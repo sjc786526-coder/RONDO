@@ -9,6 +9,7 @@ RONDO 是一个基于 Codex CLI 源码开展的实验性学习项目，目标是
 - 上游项目：[OpenAI Codex](https://github.com/openai/codex)
 - 冻结版本：Codex CLI `v0.146.0`
 - 在主体开发完成前，RONDO 将保持该源码基线稳定；后续再评估和追加上游更新。
+- 源码位于codex-source-code/
 
 ## 研究方向
 
