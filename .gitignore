@@ -1,7 +1,6 @@
 # Local read-only checkout of the upstream Codex source.
 /codex-source-code/
-/kilocode-source-code/
-/claude-code-source-code/
+reference-agent-harness/
 
 # Personal Codex hooks, worktrees, and local state.
 /.codex/
