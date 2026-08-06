@@ -1,6 +1,6 @@
 # RONDO 开发环境基线
 
-最后核对时间：2026-08-04（Asia/Shanghai）
+最后核对时间：2026-08-06（Asia/Shanghai）
 
 适用工作区：`/home/sjc/desktop/RONDO`，主要源码位于 `mydev/`。
 
@@ -155,7 +155,7 @@ APT 已安装并复核以下开发包：
 
 `cargo check -p codex-cli` 已成功完成，证明 Rust 编译器、Clang、OpenSSL、SQLite、Git 依赖和工作区主要 crate 能协同工作。首次检查约耗时 2 分钟，下载依赖后 `mydev/codex-rs/target` 当前约占 4.7 GB。
 
-仓库初始化时曾存在锁文件基线不一致：`Cargo.toml` 的工作区版本是 `0.146.0`，但 `Cargo.lock` 中 132 个本地工作区包仍是 `0.0.0`。该问题已作为独立仓库修复处理，由仓库固定的 Cargo `1.95.0` 将这 132 个内部包版本同步为 `0.146.0`。
+上游基线已从 `0.146.0` 更新到已发布的 `0.146.1`；`Cargo.toml` 和 `Cargo.lock` 的 132 个本地工作区包版本均保持为 `0.146.1`。该同步由仓库固定的 Cargo `1.95.0` 完成，第三方依赖版本、source 和 checksum 未变。
 
 差异审查确认没有第三方包版本、依赖列表、source 或 checksum 变化，因此外部依赖图没有变化，不需要刷新 `MODULE.bazel.lock`。以下锁定验证均已通过：
 
