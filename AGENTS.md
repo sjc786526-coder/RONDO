@@ -9,7 +9,7 @@
 
 ## 1. 仓库边界
 
-- `mydev/` 是实际开发源码，当前基于 Codex CLI `v0.146.1`，是我基于codex修改的产品，称为RONDO。
+- `mydev/` 是实际开发源码，是我基于Codex CLI `v0.146.1`修改的产品，称为RONDO。
 - `codex-source-code/` 是 git-ignored 的本地只读上游快照，只用于比较，学习和测试，不在其中开发。
 - `codex-doc/` 保存按日期冻结的 OpenAI Codex 官方在线文档。研究原始Codex 行为时先读对应快照的`manual.md`，专题检索使用 `full.md`；若文档与源码或测试不一致，以源码为准。
 - `.codex/` 存放开发用codex的钩子、创建工作树和本地状态，保持 git-ignored，不作为项目交付物。

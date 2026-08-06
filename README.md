@@ -15,6 +15,7 @@ RONDO 是一个基于 Codex CLI 源码开展的实验性学习项目，目标是
 
 - 对于标准性能测评，统一使用GPT-5.6-luna模型API。
 - 对于多智能体体系，使用Deepseek-v4-flash-0731（API model id: deepseek-v4-flash）和Qwen3.6-Flash-2026-04-16（API model id: qwen3.6-flash）作为对GPT系列模型的异构补充模型。
+- 对于本地审批模型，暂定首选为mistralai/Ministral-3-8B-Instruct-2512，备选为Qwen/Qwen3.5-9B。
 
 ## 研究方向
 
