@@ -48,9 +48,21 @@ fmt:
 fmt-check:
     @{{ python }} ../scripts/format.py --check
 
+# `fix`, `clippy` and `test` are the heavy build entry points, so on Unix they go
+# through `scripts/with-build-lock.sh`. See that script for why the lock exists.
+[unix]
+fix *args:
+    {{ justfile_directory() }}/scripts/with-build-lock.sh cargo clippy --fix --tests --allow-dirty {args}
+
+[windows]
 fix *args:
     cargo clippy --fix --tests --allow-dirty {args}
 
+[unix]
+clippy *args:
+    {{ justfile_directory() }}/scripts/with-build-lock.sh cargo clippy --tests {args}
+
+[windows]
 clippy *args:
     cargo clippy --tests {args}
 
@@ -79,7 +91,7 @@ install:
 # there should be no need to add `--all-features`.
 [unix]
 test *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ justfile_directory() }}/scripts/with-build-lock.sh cargo nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:

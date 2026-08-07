@@ -1,4 +1,13 @@
 [profile.default]
+# RONDO 本机上限（WSL2：32 逻辑核 / 约 26 GiB 内存，按 25 GiB 保守估算）。
+# nextest 默认按逻辑 CPU 数并发，全量跑时大量会拉起子进程的集成测试叠加后会把
+# 内存推到危险区。这与 `.cargo/config.toml` 的 build.jobs 是两个独立维度：
+# build.jobs 管编译/链接阶段，test-threads 管测试执行阶段。nextest 是先全量构建
+# 再执行，两个阶段不重叠，所以内存峰值由 build.jobs 决定；这里是保守取值，尚未
+# 实测执行阶段的峰值。
+# 单个重测试的权重用下面的 test-groups / threads-required 单独控制，不要靠继续
+# 调低这个全局值。
+test-threads = 10
 # Retry once so one transient failure does not fail full-CI outright.
 # Fanout keeps the full-CI shards moving without treating every >30s test as
 # stuck. Keep this aligned with the broader timeout budget we give sharded CI.
