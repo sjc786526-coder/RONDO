@@ -59,3 +59,39 @@ websocket 预热不产包。
 ### 解锁
 
 方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 小额真实 API 授权）、方向 2 的 L1 / L2。
+
+## 构建资源闸门与全量测试补跑（2026-08-08）
+
+### 资源闸门
+
+全量测试触发 WSL2 全局 OOM（内核杀 `systemd`/`sd-pam`，连带 VS Code Remote 与所有 agent 会话）后，
+落地四道闸门，细节见 `doc/development-environment.md` §3.5：
+
+- 仓库根 `.cargo/config.toml`：`build.jobs = 6`（覆盖 mydev、tools、codex-source-code 与所有 worktree）。
+- `.config/nextest.toml`：`[profile.default] test-threads = 10`。
+- `mydev/scripts/with-build-lock.sh`：机器级 flock，同时只允许一个重量级构建。
+- 同一脚本把构建放进 systemd 临时 scope，`MemoryMax=16G` / `MemorySwapMax=2G`——唯一不依赖估算的一道，
+  超限只杀壳内，宿主与会话存活。
+
+取值依据为实测：`jobs=8` 的完整 workspace 测试二进制构建峰值 18.7 GB（8 槽同时链接），
+空载基线 4.8 GB，得 `峰值 ≈ 4.8 + 1.74 × jobs`。
+
+### 补跑 P0 遗留的全量 `just test`
+
+上条 P0 记录中「待受控并发下补跑」的全量门禁已执行完毕（本条为追加，不修改上文历史记录）：
+
+- **结果**：13135 项运行，13062 通过 / 73 失败 / 23 跳过 / 25 flaky，执行阶段 346.7 s。
+- **资源**：全程已用内存约 3.8 GB、可用 24 GB，scope 内峰值约 5 GB，swap 未增长，**无 OOM、无退出码 137**。
+  闸门在真实全量负载下有效。
+- **73 项失败与本次并发改动无关**：`codex-tui` 以 `--test-threads 1` 串行重跑，失败项完全相同（33 项）。
+- **73 项失败也不是 RONDO 回归**：`tui` / `network-proxy` / `mcp-server` / `exec` 仅被两次基线导入提交
+  （`0fe9217`、`102ec27`）触碰过；P0 提交 `95d3358` 只改了 config / core-guardian / core-client。
+  名字含 guardian / auto_review / evidence 的 36 项测试中 35 项通过，唯一一项失败是 tui 快照里的版本号字符串。
+- **两个已证实的系统性根因**：
+  1. **版本号占位（25 项）**：上游快照与断言内嵌 `0.0.0`，RONDO 把 132 个工作区包钉成 `0.146.1`，
+     所有内嵌版本号的断言必然失败。
+  2. **Clash Verge fake-IP DNS（11 项）**：宿主所有域名解析到 `198.18.x.x`（连 `.invalid` 都解析成功），
+     codex 网络代理正确判定为私有地址并拒绝。已验证与 `http_proxy` 等环境变量无关，去掉后仍失败。
+- 其余 37 项为本地 mock 服务/超时（8）、其他快照差异（12）、其他（17），未逐项定位，
+  按本次任务范围不做修复。
+- **仍未运行**：Bazel 门禁与 `just argument-comment-lint`（本机未装 Bazel）。

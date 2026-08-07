@@ -370,9 +370,12 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 - 额外的跨平台 Rust targets
 - 工作区完整 `just test`、Bazel 测试或完整 Docker 测试
 
-关于最后一项：2026-08-08 为验证 §3.5 的并发上限，完整跑通过一次全 workspace 的**测试二进制构建**
-（`cargo nextest list --workspace`，只编译链接、不执行测试），在其后的测试枚举阶段手动停止。
-完整的 `just test` **执行**至今仍未跑过，不能声称通过。
+关于最后一项：完整 `just test` 已于 2026-08-08 在 §3.5 的闸门下跑完，**无 OOM**：
+13135 项运行，13062 通过 / 73 失败 / 23 跳过 / 25 flaky，执行阶段 346.7 s，全程已用内存约 3.8 GB、
+scope 内峰值约 5 GB、swap 未增长。73 项失败已定性为宿主环境与上游基线原因（版本号占位 25 项、
+Clash fake-IP DNS 11 项、其余 37 项），与并发配置和 RONDO 改动均无关，详见
+`agent_log/2026-08-08-031500-full-test-backfill.md`。**不声称全绿。**
+Bazel 门禁与 `just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。
 
