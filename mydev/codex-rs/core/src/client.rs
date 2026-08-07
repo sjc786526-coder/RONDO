@@ -921,6 +921,7 @@ impl ModelClient {
             text,
             client_metadata: Some(responses_metadata.client_metadata()),
         };
+        crate::guardian::capture_guardian_evidence_request(responses_metadata, &request);
         Ok(request)
     }
 

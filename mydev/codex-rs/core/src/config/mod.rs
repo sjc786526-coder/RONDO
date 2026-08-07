@@ -688,6 +688,20 @@ pub struct Config {
     /// guardian developer prompt.
     pub guardian_policy_config: Option<String>,
 
+    /// Guardian review model override from `[auto_review].model`. Takes precedence
+    /// over the catalog's `auto_review_model_override` and the provider default.
+    /// This overrides the model slug only; the guardian keeps inheriting the parent
+    /// session's model provider.
+    pub guardian_model_config: Option<String>,
+
+    /// Guardian reasoning effort override from `[auto_review].reasoning_effort`.
+    /// When `None`, the effort stays derived from the review model's capabilities.
+    pub guardian_reasoning_effort_config: Option<ReasoningEffort>,
+
+    /// Directory that guardian approval evidence bundles are written to, from
+    /// `[auto_review].evidence_dir`. `None` disables evidence capture entirely.
+    pub guardian_evidence_dir: Option<AbsolutePathBuf>,
+
     /// Whether to inject the `<permissions instructions>` developer block.
     pub include_permissions_instructions: bool,
 
@@ -3824,6 +3838,21 @@ impl Config {
                             auto_review.policy.as_deref(),
                         ))
                 });
+        let guardian_model_config = cfg
+            .auto_review
+            .as_ref()
+            .and_then(|auto_review| auto_review.model.as_deref())
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .map(str::to_string);
+        let guardian_reasoning_effort_config = cfg
+            .auto_review
+            .as_ref()
+            .and_then(|auto_review| auto_review.reasoning_effort.clone());
+        let guardian_evidence_dir = cfg
+            .auto_review
+            .as_ref()
+            .and_then(|auto_review| auto_review.evidence_dir.clone());
         let personality = personality
             .or(cfg.personality)
             .or_else(|| {
@@ -4098,6 +4127,9 @@ impl Config {
                 .or(show_raw_agent_reasoning)
                 .unwrap_or(false),
             guardian_policy_config,
+            guardian_model_config,
+            guardian_reasoning_effort_config,
+            guardian_evidence_dir,
             model_reasoning_effort: cfg.model_reasoning_effort,
             plan_mode_reasoning_effort: cfg.plan_mode_reasoning_effort,
             model_reasoning_summary: cfg.model_reasoning_summary,

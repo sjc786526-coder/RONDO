@@ -1493,6 +1493,7 @@ async fn guardian_request_model_for_auto_review(
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 1,
+        /*evidence_round*/ None,
     )
     .await;
     let GuardianReviewOutcome::Completed(_) = outcome else {
@@ -1735,6 +1736,7 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 1,
+        /*evidence_round*/ None,
     )
     .await;
     let (GuardianReviewOutcome::Completed(assessment), metadata) = outcome else {
@@ -1937,6 +1939,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 1,
+        /*evidence_round*/ None,
     )
     .await;
     session
@@ -1984,6 +1987,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 1,
+        /*evidence_round*/ None,
     )
     .await;
     session
@@ -2027,6 +2031,7 @@ async fn guardian_reuses_prompt_cache_key_and_appends_prior_reviews() -> anyhow:
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 1,
+        /*evidence_round*/ None,
     )
     .await;
 
@@ -2219,6 +2224,7 @@ async fn guardian_reused_trunk_ignores_stale_prior_turn_completion() -> anyhow::
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 1,
+        /*evidence_round*/ None,
     )
     .await;
     let (GuardianReviewOutcome::Completed(first_assessment), first_metadata) = first_outcome else {
@@ -2264,6 +2270,7 @@ async fn guardian_reused_trunk_ignores_stale_prior_turn_completion() -> anyhow::
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 1,
+        /*evidence_round*/ None,
     )
     .await;
     let (GuardianReviewOutcome::Completed(second_assessment), second_metadata) = second_outcome
@@ -2430,6 +2437,7 @@ async fn guardian_review_retries_transient_session_failure_then_approves() -> an
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 3,
+        /*evidence_round*/ None,
     )
     .await;
 
@@ -2521,6 +2529,7 @@ async fn guardian_review_retries_two_parse_failures_then_approves() -> anyhow::R
         guardian_output_schema(),
         /*external_cancel*/ None,
         /*max_attempts*/ 3,
+        /*evidence_round*/ None,
     )
     .await;
 

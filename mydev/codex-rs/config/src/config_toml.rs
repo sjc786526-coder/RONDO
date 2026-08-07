@@ -556,6 +556,21 @@ pub enum ThreadStoreToml {
 pub struct AutoReviewToml {
     /// Additional policy instructions inserted into the guardian prompt.
     pub policy: Option<String>,
+
+    /// Model slug the guardian review session should use. Takes precedence over
+    /// the model catalog's `auto_review_model_override` and over the provider's
+    /// default review model. The guardian still inherits the parent session's
+    /// model provider, so this must name a model the parent provider serves.
+    pub model: Option<String>,
+
+    /// Reasoning effort the guardian review session should use. When unset, the
+    /// effort keeps being derived from the review model's capabilities.
+    pub reasoning_effort: Option<ReasoningEffort>,
+
+    /// Directory that guardian approval evidence bundles are written to. Unset
+    /// disables evidence capture entirely. Bundles contain the raw approval
+    /// request, including task context, so point this at a private directory.
+    pub evidence_dir: Option<AbsolutePathBuf>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]

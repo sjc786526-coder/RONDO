@@ -7,11 +7,13 @@
 
 ## 1. 当前状态
 
-- 上游基线冻结在 Codex CLI `v0.146.1`，`mydev/` 当前与上游功能等价，**尚无 RONDO 自有功能改动**。
-- 开发环境已就绪（见 `doc/development-environment.md`）：Rust 1.95.0、pnpm 10.33.0、uv、Docker Desktop 可用。
+- 上游基线冻结在 Codex CLI `v0.146.1`。
+- 开发环境已就绪（见 `doc/development-environment.md`）：Rust 1.95.0、pnpm 10.33.0、uv、Docker Desktop 可用；本机未装 Bazel。
 - 本机推理硬件：RTX 4060 Laptop **8GB VRAM** / 19GB RAM / 32 核。8B 级模型只能走 4-bit 量化，且上下文预算需实测。
-- 测评体系、审批模型覆盖、教师 harness 研究均未开始。
-- **当前阶段：P0 共享地基**。
+- **P0 共享地基已完成**（S1 审批模型/effort 覆盖、S2 审批证据包 `E_final`，见 `doc/WBS-COMPLETED.md`）。
+  两个开关默认关闭，关闭时行为与上游一致。
+- 测评体系、教师 harness 研究尚未开始。
+- **当前阶段：P1**（方向 0 的 TB 2.1 最小真实链路）与方向 2 的 L1 / L2 可并行开工。
 
 ## 2. 方向与依赖
 
@@ -19,9 +21,9 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | 进行中（P0 起） |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | 进行中，P0 已完成，P1 待开工 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | 进行中（P0 起） |
+| 2 | 本地审批模型接入与横评 | 进行中，P0 已完成，L1 / L2 待开工 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -43,13 +45,13 @@ P0 共享地基 ────────┤                          ├─→ �
 
 ## 3. 阶段划分
 
-| 阶段 | 内容 | 并行关系 | 依赖 | 授权门 |
-|---|---|---|---|---|
-| P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 |
-| P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 |
-| P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 |
+| 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
+|---|---|---|---|---|---|
+| P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | ✅ 已完成 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 未开始 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
+| P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
+| P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
 阶段与任务编号一一对应，不重叠：L1/L2 属 P1，L2a/L3/L4 属 P2，L5/L6/L7 属 P3。
 注意 **L2 可以在 P1 期间先把本地推理服务搭起来并量上下文预算，但它的验收要用真实 `E_final`，因此最终验收挂在 B3 之后**——搭建与验收分处两阶段，不是矛盾。
@@ -81,28 +83,14 @@ P0 共享地基 ────────┤                          ├─→ �
 
 不通过就先修测评设施，不得先推进优化。若 `σ` 本身大到接近任务总数（说明 canary 选得太不稳定），回到 B4 重挑任务，而不是放宽判据。
 
-## 5. 当前阶段任务（P0）
+## 5. 当前阶段任务
 
-### S1 审批模型显式覆盖（规模 S）
+P0 已完成，成果与验收口径见 `doc/WBS-COMPLETED.md`，技术方案见
+`plan/001-p0-guardian-override-and-evidence.md`。下一步按 §3 进入 P1（方向 0）与 L1 / L2（方向 2）。
 
-上游已有 `[auto_review]` 配置段，但只有 `policy` 一个字段；审批模型来自服务端模型目录，本地不可控。
-
-- 锚点：`codex-rs/config/src/config_toml.rs:556` 的 `AutoReviewToml`（加 `model` / `reasoning_effort` 字段，字段挂载点在同文件 `:179`）；
-  `codex-rs/core/src/guardian/review.rs:748` 的 `model_override` 解析处（让 config 覆盖优先于 `ModelInfo.auto_review_model_override`）。
-- 验收：配置 `gpt-5.6-luna` + `low` 后，Guardian 实际发出的请求体 `model` 与 `reasoning.effort` 与配置一致；补 1 个 wiremock 集成测试断言请求体。
-- 边界：不新增配置面，不改 `ApprovalsReviewer` 语义（`approvals_reviewer = "auto_review"` 即 `approve for me` 路由）。
-- **能力边界（重要）**：S1 **只覆盖模型名与 effort，不覆盖 provider**。`build_guardian_review_session_config`（`review_session.rs:996`）克隆父会话配置，provider id 与 base_url 原样继承。测评场景父子同为 OpenAI provider，因此 S1 足够；但**切换到本地模型需要独立的 provider 覆盖**，见方向 2 的 **L2a**。P0 完成不等于可以一键切本地模型。
-
-### S2 审批证据包快照 `E_final`（规模 M）
-
-- 锚点：`codex-rs/core/src/client.rs:907` —— `ResponsesApiRequest` 组装完成、尚未发送的唯一位置。
-- 捕获资格：`request_kind == Some(Turn)`（`responses_metadata.rs:118`）**且** 该会话登记着已开启的审批轮槽。必须收到 `Some(Turn)`——枚举还有 `Prewarm` / `Compaction` / `Memory`，放宽会让预热或压缩请求覆盖真正的审批请求。
-- 关联：槽以 guardian 会话 `thread_id` 登记、RAII guard 管生命周期，`GuardianReviewSessionParams` 补 `review_id`（外层 `review.rs:293` 已持有）。轮结束原子取走，retry 取最后一次；trunk 串行复用与并发 fork 均不串档。
-- 未真正调用模型即结束（超时/取消/构造失败）的轮次只写 `meta.json` 并标 `evidence: none`，不得拿陈旧请求充数。
-- 规范化（确定性、幂等）：剥离 `prompt_cache_key`、`client_metadata`、`store`/`stream`/`stream_options`、时间戳与逐项随机标识（`ResponseItem.id`）；保留 Guardian policy、任务轨迹、工具调用与结果、待审批动作。**`call_id` 不算随机 id**，它是工具调用与结果的关联键（`protocol/src/models.rs:873/902`），必须保留或成对确定性重映射。
-- **不做内容级脱敏承诺**：`instructions` / `input` 可能包含任务上下文中出现的任何敏感信息，证据包按原始会话记录对待，落 git-ignored 目录、权限 `0700`；外发给云端模型属数据外发，单独授权。
-- 开关：默认关闭，关闭时零开销。写入失败只 warn，不影响审批决策。
-- 验收：单测覆盖规范化幂等与剥离清单；集成测试覆盖一轮一包、并发不串档、预热不产包、主 Agent 不被捕获。
+P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
+Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，
+已拆为方向 2 的 **L2a**，是 L7 的前置。任何"P0 完成即可一键切换本地模型"的表述都不成立。
 
 ## 6. 授权门
 

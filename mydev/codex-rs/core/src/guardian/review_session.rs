@@ -54,6 +54,7 @@ use codex_utils_path_uri::PathUri;
 
 use super::GUARDIAN_REVIEWER_NAME;
 use super::GuardianApprovalRequest;
+use super::evidence::GuardianEvidenceRound;
 use super::prompt::BUNDLED_GUARDIAN_POLICY;
 use super::prompt::BUNDLED_GUARDIAN_POLICY_TEMPLATE;
 use super::prompt::GuardianPromptMode;
@@ -92,6 +93,9 @@ pub(crate) struct GuardianReviewSessionParams {
     pub(crate) personality: Option<Personality>,
     pub(crate) external_cancel: Option<CancellationToken>,
     pub(crate) deadline: tokio::time::Instant,
+    /// Evidence round to attribute this review's final request to, when
+    /// `[auto_review].evidence_dir` is configured.
+    pub(crate) evidence_round: Option<Arc<GuardianEvidenceRound>>,
 }
 
 #[derive(Default)]
@@ -708,6 +712,13 @@ async fn run_review_on_session(
     bool,
     GuardianReviewAnalyticsResult,
 ) {
+    // Bind the chosen session for the whole attempt so the request-assembly hook can
+    // attribute its `turn` requests to this round. Dropping the guard on any exit path
+    // — success, early return, timeout, or panic — stops capture immediately.
+    let _evidence_binding = params
+        .evidence_round
+        .as_ref()
+        .map(|evidence_round| evidence_round.bind(review_session.session.thread_id().to_string()));
     let (send_followup_reminder, prompt_mode) = {
         let state = review_session.state.lock().await;
 
@@ -1252,6 +1263,7 @@ mod tests {
             personality,
             external_cancel: None,
             deadline: tokio::time::Instant::now() + Duration::from_secs(30),
+            evidence_round: None,
         }
     }
 

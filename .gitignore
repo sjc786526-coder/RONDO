@@ -5,3 +5,6 @@ reference-agent-harness/
 # Personal Codex hooks, worktrees, and local state.
 /.codex/
 /.claude/
+
+# Evaluation data: benchmark runs, approval evidence bundles, and result archives.
+/eval-data/

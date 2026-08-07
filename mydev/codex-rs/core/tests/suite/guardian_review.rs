@@ -421,3 +421,256 @@ printf '%s\n' "${@: -1}" >> "${payload_path}""#,
 
     Ok(())
 }
+
+/// Reads the review-id-named bundle directories under `evidence_dir`.
+fn read_evidence_bundles(evidence_dir: &std::path::Path) -> Vec<(String, Value, Option<Value>)> {
+    let mut bundles: Vec<(String, Value, Option<Value>)> = fs::read_dir(evidence_dir)
+        .unwrap_or_else(|err| panic!("read {}: {err}", evidence_dir.display()))
+        .map(|entry| {
+            let entry = entry.expect("evidence dir entry");
+            let review_id = entry.file_name().to_string_lossy().into_owned();
+            let read_json = |name: &str| -> Option<Value> {
+                let contents = fs::read_to_string(entry.path().join(name)).ok()?;
+                Some(serde_json::from_str(&contents).expect("bundle should be valid json"))
+            };
+            let meta = read_json("meta.json").expect("meta.json");
+            (review_id, meta, read_json("E_final.json"))
+        })
+        .collect();
+    bundles.sort_by(|left, right| left.0.cmp(&right.0));
+    bundles
+}
+
+/// Two sequential reviews in one session must each produce their own bundle, and
+/// the parent agent's own requests must never be captured.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guardian_evidence_bundles_are_scoped_to_their_review() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+    skip_if_wine_exec!(
+        Ok(()),
+        "Guardian approval actions require host-native paths"
+    );
+
+    let server = start_mock_server().await;
+    let approval_policy = AskForApproval::OnRequest;
+    let mut builder = test_codex().with_pre_build_hook(|home| {
+        let evidence_dir = home.join("evidence");
+        fs::write(
+            home.join("config.toml"),
+            format!(
+                "[auto_review]\nevidence_dir = \"{}\"\n",
+                evidence_dir.display()
+            ),
+        )
+        .expect("seed config.toml");
+    });
+    let test = builder.build(&server).await?;
+    let evidence_dir = test.home.path().join("evidence");
+
+    let escalated_call = |justification: &str, command: &str| {
+        json!({
+            "cmd": command,
+            "sandbox_permissions": SandboxPermissions::RequireEscalated,
+            "justification": justification,
+        })
+    };
+    let allow = |id: &str| {
+        sse(vec![
+            ev_response_created(id),
+            ev_assistant_message(
+                id,
+                &json!({
+                    "risk_level": "low",
+                    "user_authorization": "high",
+                    "outcome": "allow",
+                    "rationale": "The command is inert.",
+                })
+                .to_string(),
+            ),
+            ev_completed(id),
+        ])
+    };
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-parent-1"),
+                ev_function_call(
+                    "exec-call-1",
+                    "exec_command",
+                    &serde_json::to_string(&escalated_call("Evidence round one.", "printf one"))?,
+                ),
+                ev_completed("resp-parent-1"),
+            ]),
+            allow("resp-guardian-1"),
+            sse(vec![
+                ev_response_created("resp-parent-2"),
+                ev_function_call(
+                    "exec-call-2",
+                    "exec_command",
+                    &serde_json::to_string(&escalated_call("Evidence round two.", "printf two"))?,
+                ),
+                ev_completed("resp-parent-2"),
+            ]),
+            allow("resp-guardian-2"),
+            sse(vec![
+                ev_response_created("resp-parent-3"),
+                ev_assistant_message("msg-parent-3", "done"),
+                ev_completed("resp-parent-3"),
+            ]),
+        ],
+    )
+    .await;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run two commands that require Guardian review".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(test.config.cwd.clone())),
+                approval_policy: Some(approval_policy),
+                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            },
+        })
+        .await?;
+    let mut review_ids: Vec<String> = Vec::new();
+    core_test_support::wait_for_event_with_timeout(
+        &test.codex,
+        |event| {
+            if let EventMsg::GuardianAssessment(assessment) = event
+                && !review_ids.contains(&assessment.id)
+            {
+                review_ids.push(assessment.id.clone());
+            }
+            matches!(event, EventMsg::TurnComplete(_))
+        },
+        Duration::from_secs(15),
+    )
+    .await;
+    review_ids.sort();
+
+    let bundles = read_evidence_bundles(&evidence_dir);
+    assert_eq!(
+        bundles
+            .iter()
+            .map(|(review_id, _, _)| review_id.clone())
+            .collect::<Vec<_>>(),
+        review_ids,
+        "one bundle per review round, named by review id"
+    );
+    assert_eq!(
+        responses.requests().len(),
+        5,
+        "3 parent + 2 guardian requests"
+    );
+
+    for (review_id, meta, e_final) in &bundles {
+        let e_final = e_final.as_ref().expect("E_final.json");
+        assert_eq!(
+            (
+                meta["review_id"].clone(),
+                meta["evidence"].clone(),
+                meta["decision"].clone(),
+                meta["terminal_status"].clone(),
+                meta["model"].clone(),
+            ),
+            (
+                json!(review_id),
+                json!("e_final"),
+                json!("approved"),
+                json!("approved"),
+                json!("codex-auto-review"),
+            )
+        );
+        let stripped: Vec<&str> = ["client_metadata", "prompt_cache_key", "stream", "store"]
+            .into_iter()
+            .filter(|field| e_final.get(*field).is_some())
+            .collect();
+        assert_eq!(stripped, Vec::<&str>::new());
+        assert!(
+            e_final["instructions"]
+                .as_str()
+                .expect("instructions")
+                .starts_with("You are judging one planned coding-agent action."),
+            "captured request must be the Guardian request, not the parent agent's"
+        );
+    }
+
+    let bundle_text = |index: usize| {
+        serde_json::to_string(&bundles[index].2).expect("serialize captured request")
+    };
+    let (first_round, second_round) = if bundle_text(0).contains("Evidence round two.") {
+        (bundle_text(1), bundle_text(0))
+    } else {
+        (bundle_text(0), bundle_text(1))
+    };
+    assert!(first_round.contains("Evidence round one."));
+    assert!(
+        !first_round.contains("Evidence round two."),
+        "the first round's bundle must not contain the second round's action"
+    );
+    assert!(second_round.contains("Evidence round two."));
+
+    Ok(())
+}
+
+/// Startup prewarm reaches the same request-assembly hook as real reviews. No
+/// review round is open then, so it must leave no bundle behind.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn guardian_startup_prewarm_writes_no_evidence_bundle() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_websocket_server(vec![
+        vec![vec![ev_response_created("warm-1"), ev_completed("warm-1")]],
+        vec![vec![ev_response_created("warm-2"), ev_completed("warm-2")]],
+    ])
+    .await;
+    let mut builder = test_codex()
+        .with_pre_build_hook(|home| {
+            let evidence_dir = home.join("evidence");
+            fs::write(
+                home.join("config.toml"),
+                format!(
+                    "[auto_review]\nevidence_dir = \"{}\"\n",
+                    evidence_dir.display()
+                ),
+            )
+            .expect("seed config.toml");
+        })
+        .with_config(|config| {
+            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
+            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+        });
+    let test = builder.build_with_websocket_server(&server).await?;
+    let evidence_dir = test.home.path().join("evidence");
+
+    let (first, second) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            server.wait_for_request(/*connection_index*/ 0, /*request_index*/ 0),
+            server.wait_for_request(/*connection_index*/ 1, /*request_index*/ 0)
+        )
+    })
+    .await?;
+    let prewarms = [first.body_json(), second.body_json()];
+    assert!(
+        prewarms.iter().any(|request| {
+            request["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
+        }),
+        "expected a Guardian startup prewarm request"
+    );
+
+    assert!(
+        !evidence_dir.exists(),
+        "prewarm must not create an evidence bundle"
+    );
+    test.codex.shutdown_and_wait().await?;
+    server.shutdown().await;
+    Ok(())
+}

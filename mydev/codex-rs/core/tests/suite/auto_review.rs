@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use codex_core::sandboxing::SandboxPermissions;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_models_manager::manager::RefreshStrategy;
@@ -271,4 +272,104 @@ fn remote_model_with_auto_review_override(slug: &str, review_model: &str) -> Mod
         effective_context_window_percent: 95,
         experimental_supported_tools: Vec::new(),
     }
+}
+
+/// `[auto_review].model` / `.reasoning_effort` must reach the wire, not just an
+/// intermediate variable.
+///
+/// The effort is configured as `high` on purpose: the stock precedence prefers
+/// `low` whenever the review model supports it, so asserting `low` here would pass
+/// even if the override did nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = MockServer::start().await;
+    let approval_policy = AskForApproval::OnRequest;
+    let mut builder = test_codex().with_pre_build_hook(|home| {
+        std::fs::write(
+            home.join("config.toml"),
+            "[auto_review]\nmodel = \"gpt-5.6-luna\"\nreasoning_effort = \"high\"\n",
+        )
+        .expect("seed config.toml");
+    });
+    let test = builder.build(&server).await?;
+
+    let tool_args = json!({
+        "cmd": "true",
+        "sandbox_permissions": SandboxPermissions::RequireEscalated,
+        "justification": "Exercise the configured Guardian model.",
+    });
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-parent-model-override"),
+                ev_function_call(
+                    "exec-call-model-override",
+                    "exec_command",
+                    &serde_json::to_string(&tool_args)?,
+                ),
+                ev_completed("resp-parent-model-override"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-guardian-model-override"),
+                ev_assistant_message(
+                    "msg-guardian-model-override",
+                    &json!({
+                        "risk_level": "low",
+                        "user_authorization": "high",
+                        "outcome": "allow",
+                        "rationale": "The command is inert.",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-guardian-model-override"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-parent-model-override-done"),
+                ev_assistant_message("msg-parent-model-override-done", "done"),
+                ev_completed("resp-parent-model-override-done"),
+            ]),
+        ],
+    )
+    .await;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run a command that requires Guardian review".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(test.config.cwd.clone())),
+                approval_policy: Some(approval_policy),
+                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            },
+        })
+        .await?;
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(15),
+    )
+    .await;
+
+    let guardian_request = responses
+        .requests()
+        .into_iter()
+        .find(|request| request.body_contains_text("Exercise the configured Guardian model."))
+        .expect("expected Guardian review request");
+    let body = guardian_request.body_json();
+    assert_eq!(
+        (body["model"].clone(), body["reasoning"]["effort"].clone()),
+        (json!("gpt-5.6-luna"), json!("high"))
+    );
+
+    Ok(())
 }

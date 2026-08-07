@@ -12,6 +12,7 @@
 //! 4. Apply the guardian's explicit allow/deny outcome.
 
 mod approval_request;
+mod evidence;
 mod metrics;
 mod prompt;
 mod review;
@@ -28,6 +29,7 @@ pub(crate) use approval_request::GuardianMcpAnnotations;
 pub(crate) use approval_request::GuardianNetworkAccessTrigger;
 #[cfg(test)]
 pub(crate) use approval_request::guardian_approval_request_to_json;
+pub(crate) use evidence::capture_final_request as capture_guardian_evidence_request;
 pub(crate) use review::GuardianReviewOptions;
 pub(crate) use review::guardian_timeout_message;
 pub(crate) use review::is_guardian_reviewer_source;

@@ -139,26 +139,37 @@
 
 ### 已完成
 
-- 前置调研：S1/S2 的全部代码锚点已定位并确认（见 §4）。
-- 确认 `core/BUILD.bazel` 的 `compile_data` 使用 `glob(["**"])`，在 core 内新增模块不需要改 BUILD 文件。
-- 确认本任务不需要新增第三方依赖。
+S1 与 S2 全部落地并通过定向门禁。
 
-### 当前工作
-
-待用户一次授权后开始 S1。
-
-### 后续计划
-
-S1 → S2 → 测试与门禁 → 文档与日志 → 合并本地 main。
-P0 完成后解锁：方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 小额真实 API 授权）、方向 2 的 L1/L2。
-
-### 阻塞项
-
-- 等待用户执行授权。
+- S1：`AutoReviewToml` 加 `model` / `reasoning_effort`（并顺带 `evidence_dir`），`Config` 加
+  `guardian_model_config` / `guardian_reasoning_effort_config` / `guardian_evidence_dir`，
+  `review.rs` 的 model 优先级链与 effort 覆盖已按契约实现。provider 解析未动。
+- S2：新增 `core/src/guardian/evidence.rs`（322 行）；`client.rs` 挂 1 行钩子；
+  `GuardianReviewSessionParams` 加 `evidence_round`，`run_review_on_session` 绑定 / 解绑；
+  固化收口在 `track_guardian_review`（见决策 013）。
+- `.gitignore` 追加 `/eval-data/`；`just write-config-schema` 已运行，schema 差异只含三个新字段。
+- 非测试、非生成物改动 426 行（104 行修改 + 322 行新模块），未超 500 行闸；未新增第三方依赖。
 
 ### 当前验收状态
 
-未开始。
+- `just fmt` / `just fmt-check`、`just fix -p codex-core`：干净。
+- 定向测试全绿：`guardian::evidence::tests` 6 项、`suite::guardian_review` 5 项（新增 2）、
+  `suite::auto_review` 2 项（新增 1）。
+- `just test -p codex-core`：3100 passed / 17 failed；17 项全部为宿主机环境原因
+  （缺 `codex` 等 workspace 二进制、`/tmp/.codex` 目录污染），不涉及 guardian / config / client 路径。
+- **未运行、不声称通过**：
+  - 全量 `just test`：启动后由用户叫停（workspace 级并发测试在本机 19GB 内存下有 OOM 风险）。
+    §3 约束 11 要求的一次性全量门禁**尚未完成**，需在受控并发（如 `--test-threads`）下补跑。
+  - Bazel 门禁与 `just argument-comment-lint`（本机未装 Bazel）。
+
+### 后续计划
+
+P0 已解锁：方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 小额真实 API 授权）、方向 2 的 L1 / L2。
+`E_final` 首次用于跨侧对比前，建议人工抽查一批样本确认正文内容边界。
+
+### 阻塞项
+
+无。
 
 ## 6. 关键决策记录
 
@@ -175,3 +186,8 @@ P0 完成后解锁：方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 
 | 009 | 槽以 guardian 会话 `thread_id` 登记，由 RAII guard 管生命周期；`GuardianReviewSessionParams` 补 `review_id` | 原设计未定义 key 与生命周期，且下传 `Arc<EvidenceSlot>` 需穿透 Config/Session/ModelClient，过于侵入；`thread_id` 在挂钩点已有，串行复用 + 并发 fork 的语义天然可用 | `core/src/guardian/`（含 `review_session.rs`） | 已采纳（外部审查修正） |
 | 010 | 证据包不做内容级脱敏承诺，按原始会话记录对待 | `instructions` / `input` 承载任意任务上下文，结构性字段剥离无法保证正文无敏感信息；改为限定输出位置与权限，并把外发单列为授权动作 | 验收口径、安全边界 | 已采纳（外部审查修正） |
 | 011 | 测试门禁：开发期定向、合并前全量一次，全量前先告知 | 上游 `mydev/AGENTS.md:68` 要求 core 改动跑全量，根 `AGENTS.md` §7 要求不扩大化；两者在"开发循环 vs 阶段门禁"上可以调和，明确写死避免执行期临场判断 | 验收口径 | 已采纳（外部审查修正） |
+| 012 | 并发不串档由模块级测试覆盖，集成测试覆盖串行复用与主 Agent 不捕获 | 真实并发审批要求 trunk 忙时 fork ephemeral，在集成测试里难以稳定触发，做出来大概率是 flaky 测试；模块级测试可以确定性地同时绑定两个轮并交错投递请求，直接验证关联键这一唯一失效点 | 验收口径 | 已采纳（执行期细化） |
+| 013 | 证据固化收口在 `track_guardian_review`，meta 直接复用 `GuardianReviewAnalyticsResult` | `run_guardian_review` 有 5 条终止路径，逐条插入易漏；这 5 条都经过 `track_guardian_review`，且它拿到的正是最终决策。复用 analytics 还避免在 evidence 模块里重写一份 outcome→decision 映射造成漂移 | `core/src/guardian/review.rs` | 已采纳（执行期细化） |
+| 014 | `GuardianReviewSessionParams` 传 `evidence_round`（含 review_id）而非裸 `review_id` | 与决策 009 等价但更省：轮对象本身携带 review_id 与输出目录，关闭时该字段为 `None`，无需再从 `spawn_config` 二次取配置 | `core/src/guardian/review_session.rs` | 已采纳（执行期细化） |
+| 015 | `call_id` 采用成对确定性重映射，而非保留原值 | 方案 §4 允许二选一。`call_id` 由服务端随机生成，不归一则同一任务两次运行的 `E_final` 字节不同，对方向 0 的离线对比无用；重映射按文档顺序成对进行，对已规范化输入是不动点 | `core/src/guardian/evidence.rs` | 已采纳（执行期细化） |
+| 016 | S1 集成测试用 `reasoning_effort = "high"` 而非 `"low"` 做断言 | 既有推导逻辑本就优先选 `low`，断言 `low` 即使覆盖完全失效也会通过；`high` 是默认逻辑不可能产出的值，才真正证明配置生效。model 仍按验收口径断言 `gpt-5.6-luna` | 验收口径 | 已采纳（执行期细化） |

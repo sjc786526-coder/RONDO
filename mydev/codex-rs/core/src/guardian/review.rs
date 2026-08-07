@@ -41,6 +41,7 @@ use super::approval_request::guardian_assessment_action;
 use super::approval_request::guardian_request_target_item_id;
 use super::approval_request::guardian_request_turn_id;
 use super::approval_request::guardian_reviewed_action;
+use super::evidence::GuardianEvidenceRound;
 use super::metrics::emit_guardian_review_metrics;
 use super::prompt::guardian_output_schema;
 use super::prompt::parse_guardian_assessment;
@@ -203,6 +204,11 @@ pub(crate) fn is_guardian_reviewer_source(
     )
 }
 
+/// Reports one finished review round to metrics, analytics, and — when evidence
+/// capture is enabled — the round's evidence bundle.
+///
+/// Evidence is finalized here because this is the single point every terminal path
+/// of `run_guardian_review` passes through with the round's final decision in hand.
 fn track_guardian_review(
     session: &Session,
     tracking: &GuardianReviewTrackContext,
@@ -210,13 +216,18 @@ fn track_guardian_review(
     reviewed_action: &GuardianReviewedAction,
     result: GuardianReviewAnalyticsResult,
     completed_at_ms: u64,
+    evidence_round: Option<&Arc<GuardianEvidenceRound>>,
 ) {
+    let duration_ms = completed_at_ms.saturating_sub(tracking.started_at_ms);
+    if let Some(evidence_round) = evidence_round {
+        evidence_round.finalize(&result, duration_ms);
+    }
     emit_guardian_review_metrics(
         &session.services.session_telemetry,
         &result,
         approval_request_source,
         reviewed_action,
-        completed_at_ms.saturating_sub(tracking.started_at_ms),
+        duration_ms,
     );
     session
         .services
@@ -322,6 +333,7 @@ async fn run_guardian_review(
         reviewed_action.clone(),
         GUARDIAN_REVIEW_TIMEOUT.as_millis() as u64,
     );
+    let evidence_round = GuardianEvidenceRound::start(turn.config.as_ref(), &review_id);
     let started_at_ms = review_tracking.started_at_ms.try_into().unwrap_or_default();
     session
         .send_event(
@@ -361,6 +373,7 @@ async fn run_guardian_review(
                 ..GuardianReviewAnalyticsResult::without_session()
             },
             completed_at_ms.try_into().unwrap_or_default(),
+            evidence_round.as_ref(),
         );
         session
             .send_event(
@@ -396,6 +409,7 @@ async fn run_guardian_review(
         schema,
         external_cancel,
         GUARDIAN_REVIEW_MAX_ATTEMPTS,
+        evidence_round.clone(),
     ))
     .await;
 
@@ -426,6 +440,7 @@ async fn run_guardian_review(
                     ..analytics_result
                 },
                 completed_at_ms.try_into().unwrap_or_default(),
+                evidence_round.as_ref(),
             );
             let count_denial_for_circuit_breaker =
                 matches!(assessment.outcome, GuardianAssessmentOutcome::Deny);
@@ -448,6 +463,7 @@ async fn run_guardian_review(
                         ..analytics_result
                     },
                     completed_at_ms.try_into().unwrap_or_default(),
+                    evidence_round.as_ref(),
                 );
                 session
                     .send_event(
@@ -493,6 +509,7 @@ async fn run_guardian_review(
                         ..analytics_result
                     },
                     completed_at_ms.try_into().unwrap_or_default(),
+                    evidence_round.as_ref(),
                 );
                 session
                     .send_event(
@@ -541,6 +558,7 @@ async fn run_guardian_review(
                         ..analytics_result
                     },
                     completed_at_ms.try_into().unwrap_or_default(),
+                    evidence_round.as_ref(),
                 );
                 (
                     GuardianAssessment {
@@ -745,7 +763,15 @@ pub(super) async fn guardian_review_session_config(
             fallback
         }
     };
-    let model_override = turn.model_info.auto_review_model_override.as_deref();
+    // `[auto_review].model` wins over the catalog override, which wins over the
+    // provider default. Only the model slug is overridden here: the guardian keeps
+    // inheriting the parent session's provider, so a configured slug must be one
+    // the parent provider serves.
+    let model_override = turn
+        .config
+        .guardian_model_config
+        .as_deref()
+        .or(turn.model_info.auto_review_model_override.as_deref());
     let review_model_id = model_override.unwrap_or(default_review_model_id);
     let review_model = available_models
         .iter()
@@ -781,6 +807,13 @@ pub(super) async fn guardian_review_session_config(
             reasoning_effort,
         )
     };
+    // A configured effort replaces the capability-derived value; without it the
+    // derived value is kept exactly as computed above.
+    let guardian_reasoning_effort = turn
+        .config
+        .guardian_reasoning_effort_config
+        .clone()
+        .or(guardian_reasoning_effort);
 
     let guardian_model_info = session
         .services
@@ -826,6 +859,10 @@ pub(super) async fn guardian_review_session_config(
 /// context. It may still reuse the parent's managed-network allowlist for
 /// read-only checks, but it intentionally runs without inherited exec-policy
 /// rules.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "guardian review options are threaded positionally through the retry path"
+)]
 async fn run_guardian_review_session_before_deadline(
     session: Arc<Session>,
     turn: Arc<TurnContext>,
@@ -834,6 +871,7 @@ async fn run_guardian_review_session_before_deadline(
     schema: serde_json::Value,
     external_cancel: Option<CancellationToken>,
     deadline: Instant,
+    evidence_round: Option<Arc<GuardianEvidenceRound>>,
 ) -> (GuardianReviewOutcome, GuardianReviewAnalyticsResult) {
     let session_config = match guardian_review_session_config(session.as_ref(), turn.as_ref()).await
     {
@@ -865,6 +903,7 @@ async fn run_guardian_review_session_before_deadline(
                 personality: turn.personality,
                 external_cancel,
                 deadline,
+                evidence_round,
             }),
     )
     .await;
@@ -920,6 +959,10 @@ async fn run_guardian_review_session_before_deadline(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "guardian review options are threaded positionally through the retry path"
+)]
 pub(super) async fn run_guardian_review_session_with_retry(
     session: Arc<Session>,
     turn: Arc<TurnContext>,
@@ -928,6 +971,7 @@ pub(super) async fn run_guardian_review_session_with_retry(
     schema: serde_json::Value,
     external_cancel: Option<CancellationToken>,
     max_attempts: i64,
+    evidence_round: Option<Arc<GuardianEvidenceRound>>,
 ) -> (GuardianReviewOutcome, GuardianReviewAnalyticsResult) {
     assert!(max_attempts > 0, "guardian review must run at least once");
     let deadline = Instant::now() + GUARDIAN_REVIEW_TIMEOUT;
@@ -941,6 +985,7 @@ pub(super) async fn run_guardian_review_session_with_retry(
             schema.clone(),
             external_cancel.clone(),
             deadline,
+            evidence_round.clone(),
         )
         .await;
         analytics_result.attempt_count = attempt_count;
