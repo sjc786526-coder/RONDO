@@ -61,7 +61,7 @@
 1. 在 `.claude/worktrees/<serialnumber-taskname>` 创建独立 worktree 和本地分支。
 2. 在 worktree 内落地实现和测试。
 3. 检查 diff、受保护文件和 `agent_log` 后再提交。
-4. 合并到本地 `main`，推送 `origin main`。
+4. 合并到本地 `main`之后，一般直接推送 `origin main`，二者一体完成，不用特意在我批准合并到主工作区之后等我批准推送。
 5. 已合并的本地分支重命名为 `zz-done/<branch>`，保留历史但不再使用。
 6. 不推送 worktree 分支。
 7. 使用本地测试作为兜底门禁。
