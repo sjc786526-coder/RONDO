@@ -4,3 +4,4 @@ reference-agent-harness/
 
 # Personal Codex hooks, worktrees, and local state.
 /.codex/
+/.claude/

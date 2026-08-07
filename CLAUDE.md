@@ -45,6 +45,7 @@
 
 ## 4. 编辑纪律（重要）
 
+- 实际代码变更应该先在`.claude/worktrees/<serialnumber-taskname>` 创建独立 worktree，完成之后再合并回主分支。
 - 未知工作区修改视为用户工作/并行AI agent工作，始终保留并与之兼容。
 - 搜索优先使用 `rg` / `rg --files`，手工修改使用 `apply_patch`。
 - 优先遵循现有架构和局部惯例，优先窄改动，但是你认为更大规模的修改/重构比窄改动更优时，允许提出异议；修 bug 先复现并补回归测试，不夹带无关重构。
@@ -57,7 +58,7 @@
 
 本项目采用本地 worktree 开发、合并本地 `main`、直推 `main`、本地测试兜底的单人轻量流程：
 
-1. 在 `.codex/worktrees/<serialnumber-taskname>` 创建独立 worktree 和本地分支。
+1. 在 `.claude/worktrees/<serialnumber-taskname>` 创建独立 worktree 和本地分支。
 2. 在 worktree 内落地实现和测试。
 3. 检查 diff、受保护文件和 `agent_log` 后再提交。
 4. 合并到本地 `main`，推送 `origin main`。
