@@ -40,7 +40,7 @@ eval/                                  # 入库
 eval-data/                             # git-ignored
 ├── recordings/<recording_id>/         # A1 录制包（原始 HTTP exchange + SSE）
 ├── evidence/                          # 审批证据包
-│   ├── raw/<review_id>/               # S2 直接落盘处：E_final.json + meta.json，权限 0700
+│   ├── raw/<review_id>/               # S2 直接落盘处；Unix/WSL 权限 0700，Windows 继承 ACL
 │   ├── seed/<review_id>/              # 可用于指导合成
 │   └── holdout/<review_id>/           # 只用于评测，禁止进入合成上下文
 ├── runs/<run_id>/                     # 单次运行的原始日志、rollout、容器输出
@@ -75,7 +75,7 @@ eval-data/                             # git-ignored
   "binary_sha256": "…",
   "upstream_codex": {
     "tag": "rust-v0.147.0",
-    "commit": "be6e8eac34711945bc47d57635f4759f20f08df9",
+    "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
     "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0"
   },
   "config": {
@@ -83,7 +83,8 @@ eval-data/                             # git-ignored
     "guardian_model": "gpt-5.6-luna",
     "guardian_effort": "low",
     "guardian_request_shape": "responses_lite",
-    "guardian_policy_baseline": "rust-v0.147.0",
+    "guardian_source_baseline": "rust-v0.147.0",
+    "guardian_effective_policy_sha256": "…",
     "approvals_reviewer": "auto_review",
     "approval_policy": "on-request",
     "sandbox_mode": "workspace-write",
@@ -120,13 +121,16 @@ eval-data/                             # git-ignored
 2. 划分到 `seed/` 与 `holdout/` 时，落桶键必须是**跨运行稳定的语义身份**：`sha256(task_id + 规范化待审批动作指纹)`，无 task_id 时退化为动作指纹本身。
    **不能用 `review_id` 落桶**——它是每轮新生成的 UUID v4，同一任务同一动作重跑会换 id，互斥就只对文件实例成立、对语义样本不成立，跨运行仍会污染。
 3. 划分结果写入清单并冻结；后续新增证据按同一规则增量划分，不重划历史。
-4. 证据包**按原始会话记录对待**：可能含任务上下文里出现的任何敏感内容，目录权限 `0700`，不入库。
+4. 证据包**按原始会话记录对待**：可能含任务上下文里出现的任何敏感内容，不入库；Unix/WSL 目录
+   权限 `0700`，Windows 继承配置目录 ACL。
 5. 外发给云端模型（Luna / Sol 静态影子）属于数据外发，须单独授权。
 6. `v0.147.0` 下 `E_final` 可以是标准 Responses 或 Responses Lite：前者的 policy 位于
    `instructions`，后者位于 `input` 的 developer message。规范化后两种形态都必须保留等价的
    policy / 任务上下文 / 工具调用结果，并剔除 `encrypted_function_args` 等 provider 私有运输字段。
 7. 0.147 会把有界的 approval/retry reason 放进 Guardian prompt；它是有意义输入，规范化时必须保留。
-   每份证据还要记录 `guardian_policy_baseline`，不同 policy 版本先分层，不能静默混作同一训练或评测总体。
+   每份证据的 meta 记录 `guardian_source_baseline`；P1 消费器还必须从有效 policy 内容生成
+   `guardian_effective_policy_sha256`。源码基线与实际 policy 身份分开分层，不能静默混作同一训练或
+   评测总体。
 
 ## 6. 保留与清理
 

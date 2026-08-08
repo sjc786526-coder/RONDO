@@ -12,9 +12,11 @@ use super::X_OPENAI_SUBAGENT_HEADER;
 use crate::AttestationContext;
 use crate::AttestationProvider;
 use crate::GenerateAttestationFuture;
+use crate::guardian::GuardianEvidenceRound;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::test_support::TestCodexResponsesRequestKind;
 use crate::test_support::responses_metadata as test_responses_metadata;
+use codex_analytics::GuardianReviewAnalyticsResult;
 use codex_api::AgentIdentityTelemetry;
 use codex_api::ApiError;
 use codex_api::ResponseEvent;
@@ -270,6 +272,58 @@ fn test_model_info() -> ModelInfo {
         "experimental_supported_tools": []
     }))
     .expect("deserialize test model info")
+}
+
+#[tokio::test]
+async fn building_a_guardian_request_does_not_commit_evidence_before_send() -> anyhow::Result<()> {
+    let client = test_model_client(SessionSource::Cli);
+    let setup = client.current_client_setup().await?;
+    let prompt = Prompt {
+        input: vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "review without sending".to_string(),
+            }],
+            phase: None,
+            internal_chat_message_metadata_passthrough: None,
+        }],
+        base_instructions: BaseInstructions {
+            text: "guardian policy".to_string(),
+        },
+        ..Default::default()
+    };
+    let responses_metadata = test_responses_metadata_for_client(
+        &client,
+        /*turn_id*/ None,
+        format!("{}:evidence", client.state.thread_id),
+        /*parent_thread_id*/ None,
+        TestCodexResponsesRequestKind::Turn,
+    );
+    let evidence_root = TempDir::new()?;
+    let bundle_dir = evidence_root.path().join("review-build-only");
+    let round = GuardianEvidenceRound::new(bundle_dir.clone(), "review-build-only");
+    let binding = round.bind(client.state.thread_id.to_string());
+
+    let _request = client.build_responses_request(
+        &setup.api_provider,
+        &prompt,
+        &test_model_info(),
+        /*effort*/ None,
+        codex_protocol::config_types::ReasoningSummary::None,
+        /*service_tier*/ None,
+        &responses_metadata,
+    )?;
+
+    drop(binding);
+    round.finalize(
+        &GuardianReviewAnalyticsResult::without_session(),
+        /*duration_ms*/ 1,
+    );
+    assert!(bundle_dir.join("meta.json").exists());
+    assert!(!bundle_dir.join("E_final.json").exists());
+
+    Ok(())
 }
 
 fn test_session_telemetry() -> SessionTelemetry {

@@ -4973,7 +4973,7 @@
         }
       ],
       "default": null,
-      "description": "Optional policy instructions for the guardian auto-reviewer."
+      "description": "Optional Guardian auto-review policy, model, reasoning, and evidence settings."
     },
     "background_terminal_max_timeout": {
       "description": "Maximum poll window for background terminal output (`write_stdin`), in milliseconds. Default: `300000` (5 minutes).",

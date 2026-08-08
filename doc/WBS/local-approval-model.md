@@ -24,7 +24,7 @@
   consumer 必须移除顶层 `tools`，也必须移除 Lite `input` 中的 `additional_tools` developer item，
   再构造 provider-neutral 的单轮结构化请求。只检查“没有顶层 tools”不足以证明无工具。
   （这里说的“无网络”指模型侧没有自主联网能力；runner 仍需联网访问 Luna / Sol API。）
-- **`E_final` 有两种等价 wire shape**：标准 Responses 把 Guardian policy 放在顶层
+- **`E_final` 有两种等价的完整逻辑请求形态**：标准 Responses 把 Guardian policy 放在顶层
   `instructions`、工具放在顶层 `tools`；`v0.147.0` 的 Luna 使用 Responses Lite，policy 改放
   `input` 里的 developer message，工具改放 `additional_tools` item，顶层 `instructions` 为空且
   `tools` 缺席。影子回放必须先解析成统一的逻辑 payload，不能假设固定 JSON 位置。

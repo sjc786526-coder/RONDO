@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use codex_analytics::CompactionImplementation;
 use codex_analytics::CompactionPhase;
@@ -11,6 +12,7 @@ use codex_protocol::ResponseItemId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputPayload;
+use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -158,6 +160,102 @@ fn normalize_request_is_idempotent_and_keeps_distinct_calls_apart() {
 }
 
 #[test]
+fn normalize_request_canonicalizes_only_structural_item_ids() {
+    let mut first = request_with_tool_call_pair();
+    let mut second = request_with_tool_call_pair();
+    for (request, turn_id, nested_call_id) in [
+        (&mut first, "turn-random-a", "semantic-a"),
+        (&mut second, "turn-random-b", "semantic-b"),
+    ] {
+        let ResponseItem::Message {
+            internal_chat_message_metadata_passthrough,
+            ..
+        } = &mut request.input[0]
+        else {
+            panic!("first input item should be a message");
+        };
+        *internal_chat_message_metadata_passthrough =
+            Some(InternalChatMessageMetadataPassthrough {
+                turn_id: Some(turn_id.to_string()),
+                executed_tool_calls: None,
+            });
+        request.tools = Some(
+            Arc::<serde_json::value::RawValue>::from(
+                serde_json::value::to_raw_value(&json!({
+                "type": "function",
+                "name": "inspect",
+                "metadata": {"call_id": nested_call_id},
+                }))
+                .expect("serialize raw tools"),
+            )
+            .into(),
+        );
+    }
+
+    let normalized_first = normalize_request(&first).expect("first request should normalize");
+    let normalized_second = normalize_request(&second).expect("second request should normalize");
+    assert_eq!(
+        normalized_first["input"][0]["internal_chat_message_metadata_passthrough"]["turn_id"],
+        json!("turn_0")
+    );
+    assert_eq!(
+        normalized_second["input"][0]["internal_chat_message_metadata_passthrough"]["turn_id"],
+        json!("turn_0")
+    );
+    assert_eq!(
+        normalized_first["tools"]["metadata"]["call_id"],
+        json!("semantic-a")
+    );
+    assert_eq!(
+        normalized_second["tools"]["metadata"]["call_id"],
+        json!("semantic-b")
+    );
+}
+
+#[test]
+fn normalize_responses_lite_keeps_policy_and_strips_private_function_metadata() {
+    let mut request = request_with_tool_call_pair();
+    request.instructions.clear();
+    request.tools = None;
+    request.input.insert(
+        0,
+        ResponseItem::AdditionalTools {
+            id: Some(ResponseItemId::new("at_volatile")),
+            role: "developer".to_string(),
+            tools: vec![json!({"type": "function", "name": "shell"})],
+        },
+    );
+    request.input.insert(
+        1,
+        ResponseItem::Message {
+            id: Some(ResponseItemId::new("msg_policy_volatile")),
+            role: "developer".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "guardian lite policy".to_string(),
+            }],
+            phase: None,
+            internal_chat_message_metadata_passthrough: None,
+        },
+    );
+
+    let normalized = normalize_request(&request).expect("lite request should normalize");
+    assert!(normalized.get("instructions").is_none());
+    assert!(normalized.get("tools").is_none());
+    assert_eq!(normalized["input"][0]["type"], json!("additional_tools"));
+    assert_eq!(
+        normalized["input"][1]["content"][0]["text"],
+        json!("guardian lite policy")
+    );
+    assert!(
+        normalized["input"]
+            .as_array()
+            .expect("lite input array")
+            .iter()
+            .all(|item| item.get("encrypted_function_args").is_none())
+    );
+}
+
+#[test]
 fn normalize_request_is_a_fixed_point_for_already_canonical_call_ids() {
     let mut request = request_with_tool_call_pair();
     for item in &mut request.input {
@@ -241,8 +339,14 @@ fn concurrent_rounds_keep_their_own_final_request() {
             read_bundle(&first_dir, "meta.json")["review_id"].clone(),
             read_bundle(&first_dir, "meta.json")["evidence"].clone(),
             read_bundle(&first_dir, "meta.json")["duration_ms"].clone(),
+            read_bundle(&first_dir, "meta.json")["guardian_source_baseline"].clone(),
         ),
-        (json!("review-1"), json!("e_final"), json!(11))
+        (
+            json!("review-1"),
+            json!("e_final"),
+            json!(11),
+            json!("rust-v0.147.0"),
+        )
     );
 }
 

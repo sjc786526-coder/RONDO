@@ -17,7 +17,7 @@
 #   2. 准入水位：可用内存低于 RONDO_RUSTC_MEM_FLOOR_MB 时不放新的 rustc 进来，
 #      形成背压。已在跑的 rustc 数量由信号量封顶，所以总量有界。
 #
-# 任何一步出问题都明确告警并 fail-open 直接执行 rustc，绝不静默失效或把构建卡死。
+# 任一计数器、锁或安全目录不可用时 fail-closed；安全闸门不能把未知状态当作可用。
 #
 # 逃生口：
 #   RONDO_RUSTC_THROTTLE=0        完全关闭
@@ -30,16 +30,20 @@ if [[ "$#" -eq 0 ]]; then
   exit 1
 fi
 
-if [[ "${RONDO_RUSTC_THROTTLE:-1}" == "0" ]] || ! command -v flock >/dev/null 2>&1; then
+if [[ "${RONDO_RUSTC_THROTTLE:-1}" == "0" ]]; then
   exec "$@"
+fi
+if ! command -v flock >/dev/null 2>&1; then
+  echo "[rondo] flock is unavailable; refusing to run rustc without the throttle" >&2
+  exit 75
 fi
 
 slots="${RONDO_RUSTC_SLOTS:-6}"
 floor_mb="${RONDO_RUSTC_MEM_FLOOR_MB:-3072}"
 
 if [[ ! "$slots" =~ ^[1-9][0-9]*$ ]] || [[ ! "$floor_mb" =~ ^[0-9]+$ ]]; then
-  echo "[rondo] invalid rustc throttle settings; running rustc without the throttle" >&2
-  exec "$@"
+  echo "[rondo] invalid rustc throttle settings; refusing an unthrottled rustc" >&2
+  exit 76
 fi
 
 # Do not derive this path from TMPDIR: different agents can have different temporary
@@ -59,24 +63,34 @@ if [[ -L "$runtime_dir" ]] || [[ -L "$slot_dir" ]] \
   || ! mkdir -p "$slot_dir" 2>/dev/null \
   || ! chmod 700 "$runtime_dir" "$slot_dir" 2>/dev/null \
   || [[ ! -d "$slot_dir" ]] || [[ ! -O "$slot_dir" ]]; then
-  echo "[rondo] rustc throttle directory is unavailable or unsafe; running without the throttle" >&2
-  exec "$@"
+  echo "[rondo] rustc throttle directory is unavailable or unsafe; refusing an unthrottled rustc" >&2
+  exit 77
 fi
 
 # --- 1. 准入水位：可用内存不足时先不放进来（最多等 10 分钟，绝不无限阻塞） ---
 waited=0
 while ((waited < 600)); do
   avail=$(awk '/^MemAvailable:/{print int($2/1024); exit}' /proc/meminfo 2>/dev/null)
-  [[ -z "${avail:-}" ]] && break
+  if [[ ! "${avail:-}" =~ ^[0-9]+$ ]]; then
+    echo "[rondo] host memory counter is unavailable; refusing to start rustc" >&2
+    exit 78
+  fi
   ((avail >= floor_mb)) && break
   sleep 1
   waited=$((waited + 1))
 done
+if ((avail < floor_mb)); then
+  echo "[rondo] available memory stayed below ${floor_mb} MiB for ${waited}s; refusing to start rustc" >&2
+  exit 79
+fi
 
 # --- 2. 计数信号量：抢一个槽，抢到就 exec，槽随 rustc 进程一起释放 ---
 while :; do
   for ((i = 1; i <= slots; i++)); do
-    exec 8>"$slot_dir/$i" 2>/dev/null || exec "$@"
+    if ! exec 8>"$slot_dir/$i" 2>/dev/null; then
+      echo "[rondo] cannot open rustc throttle slot ${i}; refusing an unthrottled rustc" >&2
+      exit 80
+    fi
     if flock --nonblock 8; then
       exec "$@"
     fi

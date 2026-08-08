@@ -1261,7 +1261,13 @@ fn guardian_request_target_item_id_omits_network_access_trigger_call_id() {
 
 #[tokio::test]
 async fn cancelled_guardian_review_emits_terminal_abort_without_warning() {
-    let (session, turn, rx) = crate::session::tests::make_session_and_context_with_rx().await;
+    let (session, mut turn, rx) = crate::session::tests::make_session_and_context_with_rx().await;
+    let evidence_dir = TempDir::new().expect("evidence temp dir");
+    let turn_mut = Arc::get_mut(&mut turn).expect("turn should be uniquely owned");
+    Arc::make_mut(&mut turn_mut.config).guardian_evidence_dir = Some(
+        codex_utils_absolute_path::AbsolutePathBuf::try_from(evidence_dir.path())
+            .expect("absolute evidence path"),
+    );
     let cancel_token = CancellationToken::new();
     cancel_token.cancel();
 
@@ -1305,6 +1311,15 @@ async fn cancelled_guardian_review_emits_terminal_abort_without_warning() {
         ]
     );
     assert!(warnings.is_empty());
+
+    let bundle_dir = evidence_dir.path().join("review-cancelled-guardian");
+    let meta: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(bundle_dir.join("meta.json")).expect("cancelled review meta"),
+    )
+    .expect("valid cancelled review meta");
+    assert_eq!(meta["evidence"], serde_json::json!("none"));
+    assert_eq!(meta["terminal_status"], serde_json::json!("aborted"));
+    assert!(!bundle_dir.join("E_final.json").exists());
 }
 
 #[test]

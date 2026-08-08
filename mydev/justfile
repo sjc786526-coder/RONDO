@@ -48,8 +48,9 @@ fmt:
 fmt-check:
     @{{ python }} ../scripts/format.py --check
 
-# `fix`, `clippy` and `test` are the heavy build entry points, so on Unix they go
-# through `scripts/with-build-lock.sh`. See that script for why the lock exists.
+# Tests, lints, Rust benchmarks, and schema generators are heavy build entry
+# points, so on Unix they go through `scripts/with-build-lock.sh`. See that script
+# for why the lock exists.
 [unix]
 fix *args:
     {{ justfile_directory() }}/scripts/with-build-lock.sh cargo clippy --fix --tests --allow-dirty {args}
@@ -104,6 +105,11 @@ test-github-scripts:
     {{ python }} -m unittest discover -s {{ justfile_directory() }}/.github/scripts -p 'test_*.py'
 
 # Run explicit workspace benchmark targets.
+[unix]
+bench *args:
+    {{ justfile_directory() }}/scripts/with-build-lock.sh cargo bench --workspace --bench '*' {args}
+
+[windows]
 bench *args:
     cargo bench --workspace --bench '*' {args}
 
@@ -180,14 +186,30 @@ mcp-server-run *args:
     cargo run -p codex-mcp-server -- {args}
 
 # Regenerate the json schema for config.toml from the current config types.
+[unix]
+write-config-schema:
+    {{ justfile_directory() }}/scripts/with-build-lock.sh cargo run -p codex-core --bin codex-write-config-schema
+
+[windows]
 write-config-schema:
     cargo run -p codex-core --bin codex-write-config-schema
 
 # Regenerate vendored app-server protocol schema artifacts.
+[unix]
+write-app-server-schema *args:
+    {{ justfile_directory() }}/scripts/with-build-lock.sh cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- {args}
+
+[windows]
 write-app-server-schema *args:
     cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- {args}
 
 [no-cd]
+[unix]
+write-hooks-schema:
+    {{ justfile_directory() }}/scripts/with-build-lock.sh cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
+
+[no-cd]
+[windows]
 write-hooks-schema:
     cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
 

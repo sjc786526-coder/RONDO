@@ -35,7 +35,7 @@
   预热 / 压缩 / memory 一并排除）。
 - 关联：槽以 guardian 会话 `thread_id` 登记，RAII guard 管生命周期，覆盖所有提前返回与超时路径；
   retry 取最后一次请求。
-- 未真正调用模型即结束的轮次只写 `meta.json` 并标 `evidence: none`，不拿陈旧请求充数。
+- 未到 transport send point 即结束的轮次只写 `meta.json` 并标 `evidence: none`，不拿陈旧请求充数。
 - 规范化确定性且幂等：剥离 `client_metadata` / `prompt_cache_key` / `store` / `stream` /
   `stream_options` 与 `input` 项的 `id`；`call_id` 按出现顺序成对确定性重映射，工具调用与结果仍配对。
 - 未配置时不产生任何文件，钩子首个判定无分配；写入失败只 warn，不影响审批决策与 fail-closed 语义。
@@ -107,7 +107,7 @@ worktree 的 rustc 共用 6 个机器级槽，并在可用内存过低时暂停�
 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。
 
 只读标准快照 `codex-source-code/` 固定在官方 `rust-v0.147.0`（commit
-`be6e8eac34711945bc47d57635f4759f20f08df9`），detached HEAD、工作区干净。产品树基线导入提交为
+`be6e8eac029b183056b7e4402879f15d2c85f61b`），detached HEAD、工作区干净。产品树基线导入提交为
 `1001929`；只把官方 `Cargo.lock` 中 135 个本地 workspace package 的发布占位值 `0.0.0` 机械
 规范化为 `0.147.0`，相对官方 lock 没有其他产品侧改写。上游本身同时带来三个 workspace member
 以及 `Cargo.lock`、`MODULE.bazel.lock`、`pnpm-lock.yaml` 的依赖图更新。
@@ -120,7 +120,7 @@ worktree 的 rustc 共用 6 个机器级槽，并在可用内存过低时暂停�
 - S1 出站测试改用非默认的 `gpt-5.5/high`。0.147 的 OpenAI API-key Guardian 默认本来就是
   Luna；继续用 Luna 断言 model 会让 override 失效时也可能误绿。正式测评仍显式钉
   `gpt-5.6-luna/low`。
-- `E_final` 保留标准 Responses 与 Responses Lite 的真实 wire shape；后者把 policy 放在
+- `E_final` 保留标准 Responses 与 Responses Lite 的完整逻辑请求形态；后者把 policy 放在
   `input` developer item，而不是顶层 `instructions`。
 - 规范化剥离新增的 `FunctionCall.encrypted_function_args` provider-private 运输字段，继续保留并
   成对重映射 `call_id`，保证工具调用/结果关联。
@@ -143,6 +143,23 @@ worktree 的 rustc 共用 6 个机器级槽，并在可用内存过低时暂停�
 23 跳过 / 27 flaky，失败中没有 P0 路径。字面 `just test -p codex-core` 经诊断会因 package-only
 缺少 workspace helper binaries 与项目内 `TMPDIR` 污染 fixture 产生 216 项基础设施失败，故不作为
 必须全绿的 hermetic 门禁；以 P0 精确边界加完整 workspace 结果替代。**P0 严格验收完成。**
+
+### 2026-08-09 独立复验更正
+
+后续独立审查证明上面的“严格验收完成”遗漏了三个真实缺口，不能继续原样作为当前结论：共享 builder
+中的捕获早于 WebSocket 建连；全树递归 `call_id` 规范化可能误改工具 schema/元数据里的同名业务字段；
+passthrough `turn_id` 未规范化。修复把 HTTP/WS 捕获点后移到 transport send 前，同时仍保存可离线复用
+的完整逻辑请求；`call_id`/`turn_id` 只在 input item 的明确结构位置成对重映射，并增加
+`guardian_source_baseline`。预取消且未到 send point 的已建轮只写 `meta.json`/`evidence:none`；
+到达 send point 后即使发送/流读取失败或超时仍可保留该次尝试的 `E_final`。builder 不提前提交和
+standard/Lite 形态均补回归。
+
+规范化承诺同时收窄到真实边界：同一份已构造请求重复规范化字节一致；两个新会话的自由文本仍可能含
+不同父会话 id，整包不保证跨运行字节相同。P1 的 seed/holdout 分桶必须继续使用规范化待审批动作指纹，
+不得改用整份 `E_final` 哈希。Unix/WSL 权限为目录 `0700`、文件 `0600`；Windows 只承诺继承配置目录 ACL。
+本轮 schema、fmt、clippy 与精确选择的 16 项回归均在项目看门狗下通过；这是 P0 定向功能验收，
+不把历史 workspace 的 81 项失败改写成全绿。完整门禁与复验结论见
+`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。
 
 ### 构建资源设施与实测
 

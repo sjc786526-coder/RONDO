@@ -174,7 +174,7 @@ pub struct ConfigToml {
     /// ARC.
     pub approvals_reviewer: Option<ApprovalsReviewer>,
 
-    /// Optional policy instructions for the guardian auto-reviewer.
+    /// Optional Guardian auto-review policy, model, reasoning, and evidence settings.
     #[serde(default)]
     pub auto_review: Option<AutoReviewToml>,
 
