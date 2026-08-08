@@ -22,3 +22,11 @@
 # 约 15 GB，给页缓存和其他 agent 会话留出余量。
 [build]
 jobs = 6
+
+# 机器级 rustc 总并发兜底。jobs 只管单次 cargo 调用内部的并发，两个 agent 各自直接
+# 敲 cargo 仍可能叠加；with-build-lock.sh 负责保证经过 just 的重型 Cargo 构建互斥，
+# 本闸门则把所有入口、worktree 和 agent 的 rustc 总数限制在同一组槽内。它不等同于
+# “同一时刻只有一个 Cargo 构建”。脚本降级时会告警并 fail-open，详见脚本头部注释。
+# 相对路径由 cargo 解析成「`.cargo/` 的父目录」下的路径，因此在主工作区和各
+# worktree 里都各自指向自己那一份，不写死绝对路径。
+rustc-wrapper = "./.cargo/rustc-throttle.sh"
