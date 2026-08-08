@@ -298,7 +298,9 @@ fn remote_model_with_auto_review_override(slug: &str, review_model: &str) -> Mod
 ///
 /// The effort is configured as `high` on purpose: the stock precedence prefers
 /// `low` whenever the review model supports it, so asserting `low` here would pass
-/// even if the override did nothing.
+/// even if the override did nothing. The model is also deliberately different from
+/// the API-key provider default (`gpt-5.6-luna`) so the assertion proves the
+/// configured override reached the wire.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -309,7 +311,7 @@ async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> R
     let mut builder = test_codex().with_pre_build_hook(|home| {
         std::fs::write(
             home.join("config.toml"),
-            "[auto_review]\nmodel = \"gpt-5.6-luna\"\nreasoning_effort = \"high\"\n",
+            "[auto_review]\nmodel = \"gpt-5.5\"\nreasoning_effort = \"high\"\n",
         )
         .expect("seed config.toml");
     });
@@ -387,7 +389,7 @@ async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> R
     let body = guardian_request.body_json();
     assert_eq!(
         (body["model"].clone(), body["reasoning"]["effort"].clone()),
-        (json!("gpt-5.6-luna"), json!("high"))
+        (json!("gpt-5.5"), json!("high"))
     );
 
     Ok(())

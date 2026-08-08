@@ -8,12 +8,12 @@
 ## 1. 当前状态
 
 - 上游基线冻结在 Codex CLI `v0.147.0`（`rust-v0.147.0`，上游 commit
-  `be6e8eac029b183056b7e4402879f15d2c85f61b`）。
+  `be6e8eac34711945bc47d57635f4759f20f08df9`）。
 - 开发环境已就绪（见 `doc/development-environment.md`）：Rust 1.95.0、pnpm 10.33.0、uv、Docker Desktop 可用；本机未装 Bazel。
 - 本机推理硬件：RTX 4060 Laptop **8GB VRAM** / 32 核；RAM 与 WSL 配额见
   `doc/development-environment.md`。8B 级模型只能走 4-bit 量化，且上下文预算需实测。
-- P0 共享地基的主体实现已在 `v0.146.1` 完成并随产品树导入 `v0.147.0`；两个开关仍默认关闭。
-  0.147 兼容门禁尚待升级任务收口，旧基线测试结果不得作为当前通过证据。
+- P0 共享地基已适配 `v0.147.0` 并完成严格验收；两个开关仍默认关闭。permission hook 提前
+  resolve、关闭态捕获快路径和写失败边界均有直接回归，完整 workspace 失败中没有 P0 回归。
 - `v0.147.0` 中 Guardian 默认模型候选由 provider/auth 决定：configured provider + API key
   候选为 `gpt-5.6-luna`，ChatGPT/无 key 候选为 `codex-auto-review`，Bedrock 使用自身模型 id；
   候选不在 catalog 且无 metadata override 时仍会回退主模型。RONDO 显式 `[auto_review].model`
@@ -22,7 +22,7 @@
   `E_final` 消费者不得假设 policy 和 tools 总在顶层 `instructions` / `tools`，也不得保留新增的
   provider-private `encrypted_function_args`；新旧 Guardian policy 证据须分层。
 - 测评体系、教师 harness 研究尚未开始。
-- **当前阶段：`v0.147.0` 基线收口**。完成 P0 兼容适配与相关门禁后，再恢复 P1 与 L1 / L2。
+- **当前阶段：P1 与 L1 / L2 准备**。P1 的 Docker 与小额真实 API 仍受 §6 授权门约束。
 
 ## 2. 方向与依赖
 
@@ -30,9 +30,9 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P0 主体已完成，等待 0.147 兼容门禁后开 P1 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P0 完成，可开 P1 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | P0 主体已完成，等待 0.147 兼容门禁后开 L1 / L2 |
+| 2 | 本地审批模型接入与横评 | P0 完成，可开 L1 / L2 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -56,7 +56,7 @@ P0 共享地基 ────────┤                          ├─→ �
 
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
-| P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 主体完成；0.147 兼容验收待收口 |
+| P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已完成并严格验收 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 未开始 |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
@@ -94,10 +94,9 @@ P0 共享地基 ────────┤                          ├─→ �
 
 ## 5. 当前阶段任务
 
-当前只收口 `v0.147.0` 兼容：把 model override 回归改为非 API-key 默认模型，覆盖 Standard/Lite
-两种 `E_final`，剥离 `encrypted_function_args`，再运行相关门禁。历史成果见
-`doc/WBS-COMPLETED.md`，当前契约见 `plan/001-p0-guardian-override-and-evidence.md`。完成后按 §3
-进入 P1（方向 0）与 L1 / L2（方向 2）。
+P0 已收口；验收和失败差集见 `doc/WBS-COMPLETED.md` 与
+`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。下一步按 §3 进入 P1（方向 0）与
+L1 / L2（方向 2）；涉及 Docker、真实 API 或数据外发时先走 §6 授权门。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，

@@ -1,83 +1,472 @@
 #!/usr/bin/env bash
-# Serialize heavy cargo builds and run them under a hard memory cap.
+# Serialize heavy builds and supervise their disk, memory, swap, and PSI usage.
 #
-# Two independent protections, because they fail differently:
-#
-# 1. Mutual exclusion (flock). `.cargo/config.toml` caps a single build at
-#    `build.jobs` rustc processes, but two agents (Claude Code in the main
-#    workspace, Codex in a worktree, ...) each staying under that cap still add
-#    up to twice the memory peak. Only one heavy build compiles at a time.
-#
-# 2. A cgroup memory cap (systemd transient scope). The 2026-08-08 incident was
-#    not "a build died" -- it was that the *global* OOM killer picked systemd
-#    and sd-pam and took the whole login session, VS Code Server and every agent
-#    with it. Running the build inside a scope with MemoryMax means the kernel
-#    kills processes *inside that scope* instead: the build fails with exit 137,
-#    the machine and the sessions stay up. This is the protection that does not
-#    depend on `build.jobs` having been estimated correctly.
+# The wrapper is intentionally fail-closed. A heavy build is not started unless
+# the machine-global lock, systemd cgroup, and live counters are all available.
+# This guarantees that main and worktrees cannot compile concurrently through
+# the supported just recipes, while a direct external Cargo build causes the
+# supervised build to stop immediately.
 #
 # Usage: with-build-lock.sh <command> [args...]
 #
-# The lock is machine-global on purpose: per-worktree locks would not protect
-# against the multi-worktree case. It is held by the wrapped process itself, so
-# it is always released on exit, crash, or kill -- no stale-lock recovery
-# needed.
+# Normal defaults are calibrated from the Codex 0.147.0 full-workspace run on a
+# 26 GiB RAM / 10 GiB swap WSL2 host. They retain headroom below the one-off
+# 22 GiB / 6 GiB pressure-probe settings without treating small peaks as faults.
 #
-# Escape hatches:
-#   RONDO_BUILD_LOCK=<path>        use a different lock file
-#   RONDO_BUILD_LOCK=0             skip locking entirely
-#   RONDO_BUILD_MEMORY_MAX=<size>  hard cap for the build (default 16G)
-#   RONDO_BUILD_SWAP_MAX=<size>    swap allowance for the build (default 2G)
-#   RONDO_BUILD_CGROUP=0           skip the memory cap entirely
-set -euo pipefail
-
-lock_path="${RONDO_BUILD_LOCK:-${TMPDIR:-/tmp}/rondo-cargo-build.lock}"
-mem_max="${RONDO_BUILD_MEMORY_MAX:-16G}"
-swap_max="${RONDO_BUILD_SWAP_MAX:-2G}"
+# Explicit overrides:
+#   RONDO_PROJECT_ROOT=<path>
+#   RONDO_BUILD_LOCK=<path>                 (0 disables only the lock)
+#   RONDO_BUILD_WATCHDOG=0                  (disables cgroup/watchdog explicitly)
+#   RONDO_BUILD_MEMORY_HIGH=<size>          (default 19G)
+#   RONDO_BUILD_MEMORY_MAX=<size>           (default 21G)
+#   RONDO_BUILD_SWAP_MAX=<size>             (default 5G)
+#   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 180 GB decimal)
+#   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 195 GB decimal)
+#   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 200 GB decimal)
+#   RONDO_BUILD_RESIDUAL_GRACE_SECONDS=<s>  (default 5)
+#   RONDO_BUILD_METRICS_DIR=<path>
+set -uo pipefail
 
 if [[ "$#" -eq 0 ]]; then
   echo "with-build-lock.sh: expected a command to run" >&2
-  exit 1
+  exit 64
 fi
 
-# --- 1. mutual exclusion -----------------------------------------------------
-if [[ "${lock_path}" != "0" ]] && command -v flock >/dev/null 2>&1; then
-  exec 9>"${lock_path}"
+command_name="$(basename -- "$1")"
+uid="${UID:-$(id -u 2>/dev/null || true)}"
+if [[ -z "$uid" ]] || [[ ! "$uid" =~ ^[0-9]+$ ]]; then
+  echo "[rondo] cannot determine the current uid; refusing a heavy build" >&2
+  exit 65
+fi
+
+project_root="${RONDO_PROJECT_ROOT:-}"
+worktree_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$project_root" ]]; then
+  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [[ -z "$git_common_dir" ]]; then
+    echo "[rondo] cannot resolve the shared RONDO repository root" >&2
+    exit 66
+  fi
+  project_root="$(dirname -- "$git_common_dir")"
+fi
+project_root="$(realpath -e -- "$project_root" 2>/dev/null || true)"
+worktree_root="$(realpath -e -- "$worktree_root" 2>/dev/null || true)"
+if [[ -z "$project_root" ]] || [[ ! -d "$project_root" ]] \
+  || [[ -z "$worktree_root" ]] || [[ ! -d "$worktree_root" ]]; then
+  echo "[rondo] invalid RONDO_PROJECT_ROOT" >&2
+  exit 67
+fi
+
+runtime_dir="/run/user/${uid}"
+if [[ -L "$runtime_dir" ]] || [[ ! -d "$runtime_dir" ]] || [[ ! -O "$runtime_dir" ]] || [[ ! -w "$runtime_dir" ]]; then
+  runtime_dir="/tmp/rondo-runtime-${uid}"
+  umask 077
+  if [[ -L "$runtime_dir" ]] || ! mkdir -p -- "$runtime_dir" \
+    || ! chmod 700 -- "$runtime_dir" || [[ ! -O "$runtime_dir" ]]; then
+    echo "[rondo] no safe runtime directory is available" >&2
+    exit 68
+  fi
+fi
+
+lock_path="${RONDO_BUILD_LOCK:-${runtime_dir}/rondo-cargo-build.lock}"
+if [[ "$lock_path" != "0" ]]; then
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "[rondo] flock is unavailable; refusing an unlocked heavy build" >&2
+    exit 69
+  fi
+  if [[ -L "$lock_path" ]] || [[ -e "$lock_path" && ! -O "$lock_path" ]]; then
+    echo "[rondo] build lock path is unsafe: ${lock_path}" >&2
+    exit 70
+  fi
+  umask 077
+  exec 9>"$lock_path" || exit 70
+  chmod 600 -- "$lock_path" 2>/dev/null || true
   if ! flock --nonblock 9; then
-    echo "[rondo] waiting for another heavy cargo build to finish (lock: ${lock_path})" >&2
+    echo "[rondo] waiting for the active heavy build (lock: ${lock_path})" >&2
     flock 9
   fi
-  # fd 9 stays open across exec and through the systemd scope, and is closed by
-  # the kernel when the build exits.
 fi
 
-# --- 2. hard memory cap ------------------------------------------------------
-# Needs systemd as PID 1, cgroup v2, and the memory controller delegated to the
-# user slice. Probe once instead of guessing, and degrade to an uncapped run
-# rather than refusing to build.
-use_scope=0
-if [[ "${RONDO_BUILD_CGROUP:-1}" != "0" ]] && command -v systemd-run >/dev/null 2>&1; then
-  if systemd-run --user --scope --quiet --collect -p MemoryMax=1G -- true >/dev/null 2>&1; then
-    use_scope=1
-  else
-    echo "[rondo] systemd user scope unavailable; running without a memory cap" >&2
-  fi
-fi
-
-if ((use_scope == 0)); then
+if [[ "${RONDO_BUILD_WATCHDOG:-1}" == "0" ]]; then
+  echo "[rondo] build watchdog explicitly disabled" >&2
   exec "$@"
 fi
 
-rc=0
-systemd-run --user --scope --quiet --collect \
-  -p MemoryMax="${mem_max}" -p MemorySwapMax="${swap_max}" \
-  -- "$@" || rc=$?
+for required in systemd-run systemctl du df awk pgrep; do
+  if ! command -v "$required" >/dev/null 2>&1; then
+    echo "[rondo] ${required} is unavailable; refusing an unsupervised heavy build" >&2
+    exit 71
+  fi
+done
 
-if ((rc == 137)); then
-  echo "[rondo] the build was OOM-killed inside its ${mem_max} cgroup (MemorySwapMax=${swap_max})." >&2
-  echo "[rondo] the host and your session were protected on purpose. Lower build.jobs in" >&2
-  echo "[rondo] .cargo/config.toml, or raise RONDO_BUILD_MEMORY_MAX if the host has headroom." >&2
-  echo "[rondo] See doc/development-environment.md section 3.5." >&2
+for proc_name in cargo rustc rust-lld cargo-nextest nextest; do
+  if pgrep -x "$proc_name" >/dev/null 2>&1; then
+    echo "[rondo] another ${proc_name} process is already active; refusing a second build" >&2
+    exit 72
+  fi
+done
+
+memory_high="${RONDO_BUILD_MEMORY_HIGH:-19G}"
+memory_max="${RONDO_BUILD_MEMORY_MAX:-21G}"
+swap_max="${RONDO_BUILD_SWAP_MAX:-5G}"
+project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-180000000000}"
+project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-195000000000}"
+project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-200000000000}"
+filesystem_free_stop_bytes="${RONDO_BUILD_FILESYSTEM_FREE_STOP_BYTES:-50000000000}"
+nonreclaimable_stop_bytes="${RONDO_BUILD_NONRECLAIMABLE_STOP_BYTES:-20401094656}"
+swap_sustained_stop_bytes="${RONDO_BUILD_SWAP_SUSTAINED_STOP_BYTES:-4294967296}"
+swap_emergency_stop_bytes="${RONDO_BUILD_SWAP_EMERGENCY_STOP_BYTES:-5100273664}"
+swap_stop_seconds="${RONDO_BUILD_SWAP_STOP_SECONDS:-20}"
+host_available_stop_kb="${RONDO_BUILD_HOST_AVAILABLE_STOP_KB:-3670016}"
+psi_full_stop_bp="${RONDO_BUILD_PSI_FULL_STOP_BP:-1500}"
+psi_stop_seconds="${RONDO_BUILD_PSI_STOP_SECONDS:-20}"
+disk_sample_interval="${RONDO_BUILD_DISK_SAMPLE_INTERVAL:-5}"
+residual_grace_seconds="${RONDO_BUILD_RESIDUAL_GRACE_SECONDS:-5}"
+
+numeric_settings=(
+  "$project_warn_bytes" "$project_stop_bytes" "$project_max_bytes"
+  "$filesystem_free_stop_bytes" "$nonreclaimable_stop_bytes"
+  "$swap_sustained_stop_bytes" "$swap_emergency_stop_bytes" "$swap_stop_seconds"
+  "$host_available_stop_kb" "$psi_full_stop_bp" "$psi_stop_seconds"
+  "$disk_sample_interval" "$residual_grace_seconds"
+)
+for setting in "${numeric_settings[@]}"; do
+  if [[ ! "$setting" =~ ^[0-9]+$ ]]; then
+    echo "[rondo] watchdog byte/count settings must be non-negative integers" >&2
+    exit 73
+  fi
+done
+if ((project_warn_bytes >= project_stop_bytes \
+  || project_stop_bytes >= project_max_bytes \
+  || disk_sample_interval == 0)); then
+  echo "[rondo] invalid project warning/stop/max or sample interval ordering" >&2
+  exit 74
 fi
 
-exit "${rc}"
+project_before="$(du -sx -B1 -- "$project_root" 2>/dev/null | awk '{print $1}')"
+read -r filesystem_used_before filesystem_available_before < <(
+  df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
+)
+host_mem_available_before="$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo)"
+host_swap_free_before="$(awk '/^SwapFree:/{print $2; exit}' /proc/meminfo)"
+if [[ ! "$project_before" =~ ^[0-9]+$ ]] \
+  || [[ ! "$filesystem_available_before" =~ ^[0-9]+$ ]] \
+  || [[ ! "$host_mem_available_before" =~ ^[0-9]+$ ]] \
+  || [[ ! "$host_swap_free_before" =~ ^[0-9]+$ ]]; then
+  echo "[rondo] resource preflight counters are unavailable" >&2
+  exit 75
+fi
+if ((project_before >= project_stop_bytes)); then
+  echo "[rondo] project is already at the ${project_stop_bytes}-byte proactive stop line" >&2
+  exit 76
+fi
+if ((filesystem_available_before <= filesystem_free_stop_bytes)); then
+  echo "[rondo] filesystem free space is already below the safety floor" >&2
+  exit 77
+fi
+if ((host_mem_available_before <= host_available_stop_kb)); then
+  echo "[rondo] host available memory is already below the safety floor" >&2
+  exit 78
+fi
+if ((host_swap_free_before <= 1048576)); then
+  echo "[rondo] host free swap is already below 1 GiB" >&2
+  exit 79
+fi
+
+target_dir="${CARGO_TARGET_DIR:-${PWD}/target}"
+if [[ "$target_dir" != /* ]]; then
+  target_dir="${PWD}/${target_dir}"
+fi
+target_dir="$(realpath -m -- "$target_dir" 2>/dev/null || true)"
+if [[ -z "$target_dir" ]] || [[ "$target_dir" != "${project_root}/"* ]]; then
+  echo "[rondo] CARGO_TARGET_DIR must stay inside the monitored RONDO project root" >&2
+  exit 82
+fi
+
+metrics_parent="${RONDO_BUILD_METRICS_DIR:-${worktree_root}/.codex/build-watchdog}"
+started_stamp="$(date '+%Y%m%d-%H%M%S')"
+run_dir="${metrics_parent}/${started_stamp}-${uid}-$$"
+if ! mkdir -p -- "$run_dir" || ! chmod 700 -- "$run_dir"; then
+  echo "[rondo] cannot create the watchdog metrics directory: ${run_dir}" >&2
+  exit 80
+fi
+metrics_file="${run_dir}/metrics.csv"
+summary_file="${run_dir}/summary.env"
+printf '%s\n' 'timestamp,elapsed_s,project_bytes,target_bytes,filesystem_used_bytes,filesystem_available_bytes,memory_current_bytes,memory_peak_bytes,memory_anon_bytes,memory_file_bytes,memory_kernel_bytes,memory_nonreclaimable_bytes,swap_current_bytes,swap_peak_bytes,cgroup_psi_full_avg10_bp,host_psi_full_avg10_bp,host_mem_available_kb,host_swap_free_kb,cargo_count,rustc_count,rust_lld_count,nextest_count' >"$metrics_file"
+
+unit="rondo-build-${uid}-${started_stamp//[^0-9]/}-$$.scope"
+echo "[rondo] watchdog metrics: ${run_dir}" >&2
+echo "[rondo] limits: project stop/max=${project_stop_bytes}/${project_max_bytes} bytes, memory high/max=${memory_high}/${memory_max}, swap max=${swap_max}" >&2
+
+systemd-run --user --scope --quiet --unit="$unit" \
+  -p KillMode=control-group \
+  -p MemoryHigh="$memory_high" \
+  -p MemoryMax="$memory_max" \
+  -p MemorySwapMax="$swap_max" \
+  -- "$@" &
+runner_pid=$!
+
+control_group=""
+for _ in $(seq 1 100); do
+  control_group="$(systemctl --user show "$unit" -p ControlGroup --value 2>/dev/null || true)"
+  [[ -n "$control_group" ]] && break
+  if ! kill -0 "$runner_pid" 2>/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ -z "$control_group" ]]; then
+  run_rc=0
+  wait "$runner_pid" || run_rc=$?
+  if ((run_rc == 0)); then
+    echo "[rondo] command completed before the watchdog attached" >&2
+    exit 0
+  fi
+  echo "[rondo] failed to create or inspect the build cgroup; command status=${run_rc}" >&2
+  exit "$run_rc"
+fi
+
+cgroup_root="/sys/fs/cgroup${control_group}"
+for counter in memory.current memory.peak memory.stat memory.swap.current memory.swap.peak memory.pressure memory.events; do
+  if [[ ! -r "${cgroup_root}/${counter}" ]]; then
+    echo "[rondo] cgroup counter ${counter} is unavailable; stopping fail-closed" >&2
+    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
+    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
+    wait "$runner_pid" >/dev/null 2>&1 || true
+    exit 81
+  fi
+done
+
+read_counter() {
+  local path="$1"
+  local value=0
+  # A short command can finish and let systemd remove its transient scope
+  # between `is-active` and this sample. Treat that normal teardown race as an
+  # empty final sample instead of leaking shell redirection errors.
+  if [[ ! -r "$path" ]]; then
+    printf '0'
+    return
+  fi
+  read -r value <"$path" 2>/dev/null || value=0
+  [[ "$value" =~ ^[0-9]+$ ]] || value=0
+  printf '%s' "$value"
+}
+
+read_keyed_counter() {
+  local path="$1"
+  local field="$2"
+  awk -v field="$field" '$1 == field {print $2; found=1; exit} END {if (!found) print 0}' \
+    "$path" 2>/dev/null
+}
+
+read_psi_full_bp() {
+  local path="$1"
+  awk '$1 == "full" {for (i=2; i<=NF; i++) {split($i, pair, "="); if (pair[1] == "avg10") {printf "%d\n", pair[2] * 100; found=1; exit}}} END {if (!found) print 0}' \
+    "$path" 2>/dev/null
+}
+
+stop_reason="none"
+cleanup_reason="none"
+warning_emitted=0
+peak_project="$project_before"
+peak_target=0
+peak_memory=0
+peak_memory_nonreclaimable=0
+peak_swap=0
+peak_cgroup_psi_full_bp=0
+peak_host_psi_full_bp=0
+swap_over_since=0
+psi_over_since=0
+project_bytes="$project_before"
+if [[ -d "$target_dir" ]]; then
+  target_bytes="$(du -sx -B1 -- "$target_dir" 2>/dev/null | awk '{print $1}')"
+else
+  target_bytes=0
+fi
+started_epoch="$(date +%s)"
+sample=0
+runner_done=0
+runner_done_since=0
+run_rc=0
+
+while systemctl --user is-active --quiet "$unit"; do
+  now_epoch="$(date +%s)"
+  elapsed="$((now_epoch - started_epoch))"
+  if ((sample % disk_sample_interval == 0)); then
+    project_bytes="$(du -sx -B1 -- "$project_root" 2>/dev/null | awk '{print $1}')"
+    if [[ -d "$target_dir" ]]; then
+      target_bytes="$(du -sx -B1 -- "$target_dir" 2>/dev/null | awk '{print $1}')"
+    else
+      target_bytes=0
+    fi
+  fi
+  read -r filesystem_used filesystem_available < <(
+    df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
+  )
+  memory_current="$(read_counter "${cgroup_root}/memory.current")"
+  memory_peak="$(read_counter "${cgroup_root}/memory.peak")"
+  memory_anon="$(read_keyed_counter "${cgroup_root}/memory.stat" anon)"
+  memory_file="$(read_keyed_counter "${cgroup_root}/memory.stat" file)"
+  memory_kernel="$(read_keyed_counter "${cgroup_root}/memory.stat" kernel)"
+  memory_nonreclaimable="$((memory_anon + memory_kernel))"
+  swap_current="$(read_counter "${cgroup_root}/memory.swap.current")"
+  swap_peak="$(read_counter "${cgroup_root}/memory.swap.peak")"
+  cgroup_psi_full_bp="$(read_psi_full_bp "${cgroup_root}/memory.pressure")"
+  host_psi_full_bp="$(read_psi_full_bp /proc/pressure/memory)"
+  host_mem_available="$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo)"
+  host_swap_free="$(awk '/^SwapFree:/{print $2; exit}' /proc/meminfo)"
+  oom_kill_count="$(read_keyed_counter "${cgroup_root}/memory.events" oom_kill)"
+  cargo_count="$(pgrep -cx cargo || true)"
+  rustc_count="$(pgrep -cx rustc || true)"
+  rust_lld_count="$(pgrep -cx rust-lld || true)"
+  nextest_count="$(( $(pgrep -cx cargo-nextest || true) + $(pgrep -cx nextest || true) ))"
+
+  # A timed-out test can leave grandchildren in the scope after Cargo/nextest has
+  # already returned. Do not wait forever or let those descendants keep network,
+  # memory, and file descriptors alive: retain the real command status, allow a
+  # short normal-cleanup grace period, then kill only this supervised scope.
+  if ((runner_done == 0)) && ! kill -0 "$runner_pid" 2>/dev/null; then
+    wait "$runner_pid" || run_rc=$?
+    runner_done=1
+    runner_done_since="$now_epoch"
+  fi
+
+  ((project_bytes > peak_project)) && peak_project="$project_bytes"
+  ((target_bytes > peak_target)) && peak_target="$target_bytes"
+  ((memory_peak > peak_memory)) && peak_memory="$memory_peak"
+  ((memory_nonreclaimable > peak_memory_nonreclaimable)) && peak_memory_nonreclaimable="$memory_nonreclaimable"
+  ((swap_peak > peak_swap)) && peak_swap="$swap_peak"
+  ((cgroup_psi_full_bp > peak_cgroup_psi_full_bp)) && peak_cgroup_psi_full_bp="$cgroup_psi_full_bp"
+  ((host_psi_full_bp > peak_host_psi_full_bp)) && peak_host_psi_full_bp="$host_psi_full_bp"
+
+  if ((project_bytes >= project_warn_bytes && warning_emitted == 0)); then
+    echo "[rondo] warning: project storage reached ${project_bytes} bytes" >&2
+    warning_emitted=1
+  fi
+  if ((swap_current >= swap_sustained_stop_bytes)); then
+    ((swap_over_since == 0)) && swap_over_since="$now_epoch"
+  else
+    swap_over_since=0
+  fi
+  if ((cgroup_psi_full_bp >= psi_full_stop_bp || host_psi_full_bp >= psi_full_stop_bp)); then
+    ((psi_over_since == 0)) && psi_over_since="$now_epoch"
+  else
+    psi_over_since=0
+  fi
+
+  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    "$(date --iso-8601=seconds)" "$elapsed" "$project_bytes" "$target_bytes" \
+    "$filesystem_used" "$filesystem_available" "$memory_current" "$memory_peak" \
+    "$memory_anon" "$memory_file" "$memory_kernel" "$memory_nonreclaimable" \
+    "$swap_current" "$swap_peak" "$cgroup_psi_full_bp" "$host_psi_full_bp" \
+    "$host_mem_available" "$host_swap_free" "$cargo_count" "$rustc_count" \
+    "$rust_lld_count" "$nextest_count" >>"$metrics_file"
+
+  external_build=""
+  for proc_name in cargo rustc rust-lld cargo-nextest nextest; do
+    while read -r pid; do
+      [[ -n "$pid" ]] || continue
+      process_group="$(awk -F: '$1 == "0" {print $3}' "/proc/${pid}/cgroup" 2>/dev/null || true)"
+      [[ -n "$process_group" ]] || continue
+      if [[ "$process_group" != "$control_group" && "$process_group" != "${control_group}/"* ]]; then
+        external_build="${proc_name}:${pid}"
+        break 2
+      fi
+    done < <(pgrep -x "$proc_name" || true)
+  done
+
+  if [[ -n "$external_build" ]]; then
+    stop_reason="external_build_${external_build}"
+  elif ((project_bytes >= project_max_bytes)); then
+    stop_reason="project_reached_absolute_max"
+  elif ((project_bytes >= project_stop_bytes)); then
+    stop_reason="project_reached_proactive_stop"
+  elif ((filesystem_available <= filesystem_free_stop_bytes)); then
+    stop_reason="filesystem_free_below_floor"
+  elif ((oom_kill_count > 0)); then
+    stop_reason="cgroup_reported_oom_kill"
+  elif ((memory_nonreclaimable >= nonreclaimable_stop_bytes)); then
+    stop_reason="cgroup_nonreclaimable_memory_above_limit"
+  elif ((swap_current >= swap_emergency_stop_bytes)); then
+    stop_reason="cgroup_swap_above_emergency_limit"
+  elif ((swap_over_since > 0 && now_epoch - swap_over_since >= swap_stop_seconds)); then
+    stop_reason="cgroup_swap_sustained_above_limit"
+  elif ((host_mem_available <= host_available_stop_kb)); then
+    stop_reason="host_mem_available_below_floor"
+  elif ((psi_over_since > 0 && now_epoch - psi_over_since >= psi_stop_seconds)); then
+    stop_reason="memory_full_psi_sustained_above_limit"
+  elif ((runner_done == 1 \
+    && now_epoch - runner_done_since >= residual_grace_seconds)); then
+    cleanup_reason="residual_processes_after_command"
+  fi
+
+  if [[ "$stop_reason" != "none" ]]; then
+    echo "[rondo] proactive stop: ${stop_reason}" >&2
+    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
+    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
+    break
+  fi
+  if [[ "$cleanup_reason" != "none" ]]; then
+    echo "[rondo] cleanup: ${cleanup_reason}" >&2
+    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
+    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
+    break
+  fi
+
+  sample=$((sample + 1))
+  if ((sample % 30 == 0)); then
+    echo "[rondo] command=${command_name} elapsed=${elapsed}s project=${project_bytes} target=${target_bytes} memory=${memory_current} anon=${memory_anon} file=${memory_file} swap=${swap_current} host_available_kb=${host_mem_available}" >&2
+  fi
+  sleep 1
+done
+
+if ((runner_done == 0)); then
+  wait "$runner_pid" || run_rc=$?
+fi
+project_after="$(du -sx -B1 -- "$project_root" 2>/dev/null | awk '{print $1}')"
+if [[ -d "$target_dir" ]]; then
+  target_after="$(du -sx -B1 -- "$target_dir" 2>/dev/null | awk '{print $1}')"
+else
+  target_after=0
+fi
+read -r filesystem_used_after filesystem_available_after < <(
+  df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
+)
+
+{
+  printf 'unit=%s\n' "$unit"
+  printf 'command_name=%s\n' "$command_name"
+  printf 'run_rc=%s\n' "$run_rc"
+  printf 'stop_reason=%s\n' "$stop_reason"
+  printf 'cleanup_reason=%s\n' "$cleanup_reason"
+  printf 'project_before_bytes=%s\n' "$project_before"
+  printf 'project_after_bytes=%s\n' "$project_after"
+  printf 'project_peak_sampled_bytes=%s\n' "$peak_project"
+  printf 'target_after_bytes=%s\n' "$target_after"
+  printf 'target_peak_sampled_bytes=%s\n' "$peak_target"
+  printf 'filesystem_used_before_bytes=%s\n' "$filesystem_used_before"
+  printf 'filesystem_used_after_bytes=%s\n' "$filesystem_used_after"
+  printf 'filesystem_available_before_bytes=%s\n' "$filesystem_available_before"
+  printf 'filesystem_available_after_bytes=%s\n' "$filesystem_available_after"
+  printf 'memory_peak_sampled_bytes=%s\n' "$peak_memory"
+  printf 'memory_nonreclaimable_peak_sampled_bytes=%s\n' "$peak_memory_nonreclaimable"
+  printf 'swap_peak_sampled_bytes=%s\n' "$peak_swap"
+  printf 'cgroup_psi_full_avg10_peak_bp=%s\n' "$peak_cgroup_psi_full_bp"
+  printf 'host_psi_full_avg10_peak_bp=%s\n' "$peak_host_psi_full_bp"
+  printf 'memory_high=%s\n' "$memory_high"
+  printf 'memory_max=%s\n' "$memory_max"
+  printf 'swap_max=%s\n' "$swap_max"
+  printf 'project_stop_bytes=%s\n' "$project_stop_bytes"
+  printf 'project_max_bytes=%s\n' "$project_max_bytes"
+} >"$summary_file"
+
+systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+echo "[rondo] finished status=${run_rc} stop=${stop_reason} cleanup=${cleanup_reason} project=${project_after} target=${target_after}; summary=${summary_file}" >&2
+
+if [[ "$stop_reason" != "none" ]]; then
+  exit 125
+fi
+if ((run_rc == 137)); then
+  echo "[rondo] the command was OOM-killed inside its ${memory_max} cgroup" >&2
+fi
+exit "$run_rc"

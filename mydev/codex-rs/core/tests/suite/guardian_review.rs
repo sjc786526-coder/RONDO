@@ -25,6 +25,7 @@ use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::user_input::UserInput;
 use core_test_support::fs_wait;
+use core_test_support::hooks::trust_discovered_hooks;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -906,6 +907,158 @@ fn read_evidence_bundles(evidence_dir: &std::path::Path) -> Vec<(String, Value, 
     bundles
 }
 
+/// Returns the Guardian policy from either the standard Responses request shape
+/// or the Responses Lite developer message shape.
+fn guardian_policy_from_e_final(e_final: &Value) -> &str {
+    if let Some(instructions) = e_final.get("instructions").and_then(Value::as_str) {
+        return instructions;
+    }
+    e_final["input"]
+        .as_array()
+        .expect("Responses Lite E_final input")
+        .iter()
+        .filter(|item| item["type"] == "message" && item["role"] == "developer")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|content| content["text"].as_str())
+        .find(|text| text.starts_with("You are judging one planned coding-agent action."))
+        .expect("Guardian policy in E_final")
+}
+
+fn install_allow_permission_hook_with_evidence(home: &std::path::Path) {
+    let evidence_dir = home.join("evidence");
+    fs::write(
+        home.join("config.toml"),
+        format!(
+            "[auto_review]\nevidence_dir = \"{}\"\n",
+            evidence_dir.display()
+        ),
+    )
+    .expect("seed evidence config");
+
+    let script_path = home.join("allow_permission.py");
+    let marker_path = home.join("permission-hook-ran");
+    let marker_json = serde_json::to_string(&marker_path).expect("serialize hook marker path");
+    fs::write(
+        &script_path,
+        format!(
+            r#"import json
+from pathlib import Path
+import sys
+
+json.load(sys.stdin)
+Path({marker_json}).write_text("allowed", encoding="utf-8")
+print(json.dumps({{
+    "hookSpecificOutput": {{
+        "hookEventName": "PermissionRequest",
+        "decision": {{"behavior": "allow"}}
+    }}
+}}))
+"#
+        ),
+    )
+    .expect("write permission hook script");
+    let hooks = json!({
+        "hooks": {
+            "PermissionRequest": [{
+                "matcher": "^Bash$",
+                "hooks": [{
+                    "type": "command",
+                    "command": format!("python3 {}", script_path.display()),
+                }],
+            }],
+        },
+    });
+    fs::write(home.join("hooks.json"), hooks.to_string()).expect("write hooks.json");
+}
+
+/// Permission hooks precede Guardian in 0.147. If a hook resolves the action,
+/// no Guardian round exists and evidence capture must remain completely inert.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn permission_hook_resolution_writes_no_guardian_evidence() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+    skip_if_wine_exec!(
+        Ok(()),
+        "Guardian approval actions require host-native paths"
+    );
+
+    let server = start_mock_server().await;
+    let tool_call_id = "hook-resolved-exec";
+    let tool_args = json!({
+        "cmd": "printf hook-approved",
+        "sandbox_permissions": SandboxPermissions::RequireEscalated,
+        "justification": "Exercise permission-hook precedence over Guardian.",
+    });
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-parent-hook-1"),
+                ev_function_call(
+                    tool_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&tool_args)?,
+                ),
+                ev_completed("resp-parent-hook-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-parent-hook-2"),
+                ev_assistant_message("msg-parent-hook-2", "done"),
+                ev_completed("resp-parent-hook-2"),
+            ]),
+        ],
+    )
+    .await;
+
+    let mut builder = test_codex()
+        .with_pre_build_hook(install_allow_permission_hook_with_evidence)
+        .with_config(trust_discovered_hooks);
+    let test = builder.build(&server).await?;
+    let evidence_dir = test.home.path().join("evidence");
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run the command after the permission hook approves it".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(test.config.cwd.clone())),
+                approval_policy: Some(AskForApproval::OnRequest),
+                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            },
+        })
+        .await?;
+    core_test_support::wait_for_event_with_timeout(
+        &test.codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(15),
+    )
+    .await;
+
+    assert_eq!(
+        responses.requests().len(),
+        2,
+        "hook resolution must bypass the Guardian model request"
+    );
+    responses.requests()[1].function_call_output(tool_call_id);
+    assert!(
+        test.home.path().join("permission-hook-ran").exists(),
+        "permission hook fixture must actually resolve the request"
+    );
+    assert!(
+        !evidence_dir.exists(),
+        "a hook-resolved action must not create E_final or meta.json"
+    );
+
+    Ok(())
+}
+
 /// Two sequential reviews in one session must each produce their own bundle, and
 /// the parent agent's own requests must never be captured.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1051,7 +1204,7 @@ async fn guardian_evidence_bundles_are_scoped_to_their_review() -> Result<()> {
                 json!("e_final"),
                 json!("approved"),
                 json!("approved"),
-                json!("codex-auto-review"),
+                json!("gpt-5.6-luna"),
             )
         );
         let stripped: Vec<&str> = ["client_metadata", "prompt_cache_key", "stream", "store"]
@@ -1059,10 +1212,12 @@ async fn guardian_evidence_bundles_are_scoped_to_their_review() -> Result<()> {
             .filter(|field| e_final.get(*field).is_some())
             .collect();
         assert_eq!(stripped, Vec::<&str>::new());
+        assert_eq!(e_final.get("instructions"), None);
+        assert_eq!(e_final.get("tools"), None);
+        assert_eq!(e_final["input"][0]["type"], json!("additional_tools"));
+        assert_eq!(e_final["input"][0]["role"], json!("developer"));
         assert!(
-            e_final["instructions"]
-                .as_str()
-                .expect("instructions")
+            guardian_policy_from_e_final(e_final)
                 .starts_with("You are judging one planned coding-agent action."),
             "captured request must be the Guardian request, not the parent agent's"
         );

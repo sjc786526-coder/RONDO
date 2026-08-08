@@ -10,7 +10,7 @@
 
 CPU i9-13980HX
 GPU RTX4060 laptop
-总RAM 40GB，WSL分配到27GB，swap 10GB
+总RAM 40GB，WSL分配到26GB，swap 10GB
 
 ## 1. 平台与网络代理
 
@@ -159,23 +159,22 @@ APT 已安装并复核以下开发包：
 
 ### 3.4 编译验证与锁文件一致性
 
-当前源码基线为 Codex CLI `v0.147.0`，来自上游 tag `rust-v0.147.0`（commit
-`be6e8eac029b183056b7e4402879f15d2c85f61b`）。纯净只读快照 `codex-source-code/` 保持官方原样：
-detached HEAD、工作区干净，`Cargo.toml` 的 workspace 版本为 `0.147.0`，但官方 `Cargo.lock`
-仍将 135 个无 registry source 的本地 workspace package 写作 `0.0.0`。RONDO 产品树
-`mydev/codex-rs/Cargo.lock` 为支持 `--locked` 构建，才把这 135 项机械规范化为 `0.147.0`；
-相对纯净 `v0.147.0` 上游锁文件，产品树没有其他差异。新增的 workspace member 为
-`app-server-protocol-noop-macros`、`code-mode-runtime`、`utils/audio`。
+上游基线已整体升级到 Codex CLI `0.147.0`（官方 tag commit
+`be6e8eac34711945bc47d57635f4759f20f08df9`）。官方 tag 的 workspace `Cargo.toml` 已是
+`0.147.0`，但 `Cargo.lock` 中 135 个本地 workspace package 仍是发布占位值 `0.0.0`；RONDO
+沿用既有冻结规则，把这些条目机械规范化为 `0.147.0`。规范化后的 lock SHA-256 是
+`bc4fe450de929afe82928734f860ca83e5f9dc5f9f1211b0974ea47b57af77ca`。
 
-这次不是只改本地包版本：上游实质更新了 `Cargo.lock`、`MODULE.bazel.lock` 与
-`pnpm-lock.yaml`中的第三方依赖图。旧基线下的"第三方依赖未变，无需刷新 Bazel lock"
-结论不再适用。
+只读快照 `codex-source-code/` 保持官方原样、detached HEAD 且工作区干净；产品树相对官方 lock
+没有上述 135 项以外的改写。上游本身新增 `app-server-protocol-noop-macros`、
+`code-mode-runtime`、`utils/audio` 三个 workspace member，并更新了 Cargo、Bazel 与 pnpm 的
+第三方依赖图，因此旧基线“第三方依赖未变”的结论不再适用。
 
-基线升级期间在与产品源码隔离的 scratch source 上完成了一次上游 `v0.147.0`
-`cargo build --workspace --locked` 与全量 `just test --test-threads 10`；为使官方 tag 可被
-`--locked` 构建，scratch lock 中上游保留的 135 个 `0.0.0` 本地包条目被机械规范化为
-`0.147.0`。该结果证明的是**原始上游基线与当前工具链**，不是 RONDO 合入改动后的
-构建或 P0 验收证据。本次文档适配按要求未构建、未编译、未运行测试。
+纯上游 scratch 与适配后的 RONDO 都完成了冷编译和全量 nextest 枚举/执行。`rusty_v8` 使用仓库
+`.github/actions/setup-rusty-v8/action.yml` 指定的 OpenAI release archive 与 binding，并通过官方
+SHA-256 清单；默认 denoland 资产地址在本轮返回 404，不能作为可复现入口。详细构建与失败证据见
+`agent_log/2026-08-08-212134-codex-0.147.0-upstream-baseline.md`、P0 升级验收日志与
+`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。
 
 ### 3.5 构建与测试并发上限（OOM 防护）
 
@@ -184,8 +183,7 @@ detached HEAD、工作区干净，`Cargo.toml` 的 workspace 版本为 `0.147.0`
 时开始杀进程，连 `systemd`、`sd-pam` 一起被 SIGKILL，于是 VS Code Remote 报 WebSocket 1006、
 所有 agent 会话一并丢失。根因是**并发度超过内存承载能力**，不是 CPU 不足，也不是 VS Code 或 WSL 网络问题。
 
-提交 `1001929` 已保留前四层与旧 cgroup 保护；`v0.147.0` 升级工作树正依据本次校准把第五层
-收口为 fail-closed watchdog：
+现在有七道固化在仓库里的闸门，不依赖人或 AI 记忆：
 
 | 闸门 | 位置 | 作用维度 |
 | ---- | ---- | -------- |
@@ -193,80 +191,79 @@ detached HEAD、工作区干净，`Cargo.toml` 的 workspace 版本为 `0.147.0`
 | `test-threads = 10` | `mydev/codex-rs/.config/nextest.toml` 的 `[profile.default]` | 测试执行阶段并发的测试进程数量 |
 | rustc 总并发槽 = 6 | 仓库根 `.cargo/rustc-throttle.sh` | 所有 Cargo 入口、agent 与 worktree 共用同一组 rustc 槽 |
 | 全局互斥锁 | `mydev/scripts/with-build-lock.sh` | 同一时刻只允许一个重量级构建 |
-| fail-closed cgroup + watchdog（升级树待提交） | 同上脚本，`systemd-run --user --scope` | 限制内存/swap，监视磁盘、PSI 与外部构建，越界只终止构建 |
+| cgroup 内存边界 | 同上脚本 | `MemoryHigh=19G`、`MemoryMax=21G`、`MemorySwapMax=5G` |
+| 实时资源看门狗 | 同上脚本 | 磁盘、匿名/文件/内核内存、swap、PSI、宿主可用内存每秒采样 |
+| scope 残留清理 | 同上脚本 | 主命令退出后仍存活的测试子进程会在 5 秒宽限后被精确终止 |
 
-jobs、test-threads 与 rustc 槽限制并发；机器级 flock 阻止两个受支持的 `just` 重型入口同时运行。
-下文 watchdog 数值与语义是 0.147 升级树当前的**待收口契约**；在其提交并合入前，不把它写成
-产品树已验收能力。目标实现默认 fail-closed：找不到安全运行目录、systemd/cgroup 或关键计数器时
-拒绝启动重型构建，不再静默降级为无上限运行。
+jobs、test-threads 与 rustc 槽是容量防护；全局锁是跨入口串行化；cgroup 与看门狗负责在估算错误时
+把损害限制在本次构建。脚本拿不到安全锁、systemd scope 或任一必要计数器时会拒绝启动，不再静默
+降级为无上限运行。
 
-#### `v0.147.0` 校准证据（2026-08-08）
+#### 0.147.0 冷构建与全量测试实测
 
-原始上游 `v0.147.0` 的 scratch workspace build 完成，随后全量 nextest 完整结束：
+在同一独立 worktree、同一 target、同一机器级锁中，以 `jobs=6` / `test-threads=10` 顺序完成冷编译
+与全量测试；主工作区和其他 worktree 没有并行构建。两次完整测量都没有触发资源停机：
 
-- 14,065 项运行，13,981 通过，83 失败，1 超时，23 跳过，31 项首轮失败后重试通过。
-- 项目峰值为 127,422,697,472 bytes，其中 Cargo target 最终为 126,174,883,840 bytes。
-- cgroup 总内存采样峰值为 17,637,695,488 bytes；匿名内存峰值为 8,352,325,632 bytes，
-  匿名内存加内核不可回收部分峰值为 8,620,105,728 bytes。
-- swap 峰值 22,200,320 bytes，cgroup/host `full avg10` PSI 峰值分别为 0.56% / 0.80%。
+| 指标 | 纯上游 0.147.0 | RONDO 0.147.0 + P0 |
+| ---- | ----: | ----: |
+| 项目峰值 | 127,422,697,472 B | 127,400,132,608 B |
+| target 峰值 | 126,174,883,840 B | 126,006,960,128 B |
+| cgroup 总内存峰值 | 17,637,695,488 B | 20,406,243,328 B |
+| 匿名+内核不可回收峰值 | 8,620,105,728 B | 12,224,589,824 B |
+| swap 峰值 | 22,200,320 B | 391,446,528 B |
+| 宿主最低 `MemAvailable` | 15,033,628 KiB | 11,036,488 KiB |
+| cgroup / 宿主 full PSI avg10 峰值 | 0.56% / 0.80% | 15.27% / 16.87% |
 
-`jobs = 6` 沿用旧基线校准；本轮验证了它在 0.147 全量负载下可用，没有重新比较并发档位。
+总内存包含大量可回收的 target 文件页缓存；判断危险不能只看 `memory.current`。多轮中真正不可回收
+最高约 12.2 GB，swap 最高约 0.39 GB，宿主最低仍保有约 10.5 GiB 可用内存。PSI 曾瞬时越过 15%，
+但没有持续 20 秒，未触发停止；这验证了持续窗口能容忍短波动。21G 硬上限与 5G swap 上限对
+26GB RAM / 10GB swap 的 WSL 配置是宽松但有边界的取值。
 
-这次结果推翻了"只看 `memory.current` 达到某个值就停"的旧思路：大型 Rust 构建的
-`memory.current` 含大量可回收文件缓存。升级树目标脚本因此综合监控不可回收内存、swap、
-host `MemAvailable`、PSI 和磁盘余量。
+#### 200 GB 项目存储看门狗
 
-#### 第四、五道闸门：全局互斥与资源 watchdog（升级树待收口）
+`with-build-lock.sh` 对共享仓库根（包含主工作区、项目 worktree 与 git-ignored 项目 scratch）执行：
 
-升级树中的 `with-build-lock.sh` 先取得机器级锁、拒绝已经存在的外部 Cargo/rustc/nextest 进程，再把构建放进
-systemd 临时 scope。`v0.147.0` 校准后的默认 cgroup 配额是 `MemoryHigh=19G`、
-`MemoryMax=21G`、`MemorySwapMax=5G`。项目目录在 180/195/200 GB 分别告警、主动停止、触及
-绝对上限，文件系统至少保留 50 GB；其余停止条件综合不可回收内存、swap、宿主可用内存、PSI
-与 scope 外构建进程，确切默认值以脚本为准。启动前发现外部构建返回 72，运行中主动停止返回 125；
-若内核仍在 scope 内触发 OOM，构建返回 137，但机器、VS Code 与 agent 会话应继续存活。逐秒指标与摘要写入当前 worktree 的
-`.codex/build-watchdog/`，不作为仓库交付物。
+- 180,000,000,000 B：一次告警；
+- 195,000,000,000 B：主动冻结并终止本次 scope；
+- 200,000,000,000 B：绝对停机线；
+- 所在文件系统剩余空间低于 50,000,000,000 B：停机。
 
-本机已具备 systemd、cgroup v2 与 user slice memory controller。脚本默认 fail-closed：锁、scope、
-资源计数器或安全运行目录不可用时拒绝启动重型构建。只有明确设置
-`RONDO_BUILD_WATCHDOG=0` 才关闭 cgroup/watchdog；机器级锁仍保留。阈值可以通过脚本列出的
-`RONDO_BUILD_*` 环境变量做单次调整，必须结合监控结果，而不是凭估算放宽。
+磁盘每 5 秒采样一次，195GB 主动线为采样和进程冻结保留约 5GB 缓冲。完整 0.147.0 target 实测约
+126GB，距主动线仍有约 69GB 余量，因此 200GB 足以覆盖正常冷构建，又能在 WSL 虚拟磁盘被中间产物
+塞满前结束任务。这是**受控构建看门狗**，不是 ext4 目录 quota；绕过脚本的直接写入不受其保护。
+为避免把项目 target 放到监控根之外绕过 200GB 计数，脚本要求 `CARGO_TARGET_DIR` 必须位于共享
+RONDO 项目根内；外部 target 会在启动前被拒绝。
 
-三点说明：
+#### 内存、swap 与 PSI 停机条件
 
-- **两个维度必须分别限制，但吃内存的是编译阶段。** nextest 是先全量构建、再执行测试，两个阶段
-  不重叠，所以峰值由 `build.jobs` 决定，它才是关键那一个。`test-threads` 是保守取值，执行阶段的
-  峰值尚未实测；如果它从来不是瓶颈，可以按实测结果调回去。
-- **`.cargo/config.toml` 放在仓库根而不是 `mydev/codex-rs/`。** cargo 会从 cwd 逐级向上合并配置，
-  所以这一份同时覆盖 `mydev/codex-rs`、`mydev/tools`、`codex-source-code` 和 `.claude/worktrees/`
-  下的全部构建，换 worktree 不会失效；同时不改动上游 codex 自带的配置文件，基线升级时不会冲突。
-- **锁是机器级而不是 worktree 级。** 单次构建限到 6 jobs，但主工作区一个 agent、worktree 里另一个
-  agent 各跑一次，叠加仍会突破单构建的安全估算。`just test` / `just clippy` / `just fix`（Unix 分支）
-  都走 `with-build-lock.sh`，等待时会打印提示，不会看起来像卡死。锁由被包裹的进程本身持有，
-  进程退出/崩溃/被杀都自动释放，没有陈旧锁问题；在受支持入口启动前发现 scope 外已有相关进程时
-  会直接拒绝第二次构建。
-- **rustc wrapper 是跨入口总并发兜底，不是第二把 Cargo 构建锁。** 即使有人绕过 `just` 直接执行
-  Cargo，所有 worktree 的 rustc 仍共享 6 个槽；但两个 Cargo 驱动仍可能同时存在，所以正式重型任务
-  仍必须经过 `with-build-lock.sh`。信号量固定在当前用户的运行目录，不随 agent 的 `TMPDIR` 分裂。
+除内核的 `MemoryHigh=19G` / `MemoryMax=21G` / `MemorySwapMax=5G` 外，看门狗还会在以下任一条件成立时
+先 `SIGSTOP`、再 `SIGKILL` 本次 scope：不可回收内存达到 19GiB；swap 达到 4.75GiB，或连续 20 秒
+超过 4GiB；宿主 `MemAvailable` 低于 3.5GiB；cgroup 或宿主 full PSI avg10 连续 20 秒达到 15%；
+cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障。
 
-单个重测试太吃内存时，**不要继续调低全局 `test-threads`**，那会让所有轻量测试一起变慢。用 nextest 的
-按测试资源控制：`.config/nextest.toml` 里已有 `test-groups`（`app_server_integration` 等用 `max-threads`
-限制同类重测试的并发数），需要更细的权重时用 `threads-required` 让单个重测试占多个线程槽。
+全量测试还验证了残留清理的必要性：一个非封闭插件迁移测试超时后泄漏 366 个 `git ls-remote`
+进程。看门狗现会在主命令退出后等待 5 秒，再只清理该 scope，并把
+`cleanup_reason=residual_processes_after_command` 与原始命令返回码分别写入 `summary.env`。
 
-Windows 分支的 `just` 配方保持上游行为（不加锁），因为本项目的开发机是 WSL。
+#### 使用边界
 
-已知的未覆盖面（互斥锁和 watchdog 只作用于 `just test` / `clippy` / `fix` 的 Unix 分支，
-`jobs = 6` 与 rustc wrapper 则覆盖仓库内 Cargo/rustc）：
+- Unix 的 `just test` / `just clippy` / `just fix` 已接入脚本；其他重型 Cargo 命令必须显式用
+  `mydev/scripts/with-build-lock.sh <command>` 包裹。主工作区与任一 worktree、两个 worktree 之间均不得
+  同时构建。
+- 脚本启动前拒绝已有 `cargo` / `rustc` / `rust-lld` / `nextest`；运行中若发现 scope 外第二个构建，
+  会停止受控构建。rustc wrapper 只保证跨入口最多 6 个 rustc，不等于 Cargo 互斥锁。
+- 直接 Cargo、Windows just 分支和 Bazel 不自动进入该 scope；这是明确未覆盖面。本机尚未安装 Bazel。
+- 指标默认写入当前 worktree 的 `.codex/build-watchdog/`，原始全量日志和指标 git-ignored；结论摘要写
+  `agent_log/`。
+- 完整 workspace 的 managed OAuth 测试会调用系统默认浏览器打开本机临时 `127.0.0.1` 授权页；它不
+  访问真实外部 OAuth 服务，但属于桌面副作用。需要完全无交互运行时，应先给 browser opener 注入 stub。
 
-- **直接敲 `cargo build` / `check` / `nextest` 不走锁也不进 scope。** `jobs = 6` 与 rustc wrapper
-  仍限制单次/总体 rustc 并发，但 direct Cargo 自身不受磁盘、PSI、swap watchdog 保护；正式重型任务
-  必须使用受支持的 `just` 入口。
-- **`just bench` 走的是 `cargo bench --workspace`，没有包进互斥锁和 scope**，因为它跨平台且极少运行。
-  需要跑基准时确认没有别的构建在跑。
-- **Bazel 路径没有加闸。** `mydev/.bazelrc` 的 `common --jobs=30` 仍是上游值。Bazel 本身按
-  `--local_resources`（默认 `HOST_RAM*0.67`）做内存感知调度，不像 cargo 那样只按 CPU 数硬拉并发，
-  风险低一档；且本机尚未安装 Bazel（见 §8）。等真正引入 Bazel 时再实测并决定是否收紧，这里不做未经验证的改动。
-- **当前阈值来自一次上游 scratch 全工作区运行，不是永久常量。** 新基线明显改变构建体积或资源曲线时，
-  应先用相同指标重新校准；出现 125/137 时先看摘要中的 stop reason、不可回收内存、swap 与 PSI。
+```bash
+RONDO_BUILD_MEMORY_MAX=20G just test       # 单次收紧硬上限
+RONDO_BUILD_SWAP_MAX=4G just test          # 单次收紧 swap
+RONDO_BUILD_PROJECT_STOP_BYTES=190000000000 just test
+RONDO_BUILD_WATCHDOG=0 just test           # 显式关闭全部监控；普通开发不得使用
+```
 
 ## 4. Node 与 pnpm
 
@@ -345,13 +342,14 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 - Docker devcontainer 环境
 - `cargo-dylint`、`dylint-link`、`cargo-shear`
 - 额外的跨平台 Rust targets
-- RONDO `v0.147.0` 产品树的完整 `just test`、Bazel 测试或完整 Docker 测试
+- Bazel 测试或完整 Docker 测试
 
 `v0.146.1` 产品树曾于 2026-08-08 完整跑过 `just test`：13,135 项运行，13,062 通过 /
 73 失败 / 23 跳过 / 25 flaky，且无 OOM；这是旧基线历史证据，详见
-`agent_log/2026-08-08-031500-full-test-backfill.md`。§3.5 记录的 14,065 项结果则来自隔离 scratch
-里的纯上游 `v0.147.0`，同样不是当前 RONDO 产品验收。本次文档任务未构建、未编译、未运行测试；
-因此不声称 RONDO `v0.147.0` 已通过任何新门禁。Bazel 门禁与 `just argument-comment-lint` 仍未运行。
+`agent_log/2026-08-08-031500-full-test-backfill.md`。`v0.147.0` 的纯上游与 RONDO 产品树也均完成完整
+workspace 运行；最新 RONDO 结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky，P0
+严格边界全部通过。完整归因见 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。Bazel 门禁与
+`just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。
 

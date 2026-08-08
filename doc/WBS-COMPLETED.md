@@ -100,26 +100,56 @@ worktree 的 rustc 共用 6 个机器级槽，并在可用内存过低时暂停�
   按本次任务范围不做修复。
 - **仍未运行**：Bazel 门禁与 `just argument-comment-lint`（本机未装 Bazel）。
 
-## Codex `v0.147.0` 上游基线导入（2026-08-08）
+## Codex 0.147.0 基线导入与 P0 兼容适配（2026-08-08）
 
-只读标准快照 `codex-source-code/` 已固定在 `rust-v0.147.0` /
-`be6e8eac029b183056b7e4402879f15d2c85f61b`，detached HEAD、工作区干净，并与 tag commit
-完全一致。官方 `Cargo.toml` 为 `0.147.0`；官方 `Cargo.lock` 原样保留 135 个版本为 `0.0.0`
-的 workspace package，没有为本项目修改。
+日志：`agent_log/2026-08-08-212134-codex-0.147.0-upstream-baseline.md`、
+`agent_log/2026-08-08-221708-codex-0.147.0-p0-acceptance.md`、
+`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。
 
-产品树基线导入提交为 `1001929`。`mydev/codex-rs/Cargo.lock` 为支持 `--locked` 构建，只把上述
-135 个本地包版本机械规范化为 `0.147.0`；相对纯净 `v0.147.0` 官方锁文件没有其他差异。
-上游导入同时带来三个 workspace member（`app-server-protocol-noop-macros`、`code-mode-runtime`、
-`utils/audio`）及 `Cargo.lock`、`MODULE.bazel.lock`、`pnpm-lock.yaml` 的依赖图更新。
+只读标准快照 `codex-source-code/` 固定在官方 `rust-v0.147.0`（commit
+`be6e8eac34711945bc47d57635f4759f20f08df9`），detached HEAD、工作区干净。产品树基线导入提交为
+`1001929`；只把官方 `Cargo.lock` 中 135 个本地 workspace package 的发布占位值 `0.0.0` 机械
+规范化为 `0.147.0`，相对官方 lock 没有其他产品侧改写。上游本身同时带来三个 workspace member
+以及 `Cargo.lock`、`MODULE.bazel.lock`、`pnpm-lock.yaml` 的依赖图更新。
 
-基线任务在隔离 scratch 副本中完成 `cargo build --workspace --locked`，并完整运行上游全量测试：
-14,065 项运行，13,981 通过 / 83 失败 / 1 超时 / 23 跳过，31 项首轮失败后重试通过。
-scratch 只为 `--locked` 构建规范化 135 个本地包版本，未回写纯净只读快照。该结果是**官方上游
-基线与工具链证据**，不是 RONDO P0 合入后的产品验收，也不声称全绿。
+隔离 scratch 上完成原始上游冷构建与全量测试：14,065 项运行，13,981 通过 / 83 失败 / 1 超时 /
+23 跳过，31 项首轮失败后重试通过。该结果只证明官方上游基线与当前工具链，不是 RONDO P0 验收。
 
-0.147 对 P0 的兼容影响已识别：官方 metadata override → provider hook 的链未变，但 configured
-provider 的 hook 改为按 auth 分流；API key 默认 `gpt-5.6-luna`，使既有 Responses Lite 线路成为
-API-key 默认路径；`FunctionCall` 新增 provider-private 的 `encrypted_function_args`。此外审批入口
-已集中为 permission hook → Guardian/user，approval/retry reason 会进入 Guardian prompt，且上游
-policy/template 有实质变化。对应的 P0 测试、证据规范化与 policy-version 分层仍需在升级任务中
-收口并重新运行门禁，因此本条不把它们记作 `v0.147.0` 已验收成果。
+### P0 兼容适配
+
+- S1 出站测试改用非默认的 `gpt-5.5/high`。0.147 的 OpenAI API-key Guardian 默认本来就是
+  Luna；继续用 Luna 断言 model 会让 override 失效时也可能误绿。正式测评仍显式钉
+  `gpt-5.6-luna/low`。
+- `E_final` 保留标准 Responses 与 Responses Lite 的真实 wire shape；后者把 policy 放在
+  `input` developer item，而不是顶层 `instructions`。
+- 规范化剥离新增的 `FunctionCall.encrypted_function_args` provider-private 运输字段，继续保留并
+  成对重映射 `call_id`，保证工具调用/结果关联。
+- P0 仍只覆盖 model/effort，不覆盖 provider；L2a 的前置关系不变。
+
+### 已完成验收
+
+- 格式、fix、schema 门禁通过；P0 精确回归 8/8、Guardian/auto-review 10/10、config/schema 6/6
+  通过；`codex-core` 冷编译通过。
+- 全量 nextest 完整执行：14,074 run，13,998 passed / 74 failed / 2 timed out / 23 skipped。
+  全量**不声称通过**；76 项终态未通过的完整清单、错误内容和与纯上游参照的差集见验收日志。
+- 76 项中没有 Guardian evidence / model-effort override 的终态回归。唯一 Guardian/MCP 慢测在
+  全量并发中两轮超时，恢复正式 `RUST_MIN_STACK` 后定向 1/1 通过（47.102 秒）。据此 P0 在
+  `v0.147.0` 上的核心功能性定向验收通过。
+- 未运行 Bazel 和 `just argument-comment-lint`；没有真实 API、Docker 或证据外发。
+
+004 独立方案提出的两个产品边界已补强：permission hook 提前 resolve 不产证据有直接集成测试；
+关闭 evidence 时捕获路径只做一次原子读取，不进入全局表、不分配、不序列化；写失败不影响审批也有
+直接回归。新增精确测试 3/3 通过，完整 workspace 执行 14,077 项，13,996 通过 / 81 失败 /
+23 跳过 / 27 flaky，失败中没有 P0 路径。字面 `just test -p codex-core` 经诊断会因 package-only
+缺少 workspace helper binaries 与项目内 `TMPDIR` 污染 fixture 产生 216 项基础设施失败，故不作为
+必须全绿的 hermetic 门禁；以 P0 精确边界加完整 workspace 结果替代。**P0 严格验收完成。**
+
+### 构建资源设施与实测
+
+- `with-build-lock.sh` 固化为 fail-closed 的单构建 + systemd cgroup + 磁盘/内存/swap/PSI 实时
+  看门狗。项目告警/主动停/绝对停为 180/195/200GB；内存为 `MemoryHigh=19G`、
+  `MemoryMax=21G`、`MemorySwapMax=5G`。
+- RONDO 完整运行的 target 历史峰值约 126.0GB；cgroup 总内存峰值约 20.4GB，其中匿名+内核
+  不可回收最高约 12.2GB，swap 最高约 0.39GB；未触发资源停机。
+- 一个网络迁移测试超时后留下 366 个 scope 内后代进程。已精确冻结/清理该 scope，并给看门狗增加
+  主命令退出后的 5 秒残留清理；合成后台进程场景验证通过。

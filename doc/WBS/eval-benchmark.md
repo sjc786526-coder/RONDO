@@ -27,9 +27,9 @@
 - 把**冻结 codex**（`codex-source-code/` 构建产物）与 **RONDO**（`mydev/`）都接入同一 agent 适配接口。
 - **基线二进制的构建方式**：`codex-source-code/` 是纯净只读快照，官方 0.147 `Cargo.lock` 的
   135 个 workspace package 仍写作 `0.0.0`。构建必须复制到隔离 scratch source，只在副本中把这
-  135 项机械规范化为 `0.147.0`，并指定项目外 `CARGO_TARGET_DIR`；不得改写只读快照或把 scratch
-  lock 冒充官方文件。基线二进制**构建一次后固化**，记录上游 tag/commit、规范化规则、二进制
-  SHA256 与工具链版本；后续跑批直接复用，不每轮重编。
+  135 项机械规范化为 `0.147.0`，并指定项目专用 scratch `CARGO_TARGET_DIR`；不得改写只读快照或
+  把 scratch lock 冒充官方文件。基线二进制**构建一次后固化**，记录上游 tag/commit、规范化规则、
+  二进制 SHA256 与工具链版本；后续跑批直接复用，不每轮重编。所有重型构建仍走项目看门狗。
 - 统一运行条件，写死在适配器里而不是靠人工记忆：
   - 关闭 websocket（provider `supports_websockets = false`）
   - `approvals_reviewer = "auto_review"`
@@ -38,7 +38,7 @@
   - Guardian 覆盖为 `gpt-5.6-luna` + `low`（依赖 S1）
   - 相同主模型 GPT-5.6-luna、相同超时与重试策略
 - `v0.147.0` 的 Guardian 默认模型会随 provider/auth 改变，所以测评配置和结果元数据必须记录
-  **显式** model/effort，不得以当前 API key 路径恰好默认 Luna 为由省略配置。
+  **显式** model/effort，不得以当前 API-key 路径恰好默认 Luna 为由省略配置。
 - 验收：同一任务两侧各跑一次，运行条件在结果元数据里可核对。
 
 ### B3 最小真实链路跑通（规模 S，授权门：小额真实 API）—— **M1**

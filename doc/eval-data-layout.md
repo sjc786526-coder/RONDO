@@ -75,7 +75,7 @@ eval-data/                             # git-ignored
   "binary_sha256": "…",
   "upstream_codex": {
     "tag": "rust-v0.147.0",
-    "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+    "commit": "be6e8eac34711945bc47d57635f4759f20f08df9",
     "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0"
   },
   "config": {
@@ -123,8 +123,8 @@ eval-data/                             # git-ignored
 4. 证据包**按原始会话记录对待**：可能含任务上下文里出现的任何敏感内容，目录权限 `0700`，不入库。
 5. 外发给云端模型（Luna / Sol 静态影子）属于数据外发，须单独授权。
 6. `v0.147.0` 下 `E_final` 可以是标准 Responses 或 Responses Lite：前者的 policy 位于
-   `instructions`，后者位于 `input` 的 developer message。规范化后两种形态都必须保留等价
-   的 policy / 任务上下文 / 工具调用结果，并剔除 `encrypted_function_args` 等 provider 私有运输字段。
+   `instructions`，后者位于 `input` 的 developer message。规范化后两种形态都必须保留等价的
+   policy / 任务上下文 / 工具调用结果，并剔除 `encrypted_function_args` 等 provider 私有运输字段。
 7. 0.147 会把有界的 approval/retry reason 放进 Guardian prompt；它是有意义输入，规范化时必须保留。
    每份证据还要记录 `guardian_policy_baseline`，不同 policy 版本先分层，不能静默混作同一训练或评测总体。
 

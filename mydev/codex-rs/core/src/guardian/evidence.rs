@@ -12,10 +12,12 @@
 //! `evidence: none`, rather than passing off a stale request as this round's
 //! evidence.
 //!
-//! Evidence bundles are raw session records, not redacted ones: `instructions` and
-//! `input` carry whatever task context the parent turn accumulated. Normalization
-//! only strips structural fields, so bundles belong in a private, git-ignored
-//! directory. This module never sends them anywhere.
+//! Evidence bundles are raw session records, not redacted ones: the standard
+//! Responses wire shape carries policy in `instructions`, while Responses Lite
+//! carries it in a developer message inside `input`. Both forms can contain whatever
+//! task context the parent turn accumulated. Normalization only strips structural
+//! and provider-private transport fields, so bundles belong in a private,
+//! git-ignored directory. This module never sends them anywhere.
 
 use std::collections::HashMap;
 use std::fs;
@@ -65,6 +67,14 @@ const META_FILE_NAME: &str = "meta.json";
 /// semaphore), so concurrent rounds always land on distinct keys.
 static CAPTURING_SESSIONS: LazyLock<RwLock<HashMap<String, Arc<GuardianEvidenceRound>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Cheap disabled-path gate for the request builder.
+///
+/// The overwhelming majority of requests run with evidence capture disabled. An
+/// atomic load keeps those requests from acquiring the registry lock or allocating
+/// or serializing anything. The registry remains the source of truth once at least
+/// one review round is active.
+static ACTIVE_CAPTURING_SESSIONS: AtomicBool = AtomicBool::new(false);
 
 /// Whether a captured request was available when the round finished.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -126,10 +136,12 @@ impl GuardianEvidenceRound {
     /// The returned guard deregisters on drop, so early returns, timeouts, and
     /// panics all stop capture for that session.
     pub(crate) fn bind(self: &Arc<Self>, thread_id: String) -> GuardianEvidenceBinding {
-        CAPTURING_SESSIONS
+        let replaced = CAPTURING_SESSIONS
             .write()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(thread_id.clone(), Arc::clone(self));
+        debug_assert!(replaced.is_none(), "guardian session already bound");
+        ACTIVE_CAPTURING_SESSIONS.store(true, Ordering::Release);
         GuardianEvidenceBinding { thread_id }
     }
 
@@ -197,10 +209,11 @@ pub(crate) struct GuardianEvidenceBinding {
 
 impl Drop for GuardianEvidenceBinding {
     fn drop(&mut self) {
-        CAPTURING_SESSIONS
+        let mut sessions = CAPTURING_SESSIONS
             .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&self.thread_id);
+            .unwrap_or_else(PoisonError::into_inner);
+        sessions.remove(&self.thread_id);
+        ACTIVE_CAPTURING_SESSIONS.store(!sessions.is_empty(), Ordering::Release);
     }
 }
 
@@ -216,12 +229,12 @@ pub(crate) fn capture_final_request(
     responses_metadata: &CodexResponsesMetadata,
     request: &ResponsesApiRequest,
 ) {
+    if !ACTIVE_CAPTURING_SESSIONS.load(Ordering::Acquire) {
+        return;
+    }
     let sessions = CAPTURING_SESSIONS
         .read()
         .unwrap_or_else(PoisonError::into_inner);
-    if sessions.is_empty() {
-        return;
-    }
     if !matches!(
         responses_metadata.request_kind,
         Some(CodexResponsesRequestKind::Turn)
@@ -254,6 +267,10 @@ fn normalize_request(request: &ResponsesApiRequest) -> serde_json::Result<Value>
             for item in input {
                 if let Some(item) = item.as_object_mut() {
                     item.remove("id");
+                    // OpenAI may attach this private collaboration transport marker
+                    // to function calls. It is provider-specific and must not make
+                    // otherwise equivalent E_final payloads compare differently.
+                    item.remove("encrypted_function_args");
                 }
             }
         }

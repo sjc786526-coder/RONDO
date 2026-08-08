@@ -7,7 +7,7 @@
 对应 WBS：`doc/WBS.md` §5（P0 / S1 / S2）。完成后解锁方向 0 的 P1 与方向 2 的 L1~L2。
 
 适用基线：Codex CLI `v0.147.0`，只读上游 `rust-v0.147.0` /
-`be6e8eac029b183056b7e4402879f15d2c85f61b`。官方 `Cargo.lock` 中 135 个 workspace package
+`be6e8eac34711945bc47d57635f4759f20f08df9`。官方 `Cargo.lock` 中 135 个 workspace package
 仍写作 `0.0.0`；RONDO 产品树为 `--locked` 构建做的 `0.147.0` 规范化不属于上游事实。
 
 ## 1. 目标
@@ -69,7 +69,8 @@ OpenAI provider 的 `gpt-5.6-luna + low`，但**不足以切到本地模型**；
 
 **通用**
 
-- `just test -p codex-core` 通过；新增集成测试放进 `core/tests/suite/` 的既有相关文件，不新建散落测试文件。
+- P0 的 `codex-core` 精确过滤集全部通过；新增集成测试放进 `core/tests/suite/` 的既有相关文件，
+  不新建散落测试文件。package-only 无过滤整包运行只作诊断，完整兼容门禁用 workspace `just test`。
 - 两个开关都不开启时，guardian 既有测试全绿，行为与上游一致（不退化项）。
 - 运行 `just fmt` 与 `just fix -p codex-core`，并确认结果干净。
 - 合并前跑一次全量 `just test`（见 §3 约束 11 的口径），结果如实记录。
@@ -132,7 +133,8 @@ OpenAI provider 的 `gpt-5.6-luna + low`，但**不足以切到本地模型**；
 9. 单个新 Rust 模块 <500 LoC；新测试模块用 `#[path = "..._tests.rs"]` 侧挂，不写内联大测试块。
 10. **Bazel 相关门禁本次不运行也不声称通过**（本机未安装，见 `doc/development-environment.md` §8）。
 11. **测试门禁口径**（解决上游 `mydev/AGENTS.md:68` 与根 `AGENTS.md` §6 的冲突，不留给执行期临场判断）：
-    - 开发过程中只跑 `just test -p codex-core`。
+    - 开发过程中只跑 `just test -p codex-core <P0 filter>` 等精确过滤集；不把缺少 workspace helper
+      binaries 的 package-only 无过滤运行当作 hermetic 全绿门禁。
     - 本任务改动 `core` 与 `config`，属于上游要求跑全量的范围，因此**合并前跑一次全量 `just test`**，作为 P0 的一次性阶段门禁。
     - 全量运行前先告知用户（上游 AGENTS.md 亦要求 ask before full suite），不在开发循环中反复跑全量。
     - 未运行或跳过的项如实标注，不表述为通过。
@@ -147,7 +149,8 @@ OpenAI provider 的 `gpt-5.6-luna + low`，但**不足以切到本地模型**；
   自定义行号误写成纯上游行号。
 - **优先级链分层描述**：RONDO `[auto_review].model` > 官方
   `ModelInfo.auto_review_model_override` > 官方 `provider.approval_review_preferred_model()`。
-  effort 配置了就覆盖，未配置时完整保留官方 `preferred_reasoning_effort(...)` 计算结果。
+  effort 配置了就覆盖；官方原本没有 auto-review effort override，未配置时须完整保留
+  `preferred_reasoning_effort(...)` 的计算结果。
 - **S2 挂钩点**：`core/src/client.rs::build_responses_request` 的 `ResponsesApiRequest` 组装完成处。
   判定所需数据全部来自已有 `responses_metadata`（`request_kind`、`thread_id`），不新增下传参数；
   必须在标准 Responses / Responses Lite 分支汇合后捕获真实 wire shape。
@@ -197,11 +200,11 @@ S1 与 S2 的主体实现已在 `v0.146.1` 基线上落地，随后随产品源�
 - S1：`AutoReviewToml` 加 `model` / `reasoning_effort`（并顺带 `evidence_dir`），`Config` 加
   `guardian_model_config` / `guardian_reasoning_effort_config` / `guardian_evidence_dir`，
   `review.rs` 的 model 优先级链与 effort 覆盖已按契约实现。provider 解析未动。
-- S2：新增 `core/src/guardian/evidence.rs`（322 行）；`client.rs` 挂 1 行钩子；
+- S2：新增 `core/src/guardian/evidence.rs`（340 行）；`client.rs` 挂 1 行钩子；
   `GuardianReviewSessionParams` 加 `evidence_round`，`run_review_on_session` 绑定 / 解绑；
   固化收口在 `track_guardian_review`（见决策 013）。
 - `.gitignore` 追加 `/eval-data/`；`just write-config-schema` 已运行，schema 差异只含三个新字段。
-- 非测试、非生成物改动 426 行（104 行修改 + 322 行新模块），未超 500 行闸；未新增第三方依赖。
+- 非测试、非生成物改动约 444 行，未超 500 行闸；未新增第三方依赖。
 
 `v0.147.0` 只读审计确认主体挂钩仍位于正确的 request builder 汇合点、provider 继承边界未变，
 同时发现两项必须随升级适配的细节：S1 的 API-key 默认模型已变为 Luna，原先用 Luna 证明 model
@@ -210,24 +213,29 @@ wire shape。升级工作树正在处理这些项，但本计划不把未提交�
 
 ### 当前验收状态
 
-- `v0.146.1` 历史证据：格式/修复门禁干净，P0 定向测试通过；`just test -p codex-core`
-  为 3,100 passed / 17 environmental failures。随后受控全量测试结果见
-  `doc/WBS-COMPLETED.md`，不得用作 `v0.147.0` 通过证据。
-- 上游 `v0.147.0` 的隔离 scratch build/full-test 只证明官方基线与工具链，见
-  `doc/development-environment.md`；它没有包含 RONDO P0，不能作为本计划验收。
-- 本次文档适配按要求未构建、未编译、未运行测试。RONDO `v0.147.0` 的 S1/S2 定向测试、
-  `codex-core` 与全量门禁均**尚无本轮结果，不声称通过**。
-- Bazel 门禁与 `just argument-comment-lint` 仍未运行（本机未装 Bazel）。
+- 产品源码已整体升级到 `v0.147.0`，S1/S2 完成 Responses Lite、新 FunctionCall 字段和非默认
+  override 断言适配。
+- `cargo fmt --all -- --check`、`just fmt-check`、`just fix -p codex-core` 和 schema 生成门禁通过。
+- P0 精确回归 8/8、Guardian/auto-review 相关集 10/10、config/schema 相关集 6/6 通过；
+  `codex-core` 冷编译通过。
+- 004 指出的产品边界已关闭：permission hook 提前 resolve 不产证据；关闭 evidence 时一次原子读取
+  后返回，不进入全局捕获表；证据写失败不影响审批。新增精确测试 3/3 通过。
+- 最新完整 workspace：14,077 run，13,996 passed / 81 failed / 0 timed out / 23 skipped，27 项首轮
+  失败后重试通过。81 项中没有 Guardian evidence / override 回归；完整归因和清单见
+  `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。
+- `just test -p codex-core` 无过滤诊断产生 216 项失败，根因是 package-only 缺少 workspace helper
+  binaries 与项目内 `TMPDIR` 注入根 `AGENTS.md`，不具备 hermetic 全绿含义；没有修改产品或快照凑绿。
+- **P0 严格验收通过。**
+- Bazel 门禁与 `just argument-comment-lint` 未运行（本机未装 Bazel）。
 
 ### 后续计划
 
-先在基线升级任务中完成两项 0.147 兼容适配并运行计划要求的相关门禁；结果进入
-`doc/WBS-COMPLETED.md` 后，P1/L1/L2 才以 `v0.147.0` 证据继续推进。`E_final` 首次用于跨侧对比前，
-还需人工抽查标准 Responses 与 Responses Lite 样本的正文边界。
+按 `doc/WBS.md` 进入 P1/L1/L2。`E_final` 首次用于跨侧对比前，仍需人工抽查标准 Responses 与
+Responses Lite 样本的正文边界。
 
 ### 阻塞项
 
-实现无结构性阻塞；当前只缺升级工作树收口和 `v0.147.0` 验收结果。
+无 P0 实现或验收阻塞。Bazel 门禁因本机未安装而未运行。
 
 ## 6. 关键决策记录
 
@@ -251,4 +259,6 @@ wire shape。升级工作树正在处理这些项，但本计划不把未提交�
 | 016 | S1 集成测试用 `gpt-5.5/high` 证明显式覆盖 | effort 的 `high` 区别于既有默认计算；`v0.147.0` API-key 默认已是 Luna，所以 model 也必须选非默认值，否则覆盖失效仍可能误通过 | 验收口径 | 已采纳（0.147 调整） |
 | 017 | 默认模型写成 RONDO 自定义层 > 官方 metadata override > provider/auth 派生默认 | 官方 0.147 configured provider + API key 默认 Luna，ChatGPT/无 key 默认 auto-review，Bedrock 另有默认；不能继续写死 `codex-auto-review` | `review.rs`、文档 | 已采纳（0.147 调整） |
 | 018 | `E_final` 保留真实 standard/Lite wire shape，消费端再提取统一逻辑 payload | Luna 使用 Responses Lite，policy 与工具位于 `input` developer items；强行只读顶层字段会漏语义 | evidence、eval | 已采纳（0.147 调整） |
-| 019 | 规范化剥离 `encrypted_function_args` | 该字段是 0.147 新增的 provider-private 运输数据，会破坏跨 provider 与离线重放稳定性，不属于 Guardian 逻辑证据 | `evidence.rs` | 待升级任务验收 |
+| 019 | 规范化剥离 `encrypted_function_args` | 该字段是 0.147 新增的 provider-private 运输数据，会破坏跨 provider 与离线重放稳定性，不属于 Guardian 逻辑证据 | `evidence.rs` | 已采纳（0.147 调整） |
+| 020 | 独立方案审查后的严格验收以测试事实为准，不用已有定向通过替代 hook 边界与关闭态开销 | 004 方案补足了原执行计划未明确验证的产品边界；两项均已补回归 | P0 验收 | 已采纳并完成 |
+| 021 | 不把无过滤 `just test -p codex-core` 的 package-only 结果当作 hermetic 全绿门禁 | 实测缺少 workspace helper binaries，且受监控项目内 `TMPDIR` 会改变 fixture 的 AGENTS/project 语义；强行凑绿会弱化真实测试。改用 P0 精确过滤集 + 完整 workspace | P0 验收 | 已采纳并完成 |

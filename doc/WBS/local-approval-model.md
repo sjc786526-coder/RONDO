@@ -102,8 +102,8 @@ provider 字段中的 `request_max_retries` / `stream_max_retries` 改为 1，pr
 | `holdout` | 只用于 L3/L4 评测 | 任何形式进入合成上下文、提示词或人工参考 |
 
 - 切分键必须是**跨运行稳定的语义身份**，不能用 `review_id`——
-  `new_guardian_review_id`（`core/src/guardian/review.rs`）每轮生成新的 UUID v4，同一任务同一动作重跑会换 id，
-  可能第一次落 holdout、第二次落 seed，互斥就只对文件实例成立、对语义样本不成立。
+  `new_guardian_review_id`（`core/src/guardian/review.rs`）每轮生成新的 UUID v4，同一任务同一动作重跑
+  会换 id，可能第一次落 holdout、第二次落 seed，互斥就只对文件实例成立、对语义样本不成立。
   改用 `sha256(task_id + 规范化待审批动作指纹)` 落桶；无 task_id 的场景退化为动作指纹本身。
 - 切分不按人工挑选，避免选择偏差；切分结果写入清单并冻结，后续增量按同一规则划分，不重划历史。
 - **近重复检查**：合成产出的训练样本对 `holdout` 做一次近重复检测（n-gram Jaccard 或 MinHash 即可，不上重型工具），命中阈值的样本剔除并记录数量。
