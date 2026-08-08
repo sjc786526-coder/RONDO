@@ -13,10 +13,12 @@
   `sandbox_mode = "workspace-write"`。Guardian 另显式覆盖为 `gpt-5.6-luna` + `low`，继续使用
   Codex 原生 Guardian 框架与只读取证能力。0.147 的 CLI shorthand 一次展开这三项；测评元数据
   仍逐项记录，不能只写一个模糊的“approve for me”。
-- **为什么必须显式指定模型**：`v0.147.0` 的默认值已不是单一的 `codex-auto-review`：OpenAI
-  API-key 路径默认 `gpt-5.6-luna`，ChatGPT 路径默认 `codex-auto-review`，其他 provider 还有各自
-  分支。测评必须显式写死模型与 effort，以免认证方式或 provider 变化暗中改变实验变量。
-  `sol + low` 作为高正确率上限对照，`luna + low` 作为经济基线；两者都复用既有 API provider。
+- **为什么必须显式指定模型**：`v0.147.0` 的默认值已不是单一的
+  `codex-auto-review`：OpenAI API key 路径默认 `gpt-5.6-luna`，ChatGPT 路径默认
+  `codex-auto-review`，Bedrock 则返回 provider 自身模型 id；候选不在 catalog 且无 metadata
+  override 时仍会回退主模型。测评必须显式写死模型与
+  effort，以免认证方式或 provider 变化暗中改变实验变量。`sol + low` 作为高正确率
+  上限对照，`luna + low` 作为经济基线；两者都复用既有 API provider。
 - **`Luna-Guardian-live` 是真实可部署系统的结果**；`Luna-static` / `Sol-static` / `Local-static`
   三个同证据组才是严格的模型横向比较。后者统一**不给模型任何工具与自主调查能力**：static
   consumer 必须移除顶层 `tools`，也必须移除 Lite `input` 中的 `additional_tools` developer item，
@@ -46,6 +48,8 @@
   **规范化逻辑 payload**（policy/instructions + 任务 input + 输出 schema），再断言三个 static 组
   逐字节一致；同时断言出站请求既无顶层 `tools`，也无 Lite `additional_tools`。provider URL、
   headers、认证方式天然不同，不在比较范围内。
+- 原始 `E_final` 保留 `internal_chat_message_metadata_passthrough.executed_tool_calls` 以忠实记录 wire；
+  该字段按上游契约仅供 warehouse，构造 static 逻辑 payload 时必须排除，不能作为影子模型输入。
 
 ### L2 本地推理服务接入（规模 M）
 
@@ -61,9 +65,9 @@
 
 L2 只是把本地服务跑起来，**并不等于 Guardian 会把请求发到它那里**。
 `build_guardian_review_session_config`（`core/src/guardian/review_session.rs`）克隆父会话配置，只把
-`model_provider.request_max_retries` / `stream_max_retries` 改为 1，provider id 与 base_url 原样继承。
-`v0.147.0` 新增的 provider/auth 默认模型分流也没有改变这个事实。因此 P0-S1 只改本地模型名时，
-该名称仍会被发往父会话的 provider 端点。
+provider 字段中的 `request_max_retries` / `stream_max_retries` 改为 1，provider id 与 base_url 原样继承。
+`v0.147.0` 新增的 provider/auth 默认模型分流也没有改变这个事实。因此 P0-S1 只改本地
+模型名时，该名称仍会被发往父会话的 provider 端点。
 
 - 目标：让 Guardian 审批会话可以使用与主 Agent **不同的** provider。
 - 落点：在 `[auto_review]` 增加 provider 覆盖项，并在 `build_guardian_review_session_config` 中一并改写 `model_provider_id` / `model_provider`。

@@ -3,7 +3,7 @@
 本文件按时间顺序追加记录已完成的开发阶段、成果与验收证据，作为历史参考。
 当前阶段见 `doc/WBS.md`，单次任务的技术方案见 `plan/`，执行细节见 `agent_log/`。
 
-## P0 共享地基（2026-08-07）
+## P0 共享地基（Codex `v0.146.1`，2026-08-07）
 
 方案：`plan/001-p0-guardian-override-and-evidence.md`；日志：`agent_log/2026-08-07-233100-p0-guardian-override-and-evidence.md`。
 
@@ -31,7 +31,7 @@
 `<evidence_dir>/<review_id>/E_final.json` + `meta.json`（目录 `0700`、文件 `0600`，先写 `.tmp` 再 rename）。
 
 - 挂钩点：`core/src/client.rs` 的 `ResponsesApiRequest` 组装完成处，1 行。
-- 捕获资格：`request_kind == Some(Turn)` **且** 该会话登记着已开启的审批轮槽（白名单，
+- 捕获资格：`matches!(request_kind, Some(Turn))` **且**该会话登记着已开启的审批轮槽（白名单，
   预热 / 压缩 / memory 一并排除）。
 - 关联：槽以 guardian 会话 `thread_id` 登记，RAII guard 管生命周期，覆盖所有提前返回与超时路径；
   retry 取最后一次请求。
@@ -60,7 +60,7 @@ websocket 预热不产包。
 
 方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 小额真实 API 授权）、方向 2 的 L1 / L2。
 
-## 构建资源闸门与全量测试补跑（2026-08-08）
+## 构建资源闸门与全量测试补跑（Codex `v0.146.1`，2026-08-08）
 
 ### 资源闸门
 
@@ -100,15 +100,20 @@ worktree 的 rustc 共用 6 个机器级槽，并在可用内存过低时暂停�
   按本次任务范围不做修复。
 - **仍未运行**：Bazel 门禁与 `just argument-comment-lint`（本机未装 Bazel）。
 
-## Codex 0.147.0 基线升级与 P0 重新验收（2026-08-08）
+## Codex 0.147.0 基线导入与 P0 兼容适配（2026-08-08）
 
 日志：`agent_log/2026-08-08-212134-codex-0.147.0-upstream-baseline.md`、
-`agent_log/2026-08-08-221708-codex-0.147.0-p0-acceptance.md`。
+`agent_log/2026-08-08-221708-codex-0.147.0-p0-acceptance.md`、
+`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。
 
-在 P1/L1 尚未产出真实测评数据前，把产品源码整体升级到官方 `rust-v0.147.0`
-（commit `be6e8eac34711945bc47d57635f4759f20f08df9`），保留原 P0 历史和主体实现，不以
-cherry-pick Guardian 的方式制造混合基线。官方 lock 中 135 个 workspace package 的发布占位值
-`0.0.0` 按既有规则规范化为 `0.147.0`，第三方依赖未额外升级。
+只读标准快照 `codex-source-code/` 固定在官方 `rust-v0.147.0`（commit
+`be6e8eac34711945bc47d57635f4759f20f08df9`），detached HEAD、工作区干净。产品树基线导入提交为
+`1001929`；只把官方 `Cargo.lock` 中 135 个本地 workspace package 的发布占位值 `0.0.0` 机械
+规范化为 `0.147.0`，相对官方 lock 没有其他产品侧改写。上游本身同时带来三个 workspace member
+以及 `Cargo.lock`、`MODULE.bazel.lock`、`pnpm-lock.yaml` 的依赖图更新。
+
+隔离 scratch 上完成原始上游冷构建与全量测试：14,065 项运行，13,981 通过 / 83 失败 / 1 超时 /
+23 跳过，31 项首轮失败后重试通过。该结果只证明官方上游基线与当前工具链，不是 RONDO P0 验收。
 
 ### P0 兼容适配
 
@@ -121,7 +126,7 @@ cherry-pick Guardian 的方式制造混合基线。官方 lock 中 135 个 works
   成对重映射 `call_id`，保证工具调用/结果关联。
 - P0 仍只覆盖 model/effort，不覆盖 provider；L2a 的前置关系不变。
 
-### 重新验收
+### 已完成验收
 
 - 格式、fix、schema 门禁通过；P0 精确回归 8/8、Guardian/auto-review 10/10、config/schema 6/6
   通过；`codex-core` 冷编译通过。
@@ -129,15 +134,22 @@ cherry-pick Guardian 的方式制造混合基线。官方 lock 中 135 个 works
   全量**不声称通过**；76 项终态未通过的完整清单、错误内容和与纯上游参照的差集见验收日志。
 - 76 项中没有 Guardian evidence / model-effort override 的终态回归。唯一 Guardian/MCP 慢测在
   全量并发中两轮超时，恢复正式 `RUST_MIN_STACK` 后定向 1/1 通过（47.102 秒）。据此 P0 在
-  `v0.147.0` 上重新验收通过。
+  `v0.147.0` 上的核心功能性定向验收通过。
 - 未运行 Bazel 和 `just argument-comment-lint`；没有真实 API、Docker 或证据外发。
+
+004 独立方案提出的两个产品边界已补强：permission hook 提前 resolve 不产证据有直接集成测试；
+关闭 evidence 时捕获路径只做一次原子读取，不进入全局表、不分配、不序列化；写失败不影响审批也有
+直接回归。新增精确测试 3/3 通过，完整 workspace 执行 14,077 项，13,996 通过 / 81 失败 /
+23 跳过 / 27 flaky，失败中没有 P0 路径。字面 `just test -p codex-core` 经诊断会因 package-only
+缺少 workspace helper binaries 与项目内 `TMPDIR` 污染 fixture 产生 216 项基础设施失败，故不作为
+必须全绿的 hermetic 门禁；以 P0 精确边界加完整 workspace 结果替代。**P0 严格验收完成。**
 
 ### 构建资源设施与实测
 
 - `with-build-lock.sh` 固化为 fail-closed 的单构建 + systemd cgroup + 磁盘/内存/swap/PSI 实时
   看门狗。项目告警/主动停/绝对停为 180/195/200GB；内存为 `MemoryHigh=19G`、
   `MemoryMax=21G`、`MemorySwapMax=5G`。
-- RONDO 冷构建与全量测试的 target 峰值约 126.0GB；cgroup 总内存峰值约 20.4GB，其中匿名+内核
-  不可回收峰值约 11.2GB，swap 峰值约 0.38GB；未触发资源停机。
+- RONDO 完整运行的 target 历史峰值约 126.0GB；cgroup 总内存峰值约 20.4GB，其中匿名+内核
+  不可回收最高约 12.2GB，swap 最高约 0.39GB；未触发资源停机。
 - 一个网络迁移测试超时后留下 366 个 scope 内后代进程。已精确冻结/清理该 scope，并给看门狗增加
   主命令退出后的 5 秒残留清理；合成后台进程场景验证通过。

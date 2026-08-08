@@ -240,6 +240,13 @@ done
 read_counter() {
   local path="$1"
   local value=0
+  # A short command can finish and let systemd remove its transient scope
+  # between `is-active` and this sample. Treat that normal teardown race as an
+  # empty final sample instead of leaking shell redirection errors.
+  if [[ ! -r "$path" ]]; then
+    printf '0'
+    return
+  fi
   read -r value <"$path" 2>/dev/null || value=0
   [[ "$value" =~ ^[0-9]+$ ]] || value=0
   printf '%s' "$value"

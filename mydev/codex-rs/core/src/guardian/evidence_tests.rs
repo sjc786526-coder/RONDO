@@ -17,6 +17,7 @@ use serde_json::Value;
 use serde_json::json;
 use tempfile::TempDir;
 
+use super::ACTIVE_CAPTURING_SESSIONS;
 use super::GuardianEvidenceRound;
 use super::GuardianReviewAnalyticsResult;
 use super::STRIPPED_REQUEST_FIELDS;
@@ -332,4 +333,48 @@ fn only_turn_requests_from_a_bound_session_are_captured() {
         read_bundle(&bundle_dir, "meta.json")["evidence"],
         json!("none")
     );
+}
+
+#[test]
+fn capture_registry_fast_path_tracks_binding_lifetime() {
+    assert!(
+        !ACTIVE_CAPTURING_SESSIONS.load(std::sync::atomic::Ordering::Acquire),
+        "an unconfigured request must skip the registry lock"
+    );
+
+    capture_final_request(
+        &turn_request_metadata("unconfigured-thread"),
+        &request_with_instructions("must remain inert"),
+    );
+    assert!(!ACTIVE_CAPTURING_SESSIONS.load(std::sync::atomic::Ordering::Acquire));
+
+    let evidence_dir = TempDir::new().expect("temp dir");
+    let round = GuardianEvidenceRound::new(evidence_dir.path().join("review-fast"), "review-fast");
+    let binding = round.bind("fast-path-thread".to_string());
+    assert!(ACTIVE_CAPTURING_SESSIONS.load(std::sync::atomic::Ordering::Acquire));
+    drop(binding);
+    assert!(!ACTIVE_CAPTURING_SESSIONS.load(std::sync::atomic::Ordering::Acquire));
+}
+
+#[test]
+fn evidence_write_failure_is_swallowed() {
+    let evidence_dir = TempDir::new().expect("temp dir");
+    let blocker = evidence_dir.path().join("not-a-directory");
+    fs::write(&blocker, "block directory creation").expect("write blocker");
+    let round =
+        GuardianEvidenceRound::new(blocker.join("review-write-failure"), "review-write-failure");
+    let binding = round.bind("write-failure-thread".to_string());
+    capture_final_request(
+        &turn_request_metadata("write-failure-thread"),
+        &request_with_instructions("approval outcome must survive evidence failure"),
+    );
+    drop(binding);
+
+    // `finalize` deliberately returns no Result: a filesystem failure is logged
+    // and cannot replace or otherwise affect the already-computed review outcome.
+    round.finalize(
+        &GuardianReviewAnalyticsResult::without_session(),
+        /*duration_ms*/ 7,
+    );
+    assert!(blocker.is_file());
 }

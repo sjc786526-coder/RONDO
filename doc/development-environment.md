@@ -165,10 +165,16 @@ APT 已安装并复核以下开发包：
 沿用既有冻结规则，把这些条目机械规范化为 `0.147.0`。规范化后的 lock SHA-256 是
 `bc4fe450de929afe82928734f860ca83e5f9dc5f9f1211b0974ea47b57af77ca`。
 
+只读快照 `codex-source-code/` 保持官方原样、detached HEAD 且工作区干净；产品树相对官方 lock
+没有上述 135 项以外的改写。上游本身新增 `app-server-protocol-noop-macros`、
+`code-mode-runtime`、`utils/audio` 三个 workspace member，并更新了 Cargo、Bazel 与 pnpm 的
+第三方依赖图，因此旧基线“第三方依赖未变”的结论不再适用。
+
 纯上游 scratch 与适配后的 RONDO 都完成了冷编译和全量 nextest 枚举/执行。`rusty_v8` 使用仓库
 `.github/actions/setup-rusty-v8/action.yml` 指定的 OpenAI release archive 与 binding，并通过官方
 SHA-256 清单；默认 denoland 资产地址在本轮返回 404，不能作为可复现入口。详细构建与失败证据见
-`agent_log/2026-08-08-212134-codex-0.147.0-upstream-baseline.md` 和本次 P0 升级验收日志。
+`agent_log/2026-08-08-212134-codex-0.147.0-upstream-baseline.md`、P0 升级验收日志与
+`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。
 
 ### 3.5 构建与测试并发上限（OOM 防护）
 
@@ -202,15 +208,16 @@ jobs、test-threads 与 rustc 槽是容量防护；全局锁是跨入口串行�
 | ---- | ----: | ----: |
 | 项目峰值 | 127,422,697,472 B | 127,400,132,608 B |
 | target 峰值 | 126,174,883,840 B | 126,006,960,128 B |
-| cgroup 总内存峰值 | 17,637,695,488 B | 20,406,046,720 B |
-| 匿名+内核不可回收峰值 | 8,620,105,728 B | 11,188,396,032 B |
-| swap 峰值 | 22,200,320 B | 379,203,584 B |
-| 宿主最低 `MemAvailable` | 15,033,628 KiB | 12,453,208 KiB |
-| cgroup / 宿主 full PSI avg10 峰值 | 0.56% / 0.80% | 4.08% / 3.72% |
+| cgroup 总内存峰值 | 17,637,695,488 B | 20,406,243,328 B |
+| 匿名+内核不可回收峰值 | 8,620,105,728 B | 12,224,589,824 B |
+| swap 峰值 | 22,200,320 B | 391,446,528 B |
+| 宿主最低 `MemAvailable` | 15,033,628 KiB | 11,036,488 KiB |
+| cgroup / 宿主 full PSI avg10 峰值 | 0.56% / 0.80% | 15.27% / 16.87% |
 
-总内存包含大量可回收的 target 文件页缓存；判断危险不能只看 `memory.current`。本轮真正不可回收峰值
-约 11.2 GB，swap 只短时使用约 0.38 GB，宿主仍保有约 11.9 GiB 可用内存，所以 21G 硬上限与 5G
-swap 上限对 26GB RAM / 10GB swap 的 WSL 配置是宽松但有边界的取值。
+总内存包含大量可回收的 target 文件页缓存；判断危险不能只看 `memory.current`。多轮中真正不可回收
+最高约 12.2 GB，swap 最高约 0.39 GB，宿主最低仍保有约 10.5 GiB 可用内存。PSI 曾瞬时越过 15%，
+但没有持续 20 秒，未触发停止；这验证了持续窗口能容忍短波动。21G 硬上限与 5G swap 上限对
+26GB RAM / 10GB swap 的 WSL 配置是宽松但有边界的取值。
 
 #### 200 GB 项目存储看门狗
 
@@ -248,6 +255,8 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 - 直接 Cargo、Windows just 分支和 Bazel 不自动进入该 scope；这是明确未覆盖面。本机尚未安装 Bazel。
 - 指标默认写入当前 worktree 的 `.codex/build-watchdog/`，原始全量日志和指标 git-ignored；结论摘要写
   `agent_log/`。
+- 完整 workspace 的 managed OAuth 测试会调用系统默认浏览器打开本机临时 `127.0.0.1` 授权页；它不
+  访问真实外部 OAuth 服务，但属于桌面副作用。需要完全无交互运行时，应先给 browser opener 注入 stub。
 
 ```bash
 RONDO_BUILD_MEMORY_MAX=20G just test       # 单次收紧硬上限
@@ -265,9 +274,9 @@ RONDO_BUILD_WATCHDOG=0 just test           # 显式关闭全部监控；普通�
 | Corepack | `0.34.6`                                                  |
 | pnpm     | 精确固定为 `10.33.0`                                      |
 | 固定来源 | `mydev/package.json` 的 `packageManager` 字段及完整性摘要 |
-| 依赖目录 | `mydev/node_modules`，约 145 MB                           |
+| 依赖目录 | `mydev/node_modules`，约 145 MB（旧基线安装）              |
 
-已执行：
+`v0.146.1` 环境准备时已执行：
 
 ```bash
 corepack prepare pnpm@10.33.0 --activate
@@ -276,7 +285,10 @@ cd /home/sjc/desktop/RONDO/mydev
 pnpm install --frozen-lockfile
 ```
 
-冻结安装覆盖 4 个 pnpm workspace 项目，共安装 529 个包。TypeScript SDK 的 `prepare` 阶段成功完成 ESM、source map 和类型声明构建。`pnpm-lock.yaml` 未被修改。pnpm 显示的新主版本提示不应直接采纳；应继续遵循仓库的 `packageManager` 固定版本。
+上述冻结安装与 529 包是 `v0.146.1` 环境准备时的历史结果。`v0.147.0` 上游导入已经更新
+`pnpm-lock.yaml`；本次文档适配没有重新执行 `pnpm install`，因此不把旧 node_modules 或旧包数
+表述为新基线验收。pnpm 显示的新主版本提示不应直接采纳；仍应遵循仓库的 `packageManager`
+固定版本，后续需要 Node 工作区时再用新锁文件做冻结安装并记录实际结果。
 
 Corepack shim 和 `git-stats` 都位于当前 NVM Node `v24.14.1` 的目录。以后切换或重装 Node 版本时，需要重新运行 `corepack enable pnpm`，并检查 `git-stats --version` 是否仍可用。
 
@@ -324,20 +336,20 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 
 ## 8. 当前未安装或未执行的重型工具
 
-以下项目不在本次批准的阶段二至四范围内，当前没有安装或没有执行：
+以下重型设施当前仍未安装或未执行：
 
 - Bazel / Bazelisk 9 及其构建缓存
 - Docker devcontainer 环境
 - `cargo-dylint`、`dylint-link`、`cargo-shear`
 - 额外的跨平台 Rust targets
-- 工作区完整 `just test`、Bazel 测试或完整 Docker 测试
+- Bazel 测试或完整 Docker 测试
 
-关于最后一项：完整 `just test` 已于 2026-08-08 在 §3.5 的闸门下跑完，**无 OOM**：
-13135 项运行，13062 通过 / 73 失败 / 23 跳过 / 25 flaky，执行阶段 346.7 s，全程已用内存约 3.8 GB、
-scope 内峰值约 5 GB、swap 未增长。73 项失败已定性为宿主环境与上游基线原因（版本号占位 25 项、
-Clash fake-IP DNS 11 项、其余 37 项），与并发配置和 RONDO 改动均无关，详见
-`agent_log/2026-08-08-031500-full-test-backfill.md`。**不声称全绿。**
-Bazel 门禁与 `just argument-comment-lint` 仍未运行。
+`v0.146.1` 产品树曾于 2026-08-08 完整跑过 `just test`：13,135 项运行，13,062 通过 /
+73 失败 / 23 跳过 / 25 flaky，且无 OOM；这是旧基线历史证据，详见
+`agent_log/2026-08-08-031500-full-test-backfill.md`。`v0.147.0` 的纯上游与 RONDO 产品树也均完成完整
+workspace 运行；最新 RONDO 结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky，P0
+严格边界全部通过。完整归因见 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。Bazel 门禁与
+`just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。
 
@@ -360,7 +372,8 @@ cargo nextest --version
 cargo insta --version
 
 cd /home/sjc/desktop/RONDO/mydev/codex-rs
-cargo check --locked -p codex-cli
+just --list
+# 重型构建/测试只使用 §3.5 受监督的 just 入口；不要把本健康检查当成构建门禁
 
 cd /home/sjc/desktop/RONDO/mydev
 pnpm --version
