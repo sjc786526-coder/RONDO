@@ -11,8 +11,8 @@
 #      下的所有构建，不会因为换了 worktree 就失效；
 #   2. 不改动上游 codex 自带的配置，避免基线升级时产生冲突。
 #
-# 优先级：命令行 `-j N` > 环境变量 CARGO_BUILD_JOBS > 本文件。临时需要更高并发
-# 时用前两者显式放开，不要直接改这里。
+# 优先级：命令行 `-j N` > 环境变量 CARGO_BUILD_JOBS > 本文件；项目安全规则禁止
+# 普通开发使用前两者提高并发。确需调整时必须由用户单独授权并重新评估看门狗阈值。
 #
 # 取值依据（2026-08-08 实测，见 doc/development-environment.md §3.5）：
 # jobs=6 / test-threads=10 已完成 Codex 0.147.0 冷构建和 14,074 项全量测试。
@@ -24,7 +24,8 @@ jobs = 6
 # 机器级 rustc 总并发兜底。jobs 只管单次 cargo 调用内部的并发，两个 agent 各自直接
 # 敲 cargo 仍可能叠加；with-build-lock.sh 负责保证经过 just 的重型 Cargo 构建互斥，
 # 本闸门则把所有入口、worktree 和 agent 的 rustc 总数限制在同一组槽内。它不等同于
-# “同一时刻只有一个 Cargo 构建”。脚本降级时会告警并 fail-open，详见脚本头部注释。
+# “同一时刻只有一个 Cargo 构建”。脚本安全依赖不可用时会告警并 fail-closed。
 # 相对路径由 cargo 解析成「`.cargo/` 的父目录」下的路径，因此在主工作区和各
-# worktree 里都各自指向自己那一份，不写死绝对路径。
+# worktree 里都各自指向自己那一份，不写死绝对路径。脚本安全依赖不可用时
+# fail-closed；显式关闭开关只用于用户单独授权的故障诊断。
 rustc-wrapper = "./.cargo/rustc-throttle.sh"

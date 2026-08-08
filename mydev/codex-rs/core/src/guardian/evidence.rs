@@ -3,12 +3,12 @@
 //! When `[auto_review].evidence_dir` is configured, each review round opens a
 //! [`GuardianEvidenceRound`]. Once the round has picked the guardian session that
 //! will serve it, it binds that session's `thread_id` into a process-wide registry.
-//! [`capture_final_request`] consults the registry from the request-assembly hook in
-//! `client.rs` and keeps the most recent `request_kind == turn` request issued by
-//! that session, so retries naturally leave the last attempt behind. When the round
+//! [`capture_final_request`] consults the registry immediately before a transport
+//! send and keeps the most recent `request_kind == turn` request issued by that
+//! session, so retries naturally leave the last attempted request behind. When the round
 //! ends, the captured request is normalized and written to
 //! `<evidence_dir>/<review_id>/E_final.json` next to a `meta.json` describing the
-//! round. A round that never reached the model writes only `meta.json`, marked
+//! round. A round that never reached the transport send point writes only `meta.json`, marked
 //! `evidence: none`, rather than passing off a stale request as this round's
 //! evidence.
 //!
@@ -47,7 +47,7 @@ use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 
 /// Structural request fields that carry no review semantics and would otherwise
-/// make two identical reviews produce different bytes.
+/// make the same constructed request unstable when serialized more than once.
 const STRIPPED_REQUEST_FIELDS: &[&str] = &[
     "client_metadata",
     "prompt_cache_key",
@@ -58,6 +58,7 @@ const STRIPPED_REQUEST_FIELDS: &[&str] = &[
 
 const E_FINAL_FILE_NAME: &str = "E_final.json";
 const META_FILE_NAME: &str = "meta.json";
+const GUARDIAN_SOURCE_BASELINE: &str = concat!("rust-v", env!("CARGO_PKG_VERSION"));
 
 /// Guardian sessions that are currently serving a capturing review round.
 ///
@@ -88,6 +89,7 @@ enum GuardianEvidenceKind {
 #[derive(Debug, Serialize)]
 struct GuardianEvidenceMeta<'a> {
     review_id: &'a str,
+    guardian_source_baseline: &'static str,
     evidence: GuardianEvidenceKind,
     decision: GuardianReviewDecision,
     terminal_status: GuardianReviewTerminalStatus,
@@ -122,7 +124,7 @@ impl GuardianEvidenceRound {
         Some(Self::new(evidence_dir.as_path().join(review_id), review_id))
     }
 
-    fn new(output_dir: PathBuf, review_id: &str) -> Arc<Self> {
+    pub(crate) fn new(output_dir: PathBuf, review_id: &str) -> Arc<Self> {
         Arc::new(Self {
             review_id: review_id.to_string(),
             output_dir,
@@ -160,6 +162,7 @@ impl GuardianEvidenceRound {
             .take();
         let meta = GuardianEvidenceMeta {
             review_id: self.review_id.as_str(),
+            guardian_source_baseline: GUARDIAN_SOURCE_BASELINE,
             evidence: match e_final {
                 Some(_) => GuardianEvidenceKind::EFinal,
                 None => GuardianEvidenceKind::None,
@@ -254,9 +257,11 @@ pub(crate) fn capture_final_request(
 /// Returns the deterministic, replayable form of an outbound approval request.
 ///
 /// Normalization is idempotent: it strips a fixed set of structural fields, drops
-/// the per-item response ids that the server assigns, and renumbers `call_id`s in
-/// document order. `call_id` is renumbered rather than removed because it is the
-/// only link between a tool call and its output.
+/// the per-item response ids that the server assigns, and renumbers direct input-item
+/// `call_id` and passthrough `turn_id` values in document order. These identifiers are
+/// renumbered rather than removed because their equality relationships carry meaning.
+/// Free text is deliberately left untouched, so this is not a promise that two fresh
+/// sessions with otherwise equivalent prompts will be byte-identical.
 fn normalize_request(request: &ResponsesApiRequest) -> serde_json::Result<Value> {
     let mut value = serde_json::to_value(request)?;
     if let Some(object) = value.as_object_mut() {
@@ -264,6 +269,8 @@ fn normalize_request(request: &ResponsesApiRequest) -> serde_json::Result<Value>
             object.remove(*field);
         }
         if let Some(input) = object.get_mut("input").and_then(Value::as_array_mut) {
+            let mut canonical_call_ids = HashMap::new();
+            let mut canonical_turn_ids = HashMap::new();
             for item in input {
                 if let Some(item) = item.as_object_mut() {
                     item.remove("id");
@@ -271,37 +278,43 @@ fn normalize_request(request: &ResponsesApiRequest) -> serde_json::Result<Value>
                     // to function calls. It is provider-specific and must not make
                     // otherwise equivalent E_final payloads compare differently.
                     item.remove("encrypted_function_args");
+                    canonicalize_direct_id(item, "call_id", "call", &mut canonical_call_ids);
+                    if let Some(metadata) = item
+                        .get_mut("internal_chat_message_metadata_passthrough")
+                        .and_then(Value::as_object_mut)
+                    {
+                        canonicalize_direct_id(
+                            metadata,
+                            "turn_id",
+                            "turn",
+                            &mut canonical_turn_ids,
+                        );
+                    }
                 }
             }
         }
     }
-    let mut canonical_call_ids = HashMap::new();
-    canonicalize_call_ids(&mut value, &mut canonical_call_ids);
     Ok(value)
 }
 
-fn canonicalize_call_ids(value: &mut Value, canonical: &mut HashMap<String, String>) {
-    match value {
-        Value::Array(items) => {
-            for item in items {
-                canonicalize_call_ids(item, canonical);
-            }
-        }
-        Value::Object(object) => {
-            for (key, entry) in object {
-                match (key.as_str(), entry.as_str()) {
-                    ("call_id", Some(call_id)) => {
-                        let next = format!("call_{}", canonical.len());
-                        let canonical_id =
-                            canonical.entry(call_id.to_string()).or_insert(next).clone();
-                        *entry = Value::String(canonical_id);
-                    }
-                    _ => canonicalize_call_ids(entry, canonical),
-                }
-            }
-        }
-        _ => {}
-    }
+fn canonicalize_direct_id(
+    object: &mut serde_json::Map<String, Value>,
+    field: &str,
+    prefix: &str,
+    canonical: &mut HashMap<String, String>,
+) {
+    let Some(entry) = object.get_mut(field) else {
+        return;
+    };
+    let Some(original) = entry.as_str() else {
+        return;
+    };
+    let next = format!("{prefix}_{}", canonical.len());
+    let canonical_id = canonical
+        .entry(original.to_string())
+        .or_insert(next)
+        .clone();
+    *entry = Value::String(canonical_id);
 }
 
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {

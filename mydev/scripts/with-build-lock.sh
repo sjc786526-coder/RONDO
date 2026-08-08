@@ -198,6 +198,63 @@ unit="rondo-build-${uid}-${started_stamp//[^0-9]/}-$$.scope"
 echo "[rondo] watchdog metrics: ${run_dir}" >&2
 echo "[rondo] limits: project stop/max=${project_stop_bytes}/${project_max_bytes} bytes, memory high/max=${memory_high}/${memory_max}, swap max=${swap_max}" >&2
 
+terminate_scope() {
+  local reason="$1"
+  local attempt=0
+  local poll=0
+
+  while ((attempt < 10)); do
+    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
+    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
+    for ((poll = 0; poll < 10; poll++)); do
+      if ! systemctl --user is-active --quiet "$unit"; then
+        return 0
+      fi
+      sleep 0.1
+    done
+    attempt=$((attempt + 1))
+  done
+
+  echo "[rondo] ${reason}: scope ${unit} is still active after kill attempts; continuing supervision" >&2
+  return 1
+}
+
+handle_exit() {
+  local exit_rc=$?
+
+  trap - EXIT INT TERM HUP
+  if systemctl --user is-active --quiet "$unit"; then
+    echo "[rondo] wrapper exited while ${unit} was active; stopping the supervised scope" >&2
+    while systemctl --user is-active --quiet "$unit"; do
+      terminate_scope "unexpected_wrapper_exit" || sleep 1
+    done
+    if [[ -n "${runner_pid:-}" ]]; then
+      wait "$runner_pid" >/dev/null 2>&1 || true
+    fi
+  fi
+  exit "$exit_rc"
+}
+
+handle_signal() {
+  local signal_name="$1"
+  local signal_rc="$2"
+
+  echo "[rondo] wrapper received ${signal_name}; stopping supervised scope ${unit}" >&2
+  while systemctl --user is-active --quiet "$unit"; do
+    terminate_scope "signal_${signal_name}" || sleep 1
+  done
+  if [[ -n "${runner_pid:-}" ]]; then
+    wait "$runner_pid" >/dev/null 2>&1 || true
+  fi
+  trap - EXIT INT TERM HUP
+  exit "$signal_rc"
+}
+
+trap 'handle_exit' EXIT
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
+trap 'handle_signal HUP 129' HUP
+
 systemd-run --user --scope --quiet --unit="$unit" \
   -p KillMode=control-group \
   -p MemoryHigh="$memory_high" \
@@ -218,6 +275,7 @@ done
 if [[ -z "$control_group" ]]; then
   run_rc=0
   wait "$runner_pid" || run_rc=$?
+  trap - EXIT INT TERM HUP
   if ((run_rc == 0)); then
     echo "[rondo] command completed before the watchdog attached" >&2
     exit 0
@@ -230,38 +288,34 @@ cgroup_root="/sys/fs/cgroup${control_group}"
 for counter in memory.current memory.peak memory.stat memory.swap.current memory.swap.peak memory.pressure memory.events; do
   if [[ ! -r "${cgroup_root}/${counter}" ]]; then
     echo "[rondo] cgroup counter ${counter} is unavailable; stopping fail-closed" >&2
-    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
-    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
+    while systemctl --user is-active --quiet "$unit"; do
+      terminate_scope "missing_initial_counter_${counter}" || sleep 1
+    done
     wait "$runner_pid" >/dev/null 2>&1 || true
+    trap - EXIT INT TERM HUP
     exit 81
   fi
 done
 
 read_counter() {
   local path="$1"
-  local value=0
-  # A short command can finish and let systemd remove its transient scope
-  # between `is-active` and this sample. Treat that normal teardown race as an
-  # empty final sample instead of leaking shell redirection errors.
-  if [[ ! -r "$path" ]]; then
-    printf '0'
-    return
-  fi
-  read -r value <"$path" 2>/dev/null || value=0
-  [[ "$value" =~ ^[0-9]+$ ]] || value=0
+  local value=""
+  [[ -r "$path" ]] || return 1
+  read -r value <"$path" 2>/dev/null || return 1
+  [[ "$value" =~ ^[0-9]+$ ]] || return 1
   printf '%s' "$value"
 }
 
 read_keyed_counter() {
   local path="$1"
   local field="$2"
-  awk -v field="$field" '$1 == field {print $2; found=1; exit} END {if (!found) print 0}' \
+  awk -v field="$field" '$1 == field && $2 ~ /^[0-9]+$/ {print $2; found=1; exit} END {if (!found) exit 1}' \
     "$path" 2>/dev/null
 }
 
 read_psi_full_bp() {
   local path="$1"
-  awk '$1 == "full" {for (i=2; i<=NF; i++) {split($i, pair, "="); if (pair[1] == "avg10") {printf "%d\n", pair[2] * 100; found=1; exit}}} END {if (!found) print 0}' \
+  awk '$1 == "full" {for (i=2; i<=NF; i++) {split($i, pair, "="); if (pair[1] == "avg10" && pair[2] ~ /^[0-9]+([.][0-9]+)?$/) {printf "%d\n", pair[2] * 100; found=1; exit}}} END {if (!found) exit 1}' \
     "$path" 2>/dev/null
 }
 
@@ -303,23 +357,59 @@ while systemctl --user is-active --quiet "$unit"; do
   read -r filesystem_used filesystem_available < <(
     df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
   )
-  memory_current="$(read_counter "${cgroup_root}/memory.current")"
-  memory_peak="$(read_counter "${cgroup_root}/memory.peak")"
-  memory_anon="$(read_keyed_counter "${cgroup_root}/memory.stat" anon)"
-  memory_file="$(read_keyed_counter "${cgroup_root}/memory.stat" file)"
-  memory_kernel="$(read_keyed_counter "${cgroup_root}/memory.stat" kernel)"
-  memory_nonreclaimable="$((memory_anon + memory_kernel))"
-  swap_current="$(read_counter "${cgroup_root}/memory.swap.current")"
-  swap_peak="$(read_counter "${cgroup_root}/memory.swap.peak")"
-  cgroup_psi_full_bp="$(read_psi_full_bp "${cgroup_root}/memory.pressure")"
-  host_psi_full_bp="$(read_psi_full_bp /proc/pressure/memory)"
+  memory_current="$(read_counter "${cgroup_root}/memory.current" || true)"
+  memory_peak="$(read_counter "${cgroup_root}/memory.peak" || true)"
+  memory_anon="$(read_keyed_counter "${cgroup_root}/memory.stat" anon || true)"
+  memory_file="$(read_keyed_counter "${cgroup_root}/memory.stat" file || true)"
+  memory_kernel="$(read_keyed_counter "${cgroup_root}/memory.stat" kernel || true)"
+  swap_current="$(read_counter "${cgroup_root}/memory.swap.current" || true)"
+  swap_peak="$(read_counter "${cgroup_root}/memory.swap.peak" || true)"
+  cgroup_psi_full_bp="$(read_psi_full_bp "${cgroup_root}/memory.pressure" || true)"
+  host_psi_full_bp="$(read_psi_full_bp /proc/pressure/memory || true)"
   host_mem_available="$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo)"
   host_swap_free="$(awk '/^SwapFree:/{print $2; exit}' /proc/meminfo)"
-  oom_kill_count="$(read_keyed_counter "${cgroup_root}/memory.events" oom_kill)"
+  oom_kill_count="$(read_keyed_counter "${cgroup_root}/memory.events" oom_kill || true)"
   cargo_count="$(pgrep -cx cargo || true)"
   rustc_count="$(pgrep -cx rustc || true)"
   rust_lld_count="$(pgrep -cx rust-lld || true)"
   nextest_count="$(( $(pgrep -cx cargo-nextest || true) + $(pgrep -cx nextest || true) ))"
+
+  invalid_sample=""
+  sample_values=(
+    "project_bytes:${project_bytes}" "target_bytes:${target_bytes}"
+    "filesystem_used:${filesystem_used}" "filesystem_available:${filesystem_available}"
+    "memory_current:${memory_current}" "memory_peak:${memory_peak}"
+    "memory_anon:${memory_anon}" "memory_file:${memory_file}" "memory_kernel:${memory_kernel}"
+    "swap_current:${swap_current}" "swap_peak:${swap_peak}"
+    "cgroup_psi_full_bp:${cgroup_psi_full_bp}" "host_psi_full_bp:${host_psi_full_bp}"
+    "host_mem_available:${host_mem_available}" "host_swap_free:${host_swap_free}"
+    "oom_kill_count:${oom_kill_count}" "cargo_count:${cargo_count}"
+    "rustc_count:${rustc_count}" "rust_lld_count:${rust_lld_count}"
+    "nextest_count:${nextest_count}"
+  )
+  for sample_value in "${sample_values[@]}"; do
+    if [[ "${sample_value#*:}" =~ ^[0-9]+$ ]]; then
+      continue
+    fi
+    invalid_sample="${sample_value%%:*}"
+    break
+  done
+  if [[ -n "$invalid_sample" ]]; then
+    # The scope can disappear between the loop condition and a counter read.
+    # That is a normal short-command teardown race. While the unit is still
+    # active, however, losing any safety counter must stop the workload.
+    if ! systemctl --user is-active --quiet "$unit"; then
+      break
+    fi
+    stop_reason="resource_counter_unavailable_${invalid_sample}"
+    echo "[rondo] proactive stop: ${stop_reason}" >&2
+    if terminate_scope "$stop_reason"; then
+      break
+    fi
+    sleep 1
+    continue
+  fi
+  memory_nonreclaimable="$((memory_anon + memory_kernel))"
 
   # A timed-out test can leave grandchildren in the scope after Cargo/nextest has
   # already returned. Do not wait forever or let those descendants keep network,
@@ -402,15 +492,19 @@ while systemctl --user is-active --quiet "$unit"; do
 
   if [[ "$stop_reason" != "none" ]]; then
     echo "[rondo] proactive stop: ${stop_reason}" >&2
-    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
-    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
-    break
+    if terminate_scope "$stop_reason"; then
+      break
+    fi
+    sleep 1
+    continue
   fi
   if [[ "$cleanup_reason" != "none" ]]; then
     echo "[rondo] cleanup: ${cleanup_reason}" >&2
-    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
-    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
-    break
+    if terminate_scope "$cleanup_reason"; then
+      break
+    fi
+    sleep 1
+    continue
   fi
 
   sample=$((sample + 1))
@@ -423,6 +517,7 @@ done
 if ((runner_done == 0)); then
   wait "$runner_pid" || run_rc=$?
 fi
+trap - EXIT INT TERM HUP
 project_after="$(du -sx -B1 -- "$project_root" 2>/dev/null | awk '{print $1}')"
 if [[ -d "$target_dir" ]]; then
   target_after="$(du -sx -B1 -- "$target_dir" 2>/dev/null | awk '{print $1}')"

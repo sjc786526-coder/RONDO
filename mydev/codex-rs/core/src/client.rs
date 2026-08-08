@@ -932,7 +932,6 @@ impl ModelClient {
             text,
             client_metadata: Some(responses_metadata.client_metadata()),
         };
-        crate::guardian::capture_guardian_evidence_request(responses_metadata, &request);
         Ok(request)
     }
 
@@ -1468,6 +1467,7 @@ impl ModelClientSession {
                 client_setup.api_auth,
             )
             .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            crate::guardian::capture_guardian_evidence_request(responses_metadata, &request);
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {
@@ -1671,6 +1671,10 @@ impl ModelClientSession {
                         "websocket connection is unavailable".to_string(),
                     ))
                 })?;
+            // Keep E_final as the complete logical Responses request rather than the
+            // transport-only websocket delta, but do not commit it until a connection
+            // exists and this attempt is about to be sent.
+            crate::guardian::capture_guardian_evidence_request(responses_metadata, &request);
             let stream_result = websocket_connection
                 .stream_request(
                     ws_request,

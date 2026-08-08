@@ -160,7 +160,7 @@ APT 已安装并复核以下开发包：
 ### 3.4 编译验证与锁文件一致性
 
 上游基线已整体升级到 Codex CLI `0.147.0`（官方 tag commit
-`be6e8eac34711945bc47d57635f4759f20f08df9`）。官方 tag 的 workspace `Cargo.toml` 已是
+`be6e8eac029b183056b7e4402879f15d2c85f61b`）。官方 tag 的 workspace `Cargo.toml` 已是
 `0.147.0`，但 `Cargo.lock` 中 135 个本地 workspace package 仍是发布占位值 `0.0.0`；RONDO
 沿用既有冻结规则，把这些条目机械规范化为 `0.147.0`。规范化后的 lock SHA-256 是
 `bc4fe450de929afe82928734f860ca83e5f9dc5f9f1211b0974ea47b57af77ca`。
@@ -247,7 +247,8 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 
 #### 使用边界
 
-- Unix 的 `just test` / `just clippy` / `just fix` 已接入脚本；其他重型 Cargo 命令必须显式用
+- Unix 的 `just test` / `just clippy` / `just fix` / `just bench` 与三个 schema generator 已接入脚本；
+  其他重型 Cargo 命令必须显式用
   `mydev/scripts/with-build-lock.sh <command>` 包裹。主工作区与任一 worktree、两个 worktree 之间均不得
   同时构建。
 - 脚本启动前拒绝已有 `cargo` / `rustc` / `rust-lld` / `nextest`；运行中若发现 scope 外第二个构建，
@@ -262,8 +263,12 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 RONDO_BUILD_MEMORY_MAX=20G just test       # 单次收紧硬上限
 RONDO_BUILD_SWAP_MAX=4G just test          # 单次收紧 swap
 RONDO_BUILD_PROJECT_STOP_BYTES=190000000000 just test
-RONDO_BUILD_WATCHDOG=0 just test           # 显式关闭全部监控；普通开发不得使用
 ```
+
+`RONDO_BUILD_WATCHDOG=0`、`RONDO_BUILD_LOCK=0` 与 `RONDO_RUSTC_THROTTLE=0` 是实现层的紧急
+诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗在活跃 scope
+中读不到资源计数器、收不到终止确认、包装器收到 `INT` / `TERM` / `HUP` 或意外退出时均按
+fail-closed 处理。
 
 ## 4. Node 与 pnpm
 
@@ -347,8 +352,11 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 `v0.146.1` 产品树曾于 2026-08-08 完整跑过 `just test`：13,135 项运行，13,062 通过 /
 73 失败 / 23 跳过 / 25 flaky，且无 OOM；这是旧基线历史证据，详见
 `agent_log/2026-08-08-031500-full-test-backfill.md`。`v0.147.0` 的纯上游与 RONDO 产品树也均完成完整
-workspace 运行；最新 RONDO 结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky，P0
-严格边界全部通过。完整归因见 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。Bazel 门禁与
+workspace 运行；最新 RONDO 结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky。该轮
+未发现 P0 测试失败，但 2026-08-09 独立复验随后发现了捕获时点与规范化缺口，因此不能继续称为
+“P0 严格边界全部通过”；当前结论与定向复验见
+`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。完整全量归因见
+`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。Bazel 门禁与
 `just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。

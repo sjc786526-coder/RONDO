@@ -31,6 +31,8 @@ pub(crate) use approval_request::GuardianMcpAnnotations;
 pub(crate) use approval_request::GuardianNetworkAccessTrigger;
 #[cfg(test)]
 pub(crate) use approval_request::guardian_approval_request_to_json;
+#[cfg(test)]
+pub(crate) use evidence::GuardianEvidenceRound;
 pub(crate) use evidence::capture_final_request as capture_guardian_evidence_request;
 pub(crate) use review::GuardianReviewOptions;
 pub(crate) use review::guardian_timeout_message;
