@@ -1,6 +1,7 @@
 # Local read-only checkout of the upstream Codex source.
 /codex-source-code/
 reference-agent-harness/
+/codex-doc/
 
 # Personal Codex hooks, worktrees, and local state.
 /.codex/
