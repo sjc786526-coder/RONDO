@@ -180,17 +180,18 @@ cargo check --locked --offline -p codex-cli
 时开始杀进程，连 `systemd`、`sd-pam` 一起被 SIGKILL，于是 VS Code Remote 报 WebSocket 1006、
 所有 agent 会话一并丢失。根因是**并发度超过内存承载能力**，不是 CPU 不足，也不是 VS Code 或 WSL 网络问题。
 
-现在有四道固化在仓库里的闸门，不依赖人或 AI 记忆：
+现在有五道固化在仓库里的闸门，不依赖人或 AI 记忆：
 
 | 闸门 | 位置 | 作用维度 |
 | ---- | ---- | -------- |
 | `[build] jobs = 6` | 仓库根 `.cargo/config.toml` | 编译/链接阶段并发的 `rustc`、`rust-lld` 数量 |
 | `test-threads = 10` | `mydev/codex-rs/.config/nextest.toml` 的 `[profile.default]` | 测试执行阶段并发的测试进程数量 |
+| rustc 总并发槽 = 6 | 仓库根 `.cargo/rustc-throttle.sh` | 所有 Cargo 入口、agent 与 worktree 共用同一组 rustc 槽 |
 | 全局互斥锁 | `mydev/scripts/with-build-lock.sh` | 同一时刻只允许一个重量级构建 |
 | **cgroup 硬内存上限 16 GiB** | 同上脚本，`systemd-run --user --scope` | 兜底：超限只杀构建，不杀会话 |
 
-前三道是**估算性**防护（靠把并发压到内存装得下），第四道是**结构性**防护（靠内核强制隔离）。
-前者可能算错，后者不依赖算得准不准——这是唯一一道不靠估算的闸门。
+jobs、test-threads 与 rustc 槽是容量防护，全局锁是跨入口的串行化约束，cgroup 是内核强制隔离。
+容量估算可能算错；cgroup 不依赖算得准不准，是唯一一道不靠估算的内存闸门。
 
 #### 取值依据（2026-08-08 实测）
 
@@ -224,7 +225,7 @@ WSL 现分配 26 GB，按 25 GB 保守估算、且不把 10 GB swap 当作日常
 `debug = "limited"` 降到 `"line-tables-only"`（backtrace 保留文件行号，丢失变量信息），
 但这会牺牲调试体验，目前没有动。
 
-#### 第四道闸门：cgroup 硬上限
+#### 第四、五道闸门：全局互斥与 cgroup 硬上限
 
 `with-build-lock.sh` 拿到锁之后，把构建放进一个 systemd 临时 scope 里跑：
 
@@ -260,10 +261,13 @@ RONDO_BUILD_CGROUP=0 just test        # 单次关掉硬上限
 - **`.cargo/config.toml` 放在仓库根而不是 `mydev/codex-rs/`。** cargo 会从 cwd 逐级向上合并配置，
   所以这一份同时覆盖 `mydev/codex-rs`、`mydev/tools`、`codex-source-code` 和 `.claude/worktrees/`
   下的全部构建，换 worktree 不会失效；同时不改动上游 codex 自带的配置文件，基线升级时不会冲突。
-- **锁是机器级而不是 worktree 级。** 单次构建限到 8 jobs，但主工作区一个 agent、worktree 里另一个
-  agent 各跑一次，叠加又回到 16 jobs 的危险区。`just test` / `just clippy` / `just fix`（Unix 分支）
+- **锁是机器级而不是 worktree 级。** 单次构建限到 6 jobs，但主工作区一个 agent、worktree 里另一个
+  agent 各跑一次，叠加仍会突破单构建的安全估算。`just test` / `just clippy` / `just fix`（Unix 分支）
   都走 `with-build-lock.sh`，等待时会打印提示，不会看起来像卡死。锁由被包裹的进程本身持有，
   进程退出/崩溃/被杀都自动释放，没有陈旧锁问题。
+- **rustc wrapper 是跨入口总并发兜底，不是第二把 Cargo 构建锁。** 即使有人绕过 `just` 直接执行
+  Cargo，所有 worktree 的 rustc 仍共享 6 个槽；但两个 Cargo 驱动仍可能同时存在，所以正式重型任务
+  仍必须经过 `with-build-lock.sh`。信号量固定在当前用户的运行目录，不随 agent 的 `TMPDIR` 分裂。
 
 覆盖方式：
 
