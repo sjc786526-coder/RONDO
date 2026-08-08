@@ -1,4 +1,5 @@
 use super::*;
+use crate::chatwidget::status_surfaces::CachedProjectRootName;
 use codex_app_server_protocol::ImageGenerationItem;
 use codex_app_server_protocol::PluginAvailability;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -204,6 +205,15 @@ pub(super) async fn make_chatwidget_manual_with_auth(
         session_telemetry,
     };
     let mut widget = ChatWidget::new_with_op_target(common, super::CodexOpTarget::Direct(op_tx));
+    // `test_config` points the fixture at a synthetic cwd that is never created on disk, so no
+    // project root can be inferred from it. Seed the cache rather than letting the widget walk
+    // the real filesystem: a machine that has already run a sandboxed Codex leaves an empty
+    // `/tmp/.git` behind, which would otherwise make the system temp directory look like this
+    // fixture's project root.
+    widget.status_line_project_root_name_cache = Some(CachedProjectRootName {
+        cwd: widget.config.cwd.to_path_buf(),
+        root_name: None,
+    });
     widget.transcript.active_cell = None;
     widget.transcript.active_cell_revision = 0;
     widget.normal_placeholder_text = "Ask Codex to do anything".to_string();

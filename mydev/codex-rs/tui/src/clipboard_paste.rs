@@ -286,8 +286,29 @@ pub fn normalize_pasted_path(pasted: &str) -> Option<PathBuf> {
     None
 }
 
+// Test-only override for `is_probably_wsl`.
+//
+// Rendering tests that show WSL-specific key chords must not depend on whether the
+// developer happens to be running under WSL, so they pin the answer instead of probing
+// the live kernel. Nextest runs each test in its own process, and the override is
+// thread-local, so pinning it never leaks into another test.
+#[cfg(all(test, target_os = "linux"))]
+thread_local! {
+    static WSL_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn set_is_probably_wsl_for_tests(value: bool) {
+    WSL_OVERRIDE.with(|cell| cell.set(Some(value)));
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn is_probably_wsl() -> bool {
+    #[cfg(test)]
+    if let Some(value) = WSL_OVERRIDE.with(std::cell::Cell::get) {
+        return value;
+    }
+
     // Primary: Check /proc/version for "microsoft" or "WSL" (most reliable for standard WSL).
     if let Ok(version) = std::fs::read_to_string("/proc/version") {
         let version_lower = version.to_lowercase();

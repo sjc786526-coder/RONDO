@@ -209,6 +209,9 @@ async fn snapshot_for_config_merges_extension_host_and_legacy_plugin_roots() {
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ false,
     );
+    // Keep the developer's real ~/.agents/skills out of this fixture.
+    let empty_home = tempfile::tempdir().expect("tempdir");
+    skills_service.set_home_dir_override(empty_home.path().abs());
 
     let snapshot = skills_service
         .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
@@ -253,6 +256,9 @@ async fn snapshot_for_config_preserves_host_precedence_for_symlinked_plugin_root
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ false,
     );
+    // Keep the developer's real ~/.agents/skills out of this fixture.
+    let empty_home = tempfile::tempdir().expect("tempdir");
+    skills_service.set_home_dir_override(empty_home.path().abs());
 
     let outcome = skills_for_config_with_stack(
         &skills_service,

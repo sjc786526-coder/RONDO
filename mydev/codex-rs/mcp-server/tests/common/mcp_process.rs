@@ -163,7 +163,9 @@ impl McpProcess {
                 "serverInfo": {
                     "name": "codex-mcp-server",
                     "title": "Codex",
-                    "version": "0.0.0",
+                    // The server reports its own compiled version, so derive the
+                    // expectation instead of pinning a released value here.
+                    "version": build_version,
                     "user_agent": user_agent
                 },
                 "protocolVersion": ProtocolVersion::V_2025_03_26
