@@ -99,3 +99,45 @@ worktree 的 rustc 共用 6 个机器级槽，并在可用内存过低时暂停�
 - 其余 37 项为本地 mock 服务/超时（8）、其他快照差异（12）、其他（17），未逐项定位，
   按本次任务范围不做修复。
 - **仍未运行**：Bazel 门禁与 `just argument-comment-lint`（本机未装 Bazel）。
+
+## Codex 0.147.0 基线升级与 P0 重新验收（2026-08-08）
+
+日志：`agent_log/2026-08-08-212134-codex-0.147.0-upstream-baseline.md`、
+`agent_log/2026-08-08-221708-codex-0.147.0-p0-acceptance.md`。
+
+在 P1/L1 尚未产出真实测评数据前，把产品源码整体升级到官方 `rust-v0.147.0`
+（commit `be6e8eac34711945bc47d57635f4759f20f08df9`），保留原 P0 历史和主体实现，不以
+cherry-pick Guardian 的方式制造混合基线。官方 lock 中 135 个 workspace package 的发布占位值
+`0.0.0` 按既有规则规范化为 `0.147.0`，第三方依赖未额外升级。
+
+### P0 兼容适配
+
+- S1 出站测试改用非默认的 `gpt-5.5/high`。0.147 的 OpenAI API-key Guardian 默认本来就是
+  Luna；继续用 Luna 断言 model 会让 override 失效时也可能误绿。正式测评仍显式钉
+  `gpt-5.6-luna/low`。
+- `E_final` 保留标准 Responses 与 Responses Lite 的真实 wire shape；后者把 policy 放在
+  `input` developer item，而不是顶层 `instructions`。
+- 规范化剥离新增的 `FunctionCall.encrypted_function_args` provider-private 运输字段，继续保留并
+  成对重映射 `call_id`，保证工具调用/结果关联。
+- P0 仍只覆盖 model/effort，不覆盖 provider；L2a 的前置关系不变。
+
+### 重新验收
+
+- 格式、fix、schema 门禁通过；P0 精确回归 8/8、Guardian/auto-review 10/10、config/schema 6/6
+  通过；`codex-core` 冷编译通过。
+- 全量 nextest 完整执行：14,074 run，13,998 passed / 74 failed / 2 timed out / 23 skipped。
+  全量**不声称通过**；76 项终态未通过的完整清单、错误内容和与纯上游参照的差集见验收日志。
+- 76 项中没有 Guardian evidence / model-effort override 的终态回归。唯一 Guardian/MCP 慢测在
+  全量并发中两轮超时，恢复正式 `RUST_MIN_STACK` 后定向 1/1 通过（47.102 秒）。据此 P0 在
+  `v0.147.0` 上重新验收通过。
+- 未运行 Bazel 和 `just argument-comment-lint`；没有真实 API、Docker 或证据外发。
+
+### 构建资源设施与实测
+
+- `with-build-lock.sh` 固化为 fail-closed 的单构建 + systemd cgroup + 磁盘/内存/swap/PSI 实时
+  看门狗。项目告警/主动停/绝对停为 180/195/200GB；内存为 `MemoryHigh=19G`、
+  `MemoryMax=21G`、`MemorySwapMax=5G`。
+- RONDO 冷构建与全量测试的 target 峰值约 126.0GB；cgroup 总内存峰值约 20.4GB，其中匿名+内核
+  不可回收峰值约 11.2GB，swap 峰值约 0.38GB；未触发资源停机。
+- 一个网络迁移测试超时后留下 366 个 scope 内后代进程。已精确冻结/清理该 scope，并给看门狗增加
+  主命令退出后的 5 秒残留清理；合成后台进程场景验证通过。

@@ -1,13 +1,13 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-07
+最后更新：2026-08-08
 
 本文件只记录**当前阶段**与**方向级路线、依赖和授权门**。方向内部的详细分解见 `doc/WBS/`，
 单次任务的技术方案见 `plan/`，已完成成果见 `doc/WBS-COMPLETED.md`。
 
 ## 1. 当前状态
 
-- 上游基线冻结在 Codex CLI `v0.146.1`。
+- 上游基线冻结在 Codex CLI `v0.147.0`；P0 已完成对应适配与重新验收。
 - 开发环境已就绪（见 `doc/development-environment.md`）：Rust 1.95.0、pnpm 10.33.0、uv、Docker Desktop 可用；本机未装 Bazel。
 - 本机推理硬件：RTX 4060 Laptop **8GB VRAM** / 19GB RAM / 32 核。8B 级模型只能走 4-bit 量化，且上下文预算需实测。
 - **P0 共享地基已完成**（S1 审批模型/effort 覆盖、S2 审批证据包 `E_final`，见 `doc/WBS-COMPLETED.md`）。
