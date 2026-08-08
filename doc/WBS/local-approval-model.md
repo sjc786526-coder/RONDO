@@ -1,6 +1,6 @@
 # 方向 2：本地审批模型接入与横评
 
-最后更新：2026-08-07 ｜ 依赖：P0（S1/S2）｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-08 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
@@ -8,13 +8,32 @@
 
 ## 核心设计（已定，不再反复讨论）
 
-- **正式端到端测评统一用 `approve for me`**，Guardian 显式覆盖为 `gpt-5.6-luna` + `low`，继续使用 Codex 原生 Guardian 框架与其原生只读取证能力。这样既避免人工审批无法并发、手速污染耗时，又以可接受成本保证实际审批质量。
-- **为什么必须显式指定模型**：隐藏的 `codex-auto-review` 无法明确指代具体型号，实验变量不清；显式覆盖后 `sol + low` 作为"最容易拿到最高正确率"的上限对照，`luna + low` 作为"最经济常用"的基线。两者都走 API 接入既有 provider，也**避免了新增本地 provider 带来的架构差异造成不公平**。
-- **`Luna-Guardian-live` 是真实可部署系统的结果**；`Luna-static` / `Sol-static` / `Local-static` 三个同证据组才是严格的模型横向比较。后者统一**不给模型任何工具与自主调查能力**——请求体不含 `tools` 字段，模型不能发起检索或取证，只接受相同的规范化 `E_final` 做单轮结构化判断。（这里说的"无网络"指模型侧没有自主联网能力；runner 当然要通过网络访问 Luna / Sol 的 API 端点，两者不矛盾。）
+- **正式端到端测评统一用 `--approve-for-me` 对应的三项配置**：
+  `approvals_reviewer = "auto_review"`、`approval_policy = "on-request"`、
+  `sandbox_mode = "workspace-write"`。Guardian 另显式覆盖为 `gpt-5.6-luna` + `low`，继续使用
+  Codex 原生 Guardian 框架与只读取证能力。0.147 的 CLI shorthand 一次展开这三项；测评元数据
+  仍逐项记录，不能只写一个模糊的“approve for me”。
+- **为什么必须显式指定模型**：`v0.147.0` 的默认值已不是单一的
+  `codex-auto-review`：OpenAI API key 路径默认 `gpt-5.6-luna`，ChatGPT 路径默认
+  `codex-auto-review`，Bedrock 则返回 provider 自身模型 id；候选不在 catalog 且无 metadata
+  override 时仍会回退主模型。测评必须显式写死模型与
+  effort，以免认证方式或 provider 变化暗中改变实验变量。`sol + low` 作为高正确率
+  上限对照，`luna + low` 作为经济基线；两者都复用既有 API provider。
+- **`Luna-Guardian-live` 是真实可部署系统的结果**；`Luna-static` / `Sol-static` / `Local-static`
+  三个同证据组才是严格的模型横向比较。后者统一**不给模型任何工具与自主调查能力**：static
+  consumer 必须移除顶层 `tools`，也必须移除 Lite `input` 中的 `additional_tools` developer item，
+  再构造 provider-neutral 的单轮结构化请求。只检查“没有顶层 tools”不足以证明无工具。
+  （这里说的“无网络”指模型侧没有自主联网能力；runner 仍需联网访问 Luna / Sol API。）
+- **`E_final` 有两种等价 wire shape**：标准 Responses 把 Guardian policy 放在顶层
+  `instructions`、工具放在顶层 `tools`；`v0.147.0` 的 Luna 使用 Responses Lite，policy 改放
+  `input` 里的 developer message，工具改放 `additional_tools` item，顶层 `instructions` 为空且
+  `tools` 缺席。影子回放必须先解析成统一的逻辑 payload，不能假设固定 JSON 位置。
 - 这组对比回答的是"面对 Luna 实际收集到的同一组证据，不同模型会怎么判"，**不宣称**比较了各模型拥有工具后的完整 Agentic 调查能力。
 - **严格耗时测评期间不在线运行影子模型**，尤其避免本地 8B 模型造成 GPU/CPU/内存/温度/调度波动；只记录证据包，任务结束后离线回放。普通调试阶段可酌情在线跑云端静态影子。
 - Sol 成本较高，只对预先固定的分层样本或重点诊断样本回放；Luna 与本地模型可全量回放。
 - 不自建第二套会话系统、不做证据链重建或工具状态机，只在 Guardian 请求发送前截快照（见 P0-S2）。
+- `v0.147.0` 的 Guardian policy/template 与审批 prompt 已有实质变化，approval/retry reason 也会成为
+  有意义输入。证据与标签必须记录 policy/baseline 版本，不把 0.146.1 和 0.147 样本静默混合训练或横评。
 - **预留但不现在做**：若后续要研究"取证调查本身值多少分"，只需额外保存该审批轮的**首个**请求 `E0`，与 `E_final` 对比即可，仍然不引入会话管理或证据链重建。P0 只做 `E_final`。
 
 ## 任务分解
@@ -23,8 +42,14 @@
 
 - 输入：规范化 `E_final`；输出：结构化判定（allow / deny + 理由 + 风险标签）。
 - 三个 static 组共用完全相同的输入与输出契约，任何一方多拿信息都视为设施 bug。
-- 硬性：请求体不得包含 `tools`，不得给模型任何自主取证能力。
-- 验收：单测断言三组请求的**规范化逻辑 payload**（instructions + input + 输出 schema）逐字节一致。provider URL、headers、认证方式天然不同，不在比较范围内。
+- 硬性：出站请求既不得包含顶层 `tools`，也不得在 `input` 中携带 `additional_tools`，不得给模型
+  任何自主取证能力。
+- 验收：单测同时覆盖标准 Responses 与 Responses Lite 的 `E_final`，将两者解析为
+  **规范化逻辑 payload**（policy/instructions + 任务 input + 输出 schema），再断言三个 static 组
+  逐字节一致；同时断言出站请求既无顶层 `tools`，也无 Lite `additional_tools`。provider URL、
+  headers、认证方式天然不同，不在比较范围内。
+- 原始 `E_final` 保留 `internal_chat_message_metadata_passthrough.executed_tool_calls` 以忠实记录 wire；
+  该字段按上游契约仅供 warehouse，构造 static 逻辑 payload 时必须排除，不能作为影子模型输入。
 
 ### L2 本地推理服务接入（规模 M）
 
@@ -38,7 +63,11 @@
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）
 
-L2 只是把本地服务跑起来，**并不等于 Guardian 会把请求发到它那里**。`build_guardian_review_session_config`（`review_session.rs:996`）克隆父会话配置，只改写 `model_provider.request_max_retries` / `stream_max_retries`（`:1006-1007`），provider id 与 base_url 原样继承父会话。因此 P0-S1 只改模型名时，本地模型名会被发往父会话的 OpenAI 端点。
+L2 只是把本地服务跑起来，**并不等于 Guardian 会把请求发到它那里**。
+`build_guardian_review_session_config`（`core/src/guardian/review_session.rs`）克隆父会话配置，只把
+provider 字段中的 `request_max_retries` / `stream_max_retries` 改为 1，provider id 与 base_url 原样继承。
+`v0.147.0` 新增的 provider/auth 默认模型分流也没有改变这个事实。因此 P0-S1 只改本地
+模型名时，该名称仍会被发往父会话的 provider 端点。
 
 - 目标：让 Guardian 审批会话可以使用与主 Agent **不同的** provider。
 - 落点：在 `[auto_review]` 增加 provider 覆盖项，并在 `build_guardian_review_session_config` 中一并改写 `model_provider_id` / `model_provider`。
@@ -72,7 +101,10 @@ L2 只是把本地服务跑起来，**并不等于 Guardian 会把请求发到�
 | `seed` | 给合成器做格式与难度模板（几十条足够） | —— |
 | `holdout` | 只用于 L3/L4 评测 | 任何形式进入合成上下文、提示词或人工参考 |
 
-- 切分键必须是**跨运行稳定的语义身份**，不能用 `review_id`——它是每轮新生成的 UUID v4（`review.rs:93`），同一任务同一动作重跑会换 id，可能第一次落 holdout、第二次落 seed，互斥就只对文件实例成立、对语义样本不成立。改用 `sha256(task_id + 规范化待审批动作指纹)` 落桶；无 task_id 的场景退化为动作指纹本身。
+- 切分键必须是**跨运行稳定的语义身份**，不能用 `review_id`——
+  `new_guardian_review_id`（`core/src/guardian/review.rs`）每轮生成新的 UUID v4，同一任务同一动作重跑会换 id，
+  可能第一次落 holdout、第二次落 seed，互斥就只对文件实例成立、对语义样本不成立。
+  改用 `sha256(task_id + 规范化待审批动作指纹)` 落桶；无 task_id 的场景退化为动作指纹本身。
 - 切分不按人工挑选，避免选择偏差；切分结果写入清单并冻结，后续增量按同一规则划分，不重划历史。
 - **近重复检查**：合成产出的训练样本对 `holdout` 做一次近重复检测（n-gram Jaccard 或 MinHash 即可，不上重型工具），命中阈值的样本剔除并记录数量。
 - 合成要覆盖的分布：明确安全、明确危险、边界模糊、证据不足、伪装成安全的危险动作、工具结果与请求不一致。

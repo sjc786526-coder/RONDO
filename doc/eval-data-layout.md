@@ -1,6 +1,6 @@
 # 测评结果与数据资产保存规范
 
-最后更新：2026-08-07
+最后更新：2026-08-08
 
 适用于全部测评产出：离线冻结回放（E-A）、真实 Terminal-Bench 2.1 端到端（E-B）、静态影子审批横评（L3）。
 目标是**结构清楚、便于管理、可长期追溯**，同时保持轻量——不做数据资产审计、可信链或权限系统。
@@ -73,11 +73,20 @@ eval-data/                             # git-ignored
   "git_commit": "4355362",
   "git_dirty": false,
   "binary_sha256": "…",
+  "upstream_codex": {
+    "tag": "rust-v0.147.0",
+    "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+    "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0"
+  },
   "config": {
     "main_model": "gpt-5.6-luna",
     "guardian_model": "gpt-5.6-luna",
     "guardian_effort": "low",
+    "guardian_request_shape": "responses_lite",
+    "guardian_policy_baseline": "rust-v0.147.0",
     "approvals_reviewer": "auto_review",
+    "approval_policy": "on-request",
+    "sandbox_mode": "workspace-write",
     "websocket": false,
     "taskset": "canary",
     "round": 1,
@@ -97,6 +106,9 @@ eval-data/                             # git-ignored
 - `track = replay` 时 `tasks` 为 `null`，改填 `metrics`：`{ wall_ms, cpu_ms, peak_rss_kb, turns, tool_calls, drift }`。
 - `track = shadow` 时 `metrics` 填一致率、false allow / false deny 率、P50/P95 延迟、显存峰值。
 - **`git_dirty = true` 的运行结果只能用于调试，不得作为里程碑证据**。
+- `upstream_codex.workspace_lock_normalization` 只描述构建只读官方基线时在隔离 scratch 副本中的
+  机械变换；RONDO 运行也记录它，便于证明两侧基线来源一致。不得把规范化后的 lock 哈希写成
+  官方 tag 文件哈希。
 
 ### 隐藏集的特殊规则
 
@@ -110,6 +122,11 @@ eval-data/                             # git-ignored
 3. 划分结果写入清单并冻结；后续新增证据按同一规则增量划分，不重划历史。
 4. 证据包**按原始会话记录对待**：可能含任务上下文里出现的任何敏感内容，目录权限 `0700`，不入库。
 5. 外发给云端模型（Luna / Sol 静态影子）属于数据外发，须单独授权。
+6. `v0.147.0` 下 `E_final` 可以是标准 Responses 或 Responses Lite：前者的 policy 位于
+   `instructions`，后者位于 `input` 的 developer message。规范化后两种形态都必须保留等价
+   的 policy / 任务上下文 / 工具调用结果，并剔除 `encrypted_function_args` 等 provider 私有运输字段。
+7. 0.147 会把有界的 approval/retry reason 放进 Guardian prompt；它是有意义输入，规范化时必须保留。
+   每份证据还要记录 `guardian_policy_baseline`，不同 policy 版本先分层，不能静默混作同一训练或评测总体。
 
 ## 6. 保留与清理
 

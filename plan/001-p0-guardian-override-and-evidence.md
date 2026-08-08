@@ -6,6 +6,10 @@
 
 对应 WBS：`doc/WBS.md` §5（P0 / S1 / S2）。完成后解锁方向 0 的 P1 与方向 2 的 L1~L2。
 
+适用基线：Codex CLI `v0.147.0`，只读上游 `rust-v0.147.0` /
+`be6e8eac029b183056b7e4402879f15d2c85f61b`。官方 `Cargo.lock` 中 135 个 workspace package
+仍写作 `0.0.0`；RONDO 产品树为 `--locked` 构建做的 `0.147.0` 规范化不属于上游事实。
+
 ## 1. 目标
 
 ### 最终目标
@@ -15,36 +19,59 @@
 - **S1**：Guardian 审批模型与 reasoning effort 可由 `config.toml` 显式覆盖，并在真实发出的请求中生效。
 - **S2**：每一轮 Guardian 审批可产出一份**确定性、可离线复用、与该审批轮明确关联**的证据包 `E_final`。
 
-**S1 的能力边界（重要）**：本任务**只覆盖模型名与 effort，不覆盖 provider**。`build_guardian_review_session_config`（`review_session.rs:996`）克隆父会话配置，只改写 `model_provider.request_max_retries` / `stream_max_retries`（`:1006-1007`），provider id 与 base_url 原样继承父会话。因此 P0 完成后可以把 Guardian 钉在 `gpt-5.6-luna + low`（测评所需，父子同为 OpenAI provider，成立），但**不足以切到本地模型**——那需要独立的 provider 覆盖，已拆为方向 2 的 **L2a**，是 L7 的前置。任何"P0 完成即可一键切换本地模型"的表述都是错的。
+**S1 的能力边界（重要）**：本任务**只覆盖模型名与 effort，不覆盖 provider**。
+`build_guardian_review_session_config`（`core/src/guardian/review_session.rs`）克隆父会话配置；provider
+字段中只改写 `request_max_retries` / `stream_max_retries`，provider id 与 base_url 原样继承。
+`v0.147.0` 的 provider/auth 默认模型分流没有改变这一点。因此 P0 可以把 Guardian 钉在同一
+OpenAI provider 的 `gpt-5.6-luna + low`，但**不足以切到本地模型**；独立 provider 覆盖属于
+方向 2 的 **L2a**，是 L7 的前置。
 
 ### 完成/验收标准
 
 **S1**
 
-- 配置 `[auto_review] model = "gpt-5.6-luna"` / `reasoning_effort = "low"` 后，Guardian 实际发出的请求体中 `model` 与 `reasoning.effort` 与配置一致（用 `ResponseMock` 断言出站请求体，不是断言中间变量）。
-- 未配置时，解析优先级回退为 `model_info.auto_review_model_override` → provider 默认 `codex-auto-review`，与上游行为逐字节一致。
-- `just write-config-schema` 已运行，`core/config.schema.json` 的差异**只包含**新增字段。
+- 配置 `[auto_review] model = "gpt-5.5"` / `reasoning_effort = "high"` 后，Guardian 实际发出的
+  请求体中 `model` 与 `reasoning.effort` 与配置一致（用 `ResponseMock` 断言出站请求体）。模型特意
+  选为不同于 API-key 默认 Luna 的值，避免 override 失效时测试仍误通过。
+- 未配置时，RONDO 自定义层回退到官方链：`ModelInfo.auto_review_model_override` →
+  `turn.provider.approval_review_preferred_model()`。后者在 configured provider + API key 下默认
+  `gpt-5.6-luna`，ChatGPT/无 API key 时为 `codex-auto-review`，Bedrock 使用自身模型 id；回归至少
+  覆盖 API-key 与非 API-key 两类。若 provider 候选不在 catalog 且无 metadata override，官方逻辑
+  回退主模型；不得把 provider 候选写成无条件最终模型。
+- 运行 `just write-config-schema`，并确认 `core/config.schema.json` 的差异**只包含**新增字段。
 - 不改动 provider 解析路径（本任务显式不做，留给 L2a）。
 
 **S2**
 
-- 配置证据输出目录后，一轮审批产出 1 份 `E_final.json` + 1 份 `meta.json`（`review_id`、决策、耗时、模型、effort、token、结束原因）。
-- **关联正确性**：产出的 `E_final` 必须归属到发起它的 `review_id`；并发审批（trunk 忙时会 fork ephemeral 会话）互不串档。需有并发场景的集成测试覆盖。
-- **只捕获真正的审批请求**：判定用 `responses_metadata.request_kind == Some(Turn)`（`responses_metadata.rs:118`），把预热、压缩、memory 请求一并排除。`build_responses_request`（`client.rs:838`）签名里没有 `warmup` 布尔（它在外层 websocket 函数 `:1531`），但 `responses_metadata` 已传进 builder，够用。
-  需有**开启 websocket** 的测试覆盖"预热不产生证据包"。实现时确认 Guardian 审批请求确实带 `Some(Turn)`；若观察到 `None`，须查明原因，**不得**放宽回 `!= Prewarm`。
+- 配置证据输出目录后，一轮**实际进入 Guardian** 的审批产出 1 份 `E_final.json` + 1 份
+  `meta.json`（`review_id`、决策、耗时、模型、effort、token、结束原因）。0.147 的 permission hook
+  在 Guardian/user 之前运行；hook 直接 resolve 时不创建 Guardian 轮，也不产证据包。
+- **关联正确性**：产出的 `E_final` 必须归属到发起它的 `review_id`；并发审批（trunk 忙时会 fork
+  ephemeral 会话）互不串档。并发关联由确定性的模块级测试覆盖；集成测试覆盖串行复用与主 Agent 不捕获。
+- **只捕获真正的审批请求**：判定用
+  `matches!(responses_metadata.request_kind, Some(CodexResponsesRequestKind::Turn))`，把预热、压缩、memory
+  请求一并排除。`build_responses_request` 没有 `warmup` 布尔，但已有 `responses_metadata`，够用。
+  需有**开启 websocket** 的测试覆盖"预热不产生证据包"。实现时确认 Guardian 审批请求确实匹配
+  `Some(Turn)`；若观察到 `None`，须查明原因，**不得**放宽为“只排除 Prewarm”。
   注：测评配置关闭 websocket 时 `schedule_startup_prewarm` 只跑 `prewarm_auth()` 就返回（`session_startup_prewarm.rs:185`），预热在测评主路径上本就不触发；但压缩请求会。
 - **不捕获主 Agent 请求**：需有测试直接覆盖。
 - 规范化**幂等**：同一请求规范化两次逐字节一致；被剥离的字段清单由测试锁定。
+- 标准 Responses 与 Responses Lite 都必须被捕获并测试。前者使用顶层 `instructions` / `tools`；
+  Lite 把 policy 与 `additional_tools` 编码进 `input` 的 developer items，顶层字段缺席。
+- `ResponseItem::FunctionCall.encrypted_function_args` 是 `v0.147.0` 新增的 provider-private 运输字段，
+  必须从规范化证据中剥离；不得把它当作 Guardian 语义输入或跨 provider 的稳定字段。
 - 规范化后**工具调用与其结果仍能正确配对**（`call_id` 保留或成对重映射），由单测断言，不新增设施。
 - 未配置时不产生任何文件，且不引入可测量开销（快照路径在开关判定前不做任何分配）。
-- 审批未真正调用模型即结束（超时/取消/prompt 构造失败）时，**不得**把上一轮或预热的陈旧请求固化为本轮 `E_final`；此类轮次只写 `meta.json` 并标记 `evidence: none`。
+- 已建立 Guardian 轮但未真正调用模型即结束（超时/取消/prompt 构造失败）时，**不得**把上一轮或
+  预热的陈旧请求固化为本轮 `E_final`；此类轮次只写 `meta.json` 并标记 `evidence: none`。
+  hook 提前 resolve 或在 Guardian 轮建立前失败则不产 meta；两类边界均由测试覆盖。
 - 证据写入失败**不得影响审批决策**：只记 warn，审批照常 fail-closed。
 
 **通用**
 
 - `just test -p codex-core` 通过；新增集成测试放进 `core/tests/suite/` 的既有相关文件，不新建散落测试文件。
 - 两个开关都不开启时，guardian 既有测试全绿，行为与上游一致（不退化项）。
-- `just fmt` 与 `just fix -p codex-core` 已运行且干净。
+- 运行 `just fmt` 与 `just fix -p codex-core`，并确认结果干净。
 - 合并前跑一次全量 `just test`（见 §3 约束 11 的口径），结果如实记录。
 
 ## 2. 范围
@@ -54,7 +81,8 @@
 - `mydev/codex-rs/config/src/config_toml.rs` —— `AutoReviewToml` 增加字段
 - `mydev/codex-rs/core/src/config/mod.rs` —— `Config` 增加字段与解析（照抄 `guardian_policy_config` 路径）
 - `mydev/codex-rs/core/src/guardian/review.rs` —— `model_override` 优先级链、审批轮起止处的槽注册
-- `mydev/codex-rs/core/src/guardian/review_session.rs` —— `GuardianReviewSessionParams` 加 `review_id`，选定会话后注册捕获槽
+- `mydev/codex-rs/core/src/guardian/review_session.rs` —— `GuardianReviewSessionParams` 加
+  `evidence_round`，选定会话后注册捕获槽
 - `mydev/codex-rs/core/src/guardian/mod.rs` —— 新模块声明与导出
 - `.gitignore` —— 追加 `/eval-data/`（证据默认输出位置，必须先于 S2 落地）
 - **新增** `mydev/codex-rs/core/src/guardian/evidence.rs`（+ `evidence_tests.rs`）
@@ -67,6 +95,7 @@
 
 - `codex-source-code/`、`reference-agent-harness/`、`codex-doc/`（只读）
 - Guardian 的审批判定语义：`policy.md`、`policy_template.md`、`prompt.rs` 的判定逻辑
+- 0.147 集中审批的 precedence（permission hook → Guardian/user）与 approval/retry reason 注入
 - Guardian 的 fail-closed 语义（超时/执行失败/输出畸形一律拒绝）
 - **Guardian 的 provider 解析**（`model_provider` / `model_provider_id` / base_url / auth）—— 属于 L2a，本任务显式不碰
 - 上游既有测试的断言语义（若上游行为确实被改变，须停下说明后再动）
@@ -85,9 +114,15 @@
 
 1. **两个开关默认关闭**；关闭时零行为差异、零可测量开销。
 2. **不新建第二套会话系统**，不做证据链重建，不引入工具状态机。只在请求发送前截快照。
-3. 快照点必须位于 **Guardian 逻辑请求已完整构造、尚未最终发送处**。捕获资格由两个条件**同时**成立决定：`request_kind == Some(Turn)`，**且** 该请求所属会话当前登记着一个已开启的审批轮捕获槽。用 `== Some(Turn)` 而不是 `!= Prewarm`：枚举还有 `Compaction`（`compact_remote_request.rs:75`）和 `Memory`（`turn_metadata.rs:79`），Guardian 会话保留了压缩路径，放宽会让压缩请求覆盖真正的审批请求。二者都用挂钩点已有的数据判定，不新增下传参数。槽的登记与注销必须由 RAII guard 保证，覆盖所有提前返回、超时与 panic 路径。
+3. 快照点必须位于 **Guardian wire request 已完整构造、尚未最终发送处**。捕获资格由两个条件
+   **同时**成立决定：`matches!(request_kind, Some(Turn))`，且该请求所属会话当前登记着已开启的审批轮槽。
+   用 `matches!(..., Some(Turn))` 而不是 `!matches!(..., Some(Prewarm))`：`CodexResponsesRequestKind` 还有 `Compaction` / `Memory`，
+   Guardian 会话保留了压缩路径，放宽会让压缩请求覆盖真正的审批请求。槽的登记与注销必须由
+   RAII guard 保证，覆盖所有提前返回、超时与 panic 路径。
 4. 规范化必须**确定性且幂等**，剥离清单为**结构性字段**（见 §4），且被测试锁定。
-5. **不得对外承诺内容级脱敏**。`ResponsesApiRequest` 的 `instructions` / `input`（`codex-api/src/common.rs:252`）承载任务上下文、命令输出与文件内容，其中可能出现任何敏感信息。因此：
+5. **不得对外承诺内容级脱敏**。`ResponsesApiRequest` 的 policy/input 承载任务上下文、命令输出与
+   文件内容；标准 Responses 的 policy 在顶层 `instructions`，Responses Lite 则在 `input` 的
+   developer item，其中可能出现任何敏感信息。因此：
    - 证据包**视同原始会话记录**对待，默认输出到 git-ignored 目录，目录权限 `0700`。
    - 剥离的只是结构性字段，不是正文内容；文档与代码注释里不得写成"已脱敏"。
    - 把证据包外发给 Luna / Sol 等云端模型属于**数据外发**，必须单独授权，并在首次外发前人工抽查一批样本。本任务只落盘，不外发。
@@ -96,7 +131,7 @@
 8. 变更规模目标 **≤500 行**（不含测试与生成的 schema）。若超出，停下拆分为可独立验收的阶段。
 9. 单个新 Rust 模块 <500 LoC；新测试模块用 `#[path = "..._tests.rs"]` 侧挂，不写内联大测试块。
 10. **Bazel 相关门禁本次不运行也不声称通过**（本机未安装，见 `doc/development-environment.md` §8）。
-11. **测试门禁口径**（解决上游 `mydev/AGENTS.md:68` 与根 `AGENTS.md` §7 的冲突，不留给执行期临场判断）：
+11. **测试门禁口径**（解决上游 `mydev/AGENTS.md:68` 与根 `AGENTS.md` §6 的冲突，不留给执行期临场判断）：
     - 开发过程中只跑 `just test -p codex-core`。
     - 本任务改动 `core` 与 `config`，属于上游要求跑全量的范围，因此**合并前跑一次全量 `just test`**，作为 P0 的一次性阶段门禁。
     - 全量运行前先告知用户（上游 AGENTS.md 亦要求 ask before full suite），不在开发循环中反复跑全量。
@@ -107,31 +142,49 @@
 
 以下是基于现有代码的执行建议，不是固定约束。AI 可依据实际代码与测试结果采用更优方案。
 
-- **S1 直接复刻既有惯例**：`[auto_review].policy` 已有一条完整落地链——`config_toml.rs:179`（字段挂载）→ `config_toml.rs:556`（`AutoReviewToml`）→ `core/src/config/mod.rs:3818`（解析，requirements 层优先）→ `Config.guardian_policy_config`（`mod.rs:689`）→ `review_session.rs:1011`（消费）。新字段照这条链走，不另设计配置面。
-- **优先级链**：model 为 `config.toml [auto_review].model` > `model_info.auto_review_model_override` > provider 默认 `codex-auto-review`，消费点 `review.rs:748`。
-  **effort 不是"同理"**——目前根本不存在 auto_review 的 effort override，现有逻辑是 `preferred_reasoning_effort(...)` 按模型能力算（`review.rs:758`）。因此契约是：配置了 effort 就用配置值，没配置就**完整保留现有计算结果**，不引入新的中间层。
-- **S2 挂钩点**：`core/src/client.rs:907`（`ResponsesApiRequest` 组装完成处）。判定所需数据全部来自已传入的 `responses_metadata`（`request_kind`、`thread_id`），不新增下传参数。
+- **S1 复用既有配置链**：以 `[auto_review].policy` → `Config.guardian_policy_config` →
+  Guardian session 的路径为模板，新字段不另设计配置面。引用实现时使用符号名，避免把 RONDO
+  自定义行号误写成纯上游行号。
+- **优先级链分层描述**：RONDO `[auto_review].model` > 官方
+  `ModelInfo.auto_review_model_override` > 官方 `provider.approval_review_preferred_model()`。
+  effort 配置了就覆盖，未配置时完整保留官方 `preferred_reasoning_effort(...)` 计算结果。
+- **S2 挂钩点**：`core/src/client.rs::build_responses_request` 的 `ResponsesApiRequest` 组装完成处。
+  判定所需数据全部来自已有 `responses_metadata`（`request_kind`、`thread_id`），不新增下传参数；
+  必须在标准 Responses / Responses Lite 分支汇合后捕获真实 wire shape。
 
-- **捕获载体：按 guardian 会话 `thread_id` 登记的审批轮槽**。把 `Arc<EvidenceSlot>` 从 Config → Session → ModelClient 一路下传是侵入式改动；而挂钩点手上已有 `responses_metadata.thread_id`（`responses_metadata.rs:160`），足以做关联：
+- **捕获载体：按 guardian 会话 `thread_id` 登记的审批轮槽**。把 `Arc<EvidenceSlot>` 从 Config →
+  Session → ModelClient 一路下传是侵入式改动；挂钩点已有 `responses_metadata.thread_id`，足以关联：
 
-  1. `GuardianReviewSessionParams`（`review_session.rs:77`）补 `review_id`——外层 `run_guardian_review`（`review.rs:293`）本就持有，只是没往下传。
-  2. `run_review`（`review_session.rs:370`）选定 trunk 或 ephemeral fork 后，以该会话 `thread_id` 登记 `thread_id → 槽{review_id, 最后一次请求}`，返回 RAII guard，drop 即注销。
+  1. `GuardianReviewSessionParams` 补 `evidence_round`（其中含 `review_id` 与输出配置）。
+  2. `run_review` 选定 trunk 或 ephemeral fork 后，以该会话 `thread_id` 登记
+     `thread_id → 槽{review_id, 最后一次请求}`，返回 RAII guard，drop 即注销。
   3. 挂钩点按 `thread_id` 查表，命中就**覆盖写**（retry 天然取最后一次，符合"最终请求"语义）。
   4. 轮结束（allow / deny / timeout / abort 皆同）原子 take 并固化，take 后槽失效。
   5. 槽为空（未真正调用模型就结束）只写 `meta.json` 并标 `evidence: none`。
 
-  这个 key 之所以成立，是因为 trunk 上有 `review_lock: Semaphore`（permits = 1，`review_session.rs:114/509`）：一轮审批在 `:458` `try_acquire()` 拿到 guard 后持有到整轮结束，拿不到就退回 `run_ephemeral_review` 新建会话。所以**同一 trunk 同一时刻只有一轮审批**是信号量强制的，并发轮必然落到不同会话；而每次 `Session` spawn 都会生成新的 `ThreadId`（`session/session.rs:552` 的 `ThreadId::default()`，`Forked` 分支同样走这条），因此 `thread_id` 作为 key 是安全的。
+  这个 key 之所以成立，是因为 trunk 上有 permits=1 的 `review_lock: Semaphore`：一轮审批拿到 guard
+  后持有到整轮结束，拿不到就退回 `run_ephemeral_review` 新建会话。因此同一 trunk 同时只有一轮审批，
+  并发轮落到不同会话；每次 `Session` spawn 都生成新的 `ThreadId`，所以可安全用 `thread_id` 关联。
 
 - **配置契约**（不留给实现期临场决定）：
-  - 键 `[auto_review].evidence_dir`，类型 `Option<AbsolutePathBuf>`——`config_toml.rs` 既有惯例（`log_dir` `:326`、`sqlite_home` `:321`），`codex_utils_absolute_path` 已是 config crate 依赖，不新增第三方依赖。
-  - 未配置 = 完全关闭。相对路径**按既有语义解析**：`deserialize_config_toml_with_base`（`core/src/config/mod.rs:1913`）会装 `AbsolutePathBufGuard`，`AbsolutePathBuf` 反序列化时把相对路径解析到配置目录下（`utils/absolute-path/src/lib.rs:358`）。沿用这套行为，**不另造校验**；想落到仓库内的 `eval-data/` 就直接写绝对路径。
+  - 键 `[auto_review].evidence_dir`，类型 `Option<AbsolutePathBuf>`；复用 `log_dir` / `sqlite_home`
+    与 `AbsolutePathBufGuard` 的既有惯例，不新增第三方依赖。
+  - 未配置 = 完全关闭。相对路径继续由 `deserialize_config_toml_with_base` 按配置目录解析，
+    **不另造校验**；想落到仓库内 `eval-data/` 就直接写绝对路径。
   - 输出 `<evidence_dir>/<review_id>/E_final.json` + `meta.json`；目录 `0700`，文件 `0600`。
   - 写入原子：先写 `*.tmp` 再 `rename`，避免读到半截文件。
   - 默认位置建议 `eval-data/evidence/raw/`（见 `doc/eval-data-layout.md`），由 `.gitignore` 的 `/eval-data/` 兜住。
 - **测试复用**：用 `core_test_support::responses` 的 `mount_sse_once` + `ResponseMock::requests()` 断言出站请求体；断言整对象而非逐字段（上游 AGENTS.md 要求）。
-- 规范化剥离建议清单（以实际结构为准）：`prompt_cache_key`、`client_metadata`、`store`、`stream`、`stream_options`、时间戳，以及**无语义的逐项随机标识**（`ResponseItem` 的 `id: Option<ResponseItemId>`）。
-  **`call_id` 不属于"随机 id"，必须保留**——它是 `FunctionCall`（`protocol/src/models.rs:873`）与 `FunctionCallOutput`（`:902`）之间唯一的关联键，删掉证据语义就废了。若为了跨运行可比而需要归一，只能按出现顺序做**成对确定性重映射**（如 `call_0`、`call_1`），不得单边删除。
+- 规范化剥离清单：`prompt_cache_key`、`client_metadata`、`store`、`stream`、`stream_options`、
+  时间戳、逐项随机 `id`，以及 `FunctionCall.encrypted_function_args`。最后一项是 provider-private
+  运输数据，必须同时覆盖标准/Lite 输入中的 FunctionCall item。
+  **`call_id` 不属于"随机 id"，必须保留**——它是 `ResponseItem::FunctionCall` 与
+  `FunctionCallOutput` 之间唯一的关联键。为跨运行可比，只能按出现顺序做**成对确定性重映射**
+  （如 `call_0`、`call_1`），不得单边删除。
 - 保留：Guardian policy、任务轨迹、工具调用与结果、待审批动作。
+- 0.147 的 approval/retry reason 是 Guardian prompt 的有意义输入（retry 优先、否则 approval，
+  上游限长 512 tokens），必须保留。RONDO 不覆写 0.147 policy/template；证据元数据要记录 policy
+  baseline，跨 0.146.1/0.147 比较时先分层。
 
 ## 5. 当前状态
 
@@ -139,7 +192,7 @@
 
 ### 已完成
 
-S1 与 S2 全部落地并通过定向门禁。
+S1 与 S2 的主体实现已在 `v0.146.1` 基线上落地，随后随产品源码导入 `v0.147.0`。
 
 - S1：`AutoReviewToml` 加 `model` / `reasoning_effort`（并顺带 `evidence_dir`），`Config` 加
   `guardian_model_config` / `guardian_reasoning_effort_config` / `guardian_evidence_dir`，
@@ -150,26 +203,31 @@ S1 与 S2 全部落地并通过定向门禁。
 - `.gitignore` 追加 `/eval-data/`；`just write-config-schema` 已运行，schema 差异只含三个新字段。
 - 非测试、非生成物改动 426 行（104 行修改 + 322 行新模块），未超 500 行闸；未新增第三方依赖。
 
+`v0.147.0` 只读审计确认主体挂钩仍位于正确的 request builder 汇合点、provider 继承边界未变，
+同时发现两项必须随升级适配的细节：S1 的 API-key 默认模型已变为 Luna，原先用 Luna 证明 model
+override 的测试失去区分度；S2 需要剥离新增的 `encrypted_function_args`，并覆盖 Responses Lite
+wire shape。升级工作树正在处理这些项，但本计划不把未提交改动写成已验收事实。
+
 ### 当前验收状态
 
-- `just fmt` / `just fmt-check`、`just fix -p codex-core`：干净。
-- 定向测试全绿：`guardian::evidence::tests` 6 项、`suite::guardian_review` 5 项（新增 2）、
-  `suite::auto_review` 2 项（新增 1）。
-- `just test -p codex-core`：3100 passed / 17 failed；17 项全部为宿主机环境原因
-  （缺 `codex` 等 workspace 二进制、`/tmp/.codex` 目录污染），不涉及 guardian / config / client 路径。
-- **未运行、不声称通过**：
-  - 全量 `just test`：启动后由用户叫停（workspace 级并发测试在本机 19GB 内存下有 OOM 风险）。
-    §3 约束 11 要求的一次性全量门禁**尚未完成**，需在受控并发（如 `--test-threads`）下补跑。
-  - Bazel 门禁与 `just argument-comment-lint`（本机未装 Bazel）。
+- `v0.146.1` 历史证据：格式/修复门禁干净，P0 定向测试通过；`just test -p codex-core`
+  为 3,100 passed / 17 environmental failures。随后受控全量测试结果见
+  `doc/WBS-COMPLETED.md`，不得用作 `v0.147.0` 通过证据。
+- 上游 `v0.147.0` 的隔离 scratch build/full-test 只证明官方基线与工具链，见
+  `doc/development-environment.md`；它没有包含 RONDO P0，不能作为本计划验收。
+- 本次文档适配按要求未构建、未编译、未运行测试。RONDO `v0.147.0` 的 S1/S2 定向测试、
+  `codex-core` 与全量门禁均**尚无本轮结果，不声称通过**。
+- Bazel 门禁与 `just argument-comment-lint` 仍未运行（本机未装 Bazel）。
 
 ### 后续计划
 
-P0 已解锁：方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 小额真实 API 授权）、方向 2 的 L1 / L2。
-`E_final` 首次用于跨侧对比前，建议人工抽查一批样本确认正文内容边界。
+先在基线升级任务中完成两项 0.147 兼容适配并运行计划要求的相关门禁；结果进入
+`doc/WBS-COMPLETED.md` 后，P1/L1/L2 才以 `v0.147.0` 证据继续推进。`E_final` 首次用于跨侧对比前，
+还需人工抽查标准 Responses 与 Responses Lite 样本的正文边界。
 
 ### 阻塞项
 
-无。
+实现无结构性阻塞；当前只缺升级工作树收口和 `v0.147.0` 验收结果。
 
 ## 6. 关键决策记录
 
@@ -180,14 +238,17 @@ P0 已解锁：方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 小额
 | 003 | P0 只做 `E_final`，不做 `E0` | `E0` 只在研究"取证调查本身值多少分"时才需要，现在做属于提前扩大范围 | 方向 2 | 已采纳 |
 | 004 | 不引入新的第三方依赖 | 避免 lock 文件连锁与无法验证的 Bazel 漂移 | 构建 | 已采纳 |
 | 005 | Bazel 门禁本次不运行、不声称通过 | 本机未安装 Bazel，项目不使用 CI，以 cargo/nextest 本地测试兜底 | 验收口径 | 已采纳（需用户知悉） |
-| 006 | 捕获资格 = `request_kind == Some(Turn)` **且** 该会话登记着已开启的审批轮槽 | 只按会话来源过滤会把陈旧请求错认成本轮证据；`build_responses_request`（`client.rs:838`）拿不到 `warmup` 布尔，改用已传入的 `responses_metadata.request_kind`，并收紧为白名单——枚举还有 `Compaction` / `Memory`，黑名单式的 `!= Prewarm` 会让压缩请求覆盖审批请求 | `core/src/client.rs` | 已采纳（外部审查修正） |
-| 007 | S1 只覆盖 model + effort，**provider 覆盖拆到方向 2 的 L2a** | Guardian 配置克隆父 provider（`review_session.rs:1006`），仅改模型名会把本地模型名发往父 provider 端点。测评场景父子同为 OpenAI provider，P0 需求成立；本地模型切换另立任务，避免 P0 膨胀 | `doc/WBS.md`、`doc/WBS/local-approval-model.md` | 已采纳（外部审查修正） |
+| 006 | 捕获资格 = `matches!(request_kind, Some(Turn))` **且**该会话登记着已开启的审批轮槽 | 只按会话来源过滤会把陈旧请求错认成本轮证据；`build_responses_request` 没有 `warmup` 布尔，改用已有的 `responses_metadata.request_kind` 并收紧为白名单。枚举还有 `Compaction` / `Memory`，只排除 Prewarm 会让压缩请求覆盖审批请求 | `core/src/client.rs` | 已采纳（外部审查修正） |
+| 007 | S1 只覆盖 model + effort，**provider 覆盖拆到方向 2 的 L2a** | `build_guardian_review_session_config` 克隆父 provider；仅改模型名会把本地模型名发往父 provider 端点。测评场景父子同为 OpenAI provider，P0 需求成立；本地模型切换另立任务，避免 P0 膨胀 | `doc/WBS.md`、`doc/WBS/local-approval-model.md` | 已采纳（外部审查修正） |
 | 008 | 撤回"P0 完成即可一键切换本地审批模型"的表述 | 与 007 同因，原表述不成立 | 全部规划文档 | 已采纳（外部审查修正） |
 | 009 | 槽以 guardian 会话 `thread_id` 登记，由 RAII guard 管生命周期；`GuardianReviewSessionParams` 补 `review_id` | 原设计未定义 key 与生命周期，且下传 `Arc<EvidenceSlot>` 需穿透 Config/Session/ModelClient，过于侵入；`thread_id` 在挂钩点已有，串行复用 + 并发 fork 的语义天然可用 | `core/src/guardian/`（含 `review_session.rs`） | 已采纳（外部审查修正） |
 | 010 | 证据包不做内容级脱敏承诺，按原始会话记录对待 | `instructions` / `input` 承载任意任务上下文，结构性字段剥离无法保证正文无敏感信息；改为限定输出位置与权限，并把外发单列为授权动作 | 验收口径、安全边界 | 已采纳（外部审查修正） |
-| 011 | 测试门禁：开发期定向、合并前全量一次，全量前先告知 | 上游 `mydev/AGENTS.md:68` 要求 core 改动跑全量，根 `AGENTS.md` §7 要求不扩大化；两者在"开发循环 vs 阶段门禁"上可以调和，明确写死避免执行期临场判断 | 验收口径 | 已采纳（外部审查修正） |
+| 011 | 测试门禁：开发期定向、合并前全量一次，全量前先告知 | 上游 `mydev/AGENTS.md:68` 要求 core 改动跑全量，根 `AGENTS.md` §6 要求不扩大化；两者在"开发循环 vs 阶段门禁"上可以调和，明确写死避免执行期临场判断 | 验收口径 | 已采纳（外部审查修正） |
 | 012 | 并发不串档由模块级测试覆盖，集成测试覆盖串行复用与主 Agent 不捕获 | 真实并发审批要求 trunk 忙时 fork ephemeral，在集成测试里难以稳定触发，做出来大概率是 flaky 测试；模块级测试可以确定性地同时绑定两个轮并交错投递请求，直接验证关联键这一唯一失效点 | 验收口径 | 已采纳（执行期细化） |
 | 013 | 证据固化收口在 `track_guardian_review`，meta 直接复用 `GuardianReviewAnalyticsResult` | `run_guardian_review` 有 5 条终止路径，逐条插入易漏；这 5 条都经过 `track_guardian_review`，且它拿到的正是最终决策。复用 analytics 还避免在 evidence 模块里重写一份 outcome→decision 映射造成漂移 | `core/src/guardian/review.rs` | 已采纳（执行期细化） |
 | 014 | `GuardianReviewSessionParams` 传 `evidence_round`（含 review_id）而非裸 `review_id` | 与决策 009 等价但更省：轮对象本身携带 review_id 与输出目录，关闭时该字段为 `None`，无需再从 `spawn_config` 二次取配置 | `core/src/guardian/review_session.rs` | 已采纳（执行期细化） |
 | 015 | `call_id` 采用成对确定性重映射，而非保留原值 | 方案 §4 允许二选一。`call_id` 由服务端随机生成，不归一则同一任务两次运行的 `E_final` 字节不同，对方向 0 的离线对比无用；重映射按文档顺序成对进行，对已规范化输入是不动点 | `core/src/guardian/evidence.rs` | 已采纳（执行期细化） |
-| 016 | S1 集成测试用 `reasoning_effort = "high"` 而非 `"low"` 做断言 | 既有推导逻辑本就优先选 `low`，断言 `low` 即使覆盖完全失效也会通过；`high` 是默认逻辑不可能产出的值，才真正证明配置生效。model 仍按验收口径断言 `gpt-5.6-luna` | 验收口径 | 已采纳（执行期细化） |
+| 016 | S1 集成测试用 `gpt-5.5/high` 证明显式覆盖 | effort 的 `high` 区别于既有默认计算；`v0.147.0` API-key 默认已是 Luna，所以 model 也必须选非默认值，否则覆盖失效仍可能误通过 | 验收口径 | 已采纳（0.147 调整） |
+| 017 | 默认模型写成 RONDO 自定义层 > 官方 metadata override > provider/auth 派生默认 | 官方 0.147 configured provider + API key 默认 Luna，ChatGPT/无 key 默认 auto-review，Bedrock 另有默认；不能继续写死 `codex-auto-review` | `review.rs`、文档 | 已采纳（0.147 调整） |
+| 018 | `E_final` 保留真实 standard/Lite wire shape，消费端再提取统一逻辑 payload | Luna 使用 Responses Lite，policy 与工具位于 `input` developer items；强行只读顶层字段会漏语义 | evidence、eval | 已采纳（0.147 调整） |
+| 019 | 规范化剥离 `encrypted_function_args` | 该字段是 0.147 新增的 provider-private 运输数据，会破坏跨 provider 与离线重放稳定性，不属于 Guardian 逻辑证据 | `evidence.rs` | 待升级任务验收 |
