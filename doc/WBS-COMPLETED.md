@@ -3,7 +3,7 @@
 本文件按时间顺序追加记录已完成的开发阶段、成果与验收证据，作为历史参考。
 当前阶段见 `doc/WBS.md`，单次任务的技术方案见 `plan/`，执行细节见 `agent_log/`。
 
-## P0 共享地基（2026-08-07）
+## P0 共享地基（Codex `v0.146.1`，2026-08-07）
 
 方案：`plan/001-p0-guardian-override-and-evidence.md`；日志：`agent_log/2026-08-07-233100-p0-guardian-override-and-evidence.md`。
 
@@ -31,7 +31,7 @@
 `<evidence_dir>/<review_id>/E_final.json` + `meta.json`（目录 `0700`、文件 `0600`，先写 `.tmp` 再 rename）。
 
 - 挂钩点：`core/src/client.rs` 的 `ResponsesApiRequest` 组装完成处，1 行。
-- 捕获资格：`request_kind == Some(Turn)` **且** 该会话登记着已开启的审批轮槽（白名单，
+- 捕获资格：`matches!(request_kind, Some(Turn))` **且**该会话登记着已开启的审批轮槽（白名单，
   预热 / 压缩 / memory 一并排除）。
 - 关联：槽以 guardian 会话 `thread_id` 登记，RAII guard 管生命周期，覆盖所有提前返回与超时路径；
   retry 取最后一次请求。
@@ -60,7 +60,7 @@ websocket 预热不产包。
 
 方向 0 的 P1（TB 2.1 最小真实链路，需 Docker + 小额真实 API 授权）、方向 2 的 L1 / L2。
 
-## 构建资源闸门与全量测试补跑（2026-08-08）
+## 构建资源闸门与全量测试补跑（Codex `v0.146.1`，2026-08-08）
 
 ### 资源闸门
 
@@ -99,3 +99,27 @@ worktree 的 rustc 共用 6 个机器级槽，并在可用内存过低时暂停�
 - 其余 37 项为本地 mock 服务/超时（8）、其他快照差异（12）、其他（17），未逐项定位，
   按本次任务范围不做修复。
 - **仍未运行**：Bazel 门禁与 `just argument-comment-lint`（本机未装 Bazel）。
+
+## Codex `v0.147.0` 上游基线导入（2026-08-08）
+
+只读标准快照 `codex-source-code/` 已固定在 `rust-v0.147.0` /
+`be6e8eac029b183056b7e4402879f15d2c85f61b`，detached HEAD、工作区干净，并与 tag commit
+完全一致。官方 `Cargo.toml` 为 `0.147.0`；官方 `Cargo.lock` 原样保留 135 个版本为 `0.0.0`
+的 workspace package，没有为本项目修改。
+
+产品树基线导入提交为 `1001929`。`mydev/codex-rs/Cargo.lock` 为支持 `--locked` 构建，只把上述
+135 个本地包版本机械规范化为 `0.147.0`；相对纯净 `v0.147.0` 官方锁文件没有其他差异。
+上游导入同时带来三个 workspace member（`app-server-protocol-noop-macros`、`code-mode-runtime`、
+`utils/audio`）及 `Cargo.lock`、`MODULE.bazel.lock`、`pnpm-lock.yaml` 的依赖图更新。
+
+基线任务在隔离 scratch 副本中完成 `cargo build --workspace --locked`，并完整运行上游全量测试：
+14,065 项运行，13,981 通过 / 83 失败 / 1 超时 / 23 跳过，31 项首轮失败后重试通过。
+scratch 只为 `--locked` 构建规范化 135 个本地包版本，未回写纯净只读快照。该结果是**官方上游
+基线与工具链证据**，不是 RONDO P0 合入后的产品验收，也不声称全绿。
+
+0.147 对 P0 的兼容影响已识别：官方 metadata override → provider hook 的链未变，但 configured
+provider 的 hook 改为按 auth 分流；API key 默认 `gpt-5.6-luna`，使既有 Responses Lite 线路成为
+API-key 默认路径；`FunctionCall` 新增 provider-private 的 `encrypted_function_args`。此外审批入口
+已集中为 permission hook → Guardian/user，approval/retry reason 会进入 Guardian prompt，且上游
+policy/template 有实质变化。对应的 P0 测试、证据规范化与 policy-version 分层仍需在升级任务中
+收口并重新运行门禁，因此本条不把它们记作 `v0.147.0` 已验收成果。
