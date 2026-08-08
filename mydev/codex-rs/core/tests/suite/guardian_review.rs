@@ -906,6 +906,24 @@ fn read_evidence_bundles(evidence_dir: &std::path::Path) -> Vec<(String, Value, 
     bundles
 }
 
+/// Returns the Guardian policy from either the standard Responses request shape
+/// or the Responses Lite developer message shape.
+fn guardian_policy_from_e_final(e_final: &Value) -> &str {
+    if let Some(instructions) = e_final.get("instructions").and_then(Value::as_str) {
+        return instructions;
+    }
+    e_final["input"]
+        .as_array()
+        .expect("Responses Lite E_final input")
+        .iter()
+        .filter(|item| item["type"] == "message" && item["role"] == "developer")
+        .filter_map(|item| item["content"].as_array())
+        .flatten()
+        .filter_map(|content| content["text"].as_str())
+        .find(|text| text.starts_with("You are judging one planned coding-agent action."))
+        .expect("Guardian policy in E_final")
+}
+
 /// Two sequential reviews in one session must each produce their own bundle, and
 /// the parent agent's own requests must never be captured.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1051,7 +1069,7 @@ async fn guardian_evidence_bundles_are_scoped_to_their_review() -> Result<()> {
                 json!("e_final"),
                 json!("approved"),
                 json!("approved"),
-                json!("codex-auto-review"),
+                json!("gpt-5.6-luna"),
             )
         );
         let stripped: Vec<&str> = ["client_metadata", "prompt_cache_key", "stream", "store"]
@@ -1059,10 +1077,12 @@ async fn guardian_evidence_bundles_are_scoped_to_their_review() -> Result<()> {
             .filter(|field| e_final.get(*field).is_some())
             .collect();
         assert_eq!(stripped, Vec::<&str>::new());
+        assert_eq!(e_final.get("instructions"), None);
+        assert_eq!(e_final.get("tools"), None);
+        assert_eq!(e_final["input"][0]["type"], json!("additional_tools"));
+        assert_eq!(e_final["input"][0]["role"], json!("developer"));
         assert!(
-            e_final["instructions"]
-                .as_str()
-                .expect("instructions")
+            guardian_policy_from_e_final(e_final)
                 .starts_with("You are judging one planned coding-agent action."),
             "captured request must be the Guardian request, not the parent agent's"
         );

@@ -45,6 +45,7 @@ fn request_with_tool_call_pair() -> ResponsesApiRequest {
                 name: "shell".to_string(),
                 namespace: None,
                 arguments: "{}".to_string(),
+                encrypted_function_args: Some(vec!["message".to_string()]),
                 call_id: "call_7f3a".to_string(),
                 internal_chat_message_metadata_passthrough: None,
             },
@@ -126,6 +127,7 @@ fn normalize_request_is_idempotent_and_keeps_distinct_calls_apart() {
         name: "shell".to_string(),
         namespace: None,
         arguments: "{}".to_string(),
+        encrypted_function_args: Some(Vec::new()),
         call_id: "call_91bd".to_string(),
         internal_chat_message_metadata_passthrough: None,
     });
@@ -144,6 +146,14 @@ fn normalize_request_is_idempotent_and_keeps_distinct_calls_apart() {
         .filter_map(|item| item["call_id"].as_str())
         .collect();
     assert_eq!(call_ids, vec!["call_0", "call_0", "call_1"]);
+    assert!(
+        first["input"]
+            .as_array()
+            .expect("input array")
+            .iter()
+            .all(|item| item.get("encrypted_function_args").is_none()),
+        "provider-private encrypted function metadata must not enter E_final"
+    );
 }
 
 #[test]

@@ -12,10 +12,12 @@
 //! `evidence: none`, rather than passing off a stale request as this round's
 //! evidence.
 //!
-//! Evidence bundles are raw session records, not redacted ones: `instructions` and
-//! `input` carry whatever task context the parent turn accumulated. Normalization
-//! only strips structural fields, so bundles belong in a private, git-ignored
-//! directory. This module never sends them anywhere.
+//! Evidence bundles are raw session records, not redacted ones: the standard
+//! Responses wire shape carries policy in `instructions`, while Responses Lite
+//! carries it in a developer message inside `input`. Both forms can contain whatever
+//! task context the parent turn accumulated. Normalization only strips structural
+//! and provider-private transport fields, so bundles belong in a private,
+//! git-ignored directory. This module never sends them anywhere.
 
 use std::collections::HashMap;
 use std::fs;
@@ -254,6 +256,10 @@ fn normalize_request(request: &ResponsesApiRequest) -> serde_json::Result<Value>
             for item in input {
                 if let Some(item) = item.as_object_mut() {
                     item.remove("id");
+                    // OpenAI may attach this private collaboration transport marker
+                    // to function calls. It is provider-specific and must not make
+                    // otherwise equivalent E_final payloads compare differently.
+                    item.remove("encrypted_function_args");
                 }
             }
         }
