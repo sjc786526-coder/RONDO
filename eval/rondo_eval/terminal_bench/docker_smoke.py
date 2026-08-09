@@ -412,6 +412,10 @@ def main(argv: list[str] | None = None) -> int:
         side = Side(args.side)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
         smoke_id = f"tb-no-api-{side.value}-{uuid.uuid4().hex[:12]}"
+        work_root = paths.common_root / "eval-data" / "work" / smoke_id
+        if work_root.exists() or work_root.is_symlink():
+            raise DockerNoApiSmokeError("no-API smoke work directory already exists")
+        work_root.mkdir(parents=True, mode=0o700)
         request = TerminalBenchRequest(
             side=side,
             batch_id="p1-no-api-smoke",
@@ -423,9 +427,7 @@ def main(argv: list[str] | None = None) -> int:
                 / "sources"
                 / "terminal-bench-2-1-ffccbe05"
             ),
-            staging_root=str(
-                paths.common_root / "eval-data" / "work" / smoke_id / "staging"
-            ),
+            staging_root=str(work_root / "staging"),
             docker_task_id=smoke_id,
             memory_bytes=2 * 1024**3,
             memory_swap_bytes=3 * 1024**3,
