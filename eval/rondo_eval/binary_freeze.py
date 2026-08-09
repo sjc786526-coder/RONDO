@@ -104,10 +104,10 @@ _LIBCAP_BUILD_COMMAND = (
     "/usr/bin/make",
     "-C",
     "libcap",
-    "CC=/usr/bin/musl-gcc",
-    "BUILD_CC=/usr/bin/cc",
-    "AR=/usr/bin/ar",
-    "RANLIB=/usr/bin/ranlib",
+    "CC=/usr/bin/x86_64-linux-musl-gcc",
+    "BUILD_CC=/usr/bin/x86_64-linux-gnu-gcc-13",
+    "AR=/usr/bin/x86_64-linux-gnu-ar",
+    "RANLIB=/usr/bin/x86_64-linux-gnu-ranlib",
     "DYNAMIC=no",
     "GOLANG=no",
     "PAM_CAP=no",
@@ -1434,10 +1434,10 @@ def _run_libcap_build(
         raise BinaryFreezeError("libcap build command or environment differs")
     for executable in (
         "/usr/bin/make",
-        "/usr/bin/musl-gcc",
-        "/usr/bin/cc",
-        "/usr/bin/ar",
-        "/usr/bin/ranlib",
+        "/usr/bin/x86_64-linux-musl-gcc",
+        "/usr/bin/x86_64-linux-gnu-gcc-13",
+        "/usr/bin/x86_64-linux-gnu-ar",
+        "/usr/bin/x86_64-linux-gnu-ranlib",
     ):
         _regular_file(Path(executable), executable=True)
     try:
