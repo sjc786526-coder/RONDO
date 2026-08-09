@@ -257,10 +257,16 @@ class DockerSupervisedHostHarborExecutor:
         _require_budget_proxy_argv(argv)
         if set(injected_env) != {"HARBOR_TELEMETRY", _provider_secret_name(injected_env)}:
             raise TerminalBenchRunError("host Harbor environment is not minimally scoped")
+        host_environment = dict(injected_env)
+        # ``rondo-eval`` is deliberately a non-installed uv project.  Harbor
+        # imports the custom adapter in its own child interpreter, so project
+        # code must be made available explicitly instead of relying on the
+        # parent process's ambient PYTHONPATH.
+        host_environment["PYTHONPATH"] = str(EVAL_ROOT)
         runner = SubprocessHostCommandRunner(
             executable=self._harbor_executable,
             cwd=cwd,
-            environment=injected_env,
+            environment=host_environment,
         )
         supervisor = DockerSupervisor(
             runner=runner,

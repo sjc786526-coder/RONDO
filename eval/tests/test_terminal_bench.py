@@ -478,7 +478,11 @@ class TerminalBenchTests(unittest.TestCase):
         host_runner.assert_called_once_with(
             executable=EVAL_ROOT / ".venv" / "bin" / "harbor",
             cwd=EVAL_ROOT,
-            environment={"HARBOR_TELEMETRY": "off", "OPENAI_API_KEY": secret},
+            environment={
+                "HARBOR_TELEMETRY": "off",
+                "OPENAI_API_KEY": secret,
+                "PYTHONPATH": str(EVAL_ROOT),
+            },
         )
         fake_supervisor.supervise_host_command.assert_called_once()
 
