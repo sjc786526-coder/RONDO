@@ -7,8 +7,10 @@
 > 副作用，二者是附加事项，不能称为“剩余失败”。在下一次完整全量前，“39”只表示与严格清单对齐的待修
 > 集合，不表示已经实跑出一轮“仅失败39项”的新结果。
 >
-> 本计划已吸收 GPT/Claude 的历次交叉核验与分歧裁决。执行者可直接按本计划实施；若 live code 已发生变化，
-> 只允许根据新证据更新“当前状态/关键决策记录”，不能静默放宽硬约束。
+> 本计划已吸收 GPT/Claude 的历次交叉核验与分歧裁决。A-G、J/K 可按已冻结合同实施；H/I 是带证据门的
+> 条件批次，必须先完成修改前取证，再把分流结论写入“当前状态/关键决策记录”后实施范围内的最小修法。
+> 若 live code 或取证结论要求改变目标、范围、硬约束或完成标准，必须暂停并请求用户确认；私有 helper 名称、
+> 等价的更窄 seam 和本计划“软性建议”可随证据调整，但不能静默降低验收强度。
 
 ## 1. 目标
 
@@ -21,15 +23,25 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
 ### 完成/验收标准
 
 - 39 个严格失败逐项对应到本计划的 21+5+1+1+6+1+1+2+1 分类，无重计或漏计。
-- 测试不依赖宿主 DNS、代理、home、`/tmp` 祖先、WSL PATH、真实 GitHub 或真实浏览器。
+- 本计划新建/修改并作为各族合同证据的测试不依赖宿主 DNS、代理、home、`/tmp` 祖先、WSL PATH、真实
+  GitHub 或真实浏览器。第9.2节点名的既有Landlock legacy测试本阶段不改、不作为D族hermetic证据，但仍参加
+  最终workspace回归，失败仍会使全量失败。
 - resolver、HTTP direct、filesystem、probe、browser 等 seam 的生产默认行为与修改前一致。
 - DNS 错误/超时/私网结果继续 fail-closed；不把 fake-IP、TEST-NET 或私网改判公网。
 - Landlock 测试必须证明未沙箱控制轮可达、沙箱轮未到 listener，并验证具体拒绝语义；任意非零、超时、
   缺 binary 或 skip 都不算通过。
-- V8 full-workspace 断言始终有信息量；default=false 与 sandbox=true 两条独占 canary 合同成对通过。
+- V8 full-workspace 保留“声明 sandbox 则链接库必须具备 sandbox”的兼容性蕴含；default=false 与
+  sandbox=true 两条带显式期望值的独占 canary 成对通过，不能把 workspace 中的真值短路称为双向证明。
 - 两项时序测试交付修改前/后各两组 200 次数据（单线程与10线程），不靠扩大 timeout 收口。
 - 每个修改批次只跑相关包门禁；全部批次完成后只跑一次完整 workspace 全量，所有 Cargo 重型任务均走
   `just`/`mydev/scripts/with-build-lock.sh`，一次一组。
+- 所有正式定向和全量 Nextest 门禁统一使用 `--retries 0 --flaky-result fail`；允许另跑带重试的诊断，
+  但其结果不能计入验收。`--retries 0` 机械阻止重试吞红，`--flaky-result fail` 是纵深约束。watchdog的
+  `junit_status=retained` 只证明文件收尾完整且哈希可读；执行者必须另行解析JUnit，核对实际执行、failure与skip。
+- JUnit无法识别测试体内 `return Ok(())`/提前返回形成的“passed假绿”；I/K族必须删除对应静默返回，并由正对照、
+  fake调用计数和代码审查直接证明，不得把这类语义交给JUnit推断。
+- bwrap、wget、Windows、V8 资产或 OAuth 隔离前提不可用时，必须记为“未运行/阶段未完成”；测试内
+  `return Ok(())`、打印 skipping、缺 binary 或基础设施启动失败不得在 JUnit 中伪装成通过。
 - 保持 Clash、代理变量和 `/tmp/.git|.codex|.agents` 原状完成验收；不得用宿主清理换绿色。
 
 ## 2. 范围
@@ -38,6 +50,8 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
 
 - `mydev/codex-rs/` 内列出的测试、fixture 和实现确定性注入所需的最小私有 seam。
 - 现有 HTTP client/factory/selector、filesystem abstraction、ResponseMock 等测试设施的窄扩展。
+  若跨 crate 确需 workspace-visible 的 Direct HTTP policy，只允许作为本文明确审计的例外：不得接入配置、
+  CLI、wire schema 或任何生产构造路径，并须有静态检查/架构回归证明只被测试设施选择。
 - 与 V8 本地 canary、测试入口和本计划直接相关的配置、文档与 agent log。
 - external migration 的纯推导测试与 OAuth CLI 的 `--no-open-browser` 显式入口。
 
@@ -47,7 +61,7 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
 - Clash、DNS、NO_PROXY、宿主代理、`/tmp` marker、真实 home、WSL interop、系统服务或全局工具链。
 - `codex-source-code/`、真实 API/模型、远端仓库、发布/上传流程。
 - 通过 `#[ignore]`、skip、删断言、任意非零即成功、降低事件量或单纯延长超时凑绿。
-- 新建测试框架、重型测试 crate、常驻服务或无必要的公共 API。
+- 新建测试框架、重型测试 crate、常驻服务或本文未明确审计的公共 API。
 
 ### 不允许读取/查看
 
@@ -61,12 +75,29 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
    不得把未复现写成已修复。
 3. 正式验证保持 Clash/TUN 与代理变量存在。允许测试自己的 Direct client、fixture resolver、`wget --no-proxy`
    来表达确定性合同；不允许在外层 `unset` 环境后把结果当正式证据。
-4. 测试的真实网络路径一律替换为本地服务、fake collaborator 或纯函数合同；live smoke 必须另列且默认不跑。
+4. 本计划新建/修改并计入对应族验收的测试，其真实网络路径一律替换为本地服务、fake collaborator 或纯函数
+   合同；live smoke 必须另列且默认不跑。第9.2节点名的未修改legacy测试是范围例外，不得作为新合同证据。
 5. 所有新 seam 必须有“生产默认仍走旧实现”的回归。测试专用入口优先 `#[cfg(test)] pub(crate)` 或私有 helper。
 6. 任何一项最终为产品缺陷时，保留红色强断言并另立产品任务；不能在测试侧掩盖。
-7. 原始失败输出、定向结果、JUnit 路径/SHA 和 watcher `summary.env` 写入该批 agent log；skip/未运行单列。
+7. 原始失败输出、定向结果、JUnit 路径/SHA 和 watcher `summary.env` 写入该批 agent log。当前watchdog没有
+   JUnit语义解析器；执行者须从 `summary.env` 的 `junit_path` 用只读XML解析单独汇总testcase实际执行数、failure
+   与skip，并记录正式命令已固定 `--retries 0 --flaky-result fail`，不能只凭 `junit_status=retained` 判绿。
+   skip/未运行单列且阻止阶段完成；测试体提前成功返回只能由I/K的代码修复、正对照和调用计数排除。
+8. 下文所有 `just`/Cargo 门禁默认从 worktree 的 `mydev/codex-rs/` 执行；Python 仓库门禁从同一目录按
+   明示相对路径运行。不得依赖执行者碰巧位于 `mydev/` 或主工作区。
 
-## 4. 集合与实施总览
+## 4. 软性建议与条件决策
+
+- A-G、J/K 中写明的 seam 和 helper 名称是依据当前 live code 给出的首选落点；满足同一硬约束、覆盖同一
+  组合链路且 API 面更窄的等价实现可以采用，并在关键决策记录中说明。
+- H/I 先只做诊断性测试改动。取证结论落在既有允许修改范围且不改变完成标准时，可记录决策后继续；若指向
+  产品缺陷、新公共协议或范围扩张，暂停该族并请求用户确认，不能为了维持“39项修完”口径改弱测试。
+- 压力次数是验收强度，不是每次编辑后的默认回归。修改中先跑单次精确测试，候选修法稳定后再执行计划规定的
+  修改后双200；修改前双200只执行一次并保留原始证据。
+- Direct policy 若无法在不扩大生产能力面的前提下安全落地，优先改用消费者已有 selector/factory/probe seam；
+  不因测试便利把“绕过代理”暴露为用户可配置能力。
+
+## 5. 集合与实施总览
 
 | 族 | 根因/合同 | 严格项数 | 当前性质 |
 |---|---|---:|---|
@@ -83,9 +114,9 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
 | J | external migration 真 GitHub clone | 附加1 | 历史偶发，非当前严格失败 |
 | K | OAuth 打开真实宿主浏览器 | 附加1 | 当前通过，但有副作用 |
 
-## 5. A族：确定性 DNS（21项）
+## 6. A族：确定性 DNS（21项）
 
-### 5.1 精确集合
+### 6.1 精确集合
 
 `codex-network-proxy` 20项：
 
@@ -111,7 +142,7 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
 
 第21项是 `codex-core::session::managed_network_proxy_decider_survives_full_access_start`。
 
-### 5.2 产品 seam
+### 6.2 产品 seam
 
 在 `network-proxy/src/runtime.rs` 给 `NetworkProxyState` 增私有、可克隆 resolver：
 
@@ -130,7 +161,7 @@ type HostLookup = Arc<dyn Fn(String, u16) -> HostLookupFuture + Send + Sync>;
 不实际发包；未知 hostname 返回 `io::ErrorKind::NotFound`。禁止 catch-all，也禁止用 `192.0.2/24`、
 `198.51.100/24`、`203.0.113/24` 或 `198.18/15`，这些在产品 policy 中均是非公网。
 
-### 5.3 安全回归与 core 项
+### 6.3 安全回归与 core 项
 
 - DNS错误、DNS timeout、显式 `10.0.0.1` 仍必须得到 `NotAllowedLocal`。
 - `does-not-resolve.invalid` 用错误 resolver，不依赖宿主DNS。
@@ -138,17 +169,17 @@ type HostLookup = Arc<dyn Fn(String, u16) -> HostLookupFuture + Send + Sync>;
 - core decider 项不验证域名语义，目标与 Host 可改为公网IP字面量 `8.8.8.8`；继续断言HTTP 403、
   `blocked-by-allowlist`、decider恰调用一次、原因是 `not_allowed` 而非 `not_allowed_local`。
 
-### 5.4 门禁
+### 6.4 门禁
 
 ```text
-just test -p codex-network-proxy -E 'test(/host_blocked/) or test(/http_connect_accept/) or test(/mitm_policy/) or test(/evaluate_host_policy/) or test(/handle_socks5_tcp/)'
-just test -p codex-network-proxy
-just test -p codex-core -E 'test(/managed_network_proxy_decider_survives_full_access_start/)'
+just test -p codex-network-proxy --retries 0 --flaky-result fail -E 'test(/host_blocked/) or test(/http_connect_accept/) or test(/mitm_policy/) or test(/evaluate_host_policy/) or test(/handle_socks5_tcp/)'
+just test -p codex-network-proxy --retries 0 --flaky-result fail
+just test -p codex-core --retries 0 --flaky-result fail -E 'test(/managed_network_proxy_decider_survives_full_access_start/)'
 ```
 
-## 6. B族：确定性直连 HTTP（5项）
+## 7. B族：确定性直连 HTTP（5项）
 
-### 6.1 精确集合
+### 7.1 精确集合
 
 1. `codex-http-client::without_url_redacts_transport_error_urls`
 2. `codex-api::upload_openai_file_reports_blob_transport_diagnostics_without_sas`
@@ -156,18 +187,21 @@ just test -p codex-core -E 'test(/managed_network_proxy_decider_survives_full_ac
 4. `codex-core-plugins::search_remote_plugins_redacts_sensitive_parameters_from_transport_errors`
 5. `codex-exec-server::delegated_http_failure_warning_redacts_request_url`
 
-### 6.2 共用 Direct policy
+### 7.2 共用 Direct policy
 
-给既有 `OutboundProxyPolicy` 增 `Direct`：
+给既有 `OutboundProxyPolicy` 增 `#[doc(hidden)] Direct`，作为跨 crate 测试确实需要的 workspace-visible 例外，
+不把它表述成新的产品代理模式：
 
 - 同步/异步 route resolver 直接返回 `OutboundProxyRoute::Direct`，不读取代理环境或 `NO_PROXY`，也不调用DNS resolver。
 - client builder 必须落到既有 `.no_proxy()`；redirect继续直连。
 - Direct不得退回 `ReqwestDefault` 的 transport-default/custom-CA 分支。
+- 配置解析、CLI、app-server/wire schema 和生产 factory 选择不得产生 Direct；补回归钉住现有配置只能映射到
+  `ReqwestDefault`/`RespectSystemProxy`，并在交付时审查 Direct 的选择调用点只位于测试/测试支持代码。
 - 生产默认和所有现有构造仍用原策略。更新 `route_aware_client_pool.rs`、
   `core-plugins/startup_sync/http_client.rs`、相关测试和 `ollama/src/client.rs` 的穷举匹配。
 - 用有毒 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY` 的 `MapEnv` 加单测，resolver设为panic，证明Direct不读它们。
 
-### 6.3 各项落点
+### 7.3 各项落点
 
 - #1 直接用 `reqwest::Client::builder().no_proxy().build()`，保留关闭端口和URL脱敏断言。
 - #2 已有 `RouteAwareClientPool` 参数，测试传 Direct pool；保留 `failed after`、connect分类、Azure request ID、
@@ -178,17 +212,17 @@ just test -p codex-core -E 'test(/managed_network_proxy_decider_survives_full_ac
   accept后drop的中途transport错误和敏感参数脱敏。listener accept需有界等待。
 - #5 已有 `HttpClientFactory` 注入，传Direct factory；继续要求请求失败、`error_is_connect=true`、path/query不泄漏。
 
-### 6.4 门禁
+### 7.4 门禁
 
 ```text
-just test -p codex-http-client -E 'test(/without_url_redacts_transport_error_urls/) or test(/direct/)'
-just test -p codex-api -E 'test(/upload_openai_file_reports_blob_transport_diagnostics_without_sas/)'
-just test -p codex-cli -E 'test(/mcp_check_warns_for_optional_http_reachability/)'
-just test -p codex-core-plugins -E 'test(/search_remote_plugins_redacts_sensitive_parameters_from_transport_errors/)'
-just test -p codex-exec-server -E 'test(/delegated_http_failure_warning_redacts_request_url/)'
+just test -p codex-http-client --retries 0 --flaky-result fail -E 'test(/without_url_redacts_transport_error_urls/) or test(/direct/)'
+just test -p codex-api --retries 0 --flaky-result fail -E 'test(/upload_openai_file_reports_blob_transport_diagnostics_without_sas/)'
+just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/mcp_check_warns_for_optional_http_reachability/)'
+just test -p codex-core-plugins --retries 0 --flaky-result fail -E 'test(/search_remote_plugins_redacts_sensitive_parameters_from_transport_errors/)'
+just test -p codex-exec-server --retries 0 --flaky-result fail -E 'test(/delegated_http_failure_warning_redacts_request_url/)'
 ```
 
-## 7. C族：登录 shell 的 managed proxy 合同（1项）
+## 8. C族：登录 shell 的 managed proxy 合同（1项）
 
 测试 `user_shell_commands_do_not_inherit_managed_network_proxy` 只承诺移除当前session的managed proxy；login
 shell允许用户profile重新设置自己的代理。历史输出 `127.0.0.1:7897` 是宿主Clash，不是本session的随机代理。
@@ -203,12 +237,12 @@ shell允许用户profile重新设置自己的代理。历史输出 `127.0.0.1:78
 门禁：
 
 ```text
-just test -p codex-core -E 'test(/user_shell_commands_do_not_inherit_managed_network_proxy/)'
+just test -p codex-core --retries 0 --flaky-result fail -E 'test(/user_shell_commands_do_not_inherit_managed_network_proxy/)'
 ```
 
-## 8. D族：Landlock wget TCP connect（1项）
+## 9. D族：Landlock wget TCP connect（1项）
 
-### 8.1 已证事实
+### 9.1 已证事实
 
 - 上游原始日志两次均为 `Sandbox(Timeout)`、exit 124、约10.003秒，panic在“expected sandbox denied error”分支；
   不是 `exit_code == 0` 的沙箱击穿。
@@ -218,12 +252,16 @@ just test -p codex-core -E 'test(/user_shell_commands_do_not_inherit_managed_net
 - seccomp无条件拒绝 `connect`，且 `socket(AF_INET)` 也被拒；回环与公网不走不同规则面。
 - “代理导致超时”尚未证明。可能是wget对EPERM的重试，也可能是其他fixture时序。
 
-### 8.2 先诊断、再固定合同
+### 9.2 先诊断、再固定合同
 
 先在看门狗内单跑一次诊断：去掉 `-q` 或加 `-d`，显式 `--tries=1`，记录完整 `SandboxErr`、duration和
 wget stderr。只有日志能决定历史10秒的内部机制；最终方案不依赖该归因。
 
 最终测试改名为 `sandbox_blocks_wget_tcp_connect`：
+
+该测试不得复用或修改 `landlock.rs::assert_network_blocked`，而应使用仅服务于本用例的窄helper/内联fixture。现有
+shared helper把“任意非零”和“缺binary”都当作网络阻断，并由多项legacy测试共用；在其中收紧会把本次单项修复
+扩张为未取证的批量合同变更。
 
 1. 起受控loopback HTTP listener。
 2. 同一个wget binary先跑未沙箱控制轮，使用 `--no-proxy --tries=1` 和局部短连接/读取超时；必须成功且
@@ -234,14 +272,19 @@ wget stderr。只有日志能决定历史10秒的内部机制；最终方案不�
 
 此方案理由是 hermetic 且断言更强，不写成“修复了已证实的代理污染”。
 
+本阶段明确不修改 `assert_network_blocked` 及其另外6个现有调用者：`sandbox_blocks_curl`、
+`sandbox_blocks_ping`、`sandbox_blocks_nc`、`sandbox_blocks_ssh`、`sandbox_blocks_getent`、
+`sandbox_blocks_dev_tcp_redirection`。它们的真实域名/地址与宽松非零合同是具名legacy例外，不计入D族完成证据；
+最终workspace仍会运行它们，任何失败仍按全量失败处理，不能skip或从全量过滤掉。后续若要hermetic化这些合同，
+应作为独立范围取证后处理。
+
 门禁：
 
 ```text
-just test -p codex-linux-sandbox -E 'test(/sandbox_blocks_wget_tcp_connect/)'
-just test -p codex-linux-sandbox
+just test -p codex-linux-sandbox --retries 0 --flaky-result fail -E 'test(/sandbox_blocks_wget_tcp_connect/)'
 ```
 
-## 9. E族：fixture边界内的项目根发现（6项）
+## 10. E族：fixture边界内的项目根发现（6项）
 
 1. `codex_home_is_not_loaded_as_project_layer_from_home_dir`：在home创建唯一非空marker，user config配置该marker；
    真实发现home为根后，再证明同一 `home/.codex` 不会作为Project层加载。
@@ -251,7 +294,8 @@ just test -p codex-linux-sandbox
    `get_metadata` 返回NotFound，其余转发 `LOCAL_FS`；不造畸形 `.git`。
 4. `workspace_section_requires_meaningful_structure`：抽私有
    `build_workspace_section_with_user_root_with_fs`，生产传 `LOCAL_FS`，测试传fixture-bounded FS；不把None契约改为空结构。
-5. `recent_work_section_groups_threads_by_cwd`：同样抽 `build_recent_work_section_with_fs`；不把两个目录改成两个repo。
+5. `recent_work_section_groups_threads_by_cwd`：同样抽 `build_recent_work_section_with_fs`，并把同一 FS 继续传入
+   `format_thread_group`，替换分组、current group 与 group label 三处 `LOCAL_FS`；不把两个目录改成两个repo。
 6. `environment_id_fallback_has_cwd_prefix`：抽纯函数
    `environment_id_from_cwd_with_repo_root(cwd, Option<PathBuf>)`，public wrapper传真实结果；fallback传None，并补
    Some(repo_root)控制用例。
@@ -259,11 +303,11 @@ just test -p codex-linux-sandbox
 空 `project_root_markers=[]` 会直接短路根发现，不能用于 #1/#2。验证时保持 `/tmp/.git/.codex/.agents` 存在。
 
 ```text
-just test -p codex-core -E 'test(/codex_home_is_not_loaded_as_project_layer_from_home_dir/) or test(/project_layers_disabled_when_untrusted_or_unknown/) or test(/resolve_root_git_project_for_trust_returns_none_outside_repo/) or test(/workspace_section_requires_meaningful_structure/) or test(/recent_work_section_groups_threads_by_cwd/)'
-just test -p codex-secrets -E 'test(/environment_id_/)'
+just test -p codex-core --retries 0 --flaky-result fail -E 'test(/codex_home_is_not_loaded_as_project_layer_from_home_dir/) or test(/project_layers_disabled_when_untrusted_or_unknown/) or test(/resolve_root_git_project_for_trust_returns_none_outside_repo/) or test(/workspace_section_requires_meaningful_structure/) or test(/recent_work_section_groups_threads_by_cwd/)'
+just test -p codex-secrets --retries 0 --flaky-result fail -E 'test(/environment_id_/)'
 ```
 
-## 10. F族：PowerShell目标平台（1项）
+## 11. F族：PowerShell目标平台（1项）
 
 在 `commands_generated_by_shell_command_handler_can_be_matched_by_is_known_safe_command` 中：
 
@@ -272,40 +316,42 @@ just test -p codex-secrets -E 'test(/environment_id_/)'
 - 不使用运行时 `cfg!(windows)` 留下无用import/lint，也不在Linux开启Windows safelist。
 
 ```text
-just test -p codex-core -E 'test(/commands_generated_by_shell_command_handler_can_be_matched_by_is_known_safe_command/)'
+just test -p codex-core --retries 0 --flaky-result fail -E 'test(/commands_generated_by_shell_command_handler_can_be_matched_by_is_known_safe_command/)'
 ```
 
 Windows平台同名测试属于平台验收；本地WSL通过不能代替Windows未运行事实。
 
-## 11. G族：V8 feature unification（1项）
+## 12. G族：V8 feature unification（1项）
 
 将单条错误等价断言拆为两层：
 
-1. 全workspace始终执行：
+1. 全workspace始终执行兼容性蕴含：
 
    ```rust
    assert!(!cfg!(feature = "sandbox") || linked_v8_has_sandbox());
    ```
 
-   声明本crate sandbox时，链接库必须具备sandbox；feature unification只会增加依赖feature，因此该蕴含在
-   独占与workspace两种模式都有意义。
-2. 独占canary严格钉住两个方向。给crate加互斥期望feature，例如
-   `v8-canary-expect-default` 和 `v8-canary-expect-sandbox`（后者包含 `sandbox`）；同时启用必须compile error。
-   default期望 `linked_v8_has_sandbox()==false`，sandbox期望true。两条必须成对，default=false负责抓恒true、stub
-   或链错库。
+   声明本crate sandbox时，链接库必须具备sandbox；但workspace feature unification可能让依赖启用sandbox而本crate的
+   `cfg!(feature = "sandbox")` 仍为false，所以这条只能证明单向兼容性，不能当作双向canary。
+2. 不新增仅为测试期望服务的Cargo feature，避免违反workspace manifest白名单，也避免把测试控制面伪装成产品feature。
+   既有测试仅在显式设置 `RONDO_V8_CANARY_EXPECT_SANDBOX` 时解析严格的 `0`/`1` 期望并断言
+   `linked_v8_has_sandbox()`；非法值必须失败，未设置时只执行上面的兼容性蕴含。该环境变量只属于下面两条独占
+   canary命令，不进入产品配置。
+3. 两条独占canary必须成对：default=false负责抓恒true、stub或链错库，sandbox=true负责抓feature未传递。
 
 本项目不依赖远端CI作为交付证据；沿用现有V8资产准备方式，在本地看门狗内分别运行独占default、独占sandbox
-与workspace包含该测试的三种门禁。任何模式资产不可用都记未运行，不能把全量断言改成skip。
+与workspace包含该测试的三种门禁。任何模式资产不可用都记未运行/阶段未完成，不能把全量断言改成skip。
 
 ```text
-just test -p codex-v8-poc --no-default-features --features v8-canary-expect-default
-just test -p codex-v8-poc --no-default-features --features v8-canary-expect-sandbox
-# 全部族完成后的唯一一次workspace门禁中必须实际执行codex-v8-poc的单向蕴含测试。
+RONDO_V8_CANARY_EXPECT_SANDBOX=0 just test -p codex-v8-poc --no-default-features --retries 0 --flaky-result fail -E 'test(/sandbox_feature_matches_linked_v8/)'
+RONDO_V8_CANARY_EXPECT_SANDBOX=1 just test -p codex-v8-poc --no-default-features --features sandbox --retries 0 --flaky-result fail -E 'test(/sandbox_feature_matches_linked_v8/)'
+python3 ../.github/scripts/verify_cargo_workspace_manifests.py
+# 全部族完成后的唯一一次workspace门禁中必须实际执行codex-v8-poc的单向兼容性测试。
 ```
 
-## 12. H族：两项时序测试（2项）
+## 13. H族：两项时序测试（2项）
 
-### 12.1 共用取证协议
+### 13.1 共用取证协议
 
 每项在改代码前后分别运行：
 
@@ -322,7 +368,7 @@ just test -p codex-core --test-threads 10 --stress-count 200 --retries 0 --flaky
 - `conversation_close_routes_only_remaining_transcript_tail_once`
 - `exec_command_consumes_pushed_remote_process_events::truncated_event_replay`
 
-### 12.2 realtime close
+### 13.2 realtime close
 
 目标：`conversation_close_routes_only_remaining_transcript_tail_once`。
 
@@ -332,7 +378,7 @@ just test -p codex-core --test-threads 10 --stress-count 200 --retries 0 --flaky
   替换固定200ms sleep。
 - 不改产品close语义；若Notify后仍出现第三请求，按产品缺陷处理。
 
-### 12.3 truncated replay
+### 13.3 truncated replay
 
 目标：`exec_command_consumes_pushed_remote_process_events::truncated_event_replay`。
 
@@ -342,54 +388,86 @@ just test -p codex-core --test-threads 10 --stress-count 200 --retries 0 --flaky
 - 所有5秒等待在失败时输出phase，而不是裸 `expect`。
 - 取证后仅允许：用Notify/barrier消除不可观察竞态，或确认terminal event真丢失并立产品缺陷；不得减事件或加时。
 
-## 13. I族：exec-server empty workspace roots（1项）
+## 14. I族：exec-server empty workspace roots（1项）
 
-目标：`remote_process_preserves_empty_workspace_roots`。超时时立即执行
-`session.read(after_seq, None, Some(0))`，记录 `chunks/next_seq/exited/exit_code/closed/failure/sandbox_denied`，并记录
-harness与child存活状态：
+目标：`remote_process_preserves_empty_workspace_roots`。把 `Arc<dyn ExecProcess>` 的clone交给现有collector，测试本身
+保留session；collector每收到一条事件都更新latest seq。超时时测试立即执行
+`session.read(latest_seq, None, Some(0))`，记录 `chunks/next_seq/exited/exit_code/closed/failure/sandbox_denied`，并记录
+harness与child存活状态。当前collector会消费session且忽略seq，实施时必须先补这两个诊断能力，不能写一条实际上
+无法执行的timeout分支：
 
 - read已terminal：push/replay交付问题；
 - read仍running且无事件：sandbox helper/process卡住；
 - read返回failure：拒绝走错误通道传播。
 
-只有证明read稳定terminal且仓库已有独立pushed-event生命周期覆盖时，才可让本测试改用read collector。验收继续要求
-stdout不含 `excluded`、非零或明确sandbox denial、terminal closed、empty roots不补默认根。缺bwrap是未运行。
+只有证明read稳定terminal且仓库已有独立pushed-event生命周期覆盖时，才可让本测试改用read collector；否则保留
+pushed collector并修复已定位的交付问题。
+
+验收必须使用同一remote backend、helper、命令和cwd做成对控制：
+
+- 正对照把临时根显式放入workspace roots，要求stdout包含 `excluded`、exit 0、terminal closed且无failure；
+- 负用例保持workspace roots为空，要求stdout不含 `excluded`、empty roots不补默认根、terminal closed，并得到明确
+  sandbox denial，或得到已由源码和断言精确分类为文件访问被拒的exit/stderr；
+- 任意非零退出、helper启动失败、动态加载器失败、命令缺失、timeout或harness提前退出都不能算负用例通过；
+- bwrap或所需helper不可用时，本阶段记未运行/未完成，不允许 `return Ok(())` 静默变绿。
 
 ```text
 just test -p codex-exec-server --stress-count 200 --retries 0 --flaky-result fail -E 'test(/remote_process_preserves_empty_workspace_roots/)'
 ```
 
-## 14. J/K附加设施事项
+## 15. J/K附加设施事项
 
-### 14.1 external migration：去真实GitHub
+### 15.1 external migration：去真实GitHub
 
 当前external层没有local cloner seam；core-plugins中的cloner helper是私有同步测试入口。最低成本收口：
 
-- 在 `source_cla::marketplace_import_sources` 的纯测试钉住缺省官方源
-  `anthropics/claude-plugins-official`。
-- 既有本地marketplace import测试继续覆盖添加、安装、配置写入管线。
-- 将真实GitHub集成测试拆为“官方源推导”与“本地导入管线”两个合同；不ignore。
-- 若必须单测试贯通，只在external内部加 `import_plugins_with_marketplace_adder` closure，fake记录精确source；
-  不扩成公共cloner框架。
+- 在external内部加私有 `import_plugins_with_marketplace_adder` closure（或等价的私有窄协作者），生产wrapper仍调用真实
+  marketplace add，不扩成公共cloner框架。
+- 必须原位改造 `marketplaces.rs` 中现有
+  `import_plugins_infers_external_official_marketplace_when_missing_from_settings`，而不是在它仍会真实clone的情况下
+  另加一条测试。改造后将其重命名为
+  `import_plugins_infers_external_official_marketplace_with_fake_adder`：仍从“settings中只有已启用的官方插件、没有
+  显式source”开始，调用真实import编排到fake adder；fake必须记录并断言source精确为
+  `anthropics/claude-plugins-official`、ref为None、sparse paths为空，然后返回包含本地marketplace/plugin manifest的
+  installed root。继续断言import outcome、错误传播与配置结果，证明“源推导→添加→安装/配置”没有断链。
+- 增加纯测试 `marketplace_import_sources_infers_external_official_marketplace`，与既有
+  `import_plugins_supports_relative_external_agent_plugin_marketplace_path` 一起作为补充合同；二者不能替代上述改造后的
+  组合测试。
+- 测试期间不得发生GitHub DNS/connect或git子进程；组合测试直接调用注入fake的私有编排helper，断言fake恰调用一次，
+  且不触达生产 `add_marketplace` wrapper，以调用路径机械证明而不是凭运行速度推断。
 
 生产git缺timeout/cancel/后代清理是真实产品缺陷，另立任务并用本地挂起+派生后代wrapper验证；测试hermetic修复
 不能宣称该产品缺陷闭环。
 
-定向门禁必须覆盖纯source推导和本地marketplace导入测试；运行过程中不得产生对GitHub的DNS、connect或git
-子进程。用测试进程/fixture记录来证明“没有外部调用”，不能只凭测试快速通过推断。
+定向门禁必须覆盖纯source推导、显式本地marketplace和上述组合测试。
 
-### 14.2 OAuth：显式禁止打开浏览器
+### 15.2 OAuth：显式禁止打开浏览器
 
 给 `mcp login` 增 `--no-open-browser`，底层flow接收显式 `launch_browser`；false时仍打印authorization URL、等待
-callback、换取并持久化token。`login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials` 使用该flag，现有
-callback/token/logout断言全部保留。只设 `BROWSER` 不是跨平台合同，Windows实现可能不尊重它。
+callback、换取并持久化token；初次授权和“去掉scopes后重试”两条路径都必须透传该值。
+
+签名变更后逐一处理所有生产调用点：`cli/src/mcp_cmd.rs` 的首次与去scopes重试都传
+`!no_open_browser`；`core/src/mcp_skill_dependencies.rs` 的首次与去scopes重试、以及既有silent wrapper均显式传true，
+保持turn期依赖登录和其他非CLI入口仍会按原行为尝试打开浏览器。不得因新增CLI flag顺手把core调用改成false。
+
+把 `webbrowser::open` 隔在私有可注入launcher/callback后，生产默认保持现行为。单元测试用计数fake机械证明false为
+0次调用、true/default为1次；测试分别命名为
+`oauth_login_does_not_invoke_browser_launcher_when_disabled` 与
+`oauth_login_invokes_browser_launcher_once_when_enabled`。CLI解析/透传测试命名为
+`mcp_login_no_open_browser_propagates_launch_false`，证明 `--no-open-browser` 最终得到false。
+`login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials` 使用该flag，现有authorization URL、callback、token
+持久化与logout断言全部保留。只设 `BROWSER` 不是跨平台合同，Windows实现可能不尊重它。
+
+`CloudManagedMcpFixture::new()` 的OAuth隔离失败不得再以 `Ok(None)` 配合测试中的 `return Ok(())` 静默通过：改成
+显式preflight或 `Result<Self>`，不可用时让该阶段失败/记未运行。缺依赖、端口或隔离能力都不是功能通过证据。
 
 ```text
-just test -p codex-external-agent-migration -E 'test(/marketplace_import_sources/) or test(/import_plugins/)'
-just test -p codex-cli -E 'test(/login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials/)'
+just test -p codex-external-agent-migration --retries 0 --flaky-result fail -E 'test(/marketplace_import_sources_infers_external_official_marketplace$/) or test(/import_plugins_supports_relative_external_agent_plugin_marketplace_path$/) or test(/import_plugins_infers_external_official_marketplace_with_fake_adder$/)'
+just test -p codex-rmcp-client --retries 0 --flaky-result fail -E 'test(/oauth_login_does_not_invoke_browser_launcher_when_disabled$/) or test(/oauth_login_invokes_browser_launcher_once_when_enabled$/)'
+just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/mcp_login_no_open_browser_propagates_launch_false$/) or test(/login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials$/)'
 ```
 
-## 15. 串并行实施顺序
+## 16. 串并行实施顺序
 
 代码审查可按独立族并行；所有重型测试严格串行：
 
@@ -397,16 +475,21 @@ just test -p codex-cli -E 'test(/login_and_logout_persist_only_cloud_managed_mcp
 2. 批次A：resolver seam + 20 network-proxy + core decider。
 3. 批次B/C：Direct policy与5项消费者；随后shell合同。
 4. 批次E/F：fixture-bounded roots与PowerShell平台收口。
-5. 批次D/G：Landlock诊断/强合同；V8三模式。
-6. 批次H/I：严格执行修改前双200取证，再决定实现；改后同负载复验。
-7. 附加J/K：纯推导+本地管线、`--no-open-browser`。
-8. 每批跑相关包；全部通过后执行一次完整workspace `just test`，核对JUnit、失败/skip清单与watchdog summary；
-   最后运行受影响包clippy/fmt，不重复全量。
+5. 批次D/G：Landlock诊断后用独立wget helper落强合同，不动shared legacy helper；V8既有feature的独占双canary与
+   workspace单向兼容性。
+6. 批次H/I：严格执行修改前双200取证；在第4节条件决策点确认仍属测试设施修复后再实施，改后同负载复验。
+7. 附加J/K：原位改造点名的真clone测试为fake-adder组合链路；`--no-open-browser`及launcher零调用证明，core
+   两处生产登录路径保持显式true。
+8. 每批跑相关包；全部通过后执行一次完整workspace
+   `just test --retries 0 --flaky-result fail`；先核对watchdog summary中的JUnit路径/哈希，再以独立只读XML解析核对
+   实际执行数、failure与skip，并记录正式命令禁重试；
+   受影响Cargo manifest另跑 `python3 ../.github/scripts/verify_cargo_workspace_manifests.py`，最后运行受影响包clippy/fmt，
+   不重复全量。
 
 若前5批完成，严格待定只应剩 H的2项与I的1项，即39→3；附加J/K不计入严格失败。任何实际数量差异都以
 新的机器JUnit逐名对账，不能靠算术改口径。
 
-## 16. 当前状态
+## 17. 当前状态
 
 ### 已完成
 
@@ -414,35 +497,43 @@ just test -p codex-cli -E 'test(/login_and_logout_persist_only_cloud_managed_mcp
 - 证实Clash fake-IP、ambient proxy和 `/tmp` marker是环境事实；没有修改宿主。
 - 证实Landlock历史失败是10秒 `Sandbox(Timeout)`，不是沙箱击穿；代理归因撤回。
 - 证实回环/公网走同一seccomp拒绝面；本地listener合同成立。
-- 证实原V8断言受feature unification影响；确定全量单向蕴含+独占双向canary。
+- 证实原V8断言受feature unification影响；确定workspace单向兼容性+既有feature的独占双向canary。
 - 核对各现有seam：NetworkProxyState手写Clone/Debug、HTTP factory/selector/pool、realtime缺FS参数、
   external无公开cloner、OAuth硬编码开浏览器。
 
 ### 当前工作
 
-- 本计划已定稿，等待后续按批次实施39个严格失败与2个附加事项。
+- 本计划已完成可执行性审查，等待后续按批次实施39个严格失败与2个附加事项。
 
 ### 阻塞项
 
-- H/I的最终代码修法必须由修改前取证决定；本计划给出可执行诊断和分流，不预判产品/fixture结论。
-- Windows PowerShell门禁、本地V8资产或bwrap缺失时必须如实记未运行，需要相应平台/资产后补验。
+- H/I的最终代码修法必须由修改前取证决定；若证据指向产品缺陷或超出本计划的重构，停在决策点更新方案，不能
+  用fixture改动掩盖。
+- Windows PowerShell门禁、本地V8资产、bwrap或OAuth隔离条件缺失时必须如实记未运行/阶段未完成，需要相应
+  平台或资产后补验。
 
 ### 当前验收状态
 
 - 方案审查完成；39+2代码未实施、未通过新全量，不能称测试闭环。
 
-## 17. 关键决策记录
+## 18. 关键决策记录
 
 | 编号 | 决策 | 原因 | 影响范围 | 状态 |
 |---|---|---|---|---|
 | 001 | 使用39严格失败+2附加事项口径 | 第一批实际覆盖42；migration/OAuth不在严格失败清单 | 全计划 | 已采纳 |
 | 002 | DNS用精确登记resolver，未知返回错误 | catch-all会破坏DNS失败安全回归 | A | 已采纳 |
-| 003 | 增显式Direct policy，默认不变 | 5项已有pool/factory/selector seam，不能依赖NO_PROXY | B | 已采纳 |
+| 003 | 增经审计的 `#[doc(hidden)] Direct，禁止配置/CLI/wire/生产路径构造并静态审查选择点 | 5项需确定性直连，但公开枚举variant不能被误当成私有测试能力 | B | 已采纳 |
 | 004 | shell只排除本session managed proxy | login shell可合法重载用户profile | C | 已采纳 |
-| 005 | Landlock使用本地listener+未沙箱对照 | seccomp无地址分支，合同更强且hermetic | D | 已采纳 |
+| 005 | wget使用独立本地listener helper，不改shared legacy helper | seccomp无地址分支；收紧共享helper会无取证扩张到另外6项 | D | 已采纳 |
 | 006 | 项目根测试用非空marker或FS seam | 空marker直接禁用根发现，会弱化测试 | E | 已采纳 |
 | 007 | PowerShell断言按编译目标平台收口 | WSL PATH不等于Windows分类目标 | F | 已采纳 |
-| 008 | V8全量蕴含与独占双canary成对 | 既覆盖unification又抓恒true/链错库 | G | 已采纳 |
+| 008 | V8用workspace单向蕴含与既有feature独占双canary | workspace断言受unification影响；不新增违反manifest白名单的期望feature | G | 已采纳 |
 | 009 | 时序修复前后都做1线程/10线程各200次 | 孤立通过不能覆盖workspace并发竞态 | H | 已采纳 |
 | 010 | external产品git终止另立任务 | hermetic测试与产品子进程缺陷不能混称闭环 | J | 已采纳 |
-| 011 | OAuth用CLI显式no-open-browser | BROWSER环境变量不是跨平台保证 | K | 已采纳 |
+| 011 | OAuth用CLI显式no-open-browser，core首次/重试保持true | BROWSER不是跨平台保证；CLI副作用修复不能改变turn期生产行为 | K | 已采纳 |
+| 012 | 所有正式nextest门禁禁重试且flaky视为失败 | 仓库默认重试1次；仅看最终绿色会掩盖不稳定性 | 全计划 | 已采纳 |
+| 013 | external原位改造点名的真clone测试为fake-adder组合测试 | 两个分拆测试不能证明真实编排没有断链；旧测试若并存仍会访问GitHub | J | 已采纳 |
+| 014 | empty roots使用同backend的正反对照并精确分类拒绝 | 任意非零可能来自helper/加载器/命令失败，不等于隔离生效 | I | 已采纳 |
+| 015 | OAuth用注入launcher计数且隔离失败不得静默通过 | CLI flag本身不能证明所有分支都未调用浏览器 | K | 已采纳 |
+| 016 | watchdog retained只作JUnit完整性证据，语义另行解析 | 当前watchdog不统计failure/skip，passed也无法识别测试体提前返回 | 全计划 | 已采纳 |
+| 017 | 6个shared Landlock helper调用者列为具名legacy例外 | 它们不在本次单个wget失败范围；全包门禁会混入真实域名与宽松合同 | D | 已采纳 |
