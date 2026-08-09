@@ -232,16 +232,16 @@ TCP 允许任意分片，这可能在压力下产生 fixture 假红。应在已�
 - `20260809-195819-1000-12` 在最终联合回归前发生一次 `watchdog_attach_failed`、rc 81、JUnit absent；
   随后的 `195832` 正常执行并通过。这不是测试红，但属于应保留的执行历史。
 
-### F-008（文档实时性）：plan/WBS 尚停留在提交前状态
+### F-008（文档实时性，现已闭环）：plan/WBS 初验时尚停留在提交前状态
 
-- plan §17 和“当前工作/后续计划”仍写“正在提交前收口”“尚待提交”，与 `216ccb7` 已提交、`06b2a0e`
+- 初验时plan §17 和“当前工作/后续计划”仍写“正在提交前收口”“尚待提交”，与 `216ccb7` 已提交、`06b2a0e`
   已合并推送的事实不一致。
-- `doc/WBS.md:109-110` 仍写提交前需收口静态检查与工作树提交。其只列 Windows/V8 符合原计划阻断口径；
+- 初验时`doc/WBS.md:109-110` 仍写提交前需收口静态检查与工作树提交。其只列 Windows/V8 符合原计划阻断口径；
   若文档另行宣称跨平台覆盖，则仍须披露 macOS 未执行，不能把它写成已通过。
 - 实施日志整体诚实记录了 V8、workspace、Windows/macOS 未完成，但 A–F/J/K 逐份 SHA 和 clippy 口径有上述偏差。
 
-按用户本轮约束，本次不修改这些权威文档。批准文档整改后，应把 plan/WBS 更新为当前事实，避免继续把已提交事项
-写成待提交，也不得把未完成平台证据写成已通过；macOS 应放在非阻断跨平台边界，而非原计划完成阻断中。
+初验时按用户约束未修改这些权威文档；第10节复验、提交与推送完成后，ExecPlan、WBS、WBS-COMPLETED和实施日志
+已按最终事实同步。未完成平台证据仍保持未通过口径；macOS 放在非阻断跨平台边界，而非原计划完成阻断中。
 
 ## 6. 初验 A–K 逐族验收矩阵（状态由第 10 节复验结果覆盖）
 
@@ -448,8 +448,7 @@ just test -p codex-cli -p codex-rmcp-client --retries 0 --flaky-result fail \
   `/home/sjc/desktop/RONDO/.claude/worktrees/0809-plan004-independent-remediation`
 - 分支：`0809-plan004-independent-remediation`
 - 基线：已推送的 `main@06b2a0e523b4cadd136f5ada5beca7d71a1a9f95`
-- 当前代码差异：7 个 Rust 文件，尚未提交、未合并、未推送。
-- 当前 7 文件 binary diff SHA-256：
+- 整改提交前快照：7 个 Rust 文件，binary diff SHA-256：
   `939960a4a8e3f394e15d1ee988cef6c78716c9edf6d9aa85d1a606fafa9f5167`。
 - 原工作树 `.claude/worktrees/0809-remaining-test-failures` 继续由原执行方使用；本次没有在其中编辑、构建、
   提交或切换分支。本日志最初从原工作树逐字复制到新工作树，之后只在新副本追加和校正。
@@ -620,8 +619,10 @@ response/compact sequence helper 仍有同类“超额会 panic”的既存失�
   目标环境判定。
 - **Plan 004 仍不能宣称 41 项完整闭环**：Windows PowerShell 正向合同、V8 `sandbox=true` canary 与完整
   workspace 尚无通过证据；后两项仍受已披露的官方预编译资产缺失影响。
-- 当前整改只存在于 `0809-plan004-independent-remediation` 的未提交工作树；尚未合并或推送，因此远端
-  `main@06b2a0e` 仍是初验基线，不包含本节整改。后续提交、合并和推送应等待用户批准。
+- 整改已提交为 `95708749f8efffa93c0a88e1b2ffe1b4db6460b3`，经no-ff合并提交
+  `8c185af30d6c65b73d1f083af6c4a8add6fed71c` 进入主线并推送远端；`git ls-remote` 与随后fetch均核对
+  `origin/main` 精确指向该合并提交。已合并分支重命名为 `zz-done/0809-plan004-independent-remediation`，
+  原执行方工作树未受影响。
 
 **复验结论：D/H/K 与 G-Low 的代码整改通过；原 Plan 004 的完整验收仍因 Windows、V8 sandbox 和
 workspace 环境门禁未闭环而保持“部分通过”。macOS 仅为已披露的非阻断跨平台边界。**

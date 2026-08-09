@@ -29,10 +29,10 @@
   `encrypted_function_args`；新旧 Guardian 源码证据须按 meta 中的 source tag/commit 分层。实际有效
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
 - 测评体系、教师 harness 研究尚未开始。
-- **当前阶段：剩余测试失败实施收尾**。`plan/004-remaining-test-failures-investigation.md` 的A-F/H-K
-  已实现并通过定向门禁，H/I压力证据与提交前独立差异审查回归通过；G的default canary与manifest门禁通过，
-  但sandbox canary和唯一一次workspace全量在测试执行前被rusty_v8缺失的官方预编译资产阻断，Windows目标平台
-  测试也待补验。P1尚未开始，Docker与小额真实API仍受§6授权门约束。
+- **当前阶段：Plan 004 环境门禁待补验**。A-F/H-K的当前平台实现与独立整改已交付，定向、压力和静态门禁通过；
+  G的default canary与manifest门禁通过。sandbox canary和唯一一次workspace全量在测试执行前被rusty_v8缺失的
+  官方预编译资产阻断，Windows目标平台测试也待补验；macOS Seatbelt未运行是非阻断跨平台证据缺口。P1尚未开始，
+  Docker与小额真实API仍受§6授权门约束。
 
 ## 2. 方向与依赖
 
@@ -106,10 +106,10 @@ P0 共享地基 ────────┤                          ├─→ �
 
 P0 已完成定向门禁并合入主线；验收和失败差集见 `doc/WBS-COMPLETED.md`、
 `agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。剩余测试失败已按
-`plan/004-remaining-test-failures-investigation.md` 实现并完成当前平台可执行的定向/压力门禁；提交前仍需收口
-最终静态检查与工作树提交，V8 sandbox预编译资产与Windows目标平台证据保持待补验边界。
-P1草稿见 `plan/003-p1-terminal-bench-minimal-chain-draft.md`，在本维护批次审查/合并和用户确认草稿前
-不进入实现；涉及Docker、真实API或数据外发时仍先走§6授权门。
+`plan/004-remaining-test-failures-investigation.md` 完成当前平台实现、独立整改、定向/压力/静态门禁并交付主线；
+V8 sandbox预编译资产、完整workspace与Windows目标平台证据保持待补验边界。
+P1草稿见 `plan/003-p1-terminal-bench-minimal-chain-draft.md`，在用户确认草稿前不进入实现；涉及Docker、
+真实API或数据外发时仍先走§6授权门。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，

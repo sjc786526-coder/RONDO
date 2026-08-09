@@ -118,11 +118,14 @@
 - I修改后200/200、0 failure/error/skip：run `20260809-183819-1000-632851`，JUnit SHA-256
   `7cf2b5f37327e43fcddc40327208275f837c036d8014f1de11f1e675df592a28`。
 - A：network定向40/40、整包205/205、core 1/1；B/C：定向24/24；D：1/1；E：6/6；F：1/1；
-  J：3/3；K：4/4。各run id与逐份SHA记录在ExecPlan §17；全部使用 `--retries 0 --flaky-result fail`。
+  J：3/3；K：4/4。代表性run id记录在ExecPlan §17，26份绿色JUnit的逐份run id与SHA矩阵见后续独立验收日志
+  §7；全部使用 `--retries 0 --flaky-result fail`。
 - G default=false canary 1/1（run `20260809-192947-1000-909276`）和manifest脚本通过。sandbox=true run
   `20260809-193011-1000-912361` 在测试执行前因官方预编译资产404失败，不能记通过。
-- `just fmt`、`just fmt-check` 通过；受影响crate `just fix` 与严格 `just clippy` 通过（run
-  `20260809-193437-1000-936925` / `20260809-193855-1000-971128`，JUnit均正确为not_applicable）。clippy fix后
+- `just fmt`、`just fmt-check` 通过；受影响crate `just fix` 与workspace配置lint的 `just clippy` 通过（run
+  `20260809-193437-1000-936925` / `20260809-193855-1000-971128`，JUnit均正确为not_applicable）；该clippy run
+  没有统一显式传入 `-- -D warnings`。后续带 `-- -D warnings` 的严格门禁为五个审查后受影响crate的run
+  `20260809-200429-1000-1103492`。clippy fix后
   H最终文件具名回归2/2通过（run `20260809-194348-1000-1014436`）；补子进程非零匹配断言后truncated最终回归
   1/1通过（run `20260809-195026-1000-1037637`）。
 - 独立只读解析26份正式JUnit，逐份testcase数量与命令匹配，failure/error/skip均为0，SHA与watchdog summary一致。

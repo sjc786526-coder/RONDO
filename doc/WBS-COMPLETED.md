@@ -182,3 +182,14 @@ standard/Lite 形态均补回归。
 - 独立复验补跑三个受影响包：3,630项运行且全部通过，三包clippy退出0、零warning。收尾补丁另通过
   44项脚本测试（其中9项为看门狗helper）及1项skills定向Nextest；该轮JUnit为1项通过、SHA与summary一致，
   `stop_reason=none`、`cleanup_reason=none`。未重跑完整workspace或Bazel。
+
+### 2026-08-09 Plan 004 当前平台实现与独立整改交付
+
+- 39个严格失败合同与J/K两个附加设施事项已完成当前平台实现；独立验收识别的D/H假绿、K透传覆盖缺口和
+  G非Unicode边界已完成窄整改。整改门禁共409 testcase、0 failure/error/skip，H两组压力各200/200，
+  五个受影响crate严格clippy与统一fmt-check通过。
+- 原实现提交 `216ccb7` 经 `06b2a0e` 合入主线；独立整改提交 `9570874` 经 `8c185af` 合入并推送远端。
+  详细证据、逐份JUnit哈希与决策见 `agent_log/2026-08-09-203209-plan-004-independent-acceptance.md`。
+- 本阶段只完成当前目标环境可执行部分，Plan 004整体仍为部分通过：Windows PowerShell正向合同未运行；V8
+  `sandbox=true` canary与完整workspace在测试前被官方预编译资产404阻断。macOS Seatbelt入口保留但未实机运行，
+  作为非阻断跨平台证据缺口披露。
