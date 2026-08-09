@@ -10,7 +10,7 @@
 | 根目录 | 是否入库 | 放什么 | 判据 |
 |---|---|---|---|
 | `eval/` | **入库** | 运行配置、任务分层清单、结果库、报表 | 文本、体积小、需要跟随代码版本演进 |
-| `test-data/` | **git-ignored** | 录制包、证据包、单次运行原始产物、模型权重 | 体积大、可重生成或不可共享 |
+| `eval-data/` | **git-ignored** | 录制包、证据包、单次运行原始产物、模型权重 | 体积大、可重生成或不可共享 |
 
 分家的理由：结果库和清单必须跟着 commit 走才能回答"这个分数是哪版代码跑的"；而录制包和容器日志放进 git 会让仓库迅速不可用。
 
@@ -18,7 +18,7 @@
 
 ```gitignore
 # 测评重资产：录制包、证据包、运行产物、模型权重
-/test-data/
+/eval-data/
 ```
 
 ## 2. 目录布局
@@ -37,7 +37,7 @@ eval/                                  # 入库
 │   └── runs.jsonl                     # 结果库主表，只追加
 └── reports/                           # 生成的对比表与曲线（可重生成）
 
-test-data/                             # git-ignored
+eval-data/                             # git-ignored
 ├── recordings/<recording_id>/         # A1 录制包（原始 HTTP exchange + SSE）
 ├── evidence/                          # 审批证据包
 │   ├── raw/<review_id>/               # S2 直接落盘处；Unix/WSL 权限 0700，Windows 继承 ACL
@@ -100,7 +100,7 @@ test-data/                             # git-ignored
   ],
   "metrics": null,
   "cost": { "estimated_usd": 1.2, "actual_usd": 1.05 },
-  "artifacts": "test-data/runs/20260812-143005182-tb-rondo-r1",
+  "artifacts": "eval-data/runs/20260812-143005182-tb-rondo-r1",
   "notes": ""
 }
 ```
@@ -118,7 +118,7 @@ test-data/                             # git-ignored
 
 ## 5. 证据包分区
 
-1. S2 运行时统一落到 `test-data/evidence/raw/<review_id>/`（`review_id` 只作文件名，保证实例唯一）。
+1. S2 运行时统一落到 `eval-data/evidence/raw/<review_id>/`（`review_id` 只作文件名，保证实例唯一）。
 2. 划分到 `seed/` 与 `holdout/` 时，落桶键必须是**跨运行稳定的语义身份**：`sha256(task_id + 规范化待审批动作指纹)`，无 task_id 时退化为动作指纹本身。
    **不能用 `review_id` 落桶**——它是每轮新生成的 UUID v4，同一任务同一动作重跑会换 id，互斥就只对文件实例成立、对语义样本不成立，跨运行仍会污染。
 3. 划分结果写入清单并冻结；后续新增证据按同一规则增量划分，不重划历史。
@@ -140,14 +140,14 @@ test-data/                             # git-ignored
 |---|---|
 | `eval/results/runs.jsonl` | 永久。文本且体积小，是唯一的历史真相 |
 | `eval/reports/` | 可随时重生成，只保留最新一版 |
-| `test-data/runs/<run_id>/` | 保留最近 20 次 + 所有里程碑（M0~M5）标记的运行 |
-| `test-data/recordings/` | 冻结用例集对应的录制永久保留；探索性录制可清 |
-| `test-data/evidence/` | `seed` 与 `holdout` 永久（体量小）；`raw` 在完成划分后可清 |
-| `test-data/models/` | 只保留当前在用与上一版权重，其余按需重新下载 |
+| `eval-data/runs/<run_id>/` | 保留最近 20 次 + 所有里程碑（M0~M5）标记的运行 |
+| `eval-data/recordings/` | 冻结用例集对应的录制永久保留；探索性录制可清 |
+| `eval-data/evidence/` | `seed` 与 `holdout` 永久（体量小）；`raw` 在完成划分后可清 |
+| `eval-data/models/` | 只保留当前在用与上一版权重，其余按需重新下载 |
 
 提供 `just eval-gc` 按上表清理，删除前打印将删除的路径与总体积，**不做静默删除**。
 
-`eval/fixtures/` 入库阈值：总量 ≤ 50MB 且单文件 ≤ 10MB。超过则只入库精简后的规范化包，原始录制留在 `test-data/`。
+`eval/fixtures/` 入库阈值：总量 ≤ 50MB 且单文件 ≤ 10MB。超过则只入库精简后的规范化包，原始录制留在 `eval-data/`。
 
 ## 7. 不做什么
 

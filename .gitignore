@@ -7,5 +7,8 @@ reference-agent-harness/
 /.codex/
 /.claude/
 
-# Evaluation data: benchmark runs, approval evidence bundles, and result archives.
+# Local test data and retained test-run artifacts.
 /test-data/
+
+# Evaluation recordings, evidence bundles, raw runs, and model weights.
+/eval-data/
