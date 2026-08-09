@@ -85,7 +85,8 @@
 - 录制元数据必须标记 Guardian 请求是标准 Responses 还是 Responses Lite。`v0.147.0` 的 Luna
   使用 Lite，policy 和工具声明的 JSON 位置与标准 Responses 不同；request drift 只能在同一
   完整逻辑请求形态或先规范化为统一逻辑 payload 后比较。
-- 录制元数据还必须写入上游 baseline tag/commit、Guardian source baseline 与有效 policy 内容哈希。
+- 录制元数据还必须写入上游 baseline tag/commit、Guardian source tag/peeled commit 与有效 policy 内容哈希；
+  Guardian两字段取自 `mydev/codex-rs/core/upstream-source-baseline.toml`。
   0.147 的 policy/template 和 approval/retry reason 输入与 0.146.1 不同；同一源码版本也可能使用
   requirements/config/catalog policy，不能在没有两层标记时合并统计。
 - 录制可以重、可以慢、低频执行，**不作为基线**，只作素材来源。

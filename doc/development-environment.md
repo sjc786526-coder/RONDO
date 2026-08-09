@@ -159,8 +159,10 @@ APT 已安装并复核以下开发包：
 
 ### 3.4 编译验证与锁文件一致性
 
-上游基线已整体升级到 Codex CLI `0.147.0`（官方 tag commit
-`be6e8eac029b183056b7e4402879f15d2c85f61b`）。官方 tag 的 workspace `Cargo.toml` 已是
+上游基线已整体升级到 Codex CLI `0.147.0`。受Git跟踪的机器事实源
+`mydev/codex-rs/core/upstream-source-baseline.toml` 记录官方tag `rust-v0.147.0` 与peeled commit
+`be6e8eac029b183056b7e4402879f15d2c85f61b`，Guardian evidence和独立基线升级校验共同消费它。
+官方tag的workspace `Cargo.toml` 已是
 `0.147.0`，但 `Cargo.lock` 中 135 个本地 workspace package 仍是发布占位值 `0.0.0`；RONDO
 沿用既有冻结规则，把这些条目机械规范化为 `0.147.0`。规范化后的 lock SHA-256 是
 `bc4fe450de929afe82928734f860ca83e5f9dc5f9f1211b0974ea47b57af77ca`。
@@ -266,14 +268,17 @@ RONDO_BUILD_PROJECT_STOP_BYTES=190000000000 just test
 ```
 
 `RONDO_BUILD_WATCHDOG=0`、`RONDO_BUILD_LOCK=0` 与 `RONDO_RUSTC_THROTTLE=0` 是实现层的紧急
-诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗在活跃 scope
-中读不到资源计数器、收不到终止确认、包装器收到 `INT` / `TERM` / `HUP` 或意外退出时均按
-fail-closed 处理。终止逻辑是「单轮有界重试 + 外层持续重试直到确认 scope inactive」：卡在不可中断
-I/O 的 scope 不会让包装器提前放手，只会每 30 秒打印一次仍存活的进程数，`MemoryMax` 继续兜底。
+诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗用
+`cgroup.events` 的 `populated` 位判断整个scope及其子cgroup是否仍有进程，`cgroup.procs`只记录根层
+直接成员数作诊断；user D-Bus查询不参与存活判定。事实不可读时按unknown主动终止并继续监督，不能
+当作inactive。终止采用约1秒的kill round与无界外层监督，按Bash单调 `SECONDS` 约每30秒报告真实
+经过时间；`MemoryMax`在此期间继续兜底。拿不到ControlGroup时即使命令返回0也按附着失败返回。
 
-每轮结束时，`target/nextest/<profile>/junit.xml` 会被复制到该轮的看门狗目录
-（`.codex/build-watchdog/<stamp>/junit-<profile>.xml`）。`target/` 会被 `cargo clean` 或换工作树抹掉，
-而看门狗目录不会，因此需要事后复盘失败清单时以这份留存为准。
+正式 `just test` 保持 `NEXTEST_PROFILE=local`，但看门狗为每轮生成独立nextest配置，把JUnit直接写入
+该轮独占目录 `.codex/build-watchdog/<stamp>/junit-local.xml`，不再扫描或复制target中的历史报告。
+`summary.env` 明确记录 `junit_status=retained|absent|unreadable|invalid|hash_failed|not_applicable`、路径与
+SHA-256；Nextest返回0但本轮报告未成功留存时，包装器以证据失败返回。`retained`只证明归属和完整性，
+测试是否通过仍由命令返回码与XML内容决定。
 
 ## 4. Node 与 pnpm
 

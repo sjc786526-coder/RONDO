@@ -84,6 +84,7 @@ eval-data/                             # git-ignored
     "guardian_effort": "low",
     "guardian_request_shape": "responses_lite",
     "guardian_source_baseline": "rust-v0.147.0",
+    "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
     "guardian_effective_policy_sha256": "…",
     "approvals_reviewer": "auto_review",
     "approval_policy": "on-request",
@@ -128,7 +129,8 @@ eval-data/                             # git-ignored
    `instructions`，后者位于 `input` 的 developer message。规范化后两种形态都必须保留等价的
    policy / 任务上下文 / 工具调用结果，并剔除 `encrypted_function_args` 等 provider 私有运输字段。
 7. 0.147 会把有界的 approval/retry reason 放进 Guardian prompt；它是有意义输入，规范化时必须保留。
-   每份证据的 meta 记录 `guardian_source_baseline`；P1 消费器还必须从有效 policy 内容生成
+   每份证据的meta从 `mydev/codex-rs/core/upstream-source-baseline.toml` 记录
+   `guardian_source_baseline`（tag）与 `guardian_source_commit`（peeled commit）；P1消费者还必须从有效policy内容生成
    `guardian_effective_policy_sha256`。源码基线与实际 policy 身份分开分层，不能静默混作同一训练或
    评测总体。
 

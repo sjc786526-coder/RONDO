@@ -8,13 +8,15 @@
 ## 1. 当前状态
 
 - 上游基线冻结在 Codex CLI `v0.147.0`（`rust-v0.147.0`，上游 commit
-  `be6e8eac029b183056b7e4402879f15d2c85f61b`）。
+  `be6e8eac029b183056b7e4402879f15d2c85f61b`）；机器事实源为
+  `mydev/codex-rs/core/upstream-source-baseline.toml`。
 - 开发环境已就绪（见 `doc/development-environment.md`）：Rust 1.95.0、pnpm 10.33.0、uv、Docker Desktop 可用；本机未装 Bazel。
 - 本机推理硬件：RTX 4060 Laptop **8GB VRAM** / 32 核；RAM 与 WSL 配额见
   `doc/development-environment.md`。8B 级模型只能走 4-bit 量化，且上下文预算需实测。
 - P0 共享地基已适配 `v0.147.0`，两个开关仍默认关闭。Guardian 证据在 HTTP/WS 各自的 transport
   send point 捕获，`call_id` / `turn_id` 只在 input 项的结构位点成对重映射，meta 带
-  `guardian_source_baseline`；预取消轮、source baseline 与 builder-before-send 均有回归。
+  `guardian_source_baseline` 与 `guardian_source_commit`；预取消轮、source identity 与
+  builder-before-send 均有回归。
   P0 定向功能验收已收口（schema、fmt、clippy 与 16 项精确回归通过）；历史 workspace 的失败
   另见测试维护批次，不称“全量全绿”。
 - `v0.147.0` 中 Guardian 默认模型候选由 provider/auth 决定：configured provider + API key
@@ -24,11 +26,12 @@
 - Luna 的 Responses Lite 线路并非 0.147 新增，但 API-key 默认改选 Luna 后成为默认可达路径。
   `E_final` 保存 transport 即将发送的完整逻辑请求而不是 WebSocket 增量 delta；消费者不得假设 policy
   和 tools 总在顶层 `instructions` / `tools`，也不得保留新增的 provider-private
-  `encrypted_function_args`；新旧 Guardian 源码证据须按 meta 中的 source baseline 分层。实际有效
+  `encrypted_function_args`；新旧 Guardian 源码证据须按 meta 中的 source tag/commit 分层。实际有效
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
 - 测评体系、教师 harness 研究尚未开始。
-- **当前阶段：P1 草稿审查与 L1 / L2 准备**。P1 尚未实施，Docker 与小额真实 API 仍受 §6
-  授权门约束。
+- **当前阶段：测试设施收尾与剩余失败实施方案定稿**。第一批覆盖42个历史失败名，严格清单机械剩余
+  39项，另有migration/OAuth两个附加设施事项；`plan/004-remaining-test-failures-investigation.md`
+  已定稿但39+2尚未实施。P1尚未开始，Docker与小额真实API仍受§6授权门约束。
 
 ## 2. 方向与依赖
 
@@ -62,7 +65,7 @@ P0 共享地基 ────────┤                          ├─→ �
 
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
-| P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 本工作树复验通过，待审查/合并 |
+| P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 未开始 |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
@@ -100,11 +103,11 @@ P0 共享地基 ────────┤                          ├─→ �
 
 ## 5. 当前阶段任务
 
-P0 的 2026-08-09 复验修复已在独立工作树完成定向门禁；此前验收和失败差集见
-`doc/WBS-COMPLETED.md` 与 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`，本轮结论见
-`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。P1 草稿见
-`plan/003-p1-terminal-bench-minimal-chain-draft.md`，在本轮改动审查/合并和用户确认草稿前不进入实现；
-涉及 Docker、真实 API 或数据外发时仍先走 §6 授权门。任务 4 的失败测试处置另立维护批次，不混入 P1。
+P0 已完成定向门禁并合入主线；验收和失败差集见 `doc/WBS-COMPLETED.md`、
+`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。当前先收口看门狗、机器基线事实源和第一批测试
+遗留；39个严格失败与2个附加事项按 `plan/004-remaining-test-failures-investigation.md` 后续分批实施。
+P1草稿见 `plan/003-p1-terminal-bench-minimal-chain-draft.md`，在本维护批次审查/合并和用户确认草稿前
+不进入实现；涉及Docker、真实API或数据外发时仍先走§6授权门。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，

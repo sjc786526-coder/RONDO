@@ -38,6 +38,7 @@ use codex_analytics::GuardianReviewFailureReason;
 use codex_analytics::GuardianReviewTerminalStatus;
 use codex_api::ResponsesApiRequest;
 use codex_protocol::protocol::TokenUsage;
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use tracing::warn;
@@ -58,17 +59,57 @@ const STRIPPED_REQUEST_FIELDS: &[&str] = &[
 
 const E_FINAL_FILE_NAME: &str = "E_final.json";
 const META_FILE_NAME: &str = "meta.json";
-/// Upstream Codex release whose Guardian source produced a piece of evidence.
+const UPSTREAM_SOURCE_BASELINE: &str = include_str!("../../upstream-source-baseline.toml");
+
+/// Upstream Codex source identity embedded into Guardian evidence metadata.
 ///
-/// This is derived from the crate version because RONDO keeps its workspace version
-/// identical to the upstream release tag it was imported from. That invariant is what makes
-/// the substitution honest, and `guardian_source_baseline_matches_the_upstream_tag_shape`
-/// guards it: if RONDO ever carries a local version suffix, this constant must be replaced
-/// with an explicit baseline rather than silently reporting a tag that does not exist.
-///
-/// It identifies the *source* only. The policy actually sent to the model also depends on
+/// It identifies the source only. The policy actually sent to the model also depends on
 /// requirements/config/catalog, so consumers must hash the effective policy separately.
-const GUARDIAN_SOURCE_BASELINE: &str = concat!("rust-v", env!("CARGO_PKG_VERSION"));
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct GuardianSourceBaseline {
+    schema_version: u32,
+    tag: String,
+    peeled_commit: String,
+}
+
+fn parse_guardian_source_baseline(source: &str) -> anyhow::Result<GuardianSourceBaseline> {
+    let baseline: GuardianSourceBaseline =
+        toml::from_str(source).context("parse upstream source baseline")?;
+    anyhow::ensure!(
+        baseline.schema_version == 1,
+        "unsupported upstream source baseline schema {}",
+        baseline.schema_version
+    );
+    let Some(version) = baseline.tag.strip_prefix("rust-v") else {
+        anyhow::bail!("upstream source baseline tag must start with rust-v");
+    };
+    let mut version_parts = version.split('.');
+    anyhow::ensure!(
+        version_parts.next().is_some_and(is_decimal_version_part)
+            && version_parts.next().is_some_and(is_decimal_version_part)
+            && version_parts.next().is_some_and(is_decimal_version_part)
+            && version_parts.next().is_none(),
+        "upstream source baseline tag must use rust-v<major>.<minor>.<patch>"
+    );
+    anyhow::ensure!(
+        baseline.peeled_commit.len() == 40
+            && baseline
+                .peeled_commit
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "upstream source baseline peeled commit must be 40 lowercase hexadecimal characters"
+    );
+    Ok(baseline)
+}
+
+fn is_decimal_version_part(part: &str) -> bool {
+    !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn guardian_source_baseline() -> anyhow::Result<GuardianSourceBaseline> {
+    parse_guardian_source_baseline(UPSTREAM_SOURCE_BASELINE)
+}
 
 /// Guardian sessions that are currently serving a capturing review round.
 ///
@@ -99,7 +140,8 @@ enum GuardianEvidenceKind {
 #[derive(Debug, Serialize)]
 struct GuardianEvidenceMeta<'a> {
     review_id: &'a str,
-    guardian_source_baseline: &'static str,
+    guardian_source_baseline: &'a str,
+    guardian_source_commit: &'a str,
     evidence: GuardianEvidenceKind,
     decision: GuardianReviewDecision,
     terminal_status: GuardianReviewTerminalStatus,
@@ -171,6 +213,17 @@ impl GuardianEvidenceRound {
         if self.finalized.swap(true, Ordering::SeqCst) {
             return;
         }
+        let source_baseline = match guardian_source_baseline() {
+            Ok(source_baseline) => source_baseline,
+            Err(err) => {
+                warn!(
+                    review_id = self.review_id,
+                    %err,
+                    "failed to load guardian source baseline; skipping evidence bundle"
+                );
+                return;
+            }
+        };
         let e_final = self
             .captured
             .lock()
@@ -178,7 +231,8 @@ impl GuardianEvidenceRound {
             .take();
         let meta = GuardianEvidenceMeta {
             review_id: self.review_id.as_str(),
-            guardian_source_baseline: GUARDIAN_SOURCE_BASELINE,
+            guardian_source_baseline: source_baseline.tag.as_str(),
+            guardian_source_commit: source_baseline.peeled_commit.as_str(),
             evidence: match e_final {
                 Some(_) => GuardianEvidenceKind::EFinal,
                 None => GuardianEvidenceKind::None,

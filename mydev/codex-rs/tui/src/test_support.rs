@@ -56,11 +56,15 @@ where
 /// a fixed-width box, so the padding in front of the trailing border is rebuilt to keep the
 /// frame aligned no matter how wide the real version is.
 pub(crate) fn sanitize_cli_version(line: String) -> String {
-    if !line.contains(CODEX_CLI_VERSION) {
+    let status_version = format!("(v{CODEX_CLI_VERSION})");
+    let update_version = format!("{CODEX_CLI_VERSION} ->");
+    if !line.contains(&status_version) && !line.contains(&update_version) {
         return line;
     }
     let original_width = UnicodeWidthStr::width(line.as_str());
-    let replaced = line.replace(CODEX_CLI_VERSION, VERSION_PLACEHOLDER);
+    let replaced = line
+        .replace(&status_version, &format!("(v{VERSION_PLACEHOLDER})"))
+        .replace(&update_version, &format!("{VERSION_PLACEHOLDER} ->"));
     let Some(border) = replaced.rfind('│') else {
         return replaced;
     };
@@ -75,6 +79,10 @@ pub(crate) fn sanitize_cli_version(line: String) -> String {
 pub(crate) fn sanitize_cli_version_lines(lines: Vec<String>) -> Vec<String> {
     lines.into_iter().map(sanitize_cli_version).collect()
 }
+
+#[cfg(test)]
+#[path = "test_support_tests.rs"]
+mod tests;
 
 fn from_app_server_wire<T>(value: impl Serialize) -> T
 where

@@ -428,7 +428,7 @@ async fn repo_ancestry_without_project_marker_does_not_walk_parents() {
     fs::create_dir_all(cwd.join(".agents/skills")).expect("create cwd skills");
     let config_stack = stack(vec![project_root_markers_layer(
         &temp_root,
-        /*markers*/ &[],
+        /*markers*/ &[".rondo-test-project-root-marker-that-does-not-exist"],
     )]);
 
     let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &config_stack, &cwd)

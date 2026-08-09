@@ -4,6 +4,9 @@
 工作树：`.claude/worktrees/005-test-hermetic`，分支 `fix/005-test-hermetic`
 边界：未改产品审批/沙箱语义，未改宿主配置，未合并、未推送。
 
+F2/F3/F7在本批后的能力结论已由 `agent_log/2026-08-09-141630-watchdog-baseline-and-plan-finalization.md`
+取代；本文件只保留当时实施与验收事实。
+
 处理对象是 `agent_log/2026-08-09-025644-claude-cross-review-of-baseline-p0-audit.md` 里记录的
 F2～F7（F1 已在上一批修复）。
 

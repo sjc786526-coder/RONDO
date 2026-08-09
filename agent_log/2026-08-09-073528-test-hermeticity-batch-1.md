@@ -31,14 +31,14 @@ stderr 读 JSON 诊断的）。改为 `{ exec 8>"$slot_dir/$i"; } 2>/dev/null`�
 - `mcp-server` 的 `serverInfo.version` 期望值从写死的 `0.0.0` 改为复用同一处
   `env!("CARGO_PKG_VERSION")`；断言强度不变，只是不再每次升级批量改数字。
 
-### `/tmp` 祖先项目标记（10 项）
+### `/tmp` 祖先项目标记（11项）
 
 宿主 `/tmp` 下残留沙箱建的空 `.git`/`.codex`/`.agents`，祖先游走会把 `/tmp` 当项目根。
 
 - `chatwidget` fixture 的 cwd 是**从不落盘的合成路径**，因此不存在可推断的项目根。改为直接预置
-  `status_line_project_root_name_cache` 为 `None`，不再走真实文件系统。9 项测试恢复，且既有快照零改动。
-- `ext/skills` 的 `repo_ancestry_without_project_marker_does_not_walk_parents` 显式传
-  `project_root_markers = []`（配置本就支持空数组），语义比继承默认 marker 更贴近测试名。
+  `status_line_project_root_name_cache` 为 `None`，不再走真实文件系统。10项测试恢复，且既有快照零改动。
+- `ext/skills` 的 `repo_ancestry_without_project_marker_does_not_walk_parents` 本批曾传空marker；后续复核确认
+  这会短路祖先遍历，当前维护批次已改为非空且确定不存在的fixture marker，保留原测试分支。
 
 ### WSL 快捷键快照（2 项）
 
@@ -56,13 +56,14 @@ fixture。`resolve_skill_roots` 增加 `home_dir_override` 参数，service 增�
 ## 验收
 
 - `just test -p codex-tui -p codex-skills-extension -p codex-mcp-server`：**3,547 项运行，3,547 通过，
-  4 跳过**（对应 40 项历史失败全部恢复）。
+  4 跳过**（当时覆盖42个历史失败名；ancestry用例随后补强fixture分支）。
 - `just clippy` 同三包：退出 0；`just fmt-check`：通过。
 - 全部经 `with-build-lock.sh`，一次一组重型任务，各轮 `stop_reason=none/cleanup_reason=none`，
-  内存峰值 16.4GB、swap 0，项目占用最高约 70GB（告警线 180GB）。
+  13轮 `summary.env` 的跨轮最高值为内存 `20,403,429,376` B、swap `141,979,648` B，项目占用
+  `70,293,745,664` B（告警线180GB）。
 
 ## 未做
 
-- 剩余 41 项未处理：代理/网络 28、codex-core 的 `/tmp` 与 shell 分类约 10、exec-server / V8 /
-  http-client / landlock / external-migration 等单点。下一批建议从 network no-proxy/resolver 开始。
+- 严格清单机械剩余39项，另有external migration历史偶发与OAuth浏览器副作用2个附加事项；最终分族与
+  实施入口见 `plan/004-remaining-test-failures-investigation.md`。
 - 未清理宿主 `/tmp` 下的残留 marker；本批修法均不依赖它们是否存在。

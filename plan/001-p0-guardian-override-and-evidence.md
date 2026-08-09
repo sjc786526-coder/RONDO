@@ -48,7 +48,7 @@ OpenAI provider 的 `gpt-5.6-luna + low`，但**不足以切到本地模型**；
 **S2**
 
 - 配置证据输出目录后，一轮 Guardian 审批若到达 transport send point，则产出 1 份
-  `E_final.json` + 1 份 `meta.json`（`review_id`、source baseline、决策、耗时、模型、effort、token、
+  `E_final.json` + 1 份 `meta.json`（`review_id`、source baseline tag/peeled commit、决策、耗时、模型、effort、token、
   结束原因）。Unix/WSL
   目录/文件权限为 `0700`/`0600`；Windows 继承配置目录 ACL。0.147 的 permission hook
   在 Guardian/user 之前运行；hook 直接 resolve 时不创建 Guardian 轮，也不产证据包。
@@ -203,7 +203,7 @@ OpenAI provider 的 `gpt-5.6-luna + low`，但**不足以切到本地模型**；
 - 保留：Guardian policy、任务轨迹、工具调用与结果、待审批动作。
 - 0.147 的 approval/retry reason 是 Guardian prompt 的有意义输入（retry 优先、否则 approval，
   上游限长 512 tokens），必须保留。RONDO 不覆写 0.147 policy/template；证据元数据要记录 Guardian
-  source baseline，跨 0.146.1/0.147 比较时先分层。这个版本号只标识 Guardian 源码基线，不代表
+  source baseline tag/peeled commit，跨 0.146.1/0.147 比较时先分层。源码身份只标识 Guardian 源码基线，不代表
   自定义 requirements/config/catalog 后的有效 policy 身份；后者由 P1 从 `E_final` 提取并哈希。
 
 ## 5. 当前状态
@@ -219,7 +219,8 @@ S1 与 S2 的主体实现已在 `v0.146.1` 基线上落地，随后随产品源�
   `review.rs` 的 model 优先级链与 effort 覆盖已按契约实现。provider 解析未动。
 - S2：新增 `core/src/guardian/evidence.rs`；HTTP/WS transport send 前各设一个捕获点；
   `GuardianReviewSessionParams` 加 `evidence_round`，`run_review_on_session` 绑定 / 解绑；
-  固化收口在 `track_guardian_review`（见决策 013）。meta 中记录 `guardian_source_baseline`；有效
+  固化收口在 `track_guardian_review`（见决策 013）。meta 中记录 `guardian_source_baseline` 与
+  `guardian_source_commit`；有效
   policy 指纹待 P1 从 `E_final` 提取。
 - `.gitignore` 追加 `/eval-data/`；`just write-config-schema` 已运行，schema 差异只含三个新字段与
   `[auto_review]` 表说明更新。

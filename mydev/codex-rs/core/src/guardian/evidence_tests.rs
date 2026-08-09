@@ -20,12 +20,13 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::ACTIVE_CAPTURING_SESSIONS;
-use super::GUARDIAN_SOURCE_BASELINE;
 use super::GuardianEvidenceRound;
 use super::GuardianReviewAnalyticsResult;
 use super::STRIPPED_REQUEST_FIELDS;
 use super::capture_final_request;
+use super::guardian_source_baseline;
 use super::normalize_request;
+use super::parse_guardian_source_baseline;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_metadata::CompactionTurnMetadata;
@@ -328,6 +329,7 @@ fn concurrent_rounds_keep_their_own_final_request() {
 
     let first_dir = evidence_dir.path().join("review-1");
     let second_dir = evidence_dir.path().join("review-2");
+    let source_baseline = guardian_source_baseline().expect("valid source baseline");
     assert_eq!(
         (
             read_bundle(&first_dir, "E_final.json")["instructions"].clone(),
@@ -341,12 +343,14 @@ fn concurrent_rounds_keep_their_own_final_request() {
             read_bundle(&first_dir, "meta.json")["evidence"].clone(),
             read_bundle(&first_dir, "meta.json")["duration_ms"].clone(),
             read_bundle(&first_dir, "meta.json")["guardian_source_baseline"].clone(),
+            read_bundle(&first_dir, "meta.json")["guardian_source_commit"].clone(),
         ),
         (
             json!("review-1"),
             json!("e_final"),
             json!(11),
-            json!("rust-v0.147.0"),
+            json!(source_baseline.tag),
+            json!(source_baseline.peeled_commit),
         )
     );
 }
@@ -485,19 +489,15 @@ fn evidence_write_failure_is_swallowed() {
 }
 
 #[test]
-fn guardian_source_baseline_matches_the_upstream_tag_shape() {
-    // `GUARDIAN_SOURCE_BASELINE` stands in for the upstream release tag by reusing the
-    // crate version, which only holds while RONDO keeps the workspace version identical to
-    // the tag it imported. A local suffix such as `0.147.0-rondo.1` would make every
-    // evidence bundle claim an upstream tag that does not exist, and P1 layers its data on
-    // that field, so fail here rather than shipping a plausible-looking lie.
-    assert_eq!(
-        GUARDIAN_SOURCE_BASELINE,
-        format!("rust-v{}", env!("CARGO_PKG_VERSION"))
-    );
-    assert!(
-        !env!("CARGO_PKG_VERSION").contains('-'),
-        "RONDO carries a local version suffix, so guardian_source_baseline can no longer be \
-         derived from CARGO_PKG_VERSION; record the upstream tag explicitly instead"
-    );
+fn guardian_source_baseline_rejects_ambiguous_or_malformed_identity() {
+    for invalid in [
+        "schema_version = 2\ntag = \"rust-v0.147.0\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\n",
+        "schema_version = 1\ntag = \"v0.147.0\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\n",
+        "schema_version = 1\ntag = \"rust-vnot.a.version\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\n",
+        "schema_version = 1\ntag = \"rust-v0.147.0\"\npeeled_commit = \"be6e8eac\"\n",
+        "schema_version = 1\ntag = \"rust-v0.147.0\"\npeeled_commit = \"BE6E8EAC029B183056B7E4402879F15D2C85F61B\"\n",
+        "schema_version = 1\ntag = \"rust-v0.147.0\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\nextra = true\n",
+    ] {
+        assert!(parse_guardian_source_baseline(invalid).is_err());
+    }
 }
