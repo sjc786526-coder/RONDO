@@ -300,7 +300,11 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         ("binary_sha256", manifest.sha256),
         ("binary_source_commit", manifest.source_commit),
         ("binary_source_dirty", json.dumps(manifest.source_dirty)),
-        ("binary_rust_toolchain", manifest.rust_toolchain),
+        # The frozen toolchain evidence intentionally contains the complete
+        # multi-line rustc/cargo verbose output.  Encode it as JSON so Harbor's
+        # parse_kwargs reconstructs the exact string without putting literal
+        # line breaks into a CLI argument.
+        ("binary_rust_toolchain", json.dumps(manifest.rust_toolchain, separators=(",", ":"))),
         ("binary_build_command", json.dumps(list(manifest.build_command), separators=(",", ":"))),
         (
             "binary_workspace_lock_normalization",

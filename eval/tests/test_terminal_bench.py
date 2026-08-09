@@ -166,7 +166,13 @@ class TerminalBenchTests(unittest.TestCase):
             sha256=self.binary_digest,
             source_commit="a" * 40,
             source_dirty=False,
-            rust_toolchain="rustc 1.95.0",
+            rust_toolchain=(
+                "rustc:\n"
+                "rustc 1.95.0\nbinary: rustc\ncommit-hash: frozen\n"
+                "commit-date: 2026-08-03\nhost: x86_64-unknown-linux-gnu\n"
+                "release: 1.95.0\nLLVM version: 21.1.8\n"
+                "cargo:\ncargo 1.95.0 (frozen 2026-07-21)"
+            ),
             build_command=("guarded-build", "codex"),
             workspace_lock_normalization="135 workspace packages: 0.0.0 -> 0.147.0",
         )
@@ -278,6 +284,7 @@ class TerminalBenchTests(unittest.TestCase):
             prepared = self.prepare(side)
             argv = prepared.command.argv
             values = [argv[index + 1] for index, value in enumerate(argv) if value == "--agent-kwarg"]
+            self.assertTrue(all("\n" not in value and "\r" not in value for value in values))
             kwargs = parse_kwargs(values)
             instance = AgentFactory.create_agent_from_import_path(
                 argv[argv.index("--agent") + 1],
