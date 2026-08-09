@@ -38,6 +38,7 @@ NORMALIZED_LOCK_SHA256 = "bc4fe450de929afe82928734f860ca83e5f9dc5f9f1211b0974ea4
 LOCK_NORMALIZATION = "135 workspace packages: 0.0.0 -> 0.147.0"
 RUST_TOOLCHAIN = "1.95.0"
 RUST_HOST = "x86_64-unknown-linux-gnu"
+RUST_TARGET = "x86_64-unknown-linux-musl"
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
@@ -171,7 +172,11 @@ def prepare(
     _validate_toolchain(toolchain)
     command = _validate_build_command(request, paths, build_command)
     _validate_source(request, paths)
-    source_binary = _regular_file(paths.target_dir / "release" / "codex", executable=True)
+    source_binary = _regular_file(
+        paths.target_dir / RUST_TARGET / "release" / "codex",
+        executable=True,
+    )
+    _validate_static_musl_binary(source_binary)
     _held(proof)
 
     digest = _sha256_file(source_binary)
@@ -217,9 +222,14 @@ def verify(
     if manifest.rust_toolchain != toolchain:
         raise BinaryFreezeError("manifest Rust toolchain differs from the live frozen toolchain")
     binary = _regular_file(paths.artifact_dir / "codex", executable=True, exact_mode=0o555)
+    _validate_static_musl_binary(binary)
     if Path(manifest.path) != binary or manifest.sha256 != _sha256_file(binary):
         raise BinaryFreezeError("frozen binary differs from its manifest")
-    release = _regular_file(paths.target_dir / "release" / "codex", executable=True)
+    release = _regular_file(
+        paths.target_dir / RUST_TARGET / "release" / "codex",
+        executable=True,
+    )
+    _validate_static_musl_binary(release)
     if _sha256_file(release) != manifest.sha256:
         raise BinaryFreezeError("release binary differs from the frozen binary")
     if {entry.name for entry in os.scandir(paths.artifact_dir)} != {"codex", "manifest.json"}:
@@ -456,6 +466,8 @@ def _validate_build_command(
         "build",
         "--locked",
         "--release",
+        "--target",
+        RUST_TARGET,
         "--manifest-path",
         str(manifest),
         "-p",
@@ -561,7 +573,24 @@ def _validate_watchdog_summary(metrics_root: Path) -> None:
 def _probe_toolchain() -> str:
     rustc = _run_version(("rustup", "run", RUST_TOOLCHAIN, "rustc", "--version", "--verbose"))
     cargo = _run_version(("rustup", "run", RUST_TOOLCHAIN, "cargo", "--version", "--verbose"))
-    return f"rustc:\n{rustc}\ncargo:\n{cargo}"
+    target_libdir = _run_version(
+        (
+            "rustup",
+            "run",
+            RUST_TOOLCHAIN,
+            "rustc",
+            "--print",
+            "target-libdir",
+            "--target",
+            RUST_TARGET,
+        )
+    )
+    if not Path(target_libdir).is_dir():
+        raise BinaryFreezeError("frozen Rust musl target is unavailable")
+    return (
+        f"rustc:\n{rustc}\ncargo:\n{cargo}\n"
+        f"target: {RUST_TARGET}\ntarget-libdir: {target_libdir}"
+    )
 
 
 def _run_version(argv: tuple[str, ...]) -> str:
@@ -596,6 +625,46 @@ def _validate_toolchain(value: str) -> None:
         raise BinaryFreezeError("rustc identity differs from the frozen toolchain")
     if not any(line.startswith("cargo 1.95.0 ") for line in value.splitlines()):
         raise BinaryFreezeError("Cargo identity differs from the frozen toolchain")
+    if f"target: {RUST_TARGET}" not in value.splitlines():
+        raise BinaryFreezeError("Rust build target differs from the portable musl freeze")
+
+
+def _validate_static_musl_binary(path: Path) -> None:
+    """Require a static x86-64 ELF with no host dynamic-loader dependency."""
+
+    readelf = _regular_file(Path("/usr/bin/x86_64-linux-gnu-readelf"), executable=True)
+    try:
+        result = subprocess.run(
+            (
+                str(readelf),
+                "--file-header",
+                "--program-headers",
+                "--dynamic",
+                "--wide",
+                str(path),
+            ),
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError) as exc:
+        raise BinaryFreezeError("portable binary ELF probe failed") from exc
+    output = result.stdout
+    if (
+        result.returncode != 0
+        or "ELF64" not in output
+        or "Advanced Micro Devices X86-64" not in output
+        or " INTERP " in output
+        or "(NEEDED)" in output
+    ):
+        raise BinaryFreezeError("binary is not a static x86_64 musl artifact")
 
 
 def _publish(artifact: Path, source_binary: Path, manifest: BinaryManifest) -> None:
@@ -780,14 +849,24 @@ def _git_result(directory: Path, *args: str) -> subprocess.CompletedProcess[str]
 
 
 def _expected_target(root: Path, side: Side, commit: str) -> Path:
-    name = f"rondo-{commit}" if side is Side.RONDO else f"codex-rust-v0.147.0-{commit}"
+    name = (
+        f"rondo-{commit}-{RUST_TARGET}"
+        if side is Side.RONDO
+        else f"codex-rust-v0.147.0-{commit}-{RUST_TARGET}"
+    )
     return root / "eval-data" / "build" / name
 
 
 def _expected_artifact(root: Path, side: Side, commit: str) -> Path:
     if side is Side.RONDO:
-        return root / "eval-data" / "bin" / "rondo" / commit
-    return root / "eval-data" / "bin" / "codex" / f"rust-v0.147.0-{commit}"
+        return root / "eval-data" / "bin" / "rondo" / f"{commit}-{RUST_TARGET}"
+    return (
+        root
+        / "eval-data"
+        / "bin"
+        / "codex"
+        / f"rust-v0.147.0-{commit}-{RUST_TARGET}"
+    )
 
 
 def _exact_existing_directory(value: Path, expected: Path, label: str) -> Path:

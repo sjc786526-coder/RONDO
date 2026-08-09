@@ -39,6 +39,8 @@ release: 1.95.0
 LLVM version: fixture
 cargo:
 cargo 1.95.0 (fixture)
+target: x86_64-unknown-linux-musl
+target-libdir: /fixture/rustlib/x86_64-unknown-linux-musl/lib
 """.strip()
 
 
@@ -157,6 +159,8 @@ def _build_command(
         "build",
         "--locked",
         "--release",
+        "--target",
+        binary_freeze.RUST_TARGET,
         "--manifest-path",
         str(manifest),
         "-p",
@@ -192,12 +196,20 @@ class RondoFreezeTests(unittest.TestCase):
         self.lock = b'version = 4\n\n[[package]]\nname = "codex-cli"\nversion = "0.147.0"\n'
         _write_workspace(self.source, self.lock, gate=True)
         self.commit = _init_detached_repository(self.source)
-        self.target = self.common / "eval-data/build" / f"rondo-{self.commit}"
-        (self.target / "release").mkdir(parents=True)
-        self.release = self.target / "release/codex"
+        self.target = (
+            self.common
+            / "eval-data/build"
+            / f"rondo-{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
+        (self.target / binary_freeze.RUST_TARGET / "release").mkdir(parents=True)
+        self.release = self.target / binary_freeze.RUST_TARGET / "release/codex"
         self.release.write_bytes(b"frozen-rondo-binary")
         self.release.chmod(0o755)
-        self.artifact = self.common / "eval-data/bin/rondo" / self.commit
+        self.artifact = (
+            self.common
+            / "eval-data/bin/rondo"
+            / f"{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
         self.request = FreezeRequest(
             side=Side.RONDO,
             common_root=self.common,
@@ -218,8 +230,11 @@ class RondoFreezeTests(unittest.TestCase):
         self.lock_sha = hashlib.sha256(self.lock).hexdigest()
         self.constants = mock.patch.object(binary_freeze, "NORMALIZED_LOCK_SHA256", self.lock_sha)
         self.constants.start()
+        self.portable = mock.patch.object(binary_freeze, "_validate_static_musl_binary")
+        self.portable.start()
 
     def tearDown(self) -> None:
+        self.portable.stop()
         self.constants.stop()
         self.temporary.cleanup()
 
@@ -359,11 +374,20 @@ class BaselineFreezeTests(unittest.TestCase):
         self.scratch = self.common / "eval-data/sources" / f"codex-rust-v0.147.0-{self.commit}"
         shutil.copytree(self.reference, self.scratch, ignore=shutil.ignore_patterns(".git"), symlinks=True)
         (self.scratch / "codex-rs/Cargo.lock").write_bytes(self.normalized_lock)
-        self.target = self.common / "eval-data/build" / f"codex-rust-v0.147.0-{self.commit}"
-        (self.target / "release").mkdir(parents=True)
-        (self.target / "release/codex").write_bytes(b"frozen-baseline-binary")
-        (self.target / "release/codex").chmod(0o755)
-        self.artifact = self.common / "eval-data/bin/codex" / f"rust-v0.147.0-{self.commit}"
+        self.target = (
+            self.common
+            / "eval-data/build"
+            / f"codex-rust-v0.147.0-{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
+        release = self.target / binary_freeze.RUST_TARGET / "release/codex"
+        release.parent.mkdir(parents=True)
+        release.write_bytes(b"frozen-baseline-binary")
+        release.chmod(0o755)
+        self.artifact = (
+            self.common
+            / "eval-data/bin/codex"
+            / f"rust-v0.147.0-{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
         self.request = FreezeRequest(
             side=Side.CODEX,
             common_root=self.common,
@@ -383,6 +407,9 @@ class BaselineFreezeTests(unittest.TestCase):
         )
         _write_watchdog_summary(self.common)
         self.stack = ExitStack()
+        self.stack.enter_context(
+            mock.patch.object(binary_freeze, "_validate_static_musl_binary")
+        )
         self.stack.enter_context(mock.patch.object(binary_freeze, "BASELINE_COMMIT", self.commit))
         self.stack.enter_context(
             mock.patch.object(
@@ -475,7 +502,11 @@ class CleanupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             common = Path(temporary).resolve()
             commit = "b" * 40
-            target = common / "eval-data/build" / f"codex-rust-v0.147.0-{commit}"
+            target = (
+                common
+                / "eval-data/build"
+                / f"codex-rust-v0.147.0-{commit}-{binary_freeze.RUST_TARGET}"
+            )
             scratch = common / "eval-data/sources" / f"codex-rust-v0.147.0-{commit}"
             target.mkdir(parents=True)
             scratch.mkdir(parents=True)
@@ -510,7 +541,11 @@ class CleanupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             common = Path(temporary).resolve()
             commit = "c" * 40
-            expected = common / "eval-data/build" / f"rondo-{commit}"
+            expected = (
+                common
+                / "eval-data/build"
+                / f"rondo-{commit}-{binary_freeze.RUST_TARGET}"
+            )
             neighbor = common / "eval-data/build/not-the-target"
             expected.mkdir(parents=True)
             neighbor.mkdir()
@@ -531,6 +566,36 @@ class CleanupTests(unittest.TestCase):
                     scratch_dir=neighbor,
                     lease_factory=_lease_factory,
                 )
+
+
+class StaticBinaryValidationTests(unittest.TestCase):
+    def test_accepts_static_x86_64_and_rejects_dynamic_loader_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "codex"
+            binary.write_bytes(b"fixture")
+            static = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=(
+                    "Class: ELF64\n"
+                    "Machine: Advanced Micro Devices X86-64\n"
+                    "Program Headers:\n  LOAD 0x0\n"
+                    "There is no dynamic section in this file.\n"
+                ),
+                stderr="",
+            )
+            with mock.patch.object(binary_freeze.subprocess, "run", return_value=static):
+                binary_freeze._validate_static_musl_binary(binary)
+
+            dynamic = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=static.stdout + " INTERP 0x1\n (NEEDED) Shared library: [libc.so.6]\n",
+                stderr="",
+            )
+            with mock.patch.object(binary_freeze.subprocess, "run", return_value=dynamic):
+                with self.assertRaises(BinaryFreezeError):
+                    binary_freeze._validate_static_musl_binary(binary)
 
 
 if __name__ == "__main__":

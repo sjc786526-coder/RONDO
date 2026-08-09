@@ -152,6 +152,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
         remote_digest = _parse_sha256sum(result, self.remote_path)
         if remote_digest != self.manifest.sha256:
             raise AdapterError("uploaded binary sha256 does not match BinaryManifest")
+        await _checked_exec(
+            environment,
+            f"{shlex.quote(self.remote_path)} --version",
+        )
 
     @with_prompt_template
     async def run(self, instruction, environment, context) -> None:

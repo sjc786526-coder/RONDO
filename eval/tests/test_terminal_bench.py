@@ -317,6 +317,7 @@ class TerminalBenchTests(unittest.TestCase):
                 self.assertNotIn("npm", commands)
                 self.assertNotIn("latest", commands)
                 self.assertIn(f"sha256sum -- {adapter.remote_path}", commands)
+                self.assertIn(f"{adapter.remote_path} --version", commands)
 
     def test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv(self) -> None:
         secret = "sentinel-secret-must-not-serialize"
