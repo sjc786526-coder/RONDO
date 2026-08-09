@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -348,6 +350,134 @@ class DockerSupervisorTests(unittest.TestCase):
             runner.commands[-1],
             ("docker", "container", "rm", "--force", CONTAINER_ID),
         )
+
+    def test_frozen_binary_version_probe_is_fixed_readonly_and_supervised(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "rondo"
+            binary.write_bytes(b"frozen-rondo-binary")
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            counter = FakeCounter([reading(), reading()])
+            supervisor, runner = self.supervisor(
+                counter=counter,
+                handles=[FakeHandle([0])],
+            )
+            limits = DockerLimits(512 * 1024**2, 768 * 1024**2, 64, 30)
+
+            result = supervisor.run_frozen_binary_version(
+                self.identity,
+                IMAGE,
+                binary,
+                digest,
+                lease=self.lease,
+                limits=limits,
+            )
+
+        argv = runner.commands[0]
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(self.identity.label, argv)
+        self.assertEqual(argv[argv.index("--memory") + 1], str(limits.memory_bytes))
+        self.assertEqual(
+            argv[argv.index("--memory-swap") + 1],
+            str(limits.memory_swap_bytes),
+        )
+        self.assertEqual(argv[argv.index("--pids-limit") + 1], str(limits.pids_limit))
+        self.assertEqual(argv[argv.index("--network") + 1], "none")
+        self.assertIn("--read-only", argv)
+        mount = argv[argv.index("--mount") + 1]
+        self.assertEqual(
+            mount,
+            f"type=bind,source={binary},"
+            "target=/opt/rondo-eval/bin/frozen-agent,readonly",
+        )
+        entrypoint = argv[argv.index("--entrypoint") + 1]
+        self.assertEqual(entrypoint, "/opt/rondo-eval/bin/frozen-agent")
+        self.assertEqual(argv[-2:], (IMAGE, "--version"))
+        self.assertEqual(
+            [sample.phase for sample in result.samples],
+            ["baseline", "final"],
+        )
+
+    def test_frozen_binary_version_probe_rejects_unfrozen_or_unsafe_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "rondo"
+            binary.write_bytes(b"frozen-rondo-binary")
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            symlink = root / "rondo-link"
+            symlink.symlink_to(binary)
+            comma = root / "rondo,evil"
+            comma.write_bytes(binary.read_bytes())
+            control = root / "rondo\ncontrol"
+            control.write_bytes(binary.read_bytes())
+            supervisor, runner = self.supervisor(
+                counter=FakeCounter([reading()]),
+                handles=[FakeHandle([0])],
+            )
+            limits = DockerLimits(100, 100, 2, 30)
+            cases = (
+                (binary, "0" * 64, IMAGE),
+                (Path("relative-rondo"), digest, IMAGE),
+                (symlink, digest, IMAGE),
+                (root, digest, IMAGE),
+                (comma, digest, IMAGE),
+                (control, digest, IMAGE),
+                (binary, digest, "example.invalid/rondo/task:latest"),
+            )
+
+            for host_binary, expected, image in cases:
+                with self.subTest(host_binary=host_binary, image=image):
+                    with self.assertRaises(DockerSupervisionError):
+                        supervisor.run_frozen_binary_version(
+                            self.identity,
+                            image,
+                            host_binary,
+                            expected,
+                            lease=self.lease,
+                            limits=limits,
+                        )
+
+        self.assertEqual(runner.commands, [])
+
+    def test_frozen_binary_version_probe_inherits_stop_and_exact_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "rondo"
+            binary.write_bytes(b"frozen-rondo-binary")
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            main_handle = FakeHandle([None])
+            runner = FakeRunner([main_handle, FakeHandle([0])])
+            counter = FakeCounter(
+                [
+                    reading(),
+                    reading(
+                        task=DOCKER_GROWTH_STOP_BYTES,
+                        containers=(CONTAINER_ID,),
+                    ),
+                    reading(containers=(CONTAINER_ID,)),
+                    reading(),
+                ]
+            )
+            supervisor = DockerSupervisor(
+                runner=runner,
+                counter=counter,
+                lock_guard=FakeLockGuard(),
+            )
+
+            with self.assertRaises(DockerSupervisionError) as caught:
+                supervisor.run_frozen_binary_version(
+                    self.identity,
+                    IMAGE,
+                    binary,
+                    digest,
+                    lease=self.lease,
+                    limits=DockerLimits(100, 100, 2, 30),
+                )
+
+        self.assertEqual(main_handle.terminated, 1)
+        self.assertEqual(
+            runner.commands[-1],
+            ("docker", "container", "rm", "--force", CONTAINER_ID),
+        )
+        self.assertEqual(caught.exception.samples[-1].phase, "cleanup_verified")
 
     def test_warns_at_40_gb_without_stopping(self) -> None:
         counter = FakeCounter(

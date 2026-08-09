@@ -7,11 +7,16 @@ unit tests offline and prevents importing this module from starting Docker.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import re
+import stat
 import time
+import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Callable, Mapping, Protocol, Sequence
 
 from .exit_codes import INFRA_ERROR
@@ -28,6 +33,8 @@ _TASK_ID = re.compile(r"[0-9A-Za-z][0-9A-Za-z_.-]{5,95}\Z")
 _SHA256_IMAGE = re.compile(r"[^\s]+@sha256:[0-9a-f]{64}\Z")
 _LOCAL_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _OBJECT_ID = re.compile(r"[0-9a-f]{12,64}\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_FROZEN_BINARY_TARGET = "/opt/rondo-eval/bin/frozen-agent"
 
 
 class DockerOperation(StrEnum):
@@ -297,6 +304,63 @@ class DockerSupervisor:
             str(limits.pids_limit),
             image,
             *command_args,
+        )
+        return self._execute(
+            DockerOperation.RUN,
+            identity,
+            argv,
+            lease=lease,
+            timeout_seconds=limits.timeout_seconds,
+        )
+
+    def run_frozen_binary_version(
+        self,
+        identity: DockerTaskIdentity,
+        image: str,
+        host_binary: Path,
+        binary_sha256: str,
+        *,
+        lease: HeavyLockLease,
+        limits: DockerLimits,
+    ) -> DockerExecutionResult:
+        """Execute only ``--version`` for one verified host binary in Docker.
+
+        The container target, entrypoint, argument, network isolation, and
+        read-only bind semantics are fixed here rather than accepted from the
+        caller.  This is the narrow B3 probe, not a general host mount API.
+        """
+
+        _require_pinned_image(image)
+        limits.validate()
+        verified_binary = _verified_frozen_binary(host_binary, binary_sha256)
+        mount = (
+            f"type=bind,source={verified_binary},"
+            f"target={_FROZEN_BINARY_TARGET},readonly"
+        )
+        argv = (
+            "docker",
+            "container",
+            "run",
+            "--rm",
+            "--name",
+            identity.container_name,
+            "--label",
+            identity.label,
+            "--memory",
+            str(limits.memory_bytes),
+            "--memory-swap",
+            str(limits.memory_swap_bytes),
+            "--pids-limit",
+            str(limits.pids_limit),
+            "--network",
+            "none",
+            "--read-only",
+            "--mount",
+            mount,
+            "--entrypoint",
+            _FROZEN_BINARY_TARGET,
+            image,
+            "--version",
         )
         return self._execute(
             DockerOperation.RUN,
@@ -686,7 +750,9 @@ def _require_pinned_image(image: str) -> None:
 
 def _require_registry_pinned_image(image: str) -> None:
     if not _SHA256_IMAGE.fullmatch(image):
-        raise DockerSupervisionError("Docker pull requires a registry image pinned by sha256 digest")
+        raise DockerSupervisionError(
+            "Docker pull requires a registry image pinned by sha256 digest"
+        )
 
 
 def _require_cli_value(value: str, label: str) -> None:
@@ -700,3 +766,59 @@ def _validated_command(command: Sequence[str]) -> tuple[str, ...]:
         if not isinstance(value, str) or "\x00" in value:
             raise DockerSupervisionError("Docker container command is invalid")
     return result
+
+
+def _verified_frozen_binary(host_binary: Path, expected_sha256: str) -> Path:
+    if not isinstance(host_binary, Path) or not host_binary.is_absolute():
+        raise DockerSupervisionError("frozen host binary path must be absolute")
+    raw_path = os.fspath(host_binary)
+    if "," in raw_path or any(
+        unicodedata.category(character) == "Cc" for character in raw_path
+    ):
+        raise DockerSupervisionError("frozen host binary path is unsafe for Docker mount")
+    if not isinstance(expected_sha256, str) or not _SHA256.fullmatch(expected_sha256):
+        raise DockerSupervisionError("frozen host binary sha256 is invalid")
+    try:
+        resolved = host_binary.resolve(strict=True)
+        if resolved != host_binary:
+            raise DockerSupervisionError("frozen host binary path contains a symlink")
+        path_stat = host_binary.lstat()
+        if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISREG(path_stat.st_mode):
+            raise DockerSupervisionError("frozen host binary must be a regular non-symlink")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(host_binary, flags)
+    except DockerSupervisionError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise DockerSupervisionError("frozen host binary is unavailable") from exc
+
+    digest = hashlib.sha256()
+    try:
+        with os.fdopen(descriptor, "rb", closefd=True) as binary:
+            opened_stat = os.fstat(binary.fileno())
+            if not stat.S_ISREG(opened_stat.st_mode) or (
+                opened_stat.st_dev,
+                opened_stat.st_ino,
+            ) != (path_stat.st_dev, path_stat.st_ino):
+                raise DockerSupervisionError("frozen host binary changed before hashing")
+            while chunk := binary.read(1024 * 1024):
+                digest.update(chunk)
+            final_opened_stat = os.fstat(binary.fileno())
+    except DockerSupervisionError:
+        raise
+    except OSError as exc:
+        raise DockerSupervisionError("frozen host binary could not be hashed") from exc
+
+    try:
+        final_path_stat = host_binary.lstat()
+    except OSError as exc:
+        raise DockerSupervisionError("frozen host binary changed after hashing") from exc
+    stable_fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+    if any(
+        getattr(final_opened_stat, field) != getattr(final_path_stat, field)
+        for field in stable_fields
+    ):
+        raise DockerSupervisionError("frozen host binary changed while hashing")
+    if not hmac.compare_digest(digest.hexdigest(), expected_sha256):
+        raise DockerSupervisionError("frozen host binary sha256 mismatch")
+    return resolved
