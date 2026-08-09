@@ -10,13 +10,13 @@
 
 CPU i9-13980HX
 GPU RTX4060 laptop
-总RAM 40GB，WSL分配到26GB，swap 10GB
+总RAM 40GB，WSL分配到28GB，swap 10GB
 
 ## 1. 平台与网络代理
 
 ### 1.1 平台
 
-- Windows 主机运行 Docker Desktop 和 Clash Verge。
+- Windows 主机运行 Docker Desktop 和 Clash Verge（开启TUN模式）。
 - WSL 发行版为 Ubuntu 24.04，内核为 Microsoft WSL2 `6.6.87.2`，架构为 `x86_64`。
 - Windows 的 `C:\Users\35283\.wslconfig` 使用以下 WSL2 网络配置：
 
