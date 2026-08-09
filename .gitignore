@@ -16,3 +16,8 @@ reference-agent-harness/
 # Local RONDO credentials and machine-specific model runtime settings.
 /.env.local
 /rondo.local.toml
+
+# Evaluation Python caches and project-local virtual environment.
+/eval/**/__pycache__/
+/eval/**/*.py[cod]
+/eval/.venv/

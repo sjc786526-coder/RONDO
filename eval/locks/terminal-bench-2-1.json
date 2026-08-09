@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "harness": {
+    "package": "harbor",
+    "version": "0.20.0",
+    "release_commit": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
+    "wheel_sha256": "4b7e48223aea2384cdb8c9eff35eaebd482fc9b1ec09f8193a121c47356ff19a"
+  },
+  "dataset": {
+    "id": "terminal-bench/terminal-bench-2-1",
+    "repository": "harbor-framework/terminal-bench-2-1",
+    "commit": "ffccbe05ee73a9d59518217f294ad711bda39304"
+  },
+  "p1_task": {
+    "id": "terminal-bench/fix-git",
+    "task_archive_sha256": "16948b980df9d96de616a205f5acca1c5d395de83ff4f8ffabcafacb93226f2e",
+    "source_image_tag": "alexgshaw/fix-git:20260403",
+    "linux_amd64_image": "alexgshaw/fix-git@sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74"
+  },
+  "no_api_fixture": {
+    "id": "harbor/hello-world",
+    "source_commit": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
+    "linux_amd64_base_image": "ubuntu@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467",
+    "observed_local_image_id": "sha256:ac40b37885c231162df4cfc86fb2980b8cb53f1d972c1de146ccd3a03b7030c0"
+  },
+  "telemetry": "off",
+  "concurrency": 1
+}

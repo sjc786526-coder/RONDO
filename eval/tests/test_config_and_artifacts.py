@@ -1,0 +1,423 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+EVAL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(EVAL_ROOT))
+
+from rondo_eval.artifacts import ArtifactError, ArtifactWriter  # noqa: E402
+from rondo_eval.config import (  # noqa: E402
+    ConfigError,
+    RepoPaths,
+    load_local_model_secret,
+    load_provider_secret,
+    load_runtime_config,
+)
+
+
+class ConfigTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.paths = RepoPaths(root, root)
+        (root / "rondo.secrets.example.env").write_text("OPENAI_API_KEY=\n", encoding="utf-8")
+        (root / "rondo.local.toml").write_text(
+            "[providers.openai]\napi_key_env = \"OPENAI_API_KEY\"\n",
+            encoding="utf-8",
+        )
+        (root / ".env.local").write_text("OPENAI_API_KEY=secret-test-value\n", encoding="utf-8")
+        os.chmod(root / ".env.local", 0o600)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_loader_returns_only_selected_secret(self) -> None:
+        config = load_runtime_config(self.paths)
+        self.assertEqual(load_provider_secret(config, "openai"), ("OPENAI_API_KEY", "secret-test-value"))
+
+    def test_shell_syntax_is_rejected(self) -> None:
+        (self.paths.common_root / ".env.local").write_text(
+            "export OPENAI_API_KEY=secret-test-value\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(ConfigError):
+            load_provider_secret(load_runtime_config(self.paths), "openai")
+
+    def test_direct_secret_in_toml_is_rejected(self) -> None:
+        (self.paths.common_root / "rondo.local.toml").write_text(
+            "[providers.openai]\napi_key = \"never-here\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(ConfigError):
+            load_runtime_config(self.paths)
+
+    def test_local_model_secret_uses_the_same_strict_loader(self) -> None:
+        (self.paths.common_root / "rondo.secrets.example.env").write_text(
+            "OPENAI_API_KEY=\nRONDO_LOCAL_MODEL_API_KEY=\n",
+            encoding="utf-8",
+        )
+        (self.paths.common_root / "rondo.local.toml").write_text(
+            "[providers.openai]\napi_key_env = \"OPENAI_API_KEY\"\n"
+            "[local_model]\napi_key_env = \"RONDO_LOCAL_MODEL_API_KEY\"\n",
+            encoding="utf-8",
+        )
+        (self.paths.common_root / ".env.local").write_text(
+            "OPENAI_API_KEY=secret-test-value\nRONDO_LOCAL_MODEL_API_KEY=local-secret-value\n",
+            encoding="utf-8",
+        )
+        config = load_runtime_config(self.paths)
+        self.assertEqual(
+            load_local_model_secret(config),
+            ("RONDO_LOCAL_MODEL_API_KEY", "local-secret-value"),
+        )
+
+    def test_empty_local_model_secret_means_loopback_without_auth(self) -> None:
+        (self.paths.common_root / "rondo.secrets.example.env").write_text(
+            "OPENAI_API_KEY=\nRONDO_LOCAL_MODEL_API_KEY=\n",
+            encoding="utf-8",
+        )
+        (self.paths.common_root / "rondo.local.toml").write_text(
+            "[providers.openai]\napi_key_env = \"OPENAI_API_KEY\"\n"
+            "[local_model]\napi_key_env = \"RONDO_LOCAL_MODEL_API_KEY\"\n",
+            encoding="utf-8",
+        )
+        (self.paths.common_root / ".env.local").write_text(
+            "OPENAI_API_KEY=secret-test-value\nRONDO_LOCAL_MODEL_API_KEY=\n",
+            encoding="utf-8",
+        )
+        self.assertIsNone(load_local_model_secret(load_runtime_config(self.paths)))
+
+
+class ArtifactTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.paths = RepoPaths(root, root)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _record(self, run_id: str, *, track: str = "tb", side: str = "rondo") -> dict:
+        return {
+            "schema_version": 1,
+            "run_id": run_id,
+            "created_at": "2026-08-09T00:00:00+08:00",
+            "track": track,
+            "side": side,
+            "git_commit": "a" * 40,
+            "git_dirty": False,
+            "binary_sha256": "b" * 64,
+            "upstream_codex": {
+                "tag": "rust-v0.147.0",
+                "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0",
+            },
+            "config": {"model": "fake"},
+            "outcome": "completed",
+            "summary": {"success_rate": 1.0},
+            "tasks": [{"task_id": "fake", "outcome": "pass"}],
+            "metrics": None,
+            "cost": {"estimated_usd": 0.0, "actual_usd": 0.0},
+            "artifacts": f"eval-data/runs/{run_id}",
+            "notes": "",
+        }
+
+    def test_finalize_publishes_private_artifacts_and_appends_index(self) -> None:
+        cases = (
+            ("20260809-000000000-tb-rondo-r1", "rondo"),
+            ("20260809-000000001-tb-codex-r1", "codex"),
+        )
+        for run_id, side in cases:
+            writer = ArtifactWriter(self.paths, run_id).start()
+            writer.write_json("result.json", {"ok": True})
+            target = writer.finalize(self._record(run_id, side=side), secrets=())
+            self.assertTrue((target / "result.json").is_file())
+            if os.name == "posix":
+                self.assertEqual(target.stat().st_mode & 0o777, 0o700)
+                self.assertEqual((target / "result.json").stat().st_mode & 0o777, 0o600)
+        rows = [
+            json.loads(line)
+            for line in (self.paths.common_root / "eval/results/runs.jsonl").read_text().splitlines()
+        ]
+        self.assertEqual([row["run_id"] for row in rows], [case[0] for case in cases])
+        self.assertTrue(
+            all(
+                row["upstream_codex"]
+                == {
+                    "tag": "rust-v0.147.0",
+                    "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                    "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0",
+                }
+                for row in rows
+            )
+        )
+
+    def test_upstream_codex_identity_is_exact(self) -> None:
+        invalid_values = (
+            None,
+            {},
+            {
+                "tag": "rust-v0.147.0",
+                "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+            },
+            {
+                "tag": "rust-v0.147.0",
+                "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0",
+                "extra": "not-schema-v1",
+            },
+            {
+                "tag": "rust-v0.146.0",
+                "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0",
+            },
+            {
+                "tag": "rust-v0.147.0",
+                "commit": "a" * 40,
+                "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0",
+            },
+            {
+                "tag": "rust-v0.147.0",
+                "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                "workspace_lock_normalization": "134 workspace packages: 0.0.0 -> 0.147.0",
+            },
+        )
+        for number, value in enumerate(invalid_values, start=25):
+            with self.subTest(value=value):
+                run_id = f"20260809-0000000{number}-tb-rondo-r1"
+                writer = ArtifactWriter(self.paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                record = self._record(run_id)
+                record["upstream_codex"] = value
+                with self.assertRaises(ArtifactError):
+                    writer.finalize(record, secrets=())
+
+    def test_upstream_codex_identity_is_required_for_every_track(self) -> None:
+        cases = (
+            ("20260809-000000032-tb-rondo-r1", "tb", "rondo"),
+            ("20260809-000000033-replay-codex-r1", "replay", "codex"),
+            ("20260809-000000034-shadow-luna-static-r1", "shadow", "luna-static"),
+        )
+        for run_id, track, side in cases:
+            with self.subTest(track=track):
+                writer = ArtifactWriter(self.paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                record = self._record(run_id, track=track, side=side)
+                if track != "tb":
+                    record["tasks"] = None
+                    record["metrics"] = {"fake_metric": 1.0}
+                del record["upstream_codex"]
+                with self.assertRaises(ArtifactError):
+                    writer.finalize(record, secrets=())
+
+    def test_secret_scan_fails_before_publication(self) -> None:
+        run_id = "20260809-000000002-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_bytes("stdout.log", b"prefix s3cr3t suffix")
+        with self.assertRaises(ArtifactError):
+            writer.finalize(self._record(run_id), secrets=["s3cr3t"])
+        self.assertFalse(writer.target.exists())
+        self.assertTrue(writer.staging.exists())
+
+    def test_mandatory_scan_rejects_sensitive_artifact_shapes_without_exact_secrets(self) -> None:
+        unsafe_values = (
+            b'{"api_key":"not-for-an-artifact"}',
+            b"OPENAI_API_KEY=not-for-an-artifact",
+            b"Authorization: Basic dXNlcjpwYXNz\n",
+            b"request=https://user:password@example.invalid/path",
+        )
+        for number, contents in enumerate(unsafe_values, start=3):
+            with self.subTest(contents=contents):
+                run_id = f"20260809-00000000{number}-tb-rondo-r1"
+                writer = ArtifactWriter(self.paths, run_id).start()
+                writer.write_bytes("stdout.log", contents)
+                with self.assertRaises(ArtifactError):
+                    writer.finalize(self._record(run_id), secrets=())
+
+    def test_tracked_record_is_included_in_secret_scan(self) -> None:
+        run_id = "20260809-000000006-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        record = self._record(run_id)
+        record["notes"] = "accidentally copied s3cr3t here"
+        with self.assertRaises(ArtifactError):
+            writer.finalize(record, secrets=["s3cr3t"])
+        self.assertFalse(writer.target.exists())
+        self.assertFalse((self.paths.common_root / "eval/results/runs.jsonl").exists())
+
+    def test_tracked_record_rejects_sensitive_key_even_without_exact_secrets(self) -> None:
+        run_id = "20260809-000000007-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        record = self._record(run_id)
+        record["config"] = {"api_key": "not-for-the-index"}
+        with self.assertRaises(ArtifactError):
+            writer.finalize(record, secrets=())
+
+    def test_existing_target_is_never_overwritten(self) -> None:
+        run_id = "20260809-000000008-tb-rondo-r1"
+        target = self.paths.common_root / "eval-data/runs" / run_id
+        target.mkdir(parents=True)
+        with self.assertRaises(ArtifactError):
+            ArtifactWriter(self.paths, run_id).start()
+
+    def test_duplicate_run_id_in_index_is_rejected(self) -> None:
+        run_id = "20260809-000000009-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        writer.results.parent.mkdir(parents=True)
+        writer.results.write_text(json.dumps(self._record(run_id)) + "\n", encoding="utf-8")
+        with self.assertRaises(ArtifactError):
+            writer.finalize(self._record(run_id), secrets=())
+        self.assertTrue(writer.staging.exists())
+        self.assertFalse(writer.target.exists())
+
+    def test_append_failure_rolls_back_and_next_writer_recovers_publication(self) -> None:
+        from unittest import mock
+
+        run_id = "20260809-000000010-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        real_write = os.write
+        write_calls = 0
+
+        def fail_after_partial_append(descriptor, contents):
+            nonlocal write_calls
+            write_calls += 1
+            if write_calls == 1:
+                prefix = bytes(contents[:11])
+                real_write(descriptor, prefix)
+                return len(prefix)
+            raise OSError("injected partial append failure")
+
+        with mock.patch("rondo_eval.artifacts.os.write", side_effect=fail_after_partial_append):
+            with self.assertRaises(OSError):
+                writer.finalize(self._record(run_id), secrets=())
+        self.assertTrue(writer.staging.exists())
+        self.assertFalse(writer.target.exists())
+        self.assertTrue(writer.journal.exists())
+        self.assertEqual(writer.results.stat().st_size, 0)
+
+        with self.assertRaises(ArtifactError):
+            ArtifactWriter(self.paths, run_id).start()
+        self.assertTrue(writer.target.exists())
+        self.assertFalse(writer.staging.exists())
+        self.assertFalse(writer.journal.exists())
+        rows = [json.loads(line) for line in writer.results.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([row["run_id"] for row in rows], [run_id])
+
+    def test_interrupted_publication_is_reconciled_from_journal(self) -> None:
+        from unittest import mock
+
+        run_id = "20260809-000000024-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        with mock.patch("rondo_eval.artifacts._append_json_line", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                writer.finalize(self._record(run_id), secrets=())
+        self.assertTrue(writer.target.exists())
+        self.assertTrue(writer.journal.exists())
+        self.assertFalse(writer.staging.exists())
+
+        with self.assertRaises(ArtifactError):
+            ArtifactWriter(self.paths, run_id).start()
+        self.assertTrue(writer.target.exists())
+        self.assertFalse(writer.journal.exists())
+        rows = [json.loads(line) for line in writer.results.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([row["run_id"] for row in rows], [run_id])
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks are unavailable")
+    def test_symlinked_run_ancestor_fails_closed_before_write(self) -> None:
+        run_id = "20260809-000000011-tb-rondo-r1"
+        redirected = self.paths.common_root / "redirected"
+        redirected.mkdir()
+        os.symlink(redirected, self.paths.common_root / "eval-data", target_is_directory=True)
+        with self.assertRaises(ArtifactError):
+            ArtifactWriter(self.paths, run_id).start()
+        self.assertEqual(list(redirected.iterdir()), [])
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks are unavailable")
+    def test_symlinked_result_or_lock_fails_closed_before_publication(self) -> None:
+        for number, unsafe_name in ((12, "runs.jsonl"), (13, "runs.jsonl.lock")):
+            with self.subTest(unsafe_name=unsafe_name):
+                root = self.paths.common_root / f"case-{number}"
+                root.mkdir()
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0000000{number}-tb-rondo-r1"
+                writer = ArtifactWriter(paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                writer.results.parent.mkdir(parents=True)
+                redirect = root / "redirect"
+                redirect.write_text("unchanged", encoding="utf-8")
+                os.symlink(redirect, writer.results.parent / unsafe_name)
+                with self.assertRaises(ArtifactError):
+                    writer.finalize(self._record(run_id), secrets=())
+                self.assertEqual(redirect.read_text(encoding="utf-8"), "unchanged")
+                self.assertFalse(writer.target.exists())
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks are unavailable")
+    def test_symlinked_result_ancestor_fails_closed_before_publication(self) -> None:
+        root = self.paths.common_root / "result-ancestor"
+        root.mkdir()
+        paths = RepoPaths(root, root)
+        run_id = "20260809-000000014-tb-rondo-r1"
+        writer = ArtifactWriter(paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        redirect = root / "redirect"
+        redirect.mkdir()
+        os.symlink(redirect, root / "eval", target_is_directory=True)
+        with self.assertRaises(ArtifactError):
+            writer.finalize(self._record(run_id), secrets=())
+        self.assertEqual(list(redirect.iterdir()), [])
+        self.assertFalse(writer.target.exists())
+
+    def test_results_can_be_explicitly_written_to_development_worktree(self) -> None:
+        common = self.paths.common_root
+        measurement = common / ".claude/worktrees/measurement"
+        development = common / ".claude/worktrees/development"
+        measurement.mkdir(parents=True)
+        development.mkdir(parents=True)
+        paths = RepoPaths(common, measurement)
+        run_id = "20260809-000000014-tb-rondo-r1"
+        writer = ArtifactWriter(paths, run_id, results_worktree_root=development).start()
+        writer.write_json("result.json", {"ok": True})
+        writer.finalize(self._record(run_id), secrets=())
+        self.assertTrue((development / "eval/results/runs.jsonl").is_file())
+        self.assertFalse((measurement / "eval/results/runs.jsonl").exists())
+
+    def test_results_worktree_outside_common_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as outside:
+            run_id = "20260809-000000015-tb-rondo-r1"
+            with self.assertRaises(ArtifactError):
+                ArtifactWriter(self.paths, run_id, results_worktree_root=Path(outside)).start()
+
+    def test_invalid_completed_records_are_rejected(self) -> None:
+        invalid_changes = (
+            {"config": {}},
+            {"summary": {}},
+            {"tasks": []},
+            {"tasks": [{}]},
+            {"cost": {"estimated_usd": -0.01, "actual_usd": 0.0}},
+            {"created_at": "2026-08-09T00:00:00"},
+            {"track": "anything"},
+            {"side": "anything"},
+        )
+        for number, changes in enumerate(invalid_changes, start=16):
+            with self.subTest(changes=changes):
+                run_id = f"20260809-0000000{number}-tb-rondo-r1"
+                writer = ArtifactWriter(self.paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                record = self._record(run_id)
+                record.update(changes)
+                with self.assertRaises(ArtifactError):
+                    writer.finalize(record, secrets=())
+
+
+if __name__ == "__main__":
+    unittest.main()

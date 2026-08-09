@@ -1,0 +1,11 @@
+[project]
+name = "rondo-eval"
+version = "0.1.0"
+description = "Lightweight RONDO evaluation and local-approval facilities"
+requires-python = ">=3.12"
+dependencies = [
+    "harbor==0.20.0",
+]
+
+[tool.uv]
+package = false

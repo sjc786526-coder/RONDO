@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "project": "ggml-org/llama.cpp",
+  "release": "b10333",
+  "source_commit": "08659901c43b51de735740f1cf61bb82fbe0c4e4",
+  "asset": {
+    "name": "llama-b10333-bin-ubuntu-x64.tar.gz",
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10333/llama-b10333-bin-ubuntu-x64.tar.gz",
+    "size_bytes": 16507165,
+    "sha256": "936ce04d98abe2a977e9dd2ff92659bb96947e136acee8f2bc3e21d8eaebbf23"
+  },
+  "installed_binary": {
+    "relative_path": "eval-data/tools/llama-b10333/llama-server",
+    "sha256": "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c15315dbd8aa4bbe"
+  },
+  "capability": "cpu_only_no_model",
+  "model_backed_structured_output": "not_run"
+}
