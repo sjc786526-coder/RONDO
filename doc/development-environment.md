@@ -271,14 +271,18 @@ RONDO_BUILD_PROJECT_STOP_BYTES=190000000000 just test
 诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗用
 `cgroup.events` 的 `populated` 位判断整个scope及其子cgroup是否仍有进程，`cgroup.procs`只记录根层
 直接成员数作诊断；user D-Bus查询不参与存活判定。事实不可读时按unknown主动终止并继续监督，不能
-当作inactive。终止采用约1秒的kill round与无界外层监督，按Bash单调 `SECONDS` 约每30秒报告真实
-经过时间；`MemoryMax`在此期间继续兜底。拿不到ControlGroup时即使命令返回0也按附着失败返回。
+当作inactive。终止采用约1秒的kill round与无界外层监督，按Bash `SECONDS` 约每30秒报告真实经过
+秒数；这减少了 `date` 子进程，但不声明抗宿主时钟跳变。user D-Bus终止请求失败时，脚本先尝试
+`cgroup.kill`，不可写时再递归核对并SIGKILL目标cgroup子树成员；`MemoryMax`在此期间继续兜底。
+拿不到ControlGroup时即使命令返回0也按附着失败返回。
 
 正式 `just test` 保持 `NEXTEST_PROFILE=local`，但看门狗为每轮生成独立nextest配置，把JUnit直接写入
 该轮独占目录 `.codex/build-watchdog/<stamp>/junit-local.xml`，不再扫描或复制target中的历史报告。
-`summary.env` 明确记录 `junit_status=retained|absent|unreadable|invalid|hash_failed|not_applicable`、路径与
-SHA-256；Nextest返回0但本轮报告未成功留存时，包装器以证据失败返回。`retained`只证明归属和完整性，
-测试是否通过仍由命令返回码与XML内容决定。
+`summary.env` 明确记录
+`junit_status=pending|retained|absent|unreadable|invalid|hash_failed|not_applicable|config_failed|unsupported_invocation`、
+路径与SHA-256；Nextest返回0但本轮报告未成功留存时，包装器以证据失败返回。`pending`只会出现在
+启动期summary，两个配置错误状态属于preflight路径；`retained`只证明归属和完整性，测试是否通过仍由
+命令返回码与XML内容决定。
 
 ## 4. Node 与 pnpm
 

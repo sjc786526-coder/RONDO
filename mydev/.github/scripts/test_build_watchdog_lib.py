@@ -73,6 +73,50 @@ class BuildWatchdogLibraryTests(unittest.TestCase):
         self.assertEqual(live.stdout, "unknown")
         self.assertEqual(dead.stdout, "gone")
 
+    def test_direct_kill_walks_descendants_and_rechecks_membership(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child = root / "child"
+            proc_root = root / "proc"
+            record = root / "signals.txt"
+            child.mkdir()
+            (root / "cgroup.procs").write_text("123\nnot-a-pid\n1\n", encoding="utf-8")
+            (child / "cgroup.procs").write_text("456\n", encoding="utf-8")
+            (proc_root / "123").mkdir(parents=True)
+            (proc_root / "456").mkdir(parents=True)
+            (proc_root / "123/cgroup").write_text(
+                "0::/expected.scope/child\n", encoding="utf-8"
+            )
+            (proc_root / "456/cgroup").write_text(
+                "0::/unrelated.scope\n", encoding="utf-8"
+            )
+
+            result = run_helper(
+                f"kill() {{ printf '%s\\n' \"$*\" >> {shlex.quote(str(record))}; }}; "
+                "rondo_kill_cgroup_subtree "
+                f"{shlex.quote(str(root))} /expected.scope {shlex.quote(str(proc_root))}"
+            )
+            signals = record.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(signals, ["-KILL 123"])
+
+    def test_direct_kill_prefers_atomic_cgroup_kill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cgroup_kill = root / "cgroup.kill"
+            cgroup_kill.write_text("", encoding="utf-8")
+
+            result = run_helper(
+                "kill() { return 99; }; "
+                "rondo_kill_cgroup_subtree "
+                f"{shlex.quote(str(root))} /expected.scope"
+            )
+            written = cgroup_kill.read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(written, "1")
+
     def test_nextest_config_keeps_local_profile_and_uses_unique_junit_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

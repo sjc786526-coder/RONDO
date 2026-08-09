@@ -99,7 +99,7 @@ if [[ "${RONDO_BUILD_WATCHDOG:-1}" == "0" ]]; then
   exec "$@"
 fi
 
-for required in systemd-run systemctl du df awk grep pgrep sha256sum tail; do
+for required in systemd-run systemctl du df awk find grep pgrep sha256sum tail; do
   if ! command -v "$required" >/dev/null 2>&1; then
     echo "[rondo] ${required} is unavailable; refusing an unsupervised heavy build" >&2
     exit 71
@@ -278,6 +278,7 @@ echo "[rondo] watchdog metrics: ${run_dir}" >&2
 echo "[rondo] limits: project stop/max=${project_stop_bytes}/${project_max_bytes} bytes, memory high/max=${memory_high}/${memory_max}, swap max=${swap_max}" >&2
 
 cgroup_root=""
+control_group=""
 runner_pid=""
 
 scope_population_state() {
@@ -320,9 +321,16 @@ terminate_scope() {
   local reason="$1"
   local poll=0
   local population_state=""
+  local systemd_kill_failed=0
 
+  # Freezing is best-effort. Only a failed SIGKILL request means the D-Bus path
+  # cannot terminate the scope and requires the direct cgroup fallback.
   systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
-  systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
+  systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 \
+    || systemd_kill_failed=1
+  if ((systemd_kill_failed == 1)) && ! kill_scope_without_dbus; then
+    echo "[rondo] ${reason}: systemd and direct cgroup kill paths are unavailable; continuing supervision" >&2
+  fi
   for ((poll = 0; poll < 10; poll++)); do
     population_state="$(scope_population_state)"
     if [[ "$population_state" == "gone" ]]; then
@@ -333,6 +341,14 @@ terminate_scope() {
 
   echo "[rondo] ${reason}: scope ${unit} is ${population_state} after a kill round; continuing supervision" >&2
   return 1
+}
+
+kill_scope_without_dbus() {
+  [[ -n "$control_group" && "$control_group" == /* && "$control_group" != "/" ]] || return 1
+  [[ -n "$cgroup_root" && "$cgroup_root" == "/sys/fs/cgroup${control_group}" ]] || return 1
+  [[ "$cgroup_root" == /sys/fs/cgroup/* && "$cgroup_root" != "/sys/fs/cgroup" ]] || return 1
+
+  rondo_kill_cgroup_subtree "$cgroup_root" "$control_group"
 }
 
 # Keeps calling `terminate_scope` until the cgroup subtree is confirmed empty.
@@ -411,7 +427,6 @@ systemd-run --user --scope --quiet --unit="$unit" \
   -- "${command_args[@]}" &
 runner_pid=$!
 
-control_group=""
 for _ in $(seq 1 100); do
   control_group="$(systemctl --user show "$unit" -p ControlGroup --value 2>/dev/null || true)"
   [[ -n "$control_group" ]] && break
@@ -482,7 +497,7 @@ if [[ -d "$target_dir" ]]; then
 else
   target_bytes=0
 fi
-started_monotonic="$SECONDS"
+started_seconds="$SECONDS"
 next_progress_report="$((SECONDS + 30))"
 sample=0
 runner_done=0
@@ -500,8 +515,8 @@ while true; do
     terminate_scope_until_gone "$stop_reason"
     break
   fi
-  now_monotonic="$SECONDS"
-  elapsed="$((now_monotonic - started_monotonic))"
+  now_seconds="$SECONDS"
+  elapsed="$((now_seconds - started_seconds))"
   if ((sample % disk_sample_interval == 0)); then
     project_bytes="$(du -sx -B1 -- "$project_root" 2>/dev/null | awk '{print $1}')"
     if [[ -d "$target_dir" ]]; then
@@ -572,7 +587,7 @@ while true; do
   if ((runner_done == 0)) && ! kill -0 "$runner_pid" 2>/dev/null; then
     wait "$runner_pid" || run_rc=$?
     runner_done=1
-    runner_done_since="$now_monotonic"
+    runner_done_since="$now_seconds"
   fi
 
   ((project_bytes > peak_project)) && peak_project="$project_bytes"
@@ -588,12 +603,12 @@ while true; do
     warning_emitted=1
   fi
   if ((swap_current >= swap_sustained_stop_bytes)); then
-    ((swap_over_since == 0)) && swap_over_since="$now_monotonic"
+    ((swap_over_since == 0)) && swap_over_since="$now_seconds"
   else
     swap_over_since=0
   fi
   if ((cgroup_psi_full_bp >= psi_full_stop_bp || host_psi_full_bp >= psi_full_stop_bp)); then
-    ((psi_over_since == 0)) && psi_over_since="$now_monotonic"
+    ((psi_over_since == 0)) && psi_over_since="$now_seconds"
   else
     psi_over_since=0
   fi
@@ -633,14 +648,14 @@ while true; do
     stop_reason="cgroup_nonreclaimable_memory_above_limit"
   elif ((swap_current >= swap_emergency_stop_bytes)); then
     stop_reason="cgroup_swap_above_emergency_limit"
-  elif ((swap_over_since > 0 && now_monotonic - swap_over_since >= swap_stop_seconds)); then
+  elif ((swap_over_since > 0 && now_seconds - swap_over_since >= swap_stop_seconds)); then
     stop_reason="cgroup_swap_sustained_above_limit"
   elif ((host_mem_available <= host_available_stop_kb)); then
     stop_reason="host_mem_available_below_floor"
-  elif ((psi_over_since > 0 && now_monotonic - psi_over_since >= psi_stop_seconds)); then
+  elif ((psi_over_since > 0 && now_seconds - psi_over_since >= psi_stop_seconds)); then
     stop_reason="memory_full_psi_sustained_above_limit"
   elif ((runner_done == 1 \
-    && now_monotonic - runner_done_since >= residual_grace_seconds)); then
+    && now_seconds - runner_done_since >= residual_grace_seconds)); then
     cleanup_reason="residual_processes_after_command"
   fi
 

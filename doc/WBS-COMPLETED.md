@@ -170,3 +170,15 @@ standard/Lite 形态均补回归。
   不可回收最高约 12.2GB，swap 最高约 0.39GB；未触发资源停机。
 - 一个网络迁移测试超时后留下 366 个 scope 内后代进程。已精确冻结/清理该 scope，并给看门狗增加
   主命令退出后的 5 秒残留清理；合成后台进程场景验证通过。
+
+### 2026-08-09 看门狗与第一批测试维护收口
+
+- scope存活判据改为cgroup v2 `cgroup.events: populated`，JUnit由Nextest直接写入逐轮独占目录并在
+  summary中记录状态、路径与SHA-256；基线tag与peeled commit由受Git跟踪的manifest统一提供。
+- user D-Bus终止请求失败时，先写 `cgroup.kill`；不可用时递归枚举子cgroup，并在发SIGKILL前重新核对
+  每个PID的cgroup成员关系。未知状态继续监督，不把终止失败当作已退出。
+- 第一批测试维护实际覆盖42个历史失败名；严格失败清单剩39项，migration与OAuth是2个附加设施事项。
+  最终实施合同见 `plan/004-remaining-test-failures-investigation.md`，本批未实施39+2。
+- 独立复验补跑三个受影响包：3,630项运行且全部通过，三包clippy退出0、零warning。收尾补丁另通过
+  44项脚本测试（其中9项为看门狗helper）及1项skills定向Nextest；该轮JUnit为1项通过、SHA与summary一致，
+  `stop_reason=none`、`cleanup_reason=none`。未重跑完整workspace或Bazel。

@@ -29,9 +29,10 @@
   `encrypted_function_args`；新旧 Guardian 源码证据须按 meta 中的 source tag/commit 分层。实际有效
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
 - 测评体系、教师 harness 研究尚未开始。
-- **当前阶段：测试设施收尾与剩余失败实施方案定稿**。第一批覆盖42个历史失败名，严格清单机械剩余
-  39项，另有migration/OAuth两个附加设施事项；`plan/004-remaining-test-failures-investigation.md`
-  已定稿但39+2尚未实施。P1尚未开始，Docker与小额真实API仍受§6授权门约束。
+- **当前阶段：剩余测试失败分批修复准备**。看门狗、机器基线事实源与第一批测试维护已收口；第一批
+  覆盖42个历史失败名，严格清单机械剩余39项，另有migration/OAuth两个附加设施事项。
+  `plan/004-remaining-test-failures-investigation.md` 已定稿但39+2尚未实施。P1尚未开始，Docker与
+  小额真实API仍受§6授权门约束。
 
 ## 2. 方向与依赖
 
@@ -104,8 +105,8 @@ P0 共享地基 ────────┤                          ├─→ �
 ## 5. 当前阶段任务
 
 P0 已完成定向门禁并合入主线；验收和失败差集见 `doc/WBS-COMPLETED.md`、
-`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。当前先收口看门狗、机器基线事实源和第一批测试
-遗留；39个严格失败与2个附加事项按 `plan/004-remaining-test-failures-investigation.md` 后续分批实施。
+`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。看门狗、机器基线事实源和第一批测试遗留已收口；
+39个严格失败与2个附加事项按 `plan/004-remaining-test-failures-investigation.md` 后续分批实施。
 P1草稿见 `plan/003-p1-terminal-bench-minimal-chain-draft.md`，在本维护批次审查/合并和用户确认草稿前
 不进入实现；涉及Docker、真实API或数据外发时仍先走§6授权门。
 

@@ -38,6 +38,57 @@ rondo_cgroup_direct_member_count() {
     || printf '%s' unknown
 }
 
+rondo_cgroup_member_pids() {
+  local cgroup_root="$1"
+  local procs_file=""
+  local pid=""
+
+  [[ -n "$cgroup_root" && -d "$cgroup_root" && ! -L "$cgroup_root" ]] || return 1
+  while IFS= read -r -d '' procs_file; do
+    while IFS= read -r pid; do
+      if [[ "$pid" =~ ^[0-9]+$ ]] && ((pid > 1)); then
+        printf '%s\n' "$pid"
+      fi
+    done <"$procs_file"
+  done < <(find -P "$cgroup_root" -type f -name cgroup.procs -print0 2>/dev/null)
+}
+
+rondo_kill_cgroup_subtree() {
+  local cgroup_root="$1"
+  local control_group="$2"
+  local proc_root="${3:-/proc}"
+  local pid=""
+  local process_group=""
+  local signalled=0
+
+  [[ -n "$cgroup_root" && -d "$cgroup_root" && ! -L "$cgroup_root" ]] || return 1
+  [[ "$control_group" == /* && "$control_group" != "/" ]] || return 1
+
+  # cgroup v2 provides an atomic recursive kill when the delegated file is writable.
+  if [[ -w "${cgroup_root}/cgroup.kill" ]] \
+    && { printf '1' >"${cgroup_root}/cgroup.kill"; } 2>/dev/null; then
+    return 0
+  fi
+
+  # Older or non-delegated cgroups may not expose a writable cgroup.kill. Walk every
+  # descendant and re-check each PID's current membership before signalling it so a
+  # rapidly recycled PID cannot target an unrelated process.
+  while IFS= read -r pid; do
+    process_group="$(
+      awk -F: '$1 == "0" {print $3; exit}' "${proc_root}/${pid}/cgroup" 2>/dev/null || true
+    )"
+    if [[ "$process_group" != "$control_group" \
+      && "$process_group" != "${control_group}/"* ]]; then
+      continue
+    fi
+    if kill -KILL "$pid" 2>/dev/null; then
+      signalled=1
+    fi
+  done < <(rondo_cgroup_member_pids "$cgroup_root")
+
+  ((signalled == 1))
+}
+
 rondo_prepare_nextest_config() {
   local source_config="$1"
   local output_config="$2"
