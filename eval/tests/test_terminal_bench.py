@@ -178,6 +178,9 @@ class TerminalBenchTests(unittest.TestCase):
             code_mode_host_sha256=self.code_mode_host_digest,
             bwrap_path=str(self.bwrap_path),
             bwrap_sha256=self.bwrap_digest,
+            libcap_version="2.78",
+            libcap_archive_sha256="1" * 64,
+            libcap_static_sha256="2" * 64,
             source_commit="a" * 40,
             source_dirty=False,
             rust_toolchain=(
@@ -237,6 +240,9 @@ class TerminalBenchTests(unittest.TestCase):
             binary_code_mode_host_sha256=manifest.code_mode_host_sha256,
             binary_bwrap_path=manifest.bwrap_path,
             binary_bwrap_sha256=manifest.bwrap_sha256,
+            binary_libcap_version=manifest.libcap_version,
+            binary_libcap_archive_sha256=manifest.libcap_archive_sha256,
+            binary_libcap_static_sha256=manifest.libcap_static_sha256,
             binary_source_commit=manifest.source_commit,
             binary_source_dirty=manifest.source_dirty,
             binary_rust_toolchain=manifest.rust_toolchain,
@@ -330,6 +336,9 @@ class TerminalBenchTests(unittest.TestCase):
                 self.code_mode_host_digest,
             )
             self.assertEqual(instance.manifest.bwrap_sha256, self.bwrap_digest)
+            self.assertEqual(instance.manifest.libcap_version, "2.78")
+            self.assertEqual(instance.manifest.libcap_archive_sha256, "1" * 64)
+            self.assertEqual(instance.manifest.libcap_static_sha256, "2" * 64)
             self.assertEqual(
                 instance.manifest.workspace_lock_normalization,
                 "135 workspace packages: 0.0.0 -> 0.147.0",

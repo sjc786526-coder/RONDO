@@ -194,9 +194,11 @@
   bubblewrap 创建 loopback 受限而 fail-closed。冻结 bundle 的本机同协议探针证明显式
   `sandbox_workspace_write.network_access=true` 后两轮工具结果与 `turn.completed` 均成功；该条件已进入
   RunSpec 公平指纹、adapter 命令门禁和归档。
-- 第二次受监督 Docker 探针进一步确认正式 Linux package 还必须包含 `codex-resources/bwrap`；现已按上游
-  package layout 增加同源 static-musl bwrap 的 13 键 runtime manifest、原子 bundle 和 Harbor 三文件
-  上传/SHA 门禁，相关 68 项 pure/fake 定向回归通过。只需串行增量构建两侧 bwrap 后再重跑 Docker。
+- 第二次受监督 Docker 探针进一步确认正式 Linux package 还必须包含 `codex-resources/bwrap`。直接交叉
+  构建暴露宿主 `libcap` 不可用于 musl 目标；现已冻结官方 libcap 2.78 归档与 SHA-256，增加项目局部
+  static-musl `libcap.a` 构建/验证入口，并把版本、归档哈希、静态库哈希纳入 16 键 runtime manifest。
+  同源 bwrap 原子 bundle、Harbor 三文件上传/SHA 门禁和 54 项合并定向回归已通过；下一步只允许在看门狗
+  内先生成固定 libcap，再串行增量构建两侧 bwrap 并重跑 Docker。
 
 ### 后续计划
 
@@ -236,3 +238,4 @@
 | 015 | 两侧启用并冻结同源 `codex-code-mode-host` companion | Luna 为 `code_mode_only`；关闭 host 会在首次 API 前拒绝执行，单 CLI manifest 不能形成真实工具链 | B2/B3 二进制公平性 | 已采纳 |
 | 016 | 容器内 workspace-write 显式允许网络，不授予 Docker 特权 capability | 默认 bubblewrap 网络命名空间在 Docker Desktop 内不能初始化；文件系统沙箱仍保留，真实 key 仅在宿主预算代理 | B2/B3 sandbox | 已采纳 |
 | 017 | runtime bundle 按上游布局内置同源 `codex-resources/bwrap` | 任务镜像不应 apt/PATH 注入浮动 sandbox；冻结包必须自包含 v0.147 Linux 运行资源 | B2/B3 二进制公平性 | 已采纳 |
+| 018 | bwrap 只链接项目局部固定的 libcap 2.78 static-musl 产物 | 宿主 GNU 静态库不属于目标 ABI，也不能形成可复现依赖身份 | B2/B3 构建与供应链 | 已采纳 |

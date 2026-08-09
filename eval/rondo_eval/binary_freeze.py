@@ -20,12 +20,15 @@ import re
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import NoReturn, Protocol
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from urllib.parse import urlsplit
 
 from .contracts import BinaryManifest, ContractError, Side
@@ -41,6 +44,16 @@ RUST_TOOLCHAIN = "1.95.0"
 RUST_HOST = "x86_64-unknown-linux-gnu"
 RUST_TARGET = "x86_64-unknown-linux-musl"
 EVAL_ROOT = Path(__file__).resolve().parents[1]
+LIBCAP_VERSION = "2.78"
+LIBCAP_URL = (
+    "https://www.kernel.org/pub/linux/libs/security/linux-privs/libcap2/"
+    "libcap-2.78.tar.xz"
+)
+LIBCAP_ARCHIVE_SHA256 = "0d621e562fd932ccf67b9660fb018e468a683d7b827541df27813228c996bb11"
+LIBCAP_DEPENDENCY_NAME = f"libcap-{LIBCAP_VERSION}-{RUST_TARGET}"
+LIBCAP_MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
+LIBCAP_MAX_EXTRACTED_BYTES = 64 * 1024 * 1024
+LIBCAP_MAX_MEMBERS = 4096
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
@@ -60,18 +73,46 @@ _MANIFEST_KEYS = {
     "build_command",
     "code_mode_host_build_command",
     "bwrap_build_command",
+    "libcap_version",
+    "libcap_archive_sha256",
+    "libcap_static_sha256",
     "workspace_lock_normalization",
 }
 _COMPANION_MANIFEST_KEYS = _MANIFEST_KEYS - {
     "bwrap_path",
     "bwrap_sha256",
     "bwrap_build_command",
+    "libcap_version",
+    "libcap_archive_sha256",
+    "libcap_static_sha256",
 }
 _LEGACY_MANIFEST_KEYS = _COMPANION_MANIFEST_KEYS - {
     "code_mode_host_path",
     "code_mode_host_sha256",
     "code_mode_host_build_command",
 }
+_LIBCAP_LOCK_KEYS = {
+    "schema_version",
+    "name",
+    "version",
+    "target",
+    "url",
+    "archive_sha256",
+}
+_LIBCAP_MANIFEST_KEYS = _LIBCAP_LOCK_KEYS | {"static_sha256", "build_command"}
+_LIBCAP_BUILD_COMMAND = (
+    "/usr/bin/make",
+    "-C",
+    "libcap",
+    "CC=/usr/bin/musl-gcc",
+    "BUILD_CC=/usr/bin/cc",
+    "AR=/usr/bin/ar",
+    "RANLIB=/usr/bin/ranlib",
+    "DYNAMIC=no",
+    "GOLANG=no",
+    "PAM_CAP=no",
+    "libcap.a",
+)
 
 
 class BinaryFreezeError(RuntimeError):
@@ -90,6 +131,16 @@ class V8ExecFunction(Protocol):
     def __call__(
         self, executable: str, argv: list[str], environment: Mapping[str, str]
     ) -> NoReturn: ...
+
+
+class DownloadFunction(Protocol):
+    def __call__(self, url: str, destination: Path, proof: WatchdogProof) -> None: ...
+
+
+class RunFunction(Protocol):
+    def __call__(
+        self, argv: Sequence[str], *, cwd: Path, environment: Mapping[str, str]
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -125,6 +176,7 @@ class RuntimeFreezeRequest:
     source_commit: str
     target_dir: Path
     companion_bundle_dir: Path
+    libcap_dir: Path
     runtime_bundle_dir: Path
     gate_root: Path
     baseline_reference_root: Path | None = None
@@ -141,6 +193,36 @@ class FreezeResult:
     code_mode_host_sha256: str | None = None
     bwrap_path: str | None = None
     bwrap_sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class LibcapPrepareResult:
+    dependency_path: str
+    version: str
+    archive_sha256: str
+    static_sha256: str
+
+
+@dataclass(frozen=True)
+class _LibcapLock:
+    schema_version: int
+    name: str
+    version: str
+    target: str
+    url: str
+    archive_sha256: str
+
+
+@dataclass(frozen=True)
+class _LibcapManifest:
+    schema_version: int
+    name: str
+    version: str
+    target: str
+    url: str
+    archive_sha256: str
+    static_sha256: str
+    build_command: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -516,6 +598,125 @@ def verify_companion(
     return _result(request.side, paths.bundle_dir, manifest)
 
 
+def prepare_libcap(
+    *,
+    common_root: Path,
+    lease_factory: LeaseFactory = lease_from_watchdog,
+    download_function: DownloadFunction | None = None,
+    run_function: RunFunction | None = None,
+) -> LibcapPrepareResult:
+    """Build and atomically publish the pinned project-local musl libcap."""
+
+    proof = _proof(lease_factory)
+    root = _regular_directory(common_root)
+    lock = _load_libcap_lock()
+    destination = _exact_absent_path(
+        root / "eval-data" / "deps" / LIBCAP_DEPENDENCY_NAME,
+        _expected_libcap_dependency(root),
+        "libcap dependency",
+    )
+    parent = destination.parent
+    _reject_symlink_chain(parent)
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _reject_symlink_chain(parent)
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.staging-", dir=parent))
+    try:
+        archive = staging / f"libcap-{LIBCAP_VERSION}.tar.xz"
+        (download_function or _download_libcap)(lock.url, archive, proof)
+        _held(proof)
+        if _sha256_file(_regular_file(archive, exact_mode=0o600)) != lock.archive_sha256:
+            raise BinaryFreezeError("libcap archive checksum differs from the pinned lock")
+
+        source_parent = staging / "source"
+        source_parent.mkdir(mode=0o700)
+        source_tree = _extract_libcap_archive(archive, source_parent, proof)
+        _held(proof)
+        (run_function or _run_libcap_build)(
+            _LIBCAP_BUILD_COMMAND,
+            cwd=source_tree,
+            environment={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0"},
+        )
+        _held(proof)
+
+        built_archive = _regular_file(source_tree / "libcap" / "libcap.a")
+        _validate_static_archive(built_archive)
+        static_sha256 = _sha256_file(built_archive)
+        header = _regular_file(source_tree / "libcap" / "include" / "sys" / "capability.h")
+        publication = staging / "publication"
+        publication.mkdir(mode=0o700)
+        (publication / "include").mkdir(mode=0o700)
+        include = publication / "include" / "sys"
+        include.mkdir(mode=0o700)
+        (publication / "lib").mkdir(mode=0o700)
+        pkgconfig = publication / "lib" / "pkgconfig"
+        pkgconfig.mkdir(mode=0o700)
+        _copy_regular(header, include / "capability.h", mode=0o444)
+        _copy_regular(built_archive, publication / "lib" / "libcap.a", mode=0o444)
+        _write_exclusive(
+            pkgconfig / "libcap.pc",
+            _libcap_pc_bytes(destination),
+            mode=0o444,
+        )
+        manifest = _LibcapManifest(
+            schema_version=1,
+            name=lock.name,
+            version=lock.version,
+            target=lock.target,
+            url=lock.url,
+            archive_sha256=lock.archive_sha256,
+            static_sha256=static_sha256,
+            build_command=_LIBCAP_BUILD_COMMAND,
+        )
+        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode()
+        _write_exclusive(publication / "manifest.json", payload + b"\n", mode=0o600)
+        _validate_libcap_dependency_tree(publication, destination, lock)
+        _fsync_tree_directories(publication)
+        _held(proof)
+        if destination.exists() or destination.is_symlink():
+            raise BinaryFreezeError("libcap dependency appeared before atomic publication")
+        _rename_noreplace(publication, destination)
+        _fsync_directory(parent)
+    except Exception:
+        if staging.exists() and staging.is_dir() and not staging.is_symlink():
+            _remove_private_tree(staging)
+        raise
+    if staging.exists():
+        _remove_private_tree(staging)
+    _held(proof)
+    published = _validate_libcap_dependency_tree(destination, destination, lock)
+    return LibcapPrepareResult(
+        dependency_path=str(destination),
+        version=published.version,
+        archive_sha256=published.archive_sha256,
+        static_sha256=published.static_sha256,
+    )
+
+
+def verify_libcap(
+    *,
+    common_root: Path,
+    lease_factory: LeaseFactory = lease_from_watchdog,
+) -> LibcapPrepareResult:
+    """Revalidate the pinned project-local musl libcap without rebuilding it."""
+
+    proof = _proof(lease_factory)
+    root = _regular_directory(common_root)
+    lock = _load_libcap_lock()
+    destination = _exact_existing_directory(
+        _expected_libcap_dependency(root),
+        _expected_libcap_dependency(root),
+        "libcap dependency",
+    )
+    manifest = _validate_libcap_dependency_tree(destination, destination, lock)
+    _held(proof)
+    return LibcapPrepareResult(
+        dependency_path=str(destination),
+        version=manifest.version,
+        archive_sha256=manifest.archive_sha256,
+        static_sha256=manifest.static_sha256,
+    )
+
+
 def prepare_runtime(
     request: RuntimeFreezeRequest,
     bwrap_build_command: Sequence[str],
@@ -527,6 +728,11 @@ def prepare_runtime(
 
     proof = _proof(lease_factory)
     paths = _validate_runtime_request(request, runtime_must_exist=False)
+    libcap = _validate_libcap_dependency_tree(
+        paths.libcap_dir,
+        paths.libcap_dir,
+        _load_libcap_lock(),
+    )
     toolchain = (toolchain_probe or _probe_toolchain)()
     _validate_toolchain(toolchain)
     freeze_request = _freeze_request_from_runtime(request)
@@ -535,6 +741,7 @@ def prepare_runtime(
         paths.freeze,
         bwrap_build_command,
         bwrap=True,
+        libcap_dir=paths.libcap_dir,
     )
     _validate_source(freeze_request, paths.freeze)
     companion = _validate_companion_artifact(request, paths, toolchain)
@@ -558,6 +765,9 @@ def prepare_runtime(
         build_command=companion.build_command,
         code_mode_host_build_command=companion.code_mode_host_build_command,
         bwrap_build_command=command,
+        libcap_version=libcap.version,
+        libcap_archive_sha256=libcap.archive_sha256,
+        libcap_static_sha256=libcap.static_sha256,
         workspace_lock_normalization=companion.workspace_lock_normalization,
     )
     try:
@@ -590,6 +800,11 @@ def verify_runtime(
 
     proof = _proof(lease_factory)
     paths = _validate_runtime_request(request, runtime_must_exist=True)
+    libcap = _validate_libcap_dependency_tree(
+        paths.libcap_dir,
+        paths.libcap_dir,
+        _load_libcap_lock(),
+    )
     toolchain = (toolchain_probe or _probe_toolchain)()
     _validate_toolchain(toolchain)
     freeze_request = _freeze_request_from_runtime(request)
@@ -608,6 +823,7 @@ def verify_runtime(
         paths.freeze,
         manifest.bwrap_build_command,
         bwrap=True,
+        libcap_dir=paths.libcap_dir,
     )
     expected_normalization = LOCK_NORMALIZATION if request.side is Side.CODEX else None
     if (
@@ -619,6 +835,9 @@ def verify_runtime(
         or manifest.code_mode_host_sha256 != companion.code_mode_host_sha256
         or manifest.build_command != companion.build_command
         or manifest.code_mode_host_build_command != companion.code_mode_host_build_command
+        or manifest.libcap_version != libcap.version
+        or manifest.libcap_archive_sha256 != libcap.archive_sha256
+        or manifest.libcap_static_sha256 != libcap.static_sha256
     ):
         raise BinaryFreezeError("runtime bundle provenance differs from its verified inputs")
     binary = _regular_file(paths.runtime_bundle_dir / "codex", executable=True, exact_mode=0o555)
@@ -712,6 +931,7 @@ class _ResolvedCompanionPaths:
 class _ResolvedRuntimePaths:
     freeze: _ResolvedPaths
     companion_bundle_dir: Path
+    libcap_dir: Path
     runtime_bundle_dir: Path
 
 
@@ -796,6 +1016,11 @@ def _validate_runtime_request(
         _expected_bundle(root, request.side, request.source_commit),
         "companion bundle",
     )
+    libcap = _exact_existing_directory(
+        request.libcap_dir,
+        _expected_libcap_dependency(root),
+        "libcap dependency",
+    )
     expected_runtime = _expected_runtime_bundle(root, request.side, request.source_commit)
     runtime = (
         _exact_existing_directory(request.runtime_bundle_dir, expected_runtime, "runtime bundle")
@@ -810,7 +1035,7 @@ def _validate_runtime_request(
     elif request.baseline_reference_root is not None:
         raise BinaryFreezeError("RONDO runtime bundle cannot declare a baseline reference")
     freeze = _ResolvedPaths(root, source, target, runtime, gate, reference)
-    return _ResolvedRuntimePaths(freeze, companion, runtime)
+    return _ResolvedRuntimePaths(freeze, companion, libcap, runtime)
 
 
 def _validate_request(request: FreezeRequest, *, artifact_must_exist: bool) -> _ResolvedPaths:
@@ -1038,6 +1263,311 @@ def _validate_workspace_manifests(workspace: Path) -> None:
         raise BinaryFreezeError("codex-bwrap package/bin contract differs")
 
 
+def _load_libcap_lock() -> _LibcapLock:
+    path = _regular_file(EVAL_ROOT / "locks" / "libcap-musl.json", exact_mode=0o644)
+    try:
+        value = json.loads(path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BinaryFreezeError("libcap dependency lock is unreadable") from exc
+    if not isinstance(value, dict) or set(value) != _LIBCAP_LOCK_KEYS:
+        raise BinaryFreezeError("libcap dependency lock schema differs")
+    try:
+        lock = _LibcapLock(**value)
+    except TypeError as exc:
+        raise BinaryFreezeError("libcap dependency lock is invalid") from exc
+    expected = _LibcapLock(
+        schema_version=1,
+        name="libcap",
+        version=LIBCAP_VERSION,
+        target=RUST_TARGET,
+        url=LIBCAP_URL,
+        archive_sha256=LIBCAP_ARCHIVE_SHA256,
+    )
+    if lock != expected or type(lock.schema_version) is not int:
+        raise BinaryFreezeError("libcap dependency lock differs from the frozen contract")
+    parsed = urlsplit(lock.url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "www.kernel.org"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise BinaryFreezeError("libcap dependency URL is invalid")
+    if not _SHA256.fullmatch(lock.archive_sha256):
+        raise BinaryFreezeError("libcap dependency archive SHA-256 is invalid")
+    return lock
+
+
+def _download_libcap(url: str, destination: Path, proof: WatchdogProof) -> None:
+    if url != LIBCAP_URL:
+        raise BinaryFreezeError("libcap download URL differs from the pinned lock")
+    request = urllib_request.Request(url, headers={"User-Agent": "RONDO-eval-freeze/1"})
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with urllib_request.urlopen(request, timeout=60) as response:
+            final_url = urlsplit(response.geturl())
+            if (
+                final_url.scheme != "https"
+                or final_url.username is not None
+                or final_url.password is not None
+            ):
+                raise BinaryFreezeError("libcap download redirected to an unsafe URL")
+            declared = response.headers.get("Content-Length")
+            if declared is not None and (
+                not declared.isascii()
+                or not declared.isdigit()
+                or int(declared) > LIBCAP_MAX_ARCHIVE_BYTES
+            ):
+                raise BinaryFreezeError("libcap archive exceeds the download limit")
+            total = 0
+            while chunk := response.read(1024 * 1024):
+                total += len(chunk)
+                if total > LIBCAP_MAX_ARCHIVE_BYTES:
+                    raise BinaryFreezeError("libcap archive exceeds the download limit")
+                _write_all(descriptor, chunk)
+                _held(proof)
+            if total == 0:
+                raise BinaryFreezeError("libcap archive download was empty")
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+    except BinaryFreezeError:
+        raise
+    except (OSError, TimeoutError, urllib_error.URLError, ValueError) as exc:
+        raise BinaryFreezeError("pinned libcap archive download failed") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _extract_libcap_archive(
+    archive_path: Path, destination: Path, proof: WatchdogProof
+) -> Path:
+    expected_top = f"libcap-{LIBCAP_VERSION}"
+    seen: set[str] = set()
+    total = 0
+    members = 0
+    try:
+        with tarfile.open(archive_path, mode="r:xz", errorlevel=2) as archive:
+            for member in archive:
+                members += 1
+                if members > LIBCAP_MAX_MEMBERS:
+                    raise BinaryFreezeError("libcap archive contains too many entries")
+                raw_name = member.name
+                normalized_name = raw_name[:-1] if member.isdir() and raw_name.endswith("/") else raw_name
+                if (
+                    not normalized_name
+                    or "\x00" in normalized_name
+                    or "\\" in normalized_name
+                    or normalized_name.startswith("/")
+                    or any(part in {"", ".", ".."} for part in normalized_name.split("/"))
+                ):
+                    raise BinaryFreezeError("libcap archive path is unsafe")
+                relative = PurePosixPath(normalized_name)
+                if (
+                    not relative.parts
+                    or relative.parts[0] != expected_top
+                    or any(part in {"", ".", ".."} for part in relative.parts)
+                    or normalized_name in seen
+                ):
+                    raise BinaryFreezeError("libcap archive layout differs")
+                seen.add(normalized_name)
+                if not (member.isdir() or member.isreg()):
+                    raise BinaryFreezeError("libcap archive contains an unsupported entry")
+                total += member.size
+                if member.size < 0 or total > LIBCAP_MAX_EXTRACTED_BYTES:
+                    raise BinaryFreezeError("libcap archive exceeds the extraction limit")
+                target = destination.joinpath(*relative.parts)
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    if target.is_symlink() or not target.is_dir():
+                        raise BinaryFreezeError("libcap archive directory is unsafe")
+                    target.chmod(0o700)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    _write_tar_member(archive, member, target)
+                _held(proof)
+    except BinaryFreezeError:
+        raise
+    except (OSError, tarfile.TarError, ValueError) as exc:
+        raise BinaryFreezeError("libcap archive extraction failed") from exc
+    if members == 0:
+        raise BinaryFreezeError("libcap archive is empty")
+    for directory, directories, _ in os.walk(destination):
+        Path(directory).chmod(0o700)
+        for name in directories:
+            (Path(directory) / name).chmod(0o700)
+    return _regular_directory(destination / expected_top)
+
+
+def _write_tar_member(archive: tarfile.TarFile, member: tarfile.TarInfo, path: Path) -> None:
+    source = archive.extractfile(member)
+    if source is None:
+        raise BinaryFreezeError("libcap archive regular file is unreadable")
+    mode = 0o755 if member.mode & 0o111 else 0o644
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    remaining = member.size
+    try:
+        while remaining:
+            chunk = source.read(min(1024 * 1024, remaining))
+            if not chunk:
+                raise BinaryFreezeError("libcap archive entry is truncated")
+            _write_all(descriptor, chunk)
+            remaining -= len(chunk)
+        os.fchmod(descriptor, mode)
+        os.fsync(descriptor)
+    finally:
+        source.close()
+        os.close(descriptor)
+
+
+def _run_libcap_build(
+    argv: Sequence[str], *, cwd: Path, environment: Mapping[str, str]
+) -> None:
+    if tuple(argv) != _LIBCAP_BUILD_COMMAND or dict(environment) != {
+        "PATH": "/usr/bin:/bin",
+        "LC_ALL": "C",
+        "SOURCE_DATE_EPOCH": "0",
+    }:
+        raise BinaryFreezeError("libcap build command or environment differs")
+    for executable in (
+        "/usr/bin/make",
+        "/usr/bin/musl-gcc",
+        "/usr/bin/cc",
+        "/usr/bin/ar",
+        "/usr/bin/ranlib",
+    ):
+        _regular_file(Path(executable), executable=True)
+    try:
+        result = subprocess.run(
+            tuple(argv),
+            cwd=cwd,
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=dict(environment),
+            timeout=600,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise BinaryFreezeError("pinned musl libcap build failed") from exc
+    if result.returncode != 0:
+        raise BinaryFreezeError("pinned musl libcap build failed")
+
+
+def _libcap_pc_bytes(prefix: Path) -> bytes:
+    return (
+        f"prefix={prefix}\n"
+        "exec_prefix=${prefix}\n"
+        "libdir=${prefix}/lib\n"
+        "includedir=${prefix}/include\n"
+        "\n"
+        "Name: libcap\n"
+        "Description: Linux capabilities library\n"
+        f"Version: {LIBCAP_VERSION}\n"
+        "Libs: -L${libdir} -lcap\n"
+        "Cflags: -I${includedir}\n"
+    ).encode("utf-8")
+
+
+def _validate_static_archive(path: Path) -> None:
+    candidate = _regular_file(path)
+    try:
+        with candidate.open("rb") as stream:
+            magic = stream.read(8)
+            has_payload = bool(stream.read(1))
+    except OSError as exc:
+        raise BinaryFreezeError("libcap static archive is unreadable") from exc
+    if magic != b"!<arch>\n" or not has_payload:
+        raise BinaryFreezeError("libcap output is not a static archive")
+
+
+def _read_libcap_manifest(path: Path) -> _LibcapManifest:
+    manifest_path = _regular_file(path, exact_mode=0o600)
+    try:
+        value = json.loads(manifest_path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BinaryFreezeError("libcap dependency manifest is unreadable") from exc
+    if not isinstance(value, dict) or set(value) != _LIBCAP_MANIFEST_KEYS:
+        raise BinaryFreezeError("libcap dependency manifest schema differs")
+    command = value.get("build_command")
+    if not isinstance(command, list):
+        raise BinaryFreezeError("libcap dependency build command is invalid")
+    try:
+        return _LibcapManifest(
+            schema_version=value["schema_version"],
+            name=value["name"],
+            version=value["version"],
+            target=value["target"],
+            url=value["url"],
+            archive_sha256=value["archive_sha256"],
+            static_sha256=value["static_sha256"],
+            build_command=tuple(command),
+        )
+    except TypeError as exc:
+        raise BinaryFreezeError("libcap dependency manifest is invalid") from exc
+
+
+def _validate_libcap_dependency_tree(
+    directory: Path, pc_prefix: Path, lock: _LibcapLock
+) -> _LibcapManifest:
+    root = _regular_directory(directory)
+    expected_directories = (
+        root,
+        root / "include",
+        root / "include" / "sys",
+        root / "lib",
+        root / "lib" / "pkgconfig",
+    )
+    if any(stat.S_IMODE(_regular_directory(path).stat().st_mode) != 0o700 for path in expected_directories):
+        raise BinaryFreezeError("libcap dependency directory mode differs")
+    expected_entries = {
+        "include",
+        "include/sys",
+        "include/sys/capability.h",
+        "lib",
+        "lib/libcap.a",
+        "lib/pkgconfig",
+        "lib/pkgconfig/libcap.pc",
+        "manifest.json",
+    }
+    actual_entries: set[str] = set()
+    for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        for name in (*directories, *files):
+            path = current_path / name
+            if path.is_symlink():
+                raise BinaryFreezeError("libcap dependency contains a symlink")
+            actual_entries.add(str(path.relative_to(root)))
+    if actual_entries != expected_entries:
+        raise BinaryFreezeError("libcap dependency contains unowned entries")
+    header = _regular_file(root / "include" / "sys" / "capability.h", exact_mode=0o444)
+    library = _regular_file(root / "lib" / "libcap.a", exact_mode=0o444)
+    pkgconfig = _regular_file(root / "lib" / "pkgconfig" / "libcap.pc", exact_mode=0o444)
+    if not header.read_bytes():
+        raise BinaryFreezeError("libcap dependency header is empty")
+    if pkgconfig.read_bytes() != _libcap_pc_bytes(pc_prefix):
+        raise BinaryFreezeError("libcap pkg-config metadata differs")
+    _validate_static_archive(library)
+    manifest = _read_libcap_manifest(root / "manifest.json")
+    expected = _LibcapManifest(
+        schema_version=1,
+        name=lock.name,
+        version=lock.version,
+        target=lock.target,
+        url=lock.url,
+        archive_sha256=lock.archive_sha256,
+        static_sha256=_sha256_file(library),
+        build_command=_LIBCAP_BUILD_COMMAND,
+    )
+    if manifest != expected or type(manifest.schema_version) is not int:
+        raise BinaryFreezeError("libcap dependency provenance differs")
+    return manifest
+
+
 def _load_source_v8_resolver(
     scripts_root: Path,
 ) -> tuple[Mapping[str, object], Callable[..., object], Callable[[], str]]:
@@ -1088,6 +1618,7 @@ def _validate_build_command(
     *,
     companion: bool = False,
     bwrap: bool = False,
+    libcap_dir: Path | None = None,
 ) -> tuple[str, ...]:
     if companion and bwrap:
         raise BinaryFreezeError("build command kind is ambiguous")
@@ -1104,8 +1635,12 @@ def _validate_build_command(
         raise BinaryFreezeError("build command lacks the exact watchdog entry") from exc
     if argv[:3] != (f"cwd={paths.gate_root}", "env", "-i"):
         raise BinaryFreezeError("build command must begin with an empty environment")
+    if bwrap != (libcap_dir is not None):
+        raise BinaryFreezeError("bwrap build requires the exact pinned libcap dependency")
     environment = _validate_build_environment(
-        argv[3:watchdog_index], require_eval_pythonpath=companion
+        argv[3:watchdog_index],
+        require_eval_pythonpath=companion,
+        libcap_dir=libcap_dir,
     )
     if environment["RONDO_PROJECT_ROOT"] != str(paths.common_root):
         raise BinaryFreezeError("build command project root differs")
@@ -1202,7 +1737,10 @@ def _validate_build_command(
 
 
 def _validate_build_environment(
-    items: Sequence[str], *, require_eval_pythonpath: bool = False
+    items: Sequence[str],
+    *,
+    require_eval_pythonpath: bool = False,
+    libcap_dir: Path | None = None,
 ) -> dict[str, str]:
     environment: dict[str, str] = {}
     for item in items:
@@ -1228,11 +1766,19 @@ def _validate_build_environment(
     }
     if require_eval_pythonpath:
         required.add("PYTHONPATH")
+    if libcap_dir is not None:
+        required.update({"PKG_CONFIG_ALLOW_CROSS", "PKG_CONFIG_PATH", "LIBCAP_STATIC"})
     allowed = required | {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
     if set(environment) - allowed or not required.issubset(environment):
         raise BinaryFreezeError("build environment differs from the non-secret allowlist")
     if require_eval_pythonpath and environment["PYTHONPATH"] != str(EVAL_ROOT):
         raise BinaryFreezeError("build command Python path differs from the eval-owned V8 gate")
+    if libcap_dir is not None and (
+        environment["PKG_CONFIG_ALLOW_CROSS"] != "1"
+        or environment["PKG_CONFIG_PATH"] != str(libcap_dir / "lib" / "pkgconfig")
+        or environment["LIBCAP_STATIC"] != "1"
+    ):
+        raise BinaryFreezeError("bwrap build does not use the exact project-local static libcap")
     if environment["HOME"] != os.environ.get("HOME") or environment["PATH"] != os.environ.get("PATH"):
         raise BinaryFreezeError("build command may not repurpose HOME or PATH")
     if environment["LC_ALL"] not in {"C", "C.UTF-8"}:
@@ -1575,6 +2121,9 @@ def _read_manifest(path: Path) -> BinaryManifest:
             build_command=tuple(command),
             code_mode_host_build_command=tuple(host_command),
             bwrap_build_command=tuple(bwrap_command),
+            libcap_version=value["libcap_version"],
+            libcap_archive_sha256=value["libcap_archive_sha256"],
+            libcap_static_sha256=value["libcap_static_sha256"],
             workspace_lock_normalization=value["workspace_lock_normalization"],
         )
         manifest.validate()
@@ -1824,6 +2373,10 @@ def _expected_runtime_bundle(root: Path, side: Side, commit: str) -> Path:
     return artifact.with_name(f"{artifact.name}-runtime-bundle")
 
 
+def _expected_libcap_dependency(root: Path) -> Path:
+    return root / "eval-data" / "deps" / LIBCAP_DEPENDENCY_NAME
+
+
 def _exact_existing_directory(value: Path, expected: Path, label: str) -> Path:
     if value != expected or not value.is_absolute():
         raise BinaryFreezeError(f"{label} path differs from the frozen layout")
@@ -2036,6 +2589,7 @@ def _runtime_request_from_args(args: argparse.Namespace) -> RuntimeFreezeRequest
         source_commit=args.source_commit,
         target_dir=args.target_dir,
         companion_bundle_dir=args.companion_bundle_dir,
+        libcap_dir=args.libcap_dir,
         runtime_bundle_dir=args.runtime_bundle_dir,
         gate_root=args.gate_root,
         baseline_reference_root=args.baseline_reference_root,
@@ -2065,6 +2619,9 @@ def _parser() -> argparse.ArgumentParser:
     v8_parser.add_argument("--source-root", type=Path, required=True)
     v8_parser.add_argument("--source-commit", required=True)
     v8_parser.add_argument("--baseline-reference-root", type=Path)
+    for operation in ("prepare-libcap", "verify-libcap"):
+        command = subparsers.add_parser(operation)
+        command.add_argument("--common-root", type=Path, required=True)
     for operation in ("prepare", "verify"):
         command = subparsers.add_parser(operation)
         _add_source_arguments(command)
@@ -2082,6 +2639,7 @@ def _parser() -> argparse.ArgumentParser:
         command = subparsers.add_parser(operation)
         _add_source_arguments(command)
         command.add_argument("--companion-bundle-dir", type=Path, required=True)
+        command.add_argument("--libcap-dir", type=Path, required=True)
         command.add_argument("--runtime-bundle-dir", type=Path, required=True)
         if operation == "prepare-runtime":
             command.add_argument("--bwrap-build-command-json", required=True)
@@ -2111,6 +2669,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_commit=args.source_commit,
                 baseline_reference_root=args.baseline_reference_root,
             )
+        elif args.operation == "prepare-libcap":
+            result = prepare_libcap(common_root=args.common_root)
+        elif args.operation == "verify-libcap":
+            result = verify_libcap(common_root=args.common_root)
         elif args.operation == "prepare":
             value = json.loads(args.build_command_json)
             if not isinstance(value, list):

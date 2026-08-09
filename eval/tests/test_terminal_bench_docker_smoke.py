@@ -262,6 +262,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             ).hexdigest(),
             bwrap_path=str(self.bwrap),
             bwrap_sha256=hashlib.sha256(self.bwrap.read_bytes()).hexdigest(),
+            libcap_version="2.78",
+            libcap_archive_sha256="1" * 64,
+            libcap_static_sha256="2" * 64,
             source_commit="a" * 40,
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
@@ -321,6 +324,13 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(
             json.loads(agent_kwargs["binary_bwrap_build_command"]),
             ["package-bwrap"],
+        )
+        self.assertEqual(json.loads(agent_kwargs["binary_libcap_version"]), "2.78")
+        self.assertEqual(
+            json.loads(agent_kwargs["binary_libcap_archive_sha256"]), "1" * 64
+        )
+        self.assertEqual(
+            json.loads(agent_kwargs["binary_libcap_static_sha256"]), "2" * 64
         )
         self.assertEqual(_smoke_exit_code(result), 0)
         self.assertNotEqual(_smoke_exit_code(replace(result, requests=())), 0)
@@ -468,7 +478,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         )
         self.assertEqual((args.side, args.binary_manifest.name), ("codex", "binary.json"))
 
-    def test_cli_loader_requires_13_key_bundle_and_rejects_legacy_10_keys(self) -> None:
+    def test_cli_loader_requires_16_key_bundle_and_rejects_legacy_13_keys(self) -> None:
         bundle = self.root / "eval-data" / "bin" / "smoke-bundle"
         resources = bundle / "codex-resources"
         resources.mkdir(parents=True)
@@ -485,6 +495,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             "code_mode_host_sha256": hashlib.sha256(host.read_bytes()).hexdigest(),
             "bwrap_path": str(bwrap),
             "bwrap_sha256": hashlib.sha256(bwrap.read_bytes()).hexdigest(),
+            "libcap_version": "2.78",
+            "libcap_archive_sha256": "1" * 64,
+            "libcap_static_sha256": "2" * 64,
             "source_commit": "a" * 40,
             "source_dirty": False,
             "rust_toolchain": "rustc 1.95.0",
@@ -499,7 +512,11 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(loaded.bwrap_path, str(bwrap))
         self.assertEqual(loaded.bwrap_sha256, value["bwrap_sha256"])
 
-        for key in ("bwrap_path", "bwrap_sha256", "bwrap_build_command"):
+        for key in (
+            "libcap_version",
+            "libcap_archive_sha256",
+            "libcap_static_sha256",
+        ):
             value.pop(key)
         manifest_path.write_text(json.dumps(value), encoding="utf-8")
         with self.assertRaisesRegex(TerminalBenchRunError, "schema differs"):

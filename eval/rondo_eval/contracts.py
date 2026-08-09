@@ -45,6 +45,9 @@ class BinaryManifest:
     build_command: tuple[str, ...]
     code_mode_host_build_command: tuple[str, ...]
     bwrap_build_command: tuple[str, ...]
+    libcap_version: str
+    libcap_archive_sha256: str
+    libcap_static_sha256: str
     workspace_lock_normalization: str | None = None
 
     def validate(self) -> None:
@@ -65,6 +68,10 @@ class BinaryManifest:
         ):
             raise ContractError("bwrap path is required and must differ from other binary paths")
         _require_sha256(self.bwrap_sha256, "bwrap sha256")
+        if self.libcap_version != "2.78":
+            raise ContractError("binary libcap version differs from the frozen dependency")
+        _require_sha256(self.libcap_archive_sha256, "libcap archive sha256")
+        _require_sha256(self.libcap_static_sha256, "libcap static library sha256")
         _require_commit(self.source_commit, "binary source commit")
         if not isinstance(self.source_dirty, bool):
             raise ContractError("binary source_dirty must be boolean")

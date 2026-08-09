@@ -191,6 +191,9 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         "build_command",
         "code_mode_host_build_command",
         "bwrap_build_command",
+        "libcap_version",
+        "libcap_archive_sha256",
+        "libcap_static_sha256",
         "workspace_lock_normalization",
     }
     if not isinstance(value, dict) or set(value) != expected:
@@ -216,6 +219,9 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         code_mode_host_sha256=value["code_mode_host_sha256"],
         bwrap_path=value["bwrap_path"],
         bwrap_sha256=value["bwrap_sha256"],
+        libcap_version=value["libcap_version"],
+        libcap_archive_sha256=value["libcap_archive_sha256"],
+        libcap_static_sha256=value["libcap_static_sha256"],
         source_commit=value["source_commit"],
         source_dirty=value["source_dirty"],
         rust_toolchain=value["rust_toolchain"],
