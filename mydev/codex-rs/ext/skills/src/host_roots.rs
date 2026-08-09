@@ -30,11 +30,14 @@ pub(crate) async fn resolve_skill_roots(
     repository_file_system: Option<Arc<dyn ExecutorFileSystem>>,
     config_layer_stack: &ConfigLayerStack,
     cwd: &AbsolutePathBuf,
+    home_dir_override: Option<&AbsolutePathBuf>,
     plugin_skill_roots: Vec<PluginSkillRoot>,
     extra_skill_roots: Vec<AbsolutePathBuf>,
 ) -> Vec<SkillRoot> {
-    let home_dir =
-        home_dir().and_then(|path| AbsolutePathBuf::from_absolute_path_checked(path).ok());
+    let home_dir = match home_dir_override {
+        Some(home_dir) => Some(home_dir.clone()),
+        None => home_dir().and_then(|path| AbsolutePathBuf::from_absolute_path_checked(path).ok()),
+    };
     resolve_skill_roots_with_home_dir(
         repository_file_system,
         config_layer_stack,

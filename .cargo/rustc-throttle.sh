@@ -85,13 +85,18 @@ if ((avail < floor_mb)); then
 fi
 
 # --- 2. 计数信号量：抢一个槽，抢到就 exec，槽随 rustc 进程一起释放 ---
+# 用高位 fd：cargo 通过 CARGO_MAKEFLAGS 把 jobserver 的读写端放在低位 fd（实测为 8/10），
+# 占用 8 会让 rustc 连不上 jobserver 并降级并行度。
 while :; do
   for ((i = 1; i <= slots; i++)); do
-    if ! exec 8>"$slot_dir/$i" 2>/dev/null; then
+    # 花括号组把 2>/dev/null 限制在这次打开动作内。写成 `exec 8>... 2>/dev/null`
+    # 会让重定向永久作用于本 shell，随后 exec 出去的 rustc 会继承 /dev/null，
+    # 把编译错误和 clippy 警告全部吞掉。
+    if ! { exec 200>"$slot_dir/$i"; } 2>/dev/null; then
       echo "[rondo] cannot open rustc throttle slot ${i}; refusing an unthrottled rustc" >&2
       exit 80
     fi
-    if flock --nonblock 8; then
+    if flock --nonblock 200; then
       exec "$@"
     fi
   done

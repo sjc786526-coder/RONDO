@@ -36,7 +36,7 @@
   `eval/results/runs.jsonl`；记录 task outcome 与 `agent|guardian_correct_deny|guardian_false_deny|infra`
   归因、wall/CPU/peak RSS、token/cost（能取得时）及产物相对路径。
 - RONDO 侧启用 S2 后产生 `E_final.json` + `meta.json`；消费者保留
-  `guardian_source_baseline`，并从 standard/Lite 两种逻辑形态中提取有效 policy，写入
+  `guardian_source_baseline` 与 `guardian_source_commit`，并从 standard/Lite 两种逻辑形态中提取有效 policy，写入
   `guardian_effective_policy_sha256`。不得用源码版本冒充实际 policy 身份。
 - 运行结束自动输出一页摘要；命令退出码能区分配置错误、环境错误、预算停止、agent 失败和成功。
 - P1 验收不要求历史 workspace 全绿；但不得把本轮已知的 Clash fake-IP、宿主代理、浏览器副作用或

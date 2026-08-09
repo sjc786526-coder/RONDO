@@ -4904,6 +4904,7 @@ mod tests {
             "ctrl-x enter".to_string(),
         )));
         let keymap = RuntimeKeymap::from_config(&config).expect("valid composer chords");
+        pin_footer_wsl(/*is_wsl*/ false);
         let (mut composer, _rx) = new_test_composer();
         composer.set_keymap_bindings(&keymap);
         composer.footer.mode = FooterMode::ShortcutOverlay;
@@ -4930,6 +4931,27 @@ mod tests {
             |composer| {
                 composer.set_keymap_bindings(&keymap);
                 composer.footer.mode = FooterMode::ShortcutOverlay;
+            },
+        );
+    }
+
+    /// Keeps the WSL-specific paste chord covered now that the other footer snapshots
+    /// pin detection off.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn shortcut_overlay_footer_uses_wsl_paste_chord_under_wsl() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+
+        pin_footer_wsl(/*is_wsl*/ true);
+
+        snapshot_composer_state(
+            "footer_mode_shortcut_overlay_wsl",
+            /*enhanced_keys_supported*/ true,
+            |composer| {
+                let _ = composer
+                    .handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
             },
         );
     }
@@ -5139,6 +5161,18 @@ mod tests {
         insta::assert_snapshot!(name, terminal.backend());
     }
 
+    /// Pins WSL detection so footer snapshots do not depend on the host kernel.
+    ///
+    /// The shortcut overlay advertises `Ctrl+Alt+V` under WSL and `Ctrl+V` everywhere
+    /// else, so a live probe makes the same snapshot legitimately differ between a WSL
+    /// developer machine and every other platform.
+    fn pin_footer_wsl(is_wsl: bool) {
+        #[cfg(target_os = "linux")]
+        crate::clipboard_paste::set_is_probably_wsl_for_tests(is_wsl);
+        #[cfg(not(target_os = "linux"))]
+        let _ = is_wsl;
+    }
+
     fn snapshot_composer_state<F>(name: &str, enhanced_keys_supported: bool, setup: F)
     where
         F: FnOnce(&mut ChatComposer),
@@ -5156,6 +5190,8 @@ mod tests {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
+
+        pin_footer_wsl(/*is_wsl*/ false);
 
         snapshot_composer_state(
             "footer_mode_shortcut_overlay",

@@ -24,7 +24,9 @@ use super::GuardianEvidenceRound;
 use super::GuardianReviewAnalyticsResult;
 use super::STRIPPED_REQUEST_FIELDS;
 use super::capture_final_request;
+use super::guardian_source_baseline;
 use super::normalize_request;
+use super::parse_guardian_source_baseline;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_metadata::CompactionTurnMetadata;
@@ -327,6 +329,7 @@ fn concurrent_rounds_keep_their_own_final_request() {
 
     let first_dir = evidence_dir.path().join("review-1");
     let second_dir = evidence_dir.path().join("review-2");
+    let source_baseline = guardian_source_baseline().expect("valid source baseline");
     assert_eq!(
         (
             read_bundle(&first_dir, "E_final.json")["instructions"].clone(),
@@ -340,12 +343,14 @@ fn concurrent_rounds_keep_their_own_final_request() {
             read_bundle(&first_dir, "meta.json")["evidence"].clone(),
             read_bundle(&first_dir, "meta.json")["duration_ms"].clone(),
             read_bundle(&first_dir, "meta.json")["guardian_source_baseline"].clone(),
+            read_bundle(&first_dir, "meta.json")["guardian_source_commit"].clone(),
         ),
         (
             json!("review-1"),
             json!("e_final"),
             json!(11),
-            json!("rust-v0.147.0"),
+            json!(source_baseline.tag),
+            json!(source_baseline.peeled_commit),
         )
     );
 }
@@ -481,4 +486,18 @@ fn evidence_write_failure_is_swallowed() {
         /*duration_ms*/ 7,
     );
     assert!(blocker.is_file());
+}
+
+#[test]
+fn guardian_source_baseline_rejects_ambiguous_or_malformed_identity() {
+    for invalid in [
+        "schema_version = 2\ntag = \"rust-v0.147.0\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\n",
+        "schema_version = 1\ntag = \"v0.147.0\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\n",
+        "schema_version = 1\ntag = \"rust-vnot.a.version\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\n",
+        "schema_version = 1\ntag = \"rust-v0.147.0\"\npeeled_commit = \"be6e8eac\"\n",
+        "schema_version = 1\ntag = \"rust-v0.147.0\"\npeeled_commit = \"BE6E8EAC029B183056B7E4402879F15D2C85F61B\"\n",
+        "schema_version = 1\ntag = \"rust-v0.147.0\"\npeeled_commit = \"be6e8eac029b183056b7e4402879f15d2c85f61b\"\nextra = true\n",
+    ] {
+        assert!(parse_guardian_source_baseline(invalid).is_err());
+    }
 }

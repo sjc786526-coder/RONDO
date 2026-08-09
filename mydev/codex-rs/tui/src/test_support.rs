@@ -8,6 +8,12 @@ pub(crate) use codex_utils_absolute_path::test_support::PathBufExt;
 pub(crate) use codex_utils_absolute_path::test_support::test_path_buf;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use unicode_width::UnicodeWidthStr;
+
+use crate::version::CODEX_CLI_VERSION;
+
+/// Stand-in for the compiled-in CLI version inside rendered snapshots.
+pub(crate) const VERSION_PLACEHOLDER: &str = "[[version]]";
 
 pub(crate) static TEST_MODEL_PRESETS: LazyLock<Vec<ModelPreset>> = LazyLock::new(|| {
     let mut response = bundled_models_response()
@@ -42,6 +48,41 @@ where
 {
     from_app_server_wire(codex_app_server_protocol::SkillScope::Repo)
 }
+
+/// Replaces the compiled-in CLI version in a rendered line with a stable placeholder.
+///
+/// `CARGO_PKG_VERSION` changes on every release tag, so any snapshot that renders the
+/// version drifts whenever the upstream baseline moves. Rendered lines usually sit inside
+/// a fixed-width box, so the padding in front of the trailing border is rebuilt to keep the
+/// frame aligned no matter how wide the real version is.
+pub(crate) fn sanitize_cli_version(line: String) -> String {
+    let status_version = format!("(v{CODEX_CLI_VERSION})");
+    let update_version = format!("{CODEX_CLI_VERSION} ->");
+    if !line.contains(&status_version) && !line.contains(&update_version) {
+        return line;
+    }
+    let original_width = UnicodeWidthStr::width(line.as_str());
+    let replaced = line
+        .replace(&status_version, &format!("(v{VERSION_PLACEHOLDER})"))
+        .replace(&update_version, &format!("{VERSION_PLACEHOLDER} ->"));
+    let Some(border) = replaced.rfind('│') else {
+        return replaced;
+    };
+    let (head, border) = replaced.split_at(border);
+    let head = head.trim_end_matches(' ');
+    let padding = original_width
+        .saturating_sub(UnicodeWidthStr::width(head) + UnicodeWidthStr::width(border));
+    format!("{head}{}{border}", " ".repeat(padding))
+}
+
+/// Applies [`sanitize_cli_version`] to every rendered line.
+pub(crate) fn sanitize_cli_version_lines(lines: Vec<String>) -> Vec<String> {
+    lines.into_iter().map(sanitize_cli_version).collect()
+}
+
+#[cfg(test)]
+#[path = "test_support_tests.rs"]
+mod tests;
 
 fn from_app_server_wire<T>(value: impl Serialize) -> T
 where

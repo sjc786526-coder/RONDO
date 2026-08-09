@@ -32,6 +32,13 @@ if [[ "$#" -eq 0 ]]; then
   exit 64
 fi
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if ! source "${script_dir}/build-watchdog-lib.sh"; then
+  echo "[rondo] cannot load build watchdog helpers" >&2
+  exit 71
+fi
+
+command_args=("$@")
 command_name="$(basename -- "$1")"
 uid="${UID:-$(id -u 2>/dev/null || true)}"
 if [[ -z "$uid" ]] || [[ ! "$uid" =~ ^[0-9]+$ ]]; then
@@ -79,11 +86,11 @@ if [[ "$lock_path" != "0" ]]; then
     exit 70
   fi
   umask 077
-  exec 9>"$lock_path" || exit 70
+  exec 199>"$lock_path" || exit 70
   chmod 600 -- "$lock_path" 2>/dev/null || true
-  if ! flock --nonblock 9; then
+  if ! flock --nonblock 199; then
     echo "[rondo] waiting for the active heavy build (lock: ${lock_path})" >&2
-    flock 9
+    flock 199
   fi
 fi
 
@@ -92,7 +99,7 @@ if [[ "${RONDO_BUILD_WATCHDOG:-1}" == "0" ]]; then
   exec "$@"
 fi
 
-for required in systemd-run systemctl du df awk pgrep; do
+for required in systemd-run systemctl du df awk find grep pgrep sha256sum tail; do
   if ! command -v "$required" >/dev/null 2>&1; then
     echo "[rondo] ${required} is unavailable; refusing an unsupervised heavy build" >&2
     exit 71
@@ -186,7 +193,13 @@ fi
 metrics_parent="${RONDO_BUILD_METRICS_DIR:-${worktree_root}/.codex/build-watchdog}"
 started_stamp="$(date '+%Y%m%d-%H%M%S')"
 run_dir="${metrics_parent}/${started_stamp}-${uid}-$$"
-if ! mkdir -p -- "$run_dir" || ! chmod 700 -- "$run_dir"; then
+umask 077
+if [[ -L "$metrics_parent" ]] || ! mkdir -p -- "$metrics_parent" \
+  || [[ ! -d "$metrics_parent" ]] || [[ ! -O "$metrics_parent" ]]; then
+  echo "[rondo] cannot create a safe watchdog metrics parent: ${metrics_parent}" >&2
+  exit 80
+fi
+if ! mkdir -- "$run_dir" || ! chmod 700 -- "$run_dir"; then
   echo "[rondo] cannot create the watchdog metrics directory: ${run_dir}" >&2
   exit 80
 fi
@@ -194,44 +207,196 @@ metrics_file="${run_dir}/metrics.csv"
 summary_file="${run_dir}/summary.env"
 printf '%s\n' 'timestamp,elapsed_s,project_bytes,target_bytes,filesystem_used_bytes,filesystem_available_bytes,memory_current_bytes,memory_peak_bytes,memory_anon_bytes,memory_file_bytes,memory_kernel_bytes,memory_nonreclaimable_bytes,swap_current_bytes,swap_peak_bytes,cgroup_psi_full_avg10_bp,host_psi_full_avg10_bp,host_mem_available_kb,host_swap_free_kb,cargo_count,rustc_count,rust_lld_count,nextest_count' >"$metrics_file"
 
+junit_expected=0
+junit_status="not_applicable"
+junit_profile=""
+junit_path=""
+junit_sha256=""
+nextest_config=""
+if [[ "${command_args[0]}" == "cargo" && "${command_args[1]:-}" == "nextest" \
+  && "${command_args[2]:-}" == "run" ]]; then
+  junit_profile="${NEXTEST_PROFILE:-}"
+  unsupported_nextest_arg=""
+  nextest_no_run=0
+  for nextest_arg in "${command_args[@]:3}"; do
+    case "$nextest_arg" in
+      -P | -P?* | --profile | --profile=* | --config-file | --config-file=* \
+        | --tool-config-file | --tool-config-file=*) unsupported_nextest_arg="$nextest_arg" ;;
+      --no-run) nextest_no_run=1 ;;
+    esac
+  done
+  if [[ "$junit_profile" != "local" || -n "$unsupported_nextest_arg" ]]; then
+    junit_status="unsupported_invocation"
+    {
+      printf 'wrapper_status=preflight_failed\n'
+      printf 'final_rc=83\n'
+      printf 'junit_status=%s\n' "$junit_status"
+      printf 'junit_profile=%s\n' "$junit_profile"
+      printf 'junit_path=\n'
+      printf 'junit_sha256=\n'
+    } >"$summary_file"
+    echo "[rondo] nextest evidence requires the local profile and no custom profile/config arguments" >&2
+    exit 83
+  fi
+  if ((nextest_no_run == 0)); then
+    junit_expected=1
+    junit_status="pending"
+    junit_path="${run_dir}/junit-local.xml"
+    nextest_config="${run_dir}/nextest.toml"
+    if ! rondo_prepare_nextest_config \
+      "${PWD}/.config/nextest.toml" "$nextest_config" "$junit_path"; then
+      junit_status="config_failed"
+      {
+        printf 'wrapper_status=preflight_failed\n'
+        printf 'final_rc=83\n'
+        printf 'junit_status=%s\n' "$junit_status"
+        printf 'junit_profile=%s\n' "$junit_profile"
+        printf 'junit_path=%s\n' "$junit_path"
+        printf 'junit_sha256=\n'
+      } >"$summary_file"
+      echo "[rondo] cannot prepare the per-run nextest configuration" >&2
+      exit 83
+    fi
+    command_args=(
+      "${command_args[@]:0:3}"
+      --config-file "$nextest_config"
+      "${command_args[@]:3}"
+    )
+  fi
+fi
+
+{
+  printf 'wrapper_status=starting\n'
+  printf 'junit_status=%s\n' "$junit_status"
+  printf 'junit_profile=%s\n' "$junit_profile"
+  printf 'junit_path=%s\n' "$junit_path"
+  printf 'junit_sha256=\n'
+} >"$summary_file"
+
 unit="rondo-build-${uid}-${started_stamp//[^0-9]/}-$$.scope"
 echo "[rondo] watchdog metrics: ${run_dir}" >&2
 echo "[rondo] limits: project stop/max=${project_stop_bytes}/${project_max_bytes} bytes, memory high/max=${memory_high}/${memory_max}, swap max=${swap_max}" >&2
 
+cgroup_root=""
+control_group=""
+runner_pid=""
+
+scope_population_state() {
+  rondo_cgroup_population_state "$cgroup_root" "$runner_pid"
+}
+
+collect_junit_status() {
+  junit_sha256=""
+  if ((junit_expected == 0)); then
+    junit_status="not_applicable"
+    return 0
+  fi
+  IFS=$'\t' read -r junit_status junit_sha256 < <(
+    rondo_inspect_junit_report "$junit_path"
+  )
+}
+
+write_minimal_summary() {
+  local wrapper_status="$1"
+  local final_rc="$2"
+  local command_rc="${3:-}"
+  local summary_tmp="${summary_file}.tmp"
+
+  collect_junit_status
+  {
+    printf 'unit=%s\n' "$unit"
+    printf 'command_name=%s\n' "$command_name"
+    printf 'wrapper_status=%s\n' "$wrapper_status"
+    printf 'run_rc=%s\n' "$command_rc"
+    printf 'final_rc=%s\n' "$final_rc"
+    printf 'junit_status=%s\n' "$junit_status"
+    printf 'junit_profile=%s\n' "$junit_profile"
+    printf 'junit_path=%s\n' "$junit_path"
+    printf 'junit_sha256=%s\n' "$junit_sha256"
+  } >"$summary_tmp"
+  mv -f -- "$summary_tmp" "$summary_file"
+}
+
 terminate_scope() {
   local reason="$1"
-  local attempt=0
   local poll=0
+  local population_state=""
+  local systemd_kill_failed=0
 
-  while ((attempt < 10)); do
-    systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
-    systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 || true
-    for ((poll = 0; poll < 10; poll++)); do
-      if ! systemctl --user is-active --quiet "$unit"; then
-        return 0
-      fi
-      sleep 0.1
-    done
-    attempt=$((attempt + 1))
+  # Freezing is best-effort. Only a failed SIGKILL request means the D-Bus path
+  # cannot terminate the scope and requires the direct cgroup fallback.
+  systemctl --user kill --kill-whom=all --signal=SIGSTOP "$unit" >/dev/null 2>&1 || true
+  systemctl --user kill --kill-whom=all --signal=SIGKILL "$unit" >/dev/null 2>&1 \
+    || systemd_kill_failed=1
+  if ((systemd_kill_failed == 1)) && ! kill_scope_without_dbus; then
+    echo "[rondo] ${reason}: systemd and direct cgroup kill paths are unavailable; continuing supervision" >&2
+  fi
+  for ((poll = 0; poll < 10; poll++)); do
+    population_state="$(scope_population_state)"
+    if [[ "$population_state" == "gone" ]]; then
+      return 0
+    fi
+    sleep 0.1
   done
 
-  echo "[rondo] ${reason}: scope ${unit} is still active after kill attempts; continuing supervision" >&2
+  echo "[rondo] ${reason}: scope ${unit} is ${population_state} after a kill round; continuing supervision" >&2
   return 1
+}
+
+kill_scope_without_dbus() {
+  [[ -n "$control_group" && "$control_group" == /* && "$control_group" != "/" ]] || return 1
+  [[ -n "$cgroup_root" && "$cgroup_root" == "/sys/fs/cgroup${control_group}" ]] || return 1
+  [[ "$cgroup_root" == /sys/fs/cgroup/* && "$cgroup_root" != "/sys/fs/cgroup" ]] || return 1
+
+  rondo_kill_cgroup_subtree "$cgroup_root" "$control_group"
+}
+
+# Keeps calling `terminate_scope` until the cgroup subtree is confirmed empty.
+#
+# Each `terminate_scope` round is bounded, but this loop deliberately is not: giving up
+# would hand control back while an unsupervised workload is still holding memory and disk.
+# The `cgroup.events` populated bit covers descendants and remains authoritative if user D-Bus
+# becomes unavailable. `MemoryMax` still caps the workload while this loop reports and retries.
+terminate_scope_until_gone() {
+  local reason="$1"
+  local started_at="$SECONDS"
+  local next_report="$((SECONDS + 30))"
+  local elapsed=0
+  local direct_members="unknown"
+  local population_state="unknown"
+
+  while true; do
+    population_state="$(scope_population_state)"
+    if [[ "$population_state" == "gone" ]]; then
+      return 0
+    fi
+    if terminate_scope "$reason"; then
+      return 0
+    fi
+    if ((SECONDS >= next_report)); then
+      elapsed="$((SECONDS - started_at))"
+      direct_members="$(rondo_cgroup_direct_member_count "$cgroup_root")"
+      echo "[rondo] ${reason}: scope ${unit} remains ${population_state} after ${elapsed}s of kill attempts (direct_members=${direct_members}); still supervising" >&2
+      next_report="$((SECONDS + 30))"
+    fi
+    sleep 0.1
+  done
 }
 
 handle_exit() {
   local exit_rc=$?
+  local population_state=""
 
   trap - EXIT INT TERM HUP
-  if systemctl --user is-active --quiet "$unit"; then
-    echo "[rondo] wrapper exited while ${unit} was active; stopping the supervised scope" >&2
-    while systemctl --user is-active --quiet "$unit"; do
-      terminate_scope "unexpected_wrapper_exit" || sleep 1
-    done
-    if [[ -n "${runner_pid:-}" ]]; then
+  population_state="$(scope_population_state)"
+  if [[ "$population_state" != "gone" ]]; then
+    echo "[rondo] wrapper exited while ${unit} was ${population_state}; stopping the supervised scope" >&2
+    terminate_scope_until_gone "unexpected_wrapper_exit"
+    if [[ -n "$runner_pid" ]]; then
       wait "$runner_pid" >/dev/null 2>&1 || true
     fi
   fi
+  write_minimal_summary "unexpected_exit" "$exit_rc"
   exit "$exit_rc"
 }
 
@@ -240,12 +405,11 @@ handle_signal() {
   local signal_rc="$2"
 
   echo "[rondo] wrapper received ${signal_name}; stopping supervised scope ${unit}" >&2
-  while systemctl --user is-active --quiet "$unit"; do
-    terminate_scope "signal_${signal_name}" || sleep 1
-  done
-  if [[ -n "${runner_pid:-}" ]]; then
+  terminate_scope_until_gone "signal_${signal_name}"
+  if [[ -n "$runner_pid" ]]; then
     wait "$runner_pid" >/dev/null 2>&1 || true
   fi
+  write_minimal_summary "signal_${signal_name}" "$signal_rc"
   trap - EXIT INT TERM HUP
   exit "$signal_rc"
 }
@@ -260,10 +424,9 @@ systemd-run --user --scope --quiet --unit="$unit" \
   -p MemoryHigh="$memory_high" \
   -p MemoryMax="$memory_max" \
   -p MemorySwapMax="$swap_max" \
-  -- "$@" &
+  -- "${command_args[@]}" &
 runner_pid=$!
 
-control_group=""
 for _ in $(seq 1 100); do
   control_group="$(systemctl --user show "$unit" -p ControlGroup --value 2>/dev/null || true)"
   [[ -n "$control_group" ]] && break
@@ -274,25 +437,22 @@ for _ in $(seq 1 100); do
 done
 if [[ -z "$control_group" ]]; then
   run_rc=0
+  terminate_scope_until_gone "watchdog_attach_failed"
   wait "$runner_pid" || run_rc=$?
   trap - EXIT INT TERM HUP
-  if ((run_rc == 0)); then
-    echo "[rondo] command completed before the watchdog attached" >&2
-    exit 0
-  fi
   echo "[rondo] failed to create or inspect the build cgroup; command status=${run_rc}" >&2
-  exit "$run_rc"
+  write_minimal_summary "watchdog_attach_failed" 81 "$run_rc"
+  exit 81
 fi
 
 cgroup_root="/sys/fs/cgroup${control_group}"
-for counter in memory.current memory.peak memory.stat memory.swap.current memory.swap.peak memory.pressure memory.events; do
+for counter in cgroup.events cgroup.procs memory.current memory.peak memory.stat memory.swap.current memory.swap.peak memory.pressure memory.events; do
   if [[ ! -r "${cgroup_root}/${counter}" ]]; then
     echo "[rondo] cgroup counter ${counter} is unavailable; stopping fail-closed" >&2
-    while systemctl --user is-active --quiet "$unit"; do
-      terminate_scope "missing_initial_counter_${counter}" || sleep 1
-    done
+    terminate_scope_until_gone "missing_initial_counter_${counter}"
     wait "$runner_pid" >/dev/null 2>&1 || true
     trap - EXIT INT TERM HUP
+    write_minimal_summary "missing_initial_counter_${counter}" 81
     exit 81
   fi
 done
@@ -337,15 +497,26 @@ if [[ -d "$target_dir" ]]; then
 else
   target_bytes=0
 fi
-started_epoch="$(date +%s)"
+started_seconds="$SECONDS"
+next_progress_report="$((SECONDS + 30))"
 sample=0
 runner_done=0
 runner_done_since=0
 run_rc=0
 
-while systemctl --user is-active --quiet "$unit"; do
-  now_epoch="$(date +%s)"
-  elapsed="$((now_epoch - started_epoch))"
+while true; do
+  population_state="$(scope_population_state)"
+  if [[ "$population_state" == "gone" ]]; then
+    break
+  fi
+  if [[ "$population_state" == "unknown" ]]; then
+    stop_reason="cgroup_population_unknown"
+    echo "[rondo] proactive stop: ${stop_reason}" >&2
+    terminate_scope_until_gone "$stop_reason"
+    break
+  fi
+  now_seconds="$SECONDS"
+  elapsed="$((now_seconds - started_seconds))"
   if ((sample % disk_sample_interval == 0)); then
     project_bytes="$(du -sx -B1 -- "$project_root" 2>/dev/null | awk '{print $1}')"
     if [[ -d "$target_dir" ]]; then
@@ -395,19 +566,17 @@ while systemctl --user is-active --quiet "$unit"; do
     break
   done
   if [[ -n "$invalid_sample" ]]; then
-    # The scope can disappear between the loop condition and a counter read.
+    # The cgroup can disappear between the population check and a counter read.
     # That is a normal short-command teardown race. While the unit is still
     # active, however, losing any safety counter must stop the workload.
-    if ! systemctl --user is-active --quiet "$unit"; then
+    population_state="$(scope_population_state)"
+    if [[ "$population_state" == "gone" ]]; then
       break
     fi
     stop_reason="resource_counter_unavailable_${invalid_sample}"
     echo "[rondo] proactive stop: ${stop_reason}" >&2
-    if terminate_scope "$stop_reason"; then
-      break
-    fi
-    sleep 1
-    continue
+    terminate_scope_until_gone "$stop_reason"
+    break
   fi
   memory_nonreclaimable="$((memory_anon + memory_kernel))"
 
@@ -418,7 +587,7 @@ while systemctl --user is-active --quiet "$unit"; do
   if ((runner_done == 0)) && ! kill -0 "$runner_pid" 2>/dev/null; then
     wait "$runner_pid" || run_rc=$?
     runner_done=1
-    runner_done_since="$now_epoch"
+    runner_done_since="$now_seconds"
   fi
 
   ((project_bytes > peak_project)) && peak_project="$project_bytes"
@@ -434,12 +603,12 @@ while systemctl --user is-active --quiet "$unit"; do
     warning_emitted=1
   fi
   if ((swap_current >= swap_sustained_stop_bytes)); then
-    ((swap_over_since == 0)) && swap_over_since="$now_epoch"
+    ((swap_over_since == 0)) && swap_over_since="$now_seconds"
   else
     swap_over_since=0
   fi
   if ((cgroup_psi_full_bp >= psi_full_stop_bp || host_psi_full_bp >= psi_full_stop_bp)); then
-    ((psi_over_since == 0)) && psi_over_since="$now_epoch"
+    ((psi_over_since == 0)) && psi_over_since="$now_seconds"
   else
     psi_over_since=0
   fi
@@ -479,37 +648,32 @@ while systemctl --user is-active --quiet "$unit"; do
     stop_reason="cgroup_nonreclaimable_memory_above_limit"
   elif ((swap_current >= swap_emergency_stop_bytes)); then
     stop_reason="cgroup_swap_above_emergency_limit"
-  elif ((swap_over_since > 0 && now_epoch - swap_over_since >= swap_stop_seconds)); then
+  elif ((swap_over_since > 0 && now_seconds - swap_over_since >= swap_stop_seconds)); then
     stop_reason="cgroup_swap_sustained_above_limit"
   elif ((host_mem_available <= host_available_stop_kb)); then
     stop_reason="host_mem_available_below_floor"
-  elif ((psi_over_since > 0 && now_epoch - psi_over_since >= psi_stop_seconds)); then
+  elif ((psi_over_since > 0 && now_seconds - psi_over_since >= psi_stop_seconds)); then
     stop_reason="memory_full_psi_sustained_above_limit"
   elif ((runner_done == 1 \
-    && now_epoch - runner_done_since >= residual_grace_seconds)); then
+    && now_seconds - runner_done_since >= residual_grace_seconds)); then
     cleanup_reason="residual_processes_after_command"
   fi
 
   if [[ "$stop_reason" != "none" ]]; then
     echo "[rondo] proactive stop: ${stop_reason}" >&2
-    if terminate_scope "$stop_reason"; then
-      break
-    fi
-    sleep 1
-    continue
+    terminate_scope_until_gone "$stop_reason"
+    break
   fi
   if [[ "$cleanup_reason" != "none" ]]; then
     echo "[rondo] cleanup: ${cleanup_reason}" >&2
-    if terminate_scope "$cleanup_reason"; then
-      break
-    fi
-    sleep 1
-    continue
+    terminate_scope_until_gone "$cleanup_reason"
+    break
   fi
 
   sample=$((sample + 1))
-  if ((sample % 30 == 0)); then
+  if ((SECONDS >= next_progress_report)); then
     echo "[rondo] command=${command_name} elapsed=${elapsed}s project=${project_bytes} target=${target_bytes} memory=${memory_current} anon=${memory_anon} file=${memory_file} swap=${swap_current} host_available_kb=${host_mem_available}" >&2
+    next_progress_report="$((SECONDS + 30))"
   fi
   sleep 1
 done
@@ -528,12 +692,31 @@ read -r filesystem_used_after filesystem_available_after < <(
   df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
 )
 
+collect_junit_status
+wrapper_status="complete"
+final_rc="$run_rc"
+if [[ "$stop_reason" != "none" ]]; then
+  wrapper_status="proactive_stop"
+  final_rc=125
+elif ((junit_expected == 1 && run_rc == 0)) && [[ "$junit_status" != "retained" ]]; then
+  wrapper_status="evidence_failed"
+  final_rc=83
+  echo "[rondo] nextest completed without a retained per-run JUnit report (${junit_status})" >&2
+fi
+
+summary_tmp="${summary_file}.tmp"
 {
   printf 'unit=%s\n' "$unit"
   printf 'command_name=%s\n' "$command_name"
+  printf 'wrapper_status=%s\n' "$wrapper_status"
   printf 'run_rc=%s\n' "$run_rc"
+  printf 'final_rc=%s\n' "$final_rc"
   printf 'stop_reason=%s\n' "$stop_reason"
   printf 'cleanup_reason=%s\n' "$cleanup_reason"
+  printf 'junit_status=%s\n' "$junit_status"
+  printf 'junit_profile=%s\n' "$junit_profile"
+  printf 'junit_path=%s\n' "$junit_path"
+  printf 'junit_sha256=%s\n' "$junit_sha256"
   printf 'project_before_bytes=%s\n' "$project_before"
   printf 'project_after_bytes=%s\n' "$project_after"
   printf 'project_peak_sampled_bytes=%s\n' "$peak_project"
@@ -553,15 +736,17 @@ read -r filesystem_used_after filesystem_available_after < <(
   printf 'swap_max=%s\n' "$swap_max"
   printf 'project_stop_bytes=%s\n' "$project_stop_bytes"
   printf 'project_max_bytes=%s\n' "$project_max_bytes"
-} >"$summary_file"
+} >"$summary_tmp"
+mv -f -- "$summary_tmp" "$summary_file"
+
+if [[ "$junit_status" == "retained" ]]; then
+  echo "[rondo] retained local junit report: ${junit_path}" >&2
+fi
 
 systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
-echo "[rondo] finished status=${run_rc} stop=${stop_reason} cleanup=${cleanup_reason} project=${project_after} target=${target_after}; summary=${summary_file}" >&2
+echo "[rondo] finished status=${final_rc} command_status=${run_rc} stop=${stop_reason} cleanup=${cleanup_reason} project=${project_after} target=${target_after}; summary=${summary_file}" >&2
 
-if [[ "$stop_reason" != "none" ]]; then
-  exit 125
-fi
 if ((run_rc == 137)); then
   echo "[rondo] the command was OOM-killed inside its ${memory_max} cgroup" >&2
 fi
-exit "$run_rc"
+exit "$final_rc"

@@ -17,6 +17,7 @@ use crate::pager_overlay::TranscriptOverlay;
 use crate::status::StatusAccountDisplay;
 use crate::status::remote_connection::RemoteConnectionStatus;
 use crate::test_support::PathBufExt;
+use crate::test_support::sanitize_cli_version_lines;
 use crate::test_support::test_path_buf;
 use crate::token_usage::TokenUsage;
 use crate::token_usage::TokenUsageInfo;
@@ -182,6 +183,12 @@ fn render_lines(lines: &[Line<'static>]) -> Vec<String> {
         .collect()
 }
 
+/// Removes the parts of a rendered status card that depend on where and on which
+/// release it was rendered: the workspace directory and the compiled-in CLI version.
+fn sanitize_snapshot(lines: Vec<String>) -> Vec<String> {
+    sanitize_cli_version_lines(sanitize_directory(lines))
+}
+
 fn sanitize_directory(lines: Vec<String>) -> Vec<String> {
     let frame_width = lines
         .iter()
@@ -233,7 +240,7 @@ fn buffer_to_text(buffer: &Buffer, width: u16) -> String {
                 .to_string()
         })
         .collect::<Vec<_>>();
-    sanitize_directory(lines).join("\n")
+    sanitize_snapshot(lines).join("\n")
 }
 
 fn reset_at_from(captured_at: &chrono::DateTime<chrono::Local>, seconds: i64) -> i64 {
@@ -349,7 +356,7 @@ async fn status_snapshot_includes_reasoning_details() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -410,7 +417,7 @@ async fn status_snapshot_shows_chatgpt_plan_without_email() {
         /*reasoning_effort_override*/ None,
     );
     let sanitized =
-        sanitize_directory(render_lines(&composite.display_lines(/*width*/ 80))).join("\n");
+        sanitize_snapshot(render_lines(&composite.display_lines(/*width*/ 80))).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -725,7 +732,7 @@ async fn status_snapshot_shows_active_user_defined_profile() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -880,7 +887,7 @@ async fn status_snapshot_shows_auto_review_permissions() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -980,7 +987,7 @@ async fn status_snapshot_includes_forked_from() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1045,7 +1052,7 @@ async fn status_snapshot_includes_monthly_limit() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1110,7 +1117,7 @@ async fn status_snapshot_includes_enterprise_monthly_credit_limit() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 
     let mut rendered_lines = render_lines(&composite.display_lines(/*width*/ 46));
@@ -1119,7 +1126,7 @@ async fn status_snapshot_includes_enterprise_monthly_credit_limit() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(
         "status_snapshot_wraps_enterprise_monthly_credit_details_in_narrow_terminal",
         sanitized
@@ -1191,7 +1198,7 @@ async fn status_snapshot_uses_generic_limit_labels_for_unsupported_windows() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1520,7 +1527,7 @@ async fn status_snapshot_truncates_in_narrow_terminal() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
 
     assert_snapshot!(sanitized);
 }
@@ -1556,7 +1563,7 @@ async fn status_snapshot_truncates_halfwidth_kana_in_narrow_terminal() {
         /*reasoning_effort_override*/ None,
     );
     let rendered_lines = render_lines(&composite.display_lines(/*width*/ 42));
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
 
     assert_snapshot!(sanitized);
 }
@@ -1605,7 +1612,7 @@ async fn status_snapshot_shows_missing_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1661,7 +1668,7 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1728,7 +1735,7 @@ async fn status_snapshot_shows_refreshing_limits_notice() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1883,7 +1890,7 @@ async fn status_snapshot_includes_credits_and_limits() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -1943,7 +1950,7 @@ async fn status_snapshot_shows_unavailable_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -2003,7 +2010,7 @@ async fn status_snapshot_treats_refreshing_empty_limits_as_unavailable() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -2072,7 +2079,7 @@ async fn status_snapshot_shows_stale_limits_message() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 
@@ -2145,7 +2152,7 @@ async fn status_snapshot_cached_limits_hide_credits_without_flag() {
             *line = line.replace('\\', "/");
         }
     }
-    let sanitized = sanitize_directory(rendered_lines).join("\n");
+    let sanitized = sanitize_snapshot(rendered_lines).join("\n");
     assert_snapshot!(sanitized);
 }
 

@@ -302,7 +302,7 @@ async fn building_a_guardian_request_does_not_commit_evidence_before_send() -> a
     );
     let evidence_root = TempDir::new()?;
     let bundle_dir = evidence_root.path().join("review-build-only");
-    let round = GuardianEvidenceRound::new(bundle_dir.clone(), "review-build-only");
+    let round = GuardianEvidenceRound::new_for_tests(bundle_dir.clone(), "review-build-only");
     let binding = round.bind(client.state.thread_id.to_string());
 
     let _request = client.build_responses_request(

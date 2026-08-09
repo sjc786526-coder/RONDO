@@ -80,6 +80,8 @@ pub struct HostSkillsService {
     codex_home: AbsolutePathBuf,
     restriction_product: Option<Product>,
     extra_roots: RwLock<Vec<AbsolutePathBuf>>,
+    /// Test-only home directory used instead of the real one when resolving user skills.
+    home_dir_override: Option<AbsolutePathBuf>,
     cache_by_cwd: RwLock<HashMap<AbsolutePathBuf, HostSkillsSnapshot>>,
     cache_by_config: RwLock<HashMap<ConfigSkillsCacheKey, Arc<OnceCell<HostSkillsSnapshot>>>>,
     // Shared across cwds so root scheduling cannot multiply per-root I/O fanout.
@@ -100,6 +102,7 @@ impl HostSkillsService {
             codex_home,
             restriction_product,
             extra_roots: RwLock::new(Vec::new()),
+            home_dir_override: None,
             cache_by_cwd: RwLock::new(HashMap::new()),
             cache_by_config: RwLock::new(HashMap::new()),
             root_scan_slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ROOT_SCANS)),
@@ -110,6 +113,16 @@ impl HostSkillsService {
             service.ensure_system_skills_installed();
         }
         service
+    }
+
+    /// Points user-scope skill discovery at a test home directory.
+    ///
+    /// Without this the loader reads the developer's real `~/.agents/skills`, so any skill
+    /// installed on the machine leaks into fixtures that only staged their own skills.
+    #[cfg(test)]
+    pub(crate) fn with_home_dir_override(mut self, home_dir: AbsolutePathBuf) -> Self {
+        self.home_dir_override = Some(home_dir);
+        self
     }
 
     pub fn set_extra_roots(&self, extra_roots: Vec<AbsolutePathBuf>) {
@@ -173,6 +186,7 @@ impl HostSkillsService {
             fs,
             &input.config_layer_stack,
             &input.cwd,
+            self.home_dir_override.as_ref(),
             input.effective_skill_roots.clone(),
             self.extra_roots(),
         )
@@ -206,6 +220,7 @@ impl HostSkillsService {
             fs.clone(),
             &input.config_layer_stack,
             &input.cwd,
+            self.home_dir_override.as_ref(),
             input.effective_skill_roots.clone(),
             self.extra_roots(),
         )

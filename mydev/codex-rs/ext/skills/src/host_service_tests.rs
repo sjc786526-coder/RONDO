@@ -205,10 +205,13 @@ async fn snapshot_for_config_merges_extension_host_and_legacy_plugin_roots() {
         config_layer_stack,
         /*bundled_skills_enabled*/ false,
     );
+    // Keep the developer's real ~/.agents/skills out of this fixture.
+    let empty_home = tempfile::tempdir().expect("tempdir");
     let skills_service = HostSkillsService::new(
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ false,
-    );
+    )
+    .with_home_dir_override(empty_home.path().abs());
 
     let snapshot = skills_service
         .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
@@ -249,10 +252,13 @@ async fn snapshot_for_config_preserves_host_precedence_for_symlinked_plugin_root
     )
     .expect("symlink user skills root to plugin skills root");
     let config_layer_stack = config_stack(&codex_home, "[skills.bundled]\nenabled = false\n");
+    // Keep the developer's real ~/.agents/skills out of this fixture.
+    let empty_home = tempfile::tempdir().expect("tempdir");
     let skills_service = HostSkillsService::new(
         codex_home.path().abs(),
         /*bundled_skills_enabled*/ false,
-    );
+    )
+    .with_home_dir_override(empty_home.path().abs());
 
     let outcome = skills_for_config_with_stack(
         &skills_service,

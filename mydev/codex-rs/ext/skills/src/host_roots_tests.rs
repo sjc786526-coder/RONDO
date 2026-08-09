@@ -196,6 +196,33 @@ fn user_layer(codex_home: &AbsolutePathBuf) -> ConfigLayerEntry {
     )
 }
 
+/// User layer that pins `project_root_markers` for an ancestor walk.
+///
+/// A machine that has already run a sandboxed Codex keeps empty `/tmp/.git`,
+/// `/tmp/.codex` and `/tmp/.agents` directories behind, so an ancestor walk started
+/// from a `TempDir` finds the default markers directly under the system temp
+/// directory and treats `/tmp` as the project root. Tests that care about the walk
+/// boundary state the markers explicitly instead of inheriting the defaults.
+fn project_root_markers_layer(codex_home: &AbsolutePathBuf, markers: &[&str]) -> ConfigLayerEntry {
+    let mut config = toml::map::Map::new();
+    config.insert(
+        "project_root_markers".to_string(),
+        toml::Value::Array(
+            markers
+                .iter()
+                .map(|marker| toml::Value::String((*marker).to_string()))
+                .collect(),
+        ),
+    );
+    ConfigLayerEntry::new(
+        ConfigLayerSource::User {
+            file: codex_home.join("config.toml"),
+            profile: None,
+        },
+        toml::Value::Table(config),
+    )
+}
+
 fn project_layer(dot_codex_folder: &AbsolutePathBuf) -> ConfigLayerEntry {
     ConfigLayerEntry::new(
         ConfigLayerSource::Project {
@@ -394,12 +421,17 @@ async fn unique_extra_root_loads_as_recursive_user_root() {
 #[tokio::test]
 async fn repo_ancestry_without_project_marker_does_not_walk_parents() {
     let temp_dir = TempDir::new().expect("temp dir");
-    let outer = absolute(temp_dir.path().join("outer"));
+    let temp_root = absolute(temp_dir.path());
+    let outer = temp_root.join("outer");
     let cwd = outer.join("nested/inner");
     fs::create_dir_all(outer.join(".agents/skills")).expect("create outer skills");
     fs::create_dir_all(cwd.join(".agents/skills")).expect("create cwd skills");
+    let config_stack = stack(vec![project_root_markers_layer(
+        &temp_root,
+        /*markers*/ &[".rondo-test-project-root-marker-that-does-not-exist"],
+    )]);
 
-    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &stack(Vec::new()), &cwd)
+    let roots = repo_agents_skill_roots(Some(Arc::clone(&LOCAL_FS)), &config_stack, &cwd)
         .await
         .into_iter()
         .map(|root| root.path)

@@ -159,8 +159,10 @@ APT 已安装并复核以下开发包：
 
 ### 3.4 编译验证与锁文件一致性
 
-上游基线已整体升级到 Codex CLI `0.147.0`（官方 tag commit
-`be6e8eac029b183056b7e4402879f15d2c85f61b`）。官方 tag 的 workspace `Cargo.toml` 已是
+上游基线已整体升级到 Codex CLI `0.147.0`。受Git跟踪的机器事实源
+`mydev/codex-rs/core/upstream-source-baseline.toml` 记录官方tag `rust-v0.147.0` 与peeled commit
+`be6e8eac029b183056b7e4402879f15d2c85f61b`，Guardian evidence和独立基线升级校验共同消费它。
+官方tag的workspace `Cargo.toml` 已是
 `0.147.0`，但 `Cargo.lock` 中 135 个本地 workspace package 仍是发布占位值 `0.0.0`；RONDO
 沿用既有冻结规则，把这些条目机械规范化为 `0.147.0`。规范化后的 lock SHA-256 是
 `bc4fe450de929afe82928734f860ca83e5f9dc5f9f1211b0974ea47b57af77ca`。
@@ -266,9 +268,21 @@ RONDO_BUILD_PROJECT_STOP_BYTES=190000000000 just test
 ```
 
 `RONDO_BUILD_WATCHDOG=0`、`RONDO_BUILD_LOCK=0` 与 `RONDO_RUSTC_THROTTLE=0` 是实现层的紧急
-诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗在活跃 scope
-中读不到资源计数器、收不到终止确认、包装器收到 `INT` / `TERM` / `HUP` 或意外退出时均按
-fail-closed 处理。
+诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗用
+`cgroup.events` 的 `populated` 位判断整个scope及其子cgroup是否仍有进程，`cgroup.procs`只记录根层
+直接成员数作诊断；user D-Bus查询不参与存活判定。事实不可读时按unknown主动终止并继续监督，不能
+当作inactive。终止采用约1秒的kill round与无界外层监督，按Bash `SECONDS` 约每30秒报告真实经过
+秒数；这减少了 `date` 子进程，但不声明抗宿主时钟跳变。user D-Bus终止请求失败时，脚本先尝试
+`cgroup.kill`，不可写时再递归核对并SIGKILL目标cgroup子树成员；`MemoryMax`在此期间继续兜底。
+拿不到ControlGroup时即使命令返回0也按附着失败返回。
+
+正式 `just test` 保持 `NEXTEST_PROFILE=local`，但看门狗为每轮生成独立nextest配置，把JUnit直接写入
+该轮独占目录 `.codex/build-watchdog/<stamp>/junit-local.xml`，不再扫描或复制target中的历史报告。
+`summary.env` 明确记录
+`junit_status=pending|retained|absent|unreadable|invalid|hash_failed|not_applicable|config_failed|unsupported_invocation`、
+路径与SHA-256；Nextest返回0但本轮报告未成功留存时，包装器以证据失败返回。`pending`只会出现在
+启动期summary，两个配置错误状态属于preflight路径；`retained`只证明归属和完整性，测试是否通过仍由
+命令返回码与XML内容决定。
 
 ## 4. Node 与 pnpm
 
@@ -352,12 +366,10 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 `v0.146.1` 产品树曾于 2026-08-08 完整跑过 `just test`：13,135 项运行，13,062 通过 /
 73 失败 / 23 跳过 / 25 flaky，且无 OOM；这是旧基线历史证据，详见
 `agent_log/2026-08-08-031500-full-test-backfill.md`。`v0.147.0` 的纯上游与 RONDO 产品树也均完成完整
-workspace 运行；最新 RONDO 结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky。该轮
-未发现 P0 测试失败，但 2026-08-09 独立复验随后发现了捕获时点与规范化缺口，因此不能继续称为
-“P0 严格边界全部通过”；当前结论与定向复验见
-`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。完整全量归因见
-`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。Bazel 门禁与
-`just argument-comment-lint` 仍未运行。
+workspace 运行；最新 RONDO 全量结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky，
+逐类归因见 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。P0 的当前结论以定向复验为准，
+见 `agent_log/2026-08-09-020200-baseline-p0-test-audit.md`；全量结果不作为 P0 的通过依据。
+Bazel 门禁与 `just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。
 
