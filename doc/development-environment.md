@@ -268,7 +268,12 @@ RONDO_BUILD_PROJECT_STOP_BYTES=190000000000 just test
 `RONDO_BUILD_WATCHDOG=0`、`RONDO_BUILD_LOCK=0` 与 `RONDO_RUSTC_THROTTLE=0` 是实现层的紧急
 诊断开关，不是普通开发入口；只有用户单独授权且已安排等价外部监督时才能使用。看门狗在活跃 scope
 中读不到资源计数器、收不到终止确认、包装器收到 `INT` / `TERM` / `HUP` 或意外退出时均按
-fail-closed 处理。
+fail-closed 处理。终止逻辑是「单轮有界重试 + 外层持续重试直到确认 scope inactive」：卡在不可中断
+I/O 的 scope 不会让包装器提前放手，只会每 30 秒打印一次仍存活的进程数，`MemoryMax` 继续兜底。
+
+每轮结束时，`target/nextest/<profile>/junit.xml` 会被复制到该轮的看门狗目录
+（`.codex/build-watchdog/<stamp>/junit-<profile>.xml`）。`target/` 会被 `cargo clean` 或换工作树抹掉，
+而看门狗目录不会，因此需要事后复盘失败清单时以这份留存为准。
 
 ## 4. Node 与 pnpm
 
@@ -352,12 +357,10 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 `v0.146.1` 产品树曾于 2026-08-08 完整跑过 `just test`：13,135 项运行，13,062 通过 /
 73 失败 / 23 跳过 / 25 flaky，且无 OOM；这是旧基线历史证据，详见
 `agent_log/2026-08-08-031500-full-test-backfill.md`。`v0.147.0` 的纯上游与 RONDO 产品树也均完成完整
-workspace 运行；最新 RONDO 结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky。该轮
-未发现 P0 测试失败，但 2026-08-09 独立复验随后发现了捕获时点与规范化缺口，因此不能继续称为
-“P0 严格边界全部通过”；当前结论与定向复验见
-`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。完整全量归因见
-`agent_log/2026-08-08-233753-p0-strict-acceptance.md`。Bazel 门禁与
-`just argument-comment-lint` 仍未运行。
+workspace 运行；最新 RONDO 全量结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky，
+逐类归因见 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。P0 的当前结论以定向复验为准，
+见 `agent_log/2026-08-09-020200-baseline-p0-test-audit.md`；全量结果不作为 P0 的通过依据。
+Bazel 门禁与 `just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。
 

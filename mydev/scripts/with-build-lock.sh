@@ -79,11 +79,11 @@ if [[ "$lock_path" != "0" ]]; then
     exit 70
   fi
   umask 077
-  exec 9>"$lock_path" || exit 70
+  exec 199>"$lock_path" || exit 70
   chmod 600 -- "$lock_path" 2>/dev/null || true
-  if ! flock --nonblock 9; then
+  if ! flock --nonblock 199; then
     echo "[rondo] waiting for the active heavy build (lock: ${lock_path})" >&2
-    flock 9
+    flock 199
   fi
 fi
 
@@ -219,15 +219,39 @@ terminate_scope() {
   return 1
 }
 
+# Keeps calling `terminate_scope` until the unit is confirmed inactive.
+#
+# Each `terminate_scope` round is bounded, but this loop deliberately is not: giving up
+# would hand control back while an unsupervised workload is still holding memory and disk.
+# A scope that survives is almost always stuck in uninterruptible I/O, so the loop escalates
+# with a periodic report instead of failing silently. `MemoryMax` still caps the workload
+# while this runs.
+terminate_scope_until_gone() {
+  local reason="$1"
+  local waited=0
+  local survivors=0
+
+  while systemctl --user is-active --quiet "$unit"; do
+    if terminate_scope "$reason"; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+    if ((waited % 30 == 0)); then
+      survivors="$(wc -l <"${cgroup_root:-/nonexistent}/cgroup.procs" 2>/dev/null || echo 0)"
+      echo "[rondo] ${reason}: scope ${unit} has survived ${waited}s of kill attempts (${survivors} processes still in the cgroup); still supervising" >&2
+    fi
+  done
+  return 0
+}
+
 handle_exit() {
   local exit_rc=$?
 
   trap - EXIT INT TERM HUP
   if systemctl --user is-active --quiet "$unit"; then
     echo "[rondo] wrapper exited while ${unit} was active; stopping the supervised scope" >&2
-    while systemctl --user is-active --quiet "$unit"; do
-      terminate_scope "unexpected_wrapper_exit" || sleep 1
-    done
+    terminate_scope_until_gone "unexpected_wrapper_exit"
     if [[ -n "${runner_pid:-}" ]]; then
       wait "$runner_pid" >/dev/null 2>&1 || true
     fi
@@ -240,9 +264,7 @@ handle_signal() {
   local signal_rc="$2"
 
   echo "[rondo] wrapper received ${signal_name}; stopping supervised scope ${unit}" >&2
-  while systemctl --user is-active --quiet "$unit"; do
-    terminate_scope "signal_${signal_name}" || sleep 1
-  done
+  terminate_scope_until_gone "signal_${signal_name}"
   if [[ -n "${runner_pid:-}" ]]; then
     wait "$runner_pid" >/dev/null 2>&1 || true
   fi
@@ -288,9 +310,7 @@ cgroup_root="/sys/fs/cgroup${control_group}"
 for counter in memory.current memory.peak memory.stat memory.swap.current memory.swap.peak memory.pressure memory.events; do
   if [[ ! -r "${cgroup_root}/${counter}" ]]; then
     echo "[rondo] cgroup counter ${counter} is unavailable; stopping fail-closed" >&2
-    while systemctl --user is-active --quiet "$unit"; do
-      terminate_scope "missing_initial_counter_${counter}" || sleep 1
-    done
+    terminate_scope_until_gone "missing_initial_counter_${counter}"
     wait "$runner_pid" >/dev/null 2>&1 || true
     trap - EXIT INT TERM HUP
     exit 81
@@ -403,11 +423,8 @@ while systemctl --user is-active --quiet "$unit"; do
     fi
     stop_reason="resource_counter_unavailable_${invalid_sample}"
     echo "[rondo] proactive stop: ${stop_reason}" >&2
-    if terminate_scope "$stop_reason"; then
-      break
-    fi
-    sleep 1
-    continue
+    terminate_scope_until_gone "$stop_reason"
+    break
   fi
   memory_nonreclaimable="$((memory_anon + memory_kernel))"
 
@@ -492,19 +509,13 @@ while systemctl --user is-active --quiet "$unit"; do
 
   if [[ "$stop_reason" != "none" ]]; then
     echo "[rondo] proactive stop: ${stop_reason}" >&2
-    if terminate_scope "$stop_reason"; then
-      break
-    fi
-    sleep 1
-    continue
+    terminate_scope_until_gone "$stop_reason"
+    break
   fi
   if [[ "$cleanup_reason" != "none" ]]; then
     echo "[rondo] cleanup: ${cleanup_reason}" >&2
-    if terminate_scope "$cleanup_reason"; then
-      break
-    fi
-    sleep 1
-    continue
+    terminate_scope_until_gone "$cleanup_reason"
+    break
   fi
 
   sample=$((sample + 1))
@@ -554,6 +565,20 @@ read -r filesystem_used_after filesystem_available_after < <(
   printf 'project_stop_bytes=%s\n' "$project_stop_bytes"
   printf 'project_max_bytes=%s\n' "$project_max_bytes"
 } >"$summary_file"
+
+# Keep the machine-readable test report next to the metrics.
+#
+# Nextest writes its JUnit report under `target/`, so a later `cargo clean` (or a fresh
+# worktree) destroys the only per-test record of a full run. The watchdog run directory
+# lives outside `target/` and is git-ignored, which makes it the right place to retain
+# failure lists for a run that is worth re-analysing later.
+for junit_report in "${target_dir}"/nextest/*/junit.xml; do
+  [[ -f "$junit_report" ]] || continue
+  junit_profile="$(basename -- "$(dirname -- "$junit_report")")"
+  if cp -- "$junit_report" "${run_dir}/junit-${junit_profile}.xml" 2>/dev/null; then
+    echo "[rondo] retained ${junit_profile} junit report: ${run_dir}/junit-${junit_profile}.xml" >&2
+  fi
+done
 
 systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
 echo "[rondo] finished status=${run_rc} stop=${stop_reason} cleanup=${cleanup_reason} project=${project_after} target=${target_after}; summary=${summary_file}" >&2

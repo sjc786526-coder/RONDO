@@ -12,10 +12,11 @@
 - 开发环境已就绪（见 `doc/development-environment.md`）：Rust 1.95.0、pnpm 10.33.0、uv、Docker Desktop 可用；本机未装 Bazel。
 - 本机推理硬件：RTX 4060 Laptop **8GB VRAM** / 32 核；RAM 与 WSL 配额见
   `doc/development-environment.md`。8B 级模型只能走 4-bit 量化，且上下文预算需实测。
-- P0 共享地基已适配 `v0.147.0`。2026-08-09 独立复验修复了 builder 过早捕获、递归误改同名
-  `call_id` 与结构 `turn_id` 未规范化三项缺口，并补齐预取消轮、source baseline 与 builder-before-send
-  回归；两个开关仍默认关闭。本工作树的 schema、fmt、clippy 与 16 项精确回归已通过，P0 定向功能
-  验收收口；这不代表历史 workspace 81 项失败已解决，也不补称“全量全绿”。改动尚待审查/合并。
+- P0 共享地基已适配 `v0.147.0`，两个开关仍默认关闭。Guardian 证据在 HTTP/WS 各自的 transport
+  send point 捕获，`call_id` / `turn_id` 只在 input 项的结构位点成对重映射，meta 带
+  `guardian_source_baseline`；预取消轮、source baseline 与 builder-before-send 均有回归。
+  P0 定向功能验收已收口（schema、fmt、clippy 与 16 项精确回归通过）；历史 workspace 的失败
+  另见测试维护批次，不称“全量全绿”。
 - `v0.147.0` 中 Guardian 默认模型候选由 provider/auth 决定：configured provider + API key
   候选为 `gpt-5.6-luna`，ChatGPT/无 key 候选为 `codex-auto-review`，Bedrock 使用自身模型 id；
   候选不在 catalog 且无 metadata override 时仍会回退主模型。RONDO 显式 `[auto_review].model`

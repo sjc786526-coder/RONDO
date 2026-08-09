@@ -20,6 +20,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::ACTIVE_CAPTURING_SESSIONS;
+use super::GUARDIAN_SOURCE_BASELINE;
 use super::GuardianEvidenceRound;
 use super::GuardianReviewAnalyticsResult;
 use super::STRIPPED_REQUEST_FIELDS;
@@ -481,4 +482,22 @@ fn evidence_write_failure_is_swallowed() {
         /*duration_ms*/ 7,
     );
     assert!(blocker.is_file());
+}
+
+#[test]
+fn guardian_source_baseline_matches_the_upstream_tag_shape() {
+    // `GUARDIAN_SOURCE_BASELINE` stands in for the upstream release tag by reusing the
+    // crate version, which only holds while RONDO keeps the workspace version identical to
+    // the tag it imported. A local suffix such as `0.147.0-rondo.1` would make every
+    // evidence bundle claim an upstream tag that does not exist, and P1 layers its data on
+    // that field, so fail here rather than shipping a plausible-looking lie.
+    assert_eq!(
+        GUARDIAN_SOURCE_BASELINE,
+        format!("rust-v{}", env!("CARGO_PKG_VERSION"))
+    );
+    assert!(
+        !env!("CARGO_PKG_VERSION").contains('-'),
+        "RONDO carries a local version suffix, so guardian_source_baseline can no longer be \
+         derived from CARGO_PKG_VERSION; record the upstream tag explicitly instead"
+    );
 }

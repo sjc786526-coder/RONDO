@@ -58,6 +58,16 @@ const STRIPPED_REQUEST_FIELDS: &[&str] = &[
 
 const E_FINAL_FILE_NAME: &str = "E_final.json";
 const META_FILE_NAME: &str = "meta.json";
+/// Upstream Codex release whose Guardian source produced a piece of evidence.
+///
+/// This is derived from the crate version because RONDO keeps its workspace version
+/// identical to the upstream release tag it was imported from. That invariant is what makes
+/// the substitution honest, and `guardian_source_baseline_matches_the_upstream_tag_shape`
+/// guards it: if RONDO ever carries a local version suffix, this constant must be replaced
+/// with an explicit baseline rather than silently reporting a tag that does not exist.
+///
+/// It identifies the *source* only. The policy actually sent to the model also depends on
+/// requirements/config/catalog, so consumers must hash the effective policy separately.
 const GUARDIAN_SOURCE_BASELINE: &str = concat!("rust-v", env!("CARGO_PKG_VERSION"));
 
 /// Guardian sessions that are currently serving a capturing review round.
@@ -124,7 +134,13 @@ impl GuardianEvidenceRound {
         Some(Self::new(evidence_dir.as_path().join(review_id), review_id))
     }
 
-    pub(crate) fn new(output_dir: PathBuf, review_id: &str) -> Arc<Self> {
+    /// Opens a round directly, bypassing the `[auto_review].evidence_dir` lookup.
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(output_dir: PathBuf, review_id: &str) -> Arc<Self> {
+        Self::new(output_dir, review_id)
+    }
+
+    fn new(output_dir: PathBuf, review_id: &str) -> Arc<Self> {
         Arc::new(Self {
             review_id: review_id.to_string(),
             output_dir,
