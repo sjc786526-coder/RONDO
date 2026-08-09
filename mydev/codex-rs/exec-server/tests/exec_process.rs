@@ -36,6 +36,8 @@ use codex_protocol::permissions::FileSystemSpecialPath;
 #[cfg(unix)]
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::SandboxPolicy;
+#[cfg(unix)]
+use codex_sandboxing::SandboxType;
 use codex_utils_path_uri::PathUri;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -69,6 +71,18 @@ enum ProcessEventSnapshot {
     Closed {
         seq: u64,
     },
+}
+
+#[cfg(unix)]
+#[derive(Debug, Default)]
+struct EmptyRootsProbeOutput {
+    stdout: String,
+    stderr: String,
+    latest_seq: Option<u64>,
+    exit_code: Option<i32>,
+    sandbox_denied: Option<bool>,
+    closed: bool,
+    failure: Option<String>,
 }
 
 async fn create_process_context(use_remote: bool) -> Result<ProcessContext> {
@@ -324,36 +338,121 @@ async fn remote_tty_process_uses_configured_sandbox_helper_with_hostile_path() -
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_process_preserves_empty_workspace_roots() -> Result<()> {
     if let Some(warning) = codex_sandboxing::system_bwrap_warning(&PermissionProfile::read_only()) {
-        eprintln!("skipping bwrap test: {warning}");
-        return Ok(());
+        anyhow::bail!("bwrap prerequisite unavailable: {warning}");
     }
 
-    let context = create_process_context(/*use_remote*/ true).await?;
+    let mut context = create_process_context(/*use_remote*/ true).await?;
     let tmp = TempDir::new()?;
     let file = tmp.path().join("excluded.txt");
     std::fs::write(&file, b"excluded")?;
     let cwd = PathUri::from_host_native_path(tmp.path())?;
-    let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-        path: FileSystemPath::Special {
-            value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
+    let policy = FileSystemSandboxPolicy::restricted(vec![
+        FileSystemSandboxEntry {
+            path: FileSystemPath::Special {
+                value: FileSystemSpecialPath::Minimal,
+            },
+            access: FileSystemAccessMode::Read,
+            missing_path_behavior: None,
         },
-        access: FileSystemAccessMode::Read,
-        missing_path_behavior: None,
-    }]);
-    let mut sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
+        FileSystemSandboxEntry {
+            path: FileSystemPath::Special {
+                value: FileSystemSpecialPath::project_roots(/*subpath*/ None),
+            },
+            access: FileSystemAccessMode::Read,
+            missing_path_behavior: None,
+        },
+    ]);
+    let sandbox = FileSystemSandboxContext::from_permission_profile_with_cwd(
         PermissionProfile::from_runtime_permissions(&policy, NetworkSandboxPolicy::Restricted),
         cwd.clone(),
     );
-    sandbox.workspace_roots.clear();
 
-    let session = context
-        .backend
+    let allowed = start_empty_roots_probe(
+        &context.backend,
+        "proc-explicit-workspace-root",
+        &file,
+        &cwd,
+        sandbox.clone(),
+    )
+    .await?;
+    assert!(
+        matches!(allowed.sandbox_type, Some(kind) if kind != SandboxType::None),
+        "positive control must run in an enforced sandbox, got {:?}",
+        allowed.sandbox_type
+    );
+    let allowed_process = Arc::clone(&allowed.process);
+    let allowed_output = collect_empty_roots_probe_reads(allowed_process)
+        .await
+        .map_err(|error| with_exec_server_status(error, &mut context))?;
+    assert_eq!(
+        allowed_output.stdout, "excluded",
+        "positive-control output: {allowed_output:?}"
+    );
+    assert!(
+        allowed_output.stderr.is_empty(),
+        "unexpected positive-control stderr: {}",
+        allowed_output.stderr
+    );
+    assert_eq!(allowed_output.exit_code, Some(0));
+    assert_eq!(allowed_output.sandbox_denied, Some(false));
+    assert!(allowed_output.closed);
+    assert_eq!(allowed_output.failure, None);
+
+    let mut empty_roots_sandbox = sandbox;
+    empty_roots_sandbox.workspace_roots.clear();
+    let denied = start_empty_roots_probe(
+        &context.backend,
+        "proc-empty-workspace-roots",
+        &file,
+        &cwd,
+        empty_roots_sandbox,
+    )
+    .await?;
+    assert!(
+        matches!(denied.sandbox_type, Some(kind) if kind != SandboxType::None),
+        "negative control must run in an enforced sandbox, got {:?}",
+        denied.sandbox_type
+    );
+    let denied_process = Arc::clone(&denied.process);
+    let denied_output = collect_empty_roots_probe_reads(denied_process)
+        .await
+        .map_err(|error| with_exec_server_status(error, &mut context))?;
+
+    assert!(
+        denied_output.stdout.is_empty(),
+        "unexpected negative-control stdout: {}",
+        denied_output.stdout
+    );
+    assert_ne!(denied_output.exit_code, Some(0));
+    assert!(denied_output.closed);
+    assert_eq!(denied_output.failure, None);
+    let denied_path = file.to_string_lossy();
+    let explicitly_blocked_file_access = denied_output.stderr.contains(denied_path.as_ref())
+        && (denied_output.stderr.contains("Permission denied")
+            || denied_output.stderr.contains("No such file or directory"));
+    assert!(
+        denied_output.sandbox_denied == Some(true) || explicitly_blocked_file_access,
+        "negative control must report sandboxed file access failure for {denied_path}: {}",
+        denied_output.stderr
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn start_empty_roots_probe(
+    backend: &Arc<dyn ExecBackend>,
+    process_id: &str,
+    file: &std::path::Path,
+    cwd: &PathUri,
+    sandbox: FileSystemSandboxContext,
+) -> Result<StartedExecProcess> {
+    backend
         .start(ExecParams {
-            process_id: ProcessId::from("proc-empty-workspace-roots"),
+            process_id: ProcessId::from(process_id),
             argv: vec!["/bin/cat".to_string(), file.to_string_lossy().into_owned()],
-            cwd,
+            cwd: cwd.clone(),
             env_policy: None,
-            env: HashMap::new(),
+            env: HashMap::from([("PATH".to_string(), std::env::var("PATH")?)]),
             tty: false,
             pipe_stdin: false,
             arg0: None,
@@ -362,14 +461,92 @@ async fn remote_process_preserves_empty_workspace_roots() -> Result<()> {
             managed_network: None,
             network_proxy: None,
         })
-        .await?;
-    let (stdout, _stderr, exit_code, closed) =
-        collect_process_output_from_events(session.process).await?;
+        .await
+        .map_err(Into::into)
+}
 
-    assert!(!stdout.contains("excluded"), "unexpected stdout: {stdout}");
-    assert_ne!(exit_code, Some(0));
-    assert!(closed);
-    Ok(())
+#[cfg(unix)]
+async fn collect_empty_roots_probe_reads(
+    session: Arc<dyn ExecProcess>,
+) -> Result<EmptyRootsProbeOutput> {
+    let mut wake_rx = session.subscribe_wake();
+    let mut output = EmptyRootsProbeOutput::default();
+    loop {
+        let mut response = session
+            .read(
+                output.latest_seq,
+                /*max_bytes*/ None,
+                /*wait_ms*/ Some(0),
+            )
+            .await?;
+        if response.chunks.is_empty() && !response.closed && response.failure.is_none() {
+            match timeout(Duration::from_secs(2), wake_rx.changed()).await {
+                Ok(Ok(())) => {
+                    response = session
+                        .read(
+                            output.latest_seq,
+                            /*max_bytes*/ None,
+                            /*wait_ms*/ Some(0),
+                        )
+                        .await?;
+                }
+                Ok(Err(error)) => {
+                    anyhow::bail!(
+                        "empty-roots wake channel closed: wake_error={error}; snapshot={output:?}; terminal_read={response:?}"
+                    );
+                }
+                Err(_) => {
+                    let terminal_read = session
+                        .read(
+                            output.latest_seq,
+                            /*max_bytes*/ None,
+                            /*wait_ms*/ Some(0),
+                        )
+                        .await;
+                    anyhow::bail!(
+                        "empty-roots read collector timed out; snapshot={output:?}; terminal_read={terminal_read:?}"
+                    );
+                }
+            }
+        }
+        if let Some(message) = response.failure {
+            output.failure = Some(message);
+            anyhow::bail!("empty-roots process failed before close: {output:?}");
+        }
+        for chunk in response.chunks {
+            output.latest_seq = Some(chunk.seq);
+            match chunk.stream {
+                ExecOutputStream::Stdout | ExecOutputStream::Pty => output
+                    .stdout
+                    .push_str(&String::from_utf8_lossy(&chunk.chunk.into_inner())),
+                ExecOutputStream::Stderr => output
+                    .stderr
+                    .push_str(&String::from_utf8_lossy(&chunk.chunk.into_inner())),
+            }
+        }
+        if response.exited {
+            output.exit_code = response.exit_code;
+            output.sandbox_denied = Some(response.sandbox_denied);
+        }
+        output.latest_seq = response.next_seq.checked_sub(1).or(output.latest_seq);
+        if response.closed {
+            output.closed = true;
+            return Ok(output);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn with_exec_server_status(error: anyhow::Error, context: &mut ProcessContext) -> anyhow::Error {
+    let child_status = match context._server.as_mut() {
+        Some(server) => match server.child_status() {
+            Ok(Some(status)) => format!("exited: {status}"),
+            Ok(None) => "running".to_string(),
+            Err(status_error) => format!("status unavailable: {status_error:#}"),
+        },
+        None => "not remote".to_string(),
+    };
+    error.context(format!("exec-server child status: {child_status}"))
 }
 
 async fn read_process_until_change(

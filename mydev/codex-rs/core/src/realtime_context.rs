@@ -2,6 +2,7 @@ use crate::compact::content_items_to_text;
 use crate::event_mapping::is_contextual_user_message_content;
 use crate::session::session::Session;
 use chrono::Utc;
+use codex_exec_server::ExecutorFileSystem;
 use codex_exec_server::LOCAL_FS;
 use codex_git_utils::resolve_root_git_project_for_trust;
 use codex_protocol::models::ResponseItem;
@@ -159,10 +160,18 @@ async fn build_recent_work_section(
     cwd: &AbsolutePathBuf,
     recent_threads: &[StoredThread],
 ) -> Option<String> {
+    build_recent_work_section_with_fs(cwd, recent_threads, LOCAL_FS.as_ref()).await
+}
+
+async fn build_recent_work_section_with_fs(
+    cwd: &AbsolutePathBuf,
+    recent_threads: &[StoredThread],
+    fs: &dyn ExecutorFileSystem,
+) -> Option<String> {
     let mut groups: HashMap<PathBuf, Vec<&StoredThread>> = HashMap::new();
     for entry in recent_threads {
         let group = match AbsolutePathBuf::from_absolute_path(entry.cwd.as_path()) {
-            Ok(entry_cwd) => resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &entry_cwd)
+            Ok(entry_cwd) => resolve_root_git_project_for_trust(fs, &entry_cwd)
                 .await
                 .map(AbsolutePathBuf::into_path_buf)
                 .unwrap_or_else(|| entry.cwd.clone()),
@@ -171,7 +180,7 @@ async fn build_recent_work_section(
         groups.entry(group).or_default().push(entry);
     }
 
-    let current_group = resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), cwd)
+    let current_group = resolve_root_git_project_for_trust(fs, cwd)
         .await
         .map(AbsolutePathBuf::into_path_buf)
         .unwrap_or_else(|| cwd.clone().into_path_buf());
@@ -202,7 +211,7 @@ async fn build_recent_work_section(
     let mut sections = Vec::new();
     for (group, mut entries) in groups.into_iter().take(MAX_RECENT_WORK_GROUPS) {
         entries.sort_by_key(|entry| Reverse(entry.updated_at));
-        if let Some(section) = format_thread_group(&current_group, &group, entries).await {
+        if let Some(section) = format_thread_group(&current_group, &group, entries, fs).await {
             sections.push(section);
         }
     }
@@ -341,8 +350,16 @@ async fn build_workspace_section_with_user_root(
     cwd: &AbsolutePathBuf,
     user_root: Option<PathBuf>,
 ) -> Option<String> {
+    build_workspace_section_with_user_root_with_fs(cwd, user_root, LOCAL_FS.as_ref()).await
+}
+
+async fn build_workspace_section_with_user_root_with_fs(
+    cwd: &AbsolutePathBuf,
+    user_root: Option<PathBuf>,
+    fs: &dyn ExecutorFileSystem,
+) -> Option<String> {
     let cwd_path = cwd.as_path();
-    let git_root = resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), cwd).await;
+    let git_root = resolve_root_git_project_for_trust(fs, cwd).await;
     let cwd_tree = render_tree(cwd_path);
     let git_root_tree = git_root
         .as_ref()
@@ -493,11 +510,12 @@ async fn format_thread_group(
     current_group: &Path,
     group: &Path,
     entries: Vec<&StoredThread>,
+    fs: &dyn ExecutorFileSystem,
 ) -> Option<String> {
     let latest = entries.first()?;
     let group_label =
         if let Ok(latest_cwd) = AbsolutePathBuf::from_absolute_path(latest.cwd.as_path()) {
-            if resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &latest_cwd)
+            if resolve_root_git_project_for_trust(fs, &latest_cwd)
                 .await
                 .is_some()
             {

@@ -604,6 +604,9 @@ mod tests {
                         .is_empty()
                 );
             }
+            OutboundProxyPolicy::Direct => {
+                panic!("test matrix must not exercise the test-only direct proxy policy")
+            }
         }
     }
 

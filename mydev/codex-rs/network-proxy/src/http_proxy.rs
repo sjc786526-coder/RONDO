@@ -1116,7 +1116,9 @@ mod tests {
             policy.set_allowed_domains(vec!["example.com".to_string()]);
             policy
         };
-        let state = Arc::new(network_proxy_state_for_policy(policy));
+        let state = Arc::new(
+            network_proxy_state_for_policy(policy).with_test_host_lookup(&["example.com"]),
+        );
         state.set_network_mode(NetworkMode::Limited).await.unwrap();
 
         let mut req = Request::builder()
@@ -1169,7 +1171,10 @@ mod tests {
 
     #[tokio::test]
     async fn http_connect_accept_passes_environment_id_to_decider() {
-        let state = Arc::new(network_proxy_state_for_policy(NetworkProxyConfig::default()));
+        let state = Arc::new(
+            network_proxy_state_for_policy(NetworkProxyConfig::default())
+                .with_test_host_lookup(&["example.com"]),
+        );
         let seen_environment_id = Arc::new(Mutex::new(None));
         let decider: Arc<dyn NetworkPolicyDecider> = Arc::new({
             let seen_environment_id = seen_environment_id.clone();
@@ -1212,7 +1217,8 @@ mod tests {
             ..NetworkProxyConfig::default()
         };
         policy.set_allowed_domains(vec!["github.com".to_string()]);
-        let state = Arc::new(network_proxy_state_for_policy(policy));
+        let state =
+            Arc::new(network_proxy_state_for_policy(policy).with_test_host_lookup(&["github.com"]));
         let mut env = HashMap::from([("GH_TOKEN".to_string(), "ghp-real".to_string())]);
         state.virtualize_child_credentials(&mut env);
 
@@ -1313,7 +1319,9 @@ mod tests {
             ..Default::default()
         };
         policy.set_allowed_domains(vec!["api.github.com".to_string()]);
-        let state = Arc::new(network_proxy_state_for_policy(policy));
+        let state = Arc::new(
+            network_proxy_state_for_policy(policy).with_test_host_lookup(&["api.github.com"]),
+        );
 
         let mut req = Request::builder()
             .method(Method::CONNECT)

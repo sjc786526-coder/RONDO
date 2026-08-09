@@ -118,6 +118,10 @@ impl ExecServerHarness {
         &self.websocket_url
     }
 
+    pub(crate) fn child_status(&mut self) -> anyhow::Result<Option<std::process::ExitStatus>> {
+        self.child.try_wait().map_err(Into::into)
+    }
+
     pub(crate) async fn disconnect_websocket(&mut self) -> anyhow::Result<()> {
         self.websocket.close(None).await?;
         Ok(())

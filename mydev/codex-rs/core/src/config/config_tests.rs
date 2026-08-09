@@ -1865,6 +1865,17 @@ respect_system_proxy = true
 }
 
 #[test]
+fn product_config_cannot_select_test_only_direct_proxy_policy() {
+    assert_eq!(
+        [false, true].map(outbound_proxy_policy_from_config),
+        [
+            codex_http_client::OutboundProxyPolicy::ReqwestDefault,
+            codex_http_client::OutboundProxyPolicy::RespectSystemProxy,
+        ]
+    );
+}
+
+#[test]
 fn bootstrap_respect_system_proxy_honors_feature_requirements() -> std::io::Result<()> {
     let configured = ConfigToml {
         features: Some(

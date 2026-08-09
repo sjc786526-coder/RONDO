@@ -635,7 +635,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn evaluate_host_policy_emits_domain_event_for_decider_allow_override() {
-        let state = network_proxy_state_for_policy(NetworkProxyConfig::default());
+        let state = network_proxy_state_for_policy(NetworkProxyConfig::default())
+            .with_test_host_lookup(&["example.com"]);
         let calls = Arc::new(AtomicUsize::new(0));
         let decider: Arc<dyn NetworkPolicyDecider> = Arc::new({
             let calls = calls.clone();
@@ -707,7 +708,8 @@ mod tests {
             let mut network = NetworkProxyConfig::default();
             network.set_allowed_domains(vec!["example.com".to_string()]);
             network
-        });
+        })
+        .with_test_host_lookup(&["example.com"]);
         state.register_execution("token-baseline-allow", "local", "execution-baseline-allow");
         let state = state
             .for_execution_token("token-baseline-allow")
@@ -796,7 +798,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn evaluate_host_policy_emits_domain_event_for_decider_ask() {
-        let state = network_proxy_state_for_policy(NetworkProxyConfig::default());
+        let state = network_proxy_state_for_policy(NetworkProxyConfig::default())
+            .with_test_host_lookup(&["example.com"]);
         let decider: Arc<dyn NetworkPolicyDecider> =
             Arc::new(|_req| async { NetworkDecision::ask(REASON_NOT_ALLOWED) });
         let request = NetworkPolicyRequest::new(NetworkPolicyRequestArgs {

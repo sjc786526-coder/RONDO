@@ -34,6 +34,10 @@ struct FailingMetadataFileSystem {
     path: PathUri,
 }
 
+struct FixtureBoundedFileSystem {
+    root: PathUri,
+}
+
 impl FailingMetadataFileSystem {
     fn unsupported<T>() -> FileSystemResult<T> {
         Err(io::Error::new(
@@ -128,6 +132,94 @@ impl ExecutorFileSystem for FailingMetadataFileSystem {
         _sandbox: Option<&'a FileSystemSandboxContext>,
     ) -> ExecutorFileSystemFuture<'a, ()> {
         Box::pin(async { Self::unsupported() })
+    }
+}
+
+impl ExecutorFileSystem for FixtureBoundedFileSystem {
+    fn canonicalize<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, PathUri> {
+        LOCAL_FS.canonicalize(path, sandbox)
+    }
+
+    fn read_file<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, Vec<u8>> {
+        LOCAL_FS.read_file(path, sandbox)
+    }
+
+    fn read_file_stream<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, FileSystemReadStream> {
+        LOCAL_FS.read_file_stream(path, sandbox)
+    }
+
+    fn write_file<'a>(
+        &'a self,
+        path: &'a PathUri,
+        contents: Vec<u8>,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.write_file(path, contents, sandbox)
+    }
+
+    fn create_directory<'a>(
+        &'a self,
+        path: &'a PathUri,
+        options: CreateDirectoryOptions,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.create_directory(path, options, sandbox)
+    }
+
+    fn get_metadata<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, FileMetadata> {
+        if path.starts_with(&self.root) {
+            LOCAL_FS.get_metadata(path, sandbox)
+        } else {
+            Box::pin(async {
+                Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "path is outside the fixture root",
+                ))
+            })
+        }
+    }
+
+    fn read_directory<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, Vec<ReadDirectoryEntry>> {
+        LOCAL_FS.read_directory(path, sandbox)
+    }
+
+    fn remove<'a>(
+        &'a self,
+        path: &'a PathUri,
+        options: RemoveOptions,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.remove(path, options, sandbox)
+    }
+
+    fn copy<'a>(
+        &'a self,
+        source_path: &'a PathUri,
+        destination_path: &'a PathUri,
+        options: CopyOptions,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.copy(source_path, destination_path, options, sandbox)
     }
 }
 
@@ -608,8 +700,11 @@ async fn test_get_git_working_tree_state_branch_fallback() {
 #[tokio::test]
 async fn resolve_root_git_project_for_trust_returns_none_outside_repo() {
     let tmp = TempDir::new().expect("tempdir");
+    let fs = FixtureBoundedFileSystem {
+        root: PathUri::from_abs_path(&tmp.path().abs()),
+    };
     assert!(
-        resolve_root_git_project_for_trust(LOCAL_FS.as_ref(), &tmp.path().abs())
+        resolve_root_git_project_for_trust(&fs, &tmp.path().abs())
             .await
             .is_none()
     );

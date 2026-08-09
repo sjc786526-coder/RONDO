@@ -11,6 +11,7 @@ use codex_protocol::request_user_input::RequestUserInputArgs;
 use codex_protocol::request_user_input::RequestUserInputQuestion;
 use codex_protocol::request_user_input::RequestUserInputQuestionOption;
 use codex_protocol::request_user_input::RequestUserInputResponse;
+use codex_rmcp_client::BrowserLaunch;
 use codex_rmcp_client::OAuthDiscoveryTimeout;
 use codex_rmcp_client::StreamableHttpRedirectMode;
 use codex_rmcp_client::perform_oauth_login;
@@ -184,6 +185,7 @@ pub(crate) async fn maybe_install_mcp_dependencies(
             server_config.oauth_resource.as_deref(),
             config.mcp_oauth_callback_port,
             config.mcp_oauth_callback_url.as_deref(),
+            BrowserLaunch::Enabled,
             Arc::clone(&http_client),
         )
         .await;
@@ -202,6 +204,7 @@ pub(crate) async fn maybe_install_mcp_dependencies(
                     server_config.oauth_resource.as_deref(),
                     config.mcp_oauth_callback_port,
                     config.mcp_oauth_callback_url.as_deref(),
+                    BrowserLaunch::Enabled,
                     Arc::clone(&http_client),
                 )
                 .await

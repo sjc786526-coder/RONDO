@@ -38,12 +38,14 @@ use wiremock::matchers::path_regex;
 #[derive(Debug, Clone)]
 pub struct ResponseMock {
     requests: Arc<Mutex<Vec<ResponsesRequest>>>,
+    request_log_updated: Arc<Notify>,
 }
 
 impl ResponseMock {
     fn new() -> Self {
         Self {
             requests: Arc::new(Mutex::new(Vec::new())),
+            request_log_updated: Arc::new(Notify::new()),
         }
     }
 
@@ -61,6 +63,15 @@ impl ResponseMock {
 
     pub fn last_request(&self) -> Option<ResponsesRequest> {
         self.requests.lock().unwrap().last().cloned()
+    }
+
+    pub async fn wait_for_request_count(&self, count: usize) {
+        loop {
+            if self.requests.lock().unwrap().len() >= count {
+                return;
+            }
+            self.request_log_updated.notified().await;
+        }
     }
 
     /// Returns true if any captured request contains a `function_call` with the
@@ -678,10 +689,13 @@ impl Match for ModelsMock {
 
 impl Match for ResponseMock {
     fn matches(&self, request: &wiremock::Request) -> bool {
-        self.requests
-            .lock()
-            .unwrap()
-            .push(ResponsesRequest(request.clone()));
+        {
+            self.requests
+                .lock()
+                .unwrap()
+                .push(ResponsesRequest(request.clone()));
+        }
+        self.request_log_updated.notify_one();
 
         // Enforce invariant checks on every request body captured by the mock.
         // Panic on orphan tool outputs or calls to catch regressions early.
@@ -1522,6 +1536,25 @@ pub async fn mount_function_call_agent_response(
 /// POST to `/v1/responses`. Panics if more requests are received than bodies
 /// provided. Also asserts the exact number of expected calls.
 pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> ResponseMock {
+    mount_sse_sequence_inner(server, bodies, true).await
+}
+
+/// Like [`mount_sse_sequence`], but leaves request-count verification to the caller.
+///
+/// This is useful for timeout diagnostics: an unmet wiremock expectation would
+/// otherwise panic during server drop and obscure the original timeout error.
+pub async fn mount_sse_sequence_without_request_count_expectation(
+    server: &MockServer,
+    bodies: Vec<String>,
+) -> ResponseMock {
+    mount_sse_sequence_inner(server, bodies, false).await
+}
+
+async fn mount_sse_sequence_inner(
+    server: &MockServer,
+    bodies: Vec<String>,
+    expect_exact_request_count: bool,
+) -> ResponseMock {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
@@ -1551,11 +1584,13 @@ pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> Res
     };
 
     let (mock, response_mock) = base_mock();
-    mock.respond_with(responder)
-        .up_to_n_times(num_calls as u64)
-        .expect(num_calls as u64)
-        .mount(server)
-        .await;
+    let mock = mock.respond_with(responder).up_to_n_times(num_calls as u64);
+    let mock = if expect_exact_request_count {
+        mock.expect(num_calls as u64)
+    } else {
+        mock
+    };
+    mock.mount(server).await;
 
     response_mock
 }

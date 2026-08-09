@@ -138,11 +138,14 @@ fn policy_ctx(
 
 #[tokio::test]
 async fn mitm_policy_blocks_disallowed_method_and_records_telemetry() {
-    let app_state = Arc::new(network_proxy_state_for_policy({
-        let mut network = NetworkProxyConfig::default();
-        network.set_allowed_domains(vec!["example.com".to_string()]);
-        network
-    }));
+    let app_state = Arc::new(
+        network_proxy_state_for_policy({
+            let mut network = NetworkProxyConfig::default();
+            network.set_allowed_domains(vec!["example.com".to_string()]);
+            network
+        })
+        .with_test_host_lookup(&["example.com"]),
+    );
     let ctx = policy_ctx(
         app_state.clone(),
         NetworkMode::Limited,
@@ -254,7 +257,9 @@ async fn mitm_policy_allows_matching_hooked_write_in_full_mode() {
         ..NetworkProxyConfig::default()
     };
     network.set_allowed_domains(vec!["api.github.com".to_string()]);
-    let app_state = Arc::new(network_proxy_state_for_policy(network));
+    let app_state = Arc::new(
+        network_proxy_state_for_policy(network).with_test_host_lookup(&["api.github.com"]),
+    );
     let ctx = policy_ctx(
         app_state.clone(),
         NetworkMode::Full,
@@ -288,7 +293,9 @@ async fn mitm_policy_blocks_matching_hooked_write_in_limited_mode() {
         ..NetworkProxyConfig::default()
     };
     network.set_allowed_domains(vec!["api.github.com".to_string()]);
-    let app_state = Arc::new(network_proxy_state_for_policy(network));
+    let app_state = Arc::new(
+        network_proxy_state_for_policy(network).with_test_host_lookup(&["api.github.com"]),
+    );
     let ctx = policy_ctx(
         app_state.clone(),
         NetworkMode::Limited,
@@ -336,7 +343,9 @@ async fn mitm_policy_blocks_hook_miss_for_hooked_host_and_records_telemetry_in_f
         ..NetworkProxyConfig::default()
     };
     network.set_allowed_domains(vec!["api.github.com".to_string()]);
-    let app_state = Arc::new(network_proxy_state_for_policy(network));
+    let app_state = Arc::new(
+        network_proxy_state_for_policy(network).with_test_host_lookup(&["api.github.com"]),
+    );
     let ctx = policy_ctx(
         app_state.clone(),
         NetworkMode::Full,

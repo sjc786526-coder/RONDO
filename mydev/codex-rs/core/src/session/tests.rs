@@ -172,6 +172,7 @@ use opentelemetry_sdk::metrics::data::AggregatedMetrics;
 use opentelemetry_sdk::metrics::data::Metric;
 use opentelemetry_sdk::metrics::data::MetricData;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::sync::Semaphore;
@@ -1059,9 +1060,7 @@ async fn managed_network_proxy_decider_survives_full_access_start() -> anyhow::R
         .parse::<std::net::SocketAddr>()?;
     let mut stream = tokio::net::TcpStream::connect(proxy_addr).await?;
     stream
-        .write_all(
-            b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n",
-        )
+        .write_all(b"GET http://8.8.8.8/ HTTP/1.1\r\nHost: 8.8.8.8\r\nConnection: close\r\n\r\n")
         .await?;
     let mut buffer = [0_u8; 4096];
     let bytes_read = tokio::time::timeout(StdDuration::from_secs(2), stream.read(&mut buffer))
@@ -1075,6 +1074,14 @@ async fn managed_network_proxy_decider_survives_full_access_start() -> anyhow::R
     );
     assert!(
         response.contains("x-proxy-error: blocked-by-allowlist"),
+        "unexpected proxy response: {response}"
+    );
+    assert!(
+        response.contains(r#""reason":"not_allowed""#),
+        "unexpected proxy response: {response}"
+    );
+    assert!(
+        !response.contains("not_allowed_local"),
         "unexpected proxy response: {response}"
     );
     assert_eq!(
@@ -1355,12 +1362,21 @@ async fn user_shell_commands_do_not_inherit_managed_network_proxy() -> anyhow::R
     .await?;
 
     let turn_context = session.new_default_turn().await;
-    assert!(turn_context.network.is_some());
+    let network = turn_context
+        .network
+        .as_ref()
+        .expect("turn should expose managed network proxy");
+    let mut managed_env = HashMap::new();
+    network.apply_to_env(&mut managed_env);
+    let managed_proxy = managed_env
+        .get("HTTP_PROXY")
+        .expect("managed network should set HTTP_PROXY")
+        .clone();
 
     #[cfg(windows)]
-    let command = r#"$val = $env:HTTP_PROXY; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
+    let command = r#"$proxy = $env:HTTP_PROXY; if ([string]::IsNullOrEmpty($proxy)) { $proxy = 'not-set' }; $active = $env:CODEX_NETWORK_PROXY_ACTIVE; if ([string]::IsNullOrEmpty($active)) { $active = 'not-set' }; [System.Console]::Write("proxy=$proxy`nactive=$active")"#.to_string();
     #[cfg(not(windows))]
-    let command = r#"sh -c "printf '%s' \"${HTTP_PROXY:-not-set}\"""#.to_string();
+    let command = r#"sh -c "printf 'proxy=%s\nactive=%s\n' \"${HTTP_PROXY:-not-set}\" \"${CODEX_NETWORK_PROXY_ACTIVE:-not-set}\"""#.to_string();
 
     execute_user_shell_command(
         Arc::clone(&session),
@@ -1375,7 +1391,18 @@ async fn user_shell_commands_do_not_inherit_managed_network_proxy() -> anyhow::R
         let event = rx.recv().await.expect("channel open");
         if let EventMsg::ExecCommandEnd(event) = event.msg {
             assert_eq!(event.exit_code, 0);
-            assert_eq!(event.stdout.trim(), "not-set");
+            let proxy = event
+                .stdout
+                .lines()
+                .find_map(|line| line.strip_prefix("proxy="))
+                .expect("shell output should include HTTP_PROXY");
+            let active = event
+                .stdout
+                .lines()
+                .find_map(|line| line.strip_prefix("active="))
+                .expect("shell output should include the managed proxy marker");
+            assert_ne!(proxy, managed_proxy.as_str());
+            assert_eq!(active, "not-set");
             break;
         }
     }

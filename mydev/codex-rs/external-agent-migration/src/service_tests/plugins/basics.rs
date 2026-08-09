@@ -244,6 +244,33 @@ fn marketplace_import_sources_infers_bundled_claude_code_marketplace() {
     );
 }
 
+#[test]
+fn marketplace_import_sources_infers_external_official_marketplace() {
+    let (_root, external_agent_home, _codex_home) = fixture_paths();
+    let settings = serde_json::json!({
+        "enabledPlugins": {
+            "sample@claude-plugins-official": true,
+        }
+    });
+
+    let import_sources = source_cla::marketplace_import_sources(
+        &settings,
+        &external_agent_home,
+        &external_agent_home,
+    );
+
+    assert_eq!(
+        import_sources,
+        std::collections::BTreeMap::from([(
+            EXTERNAL_OFFICIAL_MARKETPLACE_NAME.to_string(),
+            MarketplaceImportSource {
+                source: EXTERNAL_OFFICIAL_MARKETPLACE_SOURCE.to_string(),
+                ref_name: None,
+            },
+        )])
+    );
+}
+
 #[tokio::test]
 async fn detect_home_plugins_uses_local_settings_over_project_settings() {
     let (_root, external_agent_home, codex_home) = fixture_paths();

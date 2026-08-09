@@ -66,7 +66,22 @@ mod tests {
 
     #[test]
     fn sandbox_feature_matches_linked_v8() {
-        assert_eq!(super::linked_v8_has_sandbox(), cfg!(feature = "sandbox"));
+        let linked_v8_has_sandbox = super::linked_v8_has_sandbox();
+        assert!(
+            !cfg!(feature = "sandbox") || linked_v8_has_sandbox,
+            "the crate sandbox feature requires a sandbox-enabled linked V8"
+        );
+
+        if let Ok(expected) = std::env::var("RONDO_V8_CANARY_EXPECT_SANDBOX") {
+            let expected = match expected.as_str() {
+                "0" => false,
+                "1" => true,
+                value => panic!(
+                    "RONDO_V8_CANARY_EXPECT_SANDBOX must be exactly `0` or `1`, got {value:?}"
+                ),
+            };
+            assert_eq!(linked_v8_has_sandbox, expected);
+        }
     }
 
     #[test]

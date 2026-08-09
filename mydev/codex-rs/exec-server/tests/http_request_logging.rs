@@ -124,11 +124,10 @@ async fn delegated_http_failure_warning_redacts_request_url() -> anyhow::Result<
             ),
     );
     let _guard = tracing::subscriber::set_default(subscriber);
-    let unavailable_server = std::net::TcpListener::bind(("127.0.0.1", 0))?;
-    let unavailable_address = unavailable_server.local_addr()?;
-    drop(unavailable_server);
-    let client =
-        RouteAwareHttpClient::new(HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault));
+    let unavailable_socket = tokio::net::TcpSocket::new_v4()?;
+    unavailable_socket.bind("127.0.0.1:0".parse()?)?;
+    let unavailable_address = unavailable_socket.local_addr()?;
+    let client = RouteAwareHttpClient::new(HttpClientFactory::new(OutboundProxyPolicy::Direct));
 
     let error = client
         .http_request(HttpRequestParams {
@@ -144,7 +143,10 @@ async fn delegated_http_failure_warning_redacts_request_url() -> anyhow::Result<
             stream_response: false,
         })
         .await;
-    assert!(error.is_err(), "request to a closed port should fail");
+    assert!(
+        error.is_err(),
+        "request to a bound non-listening port should fail"
+    );
 
     let logs = String::from_utf8(log_buffer.lock().expect("log buffer lock").clone())?;
     assert!(logs.contains("http/request send failed"));

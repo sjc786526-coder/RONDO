@@ -96,11 +96,19 @@ impl fmt::Display for RouteFailureClass {
 /// Callers must choose a policy explicitly so omitting feature resolution cannot silently select
 /// legacy behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// `Direct` is an executable cross-crate test route, not a non-exhaustive compatibility sentinel.
+#[allow(clippy::manual_non_exhaustive)]
 pub enum OutboundProxyPolicy {
     /// Preserve reqwest's built-in proxy behavior.
     ReqwestDefault,
     /// Resolve system/PAC/WPAD settings, then environment settings, then direct routing.
     RespectSystemProxy,
+    /// Bypass every proxy source.
+    ///
+    /// This workspace-visible variant exists for deterministic cross-crate tests. Product
+    /// configuration and factories must not select it.
+    #[doc(hidden)]
+    Direct,
 }
 
 /// Resolved proxy route for a concrete outbound destination.
@@ -223,11 +231,12 @@ impl HttpClientFactory {
         &self,
         request_url: String,
     ) -> io::Result<OutboundProxyRoute> {
-        if matches!(
-            self.outbound_proxy_policy,
-            OutboundProxyPolicy::ReqwestDefault
-        ) {
-            return Ok(OutboundProxyRoute::TransportDefault);
+        match self.outbound_proxy_policy {
+            OutboundProxyPolicy::ReqwestDefault => {
+                return Ok(OutboundProxyRoute::TransportDefault);
+            }
+            OutboundProxyPolicy::Direct => return Ok(OutboundProxyRoute::Direct),
+            OutboundProxyPolicy::RespectSystemProxy => {}
         }
 
         if let Some(route) = self.cached_proxy_route(&request_url) {
@@ -297,8 +306,10 @@ fn resolve_proxy_route(
     outbound_proxy_policy: OutboundProxyPolicy,
     resolve_system_proxy: impl FnOnce(&str, &RequestOrigin) -> SystemProxyDecision,
 ) -> OutboundProxyRoute {
-    if matches!(outbound_proxy_policy, OutboundProxyPolicy::ReqwestDefault) {
-        return OutboundProxyRoute::TransportDefault;
+    match outbound_proxy_policy {
+        OutboundProxyPolicy::ReqwestDefault => return OutboundProxyRoute::TransportDefault,
+        OutboundProxyPolicy::Direct => return OutboundProxyRoute::Direct,
+        OutboundProxyPolicy::RespectSystemProxy => {}
     }
 
     let env_proxy_kind = EnvProxyKind::from_request_url(request_url);

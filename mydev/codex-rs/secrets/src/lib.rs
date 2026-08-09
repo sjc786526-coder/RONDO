@@ -157,7 +157,11 @@ impl SecretsManager {
 }
 
 pub fn environment_id_from_cwd(cwd: &Path) -> String {
-    if let Some(repo_root) = get_git_repo_root(cwd)
+    environment_id_from_cwd_with_repo_root(cwd, get_git_repo_root(cwd))
+}
+
+fn environment_id_from_cwd_with_repo_root(cwd: &Path, repo_root: Option<PathBuf>) -> String {
+    if let Some(repo_root) = repo_root
         && let Some(name) = repo_root.file_name()
     {
         let name = name.to_string_lossy().trim().to_string();
@@ -207,7 +211,7 @@ mod tests {
     #[test]
     fn environment_id_fallback_has_cwd_prefix() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let env_id = environment_id_from_cwd(dir.path());
+        let env_id = environment_id_from_cwd_with_repo_root(dir.path(), /*repo_root*/ None);
         let canonical = dir
             .path()
             .canonicalize()
@@ -220,6 +224,12 @@ mod tests {
         let hex = format!("{digest:x}");
         let short = hex.get(..12).expect("digest has at least 12 chars");
         assert_eq!(env_id, format!("cwd-{short}"));
+
+        let repo_root = dir.path().join("fixture-repo");
+        assert_eq!(
+            environment_id_from_cwd_with_repo_root(dir.path(), Some(repo_root)),
+            "fixture-repo"
+        );
     }
 
     #[test]

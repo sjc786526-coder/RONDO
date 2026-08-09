@@ -185,6 +185,49 @@ fn reqwest_default_route_preserves_transport_proxy_behavior() {
     assert_eq!(route, OutboundProxyRoute::TransportDefault);
 }
 
+#[tokio::test]
+async fn direct_policy_ignores_proxy_environment_and_system_resolver() {
+    let (server_addr, server_thread) = spawn_proxy_listener();
+    let request_url = format!("http://{server_addr}/direct-check");
+    let env = MapEnv {
+        values: HashMap::from([
+            ("HTTP_PROXY".to_string(), "http://127.0.0.1:1".to_string()),
+            ("HTTPS_PROXY".to_string(), "http://127.0.0.1:1".to_string()),
+            ("ALL_PROXY".to_string(), "http://127.0.0.1:1".to_string()),
+            ("NO_PROXY".to_string(), String::new()),
+        ]),
+    };
+    let builder = configure_proxy_for_route(
+        &env,
+        reqwest::Client::builder().timeout(Duration::from_secs(2)),
+        &request_url,
+        ClientRouteClass::Api,
+        OutboundProxyPolicy::Direct,
+        |_, _| panic!("direct policy must not invoke the system proxy resolver"),
+    )
+    .expect("direct client should configure");
+
+    let response = builder
+        .build()
+        .expect("direct client should build")
+        .get(&request_url)
+        .send()
+        .await
+        .expect("direct client should bypass poisoned proxy settings");
+    let request = only_request(server_thread, "direct server");
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(request.lines().next(), Some("GET /direct-check HTTP/1.1"));
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::Direct);
+    assert_eq!(
+        factory
+            .resolve_proxy_route_async(request_url)
+            .await
+            .expect("async direct route should resolve"),
+        OutboundProxyRoute::Direct
+    );
+}
+
 impl EnvSource for MapEnv {
     fn var(&self, key: &str) -> Option<String> {
         self.values.get(key).cloned()

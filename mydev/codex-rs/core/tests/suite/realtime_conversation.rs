@@ -3,6 +3,10 @@ use anyhow::Result;
 use chrono::Utc;
 use codex_config::config_toml::RealtimeWsVersion;
 use codex_core::test_support::auth_manager_from_auth;
+use codex_extension_api::ExtensionFuture;
+use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::ThreadIdleInput;
+use codex_extension_api::ThreadLifecycleContributor;
 use codex_login::CodexAuth;
 use codex_login::OPENAI_API_KEY_ENV_VAR;
 use codex_protocol::ThreadId;
@@ -4057,61 +4061,110 @@ async fn inbound_handoff_request_sends_transcript_delta_after_each_handoff() -> 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn conversation_close_routes_only_remaining_transcript_tail_once() -> Result<()> {
-    skip_if_no_network!(Ok(()));
+    struct ThreadIdleBarrier {
+        idle_tx: tokio::sync::mpsc::UnboundedSender<()>,
+    }
 
-    let api_server = start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &api_server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_assistant_message("msg-1", "first ok"),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("resp-2"),
-                responses::ev_assistant_message("msg-2", "tail ok"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let realtime_server = start_websocket_server(vec![vec![
-        vec![
-            json!({
-                "type": "session.updated",
-                "session": { "id": "sess_tail", "instructions": "backend prompt" }
-            }),
-            json!({
-                "type": "conversation.input_transcript.delta",
-                "delta": "already handed off"
-            }),
-            json!({
-                "type": "conversation.handoff.requested",
-                "handoff_id": "handoff_tail",
-                "item_id": "item_tail",
-                "input_transcript": "already handed off"
-            }),
-            json!({
-                "type": "conversation.output_transcript.delta",
-                "delta": "remaining answer"
-            }),
-            json!({
-                "type": "conversation.input_transcript.delta",
-                "delta": "remaining question"
-            }),
-        ],
-        vec![],
-    ]])
-    .await;
-    let mut builder = test_codex().with_config({
-        let realtime_base_url = realtime_server.uri().to_string();
-        move |config| {
-            config.experimental_realtime_ws_base_url = Some(realtime_base_url);
-            config.realtime.version = RealtimeWsVersion::V1;
+    impl ThreadLifecycleContributor<codex_core::config::Config> for ThreadIdleBarrier {
+        fn on_thread_idle<'a>(&'a self, _input: ThreadIdleInput<'a>) -> ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                let _ = self.idle_tx.send(());
+            })
         }
-    });
-    let test = builder.build(&api_server).await?;
+    }
+
+    if std::env::var(core_test_support::sandbox_network_env_var()).is_ok() {
+        anyhow::bail!(
+            "conversation_close_routes_only_remaining_transcript_tail_once requires loopback networking"
+        );
+    }
+
+    let (tail_response_gate_tx, tail_response_gate_rx) = oneshot::channel();
+    let first_response_chunks = vec![
+        StreamingSseChunk {
+            gate: None,
+            body: sse_event(responses::ev_response_created("resp-1")),
+        },
+        StreamingSseChunk {
+            gate: None,
+            body: sse_event(responses::ev_assistant_message("msg-1", "first ok")),
+        },
+        StreamingSseChunk {
+            gate: None,
+            body: sse_event(responses::ev_completed("resp-1")),
+        },
+    ];
+    let tail_response_chunks = vec![
+        StreamingSseChunk {
+            gate: Some(tail_response_gate_rx),
+            body: sse_event(responses::ev_response_created("resp-2")),
+        },
+        StreamingSseChunk {
+            gate: None,
+            body: sse_event(responses::ev_assistant_message("msg-2", "tail ok")),
+        },
+        StreamingSseChunk {
+            gate: None,
+            body: sse_event(responses::ev_completed("resp-2")),
+        },
+    ];
+    let (api_server, completions) =
+        start_streaming_sse_server(vec![first_response_chunks, tail_response_chunks]).await;
+    let mut completions = completions.into_iter();
+    let first_response_completion = completions
+        .next()
+        .context("missing first response completion")?;
+    let tail_response_completion = completions
+        .next()
+        .context("missing tail response completion")?;
+    let realtime_server = start_websocket_server_with_headers(vec![WebSocketConnectionConfig {
+        requests: vec![
+            vec![
+                json!({
+                    "type": "session.updated",
+                    "session": { "id": "sess_tail", "instructions": "backend prompt" }
+                }),
+                json!({
+                    "type": "conversation.input_transcript.delta",
+                    "delta": "already handed off"
+                }),
+                json!({
+                    "type": "conversation.handoff.requested",
+                    "handoff_id": "handoff_tail",
+                    "item_id": "item_tail",
+                    "input_transcript": "already handed off"
+                }),
+                json!({
+                    "type": "conversation.output_transcript.delta",
+                    "delta": "remaining answer"
+                }),
+                json!({
+                    "type": "conversation.input_transcript.delta",
+                    "delta": "remaining question"
+                }),
+            ],
+            vec![],
+        ],
+        response_headers: Vec::new(),
+        accept_delay: None,
+        close_after_requests: false,
+    }])
+    .await;
+    let (thread_idle_tx, mut thread_idle_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut extensions = ExtensionRegistryBuilder::<codex_core::config::Config>::new();
+    extensions.thread_lifecycle_contributor(Arc::new(ThreadIdleBarrier {
+        idle_tx: thread_idle_tx,
+    }));
+    let mut builder = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_config({
+            let realtime_base_url = realtime_server.uri().to_string();
+            move |config| {
+                config.experimental_realtime_ws_base_url = Some(realtime_base_url);
+                config.realtime.version = RealtimeWsVersion::V1;
+            }
+        });
+    let test = builder.build_with_streaming_server(&api_server).await?;
 
     test.codex
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
@@ -4137,36 +4190,109 @@ async fn conversation_close_routes_only_remaining_transcript_tail_once() -> Resu
         }))
         .await?;
 
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    test.codex.submit(Op::RealtimeConversationClose).await?;
-
-    let closed = wait_for_event_match(&test.codex, |msg| match msg {
-        EventMsg::RealtimeConversationClosed(closed) => Some(closed.clone()),
-        _ => None,
-    })
-    .await;
+    timeout(
+        Duration::from_secs(10),
+        api_server.wait_for_request_count(1),
+    )
+    .await
+    .context("timed out waiting for the initial Responses request")?;
+    timeout(Duration::from_secs(10), first_response_completion)
+        .await
+        .context("timed out waiting for the initial Responses stream to finish")?
+        .context("initial Responses stream completion channel closed")?;
+    let mut initial_events = Vec::new();
+    loop {
+        let event = timeout(Duration::from_secs(10), test.codex.next_event())
+            .await
+            .with_context(|| {
+                format!(
+                    "timed out waiting for the initial handoff turn completion; observed events: {initial_events:?}"
+                )
+            })??;
+        initial_events.push(format!("{:?}", event.msg));
+        if matches!(&event.msg, EventMsg::TurnComplete(_)) {
+            break;
+        }
+    }
+    timeout(Duration::from_secs(10), thread_idle_rx.recv())
+        .await
+        .context("timed out waiting for the initial handoff turn to become idle")?
+        .context("thread-idle barrier closed before the initial handoff turn became idle")?;
+    let first_close_id = test.codex.submit(Op::RealtimeConversationClose).await?;
+    let mut saw_tail_turn_complete = false;
+    let closed = loop {
+        let event = timeout(Duration::from_secs(10), test.codex.next_event())
+            .await
+            .context("timed out waiting for the first close result")??;
+        if matches!(&event.msg, EventMsg::TurnComplete(_)) {
+            saw_tail_turn_complete = true;
+        }
+        if event.id == first_close_id
+            && let EventMsg::RealtimeConversationClosed(closed) = event.msg
+        {
+            break closed;
+        }
+    };
     assert_eq!(closed.reason.as_deref(), Some("requested"));
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while response_mock.requests().len() < 2 {
-        assert!(tokio::time::Instant::now() < deadline);
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    timeout(Duration::from_secs(2), api_server.wait_for_request_count(2))
+        .await
+        .context("timed out waiting for the transcript-tail Responses request")?;
+    let _ = tail_response_gate_tx.send(());
+    timeout(Duration::from_secs(10), tail_response_completion)
+        .await
+        .context("timed out waiting for the transcript-tail Responses stream to finish")?
+        .context("transcript-tail Responses stream completion channel closed")?;
+    if !saw_tail_turn_complete {
+        let mut tail_events = Vec::new();
+        loop {
+            let event = timeout(Duration::from_secs(10), test.codex.next_event())
+                .await
+                .with_context(|| {
+                    format!(
+                        "timed out waiting for the transcript-tail turn completion; observed events: {tail_events:?}"
+                    )
+                })??;
+            tail_events.push(format!("{:?}", event.msg));
+            if matches!(&event.msg, EventMsg::TurnComplete(_)) {
+                break;
+            }
+        }
     }
+    timeout(Duration::from_secs(10), thread_idle_rx.recv())
+        .await
+        .context("timed out waiting for the transcript-tail turn to become idle")?
+        .context("thread-idle barrier closed before the transcript-tail turn became idle")?;
 
-    test.codex.submit(Op::RealtimeConversationClose).await?;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    let response_request_count = api_server.requests().await.len();
+    let second_close_id = test.codex.submit(Op::RealtimeConversationClose).await?;
+    let second_closed = loop {
+        let event = timeout(Duration::from_secs(10), test.codex.next_event())
+            .await
+            .with_context(|| {
+                format!(
+                    "timed out waiting for the second close result: response_requests={response_request_count}",
+                )
+            })??;
+        if event.id == second_close_id
+            && let EventMsg::RealtimeConversationClosed(closed) = event.msg
+        {
+            break closed;
+        }
+    };
+    assert_eq!(second_closed.reason.as_deref(), Some("requested"));
 
-    let requests = response_mock.requests();
+    let requests = api_server.requests().await;
     assert_eq!(requests.len(), 2);
-    assert!(requests[0].message_input_texts("user").iter().any(|text| text
+    let first_body: Value = serde_json::from_slice(&requests[0]).context("parse first request")?;
+    let tail_body: Value = serde_json::from_slice(&requests[1]).context("parse tail request")?;
+    assert!(message_input_texts(&first_body, "user").iter().any(|text| text
         == "<realtime_delegation>\n  <input>already handed off</input>\n  <transcript_delta>user: already handed off</transcript_delta>\n</realtime_delegation>"));
-    assert!(requests[1].message_input_texts("user").iter().any(|text| text
+    assert!(message_input_texts(&tail_body, "user").iter().any(|text| text
         == "<realtime_delegation>\n  <source>transcript_tail_flush</source>\n  <input>The user just ended their realtime session. Here is the remaining handoff/transcript tail. You probably do not have to do anything; acknowledge the handoff unless the transcript itself asks for something.</input>\n  <transcript_delta>assistant: remaining answer\nuser: remaining question</transcript_delta>\n</realtime_delegation>"));
 
     realtime_server.shutdown().await;
+    api_server.shutdown().await;
     Ok(())
 }
 
