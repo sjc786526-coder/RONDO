@@ -1,8 +1,8 @@
 # 39 个严格失败与 2 个附加设施事项最终修复计划
 
 > 状态：当前平台实现、独立整改与可执行门禁已提交，并随主线合并提交 `8c185af` 推送远端；V8
-> sandbox/full-workspace 受官方预编译资产404阻断，Windows目标平台未运行，因此本计划仍为部分通过，
-> 不宣称跨平台或完整workspace全绿。
+> sandbox canary已补验通过，完整workspace已执行但有31项失败与1项超时，Windows目标平台仍未运行，
+> 因此本计划仍为部分通过，不宣称跨平台或完整workspace全绿。
 >
 > 计数基线：最新严格全量记录有 81 个失败名；第一批实际覆盖 42 个失败名，因此当前待修集合机械推导为
 > 39 个严格失败。external-agent migration 是更早一轮的偶发超时，OAuth 是始终通过但会打开宿主浏览器的
@@ -598,27 +598,35 @@ just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/mcp_login_no_op
 - 原实现提交 `216ccb7` 经合并提交 `06b2a0e` 进入主线；独立整改提交 `9570874` 经no-ff合并提交
   `8c185af` 进入主线并推送远端。完整独立验收、逐份JUnit哈希与交付核对见
   `agent_log/2026-08-09-203209-plan-004-independent-acceptance.md`。
+- Plan 007复用既有OpenAI资产下载与双SHA校验实现，给本地watchdog增加显式薄入口；V8 v150.4.0的GNU
+  sandbox archive/binding校验通过，未使用`V8_FROM_SOURCE`。G族sandbox=true独占canary实际1/1通过
+  （watchdog `20260809-224201-1000-1688050`，JUnit SHA-256
+  `f41e264ed064445b4c8726d452eddfae56da572a398efd2144c464a50b2c83c9`），此前404环境阻断已解除。
+- 同一入口下的真实Code Mode host smoke实际1/1通过；随后完整workspace最终实际运行14,092项，14,060通过、
+  31失败、1超时，另有23项显式ignored。JUnit含14,092 testcase、32 failure节点、0 error/skipped节点，SHA-256
+  `31166103c1b000eb5c9b3e11677df79a49b7a3c6904fcbfb18394f8de66d0337`。V8 POC 7/7、Code Mode专属crate
+  167/167通过；失败和ignored完整清单见`agent_log/2026-08-09-224108-v8-sandbox-local-gate.md`。
 
 ### 当前工作
 
-- 当前平台实现、独立整改、定向/压力/静态门禁、提交、主线合并与远端推送均已完成；当前没有待提交产品代码。
+- 当前平台实现、独立整改、定向/压力/静态门禁、V8 sandbox补验均已完成；当前没有待提交产品代码。
 
 ### 后续计划
 
-- Windows环境可用时补PowerShell正向门禁；rusty_v8 sandbox资产前提恢复后成对补sandbox canary，再按本计划只运行
-  一次完整workspace。已通过的当前平台定向门禁不作无意义重复运行。
+- Windows环境可用时补PowerShell正向门禁。workspace已真实执行且非全绿，32项终态未通过应另立测试维护任务；
+  已通过的当前平台定向、V8 canary与host smoke不作无意义重复运行。
 
 ### 阻塞项
 
 - Windows PowerShell同名测试本机WSL无法提供目标平台证据，仍待Windows补验。
-- G的sandbox=true canary因rusty_v8 v150.4.0对应官方预编译资产HTTP 404而未运行；不在本任务内自动扩大为
-  `V8_FROM_SOURCE=1` 的重型源码构建；完整workspace也因此没有进入测试体。
+- 完整workspace已解除V8资产阻断并实际执行，但存在31项失败和1项超时；这不是V8/Code Mode回归，仍阻止
+  “workspace全绿”结论。Plan 004不在本轮跨模块扩修或重跑全量。
 - macOS Seatbelt入口已保留但未实机运行；这是必须披露的非阻断跨平台证据缺口，不是本计划WSL2完成门禁。
 
 ### 当前验收状态
 
-- A-F/H-K当前平台定向/压力门禁、G default与manifest、独立整改回归、fmt/fix/clippy均已通过并交付；G sandbox与
-  workspace全量被同一V8资产404阻断，Windows目标平台未运行。结论为部分通过，不能称41项跨平台/全量闭环。
+- A-F/H-K当前平台定向/压力门禁、G default/sandbox与manifest、独立整改回归、fmt/fix/clippy均已通过；workspace
+  已真实执行但31失败+1超时，Windows目标平台仍未运行。结论仍为部分通过，不能称41项跨平台/全量闭环。
 
 ## 18. 关键决策记录
 
@@ -663,3 +671,5 @@ just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/mcp_login_no_op
 | 037 | H在终态后读取MockServer全局请求并断言真实POST总数恰为2 | sequence cap会让第三个请求绕过ResponseMock内部记录，形成计数假绿 | H | 已采纳 |
 | 038 | K以CLI retry seam、rmcp finish launcher注入和cloud E2E组合证明Disabled贯穿首轮与去scopes重试 | 单测参数映射或launcher helper都不能独立证明完整链路 | K | 已采纳 |
 | 039 | macOS未运行作为非阻断边界披露，Windows仍属原计划必需证据 | 目标环境与I族原失败为WSL2/Linux；F族本身是Windows合同 | F/I | 已采纳 |
+| 040 | V8本地门禁复用既有OpenAI资产helper并显式拒绝源码构建 | 官方sandbox资产实际存在，原404来自未注入override；无需新增V8构建体系 | G | 已采纳 |
+| 041 | workspace的32项非V8终态失败另立维护任务，不在Plan 007扩修或重跑 | 完整JUnit已证明V8/Code Mode目标通过；保持轻量任务边界 | 全计划 | 已采纳 |

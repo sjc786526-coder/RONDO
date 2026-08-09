@@ -193,3 +193,13 @@ standard/Lite 形态均补回归。
 - 本阶段只完成当前目标环境可执行部分，Plan 004整体仍为部分通过：Windows PowerShell正向合同未运行；V8
   `sandbox=true` canary与完整workspace在测试前被官方预编译资产404阻断。macOS Seatbelt入口保留但未实机运行，
   作为非阻断跨平台证据缺口披露。
+
+### 2026-08-09 V8 sandbox本地资产门禁补验
+
+- 新增显式`test-with-codex-v8`薄入口，复用既有OpenAI release下载、两行manifest和archive/binding双SHA校验，
+  继续经build lock/watchdog执行；不新增V8构建体系，不使用`V8_FROM_SOURCE`。
+- V8 v150.4.0 `x86_64-unknown-linux-gnu` sandbox=true canary 1/1与真实Code Mode host smoke 1/1通过，
+  JUnit均为0 failure/error/skip；此前官方资产404阻断已解除，无需修改V8或Code Mode Rust代码。
+- 完整workspace实际运行14,092项：14,060通过、31失败、1超时、23显式ignored。V8 POC 7/7与Code Mode
+  专属crate 167/167通过；全量不称绿色，32项终态失败另列维护，Windows目标平台仍待补验。完整证据见
+  `agent_log/2026-08-09-224108-v8-sandbox-local-gate.md`。

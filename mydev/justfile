@@ -98,6 +98,12 @@ test *args:
 test *args:
     $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; $env:NEXTEST_PROFILE = "local"; cargo nextest run --no-fail-fast @($args | Select-Object -Skip 1)
 
+# Run Nextest with the checksum-verified Codex V8 sandbox artifacts while
+# retaining the same build lock, watchdog, and JUnit behavior as `just test`.
+[unix]
+test-with-codex-v8 *args:
+    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} ../scripts/with_codex_v8_artifacts.py -- {{ justfile_directory() }}/scripts/with-build-lock.sh cargo nextest run --no-fail-fast "$@"
+
 # Run from the repository root so scripts that resolve paths from `cwd` see
 # the same layout they use in GitHub Actions.
 [no-cd]
