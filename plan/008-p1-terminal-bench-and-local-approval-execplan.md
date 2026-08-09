@@ -199,6 +199,10 @@
   vendored bubblewrap Git tree ID 完全相同，现改为冻结 OpenAI `rust-v0.147.0` 官方 x86_64-musl bwrap
   资产、归档 SHA-256、单文件布局和组合源码身份。15 键 runtime manifest、Harbor 三文件上传/SHA 门禁
   和 75 项合并定向回归已通过；下一步只允许在看门狗内下载/验证 261563-byte 资产并重跑 Docker。
+- 官方 bwrap 资产已下载、离线复核并用于两侧最终 runtime bundle；Codex Docker no-API 已越过二进制
+  查找，进一步证明任务容器默认以缺少 `SYS_ADMIN` 的 root 运行时无法创建嵌套 namespace。未授予 capability、
+  privileged 或 unconfined seccomp；改为两侧固定 UID/GID 1000，root 只做安装、临时 auth 与任务目录准备，
+  Codex 和工具均以非 root 运行。75 项合并轻量回归通过，待真实 Docker 复验。
 
 ### 后续计划
 
@@ -239,3 +243,4 @@
 | 016 | 容器内 workspace-write 显式允许网络，不授予 Docker 特权 capability | 默认 bubblewrap 网络命名空间在 Docker Desktop 内不能初始化；文件系统沙箱仍保留，真实 key 仅在宿主预算代理 | B2/B3 sandbox | 已采纳 |
 | 017 | runtime bundle 按上游布局内置同源 `codex-resources/bwrap` | 任务镜像不应 apt/PATH 注入浮动 sandbox；冻结包必须自包含 v0.147 Linux 运行资源 | B2/B3 二进制公平性 | 已采纳 |
 | 018 | 复用官方 v0.147.0 musl bwrap 资产并验证两侧源码 tree identity | 自建链路会额外冻结 Linux UAPI/C 依赖；两侧源码逐树相同，官方同版本资产更小且可直接验签 | B2/B3 构建与供应链 | 已采纳 |
+| 019 | Terminal-Bench 主 service 和 agent 固定为 1000:1000 | 让内层 bwrap 使用非特权 user namespace；不授予 Docker 特权 capability 或关闭 seccomp | B2/B3 sandbox | 已采纳 |

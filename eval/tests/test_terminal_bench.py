@@ -63,11 +63,12 @@ class FakeExecResult:
 
 
 class FakeEnvironment:
-    default_user = "root"
+    default_user = "1000:1000"
 
     def __init__(self, *, corrupt_remote: bool = False) -> None:
         self.corrupt_remote = corrupt_remote
         self.calls: list[tuple[str, dict[str, str] | None, int | None, str | None]] = []
+        self.effective_users: list[str] = []
         self.uploads: list[tuple[Path, str]] = []
         self.remote: dict[str, bytes] = {}
 
@@ -80,6 +81,7 @@ class FakeEnvironment:
     async def exec(self, command, *, cwd=None, env=None, timeout_sec=None, user=None):
         del cwd
         self.calls.append((command, env, timeout_sec, user))
+        self.effective_users.append(user or self.default_user)
         raw = command.removeprefix("set -o pipefail; ")
         if raw.startswith("sha256sum -- "):
             path = raw.removeprefix("sha256sum -- ").strip("'")
@@ -98,7 +100,16 @@ class FakeMaterializer:
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
-        overlay.write_text("services:\n  main: {}\n")
+        overlay.write_text(
+            materialize_module._compose_overlay_text(
+                task_label=kwargs["task_label"],
+                memory_bytes=kwargs["memory_bytes"],
+                memory_swap_bytes=kwargs["memory_swap_bytes"],
+                pids_limit=kwargs["pids_limit"],
+                provider_api_key_env=kwargs["provider_api_key_env"],
+                runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
+            )
+        )
         staged_digest = materialize_module._harbor_content_digest(task)
         overlay_digest = hashlib.sha256(overlay.read_bytes()).hexdigest()
         return MaterializedTask(
@@ -114,6 +125,7 @@ class FakeMaterializer:
             memory_swap_bytes=kwargs["memory_swap_bytes"],
             pids_limit=kwargs["pids_limit"],
             provider_api_key_env=kwargs["provider_api_key_env"],
+            runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
             staged_task_digest=staged_digest,
             overlay_sha256=overlay_digest,
         )
@@ -380,6 +392,12 @@ class TerminalBenchTests(unittest.TestCase):
                 self.assertNotIn("apt", commands)
                 self.assertNotIn("command -v bwrap", commands)
                 self.assertIn(f"{adapter.remote_path} --version", commands)
+                self.assertTrue(environment.calls)
+                self.assertTrue(all(call[3] == "root" for call in environment.calls))
+                self.assertIn(
+                    f"chown -r 0:0 -- {adapter.remote_directory}",
+                    commands,
+                )
 
     def test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv(self) -> None:
         secret = "sentinel-secret-must-not-serialize"
@@ -473,6 +491,32 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("auto_review.model", commands)
         self.assertNotIn("auto_review.reasoning_effort", commands)
         self.assertNotIn("auto_review.evidence_dir", commands)
+        root_calls = [call for call in environment.calls if call[3] == "root"]
+        agent_calls = [call for call in environment.calls if call[3] is None]
+        self.assertEqual(len(root_calls), 2)
+        self.assertEqual(len(agent_calls), 3)
+        self.assertEqual(
+            environment.effective_users,
+            ["root", "root", "1000:1000", "1000:1000", "1000:1000"],
+        )
+        self.assertIn("task_workdir=$(pwd -P)", root_calls[0][0])
+        self.assertIn("chown -R 1000:1000", root_calls[0][0])
+        self.assertIn("/logs/agent", root_calls[0][0])
+        self.assertIn("/run/secrets/rondo_eval_provider_api_key", root_calls[1][0])
+        self.assertIn("chown 1000:1000", root_calls[1][0])
+        self.assertIn("chmod 0600", root_calls[1][0])
+        self.assertTrue(
+            any(
+                'test "$(id -u):$(id -g)" = "1000:1000"' in call[0]
+                for call in agent_calls
+            )
+        )
+        self.assertTrue(
+            all(
+                "/run/secrets/rondo_eval_provider_api_key" not in call[0]
+                for call in agent_calls
+            )
+        )
 
         rondo = self.adapter(RondoUploadAdapter, extra_env={"OPENAI_API_KEY": secret})
         rondo_environment = FakeEnvironment()
@@ -547,9 +591,40 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn("pids_limit: 256", overlay)
         self.assertIn("environment: OPENAI_API_KEY", overlay)
         self.assertIn("source: rondo_eval_provider_api_key", overlay)
-        result.overlay_path.write_text(overlay + "# tampered\n")
-        with self.assertRaises(MaterializationError):
-            result.validate()
+        self.assertIn('user: "1000:1000"', overlay)
+        self.assertEqual(result.runtime_user, "1000:1000")
+        staged_document = materialize_module._read_toml(result.task_path / "task.toml")
+        self.assertEqual(staged_document["agent"]["user"], "1000:1000")
+        object.__setattr__(
+            result,
+            "staged_task_digest",
+            materialize_module._harbor_content_digest(result.task_path),
+        )
+        original_overlay_sha256 = hashlib.sha256(
+            result.overlay_path.read_bytes()
+        ).hexdigest()
+        object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
+        result.validate()
+        for unsafe_line in (
+            '    user: "0:0"\n',
+            "    privileged: true\n",
+            "    cap_add: [SYS_ADMIN]\n",
+            '    security_opt: ["seccomp=unconfined"]\n',
+        ):
+            with self.subTest(unsafe_line=unsafe_line.strip()):
+                result.overlay_path.write_text(
+                    overlay.replace('    user: "1000:1000"\n', unsafe_line)
+                )
+                object.__setattr__(
+                    result,
+                    "overlay_sha256",
+                    hashlib.sha256(result.overlay_path.read_bytes()).hexdigest(),
+                )
+                with self.assertRaises(MaterializationError):
+                    result.validate()
+        result.overlay_path.write_text(overlay)
+        object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
+        result.validate()
 
     def test_injected_backend_never_serializes_provider_key(self) -> None:
         prepared = self.prepare(Side.RONDO)

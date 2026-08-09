@@ -19,6 +19,7 @@ from .compat import (
     exec_result,
     with_prompt_template,
 )
+from .materialize import TERMINAL_BENCH_AGENT_USER
 
 
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
@@ -191,6 +192,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
             await environment.upload_file(bwrap_source, self.remote_bwrap_path)
         except Exception as exc:
             raise AdapterError("binary bundle upload failed") from exc
+        await _checked_exec(
+            environment,
+            f"chown -R 0:0 -- {shlex.quote(str(self.remote_directory))} && "
+            f"chmod 0755 {shlex.quote(str(self.remote_directory))} "
+            f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))}",
+        )
         for remote_path, expected_digest in (
             (self.remote_path, self.manifest.sha256),
             (self.remote_code_mode_host_path, self.manifest.code_mode_host_sha256),
@@ -221,13 +228,25 @@ class UploadBinaryAdapter(HarborCodexAgent):
         output_path = (EnvironmentPaths.agent_dir / self._OUTPUT_FILENAME).as_posix()
         nonsecret_env = {"CODEX_HOME": remote_home}
 
-        await self.exec_as_agent(
+        # Harbor's agent phase uses the staged task's numeric user, and the
+        # Compose overlay independently freezes the main service as 1000:1000.
+        # Root is used only to prepare adapter-owned paths and make the task
+        # worktree writable by that user.  Refuse images whose WORKDIR is `/`
+        # rather than recursively changing ownership outside the task.
+        await _checked_exec(
             environment,
-            command=(
+            (
+                "set -e; task_workdir=$(pwd -P); "
+                'test "$task_workdir" != /; test -d "$task_workdir"; '
                 f"mkdir -p {shlex.quote(remote_home)} {shlex.quote(remote_secrets)} "
-                f"{shlex.quote(agent_dir)}"
+                f"{shlex.quote(agent_dir)}; "
+                f"chown -R {TERMINAL_BENCH_AGENT_USER} -- "
+                f"{shlex.quote(remote_home)} {shlex.quote(remote_secrets)} "
+                f'{shlex.quote(agent_dir)} "$task_workdir"; '
+                f"chmod 0700 {shlex.quote(remote_home)} {shlex.quote(remote_secrets)}; "
+                f"chmod 0750 {shlex.quote(agent_dir)}; "
+                'chmod u+rwx "$task_workdir"'
             ),
-            env=nonsecret_env,
         )
 
         try:
@@ -239,20 +258,27 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 "python3 -c 'import json,sys; print(json.dumps({\"OPENAI_API_KEY\":sys.stdin.read()}))' "
                 "< /run/secrets/rondo_eval_provider_api_key "
                 f"> {shlex.quote(remote_auth)}; "
-                f"ln -sf {shlex.quote(remote_auth)} {shlex.quote(remote_home + '/auth.json')}"
+                f"chown {TERMINAL_BENCH_AGENT_USER} -- {shlex.quote(remote_auth)}; "
+                f"chmod 0600 {shlex.quote(remote_auth)}; "
+                f"ln -sfn {shlex.quote(remote_auth)} "
+                f"{shlex.quote(remote_home + '/auth.json')}"
             )
-            auth_result = await environment.exec(
+            await _checked_exec(
+                environment,
                 auth_command,
-                timeout_sec=30,
             )
-            try:
-                auth_code, _stdout, _stderr = exec_result(auth_result)
-            except TypeError as exc:
-                raise AdapterError(
-                    "credential injection returned an unsupported result"
-                ) from exc
-            if auth_code != 0:
-                raise AdapterError("credential injection failed")
+
+            await self.exec_as_agent(
+                environment,
+                command=(
+                    f'test "$(id -u):$(id -g)" = "{TERMINAL_BENCH_AGENT_USER}" '
+                    f"&& test -r {shlex.quote(remote_auth)} "
+                    f"&& test ! -w {shlex.quote(self.remote_path)} "
+                    f"&& test ! -w {shlex.quote(self.remote_code_mode_host_path)} "
+                    f"&& test ! -w {shlex.quote(self.remote_bwrap_path)}"
+                ),
+                env=nonsecret_env,
+            )
 
             model = self.model_name.split("/", maxsplit=1)[-1]
             common_overrides = (

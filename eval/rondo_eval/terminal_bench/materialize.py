@@ -26,6 +26,13 @@ class MaterializationError(RuntimeError):
     """The local dataset checkout or staged task differs from its freeze."""
 
 
+TERMINAL_BENCH_AGENT_UID = 1000
+TERMINAL_BENCH_AGENT_GID = 1000
+TERMINAL_BENCH_AGENT_USER = (
+    f"{TERMINAL_BENCH_AGENT_UID}:{TERMINAL_BENCH_AGENT_GID}"
+)
+
+
 @dataclass(frozen=True)
 class MaterializedTask:
     task_path: Path
@@ -40,6 +47,7 @@ class MaterializedTask:
     memory_swap_bytes: int
     pids_limit: int
     provider_api_key_env: str
+    runtime_user: str
     staged_task_digest: str
     overlay_sha256: str
 
@@ -63,6 +71,8 @@ class MaterializedTask:
             raise MaterializationError("staged task label is invalid")
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", self.provider_api_key_env):
             raise MaterializationError("staged provider key variable is invalid")
+        if self.runtime_user != TERMINAL_BENCH_AGENT_USER:
+            raise MaterializationError("staged task runtime user differs from the freeze")
         if (
             self.memory_bytes <= 0
             or self.memory_swap_bytes < self.memory_bytes
@@ -71,6 +81,20 @@ class MaterializedTask:
             raise MaterializationError("staged task resource limits are invalid")
         if _harbor_content_digest(self.task_path) != self.staged_task_digest:
             raise MaterializationError("staged task changed after materialization")
+        try:
+            overlay_text = self.overlay_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise MaterializationError("Compose overlay is unreadable") from exc
+        expected_overlay = _compose_overlay_text(
+            task_label=self.task_label,
+            memory_bytes=self.memory_bytes,
+            memory_swap_bytes=self.memory_swap_bytes,
+            pids_limit=self.pids_limit,
+            provider_api_key_env=self.provider_api_key_env,
+            runtime_user=self.runtime_user,
+        )
+        if overlay_text != expected_overlay:
+            raise MaterializationError("Compose overlay differs from the frozen contract")
         if _file_sha256(self.overlay_path) != self.overlay_sha256:
             raise MaterializationError("Compose overlay changed after materialization")
 
@@ -146,24 +170,28 @@ class PinnedTaskMaterializer:
         if text.count(needle) != 1:
             raise MaterializationError("task image metadata is missing or ambiguous")
         task_toml.write_text(text.replace(needle, replacement), encoding="utf-8")
+        text = task_toml.read_text(encoding="utf-8")
+        agent_needle = "[agent]\n"
+        if text.count(agent_needle) != 1:
+            raise MaterializationError("task agent metadata is missing or ambiguous")
+        task_toml.write_text(
+            text.replace(
+                agent_needle,
+                f'{agent_needle}user = "{TERMINAL_BENCH_AGENT_USER}"\n',
+            ),
+            encoding="utf-8",
+        )
         _validate_staged_task(_read_toml(task_toml))
 
-        label_key, label_value = _split_label(task_label)
         overlay.write_text(
-            "secrets:\n"
-            "  rondo_eval_provider_api_key:\n"
-            f"    environment: {provider_api_key_env}\n"
-            "services:\n"
-            "  main:\n"
-            "    labels:\n"
-            f"      {label_key}: {label_value}\n"
-            f"    mem_limit: {memory_bytes}\n"
-            f"    memswap_limit: {memory_swap_bytes}\n"
-            f"    pids_limit: {pids_limit}\n"
-            "    secrets:\n"
-            "      - source: rondo_eval_provider_api_key\n"
-            "        target: rondo_eval_provider_api_key\n"
-            "        mode: \"0400\"\n",
+            _compose_overlay_text(
+                task_label=task_label,
+                memory_bytes=memory_bytes,
+                memory_swap_bytes=memory_swap_bytes,
+                pids_limit=pids_limit,
+                provider_api_key_env=provider_api_key_env,
+                runtime_user=TERMINAL_BENCH_AGENT_USER,
+            ),
             encoding="utf-8",
         )
         result = MaterializedTask(
@@ -179,6 +207,7 @@ class PinnedTaskMaterializer:
             memory_swap_bytes=memory_swap_bytes,
             pids_limit=pids_limit,
             provider_api_key_env=provider_api_key_env,
+            runtime_user=TERMINAL_BENCH_AGENT_USER,
             staged_task_digest=_harbor_content_digest(destination),
             overlay_sha256=_file_sha256(overlay),
         )
@@ -279,6 +308,9 @@ def _validate_staged_task(document: dict) -> None:
     environment = document.get("environment")
     if not isinstance(environment, dict) or environment.get("docker_image") != FIX_GIT_IMAGE_REF:
         raise MaterializationError("staged task did not receive the pinned runtime image")
+    agent = document.get("agent")
+    if not isinstance(agent, dict) or agent.get("user") != TERMINAL_BENCH_AGENT_USER:
+        raise MaterializationError("staged task did not receive the pinned runtime user")
 
 
 def _validate_dataset_manifest(document: dict) -> None:
@@ -354,3 +386,34 @@ def _split_label(value: str) -> tuple[str, str]:
     ):
         raise MaterializationError("task label is invalid")
     return key, label_value
+
+
+def _compose_overlay_text(
+    *,
+    task_label: str,
+    memory_bytes: int,
+    memory_swap_bytes: int,
+    pids_limit: int,
+    provider_api_key_env: str,
+    runtime_user: str,
+) -> str:
+    if runtime_user != TERMINAL_BENCH_AGENT_USER:
+        raise MaterializationError("runtime user differs from the freeze")
+    label_key, label_value = _split_label(task_label)
+    return (
+        "secrets:\n"
+        "  rondo_eval_provider_api_key:\n"
+        f"    environment: {provider_api_key_env}\n"
+        "services:\n"
+        "  main:\n"
+        f'    user: "{runtime_user}"\n'
+        "    labels:\n"
+        f"      {label_key}: {label_value}\n"
+        f"    mem_limit: {memory_bytes}\n"
+        f"    memswap_limit: {memory_swap_bytes}\n"
+        f"    pids_limit: {pids_limit}\n"
+        "    secrets:\n"
+        "      - source: rondo_eval_provider_api_key\n"
+        "        target: rondo_eval_provider_api_key\n"
+        "        mode: \"0400\"\n"
+    )

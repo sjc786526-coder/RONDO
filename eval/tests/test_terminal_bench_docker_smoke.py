@@ -57,7 +57,17 @@ class FakeMaterializer:
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
-        overlay.write_text("services:\n  main: {}\n", encoding="utf-8")
+        overlay.write_text(
+            materialize_module._compose_overlay_text(
+                task_label=kwargs["task_label"],
+                memory_bytes=kwargs["memory_bytes"],
+                memory_swap_bytes=kwargs["memory_swap_bytes"],
+                pids_limit=kwargs["pids_limit"],
+                provider_api_key_env=kwargs["provider_api_key_env"],
+                runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
+            ),
+            encoding="utf-8",
+        )
         return MaterializedTask(
             task_path=task,
             overlay_path=overlay,
@@ -71,6 +81,7 @@ class FakeMaterializer:
             memory_swap_bytes=kwargs["memory_swap_bytes"],
             pids_limit=kwargs["pids_limit"],
             provider_api_key_env=kwargs["provider_api_key_env"],
+            runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
             staged_task_digest=materialize_module._harbor_content_digest(task),
             overlay_sha256=hashlib.sha256(overlay.read_bytes()).hexdigest(),
         )
