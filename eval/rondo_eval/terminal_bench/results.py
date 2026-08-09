@@ -314,6 +314,7 @@ def _safe_summary(
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,
+            "sandbox_network_access": spec.sandbox_network_access,
             "websocket": spec.websocket,
             "code_mode_host": spec.code_mode_host,
             "terminal_bench_version": TERMINAL_BENCH_VERSION,

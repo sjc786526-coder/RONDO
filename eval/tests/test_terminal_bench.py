@@ -289,6 +289,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(prepared.command.task_source_digest, f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}")
         self.assertEqual(prepared.spec.provider.base_url, "https://api.openai.com/v1")
         self.assertIs(prepared.spec.code_mode_host, True)
+        self.assertIs(prepared.spec.sandbox_network_access, True)
         self.assertEqual(
             prepared.command.provider_transport_base_url,
             "http://host.docker.internal:43123/v1",
@@ -383,6 +384,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('approvals_reviewer="auto_review"', commands)
         self.assertIn('approval_policy="on-request"', commands)
         self.assertIn('sandbox_mode="workspace-write"', commands)
+        self.assertIn("sandbox_workspace_write.network_access=true", commands)
         self.assertIn("features.code_mode_host=true", commands)
         self.assertIn('model_provider="rondo_eval_openai"', commands)
         self.assertIn(
@@ -416,6 +418,13 @@ class TerminalBenchTests(unittest.TestCase):
         with self.assertRaises(AdapterError):
             adapters_module._validate_safe_codex_command(
                 raw_codex_command.replace("features.code_mode_host=true", ""),
+                side=Side.CODEX,
+            )
+        with self.assertRaises(AdapterError):
+            adapters_module._validate_safe_codex_command(
+                raw_codex_command.replace(
+                    "sandbox_workspace_write.network_access=true", ""
+                ),
                 side=Side.CODEX,
             )
         with self.assertRaises(AdapterError):

@@ -75,6 +75,7 @@ class ConfigHardeningTests(unittest.TestCase):
         self.assertEqual(spec.provider.config_sha256, config.source_sha256)
         self.assertEqual(spec.provider.config_source, "rondo.local.toml")
         self.assertIs(spec.code_mode_host, True)
+        self.assertIs(spec.sandbox_network_access, True)
 
     def test_unknown_env_name_and_shell_expansion_are_rejected(self) -> None:
         config = load_runtime_config(self.paths)

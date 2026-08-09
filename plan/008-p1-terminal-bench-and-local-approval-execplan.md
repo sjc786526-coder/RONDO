@@ -108,7 +108,8 @@
    重复项/未知使用，不打印内容；只向目标 API 子进程注入 `OPENAI_API_KEY`。`rondo.local.toml` 不得含 Key。
 7. **公平条件**：两侧同任务/digest/顺序/网络/timeout/retry，`supports_websockets=false`、
    `approvals_reviewer=auto_review`、`approval_policy=on-request`、`sandbox_mode=workspace-write`，主模型和
-   Guardian 为 Luna，Guardian effort low；差异必须被机器拒绝。RONDO 用 S1 显式覆盖；冻结 Codex 没有
+   `sandbox_workspace_write.network_access=true`，主模型和 Guardian 为 Luna，Guardian effort low；差异必须
+   被机器拒绝。容器只持预算代理的短生命周期下游 token，真实上游 key 不进入容器。RONDO 用 S1 显式覆盖；冻结 Codex 没有
    该配置面，因此必须由 runner 的共享、去敏 loopback metadata probe 观测实际 Guardian 出站请求中的
    model/effort 并匹配后才算合规，不能用 `RunSpec` 期望值冒充实际生效证据。
 8. **预算可阻断**：20 USD 是总硬上限而非目标消费；费用按官方 API 直接按量计费口径。无法取得可靠单价、
@@ -186,10 +187,13 @@
 
 ### 当前工作
 
-- 本机模型目录证明 Luna 只能使用 code mode；关闭 `code_mode_host` 的首条真实 Docker/no-API 试跑按设计
-  fail-closed。现已将该条件冻结为严格开启，并把同源、静态链接的 `codex-code-mode-host` companion 纳入
-  两侧 manifest、双 SHA 校验和 adapter 上传。155 项轻量门禁通过，正补充显式选择 musl 官方 V8 pair 的
-  eval 构建 gate；该 gate 通过前不继续 Docker 或最后一个真实 API run。
+- 两侧同源静态 musl 的 CLI + `codex-code-mode-host` bundle 已由新的 eval-owned V8 gate 串行构建、双 SHA
+  验证并清理 target/scratch；RONDO/Codex 两次成功构建分别耗时 16m09s/17m47s，swap 峰值均为 0。
+  baseline 导入时产生 Python bytecode 的缺口已补 no-write-bytecode 回归。
+- 首次 Codex 真实 Docker/no-API code-mode smoke 到达第二轮 fake，但 nested `exec_command` 在容器内因
+  bubblewrap 创建 loopback 受限而 fail-closed。冻结 bundle 的本机同协议探针证明显式
+  `sandbox_workspace_write.network_access=true` 后两轮工具结果与 `turn.completed` 均成功；该条件已进入
+  RunSpec 公平指纹、adapter 命令门禁和归档，相关 48 项 pure/fake 定向回归通过，等待 Docker 双侧重跑。
 
 ### 后续计划
 
@@ -227,3 +231,4 @@
 | 013 | 双侧二进制改为静态 musl，并保留 GNU 失败归档 | 目标任务镜像为 glibc 2.36，宿主 GNU 二进制需要 2.38/2.39 | B2/B3 可移植性 | 已采纳 |
 | 014 | 用自定义 `rondo_eval_openai` provider 投影 loopback transport | v0.147 禁止覆盖内置 `openai`；仍需禁 WebSocket、零重试并复用 OpenAI auth | B2/B3 transport | 已采纳 |
 | 015 | 两侧启用并冻结同源 `codex-code-mode-host` companion | Luna 为 `code_mode_only`；关闭 host 会在首次 API 前拒绝执行，单 CLI manifest 不能形成真实工具链 | B2/B3 二进制公平性 | 已采纳 |
+| 016 | 容器内 workspace-write 显式允许网络，不授予 Docker 特权 capability | 默认 bubblewrap 网络命名空间在 Docker Desktop 内不能初始化；文件系统沙箱仍保留，真实 key 仅在宿主预算代理 | B2/B3 sandbox | 已采纳 |

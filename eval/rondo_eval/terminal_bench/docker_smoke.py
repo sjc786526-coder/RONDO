@@ -418,6 +418,7 @@ async def run_docker_no_api_smoke(
         if (
             prepared.spec.websocket
             or prepared.spec.code_mode_host is not True
+            or prepared.spec.sandbox_network_access is not True
             or prepared.spec.provider.main_model != NO_API_SMOKE_MODEL
         ):
             raise DockerNoApiSmokeError("no-API smoke projection differs from the frozen contract")

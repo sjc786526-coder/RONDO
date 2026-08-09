@@ -131,6 +131,7 @@ class RunSpec:
     approvals_reviewer: str = "auto_review"
     approval_policy: str = "on-request"
     sandbox_mode: str = "workspace-write"
+    sandbox_network_access: bool = True
     websocket: bool = False
     code_mode_host: bool = True
     timeout_seconds: int = 1800
@@ -154,6 +155,7 @@ class RunSpec:
             self.approvals_reviewer == "auto_review"
             and self.approval_policy == "on-request"
             and self.sandbox_mode == "workspace-write"
+            and self.sandbox_network_access is True
             and not self.websocket
             and self.code_mode_host is True
         )
@@ -181,6 +183,7 @@ class RunSpec:
             "approvals_reviewer": self.approvals_reviewer,
             "approval_policy": self.approval_policy,
             "sandbox_mode": self.sandbox_mode,
+            "sandbox_network_access": self.sandbox_network_access,
             "websocket": self.websocket,
             "code_mode_host": self.code_mode_host,
             "timeout_seconds": self.timeout_seconds,

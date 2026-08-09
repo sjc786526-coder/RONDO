@@ -206,6 +206,16 @@ class ContractTests(unittest.TestCase):
                 with self.assertRaises(ContractError):
                     spec.validate()
 
+    def test_workspace_write_network_access_is_frozen_on_for_container_runtime(self) -> None:
+        spec = self._spec(Side.CODEX)
+        self.assertIs(spec.fairness_fingerprint()["sandbox_network_access"], True)
+        for invalid in (False, 1, None):
+            with self.subTest(invalid=invalid):
+                spec = self._spec(Side.CODEX)
+                object.__setattr__(spec, "sandbox_network_access", invalid)
+                with self.assertRaises(ContractError):
+                    spec.validate()
+
     def test_contract_rejects_floating_image(self) -> None:
         spec = self._spec(Side.CODEX)
         object.__setattr__(spec, "task_image_digest", "ubuntu:latest")

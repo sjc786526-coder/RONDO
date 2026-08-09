@@ -767,6 +767,8 @@ def _load_source_v8_resolver(
         name.startswith("codex_package.") for name in sys.modules
     ):
         raise BinaryFreezeError("ambient codex_package modules are forbidden")
+    previous_dont_write_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     sys.path.insert(0, str(scripts))
     try:
         importlib.invalidate_caches()
@@ -779,6 +781,7 @@ def _load_source_v8_resolver(
             sys.path.remove(str(scripts))
         except ValueError:
             pass
+        sys.dont_write_bytecode = previous_dont_write_bytecode
     if (
         Path(getattr(targets_module, "__file__", "")).resolve() != targets_file
         or Path(getattr(v8_module, "__file__", "")).resolve() != v8_file

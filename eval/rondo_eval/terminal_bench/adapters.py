@@ -236,6 +236,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 'approvals_reviewer="auto_review"',
                 'approval_policy="on-request"',
                 'sandbox_mode="workspace-write"',
+                "sandbox_workspace_write.network_access=true",
                 "features.code_mode_host=true",
                 f'model_provider={json.dumps(_EVAL_PROVIDER_ID)}',
                 f'model_providers.{_EVAL_PROVIDER_ID}.name="OpenAI"',
@@ -390,6 +391,7 @@ def _validate_safe_codex_command(command: str, *, side: Side) -> None:
         "--yolo",
         "approval_policy=\"never\"",
         "sandbox_mode=\"danger-full-access\"",
+        "sandbox_workspace_write.network_access=false",
         "features.code_mode_host=false",
     )
     if any(value in command for value in forbidden):
@@ -398,6 +400,7 @@ def _validate_safe_codex_command(command: str, *, side: Side) -> None:
         'approvals_reviewer="auto_review"',
         'approval_policy="on-request"',
         'sandbox_mode="workspace-write"',
+        "sandbox_workspace_write.network_access=true",
         "features.code_mode_host=true",
         'model_provider="rondo_eval_openai"',
         'model_providers.rondo_eval_openai.name="OpenAI"',
@@ -412,6 +415,8 @@ def _validate_safe_codex_command(command: str, *, side: Side) -> None:
         raise AdapterError("safe Codex execution options are incomplete")
     if command.count("features.code_mode_host=true") != 1:
         raise AdapterError("code-mode host feature override is ambiguous")
+    if command.count("sandbox_workspace_write.network_access=true") != 1:
+        raise AdapterError("workspace-write network policy override is ambiguous")
     if "model_providers.openai." in command:
         raise AdapterError("built-in OpenAI provider may not be overridden")
     rondo_only = (

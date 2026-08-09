@@ -939,5 +939,49 @@ class StaticBinaryValidationTests(unittest.TestCase):
                     binary_freeze._validate_static_musl_binary(binary)
 
 
+class SourceV8ResolverTests(unittest.TestCase):
+    def test_import_disables_bytecode_writes_temporarily_and_restores_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            scripts = Path(temporary).resolve()
+            package = scripts / "codex_package"
+            package.mkdir()
+            targets_file = package / "targets.py"
+            v8_file = package / "v8.py"
+            targets_file.write_text("# fixture\n", encoding="utf-8")
+            v8_file.write_text("# fixture\n", encoding="utf-8")
+            target_specs: dict[str, object] = {}
+            fetch = lambda *_args, **_kwargs: None
+            version = lambda: "fixture"
+            modules = {
+                "codex_package.targets": SimpleNamespace(
+                    __file__=str(targets_file), TARGET_SPECS=target_specs
+                ),
+                "codex_package.v8": SimpleNamespace(
+                    __file__=str(v8_file),
+                    fetch_codex_v8_artifacts=fetch,
+                    resolved_v8_crate_version=version,
+                ),
+            }
+            observed: list[bool] = []
+
+            def fake_import(name: str) -> object:
+                observed.append(binary_freeze.sys.dont_write_bytecode)
+                return modules[name]
+
+            original = binary_freeze.sys.dont_write_bytecode
+            binary_freeze.sys.dont_write_bytecode = False
+            try:
+                with mock.patch.object(
+                    binary_freeze.importlib, "import_module", side_effect=fake_import
+                ):
+                    loaded = binary_freeze._load_source_v8_resolver(scripts)
+                self.assertEqual(observed, [True, True])
+                self.assertFalse(binary_freeze.sys.dont_write_bytecode)
+                self.assertEqual(loaded, (target_specs, fetch, version))
+                self.assertFalse((package / "__pycache__").exists())
+            finally:
+                binary_freeze.sys.dont_write_bytecode = original
+
+
 if __name__ == "__main__":
     unittest.main()
