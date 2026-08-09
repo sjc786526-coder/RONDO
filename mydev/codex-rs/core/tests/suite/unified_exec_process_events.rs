@@ -15,7 +15,7 @@ use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::mount_sse_sequence_without_request_count_expectation;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex::test_codex;
@@ -26,10 +26,13 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 use std::fs;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use test_case::test_case;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::process::Command;
 use tokio::time::timeout;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::accept_async;
@@ -41,6 +44,8 @@ const RECOVERED_OUTPUT: &str = "recovered missing output\n";
 const RETAINED_OUTPUT: &str = "retained output\n";
 const REPLAY_OUTPUT_EVENT_COUNT: u64 = 1024;
 const REPLAY_RETAINED_OUTPUT_SEQ: u64 = 800;
+const TRUNCATED_REPLAY_SUBPROCESS_ENV: &str = "CODEX_TRUNCATED_REPLAY_TEST_SUBPROCESS";
+const TRUNCATED_REPLAY_TEST_NAME: &str = "suite::unified_exec_process_events::exec_command_consumes_pushed_remote_process_events::truncated_event_replay";
 
 #[derive(Debug, Clone, Copy)]
 enum PushedExecScenario {
@@ -56,14 +61,139 @@ struct PushedExecServerResult {
     process_start: Value,
 }
 
-async fn read_exec_server_json(websocket: &mut WebSocketStream<TcpStream>) -> Value {
+#[derive(Clone)]
+struct PushedExecTraceSnapshot {
+    phase: &'static str,
+    output_events_sent: u64,
+    start_response_sent: bool,
+    exited_sent: bool,
+    closed_sent: bool,
+    process_read_requests: usize,
+    terminate_seen: bool,
+    responses_requests_observed: usize,
+    saw_exec_command_begin: bool,
+}
+
+impl std::fmt::Display for PushedExecTraceSnapshot {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "phase={}, output_events_sent={}, start_response_sent={}, exited_sent={}, closed_sent={}, process_read_requests={}, terminate_seen={}, responses_requests_observed={}, saw_exec_command_begin={}",
+            self.phase,
+            self.output_events_sent,
+            self.start_response_sent,
+            self.exited_sent,
+            self.closed_sent,
+            self.process_read_requests,
+            self.terminate_seen,
+            self.responses_requests_observed,
+            self.saw_exec_command_begin,
+        )
+    }
+}
+
+#[derive(Clone)]
+struct PushedExecTrace {
+    snapshot: Arc<Mutex<PushedExecTraceSnapshot>>,
+}
+
+impl PushedExecTrace {
+    fn new() -> Self {
+        Self {
+            snapshot: Arc::new(Mutex::new(PushedExecTraceSnapshot {
+                phase: "created",
+                output_events_sent: 0,
+                start_response_sent: false,
+                exited_sent: false,
+                closed_sent: false,
+                process_read_requests: 0,
+                terminate_seen: false,
+                responses_requests_observed: 0,
+                saw_exec_command_begin: false,
+            })),
+        }
+    }
+
+    fn update(&self, update: impl FnOnce(&mut PushedExecTraceSnapshot)) {
+        let mut snapshot = self
+            .snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        update(&mut snapshot);
+    }
+
+    fn set_phase(&self, phase: &'static str) {
+        self.update(|snapshot| snapshot.phase = phase);
+    }
+
+    fn note_responses_requests(&self, count: usize) {
+        self.update(|snapshot| {
+            snapshot.responses_requests_observed = snapshot.responses_requests_observed.max(count);
+        });
+    }
+
+    fn note_exec_command_begin(&self) {
+        self.update(|snapshot| snapshot.saw_exec_command_begin = true);
+    }
+
+    fn snapshot(&self) -> PushedExecTraceSnapshot {
+        self.snapshot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+async fn run_truncated_replay_in_proxy_free_subprocess() -> Result<bool> {
+    if std::env::var_os(TRUNCATED_REPLAY_SUBPROCESS_ENV).is_some() {
+        return Ok(false);
+    }
+
+    let mut command = Command::new(std::env::current_exe()?);
+    command
+        .arg("--exact")
+        .arg(TRUNCATED_REPLAY_TEST_NAME)
+        .env(TRUNCATED_REPLAY_SUBPROCESS_ENV, "1");
+    for &key in codex_network_proxy::PROXY_ENV_KEYS {
+        command.env_remove(key);
+    }
+    let output = command.output().await?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "proxy-free subprocess test `{TRUNCATED_REPLAY_TEST_NAME}` failed\nstdout:\n{stdout}\nstderr:\n{stderr}",
+    );
+    assert!(
+        stdout.contains(TRUNCATED_REPLAY_TEST_NAME) && stdout.contains("1 passed"),
+        "proxy-free subprocess must execute exactly the requested test\nstdout:\n{stdout}\nstderr:\n{stderr}",
+    );
+    Ok(true)
+}
+
+async fn read_exec_server_json(
+    websocket: &mut WebSocketStream<TcpStream>,
+    trace: &PushedExecTrace,
+    phase: &'static str,
+) -> Value {
+    trace.set_phase(phase);
     loop {
-        match timeout(Duration::from_secs(5), websocket.next())
+        let frame = timeout(Duration::from_secs(5), websocket.next())
             .await
-            .expect("websocket read should not time out")
-            .expect("websocket should stay open")
-            .expect("websocket frame should read")
-        {
+            .unwrap_or_else(|_| {
+                panic!(
+                    "websocket read should not time out; trace={}",
+                    trace.snapshot()
+                )
+            })
+            .unwrap_or_else(|| panic!("websocket should stay open; trace={}", trace.snapshot()))
+            .unwrap_or_else(|error| {
+                panic!(
+                    "websocket frame should read: {error}; trace={}",
+                    trace.snapshot()
+                )
+            });
+        match frame {
             Message::Text(text) => {
                 return serde_json::from_str(text.as_ref()).expect("valid JSON-RPC message");
             }
@@ -83,11 +213,15 @@ async fn send_exec_server_json(websocket: &mut WebSocketStream<TcpStream>, messa
         .expect("exec-server message should send");
 }
 
-async fn accept_initialized_exec_server(listener: TcpListener) -> WebSocketStream<TcpStream> {
+async fn accept_initialized_exec_server(
+    listener: TcpListener,
+    trace: &PushedExecTrace,
+) -> WebSocketStream<TcpStream> {
+    trace.set_phase("accepting_connection");
     let (stream, _) = listener.accept().await.expect("connection");
     let mut websocket = accept_async(stream).await.expect("websocket handshake");
 
-    let initialize = read_exec_server_json(&mut websocket).await;
+    let initialize = read_exec_server_json(&mut websocket, trace, "waiting_for_initialize").await;
     assert_eq!(initialize["method"], "initialize");
     send_exec_server_json(
         &mut websocket,
@@ -97,14 +231,17 @@ async fn accept_initialized_exec_server(listener: TcpListener) -> WebSocketStrea
         }),
     )
     .await;
-    let initialized = read_exec_server_json(&mut websocket).await;
+    let initialized = read_exec_server_json(&mut websocket, trace, "waiting_for_initialized").await;
     assert_eq!(initialized["method"], "initialized");
 
     websocket
 }
 
-async fn send_environment_info(websocket: &mut WebSocketStream<TcpStream>) {
-    let info = read_exec_server_json(websocket).await;
+async fn send_environment_info(
+    websocket: &mut WebSocketStream<TcpStream>,
+    trace: &PushedExecTrace,
+) {
+    let info = read_exec_server_json(websocket, trace, "waiting_for_environment_info").await;
     assert_eq!(info["method"], "environment/info");
     respond_environment_info(websocket, &info["id"]).await;
 }
@@ -126,12 +263,15 @@ async fn respond_environment_info(websocket: &mut WebSocketStream<TcpStream>, id
 async fn serve_exec_with_pushed_events(
     listener: TcpListener,
     scenario: PushedExecScenario,
+    trace: PushedExecTrace,
 ) -> PushedExecServerResult {
-    let mut websocket = accept_initialized_exec_server(listener).await;
-    send_environment_info(&mut websocket).await;
+    let mut websocket = accept_initialized_exec_server(listener, &trace).await;
+    send_environment_info(&mut websocket, &trace).await;
 
+    trace.set_phase("waiting_for_process_start");
     let process_start = loop {
-        let request = read_exec_server_json(&mut websocket).await;
+        let request =
+            read_exec_server_json(&mut websocket, &trace, "waiting_for_process_start").await;
         match request["method"].as_str() {
             Some("process/start") => break request,
             Some("environment/info") => {
@@ -183,6 +323,7 @@ async fn serve_exec_with_pushed_events(
         }
     };
     if matches!(scenario, PushedExecScenario::ReplayGap) {
+        trace.set_phase("sending_replay_output");
         // The process replay log retains 256 events. This burst is much larger
         // than both that log and the JSON-RPC event queue, so the reader must
         // apply enough notifications to evict seq 1 before it can read the
@@ -203,6 +344,7 @@ async fn serve_exec_with_pushed_events(
                 }),
             )
             .await;
+            trace.update(|snapshot| snapshot.output_events_sent += 1);
         }
         send_exec_server_json(
             &mut websocket,
@@ -217,8 +359,10 @@ async fn serve_exec_with_pushed_events(
             }),
         )
         .await;
+        trace.update(|snapshot| snapshot.exited_sent = true);
     }
 
+    trace.set_phase("sending_process_start_response");
     send_exec_server_json(
         &mut websocket,
         json!({
@@ -227,6 +371,7 @@ async fn serve_exec_with_pushed_events(
         }),
     )
     .await;
+    trace.update(|snapshot| snapshot.start_response_sent = true);
 
     match scenario {
         PushedExecScenario::Complete => {
@@ -257,6 +402,11 @@ async fn serve_exec_with_pushed_events(
             ] {
                 send_exec_server_json(&mut websocket, message).await;
             }
+            trace.update(|snapshot| {
+                snapshot.output_events_sent += 1;
+                snapshot.exited_sent = true;
+                snapshot.closed_sent = true;
+            });
         }
         PushedExecScenario::DirectDenied => {
             send_exec_server_json(
@@ -272,6 +422,7 @@ async fn serve_exec_with_pushed_events(
                 }),
             )
             .await;
+            trace.update(|snapshot| snapshot.exited_sent = true);
         }
         PushedExecScenario::LegacyExit => {
             send_exec_server_json(
@@ -286,16 +437,26 @@ async fn serve_exec_with_pushed_events(
                 }),
             )
             .await;
+            trace.update(|snapshot| snapshot.exited_sent = true);
         }
         PushedExecScenario::ReplayGap => {}
     }
 
     let mut process_read_requests = 0;
     loop {
-        let request = read_exec_server_json(&mut websocket).await;
+        let request = read_exec_server_json(
+            &mut websocket,
+            &trace,
+            "waiting_for_process_read_or_terminate",
+        )
+        .await;
         match request["method"].as_str() {
             Some("process/read") => {
                 process_read_requests += 1;
+                trace.update(|snapshot| {
+                    snapshot.process_read_requests = process_read_requests;
+                    snapshot.phase = "responding_to_process_read";
+                });
                 let result = match scenario {
                     PushedExecScenario::Complete => json!({
                         "chunks": [{
@@ -369,9 +530,14 @@ async fn serve_exec_with_pushed_events(
                         }),
                     )
                     .await;
+                    trace.update(|snapshot| snapshot.closed_sent = true);
                 }
             }
             Some("process/terminate") => {
+                trace.update(|snapshot| {
+                    snapshot.terminate_seen = true;
+                    snapshot.phase = "responding_to_process_terminate";
+                });
                 send_exec_server_json(
                     &mut websocket,
                     json!({
@@ -380,6 +546,7 @@ async fn serve_exec_with_pushed_events(
                     }),
                 )
                 .await;
+                trace.set_phase("finished");
                 return PushedExecServerResult {
                     process_read_requests,
                     process_start,
@@ -402,9 +569,16 @@ async fn exec_command_consumes_pushed_remote_process_events(
     managed_network: bool,
     policy_callbacks: bool,
 ) -> Result<()> {
+    if matches!(scenario, PushedExecScenario::ReplayGap)
+        && run_truncated_replay_in_proxy_free_subprocess().await?
+    {
+        return Ok(());
+    }
+
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let server = start_mock_server().await;
-    let response_mock = mount_sse_sequence(
+    let trace = PushedExecTrace::new();
+    let response_mock = mount_sse_sequence_without_request_count_expectation(
         &server,
         vec![
             sse(vec![
@@ -429,7 +603,11 @@ async fn exec_command_consumes_pushed_remote_process_events(
     )
     .await;
     let exec_server_url = format!("ws://{}", listener.local_addr()?);
-    let exec_server = tokio::spawn(serve_exec_with_pushed_events(listener, scenario));
+    let exec_server = tokio::spawn(serve_exec_with_pushed_events(
+        listener,
+        scenario,
+        trace.clone(),
+    ));
     let mut builder = test_codex().with_exec_server_url(exec_server_url);
     if managed_network {
         let cloud_config_bundle = if policy_callbacks {
@@ -492,7 +670,13 @@ timeout = 900
     });
     let test = timeout(Duration::from_secs(5), builder.build(&server))
         .await
-        .context("thread startup should connect to the fake exec-server")??;
+        .with_context(|| {
+            trace.note_responses_requests(response_mock.requests().len());
+            format!(
+                "thread startup should connect to the fake exec-server; trace={}",
+                trace.snapshot()
+            )
+        })??;
 
     let turn_permission_profile = if managed_network {
         test.session_configured.permission_profile.clone()
@@ -535,17 +719,25 @@ timeout = 900
         loop {
             let event = timeout(Duration::from_secs(5), test.codex.next_event())
                 .await
-                .context("turn should complete")??
+                .with_context(|| {
+                    trace.note_responses_requests(response_mock.requests().len());
+                    format!("turn should complete; trace={}", trace.snapshot())
+                })??
                 .msg;
             match event {
                 EventMsg::ExecCommandBegin(event) if event.call_id == CALL_ID => {
                     saw_exec_command_begin = true;
+                    trace.note_exec_command_begin();
                 }
-                EventMsg::TurnComplete(_) => break,
+                EventMsg::TurnComplete(_) => {
+                    trace.note_responses_requests(response_mock.requests().len());
+                    break;
+                }
                 _ => {}
             }
         }
     }
+    trace.note_responses_requests(response_mock.requests().len());
     let cleanup_timeout = if managed_network {
         Duration::from_secs(15)
     } else {
@@ -553,7 +745,20 @@ timeout = 900
     };
     let exec_server_result = timeout(cleanup_timeout, exec_server)
         .await
-        .context("fake exec-server should observe process cleanup")??;
+        .with_context(|| {
+            trace.note_responses_requests(response_mock.requests().len());
+            format!(
+                "fake exec-server should observe process cleanup; trace={}",
+                trace.snapshot()
+            )
+        })?
+        .with_context(|| {
+            trace.note_responses_requests(response_mock.requests().len());
+            format!(
+                "fake exec-server task should succeed; trace={}",
+                trace.snapshot()
+            )
+        })?;
     if managed_network {
         let params = &exec_server_result.process_start["params"];
         assert_eq!(params["enforceManagedNetwork"], true);
@@ -567,15 +772,23 @@ timeout = 900
         );
         assert_eq!(params["networkProxy"]["environmentId"], "remote");
         assert!(params["networkProxy"]["executionId"].as_str().is_some());
-        timeout(Duration::from_secs(5), async {
-            while response_mock.requests().len() < 2 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
+        timeout(
+            Duration::from_secs(5),
+            response_mock.wait_for_request_count(2),
+        )
         .await
-        .context("model should receive the remote exec output")?;
+        .with_context(|| {
+            trace.note_responses_requests(response_mock.requests().len());
+            format!(
+                "model should receive the remote exec output; trace={}",
+                trace.snapshot()
+            )
+        })?;
+        trace.note_responses_requests(response_mock.requests().len());
+        assert_eq!(response_mock.requests().len(), 2);
         return Ok(());
     }
+    assert_eq!(response_mock.requests().len(), 2);
     let request = response_mock
         .last_request()
         .context("model should receive the exec_command output")?;

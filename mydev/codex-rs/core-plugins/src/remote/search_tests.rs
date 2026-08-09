@@ -12,9 +12,17 @@ use codex_app_server_protocol::PluginDisabledReason;
 use codex_app_server_protocol::PluginInstallPolicy;
 use codex_app_server_protocol::PluginInstallPolicySource;
 use codex_app_server_protocol::PluginInterface;
+use codex_http_client::ClientRouteClass;
+use codex_http_client::HttpClientFactory;
+use codex_http_client::OutboundProxyPolicy;
+use codex_http_client::RouteAwareClientPool;
 use http::StatusCode;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::io;
+use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -377,14 +385,33 @@ async fn search_remote_plugins_redacts_sensitive_parameters_from_transport_error
     let address = listener
         .local_addr()
         .expect("test listener should have a local address");
+    listener
+        .set_nonblocking(true)
+        .expect("test listener should become nonblocking");
     let connection = std::thread::spawn(move || {
-        let (stream, _) = listener
-            .accept()
-            .expect("test listener should accept the plugin search request");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let (stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "test listener should accept the plugin search request"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("test listener should accept: {error}"),
+            }
+        };
         drop(stream);
     });
-    let (config, _) =
-        recording_remote_plugin_service_config(format!("http://{address}/backend-api"));
+    let config = RemotePluginServiceConfig {
+        chatgpt_base_url: format!("http://{address}/backend-api"),
+        http_clients: Arc::new(RouteAwareClientPool::new_without_request_logging(
+            HttpClientFactory::new(OutboundProxyPolicy::Direct),
+            ClientRouteClass::Api,
+        )),
+    };
     let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
 
     let error = search_remote_plugins(

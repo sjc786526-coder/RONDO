@@ -82,6 +82,13 @@ impl std::fmt::Display for OAuthProviderError {
 
 impl std::error::Error for OAuthProviderError {}
 
+/// Controls whether an interactive OAuth login attempts to open the system browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserLaunch {
+    Enabled,
+    Disabled,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn perform_oauth_login(
     server_name: &str,
@@ -95,6 +102,7 @@ pub async fn perform_oauth_login(
     oauth_resource: Option<&str>,
     callback_port: Option<u16>,
     callback_url: Option<&str>,
+    browser_launch: BrowserLaunch,
     http_client: Arc<dyn HttpClient>,
 ) -> Result<()> {
     perform_oauth_login_with_browser_output(
@@ -109,6 +117,7 @@ pub async fn perform_oauth_login(
         oauth_resource,
         callback_port,
         callback_url,
+        browser_launch,
         http_client,
         /*emit_browser_url*/ true,
         StreamableHttpRedirectMode::Legacy,
@@ -144,6 +153,7 @@ pub async fn perform_oauth_login_silent(
         oauth_resource,
         callback_port,
         callback_url,
+        BrowserLaunch::Enabled,
         http_client,
         /*emit_browser_url*/ false,
         redirect_mode,
@@ -164,6 +174,7 @@ async fn perform_oauth_login_with_browser_output(
     oauth_resource: Option<&str>,
     callback_port: Option<u16>,
     callback_url: Option<&str>,
+    browser_launch: BrowserLaunch,
     http_client: Arc<dyn HttpClient>,
     emit_browser_url: bool,
     redirect_mode: StreamableHttpRedirectMode,
@@ -183,7 +194,7 @@ async fn perform_oauth_login_with_browser_output(
         scopes,
         oauth_client_id,
         oauth_resource,
-        /*launch_browser*/ true,
+        browser_launch,
         callback_port,
         callback_url,
         /*timeout_secs*/ None,
@@ -225,7 +236,7 @@ pub async fn perform_oauth_login_return_url(
         scopes,
         oauth_client_id,
         oauth_resource,
-        /*launch_browser*/ false,
+        BrowserLaunch::Disabled,
         callback_port,
         callback_url,
         timeout_secs,
@@ -393,7 +404,7 @@ struct OauthLoginFlow {
     server_url: String,
     store_mode: OAuthCredentialsStoreMode,
     keyring_backend_kind: AuthKeyringBackendKind,
-    launch_browser: bool,
+    browser_launch: BrowserLaunch,
     timeout: Duration,
 }
 
@@ -493,7 +504,7 @@ impl OauthLoginFlow {
         scopes: &[String],
         oauth_client_id: Option<&str>,
         oauth_resource: Option<&str>,
-        launch_browser: bool,
+        browser_launch: BrowserLaunch,
         callback_port: Option<u16>,
         callback_url: Option<&str>,
         timeout_secs: Option<i64>,
@@ -566,7 +577,7 @@ impl OauthLoginFlow {
             server_url: server_url.to_string(),
             store_mode,
             keyring_backend_kind,
-            launch_browser,
+            browser_launch,
             timeout,
         })
     }
@@ -576,23 +587,24 @@ impl OauthLoginFlow {
     }
 
     async fn finish(mut self, emit_browser_url: bool) -> Result<()> {
-        if self.launch_browser {
-            let server_name = &self.server_name;
-            let auth_url = &self.auth_url;
-            if emit_browser_url {
-                println!(
+        let server_name = &self.server_name;
+        let auth_url = &self.auth_url;
+        if emit_browser_url {
+            println!(
+                "Authorize `{server_name}` by opening this URL in your browser:\n{auth_url}\n"
+            );
+        }
+
+        if invoke_browser_launcher(self.browser_launch, auth_url, |url| {
+            webbrowser::open(url).is_ok()
+        }) == Some(false)
+        {
+            if !emit_browser_url {
+                eprintln!(
                     "Authorize `{server_name}` by opening this URL in your browser:\n{auth_url}\n"
                 );
             }
-
-            if webbrowser::open(auth_url).is_err() {
-                if !emit_browser_url {
-                    eprintln!(
-                        "Authorize `{server_name}` by opening this URL in your browser:\n{auth_url}\n"
-                    );
-                }
-                eprintln!("(Browser launch failed; please copy the URL above manually.)");
-            }
+            eprintln!("(Browser launch failed; please copy the URL above manually.)");
         }
 
         let result = async {
@@ -662,6 +674,17 @@ impl OauthLoginFlow {
         });
 
         rx
+    }
+}
+
+fn invoke_browser_launcher(
+    browser_launch: BrowserLaunch,
+    auth_url: &str,
+    launcher: impl FnOnce(&str) -> bool,
+) -> Option<bool> {
+    match browser_launch {
+        BrowserLaunch::Enabled => Some(launcher(auth_url)),
+        BrowserLaunch::Disabled => None,
     }
 }
 
@@ -746,6 +769,7 @@ mod tests {
     use tokio::net::TcpListener;
     use url::Url;
 
+    use super::BrowserLaunch;
     use super::CallbackOutcome;
     use super::OAuthHttpClientAdapter;
     use super::OAuthProviderError;
@@ -754,6 +778,7 @@ mod tests {
     use super::append_query_param;
     use super::callback_id_from_server_url;
     use super::callback_path_from_redirect_uri;
+    use super::invoke_browser_launcher;
     use super::parse_oauth_callback;
     use super::perform_oauth_login;
     use super::perform_oauth_login_silent;
@@ -973,12 +998,47 @@ mod tests {
             /*oauth_resource*/ None,
             /*callback_port*/ None,
             /*callback_url*/ None,
+            BrowserLaunch::Enabled,
             http_client.clone(),
         )
         .await
         .expect_err("OAuth metadata discovery should fail through the supplied client");
 
         assert!(http_client.requests.load(Ordering::SeqCst) > 0);
+    }
+
+    #[test]
+    fn oauth_login_does_not_invoke_browser_launcher_when_disabled() {
+        let launcher_calls = AtomicUsize::new(0);
+
+        let launch_result = invoke_browser_launcher(
+            BrowserLaunch::Disabled,
+            "https://oauth.example/authorize",
+            |_| {
+                launcher_calls.fetch_add(1, Ordering::SeqCst);
+                true
+            },
+        );
+
+        assert_eq!(launch_result, None);
+        assert_eq!(launcher_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn oauth_login_invokes_browser_launcher_once_when_enabled() {
+        let launcher_calls = AtomicUsize::new(0);
+
+        let launch_result = invoke_browser_launcher(
+            BrowserLaunch::Enabled,
+            "https://oauth.example/authorize",
+            |_| {
+                launcher_calls.fetch_add(1, Ordering::SeqCst);
+                true
+            },
+        );
+
+        assert_eq!(launch_result, Some(true));
+        assert_eq!(launcher_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

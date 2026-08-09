@@ -479,10 +479,15 @@ async fn import_plugins_supports_relative_external_agent_plugin_marketplace_path
 }
 
 #[tokio::test]
-async fn import_plugins_infers_external_official_marketplace_when_missing_from_settings() {
+async fn import_plugins_infers_external_official_marketplace_with_fake_adder() {
     let (_root, external_agent_home, codex_home) = fixture_paths();
+    let marketplace_root = external_agent_home.join("official-marketplace");
+    let plugin_root = marketplace_root.join("plugins").join("sample");
     fs::create_dir_all(&external_agent_home).expect("create external agent home");
     fs::create_dir_all(&codex_home).expect("create codex home");
+    fs::create_dir_all(marketplace_root.join(EXTERNAL_AGENT_PLUGIN_MANIFEST_DIR))
+        .expect("create marketplace manifest dir");
+    fs::create_dir_all(plugin_root.join(".codex-plugin")).expect("create plugin manifest dir");
 
     fs::write(
         external_agent_home.join("settings.json"),
@@ -495,9 +500,33 @@ async fn import_plugins_infers_external_official_marketplace_when_missing_from_s
         ),
     )
     .expect("write settings");
+    fs::write(
+        marketplace_root
+            .join(EXTERNAL_AGENT_PLUGIN_MANIFEST_DIR)
+            .join("marketplace.json"),
+        format!(
+            r#"{{
+          "name": "{EXTERNAL_OFFICIAL_MARKETPLACE_NAME}",
+          "plugins": [
+            {{
+              "name": "sample",
+              "source": "./plugins/sample"
+            }}
+          ]
+        }}"#,
+        ),
+    )
+    .expect("write marketplace manifest");
+    fs::write(
+        plugin_root.join(".codex-plugin").join("plugin.json"),
+        r#"{"name":"sample","version":"0.1.0"}"#,
+    )
+    .expect("write plugin manifest");
 
-    let outcome = service_for_paths(external_agent_home, codex_home)
-        .import_plugins(
+    let add_calls = std::cell::Cell::new(0);
+    let installed_root = marketplace_root.clone();
+    let outcome = service_for_paths(external_agent_home, codex_home.clone())
+        .import_plugins_with_marketplace_adder(
             /*cwd*/ None,
             Some(MigrationDetails {
                 plugins: vec![PluginsMigration {
@@ -506,26 +535,48 @@ async fn import_plugins_infers_external_official_marketplace_when_missing_from_s
                 }],
                 ..Default::default()
             }),
+            |_codex_home, _requirements, request| {
+                add_calls.set(add_calls.get() + 1);
+                assert_eq!(
+                    request,
+                    codex_core_plugins::marketplace_add::MarketplaceAddRequest {
+                        source: EXTERNAL_OFFICIAL_MARKETPLACE_SOURCE.to_string(),
+                        ref_name: None,
+                        sparse_paths: Vec::new(),
+                    }
+                );
+                std::future::ready(Ok(
+                    codex_core_plugins::marketplace_add::MarketplaceAddOutcome {
+                        marketplace_name: EXTERNAL_OFFICIAL_MARKETPLACE_NAME.to_string(),
+                        source_display: EXTERNAL_OFFICIAL_MARKETPLACE_SOURCE.to_string(),
+                        installed_root: installed_root
+                            .clone()
+                            .try_into()
+                            .expect("absolute installed marketplace root"),
+                        already_added: false,
+                    },
+                ))
+            },
         )
         .await
         .expect("import plugins");
 
+    assert_eq!(add_calls.get(), 1);
     assert_eq!(
-        outcome.succeeded_marketplaces,
-        vec![EXTERNAL_OFFICIAL_MARKETPLACE_NAME.to_string()]
+        outcome,
+        PluginImportOutcome {
+            succeeded_marketplaces: vec![EXTERNAL_OFFICIAL_MARKETPLACE_NAME.to_string()],
+            succeeded_plugin_ids: vec![format!("sample@{EXTERNAL_OFFICIAL_MARKETPLACE_NAME}")],
+            failed_marketplaces: Vec::new(),
+            failed_plugin_ids: Vec::new(),
+            raw_errors: Vec::new(),
+        }
     );
-    assert_eq!(outcome.succeeded_plugin_ids, Vec::<String>::new());
-    assert_eq!(outcome.failed_marketplaces, Vec::<String>::new());
-    assert_eq!(
-        outcome.failed_plugin_ids,
-        vec![format!("sample@{EXTERNAL_OFFICIAL_MARKETPLACE_NAME}")]
-    );
-    assert_single_plugin_raw_error(
-        &outcome.raw_errors,
-        "plugin_import",
-        &format!("sample@{EXTERNAL_OFFICIAL_MARKETPLACE_NAME}"),
-        Some("plugin_not_found"),
-    );
+    let config = fs::read_to_string(codex_home.join("config.toml")).expect("read config");
+    assert!(config.contains(&format!(
+        r#"[plugins."sample@{EXTERNAL_OFFICIAL_MARKETPLACE_NAME}"]"#
+    )));
+    assert!(config.contains("enabled = true"));
 }
 
 #[tokio::test]

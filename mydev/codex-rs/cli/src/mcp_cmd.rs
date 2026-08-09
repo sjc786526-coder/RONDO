@@ -31,6 +31,7 @@ use codex_mcp::oauth_login_support;
 use codex_mcp::resolve_oauth_scopes;
 use codex_mcp::should_retry_without_scopes;
 use codex_protocol::protocol::McpAuthStatus;
+use codex_rmcp_client::BrowserLaunch;
 use codex_rmcp_client::OAuthDiscoveryTimeout;
 use codex_rmcp_client::StreamableHttpRedirectMode;
 use codex_rmcp_client::delete_oauth_tokens;
@@ -170,6 +171,20 @@ pub struct LoginArgs {
     /// Comma-separated list of OAuth scopes to request.
     #[arg(long, value_delimiter = ',', value_name = "SCOPE,SCOPE")]
     pub scopes: Vec<String>,
+
+    /// Print the authorization URL without opening a browser.
+    #[arg(long)]
+    pub no_open_browser: bool,
+}
+
+impl LoginArgs {
+    fn browser_launch(&self) -> BrowserLaunch {
+        if self.no_open_browser {
+            BrowserLaunch::Disabled
+        } else {
+            BrowserLaunch::Enabled
+        }
+    }
 }
 
 #[derive(Debug, clap::Parser)]
@@ -238,6 +253,7 @@ async fn perform_oauth_login_retry_without_scopes(
     oauth_resource: Option<&str>,
     callback_port: Option<u16>,
     callback_url: Option<&str>,
+    browser_launch: BrowserLaunch,
     http_client: Arc<dyn HttpClient>,
 ) -> Result<()> {
     match perform_oauth_login(
@@ -252,6 +268,7 @@ async fn perform_oauth_login_retry_without_scopes(
         oauth_resource,
         callback_port,
         callback_url,
+        browser_launch,
         Arc::clone(&http_client),
     )
     .await
@@ -271,6 +288,7 @@ async fn perform_oauth_login_retry_without_scopes(
                 oauth_resource,
                 callback_port,
                 callback_url,
+                browser_launch,
                 http_client,
             )
             .await
@@ -430,6 +448,7 @@ async fn run_add(config_overrides: &CliConfigOverrides, add_args: AddArgs) -> Re
                 oauth_resource.as_deref(),
                 config.mcp_oauth_callback_port,
                 config.mcp_oauth_callback_url.as_deref(),
+                BrowserLaunch::Enabled,
                 http_client,
             )
             .await?;
@@ -487,7 +506,12 @@ async fn run_login(config: &Config, login_args: LoginArgs) -> Result<()> {
     let mcp_manager = load_mcp_manager(config).await;
     let mcp_servers = mcp_manager.configured_servers(config).await;
 
-    let LoginArgs { name, scopes } = login_args;
+    let browser_launch = login_args.browser_launch();
+    let LoginArgs {
+        name,
+        scopes,
+        no_open_browser: _,
+    } = login_args;
 
     let Some(server) = mcp_servers.get(&name) else {
         bail!("No MCP server named '{name}' found.");
@@ -535,6 +559,7 @@ async fn run_login(config: &Config, login_args: LoginArgs) -> Result<()> {
         server.oauth_resource.as_deref(),
         config.mcp_oauth_callback_port,
         config.mcp_oauth_callback_url.as_deref(),
+        browser_launch,
         http_client,
     )
     .await?;
@@ -1034,3 +1059,7 @@ fn format_mcp_status(config: &McpServerConfig) -> String {
         "disabled".to_string()
     }
 }
+
+#[cfg(test)]
+#[path = "mcp_cmd_tests.rs"]
+mod tests;

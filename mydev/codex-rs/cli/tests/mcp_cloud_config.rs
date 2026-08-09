@@ -45,7 +45,7 @@ struct CloudManagedMcpFixture {
 }
 
 impl CloudManagedMcpFixture {
-    async fn new() -> Result<Option<Self>> {
+    async fn new() -> Result<Self> {
         let server = MockServer::start().await;
         let chatgpt_base_url = format!("{}/backend-api", server.uri());
         let codex_home = TempDir::new()?;
@@ -61,16 +61,13 @@ impl CloudManagedMcpFixture {
             ConfigLoadOptions::default(),
         )
         .await?;
-        if bootstrap_config.config_toml.cli_auth_credentials_store
-            != Some(AuthCredentialsStoreMode::File)
-            || bootstrap_config.config_toml.chatgpt_base_url.as_deref()
-                != Some(chatgpt_base_url.as_str())
-        {
-            eprintln!(
-                "skipping cloud-managed MCP subprocess: host-managed authentication or backend routing prevents isolated mock credentials"
-            );
-            return Ok(None);
-        }
+        ensure!(
+            bootstrap_config.config_toml.cli_auth_credentials_store
+                == Some(AuthCredentialsStoreMode::File)
+                && bootstrap_config.config_toml.chatgpt_base_url.as_deref()
+                    == Some(chatgpt_base_url.as_str()),
+            "cloud-managed MCP subprocess isolation failed: host-managed authentication or backend routing prevents isolated mock credentials"
+        );
 
         write_chatgpt_auth(
             codex_home.path(),
@@ -109,12 +106,12 @@ impl CloudManagedMcpFixture {
             .mount(&server)
             .await;
 
-        Ok(Some(Self {
+        Ok(Self {
             server,
             codex_home,
             user_config,
             mcp_url,
-        }))
+        })
     }
 
     fn command(&self, args: &[&str]) -> Result<Command> {
@@ -156,9 +153,7 @@ impl CloudManagedMcpFixture {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn list_and_get_resolve_cloud_managed_mcp_without_writing_user_config() -> Result<()> {
-    let Some(fixture) = CloudManagedMcpFixture::new().await? else {
-        return Ok(());
-    };
+    let fixture = CloudManagedMcpFixture::new().await?;
 
     let output = fixture.output(&["mcp", "list", "--json"]).await?;
     let entries: Value = serde_json::from_slice(&output.stdout)?;
@@ -187,9 +182,7 @@ async fn list_and_get_resolve_cloud_managed_mcp_without_writing_user_config() ->
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials() -> Result<()> {
-    let Some(fixture) = CloudManagedMcpFixture::new().await? else {
-        return Ok(());
-    };
+    let fixture = CloudManagedMcpFixture::new().await?;
 
     let challenge = format!(
         "Bearer resource_metadata=\"{}/oauth-resource\"",
@@ -243,7 +236,8 @@ async fn login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials() -> 
         .mount(&fixture.server)
         .await;
 
-    let mut command = fixture.command(&["mcp", "login", MANAGED_SERVER_NAME])?;
+    let mut command =
+        fixture.command(&["mcp", "login", MANAGED_SERVER_NAME, "--no-open-browser"])?;
     command.stdout(Stdio::piped()).stderr(Stdio::inherit());
     let mut child = command.spawn()?;
     let stdout = child
@@ -383,9 +377,7 @@ async fn login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials() -> 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn add_and_remove_do_not_copy_or_delete_cloud_managed_mcp_servers() -> Result<()> {
-    let Some(fixture) = CloudManagedMcpFixture::new().await? else {
-        return Ok(());
-    };
+    let fixture = CloudManagedMcpFixture::new().await?;
 
     fixture
         .output(&["mcp", "get", MANAGED_SERVER_NAME, "--json"])

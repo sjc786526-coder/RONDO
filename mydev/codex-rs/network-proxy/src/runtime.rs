@@ -48,6 +48,14 @@ const MAX_BLOCKED_EVENTS: usize = 200;
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_POLICY_VIOLATION_PREFIX: &str = "CODEX_NETWORK_POLICY_VIOLATION";
 
+type HostLookupFuture =
+    Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + 'static>>;
+type HostLookup = Arc<dyn Fn(String, u16) -> HostLookupFuture + Send + Sync>;
+
+fn system_host_lookup(host: String, port: u16) -> HostLookupFuture {
+    Box::pin(async move { lookup_host((host, port)).await.map(Iterator::collect) })
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkProxyAuditMetadata {
@@ -230,6 +238,7 @@ where
 pub struct NetworkProxyState {
     state: Arc<RwLock<ConfigState>>,
     reloader: Arc<dyn ConfigReloader>,
+    host_lookup: HostLookup,
     blocked_request_observer: Arc<RwLock<Option<Arc<dyn BlockedRequestObserver>>>>,
     credential_broker: CredentialBroker,
     audit_metadata: NetworkProxyAuditMetadata,
@@ -264,6 +273,7 @@ impl Clone for NetworkProxyState {
         Self {
             state: self.state.clone(),
             reloader: self.reloader.clone(),
+            host_lookup: self.host_lookup.clone(),
             blocked_request_observer: self.blocked_request_observer.clone(),
             credential_broker: self.credential_broker.clone(),
             audit_metadata: self.audit_metadata.clone(),
@@ -347,12 +357,37 @@ impl NetworkProxyState {
             credential_broker: CredentialBroker::new(state.config.credential_broker),
             state: Arc::new(RwLock::new(state)),
             reloader,
+            host_lookup: Arc::new(system_host_lookup),
             blocked_request_observer: Arc::new(RwLock::new(blocked_request_observer)),
             audit_metadata,
             execution_attributions: Arc::new(Mutex::new(HashMap::new())),
             environment_id: None,
             execution_id: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_host_lookup(mut self, hostnames: &[&str]) -> Self {
+        let registered = Arc::new(
+            hostnames
+                .iter()
+                .map(|hostname| hostname.to_ascii_lowercase())
+                .collect::<HashSet<_>>(),
+        );
+        self.host_lookup = Arc::new(move |host, port| {
+            let registered = registered.clone();
+            Box::pin(async move {
+                if registered.contains(&host.to_ascii_lowercase()) {
+                    Ok(vec![SocketAddr::from(([8, 8, 8, 8], port))])
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("test host is not registered: {host}"),
+                    ))
+                }
+            })
+        });
+        self
     }
 
     pub(crate) fn register_execution(
@@ -552,11 +587,7 @@ impl NetworkProxyState {
                 host_str,
                 port,
                 DNS_LOOKUP_TIMEOUT,
-                |host, port| async move {
-                    lookup_host((host.as_str(), port))
-                        .await
-                        .map(Iterator::collect)
-                },
+                |host, port| (self.host_lookup)(host, port),
             )
             .await
             {
@@ -1177,7 +1208,8 @@ mod tests {
 
     #[tokio::test]
     async fn host_blocked_requires_allowlist_match() {
-        let state = network_proxy_state_for_policy(network_settings(&["example.com"], &[]));
+        let state = network_proxy_state_for_policy(network_settings(&["example.com"], &[]))
+            .with_test_host_lookup(&["example.com"]);
 
         assert_eq!(
             state
@@ -1196,7 +1228,8 @@ mod tests {
 
     #[tokio::test]
     async fn add_allowed_domain_removes_matching_deny_entry() {
-        let state = network_proxy_state_for_policy(network_settings(&[], &["example.com"]));
+        let state = network_proxy_state_for_policy(network_settings(&[], &["example.com"]))
+            .with_test_host_lookup(&["example.com"]);
 
         state.add_allowed_domain("ExAmPlE.CoM").await.unwrap();
 
@@ -1417,7 +1450,8 @@ mod tests {
 
     #[tokio::test]
     async fn host_blocked_subdomain_wildcards_exclude_apex() {
-        let state = network_proxy_state_for_policy(network_settings(&["*.openai.com"], &[]));
+        let state = network_proxy_state_for_policy(network_settings(&["*.openai.com"], &[]))
+            .with_test_host_lookup(&["api.openai.com", "openai.com"]);
 
         assert_eq!(
             state
@@ -1434,7 +1468,8 @@ mod tests {
 
     #[tokio::test]
     async fn host_blocked_global_wildcard_allowlist_allows_public_hosts_except_denylist() {
-        let state = network_proxy_state_for_policy(network_settings(&["*"], &["evil.example"]));
+        let state = network_proxy_state_for_policy(network_settings(&["*"], &["evil.example"]))
+            .with_test_host_lookup(&["example.com", "api.openai.com"]);
 
         assert_eq!(
             state
@@ -1605,7 +1640,7 @@ mod tests {
     async fn host_blocked_rejects_allowlisted_hostname_when_dns_lookup_fails() {
         let mut network = NetworkProxyConfig::default();
         network.set_allowed_domains(vec!["does-not-resolve.invalid".to_string()]);
-        let state = network_proxy_state_for_policy(network);
+        let state = network_proxy_state_for_policy(network).with_test_host_lookup(&[]);
 
         assert_eq!(
             state

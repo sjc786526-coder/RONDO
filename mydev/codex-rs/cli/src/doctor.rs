@@ -39,6 +39,13 @@ use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_core::config::find_codex_home;
 use codex_features::FEATURES;
+#[cfg(test)]
+use codex_http_client::ClientRouteClass;
+use codex_http_client::HttpClient;
+#[cfg(test)]
+use codex_http_client::HttpClientFactory;
+#[cfg(test)]
+use codex_http_client::OutboundProxyPolicy;
 use codex_install_context::CodexPackageLayout;
 use codex_install_context::InstallContext;
 use codex_install_context::InstallMethod;
@@ -1503,6 +1510,18 @@ async fn mcp_check(config: &Config) -> DoctorCheck {
 }
 
 async fn mcp_check_from_servers(servers: &HashMap<String, McpServerConfig>) -> DoctorCheck {
+    mcp_check_from_servers_with_probe(servers, |url| async move { mcp_http_probe_url(&url).await })
+        .await
+}
+
+async fn mcp_check_from_servers_with_probe<F, Fut>(
+    servers: &HashMap<String, McpServerConfig>,
+    probe: F,
+) -> DoctorCheck
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<String, String>>,
+{
     if servers.is_empty() {
         return DoctorCheck::new(
             "mcp.config",
@@ -1607,7 +1626,7 @@ async fn mcp_check_from_servers(servers: &HashMap<String, McpServerConfig>) -> D
                         }
                     }
                 }
-                if let Err(err) = mcp_http_probe_url(url).await {
+                if let Err(err) = probe(url.clone()).await {
                     let detail = format!("{name}: {url} ({err})");
                     if server.required {
                         unreachable_required_http.push(detail);
@@ -2886,17 +2905,37 @@ async fn mcp_http_probe_url(url: &str) -> Result<String, String> {
 }
 
 async fn mcp_http_probe_url_with_timeout(url: &str, timeout: Duration) -> Result<String, String> {
-    match http_probe_url_with_timeout(url, timeout).await {
+    let client = create_client_without_request_logging();
+    mcp_http_probe_url_with_timeout_and_client(url, timeout, &client).await
+}
+
+async fn mcp_http_probe_url_with_timeout_and_client(
+    url: &str,
+    timeout: Duration,
+    client: &HttpClient,
+) -> Result<String, String> {
+    match http_probe_url_with_timeout_and_client(url, timeout, client).await {
         Ok(status) => Ok(status),
-        Err(head_err) => match http_get_probe_url_with_timeout(url, timeout).await {
-            Ok(status) => Ok(status),
-            Err(get_err) => Err(format!("HEAD {head_err}; GET {get_err}")),
-        },
+        Err(head_err) => {
+            match http_get_probe_url_with_timeout_and_client(url, timeout, client).await {
+                Ok(status) => Ok(status),
+                Err(get_err) => Err(format!("HEAD {head_err}; GET {get_err}")),
+            }
+        }
     }
 }
 
 async fn http_probe_url_with_timeout(url: &str, timeout: Duration) -> Result<String, String> {
-    let response = create_client_without_request_logging()
+    let client = create_client_without_request_logging();
+    http_probe_url_with_timeout_and_client(url, timeout, &client).await
+}
+
+async fn http_probe_url_with_timeout_and_client(
+    url: &str,
+    timeout: Duration,
+    client: &HttpClient,
+) -> Result<String, String> {
+    let response = client
         .head(url)
         .timeout(timeout)
         .send()
@@ -2915,14 +2954,27 @@ async fn http_probe_url_with_timeout(url: &str, timeout: Duration) -> Result<Str
     Ok(format!("HTTP {}", response.status().as_u16()))
 }
 
-async fn http_get_probe_url_with_timeout(url: &str, timeout: Duration) -> Result<String, String> {
-    http_get_probe_status_with_timeout(url, timeout)
+async fn http_get_probe_url_with_timeout_and_client(
+    url: &str,
+    timeout: Duration,
+    client: &HttpClient,
+) -> Result<String, String> {
+    http_get_probe_status_with_timeout_and_client(url, timeout, client)
         .await
         .map(|status| format!("HTTP {status}"))
 }
 
 async fn http_get_probe_status_with_timeout(url: &str, timeout: Duration) -> Result<u16, String> {
-    let response = create_client_without_request_logging()
+    let client = create_client_without_request_logging();
+    http_get_probe_status_with_timeout_and_client(url, timeout, &client).await
+}
+
+async fn http_get_probe_status_with_timeout_and_client(
+    url: &str,
+    timeout: Duration,
+    client: &HttpClient,
+) -> Result<u16, String> {
+    let response = client
         .get(url)
         .timeout(timeout)
         .send()
@@ -3444,7 +3496,11 @@ mod tests {
         .expect("should deserialize optional MCP config");
         let servers = HashMap::from([("optional".to_string(), optional_server)]);
 
-        let check = mcp_check_from_servers(&servers).await;
+        let check = mcp_check_from_servers_with_probe(&servers, |url| async move {
+            assert_eq!(url, "http://127.0.0.1:9/mcp");
+            Err("connect failed (deterministic test probe)".to_string())
+        })
+        .await;
 
         assert_eq!(check.status, CheckStatus::Warning);
         assert_eq!(check.summary, "MCP configuration has optional issues");
@@ -3453,6 +3509,12 @@ mod tests {
                 .details
                 .iter()
                 .any(|detail| detail.contains("optional reachability failed: optional:"))
+        );
+        assert!(
+            check
+                .details
+                .iter()
+                .any(|detail| detail.contains("connect failed (deterministic test probe)"))
         );
     }
 
@@ -3891,11 +3953,13 @@ mod tests {
             head.join().expect("HEAD holder should finish");
         });
 
-        let status = mcp_http_probe_url_with_timeout(
-            &format!("http://{addr}/mcp"),
-            Duration::from_millis(10),
-        )
-        .await;
+        let url = format!("http://{addr}/mcp");
+        let client = HttpClientFactory::new(OutboundProxyPolicy::Direct)
+            .build_client_without_request_logging(&url, ClientRouteClass::Other)
+            .expect("direct MCP probe client should build");
+        let status =
+            mcp_http_probe_url_with_timeout_and_client(&url, Duration::from_millis(10), &client)
+                .await;
         server.join().expect("probe server thread should finish");
 
         assert_eq!(status, Ok("HTTP 405".to_string()));

@@ -571,11 +571,14 @@ mod tests {
 
     #[tokio::test]
     async fn upload_openai_file_reports_blob_transport_diagnostics_without_sas() {
-        let upload_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind upload address");
-        let upload_address = upload_listener.local_addr().expect("upload address");
-        drop(upload_listener);
+        let unavailable_socket =
+            tokio::net::TcpSocket::new_v4().expect("unavailable upload socket");
+        unavailable_socket
+            .bind("127.0.0.1:0".parse().expect("loopback address"))
+            .expect("bind unavailable upload socket");
+        let upload_address = unavailable_socket
+            .local_addr()
+            .expect("unavailable upload address");
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/backend-api/files"))
@@ -589,7 +592,10 @@ mod tests {
         let error = upload_openai_file(
             &base_url_for(&server),
             &chatgpt_auth(),
-            &default_http_client_pool(),
+            &RouteAwareClientPool::new_without_request_logging(
+                HttpClientFactory::new(OutboundProxyPolicy::Direct),
+                ClientRouteClass::Api,
+            ),
             "hello.txt".to_string(),
             /*file_size_bytes*/ 5,
             futures::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"hello"))]),

@@ -873,6 +873,18 @@ mod tests {
         Arc::new(NetworkProxyState::with_reloader(state, reloader))
     }
 
+    fn state_for_settings_with_host_lookup(
+        network: NetworkProxyConfig,
+        hostnames: &[&str],
+    ) -> Arc<NetworkProxyState> {
+        Arc::new(
+            state_for_settings(network)
+                .as_ref()
+                .clone()
+                .with_test_host_lookup(hostnames),
+        )
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn handle_socks5_tcp_emits_block_decision_for_proxy_disabled() {
         let state = state_for_settings(NetworkProxyConfig {
@@ -924,7 +936,7 @@ mod tests {
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["example.com".to_string()]);
-        let state = state_for_settings(settings);
+        let state = state_for_settings_with_host_lookup(settings, &["example.com"]);
         let mut request =
             TcpRequest::new(HostWithPort::try_from("example.com:443").expect("valid authority"));
         request.extensions_mut().insert(state.clone());
@@ -998,7 +1010,7 @@ mod tests {
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["api.openai.com".to_string()]);
-        let state = state_for_settings(settings);
+        let state = state_for_settings_with_host_lookup(settings, &["api.openai.com"]);
         let mut env = HashMap::from([("OPENAI_API_KEY".to_string(), "sk-real".to_string())]);
         state.virtualize_child_credentials(&mut env);
         let mut request = TcpRequest::new(
@@ -1026,7 +1038,7 @@ mod tests {
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["example.com".to_string()]);
-        let state = state_for_settings(settings);
+        let state = state_for_settings_with_host_lookup(settings, &["example.com"]);
         let mut request =
             TcpRequest::new(HostWithPort::try_from("example.com:443").expect("valid authority"));
         request.extensions_mut().insert(state.clone());
@@ -1064,7 +1076,7 @@ mod tests {
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["api.github.com".to_string()]);
-        let state = state_for_settings(settings);
+        let state = state_for_settings_with_host_lookup(settings, &["api.github.com"]);
         let mut request =
             TcpRequest::new(HostWithPort::try_from("api.github.com:443").expect("valid authority"));
         request.extensions_mut().insert(state.clone());
@@ -1099,7 +1111,7 @@ mod tests {
             ..NetworkProxyConfig::default()
         };
         settings.set_allowed_domains(vec!["api.github.com".to_string()]);
-        let state = state_for_settings(settings);
+        let state = state_for_settings_with_host_lookup(settings, &["api.github.com"]);
         let mut request =
             TcpRequest::new(HostWithPort::try_from("api.github.com:80").expect("valid authority"));
         request.extensions_mut().insert(state.clone());

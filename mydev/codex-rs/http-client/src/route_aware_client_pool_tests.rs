@@ -137,20 +137,35 @@ async fn legacy_custom_ca_fallback_is_limited_to_reqwest_default() {
 
             assert!(matches!(error, RouteAwareClientPoolError::Build(_)));
         }
+        OutboundProxyPolicy::Direct => {
+            panic!("test matrix must not exercise the test-only direct proxy policy")
+        }
     }
 }
 
 #[tokio::test]
 async fn without_url_redacts_transport_error_urls() {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener should bind");
-    let address = listener.local_addr().expect("listener should have address");
-    drop(listener);
+    let unavailable_socket =
+        tokio::net::TcpSocket::new_v4().expect("unavailable socket should be created");
+    unavailable_socket
+        .bind(
+            "127.0.0.1:0"
+                .parse()
+                .expect("loopback address should parse"),
+        )
+        .expect("unavailable socket should bind");
+    let address = unavailable_socket
+        .local_addr()
+        .expect("unavailable socket should have an address");
     let secret = "signed-secret";
-    let error = reqwest::Client::new()
+    let error = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("direct client should build")
         .get(format!("http://{address}/upload?sig={secret}"))
         .send()
         .await
-        .expect_err("closed listener should reject request");
+        .expect_err("bound non-listening socket should reject request");
     let error = RouteAwareRequestError::from(error).without_url();
 
     assert!(!error.to_string().contains(secret));

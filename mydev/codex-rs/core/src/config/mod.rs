@@ -1656,11 +1656,7 @@ impl Config {
 
     /// Creates the HTTP client factory resolved from the effective feature configuration.
     pub fn http_client_factory(&self) -> HttpClientFactory {
-        let outbound_proxy_policy = if self.respect_system_proxy {
-            OutboundProxyPolicy::RespectSystemProxy
-        } else {
-            OutboundProxyPolicy::ReqwestDefault
-        };
+        let outbound_proxy_policy = outbound_proxy_policy_from_config(self.respect_system_proxy);
         let factory = HttpClientFactory::new(outbound_proxy_policy);
         if self.psp {
             factory.with_chatgpt_cookies([HeaderValue::from_static("oai-chat-psp=true")])
@@ -3060,13 +3056,17 @@ pub fn resolve_bootstrap_http_client_factory(
     feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
 ) -> std::io::Result<HttpClientFactory> {
     resolve_bootstrap_respect_system_proxy(cfg, feature_requirements).map(|respect_system_proxy| {
-        let outbound_proxy_policy = if respect_system_proxy {
-            OutboundProxyPolicy::RespectSystemProxy
-        } else {
-            OutboundProxyPolicy::ReqwestDefault
-        };
+        let outbound_proxy_policy = outbound_proxy_policy_from_config(respect_system_proxy);
         HttpClientFactory::new(outbound_proxy_policy)
     })
+}
+
+fn outbound_proxy_policy_from_config(respect_system_proxy: bool) -> OutboundProxyPolicy {
+    if respect_system_proxy {
+        OutboundProxyPolicy::RespectSystemProxy
+    } else {
+        OutboundProxyPolicy::ReqwestDefault
+    }
 }
 
 pub(crate) fn resolve_web_search_mode_for_turn(

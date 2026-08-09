@@ -3060,11 +3060,16 @@ async fn codex_home_is_not_loaded_as_project_layer_from_home_dir() -> std::io::R
     let tmp = tempdir()?;
     let home_dir = tmp.path().join("home");
     let codex_home = home_dir.join(".codex");
+    let project_root_marker = ".rondo-home-root";
     tokio::fs::create_dir_all(&codex_home).await?;
+    tokio::fs::write(home_dir.join(project_root_marker), "fixture project root").await?;
     tokio::fs::write(
         codex_home.join(CONFIG_TOML_FILE),
-        r#"foo = "user"
-"#,
+        format!(
+            r#"foo = "user"
+project_root_markers = ["{project_root_marker}"]
+"#
+        ),
     )
     .await?;
 
@@ -3170,7 +3175,13 @@ async fn project_layers_disabled_when_untrusted_or_unknown() -> std::io::Result<
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
+    let project_root_marker = ".rondo-project-root";
     tokio::fs::create_dir_all(nested.join(".codex")).await?;
+    tokio::fs::write(
+        project_root.join(project_root_marker),
+        "fixture project root",
+    )
+    .await?;
     tokio::fs::write(
         nested.join(".codex").join(CONFIG_TOML_FILE),
         r#"foo = "child"
@@ -3187,7 +3198,7 @@ profile = "ignored"
         &codex_home_untrusted,
         &project_root,
         TrustLevel::Untrusted,
-        /*project_root_markers*/ None,
+        Some(vec![project_root_marker.to_string()]),
     )
     .await?;
     let untrusted_config_path = codex_home_untrusted.join(CONFIG_TOML_FILE);
@@ -3238,8 +3249,11 @@ profile = "ignored"
     tokio::fs::create_dir_all(&codex_home_unknown).await?;
     tokio::fs::write(
         codex_home_unknown.join(CONFIG_TOML_FILE),
-        r#"foo = "user"
-"#,
+        format!(
+            r#"foo = "user"
+project_root_markers = ["{project_root_marker}"]
+"#
+        ),
     )
     .await?;
 

@@ -20,7 +20,13 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
+use std::io::Read;
+use std::io::Write;
+use std::net::TcpListener;
 use std::path::PathBuf;
+use std::process::Command;
+use std::time::Duration;
+use std::time::Instant;
 use tempfile::NamedTempFile;
 
 // At least on GitHub CI, the arm64 tests appear to need longer timeouts.
@@ -492,8 +498,93 @@ async fn sandbox_blocks_curl() {
 }
 
 #[tokio::test]
-async fn sandbox_blocks_wget() {
-    assert_network_blocked(&["wget", "-qO-", "http://openai.com"]).await;
+async fn sandbox_blocks_wget_tcp_connect() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind wget fixture listener");
+    let listener_addr = listener.local_addr().expect("read wget fixture address");
+    let control_listener = listener.try_clone().expect("clone wget fixture listener");
+    control_listener
+        .set_nonblocking(true)
+        .expect("make wget control listener nonblocking");
+    let control_server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let (mut stream, _) = loop {
+            match control_listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "wget control request did not reach the fixture listener"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("accept wget control request: {error}"),
+            }
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set wget fixture read timeout");
+        let mut request = [0_u8; 1024];
+        let read = stream.read(&mut request).expect("read wget request");
+        assert!(
+            request[..read].starts_with(b"GET /probe HTTP/1."),
+            "unexpected wget request: {}",
+            String::from_utf8_lossy(&request[..read])
+        );
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 13\r\nConnection: close\r\n\r\nsandbox-probe",
+            )
+            .expect("write wget fixture response");
+    });
+    let url = format!("http://{listener_addr}/probe");
+    let wget_command = [
+        "wget",
+        "--no-proxy",
+        "--tries=1",
+        "--timeout=2",
+        "-O-",
+        url.as_str(),
+    ];
+
+    let control = Command::new(wget_command[0])
+        .args(&wget_command[1..])
+        .output()
+        .expect("wget must be available for the sandbox contract");
+    control_server
+        .join()
+        .expect("wget control fixture should complete");
+    assert_eq!(control.status.code(), Some(0));
+    assert_eq!(control.stdout, b"sandbox-probe");
+
+    let result = run_cmd_result_with_permission_profile(
+        &wget_command,
+        PermissionProfile::read_only(),
+        SHORT_TIMEOUT_MS,
+        /*use_legacy_landlock*/ false,
+    )
+    .await;
+    let denied_output = match result {
+        Err(err) => match err.details() {
+            CodexErrorDetails::Sandbox(SandboxErr::Denied { output, .. }) => {
+                output.as_ref().clone()
+            }
+            details => panic!("expected sandbox denial for wget connect, got: {details:?}"),
+        },
+        Ok(output) => panic!(
+            "expected sandbox denial for wget connect, got exit {}: stdout={}; stderr={}",
+            output.exit_code, output.stdout.text, output.stderr.text
+        ),
+    };
+    assert_ne!(denied_output.exit_code, 0);
+
+    listener
+        .set_nonblocking(true)
+        .expect("make wget fixture listener nonblocking");
+    match listener.accept() {
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(_) => panic!("sandboxed wget reached the fixture listener"),
+        Err(err) => panic!("failed to inspect wget fixture listener: {err}"),
+    }
 }
 
 #[tokio::test]

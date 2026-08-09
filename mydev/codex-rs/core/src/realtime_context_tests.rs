@@ -4,12 +4,23 @@ use super::RECENT_WORK_SECTION_TOKEN_BUDGET;
 use super::STARTUP_CONTEXT_HEADER;
 use super::WORKSPACE_SECTION_TOKEN_BUDGET;
 use super::build_current_thread_section;
-use super::build_recent_work_section;
+use super::build_recent_work_section_with_fs;
 use super::build_workspace_section_with_user_root;
+use super::build_workspace_section_with_user_root_with_fs;
 use super::format_section;
 use super::format_startup_context_blob;
 use chrono::TimeZone;
 use chrono::Utc;
+use codex_exec_server::CopyOptions;
+use codex_exec_server::CreateDirectoryOptions;
+use codex_exec_server::ExecutorFileSystem;
+use codex_exec_server::ExecutorFileSystemFuture;
+use codex_exec_server::FileMetadata;
+use codex_exec_server::FileSystemReadStream;
+use codex_exec_server::FileSystemSandboxContext;
+use codex_exec_server::LOCAL_FS;
+use codex_exec_server::ReadDirectoryEntry;
+use codex_exec_server::RemoveOptions;
 use codex_git_utils::GitSha;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
@@ -19,13 +30,107 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::GitInfo;
 use codex_protocol::protocol::SessionSource;
 use codex_thread_store::StoredThread;
+use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
 use core_test_support::PathExt;
 use pretty_assertions::assert_eq;
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
+
+struct FixtureBoundedFileSystem {
+    root: PathUri,
+}
+
+impl ExecutorFileSystem for FixtureBoundedFileSystem {
+    fn canonicalize<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, PathUri> {
+        LOCAL_FS.canonicalize(path, sandbox)
+    }
+
+    fn read_file<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, Vec<u8>> {
+        LOCAL_FS.read_file(path, sandbox)
+    }
+
+    fn read_file_stream<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, FileSystemReadStream> {
+        LOCAL_FS.read_file_stream(path, sandbox)
+    }
+
+    fn write_file<'a>(
+        &'a self,
+        path: &'a PathUri,
+        contents: Vec<u8>,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.write_file(path, contents, sandbox)
+    }
+
+    fn create_directory<'a>(
+        &'a self,
+        path: &'a PathUri,
+        options: CreateDirectoryOptions,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.create_directory(path, options, sandbox)
+    }
+
+    fn get_metadata<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, FileMetadata> {
+        if path.starts_with(&self.root) {
+            LOCAL_FS.get_metadata(path, sandbox)
+        } else {
+            Box::pin(async {
+                Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "path is outside the fixture root",
+                ))
+            })
+        }
+    }
+
+    fn read_directory<'a>(
+        &'a self,
+        path: &'a PathUri,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, Vec<ReadDirectoryEntry>> {
+        LOCAL_FS.read_directory(path, sandbox)
+    }
+
+    fn remove<'a>(
+        &'a self,
+        path: &'a PathUri,
+        options: RemoveOptions,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.remove(path, options, sandbox)
+    }
+
+    fn copy<'a>(
+        &'a self,
+        source_path: &'a PathUri,
+        destination_path: &'a PathUri,
+        options: CopyOptions,
+        sandbox: Option<&'a FileSystemSandboxContext>,
+    ) -> ExecutorFileSystemFuture<'a, ()> {
+        LOCAL_FS.copy(source_path, destination_path, options, sandbox)
+    }
+}
 
 fn stored_thread(cwd: &str, title: &str, first_user_message: &str) -> StoredThread {
     StoredThread {
@@ -246,8 +351,16 @@ fn fixed_section_budgets_apply_per_section_without_total_blob_truncation() {
 #[tokio::test]
 async fn workspace_section_requires_meaningful_structure() {
     let cwd = TempDir::new().expect("tempdir");
+    let fs = FixtureBoundedFileSystem {
+        root: PathUri::from_abs_path(&cwd.path().abs()),
+    };
     assert_eq!(
-        build_workspace_section_with_user_root(&cwd.path().abs(), /*user_root*/ None).await,
+        build_workspace_section_with_user_root_with_fs(
+            &cwd.path().abs(),
+            /*user_root*/ None,
+            &fs,
+        )
+        .await,
         None
     );
 }
@@ -292,6 +405,9 @@ async fn workspace_section_includes_user_root_tree_when_distinct() {
 #[tokio::test]
 async fn recent_work_section_groups_threads_by_cwd() {
     let root = TempDir::new().expect("tempdir");
+    let fs = FixtureBoundedFileSystem {
+        root: PathUri::from_abs_path(&root.path().abs()),
+    };
     let repo = root.path().join("repo");
     let workspace_a = repo.join("workspace-a");
     let workspace_b = repo.join("workspace-b");
@@ -325,7 +441,7 @@ async fn recent_work_section_groups_threads_by_cwd() {
     let current_cwd = workspace_a;
     let repo = repo.abs();
 
-    let section = build_recent_work_section(&current_cwd.abs(), &recent_threads)
+    let section = build_recent_work_section_with_fs(&current_cwd.abs(), &recent_threads, &fs)
         .await
         .expect("recent work section");
     assert!(section.contains(&format!("### Git repo: {}", repo.display())));

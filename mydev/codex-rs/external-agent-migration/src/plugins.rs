@@ -1,16 +1,21 @@
 use codex_analytics::PluginInstallSource;
+use codex_config::ConfigRequirements;
 use codex_core::config::ConfigBuilder;
 use codex_core_plugins::PluginInstallError;
 use codex_core_plugins::PluginInstallRequest;
 use codex_core_plugins::PluginsManager;
 use codex_core_plugins::marketplace::MarketplaceError;
 use codex_core_plugins::marketplace::find_marketplace_manifest_path;
+use codex_core_plugins::marketplace_add::MarketplaceAddError;
+use codex_core_plugins::marketplace_add::MarketplaceAddOutcome;
 use codex_core_plugins::marketplace_add::MarketplaceAddRequest;
 use codex_core_plugins::marketplace_add::add_marketplace;
 use codex_core_plugins::marketplace_add::is_local_marketplace_source;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::migration_source::MarketplaceImportSource;
 use crate::model::MigrationDetails;
@@ -85,6 +90,20 @@ impl ExternalAgentConfigService {
         cwd: Option<&Path>,
         details: Option<MigrationDetails>,
     ) -> io::Result<PluginImportOutcome> {
+        self.import_plugins_with_marketplace_adder(cwd, details, add_marketplace)
+            .await
+    }
+
+    pub(super) async fn import_plugins_with_marketplace_adder<F, Fut>(
+        &self,
+        cwd: Option<&Path>,
+        details: Option<MigrationDetails>,
+        mut add_marketplace: F,
+    ) -> io::Result<PluginImportOutcome>
+    where
+        F: FnMut(PathBuf, ConfigRequirements, MarketplaceAddRequest) -> Fut,
+        Fut: Future<Output = Result<MarketplaceAddOutcome, MarketplaceAddError>>,
+    {
         let Some(MigrationDetails { plugins, .. }) = details else {
             return Err(invalid_data_error(
                 "plugins migration item is missing details".to_string(),
