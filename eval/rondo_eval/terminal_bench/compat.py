@@ -80,7 +80,18 @@ def exec_result(result: Any) -> tuple[int, str, str]:
 
     code = getattr(result, "return_code", getattr(result, "exit_code", None))
     stdout = getattr(result, "stdout", None)
-    stderr = getattr(result, "stderr", "")
-    if not isinstance(code, int) or not isinstance(stdout, str) or not isinstance(stderr, str):
+    stderr = getattr(result, "stderr", None)
+    # Harbor 0.20's real ExecResult models both streams as optional and uses
+    # None for a successful command with no output.
+    if stdout is None:
+        stdout = ""
+    if stderr is None:
+        stderr = ""
+    if (
+        isinstance(code, bool)
+        or not isinstance(code, int)
+        or not isinstance(stdout, str)
+        or not isinstance(stderr, str)
+    ):
         raise TypeError("environment exec returned an unsupported result")
     return code, stdout, stderr

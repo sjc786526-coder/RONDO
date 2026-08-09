@@ -45,6 +45,7 @@ from rondo_eval.terminal_bench import (  # noqa: E402
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
 from rondo_eval.terminal_bench import live as live_module  # noqa: E402
 from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
+from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
 from rondo_eval.terminal_bench.freeze import FreezeError, validate_runtime_image_digest  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerExecutionResult,
@@ -247,6 +248,11 @@ class TerminalBenchTests(unittest.TestCase):
             validate_runtime_image_digest(FIX_GIT_IMAGE_TAG)
         with self.assertRaises(FreezeError):
             validate_runtime_image_digest(f"sha256:{'c' * 64}")
+
+    def test_real_harbor_exec_result_allows_empty_optional_streams(self) -> None:
+        from harbor.environments.base import ExecResult
+
+        self.assertEqual(exec_result(ExecResult(return_code=0)), (0, "", ""))
 
     def test_prepare_materializes_local_task_and_projects_safe_harbor_cli(self) -> None:
         materializer = FakeMaterializer(self.root / "fake")
