@@ -23,7 +23,9 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
 ### 完成/验收标准
 
 - 39 个严格失败逐项对应到本计划的 21+5+1+1+6+1+1+2+1 分类，无重计或漏计。
-- 测试不依赖宿主 DNS、代理、home、`/tmp` 祖先、WSL PATH、真实 GitHub 或真实浏览器。
+- 本计划新建/修改并作为各族合同证据的测试不依赖宿主 DNS、代理、home、`/tmp` 祖先、WSL PATH、真实
+  GitHub 或真实浏览器。第9.2节点名的既有Landlock legacy测试本阶段不改、不作为D族hermetic证据，但仍参加
+  最终workspace回归，失败仍会使全量失败。
 - resolver、HTTP direct、filesystem、probe、browser 等 seam 的生产默认行为与修改前一致。
 - DNS 错误/超时/私网结果继续 fail-closed；不把 fake-IP、TEST-NET 或私网改判公网。
 - Landlock 测试必须证明未沙箱控制轮可达、沙箱轮未到 listener，并验证具体拒绝语义；任意非零、超时、
@@ -34,7 +36,10 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
 - 每个修改批次只跑相关包门禁；全部批次完成后只跑一次完整 workspace 全量，所有 Cargo 重型任务均走
   `just`/`mydev/scripts/with-build-lock.sh`，一次一组。
 - 所有正式定向和全量 Nextest 门禁统一使用 `--retries 0 --flaky-result fail`；允许另跑带重试的诊断，
-  但其结果不能计入验收。JUnit 必须核对实际执行、failure/flaky/skip，而不只检查文件完整性和哈希。
+  但其结果不能计入验收。`--retries 0` 机械阻止重试吞红，`--flaky-result fail` 是纵深约束。watchdog的
+  `junit_status=retained` 只证明文件收尾完整且哈希可读；执行者必须另行解析JUnit，核对实际执行、failure与skip。
+- JUnit无法识别测试体内 `return Ok(())`/提前返回形成的“passed假绿”；I/K族必须删除对应静默返回，并由正对照、
+  fake调用计数和代码审查直接证明，不得把这类语义交给JUnit推断。
 - bwrap、wget、Windows、V8 资产或 OAuth 隔离前提不可用时，必须记为“未运行/阶段未完成”；测试内
   `return Ok(())`、打印 skipping、缺 binary 或基础设施启动失败不得在 JUnit 中伪装成通过。
 - 保持 Clash、代理变量和 `/tmp/.git|.codex|.agents` 原状完成验收；不得用宿主清理换绿色。
@@ -70,11 +75,14 @@ SSRF fail-closed、safe-command 分类和沙箱强度保持不变。
    不得把未复现写成已修复。
 3. 正式验证保持 Clash/TUN 与代理变量存在。允许测试自己的 Direct client、fixture resolver、`wget --no-proxy`
    来表达确定性合同；不允许在外层 `unset` 环境后把结果当正式证据。
-4. 测试的真实网络路径一律替换为本地服务、fake collaborator 或纯函数合同；live smoke 必须另列且默认不跑。
+4. 本计划新建/修改并计入对应族验收的测试，其真实网络路径一律替换为本地服务、fake collaborator 或纯函数
+   合同；live smoke 必须另列且默认不跑。第9.2节点名的未修改legacy测试是范围例外，不得作为新合同证据。
 5. 所有新 seam 必须有“生产默认仍走旧实现”的回归。测试专用入口优先 `#[cfg(test)] pub(crate)` 或私有 helper。
 6. 任何一项最终为产品缺陷时，保留红色强断言并另立产品任务；不能在测试侧掩盖。
-7. 原始失败输出、定向结果、JUnit 路径/SHA 和 watcher `summary.env` 写入该批 agent log；必须解析并记录
-   failure/flaky/skip/实际执行次数，不能只凭 `junit_status=retained` 判绿。skip/未运行单列且阻止阶段完成。
+7. 原始失败输出、定向结果、JUnit 路径/SHA 和 watcher `summary.env` 写入该批 agent log。当前watchdog没有
+   JUnit语义解析器；执行者须从 `summary.env` 的 `junit_path` 用只读XML解析单独汇总testcase实际执行数、failure
+   与skip，并记录正式命令已固定 `--retries 0 --flaky-result fail`，不能只凭 `junit_status=retained` 判绿。
+   skip/未运行单列且阻止阶段完成；测试体提前成功返回只能由I/K的代码修复、正对照和调用计数排除。
 8. 下文所有 `just`/Cargo 门禁默认从 worktree 的 `mydev/codex-rs/` 执行；Python 仓库门禁从同一目录按
    明示相对路径运行。不得依赖执行者碰巧位于 `mydev/` 或主工作区。
 
@@ -251,6 +259,10 @@ wget stderr。只有日志能决定历史10秒的内部机制；最终方案不�
 
 最终测试改名为 `sandbox_blocks_wget_tcp_connect`：
 
+该测试不得复用或修改 `landlock.rs::assert_network_blocked`，而应使用仅服务于本用例的窄helper/内联fixture。现有
+shared helper把“任意非零”和“缺binary”都当作网络阻断，并由多项legacy测试共用；在其中收紧会把本次单项修复
+扩张为未取证的批量合同变更。
+
 1. 起受控loopback HTTP listener。
 2. 同一个wget binary先跑未沙箱控制轮，使用 `--no-proxy --tries=1` 和局部短连接/读取超时；必须成功且
    listener收到恰好一个请求。控制轮失败不是skip，而是fixture失败。
@@ -260,11 +272,16 @@ wget stderr。只有日志能决定历史10秒的内部机制；最终方案不�
 
 此方案理由是 hermetic 且断言更强，不写成“修复了已证实的代理污染”。
 
+本阶段明确不修改 `assert_network_blocked` 及其另外6个现有调用者：`sandbox_blocks_curl`、
+`sandbox_blocks_ping`、`sandbox_blocks_nc`、`sandbox_blocks_ssh`、`sandbox_blocks_getent`、
+`sandbox_blocks_dev_tcp_redirection`。它们的真实域名/地址与宽松非零合同是具名legacy例外，不计入D族完成证据；
+最终workspace仍会运行它们，任何失败仍按全量失败处理，不能skip或从全量过滤掉。后续若要hermetic化这些合同，
+应作为独立范围取证后处理。
+
 门禁：
 
 ```text
 just test -p codex-linux-sandbox --retries 0 --flaky-result fail -E 'test(/sandbox_blocks_wget_tcp_connect/)'
-just test -p codex-linux-sandbox --retries 0 --flaky-result fail
 ```
 
 ## 10. E族：fixture边界内的项目根发现（6项）
@@ -404,15 +421,20 @@ just test -p codex-exec-server --stress-count 200 --retries 0 --flaky-result fai
 
 当前external层没有local cloner seam；core-plugins中的cloner helper是私有同步测试入口。最低成本收口：
 
-- 保留 `source_cla::marketplace_import_sources` 的纯测试，钉住缺省官方源
-  `anthropics/claude-plugins-official`；既有显式本地marketplace import测试也继续覆盖添加、安装、配置写入管线。
-  两者是补充合同，不能替代组合链路。
 - 在external内部加私有 `import_plugins_with_marketplace_adder` closure（或等价的私有窄协作者），生产wrapper仍调用真实
   marketplace add，不扩成公共cloner框架。
-- hermetic组合测试从“settings中只有已启用的官方插件、没有显式source”开始，调用真实import编排到fake adder；fake必须
-  记录并断言source精确为 `anthropics/claude-plugins-official`、ref为None、sparse paths为空，然后返回本地installed root。
-  继续断言适用的import outcome、错误传播与配置结果，证明“源推导→添加→安装/配置”没有断链。
-- 测试期间不得发生GitHub DNS/connect或git子进程；用fake调用记录与进程fixture机械证明，而不是凭运行速度推断。
+- 必须原位改造 `marketplaces.rs` 中现有
+  `import_plugins_infers_external_official_marketplace_when_missing_from_settings`，而不是在它仍会真实clone的情况下
+  另加一条测试。改造后将其重命名为
+  `import_plugins_infers_external_official_marketplace_with_fake_adder`：仍从“settings中只有已启用的官方插件、没有
+  显式source”开始，调用真实import编排到fake adder；fake必须记录并断言source精确为
+  `anthropics/claude-plugins-official`、ref为None、sparse paths为空，然后返回包含本地marketplace/plugin manifest的
+  installed root。继续断言import outcome、错误传播与配置结果，证明“源推导→添加→安装/配置”没有断链。
+- 增加纯测试 `marketplace_import_sources_infers_external_official_marketplace`，与既有
+  `import_plugins_supports_relative_external_agent_plugin_marketplace_path` 一起作为补充合同；二者不能替代上述改造后的
+  组合测试。
+- 测试期间不得发生GitHub DNS/connect或git子进程；组合测试直接调用注入fake的私有编排helper，断言fake恰调用一次，
+  且不触达生产 `add_marketplace` wrapper，以调用路径机械证明而不是凭运行速度推断。
 
 生产git缺timeout/cancel/后代清理是真实产品缺陷，另立任务并用本地挂起+派生后代wrapper验证；测试hermetic修复
 不能宣称该产品缺陷闭环。
@@ -424,8 +446,15 @@ just test -p codex-exec-server --stress-count 200 --retries 0 --flaky-result fai
 给 `mcp login` 增 `--no-open-browser`，底层flow接收显式 `launch_browser`；false时仍打印authorization URL、等待
 callback、换取并持久化token；初次授权和“去掉scopes后重试”两条路径都必须透传该值。
 
+签名变更后逐一处理所有生产调用点：`cli/src/mcp_cmd.rs` 的首次与去scopes重试都传
+`!no_open_browser`；`core/src/mcp_skill_dependencies.rs` 的首次与去scopes重试、以及既有silent wrapper均显式传true，
+保持turn期依赖登录和其他非CLI入口仍会按原行为尝试打开浏览器。不得因新增CLI flag顺手把core调用改成false。
+
 把 `webbrowser::open` 隔在私有可注入launcher/callback后，生产默认保持现行为。单元测试用计数fake机械证明false为
-0次调用、true/default为1次；CLI解析/透传测试证明 `--no-open-browser` 最终得到false。
+0次调用、true/default为1次；测试分别命名为
+`oauth_login_does_not_invoke_browser_launcher_when_disabled` 与
+`oauth_login_invokes_browser_launcher_once_when_enabled`。CLI解析/透传测试命名为
+`mcp_login_no_open_browser_propagates_launch_false`，证明 `--no-open-browser` 最终得到false。
 `login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials` 使用该flag，现有authorization URL、callback、token
 持久化与logout断言全部保留。只设 `BROWSER` 不是跨平台合同，Windows实现可能不尊重它。
 
@@ -433,9 +462,9 @@ callback、换取并持久化token；初次授权和“去掉scopes后重试”�
 显式preflight或 `Result<Self>`，不可用时让该阶段失败/记未运行。缺依赖、端口或隔离能力都不是功能通过证据。
 
 ```text
-just test -p codex-external-agent-migration --retries 0 --flaky-result fail -E 'test(/marketplace_import_sources/) or test(/import_plugins/)'
-just test -p codex-rmcp-client --retries 0 --flaky-result fail -E 'test(/browser/) or test(/oauth/)'
-just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials/)'
+just test -p codex-external-agent-migration --retries 0 --flaky-result fail -E 'test(/marketplace_import_sources_infers_external_official_marketplace$/) or test(/import_plugins_supports_relative_external_agent_plugin_marketplace_path$/) or test(/import_plugins_infers_external_official_marketplace_with_fake_adder$/)'
+just test -p codex-rmcp-client --retries 0 --flaky-result fail -E 'test(/oauth_login_does_not_invoke_browser_launcher_when_disabled$/) or test(/oauth_login_invokes_browser_launcher_once_when_enabled$/)'
+just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/mcp_login_no_open_browser_propagates_launch_false$/) or test(/login_and_logout_persist_only_cloud_managed_mcp_oauth_credentials$/)'
 ```
 
 ## 16. 串并行实施顺序
@@ -446,11 +475,14 @@ just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/login_and_logou
 2. 批次A：resolver seam + 20 network-proxy + core decider。
 3. 批次B/C：Direct policy与5项消费者；随后shell合同。
 4. 批次E/F：fixture-bounded roots与PowerShell平台收口。
-5. 批次D/G：Landlock诊断/强合同；V8既有feature的独占双canary与workspace单向兼容性。
+5. 批次D/G：Landlock诊断后用独立wget helper落强合同，不动shared legacy helper；V8既有feature的独占双canary与
+   workspace单向兼容性。
 6. 批次H/I：严格执行修改前双200取证；在第4节条件决策点确认仍属测试设施修复后再实施，改后同负载复验。
-7. 附加J/K：源推导到fake adder的组合链路、`--no-open-browser`及launcher零调用证明。
+7. 附加J/K：原位改造点名的真clone测试为fake-adder组合链路；`--no-open-browser`及launcher零调用证明，core
+   两处生产登录路径保持显式true。
 8. 每批跑相关包；全部通过后执行一次完整workspace
-   `just test --retries 0 --flaky-result fail`，核对JUnit中实际执行数、failure、flaky与skip清单及watchdog summary；
+   `just test --retries 0 --flaky-result fail`；先核对watchdog summary中的JUnit路径/哈希，再以独立只读XML解析核对
+   实际执行数、failure与skip，并记录正式命令禁重试；
    受影响Cargo manifest另跑 `python3 ../.github/scripts/verify_cargo_workspace_manifests.py`，最后运行受影响包clippy/fmt，
    不重复全量。
 
@@ -490,16 +522,18 @@ just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/login_and_logou
 |---|---|---|---|---|
 | 001 | 使用39严格失败+2附加事项口径 | 第一批实际覆盖42；migration/OAuth不在严格失败清单 | 全计划 | 已采纳 |
 | 002 | DNS用精确登记resolver，未知返回错误 | catch-all会破坏DNS失败安全回归 | A | 已采纳 |
-| 003 | 增显式Direct policy，默认不变 | 5项已有pool/factory/selector seam，不能依赖NO_PROXY | B | 已采纳 |
+| 003 | 增经审计的 `#[doc(hidden)] Direct，禁止配置/CLI/wire/生产路径构造并静态审查选择点 | 5项需确定性直连，但公开枚举variant不能被误当成私有测试能力 | B | 已采纳 |
 | 004 | shell只排除本session managed proxy | login shell可合法重载用户profile | C | 已采纳 |
-| 005 | Landlock使用本地listener+未沙箱对照 | seccomp无地址分支，合同更强且hermetic | D | 已采纳 |
+| 005 | wget使用独立本地listener helper，不改shared legacy helper | seccomp无地址分支；收紧共享helper会无取证扩张到另外6项 | D | 已采纳 |
 | 006 | 项目根测试用非空marker或FS seam | 空marker直接禁用根发现，会弱化测试 | E | 已采纳 |
 | 007 | PowerShell断言按编译目标平台收口 | WSL PATH不等于Windows分类目标 | F | 已采纳 |
 | 008 | V8用workspace单向蕴含与既有feature独占双canary | workspace断言受unification影响；不新增违反manifest白名单的期望feature | G | 已采纳 |
 | 009 | 时序修复前后都做1线程/10线程各200次 | 孤立通过不能覆盖workspace并发竞态 | H | 已采纳 |
 | 010 | external产品git终止另立任务 | hermetic测试与产品子进程缺陷不能混称闭环 | J | 已采纳 |
-| 011 | OAuth用CLI显式no-open-browser | BROWSER环境变量不是跨平台保证 | K | 已采纳 |
+| 011 | OAuth用CLI显式no-open-browser，core首次/重试保持true | BROWSER不是跨平台保证；CLI副作用修复不能改变turn期生产行为 | K | 已采纳 |
 | 012 | 所有正式nextest门禁禁重试且flaky视为失败 | 仓库默认重试1次；仅看最终绿色会掩盖不稳定性 | 全计划 | 已采纳 |
-| 013 | external保留源推导到fake adder的组合测试 | 两个分拆测试不能证明真实编排没有断链 | J | 已采纳 |
+| 013 | external原位改造点名的真clone测试为fake-adder组合测试 | 两个分拆测试不能证明真实编排没有断链；旧测试若并存仍会访问GitHub | J | 已采纳 |
 | 014 | empty roots使用同backend的正反对照并精确分类拒绝 | 任意非零可能来自helper/加载器/命令失败，不等于隔离生效 | I | 已采纳 |
 | 015 | OAuth用注入launcher计数且隔离失败不得静默通过 | CLI flag本身不能证明所有分支都未调用浏览器 | K | 已采纳 |
+| 016 | watchdog retained只作JUnit完整性证据，语义另行解析 | 当前watchdog不统计failure/skip，passed也无法识别测试体提前返回 | 全计划 | 已采纳 |
+| 017 | 6个shared Landlock helper调用者列为具名legacy例外 | 它们不在本次单个wget失败范围；全包门禁会混入真实域名与宽松合同 | D | 已采纳 |
