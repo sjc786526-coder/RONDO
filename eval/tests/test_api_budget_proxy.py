@@ -493,6 +493,13 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             reopened.reserve("r1", "q2")
         reopened.close()
 
+    def test_claim_run_rejects_reusing_an_existing_invocation(self) -> None:
+        path = self.root / "claim-budget.json"
+        with PersistentBudgetLedger(path, batch_id="claim-batch") as ledger:
+            ledger.claim_run("run-1")
+            with self.assertRaises(BudgetStopped):
+                ledger.claim_run("run-1")
+
     def test_invalid_state_and_over_authorized_configuration_fail_closed(self) -> None:
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(

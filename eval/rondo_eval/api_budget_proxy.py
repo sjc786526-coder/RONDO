@@ -222,6 +222,20 @@ class PersistentBudgetLedger:
             os.close(self._lock_fd)
 
     def ensure_run(self, run_id: str, *, cap_usd: Decimal | str | None = None) -> None:
+        self._register_run(run_id, cap_usd=cap_usd, reject_existing=False)
+
+    def claim_run(self, run_id: str, *, cap_usd: Decimal | str | None = None) -> None:
+        """Consume one benchmark invocation slot, rejecting every reused run id."""
+
+        self._register_run(run_id, cap_usd=cap_usd, reject_existing=True)
+
+    def _register_run(
+        self,
+        run_id: str,
+        *,
+        cap_usd: Decimal | str | None,
+        reject_existing: bool,
+    ) -> None:
         _require_safe_id(run_id, "run id")
         cap = self.default_run_cap if cap_usd is None else _money(cap_usd)
         if cap <= 0 or cap > self.default_run_cap:
@@ -230,6 +244,8 @@ class PersistentBudgetLedger:
             self._assert_open()
             runs = self._state["runs"]
             if run_id in runs:
+                if reject_existing:
+                    raise BudgetStopped("benchmark run id was already consumed")
                 if Decimal(runs[run_id]["cap_usd"]) != cap:
                     raise ApiBudgetProxyError("existing run cap differs from the requested cap")
                 return
@@ -643,11 +659,6 @@ class LoopbackResponsesProxy:
         if not self._authenticate(handler):
             self._reject(handler, 401, "unauthorized")
             return
-        try:
-            forward_lite_header = _validated_lite_header(handler.headers)
-        except ApiBudgetProxyError:
-            self._reject(handler, 400, "invalid_lite_header")
-            return
         if handler.path != "/v1/responses":
             self._reject(handler, 404, "responses_path_required")
             return
@@ -670,6 +681,14 @@ class LoopbackResponsesProxy:
         body = handler.rfile.read(length)
         if len(body) != length:
             self._reject(handler, 400, "request_body_incomplete")
+            return
+        # Consume the bounded request body before rejecting a malformed Lite
+        # routing header. Closing a socket with unread request bytes can reset
+        # the connection before the client receives the structured error body.
+        try:
+            forward_lite_header = _validated_lite_header(handler.headers)
+        except ApiBudgetProxyError:
+            self._reject(handler, 400, "invalid_lite_header")
             return
         request_id = handler.headers.get("X-RONDO-Eval-Request-Id") or uuid.uuid4().hex
         role = handler.headers.get("X-RONDO-Eval-Role", "unknown").strip().lower()

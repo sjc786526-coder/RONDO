@@ -694,10 +694,20 @@ class TerminalBenchTests(unittest.TestCase):
         )
         (bundle / "meta.json").write_text(
             json.dumps({
+                "review_id": "review-1",
+                "guardian_source_baseline": "rust-v0.147.0",
+                "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
                 "evidence": "e_final",
+                "decision": "approved",
+                "failure_reason": None,
+                "attempt_count": 1,
+                "duration_ms": 10,
+                "guardian_thread_id": "thread-1",
                 "model": "gpt-5.6-luna",
                 "reasoning_effort": "low",
-                "terminal_status": "completed",
+                "terminal_status": "approved",
+                "token_usage": None,
+                "time_to_first_token_ms": None,
             })
         )
         metadata = self.root / "api-metadata.json"

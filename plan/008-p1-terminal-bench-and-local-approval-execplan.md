@@ -159,7 +159,7 @@
 - `main` 与 `origin/main` 对齐于 `4df098c`，V8 资产门禁已合入；主工作区干净。
 - 已由看门狗清理 V8 worktree 的 Cargo target，并清理两个 Python cache；全仓未发现其他 target。
 - 已冻结共享 `eval/` 合同、严格配置/密钥 loader、Standard/Lite `E_final`/`PolicyIdentity`、无工具
-  static payload、原子归档和持久预算账本；当前集成的 155 项 pure/fake/loopback 测试全部通过。
+  static payload、原子归档和持久预算账本；当前集成的 182 项 pure/fake/loopback 测试全部通过。
 - Harbor 冻结为 `0.20.0`/commit `459ff6e`，TB2.1 冻结为 commit `ffccbe0`，`fix-git` task archive
   与 linux/amd64 镜像均已按 SHA-256 实测；真实 checkout 的 materialize/digest/overlay 前置校验通过。
 - Docker Desktop daemon/数据盘计数已接入；受监督拉取 `fix-git` 和 Ubuntu 精确 digest，官方
@@ -187,37 +187,37 @@
 
 ### 当前工作
 
-- 两侧同源静态 musl 的 CLI + `codex-code-mode-host` bundle 已由新的 eval-owned V8 gate 串行构建、双 SHA
-  验证并清理 target/scratch；RONDO/Codex 两次成功构建分别耗时 16m09s/17m47s，swap 峰值均为 0。
-  baseline 导入时产生 Python bytecode 的缺口已补 no-write-bytecode 回归。
-- 首次 Codex 真实 Docker/no-API code-mode smoke 到达第二轮 fake，但 nested `exec_command` 在容器内因
-  bubblewrap 创建 loopback 受限而 fail-closed。冻结 bundle 的本机同协议探针证明显式
-  `sandbox_workspace_write.network_access=true` 后两轮工具结果与 `turn.completed` 均成功；该条件已进入
-  RunSpec 公平指纹、adapter 命令门禁和归档。
-- 第二次受监督 Docker 探针进一步确认正式 Linux package 还必须包含 `codex-resources/bwrap`。自建 musl
-  bwrap 的首次受监督构建暴露 Linux UAPI 头链会引入额外工具链；由于 RONDO 与冻结上游的 bwrap crate/
-  vendored bubblewrap Git tree ID 完全相同，现改为冻结 OpenAI `rust-v0.147.0` 官方 x86_64-musl bwrap
-  资产、归档 SHA-256、单文件布局和组合源码身份。15 键 runtime manifest、Harbor 三文件上传/SHA 门禁
-  和 75 项合并定向回归已通过；下一步只允许在看门狗内下载/验证 261563-byte 资产并重跑 Docker。
-- 官方 bwrap 资产已下载、离线复核并用于两侧最终 runtime bundle；Codex Docker no-API 已越过二进制
-  查找，进一步证明任务容器默认以缺少 `SYS_ADMIN` 的 root 运行时无法创建嵌套 namespace。未授予 capability、
-  privileged 或 unconfined seccomp；改为两侧固定 UID/GID 1000，root 只做安装、临时 auth 与任务目录准备，
-  Codex 和工具均以非 root 运行。75 项合并轻量回归通过，待真实 Docker 复验。
+- 两侧静态 musl CLI + `codex-code-mode-host` + 官方 bwrap 的 15 键 runtime bundle 已在
+  同一上游 source identity 下冻结并离线复核；目标镜像中的受监督 `--version` 探针通过。
+- 官方 bwrap 资产已取代项目内自建路线；失败的 libcap/C 中间产物和两侧 Cargo target 已在
+  看门狗内精确清理，失败 summary 保留用于审查。
+- 实际 Codex Docker no-API 以 root 与固定 UID/GID 1000 两种形态复验，均到达冻结 bwrap
+  后因 Docker 守护进程默认 seccomp 不允许嵌套 user namespace 而失败。没有授予
+  privileged、`SYS_ADMIN` 或 `seccomp=unconfined`，也没有弱化 Codex sandbox。
+- 全部 eval pure/fake/loopback 必要门禁共 182 项通过，`uv lock --check` 通过。Docker
+  前后统计均为 18.128GB，任务容器/卷残留为 0，未触发 40/60GB 或宿主剩余
+  80GiB 门禁。
 
 ### 后续计划
 
-- no-API 全链路通过后，只使用剩余第 4 个槽位运行 `fix-git`；不得在本计划内静默新增第 5 个 run。
-- 原子归档、更新 WBS/完成历史和详细 code-review 日志，独立终审并修补后合并、推送 main。
+- 本批按 fail-closed 状态收口。若后续确需为单个固定任务改变 Docker seccomp/capability，
+  必须先明确新的精确授权与退出后处理，不在本次默认扩展。
+- 安全 no-API 全链路通过后，最多使用已有预算账本的剩余第 4 个槽位；不得静默
+  新增第 5 个 run，也不得在只有一侧结果时宣称 M1。
 
 ### 阻塞项
 
 - 本地模型权重不存在且本次禁止下载；L2 真实推理验收必然保持未运行。
+- 目标 Docker Desktop 守护进程只报告 builtin seccomp/cgroupns；在不关闭 seccomp、不授予
+  `SYS_ADMIN`/privileged 的当前安全边界下，bwrap 不能在 Terminal-Bench 任务容器内再建
+  user namespace，B3 no-API 和 M1 因此阻塞。
 
 ### 当前验收状态
 
-- B1、B2 基础 no-API、L1 fake 和 L2 前置设施已达到实现门禁；Docker hello-world oracle、两侧静态
+- B1、B2 代码/冻结产物、L1 fake 和 L2 前置设施已达到实现门禁；Docker hello-world oracle、两侧静态
   musl 冻结与目标镜像 `--version` 均真实通过。
-- B3 已有 3 条真实 Docker、零 API/零费用的 `agent_failed` 归档；M1 仍未通过。批次最多 4 run 的硬门禁
+- B2 全链路 no-API 与 B3/M1 未通过。3 次真实 Docker 诊断均在 API 前因设施失败，终审后从正式
+  `runs.jsonl` 与私有发布目录移除，只在预算账本保留不可复用槽位；批次最多 4 run 的硬门禁
   尚余 1 个槽位，因此即使最后一条 completed，也不能把同任务双侧里程碑误报为通过。
 - L2 真实模型、L2a、L3/L4、训练和正式 canary 均未运行且不在本计划完成条件内。
 
@@ -244,3 +244,6 @@
 | 017 | runtime bundle 按上游布局内置同源 `codex-resources/bwrap` | 任务镜像不应 apt/PATH 注入浮动 sandbox；冻结包必须自包含 v0.147 Linux 运行资源 | B2/B3 二进制公平性 | 已采纳 |
 | 018 | 复用官方 v0.147.0 musl bwrap 资产并验证两侧源码 tree identity | 自建链路会额外冻结 Linux UAPI/C 依赖；两侧源码逐树相同，官方同版本资产更小且可直接验签 | B2/B3 构建与供应链 | 已采纳 |
 | 019 | Terminal-Bench 主 service 和 agent 固定为 1000:1000 | 让内层 bwrap 使用非特权 user namespace；不授予 Docker 特权 capability 或关闭 seccomp | B2/B3 sandbox | 已采纳 |
+| 020 | 默认 seccomp 下 nested namespace 仍失败后停止 B3 | 安全边界只能经新的精确授权改变；计划禁止为凑绿弱化隔离 | B3/M1 | 已采纳 |
+| 021 | run-id 在外部执行前同时 claim 归档与预算槽，claim 后异常也发布分类失败记录 | 禁止复用 run 绕过四次上限，避免已计费请求没有结果索引 | B3 预算/归档 | 已采纳 |
+| 022 | API 前设施诊断不进入正式结果库 | 三次尝试没有模型请求，旧归因与新 parser/allowlist 不一致；预算账本仍保留不可复用历史 | B3 数据 | 已采纳 |

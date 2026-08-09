@@ -203,3 +203,21 @@ standard/Lite 形态均补回归。
 - 完整workspace实际运行14,092项：14,060通过、31失败、1超时、23显式ignored。V8 POC 7/7与Code Mode
   专属crate 167/167通过；全量不称绿色，32项终态失败另列维护，Windows目标平台仍待补验。完整证据见
   `agent_log/2026-08-09-224108-v8-sandbox-local-gate.md`。
+
+## Plan 008 P1 测评与本地审批前置设施（2026-08-10）
+
+- 建立顶层轻量 `eval/` 项目，统一 Standard/Responses Lite `E_final`、`PolicyIdentity`、
+  无工具静态审批 payload、严格 common-root 配置/密钥加载、结果归档、持久预算和退出码。
+- 完成 Terminal-Bench B1 版本/任务/镜像冻结与 B2 统一 runner、Codex/RONDO 双 adapter、
+  Harbor 生产 backend、Docker 实时资源监督、去敏预算代理和静态 musl runtime bundle。
+  官方 hello-world oracle Docker smoke 与两侧镜像内 `--version` 探针通过；B2 全链路 no-API
+  验收未通过，不列为完成阶段。
+- 完成方向 2 的 L1 协议/测试，以及 L2 的 llama.cpp `b10333` 项目局部运行时、
+  client、doctor、fake server、结构化输出校验和启动入口。无模型 doctor 返回
+  `infrastructure_ready_model_missing`/78，未下载权重或进行真实推理。
+- 轻量设施门禁 182/182 通过，`uv lock --check` 通过；所有 Cargo、Docker、运行时下载与
+  重型清理均在项目看门狗下串行，废弃 target/scratch/libcap 产物已精确清理。
+- **本条不宣称 P1/M1 完成**：完整 Codex Docker no-API agent 路径被 builtin seccomp 下的
+  嵌套 user namespace 拒绝，未通过弱化 seccomp/capability 换取绿色。三次 API 前设施诊断
+  已从正式结果库移除，预算槽位仍不可复用；真实 API 调用 0 次、实际费用 0 USD；B3/M1、L2 真模型、L2a/L3/L4、
+  训练和 canary 保持未完成。详细证据见同日 P1 `agent_log`。

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from ..api_budget_proxy import BudgetStopped, PersistentBudgetLedger
+from ..artifacts import ArtifactError, ArtifactWriter, validate_run_id
 from ..config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
 from ..contracts import BinaryManifest, RunOutcome, Side
 from ..docker_supervisor import DockerSupervisionError
@@ -22,12 +23,18 @@ from ..runtime_bridge import (
 from .freeze import FIX_GIT_IMAGE_DIGEST
 from .live import run_budgeted_terminal_bench
 from .results import (
+    classify_terminal_bench_result,
     parse_single_task_result,
+    publish_terminal_bench_failure,
     publish_terminal_bench_result,
+    validate_eval_harness_checkout,
     validate_measurement_checkout,
     validate_results_worktree,
 )
 from .runner import TerminalBenchRequest, TerminalBenchRunError
+
+
+P1_BATCH_ID = "p1-fix-git-20260810"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,9 +52,13 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        side = Side(args.side)
+        validate_run_id(args.run_id, track="tb", side=side.value)
+        if args.batch_id != P1_BATCH_ID:
+            raise ConfigError("batch id differs from the authorized P1 budget ledger")
         paths = RepoPaths.discover(Path.cwd())
         config = load_runtime_config(paths)
-        side = Side(args.side)
+        eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
         results_root = validate_results_worktree(
             args.results_worktree_root,
@@ -82,35 +93,103 @@ def main(argv: list[str] | None = None) -> int:
         )
         ledger_path = paths.common_root / "eval-data" / "budgets" / f"{args.batch_id}.json"
         metadata_path = work_root / "api-metadata.json"
-        with PersistentBudgetLedger(ledger_path, batch_id=args.batch_id) as ledger:
-            result = asyncio.run(
-                run_budgeted_terminal_bench(
-                    config,
-                    request,
-                    api_key=api_key,
-                    ledger=ledger,
-                    metadata_path=metadata_path,
-                    counter=counter,
-                    lock_guard=proof.guard,
-                    lease=proof.lease,
-                )
-            )
-        parsed = parse_single_task_result(
-            result.harbor.jobs_dir,
-            host_returncode=result.harbor.returncode,
-        )
-        if validate_measurement_checkout(paths, side=side, manifest=manifest) != git_commit:
-            raise TerminalBenchRunError("measurement commit changed during the run")
-        artifact_path = publish_terminal_bench_result(
+        writer = ArtifactWriter(
             paths,
             results_worktree_root=results_root,
             run_id=args.run_id,
-            side=side,
-            git_commit=git_commit,
-            live_result=result,
-            parsed=parsed,
-            metadata_path=metadata_path,
-        )
+        ).start()
+        claimed = False
+        try:
+            with PersistentBudgetLedger(ledger_path, batch_id=args.batch_id) as ledger:
+                try:
+                    ledger.claim_run(args.run_id)
+                    claimed = True
+                    result = asyncio.run(
+                        run_budgeted_terminal_bench(
+                            config,
+                            request,
+                            api_key=api_key,
+                            ledger=ledger,
+                            metadata_path=metadata_path,
+                            counter=counter,
+                            lock_guard=proof.guard,
+                            lease=proof.lease,
+                        )
+                    )
+                    parsed = parse_single_task_result(
+                        result.harbor.jobs_dir,
+                        host_returncode=result.harbor.returncode,
+                    )
+                    parsed = classify_terminal_bench_result(result, parsed)
+                    if validate_measurement_checkout(
+                        paths, side=side, manifest=manifest
+                    ) != git_commit:
+                        raise TerminalBenchRunError("measurement commit changed during the run")
+                    if (
+                        validate_eval_harness_checkout(common_root=paths.common_root)
+                        != eval_harness_commit
+                    ):
+                        raise TerminalBenchRunError("eval harness commit changed during the run")
+                    artifact_path = publish_terminal_bench_result(
+                        paths,
+                        results_worktree_root=results_root,
+                        run_id=args.run_id,
+                        side=side,
+                        git_commit=git_commit,
+                        eval_harness_commit=eval_harness_commit,
+                        live_result=result,
+                        parsed=parsed,
+                        metadata_path=metadata_path,
+                        writer=writer,
+                    )
+                except (Exception, KeyboardInterrupt, asyncio.CancelledError) as exc:
+                    if not claimed:
+                        raise
+                    snapshot = ledger.snapshot()
+                    outcome, failure_stage, exit_code = _exception_failure(exc)
+                    try:
+                        writer.abort()
+                        writer = ArtifactWriter(
+                            paths,
+                            results_worktree_root=results_root,
+                            run_id=args.run_id,
+                        ).start()
+                        artifact_path = publish_terminal_bench_failure(
+                            paths,
+                            writer=writer,
+                            run_id=args.run_id,
+                            side=side,
+                            git_commit=git_commit,
+                            eval_harness_commit=eval_harness_commit,
+                            manifest=manifest,
+                            budget_snapshot=snapshot,
+                            metadata_path=metadata_path,
+                            outcome=outcome,
+                            failure_stage=failure_stage,
+                            secrets=(api_key,),
+                        )
+                    except Exception:
+                        return EVIDENCE_ERROR
+                    print(
+                        json.dumps(
+                            {
+                                "schema_version": 1,
+                                "run_id": args.run_id,
+                                "side": args.side,
+                                "outcome": outcome.value,
+                                "failure_stage": failure_stage,
+                                "artifacts": artifact_path.relative_to(
+                                    paths.common_root
+                                ).as_posix(),
+                                "budget": snapshot,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    )
+                    return exit_code
+        finally:
+            writer.abort()
         safe = {
             "schema_version": 1,
             "run_id": args.run_id,
@@ -123,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
             "evidence": [
                 {
                     "relative_path": item.relative_path,
+                    "review_id": item.review_id,
+                    "guardian_source_baseline": item.guardian_source_baseline,
+                    "guardian_source_commit": item.guardian_source_commit,
                     "policy_sha256": item.policy.sha256,
                     "request_shape": item.policy.request_shape,
                     "model": item.model,
@@ -151,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         return CONFIG_ERROR
     except (DockerSupervisionError, RuntimeBridgeError):
         return INFRA_ERROR
-    except (TerminalBenchRunError, OSError, ValueError, json.JSONDecodeError):
+    except (ArtifactError, TerminalBenchRunError, OSError, ValueError, json.JSONDecodeError):
         return EVIDENCE_ERROR
 
 
@@ -161,6 +243,22 @@ def _outcome_exit_code(outcome: RunOutcome) -> int:
     if outcome is RunOutcome.INFRA_FAILED:
         return INFRA_ERROR
     return EVIDENCE_ERROR
+
+
+def _exception_failure(exc: BaseException) -> tuple[RunOutcome, str, int]:
+    if isinstance(exc, (KeyboardInterrupt, asyncio.CancelledError)):
+        return RunOutcome.CANCELLED, "interrupted", 130
+    if isinstance(exc, BudgetStopped):
+        return RunOutcome.BUDGET_STOPPED, "budget", BUDGET_STOPPED
+    if isinstance(exc, DockerSupervisionError):
+        return RunOutcome.INFRA_FAILED, "docker", INFRA_ERROR
+    if isinstance(exc, RuntimeBridgeError):
+        return RunOutcome.INFRA_FAILED, "runtime", INFRA_ERROR
+    if isinstance(exc, ArtifactError):
+        return RunOutcome.INFRA_FAILED, "publication", EVIDENCE_ERROR
+    if isinstance(exc, ConfigError):
+        return RunOutcome.INFRA_FAILED, "result", CONFIG_ERROR
+    return RunOutcome.INFRA_FAILED, "result", EVIDENCE_ERROR
 
 
 def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:

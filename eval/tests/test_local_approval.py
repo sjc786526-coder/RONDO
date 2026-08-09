@@ -33,6 +33,7 @@ from rondo_eval.local_approval.doctor import run_doctor  # noqa: E402
 from rondo_eval.local_approval.fake_server import FakeApprovalServer  # noqa: E402
 from rondo_eval.local_approval.launcher import (  # noqa: E402
     LLAMA_CPP_ASSET_SHA256,
+    LLAMA_CPP_BINARY_SHA256,
     LLAMA_CPP_BUILD,
     LLAMA_CPP_COMMIT,
     LauncherError,
@@ -417,6 +418,10 @@ class LauncherAndDoctorTests(unittest.TestCase):
             LLAMA_CPP_ASSET_SHA256,
             "936ce04d98abe2a977e9dd2ff92659bb96947e136acee8f2bc3e21d8eaebbf23",
         )
+        self.assertEqual(
+            LLAMA_CPP_BINARY_SHA256,
+            "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c15315dbd8aa4bbe",
+        )
 
     def test_runtime_version_probe_requires_build_and_commit(self) -> None:
         binary = self.root / "llama-server"
@@ -428,10 +433,33 @@ class LauncherAndDoctorTests(unittest.TestCase):
         config = self._config()
         config.data["local_model"]["server"]["binary"] = os.fspath(binary)
         settings = settings_from_config(config)
-        self.assertEqual(inspect_runtime(config, settings).status, "runtime_ready")
+        with mock.patch(
+            "rondo_eval.local_approval.launcher._binary_sha256",
+            return_value=LLAMA_CPP_BINARY_SHA256,
+        ):
+            self.assertEqual(inspect_runtime(config, settings).status, "runtime_ready")
 
         binary.write_text("#!/bin/sh\nprintf '%s\\n' 'version: 10332 (deadbeef)'\n", encoding="utf-8")
-        self.assertEqual(inspect_runtime(config, settings).status, "runtime_pin_mismatch")
+        with mock.patch(
+            "rondo_eval.local_approval.launcher._binary_sha256",
+            return_value=LLAMA_CPP_BINARY_SHA256,
+        ):
+            self.assertEqual(inspect_runtime(config, settings).status, "runtime_pin_mismatch")
+
+    def test_runtime_digest_mismatch_is_rejected_before_version_probe(self) -> None:
+        binary = self.root / "llama-server"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        os.chmod(binary, 0o700)
+        config = self._config()
+        config.data["local_model"]["server"]["binary"] = os.fspath(binary)
+        settings = settings_from_config(config)
+        with mock.patch(
+            "rondo_eval.local_approval.launcher._binary_sha256",
+            return_value="0" * 64,
+        ), mock.patch("rondo_eval.local_approval.launcher.subprocess.run") as probe:
+            inspection = inspect_runtime(config, settings)
+        self.assertEqual(inspection.status, "runtime_pin_mismatch")
+        probe.assert_not_called()
 
 
 if __name__ == "__main__":

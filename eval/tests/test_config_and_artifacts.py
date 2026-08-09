@@ -269,14 +269,22 @@ class ArtifactTests(unittest.TestCase):
 
     def test_duplicate_run_id_in_index_is_rejected(self) -> None:
         run_id = "20260809-000000009-tb-rondo-r1"
-        writer = ArtifactWriter(self.paths, run_id).start()
-        writer.write_json("result.json", {"ok": True})
+        writer = ArtifactWriter(self.paths, run_id)
         writer.results.parent.mkdir(parents=True)
         writer.results.write_text(json.dumps(self._record(run_id)) + "\n", encoding="utf-8")
         with self.assertRaises(ArtifactError):
-            writer.finalize(self._record(run_id), secrets=())
-        self.assertTrue(writer.staging.exists())
+            writer.start()
+        self.assertFalse(writer.staging.exists())
         self.assertFalse(writer.target.exists())
+
+    def test_abort_releases_only_the_unpublished_staging_claim(self) -> None:
+        run_id = "20260809-000000035-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        writer.abort()
+        self.assertFalse(writer.staging.exists())
+        self.assertFalse(writer.target.exists())
+        self.assertFalse(writer.journal.exists())
 
     def test_append_failure_rolls_back_and_next_writer_recovers_publication(self) -> None:
         from unittest import mock
@@ -350,14 +358,13 @@ class ArtifactTests(unittest.TestCase):
                 root.mkdir()
                 paths = RepoPaths(root, root)
                 run_id = f"20260809-0000000{number}-tb-rondo-r1"
-                writer = ArtifactWriter(paths, run_id).start()
-                writer.write_json("result.json", {"ok": True})
+                writer = ArtifactWriter(paths, run_id)
                 writer.results.parent.mkdir(parents=True)
                 redirect = root / "redirect"
                 redirect.write_text("unchanged", encoding="utf-8")
                 os.symlink(redirect, writer.results.parent / unsafe_name)
                 with self.assertRaises(ArtifactError):
-                    writer.finalize(self._record(run_id), secrets=())
+                    writer.start()
                 self.assertEqual(redirect.read_text(encoding="utf-8"), "unchanged")
                 self.assertFalse(writer.target.exists())
 
@@ -367,15 +374,13 @@ class ArtifactTests(unittest.TestCase):
         root.mkdir()
         paths = RepoPaths(root, root)
         run_id = "20260809-000000014-tb-rondo-r1"
-        writer = ArtifactWriter(paths, run_id).start()
-        writer.write_json("result.json", {"ok": True})
         redirect = root / "redirect"
         redirect.mkdir()
         os.symlink(redirect, root / "eval", target_is_directory=True)
         with self.assertRaises(ArtifactError):
-            writer.finalize(self._record(run_id), secrets=())
+            ArtifactWriter(paths, run_id).start()
         self.assertEqual(list(redirect.iterdir()), [])
-        self.assertFalse(writer.target.exists())
+        self.assertFalse((root / "eval-data/runs" / run_id).exists())
 
     def test_results_can_be_explicitly_written_to_development_worktree(self) -> None:
         common = self.paths.common_root

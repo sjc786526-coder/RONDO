@@ -7,7 +7,7 @@ import math
 import os
 import stat
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -22,7 +22,7 @@ from .freeze import (
     TERMINAL_BENCH_COMMIT,
     TERMINAL_BENCH_VERSION,
 )
-from .live import BudgetedTerminalBenchResult
+from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 
 
 UPSTREAM_CODEX = {
@@ -32,6 +32,36 @@ UPSTREAM_CODEX = {
 }
 _MAX_RESULT_BYTES = 8 * 1024 * 1024
 _MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
+_SUCCESS_COUNTS = {
+    "n_completed_trials": 1,
+    "n_errored_trials": 0,
+    "n_running_trials": 0,
+    "n_pending_trials": 0,
+    "n_cancelled_trials": 0,
+    "n_retries": 0,
+}
+_CANCELLED_COUNTS = {
+    "n_completed_trials": 0,
+    "n_errored_trials": 0,
+    "n_running_trials": 0,
+    "n_pending_trials": 0,
+    "n_cancelled_trials": 1,
+    "n_retries": 0,
+}
+_AGENT_EXCEPTION_TYPES = {
+    "AgentSafetyRefusalError",
+    "AgentTimeoutError",
+    "ContextWindowExceededError",
+    "NonZeroAgentExitCodeError",
+    "OutputTokenExceededError",
+}
+_PRIVATE_EVIDENCE_FILES = (
+    "agent/codex.txt",
+    "artifacts/manifest.json",
+    "verifier/ctrf.json",
+    "verifier/reward.txt",
+    "verifier/test-stdout.txt",
+)
 
 
 class HarborResultError(ValueError):
@@ -94,6 +124,24 @@ def validate_results_worktree(path: Path, *, common_root: Path) -> Path:
     return resolved
 
 
+def validate_eval_harness_checkout(*, common_root: Path) -> str:
+    """Bind the externally loaded eval harness to one clean repository commit."""
+
+    root = Path(__file__).resolve().parents[3]
+    try:
+        harness_paths = RepoPaths.discover(root)
+    except (OSError, ValueError) as exc:
+        raise HarborResultError("eval harness checkout is unavailable") from exc
+    if harness_paths.worktree_root != root or harness_paths.common_root != common_root:
+        raise HarborResultError("eval harness checkout is outside this RONDO repository")
+    if _git(root, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise HarborResultError("eval harness checkout is dirty")
+    relative_source = Path(__file__).resolve().relative_to(root).as_posix()
+    if _git_result(root, "ls-files", "--error-unmatch", relative_source).returncode != 0:
+        raise HarborResultError("eval harness source is not tracked")
+    return _git(root, "rev-parse", "HEAD")
+
+
 def parse_single_task_result(
     jobs_dir: Path,
     *,
@@ -137,19 +185,25 @@ def parse_single_task_result(
     }
     if _uint(job.get("n_total_trials"), "n_total_trials") != 1:
         raise HarborResultError("Harbor job is not a one-trial run")
+    exception_type = _exception_type(trial.get("exception_info"))
     if host_returncode != 0:
         outcome = RunOutcome.INFRA_FAILED
-    elif counts != {
-        "n_completed_trials": 1,
-        "n_errored_trials": 0,
-        "n_running_trials": 0,
-        "n_pending_trials": 0,
-        "n_cancelled_trials": 0,
-        "n_retries": 0,
-    } or trial.get("exception_info") is not None:
+    elif counts == _SUCCESS_COUNTS and exception_type is None:
+        outcome = RunOutcome.COMPLETED
+    elif counts == _CANCELLED_COUNTS and exception_type == "CancelledError":
+        outcome = RunOutcome.CANCELLED
+    elif (
+        counts["n_completed_trials"] == 0
+        and counts["n_errored_trials"] == 1
+        and counts["n_running_trials"] == 0
+        and counts["n_pending_trials"] == 0
+        and counts["n_cancelled_trials"] == 0
+        and counts["n_retries"] == 0
+        and exception_type in _AGENT_EXCEPTION_TYPES
+    ):
         outcome = RunOutcome.AGENT_FAILED
     else:
-        outcome = RunOutcome.COMPLETED
+        outcome = RunOutcome.INFRA_FAILED
 
     if trial.get("task_name") != FIX_GIT_TASK_ID:
         raise HarborResultError("Harbor trial task identity differs from the freeze")
@@ -197,12 +251,17 @@ def publish_terminal_bench_result(
     run_id: str,
     side: Side,
     git_commit: str,
+    eval_harness_commit: str,
     live_result: BudgetedTerminalBenchResult,
     parsed: ParsedHarborResult,
     metadata_path: Path,
+    writer: ArtifactWriter | None = None,
 ) -> Path:
     """Archive private raw evidence and append one strict tracked record."""
 
+    parsed = classify_terminal_bench_result(live_result, parsed)
+    if not _is_commit(eval_harness_commit):
+        raise HarborResultError("eval harness commit is invalid")
     if live_result.prepared.spec.side is not side:
         raise HarborResultError("prepared side differs from publication side")
     request_roles = _validate_publication_evidence(
@@ -210,22 +269,23 @@ def publish_terminal_bench_result(
         parsed,
         metadata_path=metadata_path,
     )
-    writer = ArtifactWriter(
-        paths,
-        run_id,
-        results_worktree_root=results_worktree_root,
+    writer = writer or ArtifactWriter(
+        paths, run_id, results_worktree_root=results_worktree_root
     ).start()
+    if writer.run_id != run_id or writer.paths.common_root != paths.common_root:
+        raise HarborResultError("artifact writer claim differs from the run")
     summary = _safe_summary(
         run_id,
         side,
         git_commit,
+        eval_harness_commit,
         live_result,
         parsed,
         request_roles=request_roles,
     )
     writer.write_json("run-summary.json", summary)
     if parsed.job_result or parsed.trial_result:
-        _copy_private_tree(writer, live_result.harbor.jobs_dir, "harbor/jobs")
+        _write_harbor_evidence(writer, live_result.harbor.jobs_dir, parsed)
     else:
         writer.write_json(
             "harbor/jobs-unavailable.json",
@@ -235,6 +295,7 @@ def publish_terminal_bench_result(
                 "host_returncode": live_result.harbor.returncode,
             },
         )
+    _write_guardian_evidence(writer, live_result, side=side)
     try:
         metadata = _read_json_object(metadata_path)
     except HarborResultError:
@@ -278,10 +339,139 @@ def publish_terminal_bench_result(
     return writer.finalize(record, secrets=live_result.redaction_secrets)
 
 
+def classify_terminal_bench_result(
+    live_result: BudgetedTerminalBenchResult,
+    parsed: ParsedHarborResult,
+) -> ParsedHarborResult:
+    """Treat pre-API adapter exits as infrastructure, not model behavior."""
+
+    if parsed.outcome is RunOutcome.AGENT_FAILED and not live_result.metadata_ready:
+        return replace(parsed, outcome=RunOutcome.INFRA_FAILED)
+    return parsed
+
+
+def publish_terminal_bench_failure(
+    paths: RepoPaths,
+    *,
+    writer: ArtifactWriter,
+    run_id: str,
+    side: Side,
+    git_commit: str,
+    eval_harness_commit: str,
+    manifest: BinaryManifest,
+    budget_snapshot: Mapping[str, object],
+    metadata_path: Path,
+    outcome: RunOutcome,
+    failure_stage: str,
+    secrets: tuple[str, ...],
+) -> Path:
+    """Publish a safe terminal record after a claimed run exits exceptionally."""
+
+    if outcome not in {
+        RunOutcome.INFRA_FAILED,
+        RunOutcome.BUDGET_STOPPED,
+        RunOutcome.CANCELLED,
+    }:
+        raise HarborResultError("exceptional publication outcome is invalid")
+    if failure_stage not in {
+        "budget",
+        "docker",
+        "runtime",
+        "result",
+        "publication",
+        "interrupted",
+    }:
+        raise HarborResultError("exceptional publication stage is invalid")
+    if not _is_commit(git_commit) or not _is_commit(eval_harness_commit):
+        raise HarborResultError("exceptional publication commit is invalid")
+    if writer.run_id != run_id or writer.paths.common_root != paths.common_root:
+        raise HarborResultError("artifact writer claim differs from the failed run")
+    spent = _run_spend(budget_snapshot, run_id)
+    config = {
+        "batch_id": budget_snapshot.get("batch_id"),
+        "terminal_bench_version": TERMINAL_BENCH_VERSION,
+        "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
+        "task_image_digest": FIX_GIT_IMAGE_DIGEST,
+        "binary_source_commit": manifest.source_commit,
+        "eval_harness_commit": eval_harness_commit,
+        "binary_workspace_lock_normalization": manifest.workspace_lock_normalization,
+        "failure_stage": failure_stage,
+    }
+    metadata: dict[str, Any] | None = None
+    request_roles: tuple[str, ...] = ()
+    try:
+        candidate_metadata = _read_json_object(metadata_path)
+        request_roles = _request_roles(candidate_metadata)
+        metadata = candidate_metadata
+    except HarborResultError:
+        pass
+    metadata_ready = metadata is not None
+    summary = {
+        "tasks_total": 1,
+        "infra_failed": 1 if outcome is RunOutcome.INFRA_FAILED else 0,
+        "budget_stopped": 1 if outcome is RunOutcome.BUDGET_STOPPED else 0,
+        "cancelled": 1 if outcome is RunOutcome.CANCELLED else 0,
+        "metadata_ready": metadata_ready,
+        "api_request_roles": {
+            "main": request_roles.count("main"),
+            "guardian": request_roles.count("guardian"),
+        },
+    }
+    tasks = [
+        {
+            "task_id": FIX_GIT_TASK_ID,
+            "outcome": "fail",
+            "attribution": "infra",
+            "reward": 0.0,
+            "duration_s": 0.0,
+            "tokens_in": 0,
+            "tokens_cached": 0,
+            "tokens_out": 0,
+        }
+    ]
+    writer.write_json(
+        "run-failure.json",
+        {
+            "schema_version": 1,
+            "run_id": run_id,
+            "outcome": outcome.value,
+            "failure_stage": failure_stage,
+        },
+    )
+    if metadata is None:
+        writer.write_json(
+            "api-metadata-unavailable.json",
+            {"schema_version": 1, "metadata_ready": False, "outcome": outcome.value},
+        )
+    else:
+        writer.write_json("api-metadata.json", metadata)
+    record = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "track": "tb",
+        "side": side.value,
+        "git_commit": git_commit,
+        "git_dirty": False,
+        "binary_sha256": manifest.sha256,
+        "upstream_codex": dict(UPSTREAM_CODEX),
+        "config": config,
+        "outcome": outcome.value,
+        "summary": summary,
+        "tasks": tasks,
+        "metrics": None,
+        "cost": {"estimated_usd": spent, "actual_usd": spent},
+        "artifacts": f"eval-data/runs/{run_id}",
+        "notes": "Run exited after its paid-run claim; failure details are intentionally categorical.",
+    }
+    return writer.finalize(record, secrets=secrets)
+
+
 def _safe_summary(
     run_id: str,
     side: Side,
     git_commit: str,
+    eval_harness_commit: str,
     live_result: BudgetedTerminalBenchResult,
     parsed: ParsedHarborResult,
     *,
@@ -291,6 +481,9 @@ def _safe_summary(
     evidence = [
         {
             "relative_path": item.relative_path,
+            "review_id": item.review_id,
+            "guardian_source_baseline": item.guardian_source_baseline,
+            "guardian_source_commit": item.guardian_source_commit,
             "policy_sha256": item.policy.sha256,
             "request_shape": item.policy.request_shape,
             "model": item.model,
@@ -321,6 +514,7 @@ def _safe_summary(
             "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
             "task_image_digest": FIX_GIT_IMAGE_DIGEST,
             "binary_source_commit": spec.binary.source_commit,
+            "eval_harness_commit": eval_harness_commit,
             "binary_workspace_lock_normalization": spec.binary.workspace_lock_normalization,
             "bwrap_runtime_path": "/opt/rondo-eval/bin/codex-resources/bwrap",
             "bwrap_sha256": spec.binary.bwrap_sha256,
@@ -366,24 +560,121 @@ def _safe_summary(
     }
 
 
-def _copy_private_tree(writer: ArtifactWriter, source: Path, prefix: str) -> None:
+def _write_harbor_evidence(
+    writer: ArtifactWriter,
+    source: Path,
+    parsed: ParsedHarborResult,
+) -> None:
+    """Archive a deliberate private subset, never Harbor configs, locks, or raw logs."""
+
     root = _regular_directory(source)
+    job_directories = _child_directories(root)
+    if len(job_directories) != 1:
+        raise HarborResultError("Harbor evidence must contain exactly one job")
+    trial_directories = _child_directories(job_directories[0], allow_regular_files=True)
+    if len(trial_directories) != 1:
+        raise HarborResultError("Harbor evidence must contain exactly one trial")
+    trial_directory = trial_directories[0]
+    stats = parsed.job_result.get("stats")
+    if not isinstance(stats, dict):  # pragma: no cover - parser already guarantees this.
+        raise HarborResultError("parsed Harbor job stats are unavailable")
+    writer.write_json(
+        "harbor/job-result.json",
+        {
+            "schema_version": 1,
+            "n_total_trials": 1,
+            "stats": {name: stats[name] for name in _SUCCESS_COUNTS},
+        },
+    )
+    writer.write_json(
+        "harbor/trial-result.json",
+        {
+            "schema_version": 1,
+            "task_name": FIX_GIT_TASK_ID,
+            "outcome": parsed.outcome.value,
+            "task_outcome": parsed.task_outcome,
+            "reward": parsed.reward,
+            "duration_seconds": parsed.duration_seconds,
+            "tokens": {
+                "input": parsed.input_tokens,
+                "cached": parsed.cached_tokens,
+                "output": parsed.output_tokens,
+            },
+            "exception_type": _exception_type(parsed.trial_result.get("exception_info")),
+        },
+    )
     total = 0
-    for path in sorted(root.rglob("*")):
-        mode = path.lstat().st_mode
-        if stat.S_ISLNK(mode) or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
-            raise HarborResultError("Harbor artifact tree contains an unsafe entry")
-        if not stat.S_ISREG(mode):
-            continue
-        size = path.stat().st_size
-        total += size
-        if size > _MAX_ARCHIVE_BYTES or total > _MAX_ARCHIVE_BYTES:
-            raise HarborResultError("Harbor artifacts exceed the bounded archive size")
+    for relative in _PRIVATE_EVIDENCE_FILES:
+        path = trial_directory.joinpath(*relative.split("/"))
         try:
-            contents = path.read_bytes()
+            contents = _read_bounded_regular_file(
+                trial_directory,
+                path,
+                limit=_MAX_ARCHIVE_BYTES,
+            )
+        except FileNotFoundError:
+            continue
+        total += len(contents)
+        if total > _MAX_ARCHIVE_BYTES:
+            raise HarborResultError("Harbor evidence exceeds the bounded archive size")
+        writer.write_bytes(f"harbor/{relative}", contents)
+
+
+def _write_guardian_evidence(
+    writer: ArtifactWriter,
+    live_result: BudgetedTerminalBenchResult,
+    *,
+    side: Side,
+) -> None:
+    """Archive verified E_final/meta pairs under review-id-independent names."""
+
+    if side is Side.CODEX:
+        if live_result.evidence:
+            raise HarborResultError("Codex baseline cannot publish RONDO Guardian evidence")
+        return
+    for index, expected in enumerate(live_result.evidence, start=1):
+        observed, e_final_bytes, meta_bytes = load_guardian_evidence_bundle(
+            live_result.harbor.jobs_dir,
+            expected.relative_path,
+        )
+        if observed != expected:
+            raise HarborResultError("Guardian evidence changed before publication")
+        destination = f"guardian-evidence/{index:04d}"
+        writer.write_bytes(f"{destination}/E_final.json", e_final_bytes)
+        writer.write_bytes(f"{destination}/meta.json", meta_bytes)
+
+
+def _read_bounded_regular_file(root: Path, path: Path, *, limit: int) -> bytes:
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise HarborResultError("Harbor evidence path escaped the trial directory") from exc
+    current = root
+    for part in relative.parts:
+        current = current / part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            raise
         except OSError as exc:
-            raise HarborResultError("Harbor artifact cannot be read") from exc
-        writer.write_bytes(f"{prefix}/{path.relative_to(root).as_posix()}", contents)
+            raise HarborResultError("Harbor evidence file is unavailable") from exc
+        if stat.S_ISLNK(mode):
+            raise HarborResultError("Harbor evidence path contains a symlink")
+    try:
+        file_stat = path.stat()
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise HarborResultError("Harbor evidence file is unavailable") from exc
+    if not stat.S_ISREG(file_stat.st_mode) or file_stat.st_size > limit:
+        raise HarborResultError("Harbor evidence file is unsafe")
+    try:
+        contents = path.read_bytes()
+    except OSError as exc:
+        raise HarborResultError("Harbor evidence cannot be read") from exc
+    if len(contents) != file_stat.st_size:
+        raise HarborResultError("Harbor evidence changed while being read")
+    return contents
 
 
 def _validate_publication_evidence(
@@ -421,8 +712,12 @@ def _validate_publication_evidence(
                 raise HarborResultError(
                     "RONDO Guardian request and E_final evidence do not agree"
                 )
-    elif parsed.outcome is RunOutcome.INFRA_FAILED and host_returncode == 0:
-        raise HarborResultError("infra-failed result has a zero Harbor return code")
+    elif (
+        parsed.outcome is RunOutcome.INFRA_FAILED
+        and host_returncode == 0
+        and not has_trial_result
+    ):
+        raise HarborResultError("infra-failed result lacks Harbor failure evidence")
     else:
         roles = ()
     return roles
@@ -430,6 +725,10 @@ def _validate_publication_evidence(
 
 def _verified_request_roles(metadata_path: Path) -> tuple[str, ...]:
     metadata = _read_json_object(metadata_path)
+    return _request_roles(metadata)
+
+
+def _request_roles(metadata: Mapping[str, Any]) -> tuple[str, ...]:
     if set(metadata) != {"schema_version", "requests"} or metadata.get("schema_version") != 1:
         raise HarborResultError("API metadata differs from schema v1")
     requests = metadata.get("requests")
@@ -576,6 +875,30 @@ def _uint(value: object, label: str) -> int:
 
 def _optional_uint(value: object, label: str) -> int:
     return 0 if value is None else _uint(value, label)
+
+
+def _is_commit(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _exception_type(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HarborResultError("Harbor trial exception info is invalid")
+    exception_type = value.get("exception_type", value.get("type"))
+    if (
+        not isinstance(exception_type, str)
+        or not exception_type
+        or len(exception_type) > 128
+        or not exception_type.replace("_", "").isalnum()
+    ):
+        raise HarborResultError("Harbor trial exception type is invalid")
+    return exception_type
 
 
 def _git(root: Path, *args: str) -> str:

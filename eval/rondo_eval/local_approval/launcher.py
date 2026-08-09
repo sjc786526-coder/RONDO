@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import time
 import urllib.error
@@ -25,6 +27,7 @@ from .client import LocalApprovalSettings, resolve_config_path, settings_from_co
 LLAMA_CPP_BUILD = 10333
 LLAMA_CPP_COMMIT = "08659901c43b51de735740f1cf61bb82fbe0c4e4"
 LLAMA_CPP_ASSET_SHA256 = "936ce04d98abe2a977e9dd2ff92659bb96947e136acee8f2bc3e21d8eaebbf23"
+LLAMA_CPP_BINARY_SHA256 = "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c15315dbd8aa4bbe"
 _VERSION_TIMEOUT_SECONDS = 10
 _ROUTER_TIMEOUT_SECONDS = 10.0
 _WATCHDOG_INTERVAL_SECONDS = 5.0
@@ -82,6 +85,15 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
     if binary is None:
         return RuntimeInspection("runtime_missing", None, "pinned llama-server binary is unavailable")
     try:
+        if _binary_sha256(binary) != LLAMA_CPP_BINARY_SHA256:
+            return RuntimeInspection(
+                "runtime_pin_mismatch",
+                binary,
+                "llama-server binary digest does not match b10333",
+            )
+    except OSError:
+        return RuntimeInspection("runtime_invalid", binary, "llama-server binary cannot be hashed")
+    try:
         completed = subprocess.run(
             [os.fspath(binary), "--version"],
             check=False,
@@ -98,6 +110,28 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
     if completed.returncode != 0 or not build_matches or not commit_matches:
         return RuntimeInspection("runtime_pin_mismatch", binary, "llama-server does not match b10333")
     return RuntimeInspection("runtime_ready", binary, "llama.cpp b10333 is available")
+
+
+def _binary_sha256(path: Path) -> str:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        before = os.fstat(descriptor)
+        digest = hashlib.sha256()
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    ):
+        raise OSError("llama-server changed while being hashed")
+    return digest.hexdigest()
 
 
 def model_path(config: RuntimeConfig, settings: LocalApprovalSettings) -> Path:

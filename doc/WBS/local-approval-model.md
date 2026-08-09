@@ -1,10 +1,24 @@
 # 方向 2：本地审批模型接入与横评
 
-最后更新：2026-08-08 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-10 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
 把 Codex `approve for me` 的审批模型换成可在本地推理的小模型，量化其审批质量与成本相对云端模型的差距。能力必须**可插拔、一键切换**，且不影响原有功能与性能。
+
+## P1 当前状态
+
+- **L1 完成**：已落地 Standard/Responses Lite 双形态 `E_final` 解析、exact policy bytes
+  身份哈希、provider-neutral canonical payload 与结构化决策校验。出站静态 payload 同时排除
+  顶层 `tools`、Lite `additional_tools`、warehouse-only metadata 和 provider-private 运输字段，
+  malformed/歧义证据 fail-closed。
+- **L2 前置设施就绪，真实验收未运行**：llama.cpp 固定为 `b10333`/commit
+  `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 运行时、Responses
+  client、doctor、fake server、结构化输出本地校验和启动入口已实现。无模型 doctor 在
+  看门狗下返回 `infrastructure_ready_model_missing`/78；启动前同时核对安装 binary SHA 与
+  build/commit，不把可伪造的版本输出或 router 健康冒充模型就绪。
+- 当前未提供本地模型权重，本批也明确禁止下载；因此未启动真实模型、未推理、
+  未量显存/上下文/首 token/总耗时，L2 验收与 L2a/L3/L4 保持待后续阶段。
 
 ## 核心设计（已定，不再反复讨论）
 

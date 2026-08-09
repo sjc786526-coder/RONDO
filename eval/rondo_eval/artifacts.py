@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import shutil
 import stat
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +75,23 @@ class ArtifactError(ValueError):
     """Raised when artifact publication cannot be completed safely."""
 
 
+def validate_run_id(
+    run_id: str,
+    *,
+    track: str | None = None,
+    side: str | None = None,
+) -> None:
+    """Validate a run identity before any external work or budget reservation."""
+
+    match = _match_run_id(run_id)
+    if match is None:
+        raise ArtifactError("run id is invalid")
+    if track is not None and match.group("track") != track:
+        raise ArtifactError("run id track is invalid")
+    if side is not None and match.group("side") != side:
+        raise ArtifactError("run id side is invalid")
+
+
 class ArtifactWriter:
     def __init__(
         self,
@@ -82,8 +100,7 @@ class ArtifactWriter:
         *,
         results_worktree_root: Path | None = None,
     ):
-        if _match_run_id(run_id) is None:
-            raise ArtifactError("run id is invalid")
+        validate_run_id(run_id)
         self.paths = paths
         self.run_id = run_id
         self.runs_root = paths.common_root / "eval-data" / "runs"
@@ -99,8 +116,7 @@ class ArtifactWriter:
         _make_directories(self.runs_root, self.paths.common_root, mode=0o700)
         self._recover_pending_publication()
         self._assert_run_paths()
-        if _path_present(self.target) or _path_present(self.staging) or _path_present(self.journal):
-            raise ArtifactError("artifact destination already exists or is unsafe")
+        self._assert_run_unclaimed()
         self.staging.mkdir(mode=0o700)
         self._started = True
         return self
@@ -170,6 +186,18 @@ class ArtifactWriter:
         self._started = False
         return self.target
 
+    def abort(self) -> None:
+        """Release only this process's unpublished staging claim."""
+
+        if not self._started:
+            return
+        self._assert_staging_tree()
+        if _path_present(self.target) or _path_present(self.journal):
+            raise ArtifactError("published artifact state cannot be aborted")
+        shutil.rmtree(self.staging)
+        _fsync_directory(self.runs_root)
+        self._started = False
+
     def _validate_roots(self) -> None:
         common_root = self.paths.common_root
         _require_directory(common_root, "common root")
@@ -185,6 +213,26 @@ class ArtifactWriter:
         _assert_no_symlink_components(self.paths.common_root, self.runs_root)
         for path in (self.target, self.staging, self.journal):
             _require_below(path, self.runs_root, "artifact publication path")
+
+    def _assert_run_unclaimed(self) -> None:
+        if _path_present(self.target) or _path_present(self.journal):
+            raise ArtifactError("artifact destination already exists or is unsafe")
+        prefix = f".{self.run_id}.staging-"
+        try:
+            if any(entry.name.startswith(prefix) for entry in os.scandir(self.runs_root)):
+                raise ArtifactError("artifact run id already has an active staging claim")
+        except OSError as exc:
+            raise ArtifactError("artifact runs directory cannot be checked safely") from exc
+        _make_directories(self.results.parent, self.paths.common_root)
+        lock_path = self.results.with_suffix(".jsonl.lock")
+        _assert_safe_index_paths(self.results, lock_path, self.paths.common_root)
+        with _open_lock_file(lock_path) as lock_handle:
+            _lock(lock_handle)
+            try:
+                if _run_id_exists(self.results, self.run_id):
+                    raise ArtifactError("run id is already present in the tracked index")
+            finally:
+                _unlock(lock_handle)
 
     def _assert_staging_tree(self) -> None:
         self._assert_run_paths()
