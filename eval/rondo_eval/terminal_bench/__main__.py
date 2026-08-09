@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         }
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
-        return 0 if parsed.outcome is RunOutcome.COMPLETED else EVIDENCE_ERROR
+        return _outcome_exit_code(parsed.outcome)
     except BudgetStopped:
         return BUDGET_STOPPED
     except ConfigError:
@@ -153,6 +153,14 @@ def main(argv: list[str] | None = None) -> int:
         return INFRA_ERROR
     except (TerminalBenchRunError, OSError, ValueError, json.JSONDecodeError):
         return EVIDENCE_ERROR
+
+
+def _outcome_exit_code(outcome: RunOutcome) -> int:
+    if outcome is RunOutcome.COMPLETED:
+        return 0
+    if outcome is RunOutcome.INFRA_FAILED:
+        return INFRA_ERROR
+    return EVIDENCE_ERROR
 
 
 def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:

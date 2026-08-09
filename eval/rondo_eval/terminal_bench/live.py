@@ -106,10 +106,6 @@ async def run_budgeted_terminal_bench(
 
     metadata_ready = milestone_metadata_ready(metadata_path)
     evidence = _collect_evidence(harbor.jobs_dir) if request.side is Side.RONDO else ()
-    if harbor.returncode == 0 and not metadata_ready:
-        raise TerminalBenchRunError("successful Harbor run lacks verified API metadata")
-    if harbor.returncode == 0 and request.side is Side.RONDO and not evidence:
-        raise TerminalBenchRunError("successful RONDO run lacks an aggregatable E_final bundle")
     return BudgetedTerminalBenchResult(
         prepared=prepared,
         harbor=harbor,

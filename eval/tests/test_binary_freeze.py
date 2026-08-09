@@ -104,10 +104,12 @@ def _write_workspace(root: Path, lock: bytes, *, gate: bool) -> None:
     if gate:
         scripts = root / "mydev" / "scripts"
         scripts.mkdir(parents=True)
-        for name in ("with-build-lock.sh", "with_codex_v8_artifacts.py"):
-            path = scripts / name
-            path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            path.chmod(0o755)
+        watchdog = scripts / "with-build-lock.sh"
+        watchdog.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        watchdog.chmod(0o755)
+        v8_gate = scripts / "with_codex_v8_artifacts.py"
+        v8_gate.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        v8_gate.chmod(0o644)
 
 
 def _init_detached_repository(root: Path, *, tag: str | None = None) -> str:

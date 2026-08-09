@@ -425,7 +425,9 @@ def _validate_build_command(
     watchdog = paths.gate_root / "mydev" / "scripts" / "with-build-lock.sh"
     v8_gate = paths.gate_root / "mydev" / "scripts" / "with_codex_v8_artifacts.py"
     _regular_file(watchdog, executable=True)
-    _regular_file(v8_gate, executable=True)
+    # This tracked helper is invoked through ``python3`` in the frozen argv;
+    # its repository mode is intentionally 0644.
+    _regular_file(v8_gate)
     try:
         watchdog_index = argv.index(str(watchdog), 3)
     except ValueError as exc:

@@ -101,8 +101,17 @@ def parse_single_task_result(
 ) -> ParsedHarborResult:
     """Parse exactly one Harbor job and trial; host rc alone is never success."""
 
-    root = _regular_directory(jobs_dir)
+    if isinstance(host_returncode, bool) or not isinstance(host_returncode, int):
+        raise HarborResultError("Harbor host return code is invalid")
+    root = _optional_jobs_directory(
+        jobs_dir,
+        allow_missing=host_returncode != 0,
+    )
+    if root is None:
+        return _infra_result_without_harbor_tree()
     job_directories = _child_directories(root)
+    if not job_directories and host_returncode != 0:
+        return _infra_result_without_harbor_tree()
     if len(job_directories) != 1:
         raise HarborResultError("Harbor jobs directory must contain exactly one job")
     job_directory = job_directories[0]
@@ -156,17 +165,16 @@ def parse_single_task_result(
         or not 0 <= float(reward) <= 1
     ):
         raise HarborResultError("Harbor trial reward is invalid")
-    started = _timestamp(trial.get("started_at"), "trial started_at")
-    finished = _timestamp(trial.get("finished_at"), "trial finished_at")
-    duration = (finished - started).total_seconds()
-    if not math.isfinite(duration) or duration < 0:
-        raise HarborResultError("Harbor trial duration is invalid")
+    duration = _trial_duration(trial, outcome=outcome)
     agent_result = trial.get("agent_result")
-    if not isinstance(agent_result, dict):
+    if agent_result is None and outcome is not RunOutcome.COMPLETED:
+        input_tokens = cached_tokens = output_tokens = 0
+    elif not isinstance(agent_result, dict):
         raise HarborResultError("Harbor agent result is missing")
-    input_tokens = _optional_uint(agent_result.get("n_input_tokens"), "input tokens")
-    cached_tokens = _optional_uint(agent_result.get("n_cache_tokens"), "cache tokens")
-    output_tokens = _optional_uint(agent_result.get("n_output_tokens"), "output tokens")
+    else:
+        input_tokens = _optional_uint(agent_result.get("n_input_tokens"), "input tokens")
+        cached_tokens = _optional_uint(agent_result.get("n_cache_tokens"), "cache tokens")
+        output_tokens = _optional_uint(agent_result.get("n_output_tokens"), "output tokens")
     if cached_tokens > input_tokens:
         raise HarborResultError("Harbor cached tokens exceed input tokens")
     return ParsedHarborResult(
@@ -197,6 +205,7 @@ def publish_terminal_bench_result(
 
     if live_result.prepared.spec.side is not side:
         raise HarborResultError("prepared side differs from publication side")
+    _validate_publication_evidence(live_result, parsed)
     writer = ArtifactWriter(
         paths,
         run_id,
@@ -204,9 +213,36 @@ def publish_terminal_bench_result(
     ).start()
     summary = _safe_summary(run_id, side, git_commit, live_result, parsed)
     writer.write_json("run-summary.json", summary)
-    _copy_private_tree(writer, live_result.harbor.jobs_dir, "harbor/jobs")
-    metadata = _read_json_object(metadata_path)
-    writer.write_json("api-metadata.json", metadata)
+    if parsed.job_result or parsed.trial_result:
+        _copy_private_tree(writer, live_result.harbor.jobs_dir, "harbor/jobs")
+    else:
+        writer.write_json(
+            "harbor/jobs-unavailable.json",
+            {
+                "schema_version": 1,
+                "outcome": RunOutcome.INFRA_FAILED.value,
+                "host_returncode": live_result.harbor.returncode,
+            },
+        )
+    try:
+        metadata = _read_json_object(metadata_path)
+    except HarborResultError:
+        if (
+            parsed.outcome is RunOutcome.COMPLETED
+            or live_result.metadata_ready
+            or _path_present(metadata_path)
+        ):
+            raise
+        writer.write_json(
+            "api-metadata-unavailable.json",
+            {
+                "schema_version": 1,
+                "metadata_ready": False,
+                "outcome": parsed.outcome.value,
+            },
+        )
+    else:
+        writer.write_json("api-metadata.json", metadata)
 
     spent = _run_spend(live_result.budget_snapshot, run_id)
     record = {
@@ -326,6 +362,64 @@ def _copy_private_tree(writer: ArtifactWriter, source: Path, prefix: str) -> Non
         writer.write_bytes(f"{prefix}/{path.relative_to(root).as_posix()}", contents)
 
 
+def _validate_publication_evidence(
+    live_result: BudgetedTerminalBenchResult,
+    parsed: ParsedHarborResult,
+) -> None:
+    host_returncode = live_result.harbor.returncode
+    has_job_result = bool(parsed.job_result)
+    has_trial_result = bool(parsed.trial_result)
+    if has_job_result != has_trial_result:
+        raise HarborResultError("parsed Harbor result is internally inconsistent")
+    if not has_job_result:
+        if parsed.outcome is not RunOutcome.INFRA_FAILED:
+            raise HarborResultError("only infra failure may omit the Harbor result tree")
+        root = _optional_jobs_directory(
+            live_result.harbor.jobs_dir,
+            allow_missing=True,
+        )
+        if root is not None and _child_directories(root):
+            raise HarborResultError("an existing Harbor result tree cannot be omitted")
+    if parsed.outcome is RunOutcome.COMPLETED:
+        if host_returncode != 0:
+            raise HarborResultError("completed result has a non-zero Harbor return code")
+        if not live_result.metadata_ready:
+            raise HarborResultError("completed run lacks verified API metadata")
+        if live_result.prepared.spec.side is Side.RONDO and not live_result.evidence:
+            raise HarborResultError("completed RONDO run lacks an aggregatable E_final bundle")
+    elif parsed.outcome is RunOutcome.INFRA_FAILED and host_returncode == 0:
+        raise HarborResultError("infra-failed result has a zero Harbor return code")
+
+
+def _infra_result_without_harbor_tree() -> ParsedHarborResult:
+    return ParsedHarborResult(
+        outcome=RunOutcome.INFRA_FAILED,
+        task_outcome="fail",
+        reward=0.0,
+        duration_seconds=0.0,
+        input_tokens=0,
+        cached_tokens=0,
+        output_tokens=0,
+        job_result={},
+        trial_result={},
+    )
+
+
+def _trial_duration(trial: Mapping[str, Any], *, outcome: RunOutcome) -> float:
+    started_raw = trial.get("started_at")
+    finished_raw = trial.get("finished_at")
+    if started_raw is None and finished_raw is None and outcome is not RunOutcome.COMPLETED:
+        return 0.0
+    if started_raw is None or finished_raw is None:
+        raise HarborResultError("Harbor trial timestamps are incomplete")
+    started = _timestamp(started_raw, "trial started_at")
+    finished = _timestamp(finished_raw, "trial finished_at")
+    duration = (finished - started).total_seconds()
+    if not math.isfinite(duration) or duration < 0:
+        raise HarborResultError("Harbor trial duration is invalid")
+    return duration
+
+
 def _run_spend(snapshot: Mapping[str, object], run_id: str) -> float:
     runs = snapshot.get("runs")
     run = runs.get(run_id) if isinstance(runs, dict) else None
@@ -366,6 +460,28 @@ def _regular_directory(path: Path) -> Path:
     if resolved != path or not stat.S_ISDIR(mode):
         raise HarborResultError("Harbor result directory is unsafe")
     return path
+
+
+def _optional_jobs_directory(path: Path, *, allow_missing: bool) -> Path | None:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        if allow_missing:
+            return None
+        raise HarborResultError("Harbor result directory is unavailable")
+    except OSError as exc:
+        raise HarborResultError("Harbor result directory is unavailable") from exc
+    return _regular_directory(path)
+
+
+def _path_present(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise HarborResultError("artifact input path is unavailable") from exc
+    return True
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

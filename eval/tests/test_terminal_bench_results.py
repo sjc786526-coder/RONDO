@@ -14,6 +14,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.config import RepoPaths  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, ProviderProjection, RunOutcome, RunSpec, Side  # noqa: E402
 from rondo_eval.terminal_bench.live import BudgetedTerminalBenchResult  # noqa: E402
+from rondo_eval.terminal_bench import __main__ as terminal_bench_main  # noqa: E402
 from rondo_eval.terminal_bench.results import (  # noqa: E402
     HarborResultError,
     UPSTREAM_CODEX,
@@ -120,6 +121,92 @@ class TerminalBenchResultTests(unittest.TestCase):
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         self.assertEqual((parsed.outcome, parsed.reward), (RunOutcome.AGENT_FAILED, 0.0))
 
+    def test_early_agent_error_accepts_optional_harbor_fields(self) -> None:
+        self.job_result["stats"]["n_completed_trials"] = 0
+        self.job_result["stats"]["n_errored_trials"] = 1
+        self.trial_result.update(
+            {
+                "agent_result": None,
+                "verifier_result": None,
+                "exception_info": {"exception_type": "RuntimeError"},
+                "started_at": None,
+                "finished_at": None,
+            }
+        )
+        self._write_results()
+
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        self.assertEqual(parsed.outcome, RunOutcome.AGENT_FAILED)
+        self.assertEqual(parsed.task_outcome, "fail")
+        self.assertEqual(parsed.duration_seconds, 0.0)
+        self.assertEqual(
+            (parsed.input_tokens, parsed.cached_tokens, parsed.output_tokens),
+            (0, 0, 0),
+        )
+
+    def test_completed_still_requires_agent_result_and_timestamps(self) -> None:
+        self.trial_result["agent_result"] = None
+        self._write_results()
+        with self.assertRaises(HarborResultError):
+            parse_single_task_result(self.jobs, host_returncode=0)
+
+        self.trial_result["agent_result"] = {
+            "n_input_tokens": 0,
+            "n_cache_tokens": 0,
+            "n_output_tokens": 0,
+        }
+        self.trial_result["started_at"] = None
+        self.trial_result["finished_at"] = None
+        self._write_results()
+        with self.assertRaises(HarborResultError):
+            parse_single_task_result(self.jobs, host_returncode=0)
+
+    def test_early_agent_error_is_archived_without_fake_api_metadata(self) -> None:
+        run_id = "20260810-010000005-tb-codex-r1"
+        self.job_result["stats"]["n_completed_trials"] = 0
+        self.job_result["stats"]["n_errored_trials"] = 1
+        self.trial_result.update(
+            {
+                "agent_result": None,
+                "verifier_result": None,
+                "exception_info": {"exception_type": "RuntimeError"},
+                "started_at": None,
+                "finished_at": None,
+            }
+        )
+        self._write_results()
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result, "metadata_ready", False)
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.CODEX,
+            git_commit="e" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=self.root / "missing-api-metadata.json",
+        )
+
+        self.assertTrue((target / "harbor/jobs/2026-08-10__01-00-00/result.json").is_file())
+        self.assertTrue((target / "api-metadata-unavailable.json").is_file())
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "agent_failed")
+        self.assertEqual(record["tasks"][0]["attribution"], "agent")
+
+    def test_nonzero_host_without_job_tree_is_explicit_infra_failure(self) -> None:
+        missing = self.root / "missing-jobs"
+        parsed = parse_single_task_result(missing, host_returncode=17)
+        self.assertEqual(parsed.outcome, RunOutcome.INFRA_FAILED)
+        self.assertEqual(parsed.task_outcome, "fail")
+        self.assertEqual((parsed.reward, parsed.duration_seconds), (0.0, 0.0))
+        self.assertEqual((parsed.job_result, parsed.trial_result), ({}, {}))
+        with self.assertRaises(HarborResultError):
+            parse_single_task_result(missing, host_returncode=0)
+
     def test_ambiguous_or_malformed_results_fail_closed(self) -> None:
         (self.jobs / "second-job").mkdir()
         with self.assertRaises(HarborResultError):
@@ -151,6 +238,81 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(record["upstream_codex"], UPSTREAM_CODEX)
         self.assertEqual(record["outcome"], "completed")
         self.assertEqual(record["cost"], {"estimated_usd": 0.012345, "actual_usd": 0.012345})
+
+    def test_infra_without_job_tree_or_metadata_is_archived_explicitly(self) -> None:
+        run_id = "20260810-010000002-tb-codex-r1"
+        missing_jobs = self.root / "missing-jobs"
+        missing_metadata = self.root / "work" / "missing-api-metadata.json"
+        live_result = self._live_result(run_id)
+        object.__setattr__(
+            live_result,
+            "harbor",
+            HostHarborResult(17, missing_jobs),
+        )
+        object.__setattr__(live_result, "metadata_ready", False)
+        parsed = parse_single_task_result(missing_jobs, host_returncode=17)
+
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.CODEX,
+            git_commit="e" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=missing_metadata,
+        )
+
+        self.assertTrue((target / "harbor/jobs-unavailable.json").is_file())
+        self.assertTrue((target / "api-metadata-unavailable.json").is_file())
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "infra_failed")
+        self.assertEqual(record["tasks"][0]["attribution"], "infra")
+
+    def test_completed_publication_keeps_metadata_gate(self) -> None:
+        run_id = "20260810-010000003-tb-codex-r1"
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result, "metadata_ready", False)
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        with self.assertRaises(HarborResultError):
+            publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=Side.CODEX,
+                git_commit="e" * 40,
+                live_result=live_result,
+                parsed=parsed,
+                metadata_path=self.root / "missing-api-metadata.json",
+            )
+
+    def test_completed_rondo_publication_keeps_e_final_gate(self) -> None:
+        run_id = "20260810-010000004-tb-rondo-r1"
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        with self.assertRaises(HarborResultError):
+            publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=Side.RONDO,
+                git_commit="e" * 40,
+                live_result=live_result,
+                parsed=parsed,
+                metadata_path=self.root / "missing-api-metadata.json",
+            )
+
+    def test_outcome_exit_codes_preserve_infra_classification(self) -> None:
+        self.assertEqual(terminal_bench_main._outcome_exit_code(RunOutcome.COMPLETED), 0)
+        self.assertEqual(
+            terminal_bench_main._outcome_exit_code(RunOutcome.INFRA_FAILED),
+            terminal_bench_main.INFRA_ERROR,
+        )
+        self.assertEqual(
+            terminal_bench_main._outcome_exit_code(RunOutcome.AGENT_FAILED),
+            terminal_bench_main.EVIDENCE_ERROR,
+        )
 
 
 if __name__ == "__main__":
