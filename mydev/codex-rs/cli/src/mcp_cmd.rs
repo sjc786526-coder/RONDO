@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -256,45 +257,71 @@ async fn perform_oauth_login_retry_without_scopes(
     browser_launch: BrowserLaunch,
     http_client: Arc<dyn HttpClient>,
 ) -> Result<()> {
-    match perform_oauth_login(
-        name,
-        url,
-        store_mode,
-        keyring_backend_kind,
-        http_headers.clone(),
-        env_http_headers.clone(),
-        &resolved_scopes.scopes,
-        oauth_client_id,
-        oauth_resource,
-        callback_port,
-        callback_url,
+    perform_oauth_login_retry_without_scopes_with(
+        resolved_scopes,
         browser_launch,
-        Arc::clone(&http_client),
+        move |scopes, browser_launch| {
+            let http_headers = http_headers.clone();
+            let env_http_headers = env_http_headers.clone();
+            let http_client = Arc::clone(&http_client);
+            async move {
+                perform_oauth_login(
+                    name,
+                    url,
+                    store_mode,
+                    keyring_backend_kind,
+                    http_headers,
+                    env_http_headers,
+                    &scopes,
+                    oauth_client_id,
+                    oauth_resource,
+                    callback_port,
+                    callback_url,
+                    browser_launch,
+                    http_client,
+                )
+                .await
+            }
+        },
     )
     .await
-    {
+}
+
+async fn perform_oauth_login_retry_without_scopes_with<F, Fut>(
+    resolved_scopes: &ResolvedMcpOAuthScopes,
+    browser_launch: BrowserLaunch,
+    mut perform_login: F,
+) -> Result<()>
+where
+    F: FnMut(Vec<String>, BrowserLaunch) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    match perform_login(resolved_scopes.scopes.clone(), browser_launch).await {
         Ok(()) => Ok(()),
         Err(err) if should_retry_without_scopes(resolved_scopes, &err) => {
             println!("OAuth provider rejected discovered scopes. Retrying without scopes…");
-            perform_oauth_login(
-                name,
-                url,
-                store_mode,
-                keyring_backend_kind,
-                http_headers,
-                env_http_headers,
-                &[],
-                oauth_client_id,
-                oauth_resource,
-                callback_port,
-                callback_url,
-                browser_launch,
-                http_client,
-            )
-            .await
+            perform_login(Vec::new(), browser_launch).await
         }
         Err(err) => Err(err),
     }
+}
+
+/// Keep the parsed CLI browser policy attached to both OAuth attempts.
+async fn perform_mcp_login_from_args_with<F, Fut>(
+    login_args: &LoginArgs,
+    resolved_scopes: &ResolvedMcpOAuthScopes,
+    perform_login: F,
+) -> Result<()>
+where
+    F: FnMut(Vec<String>, BrowserLaunch) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    perform_oauth_login_retry_without_scopes_with(
+        resolved_scopes,
+        login_args.browser_launch(),
+        perform_login,
+    )
+    .await
 }
 
 async fn validate_profile_v2_migration(
@@ -506,15 +533,8 @@ async fn run_login(config: &Config, login_args: LoginArgs) -> Result<()> {
     let mcp_manager = load_mcp_manager(config).await;
     let mcp_servers = mcp_manager.configured_servers(config).await;
 
-    let browser_launch = login_args.browser_launch();
-    let LoginArgs {
-        name,
-        scopes,
-        no_open_browser: _,
-    } = login_args;
-
-    let Some(server) = mcp_servers.get(&name) else {
-        bail!("No MCP server named '{name}' found.");
+    let Some(server) = mcp_servers.get(&login_args.name) else {
+        bail!("No MCP server named '{}' found.", login_args.name);
     };
 
     let (url, http_headers, env_http_headers) = match &server.transport {
@@ -531,7 +551,7 @@ async fn run_login(config: &Config, login_args: LoginArgs) -> Result<()> {
     // environment routing belongs to app-server and session MCP flows.
     let http_client: Arc<dyn HttpClient> =
         Arc::new(RouteAwareHttpClient::new(config.http_client_factory()));
-    let explicit_scopes = (!scopes.is_empty()).then_some(scopes);
+    let explicit_scopes = (!login_args.scopes.is_empty()).then(|| login_args.scopes.clone());
     let discovered_scopes = if explicit_scopes.is_none() && server.scopes.is_none() {
         discover_supported_scopes(
             &server.transport,
@@ -545,25 +565,48 @@ async fn run_login(config: &Config, login_args: LoginArgs) -> Result<()> {
     };
     let resolved_scopes =
         resolve_oauth_scopes(explicit_scopes, server.scopes.clone(), discovered_scopes);
-    let credential_name = server.oauth_credential_name(&name);
+    let credential_name = server.oauth_credential_name(&login_args.name);
+    let credential_name = credential_name.as_ref();
+    let url = url.as_str();
+    let store_mode = config.mcp_oauth_credentials_store_mode;
+    let keyring_backend_kind = config.auth_keyring_backend_kind();
+    let oauth_client_id = server.oauth_client_id();
+    let oauth_resource = server.oauth_resource.as_deref();
+    let callback_port = config.mcp_oauth_callback_port;
+    let callback_url = config.mcp_oauth_callback_url.as_deref();
 
-    perform_oauth_login_retry_without_scopes(
-        credential_name.as_ref(),
-        &url,
-        config.mcp_oauth_credentials_store_mode,
-        config.auth_keyring_backend_kind(),
-        http_headers,
-        env_http_headers,
+    perform_mcp_login_from_args_with(
+        &login_args,
         &resolved_scopes,
-        server.oauth_client_id(),
-        server.oauth_resource.as_deref(),
-        config.mcp_oauth_callback_port,
-        config.mcp_oauth_callback_url.as_deref(),
-        browser_launch,
-        http_client,
+        move |scopes, browser_launch| {
+            let http_headers = http_headers.clone();
+            let env_http_headers = env_http_headers.clone();
+            let http_client = Arc::clone(&http_client);
+            async move {
+                perform_oauth_login(
+                    credential_name,
+                    url,
+                    store_mode,
+                    keyring_backend_kind,
+                    http_headers,
+                    env_http_headers,
+                    &scopes,
+                    oauth_client_id,
+                    oauth_resource,
+                    callback_port,
+                    callback_url,
+                    browser_launch,
+                    http_client,
+                )
+                .await
+            }
+        },
     )
     .await?;
-    println!("Successfully logged in to MCP server '{name}'.");
+    println!(
+        "Successfully logged in to MCP server '{}'.",
+        login_args.name
+    );
     Ok(())
 }
 

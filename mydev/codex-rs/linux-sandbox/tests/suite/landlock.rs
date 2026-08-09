@@ -47,6 +47,15 @@ const NETWORK_TIMEOUT_MS: u64 = 10_000;
 const NETWORK_TIMEOUT_MS: u64 = 10_000;
 
 const BWRAP_UNAVAILABLE_ERR: &str = "bubblewrap is unavailable: no system bwrap was found";
+const BWRAP_USER_NAMESPACE_ERR_SNIPPETS: &[&str] = &[
+    "loopback: Failed RTM_NEWADDR",
+    "loopback: Failed RTM_NEWLINK",
+    "setting up uid map: Permission denied",
+    "No permissions to create a new namespace",
+];
+// Keep the emitted value free of generic denial-classifier keywords such as
+// "sandbox" and "landlock" so the marker cannot itself turn a failure into Denied.
+const WGET_INNER_STAGE_MARKER: &str = "__codex_wget_inner_ready_4d0bf61b__";
 
 fn create_env_from_core_vars() -> HashMap<String, String> {
     let policy = ShellEnvironmentPolicy::default();
@@ -129,6 +138,7 @@ async fn run_cmd_result_with_permission_profile(
         permission_profile,
         timeout_ms,
         use_legacy_landlock,
+        create_env_from_core_vars(),
     )
     .await
 }
@@ -162,6 +172,7 @@ async fn run_cmd_result_with_cwd_and_writable_roots(
         permission_profile,
         timeout_ms,
         use_legacy_landlock,
+        create_env_from_core_vars(),
     )
     .await
 }
@@ -172,6 +183,7 @@ async fn run_cmd_result_with_permission_profile_for_cwd(
     permission_profile: PermissionProfile,
     timeout_ms: u64,
     use_legacy_landlock: bool,
+    env: HashMap<String, String>,
 ) -> Result<codex_protocol::exec_output::ExecToolCallOutput> {
     let sandbox_cwd = cwd.clone();
     let params = ExecParams {
@@ -179,7 +191,7 @@ async fn run_cmd_result_with_permission_profile_for_cwd(
         cwd,
         expiration: timeout_ms.into(),
         capture_policy: ExecCapturePolicy::ShellTool,
-        env: create_env_from_core_vars(),
+        env,
         network: None,
         network_environment_id: None,
         sandbox_permissions: SandboxPermissions::UseDefault,
@@ -211,6 +223,41 @@ fn is_bwrap_unavailable_output(output: &codex_protocol::exec_output::ExecToolCal
             && (output.stderr.text.contains("Operation not permitted")
                 || output.stderr.text.contains("Permission denied")
                 || output.stderr.text.contains("Invalid argument")))
+}
+
+fn is_bwrap_user_namespace_failure(
+    output: &codex_protocol::exec_output::ExecToolCallOutput,
+) -> bool {
+    BWRAP_USER_NAMESPACE_ERR_SNIPPETS
+        .iter()
+        .any(|snippet| output.stderr.text.contains(snippet))
+}
+
+fn is_wget_connect_seccomp_denial(
+    output: &codex_protocol::exec_output::ExecToolCallOutput,
+    listener_endpoint: &str,
+) -> bool {
+    let sandbox_started = output
+        .stdout
+        .text
+        .lines()
+        .any(|line| line == WGET_INNER_STAGE_MARKER);
+    let stderr = output.stderr.text.to_ascii_lowercase();
+    let listener_endpoint = listener_endpoint.to_ascii_lowercase();
+    let has_wget_network_diagnostic = stderr.lines().any(|line| {
+        line.contains(&listener_endpoint)
+            && line.contains("operation not permitted")
+            && (line.contains("connect") || line.contains("socket"))
+    });
+
+    output.exit_code != 0
+        && sandbox_started
+        && !is_bwrap_unavailable_output(output)
+        && !is_bwrap_user_namespace_failure(output)
+        // The restricted-network seccomp filter returns EPERM for AF_INET
+        // socket/connect. Bind EPERM to the same diagnostic line as this
+        // fixture's endpoint without requiring one complete wget sentence.
+        && has_wget_network_diagnostic
 }
 
 async fn should_skip_bwrap_tests() -> bool {
@@ -520,15 +567,36 @@ async fn sandbox_blocks_wget_tcp_connect() {
                 Err(error) => panic!("accept wget control request: {error}"),
             }
         };
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .expect("set wget fixture read timeout");
-        let mut request = [0_u8; 1024];
-        let read = stream.read(&mut request).expect("read wget request");
+        const MAX_REQUEST_HEADER_BYTES: usize = 16 * 1024;
+        let read_deadline = Instant::now() + Duration::from_secs(2);
+        let mut request = Vec::with_capacity(1024);
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            assert!(
+                request.len() < MAX_REQUEST_HEADER_BYTES,
+                "wget control request headers exceeded {MAX_REQUEST_HEADER_BYTES} bytes"
+            );
+            let now = Instant::now();
+            assert!(
+                now < read_deadline,
+                "timed out reading wget request headers"
+            );
+            stream
+                .set_read_timeout(Some(read_deadline - now))
+                .expect("set wget fixture read timeout");
+
+            let mut chunk = [0_u8; 1024];
+            let chunk_len = (MAX_REQUEST_HEADER_BYTES - request.len()).min(chunk.len());
+            match stream.read(&mut chunk[..chunk_len]) {
+                Ok(0) => panic!("wget closed the control connection before sending full headers"),
+                Ok(read) => request.extend_from_slice(&chunk[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => panic!("read wget request headers: {error}"),
+            }
+        }
         assert!(
-            request[..read].starts_with(b"GET /probe HTTP/1."),
+            request.starts_with(b"GET /probe HTTP/1."),
             "unexpected wget request: {}",
-            String::from_utf8_lossy(&request[..read])
+            String::from_utf8_lossy(&request)
         );
         stream
             .write_all(
@@ -536,9 +604,22 @@ async fn sandbox_blocks_wget_tcp_connect() {
             )
             .expect("write wget fixture response");
     });
-    let url = format!("http://{listener_addr}/probe");
+    let listener_endpoint = listener_addr.to_string();
+    let url = format!("http://{listener_endpoint}/probe");
+    // Resolve wget once so the host control and sandbox round cannot select
+    // different executables through different PATH views.
+    let path = std::env::var_os("PATH").expect("PATH must be set to locate wget");
+    let wget_program = std::env::split_paths(&path)
+        .map(|directory| directory.join("wget"))
+        .find(|candidate| candidate.is_file())
+        .expect("wget must be available for the sandbox contract")
+        .canonicalize()
+        .expect("canonicalize wget executable");
+    let wget_program = wget_program
+        .to_str()
+        .expect("wget executable path must be valid UTF-8");
     let wget_command = [
-        "wget",
+        wget_program,
         "--no-proxy",
         "--tries=1",
         "--timeout=2",
@@ -548,6 +629,7 @@ async fn sandbox_blocks_wget_tcp_connect() {
 
     let control = Command::new(wget_command[0])
         .args(&wget_command[1..])
+        .env("LC_ALL", "C")
         .output()
         .expect("wget must be available for the sandbox contract");
     control_server
@@ -556,11 +638,33 @@ async fn sandbox_blocks_wget_tcp_connect() {
     assert_eq!(control.status.code(), Some(0));
     assert_eq!(control.stdout, b"sandbox-probe");
 
-    let result = run_cmd_result_with_permission_profile(
-        &wget_command,
+    let sandbox_wget_command = [
+        "bash",
+        "--noprofile",
+        "--norc",
+        "-p",
+        "-c",
+        "export LC_ALL=C && printf '%s\\n' \"$1\" && shift && exec \"$@\"",
+        "codex-wget-inner-control",
+        WGET_INNER_STAGE_MARKER,
+        wget_command[0],
+        wget_command[1],
+        wget_command[2],
+        wget_command[3],
+        wget_command[4],
+        wget_command[5],
+    ];
+    let mut sandbox_env = create_env_from_core_vars();
+    sandbox_env.remove("BASH_ENV");
+    sandbox_env.remove("ENV");
+    let cwd = AbsolutePathBuf::current_dir().expect("cwd should exist");
+    let result = run_cmd_result_with_permission_profile_for_cwd(
+        &sandbox_wget_command,
+        cwd,
         PermissionProfile::read_only(),
         SHORT_TIMEOUT_MS,
         /*use_legacy_landlock*/ false,
+        sandbox_env,
     )
     .await;
     let denied_output = match result {
@@ -575,7 +679,13 @@ async fn sandbox_blocks_wget_tcp_connect() {
             output.exit_code, output.stdout.text, output.stderr.text
         ),
     };
-    assert_ne!(denied_output.exit_code, 0);
+    assert!(
+        is_wget_connect_seccomp_denial(&denied_output, &listener_endpoint),
+        "expected wget connect to reach the initialized sandbox and fail with seccomp EPERM; exit={}; stdout={}; stderr={}",
+        denied_output.exit_code,
+        denied_output.stdout.text,
+        denied_output.stderr.text
+    );
 
     listener
         .set_nonblocking(true)
@@ -585,6 +695,74 @@ async fn sandbox_blocks_wget_tcp_connect() {
         Ok(_) => panic!("sandboxed wget reached the fixture listener"),
         Err(err) => panic!("failed to inspect wget fixture listener: {err}"),
     }
+}
+
+#[test]
+fn sandbox_blocks_wget_tcp_connect_classifier_rejects_non_connect_eperm() {
+    let output = |stdout: &str, stderr: &str| codex_protocol::exec_output::ExecToolCallOutput {
+        exit_code: 1,
+        stdout: codex_protocol::exec_output::StreamOutput::new(stdout.to_string()),
+        stderr: codex_protocol::exec_output::StreamOutput::new(stderr.to_string()),
+        ..Default::default()
+    };
+    let marker = format!("{WGET_INNER_STAGE_MARKER}\n");
+    let listener_endpoint = "127.0.0.1:43123";
+    let connect_eperm =
+        format!("wget: Connecting to {listener_endpoint}... failed: Operation not permitted");
+
+    let seccomp_denial_after_marker = output(&marker, &connect_eperm);
+    assert!(is_wget_connect_seccomp_denial(
+        &seccomp_denial_after_marker,
+        listener_endpoint
+    ));
+    assert!(!is_wget_connect_seccomp_denial(
+        &seccomp_denial_after_marker,
+        "127.0.0.1:43124"
+    ));
+
+    let bwrap_startup_failure = output(
+        "",
+        "bwrap: Can't mount proc on /newroot/proc: Operation not permitted",
+    );
+    assert!(!is_wget_connect_seccomp_denial(
+        &bwrap_startup_failure,
+        listener_endpoint
+    ));
+
+    let missing_marker = output("", &connect_eperm);
+    assert!(!is_wget_connect_seccomp_denial(
+        &missing_marker,
+        listener_endpoint
+    ));
+
+    let exec_eperm_after_marker = output(
+        &marker,
+        "bash: exec: /usr/bin/wget: cannot execute: Operation not permitted",
+    );
+    assert!(!is_wget_connect_seccomp_denial(
+        &exec_eperm_after_marker,
+        listener_endpoint
+    ));
+
+    let split_transport_and_eperm = output(
+        &marker,
+        &format!(
+            "wget: Connecting to {listener_endpoint}... failed: Connection refused\nbash: unrelated: Operation not permitted"
+        ),
+    );
+    assert!(!is_wget_connect_seccomp_denial(
+        &split_transport_and_eperm,
+        listener_endpoint
+    ));
+
+    let user_namespace_failure_after_marker = output(
+        &marker,
+        &format!("{connect_eperm}\nbwrap: setting up uid map: Permission denied"),
+    );
+    assert!(!is_wget_connect_seccomp_denial(
+        &user_namespace_failure_after_marker,
+        listener_endpoint
+    ));
 }
 
 #[tokio::test]

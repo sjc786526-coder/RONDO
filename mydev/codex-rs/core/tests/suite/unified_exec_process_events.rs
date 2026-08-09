@@ -4,6 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_config::test_support::CloudConfigBundleFixture;
 use codex_features::Feature;
+use codex_http_client::HttpClientBuilder;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
@@ -16,6 +17,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_sequence_without_request_count_expectation;
+use core_test_support::responses::received_responses_request_count;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex::test_codex;
@@ -557,6 +559,39 @@ async fn serve_exec_with_pushed_events(
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn capped_sse_sequence_global_count_sees_third_responses_request() -> Result<()> {
+    let server = start_mock_server().await;
+    let response_mock = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![
+            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+        ],
+    )
+    .await;
+    let client = HttpClientBuilder::new().build_direct()?;
+    let responses_url = format!("{}/v1/responses", server.uri());
+    let request_body = json!({ "input": [] });
+
+    let mut statuses = Vec::new();
+    for _ in 0..3 {
+        let response = client
+            .post(responses_url.clone())
+            .json(&request_body)
+            .send()
+            .await?;
+        statuses.push(response.status().as_u16());
+        response.bytes().await?;
+    }
+
+    assert_eq!(statuses, vec![200, 200, 404]);
+    assert_eq!(response_mock.requests().len(), 2);
+    assert_eq!(received_responses_request_count(&server).await?, 3);
+
+    Ok(())
+}
+
 #[test_case(PushedExecScenario::Complete, false, false ; "complete_event_stream")]
 #[test_case(PushedExecScenario::DirectDenied, false, false ; "direct_sandbox_denial")]
 #[test_case(PushedExecScenario::LegacyExit, false, false ; "legacy_exit_metadata")]
@@ -788,6 +823,11 @@ timeout = 900
         assert_eq!(response_mock.requests().len(), 2);
         return Ok(());
     }
+    assert_eq!(
+        received_responses_request_count(&server).await?,
+        2,
+        "completed turn must issue exactly two Responses API POSTs",
+    );
     assert_eq!(response_mock.requests().len(), 2);
     let request = response_mock
         .last_request()
