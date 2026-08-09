@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -10,6 +11,7 @@ import tempfile
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -19,11 +21,15 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval import binary_freeze  # noqa: E402
 from rondo_eval.binary_freeze import (  # noqa: E402
     BinaryFreezeError,
+    CompanionFreezeRequest,
     FreezeRequest,
     cleanup,
+    exec_v8_build,
     export_baseline,
     prepare,
+    prepare_companion,
     verify,
+    verify_companion,
 )
 from rondo_eval.contracts import Side  # noqa: E402
 
@@ -103,6 +109,15 @@ def _write_workspace(root: Path, lock: bytes, *, gate: bool) -> None:
         encoding="utf-8",
     )
     (workspace / "cli" / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+    (workspace / "code-mode-host" / "src").mkdir(parents=True)
+    (workspace / "code-mode-host" / "Cargo.toml").write_text(
+        '[package]\nname = "codex-code-mode-host"\nversion.workspace = true\n\n'
+        '[[bin]]\nname = "codex-code-mode-host"\npath = "src/main.rs"\n',
+        encoding="utf-8",
+    )
+    (workspace / "code-mode-host" / "src" / "main.rs").write_text(
+        "fn main() {}\n", encoding="utf-8"
+    )
     if gate:
         scripts = root / "mydev" / "scripts"
         scripts.mkdir(parents=True)
@@ -134,9 +149,14 @@ def _build_command(
     target: Path,
     gate: Path,
     side: Side,
+    source_commit: str,
+    package: str = "codex-cli",
+    binary: str = "codex",
+    baseline_reference: Path | None = None,
 ) -> tuple[str, ...]:
     manifest = source / ("mydev/codex-rs/Cargo.toml" if side is Side.RONDO else "codex-rs/Cargo.toml")
-    return (
+    companion = package == "codex-code-mode-host" and binary == "codex-code-mode-host"
+    argv = [
         f"cwd={gate}",
         "env",
         "-i",
@@ -145,6 +165,11 @@ def _build_command(
         "LC_ALL=C.UTF-8",
         f"XDG_RUNTIME_DIR=/run/user/{os.getuid()}",
         f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{os.getuid()}/bus",
+    ]
+    if companion:
+        argv.append(f"PYTHONPATH={binary_freeze.EVAL_ROOT}")
+    argv.extend(
+        (
         f"RONDO_PROJECT_ROOT={common}",
         f"CARGO_TARGET_DIR={target}",
         f"RONDO_BUILD_METRICS_DIR={common}/eval-data/build-metrics/test",
@@ -152,6 +177,29 @@ def _build_command(
         "rustup",
         "run",
         "1.95.0",
+        )
+    )
+    if companion:
+        argv.extend(
+            (
+                "python3",
+                "-m",
+                "rondo_eval.binary_freeze",
+                "v8-build",
+                "--side",
+                side.value,
+                "--source-root",
+                str(source),
+                "--source-commit",
+                source_commit,
+            )
+        )
+        if side is Side.CODEX:
+            assert baseline_reference is not None
+            argv.extend(("--baseline-reference-root", str(baseline_reference)))
+        return tuple(argv)
+    argv.extend(
+        (
         "python3",
         str(gate / "mydev/scripts/with_codex_v8_artifacts.py"),
         "--",
@@ -167,7 +215,9 @@ def _build_command(
         "codex-cli",
         "--bin",
         "codex",
+        )
     )
+    return tuple(argv)
 
 
 def _write_watchdog_summary(common: Path) -> None:
@@ -225,6 +275,7 @@ class RondoFreezeTests(unittest.TestCase):
             target=self.target,
             gate=self.source,
             side=Side.RONDO,
+            source_commit=self.commit,
         )
         _write_watchdog_summary(self.common)
         self.lock_sha = hashlib.sha256(self.lock).hexdigest()
@@ -237,6 +288,43 @@ class RondoFreezeTests(unittest.TestCase):
         self.portable.stop()
         self.constants.stop()
         self.temporary.cleanup()
+
+    def _companion_fixture(
+        self,
+    ) -> tuple[CompanionFreezeRequest, tuple[str, ...], Path, Path]:
+        prepare(
+            self.request,
+            self.command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        host_release = (
+            self.target / binary_freeze.RUST_TARGET / "release/codex-code-mode-host"
+        )
+        host_release.write_bytes(b"frozen-rondo-code-mode-host")
+        host_release.chmod(0o755)
+        bundle = self.artifact.with_name(f"{self.artifact.name}-code-mode-bundle")
+        request = CompanionFreezeRequest(
+            side=Side.RONDO,
+            common_root=self.common,
+            source_root=self.source,
+            source_commit=self.commit,
+            target_dir=self.target,
+            legacy_artifact_dir=self.artifact,
+            bundle_dir=bundle,
+            gate_root=self.source,
+        )
+        command = _build_command(
+            common=self.common,
+            source=self.source,
+            target=self.target,
+            gate=self.source,
+            side=Side.RONDO,
+            source_commit=self.commit,
+            package="codex-code-mode-host",
+            binary="codex-code-mode-host",
+        )
+        return request, command, bundle, host_release
 
     def test_prepares_and_verifies_atomic_manifest_and_modes(self) -> None:
         prepared = prepare(
@@ -352,6 +440,207 @@ class RondoFreezeTests(unittest.TestCase):
         self.assertTrue(self.artifact.is_dir())
         self.assertEqual(list(self.artifact.iterdir()), [])
 
+    def test_companion_migrates_legacy_cli_into_verified_bundle(self) -> None:
+        request, command, bundle, host_release = self._companion_fixture()
+
+        prepared = prepare_companion(
+            request,
+            command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        verified = verify_companion(
+            request,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+
+        self.assertEqual(prepared, verified)
+        self.assertEqual((bundle / "codex").read_bytes(), (self.artifact / "codex").read_bytes())
+        self.assertEqual((bundle / "codex-code-mode-host").read_bytes(), host_release.read_bytes())
+        self.assertEqual((bundle / "codex").stat().st_mode & 0o777, 0o555)
+        self.assertEqual((bundle / "codex-code-mode-host").stat().st_mode & 0o777, 0o555)
+        manifest_path = bundle / "manifest.json"
+        self.assertEqual(manifest_path.stat().st_mode & 0o777, 0o600)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(set(manifest), binary_freeze._MANIFEST_KEYS)
+        self.assertEqual(manifest["path"], str(bundle / "codex"))
+        self.assertEqual(
+            manifest["code_mode_host_path"], str(bundle / "codex-code-mode-host")
+        )
+        self.assertEqual(manifest["build_command"], list(self.command))
+        self.assertEqual(manifest["code_mode_host_build_command"], list(command))
+        with self.assertRaises(BinaryFreezeError):
+            prepare_companion(
+                request,
+                command,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_companion_rejects_wrong_host_command_and_tampering(self) -> None:
+        request, command, bundle, _ = self._companion_fixture()
+        with self.assertRaises(BinaryFreezeError):
+            prepare_companion(
+                request,
+                self.command,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+        without_pythonpath = [
+            item for item in command if not item.startswith("PYTHONPATH=")
+        ]
+        with self.assertRaises(BinaryFreezeError):
+            prepare_companion(
+                request,
+                without_pythonpath,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+        with self.assertRaises(BinaryFreezeError):
+            prepare_companion(
+                request,
+                command[:-3],
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+        wrong_command = list(command)
+        wrong_command[wrong_command.index("rondo_eval.binary_freeze")] = "wrong.v8_gate"
+        with self.assertRaises(BinaryFreezeError):
+            prepare_companion(
+                request,
+                wrong_command,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+        prepare_companion(
+            request,
+            command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        frozen_host = bundle / "codex-code-mode-host"
+        frozen_host.chmod(0o755)
+        frozen_host.write_bytes(b"tampered")
+        frozen_host.chmod(0o555)
+        with self.assertRaises(BinaryFreezeError):
+            verify_companion(
+                request,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_companion_does_not_publish_after_watchdog_lease_loss(self) -> None:
+        request, command, bundle, _ = self._companion_fixture()
+        copy_regular = binary_freeze._copy_regular
+        copies = 0
+
+        def lose_lease_after_copy(source: Path, destination: Path, *, mode: int) -> None:
+            nonlocal copies
+            copy_regular(source, destination, mode=mode)
+            copies += 1
+            if copies == 2:
+                GUARD.held = False
+
+        with mock.patch.object(
+            binary_freeze, "_copy_regular", side_effect=lose_lease_after_copy
+        ):
+            with self.assertRaises(BinaryFreezeError):
+                prepare_companion(
+                    request,
+                    command,
+                    lease_factory=_lease_factory,
+                    toolchain_probe=lambda: TOOLCHAIN,
+                )
+        self.assertFalse(bundle.exists())
+
+    def test_eval_v8_gate_resolves_musl_and_execs_only_the_two_frozen_bins(self) -> None:
+        archive = self.common / "cache/librusty_v8_musl.a.gz"
+        binding = self.common / "cache/src_binding_musl.rs"
+        archive.parent.mkdir()
+        archive.write_bytes(b"official-musl-archive")
+        binding.write_bytes(b"official-musl-binding")
+        spec = SimpleNamespace(target=binary_freeze.RUST_TARGET)
+        fetch_calls: list[tuple[object, str]] = []
+
+        def fetch(selected: object, *, version: str) -> object:
+            fetch_calls.append((selected, version))
+            return SimpleNamespace(archive=archive, binding=binding)
+
+        class ExecCalled(Exception):
+            pass
+
+        executed: list[tuple[str, list[str], dict[str, str]]] = []
+
+        def fake_exec(executable: str, argv: list[str], environment: dict[str, str]) -> None:
+            executed.append((executable, argv, environment))
+            raise ExecCalled
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                binary_freeze,
+                "_load_source_v8_resolver",
+                return_value=(
+                    {binary_freeze.RUST_TARGET: spec},
+                    fetch,
+                    lambda: "150.4.0",
+                ),
+            ),
+            mock.patch.object(binary_freeze.sys, "stderr", stderr),
+            self.assertRaises(ExecCalled),
+        ):
+            exec_v8_build(
+                side=Side.RONDO,
+                source_root=self.source,
+                source_commit=self.commit,
+                lease_factory=_lease_factory,
+                exec_function=fake_exec,
+                environ={"PATH": "/safe/bin", "HOME": "/safe/home"},
+            )
+
+        self.assertEqual(fetch_calls, [(spec, "150.4.0")])
+        executable, argv, environment = executed[0]
+        self.assertEqual(executable, "cargo")
+        self.assertEqual(
+            argv[-8:],
+            [
+                "-p",
+                "codex-cli",
+                "--bin",
+                "codex",
+                "-p",
+                "codex-code-mode-host",
+                "--bin",
+                "codex-code-mode-host",
+            ],
+        )
+        self.assertEqual(environment["RUSTY_V8_ARCHIVE"], str(archive))
+        self.assertEqual(environment["RUSTY_V8_SRC_BINDING_PATH"], str(binding))
+        self.assertIn(f"target={binary_freeze.RUST_TARGET}", stderr.getvalue())
+        self.assertIn(hashlib.sha256(archive.read_bytes()).hexdigest(), stderr.getvalue())
+        self.assertNotIn("/safe/home", stderr.getvalue())
+
+    def test_eval_v8_gate_rejects_ambient_overrides_before_resolution(self) -> None:
+        for name in (
+            "V8_FROM_SOURCE",
+            "RUSTY_V8_ARCHIVE",
+            "RUSTY_V8_SRC_BINDING_PATH",
+        ):
+            with (
+                self.subTest(name=name),
+                mock.patch.object(binary_freeze, "_load_source_v8_resolver") as resolver,
+                self.assertRaises(BinaryFreezeError),
+            ):
+                exec_v8_build(
+                    side=Side.RONDO,
+                    source_root=self.source,
+                    source_commit=self.commit,
+                    lease_factory=_lease_factory,
+                    environ={name: ""},
+                )
+            resolver.assert_not_called()
+
 
 class BaselineFreezeTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -404,6 +693,7 @@ class BaselineFreezeTests(unittest.TestCase):
             target=self.target,
             gate=self.gate,
             side=Side.CODEX,
+            source_commit=self.commit,
         )
         _write_watchdog_summary(self.common)
         self.stack = ExitStack()
@@ -492,6 +782,57 @@ class BaselineFreezeTests(unittest.TestCase):
                 lease_factory=_lease_factory,
                 toolchain_probe=lambda: TOOLCHAIN,
             )
+
+    def test_companion_keeps_exact_baseline_normalization(self) -> None:
+        prepare(
+            self.request,
+            self.command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        host_release = (
+            self.target / binary_freeze.RUST_TARGET / "release/codex-code-mode-host"
+        )
+        host_release.write_bytes(b"frozen-baseline-code-mode-host")
+        host_release.chmod(0o755)
+        bundle = self.artifact.with_name(f"{self.artifact.name}-code-mode-bundle")
+        companion = CompanionFreezeRequest(
+            side=Side.CODEX,
+            common_root=self.common,
+            source_root=self.scratch,
+            source_commit=self.commit,
+            target_dir=self.target,
+            legacy_artifact_dir=self.artifact,
+            bundle_dir=bundle,
+            gate_root=self.gate,
+            baseline_reference_root=self.reference,
+        )
+        host_command = _build_command(
+            common=self.common,
+            source=self.scratch,
+            target=self.target,
+            gate=self.gate,
+            side=Side.CODEX,
+            source_commit=self.commit,
+            package="codex-code-mode-host",
+            binary="codex-code-mode-host",
+            baseline_reference=self.reference,
+        )
+
+        prepare_companion(
+            companion,
+            host_command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        verified = verify_companion(
+            companion,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+
+        manifest = json.loads(Path(verified.manifest_path).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["workspace_lock_normalization"], binary_freeze.LOCK_NORMALIZATION)
 
 
 class CleanupTests(unittest.TestCase):

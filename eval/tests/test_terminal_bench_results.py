@@ -66,14 +66,38 @@ class TerminalBenchResultTests(unittest.TestCase):
         (self.job / "job.log").write_text("safe log\n", encoding="utf-8")
         (self.job / "config.json").write_text("{}\n", encoding="utf-8")
 
+    @staticmethod
+    def _write_metadata(path: Path, *roles: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "requests": [
+                        {
+                            "role": role,
+                            "contract_match": True,
+                            "usage_valid": True,
+                        }
+                        for role in roles
+                    ],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     def _live_result(self, run_id: str) -> BudgetedTerminalBenchResult:
         binary = BinaryManifest(
             path=str(self.root / "codex"),
             sha256="a" * 64,
+            code_mode_host_path=str(self.root / "codex-code-mode-host"),
+            code_mode_host_sha256="e" * 64,
             source_commit=UPSTREAM_CODEX["commit"],
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
             build_command=("supervised", "build"),
+            code_mode_host_build_command=("supervised", "build-code-mode-host"),
             workspace_lock_normalization=UPSTREAM_CODEX["workspace_lock_normalization"],
         )
         provider = ProviderProjection(
@@ -220,7 +244,7 @@ class TerminalBenchResultTests(unittest.TestCase):
     def test_publication_copies_private_tree_and_appends_strict_index(self) -> None:
         run_id = "20260810-010000001-tb-codex-r1"
         metadata = self.root / "work" / "api-metadata.json"
-        metadata.write_text('{"schema_version":1,"requests":[{"safe":true}]}\n', encoding="utf-8")
+        self._write_metadata(metadata, "main")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         target = publish_terminal_bench_result(
             RepoPaths(self.root, self.root),
@@ -286,10 +310,35 @@ class TerminalBenchResultTests(unittest.TestCase):
                 metadata_path=self.root / "missing-api-metadata.json",
             )
 
-    def test_completed_rondo_publication_keeps_e_final_gate(self) -> None:
+    def test_completed_rondo_without_guardian_request_does_not_invent_e_final(self) -> None:
         run_id = "20260810-010000004-tb-rondo-r1"
         live_result = self._live_result(run_id)
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+        )
+
+        summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["summary"]["api_request_roles"], {"main": 1, "guardian": 0})
+        self.assertEqual(summary["summary"]["evidence"], [])
+
+    def test_completed_rondo_guardian_request_requires_e_final(self) -> None:
+        run_id = "20260810-010000006-tb-rondo-r1"
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main", "guardian")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         with self.assertRaises(HarborResultError):
             publish_terminal_bench_result(
@@ -300,7 +349,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                 git_commit="e" * 40,
                 live_result=live_result,
                 parsed=parsed,
-                metadata_path=self.root / "missing-api-metadata.json",
+                metadata_path=metadata,
             )
 
     def test_outcome_exit_codes_preserve_infra_classification(self) -> None:

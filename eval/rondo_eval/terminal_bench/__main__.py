@@ -181,28 +181,43 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
     expected = {
         "path",
         "sha256",
+        "code_mode_host_path",
+        "code_mode_host_sha256",
         "source_commit",
         "source_dirty",
         "rust_toolchain",
         "build_command",
+        "code_mode_host_build_command",
         "workspace_lock_normalization",
     }
     if not isinstance(value, dict) or set(value) != expected:
         raise TerminalBenchRunError("binary manifest schema differs from v1")
     build_command = value["build_command"]
-    if not isinstance(build_command, list) or not all(isinstance(item, str) for item in build_command):
-        raise TerminalBenchRunError("binary manifest build command is invalid")
+    code_mode_host_build_command = value["code_mode_host_build_command"]
+    if any(
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(item, str) and item for item in command)
+        for command in (build_command, code_mode_host_build_command)
+    ):
+        raise TerminalBenchRunError("binary manifest build commands are invalid")
     manifest = BinaryManifest(
         path=value["path"],
         sha256=value["sha256"],
+        code_mode_host_path=value["code_mode_host_path"],
+        code_mode_host_sha256=value["code_mode_host_sha256"],
         source_commit=value["source_commit"],
         source_dirty=value["source_dirty"],
         rust_toolchain=value["rust_toolchain"],
         build_command=tuple(build_command),
+        code_mode_host_build_command=tuple(code_mode_host_build_command),
         workspace_lock_normalization=value["workspace_lock_normalization"],
     )
     manifest.validate()
-    if manifest.source_dirty or not Path(manifest.path).resolve(strict=True).is_relative_to(expected_root):
+    if manifest.source_dirty or any(
+        not Path(binary_path).resolve(strict=True).is_relative_to(expected_root)
+        for binary_path in (manifest.path, manifest.code_mode_host_path)
+    ):
         raise TerminalBenchRunError("binary manifest does not describe a clean eval-data binary")
     return manifest
 

@@ -53,10 +53,15 @@ class ConfigHardeningTests(unittest.TestCase):
         binary = BinaryManifest(
             path="eval-data/bin/codex",
             sha256="a" * 64,
+            code_mode_host_path="eval-data/bin/codex-code-mode-host",
+            code_mode_host_sha256="e" * 64,
             source_commit="b" * 40,
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
             build_command=("cargo", "build", "--bin", "codex"),
+            code_mode_host_build_command=(
+                "cargo", "build", "--bin", "codex-code-mode-host"
+            ),
         )
         spec = make_run_spec(
             config,
@@ -69,6 +74,7 @@ class ConfigHardeningTests(unittest.TestCase):
         )
         self.assertEqual(spec.provider.config_sha256, config.source_sha256)
         self.assertEqual(spec.provider.config_source, "rondo.local.toml")
+        self.assertIs(spec.code_mode_host, True)
 
     def test_unknown_env_name_and_shell_expansion_are_rejected(self) -> None:
         config = load_runtime_config(self.paths)

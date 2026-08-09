@@ -35,16 +35,26 @@ class RunOutcome(StrEnum):
 class BinaryManifest:
     path: str
     sha256: str
+    code_mode_host_path: str
+    code_mode_host_sha256: str
     source_commit: str
     source_dirty: bool
     rust_toolchain: str
     build_command: tuple[str, ...]
+    code_mode_host_build_command: tuple[str, ...]
     workspace_lock_normalization: str | None = None
 
     def validate(self) -> None:
         if not isinstance(self.path, str) or not self.path:
             raise ContractError("binary path is required")
         _require_sha256(self.sha256, "binary sha256")
+        if (
+            not isinstance(self.code_mode_host_path, str)
+            or not self.code_mode_host_path
+            or self.code_mode_host_path == self.path
+        ):
+            raise ContractError("code-mode host path is required and must differ from binary path")
+        _require_sha256(self.code_mode_host_sha256, "code-mode host sha256")
         _require_commit(self.source_commit, "binary source commit")
         if not isinstance(self.source_dirty, bool):
             raise ContractError("binary source_dirty must be boolean")
@@ -54,8 +64,14 @@ class BinaryManifest:
             or not isinstance(self.build_command, tuple)
             or not self.build_command
             or any(not isinstance(item, str) or not item for item in self.build_command)
+            or not isinstance(self.code_mode_host_build_command, tuple)
+            or not self.code_mode_host_build_command
+            or any(
+                not isinstance(item, str) or not item
+                for item in self.code_mode_host_build_command
+            )
         ):
-            raise ContractError("binary toolchain and build command are required")
+            raise ContractError("binary toolchain and both build commands are required")
         if self.workspace_lock_normalization is not None and (
             not isinstance(self.workspace_lock_normalization, str)
             or not self.workspace_lock_normalization
@@ -116,6 +132,7 @@ class RunSpec:
     approval_policy: str = "on-request"
     sandbox_mode: str = "workspace-write"
     websocket: bool = False
+    code_mode_host: bool = True
     timeout_seconds: int = 1800
     max_retries: int = 0
     budget_usd: float = 5.0
@@ -138,6 +155,7 @@ class RunSpec:
             and self.approval_policy == "on-request"
             and self.sandbox_mode == "workspace-write"
             and not self.websocket
+            and self.code_mode_host is True
         )
         if not expected:
             raise ContractError("run conditions differ from the frozen P1 fairness contract")
@@ -164,6 +182,7 @@ class RunSpec:
             "approval_policy": self.approval_policy,
             "sandbox_mode": self.sandbox_mode,
             "websocket": self.websocket,
+            "code_mode_host": self.code_mode_host,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "budget_usd": self.budget_usd,
@@ -174,6 +193,9 @@ class RunSpec:
         value = asdict(self)
         value["side"] = self.side.value
         value["binary"]["build_command"] = list(self.binary.build_command)
+        value["binary"]["code_mode_host_build_command"] = list(
+            self.binary.code_mode_host_build_command
+        )
         return value
 
 

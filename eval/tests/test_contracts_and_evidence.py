@@ -151,10 +151,15 @@ class ContractTests(unittest.TestCase):
         binary = BinaryManifest(
             path="eval-data/bin/codex",
             sha256="a" * 64,
+            code_mode_host_path="eval-data/bin/codex-code-mode-host",
+            code_mode_host_sha256="e" * 64,
             source_commit="b" * 40,
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
             build_command=("cargo", "build", "--bin", "codex"),
+            code_mode_host_build_command=(
+                "cargo", "build", "--bin", "codex-code-mode-host"
+            ),
         )
         provider = ProviderProjection(
             provider_id="openai",
@@ -190,6 +195,16 @@ class ContractTests(unittest.TestCase):
         object.__setattr__(drifted, "budget_usd", 4.0)
         with self.assertRaises(ContractError):
             assert_fair_pair(self._spec(Side.CODEX), drifted)
+
+    def test_code_mode_host_is_frozen_on_in_fairness_contract(self) -> None:
+        spec = self._spec(Side.CODEX)
+        self.assertIs(spec.fairness_fingerprint()["code_mode_host"], True)
+        for invalid in (False, 1, None):
+            with self.subTest(invalid=invalid):
+                spec = self._spec(Side.CODEX)
+                object.__setattr__(spec, "code_mode_host", invalid)
+                with self.assertRaises(ContractError):
+                    spec.validate()
 
     def test_contract_rejects_floating_image(self) -> None:
         spec = self._spec(Side.CODEX)

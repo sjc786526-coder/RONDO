@@ -30,9 +30,11 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 OFFICIAL_MODEL = "gpt-5.6-luna"
-INPUT_USD_PER_MILLION = Decimal("1.00")
-CACHED_INPUT_USD_PER_MILLION = Decimal("0.10")
-OUTPUT_USD_PER_MILLION = Decimal("6.00")
+PRICE_SNAPSHOT_DATE = "2026-08-10"
+PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
+INPUT_USD_PER_MILLION = Decimal("0.20")
+CACHED_INPUT_USD_PER_MILLION = Decimal("0.02")
+OUTPUT_USD_PER_MILLION = Decimal("1.20")
 LONG_CONTEXT_THRESHOLD = 272_000
 LONG_INPUT_MULTIPLIER = Decimal("2")
 LONG_OUTPUT_MULTIPLIER = Decimal("1.5")
@@ -811,6 +813,7 @@ class LoopbackResponsesProxy:
         handler.close_connection = True
         try:
             handler.wfile.write(body)
+            handler.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
 

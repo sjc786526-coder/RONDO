@@ -205,13 +205,24 @@ def publish_terminal_bench_result(
 
     if live_result.prepared.spec.side is not side:
         raise HarborResultError("prepared side differs from publication side")
-    _validate_publication_evidence(live_result, parsed)
+    request_roles = _validate_publication_evidence(
+        live_result,
+        parsed,
+        metadata_path=metadata_path,
+    )
     writer = ArtifactWriter(
         paths,
         run_id,
         results_worktree_root=results_worktree_root,
     ).start()
-    summary = _safe_summary(run_id, side, git_commit, live_result, parsed)
+    summary = _safe_summary(
+        run_id,
+        side,
+        git_commit,
+        live_result,
+        parsed,
+        request_roles=request_roles,
+    )
     writer.write_json("run-summary.json", summary)
     if parsed.job_result or parsed.trial_result:
         _copy_private_tree(writer, live_result.harbor.jobs_dir, "harbor/jobs")
@@ -273,6 +284,8 @@ def _safe_summary(
     git_commit: str,
     live_result: BudgetedTerminalBenchResult,
     parsed: ParsedHarborResult,
+    *,
+    request_roles: tuple[str, ...],
 ) -> dict[str, Any]:
     spec = live_result.prepared.spec
     evidence = [
@@ -302,6 +315,7 @@ def _safe_summary(
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,
             "websocket": spec.websocket,
+            "code_mode_host": spec.code_mode_host,
             "terminal_bench_version": TERMINAL_BENCH_VERSION,
             "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
             "task_image_digest": FIX_GIT_IMAGE_DIGEST,
@@ -317,6 +331,10 @@ def _safe_summary(
             "infra_failed": 1 if parsed.outcome is RunOutcome.INFRA_FAILED else 0,
             "host_returncode": live_result.harbor.returncode,
             "metadata_ready": live_result.metadata_ready,
+            "api_request_roles": {
+                "main": request_roles.count("main"),
+                "guardian": request_roles.count("guardian"),
+            },
             "docker_samples": len(live_result.harbor.docker_evidence.samples)
             if live_result.harbor.docker_evidence is not None
             else 0,
@@ -365,7 +383,9 @@ def _copy_private_tree(writer: ArtifactWriter, source: Path, prefix: str) -> Non
 def _validate_publication_evidence(
     live_result: BudgetedTerminalBenchResult,
     parsed: ParsedHarborResult,
-) -> None:
+    *,
+    metadata_path: Path,
+) -> tuple[str, ...]:
     host_returncode = live_result.harbor.returncode
     has_job_result = bool(parsed.job_result)
     has_trial_result = bool(parsed.trial_result)
@@ -385,10 +405,41 @@ def _validate_publication_evidence(
             raise HarborResultError("completed result has a non-zero Harbor return code")
         if not live_result.metadata_ready:
             raise HarborResultError("completed run lacks verified API metadata")
-        if live_result.prepared.spec.side is Side.RONDO and not live_result.evidence:
-            raise HarborResultError("completed RONDO run lacks an aggregatable E_final bundle")
+        roles = _verified_request_roles(metadata_path)
+        if "main" not in roles:
+            raise HarborResultError("completed run lacks a verified main-model request")
+        if live_result.prepared.spec.side is Side.RONDO:
+            guardian_observed = "guardian" in roles
+            evidence_observed = bool(live_result.evidence)
+            if guardian_observed != evidence_observed:
+                raise HarborResultError(
+                    "RONDO Guardian request and E_final evidence do not agree"
+                )
     elif parsed.outcome is RunOutcome.INFRA_FAILED and host_returncode == 0:
         raise HarborResultError("infra-failed result has a zero Harbor return code")
+    else:
+        roles = ()
+    return roles
+
+
+def _verified_request_roles(metadata_path: Path) -> tuple[str, ...]:
+    metadata = _read_json_object(metadata_path)
+    if set(metadata) != {"schema_version", "requests"} or metadata.get("schema_version") != 1:
+        raise HarborResultError("API metadata differs from schema v1")
+    requests = metadata.get("requests")
+    if not isinstance(requests, list) or not requests:
+        raise HarborResultError("API metadata has no verified requests")
+    roles: list[str] = []
+    for request in requests:
+        if (
+            not isinstance(request, dict)
+            or request.get("role") not in {"main", "guardian"}
+            or request.get("contract_match") is not True
+            or request.get("usage_valid") is not True
+        ):
+            raise HarborResultError("API metadata contains an unverified request")
+        roles.append(request["role"])
+    return tuple(roles)
 
 
 def _infra_result_without_harbor_tree() -> ParsedHarborResult:

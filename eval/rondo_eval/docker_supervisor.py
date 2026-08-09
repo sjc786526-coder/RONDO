@@ -24,6 +24,7 @@ from .exit_codes import INFRA_ERROR
 
 SAMPLE_INTERVAL_SECONDS = 5.0
 FAILURE_CLEANUP_TIMEOUT_SECONDS = 30.0
+HOST_SUCCESS_TEARDOWN_GRACE_SECONDS = 30.0
 DOCKER_GROWTH_WARN_BYTES = 40_000_000_000
 DOCKER_GROWTH_STOP_BYTES = 60_000_000_000
 DATA_ROOT_FREE_STOP_BYTES = 80 * 1024**3
@@ -219,6 +220,7 @@ class DockerSupervisor:
         lock_guard: HeavyLockGuard,
         cleanup_runner: DockerCommandRunner | None = None,
         monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
     ):
         self._runner = runner
         self._cleanup_runner = cleanup_runner or runner
@@ -228,6 +230,7 @@ class DockerSupervisor:
         self._counter = counter
         self._lock_guard = lock_guard
         self._monotonic = monotonic
+        self._sleeper = sleeper
         self._owned_container_ids: dict[str, set[str]] = {}
 
     def pull(
@@ -491,8 +494,27 @@ class DockerSupervisor:
                 self._enforce_sample(sample, warnings, samples=samples)
                 if returncode is not None:
                     if (
-                        operation in {DockerOperation.RUN, DockerOperation.HOST}
+                        operation is DockerOperation.HOST
+                        and returncode == 0
                         and sample.task_container_ids
+                        and self._wait_for_successful_host_teardown(
+                            identity,
+                            lease,
+                            baseline,
+                            samples,
+                            warnings,
+                        )
+                    ):
+                        return DockerExecutionResult(
+                            operation=operation,
+                            argv=argv,
+                            returncode=returncode,
+                            samples=tuple(samples),
+                            warnings=tuple(warnings),
+                        )
+                    if (
+                        operation in {DockerOperation.RUN, DockerOperation.HOST}
+                        and samples[-1].task_container_ids
                         and self._cleanup_task_containers(
                             identity,
                             operation,
@@ -514,6 +536,7 @@ class DockerSupervisor:
                 "automatic cleanup was not verified",
                 samples=samples,
             ) from exc
+
         except DockerSupervisionError as exc:
             self._stop(handle)
             cleanup_failed = self._cleanup_task_containers(
@@ -541,6 +564,37 @@ class DockerSupervisor:
                 reason,
                 samples=samples,
             ) from exc
+
+    def _wait_for_successful_host_teardown(
+        self,
+        identity: DockerTaskIdentity,
+        lease: HeavyLockLease,
+        baseline: DockerCounterReading,
+        samples: list[DockerSample],
+        warnings: list[str],
+    ) -> bool:
+        """Allow a successful host harness to finish daemon-side teardown."""
+
+        started_at = self._monotonic()
+        while True:
+            self._assert_lock(lease, samples=samples)
+            elapsed = self._monotonic() - started_at
+            remaining = HOST_SUCCESS_TEARDOWN_GRACE_SECONDS - elapsed
+            if remaining <= 0:
+                return False
+            self._sleeper(min(SAMPLE_INTERVAL_SECONDS, remaining))
+            reading = self._read_counter(
+                identity,
+                DockerOperation.HOST,
+                lease=lease,
+                samples=samples,
+            )
+            sample = self._make_sample("teardown_grace", baseline, reading)
+            samples.append(sample)
+            self._record_owned_containers(identity, reading)
+            self._enforce_sample(sample, warnings, samples=samples)
+            if not sample.task_container_ids:
+                return True
 
     def _read_counter(
         self,

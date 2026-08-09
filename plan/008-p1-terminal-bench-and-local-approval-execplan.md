@@ -158,7 +158,7 @@
 - `main` 与 `origin/main` 对齐于 `4df098c`，V8 资产门禁已合入；主工作区干净。
 - 已由看门狗清理 V8 worktree 的 Cargo target，并清理两个 Python cache；全仓未发现其他 target。
 - 已冻结共享 `eval/` 合同、严格配置/密钥 loader、Standard/Lite `E_final`/`PolicyIdentity`、无工具
-  static payload、原子归档和持久预算账本；最终集成的 130 项 pure/fake/loopback 测试全部通过。
+  static payload、原子归档和持久预算账本；当前集成的 155 项 pure/fake/loopback 测试全部通过。
 - Harbor 冻结为 `0.20.0`/commit `459ff6e`，TB2.1 冻结为 commit `ffccbe0`，`fix-git` task archive
   与 linux/amd64 镜像均已按 SHA-256 实测；真实 checkout 的 materialize/digest/overlay 前置校验通过。
 - Docker Desktop daemon/数据盘计数已接入；受监督拉取 `fix-git` 和 Ubuntu 精确 digest，官方
@@ -172,18 +172,29 @@
 - L1 与 L2 client/doctor/fake/launcher 已落地；L2 结构化输出仍明确标为 b10333 pin-specific、待模型实测。
 - 独立计划审查发现原编号与 V8 Plan 007 冲突，已改为 Plan 008；同时补齐配置唯一来源、evidence transport
   字段、clean measurement worktree、Docker 持续采样、退出码和冻结 Codex 实际 Guardian 条件证明。
+- clean 实现提交 `cb652e1` 已用于 detached measurement worktree。两侧 GNU release 均在看门狗内成功构建、
+  冻结后清理，但目标 `fix-git` Debian 镜像缺少宿主 glibc 2.38/2.39，故改用同一 Rust 1.95 的
+  `x86_64-unknown-linux-musl` 静态目标；RONDO/Codex musl 构建分别在 16m21s/16m26s 完成，swap 峰值均为 0。
+- 两侧 musl 二进制均通过无 `INTERP`/`NEEDED` 的 ELF 门禁，并在固定 `fix-git` 镜像内以只读挂载、
+  `--network none` 执行 `--version` 成功；Docker 总占用前后均为 18.128GB，无告警或残留容器。
+- 三次 Codex B3 尝试均在 API 前 fail-closed 并归档，实际费用保持 0 USD：先后暴露 Harbor ExecResult
+  optional stream、GNU/glibc 可移植性、以及 v0.147 禁止覆盖内置 `model_providers.openai`。前两项已由
+  真实重跑验证越过；第三项已改为隔离的 `rondo_eval_openai` Responses provider，25 项定向回归通过。
+- RONDO companion 的前两次受监督构建均保留失败 summary：第一次证明 helper 的独立依赖图没有继承
+  `codex-core` 的 vendored OpenSSL feature；同次选择 core 后越过该点，但又证明原 V8 gate 按 GNU rustc
+  host 选择的归档不能链接 musl。两次均为构建错误、非资源停止，swap 峰值为 0。
 
 ### 当前工作
 
-- 独立审查发现的 Lite 路由头、下游临时认证、Harbor 结果误判、归档未接线、容器残留清理、pipefail、
-  manifest 归一化字段和稳定构建入口均已收束；正在冻结 clean 实现提交，随后在 detached measurement
-  worktree 串行构建 RONDO 与仅规范化 135 个 lock version 的 Codex 基线二进制。
+- 本机模型目录证明 Luna 只能使用 code mode；关闭 `code_mode_host` 的首条真实 Docker/no-API 试跑按设计
+  fail-closed。现已将该条件冻结为严格开启，并把同源、静态链接的 `codex-code-mode-host` companion 纳入
+  两侧 manifest、双 SHA 校验和 adapter 上传。155 项轻量门禁通过，正补充显式选择 musl 官方 V8 pair 的
+  eval 构建 gate；该 gate 通过前不继续 Docker 或最后一个真实 API run。
 
 ### 后续计划
 
-- 在同一 `fix-git` 任务上按冻结顺序运行 Codex、RONDO 各一轮；两侧任一不满足 completed、预算、
-  去敏 API 元数据或 RONDO E_final 门禁即停止，不扩大第二任务。
-- 原子归档、更新 WBS/完成历史/日志，完成终审、合并并推送 main。
+- no-API 全链路通过后，只使用剩余第 4 个槽位运行 `fix-git`；不得在本计划内静默新增第 5 个 run。
+- 原子归档、更新 WBS/完成历史和详细 code-review 日志，独立终审并修补后合并、推送 main。
 
 ### 阻塞项
 
@@ -191,8 +202,10 @@
 
 ### 当前验收状态
 
-- B1、B2 no-API、L1 fake 和 L2 前置设施已达到实现门禁；Docker hello-world oracle 已真实通过。
-- B3/M1 尚未运行；两侧二进制构建、`fix-git` 双侧真实 API 与最终归档仍待完成。
+- B1、B2 基础 no-API、L1 fake 和 L2 前置设施已达到实现门禁；Docker hello-world oracle、两侧静态
+  musl 冻结与目标镜像 `--version` 均真实通过。
+- B3 已有 3 条真实 Docker、零 API/零费用的 `agent_failed` 归档；M1 仍未通过。批次最多 4 run 的硬门禁
+  尚余 1 个槽位，因此即使最后一条 completed，也不能把同任务双侧里程碑误报为通过。
 - L2 真实模型、L2a、L3/L4、训练和正式 canary 均未运行且不在本计划完成条件内。
 
 ## 6. 关键决策记录
@@ -211,3 +224,6 @@
 | 010 | 付费链路只允许经宿主 loopback 预算代理 | key 留在宿主；容器拿临时 token，代理按 usage 结算并可停机 | B3/秘密/预算 | 已采纳 |
 | 011 | 官方 provider 身份与 ephemeral Docker transport 分离 | `rondo.local.toml` 仍是云参数唯一源，bridge URL 只是运行设施 | 配置/公平性 | 已采纳 |
 | 012 | Codex 不注入 RONDO 专属 auto_review 字段 | 上游 strict config 不支持；由实际出站 Guardian payload 证明 Luna+low | 基线兼容 | 已采纳 |
+| 013 | 双侧二进制改为静态 musl，并保留 GNU 失败归档 | 目标任务镜像为 glibc 2.36，宿主 GNU 二进制需要 2.38/2.39 | B2/B3 可移植性 | 已采纳 |
+| 014 | 用自定义 `rondo_eval_openai` provider 投影 loopback transport | v0.147 禁止覆盖内置 `openai`；仍需禁 WebSocket、零重试并复用 OpenAI auth | B2/B3 transport | 已采纳 |
+| 015 | 两侧启用并冻结同源 `codex-code-mode-host` companion | Luna 为 `code_mode_only`；关闭 host 会在首次 API 前拒绝执行，单 CLI manifest 不能形成真实工具链 | B2/B3 二进制公平性 | 已采纳 |

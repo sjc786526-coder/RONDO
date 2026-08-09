@@ -43,6 +43,7 @@ from rondo_eval.terminal_bench import (  # noqa: E402
     prepare_terminal_bench_run,
 )
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
+from rondo_eval.terminal_bench import adapters as adapters_module  # noqa: E402
 from rondo_eval.terminal_bench import live as live_module  # noqa: E402
 from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
 from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
@@ -157,6 +158,11 @@ class TerminalBenchTests(unittest.TestCase):
         self.binary_path = self.root / "codex"
         self.binary_path.write_bytes(b"frozen v0.147.0 binary")
         self.binary_digest = hashlib.sha256(self.binary_path.read_bytes()).hexdigest()
+        self.code_mode_host_path = self.root / "codex-code-mode-host"
+        self.code_mode_host_path.write_bytes(b"frozen v0.147.0 code-mode host")
+        self.code_mode_host_digest = hashlib.sha256(
+            self.code_mode_host_path.read_bytes()
+        ).hexdigest()
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -165,6 +171,8 @@ class TerminalBenchTests(unittest.TestCase):
         return BinaryManifest(
             path=str(self.binary_path),
             sha256=self.binary_digest,
+            code_mode_host_path=str(self.code_mode_host_path),
+            code_mode_host_sha256=self.code_mode_host_digest,
             source_commit="a" * 40,
             source_dirty=False,
             rust_toolchain=(
@@ -175,6 +183,7 @@ class TerminalBenchTests(unittest.TestCase):
                 "cargo:\ncargo 1.95.0 (frozen 2026-07-21)"
             ),
             build_command=("guarded-build", "codex"),
+            code_mode_host_build_command=("guarded-build", "codex-code-mode-host"),
             workspace_lock_normalization="135 workspace packages: 0.0.0 -> 0.147.0",
         )
 
@@ -218,10 +227,15 @@ class TerminalBenchTests(unittest.TestCase):
             model_name="openai/gpt-5.6-luna",
             binary_path=manifest.path,
             binary_sha256=manifest.sha256,
+            binary_code_mode_host_path=manifest.code_mode_host_path,
+            binary_code_mode_host_sha256=manifest.code_mode_host_sha256,
             binary_source_commit=manifest.source_commit,
             binary_source_dirty=manifest.source_dirty,
             binary_rust_toolchain=manifest.rust_toolchain,
             binary_build_command=list(manifest.build_command),
+            binary_code_mode_host_build_command=list(
+                manifest.code_mode_host_build_command
+            ),
             binary_workspace_lock_normalization=manifest.workspace_lock_normalization,
             provider_base_url="https://api.openai.com/v1",
             provider_api_key_env="OPENAI_API_KEY",
@@ -274,6 +288,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(prepared.command.source_repo_ref, TERMINAL_BENCH_REPO_REF)
         self.assertEqual(prepared.command.task_source_digest, f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}")
         self.assertEqual(prepared.spec.provider.base_url, "https://api.openai.com/v1")
+        self.assertIs(prepared.spec.code_mode_host, True)
         self.assertEqual(
             prepared.command.provider_transport_base_url,
             "http://host.docker.internal:43123/v1",
@@ -301,6 +316,10 @@ class TerminalBenchTests(unittest.TestCase):
             self.assertIsInstance(instance, (CodexUploadAdapter, RondoUploadAdapter))
             self.assertEqual(instance.manifest, prepared.spec.binary)
             self.assertEqual(
+                instance.manifest.code_mode_host_sha256,
+                self.code_mode_host_digest,
+            )
+            self.assertEqual(
                 instance.manifest.workspace_lock_normalization,
                 "135 workspace packages: 0.0.0 -> 0.147.0",
             )
@@ -312,11 +331,26 @@ class TerminalBenchTests(unittest.TestCase):
                 adapter = self.adapter(adapter_type)
                 asyncio.run(adapter.install(environment))
                 self.assertTrue(adapter.remote_path.endswith(suffix))
-                self.assertEqual(environment.uploads, [(self.binary_path, adapter.remote_path)])
+                self.assertTrue(
+                    adapter.remote_code_mode_host_path.endswith("/codex-code-mode-host")
+                )
+                self.assertEqual(
+                    environment.uploads,
+                    [
+                        (self.binary_path, adapter.remote_path),
+                        (
+                            self.code_mode_host_path,
+                            adapter.remote_code_mode_host_path,
+                        ),
+                    ],
+                )
                 commands = "\n".join(call[0] for call in environment.calls).lower()
                 self.assertNotIn("npm", commands)
                 self.assertNotIn("latest", commands)
                 self.assertIn(f"sha256sum -- {adapter.remote_path}", commands)
+                self.assertIn(
+                    f"sha256sum -- {adapter.remote_code_mode_host_path}", commands
+                )
                 self.assertIn(f"{adapter.remote_path} --version", commands)
 
     def test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv(self) -> None:
@@ -349,6 +383,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('approvals_reviewer="auto_review"', commands)
         self.assertIn('approval_policy="on-request"', commands)
         self.assertIn('sandbox_mode="workspace-write"', commands)
+        self.assertIn("features.code_mode_host=true", commands)
         self.assertIn('model_provider="rondo_eval_openai"', commands)
         self.assertIn(
             'model_providers.rondo_eval_openai.wire_api="responses"',
@@ -372,11 +407,25 @@ class TerminalBenchTests(unittest.TestCase):
             command for command in raw_agent_commands if adapter.remote_path + " exec" in command
         )
         self.assertTrue(raw_codex_command.startswith("set -o pipefail; "))
+        self.assertIn("--enable unified_exec", raw_codex_command)
         self.assertEqual(raw_codex_command.count("set -o pipefail; "), 1)
         self.assertLess(
             raw_codex_command.index("set -o pipefail; "),
             raw_codex_command.index("| tee "),
         )
+        with self.assertRaises(AdapterError):
+            adapters_module._validate_safe_codex_command(
+                raw_codex_command.replace("features.code_mode_host=true", ""),
+                side=Side.CODEX,
+            )
+        with self.assertRaises(AdapterError):
+            adapters_module._validate_safe_codex_command(
+                raw_codex_command.replace(
+                    "features.code_mode_host=true",
+                    "features.code_mode_host=false",
+                ),
+                side=Side.CODEX,
+            )
         self.assertTrue(
             all(
                 not call[1]
@@ -393,6 +442,7 @@ class TerminalBenchTests(unittest.TestCase):
         rondo_environment = FakeEnvironment()
         asyncio.run(rondo.run("repair the repository", rondo_environment, mock.Mock()))
         rondo_commands = "\n".join(call[0] for call in rondo_environment.calls)
+        self.assertIn("features.code_mode_host=true", rondo_commands)
         self.assertIn('auto_review.model="gpt-5.6-luna"', rondo_commands)
         self.assertIn('auto_review.reasoning_effort="low"', rondo_commands)
         self.assertIn('auto_review.evidence_dir="/logs/agent/guardian-evidence"', rondo_commands)
@@ -400,6 +450,11 @@ class TerminalBenchTests(unittest.TestCase):
     def test_adapter_rejects_wrong_binary_digest(self) -> None:
         adapter = self.adapter()
         object.__setattr__(adapter.manifest, "sha256", "d" * 64)
+        with self.assertRaises(AdapterError):
+            asyncio.run(adapter.install(FakeEnvironment()))
+
+        adapter = self.adapter()
+        object.__setattr__(adapter.manifest, "code_mode_host_sha256", "d" * 64)
         with self.assertRaises(AdapterError):
             asyncio.run(adapter.install(FakeEnvironment()))
 

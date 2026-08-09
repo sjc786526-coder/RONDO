@@ -21,3 +21,4 @@ reference-agent-harness/
 /eval/**/__pycache__/
 /eval/**/*.py[cod]
 /eval/.venv/
+/eval/results/*.lock

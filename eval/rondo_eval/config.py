@@ -150,6 +150,7 @@ def make_run_spec(
         binary=binary,
         terminal_bench_version=terminal_bench_version,
         provider=projection,
+        code_mode_host=True,
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
         budget_usd=budget_usd,

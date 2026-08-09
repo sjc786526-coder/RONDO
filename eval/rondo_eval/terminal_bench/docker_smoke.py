@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import math
+import stat
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -47,7 +48,15 @@ from .runner import (
 
 NO_API_SMOKE_BEARER = "rondo-terminal-bench-no-api-smoke"
 NO_API_SMOKE_MODEL = "gpt-5.6-luna"
+NO_API_SMOKE_CALL_ID = "rondo-code-mode-smoke-call"
+NO_API_SMOKE_MARKER = "rondo_code_mode_smoke"
+NO_API_SMOKE_CODE = (
+    'text(JSON.stringify(await tools.exec_command({cmd:"printf '
+    f'{NO_API_SMOKE_MARKER}'
+    '"})));'
+)
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
+_MAX_AGENT_JSON_BYTES = 16 * 1024 * 1024
 
 
 class DockerNoApiSmokeError(ValueError):
@@ -71,11 +80,18 @@ class DockerNoApiSmokeResult:
     harbor: HostHarborResult
     parsed: ParsedHarborResult
     requests: tuple[SmokeRequestObservation, ...]
+    agent_json_events: int
+    tool_round_trip: bool
 
     @property
     def contract_satisfied(self) -> bool:
         accepted = [request for request in self.requests if request.accepted]
-        return bool(accepted) and len(accepted) == len(self.requests)
+        return (
+            len(accepted) == 2
+            and len(accepted) == len(self.requests)
+            and self.agent_json_events > 0
+            and self.tool_round_trip
+        )
 
     @property
     def passed(self) -> bool:
@@ -91,6 +107,8 @@ class DockerNoApiSmokeResult:
             "fake_requests": len(self.requests),
             "fake_contract_hits": sum(request.accepted for request in self.requests),
             "fake_contract_satisfied": self.contract_satisfied,
+            "agent_json_events": self.agent_json_events,
+            "code_mode_tool_round_trip": self.tool_round_trip,
             "host_returncode": self.harbor.returncode,
         }
 
@@ -125,6 +143,7 @@ class LocalResponsesFakeServer:
         self._lock = threading.Lock()
         self._requests: list[SmokeRequestObservation] = []
         self._response_number = 0
+        self._tool_round_trip = False
 
     @property
     def loopback_base_url(self) -> str:
@@ -140,6 +159,11 @@ class LocalResponsesFakeServer:
     def requests(self) -> tuple[SmokeRequestObservation, ...]:
         with self._lock:
             return tuple(self._requests)
+
+    @property
+    def tool_round_trip(self) -> bool:
+        with self._lock:
+            return self._tool_round_trip
 
     def __enter__(self) -> LocalResponsesFakeServer:
         return self.start()
@@ -248,8 +272,13 @@ class LocalResponsesFakeServer:
             self._record(handler, True, model, websocket, "request_contract_mismatch")
             self._reject(handler, 400, "request_contract_mismatch")
             return
+        try:
+            payload = self._sse_response(value)
+        except DockerNoApiSmokeError:
+            self._record(handler, True, model, websocket, "tool_round_trip_mismatch")
+            self._reject(handler, 400, "tool_round_trip_mismatch")
+            return
         self._record(handler, True, model, websocket, None)
-        payload = self._sse_response()
         handler.send_response(200)
         handler.send_header("Content-Type", "text/event-stream")
         handler.send_header("Cache-Control", "no-cache")
@@ -286,25 +315,47 @@ class LocalResponsesFakeServer:
         with self._lock:
             self._requests.append(observation)
 
-    def _sse_response(self) -> bytes:
+    def _sse_response(self, request: dict[str, object]) -> bytes:
         with self._lock:
             self._response_number += 1
             number = self._response_number
+            if number == 1:
+                if _find_custom_tool_output(request) is not None:
+                    raise DockerNoApiSmokeError("first request already contains tool output")
+            elif number == 2:
+                output = _find_custom_tool_output(request)
+                if output is None or not _contains_marker(output, NO_API_SMOKE_MARKER):
+                    raise DockerNoApiSmokeError("second request lacks code-mode tool output")
+                if isinstance(output, dict) and output.get("success") is False:
+                    raise DockerNoApiSmokeError("code-mode tool output reports failure")
+                self._tool_round_trip = True
+            else:
+                raise DockerNoApiSmokeError("no-API fake received an extra model round")
         response_id = f"resp-rondo-no-api-{number}"
-        events = (
+        output_item = (
             {
-                "type": "response.created",
-                "response": {"id": response_id},
-            },
-            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "custom_tool_call",
+                    "call_id": NO_API_SMOKE_CALL_ID,
+                    "name": "exec",
+                    "input": NO_API_SMOKE_CODE,
+                },
+            }
+            if number == 1
+            else {
                 "type": "response.output_item.done",
                 "item": {
                     "type": "message",
                     "role": "assistant",
-                    "id": f"msg-rondo-no-api-{number}",
+                    "id": "msg-rondo-no-api-2",
                     "content": [{"type": "output_text", "text": "done"}],
                 },
-            },
+            }
+        )
+        events = (
+            {"type": "response.created", "response": {"id": response_id}},
+            output_item,
             {
                 "type": "response.completed",
                 "response": {
@@ -364,7 +415,11 @@ async def run_docker_no_api_smoke(
             replace(request, provider_transport_base_url=server.docker_base_url),
             materializer=materializer,
         )
-        if prepared.spec.websocket or prepared.spec.provider.main_model != NO_API_SMOKE_MODEL:
+        if (
+            prepared.spec.websocket
+            or prepared.spec.code_mode_host is not True
+            or prepared.spec.provider.main_model != NO_API_SMOKE_MODEL
+        ):
             raise DockerNoApiSmokeError("no-API smoke projection differs from the frozen contract")
         executor = executor_factory(
             counter=counter,
@@ -384,13 +439,92 @@ async def run_docker_no_api_smoke(
             harbor.jobs_dir,
             host_returncode=harbor.returncode,
         )
+        agent_json_events = (
+            _validate_agent_codex_json(harbor.jobs_dir)
+            if parsed.outcome is RunOutcome.COMPLETED
+            else 0
+        )
         observations = server.requests
     return DockerNoApiSmokeResult(
         prepared=prepared,
         harbor=harbor,
         parsed=parsed,
         requests=observations,
+        agent_json_events=agent_json_events,
+        tool_round_trip=server.tool_round_trip,
     )
+
+
+def _find_custom_tool_output(request: dict[str, object]) -> object | None:
+    inputs = request.get("input")
+    if not isinstance(inputs, list):
+        return None
+    matches = [
+        item.get("output")
+        for item in inputs
+        if isinstance(item, dict)
+        and item.get("type") == "custom_tool_call_output"
+        and item.get("call_id") == NO_API_SMOKE_CALL_ID
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _contains_marker(value: object, marker: str) -> bool:
+    if isinstance(value, str):
+        return marker in value
+    if isinstance(value, list):
+        return any(_contains_marker(item, marker) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_marker(item, marker) for item in value.values())
+    return False
+
+
+def _validate_agent_codex_json(jobs_dir: Path) -> int:
+    """Reject incomplete or error-bearing Codex JSONL from the one-task smoke."""
+
+    matches = list(jobs_dir.glob("*/*/agent/codex.txt"))
+    if len(matches) != 1:
+        raise DockerNoApiSmokeError("no-API smoke requires exactly one agent codex JSONL")
+    path = matches[0]
+    try:
+        agent_dir = path.parent
+        if agent_dir.is_symlink() or not stat.S_ISDIR(agent_dir.lstat().st_mode):
+            raise DockerNoApiSmokeError("agent codex JSONL directory is unsafe")
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _MAX_AGENT_JSON_BYTES:
+            raise DockerNoApiSmokeError("agent codex JSONL is unsafe")
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise DockerNoApiSmokeError("agent codex JSONL is unreadable") from exc
+
+    event_count = 0
+    completed = False
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise DockerNoApiSmokeError("agent codex JSONL contains malformed output") from exc
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            raise DockerNoApiSmokeError("agent codex JSONL contains an invalid event")
+        event_count += 1
+        event_type = event["type"]
+        item = event.get("item")
+        if (
+            event_type in {"error", "turn.failed"}
+            or (
+                event_type in {"item.started", "item.updated", "item.completed"}
+                and isinstance(item, dict)
+                and item.get("type") == "error"
+            )
+        ):
+            raise DockerNoApiSmokeError("agent codex JSONL contains an error event")
+        if event_type == "turn.completed":
+            completed = True
+    if not completed:
+        raise DockerNoApiSmokeError("agent codex JSONL lacks turn completion")
+    return event_count
 
 
 def _parser() -> argparse.ArgumentParser:

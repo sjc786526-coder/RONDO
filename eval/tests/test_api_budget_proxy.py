@@ -21,6 +21,8 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.api_budget_proxy import (  # noqa: E402
     GUARDIAN_OUTPUT_SCHEMA,
     MAX_REQUEST_RESERVATION_USD,
+    PRICE_SNAPSHOT_DATE,
+    PRICE_SOURCE_URL,
     ApiBudgetProxyError,
     BudgetStopped,
     LoopbackResponsesProxy,
@@ -437,8 +439,13 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             cache_write_input_tokens=50_000,
             output_tokens=10_000,
         )
-        self.assertEqual(price_usage(usage), Decimal("0.535000"))
-        self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("3.777000"))
+        self.assertEqual(PRICE_SNAPSHOT_DATE, "2026-08-10")
+        self.assertEqual(
+            PRICE_SOURCE_URL,
+            "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+        )
+        self.assertEqual(price_usage(usage), Decimal("0.107000"))
+        self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("0.755400"))
 
     def test_four_runs_can_reserve_and_settle_concurrently(self) -> None:
         path = self.root / "budget.json"

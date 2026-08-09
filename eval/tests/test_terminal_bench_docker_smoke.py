@@ -22,6 +22,8 @@ from rondo_eval.docker_supervisor import HeavyLockLease  # noqa: E402
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
 from rondo_eval.terminal_bench.docker_smoke import (  # noqa: E402
     NO_API_SMOKE_BEARER,
+    NO_API_SMOKE_CALL_ID,
+    NO_API_SMOKE_MARKER,
     DockerNoApiSmokeError,
     LocalResponsesFakeServer,
     _parser,
@@ -105,8 +107,42 @@ class FakeHostExecutor:
         response = connection.getresponse()
         payload = response.read().decode("utf-8")
         connection.close()
-        if response.status != 200 or "event: response.completed" not in payload:
-            raise AssertionError("loopback fake did not return the frozen SSE")
+        if (
+            response.status != 200
+            or '"type":"custom_tool_call"' not in payload
+            or NO_API_SMOKE_MARKER not in payload
+        ):
+            raise AssertionError("loopback fake did not request the frozen code-mode call")
+        follow_up = json.dumps(
+            {
+                "model": "gpt-5.6-luna",
+                "stream": True,
+                "input": [
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": NO_API_SMOKE_CALL_ID,
+                        "output": json.dumps(
+                            {"output": NO_API_SMOKE_MARKER, "exit_code": 0}
+                        ),
+                    }
+                ],
+            }
+        )
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=follow_up,
+            headers={
+                "Authorization": f"Bearer {bearer}",
+                "Content-Type": "application/json",
+            },
+        )
+        response = connection.getresponse()
+        payload = response.read().decode("utf-8")
+        connection.close()
+        if response.status != 200 or '"text":"done"' not in payload:
+            raise AssertionError("loopback fake did not complete after code-mode output")
 
         jobs = Path(argv[argv.index("--jobs-dir") + 1])
         job = jobs / "2026-08-10__02-00-00"
@@ -145,6 +181,39 @@ class FakeHostExecutor:
             ),
             encoding="utf-8",
         )
+        agent = trial / "agent"
+        agent.mkdir()
+        (agent / "codex.txt").write_text(
+            "\n".join(
+                (
+                    json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "item-1",
+                                "type": "agent_message",
+                                "text": "done",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "turn.completed",
+                            "usage": {
+                                "input_tokens": 0,
+                                "cached_input_tokens": 0,
+                                "cache_write_input_tokens": 0,
+                                "output_tokens": 0,
+                                "reasoning_output_tokens": 0,
+                            },
+                        }
+                    ),
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         return HostHarborResult(0, jobs)
 
 
@@ -154,6 +223,8 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.binary = self.root / "codex"
         self.binary.write_bytes(b"frozen binary")
+        self.code_mode_host = self.root / "codex-code-mode-host"
+        self.code_mode_host.write_bytes(b"frozen code-mode host")
         FakeHostExecutor.calls.clear()
 
     def tearDown(self) -> None:
@@ -181,10 +252,15 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         manifest = BinaryManifest(
             path=str(self.binary),
             sha256=hashlib.sha256(self.binary.read_bytes()).hexdigest(),
+            code_mode_host_path=str(self.code_mode_host),
+            code_mode_host_sha256=hashlib.sha256(
+                self.code_mode_host.read_bytes()
+            ).hexdigest(),
             source_commit="a" * 40,
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
             build_command=("guarded-build",),
+            code_mode_host_build_command=("guarded-build-code-mode-host",),
         )
         return TerminalBenchRequest(
             side=Side.CODEX,
@@ -217,13 +293,111 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(result.parsed.reward, 0.0)
         self.assertTrue(result.contract_satisfied)
         self.assertTrue(result.passed)
-        self.assertEqual(len(result.requests), 1)
-        self.assertEqual(result.requests[0].model, "gpt-5.6-luna")
-        self.assertTrue(result.requests[0].authorized)
+        self.assertEqual(result.agent_json_events, 3)
+        self.assertTrue(result.tool_round_trip)
+        self.assertEqual(len(result.requests), 2)
+        self.assertTrue(all(item.model == "gpt-5.6-luna" for item in result.requests))
+        self.assertTrue(all(item.authorized for item in result.requests))
+        self.assertTrue(result.safe_summary()["code_mode_tool_round_trip"])
         _argv, kwargs = FakeHostExecutor.calls[0]
         self.assertEqual(kwargs["injected_env"]["OPENAI_API_KEY"], NO_API_SMOKE_BEARER)
         self.assertEqual(_smoke_exit_code(result), 0)
         self.assertNotEqual(_smoke_exit_code(replace(result, requests=())), 0)
+
+    def test_fake_rejects_second_round_without_nested_tool_marker(self) -> None:
+        with LocalResponsesFakeServer() as server:
+            port = urlsplit(server.loopback_base_url).port
+            assert port is not None
+            headers = {
+                "Authorization": f"Bearer {NO_API_SMOKE_BEARER}",
+                "Content-Type": "application/json",
+            }
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            connection.request(
+                "POST",
+                "/v1/responses",
+                body=json.dumps(
+                    {"model": "gpt-5.6-luna", "stream": True, "input": "fix"}
+                ),
+                headers=headers,
+            )
+            first = connection.getresponse()
+            first.read()
+            connection.close()
+            self.assertEqual(first.status, 200)
+
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            connection.request(
+                "POST",
+                "/v1/responses",
+                body=json.dumps(
+                    {
+                        "model": "gpt-5.6-luna",
+                        "stream": True,
+                        "input": [
+                            {
+                                "type": "custom_tool_call_output",
+                                "call_id": NO_API_SMOKE_CALL_ID,
+                                "output": "wrong marker",
+                            }
+                        ],
+                    }
+                ),
+                headers=headers,
+            )
+            second = connection.getresponse()
+            second.read()
+            connection.close()
+            self.assertEqual(second.status, 400)
+            self.assertEqual(server.requests[-1].rejection, "tool_round_trip_mismatch")
+            self.assertFalse(server.tool_round_trip)
+
+    def test_completed_harbor_result_rejects_unexpected_code_mode_host_error_item(self) -> None:
+        class ErrorItemHostExecutor(FakeHostExecutor):
+            async def run(self, argv, **kwargs) -> HostHarborResult:
+                result = await super().run(argv, **kwargs)
+                codex_output = next(result.jobs_dir.glob("*/*/agent/codex.txt"))
+                codex_output.write_text(
+                    json.dumps(
+                        {
+                            "type": "item.completed",
+                            "item": {
+                                "id": "item-error",
+                                "type": "error",
+                                "message": "unexpected error: code-mode-host binary is missing",
+                            },
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "type": "turn.completed",
+                            "usage": {
+                                "input_tokens": 0,
+                                "cached_input_tokens": 0,
+                                "cache_write_input_tokens": 0,
+                                "output_tokens": 0,
+                                "reasoning_output_tokens": 0,
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                return result
+
+        with self.assertRaisesRegex(DockerNoApiSmokeError, "error event"):
+            asyncio.run(
+                run_docker_no_api_smoke(
+                    self.config(),
+                    self.request(),
+                    counter=mock.Mock(),
+                    lock_guard=mock.Mock(),
+                    lease=HeavyLockLease(token="x" * 16, held=True),
+                    materializer=FakeMaterializer(self.root / "fake-materialized-error"),
+                    executor_factory=ErrorItemHostExecutor,
+                )
+            )
 
     def test_server_rejects_websocket_and_nonlocal_configuration(self) -> None:
         with self.assertRaises(DockerNoApiSmokeError):

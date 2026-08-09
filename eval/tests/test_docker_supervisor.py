@@ -16,6 +16,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     DOCKER_GROWTH_STOP_BYTES,
     DockerCounterReading,
     FAILURE_CLEANUP_TIMEOUT_SECONDS,
+    HOST_SUCCESS_TEARDOWN_GRACE_SECONDS,
     DockerLimits,
     DockerOperation,
     DockerSupervisionError,
@@ -110,12 +111,34 @@ class FakeRunner:
         return self.handles.pop(0)
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
 class DockerSupervisorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.identity = DockerTaskIdentity("20260810-task-a-r1")
         self.lease = HeavyLockLease("held-lock-token-123456", held=True)
 
-    def supervisor(self, *, counter, handles, lock=None, cleanup_runner=None, monotonic=None):
+    def supervisor(
+        self,
+        *,
+        counter,
+        handles,
+        lock=None,
+        cleanup_runner=None,
+        monotonic=None,
+        sleeper=None,
+    ):
         runner = FakeRunner(handles)
         options = dict(
             runner=runner,
@@ -125,6 +148,8 @@ class DockerSupervisorTests(unittest.TestCase):
         )
         if monotonic is not None:
             options["monotonic"] = monotonic
+        if sleeper is not None:
+            options["sleeper"] = sleeper
         supervisor = DockerSupervisor(**options)
         return supervisor, runner
 
@@ -288,14 +313,17 @@ class DockerSupervisorTests(unittest.TestCase):
             )
         self.assertEqual(same_runner.commands, [])
 
-    def test_successful_host_exit_cleans_and_verifies_observed_daemon_container(self) -> None:
-        cleanup_handle = FakeHandle([0])
-        cleanup_runner = FakeRunner([cleanup_handle])
+    def test_successful_host_exit_allows_natural_daemon_teardown(self) -> None:
+        clock = FakeClock()
+        cleanup_runner = FakeRunner([])
         counter = FakeCounter(
             [
                 reading(),
                 reading(containers=(CONTAINER_ID,)),
-                reading(containers=(CONTAINER_ID,)),
+                reading(
+                    total=1_000 + DOCKER_GROWTH_WARN_BYTES,
+                    containers=(CONTAINER_ID,),
+                ),
                 reading(),
             ]
         )
@@ -303,6 +331,8 @@ class DockerSupervisorTests(unittest.TestCase):
             counter=counter,
             handles=[FakeHandle([0])],
             cleanup_runner=cleanup_runner,
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
         )
 
         result = supervisor.supervise_host_command(
@@ -313,15 +343,196 @@ class DockerSupervisorTests(unittest.TestCase):
         )
 
         self.assertEqual(len(host_runner.commands), 1)
+        self.assertEqual(cleanup_runner.commands, [])
+        self.assertEqual(clock.sleeps, [SAMPLE_INTERVAL_SECONDS] * 2)
+        self.assertEqual(len(result.warnings), 1)
+        self.assertEqual(
+            [sample.phase for sample in result.samples],
+            ["baseline", "final", "teardown_grace", "teardown_grace"],
+        )
+
+    def test_successful_host_exit_cleans_after_bounded_teardown_grace(self) -> None:
+        clock = FakeClock()
+        cleanup_handle = FakeHandle([0])
+        cleanup_runner = FakeRunner([cleanup_handle])
+        counter = FakeCounter(
+            [reading(), *[reading(containers=(CONTAINER_ID,))] * 8, reading()]
+        )
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([0])],
+            cleanup_runner=cleanup_runner,
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+
+        result = supervisor.supervise_host_command(
+            self.identity,
+            ("/project/eval/.venv/bin/harbor", "run"),
+            lease=self.lease,
+            timeout_seconds=60,
+        )
+
+        self.assertEqual(
+            clock.sleeps,
+            [SAMPLE_INTERVAL_SECONDS]
+            * int(HOST_SUCCESS_TEARDOWN_GRACE_SECONDS / SAMPLE_INTERVAL_SECONDS),
+        )
         self.assertEqual(
             cleanup_runner.commands,
             [("docker", "container", "rm", "--force", CONTAINER_ID)],
         )
         self.assertEqual(cleanup_handle.waits, [FAILURE_CLEANUP_TIMEOUT_SECONDS])
-        self.assertEqual(
-            [sample.phase for sample in result.samples],
-            ["baseline", "final", "post_stop", "cleanup_verified"],
+        self.assertEqual(result.samples[-2].phase, "post_stop")
+        self.assertEqual(result.samples[-1].phase, "cleanup_verified")
+
+    def test_nonzero_host_exit_skips_grace_and_cleans_immediately(self) -> None:
+        clock = FakeClock()
+        cleanup_runner = FakeRunner([FakeHandle([0])])
+        counter = FakeCounter(
+            [
+                reading(),
+                reading(containers=(CONTAINER_ID,)),
+                reading(containers=(CONTAINER_ID,)),
+                reading(),
+            ]
         )
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([7])],
+            cleanup_runner=cleanup_runner,
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+
+        result = supervisor.supervise_host_command(
+            self.identity,
+            ("/project/eval/.venv/bin/harbor", "run"),
+            lease=self.lease,
+            timeout_seconds=30,
+        )
+
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(clock.sleeps, [])
+        self.assertEqual(
+            cleanup_runner.commands,
+            [("docker", "container", "rm", "--force", CONTAINER_ID)],
+        )
+
+    def test_success_grace_threshold_fails_immediately_and_cleans(self) -> None:
+        cases = (
+            (
+                "growth",
+                reading(
+                    task=DOCKER_GROWTH_STOP_BYTES,
+                    containers=(CONTAINER_ID,),
+                ),
+                "60 GB stop threshold",
+            ),
+            (
+                "host-free",
+                reading(
+                    free=DATA_ROOT_FREE_STOP_BYTES - 1,
+                    containers=(CONTAINER_ID,),
+                ),
+                "less than 80 GiB free",
+            ),
+        )
+        for name, dangerous_reading, expected_reason in cases:
+            with self.subTest(name=name):
+                clock = FakeClock()
+                host_handle = FakeHandle([0])
+                cleanup_runner = FakeRunner([FakeHandle([0])])
+                counter = FakeCounter(
+                    [
+                        reading(),
+                        reading(containers=(CONTAINER_ID,)),
+                        dangerous_reading,
+                        reading(containers=(CONTAINER_ID,)),
+                        reading(),
+                    ]
+                )
+                supervisor, _ = self.supervisor(
+                    counter=counter,
+                    handles=[host_handle],
+                    cleanup_runner=cleanup_runner,
+                    monotonic=clock.monotonic,
+                    sleeper=clock.sleep,
+                )
+
+                with self.assertRaises(DockerSupervisionError) as caught:
+                    supervisor.supervise_host_command(
+                        self.identity,
+                        ("/project/eval/.venv/bin/harbor", "run"),
+                        lease=self.lease,
+                        timeout_seconds=60,
+                    )
+
+                self.assertEqual(clock.sleeps, [SAMPLE_INTERVAL_SECONDS])
+                self.assertEqual(host_handle.terminated, 1)
+                self.assertIn(expected_reason, caught.exception.reason)
+                self.assertEqual(caught.exception.samples[-1].phase, "cleanup_verified")
+
+    def test_success_grace_lock_or_counter_failure_does_not_wait(self) -> None:
+        cases = (
+            (
+                "lock",
+                FakeCounter(
+                    [
+                        reading(),
+                        reading(containers=(CONTAINER_ID,)),
+                        reading(containers=(CONTAINER_ID,)),
+                        reading(),
+                    ]
+                ),
+                FakeLockGuard([True, True, True, True, False]),
+                0,
+            ),
+            (
+                "counter",
+                FakeCounter(
+                    [
+                        reading(),
+                        reading(containers=(CONTAINER_ID,)),
+                        OSError("counter unavailable"),
+                        reading(containers=(CONTAINER_ID,)),
+                        reading(),
+                    ]
+                ),
+                FakeLockGuard(),
+                1,
+            ),
+        )
+        for name, counter, guard, expected_sleeps in cases:
+            with self.subTest(name=name):
+                clock = FakeClock()
+                cleanup_runner = FakeRunner([FakeHandle([0])])
+                supervisor, _ = self.supervisor(
+                    counter=counter,
+                    handles=[FakeHandle([0])],
+                    cleanup_runner=cleanup_runner,
+                    lock=guard,
+                    monotonic=clock.monotonic,
+                    sleeper=clock.sleep,
+                )
+
+                with self.assertRaises(DockerSupervisionError) as caught:
+                    supervisor.supervise_host_command(
+                        self.identity,
+                        ("/project/eval/.venv/bin/harbor", "run"),
+                        lease=self.lease,
+                        timeout_seconds=60,
+                    )
+
+                self.assertEqual(
+                    clock.sleeps,
+                    [SAMPLE_INTERVAL_SECONDS] * expected_sleeps,
+                )
+                self.assertEqual(caught.exception.samples[-1].phase, "cleanup_verified")
+                self.assertEqual(
+                    cleanup_runner.commands,
+                    [("docker", "container", "rm", "--force", CONTAINER_ID)],
+                )
 
     def test_successful_direct_run_reuses_docker_runner_for_cleanup(self) -> None:
         counter = FakeCounter(
