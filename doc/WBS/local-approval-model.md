@@ -54,6 +54,10 @@
 ### L2 本地推理服务接入（规模 M）
 
 - 形态：起本地 OpenAI 兼容 HTTP 服务（llama.cpp server 或 Ollama，GGUF `Q4_K_M`），通过 `codex-rs/model-provider-info` 的既有 OpenAI 兼容 provider 配置指向它。**不新增 provider crate**，保持轻量（上游已有 `ollama` / `lmstudio` crate 可参考，但审批走静态无工具路径，不必复用其全部逻辑）。
+- 首选运行时固定为 **llama.cpp server**，统一使用 `/v1/responses`；根目录受跟踪的
+  `rondo.local.example.toml` 定义参数合同，机器实际值写入忽略的 `rondo.local.toml`。API Key 只从根目录
+  忽略且权限收紧的 `.env.local` 按变量名加载，不进入 TOML、命令行、日志或工件。linked worktree 的加载器
+  必须通过 Git common dir 定位主仓库根，复用同一份本机配置，不在各 worktree 复制密钥。
 - 硬件约束（RTX 4060 Laptop 8GB VRAM）：
   - 8B 级模型 Q4 权重约 4.8GB，剩余显存要留给 KV cache。
   - 审批证据包可能很长（任务轨迹 + 工具结果），**上下文预算必须实测**，不能拍脑袋。L2 的第一件事就是量出"在不 OOM、不掉到共享内存的前提下，实际能吃多长的证据包"。

@@ -373,7 +373,33 @@ Bazel 门禁与 `just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。
 
-## 9. 快速健康检查
+## 9. RONDO 本地凭据与模型配置合同
+
+固定接口由两个受 Git 跟踪、不得填写真实值的示例文件定义：
+
+| 文件 | 作用 |
+|---|---|
+| `rondo.secrets.example.env` | 允许的密钥变量名；只定义接口，不保存密钥 |
+| `rondo.local.example.toml` | OpenAI、DeepSeek、Qwen 与 llama.cpp 的 provider、模型和运行参数合同 |
+
+机器实际值固定放在主仓库根的两个 ignored 文件：
+
+| 文件 | 可否由 AI 读取 | 内容 |
+|---|---|---|
+| `.env.local` | **不可读取** | `OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`，以及可选的 `RONDO_LOCAL_MODEL_API_KEY` |
+| `rondo.local.toml` | 可按任务读取 | 非密钥的 endpoint、model id、GGUF 路径和 llama.cpp 参数 |
+
+`.env.local` 必须是普通文件、权限 `0600`，格式为 UTF-8 的逐行 `KEY=VALUE`；允许空行和 `#` 注释，
+不允许 `export`、命令替换、shell 展开或未在示例文件声明的变量。加载器按数据解析而不是执行 shell，只把当前
+任务需要的变量注入目标子进程；日志、命令行、测试工件和错误消息均不得包含值。AI 验证配置时只返回
+`present`、`missing` 或 `empty`，不得读取后回显、报告长度、前后缀或哈希。
+
+linked worktree 不复制凭据。后续加载器通过 `git rev-parse --git-common-dir` 定位 common Git directory，
+再取其父目录作为主仓库根，从同一处读取 `.env.local` 和 `rondo.local.toml`。B3 只要求
+`OPENAI_API_KEY`；DeepSeek/Qwen 仅在对应 provider 实际使用时要求各自密钥；只监听 `127.0.0.1` 且未启用
+`--api-key` 的 llama.cpp server 不要求 `RONDO_LOCAL_MODEL_API_KEY`。
+
+## 10. 快速健康检查
 
 ```bash
 . "$HOME/.cargo/env"

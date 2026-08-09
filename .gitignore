@@ -12,3 +12,7 @@ reference-agent-harness/
 
 # Evaluation recordings, evidence bundles, raw runs, and model weights.
 /eval-data/
+
+# Local RONDO credentials and machine-specific model runtime settings.
+/.env.local
+/rondo.local.toml
