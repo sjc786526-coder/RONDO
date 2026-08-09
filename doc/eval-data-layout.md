@@ -1,6 +1,6 @@
 # 测评结果与数据资产保存规范
 
-最后更新：2026-08-08
+最后更新：2026-08-10
 
 适用于全部测评产出：离线冻结回放（E-A）、真实 Terminal-Bench 2.1 端到端（E-B）、静态影子审批横评（L3）。
 目标是**结构清楚、便于管理、可长期追溯**，同时保持轻量——不做数据资产审计、可信链或权限系统。
@@ -25,9 +25,10 @@
 
 ```
 eval/                                  # 入库
-├── config/                            # 运行条件（模型、effort、超时、探针开关、websocket=false）
-│   ├── tb-canary.toml
-│   └── replay-default.toml
+├── rondo_eval/                        # 共享合同、runner、adapter、归档、doctor/fake
+├── locks/                             # Harbor/TB、llama.cpp、bwrap 的版本与 SHA 冻结
+├── tests/                             # pure/fake/loopback 设施测试
+├── pyproject.toml / uv.lock           # 项目局部 Python/Harbor 依赖锁
 ├── tasksets/                          # 只存任务 id 与分区归属，不存任务正文
 │   ├── canary.txt
 │   ├── validation.txt
@@ -38,12 +39,18 @@ eval/                                  # 入库
 └── reports/                           # 生成的对比表与曲线（可重生成）
 
 eval-data/                             # git-ignored
+├── bin/{rondo,codex}/                # 已冻结的两侧 runtime bundle + manifest
+├── deps/                              # 按 SHA 验证的项目局部运行资产（例如 bwrap）
+├── tools/                             # 项目局部工具（例如 llama.cpp runtime）
+├── build-metrics/                     # 看门狗 summary/JUnit/受限日志
+├── budgets/                           # 持久费用预留/结算账本，0600
+├── work/                              # materialize 和 no-API 工作目录
 ├── recordings/<recording_id>/         # A1 录制包（原始 HTTP exchange + SSE）
 ├── evidence/                          # 审批证据包
 │   ├── raw/<review_id>/               # S2 直接落盘处；Unix/WSL 权限 0700，Windows 继承 ACL
 │   ├── seed/<review_id>/              # 可用于指导合成
 │   └── holdout/<review_id>/           # 只用于评测，禁止进入合成上下文
-├── runs/<run_id>/                     # 单次运行的原始日志、rollout、容器输出
+├── runs/<run_id>/                     # 已发布单次运行的原始日志、rollout、容器输出
 └── models/                            # 本地权重、GGUF、LoRA adapter（永不入库）
 ```
 
@@ -105,6 +112,14 @@ eval-data/                             # git-ignored
 }
 ```
 
+- 当前 ArtifactWriter v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
+  `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
+- Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的
+  Docker/watchdog/parser 异常也必须写分类失败行，不允许复用同一 run-id 绕过运行次数上限。
+- `git_commit` 记录冻结产品/二进制的 measurement commit；若 eval harness 从另一 clean worktree 加载，
+  其独立 commit 必须写入 `config.eval_harness_commit`。
+- Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source
+  tag/commit 与 effective policy hash 后单独归档，不复制 config、lock、raw log 或 exception trace。
 - `track = replay` 时 `tasks` 为 `null`，改填 `metrics`：`{ wall_ms, cpu_ms, peak_rss_kb, turns, tool_calls, drift }`。
 - `track = shadow` 时 `metrics` 填一致率、false allow / false deny 率、P50/P95 延迟、显存峰值。
 - **`git_dirty = true` 的运行结果只能用于调试，不得作为里程碑证据**。
@@ -145,7 +160,8 @@ eval-data/                             # git-ignored
 | `eval-data/evidence/` | `seed` 与 `holdout` 永久（体量小）；`raw` 在完成划分后可清 |
 | `eval-data/models/` | 只保留当前在用与上一版权重，其余按需重新下载 |
 
-提供 `just eval-gc` 按上表清理，删除前打印将删除的路径与总体积，**不做静默删除**。
+当前尚未实现通用 `eval-gc`。清理只能针对本次已知的精确 target/scratch/任务容器，
+必须在操作前打印目标和体积，重型产物仍经项目看门狗；不静默清理来源不明的历史资产。
 
 `eval/fixtures/` 入库阈值：总量 ≤ 50MB 且单文件 ≤ 10MB。超过则只入库精简后的规范化包，原始录制留在 `eval-data/`。
 

@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-09
+最后更新：2026-08-10
 
 本文件只记录**当前阶段**与**方向级路线、依赖和授权门**。方向内部的详细分解见 `doc/WBS/`，
 单次任务的execplan见 `plan/`，已完成成果见 `doc/WBS-COMPLETED.md`。
@@ -28,11 +28,21 @@
   和 tools 总在顶层 `instructions` / `tools`，也不得保留新增的 provider-private
   `encrypted_function_args`；新旧 Guardian 源码证据须按 meta 中的 source tag/commit 分层。实际有效
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
-- 测评体系、教师 harness 研究尚未开始。
-- **当前阶段：Plan 004 部分通过**。A-F/H-K当前平台实现与独立整改已交付；G的default/sandbox canary和
-  manifest门禁均通过，rusty_v8资产阻断已解除。完整workspace实际运行14,092项，14,060通过、31失败、1超时，
-  另有23项显式ignored；V8 POC 7/7及Code Mode专属crate 167/167通过，但workspace整体不称全绿。Windows目标
-  平台测试仍待补验；macOS Seatbelt未运行是非阻断跨平台证据缺口。P1尚未开始，Docker与小额真实API仍受§6授权门约束。
+- P1 已落地顶层轻量 `eval/` 体系：Standard/Lite `E_final` 解析、`PolicyIdentity`、
+  无工具静态审批协议、严格本地配置、原子归档、持久费用上限、Docker 监督、
+  Terminal-Bench runner/双适配器与 llama.cpp client/doctor/fake/launcher。182 项 pure/fake/loopback
+  设施测试通过，`uv lock --check` 通过。
+- Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest；B2 已生成
+  Codex/RONDO 静态 musl CLI + code-mode-host + 官方 bwrap runtime bundle，受看门狗的镜像
+  `--version` 探针通过。完整 no-API agent 路径依然被 Docker 默认 seccomp 下的嵌套
+  user namespace 拒绝；未授予 privileged/`SYS_ADMIN`/关闭 seccomp，所以 B3/M1 保持未通过。
+- L1 已完成；L2 项目局部 llama.cpp `b10333` 运行时、配置、client、doctor、fake 和
+  启动入口已就绪，无模型 doctor 返回 `infrastructure_ready_model_missing`/78。当前无权重，
+  未做真实本地推理、显存/延迟实测或 L2a/L3/L4。
+- **当前阶段：Plan 008 部分完成，安全阻塞收口**。三次 B3 诊断尝试均在首次
+  付费 API 请求前停止，按终审从正式结果库移除、仅在预算账本保留不可复用槽位；实际 API 调用
+  0 次、费用 0 USD。批次最多四个 run 尚保留 1 个槽位，
+  在 no-API 门禁通过前不消耗。
 
 ## 2. 方向与依赖
 
@@ -40,9 +50,9 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P0 定向复验通过；P1 草稿待审 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1 与 B2 代码/冻结产物已落地；B2 全链路 no-API、B3 受 Docker 安全边界阻塞 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | P0 定向复验通过；暂不进入实现 |
+| 2 | 本地审批模型接入与横评 | L1 已完成；L2 前置设施就绪、待模型接入 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -67,7 +77,7 @@ P0 共享地基 ────────┤                          ├─→ �
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 未开始 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1、B2 代码/冻结产物、L1、L2 前置完成；B2 全链路 no-API 与 B3/M1 未通过 |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
@@ -104,12 +114,12 @@ P0 共享地基 ────────┤                          ├─→ �
 
 ## 5. 当前阶段任务
 
-P0 已完成定向门禁并合入主线；验收和失败差集见 `doc/WBS-COMPLETED.md`、
-`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`。剩余测试失败已按
-`plan/004-remaining-test-failures-investigation.md` 完成当前平台实现、独立整改、定向/压力/静态门禁并交付主线；
-V8 sandbox补验已经完成，完整workspace已执行但仍有32项终态未通过，Windows目标平台证据保持待补验边界。
-P1草稿见 `plan/003-p1-terminal-bench-minimal-chain-draft.md`，在用户确认草稿前不进入实现；涉及Docker、
-真实API或数据外发时仍先走§6授权门。
+P0 已完成定向门禁并合入主线；P1 执行合同见
+`plan/008-p1-terminal-bench-and-local-approval-execplan.md`。本批已完成共享 eval 合同、B1、B2
+代码/冻结产物、L1 和 L2 前置设施，并保留 pure/fake、Docker、真实 API 与未运行项的证据分层。完整
+Terminal-Bench no-API 链路在 Docker 默认 seccomp 下无法创建 bwrap 所需的嵌套
+user namespace；未授权弱化容器安全边界，因此 B3/M1 与真实 `E_final` 种子保持待完成。
+执行细节和验收差集记录在本批 `agent_log`。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，
@@ -119,7 +129,8 @@ Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审�
 
 ## 6. 授权门
 
-以下动作必须在执行前单独取得授权，不随普通开发一起进行：
+以下动作必须在执行前单独取得授权，不随普通开发一起进行。Plan 008 已获得的
+Docker/最多四个 run/总计 20 USD 授权只对该计划有效，不自动扩展到后续批次：
 
 - 宿主机 Docker 拉镜像与运行容器（TB 2.1 任务环境）。
 - 任何真实 API 批量跑批：需事先说明任务范围、轮数、模型与预算上限。

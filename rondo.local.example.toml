@@ -34,7 +34,9 @@ format = "gguf"
 quantization = "Q4_K_M"
 
 [local_model.server]
-binary = "llama-server"
+# Install the digest-pinned b10333 asset from eval/locks/llama-cpp-b10333.json
+# below this ignored project-local path. Global/PATH binaries are rejected.
+binary = "eval-data/tools/llama-b10333/llama-server"
 host = "127.0.0.1"
 port = 8080
 # 0 means use the context size stored in the model. L2 acceptance will measure

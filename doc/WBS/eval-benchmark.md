@@ -1,6 +1,6 @@
 # 方向 0：量化测评基准
 
-最后更新：2026-08-08 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-10 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
@@ -12,6 +12,23 @@
 - **E-B 真实 API + Terminal-Bench 2.1**：测行为改变型优化，是最终可信指标，成本高、低频跑。
 
 按已定排序，**E-B 的最小真实链路先行**，它同时产出 E-A 需要的高保真录制素材和方向 2 需要的证据包模板。
+
+## P1 当前状态
+
+- **B1 完成**：Harbor 固定为 `0.20.0`，TB 2.1 数据集固定为 commit
+  `ffccbe05ee73a9d59518217f294ad711bda39304`；`terminal-bench/fix-git` 的 task archive 和
+  `linux/amd64` 镜像均以 SHA-256 锁定。受监督 Docker 下官方 hello-world oracle 为
+  `completed`/reward 1.0。
+- **B2 代码与冻结产物完成，全链路 no-API 验收未通过**：统一 runner、双 adapter、
+  结果解析/归档、费用代理与 Docker 监督已接线。Codex/RONDO 均冻结为同一
+  Rust 1.95.0 产出的静态 musl CLI + code-mode-host，并捆绑同一官方 v0.147.0 musl
+  bwrap 资产；镜像内 `--version` 探针通过。真实 agent no-API 在 Docker 内到达 bwrap 后，
+  被守护进程默认 seccomp 下的嵌套 user namespace 拒绝；未用 privileged、`SYS_ADMIN`
+  或 `seccomp=unconfined` 换取通过。
+- **B3/M1 未完成**：三条 Codex 诊断尝试均在首个官方 API 请求前因设施问题 fail-closed；终审后不再
+  作为正式 `runs.jsonl` 结果，只在不可重用的持久预算账本中保留尝试槽位。实际 API 调用 0 次、费用 0 USD。最多四个 run 的账本保留
+  1 个未用槽位，在 no-API 链路通过前不继续付费路径。没有同一任务两侧
+  `completed` 证据，不得声称 M1。
 
 ## E-B 真实 Terminal-Bench 2.1 测评
 

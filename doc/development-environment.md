@@ -1,6 +1,6 @@
 # RONDO 开发环境基线
 
-最后核对时间：2026-08-08（Asia/Shanghai）
+最后核对时间：2026-08-10（Asia/Shanghai）
 
 适用工作区：`/home/sjc/desktop/RONDO`，主要源码位于 `mydev/`。
 
@@ -330,6 +330,18 @@ uv sync --frozen --python /usr/bin/python3
 
 虽然主机仍安装了 Miniconda，且 Bash 中保留其初始化配置，但本项目 `.venv` 已明确重建为基于 Ubuntu Python 3.12，不使用 Conda 环境，也不依赖 Miniconda 的 Python。`uv.lock` 未被修改。
 
+P1 测评设施另在 `eval/` 中使用独立 uv project，`pyproject.toml`/`uv.lock` 固定
+Harbor `0.20.0` 及其传递依赖，实际虚拟环境为 ignored `eval/.venv/`。轻量门禁用：
+
+```bash
+cd /home/sjc/desktop/RONDO/eval
+uv sync --frozen --python /usr/bin/python3
+.venv/bin/python -m unittest discover -s tests -v
+uv lock --check
+```
+
+这组单测包含 pure、fake HTTP 与 loopback 测试，不代表 Docker、官方 API 或真实本地模型验收。
+
 ## 6. 常用 CLI 与 PATH 优先级
 
 除了 APT 版本，当前 PATH 中还有部分其他工具提供方：
@@ -351,7 +363,17 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 
 这证明 Docker Desktop 的 WSL 集成和 Linux daemon 当前可用。Codex 的 workspace-write 沙箱内直接访问 `/var/run/docker.sock` 可能显示 `permission denied`；沙箱外同一 WSL 环境连接成功，因此这不是 Docker Desktop 安装故障。需要运行 Docker 测试时，应明确允许对应 Docker 命令在沙箱外执行。
 
-本次只做 daemon 握手，没有拉取镜像、创建容器或运行完整 Docker 测试套件。
+随后的 P1 实测已在项目看门狗下串行拉取和运行固定镜像。当前固定：
+
+- Terminal-Bench `fix-git` `linux/amd64` 镜像 digest：
+  `sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74`。
+- hello-world oracle 的 Docker no-API 生命周期验收通过，reward 1.0。
+- 测试基线与收尾的 Docker 总占用均为 18.128GB，本任务残留容器/卷为 0，
+  未触发 40/60GB 增量或宿主剩余 80GiB 停机线。
+- Docker 守护进程报告 builtin seccomp 和 cgroup namespace，未启用 AppArmor。冻结 Codex
+  在任务容器内进入 bwrap 时，root 与 UID/GID 1000 两种形态都无法再创建 user
+  namespace。当前不授予 privileged/`SYS_ADMIN`，也不使用 `seccomp=unconfined`；
+  因此 Terminal-Bench 完整 no-API agent smoke 仍是已记录的安全阻塞，不是通过项。
 
 ## 8. 当前未安装或未执行的重型工具
 
@@ -361,7 +383,7 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 - Docker devcontainer 环境
 - `cargo-dylint`、`dylint-link`、`cargo-shear`
 - 额外的跨平台 Rust targets
-- Bazel 测试或完整 Docker 测试
+- Bazel 测试或完整 Docker devcontainer 测试
 
 `v0.146.1` 产品树曾于 2026-08-08 完整跑过 `just test`：13,135 项运行，13,062 通过 /
 73 失败 / 23 跳过 / 25 flaky，且无 OOM；这是旧基线历史证据，详见
@@ -398,6 +420,20 @@ linked worktree 不复制凭据。后续加载器通过 `git rev-parse --git-com
 再取其父目录作为主仓库根，从同一处读取 `.env.local` 和 `rondo.local.toml`。B3 只要求
 `OPENAI_API_KEY`；DeepSeek/Qwen 仅在对应 provider 实际使用时要求各自密钥；只监听 `127.0.0.1` 且未启用
 `--api-key` 的 llama.cpp server 不要求 `RONDO_LOCAL_MODEL_API_KEY`。
+
+### 9.1 P1 本地运行时状态
+
+- llama.cpp 固定为 `b10333`/commit `08659901c43b51de735740f1cf61bb82fbe0c4e4`，CPU x64
+  asset 安装于 ignored `eval-data/tools/llama-b10333/`；launcher/doctor 先核对安装 binary SHA，
+  再核对 `--version` build/commit。`doctor` 在无权重时只做短生命周期
+  router 身份/健康探针，终态为 `infrastructure_ready_model_missing`/78；未下载模型、
+  未启动真实推理。
+- Terminal-Bench 两侧静态 musl runtime bundle 位于 ignored `eval-data/bin/{rondo,codex}/`；
+  内含 CLI、`codex-code-mode-host` 与同一官方 v0.147.0 musl bwrap，详细 SHA 在各 bundle
+  `manifest.json` 和 `agent_log/` 的 P1 日志中。
+- 所有 Cargo target、baseline scratch 和废弃的 libcap 自建产物已按精确路径在看门狗内清理；
+  冻结 bundle、下载资产、预算账本与看门狗 summary 保留在 `eval-data/`。三条 API 前诊断 raw run
+  已从正式结果库和私有发布目录移除，预算槽位不回收。
 
 ## 10. 快速健康检查
 
