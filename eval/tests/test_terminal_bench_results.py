@@ -93,11 +93,14 @@ class TerminalBenchResultTests(unittest.TestCase):
             sha256="a" * 64,
             code_mode_host_path=str(self.root / "codex-code-mode-host"),
             code_mode_host_sha256="e" * 64,
+            bwrap_path=str(self.root / "codex-resources" / "bwrap"),
+            bwrap_sha256="f" * 64,
             source_commit=UPSTREAM_CODEX["commit"],
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
             build_command=("supervised", "build"),
             code_mode_host_build_command=("supervised", "build-code-mode-host"),
+            bwrap_build_command=("package", "bwrap"),
             workspace_lock_normalization=UPSTREAM_CODEX["workspace_lock_normalization"],
         )
         provider = ProviderProjection(
@@ -262,6 +265,13 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(record["upstream_codex"], UPSTREAM_CODEX)
         self.assertEqual(record["outcome"], "completed")
         self.assertEqual(record["cost"], {"estimated_usd": 0.012345, "actual_usd": 0.012345})
+        summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            summary["config"]["bwrap_runtime_path"],
+            "/opt/rondo-eval/bin/codex-resources/bwrap",
+        )
+        self.assertEqual(summary["config"]["bwrap_sha256"], "f" * 64)
+        self.assertEqual(summary["config"]["bwrap_build_command"], ["package", "bwrap"])
 
     def test_infra_without_job_tree_or_metadata_is_archived_explicitly(self) -> None:
         run_id = "20260810-010000002-tb-codex-r1"

@@ -153,6 +153,8 @@ class ContractTests(unittest.TestCase):
             sha256="a" * 64,
             code_mode_host_path="eval-data/bin/codex-code-mode-host",
             code_mode_host_sha256="e" * 64,
+            bwrap_path="eval-data/bin/codex-resources/bwrap",
+            bwrap_sha256="f" * 64,
             source_commit="b" * 40,
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
@@ -160,6 +162,7 @@ class ContractTests(unittest.TestCase):
             code_mode_host_build_command=(
                 "cargo", "build", "--bin", "codex-code-mode-host"
             ),
+            bwrap_build_command=("package", "bwrap"),
         )
         provider = ProviderProjection(
             provider_id="openai",

@@ -45,6 +45,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
     remote_filename: ClassVar[str]
     remote_directory: ClassVar[PurePosixPath] = PurePosixPath("/opt/rondo-eval/bin")
     remote_code_mode_host_filename: ClassVar[str] = "codex-code-mode-host"
+    remote_bwrap_relative_path: ClassVar[PurePosixPath] = PurePosixPath(
+        "codex-resources/bwrap"
+    )
     agent_version: ClassVar[str] = "0.147.0"
     _REMOTE_CODEX_HOME = PurePosixPath("/tmp/rondo-eval-codex-home")
     _REMOTE_CODEX_SECRETS_DIR = PurePosixPath("/tmp/rondo-eval-codex-secrets")
@@ -58,11 +61,14 @@ class UploadBinaryAdapter(HarborCodexAgent):
         binary_sha256: str,
         binary_code_mode_host_path: str,
         binary_code_mode_host_sha256: str,
+        binary_bwrap_path: str,
+        binary_bwrap_sha256: str,
         binary_source_commit: str,
         binary_source_dirty: bool,
         binary_rust_toolchain: str,
         binary_build_command: list[str] | tuple[str, ...],
         binary_code_mode_host_build_command: list[str] | tuple[str, ...],
+        binary_bwrap_build_command: list[str] | tuple[str, ...],
         binary_workspace_lock_normalization: str | None,
         provider_base_url: str,
         provider_api_key_env: str,
@@ -74,6 +80,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         for name, command in (
             ("binary_build_command", binary_build_command),
             ("binary_code_mode_host_build_command", binary_code_mode_host_build_command),
+            ("binary_bwrap_build_command", binary_bwrap_build_command),
         ):
             if not isinstance(command, (list, tuple)) or not command or not all(
                 isinstance(value, str) and value for value in command
@@ -84,11 +91,14 @@ class UploadBinaryAdapter(HarborCodexAgent):
             sha256=binary_sha256,
             code_mode_host_path=binary_code_mode_host_path,
             code_mode_host_sha256=binary_code_mode_host_sha256,
+            bwrap_path=binary_bwrap_path,
+            bwrap_sha256=binary_bwrap_sha256,
             source_commit=binary_source_commit,
             source_dirty=binary_source_dirty,
             rust_toolchain=binary_rust_toolchain,
             build_command=tuple(binary_build_command),
             code_mode_host_build_command=tuple(binary_code_mode_host_build_command),
+            bwrap_build_command=tuple(binary_bwrap_build_command),
             workspace_lock_normalization=binary_workspace_lock_normalization,
         )
         try:
@@ -141,6 +151,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
     def remote_code_mode_host_path(self) -> str:
         return str(self.remote_directory / self.remote_code_mode_host_filename)
 
+    @property
+    def remote_bwrap_path(self) -> str:
+        return str(self.remote_directory / self.remote_bwrap_relative_path)
+
     def get_version_command(self) -> str:
         return f"{shlex.quote(self.remote_path)} --version"
 
@@ -150,16 +164,20 @@ class UploadBinaryAdapter(HarborCodexAgent):
             Path(self.manifest.code_mode_host_path),
             self.manifest.code_mode_host_sha256,
         )
+        _verify_local_binary(Path(self.manifest.bwrap_path), self.manifest.bwrap_sha256)
 
     async def install(self, environment: EnvironmentLike) -> None:
         source = Path(self.manifest.path)
         code_mode_host_source = Path(self.manifest.code_mode_host_path)
+        bwrap_source = Path(self.manifest.bwrap_path)
         self.validate_local_binary()
 
         await _checked_exec(
             environment,
-            f"mkdir -p {shlex.quote(str(self.remote_directory))} && "
-            f"chmod 0755 {shlex.quote(str(self.remote_directory))}",
+            f"mkdir -p {shlex.quote(str(self.remote_directory))} "
+            f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))} && "
+            f"chmod 0755 {shlex.quote(str(self.remote_directory))} "
+            f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))}",
         )
         try:
             await environment.upload_file(source, self.remote_path)
@@ -167,11 +185,13 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 code_mode_host_source,
                 self.remote_code_mode_host_path,
             )
+            await environment.upload_file(bwrap_source, self.remote_bwrap_path)
         except Exception as exc:
             raise AdapterError("binary bundle upload failed") from exc
         for remote_path, expected_digest in (
             (self.remote_path, self.manifest.sha256),
             (self.remote_code_mode_host_path, self.manifest.code_mode_host_sha256),
+            (self.remote_bwrap_path, self.manifest.bwrap_sha256),
         ):
             await _checked_exec(environment, f"chmod 0555 {shlex.quote(remote_path)}")
             result = await _checked_exec(
@@ -323,11 +343,14 @@ def adapter_for(
         binary_sha256=manifest.sha256,
         binary_code_mode_host_path=manifest.code_mode_host_path,
         binary_code_mode_host_sha256=manifest.code_mode_host_sha256,
+        binary_bwrap_path=manifest.bwrap_path,
+        binary_bwrap_sha256=manifest.bwrap_sha256,
         binary_source_commit=manifest.source_commit,
         binary_source_dirty=manifest.source_dirty,
         binary_rust_toolchain=manifest.rust_toolchain,
         binary_build_command=list(manifest.build_command),
         binary_code_mode_host_build_command=list(manifest.code_mode_host_build_command),
+        binary_bwrap_build_command=list(manifest.bwrap_build_command),
         binary_workspace_lock_normalization=manifest.workspace_lock_normalization,
         provider_base_url=provider_base_url,
         provider_api_key_env=provider_api_key_env,
@@ -345,6 +368,8 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         ("binary_sha256", manifest.sha256),
         ("binary_code_mode_host_path", manifest.code_mode_host_path),
         ("binary_code_mode_host_sha256", manifest.code_mode_host_sha256),
+        ("binary_bwrap_path", manifest.bwrap_path),
+        ("binary_bwrap_sha256", manifest.bwrap_sha256),
         ("binary_source_commit", manifest.source_commit),
         ("binary_source_dirty", json.dumps(manifest.source_dirty)),
         # The frozen toolchain evidence intentionally contains the complete
@@ -356,6 +381,10 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         (
             "binary_code_mode_host_build_command",
             json.dumps(list(manifest.code_mode_host_build_command), separators=(",", ":")),
+        ),
+        (
+            "binary_bwrap_build_command",
+            json.dumps(list(manifest.bwrap_build_command), separators=(",", ":")),
         ),
         (
             "binary_workspace_lock_normalization",

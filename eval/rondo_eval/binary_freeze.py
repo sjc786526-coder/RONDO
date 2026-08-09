@@ -52,14 +52,22 @@ _MANIFEST_KEYS = {
     "sha256",
     "code_mode_host_path",
     "code_mode_host_sha256",
+    "bwrap_path",
+    "bwrap_sha256",
     "source_commit",
     "source_dirty",
     "rust_toolchain",
     "build_command",
     "code_mode_host_build_command",
+    "bwrap_build_command",
     "workspace_lock_normalization",
 }
-_LEGACY_MANIFEST_KEYS = _MANIFEST_KEYS - {
+_COMPANION_MANIFEST_KEYS = _MANIFEST_KEYS - {
+    "bwrap_path",
+    "bwrap_sha256",
+    "bwrap_build_command",
+}
+_LEGACY_MANIFEST_KEYS = _COMPANION_MANIFEST_KEYS - {
     "code_mode_host_path",
     "code_mode_host_sha256",
     "code_mode_host_build_command",
@@ -110,6 +118,19 @@ class CompanionFreezeRequest:
 
 
 @dataclass(frozen=True)
+class RuntimeFreezeRequest:
+    side: Side
+    common_root: Path
+    source_root: Path
+    source_commit: str
+    target_dir: Path
+    companion_bundle_dir: Path
+    runtime_bundle_dir: Path
+    gate_root: Path
+    baseline_reference_root: Path | None = None
+
+
+@dataclass(frozen=True)
 class FreezeResult:
     side: str
     manifest_path: str
@@ -118,6 +139,8 @@ class FreezeResult:
     source_commit: str
     code_mode_host_path: str | None = None
     code_mode_host_sha256: str | None = None
+    bwrap_path: str | None = None
+    bwrap_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +151,20 @@ class _LegacyBinaryManifest:
     source_dirty: bool
     rust_toolchain: str
     build_command: tuple[str, ...]
+    workspace_lock_normalization: str | None = None
+
+
+@dataclass(frozen=True)
+class _CompanionBinaryManifest:
+    path: str
+    sha256: str
+    code_mode_host_path: str
+    code_mode_host_sha256: str
+    source_commit: str
+    source_dirty: bool
+    rust_toolchain: str
+    build_command: tuple[str, ...]
+    code_mode_host_build_command: tuple[str, ...]
     workspace_lock_normalization: str | None = None
 
 
@@ -390,7 +427,7 @@ def prepare_companion(
     _held(proof)
 
     host_digest = _sha256_file(source_host)
-    manifest = BinaryManifest(
+    manifest = _CompanionBinaryManifest(
         path=str(paths.bundle_dir / "codex"),
         sha256=legacy.sha256,
         code_mode_host_path=str(paths.bundle_dir / "codex-code-mode-host"),
@@ -402,11 +439,8 @@ def prepare_companion(
         code_mode_host_build_command=command,
         workspace_lock_normalization=legacy.workspace_lock_normalization,
     )
-    try:
-        manifest.validate()
-    except ContractError as exc:
-        raise BinaryFreezeError("binary bundle manifest contract is invalid") from exc
-    _publish_bundle(
+    _validate_companion_manifest_contract(manifest)
+    _publish_companion_bundle(
         paths.bundle_dir,
         _regular_file(paths.legacy_artifact_dir / "codex", executable=True, exact_mode=0o555),
         source_host,
@@ -432,7 +466,7 @@ def verify_companion(
     freeze_request = _freeze_request_from_companion(request)
     _validate_source(freeze_request, paths.freeze)
     legacy = _validate_legacy_artifact(request, paths, toolchain)
-    manifest = _read_manifest(paths.bundle_dir / "manifest.json")
+    manifest = _read_companion_manifest(paths.bundle_dir / "manifest.json")
     _validate_build_command(freeze_request, paths.freeze, manifest.build_command)
     _validate_build_command(
         freeze_request,
@@ -480,6 +514,146 @@ def verify_companion(
         raise BinaryFreezeError("binary bundle contains unowned entries")
     _held(proof)
     return _result(request.side, paths.bundle_dir, manifest)
+
+
+def prepare_runtime(
+    request: RuntimeFreezeRequest,
+    bwrap_build_command: Sequence[str],
+    *,
+    lease_factory: LeaseFactory = lease_from_watchdog,
+    toolchain_probe: Callable[[], str] | None = None,
+) -> FreezeResult:
+    """Extend a verified two-binary bundle with its same-source static bwrap."""
+
+    proof = _proof(lease_factory)
+    paths = _validate_runtime_request(request, runtime_must_exist=False)
+    toolchain = (toolchain_probe or _probe_toolchain)()
+    _validate_toolchain(toolchain)
+    freeze_request = _freeze_request_from_runtime(request)
+    command = _validate_build_command(
+        freeze_request,
+        paths.freeze,
+        bwrap_build_command,
+        bwrap=True,
+    )
+    _validate_source(freeze_request, paths.freeze)
+    companion = _validate_companion_artifact(request, paths, toolchain)
+    source_bwrap = _regular_file(
+        paths.freeze.target_dir / RUST_TARGET / "release" / "bwrap",
+        executable=True,
+    )
+    _validate_static_musl_binary(source_bwrap)
+    _held(proof)
+
+    manifest = BinaryManifest(
+        path=str(paths.runtime_bundle_dir / "codex"),
+        sha256=companion.sha256,
+        code_mode_host_path=str(paths.runtime_bundle_dir / "codex-code-mode-host"),
+        code_mode_host_sha256=companion.code_mode_host_sha256,
+        bwrap_path=str(paths.runtime_bundle_dir / "codex-resources" / "bwrap"),
+        bwrap_sha256=_sha256_file(source_bwrap),
+        source_commit=request.source_commit,
+        source_dirty=False,
+        rust_toolchain=toolchain,
+        build_command=companion.build_command,
+        code_mode_host_build_command=companion.code_mode_host_build_command,
+        bwrap_build_command=command,
+        workspace_lock_normalization=companion.workspace_lock_normalization,
+    )
+    try:
+        manifest.validate()
+    except ContractError as exc:
+        raise BinaryFreezeError("runtime bundle manifest contract is invalid") from exc
+    _publish_runtime_bundle(
+        paths.runtime_bundle_dir,
+        _regular_file(paths.companion_bundle_dir / "codex", executable=True, exact_mode=0o555),
+        _regular_file(
+            paths.companion_bundle_dir / "codex-code-mode-host",
+            executable=True,
+            exact_mode=0o555,
+        ),
+        source_bwrap,
+        manifest,
+        proof,
+    )
+    _held(proof)
+    return _result(request.side, paths.runtime_bundle_dir, manifest)
+
+
+def verify_runtime(
+    request: RuntimeFreezeRequest,
+    *,
+    lease_factory: LeaseFactory = lease_from_watchdog,
+    toolchain_probe: Callable[[], str] | None = None,
+) -> FreezeResult:
+    """Revalidate the source, companion input, bwrap release, and runtime bundle."""
+
+    proof = _proof(lease_factory)
+    paths = _validate_runtime_request(request, runtime_must_exist=True)
+    toolchain = (toolchain_probe or _probe_toolchain)()
+    _validate_toolchain(toolchain)
+    freeze_request = _freeze_request_from_runtime(request)
+    _validate_source(freeze_request, paths.freeze)
+    companion = _validate_companion_artifact(request, paths, toolchain)
+    manifest = _read_manifest(paths.runtime_bundle_dir / "manifest.json")
+    _validate_build_command(freeze_request, paths.freeze, manifest.build_command)
+    _validate_build_command(
+        freeze_request,
+        paths.freeze,
+        manifest.code_mode_host_build_command,
+        companion=True,
+    )
+    _validate_build_command(
+        freeze_request,
+        paths.freeze,
+        manifest.bwrap_build_command,
+        bwrap=True,
+    )
+    expected_normalization = LOCK_NORMALIZATION if request.side is Side.CODEX else None
+    if (
+        manifest.source_commit != request.source_commit
+        or manifest.source_dirty
+        or manifest.rust_toolchain != toolchain
+        or manifest.workspace_lock_normalization != expected_normalization
+        or manifest.sha256 != companion.sha256
+        or manifest.code_mode_host_sha256 != companion.code_mode_host_sha256
+        or manifest.build_command != companion.build_command
+        or manifest.code_mode_host_build_command != companion.code_mode_host_build_command
+    ):
+        raise BinaryFreezeError("runtime bundle provenance differs from its verified inputs")
+    binary = _regular_file(paths.runtime_bundle_dir / "codex", executable=True, exact_mode=0o555)
+    host = _regular_file(
+        paths.runtime_bundle_dir / "codex-code-mode-host", executable=True, exact_mode=0o555
+    )
+    resources = _regular_directory(paths.runtime_bundle_dir / "codex-resources")
+    if stat.S_IMODE(resources.stat().st_mode) != 0o700:
+        raise BinaryFreezeError("runtime resource directory mode differs")
+    bwrap = _regular_file(resources / "bwrap", executable=True, exact_mode=0o555)
+    release_bwrap = _regular_file(
+        paths.freeze.target_dir / RUST_TARGET / "release" / "bwrap",
+        executable=True,
+    )
+    for candidate in (binary, host, bwrap, release_bwrap):
+        _validate_static_musl_binary(candidate)
+    if (
+        Path(manifest.path) != binary
+        or Path(manifest.code_mode_host_path) != host
+        or Path(manifest.bwrap_path) != bwrap
+        or _sha256_file(binary) != manifest.sha256
+        or _sha256_file(host) != manifest.code_mode_host_sha256
+        or _sha256_file(bwrap) != manifest.bwrap_sha256
+        or _sha256_file(release_bwrap) != manifest.bwrap_sha256
+    ):
+        raise BinaryFreezeError("runtime bundle bytes differ from its manifest or bwrap release")
+    if {entry.name for entry in os.scandir(paths.runtime_bundle_dir)} != {
+        "codex",
+        "codex-code-mode-host",
+        "codex-resources",
+        "manifest.json",
+    } or {entry.name for entry in os.scandir(resources)} != {"bwrap"}:
+        raise BinaryFreezeError("runtime bundle contains unowned entries")
+    _held(proof)
+    return _result(request.side, paths.runtime_bundle_dir, manifest)
 
 
 def cleanup(
@@ -534,6 +708,13 @@ class _ResolvedCompanionPaths:
     bundle_dir: Path
 
 
+@dataclass(frozen=True)
+class _ResolvedRuntimePaths:
+    freeze: _ResolvedPaths
+    companion_bundle_dir: Path
+    runtime_bundle_dir: Path
+
+
 def _freeze_request_from_companion(request: CompanionFreezeRequest) -> FreezeRequest:
     return FreezeRequest(
         side=request.side,
@@ -542,6 +723,19 @@ def _freeze_request_from_companion(request: CompanionFreezeRequest) -> FreezeReq
         source_commit=request.source_commit,
         target_dir=request.target_dir,
         artifact_dir=request.bundle_dir,
+        gate_root=request.gate_root,
+        baseline_reference_root=request.baseline_reference_root,
+    )
+
+
+def _freeze_request_from_runtime(request: RuntimeFreezeRequest) -> FreezeRequest:
+    return FreezeRequest(
+        side=request.side,
+        common_root=request.common_root,
+        source_root=request.source_root,
+        source_commit=request.source_commit,
+        target_dir=request.target_dir,
+        artifact_dir=request.runtime_bundle_dir,
         gate_root=request.gate_root,
         baseline_reference_root=request.baseline_reference_root,
     )
@@ -581,6 +775,42 @@ def _validate_companion_request(
         raise BinaryFreezeError("RONDO bundle cannot declare a baseline reference")
     freeze = _ResolvedPaths(root, source, target, bundle, gate, reference)
     return _ResolvedCompanionPaths(freeze, legacy, bundle)
+
+
+def _validate_runtime_request(
+    request: RuntimeFreezeRequest, *, runtime_must_exist: bool
+) -> _ResolvedRuntimePaths:
+    if not isinstance(request.side, Side):
+        raise BinaryFreezeError("binary side is invalid")
+    _validate_commit(request.source_commit)
+    root = _regular_directory(request.common_root)
+    source = _regular_directory(request.source_root)
+    gate = _regular_directory(request.gate_root)
+    target = _exact_existing_directory(
+        request.target_dir,
+        _expected_target(root, request.side, request.source_commit),
+        "Cargo target",
+    )
+    companion = _exact_existing_directory(
+        request.companion_bundle_dir,
+        _expected_bundle(root, request.side, request.source_commit),
+        "companion bundle",
+    )
+    expected_runtime = _expected_runtime_bundle(root, request.side, request.source_commit)
+    runtime = (
+        _exact_existing_directory(request.runtime_bundle_dir, expected_runtime, "runtime bundle")
+        if runtime_must_exist
+        else _exact_absent_path(request.runtime_bundle_dir, expected_runtime, "runtime bundle")
+    )
+    reference = None
+    if request.side is Side.CODEX:
+        if request.source_commit != BASELINE_COMMIT or request.baseline_reference_root is None:
+            raise BinaryFreezeError("Codex runtime bundle requires the frozen baseline identity")
+        reference = _regular_directory(request.baseline_reference_root)
+    elif request.baseline_reference_root is not None:
+        raise BinaryFreezeError("RONDO runtime bundle cannot declare a baseline reference")
+    freeze = _ResolvedPaths(root, source, target, runtime, gate, reference)
+    return _ResolvedRuntimePaths(freeze, companion, runtime)
 
 
 def _validate_request(request: FreezeRequest, *, artifact_must_exist: bool) -> _ResolvedPaths:
@@ -649,6 +879,51 @@ def _validate_legacy_artifact(
         "manifest.json",
     }:
         raise BinaryFreezeError("legacy CLI artifact contains unowned entries")
+    return manifest
+
+
+def _validate_companion_artifact(
+    request: RuntimeFreezeRequest,
+    paths: _ResolvedRuntimePaths,
+    toolchain: str,
+) -> _CompanionBinaryManifest:
+    manifest = _read_companion_manifest(paths.companion_bundle_dir / "manifest.json")
+    freeze_request = _freeze_request_from_runtime(request)
+    _validate_build_command(freeze_request, paths.freeze, manifest.build_command)
+    _validate_build_command(
+        freeze_request,
+        paths.freeze,
+        manifest.code_mode_host_build_command,
+        companion=True,
+    )
+    expected_normalization = LOCK_NORMALIZATION if request.side is Side.CODEX else None
+    binary = _regular_file(
+        paths.companion_bundle_dir / "codex", executable=True, exact_mode=0o555
+    )
+    host = _regular_file(
+        paths.companion_bundle_dir / "codex-code-mode-host",
+        executable=True,
+        exact_mode=0o555,
+    )
+    for candidate in (binary, host):
+        _validate_static_musl_binary(candidate)
+    if (
+        manifest.source_commit != request.source_commit
+        or manifest.source_dirty
+        or manifest.rust_toolchain != toolchain
+        or manifest.workspace_lock_normalization != expected_normalization
+        or Path(manifest.path) != binary
+        or Path(manifest.code_mode_host_path) != host
+        or manifest.sha256 != _sha256_file(binary)
+        or manifest.code_mode_host_sha256 != _sha256_file(host)
+    ):
+        raise BinaryFreezeError("companion bundle provenance differs")
+    if {entry.name for entry in os.scandir(paths.companion_bundle_dir)} != {
+        "codex",
+        "codex-code-mode-host",
+        "manifest.json",
+    }:
+        raise BinaryFreezeError("companion bundle contains unowned entries")
     return manifest
 
 
@@ -743,8 +1018,10 @@ def _validate_workspace_manifests(workspace: Path) -> None:
     host = tomllib.loads(
         _regular_file(workspace / "code-mode-host" / "Cargo.toml").read_text("utf-8")
     )
+    bwrap = tomllib.loads(_regular_file(workspace / "bwrap" / "Cargo.toml").read_text("utf-8"))
     bins = {(item.get("name"), item.get("path")) for item in cli.get("bin", [])}
     host_bins = {(item.get("name"), item.get("path")) for item in host.get("bin", [])}
+    bwrap_bins = {(item.get("name"), item.get("path")) for item in bwrap.get("bin", [])}
     if root.get("workspace", {}).get("package", {}).get("version") != "0.147.0":
         raise BinaryFreezeError("workspace version is not 0.147.0")
     if cli.get("package", {}).get("name") != "codex-cli" or ("codex", "src/main.rs") not in bins:
@@ -754,6 +1031,11 @@ def _validate_workspace_manifests(workspace: Path) -> None:
         "src/main.rs",
     ) not in host_bins:
         raise BinaryFreezeError("codex-code-mode-host package/bin contract differs")
+    if bwrap.get("package", {}).get("name") != "codex-bwrap" or (
+        "bwrap",
+        "src/main.rs",
+    ) not in bwrap_bins:
+        raise BinaryFreezeError("codex-bwrap package/bin contract differs")
 
 
 def _load_source_v8_resolver(
@@ -805,7 +1087,10 @@ def _validate_build_command(
     command: Sequence[str],
     *,
     companion: bool = False,
+    bwrap: bool = False,
 ) -> tuple[str, ...]:
+    if companion and bwrap:
+        raise BinaryFreezeError("build command kind is ambiguous")
     if isinstance(command, (str, bytes)):
         raise BinaryFreezeError("build command must be an argv array")
     argv = tuple(command)
@@ -831,7 +1116,31 @@ def _validate_build_command(
     if not _lexically_below(metrics_path, expected_metrics_root):
         raise BinaryFreezeError("watchdog metrics directory is outside eval-data/build-metrics")
     _validate_watchdog_summary(metrics_path)
-    if companion:
+    if bwrap:
+        manifest = (
+            paths.source_root / "mydev" / "codex-rs" / "Cargo.toml"
+            if request.side is Side.RONDO
+            else paths.source_root / "codex-rs" / "Cargo.toml"
+        )
+        expected_suffix = (
+            str(watchdog),
+            "rustup",
+            "run",
+            RUST_TOOLCHAIN,
+            "cargo",
+            "build",
+            "--locked",
+            "--release",
+            "--target",
+            RUST_TARGET,
+            "--manifest-path",
+            str(manifest),
+            "-p",
+            "codex-bwrap",
+            "--bin",
+            "bwrap",
+        )
+    elif companion:
         gate_arguments = (
             "python3",
             "-m",
@@ -1111,11 +1420,11 @@ def _publish_legacy(
         raise BinaryFreezeError("atomic publication differs from its manifest")
 
 
-def _publish_bundle(
+def _publish_companion_bundle(
     artifact: Path,
     source_binary: Path,
     source_host: Path,
-    manifest: BinaryManifest,
+    manifest: _CompanionBinaryManifest,
     proof: WatchdogProof,
 ) -> None:
     parent = artifact.parent
@@ -1143,7 +1452,7 @@ def _publish_bundle(
         if staging.exists() and staging.is_dir() and not staging.is_symlink():
             _remove_private_tree(staging)
         raise
-    published = _read_manifest(artifact / "manifest.json")
+    published = _read_companion_manifest(artifact / "manifest.json")
     binary = _regular_file(artifact / "codex", executable=True, exact_mode=0o555)
     host = _regular_file(
         artifact / "codex-code-mode-host", executable=True, exact_mode=0o555
@@ -1154,6 +1463,61 @@ def _publish_bundle(
         or _sha256_file(host) != manifest.code_mode_host_sha256
     ):
         raise BinaryFreezeError("atomic bundle publication differs from its manifest")
+
+
+def _publish_runtime_bundle(
+    artifact: Path,
+    source_binary: Path,
+    source_host: Path,
+    source_bwrap: Path,
+    manifest: BinaryManifest,
+    proof: WatchdogProof,
+) -> None:
+    parent = artifact.parent
+    parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _reject_symlink_chain(parent)
+    staging = Path(tempfile.mkdtemp(prefix=f".{artifact.name}.staging-", dir=parent))
+    try:
+        resources = staging / "codex-resources"
+        resources.mkdir(mode=0o700)
+        _copy_regular(source_binary, staging / "codex", mode=0o555)
+        _copy_regular(source_host, staging / "codex-code-mode-host", mode=0o555)
+        _copy_regular(source_bwrap, resources / "bwrap", mode=0o555)
+        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        _write_exclusive(staging / "manifest.json", payload, mode=0o600)
+        if (
+            _sha256_file(staging / "codex") != manifest.sha256
+            or _sha256_file(staging / "codex-code-mode-host")
+            != manifest.code_mode_host_sha256
+            or _sha256_file(resources / "bwrap") != manifest.bwrap_sha256
+        ):
+            raise BinaryFreezeError("staged runtime bundle differs from its verified inputs")
+        _fsync_directory(resources)
+        _fsync_directory(staging)
+        _held(proof)
+        if artifact.exists() or artifact.is_symlink():
+            raise BinaryFreezeError("runtime bundle appeared before atomic publication")
+        _rename_noreplace(staging, artifact)
+        _fsync_directory(parent)
+    except Exception:
+        if staging.exists() and staging.is_dir() and not staging.is_symlink():
+            _remove_private_tree(staging)
+        raise
+    published = _read_manifest(artifact / "manifest.json")
+    binary = _regular_file(artifact / "codex", executable=True, exact_mode=0o555)
+    host = _regular_file(
+        artifact / "codex-code-mode-host", executable=True, exact_mode=0o555
+    )
+    bwrap = _regular_file(
+        artifact / "codex-resources" / "bwrap", executable=True, exact_mode=0o555
+    )
+    if (
+        published != manifest
+        or _sha256_file(binary) != manifest.sha256
+        or _sha256_file(host) != manifest.code_mode_host_sha256
+        or _sha256_file(bwrap) != manifest.bwrap_sha256
+    ):
+        raise BinaryFreezeError("atomic runtime publication differs from its manifest")
 
 
 def _copy_regular(source: Path, destination: Path, *, mode: int) -> None:
@@ -1194,10 +1558,45 @@ def _read_manifest(path: Path) -> BinaryManifest:
         raise BinaryFreezeError("binary manifest schema differs")
     command = value.get("build_command")
     host_command = value.get("code_mode_host_build_command")
-    if not isinstance(command, list) or not isinstance(host_command, list):
-        raise BinaryFreezeError("binary bundle manifest build command is invalid")
+    bwrap_command = value.get("bwrap_build_command")
+    if not all(isinstance(item, list) for item in (command, host_command, bwrap_command)):
+        raise BinaryFreezeError("runtime bundle manifest build command is invalid")
     try:
         manifest = BinaryManifest(
+            path=value["path"],
+            sha256=value["sha256"],
+            code_mode_host_path=value["code_mode_host_path"],
+            code_mode_host_sha256=value["code_mode_host_sha256"],
+            bwrap_path=value["bwrap_path"],
+            bwrap_sha256=value["bwrap_sha256"],
+            source_commit=value["source_commit"],
+            source_dirty=value["source_dirty"],
+            rust_toolchain=value["rust_toolchain"],
+            build_command=tuple(command),
+            code_mode_host_build_command=tuple(host_command),
+            bwrap_build_command=tuple(bwrap_command),
+            workspace_lock_normalization=value["workspace_lock_normalization"],
+        )
+        manifest.validate()
+    except (ContractError, TypeError) as exc:
+        raise BinaryFreezeError("binary manifest contract is invalid") from exc
+    return manifest
+
+
+def _read_companion_manifest(path: Path) -> _CompanionBinaryManifest:
+    manifest_path = _regular_file(path, exact_mode=0o600)
+    try:
+        value = json.loads(manifest_path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BinaryFreezeError("companion bundle manifest is unreadable") from exc
+    if not isinstance(value, dict) or set(value) != _COMPANION_MANIFEST_KEYS:
+        raise BinaryFreezeError("companion bundle manifest schema differs")
+    command = value.get("build_command")
+    host_command = value.get("code_mode_host_build_command")
+    if not isinstance(command, list) or not isinstance(host_command, list):
+        raise BinaryFreezeError("companion bundle build command is invalid")
+    try:
+        manifest = _CompanionBinaryManifest(
             path=value["path"],
             sha256=value["sha256"],
             code_mode_host_path=value["code_mode_host_path"],
@@ -1209,9 +1608,9 @@ def _read_manifest(path: Path) -> BinaryManifest:
             code_mode_host_build_command=tuple(host_command),
             workspace_lock_normalization=value["workspace_lock_normalization"],
         )
-        manifest.validate()
-    except (ContractError, TypeError) as exc:
-        raise BinaryFreezeError("binary manifest contract is invalid") from exc
+        _validate_companion_manifest_contract(manifest)
+    except (TypeError, ValueError) as exc:
+        raise BinaryFreezeError("companion bundle manifest contract is invalid") from exc
     return manifest
 
 
@@ -1263,6 +1662,33 @@ def _validate_legacy_manifest_contract(manifest: _LegacyBinaryManifest) -> None:
         or not manifest.workspace_lock_normalization
     ):
         raise BinaryFreezeError("legacy lock normalization is invalid")
+
+
+def _validate_companion_manifest_contract(manifest: _CompanionBinaryManifest) -> None:
+    legacy = _LegacyBinaryManifest(
+        path=manifest.path,
+        sha256=manifest.sha256,
+        source_commit=manifest.source_commit,
+        source_dirty=manifest.source_dirty,
+        rust_toolchain=manifest.rust_toolchain,
+        build_command=manifest.build_command,
+        workspace_lock_normalization=manifest.workspace_lock_normalization,
+    )
+    _validate_legacy_manifest_contract(legacy)
+    if (
+        not isinstance(manifest.code_mode_host_path, str)
+        or not manifest.code_mode_host_path
+        or manifest.code_mode_host_path == manifest.path
+        or not isinstance(manifest.code_mode_host_sha256, str)
+        or not _SHA256.fullmatch(manifest.code_mode_host_sha256)
+        or not isinstance(manifest.code_mode_host_build_command, tuple)
+        or not manifest.code_mode_host_build_command
+        or any(
+            not isinstance(item, str) or not item
+            for item in manifest.code_mode_host_build_command
+        )
+    ):
+        raise BinaryFreezeError("companion bundle manifest contract is invalid")
 
 
 def _tracked_modes(reference: Path) -> dict[str, int]:
@@ -1393,6 +1819,11 @@ def _expected_bundle(root: Path, side: Side, commit: str) -> Path:
     return artifact.with_name(f"{artifact.name}-code-mode-bundle")
 
 
+def _expected_runtime_bundle(root: Path, side: Side, commit: str) -> Path:
+    artifact = _expected_artifact(root, side, commit)
+    return artifact.with_name(f"{artifact.name}-runtime-bundle")
+
+
 def _exact_existing_directory(value: Path, expected: Path, label: str) -> Path:
     if value != expected or not value.is_absolute():
         raise BinaryFreezeError(f"{label} path differs from the frozen layout")
@@ -1483,7 +1914,7 @@ def _held(proof: WatchdogProof) -> None:
 def _result(
     side: Side,
     artifact: Path,
-    manifest: BinaryManifest | _LegacyBinaryManifest,
+    manifest: BinaryManifest | _CompanionBinaryManifest | _LegacyBinaryManifest,
 ) -> FreezeResult:
     return FreezeResult(
         side=side.value,
@@ -1492,10 +1923,18 @@ def _result(
         binary_sha256=manifest.sha256,
         source_commit=manifest.source_commit,
         code_mode_host_path=(
-            manifest.code_mode_host_path if isinstance(manifest, BinaryManifest) else None
+            manifest.code_mode_host_path
+            if isinstance(manifest, (BinaryManifest, _CompanionBinaryManifest))
+            else None
         ),
         code_mode_host_sha256=(
-            manifest.code_mode_host_sha256 if isinstance(manifest, BinaryManifest) else None
+            manifest.code_mode_host_sha256
+            if isinstance(manifest, (BinaryManifest, _CompanionBinaryManifest))
+            else None
+        ),
+        bwrap_path=(manifest.bwrap_path if isinstance(manifest, BinaryManifest) else None),
+        bwrap_sha256=(
+            manifest.bwrap_sha256 if isinstance(manifest, BinaryManifest) else None
         ),
     )
 
@@ -1589,6 +2028,20 @@ def _companion_request_from_args(args: argparse.Namespace) -> CompanionFreezeReq
     )
 
 
+def _runtime_request_from_args(args: argparse.Namespace) -> RuntimeFreezeRequest:
+    return RuntimeFreezeRequest(
+        side=args.side,
+        common_root=args.common_root,
+        source_root=args.source_root,
+        source_commit=args.source_commit,
+        target_dir=args.target_dir,
+        companion_bundle_dir=args.companion_bundle_dir,
+        runtime_bundle_dir=args.runtime_bundle_dir,
+        gate_root=args.gate_root,
+        baseline_reference_root=args.baseline_reference_root,
+    )
+
+
 def _add_source_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--side", type=_parse_side, required=True)
     command.add_argument("--common-root", type=Path, required=True)
@@ -1625,6 +2078,13 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--bundle-dir", type=Path, required=True)
         if operation == "prepare-companion":
             command.add_argument("--code-mode-host-build-command-json", required=True)
+    for operation in ("prepare-runtime", "verify-runtime"):
+        command = subparsers.add_parser(operation)
+        _add_source_arguments(command)
+        command.add_argument("--companion-bundle-dir", type=Path, required=True)
+        command.add_argument("--runtime-bundle-dir", type=Path, required=True)
+        if operation == "prepare-runtime":
+            command.add_argument("--bwrap-build-command-json", required=True)
     cleanup_parser = subparsers.add_parser("cleanup")
     cleanup_parser.add_argument("--side", type=_parse_side, required=True)
     cleanup_parser.add_argument("--common-root", type=Path, required=True)
@@ -1665,6 +2125,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = prepare_companion(_companion_request_from_args(args), value)
         elif args.operation == "verify-companion":
             result = verify_companion(_companion_request_from_args(args))
+        elif args.operation == "prepare-runtime":
+            value = json.loads(args.bwrap_build_command_json)
+            if not isinstance(value, list):
+                raise BinaryFreezeError("bwrap build command JSON must be an argv array")
+            result = prepare_runtime(_runtime_request_from_args(args), value)
+        elif args.operation == "verify-runtime":
+            result = verify_runtime(_runtime_request_from_args(args))
         else:
             cleanup(
                 side=args.side,

@@ -183,22 +183,30 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         "sha256",
         "code_mode_host_path",
         "code_mode_host_sha256",
+        "bwrap_path",
+        "bwrap_sha256",
         "source_commit",
         "source_dirty",
         "rust_toolchain",
         "build_command",
         "code_mode_host_build_command",
+        "bwrap_build_command",
         "workspace_lock_normalization",
     }
     if not isinstance(value, dict) or set(value) != expected:
         raise TerminalBenchRunError("binary manifest schema differs from v1")
     build_command = value["build_command"]
     code_mode_host_build_command = value["code_mode_host_build_command"]
+    bwrap_build_command = value["bwrap_build_command"]
     if any(
         not isinstance(command, list)
         or not command
         or not all(isinstance(item, str) and item for item in command)
-        for command in (build_command, code_mode_host_build_command)
+        for command in (
+            build_command,
+            code_mode_host_build_command,
+            bwrap_build_command,
+        )
     ):
         raise TerminalBenchRunError("binary manifest build commands are invalid")
     manifest = BinaryManifest(
@@ -206,17 +214,40 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         sha256=value["sha256"],
         code_mode_host_path=value["code_mode_host_path"],
         code_mode_host_sha256=value["code_mode_host_sha256"],
+        bwrap_path=value["bwrap_path"],
+        bwrap_sha256=value["bwrap_sha256"],
         source_commit=value["source_commit"],
         source_dirty=value["source_dirty"],
         rust_toolchain=value["rust_toolchain"],
         build_command=tuple(build_command),
         code_mode_host_build_command=tuple(code_mode_host_build_command),
+        bwrap_build_command=tuple(bwrap_build_command),
         workspace_lock_normalization=value["workspace_lock_normalization"],
     )
     manifest.validate()
-    if manifest.source_dirty or any(
-        not Path(binary_path).resolve(strict=True).is_relative_to(expected_root)
-        for binary_path in (manifest.path, manifest.code_mode_host_path)
+    declared_paths = tuple(
+        Path(binary_path)
+        for binary_path in (
+            manifest.path,
+            manifest.code_mode_host_path,
+            manifest.bwrap_path,
+        )
+    )
+    try:
+        binary_paths = tuple(path.resolve(strict=True) for path in declared_paths)
+    except OSError as exc:
+        raise TerminalBenchRunError("binary manifest bundle is unavailable") from exc
+    bundle_root = resolved.parent
+    expected_paths = (
+        bundle_root / "codex",
+        bundle_root / "codex-code-mode-host",
+        bundle_root / "codex-resources" / "bwrap",
+    )
+    if (
+        manifest.source_dirty
+        or any(not path.is_absolute() or path.is_symlink() for path in declared_paths)
+        or binary_paths != expected_paths
+        or not bundle_root.is_relative_to(expected_root)
     ):
         raise TerminalBenchRunError("binary manifest does not describe a clean eval-data binary")
     return manifest

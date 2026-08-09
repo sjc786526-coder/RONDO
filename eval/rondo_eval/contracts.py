@@ -37,11 +37,14 @@ class BinaryManifest:
     sha256: str
     code_mode_host_path: str
     code_mode_host_sha256: str
+    bwrap_path: str
+    bwrap_sha256: str
     source_commit: str
     source_dirty: bool
     rust_toolchain: str
     build_command: tuple[str, ...]
     code_mode_host_build_command: tuple[str, ...]
+    bwrap_build_command: tuple[str, ...]
     workspace_lock_normalization: str | None = None
 
     def validate(self) -> None:
@@ -55,6 +58,13 @@ class BinaryManifest:
         ):
             raise ContractError("code-mode host path is required and must differ from binary path")
         _require_sha256(self.code_mode_host_sha256, "code-mode host sha256")
+        if (
+            not isinstance(self.bwrap_path, str)
+            or not self.bwrap_path
+            or self.bwrap_path in {self.path, self.code_mode_host_path}
+        ):
+            raise ContractError("bwrap path is required and must differ from other binary paths")
+        _require_sha256(self.bwrap_sha256, "bwrap sha256")
         _require_commit(self.source_commit, "binary source commit")
         if not isinstance(self.source_dirty, bool):
             raise ContractError("binary source_dirty must be boolean")
@@ -70,8 +80,11 @@ class BinaryManifest:
                 not isinstance(item, str) or not item
                 for item in self.code_mode_host_build_command
             )
+            or not isinstance(self.bwrap_build_command, tuple)
+            or not self.bwrap_build_command
+            or any(not isinstance(item, str) or not item for item in self.bwrap_build_command)
         ):
-            raise ContractError("binary toolchain and both build commands are required")
+            raise ContractError("binary toolchain and all build commands are required")
         if self.workspace_lock_normalization is not None and (
             not isinstance(self.workspace_lock_normalization, str)
             or not self.workspace_lock_normalization
@@ -199,6 +212,7 @@ class RunSpec:
         value["binary"]["code_mode_host_build_command"] = list(
             self.binary.code_mode_host_build_command
         )
+        value["binary"]["bwrap_build_command"] = list(self.binary.bwrap_build_command)
         return value
 
 

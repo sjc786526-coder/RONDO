@@ -40,9 +40,11 @@ from rondo_eval.terminal_bench.freeze import (  # noqa: E402
     TERMINAL_BENCH_REPO_REF,
 )
 from rondo_eval.terminal_bench.materialize import MaterializedTask  # noqa: E402
+from rondo_eval.terminal_bench.__main__ import _load_manifest  # noqa: E402
 from rondo_eval.terminal_bench.runner import (  # noqa: E402
     HostHarborResult,
     TerminalBenchRequest,
+    TerminalBenchRunError,
 )
 
 
@@ -225,6 +227,8 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.binary.write_bytes(b"frozen binary")
         self.code_mode_host = self.root / "codex-code-mode-host"
         self.code_mode_host.write_bytes(b"frozen code-mode host")
+        self.bwrap = self.root / "bwrap"
+        self.bwrap.write_bytes(b"frozen package bwrap")
         FakeHostExecutor.calls.clear()
 
     def tearDown(self) -> None:
@@ -256,11 +260,14 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             code_mode_host_sha256=hashlib.sha256(
                 self.code_mode_host.read_bytes()
             ).hexdigest(),
+            bwrap_path=str(self.bwrap),
+            bwrap_sha256=hashlib.sha256(self.bwrap.read_bytes()).hexdigest(),
             source_commit="a" * 40,
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
             build_command=("guarded-build",),
             code_mode_host_build_command=("guarded-build-code-mode-host",),
+            bwrap_build_command=("package-bwrap",),
         )
         return TerminalBenchRequest(
             side=Side.CODEX,
@@ -301,6 +308,20 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertTrue(result.safe_summary()["code_mode_tool_round_trip"])
         _argv, kwargs = FakeHostExecutor.calls[0]
         self.assertEqual(kwargs["injected_env"]["OPENAI_API_KEY"], NO_API_SMOKE_BEARER)
+        agent_kwargs = {
+            _argv[index + 1].split("=", 1)[0]: _argv[index + 1].split("=", 1)[1]
+            for index, item in enumerate(_argv[:-1])
+            if item == "--agent-kwarg"
+        }
+        self.assertEqual(agent_kwargs["binary_bwrap_path"], str(self.bwrap))
+        self.assertEqual(
+            agent_kwargs["binary_bwrap_sha256"],
+            hashlib.sha256(self.bwrap.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            json.loads(agent_kwargs["binary_bwrap_build_command"]),
+            ["package-bwrap"],
+        )
         self.assertEqual(_smoke_exit_code(result), 0)
         self.assertNotEqual(_smoke_exit_code(replace(result, requests=())), 0)
 
@@ -446,6 +467,43 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             ]
         )
         self.assertEqual((args.side, args.binary_manifest.name), ("codex", "binary.json"))
+
+    def test_cli_loader_requires_13_key_bundle_and_rejects_legacy_10_keys(self) -> None:
+        bundle = self.root / "eval-data" / "bin" / "smoke-bundle"
+        resources = bundle / "codex-resources"
+        resources.mkdir(parents=True)
+        codex = bundle / "codex"
+        host = bundle / "codex-code-mode-host"
+        bwrap = resources / "bwrap"
+        codex.write_bytes(b"codex")
+        host.write_bytes(b"host")
+        bwrap.write_bytes(b"bwrap")
+        value = {
+            "path": str(codex),
+            "sha256": hashlib.sha256(codex.read_bytes()).hexdigest(),
+            "code_mode_host_path": str(host),
+            "code_mode_host_sha256": hashlib.sha256(host.read_bytes()).hexdigest(),
+            "bwrap_path": str(bwrap),
+            "bwrap_sha256": hashlib.sha256(bwrap.read_bytes()).hexdigest(),
+            "source_commit": "a" * 40,
+            "source_dirty": False,
+            "rust_toolchain": "rustc 1.95.0",
+            "build_command": ["build-codex"],
+            "code_mode_host_build_command": ["build-host"],
+            "bwrap_build_command": ["package-bwrap"],
+            "workspace_lock_normalization": None,
+        }
+        manifest_path = bundle / "manifest.json"
+        manifest_path.write_text(json.dumps(value), encoding="utf-8")
+        loaded = _load_manifest(manifest_path, self.root)
+        self.assertEqual(loaded.bwrap_path, str(bwrap))
+        self.assertEqual(loaded.bwrap_sha256, value["bwrap_sha256"])
+
+        for key in ("bwrap_path", "bwrap_sha256", "bwrap_build_command"):
+            value.pop(key)
+        manifest_path.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(TerminalBenchRunError, "schema differs"):
+            _load_manifest(manifest_path, self.root)
 
 
 if __name__ == "__main__":

@@ -163,6 +163,9 @@ class TerminalBenchTests(unittest.TestCase):
         self.code_mode_host_digest = hashlib.sha256(
             self.code_mode_host_path.read_bytes()
         ).hexdigest()
+        self.bwrap_path = self.root / "bwrap"
+        self.bwrap_path.write_bytes(b"frozen package bwrap")
+        self.bwrap_digest = hashlib.sha256(self.bwrap_path.read_bytes()).hexdigest()
 
     def tearDown(self) -> None:
         self.temp.cleanup()
@@ -173,6 +176,8 @@ class TerminalBenchTests(unittest.TestCase):
             sha256=self.binary_digest,
             code_mode_host_path=str(self.code_mode_host_path),
             code_mode_host_sha256=self.code_mode_host_digest,
+            bwrap_path=str(self.bwrap_path),
+            bwrap_sha256=self.bwrap_digest,
             source_commit="a" * 40,
             source_dirty=False,
             rust_toolchain=(
@@ -184,6 +189,7 @@ class TerminalBenchTests(unittest.TestCase):
             ),
             build_command=("guarded-build", "codex"),
             code_mode_host_build_command=("guarded-build", "codex-code-mode-host"),
+            bwrap_build_command=("package", "codex-resources/bwrap"),
             workspace_lock_normalization="135 workspace packages: 0.0.0 -> 0.147.0",
         )
 
@@ -229,6 +235,8 @@ class TerminalBenchTests(unittest.TestCase):
             binary_sha256=manifest.sha256,
             binary_code_mode_host_path=manifest.code_mode_host_path,
             binary_code_mode_host_sha256=manifest.code_mode_host_sha256,
+            binary_bwrap_path=manifest.bwrap_path,
+            binary_bwrap_sha256=manifest.bwrap_sha256,
             binary_source_commit=manifest.source_commit,
             binary_source_dirty=manifest.source_dirty,
             binary_rust_toolchain=manifest.rust_toolchain,
@@ -236,6 +244,7 @@ class TerminalBenchTests(unittest.TestCase):
             binary_code_mode_host_build_command=list(
                 manifest.code_mode_host_build_command
             ),
+            binary_bwrap_build_command=list(manifest.bwrap_build_command),
             binary_workspace_lock_normalization=manifest.workspace_lock_normalization,
             provider_base_url="https://api.openai.com/v1",
             provider_api_key_env="OPENAI_API_KEY",
@@ -320,6 +329,7 @@ class TerminalBenchTests(unittest.TestCase):
                 instance.manifest.code_mode_host_sha256,
                 self.code_mode_host_digest,
             )
+            self.assertEqual(instance.manifest.bwrap_sha256, self.bwrap_digest)
             self.assertEqual(
                 instance.manifest.workspace_lock_normalization,
                 "135 workspace packages: 0.0.0 -> 0.147.0",
@@ -336,6 +346,10 @@ class TerminalBenchTests(unittest.TestCase):
                     adapter.remote_code_mode_host_path.endswith("/codex-code-mode-host")
                 )
                 self.assertEqual(
+                    adapter.remote_bwrap_path,
+                    "/opt/rondo-eval/bin/codex-resources/bwrap",
+                )
+                self.assertEqual(
                     environment.uploads,
                     [
                         (self.binary_path, adapter.remote_path),
@@ -343,6 +357,7 @@ class TerminalBenchTests(unittest.TestCase):
                             self.code_mode_host_path,
                             adapter.remote_code_mode_host_path,
                         ),
+                        (self.bwrap_path, adapter.remote_bwrap_path),
                     ],
                 )
                 commands = "\n".join(call[0] for call in environment.calls).lower()
@@ -352,6 +367,9 @@ class TerminalBenchTests(unittest.TestCase):
                 self.assertIn(
                     f"sha256sum -- {adapter.remote_code_mode_host_path}", commands
                 )
+                self.assertIn(f"sha256sum -- {adapter.remote_bwrap_path}", commands)
+                self.assertNotIn("apt", commands)
+                self.assertNotIn("command -v bwrap", commands)
                 self.assertIn(f"{adapter.remote_path} --version", commands)
 
     def test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv(self) -> None:
@@ -464,6 +482,11 @@ class TerminalBenchTests(unittest.TestCase):
 
         adapter = self.adapter()
         object.__setattr__(adapter.manifest, "code_mode_host_sha256", "d" * 64)
+        with self.assertRaises(AdapterError):
+            asyncio.run(adapter.install(FakeEnvironment()))
+
+        adapter = self.adapter()
+        object.__setattr__(adapter.manifest, "bwrap_sha256", "d" * 64)
         with self.assertRaises(AdapterError):
             asyncio.run(adapter.install(FakeEnvironment()))
 

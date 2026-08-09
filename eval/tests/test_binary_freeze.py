@@ -23,13 +23,16 @@ from rondo_eval.binary_freeze import (  # noqa: E402
     BinaryFreezeError,
     CompanionFreezeRequest,
     FreezeRequest,
+    RuntimeFreezeRequest,
     cleanup,
     exec_v8_build,
     export_baseline,
     prepare,
     prepare_companion,
+    prepare_runtime,
     verify,
     verify_companion,
+    verify_runtime,
 )
 from rondo_eval.contracts import Side  # noqa: E402
 
@@ -116,6 +119,15 @@ def _write_workspace(root: Path, lock: bytes, *, gate: bool) -> None:
         encoding="utf-8",
     )
     (workspace / "code-mode-host" / "src" / "main.rs").write_text(
+        "fn main() {}\n", encoding="utf-8"
+    )
+    (workspace / "bwrap" / "src").mkdir(parents=True)
+    (workspace / "bwrap" / "Cargo.toml").write_text(
+        '[package]\nname = "codex-bwrap"\nversion.workspace = true\n\n'
+        '[[bin]]\nname = "bwrap"\npath = "src/main.rs"\n',
+        encoding="utf-8",
+    )
+    (workspace / "bwrap" / "src" / "main.rs").write_text(
         "fn main() {}\n", encoding="utf-8"
     )
     if gate:
@@ -236,6 +248,43 @@ def _write_watchdog_summary(common: Path) -> None:
     )
 
 
+def _bwrap_build_command(
+    *, common: Path, source: Path, target: Path, gate: Path, side: Side
+) -> tuple[str, ...]:
+    manifest = source / (
+        "mydev/codex-rs/Cargo.toml" if side is Side.RONDO else "codex-rs/Cargo.toml"
+    )
+    return (
+        f"cwd={gate}",
+        "env",
+        "-i",
+        f"HOME={os.environ['HOME']}",
+        f"PATH={os.environ['PATH']}",
+        "LC_ALL=C.UTF-8",
+        f"XDG_RUNTIME_DIR=/run/user/{os.getuid()}",
+        f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{os.getuid()}/bus",
+        f"RONDO_PROJECT_ROOT={common}",
+        f"CARGO_TARGET_DIR={target}",
+        f"RONDO_BUILD_METRICS_DIR={common}/eval-data/build-metrics/test",
+        str(gate / "mydev/scripts/with-build-lock.sh"),
+        "rustup",
+        "run",
+        "1.95.0",
+        "cargo",
+        "build",
+        "--locked",
+        "--release",
+        "--target",
+        binary_freeze.RUST_TARGET,
+        "--manifest-path",
+        str(manifest),
+        "-p",
+        "codex-bwrap",
+        "--bin",
+        "bwrap",
+    )
+
+
 class RondoFreezeTests(unittest.TestCase):
     def setUp(self) -> None:
         GUARD.held = True
@@ -325,6 +374,39 @@ class RondoFreezeTests(unittest.TestCase):
             binary="codex-code-mode-host",
         )
         return request, command, bundle, host_release
+
+    def _runtime_fixture(
+        self,
+    ) -> tuple[RuntimeFreezeRequest, tuple[str, ...], Path, Path, Path]:
+        companion_request, companion_command, companion_bundle, _ = self._companion_fixture()
+        prepare_companion(
+            companion_request,
+            companion_command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        bwrap_release = self.target / binary_freeze.RUST_TARGET / "release/bwrap"
+        bwrap_release.write_bytes(b"frozen-rondo-bwrap")
+        bwrap_release.chmod(0o755)
+        runtime_bundle = self.artifact.with_name(f"{self.artifact.name}-runtime-bundle")
+        request = RuntimeFreezeRequest(
+            side=Side.RONDO,
+            common_root=self.common,
+            source_root=self.source,
+            source_commit=self.commit,
+            target_dir=self.target,
+            companion_bundle_dir=companion_bundle,
+            runtime_bundle_dir=runtime_bundle,
+            gate_root=self.source,
+        )
+        command = _bwrap_build_command(
+            common=self.common,
+            source=self.source,
+            target=self.target,
+            gate=self.source,
+            side=Side.RONDO,
+        )
+        return request, command, runtime_bundle, companion_bundle, bwrap_release
 
     def test_prepares_and_verifies_atomic_manifest_and_modes(self) -> None:
         prepared = prepare(
@@ -463,7 +545,7 @@ class RondoFreezeTests(unittest.TestCase):
         manifest_path = bundle / "manifest.json"
         self.assertEqual(manifest_path.stat().st_mode & 0o777, 0o600)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        self.assertEqual(set(manifest), binary_freeze._MANIFEST_KEYS)
+        self.assertEqual(set(manifest), binary_freeze._COMPANION_MANIFEST_KEYS)
         self.assertEqual(manifest["path"], str(bundle / "codex"))
         self.assertEqual(
             manifest["code_mode_host_path"], str(bundle / "codex-code-mode-host")
@@ -640,6 +722,79 @@ class RondoFreezeTests(unittest.TestCase):
                     environ={name: ""},
                 )
             resolver.assert_not_called()
+
+    def test_runtime_bundle_preserves_companion_and_adds_nested_static_bwrap(self) -> None:
+        request, command, runtime, companion, bwrap_release = self._runtime_fixture()
+
+        prepared = prepare_runtime(
+            request,
+            command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        verified = verify_runtime(
+            request,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+
+        self.assertEqual(prepared, verified)
+        self.assertEqual((runtime / "codex").read_bytes(), (companion / "codex").read_bytes())
+        self.assertEqual(
+            (runtime / "codex-code-mode-host").read_bytes(),
+            (companion / "codex-code-mode-host").read_bytes(),
+        )
+        self.assertEqual(
+            (runtime / "codex-resources/bwrap").read_bytes(), bwrap_release.read_bytes()
+        )
+        self.assertEqual((runtime / "codex-resources/bwrap").stat().st_mode & 0o777, 0o555)
+        self.assertEqual((runtime / "codex-resources").stat().st_mode & 0o777, 0o700)
+        manifest = json.loads((runtime / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(manifest), binary_freeze._MANIFEST_KEYS)
+        self.assertEqual(manifest["bwrap_path"], str(runtime / "codex-resources/bwrap"))
+        self.assertEqual(manifest["bwrap_build_command"], list(command))
+        companion_manifest = json.loads(
+            (companion / "manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["sha256"], companion_manifest["sha256"])
+        self.assertEqual(
+            manifest["code_mode_host_sha256"], companion_manifest["code_mode_host_sha256"]
+        )
+        with self.assertRaises(BinaryFreezeError):
+            prepare_runtime(
+                request,
+                command,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_runtime_bundle_rejects_non_bwrap_argv_and_tampering(self) -> None:
+        request, command, runtime, _, _ = self._runtime_fixture()
+        wrong = list(command)
+        wrong[wrong.index("codex-bwrap")] = "codex-cli"
+        with self.assertRaises(BinaryFreezeError):
+            prepare_runtime(
+                request,
+                wrong,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+        prepare_runtime(
+            request,
+            command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        frozen = runtime / "codex-resources/bwrap"
+        frozen.chmod(0o755)
+        frozen.write_bytes(b"tampered")
+        frozen.chmod(0o555)
+        with self.assertRaises(BinaryFreezeError):
+            verify_runtime(
+                request,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
 
 
 class BaselineFreezeTests(unittest.TestCase):
@@ -833,6 +988,45 @@ class BaselineFreezeTests(unittest.TestCase):
 
         manifest = json.loads(Path(verified.manifest_path).read_text(encoding="utf-8"))
         self.assertEqual(manifest["workspace_lock_normalization"], binary_freeze.LOCK_NORMALIZATION)
+        bwrap_release = self.target / binary_freeze.RUST_TARGET / "release/bwrap"
+        bwrap_release.write_bytes(b"frozen-baseline-bwrap")
+        bwrap_release.chmod(0o755)
+        runtime = self.artifact.with_name(f"{self.artifact.name}-runtime-bundle")
+        runtime_request = RuntimeFreezeRequest(
+            side=Side.CODEX,
+            common_root=self.common,
+            source_root=self.scratch,
+            source_commit=self.commit,
+            target_dir=self.target,
+            companion_bundle_dir=bundle,
+            runtime_bundle_dir=runtime,
+            gate_root=self.gate,
+            baseline_reference_root=self.reference,
+        )
+        bwrap_command = _bwrap_build_command(
+            common=self.common,
+            source=self.scratch,
+            target=self.target,
+            gate=self.gate,
+            side=Side.CODEX,
+        )
+        prepare_runtime(
+            runtime_request,
+            bwrap_command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        runtime_verified = verify_runtime(
+            runtime_request,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        runtime_manifest = json.loads(
+            Path(runtime_verified.manifest_path).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            runtime_manifest["workspace_lock_normalization"], binary_freeze.LOCK_NORMALIZATION
+        )
 
 
 class CleanupTests(unittest.TestCase):
