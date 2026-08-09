@@ -30,11 +30,11 @@ from rondo_eval.binary_freeze import (  # noqa: E402
     export_baseline,
     prepare,
     prepare_companion,
-    prepare_libcap,
+    prepare_bwrap_asset,
     prepare_runtime,
     verify,
     verify_companion,
-    verify_libcap,
+    verify_bwrap_asset,
     verify_runtime,
 )
 from rondo_eval.contracts import Side  # noqa: E402
@@ -251,72 +251,14 @@ def _write_watchdog_summary(common: Path) -> None:
     )
 
 
-def _bwrap_build_command(
-    *, common: Path, source: Path, target: Path, gate: Path, side: Side, libcap: Path
-) -> tuple[str, ...]:
-    manifest = source / (
-        "mydev/codex-rs/Cargo.toml" if side is Side.RONDO else "codex-rs/Cargo.toml"
-    )
-    return (
-        f"cwd={gate}",
-        "env",
-        "-i",
-        f"HOME={os.environ['HOME']}",
-        f"PATH={os.environ['PATH']}",
-        "LC_ALL=C.UTF-8",
-        f"XDG_RUNTIME_DIR=/run/user/{os.getuid()}",
-        f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{os.getuid()}/bus",
-        "PKG_CONFIG_ALLOW_CROSS=1",
-        f"PKG_CONFIG_PATH={libcap}/lib/pkgconfig",
-        "LIBCAP_STATIC=1",
-        f"RONDO_PROJECT_ROOT={common}",
-        f"CARGO_TARGET_DIR={target}",
-        f"RONDO_BUILD_METRICS_DIR={common}/eval-data/build-metrics/test",
-        str(gate / "mydev/scripts/with-build-lock.sh"),
-        "rustup",
-        "run",
-        "1.95.0",
-        "cargo",
-        "build",
-        "--locked",
-        "--release",
-        "--target",
-        binary_freeze.RUST_TARGET,
-        "--manifest-path",
-        str(manifest),
-        "-p",
-        "codex-bwrap",
-        "--bin",
-        "bwrap",
-    )
-
-
-def _write_libcap_dependency(common: Path) -> Path:
-    destination = common / "eval-data" / "deps" / binary_freeze.LIBCAP_DEPENDENCY_NAME
+def _write_bwrap_asset(common: Path) -> Path:
+    destination = common / "eval-data" / "deps" / binary_freeze.BWRAP_ASSET_NAME
     destination.mkdir(parents=True, mode=0o700)
-    (destination / "include").mkdir(mode=0o700)
-    (destination / "include/sys").mkdir(mode=0o700)
-    (destination / "lib").mkdir(mode=0o700)
-    (destination / "lib/pkgconfig").mkdir(mode=0o700)
-    header = destination / "include/sys/capability.h"
-    header.write_bytes(b"#define LIBCAP_FIXTURE 1\n")
-    header.chmod(0o444)
-    library = destination / "lib/libcap.a"
-    library.write_bytes(b"!<arch>\nfixture")
-    library.chmod(0o444)
-    pc = destination / "lib/pkgconfig/libcap.pc"
-    pc.write_bytes(binary_freeze._libcap_pc_bytes(destination))
-    pc.chmod(0o444)
-    manifest = {
-        "schema_version": 1,
-        "name": "libcap",
-        "version": binary_freeze.LIBCAP_VERSION,
-        "target": binary_freeze.RUST_TARGET,
-        "url": binary_freeze.LIBCAP_URL,
-        "archive_sha256": binary_freeze.LIBCAP_ARCHIVE_SHA256,
-        "static_sha256": hashlib.sha256(library.read_bytes()).hexdigest(),
-        "build_command": list(binary_freeze._LIBCAP_BUILD_COMMAND),
-    }
+    bwrap = destination / "bwrap"
+    bwrap.write_bytes(b"fixture-official-bwrap")
+    bwrap.chmod(0o555)
+    lock = binary_freeze._load_bwrap_asset_lock()
+    manifest = {**lock.__dict__, "bwrap_sha256": hashlib.sha256(bwrap.read_bytes()).hexdigest()}
     manifest_path = destination / "manifest.json"
     manifest_path.write_text(
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
@@ -326,160 +268,184 @@ def _write_libcap_dependency(common: Path) -> Path:
     return destination
 
 
-def _libcap_archive_bytes(*, unsafe_member: str | None = None) -> bytes:
+def _bwrap_archive_bytes(*, member: str | None = None, extra: bool = False) -> bytes:
     output = io.BytesIO()
-    with tarfile.open(fileobj=output, mode="w:xz") as archive:
-        entries = {
-            "libcap-2.78/libcap/Makefile": b"libcap.a:\n\t@true\n",
-            "libcap-2.78/libcap/include/sys/capability.h": b"#define LIBCAP_FIXTURE 1\n",
-        }
-        if unsafe_member is not None:
-            entries[unsafe_member] = b"escape"
+    with tarfile.open(fileobj=output, mode="w:gz") as archive:
+        entries = {member or binary_freeze.BWRAP_ARCHIVE_MEMBER: b"fixture-official-bwrap"}
+        if extra:
+            entries["unexpected"] = b"escape"
         for name, payload in entries.items():
             info = tarfile.TarInfo(name)
-            info.mode = 0o644
+            info.mode = 0o755
             info.size = len(payload)
             archive.addfile(info, io.BytesIO(payload))
     return output.getvalue()
 
 
-class LibcapFreezeTests(unittest.TestCase):
+class BwrapAssetFreezeTests(unittest.TestCase):
     def setUp(self) -> None:
         GUARD.held = True
         self.temporary = tempfile.TemporaryDirectory()
         self.common = Path(self.temporary.name).resolve()
-        self.archive = _libcap_archive_bytes()
+        self.archive = _bwrap_archive_bytes()
         self.archive_sha = hashlib.sha256(self.archive).hexdigest()
-        self.lock = binary_freeze._LibcapLock(
+        self.lock = binary_freeze._BwrapAssetLock(
             schema_version=1,
-            name="libcap",
-            version=binary_freeze.LIBCAP_VERSION,
+            name="bwrap",
+            release_tag=binary_freeze.BASELINE_TAG,
             target=binary_freeze.RUST_TARGET,
-            url=binary_freeze.LIBCAP_URL,
+            url=binary_freeze.BWRAP_ASSET_URL,
             archive_sha256=self.archive_sha,
+            archive_size=len(self.archive),
+            archive_member=binary_freeze.BWRAP_ARCHIVE_MEMBER,
+            source_commit=binary_freeze.BASELINE_COMMIT,
+            bwrap_tree_id=binary_freeze.BWRAP_PACKAGE_TREE_ID,
+            vendor_tree_id=binary_freeze.BWRAP_VENDOR_TREE_ID,
+            source_tree_sha256=binary_freeze.BWRAP_SOURCE_TREE_SHA256,
         )
+        self.portable = mock.patch.object(binary_freeze, "_validate_static_musl_binary")
+        self.portable.start()
 
     def tearDown(self) -> None:
+        self.portable.stop()
         GUARD.held = True
         self.temporary.cleanup()
 
     def test_tracked_lock_matches_frozen_release(self) -> None:
-        lock = binary_freeze._load_libcap_lock()
-        self.assertEqual(lock.version, "2.78")
+        lock = binary_freeze._load_bwrap_asset_lock()
+        self.assertEqual(lock.release_tag, "rust-v0.147.0")
         self.assertEqual(lock.target, binary_freeze.RUST_TARGET)
-        self.assertEqual(lock.archive_sha256, binary_freeze.LIBCAP_ARCHIVE_SHA256)
+        self.assertEqual(lock.archive_sha256, binary_freeze.BWRAP_ARCHIVE_SHA256)
+        self.assertEqual(lock.archive_size, 261563)
 
-    def _download(self, payload: bytes):
+    def _download(self, payload: bytes, *, expire_lease: bool = False):
         def download(url: str, destination: Path, proof: object) -> None:
-            self.assertEqual(url, binary_freeze.LIBCAP_URL)
+            self.assertEqual(url, binary_freeze.BWRAP_ASSET_URL)
             destination.write_bytes(payload)
             destination.chmod(0o600)
-
-        return download
-
-    def _build(self, *, expire_lease: bool = False):
-        def run(argv: object, *, cwd: Path, environment: object) -> None:
-            self.assertEqual(tuple(argv), binary_freeze._LIBCAP_BUILD_COMMAND)
-            self.assertEqual(
-                dict(environment),
-                {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0"},
-            )
-            self.assertEqual((cwd / "libcap/Makefile").read_text("utf-8"), "libcap.a:\n\t@true\n")
-            library = cwd / "libcap/libcap.a"
-            library.write_bytes(b"!<arch>\nfixture-libcap")
             if expire_lease:
                 GUARD.held = False
 
-        return run
+        return download
 
-    def test_prepares_and_verifies_pinned_dependency_without_overwrite(self) -> None:
-        with mock.patch.object(binary_freeze, "_load_libcap_lock", return_value=self.lock):
-            prepared = prepare_libcap(
+    def test_prepares_and_verifies_official_asset_without_overwrite(self) -> None:
+        with mock.patch.object(binary_freeze, "_load_bwrap_asset_lock", return_value=self.lock):
+            prepared = prepare_bwrap_asset(
                 common_root=self.common,
                 lease_factory=_lease_factory,
                 download_function=self._download(self.archive),
-                run_function=self._build(),
             )
-            verified = verify_libcap(
+            verified = verify_bwrap_asset(
                 common_root=self.common,
                 lease_factory=_lease_factory,
             )
             with self.assertRaises(BinaryFreezeError):
-                prepare_libcap(
+                prepare_bwrap_asset(
                     common_root=self.common,
                     lease_factory=_lease_factory,
                     download_function=self._download(self.archive),
-                    run_function=self._build(),
                 )
 
         self.assertEqual(prepared, verified)
-        dependency = Path(prepared.dependency_path)
-        self.assertEqual(dependency.name, binary_freeze.LIBCAP_DEPENDENCY_NAME)
-        self.assertEqual((dependency / "lib/libcap.a").stat().st_mode & 0o777, 0o444)
-        self.assertEqual((dependency / "manifest.json").stat().st_mode & 0o777, 0o600)
-        manifest = json.loads((dependency / "manifest.json").read_text("utf-8"))
+        asset = Path(prepared.asset_path)
+        self.assertEqual(asset.name, binary_freeze.BWRAP_ASSET_NAME)
+        self.assertEqual((asset / "bwrap").stat().st_mode & 0o777, 0o555)
+        self.assertEqual((asset / "manifest.json").stat().st_mode & 0o777, 0o600)
+        manifest = json.loads((asset / "manifest.json").read_text("utf-8"))
         self.assertEqual(manifest["archive_sha256"], self.archive_sha)
-        self.assertEqual(manifest["static_sha256"], prepared.static_sha256)
-        self.assertEqual(manifest["build_command"], list(binary_freeze._LIBCAP_BUILD_COMMAND))
+        self.assertEqual(manifest["bwrap_sha256"], prepared.bwrap_sha256)
+        self.assertEqual(manifest["source_tree_sha256"], binary_freeze.BWRAP_SOURCE_TREE_SHA256)
 
     def test_rejects_bad_checksum_and_unsafe_tar_member(self) -> None:
-        runner = mock.Mock()
-        wrong_lock = binary_freeze._LibcapLock(
-            schema_version=1,
-            name="libcap",
-            version=binary_freeze.LIBCAP_VERSION,
-            target=binary_freeze.RUST_TARGET,
-            url=binary_freeze.LIBCAP_URL,
-            archive_sha256="0" * 64,
+        wrong_lock = binary_freeze._BwrapAssetLock(
+            **{**self.lock.__dict__, "archive_sha256": "0" * 64}
         )
         with (
-            mock.patch.object(binary_freeze, "_load_libcap_lock", return_value=wrong_lock),
+            mock.patch.object(binary_freeze, "_load_bwrap_asset_lock", return_value=wrong_lock),
             self.assertRaises(BinaryFreezeError),
         ):
-            prepare_libcap(
+            prepare_bwrap_asset(
                 common_root=self.common,
                 lease_factory=_lease_factory,
                 download_function=self._download(self.archive),
-                run_function=runner,
             )
-        runner.assert_not_called()
 
-        unsafe = _libcap_archive_bytes(unsafe_member="libcap-2.78/../../escape")
-        unsafe_lock = binary_freeze._LibcapLock(
-            schema_version=1,
-            name="libcap",
-            version=binary_freeze.LIBCAP_VERSION,
-            target=binary_freeze.RUST_TARGET,
-            url=binary_freeze.LIBCAP_URL,
-            archive_sha256=hashlib.sha256(unsafe).hexdigest(),
+        unsafe = _bwrap_archive_bytes(extra=True)
+        unsafe_lock = binary_freeze._BwrapAssetLock(
+            **{
+                **self.lock.__dict__,
+                "archive_sha256": hashlib.sha256(unsafe).hexdigest(),
+                "archive_size": len(unsafe),
+            }
         )
         with (
-            mock.patch.object(binary_freeze, "_load_libcap_lock", return_value=unsafe_lock),
+            mock.patch.object(binary_freeze, "_load_bwrap_asset_lock", return_value=unsafe_lock),
             self.assertRaises(BinaryFreezeError),
         ):
-            prepare_libcap(
+            prepare_bwrap_asset(
                 common_root=self.common,
                 lease_factory=_lease_factory,
                 download_function=self._download(unsafe),
-                run_function=runner,
             )
-        self.assertFalse((self.common / "escape").exists())
-        runner.assert_not_called()
 
-    def test_expired_watchdog_cannot_publish_dependency(self) -> None:
+    def test_expired_watchdog_cannot_publish_asset(self) -> None:
         with (
-            mock.patch.object(binary_freeze, "_load_libcap_lock", return_value=self.lock),
+            mock.patch.object(binary_freeze, "_load_bwrap_asset_lock", return_value=self.lock),
             self.assertRaises(BinaryFreezeError),
         ):
-            prepare_libcap(
+            prepare_bwrap_asset(
                 common_root=self.common,
                 lease_factory=_lease_factory,
-                download_function=self._download(self.archive),
-                run_function=self._build(expire_lease=True),
+                download_function=self._download(self.archive, expire_lease=True),
             )
         self.assertFalse(
-            (self.common / "eval-data/deps" / binary_freeze.LIBCAP_DEPENDENCY_NAME).exists()
+            (self.common / "eval-data/deps" / binary_freeze.BWRAP_ASSET_NAME).exists()
         )
+
+
+class BwrapSourceIdentityTests(unittest.TestCase):
+    def test_both_sides_require_the_exact_upstream_bwrap_trees(self) -> None:
+        paths = SimpleNamespace(
+            freeze=SimpleNamespace(
+                source_root=Path("/fixture/rondo"),
+                baseline_reference_root=Path("/fixture/upstream"),
+            )
+        )
+        for side in (Side.RONDO, Side.CODEX):
+            with (
+                self.subTest(side=side.value),
+                mock.patch.object(binary_freeze, "_validate_baseline_reference"),
+                mock.patch.object(
+                    binary_freeze,
+                    "_git",
+                    side_effect=(
+                        binary_freeze.BWRAP_PACKAGE_TREE_ID,
+                        binary_freeze.BWRAP_VENDOR_TREE_ID,
+                    ),
+                ),
+            ):
+                binary_freeze._validate_bwrap_source_identity(
+                    SimpleNamespace(side=side), paths
+                )
+
+    def test_rejects_either_source_tree_mismatch(self) -> None:
+        paths = SimpleNamespace(
+            freeze=SimpleNamespace(
+                source_root=Path("/fixture/rondo"),
+                baseline_reference_root=None,
+            )
+        )
+        with (
+            mock.patch.object(
+                binary_freeze,
+                "_git",
+                side_effect=("0" * 40, binary_freeze.BWRAP_VENDOR_TREE_ID),
+            ),
+            self.assertRaises(BinaryFreezeError),
+        ):
+            binary_freeze._validate_bwrap_source_identity(
+                SimpleNamespace(side=Side.RONDO), paths
+            )
 
 
 class RondoFreezeTests(unittest.TestCase):
@@ -529,8 +495,11 @@ class RondoFreezeTests(unittest.TestCase):
         self.constants.start()
         self.portable = mock.patch.object(binary_freeze, "_validate_static_musl_binary")
         self.portable.start()
+        self.source_identity = mock.patch.object(binary_freeze, "_validate_bwrap_source_identity")
+        self.source_identity.start()
 
     def tearDown(self) -> None:
+        self.source_identity.stop()
         self.portable.stop()
         self.constants.stop()
         self.temporary.cleanup()
@@ -574,7 +543,7 @@ class RondoFreezeTests(unittest.TestCase):
 
     def _runtime_fixture(
         self,
-    ) -> tuple[RuntimeFreezeRequest, tuple[str, ...], Path, Path, Path]:
+    ) -> tuple[RuntimeFreezeRequest, Path, Path, Path]:
         companion_request, companion_command, companion_bundle, _ = self._companion_fixture()
         prepare_companion(
             companion_request,
@@ -582,10 +551,7 @@ class RondoFreezeTests(unittest.TestCase):
             lease_factory=_lease_factory,
             toolchain_probe=lambda: TOOLCHAIN,
         )
-        bwrap_release = self.target / binary_freeze.RUST_TARGET / "release/bwrap"
-        bwrap_release.write_bytes(b"frozen-rondo-bwrap")
-        bwrap_release.chmod(0o755)
-        libcap = _write_libcap_dependency(self.common)
+        asset = _write_bwrap_asset(self.common)
         runtime_bundle = self.artifact.with_name(f"{self.artifact.name}-runtime-bundle")
         request = RuntimeFreezeRequest(
             side=Side.RONDO,
@@ -594,19 +560,11 @@ class RondoFreezeTests(unittest.TestCase):
             source_commit=self.commit,
             target_dir=self.target,
             companion_bundle_dir=companion_bundle,
-            libcap_dir=libcap,
+            bwrap_asset_dir=asset,
             runtime_bundle_dir=runtime_bundle,
             gate_root=self.source,
         )
-        command = _bwrap_build_command(
-            common=self.common,
-            source=self.source,
-            target=self.target,
-            gate=self.source,
-            side=Side.RONDO,
-            libcap=libcap,
-        )
-        return request, command, runtime_bundle, companion_bundle, bwrap_release
+        return request, runtime_bundle, companion_bundle, asset / "bwrap"
 
     def test_prepares_and_verifies_atomic_manifest_and_modes(self) -> None:
         prepared = prepare(
@@ -924,11 +882,10 @@ class RondoFreezeTests(unittest.TestCase):
             resolver.assert_not_called()
 
     def test_runtime_bundle_preserves_companion_and_adds_nested_static_bwrap(self) -> None:
-        request, command, runtime, companion, bwrap_release = self._runtime_fixture()
+        request, runtime, companion, asset_bwrap = self._runtime_fixture()
 
         prepared = prepare_runtime(
             request,
-            command,
             lease_factory=_lease_factory,
             toolchain_probe=lambda: TOOLCHAIN,
         )
@@ -945,17 +902,17 @@ class RondoFreezeTests(unittest.TestCase):
             (companion / "codex-code-mode-host").read_bytes(),
         )
         self.assertEqual(
-            (runtime / "codex-resources/bwrap").read_bytes(), bwrap_release.read_bytes()
+            (runtime / "codex-resources/bwrap").read_bytes(), asset_bwrap.read_bytes()
         )
         self.assertEqual((runtime / "codex-resources/bwrap").stat().st_mode & 0o777, 0o555)
         self.assertEqual((runtime / "codex-resources").stat().st_mode & 0o777, 0o700)
         manifest = json.loads((runtime / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(set(manifest), binary_freeze._MANIFEST_KEYS)
         self.assertEqual(manifest["bwrap_path"], str(runtime / "codex-resources/bwrap"))
-        self.assertEqual(manifest["bwrap_build_command"], list(command))
-        self.assertEqual(manifest["libcap_version"], binary_freeze.LIBCAP_VERSION)
+        self.assertEqual(manifest["bwrap_asset_url"], binary_freeze.BWRAP_ASSET_URL)
+        self.assertEqual(manifest["bwrap_archive_sha256"], binary_freeze.BWRAP_ARCHIVE_SHA256)
         self.assertEqual(
-            manifest["libcap_archive_sha256"], binary_freeze.LIBCAP_ARCHIVE_SHA256
+            manifest["bwrap_source_tree_sha256"], binary_freeze.BWRAP_SOURCE_TREE_SHA256
         )
         companion_manifest = json.loads(
             (companion / "manifest.json").read_text(encoding="utf-8")
@@ -967,36 +924,14 @@ class RondoFreezeTests(unittest.TestCase):
         with self.assertRaises(BinaryFreezeError):
             prepare_runtime(
                 request,
-                command,
                 lease_factory=_lease_factory,
                 toolchain_probe=lambda: TOOLCHAIN,
             )
 
-    def test_runtime_bundle_rejects_non_bwrap_argv_and_tampering(self) -> None:
-        request, command, runtime, _, _ = self._runtime_fixture()
-        wrong = list(command)
-        wrong[wrong.index("codex-bwrap")] = "codex-cli"
-        with self.assertRaises(BinaryFreezeError):
-            prepare_runtime(
-                request,
-                wrong,
-                lease_factory=_lease_factory,
-                toolchain_probe=lambda: TOOLCHAIN,
-            )
-        wrong_environment = list(command)
-        wrong_environment[wrong_environment.index("PKG_CONFIG_ALLOW_CROSS=1")] = (
-            "PKG_CONFIG_ALLOW_CROSS=0"
-        )
-        with self.assertRaises(BinaryFreezeError):
-            prepare_runtime(
-                request,
-                wrong_environment,
-                lease_factory=_lease_factory,
-                toolchain_probe=lambda: TOOLCHAIN,
-            )
+    def test_runtime_bundle_rejects_tampering(self) -> None:
+        request, runtime, _, _ = self._runtime_fixture()
         prepare_runtime(
             request,
-            command,
             lease_factory=_lease_factory,
             toolchain_probe=lambda: TOOLCHAIN,
         )
@@ -1011,16 +946,15 @@ class RondoFreezeTests(unittest.TestCase):
                 toolchain_probe=lambda: TOOLCHAIN,
             )
 
-    def test_runtime_bundle_rejects_tampered_libcap_dependency(self) -> None:
-        request, command, _, _, _ = self._runtime_fixture()
-        library = request.libcap_dir / "lib/libcap.a"
-        library.chmod(0o644)
-        library.write_bytes(b"!<arch>\ntampered")
-        library.chmod(0o444)
+    def test_runtime_bundle_rejects_tampered_bwrap_asset(self) -> None:
+        request, _, _, _ = self._runtime_fixture()
+        bwrap = request.bwrap_asset_dir / "bwrap"
+        bwrap.chmod(0o755)
+        bwrap.write_bytes(b"tampered")
+        bwrap.chmod(0o555)
         with self.assertRaises(BinaryFreezeError):
             prepare_runtime(
                 request,
-                command,
                 lease_factory=_lease_factory,
                 toolchain_probe=lambda: TOOLCHAIN,
             )
@@ -1084,7 +1018,30 @@ class BaselineFreezeTests(unittest.TestCase):
         self.stack.enter_context(
             mock.patch.object(binary_freeze, "_validate_static_musl_binary")
         )
+        self.stack.enter_context(
+            mock.patch.object(binary_freeze, "_validate_bwrap_source_identity")
+        )
         self.stack.enter_context(mock.patch.object(binary_freeze, "BASELINE_COMMIT", self.commit))
+        self.stack.enter_context(
+            mock.patch.object(
+                binary_freeze,
+                "_load_bwrap_asset_lock",
+                return_value=binary_freeze._BwrapAssetLock(
+                    schema_version=1,
+                    name="bwrap",
+                    release_tag=binary_freeze.BASELINE_TAG,
+                    target=binary_freeze.RUST_TARGET,
+                    url=binary_freeze.BWRAP_ASSET_URL,
+                    archive_sha256=binary_freeze.BWRAP_ARCHIVE_SHA256,
+                    archive_size=binary_freeze.BWRAP_ARCHIVE_SIZE,
+                    archive_member=binary_freeze.BWRAP_ARCHIVE_MEMBER,
+                    source_commit=self.commit,
+                    bwrap_tree_id=binary_freeze.BWRAP_PACKAGE_TREE_ID,
+                    vendor_tree_id=binary_freeze.BWRAP_VENDOR_TREE_ID,
+                    source_tree_sha256=binary_freeze.BWRAP_SOURCE_TREE_SHA256,
+                ),
+            )
+        )
         self.stack.enter_context(
             mock.patch.object(
                 binary_freeze,
@@ -1217,10 +1174,7 @@ class BaselineFreezeTests(unittest.TestCase):
 
         manifest = json.loads(Path(verified.manifest_path).read_text(encoding="utf-8"))
         self.assertEqual(manifest["workspace_lock_normalization"], binary_freeze.LOCK_NORMALIZATION)
-        bwrap_release = self.target / binary_freeze.RUST_TARGET / "release/bwrap"
-        bwrap_release.write_bytes(b"frozen-baseline-bwrap")
-        bwrap_release.chmod(0o755)
-        libcap = _write_libcap_dependency(self.common)
+        bwrap_asset = _write_bwrap_asset(self.common)
         runtime = self.artifact.with_name(f"{self.artifact.name}-runtime-bundle")
         runtime_request = RuntimeFreezeRequest(
             side=Side.CODEX,
@@ -1229,22 +1183,13 @@ class BaselineFreezeTests(unittest.TestCase):
             source_commit=self.commit,
             target_dir=self.target,
             companion_bundle_dir=bundle,
-            libcap_dir=libcap,
+            bwrap_asset_dir=bwrap_asset,
             runtime_bundle_dir=runtime,
             gate_root=self.gate,
             baseline_reference_root=self.reference,
         )
-        bwrap_command = _bwrap_build_command(
-            common=self.common,
-            source=self.scratch,
-            target=self.target,
-            gate=self.gate,
-            side=Side.CODEX,
-            libcap=libcap,
-        )
         prepare_runtime(
             runtime_request,
-            bwrap_command,
             lease_factory=_lease_factory,
             toolchain_probe=lambda: TOOLCHAIN,
         )

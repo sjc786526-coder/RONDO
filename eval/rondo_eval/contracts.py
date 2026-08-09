@@ -44,10 +44,9 @@ class BinaryManifest:
     rust_toolchain: str
     build_command: tuple[str, ...]
     code_mode_host_build_command: tuple[str, ...]
-    bwrap_build_command: tuple[str, ...]
-    libcap_version: str
-    libcap_archive_sha256: str
-    libcap_static_sha256: str
+    bwrap_asset_url: str
+    bwrap_archive_sha256: str
+    bwrap_source_tree_sha256: str
     workspace_lock_normalization: str | None = None
 
     def validate(self) -> None:
@@ -68,10 +67,13 @@ class BinaryManifest:
         ):
             raise ContractError("bwrap path is required and must differ from other binary paths")
         _require_sha256(self.bwrap_sha256, "bwrap sha256")
-        if self.libcap_version != "2.78":
-            raise ContractError("binary libcap version differs from the frozen dependency")
-        _require_sha256(self.libcap_archive_sha256, "libcap archive sha256")
-        _require_sha256(self.libcap_static_sha256, "libcap static library sha256")
+        if self.bwrap_asset_url != (
+            "https://github.com/openai/codex/releases/download/rust-v0.147.0/"
+            "bwrap-x86_64-unknown-linux-musl.tar.gz"
+        ):
+            raise ContractError("bwrap asset URL differs from the frozen release")
+        _require_sha256(self.bwrap_archive_sha256, "bwrap archive sha256")
+        _require_sha256(self.bwrap_source_tree_sha256, "bwrap source tree sha256")
         _require_commit(self.source_commit, "binary source commit")
         if not isinstance(self.source_dirty, bool):
             raise ContractError("binary source_dirty must be boolean")
@@ -87,11 +89,8 @@ class BinaryManifest:
                 not isinstance(item, str) or not item
                 for item in self.code_mode_host_build_command
             )
-            or not isinstance(self.bwrap_build_command, tuple)
-            or not self.bwrap_build_command
-            or any(not isinstance(item, str) or not item for item in self.bwrap_build_command)
         ):
-            raise ContractError("binary toolchain and all build commands are required")
+            raise ContractError("binary toolchain and build commands are required")
         if self.workspace_lock_normalization is not None and (
             not isinstance(self.workspace_lock_normalization, str)
             or not self.workspace_lock_normalization
@@ -219,7 +218,6 @@ class RunSpec:
         value["binary"]["code_mode_host_build_command"] = list(
             self.binary.code_mode_host_build_command
         )
-        value["binary"]["bwrap_build_command"] = list(self.binary.bwrap_build_command)
         return value
 
 

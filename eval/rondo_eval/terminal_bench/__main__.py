@@ -190,17 +190,15 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         "rust_toolchain",
         "build_command",
         "code_mode_host_build_command",
-        "bwrap_build_command",
-        "libcap_version",
-        "libcap_archive_sha256",
-        "libcap_static_sha256",
+        "bwrap_asset_url",
+        "bwrap_archive_sha256",
+        "bwrap_source_tree_sha256",
         "workspace_lock_normalization",
     }
     if not isinstance(value, dict) or set(value) != expected:
         raise TerminalBenchRunError("binary manifest schema differs from v1")
     build_command = value["build_command"]
     code_mode_host_build_command = value["code_mode_host_build_command"]
-    bwrap_build_command = value["bwrap_build_command"]
     if any(
         not isinstance(command, list)
         or not command
@@ -208,7 +206,6 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         for command in (
             build_command,
             code_mode_host_build_command,
-            bwrap_build_command,
         )
     ):
         raise TerminalBenchRunError("binary manifest build commands are invalid")
@@ -219,15 +216,14 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         code_mode_host_sha256=value["code_mode_host_sha256"],
         bwrap_path=value["bwrap_path"],
         bwrap_sha256=value["bwrap_sha256"],
-        libcap_version=value["libcap_version"],
-        libcap_archive_sha256=value["libcap_archive_sha256"],
-        libcap_static_sha256=value["libcap_static_sha256"],
+        bwrap_asset_url=value["bwrap_asset_url"],
+        bwrap_archive_sha256=value["bwrap_archive_sha256"],
+        bwrap_source_tree_sha256=value["bwrap_source_tree_sha256"],
         source_commit=value["source_commit"],
         source_dirty=value["source_dirty"],
         rust_toolchain=value["rust_toolchain"],
         build_command=tuple(build_command),
         code_mode_host_build_command=tuple(code_mode_host_build_command),
-        bwrap_build_command=tuple(bwrap_build_command),
         workspace_lock_normalization=value["workspace_lock_normalization"],
     )
     manifest.validate()

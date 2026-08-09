@@ -1,8 +1,0 @@
-{
-  "archive_sha256": "0d621e562fd932ccf67b9660fb018e468a683d7b827541df27813228c996bb11",
-  "name": "libcap",
-  "schema_version": 1,
-  "target": "x86_64-unknown-linux-musl",
-  "url": "https://www.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.78.tar.xz",
-  "version": "2.78"
-}

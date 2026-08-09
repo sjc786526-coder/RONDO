@@ -95,15 +95,17 @@ class TerminalBenchResultTests(unittest.TestCase):
             code_mode_host_sha256="e" * 64,
             bwrap_path=str(self.root / "codex-resources" / "bwrap"),
             bwrap_sha256="f" * 64,
-            libcap_version="2.78",
-            libcap_archive_sha256="1" * 64,
-            libcap_static_sha256="2" * 64,
+            bwrap_asset_url=(
+                "https://github.com/openai/codex/releases/download/rust-v0.147.0/"
+                "bwrap-x86_64-unknown-linux-musl.tar.gz"
+            ),
+            bwrap_archive_sha256="1" * 64,
+            bwrap_source_tree_sha256="2" * 64,
             source_commit=UPSTREAM_CODEX["commit"],
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
             build_command=("supervised", "build"),
             code_mode_host_build_command=("supervised", "build-code-mode-host"),
-            bwrap_build_command=("package", "bwrap"),
             workspace_lock_normalization=UPSTREAM_CODEX["workspace_lock_normalization"],
         )
         provider = ProviderProjection(
@@ -274,10 +276,13 @@ class TerminalBenchResultTests(unittest.TestCase):
             "/opt/rondo-eval/bin/codex-resources/bwrap",
         )
         self.assertEqual(summary["config"]["bwrap_sha256"], "f" * 64)
-        self.assertEqual(summary["config"]["bwrap_build_command"], ["package", "bwrap"])
-        self.assertEqual(summary["config"]["libcap_version"], "2.78")
-        self.assertEqual(summary["config"]["libcap_archive_sha256"], "1" * 64)
-        self.assertEqual(summary["config"]["libcap_static_sha256"], "2" * 64)
+        self.assertEqual(
+            summary["config"]["bwrap_asset_url"],
+            "https://github.com/openai/codex/releases/download/rust-v0.147.0/"
+            "bwrap-x86_64-unknown-linux-musl.tar.gz",
+        )
+        self.assertEqual(summary["config"]["bwrap_archive_sha256"], "1" * 64)
+        self.assertEqual(summary["config"]["bwrap_source_tree_sha256"], "2" * 64)
 
     def test_infra_without_job_tree_or_metadata_is_archived_explicitly(self) -> None:
         run_id = "20260810-010000002-tb-codex-r1"

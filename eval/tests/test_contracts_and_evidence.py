@@ -155,9 +155,12 @@ class ContractTests(unittest.TestCase):
             code_mode_host_sha256="e" * 64,
             bwrap_path="eval-data/bin/codex-resources/bwrap",
             bwrap_sha256="f" * 64,
-            libcap_version="2.78",
-            libcap_archive_sha256="1" * 64,
-            libcap_static_sha256="2" * 64,
+            bwrap_asset_url=(
+                "https://github.com/openai/codex/releases/download/rust-v0.147.0/"
+                "bwrap-x86_64-unknown-linux-musl.tar.gz"
+            ),
+            bwrap_archive_sha256="1" * 64,
+            bwrap_source_tree_sha256="2" * 64,
             source_commit="b" * 40,
             source_dirty=False,
             rust_toolchain="rustc 1.95.0",
@@ -165,7 +168,6 @@ class ContractTests(unittest.TestCase):
             code_mode_host_build_command=(
                 "cargo", "build", "--bin", "codex-code-mode-host"
             ),
-            bwrap_build_command=("package", "bwrap"),
         )
         provider = ProviderProjection(
             provider_id="openai",
