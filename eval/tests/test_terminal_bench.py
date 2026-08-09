@@ -349,7 +349,24 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('approvals_reviewer="auto_review"', commands)
         self.assertIn('approval_policy="on-request"', commands)
         self.assertIn('sandbox_mode="workspace-write"', commands)
-        self.assertIn("model_providers.openai.supports_websockets=false", commands)
+        self.assertIn('model_provider="rondo_eval_openai"', commands)
+        self.assertIn(
+            'model_providers.rondo_eval_openai.wire_api="responses"',
+            commands,
+        )
+        self.assertIn(
+            "model_providers.rondo_eval_openai.supports_websockets=false",
+            commands,
+        )
+        self.assertIn(
+            "model_providers.rondo_eval_openai.request_max_retries=0",
+            commands,
+        )
+        self.assertIn(
+            "model_providers.rondo_eval_openai.stream_max_retries=0",
+            commands,
+        )
+        self.assertNotIn("model_providers.openai.", commands)
         self.assertIn(adapter.remote_path + " exec", commands)
         raw_codex_command = next(
             command for command in raw_agent_commands if adapter.remote_path + " exec" in command

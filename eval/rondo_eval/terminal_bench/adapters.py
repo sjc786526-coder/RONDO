@@ -23,6 +23,7 @@ from .compat import (
 
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_EVAL_PROVIDER_ID = "rondo_eval_openai"
 
 
 class AdapterError(RuntimeError):
@@ -207,8 +208,15 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 'approvals_reviewer="auto_review"',
                 'approval_policy="on-request"',
                 'sandbox_mode="workspace-write"',
-                f'openai_base_url={json.dumps(self._provider_base_url)}',
-                "model_providers.openai.supports_websockets=false",
+                f'model_provider={json.dumps(_EVAL_PROVIDER_ID)}',
+                f'model_providers.{_EVAL_PROVIDER_ID}.name="OpenAI"',
+                f'model_providers.{_EVAL_PROVIDER_ID}.base_url='
+                f'{json.dumps(self._provider_base_url)}',
+                f'model_providers.{_EVAL_PROVIDER_ID}.wire_api="responses"',
+                f"model_providers.{_EVAL_PROVIDER_ID}.requires_openai_auth=true",
+                f"model_providers.{_EVAL_PROVIDER_ID}.supports_websockets=false",
+                f"model_providers.{_EVAL_PROVIDER_ID}.request_max_retries=0",
+                f"model_providers.{_EVAL_PROVIDER_ID}.stream_max_retries=0",
             )
             if self.side is Side.RONDO:
                 overrides = (
@@ -351,10 +359,19 @@ def _validate_safe_codex_command(command: str, *, side: Side) -> None:
         'approvals_reviewer="auto_review"',
         'approval_policy="on-request"',
         'sandbox_mode="workspace-write"',
-        "model_providers.openai.supports_websockets=false",
+        'model_provider="rondo_eval_openai"',
+        'model_providers.rondo_eval_openai.name="OpenAI"',
+        "model_providers.rondo_eval_openai.base_url=",
+        'model_providers.rondo_eval_openai.wire_api="responses"',
+        "model_providers.rondo_eval_openai.requires_openai_auth=true",
+        "model_providers.rondo_eval_openai.supports_websockets=false",
+        "model_providers.rondo_eval_openai.request_max_retries=0",
+        "model_providers.rondo_eval_openai.stream_max_retries=0",
     )
     if any(value not in command for value in required):
         raise AdapterError("safe Codex execution options are incomplete")
+    if "model_providers.openai." in command:
+        raise AdapterError("built-in OpenAI provider may not be overridden")
     rondo_only = (
         'auto_review.model="gpt-5.6-luna"',
         'auto_review.reasoning_effort="low"',
