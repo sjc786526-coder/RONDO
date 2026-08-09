@@ -1533,8 +1533,13 @@ pub async fn mount_function_call_agent_response(
 }
 
 /// Mounts a sequence of SSE response bodies and serves them in order for each
-/// POST to `/v1/responses`. Panics if more requests are received than bodies
-/// provided. Also asserts the exact number of expected calls.
+/// matching POST to `/v1/responses`. Asserts that every configured body is
+/// consumed.
+///
+/// The mock is capped at the number of configured bodies, so later requests
+/// fall through to Wiremock's default response. Use
+/// [`received_responses_request_count`] when the test must assert the exact
+/// total number of `/responses` requests received by the server.
 pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> ResponseMock {
     mount_sse_sequence_inner(server, bodies, true).await
 }
@@ -1543,11 +1548,25 @@ pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> Res
 ///
 /// This is useful for timeout diagnostics: an unmet wiremock expectation would
 /// otherwise panic during server drop and obscure the original timeout error.
+/// Call [`received_responses_request_count`] after the tested operation reaches
+/// its terminal barrier when the exact server-wide total matters.
 pub async fn mount_sse_sequence_without_request_count_expectation(
     server: &MockServer,
     bodies: Vec<String>,
 ) -> ResponseMock {
     mount_sse_sequence_inner(server, bodies, false).await
+}
+
+/// Counts every Responses API POST recorded by Wiremock, including requests
+/// that fell through after a capped mock stopped matching.
+pub async fn received_responses_request_count(server: &MockServer) -> Result<usize> {
+    let Some(requests) = server.received_requests().await else {
+        anyhow::bail!("wiremock request recording must be enabled");
+    };
+    Ok(requests
+        .iter()
+        .filter(|request| request.method == "POST" && request.url.path().ends_with("/responses"))
+        .count())
 }
 
 async fn mount_sse_sequence_inner(

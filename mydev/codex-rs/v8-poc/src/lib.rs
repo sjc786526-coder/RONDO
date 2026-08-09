@@ -26,6 +26,7 @@ pub fn linked_v8_has_sandbox() -> bool {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use std::ffi::OsStr;
     use std::sync::Once;
 
     use super::bazel_target;
@@ -54,6 +55,21 @@ mod tests {
         result.to_rust_string_lossy(scope)
     }
 
+    fn parse_sandbox_expectation(value: Option<&OsStr>) -> Option<bool> {
+        let value = value?;
+        let value = value
+            .to_str()
+            .expect("RONDO_V8_CANARY_EXPECT_SANDBOX must be valid Unicode and exactly `0` or `1`");
+
+        match value {
+            "0" => Some(false),
+            "1" => Some(true),
+            value => {
+                panic!("RONDO_V8_CANARY_EXPECT_SANDBOX must be exactly `0` or `1`, got {value:?}")
+            }
+        }
+    }
+
     #[test]
     fn exposes_expected_bazel_target() {
         assert_eq!(bazel_target(), "//codex-rs/v8-poc:v8-poc");
@@ -72,16 +88,23 @@ mod tests {
             "the crate sandbox feature requires a sandbox-enabled linked V8"
         );
 
-        if let Ok(expected) = std::env::var("RONDO_V8_CANARY_EXPECT_SANDBOX") {
-            let expected = match expected.as_str() {
-                "0" => false,
-                "1" => true,
-                value => panic!(
-                    "RONDO_V8_CANARY_EXPECT_SANDBOX must be exactly `0` or `1`, got {value:?}"
-                ),
-            };
+        let expected = std::env::var_os("RONDO_V8_CANARY_EXPECT_SANDBOX");
+        if let Some(expected) = parse_sandbox_expectation(expected.as_deref()) {
             assert_eq!(linked_v8_has_sandbox, expected);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[should_panic(
+        expected = "RONDO_V8_CANARY_EXPECT_SANDBOX must be valid Unicode and exactly `0` or `1`"
+    )]
+    fn sandbox_expectation_rejects_non_unicode_values() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let value = OsString::from_vec(vec![0xff]);
+        parse_sandbox_expectation(Some(value.as_os_str()));
     }
 
     #[test]

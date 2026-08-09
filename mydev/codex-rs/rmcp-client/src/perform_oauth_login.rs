@@ -586,7 +586,16 @@ impl OauthLoginFlow {
         self.auth_url.clone()
     }
 
-    async fn finish(mut self, emit_browser_url: bool) -> Result<()> {
+    async fn finish(self, emit_browser_url: bool) -> Result<()> {
+        self.finish_with_launcher(emit_browser_url, |url| webbrowser::open(url).is_ok())
+            .await
+    }
+
+    async fn finish_with_launcher(
+        mut self,
+        emit_browser_url: bool,
+        launcher: impl FnOnce(&str) -> bool,
+    ) -> Result<()> {
         let server_name = &self.server_name;
         let auth_url = &self.auth_url;
         if emit_browser_url {
@@ -595,10 +604,7 @@ impl OauthLoginFlow {
             );
         }
 
-        if invoke_browser_launcher(self.browser_launch, auth_url, |url| {
-            webbrowser::open(url).is_ok()
-        }) == Some(false)
-        {
+        if invoke_browser_launcher(self.browser_launch, auth_url, launcher) == Some(false) {
             if !emit_browser_url {
                 eprintln!(
                     "Authorize `{server_name}` by opening this URL in your browser:\n{auth_url}\n"
@@ -771,14 +777,16 @@ mod tests {
 
     use super::BrowserLaunch;
     use super::CallbackOutcome;
+    use super::CallbackResult;
+    use super::CallbackServerGuard;
     use super::OAuthHttpClientAdapter;
     use super::OAuthProviderError;
+    use super::OauthLoginFlow;
     use super::StreamableHttpRedirectMode;
     use super::append_callback_id_to_redirect_uri;
     use super::append_query_param;
     use super::callback_id_from_server_url;
     use super::callback_path_from_redirect_uri;
-    use super::invoke_browser_launcher;
     use super::parse_oauth_callback;
     use super::perform_oauth_login;
     use super::perform_oauth_login_silent;
@@ -851,6 +859,53 @@ mod tests {
         });
 
         base_url
+    }
+
+    async fn oauth_login_flow_with_callback_error(browser_launch: BrowserLaunch) -> OauthLoginFlow {
+        let base_url = spawn_oauth_metadata_server().await;
+        let server_url = format!("{base_url}/mcp");
+        let oauth_state = start_authorization(
+            &server_url,
+            Arc::new(OAuthHttpClientAdapter::new(
+                Arc::new(RouteAwareHttpClient::new(HttpClientFactory::new(
+                    OutboundProxyPolicy::Direct,
+                ))),
+                HeaderMap::new(),
+            )),
+            &[],
+            "http://127.0.0.1/callback",
+            Some("test-client"),
+        )
+        .await
+        .expect("start OAuth authorization fixture");
+        let auth_url = oauth_state
+            .get_authorization_url()
+            .await
+            .expect("read OAuth authorization URL");
+        let callback_server =
+            Arc::new(tiny_http::Server::http("127.0.0.1:0").expect("bind callback guard fixture"));
+        let (callback_tx, callback_rx) = tokio::sync::oneshot::channel();
+        callback_tx
+            .send(CallbackResult::Error(OAuthProviderError::new(
+                Some("access_denied".to_string()),
+                Some("fixture ends after browser launch".to_string()),
+            )))
+            .expect("queue callback error");
+
+        OauthLoginFlow {
+            auth_url,
+            oauth_state,
+            rx: callback_rx,
+            guard: CallbackServerGuard {
+                server: callback_server,
+            },
+            server_name: "launcher-fixture".to_string(),
+            server_url,
+            store_mode: OAuthCredentialsStoreMode::default(),
+            keyring_backend_kind: AuthKeyringBackendKind::default(),
+            browser_launch,
+            timeout: std::time::Duration::from_secs(1),
+        }
     }
 
     #[tokio::test]
@@ -1007,37 +1062,35 @@ mod tests {
         assert!(http_client.requests.load(Ordering::SeqCst) > 0);
     }
 
-    #[test]
-    fn oauth_login_does_not_invoke_browser_launcher_when_disabled() {
+    #[tokio::test]
+    async fn oauth_login_does_not_invoke_browser_launcher_when_disabled() {
         let launcher_calls = AtomicUsize::new(0);
 
-        let launch_result = invoke_browser_launcher(
-            BrowserLaunch::Disabled,
-            "https://oauth.example/authorize",
-            |_| {
+        oauth_login_flow_with_callback_error(BrowserLaunch::Disabled)
+            .await
+            .finish_with_launcher(/*emit_browser_url*/ false, |_| {
                 launcher_calls.fetch_add(1, Ordering::SeqCst);
                 true
-            },
-        );
+            })
+            .await
+            .expect_err("fixture callback should end OAuth finish");
 
-        assert_eq!(launch_result, None);
         assert_eq!(launcher_calls.load(Ordering::SeqCst), 0);
     }
 
-    #[test]
-    fn oauth_login_invokes_browser_launcher_once_when_enabled() {
+    #[tokio::test]
+    async fn oauth_login_invokes_browser_launcher_once_when_enabled() {
         let launcher_calls = AtomicUsize::new(0);
 
-        let launch_result = invoke_browser_launcher(
-            BrowserLaunch::Enabled,
-            "https://oauth.example/authorize",
-            |_| {
+        oauth_login_flow_with_callback_error(BrowserLaunch::Enabled)
+            .await
+            .finish_with_launcher(/*emit_browser_url*/ false, |_| {
                 launcher_calls.fetch_add(1, Ordering::SeqCst);
                 true
-            },
-        );
+            })
+            .await
+            .expect_err("fixture callback should end OAuth finish");
 
-        assert_eq!(launch_result, Some(true));
         assert_eq!(launcher_calls.load(Ordering::SeqCst), 1);
     }
 
