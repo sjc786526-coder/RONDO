@@ -28,7 +28,7 @@
 - 规范化剥离 `client_metadata` / `prompt_cache_key` / `store` / `stream` / `stream_options` 与
   `input` 项的 `id`；`call_id` 按出现顺序做成对确定性重映射（`call_0`、`call_1`…），保持工具调用与结果配对。
 - 未配置 `evidence_dir` 时不产生任何文件；钩子首个判定是一次 RwLock 读 + `is_empty()`，无分配。
-- `.gitignore` 追加 `/eval-data/`。
+- `.gitignore` 追加 `/test-data/`。
 
 ## 疑难问题与处理
 

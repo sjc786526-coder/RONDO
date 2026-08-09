@@ -1,5 +1,5 @@
 # Local read-only checkout of the upstream Codex source.
-/codex-source-code/
+/codex-source-code
 reference-agent-harness/
 /codex-doc/
 
@@ -8,4 +8,4 @@ reference-agent-harness/
 /.claude/
 
 # Evaluation data: benchmark runs, approval evidence bundles, and result archives.
-/eval-data/
+/test-data/
