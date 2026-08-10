@@ -146,7 +146,8 @@ class FakeHostExecutor:
 
     async def run(self, argv, **kwargs):
         self.calls.append((argv, kwargs))
-        return HostHarborResult(0, Path(argv[argv.index("--jobs-dir") + 1]))
+        trials = Path(argv[argv.index("--trials-dir") + 1])
+        return HostHarborResult(0, trials / argv[argv.index("--trial-name") + 1])
 
 
 class FakeBudgetProxy:
@@ -306,12 +307,30 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(materializer.calls[0]["image_digest"], FIX_GIT_IMAGE_DIGEST)
         argv = prepared.command.argv
         self.assertEqual(Path(argv[0]), EVAL_ROOT / ".venv" / "bin" / "harbor")
-        self.assertEqual(argv[1], "run")
+        self.assertEqual(argv[1:3], ("trials", "start"))
         self.assertEqual(Path(argv[argv.index("--path") + 1]), prepared.materialized_task.task_path)
         self.assertNotIn("--repo", argv)
         self.assertNotIn("--upload", argv)
         self.assertIn("--delete", argv)
-        self.assertEqual(argv[argv.index("--max-retries") + 1], "0")
+        self.assertNotIn("--max-retries", argv)
+        self.assertEqual(
+            Path(argv[argv.index("--trials-dir") + 1]),
+            prepared.command.trials_dir,
+        )
+        self.assertEqual(
+            argv[argv.index("--trial-name") + 1],
+            prepared.command.trial_name,
+        )
+        container = prepared.command.compose_contract.container
+        self.assertEqual(len(container.mounts), 3)
+        self.assertEqual(
+            container.compose_secret_mount.destination,
+            "/run/secrets/rondo_eval_provider_api_key",
+        )
+        self.assertEqual(
+            container.compose_secret_mount.source_basename,
+            "rondo_eval_provider_api_key",
+        )
         self.assertEqual(prepared.command.image_ref, FIX_GIT_IMAGE_REF)
         self.assertEqual(prepared.command.source_repo_ref, TERMINAL_BENCH_REPO_REF)
         self.assertEqual(prepared.command.task_source_digest, f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}")
@@ -638,6 +657,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn(secret, repr(prepared.command))
         self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off", "OPENAI_API_KEY": secret})
         self.assertEqual(kwargs["exact_task_label"], "dev.rondo.eval.task=p1-b3-rondo")
+        self.assertEqual(kwargs["compose_contract"], prepared.command.compose_contract)
 
     def test_concrete_host_executor_uses_public_full_lifetime_supervisor(self) -> None:
         prepared = self.prepare()
@@ -665,6 +685,7 @@ class TerminalBenchTests(unittest.TestCase):
                     injected_env={"HARBOR_TELEMETRY": "off", "OPENAI_API_KEY": secret},
                     timeout_seconds=prepared.spec.timeout_seconds,
                     exact_task_label=prepared.command.task_label,
+                    compose_contract=prepared.command.compose_contract,
                 )
             )
 
@@ -746,6 +767,7 @@ class TerminalBenchTests(unittest.TestCase):
                 counter=mock.Mock(),
                 lock_guard=mock.Mock(),
                 lease=HeavyLockLease(token="x" * 16, held=True),
+                pair_identity=mock.Mock(),
                 materializer=materializer,
             ))
 

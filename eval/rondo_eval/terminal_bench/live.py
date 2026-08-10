@@ -28,6 +28,7 @@ from .runner import (
     UnifiedTerminalBenchRunner,
     prepare_terminal_bench_run,
 )
+from .pair import PairIdentity
 
 
 GUARDIAN_SOURCE_BASELINE = "rust-v0.147.0"
@@ -83,6 +84,7 @@ async def run_budgeted_terminal_bench(
     counter: DockerCounter,
     lock_guard: HeavyLockGuard,
     lease: HeavyLockLease,
+    pair_identity: PairIdentity,
     materializer: TaskMaterializer | None = None,
 ) -> BudgetedTerminalBenchResult:
     """Run one side through the only paid path: the local budget proxy.
@@ -112,6 +114,7 @@ async def run_budgeted_terminal_bench(
             replace(request, provider_transport_base_url=proxy.docker_base_url),
             materializer=materializer,
         )
+        pair_identity.validate_prepared(prepared, mode="paid")
         executor = DockerSupervisedHostHarborExecutor(
             counter=counter,
             lock_guard=lock_guard,

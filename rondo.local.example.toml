@@ -29,7 +29,10 @@ api = "responses"
 base_url = "http://127.0.0.1:8080/v1"
 api_key_env = "RONDO_LOCAL_MODEL_API_KEY"
 model_id = "rondo-local-approval"
-model_path = "/absolute/path/outside/RONDO/model-Q4_K_M.gguf"
+# Set both fields only after a reviewed local GGUF is installed. Until then the
+# doctor accurately reports model_missing without downloading or loading one.
+model_path = ""
+model_sha256 = ""
 format = "gguf"
 quantization = "Q4_K_M"
 

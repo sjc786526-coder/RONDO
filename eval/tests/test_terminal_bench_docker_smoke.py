@@ -157,29 +157,14 @@ class FakeHostExecutor:
         if response.status != 200 or '"text":"done"' not in payload:
             raise AssertionError("loopback fake did not complete after code-mode output")
 
-        jobs = Path(argv[argv.index("--jobs-dir") + 1])
-        job = jobs / "2026-08-10__02-00-00"
-        trial = job / "fix-git__smoke"
+        trials = Path(argv[argv.index("--trials-dir") + 1])
+        trial_name = argv[argv.index("--trial-name") + 1]
+        trial = trials / trial_name
         trial.mkdir(parents=True)
-        (job / "result.json").write_text(
-            json.dumps(
-                {
-                    "n_total_trials": 1,
-                    "stats": {
-                        "n_completed_trials": 1,
-                        "n_errored_trials": 0,
-                        "n_running_trials": 0,
-                        "n_pending_trials": 0,
-                        "n_cancelled_trials": 0,
-                        "n_retries": 0,
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
         (trial / "result.json").write_text(
             json.dumps(
                 {
+                    "trial_name": trial_name,
                     "task_name": FIX_GIT_TASK_ID,
                     "agent_result": {
                         "n_input_tokens": 0,
@@ -227,7 +212,7 @@ class FakeHostExecutor:
             + "\n",
             encoding="utf-8",
         )
-        return HostHarborResult(0, jobs)
+        return HostHarborResult(0, trial)
 
 
 class DockerNoApiSmokeTests(unittest.TestCase):
@@ -307,6 +292,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                 counter=mock.Mock(),
                 lock_guard=mock.Mock(),
                 lease=HeavyLockLease(token="x" * 16, held=True),
+                pair_identity=mock.Mock(),
                 materializer=FakeMaterializer(self.root / "fake-materialized"),
                 executor_factory=FakeHostExecutor,
             )
@@ -399,7 +385,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         class ErrorItemHostExecutor(FakeHostExecutor):
             async def run(self, argv, **kwargs) -> HostHarborResult:
                 result = await super().run(argv, **kwargs)
-                codex_output = next(result.jobs_dir.glob("*/*/agent/codex.txt"))
+                codex_output = result.jobs_dir / "agent" / "codex.txt"
                 codex_output.write_text(
                     json.dumps(
                         {
@@ -437,6 +423,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     counter=mock.Mock(),
                     lock_guard=mock.Mock(),
                     lease=HeavyLockLease(token="x" * 16, held=True),
+                    pair_identity=mock.Mock(),
                     materializer=FakeMaterializer(self.root / "fake-materialized-error"),
                     executor_factory=ErrorItemHostExecutor,
                 )
@@ -476,6 +463,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     counter=mock.Mock(),
                     lock_guard=mock.Mock(),
                     lease=HeavyLockLease(token="x" * 16, held=True),
+                    pair_identity=mock.Mock(),
                 )
             )
         args = _parser().parse_args(

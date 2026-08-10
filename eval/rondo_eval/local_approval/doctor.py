@@ -26,6 +26,8 @@ from .client import (
     settings_from_config,
 )
 from .launcher import (
+    LLAMA_CPP_BUILD,
+    LLAMA_CPP_COMMIT,
     ModelMissingError,
     RouterProbe,
     RuntimeInspection,
@@ -56,6 +58,7 @@ def run_doctor(
     router_probe: Callable[
         [RuntimeConfig, LocalApprovalSettings, RuntimeInspection], RouterProbe
     ] = probe_router_runtime,
+    identity_probe: Callable[[RuntimeConfig, Path], None] | None = None,
     decision_probe: Callable[[RuntimeConfig], dict[str, object]] | None = None,
 ) -> DoctorReport:
     """Return one precise state without turning missing weights into success."""
@@ -97,7 +100,7 @@ def run_doctor(
         )
 
     try:
-        model_path(config, settings)
+        resolved_model = model_path(config, settings)
     except ModelMissingError:
         try:
             probe = router_probe(config, settings, runtime)
@@ -142,6 +145,10 @@ def run_doctor(
         )
 
     try:
+        if identity_probe is None:
+            _probe_identity(config, resolved_model)
+        else:
+            identity_probe(config, resolved_model)
         if decision_probe is None:
             _probe_decision(config)
         else:
@@ -215,6 +222,14 @@ def _probe_decision(config: RuntimeConfig) -> dict[str, object]:
         }
     )
     return LocalApprovalClient(config).decide(payload)
+
+
+def _probe_identity(config: RuntimeConfig, expected_model_path: Path) -> None:
+    LocalApprovalClient(config).verify_service_identity(
+        expected_model_path,
+        expected_build=LLAMA_CPP_BUILD,
+        expected_commit=LLAMA_CPP_COMMIT,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

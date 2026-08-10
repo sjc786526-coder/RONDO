@@ -31,7 +31,17 @@ from ..runtime_bridge import (
 )
 from .__main__ import _load_manifest
 from .freeze import FIX_GIT_IMAGE_DIGEST
-from .results import ParsedHarborResult, parse_single_task_result
+from .results import (
+    ParsedHarborResult,
+    parse_single_task_result,
+    validate_eval_harness_checkout,
+)
+from .pair import (
+    PairIdentity,
+    PairSequenceLedger,
+    load_pair_identity,
+    validate_harbor_installation,
+)
 from .runner import (
     DockerSupervisedHostHarborExecutor,
     HostHarborExecutor,
@@ -42,6 +52,7 @@ from .runner import (
     TerminalBenchRequest,
     TerminalBenchRunError,
     UnifiedTerminalBenchRunner,
+    HARBOR_EXECUTABLE,
     prepare_terminal_bench_run,
 )
 
@@ -82,6 +93,7 @@ class DockerNoApiSmokeResult:
     requests: tuple[SmokeRequestObservation, ...]
     agent_json_events: int
     tool_round_trip: bool
+    pair_validation: bool = False
 
     @property
     def contract_satisfied(self) -> bool:
@@ -110,6 +122,7 @@ class DockerNoApiSmokeResult:
             "agent_json_events": self.agent_json_events,
             "code_mode_tool_round_trip": self.tool_round_trip,
             "host_returncode": self.harbor.returncode,
+            "pair_validation": self.pair_validation,
         }
 
 
@@ -398,6 +411,7 @@ async def run_docker_no_api_smoke(
     counter: DockerCounter,
     lock_guard: HeavyLockGuard,
     lease: HeavyLockLease,
+    pair_identity: PairIdentity,
     materializer: TaskMaterializer | None = None,
     executor_factory: HostExecutorFactory = DockerSupervisedHostHarborExecutor,
     server_factory: Callable[[], LocalResponsesFakeServer] = LocalResponsesFakeServer,
@@ -415,6 +429,7 @@ async def run_docker_no_api_smoke(
             replace(request, provider_transport_base_url=server.docker_base_url),
             materializer=materializer,
         )
+        pair_identity.validate_prepared(prepared, mode="no_api")
         if (
             prepared.spec.websocket
             or prepared.spec.code_mode_host is not True
@@ -483,7 +498,7 @@ def _contains_marker(value: object, marker: str) -> bool:
 def _validate_agent_codex_json(jobs_dir: Path) -> int:
     """Reject incomplete or error-bearing Codex JSONL from the one-task smoke."""
 
-    matches = list(jobs_dir.glob("*/*/agent/codex.txt"))
+    matches = list(jobs_dir.glob("agent/codex.txt"))
     if len(matches) != 1:
         raise DockerNoApiSmokeError("no-API smoke requires exactly one agent codex JSONL")
     path = matches[0]
@@ -536,6 +551,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--binary-manifest", required=True, type=Path)
     parser.add_argument("--docker-host-volume", required=True, type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
+    parser.add_argument(
+        "--pair-validation",
+        action="store_true",
+        help="consume the tracked RONDO-then-Codex no-API pair sequence",
+    )
     return parser
 
 
@@ -543,9 +563,19 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         paths = RepoPaths.discover(Path.cwd())
+        validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
         side = Side(args.side)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
+        pair_identity = load_pair_identity()
+        pair_identity.validate_manifest(
+            common_root=paths.common_root,
+            side=side,
+            manifest_path=args.binary_manifest,
+            manifest=manifest,
+        )
+        validate_harbor_installation(pair_identity, executable=HARBOR_EXECUTABLE)
+        no_api_mode = pair_identity.mode("no_api")
         smoke_id = f"tb-no-api-{side.value}-{uuid.uuid4().hex[:12]}"
         work_root = paths.common_root / "eval-data" / "work" / smoke_id
         if work_root.exists() or work_root.is_symlink():
@@ -553,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
         work_root.mkdir(parents=True, mode=0o700)
         request = TerminalBenchRequest(
             side=side,
-            batch_id="p1-no-api-smoke",
+            batch_id=no_api_mode.batch_id,
             binary=manifest,
             image_digest=FIX_GIT_IMAGE_DIGEST,
             source_checkout=str(
@@ -577,15 +607,46 @@ def main(argv: list[str] | None = None) -> int:
             host_data_root=args.docker_host_volume,
             desktop_host_probe=PowerShellDockerDesktopHostProbe(),
         )
-        result = asyncio.run(
-            run_docker_no_api_smoke(
-                config,
-                request,
-                counter=counter,
-                lock_guard=proof.guard,
-                lease=proof.lease,
+        if args.pair_validation:
+            sequence_path = (
+                paths.common_root
+                / "eval-data"
+                / "pairs"
+                / f"{pair_identity.pair_id}-no-api.json"
             )
-        )
+            with PairSequenceLedger(
+                sequence_path,
+                identity=pair_identity,
+                mode="no_api",
+            ) as sequence:
+                sequence.claim(side=side, run_id=smoke_id)
+                try:
+                    result = asyncio.run(
+                        run_docker_no_api_smoke(
+                            config,
+                            request,
+                            counter=counter,
+                            lock_guard=proof.guard,
+                            lease=proof.lease,
+                            pair_identity=pair_identity,
+                        )
+                    )
+                except BaseException:
+                    sequence.finish(run_id=smoke_id, completed=False)
+                    raise
+                sequence.finish(run_id=smoke_id, completed=result.passed)
+            result = replace(result, pair_validation=True)
+        else:
+            result = asyncio.run(
+                run_docker_no_api_smoke(
+                    config,
+                    request,
+                    counter=counter,
+                    lock_guard=proof.guard,
+                    lease=proof.lease,
+                    pair_identity=pair_identity,
+                )
+            )
         print(json.dumps(result.safe_summary(), sort_keys=True, separators=(",", ":")))
         return _smoke_exit_code(result)
     except (DockerSupervisionError, RuntimeBridgeError):

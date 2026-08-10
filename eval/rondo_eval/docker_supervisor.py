@@ -36,6 +36,8 @@ _LOCAL_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _OBJECT_ID = re.compile(r"[0-9a-f]{12,64}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _FROZEN_BINARY_TARGET = "/opt/rondo-eval/bin/frozen-agent"
+_COMPOSE_PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}\Z")
+_RESOURCE_NAME = re.compile(r"[0-9A-Za-z][0-9A-Za-z_.-]{0,127}\Z")
 
 
 class DockerOperation(StrEnum):
@@ -109,6 +111,310 @@ class DockerLimits:
             raise DockerSupervisionError("Docker pids and timeout limits must be positive")
 
 
+@dataclass(frozen=True, order=True)
+class DockerMountFact:
+    """Effective mount fact obtained from ``docker container inspect``."""
+
+    kind: str
+    source: str
+    destination: str
+    read_only: bool
+
+    def validate(self) -> None:
+        if self.kind not in {"bind", "volume", "tmpfs"}:
+            raise DockerSupervisionError("Docker container mount type is invalid")
+        if (not self.source and self.kind != "tmpfs") or "\x00" in self.source:
+            raise DockerSupervisionError("Docker container mount source is invalid")
+        if not os.path.isabs(self.destination) or "\x00" in self.destination:
+            raise DockerSupervisionError("Docker container mount destination is invalid")
+        if not isinstance(self.read_only, bool):
+            raise DockerSupervisionError("Docker container mount mode is invalid")
+
+
+@dataclass(frozen=True)
+class ComposeSecretMountContract:
+    """The one Compose-generated secret bind whose host temp path is dynamic."""
+
+    destination: str
+    source_basename: str
+
+    def validate(self) -> None:
+        if not os.path.isabs(self.destination) or "\x00" in self.destination:
+            raise DockerSupervisionError("Compose secret destination is invalid")
+        if (
+            not self.source_basename
+            or self.source_basename in {".", ".."}
+            or "/" in self.source_basename
+            or "\x00" in self.source_basename
+        ):
+            raise DockerSupervisionError("Compose secret source identity is invalid")
+
+    def matches(self, mount: DockerMountFact) -> bool:
+        self.validate()
+        mount.validate()
+        source = Path(mount.source)
+        return (
+            mount.kind == "bind"
+            and mount.destination == self.destination
+            and mount.read_only
+            and source.is_absolute()
+            and source.name == self.source_basename
+            and os.path.normpath(mount.source) == mount.source
+        )
+
+
+@dataclass(frozen=True)
+class DockerContainerFact:
+    """Security and resource facts for one exact task-labelled container."""
+
+    container_id: str
+    user: str
+    privileged: bool
+    cap_add: tuple[str, ...]
+    cap_drop: tuple[str, ...]
+    security_opt: tuple[str, ...]
+    memory_bytes: int
+    memory_swap_bytes: int
+    pids_limit: int
+    read_only_rootfs: bool
+    network_mode: str
+    networks: tuple[str, ...]
+    mounts: tuple[DockerMountFact, ...]
+    compose_project: str
+    compose_service: str
+    seccomp_profile_sha256: str | None = None
+
+    def validate(self) -> None:
+        if not _OBJECT_ID.fullmatch(self.container_id):
+            raise DockerSupervisionError("Docker container runtime fact id is invalid")
+        if not self.user or "\x00" in self.user:
+            raise DockerSupervisionError("Docker container runtime user is invalid")
+        if not isinstance(self.privileged, bool) or not isinstance(self.read_only_rootfs, bool):
+            raise DockerSupervisionError("Docker container privilege fact is invalid")
+        for values in (self.cap_add, self.cap_drop, self.security_opt):
+            if len(values) != len(set(values)) or any(
+                not value or "\x00" in value for value in values
+            ):
+                raise DockerSupervisionError("Docker container security fact is invalid")
+        seccomp_options = tuple(
+            value for value in self.security_opt if value.casefold().startswith("seccomp=")
+        )
+        if any(value.casefold() == "seccomp=unconfined" for value in seccomp_options):
+            raise DockerSupervisionError("unconfined Docker seccomp is forbidden")
+        if (self.seccomp_profile_sha256 is None) != (not seccomp_options):
+            raise DockerSupervisionError("Docker seccomp profile fact is inconsistent")
+        if len(seccomp_options) > 1:
+            raise DockerSupervisionError("Docker seccomp profile fact is ambiguous")
+        for value in (self.memory_bytes, self.memory_swap_bytes, self.pids_limit):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise DockerSupervisionError("Docker container resource fact is invalid")
+        if not self.network_mode or "\x00" in self.network_mode:
+            raise DockerSupervisionError("Docker container network mode is invalid")
+        if len(self.networks) != len(set(self.networks)) or any(
+            not _RESOURCE_NAME.fullmatch(value) for value in self.networks
+        ):
+            raise DockerSupervisionError("Docker container network attachment is invalid")
+        if not self.networks and self.network_mode != "none":
+            raise DockerSupervisionError("Docker container has no effective network attachment")
+        if not _COMPOSE_PROJECT.fullmatch(self.compose_project):
+            raise DockerSupervisionError("Docker Compose project identity is invalid")
+        if not _RESOURCE_NAME.fullmatch(self.compose_service):
+            raise DockerSupervisionError("Docker Compose service identity is invalid")
+        if self.seccomp_profile_sha256 is not None and not _SHA256.fullmatch(
+            self.seccomp_profile_sha256
+        ):
+            raise DockerSupervisionError("Docker seccomp profile identity is invalid")
+        if len(self.mounts) != len(set(self.mounts)):
+            raise DockerSupervisionError("Docker container mounts are ambiguous")
+        for mount in self.mounts:
+            mount.validate()
+
+
+@dataclass(frozen=True, order=True)
+class ComposeResourceFact:
+    """Exact daemon object bound to one Compose project label."""
+
+    kind: str
+    object_id: str
+    name: str
+
+    def validate(self) -> None:
+        if self.kind not in {"network", "volume"}:
+            raise DockerSupervisionError("Docker Compose resource kind is invalid")
+        if self.kind == "network" and not _OBJECT_ID.fullmatch(self.object_id):
+            raise DockerSupervisionError("Docker Compose network id is invalid")
+        if self.kind == "volume" and self.object_id != self.name:
+            raise DockerSupervisionError("Docker Compose volume identity is invalid")
+        if not _RESOURCE_NAME.fullmatch(self.name):
+            raise DockerSupervisionError("Docker Compose resource name is invalid")
+
+
+@dataclass(frozen=True)
+class HostContainerContract:
+    """Expected effective state for the one Harbor task container.
+
+    This is intentionally a strict equality contract.  The Terminal-Bench
+    projection must build it from the already-frozen task/overlay rather than
+    teaching the supervisor Harbor-specific defaults.
+    """
+
+    user: str
+    memory_bytes: int
+    memory_swap_bytes: int
+    pids_limit: int
+    compose_project: str
+    compose_service: str
+    network_mode: str
+    networks: tuple[str, ...]
+    mounts: tuple[DockerMountFact, ...]
+    compose_secret_mount: ComposeSecretMountContract | None = None
+    privileged: bool = False
+    cap_add: tuple[str, ...] = ()
+    cap_drop: tuple[str, ...] = ()
+    security_opt: tuple[str, ...] = ()
+    read_only_rootfs: bool = False
+    seccomp_profile_sha256: str | None = None
+    required_daemon_security_options: tuple[str, ...] = (
+        "name=seccomp,profile=builtin",
+    )
+
+    def validate(self) -> None:
+        if not self.user or "\x00" in self.user:
+            raise DockerSupervisionError("expected Docker runtime user is invalid")
+        DockerLimits(
+            self.memory_bytes,
+            self.memory_swap_bytes,
+            self.pids_limit,
+            1,
+        ).validate()
+        if not _COMPOSE_PROJECT.fullmatch(self.compose_project):
+            raise DockerSupervisionError("expected Docker Compose project is invalid")
+        if not _RESOURCE_NAME.fullmatch(self.compose_service):
+            raise DockerSupervisionError("expected Docker Compose service is invalid")
+        if not self.network_mode or "\x00" in self.network_mode:
+            raise DockerSupervisionError("expected Docker network mode is invalid")
+        if len(self.networks) != len(set(self.networks)) or any(
+            not _RESOURCE_NAME.fullmatch(value) for value in self.networks
+        ):
+            raise DockerSupervisionError("expected Docker networks are invalid")
+        if not self.networks and self.network_mode != "none":
+            raise DockerSupervisionError("expected Docker network attachment is invalid")
+        if len(self.mounts) != len(set(self.mounts)):
+            raise DockerSupervisionError("expected Docker mounts are ambiguous")
+        for mount in self.mounts:
+            mount.validate()
+        if self.compose_secret_mount is not None:
+            self.compose_secret_mount.validate()
+            if any(
+                mount.destination == self.compose_secret_mount.destination
+                for mount in self.mounts
+            ):
+                raise DockerSupervisionError("Compose secret overlaps an exact mount")
+        for values in (
+            self.cap_add,
+            self.cap_drop,
+            self.security_opt,
+            self.required_daemon_security_options,
+        ):
+            if len(values) != len(set(values)) or any(
+                not value or "\x00" in value for value in values
+            ):
+                raise DockerSupervisionError("expected Docker security state is invalid")
+        if self.privileged:
+            raise DockerSupervisionError("privileged task containers are forbidden")
+        if "SYS_ADMIN" in self.cap_add:
+            raise DockerSupervisionError("SYS_ADMIN is forbidden")
+        forbidden = {"seccomp=unconfined", "apparmor=unconfined", "label=disable"}
+        if forbidden.intersection(value.casefold() for value in self.security_opt):
+            raise DockerSupervisionError("unconfined Docker security options are forbidden")
+        if self.seccomp_profile_sha256 is None:
+            if any(
+                value.casefold().startswith("seccomp=") for value in self.security_opt
+            ):
+                raise DockerSupervisionError("default seccomp contract cannot name a profile")
+        elif not _SHA256.fullmatch(self.seccomp_profile_sha256):
+            raise DockerSupervisionError("minimal seccomp profile contract is invalid")
+
+    def validate_observation(
+        self,
+        fact: DockerContainerFact,
+        daemon_security_options: tuple[str, ...],
+    ) -> None:
+        self.validate()
+        fact.validate()
+        observed_mounts = list(fact.mounts)
+        if self.compose_secret_mount is not None:
+            secret_mounts = [
+                mount
+                for mount in observed_mounts
+                if mount.destination == self.compose_secret_mount.destination
+            ]
+            if len(secret_mounts) != 1 or not self.compose_secret_mount.matches(secret_mounts[0]):
+                raise DockerSupervisionError("effective Docker Compose secret mount differs")
+            observed_mounts.remove(secret_mounts[0])
+        expected = (
+            self.user,
+            self.privileged,
+            self.cap_add,
+            self.cap_drop,
+            self.security_opt,
+            self.memory_bytes,
+            self.memory_swap_bytes,
+            self.pids_limit,
+            self.read_only_rootfs,
+            self.network_mode,
+            tuple(sorted(self.networks)),
+            tuple(sorted(self.mounts)),
+            self.compose_project,
+            self.compose_service,
+            self.seccomp_profile_sha256,
+        )
+        observed = (
+            fact.user,
+            fact.privileged,
+            fact.cap_add,
+            fact.cap_drop,
+            tuple(
+                value
+                for value in fact.security_opt
+                if not value.casefold().startswith("seccomp=")
+            ),
+            fact.memory_bytes,
+            fact.memory_swap_bytes,
+            fact.pids_limit,
+            fact.read_only_rootfs,
+            fact.network_mode,
+            tuple(sorted(fact.networks)),
+            tuple(sorted(observed_mounts)),
+            fact.compose_project,
+            fact.compose_service,
+            fact.seccomp_profile_sha256,
+        )
+        if observed != expected:
+            raise DockerSupervisionError("effective Docker container state differs from contract")
+        if any(value not in daemon_security_options for value in self.required_daemon_security_options):
+            raise DockerSupervisionError("effective Docker daemon security state differs from contract")
+
+
+@dataclass(frozen=True)
+class ComposeRunContract:
+    """One task container plus the exact Compose resources it may create."""
+
+    container: HostContainerContract
+    network_names: tuple[str, ...]
+    volume_names: tuple[str, ...] = ()
+
+    def validate(self) -> None:
+        self.container.validate()
+        if tuple(sorted(self.network_names)) != tuple(sorted(self.container.networks)):
+            raise DockerSupervisionError("Compose network contract differs from container")
+        for values in (self.network_names, self.volume_names):
+            if len(values) != len(set(values)) or any(
+                not _RESOURCE_NAME.fullmatch(value) for value in values
+            ):
+                raise DockerSupervisionError("Compose resource contract is invalid")
+
+
 @dataclass(frozen=True)
 class DockerCounterReading:
     """One structured equivalent of ``docker system df`` plus host counters."""
@@ -120,6 +426,10 @@ class DockerCounterReading:
     data_root_filesystem_free_bytes: int
     task_container_ids: tuple[str, ...] = ()
     task_image_ids: tuple[str, ...] = ()
+    task_containers: tuple[DockerContainerFact, ...] = ()
+    task_networks: tuple[ComposeResourceFact, ...] = ()
+    task_volumes: tuple[ComposeResourceFact, ...] = ()
+    daemon_security_options: tuple[str, ...] = ()
 
     def validate(self) -> None:
         if not isinstance(self.docker_system_df, Mapping) or not self.docker_system_df:
@@ -136,6 +446,26 @@ class DockerCounterReading:
         for object_id in (*self.task_container_ids, *self.task_image_ids):
             if not _OBJECT_ID.fullmatch(object_id):
                 raise DockerSupervisionError("task-owned Docker object id is invalid")
+        if tuple(sorted(item.container_id for item in self.task_containers)) != tuple(
+            sorted(self.task_container_ids)
+        ):
+            raise DockerSupervisionError("Docker container facts do not match selected ids")
+        for fact in self.task_containers:
+            fact.validate()
+        for resources, expected_kind in (
+            (self.task_networks, "network"),
+            (self.task_volumes, "volume"),
+        ):
+            if len(resources) != len(set(resources)):
+                raise DockerSupervisionError("Docker Compose resources are ambiguous")
+            for resource in resources:
+                resource.validate()
+                if resource.kind != expected_kind:
+                    raise DockerSupervisionError("Docker Compose resource kind differs")
+        if len(self.daemon_security_options) != len(set(self.daemon_security_options)) or any(
+            not value or "\x00" in value for value in self.daemon_security_options
+        ):
+            raise DockerSupervisionError("Docker daemon security facts are invalid")
 
 
 class DockerCounter(Protocol):
@@ -151,6 +481,8 @@ class DockerCounter(Protocol):
         *,
         identity: DockerTaskIdentity,
         operation: DockerOperation,
+        compose_contract: ComposeRunContract | None = None,
+        deadline: float | None = None,
     ) -> DockerCounterReading: ...
 
 
@@ -163,6 +495,9 @@ class RunningCommand(Protocol):
     def terminate(self) -> None: ...
 
     def kill(self) -> None: ...
+
+    def close_process_group(self, timeout_seconds: float) -> bool:
+        """Stop descendants and prove the dedicated host process group is empty."""
 
 
 class DockerCommandRunner(Protocol):
@@ -183,6 +518,10 @@ class DockerSample:
     data_root_filesystem_free_bytes: int
     task_container_ids: tuple[str, ...]
     task_image_ids: tuple[str, ...]
+    task_containers: tuple[DockerContainerFact, ...]
+    task_networks: tuple[ComposeResourceFact, ...]
+    task_volumes: tuple[ComposeResourceFact, ...]
+    daemon_security_options: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -232,6 +571,8 @@ class DockerSupervisor:
         self._monotonic = monotonic
         self._sleeper = sleeper
         self._owned_container_ids: dict[str, set[str]] = {}
+        self._owned_networks: dict[str, set[ComposeResourceFact]] = {}
+        self._owned_volumes: dict[str, set[ComposeResourceFact]] = {}
 
     def pull(
         self,
@@ -380,6 +721,7 @@ class DockerSupervisor:
         *,
         lease: HeavyLockLease,
         timeout_seconds: int,
+        compose_contract: ComposeRunContract,
     ) -> DockerExecutionResult:
         """Supervise a host harness that creates labelled Docker objects.
 
@@ -399,12 +741,49 @@ class DockerSupervisor:
             raise DockerSupervisionError(
                 "host supervision requires a separate Docker cleanup runner"
             )
+        compose_contract.validate()
         return self._execute(
             DockerOperation.HOST,
             identity,
             argv,
             lease=lease,
             timeout_seconds=timeout_seconds,
+            compose_contract=compose_contract,
+        )
+
+    def supervise_diagnostic_command(
+        self,
+        identity: DockerTaskIdentity,
+        argv: Sequence[str],
+        *,
+        lease: HeavyLockLease,
+        limits: DockerLimits,
+        compose_contract: ComposeRunContract,
+    ) -> DockerExecutionResult:
+        """Supervise one fixed, non-privileged Docker diagnostic argv.
+
+        The caller builds the complete command, while this boundary independently
+        checks the task identity, resource limits and forbidden privilege knobs.
+        It deliberately reuses the host lifecycle path so an exact container must
+        be observed and the dedicated Docker CLI process group must be empty.
+        """
+
+        identity.validate()
+        limits.validate()
+        command = _validated_command(argv)
+        if not self._has_separate_cleanup_runner:
+            raise DockerSupervisionError(
+                "diagnostic supervision requires a separate Docker cleanup runner"
+            )
+        _validate_diagnostic_argv(command, identity, limits)
+        compose_contract.validate()
+        return self._execute(
+            DockerOperation.HOST,
+            identity,
+            command,
+            lease=lease,
+            timeout_seconds=limits.timeout_seconds,
+            compose_contract=compose_contract,
         )
 
     def cleanup_containers(
@@ -443,18 +822,38 @@ class DockerSupervisor:
         *,
         lease: HeavyLockLease,
         timeout_seconds: int,
+        compose_contract: ComposeRunContract | None = None,
     ) -> DockerExecutionResult:
         identity.validate()
         if timeout_seconds <= 0:
             raise DockerSupervisionError("Docker wall timeout must be positive")
+        if operation is DockerOperation.HOST:
+            if compose_contract is None:
+                raise DockerSupervisionError("host supervision requires a Compose contract")
+            compose_contract.validate()
+        elif compose_contract is not None:
+            raise DockerSupervisionError("Compose contract is valid only for host supervision")
         self._assert_lock(lease)
+        started_at = self._monotonic()
+        deadline = started_at + timeout_seconds
         samples: list[DockerSample] = []
         warnings: list[str] = []
-        baseline = self._read_counter(identity, operation, lease=lease)
+        baseline = self._read_counter(
+            identity,
+            operation,
+            lease=lease,
+            compose_contract=compose_contract,
+            deadline=deadline,
+        )
         baseline_sample = self._make_sample("baseline", baseline, baseline)
         samples.append(baseline_sample)
         self._enforce_sample(baseline_sample, warnings)
-        if operation in {DockerOperation.RUN, DockerOperation.HOST} and baseline.task_container_ids:
+        if operation is DockerOperation.HOST and self._sample_has_compose_resources(baseline_sample):
+            raise DockerSupervisionError(
+                "task Compose resources already exist before host run",
+                samples=samples,
+            )
+        if operation is DockerOperation.RUN and baseline.task_container_ids:
             raise DockerSupervisionError(
                 "task container already exists before Docker run",
                 samples=samples,
@@ -471,7 +870,9 @@ class DockerSupervisor:
                 samples=samples,
             ) from exc
 
-        started_at = self._monotonic()
+        observed_valid_container = False
+        process_group_closed = operation is not DockerOperation.HOST
+        command_exited = False
         try:
             while True:
                 self._assert_lock(lease, samples=samples)
@@ -481,28 +882,53 @@ class DockerSupervisor:
                     raise DockerSupervisionError("Docker wall timeout exceeded", samples=samples)
                 wait_seconds = min(SAMPLE_INTERVAL_SECONDS, remaining)
                 returncode = handle.wait(wait_seconds)
+                if returncode is not None:
+                    command_exited = True
+                if returncode is not None and operation is DockerOperation.HOST:
+                    remaining = deadline - self._monotonic()
+                    if remaining <= 0 or not handle.close_process_group(
+                        min(SAMPLE_INTERVAL_SECONDS, remaining)
+                    ):
+                        raise DockerSupervisionError(
+                            "host harness process group teardown was not verified",
+                            samples=samples,
+                        )
+                    process_group_closed = True
                 reading = self._read_counter(
                     identity,
                     operation,
                     lease=lease,
                     samples=samples,
+                    compose_contract=compose_contract,
+                    deadline=deadline,
                 )
+                if compose_contract is not None:
+                    self._validate_host_reading(reading, compose_contract, samples=samples)
+                    if reading.task_containers:
+                        observed_valid_container = True
                 phase = "final" if returncode is not None else "periodic"
                 sample = self._make_sample(phase, baseline, reading)
                 samples.append(sample)
                 self._record_owned_containers(identity, reading)
                 self._enforce_sample(sample, warnings, samples=samples)
                 if returncode is not None:
+                    if operation is DockerOperation.HOST and not observed_valid_container:
+                        raise DockerSupervisionError(
+                            "host harness task container was never observed",
+                            samples=samples,
+                        )
                     if (
                         operation is DockerOperation.HOST
                         and returncode == 0
-                        and sample.task_container_ids
+                        and self._sample_has_compose_resources(sample)
                         and self._wait_for_successful_host_teardown(
                             identity,
                             lease,
                             baseline,
                             samples,
                             warnings,
+                            compose_contract,
+                            deadline,
                         )
                     ):
                         return DockerExecutionResult(
@@ -514,12 +940,13 @@ class DockerSupervisor:
                         )
                     if (
                         operation in {DockerOperation.RUN, DockerOperation.HOST}
-                        and samples[-1].task_container_ids
+                        and self._sample_has_task_resources(samples[-1])
                         and self._cleanup_task_containers(
                             identity,
                             operation,
                             baseline,
                             samples,
+                            compose_contract=compose_contract,
                         )
                     ):
                         raise _CleanupVerificationError
@@ -538,28 +965,44 @@ class DockerSupervisor:
             ) from exc
 
         except DockerSupervisionError as exc:
-            self._stop(handle)
+            process_cleanup_failed = False
+            if not command_exited or (operation is DockerOperation.HOST and not process_group_closed):
+                process_cleanup_failed = not self._stop(
+                    handle,
+                    close_group=not process_group_closed,
+                )
             cleanup_failed = self._cleanup_task_containers(
                 identity,
                 operation,
                 baseline,
                 samples,
+                compose_contract=compose_contract,
             )
             reason = exc.reason
             if cleanup_failed:
                 reason = f"{reason}; automatic task-container cleanup was not verified"
+            if process_cleanup_failed:
+                reason = f"{reason}; host process-group cleanup was not verified"
             raise DockerSupervisionError(reason, samples=samples) from exc
         except Exception as exc:
-            self._stop(handle)
+            process_cleanup_failed = False
+            if not command_exited or (operation is DockerOperation.HOST and not process_group_closed):
+                process_cleanup_failed = not self._stop(
+                    handle,
+                    close_group=not process_group_closed,
+                )
             cleanup_failed = self._cleanup_task_containers(
                 identity,
                 operation,
                 baseline,
                 samples,
+                compose_contract=compose_contract,
             )
             reason = "Docker command supervision failed"
             if cleanup_failed:
                 reason = f"{reason}; automatic task-container cleanup was not verified"
+            if process_cleanup_failed:
+                reason = f"{reason}; host process-group cleanup was not verified"
             raise DockerSupervisionError(
                 reason,
                 samples=samples,
@@ -572,28 +1015,37 @@ class DockerSupervisor:
         baseline: DockerCounterReading,
         samples: list[DockerSample],
         warnings: list[str],
+        compose_contract: ComposeRunContract,
+        command_deadline: float,
     ) -> bool:
         """Allow a successful host harness to finish daemon-side teardown."""
 
-        started_at = self._monotonic()
+        teardown_deadline = min(
+            command_deadline,
+            self._monotonic() + HOST_SUCCESS_TEARDOWN_GRACE_SECONDS,
+        )
         while True:
             self._assert_lock(lease, samples=samples)
-            elapsed = self._monotonic() - started_at
-            remaining = HOST_SUCCESS_TEARDOWN_GRACE_SECONDS - elapsed
+            remaining = teardown_deadline - self._monotonic()
             if remaining <= 0:
                 return False
             self._sleeper(min(SAMPLE_INTERVAL_SECONDS, remaining))
+            if self._monotonic() >= teardown_deadline:
+                return False
             reading = self._read_counter(
                 identity,
                 DockerOperation.HOST,
                 lease=lease,
                 samples=samples,
+                compose_contract=compose_contract,
+                deadline=teardown_deadline,
             )
+            self._validate_host_reading(reading, compose_contract, samples=samples)
             sample = self._make_sample("teardown_grace", baseline, reading)
             samples.append(sample)
             self._record_owned_containers(identity, reading)
             self._enforce_sample(sample, warnings, samples=samples)
-            if not sample.task_container_ids:
+            if not self._sample_has_compose_resources(sample):
                 return True
 
     def _read_counter(
@@ -603,12 +1055,26 @@ class DockerSupervisor:
         *,
         lease: HeavyLockLease,
         samples: Sequence[DockerSample] = (),
+        compose_contract: ComposeRunContract | None = None,
+        deadline: float | None = None,
     ) -> DockerCounterReading:
         identity.validate()
         self._assert_lock(lease, samples=samples)
+        if deadline is not None and self._monotonic() >= deadline:
+            raise DockerSupervisionError("Docker supervision deadline exceeded", samples=samples)
         try:
-            reading = self._counter.sample(identity=identity, operation=operation)
+            reading = self._counter.sample(
+                identity=identity,
+                operation=operation,
+                compose_contract=compose_contract,
+                deadline=deadline,
+            )
             reading.validate()
+            if deadline is not None and self._monotonic() >= deadline:
+                raise DockerSupervisionError(
+                    "Docker counter probe exceeded its absolute deadline",
+                    samples=samples,
+                )
             return reading
         except DockerSupervisionError as exc:
             if samples and not exc.samples:
@@ -626,12 +1092,16 @@ class DockerSupervisor:
         operation: DockerOperation,
         baseline: DockerCounterReading,
         samples: list[DockerSample],
+        *,
+        compose_contract: ComposeRunContract | None = None,
     ) -> bool:
-        """Remove only task-labelled containers observed at command completion.
+        """Remove only exact task resources observed at command completion.
 
         Cleanup is a safety action, so it deliberately bypasses a lost lock.
-        It remains bounded, uses a Docker-only runner, and never targets an
-        image, volume, name, label expression, or unobserved container id.
+        It remains bounded, uses a Docker-only runner, and targets only exact
+        container/network/volume identities already selected and inspected by
+        the task/Compose labels.  Images and label expressions are never cleanup
+        targets.
         """
 
         if operation is DockerOperation.CLEANUP:
@@ -642,58 +1112,110 @@ class DockerSupervisor:
             for recorded in samples
             for object_id in recorded.task_container_ids
         }
+        networks_before_sample = {
+            resource
+            for recorded in samples
+            for resource in recorded.task_networks
+        }
+        volumes_before_sample = {
+            resource
+            for recorded in samples
+            for resource in recorded.task_volumes
+        }
+        cleanup_deadline = self._monotonic() + FAILURE_CLEANUP_TIMEOUT_SECONDS
         try:
             reading = self._read_counter_without_lock(
                 identity,
                 DockerOperation.CLEANUP,
+                compose_contract=compose_contract,
+                deadline=cleanup_deadline,
             )
         except DockerSupervisionError:
             observed_ids = observed_before_sample
+            observed_networks = networks_before_sample
+            observed_volumes = volumes_before_sample
         else:
             sample = self._make_sample("post_stop", baseline, reading)
             samples.append(sample)
             self._record_owned_containers(identity, reading)
             observed_ids = set(reading.task_container_ids)
+            observed_networks = set(reading.task_networks)
+            observed_volumes = set(reading.task_volumes)
 
         cleanup_failed = False
-        if observed_ids:
-            argv = (
-                "docker",
-                "container",
-                "rm",
-                "--force",
-                *sorted(observed_ids),
+        cleanup_commands: tuple[tuple[str, ...], ...] = tuple(
+            command
+            for command in (
+                (
+                    "docker",
+                    "container",
+                    "rm",
+                    "--force",
+                    *sorted(observed_ids),
+                ) if observed_ids else (),
+                (
+                    "docker",
+                    "network",
+                    "rm",
+                    *sorted(resource.object_id for resource in observed_networks),
+                ) if observed_networks else (),
+                (
+                    "docker",
+                    "volume",
+                    "rm",
+                    *sorted(resource.name for resource in observed_volumes),
+                ) if observed_volumes else (),
             )
+            if command
+        )
+        for argv in cleanup_commands:
             cleanup_handle: RunningCommand | None = None
             try:
+                remaining = cleanup_deadline - self._monotonic()
+                if remaining <= 0:
+                    cleanup_failed = True
+                    break
                 cleanup_handle = self._cleanup_runner.start(argv)
-                returncode = cleanup_handle.wait(FAILURE_CLEANUP_TIMEOUT_SECONDS)
+                returncode = cleanup_handle.wait(remaining)
                 if returncode is None:
-                    self._stop(cleanup_handle)
+                    self._stop(cleanup_handle, close_group=False)
                     cleanup_failed = True
                 elif returncode != 0:
                     cleanup_failed = True
             except Exception:
                 if cleanup_handle is not None:
-                    self._stop(cleanup_handle)
+                    self._stop(cleanup_handle, close_group=False)
                 cleanup_failed = True
 
         try:
             verified = self._read_counter_without_lock(
                 identity,
                 DockerOperation.CLEANUP,
+                compose_contract=compose_contract,
+                deadline=cleanup_deadline,
             )
         except DockerSupervisionError:
             return True
-        phase = "cleanup_verified" if not verified.task_container_ids else "cleanup_unverified"
+        verified_empty = not (
+            verified.task_container_ids
+            or verified.task_networks
+            or verified.task_volumes
+        )
+        phase = "cleanup_verified" if verified_empty else "cleanup_unverified"
         verified_sample = self._make_sample(phase, baseline, verified)
         samples.append(verified_sample)
         self._record_owned_containers(identity, verified)
-        if verified.task_container_ids:
+        if not verified_empty:
             cleanup_failed = True
-        elif observed_ids:
+        else:
             self._owned_container_ids.setdefault(identity.task_id, set()).difference_update(
                 observed_ids
+            )
+            self._owned_networks.setdefault(identity.task_id, set()).difference_update(
+                observed_networks
+            )
+            self._owned_volumes.setdefault(identity.task_id, set()).difference_update(
+                observed_volumes
             )
         return cleanup_failed
 
@@ -701,13 +1223,25 @@ class DockerSupervisor:
         self,
         identity: DockerTaskIdentity,
         operation: DockerOperation,
+        *,
+        compose_contract: ComposeRunContract | None = None,
+        deadline: float | None = None,
     ) -> DockerCounterReading:
         """Read exact-label cleanup evidence even after the shared lock is lost."""
 
         identity.validate()
         try:
-            reading = self._counter.sample(identity=identity, operation=operation)
+            if deadline is not None and self._monotonic() >= deadline:
+                raise DockerSupervisionError("Docker cleanup deadline exceeded")
+            reading = self._counter.sample(
+                identity=identity,
+                operation=operation,
+                compose_contract=compose_contract,
+                deadline=deadline,
+            )
             reading.validate()
+            if deadline is not None and self._monotonic() >= deadline:
+                raise DockerSupervisionError("Docker cleanup probe exceeded its deadline")
             return reading
         except DockerSupervisionError:
             raise
@@ -750,6 +1284,10 @@ class DockerSupervisor:
             data_root_filesystem_free_bytes=reading.data_root_filesystem_free_bytes,
             task_container_ids=tuple(reading.task_container_ids),
             task_image_ids=tuple(reading.task_image_ids),
+            task_containers=tuple(reading.task_containers),
+            task_networks=tuple(reading.task_networks),
+            task_volumes=tuple(reading.task_volumes),
+            daemon_security_options=tuple(reading.daemon_security_options),
         )
 
     @staticmethod
@@ -783,18 +1321,75 @@ class DockerSupervisor:
                 reading.task_container_ids
             )
 
+        if reading.task_networks:
+            self._owned_networks.setdefault(identity.task_id, set()).update(
+                reading.task_networks
+            )
+        if reading.task_volumes:
+            self._owned_volumes.setdefault(identity.task_id, set()).update(
+                reading.task_volumes
+            )
+
     @staticmethod
-    def _stop(handle: RunningCommand) -> None:
+    def _sample_has_task_resources(sample: DockerSample) -> bool:
+        return bool(sample.task_container_ids or sample.task_networks or sample.task_volumes)
+
+    @staticmethod
+    def _sample_has_compose_resources(sample: DockerSample) -> bool:
+        return bool(sample.task_container_ids or sample.task_networks or sample.task_volumes)
+
+    @staticmethod
+    def _validate_host_reading(
+        reading: DockerCounterReading,
+        contract: ComposeRunContract,
+        *,
+        samples: Sequence[DockerSample],
+    ) -> None:
+        if len(reading.task_containers) > 1:
+            raise DockerSupervisionError(
+                "more than one exact task container was observed",
+                samples=samples,
+            )
+        for fact in reading.task_containers:
+            try:
+                contract.container.validate_observation(
+                    fact,
+                    reading.daemon_security_options,
+                )
+            except DockerSupervisionError as exc:
+                raise DockerSupervisionError(exc.reason, samples=samples) from exc
+        network_names = {resource.name for resource in reading.task_networks}
+        volume_names = {resource.name for resource in reading.task_volumes}
+        if not network_names.issubset(set(contract.network_names)):
+            raise DockerSupervisionError(
+                "unexpected Docker Compose network was observed",
+                samples=samples,
+            )
+        if not volume_names.issubset(set(contract.volume_names)):
+            raise DockerSupervisionError(
+                "unexpected Docker Compose volume was observed",
+                samples=samples,
+            )
+
+    @staticmethod
+    def _stop(handle: RunningCommand, *, close_group: bool) -> bool:
+        if close_group:
+            try:
+                if handle.close_process_group(SAMPLE_INTERVAL_SECONDS):
+                    return True
+            except Exception:
+                pass
         try:
             handle.terminate()
             if handle.wait(SAMPLE_INTERVAL_SECONDS) is not None:
-                return
+                return not close_group
         except Exception:
             pass
         try:
             handle.kill()
         except Exception:
-            pass
+            return False
+        return not close_group
 
 
 def _require_pinned_image(image: str) -> None:
@@ -820,6 +1415,41 @@ def _validated_command(command: Sequence[str]) -> tuple[str, ...]:
         if not isinstance(value, str) or "\x00" in value:
             raise DockerSupervisionError("Docker container command is invalid")
     return result
+
+
+def _validate_diagnostic_argv(
+    argv: tuple[str, ...],
+    identity: DockerTaskIdentity,
+    limits: DockerLimits,
+) -> None:
+    if argv[:3] != ("docker", "container", "run"):
+        raise DockerSupervisionError("diagnostic must use docker container run")
+    required_pairs = (
+        ("--name", identity.container_name),
+        ("--label", identity.label),
+        ("--user", "1000:1000"),
+        ("--cap-drop", "ALL"),
+        ("--memory", str(limits.memory_bytes)),
+        ("--memory-swap", str(limits.memory_swap_bytes)),
+        ("--pids-limit", str(limits.pids_limit)),
+        ("--network", "none"),
+    )
+    for option, expected in required_pairs:
+        positions = [index for index, value in enumerate(argv) if value == option]
+        if len(positions) != 1 or positions[0] + 1 >= len(argv) or argv[positions[0] + 1] != expected:
+            raise DockerSupervisionError("diagnostic Docker argv differs from its fixed contract")
+    if argv.count("--rm") != 1 or argv.count("--read-only") != 1:
+        raise DockerSupervisionError("diagnostic Docker lifecycle is not fixed")
+    lowered = tuple(value.casefold() for value in argv)
+    if (
+        "--privileged" in lowered
+        or "--cap-add" in lowered
+        or "seccomp=unconfined" in lowered
+        or "sys_admin" in lowered
+        or "--detach" in lowered
+        or "-d" in lowered
+    ):
+        raise DockerSupervisionError("diagnostic Docker argv requests forbidden privilege")
 
 
 def _verified_frozen_binary(host_binary: Path, expected_sha256: str) -> Path:

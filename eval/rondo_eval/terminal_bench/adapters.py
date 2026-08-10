@@ -50,6 +50,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
         "codex-resources/bwrap"
     )
     agent_version: ClassVar[str] = "0.147.0"
+    # This is part of Harbor 0.20's Codex result-parser contract.  Declare it
+    # locally as well so the adapter does not depend on an untyped/private base
+    # attribute that is absent from the lightweight compatibility test double.
+    _OUTPUT_FILENAME: ClassVar[str] = "codex.txt"
     _REMOTE_CODEX_HOME = PurePosixPath("/tmp/rondo-eval-codex-home")
     _REMOTE_CODEX_SECRETS_DIR = PurePosixPath("/tmp/rondo-eval-codex-secrets")
 

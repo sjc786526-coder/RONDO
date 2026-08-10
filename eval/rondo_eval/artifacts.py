@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -114,7 +115,7 @@ class ArtifactWriter:
     def start(self) -> "ArtifactWriter":
         self._validate_roots()
         _make_directories(self.runs_root, self.paths.common_root, mode=0o700)
-        self._recover_pending_publication()
+        self._recover_pending_publications()
         self._assert_run_paths()
         self._assert_run_unclaimed()
         self.staging.mkdir(mode=0o700)
@@ -147,7 +148,8 @@ class ArtifactWriter:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, destination)
-        except Exception:
+            _fsync_directory(destination.parent)
+        except BaseException:
             if temporary.is_file() and not temporary.is_symlink():
                 temporary.unlink()
             raise
@@ -159,26 +161,36 @@ class ArtifactWriter:
         self._assert_staging_tree()
         _validate_record(record, self.run_id, self.paths.common_root)
         secret_bytes = _normalize_secrets(secrets)
-        self._scan_staging(secret_bytes)
-        _scan_bytes(_encode_record(record), secret_bytes, "tracked run record")
+        record_bytes = _encode_record(record)
+        tree_identity = _artifact_tree_identity(self.staging, secret_bytes)
+        _scan_bytes(record_bytes, secret_bytes, "tracked run record")
         _make_directories(self.results.parent, self.paths.common_root)
         lock_path = self.results.with_suffix(".jsonl.lock")
         _assert_safe_index_paths(self.results, lock_path, self.paths.common_root)
         with _open_lock_file(lock_path) as lock_handle:
             _lock(lock_handle)
             try:
+                self._recover_pending_publications_locked()
                 self._assert_publication_paths()
-                if _run_id_exists(self.results, self.run_id):
+                index_before, rows = _read_index(self.results)
+                if any(row["run_id"] == self.run_id for row in rows):
                     raise ArtifactError("run id is already present in the tracked index")
-                self._write_journal(record)
+                index_after = index_before + record_bytes + b"\n"
+                self._write_journal(
+                    record,
+                    tree_identity=tree_identity,
+                    index_before=index_before,
+                    index_after=index_after,
+                )
+                _assert_artifact_tree_identity(self.staging, tree_identity)
                 os.replace(self.staging, self.target)
                 _fsync_directory(self.runs_root)
-                try:
-                    _append_json_line(self.results, record)
-                except Exception:
-                    os.replace(self.target, self.staging)
-                    _fsync_directory(self.runs_root)
-                    raise
+                _assert_artifact_tree_identity(self.target, tree_identity)
+                _atomic_replace_index(
+                    self.results,
+                    index_after,
+                    _index_temporary_name(self.run_id),
+                )
                 self.journal.unlink()
                 _fsync_directory(self.runs_root)
             finally:
@@ -263,99 +275,111 @@ class ArtifactWriter:
             raise ArtifactError("artifact file already exists or is unsafe")
         return destination
 
-    def _scan_staging(self, secrets: tuple[bytes, ...]) -> None:
-        total_size = 0
-        for path in self.staging.rglob("*"):
-            if path.is_symlink() or (not path.is_file() and not path.is_dir()):
-                raise ArtifactError("artifact staging tree contains an unsafe entry")
-            if not path.is_file():
-                continue
-            size = path.stat().st_size
-            total_size += size
-            if size > _MAX_SCAN_BYTES or total_size > _MAX_SCAN_BYTES:
-                raise ArtifactError("artifacts exceed the bounded secret scan size")
-            try:
-                contents = path.read_bytes()
-            except OSError as exc:
-                raise ArtifactError("artifact cannot be scanned safely") from exc
-            _scan_bytes(contents, secrets, "artifact")
-
-    def _write_journal(self, record: Mapping[str, Any]) -> None:
+    def _write_journal(
+        self,
+        record: Mapping[str, Any],
+        *,
+        tree_identity: Mapping[str, Any],
+        index_before: bytes,
+        index_after: bytes,
+    ) -> None:
         try:
             results_relative = self.results.relative_to(self.paths.common_root).as_posix()
         except ValueError as exc:  # pragma: no cover - guarded by root validation
             raise ArtifactError("tracked result path escapes the common root") from exc
         value = {
-            "schema_version": 1,
+            "schema_version": 2,
             "run_id": self.run_id,
             "staging_name": self.staging.name,
             "results": results_relative,
+            "index_temporary_name": _index_temporary_name(self.run_id),
+            "index_before": _bytes_identity(index_before),
+            "index_after": _bytes_identity(index_after),
+            "record_identity": _bytes_identity(_encode_record(record)),
+            "tree_identity": dict(tree_identity),
             "record": dict(record),
         }
         _write_private_json(self.journal, value)
-        _fsync_directory(self.runs_root)
 
-    def _recover_pending_publication(self) -> None:
-        if not _path_present(self.journal):
-            return
-        if self.journal.is_symlink() or not self.journal.is_file():
-            raise ArtifactError("artifact publication journal is unsafe")
-        try:
-            value = json.loads(self.journal.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise ArtifactError("artifact publication journal is invalid") from exc
-        expected_results = self.results.relative_to(self.paths.common_root).as_posix()
-        if (
-            not isinstance(value, dict)
-            or set(value) != {"schema_version", "run_id", "staging_name", "results", "record"}
-            or value.get("schema_version") != 1
-            or value.get("run_id") != self.run_id
-            or value.get("results") != expected_results
-            or not isinstance(value.get("record"), dict)
-        ):
-            raise ArtifactError("artifact publication journal does not match this writer")
-        staging_name = value.get("staging_name")
-        if not isinstance(staging_name, str) or Path(staging_name).name != staging_name:
-            raise ArtifactError("artifact publication journal has an unsafe staging path")
-        staged = self.runs_root / staging_name
-        if not staging_name.startswith(f".{self.run_id}.staging-"):
-            raise ArtifactError("artifact publication journal has an invalid staging path")
-        record = value["record"]
-        _validate_record(record, self.run_id, self.paths.common_root)
-        _scan_bytes(_encode_record(record), (), "tracked run record")
+    def _recover_pending_publications(self) -> None:
         _make_directories(self.results.parent, self.paths.common_root)
         lock_path = self.results.with_suffix(".jsonl.lock")
         _assert_safe_index_paths(self.results, lock_path, self.paths.common_root)
         with _open_lock_file(lock_path) as lock_handle:
             _lock(lock_handle)
             try:
-                indexed = _run_id_exists(self.results, self.run_id)
-                target_present = _path_present(self.target)
-                staged_present = _path_present(staged)
-                if indexed:
-                    if not target_present or staged_present:
-                        raise ArtifactError("published run has inconsistent recovery state")
-                    self.journal.unlink()
-                    _fsync_directory(self.runs_root)
-                    return
-                if not target_present:
-                    if not staged_present or staged.is_symlink() or not staged.is_dir():
-                        raise ArtifactError("pending artifact staging directory is unavailable")
-                    _assert_no_symlink_components(self.runs_root, staged)
-                    os.replace(staged, self.target)
-                    _fsync_directory(self.runs_root)
-                elif staged_present or self.target.is_symlink() or not self.target.is_dir():
-                    raise ArtifactError("pending artifact publication state is inconsistent")
-                try:
-                    _append_json_line(self.results, record)
-                except Exception:
-                    os.replace(self.target, staged)
-                    _fsync_directory(self.runs_root)
-                    raise
-                self.journal.unlink()
-                _fsync_directory(self.runs_root)
+                self._recover_pending_publications_locked()
             finally:
                 _unlock(lock_handle)
+
+    def _recover_pending_publications_locked(self) -> None:
+        try:
+            journals = sorted(
+                Path(entry.path)
+                for entry in os.scandir(self.runs_root)
+                if entry.name.startswith(".") and entry.name.endswith(".publish.json")
+            )
+        except OSError as exc:
+            raise ArtifactError("artifact publication journals cannot be scanned safely") from exc
+        expected_results = self.results.relative_to(self.paths.common_root).as_posix()
+        for journal in journals:
+            value = _read_publication_journal(journal)
+            if value["results"] == expected_results:
+                self._recover_publication_locked(journal, value)
+
+    def _recover_publication_locked(self, journal: Path, value: Mapping[str, Any]) -> None:
+        run_id = value["run_id"]
+        target = self.runs_root / run_id
+        try:
+            expected_results = self.results.relative_to(self.paths.common_root).as_posix()
+        except ValueError as exc:  # pragma: no cover - guarded by root validation
+            raise ArtifactError("tracked result path escapes the common root") from exc
+        if value["results"] != expected_results:
+            raise ArtifactError("artifact publication journal targets another result index")
+        staging_name = value.get("staging_name")
+        staged = self.runs_root / staging_name
+        record = value["record"]
+        _validate_record(record, run_id, self.paths.common_root)
+        record_bytes = _encode_record(record)
+        _scan_bytes(record_bytes, (), "tracked run record")
+        if value["record_identity"] != _bytes_identity(record_bytes):
+            raise ArtifactError("artifact publication journal record identity differs")
+        index_bytes, _rows = _read_index(self.results)
+        index_identity = _bytes_identity(index_bytes)
+        index_before = value["index_before"]
+        index_after = value["index_after"]
+        target_present = _path_present(target)
+        staged_present = _path_present(staged)
+        tree_identity = value["tree_identity"]
+        if index_identity == index_after:
+            if not target_present or staged_present:
+                raise ArtifactError("published run has inconsistent recovery state")
+            _assert_artifact_tree_identity(target, tree_identity)
+            _discard_index_temporary(self.results.parent / value["index_temporary_name"])
+            journal.unlink()
+            _fsync_directory(self.runs_root)
+            return
+        if index_identity != index_before:
+            raise ArtifactError("tracked run index differs from both journal identities")
+        expected_after = index_bytes + record_bytes + b"\n"
+        if _bytes_identity(expected_after) != index_after:
+            raise ArtifactError("artifact publication journal index transition is invalid")
+        if target_present and staged_present:
+            raise ArtifactError("pending artifact publication has two artifact trees")
+        artifact_tree = target if target_present else staged
+        if not _path_present(artifact_tree):
+            raise ArtifactError("pending artifact staging directory is unavailable")
+        _assert_artifact_tree_identity(artifact_tree, tree_identity)
+        if not target_present:
+            os.replace(staged, target)
+            _fsync_directory(self.runs_root)
+        _atomic_replace_index(
+            self.results,
+            expected_after,
+            value["index_temporary_name"],
+        )
+        journal.unlink()
+        _fsync_directory(self.runs_root)
 
 
 def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) -> None:
@@ -413,6 +437,8 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
         raise ArtifactError("run record tasks must be a list of objects or null")
     if metrics is not None and not isinstance(metrics, dict):
         raise ArtifactError("run record metrics must be an object or null")
+    if track == "tb" and metrics is not None:
+        _validate_terminal_bench_metrics(metrics)
     cost = record.get("cost")
     if not isinstance(cost, dict) or set(cost) != {"estimated_usd", "actual_usd"}:
         raise ArtifactError("run record cost is invalid")
@@ -426,12 +452,43 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
     if outcome is RunOutcome.COMPLETED:
         if not config or not summary or any(value is None for value in cost.values()):
             raise ArtifactError("completed run record is missing required results")
-        if track == "tb" and (not tasks or metrics is not None):
-            raise ArtifactError("completed Terminal-Bench run requires tasks and no metrics")
+        if track == "tb" and (not tasks or metrics is None):
+            raise ArtifactError("completed Terminal-Bench run requires tasks and external metrics")
         if track == "replay" and (tasks is not None or not metrics):
             raise ArtifactError("completed replay run requires metrics and null tasks")
         if track == "shadow" and not metrics:
             raise ArtifactError("completed shadow run requires metrics")
+
+
+def _validate_terminal_bench_metrics(metrics: Mapping[str, Any]) -> None:
+    expected = {
+        "wall_seconds",
+        "cpu_user_seconds",
+        "cpu_system_seconds",
+        "peak_rss_bytes",
+        "exit_code",
+    }
+    if set(metrics) != expected:
+        raise ArtifactError("Terminal-Bench metrics differ from schema v1")
+    for key in ("wall_seconds", "cpu_user_seconds", "cpu_system_seconds"):
+        value = metrics[key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ArtifactError(f"Terminal-Bench {key} must be finite and non-negative")
+    peak_rss = metrics["peak_rss_bytes"]
+    if isinstance(peak_rss, bool) or not isinstance(peak_rss, int) or peak_rss <= 0:
+        raise ArtifactError("Terminal-Bench peak_rss_bytes must be a positive integer")
+    exit_code = metrics["exit_code"]
+    if (
+        isinstance(exit_code, bool)
+        or not isinstance(exit_code, int)
+        or not 0 <= exit_code <= 255
+    ):
+        raise ArtifactError("Terminal-Bench exit_code must be between 0 and 255")
 
 
 def _normalize_secrets(secrets: Iterable[str]) -> tuple[bytes, ...]:
@@ -473,46 +530,218 @@ def _scan_bytes(contents: bytes, secrets: tuple[bytes, ...], label: str) -> None
         raise ArtifactError(f"{label} contains a configured secret value")
 
 
-def _append_json_line(path: Path, record: Mapping[str, Any]) -> None:
-    payload = _encode_record(record) + b"\n"
-    descriptor = _open_append_file(path, 0o644)
+def _bytes_identity(contents: bytes) -> dict[str, int | str]:
+    return {"size": len(contents), "sha256": hashlib.sha256(contents).hexdigest()}
+
+
+def _artifact_tree_identity(root: Path, secrets: tuple[bytes, ...]) -> dict[str, Any]:
+    if root.is_symlink() or not root.is_dir():
+        raise ArtifactError("artifact tree is unsafe")
+    entries: list[dict[str, Any]] = []
+    total_size = 0
     try:
-        original_size = os.lseek(descriptor, 0, os.SEEK_END)
+        paths = sorted(root.rglob("*"), key=lambda path: path.relative_to(root).as_posix())
+    except OSError as exc:
+        raise ArtifactError("artifact tree cannot be scanned safely") from exc
+    for path in paths:
+        relative = path.relative_to(root).as_posix()
         try:
-            view = memoryview(payload)
-            while view:
-                written = os.write(descriptor, view)
-                if written <= 0:
-                    raise OSError("short JSONL append")
-                view = view[written:]
-            os.fsync(descriptor)
-        except Exception:
-            os.ftruncate(descriptor, original_size)
-            os.fsync(descriptor)
-            raise
-    finally:
-        os.close(descriptor)
+            before = path.lstat()
+        except OSError as exc:
+            raise ArtifactError("artifact tree cannot be scanned safely") from exc
+        if stat.S_ISLNK(before.st_mode):
+            raise ArtifactError("artifact tree contains a symlink")
+        mode = stat.S_IMODE(before.st_mode)
+        if stat.S_ISDIR(before.st_mode):
+            entries.append({"path": relative, "type": "directory", "mode": mode})
+            continue
+        if not stat.S_ISREG(before.st_mode):
+            raise ArtifactError("artifact tree contains an unsafe entry")
+        size = before.st_size
+        total_size += size
+        if size > _MAX_SCAN_BYTES or total_size > _MAX_SCAN_BYTES:
+            raise ArtifactError("artifacts exceed the bounded secret scan size")
+        try:
+            contents = path.read_bytes()
+            after = path.lstat()
+        except OSError as exc:
+            raise ArtifactError("artifact cannot be scanned safely") from exc
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or len(contents) != size
+        ):
+            raise ArtifactError("artifact changed while it was being scanned")
+        _scan_bytes(contents, secrets, "artifact")
+        entries.append(
+            {
+                "path": relative,
+                "type": "file",
+                "mode": mode,
+                "size": size,
+                "sha256": hashlib.sha256(contents).hexdigest(),
+            }
+        )
+    payload = {
+        "schema_version": 1,
+        "root_mode": stat.S_IMODE(root.stat().st_mode),
+        "total_size": total_size,
+        "entries": entries,
+    }
+    return {**payload, "tree_sha256": hashlib.sha256(_encode_record(payload)).hexdigest()}
 
 
-def _run_id_exists(path: Path, run_id: str) -> bool:
+def _assert_artifact_tree_identity(root: Path, expected: object) -> None:
+    if not isinstance(expected, dict) or _artifact_tree_identity(root, ()) != expected:
+        raise ArtifactError("artifact tree differs from its publication journal")
+
+
+def _read_index(path: Path) -> tuple[bytes, list[dict[str, Any]]]:
     if not _path_present(path):
-        return False
+        return b"", []
     if path.is_symlink() or not path.is_file():
         raise ArtifactError("tracked run index is unsafe")
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise ArtifactError("tracked run index contains invalid JSON") from exc
-                if not isinstance(row, dict) or not isinstance(row.get("run_id"), str):
-                    raise ArtifactError("tracked run index contains an invalid row")
-                if row["run_id"] == run_id:
-                    return True
+        contents = path.read_bytes()
+        text = contents.decode("utf-8")
     except (OSError, UnicodeError) as exc:
         raise ArtifactError("tracked run index cannot be checked safely") from exc
-    return False
+    if contents and not contents.endswith(b"\n"):
+        raise ArtifactError("tracked run index contains a partial row")
+    rows: list[dict[str, Any]] = []
+    run_ids: set[str] = set()
+    for line in text.splitlines():
+        if not line:
+            raise ArtifactError("tracked run index contains an empty row")
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ArtifactError("tracked run index contains invalid JSON") from exc
+        run_id = row.get("run_id") if isinstance(row, dict) else None
+        if not isinstance(run_id, str):
+            raise ArtifactError("tracked run index contains an invalid row")
+        if run_id in run_ids:
+            raise ArtifactError("tracked run index contains a duplicate run id")
+        run_ids.add(run_id)
+        rows.append(row)
+    return contents, rows
+
+
+def _index_temporary_name(run_id: str) -> str:
+    validate_run_id(run_id)
+    return f".runs.jsonl.publish-{run_id}.tmp"
+
+
+def _discard_index_temporary(path: Path) -> None:
+    if not _path_present(path):
+        return
+    if path.is_symlink() or not path.is_file():
+        raise ArtifactError("tracked run index temporary path is unsafe")
+    path.unlink()
+    _fsync_directory(path.parent)
+
+
+def _write_all(descriptor: int, contents: bytes) -> None:
+    view = memoryview(contents)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            raise OSError("short file write")
+        view = view[written:]
+
+
+def _atomic_replace_index(path: Path, contents: bytes, temporary_name: str) -> None:
+    if Path(temporary_name).name != temporary_name or not temporary_name.startswith(
+        ".runs.jsonl.publish-"
+    ):
+        raise ArtifactError("tracked run index temporary name is invalid")
+    temporary = path.parent / temporary_name
+    _discard_index_temporary(temporary)
+    descriptor: int | None = None
+    try:
+        descriptor = _open_new_regular_file(temporary, 0o644)
+        _write_all(descriptor, contents)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+        if temporary.is_file() and not temporary.is_symlink():
+            temporary.unlink()
+            _fsync_directory(temporary.parent)
+        raise
+
+
+def _run_id_exists(path: Path, run_id: str) -> bool:
+    _contents, rows = _read_index(path)
+    return any(row["run_id"] == run_id for row in rows)
+
+
+def _read_publication_journal(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file():
+        raise ArtifactError("artifact publication journal is unsafe")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ArtifactError("artifact publication journal is invalid") from exc
+    fields = {
+        "schema_version",
+        "run_id",
+        "staging_name",
+        "results",
+        "index_temporary_name",
+        "index_before",
+        "index_after",
+        "record_identity",
+        "tree_identity",
+        "record",
+    }
+    if not isinstance(value, dict) or set(value) != fields or value.get("schema_version") != 2:
+        raise ArtifactError("artifact publication journal differs from schema v2")
+    run_id = value.get("run_id")
+    if not isinstance(run_id, str):
+        raise ArtifactError("artifact publication journal run id is invalid")
+    validate_run_id(run_id)
+    if path.name != f".{run_id}.publish.json":
+        raise ArtifactError("artifact publication journal filename is invalid")
+    staging_name = value.get("staging_name")
+    if (
+        not isinstance(staging_name, str)
+        or Path(staging_name).name != staging_name
+        or not staging_name.startswith(f".{run_id}.staging-")
+    ):
+        raise ArtifactError("artifact publication journal has an unsafe staging path")
+    results = value.get("results")
+    if (
+        not isinstance(results, str)
+        or Path(results).is_absolute()
+        or not Path(results).parts
+        or any(part in {"", ".", ".."} for part in Path(results).parts)
+    ):
+        raise ArtifactError("artifact publication journal result path is invalid")
+    if value.get("index_temporary_name") != _index_temporary_name(run_id):
+        raise ArtifactError("artifact publication journal temporary path is invalid")
+    for key in ("index_before", "index_after", "record_identity"):
+        identity = value.get(key)
+        if (
+            not isinstance(identity, dict)
+            or set(identity) != {"size", "sha256"}
+            or not isinstance(identity.get("size"), int)
+            or isinstance(identity.get("size"), bool)
+            or identity["size"] < 0
+            or not isinstance(identity.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
+        ):
+            raise ArtifactError("artifact publication journal identity is invalid")
+    if not isinstance(value.get("tree_identity"), dict) or not isinstance(value.get("record"), dict):
+        raise ArtifactError("artifact publication journal payload is invalid")
+    return value
 
 
 def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
@@ -527,7 +756,8 @@ def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-    except Exception:
+        _fsync_directory(path.parent)
+    except BaseException:
         if temporary.is_file() and not temporary.is_symlink():
             temporary.unlink()
         raise
@@ -606,17 +836,6 @@ def _open_new_regular_file(path: Path, mode: int) -> int:
     if not stat.S_ISREG(os.fstat(descriptor).st_mode):
         os.close(descriptor)
         raise ArtifactError("new artifact path is not a regular file")
-    return descriptor
-
-
-def _open_append_file(path: Path, mode: int) -> int:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags, mode)
-    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-        os.close(descriptor)
-        raise ArtifactError("tracked run index is not a regular file")
     return descriptor
 
 

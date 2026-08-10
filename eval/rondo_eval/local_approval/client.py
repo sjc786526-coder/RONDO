@@ -9,9 +9,9 @@ locally.  The server-side grammar is never treated as a security boundary.
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import math
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,7 +20,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..config import ConfigError, RuntimeConfig, load_local_model_secret
-from ..evidence import EvidenceError, StaticApprovalPayload, validate_static_decision
+from ..evidence import (
+    EvidenceError,
+    StaticApprovalPayload,
+    validate_static_decision,
+    validate_static_payload,
+)
 from ..exit_codes import SERVICE_UNAVAILABLE, STRUCTURED_OUTPUT_ERROR
 
 
@@ -47,6 +52,7 @@ class LocalApprovalSettings:
     responses_url: str
     model_id: str
     model_path: str
+    model_sha256: str
     quantization: str
     binary: str
     host: str
@@ -73,8 +79,16 @@ def settings_from_config(config: RuntimeConfig) -> LocalApprovalSettings:
     for key in ("model_id", "model_path", "base_url"):
         if not isinstance(local.get(key), str):
             raise ConfigError(f"local_model {key} must be a string")
+    model_sha256 = local.get("model_sha256", "")
+    if not isinstance(model_sha256, str):
+        raise ConfigError("local_model model_sha256 must be a string")
     if not local["model_id"]:
         raise ConfigError("local_model model_id is empty")
+    if local["model_path"]:
+        if not re.fullmatch(r"[0-9a-f]{64}", model_sha256):
+            raise ConfigError("local_model model_sha256 must pin the configured model")
+    elif model_sha256:
+        raise ConfigError("local_model model_sha256 requires a model_path")
     if local.get("format") != "gguf":
         raise ConfigError("local_model format must be gguf")
     quantization = local.get("quantization")
@@ -139,6 +153,7 @@ def settings_from_config(config: RuntimeConfig) -> LocalApprovalSettings:
         responses_url=f"{base_url}/responses",
         model_id=local["model_id"],
         model_path=local["model_path"],
+        model_sha256=model_sha256,
         quantization=quantization,
         binary=binary,
         host=host,
@@ -165,20 +180,11 @@ class LocalApprovalClient:
         self.settings = settings_from_config(config)
 
     def build_request(self, payload: StaticApprovalPayload) -> dict[str, Any]:
-        logical = copy.deepcopy(payload.logical_payload)
-        _reject_tool_transport(logical)
         try:
-            canonical = json.dumps(
-                logical,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            ).encode("utf-8")
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("static approval payload is not canonical JSON") from exc
-        if canonical != payload.canonical_bytes:
-            raise ConfigError("static approval canonical bytes do not match the logical payload")
+            validate_static_payload(payload)
+        except EvidenceError as exc:
+            raise ConfigError("static approval payload failed the final sink check") from exc
+        logical = copy.deepcopy(payload.logical_payload)
         policy = logical.get("guardian_policy")
         instructions = logical.get("instructions")
         task_input = logical.get("input")
@@ -192,11 +198,6 @@ class LocalApprovalClient:
             or not isinstance(schema, dict)
         ):
             raise ConfigError("static approval payload does not match schema v1")
-        if (
-            not payload.policy_identity.aggregatable
-            or payload.policy_identity.sha256 != hashlib.sha256(policy.encode("utf-8")).hexdigest()
-        ):
-            raise ConfigError("static approval policy identity does not match the exact policy bytes")
         request: dict[str, Any] = {
             "model": self.settings.model_id,
             "instructions": f"{instructions}\n\nGuardian policy follows exactly:\n{policy}",
@@ -216,7 +217,6 @@ class LocalApprovalClient:
                 },
             },
         }
-        _reject_tool_transport(request)
         return request
 
     def decide(self, payload: StaticApprovalPayload) -> dict[str, Any]:
@@ -226,10 +226,7 @@ class LocalApprovalClient:
             allow_nan=False,
             separators=(",", ":"),
         ).encode("utf-8")
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        secret = load_local_model_secret(self.config)
-        if secret is not None:
-            headers["Authorization"] = f"Bearer {secret[1]}"
+        headers = self._headers(content_type=True)
         request = urllib.request.Request(
             self.settings.responses_url,
             data=body,
@@ -237,7 +234,13 @@ class LocalApprovalClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.settings.timeout_seconds) as response:
+            with _NO_REDIRECT_OPENER.open(
+                request, timeout=self.settings.timeout_seconds
+            ) as response:
+                if response.geturl() != self.settings.responses_url:
+                    raise ServiceUnavailableError(
+                        "local approval endpoint response URL changed"
+                    )
                 if response.status != 200:
                     raise ServiceUnavailableError("local approval endpoint returned a non-200 status")
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
@@ -249,12 +252,90 @@ class LocalApprovalClient:
             envelope = json.loads(raw)
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise StructuredOutputError("local approval response is not valid JSON") from exc
-        return _parse_response(envelope)
+        return _parse_response(envelope, expected_model=self.settings.model_id)
+
+    def verify_service_identity(
+        self,
+        expected_model_path: Path,
+        *,
+        expected_build: int,
+        expected_commit: str,
+    ) -> None:
+        """Bind a configured endpoint to the pinned build, model path, and alias."""
+
+        parsed = urllib.parse.urlsplit(self.settings.base_url)
+        props_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/props", "", ""))
+        props = self._get_json(props_url)
+        if not isinstance(props, Mapping):
+            raise StructuredOutputError("local approval service props are invalid")
+        build_info = props.get("build_info")
+        reported_path = props.get("model_path")
+        try:
+            path_matches = (
+                isinstance(reported_path, str)
+                and Path(reported_path).is_absolute()
+                and Path(reported_path).resolve(strict=False)
+                == expected_model_path.resolve(strict=True)
+            )
+        except OSError:
+            path_matches = False
+        if (
+            not isinstance(build_info, str)
+            or re.search(rf"(?<!\d){expected_build}(?!\d)", build_info) is None
+            or expected_commit[:8] not in build_info
+            or not path_matches
+        ):
+            raise StructuredOutputError("local approval service identity differs")
+
+        models = self._get_json(f"{self.settings.base_url}/models")
+        data = models.get("data") if isinstance(models, Mapping) else None
+        if (
+            not isinstance(data, list)
+            or len(data) != 1
+            or not isinstance(data[0], Mapping)
+            or data[0].get("id") != self.settings.model_id
+        ):
+            raise StructuredOutputError("local approval model alias differs")
+
+    def _headers(self, *, content_type: bool = False) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if content_type:
+            headers["Content-Type"] = "application/json"
+        secret = load_local_model_secret(self.config)
+        if secret is not None:
+            headers["Authorization"] = f"Bearer {secret[1]}"
+        return headers
+
+    def _get_json(self, url: str) -> Any:
+        request = urllib.request.Request(url, headers=self._headers(), method="GET")
+        try:
+            with _NO_REDIRECT_OPENER.open(
+                request, timeout=self.settings.timeout_seconds
+            ) as response:
+                if response.geturl() != url or response.status != 200:
+                    raise ServiceUnavailableError(
+                        "local approval identity endpoint is unavailable"
+                    )
+                raw = response.read(_MAX_RESPONSE_BYTES + 1)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise ServiceUnavailableError(
+                "local approval identity endpoint is unavailable"
+            ) from exc
+        if len(raw) > _MAX_RESPONSE_BYTES:
+            raise StructuredOutputError("local approval identity response exceeds the size limit")
+        try:
+            return json.loads(raw)
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise StructuredOutputError(
+                "local approval identity response is not valid JSON"
+            ) from exc
 
 
-def _parse_response(envelope: Any) -> dict[str, Any]:
+def _parse_response(envelope: Any, *, expected_model: str) -> dict[str, Any]:
     if not isinstance(envelope, Mapping) or envelope.get("status") != "completed":
         raise StructuredOutputError("local approval response is not completed")
+    if envelope.get("model") != expected_model:
+        raise StructuredOutputError("local approval response model identity differs")
     output = envelope.get("output")
     if not isinstance(output, list):
         raise StructuredOutputError("local approval response output is invalid")
@@ -288,15 +369,23 @@ def _parse_response(envelope: Any) -> dict[str, Any]:
         raise StructuredOutputError("local approval decision does not match schema v1") from exc
 
 
-def _reject_tool_transport(value: Any) -> None:
-    if isinstance(value, Mapping):
-        if "tools" in value or value.get("type") == "additional_tools":
-            raise ConfigError("local static approval requests cannot contain tools")
-        for item in value.values():
-            _reject_tool_transport(item)
-    elif isinstance(value, list):
-        for item in value:
-            _reject_tool_transport(item)
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Mapping[str, str],
+        newurl: str,
+    ) -> None:
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    _NoRedirectHandler(),
+)
 
 
 def _nonempty_string(table: Mapping[str, Any], key: str, label: str) -> str:

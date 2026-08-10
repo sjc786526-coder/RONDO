@@ -23,6 +23,8 @@ from .freeze import (
     TERMINAL_BENCH_VERSION,
 )
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
+from .metrics import RunMetricsError, metrics_from_dict
+from .pair import RunPublicationContext
 
 
 UPSTREAM_CODEX = {
@@ -32,22 +34,6 @@ UPSTREAM_CODEX = {
 }
 _MAX_RESULT_BYTES = 8 * 1024 * 1024
 _MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
-_SUCCESS_COUNTS = {
-    "n_completed_trials": 1,
-    "n_errored_trials": 0,
-    "n_running_trials": 0,
-    "n_pending_trials": 0,
-    "n_cancelled_trials": 0,
-    "n_retries": 0,
-}
-_CANCELLED_COUNTS = {
-    "n_completed_trials": 0,
-    "n_errored_trials": 0,
-    "n_running_trials": 0,
-    "n_pending_trials": 0,
-    "n_cancelled_trials": 1,
-    "n_retries": 0,
-}
 _AGENT_EXCEPTION_TYPES = {
     "AgentSafetyRefusalError",
     "AgentTimeoutError",
@@ -143,64 +129,34 @@ def validate_eval_harness_checkout(*, common_root: Path) -> str:
 
 
 def parse_single_task_result(
-    jobs_dir: Path,
+    trial_dir: Path,
     *,
     host_returncode: int,
 ) -> ParsedHarborResult:
-    """Parse exactly one Harbor job and trial; host rc alone is never success."""
+    """Parse Harbor 0.20's exact single-trial result; host rc alone is not success."""
 
     if isinstance(host_returncode, bool) or not isinstance(host_returncode, int):
         raise HarborResultError("Harbor host return code is invalid")
-    root = _optional_jobs_directory(
-        jobs_dir,
+    root = _optional_result_directory(
+        trial_dir,
         allow_missing=host_returncode != 0,
     )
     if root is None:
         return _infra_result_without_harbor_tree()
-    job_directories = _child_directories(root)
-    if not job_directories and host_returncode != 0:
+    if host_returncode != 0 and not _path_present(root / "result.json"):
         return _infra_result_without_harbor_tree()
-    if len(job_directories) != 1:
-        raise HarborResultError("Harbor jobs directory must contain exactly one job")
-    job_directory = job_directories[0]
-    job = _read_json_object(job_directory / "result.json")
-    trial_directories = _child_directories(job_directory, allow_regular_files=True)
-    if len(trial_directories) != 1:
-        raise HarborResultError("Harbor job must contain exactly one trial")
-    trial = _read_json_object(trial_directories[0] / "result.json")
-
-    stats = job.get("stats")
-    if not isinstance(stats, dict):
-        raise HarborResultError("Harbor job stats are missing")
-    counts = {
-        name: _uint(stats.get(name), name)
-        for name in (
-            "n_completed_trials",
-            "n_errored_trials",
-            "n_running_trials",
-            "n_pending_trials",
-            "n_cancelled_trials",
-            "n_retries",
-        )
-    }
-    if _uint(job.get("n_total_trials"), "n_total_trials") != 1:
-        raise HarborResultError("Harbor job is not a one-trial run")
+    trial = _read_json_object(root / "result.json")
+    trial_name = trial.get("trial_name")
+    if not isinstance(trial_name, str) or trial_name != root.name:
+        raise HarborResultError("Harbor trial identity differs from its directory")
     exception_type = _exception_type(trial.get("exception_info"))
     if host_returncode != 0:
         outcome = RunOutcome.INFRA_FAILED
-    elif counts == _SUCCESS_COUNTS and exception_type is None:
+    elif exception_type is None:
         outcome = RunOutcome.COMPLETED
-    elif counts == _CANCELLED_COUNTS and exception_type == "CancelledError":
+    elif exception_type == "CancelledError":
         outcome = RunOutcome.CANCELLED
-    elif (
-        counts["n_completed_trials"] == 0
-        and counts["n_errored_trials"] == 1
-        and counts["n_running_trials"] == 0
-        and counts["n_pending_trials"] == 0
-        and counts["n_cancelled_trials"] == 0
-        and counts["n_retries"] == 0
-        and exception_type in _AGENT_EXCEPTION_TYPES
-    ):
+    elif exception_type in _AGENT_EXCEPTION_TYPES:
         outcome = RunOutcome.AGENT_FAILED
     else:
         outcome = RunOutcome.INFRA_FAILED
@@ -210,7 +166,7 @@ def parse_single_task_result(
     verifier = trial.get("verifier_result")
     rewards = verifier.get("rewards") if isinstance(verifier, dict) else None
     reward = rewards.get("reward") if isinstance(rewards, dict) else None
-    if reward is None and outcome is not RunOutcome.COMPLETED:
+    if outcome is not RunOutcome.COMPLETED:
         reward = 0.0
     if (
         isinstance(reward, bool)
@@ -239,7 +195,9 @@ def parse_single_task_result(
         input_tokens=input_tokens,
         cached_tokens=cached_tokens,
         output_tokens=output_tokens,
-        job_result=job,
+        # The official single-trial CLI has no JobResult.  Keep the field empty
+        # for the stable internal type instead of fabricating aggregate stats.
+        job_result={},
         trial_result=trial,
     )
 
@@ -255,6 +213,7 @@ def publish_terminal_bench_result(
     live_result: BudgetedTerminalBenchResult,
     parsed: ParsedHarborResult,
     metadata_path: Path,
+    publication: RunPublicationContext,
     writer: ArtifactWriter | None = None,
 ) -> Path:
     """Archive private raw evidence and append one strict tracked record."""
@@ -264,6 +223,7 @@ def publish_terminal_bench_result(
         raise HarborResultError("eval harness commit is invalid")
     if live_result.prepared.spec.side is not side:
         raise HarborResultError("prepared side differs from publication side")
+    _validate_publication_context(publication, side=side)
     request_roles = _validate_publication_evidence(
         live_result,
         parsed,
@@ -282,9 +242,10 @@ def publish_terminal_bench_result(
         live_result,
         parsed,
         request_roles=request_roles,
+        publication=publication,
     )
     writer.write_json("run-summary.json", summary)
-    if parsed.job_result or parsed.trial_result:
+    if parsed.trial_result:
         _write_harbor_evidence(writer, live_result.harbor.jobs_dir, parsed)
     else:
         writer.write_json(
@@ -331,11 +292,12 @@ def publish_terminal_bench_result(
         "outcome": parsed.outcome.value,
         "summary": summary["summary"],
         "tasks": summary["tasks"],
-        "metrics": None,
+        "metrics": dict(publication.metrics),
         "cost": {"estimated_usd": spent, "actual_usd": spent},
         "artifacts": f"eval-data/runs/{run_id}",
         "notes": "API usage priced at the frozen official Luna Standard rates; no invoice query.",
     }
+    _validate_terminal_bench_record(record)
     return writer.finalize(record, secrets=live_result.redaction_secrets)
 
 
@@ -363,6 +325,7 @@ def publish_terminal_bench_failure(
     metadata_path: Path,
     outcome: RunOutcome,
     failure_stage: str,
+    publication: RunPublicationContext,
     secrets: tuple[str, ...],
 ) -> Path:
     """Publish a safe terminal record after a claimed run exits exceptionally."""
@@ -386,6 +349,7 @@ def publish_terminal_bench_failure(
         raise HarborResultError("exceptional publication commit is invalid")
     if writer.run_id != run_id or writer.paths.common_root != paths.common_root:
         raise HarborResultError("artifact writer claim differs from the failed run")
+    _validate_publication_context(publication, side=side)
     spent = _run_spend(budget_snapshot, run_id)
     config = {
         "batch_id": budget_snapshot.get("batch_id"),
@@ -396,6 +360,10 @@ def publish_terminal_bench_failure(
         "eval_harness_commit": eval_harness_commit,
         "binary_workspace_lock_normalization": manifest.workspace_lock_normalization,
         "failure_stage": failure_stage,
+        "pair_id": publication.pair_id,
+        "pair_lock_sha256": publication.pair_lock_sha256,
+        "pair_slot": publication.pair_slot,
+        "pair_round": publication.pair_round,
     }
     metadata: dict[str, Any] | None = None
     request_roles: tuple[str, ...] = ()
@@ -459,11 +427,12 @@ def publish_terminal_bench_failure(
         "outcome": outcome.value,
         "summary": summary,
         "tasks": tasks,
-        "metrics": None,
+        "metrics": dict(publication.metrics),
         "cost": {"estimated_usd": spent, "actual_usd": spent},
         "artifacts": f"eval-data/runs/{run_id}",
         "notes": "Run exited after its paid-run claim; failure details are intentionally categorical.",
     }
+    _validate_terminal_bench_record(record)
     return writer.finalize(record, secrets=secrets)
 
 
@@ -476,6 +445,7 @@ def _safe_summary(
     parsed: ParsedHarborResult,
     *,
     request_roles: tuple[str, ...],
+    publication: RunPublicationContext,
 ) -> dict[str, Any]:
     spec = live_result.prepared.spec
     evidence = [
@@ -492,6 +462,22 @@ def _safe_summary(
         }
         for item in live_result.evidence
     ]
+    effective_task_outcome = (
+        parsed.task_outcome
+        if parsed.outcome in {RunOutcome.COMPLETED, RunOutcome.AGENT_FAILED}
+        else "fail"
+    )
+    effective_reward = (
+        parsed.reward
+        if parsed.outcome in {RunOutcome.COMPLETED, RunOutcome.AGENT_FAILED}
+        else 0.0
+    )
+    guardian_requests = request_roles.count("guardian")
+    s2_binding = (
+        "not_triggered"
+        if guardian_requests == 0 and not evidence
+        else "unbound"
+    )
     return {
         "schema_version": 1,
         "run_id": run_id,
@@ -503,6 +489,9 @@ def _safe_summary(
             "guardian_model": spec.provider.guardian_model,
             "guardian_effort": spec.provider.guardian_effort,
             "provider": spec.provider.provider_id,
+            "provider_api": spec.provider.api,
+            "provider_base_url": spec.provider.base_url,
+            "provider_api_key_env": spec.provider.api_key_env,
             "provider_config_sha256": spec.provider.config_sha256,
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
@@ -524,16 +513,22 @@ def _safe_summary(
             "timeout_seconds": spec.timeout_seconds,
             "max_retries": spec.max_retries,
             "budget_usd": spec.budget_usd,
+            "pair_id": publication.pair_id,
+            "pair_lock_sha256": publication.pair_lock_sha256,
+            "pair_slot": publication.pair_slot,
+            "pair_round": publication.pair_round,
         },
         "summary": {
-            "success_rate": 1.0 if parsed.task_outcome == "pass" else 0.0,
+            "success_rate": 1.0
+            if parsed.outcome is RunOutcome.COMPLETED and effective_task_outcome == "pass"
+            else 0.0,
             "tasks_total": 1,
             "infra_failed": 1 if parsed.outcome is RunOutcome.INFRA_FAILED else 0,
             "host_returncode": live_result.harbor.returncode,
             "metadata_ready": live_result.metadata_ready,
             "api_request_roles": {
                 "main": request_roles.count("main"),
-                "guardian": request_roles.count("guardian"),
+                "guardian": guardian_requests,
             },
             "docker_samples": len(live_result.harbor.docker_evidence.samples)
             if live_result.harbor.docker_evidence is not None
@@ -542,15 +537,19 @@ def _safe_summary(
             if live_result.harbor.docker_evidence is not None
             else [],
             "evidence": evidence,
+            # M1 does not depend on S2.  Existing E_final metadata has no
+            # request-id/body-hash binding, so a triggered chain is explicitly
+            # unbound rather than being misreported as S2 evidence.
+            "s2_request_evidence_binding": s2_binding,
         },
         "tasks": [
             {
                 "task_id": FIX_GIT_TASK_ID,
-                "outcome": parsed.task_outcome,
-                "attribution": "infra"
-                if parsed.outcome is RunOutcome.INFRA_FAILED
-                else "agent",
-                "reward": parsed.reward,
+                "outcome": effective_task_outcome,
+                "attribution": "agent"
+                if parsed.outcome in {RunOutcome.COMPLETED, RunOutcome.AGENT_FAILED}
+                else "infra",
+                "reward": effective_reward,
                 "duration_s": parsed.duration_seconds,
                 "tokens_in": parsed.input_tokens,
                 "tokens_cached": parsed.cached_tokens,
@@ -567,25 +566,9 @@ def _write_harbor_evidence(
 ) -> None:
     """Archive a deliberate private subset, never Harbor configs, locks, or raw logs."""
 
-    root = _regular_directory(source)
-    job_directories = _child_directories(root)
-    if len(job_directories) != 1:
-        raise HarborResultError("Harbor evidence must contain exactly one job")
-    trial_directories = _child_directories(job_directories[0], allow_regular_files=True)
-    if len(trial_directories) != 1:
-        raise HarborResultError("Harbor evidence must contain exactly one trial")
-    trial_directory = trial_directories[0]
-    stats = parsed.job_result.get("stats")
-    if not isinstance(stats, dict):  # pragma: no cover - parser already guarantees this.
-        raise HarborResultError("parsed Harbor job stats are unavailable")
-    writer.write_json(
-        "harbor/job-result.json",
-        {
-            "schema_version": 1,
-            "n_total_trials": 1,
-            "stats": {name: stats[name] for name in _SUCCESS_COUNTS},
-        },
-    )
+    trial_directory = _regular_directory(source)
+    if parsed.job_result:
+        raise HarborResultError("single-trial publication cannot contain a JobResult")
     writer.write_json(
         "harbor/trial-result.json",
         {
@@ -684,18 +667,17 @@ def _validate_publication_evidence(
     metadata_path: Path,
 ) -> tuple[str, ...]:
     host_returncode = live_result.harbor.returncode
-    has_job_result = bool(parsed.job_result)
     has_trial_result = bool(parsed.trial_result)
-    if has_job_result != has_trial_result:
-        raise HarborResultError("parsed Harbor result is internally inconsistent")
-    if not has_job_result:
+    if parsed.job_result:
+        raise HarborResultError("single-trial publication cannot contain a JobResult")
+    if not has_trial_result:
         if parsed.outcome is not RunOutcome.INFRA_FAILED:
             raise HarborResultError("only infra failure may omit the Harbor result tree")
-        root = _optional_jobs_directory(
+        root = _optional_result_directory(
             live_result.harbor.jobs_dir,
             allow_missing=True,
         )
-        if root is not None and _child_directories(root):
+        if root is not None and (root / "result.json").exists():
             raise HarborResultError("an existing Harbor result tree cannot be omitted")
     if parsed.outcome is RunOutcome.COMPLETED:
         if host_returncode != 0:
@@ -720,7 +702,91 @@ def _validate_publication_evidence(
         raise HarborResultError("infra-failed result lacks Harbor failure evidence")
     else:
         roles = ()
+        if _path_present(metadata_path):
+            try:
+                roles = _verified_request_roles(metadata_path)
+            except HarborResultError:
+                if live_result.metadata_ready:
+                    raise
     return roles
+
+
+def _validate_publication_context(
+    publication: RunPublicationContext, *, side: Side
+) -> None:
+    try:
+        publication.validate()
+    except ValueError as exc:
+        raise HarborResultError("Terminal-Bench publication context is invalid") from exc
+    expected_slot = 1 if side is Side.RONDO else 2
+    if publication.pair_slot != expected_slot:
+        raise HarborResultError("publication side differs from the pair topology")
+
+
+def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
+    """Enforce the P1 producer's cross-field invariants before publication."""
+
+    try:
+        outcome = RunOutcome(record.get("outcome"))
+    except (TypeError, ValueError) as exc:
+        raise HarborResultError("Terminal-Bench record outcome is invalid") from exc
+    summary = record.get("summary")
+    tasks = record.get("tasks")
+    config = record.get("config")
+    if (
+        not isinstance(summary, dict)
+        or not isinstance(tasks, list)
+        or len(tasks) != 1
+        or not isinstance(tasks[0], dict)
+        or not isinstance(config, dict)
+    ):
+        raise HarborResultError("Terminal-Bench record sections are invalid")
+    task = tasks[0]
+    if task.get("task_id") != FIX_GIT_TASK_ID:
+        raise HarborResultError("Terminal-Bench task identity is invalid")
+    if task.get("attribution") not in {"agent", "infra"}:
+        raise HarborResultError("Terminal-Bench attribution is invalid")
+    if task.get("outcome") not in {"pass", "fail"}:
+        raise HarborResultError("Terminal-Bench task outcome is invalid")
+    reward = task.get("reward")
+    if (
+        isinstance(reward, bool)
+        or not isinstance(reward, (int, float))
+        or not math.isfinite(float(reward))
+        or not 0 <= float(reward) <= 1
+    ):
+        raise HarborResultError("Terminal-Bench task reward is invalid")
+    try:
+        metrics = metrics_from_dict(record.get("metrics"))
+    except RunMetricsError as exc:
+        raise HarborResultError("Terminal-Bench external metrics are invalid") from exc
+    if outcome is RunOutcome.COMPLETED:
+        if metrics.exit_code != 0 or task["attribution"] != "agent":
+            raise HarborResultError("completed Terminal-Bench record is contradictory")
+    else:
+        if (
+            metrics.exit_code == 0
+            or task["outcome"] != "fail"
+            or float(reward) != 0.0
+            or summary.get("success_rate", 0.0) != 0.0
+        ):
+            raise HarborResultError("non-completed Terminal-Bench record reports success")
+        expected_attribution = "agent" if outcome is RunOutcome.AGENT_FAILED else "infra"
+        if task["attribution"] != expected_attribution:
+            raise HarborResultError("Terminal-Bench failure attribution is contradictory")
+    roles = summary.get("api_request_roles")
+    if not isinstance(roles, dict) or set(roles) != {"main", "guardian"} or any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in roles.values()
+    ):
+        raise HarborResultError("Terminal-Bench API role summary is invalid")
+    if (
+        config.get("pair_id") != "p1-fix-git-pair-v1"
+        or not isinstance(config.get("pair_lock_sha256"), str)
+        or config.get("pair_slot") not in {1, 2}
+        or config.get("pair_round") != 1
+    ):
+        raise HarborResultError("Terminal-Bench pair identity is invalid")
 
 
 def _verified_request_roles(metadata_path: Path) -> tuple[str, ...]:
@@ -818,7 +884,7 @@ def _regular_directory(path: Path) -> Path:
     return path
 
 
-def _optional_jobs_directory(path: Path, *, allow_missing: bool) -> Path | None:
+def _optional_result_directory(path: Path, *, allow_missing: bool) -> Path | None:
     try:
         path.lstat()
     except FileNotFoundError:

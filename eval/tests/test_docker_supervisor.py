@@ -4,6 +4,7 @@ import hashlib
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -14,15 +15,21 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     DATA_ROOT_FREE_STOP_BYTES,
     DOCKER_GROWTH_WARN_BYTES,
     DOCKER_GROWTH_STOP_BYTES,
+    ComposeResourceFact,
+    ComposeRunContract,
+    ComposeSecretMountContract,
+    DockerContainerFact,
     DockerCounterReading,
     FAILURE_CLEANUP_TIMEOUT_SECONDS,
     HOST_SUCCESS_TEARDOWN_GRACE_SECONDS,
     DockerLimits,
     DockerOperation,
+    DockerMountFact,
     DockerSupervisionError,
     DockerSupervisor,
     DockerTaskIdentity,
     HeavyLockLease,
+    HostContainerContract,
     SAMPLE_INTERVAL_SECONDS,
 )
 
@@ -30,6 +37,28 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
 IMAGE = f"example.invalid/rondo/task@sha256:{'a' * 64}"
 CONTAINER_ID = "b" * 64
 OTHER_CONTAINER_ID = "c" * 64
+COMPOSE_PROJECT = "rondoeval0810"
+COMPOSE_NETWORK = f"{COMPOSE_PROJECT}_default"
+
+
+def container_fact(container_id: str) -> DockerContainerFact:
+    return DockerContainerFact(
+        container_id=container_id,
+        user="1000:1000",
+        privileged=False,
+        cap_add=(),
+        cap_drop=(),
+        security_opt=(),
+        memory_bytes=100,
+        memory_swap_bytes=100,
+        pids_limit=2,
+        read_only_rootfs=False,
+        network_mode=COMPOSE_NETWORK,
+        networks=(COMPOSE_NETWORK,),
+        mounts=(),
+        compose_project=COMPOSE_PROJECT,
+        compose_service="main",
+    )
 
 
 def reading(
@@ -38,6 +67,8 @@ def reading(
     task: int = 0,
     free: int = DATA_ROOT_FREE_STOP_BYTES + 1,
     containers: tuple[str, ...] = (),
+    networks: tuple[ComposeResourceFact, ...] = (),
+    volumes: tuple[ComposeResourceFact, ...] = (),
 ) -> DockerCounterReading:
     return DockerCounterReading(
         docker_system_df={"layers_size": total, "containers_size": task},
@@ -46,6 +77,10 @@ def reading(
         data_root="/var/lib/docker",
         data_root_filesystem_free_bytes=free,
         task_container_ids=containers,
+        task_containers=tuple(container_fact(value) for value in containers),
+        task_networks=networks,
+        task_volumes=volumes,
+        daemon_security_options=("name=seccomp,profile=builtin",),
     )
 
 
@@ -65,7 +100,8 @@ class FakeCounter:
         self.values = list(values)
         self.calls: list[tuple[DockerTaskIdentity, DockerOperation]] = []
 
-    def sample(self, *, identity, operation):
+    def sample(self, *, identity, operation, compose_contract=None, deadline=None):
+        del compose_contract, deadline
         self.calls.append((identity, operation))
         value = self.values.pop(0) if len(self.values) > 1 else self.values[0]
         if isinstance(value, Exception):
@@ -74,11 +110,13 @@ class FakeCounter:
 
 
 class FakeHandle:
-    def __init__(self, outcomes):
+    def __init__(self, outcomes, *, group_ok=True):
         self.outcomes = list(outcomes)
         self.waits: list[float] = []
         self.terminated = 0
         self.killed = 0
+        self.group_closes: list[float] = []
+        self.group_ok = group_ok
 
     def wait(self, timeout_seconds):
         self.waits.append(timeout_seconds)
@@ -91,6 +129,10 @@ class FakeHandle:
 
     def kill(self):
         self.killed += 1
+
+    def close_process_group(self, timeout_seconds):
+        self.group_closes.append(timeout_seconds)
+        return self.group_ok
 
 
 class FailingWaitHandle(FakeHandle):
@@ -128,6 +170,20 @@ class DockerSupervisorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.identity = DockerTaskIdentity("20260810-task-a-r1")
         self.lease = HeavyLockLease("held-lock-token-123456", held=True)
+        self.compose_contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=COMPOSE_PROJECT,
+                compose_service="main",
+                network_mode=COMPOSE_NETWORK,
+                networks=(COMPOSE_NETWORK,),
+                mounts=(),
+            ),
+            network_names=(COMPOSE_NETWORK,),
+        )
 
     def supervisor(
         self,
@@ -245,7 +301,7 @@ class DockerSupervisorTests(unittest.TestCase):
             DockerOperation.BUILD,
         ])
 
-    def test_host_harness_has_public_full_lifetime_supervision(self) -> None:
+    def test_host_harness_fails_when_exact_task_container_is_never_observed(self) -> None:
         handle = FakeHandle([None, 0])
         counter = FakeCounter([reading(), reading(), reading()])
         cleanup_runner = FakeRunner([])
@@ -255,22 +311,20 @@ class DockerSupervisorTests(unittest.TestCase):
             cleanup_runner=cleanup_runner,
         )
 
-        result = supervisor.supervise_host_command(
-            self.identity,
-            ("/project/eval/.venv/bin/harbor", "run", "--help"),
-            lease=self.lease,
-            timeout_seconds=30,
-        )
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.supervise_host_command(
+                self.identity,
+                ("/project/eval/.venv/bin/harbor", "run", "--help"),
+                lease=self.lease,
+                timeout_seconds=30,
+                compose_contract=self.compose_contract,
+            )
 
-        self.assertEqual(result.operation, DockerOperation.HOST)
+        self.assertIn("never observed", caught.exception.reason)
         self.assertEqual(handle.waits, [SAMPLE_INTERVAL_SECONDS] * 2)
         self.assertEqual(
-            [sample.phase for sample in result.samples],
-            ["baseline", "periodic", "final"],
-        )
-        self.assertEqual(
             [call[1] for call in counter.calls],
-            [DockerOperation.HOST] * 3,
+            [DockerOperation.HOST] * 3 + [DockerOperation.CLEANUP] * 2,
         )
         self.assertEqual(runner.commands[0][0], "/project/eval/.venv/bin/harbor")
         with self.assertRaises(DockerSupervisionError):
@@ -279,7 +333,103 @@ class DockerSupervisorTests(unittest.TestCase):
                 ("/usr/bin/docker", "ps"),
                 lease=self.lease,
                 timeout_seconds=30,
+                compose_contract=self.compose_contract,
             )
+
+    def test_host_harness_rejects_effective_runtime_drift(self) -> None:
+        drifted = replace(container_fact(CONTAINER_ID), privileged=True)
+        counter = FakeCounter(
+            [
+                reading(),
+                replace(
+                    reading(containers=(CONTAINER_ID,)),
+                    task_containers=(drifted,),
+                ),
+                reading(containers=(CONTAINER_ID,)),
+                reading(),
+            ]
+        )
+        cleanup_runner = FakeRunner([FakeHandle([0])])
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([0])],
+            cleanup_runner=cleanup_runner,
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.supervise_host_command(
+                self.identity,
+                ("/project/eval/.venv/bin/harbor", "run"),
+                lease=self.lease,
+                timeout_seconds=30,
+                compose_contract=self.compose_contract,
+            )
+
+        self.assertIn("effective Docker container state", caught.exception.reason)
+        self.assertEqual(
+            cleanup_runner.commands,
+            [("docker", "container", "rm", "--force", CONTAINER_ID)],
+        )
+
+    def test_host_cleanup_covers_exact_compose_network_and_volume(self) -> None:
+        network = ComposeResourceFact("network", "d" * 64, COMPOSE_NETWORK)
+        volume_name = f"{COMPOSE_PROJECT}_data"
+        volume = ComposeResourceFact("volume", volume_name, volume_name)
+        contract = replace(self.compose_contract, volume_names=(volume_name,))
+        active = reading(
+            containers=(CONTAINER_ID,),
+            networks=(network,),
+            volumes=(volume,),
+        )
+        cleanup_runner = FakeRunner([FakeHandle([0]), FakeHandle([0]), FakeHandle([0])])
+        supervisor, _ = self.supervisor(
+            counter=FakeCounter([reading(), active, active, reading()]),
+            handles=[FakeHandle([7])],
+            cleanup_runner=cleanup_runner,
+        )
+
+        result = supervisor.supervise_host_command(
+            self.identity,
+            ("/project/eval/.venv/bin/harbor", "run"),
+            lease=self.lease,
+            timeout_seconds=30,
+            compose_contract=contract,
+        )
+
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(
+            cleanup_runner.commands,
+            [
+                ("docker", "container", "rm", "--force", CONTAINER_ID),
+                ("docker", "network", "rm", network.object_id),
+                ("docker", "volume", "rm", volume.name),
+            ],
+        )
+        self.assertEqual(result.samples[-1].phase, "cleanup_verified")
+
+    def test_host_process_group_must_be_verified_before_final_sampling(self) -> None:
+        cleanup_runner = FakeRunner([FakeHandle([0])])
+        handle = FakeHandle([0], group_ok=False)
+        supervisor, _ = self.supervisor(
+            counter=FakeCounter(
+                [reading(), reading(containers=(CONTAINER_ID,)), reading()]
+            ),
+            handles=[handle],
+            cleanup_runner=cleanup_runner,
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.supervise_host_command(
+                self.identity,
+                ("/project/eval/.venv/bin/harbor", "run"),
+                lease=self.lease,
+                timeout_seconds=30,
+                compose_contract=self.compose_contract,
+            )
+
+        self.assertIn("process group teardown", caught.exception.reason)
+        self.assertIn("process-group cleanup was not verified", caught.exception.reason)
+        self.assertEqual(len(handle.group_closes), 2)
 
     def test_host_harness_requires_a_separate_docker_cleanup_runner(self) -> None:
         supervisor, runner = self.supervisor(
@@ -293,6 +443,7 @@ class DockerSupervisorTests(unittest.TestCase):
                 ("/project/eval/.venv/bin/harbor", "run"),
                 lease=self.lease,
                 timeout_seconds=30,
+                compose_contract=self.compose_contract,
             )
 
         self.assertEqual(runner.commands, [])
@@ -310,6 +461,7 @@ class DockerSupervisorTests(unittest.TestCase):
                 ("/project/eval/.venv/bin/harbor", "run"),
                 lease=self.lease,
                 timeout_seconds=30,
+                compose_contract=self.compose_contract,
             )
         self.assertEqual(same_runner.commands, [])
 
@@ -340,6 +492,7 @@ class DockerSupervisorTests(unittest.TestCase):
             ("/project/eval/.venv/bin/harbor", "run"),
             lease=self.lease,
             timeout_seconds=30,
+            compose_contract=self.compose_contract,
         )
 
         self.assertEqual(len(host_runner.commands), 1)
@@ -356,7 +509,7 @@ class DockerSupervisorTests(unittest.TestCase):
         cleanup_handle = FakeHandle([0])
         cleanup_runner = FakeRunner([cleanup_handle])
         counter = FakeCounter(
-            [reading(), *[reading(containers=(CONTAINER_ID,))] * 8, reading()]
+            [reading(), *[reading(containers=(CONTAINER_ID,))] * 7, reading()]
         )
         supervisor, _ = self.supervisor(
             counter=counter,
@@ -371,6 +524,7 @@ class DockerSupervisorTests(unittest.TestCase):
             ("/project/eval/.venv/bin/harbor", "run"),
             lease=self.lease,
             timeout_seconds=60,
+            compose_contract=self.compose_contract,
         )
 
         self.assertEqual(
@@ -410,6 +564,7 @@ class DockerSupervisorTests(unittest.TestCase):
             ("/project/eval/.venv/bin/harbor", "run"),
             lease=self.lease,
             timeout_seconds=30,
+            compose_contract=self.compose_contract,
         )
 
         self.assertEqual(result.returncode, 7)
@@ -466,10 +621,12 @@ class DockerSupervisorTests(unittest.TestCase):
                         ("/project/eval/.venv/bin/harbor", "run"),
                         lease=self.lease,
                         timeout_seconds=60,
+                        compose_contract=self.compose_contract,
                     )
 
                 self.assertEqual(clock.sleeps, [SAMPLE_INTERVAL_SECONDS])
-                self.assertEqual(host_handle.terminated, 1)
+                self.assertEqual(host_handle.terminated, 0)
+                self.assertEqual(len(host_handle.group_closes), 1)
                 self.assertIn(expected_reason, caught.exception.reason)
                 self.assertEqual(caught.exception.samples[-1].phase, "cleanup_verified")
 
@@ -522,6 +679,7 @@ class DockerSupervisorTests(unittest.TestCase):
                         ("/project/eval/.venv/bin/harbor", "run"),
                         lease=self.lease,
                         timeout_seconds=60,
+                        compose_contract=self.compose_contract,
                     )
 
                 self.assertEqual(
@@ -701,6 +859,86 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertEqual(len(result.warnings), 1)
         self.assertEqual(result.samples[-1].docker_growth_bytes, DOCKER_GROWTH_WARN_BYTES)
 
+    def test_counter_probe_cannot_overrun_absolute_command_deadline(self) -> None:
+        clock = FakeClock()
+
+        class AdvancingCounter(FakeCounter):
+            def __init__(self):
+                super().__init__([reading(), reading(), reading(), reading()])
+                self.advances = [0.0, 31.0, 0.0, 0.0]
+
+            def sample(self, **kwargs):
+                value = super().sample(**kwargs)
+                clock.now += self.advances.pop(0)
+                return value
+
+        handle = FakeHandle([None])
+        supervisor, _ = self.supervisor(
+            counter=AdvancingCounter(),
+            handles=[handle],
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.pull(self.identity, IMAGE, lease=self.lease, timeout_seconds=30)
+
+        self.assertIn("absolute deadline", caught.exception.reason)
+        self.assertEqual(handle.terminated, 1)
+
+    def test_seccomp_contract_rejects_unsafe_modes_and_binds_profile_digest(self) -> None:
+        with self.assertRaises(DockerSupervisionError):
+            replace(
+                self.compose_contract.container,
+                security_opt=("seccomp=unconfined",),
+            ).validate()
+        with self.assertRaises(DockerSupervisionError):
+            replace(
+                self.compose_contract.container,
+                cap_add=("SYS_ADMIN",),
+            ).validate()
+
+        profile_payload = '{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[]}'
+        profile_digest = hashlib.sha256(profile_payload.encode()).hexdigest()
+        custom = replace(
+            self.compose_contract.container,
+            seccomp_profile_sha256=profile_digest,
+        )
+        custom.validate()
+        custom.validate_observation(
+            replace(
+                container_fact(CONTAINER_ID),
+                security_opt=(f"seccomp={profile_payload}",),
+                seccomp_profile_sha256=profile_digest,
+            ),
+            ("name=seccomp,profile=builtin",),
+        )
+
+    def test_compose_secret_allows_exactly_one_dynamic_source_mount(self) -> None:
+        secret = DockerMountFact(
+            "bind", "/tmp/compose-123/rondo_eval_provider_api_key",
+            "/run/secrets/rondo_eval_provider_api_key", True,
+        )
+        contract = replace(
+            self.compose_contract.container,
+            compose_secret_mount=ComposeSecretMountContract(
+                destination="/run/secrets/rondo_eval_provider_api_key",
+                source_basename="rondo_eval_provider_api_key",
+            ),
+        )
+        contract.validate_observation(
+            replace(container_fact(CONTAINER_ID), mounts=(secret,)),
+            ("name=seccomp,profile=builtin",),
+        )
+        with self.assertRaises(DockerSupervisionError):
+            contract.validate_observation(
+                replace(
+                    container_fact(CONTAINER_ID),
+                    mounts=(secret, DockerMountFact("bind", "/tmp/other", "/extra", True)),
+                ),
+                ("name=seccomp,profile=builtin",),
+            )
+
     def test_stops_at_60_gb_growth(self) -> None:
         handle = FakeHandle([None])
         counter = FakeCounter(
@@ -722,7 +960,7 @@ class DockerSupervisorTests(unittest.TestCase):
                     [reading(), reading(containers=(CONTAINER_ID,)), reading()]
                 ),
                 FakeLockGuard(),
-                iter((0.0, 31.0)).__next__,
+                iter((0.0, 0.0, 0.0, 31.0, *([31.0] * 10))).__next__,
             ),
             (
                 "lock",
@@ -900,7 +1138,7 @@ class DockerSupervisorTests(unittest.TestCase):
             [sample.phase for sample in caught.exception.samples],
             ["baseline", "post_stop", "cleanup_verified"],
         )
-        self.assertEqual(handle.terminated, 1)
+        self.assertEqual(handle.terminated, 0)
 
     def test_cleanup_accepts_only_container_ids_observed_for_this_task(self) -> None:
         run_handle = FakeHandle([0])

@@ -158,8 +158,9 @@
 - 凭据门禁确认复用主仓库 `.env.local` 中现有 `OPENAI_API_KEY`；未读取或输出明文。
 - `main` 与 `origin/main` 对齐于 `4df098c`，V8 资产门禁已合入；主工作区干净。
 - 已由看门狗清理 V8 worktree 的 Cargo target，并清理两个 Python cache；全仓未发现其他 target。
-- 已冻结共享 `eval/` 合同、严格配置/密钥 loader、Standard/Lite `E_final`/`PolicyIdentity`、无工具
-  static payload、原子归档和持久预算账本；当前集成的 182 项 pure/fake/loopback 测试全部通过。
+- 已落地共享 `eval/` 合同、严格配置/密钥 loader、Standard/Lite `E_final`/`PolicyIdentity`、无工具
+  static payload、归档骨架和持久预算账本；独立审查确认 crash consistency、合法 ToolSearch evidence、
+  pair/batch 门禁和最小逐 run 指标仍需收口，不能把骨架表述为完整验收。
 - Harbor 冻结为 `0.20.0`/commit `459ff6e`，TB2.1 冻结为 commit `ffccbe0`，`fix-git` task archive
   与 linux/amd64 镜像均已按 SHA-256 实测；真实 checkout 的 materialize/digest/overlay 前置校验通过。
 - Docker Desktop daemon/数据盘计数已接入；受监督拉取 `fix-git` 和 Ubuntu 精确 digest，官方
@@ -187,35 +188,34 @@
 
 ### 当前工作
 
-- 两侧静态 musl CLI + `codex-code-mode-host` + 官方 bwrap 的 15 键 runtime bundle 已在
-  同一上游 source identity 下冻结并离线复核；目标镜像中的受监督 `--version` 探针通过。
-- 官方 bwrap 资产已取代项目内自建路线；失败的 libcap/C 中间产物和两侧 Cargo target 已在
-  看门狗内精确清理，失败 summary 保留用于审查。
-- 实际 Codex Docker no-API 以 root 与固定 UID/GID 1000 两种形态复验，均到达冻结 bwrap
-  后因 Docker 守护进程默认 seccomp 不允许嵌套 user namespace 而失败。没有授予
-  privileged、`SYS_ADMIN` 或 `seccomp=unconfined`，也没有弱化 Codex sandbox。
-- 全部 eval pure/fake/loopback 必要门禁共 182 项通过，`uv lock --check` 通过。Docker
-  前后统计均为 18.128GB，任务容器/卷残留为 0，未触发 40/60GB 或宿主剩余
-  80GiB 门禁。
+- 独立审查日志 `agent_log/2026-08-10-120053-plan008-independent-implementation-review.md` 已在
+  `6d4cd75` 固化；本批以其 F-01～F-16 收敛结论为唯一缺陷清单，不重开已撤回的异议。
+- 已在看门狗下清理旧 worktree venv、uv/Python/ruff 缓存；冻结 bundle、预算账本和三个 claimed
+  诊断 work 现场保留。修复在 `0810-plan008-review-remediation` 独立 worktree 实施。
+- 当前并行修复 pair/batch 身份与公平拓扑、Harbor preflight、最小 wall/CPU/peak RSS、Docker 有效态与
+  watchdog proof、crash-consistent 归档、L1 evidence/sink、L2 runtime/redirect/身份和结果交叉约束。
+- 用户已授权只在 Plan 008 固定镜像/容器内做无 API、无密钥 namespace/seccomp 定向诊断；允许项目内、
+  仅作用于该容器的最小 seccomp profile。仍禁止 privileged、`SYS_ADMIN`、`seccomp=unconfined` 和宿主全局修改。
 
 ### 后续计划
 
-- 本批按 fail-closed 状态收口。若后续确需为单个固定任务改变 Docker seccomp/capability，
-  必须先明确新的精确授权与退出后处理，不在本次默认扩展。
-- 安全 no-API 全链路通过后，最多使用已有预算账本的剩余第 4 个槽位；不得静默
-  新增第 5 个 run，也不得在只有一侧结果时宣称 M1。
+- 先完成 pure/fake 门禁，再串行执行固定镜像的 syscall/namespace 定向诊断；只采用能够明确解释、
+  且不越过上述禁止项的最小容器 profile。随后以同一生产 preflight 重新做双侧 no-API 验收。
+- 旧批次三个永久 claim 只剩一个槽位，已不可能形成公平 pair；本批不调用真实 API，也不消费最后一个槽位。
+  若 no-API 通过后需要重开 B3，必须先给出新的 pair/batch manifest、轮次和预算并重新取得批量测评授权。
 
 ### 阻塞项
 
 - 本地模型权重不存在且本次禁止下载；L2 真实推理验收必然保持未运行。
-- 目标 Docker Desktop 守护进程只报告 builtin seccomp/cgroupns；在不关闭 seccomp、不授予
-  `SYS_ADMIN`/privileged 的当前安全边界下，bwrap 不能在 Terminal-Bench 任务容器内再建
-  user namespace，B3 no-API 和 M1 因此阻塞。
+- 当前 Docker 证据只证明默认安全环境阻止嵌套 user namespace；builtin seccomp 是候选原因，尚未唯一归因。
+  在本批定向诊断和有效态监督完成前，B2 no-API、B3 与 M1 均保持未通过。
 
 ### 当前验收状态
 
-- B1、B2 代码/冻结产物、L1 fake 和 L2 前置设施已达到实现门禁；Docker hello-world oracle、两侧静态
-  musl 冻结与目标镜像 `--version` 均真实通过。
+- B1 的版本/task/image 资料冻结、Docker hello-world oracle、两侧静态 musl bundle 与目标镜像
+  `--version` 探针保留为真实通过项；B2 仅有可保留基础设施，公平/身份/有效隔离/归档尚未完整验收。
+- L1 仅有协议骨架和正常 fixture；合法 ToolSearch evidence、最终 sink 和三消费者尚未完整验收。
+  L2 仍是无权重前置设施，runtime 闭包、redirect 与 endpoint/model identity 在真实 L2 前必须收口。
 - B2 全链路 no-API 与 B3/M1 未通过。3 次真实 Docker 诊断均在 API 前因设施失败，终审后从正式
   `runs.jsonl` 与私有发布目录移除，只在预算账本保留不可复用槽位；批次最多 4 run 的硬门禁
   尚余 1 个槽位，因此即使最后一条 completed，也不能把同任务双侧里程碑误报为通过。
@@ -247,3 +247,5 @@
 | 020 | 默认 seccomp 下 nested namespace 仍失败后停止 B3 | 安全边界只能经新的精确授权改变；计划禁止为凑绿弱化隔离 | B3/M1 | 已采纳 |
 | 021 | run-id 在外部执行前同时 claim 归档与预算槽，claim 后异常也发布分类失败记录 | 禁止复用 run 绕过四次上限，避免已计费请求没有结果索引 | B3 预算/归档 | 已采纳 |
 | 022 | API 前设施诊断不进入正式结果库 | 三次尝试没有模型请求，旧归因与新 parser/allowlist 不一致；预算账本仍保留不可复用历史 | B3 数据 | 已采纳 |
+| 023 | 独立审查 F-01～F-16 作为本批修复与重新验收清单 | 原实现存在公平、有效态、崩溃一致性和能力口径缺口；已完成异议复核 | Plan 008 收口 | 已采纳 |
+| 024 | namespace/seccomp 只做固定容器的最小定向诊断 | 用户明确授权；需要区分 seccomp、userns/capability 与 daemon 行为，仍禁止特权化绕过 | B2 Docker | 已采纳 |

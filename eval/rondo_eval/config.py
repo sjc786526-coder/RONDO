@@ -35,6 +35,7 @@ _CONFIG_KEYS: dict[str, Any] = {
         "api_key_env",
         "model_id",
         "model_path",
+        "model_sha256",
         "format",
         "quantization",
         "server",
