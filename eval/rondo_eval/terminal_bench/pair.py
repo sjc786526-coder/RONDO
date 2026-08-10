@@ -37,6 +37,7 @@ _PAIR_LOCK_KEYS = {
     "topology",
     "fairness",
     "harbor",
+    "no_api_seccomp",
     "bundles",
 }
 _MODE_KEYS = {"enabled", "batch_id"}
@@ -83,6 +84,7 @@ _HARBOR_KEYS = {
     "installed_closure_sha256",
     "installed_closure_files",
 }
+_SECCOMP_KEYS = {"profile_path", "source_sha256", "effective_sha256"}
 
 
 class PairIdentityError(ValueError):
@@ -259,12 +261,20 @@ class HarborIdentity:
 
 
 @dataclass(frozen=True)
+class NoApiSeccompIdentity:
+    profile_path: str
+    source_sha256: str
+    effective_sha256: str
+
+
+@dataclass(frozen=True)
 class PairIdentity:
     pair_id: str
     modes: Mapping[str, PairMode]
     topology: tuple[PairSlot, ...]
     fairness: Mapping[str, object]
     harbor: HarborIdentity
+    no_api_seccomp: NoApiSeccompIdentity
     bundles: Mapping[Side, BundleIdentity]
     lock_sha256: str
 
@@ -374,7 +384,51 @@ class PairIdentity:
         self, prepared: PreparedTerminalBenchRun, *, mode: str
     ) -> PairSlot:
         prepared.validate()
-        return self.validate_spec(prepared.spec, mode=mode)
+        slot = self.validate_spec(prepared.spec, mode=mode)
+        if mode == "no_api":
+            materialized = prepared.materialized_task
+            expected = self.no_api_seccomp
+            if (
+                materialized.seccomp_profile is None
+                or materialized.seccomp_profile.as_posix()
+                != str((Path(__file__).resolve().parents[3] / expected.profile_path).resolve())
+                or materialized.seccomp_profile_source_sha256 != expected.source_sha256
+                or materialized.seccomp_profile_effective_sha256 != expected.effective_sha256
+                or prepared.command.compose_contract.container.seccomp_profile_sha256
+                != expected.effective_sha256
+            ):
+                raise PairIdentityError("no-API seccomp projection differs from the pair lock")
+        return slot
+
+    def validate_no_api_seccomp(self, *, project_root: Path) -> Path:
+        expected = self.no_api_seccomp
+        try:
+            root = project_root.resolve(strict=True)
+            profile = (root / expected.profile_path).resolve(strict=True)
+            metadata = profile.lstat()
+        except OSError as exc:
+            raise PairIdentityError("tracked no-API seccomp profile is unavailable") from exc
+        if (
+            profile != root / expected.profile_path
+            or profile.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or _file_sha256(profile) != expected.source_sha256
+        ):
+            raise PairIdentityError("tracked no-API seccomp profile identity differs")
+        try:
+            from .namespace_diagnostic import (
+                _EFFECTIVE_PROFILE_SHA256,
+                _require_clean_tracked_file,
+                _validate_frozen_profile,
+            )
+
+            _require_clean_tracked_file(root, profile)
+            _validate_frozen_profile(profile.read_bytes())
+        except Exception as exc:
+            raise PairIdentityError("no-API seccomp profile is not clean and frozen") from exc
+        if expected.effective_sha256 != _EFFECTIVE_PROFILE_SHA256:
+            raise PairIdentityError("no-API effective seccomp identity differs")
+        return profile
 
 
 @dataclass(frozen=True)
@@ -415,6 +469,7 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
     topology = _parse_topology(value["topology"], modes=modes)
     fairness = _parse_fairness(value["fairness"])
     harbor = _parse_harbor(value["harbor"])
+    no_api_seccomp = _parse_no_api_seccomp(value["no_api_seccomp"])
     bundles = _parse_bundles(value["bundles"])
     identity = PairIdentity(
         pair_id=value["pair_id"],
@@ -422,6 +477,7 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
         topology=topology,
         fairness=fairness,
         harbor=harbor,
+        no_api_seccomp=no_api_seccomp,
         bundles=bundles,
         lock_sha256=hashlib.sha256(raw).hexdigest(),
     )
@@ -717,6 +773,23 @@ def _parse_harbor(value: object) -> HarborIdentity:
     ):
         raise PairIdentityError("Harbor identity differs from the B1 freeze")
     return HarborIdentity(**value)
+
+
+def _parse_no_api_seccomp(value: object) -> NoApiSeccompIdentity:
+    if not isinstance(value, dict) or set(value) != _SECCOMP_KEYS:
+        raise PairIdentityError("no-API seccomp identity differs from schema v1")
+    if value["profile_path"] != "eval/seccomp/plan008-userns-minimal-v0.2.3.json":
+        raise PairIdentityError("no-API seccomp path differs from Plan 008")
+    _require_sha256(value["source_sha256"], "seccomp source sha256")
+    _require_sha256(value["effective_sha256"], "seccomp effective sha256")
+    if (
+        value["source_sha256"]
+        != "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
+        or value["effective_sha256"]
+        != "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+    ):
+        raise PairIdentityError("no-API seccomp digest differs from diagnosis")
+    return NoApiSeccompIdentity(**value)
 
 
 def _parse_bundles(value: object) -> dict[Side, BundleIdentity]:

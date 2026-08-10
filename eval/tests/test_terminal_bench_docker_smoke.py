@@ -65,6 +65,9 @@ class FakeMaterializer:
                 pids_limit=kwargs["pids_limit"],
                 provider_api_key_env=kwargs["provider_api_key_env"],
                 runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
+                seccomp_profile=kwargs.get("seccomp_profile"),
+                seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
+                seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
             ),
             encoding="utf-8",
         )
@@ -84,6 +87,9 @@ class FakeMaterializer:
             runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
             staged_task_digest=materialize_module._harbor_content_digest(task),
             overlay_sha256=hashlib.sha256(overlay.read_bytes()).hexdigest(),
+            seccomp_profile=kwargs.get("seccomp_profile"),
+            seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
+            seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
         )
 
 
@@ -282,6 +288,15 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             memory_swap_bytes=3 * 1024**3,
             pids_limit=256,
             provider_transport_base_url=None,
+            seccomp_profile_path=str(
+                (EVAL_ROOT / "seccomp" / "plan008-userns-minimal-v0.2.3.json").resolve()
+            ),
+            seccomp_profile_source_sha256=(
+                "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
+            ),
+            seccomp_profile_effective_sha256=(
+                "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+            ),
         )
 
     def test_full_function_uses_real_prepare_backend_and_parser_with_reward_zero(self) -> None:
@@ -308,6 +323,18 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertTrue(all(item.model == "gpt-5.6-luna" for item in result.requests))
         self.assertTrue(all(item.authorized for item in result.requests))
         self.assertTrue(result.safe_summary()["code_mode_tool_round_trip"])
+        self.assertIn(
+            '      - "seccomp=',
+            result.prepared.materialized_task.overlay_path.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            result.prepared.command.compose_contract.container.seccomp_profile_sha256,
+            "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf",
+        )
+        self.assertEqual(
+            result.prepared.command.compose_contract.container.security_opt,
+            ("no-new-privileges:true",),
+        )
         _argv, kwargs = FakeHostExecutor.calls[0]
         self.assertEqual(kwargs["injected_env"]["OPENAI_API_KEY"], NO_API_SMOKE_BEARER)
         agent_kwargs = {

@@ -110,7 +110,7 @@ class DockerNoApiSmokeResult:
         return self.parsed.outcome is RunOutcome.COMPLETED and self.contract_satisfied
 
     def safe_summary(self) -> dict[str, object]:
-        return {
+        summary: dict[str, object] = {
             "schema_version": 1,
             "side": self.prepared.spec.side.value,
             "outcome": self.parsed.outcome.value,
@@ -124,6 +124,23 @@ class DockerNoApiSmokeResult:
             "host_returncode": self.harbor.returncode,
             "pair_validation": self.pair_validation,
         }
+        evidence = self.harbor.docker_evidence
+        if evidence is None or not evidence.samples:
+            summary["docker"] = None
+        else:
+            baseline, final = evidence.samples[0], evidence.samples[-1]
+            summary["docker"] = {
+                "sample_count": len(evidence.samples),
+                "warnings": list(evidence.warnings),
+                "data_root": final.data_root,
+                "baseline_total_bytes": baseline.docker_total_bytes,
+                "final_total_bytes": final.docker_total_bytes,
+                "baseline_task_bytes": baseline.task_bytes,
+                "final_task_bytes": final.task_bytes,
+                "baseline_data_root_free_bytes": baseline.data_root_filesystem_free_bytes,
+                "final_data_root_free_bytes": final.data_root_filesystem_free_bytes,
+            }
+        return summary
 
 
 class HostExecutorFactory(Protocol):
@@ -568,6 +585,9 @@ def main(argv: list[str] | None = None) -> int:
         side = Side(args.side)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
         pair_identity = load_pair_identity()
+        seccomp_profile = pair_identity.validate_no_api_seccomp(
+            project_root=paths.worktree_root
+        )
         pair_identity.validate_manifest(
             common_root=paths.common_root,
             side=side,
@@ -601,6 +621,9 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=args.timeout_seconds,
             max_retries=0,
             budget_usd=5.0,
+            seccomp_profile_path=str(seccomp_profile),
+            seccomp_profile_source_sha256=pair_identity.no_api_seccomp.source_sha256,
+            seccomp_profile_effective_sha256=pair_identity.no_api_seccomp.effective_sha256,
         )
         proof = lease_from_watchdog()
         counter = DockerCliCounter(

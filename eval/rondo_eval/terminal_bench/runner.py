@@ -68,6 +68,9 @@ class TerminalBenchRequest:
     timeout_seconds: int = 1800
     max_retries: int = 0
     budget_usd: float = 5.0
+    seccomp_profile_path: str | None = None
+    seccomp_profile_source_sha256: str | None = None
+    seccomp_profile_effective_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -351,6 +354,16 @@ def prepare_terminal_bench_run(
 
     validate_freeze()
     image_digest = validate_runtime_image_digest(request.image_digest)
+    seccomp_values = (
+        request.seccomp_profile_path,
+        request.seccomp_profile_source_sha256,
+        request.seccomp_profile_effective_sha256,
+    )
+    if any(value is not None for value in seccomp_values) and (
+        not all(value is not None for value in seccomp_values)
+        or not Path(request.seccomp_profile_path or "").is_absolute()
+    ):
+        raise TerminalBenchRunError("Terminal-Bench seccomp profile is incomplete")
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
     spec = config_module.make_run_spec(
@@ -377,6 +390,13 @@ def prepare_terminal_bench_run(
         memory_swap_bytes=request.memory_swap_bytes,
         pids_limit=request.pids_limit,
         provider_api_key_env=spec.provider.api_key_env,
+        seccomp_profile=(
+            Path(request.seccomp_profile_path)
+            if request.seccomp_profile_path is not None
+            else None
+        ),
+        seccomp_profile_source_sha256=request.seccomp_profile_source_sha256,
+        seccomp_profile_effective_sha256=request.seccomp_profile_effective_sha256,
     )
     materialized.validate()
     transport_base_url = _validate_budget_proxy_transport(
@@ -499,6 +519,11 @@ def _compose_run_contract(
             False,
         ),
     )
+    security_opt: tuple[str, ...] = ()
+    seccomp_profile_sha256 = None
+    if materialized.seccomp_profile is not None:
+        security_opt = ("no-new-privileges:true",)
+        seccomp_profile_sha256 = materialized.seccomp_profile_effective_sha256
     return ComposeRunContract(
         container=HostContainerContract(
             user=materialized.runtime_user,
@@ -514,6 +539,8 @@ def _compose_run_contract(
                 destination="/run/secrets/rondo_eval_provider_api_key",
                 source_basename="rondo_eval_provider_api_key",
             ),
+            security_opt=security_opt,
+            seccomp_profile_sha256=seccomp_profile_sha256,
         ),
         network_names=(network,),
         volume_names=(),

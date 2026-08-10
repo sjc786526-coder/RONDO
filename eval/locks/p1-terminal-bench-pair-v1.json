@@ -55,6 +55,11 @@
     "installed_closure_sha256": "df0fdb441cc7a314cf018d9875ccbcd94fbb86b25d4de65914f877af3a007a95",
     "installed_closure_files": 480
   },
+  "no_api_seccomp": {
+    "profile_path": "eval/seccomp/plan008-userns-minimal-v0.2.3.json",
+    "source_sha256": "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f",
+    "effective_sha256": "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+  },
   "bundles": {
     "rondo": {
       "manifest_path": "eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",

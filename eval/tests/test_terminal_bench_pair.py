@@ -140,6 +140,11 @@ class PairIdentityTests(unittest.TestCase):
 
     def test_tracked_lock_enables_no_api_and_hard_disables_paid(self) -> None:
         self.assertEqual(self.identity.mode("no_api").batch_id, "p1-no-api-smoke")
+        profile = self.identity.validate_no_api_seccomp(project_root=EVAL_ROOT.parent)
+        self.assertEqual(
+            hashlib.sha256(profile.read_bytes()).hexdigest(),
+            self.identity.no_api_seccomp.source_sha256,
+        )
         with self.assertRaisesRegex(PairIdentityError, "fresh_pair"):
             self.identity.mode("paid")
 

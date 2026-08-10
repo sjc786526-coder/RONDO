@@ -108,6 +108,9 @@ class FakeMaterializer:
                 pids_limit=kwargs["pids_limit"],
                 provider_api_key_env=kwargs["provider_api_key_env"],
                 runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
+                seccomp_profile=kwargs.get("seccomp_profile"),
+                seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
+                seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
             )
         )
         staged_digest = materialize_module._harbor_content_digest(task)
@@ -128,6 +131,9 @@ class FakeMaterializer:
             runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
             staged_task_digest=staged_digest,
             overlay_sha256=overlay_digest,
+            seccomp_profile=kwargs.get("seccomp_profile"),
+            seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
+            seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
         )
 
 
