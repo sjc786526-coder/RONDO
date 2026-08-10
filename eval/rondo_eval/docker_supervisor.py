@@ -763,6 +763,89 @@ class DockerExecutionResult:
     container_metrics: DockerContainerMetrics | None = None
     effective_seccomp: DockerSeccompEvidence | None = None
 
+    def receipt(self) -> dict[str, object]:
+        """Return the canonical, path-free B2 Docker result projection."""
+
+        if not self.samples:
+            raise DockerSupervisionError("Docker result has no supervised samples")
+        for item in (self.image_identity, self.desktop_vhdx, self.container_metrics, self.effective_seccomp):
+            if item is None:
+                raise DockerSupervisionError("Docker result lacks required B2 evidence")
+            item.validate()
+        facts = {
+            fact
+            for sample in self.samples
+            for fact in sample.task_containers
+        }
+        if len(facts) != 1:
+            raise DockerSupervisionError("Docker result lacks one stable container fact")
+        fact = next(iter(facts))
+        fact.validate()
+        final = self.samples[-1]
+        if (
+            final.phase != "cleanup_verified"
+            or final.task_container_ids
+            or final.task_networks
+            or final.task_volumes
+        ):
+            raise DockerSupervisionError("Docker result cleanup was not verified empty")
+        return {
+            "schema_version": 1,
+            "operation": self.operation.value,
+            "returncode": self.returncode,
+            "samples": len(self.samples),
+            "image": {
+                "reference": self.image_identity.image_reference,
+                "id": self.image_identity.image_id,
+            },
+            "storage": {
+                "docker_total_before": self.samples[0].docker_total_bytes,
+                "docker_total_after": final.docker_total_bytes,
+                "data_root_free_before": self.samples[0].data_root_filesystem_free_bytes,
+                "data_root_free_after": final.data_root_filesystem_free_bytes,
+                "vhdx_before": self.desktop_vhdx.baseline_bytes,
+                "vhdx_peak": self.desktop_vhdx.peak_bytes,
+                "vhdx_after": self.desktop_vhdx.final_bytes,
+            },
+            "container": {
+                "user": fact.user,
+                "privileged": fact.privileged,
+                "cap_add": list(fact.cap_add),
+                "cap_drop": list(fact.cap_drop),
+                "security_opt": [
+                    "seccomp=custom"
+                    if option.casefold().startswith("seccomp=")
+                    else option
+                    for option in fact.security_opt
+                ],
+                "memory": fact.memory_bytes,
+                "memory_swap": fact.memory_swap_bytes,
+                "pids": fact.pids_limit,
+                "read_only_rootfs": fact.read_only_rootfs,
+                "cgroupns": fact.cgroupns_mode,
+                "network_mode": fact.network_mode,
+                "networks": list(fact.networks),
+                "mounts": [
+                    {
+                        "type": mount.kind,
+                        "destination": mount.destination,
+                        "read_only": mount.read_only,
+                    }
+                    for mount in fact.mounts
+                ],
+            },
+            "metrics": {
+                "container_id": self.container_metrics.container_id,
+                "cpu_seconds": self.container_metrics.cpu_usage_seconds,
+                "peak_memory": self.container_metrics.peak_memory_bytes,
+            },
+            "seccomp": {
+                "kind": self.effective_seccomp.profile_kind,
+                "sha256": self.effective_seccomp.profile_sha256,
+            },
+            "cleanup": "verified_empty",
+        }
+
 
 class DockerSupervisionError(RuntimeError):
     """Infrastructure failure.  Every caller-facing instance maps to exit 70."""

@@ -28,32 +28,15 @@
   和 tools 总在顶层 `instructions` / `tools`，也不得保留新增的 provider-private
   `encrypted_function_args`；新旧 Guardian 源码证据须按 meta 中的 source tag/commit 分层。实际有效
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
-- P1 已落地顶层轻量 `eval/` 体系：Standard/Lite `E_final` 解析、`PolicyIdentity`、
-  无工具静态审批协议、严格本地配置、崩溃一致归档、持久费用上限、Docker 监督、
-  Terminal-Bench 公平配对/双适配器与 llama.cpp client/doctor/fake/launcher。第二轮审查后，
-  pair 原子账本、跨槽 harness commit、Harbor 安装闭包、发布恢复、watchdog override、VHDX/
-  image/container metrics、paid custom seccomp、request role provenance 与费用口径已进入代码门禁；
-  第三轮 B2 前置整改与失败后 adapter 窄修完成后，统一轻量门禁保持通过。wrapper
-  heartbeat/PID/start-ticks 活性、no-API summary/ledger 崩溃收敛与 production `cap_drop=ALL`
-  已进入机器合同；宿主反事实验证旧 synthetic scope 不能 mint lease，规范 wrapper 停止刷新后 guard
-  fail-closed。v4 首次真实 Docker 重验在 RONDO slot 1 的 adapter 安装阶段以 `infra_failed`
-  终止：daemon 有效镜像、custom seccomp、private cgroup、容器 metrics 与 VHDX 证据均已采集，
-  但 `cap_drop=ALL` 后上传物 ownership/permission 复合命令失败；trace 精确定位到含 `chown` 的命令，
-  未保留 stderr，因此这是与 capability-free 合同一致的强归因而非独立 syscall 证明。Codex slot 2
-  按序列合同未运行。第四轮整改把 v4 以 ledger SHA、harness commit、run/side 和审查日志写入受跟踪
-  retirement 清单，当前唯一可执行 identity 推进为 v5；v5 completed/failed no-API 都绑定原子去敏摘要，
-  崩溃恢复必须与请求 side 一致。v5 adapter 只在临时私有 Git 配置中为精确
-  `/app/personal-site` 设置 `safe.directory`，以 UID/GID 1000 执行 Git probe；code-mode no-API marker
-  也必须由同一路径的真实 `git status` 成功后产生。cleanup 只有 supervisor 明确标记
-  `cleanup_verified` 且精确资源计数全零时才能成为耐久 `verified_empty`；其余计数保持未知或
-  `unverified`。本轮只运行轻量门禁，v5 仍未经过 Docker 验收。
-- Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest，Harbor
-  入口字节及 marker-active 传递依赖闭包由受跟踪 lock 绑定。Codex/RONDO 静态 musl CLI +
-  code-mode-host + 官方 bwrap runtime bundle 保持冻结。旧 no-API v3 在旧 pair schema 下证明
-  RONDO→Codex 正常路径完成。v4 运行时曾通过 daemon 镜像、private cgroup namespace、容器
-  CPU/峰值内存与 VHDX 门禁并当场采样，但失败 ledger 没有耐久绑定结构化 Docker 摘要；它不复用保留的
-  v3 ledger，且已产生一次 RONDO 侧真实失败终态并退休。当前 v5 尚未运行 Docker，因此 B2 不称新门禁
-  已完整验收。
+- P1 已落地顶层 `eval/` 体系：Standard/Lite `E_final`、静态审批、严格本地配置、付费预算与发布恢复、
+  Docker/watchdog 监督、Terminal-Bench 双适配器和 llama.cpp 前置设施。Plan 009 将 no-API 从付费式
+  permanent ledger、retirement、崩溃恢复和一次性 migration 中解耦；这些历史机制不再是 B2 生产路径。
+  paid B3 的预算、不可复用 run、append-only publication 与恢复保持 hard-disabled 且未削弱。
+- Terminal-Bench B1 固定 Harbor `0.20.0`、`uv.lock`、TB 2.1 commit、`fix-git` task/image digest 和两侧
+  runtime bundle。Harbor 启动前只核对版本、console/interpreter 与三个关键模块，不再扫描数千个依赖文件。
+  B2 由唯一入口在同一进程中严格执行 RONDO→Codex，首侧失败立即停止；成功后只替换一个
+  `eval-data/b2/current.json` 当前收据。marker 必须来自 `exit_code=0` 且 stdout 精确等于固定值的结构化
+  `exec_command` 结果。新入口尚未运行 Docker，因此 B2 仍未验收。
 - L1 协议与三组 consumer 协议/fixture 逐字节投影已完成，合法 `ToolSearchOutput` 可消费且最终 sink
   fail-closed；本阶段不宣称已有三套独立生产调用端。
   L2 项目局部 llama.cpp `b10333` 已冻结 CPU x64 前端/动态运行闭包、配置、client、
@@ -62,7 +45,7 @@
   仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。当前无权重，
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
-- **当前阶段：Plan 008 第五轮 B2 前置合同已落地轻量实现，v4 失败 identity 已退休，B2 待 v5 Docker 重验，
+- **当前阶段：Plan 009 已把 B2 收敛为轻量、可重跑的双侧当前验收；Docker 尚未运行，
   B3/M1 保持 hard-disabled/未运行。** 三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。旧付费批次不再用于配对，生产 paid 入口保持 hard-disabled；若继续 B3，需以新的
@@ -74,7 +57,7 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1 完成；B2 v4 RONDO slot 1 真实重验为设施失败且已退休，v5 未运行；B3/M1 hard-disabled/未运行 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1 完成；B2 轻量入口待真实 Docker 双侧验收；B3/M1 hard-disabled/未运行 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
 | 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
@@ -138,24 +121,13 @@ P0 共享地基 ────────┤                          ├─→ �
 
 ## 5. 当前阶段任务
 
-P0 已完成定向门禁并合入主线；P1 执行合同见
-`plan/008-p1-terminal-bench-and-local-approval-execplan.md`。本批共享 eval 合同、B1 与 L1 保持可用。B2 的旧
-no-API v3 仍只是旧 lock/schema 下的历史正常路径证据；第二轮审查使用的 v4 identity
-不复用或改写保留的 v3 ledger。第二轮审查后的新门禁已覆盖
-pair 原子持久化和跨事务恢复、跨槽 harness identity、Harbor 可移植安装闭包、规范
-watchdog/VHDX/image/container metrics、paid custom seccomp、declared role 和可解释费用口径。这些
-修改先通过 pure/fake/loopback 验证；随后 v4 RONDO slot 1 在真实 Docker 中完成有效态采样，
-但 adapter 安装在任何 fake/API 请求前因上传后的 ownership/permission 复合命令失败；该命令含
-`chown` 且容器 capability 已全部移除，但原始 stderr 未保留。该 pair 已永久写为
-failed/blocked，Codex slot 2 未运行。adapter 后续已移除 install/run 的运行时 ownership mutation，
-改为消费实际 ownership、由 agent 用户创建私有文件，并把递归写权限严格限制到固定
-`/app/personal-site`；该修复目前只有 pure/fake 回归。v4 已以受跟踪 retirement 记录退出当前入口，
-当前 pair 为 v5；其 completed/failed summary 都与 ledger 原子绑定，恢复入口也核对请求 side。
-adapter 临时私有 Git 配置和 UID 1000 Git probe 已进入生产路径，no-API marker 也依赖同一只读
-`git status`。摘要另保存实际 container user、精确 memory/swap/pids、network mode、只读根状态，并只接受
-显式 cleanup phase；失败时保存实际可得的 fake/tool/Harbor/artifact 事实，未知值为 `null`，恢复沿用原
-65/70 分类。上述改动尚未运行 Docker，仍需用 v5 重跑双侧 no-API，才能认定
-B2 完整验收。B3/M1 继续 hard-disabled/未运行，不存在可用的真实 `E_final` 种子。
+P0 已完成定向门禁并合入主线；P1 当前执行合同见
+`plan/009-p1-b2-lightweight-slimming-and-v5-execplan.md`。共享 eval 合同、B1 与 L1 保持可用。
+B2 删除 no-API permanent ledger/retirement/summary recovery、一次性 migration 和 Harbor 全依赖闭包，
+保留一个当前冻结输入、一个 supervisor Docker receipt 和一个 RONDO→Codex 串行入口。adapter 仍要求
+UID/GID 1000、精确 `/app/personal-site` Git probe、custom seccomp、`cap_drop=ALL`、资源阈值和清理成功；
+marker 只接受成功的结构化 `exec_command` 结果。该轻量实现尚未运行 Docker，双侧真实行为仍待验收。
+B3 的 paid ledger/publication/预算恢复继续 hard-disabled/未运行，不存在可用的真实 `E_final` 种子。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
 

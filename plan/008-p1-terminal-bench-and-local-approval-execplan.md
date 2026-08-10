@@ -8,6 +8,10 @@
 `doc/WBS/local-approval-model.md` L1 与 L2 搭建。Plan 003 的 B1～B3 约束继续有效；本计划以当前
 `main` 和 WBS 为事实源，并取代 Plan 003 中已经过期的 P0/watchdog 阻塞状态。
 
+> B2 no-API 的 permanent ledger、retirement、Harbor 全依赖闭包与执行入口已由 Plan 009 取代；
+> 本计划中这些历史实现细节不再描述当前生产路径。paid B3 的预算、不可复用 run、publication 恢复与
+> M1 边界仍由本计划约束并保持 hard-disabled。
+
 ## 1. 目标
 
 ### 最终目标

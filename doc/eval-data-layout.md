@@ -44,7 +44,8 @@ eval-data/                             # git-ignored
 ├── tools/                             # 项目局部工具（例如 llama.cpp runtime）
 ├── build-metrics/                     # 看门狗 summary/JUnit/受限日志
 ├── budgets/                           # 持久费用预留/结算账本，0600
-├── pairs/                             # no-API/paid 双侧顺序、终态账本与去敏 safe summary，0600
+├── pairs/                             # 仅 paid 双侧顺序与发布恢复账本，0600
+├── b2/current.json                    # 可替换的当前 no-API 双侧验收收据，0600
 ├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
 ├── work/                              # materialize 和 no-API 工作目录
 ├── recordings/<recording_id>/         # A1 录制包（原始 HTTP exchange + SSE）
@@ -121,35 +122,21 @@ eval-data/                             # git-ignored
 - Terminal-Bench 五键 host `metrics` 固定为 runner-host `self+children` 的 `wall_seconds`、
   `cpu_user_seconds`、`cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code`，仅用于设施诊断。
   supervisor 在 daemon 确认 private cgroup namespace 后，另从 exact container 的 cgroup v2 生成
-  `container_id`、`cpu_usage_seconds`、`peak_memory_bytes`；no-API safe summary、paid publication、
-  pair ledger 与 M1 必须持有该组机器证据。本轮未用真实
+  `container_id`、`cpu_usage_seconds`、`peak_memory_bytes`；B2 当前收据直接复用 supervisor 的
+  canonical Docker receipt，paid publication、pair ledger 与 M1 继续持有该组机器证据。本轮未用真实
   Docker 重验新字段，paid B3 仍 hard-disabled；完整探针和细粒度 Guardian 归因留给 A4/B5。
 - 发布使用 journal v2：在同一结果锁内绑定工件树摘要、完整 record bytes 及 index 前/后长度与 SHA，
   以同目录临时文件写完整新 index、fsync 后原子 replace。恢复只接受精确 pre/post identity，并重新核对
   工件树；partial write、进程死亡或恢复前篡改均 fail-closed，不再原地 append 半行。
-- pair sequence 使用稳定 `<ledger>.lock` 侧车 flock，ledger 本体通过 0600 temp write + fsync +
+- paid pair sequence 使用稳定 `<ledger>.lock` 侧车 flock，ledger 本体通过 0600 temp write + fsync +
   atomic replace + parent fsync 更新；已存在的空文件视为损坏，不能重置为 slot 1。两槽绑定
   同一 `eval_harness_commit`。paid 槽先进入 `publishing`，结果持久后回读 record SHA-256 再收敛为
   `completed`；M1 同时核对 durable ledger 与 result index，不仅聚合两条 record。
-- 当前 no-API ledger schema v4 为每个 claim 固定 `no_api_summary_path`。completed 与 failed 都必须先原子
-  写 canonical summary，再由 ledger 在同一锁内重读 identity/hash 并收敛；恢复还必须匹配调用者请求 side。
-  completed/failed ledger 每次打开持续回读摘要，缺失或漂移 fail-closed。若进程在任何摘要耐久前死亡，
-  无法证明 Docker 是否已启动，ledger 保持 `active` 并拒绝新 claim，而不是伪造 `not_observed` 终态；
-  不得在同一 identity/授权下静默重跑。后续新 identity 必须有明确续跑决定和受跟踪 lock。
-- 后续 no-API 槽在账本写终态前，先原子写入
-  `eval-data/pairs/<pair_id>/no-api-safe/<run_id>.json`。completed 摘要只保留 pair/bundle/Harbor/
-  seccomp/harness 身份、去敏计数/有效态，以及实际 daemon image ID、VHDX baseline/peak/final/growth、
-  exact container CPU/峰值内存和 daemon 回显的有效 seccomp，任一必需字段缺失都不能 completed。
-  failed 摘要保持 `failed + blocked`，另记录实际可得的 Docker/cleanup、fake request/tool、agent event、
-  Harbor return code 与受限 artifact SHA，闭集 failure stage、安全 command id 和受限诊断分类；未观察到的
-  事实明确标 unavailable/`null`，不补造 0、argv、stdout/stderr、密钥或宿主绝对路径。runtime 投影保存
-  container user、精确 memory/swap/pids、network mode、read-only rootfs 与去路径 mount/network digest。
-  cleanup 只有 supervisor 的 `cleanup_verified` phase 且精确资源计数全零时才能写 `verified_empty`，其他
-  情况写 `unverified`，未知计数为 `null`。watchdog 最终 summary 由父 wrapper 在子 CLI 退出后生成，
-  CLI 内只能诚实记录
-  `parent_finalize_pending`，不能伪造 digest。旧 no-API
-  v3 原始 trial/safe summary 已按原保留策略清理，不能事后补写或
-  冒充新机器证据。
+- no-API 不进入 paid ledger，也不维护 retirement 或崩溃恢复状态。唯一入口在一个进程中严格执行
+  RONDO→Codex，首侧失败立即停止；两侧成功后以 temp+fsync+atomic replace 写
+  `eval-data/b2/current.json`。新运行可替换该收据。收据只保留 harness/lock 身份、两侧状态、0 官方 API/
+  0 USD 和 supervisor 已验证的 image、VHDX、容器资源/隔离、metrics、seccomp 与 cleanup；不保存 raw
+  argv、stdout/stderr、密钥或宿主 mount source。
 - `git_commit` 记录冻结产品/二进制的 measurement commit；若 eval harness 从另一 clean worktree 加载，
   其独立 commit 必须写入 `config.eval_harness_commit`，并与 pair ledger 首次 claim 绑定的 commit 一致。
 - Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source

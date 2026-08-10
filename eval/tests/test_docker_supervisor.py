@@ -1054,9 +1054,9 @@ class DockerSupervisorTests(unittest.TestCase):
         metric = DockerContainerMetricFact(CONTAINER_ID, 1_250_000, 456_789)
         counter = FakeCounter(
             [
-                reading(),
-                reading(containers=(CONTAINER_ID,), metrics=(metric,)),
-                reading(),
+                reading(vhdx=100),
+                reading(vhdx=101, containers=(CONTAINER_ID,), metrics=(metric,)),
+                reading(vhdx=101),
             ]
         )
         supervisor, _ = self.supervisor(
@@ -1078,6 +1078,10 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertEqual(result.image_identity, DockerImageIdentity(IMAGE, IMAGE_ID))
         assert result.effective_seccomp is not None
         self.assertEqual(result.effective_seccomp.profile_kind, "builtin")
+        receipt = result.receipt()
+        self.assertEqual(receipt["cleanup"], "verified_empty")
+        self.assertEqual(receipt["metrics"]["peak_memory"], 456_789)
+        self.assertEqual(receipt["container"]["user"], "1000:1000")
 
         with self.assertRaises(DockerSupervisionError):
             DockerSupervisor._validate_host_reading(

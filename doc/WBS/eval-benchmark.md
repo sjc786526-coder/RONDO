@@ -18,29 +18,15 @@
 - **B1 完成**：Harbor 固定为 `0.20.0`，TB 2.1 数据集固定为 commit
   `ffccbe05ee73a9d59518217f294ad711bda39304`；`terminal-bench/fix-git` 的 task archive 和
   `linux/amd64` 镜像均以 SHA-256 锁定。受监督 Docker 下官方 hello-world oracle 为
-  `completed`/reward 1.0。受跟踪 lock 同时绑定 Harbor console entry bytes、package files、
-  marker-active 传递运行依赖版本与文件闭包。
-- **B2 新门禁真实重验失败**：统一 runner、双 adapter、结果解析/归档、费用代理与
-  Docker 监督已接线。旧 pair lock/schema 下的 `fix-git` no-API v3 保留 RONDO→Codex 正常路径
-  completed 的历史证据，但它不包含第二轮新增的持久化契约。新契约使用 stable
-  sidecar lock + temp/fsync/atomic replace/parent fsync 保存 pair ledger，绑定两槽共用的 clean
-  eval harness commit，并对 no-API 原子保留去敏 safe summary；summary 与 ledger 通过固定路径、持续
-  重读和 active 崩溃恢复收敛。watchdog lease 另绑定 wrapper PID/start-ticks 和新鲜 heartbeat，production
-  overlay/inspect 强制 `cap_drop=ALL`。Docker 有效态另绑定 daemon
-  actual image ID、Desktop VHDX 增长、private cgroup namespace、容器 cgroup v2 CPU/峰值内存、
-  daemon 回显的有效 seccomp、规范 watchdog 阈值与安全 override；这些字段必须存在于去敏 safe
-  summary，缺失不能完成 pair。v4 不复用保留的 v3 ledger，并在首次失败后进入受跟踪 retirement；
-  首次真实 Docker 重验在 RONDO slot 1 的 adapter 安装阶段 `infra_failed`：有效镜像、VHDX、
-  private cgroup、容器 metrics、custom seccomp 与 `cap_drop=ALL` 已由 daemon 事实校验，但安装上传后的
-  ownership/permission 复合命令失败；trace 定位到含 `chown` 的命令，原始 stderr 未保留，因此不冒充
-  独立 syscall 证明。0 fake/API 请求。ledger 已写 failed/blocked，Codex slot 2 按合同未运行。
-  adapter 后续已移除 install/run 的所有 `chown`，上传物必须实际 root-owned，agent 私有文件由
-  1000:1000 自建，任务递归写权限只允许固定 `/app/personal-site`。同一 agent 私有配置只为该精确路径
-  设置 `safe.directory` 并执行真实 Git probe；no-API marker 依赖该 probe。失败摘要保留实际 fake/tool/
-  Harbor/artifact 事实，未知值不补 0；runtime 投影绑定 user、精确 limits、network/rootfs，cleanup 只有
-  supervisor 明确验证才可记为清空。该实现尚未用 Docker 重验。
-  这不是双侧 B2 完整验收。当前唯一可执行 identity 为 v5；completed 与 failed 槽都必须先耐久写入
-  identity-bound 去敏摘要，ledger 重读后再收敛，恢复入口必须匹配所请求 side。v5 尚未运行 Docker。
+  `completed`/reward 1.0。受跟踪 lock 绑定 `uv.lock`、Harbor 版本、console/interpreter 和三个关键模块；
+  不再遍历 site-packages 或维护传递依赖文件闭包。
+- **B2 待真实 Docker 验收**：统一 runner、双 adapter 与 Docker/watchdog 监督保持。no-API 不再使用
+  permanent pair ledger、retirement、失败摘要恢复或一次性 migration；失败可在修复后由用户重新启动。
+  canonical `just eval-b2-no-api` 在一个进程中按 RONDO→Codex 严格串行，首侧失败立即停止。成功时只替换
+  `eval-data/b2/current.json`，其中 Docker 字段直接来自 supervisor 的唯一 receipt。
+  adapter 仍要求上传物实际 root-owned、agent UID/GID 1000、精确 `/app/personal-site` Git probe、
+  custom seccomp、`cap_drop=ALL`、private cgroup、容器 metrics、VHDX 与 cleanup；marker 还必须来自
+  `exit_code=0` 且 stdout 精确等于固定值的结构化结果。轻量实现尚未运行 Docker，因此不称 B2 完成。
 - **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
   公平 pair，paid 入口 hard-disabled。后续除新 pair/batch/轮次/预算和新授权外，还须在真实
