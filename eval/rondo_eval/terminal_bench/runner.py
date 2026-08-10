@@ -290,6 +290,56 @@ class DockerSupervisedHostHarborExecutor:
         exact_task_label: str,
         compose_contract: ComposeRunContract,
     ) -> HostHarborResult:
+        _require_budget_proxy_argv(argv)
+        return await self._run_supervised(
+            argv,
+            cwd=cwd,
+            injected_env=injected_env,
+            timeout_seconds=timeout_seconds,
+            exact_task_label=exact_task_label,
+            compose_contract=compose_contract,
+        )
+
+    async def run_oracle(
+        self,
+        materialized: MaterializedTask,
+        *,
+        timeout_seconds: int,
+    ) -> HostHarborResult:
+        """Run Harbor's frozen oracle without loading or mounting a real key."""
+
+        materialized.validate()
+        trial_name = _oracle_trial_name(materialized.task_label)
+        trials_dir = materialized.task_path.parent / "trials"
+        argv = _harbor_oracle_argv(
+            materialized,
+            trial_name=trial_name,
+            trials_dir=trials_dir,
+        )
+        return await self._run_supervised(
+            argv,
+            cwd=EVAL_ROOT,
+            injected_env={"HARBOR_TELEMETRY": "off"},
+            timeout_seconds=timeout_seconds,
+            exact_task_label=materialized.task_label,
+            compose_contract=_compose_run_contract(
+                materialized,
+                trial_name=trial_name,
+                trials_dir=trials_dir,
+                require_container_metrics=True,
+            ),
+        )
+
+    async def _run_supervised(
+        self,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        injected_env: Mapping[str, str],
+        timeout_seconds: int,
+        exact_task_label: str,
+        compose_contract: ComposeRunContract,
+    ) -> HostHarborResult:
         prefix = "dev.rondo.eval.task="
         if not exact_task_label.startswith(prefix):
             raise TerminalBenchRunError("host Harbor task label is invalid")
@@ -299,7 +349,8 @@ class DockerSupervisedHostHarborExecutor:
             raise TerminalBenchRunError("host Harbor task label is not exact")
         if not argv or Path(argv[0]) != self._harbor_executable:
             raise TerminalBenchRunError("host Harbor executable differs from the freeze")
-        _require_budget_proxy_argv(argv)
+        if cwd != EVAL_ROOT:
+            raise TerminalBenchRunError("host Harbor cwd differs from the locked eval project")
         if dict(injected_env) != {"HARBOR_TELEMETRY": "off"}:
             raise TerminalBenchRunError("host Harbor environment is not minimally scoped")
         host_environment = dict(injected_env)
@@ -520,6 +571,44 @@ def _trial_name(task_label: str, side: Side) -> str:
         raise TerminalBenchRunError("Docker task label is invalid")
     suffix = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:12]
     return f"rondo-p1-{side.value}-{suffix}"
+
+
+def _oracle_trial_name(task_label: str) -> str:
+    task_id = task_label.removeprefix("dev.rondo.eval.task=")
+    if not task_id or task_id == task_label:
+        raise TerminalBenchRunError("Docker task label is invalid")
+    suffix = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:12]
+    return f"rondo-p1-oracle-{suffix}"
+
+
+def _harbor_oracle_argv(
+    materialized: MaterializedTask,
+    *,
+    trial_name: str,
+    trials_dir: Path,
+) -> tuple[str, ...]:
+    expected = (
+        str(HARBOR_EXECUTABLE),
+        "trials",
+        "start",
+        "--path",
+        str(materialized.task_path),
+        "--trial-name",
+        trial_name,
+        "--trials-dir",
+        str(trials_dir),
+        "--extra-docker-compose",
+        str(materialized.overlay_path),
+        "--agent",
+        "oracle",
+        "--delete",
+    )
+    if any(
+        token in expected
+        for token in ("--model", "--agent-kwarg", "--agent-env", "--env-file")
+    ):
+        raise TerminalBenchRunError("oracle command contains provider configuration")
+    return expected
 
 
 def _compose_run_contract(

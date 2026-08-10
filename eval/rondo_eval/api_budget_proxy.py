@@ -156,6 +156,11 @@ MAX_REQUEST_RESERVATION_USD = price_usage(
     )
 )
 
+# This transport deadline is deliberately independent from the 900/1800 second
+# Harbor task deadline.  A provider request must settle while the agent is
+# still alive so an upstream stall cannot leave only a reservation behind.
+UPSTREAM_TIMEOUT_SECONDS = 90.0
+
 
 class PersistentBudgetLedger:
     """Thread-safe, atomically persisted budget state for one benchmark batch."""
@@ -548,14 +553,18 @@ class LoopbackResponsesProxy:
         ledger: PersistentBudgetLedger,
         run_id: str,
         metadata_path: Path,
-        timeout_seconds: float = 120.0,
+        timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         _transport: _UrllibTransport | None = None,
     ):
         self.upstream_endpoint = _compatible_responses_endpoint(upstream_base_url)
         if not api_key or "\r" in api_key or "\n" in api_key:
             raise ApiBudgetProxyError("an in-memory API key is required")
-        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
-            raise ApiBudgetProxyError("proxy timeout must be positive")
+        if (
+            not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+            or timeout_seconds > UPSTREAM_TIMEOUT_SECONDS
+        ):
+            raise ApiBudgetProxyError("proxy timeout must be within the 90 second limit")
         _require_safe_id(run_id, "run id")
         ledger.ensure_run(run_id)
         self._api_key = api_key
@@ -774,24 +783,39 @@ class LoopbackResponsesProxy:
             collector = _SseUsageCollector()
             total = 0
             writable = True
-            while True:
-                chunk = upstream.read(8192)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > _MAX_RESPONSE_BYTES:
-                    usage = None
-                    break
-                collector.feed(chunk)
-                if writable:
-                    try:
-                        handler.wfile.write(chunk)
-                        handler.wfile.flush()
-                    except (BrokenPipeError, ConnectionResetError):
-                        writable = False
-            collector.finish()
-            usage = collector.usage
-            upstream.close()
+            try:
+                while True:
+                    remaining = _MAX_RESPONSE_BYTES - total
+                    if remaining <= 0:
+                        usage = None
+                        break
+                    # BufferedResponse.read(8192) may wait for the buffer to fill
+                    # on a keep-alive SSE connection.  Reading one bounded line at
+                    # a time lets a complete terminal event settle immediately.
+                    chunk = upstream.readline(min(8192, remaining + 1))
+                    if not chunk:
+                        collector.finish()
+                        usage = collector.usage if collector.completed else None
+                        break
+                    total += len(chunk)
+                    if total > _MAX_RESPONSE_BYTES:
+                        usage = None
+                        break
+                    collector.feed(chunk)
+                    if writable:
+                        try:
+                            handler.wfile.write(chunk)
+                            handler.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError):
+                            writable = False
+                    if collector.terminal_seen:
+                        usage = collector.usage if collector.completed else None
+                        break
+            except (OSError, URLError, TimeoutError, socket.timeout):
+                usage = None
+                status = 0
+            finally:
+                upstream.close()
             settlement = self._ledger.settle(self._run_id, request_id, usage)
             self._save_observation(request_id, request_metadata, status, settlement)
         else:
@@ -1010,6 +1034,8 @@ class _SseUsageCollector:
     def __init__(self) -> None:
         self._buffer = bytearray()
         self.usage: Usage | None = None
+        self.terminal_seen = False
+        self.completed = False
 
     def feed(self, chunk: bytes) -> None:
         self._buffer.extend(chunk)
@@ -1029,14 +1055,39 @@ class _SseUsageCollector:
             self._buffer.clear()
 
     def _consume(self, event: bytes) -> None:
+        event_names = [
+            line[6:].strip()
+            for line in event.splitlines()
+            if line.startswith(b"event:")
+        ]
         data = b"\n".join(
             line[5:].lstrip() for line in event.splitlines() if line.startswith(b"data:")
         )
         if not data or data == b"[DONE]":
             return
+        try:
+            value = json.loads(data)
+        except (UnicodeError, json.JSONDecodeError):
+            return
+        if not isinstance(value, dict):
+            return
+        event_type = value.get("type")
+        if event_type not in {
+            "response.completed",
+            "response.failed",
+            "response.incomplete",
+            "error",
+        }:
+            return
+        self.terminal_seen = True
+        if event_type != "response.completed":
+            return
+        if event_names and event_names != [b"response.completed"]:
+            return
         parsed = _usage_from_json_bytes(data)
         if parsed is not None:
             self.usage = parsed
+            self.completed = True
 
 
 def _compatible_responses_endpoint(base_url: str) -> str:

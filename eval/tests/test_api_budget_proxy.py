@@ -23,6 +23,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     MAX_REQUEST_RESERVATION_USD,
     PRICE_SNAPSHOT_DATE,
     PRICE_SOURCE_URL,
+    UPSTREAM_TIMEOUT_SECONDS,
     ApiBudgetProxyError,
     BudgetStopped,
     LoopbackResponsesProxy,
@@ -40,6 +41,9 @@ class _FakeUpstream:
         self.mode = "json"
         self.redirect_hits = 0
         self.requests: list[dict[str, object]] = []
+        self.sse_terminal_sent = threading.Event()
+        self.release_sse = threading.Event()
+        self.hang_started = threading.Event()
         self._lock = threading.Lock()
         owner = self
 
@@ -72,6 +76,10 @@ class _FakeUpstream:
                     self.connection.shutdown(socket.SHUT_RDWR)
                     self.connection.close()
                     return
+                if mode == "hang_before_headers":
+                    owner.hang_started.set()
+                    owner.release_sse.wait(timeout=5)
+                    return
                 if mode == "redirect":
                     self.send_response(302)
                     self.send_header("Location", owner.endpoint + "/redirect-target")
@@ -93,7 +101,7 @@ class _FakeUpstream:
                     self.end_headers()
                     self.wfile.write(encoded)
                     return
-                if mode == "sse":
+                if mode in {"sse", "sse_hold_open"}:
                     response = {
                         "type": "response.completed",
                         "response": {
@@ -106,7 +114,9 @@ class _FakeUpstream:
                         },
                     }
                     encoded = b"event: response.completed\n" + b"data: " + json.dumps(response).encode()
-                    encoded += b"\n\ndata: [DONE]\n\n"
+                    encoded += b"\n\n"
+                    if mode == "sse":
+                        encoded += b"data: [DONE]\n\n"
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                     self.send_header("Connection", "close")
@@ -114,6 +124,10 @@ class _FakeUpstream:
                     self.wfile.write(encoded[:23])
                     self.wfile.flush()
                     self.wfile.write(encoded[23:])
+                    self.wfile.flush()
+                    owner.sse_terminal_sent.set()
+                    if mode == "sse_hold_open":
+                        owner.release_sse.wait(timeout=5)
                     self.close_connection = True
                     return
                 response = {
@@ -147,6 +161,7 @@ class _FakeUpstream:
         return f"http://{host}:{port}/v1/responses"
 
     def close(self) -> None:
+        self.release_sse.set()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
@@ -234,6 +249,19 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
                 self.assertEqual(proxy.upstream_endpoint, endpoint)
+
+    def test_transport_timeout_is_bounded_independently_from_agent_timeout(self) -> None:
+        self.assertEqual(UPSTREAM_TIMEOUT_SECONDS, 90.0)
+        with self.assertRaisesRegex(ApiBudgetProxyError, "90 second"):
+            LoopbackResponsesProxy(
+                upstream_base_url="https://provider.example/v1",
+                api_key=self.secret,
+                ledger=self.ledger,
+                run_id="overlong-timeout",
+                metadata_path=self.root / "overlong-timeout.json",
+                timeout_seconds=900.0,
+                _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+            )
 
     def test_invalid_compatible_base_urls_are_rejected_before_registration(self) -> None:
         for number, base_url in enumerate(
@@ -390,6 +418,72 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertTrue(observation["stream"])
         self.assertTrue(observation["usage_valid"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
+
+    def test_sse_completed_usage_settles_before_upstream_eof(self) -> None:
+        self.upstream.mode = "sse_hold_open"
+        result: list[tuple[int, bytes, object]] = []
+        error: list[BaseException] = []
+
+        def send() -> None:
+            try:
+                result.append(self._post(
+                    self._body(stream=True, effort="low", guardian=True),
+                    role="guardian",
+                    request_id="sse-hold-open",
+                ))
+            except BaseException as exc:  # pragma: no cover - asserted below
+                error.append(exc)
+
+        thread = threading.Thread(target=send)
+        thread.start()
+        self.assertTrue(self.upstream.sse_terminal_sent.wait(timeout=2))
+        thread.join(timeout=2)
+        try:
+            self.assertFalse(thread.is_alive(), "proxy waited for upstream EOF")
+            self.assertEqual(error, [])
+            self.assertEqual(result[0][0], 200)
+            self.assertIn(b"response.completed", result[0][1])
+            snapshot = self.ledger.snapshot()
+            request = snapshot["runs"]["benchmark-r1"]["requests"]["sse-hold-open"]
+            self.assertEqual(request["status"], "settled")
+            self.assertTrue(request["usage_valid"])
+            self.assertEqual(snapshot["reserved_usd"], "0.000000")
+        finally:
+            self.upstream.release_sse.set()
+            thread.join(timeout=2)
+
+    def test_upstream_header_timeout_settles_reservation_and_stops_run(self) -> None:
+        self.proxy.close()
+        self.upstream.mode = "hang_before_headers"
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="timeout-run",
+            metadata_path=self.root / "timeout-metadata.json",
+            timeout_seconds=0.1,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+        try:
+            status, body, _headers = self._post(
+                self._body(), request_id="timeout-request"
+            )
+        finally:
+            self.upstream.release_sse.set()
+        self.assertTrue(self.upstream.hang_started.is_set())
+        self.assertEqual(status, 502)
+        self.assertEqual(json.loads(body)["error"]["code"], "upstream_unavailable")
+        snapshot = self.ledger.snapshot()
+        run = snapshot["runs"]["timeout-run"]
+        request = run["requests"]["timeout-request"]
+        self.assertEqual(request["status"], "settled")
+        self.assertFalse(request["usage_valid"])
+        self.assertTrue(run["stopped"])
+        self.assertEqual(snapshot["reserved_usd"], "0.000000")
+        observation = json.loads(
+            (self.root / "timeout-metadata.json").read_text(encoding="utf-8")
+        )["requests"][0]
+        self.assertEqual(observation["upstream_status"], 0)
 
     def test_missing_role_header_projects_declared_main_from_request_shape(self) -> None:
         status, _body, _headers = self._post(self._body(), role=None)

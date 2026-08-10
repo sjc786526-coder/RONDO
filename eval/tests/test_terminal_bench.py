@@ -207,7 +207,10 @@ class FakeHostExecutor:
 
 
 class FakeBudgetProxy:
+    last_kwargs: dict[str, object] = {}
+
     def __init__(self, **kwargs) -> None:
+        type(self).last_kwargs = dict(kwargs)
         self.kwargs = kwargs
         kwargs["ledger"].ensure_run(kwargs["run_id"])
         self.docker_base_url = "http://host.docker.internal:43123/v1"
@@ -882,6 +885,15 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(result.runtime_user, "1000:1000")
         staged_document = materialize_module._read_toml(result.task_path / "task.toml")
         self.assertEqual(staged_document["agent"]["user"], "1000:1000")
+        self.assertEqual(staged_document["verifier"]["user"], "root")
+        self.assertEqual(staged_document["verifier"]["env"], {"HOME": "/root"})
+        for field, value in (("user", "1000:1000"), ("env", {"HOME": "/tmp"})):
+            with self.subTest(verifier_field=field):
+                original = staged_document["verifier"][field]
+                staged_document["verifier"][field] = value
+                with self.assertRaises(MaterializationError):
+                    materialize_module._validate_staged_task(staged_document)
+                staged_document["verifier"][field] = original
         object.__setattr__(
             result,
             "staged_task_digest",
@@ -1013,6 +1025,47 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(bound_contract.container.image_reference, FIX_GIT_IMAGE_REF)
         self.assertEqual(bound_contract.container.image_id, f"sha256:{'a' * 64}")
 
+    def test_supervised_oracle_uses_no_model_key_or_custom_agent(self) -> None:
+        prepared = self.prepare()
+        materialized = prepared.materialized_task
+        fake_supervisor = mock.Mock()
+        fake_supervisor.resolve_image_identity.return_value = DockerImageIdentity(
+            FIX_GIT_IMAGE_REF,
+            f"sha256:{'a' * 64}",
+        )
+        fake_supervisor.supervise_host_command.return_value = DockerExecutionResult(
+            operation=DockerOperation.HOST,
+            argv=(),
+            returncode=0,
+            samples=(),
+            warnings=(),
+        )
+        with mock.patch.object(runner_module, "SubprocessHostCommandRunner"), mock.patch.object(
+            runner_module, "DockerSupervisor", return_value=fake_supervisor
+        ):
+            executor = DockerSupervisedHostHarborExecutor(
+                counter=mock.Mock(),
+                lock_guard=mock.Mock(),
+                lease=HeavyLockLease(token="x" * 16, held=True),
+            )
+            result = asyncio.run(
+                executor.run_oracle(materialized, timeout_seconds=1800)
+            )
+
+        self.assertEqual(result.returncode, 0)
+        argv = fake_supervisor.supervise_host_command.call_args.args[1]
+        self.assertEqual(argv[1:3], ("trials", "start"))
+        self.assertEqual(argv[argv.index("--agent") + 1], "oracle")
+        self.assertNotIn("--model", argv)
+        self.assertNotIn("--agent-kwarg", argv)
+        self.assertNotIn("--agent-env", argv)
+        self.assertEqual(materialized.provider_secret_path.read_bytes(), b"")
+        contract = fake_supervisor.supervise_host_command.call_args.kwargs[
+            "compose_contract"
+        ]
+        self.assertTrue(contract.container.require_container_metrics)
+        self.assertEqual(contract.container.user, "1000:1000")
+
     def test_budgeted_live_path_keeps_official_key_out_of_harbor_and_requires_evidence(self) -> None:
         jobs = self.root / "jobs"
         bundle = jobs / "trial" / "agent" / "guardian-evidence" / "review-1"
@@ -1093,6 +1146,11 @@ class TerminalBenchTests(unittest.TestCase):
             {"HARBOR_TELEMETRY": "off"},
         )
         self.assertNotIn("official-key-sentinel", "\0".join(observed["argv"]))
+        self.assertEqual(FakeBudgetProxy.last_kwargs["timeout_seconds"], 90.0)
+        self.assertNotEqual(
+            FakeBudgetProxy.last_kwargs["timeout_seconds"],
+            self.request(Side.RONDO).timeout_seconds,
+        )
 
     def test_prepare_rejects_every_non_b1_image_before_materialization(self) -> None:
         for value in (FIX_GIT_IMAGE_TAG, f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}", f"sha256:{'c' * 64}"):
@@ -1145,6 +1203,8 @@ memory_mb = 2048
 storage_mb = 10240
 gpus = 0
 allow_internet = true
+
+[verifier.env]
 '''
 
 

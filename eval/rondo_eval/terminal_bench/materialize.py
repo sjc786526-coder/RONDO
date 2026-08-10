@@ -33,6 +33,8 @@ TERMINAL_BENCH_AGENT_GID = 1000
 TERMINAL_BENCH_AGENT_USER = (
     f"{TERMINAL_BENCH_AGENT_UID}:{TERMINAL_BENCH_AGENT_GID}"
 )
+TERMINAL_BENCH_VERIFIER_USER = "root"
+TERMINAL_BENCH_VERIFIER_HOME = "/root"
 
 
 def _create_secret_placeholder(path: Path) -> None:
@@ -271,6 +273,19 @@ class PinnedTaskMaterializer:
             ),
             encoding="utf-8",
         )
+        text = task_toml.read_text(encoding="utf-8")
+        verifier_needle = "[verifier]\n"
+        verifier_env_needle = "[verifier.env]\n"
+        if text.count(verifier_needle) != 1 or text.count(verifier_env_needle) != 1:
+            raise MaterializationError("task verifier metadata is missing or ambiguous")
+        text = text.replace(
+            verifier_needle,
+            f'{verifier_needle}user = "{TERMINAL_BENCH_VERIFIER_USER}"\n',
+        ).replace(
+            verifier_env_needle,
+            f'{verifier_env_needle}HOME = "{TERMINAL_BENCH_VERIFIER_HOME}"\n',
+        )
+        task_toml.write_text(text, encoding="utf-8")
         _validate_staged_task(_read_toml(task_toml))
 
         overlay.write_text(
@@ -409,6 +424,13 @@ def _validate_staged_task(document: dict) -> None:
     agent = document.get("agent")
     if not isinstance(agent, dict) or agent.get("user") != TERMINAL_BENCH_AGENT_USER:
         raise MaterializationError("staged task did not receive the pinned runtime user")
+    verifier = document.get("verifier")
+    if (
+        not isinstance(verifier, dict)
+        or verifier.get("user") != TERMINAL_BENCH_VERIFIER_USER
+        or verifier.get("env") != {"HOME": TERMINAL_BENCH_VERIFIER_HOME}
+    ):
+        raise MaterializationError("staged verifier identity differs from the pinned root phase")
 
 
 def _validate_dataset_manifest(document: dict) -> None:
