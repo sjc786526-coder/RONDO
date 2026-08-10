@@ -930,6 +930,17 @@ class DockerSupervisorTests(unittest.TestCase):
             replace(container_fact(CONTAINER_ID), mounts=(secret,)),
             ("name=seccomp,profile=builtin",),
         )
+        wrong_secret = replace(
+            secret,
+            source="/tmp/compose-123/generated-secret-name",
+        )
+        with self.assertRaises(DockerSupervisionError) as caught:
+            contract.validate_observation(
+                replace(container_fact(CONTAINER_ID), mounts=(wrong_secret,)),
+                ("name=seccomp,profile=builtin",),
+            )
+        self.assertIn("generated-secret-name", caught.exception.reason)
+        self.assertNotIn("/tmp/compose-123", caught.exception.reason)
         with self.assertRaises(DockerSupervisionError):
             contract.validate_observation(
                 replace(

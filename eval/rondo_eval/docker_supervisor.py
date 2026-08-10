@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import re
 import stat
@@ -359,7 +360,25 @@ class HostContainerContract:
                 if mount.destination == self.compose_secret_mount.destination
             ]
             if len(secret_mounts) != 1 or not self.compose_secret_mount.matches(secret_mounts[0]):
-                raise DockerSupervisionError("effective Docker Compose secret mount differs")
+                safe_facts = tuple(
+                    {
+                        "kind": mount.kind,
+                        "source_basename": Path(mount.source).name,
+                        "source_absolute": Path(mount.source).is_absolute(),
+                        "destination": mount.destination,
+                        "read_only": mount.read_only,
+                    }
+                    for mount in secret_mounts
+                )
+                raise DockerSupervisionError(
+                    "effective Docker Compose secret mount differs: "
+                    + json.dumps(
+                        safe_facts,
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
             observed_mounts.remove(secret_mounts[0])
         expected = (
             self.user,
