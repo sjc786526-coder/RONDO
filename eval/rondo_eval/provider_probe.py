@@ -85,7 +85,7 @@ def probe_models_status(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
-            "User-Agent": "rondo-eval-provider-probe/1",
+            "User-Agent": PROBE_USER_AGENT,
         },
         method="GET",
     )

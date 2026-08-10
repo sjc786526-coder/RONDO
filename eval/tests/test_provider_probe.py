@@ -18,6 +18,7 @@ from rondo_eval.config import RepoPaths, RuntimeConfig  # noqa: E402
 from rondo_eval.provider_probe import (  # noqa: E402
     PROBE_USER_AGENT,
     ProviderProbeError,
+    probe_models_status,
     run_provider_probes,
 )
 
@@ -39,6 +40,7 @@ class _Provider:
                 owner.requests.append({
                     "method": "GET",
                     "authorization": self.headers.get("Authorization"),
+                    "user_agent": self.headers.get("User-Agent"),
                 })
                 if owner.models_redirect:
                     self.send_response(302)
@@ -161,6 +163,19 @@ class ProviderProbeTests(unittest.TestCase):
         for path in (self.root / "probe").iterdir():
             if path.is_file():
                 self.assertNotIn(self.provider.secret.encode(), path.read_bytes())
+
+    def test_models_status_probe_uses_codex_user_agent_and_discards_body(self) -> None:
+        status = probe_models_status(
+            "https://provider.example/v1",
+            self.provider.secret,
+            _endpoint_override=self.provider.base + "/models",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(self.provider.requests, [{
+            "method": "GET",
+            "authorization": f"Bearer {self.provider.secret}",
+            "user_agent": PROBE_USER_AGENT,
+        }])
 
 if __name__ == "__main__":
     unittest.main()

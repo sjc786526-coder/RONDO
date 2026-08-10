@@ -155,3 +155,13 @@
   使用冻结 Codex 形状。实现仍由通用 HTTPS base URL 配置驱动，没有供应商域名或专用类型。
 - 新探针 identity/output 为 `plan012-provider-responses-r2` / `plan012-v8-responses-r2`。focused proxy/provider/
   Terminal-Bench 回归 45/45 通过；尚未发出 r2 真实请求。
+
+## 14. Provider 探针 3（明确 HTTP 503）
+
+- clean `4ba05f8` 的 r2 non-stream 请求在一秒内收到上游 HTTP 503，证明 Codex User-Agent 已使请求进入明确的
+  上游响应路径；stream 请求按停止规则没有发送。
+- r2 ledger 已结算为 usage invalid、run stopped，`reserved_usd=0`，保守计价 `$0.755400`。连同上一轮，本阶段
+  已按官方价格保守计入 `$1.510800`；中转站实扣仍未知且未猜测。
+- 供应商公开故障说明把 503 归为 `model_not_found`/当前渠道不可用。下一步仅运行一次不生成 token、丢弃正文的
+  authenticated `/models` 状态探测，并使用同一 Codex User-Agent；它只区分 key/分组端点是否整体可达，不重复
+  Responses 或绕过 Luna 固定模型。
