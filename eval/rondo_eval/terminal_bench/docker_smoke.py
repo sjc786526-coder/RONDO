@@ -6,8 +6,10 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import stat
 import sys
+import tempfile
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -38,8 +40,8 @@ from .results import (
     validate_eval_harness_checkout,
 )
 from .pair import (
+    B2_NO_API_BATCH_ID,
     PairIdentity,
-    PairSequenceLedger,
     load_pair_identity,
     validate_harbor_installation,
 )
@@ -62,10 +64,14 @@ NO_API_SMOKE_BEARER = "rondo-terminal-bench-no-api-smoke"
 NO_API_SMOKE_MODEL = "gpt-5.6-luna"
 NO_API_SMOKE_CALL_ID = "rondo-code-mode-smoke-call"
 NO_API_SMOKE_MARKER = "rondo_code_mode_smoke"
+NO_API_SMOKE_COMMAND = (
+    f"git -C /app/personal-site status --porcelain=v1 --untracked-files=no >/dev/null "
+    f"&& printf {NO_API_SMOKE_MARKER}"
+)
 NO_API_SMOKE_CODE = (
-    'text(JSON.stringify(await tools.exec_command({cmd:"printf '
-    f'{NO_API_SMOKE_MARKER}'
-    '"})));'
+    "const result=await tools.exec_command({cmd:"
+    + json.dumps(NO_API_SMOKE_COMMAND)
+    + "});text(JSON.stringify({output:result.output,exit_code:result.exit_code}));"
 )
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
 _MAX_AGENT_JSON_BYTES = 16 * 1024 * 1024
@@ -73,6 +79,17 @@ _MAX_AGENT_JSON_BYTES = 16 * 1024 * 1024
 
 class DockerNoApiSmokeError(ValueError):
     """Raised when the no-API smoke would leave its loopback-only contract."""
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        samples: tuple[object, ...] = (),
+        exit_code: int = EVIDENCE_ERROR,
+    ) -> None:
+        super().__init__(reason)
+        self.samples = samples
+        self.exit_code = exit_code
 
 
 @dataclass(frozen=True)
@@ -94,7 +111,6 @@ class DockerNoApiSmokeResult:
     requests: tuple[SmokeRequestObservation, ...]
     agent_json_events: int
     tool_round_trip: bool
-    pair_validation: bool = False
 
     @property
     def contract_satisfied(self) -> bool:
@@ -111,37 +127,20 @@ class DockerNoApiSmokeResult:
         return self.parsed.outcome is RunOutcome.COMPLETED and self.contract_satisfied
 
     def safe_summary(self) -> dict[str, object]:
-        summary: dict[str, object] = {
+        if self.harbor.docker_evidence is None:
+            raise DockerNoApiSmokeError("completed smoke lacks Docker evidence")
+        return {
             "schema_version": 1,
             "side": self.prepared.spec.side.value,
+            "status": "completed" if self.passed else "failed",
             "outcome": self.parsed.outcome.value,
             "task_outcome": self.parsed.task_outcome,
             "reward": self.parsed.reward,
             "fake_requests": len(self.requests),
-            "fake_contract_hits": sum(request.accepted for request in self.requests),
-            "fake_contract_satisfied": self.contract_satisfied,
             "agent_json_events": self.agent_json_events,
-            "code_mode_tool_round_trip": self.tool_round_trip,
-            "host_returncode": self.harbor.returncode,
-            "pair_validation": self.pair_validation,
+            "tool_round_trip": self.tool_round_trip,
+            "docker": self.harbor.docker_evidence.receipt(),
         }
-        evidence = self.harbor.docker_evidence
-        if evidence is None or not evidence.samples:
-            summary["docker"] = None
-        else:
-            baseline, final = evidence.samples[0], evidence.samples[-1]
-            summary["docker"] = {
-                "sample_count": len(evidence.samples),
-                "warnings": list(evidence.warnings),
-                "data_root": final.data_root,
-                "baseline_total_bytes": baseline.docker_total_bytes,
-                "final_total_bytes": final.docker_total_bytes,
-                "baseline_task_bytes": baseline.task_bytes,
-                "final_task_bytes": final.task_bytes,
-                "baseline_data_root_free_bytes": baseline.data_root_filesystem_free_bytes,
-                "final_data_root_free_bytes": final.data_root_filesystem_free_bytes,
-            }
-        return summary
 
 
 class HostExecutorFactory(Protocol):
@@ -355,10 +354,8 @@ class LocalResponsesFakeServer:
                     raise DockerNoApiSmokeError("first request already contains tool output")
             elif number == 2:
                 output = _find_custom_tool_output(request)
-                if output is None or not _contains_marker(output, NO_API_SMOKE_MARKER):
+                if output is None or not _valid_exec_result(output):
                     raise DockerNoApiSmokeError("second request lacks code-mode tool output")
-                if isinstance(output, dict) and output.get("success") is False:
-                    raise DockerNoApiSmokeError("code-mode tool output reports failure")
                 self._tool_round_trip = True
             else:
                 raise DockerNoApiSmokeError("no-API fake received an extra model round")
@@ -441,50 +438,70 @@ async def run_docker_no_api_smoke(
     if not math.isfinite(request.budget_usd) or request.budget_usd <= 0:
         raise DockerNoApiSmokeError("no-API smoke RunSpec budget field is invalid")
     server = server_factory()
-    with server:
-        prepared = prepare_terminal_bench_run(
-            config,
-            replace(request, provider_transport_base_url=server.docker_base_url),
-            materializer=materializer,
-        )
-        pair_identity.validate_prepared(prepared, mode="no_api")
-        if (
-            prepared.spec.websocket
-            or prepared.spec.code_mode_host is not True
-            or prepared.spec.sandbox_network_access is not True
-            or prepared.spec.provider.main_model != NO_API_SMOKE_MODEL
-        ):
-            raise DockerNoApiSmokeError("no-API smoke projection differs from the frozen contract")
-        executor = executor_factory(
-            counter=counter,
-            lock_guard=lock_guard,
-            lease=lease,
-        )
-        backend = InjectedHostHarborBackend(
-            executor,
-            getenv=lambda name: (
-                NO_API_SMOKE_BEARER
-                if name == prepared.spec.provider.api_key_env
+    harbor: HostHarborResult | None = None
+    parsed: ParsedHarborResult | None = None
+    agent_json_events: int | None = None
+    try:
+        with server:
+            prepared = prepare_terminal_bench_run(
+                config,
+                replace(request, provider_transport_base_url=server.docker_base_url),
+                materializer=materializer,
+            )
+            pair_identity.validate_prepared(prepared, mode="no_api")
+            if (
+                prepared.spec.websocket
+                or prepared.spec.code_mode_host is not True
+                or prepared.spec.sandbox_network_access is not True
+                or prepared.spec.provider.main_model != NO_API_SMOKE_MODEL
+            ):
+                raise DockerNoApiSmokeError(
+                    "no-API smoke projection differs from the frozen contract"
+                )
+            executor = executor_factory(
+                counter=counter,
+                lock_guard=lock_guard,
+                lease=lease,
+            )
+            backend = InjectedHostHarborBackend(
+                executor,
+                getenv=lambda name: (
+                    NO_API_SMOKE_BEARER
+                    if name == prepared.spec.provider.api_key_env
+                    else None
+                ),
+            )
+            harbor = await UnifiedTerminalBenchRunner(backend).run(prepared)
+            parsed = parse_single_task_result(
+                harbor.jobs_dir,
+                host_returncode=harbor.returncode,
+            )
+            agent_json_events = (
+                _validate_agent_codex_json(harbor.jobs_dir)
+                if parsed.outcome is RunOutcome.COMPLETED
                 else None
+            )
+            observations = server.requests
+    except Exception as exc:
+        samples = tuple(getattr(exc, "samples", ()))
+        if not samples and harbor is not None and harbor.docker_evidence is not None:
+            samples = tuple(harbor.docker_evidence.samples)
+        raise DockerNoApiSmokeError(
+            "no-API supervised run failed",
+            samples=samples,
+            exit_code=(
+                INFRA_ERROR
+                if isinstance(exc, (DockerSupervisionError, RuntimeBridgeError))
+                or (parsed is not None and parsed.outcome is RunOutcome.INFRA_FAILED)
+                else EVIDENCE_ERROR
             ),
-        )
-        harbor = await UnifiedTerminalBenchRunner(backend).run(prepared)
-        parsed = parse_single_task_result(
-            harbor.jobs_dir,
-            host_returncode=harbor.returncode,
-        )
-        agent_json_events = (
-            _validate_agent_codex_json(harbor.jobs_dir)
-            if parsed.outcome is RunOutcome.COMPLETED
-            else 0
-        )
-        observations = server.requests
+        ) from None
     return DockerNoApiSmokeResult(
         prepared=prepared,
         harbor=harbor,
         parsed=parsed,
         requests=observations,
-        agent_json_events=agent_json_events,
+        agent_json_events=agent_json_events if agent_json_events is not None else 0,
         tool_round_trip=server.tool_round_trip,
     )
 
@@ -503,14 +520,31 @@ def _find_custom_tool_output(request: dict[str, object]) -> object | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def _contains_marker(value: object, marker: str) -> bool:
-    if isinstance(value, str):
-        return marker in value
-    if isinstance(value, list):
-        return any(_contains_marker(item, marker) for item in value)
-    if isinstance(value, dict):
-        return any(_contains_marker(item, marker) for item in value.values())
-    return False
+def _valid_exec_result(value: object) -> bool:
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"type", "text"}
+            or item["type"] != "input_text"
+            or not isinstance(item["text"], str)
+            for item in value
+        )
+    ):
+        return False
+    try:
+        result = json.loads(value[1]["text"])
+    except json.JSONDecodeError:
+        return False
+    return (
+        isinstance(result, dict)
+        and set(result) == {"output", "exit_code"}
+        and type(result["exit_code"]) is int
+        and result["exit_code"] == 0
+        and isinstance(result["output"], str)
+        and result["output"].rstrip("\r\n") == NO_API_SMOKE_MARKER
+    )
 
 
 def _validate_agent_codex_json(jobs_dir: Path) -> int:
@@ -565,15 +599,10 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m rondo_eval.terminal_bench.docker_smoke"
     )
-    parser.add_argument("--side", required=True, choices=[side.value for side in Side])
-    parser.add_argument("--binary-manifest", required=True, type=Path)
+    parser.add_argument("--rondo-binary-manifest", required=True, type=Path)
+    parser.add_argument("--codex-binary-manifest", required=True, type=Path)
     parser.add_argument("--docker-host-volume", required=True, type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
-    parser.add_argument(
-        "--pair-validation",
-        action="store_true",
-        help="consume the tracked RONDO-then-Codex no-API pair sequence",
-    )
     return parser
 
 
@@ -581,86 +610,65 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         paths = RepoPaths.discover(Path.cwd())
-        validate_eval_harness_checkout(common_root=paths.common_root)
-        config = load_runtime_config(paths)
-        side = Side(args.side)
-        manifest = _load_manifest(args.binary_manifest, paths.common_root)
         pair_identity = load_pair_identity()
+        eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
+        config = load_runtime_config(paths)
         seccomp_profile = pair_identity.validate_no_api_seccomp(
             project_root=paths.worktree_root
         )
-        pair_identity.validate_manifest(
-            common_root=paths.common_root,
-            side=side,
-            manifest_path=args.binary_manifest,
-            manifest=manifest,
-        )
         validate_harbor_installation(pair_identity, executable=HARBOR_EXECUTABLE)
-        no_api_mode = pair_identity.mode("no_api")
-        smoke_id = f"tb-no-api-{side.value}-{uuid.uuid4().hex[:12]}"
-        work_root = paths.common_root / "eval-data" / "work" / smoke_id
-        if work_root.exists() or work_root.is_symlink():
-            raise DockerNoApiSmokeError("no-API smoke work directory already exists")
-        work_root.mkdir(parents=True, mode=0o700)
-        request = TerminalBenchRequest(
-            side=side,
-            batch_id=no_api_mode.batch_id,
-            binary=manifest,
-            image_digest=FIX_GIT_IMAGE_DIGEST,
-            source_checkout=str(
-                paths.common_root
-                / "eval-data"
-                / "sources"
-                / "terminal-bench-2-1-ffccbe05"
-            ),
-            staging_root=str(work_root / "staging"),
-            docker_task_id=smoke_id,
-            memory_bytes=2 * 1024**3,
-            memory_swap_bytes=3 * 1024**3,
-            pids_limit=256,
-            provider_transport_base_url=None,
-            timeout_seconds=args.timeout_seconds,
-            max_retries=0,
-            budget_usd=5.0,
-            seccomp_profile_path=str(seccomp_profile),
-            seccomp_profile_source_sha256=pair_identity.no_api_seccomp.source_sha256,
-            seccomp_profile_effective_sha256=pair_identity.no_api_seccomp.effective_sha256,
-        )
+        manifest_paths = {
+            Side.RONDO: args.rondo_binary_manifest,
+            Side.CODEX: args.codex_binary_manifest,
+        }
+        manifests = {
+            side: _load_manifest(path, paths.common_root)
+            for side, path in manifest_paths.items()
+        }
+        for side in Side:
+            pair_identity.validate_manifest(
+                common_root=paths.common_root,
+                side=side,
+                manifest_path=manifest_paths[side],
+                manifest=manifests[side],
+            )
         proof = lease_from_watchdog()
         counter = DockerCliCounter(
             host_data_root=args.docker_host_volume,
             desktop_host_probe=PowerShellDockerDesktopHostProbe(),
         )
-        if args.pair_validation:
-            sequence_path = (
-                paths.common_root
-                / "eval-data"
-                / "pairs"
-                / f"{pair_identity.pair_id}-no-api.json"
+        summaries: list[dict[str, object]] = []
+        for side in (Side.RONDO, Side.CODEX):
+            smoke_id = f"tb-no-api-{side.value}-{uuid.uuid4().hex[:12]}"
+            work_root = paths.common_root / "eval-data" / "work" / smoke_id
+            if work_root.exists() or work_root.is_symlink():
+                raise DockerNoApiSmokeError("no-API smoke work directory already exists")
+            work_root.mkdir(parents=True, mode=0o700)
+            request = TerminalBenchRequest(
+                side=side,
+                batch_id=B2_NO_API_BATCH_ID,
+                binary=manifests[side],
+                image_digest=FIX_GIT_IMAGE_DIGEST,
+                source_checkout=str(
+                    paths.common_root
+                    / "eval-data"
+                    / "sources"
+                    / "terminal-bench-2-1-ffccbe05"
+                ),
+                staging_root=str(work_root / "staging"),
+                docker_task_id=smoke_id,
+                memory_bytes=2 * 1024**3,
+                memory_swap_bytes=3 * 1024**3,
+                pids_limit=256,
+                provider_transport_base_url=None,
+                timeout_seconds=args.timeout_seconds,
+                max_retries=0,
+                budget_usd=5.0,
+                seccomp_profile_path=str(seccomp_profile),
+                seccomp_profile_source_sha256=pair_identity.no_api_seccomp.source_sha256,
+                seccomp_profile_effective_sha256=pair_identity.no_api_seccomp.effective_sha256,
+                require_container_metrics=True,
             )
-            with PairSequenceLedger(
-                sequence_path,
-                identity=pair_identity,
-                mode="no_api",
-            ) as sequence:
-                sequence.claim(side=side, run_id=smoke_id)
-                try:
-                    result = asyncio.run(
-                        run_docker_no_api_smoke(
-                            config,
-                            request,
-                            counter=counter,
-                            lock_guard=proof.guard,
-                            lease=proof.lease,
-                            pair_identity=pair_identity,
-                        )
-                    )
-                except BaseException:
-                    sequence.finish(run_id=smoke_id, completed=False)
-                    raise
-                sequence.finish(run_id=smoke_id, completed=result.passed)
-            result = replace(result, pair_validation=True)
-        else:
             result = asyncio.run(
                 run_docker_no_api_smoke(
                     config,
@@ -671,20 +679,66 @@ def main(argv: list[str] | None = None) -> int:
                     pair_identity=pair_identity,
                 )
             )
-        print(json.dumps(result.safe_summary(), sort_keys=True, separators=(",", ":")))
-        return _smoke_exit_code(result)
+            summary = result.safe_summary()
+            summaries.append(summary)
+            if not result.passed:
+                print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
+                return _smoke_exit_code(result)
+        receipt = {
+            "schema_version": 1,
+            "pair_id": pair_identity.pair_id,
+            "pair_lock_sha256": pair_identity.lock_sha256,
+            "eval_harness_commit": eval_harness_commit,
+            "order": [Side.RONDO.value, Side.CODEX.value],
+            "official_api_requests": 0,
+            "actual_usd": 0.0,
+            "results": summaries,
+        }
+        _write_current_receipt(paths.common_root / "eval-data" / "b2" / "current.json", receipt)
+        print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+        return 0
     except (DockerSupervisionError, RuntimeBridgeError) as exc:
         _print_safe_cli_error(exc, exit_code=INFRA_ERROR)
         return INFRA_ERROR
+    except DockerNoApiSmokeError as exc:
+        _print_safe_cli_error(exc, exit_code=exc.exit_code)
+        return exc.exit_code
     except (
         ConfigError,
-        DockerNoApiSmokeError,
         TerminalBenchRunError,
         OSError,
         ValueError,
     ) as exc:
         _print_safe_cli_error(exc, exit_code=EVIDENCE_ERROR)
         return EVIDENCE_ERROR
+
+
+def _write_current_receipt(path: Path, receipt: dict[str, object]) -> None:
+    encoded = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.parent.resolve() != path.parent or path.parent.is_symlink():
+        raise DockerNoApiSmokeError("B2 receipt directory is unsafe")
+    descriptor, temporary = tempfile.mkstemp(prefix=".current-", dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        parent = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def _print_safe_cli_error(exc: BaseException, *, exit_code: int) -> None:

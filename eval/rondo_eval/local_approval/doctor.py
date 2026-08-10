@@ -26,6 +26,7 @@ from .client import (
     settings_from_config,
 )
 from .launcher import (
+    GPU_MODEL_SERVING_CAPABILITY,
     LLAMA_CPP_BUILD,
     LLAMA_CPP_COMMIT,
     ModelMissingError,
@@ -46,6 +47,8 @@ class DoctorReport:
     model: str
     service: str
     schema: str
+    runtime_capability: str = "not_checked"
+    model_backed_validation: str = "not_run"
 
     def to_dict(self) -> dict[str, str | int]:
         return asdict(self)
@@ -125,13 +128,15 @@ def run_doctor(
                 "not_checked",
             )
         return DoctorReport(
-            "infrastructure_ready_model_missing",
+            "cpu_frontend_ready_model_missing_gpu_unvalidated",
             MODEL_MISSING,
             "valid",
-            "ready",
+            "cpu_only_ready",
             "missing",
             "not_started",
             "not_checked",
+            runtime.capability,
+            runtime.model_backed_validation,
         )
     except ConfigError:
         return DoctorReport(
@@ -142,6 +147,19 @@ def run_doctor(
             "invalid",
             "not_checked",
             "not_checked",
+        )
+
+    if runtime.capability != GPU_MODEL_SERVING_CAPABILITY:
+        return DoctorReport(
+            "gpu_runtime_not_validated",
+            INFRA_ERROR,
+            "valid",
+            "cpu_only",
+            "present",
+            "not_started",
+            "not_checked",
+            runtime.capability,
+            runtime.model_backed_validation,
         )
 
     try:
@@ -201,6 +219,8 @@ def run_doctor(
         "present",
         "reachable",
         "valid",
+        runtime.capability,
+        "model_schema_probe_passed",
     )
 
 

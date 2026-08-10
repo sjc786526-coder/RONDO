@@ -25,10 +25,24 @@ from .materialize import TERMINAL_BENCH_AGENT_USER
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _EVAL_PROVIDER_ID = "rondo_eval_openai"
+FIX_GIT_CANONICAL_WORKDIR = "/app/personal-site"
 
 
 class AdapterError(RuntimeError):
     """Raised before or during an agent run when its frozen contract is unsafe."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str | None = None,
+        command_id: str | None = None,
+        stderr_summary: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.command_id = command_id
+        self.stderr_summary = stderr_summary
 
 
 class UploadBinaryAdapter(HarborCodexAgent):
@@ -188,6 +202,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
             f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))} && "
             f"chmod 0755 {shlex.quote(str(self.remote_directory))} "
             f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))}",
+            stage="install",
+            command_id="prepare_bundle_dirs",
         )
         try:
             await environment.upload_file(source, self.remote_path)
@@ -196,30 +212,97 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 self.remote_code_mode_host_path,
             )
             await environment.upload_file(bwrap_source, self.remote_bwrap_path)
-        except Exception as exc:
-            raise AdapterError("binary bundle upload failed") from exc
+        except Exception:
+            raise _diagnostic_error(
+                stage="install",
+                command_id="upload_bundle",
+                stderr_summary="other_redacted",
+            ) from None
+        directories = (
+            str(self.remote_directory),
+            str(PurePosixPath(self.remote_bwrap_path).parent),
+        )
+        files = (
+            self.remote_path,
+            self.remote_code_mode_host_path,
+            self.remote_bwrap_path,
+        )
+        # The bundle directories are created by root, while Docker Compose cp
+        # preserves the frozen host files as the agent user.  With every
+        # capability dropped, consume those facts instead of mutating them.
+        for remote_path, kind in (
+            *((path, "directory") for path in directories),
+            *((path, "file") for path in files),
+        ):
+            quoted = shlex.quote(remote_path)
+            type_test = "-d" if kind == "directory" else "-f"
+            await _checked_exec(
+                environment,
+                f"test {type_test} {quoted} && test ! -L {quoted}",
+                stage="install",
+                command_id=f"verify_{kind}_type",
+            )
+            ownership = await _checked_exec(
+                environment,
+                f"stat -c '%u:%g' -- {quoted}",
+                stage="install",
+                command_id=f"verify_{kind}_owner",
+            )
+            try:
+                _require_ownership(
+                    ownership,
+                    remote_path,
+                    "0:0" if kind == "directory" else TERMINAL_BENCH_AGENT_USER,
+                )
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id=f"verify_{kind}_owner",
+                    stderr_summary="other_redacted",
+                ) from None
+            if kind == "file":
+                await _checked_exec(
+                    environment,
+                    f"test \"$(stat -c '%a' -- {quoted})\" = 555",
+                    stage="install",
+                    command_id="verify_file_mode",
+                )
         await _checked_exec(
             environment,
-            f"chown -R 0:0 -- {shlex.quote(str(self.remote_directory))} && "
-            f"chmod 0755 {shlex.quote(str(self.remote_directory))} "
-            f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))}",
+            "chmod 0755 " + " ".join(shlex.quote(path) for path in directories),
+            stage="install",
+            command_id="set_bundle_dir_modes",
         )
         for remote_path, expected_digest in (
             (self.remote_path, self.manifest.sha256),
             (self.remote_code_mode_host_path, self.manifest.code_mode_host_sha256),
             (self.remote_bwrap_path, self.manifest.bwrap_sha256),
         ):
-            await _checked_exec(environment, f"chmod 0555 {shlex.quote(remote_path)}")
             result = await _checked_exec(
                 environment,
                 f"sha256sum -- {shlex.quote(remote_path)}",
+                stage="install",
+                command_id="verify_bundle_sha256",
             )
-            remote_digest = _parse_sha256sum(result, remote_path)
+            try:
+                remote_digest = _parse_sha256sum(result, remote_path)
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id="verify_bundle_sha256",
+                    stderr_summary="other_redacted",
+                ) from None
             if remote_digest != expected_digest:
-                raise AdapterError("uploaded binary sha256 does not match BinaryManifest")
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id="verify_bundle_sha256",
+                    stderr_summary="other_redacted",
+                )
         await _checked_exec(
             environment,
             f"{shlex.quote(self.remote_path)} --version",
+            stage="install",
+            command_id="verify_binary_version",
         )
 
     @with_prompt_template
@@ -230,52 +313,113 @@ class UploadBinaryAdapter(HarborCodexAgent):
         remote_home = self._REMOTE_CODEX_HOME.as_posix()
         remote_secrets = self._REMOTE_CODEX_SECRETS_DIR.as_posix()
         remote_auth = (self._REMOTE_CODEX_SECRETS_DIR / "auth.json").as_posix()
+        remote_gitconfig = (self._REMOTE_CODEX_HOME / "gitconfig").as_posix()
         agent_dir = EnvironmentPaths.agent_dir.as_posix()
         output_path = (EnvironmentPaths.agent_dir / self._OUTPUT_FILENAME).as_posix()
         stderr_path = (EnvironmentPaths.agent_dir / self._STDERR_FILENAME).as_posix()
-        nonsecret_env = {"CODEX_HOME": remote_home}
+        nonsecret_env = {
+            "CODEX_HOME": remote_home,
+            "GIT_CONFIG_GLOBAL": remote_gitconfig,
+        }
 
-        # Harbor's agent phase uses the staged task's numeric user, and the
-        # Compose overlay independently freezes the main service as 1000:1000.
-        # Root is used only to prepare adapter-owned paths and make the task
-        # worktree writable by that user.  Refuse images whose WORKDIR is `/`
-        # rather than recursively changing ownership outside the task.
+        # Harbor freezes environment.default_user to the task's 1000:1000
+        # identity.  Root may only expose the exact current task workdir; all
+        # adapter-owned state is created by the agent user itself.  This keeps
+        # the path viable under cap_drop=ALL without ownership mutation.
         await _checked_exec(
             environment,
             (
                 "set -e; task_workdir=$(pwd -P); "
-                'test "$task_workdir" != /; test -d "$task_workdir"; '
+                f'test "$task_workdir" = "{FIX_GIT_CANONICAL_WORKDIR}"; '
+                'test -d "$task_workdir"; '
+                'test ! -L "$task_workdir"; '
+                'chmod -R a+rwX -- "$task_workdir"'
+            ),
+            stage="run",
+            command_id="project_task_permissions",
+        )
+        await _checked_exec_as_agent(
+            environment,
+            command=(
+                "set -e; "
+                f'test "$(id -u):$(id -g)" = "{TERMINAL_BENCH_AGENT_USER}"; '
+                "task_workdir=$(pwd -P); "
+                f'test "$task_workdir" = "{FIX_GIT_CANONICAL_WORKDIR}"; '
+                'test -d "$task_workdir"; '
                 f"mkdir -p {shlex.quote(remote_home)} {shlex.quote(remote_secrets)} "
                 f"{shlex.quote(agent_dir)}; "
-                f"chown -R {TERMINAL_BENCH_AGENT_USER} -- "
-                f"{shlex.quote(remote_home)} {shlex.quote(remote_secrets)} "
-                f'{shlex.quote(agent_dir)} "$task_workdir"; '
                 f"chmod 0700 {shlex.quote(remote_home)} {shlex.quote(remote_secrets)}; "
                 f"chmod 0750 {shlex.quote(agent_dir)}; "
-                'chmod u+rwx "$task_workdir"'
+                f"test -O {shlex.quote(remote_home)}; "
+                f"test -O {shlex.quote(remote_secrets)}; "
+                f"test -O {shlex.quote(agent_dir)}; "
+                'test -w "$task_workdir"; '
+                'test -d "$task_workdir/.git"; test -w "$task_workdir/.git"; '
+                'test -d "$task_workdir/.git/refs"; '
+                'test -w "$task_workdir/.git/refs"; '
+                'test -d "$task_workdir/.git/logs"; '
+                'test -w "$task_workdir/.git/logs"; '
+                'test -f "$task_workdir/.git/index"; '
+                'test -w "$task_workdir/.git/index"; '
+                f": > {shlex.quote(remote_gitconfig)}; "
+                f"chmod 0600 {shlex.quote(remote_gitconfig)}; "
+                'git config --global --replace-all safe.directory "$task_workdir"; '
+                'test "$(git config --global --get-all safe.directory | wc -l)" -eq 1; '
+                'test "$(git config --global --get-all safe.directory)" = "$task_workdir"; '
+                'test "$(git -C "$task_workdir" rev-parse --is-inside-work-tree)" = true; '
+                'git -C "$task_workdir" status --porcelain=v1 --untracked-files=no >/dev/null'
             ),
+            env=nonsecret_env,
+            stage="run",
+            command_id="prepare_agent_and_git",
         )
 
         try:
             # Compose mounts the private staging file as a Docker secret.  No
             # environment.exec ``-e KEY=value`` argument is used because Harbor's
             # Docker backend would serialize that value into docker argv.
+            secret_path = "/run/secrets/rondo_eval_provider_api_key"
+            secret_owner = await _checked_exec_as_agent(
+                environment,
+                command=f"stat -c '%u:%g' -- {shlex.quote(secret_path)}",
+                env=nonsecret_env,
+                stage="run",
+                command_id="inspect_secret_owner",
+            )
+            try:
+                _require_ownership(
+                    secret_owner,
+                    secret_path,
+                    TERMINAL_BENCH_AGENT_USER,
+                )
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="run",
+                    command_id="verify_secret_owner",
+                    stderr_summary="other_redacted",
+                ) from None
             auth_command = (
-                "set -e; test -s /run/secrets/rondo_eval_provider_api_key; umask 077; "
+                f"set -e; test -f {shlex.quote(secret_path)}; "
+                f"test ! -L {shlex.quote(secret_path)}; "
+                f"test -s {shlex.quote(secret_path)}; "
+                f"test -r {shlex.quote(secret_path)}; "
+                f"test ! -w {shlex.quote(secret_path)}; umask 077; "
                 "python3 -c 'import json,sys; print(json.dumps({\"OPENAI_API_KEY\":sys.stdin.read()}))' "
-                "< /run/secrets/rondo_eval_provider_api_key "
+                f"< {shlex.quote(secret_path)} "
                 f"> {shlex.quote(remote_auth)}; "
-                f"chown {TERMINAL_BENCH_AGENT_USER} -- {shlex.quote(remote_auth)}; "
                 f"chmod 0600 {shlex.quote(remote_auth)}; "
                 f"ln -sfn {shlex.quote(remote_auth)} "
                 f"{shlex.quote(remote_home + '/auth.json')}"
             )
-            await _checked_exec(
+            await _checked_exec_as_agent(
                 environment,
-                auth_command,
+                command=auth_command,
+                env=nonsecret_env,
+                stage="run",
+                command_id="write_auth",
             )
 
-            await self.exec_as_agent(
+            await _checked_exec_as_agent(
                 environment,
                 command=(
                     f'test "$(id -u):$(id -g)" = "{TERMINAL_BENCH_AGENT_USER}" '
@@ -285,6 +429,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
                     f"&& test ! -w {shlex.quote(self.remote_bwrap_path)}"
                 ),
                 env=nonsecret_env,
+                stage="run",
+                command_id="verify_runtime_access",
             )
 
             model = self.model_name.split("/", maxsplit=1)[-1]
@@ -326,17 +472,26 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"</dev/null 2>{shlex.quote(stderr_path)} | tee {shlex.quote(output_path)}"
             )
             _validate_safe_codex_command(command, side=self.side)
-            await self.exec_as_agent(environment, command=command, env=nonsecret_env)
+            await _checked_exec_as_agent(
+                environment,
+                command=command,
+                env=nonsecret_env,
+                stage="run",
+                command_id="agent_exec",
+                timeout_sec=None,
+            )
         finally:
             # Cleanup is deliberately restricted to the two adapter-owned paths.
             try:
-                await self.exec_as_agent(
+                await _checked_exec_as_agent(
                     environment,
                     command=(
                         f"rm -rf -- {shlex.quote(remote_secrets)} "
                         f"{shlex.quote(remote_home)}"
                     ),
                     env=nonsecret_env,
+                    stage="run",
+                    command_id="cleanup_agent_state",
                 )
             except Exception:
                 pass
@@ -522,17 +677,102 @@ def _verify_local_binary(path: Path, expected: str) -> None:
         raise AdapterError("local binary sha256 does not match BinaryManifest")
 
 
-async def _checked_exec(environment: EnvironmentLike, command: str):
+async def _checked_exec(
+    environment: EnvironmentLike,
+    command: str,
+    *,
+    stage: str,
+    command_id: str,
+):
+    if not re.fullmatch(r"[a-z][a-z0-9_.-]{0,31}", stage) or not re.fullmatch(
+        r"[a-z][a-z0-9_.-]{0,63}", command_id
+    ):
+        raise AdapterError("container diagnostic identity is invalid")
     try:
         result = await environment.exec(command, timeout_sec=30, user="root")
-        code, _stdout, _stderr = exec_result(result)
-    except Exception as exc:
-        if isinstance(exc, AdapterError):
-            raise
-        raise AdapterError("container command failed") from exc
+        code, _stdout, stderr = exec_result(result)
+    except Exception:
+        stderr_summary = "other_redacted"
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=stderr_summary,
+        ) from None
     if code != 0:
-        raise AdapterError("container command failed")
+        stderr_summary = _classify_stderr(stderr)
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=stderr_summary,
+        )
     return result
+
+
+async def _checked_exec_as_agent(
+    environment: EnvironmentLike,
+    *,
+    command: str,
+    env: dict[str, str],
+    stage: str,
+    command_id: str,
+    timeout_sec: int | None = 30,
+):
+    """Execute as Harbor's frozen default user without its raw error renderer."""
+
+    if not re.fullmatch(r"[a-z][a-z0-9_.-]{0,31}", stage) or not re.fullmatch(
+        r"[a-z][a-z0-9_.-]{0,63}", command_id
+    ):
+        raise AdapterError("container diagnostic identity is invalid")
+    try:
+        shell_command = (
+            command
+            if command.startswith("set -o pipefail; ")
+            else f"set -o pipefail; {command}"
+        )
+        result = await environment.exec(
+            shell_command,
+            env=env,
+            timeout_sec=timeout_sec,
+        )
+        code, _stdout, stderr = exec_result(result)
+    except Exception as exc:
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=_classify_stderr(str(exc)),
+        ) from None
+    if code != 0:
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=_classify_stderr(stderr),
+        )
+    return result
+
+
+def _classify_stderr(stderr: str) -> str:
+    if not stderr:
+        return "empty"
+    lowered = stderr[:4096].casefold()
+    if "permission denied" in lowered or "operation not permitted" in lowered:
+        return "permission_denied"
+    if "not found" in lowered or "no such file" in lowered:
+        return "not_found"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "timeout"
+    return "other_redacted"
+
+
+def _diagnostic_error(
+    *, stage: str, command_id: str, stderr_summary: str
+) -> AdapterError:
+    return AdapterError(
+        f"container command failed: stage={stage} command_id={command_id} "
+        f"stderr={stderr_summary}",
+        stage=stage,
+        command_id=command_id,
+        stderr_summary=stderr_summary,
+    )
 
 
 def _parse_sha256sum(result: object, expected_path: str) -> str:
@@ -550,3 +790,14 @@ def _parse_sha256sum(result: object, expected_path: str) -> str:
     if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
         raise AdapterError("sha256 command returned malformed output")
     return digest
+
+
+def _require_ownership(
+    result: object, expected_path: str, expected_owner: str
+) -> None:
+    try:
+        _code, stdout, _stderr = exec_result(result)
+    except TypeError as exc:
+        raise AdapterError("container ownership command returned an unsupported result") from exc
+    if stdout != f"{expected_owner}\n":
+        raise AdapterError(f"container path ownership differs: {expected_path}")

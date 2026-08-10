@@ -22,12 +22,18 @@ from .. import runtime_bridge
 from ..config import ConfigError, RepoPaths, RuntimeConfig, load_local_model_secret, load_runtime_config
 from ..exit_codes import CONFIG_ERROR, INFRA_ERROR, MODEL_MISSING, SUCCESS
 from .client import LocalApprovalSettings, resolve_config_path, settings_from_config
+from .identity import (
+    LauncherIdentity,
+    clear_launcher_identity,
+    publish_launcher_identity,
+)
 
 
 LLAMA_CPP_BUILD = 10333
 LLAMA_CPP_COMMIT = "08659901c43b51de735740f1cf61bb82fbe0c4e4"
 LLAMA_CPP_ASSET_SHA256 = "936ce04d98abe2a977e9dd2ff92659bb96947e136acee8f2bc3e21d8eaebbf23"
 LLAMA_CPP_BINARY_SHA256 = "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c15315dbd8aa4bbe"
+GPU_MODEL_SERVING_CAPABILITY = "gpu_model_serving_validated"
 _VERSION_TIMEOUT_SECONDS = 10
 _ROUTER_TIMEOUT_SECONDS = 10.0
 _WATCHDOG_INTERVAL_SECONDS = 5.0
@@ -47,6 +53,9 @@ class RuntimeInspection:
     status: str
     binary: Path | None
     detail: str
+    identity_sha256: str | None = None
+    capability: str = "not_checked"
+    model_backed_validation: str = "not_run"
 
     @property
     def ok(self) -> bool:
@@ -100,10 +109,13 @@ def resolve_binary(config: RuntimeConfig, settings: LocalApprovalSettings) -> Pa
     if found is None:
         return None
     try:
-        found.resolve().relative_to(config.paths.common_root.resolve())
-    except ValueError:
+        resolved = found.resolve(strict=True)
+        resolved.relative_to(config.paths.common_root.resolve(strict=True))
+    except (OSError, ValueError):
         return None
-    return found
+    # Execute the already-inspected canonical target, never the configurable
+    # symlink spelling that could be retargeted between inspection and Popen.
+    return resolved
 
 
 def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> RuntimeInspection:
@@ -111,7 +123,7 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
     if binary is None:
         return RuntimeInspection("runtime_missing", None, "pinned llama-server binary is unavailable")
     try:
-        _verify_runtime_closure(config, binary)
+        runtime_identity = _verify_runtime_closure(config, binary)
     except (OSError, ValueError):
         return RuntimeInspection(
             "runtime_pin_mismatch",
@@ -134,7 +146,14 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
     build_matches = re.search(r"(?<!\d)10333(?!\d)", version) is not None
     if completed.returncode != 0 or not build_matches or not commit_matches:
         return RuntimeInspection("runtime_pin_mismatch", binary, "llama-server does not match b10333")
-    return RuntimeInspection("runtime_ready", binary, "llama.cpp b10333 is available")
+    return RuntimeInspection(
+        "runtime_ready",
+        binary,
+        "llama.cpp b10333 CPU x64 runtime is available; model/GPU serving is not validated",
+        runtime_identity,
+        "cpu_only_x64",
+        "not_run",
+    )
 
 
 def _binary_sha256(path: Path) -> str:
@@ -477,12 +496,14 @@ def run_server(
     *,
     watchdog_factory: Callable[[], runtime_bridge.WatchdogProof] | None = None,
     popen: Callable[..., subprocess.Popen[Any]] = subprocess.Popen,
+    identity_publisher: Callable[..., LauncherIdentity] = publish_launcher_identity,
+    identity_clearer: Callable[[RuntimeConfig, LauncherIdentity], None] = clear_launcher_identity,
     watchdog_interval_seconds: float = _WATCHDOG_INTERVAL_SECONDS,
 ) -> int:
     settings = settings_from_config(config)
-    # The model check deliberately precedes runtime probing: an empty formal
-    # configuration must report the stable only-waiting-for-model state.
-    model_path(config, settings)
+    # The model check deliberately precedes runtime probing so an empty formal
+    # configuration reports the stable model-missing exit without server work.
+    model = model_path(config, settings)
     if watchdog_interval_seconds <= 0:
         raise ConfigError("watchdog interval must be positive")
     try:
@@ -494,8 +515,12 @@ def run_server(
         raise LauncherError("shared watchdog lease is unavailable")
 
     runtime = inspect_runtime(config, settings)
-    if not runtime.ok or runtime.binary is None:
+    if not runtime.ok or runtime.binary is None or runtime.identity_sha256 is None:
         raise LauncherError(runtime.detail)
+    if runtime.capability != GPU_MODEL_SERVING_CAPABILITY:
+        raise LauncherError(
+            "the pinned runtime is CPU-only; GPU/model serving remains unvalidated"
+        )
     command = build_serve_command(config, settings, runtime.binary)
     environment = serve_environment(config)
     if not _watchdog_held(watchdog):
@@ -504,6 +529,22 @@ def run_server(
         process = popen(command, env=environment)
     except (OSError, ValueError) as exc:
         raise LauncherError("llama-server could not be started") from exc
+    try:
+        identity = identity_publisher(
+            config,
+            pid=process.pid,
+            command=command,
+            runtime_sha256=runtime.identity_sha256,
+            model_sha256=settings.model_sha256,
+            model_path=model,
+            model_id=settings.model_id,
+            base_url=settings.base_url,
+            host=settings.host,
+            port=settings.port,
+        )
+    except (AttributeError, OSError, ConfigError) as exc:
+        _stop_server_process(process)
+        raise LauncherError("local approval launcher identity could not be published") from exc
     try:
         while True:
             try:
@@ -515,6 +556,8 @@ def run_server(
     except KeyboardInterrupt:
         _stop_server_process(process)
         return 130
+    finally:
+        identity_clearer(config, identity)
 
 
 def _watchdog_held(watchdog: runtime_bridge.WatchdogProof) -> bool:
@@ -656,7 +699,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return INFRA_ERROR
         return SUCCESS
     except ModelMissingError:
-        print(json.dumps({"status": "infrastructure_ready_model_missing"}, sort_keys=True))
+        print(
+            json.dumps(
+                {"status": "model_missing_gpu_runtime_unvalidated"},
+                sort_keys=True,
+            )
+        )
         return MODEL_MISSING
     except ConfigError:
         print(json.dumps({"status": "configuration_error"}, sort_keys=True))

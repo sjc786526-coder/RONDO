@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import stat
@@ -173,6 +174,109 @@ class ComposeSecretMountContract:
 
 
 @dataclass(frozen=True)
+class DockerImageIdentity:
+    """Daemon-resolved identity for one frozen registry digest reference."""
+
+    image_reference: str
+    image_id: str
+
+    def validate(self) -> None:
+        if not (
+            _SHA256_IMAGE.fullmatch(self.image_reference)
+            or _LOCAL_IMAGE_ID.fullmatch(self.image_reference)
+        ):
+            raise DockerSupervisionError("Docker image reference is not content addressed")
+        if not _LOCAL_IMAGE_ID.fullmatch(self.image_id):
+            raise DockerSupervisionError("Docker daemon image id is invalid")
+
+
+@dataclass(frozen=True, order=True)
+class DockerContainerMetricFact:
+    """Cgroup counters sampled from the exact task container."""
+
+    container_id: str
+    cpu_usage_microseconds: int
+    peak_memory_bytes: int
+
+    def validate(self) -> None:
+        if not _OBJECT_ID.fullmatch(self.container_id):
+            raise DockerSupervisionError("Docker container metric identity is invalid")
+        for value in (self.cpu_usage_microseconds, self.peak_memory_bytes):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise DockerSupervisionError("Docker container metric is invalid")
+        if self.peak_memory_bytes == 0:
+            raise DockerSupervisionError("Docker container peak memory is unavailable")
+
+
+@dataclass(frozen=True)
+class DockerContainerMetrics:
+    """Stable container projection accumulated across supervised samples."""
+
+    container_id: str
+    cpu_usage_seconds: float
+    peak_memory_bytes: int
+
+    def validate(self) -> None:
+        if not _OBJECT_ID.fullmatch(self.container_id):
+            raise DockerSupervisionError("Docker result metric identity is invalid")
+        if (
+            isinstance(self.cpu_usage_seconds, bool)
+            or not isinstance(self.cpu_usage_seconds, (int, float))
+            or not math.isfinite(self.cpu_usage_seconds)
+            or self.cpu_usage_seconds < 0
+            or isinstance(self.peak_memory_bytes, bool)
+            or not isinstance(self.peak_memory_bytes, int)
+            or self.peak_memory_bytes <= 0
+        ):
+            raise DockerSupervisionError("Docker result metric is invalid")
+
+
+@dataclass(frozen=True)
+class DockerDesktopVhdxEvidence:
+    """Stable Docker Desktop storage evidence for one supervised execution."""
+
+    baseline_bytes: int
+    peak_bytes: int
+    final_bytes: int
+    peak_growth_bytes: int
+
+    def validate(self) -> None:
+        values = (
+            self.baseline_bytes,
+            self.peak_bytes,
+            self.final_bytes,
+            self.peak_growth_bytes,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in values
+        ):
+            raise DockerSupervisionError("Docker Desktop VHDX evidence is invalid")
+        if self.peak_bytes < max(self.baseline_bytes, self.final_bytes):
+            raise DockerSupervisionError("Docker Desktop VHDX peak evidence is invalid")
+        if self.peak_growth_bytes != self.peak_bytes - self.baseline_bytes:
+            raise DockerSupervisionError("Docker Desktop VHDX growth evidence is invalid")
+
+
+@dataclass(frozen=True)
+class DockerSeccompEvidence:
+    """Observed effective seccomp identity for one exact task container."""
+
+    profile_kind: str
+    profile_sha256: str | None
+
+    def validate(self) -> None:
+        if self.profile_kind == "builtin":
+            if self.profile_sha256 is not None:
+                raise DockerSupervisionError("builtin seccomp evidence is inconsistent")
+            return
+        if self.profile_kind != "custom" or self.profile_sha256 is None:
+            raise DockerSupervisionError("Docker seccomp evidence is invalid")
+        if not _SHA256.fullmatch(self.profile_sha256):
+            raise DockerSupervisionError("Docker seccomp profile identity is invalid")
+
+
+@dataclass(frozen=True)
 class DockerContainerFact:
     """Security and resource facts for one exact task-labelled container."""
 
@@ -186,11 +290,14 @@ class DockerContainerFact:
     memory_swap_bytes: int
     pids_limit: int
     read_only_rootfs: bool
+    cgroupns_mode: str
     network_mode: str
     networks: tuple[str, ...]
     mounts: tuple[DockerMountFact, ...]
     compose_project: str
     compose_service: str
+    image_reference: str
+    image_id: str
     seccomp_profile_sha256: str | None = None
 
     def validate(self) -> None:
@@ -217,6 +324,8 @@ class DockerContainerFact:
         for value in (self.memory_bytes, self.memory_swap_bytes, self.pids_limit):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise DockerSupervisionError("Docker container resource fact is invalid")
+        if self.cgroupns_mode != "private":
+            raise DockerSupervisionError("Docker container cgroup namespace is not private")
         if not self.network_mode or "\x00" in self.network_mode:
             raise DockerSupervisionError("Docker container network mode is invalid")
         if len(self.networks) != len(set(self.networks)) or any(
@@ -229,6 +338,7 @@ class DockerContainerFact:
             raise DockerSupervisionError("Docker Compose project identity is invalid")
         if not _RESOURCE_NAME.fullmatch(self.compose_service):
             raise DockerSupervisionError("Docker Compose service identity is invalid")
+        DockerImageIdentity(self.image_reference, self.image_id).validate()
         if self.seccomp_profile_sha256 is not None and not _SHA256.fullmatch(
             self.seccomp_profile_sha256
         ):
@@ -278,6 +388,11 @@ class HostContainerContract:
     network_mode: str
     networks: tuple[str, ...]
     mounts: tuple[DockerMountFact, ...]
+    cgroupns_mode: str = "private"
+    image_reference: str | None = None
+    image_id: str | None = None
+    require_image_identity: bool = False
+    require_container_metrics: bool = False
     compose_secret_mount: ComposeSecretMountContract | None = None
     privileged: bool = False
     cap_add: tuple[str, ...] = ()
@@ -314,6 +429,18 @@ class HostContainerContract:
             raise DockerSupervisionError("expected Docker mounts are ambiguous")
         for mount in self.mounts:
             mount.validate()
+        if self.cgroupns_mode != "private":
+            raise DockerSupervisionError("private Docker cgroup namespace is required")
+        if not isinstance(self.require_image_identity, bool) or not isinstance(
+            self.require_container_metrics, bool
+        ):
+            raise DockerSupervisionError("Docker runtime evidence gate is invalid")
+        if (self.image_reference is None) != (self.image_id is None):
+            raise DockerSupervisionError("Docker image contract is incomplete")
+        if self.image_reference is not None and self.image_id is not None:
+            DockerImageIdentity(self.image_reference, self.image_id).validate()
+        if self.require_image_identity and self.image_reference is None:
+            raise DockerSupervisionError("Docker image identity evidence is required")
         if self.compose_secret_mount is not None:
             self.compose_secret_mount.validate()
             if any(
@@ -392,11 +519,14 @@ class HostContainerContract:
             self.memory_swap_bytes,
             self.pids_limit,
             self.read_only_rootfs,
+            self.cgroupns_mode,
             self.network_mode,
             tuple(sorted(self.networks)),
             tuple(sorted(self.mounts)),
             self.compose_project,
             self.compose_service,
+            self.image_reference,
+            self.image_id,
             self.seccomp_profile_sha256,
         )
         observed = (
@@ -413,11 +543,14 @@ class HostContainerContract:
             fact.memory_swap_bytes,
             fact.pids_limit,
             fact.read_only_rootfs,
+            fact.cgroupns_mode,
             fact.network_mode,
             tuple(sorted(fact.networks)),
             tuple(sorted(observed_mounts)),
             fact.compose_project,
             fact.compose_service,
+            fact.image_reference if self.image_reference is not None else None,
+            fact.image_id if self.image_id is not None else None,
             fact.seccomp_profile_sha256,
         )
         if observed != expected:
@@ -431,11 +564,14 @@ class HostContainerContract:
                 "memory_swap",
                 "pids_limit",
                 "read_only_rootfs",
+                "cgroupns_mode",
                 "network_mode",
                 "networks",
                 "mounts",
                 "compose_project",
                 "compose_service",
+                "image_reference",
+                "image_id",
                 "seccomp_profile",
             )
             mismatches = tuple(
@@ -490,9 +626,11 @@ class DockerCounterReading:
     task_bytes: int
     data_root: str
     data_root_filesystem_free_bytes: int
+    docker_desktop_vhdx_bytes: int | None = None
     task_container_ids: tuple[str, ...] = ()
     task_image_ids: tuple[str, ...] = ()
     task_containers: tuple[DockerContainerFact, ...] = ()
+    task_container_metrics: tuple[DockerContainerMetricFact, ...] = ()
     task_networks: tuple[ComposeResourceFact, ...] = ()
     task_volumes: tuple[ComposeResourceFact, ...] = ()
     daemon_security_options: tuple[str, ...] = ()
@@ -509,6 +647,12 @@ class DockerCounterReading:
                 raise DockerSupervisionError("Docker storage counter is unreadable")
         if not self.data_root or not os.path.isabs(self.data_root):
             raise DockerSupervisionError("Docker data-root filesystem is unreadable")
+        if self.docker_desktop_vhdx_bytes is not None and (
+            isinstance(self.docker_desktop_vhdx_bytes, bool)
+            or not isinstance(self.docker_desktop_vhdx_bytes, int)
+            or self.docker_desktop_vhdx_bytes < 0
+        ):
+            raise DockerSupervisionError("Docker Desktop VHDX counter is unreadable")
         for object_id in (*self.task_container_ids, *self.task_image_ids):
             if not _OBJECT_ID.fullmatch(object_id):
                 raise DockerSupervisionError("task-owned Docker object id is invalid")
@@ -518,6 +662,13 @@ class DockerCounterReading:
             raise DockerSupervisionError("Docker container facts do not match selected ids")
         for fact in self.task_containers:
             fact.validate()
+        metric_ids = tuple(sorted(item.container_id for item in self.task_container_metrics))
+        if len(metric_ids) != len(set(metric_ids)) or not set(metric_ids).issubset(
+            set(self.task_container_ids)
+        ):
+            raise DockerSupervisionError("Docker container metrics do not match selected ids")
+        for metric in self.task_container_metrics:
+            metric.validate()
         for resources, expected_kind in (
             (self.task_networks, "network"),
             (self.task_volumes, "volume"),
@@ -551,6 +702,13 @@ class DockerCounter(Protocol):
         deadline: float | None = None,
     ) -> DockerCounterReading: ...
 
+    def resolve_image_identity(
+        self,
+        image_reference: str,
+        *,
+        deadline: float | None = None,
+    ) -> DockerImageIdentity: ...
+
 
 class RunningCommand(Protocol):
     """A non-blocking process handle returned by an injected runner."""
@@ -580,11 +738,14 @@ class DockerSample:
     task_bytes: int
     docker_growth_bytes: int
     task_growth_bytes: int
+    docker_desktop_vhdx_bytes: int | None
+    docker_desktop_vhdx_growth_bytes: int
     data_root: str
     data_root_filesystem_free_bytes: int
     task_container_ids: tuple[str, ...]
     task_image_ids: tuple[str, ...]
     task_containers: tuple[DockerContainerFact, ...]
+    task_container_metrics: tuple[DockerContainerMetricFact, ...]
     task_networks: tuple[ComposeResourceFact, ...]
     task_volumes: tuple[ComposeResourceFact, ...]
     daemon_security_options: tuple[str, ...]
@@ -597,6 +758,93 @@ class DockerExecutionResult:
     returncode: int
     samples: tuple[DockerSample, ...]
     warnings: tuple[str, ...]
+    image_identity: DockerImageIdentity | None = None
+    desktop_vhdx: DockerDesktopVhdxEvidence | None = None
+    container_metrics: DockerContainerMetrics | None = None
+    effective_seccomp: DockerSeccompEvidence | None = None
+
+    def receipt(self) -> dict[str, object]:
+        """Return the canonical, path-free B2 Docker result projection."""
+
+        if not self.samples:
+            raise DockerSupervisionError("Docker result has no supervised samples")
+        for item in (self.image_identity, self.desktop_vhdx, self.container_metrics, self.effective_seccomp):
+            if item is None:
+                raise DockerSupervisionError("Docker result lacks required B2 evidence")
+            item.validate()
+        facts = {
+            fact
+            for sample in self.samples
+            for fact in sample.task_containers
+        }
+        if len(facts) != 1:
+            raise DockerSupervisionError("Docker result lacks one stable container fact")
+        fact = next(iter(facts))
+        fact.validate()
+        final = self.samples[-1]
+        if (
+            final.phase != "cleanup_verified"
+            or final.task_container_ids
+            or final.task_networks
+            or final.task_volumes
+        ):
+            raise DockerSupervisionError("Docker result cleanup was not verified empty")
+        return {
+            "schema_version": 1,
+            "operation": self.operation.value,
+            "returncode": self.returncode,
+            "samples": len(self.samples),
+            "image": {
+                "reference": self.image_identity.image_reference,
+                "id": self.image_identity.image_id,
+            },
+            "storage": {
+                "docker_total_before": self.samples[0].docker_total_bytes,
+                "docker_total_after": final.docker_total_bytes,
+                "data_root_free_before": self.samples[0].data_root_filesystem_free_bytes,
+                "data_root_free_after": final.data_root_filesystem_free_bytes,
+                "vhdx_before": self.desktop_vhdx.baseline_bytes,
+                "vhdx_peak": self.desktop_vhdx.peak_bytes,
+                "vhdx_after": self.desktop_vhdx.final_bytes,
+            },
+            "container": {
+                "user": fact.user,
+                "privileged": fact.privileged,
+                "cap_add": list(fact.cap_add),
+                "cap_drop": list(fact.cap_drop),
+                "security_opt": [
+                    "seccomp=custom"
+                    if option.casefold().startswith("seccomp=")
+                    else option
+                    for option in fact.security_opt
+                ],
+                "memory": fact.memory_bytes,
+                "memory_swap": fact.memory_swap_bytes,
+                "pids": fact.pids_limit,
+                "read_only_rootfs": fact.read_only_rootfs,
+                "cgroupns": fact.cgroupns_mode,
+                "network_mode": fact.network_mode,
+                "networks": list(fact.networks),
+                "mounts": [
+                    {
+                        "type": mount.kind,
+                        "destination": mount.destination,
+                        "read_only": mount.read_only,
+                    }
+                    for mount in fact.mounts
+                ],
+            },
+            "metrics": {
+                "container_id": self.container_metrics.container_id,
+                "cpu_seconds": self.container_metrics.cpu_usage_seconds,
+                "peak_memory": self.container_metrics.peak_memory_bytes,
+            },
+            "seccomp": {
+                "kind": self.effective_seccomp.profile_kind,
+                "sha256": self.effective_seccomp.profile_sha256,
+            },
+            "cleanup": "verified_empty",
+        }
 
 
 class DockerSupervisionError(RuntimeError):
@@ -639,6 +887,39 @@ class DockerSupervisor:
         self._owned_container_ids: dict[str, set[str]] = {}
         self._owned_networks: dict[str, set[ComposeResourceFact]] = {}
         self._owned_volumes: dict[str, set[ComposeResourceFact]] = {}
+
+    def resolve_image_identity(
+        self,
+        identity: DockerTaskIdentity,
+        image_reference: str,
+        *,
+        lease: HeavyLockLease,
+        timeout_seconds: float = 5.0,
+    ) -> DockerImageIdentity:
+        """Resolve a pinned image through the guarded, bounded counter path."""
+
+        identity.validate()
+        _require_registry_pinned_image(image_reference)
+        if timeout_seconds <= 0:
+            raise DockerSupervisionError("Docker image identity timeout is invalid")
+        self._assert_lock(lease)
+        deadline = self._monotonic() + min(
+            float(timeout_seconds), COUNTER_SAMPLE_TIMEOUT_SECONDS
+        )
+        try:
+            image_identity = self._counter.resolve_image_identity(
+                image_reference,
+                deadline=deadline,
+            )
+            image_identity.validate()
+        except DockerSupervisionError:
+            raise
+        except Exception as exc:
+            raise DockerSupervisionError("Docker image identity is unavailable") from exc
+        if self._monotonic() >= deadline:
+            raise DockerSupervisionError("Docker image identity deadline exceeded")
+        self._assert_lock(lease)
+        return image_identity
 
     def pull(
         self,
@@ -973,6 +1254,17 @@ class DockerSupervisor:
                     if reading.task_containers:
                         observed_valid_container = True
                 phase = "final" if returncode is not None else "periodic"
+                if (
+                    operation is DockerOperation.HOST
+                    and returncode == 0
+                    and observed_valid_container
+                    and not (
+                        reading.task_container_ids
+                        or reading.task_networks
+                        or reading.task_volumes
+                    )
+                ):
+                    phase = "cleanup_verified"
                 sample = self._make_sample(phase, baseline, reading)
                 samples.append(sample)
                 self._record_owned_containers(identity, reading)
@@ -997,12 +1289,17 @@ class DockerSupervisor:
                             deadline,
                         )
                     ):
+                        durable = self._result_durable_evidence(compose_contract, samples)
                         return DockerExecutionResult(
                             operation=operation,
                             argv=argv,
                             returncode=returncode,
                             samples=tuple(samples),
                             warnings=tuple(warnings),
+                            image_identity=durable[0],
+                            desktop_vhdx=durable[1],
+                            container_metrics=durable[2],
+                            effective_seccomp=durable[3],
                         )
                     if (
                         operation in {DockerOperation.RUN, DockerOperation.HOST}
@@ -1016,12 +1313,17 @@ class DockerSupervisor:
                         )
                     ):
                         raise _CleanupVerificationError
+                    durable = self._result_durable_evidence(compose_contract, samples)
                     return DockerExecutionResult(
                         operation=operation,
                         argv=argv,
                         returncode=returncode,
                         samples=tuple(samples),
                         warnings=tuple(warnings),
+                        image_identity=durable[0],
+                        desktop_vhdx=durable[1],
+                        container_metrics=durable[2],
+                        effective_seccomp=durable[3],
                     )
         except _CleanupVerificationError as exc:
             raise DockerSupervisionError(
@@ -1107,7 +1409,16 @@ class DockerSupervisor:
                 deadline=teardown_deadline,
             )
             self._validate_host_reading(reading, compose_contract, samples=samples)
-            sample = self._make_sample("teardown_grace", baseline, reading)
+            phase = (
+                "cleanup_verified"
+                if not (
+                    reading.task_container_ids
+                    or reading.task_networks
+                    or reading.task_volumes
+                )
+                else "teardown_grace"
+            )
+            sample = self._make_sample(phase, baseline, reading)
             samples.append(sample)
             self._record_owned_containers(identity, reading)
             self._enforce_sample(sample, warnings, samples=samples)
@@ -1352,6 +1663,20 @@ class DockerSupervisor:
         baseline: DockerCounterReading,
         reading: DockerCounterReading,
     ) -> DockerSample:
+        if (baseline.docker_desktop_vhdx_bytes is None) != (
+            reading.docker_desktop_vhdx_bytes is None
+        ):
+            raise DockerSupervisionError("Docker Desktop VHDX counter availability changed")
+        vhdx_growth = 0
+        if (
+            baseline.docker_desktop_vhdx_bytes is not None
+            and reading.docker_desktop_vhdx_bytes is not None
+        ):
+            vhdx_growth = max(
+                0,
+                reading.docker_desktop_vhdx_bytes
+                - baseline.docker_desktop_vhdx_bytes,
+            )
         return DockerSample(
             phase=phase,
             docker_system_df=dict(reading.docker_system_df),
@@ -1359,11 +1684,14 @@ class DockerSupervisor:
             task_bytes=reading.task_bytes,
             docker_growth_bytes=max(0, reading.docker_total_bytes - baseline.docker_total_bytes),
             task_growth_bytes=max(0, reading.task_bytes - baseline.task_bytes),
+            docker_desktop_vhdx_bytes=reading.docker_desktop_vhdx_bytes,
+            docker_desktop_vhdx_growth_bytes=vhdx_growth,
             data_root=reading.data_root,
             data_root_filesystem_free_bytes=reading.data_root_filesystem_free_bytes,
             task_container_ids=tuple(reading.task_container_ids),
             task_image_ids=tuple(reading.task_image_ids),
             task_containers=tuple(reading.task_containers),
+            task_container_metrics=tuple(reading.task_container_metrics),
             task_networks=tuple(reading.task_networks),
             task_volumes=tuple(reading.task_volumes),
             daemon_security_options=tuple(reading.daemon_security_options),
@@ -1381,7 +1709,11 @@ class DockerSupervisor:
                 "Docker data-root filesystem has less than 80 GiB free",
                 samples=samples or (sample,),
             )
-        growth = max(sample.docker_growth_bytes, sample.task_growth_bytes)
+        growth = max(
+            sample.docker_growth_bytes,
+            sample.task_growth_bytes,
+            sample.docker_desktop_vhdx_growth_bytes,
+        )
         if growth >= DOCKER_GROWTH_STOP_BYTES:
             raise DockerSupervisionError(
                 "Docker storage growth reached the 60 GB stop threshold",
@@ -1437,6 +1769,16 @@ class DockerSupervisor:
                 )
             except DockerSupervisionError as exc:
                 raise DockerSupervisionError(exc.reason, samples=samples) from exc
+        if contract.container.require_container_metrics:
+            fact_ids = {fact.container_id for fact in reading.task_containers}
+            metric_ids = {
+                metric.container_id for metric in reading.task_container_metrics
+            }
+            if metric_ids != fact_ids:
+                raise DockerSupervisionError(
+                    "required Docker container metrics are unavailable",
+                    samples=samples,
+                )
         network_names = {resource.name for resource in reading.task_networks}
         volume_names = {resource.name for resource in reading.task_volumes}
         if not network_names.issubset(set(contract.network_names)):
@@ -1449,6 +1791,136 @@ class DockerSupervisor:
                 "unexpected Docker Compose volume was observed",
                 samples=samples,
             )
+
+    @staticmethod
+    def _result_container_metrics(
+        contract: ComposeRunContract | None,
+        samples: Sequence[DockerSample],
+    ) -> DockerContainerMetrics | None:
+        metrics = tuple(
+            metric
+            for sample in samples
+            for metric in sample.task_container_metrics
+        )
+        if not metrics:
+            if contract is not None and contract.container.require_container_metrics:
+                raise DockerSupervisionError(
+                    "required Docker result metrics were never observed",
+                    samples=samples,
+                )
+            return None
+        container_ids = {metric.container_id for metric in metrics}
+        if len(container_ids) != 1:
+            raise DockerSupervisionError(
+                "Docker result metrics changed container identity",
+                samples=samples,
+            )
+        previous: DockerContainerMetricFact | None = None
+        for metric in metrics:
+            if previous is not None and (
+                metric.cpu_usage_microseconds < previous.cpu_usage_microseconds
+                or metric.peak_memory_bytes < previous.peak_memory_bytes
+            ):
+                raise DockerSupervisionError(
+                    "Docker container cgroup metrics moved backwards",
+                    samples=samples,
+                )
+            previous = metric
+        result = DockerContainerMetrics(
+            container_id=next(iter(container_ids)),
+            cpu_usage_seconds=max(
+                metric.cpu_usage_microseconds for metric in metrics
+            )
+            / 1_000_000,
+            peak_memory_bytes=max(metric.peak_memory_bytes for metric in metrics),
+        )
+        result.validate()
+        return result
+
+    @classmethod
+    def _result_durable_evidence(
+        cls,
+        contract: ComposeRunContract | None,
+        samples: Sequence[DockerSample],
+    ) -> tuple[
+        DockerImageIdentity | None,
+        DockerDesktopVhdxEvidence | None,
+        DockerContainerMetrics | None,
+        DockerSeccompEvidence | None,
+    ]:
+        facts = tuple(
+            fact
+            for sample in samples
+            for fact in sample.task_containers
+        )
+        identities = {
+            DockerImageIdentity(fact.image_reference, fact.image_id)
+            for fact in facts
+        }
+        if len(identities) > 1:
+            raise DockerSupervisionError(
+                "Docker result image identity changed",
+                samples=samples,
+            )
+        image_identity = next(iter(identities), None)
+        if (
+            contract is not None
+            and contract.container.require_image_identity
+            and image_identity is None
+        ):
+            raise DockerSupervisionError(
+                "required Docker result image identity was never observed",
+                samples=samples,
+            )
+        if image_identity is not None:
+            image_identity.validate()
+
+        vhdx_values = tuple(
+            sample.docker_desktop_vhdx_bytes
+            for sample in samples
+            if sample.docker_desktop_vhdx_bytes is not None
+        )
+        desktop_vhdx: DockerDesktopVhdxEvidence | None = None
+        if vhdx_values:
+            if len(vhdx_values) != len(samples):
+                raise DockerSupervisionError(
+                    "Docker Desktop VHDX result evidence is incomplete",
+                    samples=samples,
+                )
+            baseline_bytes = vhdx_values[0]
+            peak_bytes = max(vhdx_values)
+            desktop_vhdx = DockerDesktopVhdxEvidence(
+                baseline_bytes=baseline_bytes,
+                peak_bytes=peak_bytes,
+                final_bytes=vhdx_values[-1],
+                peak_growth_bytes=peak_bytes - baseline_bytes,
+            )
+            desktop_vhdx.validate()
+
+        seccomp_values = {
+            DockerSeccompEvidence(
+                profile_kind=(
+                    "custom" if fact.seccomp_profile_sha256 is not None else "builtin"
+                ),
+                profile_sha256=fact.seccomp_profile_sha256,
+            )
+            for fact in facts
+        }
+        if len(seccomp_values) > 1:
+            raise DockerSupervisionError(
+                "Docker result seccomp identity changed",
+                samples=samples,
+            )
+        effective_seccomp = next(iter(seccomp_values), None)
+        if effective_seccomp is not None:
+            effective_seccomp.validate()
+
+        return (
+            image_identity,
+            desktop_vhdx,
+            cls._result_container_metrics(contract, samples),
+            effective_seccomp,
+        )
 
     @staticmethod
     def _stop(handle: RunningCommand, *, close_group: bool) -> bool:

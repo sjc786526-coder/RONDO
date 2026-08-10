@@ -245,6 +245,9 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertNotIn(b"secret prompt", metadata_bytes)
         observation = json.loads(metadata_bytes)["requests"][0]
         self.assertEqual(observation["role"], "main")
+        self.assertEqual(observation["role_provenance"], "declared")
+        self.assertEqual(observation["declared_role"], "main")
+        self.assertEqual(observation["inferred_role"], "main")
         self.assertEqual(observation["model"], "gpt-5.6-luna")
         self.assertEqual(observation["shape"]["input_items"], 1)
         self.assertEqual(len(observation["body_sha256"]), 64)
@@ -324,8 +327,11 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(status, 200)
         observation = json.loads((self.root / "metadata.json").read_text())["requests"][0]
         self.assertEqual(observation["role"], "main")
+        self.assertEqual(observation["role_provenance"], "inferred")
+        self.assertIsNone(observation["declared_role"])
+        self.assertEqual(observation["inferred_role"], "main")
         self.assertTrue(observation["contract_match"])
-        self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
+        self.assertFalse(milestone_metadata_ready(self.root / "metadata.json"))
 
     def test_missing_role_header_infers_guardian_from_exact_schema(self) -> None:
         status, _body, _headers = self._post(
@@ -335,8 +341,11 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(status, 200)
         observation = json.loads((self.root / "metadata.json").read_text())["requests"][0]
         self.assertEqual(observation["role"], "guardian")
+        self.assertEqual(observation["role_provenance"], "inferred")
+        self.assertIsNone(observation["declared_role"])
+        self.assertEqual(observation["inferred_role"], "guardian")
         self.assertTrue(observation["contract_match"])
-        self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
+        self.assertFalse(milestone_metadata_ready(self.root / "metadata.json"))
 
     def test_missing_usage_charges_reservation_stops_run_and_prevents_forward(self) -> None:
         self.upstream.mode = "missing_usage"

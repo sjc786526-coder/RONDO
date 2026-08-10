@@ -9,7 +9,6 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
@@ -22,22 +21,21 @@ from rondo_eval.contracts import (  # noqa: E402
     Side,
 )
 from rondo_eval.terminal_bench import pair as pair_module  # noqa: E402
-from rondo_eval.terminal_bench.metrics import (  # noqa: E402
-    ExternalRunMetrics,
-    RunnerMetricsTimer,
-    metrics_from_dict,
-)
+from rondo_eval.terminal_bench.metrics import RunnerMetricsTimer, metrics_from_dict  # noqa: E402
 from rondo_eval.terminal_bench.pair import (  # noqa: E402
     PairSequenceLedger,
     PairIdentityError,
     assess_m1,
     load_pair_identity,
+    terminal_record_sha256,
     validate_harbor_installation,
 )
 from rondo_eval.terminal_bench.runner import HARBOR_EXECUTABLE  # noqa: E402
 
 
 class PairIdentityTests(unittest.TestCase):
+    HARNESS_COMMIT = "f" * 40
+
     def setUp(self) -> None:
         self.identity = load_pair_identity()
 
@@ -68,7 +66,7 @@ class PairIdentityTests(unittest.TestCase):
         fair = self.identity.fairness
         return RunSpec(
             side=side,
-            batch_id="p1-no-api-smoke",
+            batch_id=pair_module.B2_NO_API_BATCH_ID,
             task_id=fair["task_id"],
             task_image_digest=fair["task_image_digest"],
             binary=self._manifest(side),
@@ -96,6 +94,7 @@ class PairIdentityTests(unittest.TestCase):
             "pair_lock_sha256": self.identity.lock_sha256,
             "pair_slot": slot.slot,
             "pair_round": slot.round,
+            "eval_harness_commit": self.HARNESS_COMMIT,
             "main_model": fair["main_model"],
             "guardian_model": fair["guardian_model"],
             "guardian_effort": fair["guardian_effort"],
@@ -117,6 +116,7 @@ class PairIdentityTests(unittest.TestCase):
             "budget_usd": fair["budget_usd"],
         }
         return {
+            "run_id": f"tb-{side.value}-run",
             "side": side.value,
             "created_at": created_at,
             "outcome": "completed",
@@ -139,8 +139,25 @@ class PairIdentityTests(unittest.TestCase):
             "artifacts": f"eval-data/runs/{side.value}",
         }
 
-    def test_tracked_lock_enables_no_api_and_hard_disables_paid(self) -> None:
-        self.assertEqual(self.identity.mode("no_api").batch_id, "p1-no-api-smoke")
+    def _paid_identity(self):
+        modes = dict(self.identity.modes)
+        modes["paid"] = pair_module.PairMode(True, "paid-batch")
+        topology = tuple(
+            replace(slot, paid_run_id=f"tb-{slot.side.value}-run")
+            for slot in self.identity.topology
+        )
+        return replace(self.identity, modes=modes, topology=topology)
+
+    @staticmethod
+    def _container_metrics(side: Side) -> dict[str, object]:
+        return {
+            "container_id": ("a" if side is Side.RONDO else "b") * 64,
+            "cpu_usage_seconds": 1.25,
+            "peak_memory_bytes": 4096,
+        }
+
+    def test_tracked_lock_keeps_no_api_lightweight_and_paid_disabled(self) -> None:
+        self.assertNotIn("no_api", self.identity.modes)
         profile = self.identity.validate_no_api_seccomp(project_root=EVAL_ROOT.parent)
         self.assertEqual(
             hashlib.sha256(profile.read_bytes()).hexdigest(),
@@ -148,8 +165,6 @@ class PairIdentityTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(PairIdentityError, "fresh_pair"):
             self.identity.mode("paid")
-
-    def test_current_frozen_harbor_install_matches_pair_lock(self) -> None:
         validate_harbor_installation(
             self.identity,
             executable=HARBOR_EXECUTABLE,
@@ -161,107 +176,103 @@ class PairIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(PairIdentityError, "fairness"):
             self.identity.validate_spec(drifted, mode="no_api")
 
-    def test_persistent_sequence_enforces_rondo_then_codex(self) -> None:
+    @unittest.skipUnless(hasattr(os, "fork"), "requires POSIX process death injection")
+    def test_paid_publication_reconciles_after_process_restart(self) -> None:
+        paid_identity = self._paid_identity()
+        record = self._record(Side.RONDO, "2026-08-10T01:00:00Z")
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pair.json"
+            root = Path(directory)
+            ledger_path = root / "paid.json"
+            index_path = root / "runs.jsonl"
+            child = os.fork()
+            if child == 0:
+                with PairSequenceLedger(
+                    ledger_path, identity=paid_identity, mode="paid"
+                ) as sequence:
+                    sequence.claim(
+                        side=Side.RONDO,
+                        run_id=record["run_id"],
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                    )
+                    sequence.stage_paid_publication(
+                        run_id=record["run_id"],
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                        container_metrics=self._container_metrics(Side.RONDO),
+                    )
+                with index_path.open("w", encoding="utf-8") as handle:
+                    handle.write(
+                        json.dumps(record, sort_keys=True, separators=(",", ":"))
+                        + "\n"
+                    )
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os._exit(77)
+            _pid, status = os.waitpid(child, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 77)
             with PairSequenceLedger(
-                path, identity=self.identity, mode="no_api"
+                ledger_path, identity=paid_identity, mode="paid"
             ) as sequence:
-                with self.assertRaisesRegex(PairIdentityError, "slot order"):
-                    sequence.claim(side=Side.CODEX, run_id="codex-first")
-                sequence.claim(side=Side.RONDO, run_id="rondo-slot")
-                sequence.finish(run_id="rondo-slot", completed=True)
-            with PairSequenceLedger(
-                path, identity=self.identity, mode="no_api"
-            ) as sequence:
-                sequence.claim(side=Side.CODEX, run_id="codex-slot")
-                sequence.finish(run_id="codex-slot", completed=True)
-            state = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(state["next_slot"], 3)
-            self.assertEqual(
-                [item["side"] for item in state["runs"]], ["rondo", "codex"]
-            )
-
-    def test_abandoned_active_slot_blocks_pair_persistently(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pair.json"
-            with PairSequenceLedger(
-                path, identity=self.identity, mode="no_api"
-            ) as sequence:
-                sequence.claim(side=Side.RONDO, run_id="rondo-before-crash")
-                # Deliberately omit finish(), simulating process death after the
-                # durable claim but before result publication.
-
-            with PairSequenceLedger(
-                path, identity=self.identity, mode="no_api"
-            ) as sequence:
-                with self.assertRaisesRegex(PairIdentityError, "abandoned active"):
-                    sequence.claim(side=Side.RONDO, run_id="rondo-replacement")
-
-            state = json.loads(path.read_text(encoding="utf-8"))
-            self.assertTrue(state["blocked"])
-            self.assertEqual(state["next_slot"], 1)
-            self.assertEqual(len(state["runs"]), 1)
-            self.assertEqual(state["runs"][0]["run_id"], "rondo-before-crash")
-            self.assertEqual(state["runs"][0]["status"], "failed")
-
-            with PairSequenceLedger(
-                path, identity=self.identity, mode="no_api"
-            ) as sequence:
-                with self.assertRaisesRegex(PairIdentityError, "earlier failed"):
-                    sequence.claim(side=Side.RONDO, run_id="rondo-third-attempt")
+                digest = sequence.reconcile_paid_publication(
+                    run_id=record["run_id"],
+                    eval_harness_commit=self.HARNESS_COMMIT,
+                    index_path=index_path,
+                )
+            state = json.loads(ledger_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["runs"][0]["status"], "completed")
+            self.assertEqual(digest, terminal_record_sha256(record))
 
     def test_m1_pair_aggregation_keeps_s2_independent(self) -> None:
         records = [
             self._record(Side.RONDO, "2026-08-10T01:00:00Z"),
             self._record(Side.CODEX, "2026-08-10T02:00:00Z"),
         ]
-        result = assess_m1(records, self.identity)
-        self.assertEqual(result["m1"], "passed")
-        self.assertEqual(result["s2"], "unbound")
-        self.assertEqual(result["reasons"], [])
-
-        duplicate = assess_m1([*records, records[1]], self.identity)
-        self.assertEqual(duplicate["m1"], "incomplete")
-        self.assertIn("exactly_two", duplicate["reasons"][0])
-
-    def test_harbor_preflight_binds_closure_and_console_interpreter(self) -> None:
+        paid_identity = self._paid_identity()
         with tempfile.TemporaryDirectory() as directory:
-            executable = Path(directory) / "harbor"
-            executable.write_text(
-                f"#!{sys.executable}\nfrom harbor.cli.main import app\napp()\n",
+            ledger_path = Path(directory) / "paid.json"
+            with PairSequenceLedger(
+                ledger_path, identity=paid_identity, mode="paid"
+            ) as sequence:
+                for side, record in zip((Side.RONDO, Side.CODEX), records, strict=True):
+                    sequence.claim(
+                        side=side,
+                        run_id=record["run_id"],
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                    )
+                    sequence.finish(
+                        run_id=record["run_id"],
+                        completed=True,
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                        publication_sha256=terminal_record_sha256(record),
+                        container_metrics=self._container_metrics(side),
+                    )
+            result = assess_m1(
+                records, paid_identity, pair_ledger_path=ledger_path
+            )
+            self.assertEqual(result["m1"], "passed")
+            self.assertEqual(result["s2"], "unbound")
+            self.assertEqual(result["reasons"], [])
+
+            split = json.loads(ledger_path.read_text(encoding="utf-8"))
+            split["runs"][1]["status"] = "publishing"
+            split["runs"][1]["publication_sha256"] = None
+            split["next_slot"] = 2
+            ledger_path.write_text(
+                json.dumps(split, sort_keys=True, separators=(",", ":")) + "\n",
                 encoding="utf-8",
             )
-            executable.chmod(0o755)
-            distribution = SimpleNamespace(version="0.20.0")
-            with mock.patch.object(
-                pair_module,
-                "_installed_harbor_closure",
-                return_value=(
-                    self.identity.harbor.installed_closure_sha256,
-                    self.identity.harbor.installed_closure_files,
-                ),
-            ):
-                validate_harbor_installation(
-                    self.identity,
-                    executable=executable,
-                    distribution=distribution,
-                )
-            executable.write_text(f"#!{sys.executable}\nprint('wrong')\n", encoding="utf-8")
-            with mock.patch.object(
-                pair_module,
-                "_installed_harbor_closure",
-                return_value=(
-                    self.identity.harbor.installed_closure_sha256,
-                    self.identity.harbor.installed_closure_files,
-                ),
-            ), self.assertRaisesRegex(PairIdentityError, "entry point"):
-                validate_harbor_installation(
-                    self.identity,
-                    executable=executable,
-                    distribution=distribution,
-                )
+            not_converged = assess_m1(
+                records, paid_identity, pair_ledger_path=ledger_path
+            )
+            self.assertEqual(not_converged["m1"], "failed")
+            self.assertIn("paid_pair_ledger_not_completed", not_converged["reasons"])
 
+            duplicate = assess_m1(
+                [*records, records[1]],
+                paid_identity,
+                pair_ledger_path=ledger_path,
+            )
+            self.assertEqual(duplicate["m1"], "incomplete")
+            self.assertIn("exactly_two", duplicate["reasons"][0])
 
 class RunnerMetricsTests(unittest.TestCase):
     def test_runner_timer_records_fixed_runner_host_shape(self) -> None:

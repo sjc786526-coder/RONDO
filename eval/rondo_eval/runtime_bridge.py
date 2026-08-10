@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from .docker_supervisor import (
         ComposeRunContract,
         DockerCounterReading,
+        DockerImageIdentity,
         DockerOperation,
         DockerTaskIdentity,
     )
@@ -51,17 +52,29 @@ _REQUIRED_CGROUP_COUNTERS = (
 _DEFAULT_MEMORY_HIGH_BYTES = 19 * 1024**3
 _DEFAULT_MEMORY_MAX_BYTES = 21 * 1024**3
 _DEFAULT_SWAP_MAX_BYTES = 5 * 1024**3
-_WATCHDOG_OVERRIDE_ENV = (
-    "RONDO_BUILD_LOCK",
-    "RONDO_BUILD_WATCHDOG",
-    "RONDO_BUILD_MEMORY_HIGH",
-    "RONDO_BUILD_MEMORY_MAX",
-    "RONDO_BUILD_SWAP_MAX",
+_WATCHDOG_HEARTBEAT_MAX_AGE_NS = 15_000_000_000
+_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = 1_000_000_000
+_WATCHDOG_ENV = (
+    "RONDO_WATCHDOG_WRAPPER_PID",
+    "RONDO_WATCHDOG_WRAPPER_START_TICKS",
+    "RONDO_WATCHDOG_HEARTBEAT_PATH",
+    "RONDO_WATCHDOG_SCRIPT_PATH",
 )
 _DF_TYPES = ("Images", "Containers", "Local Volumes", "Build Cache")
 _SIZE = re.compile(r"([0-9]+(?:[.][0-9]+)?)(B|kB|MB|GB|TB|PB|KiB|MiB|GiB|TiB|PiB)\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 _RESOURCE_NAME = re.compile(r"[0-9A-Za-z][0-9A-Za-z_.-]{0,127}\Z")
+_SHA256_IMAGE = re.compile(r"[^\s]+@sha256:[0-9a-f]{64}\Z")
+_CONTAINER_CGROUP_METRIC_SCRIPT = """
+cpu_usage_usec=
+while read -r key value rest; do
+  if [ "$key" = usage_usec ]; then cpu_usage_usec="$value"; fi
+done < /sys/fs/cgroup/cpu.stat
+IFS= read -r memory_peak_bytes < /sys/fs/cgroup/memory.peak
+case "$cpu_usage_usec" in ''|*[!0-9]*) exit 70;; esac
+case "$memory_peak_bytes" in ''|*[!0-9]*) exit 70;; esac
+printf 'cpu_usage_microseconds=%s\\npeak_memory_bytes=%s\\n' "$cpu_usage_usec" "$memory_peak_bytes"
+""".strip()
 _SIZE_FACTORS = {
     "B": 1,
     "kB": 1_000,
@@ -101,6 +114,27 @@ class WatchdogProof:
     guard: "CgroupWatchdogGuard"
 
 
+@dataclass(frozen=True)
+class MachineWatchdogIdentity:
+    common_root: Path
+    checkout_root: Path
+    root_device: int
+    root_inode: int
+    metrics_root: Path | None
+    cargo_target: Path | None
+    watcher: "WatcherProcessIdentity"
+
+
+@dataclass(frozen=True)
+class WatcherProcessIdentity:
+    pid: int
+    start_ticks: int
+    heartbeat_path: Path
+    heartbeat_device: int
+    heartbeat_inode: int
+    script_path: Path
+
+
 class CgroupWatchdogGuard:
     """Revalidates the same cgroup and all required counters on every check."""
 
@@ -115,6 +149,10 @@ class CgroupWatchdogGuard:
         pid: int,
         lock_path: Path,
         lock_identity: tuple[int, int],
+        machine_identity: MachineWatchdogIdentity,
+        watcher_proc_root: Path,
+        watchdog_environment: Mapping[str, str] | None,
+        heartbeat_clock_ns: Callable[[], int],
     ) -> None:
         self._token = token
         self._proc_cgroup_path = proc_cgroup_path
@@ -124,6 +162,10 @@ class CgroupWatchdogGuard:
         self._pid = pid
         self._lock_path = lock_path
         self._lock_identity = lock_identity
+        self._machine_identity = machine_identity
+        self._watcher_proc_root = watcher_proc_root
+        self._watchdog_environment = watchdog_environment
+        self._heartbeat_clock_ns = heartbeat_clock_ns
 
     def is_held(self, lease: object) -> bool:
         try:
@@ -143,6 +185,12 @@ class CgroupWatchdogGuard:
             _read_required_cgroup_counters(current_directory, self._pid)
             if _canonical_lock_is_held(self._lock_path) != self._lock_identity:
                 return False
+            if _machine_watchdog_identity(
+                watcher_proc_root=self._watcher_proc_root,
+                watchdog_environment=self._watchdog_environment,
+                heartbeat_clock_ns=self._heartbeat_clock_ns,
+            ) != self._machine_identity:
+                return False
             return True
         except (AttributeError, OSError, RuntimeBridgeError, TypeError):
             return False
@@ -152,16 +200,23 @@ def lease_from_watchdog(
     *,
     proc_cgroup_path: Path = Path("/proc/self/cgroup"),
     cgroup_fs_root: Path = Path("/sys/fs/cgroup"),
+    watcher_proc_root: Path = Path("/proc"),
+    watchdog_environment: Mapping[str, str] | None = None,
+    heartbeat_clock_ns: Callable[[], int] = time.time_ns,
 ) -> WatchdogProof:
     """Mint a lease only when this process is inside a live RONDO scope.
 
-    The injectable paths exist solely for hermetic tests.  The PID cannot be
-    injected: membership is always proved for the calling process itself.
+    The injectable paths exist solely for hermetic tests.  Cgroup membership
+    is always proved for the calling process itself.
     """
 
     pid = os.getpid()
     try:
-        _reject_watchdog_overrides()
+        machine_identity = _machine_watchdog_identity(
+            watcher_proc_root=watcher_proc_root,
+            watchdog_environment=watchdog_environment,
+            heartbeat_clock_ns=heartbeat_clock_ns,
+        )
         lock_path = _canonical_lock_path(os.getuid())
         lock_identity = _canonical_lock_is_held(lock_path)
         root = cgroup_fs_root.resolve(strict=True)
@@ -181,6 +236,10 @@ def lease_from_watchdog(
         pid=pid,
         lock_path=lock_path,
         lock_identity=lock_identity,
+        machine_identity=machine_identity,
+        watcher_proc_root=watcher_proc_root,
+        watchdog_environment=watchdog_environment,
+        heartbeat_clock_ns=heartbeat_clock_ns,
     )
     lease = WatchdogLease(token=token)
     if guard.is_held(lease) is not True:
@@ -245,9 +304,260 @@ def _read_required_cgroup_counters(directory: Path, pid: int) -> None:
     _parse_pressure(values["memory.pressure"])
 
 
-def _reject_watchdog_overrides() -> None:
-    if any(name in os.environ for name in _WATCHDOG_OVERRIDE_ENV):
+def _reject_watchdog_overrides(common_root: Path) -> tuple[Path | None, Path | None]:
+    allowed = {"RONDO_BUILD_METRICS_DIR"}
+    if any(
+        name.startswith("RONDO_BUILD_") and name not in allowed
+        for name in os.environ
+    ):
         raise RuntimeBridgeError("watchdog overrides are forbidden for production proof")
+    project_override = os.environ.get("RONDO_PROJECT_ROOT")
+    if project_override is not None and _project_path(project_override) != common_root:
+        raise RuntimeBridgeError("watchdog project root differs from RONDO common root")
+    metrics_root = _optional_project_directory(
+        os.environ.get("RONDO_BUILD_METRICS_DIR"), common_root, "watchdog metrics root"
+    )
+    cargo_target = _optional_project_directory(
+        os.environ.get("CARGO_TARGET_DIR"), common_root, "Cargo target root"
+    )
+    return metrics_root, cargo_target
+
+
+def _machine_watchdog_identity(
+    *,
+    watcher_proc_root: Path = Path("/proc"),
+    watchdog_environment: Mapping[str, str] | None = None,
+    heartbeat_clock_ns: Callable[[], int] = time.time_ns,
+) -> MachineWatchdogIdentity:
+    module_checkout = _repository_checkout_root(Path(__file__).resolve(strict=True))
+    current_checkout = _repository_checkout_root(Path.cwd().resolve(strict=True))
+    module_root = _repository_common_root(module_checkout)
+    current_root = _repository_common_root(current_checkout)
+    if module_root != current_root or module_checkout != current_checkout:
+        raise RuntimeBridgeError("watchdog process is outside the RONDO common root")
+    root_stat = module_root.stat()
+    metrics_root, cargo_target = _reject_watchdog_overrides(module_root)
+    watcher = _watcher_process_identity(
+        common_root=module_root,
+        expected_script=(
+            module_checkout / "mydev" / "scripts" / "with-build-lock.sh"
+        ),
+        proc_root=watcher_proc_root,
+        environment=(os.environ if watchdog_environment is None else watchdog_environment),
+        heartbeat_clock_ns=heartbeat_clock_ns,
+    )
+    return MachineWatchdogIdentity(
+        common_root=module_root,
+        checkout_root=module_checkout,
+        root_device=root_stat.st_dev,
+        root_inode=root_stat.st_ino,
+        metrics_root=metrics_root,
+        cargo_target=cargo_target,
+        watcher=watcher,
+    )
+
+
+def _watcher_process_identity(
+    *,
+    common_root: Path,
+    expected_script: Path,
+    proc_root: Path,
+    environment: Mapping[str, str],
+    heartbeat_clock_ns: Callable[[], int],
+) -> WatcherProcessIdentity:
+    values = {name: environment.get(name) for name in _WATCHDOG_ENV}
+    if any(not isinstance(value, str) or not value for value in values.values()):
+        raise RuntimeBridgeError("watchdog liveness environment is incomplete")
+    try:
+        pid = _parse_uint(values["RONDO_WATCHDOG_WRAPPER_PID"] or "")
+        start_ticks = _parse_uint(
+            values["RONDO_WATCHDOG_WRAPPER_START_TICKS"] or ""
+        )
+    except RuntimeBridgeError as exc:
+        raise RuntimeBridgeError("watchdog process identity is invalid") from exc
+    if pid <= 1 or start_ticks <= 0:
+        raise RuntimeBridgeError("watchdog process identity is invalid")
+
+    script_value = values["RONDO_WATCHDOG_SCRIPT_PATH"] or ""
+    heartbeat_value = values["RONDO_WATCHDOG_HEARTBEAT_PATH"] or ""
+    script_path = _project_path(script_value)
+    canonical_expected_script = expected_script.resolve(strict=True)
+    if script_path != canonical_expected_script:
+        raise RuntimeBridgeError("watchdog script differs from the active RONDO checkout")
+    script_stat = script_path.lstat()
+    if (
+        stat.S_ISLNK(script_stat.st_mode)
+        or not stat.S_ISREG(script_stat.st_mode)
+        or not os.access(script_path, os.X_OK)
+    ):
+        raise RuntimeBridgeError("watchdog script is unavailable")
+
+    heartbeat_path = Path(heartbeat_value)
+    if (
+        not heartbeat_path.is_absolute()
+        or Path(os.path.normpath(heartbeat_value)) != heartbeat_path
+        or heartbeat_path.name != "watchdog-heartbeat"
+    ):
+        raise RuntimeBridgeError("watchdog heartbeat path is invalid")
+    heartbeat_parent = heartbeat_path.parent
+    parent_stat = heartbeat_parent.lstat()
+    heartbeat_stat = heartbeat_path.lstat()
+    if (
+        stat.S_ISLNK(parent_stat.st_mode)
+        or not stat.S_ISDIR(parent_stat.st_mode)
+        or parent_stat.st_uid != os.getuid()
+        or stat.S_IMODE(parent_stat.st_mode) != 0o700
+        or stat.S_ISLNK(heartbeat_stat.st_mode)
+        or not stat.S_ISREG(heartbeat_stat.st_mode)
+        or heartbeat_stat.st_uid != os.getuid()
+        or stat.S_IMODE(heartbeat_stat.st_mode) != 0o600
+    ):
+        raise RuntimeBridgeError("watchdog heartbeat path is unsafe")
+    resolved_heartbeat = heartbeat_path.resolve(strict=True)
+    if not resolved_heartbeat.is_relative_to(common_root):
+        raise RuntimeBridgeError("watchdog heartbeat is outside RONDO common root")
+    now_ns = heartbeat_clock_ns()
+    if isinstance(now_ns, bool) or not isinstance(now_ns, int) or now_ns < 0:
+        raise RuntimeBridgeError("watchdog heartbeat clock is unavailable")
+    age_ns = now_ns - heartbeat_stat.st_mtime_ns
+    if (
+        age_ns < -_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS
+        or age_ns > _WATCHDOG_HEARTBEAT_MAX_AGE_NS
+    ):
+        raise RuntimeBridgeError("watchdog heartbeat is stale")
+
+    proc_directory = proc_root / str(pid)
+    process_start_ticks, process_state = _read_process_stat(
+        proc_directory / "stat", pid
+    )
+    if process_start_ticks != start_ticks or process_state in {"Z", "X", "x"}:
+        raise RuntimeBridgeError("watchdog process identity changed")
+    cmdline = _read_bounded_bytes(proc_directory / "cmdline", 65_536)
+    arguments = tuple(value for value in cmdline.split(b"\0") if value)
+    if os.fsencode(script_path) not in arguments:
+        raise RuntimeBridgeError("watchdog process is not the canonical wrapper")
+
+    return WatcherProcessIdentity(
+        pid=pid,
+        start_ticks=start_ticks,
+        heartbeat_path=resolved_heartbeat,
+        heartbeat_device=heartbeat_stat.st_dev,
+        heartbeat_inode=heartbeat_stat.st_ino,
+        script_path=script_path,
+    )
+
+
+def _read_process_stat(path: Path, expected_pid: int) -> tuple[int, str]:
+    try:
+        payload = _read_bounded_bytes(path, 4096).decode("ascii")
+    except UnicodeError as exc:
+        raise RuntimeBridgeError("watchdog process stat is invalid") from exc
+    closing = payload.rfind(")")
+    prefix = f"{expected_pid} ("
+    if (
+        not payload.startswith(prefix)
+        or closing < len(prefix)
+        or payload[closing + 1:closing + 2] != " "
+    ):
+        raise RuntimeBridgeError("watchdog process stat is invalid")
+    fields = payload[closing + 2:].split()
+    if len(fields) < 20 or len(fields[0]) != 1:
+        raise RuntimeBridgeError("watchdog process stat is incomplete")
+    return _parse_uint(fields[19]), fields[0]
+
+
+def _read_bounded_bytes(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            payload = handle.read(limit + 1)
+    except OSError as exc:
+        raise RuntimeBridgeError("watchdog process evidence is unavailable") from exc
+    if not payload or len(payload) > limit:
+        raise RuntimeBridgeError("watchdog process evidence is invalid")
+    return payload
+
+
+def _project_path(value: str) -> Path:
+    if not value or "\x00" in value:
+        raise RuntimeBridgeError("watchdog project path is invalid")
+    path = Path(value)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    try:
+        return path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeBridgeError("watchdog project path is unavailable") from exc
+
+
+def _optional_project_directory(
+    value: str | None,
+    common_root: Path,
+    label: str,
+) -> Path | None:
+    if value is None:
+        return None
+    raw_path = Path(value)
+    if not raw_path.is_absolute():
+        raw_path = Path.cwd() / raw_path
+    try:
+        raw_stat = raw_path.lstat()
+    except OSError as exc:
+        raise RuntimeBridgeError(f"{label} is unavailable") from exc
+    if stat.S_ISLNK(raw_stat.st_mode):
+        raise RuntimeBridgeError(f"{label} is unsafe")
+    resolved = _project_path(value)
+    try:
+        path_stat = resolved.lstat()
+    except OSError as exc:
+        raise RuntimeBridgeError(f"{label} is unavailable") from exc
+    if (
+        stat.S_ISLNK(path_stat.st_mode)
+        or not stat.S_ISDIR(path_stat.st_mode)
+        or not resolved.is_relative_to(common_root)
+        or resolved == common_root
+    ):
+        raise RuntimeBridgeError(f"{label} must be a directory inside RONDO common root")
+    return resolved
+
+
+def _repository_common_root(start: Path) -> Path:
+    checkout = _repository_checkout_root(start)
+    git_entry = checkout / ".git"
+    entry_stat = git_entry.lstat()
+    if stat.S_ISLNK(entry_stat.st_mode):
+        raise RuntimeBridgeError("RONDO Git metadata path is unsafe")
+    if stat.S_ISDIR(entry_stat.st_mode):
+        git_directory = git_entry.resolve(strict=True)
+    elif stat.S_ISREG(entry_stat.st_mode):
+        line = git_entry.read_text(encoding="utf-8").strip()
+        prefix = "gitdir: "
+        if not line.startswith(prefix) or "\n" in line or "\x00" in line:
+            raise RuntimeBridgeError("RONDO worktree metadata is invalid")
+        raw_git_directory = Path(line[len(prefix):])
+        if not raw_git_directory.is_absolute():
+            raw_git_directory = checkout / raw_git_directory
+        git_directory = raw_git_directory.resolve(strict=True)
+    else:
+        raise RuntimeBridgeError("RONDO Git metadata path is invalid")
+    common_pointer = git_directory / "commondir"
+    if common_pointer.exists():
+        pointer_stat = common_pointer.lstat()
+        if stat.S_ISLNK(pointer_stat.st_mode) or not stat.S_ISREG(pointer_stat.st_mode):
+            raise RuntimeBridgeError("RONDO common metadata pointer is unsafe")
+        raw_common = Path(common_pointer.read_text(encoding="utf-8").strip())
+        common_git = (git_directory / raw_common).resolve(strict=True)
+    else:
+        common_git = git_directory
+    if common_git.name != ".git" or not common_git.is_dir():
+        raise RuntimeBridgeError("RONDO Git common directory is invalid")
+    return common_git.parent.resolve(strict=True)
+
+
+def _repository_checkout_root(start: Path) -> Path:
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate.resolve(strict=True)
+    raise RuntimeBridgeError("RONDO Git checkout root is unavailable")
 
 
 def _canonical_lock_path(uid: int) -> Path:
@@ -751,6 +1061,12 @@ class DockerCliCounter:
                 container_ids,
                 deadline=deadline,
             )
+            container_metrics: tuple[object, ...] = ()
+            if compose_contract is not None and compose_contract.container.require_container_metrics:
+                container_metrics = self._container_metrics(
+                    container_facts,
+                    deadline=deadline,
+                )
             image_bytes = self._image_bytes(identity, image_ids, deadline=deadline)
             network_facts: tuple[object, ...] = ()
             volume_facts: tuple[object, ...] = ()
@@ -783,13 +1099,36 @@ class DockerCliCounter:
             task_bytes=container_bytes + image_bytes,
             data_root=str(host_root),
             data_root_filesystem_free_bytes=free_bytes,
+            docker_desktop_vhdx_bytes=(
+                desktop_reading.vhd_size_bytes
+                if desktop_reading is not None
+                else None
+            ),
             task_container_ids=container_ids,
             task_image_ids=image_ids,
             task_containers=container_facts,
+            task_container_metrics=container_metrics,
             task_networks=network_facts,
             task_volumes=volume_facts,
             daemon_security_options=security_options,
         )
+
+    def resolve_image_identity(
+        self,
+        image_reference: str,
+        *,
+        deadline: float | None = None,
+    ) -> "DockerImageIdentity":
+        """Resolve a frozen manifest digest to the daemon's actual image id."""
+
+        if not _SHA256_IMAGE.fullmatch(image_reference):
+            raise RuntimeBridgeError("Docker image reference must be digest pinned")
+        if deadline is None:
+            deadline = self._monotonic() + self._probe_timeout_seconds
+        payload = _parse_json_array(
+            self._run(("docker", "image", "inspect", image_reference), deadline=deadline)
+        )
+        return _validate_resolved_image_identity(payload, image_reference)
 
     def _remaining(self, deadline: float) -> float:
         remaining = deadline - self._monotonic()
@@ -848,6 +1187,40 @@ class DockerCliCounter:
             identity=identity,
             kind="image",
         )
+
+    def _container_metrics(
+        self,
+        container_facts: tuple[object, ...],
+        *,
+        deadline: float,
+    ) -> tuple[object, ...]:
+        from .docker_supervisor import DockerContainerMetricFact
+
+        metrics: list[DockerContainerMetricFact] = []
+        for fact in container_facts:
+            container_id = getattr(fact, "container_id", None)
+            user = getattr(fact, "user", None)
+            if not isinstance(container_id, str) or not isinstance(user, str):
+                raise RuntimeBridgeError("Docker container metric target is invalid")
+            output = self._run(
+                (
+                    "docker", "container", "exec", "--user", user,
+                    container_id, "/bin/sh", "-ceu", _CONTAINER_CGROUP_METRIC_SCRIPT,
+                ),
+                deadline=deadline,
+            )
+            values = _parse_exact_uint_lines(
+                output,
+                ("cpu_usage_microseconds", "peak_memory_bytes"),
+            )
+            metric = DockerContainerMetricFact(
+                container_id=container_id,
+                cpu_usage_microseconds=values["cpu_usage_microseconds"],
+                peak_memory_bytes=values["peak_memory_bytes"],
+            )
+            metric.validate()
+            metrics.append(metric)
+        return tuple(metrics)
 
     def _compose_networks(self, project: str, *, deadline: float) -> tuple[object, ...]:
         from .docker_supervisor import ComposeResourceFact
@@ -1206,6 +1579,12 @@ def _validate_inspected_containers(
         if match is None or match.group(1) in facts:
             raise RuntimeBridgeError("Docker inspect object id is invalid")
         object_id = match.group(1)
+        raw_image_id = item.get("Image")
+        if not isinstance(raw_image_id, str) or _OBJECT_ID.fullmatch(raw_image_id) is None:
+            raise RuntimeBridgeError("Docker container image id is invalid")
+        image_id_match = _OBJECT_ID.fullmatch(raw_image_id)
+        assert image_id_match is not None
+        image_id = f"sha256:{image_id_match.group(1)}"
         config = item.get("Config")
         host = item.get("HostConfig")
         network_settings = item.get("NetworkSettings")
@@ -1268,11 +1647,14 @@ def _validate_inspected_containers(
             memory_swap_bytes=_required_nonnegative_int(host, "MemorySwap"),
             pids_limit=_required_nonnegative_int(host, "PidsLimit"),
             read_only_rootfs=_required_bool(host, "ReadonlyRootfs"),
+            cgroupns_mode=_required_string(host, "CgroupnsMode"),
             network_mode=network_mode,
             networks=networks,
             mounts=tuple(sorted(mounts)),
             compose_project=compose_project,
             compose_service=compose_service,
+            image_reference=_required_string(config, "Image"),
+            image_id=image_id,
             seccomp_profile_sha256=seccomp_profile_sha256,
         )
         try:
@@ -1284,6 +1666,46 @@ def _validate_inspected_containers(
     if set(facts) != set(expected_ids):
         raise RuntimeBridgeError("Docker inspect object set changed")
     return sum(sizes.values()), tuple(facts[value] for value in expected_ids)
+
+
+def _validate_resolved_image_identity(
+    payload: list[object],
+    image_reference: str,
+) -> object:
+    from .docker_supervisor import DockerImageIdentity
+
+    if len(payload) != 1 or not isinstance(payload[0], dict):
+        raise RuntimeBridgeError("Docker image identity is unavailable")
+    raw_id = payload[0].get("Id")
+    repo_digests = payload[0].get("RepoDigests")
+    if (
+        not isinstance(raw_id, str)
+        or _OBJECT_ID.fullmatch(raw_id) is None
+        or not isinstance(repo_digests, list)
+        or any(not isinstance(value, str) for value in repo_digests)
+        or image_reference not in repo_digests
+    ):
+        raise RuntimeBridgeError("Docker image identity differs from frozen digest")
+    match = _OBJECT_ID.fullmatch(raw_id)
+    assert match is not None
+    identity = DockerImageIdentity(image_reference, f"sha256:{match.group(1)}")
+    try:
+        identity.validate()
+    except Exception as exc:
+        raise RuntimeBridgeError("Docker image identity is invalid") from exc
+    return identity
+
+
+def _parse_exact_uint_lines(output: str, expected: tuple[str, ...]) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for line in output.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key not in expected or key in values:
+            raise RuntimeBridgeError("Docker container metric output is invalid")
+        values[key] = _parse_uint(value)
+    if set(values) != set(expected):
+        raise RuntimeBridgeError("Docker container metric output is incomplete")
+    return values
 
 
 def _required_string(payload: Mapping[str, object], key: str) -> str:

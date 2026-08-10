@@ -370,10 +370,11 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 - hello-world oracle 的 Docker no-API 生命周期验收通过，reward 1.0。
 - 测试基线与收尾的 Docker 总占用均为 18.128GB，本任务残留容器/卷为 0，
   未触发 40/60GB 增量或宿主剩余 80GiB 停机线。
-- Docker 守护进程报告 builtin seccomp 和 cgroup namespace，未启用 AppArmor。冻结 Codex
-  在任务容器内进入 bwrap 时，root 与 UID/GID 1000 两种形态都无法再创建 user
-  namespace。当前不授予 privileged/`SYS_ADMIN`，也不使用 `seccomp=unconfined`；
-  因此 Terminal-Bench 完整 no-API agent smoke 仍是已记录的安全阻塞，不是通过项。
+- 早期 builtin seccomp 诊断中，冻结 Codex 在任务容器内以 root 与 UID/GID 1000 两种形态都无法再创建
+  user namespace。后续项目内最小 custom seccomp、`cap_drop=ALL`、private cgroup 与有效态监督已进入
+  机器合同；v4 RONDO 重验随后在 adapter 安装阶段失败并退休。当前不授予 privileged/`SYS_ADMIN`，也不
+  使用 `seccomp=unconfined`。v5 adapter/Git/cleanup 合同尚未运行真实 Docker，因此 Terminal-Bench 双侧
+  no-API 仍不是通过项。
 
 ## 8. 当前未安装或未执行的重型工具
 
@@ -426,7 +427,7 @@ linked worktree 不复制凭据。后续加载器通过 `git rev-parse --git-com
 - llama.cpp 固定为 `b10333`/commit `08659901c43b51de735740f1cf61bb82fbe0c4e4`，CPU x64
   asset 安装于 ignored `eval-data/tools/llama-b10333/`；launcher/doctor 先核对安装 binary SHA，
   再核对 `--version` build/commit。`doctor` 在无权重时只做短生命周期
-  router 身份/健康探针，终态为 `infrastructure_ready_model_missing`/78；未下载模型、
+  router 身份/健康探针，终态为 `cpu_frontend_ready_model_missing_gpu_unvalidated`/78；未下载模型、
   未启动真实推理。
 - Terminal-Bench 两侧静态 musl runtime bundle 位于 ignored `eval-data/bin/{rondo,codex}/`；
   内含 CLI、`codex-code-mode-host` 与同一官方 v0.147.0 musl bwrap，详细 SHA 在各 bundle

@@ -7,8 +7,8 @@ import os
 import sys
 import tempfile
 import unittest
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass, replace
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 
@@ -49,8 +49,11 @@ from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
 from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
 from rondo_eval.terminal_bench.freeze import FreezeError, validate_runtime_image_digest  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
+    DockerContainerFact,
     DockerExecutionResult,
+    DockerImageIdentity,
     DockerOperation,
+    DockerSupervisionError,
     HeavyLockLease,
 )
 
@@ -65,8 +68,23 @@ class FakeExecResult:
 class FakeEnvironment:
     default_user = "1000:1000"
 
-    def __init__(self, *, corrupt_remote: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        corrupt_remote: bool = False,
+        remote_owner: str = "0:0",
+        remote_owners: dict[str, str] | None = None,
+        resolved_pwd: str = adapters_module.FIX_GIT_CANONICAL_WORKDIR,
+        fail_command_contains: str | None = None,
+    ) -> None:
         self.corrupt_remote = corrupt_remote
+        self.remote_owner = remote_owner
+        self.remote_owners = {
+            "/run/secrets/rondo_eval_provider_api_key": "1000:1000",
+            **dict(remote_owners or {}),
+        }
+        self.resolved_pwd = resolved_pwd
+        self.fail_command_contains = fail_command_contains
         self.calls: list[tuple[str, dict[str, str] | None, int | None, str | None]] = []
         self.effective_users: list[str] = []
         self.uploads: list[tuple[Path, str]] = []
@@ -77,12 +95,30 @@ class FakeEnvironment:
         self.uploads.append((source, remote_path))
         data = source.read_bytes()
         self.remote[remote_path] = data + (b"corrupt" if self.corrupt_remote else b"")
+        self.remote_owners.setdefault(remote_path, "1000:1000")
 
     async def exec(self, command, *, cwd=None, env=None, timeout_sec=None, user=None):
         del cwd
         self.calls.append((command, env, timeout_sec, user))
         self.effective_users.append(user or self.default_user)
         raw = command.removeprefix("set -o pipefail; ")
+        if self.fail_command_contains and self.fail_command_contains in raw:
+            return FakeExecResult(1)
+        if (
+            "task_workdir=$(pwd -P)" in raw
+            and self.resolved_pwd != adapters_module.FIX_GIT_CANONICAL_WORKDIR
+        ):
+            return FakeExecResult(1)
+        if raw.startswith("stat -c '%u:%g' -- "):
+            owner = next(
+                (
+                    value
+                    for path, value in self.remote_owners.items()
+                    if raw.endswith(path)
+                ),
+                self.remote_owner,
+            )
+            return FakeExecResult(0, f"{owner}\n")
         if raw.startswith("sha256sum -- "):
             path = raw.removeprefix("sha256sum -- ").strip("'")
             digest = hashlib.sha256(self.remote[path]).hexdigest()
@@ -342,6 +378,7 @@ class TerminalBenchTests(unittest.TestCase):
             prepared.command.trial_name,
         )
         container = prepared.command.compose_contract.container
+        self.assertEqual(container.cap_drop, ("ALL",))
         self.assertEqual(len(container.mounts), 4)
         secret_mount = next(
             item
@@ -365,6 +402,46 @@ class TerminalBenchTests(unittest.TestCase):
             "http://host.docker.internal:43123/v1",
         )
         self.assertNotIn(FIX_GIT_IMAGE_TAG, "\0".join(argv))
+        drifted_container = replace(container, cap_drop=())
+        drifted_command = replace(
+            prepared.command,
+            compose_contract=replace(
+                prepared.command.compose_contract, container=drifted_container
+            ),
+        )
+        with self.assertRaisesRegex(runner_module.TerminalBenchRunError, "Compose contract"):
+            drifted_command.validate(
+                prepared.spec, prepared.adapter, prepared.materialized_task
+            )
+        observed = DockerContainerFact(
+            container_id="b" * 64,
+            user=container.user,
+            privileged=container.privileged,
+            cap_add=container.cap_add,
+            cap_drop=container.cap_drop,
+            security_opt=container.security_opt,
+            memory_bytes=container.memory_bytes,
+            memory_swap_bytes=container.memory_swap_bytes,
+            pids_limit=container.pids_limit,
+            read_only_rootfs=container.read_only_rootfs,
+            cgroupns_mode=container.cgroupns_mode,
+            network_mode=container.network_mode,
+            networks=container.networks,
+            mounts=container.mounts,
+            compose_project=container.compose_project,
+            compose_service=container.compose_service,
+            image_reference=FIX_GIT_IMAGE_REF,
+            image_id=f"sha256:{'e' * 64}",
+        )
+        container.validate_observation(
+            observed, ("name=seccomp,profile=builtin",)
+        )
+        for observed_cap_drop in ((), ("ALL", "NET_RAW")):
+            with self.assertRaises(DockerSupervisionError):
+                container.validate_observation(
+                    replace(observed, cap_drop=observed_cap_drop),
+                    ("name=seccomp,profile=builtin",),
+                )
 
     def test_real_harbor_factory_can_construct_both_custom_agents(self) -> None:
         try:
@@ -436,33 +513,41 @@ class TerminalBenchTests(unittest.TestCase):
                 self.assertIn(f"{adapter.remote_path} --version", commands)
                 self.assertTrue(environment.calls)
                 self.assertTrue(all(call[3] == "root" for call in environment.calls))
-                self.assertIn(
-                    f"chown -r 0:0 -- {adapter.remote_directory}",
-                    commands,
-                )
+                self.assertNotIn("chown", commands)
+                for remote_path in (
+                    str(adapter.remote_directory),
+                    str(PurePosixPath(adapter.remote_bwrap_path).parent),
+                    adapter.remote_path,
+                    adapter.remote_code_mode_host_path,
+                    adapter.remote_bwrap_path,
+                ):
+                    self.assertIn(f"stat -c '%u:%g' -- {remote_path}", commands)
+                    self.assertIn(f"test ! -l {remote_path}", commands)
+                for remote_path in (
+                    adapter.remote_path,
+                    adapter.remote_code_mode_host_path,
+                    adapter.remote_bwrap_path,
+                ):
+                    self.assertIn(f"stat -c '%a' -- {remote_path}", commands)
+                self.assertNotIn("chmod 0555", commands)
+
+    def test_adapter_install_rejects_uploaded_file_owner_drift(self) -> None:
+        adapter = self.adapter()
+        environment = FakeEnvironment(
+            remote_owners={adapter.remote_bwrap_path: "0:0"}
+        )
+        with self.assertRaisesRegex(AdapterError, "command_id=verify_file_owner"):
+            asyncio.run(adapter.install(environment))
+        commands = "\n".join(call[0] for call in environment.calls)
+        self.assertNotIn("chown", commands)
+        self.assertNotIn("chmod 0555", commands)
+        self.assertNotIn(f"{adapter.remote_path} --version", commands)
 
     def test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv(self) -> None:
         secret = "sentinel-secret-must-not-serialize"
         adapter = self.adapter(extra_env={"OPENAI_API_KEY": secret})
         environment = FakeEnvironment()
-        raw_agent_commands = []
-        original_exec_as_agent = adapter.exec_as_agent
-
-        async def capture_exec_as_agent(environment_arg, *, command, env=None, **kwargs):
-            raw_agent_commands.append(command)
-            return await original_exec_as_agent(
-                environment_arg,
-                command=command,
-                env=env,
-                **kwargs,
-            )
-
-        with mock.patch.object(
-            adapter,
-            "exec_as_agent",
-            side_effect=capture_exec_as_agent,
-        ):
-            asyncio.run(adapter.run("repair the repository", environment, mock.Mock()))
+        asyncio.run(adapter.run("repair the repository", environment, mock.Mock()))
 
         commands = "\n".join(call[0] for call in environment.calls)
         self.assertNotIn(secret, commands)
@@ -493,7 +578,9 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("model_providers.openai.", commands)
         self.assertIn(adapter.remote_path + " exec", commands)
         raw_codex_command = next(
-            command for command in raw_agent_commands if adapter.remote_path + " exec" in command
+            command
+            for command, _env, _timeout, user in environment.calls
+            if user is None and adapter.remote_path + " exec" in command
         )
         self.assertTrue(raw_codex_command.startswith("set -o pipefail; "))
         self.assertIn("--enable unified_exec", raw_codex_command)
@@ -535,7 +622,11 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertTrue(
             all(
                 not call[1]
-                or call[1] == {"CODEX_HOME": "/tmp/rondo-eval-codex-home"}
+                or call[1]
+                == {
+                    "CODEX_HOME": "/tmp/rondo-eval-codex-home",
+                    "GIT_CONFIG_GLOBAL": "/tmp/rondo-eval-codex-home/gitconfig",
+                }
                 for call in environment.calls
             )
         )
@@ -545,18 +636,33 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("auto_review.evidence_dir", commands)
         root_calls = [call for call in environment.calls if call[3] == "root"]
         agent_calls = [call for call in environment.calls if call[3] is None]
-        self.assertEqual(len(root_calls), 2)
-        self.assertEqual(len(agent_calls), 3)
+        self.assertEqual(len(root_calls), 1)
+        self.assertEqual(len(agent_calls), 6)
         self.assertEqual(
             environment.effective_users,
-            ["root", "root", "1000:1000", "1000:1000", "1000:1000"],
+            ["root", *("1000:1000" for _ in range(6))],
         )
         self.assertIn("task_workdir=$(pwd -P)", root_calls[0][0])
-        self.assertIn("chown -R 1000:1000", root_calls[0][0])
-        self.assertIn("/logs/agent", root_calls[0][0])
-        self.assertIn("/run/secrets/rondo_eval_provider_api_key", root_calls[1][0])
-        self.assertIn("chown 1000:1000", root_calls[1][0])
-        self.assertIn("chmod 0600", root_calls[1][0])
+        self.assertIn(
+            f'test "$task_workdir" = "{adapters_module.FIX_GIT_CANONICAL_WORKDIR}"',
+            root_calls[0][0],
+        )
+        self.assertIn('test ! -L "$task_workdir"', root_calls[0][0])
+        self.assertIn('chmod -R a+rwX -- "$task_workdir"', root_calls[0][0])
+        self.assertNotIn("/logs/agent", root_calls[0][0])
+        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", root_calls[0][0])
+        self.assertNotIn("/tmp/rondo-eval", root_calls[0][0])
+        self.assertNotIn("chown", commands)
+        secret_agent_calls = [
+            call
+            for call in agent_calls
+            if "/run/secrets/rondo_eval_provider_api_key" in call[0]
+        ]
+        self.assertEqual(len(secret_agent_calls), 2)
+        self.assertTrue(any("stat -c '%u:%g'" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("chmod 0600" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("test -r /run/secrets/" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("test ! -w /run/secrets/" in call[0] for call in secret_agent_calls))
         self.assertTrue(
             any(
                 'test "$(id -u):$(id -g)" = "1000:1000"' in call[0]
@@ -564,8 +670,21 @@ class TerminalBenchTests(unittest.TestCase):
             )
         )
         self.assertTrue(
-            all(
-                "/run/secrets/rondo_eval_provider_api_key" not in call[0]
+            any(
+                f'test "$task_workdir" = "{adapters_module.FIX_GIT_CANONICAL_WORKDIR}"'
+                in call[0]
+                for call in agent_calls
+            )
+        )
+        self.assertTrue(any('.git/refs"' in call[0] for call in agent_calls))
+        self.assertTrue(any('.git/logs"' in call[0] for call in agent_calls))
+        self.assertTrue(any('.git/index"' in call[0] for call in agent_calls))
+        self.assertTrue(
+            any(
+                'git config --global --replace-all safe.directory "$task_workdir"'
+                in call[0]
+                and 'git -C "$task_workdir" status --porcelain=v1'
+                in call[0]
                 for call in agent_calls
             )
         )
@@ -578,6 +697,112 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('auto_review.model="gpt-5.6-luna"', rondo_commands)
         self.assertIn('auto_review.reasoning_effort="low"', rondo_commands)
         self.assertIn('auto_review.evidence_dir="/logs/agent/guardian-evidence"', rondo_commands)
+
+    def test_adapter_run_rejects_root_workdir_and_permission_projection_failure(self) -> None:
+        adapter = self.adapter()
+        for environment in (
+            FakeEnvironment(resolved_pwd="/"),
+            FakeEnvironment(resolved_pwd="/tmp/unexpected"),
+            FakeEnvironment(fail_command_contains="chmod -R a+rwX"),
+        ):
+            with self.subTest(environment=environment.__dict__):
+                with self.assertRaises(AdapterError):
+                    asyncio.run(
+                        adapter.run("repair the repository", environment, mock.Mock())
+                    )
+                self.assertEqual(len(environment.calls), 1)
+                command, _env, _timeout, user = environment.calls[0]
+                self.assertEqual(user, "root")
+                self.assertIn("task_workdir=$(pwd -P)", command)
+                self.assertIn(
+                    f'test "$task_workdir" = "{adapters_module.FIX_GIT_CANONICAL_WORKDIR}"',
+                    command,
+                )
+                self.assertIn(
+                    'chmod -R a+rwX -- "$task_workdir"', command
+                )
+                self.assertNotIn("chown", command)
+
+    def test_adapter_run_rejects_unwritable_git_state_and_secret_owner_drift(self) -> None:
+        adapter = self.adapter()
+        git_environment = FakeEnvironment(fail_command_contains='.git/logs"')
+        with self.assertRaisesRegex(AdapterError, "command_id=prepare_agent_and_git"):
+            asyncio.run(
+                adapter.run("repair the repository", git_environment, mock.Mock())
+            )
+        self.assertFalse(
+            any(
+                "OPENAI_API_KEY" in call[0]
+                for call in git_environment.calls
+            )
+        )
+
+        secret_environment = FakeEnvironment(
+            remote_owners={
+                "/run/secrets/rondo_eval_provider_api_key": "0:0"
+            }
+        )
+        with self.assertRaisesRegex(AdapterError, "command_id=verify_secret_owner"):
+            asyncio.run(
+                adapter.run("repair the repository", secret_environment, mock.Mock())
+            )
+        commands = "\n".join(call[0] for call in secret_environment.calls)
+        self.assertIn("stat -c '%u:%g' -- /run/secrets/", commands)
+        self.assertNotIn("python3 -c", commands)
+        self.assertNotIn("chown", commands)
+
+        git_probe_environment = FakeEnvironment(
+            fail_command_contains='git -C "$task_workdir" status'
+        )
+        with self.assertRaisesRegex(AdapterError, "command_id=prepare_agent_and_git"):
+            asyncio.run(
+                adapter.run("repair the repository", git_probe_environment, mock.Mock())
+            )
+        git_probe_commands = "\n".join(call[0] for call in git_probe_environment.calls)
+        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", git_probe_commands)
+
+    def test_checked_exec_diagnostic_is_bounded_and_secret_redacted(self) -> None:
+        secret = "sk-secret-must-never-escape"
+
+        class StderrEnvironment(FakeEnvironment):
+            async def exec(self, command, **kwargs):
+                self.calls.append((command, kwargs.get("env"), kwargs.get("timeout_sec"), kwargs.get("user")))
+                return FakeExecResult(1, stdout=secret, stderr=f"permission denied {secret}")
+
+        environment = StderrEnvironment()
+        with self.assertRaises(AdapterError) as caught:
+            asyncio.run(
+                adapters_module._checked_exec(
+                    environment,
+                    f"unsafe-full-argv {secret}",
+                    stage="install",
+                    command_id="verify_bundle_sha256",
+                )
+            )
+        rendered = str(caught.exception)
+        self.assertEqual(caught.exception.stage, "install")
+        self.assertEqual(caught.exception.command_id, "verify_bundle_sha256")
+        self.assertEqual(caught.exception.stderr_summary, "permission_denied")
+        self.assertNotIn(secret, rendered)
+        self.assertNotIn("unsafe-full-argv", rendered)
+        self.assertIsNone(caught.exception.__cause__)
+
+        agent_environment = StderrEnvironment()
+        with self.assertRaises(AdapterError) as agent_caught:
+            asyncio.run(
+                adapters_module._checked_exec_as_agent(
+                    agent_environment,
+                    command=f"unsafe-agent-command {secret}",
+                    env={"CODEX_HOME": "/tmp/rondo-eval-codex-home"},
+                    stage="run",
+                    command_id="prepare_agent_and_git",
+                )
+            )
+        agent_rendered = str(agent_caught.exception)
+        self.assertEqual(agent_caught.exception.command_id, "prepare_agent_and_git")
+        self.assertNotIn(secret, agent_rendered)
+        self.assertNotIn("unsafe-agent-command", agent_rendered)
+        self.assertIsNone(agent_caught.exception.__cause__)
 
     def test_adapter_rejects_wrong_binary_digest(self) -> None:
         adapter = self.adapter()
@@ -648,7 +873,12 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn("source: rondo_eval_provider_api_key", overlay)
         self.assertEqual(result.provider_secret_path.read_bytes(), b"")
         self.assertEqual(result.provider_secret_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(
+            (result.task_path / "tests" / "test.sh").stat().st_mode & 0o777,
+            0o555,
+        )
         self.assertIn('user: "1000:1000"', overlay)
+        self.assertIn("    cap_drop:\n      - ALL\n", overlay)
         self.assertEqual(result.runtime_user, "1000:1000")
         staged_document = materialize_module._read_toml(result.task_path / "task.toml")
         self.assertEqual(staged_document["agent"]["user"], "1000:1000")
@@ -679,6 +909,21 @@ class TerminalBenchTests(unittest.TestCase):
                 )
                 with self.assertRaises(MaterializationError):
                     result.validate()
+        result.overlay_path.write_text(overlay)
+        object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
+        result.validate()
+        for drifted_cap_drop in (
+            overlay.replace("    cap_drop:\n      - ALL\n", ""),
+            overlay.replace("      - ALL\n", "      - NET_RAW\n"),
+        ):
+            result.overlay_path.write_text(drifted_cap_drop)
+            object.__setattr__(
+                result,
+                "overlay_sha256",
+                hashlib.sha256(result.overlay_path.read_bytes()).hexdigest(),
+            )
+            with self.assertRaises(MaterializationError):
+                result.validate()
         result.overlay_path.write_text(overlay)
         object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
         result.validate()
@@ -720,6 +965,10 @@ class TerminalBenchTests(unittest.TestCase):
     def test_concrete_host_executor_uses_public_full_lifetime_supervisor(self) -> None:
         prepared = self.prepare()
         fake_supervisor = mock.Mock()
+        fake_supervisor.resolve_image_identity.return_value = DockerImageIdentity(
+            FIX_GIT_IMAGE_REF,
+            f"sha256:{'a' * 64}",
+        )
         fake_supervisor.supervise_host_command.return_value = DockerExecutionResult(
             operation=DockerOperation.HOST,
             argv=prepared.command.argv,
@@ -756,6 +1005,13 @@ class TerminalBenchTests(unittest.TestCase):
             },
         )
         fake_supervisor.supervise_host_command.assert_called_once()
+        fake_supervisor.resolve_image_identity.assert_called_once()
+        bound_contract = fake_supervisor.supervise_host_command.call_args.kwargs[
+            "compose_contract"
+        ]
+        self.assertTrue(bound_contract.container.require_image_identity)
+        self.assertEqual(bound_contract.container.image_reference, FIX_GIT_IMAGE_REF)
+        self.assertEqual(bound_contract.container.image_id, f"sha256:{'a' * 64}")
 
     def test_budgeted_live_path_keeps_official_key_out_of_harbor_and_requires_evidence(self) -> None:
         jobs = self.root / "jobs"
@@ -790,6 +1046,9 @@ class TerminalBenchTests(unittest.TestCase):
         metadata.write_text(json.dumps({
             "requests": [{
                 "role": "guardian",
+                "role_provenance": "declared",
+                "declared_role": "guardian",
+                "inferred_role": "guardian",
                 "contract_match": True,
                 "usage_valid": True,
             }]

@@ -9,11 +9,13 @@ import json
 import os
 import stat
 import sys
+import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 
 from ..contracts import BinaryManifest, RunOutcome, RunSpec, Side, assert_fair_pair
+from ..exit_codes import EVIDENCE_ERROR, INFRA_ERROR
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
     FIX_GIT_TASK_ID,
@@ -30,7 +32,8 @@ if TYPE_CHECKING:
 
 
 PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
-P1_PAIR_ID = "p1-fix-git-pair-v3"
+P1_PAIR_ID = "p1-fix-git-pair-v5"
+B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_KEYS = {
     "schema_version",
     "pair_id",
@@ -39,10 +42,10 @@ _PAIR_LOCK_KEYS = {
     "fairness",
     "harbor",
     "no_api_seccomp",
+    "runtime_requirements",
     "bundles",
 }
-_MODE_KEYS = {"enabled", "batch_id"}
-_PAID_MODE_KEYS = _MODE_KEYS | {"disabled_reason"}
+_PAID_MODE_KEYS = {"enabled", "batch_id", "disabled_reason"}
 _SLOT_KEYS = {"slot", "side", "round", "paid_run_id"}
 _BUNDLE_KEYS = {
     "manifest_path",
@@ -82,10 +85,17 @@ _HARBOR_KEYS = {
     "version",
     "release_commit",
     "wheel_sha256",
-    "installed_closure_sha256",
-    "installed_closure_files",
+    "uv_lock_sha256",
+    "console_script_normalized_sha256",
+    "console_script_normalization",
+    "key_files",
 }
 _SECCOMP_KEYS = {"profile_path", "source_sha256", "effective_sha256"}
+_RUNTIME_REQUIREMENT_KEYS = {
+    "paid_custom_seccomp_required",
+    "m1_pair_ledger_required",
+    "m1_container_metrics_required",
+}
 
 
 class PairIdentityError(ValueError):
@@ -93,34 +103,58 @@ class PairIdentityError(ValueError):
 
 
 class PairSequenceLedger:
-    """Persistent two-slot order gate shared by no-API pair and future paid runs."""
+    """Persistent two-slot order gate for paid runs only."""
 
-    def __init__(self, path: Path, *, identity: PairIdentity, mode: str) -> None:
-        selected = identity.mode(mode)
+    def __init__(
+        self,
+        path: Path,
+        *,
+        identity: PairIdentity,
+        mode: str,
+        persist_hook: Callable[[str], None] | None = None,
+    ) -> None:
+        if mode != "paid":
+            raise PairIdentityError("pair sequence ledger is paid-only")
+        selected = identity.mode("paid")
         self.path = path
         self.identity = identity
         self.mode_name = mode
         self.batch_id = selected.batch_id
+        self._lock_path = path.with_name(f"{path.name}.lock")
         self._handle: Any | None = None
         self._state: dict[str, Any] | None = None
+        self._persist_hook = persist_hook or (lambda _point: None)
 
     def __enter__(self) -> PairSequenceLedger:
-        if self.path.is_symlink():
-            raise PairIdentityError("pair sequence ledger must not be a symlink")
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
-            handle = self.path.open("a+", encoding="utf-8")
-            os.chmod(self.path, 0o600)
+            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(self._lock_path, flags, 0o600)
+            lock_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(lock_stat.st_mode):
+                os.close(descriptor)
+                raise PairIdentityError("pair sequence lock must be a regular file")
+            os.fchmod(descriptor, 0o600)
+            handle = os.fdopen(descriptor, "r+", encoding="utf-8")
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            handle.seek(0)
-            text = handle.read()
         except OSError as exc:
             raise PairIdentityError("pair sequence ledger is unavailable") from exc
         self._handle = handle
-        if text.strip():
+        exists = self.path.exists() or self.path.is_symlink()
+        if exists:
             try:
-                state = json.loads(text)
-            except json.JSONDecodeError as exc:
+                metadata = self.path.lstat()
+                if self.path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+                    raise PairIdentityError("pair sequence ledger must be a regular file")
+                raw = self.path.read_bytes()
+                if not raw or len(raw) > 1024 * 1024:
+                    raise PairIdentityError("pair sequence ledger is empty or oversized")
+                state = json.loads(raw.decode("utf-8"))
+            except PairIdentityError:
+                self.__exit__(None, None, None)
+                raise
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 self.__exit__(None, None, None)
                 raise PairIdentityError("pair sequence ledger is unreadable") from exc
             try:
@@ -136,11 +170,12 @@ class PairSequenceLedger:
             self._state = state
         else:
             self._state = {
-                "schema_version": 1,
+                "schema_version": 4,
                 "pair_id": self.identity.pair_id,
                 "pair_lock_sha256": self.identity.lock_sha256,
                 "mode": self.mode_name,
                 "batch_id": self.batch_id,
+                "eval_harness_commit": None,
                 "next_slot": 1,
                 "blocked": False,
                 "runs": [],
@@ -162,22 +197,21 @@ class PairSequenceLedger:
             finally:
                 handle.close()
 
-    def claim(self, *, side: Side, run_id: str) -> PairSlot:
+    def claim(self, *, side: Side, run_id: str, eval_harness_commit: str) -> PairSlot:
         state = self._require_state()
         active = [item for item in state["runs"] if item["status"] == "active"]
         if active:
-            # An active entry surviving a lock handoff means the owning process
-            # exited without publishing a terminal result.  It cannot be
-            # resumed or replaced safely: persist the failed slot before
-            # rejecting every subsequent claim for this pair.
             if len(active) != 1:
                 raise PairIdentityError("pair sequence active state is ambiguous")
-            active[0]["status"] = "failed"
-            state["blocked"] = True
-            self._persist()
-            raise PairIdentityError("pair sequence is blocked by an abandoned active slot")
+            raise PairIdentityError("pair sequence active slot requires reconciliation")
         if state["blocked"]:
             raise PairIdentityError("pair sequence is blocked by an earlier failed slot")
+        _require_commit(eval_harness_commit, "eval harness commit")
+        bound_commit = state["eval_harness_commit"]
+        if bound_commit is None:
+            state["eval_harness_commit"] = eval_harness_commit
+        elif bound_commit != eval_harness_commit:
+            raise PairIdentityError("pair slots require the same eval harness commit")
         slot = self.identity.slot_for(side)
         if slot.slot != state["next_slot"]:
             raise PairIdentityError("pair run attempted out of tracked slot order")
@@ -186,7 +220,7 @@ class PairSequenceLedger:
             for character in run_id
         ):
             raise PairIdentityError("pair sequence run id is invalid")
-        if self.mode_name == "paid" and slot.paid_run_id != run_id:
+        if slot.paid_run_id != run_id:
             raise PairIdentityError("paid run id differs from the tracked pair slot")
         if any(item["run_id"] == run_id for item in state["runs"]):
             raise PairIdentityError("pair sequence run id was already claimed")
@@ -197,22 +231,114 @@ class PairSequenceLedger:
                 "round": slot.round,
                 "run_id": run_id,
                 "status": "active",
+                "eval_harness_commit": eval_harness_commit,
+                "publication_sha256": None,
+                "container_metrics": None,
             }
         )
         self._persist()
         return slot
 
-    def finish(self, *, run_id: str, completed: bool) -> None:
+    def finish(
+        self,
+        *,
+        run_id: str,
+        completed: bool,
+        eval_harness_commit: str,
+        publication_sha256: str | None = None,
+        container_metrics: Mapping[str, object] | None = None,
+    ) -> None:
         state = self._require_state()
         matches = [item for item in state["runs"] if item["run_id"] == run_id]
-        if len(matches) != 1 or matches[0]["status"] != "active":
+        if len(matches) != 1 or matches[0]["status"] not in {"active", "publishing"}:
             raise PairIdentityError("pair sequence active run is unavailable")
+        _require_commit(eval_harness_commit, "eval harness commit")
+        if (
+            state["eval_harness_commit"] != eval_harness_commit
+            or matches[0]["eval_harness_commit"] != eval_harness_commit
+        ):
+            raise PairIdentityError("pair finish harness identity differs from claim")
+        if publication_sha256 is not None:
+            _require_sha256(publication_sha256, "publication sha256")
+        normalized_metrics = _container_metrics(container_metrics)
+        if completed and (
+            publication_sha256 is None or normalized_metrics is None
+        ):
+            raise PairIdentityError("completed paid slot lacks publication or container metrics")
+        matches[0]["publication_sha256"] = publication_sha256
+        matches[0]["container_metrics"] = normalized_metrics
         matches[0]["status"] = "completed" if completed else "failed"
         if completed:
             state["next_slot"] = matches[0]["slot"] + 1
         else:
             state["blocked"] = True
         self._persist()
+
+    def stage_paid_publication(
+        self,
+        *,
+        run_id: str,
+        eval_harness_commit: str,
+        container_metrics: Mapping[str, object],
+    ) -> None:
+        """Durably retain metrics before the external result transaction begins."""
+
+        state = self._require_state()
+        matches = [item for item in state["runs"] if item["run_id"] == run_id]
+        if len(matches) != 1 or matches[0]["status"] != "active":
+            raise PairIdentityError("pair sequence active run is unavailable")
+        _require_commit(eval_harness_commit, "eval harness commit")
+        if matches[0]["eval_harness_commit"] != eval_harness_commit:
+            raise PairIdentityError("publication staging harness differs from claim")
+        metrics = _container_metrics(container_metrics)
+        if metrics is None:
+            raise PairIdentityError("publication staging lacks container metrics")
+        matches[0]["container_metrics"] = metrics
+        matches[0]["status"] = "publishing"
+        self._persist()
+
+    def reconcile_paid_publication(
+        self,
+        *,
+        run_id: str,
+        eval_harness_commit: str,
+        index_path: Path,
+    ) -> str:
+        """Converge a staged slot after ArtifactWriter made its record durable."""
+
+        state = self._require_state()
+        matches = [item for item in state["runs"] if item["run_id"] == run_id]
+        if len(matches) != 1 or matches[0]["status"] != "publishing":
+            raise PairIdentityError("pair sequence publishing run is unavailable")
+        record = _published_terminal_record(index_path, run_id=run_id)
+        config = record.get("config")
+        run = matches[0]
+        if (
+            record.get("outcome") != RunOutcome.COMPLETED.value
+            or record.get("side") != run["side"]
+            or not isinstance(config, Mapping)
+            or config.get("pair_id") != self.identity.pair_id
+            or config.get("pair_lock_sha256") != self.identity.lock_sha256
+            or config.get("pair_slot") != run["slot"]
+            or config.get("pair_round") != run["round"]
+            or config.get("eval_harness_commit") != eval_harness_commit
+        ):
+            raise PairIdentityError("durable publication differs from the staged pair slot")
+        digest = terminal_record_sha256(record)
+        self.finish(
+            run_id=run_id,
+            completed=True,
+            eval_harness_commit=eval_harness_commit,
+            publication_sha256=digest,
+            container_metrics=matches[0]["container_metrics"],
+        )
+        return digest
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a detached validated snapshot while holding the stable lock."""
+
+        state = self._require_state()
+        return json.loads(json.dumps(state, sort_keys=True, separators=(",", ":")))
 
     def _require_state(self) -> dict[str, Any]:
         if self._handle is None or self._state is None:
@@ -221,17 +347,8 @@ class PairSequenceLedger:
 
     def _persist(self) -> None:
         state = self._require_state()
-        encoded = json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n"
-        handle = self._handle
-        assert handle is not None
-        try:
-            handle.seek(0)
-            handle.truncate(0)
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        except OSError as exc:
-            raise PairIdentityError("pair sequence ledger cannot be persisted") from exc
+        encoded = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        _atomic_replace_bytes(self.path, encoded, hook=self._persist_hook)
 
 
 @dataclass(frozen=True)
@@ -269,8 +386,10 @@ class HarborIdentity:
     version: str
     release_commit: str
     wheel_sha256: str
-    installed_closure_sha256: str
-    installed_closure_files: int
+    uv_lock_sha256: str
+    console_script_normalized_sha256: str
+    console_script_normalization: str
+    key_files: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -281,6 +400,13 @@ class NoApiSeccompIdentity:
 
 
 @dataclass(frozen=True)
+class RuntimeRequirements:
+    paid_custom_seccomp_required: bool
+    m1_pair_ledger_required: bool
+    m1_container_metrics_required: bool
+
+
+@dataclass(frozen=True)
 class PairIdentity:
     pair_id: str
     modes: Mapping[str, PairMode]
@@ -288,6 +414,7 @@ class PairIdentity:
     fairness: Mapping[str, object]
     harbor: HarborIdentity
     no_api_seccomp: NoApiSeccompIdentity
+    runtime_requirements: RuntimeRequirements
     bundles: Mapping[Side, BundleIdentity]
     lock_sha256: str
 
@@ -354,9 +481,14 @@ class PairIdentity:
             _validate_bundle_file(bundle_root / relative, digest=digest, size=size)
 
     def validate_spec(self, spec: RunSpec, *, mode: str) -> PairSlot:
-        selected_mode = self.mode(mode)
+        if mode == "paid":
+            batch_id = self.mode("paid").batch_id
+        elif mode == "no_api":
+            batch_id = B2_NO_API_BATCH_ID
+        else:
+            raise PairIdentityError("pair execution mode is unknown")
         slot = self.slot_for(spec.side)
-        if spec.batch_id != selected_mode.batch_id:
+        if spec.batch_id != batch_id:
             raise PairIdentityError("RunSpec batch differs from the tracked pair mode")
         actual = {
             "task_id": spec.task_id,
@@ -398,7 +530,10 @@ class PairIdentity:
     ) -> PairSlot:
         prepared.validate()
         slot = self.validate_spec(prepared.spec, mode=mode)
-        if mode == "no_api":
+        container = prepared.command.compose_contract.container
+        if container.require_container_metrics is not True:
+            raise PairIdentityError("pair container metrics are not enforced")
+        if mode in {"no_api", "paid"}:
             materialized = prepared.materialized_task
             expected = self.no_api_seccomp
             if (
@@ -407,10 +542,9 @@ class PairIdentity:
                 != str((Path(__file__).resolve().parents[3] / expected.profile_path).resolve())
                 or materialized.seccomp_profile_source_sha256 != expected.source_sha256
                 or materialized.seccomp_profile_effective_sha256 != expected.effective_sha256
-                or prepared.command.compose_contract.container.seccomp_profile_sha256
-                != expected.effective_sha256
+                or container.seccomp_profile_sha256 != expected.effective_sha256
             ):
-                raise PairIdentityError("no-API seccomp projection differs from the pair lock")
+                raise PairIdentityError("custom seccomp projection differs from the pair lock")
         return slot
 
     def validate_no_api_seccomp(self, *, project_root: Path) -> Path:
@@ -442,6 +576,11 @@ class PairIdentity:
         if expected.effective_sha256 != _EFFECTIVE_PROFILE_SHA256:
             raise PairIdentityError("no-API effective seccomp identity differs")
         return profile
+
+    def validate_runtime_seccomp(self, *, project_root: Path) -> Path:
+        """Return the one tracked profile shared by no-API and future paid runs."""
+
+        return self.validate_no_api_seccomp(project_root=project_root)
 
 
 @dataclass(frozen=True)
@@ -483,6 +622,7 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
     fairness = _parse_fairness(value["fairness"])
     harbor = _parse_harbor(value["harbor"])
     no_api_seccomp = _parse_no_api_seccomp(value["no_api_seccomp"])
+    runtime_requirements = _parse_runtime_requirements(value["runtime_requirements"])
     bundles = _parse_bundles(value["bundles"])
     identity = PairIdentity(
         pair_id=value["pair_id"],
@@ -491,6 +631,7 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
         fairness=fairness,
         harbor=harbor,
         no_api_seccomp=no_api_seccomp,
+        runtime_requirements=runtime_requirements,
         bundles=bundles,
         lock_sha256=hashlib.sha256(raw).hexdigest(),
     )
@@ -508,7 +649,7 @@ def validate_harbor_installation(
     distribution: importlib.metadata.Distribution | None = None,
     python_executable: Path | None = None,
 ) -> None:
-    """Bind the executing Harbor environment to the tracked wheel closure."""
+    """Bind Harbor to the tracked lock, entry point, and key modules."""
 
     expected = identity.harbor
     if (
@@ -524,12 +665,22 @@ def validate_harbor_installation(
         raise PairIdentityError("frozen Harbor distribution is not installed") from exc
     if dist.version != expected.version:
         raise PairIdentityError("installed Harbor version differs from the pair lock")
-    digest, count = _installed_harbor_closure(dist, expected.version)
-    if digest != expected.installed_closure_sha256 or count != expected.installed_closure_files:
-        raise PairIdentityError("installed Harbor files differ from the frozen wheel closure")
+    uv_lock = PAIR_LOCK_PATH.parents[1] / "uv.lock"
+    if _file_sha256(uv_lock) != expected.uv_lock_sha256:
+        raise PairIdentityError("eval uv.lock differs from the pair lock")
+    for relative, digest in expected.key_files.items():
+        path = Path(dist.locate_file(relative))
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            raise PairIdentityError("installed Harbor key file is unavailable") from exc
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode) or _file_sha256(path) != digest:
+            raise PairIdentityError("installed Harbor key file differs from the pair lock")
     _validate_console_script(
         executable,
         python_executable=python_executable or Path(sys.executable),
+        expected_normalized_sha256=expected.console_script_normalized_sha256,
+        normalization=expected.console_script_normalization,
     )
 
 
@@ -551,8 +702,13 @@ def publication_context(
     return context
 
 
-def assess_m1(records: Iterable[Mapping[str, Any]], identity: PairIdentity) -> dict[str, object]:
-    """Evaluate Terminal-Bench M1 without treating S2 as an M1 condition."""
+def assess_m1(
+    records: Iterable[Mapping[str, Any]],
+    identity: PairIdentity,
+    *,
+    pair_ledger_path: Path,
+) -> dict[str, object]:
+    """Evaluate M1 only when records and the durable paid ledger agree."""
 
     candidates = [
         record
@@ -571,8 +727,49 @@ def assess_m1(records: Iterable[Mapping[str, Any]], identity: PairIdentity) -> d
     if len(candidates) != 2:
         result["reasons"] = ["pair_requires_exactly_two_records"]
         return result
-    ordered = sorted(candidates, key=lambda item: item.get("created_at", ""))
+    ordered = sorted(
+        candidates,
+        key=lambda item: (
+            item.get("config", {}).get("pair_slot", 99)
+            if isinstance(item.get("config"), Mapping)
+            else 99
+        ),
+    )
     reasons: list[str] = []
+    try:
+        identity.mode("paid")
+    except PairIdentityError:
+        reasons.append("paid_pair_disabled")
+        ledger: Mapping[str, Any] | None = None
+    else:
+        try:
+            if not pair_ledger_path.exists() or pair_ledger_path.is_symlink():
+                raise PairIdentityError("paid pair ledger is unavailable")
+            with PairSequenceLedger(
+                pair_ledger_path,
+                identity=identity,
+                mode="paid",
+            ) as sequence:
+                ledger = sequence.snapshot()
+        except PairIdentityError:
+            ledger = None
+            reasons.append("paid_pair_ledger_invalid")
+    ledger_runs: dict[int, Mapping[str, Any]] = {}
+    if ledger is not None:
+        raw_runs = ledger.get("runs")
+        if (
+            ledger.get("next_slot") != 3
+            or ledger.get("blocked") is not False
+            or not isinstance(raw_runs, list)
+            or len(raw_runs) != 2
+        ):
+            reasons.append("paid_pair_ledger_not_completed")
+        else:
+            ledger_runs = {
+                item["slot"]: item
+                for item in raw_runs
+                if isinstance(item, Mapping) and isinstance(item.get("slot"), int)
+            }
     for record, slot in zip(ordered, identity.topology, strict=True):
         config = record.get("config")
         if not isinstance(config, dict) or (
@@ -602,6 +799,25 @@ def assess_m1(records: Iterable[Mapping[str, Any]], identity: PairIdentity) -> d
             or roles["main"] < 1
         ):
             reasons.append(f"{slot.side.value}_real_api_evidence_missing")
+        ledger_run = ledger_runs.get(slot.slot)
+        eval_commit = config.get("eval_harness_commit") if isinstance(config, dict) else None
+        if (
+            not isinstance(ledger_run, Mapping)
+            or ledger_run.get("status") != "completed"
+            or ledger_run.get("run_id") != record.get("run_id")
+            or ledger_run.get("side") != slot.side.value
+            or ledger_run.get("eval_harness_commit") != eval_commit
+            or ledger_run.get("publication_sha256") != terminal_record_sha256(record)
+        ):
+            reasons.append(f"{slot.side.value}_pair_ledger_mismatch")
+        try:
+            if not isinstance(ledger_run, Mapping):
+                raise PairIdentityError("ledger run is absent")
+            _container_metrics(ledger_run.get("container_metrics"))
+            if ledger_run.get("container_metrics") is None:
+                raise PairIdentityError("container metrics are absent")
+        except PairIdentityError:
+            reasons.append(f"{slot.side.value}_container_metrics_missing")
     _compare_record_fairness(ordered, identity, reasons)
     rondo = next((item for item in candidates if item.get("side") == Side.RONDO.value), None)
     if isinstance(rondo, Mapping):
@@ -620,13 +836,54 @@ def assess_m1(records: Iterable[Mapping[str, Any]], identity: PairIdentity) -> d
     return result
 
 
+def terminal_record_sha256(record: Mapping[str, Any]) -> str:
+    try:
+        encoded = json.dumps(
+            dict(record),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise PairIdentityError("Terminal-Bench record is not canonical JSON") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def published_terminal_record_sha256(index_path: Path, *, run_id: str) -> str:
+    """Read back one durable publication before completing its pair slot."""
+
+    return terminal_record_sha256(_published_terminal_record(index_path, run_id=run_id))
+
+
+def _published_terminal_record(index_path: Path, *, run_id: str) -> dict[str, Any]:
+
+    try:
+        metadata = index_path.lstat()
+        if index_path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+            raise PairIdentityError("Terminal-Bench result index is unsafe")
+        if metadata.st_size > 64 * 1024 * 1024:
+            raise PairIdentityError("Terminal-Bench result index is oversized")
+        records = [json.loads(line) for line in index_path.read_text().splitlines() if line]
+    except PairIdentityError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PairIdentityError("Terminal-Bench result index is unreadable") from exc
+    matches = [
+        record
+        for record in records
+        if isinstance(record, dict) and record.get("run_id") == run_id
+    ]
+    if len(matches) != 1:
+        raise PairIdentityError("Terminal-Bench publication is not uniquely durable")
+    return matches[0]
+
+
 def _parse_modes(value: object) -> dict[str, PairMode]:
-    if not isinstance(value, dict) or set(value) != {"no_api", "paid"}:
+    if not isinstance(value, dict) or set(value) != {"paid"}:
         raise PairIdentityError("pair modes differ from schema v1")
     result: dict[str, PairMode] = {}
     for name, raw in value.items():
-        expected_keys = _PAID_MODE_KEYS if name == "paid" else _MODE_KEYS
-        if not isinstance(raw, dict) or set(raw) != expected_keys:
+        if not isinstance(raw, dict) or set(raw) != _PAID_MODE_KEYS:
             raise PairIdentityError("pair mode differs from schema v1")
         enabled = raw["enabled"]
         batch_id = raw["batch_id"]
@@ -637,9 +894,7 @@ def _parse_modes(value: object) -> dict[str, PairMode]:
             raise PairIdentityError("pair mode values are invalid")
         if enabled != (batch_id is not None):
             raise PairIdentityError("pair mode enabled state and batch id disagree")
-        if name == "paid" and not enabled and (
-            not isinstance(reason, str) or not reason
-        ):
+        if not enabled and (not isinstance(reason, str) or not reason):
             raise PairIdentityError("disabled paid mode requires a reason")
         result[name] = PairMode(enabled, batch_id, reason)
     return result
@@ -658,14 +913,15 @@ def _validate_sequence_state(
         "pair_lock_sha256",
         "mode",
         "batch_id",
+        "eval_harness_commit",
         "next_slot",
         "blocked",
         "runs",
     }
     if not isinstance(value, dict) or set(value) != expected_keys:
-        raise PairIdentityError("pair sequence ledger differs from schema v1")
+        raise PairIdentityError("pair sequence ledger differs from schema v4")
     if (
-        value["schema_version"] != 1
+        value["schema_version"] != 4
         or value["pair_id"] != identity.pair_id
         or value["pair_lock_sha256"] != identity.lock_sha256
         or value["mode"] != mode
@@ -676,6 +932,11 @@ def _validate_sequence_state(
         or len(value["runs"]) > 2
     ):
         raise PairIdentityError("pair sequence ledger identity is invalid")
+    harness_commit = value["eval_harness_commit"]
+    if harness_commit is not None:
+        _require_commit(harness_commit, "pair sequence eval harness commit")
+    if bool(value["runs"]) != (harness_commit is not None):
+        raise PairIdentityError("pair sequence harness binding is inconsistent")
     statuses: list[str] = []
     for index, item in enumerate(value["runs"], start=1):
         if not isinstance(item, dict) or set(item) != {
@@ -684,8 +945,11 @@ def _validate_sequence_state(
             "round",
             "run_id",
             "status",
+            "eval_harness_commit",
+            "publication_sha256",
+            "container_metrics",
         }:
-            raise PairIdentityError("pair sequence run differs from schema v1")
+            raise PairIdentityError("pair sequence run differs from schema v4")
         slot = identity.topology[index - 1]
         if (
             item["slot"] != slot.slot
@@ -693,16 +957,29 @@ def _validate_sequence_state(
             or item["round"] != slot.round
             or not isinstance(item["run_id"], str)
             or not item["run_id"]
-            or item["status"] not in {"active", "completed", "failed"}
-            or (mode == "paid" and item["run_id"] != slot.paid_run_id)
+            or item["status"] not in {"active", "publishing", "completed", "failed"}
+            or item["run_id"] != slot.paid_run_id
+            or item["eval_harness_commit"] != harness_commit
         ):
             raise PairIdentityError("pair sequence run is invalid")
+        if item["publication_sha256"] is not None:
+            _require_sha256(item["publication_sha256"], "pair publication sha256")
+        metrics = _container_metrics(item["container_metrics"])
+        if metrics != item["container_metrics"]:
+            raise PairIdentityError("pair sequence container metrics are not canonical")
+        if item["status"] == "completed" and (
+            item["publication_sha256"] is None or metrics is None
+        ):
+            raise PairIdentityError("completed paid sequence lacks publication evidence")
+        if item["status"] == "publishing" and metrics is None:
+            raise PairIdentityError("pair publishing state lacks paid container metrics")
         statuses.append(item["status"])
     expected_next = 1 + sum(status == "completed" for status in statuses)
     if value["next_slot"] != expected_next:
         raise PairIdentityError("pair sequence next slot is inconsistent")
-    if statuses.count("active") > 1 or (
-        "active" in statuses and statuses[-1] != "active"
+    in_progress = sum(status in {"active", "publishing"} for status in statuses)
+    if in_progress > 1 or (
+        in_progress == 1 and statuses[-1] not in {"active", "publishing"}
     ):
         raise PairIdentityError("pair sequence active state is inconsistent")
     failed = "failed" in statuses
@@ -773,19 +1050,41 @@ def _parse_fairness(value: object) -> dict[str, object]:
 def _parse_harbor(value: object) -> HarborIdentity:
     if not isinstance(value, dict) or set(value) != _HARBOR_KEYS:
         raise PairIdentityError("Harbor identity differs from schema v1")
-    for key in ("wheel_sha256", "installed_closure_sha256"):
+    for key in (
+        "wheel_sha256",
+        "uv_lock_sha256",
+        "console_script_normalized_sha256",
+    ):
         _require_sha256(value[key], key)
     if (
         value["package"] != HARBOR_PACKAGE
         or value["version"] != HARBOR_VERSION
         or value["release_commit"] != HARBOR_RELEASE_COMMIT
         or value["wheel_sha256"] != HARBOR_WHEEL_SHA256
-        or isinstance(value["installed_closure_files"], bool)
-        or not isinstance(value["installed_closure_files"], int)
-        or value["installed_closure_files"] <= 0
+        or value["console_script_normalization"]
+        != "absolute_shebang_to_#!<RONDO_EVAL_PYTHON>"
+        or not isinstance(value["key_files"], dict)
+        or set(value["key_files"]) != {
+            "harbor/__init__.py",
+            "harbor/cli/main.py",
+            "harbor/agents/installed/base.py",
+        }
     ):
         raise PairIdentityError("Harbor identity differs from the B1 freeze")
+    for path, digest in value["key_files"].items():
+        if Path(path).is_absolute() or ".." in Path(path).parts:
+            raise PairIdentityError("Harbor key file path is invalid")
+        _require_sha256(digest, "Harbor key file sha256")
     return HarborIdentity(**value)
+
+
+def _parse_runtime_requirements(value: object) -> RuntimeRequirements:
+    if not isinstance(value, dict) or set(value) != _RUNTIME_REQUIREMENT_KEYS:
+        raise PairIdentityError("pair runtime requirements differ from schema v1")
+    for key in _RUNTIME_REQUIREMENT_KEYS:
+        if value[key] is not True:
+            raise PairIdentityError("pair runtime requirement is not enabled")
+    return RuntimeRequirements(**value)
 
 
 def _parse_no_api_seccomp(value: object) -> NoApiSeccompIdentity:
@@ -844,58 +1143,32 @@ def _parse_bundles(value: object) -> dict[Side, BundleIdentity]:
     return result
 
 
-def _installed_harbor_closure(
-    distribution: importlib.metadata.Distribution, version: str
-) -> tuple[str, int]:
-    package_root = Path(distribution.locate_file("harbor"))
-    dist_info_root = Path(distribution.locate_file(f"harbor-{version}.dist-info"))
-    candidates: list[tuple[str, Path]] = []
-    try:
-        for path in package_root.rglob("*"):
-            if path.is_dir() or "__pycache__" in path.parts or path.suffix == ".pyc":
-                continue
-            relative = path.relative_to(package_root).as_posix()
-            candidates.append((f"harbor/{relative}", path))
-        for name in ("METADATA", "WHEEL", "entry_points.txt"):
-            candidates.append((f"harbor-{version}.dist-info/{name}", dist_info_root / name))
-        licenses = dist_info_root / "licenses"
-        for path in licenses.rglob("*"):
-            if path.is_file():
-                relative = path.relative_to(dist_info_root).as_posix()
-                candidates.append((f"harbor-{version}.dist-info/{relative}", path))
-    except OSError as exc:
-        raise PairIdentityError("installed Harbor closure is unavailable") from exc
-    digest = hashlib.sha256()
-    for name, path in sorted(candidates):
-        try:
-            metadata = path.lstat()
-            contents = path.read_bytes()
-        except OSError as exc:
-            raise PairIdentityError("installed Harbor file is unreadable") from exc
-        if not stat.S_ISREG(metadata.st_mode) or path.is_symlink() or len(contents) != metadata.st_size:
-            raise PairIdentityError("installed Harbor closure contains an unsafe file")
-        digest.update(name.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(str(len(contents)).encode("ascii"))
-        digest.update(b"\0")
-        digest.update(hashlib.sha256(contents).hexdigest().encode("ascii"))
-        digest.update(b"\n")
-    return digest.hexdigest(), len(candidates)
-
-
-def _validate_console_script(executable: Path, *, python_executable: Path) -> None:
+def _validate_console_script(
+    executable: Path,
+    *,
+    python_executable: Path,
+    expected_normalized_sha256: str,
+    normalization: str,
+) -> None:
     try:
         metadata = executable.lstat()
-        contents = executable.read_text(encoding="utf-8")
+        raw = executable.read_bytes()
+        contents = raw.decode("utf-8")
     except (OSError, UnicodeError) as exc:
         raise PairIdentityError("Harbor console script is unavailable") from exc
+    first_line, separator, remainder = raw.partition(b"\n")
     if (
         executable.is_symlink()
         or not stat.S_ISREG(metadata.st_mode)
         or not metadata.st_mode & stat.S_IXUSR
         or metadata.st_size > 8192
+        or not separator
+        or normalization != "absolute_shebang_to_#!<RONDO_EVAL_PYTHON>"
     ):
-        raise PairIdentityError("Harbor console script is unsafe")
+        raise PairIdentityError("Harbor console script bytes differ from the pair lock")
+    normalized = b"#!<RONDO_EVAL_PYTHON>\n" + remainder
+    if hashlib.sha256(normalized).hexdigest() != expected_normalized_sha256:
+        raise PairIdentityError("Harbor console script bytes differ from the pair lock")
     lines = contents.splitlines()
     try:
         shebang = Path(lines[0].removeprefix("#!")).resolve(strict=True)
@@ -1005,3 +1278,92 @@ def _file_sha256(path: Path) -> str:
     except OSError as exc:
         raise PairIdentityError("pair identity file cannot be hashed") from exc
     return digest.hexdigest()
+
+
+def _container_metrics(value: Mapping[str, object] | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != {
+        "container_id",
+        "cpu_usage_seconds",
+        "peak_memory_bytes",
+    }:
+        raise PairIdentityError("container metrics differ from schema v1")
+    container_id = value["container_id"]
+    cpu = value["cpu_usage_seconds"]
+    peak = value["peak_memory_bytes"]
+    if (
+        not isinstance(container_id, str)
+        or not 12 <= len(container_id) <= 64
+        or any(character not in "0123456789abcdef" for character in container_id)
+        or isinstance(cpu, bool)
+        or not isinstance(cpu, (int, float))
+        or not float(cpu) >= 0
+        or not float(cpu) < float("inf")
+        or isinstance(peak, bool)
+        or not isinstance(peak, int)
+        or peak <= 0
+    ):
+        raise PairIdentityError("container metrics are invalid")
+    return {
+        "container_id": container_id,
+        "cpu_usage_seconds": float(cpu),
+        "peak_memory_bytes": peak,
+    }
+
+
+def _atomic_replace_bytes(
+    path: Path,
+    contents: bytes,
+    *,
+    hook: Callable[[str], None] | None = None,
+) -> None:
+    """Durably replace one bounded file while a caller-owned stable lock is held."""
+
+    if len(contents) > 1024 * 1024:
+        raise PairIdentityError("pair durable payload is oversized")
+    callback = hook or (lambda _point: None)
+    temporary: Path | None = None
+    descriptor = -1
+    try:
+        descriptor, raw_name = tempfile.mkstemp(
+            prefix=f".{path.name}.tmp-",
+            dir=path.parent,
+        )
+        temporary = Path(raw_name)
+        os.fchmod(descriptor, 0o600)
+        offset = 0
+        while offset < len(contents):
+            written = os.write(descriptor, contents[offset:])
+            if written <= 0:
+                raise OSError("durable write made no progress")
+            offset += written
+        callback("after_temp_write")
+        os.fsync(descriptor)
+        callback("after_temp_fsync")
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+        temporary = None
+        callback("after_replace")
+        parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        parent_fd = os.open(path.parent, parent_flags)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+        callback("after_parent_fsync")
+    except PairIdentityError:
+        raise
+    except OSError as exc:
+        raise PairIdentityError("pair durable state cannot be persisted") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass

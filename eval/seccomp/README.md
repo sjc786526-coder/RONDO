@@ -1,7 +1,13 @@
 # Plan 008 namespace diagnostic profile
 
-`plan008-userns-minimal-v0.2.3.json` is used only by the opt-in, no-API
-namespace diagnosis. It is not the RONDO or Docker daemon default.
+`plan008-userns-minimal-v0.2.3.json` is an opt-in Plan 008 container profile
+used by the bounded namespace diagnosis and by the no-API/paid Terminal-Bench
+paths whose tracked pair contract requires it. It is never the RONDO host or
+Docker daemon default and must not be applied globally.
+
+The additional allow rule is nevertheless container-wide: the kernel does not
+bind it to the frozen bubblewrap binary or the diagnostic process. Every process
+inside that container without `CAP_SYS_ADMIN` is evaluated against the same rule.
 
 - Upstream: `moby/profiles`, tag `seccomp/v0.2.3`
 - Tag object: `f1a0fd6b5a369fca061b041539129661ed337ef5`

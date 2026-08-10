@@ -6,7 +6,7 @@ import argparse
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .launcher import LLAMA_CPP_BUILD, LLAMA_CPP_COMMIT
 
@@ -26,6 +26,7 @@ class FakeApprovalServer:
         redirect_to: str | None = None,
         model_id: str = "rondo-local-approval",
         model_path: str = "/fake/model.gguf",
+        on_decision: Callable[[], None] | None = None,
     ):
         self.decision = dict(
             decision
@@ -36,6 +37,7 @@ class FakeApprovalServer:
         self.redirect_to = redirect_to
         self.model_id = model_id
         self.model_path = model_path
+        self.on_decision = on_decision
         self.requests: list[dict[str, Any]] = []
         self.authorization_seen: list[bool] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_type(self))
@@ -153,6 +155,8 @@ def _handler_type(fake: FakeApprovalServer):
                 self._json(401, {"error": {"message": "unauthorized"}})
                 return
             fake.requests.append(body)
+            if fake.on_decision is not None:
+                fake.on_decision()
             envelope = fake.response_override
             if envelope is None:
                 decision_text = json.dumps(

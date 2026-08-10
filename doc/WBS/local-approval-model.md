@@ -14,14 +14,22 @@
   malformed/歧义证据 fail-closed；合法 `ToolSearchOutput.tools` 作为既有证据保留，Luna/Sol/Local
   三组 consumer 协议投影对同一 Standard/Lite fixture 产生完全相同的 canonical bytes；这项验收不等同于
   三套生产调用端均已实现。
-- **L2 前置设施就绪，真实验收未运行**：llama.cpp 固定为 `b10333`/commit
-  `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 运行时、Responses
-  client、doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
-  52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`；client
-  禁止 redirect 并绑定 endpoint/model identity，模型存在时还要求 GGUF header 与配置 digest。
-  无模型 doctor 返回 `infrastructure_ready_model_missing`/78，不把 router 健康冒充模型就绪。
-- 当前未提供本地模型权重，本批也明确禁止下载；因此未启动真实模型、未推理、
-  未量显存/上下文/首 token/总耗时，L2 验收与 L2a/L3/L4 保持待后续阶段。
+- **L2 仅 CPU x64 前端/运行闭包就绪**：llama.cpp 固定为 `b10333`/commit
+  `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 runtime closure、Responses client、
+  doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
+  52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。
+- model-backed client 必须消费 launcher 写入主仓 `eval-data/local-approval/launcher-identity.json`
+  的 0600 私有 receipt，绑定 nonce、PID/start ticks、实际 cmdline、监听 socket、runtime/model
+  identity/path/id 和 endpoint。client 在 identity probe 后、decision 前以及 decision 返回后重验同一
+  launcher 实例；redirect、receipt 替换、进程/监听者变化都 fail-closed。这是轻量实例身份
+  约束，不是签名或权限系统，也不证明 server 实际加载了 receipt 所声明的全部字节，或 launcher 退出后
+  server 必然随之退出。
+- 当前未提供本地模型权重；冻结 lock 的能力状态为 `cpu_only_no_model`，结构化 model-backed 输出为
+  `not_run`，launcher 的运行时投影为 `cpu_only_x64`。无模型 doctor 返回
+  `cpu_frontend_ready_model_missing_gpu_unvalidated`/78；即使补入模型，在 GPU runtime 和
+  model-backed 参数验证前也不启动真实服务。本批未下载权重、未启动模型/推理、未量显存/
+  上下文/首 token/总耗时，L2 真实验收与 L2a/L3/L4 保持待后续阶段；当前不表述为
+  “只差权重”。
 
 ## 核心设计（已定，不再反复讨论）
 

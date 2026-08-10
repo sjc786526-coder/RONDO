@@ -20,6 +20,8 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     ComposeRunContract,
     ComposeSecretMountContract,
     DockerContainerFact,
+    DockerContainerMetricFact,
+    DockerImageIdentity,
     DockerCounterReading,
     FAILURE_CLEANUP_TIMEOUT_SECONDS,
     HOST_SUCCESS_TEARDOWN_GRACE_SECONDS,
@@ -36,6 +38,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
 
 
 IMAGE = f"example.invalid/rondo/task@sha256:{'a' * 64}"
+IMAGE_ID = f"sha256:{'e' * 64}"
 CONTAINER_ID = "b" * 64
 OTHER_CONTAINER_ID = "c" * 64
 COMPOSE_PROJECT = "rondoeval0810"
@@ -54,11 +57,14 @@ def container_fact(container_id: str) -> DockerContainerFact:
         memory_swap_bytes=100,
         pids_limit=2,
         read_only_rootfs=False,
+        cgroupns_mode="private",
         network_mode=COMPOSE_NETWORK,
         networks=(COMPOSE_NETWORK,),
         mounts=(),
         compose_project=COMPOSE_PROJECT,
         compose_service="main",
+        image_reference=IMAGE,
+        image_id=IMAGE_ID,
     )
 
 
@@ -70,6 +76,8 @@ def reading(
     containers: tuple[str, ...] = (),
     networks: tuple[ComposeResourceFact, ...] = (),
     volumes: tuple[ComposeResourceFact, ...] = (),
+    vhdx: int | None = None,
+    metrics: tuple[DockerContainerMetricFact, ...] = (),
 ) -> DockerCounterReading:
     return DockerCounterReading(
         docker_system_df={"layers_size": total, "containers_size": task},
@@ -77,8 +85,10 @@ def reading(
         task_bytes=task,
         data_root="/var/lib/docker",
         data_root_filesystem_free_bytes=free,
+        docker_desktop_vhdx_bytes=vhdx,
         task_container_ids=containers,
         task_containers=tuple(container_fact(value) for value in containers),
+        task_container_metrics=metrics,
         task_networks=networks,
         task_volumes=volumes,
         daemon_security_options=("name=seccomp,profile=builtin",),
@@ -502,7 +512,7 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertEqual(len(result.warnings), 1)
         self.assertEqual(
             [sample.phase for sample in result.samples],
-            ["baseline", "final", "teardown_grace", "teardown_grace"],
+            ["baseline", "final", "teardown_grace", "cleanup_verified"],
         )
 
     def test_successful_host_exit_cleans_after_bounded_teardown_grace(self) -> None:
@@ -860,6 +870,39 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertEqual(len(result.warnings), 1)
         self.assertEqual(result.samples[-1].docker_growth_bytes, DOCKER_GROWTH_WARN_BYTES)
 
+    def test_desktop_vhdx_growth_participates_in_warning_and_stop_gates(self) -> None:
+        warning_supervisor, _ = self.supervisor(
+            counter=FakeCounter(
+                [
+                    reading(vhdx=1_000),
+                    reading(vhdx=1_000 + DOCKER_GROWTH_WARN_BYTES),
+                ]
+            ),
+            handles=[FakeHandle([0])],
+        )
+        result = warning_supervisor.pull(
+            self.identity, IMAGE, lease=self.lease, timeout_seconds=30
+        )
+        self.assertEqual(result.samples[-1].docker_desktop_vhdx_growth_bytes, DOCKER_GROWTH_WARN_BYTES)
+        self.assertEqual(len(result.warnings), 1)
+
+        stop_handle = FakeHandle([None])
+        stop_supervisor, _ = self.supervisor(
+            counter=FakeCounter(
+                [
+                    reading(vhdx=1_000),
+                    reading(vhdx=1_000 + DOCKER_GROWTH_STOP_BYTES),
+                    reading(vhdx=1_000),
+                ]
+            ),
+            handles=[stop_handle],
+        )
+        with self.assertRaises(DockerSupervisionError):
+            stop_supervisor.pull(
+                self.identity, IMAGE, lease=self.lease, timeout_seconds=30
+            )
+        self.assertEqual(stop_handle.terminated, 1)
+
     def test_counter_probe_cannot_overrun_absolute_command_deadline(self) -> None:
         clock = FakeClock()
 
@@ -953,6 +996,158 @@ class DockerSupervisorTests(unittest.TestCase):
             ),
             ("name=seccomp,profile=builtin",),
         )
+
+    def test_host_contract_binds_daemon_image_identity(self) -> None:
+        contract = replace(
+            self.compose_contract.container,
+            image_reference=IMAGE,
+            image_id=IMAGE_ID,
+            require_image_identity=True,
+        )
+        contract.validate_observation(
+            container_fact(CONTAINER_ID),
+            ("name=seccomp,profile=builtin",),
+        )
+        with self.assertRaises(DockerSupervisionError) as caught:
+            contract.validate_observation(
+                replace(container_fact(CONTAINER_ID), image_id=f"sha256:{'f' * 64}"),
+                ("name=seccomp,profile=builtin",),
+            )
+        self.assertIn("image_id", caught.exception.reason)
+
+    def test_image_identity_preflight_is_lock_guarded_and_bounded(self) -> None:
+        class ResolvingCounter(FakeCounter):
+            def __init__(self):
+                super().__init__([reading()])
+                self.deadlines = []
+
+            def resolve_image_identity(self, image_reference, *, deadline=None):
+                self.deadlines.append(deadline)
+                return DockerImageIdentity(image_reference, IMAGE_ID)
+
+        clock = FakeClock()
+        counter = ResolvingCounter()
+        supervisor, runner = self.supervisor(
+            counter=counter,
+            handles=[],
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+        resolved = supervisor.resolve_image_identity(
+            self.identity,
+            IMAGE,
+            lease=self.lease,
+            timeout_seconds=30,
+        )
+        self.assertEqual(resolved.image_id, IMAGE_ID)
+        self.assertEqual(counter.deadlines, [COUNTER_SAMPLE_TIMEOUT_SECONDS])
+        self.assertEqual(runner.commands, [])
+
+    def test_paid_container_metrics_are_required_and_projected(self) -> None:
+        contract = replace(
+            self.compose_contract,
+            container=replace(
+                self.compose_contract.container,
+                require_container_metrics=True,
+            ),
+        )
+        metric = DockerContainerMetricFact(CONTAINER_ID, 1_250_000, 456_789)
+        counter = FakeCounter(
+            [
+                reading(vhdx=100),
+                reading(vhdx=101, containers=(CONTAINER_ID,), metrics=(metric,)),
+                reading(vhdx=101),
+            ]
+        )
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([None, 0])],
+            cleanup_runner=FakeRunner([]),
+        )
+        result = supervisor.supervise_host_command(
+            self.identity,
+            ("/project/eval/.venv/bin/harbor", "trials", "start"),
+            lease=self.lease,
+            timeout_seconds=30,
+            compose_contract=contract,
+        )
+        self.assertIsNotNone(result.container_metrics)
+        assert result.container_metrics is not None
+        self.assertEqual(result.container_metrics.cpu_usage_seconds, 1.25)
+        self.assertEqual(result.container_metrics.peak_memory_bytes, 456_789)
+        self.assertEqual(result.image_identity, DockerImageIdentity(IMAGE, IMAGE_ID))
+        assert result.effective_seccomp is not None
+        self.assertEqual(result.effective_seccomp.profile_kind, "builtin")
+        receipt = result.receipt()
+        self.assertEqual(receipt["cleanup"], "verified_empty")
+        self.assertEqual(receipt["metrics"]["peak_memory"], 456_789)
+        self.assertEqual(receipt["container"]["user"], "1000:1000")
+
+        with self.assertRaises(DockerSupervisionError):
+            DockerSupervisor._validate_host_reading(
+                reading(containers=(CONTAINER_ID,)), contract, samples=()
+            )
+
+    def test_container_metrics_require_effective_private_cgroup_namespace(self) -> None:
+        contract = replace(
+            self.compose_contract.container,
+            require_container_metrics=True,
+        )
+        contract.validate_observation(
+            container_fact(CONTAINER_ID),
+            ("name=seccomp,profile=builtin",),
+        )
+        for mode in ("host", "default", ""):
+            with self.subTest(mode=mode), self.assertRaises(DockerSupervisionError):
+                contract.validate_observation(
+                    replace(container_fact(CONTAINER_ID), cgroupns_mode=mode),
+                    ("name=seccomp,profile=builtin",),
+                )
+
+    def test_result_projects_vhdx_image_and_custom_seccomp_evidence(self) -> None:
+        profile_digest = "f" * 64
+        fact = replace(
+            container_fact(CONTAINER_ID),
+            security_opt=("seccomp={}",),
+            seccomp_profile_sha256=profile_digest,
+        )
+        baseline = reading(vhdx=1_000)
+        samples = (
+            DockerSupervisor._make_sample("baseline", baseline, baseline),
+            DockerSupervisor._make_sample(
+                "periodic",
+                baseline,
+                replace(
+                    reading(vhdx=1_500, containers=(CONTAINER_ID,)),
+                    task_containers=(fact,),
+                ),
+            ),
+            DockerSupervisor._make_sample(
+                "final", baseline, reading(vhdx=1_200)
+            ),
+        )
+        contract = replace(
+            self.compose_contract,
+            container=replace(
+                self.compose_contract.container,
+                image_reference=IMAGE,
+                image_id=IMAGE_ID,
+                require_image_identity=True,
+            ),
+        )
+        image, vhdx, metrics, seccomp = DockerSupervisor._result_durable_evidence(
+            contract, samples
+        )
+        self.assertEqual(image, DockerImageIdentity(IMAGE, IMAGE_ID))
+        assert vhdx is not None
+        self.assertEqual(vhdx.baseline_bytes, 1_000)
+        self.assertEqual(vhdx.peak_bytes, 1_500)
+        self.assertEqual(vhdx.final_bytes, 1_200)
+        self.assertEqual(vhdx.peak_growth_bytes, 500)
+        self.assertIsNone(metrics)
+        assert seccomp is not None
+        self.assertEqual(seccomp.profile_kind, "custom")
+        self.assertEqual(seccomp.profile_sha256, profile_digest)
 
     def test_compose_secret_allows_exactly_one_dynamic_source_mount(self) -> None:
         secret = DockerMountFact(

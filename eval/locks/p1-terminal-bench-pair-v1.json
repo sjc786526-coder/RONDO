@@ -1,11 +1,7 @@
 {
   "schema_version": 1,
-  "pair_id": "p1-fix-git-pair-v3",
+  "pair_id": "p1-fix-git-pair-v5",
   "modes": {
-    "no_api": {
-      "enabled": true,
-      "batch_id": "p1-no-api-smoke"
-    },
     "paid": {
       "enabled": false,
       "batch_id": null,
@@ -52,13 +48,24 @@
     "version": "0.20.0",
     "release_commit": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
     "wheel_sha256": "4b7e48223aea2384cdb8c9eff35eaebd482fc9b1ec09f8193a121c47356ff19a",
-    "installed_closure_sha256": "28797c4e9cd0ff6e0b2082af4bc355477970ea3a1c563b9c857bcc770ddb9fd1",
-    "installed_closure_files": 400
+    "uv_lock_sha256": "0ae149ea87324439c8fe56d05a8dd14ed6af6b50140363f62d31d0615b449014",
+    "console_script_normalized_sha256": "5cba75527afc99b8f826fa5e15c001131d83fa734ab840a959779e56c1566e45",
+    "console_script_normalization": "absolute_shebang_to_#!<RONDO_EVAL_PYTHON>",
+    "key_files": {
+      "harbor/__init__.py": "03274b7cebb4a8b4faedd0b7397e93524a753f140503bc6bfee16f907808301b",
+      "harbor/cli/main.py": "6f2d2c147f79b6ba6d40551f025555f85992f9779ef1263f3c91009b79ab2a2e",
+      "harbor/agents/installed/base.py": "ceb37980afe9e9d3f3dcd4a667364b22169ffa3939e0cf19ec9ca07af41a889b"
+    }
   },
   "no_api_seccomp": {
     "profile_path": "eval/seccomp/plan008-userns-minimal-v0.2.3.json",
     "source_sha256": "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f",
     "effective_sha256": "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+  },
+  "runtime_requirements": {
+    "paid_custom_seccomp_required": true,
+    "m1_pair_ledger_required": true,
+    "m1_container_metrics_required": true
   },
   "bundles": {
     "rondo": {

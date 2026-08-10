@@ -3,14 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import http.client
-import io
 import json
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
-from contextlib import redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 from urllib.parse import urlsplit
 
@@ -20,16 +19,19 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.config import RuntimeConfig  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, RunOutcome, Side  # noqa: E402
-from rondo_eval.docker_supervisor import HeavyLockLease  # noqa: E402
+from rondo_eval.docker_supervisor import (  # noqa: E402
+    HeavyLockLease,
+)
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
+from rondo_eval.terminal_bench import docker_smoke as docker_smoke_module  # noqa: E402
 from rondo_eval.terminal_bench.docker_smoke import (  # noqa: E402
     NO_API_SMOKE_BEARER,
     NO_API_SMOKE_CALL_ID,
+    NO_API_SMOKE_COMMAND,
     NO_API_SMOKE_MARKER,
     DockerNoApiSmokeError,
     LocalResponsesFakeServer,
     _parser,
-    _print_safe_cli_error,
     _smoke_exit_code,
     run_docker_no_api_smoke,
 )
@@ -43,12 +45,24 @@ from rondo_eval.terminal_bench.freeze import (  # noqa: E402
     TERMINAL_BENCH_REPO_REF,
 )
 from rondo_eval.terminal_bench.materialize import MaterializedTask  # noqa: E402
+from rondo_eval.terminal_bench.pair import B2_NO_API_BATCH_ID, load_pair_identity  # noqa: E402
+from rondo_eval.terminal_bench.results import ParsedHarborResult  # noqa: E402
 from rondo_eval.terminal_bench.__main__ import _load_manifest  # noqa: E402
 from rondo_eval.terminal_bench.runner import (  # noqa: E402
     HostHarborResult,
     TerminalBenchRequest,
     TerminalBenchRunError,
 )
+
+
+def _code_mode_wire_output(result_text: str) -> list[dict[str, str]]:
+    return [
+        {
+            "type": "input_text",
+            "text": "Script completed\nWall time 0.1 seconds\nOutput:\n",
+        },
+        {"type": "input_text", "text": result_text},
+    ]
 
 
 class FakeMaterializer:
@@ -154,8 +168,10 @@ class FakeHostExecutor:
                     {
                         "type": "custom_tool_call_output",
                         "call_id": NO_API_SMOKE_CALL_ID,
-                        "output": json.dumps(
-                            {"output": NO_API_SMOKE_MARKER, "exit_code": 0}
+                        "output": _code_mode_wire_output(
+                            json.dumps(
+                                {"output": NO_API_SMOKE_MARKER, "exit_code": 0}
+                            )
                         ),
                     }
                 ],
@@ -250,6 +266,20 @@ class DockerNoApiSmokeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_frozen_marker_requires_canonical_git_probe(self) -> None:
+        self.assertEqual(
+            NO_API_SMOKE_COMMAND,
+            "git -C /app/personal-site status --porcelain=v1 "
+            "--untracked-files=no >/dev/null && printf rondo_code_mode_smoke",
+        )
+        self.assertEqual(
+            docker_smoke_module.NO_API_SMOKE_CODE,
+            'const result=await tools.exec_command({cmd:"git -C '
+            '/app/personal-site status --porcelain=v1 --untracked-files=no '
+            '>/dev/null && printf rondo_code_mode_smoke"});'
+            'text(JSON.stringify({output:result.output,exit_code:result.exit_code}));',
+        )
+
     def config(self) -> RuntimeConfig:
         return RuntimeConfig(
             paths=mock.Mock(),
@@ -292,7 +322,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         )
         return TerminalBenchRequest(
             side=Side.CODEX,
-            batch_id="p1-no-api-smoke",
+            batch_id=B2_NO_API_BATCH_ID,
             binary=manifest,
             image_digest=FIX_GIT_IMAGE_DIGEST,
             source_checkout=str(self.root / "source"),
@@ -311,6 +341,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             seccomp_profile_effective_sha256=(
                 "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
             ),
+            require_container_metrics=True,
         )
 
     def test_full_function_uses_real_prepare_backend_and_parser_with_reward_zero(self) -> None:
@@ -336,7 +367,15 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(len(result.requests), 2)
         self.assertTrue(all(item.model == "gpt-5.6-luna" for item in result.requests))
         self.assertTrue(all(item.authorized for item in result.requests))
-        self.assertTrue(result.safe_summary()["code_mode_tool_round_trip"])
+        docker_receipt = {"schema_version": 1, "cleanup": "verified_empty"}
+        durable = replace(
+            result,
+            harbor=replace(
+                result.harbor,
+                docker_evidence=SimpleNamespace(receipt=lambda: docker_receipt),
+            ),
+        ).safe_summary()
+        self.assertEqual(durable["docker"], docker_receipt)
         self.assertIn(
             '      - "seccomp=',
             result.prepared.materialized_task.overlay_path.read_text(encoding="utf-8"),
@@ -348,6 +387,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(
             result.prepared.command.compose_contract.container.security_opt,
             ("no-new-privileges:true",),
+        )
+        self.assertTrue(
+            result.prepared.command.compose_contract.container.require_container_metrics
         )
         _argv, kwargs = FakeHostExecutor.calls[0]
         self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off"})
@@ -376,52 +418,66 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertNotEqual(_smoke_exit_code(replace(result, requests=())), 0)
 
     def test_fake_rejects_second_round_without_nested_tool_marker(self) -> None:
-        with LocalResponsesFakeServer() as server:
-            port = urlsplit(server.loopback_base_url).port
-            assert port is not None
-            headers = {
-                "Authorization": f"Bearer {NO_API_SMOKE_BEARER}",
-                "Content-Type": "application/json",
-            }
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            connection.request(
-                "POST",
-                "/v1/responses",
-                body=json.dumps(
-                    {"model": "gpt-5.6-luna", "stream": True, "input": "fix"}
-                ),
-                headers=headers,
-            )
-            first = connection.getresponse()
-            first.read()
-            connection.close()
-            self.assertEqual(first.status, 200)
+        valid_wire = _code_mode_wire_output(
+            json.dumps({"output": NO_API_SMOKE_MARKER, "exit_code": 0})
+        )
+        self.assertTrue(docker_smoke_module._valid_exec_result(valid_wire))
+        for malformed_wire in (
+            valid_wire[1]["text"],
+            valid_wire[1:],
+            valid_wire + [{"type": "input_text", "text": "extra"}],
+            [valid_wire[0], {"type": "output_text", "text": valid_wire[1]["text"]}],
+        ):
+            with self.subTest(wire=malformed_wire):
+                self.assertFalse(docker_smoke_module._valid_exec_result(malformed_wire))
 
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            connection.request(
-                "POST",
-                "/v1/responses",
-                body=json.dumps(
+        invalid_outputs = (
+            "wrong marker",
+            (
+                "Script error: exec_command failed for git status && printf "
+                f"{NO_API_SMOKE_MARKER}: spawn failed"
+            ),
+            json.dumps({"output": NO_API_SMOKE_MARKER, "exit_code": 1}),
+            json.dumps({"output": NO_API_SMOKE_MARKER, "exit_code": False}),
+            json.dumps({"output": f"extra {NO_API_SMOKE_MARKER}", "exit_code": 0}),
+            json.dumps(
+                {"output": NO_API_SMOKE_MARKER, "exit_code": 0, "extra": True}
+            ),
+        )
+        for invalid_output in invalid_outputs:
+            with self.subTest(output=invalid_output), LocalResponsesFakeServer() as server:
+                port = urlsplit(server.loopback_base_url).port
+                assert port is not None
+                headers = {
+                    "Authorization": f"Bearer {NO_API_SMOKE_BEARER}",
+                    "Content-Type": "application/json",
+                }
+                for body in (
+                    {"model": "gpt-5.6-luna", "stream": True, "input": "fix"},
                     {
                         "model": "gpt-5.6-luna",
                         "stream": True,
-                        "input": [
-                            {
-                                "type": "custom_tool_call_output",
-                                "call_id": NO_API_SMOKE_CALL_ID,
-                                "output": "wrong marker",
-                            }
-                        ],
-                    }
-                ),
-                headers=headers,
-            )
-            second = connection.getresponse()
-            second.read()
-            connection.close()
-            self.assertEqual(second.status, 400)
-            self.assertEqual(server.requests[-1].rejection, "tool_round_trip_mismatch")
-            self.assertFalse(server.tool_round_trip)
+                        "input": [{
+                            "type": "custom_tool_call_output",
+                            "call_id": NO_API_SMOKE_CALL_ID,
+                            "output": _code_mode_wire_output(invalid_output),
+                        }],
+                    },
+                ):
+                    connection = http.client.HTTPConnection(
+                        "127.0.0.1", port, timeout=5
+                    )
+                    connection.request(
+                        "POST", "/v1/responses", body=json.dumps(body), headers=headers
+                    )
+                    response = connection.getresponse()
+                    response.read()
+                    connection.close()
+                self.assertEqual(response.status, 400)
+                self.assertEqual(
+                    server.requests[-1].rejection, "tool_round_trip_mismatch"
+                )
+                self.assertFalse(server.tool_round_trip)
 
     def test_completed_harbor_result_rejects_unexpected_code_mode_host_error_item(self) -> None:
         class ErrorItemHostExecutor(FakeHostExecutor):
@@ -457,7 +513,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                 )
                 return result
 
-        with self.assertRaisesRegex(DockerNoApiSmokeError, "error event"):
+        with self.assertRaises(DockerNoApiSmokeError) as caught:
             asyncio.run(
                 run_docker_no_api_smoke(
                     self.config(),
@@ -470,6 +526,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     executor_factory=ErrorItemHostExecutor,
                 )
             )
+        self.assertEqual(str(caught.exception), "no-API supervised run failed")
+        self.assertNotIn("code-mode-host binary", str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
 
     def test_server_rejects_websocket_and_nonlocal_configuration(self) -> None:
         with self.assertRaises(DockerNoApiSmokeError):
@@ -494,7 +553,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             self.assertEqual(response.status, 400)
             self.assertEqual(server.requests[0].rejection, "websocket_disabled")
 
-    def test_function_rejects_caller_transport_and_cli_requires_three_inputs(self) -> None:
+    def test_function_rejects_caller_transport_and_cli_requires_pair_inputs(self) -> None:
         request = self.request()
         object.__setattr__(request, "provider_transport_base_url", "https://example.com/v1")
         with self.assertRaises(DockerNoApiSmokeError):
@@ -510,28 +569,78 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             )
         args = _parser().parse_args(
             [
-                "--side",
-                "codex",
-                "--binary-manifest",
-                "/tmp/binary.json",
+                "--rondo-binary-manifest",
+                "/tmp/rondo.json",
+                "--codex-binary-manifest",
+                "/tmp/codex.json",
                 "--docker-host-volume",
                 "/mnt/docker-data",
             ]
         )
-        self.assertEqual((args.side, args.binary_manifest.name), ("codex", "binary.json"))
-
-    def test_cli_error_is_single_line_structured_and_does_not_render_causes(self) -> None:
-        caught = DockerNoApiSmokeError("tracked Harbor identity differs")
-        caught.__cause__ = RuntimeError("sensitive-cause")
-        output = io.StringIO()
-
-        with redirect_stderr(output):
-            _print_safe_cli_error(caught, exit_code=65)
-
-        value = json.loads(output.getvalue())
-        self.assertEqual(value["reason"], "tracked Harbor identity differs")
-        self.assertEqual(value["exit_code"], 65)
-        self.assertNotIn("sensitive-cause", output.getvalue())
+        self.assertEqual(
+            (args.rondo_binary_manifest.name, args.codex_binary_manifest.name),
+            ("rondo.json", "codex.json"),
+        )
+        identity = mock.Mock()
+        identity.no_api_seccomp.source_sha256 = "1" * 64
+        identity.no_api_seccomp.effective_sha256 = "2" * 64
+        identity.validate_no_api_seccomp.return_value = EVAL_ROOT / "seccomp.json"
+        failed = SimpleNamespace(
+            passed=False,
+            parsed=SimpleNamespace(outcome=RunOutcome.INFRA_FAILED),
+            safe_summary=lambda: {"status": "failed", "side": "rondo"},
+        )
+        proof = SimpleNamespace(
+            guard=mock.Mock(),
+            lease=HeavyLockLease(token="x" * 16, held=True),
+        )
+        with (
+            mock.patch.object(
+                docker_smoke_module.RepoPaths,
+                "discover",
+                return_value=SimpleNamespace(
+                    common_root=self.root,
+                    worktree_root=EVAL_ROOT.parent,
+                ),
+            ),
+            mock.patch.object(docker_smoke_module, "load_pair_identity", return_value=identity),
+            mock.patch.object(docker_smoke_module, "load_runtime_config", return_value=self.config()),
+            mock.patch.object(
+                docker_smoke_module,
+                "validate_eval_harness_checkout",
+                return_value="a" * 40,
+            ),
+            mock.patch.object(docker_smoke_module, "validate_harbor_installation"),
+            mock.patch.object(
+                docker_smoke_module,
+                "_load_manifest",
+                side_effect=(self.request().binary, self.request().binary),
+            ),
+            mock.patch.object(docker_smoke_module, "lease_from_watchdog", return_value=proof),
+            mock.patch.object(docker_smoke_module, "DockerCliCounter", return_value=mock.Mock()),
+            mock.patch.object(
+                docker_smoke_module,
+                "run_docker_no_api_smoke",
+                new=mock.AsyncMock(return_value=failed),
+            ) as run,
+            mock.patch.object(docker_smoke_module, "_write_current_receipt") as write,
+            mock.patch("builtins.print"),
+        ):
+            status = docker_smoke_module.main(
+                [
+                    "--rondo-binary-manifest", "/tmp/rondo.json",
+                    "--codex-binary-manifest", "/tmp/codex.json",
+                    "--docker-host-volume", "/mnt/docker-data",
+                ]
+            )
+        self.assertEqual(status, 70)
+        self.assertEqual(run.await_count, 1)
+        self.assertIs(run.await_args.args[1].side, Side.RONDO)
+        write.assert_not_called()
+        current = self.root / "eval-data" / "b2" / "current.json"
+        docker_smoke_module._write_current_receipt(current, {"run": 1})
+        docker_smoke_module._write_current_receipt(current, {"run": 2})
+        self.assertEqual(json.loads(current.read_text()), {"run": 2})
 
     def test_cli_loader_requires_15_key_bundle_and_rejects_legacy_16_keys(self) -> None:
         bundle = self.root / "eval-data" / "bin" / "smoke-bundle"

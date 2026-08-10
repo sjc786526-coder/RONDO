@@ -27,6 +27,11 @@ from ..evidence import (
     validate_static_payload,
 )
 from ..exit_codes import SERVICE_UNAVAILABLE, STRUCTURED_OUTPUT_ERROR
+from .identity import (
+    LauncherIdentity,
+    require_launcher_identity,
+    revalidate_launcher_identity,
+)
 
 
 _MAX_RESPONSE_BYTES = 1_048_576
@@ -220,6 +225,14 @@ class LocalApprovalClient:
         return request
 
     def decide(self, payload: StaticApprovalPayload) -> dict[str, Any]:
+        launcher_identity = self._model_backed_launcher_identity()
+        if launcher_identity is not None:
+            self.verify_service_identity(
+                Path(launcher_identity.model_path),
+                expected_build=10333,
+                expected_commit="08659901c43b51de735740f1cf61bb82fbe0c4e4",
+            )
+            self._revalidate_launcher_identity(launcher_identity)
         body = json.dumps(
             self.build_request(payload),
             ensure_ascii=False,
@@ -248,11 +261,47 @@ class LocalApprovalClient:
             raise ServiceUnavailableError("local approval service is unavailable") from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise StructuredOutputError("local approval response exceeds the size limit")
+        if launcher_identity is not None:
+            self._revalidate_launcher_identity(launcher_identity)
         try:
             envelope = json.loads(raw)
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise StructuredOutputError("local approval response is not valid JSON") from exc
         return _parse_response(envelope, expected_model=self.settings.model_id)
+
+    def _model_backed_launcher_identity(self) -> LauncherIdentity | None:
+        if not self.settings.model_path:
+            return None
+        try:
+            # Imported lazily to keep the launcher -> client module dependency acyclic.
+            from .launcher import _load_runtime_lock
+
+            runtime_identity = _load_runtime_lock(self.config).identity_sha256
+            configured_model = resolve_config_path(
+                self.config, self.settings.model_path
+            ).resolve(strict=True)
+            return require_launcher_identity(
+                self.config,
+                runtime_sha256=runtime_identity,
+                model_sha256=self.settings.model_sha256,
+                model_path=configured_model,
+                model_id=self.settings.model_id,
+                base_url=self.settings.base_url,
+                host=self.settings.host,
+                port=self.settings.port,
+            )
+        except (ConfigError, OSError) as exc:
+            raise ServiceUnavailableError(
+                "local approval launcher instance is unavailable"
+            ) from exc
+
+    def _revalidate_launcher_identity(self, identity: LauncherIdentity) -> None:
+        try:
+            revalidate_launcher_identity(self.config, identity)
+        except (ConfigError, OSError) as exc:
+            raise ServiceUnavailableError(
+                "local approval launcher instance changed during request"
+            ) from exc
 
     def verify_service_identity(
         self,
