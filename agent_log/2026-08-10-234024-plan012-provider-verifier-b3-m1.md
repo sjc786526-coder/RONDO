@@ -113,3 +113,13 @@
   `logs_dir` 确定性派生，timeout 仍是 frozen 900 秒。
 - 使用失败 trial 的 frozen staging 做了无 Docker 构造复现，`PreparedOracleAgent` 已能完成构造；相关 Terminal-
   Bench 单测 19/19 通过。
+
+## 10. Oracle Docker 运行 5（评分失败并已清理）
+
+- clean commit `b8ac152c3f60a46d3b5e806db7e47a9f00a1413a` 已完整运行 prepared oracle 与 root verifier。
+  Oracle 成功创建/切换 recovery branch，最后仅因 UID 1000 没有 Git author identity 而无法 merge commit。
+- verifier 的 apt update 与 curl 安装均成功；uv installer 解包时 GNU tar 尝试恢复 archive UID/GID，在
+  `cap_drop=ALL` 下被拒绝，故 uvx 未安装、reward=0。该结果不是 Agent 性能失败。
+- Docker contract/metrics/cleanup 仍完整，API/key/cost 为 0。修复只在 scoped `solution.env` 增加 frozen image
+  同值的 `Test User/test@example.com`，在 `verifier.env` 增加 `TAR_OPTIONS=--no-same-owner`；不修改 frozen
+  脚本、不授予 chown/setuid 能力。

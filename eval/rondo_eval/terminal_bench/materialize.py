@@ -39,9 +39,13 @@ TERMINAL_BENCH_APT_CONFIG = "/tests/rondo-apt.conf"
 TERMINAL_BENCH_WORKDIR = "/app/personal-site"
 _APT_CONFIG_TEXT = 'APT::Sandbox::User "root";\n'
 _SOLUTION_ENV = {
-    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_COUNT": "3",
     "GIT_CONFIG_KEY_0": "safe.directory",
     "GIT_CONFIG_VALUE_0": TERMINAL_BENCH_WORKDIR,
+    "GIT_CONFIG_KEY_1": "user.name",
+    "GIT_CONFIG_VALUE_1": "Test User",
+    "GIT_CONFIG_KEY_2": "user.email",
+    "GIT_CONFIG_VALUE_2": "test@example.com",
 }
 
 
@@ -304,6 +308,7 @@ class PinnedTaskMaterializer:
             (
                 f'{verifier_env_needle}HOME = "{TERMINAL_BENCH_VERIFIER_HOME}"\n'
                 f'APT_CONFIG = "{TERMINAL_BENCH_APT_CONFIG}"\n'
+                'TAR_OPTIONS = "--no-same-owner"\n'
             ),
         ).replace(
             solution_env_needle,
@@ -490,6 +495,7 @@ def _validate_staged_task(document: dict) -> None:
         != {
             "HOME": TERMINAL_BENCH_VERIFIER_HOME,
             "APT_CONFIG": TERMINAL_BENCH_APT_CONFIG,
+            "TAR_OPTIONS": "--no-same-owner",
         }
         or not isinstance(solution, dict)
         or solution.get("env") != _SOLUTION_ENV

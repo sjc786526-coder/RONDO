@@ -915,14 +915,22 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(staged_document["verifier"]["user"], "root")
         self.assertEqual(
             staged_document["verifier"]["env"],
-            {"HOME": "/root", "APT_CONFIG": "/tests/rondo-apt.conf"},
+            {
+                "HOME": "/root",
+                "APT_CONFIG": "/tests/rondo-apt.conf",
+                "TAR_OPTIONS": "--no-same-owner",
+            },
         )
         self.assertEqual(
             staged_document["solution"]["env"],
             {
-                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_COUNT": "3",
                 "GIT_CONFIG_KEY_0": "safe.directory",
                 "GIT_CONFIG_VALUE_0": "/app/personal-site",
+                "GIT_CONFIG_KEY_1": "user.name",
+                "GIT_CONFIG_VALUE_1": "Test User",
+                "GIT_CONFIG_KEY_2": "user.email",
+                "GIT_CONFIG_VALUE_2": "test@example.com",
             },
         )
         for field, value in (("user", "1000:1000"), ("env", {"HOME": "/tmp"})):
