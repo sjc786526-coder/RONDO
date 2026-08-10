@@ -31,6 +31,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     Usage,
     _UrllibTransport,
     _validated_lite_header,
+    _validated_user_agent,
     milestone_metadata_ready,
     price_usage,
 )
@@ -68,6 +69,7 @@ class _FakeUpstream:
                                 "x-openai-internal-codex-responses-lite"
                             ),
                             "role": self.headers.get("X-RONDO-Eval-Role"),
+                            "user_agent": self.headers.get("User-Agent"),
                             "body": body,
                         }
                     )
@@ -205,6 +207,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         headers = {
             "Content-Type": "application/json",
             "X-RONDO-Eval-Request-Id": request_id,
+            "User-Agent": "codex_cli_rs/0.147.0 (proxy-test)",
         }
         if authenticate:
             headers["Authorization"] = f"Bearer {self.proxy.downstream_api_key}"
@@ -333,6 +336,10 @@ class ApiBudgetProxyTests(unittest.TestCase):
             self.upstream.requests[0]["authorization"], f"Bearer {self.secret}"
         )
         self.assertEqual(self.upstream.requests[0]["role"], "main")
+        self.assertEqual(
+            self.upstream.requests[0]["user_agent"],
+            "codex_cli_rs/0.147.0 (proxy-test)",
+        )
         metadata_bytes = (self.root / "metadata.json").read_bytes()
         ledger_bytes = (self.root / "budget.json").read_bytes()
         self.assertNotIn(self.secret.encode(), metadata_bytes)
@@ -402,6 +409,22 @@ class ApiBudgetProxyTests(unittest.TestCase):
         for values in ([" true"], ["true "], ["true", "true"]):
             with self.subTest(values=values), self.assertRaises(ApiBudgetProxyError):
                 _validated_lite_header(Headers(values))
+
+    def test_user_agent_is_forwarded_once_and_invalid_values_are_rejected(self) -> None:
+        class Headers:
+            def __init__(self, values: list[str]):
+                self.values = values
+
+            def get_all(self, _name: str, _default: list[str]) -> list[str]:
+                return self.values
+
+        self.assertEqual(
+            _validated_user_agent(Headers(["codex_cli_rs/0.147.0 (test)"])),
+            "codex_cli_rs/0.147.0 (test)",
+        )
+        for values in ([], ["one", "two"], ["bad\nagent"], ["x" * 513]):
+            with self.subTest(values=values), self.assertRaises(ApiBudgetProxyError):
+                _validated_user_agent(Headers(values))
 
     def test_sse_is_streamed_and_completed_usage_is_settled(self) -> None:
         self.upstream.mode = "sse"

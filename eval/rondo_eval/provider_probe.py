@@ -29,11 +29,12 @@ from .config import ConfigError, RepoPaths, RuntimeConfig, load_provider_secret,
 from .exit_codes import EVIDENCE_ERROR, SUCCESS
 
 
-PROBE_BATCH_ID = "plan012-provider-responses"
-PROBE_RUN_ID = "plan012-provider-responses"
+PROBE_BATCH_ID = "plan012-provider-responses-r2"
+PROBE_RUN_ID = "plan012-provider-responses-r2"
 PROBE_TOTAL_CAP_USD = Decimal("1")
 PROBE_MAX_OUTPUT_TOKENS = 64
 PROBE_CLIENT_TIMEOUT_SECONDS = 120.0
+PROBE_USER_AGENT = "codex_cli_rs/0.147.0 (rondo-eval-provider-probe)"
 _MAX_PROBE_RESPONSE_BYTES = 8 * 1024 * 1024
 _MAX_MODELS_RESPONSE_BYTES = 2 * 1024 * 1024
 
@@ -184,6 +185,7 @@ def _run_responses_probe(
             "Accept": "text/event-stream" if stream else "application/json",
             "X-RONDO-Eval-Role": "main",
             "X-RONDO-Eval-Request-Id": f"plan012-{name}",
+            "User-Agent": PROBE_USER_AGENT,
         },
         method="POST",
     )
@@ -243,7 +245,7 @@ def main() -> int:
                 paths.common_root
                 / "eval-data"
                 / "provider-probes"
-                / "plan012-v8-responses"
+                / "plan012-v8-responses-r2"
             ),
         )
         print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))

@@ -29,12 +29,13 @@
 - focused pure/fake/loopback tests 通过。
 - Docker 诊断最多三个 task run，严格串行且均在项目 watchdog 内：先 oracle/solution reward=1，再 RONDO、Codex
   no-API；使用既有 pinned image，禁止 pull/build，精确清理并保留 Windows C:、Docker df、receipt 与 watchdog evidence。
-- provider 真实探针最多三个请求、依次为 authenticated endpoint、non-stream Responses、stream Responses；
-  Responses `max_output_tokens <= 64`、reasoning effort low、每次 timeout <=120 秒；最多 1 USD，任一 timeout、usage
-  缺失或未结算即停止后续真实请求。
+- provider 真实探针使用极小 Responses 请求，`max_output_tokens <= 64`、reasoning effort low、每次 timeout
+  `<=120` 秒；任一 usage 缺失或未结算即停止同一诊断序列。探针与正式 benchmark 的本阶段新增费用合计不得超过
+  20 USD（按冻结的官方 Luna 价格核算）。
 - 仅当上述门禁全部通过，冻结全新 v8 pair/batch/run IDs；v8 固定 `terminal-bench/fix-git`、RONDO→Codex、零重试、
   5 USD/run、10 USD/pair，连同探针本阶段新增真实 API 总上限 11 USD，底层 ledger 20 USD hard cap 不变。
-- v8 任一侧失败即保留终态并停止；不得运行 v9 或替代 pair。双侧 completed 后才可评估 M1。
+- 每个新 pair 任一侧失败即保留终态并停止；只有明确的 provider/proxy/verifier/Docker/eval harness 基础设施故障
+  修复后才可冻结第二个 pair，最多两个新 pair。双侧 completed 后才可评估 M1。
 - 更新实时 WBS、Plan 012 和一份精炼执行日志；Plan 012 提交不合并、不推送。
 
 ## 2. 范围
@@ -76,10 +77,10 @@
 7. **Verifier 权限分离**：只允许 Harbor verifier phase 使用 root + `HOME=/root`；容器默认 user、Agent、
    RONDO/Codex 和工具调用保持 1000:1000，禁止 privileged、SYS_ADMIN、seccomp unconfined。
 8. **Docker 次数**：最多三个 no-API task run；oracle 失败即停止，RONDO no-API 失败即不运行 Codex。
-9. **探针次数/费用**：最多三个真实 provider 请求、合计不超过 1 USD；请求严格串行。任一 request 未 settle、usage
-   不合法或 timeout，立即停止剩余真实探针。
-10. **v8 授权**：仅前置门禁全部通过后才可新建 v8；最多两个 Docker run，RONDO 失败不运行 Codex，零重试，
-    pair 不超过 10 USD，本阶段连探针总新增费用不超过 11 USD。
+9. **探针次数/费用**：真实 provider 请求严格串行、保持极小输入；任一 request 未 settle 或 usage 不合法即停止同一
+   诊断序列。本阶段探针与正式 benchmark 新增费用合计不超过 20 USD。
+10. **paid 授权**：仅前置门禁全部通过后才可新建 paid pair；每 pair 最多两个 Docker run，RONDO 失败不运行
+    Codex，零重试，5 USD/run、10 USD/pair；最多两个新 pair，第二个仅用于修复后重验明确的基础设施故障。
 11. **结果诚实性**：`actual_usd` 只有结算事实支持时才写数值；未结算 reservation 保持 null。fake、Docker、
     真实 API、未运行项分开报告。
 12. **停止条件**：redirect、配置漂移、预算/usage/settlement 异常、watchdog/Windows C:/Docker counter 不可用、
@@ -122,7 +123,7 @@
 
 ### 阻塞项
 
-- 当前无代码实施阻塞；v8 identity 尚未创建，Docker/API 尚未运行。
+- 通用 Responses 上游未返回 HTTP 终态；已定位代理覆盖冻结 Codex User-Agent 的兼容问题。paid identity 尚未创建。
 
 ### 当前验收状态
 
@@ -138,3 +139,5 @@
 | 004 | Docker 三次额度按 oracle、RONDO no-API、Codex no-API 各一次计算 | 同时验证评分链与两侧执行合同且不超过授权 | Docker acceptance | 已采纳 |
 | 005 | provider 探针单独使用 1 USD 总账本；v8 pair 仍为 10 USD，两者合计 11 USD | 保持授权边界清晰且不复用 v7 | budget/pair | 已采纳 |
 | 006 | v8 仅在全部前置门禁通过后冻结 | 避免未就绪 identity 被消费后再次遗留不可复用失败批次 | paid readiness | 已采纳 |
+| 007 | 代理逐字转发一个经语法校验的下游 User-Agent | OpenAI-compatible 中转可能以 Codex User-Agent 路由；代理身份覆盖会破坏兼容 | provider transport | 已采纳 |
+| 008 | 探针与最多两个新 paid pair 共用 20 USD 总授权 | 用户扩大诊断次数但收紧本阶段总费用；第二 pair 仅限基础设施修复后重验 | provider/budget/pair | 已采纳 |

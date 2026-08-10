@@ -6,8 +6,9 @@
   `c3411b9b77227e20ca2892ddc4b0245fe5d8a3be` 已分别合并；本地与远端 main 均为
   `7bb03d0e23bcbc27dd49e66485652a502e44b0d5`。
 - v7 的 failed/blocked pair、budget reservation、artifact 和 append-only result 原样保留，没有复用或改写。
-- 本批禁止 Cargo、本地模型、Docker pull/build、自动重试和隔离边界放宽。真实探针最多三请求/1 USD；只有全部
-  前置门禁通过才允许唯一 v8，RONDO→Codex 各一次、零重试、5 USD/run、10 USD/pair。
+- 本批禁止 Cargo、本地模型、Docker pull/build、自动重试和隔离边界放宽。真实探针保持极小且严格串行；最多两个
+  新 paid pair，每个 RONDO→Codex 各一次、零重试、5 USD/run、10 USD/pair。探针与 benchmark 的新增费用按官方
+  Luna 价格合计不得超过 20 USD；第二 pair 仅限明确基础设施故障修复后的重验。
 - `.env.local` 未被打开、搜索、打印或复制；只通过既有严格 loader 静默确认目标 credential 可用。
 
 ## 2. 直接阻塞修复
@@ -142,3 +143,15 @@
 - 供应商教程只承诺 OpenAI Responses-compatible `/v1/responses`，不承诺 Models API。后续不重试 `/models`，
   而是把剩余两次授权分别用于 non-stream 与 stream Responses；新 one-shot 目录为
   `plan012-v8-responses`，两请求仍共享 1 USD hard cap。对应 loopback 回归 25/25 通过。
+
+## 13. Provider 探针 2（Responses 无 HTTP 终态）
+
+- 新 one-shot `plan012-v8-responses` 的 non-stream Responses 请求通过全部本地请求合同并完成 `$0.755400`
+  reservation；90 秒内上游没有返回 HTTP status，代理以去敏 502 收束。stream 请求未执行。
+- ledger 已把该 request 结算为 usage invalid、run stopped，`reserved_usd=0`；按冻结官方价格计入本阶段的保守费用为
+  `$0.755400`，中转站账单实扣未知且未猜测。该 one-shot 目录不复用。
+- 直接兼容根因是代理把冻结 Codex 的 `codex_cli_rs/...` User-Agent 覆盖为自身身份；供应商兼容说明明确将 Codex
+  User-Agent 作为路由/排障条件。代理现只接受一个长度受限的可打印 ASCII User-Agent，并逐字转发；provider probe
+  使用冻结 Codex 形状。实现仍由通用 HTTPS base URL 配置驱动，没有供应商域名或专用类型。
+- 新探针 identity/output 为 `plan012-provider-responses-r2` / `plan012-v8-responses-r2`。focused proxy/provider/
+  Terminal-Bench 回归 45/45 通过；尚未发出 r2 真实请求。

@@ -66,6 +66,7 @@ _RETRY_HEADERS = (
     "x-rondo-eval-attempt",
 )
 _LITE_HEADER = "x-openai-internal-codex-responses-lite"
+_MAX_USER_AGENT_BYTES = 512
 GUARDIAN_OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -702,6 +703,11 @@ class LoopbackResponsesProxy:
         except ApiBudgetProxyError:
             self._reject(handler, 400, "invalid_lite_header")
             return
+        try:
+            user_agent = _validated_user_agent(handler.headers)
+        except ApiBudgetProxyError:
+            self._reject(handler, 400, "invalid_user_agent")
+            return
         request_id = handler.headers.get("X-RONDO-Eval-Request-Id") or uuid.uuid4().hex
         role_header = handler.headers.get("X-RONDO-Eval-Role")
         declared_role = role_header.strip().lower() if role_header is not None else None
@@ -724,7 +730,7 @@ class LoopbackResponsesProxy:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "Accept": handler.headers.get("Accept", "application/json"),
-            "User-Agent": "rondo-eval-budget-proxy/1",
+            "User-Agent": user_agent,
             "X-RONDO-Eval-Role": declared_role,
         }
         if forward_lite_header:
@@ -897,6 +903,24 @@ def _validated_lite_header(headers: Any) -> bool:
     if values != ["true"]:
         raise ApiBudgetProxyError("Lite routing header must be exactly true")
     return True
+
+
+def _validated_user_agent(headers: Any) -> str:
+    """Return one safe downstream User-Agent for the compatible upstream."""
+
+    values = headers.get_all("User-Agent", [])
+    if len(values) != 1 or not isinstance(values[0], str):
+        raise ApiBudgetProxyError("exactly one User-Agent header is required")
+    value = values[0]
+    try:
+        encoded = value.encode("ascii", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise ApiBudgetProxyError("User-Agent header is invalid") from exc
+    if not encoded or len(encoded) > _MAX_USER_AGENT_BYTES:
+        raise ApiBudgetProxyError("User-Agent header is invalid")
+    if any(byte < 0x20 or byte > 0x7E for byte in encoded):
+        raise ApiBudgetProxyError("User-Agent header is invalid")
+    return value
 
 
 def _inspect_request(body: bytes, declared_role: str | None) -> dict[str, Any]:

@@ -15,7 +15,11 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.api_budget_proxy import _UrllibTransport  # noqa: E402
 from rondo_eval.config import RepoPaths, RuntimeConfig  # noqa: E402
-from rondo_eval.provider_probe import ProviderProbeError, run_provider_probes  # noqa: E402
+from rondo_eval.provider_probe import (  # noqa: E402
+    PROBE_USER_AGENT,
+    ProviderProbeError,
+    run_provider_probes,
+)
 
 
 class _Provider:
@@ -56,6 +60,7 @@ class _Provider:
                     "method": "POST",
                     "authorization": self.headers.get("Authorization"),
                     "role": self.headers.get("X-RONDO-Eval-Role"),
+                    "user_agent": self.headers.get("User-Agent"),
                     "body": body,
                 })
                 usage = {
@@ -149,6 +154,7 @@ class ProviderProbeTests(unittest.TestCase):
         ))
         for item in self.provider.requests:
             self.assertEqual(item["role"], "main")
+            self.assertEqual(item["user_agent"], PROBE_USER_AGENT)
             body = item["body"]
             self.assertEqual(body["max_output_tokens"], 64)
             self.assertEqual(body["reasoning"], {"effort": "low"})
