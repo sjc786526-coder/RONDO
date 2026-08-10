@@ -105,8 +105,8 @@
    不启动。Cargo target 位于 RONDO 根内；不得直接 Cargo 或绕过并发/内存/磁盘上限。
 4. **Docker 双重监督**：CLI 进入共享锁；容器另设明确 memory/swap/pids/wall timeout、前台生命周期和
    唯一 label/name。pull/build/run 从启动前到退出后必须周期采样 `docker system df`、本任务对象大小与
-   Docker Desktop 实际数据盘宿主剩余空间；计数不可读即停止。相对本次基线新增 40GB 实时告警、60GB
-   实时停止，宿主实际剩余低于 80GiB 立即停止。只清理本任务对象。
+   Windows `C:` 盘实际剩余空间；计数不可读即停止。相对本次基线新增 40GB 实时告警、60GB
+   实时停止，Windows `C:` 盘实际剩余低于 80GiB 立即停止。WSL 虚拟余量不作为宿主容量证据；只清理本任务对象。
 5. **构建空间有界**：开工先清理明确可再生的旧中间产物；两侧按“构建一个、固化二进制、清理 target、
    再构建另一个”串行，避免历史约 126GB 的两个 target 共存。任务结束再次清理中间产物。
 6. **秘密最小化**：`.env.local` 必须是主根普通文件、0600；严格 `KEY=VALUE` 数据解析、拒绝 shell 语法/

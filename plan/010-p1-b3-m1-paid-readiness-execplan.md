@@ -117,7 +117,8 @@
   实际使用另一 OpenAI-compatible provider。清除 proxy 只使错误 endpoint 表现为超时。Plan 011 改为配置驱动通用
   HTTPS base URL；未来 canonical shell 继续清除 ambient proxy，只设置 loopback `NO_PROXY`。
 - watchdog 正常收尾，132 个 Docker samples 无 warning；运行后 Docker 为 0 容器、0 卷，image/build-cache
-  与运行前相同，项目盘仍有 846GB 可用空间。
+  与运行前相同。该轮记录的约 846GB 是 WSL 虚拟文件系统余量，不是 Windows `C:` 盘实际剩余空间，
+  因而不作为宿主容量验收证据。
 
 ### 当前工作
 

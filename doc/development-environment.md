@@ -228,11 +228,13 @@ jobs、test-threads 与 rustc 槽是容量防护；全局锁是跨入口串行�
 - 180,000,000,000 B：一次告警；
 - 195,000,000,000 B：主动冻结并终止本次 scope；
 - 200,000,000,000 B：绝对停机线；
-- 所在文件系统剩余空间低于 50,000,000,000 B：停机。
+- Windows `C:` 盘实际剩余空间低于 50,000,000,000 B：停机。
 
 磁盘每 5 秒采样一次，195GB 主动线为采样和进程冻结保留约 5GB 缓冲。完整 0.147.0 target 实测约
-126GB，距主动线仍有约 69GB 余量，因此 200GB 足以覆盖正常冷构建，又能在 WSL 虚拟磁盘被中间产物
-塞满前结束任务。这是**受控构建看门狗**，不是 ext4 目录 quota；绕过脚本的直接写入不受其保护。
+126GB，距主动线仍有约 69GB 余量，因此 200GB 足以覆盖正常冷构建。宿主容量门禁必须读取 Windows
+`C:` 盘的实际余量；看门狗通过 `C:\` 的 WSL drvfs 挂载 `/mnt/c` 采样该值。WSL ext4 根文件系统
+`df` 显示的约 1TB 虚拟容量/余量只能作为诊断信息，不能代替该门禁。
+这是**受控构建看门狗**，不是 ext4 目录 quota；绕过脚本的直接写入不受其保护。
 为避免把项目 target 放到监控根之外绕过 200GB 计数，脚本要求 `CARGO_TARGET_DIR` 必须位于共享
 RONDO 项目根内；外部 target 会在启动前被拒绝。
 
@@ -369,7 +371,7 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
   `sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74`。
 - hello-world oracle 的 Docker no-API 生命周期验收通过，reward 1.0。
 - 测试基线与收尾的 Docker 总占用均为 18.128GB，本任务残留容器/卷为 0，
-  未触发 40/60GB 增量或宿主剩余 80GiB 停机线。
+  未触发 40/60GB 增量或 Windows `C:` 盘实际剩余 80GiB 停机线。
 - 早期 builtin seccomp 诊断中，冻结 Codex 在任务容器内以 root 与 UID/GID 1000 两种形态都无法再创建
   user namespace。后续项目内最小 custom seccomp、`cap_drop=ALL`、private cgroup 与有效态监督已进入
   机器合同；v4 RONDO 重验随后在 adapter 安装阶段失败并退休。当前不授予 privileged/`SYS_ADMIN`，也不
