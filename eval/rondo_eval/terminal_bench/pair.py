@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
-P1_PAIR_ID = "p1-fix-git-pair-v5"
+P1_PAIR_ID = "p1-fix-git-pair-v6"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_KEYS = {
     "schema_version",

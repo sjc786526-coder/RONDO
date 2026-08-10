@@ -156,15 +156,24 @@ class PairIdentityTests(unittest.TestCase):
             "peak_memory_bytes": 4096,
         }
 
-    def test_tracked_lock_keeps_no_api_lightweight_and_paid_disabled(self) -> None:
+    def test_tracked_lock_freezes_one_paid_round_per_side(self) -> None:
         self.assertNotIn("no_api", self.identity.modes)
         profile = self.identity.validate_no_api_seccomp(project_root=EVAL_ROOT.parent)
         self.assertEqual(
             hashlib.sha256(profile.read_bytes()).hexdigest(),
             self.identity.no_api_seccomp.source_sha256,
         )
-        with self.assertRaisesRegex(PairIdentityError, "fresh_pair"):
-            self.identity.mode("paid")
+        paid = self.identity.mode("paid")
+        self.assertEqual(paid.batch_id, "p1-fix-git-b3-m1-v1")
+        self.assertEqual(
+            [slot.paid_run_id for slot in self.identity.topology],
+            [
+                "20260810-230000000-tb-rondo-r1",
+                "20260810-230000001-tb-codex-r1",
+            ],
+        )
+        self.assertEqual(self.identity.fairness["max_retries"], 0)
+        self.assertEqual(self.identity.fairness["budget_usd"], 5.0)
         validate_harbor_installation(
             self.identity,
             executable=HARBOR_EXECUTABLE,

@@ -43,7 +43,7 @@ from .results import (
 from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
 
 
-P1_BATCH_ID = "p1-fix-git-20260810"  # Historical exhausted batch; paid lock is disabled.
+P1_BATCH_ID = "p1-fix-git-b3-m1-v1"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -54,6 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--binary-manifest", required=True, type=Path)
     parser.add_argument("--docker-host-volume", required=True, type=Path)
     parser.add_argument("--results-worktree-root", required=True, type=Path)
+    parser.add_argument("--measurement-worktree-root", type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     return parser
 
@@ -64,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
         side = Side(args.side)
         validate_run_id(args.run_id, track="tb", side=side.value)
         paths = RepoPaths.discover(Path.cwd())
+        measurement_paths = RepoPaths.discover(
+            args.measurement_worktree_root or paths.worktree_root
+        )
+        if measurement_paths.common_root != paths.common_root:
+            raise ConfigError("measurement worktree belongs to another repository")
         pair_identity = load_pair_identity()
         paid_mode = pair_identity.mode("paid")
         slot = pair_identity.slot_for(side)
@@ -113,7 +119,11 @@ def main(argv: list[str] | None = None) -> int:
             manifest=manifest,
         )
         validate_harbor_installation(pair_identity, executable=HARBOR_EXECUTABLE)
-        git_commit = validate_measurement_checkout(paths, side=side, manifest=manifest)
+        git_commit = validate_measurement_checkout(
+            measurement_paths,
+            side=side,
+            manifest=manifest,
+        )
         _secret_name, api_key = load_provider_secret(config, "openai")
         source = paths.common_root / "eval-data" / "sources" / "terminal-bench-2-1-ffccbe05"
         work_root = paths.common_root / "eval-data" / "work" / args.run_id
@@ -192,7 +202,9 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     parsed = classify_terminal_bench_result(result, parsed)
                     if validate_measurement_checkout(
-                        paths, side=side, manifest=manifest
+                        measurement_paths,
+                        side=side,
+                        manifest=manifest,
                     ) != git_commit:
                         raise TerminalBenchRunError("measurement commit changed during the run")
                     if (
@@ -229,7 +241,9 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 except (Exception, KeyboardInterrupt, asyncio.CancelledError) as exc:
                     if publication_staged:
-                        raise
+                        if writer is None or writer.publication_started():
+                            raise
+                        publication_staged = False
                     if not claimed:
                         raise
                     snapshot = ledger.snapshot()

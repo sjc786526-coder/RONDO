@@ -16,7 +16,7 @@ EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.config import RepoPaths  # noqa: E402
-from rondo_eval.artifacts import ArtifactWriter  # noqa: E402
+from rondo_eval.artifacts import ArtifactError, ArtifactWriter  # noqa: E402
 from rondo_eval import artifacts as artifacts_module  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, ProviderProjection, RunOutcome, RunSpec, Side  # noqa: E402
 from rondo_eval.docker_supervisor import DockerSupervisionError  # noqa: E402
@@ -94,7 +94,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         *, side: Side = Side.CODEX, exit_code: int = 0
     ) -> RunPublicationContext:
         return RunPublicationContext(
-            pair_id="p1-fix-git-pair-v5",
+            pair_id="p1-fix-git-pair-v6",
             pair_lock_sha256="9" * 64,
             pair_slot=1 if side is Side.RONDO else 2,
             pair_round=1,
@@ -1144,7 +1144,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             side_effect=DockerSupervisionError("redacted test failure")
         )
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v5",
+            pair_id="p1-fix-git-pair-v6",
             lock_sha256="9" * 64,
         )
         pair_identity.mode.return_value = SimpleNamespace(
@@ -1215,9 +1215,132 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "docker")
         budget = json.loads(
-            (self.root / "eval-data/budgets/p1-fix-git-20260810.json").read_text()
+            (self.root / f"eval-data/budgets/{terminal_bench_main.P1_BATCH_ID}.json").read_text()
         )
         self.assertIn(run_id, budget["runs"])
+
+    def test_cli_converges_pre_journal_publication_validation_failure(self) -> None:
+        run_id = "20260810-010000014-tb-codex-r1"
+        live = self._live_result(run_id)
+        paths = RepoPaths(self.root, self.root)
+        measurement_root = self.root / "measurement"
+        measurement_root.mkdir()
+        measurement_paths = RepoPaths(self.root, measurement_root)
+
+        def discover(start):
+            return measurement_paths if Path(start) == measurement_root else paths
+
+        pair_identity = mock.Mock(
+            pair_id="p1-fix-git-pair-v6",
+            lock_sha256="9" * 64,
+        )
+        pair_identity.mode.return_value = SimpleNamespace(
+            batch_id=terminal_bench_main.P1_BATCH_ID
+        )
+        pair_identity.slot_for.return_value = SimpleNamespace(
+            paid_run_id=run_id,
+            slot=2,
+            round=1,
+        )
+        sequence = mock.MagicMock()
+        sequence.__enter__.return_value = sequence
+
+        with patch.object(
+            terminal_bench_main.RepoPaths, "discover", side_effect=discover
+        ), patch.object(
+            terminal_bench_main, "load_pair_identity", return_value=pair_identity
+        ), patch.object(
+            terminal_bench_main, "validate_harbor_installation"
+        ), patch.object(
+            terminal_bench_main, "load_runtime_config", return_value=object()
+        ), patch.object(
+            terminal_bench_main,
+            "validate_eval_harness_checkout",
+            return_value="f" * 40,
+        ), patch.object(
+            terminal_bench_main,
+            "_load_manifest",
+            return_value=live.prepared.spec.binary,
+        ), patch.object(
+            terminal_bench_main, "validate_results_worktree", return_value=self.root
+        ), patch.object(
+            terminal_bench_main,
+            "validate_measurement_checkout",
+            return_value="e" * 40,
+        ) as validate_measurement, patch.object(
+            terminal_bench_main,
+            "load_provider_secret",
+            return_value=("OPENAI_API_KEY", "key"),
+        ), patch.object(
+            terminal_bench_main,
+            "lease_from_watchdog",
+            return_value=SimpleNamespace(lease=object(), guard=object()),
+        ), patch.object(
+            terminal_bench_main,
+            "run_budgeted_terminal_bench",
+            mock.AsyncMock(return_value=live),
+        ), patch.object(
+            terminal_bench_main,
+            "_paid_container_metrics",
+            return_value={
+                "container_id": "a" * 64,
+                "cpu_usage_seconds": 1.0,
+                "peak_memory_bytes": 4096,
+            },
+        ), patch.object(
+            terminal_bench_main,
+            "publication_context",
+            return_value=self._publication(
+                side=Side.CODEX,
+                exit_code=terminal_bench_main.EVIDENCE_ERROR,
+            ),
+        ), patch.object(
+            terminal_bench_main,
+            "publish_terminal_bench_result",
+            side_effect=ArtifactError("deterministic record validation failed"),
+        ) as result_publisher, patch.object(
+            terminal_bench_main, "PairSequenceLedger", return_value=sequence
+        ), patch("builtins.print") as safe_print:
+            result = terminal_bench_main.main(
+                [
+                    "--side",
+                    "codex",
+                    "--batch-id",
+                    terminal_bench_main.P1_BATCH_ID,
+                    "--run-id",
+                    run_id,
+                    "--binary-manifest",
+                    "/ignored/manifest.json",
+                    "--docker-host-volume",
+                    os.fspath(self.root),
+                    "--results-worktree-root",
+                    os.fspath(self.root),
+                    "--measurement-worktree-root",
+                    os.fspath(measurement_root),
+                ]
+            )
+
+        self.assertEqual(result, terminal_bench_main.EVIDENCE_ERROR)
+        result_publisher.assert_called_once()
+        safe_print.assert_called_once()
+        self.assertEqual(validate_measurement.call_count, 2)
+        self.assertTrue(
+            all(
+                call.args[0] == measurement_paths
+                for call in validate_measurement.call_args_list
+            )
+        )
+        sequence.stage_paid_publication.assert_called_once()
+        sequence.finish.assert_called_once_with(
+            run_id=run_id,
+            completed=False,
+            eval_harness_commit="f" * 40,
+        )
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "infra_failed")
+        self.assertEqual(record["config"]["failure_stage"], "publication")
+        runs_root = self.root / "eval-data" / "runs"
+        self.assertFalse((runs_root / f".{run_id}.publish.json").exists())
 
 
 if __name__ == "__main__":

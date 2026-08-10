@@ -206,6 +206,13 @@ class ArtifactWriter:
         self._started = False
         return self.target
 
+    def publication_started(self) -> bool:
+        """Return whether the recoverable publication transaction has begun."""
+
+        if not self._started:
+            raise ArtifactError("artifact writer has not started")
+        return _path_present(self.journal) or _path_present(self.target)
+
     def abort(self) -> None:
         """Release only this process's unpublished staging claim."""
 

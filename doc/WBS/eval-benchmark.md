@@ -31,10 +31,12 @@
   Plan 009 在 commit `b47a7b4` 上以已存在的 pinned image 严格串行运行 RONDO→Codex：两侧均
   completed，各 2 次 fake 请求、tool round-trip 成功、cleanup verified empty；官方 API 0 次、
   费用 0 USD。`reward=0` 是 no-API marker 诊断不解真实 task 的预期结果，不冒充 B3 成绩。
-- **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
+- **B3/M1 未运行**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
-  公平 pair，paid 入口 hard-disabled。后续除新 pair/batch/轮次/预算和新授权外，还须在真实
-  Docker 中验证 custom seccomp、container metrics 与 image/VHDX 契约。paid publication 先将 ledger 置为
+  公平 pair。Plan 010 已冻结 `p1-fix-git-pair-v6` / `p1-fix-git-b3-m1-v1`：同一 `fix-git`，RONDO、Codex
+  各一轮，零重试，每 run 5 USD、批次硬上限 20 USD；执行仍待单独真实 API 授权。本地预算代理按严格请求
+  形状投影并验证 main/guardian declared role，journal 创建前的确定性 publication 校验失败会收敛为既有
+  失败终态。真实运行仍须验证 custom seccomp、container metrics 与 image/VHDX 契约。paid publication 先将 ledger 置为
   `publishing`，持久结果后回读 record digest 再收敛为 `completed`；M1 必须同时核对两条
   record 与 durable paid pair ledger、harness commit、publication digest、declared request role 和容器
   metrics。任一不一致都不能通过 M1。

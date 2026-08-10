@@ -32,9 +32,9 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 OFFICIAL_MODEL = "gpt-5.6-luna"
 PRICE_SNAPSHOT_DATE = "2026-08-10"
 PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
-INPUT_USD_PER_MILLION = Decimal("0.20")
-CACHED_INPUT_USD_PER_MILLION = Decimal("0.02")
-OUTPUT_USD_PER_MILLION = Decimal("1.20")
+INPUT_USD_PER_MILLION = Decimal("1.00")
+CACHED_INPUT_USD_PER_MILLION = Decimal("0.10")
+OUTPUT_USD_PER_MILLION = Decimal("6.00")
 LONG_CONTEXT_THRESHOLD = 272_000
 LONG_INPUT_MULTIPLIER = Decimal("2")
 LONG_OUTPUT_MULTIPLIER = Decimal("1.5")
@@ -699,6 +699,10 @@ class LoopbackResponsesProxy:
         try:
             _require_safe_id(request_id, "request id")
             request_metadata = _inspect_request(body, declared_role)
+            if declared_role is None:
+                declared_role = request_metadata["role"]
+                request_metadata["role_provenance"] = "declared"
+                request_metadata["declared_role"] = declared_role
             self._ledger.reserve(self._run_id, request_id)
         except BudgetStopped:
             self._reject(handler, 429, "budget_stopped")
@@ -712,6 +716,7 @@ class LoopbackResponsesProxy:
             "Content-Type": "application/json",
             "Accept": handler.headers.get("Accept", "application/json"),
             "User-Agent": "rondo-eval-budget-proxy/1",
+            "X-RONDO-Eval-Role": declared_role,
         }
         if forward_lite_header:
             headers[_LITE_HEADER] = "true"
