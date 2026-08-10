@@ -447,7 +447,7 @@ class DockerCounterTests(unittest.TestCase):
                     json.dumps(CONTAINER_ID) + "\n",
                     "",
                     _container_inspect(
-                        security_opt=["no-new-privileges"],
+                        security_opt=["no-new-privileges=true"],
                         network_mode="none",
                         networks={"none": {}},
                         tmpfs={"/tmp": "rw,nosuid,nodev,noexec,size=64m"},

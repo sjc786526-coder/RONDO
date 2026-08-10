@@ -1324,7 +1324,8 @@ def _normalized_security_options(payload: Mapping[str, object]) -> tuple[str, ..
     values = _optional_string_list(payload, "SecurityOpt")
     normalized = tuple(
         "no-new-privileges:true"
-        if value.casefold() in {"no-new-privileges", "no-new-privileges:true"}
+        if value.casefold()
+        in {"no-new-privileges", "no-new-privileges:true", "no-new-privileges=true"}
         else value
         for value in values
     )

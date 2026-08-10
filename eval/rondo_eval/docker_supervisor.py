@@ -430,6 +430,12 @@ class HostContainerContract:
             raise DockerSupervisionError(
                 "effective Docker container state differs from contract: "
                 + ",".join(mismatches)
+                + (
+                    "; observed_non_seccomp_security_opt="
+                    + json.dumps(observed[4], ensure_ascii=True, separators=(",", ":"))
+                    if "security_opt" in mismatches
+                    else ""
+                )
             )
         if any(value not in daemon_security_options for value in self.required_daemon_security_options):
             raise DockerSupervisionError("effective Docker daemon security state differs from contract")
