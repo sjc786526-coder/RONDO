@@ -122,14 +122,89 @@ custom seccomp 反事实保持一致；仍禁止 privileged、`SYS_ADMIN` 和 `s
 
 上述数字存在重叠，不相加冒充总数。宿主反事实不是 Docker 验收；fake inspect 也不能代替真实 daemon。
 
-## 6. 仍未完成与下一步
+## 6. v4 真实 Docker 结果
 
-- B2 v4 尚未运行真实 Docker，因此 image/VHDX/private-cgroup/container-metrics/seccomp/cap-drop 的组合
-  仍未验收；
+整改提交 `07d0a487f8c498032a6da7ce4fd37a91c607bdac` 的 clean checkout 上，按用户授权启动
+`p1-fix-git-pair-v4` no-API pair。只执行了 slot 1 RONDO；没有拉取镜像、没有 Cargo、API、模型或
+密钥读取。命令由规范 `with-build-lock.sh` 包裹，使用 `/mnt/c` 作为 Docker Desktop 宿主数据盘事实。
+
+运行标识：
+
+- run id：`tb-no-api-rondo-e2cd95f5bc72`；
+- trial：`rondo-p1-rondo-fce8cbf561f7`；
+- pair ledger：`eval-data/pairs/p1-fix-git-pair-v4-no-api.json`，SHA-256
+  `23ceecfebfb058fe6dd814df09a217674f62374740d3e2282b90f4aff069edef`；
+- ledger schema v3，`blocked=true`、slot 1 `failed`、`next_slot=1`；
+- watchdog summary：
+  `eval-data/build-metrics/p1-v4-noapi-rondo/20260810-164759-1000-97046/summary.env`，SHA-256
+  `95c4c23a886d0048a11fa898e310b739c9964ef464e353562bf8efc6d5ae47a0`。
+
+真实 daemon/宿主证据：
+
+- pinned image reference 与 daemon image id 均为
+  `sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74`；
+- Docker system df total baseline/final 均为 `18128000000` bytes；本任务 bytes baseline/final 均为 0；
+- Docker Desktop VHDX baseline/peak/final 均为 `69467111424` bytes，增长 0；
+- Windows 数据盘 free bytes 从 `196717150208` 变为 `196717023232`；
+- exact container `658be8a9987961bf16cf7f653e851a1d25005cc0f7d6ef246429efd2dcd6cec5`：
+  CPU `0.237511` seconds，cgroup peak memory `9838592` bytes；
+- daemon 回显 custom seccomp SHA-256
+  `a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf`；
+- contract 同时核对 private cgroup namespace、non-root user、`cap_drop=ALL`、NNP、memory/swap/pids、
+  network/mounts；最终 task bytes 为 0，监督器完成精确清理；
+- wrapper `run_rc=70`、`final_rc=70`、`stop_reason=none`、`cleanup_reason=none`；项目峰值约
+  `12091826176` bytes，宿主文件系统仍余 `908160872448` bytes，峰值内存约 `2209697792` bytes，swap 0。
+
+失败发生在 Harbor adapter install。host return code 为 0，但 trial 的 `exception_info` 是
+`AdapterError: container command failed`，trace 精确定位到 `adapters.py` 上传 bundle 后的
+`chown -R 0:0 && chmod ...` 复合命令。原执行层丢弃了 stderr，不能从现有证据独立证明具体失败的 syscall；
+结合 daemon 已核对 `cap_drop=ALL` 与命令位置，可强归因为运行时 ownership mutation 和 capability-free
+安全合同不兼容，但不把该推断写成直接内核证据。失败发生在任何 agent/fake 请求前：
+`fake_requests=0`、fake contract 未满足、tool round-trip=false、API 调用 0、费用 0 USD。
+
+按照 pair 合同和用户授权，失败终态未改写，未运行 Codex slot 2，也未另起 pair。保留的 trial
+`result.json` SHA-256 为 `01486136523de7d3a6f030d75aa1ffe10a64a583a125c3cd0866d7c4e8c199dc`，
+`exception.txt` SHA-256 为 `c949f5714ed9ecedcb15d76ba7222011b930345d2297c30a4b89bc04fc90d35f`。
+
+### 6.1 失败后的无 Docker 窄修
+
+不改动失败 ledger/work evidence，也不重跑 Docker。adapter 的 install 和 run 路径均移除运行时
+`chown`，且没有通过添加 capability 或放宽 `cap_drop=ALL` 规避问题：
+
+- Harbor 上传后的 2 个目录与 3 个 bundle 文件逐项验证类型、非 symlink 和实际 owner `0:0`；
+  只有全部通过才 chmod、重算 SHA-256 和执行 `--version`；
+- root 在 run 阶段只允许 `pwd -P` 精确等于冻结 workdir `/app/personal-site`，再对该引号包裹的精确目录
+  执行 `chmod -R a+rwX`；`/`、其他 workdir 或失败 chmod 均在 agent/secret 前拒绝；
+- 1000:1000 agent 自行创建 CODEX_HOME、secrets 和 agent log 目录，验证 `.git`、refs、logs、index 可写；
+- agent 读取 Compose secret 前验证实际 owner `1000:1000`、普通非 symlink、非空、可读且不可写，随后自行
+  创建 0600 auth JSON；root 不读取 secret。
+
+定向 `test_terminal_bench` 17/17；adapter + docker-smoke + pair 联合 40/40；统一
+`just eval-test` 277/277、`just eval-lock` 85 packages；`py_compile` 与 `git diff --check` 通过。
+这些只是 pure/fake 证据，不能把本次失败改写为通过，也不能证明下一次 Docker 已成功。
+
+### 6.2 失败后聚焦独立复审
+
+独立复审核对了现场 ledger、watchdog、trial/result/exception 哈希、adapter diff 与文档，聚焦 5/5
+通过；结论仅为本次窄修可以提交，不是 B2 验收或全项目缺陷结论。复审保留以下边界：
+
+- 真实 `docker compose cp` 是否产生期望的 root ownership 尚未到达；不符合时新门禁会安全失败；
+- workdir 递归 chmod、`/logs/agent` owner、secret bind 的 1000:1000/只读有效态尚未由 Docker 重验；
+- failed run 按合同不生成 completed safe summary，因此本节 daemon 数值是详细人工日志证据，不能作为
+  completed B2 的机器摘要；
+- failure trace 没有原始 stderr，具体 syscall 原因只能强归因，不能写成独立直接证明。
+
+复审指出的上传目录 symlink 低项已顺手收紧：2 个目录与 3 个文件均显式拒绝 symlink；随后重新运行
+`test_terminal_bench` 17/17、统一 `just eval-test` 277/277、`just eval-lock` 85 packages 和
+`git diff --check`，均通过。
+
+## 7. 仍未完成与下一步
+
+- B2 v4 已在 RONDO 侧真实验证监督与 daemon 有效态，但 agent 链路未完成；Codex 侧未运行，不能认定
+  双侧 B2 验收；
 - B3 仍受 declared request role、pre-journal `publishing` 终态收敛和完整 paid Docker 耐久证据阻断；
 - L2 仍受 launcher/child 生命周期绑定和实际已加载 runtime/model bytes 身份阻断；
 - VHDX 文件身份、pair/safe-summary 父目录纵深和 canonical pair recipe 等低项仍存在。
 
-下一步只按用户已授权范围，在完整 watcher 下使用受跟踪 v4 identity，严格串行运行 RONDO→Codex
-两侧 no-API Docker pair；不拉取镜像，缺少 pinned image 即停止。任一侧失败都保留其终态并停止，
-不改写或另起 pair。
+当前失败 pair 永久保留；未来是否创建新 pair 并重跑 Docker，须以新的 clean harness identity 和用户
+后续指示为准。

@@ -210,15 +210,20 @@
 
 - 第二轮审查整改的代码与 pure/fake/loopback 门禁已收口；本轮未运行 Docker、Cargo、
   真实 API 或模型。第三轮 B2 前置整改加入规范 wrapper 活性证明、no-API summary/ledger 崩溃收敛和
-  production `cap_drop=ALL`；统一 `just eval-test` 为 274/274，`just eval-lock` 为 85 packages。
-  因此新 pair/watchdog/image/VHDX/container metrics/seccomp 合同仍需双侧
-  no-API 真实 Docker 重验。
+  production `cap_drop=ALL`；失败后 adapter 窄修完成的统一 `just eval-test` 为 277/277，
+  `just eval-lock` 为 85 packages。
+  随后的 v4 真实 Docker 重验在 RONDO slot 1 adapter 安装阶段以 `infra_failed` 终止；其
+  image/VHDX/private-cgroup/container-metrics/custom-seccomp 有效证据已采集，但上传后的
+  ownership/permission 复合命令失败；trace 定位到含 `chown` 的命令而无原始 stderr，且 0 fake/API
+  请求。失败 ledger 已封锁，Codex slot 2 未运行。
 - 受跟踪 pair lock 已推进为 `p1-fix-git-pair-v4`，绑定 Harbor/runtime 闭包和新启用门禁。
   旧 v3 no-API ledger 保留原身份且不兼容新 schema，不复用、删除或作为新门禁已完成的证据。
 
 ### 后续计划
 
-- 先用新 pair/schema 在项目看门狗内重跑一次 RONDO→Codex no-API Docker pair，将去敏
+- adapter 已移除 install/run 的运行时 ownership mutation，改为实际 ownership 验证、agent 用户自建
+  私有文件，并只对固定 `/app/personal-site` 投影递归写权限；该代码只有 pure/fake 回归。后续以新的
+  受跟踪 pair/schema 在项目看门狗内重跑一次 RONDO→Codex no-API Docker pair，将去敏
   safe summary、daemon image identity、VHDX、private cgroup namespace、容器 metrics 和有效
   seccomp 作为耐久证据。在此之前 B2 保持待重验。
 - 若后续重开 B3，必须冻结新的 paid pair/batch manifest、任务轮次与预算，并重新取得批量
@@ -232,15 +237,16 @@
 
 - 本地模型权重不存在且本次禁止下载；GPU runtime/model-backed 路径也未实现验收，因此
   L2 不是“只差权重”，真实推理必然保持未运行。
-- 没有基于新 schema 的 Docker no-API pair 证据，B2 不称完整验收。当前也没有新公平 paid
+- v4 只有 RONDO slot 1 的真实设施失败和有效态采样，没有双侧 completed 证据，B2 不称完整验收。
+  当前也没有新公平 paid
   pair 和批量 API 授权，因此 B3/M1 保持 hard-disabled/未运行。
 
 ### 当前验收状态
 
 - B1 的版本/task/image 资料冻结、Docker hello-world oracle、两侧静态 musl bundle 与目标镜像
   `--version` 探针保留为真实通过项；Harbor console/package/传递依赖闭包已进入受跟踪门禁。
-- B2 双侧 no-API v3 只是旧 lock/schema 的历史正常路径证据。第二轮 pair/watchdog/
-  image/VHDX/container metrics/seccomp 门禁已有 pure/fake 回归，但未在真实 Docker 中重验。
+- B2 双侧 no-API v3 只是旧 lock/schema 的历史正常路径证据。v4 的 pair/watchdog/
+  image/VHDX/container metrics/seccomp 门禁已在 RONDO 侧真实采样，但 adapter 安装失败，Codex 未运行。
 - L1 协议、合法 ToolSearch evidence、最终 sink 与三组 consumer 协议逐字节 fixture 已验收；不宣称三套
   生产调用端均已实现。L2 只是 CPU x64 前端/动态运行闭包和实例 receipt 门禁；
   GPU/model-backed 启动、真实结构化推理与性能实测未验收。

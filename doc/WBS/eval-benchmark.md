@@ -20,7 +20,7 @@
   `linux/amd64` 镜像均以 SHA-256 锁定。受监督 Docker 下官方 hello-world oracle 为
   `completed`/reward 1.0。受跟踪 lock 同时绑定 Harbor console entry bytes、package files、
   marker-active 传递运行依赖版本与文件闭包。
-- **B2 新门禁待 Docker 重验**：统一 runner、双 adapter、结果解析/归档、费用代理与
+- **B2 新门禁真实重验失败**：统一 runner、双 adapter、结果解析/归档、费用代理与
   Docker 监督已接线。旧 pair lock/schema 下的 `fix-git` no-API v3 保留 RONDO→Codex 正常路径
   completed 的历史证据，但它不包含第二轮新增的持久化契约。新契约使用 stable
   sidecar lock + temp/fsync/atomic replace/parent fsync 保存 pair ledger，绑定两槽共用的 clean
@@ -29,9 +29,14 @@
   overlay/inspect 强制 `cap_drop=ALL`。Docker 有效态另绑定 daemon
   actual image ID、Desktop VHDX 增长、private cgroup namespace、容器 cgroup v2 CPU/峰值内存、
   daemon 回显的有效 seccomp、规范 watchdog 阈值与安全 override；这些字段必须存在于去敏 safe
-  summary，缺失不能完成 pair。新 identity 为 `p1-fix-git-pair-v4`，不复用保留的 v3 ledger。本轮只做
-  pure/fake/loopback 验证，未重跑真实 Docker，不把旧 v3 升格为新
-  schema 的 B2 完整验收。
+  summary，缺失不能完成 pair。新 identity 为 `p1-fix-git-pair-v4`，不复用保留的 v3 ledger。
+  首次真实 Docker 重验在 RONDO slot 1 的 adapter 安装阶段 `infra_failed`：有效镜像、VHDX、
+  private cgroup、容器 metrics、custom seccomp 与 `cap_drop=ALL` 已由 daemon 事实校验，但安装上传后的
+  ownership/permission 复合命令失败；trace 定位到含 `chown` 的命令，原始 stderr 未保留，因此不冒充
+  独立 syscall 证明。0 fake/API 请求。ledger 已写 failed/blocked，Codex slot 2 按合同未运行。
+  adapter 后续已移除 install/run 的所有 `chown`，上传物必须实际 root-owned，agent 私有文件由
+  1000:1000 自建，任务递归写权限只允许固定 `/app/personal-site`；该修复尚未用 Docker 重验。
+  这不是双侧 B2 完整验收。
 - **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
   公平 pair，paid 入口 hard-disabled。后续除新 pair/batch/轮次/预算和新授权外，还须在真实

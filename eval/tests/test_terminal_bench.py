@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 
@@ -68,8 +68,23 @@ class FakeExecResult:
 class FakeEnvironment:
     default_user = "1000:1000"
 
-    def __init__(self, *, corrupt_remote: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        corrupt_remote: bool = False,
+        remote_owner: str = "0:0",
+        remote_owners: dict[str, str] | None = None,
+        resolved_pwd: str = adapters_module.FIX_GIT_CANONICAL_WORKDIR,
+        fail_command_contains: str | None = None,
+    ) -> None:
         self.corrupt_remote = corrupt_remote
+        self.remote_owner = remote_owner
+        self.remote_owners = {
+            "/run/secrets/rondo_eval_provider_api_key": "1000:1000",
+            **dict(remote_owners or {}),
+        }
+        self.resolved_pwd = resolved_pwd
+        self.fail_command_contains = fail_command_contains
         self.calls: list[tuple[str, dict[str, str] | None, int | None, str | None]] = []
         self.effective_users: list[str] = []
         self.uploads: list[tuple[Path, str]] = []
@@ -86,6 +101,23 @@ class FakeEnvironment:
         self.calls.append((command, env, timeout_sec, user))
         self.effective_users.append(user or self.default_user)
         raw = command.removeprefix("set -o pipefail; ")
+        if self.fail_command_contains and self.fail_command_contains in raw:
+            return FakeExecResult(1)
+        if (
+            "task_workdir=$(pwd -P)" in raw
+            and self.resolved_pwd != adapters_module.FIX_GIT_CANONICAL_WORKDIR
+        ):
+            return FakeExecResult(1)
+        if raw.startswith("stat -c '%u:%g' -- "):
+            owner = next(
+                (
+                    value
+                    for path, value in self.remote_owners.items()
+                    if raw.endswith(path)
+                ),
+                self.remote_owner,
+            )
+            return FakeExecResult(0, f"{owner}\n")
         if raw.startswith("sha256sum -- "):
             path = raw.removeprefix("sha256sum -- ").strip("'")
             digest = hashlib.sha256(self.remote[path]).hexdigest()
@@ -480,10 +512,28 @@ class TerminalBenchTests(unittest.TestCase):
                 self.assertIn(f"{adapter.remote_path} --version", commands)
                 self.assertTrue(environment.calls)
                 self.assertTrue(all(call[3] == "root" for call in environment.calls))
-                self.assertIn(
-                    f"chown -r 0:0 -- {adapter.remote_directory}",
-                    commands,
-                )
+                self.assertNotIn("chown", commands)
+                for remote_path in (
+                    str(adapter.remote_directory),
+                    str(PurePosixPath(adapter.remote_bwrap_path).parent),
+                    adapter.remote_path,
+                    adapter.remote_code_mode_host_path,
+                    adapter.remote_bwrap_path,
+                ):
+                    self.assertIn(f"stat -c '%u:%g' -- {remote_path}", commands)
+                    self.assertIn(f"test ! -l {remote_path}", commands)
+
+    def test_adapter_install_rejects_non_root_owned_docker_upload(self) -> None:
+        adapter = self.adapter()
+        environment = FakeEnvironment(
+            remote_owners={adapter.remote_bwrap_path: "1000:1000"}
+        )
+        with self.assertRaisesRegex(AdapterError, "ownership differs"):
+            asyncio.run(adapter.install(environment))
+        commands = "\n".join(call[0] for call in environment.calls)
+        self.assertNotIn("chown", commands)
+        self.assertNotIn("chmod 0555", commands)
+        self.assertNotIn(f"{adapter.remote_path} --version", commands)
 
     def test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv(self) -> None:
         secret = "sentinel-secret-must-not-serialize"
@@ -589,18 +639,33 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("auto_review.evidence_dir", commands)
         root_calls = [call for call in environment.calls if call[3] == "root"]
         agent_calls = [call for call in environment.calls if call[3] is None]
-        self.assertEqual(len(root_calls), 2)
-        self.assertEqual(len(agent_calls), 3)
+        self.assertEqual(len(root_calls), 1)
+        self.assertEqual(len(agent_calls), 6)
         self.assertEqual(
             environment.effective_users,
-            ["root", "root", "1000:1000", "1000:1000", "1000:1000"],
+            ["root", *("1000:1000" for _ in range(6))],
         )
         self.assertIn("task_workdir=$(pwd -P)", root_calls[0][0])
-        self.assertIn("chown -R 1000:1000", root_calls[0][0])
-        self.assertIn("/logs/agent", root_calls[0][0])
-        self.assertIn("/run/secrets/rondo_eval_provider_api_key", root_calls[1][0])
-        self.assertIn("chown 1000:1000", root_calls[1][0])
-        self.assertIn("chmod 0600", root_calls[1][0])
+        self.assertIn(
+            f'test "$task_workdir" = "{adapters_module.FIX_GIT_CANONICAL_WORKDIR}"',
+            root_calls[0][0],
+        )
+        self.assertIn('test ! -L "$task_workdir"', root_calls[0][0])
+        self.assertIn('chmod -R a+rwX -- "$task_workdir"', root_calls[0][0])
+        self.assertNotIn("/logs/agent", root_calls[0][0])
+        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", root_calls[0][0])
+        self.assertNotIn("/tmp/rondo-eval", root_calls[0][0])
+        self.assertNotIn("chown", commands)
+        secret_agent_calls = [
+            call
+            for call in agent_calls
+            if "/run/secrets/rondo_eval_provider_api_key" in call[0]
+        ]
+        self.assertEqual(len(secret_agent_calls), 2)
+        self.assertTrue(any("stat -c '%u:%g'" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("chmod 0600" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("test -r /run/secrets/" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("test ! -w /run/secrets/" in call[0] for call in secret_agent_calls))
         self.assertTrue(
             any(
                 'test "$(id -u):$(id -g)" = "1000:1000"' in call[0]
@@ -608,11 +673,15 @@ class TerminalBenchTests(unittest.TestCase):
             )
         )
         self.assertTrue(
-            all(
-                "/run/secrets/rondo_eval_provider_api_key" not in call[0]
+            any(
+                f'test "$task_workdir" = "{adapters_module.FIX_GIT_CANONICAL_WORKDIR}"'
+                in call[0]
                 for call in agent_calls
             )
         )
+        self.assertTrue(any('.git/refs"' in call[0] for call in agent_calls))
+        self.assertTrue(any('.git/logs"' in call[0] for call in agent_calls))
+        self.assertTrue(any('.git/index"' in call[0] for call in agent_calls))
 
         rondo = self.adapter(RondoUploadAdapter, extra_env={"OPENAI_API_KEY": secret})
         rondo_environment = FakeEnvironment()
@@ -622,6 +691,59 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('auto_review.model="gpt-5.6-luna"', rondo_commands)
         self.assertIn('auto_review.reasoning_effort="low"', rondo_commands)
         self.assertIn('auto_review.evidence_dir="/logs/agent/guardian-evidence"', rondo_commands)
+
+    def test_adapter_run_rejects_root_workdir_and_permission_projection_failure(self) -> None:
+        adapter = self.adapter()
+        for environment in (
+            FakeEnvironment(resolved_pwd="/"),
+            FakeEnvironment(resolved_pwd="/tmp/unexpected"),
+            FakeEnvironment(fail_command_contains="chmod -R a+rwX"),
+        ):
+            with self.subTest(environment=environment.__dict__):
+                with self.assertRaises(AdapterError):
+                    asyncio.run(
+                        adapter.run("repair the repository", environment, mock.Mock())
+                    )
+                self.assertEqual(len(environment.calls), 1)
+                command, _env, _timeout, user = environment.calls[0]
+                self.assertEqual(user, "root")
+                self.assertIn("task_workdir=$(pwd -P)", command)
+                self.assertIn(
+                    f'test "$task_workdir" = "{adapters_module.FIX_GIT_CANONICAL_WORKDIR}"',
+                    command,
+                )
+                self.assertIn(
+                    'chmod -R a+rwX -- "$task_workdir"', command
+                )
+                self.assertNotIn("chown", command)
+
+    def test_adapter_run_rejects_unwritable_git_state_and_secret_owner_drift(self) -> None:
+        adapter = self.adapter()
+        git_environment = FakeEnvironment(fail_command_contains='.git/logs"')
+        with self.assertRaises(RuntimeError):
+            asyncio.run(
+                adapter.run("repair the repository", git_environment, mock.Mock())
+            )
+        self.assertFalse(
+            any(
+                "OPENAI_API_KEY" in call[0]
+                for call in git_environment.calls
+            )
+        )
+
+        secret_environment = FakeEnvironment(
+            remote_owners={
+                "/run/secrets/rondo_eval_provider_api_key": "0:0"
+            }
+        )
+        with self.assertRaisesRegex(AdapterError, "ownership differs"):
+            asyncio.run(
+                adapter.run("repair the repository", secret_environment, mock.Mock())
+            )
+        commands = "\n".join(call[0] for call in secret_environment.calls)
+        self.assertIn("stat -c '%u:%g' -- /run/secrets/", commands)
+        self.assertNotIn("python3 -c", commands)
+        self.assertNotIn("chown", commands)
 
     def test_adapter_rejects_wrong_binary_digest(self) -> None:
         adapter = self.adapter()

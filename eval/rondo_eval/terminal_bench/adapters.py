@@ -25,6 +25,7 @@ from .materialize import TERMINAL_BENCH_AGENT_USER
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _EVAL_PROVIDER_ID = "rondo_eval_openai"
+FIX_GIT_CANONICAL_WORKDIR = "/app/personal-site"
 
 
 class AdapterError(RuntimeError):
@@ -198,11 +199,36 @@ class UploadBinaryAdapter(HarborCodexAgent):
             await environment.upload_file(bwrap_source, self.remote_bwrap_path)
         except Exception as exc:
             raise AdapterError("binary bundle upload failed") from exc
+        directories = (
+            str(self.remote_directory),
+            str(PurePosixPath(self.remote_bwrap_path).parent),
+        )
+        files = (
+            self.remote_path,
+            self.remote_code_mode_host_path,
+            self.remote_bwrap_path,
+        )
+        # Harbor 0.20's Docker upload normalizes tar ownership to 0:0.  With
+        # every capability dropped, even a no-op-looking chown is forbidden;
+        # consume the actual container facts instead of trying to mutate them.
+        for remote_path, kind in (
+            *((path, "directory") for path in directories),
+            *((path, "file") for path in files),
+        ):
+            quoted = shlex.quote(remote_path)
+            type_test = "-d" if kind == "directory" else "-f"
+            await _checked_exec(
+                environment,
+                f"test {type_test} {quoted} && test ! -L {quoted}",
+            )
+            ownership = await _checked_exec(
+                environment,
+                f"stat -c '%u:%g' -- {quoted}",
+            )
+            _require_ownership(ownership, remote_path, "0:0")
         await _checked_exec(
             environment,
-            f"chown -R 0:0 -- {shlex.quote(str(self.remote_directory))} && "
-            f"chmod 0755 {shlex.quote(str(self.remote_directory))} "
-            f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))}",
+            "chmod 0755 " + " ".join(shlex.quote(path) for path in directories),
         )
         for remote_path, expected_digest in (
             (self.remote_path, self.manifest.sha256),
@@ -235,44 +261,79 @@ class UploadBinaryAdapter(HarborCodexAgent):
         stderr_path = (EnvironmentPaths.agent_dir / self._STDERR_FILENAME).as_posix()
         nonsecret_env = {"CODEX_HOME": remote_home}
 
-        # Harbor's agent phase uses the staged task's numeric user, and the
-        # Compose overlay independently freezes the main service as 1000:1000.
-        # Root is used only to prepare adapter-owned paths and make the task
-        # worktree writable by that user.  Refuse images whose WORKDIR is `/`
-        # rather than recursively changing ownership outside the task.
+        # Harbor freezes environment.default_user to the task's 1000:1000
+        # identity.  Root may only expose the exact current task workdir; all
+        # adapter-owned state is created by the agent user itself.  This keeps
+        # the path viable under cap_drop=ALL without ownership mutation.
         await _checked_exec(
             environment,
             (
                 "set -e; task_workdir=$(pwd -P); "
-                'test "$task_workdir" != /; test -d "$task_workdir"; '
+                f'test "$task_workdir" = "{FIX_GIT_CANONICAL_WORKDIR}"; '
+                'test -d "$task_workdir"; '
+                'test ! -L "$task_workdir"; '
+                'chmod -R a+rwX -- "$task_workdir"'
+            ),
+        )
+        await self.exec_as_agent(
+            environment,
+            command=(
+                "set -e; "
+                f'test "$(id -u):$(id -g)" = "{TERMINAL_BENCH_AGENT_USER}"; '
+                "task_workdir=$(pwd -P); "
+                f'test "$task_workdir" = "{FIX_GIT_CANONICAL_WORKDIR}"; '
+                'test -d "$task_workdir"; '
                 f"mkdir -p {shlex.quote(remote_home)} {shlex.quote(remote_secrets)} "
                 f"{shlex.quote(agent_dir)}; "
-                f"chown -R {TERMINAL_BENCH_AGENT_USER} -- "
-                f"{shlex.quote(remote_home)} {shlex.quote(remote_secrets)} "
-                f'{shlex.quote(agent_dir)} "$task_workdir"; '
                 f"chmod 0700 {shlex.quote(remote_home)} {shlex.quote(remote_secrets)}; "
                 f"chmod 0750 {shlex.quote(agent_dir)}; "
-                'chmod u+rwx "$task_workdir"'
+                f"test -O {shlex.quote(remote_home)}; "
+                f"test -O {shlex.quote(remote_secrets)}; "
+                f"test -O {shlex.quote(agent_dir)}; "
+                'test -w "$task_workdir"; '
+                'test -d "$task_workdir/.git"; test -w "$task_workdir/.git"; '
+                'test -d "$task_workdir/.git/refs"; '
+                'test -w "$task_workdir/.git/refs"; '
+                'test -d "$task_workdir/.git/logs"; '
+                'test -w "$task_workdir/.git/logs"; '
+                'test -f "$task_workdir/.git/index"; '
+                'test -w "$task_workdir/.git/index"'
             ),
+            env=nonsecret_env,
         )
 
         try:
             # Compose mounts the private staging file as a Docker secret.  No
             # environment.exec ``-e KEY=value`` argument is used because Harbor's
             # Docker backend would serialize that value into docker argv.
+            secret_path = "/run/secrets/rondo_eval_provider_api_key"
+            secret_owner = await self.exec_as_agent(
+                environment,
+                command=f"stat -c '%u:%g' -- {shlex.quote(secret_path)}",
+                env=nonsecret_env,
+            )
+            _require_ownership(
+                secret_owner,
+                secret_path,
+                TERMINAL_BENCH_AGENT_USER,
+            )
             auth_command = (
-                "set -e; test -s /run/secrets/rondo_eval_provider_api_key; umask 077; "
+                f"set -e; test -f {shlex.quote(secret_path)}; "
+                f"test ! -L {shlex.quote(secret_path)}; "
+                f"test -s {shlex.quote(secret_path)}; "
+                f"test -r {shlex.quote(secret_path)}; "
+                f"test ! -w {shlex.quote(secret_path)}; umask 077; "
                 "python3 -c 'import json,sys; print(json.dumps({\"OPENAI_API_KEY\":sys.stdin.read()}))' "
-                "< /run/secrets/rondo_eval_provider_api_key "
+                f"< {shlex.quote(secret_path)} "
                 f"> {shlex.quote(remote_auth)}; "
-                f"chown {TERMINAL_BENCH_AGENT_USER} -- {shlex.quote(remote_auth)}; "
                 f"chmod 0600 {shlex.quote(remote_auth)}; "
                 f"ln -sfn {shlex.quote(remote_auth)} "
                 f"{shlex.quote(remote_home + '/auth.json')}"
             )
-            await _checked_exec(
+            await self.exec_as_agent(
                 environment,
-                auth_command,
+                command=auth_command,
+                env=nonsecret_env,
             )
 
             await self.exec_as_agent(
@@ -550,3 +611,14 @@ def _parse_sha256sum(result: object, expected_path: str) -> str:
     if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
         raise AdapterError("sha256 command returned malformed output")
     return digest
+
+
+def _require_ownership(
+    result: object, expected_path: str, expected_owner: str
+) -> None:
+    try:
+        _code, stdout, _stderr = exec_result(result)
+    except TypeError as exc:
+        raise AdapterError("container ownership command returned an unsupported result") from exc
+    if stdout != f"{expected_owner}\n":
+        raise AdapterError(f"container path ownership differs: {expected_path}")
