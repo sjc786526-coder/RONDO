@@ -17,6 +17,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.docker_supervisor import (  # noqa: E402
     ComposeRunContract,
+    DockerMountFact,
     HostContainerContract,
     DockerOperation,
     DockerTaskIdentity,
@@ -323,7 +324,11 @@ def _container_inspect(
     *,
     task_id: str = TASK_ID,
     security_opt: list[str] | None = None,
+    network_mode: str = "rondoeval0810_default",
+    networks: dict[str, object] | None = None,
+    tmpfs: dict[str, str] | None = None,
 ) -> str:
+    network_payload = networks if networks is not None else {network_mode: {}}
     return json.dumps(
         [
             {
@@ -345,9 +350,10 @@ def _container_inspect(
                     "MemorySwap": 100,
                     "PidsLimit": 2,
                     "ReadonlyRootfs": False,
-                    "NetworkMode": "rondoeval0810_default",
+                    "NetworkMode": network_mode,
+                    "Tmpfs": tmpfs,
                 },
-                "NetworkSettings": {"Networks": {"rondoeval0810_default": {}}},
+                "NetworkSettings": {"Networks": network_payload},
                 "Mounts": [],
                 "SizeRw": 123,
             }
@@ -425,6 +431,51 @@ class DockerCounterTests(unittest.TestCase):
             expected_filter = f"label=dev.rondo.eval.task={TASK_ID}"
             self.assertEqual(executor.commands[2][5:7], ("--filter", expected_filter))
             self.assertEqual(executor.commands[3][4:6], ("--filter", expected_filter))
+
+    def test_normalizes_direct_none_network_nnp_and_effective_tmpfs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, _ = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(
+                        security_opt=["no-new-privileges"],
+                        network_mode="none",
+                        networks={"none": {}},
+                        tmpfs={"/tmp": "rw,nosuid,nodev,noexec,size=64m"},
+                    ),
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.RUN,
+            )
+
+            fact = reading.task_containers[0]
+            self.assertEqual(fact.security_opt, ("no-new-privileges:true",))
+            self.assertEqual(fact.network_mode, "none")
+            self.assertEqual(fact.networks, ())
+            self.assertEqual(
+                fact.mounts,
+                (
+                    DockerMountFact(
+                        "tmpfs",
+                        "",
+                        "/tmp",
+                        False,
+                        ("nodev", "noexec", "nosuid", "rw", "size=64m"),
+                    ),
+                ),
+            )
 
     def test_rejects_malicious_output_without_echoing_it(self) -> None:
         secret = "credential-value-that-must-not-appear"

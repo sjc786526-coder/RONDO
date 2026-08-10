@@ -1221,12 +1221,15 @@ def _validate_inspected_containers(
         compose_service = labels.get("com.docker.compose.service")
         if not isinstance(compose_project, str) or not isinstance(compose_service, str):
             raise RuntimeBridgeError("Docker Compose container identity is unavailable")
+        network_mode = _required_string(host, "NetworkMode")
         networks_payload = network_settings.get("Networks")
         if not isinstance(networks_payload, dict):
             raise RuntimeBridgeError("Docker container network facts are invalid")
         networks = tuple(sorted(networks_payload))
         if any(not _RESOURCE_NAME.fullmatch(value) for value in networks):
             raise RuntimeBridgeError("Docker container network facts are invalid")
+        if network_mode == "none" and networks == ("none",):
+            networks = ()
         mounts: list[DockerMountFact] = []
         for raw_mount in mounts_payload:
             if not isinstance(raw_mount, dict) or set(("Type", "Source", "Destination", "RW")) - set(raw_mount):
@@ -1248,10 +1251,11 @@ def _validate_inspected_containers(
             except Exception as exc:
                 raise RuntimeBridgeError("Docker container mount fact is invalid") from exc
             mounts.append(mount)
+        mounts.extend(_tmpfs_mounts(host))
         size = item.get("SizeRw")
         if isinstance(size, bool) or not isinstance(size, int) or size < 0:
             raise RuntimeBridgeError("Docker inspect size is invalid")
-        security_opt = _optional_string_list(host, "SecurityOpt")
+        security_opt = _normalized_security_options(host)
         seccomp_profile_sha256 = _seccomp_profile_digest(security_opt)
         fact = DockerContainerFact(
             container_id=object_id,
@@ -1264,7 +1268,7 @@ def _validate_inspected_containers(
             memory_swap_bytes=_required_nonnegative_int(host, "MemorySwap"),
             pids_limit=_required_nonnegative_int(host, "PidsLimit"),
             read_only_rootfs=_required_bool(host, "ReadonlyRootfs"),
-            network_mode=_required_string(host, "NetworkMode"),
+            network_mode=network_mode,
             networks=networks,
             mounts=tuple(sorted(mounts)),
             compose_project=compose_project,
@@ -1314,6 +1318,55 @@ def _optional_string_list(payload: Mapping[str, object], key: str) -> tuple[str,
     if len(value) != len(set(value)):
         raise RuntimeBridgeError("Docker container list fact is ambiguous")
     return tuple(sorted(value))
+
+
+def _normalized_security_options(payload: Mapping[str, object]) -> tuple[str, ...]:
+    values = _optional_string_list(payload, "SecurityOpt")
+    normalized = tuple(
+        "no-new-privileges:true"
+        if value.casefold() in {"no-new-privileges", "no-new-privileges:true"}
+        else value
+        for value in values
+    )
+    if len(normalized) != len(set(normalized)):
+        raise RuntimeBridgeError("Docker security options are ambiguous")
+    return tuple(sorted(normalized))
+
+
+def _tmpfs_mounts(payload: Mapping[str, object]) -> tuple[object, ...]:
+    from .docker_supervisor import DockerMountFact
+
+    value = payload.get("Tmpfs")
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        raise RuntimeBridgeError("Docker tmpfs facts are invalid")
+    mounts: list[DockerMountFact] = []
+    for destination, raw_options in value.items():
+        if (
+            not isinstance(destination, str)
+            or not isinstance(raw_options, str)
+            or not raw_options
+        ):
+            raise RuntimeBridgeError("Docker tmpfs fact is invalid")
+        options = tuple(sorted(raw_options.split(",")))
+        if len(options) != len(set(options)) or any(not option for option in options):
+            raise RuntimeBridgeError("Docker tmpfs options are invalid")
+        if "ro" in options and "rw" in options:
+            raise RuntimeBridgeError("Docker tmpfs mode is ambiguous")
+        mount = DockerMountFact(
+            "tmpfs",
+            "",
+            destination,
+            "ro" in options,
+            options,
+        )
+        try:
+            mount.validate()
+        except Exception as exc:
+            raise RuntimeBridgeError("Docker tmpfs fact is invalid") from exc
+        mounts.append(mount)
+    return tuple(sorted(mounts))
 
 
 def _seccomp_profile_digest(security_opt: tuple[str, ...]) -> str | None:

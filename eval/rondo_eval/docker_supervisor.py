@@ -119,6 +119,7 @@ class DockerMountFact:
     source: str
     destination: str
     read_only: bool
+    tmpfs_options: tuple[str, ...] = ()
 
     def validate(self) -> None:
         if self.kind not in {"bind", "volume", "tmpfs"}:
@@ -129,6 +130,12 @@ class DockerMountFact:
             raise DockerSupervisionError("Docker container mount destination is invalid")
         if not isinstance(self.read_only, bool):
             raise DockerSupervisionError("Docker container mount mode is invalid")
+        if (
+            len(self.tmpfs_options) != len(set(self.tmpfs_options))
+            or any(not value or "," in value or "\x00" in value for value in self.tmpfs_options)
+            or (self.kind != "tmpfs" and self.tmpfs_options)
+        ):
+            raise DockerSupervisionError("Docker tmpfs mount options are invalid")
 
 
 @dataclass(frozen=True)
@@ -226,6 +233,8 @@ class DockerContainerFact:
             raise DockerSupervisionError("Docker seccomp profile identity is invalid")
         if len(self.mounts) != len(set(self.mounts)):
             raise DockerSupervisionError("Docker container mounts are ambiguous")
+        if len({mount.destination for mount in self.mounts}) != len(self.mounts):
+            raise DockerSupervisionError("Docker container mount destinations are ambiguous")
         for mount in self.mounts:
             mount.validate()
 
