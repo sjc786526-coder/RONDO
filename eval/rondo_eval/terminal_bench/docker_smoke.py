@@ -7,6 +7,7 @@ import asyncio
 import json
 import math
 import stat
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -672,10 +673,39 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(json.dumps(result.safe_summary(), sort_keys=True, separators=(",", ":")))
         return _smoke_exit_code(result)
-    except (DockerSupervisionError, RuntimeBridgeError):
+    except (DockerSupervisionError, RuntimeBridgeError) as exc:
+        _print_safe_cli_error(exc, exit_code=INFRA_ERROR)
         return INFRA_ERROR
-    except (ConfigError, DockerNoApiSmokeError, TerminalBenchRunError, OSError, ValueError):
+    except (
+        ConfigError,
+        DockerNoApiSmokeError,
+        TerminalBenchRunError,
+        OSError,
+        ValueError,
+    ) as exc:
+        _print_safe_cli_error(exc, exit_code=EVIDENCE_ERROR)
         return EVIDENCE_ERROR
+
+
+def _print_safe_cli_error(exc: BaseException, *, exit_code: int) -> None:
+    reason = str(exc)
+    if not reason or "\x00" in reason or "\n" in reason or "\r" in reason:
+        reason = "no-API smoke failed without a safe single-line reason"
+    print(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "status": "error",
+                "exit_code": exit_code,
+                "error_type": type(exc).__name__,
+                "reason": reason,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+    )
 
 
 def _smoke_exit_code(result: DockerNoApiSmokeResult) -> int:

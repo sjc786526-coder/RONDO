@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import http.client
+import io
 import json
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
@@ -27,6 +29,7 @@ from rondo_eval.terminal_bench.docker_smoke import (  # noqa: E402
     DockerNoApiSmokeError,
     LocalResponsesFakeServer,
     _parser,
+    _print_safe_cli_error,
     _smoke_exit_code,
     run_docker_no_api_smoke,
 )
@@ -504,6 +507,19 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             ]
         )
         self.assertEqual((args.side, args.binary_manifest.name), ("codex", "binary.json"))
+
+    def test_cli_error_is_single_line_structured_and_does_not_render_causes(self) -> None:
+        caught = DockerNoApiSmokeError("tracked Harbor identity differs")
+        caught.__cause__ = RuntimeError("sensitive-cause")
+        output = io.StringIO()
+
+        with redirect_stderr(output):
+            _print_safe_cli_error(caught, exit_code=65)
+
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["reason"], "tracked Harbor identity differs")
+        self.assertEqual(value["exit_code"], 65)
+        self.assertNotIn("sensitive-cause", output.getvalue())
 
     def test_cli_loader_requires_15_key_bundle_and_rejects_legacy_16_keys(self) -> None:
         bundle = self.root / "eval-data" / "bin" / "smoke-bundle"
