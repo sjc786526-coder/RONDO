@@ -62,3 +62,19 @@
   或费用，因此不计入三个 Docker task run。
 - 只补齐 `validate_harbor_installation(..., executable=HARBOR_EXECUTABLE)`，不改变任何执行或隔离合同；后续使用
   全新的 metrics 目录。
+
+## 6. Oracle Docker 运行 1（失败并已清理）
+
+- clean commit `9eba57031c9f642f8d5b2a8ef5ec3a606427bb1c` 在规范 watchdog 内启动了一个 pinned
+  fix-git 容器；没有 API 请求、没有加载 key，费用为 0。
+- Docker 有效态门禁通过：exact pinned image、UID/GID `1000:1000`、`cap_drop=ALL`、private cgroup、custom
+  seccomp、2 GiB memory、3 GiB memory+swap、256 pids。容器、network 与 volume 最终均为 0，cleanup 为
+  `verified_empty`；watchdog 自身没有资源停机或清理异常。
+- Harbor structured result 为 `infra_failed`：oracle stdout 是 `/solution/solve.sh: Permission denied`，verifier
+  stdout 是 `/tests/test.sh: Permission denied`，最终 `RewardFileNotFoundError`。未把 reward=0 冒充验收通过。
+- 根因是冻结 checkout 的 `solution/`、`tests/` 目录为 `0700`，`solve.sh` 为 `0600`。文件由 UID 1000 上传后，
+  UID 1000 oracle 无执行位；root verifier 在 `cap_drop=ALL` 下也没有 `DAC_OVERRIDE/FOWNER` 去穿越或修正这些
+  UID 1000 拥有的目录。
+- 最小修复只在 task staging 中把固定 `solution/`、`tests/` 目录规范化为 `0555`，两个 shell 脚本为 `0555`，
+  verifier Python 输入为 `0444`。没有增加 capability、改变容器用户或放宽 seccomp；相关 materializer 回归
+  19/19 通过。

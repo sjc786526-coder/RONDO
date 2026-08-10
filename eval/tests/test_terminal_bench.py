@@ -832,6 +832,7 @@ class TerminalBenchTests(unittest.TestCase):
         (task / "README.md").write_text("readme\n")
         (task / "environment" / "Dockerfile").write_text("FROM scratch\n")
         (task / "tests" / "test.sh").write_text("true\n")
+        (task / "tests" / "test_outputs.py").write_text("def test_ok():\n    pass\n")
         (task / "solution" / "solve.sh").write_text("true\n")
         (task / "task.toml").write_text(_TASK_TOML)
         (source / "tasks" / "dataset.toml").write_text(
@@ -879,6 +880,22 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(
             (result.task_path / "tests" / "test.sh").stat().st_mode & 0o777,
             0o555,
+        )
+        self.assertEqual(
+            (result.task_path / "solution").stat().st_mode & 0o777,
+            0o555,
+        )
+        self.assertEqual(
+            (result.task_path / "solution" / "solve.sh").stat().st_mode & 0o777,
+            0o555,
+        )
+        self.assertEqual(
+            (result.task_path / "tests").stat().st_mode & 0o777,
+            0o555,
+        )
+        self.assertEqual(
+            (result.task_path / "tests" / "test_outputs.py").stat().st_mode & 0o777,
+            0o444,
         )
         self.assertIn('user: "1000:1000"', overlay)
         self.assertIn("    cap_drop:\n      - ALL\n", overlay)

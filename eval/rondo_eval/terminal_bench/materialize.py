@@ -247,6 +247,7 @@ class PinnedTaskMaterializer:
         staging_root.chmod(0o700)
         _create_secret_placeholder(provider_secret)
         shutil.copytree(source_task, destination, symlinks=True)
+        _normalize_phase_inputs(destination)
         verifier_script = destination / "tests" / "test.sh"
         verifier_metadata = verifier_script.lstat()
         if stat.S_ISLNK(verifier_metadata.st_mode) or not stat.S_ISREG(
@@ -376,6 +377,32 @@ def _read_toml(path: Path) -> dict:
     if not isinstance(document, dict):
         raise MaterializationError("frozen task metadata is invalid")
     return document
+
+
+def _normalize_phase_inputs(task_path: Path) -> None:
+    """Keep frozen oracle/verifier inputs executable without container capabilities."""
+
+    expected_files = {
+        task_path / "solution" / "solve.sh": 0o555,
+        task_path / "tests" / "test.sh": 0o555,
+        task_path / "tests" / "test_outputs.py": 0o444,
+    }
+    for directory in (task_path / "solution", task_path / "tests"):
+        try:
+            metadata = directory.lstat()
+        except OSError as exc:
+            raise MaterializationError("frozen phase input directory is unavailable") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise MaterializationError("frozen phase input directory is unsafe")
+        directory.chmod(0o555)
+    for path, mode in expected_files.items():
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            raise MaterializationError("frozen phase input is unavailable") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise MaterializationError("frozen phase input is unsafe")
+        path.chmod(mode)
 
 
 def _validate_task_metadata(document: dict) -> None:
