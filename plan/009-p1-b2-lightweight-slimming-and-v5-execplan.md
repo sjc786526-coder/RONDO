@@ -160,17 +160,19 @@
   manifest 路径错误地落到 linked worktree。watchdog `wrapper_status=complete`、`stop=none`、
   `cleanup=none`，没有创建容器或 current receipt。
 - 唯一直接修复是从 `git --git-common-dir` 的父目录取得两个 bundle；相关 dry-run 通过后，以新的 fresh metrics
-  `/home/sjc/desktop/RONDO/eval-data/build-metrics/plan009-b2-aa73ecf-r2` 重验，不自动扩大范围。
+  `plan009-b2-aa73ecf-r2` 重验。r2 同样在 Docker 前返回 70：相对 wrapper argv 不满足既有 watchdog
+  liveness identity。只把 wrapper 改为当前 `$PWD` 下的绝对路径，短生命周期 lease 诊断通过后使用 fresh
+  `plan009-b2-aa73ecf-r3` 重验，不扩大范围。
 
 ### 后续计划
 
 1. 记录执行前 Docker system df、宿主 `/mnt/c` 剩余空间和 pinned image identity，不拉取或构建。
-2. 在 canonical watchdog 内串行运行 RONDO→Codex；首侧失败立即停止。只因上述 Docker 前直接阻塞允许一次 r2。
+2. 在 canonical watchdog 内串行运行 RONDO→Codex；首侧失败立即停止。仅对上述两个 Docker 前直接阻塞依次修复。
 3. 失败时只修复本次真实链路的直接阻塞并跑相关测试；双侧通过时只更新 current receipt、实时 WBS 和一份日志。
 
 ### 阻塞项
 
-- 首次命令在 Docker 前停止；r2 尚未启动，当前不能宣告 B2 完成。
+- 首次与 r2 均在 Docker 前停止；r3 尚未启动，当前不能宣告 B2 完成。
 - 若 pinned 资产缺失、watchdog/资源事实不可用或 RONDO 首侧失败，按合同立即停止。
 
 ### 当前验收状态
