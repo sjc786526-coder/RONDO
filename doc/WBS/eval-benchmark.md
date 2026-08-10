@@ -20,14 +20,17 @@
   `linux/amd64` 镜像均以 SHA-256 锁定。受监督 Docker 下官方 hello-world oracle 为
   `completed`/reward 1.0。受跟踪 lock 绑定 `uv.lock`、Harbor 版本、console/interpreter 和三个关键模块；
   不再遍历 site-packages 或维护传递依赖文件闭包。
-- **B2 待真实 Docker 验收**：统一 runner、双 adapter 与 Docker/watchdog 监督保持。no-API 不再使用
+- **B2 完成**：统一 runner、双 adapter 与 Docker/watchdog 监督保持。no-API 不再使用
   permanent pair ledger、retirement、失败摘要恢复或一次性 migration；失败可在修复后由用户重新启动。
   canonical `just eval-b2-no-api` 在一个进程中按 RONDO→Codex 严格串行，首侧失败立即停止。成功时只替换
   `eval-data/b2/current.json`，其中 Docker 字段直接来自 supervisor 的唯一 receipt。
-  adapter 仍要求上传物实际 root-owned、agent UID/GID 1000、精确 `/app/personal-site` Git probe、
+  adapter 仍要求 bundle 目录 root-owned、三个固定文件为 agent UID/GID 1000 且 mode 0555、
+  精确 `/app/personal-site` Git probe、
   custom seccomp、`cap_drop=ALL`、private cgroup、容器 metrics、VHDX 与 cleanup；marker 还必须来自
   冻结 code-mode 两项 structured output 的第二项，且其中投影后的 `exit_code=0`、stdout 精确等于固定值。
-  轻量实现尚未运行 Docker，因此不称 B2 完成。
+  Plan 009 在 commit `b47a7b4` 上以已存在的 pinned image 严格串行运行 RONDO→Codex：两侧均
+  completed，各 2 次 fake 请求、tool round-trip 成功、cleanup verified empty；官方 API 0 次、
+  费用 0 USD。`reward=0` 是 no-API marker 诊断不解真实 task 的预期结果，不冒充 B3 成绩。
 - **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
   公平 pair，paid 入口 hard-disabled。后续除新 pair/batch/轮次/预算和新授权外，还须在真实
@@ -132,8 +135,8 @@
     `getrusage(self+children)` 只覆盖宿主 runner/CLI，仍仅作设施诊断。supervisor 已对 exact
     container 读取 cgroup v2 `cpu.stat usage_usec` 与 `memory.peak`，生成
     `container_id/cpu_usage_seconds/peak_memory_bytes`，并作为 paid publication/pair/M1 的强制机器
-    门禁。v4 仅有 RONDO 失败路径的真实采样，v5 新摘要与 adapter 修复只有 pure/fake 验证，双侧真实
-    Docker 口径仍待 B2 重验；冻结 codex 不加补丁，
+    门禁。Plan 009 已在双侧真实 no-API Docker 中采集 container CPU/峰值内存，并核对
+    pinned image、VHDX、custom seccomp 与 cleanup；冻结 codex 不加补丁，
     两侧使用完全相同的采集方式。
   - **内部探针**（轮次数、工具调用次数与耗时、序列化耗时、审批往返耗时）只存在于 RONDO 内部，用于 **RONDO 自身版本间**的对比与找瓶颈，**不用于与冻结 codex 横比**。
   - 原先"baseline 同样加载探针"的说法含糊：往冻结 codex 里打探针就破坏了"冻结"的意义，因此明确改为上面的分工。

@@ -251,3 +251,13 @@ standard/Lite 形态均补回归。
   receipt，但 GPU runtime、真模型服务和结构化推理仍未实现验收。本轮只做 pure/fake/
   loopback 验证，统一轻量门禁 269/269，`uv lock --check` 为 85 packages。未运行 Docker、
   Cargo、真实 API 或模型；B2 新门禁待 Docker 重验，B3/M1 保持 hard-disabled/未运行。
+
+### 2026-08-10 Plan 009 B2 轻量 no-API Docker 验收
+
+- 删除 no-API permanent ledger、retirement、失败摘要恢复和 Harbor 全依赖闭包，保留一个可重跑的
+  RONDO→Codex 串行入口、一个 current receipt 和 Docker supervisor 唯一事实源。
+- 在 clean commit `b47a7b4` 上使用已存在的 pinned `fix-git` image 完成双侧真实 Docker
+  no-API 链路；两侧均 completed、tool round-trip 成功、cleanup verified empty，官方 API 0 次、
+  费用 0 USD。看门狗、VHDX、容器资源与精确清理证据见本批执行日志。
+- 该验收只证明 B2 设施链路；`reward=0` 不是真实任务成绩。B3/M1 、真实 API 与 L2 model-backed
+  仍未运行。

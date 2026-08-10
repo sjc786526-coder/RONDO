@@ -167,24 +167,24 @@
   `1000:1000`/`0555`，实现却错误要求文件为 `0:0`。目录继续要求 `0:0`，文件改为消费实际
   `1000:1000`/`0555` 后，以 fresh `plan009-b2-aa73ecf-r4` 重验。r4 的真实 marker/tool round-trip 已通过，
   但 Harbor 直接执行冻结 task 中 mode `0600` 的 `/tests/test.sh`，verifier permission denied。只在 ignored
-  staging copy 将该固定脚本设为 `0555`，以 fresh `plan009-b2-aa73ecf-r5` 重验。
+  staging copy 将该固定脚本设为 `0555`，以 fresh `plan009-b2-aa73ecf-r5` 重验。r5 在
+  clean commit `b47a7b4` 上完成 RONDO→Codex：两侧均 completed、fake 请求各 2 次、
+  tool round-trip 成功、cleanup verified empty，官方 API 0 次、费用 0 USD。
 
 ### 后续计划
 
-1. 记录执行前 Docker system df、宿主 `/mnt/c` 剩余空间和 pinned image identity，不拉取或构建。
-2. 在 canonical watchdog 内串行运行 RONDO→Codex；首侧失败立即停止。仅对上述两个 Docker 前直接阻塞依次修复。
-3. 失败时只修复本次真实链路的直接阻塞并跑相关测试；双侧通过时只更新 current receipt、实时 WBS 和一份日志。
+1. B2 以 current receipt 作为当前轻量验收事实，不继续扩展 no-API 审计或状态机。
+2. B3/M1 只能在新的真实 API 批次、轮数、模型和 USD 授权后启用。
 
 ### 阻塞项
 
-- 首次与 r2 在 Docker 前停止；r3/r4 的 RONDO 设施失败且已精确清理，r5 尚未启动，当前不能宣告 B2 完成。
-- 若 pinned 资产缺失、watchdog/资源事实不可用或 RONDO 首侧失败，按合同立即停止。
+- B2 无当前阻塞。B3/M1 仍由 paid hard-disable 与单独授权门阻断。
 
 ### 当前验收状态
 
-- 本计划轻量代码阶段：完成；真实 Docker 阶段未执行。
+- 本计划轻量代码阶段：完成；真实 Docker 阶段：完成。
 - B1：保持完成。
-- B2：瘦身与 marker 修复完成，待双侧真实 Docker。
+- B2：瘦身、marker 修复与双侧真实 no-API Docker 验收完成。
 - B3/M1：保持 hard-disabled/未运行，不在本计划内。
 - L2 model-backed：未验收，不在本计划内。
 
