@@ -154,22 +154,23 @@
 
 ### 当前工作
 
-- 用户已授权下一阶段真实 B2：固定 host-volume 为此前真实 v4 已验证的 `/mnt/c`，fresh metrics dir 为
-  `/home/sjc/desktop/RONDO/eval-data/build-metrics/plan009-b2-aa73ecf`。两者与
-  `/home/sjc/desktop/RONDO/eval-data/b2/current.json` 已核对为未创建。
+- 用户已授权下一阶段真实 B2：固定 host-volume 为此前真实 v4 已验证的 `/mnt/c`。
 - 受跟踪 pinned image digest 已存在于 daemon；执行前没有本项目 managed container/network/volume。
-- 先提交本节执行状态使 worktree clean，再只调用一次
-  `just eval-b2-no-api /mnt/c /home/sjc/desktop/RONDO/eval-data/build-metrics/plan009-b2-aa73ecf`。
+- 首次命令使用 fresh metrics `plan009-b2-aa73ecf`，在 Docker 前以 `binary manifest is unavailable` 返回 65：
+  manifest 路径错误地落到 linked worktree。watchdog `wrapper_status=complete`、`stop=none`、
+  `cleanup=none`，没有创建容器或 current receipt。
+- 唯一直接修复是从 `git --git-common-dir` 的父目录取得两个 bundle；相关 dry-run 通过后，以新的 fresh metrics
+  `/home/sjc/desktop/RONDO/eval-data/build-metrics/plan009-b2-aa73ecf-r2` 重验，不自动扩大范围。
 
 ### 后续计划
 
 1. 记录执行前 Docker system df、宿主 `/mnt/c` 剩余空间和 pinned image identity，不拉取或构建。
-2. 在 canonical watchdog 内串行运行 RONDO→Codex；首侧失败立即停止，不自动重试。
+2. 在 canonical watchdog 内串行运行 RONDO→Codex；首侧失败立即停止。只因上述 Docker 前直接阻塞允许一次 r2。
 3. 失败时只修复本次真实链路的直接阻塞并跑相关测试；双侧通过时只更新 current receipt、实时 WBS 和一份日志。
 
 ### 阻塞项
 
-- 本次真实 Docker 尚未启动；当前不能宣告 B2 完成。
+- 首次命令在 Docker 前停止；r2 尚未启动，当前不能宣告 B2 完成。
 - 若 pinned 资产缺失、watchdog/资源事实不可用或 RONDO 首侧失败，按合同立即停止。
 
 ### 当前验收状态

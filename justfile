@@ -26,11 +26,12 @@ eval-check: eval-lock eval-test
 # The caller supplies the Docker Desktop host-volume path and a fresh metrics dir.
 eval-b2-no-api docker_host_volume metrics_dir:
     @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
-    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
         RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
         mydev/scripts/with-build-lock.sh \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.docker_smoke \
-        --rondo-binary-manifest "$PWD/eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
-        --codex-binary-manifest "$PWD/eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
+        --rondo-binary-manifest "$common_root/eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
+        --codex-binary-manifest "$common_root/eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
         --docker-host-volume "{{docker_host_volume}}"
