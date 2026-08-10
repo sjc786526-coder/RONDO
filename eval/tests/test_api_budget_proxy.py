@@ -457,8 +457,8 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             PRICE_SOURCE_URL,
             "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
         )
-        self.assertEqual(price_usage(usage), Decimal("0.535000"))
-        self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("3.777000"))
+        self.assertEqual(price_usage(usage), Decimal("0.107000"))
+        self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("0.755400"))
 
     def test_four_runs_can_reserve_and_settle_concurrently(self) -> None:
         path = self.root / "budget.json"

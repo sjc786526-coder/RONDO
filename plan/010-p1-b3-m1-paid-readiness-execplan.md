@@ -99,8 +99,8 @@
   `20260810-230000001-tb-codex-r1`。
 - loopback budget proxy 会按已验证 request shape 为缺失声明的请求投影 main/guardian declared role，并把该
   header 转发；已有 header 与推导不一致仍在上游调用前拒绝。
-- Luna Standard 价格已按 2026-08-10 官方模型页同步为 input 1.00、cached input 0.10、output 6.00
-  USD/百万 token；最大单请求 reservation 为 3.777 USD。20/5 USD 硬上限未改。
+- Luna Standard 价格已按 2026-08-10 官方模型页同步为 input 0.20、cached input 0.02、output 1.20
+  USD/百万 token；最大单请求 reservation 为 0.7554 USD。20/5 USD 硬上限未改。
 - `ArtifactWriter.publication_started()` 只区分 journal/target 是否已出现；paid CLI 对 journal 前确定性
   validation failure 复用已有 failure publication，journal 后恢复语义不变。
 - paid lock 已冻结 v6 两槽并启用：同一 `fix-git`，RONDO/Codex 各一轮、零重试；lock SHA-256 为
