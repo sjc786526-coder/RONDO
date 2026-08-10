@@ -227,9 +227,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
             self.remote_code_mode_host_path,
             self.remote_bwrap_path,
         )
-        # Harbor 0.20's Docker upload normalizes tar ownership to 0:0.  With
-        # every capability dropped, even a no-op-looking chown is forbidden;
-        # consume the actual container facts instead of trying to mutate them.
+        # The bundle directories are created by root, while Docker Compose cp
+        # preserves the frozen host files as the agent user.  With every
+        # capability dropped, consume those facts instead of mutating them.
         for remote_path, kind in (
             *((path, "directory") for path in directories),
             *((path, "file") for path in files),
@@ -249,13 +249,24 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 command_id=f"verify_{kind}_owner",
             )
             try:
-                _require_ownership(ownership, remote_path, "0:0")
+                _require_ownership(
+                    ownership,
+                    remote_path,
+                    "0:0" if kind == "directory" else TERMINAL_BENCH_AGENT_USER,
+                )
             except AdapterError:
                 raise _diagnostic_error(
                     stage="install",
                     command_id=f"verify_{kind}_owner",
                     stderr_summary="other_redacted",
                 ) from None
+            if kind == "file":
+                await _checked_exec(
+                    environment,
+                    f"test \"$(stat -c '%a' -- {quoted})\" = 555",
+                    stage="install",
+                    command_id="verify_file_mode",
+                )
         await _checked_exec(
             environment,
             "chmod 0755 " + " ".join(shlex.quote(path) for path in directories),
@@ -267,12 +278,6 @@ class UploadBinaryAdapter(HarborCodexAgent):
             (self.remote_code_mode_host_path, self.manifest.code_mode_host_sha256),
             (self.remote_bwrap_path, self.manifest.bwrap_sha256),
         ):
-            await _checked_exec(
-                environment,
-                f"chmod 0555 {shlex.quote(remote_path)}",
-                stage="install",
-                command_id="set_bundle_file_mode",
-            )
             result = await _checked_exec(
                 environment,
                 f"sha256sum -- {shlex.quote(remote_path)}",

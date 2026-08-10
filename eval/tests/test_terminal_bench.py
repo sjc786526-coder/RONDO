@@ -95,6 +95,7 @@ class FakeEnvironment:
         self.uploads.append((source, remote_path))
         data = source.read_bytes()
         self.remote[remote_path] = data + (b"corrupt" if self.corrupt_remote else b"")
+        self.remote_owners.setdefault(remote_path, "1000:1000")
 
     async def exec(self, command, *, cwd=None, env=None, timeout_sec=None, user=None):
         del cwd
@@ -522,11 +523,18 @@ class TerminalBenchTests(unittest.TestCase):
                 ):
                     self.assertIn(f"stat -c '%u:%g' -- {remote_path}", commands)
                     self.assertIn(f"test ! -l {remote_path}", commands)
+                for remote_path in (
+                    adapter.remote_path,
+                    adapter.remote_code_mode_host_path,
+                    adapter.remote_bwrap_path,
+                ):
+                    self.assertIn(f"stat -c '%a' -- {remote_path}", commands)
+                self.assertNotIn("chmod 0555", commands)
 
-    def test_adapter_install_rejects_non_root_owned_docker_upload(self) -> None:
+    def test_adapter_install_rejects_uploaded_file_owner_drift(self) -> None:
         adapter = self.adapter()
         environment = FakeEnvironment(
-            remote_owners={adapter.remote_bwrap_path: "1000:1000"}
+            remote_owners={adapter.remote_bwrap_path: "0:0"}
         )
         with self.assertRaisesRegex(AdapterError, "command_id=verify_file_owner"):
             asyncio.run(adapter.install(environment))
