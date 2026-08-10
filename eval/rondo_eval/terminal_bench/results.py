@@ -24,7 +24,7 @@ from .freeze import (
 )
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 from .metrics import RunMetricsError, metrics_from_dict
-from .pair import RunPublicationContext
+from .pair import P1_PAIR_ID, RunPublicationContext
 
 
 UPSTREAM_CODEX = {
@@ -781,7 +781,7 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
     ):
         raise HarborResultError("Terminal-Bench API role summary is invalid")
     if (
-        config.get("pair_id") != "p1-fix-git-pair-v1"
+        config.get("pair_id") != P1_PAIR_ID
         or not isinstance(config.get("pair_lock_sha256"), str)
         or config.get("pair_slot") not in {1, 2}
         or config.get("pair_round") != 1

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
@@ -15,7 +16,6 @@ from ..config import RuntimeConfig
 from ..contracts import BinaryManifest, RunSpec, Side
 from ..docker_supervisor import (
     ComposeRunContract,
-    ComposeSecretMountContract,
     DockerCounter,
     DockerExecutionResult,
     DockerMountFact,
@@ -199,7 +199,9 @@ class HostHarborResult:
 class HostHarborExecutor(Protocol):
     """Runs the host process under the shared lock and Docker supervisor.
 
-    ``injected_env`` contains exactly one task-required secret plus telemetry.
+    ``injected_env`` contains only non-secret process configuration.  The task
+    secret is exposed solely through the exact read-only Compose mount in the
+    frozen container contract.
     Implementations must extend a safe host environment without logging values,
     supervise all label-matching containers for the full process lifetime, and
     return no captured output containing environment values.
@@ -241,19 +243,21 @@ class InjectedHostHarborBackend:
             raise TerminalBenchRunError("the projected provider key is unavailable")
         if secret in prepared.command.argv or secret in str(prepared.command):
             raise TerminalBenchRunError("provider key reached the serialized Harbor command")
-        injected_env = dict(prepared.command.env)
-        injected_env[secret_name] = secret
-        result = await self._executor.run(
-            prepared.command.argv,
-            cwd=prepared.command.cwd,
-            injected_env=injected_env,
-            timeout_seconds=prepared.spec.timeout_seconds,
-            exact_task_label=prepared.command.task_label,
-            compose_contract=prepared.command.compose_contract,
-        )
-        if not isinstance(result, HostHarborResult):
-            raise TerminalBenchRunError("host Harbor executor returned an invalid result")
-        return result
+        _replace_provider_secret(prepared.materialized_task.provider_secret_path, secret)
+        try:
+            result = await self._executor.run(
+                prepared.command.argv,
+                cwd=prepared.command.cwd,
+                injected_env=dict(prepared.command.env),
+                timeout_seconds=prepared.spec.timeout_seconds,
+                exact_task_label=prepared.command.task_label,
+                compose_contract=prepared.command.compose_contract,
+            )
+            if not isinstance(result, HostHarborResult):
+                raise TerminalBenchRunError("host Harbor executor returned an invalid result")
+            return result
+        finally:
+            _replace_provider_secret(prepared.materialized_task.provider_secret_path, "")
 
 
 class DockerSupervisedHostHarborExecutor:
@@ -293,7 +297,7 @@ class DockerSupervisedHostHarborExecutor:
         if not argv or Path(argv[0]) != self._harbor_executable:
             raise TerminalBenchRunError("host Harbor executable differs from the freeze")
         _require_budget_proxy_argv(argv)
-        if set(injected_env) != {"HARBOR_TELEMETRY", _provider_secret_name(injected_env)}:
+        if dict(injected_env) != {"HARBOR_TELEMETRY": "off"}:
             raise TerminalBenchRunError("host Harbor environment is not minimally scoped")
         host_environment = dict(injected_env)
         # ``rondo-eval`` is deliberately a non-installed uv project.  Harbor
@@ -518,6 +522,12 @@ def _compose_run_contract(
             "/logs/artifacts",
             False,
         ),
+        DockerMountFact(
+            "bind",
+            str(materialized.provider_secret_path),
+            "/run/secrets/rondo_eval_provider_api_key",
+            True,
+        ),
     )
     security_opt: tuple[str, ...] = ()
     seccomp_profile_sha256 = None
@@ -535,10 +545,7 @@ def _compose_run_contract(
             network_mode=network,
             networks=(network,),
             mounts=mounts,
-            compose_secret_mount=ComposeSecretMountContract(
-                destination="/run/secrets/rondo_eval_provider_api_key",
-                source_basename="rondo_eval_provider_api_key",
-            ),
+            compose_secret_mount=None,
             security_opt=security_opt,
             seccomp_profile_sha256=seccomp_profile_sha256,
         ),
@@ -556,13 +563,45 @@ def _task_label(task_id: str) -> str:
     return f"dev.rondo.eval.task={task_id}"
 
 
-def _provider_secret_name(environment: Mapping[str, str]) -> str:
-    names = [name for name in environment if name != "HARBOR_TELEMETRY"]
-    if len(names) != 1 or not names[0]:
-        raise TerminalBenchRunError("host Harbor requires exactly one provider secret")
-    if environment.get("HARBOR_TELEMETRY") != "off" or not environment[names[0]]:
-        raise TerminalBenchRunError("host Harbor environment is invalid")
-    return names[0]
+def _replace_provider_secret(path: Path, value: str) -> None:
+    if not isinstance(value, str) or "\0" in value or "\r" in value or "\n" in value:
+        raise TerminalBenchRunError("provider key cannot be represented as a Compose secret")
+    payload = value.encode("utf-8")
+    if len(payload) > 16 * 1024:
+        raise TerminalBenchRunError("provider key exceeds the bounded Compose secret size")
+    try:
+        before = path.lstat()
+        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                path.is_symlink()
+                or not stat.S_ISREG(opened.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            ):
+                raise TerminalBenchRunError("provider secret placeholder identity changed")
+            os.ftruncate(descriptor, 0)
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise OSError("provider secret write made no progress")
+                offset += written
+            os.fsync(descriptor)
+            after_write = os.fstat(descriptor)
+            if after_write.st_size != len(payload):
+                raise TerminalBenchRunError("provider secret write was incomplete")
+        finally:
+            os.close(descriptor)
+        after = path.lstat()
+        if path.is_symlink() or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+            raise TerminalBenchRunError("provider secret placeholder changed after write")
+    except TerminalBenchRunError:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise TerminalBenchRunError("provider secret placeholder could not be updated") from exc
 
 
 def _validate_budget_proxy_transport(value: str) -> str:

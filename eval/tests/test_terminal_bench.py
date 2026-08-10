@@ -100,6 +100,9 @@ class FakeMaterializer:
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
+        provider_secret = self.root / f"{kwargs['staging_name']}.provider-api-key"
+        provider_secret.write_bytes(b"")
+        provider_secret.chmod(0o600)
         overlay.write_text(
             materialize_module._compose_overlay_text(
                 task_label=kwargs["task_label"],
@@ -108,6 +111,7 @@ class FakeMaterializer:
                 pids_limit=kwargs["pids_limit"],
                 provider_api_key_env=kwargs["provider_api_key_env"],
                 runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
+                provider_secret_path=provider_secret,
                 seccomp_profile=kwargs.get("seccomp_profile"),
                 seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
                 seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
@@ -118,6 +122,7 @@ class FakeMaterializer:
         return MaterializedTask(
             task_path=task,
             overlay_path=overlay,
+            provider_secret_path=provider_secret,
             source_repo_ref=TERMINAL_BENCH_REPO_REF,
             source_commit=TERMINAL_BENCH_COMMIT,
             source_digest=f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}",
@@ -149,9 +154,18 @@ class FakeRunnerBackend:
 class FakeHostExecutor:
     def __init__(self) -> None:
         self.calls = []
+        self.provider_secrets = []
 
     async def run(self, argv, **kwargs):
         self.calls.append((argv, kwargs))
+        secret_mounts = [
+            item
+            for item in kwargs["compose_contract"].container.mounts
+            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+        ]
+        if len(secret_mounts) != 1:
+            raise AssertionError("expected one exact provider secret mount")
+        self.provider_secrets.append(Path(secret_mounts[0].source).read_text(encoding="utf-8"))
         trials = Path(argv[argv.index("--trials-dir") + 1])
         return HostHarborResult(0, trials / argv[argv.index("--trial-name") + 1])
 
@@ -328,15 +342,18 @@ class TerminalBenchTests(unittest.TestCase):
             prepared.command.trial_name,
         )
         container = prepared.command.compose_contract.container
-        self.assertEqual(len(container.mounts), 3)
-        self.assertEqual(
-            container.compose_secret_mount.destination,
-            "/run/secrets/rondo_eval_provider_api_key",
+        self.assertEqual(len(container.mounts), 4)
+        secret_mount = next(
+            item
+            for item in container.mounts
+            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
         )
         self.assertEqual(
-            container.compose_secret_mount.source_basename,
-            "rondo_eval_provider_api_key",
+            Path(secret_mount.source),
+            prepared.materialized_task.provider_secret_path,
         )
+        self.assertTrue(secret_mount.read_only)
+        self.assertIsNone(container.compose_secret_mount)
         self.assertEqual(prepared.command.image_ref, FIX_GIT_IMAGE_REF)
         self.assertEqual(prepared.command.source_repo_ref, TERMINAL_BENCH_REPO_REF)
         self.assertEqual(prepared.command.task_source_digest, f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}")
@@ -614,8 +631,13 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn(f"mem_limit: {2 * 1024**3}", overlay)
         self.assertIn(f"memswap_limit: {3 * 1024**3}", overlay)
         self.assertIn("pids_limit: 256", overlay)
-        self.assertIn("environment: OPENAI_API_KEY", overlay)
+        self.assertIn(
+            f"file: {json.dumps(str(result.provider_secret_path))}",
+            overlay,
+        )
         self.assertIn("source: rondo_eval_provider_api_key", overlay)
+        self.assertEqual(result.provider_secret_path.read_bytes(), b"")
+        self.assertEqual(result.provider_secret_path.stat().st_mode & 0o777, 0o600)
         self.assertIn('user: "1000:1000"', overlay)
         self.assertEqual(result.runtime_user, "1000:1000")
         staged_document = materialize_module._read_toml(result.task_path / "task.toml")
@@ -661,13 +683,32 @@ class TerminalBenchTests(unittest.TestCase):
         argv, kwargs = executor.calls[0]
         self.assertNotIn(secret, "\0".join(argv))
         self.assertNotIn(secret, repr(prepared.command))
-        self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off", "OPENAI_API_KEY": secret})
+        self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off"})
+        self.assertEqual(executor.provider_secrets, [secret])
+        self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
         self.assertEqual(kwargs["exact_task_label"], "dev.rondo.eval.task=p1-b3-rondo")
         self.assertEqual(kwargs["compose_contract"], prepared.command.compose_contract)
 
+    def test_injected_backend_clears_provider_secret_after_executor_failure(self) -> None:
+        prepared = self.prepare(Side.RONDO)
+
+        class FailingExecutor(FakeHostExecutor):
+            async def run(self, argv, **kwargs):
+                await super().run(argv, **kwargs)
+                raise RuntimeError("fake host failure")
+
+        executor = FailingExecutor()
+        backend = InjectedHostHarborBackend(
+            executor,
+            getenv=lambda name: "failure-secret" if name == "OPENAI_API_KEY" else None,
+        )
+        with self.assertRaisesRegex(RuntimeError, "fake host failure"):
+            asyncio.run(UnifiedTerminalBenchRunner(backend).run(prepared))
+        self.assertEqual(executor.provider_secrets, ["failure-secret"])
+        self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
+
     def test_concrete_host_executor_uses_public_full_lifetime_supervisor(self) -> None:
         prepared = self.prepare()
-        secret = "supervisor-secret-sentinel"
         fake_supervisor = mock.Mock()
         fake_supervisor.supervise_host_command.return_value = DockerExecutionResult(
             operation=DockerOperation.HOST,
@@ -688,7 +729,7 @@ class TerminalBenchTests(unittest.TestCase):
                 executor.run(
                     prepared.command.argv,
                     cwd=prepared.command.cwd,
-                    injected_env={"HARBOR_TELEMETRY": "off", "OPENAI_API_KEY": secret},
+                    injected_env={"HARBOR_TELEMETRY": "off"},
                     timeout_seconds=prepared.spec.timeout_seconds,
                     exact_task_label=prepared.command.task_label,
                     compose_contract=prepared.command.compose_contract,
@@ -696,13 +737,11 @@ class TerminalBenchTests(unittest.TestCase):
             )
 
         self.assertEqual(result.docker_evidence.operation, DockerOperation.HOST)
-        self.assertNotIn(secret, "\0".join(prepared.command.argv))
         host_runner.assert_called_once_with(
             executable=EVAL_ROOT / ".venv" / "bin" / "harbor",
             cwd=EVAL_ROOT,
             environment={
                 "HARBOR_TELEMETRY": "off",
-                "OPENAI_API_KEY": secret,
                 "PYTHONPATH": str(EVAL_ROOT),
             },
         )
@@ -782,10 +821,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertTrue(result.evidence[0].policy.aggregatable)
         self.assertEqual(
             observed["env"],
-            {
-                "HARBOR_TELEMETRY": "off",
-                "OPENAI_API_KEY": "fake-budget-proxy-downstream-key",
-            },
+            {"HARBOR_TELEMETRY": "off"},
         )
         self.assertNotIn("official-key-sentinel", "\0".join(observed["argv"]))
 

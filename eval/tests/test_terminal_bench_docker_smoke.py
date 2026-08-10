@@ -60,6 +60,9 @@ class FakeMaterializer:
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
+        provider_secret = self.root / f"{kwargs['staging_name']}.provider-api-key"
+        provider_secret.write_bytes(b"")
+        provider_secret.chmod(0o600)
         overlay.write_text(
             materialize_module._compose_overlay_text(
                 task_label=kwargs["task_label"],
@@ -68,6 +71,7 @@ class FakeMaterializer:
                 pids_limit=kwargs["pids_limit"],
                 provider_api_key_env=kwargs["provider_api_key_env"],
                 runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
+                provider_secret_path=provider_secret,
                 seccomp_profile=kwargs.get("seccomp_profile"),
                 seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
                 seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
@@ -77,6 +81,7 @@ class FakeMaterializer:
         return MaterializedTask(
             task_path=task,
             overlay_path=overlay,
+            provider_secret_path=provider_secret,
             source_repo_ref=TERMINAL_BENCH_REPO_REF,
             source_commit=TERMINAL_BENCH_COMMIT,
             source_digest=f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}",
@@ -113,8 +118,14 @@ class FakeHostExecutor:
         )
         port = urlsplit(transport).port
         assert port is not None
-        secret_name = next(name for name in kwargs["injected_env"] if name != "HARBOR_TELEMETRY")
-        bearer = kwargs["injected_env"][secret_name]
+        assert kwargs["injected_env"] == {"HARBOR_TELEMETRY": "off"}
+        secret_mounts = [
+            item
+            for item in kwargs["compose_contract"].container.mounts
+            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+        ]
+        assert len(secret_mounts) == 1
+        bearer = Path(secret_mounts[0].source).read_text(encoding="utf-8")
         body = json.dumps({"model": "gpt-5.6-luna", "stream": True, "input": "fix"})
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         connection.request(
@@ -339,7 +350,8 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             ("no-new-privileges:true",),
         )
         _argv, kwargs = FakeHostExecutor.calls[0]
-        self.assertEqual(kwargs["injected_env"]["OPENAI_API_KEY"], NO_API_SMOKE_BEARER)
+        self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off"})
+        self.assertEqual(result.prepared.materialized_task.provider_secret_path.read_bytes(), b"")
         agent_kwargs = {
             _argv[index + 1].split("=", 1)[0]: _argv[index + 1].split("=", 1)[1]
             for index, item in enumerate(_argv[:-1])

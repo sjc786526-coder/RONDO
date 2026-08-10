@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
 
 PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
+P1_PAIR_ID = "p1-fix-git-pair-v2"
 _PAIR_LOCK_KEYS = {
     "schema_version",
     "pair_id",
@@ -440,7 +441,7 @@ class RunPublicationContext:
     metrics: Mapping[str, object]
 
     def validate(self) -> None:
-        if self.pair_id != "p1-fix-git-pair-v1":
+        if self.pair_id != P1_PAIR_ID:
             raise PairIdentityError("publication pair id is invalid")
         _require_sha256(self.pair_lock_sha256, "pair lock sha256")
         if self.pair_slot not in {1, 2} or self.pair_round != 1:
@@ -463,7 +464,7 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
         raise PairIdentityError("pair lock is unreadable") from exc
     if not isinstance(value, dict) or set(value) != _PAIR_LOCK_KEYS:
         raise PairIdentityError("pair lock differs from schema v1")
-    if value["schema_version"] != 1 or value["pair_id"] != "p1-fix-git-pair-v1":
+    if value["schema_version"] != 1 or value["pair_id"] != P1_PAIR_ID:
         raise PairIdentityError("pair lock identity differs from P1")
     modes = _parse_modes(value["modes"])
     topology = _parse_topology(value["topology"], modes=modes)
