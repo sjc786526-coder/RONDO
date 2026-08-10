@@ -74,7 +74,7 @@ class NamespaceDiagnosticTests(unittest.TestCase):
         _validate_diagnostic_argv(
             plan.argv,
             DockerTaskIdentity("20260810-namespace-diag-r1"),
-            DockerLimits(512 * 1024**2, 768 * 1024**2, 128, 30),
+            DockerLimits(512 * 1024**2, 768 * 1024**2, 128, 60),
         )
 
     def test_frozen_binary_may_live_in_common_root_outside_checkout(self) -> None:
@@ -118,7 +118,7 @@ class NamespaceDiagnosticTests(unittest.TestCase):
             _validate_diagnostic_argv(
                 plan.argv,
                 DockerTaskIdentity("20260810-namespace-diag-r1"),
-                DockerLimits(512 * 1024**2, 768 * 1024**2, 128, 30),
+                DockerLimits(512 * 1024**2, 768 * 1024**2, 128, 60),
             )
 
         self.assertEqual(plan.seccomp_profile_sha256, digest)

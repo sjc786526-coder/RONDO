@@ -73,7 +73,7 @@ print("unshare_userns=" + ("ok" if result == 0 else "denied"))
 print("unshare_errno=" + ("0" if result == 0 else str(error)))
 PY
 if /opt/rondo-eval/diagnostic/bwrap --new-session --die-with-parent --ro-bind / / --unshare-user --unshare-pid -- /bin/true; then echo 'bwrap_baseline=ok'; else echo 'bwrap_baseline=denied'; fi
-sleep 6
+sleep 20
 """.strip()
 
 
@@ -93,7 +93,7 @@ class NamespaceDiagnosticSpec:
     memory_bytes: int = 512 * 1024**2
     memory_swap_bytes: int = 768 * 1024**2
     pids_limit: int = 128
-    timeout_seconds: int = 30
+    timeout_seconds: int = 60
 
 
 @dataclass(frozen=True)
