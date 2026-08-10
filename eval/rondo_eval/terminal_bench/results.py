@@ -278,6 +278,9 @@ def publish_terminal_bench_result(
         writer.write_json("api-metadata.json", metadata)
 
     spent = _run_spend(live_result.budget_snapshot, run_id)
+    has_unsettled_reservation = _run_has_unsettled_reservation(
+        live_result.budget_snapshot, run_id
+    )
     record = {
         "schema_version": 1,
         "run_id": run_id,
@@ -293,11 +296,14 @@ def publish_terminal_bench_result(
         "summary": summary["summary"],
         "tasks": summary["tasks"],
         "metrics": dict(publication.metrics),
-        "cost": _cost_from_budget_spend(spent),
+        "cost": _cost_from_budget_spend(
+            spent, has_unsettled_reservation=has_unsettled_reservation
+        ),
         "artifacts": f"eval-data/runs/{run_id}",
         "notes": (
-            "estimated_usd is local budget accounting from frozen Luna Standard rates and "
-            "reservations; actual_usd is null for non-zero spend because no invoice was queried."
+            "estimated_usd is settled local budget accounting from frozen Luna Standard rates; "
+            "actual_usd is null for non-zero spend or an unsettled reservation because no "
+            "invoice was queried."
         ),
     }
     _validate_terminal_bench_record(record)
@@ -354,6 +360,9 @@ def publish_terminal_bench_failure(
         raise HarborResultError("artifact writer claim differs from the failed run")
     _validate_publication_context(publication, side=side)
     spent = _run_spend(budget_snapshot, run_id)
+    has_unsettled_reservation = _run_has_unsettled_reservation(
+        budget_snapshot, run_id
+    )
     config = {
         "batch_id": budget_snapshot.get("batch_id"),
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
@@ -435,11 +444,14 @@ def publish_terminal_bench_failure(
         "summary": summary,
         "tasks": tasks,
         "metrics": dict(publication.metrics),
-        "cost": _cost_from_budget_spend(spent),
+        "cost": _cost_from_budget_spend(
+            spent, has_unsettled_reservation=has_unsettled_reservation
+        ),
         "artifacts": f"eval-data/runs/{run_id}",
         "notes": (
             "Run exited after its paid-run claim; failure details are intentionally categorical. "
-            "estimated_usd is local budget accounting; actual_usd is null for non-zero spend."
+            "estimated_usd is settled local budget accounting; actual_usd is null for non-zero "
+            "spend or an unsettled reservation."
         ),
     }
     _validate_terminal_bench_record(record)
@@ -868,12 +880,35 @@ def _run_spend(snapshot: Mapping[str, object], run_id: str) -> float:
     return float(amount)
 
 
-def _cost_from_budget_spend(spent: float) -> dict[str, float | None]:
+def _run_has_unsettled_reservation(snapshot: Mapping[str, object], run_id: str) -> bool:
+    runs = snapshot.get("runs")
+    run = runs.get(run_id) if isinstance(runs, dict) else None
+    requests = run.get("requests") if isinstance(run, dict) else None
+    if requests is None:
+        return False
+    if not isinstance(requests, dict):
+        raise HarborResultError("budget snapshot run requests are invalid")
+    unsettled = False
+    for request in requests.values():
+        if not isinstance(request, dict) or request.get("status") not in {
+            "reserved",
+            "settled",
+        }:
+            raise HarborResultError("budget snapshot request status is invalid")
+        unsettled = unsettled or request["status"] == "reserved"
+    return unsettled
+
+
+def _cost_from_budget_spend(
+    spent: float, *, has_unsettled_reservation: bool = False
+) -> dict[str, float | None]:
     """Keep schema v1 while refusing to call local pricing an invoiced actual."""
 
     return {
         "estimated_usd": spent,
-        "actual_usd": 0.0 if spent == 0.0 else None,
+        "actual_usd": (
+            0.0 if spent == 0.0 and not has_unsettled_reservation else None
+        ),
     }
 
 

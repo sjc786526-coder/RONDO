@@ -113,9 +113,9 @@
   `failed/blocked`，零重试合同生效，Codex slot 2 与 M1 均未运行。
 - 该 run 启动了一个 main 请求，但没有收到上游响应或 usage；预算 ledger 保留 0.755400 USD reservation，
   `charged_usd=null`、`spent_usd=0`。未查询账单，因此真实计费不作 0 USD 断言。
-- 直接原因是本计划原 canonical shell 清除了宿主 HTTP(S) proxy。无认证对照中，清除 proxy 后访问官方 endpoint
-  15.010 秒超时；保留宿主网络环境时 0.494 秒返回预期 401。未来 paid 命令必须保留宿主 proxy，只设置
-  loopback `NO_PROXY=127.0.0.1,localhost`。
+- 后续配置核对确认 v6 的直接原因是本地配置、tracked pair 与 budget proxy 错误固定官方 OpenAI endpoint，而用户
+  实际使用另一 OpenAI-compatible provider。清除 proxy 只使错误 endpoint 表现为超时。Plan 011 改为配置驱动通用
+  HTTPS base URL；未来 canonical shell 继续清除 ambient proxy，只设置 loopback `NO_PROXY`。
 - watchdog 正常收尾，132 个 Docker samples 无 warning；运行后 Docker 为 0 容器、0 卷，image/build-cache
   与运行前相同。该轮记录的约 846GB 是 WSL 虚拟文件系统余量，不是 Windows `C:` 盘实际剩余空间，
   因而不作为宿主容量验收证据。
@@ -127,8 +127,8 @@
 ### 后续计划
 
 1. 不复用 v6，不运行 Codex；若继续 B3，须另行冻结新 pair，并再次取得明确真实 API 批量授权。
-2. 新 pair 的 canonical 命令保留宿主 HTTP(S) proxy，仅让 loopback 地址绕过 proxy；仍严格 RONDO→Codex、
-   零重试、首侧失败停止。
+2. 新 pair 的 canonical 命令从 ignored 配置读取 provider，清除 ambient HTTP(S)/ALL proxy，仅保留 loopback
+   `NO_PROXY`；仍严格 RONDO→Codex、零重试、首侧失败停止。
 
 ### 阻塞项
 
@@ -154,4 +154,4 @@
 | 005 | 本批只做 readiness 并提交 worktree，真实 API 必须下一次单独授权 | 用户明确要求先给参数/命令再停止 | 执行边界 | 已采纳 |
 | 006 | paid CLI 显式接收 detached measurement worktree，harness/watchdog 仍在当前 clean checkout | 当前 eval harness 与冻结 RONDO 产品提交不同，单一 cwd 无法同时证明两种身份 | CLI 启动命令 | 已采纳 |
 | 007 | 真实执行时使用同 readiness commit 的独立 results worktree | 首侧 append-only result 会弄脏 results checkout，不能同时弄脏第二槽所需的 clean harness | paid 执行拓扑 | 已采纳 |
-| 008 | paid host 进程保留宿主 HTTP(S) proxy，只对 loopback 设置 `NO_PROXY` | 当前机器直连官方 endpoint 超时，预算代理需要宿主网络路径；Harbor 子进程环境仍由 runner 最小化 | canonical shell | 已采纳 |
+| 008 | paid host 保留宿主 proxy | 后续确认超时来自错误 provider endpoint，不是直连能力 | canonical shell | 已由 Plan 011 废止 |

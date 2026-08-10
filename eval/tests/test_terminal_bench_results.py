@@ -94,7 +94,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         *, side: Side = Side.CODEX, exit_code: int = 0
     ) -> RunPublicationContext:
         return RunPublicationContext(
-            pair_id="p1-fix-git-pair-v6",
+            pair_id="p1-fix-git-pair-v7",
             pair_lock_sha256="9" * 64,
             pair_slot=1 if side is Side.RONDO else 2,
             pair_round=1,
@@ -157,7 +157,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         provider = ProviderProjection(
             provider_id="openai",
             api="responses",
-            base_url="https://api.openai.com/v1",
+            base_url="https://provider.example/v1",
             api_key_env="OPENAI_API_KEY",
             main_model="gpt-5.6-luna",
             guardian_model="gpt-5.6-luna",
@@ -585,6 +585,15 @@ class TerminalBenchResultTests(unittest.TestCase):
             paths, run_id, results_worktree_root=self.root
         ).start()
         live_result = self._live_result(run_id)
+        budget_snapshot = {
+            "batch_id": "p1-b3",
+            "runs": {
+                run_id: {
+                    "spent_usd": "0.000000",
+                    "requests": {"request-1": {"status": "reserved"}},
+                }
+            },
+        }
 
         target = publish_terminal_bench_failure(
             paths,
@@ -594,7 +603,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             git_commit="e" * 40,
             eval_harness_commit="f" * 40,
             manifest=live_result.prepared.spec.binary,
-            budget_snapshot=live_result.budget_snapshot,
+            budget_snapshot=budget_snapshot,
             metadata_path=self.root / "missing-api-metadata.json",
             outcome=RunOutcome.INFRA_FAILED,
             failure_stage="docker",
@@ -607,7 +616,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "docker")
         self.assertEqual(
-            record["cost"], {"estimated_usd": 0.012345, "actual_usd": None}
+            record["cost"], {"estimated_usd": 0.0, "actual_usd": None}
         )
 
     def test_claimed_failure_reports_verified_api_metadata_truthfully(self) -> None:
@@ -1144,7 +1153,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             side_effect=DockerSupervisionError("redacted test failure")
         )
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v6",
+            pair_id="p1-fix-git-pair-v7",
             lock_sha256="9" * 64,
         )
         pair_identity.mode.return_value = SimpleNamespace(
@@ -1231,7 +1240,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             return measurement_paths if Path(start) == measurement_root else paths
 
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v6",
+            pair_id="p1-fix-git-pair-v7",
             lock_sha256="9" * 64,
         )
         pair_identity.mode.return_value = SimpleNamespace(
