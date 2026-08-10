@@ -245,6 +245,13 @@ class PinnedTaskMaterializer:
         staging_root.chmod(0o700)
         _create_secret_placeholder(provider_secret)
         shutil.copytree(source_task, destination, symlinks=True)
+        verifier_script = destination / "tests" / "test.sh"
+        verifier_metadata = verifier_script.lstat()
+        if stat.S_ISLNK(verifier_metadata.st_mode) or not stat.S_ISREG(
+            verifier_metadata.st_mode
+        ):
+            raise MaterializationError("staged verifier script is unsafe")
+        verifier_script.chmod(0o555)
 
         task_toml = destination / "task.toml"
         text = task_toml.read_text(encoding="utf-8")

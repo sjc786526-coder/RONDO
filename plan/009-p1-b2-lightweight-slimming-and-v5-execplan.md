@@ -165,7 +165,9 @@
   `plan009-b2-aa73ecf-r3` 重验。r3 首次进入 Docker，真实 RONDO 在 `install.verify_file_owner` 失败；
   daemon/资源/seccomp/cleanup 均验证成功，Codex 未运行。直接原因是 Compose cp 保留 frozen 文件
   `1000:1000`/`0555`，实现却错误要求文件为 `0:0`。目录继续要求 `0:0`，文件改为消费实际
-  `1000:1000`/`0555` 后，以 fresh `plan009-b2-aa73ecf-r4` 重验。
+  `1000:1000`/`0555` 后，以 fresh `plan009-b2-aa73ecf-r4` 重验。r4 的真实 marker/tool round-trip 已通过，
+  但 Harbor 直接执行冻结 task 中 mode `0600` 的 `/tests/test.sh`，verifier permission denied。只在 ignored
+  staging copy 将该固定脚本设为 `0555`，以 fresh `plan009-b2-aa73ecf-r5` 重验。
 
 ### 后续计划
 
@@ -175,7 +177,7 @@
 
 ### 阻塞项
 
-- 首次与 r2 在 Docker 前停止；r3 的 RONDO 设施失败且已精确清理，r4 尚未启动，当前不能宣告 B2 完成。
+- 首次与 r2 在 Docker 前停止；r3/r4 的 RONDO 设施失败且已精确清理，r5 尚未启动，当前不能宣告 B2 完成。
 - 若 pinned 资产缺失、watchdog/资源事实不可用或 RONDO 首侧失败，按合同立即停止。
 
 ### 当前验收状态

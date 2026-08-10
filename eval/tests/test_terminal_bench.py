@@ -873,6 +873,10 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn("source: rondo_eval_provider_api_key", overlay)
         self.assertEqual(result.provider_secret_path.read_bytes(), b"")
         self.assertEqual(result.provider_secret_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(
+            (result.task_path / "tests" / "test.sh").stat().st_mode & 0o777,
+            0o555,
+        )
         self.assertIn('user: "1000:1000"', overlay)
         self.assertIn("    cap_drop:\n      - ALL\n", overlay)
         self.assertEqual(result.runtime_user, "1000:1000")
