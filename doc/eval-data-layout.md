@@ -131,6 +131,9 @@ eval-data/                             # git-ignored
   atomic replace + parent fsync 更新；已存在的空文件视为损坏，不能重置为 slot 1。两槽绑定
   同一 `eval_harness_commit`。paid 槽先进入 `publishing`，结果持久后回读 record SHA-256 再收敛为
   `completed`；M1 同时核对 durable ledger 与 result index，不仅聚合两条 record。
+- no-API ledger schema v3 为每个 claim 固定 `safe_summary_path`。summary 已耐久、ledger 仍 active 的崩溃
+  在任何外部 preflight 前按完整 schema/identity/hash 收敛；completed ledger 每次打开持续回读摘要，缺失或
+  漂移 fail-closed。遗留 active 没有合法摘要时写为 `failed + blocked`，不得重跑或另起 pair。
 - 后续 no-API 成功槽在账本写 `completed` 前，先原子写入
   `eval-data/pairs/<pair_id>/no-api-safe/<run_id>.json`，只保留 pair/bundle/Harbor/seccomp/harness 身份和去敏
   计数/有效态摘要，以及实际 daemon image ID、VHDX baseline/peak/final/growth、exact container

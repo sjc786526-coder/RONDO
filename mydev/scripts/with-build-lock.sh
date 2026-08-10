@@ -205,6 +205,27 @@ if ! mkdir -- "$run_dir" || ! chmod 700 -- "$run_dir"; then
 fi
 metrics_file="${run_dir}/metrics.csv"
 summary_file="${run_dir}/summary.env"
+watchdog_heartbeat_file="${run_dir}/watchdog-heartbeat"
+watchdog_wrapper_pid="$$"
+watchdog_wrapper_start_ticks="$(awk '{print $22}' "/proc/${watchdog_wrapper_pid}/stat" 2>/dev/null || true)"
+if [[ ! "$watchdog_wrapper_start_ticks" =~ ^[0-9]+$ ]]; then
+  echo "[rondo] cannot identify the watchdog wrapper process" >&2
+  exit 81
+fi
+umask 077
+if ! : >"$watchdog_heartbeat_file" || ! chmod 600 -- "$watchdog_heartbeat_file"; then
+  echo "[rondo] cannot create the watchdog heartbeat" >&2
+  exit 81
+fi
+export RONDO_WATCHDOG_WRAPPER_PID="$watchdog_wrapper_pid"
+export RONDO_WATCHDOG_WRAPPER_START_TICKS="$watchdog_wrapper_start_ticks"
+export RONDO_WATCHDOG_HEARTBEAT_PATH="$watchdog_heartbeat_file"
+export RONDO_WATCHDOG_SCRIPT_PATH="${script_dir}/with-build-lock.sh"
+
+refresh_watchdog_heartbeat() {
+  : >"$watchdog_heartbeat_file"
+}
+
 printf '%s\n' 'timestamp,elapsed_s,project_bytes,target_bytes,filesystem_used_bytes,filesystem_available_bytes,memory_current_bytes,memory_peak_bytes,memory_anon_bytes,memory_file_bytes,memory_kernel_bytes,memory_nonreclaimable_bytes,swap_current_bytes,swap_peak_bytes,cgroup_psi_full_avg10_bp,host_psi_full_avg10_bp,host_mem_available_kb,host_swap_free_kb,cargo_count,rustc_count,rust_lld_count,nextest_count' >"$metrics_file"
 
 junit_expected=0
@@ -419,6 +440,11 @@ trap 'handle_signal INT 130' INT
 trap 'handle_signal TERM 143' TERM
 trap 'handle_signal HUP 129' HUP
 
+if ! refresh_watchdog_heartbeat; then
+  trap - EXIT INT TERM HUP
+  write_minimal_summary "watchdog_heartbeat_failed" 81
+  exit 81
+fi
 systemd-run --user --scope --quiet --unit="$unit" \
   -p KillMode=control-group \
   -p MemoryHigh="$memory_high" \
@@ -511,6 +537,12 @@ while true; do
   fi
   if [[ "$population_state" == "unknown" ]]; then
     stop_reason="cgroup_population_unknown"
+    echo "[rondo] proactive stop: ${stop_reason}" >&2
+    terminate_scope_until_gone "$stop_reason"
+    break
+  fi
+  if ! refresh_watchdog_heartbeat; then
+    stop_reason="watchdog_heartbeat_unavailable"
     echo "[rondo] proactive stop: ${stop_reason}" >&2
     terminate_scope_until_gone "$stop_reason"
     break

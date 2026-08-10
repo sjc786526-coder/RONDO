@@ -24,7 +24,9 @@
   Docker 监督已接线。旧 pair lock/schema 下的 `fix-git` no-API v3 保留 RONDO→Codex 正常路径
   completed 的历史证据，但它不包含第二轮新增的持久化契约。新契约使用 stable
   sidecar lock + temp/fsync/atomic replace/parent fsync 保存 pair ledger，绑定两槽共用的 clean
-  eval harness commit，并对 no-API 原子保留去敏 safe summary。Docker 有效态另绑定 daemon
+  eval harness commit，并对 no-API 原子保留去敏 safe summary；summary 与 ledger 通过固定路径、持续
+  重读和 active 崩溃恢复收敛。watchdog lease 另绑定 wrapper PID/start-ticks 和新鲜 heartbeat，production
+  overlay/inspect 强制 `cap_drop=ALL`。Docker 有效态另绑定 daemon
   actual image ID、Desktop VHDX 增长、private cgroup namespace、容器 cgroup v2 CPU/峰值内存、
   daemon 回显的有效 seccomp、规范 watchdog 阈值与安全 override；这些字段必须存在于去敏 safe
   summary，缺失不能完成 pair。新 identity 为 `p1-fix-git-pair-v4`，不复用保留的 v3 ledger。本轮只做

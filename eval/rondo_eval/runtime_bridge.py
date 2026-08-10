@@ -52,6 +52,14 @@ _REQUIRED_CGROUP_COUNTERS = (
 _DEFAULT_MEMORY_HIGH_BYTES = 19 * 1024**3
 _DEFAULT_MEMORY_MAX_BYTES = 21 * 1024**3
 _DEFAULT_SWAP_MAX_BYTES = 5 * 1024**3
+_WATCHDOG_HEARTBEAT_MAX_AGE_NS = 15_000_000_000
+_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = 1_000_000_000
+_WATCHDOG_ENV = (
+    "RONDO_WATCHDOG_WRAPPER_PID",
+    "RONDO_WATCHDOG_WRAPPER_START_TICKS",
+    "RONDO_WATCHDOG_HEARTBEAT_PATH",
+    "RONDO_WATCHDOG_SCRIPT_PATH",
+)
 _DF_TYPES = ("Images", "Containers", "Local Volumes", "Build Cache")
 _SIZE = re.compile(r"([0-9]+(?:[.][0-9]+)?)(B|kB|MB|GB|TB|PB|KiB|MiB|GiB|TiB|PiB)\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
@@ -109,10 +117,22 @@ class WatchdogProof:
 @dataclass(frozen=True)
 class MachineWatchdogIdentity:
     common_root: Path
+    checkout_root: Path
     root_device: int
     root_inode: int
     metrics_root: Path | None
     cargo_target: Path | None
+    watcher: "WatcherProcessIdentity"
+
+
+@dataclass(frozen=True)
+class WatcherProcessIdentity:
+    pid: int
+    start_ticks: int
+    heartbeat_path: Path
+    heartbeat_device: int
+    heartbeat_inode: int
+    script_path: Path
 
 
 class CgroupWatchdogGuard:
@@ -130,6 +150,9 @@ class CgroupWatchdogGuard:
         lock_path: Path,
         lock_identity: tuple[int, int],
         machine_identity: MachineWatchdogIdentity,
+        watcher_proc_root: Path,
+        watchdog_environment: Mapping[str, str] | None,
+        heartbeat_clock_ns: Callable[[], int],
     ) -> None:
         self._token = token
         self._proc_cgroup_path = proc_cgroup_path
@@ -140,6 +163,9 @@ class CgroupWatchdogGuard:
         self._lock_path = lock_path
         self._lock_identity = lock_identity
         self._machine_identity = machine_identity
+        self._watcher_proc_root = watcher_proc_root
+        self._watchdog_environment = watchdog_environment
+        self._heartbeat_clock_ns = heartbeat_clock_ns
 
     def is_held(self, lease: object) -> bool:
         try:
@@ -159,7 +185,11 @@ class CgroupWatchdogGuard:
             _read_required_cgroup_counters(current_directory, self._pid)
             if _canonical_lock_is_held(self._lock_path) != self._lock_identity:
                 return False
-            if _machine_watchdog_identity() != self._machine_identity:
+            if _machine_watchdog_identity(
+                watcher_proc_root=self._watcher_proc_root,
+                watchdog_environment=self._watchdog_environment,
+                heartbeat_clock_ns=self._heartbeat_clock_ns,
+            ) != self._machine_identity:
                 return False
             return True
         except (AttributeError, OSError, RuntimeBridgeError, TypeError):
@@ -170,16 +200,23 @@ def lease_from_watchdog(
     *,
     proc_cgroup_path: Path = Path("/proc/self/cgroup"),
     cgroup_fs_root: Path = Path("/sys/fs/cgroup"),
+    watcher_proc_root: Path = Path("/proc"),
+    watchdog_environment: Mapping[str, str] | None = None,
+    heartbeat_clock_ns: Callable[[], int] = time.time_ns,
 ) -> WatchdogProof:
     """Mint a lease only when this process is inside a live RONDO scope.
 
-    The injectable paths exist solely for hermetic tests.  The PID cannot be
-    injected: membership is always proved for the calling process itself.
+    The injectable paths exist solely for hermetic tests.  Cgroup membership
+    is always proved for the calling process itself.
     """
 
     pid = os.getpid()
     try:
-        machine_identity = _machine_watchdog_identity()
+        machine_identity = _machine_watchdog_identity(
+            watcher_proc_root=watcher_proc_root,
+            watchdog_environment=watchdog_environment,
+            heartbeat_clock_ns=heartbeat_clock_ns,
+        )
         lock_path = _canonical_lock_path(os.getuid())
         lock_identity = _canonical_lock_is_held(lock_path)
         root = cgroup_fs_root.resolve(strict=True)
@@ -200,6 +237,9 @@ def lease_from_watchdog(
         lock_path=lock_path,
         lock_identity=lock_identity,
         machine_identity=machine_identity,
+        watcher_proc_root=watcher_proc_root,
+        watchdog_environment=watchdog_environment,
+        heartbeat_clock_ns=heartbeat_clock_ns,
     )
     lease = WatchdogLease(token=token)
     if guard.is_held(lease) is not True:
@@ -283,20 +323,158 @@ def _reject_watchdog_overrides(common_root: Path) -> tuple[Path | None, Path | N
     return metrics_root, cargo_target
 
 
-def _machine_watchdog_identity() -> MachineWatchdogIdentity:
-    module_root = _repository_common_root(Path(__file__).resolve(strict=True))
-    current_root = _repository_common_root(Path.cwd().resolve(strict=True))
-    if module_root != current_root:
+def _machine_watchdog_identity(
+    *,
+    watcher_proc_root: Path = Path("/proc"),
+    watchdog_environment: Mapping[str, str] | None = None,
+    heartbeat_clock_ns: Callable[[], int] = time.time_ns,
+) -> MachineWatchdogIdentity:
+    module_checkout = _repository_checkout_root(Path(__file__).resolve(strict=True))
+    current_checkout = _repository_checkout_root(Path.cwd().resolve(strict=True))
+    module_root = _repository_common_root(module_checkout)
+    current_root = _repository_common_root(current_checkout)
+    if module_root != current_root or module_checkout != current_checkout:
         raise RuntimeBridgeError("watchdog process is outside the RONDO common root")
     root_stat = module_root.stat()
     metrics_root, cargo_target = _reject_watchdog_overrides(module_root)
+    watcher = _watcher_process_identity(
+        common_root=module_root,
+        expected_script=(
+            module_checkout / "mydev" / "scripts" / "with-build-lock.sh"
+        ),
+        proc_root=watcher_proc_root,
+        environment=(os.environ if watchdog_environment is None else watchdog_environment),
+        heartbeat_clock_ns=heartbeat_clock_ns,
+    )
     return MachineWatchdogIdentity(
         common_root=module_root,
+        checkout_root=module_checkout,
         root_device=root_stat.st_dev,
         root_inode=root_stat.st_ino,
         metrics_root=metrics_root,
         cargo_target=cargo_target,
+        watcher=watcher,
     )
+
+
+def _watcher_process_identity(
+    *,
+    common_root: Path,
+    expected_script: Path,
+    proc_root: Path,
+    environment: Mapping[str, str],
+    heartbeat_clock_ns: Callable[[], int],
+) -> WatcherProcessIdentity:
+    values = {name: environment.get(name) for name in _WATCHDOG_ENV}
+    if any(not isinstance(value, str) or not value for value in values.values()):
+        raise RuntimeBridgeError("watchdog liveness environment is incomplete")
+    try:
+        pid = _parse_uint(values["RONDO_WATCHDOG_WRAPPER_PID"] or "")
+        start_ticks = _parse_uint(
+            values["RONDO_WATCHDOG_WRAPPER_START_TICKS"] or ""
+        )
+    except RuntimeBridgeError as exc:
+        raise RuntimeBridgeError("watchdog process identity is invalid") from exc
+    if pid <= 1 or start_ticks <= 0:
+        raise RuntimeBridgeError("watchdog process identity is invalid")
+
+    script_value = values["RONDO_WATCHDOG_SCRIPT_PATH"] or ""
+    heartbeat_value = values["RONDO_WATCHDOG_HEARTBEAT_PATH"] or ""
+    script_path = _project_path(script_value)
+    canonical_expected_script = expected_script.resolve(strict=True)
+    if script_path != canonical_expected_script:
+        raise RuntimeBridgeError("watchdog script differs from the active RONDO checkout")
+    script_stat = script_path.lstat()
+    if (
+        stat.S_ISLNK(script_stat.st_mode)
+        or not stat.S_ISREG(script_stat.st_mode)
+        or not os.access(script_path, os.X_OK)
+    ):
+        raise RuntimeBridgeError("watchdog script is unavailable")
+
+    heartbeat_path = Path(heartbeat_value)
+    if (
+        not heartbeat_path.is_absolute()
+        or Path(os.path.normpath(heartbeat_value)) != heartbeat_path
+        or heartbeat_path.name != "watchdog-heartbeat"
+    ):
+        raise RuntimeBridgeError("watchdog heartbeat path is invalid")
+    heartbeat_parent = heartbeat_path.parent
+    parent_stat = heartbeat_parent.lstat()
+    heartbeat_stat = heartbeat_path.lstat()
+    if (
+        stat.S_ISLNK(parent_stat.st_mode)
+        or not stat.S_ISDIR(parent_stat.st_mode)
+        or parent_stat.st_uid != os.getuid()
+        or stat.S_IMODE(parent_stat.st_mode) != 0o700
+        or stat.S_ISLNK(heartbeat_stat.st_mode)
+        or not stat.S_ISREG(heartbeat_stat.st_mode)
+        or heartbeat_stat.st_uid != os.getuid()
+        or stat.S_IMODE(heartbeat_stat.st_mode) != 0o600
+    ):
+        raise RuntimeBridgeError("watchdog heartbeat path is unsafe")
+    resolved_heartbeat = heartbeat_path.resolve(strict=True)
+    if not resolved_heartbeat.is_relative_to(common_root):
+        raise RuntimeBridgeError("watchdog heartbeat is outside RONDO common root")
+    now_ns = heartbeat_clock_ns()
+    if isinstance(now_ns, bool) or not isinstance(now_ns, int) or now_ns < 0:
+        raise RuntimeBridgeError("watchdog heartbeat clock is unavailable")
+    age_ns = now_ns - heartbeat_stat.st_mtime_ns
+    if (
+        age_ns < -_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS
+        or age_ns > _WATCHDOG_HEARTBEAT_MAX_AGE_NS
+    ):
+        raise RuntimeBridgeError("watchdog heartbeat is stale")
+
+    proc_directory = proc_root / str(pid)
+    process_start_ticks, process_state = _read_process_stat(
+        proc_directory / "stat", pid
+    )
+    if process_start_ticks != start_ticks or process_state in {"Z", "X", "x"}:
+        raise RuntimeBridgeError("watchdog process identity changed")
+    cmdline = _read_bounded_bytes(proc_directory / "cmdline", 65_536)
+    arguments = tuple(value for value in cmdline.split(b"\0") if value)
+    if os.fsencode(script_path) not in arguments:
+        raise RuntimeBridgeError("watchdog process is not the canonical wrapper")
+
+    return WatcherProcessIdentity(
+        pid=pid,
+        start_ticks=start_ticks,
+        heartbeat_path=resolved_heartbeat,
+        heartbeat_device=heartbeat_stat.st_dev,
+        heartbeat_inode=heartbeat_stat.st_ino,
+        script_path=script_path,
+    )
+
+
+def _read_process_stat(path: Path, expected_pid: int) -> tuple[int, str]:
+    try:
+        payload = _read_bounded_bytes(path, 4096).decode("ascii")
+    except UnicodeError as exc:
+        raise RuntimeBridgeError("watchdog process stat is invalid") from exc
+    closing = payload.rfind(")")
+    prefix = f"{expected_pid} ("
+    if (
+        not payload.startswith(prefix)
+        or closing < len(prefix)
+        or payload[closing + 1:closing + 2] != " "
+    ):
+        raise RuntimeBridgeError("watchdog process stat is invalid")
+    fields = payload[closing + 2:].split()
+    if len(fields) < 20 or len(fields[0]) != 1:
+        raise RuntimeBridgeError("watchdog process stat is incomplete")
+    return _parse_uint(fields[19]), fields[0]
+
+
+def _read_bounded_bytes(path: Path, limit: int) -> bytes:
+    try:
+        with path.open("rb") as handle:
+            payload = handle.read(limit + 1)
+    except OSError as exc:
+        raise RuntimeBridgeError("watchdog process evidence is unavailable") from exc
+    if not payload or len(payload) > limit:
+        raise RuntimeBridgeError("watchdog process evidence is invalid")
+    return payload
 
 
 def _project_path(value: str) -> Path:
@@ -343,13 +521,7 @@ def _optional_project_directory(
 
 
 def _repository_common_root(start: Path) -> Path:
-    checkout: Path | None = None
-    for candidate in (start, *start.parents):
-        if (candidate / ".git").exists():
-            checkout = candidate
-            break
-    if checkout is None:
-        raise RuntimeBridgeError("RONDO Git common root is unavailable")
+    checkout = _repository_checkout_root(start)
     git_entry = checkout / ".git"
     entry_stat = git_entry.lstat()
     if stat.S_ISLNK(entry_stat.st_mode):
@@ -379,6 +551,13 @@ def _repository_common_root(start: Path) -> Path:
     if common_git.name != ".git" or not common_git.is_dir():
         raise RuntimeBridgeError("RONDO Git common directory is invalid")
     return common_git.parent.resolve(strict=True)
+
+
+def _repository_checkout_root(start: Path) -> Path:
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate.resolve(strict=True)
+    raise RuntimeBridgeError("RONDO Git checkout root is unavailable")
 
 
 def _canonical_lock_path(uid: int) -> Path:

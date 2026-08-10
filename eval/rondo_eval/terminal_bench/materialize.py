@@ -529,6 +529,8 @@ def _compose_overlay_text(
         f"    mem_limit: {memory_bytes}\n"
         f"    memswap_limit: {memory_swap_bytes}\n"
         f"    pids_limit: {pids_limit}\n"
+        "    cap_drop:\n"
+        "      - ALL\n"
         f"{seccomp}"
         "    secrets:\n"
         "      - source: rondo_eval_provider_api_key\n"

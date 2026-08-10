@@ -426,7 +426,7 @@ linked worktree 不复制凭据。后续加载器通过 `git rev-parse --git-com
 - llama.cpp 固定为 `b10333`/commit `08659901c43b51de735740f1cf61bb82fbe0c4e4`，CPU x64
   asset 安装于 ignored `eval-data/tools/llama-b10333/`；launcher/doctor 先核对安装 binary SHA，
   再核对 `--version` build/commit。`doctor` 在无权重时只做短生命周期
-  router 身份/健康探针，终态为 `infrastructure_ready_model_missing`/78；未下载模型、
+  router 身份/健康探针，终态为 `cpu_frontend_ready_model_missing_gpu_unvalidated`/78；未下载模型、
   未启动真实推理。
 - Terminal-Bench 两侧静态 musl runtime bundle 位于 ignored `eval-data/bin/{rondo,codex}/`；
   内含 CLI、`codex-code-mode-host` 与同一官方 v0.147.0 musl bwrap，详细 SHA 在各 bundle

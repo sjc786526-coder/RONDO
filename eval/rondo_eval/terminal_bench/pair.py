@@ -174,9 +174,24 @@ class PairSequenceLedger:
                 self.__exit__(None, None, None)
                 raise
             self._state = state
+            if self.mode_name == "no_api":
+                try:
+                    for run in state["runs"]:
+                        if run["status"] == "completed":
+                            digest = self._read_no_api_summary(run)
+                            if (
+                                run["safe_summary_sha256"] is not None
+                                and run["safe_summary_sha256"] != digest
+                            ):
+                                raise PairIdentityError(
+                                    "no-API sequence safe summary digest drifted"
+                                )
+                except PairIdentityError:
+                    self.__exit__(None, None, None)
+                    raise
         else:
             self._state = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "pair_id": self.identity.pair_id,
                 "pair_lock_sha256": self.identity.lock_sha256,
                 "mode": self.mode_name,
@@ -207,16 +222,18 @@ class PairSequenceLedger:
         state = self._require_state()
         active = [item for item in state["runs"] if item["status"] == "active"]
         if active:
-            # An active entry surviving a lock handoff means the owning process
-            # exited without publishing a terminal result.  It cannot be
-            # resumed or replaced safely: persist the failed slot before
-            # rejecting every subsequent claim for this pair.
             if len(active) != 1:
                 raise PairIdentityError("pair sequence active state is ambiguous")
-            active[0]["status"] = "failed"
-            state["blocked"] = True
-            self._persist()
-            raise PairIdentityError("pair sequence is blocked by an abandoned active slot")
+            try:
+                self._read_no_api_summary(active[0])
+            except PairIdentityError:
+                active[0]["status"] = "failed"
+                state["blocked"] = True
+                self._persist()
+                raise PairIdentityError(
+                    "pair sequence is blocked by an abandoned active slot"
+                )
+            raise PairIdentityError("pair sequence active slot requires recovery")
         if state["blocked"]:
             raise PairIdentityError("pair sequence is blocked by an earlier failed slot")
         _require_commit(eval_harness_commit, "eval harness commit")
@@ -247,6 +264,11 @@ class PairSequenceLedger:
                 "eval_harness_commit": eval_harness_commit,
                 "publication_sha256": None,
                 "safe_summary_sha256": None,
+                "safe_summary_path": (
+                    _no_api_safe_summary_relative_path(self.identity, run_id)
+                    if self.mode_name == "no_api"
+                    else None
+                ),
                 "container_metrics": None,
             }
         )
@@ -278,8 +300,11 @@ class PairSequenceLedger:
         if safe_summary_sha256 is not None:
             _require_sha256(safe_summary_sha256, "safe summary sha256")
         normalized_metrics = _container_metrics(container_metrics)
-        if completed and self.mode_name == "no_api" and safe_summary_sha256 is None:
-            raise PairIdentityError("completed no-API slot lacks a durable safe summary")
+        if completed and self.mode_name == "no_api":
+            durable_sha256 = self._read_no_api_summary(matches[0])
+            if safe_summary_sha256 is not None and safe_summary_sha256 != durable_sha256:
+                raise PairIdentityError("no-API safe summary digest differs from durable bytes")
+            safe_summary_sha256 = durable_sha256
         if completed and self.mode_name == "paid" and (
             publication_sha256 is None or normalized_metrics is None
         ):
@@ -293,6 +318,31 @@ class PairSequenceLedger:
         else:
             state["blocked"] = True
         self._persist()
+
+    def reconcile_no_api_summary(self) -> dict[str, Any] | None:
+        """Converge one durable safe summary without starting another Docker run."""
+
+        if self.mode_name != "no_api":
+            raise PairIdentityError("safe-summary reconciliation is no-API-only")
+        state = self._require_state()
+        active = [item for item in state["runs"] if item["status"] == "active"]
+        if not active:
+            return None
+        if len(active) != 1:
+            raise PairIdentityError("pair sequence active state is ambiguous")
+        run = active[0]
+        try:
+            digest = self._read_no_api_summary(run)
+        except PairIdentityError:
+            run["status"] = "failed"
+            state["blocked"] = True
+            self._persist()
+            raise
+        run["safe_summary_sha256"] = digest
+        run["status"] = "completed"
+        state["next_slot"] = run["slot"] + 1
+        self._persist()
+        return json.loads(json.dumps(run, sort_keys=True, separators=(",", ":")))
 
     def stage_paid_publication(
         self,
@@ -373,6 +423,27 @@ class PairSequenceLedger:
         state = self._require_state()
         encoded = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
         _atomic_replace_bytes(self.path, encoded, hook=self._persist_hook)
+
+    def _read_no_api_summary(self, run: Mapping[str, object]) -> str:
+        relative = run.get("safe_summary_path")
+        if not isinstance(relative, str):
+            raise PairIdentityError("no-API sequence lacks its fixed safe summary path")
+        expected = _no_api_safe_summary_relative_path(
+            self.identity, str(run.get("run_id", ""))
+        )
+        if relative != expected:
+            raise PairIdentityError("no-API sequence safe summary path drifted")
+        try:
+            side = Side(str(run.get("side", "")))
+        except ValueError as exc:
+            raise PairIdentityError("no-API sequence side is invalid") from exc
+        return _read_no_api_safe_summary(
+            self.path.parent / relative,
+            identity=self.identity,
+            side=side,
+            run_id=str(run.get("run_id", "")),
+            eval_harness_commit=str(run.get("eval_harness_commit", "")),
+        )
 
 
 @dataclass(frozen=True)
@@ -903,20 +974,18 @@ def _published_terminal_record(index_path: Path, *, run_id: str) -> dict[str, An
     return matches[0]
 
 
-def persist_no_api_safe_summary(
-    path: Path,
+def _encode_no_api_safe_summary(
     *,
     identity: PairIdentity,
     side: Side,
     run_id: str,
     eval_harness_commit: str,
     summary: Mapping[str, object],
-) -> str:
-    """Persist a redacted, identity-bound future no-API pair observation."""
+) -> bytes:
+    """Validate and encode one canonical redacted no-API observation."""
 
     _require_commit(eval_harness_commit, "eval harness commit")
-    if path.exists() or path.is_symlink():
-        raise PairIdentityError("no-API safe summary already exists")
+    _require_run_id(run_id)
     required = {
         "schema_version",
         "side",
@@ -1084,9 +1153,102 @@ def persist_no_api_safe_summary(
         "observation": observation,
     }
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    return encoded
+
+
+def persist_no_api_safe_summary(
+    path: Path,
+    *,
+    identity: PairIdentity,
+    side: Side,
+    run_id: str,
+    eval_harness_commit: str,
+    summary: Mapping[str, object],
+) -> str:
+    """Persist or idempotently verify one fixed, identity-bound safe summary."""
+
+    encoded = _encode_no_api_safe_summary(
+        identity=identity,
+        side=side,
+        run_id=run_id,
+        eval_harness_commit=eval_harness_commit,
+        summary=summary,
+    )
+    if path.exists() or path.is_symlink():
+        digest = _read_no_api_safe_summary(
+            path,
+            identity=identity,
+            side=side,
+            run_id=run_id,
+            eval_harness_commit=eval_harness_commit,
+        )
+        if path.read_bytes() != encoded:
+            raise PairIdentityError("no-API safe summary differs from durable bytes")
+        return digest
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     _atomic_replace_bytes(path, encoded)
     return hashlib.sha256(encoded).hexdigest()
+
+
+def no_api_safe_summary_path(
+    ledger_path: Path, *, identity: PairIdentity, run_id: str
+) -> Path:
+    """Return the sole durable safe-summary location for a claimed no-API run."""
+
+    return ledger_path.parent / _no_api_safe_summary_relative_path(identity, run_id)
+
+
+def _no_api_safe_summary_relative_path(identity: PairIdentity, run_id: str) -> str:
+    _require_run_id(run_id)
+    return f"{identity.pair_id}/no-api-safe/{run_id}.json"
+
+
+def _read_no_api_safe_summary(
+    path: Path,
+    *,
+    identity: PairIdentity,
+    side: Side,
+    run_id: str,
+    eval_harness_commit: str,
+) -> str:
+    try:
+        metadata = path.lstat()
+        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+            raise PairIdentityError("no-API safe summary must be a regular file")
+        if not 0 < metadata.st_size <= 1024 * 1024:
+            raise PairIdentityError("no-API safe summary is empty or oversized")
+        raw = path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+    except PairIdentityError:
+        raise
+    except FileNotFoundError as exc:
+        raise PairIdentityError("no-API safe summary is missing") from exc
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PairIdentityError("no-API safe summary is unreadable") from exc
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema_version",
+        "run_id",
+        "identity",
+        "identity_sha256",
+        "observation",
+    } or not isinstance(payload.get("observation"), Mapping):
+        raise PairIdentityError("no-API safe summary differs from schema v1")
+    summary = {
+        "schema_version": 1,
+        "side": side.value,
+        "pair_validation": True,
+        **dict(payload["observation"]),
+    }
+    expected = _encode_no_api_safe_summary(
+        identity=identity,
+        side=side,
+        run_id=run_id,
+        eval_harness_commit=eval_harness_commit,
+        summary=summary,
+    )
+    if raw != expected:
+        raise PairIdentityError("no-API safe summary identity or canonical bytes drifted")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _parse_modes(value: object) -> dict[str, PairMode]:
@@ -1133,9 +1295,9 @@ def _validate_sequence_state(
         "runs",
     }
     if not isinstance(value, dict) or set(value) != expected_keys:
-        raise PairIdentityError("pair sequence ledger differs from schema v2")
+        raise PairIdentityError("pair sequence ledger differs from schema v3")
     if (
-        value["schema_version"] != 2
+        value["schema_version"] != 3
         or value["pair_id"] != identity.pair_id
         or value["pair_lock_sha256"] != identity.lock_sha256
         or value["mode"] != mode
@@ -1162,9 +1324,10 @@ def _validate_sequence_state(
             "eval_harness_commit",
             "publication_sha256",
             "safe_summary_sha256",
+            "safe_summary_path",
             "container_metrics",
         }:
-            raise PairIdentityError("pair sequence run differs from schema v2")
+            raise PairIdentityError("pair sequence run differs from schema v3")
         slot = identity.topology[index - 1]
         if (
             item["slot"] != slot.slot
@@ -1177,6 +1340,13 @@ def _validate_sequence_state(
             or item["eval_harness_commit"] != harness_commit
         ):
             raise PairIdentityError("pair sequence run is invalid")
+        expected_safe_path = (
+            _no_api_safe_summary_relative_path(identity, item["run_id"])
+            if mode == "no_api"
+            else None
+        )
+        if item["safe_summary_path"] != expected_safe_path:
+            raise PairIdentityError("pair sequence safe summary path is invalid")
         for key in ("publication_sha256", "safe_summary_sha256"):
             if item[key] is not None:
                 _require_sha256(item[key], f"pair sequence {key}")
@@ -1185,6 +1355,8 @@ def _validate_sequence_state(
             raise PairIdentityError("pair sequence container metrics are not canonical")
         if item["status"] == "completed" and mode == "no_api" and item["safe_summary_sha256"] is None:
             raise PairIdentityError("completed no-API sequence lacks safe summary evidence")
+        if item["status"] != "completed" and item["safe_summary_sha256"] is not None:
+            raise PairIdentityError("unfinished pair sequence cannot claim safe summary evidence")
         if item["status"] == "completed" and mode == "paid" and (
             item["publication_sha256"] is None or metrics is None
         ):
@@ -1614,6 +1786,14 @@ def _require_commit(value: object, label: str) -> None:
         character not in "0123456789abcdef" for character in value
     ):
         raise PairIdentityError(f"{label} must be 40 lowercase hexadecimal characters")
+
+
+def _require_run_id(value: object) -> None:
+    if not isinstance(value, str) or not value or any(
+        character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+        for character in value
+    ):
+        raise PairIdentityError("pair sequence run id is invalid")
 
 
 def _file_sha256(path: Path) -> str:

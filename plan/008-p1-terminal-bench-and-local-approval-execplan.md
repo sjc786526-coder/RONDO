@@ -209,7 +209,8 @@
 ### 当前工作
 
 - 第二轮审查整改的代码与 pure/fake/loopback 门禁已收口；本轮未运行 Docker、Cargo、
-  真实 API 或模型。统一 `just eval-test` 为 269/269，`just eval-lock` 为 85 packages。
+  真实 API 或模型。第三轮 B2 前置整改加入规范 wrapper 活性证明、no-API summary/ledger 崩溃收敛和
+  production `cap_drop=ALL`；统一 `just eval-test` 为 274/274，`just eval-lock` 为 85 packages。
   因此新 pair/watchdog/image/VHDX/container metrics/seccomp 合同仍需双侧
   no-API 真实 Docker 重验。
 - 受跟踪 pair lock 已推进为 `p1-fix-git-pair-v4`，绑定 Harbor/runtime 闭包和新启用门禁。

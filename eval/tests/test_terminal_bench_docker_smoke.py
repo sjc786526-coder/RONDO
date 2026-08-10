@@ -5,11 +5,12 @@ import hashlib
 import http.client
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -29,6 +30,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     HeavyLockLease,
 )
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
+from rondo_eval.terminal_bench import docker_smoke as docker_smoke_module  # noqa: E402
 from rondo_eval.terminal_bench.docker_smoke import (  # noqa: E402
     NO_API_SMOKE_BEARER,
     NO_API_SMOKE_CALL_ID,
@@ -50,6 +52,12 @@ from rondo_eval.terminal_bench.freeze import (  # noqa: E402
     TERMINAL_BENCH_REPO_REF,
 )
 from rondo_eval.terminal_bench.materialize import MaterializedTask  # noqa: E402
+from rondo_eval.terminal_bench.pair import (  # noqa: E402
+    PairSequenceLedger,
+    load_pair_identity,
+    no_api_safe_summary_path,
+    persist_no_api_safe_summary,
+)
 from rondo_eval.terminal_bench.__main__ import _load_manifest  # noqa: E402
 from rondo_eval.terminal_bench.runner import (  # noqa: E402
     HostHarborResult,
@@ -575,6 +583,123 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(value["reason"], "tracked Harbor identity differs")
         self.assertEqual(value["exit_code"], 65)
         self.assertNotIn("sensitive-cause", output.getvalue())
+
+    @unittest.skipUnless(hasattr(os, "fork"), "requires POSIX process death injection")
+    def test_cli_recovers_durable_safe_summary_before_external_preflight(self) -> None:
+        identity = load_pair_identity()
+        paths = SimpleNamespace(
+            common_root=self.root,
+            worktree_root=EVAL_ROOT.parent,
+        )
+        ledger_path = (
+            self.root
+            / "eval-data"
+            / "pairs"
+            / f"{identity.pair_id}-no-api.json"
+        )
+        run_id = "tb-no-api-rondo-summary-cut"
+        summary = {
+            "schema_version": 1,
+            "side": "rondo",
+            "outcome": "completed",
+            "task_outcome": "pass",
+            "reward": 1.0,
+            "fake_requests": 2,
+            "fake_contract_hits": 2,
+            "fake_contract_satisfied": True,
+            "agent_json_events": 3,
+            "code_mode_tool_round_trip": True,
+            "host_returncode": 0,
+            "pair_validation": True,
+            "docker": {
+                "sample_count": 2,
+                "baseline_total_bytes": 1,
+                "final_total_bytes": 2,
+                "baseline_task_bytes": 1,
+                "final_task_bytes": 2,
+                "baseline_data_root_free_bytes": 100,
+                "final_data_root_free_bytes": 99,
+                "image_identity": {
+                    "image_reference": FIX_GIT_IMAGE_REF,
+                    "image_id": f"sha256:{'a' * 64}",
+                },
+                "desktop_vhdx": {
+                    "baseline_bytes": 1000,
+                    "peak_bytes": 1200,
+                    "final_bytes": 1100,
+                    "peak_growth_bytes": 200,
+                },
+                "container_metrics": {
+                    "container_id": "b" * 64,
+                    "cpu_usage_seconds": 1.0,
+                    "peak_memory_bytes": 4096,
+                },
+                "effective_seccomp": {
+                    "profile_kind": "custom",
+                    "profile_sha256": identity.no_api_seccomp.effective_sha256,
+                },
+            },
+        }
+        child = os.fork()
+        if child == 0:
+            try:
+                with PairSequenceLedger(
+                    ledger_path, identity=identity, mode="no_api"
+                ) as sequence:
+                    sequence.claim(
+                        side=Side.RONDO,
+                        run_id=run_id,
+                        eval_harness_commit="f" * 40,
+                    )
+                persist_no_api_safe_summary(
+                    no_api_safe_summary_path(
+                        ledger_path, identity=identity, run_id=run_id
+                    ),
+                    identity=identity,
+                    side=Side.RONDO,
+                    run_id=run_id,
+                    eval_harness_commit="f" * 40,
+                    summary=summary,
+                )
+            except BaseException:
+                os._exit(99)
+            os._exit(77)
+        _pid, status = os.waitpid(child, 0)
+        self.assertEqual(os.waitstatus_to_exitcode(status), 77)
+
+        external_preflight = mock.Mock(side_effect=AssertionError("external preflight ran"))
+        output = io.StringIO()
+        with mock.patch.object(
+            docker_smoke_module.RepoPaths, "discover", return_value=paths
+        ), mock.patch.object(
+            docker_smoke_module, "load_pair_identity", return_value=identity
+        ), mock.patch.object(
+            docker_smoke_module, "validate_eval_harness_checkout", external_preflight
+        ), mock.patch.object(
+            docker_smoke_module, "load_runtime_config", external_preflight
+        ), mock.patch.object(
+            docker_smoke_module, "_load_manifest", external_preflight
+        ), mock.patch.object(
+            docker_smoke_module, "validate_harbor_installation", external_preflight
+        ), mock.patch.object(
+            docker_smoke_module, "lease_from_watchdog", external_preflight
+        ), redirect_stdout(output):
+            exit_code = docker_smoke_module.main(
+                [
+                    "--side",
+                    "rondo",
+                    "--binary-manifest",
+                    str(self.root / "not-read.json"),
+                    "--docker-host-volume",
+                    str(self.root / "not-probed"),
+                    "--pair-validation",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        external_preflight.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue())["status"], "recovered")
+        state = json.loads(ledger_path.read_text(encoding="utf-8"))
+        self.assertEqual(state["runs"][0]["status"], "completed")
 
     def test_cli_loader_requires_15_key_bundle_and_rejects_legacy_16_keys(self) -> None:
         bundle = self.root / "eval-data" / "bin" / "smoke-bundle"

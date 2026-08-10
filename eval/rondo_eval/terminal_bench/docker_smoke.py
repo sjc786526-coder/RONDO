@@ -41,6 +41,7 @@ from .pair import (
     PairIdentity,
     PairSequenceLedger,
     load_pair_identity,
+    no_api_safe_summary_path,
     persist_no_api_safe_summary,
     validate_harbor_installation,
 )
@@ -624,11 +625,41 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         paths = RepoPaths.discover(Path.cwd())
+        side = Side(args.side)
+        pair_identity = load_pair_identity()
+        no_api_mode = pair_identity.mode("no_api")
+        sequence_path = (
+            paths.common_root
+            / "eval-data"
+            / "pairs"
+            / f"{pair_identity.pair_id}-no-api.json"
+        )
+        if args.pair_validation and (sequence_path.exists() or sequence_path.is_symlink()):
+            with PairSequenceLedger(
+                sequence_path,
+                identity=pair_identity,
+                mode="no_api",
+            ) as sequence:
+                recovered = sequence.reconcile_no_api_summary()
+            if recovered is not None:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": "recovered",
+                            "pair_id": pair_identity.pair_id,
+                            "run_id": recovered["run_id"],
+                            "side": recovered["side"],
+                            "safe_summary_sha256": recovered["safe_summary_sha256"],
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+                return 0
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
-        side = Side(args.side)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
-        pair_identity = load_pair_identity()
         seccomp_profile = pair_identity.validate_no_api_seccomp(
             project_root=paths.worktree_root
         )
@@ -639,7 +670,6 @@ def main(argv: list[str] | None = None) -> int:
             manifest=manifest,
         )
         validate_harbor_installation(pair_identity, executable=HARBOR_EXECUTABLE)
-        no_api_mode = pair_identity.mode("no_api")
         smoke_id = f"tb-no-api-{side.value}-{uuid.uuid4().hex[:12]}"
         work_root = paths.common_root / "eval-data" / "work" / smoke_id
         if work_root.exists() or work_root.is_symlink():
@@ -676,12 +706,6 @@ def main(argv: list[str] | None = None) -> int:
             desktop_host_probe=PowerShellDockerDesktopHostProbe(),
         )
         if args.pair_validation:
-            sequence_path = (
-                paths.common_root
-                / "eval-data"
-                / "pairs"
-                / f"{pair_identity.pair_id}-no-api.json"
-            )
             with PairSequenceLedger(
                 sequence_path,
                 identity=pair_identity,
@@ -713,12 +737,11 @@ def main(argv: list[str] | None = None) -> int:
                 result = replace(result, pair_validation=True)
                 if result.passed:
                     summary_sha256 = persist_no_api_safe_summary(
-                        paths.common_root
-                        / "eval-data"
-                        / "pairs"
-                        / pair_identity.pair_id
-                        / "no-api-safe"
-                        / f"{smoke_id}.json",
+                        no_api_safe_summary_path(
+                            sequence_path,
+                            identity=pair_identity,
+                            run_id=smoke_id,
+                        ),
                         identity=pair_identity,
                         side=side,
                         run_id=smoke_id,

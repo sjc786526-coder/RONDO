@@ -7,7 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from unittest import mock
 
@@ -49,9 +49,11 @@ from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
 from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
 from rondo_eval.terminal_bench.freeze import FreezeError, validate_runtime_image_digest  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
+    DockerContainerFact,
     DockerExecutionResult,
     DockerImageIdentity,
     DockerOperation,
+    DockerSupervisionError,
     HeavyLockLease,
 )
 
@@ -343,6 +345,7 @@ class TerminalBenchTests(unittest.TestCase):
             prepared.command.trial_name,
         )
         container = prepared.command.compose_contract.container
+        self.assertEqual(container.cap_drop, ("ALL",))
         self.assertEqual(len(container.mounts), 4)
         secret_mount = next(
             item
@@ -366,6 +369,46 @@ class TerminalBenchTests(unittest.TestCase):
             "http://host.docker.internal:43123/v1",
         )
         self.assertNotIn(FIX_GIT_IMAGE_TAG, "\0".join(argv))
+        drifted_container = replace(container, cap_drop=())
+        drifted_command = replace(
+            prepared.command,
+            compose_contract=replace(
+                prepared.command.compose_contract, container=drifted_container
+            ),
+        )
+        with self.assertRaisesRegex(runner_module.TerminalBenchRunError, "Compose contract"):
+            drifted_command.validate(
+                prepared.spec, prepared.adapter, prepared.materialized_task
+            )
+        observed = DockerContainerFact(
+            container_id="b" * 64,
+            user=container.user,
+            privileged=container.privileged,
+            cap_add=container.cap_add,
+            cap_drop=container.cap_drop,
+            security_opt=container.security_opt,
+            memory_bytes=container.memory_bytes,
+            memory_swap_bytes=container.memory_swap_bytes,
+            pids_limit=container.pids_limit,
+            read_only_rootfs=container.read_only_rootfs,
+            cgroupns_mode=container.cgroupns_mode,
+            network_mode=container.network_mode,
+            networks=container.networks,
+            mounts=container.mounts,
+            compose_project=container.compose_project,
+            compose_service=container.compose_service,
+            image_reference=FIX_GIT_IMAGE_REF,
+            image_id=f"sha256:{'e' * 64}",
+        )
+        container.validate_observation(
+            observed, ("name=seccomp,profile=builtin",)
+        )
+        for observed_cap_drop in ((), ("ALL", "NET_RAW")):
+            with self.assertRaises(DockerSupervisionError):
+                container.validate_observation(
+                    replace(observed, cap_drop=observed_cap_drop),
+                    ("name=seccomp,profile=builtin",),
+                )
 
     def test_real_harbor_factory_can_construct_both_custom_agents(self) -> None:
         try:
@@ -650,6 +693,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(result.provider_secret_path.read_bytes(), b"")
         self.assertEqual(result.provider_secret_path.stat().st_mode & 0o777, 0o600)
         self.assertIn('user: "1000:1000"', overlay)
+        self.assertIn("    cap_drop:\n      - ALL\n", overlay)
         self.assertEqual(result.runtime_user, "1000:1000")
         staged_document = materialize_module._read_toml(result.task_path / "task.toml")
         self.assertEqual(staged_document["agent"]["user"], "1000:1000")
@@ -680,6 +724,21 @@ class TerminalBenchTests(unittest.TestCase):
                 )
                 with self.assertRaises(MaterializationError):
                     result.validate()
+        result.overlay_path.write_text(overlay)
+        object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
+        result.validate()
+        for drifted_cap_drop in (
+            overlay.replace("    cap_drop:\n      - ALL\n", ""),
+            overlay.replace("      - ALL\n", "      - NET_RAW\n"),
+        ):
+            result.overlay_path.write_text(drifted_cap_drop)
+            object.__setattr__(
+                result,
+                "overlay_sha256",
+                hashlib.sha256(result.overlay_path.read_bytes()).hexdigest(),
+            )
+            with self.assertRaises(MaterializationError):
+                result.validate()
         result.overlay_path.write_text(overlay)
         object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
         result.validate()

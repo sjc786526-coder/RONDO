@@ -33,8 +33,10 @@
   Terminal-Bench 公平配对/双适配器与 llama.cpp client/doctor/fake/launcher。第二轮审查后，
   pair 原子账本、跨槽 harness commit、Harbor 安装闭包、发布恢复、watchdog override、VHDX/
   image/container metrics、paid custom seccomp、request role provenance 与费用口径已进入代码门禁；
-  统一轻量门禁 269/269，`uv lock --check` 为 85 packages。本轮只做 pure/fake/loopback 验证，
-  没有重跑 Docker。
+  第三轮 B2 前置整改后，统一轻量门禁 274/274，`uv lock --check` 为 85 packages。wrapper
+  heartbeat/PID/start-ticks 活性、no-API summary/ledger 崩溃收敛与 production `cap_drop=ALL`
+  已进入机器合同；宿主反事实验证旧 synthetic scope 不能 mint lease，规范 wrapper 停止刷新后 guard
+  fail-closed。本轮尚未运行 v4 Docker。
 - Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest，Harbor
   入口字节及 marker-active 传递依赖闭包由受跟踪 lock 绑定。Codex/RONDO 静态 musl CLI +
   code-mode-host + 官方 bwrap runtime bundle 保持冻结。旧 no-API v3 在旧 pair schema 下证明

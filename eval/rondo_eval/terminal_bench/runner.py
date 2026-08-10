@@ -566,6 +566,7 @@ def _compose_run_contract(
             network_mode=network,
             networks=(network,),
             mounts=mounts,
+            cap_drop=("ALL",),
             require_container_metrics=require_container_metrics,
             compose_secret_mount=None,
             security_opt=security_opt,

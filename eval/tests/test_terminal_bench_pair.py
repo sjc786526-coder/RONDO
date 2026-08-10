@@ -32,6 +32,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     PairIdentityError,
     assess_m1,
     load_pair_identity,
+    no_api_safe_summary_path,
     persist_no_api_safe_summary,
     terminal_record_sha256,
     validate_harbor_installation,
@@ -162,6 +163,58 @@ class PairIdentityTests(unittest.TestCase):
             "peak_memory_bytes": 4096,
         }
 
+    def _safe_summary(self, side: Side) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "side": side.value,
+            "outcome": "completed",
+            "task_outcome": "pass",
+            "reward": 1.0,
+            "fake_requests": 2,
+            "fake_contract_hits": 2,
+            "fake_contract_satisfied": True,
+            "agent_json_events": 6,
+            "code_mode_tool_round_trip": True,
+            "host_returncode": 0,
+            "pair_validation": True,
+            "docker": {
+                "sample_count": 5,
+                "baseline_total_bytes": 1,
+                "final_total_bytes": 2,
+                "baseline_task_bytes": 3,
+                "final_task_bytes": 4,
+                "baseline_data_root_free_bytes": 5,
+                "final_data_root_free_bytes": 6,
+                "image_identity": {
+                    "image_reference": pair_module.FIX_GIT_IMAGE_REF,
+                    "image_id": f"sha256:{'a' * 64}",
+                },
+                "desktop_vhdx": {
+                    "baseline_bytes": 100,
+                    "peak_bytes": 120,
+                    "final_bytes": 110,
+                    "peak_growth_bytes": 20,
+                },
+                "container_metrics": self._container_metrics(side),
+                "effective_seccomp": {
+                    "profile_kind": "custom",
+                    "profile_sha256": self.identity.no_api_seccomp.effective_sha256,
+                },
+            },
+        }
+
+    def _persist_safe_summary(self, ledger_path: Path, side: Side, run_id: str) -> str:
+        return persist_no_api_safe_summary(
+            no_api_safe_summary_path(
+                ledger_path, identity=self.identity, run_id=run_id
+            ),
+            identity=self.identity,
+            side=side,
+            run_id=run_id,
+            eval_harness_commit=self.HARNESS_COMMIT,
+            summary=self._safe_summary(side),
+        )
+
     def test_tracked_lock_enables_no_api_and_hard_disables_paid(self) -> None:
         self.assertEqual(self.identity.mode("no_api").batch_id, "p1-no-api-smoke")
         profile = self.identity.validate_no_api_seccomp(project_root=EVAL_ROOT.parent)
@@ -201,11 +254,12 @@ class PairIdentityTests(unittest.TestCase):
                     run_id="rondo-slot",
                     eval_harness_commit=self.HARNESS_COMMIT,
                 )
+                digest = self._persist_safe_summary(path, Side.RONDO, "rondo-slot")
                 sequence.finish(
                     run_id="rondo-slot",
                     completed=True,
                     eval_harness_commit=self.HARNESS_COMMIT,
-                    safe_summary_sha256="1" * 64,
+                    safe_summary_sha256=digest,
                 )
             with PairSequenceLedger(
                 path, identity=self.identity, mode="no_api"
@@ -215,11 +269,12 @@ class PairIdentityTests(unittest.TestCase):
                     run_id="codex-slot",
                     eval_harness_commit=self.HARNESS_COMMIT,
                 )
+                digest = self._persist_safe_summary(path, Side.CODEX, "codex-slot")
                 sequence.finish(
                     run_id="codex-slot",
                     completed=True,
                     eval_harness_commit=self.HARNESS_COMMIT,
-                    safe_summary_sha256="2" * 64,
+                    safe_summary_sha256=digest,
                 )
             state = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(state["next_slot"], 3)
@@ -296,6 +351,9 @@ class PairIdentityTests(unittest.TestCase):
                         run_id="rondo-crash-cut",
                         eval_harness_commit=self.HARNESS_COMMIT,
                     )
+                digest = self._persist_safe_summary(
+                    path, Side.RONDO, "rondo-crash-cut"
+                )
                 child = os.fork()
                 if child == 0:
                     def die(point: str) -> None:
@@ -312,7 +370,7 @@ class PairIdentityTests(unittest.TestCase):
                             run_id="rondo-crash-cut",
                             completed=True,
                             eval_harness_commit=self.HARNESS_COMMIT,
-                            safe_summary_sha256="3" * 64,
+                            safe_summary_sha256=digest,
                         )
                     os._exit(0)
                 _pid, status = os.waitpid(child, 0)
@@ -325,14 +383,10 @@ class PairIdentityTests(unittest.TestCase):
                     with PairSequenceLedger(
                         path, identity=self.identity, mode="no_api"
                     ) as sequence:
-                        with self.assertRaisesRegex(PairIdentityError, "abandoned active"):
-                            sequence.claim(
-                                side=Side.RONDO,
-                                run_id="replacement-must-not-reset",
-                                eval_harness_commit=self.HARNESS_COMMIT,
-                            )
-                    blocked = json.loads(path.read_text(encoding="utf-8"))
-                    self.assertTrue(blocked["blocked"])
+                        recovered = sequence.reconcile_no_api_summary()
+                    self.assertEqual(recovered["run_id"], "rondo-crash-cut")
+                    converged = json.loads(path.read_text(encoding="utf-8"))
+                    self.assertEqual(converged["runs"][0]["status"], "completed")
                 else:
                     self.assertEqual(state["runs"][0]["status"], "completed")
                     self.assertEqual(state["next_slot"], 2)
@@ -348,11 +402,12 @@ class PairIdentityTests(unittest.TestCase):
                     run_id="rondo-slot",
                     eval_harness_commit=self.HARNESS_COMMIT,
                 )
+                digest = self._persist_safe_summary(path, Side.RONDO, "rondo-slot")
                 sequence.finish(
                     run_id="rondo-slot",
                     completed=True,
                     eval_harness_commit=self.HARNESS_COMMIT,
-                    safe_summary_sha256="4" * 64,
+                    safe_summary_sha256=digest,
                 )
             with PairSequenceLedger(
                 path, identity=self.identity, mode="no_api"
@@ -407,7 +462,10 @@ class PairIdentityTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            safe_path = root / "safe" / "rondo.json"
+            ledger_path = root / "pair.json"
+            safe_path = no_api_safe_summary_path(
+                ledger_path, identity=self.identity, run_id="rondo-safe"
+            )
             digest = persist_no_api_safe_summary(
                 safe_path,
                 identity=self.identity,
@@ -424,7 +482,7 @@ class PairIdentityTests(unittest.TestCase):
                 self.identity.no_api_seccomp.effective_sha256,
             )
             with PairSequenceLedger(
-                root / "pair.json", identity=self.identity, mode="no_api"
+                ledger_path, identity=self.identity, mode="no_api"
             ) as sequence:
                 sequence.claim(
                     side=Side.RONDO,
@@ -451,6 +509,57 @@ class PairIdentityTests(unittest.TestCase):
                     eval_harness_commit=self.HARNESS_COMMIT,
                     summary=missing_docker,
                 )
+
+    def test_no_api_recovery_blocks_missing_and_completed_reload_rejects_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing_ledger = root / "missing.json"
+            with PairSequenceLedger(
+                missing_ledger, identity=self.identity, mode="no_api"
+            ) as sequence:
+                sequence.claim(
+                    side=Side.RONDO,
+                    run_id="missing-summary",
+                    eval_harness_commit=self.HARNESS_COMMIT,
+                )
+            with PairSequenceLedger(
+                missing_ledger, identity=self.identity, mode="no_api"
+            ) as sequence:
+                with self.assertRaisesRegex(PairIdentityError, "missing"):
+                    sequence.reconcile_no_api_summary()
+            missing_state = json.loads(missing_ledger.read_text(encoding="utf-8"))
+            self.assertTrue(missing_state["blocked"])
+            self.assertEqual(missing_state["runs"][0]["status"], "failed")
+
+            completed_ledger = root / "completed.json"
+            with PairSequenceLedger(
+                completed_ledger, identity=self.identity, mode="no_api"
+            ) as sequence:
+                sequence.claim(
+                    side=Side.RONDO,
+                    run_id="completed-summary",
+                    eval_harness_commit=self.HARNESS_COMMIT,
+                )
+                digest = self._persist_safe_summary(
+                    completed_ledger, Side.RONDO, "completed-summary"
+                )
+                sequence.finish(
+                    run_id="completed-summary",
+                    completed=True,
+                    eval_harness_commit=self.HARNESS_COMMIT,
+                    safe_summary_sha256=digest,
+                )
+            summary_path = no_api_safe_summary_path(
+                completed_ledger,
+                identity=self.identity,
+                run_id="completed-summary",
+            )
+            summary_path.write_bytes(summary_path.read_bytes().replace(b'"reward":1.0', b'"reward":0.0'))
+            with self.assertRaisesRegex(PairIdentityError, "drifted"):
+                with PairSequenceLedger(
+                    completed_ledger, identity=self.identity, mode="no_api"
+                ):
+                    self.fail("completed ledger reload must verify durable summary")
 
     @unittest.skipUnless(hasattr(os, "fork"), "requires POSIX process death injection")
     def test_paid_publication_reconciles_after_process_restart(self) -> None:

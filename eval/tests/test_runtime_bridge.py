@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -44,7 +45,10 @@ RUNTIME_IMAGE_REF = f"example.invalid/rondo/task@sha256:{'c' * 64}"
 RUNTIME_IMAGE_ID = f"sha256:{'d' * 64}"
 
 
-def _write_counter_tree(root: Path, relative: str) -> tuple[Path, Path]:
+def _write_counter_tree(
+    root: Path,
+    relative: str,
+) -> tuple[Path, Path, Path, dict[str, str]]:
     proc = root / "proc-cgroup"
     proc.write_text(f"0::{relative}\n", encoding="utf-8")
     directory = root / "cgroup" / relative.lstrip("/")
@@ -68,7 +72,33 @@ def _write_counter_tree(root: Path, relative: str) -> tuple[Path, Path]:
     }
     for name, value in values.items():
         (directory / name).write_text(value, encoding="ascii")
-    return proc, root / "cgroup"
+    watcher_pid = 4242
+    watcher_start_ticks = 123_456
+    watcher_proc_root = root / "proc"
+    watcher_process = watcher_proc_root / str(watcher_pid)
+    watcher_process.mkdir(parents=True)
+    watcher_process.joinpath("stat").write_text(
+        f"{watcher_pid} (bash) S "
+        + " ".join(["0"] * 18 + [str(watcher_start_ticks)])
+        + "\n",
+        encoding="ascii",
+    )
+    watchdog_script = EVAL_ROOT.parent / "mydev" / "scripts" / "with-build-lock.sh"
+    watcher_process.joinpath("cmdline").write_bytes(
+        b"bash\0" + os.fsencode(watchdog_script) + b"\0"
+    )
+    heartbeat = root / "watchdog-heartbeat"
+    heartbeat.write_bytes(b"")
+    heartbeat.chmod(0o600)
+    now_ns = time.time_ns()
+    os.utime(heartbeat, ns=(now_ns, now_ns))
+    watcher_environment = {
+        "RONDO_WATCHDOG_WRAPPER_PID": str(watcher_pid),
+        "RONDO_WATCHDOG_WRAPPER_START_TICKS": str(watcher_start_ticks),
+        "RONDO_WATCHDOG_HEARTBEAT_PATH": str(heartbeat),
+        "RONDO_WATCHDOG_SCRIPT_PATH": str(watchdog_script),
+    }
+    return proc, root / "cgroup", watcher_proc_root, watcher_environment
 
 
 class WatchdogBridgeTests(unittest.TestCase):
@@ -81,19 +111,33 @@ class WatchdogBridgeTests(unittest.TestCase):
         return path, handle
 
     def test_mints_reusable_lease_and_rereads_live_counters(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(dir=EVAL_ROOT) as temporary:
             root = Path(temporary)
             relative = "/user.slice/rondo-build-1000-20260810-123.scope"
-            proc, cgroup_root = _write_counter_tree(root, relative)
+            proc, cgroup_root, watcher_proc_root, watcher_environment = (
+                _write_counter_tree(root, relative)
+            )
+            watcher_kwargs = {
+                "watcher_proc_root": watcher_proc_root,
+                "watchdog_environment": watcher_environment,
+            }
             lock_path, lock_handle = self._held_lock(root)
 
             with mock.patch(
                 "rondo_eval.runtime_bridge._canonical_lock_path",
                 return_value=lock_path,
             ):
+                with self.assertRaises(RuntimeBridgeError):
+                    lease_from_watchdog(
+                        proc_cgroup_path=proc,
+                        cgroup_fs_root=cgroup_root,
+                        watcher_proc_root=watcher_proc_root,
+                        watchdog_environment={},
+                    )
                 proof = lease_from_watchdog(
                     proc_cgroup_path=proc,
                     cgroup_fs_root=cgroup_root,
+                    **watcher_kwargs,
                 )
 
             proof.lease.validate()
@@ -104,16 +148,26 @@ class WatchdogBridgeTests(unittest.TestCase):
             lock_handle.close()
 
     def test_rejects_released_flock_limit_drift_and_environment_overrides(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(dir=EVAL_ROOT) as temporary:
             root = Path(temporary)
             relative = "/user.slice/rondo-build-1000-20260810-123.scope"
-            proc, cgroup_root = _write_counter_tree(root, relative)
+            proc, cgroup_root, watcher_proc_root, watcher_environment = (
+                _write_counter_tree(root, relative)
+            )
+            watcher_kwargs = {
+                "watcher_proc_root": watcher_proc_root,
+                "watchdog_environment": watcher_environment,
+            }
             lock_path, lock_handle = self._held_lock(root)
             with mock.patch(
                 "rondo_eval.runtime_bridge._canonical_lock_path",
                 return_value=lock_path,
             ):
-                proof = lease_from_watchdog(proc_cgroup_path=proc, cgroup_fs_root=cgroup_root)
+                proof = lease_from_watchdog(
+                    proc_cgroup_path=proc,
+                    cgroup_fs_root=cgroup_root,
+                    **watcher_kwargs,
+                )
                 lock_handle.close()
                 self.assertFalse(proof.guard.is_held(proof.lease))
 
@@ -122,13 +176,21 @@ class WatchdogBridgeTests(unittest.TestCase):
                 directory = cgroup_root / relative.lstrip("/")
                 (directory / "memory.max").write_text("1\n", encoding="ascii")
                 with self.assertRaises(RuntimeBridgeError):
-                    lease_from_watchdog(proc_cgroup_path=proc, cgroup_fs_root=cgroup_root)
+                    lease_from_watchdog(
+                        proc_cgroup_path=proc,
+                        cgroup_fs_root=cgroup_root,
+                        **watcher_kwargs,
+                    )
                 (directory / "memory.max").write_text(
                     f"{21 * 1024**3}\n", encoding="ascii"
                 )
                 with mock.patch.dict(os.environ, {"RONDO_BUILD_LOCK": "0"}):
                     with self.assertRaises(RuntimeBridgeError):
-                        lease_from_watchdog(proc_cgroup_path=proc, cgroup_fs_root=cgroup_root)
+                        lease_from_watchdog(
+                            proc_cgroup_path=proc,
+                            cgroup_fs_root=cgroup_root,
+                            **watcher_kwargs,
+                        )
 
                 for name in (
                     "RONDO_BUILD_WATCHDOG",
@@ -154,13 +216,20 @@ class WatchdogBridgeTests(unittest.TestCase):
                             lease_from_watchdog(
                                 proc_cgroup_path=proc,
                                 cgroup_fs_root=cgroup_root,
+                                **watcher_kwargs,
                             )
 
     def test_watchdog_paths_are_bound_to_real_common_root(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(dir=EVAL_ROOT) as temporary:
             root = Path(temporary)
             relative = "/user.slice/rondo-build-1000-20260810-123.scope"
-            proc, cgroup_root = _write_counter_tree(root, relative)
+            proc, cgroup_root, watcher_proc_root, watcher_environment = (
+                _write_counter_tree(root, relative)
+            )
+            watcher_kwargs = {
+                "watcher_proc_root": watcher_proc_root,
+                "watchdog_environment": watcher_environment,
+            }
             lock_path, lock_handle = self._held_lock(root)
             self.addCleanup(lock_handle.close)
             common_root = _repository_common_root(EVAL_ROOT)
@@ -179,6 +248,7 @@ class WatchdogBridgeTests(unittest.TestCase):
                     proof = lease_from_watchdog(
                         proc_cgroup_path=proc,
                         cgroup_fs_root=cgroup_root,
+                        **watcher_kwargs,
                     )
                     self.assertTrue(proof.guard.is_held(proof.lease))
                 with mock.patch.dict(
@@ -189,23 +259,32 @@ class WatchdogBridgeTests(unittest.TestCase):
                         lease_from_watchdog(
                             proc_cgroup_path=proc,
                             cgroup_fs_root=cgroup_root,
+                            **watcher_kwargs,
                         )
-                for name in ("RONDO_BUILD_METRICS_DIR", "CARGO_TARGET_DIR"):
-                    with self.subTest(name=name), mock.patch.dict(
-                        os.environ,
-                        {name: str(root)},
-                    ):
-                        with self.assertRaises(RuntimeBridgeError):
-                            lease_from_watchdog(
-                                proc_cgroup_path=proc,
-                                cgroup_fs_root=cgroup_root,
-                            )
+                with tempfile.TemporaryDirectory() as outside:
+                    for name in ("RONDO_BUILD_METRICS_DIR", "CARGO_TARGET_DIR"):
+                        with self.subTest(name=name), mock.patch.dict(
+                            os.environ,
+                            {name: outside},
+                        ):
+                            with self.assertRaises(RuntimeBridgeError):
+                                lease_from_watchdog(
+                                    proc_cgroup_path=proc,
+                                    cgroup_fs_root=cgroup_root,
+                                    **watcher_kwargs,
+                                )
 
     def test_refuses_missing_or_non_rondo_cgroup_and_detects_movement(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(dir=EVAL_ROOT) as temporary:
             root = Path(temporary)
             relative = "/user.slice/rondo-build-1000-20260810-123.scope"
-            proc, cgroup_root = _write_counter_tree(root, relative)
+            proc, cgroup_root, watcher_proc_root, watcher_environment = (
+                _write_counter_tree(root, relative)
+            )
+            watcher_kwargs = {
+                "watcher_proc_root": watcher_proc_root,
+                "watchdog_environment": watcher_environment,
+            }
             lock_path, lock_handle = self._held_lock(root)
             patcher = mock.patch(
                 "rondo_eval.runtime_bridge._canonical_lock_path",
@@ -214,7 +293,11 @@ class WatchdogBridgeTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
             self.addCleanup(lock_handle.close)
-            proof = lease_from_watchdog(proc_cgroup_path=proc, cgroup_fs_root=cgroup_root)
+            proof = lease_from_watchdog(
+                proc_cgroup_path=proc,
+                cgroup_fs_root=cgroup_root,
+                **watcher_kwargs,
+            )
             proc.write_text("0::/user.slice/not-rondo.scope\n", encoding="utf-8")
             self.assertFalse(proof.guard.is_held(proof.lease))
 
@@ -222,6 +305,7 @@ class WatchdogBridgeTests(unittest.TestCase):
                 lease_from_watchdog(
                     proc_cgroup_path=proc,
                     cgroup_fs_root=cgroup_root,
+                    **watcher_kwargs,
                 )
 
             proc.unlink()
@@ -229,7 +313,44 @@ class WatchdogBridgeTests(unittest.TestCase):
                 lease_from_watchdog(
                     proc_cgroup_path=proc,
                     cgroup_fs_root=cgroup_root,
+                    **watcher_kwargs,
                 )
+
+    def test_watcher_pid_start_ticks_and_heartbeat_remain_live(self) -> None:
+        with tempfile.TemporaryDirectory(dir=EVAL_ROOT) as temporary:
+            root = Path(temporary)
+            relative = "/user.slice/rondo-build-1000-20260810-123.scope"
+            proc, cgroup_root, watcher_proc_root, watcher_environment = (
+                _write_counter_tree(root, relative)
+            )
+            lock_path, lock_handle = self._held_lock(root)
+            self.addCleanup(lock_handle.close)
+            watcher_kwargs = {
+                "watcher_proc_root": watcher_proc_root,
+                "watchdog_environment": watcher_environment,
+            }
+            with mock.patch(
+                "rondo_eval.runtime_bridge._canonical_lock_path",
+                return_value=lock_path,
+            ):
+                proof = lease_from_watchdog(
+                    proc_cgroup_path=proc,
+                    cgroup_fs_root=cgroup_root,
+                    **watcher_kwargs,
+                )
+                heartbeat = Path(watcher_environment["RONDO_WATCHDOG_HEARTBEAT_PATH"])
+                stale_ns = time.time_ns() - 30_000_000_000
+                os.utime(heartbeat, ns=(stale_ns, stale_ns))
+                self.assertFalse(proof.guard.is_held(proof.lease))
+
+                now_ns = time.time_ns()
+                os.utime(heartbeat, ns=(now_ns, now_ns))
+                watcher_environment["RONDO_WATCHDOG_WRAPPER_START_TICKS"] = "1"
+                self.assertFalse(proof.guard.is_held(proof.lease))
+
+                watcher_environment["RONDO_WATCHDOG_WRAPPER_START_TICKS"] = "123456"
+                (watcher_proc_root / "4242" / "stat").unlink()
+                self.assertFalse(proof.guard.is_held(proof.lease))
 
 
 class FakeProcess:
