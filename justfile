@@ -28,7 +28,7 @@ eval-b2-no-api docker_host_volume metrics_dir:
     @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
     env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
-        RONDO_PROJECT_ROOT="$PWD" RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
+        RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
         mydev/scripts/with-build-lock.sh \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.docker_smoke \
         --rondo-binary-manifest "$PWD/eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \

@@ -135,7 +135,8 @@
 - scoped `safe.directory`、UID 1000 前置 Git probe、cleanup 明确 phase、失败事实与 65/70 分类已进入代码。
 - 轻量基线为 286/286，`just eval-lock` 为 85 packages；这些不代表 v5 Docker 验收。
 - marker 已改为只接受精确两键的结构化 `exec_command` 结果：`exit_code` 必须为整数 `0`，`output`
-  只能在去除末尾 CR/LF 后精确等于固定 marker；失败回显、额外文本和额外字段均拒绝。
+  只能在去除末尾 CR/LF 后精确等于固定 marker；JS 先投影这两个字段，Python 再从冻结 code-mode 的
+  两项 `input_text` wire shape 中读取第二项。失败回显、错误 item 数量和额外字段均拒绝。
 - no-API permanent ledger、retirement、safe-summary 恢复和一次性三诊断 migration 已从生产路径删除；
   paid ledger、预算和 publication 恢复保持 hard-disabled 且未改弱。
 - Harbor preflight 已收敛为 tracked `uv.lock` SHA、`harbor==0.20.0`、console/interpreter 与三个关键模块；
@@ -143,9 +144,10 @@
 - `DockerExecutionResult.receipt()` 成为 B2 image/VHDX/runtime/metrics/seccomp/cleanup 的唯一序列化所有者；
   no-API 层只消费该 receipt，不再复制字段清单。
 - canonical `just eval-b2-no-api` 在一个受 watchdog 监督的进程中严格执行 RONDO→Codex；首侧失败立即
-  返回且不运行第二侧，两侧成功才原子替换 `eval-data/b2/current.json`。
-- 以 `a98914c` 为基线，生产 Python 从 20,208 行降至 18,473 行（净删除 1,735），测试从 11,552 行
-  降至 10,171 行（净删除 1,381）；测试方法 260 个，`pair.py + docker_smoke.py` 合计 2,133 行。
+  返回且不运行第二侧，两侧成功才原子替换 `eval-data/b2/current.json`。recipe 不覆盖
+  `RONDO_PROJECT_ROOT`，由 watchdog 从 Git common dir 推导项目根，兼容 linked worktree。
+- 以 `a98914c` 为基线，生产 Python 从 20,208 行降至 18,483 行（净删除 1,725），测试从 11,552 行
+  降至 10,203 行（净删除 1,349）；测试方法 260 个，`pair.py + docker_smoke.py` 合计 2,143 行。
 - 相关模块 99/99 通过；最终 `just eval-test` 260/260、`just eval-lock` 85 packages 与
   `git diff --check` 通过。
 

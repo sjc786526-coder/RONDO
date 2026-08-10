@@ -55,6 +55,16 @@ from rondo_eval.terminal_bench.runner import (  # noqa: E402
 )
 
 
+def _code_mode_wire_output(result_text: str) -> list[dict[str, str]]:
+    return [
+        {
+            "type": "input_text",
+            "text": "Script completed\nWall time 0.1 seconds\nOutput:\n",
+        },
+        {"type": "input_text", "text": result_text},
+    ]
+
+
 class FakeMaterializer:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -158,8 +168,10 @@ class FakeHostExecutor:
                     {
                         "type": "custom_tool_call_output",
                         "call_id": NO_API_SMOKE_CALL_ID,
-                        "output": json.dumps(
-                            {"output": NO_API_SMOKE_MARKER, "exit_code": 0}
+                        "output": _code_mode_wire_output(
+                            json.dumps(
+                                {"output": NO_API_SMOKE_MARKER, "exit_code": 0}
+                            )
                         ),
                     }
                 ],
@@ -259,6 +271,13 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             NO_API_SMOKE_COMMAND,
             "git -C /app/personal-site status --porcelain=v1 "
             "--untracked-files=no >/dev/null && printf rondo_code_mode_smoke",
+        )
+        self.assertEqual(
+            docker_smoke_module.NO_API_SMOKE_CODE,
+            'const result=await tools.exec_command({cmd:"git -C '
+            '/app/personal-site status --porcelain=v1 --untracked-files=no '
+            '>/dev/null && printf rondo_code_mode_smoke"});'
+            'text(JSON.stringify({output:result.output,exit_code:result.exit_code}));',
         )
 
     def config(self) -> RuntimeConfig:
@@ -399,6 +418,19 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertNotEqual(_smoke_exit_code(replace(result, requests=())), 0)
 
     def test_fake_rejects_second_round_without_nested_tool_marker(self) -> None:
+        valid_wire = _code_mode_wire_output(
+            json.dumps({"output": NO_API_SMOKE_MARKER, "exit_code": 0})
+        )
+        self.assertTrue(docker_smoke_module._valid_exec_result(valid_wire))
+        for malformed_wire in (
+            valid_wire[1]["text"],
+            valid_wire[1:],
+            valid_wire + [{"type": "input_text", "text": "extra"}],
+            [valid_wire[0], {"type": "output_text", "text": valid_wire[1]["text"]}],
+        ):
+            with self.subTest(wire=malformed_wire):
+                self.assertFalse(docker_smoke_module._valid_exec_result(malformed_wire))
+
         invalid_outputs = (
             "wrong marker",
             (
@@ -428,7 +460,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                         "input": [{
                             "type": "custom_tool_call_output",
                             "call_id": NO_API_SMOKE_CALL_ID,
-                            "output": invalid_output,
+                            "output": _code_mode_wire_output(invalid_output),
                         }],
                     },
                 ):

@@ -69,9 +69,9 @@ NO_API_SMOKE_COMMAND = (
     f"&& printf {NO_API_SMOKE_MARKER}"
 )
 NO_API_SMOKE_CODE = (
-    "text(JSON.stringify(await tools.exec_command({cmd:"
+    "const result=await tools.exec_command({cmd:"
     + json.dumps(NO_API_SMOKE_COMMAND)
-    + "})));"
+    + "});text(JSON.stringify({output:result.output,exit_code:result.exit_code}));"
 )
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
 _MAX_AGENT_JSON_BYTES = 16 * 1024 * 1024
@@ -521,10 +521,20 @@ def _find_custom_tool_output(request: dict[str, object]) -> object | None:
 
 
 def _valid_exec_result(value: object) -> bool:
-    if not isinstance(value, str):
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"type", "text"}
+            or item["type"] != "input_text"
+            or not isinstance(item["text"], str)
+            for item in value
+        )
+    ):
         return False
     try:
-        result = json.loads(value)
+        result = json.loads(value[1]["text"])
     except json.JSONDecodeError:
         return False
     return (

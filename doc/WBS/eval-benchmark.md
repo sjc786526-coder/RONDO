@@ -26,7 +26,8 @@
   `eval-data/b2/current.json`，其中 Docker 字段直接来自 supervisor 的唯一 receipt。
   adapter 仍要求上传物实际 root-owned、agent UID/GID 1000、精确 `/app/personal-site` Git probe、
   custom seccomp、`cap_drop=ALL`、private cgroup、容器 metrics、VHDX 与 cleanup；marker 还必须来自
-  `exit_code=0` 且 stdout 精确等于固定值的结构化结果。轻量实现尚未运行 Docker，因此不称 B2 完成。
+  冻结 code-mode 两项 structured output 的第二项，且其中投影后的 `exit_code=0`、stdout 精确等于固定值。
+  轻量实现尚未运行 Docker，因此不称 B2 完成。
 - **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
   公平 pair，paid 入口 hard-disabled。后续除新 pair/batch/轮次/预算和新授权外，还须在真实
