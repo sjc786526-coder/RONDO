@@ -391,7 +391,37 @@ class HostContainerContract:
             fact.seccomp_profile_sha256,
         )
         if observed != expected:
-            raise DockerSupervisionError("effective Docker container state differs from contract")
+            fields = (
+                "user",
+                "privileged",
+                "cap_add",
+                "cap_drop",
+                "security_opt",
+                "memory",
+                "memory_swap",
+                "pids_limit",
+                "read_only_rootfs",
+                "network_mode",
+                "networks",
+                "mounts",
+                "compose_project",
+                "compose_service",
+                "seccomp_profile",
+            )
+            mismatches = tuple(
+                field
+                for field, expected_value, observed_value in zip(
+                    fields,
+                    expected,
+                    observed,
+                    strict=True,
+                )
+                if expected_value != observed_value
+            )
+            raise DockerSupervisionError(
+                "effective Docker container state differs from contract: "
+                + ",".join(mismatches)
+            )
         if any(value not in daemon_security_options for value in self.required_daemon_security_options):
             raise DockerSupervisionError("effective Docker daemon security state differs from contract")
 

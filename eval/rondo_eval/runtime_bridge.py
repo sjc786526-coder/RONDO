@@ -428,6 +428,10 @@ class SubprocessCommandHandle:
 
     def _process_group_exists(self) -> bool:
         assert self._process_group is not None
+        # Reap an exited group leader before probing the process group.  A
+        # zombie leader otherwise keeps killpg(..., 0) successful and makes a
+        # completed cleanup look unverifiable until the parent later waits.
+        self._process.poll()
         try:
             self._killpg(self._process_group, 0)
         except ProcessLookupError:

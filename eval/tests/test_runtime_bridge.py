@@ -176,6 +176,9 @@ class FakeProcess:
     def kill(self) -> None:
         self.killed = True
 
+    def poll(self) -> int | None:
+        return None
+
 
 class SubprocessRunnerTests(unittest.TestCase):
     def test_popen_is_shell_false_silent_and_environment_is_allowlisted(self) -> None:
@@ -208,6 +211,32 @@ class SubprocessRunnerTests(unittest.TestCase):
         def killpg(_pid: int, signal_number: int) -> None:
             signals.append(signal_number)
             if signal_number == 0:
+                raise ProcessLookupError
+
+        handle = SubprocessCommandHandle(
+            process,
+            owns_process_group=True,
+            killpg=killpg,
+        )
+
+        self.assertTrue(handle.close_process_group(1.0))
+        self.assertEqual(signals, [15, 0])
+
+    def test_host_handle_reaps_exited_group_leader_before_liveness_probe(self) -> None:
+        process = FakeProcess()
+        reaped = False
+        signals: list[int] = []
+
+        def poll() -> int:
+            nonlocal reaped
+            reaped = True
+            return 0
+
+        process.poll = poll  # type: ignore[method-assign]
+
+        def killpg(_pid: int, signal_number: int) -> None:
+            signals.append(signal_number)
+            if signal_number == 0 and reaped:
                 raise ProcessLookupError
 
         handle = SubprocessCommandHandle(
