@@ -539,24 +539,7 @@ class TerminalBenchTests(unittest.TestCase):
         secret = "sentinel-secret-must-not-serialize"
         adapter = self.adapter(extra_env={"OPENAI_API_KEY": secret})
         environment = FakeEnvironment()
-        raw_agent_commands = []
-        original_exec_as_agent = adapter.exec_as_agent
-
-        async def capture_exec_as_agent(environment_arg, *, command, env=None, **kwargs):
-            raw_agent_commands.append(command)
-            return await original_exec_as_agent(
-                environment_arg,
-                command=command,
-                env=env,
-                **kwargs,
-            )
-
-        with mock.patch.object(
-            adapter,
-            "exec_as_agent",
-            side_effect=capture_exec_as_agent,
-        ):
-            asyncio.run(adapter.run("repair the repository", environment, mock.Mock()))
+        asyncio.run(adapter.run("repair the repository", environment, mock.Mock()))
 
         commands = "\n".join(call[0] for call in environment.calls)
         self.assertNotIn(secret, commands)
@@ -587,7 +570,9 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("model_providers.openai.", commands)
         self.assertIn(adapter.remote_path + " exec", commands)
         raw_codex_command = next(
-            command for command in raw_agent_commands if adapter.remote_path + " exec" in command
+            command
+            for command, _env, _timeout, user in environment.calls
+            if user is None and adapter.remote_path + " exec" in command
         )
         self.assertTrue(raw_codex_command.startswith("set -o pipefail; "))
         self.assertIn("--enable unified_exec", raw_codex_command)
@@ -629,7 +614,11 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertTrue(
             all(
                 not call[1]
-                or call[1] == {"CODEX_HOME": "/tmp/rondo-eval-codex-home"}
+                or call[1]
+                == {
+                    "CODEX_HOME": "/tmp/rondo-eval-codex-home",
+                    "GIT_CONFIG_GLOBAL": "/tmp/rondo-eval-codex-home/gitconfig",
+                }
                 for call in environment.calls
             )
         )
@@ -682,6 +671,15 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertTrue(any('.git/refs"' in call[0] for call in agent_calls))
         self.assertTrue(any('.git/logs"' in call[0] for call in agent_calls))
         self.assertTrue(any('.git/index"' in call[0] for call in agent_calls))
+        self.assertTrue(
+            any(
+                'git config --global --replace-all safe.directory "$task_workdir"'
+                in call[0]
+                and 'git -C "$task_workdir" status --porcelain=v1'
+                in call[0]
+                for call in agent_calls
+            )
+        )
 
         rondo = self.adapter(RondoUploadAdapter, extra_env={"OPENAI_API_KEY": secret})
         rondo_environment = FakeEnvironment()
@@ -720,7 +718,7 @@ class TerminalBenchTests(unittest.TestCase):
     def test_adapter_run_rejects_unwritable_git_state_and_secret_owner_drift(self) -> None:
         adapter = self.adapter()
         git_environment = FakeEnvironment(fail_command_contains='.git/logs"')
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(AdapterError, "command_id=prepare_agent_and_git"):
             asyncio.run(
                 adapter.run("repair the repository", git_environment, mock.Mock())
             )
@@ -744,6 +742,16 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn("stat -c '%u:%g' -- /run/secrets/", commands)
         self.assertNotIn("python3 -c", commands)
         self.assertNotIn("chown", commands)
+
+        git_probe_environment = FakeEnvironment(
+            fail_command_contains='git -C "$task_workdir" status'
+        )
+        with self.assertRaisesRegex(AdapterError, "command_id=prepare_agent_and_git"):
+            asyncio.run(
+                adapter.run("repair the repository", git_probe_environment, mock.Mock())
+            )
+        git_probe_commands = "\n".join(call[0] for call in git_probe_environment.calls)
+        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", git_probe_commands)
 
     def test_checked_exec_diagnostic_is_bounded_and_secret_redacted(self) -> None:
         secret = "sk-secret-must-never-escape"
@@ -770,6 +778,23 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn(secret, rendered)
         self.assertNotIn("unsafe-full-argv", rendered)
         self.assertIsNone(caught.exception.__cause__)
+
+        agent_environment = StderrEnvironment()
+        with self.assertRaises(AdapterError) as agent_caught:
+            asyncio.run(
+                adapters_module._checked_exec_as_agent(
+                    agent_environment,
+                    command=f"unsafe-agent-command {secret}",
+                    env={"CODEX_HOME": "/tmp/rondo-eval-codex-home"},
+                    stage="run",
+                    command_id="prepare_agent_and_git",
+                )
+            )
+        agent_rendered = str(agent_caught.exception)
+        self.assertEqual(agent_caught.exception.command_id, "prepare_agent_and_git")
+        self.assertNotIn(secret, agent_rendered)
+        self.assertNotIn("unsafe-agent-command", agent_rendered)
+        self.assertIsNone(agent_caught.exception.__cause__)
 
     def test_adapter_rejects_wrong_binary_digest(self) -> None:
         adapter = self.adapter()

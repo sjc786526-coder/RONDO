@@ -512,7 +512,7 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertEqual(len(result.warnings), 1)
         self.assertEqual(
             [sample.phase for sample in result.samples],
-            ["baseline", "final", "teardown_grace", "teardown_grace"],
+            ["baseline", "final", "teardown_grace", "cleanup_verified"],
         )
 
     def test_successful_host_exit_cleans_after_bounded_teardown_grace(self) -> None:

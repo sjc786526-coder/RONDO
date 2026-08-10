@@ -308,10 +308,14 @@ class UploadBinaryAdapter(HarborCodexAgent):
         remote_home = self._REMOTE_CODEX_HOME.as_posix()
         remote_secrets = self._REMOTE_CODEX_SECRETS_DIR.as_posix()
         remote_auth = (self._REMOTE_CODEX_SECRETS_DIR / "auth.json").as_posix()
+        remote_gitconfig = (self._REMOTE_CODEX_HOME / "gitconfig").as_posix()
         agent_dir = EnvironmentPaths.agent_dir.as_posix()
         output_path = (EnvironmentPaths.agent_dir / self._OUTPUT_FILENAME).as_posix()
         stderr_path = (EnvironmentPaths.agent_dir / self._STDERR_FILENAME).as_posix()
-        nonsecret_env = {"CODEX_HOME": remote_home}
+        nonsecret_env = {
+            "CODEX_HOME": remote_home,
+            "GIT_CONFIG_GLOBAL": remote_gitconfig,
+        }
 
         # Harbor freezes environment.default_user to the task's 1000:1000
         # identity.  Root may only expose the exact current task workdir; all
@@ -329,7 +333,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
             stage="run",
             command_id="project_task_permissions",
         )
-        await self.exec_as_agent(
+        await _checked_exec_as_agent(
             environment,
             command=(
                 "set -e; "
@@ -351,9 +355,18 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 'test -d "$task_workdir/.git/logs"; '
                 'test -w "$task_workdir/.git/logs"; '
                 'test -f "$task_workdir/.git/index"; '
-                'test -w "$task_workdir/.git/index"'
+                'test -w "$task_workdir/.git/index"; '
+                f": > {shlex.quote(remote_gitconfig)}; "
+                f"chmod 0600 {shlex.quote(remote_gitconfig)}; "
+                'git config --global --replace-all safe.directory "$task_workdir"; '
+                'test "$(git config --global --get-all safe.directory | wc -l)" -eq 1; '
+                'test "$(git config --global --get-all safe.directory)" = "$task_workdir"; '
+                'test "$(git -C "$task_workdir" rev-parse --is-inside-work-tree)" = true; '
+                'git -C "$task_workdir" status --porcelain=v1 --untracked-files=no >/dev/null'
             ),
             env=nonsecret_env,
+            stage="run",
+            command_id="prepare_agent_and_git",
         )
 
         try:
@@ -361,10 +374,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
             # environment.exec ``-e KEY=value`` argument is used because Harbor's
             # Docker backend would serialize that value into docker argv.
             secret_path = "/run/secrets/rondo_eval_provider_api_key"
-            secret_owner = await self.exec_as_agent(
+            secret_owner = await _checked_exec_as_agent(
                 environment,
                 command=f"stat -c '%u:%g' -- {shlex.quote(secret_path)}",
                 env=nonsecret_env,
+                stage="run",
+                command_id="inspect_secret_owner",
             )
             try:
                 _require_ownership(
@@ -391,13 +406,15 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"ln -sfn {shlex.quote(remote_auth)} "
                 f"{shlex.quote(remote_home + '/auth.json')}"
             )
-            await self.exec_as_agent(
+            await _checked_exec_as_agent(
                 environment,
                 command=auth_command,
                 env=nonsecret_env,
+                stage="run",
+                command_id="write_auth",
             )
 
-            await self.exec_as_agent(
+            await _checked_exec_as_agent(
                 environment,
                 command=(
                     f'test "$(id -u):$(id -g)" = "{TERMINAL_BENCH_AGENT_USER}" '
@@ -407,6 +424,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
                     f"&& test ! -w {shlex.quote(self.remote_bwrap_path)}"
                 ),
                 env=nonsecret_env,
+                stage="run",
+                command_id="verify_runtime_access",
             )
 
             model = self.model_name.split("/", maxsplit=1)[-1]
@@ -448,17 +467,26 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"</dev/null 2>{shlex.quote(stderr_path)} | tee {shlex.quote(output_path)}"
             )
             _validate_safe_codex_command(command, side=self.side)
-            await self.exec_as_agent(environment, command=command, env=nonsecret_env)
+            await _checked_exec_as_agent(
+                environment,
+                command=command,
+                env=nonsecret_env,
+                stage="run",
+                command_id="agent_exec",
+                timeout_sec=None,
+            )
         finally:
             # Cleanup is deliberately restricted to the two adapter-owned paths.
             try:
-                await self.exec_as_agent(
+                await _checked_exec_as_agent(
                     environment,
                     command=(
                         f"rm -rf -- {shlex.quote(remote_secrets)} "
                         f"{shlex.quote(remote_home)}"
                     ),
                     env=nonsecret_env,
+                    stage="run",
+                    command_id="cleanup_agent_state",
                 )
             except Exception:
                 pass
@@ -671,6 +699,48 @@ async def _checked_exec(
             stage=stage,
             command_id=command_id,
             stderr_summary=stderr_summary,
+        )
+    return result
+
+
+async def _checked_exec_as_agent(
+    environment: EnvironmentLike,
+    *,
+    command: str,
+    env: dict[str, str],
+    stage: str,
+    command_id: str,
+    timeout_sec: int | None = 30,
+):
+    """Execute as Harbor's frozen default user without its raw error renderer."""
+
+    if not re.fullmatch(r"[a-z][a-z0-9_.-]{0,31}", stage) or not re.fullmatch(
+        r"[a-z][a-z0-9_.-]{0,63}", command_id
+    ):
+        raise AdapterError("container diagnostic identity is invalid")
+    try:
+        shell_command = (
+            command
+            if command.startswith("set -o pipefail; ")
+            else f"set -o pipefail; {command}"
+        )
+        result = await environment.exec(
+            shell_command,
+            env=env,
+            timeout_sec=timeout_sec,
+        )
+        code, _stdout, stderr = exec_result(result)
+    except Exception as exc:
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=_classify_stderr(str(exc)),
+        ) from None
+    if code != 0:
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=_classify_stderr(stderr),
         )
     return result
 

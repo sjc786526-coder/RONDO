@@ -51,7 +51,7 @@
 - no-API ledger 升为 schema v4；completed 与 failed 统一绑定固定 `no_api_summary_path` 和 SHA-256，terminal ledger 每次打开都重读 canonical summary、重算 hash 并核对终态。
 - 事务顺序为：持久 active claim → 执行与 cleanup → 原子写入并 fsync summary → ledger 在锁内从固定路径重读/校验 → 原子收敛为 completed 或 failed/blocked。
 - summary schema v2 对 completed/failed 共用身份字段；失败额外保存闭集 failure stage、安全 command id 和受限诊断分类。adapter 不再把原始 argv、stdout/stderr、异常 cause、密钥或宿主绝对路径带入错误或摘要。
-- Docker 证据按实际可用性记录 `observed_complete`、`observed_partial` 或 `not_observed`。可用时保存 daemon image ref/id、有效 seccomp、private cgroup、capability/NNP、资源限额、去路径 mount/network digest、VHDX/df、container CPU/peak memory 与 cleanup；不可用字段保持 `null` 和固定原因，不补造 0。
+- Docker 证据按实际可用性记录 `observed`、`observed_partial` 或 `not_observed`。可用时保存 daemon image ref/id、有效 seccomp、private cgroup、capability/NNP、资源限额、去路径 mount/network digest、VHDX/df、container CPU/peak memory 与 cleanup；不可用字段保持 `null` 和固定原因，不补造 0。
 - trial result/exception 只以受限相对 artifact role 和 SHA-256 关联。父 watchdog summary 在子 CLI 退出后才生成，子进程诚实记录 `parent_finalize_pending`，不伪造其 digest。
 - summary 已耐久而 ledger 仍 active 时，同侧重启可收敛。若进程在 summary 耐久前死亡，ledger 保持 active 并拒绝新 claim；因为无法证明 Docker 是否启动，不伪造 `not_observed` 终态。
 

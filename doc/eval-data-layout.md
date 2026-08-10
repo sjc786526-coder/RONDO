@@ -140,9 +140,13 @@ eval-data/                             # git-ignored
   `eval-data/pairs/<pair_id>/no-api-safe/<run_id>.json`。completed 摘要只保留 pair/bundle/Harbor/
   seccomp/harness 身份、去敏计数/有效态，以及实际 daemon image ID、VHDX baseline/peak/final/growth、
   exact container CPU/峰值内存和 daemon 回显的有效 seccomp，任一必需字段缺失都不能 completed。
-  failed 摘要保持 `failed + blocked`，另记录实际可得的 Docker/cleanup 状态、闭集 failure stage、安全
-  command id 和受限诊断分类；未观察到的事实明确标 unavailable，不补造 0、argv、stdout/stderr、密钥或
-  宿主绝对路径。watchdog 最终 summary 由父 wrapper 在子 CLI 退出后生成，CLI 内只能诚实记录
+  failed 摘要保持 `failed + blocked`，另记录实际可得的 Docker/cleanup、fake request/tool、agent event、
+  Harbor return code 与受限 artifact SHA，闭集 failure stage、安全 command id 和受限诊断分类；未观察到的
+  事实明确标 unavailable/`null`，不补造 0、argv、stdout/stderr、密钥或宿主绝对路径。runtime 投影保存
+  container user、精确 memory/swap/pids、network mode、read-only rootfs 与去路径 mount/network digest。
+  cleanup 只有 supervisor 的 `cleanup_verified` phase 且精确资源计数全零时才能写 `verified_empty`，其他
+  情况写 `unverified`，未知计数为 `null`。watchdog 最终 summary 由父 wrapper 在子 CLI 退出后生成，
+  CLI 内只能诚实记录
   `parent_finalize_pending`，不能伪造 digest。旧 no-API
   v3 原始 trial/safe summary 已按原保留策略清理，不能事后补写或
   冒充新机器证据。

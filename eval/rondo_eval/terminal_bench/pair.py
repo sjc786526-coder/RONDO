@@ -18,6 +18,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 from ..contracts import BinaryManifest, RunOutcome, RunSpec, Side, assert_fair_pair
+from ..exit_codes import EVIDENCE_ERROR, INFRA_ERROR
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
     FIX_GIT_IMAGE_REF,
@@ -133,6 +134,7 @@ class PairIdentityError(ValueError):
 class NoApiSummaryEvidence:
     sha256: str
     terminal_status: str
+    exit_code: int
 
 
 class PairSequenceLedger:
@@ -369,6 +371,7 @@ class PairSequenceLedger:
         recovered = json.loads(json.dumps(run, sort_keys=True, separators=(",", ":")))
         recovered["requested_side"] = requested_side.value
         recovered["recovered_side"] = recovered_side
+        recovered["exit_code"] = evidence.exit_code
         return recovered
 
     def stage_paid_publication(
@@ -1040,6 +1043,7 @@ def _encode_no_api_safe_summary(
         "agent_json_events",
         "code_mode_tool_round_trip",
         "host_returncode",
+        "exit_code",
         "pair_validation",
         "failure",
         "docker",
@@ -1056,29 +1060,44 @@ def _encode_no_api_safe_summary(
         raise PairIdentityError("no-API safe summary is not pair-validation evidence")
     for key in ("fake_requests", "fake_contract_hits", "agent_json_events"):
         value = summary.get(key)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
             raise PairIdentityError("no-API safe summary count is invalid")
     for key in ("fake_contract_satisfied", "code_mode_tool_round_trip"):
-        if not isinstance(summary.get(key), bool):
+        if summary.get(key) is not None and not isinstance(summary.get(key), bool):
             raise PairIdentityError("no-API safe summary boolean is invalid")
     reward = summary.get("reward")
     host_returncode = summary.get("host_returncode")
+    exit_code = summary.get("exit_code")
+    outcome = summary.get("outcome")
     if (
-        summary.get("outcome") not in {item.value for item in RunOutcome}
+        (outcome is not None and outcome not in {item.value for item in RunOutcome})
         or summary.get("task_outcome") not in {None, "pass", "fail"}
-        or isinstance(reward, bool)
-        or not isinstance(reward, (int, float))
-        or not 0 <= float(reward) <= 1
-        or not float(reward) < float("inf")
-        or isinstance(host_returncode, bool)
-        or not isinstance(host_returncode, int)
-        or not -255 <= host_returncode <= 255
-        or summary.get("fake_contract_hits", 0) > summary.get("fake_requests", 0)
+        or (reward is not None and (
+            isinstance(reward, bool)
+            or not isinstance(reward, (int, float))
+            or not 0 <= float(reward) <= 1
+            or not float(reward) < float("inf")
+        ))
+        or (host_returncode is not None and (
+            isinstance(host_returncode, bool)
+            or not isinstance(host_returncode, int)
+            or not -255 <= host_returncode <= 255
+        ))
+        or isinstance(exit_code, bool)
+        or exit_code not in {0, EVIDENCE_ERROR, INFRA_ERROR}
+        or (
+            summary.get("fake_contract_hits") is not None
+            and summary.get("fake_requests") is not None
+            and summary["fake_contract_hits"] > summary["fake_requests"]
+        )
     ):
         raise PairIdentityError("no-API observation is invalid")
     if terminal_status == "completed" and (
-        summary.get("outcome") != RunOutcome.COMPLETED.value
+        outcome != RunOutcome.COMPLETED.value
         or host_returncode != 0
+        or exit_code != 0
         or summary.get("fake_requests") != 2
         or summary.get("fake_contract_hits") != 2
         or summary.get("fake_contract_satisfied") is not True
@@ -1089,6 +1108,12 @@ def _encode_no_api_safe_summary(
         raise PairIdentityError("no-API completed observation is invalid")
     failure = summary.get("failure")
     if terminal_status == "failed":
+        if exit_code not in {EVIDENCE_ERROR, INFRA_ERROR}:
+            raise PairIdentityError("no-API failed exit classification is invalid")
+        if outcome == RunOutcome.INFRA_FAILED.value and exit_code != INFRA_ERROR:
+            raise PairIdentityError("no-API infra outcome exit classification drifted")
+        if outcome is not None and outcome != RunOutcome.INFRA_FAILED.value and exit_code != EVIDENCE_ERROR:
+            raise PairIdentityError("no-API evidence outcome exit classification drifted")
         if not isinstance(failure, Mapping) or set(failure) != {
             "stage",
             "command_id",
@@ -1216,6 +1241,7 @@ def _encode_no_api_safe_summary(
         safe_docker["effective_seccomp"] = dict(seccomp) if isinstance(seccomp, Mapping) else None
         runtime = safe_docker["runtime"]
         if runtime is not None and (not isinstance(runtime, Mapping) or set(runtime) != {
+            "user",
             "privileged",
             "cap_add",
             "cap_drop",
@@ -1224,9 +1250,17 @@ def _encode_no_api_safe_summary(
             "memory_bytes",
             "memory_swap_bytes",
             "pids_limit",
+            "read_only_rootfs",
+            "network_mode",
             "mounts_sha256",
             "networks_sha256",
-        } or not isinstance(runtime["privileged"], bool)
+        } or runtime["user"] != "1000:1000"
+        or not isinstance(runtime["privileged"], bool)
+        or not isinstance(runtime["read_only_rootfs"], bool)
+        or not isinstance(runtime["network_mode"], str)
+        or not runtime["network_mode"]
+        or len(runtime["network_mode"]) > 128
+        or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for char in runtime["network_mode"])
         or not all(
             isinstance(runtime[key], list)
             and all(isinstance(item, str) and 0 < len(item) <= 128 for item in runtime[key])
@@ -1251,27 +1285,37 @@ def _encode_no_api_safe_summary(
             or runtime["cap_drop"] != ["ALL"]
             or runtime["security_opt"] != ["no-new-privileges:true"]
             or runtime["cgroupns_mode"] != "private"
+            or runtime["memory_bytes"] != 2 * 1024**3
+            or runtime["memory_swap_bytes"] != 3 * 1024**3
+            or runtime["pids_limit"] != 256
+            or runtime["read_only_rootfs"] is not False
         ):
             raise PairIdentityError("no-API completed runtime evidence differs from lock")
         cleanup = safe_docker["cleanup"]
         if not isinstance(cleanup, Mapping) or set(cleanup) != {
-            "state", "container_count", "network_count", "volume_count"
+            "state", "reason", "container_count", "network_count", "volume_count"
         } or cleanup["state"] not in {"verified_empty", "unverified"}:
             raise PairIdentityError("no-API cleanup evidence is invalid")
         for key in ("container_count", "network_count", "volume_count"):
-            if (
+            if cleanup[key] is not None and (
                 isinstance(cleanup[key], bool)
                 or not isinstance(cleanup[key], int)
                 or cleanup[key] < 0
             ):
                 raise PairIdentityError("no-API cleanup count is invalid")
-        if cleanup["state"] == "verified_empty" and any(
-            cleanup[key] for key in ("container_count", "network_count", "volume_count")
-        ):
-            raise PairIdentityError("no-API cleanup evidence is not empty")
-        if docker_state == "observed" and (
-            terminal_status == "completed"
-            and any(value is None for value in (image, vhdx, metrics, seccomp, runtime))
+        if cleanup["state"] == "verified_empty":
+            if cleanup["reason"] is not None or any(
+                cleanup[key] != 0
+                for key in ("container_count", "network_count", "volume_count")
+            ):
+                raise PairIdentityError("no-API cleanup evidence is not empty")
+        elif cleanup["reason"] not in {
+            "cleanup_not_verified",
+            "cleanup_probe_not_empty",
+        }:
+            raise PairIdentityError("no-API cleanup unavailable reason is invalid")
+        if terminal_status == "completed" and docker_state == "observed" and (
+            any(value is None for value in (image, vhdx, metrics, seccomp, runtime))
             or cleanup["state"] != "verified_empty"
         ):
             raise PairIdentityError("no-API completed Docker evidence is incomplete")
@@ -1287,6 +1331,7 @@ def _encode_no_api_safe_summary(
         cleanup = docker["cleanup"]
         if not isinstance(cleanup, Mapping) or cleanup != {
             "state": "not_observed",
+            "reason": "cleanup_not_started",
             "container_count": None,
             "network_count": None,
             "volume_count": None,
@@ -1348,6 +1393,7 @@ def _encode_no_api_safe_summary(
             "agent_json_events",
             "code_mode_tool_round_trip",
             "host_returncode",
+            "exit_code",
             "failure",
             "artifacts",
         )
@@ -1462,6 +1508,7 @@ def _read_no_api_safe_summary(
     return NoApiSummaryEvidence(
         sha256=hashlib.sha256(raw).hexdigest(),
         terminal_status=str(payload["terminal_status"]),
+        exit_code=int(payload["observation"]["exit_code"]),
     )
 
 

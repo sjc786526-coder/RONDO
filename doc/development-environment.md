@@ -370,10 +370,11 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 - hello-world oracle 的 Docker no-API 生命周期验收通过，reward 1.0。
 - 测试基线与收尾的 Docker 总占用均为 18.128GB，本任务残留容器/卷为 0，
   未触发 40/60GB 增量或宿主剩余 80GiB 停机线。
-- Docker 守护进程报告 builtin seccomp 和 cgroup namespace，未启用 AppArmor。冻结 Codex
-  在任务容器内进入 bwrap 时，root 与 UID/GID 1000 两种形态都无法再创建 user
-  namespace。当前不授予 privileged/`SYS_ADMIN`，也不使用 `seccomp=unconfined`；
-  因此 Terminal-Bench 完整 no-API agent smoke 仍是已记录的安全阻塞，不是通过项。
+- 早期 builtin seccomp 诊断中，冻结 Codex 在任务容器内以 root 与 UID/GID 1000 两种形态都无法再创建
+  user namespace。后续项目内最小 custom seccomp、`cap_drop=ALL`、private cgroup 与有效态监督已进入
+  机器合同；v4 RONDO 重验随后在 adapter 安装阶段失败并退休。当前不授予 privileged/`SYS_ADMIN`，也不
+  使用 `seccomp=unconfined`。v5 adapter/Git/cleanup 合同尚未运行真实 Docker，因此 Terminal-Bench 双侧
+  no-API 仍不是通过项。
 
 ## 8. 当前未安装或未执行的重型工具
 

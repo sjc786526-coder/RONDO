@@ -37,6 +37,7 @@ from rondo_eval.terminal_bench import docker_smoke as docker_smoke_module  # noq
 from rondo_eval.terminal_bench.docker_smoke import (  # noqa: E402
     NO_API_SMOKE_BEARER,
     NO_API_SMOKE_CALL_ID,
+    NO_API_SMOKE_COMMAND,
     NO_API_SMOKE_MARKER,
     DockerNoApiSmokeError,
     LocalResponsesFakeServer,
@@ -269,6 +270,13 @@ class DockerNoApiSmokeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_frozen_marker_requires_canonical_git_probe(self) -> None:
+        self.assertEqual(
+            NO_API_SMOKE_COMMAND,
+            "git -C /app/personal-site status --porcelain=v1 "
+            "--untracked-files=no >/dev/null && printf rondo_code_mode_smoke",
+        )
+
     def config(self) -> RuntimeConfig:
         return RuntimeConfig(
             paths=mock.Mock(),
@@ -385,6 +393,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         )
         samples = (
             SimpleNamespace(
+                phase="baseline",
                 docker_total_bytes=10,
                 task_bytes=2,
                 data_root_filesystem_free_bytes=100,
@@ -394,6 +403,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                 task_volumes=(),
             ),
             SimpleNamespace(
+                phase="cleanup_verified",
                 docker_total_bytes=11,
                 task_bytes=3,
                 data_root_filesystem_free_bytes=99,
@@ -424,6 +434,12 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(durable["container_metrics"]["peak_memory_bytes"], 4096)
         self.assertEqual(durable["effective_seccomp"]["profile_kind"], "custom")
         self.assertEqual(durable["runtime"]["cap_drop"], ["ALL"])
+        self.assertEqual(durable["runtime"]["user"], "1000:1000")
+        self.assertEqual(durable["runtime"]["memory_bytes"], 2 * 1024**3)
+        self.assertEqual(durable["runtime"]["memory_swap_bytes"], 3 * 1024**3)
+        self.assertEqual(durable["runtime"]["pids_limit"], 256)
+        self.assertFalse(durable["runtime"]["read_only_rootfs"])
+        self.assertEqual(durable["runtime"]["network_mode"], "trial_default")
         self.assertEqual(durable["cleanup"]["state"], "verified_empty")
         durable_result = replace(
             result,
@@ -562,7 +578,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                 )
                 return result
 
-        with self.assertRaisesRegex(DockerNoApiSmokeError, "error event"):
+        with self.assertRaises(DockerNoApiSmokeError) as caught:
             asyncio.run(
                 run_docker_no_api_smoke(
                     self.config(),
@@ -575,6 +591,23 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     executor_factory=ErrorItemHostExecutor,
                 )
             )
+        self.assertEqual(str(caught.exception), "no-API supervised run failed")
+        self.assertIsNotNone(caught.exception.failure_context)
+        self.assertEqual(len(caught.exception.failure_context.requests), 2)
+        self.assertIsNone(caught.exception.failure_context.agent_json_events)
+        self.assertNotIn("code-mode-host binary", str(caught.exception))
+        failure_summary = docker_smoke_module._early_failure_summary(
+            side=Side.CODEX,
+            exc=caught.exception,
+        )
+        self.assertEqual(failure_summary["fake_requests"], 2)
+        self.assertEqual(failure_summary["fake_contract_hits"], 2)
+        self.assertTrue(failure_summary["code_mode_tool_round_trip"])
+        self.assertEqual(failure_summary["host_returncode"], 0)
+        self.assertIsNone(failure_summary["agent_json_events"])
+        self.assertIsNotNone(
+            failure_summary["artifacts"]["trial_result_sha256"]
+        )
 
     def test_server_rejects_websocket_and_nonlocal_configuration(self) -> None:
         with self.assertRaises(DockerNoApiSmokeError):
@@ -665,6 +698,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             "agent_json_events": 3,
             "code_mode_tool_round_trip": True,
             "host_returncode": 0,
+            "exit_code": 0,
             "pair_validation": True,
             "failure": None,
             "docker": {
@@ -696,6 +730,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     "profile_sha256": identity.no_api_seccomp.effective_sha256,
                 },
                 "runtime": {
+                    "user": "1000:1000",
                     "privileged": False,
                     "cap_add": [],
                     "cap_drop": ["ALL"],
@@ -704,11 +739,14 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     "memory_bytes": 2147483648,
                     "memory_swap_bytes": 3221225472,
                     "pids_limit": 256,
+                    "read_only_rootfs": False,
+                    "network_mode": "trial_default",
                     "mounts_sha256": "1" * 64,
                     "networks_sha256": "2" * 64,
                 },
                 "cleanup": {
                     "state": "verified_empty",
+                    "reason": None,
                     "container_count": 0,
                     "network_count": 0,
                     "volume_count": 0,
@@ -827,7 +865,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     "--pair-validation",
                 ]
             )
-        self.assertEqual(exit_code, 70)
+        self.assertEqual(exit_code, 65)
         external.assert_not_called()
         recovered = json.loads(output.getvalue())
         self.assertEqual(recovered["terminal_status"], "failed")
@@ -911,6 +949,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         }
         samples = (
             SimpleNamespace(
+                phase="periodic",
                 **common,
                 docker_desktop_vhdx_bytes=1000,
                 task_container_ids=(container_id,),
@@ -918,6 +957,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                 task_container_metrics=(metric,),
             ),
             SimpleNamespace(
+                phase="cleanup_verified",
                 **{**common, "docker_total_bytes": 11, "task_bytes": 3},
                 docker_desktop_vhdx_bytes=1100,
                 task_container_ids=(),
@@ -948,6 +988,29 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             "post_supervision_validation",
         )
         self.assertEqual(post_validation["docker"]["state"], "observed_partial")
+        stale_empty_samples = tuple(
+            SimpleNamespace(
+                **{
+                    key: value
+                    for key, value in vars(sample).items()
+                    if key != "phase"
+                }
+            )
+            for sample in samples
+        )
+        unverified = docker_smoke_module._early_failure_summary(
+            side=Side.RONDO,
+            exc=DockerSupervisionError(
+                "empty sample without cleanup proof",
+                samples=stale_empty_samples,
+            ),
+        )
+        self.assertEqual(unverified["docker"]["cleanup"]["state"], "unverified")
+        self.assertEqual(
+            unverified["docker"]["cleanup"]["reason"], "cleanup_not_verified"
+        )
+        self.assertIsNone(unverified["docker"]["cleanup"]["container_count"])
+        self.assertEqual(unverified["exit_code"], 70)
         with tempfile.TemporaryDirectory() as directory:
             persist_no_api_safe_summary(
                 Path(directory) / "failure.json",

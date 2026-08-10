@@ -177,6 +177,7 @@ class PairIdentityTests(unittest.TestCase):
             "agent_json_events": 6,
             "code_mode_tool_round_trip": True,
             "host_returncode": 0,
+            "exit_code": 0,
             "pair_validation": True,
             "failure": None,
             "docker": {
@@ -204,6 +205,7 @@ class PairIdentityTests(unittest.TestCase):
                     "profile_sha256": self.identity.no_api_seccomp.effective_sha256,
                 },
                 "runtime": {
+                    "user": "1000:1000",
                     "privileged": False,
                     "cap_add": [],
                     "cap_drop": ["ALL"],
@@ -212,11 +214,14 @@ class PairIdentityTests(unittest.TestCase):
                     "memory_bytes": 2147483648,
                     "memory_swap_bytes": 3221225472,
                     "pids_limit": 256,
+                    "read_only_rootfs": False,
+                    "network_mode": "trial_default",
                     "mounts_sha256": "1" * 64,
                     "networks_sha256": "2" * 64,
                 },
                 "cleanup": {
                     "state": "verified_empty",
+                    "reason": None,
                     "container_count": 0,
                     "network_count": 0,
                     "volume_count": 0,
@@ -256,6 +261,7 @@ class PairIdentityTests(unittest.TestCase):
                 "agent_json_events": 0,
                 "code_mode_tool_round_trip": False,
                 "host_returncode": 70,
+                "exit_code": 70,
                 "failure": {
                     "stage": "adapter_install",
                     "command_id": "verify_bundle_owner",
@@ -266,6 +272,7 @@ class PairIdentityTests(unittest.TestCase):
                     "reason": "pre_daemon_failure",
                     "cleanup": {
                         "state": "not_observed",
+                        "reason": "cleanup_not_started",
                         "container_count": None,
                         "network_count": None,
                         "volume_count": None,

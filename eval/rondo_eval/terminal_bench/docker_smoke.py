@@ -66,10 +66,14 @@ NO_API_SMOKE_BEARER = "rondo-terminal-bench-no-api-smoke"
 NO_API_SMOKE_MODEL = "gpt-5.6-luna"
 NO_API_SMOKE_CALL_ID = "rondo-code-mode-smoke-call"
 NO_API_SMOKE_MARKER = "rondo_code_mode_smoke"
+NO_API_SMOKE_COMMAND = (
+    f"git -C /app/personal-site status --porcelain=v1 --untracked-files=no >/dev/null "
+    f"&& printf {NO_API_SMOKE_MARKER}"
+)
 NO_API_SMOKE_CODE = (
-    'text(JSON.stringify(await tools.exec_command({cmd:"printf '
-    f'{NO_API_SMOKE_MARKER}'
-    '"})));'
+    "text(JSON.stringify(await tools.exec_command({cmd:"
+    + json.dumps(NO_API_SMOKE_COMMAND)
+    + "})));"
 )
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
 _MAX_AGENT_JSON_BYTES = 16 * 1024 * 1024
@@ -78,9 +82,18 @@ _MAX_AGENT_JSON_BYTES = 16 * 1024 * 1024
 class DockerNoApiSmokeError(ValueError):
     """Raised when the no-API smoke would leave its loopback-only contract."""
 
-    def __init__(self, reason: str, *, samples: tuple[object, ...] = ()) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        samples: tuple[object, ...] = (),
+        failure_context: "NoApiFailureContext | None" = None,
+        exit_code: int = EVIDENCE_ERROR,
+    ) -> None:
         super().__init__(reason)
-        self.samples = samples
+        self.failure_context = failure_context
+        self.samples = failure_context.samples if failure_context is not None else samples
+        self.exit_code = failure_context.exit_code if failure_context is not None else exit_code
 
 
 @dataclass(frozen=True)
@@ -92,6 +105,24 @@ class SmokeRequestObservation:
     websocket: bool
     accepted: bool
     rejection: str | None
+
+
+@dataclass(frozen=True)
+class NoApiFailureContext:
+    outcome: RunOutcome | None
+    task_outcome: str | None
+    reward: float | None
+    requests: tuple[SmokeRequestObservation, ...] | None
+    agent_json_events: int | None
+    tool_round_trip: bool | None
+    host_returncode: int | None
+    samples: tuple[object, ...]
+    trial_result_sha256: str | None
+    trial_exception_sha256: str | None
+    exit_code: int
+    failure_stage: str
+    command_id: str
+    stderr_summary: str
 
 
 @dataclass(frozen=True)
@@ -136,6 +167,7 @@ class DockerNoApiSmokeResult:
             "agent_json_events": self.agent_json_events,
             "code_mode_tool_round_trip": self.tool_round_trip,
             "host_returncode": self.harbor.returncode,
+            "exit_code": _smoke_exit_code(self),
             "pair_validation": self.pair_validation,
             "failure": failure,
             "artifacts": {
@@ -156,6 +188,7 @@ class DockerNoApiSmokeResult:
                 "reason": "pre_daemon_failure",
                 "cleanup": {
                     "state": "not_observed",
+                    "reason": "cleanup_not_started",
                     "container_count": None,
                     "network_count": None,
                     "volume_count": None,
@@ -176,17 +209,7 @@ class DockerNoApiSmokeResult:
                 for fact in getattr(sample, "task_containers", ())
             )
             runtime = _runtime_projection(runtime_facts[0]) if runtime_facts else None
-            cleanup = {
-                "state": "verified_empty",
-                "container_count": len(getattr(final, "task_container_ids", ())),
-                "network_count": len(getattr(final, "task_networks", ())),
-                "volume_count": len(getattr(final, "task_volumes", ())),
-            }
-            if any(
-                cleanup[key] != 0
-                for key in ("container_count", "network_count", "volume_count")
-            ):
-                cleanup["state"] = "unverified"
+            cleanup = _cleanup_projection(final)
             summary["docker"] = {
                 "state": "observed",
                 "sample_count": len(evidence.samples),
@@ -300,6 +323,7 @@ def _runtime_projection(fact: object) -> dict[str, object]:
         for item in sorted(getattr(fact, "mounts"), key=lambda item: item.destination)
     ]
     return {
+        "user": getattr(fact, "user"),
         "privileged": getattr(fact, "privileged"),
         "cap_add": list(getattr(fact, "cap_add")),
         "cap_drop": list(getattr(fact, "cap_drop")),
@@ -308,8 +332,33 @@ def _runtime_projection(fact: object) -> dict[str, object]:
         "memory_bytes": getattr(fact, "memory_bytes"),
         "memory_swap_bytes": getattr(fact, "memory_swap_bytes"),
         "pids_limit": getattr(fact, "pids_limit"),
+        "read_only_rootfs": getattr(fact, "read_only_rootfs"),
+        "network_mode": getattr(fact, "network_mode"),
         "mounts_sha256": _projection_sha256(mounts),
         "networks_sha256": _projection_sha256(sorted(getattr(fact, "networks"))),
+    }
+
+
+def _cleanup_projection(final: object) -> dict[str, object]:
+    phase = getattr(final, "phase", None)
+    if phase not in {"cleanup_verified", "cleanup_unverified"}:
+        return {
+            "state": "unverified",
+            "reason": "cleanup_not_verified",
+            "container_count": None,
+            "network_count": None,
+            "volume_count": None,
+        }
+    counts = {
+        "container_count": len(getattr(final, "task_container_ids", ())),
+        "network_count": len(getattr(final, "task_networks", ())),
+        "volume_count": len(getattr(final, "task_volumes", ())),
+    }
+    verified = phase == "cleanup_verified" and not any(counts.values())
+    return {
+        "state": "verified_empty" if verified else "unverified",
+        "reason": None if verified else "cleanup_probe_not_empty",
+        **counts,
     }
 
 
@@ -320,6 +369,7 @@ def _docker_failure_from_samples(samples: tuple[object, ...]) -> dict[str, objec
             "reason": "pre_daemon_failure",
             "cleanup": {
                 "state": "not_observed",
+                "reason": "cleanup_not_started",
                 "container_count": None,
                 "network_count": None,
                 "volume_count": None,
@@ -343,14 +393,7 @@ def _docker_failure_from_samples(samples: tuple[object, ...]) -> dict[str, objec
         for metric in getattr(sample, "task_container_metrics", ())
     )
     metric = metric_facts[-1] if metric_facts else None
-    cleanup = {
-        "state": "verified_empty",
-        "container_count": len(getattr(final, "task_container_ids", ())),
-        "network_count": len(getattr(final, "task_networks", ())),
-        "volume_count": len(getattr(final, "task_volumes", ())),
-    }
-    if any(cleanup[key] for key in ("container_count", "network_count", "volume_count")):
-        cleanup["state"] = "unverified"
+    cleanup = _cleanup_projection(final)
     image = None
     seccomp = None
     if fact is not None:
@@ -698,6 +741,8 @@ async def run_docker_no_api_smoke(
         raise DockerNoApiSmokeError("no-API smoke RunSpec budget field is invalid")
     server = server_factory()
     harbor: HostHarborResult | None = None
+    parsed: ParsedHarborResult | None = None
+    agent_json_events: int | None = None
     try:
         with server:
             prepared = prepare_terminal_bench_run(
@@ -736,22 +781,55 @@ async def run_docker_no_api_smoke(
             agent_json_events = (
                 _validate_agent_codex_json(harbor.jobs_dir)
                 if parsed.outcome is RunOutcome.COMPLETED
-                else 0
+                else None
             )
             observations = server.requests
     except Exception as exc:
-        if getattr(exc, "samples", ()) or harbor is None or harbor.docker_evidence is None:
-            raise
+        samples = tuple(getattr(exc, "samples", ()))
+        if not samples and harbor is not None and harbor.docker_evidence is not None:
+            samples = tuple(harbor.docker_evidence.samples)
+        failure_stage, command_id, stderr_summary = _exception_failure_diagnostic(
+            exc, samples=samples
+        )
+        context = NoApiFailureContext(
+            outcome=parsed.outcome if parsed is not None else None,
+            task_outcome=parsed.task_outcome if parsed is not None else None,
+            reward=parsed.reward if parsed is not None else None,
+            requests=server.requests,
+            agent_json_events=agent_json_events,
+            tool_round_trip=server.tool_round_trip,
+            host_returncode=harbor.returncode if harbor is not None else None,
+            samples=samples,
+            trial_result_sha256=(
+                _safe_artifact_sha256(harbor.jobs_dir / "result.json")
+                if harbor is not None
+                else None
+            ),
+            trial_exception_sha256=(
+                _safe_artifact_sha256(harbor.jobs_dir / "exception.txt")
+                if harbor is not None
+                else None
+            ),
+            exit_code=(
+                INFRA_ERROR
+                if isinstance(exc, (DockerSupervisionError, RuntimeBridgeError))
+                or (parsed is not None and parsed.outcome is RunOutcome.INFRA_FAILED)
+                else EVIDENCE_ERROR
+            ),
+            failure_stage=failure_stage,
+            command_id=command_id,
+            stderr_summary=stderr_summary,
+        )
         raise DockerNoApiSmokeError(
-            "no-API result validation failed after supervised execution",
-            samples=tuple(harbor.docker_evidence.samples),
+            "no-API supervised run failed",
+            failure_context=context,
         ) from None
     return DockerNoApiSmokeResult(
         prepared=prepared,
         harbor=harbor,
         parsed=parsed,
         requests=observations,
-        agent_json_events=agent_json_events,
+        agent_json_events=agent_json_events if agent_json_events is not None else 0,
         tool_round_trip=server.tool_round_trip,
     )
 
@@ -882,7 +960,7 @@ def main(argv: list[str] | None = None) -> int:
                         separators=(",", ":"),
                     )
                 )
-                return 0 if recovered["status"] == "completed" else INFRA_ERROR
+                return recovered["exit_code"]
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
@@ -1009,9 +1087,11 @@ def main(argv: list[str] | None = None) -> int:
     except (DockerSupervisionError, RuntimeBridgeError) as exc:
         _print_safe_cli_error(exc, exit_code=INFRA_ERROR)
         return INFRA_ERROR
+    except DockerNoApiSmokeError as exc:
+        _print_safe_cli_error(exc, exit_code=exc.exit_code)
+        return exc.exit_code
     except (
         ConfigError,
-        DockerNoApiSmokeError,
         TerminalBenchRunError,
         OSError,
         ValueError,
@@ -1042,41 +1122,50 @@ def _print_safe_cli_error(exc: BaseException, *, exit_code: int) -> None:
 
 
 def _early_failure_summary(*, side: Side, exc: BaseException) -> dict[str, object]:
-    diagnostic_match = _ADAPTER_DIAGNOSTIC.fullmatch(str(exc))
-    samples = tuple(getattr(exc, "samples", ()))
-    if diagnostic_match is not None:
-        stage = f"adapter_{diagnostic_match.group(1)}"
-        command_id = diagnostic_match.group(2)
-        stderr_summary = diagnostic_match.group(3)
-    elif isinstance(exc, DockerSupervisionError):
-        stage = "docker_supervision"
-        command_id = "supervised_host"
-        stderr_summary = "other_redacted"
-    elif samples:
-        stage = "result"
-        command_id = "post_supervision_validation"
-        stderr_summary = "other_redacted"
-    elif isinstance(exc, TerminalBenchRunError):
-        stage = "harbor"
-        command_id = "harbor_trial"
-        stderr_summary = "other_redacted"
+    context = getattr(exc, "failure_context", None)
+    if not isinstance(context, NoApiFailureContext):
+        context = None
+    samples = context.samples if context is not None else tuple(getattr(exc, "samples", ()))
+    if context is not None:
+        stage = context.failure_stage
+        command_id = context.command_id
+        stderr_summary = context.stderr_summary
     else:
-        stage = "prepare"
-        command_id = "no_api_prepare"
-        stderr_summary = "other_redacted"
+        stage, command_id, stderr_summary = _exception_failure_diagnostic(
+            exc, samples=samples
+        )
+    requests = context.requests if context is not None else None
+    fake_requests = len(requests) if requests is not None else None
+    fake_hits = (
+        sum(request.accepted for request in requests) if requests is not None else None
+    )
+    fake_satisfied = (
+        fake_requests == 2
+        and fake_hits == 2
+        and context.agent_json_events is not None
+        and context.agent_json_events > 0
+        and context.tool_round_trip is True
+        if context is not None and requests is not None
+        else None
+    )
+    outcome = context.outcome.value if context is not None and context.outcome else None
+    exit_code = context.exit_code if context is not None else (
+        INFRA_ERROR if isinstance(exc, (DockerSupervisionError, RuntimeBridgeError)) else EVIDENCE_ERROR
+    )
     return {
         "schema_version": 2,
         "side": side.value,
         "terminal_status": "failed",
-        "outcome": RunOutcome.INFRA_FAILED.value,
-        "task_outcome": None,
-        "reward": 0.0,
-        "fake_requests": 0,
-        "fake_contract_hits": 0,
-        "fake_contract_satisfied": False,
-        "agent_json_events": 0,
-        "code_mode_tool_round_trip": False,
-        "host_returncode": 70,
+        "outcome": outcome,
+        "task_outcome": context.task_outcome if context is not None else None,
+        "reward": context.reward if context is not None else None,
+        "fake_requests": fake_requests,
+        "fake_contract_hits": fake_hits,
+        "fake_contract_satisfied": fake_satisfied,
+        "agent_json_events": context.agent_json_events if context is not None else None,
+        "code_mode_tool_round_trip": context.tool_round_trip if context is not None else None,
+        "host_returncode": context.host_returncode if context is not None else None,
+        "exit_code": exit_code,
         "pair_validation": True,
         "failure": {
             "stage": stage,
@@ -1085,12 +1174,35 @@ def _early_failure_summary(*, side: Side, exc: BaseException) -> dict[str, objec
         },
         "docker": _docker_failure_from_samples(samples),
         "artifacts": {
-            "trial_result_sha256": None,
-            "trial_exception_sha256": None,
+            "trial_result_sha256": (
+                context.trial_result_sha256 if context is not None else None
+            ),
+            "trial_exception_sha256": (
+                context.trial_exception_sha256 if context is not None else None
+            ),
             "watchdog_state": "parent_finalize_pending",
             "watchdog_summary_sha256": None,
         },
     }
+
+
+def _exception_failure_diagnostic(
+    exc: BaseException, *, samples: tuple[object, ...]
+) -> tuple[str, str, str]:
+    diagnostic_match = _ADAPTER_DIAGNOSTIC.fullmatch(str(exc))
+    if diagnostic_match is not None:
+        return (
+            f"adapter_{diagnostic_match.group(1)}",
+            diagnostic_match.group(2),
+            diagnostic_match.group(3),
+        )
+    if isinstance(exc, (DockerSupervisionError, RuntimeBridgeError)):
+        return "docker_supervision", "supervised_host", "other_redacted"
+    if samples:
+        return "result", "post_supervision_validation", "other_redacted"
+    if isinstance(exc, TerminalBenchRunError):
+        return "harbor", "harbor_trial", "other_redacted"
+    return "prepare", "no_api_prepare", "other_redacted"
 
 
 def _smoke_exit_code(result: DockerNoApiSmokeResult) -> int:

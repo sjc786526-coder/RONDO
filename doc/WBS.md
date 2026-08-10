@@ -42,7 +42,11 @@
   未保留 stderr，因此这是与 capability-free 合同一致的强归因而非独立 syscall 证明。Codex slot 2
   按序列合同未运行。第四轮整改把 v4 以 ledger SHA、harness commit、run/side 和审查日志写入受跟踪
   retirement 清单，当前唯一可执行 identity 推进为 v5；v5 completed/failed no-API 都绑定原子去敏摘要，
-  崩溃恢复必须与请求 side 一致。本轮只运行轻量门禁，v5 仍未经过 Docker 验收。
+  崩溃恢复必须与请求 side 一致。v5 adapter 只在临时私有 Git 配置中为精确
+  `/app/personal-site` 设置 `safe.directory`，以 UID/GID 1000 执行 Git probe；code-mode no-API marker
+  也必须由同一路径的真实 `git status` 成功后产生。cleanup 只有 supervisor 明确标记
+  `cleanup_verified` 且精确资源计数全零时才能成为耐久 `verified_empty`；其余计数保持未知或
+  `unverified`。本轮只运行轻量门禁，v5 仍未经过 Docker 验收。
 - Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest，Harbor
   入口字节及 marker-active 传递依赖闭包由受跟踪 lock 绑定。Codex/RONDO 静态 musl CLI +
   code-mode-host + 官方 bwrap runtime bundle 保持冻结。旧 no-API v3 在旧 pair schema 下证明
@@ -58,7 +62,7 @@
   仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。当前无权重，
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
-- **当前阶段：Plan 008 第四轮 B2 前置整改已落地，v4 失败 identity 已退休，B2 待 v5 Docker 重验，
+- **当前阶段：Plan 008 第五轮 B2 前置合同已落地轻量实现，v4 失败 identity 已退休，B2 待 v5 Docker 重验，
   B3/M1 保持 hard-disabled/未运行。** 三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。旧付费批次不再用于配对，生产 paid 入口保持 hard-disabled；若继续 B3，需以新的
@@ -146,8 +150,11 @@ watchdog/VHDX/image/container metrics、paid custom seccomp、declared role 和�
 failed/blocked，Codex slot 2 未运行。adapter 后续已移除 install/run 的运行时 ownership mutation，
 改为消费实际 ownership、由 agent 用户创建私有文件，并把递归写权限严格限制到固定
 `/app/personal-site`；该修复目前只有 pure/fake 回归。v4 已以受跟踪 retirement 记录退出当前入口，
-当前 pair 为 v5；其 completed/failed summary 都与 ledger 原子绑定，恢复入口也核对请求 side。仍需用
-v5 重跑双侧 no-API，才能认定
+当前 pair 为 v5；其 completed/failed summary 都与 ledger 原子绑定，恢复入口也核对请求 side。
+adapter 临时私有 Git 配置和 UID 1000 Git probe 已进入生产路径，no-API marker 也依赖同一只读
+`git status`。摘要另保存实际 container user、精确 memory/swap/pids、network mode、只读根状态，并只接受
+显式 cleanup phase；失败时保存实际可得的 fake/tool/Harbor/artifact 事实，未知值为 `null`，恢复沿用原
+65/70 分类。上述改动尚未运行 Docker，仍需用 v5 重跑双侧 no-API，才能认定
 B2 完整验收。B3/M1 继续 hard-disabled/未运行，不存在可用的真实 `E_final` 种子。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。

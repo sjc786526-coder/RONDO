@@ -1171,6 +1171,17 @@ class DockerSupervisor:
                     if reading.task_containers:
                         observed_valid_container = True
                 phase = "final" if returncode is not None else "periodic"
+                if (
+                    operation is DockerOperation.HOST
+                    and returncode == 0
+                    and observed_valid_container
+                    and not (
+                        reading.task_container_ids
+                        or reading.task_networks
+                        or reading.task_volumes
+                    )
+                ):
+                    phase = "cleanup_verified"
                 sample = self._make_sample(phase, baseline, reading)
                 samples.append(sample)
                 self._record_owned_containers(identity, reading)
@@ -1315,7 +1326,16 @@ class DockerSupervisor:
                 deadline=teardown_deadline,
             )
             self._validate_host_reading(reading, compose_contract, samples=samples)
-            sample = self._make_sample("teardown_grace", baseline, reading)
+            phase = (
+                "cleanup_verified"
+                if not (
+                    reading.task_container_ids
+                    or reading.task_networks
+                    or reading.task_volumes
+                )
+                else "teardown_grace"
+            )
+            sample = self._make_sample(phase, baseline, reading)
             samples.append(sample)
             self._record_owned_containers(identity, reading)
             self._enforce_sample(sample, warnings, samples=samples)

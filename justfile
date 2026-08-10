@@ -1,8 +1,9 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-# Materialize the ignored, lockfile-frozen eval environment.
+# Materialize the ignored, lockfile-frozen eval environment. Keep the uv cache
+# in the repository-level eval-data partition even though uv enters eval/.
 eval-sync:
-    UV_CACHE_DIR=eval-data/uv-cache uv sync --directory eval --frozen --python /usr/bin/python3
+    UV_CACHE_DIR="$PWD/eval-data/uv-cache" uv sync --directory eval --frozen --python /usr/bin/python3
 
 # Run the pure/fake/loopback suite without inheriting an ambient HTTP proxy.
 eval-test:
@@ -11,12 +12,12 @@ eval-test:
         -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
         -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
-        UV_CACHE_DIR=eval-data/uv-cache \
+        UV_CACHE_DIR="$PWD/eval-data/uv-cache" \
         uv run --directory eval --frozen --no-sync \
         python -m unittest discover -s tests -v
 
 # Check the eval dependency lock without updating it.
 eval-lock:
-    UV_CACHE_DIR=eval-data/uv-cache uv lock --directory eval --check
+    UV_CACHE_DIR="$PWD/eval-data/uv-cache" uv lock --directory eval --check
 
 eval-check: eval-lock eval-test

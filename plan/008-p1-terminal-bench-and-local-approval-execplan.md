@@ -219,12 +219,17 @@
   去敏摘要，再由 ledger 重读并收敛；恢复必须匹配 CLI 请求 side。旧 v3 与失败 v4 的 ledger/trial/
   watchdog/log 均保留原身份，不迁移、不改写，也不作为 v5 已验收的证据。若进程在摘要耐久前死亡，
   v5 保持 active 并拒绝新 claim，不凭空断言 Docker 未启动。
+- 第五轮 B2 前置合同要求 agent 临时私有 Git 配置只允许精确 `/app/personal-site`，并以 1000:1000
+  身份通过真实 `git status` 后才能产生 no-API marker。no-API summary 保留实际 fake/tool/Harbor/artifact
+  事实和原始 65/70 分类，保存 container user、精确资源 limits、network/rootfs；cleanup 仅接受 supervisor
+  明确 `cleanup_verified`，无法复核时保持 `unverified`/`null`。这些改动仍只有 pure/fake 验证。
 
 ### 后续计划
 
 - adapter 已移除 install/run 的运行时 ownership mutation，改为实际 ownership 验证、agent 用户自建
-  私有文件，并只对固定 `/app/personal-site` 投影递归写权限；该代码只有 pure/fake 回归。后续仅以
-  当前受跟踪 v5 pair/schema 在项目看门狗内重跑一次 RONDO→Codex no-API Docker pair，将去敏
+  私有文件，并只对固定 `/app/personal-site` 投影递归写权限；scoped Git probe 与 marker 依赖已经加入，
+  该代码只有 pure/fake 回归。后续仅以当前受跟踪 v5 pair/schema 在项目看门狗内重跑一次
+  RONDO→Codex no-API Docker pair，将去敏
   safe summary、daemon image identity、VHDX、private cgroup namespace、容器 metrics 和有效
   seccomp 作为耐久证据。在此之前 B2 保持待重验。
 - 若后续重开 B3，必须冻结新的 paid pair/batch manifest、任务轮次与预算，并重新取得批量

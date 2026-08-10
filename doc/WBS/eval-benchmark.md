@@ -35,7 +35,10 @@
   ownership/permission 复合命令失败；trace 定位到含 `chown` 的命令，原始 stderr 未保留，因此不冒充
   独立 syscall 证明。0 fake/API 请求。ledger 已写 failed/blocked，Codex slot 2 按合同未运行。
   adapter 后续已移除 install/run 的所有 `chown`，上传物必须实际 root-owned，agent 私有文件由
-  1000:1000 自建，任务递归写权限只允许固定 `/app/personal-site`；该修复尚未用 Docker 重验。
+  1000:1000 自建，任务递归写权限只允许固定 `/app/personal-site`。同一 agent 私有配置只为该精确路径
+  设置 `safe.directory` 并执行真实 Git probe；no-API marker 依赖该 probe。失败摘要保留实际 fake/tool/
+  Harbor/artifact 事实，未知值不补 0；runtime 投影绑定 user、精确 limits、network/rootfs，cleanup 只有
+  supervisor 明确验证才可记为清空。该实现尚未用 Docker 重验。
   这不是双侧 B2 完整验收。当前唯一可执行 identity 为 v5；completed 与 failed 槽都必须先耐久写入
   identity-bound 去敏摘要，ledger 重读后再收敛，恢复入口必须匹配所请求 side。v5 尚未运行 Docker。
 - **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
