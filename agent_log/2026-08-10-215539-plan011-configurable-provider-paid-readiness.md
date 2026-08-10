@@ -57,20 +57,22 @@ pair 和 budget proxy 都错误固定 `https://api.openai.com/v1`。本批未运
   - `git diff --check`：通过。
 - canonical `HARNESS` 固定为本 readiness worktree，`WATCHDOG=$HARNESS/mydev/scripts/with-build-lock.sh`；因此后续
   命令使用的是已合入 Windows `C:` 容量门禁的看门狗，而非分叉前旧版本。
-- tracked results 和 common `eval-data` 中 v7 pair、budget、两个 work/run/artifact 路径均不存在；本批没有创建
-  v7 ledger、run、metrics 或 results worktree。
+- readiness 提交时，tracked results 和 common `eval-data` 中 v7 pair、budget、两个 work/run/artifact 路径均不存在；
+  该阶段没有创建 v7 ledger、run、metrics 或 results worktree。
 
-所有网络交互只有 `uv` 锁定依赖下载和此前用户提供/文档核对；测试 upstream 全部是 loopback fake。没有 Docker、
-真实 API、Cargo、本地模型或费用证据。
+readiness 阶段的网络交互只有 `uv` 锁定依赖下载和此前用户提供/文档核对；测试 upstream 全部是 loopback fake，
+未运行 Docker、真实 API、Cargo 或本地模型。其后单独授权的 paid 执行见
+`agent_log/2026-08-10-225219-plan011-v7-paid-execution.md`。
 
 本实现与本日志提交在独立 `0810-plan011-cctq-b3-paid-readiness` 分支；该分支已合入本地 main 的
 `fecd9f1d2fe162decfaf22d8771f8d75790c4552`，未合并回 main、未推送。
 
-## 4. 授权后唯一 canonical 命令
+## 4. 本批唯一 canonical 命令（已执行，不可重用）
 
-以下整段只供下一次单独真实 API 批量授权后执行，本批不执行。它从届时 clean readiness HEAD 创建独立 results
-worktree，在项目 watchdog 内严格串行 RONDO→Codex；`set -e` 保证首侧失败不运行第二侧。host shell 清除大小写
-HTTP(S)/ALL proxy，仅设置 loopback `NO_PROXY`；真实 upstream 由 common-root ignored `rondo.local.toml` 决定。
+以下整段已在单独授权后从 clean readiness HEAD `10b1025eb24d1f40ca3ded991d18ec84eefce2fa` 执行一次。
+RONDO 首侧失败后 `set -e` 正确停止，Codex 未运行。命令仅作为复核记录保留；v7 pair 已 blocked，禁止再次执行。
+host shell 当时清除大小写 HTTP(S)/ALL proxy，仅设置 loopback `NO_PROXY`；真实 upstream 由 common-root ignored
+`rondo.local.toml` 决定。
 
 ```bash
 set -euo pipefail
@@ -150,6 +152,5 @@ raise SystemExit(0 if result["m1"] == "passed" else 66)
 
 ## 5. 停止线
 
-readiness 不等于 B3/M1 通过。下一次授权应明确：`terminal-bench/fix-git`，主 Agent 与 Guardian 均为
-`gpt-5.6-luna`、Guardian effort low；RONDO 1 次→Codex 1 次、零重试；5 USD/run、pair 最多 10 USD、底层
-20 USD hard cap；最多两个 Docker run。禁止 pull/build、Cargo、本地模型和自动重试。首侧失败立即停止。
+v7 已按零重试合同停止，不能再次执行。RONDO `infra_failed`、Codex 未运行，所以 B3/M1 未通过。未来若继续必须
+使用新 pair 和新的单独真实 API 授权；不得把本次未结算 reservation 当作 0 账单，也不得修改 append-only v7 终态。

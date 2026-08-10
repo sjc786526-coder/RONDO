@@ -61,10 +61,11 @@
    `NO_PROXY/no_proxy=127.0.0.1,localhost`；当前配置的 provider 已由用户提供的无认证探测验证可直连。
 4. **费用边界**：沿用官方 Luna 价格和 5/10/20 USD 上限；usage 缺失/非法及未结算 reservation 保持
    fail-closed，不把本地 estimate 冒充账单实扣。
-5. **v6 append-only**：不得修改或复用 v6；v7 使用全新 pair/batch/run IDs。当前 v7 readiness 不能创建真实
+5. **v6 append-only**：不得修改或复用 v6；v7 使用全新 pair/batch/run IDs。v7 readiness 实现阶段不能创建真实
    pair/budget/run/metrics/results 数据。
 6. **严格串行**：未来真实命令固定 RONDO→Codex，首侧失败立即停止，零重试；M1 仅在双侧 completed 后运行。
-7. **无外部执行**：本阶段禁止 Docker、真实 API、Cargo、本地模型、pull/build、发布或产生费用。
+7. **无外部执行**：readiness 实现阶段禁止 Docker、真实 API、Cargo、本地模型、pull/build、发布或产生费用；
+   后续仅可在单独授权范围内执行冻结命令。
 8. **轻量验证**：只跑直接相关门禁，不扩 schema、账本、审计或理论性边界。
 
 ## 4. 软性建议
@@ -98,23 +99,29 @@
   由 `set -e` 直接停止，不创建第二套 ledger/schema。
 - 合并后窄门禁已通过：`bash -n mydev/scripts/with-build-lock.sh`、runtime bridge 24/24、Plan 011 focused
   pure/fake/loopback 87/87；canonical `HARNESS` 与 `WATCHDOG` 均指向包含 Plan 011 与 `fecd9f1` 的本 worktree。
+- 用户随后单独授权并从 clean `10b1025eb24d1f40ca3ded991d18ec84eefce2fa` 执行日志 §4 canonical 命令。
+  RONDO slot 1 在唯一一次 Docker/API 链路中以 `AgentTimeoutError` 收敛为 `infra_failed`；Codex slot 2 与 M1
+  均未运行。pair 已 `failed/blocked`，不得复用或重试。
+- RONDO append-only 结果提交为 `c3411b9`；预算账本保留一个 `0.755400 USD` 未结算 reservation，settled
+  local spend 为 `0.000000 USD`，`actual_usd=null`。本次精确容器、网络和卷均归零，watchdog scope inactive。
 
 ### 当前工作
 
-- 无；集成、窄门禁、实时 Plan 和执行日志均已完成。
+- 无；v7 授权执行、失败终态归档和实时文档均已完成。
 
 ### 后续计划
 
-1. 停在授权门；只有取得新的单独真实 API 批量授权后才执行日志中的 canonical 命令。
+1. 停止。若继续 B3，必须另建新 pair、分析 timeout 直接原因并取得新的单独真实 API 批量授权；不得重跑 v7。
 
 ### 阻塞项
 
-- 无实现阻塞；真实 v7 B3/M1 受新的单独 API 批量授权门阻断。
+- v7 RONDO 首槽 `infra_failed` 且 pair 永久 blocked；没有双侧 completed 结果，M1 不可评估。
 
 ### 当前验收状态
 
 - v6：failed/blocked，完整保留，不可复用。
-- v7：readiness 已完成，未创建 ledger/run，Docker/API/Cargo/model 均未运行，等待新的单独 API 批量授权。
+- v7：RONDO slot 1 `infra_failed`，Codex 未运行，M1 未运行；结果、预算、artifact 与 watchdog 证据已保留。
+  本批运行过一个真实 Docker/API 链路；Cargo、本地模型、pull/build 与自动重试均未运行。
 
 ## 6. 关键决策记录
 
