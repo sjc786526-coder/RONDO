@@ -360,6 +360,7 @@ class HostContainerContract:
                 if mount.destination == self.compose_secret_mount.destination
             ]
             if len(secret_mounts) != 1 or not self.compose_secret_mount.matches(secret_mounts[0]):
+                diagnostic_mounts = secret_mounts if secret_mounts else observed_mounts
                 safe_facts = tuple(
                     {
                         "kind": mount.kind,
@@ -368,7 +369,7 @@ class HostContainerContract:
                         "destination": mount.destination,
                         "read_only": mount.read_only,
                     }
-                    for mount in secret_mounts
+                    for mount in diagnostic_mounts
                 )
                 raise DockerSupervisionError(
                     "effective Docker Compose secret mount differs: "
