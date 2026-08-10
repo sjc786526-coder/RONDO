@@ -35,7 +35,10 @@
   上游错误固定为官方 OpenAI endpoint，因而等待错误上游超时；该 pair 已失败并按零重试合同阻断，Codex 与 M1
   未运行。Plan 011 已恢复配置驱动的通用 OpenAI-compatible HTTPS endpoint，真实 provider 仅由 ignored 本地配置决定；
   v7 随后按单独授权执行 RONDO 首槽，但在没有响应或 usage 时以 `AgentTimeoutError` 收敛为 `infra_failed`。Codex 与
-  M1 未运行，v7 pair 已 failed/blocked。
+  M1 未运行，v7 pair 已 failed/blocked。Plan 012 已把 transport timeout 限为 90 秒、让 SSE 在合法 terminal
+  event + usage 后主动结束，并修通 frozen solution/root verifier，真实 oracle 得到 `reward=1`。配置所指 provider
+  仍未通过 Luna 门禁：一次 Responses 无 HTTP 终态，转发 Codex User-Agent 后一次明确 HTTP 503，两次 `/models`
+  状态检查也无 HTTP 终态；paid pair 未创建。
 - Terminal-Bench B1 固定 Harbor `0.20.0`、`uv.lock`、TB 2.1 commit、`fix-git` task/image digest 和两侧
   runtime bundle。Harbor 启动前只核对版本、console/interpreter 与三个关键模块，不再扫描数千个依赖文件。
   B2 由唯一入口在同一进程中严格执行 RONDO→Codex，首侧失败立即停止；成功后只替换一个
@@ -52,13 +55,15 @@
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
 - **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 010 v6 与 Plan 011 v7 的 paid
-  RONDO 首槽均已失败，B3/M1 未通过。** 三次早期诊断均在
+  RONDO 首槽均已失败，Plan 012 oracle/verifier 已通过但 provider 门禁失败，B3/M1 未通过。** 三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
   上游响应或 usage，ledger 保留 0.755400 USD reservation，实际账单未查询。v6 已 `failed/blocked`，
   Codex 与 M1 未运行；继续 B3 需新 pair 与单独 API 授权。v7 同样只运行 RONDO：一个请求保留 0.755400 USD
   未结算 reservation，settled local spend 为 0，`actual_usd=null`；任务以 `AgentTimeoutError` 失败，Codex/M1
   未运行。v7 shell 清除了 ambient HTTP(S)/ALL proxy，仅保留 loopback `NO_PROXY`；tracked pair 不冻结供应商域名。
+  Plan 012 两个 Responses one-shot 均 settled、没有悬挂 reservation，按官方 Luna 价格各保守计入 `$0.755400`，
+  合计 `$1.510800`；实际中转账单未知。HTTP 503 与 `/models` 无终态不支持继续付费跑批。
 
 ## 2. 方向与依赖
 
@@ -66,7 +71,7 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；v6/v7 paid 首槽均 infra_failed，B3/M1 未通过 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；Plan 012 oracle reward=1，provider 未就绪，B3/M1 未通过 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
 | 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
@@ -93,7 +98,7 @@ P0 共享地基 ────────┤                          ├─→ �
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/B2/L1 完成；L2 仅 CPU 前端；v6/v7 首槽失败，B3/M1 未通过 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/B2/L1 完成；oracle/verifier reward=1；provider 未就绪，B3/M1 未通过 |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
@@ -132,7 +137,7 @@ P0 共享地基 ────────┤                          ├─→ �
 
 P0 已完成定向门禁并合入主线；B2 合同见
 `plan/009-p1-b2-lightweight-slimming-and-v5-execplan.md`，当前 paid readiness 见
-`plan/011-p1-b3-m1-cctq-paid-readiness-execplan.md`。共享 eval 合同、B1 与 L1 保持可用。
+`plan/012-p1-provider-verifier-b3-m1-execplan.md`。共享 eval 合同、B1 与 L1 保持可用。
 B2 删除 no-API permanent ledger/retirement/summary recovery、一次性 migration 和 Harbor 全依赖闭包，
 保留一个当前冻结输入、一个 supervisor Docker receipt 和一个 RONDO→Codex 串行入口。adapter 仍要求
 UID/GID 1000、精确 `/app/personal-site` Git probe、custom seccomp、`cap_drop=ALL`、资源阈值和清理成功；
@@ -141,6 +146,9 @@ image 和同一运行合同完成 no-API 链路，current receipt 与看门狗 s
 B3 的 v6 pair 已运行 RONDO 首槽但因错误固定官方 endpoint 在上游响应前超时；Plan 011 v7 使用配置驱动 provider
 再次运行 RONDO 首槽，但仍在没有响应或 usage 时以 `AgentTimeoutError` 失败。两批均没有可用真实 `E_final` 种子，
 Codex 与 M1 均未运行；v7 的结果、未结算 reservation、artifact 与 watchdog 终态已保留。
+Plan 012 已验证 oracle/root verifier 的真实评分链为 `reward=1`，并把 provider transport timeout 和 SSE 终态收束
+修到可结算；但配置所指上游对 Luna 返回一次无终态、一次 HTTP 503，`/models` 也无终态。两个 probe ledger 均已
+settled，保守计价合计 `$1.510800`；因此没有创建新的 paid pair。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
 

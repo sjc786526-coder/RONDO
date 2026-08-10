@@ -33,8 +33,8 @@ eval-b3-oracle-no-api docker_host_volume metrics_dir:
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.oracle_smoke \
         --docker-host-volume "{{docker_host_volume}}"
 
-# Three strictly sequential real-provider requests, capped by a private 1 USD
-# ledger: models status, non-stream Responses, then stream Responses.
+# Two strictly sequential real-provider Responses requests, capped by a private
+# 1 USD ledger: non-stream first, then stream only after valid terminal usage.
 eval-plan012-provider-probes:
     @env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \

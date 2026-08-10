@@ -15,8 +15,8 @@
 2. frozen `terminal-bench/fix-git` verifier 通过 Harbor 的 verifier user/env 以 root + `HOME=/root` 执行，
    RONDO/Codex Agent 继续固定 UID/GID 1000:1000。
 
-通过离线、Docker 和小额 provider 探针后，才冻结并执行唯一的 v8 paid pair：RONDO 一次后 Codex 一次、零重试，
-最后仅在双侧 completed 时运行既有 `assess_m1`。
+通过离线、Docker 和小额 provider 探针后，才冻结并执行新的 paid pair：每个 pair 为 RONDO 一次后 Codex 一次、
+零重试，最后仅在双侧 completed 时运行既有 `assess_m1`。只有明确基础设施故障修复后才允许第二个 pair。
 
 ### 完成/验收标准
 
@@ -32,8 +32,8 @@
 - provider 真实探针使用极小 Responses 请求，`max_output_tokens <= 64`、reasoning effort low、每次 timeout
   `<=120` 秒；任一 usage 缺失或未结算即停止同一诊断序列。探针与正式 benchmark 的本阶段新增费用合计不得超过
   20 USD（按冻结的官方 Luna 价格核算）。
-- 仅当上述门禁全部通过，冻结全新 v8 pair/batch/run IDs；v8 固定 `terminal-bench/fix-git`、RONDO→Codex、零重试、
-  5 USD/run、10 USD/pair，连同探针本阶段新增真实 API 总上限 11 USD，底层 ledger 20 USD hard cap 不变。
+- 仅当上述门禁全部通过，冻结全新 pair/batch/run IDs；固定 `terminal-bench/fix-git`、RONDO→Codex、零重试、
+  5 USD/run、10 USD/pair。本阶段探针与最多两个 pair 的新增真实 API 总上限为 20 USD。
 - 每个新 pair 任一侧失败即保留终态并停止；只有明确的 provider/proxy/verifier/Docker/eval harness 基础设施故障
   修复后才可冻结第二个 pair，最多两个新 pair。双侧 completed 后才可评估 M1。
 - 更新实时 WBS、Plan 012 和一份精炼执行日志；Plan 012 提交不合并、不推送。
@@ -54,7 +54,8 @@
 - v7 ledger、run IDs、artifact、append-only result 及其历史证据。
 - Docker seccomp/capability/private-cgroup/UID/resource/cleanup 边界、预算上限与角色公平合同的放宽。
 - RONDO 产品 Rust 源码、上游基线、Cargo lock、模型设施或 L2。
-- provider 专用类型、域名硬编码、新审计/可信体系、自动重试或第二个 pair。
+- provider 专用类型、域名硬编码、新审计/可信体系或自动重试；不得以产品失败、认证/额度/usage 错误或不明确的
+  供应商错误为理由创建第二个 pair。
 
 ### 不允许读取/查看
 
@@ -106,28 +107,35 @@
   header timeout 和 hold-open 回归均证明 reservation 会结算。
 - staged verifier 已投影为 root + `HOME=/root`，service/Agent 仍为 1000:1000；新增受监督、无模型、无真实 key
   的 Harbor oracle 入口。
-- provider 探针已实现为通用配置驱动的三步入口，使用 1 USD 私有 ledger，响应正文和 key 不落盘。
-- 本 worktree frozen eval 环境已按锁安装 83 个包；`just eval-lock` 解析 85 包，`just eval-test` 270/270 通过。
+- provider 探针为通用配置驱动入口，响应正文和 key 不落盘；代理保留冻结 Codex 的 User-Agent，并继续拒绝
+  redirect、非法 usage 和超预算请求。
+- 本 worktree frozen eval 环境已按锁安装 83 个包；`just eval-lock` 解析 85 包，最终 `just eval-test`
+  271/271 通过。
+- watchdog 内的第六次 oracle 诊断已完成 frozen solution，root verifier 通过 pytest，`reward=1`；Agent/oracle
+  保持 UID/GID 1000，隔离和 cleanup 有效态均通过。
+- 真实 provider 已执行两个 non-stream Responses one-shot：首个 90 秒无 HTTP status，第二个在 Codex User-Agent
+  转发后明确返回 HTTP 503；两个 ledger 均 settled/无 reservation，各按最大 reservation 保守计价 `$0.755400`。
+  两次 `/models` 状态检查均在 90 秒内无 HTTP status，不生成 token 或 ledger 费用。
 
 ### 当前工作
 
-- 复核差异并提交 clean provider/verifier readiness 基线，为 Docker oracle/no-API 做准备。
+- provider 门禁未通过，按停止合同进行文档与提交收口；没有冻结 paid pair。
 
 ### 后续计划
 
-1. 提交 provider/verifier 修复并从 clean commit 运行 focused tests。
-2. 在 watchdog 内依次运行 oracle reward=1、RONDO no-API、Codex no-API，最多三个 Docker task run。
-3. 运行最多三个/1 USD provider 探针；任何异常即停止真实请求。
-4. 全部门禁通过后冻结 v8，提交 clean readiness，再执行唯一 v8 pair；双侧 completed 后运行 M1。
-5. 更新权威状态和执行日志，提交相关 Plan 012 worktree但不合并、不推送。
+1. 保留两个 stopped probe ledger、去敏 metadata、oracle Docker evidence 与 watchdog summary，不复用或改写。
+2. 等待配置所指 provider 明确恢复 Luna Responses 可用性；不得对当前 503/无终态换 ID 碰运气。
+3. 后续只有新的 provider 门禁成功并取得合法 usage 后，才可冻结 paid pair；双侧 completed 后才运行 M1。
 
 ### 阻塞项
 
-- 通用 Responses 上游未返回 HTTP 终态；已定位代理覆盖冻结 Codex User-Agent 的兼容问题。paid identity 尚未创建。
+- User-Agent 覆盖问题已排除，但 provider 对 Luna non-stream Responses 明确返回 HTTP 503，`/models` 又无 HTTP
+  终态。供应商文档将 503 映射为当前渠道模型不可用；由于响应正文按边界未读取，只能把精确 subtype 记为未独立确认。
 
 ### 当前验收状态
 
-- provider/verifier 代码与 pure/fake/loopback 门禁已通过；Docker oracle/no-API、真实探针、v8 与 M1 均未运行。
+- provider/verifier 的 pure/fake/loopback 门禁已通过；真实 oracle/verifier `reward=1`。真实 provider 门禁失败，
+  paid pair 与 M1 未创建、未运行；本阶段保守 API 计价累计 `$1.510800`，实际账单未知。
 
 ## 6. 关键决策记录
 
@@ -137,7 +145,7 @@
 | 002 | SSE 以合法 `response.completed` + usage 为成功终态，不等待 EOF | OpenAI-compatible 上游可能在 terminal event 后保持连接 | proxy/ledger | 已采纳 |
 | 003 | verifier phase 使用 root + `HOME=/root`，Agent 保持 1000:1000 | frozen verifier 需要 apt/curl/uvx，不能把 root 权限扩给 Agent | task materialization | 已采纳 |
 | 004 | Docker 三次额度按 oracle、RONDO no-API、Codex no-API 各一次计算 | 同时验证评分链与两侧执行合同且不超过授权 | Docker acceptance | 已采纳 |
-| 005 | provider 探针单独使用 1 USD 总账本；v8 pair 仍为 10 USD，两者合计 11 USD | 保持授权边界清晰且不复用 v7 | budget/pair | 已采纳 |
+| 005 | provider 探针单独使用 1 USD 总账本；v8 pair 仍为 10 USD，两者合计 11 USD | 早期授权边界 | budget/pair | 已由 008 取代 |
 | 006 | v8 仅在全部前置门禁通过后冻结 | 避免未就绪 identity 被消费后再次遗留不可复用失败批次 | paid readiness | 已采纳 |
 | 007 | 代理逐字转发一个经语法校验的下游 User-Agent | OpenAI-compatible 中转可能以 Codex User-Agent 路由；代理身份覆盖会破坏兼容 | provider transport | 已采纳 |
 | 008 | 探针与最多两个新 paid pair 共用 20 USD 总授权 | 用户扩大诊断次数但收紧本阶段总费用；第二 pair 仅限基础设施修复后重验 | provider/budget/pair | 已采纳 |

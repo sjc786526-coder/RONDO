@@ -165,3 +165,23 @@
 - 供应商公开故障说明把 503 归为 `model_not_found`/当前渠道不可用。下一步仅运行一次不生成 token、丢弃正文的
   authenticated `/models` 状态探测，并使用同一 Codex User-Agent；它只区分 key/分组端点是否整体可达，不重复
   Responses 或绕过 Luna 固定模型。
+
+## 15. Provider 状态探测与停止结论
+
+- clean `9b814c6` 使用严格 loader 和 Codex User-Agent 运行一次 authenticated `/models` 状态检查；90 秒内仍未取得
+  HTTP status。该请求不生成 token、不创建 budget reservation，响应正文未保存或打印。
+- 当前可复核组合是：旧 UA 的 Responses 无终态；转发 Codex UA 后 Responses 明确 HTTP 503；旧/新 UA 的
+  `/models` 均无终态。CCTQ 公开文档将 503 说明为 `model_not_found`/当前渠道不可用，同时指出 token 分组、模型和
+  Codex UA 必须匹配。由于本任务刻意不读取错误正文，不能把具体 error subtype 冒充为本地实测值。
+- 这已经超出可由 proxy/verifier/eval harness 直接修复的范围；按授权中的供应商错误停止条件，不再更换 ID 发出
+  Responses，不创建 paid pair，不运行 Codex 或 M1。两个 Responses probe 均 settled、无悬挂 reservation，按官方
+  Luna 价格的保守累计为 `$1.510800`，中转站实际账单未查询也未猜测。
+
+## 16. Plan 012 最终能力边界
+
+- 已成立：90 秒 transport 收敛、SSE terminal+usage 提前结束、通用 User-Agent 转发、host-only key、root verifier
+  与 UID1000 agent 分离、frozen oracle reward=1、Docker 精确 cleanup。
+- 未成立：配置所指 provider 的 Luna terminal response + usage、任何新 paid pair、双侧 B3、M1、自然 Guardian
+  `E_final`/S2。没有伪造 `E_final`，也没有把 oracle 或 503 探针冒充 B3 成绩。
+- 最终轻量门禁：`just eval-test` 271/271，`just eval-lock` 85 packages，`git diff --check` 通过；最终收口没有再
+  运行 Docker、Cargo、模型或真实 API。

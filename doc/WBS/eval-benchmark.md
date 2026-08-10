@@ -45,6 +45,10 @@
   `publishing`，持久结果后回读 record digest 再收敛为 `completed`；M1 必须同时核对两条
   record 与 durable paid pair ledger、harness commit、publication digest、declared request role 和容器
   metrics。任一不一致都不能通过 M1。
+  Plan 012 进一步把上游 transport timeout 限为 90 秒、以合法 `response.completed + usage` 收束 SSE，并在真实
+  Docker 中让 frozen solution/root verifier 得到 `reward=1`。provider one-shot 随后分别出现无 HTTP 终态和明确
+  HTTP 503；两个 reservation 均已 settled、保守计价合计 `$1.510800`，`/models` 状态检查也无终态。provider
+  门禁未通过，所以没有冻结新 paid pair，B3/M1 状态不变。
 
 ## E-B 真实 Terminal-Bench 2.1 测评
 
