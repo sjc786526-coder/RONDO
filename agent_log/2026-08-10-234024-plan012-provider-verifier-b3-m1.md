@@ -103,3 +103,13 @@
   preflight 的薄 subclass；apt 的三个固定 cache 目录只接受实际 owner `root` 或 Debian `_apt`，再由该 owner
   改为 verifier 所需的可写模式。paid adapters 复用同一 apt 准备函数。没有增加 capability、修改 frozen
   solution/verifier 或改变 agent UID。
+
+## 9. Oracle Docker 运行 4（容器创建前失败）
+
+- clean commit `cf39e46` 的 Harbor 进程创建了 trial lock，但在任何 task container 出现前退出；supervisor 因
+  `host harness task container was never observed` 返回 70。没有 Docker 对象、API 或费用。
+- 原因是 Harbor 0.20 仅在 agent name 字面等于内置 `oracle` 时注入 `task_dir/trial_paths`；import-path subclass
+  未收到 Oracle 构造所需参数。修复后 `task_dir` 是唯一非密钥 `--agent-kwarg`，`trial_paths` 从 Harbor 提供的
+  `logs_dir` 确定性派生，timeout 仍是 frozen 900 秒。
+- 使用失败 trial 的 frozen staging 做了无 Docker 构造复现，`PreparedOracleAgent` 已能完成构造；相关 Terminal-
+  Bench 单测 19/19 通过。

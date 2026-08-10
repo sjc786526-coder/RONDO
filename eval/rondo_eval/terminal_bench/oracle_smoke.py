@@ -29,6 +29,7 @@ from .verifier_runtime import prepare_fix_git_workdir, prepare_verifier_apt_dirs
 
 from harbor.agents.oracle import OracleAgent
 from harbor.environments.base import BaseEnvironment
+from harbor.models.trial.paths import TrialPaths
 
 
 ORACLE_BATCH_ID = "p1-plan012-oracle-verifier"
@@ -36,6 +37,27 @@ ORACLE_BATCH_ID = "p1-plan012-oracle-verifier"
 
 class PreparedOracleAgent(OracleAgent):
     """Frozen Harbor oracle with only the task/verifier filesystem preflight."""
+
+    def __init__(
+        self,
+        logs_dir: Path,
+        model_name: str | None = None,
+        *,
+        task_dir: str,
+        **kwargs: object,
+    ) -> None:
+        logs_dir = Path(logs_dir)
+        task_path = Path(task_dir)
+        if not task_path.is_absolute() or task_path.is_symlink():
+            raise OracleVerifierSmokeError("oracle task path is invalid")
+        super().__init__(
+            logs_dir=logs_dir,
+            model_name=model_name,
+            task_dir=task_path,
+            trial_paths=TrialPaths(logs_dir.parent),
+            agent_timeout_sec=900.0,
+            **kwargs,
+        )
 
     async def setup(self, environment: BaseEnvironment) -> None:
         await prepare_fix_git_workdir(environment)

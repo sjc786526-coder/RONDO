@@ -1098,7 +1098,10 @@ class TerminalBenchTests(unittest.TestCase):
             "rondo_eval.terminal_bench.oracle_smoke:PreparedOracleAgent",
         )
         self.assertNotIn("--model", argv)
-        self.assertNotIn("--agent-kwarg", argv)
+        self.assertEqual(
+            argv[argv.index("--agent-kwarg") + 1],
+            f"task_dir={materialized.task_path}",
+        )
         self.assertNotIn("--agent-env", argv)
         self.assertEqual(materialized.provider_secret_path.read_bytes(), b"")
         contract = fake_supervisor.supervise_host_command.call_args.kwargs[

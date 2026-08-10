@@ -601,13 +601,17 @@ def _harbor_oracle_argv(
         str(materialized.overlay_path),
         "--agent",
         "rondo_eval.terminal_bench.oracle_smoke:PreparedOracleAgent",
+        "--agent-kwarg",
+        f"task_dir={materialized.task_path}",
         "--delete",
     )
     if any(
         token in expected
-        for token in ("--model", "--agent-kwarg", "--agent-env", "--env-file")
+        for token in ("--model", "--agent-env", "--env-file")
     ):
         raise TerminalBenchRunError("oracle command contains provider configuration")
+    if expected.count("--agent-kwarg") != 1:
+        raise TerminalBenchRunError("oracle command task path projection is ambiguous")
     return expected
 
 
