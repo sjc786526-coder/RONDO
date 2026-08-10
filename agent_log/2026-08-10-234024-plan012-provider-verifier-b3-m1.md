@@ -52,3 +52,13 @@
 2. oracle 通过后运行现有 RONDO→Codex no-API；三者合计最多三个 Docker task run。
 3. Docker 门禁通过后运行唯一三请求/1 USD provider 探针；任一异常停止。
 4. 只有以上全部通过才冻结 v8 并执行授权的唯一 paid pair；双侧 completed 后才运行 M1。
+
+## 5. Docker 尝试 0（未进入 Docker）
+
+- clean commit `6a36560ce76550f8361ab07d68b445514e5c389c` 的首次 oracle 命令在 watchdog 内建立了
+  `plan012-oracle-verifier/20260810-234558-1000-77761`，随后在 Harbor 安装预检处因 CLI 漏传 frozen
+  executable 参数直接返回 1。
+- watcher `status=1/command_status=1`、`stop=none/cleanup=none`；没有启动 Docker、没有读取 key、没有 API
+  或费用，因此不计入三个 Docker task run。
+- 只补齐 `validate_harbor_installation(..., executable=HARBOR_EXECUTABLE)`，不改变任何执行或隔离合同；后续使用
+  全新的 metrics 目录。

@@ -24,7 +24,7 @@ from .freeze import FIX_GIT_IMAGE_DIGEST
 from .materialize import PinnedTaskMaterializer
 from .pair import load_pair_identity, validate_harbor_installation
 from .results import ParsedHarborResult, parse_single_task_result, validate_eval_harness_checkout
-from .runner import DockerSupervisedHostHarborExecutor, HostHarborResult
+from .runner import DockerSupervisedHostHarborExecutor, HARBOR_EXECUTABLE, HostHarborResult
 
 
 ORACLE_BATCH_ID = "p1-plan012-oracle-verifier"
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         seccomp_profile = pair_identity.validate_no_api_seccomp(
             project_root=paths.worktree_root
         )
-        validate_harbor_installation(pair_identity)
+        validate_harbor_installation(pair_identity, executable=HARBOR_EXECUTABLE)
         proof = lease_from_watchdog()
         counter = DockerCliCounter(
             host_data_root=args.docker_host_volume,
