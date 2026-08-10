@@ -130,7 +130,7 @@ class ProviderProbeTests(unittest.TestCase):
         self.provider.close()
         self.temp.cleanup()
 
-    def test_three_bounded_probes_settle_without_persisting_secret(self) -> None:
+    def test_two_bounded_responses_probes_settle_without_persisting_secret(self) -> None:
         receipt = run_provider_probes(
             self.config,
             self.provider.secret,
@@ -138,18 +138,16 @@ class ProviderProbeTests(unittest.TestCase):
             _transport=_UrllibTransport(
                 endpoint_override=self.provider.base + "/responses"
             ),
-            _models_endpoint_override=self.provider.base + "/models",
         )
-        self.assertEqual(receipt["request_count"], 3)
-        self.assertEqual(receipt["models_http_status"], 200)
+        self.assertEqual(receipt["request_count"], 2)
         self.assertEqual(receipt["reserved_usd"], "0.000000")
         self.assertEqual([item["terminal"] for item in receipt["responses"]], [True, True])
-        self.assertEqual(len(self.provider.requests), 3)
+        self.assertEqual(len(self.provider.requests), 2)
         self.assertTrue(all(
             item["authorization"] == f"Bearer {self.provider.secret}"
             for item in self.provider.requests
         ))
-        for item in self.provider.requests[1:]:
+        for item in self.provider.requests:
             self.assertEqual(item["role"], "main")
             body = item["body"]
             self.assertEqual(body["max_output_tokens"], 64)
@@ -157,22 +155,6 @@ class ProviderProbeTests(unittest.TestCase):
         for path in (self.root / "probe").iterdir():
             if path.is_file():
                 self.assertNotIn(self.provider.secret.encode(), path.read_bytes())
-
-    def test_models_redirect_stops_before_responses(self) -> None:
-        self.provider.models_redirect = True
-        with self.assertRaisesRegex(ProviderProbeError, "non-success"):
-            run_provider_probes(
-                self.config,
-                self.provider.secret,
-                output_root=self.root / "redirect",
-                _transport=_UrllibTransport(
-                    endpoint_override=self.provider.base + "/responses"
-                ),
-                _models_endpoint_override=self.provider.base + "/models",
-            )
-        self.assertEqual(len(self.provider.requests), 1)
-        self.assertEqual(self.provider.requests[0]["method"], "GET")
-
 
 if __name__ == "__main__":
     unittest.main()

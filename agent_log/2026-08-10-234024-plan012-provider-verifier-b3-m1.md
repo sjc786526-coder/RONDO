@@ -123,3 +123,22 @@
 - Docker contract/metrics/cleanup 仍完整，API/key/cost 为 0。修复只在 scoped `solution.env` 增加 frozen image
   同值的 `Test User/test@example.com`，在 `verifier.env` 增加 `TAR_OPTIONS=--no-same-owner`；不修改 frozen
   脚本、不授予 chown/setuid 能力。
+
+## 11. Oracle Docker 运行 6（通过）
+
+- clean commit `0fe5d2b725bae40886c8adc5f149f080fe913771` 完成 frozen solution，可信 root verifier 通过
+  pytest 并产出 `reward=1`；Harbor outcome/task_outcome 分别为 `completed/pass`。
+- Agent/oracle 仍为 UID/GID 1000，verifier 仅阶段性使用 root；pinned image、`cap_drop=ALL`、private cgroup、
+  custom seccomp、2/3 GiB memory/swap 与 256 pids 均由 daemon facts 复核。CPU 4.164891 秒、peak memory
+  335413248 bytes；cleanup 为 `verified_empty`，Docker/VHDX 没有新增占用。
+- 六次 no-API 诊断额度已用完；本批没有再启动额外 no-API Docker。Oracle/Verifier 门禁已成立。
+
+## 12. Provider 探针 1（Models API 无终态）
+
+- 配置驱动的 authenticated `GET /models` 在 90 秒有界 transport 内没有取得 HTTP status，入口返回
+  `models endpoint transport failed`；non-stream/stream 两个 Responses 请求未执行。
+- 失败发生在 budget ledger 创建前，因此没有 reservation、token usage 或费用；空的私有 one-shot 输出目录
+  `eval-data/provider-probes/plan012-v8` 保留，不复用。
+- 供应商教程只承诺 OpenAI Responses-compatible `/v1/responses`，不承诺 Models API。后续不重试 `/models`，
+  而是把剩余两次授权分别用于 non-stream 与 stream Responses；新 one-shot 目录为
+  `plan012-v8-responses`，两请求仍共享 1 USD hard cap。对应 loopback 回归 25/25 通过。

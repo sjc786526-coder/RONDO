@@ -29,8 +29,8 @@ from .config import ConfigError, RepoPaths, RuntimeConfig, load_provider_secret,
 from .exit_codes import EVIDENCE_ERROR, SUCCESS
 
 
-PROBE_BATCH_ID = "plan012-provider-probes"
-PROBE_RUN_ID = "plan012-provider-probes"
+PROBE_BATCH_ID = "plan012-provider-responses"
+PROBE_RUN_ID = "plan012-provider-responses"
 PROBE_TOTAL_CAP_USD = Decimal("1")
 PROBE_MAX_OUTPUT_TOKENS = 64
 PROBE_CLIENT_TIMEOUT_SECONDS = 120.0
@@ -108,9 +108,8 @@ def run_provider_probes(
     *,
     output_root: Path,
     _transport: _UrllibTransport | None = None,
-    _models_endpoint_override: str | None = None,
 ) -> dict[str, object]:
-    """Run exactly models, non-stream Responses, then stream Responses."""
+    """Run the two remaining bounded Responses probes after the models timeout."""
 
     provider = config.provider("openai")
     base_url = provider.get("base_url")
@@ -122,19 +121,6 @@ def run_provider_probes(
         raise ProviderProbeError("provider probe output already exists; retries are disabled")
     output_root.mkdir(parents=True, mode=0o700)
     output_root.chmod(0o700)
-    models_status = probe_models_status(
-        base_url,
-        api_key,
-        timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
-        _endpoint_override=_models_endpoint_override,
-    )
-    _atomic_private_json(
-        output_root / "models-status.json",
-        {"schema_version": 1, "http_status": models_status},
-    )
-    if not 200 <= models_status < 300:
-        raise ProviderProbeError("authenticated models endpoint returned a non-success status")
-
     metadata_path = output_root / "api-metadata.json"
     probes: list[ProviderResponseProbe] = []
     ledger_path = output_root / "budget.json"
@@ -162,8 +148,7 @@ def run_provider_probes(
     receipt: dict[str, object] = {
         "schema_version": 1,
         "batch_id": PROBE_BATCH_ID,
-        "request_count": 3,
-        "models_http_status": models_status,
+        "request_count": 2,
         "responses": [probe.__dict__ for probe in probes],
         "spent_usd": snapshot["spent_usd"],
         "reserved_usd": snapshot["reserved_usd"],
@@ -254,7 +239,12 @@ def main() -> int:
         receipt = run_provider_probes(
             config,
             api_key,
-            output_root=paths.common_root / "eval-data" / "provider-probes" / "plan012-v8",
+            output_root=(
+                paths.common_root
+                / "eval-data"
+                / "provider-probes"
+                / "plan012-v8-responses"
+            ),
         )
         print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
         return SUCCESS
