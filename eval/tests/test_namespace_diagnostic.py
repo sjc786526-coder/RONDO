@@ -20,6 +20,11 @@ from rondo_eval.terminal_bench.namespace_diagnostic import (  # noqa: E402
     main,
     run_supervised_namespace_diagnostic,
 )
+from rondo_eval.docker_supervisor import (  # noqa: E402
+    DockerLimits,
+    DockerTaskIdentity,
+    _validate_diagnostic_argv,
+)
 
 
 IMAGE = f"example.invalid/fix-git@sha256:{'a' * 64}"
@@ -66,6 +71,11 @@ class NamespaceDiagnosticTests(unittest.TestCase):
             "bwrap_baseline",
         ):
             self.assertIn(marker, DIAGNOSTIC_SCRIPT)
+        _validate_diagnostic_argv(
+            plan.argv,
+            DockerTaskIdentity("20260810-namespace-diag-r1"),
+            DockerLimits(512 * 1024**2, 768 * 1024**2, 128, 30),
+        )
 
     def test_frozen_binary_may_live_in_common_root_outside_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -104,6 +114,12 @@ class NamespaceDiagnosticTests(unittest.TestCase):
             digest = "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
             resolved_root = root.resolve()
             resolved_profile = profile.resolve()
+
+            _validate_diagnostic_argv(
+                plan.argv,
+                DockerTaskIdentity("20260810-namespace-diag-r1"),
+                DockerLimits(512 * 1024**2, 768 * 1024**2, 128, 30),
+            )
 
         self.assertEqual(plan.seccomp_profile_sha256, digest)
         self.assertEqual(checks, [(resolved_root, resolved_profile)])

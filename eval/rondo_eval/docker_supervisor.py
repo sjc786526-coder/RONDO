@@ -1426,7 +1426,6 @@ def _validate_diagnostic_argv(
         raise DockerSupervisionError("diagnostic must use docker container run")
     required_pairs = (
         ("--name", identity.container_name),
-        ("--label", identity.label),
         ("--user", "1000:1000"),
         ("--cap-drop", "ALL"),
         ("--memory", str(limits.memory_bytes)),
@@ -1438,6 +1437,34 @@ def _validate_diagnostic_argv(
         positions = [index for index, value in enumerate(argv) if value == option]
         if len(positions) != 1 or positions[0] + 1 >= len(argv) or argv[positions[0] + 1] != expected:
             raise DockerSupervisionError("diagnostic Docker argv differs from its fixed contract")
+    label_positions = [index for index, value in enumerate(argv) if value == "--label"]
+    if any(index + 1 >= len(argv) for index in label_positions):
+        raise DockerSupervisionError("diagnostic Docker labels are incomplete")
+    labels = tuple(argv[index + 1] for index in label_positions)
+    project_labels = tuple(
+        value
+        for value in labels
+        if re.fullmatch(r"com\.docker\.compose\.project=rondodiag-[0-9a-f]{16}", value)
+    )
+    profile_labels = tuple(
+        value
+        for value in labels
+        if re.fullmatch(r"dev\.rondo\.eval\.seccomp-profile-sha256=[0-9a-f]{64}", value)
+    )
+    expected_labels = {
+        identity.label,
+        "com.docker.compose.service=main",
+        *project_labels,
+        *profile_labels,
+    }
+    if (
+        len(project_labels) != 1
+        or len(profile_labels) > 1
+        or len(labels) != 3 + len(profile_labels)
+        or len(set(labels)) != len(labels)
+        or set(labels) != expected_labels
+    ):
+        raise DockerSupervisionError("diagnostic Docker labels differ from its fixed contract")
     if argv.count("--rm") != 1 or argv.count("--read-only") != 1:
         raise DockerSupervisionError("diagnostic Docker lifecycle is not fixed")
     lowered = tuple(value.casefold() for value in argv)
