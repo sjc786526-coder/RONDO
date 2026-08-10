@@ -274,7 +274,7 @@ class TerminalBenchTests(unittest.TestCase):
                 "providers": {
                     "openai": {
                         "api": "responses",
-                        "base_url": "https://api.openai.com/v1",
+                        "base_url": "https://provider.example/v1",
                         "api_key_env": "OPENAI_API_KEY",
                         "main_model": "gpt-5.6-luna",
                         "guardian_model": "gpt-5.6-luna",
@@ -322,7 +322,7 @@ class TerminalBenchTests(unittest.TestCase):
                 manifest.code_mode_host_build_command
             ),
             binary_workspace_lock_normalization=manifest.workspace_lock_normalization,
-            provider_base_url="https://api.openai.com/v1",
+            provider_base_url="https://provider.example/v1",
             provider_api_key_env="OPENAI_API_KEY",
             guardian_model="gpt-5.6-luna",
             guardian_effort="low",
@@ -394,7 +394,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(prepared.command.image_ref, FIX_GIT_IMAGE_REF)
         self.assertEqual(prepared.command.source_repo_ref, TERMINAL_BENCH_REPO_REF)
         self.assertEqual(prepared.command.task_source_digest, f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}")
-        self.assertEqual(prepared.spec.provider.base_url, "https://api.openai.com/v1")
+        self.assertEqual(prepared.spec.provider.base_url, "https://provider.example/v1")
         self.assertIs(prepared.spec.code_mode_host, True)
         self.assertIs(prepared.spec.sandbox_network_access, True)
         self.assertEqual(

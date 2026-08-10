@@ -73,6 +73,14 @@ budget ledger 当前只登记一个 request：`reserved_usd=0.755400`、`charged
 v6 已按零重试合同永久失败，本轮不会用修正后的命令复跑。继续 B3 必须另行冻结新 pair，并再次取得明确真实 API
 批量授权。
 
+### 后续配置事实修正
+
+用户随后确认 v6 的真实 provider 并非官方 OpenAI endpoint。无认证探测证明当前配置的 OpenAI-compatible provider
+在保留或清除宿主 proxy 时都能快速返回 401，因此上文把“清除 proxy”判断为根因并不成立。实际断链是 v6 的 ignored
+config、tracked pair lock 和 budget proxy 都错误固定 `https://api.openai.com/v1`。Plan 011 保留这段历史探测，但
+废止“未来必须保留宿主 proxy”的建议：provider 改由 ignored 本地配置决定，canonical shell 继续清除 ambient proxy，
+只为 loopback 设置 `NO_PROXY`。v6 结果、ledger、reservation 与 append-only 行均不改写。
+
 ## 5. 验收边界
 
 - 真实运行：RONDO 1 次，infra_failed；Codex 0 次；M1 未运行/未通过。

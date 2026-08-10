@@ -34,12 +34,14 @@
 - **B3/M1 未通过**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
   公平 pair。Plan 010 的 `p1-fix-git-pair-v6` / `p1-fix-git-b3-m1-v1` 已按授权启动：同一 `fix-git`，
-  RONDO、Codex 各一轮，零重试，每 run 5 USD、批次硬上限 20 USD。RONDO 首槽因 canonical shell 清除
-  宿主 HTTP(S) proxy 而在等待上游时 `AgentTimeoutError`；一个 main 请求无响应/usage，预算 ledger 保留
+  RONDO、Codex 各一轮，零重试，每 run 5 USD、批次硬上限 20 USD。RONDO 首槽因当时本地配置、pair lock 和
+  budget proxy 都把 provider 错误固定为官方 OpenAI endpoint，在等待错误上游时出现 `AgentTimeoutError`；一个 main 请求无响应/usage，预算 ledger 保留
   0.755400 USD reservation，实际账单未知。pair 已 `failed/blocked`，所以 Codex 与 M1 未运行。本地预算代理按严格请求
   形状投影并验证 main/guardian declared role，journal 创建前的确定性 publication 校验失败会收敛为既有
-  失败终态；本次 watchdog/Docker cleanup 正常且运行后无容器/卷残留。后续新 pair 的 host shell 必须保留
-  宿主 proxy，仅让 loopback 绕过。paid publication 先将 ledger 置为
+  失败终态；本次 watchdog/Docker cleanup 正常且运行后无容器/卷残留。Plan 011 将 proxy 改为从 ignored
+  `rondo.local.toml` 接受通用 credential-free HTTPS base URL 并拼接 `/responses`；tracked v7 不冻结供应商域名，
+  两侧 base URL 与 config SHA 由 M1 比较。canonical shell 继续清除 ambient proxy，只设置 loopback `NO_PROXY`。
+  paid publication 先将 ledger 置为
   `publishing`，持久结果后回读 record digest 再收敛为 `completed`；M1 必须同时核对两条
   record 与 durable paid pair ledger、harness commit、publication digest、declared request role 和容器
   metrics。任一不一致都不能通过 M1。

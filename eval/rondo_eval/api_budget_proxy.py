@@ -1,9 +1,9 @@
 """Loopback-only Responses proxy with fail-closed API budget accounting.
 
-The runner must opt in to this proxy explicitly.  It accepts a validated official
-OpenAI base URL and an API key already loaded into memory; neither value is read
-from disk here.  Request bodies are forwarded, but only redacted shape metadata
-and the request-body digest are persisted.
+The runner must opt in to this proxy explicitly.  It accepts a credential-free
+HTTPS OpenAI-compatible base URL and an API key already loaded into memory;
+neither value is read from disk here.  Request bodies are forwarded, but only
+redacted shape metadata and the request-body digest are persisted.
 """
 
 from __future__ import annotations
@@ -521,13 +521,13 @@ class _UrllibTransport:
 
     def open(
         self,
-        official_endpoint: str,
+        upstream_endpoint: str,
         *,
         body: bytes,
         headers: Mapping[str, str],
         timeout: float,
     ) -> Any:
-        endpoint = self._endpoint_override or official_endpoint
+        endpoint = self._endpoint_override or upstream_endpoint
         request = Request(endpoint, data=body, headers=dict(headers), method="POST")
         return self._opener.open(request, timeout=timeout)
 
@@ -551,7 +551,7 @@ class LoopbackResponsesProxy:
         timeout_seconds: float = 120.0,
         _transport: _UrllibTransport | None = None,
     ):
-        self.upstream_endpoint = _official_responses_endpoint(upstream_base_url)
+        self.upstream_endpoint = _compatible_responses_endpoint(upstream_base_url)
         if not api_key or "\r" in api_key or "\n" in api_key:
             raise ApiBudgetProxyError("an in-memory API key is required")
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -1039,20 +1039,32 @@ class _SseUsageCollector:
             self.usage = parsed
 
 
-def _official_responses_endpoint(base_url: str) -> str:
-    parsed = urlsplit(base_url)
+def _compatible_responses_endpoint(base_url: str) -> str:
+    if (
+        not isinstance(base_url, str)
+        or not base_url
+        or base_url != base_url.strip()
+        or any(ord(character) < 0x20 or character == "\\" for character in base_url)
+    ):
+        raise ApiBudgetProxyError("upstream base URL is invalid")
+    try:
+        parsed = urlsplit(base_url)
+        parsed.port
+    except ValueError as exc:
+        raise ApiBudgetProxyError("upstream base URL is invalid") from exc
     if (
         parsed.scheme != "https"
-        or parsed.hostname != "api.openai.com"
-        or parsed.port not in {None, 443}
+        or not parsed.netloc
+        or parsed.hostname is None
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
-        or parsed.path.rstrip("/") != "/v1"
     ):
-        raise ApiBudgetProxyError("upstream must be the official credential-free OpenAI /v1 URL")
-    return "https://api.openai.com/v1/responses"
+        raise ApiBudgetProxyError(
+            "upstream must be a credential-free HTTPS OpenAI-compatible base URL"
+        )
+    return f"{base_url.rstrip('/')}/responses"
 
 
 def _money(value: Decimal | str | int) -> Decimal:

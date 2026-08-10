@@ -38,12 +38,19 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
 class _FakeUpstream:
     def __init__(self) -> None:
         self.mode = "json"
+        self.redirect_hits = 0
         self.requests: list[dict[str, object]] = []
         self._lock = threading.Lock()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
+
+            def do_GET(self) -> None:  # noqa: N802
+                owner.redirect_hits += 1
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
             def do_POST(self) -> None:  # noqa: N802
                 length = int(self.headers["Content-Length"])
@@ -64,6 +71,12 @@ class _FakeUpstream:
                 if mode == "disconnect":
                     self.connection.shutdown(socket.SHUT_RDWR)
                     self.connection.close()
+                    return
+                if mode == "redirect":
+                    self.send_response(302)
+                    self.send_header("Location", owner.endpoint + "/redirect-target")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
                     return
                 if mode in {"missing_usage", "invalid_usage"}:
                     response: dict[str, object] = {"id": "fake-response", "output": []}
@@ -149,7 +162,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             self.root / "budget.json", batch_id="p1-batch"
         )
         self.proxy = LoopbackResponsesProxy(
-            upstream_base_url="https://api.openai.com/v1",
+            upstream_base_url="https://provider.example/v1",
             api_key=self.secret,
             ledger=self.ledger,
             run_id="benchmark-r1",
@@ -196,6 +209,60 @@ class ApiBudgetProxyTests(unittest.TestCase):
             return error.code, error.read(), error.headers
         with response:
             return response.status, response.read(), response.headers
+
+    def test_any_credential_free_https_compatible_base_url_is_accepted(self) -> None:
+        self.assertEqual(
+            self.proxy.upstream_endpoint, "https://provider.example/v1/responses"
+        )
+        for number, (base_url, endpoint) in enumerate(
+            (
+                ("https://api.example.com/v1", "https://api.example.com/v1/responses"),
+                (
+                    "https://gateway.example.net/openai/v1/",
+                    "https://gateway.example.net/openai/v1/responses",
+                ),
+                ("https://[::1]:8443/v1", "https://[::1]:8443/v1/responses"),
+            )
+        ):
+            with self.subTest(base_url=base_url):
+                proxy = LoopbackResponsesProxy(
+                    upstream_base_url=base_url,
+                    api_key=self.secret,
+                    ledger=self.ledger,
+                    run_id=f"valid-upstream-{number}",
+                    metadata_path=self.root / f"valid-upstream-{number}.json",
+                    _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+                )
+                self.assertEqual(proxy.upstream_endpoint, endpoint)
+
+    def test_invalid_compatible_base_urls_are_rejected_before_registration(self) -> None:
+        for number, base_url in enumerate(
+            (
+                "",
+                "http://api.example.com/v1",
+                "https://user:secret@api.example.com/v1",
+                "https://api.example.com/v1?query=1",
+                "https://api.example.com/v1#fragment",
+                " https://api.example.com/v1",
+                "https://api.example.com/v1\\other",
+                "https://api.example.com:invalid/v1",
+            )
+        ):
+            with self.subTest(base_url=base_url), self.assertRaises(ApiBudgetProxyError):
+                LoopbackResponsesProxy(
+                    upstream_base_url=base_url,
+                    api_key=self.secret,
+                    ledger=self.ledger,
+                    run_id=f"invalid-upstream-{number}",
+                    metadata_path=self.root / f"invalid-upstream-{number}.json",
+                    _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+                )
+
+    def test_upstream_redirect_is_not_followed(self) -> None:
+        self.upstream.mode = "redirect"
+        status, _body, _headers = self._post(self._body(), request_id="redirect-1")
+        self.assertEqual(status, 302)
+        self.assertEqual(self.upstream.redirect_hits, 0)
 
     @staticmethod
     def _body(

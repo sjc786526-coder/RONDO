@@ -62,7 +62,13 @@ class PairIdentityTests(unittest.TestCase):
             workspace_lock_normalization=bundle.workspace_lock_normalization,
         )
 
-    def _spec(self, side: Side) -> RunSpec:
+    def _spec(
+        self,
+        side: Side,
+        *,
+        base_url: str = "https://provider.example/v1",
+        config_sha256: str = "a" * 64,
+    ) -> RunSpec:
         fair = self.identity.fairness
         return RunSpec(
             side=side,
@@ -74,12 +80,12 @@ class PairIdentityTests(unittest.TestCase):
             provider=ProviderProjection(
                 provider_id=fair["provider_id"],
                 api=fair["provider_api"],
-                base_url=fair["provider_base_url"],
+                base_url=base_url,
                 api_key_env=fair["provider_api_key_env"],
                 main_model=fair["main_model"],
                 guardian_model=fair["guardian_model"],
                 guardian_effort=fair["guardian_effort"],
-                config_sha256="a" * 64,
+                config_sha256=config_sha256,
             ),
             timeout_seconds=fair["timeout_seconds"],
             max_retries=fair["max_retries"],
@@ -100,7 +106,7 @@ class PairIdentityTests(unittest.TestCase):
             "guardian_effort": fair["guardian_effort"],
             "provider": fair["provider_id"],
             "provider_api": fair["provider_api"],
-            "provider_base_url": fair["provider_base_url"],
+            "provider_base_url": "https://provider.example/v1",
             "provider_api_key_env": fair["provider_api_key_env"],
             "provider_config_sha256": "c" * 64,
             "approvals_reviewer": fair["approvals_reviewer"],
@@ -164,14 +170,16 @@ class PairIdentityTests(unittest.TestCase):
             self.identity.no_api_seccomp.source_sha256,
         )
         paid = self.identity.mode("paid")
-        self.assertEqual(paid.batch_id, "p1-fix-git-b3-m1-v1")
+        self.assertEqual(self.identity.pair_id, "p1-fix-git-pair-v7")
+        self.assertEqual(paid.batch_id, "p1-fix-git-b3-m1-v2")
         self.assertEqual(
             [slot.paid_run_id for slot in self.identity.topology],
             [
-                "20260810-230000000-tb-rondo-r1",
-                "20260810-230000001-tb-codex-r1",
+                "20260810-233000000-tb-rondo-r1",
+                "20260810-233000001-tb-codex-r1",
             ],
         )
+        self.assertNotIn("provider_base_url", self.identity.fairness)
         self.assertEqual(self.identity.fairness["max_retries"], 0)
         self.assertEqual(self.identity.fairness["budget_usd"], 5.0)
         validate_harbor_installation(
@@ -181,6 +189,10 @@ class PairIdentityTests(unittest.TestCase):
 
     def test_shared_fair_pair_gate_rejects_runtime_drift(self) -> None:
         self.identity.validate_spec(self._spec(Side.CODEX), mode="no_api")
+        self.identity.validate_spec(
+            self._spec(Side.CODEX, base_url="https://another.example/v1"),
+            mode="no_api",
+        )
         drifted = replace(self._spec(Side.RONDO), timeout_seconds=900)
         with self.assertRaisesRegex(PairIdentityError, "fairness"):
             self.identity.validate_spec(drifted, mode="no_api")
@@ -260,6 +272,16 @@ class PairIdentityTests(unittest.TestCase):
             self.assertEqual(result["m1"], "passed")
             self.assertEqual(result["s2"], "unbound")
             self.assertEqual(result["reasons"], [])
+
+            provider_drift = json.loads(json.dumps(records))
+            provider_drift[1]["config"]["provider_base_url"] = (
+                "https://different-provider.example/v1"
+            )
+            drifted = assess_m1(
+                provider_drift, paid_identity, pair_ledger_path=ledger_path
+            )
+            self.assertEqual(drifted["m1"], "failed")
+            self.assertIn("pair_provider_base_url_mismatch", drifted["reasons"])
 
             split = json.loads(ledger_path.read_text(encoding="utf-8"))
             split["runs"][1]["status"] = "publishing"

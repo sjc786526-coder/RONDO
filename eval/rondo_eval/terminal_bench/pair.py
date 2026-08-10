@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
-P1_PAIR_ID = "p1-fix-git-pair-v6"
+P1_PAIR_ID = "p1-fix-git-pair-v7"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_KEYS = {
     "schema_version",
@@ -65,7 +65,6 @@ _FAIRNESS_KEYS = {
     "terminal_bench_version",
     "provider_id",
     "provider_api",
-    "provider_base_url",
     "provider_api_key_env",
     "main_model",
     "guardian_model",
@@ -496,7 +495,6 @@ class PairIdentity:
             "terminal_bench_version": spec.terminal_bench_version,
             "provider_id": spec.provider.provider_id,
             "provider_api": spec.provider.api,
-            "provider_base_url": spec.provider.base_url,
             "provider_api_key_env": spec.provider.api_key_env,
             "main_model": spec.provider.main_model,
             "guardian_model": spec.provider.guardian_model,
@@ -1027,7 +1025,6 @@ def _parse_fairness(value: object) -> dict[str, object]:
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
         "provider_id": "openai",
         "provider_api": "responses",
-        "provider_base_url": "https://api.openai.com/v1",
         "provider_api_key_env": "OPENAI_API_KEY",
         "main_model": "gpt-5.6-luna",
         "guardian_model": "gpt-5.6-luna",
@@ -1227,7 +1224,6 @@ def _compare_record_fairness(
         "terminal_bench_version": "terminal_bench_version",
         "provider_id": "provider",
         "provider_api": "provider_api",
-        "provider_base_url": "provider_base_url",
         "provider_api_key_env": "provider_api_key_env",
         "task_image_digest": "task_image_digest",
         "timeout_seconds": "timeout_seconds",
@@ -1247,6 +1243,8 @@ def _compare_record_fairness(
     if projected[0] != projected[1] or projected[0] != expected:
         reasons.append("pair_fairness_mismatch")
     configs = [record["config"] for record in records]
+    if configs[0].get("provider_base_url") != configs[1].get("provider_base_url"):
+        reasons.append("pair_provider_base_url_mismatch")
     if configs[0].get("provider_config_sha256") != configs[1].get("provider_config_sha256"):
         reasons.append("pair_provider_config_mismatch")
     for record in records:

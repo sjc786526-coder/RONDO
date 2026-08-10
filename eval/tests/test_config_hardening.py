@@ -23,7 +23,7 @@ from rondo_eval.contracts import BinaryManifest, Side  # noqa: E402
 OPENAI_CONFIG = """\
 [providers.openai]
 api = "responses"
-base_url = "https://api.openai.com/v1"
+base_url = "https://provider.example/v1"
 api_key_env = "OPENAI_API_KEY"
 main_model = "gpt-5.6-luna"
 guardian_model = "gpt-5.6-luna"
