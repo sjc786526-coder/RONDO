@@ -897,13 +897,32 @@ class TerminalBenchTests(unittest.TestCase):
             (result.task_path / "tests" / "test_outputs.py").stat().st_mode & 0o777,
             0o444,
         )
+        self.assertEqual(
+            (result.task_path / "tests" / "rondo-apt.conf").read_text(),
+            'APT::Sandbox::User "root";\n',
+        )
+        self.assertEqual(
+            (result.task_path / "tests" / "rondo-apt.conf").stat().st_mode & 0o777,
+            0o444,
+        )
         self.assertIn('user: "1000:1000"', overlay)
         self.assertIn("    cap_drop:\n      - ALL\n", overlay)
         self.assertEqual(result.runtime_user, "1000:1000")
         staged_document = materialize_module._read_toml(result.task_path / "task.toml")
         self.assertEqual(staged_document["agent"]["user"], "1000:1000")
         self.assertEqual(staged_document["verifier"]["user"], "root")
-        self.assertEqual(staged_document["verifier"]["env"], {"HOME": "/root"})
+        self.assertEqual(
+            staged_document["verifier"]["env"],
+            {"HOME": "/root", "APT_CONFIG": "/tests/rondo-apt.conf"},
+        )
+        self.assertEqual(
+            staged_document["solution"]["env"],
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "safe.directory",
+                "GIT_CONFIG_VALUE_0": "/app/personal-site",
+            },
+        )
         for field, value in (("user", "1000:1000"), ("env", {"HOME": "/tmp"})):
             with self.subTest(verifier_field=field):
                 original = staged_document["verifier"][field]
@@ -1222,6 +1241,10 @@ gpus = 0
 allow_internet = true
 
 [verifier.env]
+
+[environment.env]
+
+[solution.env]
 '''
 
 

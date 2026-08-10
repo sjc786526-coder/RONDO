@@ -78,3 +78,15 @@
 - 最小修复只在 task staging 中把固定 `solution/`、`tests/` 目录规范化为 `0555`，两个 shell 脚本为 `0555`，
   verifier Python 输入为 `0444`。没有增加 capability、改变容器用户或放宽 seccomp；相关 materializer 回归
   19/19 通过。
+
+## 7. Oracle Docker 运行 2（评分失败并已清理）
+
+- clean commit `53bc705c66dc86ddee2691278fec5a38e1078425` 的第二次运行已正常完成 oracle 与 verifier
+  生命周期，Harbor host return code 为 0，但可信 verifier 明确给出 `reward=0`，所以入口返回失败。
+- Oracle 的三个 Git 命令均被 `detected dubious ownership` 拒绝；verifier 已以 root、`HOME=/root` 启动，但
+  `apt` 默认尝试切换 `_apt` 用户，在 `cap_drop=ALL` 下被 setuid/setgid 门禁拒绝，继而 curl/uvx 不存在。
+- Docker 仍使用同一 pinned image/UID/cap/seccomp/private-cgroup/resource 合同，最终 cleanup 为
+  `verified_empty`；没有 API 请求、key 加载或费用。
+- 直接修复不修改 frozen `solve.sh`/`test.sh`：`solution.env` 只为 `/app/personal-site` 投影 scoped Git
+  `safe.directory`；`verifier.env` 增加 `/tests/rondo-apt.conf`，内容仅令 apt sandbox 保持 root，避免新增
+  `SETUID/SETGID/CHOWN/DAC_OVERRIDE` capability。配置文件随 tests 以 `0444` 上传并由 materializer 精确复核。
