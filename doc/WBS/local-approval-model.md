@@ -20,11 +20,12 @@
   52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。
 - model-backed client 必须消费 launcher 写入主仓 `eval-data/local-approval/launcher-identity.json`
   的 0600 私有 receipt，绑定 nonce、PID/start ticks、实际 cmdline、监听 socket、runtime/model
-  digest/path/id 和 endpoint。client 在 identity probe 后、decision 前以及 decision 返回后重验同一
+  identity/path/id 和 endpoint。client 在 identity probe 后、decision 前以及 decision 返回后重验同一
   launcher 实例；redirect、receipt 替换、进程/监听者变化都 fail-closed。这是轻量实例身份
-  约束，不是签名或权限系统。
-- 当前未提供本地模型权重，且冻结运行时明确是 `cpu_only_x64`/
-  `model_backed_validation=not_run`。无模型 doctor 返回
+  约束，不是签名或权限系统，也不证明 server 实际加载了 receipt 所声明的全部字节，或 launcher 退出后
+  server 必然随之退出。
+- 当前未提供本地模型权重；冻结 lock 的能力状态为 `cpu_only_no_model`，结构化 model-backed 输出为
+  `not_run`，launcher 的运行时投影为 `cpu_only_x64`。无模型 doctor 返回
   `cpu_frontend_ready_model_missing_gpu_unvalidated`/78；即使补入模型，在 GPU runtime 和
   model-backed 参数验证前也不启动真实服务。本批未下载权重、未启动模型/推理、未量显存/
   上下文/首 token/总耗时，L2 真实验收与 L2a/L3/L4 保持待后续阶段；当前不表述为

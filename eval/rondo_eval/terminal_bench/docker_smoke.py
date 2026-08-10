@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import math
+import re
 import stat
 import sys
 import threading
@@ -76,6 +78,10 @@ _MAX_AGENT_JSON_BYTES = 16 * 1024 * 1024
 class DockerNoApiSmokeError(ValueError):
     """Raised when the no-API smoke would leave its loopback-only contract."""
 
+    def __init__(self, reason: str, *, samples: tuple[object, ...] = ()) -> None:
+        super().__init__(reason)
+        self.samples = samples
+
 
 @dataclass(frozen=True)
 class SmokeRequestObservation:
@@ -113,9 +119,14 @@ class DockerNoApiSmokeResult:
         return self.parsed.outcome is RunOutcome.COMPLETED and self.contract_satisfied
 
     def safe_summary(self) -> dict[str, object]:
+        terminal_status = "completed" if self.passed else "failed"
+        failure = None
+        if terminal_status == "failed":
+            failure = _trial_failure_diagnostic(self.parsed)
         summary: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "side": self.prepared.spec.side.value,
+            "terminal_status": terminal_status,
             "outcome": self.parsed.outcome.value,
             "task_outcome": self.parsed.task_outcome,
             "reward": self.parsed.reward,
@@ -126,10 +137,30 @@ class DockerNoApiSmokeResult:
             "code_mode_tool_round_trip": self.tool_round_trip,
             "host_returncode": self.harbor.returncode,
             "pair_validation": self.pair_validation,
+            "failure": failure,
+            "artifacts": {
+                "trial_result_sha256": _safe_artifact_sha256(
+                    self.harbor.jobs_dir / "result.json"
+                ),
+                "trial_exception_sha256": _safe_artifact_sha256(
+                    self.harbor.jobs_dir / "exception.txt"
+                ),
+                "watchdog_state": "parent_finalize_pending",
+                "watchdog_summary_sha256": None,
+            },
         }
         evidence = self.harbor.docker_evidence
         if evidence is None or not evidence.samples:
-            summary["docker"] = None
+            summary["docker"] = {
+                "state": "not_observed",
+                "reason": "pre_daemon_failure",
+                "cleanup": {
+                    "state": "not_observed",
+                    "container_count": None,
+                    "network_count": None,
+                    "volume_count": None,
+                },
+            }
         else:
             image = evidence.image_identity
             vhdx = evidence.desktop_vhdx
@@ -139,10 +170,26 @@ class DockerNoApiSmokeResult:
                 if item is not None:
                     item.validate()
             baseline, final = evidence.samples[0], evidence.samples[-1]
+            runtime_facts = tuple(
+                fact
+                for sample in evidence.samples
+                for fact in getattr(sample, "task_containers", ())
+            )
+            runtime = _runtime_projection(runtime_facts[0]) if runtime_facts else None
+            cleanup = {
+                "state": "verified_empty",
+                "container_count": len(getattr(final, "task_container_ids", ())),
+                "network_count": len(getattr(final, "task_networks", ())),
+                "volume_count": len(getattr(final, "task_volumes", ())),
+            }
+            if any(
+                cleanup[key] != 0
+                for key in ("container_count", "network_count", "volume_count")
+            ):
+                cleanup["state"] = "unverified"
             summary["docker"] = {
+                "state": "observed",
                 "sample_count": len(evidence.samples),
-                "warnings": list(evidence.warnings),
-                "data_root": final.data_root,
                 "baseline_total_bytes": baseline.docker_total_bytes,
                 "final_total_bytes": final.docker_total_bytes,
                 "baseline_task_bytes": baseline.task_bytes,
@@ -184,8 +231,173 @@ class DockerNoApiSmokeResult:
                     if seccomp is not None
                     else None
                 ),
+                "runtime": runtime,
+                "cleanup": cleanup,
             }
         return summary
+
+
+def _safe_artifact_sha256(path: Path) -> str | None:
+    try:
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size > 16 * 1024 * 1024
+        ):
+            return None
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+_ADAPTER_DIAGNOSTIC = re.compile(
+    r"container command failed: stage=(install|run) "
+    r"command_id=([a-z][a-z0-9_.-]{0,63}) "
+    r"stderr=(empty|permission_denied|not_found|timeout|other_redacted)\Z"
+)
+
+
+def _trial_failure_diagnostic(parsed: ParsedHarborResult) -> dict[str, str]:
+    exception = parsed.trial_result.get("exception_info")
+    if isinstance(exception, dict):
+        message = exception.get("exception_message", exception.get("message"))
+        match = _ADAPTER_DIAGNOSTIC.fullmatch(message) if isinstance(message, str) else None
+        if match is not None:
+            return {
+                "stage": f"adapter_{match.group(1)}",
+                "command_id": match.group(2),
+                "stderr_summary": match.group(3),
+            }
+    return {
+        "stage": "result",
+        "command_id": "no_api_contract",
+        "stderr_summary": "empty",
+    }
+
+
+def _projection_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _runtime_projection(fact: object) -> dict[str, object]:
+    # ``security_opt`` may carry Docker's expanded seccomp JSON.  Its identity
+    # is recorded separately, so this projection retains only normalized NNP.
+    security_opt = [
+        "no-new-privileges:true"
+        for value in getattr(fact, "security_opt")
+        if value in {"no-new-privileges", "no-new-privileges:true"}
+    ]
+    mounts = [
+        {
+            "kind": item.kind,
+            "destination": item.destination,
+            "read_only": item.read_only,
+            "tmpfs_options": list(item.tmpfs_options),
+        }
+        for item in sorted(getattr(fact, "mounts"), key=lambda item: item.destination)
+    ]
+    return {
+        "privileged": getattr(fact, "privileged"),
+        "cap_add": list(getattr(fact, "cap_add")),
+        "cap_drop": list(getattr(fact, "cap_drop")),
+        "security_opt": security_opt,
+        "cgroupns_mode": getattr(fact, "cgroupns_mode"),
+        "memory_bytes": getattr(fact, "memory_bytes"),
+        "memory_swap_bytes": getattr(fact, "memory_swap_bytes"),
+        "pids_limit": getattr(fact, "pids_limit"),
+        "mounts_sha256": _projection_sha256(mounts),
+        "networks_sha256": _projection_sha256(sorted(getattr(fact, "networks"))),
+    }
+
+
+def _docker_failure_from_samples(samples: tuple[object, ...]) -> dict[str, object]:
+    if not samples:
+        return {
+            "state": "not_observed",
+            "reason": "pre_daemon_failure",
+            "cleanup": {
+                "state": "not_observed",
+                "container_count": None,
+                "network_count": None,
+                "volume_count": None,
+            },
+        }
+    baseline, final = samples[0], samples[-1]
+    facts = tuple(
+        fact for sample in samples for fact in getattr(sample, "task_containers", ())
+    )
+    fact = facts[-1] if facts else None
+    vhdx_values = [
+        value
+        for value in (
+            getattr(sample, "docker_desktop_vhdx_bytes", None) for sample in samples
+        )
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    ]
+    metric_facts = tuple(
+        metric
+        for sample in samples
+        for metric in getattr(sample, "task_container_metrics", ())
+    )
+    metric = metric_facts[-1] if metric_facts else None
+    cleanup = {
+        "state": "verified_empty",
+        "container_count": len(getattr(final, "task_container_ids", ())),
+        "network_count": len(getattr(final, "task_networks", ())),
+        "volume_count": len(getattr(final, "task_volumes", ())),
+    }
+    if any(cleanup[key] for key in ("container_count", "network_count", "volume_count")):
+        cleanup["state"] = "unverified"
+    image = None
+    seccomp = None
+    if fact is not None:
+        image = {
+            "image_reference": getattr(fact, "image_reference"),
+            "image_id": getattr(fact, "image_id"),
+        }
+        profile_sha = getattr(fact, "seccomp_profile_sha256", None)
+        seccomp = {
+            "profile_kind": "custom" if profile_sha is not None else "builtin",
+            "profile_sha256": profile_sha,
+        }
+    return {
+        "state": "observed_partial",
+        "sample_count": len(samples),
+        "baseline_total_bytes": getattr(baseline, "docker_total_bytes"),
+        "final_total_bytes": getattr(final, "docker_total_bytes"),
+        "baseline_task_bytes": getattr(baseline, "task_bytes"),
+        "final_task_bytes": getattr(final, "task_bytes"),
+        "baseline_data_root_free_bytes": getattr(
+            baseline, "data_root_filesystem_free_bytes"
+        ),
+        "final_data_root_free_bytes": getattr(final, "data_root_filesystem_free_bytes"),
+        "image_identity": image,
+        "desktop_vhdx": (
+            {
+                "baseline_bytes": vhdx_values[0],
+                "peak_bytes": max(vhdx_values),
+                "final_bytes": vhdx_values[-1],
+                "peak_growth_bytes": max(vhdx_values) - vhdx_values[0],
+            }
+            if len(vhdx_values) == len(samples)
+            else None
+        ),
+        "container_metrics": (
+            {
+                "container_id": getattr(metric, "container_id"),
+                "cpu_usage_seconds": getattr(metric, "cpu_usage_microseconds") / 1_000_000,
+                "peak_memory_bytes": getattr(metric, "peak_memory_bytes"),
+            }
+            if metric is not None
+            else None
+        ),
+        "effective_seccomp": seccomp,
+        "runtime": _runtime_projection(fact) if fact is not None else None,
+        "cleanup": cleanup,
+    }
 
 
 class HostExecutorFactory(Protocol):
@@ -485,44 +697,55 @@ async def run_docker_no_api_smoke(
     if not math.isfinite(request.budget_usd) or request.budget_usd <= 0:
         raise DockerNoApiSmokeError("no-API smoke RunSpec budget field is invalid")
     server = server_factory()
-    with server:
-        prepared = prepare_terminal_bench_run(
-            config,
-            replace(request, provider_transport_base_url=server.docker_base_url),
-            materializer=materializer,
-        )
-        pair_identity.validate_prepared(prepared, mode="no_api")
-        if (
-            prepared.spec.websocket
-            or prepared.spec.code_mode_host is not True
-            or prepared.spec.sandbox_network_access is not True
-            or prepared.spec.provider.main_model != NO_API_SMOKE_MODEL
-        ):
-            raise DockerNoApiSmokeError("no-API smoke projection differs from the frozen contract")
-        executor = executor_factory(
-            counter=counter,
-            lock_guard=lock_guard,
-            lease=lease,
-        )
-        backend = InjectedHostHarborBackend(
-            executor,
-            getenv=lambda name: (
-                NO_API_SMOKE_BEARER
-                if name == prepared.spec.provider.api_key_env
-                else None
-            ),
-        )
-        harbor = await UnifiedTerminalBenchRunner(backend).run(prepared)
-        parsed = parse_single_task_result(
-            harbor.jobs_dir,
-            host_returncode=harbor.returncode,
-        )
-        agent_json_events = (
-            _validate_agent_codex_json(harbor.jobs_dir)
-            if parsed.outcome is RunOutcome.COMPLETED
-            else 0
-        )
-        observations = server.requests
+    harbor: HostHarborResult | None = None
+    try:
+        with server:
+            prepared = prepare_terminal_bench_run(
+                config,
+                replace(request, provider_transport_base_url=server.docker_base_url),
+                materializer=materializer,
+            )
+            pair_identity.validate_prepared(prepared, mode="no_api")
+            if (
+                prepared.spec.websocket
+                or prepared.spec.code_mode_host is not True
+                or prepared.spec.sandbox_network_access is not True
+                or prepared.spec.provider.main_model != NO_API_SMOKE_MODEL
+            ):
+                raise DockerNoApiSmokeError(
+                    "no-API smoke projection differs from the frozen contract"
+                )
+            executor = executor_factory(
+                counter=counter,
+                lock_guard=lock_guard,
+                lease=lease,
+            )
+            backend = InjectedHostHarborBackend(
+                executor,
+                getenv=lambda name: (
+                    NO_API_SMOKE_BEARER
+                    if name == prepared.spec.provider.api_key_env
+                    else None
+                ),
+            )
+            harbor = await UnifiedTerminalBenchRunner(backend).run(prepared)
+            parsed = parse_single_task_result(
+                harbor.jobs_dir,
+                host_returncode=harbor.returncode,
+            )
+            agent_json_events = (
+                _validate_agent_codex_json(harbor.jobs_dir)
+                if parsed.outcome is RunOutcome.COMPLETED
+                else 0
+            )
+            observations = server.requests
+    except Exception as exc:
+        if getattr(exc, "samples", ()) or harbor is None or harbor.docker_evidence is None:
+            raise
+        raise DockerNoApiSmokeError(
+            "no-API result validation failed after supervised execution",
+            samples=tuple(harbor.docker_evidence.samples),
+        ) from None
     return DockerNoApiSmokeResult(
         prepared=prepared,
         harbor=harbor,
@@ -640,7 +863,7 @@ def main(argv: list[str] | None = None) -> int:
                 identity=pair_identity,
                 mode="no_api",
             ) as sequence:
-                recovered = sequence.reconcile_no_api_summary()
+                recovered = sequence.reconcile_no_api_summary(requested_side=side)
             if recovered is not None:
                 print(
                     json.dumps(
@@ -650,13 +873,16 @@ def main(argv: list[str] | None = None) -> int:
                             "pair_id": pair_identity.pair_id,
                             "run_id": recovered["run_id"],
                             "side": recovered["side"],
-                            "safe_summary_sha256": recovered["safe_summary_sha256"],
+                            "requested_side": recovered["requested_side"],
+                            "recovered_side": recovered["recovered_side"],
+                            "terminal_status": recovered["status"],
+                            "no_api_summary_sha256": recovered["no_api_summary_sha256"],
                         },
                         sort_keys=True,
                         separators=(",", ":"),
                     )
                 )
-                return 0
+                return 0 if recovered["status"] == "completed" else INFRA_ERROR
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
@@ -727,15 +953,8 @@ def main(argv: list[str] | None = None) -> int:
                             pair_identity=pair_identity,
                         )
                     )
-                except BaseException:
-                    sequence.finish(
-                        run_id=smoke_id,
-                        completed=False,
-                        eval_harness_commit=eval_harness_commit,
-                    )
-                    raise
-                result = replace(result, pair_validation=True)
-                if result.passed:
+                except Exception as exc:
+                    failure_summary = _early_failure_summary(side=side, exc=exc)
                     summary_sha256 = persist_no_api_safe_summary(
                         no_api_safe_summary_path(
                             sequence_path,
@@ -746,20 +965,34 @@ def main(argv: list[str] | None = None) -> int:
                         side=side,
                         run_id=smoke_id,
                         eval_harness_commit=eval_harness_commit,
-                        summary=result.safe_summary(),
+                        summary=failure_summary,
                     )
-                    sequence.finish(
-                        run_id=smoke_id,
-                        completed=True,
-                        eval_harness_commit=eval_harness_commit,
-                        safe_summary_sha256=summary_sha256,
-                    )
-                else:
                     sequence.finish(
                         run_id=smoke_id,
                         completed=False,
                         eval_harness_commit=eval_harness_commit,
+                        no_api_summary_sha256=summary_sha256,
                     )
+                    raise
+                result = replace(result, pair_validation=True)
+                summary_sha256 = persist_no_api_safe_summary(
+                    no_api_safe_summary_path(
+                        sequence_path,
+                        identity=pair_identity,
+                        run_id=smoke_id,
+                    ),
+                    identity=pair_identity,
+                    side=side,
+                    run_id=smoke_id,
+                    eval_harness_commit=eval_harness_commit,
+                    summary=result.safe_summary(),
+                )
+                sequence.finish(
+                    run_id=smoke_id,
+                    completed=result.passed,
+                    eval_harness_commit=eval_harness_commit,
+                    no_api_summary_sha256=summary_sha256,
+                )
         else:
             result = asyncio.run(
                 run_docker_no_api_smoke(
@@ -806,6 +1039,58 @@ def _print_safe_cli_error(exc: BaseException, *, exit_code: int) -> None:
         ),
         file=sys.stderr,
     )
+
+
+def _early_failure_summary(*, side: Side, exc: BaseException) -> dict[str, object]:
+    diagnostic_match = _ADAPTER_DIAGNOSTIC.fullmatch(str(exc))
+    samples = tuple(getattr(exc, "samples", ()))
+    if diagnostic_match is not None:
+        stage = f"adapter_{diagnostic_match.group(1)}"
+        command_id = diagnostic_match.group(2)
+        stderr_summary = diagnostic_match.group(3)
+    elif isinstance(exc, DockerSupervisionError):
+        stage = "docker_supervision"
+        command_id = "supervised_host"
+        stderr_summary = "other_redacted"
+    elif samples:
+        stage = "result"
+        command_id = "post_supervision_validation"
+        stderr_summary = "other_redacted"
+    elif isinstance(exc, TerminalBenchRunError):
+        stage = "harbor"
+        command_id = "harbor_trial"
+        stderr_summary = "other_redacted"
+    else:
+        stage = "prepare"
+        command_id = "no_api_prepare"
+        stderr_summary = "other_redacted"
+    return {
+        "schema_version": 2,
+        "side": side.value,
+        "terminal_status": "failed",
+        "outcome": RunOutcome.INFRA_FAILED.value,
+        "task_outcome": None,
+        "reward": 0.0,
+        "fake_requests": 0,
+        "fake_contract_hits": 0,
+        "fake_contract_satisfied": False,
+        "agent_json_events": 0,
+        "code_mode_tool_round_trip": False,
+        "host_returncode": 70,
+        "pair_validation": True,
+        "failure": {
+            "stage": stage,
+            "command_id": command_id,
+            "stderr_summary": stderr_summary,
+        },
+        "docker": _docker_failure_from_samples(samples),
+        "artifacts": {
+            "trial_result_sha256": None,
+            "trial_exception_sha256": None,
+            "watchdog_state": "parent_finalize_pending",
+            "watchdog_summary_sha256": None,
+        },
+    }
 
 
 def _smoke_exit_code(result: DockerNoApiSmokeResult) -> int:

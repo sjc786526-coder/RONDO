@@ -35,10 +35,20 @@ if TYPE_CHECKING:
 
 
 PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
-P1_PAIR_ID = "p1-fix-git-pair-v4"
+P1_PAIR_ID = "p1-fix-git-pair-v5"
+_RETIRED_V4 = {
+    "pair_id": "p1-fix-git-pair-v4",
+    "terminal_status": "failed",
+    "ledger_sha256": "23ceecfebfb058fe6dd814df09a217674f62374740d3e2282b90f4aff069edef",
+    "eval_harness_commit": "07d0a487f8c498032a6da7ce4fd37a91c607bdac",
+    "run_id": "tb-no-api-rondo-e2cd95f5bc72",
+    "side": "rondo",
+    "review_log_path": "agent_log/2026-08-10-172258-plan008-fourth-independent-review.md",
+}
 _PAIR_LOCK_KEYS = {
     "schema_version",
     "pair_id",
+    "retired_pairs",
     "modes",
     "topology",
     "fairness",
@@ -46,6 +56,15 @@ _PAIR_LOCK_KEYS = {
     "no_api_seccomp",
     "runtime_requirements",
     "bundles",
+}
+_RETIRED_PAIR_KEYS = {
+    "pair_id",
+    "terminal_status",
+    "ledger_sha256",
+    "eval_harness_commit",
+    "run_id",
+    "side",
+    "review_log_path",
 }
 _MODE_KEYS = {"enabled", "batch_id"}
 _PAID_MODE_KEYS = _MODE_KEYS | {"disabled_reason"}
@@ -108,6 +127,12 @@ _RUNTIME_REQUIREMENT_KEYS = {
 
 class PairIdentityError(ValueError):
     """Raised when a run cannot prove the tracked pair identity."""
+
+
+@dataclass(frozen=True)
+class NoApiSummaryEvidence:
+    sha256: str
+    terminal_status: str
 
 
 class PairSequenceLedger:
@@ -177,21 +202,21 @@ class PairSequenceLedger:
             if self.mode_name == "no_api":
                 try:
                     for run in state["runs"]:
-                        if run["status"] == "completed":
-                            digest = self._read_no_api_summary(run)
+                        if run["status"] in {"completed", "failed"}:
+                            evidence = self._read_no_api_summary(run)
                             if (
-                                run["safe_summary_sha256"] is not None
-                                and run["safe_summary_sha256"] != digest
+                                run["no_api_summary_sha256"] != evidence.sha256
+                                or run["status"] != evidence.terminal_status
                             ):
                                 raise PairIdentityError(
-                                    "no-API sequence safe summary digest drifted"
+                                    "no-API sequence summary terminal evidence drifted"
                                 )
                 except PairIdentityError:
                     self.__exit__(None, None, None)
                     raise
         else:
             self._state = {
-                "schema_version": 3,
+                "schema_version": 4,
                 "pair_id": self.identity.pair_id,
                 "pair_lock_sha256": self.identity.lock_sha256,
                 "mode": self.mode_name,
@@ -224,16 +249,7 @@ class PairSequenceLedger:
         if active:
             if len(active) != 1:
                 raise PairIdentityError("pair sequence active state is ambiguous")
-            try:
-                self._read_no_api_summary(active[0])
-            except PairIdentityError:
-                active[0]["status"] = "failed"
-                state["blocked"] = True
-                self._persist()
-                raise PairIdentityError(
-                    "pair sequence is blocked by an abandoned active slot"
-                )
-            raise PairIdentityError("pair sequence active slot requires recovery")
+            raise PairIdentityError("pair sequence active slot requires reconciliation")
         if state["blocked"]:
             raise PairIdentityError("pair sequence is blocked by an earlier failed slot")
         _require_commit(eval_harness_commit, "eval harness commit")
@@ -263,8 +279,8 @@ class PairSequenceLedger:
                 "status": "active",
                 "eval_harness_commit": eval_harness_commit,
                 "publication_sha256": None,
-                "safe_summary_sha256": None,
-                "safe_summary_path": (
+                "no_api_summary_sha256": None,
+                "no_api_summary_path": (
                     _no_api_safe_summary_relative_path(self.identity, run_id)
                     if self.mode_name == "no_api"
                     else None
@@ -282,7 +298,7 @@ class PairSequenceLedger:
         completed: bool,
         eval_harness_commit: str,
         publication_sha256: str | None = None,
-        safe_summary_sha256: str | None = None,
+        no_api_summary_sha256: str | None = None,
         container_metrics: Mapping[str, object] | None = None,
     ) -> None:
         state = self._require_state()
@@ -297,20 +313,25 @@ class PairSequenceLedger:
             raise PairIdentityError("pair finish harness identity differs from claim")
         if publication_sha256 is not None:
             _require_sha256(publication_sha256, "publication sha256")
-        if safe_summary_sha256 is not None:
-            _require_sha256(safe_summary_sha256, "safe summary sha256")
+        if no_api_summary_sha256 is not None:
+            _require_sha256(no_api_summary_sha256, "no-API summary sha256")
         normalized_metrics = _container_metrics(container_metrics)
-        if completed and self.mode_name == "no_api":
-            durable_sha256 = self._read_no_api_summary(matches[0])
-            if safe_summary_sha256 is not None and safe_summary_sha256 != durable_sha256:
-                raise PairIdentityError("no-API safe summary digest differs from durable bytes")
-            safe_summary_sha256 = durable_sha256
+        if self.mode_name == "no_api":
+            if publication_sha256 is not None or normalized_metrics is not None:
+                raise PairIdentityError("no-API slot cannot claim paid publication evidence")
+            evidence = self._read_no_api_summary(matches[0])
+            expected_status = "completed" if completed else "failed"
+            if evidence.terminal_status != expected_status:
+                raise PairIdentityError("no-API summary terminal status differs from finish")
+            if no_api_summary_sha256 is not None and no_api_summary_sha256 != evidence.sha256:
+                raise PairIdentityError("no-API summary digest differs from durable bytes")
+            no_api_summary_sha256 = evidence.sha256
         if completed and self.mode_name == "paid" and (
             publication_sha256 is None or normalized_metrics is None
         ):
             raise PairIdentityError("completed paid slot lacks publication or container metrics")
         matches[0]["publication_sha256"] = publication_sha256
-        matches[0]["safe_summary_sha256"] = safe_summary_sha256
+        matches[0]["no_api_summary_sha256"] = no_api_summary_sha256
         matches[0]["container_metrics"] = normalized_metrics
         matches[0]["status"] = "completed" if completed else "failed"
         if completed:
@@ -319,7 +340,7 @@ class PairSequenceLedger:
             state["blocked"] = True
         self._persist()
 
-    def reconcile_no_api_summary(self) -> dict[str, Any] | None:
+    def reconcile_no_api_summary(self, *, requested_side: Side) -> dict[str, Any] | None:
         """Converge one durable safe summary without starting another Docker run."""
 
         if self.mode_name != "no_api":
@@ -331,18 +352,24 @@ class PairSequenceLedger:
         if len(active) != 1:
             raise PairIdentityError("pair sequence active state is ambiguous")
         run = active[0]
-        try:
-            digest = self._read_no_api_summary(run)
-        except PairIdentityError:
-            run["status"] = "failed"
+        recovered_side = run.get("side")
+        if recovered_side != requested_side.value:
+            raise PairIdentityError(
+                "no-API recovery side mismatch: "
+                f"requested={requested_side.value},recovered={recovered_side}"
+            )
+        evidence = self._read_no_api_summary(run)
+        run["no_api_summary_sha256"] = evidence.sha256
+        run["status"] = evidence.terminal_status
+        if evidence.terminal_status == "completed":
+            state["next_slot"] = run["slot"] + 1
+        else:
             state["blocked"] = True
-            self._persist()
-            raise
-        run["safe_summary_sha256"] = digest
-        run["status"] = "completed"
-        state["next_slot"] = run["slot"] + 1
         self._persist()
-        return json.loads(json.dumps(run, sort_keys=True, separators=(",", ":")))
+        recovered = json.loads(json.dumps(run, sort_keys=True, separators=(",", ":")))
+        recovered["requested_side"] = requested_side.value
+        recovered["recovered_side"] = recovered_side
+        return recovered
 
     def stage_paid_publication(
         self,
@@ -424,8 +451,8 @@ class PairSequenceLedger:
         encoded = (json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n").encode()
         _atomic_replace_bytes(self.path, encoded, hook=self._persist_hook)
 
-    def _read_no_api_summary(self, run: Mapping[str, object]) -> str:
-        relative = run.get("safe_summary_path")
+    def _read_no_api_summary(self, run: Mapping[str, object]) -> NoApiSummaryEvidence:
+        relative = run.get("no_api_summary_path")
         if not isinstance(relative, str):
             raise PairIdentityError("no-API sequence lacks its fixed safe summary path")
         expected = _no_api_safe_summary_relative_path(
@@ -507,8 +534,20 @@ class RuntimeRequirements:
 
 
 @dataclass(frozen=True)
+class RetiredPairIdentity:
+    pair_id: str
+    terminal_status: str
+    ledger_sha256: str
+    eval_harness_commit: str
+    run_id: str
+    side: Side
+    review_log_path: str
+
+
+@dataclass(frozen=True)
 class PairIdentity:
     pair_id: str
+    retired_pairs: tuple[RetiredPairIdentity, ...]
     modes: Mapping[str, PairMode]
     topology: tuple[PairSlot, ...]
     fairness: Mapping[str, object]
@@ -712,6 +751,7 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
         raise PairIdentityError("pair lock differs from schema v1")
     if value["schema_version"] != 1 or value["pair_id"] != P1_PAIR_ID:
         raise PairIdentityError("pair lock identity differs from P1")
+    retired_pairs = _parse_retired_pairs(value["retired_pairs"], current=value["pair_id"])
     modes = _parse_modes(value["modes"])
     topology = _parse_topology(value["topology"], modes=modes)
     fairness = _parse_fairness(value["fairness"])
@@ -721,6 +761,7 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
     bundles = _parse_bundles(value["bundles"])
     identity = PairIdentity(
         pair_id=value["pair_id"],
+        retired_pairs=retired_pairs,
         modes=modes,
         topology=topology,
         fairness=fairness,
@@ -989,6 +1030,7 @@ def _encode_no_api_safe_summary(
     required = {
         "schema_version",
         "side",
+        "terminal_status",
         "outcome",
         "task_outcome",
         "reward",
@@ -999,11 +1041,18 @@ def _encode_no_api_safe_summary(
         "code_mode_tool_round_trip",
         "host_returncode",
         "pair_validation",
+        "failure",
         "docker",
+        "artifacts",
     }
     if set(summary) != required or summary.get("side") != side.value:
-        raise PairIdentityError("no-API safe summary differs from schema v1")
-    if summary.get("schema_version") != 1 or summary.get("pair_validation") is not True:
+        raise PairIdentityError("no-API safe summary differs from schema v2")
+    terminal_status = summary.get("terminal_status")
+    if (
+        summary.get("schema_version") != 2
+        or summary.get("pair_validation") is not True
+        or terminal_status not in {"completed", "failed"}
+    ):
         raise PairIdentityError("no-API safe summary is not pair-validation evidence")
     for key in ("fake_requests", "fake_contract_hits", "agent_json_events"):
         value = summary.get(key)
@@ -1015,26 +1064,65 @@ def _encode_no_api_safe_summary(
     reward = summary.get("reward")
     host_returncode = summary.get("host_returncode")
     if (
-        summary.get("outcome") != RunOutcome.COMPLETED.value
-        or summary.get("task_outcome") not in {"pass", "fail"}
+        summary.get("outcome") not in {item.value for item in RunOutcome}
+        or summary.get("task_outcome") not in {None, "pass", "fail"}
         or isinstance(reward, bool)
         or not isinstance(reward, (int, float))
         or not 0 <= float(reward) <= 1
         or not float(reward) < float("inf")
         or isinstance(host_returncode, bool)
         or not isinstance(host_returncode, int)
+        or not -255 <= host_returncode <= 255
+        or summary.get("fake_contract_hits", 0) > summary.get("fake_requests", 0)
+    ):
+        raise PairIdentityError("no-API observation is invalid")
+    if terminal_status == "completed" and (
+        summary.get("outcome") != RunOutcome.COMPLETED.value
         or host_returncode != 0
         or summary.get("fake_requests") != 2
         or summary.get("fake_contract_hits") != 2
         or summary.get("fake_contract_satisfied") is not True
         or summary.get("agent_json_events", 0) <= 0
         or summary.get("code_mode_tool_round_trip") is not True
+        or summary.get("failure") is not None
     ):
         raise PairIdentityError("no-API completed observation is invalid")
+    failure = summary.get("failure")
+    if terminal_status == "failed":
+        if not isinstance(failure, Mapping) or set(failure) != {
+            "stage",
+            "command_id",
+            "stderr_summary",
+        }:
+            raise PairIdentityError("no-API failure diagnostic is missing")
+        if (
+            failure["stage"]
+            not in {
+                "preflight",
+                "prepare",
+                "docker_supervision",
+                "adapter_install",
+                "adapter_run",
+                "harbor",
+                "result",
+            }
+            or not isinstance(failure["command_id"], str)
+            or not failure["command_id"]
+            or len(failure["command_id"]) > 64
+            or any(
+                char not in "abcdefghijklmnopqrstuvwxyz0123456789_.-"
+                for char in failure["command_id"]
+            )
+            or failure["stderr_summary"]
+            not in {"empty", "permission_denied", "not_found", "timeout", "other_redacted"}
+        ):
+            raise PairIdentityError("no-API failure diagnostic is invalid")
     docker = summary.get("docker")
     safe_docker: dict[str, object]
-    if isinstance(docker, Mapping):
+    docker_state = docker.get("state") if isinstance(docker, Mapping) else None
+    if isinstance(docker, Mapping) and docker_state in {"observed", "observed_partial"}:
         safe_docker_keys = {
+            "state",
             "sample_count",
             "baseline_total_bytes",
             "final_total_bytes",
@@ -1046,15 +1134,20 @@ def _encode_no_api_safe_summary(
             "desktop_vhdx",
             "container_metrics",
             "effective_seccomp",
+            "runtime",
+            "cleanup",
         }
-        if not safe_docker_keys.issubset(docker):
+        if set(docker) != safe_docker_keys:
             raise PairIdentityError("no-API Docker summary is incomplete")
         safe_docker = {key: docker[key] for key in sorted(safe_docker_keys)}
         counter_keys = safe_docker_keys - {
+            "state",
             "image_identity",
             "desktop_vhdx",
             "container_metrics",
             "effective_seccomp",
+            "runtime",
+            "cleanup",
         }
         if any(
             isinstance(value, bool) or not isinstance(value, int) or value < 0
@@ -1063,13 +1156,13 @@ def _encode_no_api_safe_summary(
         ):
             raise PairIdentityError("no-API Docker summary counter is invalid")
         image = safe_docker["image_identity"]
-        if not isinstance(image, Mapping) or set(image) != {
+        if image is not None and (not isinstance(image, Mapping) or set(image) != {
             "image_reference",
             "image_id",
-        }:
+        }):
             raise PairIdentityError("no-API daemon image evidence is missing")
-        image_id = image["image_id"]
-        if (
+        image_id = image["image_id"] if isinstance(image, Mapping) else None
+        if image is not None and (
             image["image_reference"] != FIX_GIT_IMAGE_REF
             or not isinstance(image_id, str)
             or not image_id.startswith("sha256:")
@@ -1078,40 +1171,153 @@ def _encode_no_api_safe_summary(
         ):
             raise PairIdentityError("no-API daemon image evidence is invalid")
         vhdx = safe_docker["desktop_vhdx"]
-        if not isinstance(vhdx, Mapping) or set(vhdx) != {
+        if vhdx is not None and (not isinstance(vhdx, Mapping) or set(vhdx) != {
             "baseline_bytes",
             "peak_bytes",
             "final_bytes",
             "peak_growth_bytes",
-        }:
+        }):
             raise PairIdentityError("no-API VHDX evidence is missing")
-        if any(
+        if isinstance(vhdx, Mapping) and (any(
             isinstance(value, bool) or not isinstance(value, int) or value < 0
             for value in vhdx.values()
         ) or (
             vhdx["peak_bytes"] < max(vhdx["baseline_bytes"], vhdx["final_bytes"])
             or vhdx["peak_growth_bytes"]
             != vhdx["peak_bytes"] - vhdx["baseline_bytes"]
-        ):
+        )):
             raise PairIdentityError("no-API VHDX evidence is invalid")
         metrics = _container_metrics(safe_docker["container_metrics"])
-        if metrics is None:
+        if safe_docker["container_metrics"] is not None and metrics is None:
             raise PairIdentityError("no-API container metrics are missing")
         seccomp = safe_docker["effective_seccomp"]
-        if not isinstance(seccomp, Mapping) or set(seccomp) != {
+        if seccomp is not None and (not isinstance(seccomp, Mapping) or set(seccomp) != {
             "profile_kind",
             "profile_sha256",
-        } or (
-            seccomp["profile_kind"] != "custom"
+        } or not (
+            (seccomp["profile_kind"] == "builtin" and seccomp["profile_sha256"] is None)
+            or (
+                seccomp["profile_kind"] == "custom"
+                and isinstance(seccomp["profile_sha256"], str)
+                and len(seccomp["profile_sha256"]) == 64
+                and all(char in "0123456789abcdef" for char in seccomp["profile_sha256"])
+            )
+        )):
+            raise PairIdentityError("no-API effective seccomp evidence is invalid")
+        if terminal_status == "completed" and (
+            not isinstance(seccomp, Mapping)
+            or seccomp["profile_kind"] != "custom"
             or seccomp["profile_sha256"] != identity.no_api_seccomp.effective_sha256
         ):
-            raise PairIdentityError("no-API effective seccomp evidence is invalid")
-        safe_docker["image_identity"] = dict(image)
-        safe_docker["desktop_vhdx"] = dict(vhdx)
+            raise PairIdentityError("no-API completed seccomp evidence differs from lock")
+        safe_docker["image_identity"] = dict(image) if isinstance(image, Mapping) else None
+        safe_docker["desktop_vhdx"] = dict(vhdx) if isinstance(vhdx, Mapping) else None
         safe_docker["container_metrics"] = metrics
-        safe_docker["effective_seccomp"] = dict(seccomp)
+        safe_docker["effective_seccomp"] = dict(seccomp) if isinstance(seccomp, Mapping) else None
+        runtime = safe_docker["runtime"]
+        if runtime is not None and (not isinstance(runtime, Mapping) or set(runtime) != {
+            "privileged",
+            "cap_add",
+            "cap_drop",
+            "security_opt",
+            "cgroupns_mode",
+            "memory_bytes",
+            "memory_swap_bytes",
+            "pids_limit",
+            "mounts_sha256",
+            "networks_sha256",
+        } or not isinstance(runtime["privileged"], bool)
+        or not all(
+            isinstance(runtime[key], list)
+            and all(isinstance(item, str) and 0 < len(item) <= 128 for item in runtime[key])
+            for key in ("cap_add", "cap_drop", "security_opt")
+        )
+        or runtime["cgroupns_mode"] not in {"private", "host", "default", "empty"}):
+            raise PairIdentityError("no-API effective runtime evidence is invalid")
+        if isinstance(runtime, Mapping):
+            for key in ("memory_bytes", "memory_swap_bytes", "pids_limit"):
+                if (
+                    isinstance(runtime[key], bool)
+                    or not isinstance(runtime[key], int)
+                    or runtime[key] <= 0
+                ):
+                    raise PairIdentityError("no-API effective runtime limit is invalid")
+            for key in ("mounts_sha256", "networks_sha256"):
+                _require_sha256(runtime[key], f"no-API runtime {key}")
+        if terminal_status == "completed" and (
+            not isinstance(runtime, Mapping)
+            or runtime["privileged"] is not False
+            or runtime["cap_add"] != []
+            or runtime["cap_drop"] != ["ALL"]
+            or runtime["security_opt"] != ["no-new-privileges:true"]
+            or runtime["cgroupns_mode"] != "private"
+        ):
+            raise PairIdentityError("no-API completed runtime evidence differs from lock")
+        cleanup = safe_docker["cleanup"]
+        if not isinstance(cleanup, Mapping) or set(cleanup) != {
+            "state", "container_count", "network_count", "volume_count"
+        } or cleanup["state"] not in {"verified_empty", "unverified"}:
+            raise PairIdentityError("no-API cleanup evidence is invalid")
+        for key in ("container_count", "network_count", "volume_count"):
+            if (
+                isinstance(cleanup[key], bool)
+                or not isinstance(cleanup[key], int)
+                or cleanup[key] < 0
+            ):
+                raise PairIdentityError("no-API cleanup count is invalid")
+        if cleanup["state"] == "verified_empty" and any(
+            cleanup[key] for key in ("container_count", "network_count", "volume_count")
+        ):
+            raise PairIdentityError("no-API cleanup evidence is not empty")
+        if docker_state == "observed" and (
+            terminal_status == "completed"
+            and any(value is None for value in (image, vhdx, metrics, seccomp, runtime))
+            or cleanup["state"] != "verified_empty"
+        ):
+            raise PairIdentityError("no-API completed Docker evidence is incomplete")
+        if docker_state == "observed_partial" and terminal_status != "failed":
+            raise PairIdentityError("partial Docker evidence is failure-only")
+        safe_docker["runtime"] = dict(runtime) if isinstance(runtime, Mapping) else None
+        safe_docker["cleanup"] = dict(cleanup)
+    elif isinstance(docker, Mapping) and docker.get("state") == "not_observed":
+        if set(docker) != {"state", "reason", "cleanup"} or terminal_status != "failed":
+            raise PairIdentityError("no-API Docker unavailable evidence is invalid")
+        if docker["reason"] != "pre_daemon_failure":
+            raise PairIdentityError("no-API Docker unavailable reason is invalid")
+        cleanup = docker["cleanup"]
+        if not isinstance(cleanup, Mapping) or cleanup != {
+            "state": "not_observed",
+            "container_count": None,
+            "network_count": None,
+            "volume_count": None,
+        }:
+            raise PairIdentityError("no-API unavailable cleanup evidence is invalid")
+        safe_docker = {
+            "state": docker["state"],
+            "reason": docker["reason"],
+            "cleanup": dict(cleanup),
+        }
     else:
         raise PairIdentityError("no-API Docker evidence is required")
+    artifacts = summary.get("artifacts")
+    if not isinstance(artifacts, Mapping) or set(artifacts) != {
+        "trial_result_sha256",
+        "trial_exception_sha256",
+        "watchdog_state",
+        "watchdog_summary_sha256",
+    }:
+        raise PairIdentityError("no-API artifact evidence is invalid")
+    for key in ("trial_result_sha256", "trial_exception_sha256", "watchdog_summary_sha256"):
+        if artifacts[key] is not None:
+            _require_sha256(artifacts[key], f"no-API {key}")
+    if artifacts["watchdog_state"] not in {"parent_finalize_pending", "durable", "not_started"}:
+        raise PairIdentityError("no-API watchdog evidence state is invalid")
+    if (artifacts["watchdog_state"] == "durable") != (
+        artifacts["watchdog_summary_sha256"] is not None
+    ):
+        raise PairIdentityError("no-API watchdog digest state is inconsistent")
+    if terminal_status == "completed" and artifacts["trial_result_sha256"] is None:
+        raise PairIdentityError("no-API completed trial digest is missing")
     identity_projection = {
         "pair_id": identity.pair_id,
         "pair_lock_sha256": identity.lock_sha256,
@@ -1142,12 +1348,15 @@ def _encode_no_api_safe_summary(
             "agent_json_events",
             "code_mode_tool_round_trip",
             "host_returncode",
+            "failure",
+            "artifacts",
         )
     }
     observation["docker"] = safe_docker
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
+        "terminal_status": terminal_status,
         "identity": identity_projection,
         "identity_sha256": identity_sha,
         "observation": observation,
@@ -1175,7 +1384,7 @@ def persist_no_api_safe_summary(
         summary=summary,
     )
     if path.exists() or path.is_symlink():
-        digest = _read_no_api_safe_summary(
+        evidence = _read_no_api_safe_summary(
             path,
             identity=identity,
             side=side,
@@ -1184,7 +1393,7 @@ def persist_no_api_safe_summary(
         )
         if path.read_bytes() != encoded:
             raise PairIdentityError("no-API safe summary differs from durable bytes")
-        return digest
+        return evidence.sha256
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     _atomic_replace_bytes(path, encoded)
     return hashlib.sha256(encoded).hexdigest()
@@ -1210,7 +1419,7 @@ def _read_no_api_safe_summary(
     side: Side,
     run_id: str,
     eval_harness_commit: str,
-) -> str:
+) -> NoApiSummaryEvidence:
     try:
         metadata = path.lstat()
         if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
@@ -1228,14 +1437,16 @@ def _read_no_api_safe_summary(
     if not isinstance(payload, dict) or set(payload) != {
         "schema_version",
         "run_id",
+        "terminal_status",
         "identity",
         "identity_sha256",
         "observation",
     } or not isinstance(payload.get("observation"), Mapping):
-        raise PairIdentityError("no-API safe summary differs from schema v1")
+        raise PairIdentityError("no-API safe summary differs from schema v2")
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "side": side.value,
+        "terminal_status": payload["terminal_status"],
         "pair_validation": True,
         **dict(payload["observation"]),
     }
@@ -1248,7 +1459,10 @@ def _read_no_api_safe_summary(
     )
     if raw != expected:
         raise PairIdentityError("no-API safe summary identity or canonical bytes drifted")
-    return hashlib.sha256(raw).hexdigest()
+    return NoApiSummaryEvidence(
+        sha256=hashlib.sha256(raw).hexdigest(),
+        terminal_status=str(payload["terminal_status"]),
+    )
 
 
 def _parse_modes(value: object) -> dict[str, PairMode]:
@@ -1276,6 +1490,54 @@ def _parse_modes(value: object) -> dict[str, PairMode]:
     return result
 
 
+def _parse_retired_pairs(
+    value: object, *, current: str
+) -> tuple[RetiredPairIdentity, ...]:
+    if not isinstance(value, list) or value != [_RETIRED_V4]:
+        raise PairIdentityError("retired pair list differs from schema v1")
+    result: list[RetiredPairIdentity] = []
+    seen: set[str] = set()
+    for raw in value:
+        if not isinstance(raw, dict) or set(raw) != _RETIRED_PAIR_KEYS:
+            raise PairIdentityError("retired pair differs from schema v1")
+        pair_id = raw["pair_id"]
+        run_id = raw["run_id"]
+        review_path = raw["review_log_path"]
+        if (
+            not isinstance(pair_id, str)
+            or not pair_id
+            or pair_id == current
+            or pair_id in seen
+            or raw["terminal_status"] != "failed"
+            or not isinstance(review_path, str)
+            or not review_path.startswith("agent_log/")
+            or not review_path.endswith(".md")
+            or Path(review_path).is_absolute()
+            or ".." in Path(review_path).parts
+        ):
+            raise PairIdentityError("retired pair identity is invalid")
+        _require_sha256(raw["ledger_sha256"], "retired pair ledger sha256")
+        _require_commit(raw["eval_harness_commit"], "retired pair harness commit")
+        _require_run_id(run_id)
+        try:
+            side = Side(raw["side"])
+        except (TypeError, ValueError) as exc:
+            raise PairIdentityError("retired pair side is invalid") from exc
+        seen.add(pair_id)
+        result.append(
+            RetiredPairIdentity(
+                pair_id=pair_id,
+                terminal_status="failed",
+                ledger_sha256=raw["ledger_sha256"],
+                eval_harness_commit=raw["eval_harness_commit"],
+                run_id=run_id,
+                side=side,
+                review_log_path=review_path,
+            )
+        )
+    return tuple(result)
+
+
 def _validate_sequence_state(
     value: object,
     *,
@@ -1295,9 +1557,9 @@ def _validate_sequence_state(
         "runs",
     }
     if not isinstance(value, dict) or set(value) != expected_keys:
-        raise PairIdentityError("pair sequence ledger differs from schema v3")
+        raise PairIdentityError("pair sequence ledger differs from schema v4")
     if (
-        value["schema_version"] != 3
+        value["schema_version"] != 4
         or value["pair_id"] != identity.pair_id
         or value["pair_lock_sha256"] != identity.lock_sha256
         or value["mode"] != mode
@@ -1323,11 +1585,11 @@ def _validate_sequence_state(
             "status",
             "eval_harness_commit",
             "publication_sha256",
-            "safe_summary_sha256",
-            "safe_summary_path",
+            "no_api_summary_sha256",
+            "no_api_summary_path",
             "container_metrics",
         }:
-            raise PairIdentityError("pair sequence run differs from schema v3")
+            raise PairIdentityError("pair sequence run differs from schema v4")
         slot = identity.topology[index - 1]
         if (
             item["slot"] != slot.slot
@@ -1345,18 +1607,28 @@ def _validate_sequence_state(
             if mode == "no_api"
             else None
         )
-        if item["safe_summary_path"] != expected_safe_path:
-            raise PairIdentityError("pair sequence safe summary path is invalid")
-        for key in ("publication_sha256", "safe_summary_sha256"):
+        if item["no_api_summary_path"] != expected_safe_path:
+            raise PairIdentityError("pair sequence no-API summary path is invalid")
+        for key in ("publication_sha256", "no_api_summary_sha256"):
             if item[key] is not None:
                 _require_sha256(item[key], f"pair sequence {key}")
         metrics = _container_metrics(item["container_metrics"])
         if metrics != item["container_metrics"]:
             raise PairIdentityError("pair sequence container metrics are not canonical")
-        if item["status"] == "completed" and mode == "no_api" and item["safe_summary_sha256"] is None:
-            raise PairIdentityError("completed no-API sequence lacks safe summary evidence")
-        if item["status"] != "completed" and item["safe_summary_sha256"] is not None:
-            raise PairIdentityError("unfinished pair sequence cannot claim safe summary evidence")
+        if (
+            mode == "no_api"
+            and item["status"] in {"completed", "failed"}
+            and item["no_api_summary_sha256"] is None
+        ):
+            raise PairIdentityError("terminal no-API sequence lacks summary evidence")
+        if item["status"] in {"active", "publishing"} and item["no_api_summary_sha256"] is not None:
+            raise PairIdentityError("unfinished pair sequence cannot claim summary evidence")
+        if mode == "paid" and item["no_api_summary_sha256"] is not None:
+            raise PairIdentityError("paid sequence cannot claim no-API summary evidence")
+        if mode == "no_api" and (
+            item["publication_sha256"] is not None or metrics is not None
+        ):
+            raise PairIdentityError("no-API sequence cannot claim paid evidence")
         if item["status"] == "completed" and mode == "paid" and (
             item["publication_sha256"] is None or metrics is None
         ):

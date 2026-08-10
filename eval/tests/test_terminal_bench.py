@@ -528,7 +528,7 @@ class TerminalBenchTests(unittest.TestCase):
         environment = FakeEnvironment(
             remote_owners={adapter.remote_bwrap_path: "1000:1000"}
         )
-        with self.assertRaisesRegex(AdapterError, "ownership differs"):
+        with self.assertRaisesRegex(AdapterError, "command_id=verify_file_owner"):
             asyncio.run(adapter.install(environment))
         commands = "\n".join(call[0] for call in environment.calls)
         self.assertNotIn("chown", commands)
@@ -736,7 +736,7 @@ class TerminalBenchTests(unittest.TestCase):
                 "/run/secrets/rondo_eval_provider_api_key": "0:0"
             }
         )
-        with self.assertRaisesRegex(AdapterError, "ownership differs"):
+        with self.assertRaisesRegex(AdapterError, "command_id=verify_secret_owner"):
             asyncio.run(
                 adapter.run("repair the repository", secret_environment, mock.Mock())
             )
@@ -744,6 +744,32 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn("stat -c '%u:%g' -- /run/secrets/", commands)
         self.assertNotIn("python3 -c", commands)
         self.assertNotIn("chown", commands)
+
+    def test_checked_exec_diagnostic_is_bounded_and_secret_redacted(self) -> None:
+        secret = "sk-secret-must-never-escape"
+
+        class StderrEnvironment(FakeEnvironment):
+            async def exec(self, command, **kwargs):
+                self.calls.append((command, kwargs.get("env"), kwargs.get("timeout_sec"), kwargs.get("user")))
+                return FakeExecResult(1, stdout=secret, stderr=f"permission denied {secret}")
+
+        environment = StderrEnvironment()
+        with self.assertRaises(AdapterError) as caught:
+            asyncio.run(
+                adapters_module._checked_exec(
+                    environment,
+                    f"unsafe-full-argv {secret}",
+                    stage="install",
+                    command_id="verify_bundle_sha256",
+                )
+            )
+        rendered = str(caught.exception)
+        self.assertEqual(caught.exception.stage, "install")
+        self.assertEqual(caught.exception.command_id, "verify_bundle_sha256")
+        self.assertEqual(caught.exception.stderr_summary, "permission_denied")
+        self.assertNotIn(secret, rendered)
+        self.assertNotIn("unsafe-full-argv", rendered)
+        self.assertIsNone(caught.exception.__cause__)
 
     def test_adapter_rejects_wrong_binary_digest(self) -> None:
         adapter = self.adapter()

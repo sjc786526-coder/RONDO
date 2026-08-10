@@ -29,14 +29,15 @@
   overlay/inspect 强制 `cap_drop=ALL`。Docker 有效态另绑定 daemon
   actual image ID、Desktop VHDX 增长、private cgroup namespace、容器 cgroup v2 CPU/峰值内存、
   daemon 回显的有效 seccomp、规范 watchdog 阈值与安全 override；这些字段必须存在于去敏 safe
-  summary，缺失不能完成 pair。新 identity 为 `p1-fix-git-pair-v4`，不复用保留的 v3 ledger。
+  summary，缺失不能完成 pair。v4 不复用保留的 v3 ledger，并在首次失败后进入受跟踪 retirement；
   首次真实 Docker 重验在 RONDO slot 1 的 adapter 安装阶段 `infra_failed`：有效镜像、VHDX、
   private cgroup、容器 metrics、custom seccomp 与 `cap_drop=ALL` 已由 daemon 事实校验，但安装上传后的
   ownership/permission 复合命令失败；trace 定位到含 `chown` 的命令，原始 stderr 未保留，因此不冒充
   独立 syscall 证明。0 fake/API 请求。ledger 已写 failed/blocked，Codex slot 2 按合同未运行。
   adapter 后续已移除 install/run 的所有 `chown`，上传物必须实际 root-owned，agent 私有文件由
   1000:1000 自建，任务递归写权限只允许固定 `/app/personal-site`；该修复尚未用 Docker 重验。
-  这不是双侧 B2 完整验收。
+  这不是双侧 B2 完整验收。当前唯一可执行 identity 为 v5；completed 与 failed 槽都必须先耐久写入
+  identity-bound 去敏摘要，ledger 重读后再收敛，恢复入口必须匹配所请求 side。v5 尚未运行 Docker。
 - **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
   公平 pair，paid 入口 hard-disabled。后续除新 pair/batch/轮次/预算和新授权外，还须在真实
@@ -141,7 +142,8 @@
     `getrusage(self+children)` 只覆盖宿主 runner/CLI，仍仅作设施诊断。supervisor 已对 exact
     container 读取 cgroup v2 `cpu.stat usage_usec` 与 `memory.peak`，生成
     `container_id/cpu_usage_seconds/peak_memory_bytes`，并作为 paid publication/pair/M1 的强制机器
-    门禁。当前只有 pure/fake 验证，真实 Docker 口径待 B2 重验；冻结 codex 不加补丁，
+    门禁。v4 仅有 RONDO 失败路径的真实采样，v5 新摘要与 adapter 修复只有 pure/fake 验证，双侧真实
+    Docker 口径仍待 B2 重验；冻结 codex 不加补丁，
     两侧使用完全相同的采集方式。
   - **内部探针**（轮次数、工具调用次数与耗时、序列化耗时、审批往返耗时）只存在于 RONDO 内部，用于 **RONDO 自身版本间**的对比与找瓶颈，**不用于与冻结 codex 横比**。
   - 原先"baseline 同样加载探针"的说法含糊：往冻结 codex 里打探针就破坏了"冻结"的意义，因此明确改为上面的分工。

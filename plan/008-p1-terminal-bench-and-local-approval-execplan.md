@@ -172,7 +172,8 @@
   最多 4 run；容器到宿主 127.0.0.1 代理的 Docker Desktop bridge 已用 no-API TCP 实测。
 - llama.cpp 冻结为 b10333/commit `0865990` 的 CPU x64 asset，runtime lock 覆盖 52 个普通文件、
   10 个 symlink 和 8 个宿主动态依赖。model-backed client 必须消费并重验 launcher 的
-  0600 私有 receipt，绑定 PID/start ticks、cmdline、listener、runtime/model digest 和 endpoint。
+  0600 私有 receipt，绑定 PID/start ticks、cmdline、listener、runtime/model identity 和 endpoint；这不等于
+  对服务实际加载的全部字节做了持续证明。
   当前 capability 仅 `cpu_only_x64`，`model_backed_validation=not_run`；无模型 doctor 为
   `cpu_frontend_ready_model_missing_gpu_unvalidated`/78，GPU/model-backed 启动在验证前 fail-closed。
 - 独立计划审查发现原编号与 V8 Plan 007 冲突，已改为 Plan 008；同时补齐配置唯一来源、evidence transport
@@ -208,22 +209,22 @@
 
 ### 当前工作
 
-- 第二轮审查整改的代码与 pure/fake/loopback 门禁已收口；本轮未运行 Docker、Cargo、
-  真实 API 或模型。第三轮 B2 前置整改加入规范 wrapper 活性证明、no-API summary/ledger 崩溃收敛和
-  production `cap_drop=ALL`；失败后 adapter 窄修完成的统一 `just eval-test` 为 277/277，
-  `just eval-lock` 为 85 packages。
-  随后的 v4 真实 Docker 重验在 RONDO slot 1 adapter 安装阶段以 `infra_failed` 终止；其
-  image/VHDX/private-cgroup/container-metrics/custom-seccomp 有效证据已采集，但上传后的
-  ownership/permission 复合命令失败；trace 定位到含 `chown` 的命令而无原始 stderr，且 0 fake/API
-  请求。失败 ledger 已封锁，Codex slot 2 未运行。
-- 受跟踪 pair lock 已推进为 `p1-fix-git-pair-v4`，绑定 Harbor/runtime 闭包和新启用门禁。
-  旧 v3 no-API ledger 保留原身份且不兼容新 schema，不复用、删除或作为新门禁已完成的证据。
+- 第二、三轮审查整改已加入规范 wrapper 活性证明、no-API summary/ledger 崩溃收敛和 production
+  `cap_drop=ALL`。随后 v4 真实 Docker 重验在 RONDO slot 1 adapter 安装阶段以 `infra_failed`
+  终止；daemon 有效态曾被当场采样，但失败 ledger 未绑定结构化 Docker 摘要，现存机器证据只能证明
+  failed/blocked、0 fake/API 请求与 Codex 未运行，不能从 ledger 独立重算全部数值。
+- 第四轮整改只运行 pure/fake 轻量门禁，不运行 Docker、Cargo、真实 API 或模型。受跟踪当前 identity
+  已推进为 `p1-fix-git-pair-v5`；同一 lock 记录 v4 的失败 ledger SHA、harness commit、run/side 与审查
+  日志，使新 clone 不能从当前源码重新创建 v4。v5 no-API 的 completed/failed 都先原子保存 identity-bound
+  去敏摘要，再由 ledger 重读并收敛；恢复必须匹配 CLI 请求 side。旧 v3 与失败 v4 的 ledger/trial/
+  watchdog/log 均保留原身份，不迁移、不改写，也不作为 v5 已验收的证据。若进程在摘要耐久前死亡，
+  v5 保持 active 并拒绝新 claim，不凭空断言 Docker 未启动。
 
 ### 后续计划
 
 - adapter 已移除 install/run 的运行时 ownership mutation，改为实际 ownership 验证、agent 用户自建
-  私有文件，并只对固定 `/app/personal-site` 投影递归写权限；该代码只有 pure/fake 回归。后续以新的
-  受跟踪 pair/schema 在项目看门狗内重跑一次 RONDO→Codex no-API Docker pair，将去敏
+  私有文件，并只对固定 `/app/personal-site` 投影递归写权限；该代码只有 pure/fake 回归。后续仅以
+  当前受跟踪 v5 pair/schema 在项目看门狗内重跑一次 RONDO→Codex no-API Docker pair，将去敏
   safe summary、daemon image identity、VHDX、private cgroup namespace、容器 metrics 和有效
   seccomp 作为耐久证据。在此之前 B2 保持待重验。
 - 若后续重开 B3，必须冻结新的 paid pair/batch manifest、任务轮次与预算，并重新取得批量
@@ -237,7 +238,8 @@
 
 - 本地模型权重不存在且本次禁止下载；GPU runtime/model-backed 路径也未实现验收，因此
   L2 不是“只差权重”，真实推理必然保持未运行。
-- v4 只有 RONDO slot 1 的真实设施失败和有效态采样，没有双侧 completed 证据，B2 不称完整验收。
+- v4 只有 RONDO slot 1 的真实设施失败和当场有效态采样，且已作为当前项目历史退休；v5 尚未运行
+  Docker，没有双侧 completed 证据，B2 不称完整验收。
   当前也没有新公平 paid
   pair 和批量 API 授权，因此 B3/M1 保持 hard-disabled/未运行。
 
@@ -245,8 +247,8 @@
 
 - B1 的版本/task/image 资料冻结、Docker hello-world oracle、两侧静态 musl bundle 与目标镜像
   `--version` 探针保留为真实通过项；Harbor console/package/传递依赖闭包已进入受跟踪门禁。
-- B2 双侧 no-API v3 只是旧 lock/schema 的历史正常路径证据。v4 的 pair/watchdog/
-  image/VHDX/container metrics/seccomp 门禁已在 RONDO 侧真实采样，但 adapter 安装失败，Codex 未运行。
+- B2 双侧 no-API v3 只是旧 lock/schema 的历史正常路径证据。v4 的新门禁曾在 RONDO 侧真实采样，
+  但 adapter 安装失败且失败摘要不完整，Codex 未运行；v5 仅完成代码与轻量门禁，尚无 Docker 结果。
 - L1 协议、合法 ToolSearch evidence、最终 sink 与三组 consumer 协议逐字节 fixture 已验收；不宣称三套
   生产调用端均已实现。L2 只是 CPU x64 前端/动态运行闭包和实例 receipt 门禁；
   GPU/model-backed 启动、真实结构化推理与性能实测未验收。

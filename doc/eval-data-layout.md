@@ -131,13 +131,19 @@ eval-data/                             # git-ignored
   atomic replace + parent fsync 更新；已存在的空文件视为损坏，不能重置为 slot 1。两槽绑定
   同一 `eval_harness_commit`。paid 槽先进入 `publishing`，结果持久后回读 record SHA-256 再收敛为
   `completed`；M1 同时核对 durable ledger 与 result index，不仅聚合两条 record。
-- no-API ledger schema v3 为每个 claim 固定 `safe_summary_path`。summary 已耐久、ledger 仍 active 的崩溃
-  在任何外部 preflight 前按完整 schema/identity/hash 收敛；completed ledger 每次打开持续回读摘要，缺失或
-  漂移 fail-closed。遗留 active 没有合法摘要时写为 `failed + blocked`，不得重跑或另起 pair。
-- 后续 no-API 成功槽在账本写 `completed` 前，先原子写入
-  `eval-data/pairs/<pair_id>/no-api-safe/<run_id>.json`，只保留 pair/bundle/Harbor/seccomp/harness 身份和去敏
-  计数/有效态摘要，以及实际 daemon image ID、VHDX baseline/peak/final/growth、exact container
-  CPU/峰值内存和 daemon 回显的有效 seccomp。`docker=null` 或任一字段缺失都不能完成 pair。旧 no-API
+- 当前 no-API ledger schema v4 为每个 claim 固定 `no_api_summary_path`。completed 与 failed 都必须先原子
+  写 canonical summary，再由 ledger 在同一锁内重读 identity/hash 并收敛；恢复还必须匹配调用者请求 side。
+  completed/failed ledger 每次打开持续回读摘要，缺失或漂移 fail-closed。若进程在任何摘要耐久前死亡，
+  无法证明 Docker 是否已启动，ledger 保持 `active` 并拒绝新 claim，而不是伪造 `not_observed` 终态；
+  不得在同一 identity/授权下静默重跑。后续新 identity 必须有明确续跑决定和受跟踪 lock。
+- 后续 no-API 槽在账本写终态前，先原子写入
+  `eval-data/pairs/<pair_id>/no-api-safe/<run_id>.json`。completed 摘要只保留 pair/bundle/Harbor/
+  seccomp/harness 身份、去敏计数/有效态，以及实际 daemon image ID、VHDX baseline/peak/final/growth、
+  exact container CPU/峰值内存和 daemon 回显的有效 seccomp，任一必需字段缺失都不能 completed。
+  failed 摘要保持 `failed + blocked`，另记录实际可得的 Docker/cleanup 状态、闭集 failure stage、安全
+  command id 和受限诊断分类；未观察到的事实明确标 unavailable，不补造 0、argv、stdout/stderr、密钥或
+  宿主绝对路径。watchdog 最终 summary 由父 wrapper 在子 CLI 退出后生成，CLI 内只能诚实记录
+  `parent_finalize_pending`，不能伪造 digest。旧 no-API
   v3 原始 trial/safe summary 已按原保留策略清理，不能事后补写或
   冒充新机器证据。
 - `git_commit` 记录冻结产品/二进制的 measurement commit；若 eval harness 从另一 clean worktree 加载，

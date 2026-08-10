@@ -23,10 +23,13 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.config import RuntimeConfig  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, RunOutcome, Side  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
+    DockerContainerFact,
+    DockerContainerMetricFact,
     DockerContainerMetrics,
     DockerDesktopVhdxEvidence,
     DockerImageIdentity,
     DockerSeccompEvidence,
+    DockerSupervisionError,
     HeavyLockLease,
 )
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
@@ -58,6 +61,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     no_api_safe_summary_path,
     persist_no_api_safe_summary,
 )
+from rondo_eval.terminal_bench.results import ParsedHarborResult  # noqa: E402
 from rondo_eval.terminal_bench.__main__ import _load_manifest  # noqa: E402
 from rondo_eval.terminal_bench.runner import (  # noqa: E402
     HostHarborResult,
@@ -307,12 +311,12 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         )
         return TerminalBenchRequest(
             side=Side.CODEX,
-            batch_id="p1-no-api-smoke",
+            batch_id="p1-no-api-smoke-v5",
             binary=manifest,
             image_digest=FIX_GIT_IMAGE_DIGEST,
             source_checkout=str(self.root / "source"),
             staging_root=str(self.root / "staging"),
-            docker_task_id="p1-no-api-smoke-codex",
+            docker_task_id="p1-no-api-smoke-v5-codex",
             memory_bytes=2 * 1024**3,
             memory_swap_bytes=3 * 1024**3,
             pids_limit=256,
@@ -353,17 +357,51 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertTrue(all(item.model == "gpt-5.6-luna" for item in result.requests))
         self.assertTrue(all(item.authorized for item in result.requests))
         self.assertTrue(result.safe_summary()["code_mode_tool_round_trip"])
+        identity = load_pair_identity()
+        container_id = "b" * 64
+        runtime_fact = DockerContainerFact(
+            container_id=container_id,
+            user="1000:1000",
+            privileged=False,
+            cap_add=(),
+            cap_drop=("ALL",),
+            security_opt=(
+                "no-new-privileges:true",
+                'seccomp={"defaultAction":"SCMP_ACT_ERRNO"}',
+            ),
+            memory_bytes=2 * 1024**3,
+            memory_swap_bytes=3 * 1024**3,
+            pids_limit=256,
+            read_only_rootfs=False,
+            cgroupns_mode="private",
+            network_mode="trial_default",
+            networks=("trial_default",),
+            mounts=(),
+            compose_project="trial__env",
+            compose_service="client",
+            image_reference=FIX_GIT_IMAGE_REF,
+            image_id=f"sha256:{'a' * 64}",
+            seccomp_profile_sha256=identity.no_api_seccomp.effective_sha256,
+        )
         samples = (
             SimpleNamespace(
                 docker_total_bytes=10,
                 task_bytes=2,
                 data_root_filesystem_free_bytes=100,
+                task_container_ids=(container_id,),
+                task_containers=(runtime_fact,),
+                task_networks=(),
+                task_volumes=(),
             ),
             SimpleNamespace(
                 docker_total_bytes=11,
                 task_bytes=3,
                 data_root_filesystem_free_bytes=99,
                 data_root="/must-not-be-persisted",
+                task_container_ids=(),
+                task_containers=(),
+                task_networks=(),
+                task_volumes=(),
             ),
         )
         evidence = SimpleNamespace(
@@ -371,7 +409,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             warnings=(),
             image_identity=DockerImageIdentity(FIX_GIT_IMAGE_REF, f"sha256:{'a' * 64}"),
             desktop_vhdx=DockerDesktopVhdxEvidence(1000, 1200, 1100, 200),
-            container_metrics=DockerContainerMetrics("b" * 64, 1.5, 4096),
+            container_metrics=DockerContainerMetrics(container_id, 1.5, 4096),
             effective_seccomp=DockerSeccompEvidence(
                 "custom",
                 "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf",
@@ -385,6 +423,22 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(durable["desktop_vhdx"]["peak_growth_bytes"], 200)
         self.assertEqual(durable["container_metrics"]["peak_memory_bytes"], 4096)
         self.assertEqual(durable["effective_seccomp"]["profile_kind"], "custom")
+        self.assertEqual(durable["runtime"]["cap_drop"], ["ALL"])
+        self.assertEqual(durable["cleanup"]["state"], "verified_empty")
+        durable_result = replace(
+            result,
+            harbor=replace(result.harbor, docker_evidence=evidence),
+            pair_validation=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            persist_no_api_safe_summary(
+                Path(directory) / "completed.json",
+                identity=identity,
+                side=Side.CODEX,
+                run_id="codex-completed-observed",
+                eval_harness_commit="f" * 40,
+                summary=durable_result.safe_summary(),
+            )
         self.assertIn(
             '      - "seccomp=',
             result.prepared.materialized_task.overlay_path.read_text(encoding="utf-8"),
@@ -599,8 +653,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         )
         run_id = "tb-no-api-rondo-summary-cut"
         summary = {
-            "schema_version": 1,
+            "schema_version": 2,
             "side": "rondo",
+            "terminal_status": "completed",
             "outcome": "completed",
             "task_outcome": "pass",
             "reward": 1.0,
@@ -611,7 +666,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             "code_mode_tool_round_trip": True,
             "host_returncode": 0,
             "pair_validation": True,
+            "failure": None,
             "docker": {
+                "state": "observed",
                 "sample_count": 2,
                 "baseline_total_bytes": 1,
                 "final_total_bytes": 2,
@@ -638,6 +695,30 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     "profile_kind": "custom",
                     "profile_sha256": identity.no_api_seccomp.effective_sha256,
                 },
+                "runtime": {
+                    "privileged": False,
+                    "cap_add": [],
+                    "cap_drop": ["ALL"],
+                    "security_opt": ["no-new-privileges:true"],
+                    "cgroupns_mode": "private",
+                    "memory_bytes": 2147483648,
+                    "memory_swap_bytes": 3221225472,
+                    "pids_limit": 256,
+                    "mounts_sha256": "1" * 64,
+                    "networks_sha256": "2" * 64,
+                },
+                "cleanup": {
+                    "state": "verified_empty",
+                    "container_count": 0,
+                    "network_count": 0,
+                    "volume_count": 0,
+                },
+            },
+            "artifacts": {
+                "trial_result_sha256": "3" * 64,
+                "trial_exception_sha256": None,
+                "watchdog_state": "parent_finalize_pending",
+                "watchdog_summary_sha256": None,
             },
         }
         child = os.fork()
@@ -700,6 +781,230 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue())["status"], "recovered")
         state = json.loads(ledger_path.read_text(encoding="utf-8"))
         self.assertEqual(state["runs"][0]["status"], "completed")
+
+    def test_cli_failed_summary_recovery_is_nonzero_before_external_preflight(self) -> None:
+        identity = load_pair_identity()
+        paths = SimpleNamespace(common_root=self.root, worktree_root=EVAL_ROOT.parent)
+        ledger_path = (
+            self.root / "eval-data" / "pairs" / f"{identity.pair_id}-no-api.json"
+        )
+        run_id = "tb-no-api-rondo-failed-recovery"
+        with PairSequenceLedger(ledger_path, identity=identity, mode="no_api") as sequence:
+            sequence.claim(
+                side=Side.RONDO,
+                run_id=run_id,
+                eval_harness_commit="f" * 40,
+            )
+        persist_no_api_safe_summary(
+            no_api_safe_summary_path(ledger_path, identity=identity, run_id=run_id),
+            identity=identity,
+            side=Side.RONDO,
+            run_id=run_id,
+            eval_harness_commit="f" * 40,
+            summary=docker_smoke_module._early_failure_summary(
+                side=Side.RONDO,
+                exc=DockerNoApiSmokeError("redacted pre-daemon failure"),
+            ),
+        )
+        external = mock.Mock(side_effect=AssertionError("external preflight ran"))
+        output = io.StringIO()
+        with mock.patch.object(
+            docker_smoke_module.RepoPaths, "discover", return_value=paths
+        ), mock.patch.object(
+            docker_smoke_module, "load_pair_identity", return_value=identity
+        ), mock.patch.object(
+            docker_smoke_module, "validate_eval_harness_checkout", external
+        ), mock.patch.object(
+            docker_smoke_module, "load_runtime_config", external
+        ), mock.patch.object(
+            docker_smoke_module, "lease_from_watchdog", external
+        ), redirect_stdout(output):
+            exit_code = docker_smoke_module.main(
+                [
+                    "--side", "rondo",
+                    "--binary-manifest", str(self.root / "not-read.json"),
+                    "--docker-host-volume", str(self.root / "not-probed"),
+                    "--pair-validation",
+                ]
+            )
+        self.assertEqual(exit_code, 70)
+        external.assert_not_called()
+        recovered = json.loads(output.getvalue())
+        self.assertEqual(recovered["terminal_status"], "failed")
+        state = json.loads(ledger_path.read_text(encoding="utf-8"))
+        self.assertTrue(state["blocked"])
+        self.assertEqual(state["runs"][0]["status"], "failed")
+
+    def test_cli_side_mismatch_is_nonzero_before_external_preflight(self) -> None:
+        identity = load_pair_identity()
+        paths = SimpleNamespace(common_root=self.root, worktree_root=EVAL_ROOT.parent)
+        ledger_path = (
+            self.root / "eval-data" / "pairs" / f"{identity.pair_id}-no-api.json"
+        )
+        with PairSequenceLedger(ledger_path, identity=identity, mode="no_api") as sequence:
+            sequence.claim(
+                side=Side.RONDO,
+                run_id="tb-no-api-rondo-side-bound",
+                eval_harness_commit="f" * 40,
+            )
+        before = ledger_path.read_bytes()
+        external = mock.Mock(side_effect=AssertionError("external preflight ran"))
+        error = io.StringIO()
+        with mock.patch.object(
+            docker_smoke_module.RepoPaths, "discover", return_value=paths
+        ), mock.patch.object(
+            docker_smoke_module, "load_pair_identity", return_value=identity
+        ), mock.patch.object(
+            docker_smoke_module, "validate_eval_harness_checkout", external
+        ), mock.patch.object(
+            docker_smoke_module, "load_runtime_config", external
+        ), mock.patch.object(
+            docker_smoke_module, "lease_from_watchdog", external
+        ), redirect_stderr(error):
+            exit_code = docker_smoke_module.main(
+                [
+                    "--side", "codex",
+                    "--binary-manifest", str(self.root / "not-read.json"),
+                    "--docker-host-volume", str(self.root / "not-probed"),
+                    "--pair-validation",
+                ]
+            )
+        self.assertEqual(exit_code, 65)
+        self.assertIn("requested=codex,recovered=rondo", error.getvalue())
+        external.assert_not_called()
+        self.assertEqual(ledger_path.read_bytes(), before)
+
+    def test_supervision_failure_summary_keeps_actual_partial_state_redacted(self) -> None:
+        identity = load_pair_identity()
+        container_id = "b" * 64
+        fact = DockerContainerFact(
+            container_id=container_id,
+            user="1000:1000",
+            privileged=False,
+            cap_add=(),
+            cap_drop=("ALL",),
+            security_opt=(
+                "no-new-privileges:true",
+                'seccomp={"defaultAction":"SCMP_ACT_ERRNO"}',
+            ),
+            memory_bytes=2 * 1024**3,
+            memory_swap_bytes=3 * 1024**3,
+            pids_limit=256,
+            read_only_rootfs=False,
+            cgroupns_mode="private",
+            network_mode="trial_default",
+            networks=("trial_default",),
+            mounts=(),
+            compose_project="trial__env",
+            compose_service="client",
+            image_reference=FIX_GIT_IMAGE_REF,
+            image_id=f"sha256:{'a' * 64}",
+            seccomp_profile_sha256=identity.no_api_seccomp.effective_sha256,
+        )
+        metric = DockerContainerMetricFact(container_id, 1_500_000, 4096)
+        common = {
+            "docker_total_bytes": 10,
+            "task_bytes": 2,
+            "data_root_filesystem_free_bytes": 100,
+            "task_networks": (),
+            "task_volumes": (),
+        }
+        samples = (
+            SimpleNamespace(
+                **common,
+                docker_desktop_vhdx_bytes=1000,
+                task_container_ids=(container_id,),
+                task_containers=(fact,),
+                task_container_metrics=(metric,),
+            ),
+            SimpleNamespace(
+                **{**common, "docker_total_bytes": 11, "task_bytes": 3},
+                docker_desktop_vhdx_bytes=1100,
+                task_container_ids=(),
+                task_containers=(),
+                task_container_metrics=(),
+            ),
+        )
+        exc = DockerSupervisionError(
+            "raw secret must not be retained", samples=samples
+        )
+        summary = docker_smoke_module._early_failure_summary(
+            side=Side.RONDO, exc=exc
+        )
+        docker = summary["docker"]
+        self.assertEqual(docker["state"], "observed_partial")
+        self.assertEqual(docker["cleanup"]["state"], "verified_empty")
+        self.assertEqual(
+            docker["runtime"]["security_opt"], ["no-new-privileges:true"]
+        )
+        self.assertNotIn("raw secret", json.dumps(summary))
+        post_validation = docker_smoke_module._early_failure_summary(
+            side=Side.RONDO,
+            exc=DockerNoApiSmokeError("redacted validation failure", samples=samples),
+        )
+        self.assertEqual(post_validation["failure"]["stage"], "result")
+        self.assertEqual(
+            post_validation["failure"]["command_id"],
+            "post_supervision_validation",
+        )
+        self.assertEqual(post_validation["docker"]["state"], "observed_partial")
+        with tempfile.TemporaryDirectory() as directory:
+            persist_no_api_safe_summary(
+                Path(directory) / "failure.json",
+                identity=identity,
+                side=Side.RONDO,
+                run_id="rondo-partial-failure",
+                eval_harness_commit="f" * 40,
+                summary=summary,
+            )
+
+    def test_trial_failure_consumes_only_closed_adapter_diagnostic(self) -> None:
+        secret = "sk-secret-must-not-persist"
+        parsed = ParsedHarborResult(
+            outcome=RunOutcome.INFRA_FAILED,
+            task_outcome="fail",
+            reward=0.0,
+            duration_seconds=0.0,
+            input_tokens=0,
+            cached_tokens=0,
+            output_tokens=0,
+            job_result={},
+            trial_result={
+                "exception_info": {
+                    "exception_type": "AdapterError",
+                    "exception_message": (
+                        "container command failed: stage=install "
+                        "command_id=verify_bundle_owner stderr=permission_denied"
+                    ),
+                    "raw": secret,
+                }
+            },
+        )
+        diagnostic = docker_smoke_module._trial_failure_diagnostic(parsed)
+        self.assertEqual(
+            diagnostic,
+            {
+                "stage": "adapter_install",
+                "command_id": "verify_bundle_owner",
+                "stderr_summary": "permission_denied",
+            },
+        )
+        self.assertNotIn(secret, json.dumps(diagnostic))
+        drifted = replace(
+            parsed,
+            trial_result={
+                "exception_info": {
+                    "exception_message": (
+                        "container command failed: stage=install "
+                        f"command_id=verify_bundle_owner stderr={secret}"
+                    )
+                }
+            },
+        )
+        self.assertEqual(
+            docker_smoke_module._trial_failure_diagnostic(drifted)["command_id"],
+            "no_api_contract",
+        )
 
     def test_cli_loader_requires_15_key_bundle_and_rejects_legacy_16_keys(self) -> None:
         bundle = self.root / "eval-data" / "bin" / "smoke-bundle"

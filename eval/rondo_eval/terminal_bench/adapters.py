@@ -31,6 +31,19 @@ FIX_GIT_CANONICAL_WORKDIR = "/app/personal-site"
 class AdapterError(RuntimeError):
     """Raised before or during an agent run when its frozen contract is unsafe."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str | None = None,
+        command_id: str | None = None,
+        stderr_summary: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.command_id = command_id
+        self.stderr_summary = stderr_summary
+
 
 class UploadBinaryAdapter(HarborCodexAgent):
     """Reuse Harbor's Codex result parser but replace both install and run.
@@ -189,6 +202,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
             f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))} && "
             f"chmod 0755 {shlex.quote(str(self.remote_directory))} "
             f"{shlex.quote(str(PurePosixPath(self.remote_bwrap_path).parent))}",
+            stage="install",
+            command_id="prepare_bundle_dirs",
         )
         try:
             await environment.upload_file(source, self.remote_path)
@@ -197,8 +212,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 self.remote_code_mode_host_path,
             )
             await environment.upload_file(bwrap_source, self.remote_bwrap_path)
-        except Exception as exc:
-            raise AdapterError("binary bundle upload failed") from exc
+        except Exception:
+            raise _diagnostic_error(
+                stage="install",
+                command_id="upload_bundle",
+                stderr_summary="other_redacted",
+            ) from None
         directories = (
             str(self.remote_directory),
             str(PurePosixPath(self.remote_bwrap_path).parent),
@@ -220,32 +239,65 @@ class UploadBinaryAdapter(HarborCodexAgent):
             await _checked_exec(
                 environment,
                 f"test {type_test} {quoted} && test ! -L {quoted}",
+                stage="install",
+                command_id=f"verify_{kind}_type",
             )
             ownership = await _checked_exec(
                 environment,
                 f"stat -c '%u:%g' -- {quoted}",
+                stage="install",
+                command_id=f"verify_{kind}_owner",
             )
-            _require_ownership(ownership, remote_path, "0:0")
+            try:
+                _require_ownership(ownership, remote_path, "0:0")
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id=f"verify_{kind}_owner",
+                    stderr_summary="other_redacted",
+                ) from None
         await _checked_exec(
             environment,
             "chmod 0755 " + " ".join(shlex.quote(path) for path in directories),
+            stage="install",
+            command_id="set_bundle_dir_modes",
         )
         for remote_path, expected_digest in (
             (self.remote_path, self.manifest.sha256),
             (self.remote_code_mode_host_path, self.manifest.code_mode_host_sha256),
             (self.remote_bwrap_path, self.manifest.bwrap_sha256),
         ):
-            await _checked_exec(environment, f"chmod 0555 {shlex.quote(remote_path)}")
+            await _checked_exec(
+                environment,
+                f"chmod 0555 {shlex.quote(remote_path)}",
+                stage="install",
+                command_id="set_bundle_file_mode",
+            )
             result = await _checked_exec(
                 environment,
                 f"sha256sum -- {shlex.quote(remote_path)}",
+                stage="install",
+                command_id="verify_bundle_sha256",
             )
-            remote_digest = _parse_sha256sum(result, remote_path)
+            try:
+                remote_digest = _parse_sha256sum(result, remote_path)
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id="verify_bundle_sha256",
+                    stderr_summary="other_redacted",
+                ) from None
             if remote_digest != expected_digest:
-                raise AdapterError("uploaded binary sha256 does not match BinaryManifest")
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id="verify_bundle_sha256",
+                    stderr_summary="other_redacted",
+                )
         await _checked_exec(
             environment,
             f"{shlex.quote(self.remote_path)} --version",
+            stage="install",
+            command_id="verify_binary_version",
         )
 
     @with_prompt_template
@@ -274,6 +326,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 'test ! -L "$task_workdir"; '
                 'chmod -R a+rwX -- "$task_workdir"'
             ),
+            stage="run",
+            command_id="project_task_permissions",
         )
         await self.exec_as_agent(
             environment,
@@ -312,11 +366,18 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 command=f"stat -c '%u:%g' -- {shlex.quote(secret_path)}",
                 env=nonsecret_env,
             )
-            _require_ownership(
-                secret_owner,
-                secret_path,
-                TERMINAL_BENCH_AGENT_USER,
-            )
+            try:
+                _require_ownership(
+                    secret_owner,
+                    secret_path,
+                    TERMINAL_BENCH_AGENT_USER,
+                )
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="run",
+                    command_id="verify_secret_owner",
+                    stderr_summary="other_redacted",
+                ) from None
             auth_command = (
                 f"set -e; test -f {shlex.quote(secret_path)}; "
                 f"test ! -L {shlex.quote(secret_path)}; "
@@ -583,17 +644,60 @@ def _verify_local_binary(path: Path, expected: str) -> None:
         raise AdapterError("local binary sha256 does not match BinaryManifest")
 
 
-async def _checked_exec(environment: EnvironmentLike, command: str):
+async def _checked_exec(
+    environment: EnvironmentLike,
+    command: str,
+    *,
+    stage: str,
+    command_id: str,
+):
+    if not re.fullmatch(r"[a-z][a-z0-9_.-]{0,31}", stage) or not re.fullmatch(
+        r"[a-z][a-z0-9_.-]{0,63}", command_id
+    ):
+        raise AdapterError("container diagnostic identity is invalid")
     try:
         result = await environment.exec(command, timeout_sec=30, user="root")
-        code, _stdout, _stderr = exec_result(result)
-    except Exception as exc:
-        if isinstance(exc, AdapterError):
-            raise
-        raise AdapterError("container command failed") from exc
+        code, _stdout, stderr = exec_result(result)
+    except Exception:
+        stderr_summary = "other_redacted"
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=stderr_summary,
+        ) from None
     if code != 0:
-        raise AdapterError("container command failed")
+        stderr_summary = _classify_stderr(stderr)
+        raise _diagnostic_error(
+            stage=stage,
+            command_id=command_id,
+            stderr_summary=stderr_summary,
+        )
     return result
+
+
+def _classify_stderr(stderr: str) -> str:
+    if not stderr:
+        return "empty"
+    lowered = stderr[:4096].casefold()
+    if "permission denied" in lowered or "operation not permitted" in lowered:
+        return "permission_denied"
+    if "not found" in lowered or "no such file" in lowered:
+        return "not_found"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "timeout"
+    return "other_redacted"
+
+
+def _diagnostic_error(
+    *, stage: str, command_id: str, stderr_summary: str
+) -> AdapterError:
+    return AdapterError(
+        f"container command failed: stage={stage} command_id={command_id} "
+        f"stderr={stderr_summary}",
+        stage=stage,
+        command_id=command_id,
+        stderr_summary=stderr_summary,
+    )
 
 
 def _parse_sha256sum(result: object, expected_path: str) -> str:
