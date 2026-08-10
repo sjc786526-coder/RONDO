@@ -54,6 +54,7 @@ class NamespaceDiagnosticTests(unittest.TestCase):
         argv = plan.argv
         lowered = tuple(value.casefold() for value in argv)
         self.assertIsNone(plan.seccomp_profile_sha256)
+        self.assertIsNone(plan.seccomp_profile_source_sha256)
         self.assertEqual(argv[:3], ("docker", "container", "run"))
         self.assertNotIn("--privileged", lowered)
         self.assertNotIn("--cap-add", lowered)
@@ -111,7 +112,8 @@ class NamespaceDiagnosticTests(unittest.TestCase):
                 self._spec(root, profile=profile),
                 tracked_file_check=lambda project, path: checks.append((project, path)),
             )
-            digest = "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
+            source_digest = "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
+            digest = "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
             resolved_root = root.resolve()
             resolved_profile = profile.resolve()
 
@@ -122,9 +124,10 @@ class NamespaceDiagnosticTests(unittest.TestCase):
             )
 
         self.assertEqual(plan.seccomp_profile_sha256, digest)
+        self.assertEqual(plan.seccomp_profile_source_sha256, source_digest)
         self.assertEqual(checks, [(resolved_root, resolved_profile)])
         self.assertIn(f"seccomp={resolved_profile}", plan.argv)
-        self.assertIn(f"dev.rondo.eval.seccomp-profile-sha256={digest}", plan.argv)
+        self.assertIn(f"dev.rondo.eval.seccomp-profile-sha256={source_digest}", plan.argv)
 
     def test_rejects_floating_image_bad_binary_and_unsafe_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

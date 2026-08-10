@@ -9,6 +9,7 @@ namespace diagnosis. It is not the RONDO or Docker daemon default.
 - Source URL: `https://raw.githubusercontent.com/moby/profiles/seccomp/v0.2.3/seccomp/default.json`
 - Source SHA-256: `536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74`
 - Derived SHA-256: `9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f`
+- Canonical effective JSON SHA-256: `a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf`
 
 The only semantic delta is one `SCMP_ACT_ALLOW` rule, excluded when
 `CAP_SYS_ADMIN` is present, for `clone`, `mount`, `pivot_root`, `umount2`, and
@@ -22,4 +23,6 @@ requiring the upstream SHA-256 above.
 The observed Docker Engine version is recorded separately by the execution
 log; it does not change this profile's upstream identity. Every run must retain
 `--cap-drop ALL`, reject `privileged`, `SYS_ADMIN`, and `seccomp=unconfined`,
-and verify the daemon-inspected profile-content digest through the supervisor.
+and verify the daemon-inspected canonical JSON digest through the supervisor.
+The original derived-file SHA remains a separate source identity because the
+Docker daemon reserializes the profile before returning `SecurityOpt`.

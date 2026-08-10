@@ -1385,12 +1385,27 @@ def _seccomp_profile_digest(security_opt: tuple[str, ...]) -> str | None:
     if not payload or payload.startswith(("/", "./", "../")):
         raise RuntimeBridgeError("Docker seccomp profile content is unavailable")
     try:
-        decoded = json.loads(payload)
+        decoded = json.loads(payload, object_pairs_hook=_unique_json_object)
     except json.JSONDecodeError as exc:
         raise RuntimeBridgeError("Docker seccomp profile content is invalid") from exc
     if not isinstance(decoded, dict):
         raise RuntimeBridgeError("Docker seccomp profile content is invalid")
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    canonical = json.dumps(
+        decoded,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise RuntimeBridgeError("Docker seccomp profile content is ambiguous")
+        result[key] = value
+    return result
 
 
 def _validate_compose_resources(

@@ -39,6 +39,7 @@ _PROFILE_LABEL = "dev.rondo.eval.seccomp-profile-sha256"
 _TRACKED_PROFILE = Path("eval/seccomp/plan008-userns-minimal-v0.2.3.json")
 _UPSTREAM_PROFILE_SHA256 = "536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74"
 _DERIVED_PROFILE_SHA256 = "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
+_EFFECTIVE_PROFILE_SHA256 = "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
 _PROFILE_DELTA = b'''\t\t{
 \t\t\t"names": [
 \t\t\t\t"clone",
@@ -99,6 +100,7 @@ class NamespaceDiagnosticSpec:
 @dataclass(frozen=True)
 class NamespaceDiagnosticPlan:
     argv: tuple[str, ...]
+    seccomp_profile_source_sha256: str | None
     seccomp_profile_sha256: str | None
     compose_contract: ComposeRunContract
 
@@ -116,6 +118,7 @@ class NamespaceDiagnosticResult:
     unshare_userns: str
     unshare_errno: int
     bwrap_baseline: str
+    seccomp_profile_source_sha256: str | None
     seccomp_profile_sha256: str | None
     docker_returncode: int
     docker_sample_count: int
@@ -163,6 +166,7 @@ def build_namespace_diagnostic_plan(
         "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=64m",
         "--mount", f"type=bind,source={bwrap},target={_CONTAINER_BWRAP},readonly",
     ]
+    profile_source_sha256 = None
     profile_sha256 = None
     # Docker daemon inspect normalizes the CLI spelling to a colon.
     security_opt = ("no-new-privileges:true",)
@@ -172,8 +176,9 @@ def build_namespace_diagnostic_plan(
             raise NamespaceDiagnosticError("only the frozen Plan 008 seccomp profile is allowed")
         (tracked_file_check or _require_clean_tracked_file)(project_root, profile)
         _validate_frozen_profile(profile.read_bytes())
-        profile_sha256 = _DERIVED_PROFILE_SHA256
-        argv.extend(("--label", f"{_PROFILE_LABEL}={profile_sha256}", "--security-opt", f"seccomp={profile}"))
+        profile_source_sha256 = _DERIVED_PROFILE_SHA256
+        profile_sha256 = _EFFECTIVE_PROFILE_SHA256
+        argv.extend(("--label", f"{_PROFILE_LABEL}={profile_source_sha256}", "--security-opt", f"seccomp={profile}"))
     argv.extend((spec.image, "/bin/sh", "-ceu", DIAGNOSTIC_SCRIPT))
     result = tuple(argv)
     _reject_forbidden_argv(result)
@@ -196,7 +201,7 @@ def build_namespace_diagnostic_plan(
         network_names=(),
     )
     contract.validate()
-    return NamespaceDiagnosticPlan(result, profile_sha256, contract)
+    return NamespaceDiagnosticPlan(result, profile_source_sha256, profile_sha256, contract)
 
 
 def run_supervised_namespace_diagnostic(
@@ -237,7 +242,9 @@ def run_supervised_namespace_diagnostic(
     values = _parse_output(output)
     baseline, final = execution.samples[0], execution.samples[-1]
     return NamespaceDiagnosticResult(
-        **values, seccomp_profile_sha256=plan.seccomp_profile_sha256,
+        **values,
+        seccomp_profile_source_sha256=plan.seccomp_profile_source_sha256,
+        seccomp_profile_sha256=plan.seccomp_profile_sha256,
         docker_returncode=execution.returncode, docker_sample_count=len(execution.samples),
         docker_baseline_total_bytes=baseline.docker_total_bytes,
         docker_final_total_bytes=final.docker_total_bytes,
@@ -296,6 +303,14 @@ def _validate_frozen_profile(raw: bytes) -> None:
         raise NamespaceDiagnosticError("seccomp profile is invalid JSON") from exc
     if not isinstance(document, dict) or document.get("defaultAction") != "SCMP_ACT_ERRNO":
         raise NamespaceDiagnosticError("seccomp profile must remain default-deny")
+    canonical = json.dumps(
+        document,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if hashlib.sha256(canonical).hexdigest() != _EFFECTIVE_PROFILE_SHA256:
+        raise NamespaceDiagnosticError("seccomp effective profile identity differs")
 
 
 def _reject_forbidden_argv(argv: Sequence[str]) -> None:

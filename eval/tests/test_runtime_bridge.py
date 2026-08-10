@@ -569,7 +569,13 @@ class DockerCounterTests(unittest.TestCase):
 
             self.assertEqual(
                 reading.task_containers[0].seccomp_profile_sha256,
-                hashlib.sha256(profile.encode()).hexdigest(),
+                hashlib.sha256(
+                    json.dumps(
+                        json.loads(profile),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest(),
             )
 
             responses[-1] = _container_inspect(
