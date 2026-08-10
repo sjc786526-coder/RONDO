@@ -185,40 +185,39 @@
 - RONDO companion 的前两次受监督构建均保留失败 summary：第一次证明 helper 的独立依赖图没有继承
   `codex-core` 的 vendored OpenSSL feature；同次选择 core 后越过该点，但又证明原 V8 gate 按 GNU rustc
   host 选择的归档不能链接 musl。两次均为构建错误、非资源停止，swap 峰值为 0。
+- 独立审查 F-01～F-16 已收口：pair/Harbor identity、公平拓扑、Docker 有效态、watchdog proof、
+  Compose 资源清理、最小外部 metrics、结果交叉约束、crash-consistent 归档、L1 ToolSearch/sink、
+  L2 完整 runtime closure/redirect/model identity 均进入生产门禁与回归。
+- 固定镜像的 default/custom seccomp 反事实证明 builtin profile 是 nested user namespace 阻断原因；
+  受跟踪最小 profile 下 RONDO→Codex no-API 配对 v3 两侧通过，未使用 privileged、`SYS_ADMIN` 或
+  `seccomp=unconfined`。轻量门禁为 233/233，`uv lock --check` 为 85 packages。
 
 ### 当前工作
 
-- 独立审查日志 `agent_log/2026-08-10-120053-plan008-independent-implementation-review.md` 已在
-  `6d4cd75` 固化；本批以其 F-01～F-16 收敛结论为唯一缺陷清单，不重开已撤回的异议。
-- 已在看门狗下清理旧 worktree venv、uv/Python/ruff 缓存；冻结 bundle、预算账本和三个 claimed
-  诊断 work 现场保留。修复在 `0810-plan008-review-remediation` 独立 worktree 实施。
-- 当前并行修复 pair/batch 身份与公平拓扑、Harbor preflight、最小 wall/CPU/peak RSS、Docker 有效态与
-  watchdog proof、crash-consistent 归档、L1 evidence/sink、L2 runtime/redirect/身份和结果交叉约束。
-- 用户已授权只在 Plan 008 固定镜像/容器内做无 API、无密钥 namespace/seccomp 定向诊断；允许项目内、
-  仅作用于该容器的最小 seccomp profile。仍禁止 privileged、`SYS_ADMIN`、`seccomp=unconfined` 和宿主全局修改。
+- F-01～F-16 修复、定向 Docker 诊断与双侧 no-API 配对均已完成；正在同步权威文档、清理本批工作目录并
+  进行独立终审。实现仍位于 `0810-plan008-review-remediation` 独立 worktree。
+- 受跟踪 pair lock 当前为 `p1-fix-git-pair-v3`；RONDO 槽位 1 与 Codex 槽位 2 均 completed，旧 v1/v2
+  诊断账本保留失败终态，不复用或删除。
 
 ### 后续计划
 
-- 先完成 pure/fake 门禁，再串行执行固定镜像的 syscall/namespace 定向诊断；只采用能够明确解释、
-  且不越过上述禁止项的最小容器 profile。随后以同一生产 preflight 重新做双侧 no-API 验收。
-- 旧批次三个永久 claim 只剩一个槽位，已不可能形成公平 pair；本批不调用真实 API，也不消费最后一个槽位。
-  若 no-API 通过后需要重开 B3，必须先给出新的 pair/batch manifest、轮次和预算并重新取得批量测评授权。
+- 本批只剩最终必要门禁、独立终审、详细日志、合并与推送。
+- 若后续重开 B3，必须冻结新的 paid pair/batch manifest、任务轮次与预算并重新取得批量真实 API 测评授权；
+  当前生产 paid mode 保持 hard-disabled。
 
 ### 阻塞项
 
 - 本地模型权重不存在且本次禁止下载；L2 真实推理验收必然保持未运行。
-- 当前 Docker 证据只证明默认安全环境阻止嵌套 user namespace；builtin seccomp 是候选原因，尚未唯一归因。
-  在本批定向诊断和有效态监督完成前，B2 no-API、B3 与 M1 均保持未通过。
+- 本批没有真实 API 授权下的新公平 paid pair，因此 B3/M1 不运行；这不再阻塞已完成的 B2 no-API。
 
 ### 当前验收状态
 
 - B1 的版本/task/image 资料冻结、Docker hello-world oracle、两侧静态 musl bundle 与目标镜像
-  `--version` 探针保留为真实通过项；B2 仅有可保留基础设施，公平/身份/有效隔离/归档尚未完整验收。
-- L1 仅有协议骨架和正常 fixture；合法 ToolSearch evidence、最终 sink 和三消费者尚未完整验收。
-  L2 仍是无权重前置设施，runtime 闭包、redirect 与 endpoint/model identity 在真实 L2 前必须收口。
-- B2 全链路 no-API 与 B3/M1 未通过。3 次真实 Docker 诊断均在 API 前因设施失败，终审后从正式
-  `runs.jsonl` 与私有发布目录移除，只在预算账本保留不可复用槽位；批次最多 4 run 的硬门禁
-  尚余 1 个槽位，因此即使最后一条 completed，也不能把同任务双侧里程碑误报为通过。
+  `--version` 探针保留为真实通过项；B2 公平/身份/有效隔离/归档与双侧 no-API 已验收。
+- L1 协议、合法 ToolSearch evidence、最终 sink 与三消费者逐字节 fixture 已验收。L2 是完整闭包已冻结、
+  redirect/endpoint/model identity 已收口的无权重前置设施，真实结构化推理仍待模型。
+- 三次旧诊断已迁移为 `infra_failed` 永久记录，预算槽不可复用；本批真实 API 调用 0 次、费用 0 USD。
+  B3/M1 未运行，不能由 no-API completed 或 reward 0 结果代替。
 - L2 真实模型、L2a、L3/L4、训练和正式 canary 均未运行且不在本计划完成条件内。
 
 ## 6. 关键决策记录
@@ -249,3 +248,7 @@
 | 022 | API 前设施诊断不进入正式结果库 | 三次尝试没有模型请求，旧归因与新 parser/allowlist 不一致；预算账本仍保留不可复用历史 | B3 数据 | 已采纳 |
 | 023 | 独立审查 F-01～F-16 作为本批修复与重新验收清单 | 原实现存在公平、有效态、崩溃一致性和能力口径缺口；已完成异议复核 | Plan 008 收口 | 已采纳 |
 | 024 | namespace/seccomp 只做固定容器的最小定向诊断 | 用户明确授权；需要区分 seccomp、userns/capability 与 daemon 行为，仍禁止特权化绕过 | B2 Docker | 已采纳 |
+| 025 | no-API 与 paid 共用受跟踪 pair identity/preflight，paid 默认禁用 | 把两侧 bundle、Harbor closure、公平字段与执行顺序变为启动前机器门禁 | B2/B3 | 已采纳 |
+| 026 | 归档改为 journal v2 + 完整 index 原子 replace | partial write/进程死亡后仍能按 pre/post identity 恢复，拒绝工件篡改 | 结果归档 | 已采纳 |
+| 027 | 以 Moby v0.2.3 为基线，只为 non-CAP_SYS_ADMIN bwrap 增加最小 syscall delta | 定向反事实确认 builtin seccomp 阻断，同时保持 non-root/cap-drop/NNP | B2 Docker | 已采纳 |
+| 028 | Compose provider secret 使用 0600 私有 staging 文件而非 Harbor environment | daemon 能核对 exact RO mount，bearer 不进入 Harbor env/argv，执行后清空 | B2/B3 秘密 | 已采纳 |

@@ -19,16 +19,16 @@
   `ffccbe05ee73a9d59518217f294ad711bda39304`；`terminal-bench/fix-git` 的 task archive 和
   `linux/amd64` 镜像均以 SHA-256 锁定。受监督 Docker 下官方 hello-world oracle 为
   `completed`/reward 1.0。
-- **B2 代码与冻结产物完成，全链路 no-API 验收未通过**：统一 runner、双 adapter、
-  结果解析/归档、费用代理与 Docker 监督已接线。Codex/RONDO 均冻结为同一
-  Rust 1.95.0 产出的静态 musl CLI + code-mode-host，并捆绑同一官方 v0.147.0 musl
-  bwrap 资产；镜像内 `--version` 探针通过。真实 agent no-API 在 Docker 内到达 bwrap 后，
-  被守护进程默认 seccomp 下的嵌套 user namespace 拒绝；未用 privileged、`SYS_ADMIN`
-  或 `seccomp=unconfined` 换取通过。
-- **B3/M1 未完成**：三条 Codex 诊断尝试均在首个官方 API 请求前因设施问题 fail-closed；终审后不再
-  作为正式 `runs.jsonl` 结果，只在不可重用的持久预算账本中保留尝试槽位。实际 API 调用 0 次、费用 0 USD。最多四个 run 的账本保留
-  1 个未用槽位，在 no-API 链路通过前不继续付费路径。没有同一任务两侧
-  `completed` 证据，不得声称 M1。
+- **B2 完成**：统一 runner、双 adapter、结果解析/归档、费用代理与 Docker 监督已接线。
+  受跟踪 pair lock 绑定 Harbor 0.20.0 安装闭包、两侧静态 musl CLI/code-mode-host/bwrap bundle、
+  公平字段和 RONDO→Codex 拓扑。默认/custom seccomp 反事实确认 builtin profile 阻止非特权 user
+  namespace；受跟踪 profile 只为 non-`CAP_SYS_ADMIN` bwrap 放开 `clone/mount/pivot_root/umount2/unshare`，
+  不使用 privileged、`SYS_ADMIN` 或 `seccomp=unconfined`。`fix-git` 的 RONDO/Codex no-API 配对 v3
+  均为 host 0、2 次 fake 请求、code-mode tool round-trip 成立、任务 Docker 残留 0。
+- **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
+  `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
+  公平 pair，paid 入口 hard-disabled。继续 B3 必须先冻结新的 pair/batch/轮次/预算并重新授权；没有同一
+  任务两侧真实 API `completed` 证据，不得声称 M1。
 
 ## E-B 真实 Terminal-Bench 2.1 测评
 

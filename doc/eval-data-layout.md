@@ -44,6 +44,7 @@ eval-data/                             # git-ignored
 ├── tools/                             # 项目局部工具（例如 llama.cpp runtime）
 ├── build-metrics/                     # 看门狗 summary/JUnit/受限日志
 ├── budgets/                           # 持久费用预留/结算账本，0600
+├── pairs/                             # no-API/paid 双侧顺序与终态账本，0600
 ├── work/                              # materialize 和 no-API 工作目录
 ├── recordings/<recording_id>/         # A1 录制包（原始 HTTP exchange + SSE）
 ├── evidence/                          # 审批证据包
@@ -105,7 +106,7 @@ eval-data/                             # git-ignored
   "tasks": [
     { "task_id": "…", "outcome": "pass|fail", "attribution": "agent|guardian_correct_deny|guardian_false_deny|infra", "duration_s": 182, "tokens_in": 0, "tokens_out": 0 }
   ],
-  "metrics": null,
+  "metrics": { "wall_seconds": 182.0, "cpu_user_seconds": 21.0, "cpu_system_seconds": 3.0, "peak_rss_bytes": 536870912, "exit_code": 0 },
   "cost": { "estimated_usd": 1.2, "actual_usd": 1.05 },
   "artifacts": "eval-data/runs/20260812-143005182-tb-rondo-r1",
   "notes": ""
@@ -116,6 +117,11 @@ eval-data/                             # git-ignored
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的
   Docker/watchdog/parser 异常也必须写分类失败行，不允许复用同一 run-id 绕过运行次数上限。
+- Terminal-Bench 生产记录的 `metrics` 固定为进程外采集的 `wall_seconds`、`cpu_user_seconds`、
+  `cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code` 五项；完整探针和细粒度 Guardian 归因仍留给 A4/B5。
+- 发布使用 journal v2：在同一结果锁内绑定工件树摘要、完整 record bytes 及 index 前/后长度与 SHA，
+  以同目录临时文件写完整新 index、fsync 后原子 replace。恢复只接受精确 pre/post identity，并重新核对
+  工件树；partial write、进程死亡或恢复前篡改均 fail-closed，不再原地 append 半行。
 - `git_commit` 记录冻结产品/二进制的 measurement commit；若 eval harness 从另一 clean worktree 加载，
   其独立 commit 必须写入 `config.eval_harness_commit`。
 - Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source

@@ -221,3 +221,17 @@ standard/Lite 形态均补回归。
   嵌套 user namespace 拒绝，未通过弱化 seccomp/capability 换取绿色。三次 API 前设施诊断
   已从正式结果库移除，预算槽位仍不可复用；真实 API 调用 0 次、实际费用 0 USD；B3/M1、L2 真模型、L2a/L3/L4、
   训练和 canary 保持未完成。详细证据见同日 P1 `agent_log`。
+
+### 2026-08-10 Plan 008 独立审查整改与 B2 no-API 验收
+
+- 按独立审查 F-01～F-16 收口公平 pair/Harbor closure preflight、Docker daemon 有效态、规范 flock/cgroup
+  证明、绝对 deadline、Compose 全资源清理、最小外部 wall/CPU/RSS、结果交叉约束与 crash-consistent
+  journal v2；三次零请求诊断以一次性迁移恢复为 `infra_failed` 永久终态。
+- L1 补齐合法 `ToolSearchOutput`、Lite discriminator、最终 sink 与 Luna/Sol/Local 三消费者逐字节 fixture；
+  L2 lock 扩为完整动态运行闭包并关闭 redirect/`LD_LIBRARY_PATH` 注入，绑定 endpoint/model identity。
+- 固定镜像内反事实确认 builtin seccomp 是 bwrap user namespace 阻断原因；受跟踪 profile 仅放开
+  non-`CAP_SYS_ADMIN` bwrap 所需 syscall，未使用 privileged、`SYS_ADMIN` 或 `seccomp=unconfined`。
+  随后 `fix-git` 的 RONDO→Codex no-API 配对 v3 两侧均 completed，fake 请求各 2 次、任务残留 0。
+- 最终轻量设施门禁 233/233、`uv lock --check` 85 packages；无模型 doctor 为
+  `infrastructure_ready_model_missing`/78。本批没有 Cargo、真实 API、权重或真实推理；B3/M1、L2 真模型、
+  L2a/L3/L4、训练和 canary 继续保持未完成。
