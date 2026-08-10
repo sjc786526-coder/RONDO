@@ -33,6 +33,11 @@ pair 和 budget proxy 都错误固定 `https://api.openai.com/v1`。本批未运
   reservation 0.755400 USD、5 USD/run、v7 最多 10 USD、底层 ledger 20 USD hard cap 均未改变。
 - future record 在 `spent_usd == 0` 且没有 reserved request 时才写 `actual_usd=0.0`；存在未结算 reservation 或
   非零本地计价时写 `actual_usd=null`。这只改变未来 producer，不迁移 v6 行。
+- main 提交 `fecd9f1d2fe162decfaf22d8771f8d75790c4552` 已合入本 readiness：重型构建容量只认 Windows
+  `C:` 盘实际余量，低于 50GB 停止；Docker 仍以低于 80GiB 停止，无法读取时 fail-closed。旧日志中的约
+  846GB 是无效的 WSL 虚拟容量证据，不用于门禁。
+- canonical shell 启动时计算一次 common-root `rondo.local.toml` SHA-256，并在 RONDO、Codex 每侧进入
+  watchdog 前重新计算并比较；配置漂移立即由 `set -e` 停止，不修改 ledger/schema。
 
 当前 pair lock SHA-256：
 `b9e38f51de548d2787ca80114b8df8eaaadc3138b05b3928a508eb5434bda29b`。
@@ -45,13 +50,21 @@ pair 和 budget proxy 都错误固定 `https://api.openai.com/v1`。本批未运
 - 最终相关六模块 pure/fake/loopback：87/87 通过（17.438 秒）。
 - 严格 loader 无输出确认当前 local provider base URL 与 `OPENAI_API_KEY` 变量均可用；Key 内容未输出或记录。
 - `py_compile`、`git diff --check` 通过。
+- 合入 `fecd9f1` 后重新执行指定集成门禁：
+  - `bash -n mydev/scripts/with-build-lock.sh`：通过；
+  - `eval/.venv/bin/python -m unittest -q tests.test_runtime_bridge`：24/24 通过；
+  - Plan 011 六模块 pure/fake/loopback：87/87 通过（17.390 秒）；
+  - `git diff --check`：通过。
+- canonical `HARNESS` 固定为本 readiness worktree，`WATCHDOG=$HARNESS/mydev/scripts/with-build-lock.sh`；因此后续
+  命令使用的是已合入 Windows `C:` 容量门禁的看门狗，而非分叉前旧版本。
 - tracked results 和 common `eval-data` 中 v7 pair、budget、两个 work/run/artifact 路径均不存在；本批没有创建
   v7 ledger、run、metrics 或 results worktree。
 
 所有网络交互只有 `uv` 锁定依赖下载和此前用户提供/文档核对；测试 upstream 全部是 loopback fake。没有 Docker、
 真实 API、Cargo、本地模型或费用证据。
 
-本实现与本日志一并提交在独立 `0810-plan011-cctq-b3-paid-readiness` 分支；未合并、未推送。
+本实现与本日志提交在独立 `0810-plan011-cctq-b3-paid-readiness` 分支；该分支已合入本地 main 的
+`fecd9f1d2fe162decfaf22d8771f8d75790c4552`，未合并回 main、未推送。
 
 ## 4. 授权后唯一 canonical 命令
 
@@ -75,6 +88,9 @@ PAIR=p1-fix-git-pair-v7
 BATCH=p1-fix-git-b3-m1-v2
 R_RUN=20260810-233000000-tb-rondo-r1
 C_RUN=20260810-233000001-tb-codex-r1
+PROVIDER_CONFIG=$COMMON/rondo.local.toml
+PROVIDER_CONFIG_SHA="$(sha256sum -- "$PROVIDER_CONFIG" | awk '{print $1}')"
+printf 'provider_config_sha256=%s\n' "$PROVIDER_CONFIG_SHA"
 
 READINESS_SHA="$(git -C "$HARNESS" rev-parse HEAD)"
 test -z "$(git -C "$HARNESS" status --porcelain=v1 --untracked-files=all)"
@@ -92,6 +108,7 @@ run_side() {
     run_id=$2
     manifest=$3
     metrics=$4
+    test "$(sha256sum -- "$PROVIDER_CONFIG" | awk '{print $1}')" = "$PROVIDER_CONFIG_SHA"
     test ! -e "$metrics"
     env \
         -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \

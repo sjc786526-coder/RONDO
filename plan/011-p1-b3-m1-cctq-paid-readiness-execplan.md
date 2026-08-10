@@ -92,10 +92,16 @@
 - proxy、v7 identity、通用 template 与 future `actual_usd` 已完成最小修改；最终 focused
   pure/fake/loopback 87/87。pair lock SHA-256 为
   `b9e38f51de548d2787ca80114b8df8eaaadc3138b05b3928a508eb5434bda29b`。
+- main 的 Windows `C:` 容量看门狗提交 `fecd9f1d2fe162decfaf22d8771f8d75790c4552` 已合入本分支；Plan 010
+  同时保留 provider 根因修正和“846GB 为无效 WSL 虚拟余量”的事实。
+- canonical shell 已在启动时捕获 `rondo.local.toml` SHA-256，并在每个 `run_side` 进入 watchdog 前复核；不一致
+  由 `set -e` 直接停止，不创建第二套 ledger/schema。
+- 合并后窄门禁已通过：`bash -n mydev/scripts/with-build-lock.sh`、runtime bridge 24/24、Plan 011 focused
+  pure/fake/loopback 87/87；canonical `HARNESS` 与 `WATCHDOG` 均指向包含 Plan 011 与 `fecd9f1` 的本 worktree。
 
 ### 当前工作
 
-- 无；readiness 实现、focused 门禁、实时文档、实施日志和唯一 canonical 命令均已完成。
+- 无；集成、窄门禁、实时 Plan 和执行日志均已完成。
 
 ### 后续计划
 
@@ -119,3 +125,4 @@
 | 003 | v6 原样保留，v7 使用新 identity | 遵守 append-only 与零重试，不把配置修正冒充同一次 run | pair/results | 已采纳 |
 | 004 | reservation 存在时 future `actual_usd=null` | 本地未结算预留不是已确认 0 账单 | results | 已采纳 |
 | 005 | tracked pair 不冻结域名，M1 比较两侧 base URL 与 config SHA | 复用已有公平字段，避免供应商审计体系 | pair、M1 | 已采纳 |
+| 006 | 启动记录本地配置 SHA、每侧执行前复核 | 避免两侧之间配置改变而浪费第二侧费用，不扩 ledger | canonical shell | 已采纳 |
