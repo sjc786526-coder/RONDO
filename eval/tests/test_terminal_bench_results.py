@@ -87,7 +87,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         *, side: Side = Side.CODEX, exit_code: int = 0
     ) -> RunPublicationContext:
         return RunPublicationContext(
-            pair_id="p1-fix-git-pair-v2",
+            pair_id="p1-fix-git-pair-v3",
             pair_lock_sha256="9" * 64,
             pair_slot=1 if side is Side.RONDO else 2,
             pair_round=1,
@@ -798,7 +798,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             side_effect=DockerSupervisionError("redacted test failure")
         )
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v2",
+            pair_id="p1-fix-git-pair-v3",
             lock_sha256="9" * 64,
         )
         pair_identity.mode.return_value = SimpleNamespace(

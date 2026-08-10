@@ -498,10 +498,20 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertTrue(raw_codex_command.startswith("set -o pipefail; "))
         self.assertIn("--enable unified_exec", raw_codex_command)
         self.assertEqual(raw_codex_command.count("set -o pipefail; "), 1)
+        self.assertNotIn("2>&1", raw_codex_command)
+        self.assertIn("2>/logs/agent/codex.stderr.txt", raw_codex_command)
         self.assertLess(
             raw_codex_command.index("set -o pipefail; "),
             raw_codex_command.index("| tee "),
         )
+        with self.assertRaises(AdapterError):
+            adapters_module._validate_safe_codex_command(
+                raw_codex_command.replace(
+                    "2>/logs/agent/codex.stderr.txt",
+                    "2>&1",
+                ),
+                side=Side.CODEX,
+            )
         with self.assertRaises(AdapterError):
             adapters_module._validate_safe_codex_command(
                 raw_codex_command.replace("features.code_mode_host=true", ""),
