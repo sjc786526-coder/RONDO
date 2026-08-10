@@ -56,6 +56,7 @@ class _FakeUpstream:
                             "lite": self.headers.get(
                                 "x-openai-internal-codex-responses-lite"
                             ),
+                            "role": self.headers.get("X-RONDO-Eval-Role"),
                             "body": body,
                         }
                     )
@@ -236,6 +237,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(
             self.upstream.requests[0]["authorization"], f"Bearer {self.secret}"
         )
+        self.assertEqual(self.upstream.requests[0]["role"], "main")
         metadata_bytes = (self.root / "metadata.json").read_bytes()
         ledger_bytes = (self.root / "budget.json").read_bytes()
         self.assertNotIn(self.secret.encode(), metadata_bytes)
@@ -322,18 +324,19 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertTrue(observation["usage_valid"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
 
-    def test_missing_role_header_infers_main_from_request_shape(self) -> None:
+    def test_missing_role_header_projects_declared_main_from_request_shape(self) -> None:
         status, _body, _headers = self._post(self._body(), role=None)
         self.assertEqual(status, 200)
         observation = json.loads((self.root / "metadata.json").read_text())["requests"][0]
         self.assertEqual(observation["role"], "main")
-        self.assertEqual(observation["role_provenance"], "inferred")
-        self.assertIsNone(observation["declared_role"])
+        self.assertEqual(observation["role_provenance"], "declared")
+        self.assertEqual(observation["declared_role"], "main")
         self.assertEqual(observation["inferred_role"], "main")
         self.assertTrue(observation["contract_match"])
-        self.assertFalse(milestone_metadata_ready(self.root / "metadata.json"))
+        self.assertEqual(self.upstream.requests[0]["role"], "main")
+        self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
 
-    def test_missing_role_header_infers_guardian_from_exact_schema(self) -> None:
+    def test_missing_role_header_projects_declared_guardian_from_exact_schema(self) -> None:
         status, _body, _headers = self._post(
             self._body(effort="low", guardian=True),
             role=None,
@@ -341,11 +344,12 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(status, 200)
         observation = json.loads((self.root / "metadata.json").read_text())["requests"][0]
         self.assertEqual(observation["role"], "guardian")
-        self.assertEqual(observation["role_provenance"], "inferred")
-        self.assertIsNone(observation["declared_role"])
+        self.assertEqual(observation["role_provenance"], "declared")
+        self.assertEqual(observation["declared_role"], "guardian")
         self.assertEqual(observation["inferred_role"], "guardian")
         self.assertTrue(observation["contract_match"])
-        self.assertFalse(milestone_metadata_ready(self.root / "metadata.json"))
+        self.assertEqual(self.upstream.requests[0]["role"], "guardian")
+        self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
 
     def test_missing_usage_charges_reservation_stops_run_and_prevents_forward(self) -> None:
         self.upstream.mode = "missing_usage"

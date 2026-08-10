@@ -123,11 +123,13 @@ eval-data/                             # git-ignored
   `cpu_user_seconds`、`cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code`，仅用于设施诊断。
   supervisor 在 daemon 确认 private cgroup namespace 后，另从 exact container 的 cgroup v2 生成
   `container_id`、`cpu_usage_seconds`、`peak_memory_bytes`；B2 当前收据直接复用 supervisor 的
-  canonical Docker receipt，paid publication、pair ledger 与 M1 继续持有该组机器证据。本轮未用真实
-  Docker 重验新字段，paid B3 仍 hard-disabled；完整探针和细粒度 Guardian 归因留给 A4/B5。
+  canonical Docker receipt，paid publication、pair ledger 与 M1 继续持有该组机器证据。Plan 010 的 paid v6
+  参数已冻结，但真实 B3 仍待单独授权；完整探针和细粒度 Guardian 归因留给 A4/B5。
 - 发布使用 journal v2：在同一结果锁内绑定工件树摘要、完整 record bytes 及 index 前/后长度与 SHA，
   以同目录临时文件写完整新 index、fsync 后原子 replace。恢复只接受精确 pre/post identity，并重新核对
-  工件树；partial write、进程死亡或恢复前篡改均 fail-closed，不再原地 append 半行。
+  工件树；partial write、进程死亡或恢复前篡改均 fail-closed，不再原地 append 半行。paid 槽进入
+  `publishing` 后，若确定性校验在 journal 创建前失败，则撤销未发布 staging 并使用既有失败 publication
+  收敛；journal/target 一旦出现仍只走恢复路径。
 - paid pair sequence 使用稳定 `<ledger>.lock` 侧车 flock，ledger 本体通过 0600 temp write + fsync +
   atomic replace + parent fsync 更新；已存在的空文件视为损坏，不能重置为 slot 1。两槽绑定
   同一 `eval_harness_commit`。paid 槽先进入 `publishing`，结果持久后回读 record SHA-256 再收敛为
@@ -149,7 +151,8 @@ eval-data/                             # git-ignored
   官方 tag 文件哈希。
 - `estimated_usd` 是本地冻结价格 × usage 的预算计价。没有查询供应商账单时，非零
   `actual_usd` 必须为 `null`；零请求/零费用可记 `0.0`。请求 role 允许为诊断做 shape inference，
-  但只有显式 header 产生的 `role_provenance=declared` 可满足 completed/M1。
+  本地预算代理必须先验证请求形状，再把一致的 main/guardian role 投影为出站 declared header；调用方已有
+  header 时必须与形状一致。只有该 declared+inferred 一致的元数据可满足 completed/M1。
 
 ### 隐藏集的特殊规则
 

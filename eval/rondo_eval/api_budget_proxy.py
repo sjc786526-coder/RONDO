@@ -699,6 +699,10 @@ class LoopbackResponsesProxy:
         try:
             _require_safe_id(request_id, "request id")
             request_metadata = _inspect_request(body, declared_role)
+            if declared_role is None:
+                declared_role = request_metadata["role"]
+                request_metadata["role_provenance"] = "declared"
+                request_metadata["declared_role"] = declared_role
             self._ledger.reserve(self._run_id, request_id)
         except BudgetStopped:
             self._reject(handler, 429, "budget_stopped")
@@ -712,6 +716,7 @@ class LoopbackResponsesProxy:
             "Content-Type": "application/json",
             "Accept": handler.headers.get("Accept", "application/json"),
             "User-Agent": "rondo-eval-budget-proxy/1",
+            "X-RONDO-Eval-Role": declared_role,
         }
         if forward_lite_header:
             headers[_LITE_HEADER] = "true"
