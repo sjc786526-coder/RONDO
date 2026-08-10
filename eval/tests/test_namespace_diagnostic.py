@@ -32,6 +32,7 @@ class NamespaceDiagnosticTests(unittest.TestCase):
         bwrap.write_bytes(b"frozen-bwrap")
         bwrap.chmod(0o700)
         return NamespaceDiagnosticSpec(
+            common_root=root,
             project_root=root,
             image=IMAGE,
             task_id="20260810-namespace-diag-r1",
@@ -65,6 +66,29 @@ class NamespaceDiagnosticTests(unittest.TestCase):
             "bwrap_baseline",
         ):
             self.assertIn(marker, DIAGNOSTIC_SCRIPT)
+
+    def test_frozen_binary_may_live_in_common_root_outside_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            common_root = Path(temporary)
+            checkout = common_root / ".claude" / "worktrees" / "diagnostic"
+            checkout.mkdir(parents=True)
+            bwrap = common_root / "eval-data" / "deps" / "bwrap"
+            bwrap.parent.mkdir(parents=True)
+            bwrap.write_bytes(b"frozen-bwrap")
+            bwrap.chmod(0o700)
+            spec = NamespaceDiagnosticSpec(
+                common_root=common_root,
+                project_root=checkout,
+                image=IMAGE,
+                task_id="20260810-namespace-diag-r2",
+                bwrap_binary=bwrap,
+                bwrap_sha256=hashlib.sha256(bwrap.read_bytes()).hexdigest(),
+            )
+
+            plan = build_namespace_diagnostic_plan(spec)
+
+        mount = plan.argv[plan.argv.index("--mount") + 1]
+        self.assertIn(f"source={bwrap.resolve()}", mount)
 
     def test_custom_profile_must_be_exact_frozen_tracked_delta(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -192,6 +216,8 @@ class NamespaceDiagnosticTests(unittest.TestCase):
             main(
                 [
                     "--project-root",
+                    "/does/not/matter",
+                    "--common-root",
                     "/does/not/matter",
                     "--image",
                     IMAGE,

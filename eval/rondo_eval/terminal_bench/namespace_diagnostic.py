@@ -83,6 +83,7 @@ class NamespaceDiagnosticError(ValueError):
 
 @dataclass(frozen=True)
 class NamespaceDiagnosticSpec:
+    common_root: Path
     project_root: Path
     image: str
     task_id: str
@@ -138,8 +139,13 @@ def build_namespace_diagnostic_plan(
     if not _TASK_ID.fullmatch(spec.task_id):
         raise NamespaceDiagnosticError("diagnostic task id is invalid")
     limits = _limits(spec)
+    common_root = _directory(spec.common_root, "common root")
     project_root = _directory(spec.project_root, "project root")
-    bwrap = _project_file(project_root, spec.bwrap_binary, "bwrap binary")
+    try:
+        project_root.relative_to(common_root)
+    except ValueError as exc:
+        raise NamespaceDiagnosticError("project root must stay below the common root") from exc
+    bwrap = _project_file(common_root, spec.bwrap_binary, "bwrap binary")
     if not _SHA256.fullmatch(spec.bwrap_sha256) or _sha256_file(bwrap) != spec.bwrap_sha256:
         raise NamespaceDiagnosticError("diagnostic bwrap identity differs")
     if not os.access(bwrap, os.X_OK):
@@ -341,6 +347,7 @@ def _parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--emit-argv", action="store_true")
     mode.add_argument("--run", action="store_true")
+    parser.add_argument("--common-root", type=Path, required=True)
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--task-id", required=True)
@@ -355,7 +362,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if not args.emit_argv and not args.run:
         raise NamespaceDiagnosticError("diagnostic CLI is inert without --emit-argv or --run")
-    spec = NamespaceDiagnosticSpec(args.project_root, args.image, args.task_id, args.bwrap, args.bwrap_sha256, args.seccomp_profile)
+    spec = NamespaceDiagnosticSpec(
+        args.common_root,
+        args.project_root,
+        args.image,
+        args.task_id,
+        args.bwrap,
+        args.bwrap_sha256,
+        args.seccomp_profile,
+    )
     if args.emit_argv:
         plan = build_namespace_diagnostic_plan(spec)
         print(json.dumps(plan.argv, ensure_ascii=True, separators=(",", ":")))
