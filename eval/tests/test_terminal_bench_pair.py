@@ -34,6 +34,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     load_pair_identity,
     validate_harbor_installation,
 )
+from rondo_eval.terminal_bench.runner import HARBOR_EXECUTABLE  # noqa: E402
 
 
 class PairIdentityTests(unittest.TestCase):
@@ -147,6 +148,12 @@ class PairIdentityTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(PairIdentityError, "fresh_pair"):
             self.identity.mode("paid")
+
+    def test_current_frozen_harbor_install_matches_pair_lock(self) -> None:
+        validate_harbor_installation(
+            self.identity,
+            executable=HARBOR_EXECUTABLE,
+        )
 
     def test_shared_fair_pair_gate_rejects_runtime_drift(self) -> None:
         self.identity.validate_spec(self._spec(Side.CODEX), mode="no_api")

@@ -52,8 +52,8 @@
     "version": "0.20.0",
     "release_commit": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
     "wheel_sha256": "4b7e48223aea2384cdb8c9eff35eaebd482fc9b1ec09f8193a121c47356ff19a",
-    "installed_closure_sha256": "df0fdb441cc7a314cf018d9875ccbcd94fbb86b25d4de65914f877af3a007a95",
-    "installed_closure_files": 480
+    "installed_closure_sha256": "28797c4e9cd0ff6e0b2082af4bc355477970ea3a1c563b9c857bcc770ddb9fd1",
+    "installed_closure_files": 400
   },
   "no_api_seccomp": {
     "profile_path": "eval/seccomp/plan008-userns-minimal-v0.2.3.json",
