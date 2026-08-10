@@ -200,7 +200,7 @@ class WatchdogBridgeTests(unittest.TestCase):
                     "RONDO_BUILD_PROJECT_WARN_BYTES",
                     "RONDO_BUILD_PROJECT_STOP_BYTES",
                     "RONDO_BUILD_PROJECT_MAX_BYTES",
-                    "RONDO_BUILD_FILESYSTEM_FREE_STOP_BYTES",
+                    "RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES",
                     "RONDO_BUILD_NONRECLAIMABLE_STOP_BYTES",
                     "RONDO_BUILD_SWAP_SUSTAINED_STOP_BYTES",
                     "RONDO_BUILD_SWAP_EMERGENCY_STOP_BYTES",

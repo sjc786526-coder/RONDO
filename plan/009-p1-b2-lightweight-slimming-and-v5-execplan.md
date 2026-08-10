@@ -99,8 +99,8 @@
 9. **执行前 clean commit**：真实 Docker 前必须形成 clean harness commit，v5 当前 receipt 不存在，相关轻量门禁
    通过；Docker 运行期间不得再修改代码。
 10. **Docker 严格串行**：通过项目规范 watchdog 和 canonical lock，只运行固定 `fix-git`、固定 digest、固定
-    RONDO→Codex 顺序；与 Cargo/模型互斥。前后记录 `docker system df`、VHDX 和宿主空间；40/60GB、80GiB
-    阈值保持不变。
+    RONDO→Codex 顺序；与 Cargo/模型互斥。前后记录 `docker system df`、VHDX 和 Windows `C:` 盘实际
+    剩余空间；40/60GB、80GiB 阈值保持不变，WSL 虚拟余量不作为容量证据。
 11. **不拉取、不构建**：若 pinned image、runtime bundle 或 Harbor 冻结环境不存在，停止并报告，不自动 pull、
     build、sync 大型资产或重新构建 Rust。
 12. **失败即停**：RONDO 失败则不运行 Codex，不自动创建新 identity，不自动重试。只允许修直接阻塞真实链路的

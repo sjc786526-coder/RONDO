@@ -117,7 +117,8 @@
   15.010 秒超时；保留宿主网络环境时 0.494 秒返回预期 401。未来 paid 命令必须保留宿主 proxy，只设置
   loopback `NO_PROXY=127.0.0.1,localhost`。
 - watchdog 正常收尾，132 个 Docker samples 无 warning；运行后 Docker 为 0 容器、0 卷，image/build-cache
-  与运行前相同，项目盘仍有 846GB 可用空间。
+  与运行前相同。该轮记录的约 846GB 是 WSL 虚拟文件系统余量，不是 Windows `C:` 盘实际剩余空间，
+  因而不作为宿主容量验收证据。
 
 ### 当前工作
 

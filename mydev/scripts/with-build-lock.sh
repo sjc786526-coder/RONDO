@@ -23,6 +23,7 @@
 #   RONDO_BUILD_PROJECT_WARN_BYTES=<bytes>  (default 180 GB decimal)
 #   RONDO_BUILD_PROJECT_STOP_BYTES=<bytes>  (default 195 GB decimal)
 #   RONDO_BUILD_PROJECT_MAX_BYTES=<bytes>   (default 200 GB decimal)
+#   RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES=<bytes> (default 50 GB decimal)
 #   RONDO_BUILD_RESIDUAL_GRACE_SECONDS=<s>  (default 5)
 #   RONDO_BUILD_METRICS_DIR=<path>
 set -uo pipefail
@@ -119,7 +120,7 @@ swap_max="${RONDO_BUILD_SWAP_MAX:-5G}"
 project_warn_bytes="${RONDO_BUILD_PROJECT_WARN_BYTES:-180000000000}"
 project_stop_bytes="${RONDO_BUILD_PROJECT_STOP_BYTES:-195000000000}"
 project_max_bytes="${RONDO_BUILD_PROJECT_MAX_BYTES:-200000000000}"
-filesystem_free_stop_bytes="${RONDO_BUILD_FILESYSTEM_FREE_STOP_BYTES:-50000000000}"
+windows_c_free_stop_bytes="${RONDO_BUILD_WINDOWS_C_FREE_STOP_BYTES:-50000000000}"
 nonreclaimable_stop_bytes="${RONDO_BUILD_NONRECLAIMABLE_STOP_BYTES:-20401094656}"
 swap_sustained_stop_bytes="${RONDO_BUILD_SWAP_SUSTAINED_STOP_BYTES:-4294967296}"
 swap_emergency_stop_bytes="${RONDO_BUILD_SWAP_EMERGENCY_STOP_BYTES:-5100273664}"
@@ -132,7 +133,7 @@ residual_grace_seconds="${RONDO_BUILD_RESIDUAL_GRACE_SECONDS:-5}"
 
 numeric_settings=(
   "$project_warn_bytes" "$project_stop_bytes" "$project_max_bytes"
-  "$filesystem_free_stop_bytes" "$nonreclaimable_stop_bytes"
+  "$windows_c_free_stop_bytes" "$nonreclaimable_stop_bytes"
   "$swap_sustained_stop_bytes" "$swap_emergency_stop_bytes" "$swap_stop_seconds"
   "$host_available_stop_kb" "$psi_full_stop_bp" "$psi_stop_seconds"
   "$disk_sample_interval" "$residual_grace_seconds"
@@ -150,14 +151,27 @@ if ((project_warn_bytes >= project_stop_bytes \
   exit 74
 fi
 
+read_windows_c_capacity() {
+  local used=""
+  local available=""
+
+  [[ -d /mnt/c ]] || return 1
+  read -r used available < <(
+    LC_ALL=C df -B1 --output=used,avail -- /mnt/c | awk 'NR==2 {print $1, $2}'
+  ) || return 1
+  [[ "$used" =~ ^[0-9]+$ && "$available" =~ ^[0-9]+$ ]] || return 1
+  printf '%s %s\n' "$used" "$available"
+}
+
 project_before="$(du -sx -B1 -- "$project_root" 2>/dev/null | awk '{print $1}')"
-read -r filesystem_used_before filesystem_available_before < <(
-  df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
-)
+windows_c_used_before=""
+windows_c_available_before=""
+read -r windows_c_used_before windows_c_available_before < <(read_windows_c_capacity) || true
 host_mem_available_before="$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo)"
 host_swap_free_before="$(awk '/^SwapFree:/{print $2; exit}' /proc/meminfo)"
 if [[ ! "$project_before" =~ ^[0-9]+$ ]] \
-  || [[ ! "$filesystem_available_before" =~ ^[0-9]+$ ]] \
+  || [[ ! "$windows_c_used_before" =~ ^[0-9]+$ ]] \
+  || [[ ! "$windows_c_available_before" =~ ^[0-9]+$ ]] \
   || [[ ! "$host_mem_available_before" =~ ^[0-9]+$ ]] \
   || [[ ! "$host_swap_free_before" =~ ^[0-9]+$ ]]; then
   echo "[rondo] resource preflight counters are unavailable" >&2
@@ -167,8 +181,8 @@ if ((project_before >= project_stop_bytes)); then
   echo "[rondo] project is already at the ${project_stop_bytes}-byte proactive stop line" >&2
   exit 76
 fi
-if ((filesystem_available_before <= filesystem_free_stop_bytes)); then
-  echo "[rondo] filesystem free space is already below the safety floor" >&2
+if ((windows_c_available_before <= windows_c_free_stop_bytes)); then
+  echo "[rondo] Windows C: free space is already below the safety floor" >&2
   exit 77
 fi
 if ((host_mem_available_before <= host_available_stop_kb)); then
@@ -226,7 +240,7 @@ refresh_watchdog_heartbeat() {
   : >"$watchdog_heartbeat_file"
 }
 
-printf '%s\n' 'timestamp,elapsed_s,project_bytes,target_bytes,filesystem_used_bytes,filesystem_available_bytes,memory_current_bytes,memory_peak_bytes,memory_anon_bytes,memory_file_bytes,memory_kernel_bytes,memory_nonreclaimable_bytes,swap_current_bytes,swap_peak_bytes,cgroup_psi_full_avg10_bp,host_psi_full_avg10_bp,host_mem_available_kb,host_swap_free_kb,cargo_count,rustc_count,rust_lld_count,nextest_count' >"$metrics_file"
+printf '%s\n' 'timestamp,elapsed_s,project_bytes,target_bytes,windows_c_used_bytes,windows_c_available_bytes,memory_current_bytes,memory_peak_bytes,memory_anon_bytes,memory_file_bytes,memory_kernel_bytes,memory_nonreclaimable_bytes,swap_current_bytes,swap_peak_bytes,cgroup_psi_full_avg10_bp,host_psi_full_avg10_bp,host_mem_available_kb,host_swap_free_kb,cargo_count,rustc_count,rust_lld_count,nextest_count' >"$metrics_file"
 
 junit_expected=0
 junit_status="not_applicable"
@@ -557,9 +571,9 @@ while true; do
       target_bytes=0
     fi
   fi
-  read -r filesystem_used filesystem_available < <(
-    df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
-  )
+  windows_c_used=""
+  windows_c_available=""
+  read -r windows_c_used windows_c_available < <(read_windows_c_capacity) || true
   memory_current="$(read_counter "${cgroup_root}/memory.current" || true)"
   memory_peak="$(read_counter "${cgroup_root}/memory.peak" || true)"
   memory_anon="$(read_keyed_counter "${cgroup_root}/memory.stat" anon || true)"
@@ -580,7 +594,7 @@ while true; do
   invalid_sample=""
   sample_values=(
     "project_bytes:${project_bytes}" "target_bytes:${target_bytes}"
-    "filesystem_used:${filesystem_used}" "filesystem_available:${filesystem_available}"
+    "windows_c_used:${windows_c_used}" "windows_c_available:${windows_c_available}"
     "memory_current:${memory_current}" "memory_peak:${memory_peak}"
     "memory_anon:${memory_anon}" "memory_file:${memory_file}" "memory_kernel:${memory_kernel}"
     "swap_current:${swap_current}" "swap_peak:${swap_peak}"
@@ -647,7 +661,7 @@ while true; do
 
   printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
     "$(date --iso-8601=seconds)" "$elapsed" "$project_bytes" "$target_bytes" \
-    "$filesystem_used" "$filesystem_available" "$memory_current" "$memory_peak" \
+    "$windows_c_used" "$windows_c_available" "$memory_current" "$memory_peak" \
     "$memory_anon" "$memory_file" "$memory_kernel" "$memory_nonreclaimable" \
     "$swap_current" "$swap_peak" "$cgroup_psi_full_bp" "$host_psi_full_bp" \
     "$host_mem_available" "$host_swap_free" "$cargo_count" "$rustc_count" \
@@ -672,8 +686,8 @@ while true; do
     stop_reason="project_reached_absolute_max"
   elif ((project_bytes >= project_stop_bytes)); then
     stop_reason="project_reached_proactive_stop"
-  elif ((filesystem_available <= filesystem_free_stop_bytes)); then
-    stop_reason="filesystem_free_below_floor"
+  elif ((windows_c_available <= windows_c_free_stop_bytes)); then
+    stop_reason="windows_c_free_below_floor"
   elif ((oom_kill_count > 0)); then
     stop_reason="cgroup_reported_oom_kill"
   elif ((memory_nonreclaimable >= nonreclaimable_stop_bytes)); then
@@ -720,9 +734,14 @@ if [[ -d "$target_dir" ]]; then
 else
   target_after=0
 fi
-read -r filesystem_used_after filesystem_available_after < <(
-  df -B1 --output=used,avail -- "$project_root" | awk 'NR==2 {print $1, $2}'
-)
+windows_c_used_after=""
+windows_c_available_after=""
+read -r windows_c_used_after windows_c_available_after < <(read_windows_c_capacity) || true
+if [[ "$stop_reason" == "none" ]] \
+  && { [[ ! "$windows_c_used_after" =~ ^[0-9]+$ ]] \
+    || [[ ! "$windows_c_available_after" =~ ^[0-9]+$ ]]; }; then
+  stop_reason="resource_counter_unavailable_windows_c_after"
+fi
 
 collect_junit_status
 wrapper_status="complete"
@@ -754,10 +773,10 @@ summary_tmp="${summary_file}.tmp"
   printf 'project_peak_sampled_bytes=%s\n' "$peak_project"
   printf 'target_after_bytes=%s\n' "$target_after"
   printf 'target_peak_sampled_bytes=%s\n' "$peak_target"
-  printf 'filesystem_used_before_bytes=%s\n' "$filesystem_used_before"
-  printf 'filesystem_used_after_bytes=%s\n' "$filesystem_used_after"
-  printf 'filesystem_available_before_bytes=%s\n' "$filesystem_available_before"
-  printf 'filesystem_available_after_bytes=%s\n' "$filesystem_available_after"
+  printf 'windows_c_used_before_bytes=%s\n' "$windows_c_used_before"
+  printf 'windows_c_used_after_bytes=%s\n' "$windows_c_used_after"
+  printf 'windows_c_available_before_bytes=%s\n' "$windows_c_available_before"
+  printf 'windows_c_available_after_bytes=%s\n' "$windows_c_available_after"
   printf 'memory_peak_sampled_bytes=%s\n' "$peak_memory"
   printf 'memory_nonreclaimable_peak_sampled_bytes=%s\n' "$peak_memory_nonreclaimable"
   printf 'swap_peak_sampled_bytes=%s\n' "$peak_swap"
