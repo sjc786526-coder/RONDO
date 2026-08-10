@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import http.client
+import io
 import json
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
@@ -27,6 +29,7 @@ from rondo_eval.terminal_bench.docker_smoke import (  # noqa: E402
     DockerNoApiSmokeError,
     LocalResponsesFakeServer,
     _parser,
+    _print_safe_cli_error,
     _smoke_exit_code,
     run_docker_no_api_smoke,
 )
@@ -57,6 +60,9 @@ class FakeMaterializer:
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
+        provider_secret = self.root / f"{kwargs['staging_name']}.provider-api-key"
+        provider_secret.write_bytes(b"")
+        provider_secret.chmod(0o600)
         overlay.write_text(
             materialize_module._compose_overlay_text(
                 task_label=kwargs["task_label"],
@@ -65,12 +71,17 @@ class FakeMaterializer:
                 pids_limit=kwargs["pids_limit"],
                 provider_api_key_env=kwargs["provider_api_key_env"],
                 runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
+                provider_secret_path=provider_secret,
+                seccomp_profile=kwargs.get("seccomp_profile"),
+                seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
+                seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
             ),
             encoding="utf-8",
         )
         return MaterializedTask(
             task_path=task,
             overlay_path=overlay,
+            provider_secret_path=provider_secret,
             source_repo_ref=TERMINAL_BENCH_REPO_REF,
             source_commit=TERMINAL_BENCH_COMMIT,
             source_digest=f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}",
@@ -84,6 +95,9 @@ class FakeMaterializer:
             runtime_user=materialize_module.TERMINAL_BENCH_AGENT_USER,
             staged_task_digest=materialize_module._harbor_content_digest(task),
             overlay_sha256=hashlib.sha256(overlay.read_bytes()).hexdigest(),
+            seccomp_profile=kwargs.get("seccomp_profile"),
+            seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
+            seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
         )
 
 
@@ -104,8 +118,14 @@ class FakeHostExecutor:
         )
         port = urlsplit(transport).port
         assert port is not None
-        secret_name = next(name for name in kwargs["injected_env"] if name != "HARBOR_TELEMETRY")
-        bearer = kwargs["injected_env"][secret_name]
+        assert kwargs["injected_env"] == {"HARBOR_TELEMETRY": "off"}
+        secret_mounts = [
+            item
+            for item in kwargs["compose_contract"].container.mounts
+            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+        ]
+        assert len(secret_mounts) == 1
+        bearer = Path(secret_mounts[0].source).read_text(encoding="utf-8")
         body = json.dumps({"model": "gpt-5.6-luna", "stream": True, "input": "fix"})
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         connection.request(
@@ -157,29 +177,14 @@ class FakeHostExecutor:
         if response.status != 200 or '"text":"done"' not in payload:
             raise AssertionError("loopback fake did not complete after code-mode output")
 
-        jobs = Path(argv[argv.index("--jobs-dir") + 1])
-        job = jobs / "2026-08-10__02-00-00"
-        trial = job / "fix-git__smoke"
+        trials = Path(argv[argv.index("--trials-dir") + 1])
+        trial_name = argv[argv.index("--trial-name") + 1]
+        trial = trials / trial_name
         trial.mkdir(parents=True)
-        (job / "result.json").write_text(
-            json.dumps(
-                {
-                    "n_total_trials": 1,
-                    "stats": {
-                        "n_completed_trials": 1,
-                        "n_errored_trials": 0,
-                        "n_running_trials": 0,
-                        "n_pending_trials": 0,
-                        "n_cancelled_trials": 0,
-                        "n_retries": 0,
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
         (trial / "result.json").write_text(
             json.dumps(
                 {
+                    "trial_name": trial_name,
                     "task_name": FIX_GIT_TASK_ID,
                     "agent_result": {
                         "n_input_tokens": 0,
@@ -227,7 +232,7 @@ class FakeHostExecutor:
             + "\n",
             encoding="utf-8",
         )
-        return HostHarborResult(0, jobs)
+        return HostHarborResult(0, trial)
 
 
 class DockerNoApiSmokeTests(unittest.TestCase):
@@ -297,6 +302,15 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             memory_swap_bytes=3 * 1024**3,
             pids_limit=256,
             provider_transport_base_url=None,
+            seccomp_profile_path=str(
+                (EVAL_ROOT / "seccomp" / "plan008-userns-minimal-v0.2.3.json").resolve()
+            ),
+            seccomp_profile_source_sha256=(
+                "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
+            ),
+            seccomp_profile_effective_sha256=(
+                "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+            ),
         )
 
     def test_full_function_uses_real_prepare_backend_and_parser_with_reward_zero(self) -> None:
@@ -307,6 +321,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                 counter=mock.Mock(),
                 lock_guard=mock.Mock(),
                 lease=HeavyLockLease(token="x" * 16, held=True),
+                pair_identity=mock.Mock(),
                 materializer=FakeMaterializer(self.root / "fake-materialized"),
                 executor_factory=FakeHostExecutor,
             )
@@ -322,8 +337,21 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertTrue(all(item.model == "gpt-5.6-luna" for item in result.requests))
         self.assertTrue(all(item.authorized for item in result.requests))
         self.assertTrue(result.safe_summary()["code_mode_tool_round_trip"])
+        self.assertIn(
+            '      - "seccomp=',
+            result.prepared.materialized_task.overlay_path.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            result.prepared.command.compose_contract.container.seccomp_profile_sha256,
+            "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf",
+        )
+        self.assertEqual(
+            result.prepared.command.compose_contract.container.security_opt,
+            ("no-new-privileges:true",),
+        )
         _argv, kwargs = FakeHostExecutor.calls[0]
-        self.assertEqual(kwargs["injected_env"]["OPENAI_API_KEY"], NO_API_SMOKE_BEARER)
+        self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off"})
+        self.assertEqual(result.prepared.materialized_task.provider_secret_path.read_bytes(), b"")
         agent_kwargs = {
             _argv[index + 1].split("=", 1)[0]: _argv[index + 1].split("=", 1)[1]
             for index, item in enumerate(_argv[:-1])
@@ -399,7 +427,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         class ErrorItemHostExecutor(FakeHostExecutor):
             async def run(self, argv, **kwargs) -> HostHarborResult:
                 result = await super().run(argv, **kwargs)
-                codex_output = next(result.jobs_dir.glob("*/*/agent/codex.txt"))
+                codex_output = result.jobs_dir / "agent" / "codex.txt"
                 codex_output.write_text(
                     json.dumps(
                         {
@@ -437,6 +465,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     counter=mock.Mock(),
                     lock_guard=mock.Mock(),
                     lease=HeavyLockLease(token="x" * 16, held=True),
+                    pair_identity=mock.Mock(),
                     materializer=FakeMaterializer(self.root / "fake-materialized-error"),
                     executor_factory=ErrorItemHostExecutor,
                 )
@@ -476,6 +505,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     counter=mock.Mock(),
                     lock_guard=mock.Mock(),
                     lease=HeavyLockLease(token="x" * 16, held=True),
+                    pair_identity=mock.Mock(),
                 )
             )
         args = _parser().parse_args(
@@ -489,6 +519,19 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             ]
         )
         self.assertEqual((args.side, args.binary_manifest.name), ("codex", "binary.json"))
+
+    def test_cli_error_is_single_line_structured_and_does_not_render_causes(self) -> None:
+        caught = DockerNoApiSmokeError("tracked Harbor identity differs")
+        caught.__cause__ = RuntimeError("sensitive-cause")
+        output = io.StringIO()
+
+        with redirect_stderr(output):
+            _print_safe_cli_error(caught, exit_code=65)
+
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["reason"], "tracked Harbor identity differs")
+        self.assertEqual(value["exit_code"], 65)
+        self.assertNotIn("sensitive-cause", output.getvalue())
 
     def test_cli_loader_requires_15_key_bundle_and_rejects_legacy_16_keys(self) -> None:
         bundle = self.root / "eval-data" / "bin" / "smoke-bundle"

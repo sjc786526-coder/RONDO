@@ -1,0 +1,137 @@
+{
+  "standard": {
+    "model": "gpt-5.6-luna",
+    "instructions": "fixture policy bytes stay exact\n",
+    "tools": [
+      {
+        "type": "tool_search"
+      }
+    ],
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Review the observed calendar tool evidence."
+          }
+        ],
+        "internal_chat_message_metadata_passthrough": {
+          "turn_id": "turn_fixture",
+          "executed_tool_calls": [
+            {
+              "name": "tool_search"
+            }
+          ]
+        }
+      },
+      {
+        "type": "tool_search_output",
+        "call_id": "search_fixture",
+        "status": "completed",
+        "execution": "client",
+        "tools": [
+          {
+            "type": "function",
+            "name": "mcp__calendar__create_event",
+            "description": "Create a calendar event.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "name": "shell",
+        "call_id": "call_fixture",
+        "arguments": "{}",
+        "encrypted_function_args": "provider-private"
+      }
+    ]
+  },
+  "lite": {
+    "model": "gpt-5.6-luna",
+    "input": [
+      {
+        "type": "additional_tools",
+        "role": "developer",
+        "tools": [
+          {
+            "type": "tool_search"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "role": "developer",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "fixture policy bytes stay exact\n"
+          }
+        ]
+      },
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Review the observed calendar tool evidence."
+          }
+        ],
+        "internal_chat_message_metadata_passthrough": {
+          "turn_id": "turn_fixture",
+          "executed_tool_calls": [
+            {
+              "name": "tool_search"
+            }
+          ]
+        }
+      },
+      {
+        "type": "tool_search_output",
+        "call_id": "search_fixture",
+        "status": "completed",
+        "execution": "client",
+        "tools": [
+          {
+            "type": "function",
+            "name": "mcp__calendar__create_event",
+            "description": "Create a calendar event.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "additionalProperties": false
+            }
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "name": "shell",
+        "call_id": "call_fixture",
+        "arguments": "{}",
+        "encrypted_function_args": "provider-private"
+      }
+    ]
+  }
+}

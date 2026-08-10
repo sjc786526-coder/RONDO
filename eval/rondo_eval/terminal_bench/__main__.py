@@ -22,6 +22,14 @@ from ..runtime_bridge import (
 )
 from .freeze import FIX_GIT_IMAGE_DIGEST
 from .live import run_budgeted_terminal_bench
+from .metrics import RunnerMetricsTimer
+from .pair import (
+    PairIdentityError,
+    PairSequenceLedger,
+    load_pair_identity,
+    publication_context,
+    validate_harbor_installation,
+)
 from .results import (
     classify_terminal_bench_result,
     parse_single_task_result,
@@ -31,10 +39,10 @@ from .results import (
     validate_measurement_checkout,
     validate_results_worktree,
 )
-from .runner import TerminalBenchRequest, TerminalBenchRunError
+from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
 
 
-P1_BATCH_ID = "p1-fix-git-20260810"
+P1_BATCH_ID = "p1-fix-git-20260810"  # Historical exhausted batch; paid lock is disabled.
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -54,12 +62,22 @@ def main(argv: list[str] | None = None) -> int:
     try:
         side = Side(args.side)
         validate_run_id(args.run_id, track="tb", side=side.value)
-        if args.batch_id != P1_BATCH_ID:
-            raise ConfigError("batch id differs from the authorized P1 budget ledger")
         paths = RepoPaths.discover(Path.cwd())
+        pair_identity = load_pair_identity()
+        paid_mode = pair_identity.mode("paid")
+        slot = pair_identity.slot_for(side)
+        if args.batch_id != paid_mode.batch_id or args.run_id != slot.paid_run_id:
+            raise ConfigError("run id or batch differs from the authorized paid pair")
         config = load_runtime_config(paths)
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
+        pair_identity.validate_manifest(
+            common_root=paths.common_root,
+            side=side,
+            manifest_path=args.binary_manifest,
+            manifest=manifest,
+        )
+        validate_harbor_installation(pair_identity, executable=HARBOR_EXECUTABLE)
         results_root = validate_results_worktree(
             args.results_worktree_root,
             common_root=paths.common_root,
@@ -98,8 +116,24 @@ def main(argv: list[str] | None = None) -> int:
             results_worktree_root=results_root,
             run_id=args.run_id,
         ).start()
+        metrics_timer = RunnerMetricsTimer()
         claimed = False
+        sequence_path = (
+            paths.common_root
+            / "eval-data"
+            / "pairs"
+            / f"{pair_identity.pair_id}-paid.json"
+        )
+        sequence = PairSequenceLedger(
+            sequence_path,
+            identity=pair_identity,
+            mode="paid",
+        )
+        sequence.__enter__()
+        sequence_active = False
         try:
+            sequence.claim(side=side, run_id=args.run_id)
+            sequence_active = True
             with PersistentBudgetLedger(ledger_path, batch_id=args.batch_id) as ledger:
                 try:
                     ledger.claim_run(args.run_id)
@@ -114,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
                             counter=counter,
                             lock_guard=proof.guard,
                             lease=proof.lease,
+                            pair_identity=pair_identity,
                         )
                     )
                     parsed = parse_single_task_result(
@@ -140,6 +175,13 @@ def main(argv: list[str] | None = None) -> int:
                         live_result=result,
                         parsed=parsed,
                         metadata_path=metadata_path,
+                        publication=publication_context(
+                            pair_identity,
+                            side=side,
+                            metrics=metrics_timer.snapshot(
+                                exit_code=_outcome_exit_code(parsed.outcome)
+                            ).to_dict(),
+                        ),
                         writer=writer,
                     )
                 except (Exception, KeyboardInterrupt, asyncio.CancelledError) as exc:
@@ -166,10 +208,19 @@ def main(argv: list[str] | None = None) -> int:
                             metadata_path=metadata_path,
                             outcome=outcome,
                             failure_stage=failure_stage,
+                            publication=publication_context(
+                                pair_identity,
+                                side=side,
+                                metrics=metrics_timer.snapshot(
+                                    exit_code=exit_code
+                                ).to_dict(),
+                            ),
                             secrets=(api_key,),
                         )
                     except Exception:
                         return EVIDENCE_ERROR
+                    sequence.finish(run_id=args.run_id, completed=False)
+                    sequence_active = False
                     print(
                         json.dumps(
                             {
@@ -188,8 +239,19 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                     return exit_code
+            sequence.finish(
+                run_id=args.run_id,
+                completed=parsed.outcome is RunOutcome.COMPLETED,
+            )
+            sequence_active = False
         finally:
             writer.abort()
+            if sequence_active:
+                try:
+                    sequence.finish(run_id=args.run_id, completed=False)
+                except PairIdentityError:
+                    pass
+            sequence.__exit__(None, None, None)
         safe = {
             "schema_version": 1,
             "run_id": args.run_id,
@@ -229,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         return _outcome_exit_code(parsed.outcome)
     except BudgetStopped:
         return BUDGET_STOPPED
-    except ConfigError:
+    except (ConfigError, PairIdentityError):
         return CONFIG_ERROR
     except (DockerSupervisionError, RuntimeBridgeError):
         return INFRA_ERROR

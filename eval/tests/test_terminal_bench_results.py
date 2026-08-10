@@ -23,6 +23,7 @@ from rondo_eval.terminal_bench.live import (  # noqa: E402
     load_guardian_evidence_bundle,
 )
 from rondo_eval.terminal_bench import __main__ as terminal_bench_main  # noqa: E402
+from rondo_eval.terminal_bench.pair import RunPublicationContext  # noqa: E402
 from rondo_eval.terminal_bench.results import (  # noqa: E402
     HarborResultError,
     UPSTREAM_CODEX,
@@ -40,10 +41,13 @@ class TerminalBenchResultTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.jobs = self.root / "work" / "staging" / "jobs"
-        self.job = self.jobs / "2026-08-10__01-00-00"
-        self.trial = self.job / "fix-git__abc"
+        self.trial = self.root / "work" / "staging" / "trials" / "rondo-p1-codex-abc"
+        # Kept as a compatibility variable for APIs whose old parameter name
+        # was jobs_dir; it now denotes the exact single-trial root.
+        self.jobs = self.trial
+        self.job = self.root / "work" / "unpublished-job-fixture"
         self.trial.mkdir(parents=True)
+        self.job.mkdir(parents=True)
         self.job_result = {
             "n_total_trials": 1,
             "stats": {
@@ -56,6 +60,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             },
         }
         self.trial_result = {
+            "trial_name": self.trial.name,
             "task_name": "terminal-bench/fix-git",
             "agent_result": {
                 "n_input_tokens": 100,
@@ -73,10 +78,27 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.temp.cleanup()
 
     def _write_results(self) -> None:
-        (self.job / "result.json").write_text(json.dumps(self.job_result), encoding="utf-8")
         (self.trial / "result.json").write_text(json.dumps(self.trial_result), encoding="utf-8")
         (self.job / "job.log").write_text("safe log\n", encoding="utf-8")
         (self.job / "config.json").write_text("{}\n", encoding="utf-8")
+
+    @staticmethod
+    def _publication(
+        *, side: Side = Side.CODEX, exit_code: int = 0
+    ) -> RunPublicationContext:
+        return RunPublicationContext(
+            pair_id="p1-fix-git-pair-v3",
+            pair_lock_sha256="9" * 64,
+            pair_slot=1 if side is Side.RONDO else 2,
+            pair_round=1,
+            metrics={
+                "wall_seconds": 1.25,
+                "cpu_user_seconds": 0.5,
+                "cpu_system_seconds": 0.25,
+                "peak_rss_bytes": 1024,
+                "exit_code": exit_code,
+            },
+        )
 
     @staticmethod
     def _write_metadata(path: Path, *roles: str) -> None:
@@ -282,10 +304,75 @@ class TerminalBenchResultTests(unittest.TestCase):
             live_result=live_result,
             parsed=parsed,
             metadata_path=self.root / "missing-api-metadata.json",
+            publication=self._publication(exit_code=70),
         )
         self.assertTrue((target / "harbor/trial-result.json").is_file())
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")
+
+    def test_infra_failure_cannot_publish_reward_as_success(self) -> None:
+        run_id = "20260810-010000013-tb-codex-r1"
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=17)
+        self.assertEqual((parsed.outcome, parsed.task_outcome), (RunOutcome.INFRA_FAILED, "fail"))
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result, "harbor", HostHarborResult(17, self.jobs))
+
+        publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.CODEX,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=self._publication(exit_code=70),
+        )
+
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["summary"]["success_rate"], 0.0)
+        self.assertEqual(record["tasks"][0]["outcome"], "fail")
+        self.assertEqual(record["tasks"][0]["reward"], 0.0)
+        self.assertEqual(record["tasks"][0]["attribution"], "infra")
+        self.assertEqual(record["summary"]["api_request_roles"]["main"], 1)
+
+    def test_ordinary_agent_failure_counts_verified_request_roles(self) -> None:
+        run_id = "20260810-010000014-tb-codex-r1"
+        self.job_result["stats"]["n_completed_trials"] = 0
+        self.job_result["stats"]["n_errored_trials"] = 1
+        self.trial_result.update(
+            {
+                "verifier_result": None,
+                "exception_info": {"exception_type": "NonZeroAgentExitCodeError"},
+            }
+        )
+        self._write_results()
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main", "guardian")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.CODEX,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=self._live_result(run_id),
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=self._publication(exit_code=65),
+        )
+
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "agent_failed")
+        self.assertEqual(record["tasks"][0]["attribution"], "agent")
+        self.assertEqual(
+            record["summary"]["api_request_roles"], {"main": 1, "guardian": 1}
+        )
 
     def test_cancelled_trial_has_a_distinct_outcome(self) -> None:
         self.job_result["stats"].update(
@@ -347,9 +434,10 @@ class TerminalBenchResultTests(unittest.TestCase):
             live_result=live_result,
             parsed=parsed,
             metadata_path=self.root / "missing-api-metadata.json",
+            publication=self._publication(exit_code=70),
         )
 
-        self.assertTrue((target / "harbor/job-result.json").is_file())
+        self.assertFalse((target / "harbor/job-result.json").exists())
         self.assertTrue((target / "harbor/trial-result.json").is_file())
         self.assertFalse((target / "harbor/job.log").exists())
         self.assertTrue((target / "api-metadata-unavailable.json").is_file())
@@ -369,8 +457,12 @@ class TerminalBenchResultTests(unittest.TestCase):
 
     def test_ambiguous_or_malformed_results_fail_closed(self) -> None:
         (self.jobs / "second-job").mkdir()
-        with self.assertRaises(HarborResultError):
-            parse_single_task_result(self.jobs, host_returncode=0)
+        # The parser is anchored to the exact trial directory and does not scan
+        # children as candidate jobs/trials.
+        self.assertEqual(
+            parse_single_task_result(self.jobs, host_returncode=0).outcome,
+            RunOutcome.COMPLETED,
+        )
         (self.jobs / "second-job").rmdir()
         self.trial_result["task_name"] = "some-other-task"
         self._write_results()
@@ -399,8 +491,9 @@ class TerminalBenchResultTests(unittest.TestCase):
             live_result=self._live_result(run_id),
             parsed=parsed,
             metadata_path=metadata,
+            publication=self._publication(),
         )
-        self.assertTrue((target / "harbor/job-result.json").is_file())
+        self.assertFalse((target / "harbor/job-result.json").exists())
         self.assertTrue((target / "harbor/trial-result.json").is_file())
         self.assertTrue((target / "harbor/agent/codex.txt").is_file())
         self.assertFalse((target / "harbor/job.log").exists())
@@ -408,6 +501,16 @@ class TerminalBenchResultTests(unittest.TestCase):
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["upstream_codex"], UPSTREAM_CODEX)
         self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(
+            set(record["metrics"]),
+            {
+                "wall_seconds",
+                "cpu_user_seconds",
+                "cpu_system_seconds",
+                "peak_rss_bytes",
+                "exit_code",
+            },
+        )
         self.assertEqual(record["cost"], {"estimated_usd": 0.012345, "actual_usd": 0.012345})
         summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
         self.assertEqual(
@@ -446,6 +549,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             live_result=live_result,
             parsed=parsed,
             metadata_path=missing_metadata,
+            publication=self._publication(exit_code=70),
         )
 
         self.assertTrue((target / "harbor/jobs-unavailable.json").is_file())
@@ -474,6 +578,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             metadata_path=self.root / "missing-api-metadata.json",
             outcome=RunOutcome.INFRA_FAILED,
             failure_stage="docker",
+            publication=self._publication(exit_code=70),
             secrets=("never-persist",),
         )
 
@@ -503,6 +608,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             metadata_path=metadata,
             outcome=RunOutcome.INFRA_FAILED,
             failure_stage="result",
+            publication=self._publication(exit_code=70),
             secrets=("never-persist",),
         )
 
@@ -529,6 +635,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                 live_result=live_result,
                 parsed=parsed,
                 metadata_path=self.root / "missing-api-metadata.json",
+                publication=self._publication(),
             )
 
     def test_completed_rondo_without_guardian_request_does_not_invent_e_final(self) -> None:
@@ -549,11 +656,13 @@ class TerminalBenchResultTests(unittest.TestCase):
             live_result=live_result,
             parsed=parsed,
             metadata_path=metadata,
+            publication=self._publication(side=Side.RONDO),
         )
 
         summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
         self.assertEqual(summary["summary"]["api_request_roles"], {"main": 1, "guardian": 0})
         self.assertEqual(summary["summary"]["evidence"], [])
+        self.assertEqual(summary["summary"]["s2_request_evidence_binding"], "not_triggered")
 
     def test_completed_rondo_guardian_request_requires_e_final(self) -> None:
         run_id = "20260810-010000006-tb-rondo-r1"
@@ -573,6 +682,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                 live_result=live_result,
                 parsed=parsed,
                 metadata_path=metadata,
+                publication=self._publication(side=Side.RONDO),
             )
 
     def test_completed_rondo_archives_revalidated_e_final_and_meta(self) -> None:
@@ -596,6 +706,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             live_result=live_result,
             parsed=parsed,
             metadata_path=metadata,
+            publication=self._publication(side=Side.RONDO),
         )
 
         self.assertTrue((target / "guardian-evidence/0001/E_final.json").is_file())
@@ -608,6 +719,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             summary["summary"]["evidence"][0]["guardian_source_commit"],
             UPSTREAM_CODEX["commit"],
         )
+        self.assertEqual(summary["summary"]["s2_request_evidence_binding"], "unbound")
 
     def test_guardian_meta_source_drift_is_rejected(self) -> None:
         relative = self._write_guardian_bundle()
@@ -685,7 +797,25 @@ class TerminalBenchResultTests(unittest.TestCase):
         async_failure = mock.AsyncMock(
             side_effect=DockerSupervisionError("redacted test failure")
         )
+        pair_identity = mock.Mock(
+            pair_id="p1-fix-git-pair-v3",
+            lock_sha256="9" * 64,
+        )
+        pair_identity.mode.return_value = SimpleNamespace(
+            batch_id=terminal_bench_main.P1_BATCH_ID
+        )
+        pair_identity.slot_for.return_value = SimpleNamespace(
+            paid_run_id=run_id,
+            slot=2,
+            round=1,
+        )
+        sequence = mock.MagicMock()
+        sequence.__enter__.return_value = sequence
         with patch.object(terminal_bench_main.RepoPaths, "discover", return_value=paths), patch.object(
+            terminal_bench_main, "load_pair_identity", return_value=pair_identity
+        ), patch.object(
+            terminal_bench_main, "validate_harbor_installation"
+        ), patch.object(
             terminal_bench_main, "load_runtime_config", return_value=object()
         ), patch.object(
             terminal_bench_main, "validate_eval_harness_checkout", return_value="f" * 40
@@ -703,6 +833,8 @@ class TerminalBenchResultTests(unittest.TestCase):
             )
         ), patch.object(
             terminal_bench_main, "run_budgeted_terminal_bench", async_failure
+        ), patch.object(
+            terminal_bench_main, "PairSequenceLedger", return_value=sequence
         ), patch("builtins.print") as safe_print:
             result = terminal_bench_main.main(
                 [
@@ -722,6 +854,8 @@ class TerminalBenchResultTests(unittest.TestCase):
             )
 
         self.assertEqual(result, terminal_bench_main.INFRA_ERROR)
+        sequence.claim.assert_called_once_with(side=Side.CODEX, run_id=run_id)
+        sequence.finish.assert_called_once_with(run_id=run_id, completed=False)
         safe_print.assert_called_once()
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")

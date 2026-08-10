@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .. import runtime_bridge
 from ..config import ConfigError, RepoPaths, RuntimeConfig, load_local_model_secret, load_runtime_config
@@ -63,6 +63,32 @@ class RouterProbe:
         return self.status == "router_ready"
 
 
+@dataclass(frozen=True)
+class RuntimeLock:
+    relative_path: str
+    regular_files: dict[str, str]
+    symlinks: dict[str, str]
+    dependency_probe_path: str = "/usr/bin/ldd"
+    dependency_probe_sha256: str = ""
+    host_dependencies: dict[str, str] | None = None
+
+    @property
+    def identity_sha256(self) -> str:
+        canonical = json.dumps(
+            {
+                "regular_files": self.regular_files,
+                "relative_path": self.relative_path,
+                "symlinks": self.symlinks,
+                "dependency_probe_path": self.dependency_probe_path,
+                "dependency_probe_sha256": self.dependency_probe_sha256,
+                "host_dependencies": self.host_dependencies,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+
 def resolve_binary(config: RuntimeConfig, settings: LocalApprovalSettings) -> Path | None:
     configured = Path(settings.binary)
     if configured.is_absolute() or configured.parent != Path("."):
@@ -85,14 +111,13 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
     if binary is None:
         return RuntimeInspection("runtime_missing", None, "pinned llama-server binary is unavailable")
     try:
-        if _binary_sha256(binary) != LLAMA_CPP_BINARY_SHA256:
-            return RuntimeInspection(
-                "runtime_pin_mismatch",
-                binary,
-                "llama-server binary digest does not match b10333",
-            )
-    except OSError:
-        return RuntimeInspection("runtime_invalid", binary, "llama-server binary cannot be hashed")
+        _verify_runtime_closure(config, binary)
+    except (OSError, ValueError):
+        return RuntimeInspection(
+            "runtime_pin_mismatch",
+            binary,
+            "llama.cpp runtime directory closure does not match b10333",
+        )
     try:
         completed = subprocess.run(
             [os.fspath(binary), "--version"],
@@ -134,6 +159,244 @@ def _binary_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _load_runtime_lock(config: RuntimeConfig) -> RuntimeLock:
+    path = config.paths.worktree_root / "eval/locks/llama-cpp-b10333.json"
+    if path.is_symlink() or not path.is_file():
+        raise OSError("llama.cpp runtime lock is unavailable")
+    try:
+        value = json.loads(path.read_bytes())
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise OSError("llama.cpp runtime lock is invalid") from exc
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "project",
+        "release",
+        "source_commit",
+        "asset",
+        "installed_runtime",
+        "capability",
+        "model_backed_structured_output",
+    }:
+        raise ValueError("llama.cpp runtime lock schema differs")
+    asset = value.get("asset")
+    installed = value.get("installed_runtime")
+    if (
+        value.get("schema_version") != 2
+        or value.get("project") != "ggml-org/llama.cpp"
+        or value.get("release") != "b10333"
+        or value.get("source_commit") != LLAMA_CPP_COMMIT
+        or not isinstance(asset, dict)
+        or asset.get("sha256") != LLAMA_CPP_ASSET_SHA256
+        or not isinstance(installed, dict)
+        or set(installed)
+        != {
+            "relative_path",
+            "regular_files",
+            "symlinks",
+            "dependency_probe",
+            "host_dependencies",
+        }
+    ):
+        raise ValueError("llama.cpp runtime lock identity differs")
+    relative_path = installed.get("relative_path")
+    regular_files = installed.get("regular_files")
+    symlinks = installed.get("symlinks")
+    dependency_probe = installed.get("dependency_probe")
+    host_dependencies = installed.get("host_dependencies")
+    if (
+        relative_path != "eval-data/tools/llama-b10333"
+        or not isinstance(regular_files, dict)
+        or not isinstance(symlinks, dict)
+        or not isinstance(dependency_probe, dict)
+        or set(dependency_probe) != {"canonical_path", "sha256"}
+        or dependency_probe.get("canonical_path") != "/usr/bin/ldd"
+        or not isinstance(dependency_probe.get("sha256"), str)
+        or not isinstance(host_dependencies, dict)
+        or not host_dependencies
+        or regular_files.get("llama-server") != LLAMA_CPP_BINARY_SHA256
+    ):
+        raise ValueError("llama.cpp runtime manifest is invalid")
+    _validate_runtime_entries(regular_files, symlinks)
+    _validate_host_dependencies(host_dependencies)
+    if re.fullmatch(r"[0-9a-f]{64}", dependency_probe["sha256"]) is None:
+        raise ValueError("llama.cpp dependency probe digest is invalid")
+    return RuntimeLock(
+        relative_path,
+        dict(regular_files),
+        dict(symlinks),
+        dependency_probe["canonical_path"],
+        dependency_probe["sha256"],
+        dict(host_dependencies),
+    )
+
+
+def _validate_runtime_entries(
+    regular_files: Mapping[str, Any], symlinks: Mapping[str, Any]
+) -> None:
+    if not regular_files or set(regular_files) & set(symlinks):
+        raise ValueError("llama.cpp runtime entries are invalid")
+    for name, digest in regular_files.items():
+        if (
+            not isinstance(name, str)
+            or Path(name).name != name
+            or name in {"", ".", ".."}
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise ValueError("llama.cpp regular-file entry is invalid")
+    for name, target in symlinks.items():
+        if (
+            not isinstance(name, str)
+            or Path(name).name != name
+            or name in {"", ".", ".."}
+            or not isinstance(target, str)
+            or Path(target).name != target
+            or target not in set(regular_files) | set(symlinks)
+        ):
+            raise ValueError("llama.cpp symlink entry is invalid")
+        seen = {name}
+        while target in symlinks:
+            if target in seen:
+                raise ValueError("llama.cpp symlink entries contain a cycle")
+            seen.add(target)
+            target = symlinks[target]
+        if target not in regular_files:
+            raise ValueError("llama.cpp symlink target is not a regular file")
+
+
+def _validate_host_dependencies(host_dependencies: Mapping[str, Any]) -> None:
+    for path, digest in host_dependencies.items():
+        if (
+            not isinstance(path, str)
+            or not Path(path).is_absolute()
+            or Path(path).resolve(strict=False) != Path(path)
+            or not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise ValueError("llama.cpp host dependency entry is invalid")
+
+
+def _verify_runtime_closure(config: RuntimeConfig, binary: Path) -> str:
+    runtime_lock = _load_runtime_lock(config)
+    configured_root = config.paths.common_root / runtime_lock.relative_path
+    root_before = os.lstat(configured_root)
+    if not stat.S_ISDIR(root_before.st_mode) or stat.S_ISLNK(root_before.st_mode):
+        raise ValueError("llama.cpp runtime root is not a real directory")
+    _reject_unsafe_mode(root_before.st_mode, "llama.cpp runtime root")
+    runtime_root = configured_root.resolve(strict=True)
+    if binary.resolve(strict=True) != runtime_root / "llama-server":
+        raise ValueError("configured llama-server does not belong to the frozen runtime")
+    actual_regular, actual_symlinks = _scan_runtime_root(runtime_root)
+    expected_entries = (set(runtime_lock.regular_files), set(runtime_lock.symlinks))
+    if (actual_regular, actual_symlinks) != expected_entries:
+        raise ValueError("llama.cpp runtime directory entries differ")
+    for name, expected in runtime_lock.regular_files.items():
+        if _binary_sha256(runtime_root / name) != expected:
+            raise ValueError("llama.cpp runtime file digest differs")
+    for name, expected in runtime_lock.symlinks.items():
+        if os.readlink(runtime_root / name) != expected:
+            raise ValueError("llama.cpp runtime symlink differs")
+    _verify_host_dependency_closure(runtime_lock, runtime_root)
+    if _scan_runtime_root(runtime_root) != expected_entries:
+        raise ValueError("llama.cpp runtime changed during inspection")
+    root_after = os.lstat(configured_root)
+    if (
+        root_before.st_dev,
+        root_before.st_ino,
+        root_before.st_mode,
+        root_before.st_mtime_ns,
+    ) != (
+        root_after.st_dev,
+        root_after.st_ino,
+        root_after.st_mode,
+        root_after.st_mtime_ns,
+    ):
+        raise ValueError("llama.cpp runtime root changed during inspection")
+    return runtime_lock.identity_sha256
+
+
+def _scan_runtime_root(runtime_root: Path) -> tuple[set[str], set[str]]:
+    actual_regular: set[str] = set()
+    actual_symlinks: set[str] = set()
+    with os.scandir(runtime_root) as entries:
+        for entry in entries:
+            if entry.is_symlink():
+                actual_symlinks.add(entry.name)
+            elif entry.is_file(follow_symlinks=False):
+                _reject_unsafe_mode(entry.stat(follow_symlinks=False).st_mode, entry.name)
+                actual_regular.add(entry.name)
+            else:
+                raise ValueError("llama.cpp runtime contains an unsupported entry")
+    return actual_regular, actual_symlinks
+
+
+def _reject_unsafe_mode(mode: int, label: str) -> None:
+    forbidden = stat.S_ISUID | stat.S_ISGID | stat.S_IWGRP | stat.S_IWOTH
+    if mode & forbidden:
+        raise ValueError(f"{label} has an unsafe mode")
+
+
+def _verify_host_dependency_closure(
+    runtime_lock: RuntimeLock, runtime_root: Path
+) -> None:
+    expected = runtime_lock.host_dependencies
+    if not isinstance(expected, dict) or not expected:
+        raise ValueError("llama.cpp host dependency lock is missing")
+    probe = Path(runtime_lock.dependency_probe_path)
+    if probe.is_symlink() or not probe.is_file():
+        raise ValueError("llama.cpp dependency probe is unavailable")
+    _reject_unsafe_mode(os.lstat(probe).st_mode, "llama.cpp dependency probe")
+    if _binary_sha256(probe) != runtime_lock.dependency_probe_sha256:
+        raise ValueError("llama.cpp dependency probe digest differs")
+
+    candidates = [runtime_root / "llama-server"] + [
+        runtime_root / name
+        for name in sorted(runtime_lock.regular_files)
+        if name.startswith("libggml-cpu-") and name.endswith(".so")
+    ]
+    observed: set[str] = set()
+    for candidate in candidates:
+        try:
+            completed = subprocess.run(
+                [os.fspath(probe), os.fspath(candidate)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=_VERSION_TIMEOUT_SECONDS,
+                env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError("llama.cpp dependency probe failed") from exc
+        if completed.returncode != 0:
+            raise ValueError("llama.cpp dependency probe failed")
+        for raw_line in completed.stdout.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("linux-vdso.so.1 "):
+                continue
+            if "=>" in line:
+                resolved_text = line.split("=>", 1)[1].strip().split(" ", 1)[0]
+                if resolved_text == "not":
+                    raise ValueError("llama.cpp dependency is unavailable")
+            else:
+                resolved_text = line.split(" ", 1)[0]
+            if not resolved_text.startswith("/"):
+                raise ValueError("llama.cpp dependency probe output is invalid")
+            resolved = Path(resolved_text).resolve(strict=True)
+            try:
+                resolved.relative_to(runtime_root)
+            except ValueError:
+                observed.add(os.fspath(resolved))
+    if observed != set(expected):
+        raise ValueError("llama.cpp host dependency paths differ")
+    if _binary_sha256(probe) != runtime_lock.dependency_probe_sha256:
+        raise ValueError("llama.cpp dependency probe changed during inspection")
+    for path, digest in expected.items():
+        dependency = Path(path)
+        _reject_unsafe_mode(os.lstat(dependency).st_mode, path)
+        if _binary_sha256(dependency) != digest:
+            raise ValueError("llama.cpp host dependency digest differs")
+
+
 def model_path(config: RuntimeConfig, settings: LocalApprovalSettings) -> Path:
     if not settings.model_path:
         raise ModelMissingError("local model path is empty")
@@ -142,7 +405,17 @@ def model_path(config: RuntimeConfig, settings: LocalApprovalSettings) -> Path:
         raise ModelMissingError("configured local model is missing")
     if path.suffix.lower() != ".gguf":
         raise ConfigError("configured local model must be a GGUF file")
-    return path
+    try:
+        with path.open("rb") as stream:
+            magic = stream.read(4)
+        digest = _binary_sha256(path)
+    except OSError as exc:
+        raise ConfigError("configured local model cannot be inspected") from exc
+    if magic != b"GGUF":
+        raise ConfigError("configured local model does not have a GGUF header")
+    if digest != settings.model_sha256:
+        raise ConfigError("configured local model digest differs")
+    return path.resolve(strict=True)
 
 
 def build_serve_command(
@@ -171,6 +444,8 @@ def build_serve_command(
         str(settings.port),
         "--model",
         os.fspath(model),
+        "--alias",
+        settings.model_id,
         "--parallel",
         str(settings.parallel),
         "--flash-attn",
@@ -363,7 +638,6 @@ def _sanitized_environment() -> dict[str, str]:
         "HIP_VISIBLE_DEVICES",
         "LANG",
         "LC_ALL",
-        "LD_LIBRARY_PATH",
         "PATH",
         "TMPDIR",
     }

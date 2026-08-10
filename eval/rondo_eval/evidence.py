@@ -6,10 +6,16 @@ import copy
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 
 STATIC_SCHEMA_VERSION = 1
+StaticApprovalConsumer = Literal["luna-static", "sol-static", "local-static"]
+STATIC_APPROVAL_CONSUMERS: tuple[StaticApprovalConsumer, ...] = (
+    "luna-static",
+    "sol-static",
+    "local-static",
+)
 STATIC_INSTRUCTIONS = (
     "Judge only from the supplied policy and evidence. Do not call tools or request "
     "additional evidence. Return one object matching output_schema."
@@ -19,7 +25,7 @@ STATIC_DECISION_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "properties": {
         "outcome": {"type": "string", "enum": ["allow", "deny"]},
-        "rationale": {"type": "string"},
+        "rationale": {"type": "string", "minLength": 1},
         "risk_tags": {
             "type": "array",
             "items": {"type": "string"},
@@ -90,7 +96,75 @@ def build_static_payload(e_final: Mapping[str, Any]) -> StaticApprovalPayload:
         ).encode("utf-8")
     except (TypeError, ValueError, UnicodeError) as exc:
         raise EvidenceError("E_final contains a value that cannot be canonicalized") from exc
-    return StaticApprovalPayload(identity, canonical, logical)
+    payload = StaticApprovalPayload(identity, canonical, logical)
+    validate_static_payload(payload)
+    return payload
+
+
+def validate_static_payload(payload: StaticApprovalPayload) -> None:
+    """Validate the final provider-neutral payload at a consumer boundary."""
+
+    if not isinstance(payload, StaticApprovalPayload):
+        raise EvidenceError("static approval payload has an invalid type")
+    logical = payload.logical_payload
+    if not isinstance(logical, Mapping) or set(logical) != {
+        "schema_version",
+        "instructions",
+        "guardian_policy",
+        "input",
+        "output_schema",
+    }:
+        raise EvidenceError("static approval payload fields do not match schema v1")
+    if logical["schema_version"] != STATIC_SCHEMA_VERSION or isinstance(
+        logical["schema_version"], bool
+    ):
+        raise EvidenceError("static approval payload schema version is invalid")
+    if logical["instructions"] != STATIC_INSTRUCTIONS:
+        raise EvidenceError("static approval instructions differ from schema v1")
+    policy = logical["guardian_policy"]
+    if not isinstance(policy, str) or not policy:
+        raise EvidenceError("static approval guardian policy is invalid")
+    if not isinstance(logical["input"], list):
+        raise EvidenceError("static approval input must be an array")
+    if logical["output_schema"] != STATIC_DECISION_SCHEMA:
+        raise EvidenceError("static approval output schema differs from schema v1")
+    _reject_private_transport(logical)
+
+    identity = payload.policy_identity
+    expected_sha256 = hashlib.sha256(policy.encode("utf-8")).hexdigest()
+    if (
+        not isinstance(identity, PolicyIdentity)
+        or identity.schema_version != STATIC_SCHEMA_VERSION
+        or identity.request_shape not in {"standard", "responses_lite"}
+        or identity.status != "known"
+        or identity.reason is not None
+        or identity.sha256 != expected_sha256
+    ):
+        raise EvidenceError("static approval policy identity is invalid")
+    try:
+        canonical = json.dumps(
+            logical,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise EvidenceError("static approval payload cannot be canonicalized") from exc
+    if not isinstance(payload.canonical_bytes, bytes) or payload.canonical_bytes != canonical:
+        raise EvidenceError("static approval canonical bytes do not match the logical payload")
+
+
+def static_payload_bytes_for_consumer(
+    payload: StaticApprovalPayload,
+    consumer: StaticApprovalConsumer,
+) -> bytes:
+    """Project identical canonical bytes to one named static consumer."""
+
+    if consumer not in STATIC_APPROVAL_CONSUMERS:
+        raise EvidenceError("static approval consumer is invalid")
+    validate_static_payload(payload)
+    return payload.canonical_bytes
 
 
 def validate_static_decision(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -100,8 +174,8 @@ def validate_static_decision(value: Mapping[str, Any]) -> dict[str, Any]:
         raise EvidenceError("static decision fields do not match schema v1")
     if not isinstance(value["outcome"], str) or value["outcome"] not in {"allow", "deny"}:
         raise EvidenceError("static decision outcome is invalid")
-    if not isinstance(value["rationale"], str):
-        raise EvidenceError("static decision rationale must be a string")
+    if not isinstance(value["rationale"], str) or not value["rationale"]:
+        raise EvidenceError("static decision rationale must be a non-empty string")
     tags = value["risk_tags"]
     if (
         not isinstance(tags, list)
@@ -159,7 +233,11 @@ def _is_additional_tools(value: Any) -> bool:
 
 
 def _developer_text(value: Any) -> str | None:
-    if not isinstance(value, Mapping) or value.get("role") != "developer":
+    if (
+        not isinstance(value, Mapping)
+        or value.get("type") != "message"
+        or value.get("role") != "developer"
+    ):
         return None
     content = value.get("content")
     if not isinstance(content, list) or len(content) != 1:
@@ -188,3 +266,25 @@ def _strip_transport_metadata(value: Any) -> Any:
             }
         result[key] = _strip_transport_metadata(item)
     return result
+
+
+def _reject_private_transport(value: Any) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _reject_private_transport(item)
+        return
+    if not isinstance(value, Mapping):
+        return
+    if value.get("type") == "additional_tools":
+        raise EvidenceError("static approval payload contains additional_tools")
+    if "tools" in value and (
+        value.get("type") != "tool_search_output" or not isinstance(value["tools"], list)
+    ):
+        raise EvidenceError("static approval payload contains a tool authorization field")
+    if "encrypted_function_args" in value:
+        raise EvidenceError("static approval payload contains encrypted_function_args")
+    metadata = value.get("internal_chat_message_metadata_passthrough")
+    if isinstance(metadata, Mapping) and "executed_tool_calls" in metadata:
+        raise EvidenceError("static approval payload contains executed_tool_calls")
+    for item in value.values():
+        _reject_private_transport(item)

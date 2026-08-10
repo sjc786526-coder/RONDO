@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import unittest
@@ -18,14 +19,19 @@ from rondo_eval.contracts import (  # noqa: E402
     assert_fair_pair,
 )
 from rondo_eval.evidence import (  # noqa: E402
+    STATIC_APPROVAL_CONSUMERS,
     EvidenceError,
+    StaticApprovalPayload,
     build_static_payload,
     policy_identity,
+    static_payload_bytes_for_consumer,
     validate_static_decision,
+    validate_static_payload,
 )
 
 
 POLICY = "policy bytes stay exact\n"
+FIXTURES = Path(__file__).with_name("fixtures")
 TASK_INPUT = [
     {
         "type": "message",
@@ -124,6 +130,15 @@ class EvidenceTests(unittest.TestCase):
         with self.assertRaises(EvidenceError):
             build_static_payload(request)
 
+    def test_lite_policy_item_requires_message_discriminator(self) -> None:
+        request = lite_request()
+        request["input"][1].pop("type")
+
+        identity = policy_identity(request)
+        self.assertFalse(identity.aggregatable)
+        with self.assertRaises(EvidenceError):
+            build_static_payload(request)
+
     def test_malformed_or_duplicate_additional_tools_is_fail_closed(self) -> None:
         malformed = lite_request()
         malformed["input"][0]["role"] = "user"
@@ -144,6 +159,91 @@ class EvidenceTests(unittest.TestCase):
             validate_static_decision({**decision, "extra": True})
         with self.assertRaises(EvidenceError):
             validate_static_decision({**decision, "outcome": []})
+        with self.assertRaises(EvidenceError):
+            validate_static_decision({**decision, "rationale": ""})
+
+    def test_three_static_consumers_receive_identical_tool_search_fixture_bytes(self) -> None:
+        fixture = json.loads(
+            (FIXTURES / "static_approval_tool_search.json").read_text(encoding="utf-8")
+        )
+        standard = build_static_payload(fixture["standard"])
+        lite = build_static_payload(fixture["lite"])
+
+        self.assertEqual(standard.canonical_bytes, lite.canonical_bytes)
+        consumer_bytes = {
+            consumer: static_payload_bytes_for_consumer(standard, consumer)
+            for consumer in STATIC_APPROVAL_CONSUMERS
+        }
+        self.assertEqual(
+            set(consumer_bytes),
+            {"luna-static", "sol-static", "local-static"},
+        )
+        self.assertEqual(len(set(consumer_bytes.values())), 1)
+        self.assertEqual(
+            consumer_bytes["luna-static"],
+            consumer_bytes["sol-static"],
+        )
+        self.assertEqual(
+            consumer_bytes["sol-static"],
+            consumer_bytes["local-static"],
+        )
+
+        logical = json.loads(consumer_bytes["local-static"])
+        tool_search = next(
+            item for item in logical["input"] if item.get("type") == "tool_search_output"
+        )
+        self.assertEqual(tool_search["call_id"], "search_fixture")
+        self.assertEqual(tool_search["tools"][0]["name"], "mcp__calendar__create_event")
+        self.assertNotIn("executed_tool_calls", consumer_bytes["local-static"].decode())
+        self.assertNotIn("encrypted_function_args", consumer_bytes["local-static"].decode())
+
+    def test_final_payload_validator_allows_evidence_tools_but_rejects_transport_fields(
+        self,
+    ) -> None:
+        fixture = json.loads(
+            (FIXTURES / "static_approval_tool_search.json").read_text(encoding="utf-8")
+        )
+        payload = build_static_payload(fixture["standard"])
+        validate_static_payload(payload)
+
+        mutations = (
+            lambda logical: logical.update({"tools": []}),
+            lambda logical: logical["input"].append(
+                {"type": "additional_tools", "role": "developer", "tools": []}
+            ),
+            lambda logical: logical["input"][0].update(
+                {"tools": [{"type": "function", "name": "message_smuggled"}]}
+            ),
+            lambda logical: logical["input"][2].update(
+                {"tools": [{"type": "function", "name": "function_smuggled"}]}
+            ),
+            lambda logical: logical["input"][1].update({"tools": {}}),
+            lambda logical: logical["input"][0].update(
+                {"encrypted_function_args": "private"}
+            ),
+            lambda logical: logical["input"][0].update(
+                {
+                    "internal_chat_message_metadata_passthrough": {
+                        "turn_id": "turn_fixture",
+                        "executed_tool_calls": [],
+                    }
+                }
+            ),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                logical = copy.deepcopy(payload.logical_payload)
+                mutate(logical)
+                canonical = json.dumps(
+                    logical,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+                forged = StaticApprovalPayload(payload.policy_identity, canonical, logical)
+                with self.assertRaises(EvidenceError):
+                    validate_static_payload(forged)
 
 
 class ContractTests(unittest.TestCase):

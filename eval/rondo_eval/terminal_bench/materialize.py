@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
 import shutil
 import stat
@@ -33,10 +35,30 @@ TERMINAL_BENCH_AGENT_USER = (
 )
 
 
+def _create_secret_placeholder(path: Path) -> None:
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise MaterializationError("provider secret placeholder could not be created") from exc
+
+
 @dataclass(frozen=True)
 class MaterializedTask:
     task_path: Path
     overlay_path: Path
+    provider_secret_path: Path
     source_repo_ref: str
     source_commit: str
     source_digest: str
@@ -50,6 +72,9 @@ class MaterializedTask:
     runtime_user: str
     staged_task_digest: str
     overlay_sha256: str
+    seccomp_profile: Path | None = None
+    seccomp_profile_source_sha256: str | None = None
+    seccomp_profile_effective_sha256: str | None = None
 
     def validate(self) -> None:
         if (
@@ -59,6 +84,18 @@ class MaterializedTask:
             or self.overlay_path.is_symlink()
         ):
             raise MaterializationError("staged task or Compose overlay is unavailable")
+        try:
+            secret_stat = self.provider_secret_path.lstat()
+        except OSError as exc:
+            raise MaterializationError("provider secret placeholder is unavailable") from exc
+        if (
+            self.provider_secret_path.is_symlink()
+            or not stat.S_ISREG(secret_stat.st_mode)
+            or stat.S_IMODE(secret_stat.st_mode) != 0o600
+            or secret_stat.st_size > 16 * 1024
+            or self.provider_secret_path.parent != self.overlay_path.parent
+        ):
+            raise MaterializationError("provider secret placeholder is unsafe")
         if (
             self.source_repo_ref != TERMINAL_BENCH_REPO_REF
             or self.source_commit != TERMINAL_BENCH_COMMIT
@@ -79,6 +116,36 @@ class MaterializedTask:
             or self.pids_limit <= 0
         ):
             raise MaterializationError("staged task resource limits are invalid")
+        profile_values = (
+            self.seccomp_profile,
+            self.seccomp_profile_source_sha256,
+            self.seccomp_profile_effective_sha256,
+        )
+        if any(value is not None for value in profile_values):
+            if not all(value is not None for value in profile_values):
+                raise MaterializationError("staged seccomp profile identity is incomplete")
+            assert self.seccomp_profile is not None
+            try:
+                from .namespace_diagnostic import (
+                    _EFFECTIVE_PROFILE_SHA256,
+                    _validate_frozen_profile,
+                )
+
+                profile_stat = self.seccomp_profile.lstat()
+                if (
+                    self.seccomp_profile.is_symlink()
+                    or not stat.S_ISREG(profile_stat.st_mode)
+                    or _file_sha256(self.seccomp_profile)
+                    != self.seccomp_profile_source_sha256
+                    or self.seccomp_profile_effective_sha256
+                    != _EFFECTIVE_PROFILE_SHA256
+                ):
+                    raise MaterializationError("staged seccomp profile identity differs")
+                _validate_frozen_profile(self.seccomp_profile.read_bytes())
+            except MaterializationError:
+                raise
+            except Exception as exc:
+                raise MaterializationError("staged seccomp profile is invalid") from exc
         if _harbor_content_digest(self.task_path) != self.staged_task_digest:
             raise MaterializationError("staged task changed after materialization")
         try:
@@ -92,6 +159,10 @@ class MaterializedTask:
             pids_limit=self.pids_limit,
             provider_api_key_env=self.provider_api_key_env,
             runtime_user=self.runtime_user,
+            provider_secret_path=self.provider_secret_path,
+            seccomp_profile=self.seccomp_profile,
+            seccomp_profile_source_sha256=self.seccomp_profile_source_sha256,
+            seccomp_profile_effective_sha256=self.seccomp_profile_effective_sha256,
         )
         if overlay_text != expected_overlay:
             raise MaterializationError("Compose overlay differs from the frozen contract")
@@ -114,6 +185,9 @@ class PinnedTaskMaterializer:
         memory_swap_bytes: int,
         pids_limit: int,
         provider_api_key_env: str,
+        seccomp_profile: Path | None = None,
+        seccomp_profile_source_sha256: str | None = None,
+        seccomp_profile_effective_sha256: str | None = None,
     ) -> MaterializedTask:
         if image_digest != FIX_GIT_IMAGE_DIGEST:
             raise MaterializationError("runtime image digest is not the B1 freeze")
@@ -158,9 +232,18 @@ class PinnedTaskMaterializer:
             raise MaterializationError("staging name is unsafe")
         destination = staging_root / staging_name
         overlay = staging_root / f"{staging_name}.compose.yaml"
-        if destination.exists() or destination.is_symlink() or overlay.exists():
+        provider_secret = staging_root / f"{staging_name}.provider-api-key"
+        if (
+            destination.exists()
+            or destination.is_symlink()
+            or overlay.exists()
+            or provider_secret.exists()
+            or provider_secret.is_symlink()
+        ):
             raise MaterializationError("staging destination already exists")
-        staging_root.mkdir(parents=True, exist_ok=True)
+        staging_root.mkdir(parents=True, mode=0o700, exist_ok=True)
+        staging_root.chmod(0o700)
+        _create_secret_placeholder(provider_secret)
         shutil.copytree(source_task, destination, symlinks=True)
 
         task_toml = destination / "task.toml"
@@ -191,12 +274,17 @@ class PinnedTaskMaterializer:
                 pids_limit=pids_limit,
                 provider_api_key_env=provider_api_key_env,
                 runtime_user=TERMINAL_BENCH_AGENT_USER,
+                provider_secret_path=provider_secret,
+                seccomp_profile=seccomp_profile,
+                seccomp_profile_source_sha256=seccomp_profile_source_sha256,
+                seccomp_profile_effective_sha256=seccomp_profile_effective_sha256,
             ),
             encoding="utf-8",
         )
         result = MaterializedTask(
             task_path=destination,
             overlay_path=overlay,
+            provider_secret_path=provider_secret,
             source_repo_ref=TERMINAL_BENCH_REPO_REF,
             source_commit=TERMINAL_BENCH_COMMIT,
             source_digest=f"sha256:{source_digest}",
@@ -210,6 +298,9 @@ class PinnedTaskMaterializer:
             runtime_user=TERMINAL_BENCH_AGENT_USER,
             staged_task_digest=_harbor_content_digest(destination),
             overlay_sha256=_file_sha256(overlay),
+            seccomp_profile=seccomp_profile,
+            seccomp_profile_source_sha256=seccomp_profile_source_sha256,
+            seccomp_profile_effective_sha256=seccomp_profile_effective_sha256,
         )
         result.validate()
         return result
@@ -396,14 +487,40 @@ def _compose_overlay_text(
     pids_limit: int,
     provider_api_key_env: str,
     runtime_user: str,
+    provider_secret_path: Path,
+    seccomp_profile: Path | None = None,
+    seccomp_profile_source_sha256: str | None = None,
+    seccomp_profile_effective_sha256: str | None = None,
 ) -> str:
     if runtime_user != TERMINAL_BENCH_AGENT_USER:
         raise MaterializationError("runtime user differs from the freeze")
+    if not provider_secret_path.is_absolute():
+        raise MaterializationError("provider secret path must be absolute")
     label_key, label_value = _split_label(task_label)
+    seccomp = ""
+    values = (
+        seccomp_profile,
+        seccomp_profile_source_sha256,
+        seccomp_profile_effective_sha256,
+    )
+    if any(value is not None for value in values):
+        if (
+            not all(value is not None for value in values)
+            or not isinstance(seccomp_profile, Path)
+            or not seccomp_profile.is_absolute()
+            or not re.fullmatch(r"[0-9a-f]{64}", seccomp_profile_source_sha256 or "")
+            or not re.fullmatch(r"[0-9a-f]{64}", seccomp_profile_effective_sha256 or "")
+        ):
+            raise MaterializationError("seccomp profile projection is incomplete")
+        seccomp = (
+            "    security_opt:\n"
+            '      - "no-new-privileges=true"\n'
+            f'      - "seccomp={seccomp_profile}"\n'
+        )
     return (
         "secrets:\n"
         "  rondo_eval_provider_api_key:\n"
-        f"    environment: {provider_api_key_env}\n"
+        f"    file: {json.dumps(str(provider_secret_path))}\n"
         "services:\n"
         "  main:\n"
         f'    user: "{runtime_user}"\n'
@@ -412,6 +529,7 @@ def _compose_overlay_text(
         f"    mem_limit: {memory_bytes}\n"
         f"    memswap_limit: {memory_swap_bytes}\n"
         f"    pids_limit: {pids_limit}\n"
+        f"{seccomp}"
         "    secrets:\n"
         "      - source: rondo_eval_provider_api_key\n"
         "        target: rondo_eval_provider_api_key\n"

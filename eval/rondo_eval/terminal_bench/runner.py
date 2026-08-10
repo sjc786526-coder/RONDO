@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
@@ -13,12 +15,15 @@ from .. import config as config_module
 from ..config import RuntimeConfig
 from ..contracts import BinaryManifest, RunSpec, Side
 from ..docker_supervisor import (
+    ComposeRunContract,
     DockerCounter,
     DockerExecutionResult,
+    DockerMountFact,
     DockerSupervisor,
     DockerTaskIdentity,
     HeavyLockGuard,
     HeavyLockLease,
+    HostContainerContract,
 )
 from ..runtime_bridge import SubprocessDockerCommandRunner, SubprocessHostCommandRunner
 from .adapters import UploadBinaryAdapter, adapter_for, manifest_agent_kwargs
@@ -63,6 +68,9 @@ class TerminalBenchRequest:
     timeout_seconds: int = 1800
     max_retries: int = 0
     budget_usd: float = 5.0
+    seccomp_profile_path: str | None = None
+    seccomp_profile_source_sha256: str | None = None
+    seccomp_profile_effective_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +86,9 @@ class HarborCommand:
     source_repo_ref: str
     task_source_digest: str
     task_label: str
+    trial_name: str
+    trials_dir: Path
+    compose_contract: ComposeRunContract
     n_concurrent: int = 1
 
     def validate(
@@ -97,7 +108,25 @@ class HarborCommand:
             raise TerminalBenchRunError("Compose secret source differs from RunSpec")
         if self.n_concurrent != 1 or spec.max_retries != 0:
             raise TerminalBenchRunError("Terminal-Bench P1 permits one task and no retries")
-        expected = _harbor_argv(spec, adapter, materialized)
+        if self.trial_name != _trial_name(materialized.task_label, spec.side):
+            raise TerminalBenchRunError("Harbor trial identity differs from the frozen run")
+        if self.trials_dir != materialized.task_path.parent / "trials":
+            raise TerminalBenchRunError("Harbor trials directory differs from the frozen run")
+        expected_contract = _compose_run_contract(
+            materialized,
+            trial_name=self.trial_name,
+            trials_dir=self.trials_dir,
+        )
+        if self.compose_contract != expected_contract:
+            raise TerminalBenchRunError("Docker Compose contract differs from the frozen trial")
+        self.compose_contract.validate()
+        expected = _harbor_argv(
+            spec,
+            adapter,
+            materialized,
+            trial_name=self.trial_name,
+            trials_dir=self.trials_dir,
+        )
         if self.argv != expected:
             raise TerminalBenchRunError("Harbor command differs from the frozen local-task form")
         if self.cwd != EVAL_ROOT:
@@ -157,14 +186,22 @@ class HostHarborResult:
     """Deliberately excludes stdout/stderr so secrets cannot be echoed by this API."""
 
     returncode: int
-    jobs_dir: Path
+    trial_dir: Path
     docker_evidence: DockerExecutionResult | None = None
+
+    @property
+    def jobs_dir(self) -> Path:
+        """Compatibility name for the exact single-trial evidence root."""
+
+        return self.trial_dir
 
 
 class HostHarborExecutor(Protocol):
     """Runs the host process under the shared lock and Docker supervisor.
 
-    ``injected_env`` contains exactly one task-required secret plus telemetry.
+    ``injected_env`` contains only non-secret process configuration.  The task
+    secret is exposed solely through the exact read-only Compose mount in the
+    frozen container contract.
     Implementations must extend a safe host environment without logging values,
     supervise all label-matching containers for the full process lifetime, and
     return no captured output containing environment values.
@@ -178,6 +215,7 @@ class HostHarborExecutor(Protocol):
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        compose_contract: ComposeRunContract,
     ) -> HostHarborResult: ...
 
 
@@ -205,18 +243,21 @@ class InjectedHostHarborBackend:
             raise TerminalBenchRunError("the projected provider key is unavailable")
         if secret in prepared.command.argv or secret in str(prepared.command):
             raise TerminalBenchRunError("provider key reached the serialized Harbor command")
-        injected_env = dict(prepared.command.env)
-        injected_env[secret_name] = secret
-        result = await self._executor.run(
-            prepared.command.argv,
-            cwd=prepared.command.cwd,
-            injected_env=injected_env,
-            timeout_seconds=prepared.spec.timeout_seconds,
-            exact_task_label=prepared.command.task_label,
-        )
-        if not isinstance(result, HostHarborResult):
-            raise TerminalBenchRunError("host Harbor executor returned an invalid result")
-        return result
+        _replace_provider_secret(prepared.materialized_task.provider_secret_path, secret)
+        try:
+            result = await self._executor.run(
+                prepared.command.argv,
+                cwd=prepared.command.cwd,
+                injected_env=dict(prepared.command.env),
+                timeout_seconds=prepared.spec.timeout_seconds,
+                exact_task_label=prepared.command.task_label,
+                compose_contract=prepared.command.compose_contract,
+            )
+            if not isinstance(result, HostHarborResult):
+                raise TerminalBenchRunError("host Harbor executor returned an invalid result")
+            return result
+        finally:
+            _replace_provider_secret(prepared.materialized_task.provider_secret_path, "")
 
 
 class DockerSupervisedHostHarborExecutor:
@@ -244,6 +285,7 @@ class DockerSupervisedHostHarborExecutor:
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        compose_contract: ComposeRunContract,
     ) -> HostHarborResult:
         prefix = "dev.rondo.eval.task="
         if not exact_task_label.startswith(prefix):
@@ -255,7 +297,7 @@ class DockerSupervisedHostHarborExecutor:
         if not argv or Path(argv[0]) != self._harbor_executable:
             raise TerminalBenchRunError("host Harbor executable differs from the freeze")
         _require_budget_proxy_argv(argv)
-        if set(injected_env) != {"HARBOR_TELEMETRY", _provider_secret_name(injected_env)}:
+        if dict(injected_env) != {"HARBOR_TELEMETRY": "off"}:
             raise TerminalBenchRunError("host Harbor environment is not minimally scoped")
         host_environment = dict(injected_env)
         # ``rondo-eval`` is deliberately a non-installed uv project.  Harbor
@@ -280,11 +322,13 @@ class DockerSupervisedHostHarborExecutor:
             argv,
             lease=self._lease,
             timeout_seconds=timeout_seconds,
+            compose_contract=compose_contract,
         )
-        jobs_dir = Path(argv[argv.index("--jobs-dir") + 1])
+        trials_dir = Path(argv[argv.index("--trials-dir") + 1])
+        trial_name = argv[argv.index("--trial-name") + 1]
         return HostHarborResult(
             returncode=evidence.returncode,
-            jobs_dir=jobs_dir,
+            trial_dir=trials_dir / trial_name,
             docker_evidence=evidence,
         )
 
@@ -314,6 +358,16 @@ def prepare_terminal_bench_run(
 
     validate_freeze()
     image_digest = validate_runtime_image_digest(request.image_digest)
+    seccomp_values = (
+        request.seccomp_profile_path,
+        request.seccomp_profile_source_sha256,
+        request.seccomp_profile_effective_sha256,
+    )
+    if any(value is not None for value in seccomp_values) and (
+        not all(value is not None for value in seccomp_values)
+        or not Path(request.seccomp_profile_path or "").is_absolute()
+    ):
+        raise TerminalBenchRunError("Terminal-Bench seccomp profile is incomplete")
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
     spec = config_module.make_run_spec(
@@ -340,6 +394,13 @@ def prepare_terminal_bench_run(
         memory_swap_bytes=request.memory_swap_bytes,
         pids_limit=request.pids_limit,
         provider_api_key_env=spec.provider.api_key_env,
+        seccomp_profile=(
+            Path(request.seccomp_profile_path)
+            if request.seccomp_profile_path is not None
+            else None
+        ),
+        seccomp_profile_source_sha256=request.seccomp_profile_source_sha256,
+        seccomp_profile_effective_sha256=request.seccomp_profile_effective_sha256,
     )
     materialized.validate()
     transport_base_url = _validate_budget_proxy_transport(
@@ -356,8 +417,16 @@ def prepare_terminal_bench_run(
         guardian_model=spec.provider.guardian_model,
         guardian_effort=spec.provider.guardian_effort,
     )
+    trial_name = _trial_name(materialized.task_label, spec.side)
+    trials_dir = materialized.task_path.parent / "trials"
     command = HarborCommand(
-        argv=_harbor_argv(spec, adapter, materialized),
+        argv=_harbor_argv(
+            spec,
+            adapter,
+            materialized,
+            trial_name=trial_name,
+            trials_dir=trials_dir,
+        ),
         cwd=EVAL_ROOT,
         env=(("HARBOR_TELEMETRY", "off"),),
         required_secret_env=spec.provider.api_key_env,
@@ -366,6 +435,13 @@ def prepare_terminal_bench_run(
         source_repo_ref=materialized.source_repo_ref,
         task_source_digest=materialized.source_digest,
         task_label=materialized.task_label,
+        trial_name=trial_name,
+        trials_dir=trials_dir,
+        compose_contract=_compose_run_contract(
+            materialized,
+            trial_name=trial_name,
+            trials_dir=trials_dir,
+        ),
     )
     prepared = PreparedTerminalBenchRun(
         spec=spec,
@@ -381,12 +457,20 @@ def _harbor_argv(
     spec: RunSpec,
     adapter: UploadBinaryAdapter,
     materialized: MaterializedTask,
+    *,
+    trial_name: str,
+    trials_dir: Path,
 ) -> tuple[str, ...]:
     argv = [
         str(HARBOR_EXECUTABLE),
-        "run",
+        "trials",
+        "start",
         "--path",
         str(materialized.task_path),
+        "--trial-name",
+        trial_name,
+        "--trials-dir",
+        str(trials_dir),
         "--extra-docker-compose",
         str(materialized.overlay_path),
         "--agent",
@@ -400,20 +484,74 @@ def _harbor_argv(
         argv.extend(("--agent-kwarg", f"{key}={value}"))
     argv.extend(
         (
-            "--n-attempts",
-            "1",
-            "--n-concurrent",
-            "1",
-            "--max-retries",
-            "0",
             # Harbor may delete only the environment it creates for this one
             # staged task; the exact label keeps outer ownership observable.
             "--delete",
-            "--jobs-dir",
-            str(materialized.task_path.parent / "jobs"),
         )
     )
     return tuple(argv)
+
+
+def _trial_name(task_label: str, side: Side) -> str:
+    """Return a deterministic, Compose-safe and run-unique Harbor trial name."""
+
+    task_id = task_label.removeprefix("dev.rondo.eval.task=")
+    if not task_id or task_id == task_label:
+        raise TerminalBenchRunError("Docker task label is invalid")
+    suffix = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:12]
+    return f"rondo-p1-{side.value}-{suffix}"
+
+
+def _compose_run_contract(
+    materialized: MaterializedTask,
+    *,
+    trial_name: str,
+    trials_dir: Path,
+) -> ComposeRunContract:
+    """Project Harbor 0.20's fixed single-trial Compose topology exactly."""
+
+    project = f"{trial_name}__env"
+    network = f"{project}_default"
+    trial_dir = trials_dir / trial_name
+    mounts = (
+        DockerMountFact("bind", str(trial_dir / "verifier"), "/logs/verifier", False),
+        DockerMountFact("bind", str(trial_dir / "agent"), "/logs/agent", False),
+        DockerMountFact(
+            "bind",
+            str(trial_dir / "artifacts" / "logs" / "artifacts"),
+            "/logs/artifacts",
+            False,
+        ),
+        DockerMountFact(
+            "bind",
+            str(materialized.provider_secret_path),
+            "/run/secrets/rondo_eval_provider_api_key",
+            True,
+        ),
+    )
+    security_opt: tuple[str, ...] = ()
+    seccomp_profile_sha256 = None
+    if materialized.seccomp_profile is not None:
+        security_opt = ("no-new-privileges:true",)
+        seccomp_profile_sha256 = materialized.seccomp_profile_effective_sha256
+    return ComposeRunContract(
+        container=HostContainerContract(
+            user=materialized.runtime_user,
+            memory_bytes=materialized.memory_bytes,
+            memory_swap_bytes=materialized.memory_swap_bytes,
+            pids_limit=materialized.pids_limit,
+            compose_project=project,
+            compose_service="main",
+            network_mode=network,
+            networks=(network,),
+            mounts=mounts,
+            compose_secret_mount=None,
+            security_opt=security_opt,
+            seccomp_profile_sha256=seccomp_profile_sha256,
+        ),
+        network_names=(network,),
+        volume_names=(),
+    )
 
 
 def _task_label(task_id: str) -> str:
@@ -425,13 +563,45 @@ def _task_label(task_id: str) -> str:
     return f"dev.rondo.eval.task={task_id}"
 
 
-def _provider_secret_name(environment: Mapping[str, str]) -> str:
-    names = [name for name in environment if name != "HARBOR_TELEMETRY"]
-    if len(names) != 1 or not names[0]:
-        raise TerminalBenchRunError("host Harbor requires exactly one provider secret")
-    if environment.get("HARBOR_TELEMETRY") != "off" or not environment[names[0]]:
-        raise TerminalBenchRunError("host Harbor environment is invalid")
-    return names[0]
+def _replace_provider_secret(path: Path, value: str) -> None:
+    if not isinstance(value, str) or "\0" in value or "\r" in value or "\n" in value:
+        raise TerminalBenchRunError("provider key cannot be represented as a Compose secret")
+    payload = value.encode("utf-8")
+    if len(payload) > 16 * 1024:
+        raise TerminalBenchRunError("provider key exceeds the bounded Compose secret size")
+    try:
+        before = path.lstat()
+        flags = os.O_WRONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                path.is_symlink()
+                or not stat.S_ISREG(opened.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            ):
+                raise TerminalBenchRunError("provider secret placeholder identity changed")
+            os.ftruncate(descriptor, 0)
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise OSError("provider secret write made no progress")
+                offset += written
+            os.fsync(descriptor)
+            after_write = os.fstat(descriptor)
+            if after_write.st_size != len(payload):
+                raise TerminalBenchRunError("provider secret write was incomplete")
+        finally:
+            os.close(descriptor)
+        after = path.lstat()
+        if path.is_symlink() or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+            raise TerminalBenchRunError("provider secret placeholder changed after write")
+    except TerminalBenchRunError:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise TerminalBenchRunError("provider secret placeholder could not be updated") from exc
 
 
 def _validate_budget_proxy_transport(value: str) -> str:

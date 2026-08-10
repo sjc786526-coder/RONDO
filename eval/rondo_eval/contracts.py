@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 
 SCHEMA_VERSION = 1
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
+_MAX_RUN_TIMEOUT_SECONDS = 3600
+_MAX_RUN_RETRIES = 10
 
 
 class ContractError(ValueError):
@@ -180,8 +182,18 @@ class RunSpec:
         )
         if not expected:
             raise ContractError("run conditions differ from the frozen P1 fairness contract")
-        if self.timeout_seconds <= 0 or self.max_retries < 0:
-            raise ContractError("timeout and retry values must be bounded")
+        if (
+            isinstance(self.timeout_seconds, bool)
+            or not isinstance(self.timeout_seconds, int)
+            or not 0 < self.timeout_seconds <= _MAX_RUN_TIMEOUT_SECONDS
+        ):
+            raise ContractError("run timeout must be an integer from 1 through 3600 seconds")
+        if (
+            isinstance(self.max_retries, bool)
+            or not isinstance(self.max_retries, int)
+            or not 0 <= self.max_retries <= _MAX_RUN_RETRIES
+        ):
+            raise ContractError("run retries must be an integer from 0 through 10")
         if (
             isinstance(self.budget_usd, bool)
             or not isinstance(self.budget_usd, (int, float))

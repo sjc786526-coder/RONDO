@@ -11,12 +11,15 @@
 - **L1 完成**：已落地 Standard/Responses Lite 双形态 `E_final` 解析、exact policy bytes
   身份哈希、provider-neutral canonical payload 与结构化决策校验。出站静态 payload 同时排除
   顶层 `tools`、Lite `additional_tools`、warehouse-only metadata 和 provider-private 运输字段，
-  malformed/歧义证据 fail-closed。
+  malformed/歧义证据 fail-closed；合法 `ToolSearchOutput.tools` 作为既有证据保留，Luna/Sol/Local
+  三组 consumer 协议投影对同一 Standard/Lite fixture 产生完全相同的 canonical bytes；这项验收不等同于
+  三套生产调用端均已实现。
 - **L2 前置设施就绪，真实验收未运行**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 运行时、Responses
-  client、doctor、fake server、结构化输出本地校验和启动入口已实现。无模型 doctor 在
-  看门狗下返回 `infrastructure_ready_model_missing`/78；启动前同时核对安装 binary SHA 与
-  build/commit，不把可伪造的版本输出或 router 健康冒充模型就绪。
+  client、doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
+  52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`；client
+  禁止 redirect 并绑定 endpoint/model identity，模型存在时还要求 GGUF header 与配置 digest。
+  无模型 doctor 返回 `infrastructure_ready_model_missing`/78，不把 router 健康冒充模型就绪。
 - 当前未提供本地模型权重，本批也明确禁止下载；因此未启动真实模型、未推理、
   未量显存/上下文/首 token/总耗时，L2 验收与 L2a/L3/L4 保持待后续阶段。
 

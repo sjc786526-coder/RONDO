@@ -37,8 +37,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
     Harbor 0.20.0 dynamically constructs import-path agents as
     ``Agent(logs_dir=..., model_name=..., **agent_kwargs)``.  Every constructor
     argument below is non-secret and is projected onto ``--agent-kwarg`` by the
-    unified runner.  Compose reads the provider key only from the Harbor process
-    environment and exposes it as a mounted secret, never an argv value.
+    unified runner.  Compose reads the provider key only from the private staging
+    file and exposes it as a mounted secret, never an argv or Harbor environment
+    value.
     """
 
     side: ClassVar[Side]
@@ -50,6 +51,11 @@ class UploadBinaryAdapter(HarborCodexAgent):
         "codex-resources/bwrap"
     )
     agent_version: ClassVar[str] = "0.147.0"
+    # This is part of Harbor 0.20's Codex result-parser contract.  Declare it
+    # locally as well so the adapter does not depend on an untyped/private base
+    # attribute that is absent from the lightweight compatibility test double.
+    _OUTPUT_FILENAME: ClassVar[str] = "codex.txt"
+    _STDERR_FILENAME: ClassVar[str] = "codex.stderr.txt"
     _REMOTE_CODEX_HOME = PurePosixPath("/tmp/rondo-eval-codex-home")
     _REMOTE_CODEX_SECRETS_DIR = PurePosixPath("/tmp/rondo-eval-codex-secrets")
 
@@ -226,6 +232,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         remote_auth = (self._REMOTE_CODEX_SECRETS_DIR / "auth.json").as_posix()
         agent_dir = EnvironmentPaths.agent_dir.as_posix()
         output_path = (EnvironmentPaths.agent_dir / self._OUTPUT_FILENAME).as_posix()
+        stderr_path = (EnvironmentPaths.agent_dir / self._STDERR_FILENAME).as_posix()
         nonsecret_env = {"CODEX_HOME": remote_home}
 
         # Harbor's agent phase uses the staged task's numeric user, and the
@@ -250,9 +257,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
         )
 
         try:
-            # Compose mounts this from the Harbor process environment as a Docker
-            # secret.  No environment.exec ``-e KEY=value`` argument is used because
-            # Harbor's Docker backend would serialize that value into docker argv.
+            # Compose mounts the private staging file as a Docker secret.  No
+            # environment.exec ``-e KEY=value`` argument is used because Harbor's
+            # Docker backend would serialize that value into docker argv.
             auth_command = (
                 "set -e; test -s /run/secrets/rondo_eval_provider_api_key; umask 077; "
                 "python3 -c 'import json,sys; print(json.dumps({\"OPENAI_API_KEY\":sys.stdin.read()}))' "
@@ -316,7 +323,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 "--skip-git-repo-check "
                 f"--model {shlex.quote(model)} --json --enable unified_exec "
                 f"{override_args} -- {shlex.quote(instruction)} "
-                f"2>&1 </dev/null | tee {shlex.quote(output_path)}"
+                f"</dev/null 2>{shlex.quote(stderr_path)} | tee {shlex.quote(output_path)}"
             )
             _validate_safe_codex_command(command, side=self.side)
             await self.exec_as_agent(environment, command=command, env=nonsecret_env)
@@ -461,6 +468,8 @@ def _validate_safe_codex_command(command: str, *, side: Side) -> None:
     )
     if any(value in command for value in forbidden):
         raise AdapterError("unsafe Codex execution option was generated")
+    if "2>&1" in command or "2>/logs/agent/codex.stderr.txt" not in command:
+        raise AdapterError("Codex JSONL output must be isolated from stderr")
     required = (
         'approvals_reviewer="auto_review"',
         'approval_policy="on-request"',

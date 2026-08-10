@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -122,7 +124,13 @@ class ArtifactTests(unittest.TestCase):
             "outcome": "completed",
             "summary": {"success_rate": 1.0},
             "tasks": [{"task_id": "fake", "outcome": "pass"}],
-            "metrics": None,
+            "metrics": {
+                "wall_seconds": 1.0,
+                "cpu_user_seconds": 0.5,
+                "cpu_system_seconds": 0.25,
+                "peak_rss_bytes": 4096,
+                "exit_code": 0,
+            },
             "cost": {"estimated_usd": 0.0, "actual_usd": 0.0},
             "artifacts": f"eval-data/runs/{run_id}",
             "notes": "",
@@ -146,6 +154,21 @@ class ArtifactTests(unittest.TestCase):
             for line in (self.paths.common_root / "eval/results/runs.jsonl").read_text().splitlines()
         ]
         self.assertEqual([row["run_id"] for row in rows], [case[0] for case in cases])
+        expected_index = b"".join(
+            json.dumps(
+                self._record(run_id, side=side),
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+            + b"\n"
+            for run_id, side in cases
+        )
+        self.assertEqual(
+            (self.paths.common_root / "eval/results/runs.jsonl").read_bytes(),
+            expected_index,
+        )
         self.assertTrue(
             all(
                 row["upstream_codex"]
@@ -286,39 +309,44 @@ class ArtifactTests(unittest.TestCase):
         self.assertFalse(writer.target.exists())
         self.assertFalse(writer.journal.exists())
 
-    def test_append_failure_rolls_back_and_next_writer_recovers_publication(self) -> None:
+    def test_partial_index_write_base_exception_keeps_previous_index_intact(self) -> None:
         from unittest import mock
 
-        run_id = "20260809-000000010-tb-rondo-r1"
+        baseline_id = "20260809-000000010-tb-rondo-r1"
+        baseline = ArtifactWriter(self.paths, baseline_id).start()
+        baseline.write_json("result.json", {"ok": True})
+        baseline.finalize(self._record(baseline_id), secrets=())
+        original_index = baseline.results.read_bytes()
+
+        run_id = "20260809-000000036-tb-rondo-r1"
         writer = ArtifactWriter(self.paths, run_id).start()
         writer.write_json("result.json", {"ok": True})
         real_write = os.write
-        write_calls = 0
 
-        def fail_after_partial_append(descriptor, contents):
-            nonlocal write_calls
-            write_calls += 1
-            if write_calls == 1:
-                prefix = bytes(contents[:11])
-                real_write(descriptor, prefix)
-                return len(prefix)
-            raise OSError("injected partial append failure")
+        def interrupt_after_partial_write(descriptor, contents):
+            real_write(descriptor, bytes(contents[:11]))
+            raise KeyboardInterrupt
 
-        with mock.patch("rondo_eval.artifacts.os.write", side_effect=fail_after_partial_append):
-            with self.assertRaises(OSError):
+        with mock.patch(
+            "rondo_eval.artifacts._write_all", side_effect=interrupt_after_partial_write
+        ):
+            with self.assertRaises(KeyboardInterrupt):
                 writer.finalize(self._record(run_id), secrets=())
-        self.assertTrue(writer.staging.exists())
-        self.assertFalse(writer.target.exists())
-        self.assertTrue(writer.journal.exists())
-        self.assertEqual(writer.results.stat().st_size, 0)
-
-        with self.assertRaises(ArtifactError):
-            ArtifactWriter(self.paths, run_id).start()
-        self.assertTrue(writer.target.exists())
         self.assertFalse(writer.staging.exists())
+        self.assertTrue(writer.target.exists())
+        self.assertTrue(writer.journal.exists())
+        self.assertEqual(writer.results.read_bytes(), original_index)
+        self.assertFalse(
+            (writer.results.parent / f".runs.jsonl.publish-{run_id}.tmp").exists()
+        )
+
+        next_id = "20260809-000000037-tb-rondo-r1"
+        next_writer = ArtifactWriter(self.paths, next_id).start()
+        next_writer.abort()
+        self.assertTrue(writer.target.exists())
         self.assertFalse(writer.journal.exists())
         rows = [json.loads(line) for line in writer.results.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual([row["run_id"] for row in rows], [run_id])
+        self.assertEqual([row["run_id"] for row in rows], [baseline_id, run_id])
 
     def test_interrupted_publication_is_reconciled_from_journal(self) -> None:
         from unittest import mock
@@ -326,7 +354,7 @@ class ArtifactTests(unittest.TestCase):
         run_id = "20260809-000000024-tb-rondo-r1"
         writer = ArtifactWriter(self.paths, run_id).start()
         writer.write_json("result.json", {"ok": True})
-        with mock.patch("rondo_eval.artifacts._append_json_line", side_effect=KeyboardInterrupt):
+        with mock.patch("rondo_eval.artifacts._atomic_replace_index", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt):
                 writer.finalize(self._record(run_id), secrets=())
         self.assertTrue(writer.target.exists())
@@ -339,6 +367,99 @@ class ArtifactTests(unittest.TestCase):
         self.assertFalse(writer.journal.exists())
         rows = [json.loads(line) for line in writer.results.read_text(encoding="utf-8").splitlines()]
         self.assertEqual([row["run_id"] for row in rows], [run_id])
+
+    def test_recovery_rejects_artifact_changes_after_crash(self) -> None:
+        from unittest import mock
+
+        run_id = "20260809-000000038-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        with mock.patch("rondo_eval.artifacts._atomic_replace_index", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                writer.finalize(self._record(run_id), secrets=())
+        (writer.target / "result.json").write_text('{"ok":false}\n', encoding="utf-8")
+
+        next_id = "20260809-000000039-tb-rondo-r1"
+        with self.assertRaisesRegex(ArtifactError, "differs from its publication journal"):
+            ArtifactWriter(self.paths, next_id).start()
+        self.assertFalse(writer.results.exists())
+        self.assertTrue(writer.journal.exists())
+
+    def test_subprocess_crashes_recover_old_or_new_complete_index(self) -> None:
+        crash_script = r'''
+import json
+import os
+import signal
+import sys
+from pathlib import Path
+
+from rondo_eval import artifacts
+from rondo_eval.artifacts import ArtifactWriter
+from rondo_eval.config import RepoPaths
+
+root = Path(sys.argv[1])
+run_id = sys.argv[2]
+point = sys.argv[3]
+record = json.loads((root / "record.json").read_text(encoding="utf-8"))
+
+if point == "after-journal":
+    original = ArtifactWriter._write_journal
+    def crash(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        os.kill(os.getpid(), signal.SIGKILL)
+    ArtifactWriter._write_journal = crash
+elif point == "partial-index":
+    def crash(path, contents, temporary_name):
+        temporary = path.parent / temporary_name
+        descriptor = artifacts._open_new_regular_file(temporary, 0o644)
+        os.write(descriptor, contents[:13])
+        os.fsync(descriptor)
+        os.close(descriptor)
+        os.kill(os.getpid(), signal.SIGKILL)
+    artifacts._atomic_replace_index = crash
+elif point == "after-index":
+    original = artifacts._atomic_replace_index
+    def crash(path, contents, temporary_name):
+        original(path, contents, temporary_name)
+        os.kill(os.getpid(), signal.SIGKILL)
+    artifacts._atomic_replace_index = crash
+else:
+    raise AssertionError(point)
+
+writer = ArtifactWriter(RepoPaths(root, root), run_id).start()
+writer.write_json("result.json", {"ok": True})
+writer.finalize(record, secrets=())
+raise AssertionError("crash point was not reached")
+'''
+        for number, point in enumerate(
+            ("after-journal", "partial-index", "after-index"), start=40
+        ):
+            with self.subTest(point=point):
+                root = self.paths.common_root / point
+                root.mkdir()
+                run_id = f"20260809-0000000{number}-tb-rondo-r1"
+                (root / "record.json").write_text(
+                    json.dumps(self._record(run_id)), encoding="utf-8"
+                )
+                environment = dict(os.environ)
+                environment["PYTHONPATH"] = str(EVAL_ROOT)
+                completed = subprocess.run(
+                    [sys.executable, "-c", crash_script, str(root), run_id, point],
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, -signal.SIGKILL, completed.stderr)
+
+                paths = RepoPaths(root, root)
+                with self.assertRaises(ArtifactError):
+                    ArtifactWriter(paths, run_id).start()
+                results = root / "eval/results/runs.jsonl"
+                rows = [json.loads(line) for line in results.read_text().splitlines()]
+                self.assertEqual([row["run_id"] for row in rows], [run_id])
+                self.assertTrue((root / "eval-data/runs" / run_id / "result.json").is_file())
+                self.assertFalse((root / "eval-data/runs" / f".{run_id}.publish.json").exists())
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks are unavailable")
     def test_symlinked_run_ancestor_fails_closed_before_write(self) -> None:
@@ -412,6 +533,16 @@ class ArtifactTests(unittest.TestCase):
             {"created_at": "2026-08-09T00:00:00"},
             {"track": "anything"},
             {"side": "anything"},
+            {"metrics": None},
+            {
+                "metrics": {
+                    "wall_seconds": 1.0,
+                    "cpu_user_seconds": 0.5,
+                    "cpu_system_seconds": 0.25,
+                    "peak_rss_bytes": 0,
+                    "exit_code": 0,
+                }
+            },
         )
         for number, changes in enumerate(invalid_changes, start=16):
             with self.subTest(changes=changes):

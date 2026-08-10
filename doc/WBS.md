@@ -29,20 +29,23 @@
   `encrypted_function_args`；新旧 Guardian 源码证据须按 meta 中的 source tag/commit 分层。实际有效
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
 - P1 已落地顶层轻量 `eval/` 体系：Standard/Lite `E_final` 解析、`PolicyIdentity`、
-  无工具静态审批协议、严格本地配置、原子归档、持久费用上限、Docker 监督、
-  Terminal-Bench runner/双适配器与 llama.cpp client/doctor/fake/launcher。182 项 pure/fake/loopback
-  设施测试通过，`uv lock --check` 通过。
+  无工具静态审批协议、严格本地配置、崩溃一致归档、持久费用上限、Docker 监督、
+  Terminal-Bench 公平配对/双适配器与 llama.cpp client/doctor/fake/launcher。237 项
+  pure/fake/loopback 设施测试通过，`uv lock --check` 通过。
 - Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest；B2 已生成
-  Codex/RONDO 静态 musl CLI + code-mode-host + 官方 bwrap runtime bundle，受看门狗的镜像
-  `--version` 探针通过。完整 no-API agent 路径依然被 Docker 默认 seccomp 下的嵌套
-  user namespace 拒绝；未授予 privileged/`SYS_ADMIN`/关闭 seccomp，所以 B3/M1 保持未通过。
-- L1 已完成；L2 项目局部 llama.cpp `b10333` 运行时、配置、client、doctor、fake 和
-  启动入口已就绪，无模型 doctor 返回 `infrastructure_ready_model_missing`/78。当前无权重，
-  未做真实本地推理、显存/延迟实测或 L2a/L3/L4。
-- **当前阶段：Plan 008 部分完成，安全阻塞收口**。三次 B3 诊断尝试均在首次
-  付费 API 请求前停止，按终审从正式结果库移除、仅在预算账本保留不可复用槽位；实际 API 调用
-  0 次、费用 0 USD。批次最多四个 run 尚保留 1 个槽位，
-  在 no-API 门禁通过前不消耗。
+  Codex/RONDO 静态 musl CLI + code-mode-host + 官方 bwrap runtime bundle，并由受跟踪 pair lock
+  绑定实际 Harbor closure、两侧 bundle 与公平配置。定向反事实确认 Docker builtin seccomp 阻止
+  非特权 user namespace；只对该容器使用受跟踪的最小 non-`CAP_SYS_ADMIN` profile 后，RONDO→Codex
+  同任务 no-API 配对均完成，未使用 privileged、`SYS_ADMIN` 或 `seccomp=unconfined`。
+- L1 协议与三组 consumer 协议/fixture 逐字节投影已完成，合法 `ToolSearchOutput` 可消费且最终 sink
+  fail-closed；本阶段不宣称已有三套独立生产调用端。
+  L2 项目局部 llama.cpp `b10333` 完整动态运行闭包、配置、client、doctor、fake 和启动入口已就绪，
+  redirect、endpoint/model identity 均受约束；无模型 doctor 返回
+  `infrastructure_ready_model_missing`/78。当前无权重，未做真实本地推理、显存/延迟实测或 L2a/L3/L4。
+- **当前阶段：Plan 008 基础设施整改与 B2 no-API 验收完成，B3/M1 待新授权。** 三次早期诊断均在
+  付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
+  0 次、费用 0 USD。旧付费批次不再用于配对，生产 paid 入口保持 hard-disabled；若继续 B3，需以新的
+  pair/batch、轮次与预算单独授权。
 
 ## 2. 方向与依赖
 
@@ -50,9 +53,9 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1 与 B2 代码/冻结产物已落地；B2 全链路 no-API、B3 受 Docker 安全边界阻塞 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1、B2 与双侧 no-API 配对已完成；B3/M1 待新的真实 API 授权 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | L1 已完成；L2 前置设施就绪、待模型接入 |
+| 2 | 本地审批模型接入与横评 | L1 已完成；L2 前置设施只待模型接入，真实验收未运行 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -77,7 +80,7 @@ P0 共享地基 ────────┤                          ├─→ �
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1、B2 代码/冻结产物、L1、L2 前置完成；B2 全链路 no-API 与 B3/M1 未通过 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1、B2/no-API、L1、L2 前置完成；B3/M1 待新授权 |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
@@ -116,10 +119,10 @@ P0 共享地基 ────────┤                          ├─→ �
 
 P0 已完成定向门禁并合入主线；P1 执行合同见
 `plan/008-p1-terminal-bench-and-local-approval-execplan.md`。本批已完成共享 eval 合同、B1、B2
-代码/冻结产物、L1 和 L2 前置设施，并保留 pure/fake、Docker、真实 API 与未运行项的证据分层。完整
-Terminal-Bench no-API 链路在 Docker 默认 seccomp 下无法创建 bwrap 所需的嵌套
-user namespace；未授权弱化容器安全边界，因此 B3/M1 与真实 `E_final` 种子保持待完成。
-执行细节和验收差集记录在本批 `agent_log`。
+双侧 no-API、L1 和 L2 前置设施，并保留 pure/fake、Docker、真实 API 与未运行项的证据分层。
+默认 seccomp 与最小容器 profile 的反事实已定位 bwrap 阻断；生产 no-API 只使用受跟踪 profile，仍保持
+non-root、cap-drop、no-new-privileges 与资源/挂载/网络有效态检查。B3/M1 与真实 `E_final` 种子因本批
+未调用真实 API 而保持待完成。执行细节和验收差集记录在本批 `agent_log`。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，
@@ -144,7 +147,9 @@ Docker/最多四个 run/总计 20 USD 授权只对该计划有效，不自动扩
 - 归属界定：Divan / Bazel benchmark 等属于**测评**设施，不算测试体系的一部分。
 - 行为改变型优化：保留仍成立的原测试，修改已不成立的旧语义测试，并需要测评证据证明有效；修 bug 型优化：原测试保留，新增一个"旧实现失败、新实现通过"的回归测试；纯实现优化：原则上不改原测试，性能交给测评体系。
 - **测评（eval）** 是有效代码的一部分，轻量、开箱即用，自动运行、自动记录、自动归档，可出曲线；不做数据资产审计等重机制。
-- 探针只放少量关键节点，内存累积、轮末统一输出。**跨侧对比只用 runner 进程外采集的外部指标**（wall / CPU / RSS）；内部探针只存在于 RONDO，用于自身版本间对比，不往冻结 codex 里打补丁（详见 `doc/WBS/eval-benchmark.md` A4）。
+- 探针只放少量关键节点，内存累积、轮末统一输出。跨侧对比必须使用同口径的外部指标；当前 runner-host
+  `getrusage` 不含 Docker daemon 管理的容器进程，只是设施开销诊断。paid B3 前须由 supervisor 补齐
+  容器 CPU 与峰值内存，内部探针仍只用于 RONDO 自身版本间对比（详见 `doc/WBS/eval-benchmark.md` A4）。
 - 原始 codex 与 RONDO 的对比测评统一关闭 websocket（provider 侧
   `ModelProviderInfo.supports_websockets = false`，见 `codex-rs/model-provider-info/src/lib.rs`）。
 

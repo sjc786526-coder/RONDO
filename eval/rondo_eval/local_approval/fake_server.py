@@ -23,6 +23,9 @@ class FakeApprovalServer:
         decision: Mapping[str, Any] | None = None,
         response_override: Any | None = None,
         required_bearer: str | None = None,
+        redirect_to: str | None = None,
+        model_id: str = "rondo-local-approval",
+        model_path: str = "/fake/model.gguf",
     ):
         self.decision = dict(
             decision
@@ -30,6 +33,9 @@ class FakeApprovalServer:
         )
         self.response_override = response_override
         self.required_bearer = required_bearer
+        self.redirect_to = redirect_to
+        self.model_id = model_id
+        self.model_path = model_path
         self.requests: list[dict[str, Any]] = []
         self.authorization_seen: list[bool] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_type(self))
@@ -81,6 +87,22 @@ def _handler_type(fake: FakeApprovalServer):
                     {
                         "role": "router",
                         "build_info": f"build {LLAMA_CPP_BUILD} ({LLAMA_CPP_COMMIT[:8]})",
+                        "model_path": fake.model_path,
+                    },
+                )
+                return
+            if self.path == "/v1/models":
+                self._json(
+                    200,
+                    {
+                        "object": "list",
+                        "data": [
+                            {
+                                "id": fake.model_id,
+                                "object": "model",
+                                "owned_by": "llamacpp",
+                            }
+                        ],
                     },
                 )
                 return
@@ -89,6 +111,13 @@ def _handler_type(fake: FakeApprovalServer):
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             if self.path != "/v1/responses":
                 self._json(404, {"error": {"message": "not found"}})
+                return
+            if fake.redirect_to is not None:
+                fake.authorization_seen.append(self.headers.get("Authorization") is not None)
+                self.send_response(302)
+                self.send_header("Location", fake.redirect_to)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
                 return
             length_text = self.headers.get("Content-Length")
             try:
@@ -103,7 +132,7 @@ def _handler_type(fake: FakeApprovalServer):
             except (UnicodeError, json.JSONDecodeError):
                 self._json(400, {"error": {"message": "invalid JSON"}})
                 return
-            if not isinstance(body, dict) or _contains_tool_transport(body):
+            if not isinstance(body, dict) or _contains_forbidden_transport(body):
                 self._json(400, {"error": {"message": "tool transport is forbidden"}})
                 return
             response_format = body.get("response_format")
@@ -160,13 +189,23 @@ def _handler_type(fake: FakeApprovalServer):
     return Handler
 
 
-def _contains_tool_transport(value: Any) -> bool:
+def _contains_forbidden_transport(value: Any, *, top_level: bool = True) -> bool:
     if isinstance(value, Mapping):
-        if "tools" in value or value.get("type") == "additional_tools":
+        if (top_level and "tools" in value) or value.get("type") == "additional_tools":
             return True
-        return any(_contains_tool_transport(item) for item in value.values())
+        if "encrypted_function_args" in value:
+            return True
+        metadata = value.get("internal_chat_message_metadata_passthrough")
+        if isinstance(metadata, Mapping) and "executed_tool_calls" in metadata:
+            return True
+        return any(
+            _contains_forbidden_transport(item, top_level=False)
+            for item in value.values()
+        )
     if isinstance(value, list):
-        return any(_contains_tool_transport(item) for item in value)
+        return any(
+            _contains_forbidden_transport(item, top_level=False) for item in value
+        )
     return False
 
 
