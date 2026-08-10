@@ -432,6 +432,48 @@ class DockerCounterTests(unittest.TestCase):
             self.assertEqual(executor.commands[2][5:7], ("--filter", expected_filter))
             self.assertEqual(executor.commands[3][4:6], ("--filter", expected_filter))
 
+    def test_multi_probe_sample_shares_one_absolute_deadline(self) -> None:
+        now = [0.0]
+
+        class SlowExecutor(FakeExecutor):
+            def run(self, argv, *, timeout_seconds):
+                self.timeouts.append(timeout_seconds)
+                self.commands.append(argv)
+                response = self.responses.pop(0)
+                now[0] += 2.0
+                return CommandOutput(returncode=0, stdout=response)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            executor = SlowExecutor(
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    "",
+                    "",
+                ]
+            )
+            counter = DockerCliCounter(
+                host_data_root=root,
+                executor=executor,
+                statvfs=lambda path: os.statvfs(path),
+                monotonic=lambda: now[0],
+                probe_timeout_seconds=5.0,
+            )
+
+            with self.assertRaises(RuntimeBridgeError):
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.RUN,
+                )
+
+        self.assertEqual(executor.timeouts, [5.0, 3.0, 1.0])
+        self.assertEqual(len(executor.commands), 3)
+
     def test_normalizes_direct_none_network_nnp_and_effective_tmpfs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

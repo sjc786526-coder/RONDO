@@ -13,6 +13,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.docker_supervisor import (  # noqa: E402
     DATA_ROOT_FREE_STOP_BYTES,
+    COUNTER_SAMPLE_TIMEOUT_SECONDS,
     DOCKER_GROWTH_WARN_BYTES,
     DOCKER_GROWTH_STOP_BYTES,
     ComposeResourceFact,
@@ -886,6 +887,45 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertIn("absolute deadline", caught.exception.reason)
         self.assertEqual(handle.terminated, 1)
 
+    def test_each_counter_round_gets_short_deadline_bounded_by_global_deadline(self) -> None:
+        for global_timeout, expected_budget in (
+            (60, COUNTER_SAMPLE_TIMEOUT_SECONDS),
+            (3, 3.0),
+        ):
+            with self.subTest(global_timeout=global_timeout):
+                clock = FakeClock()
+
+                class SlowCounter(FakeCounter):
+                    def __init__(self):
+                        super().__init__([reading()])
+                        self.budgets: list[float] = []
+
+                    def sample(self, **kwargs):
+                        deadline = kwargs["deadline"]
+                        self.budgets.append(deadline - clock.now)
+                        clock.now += self.budgets[-1] + 0.1
+                        return super().sample(**kwargs)
+
+                counter = SlowCounter()
+                supervisor, runner = self.supervisor(
+                    counter=counter,
+                    handles=[FakeHandle([0])],
+                    monotonic=clock.monotonic,
+                    sleeper=clock.sleep,
+                )
+
+                with self.assertRaises(DockerSupervisionError) as caught:
+                    supervisor.pull(
+                        self.identity,
+                        IMAGE,
+                        lease=self.lease,
+                        timeout_seconds=global_timeout,
+                    )
+
+                self.assertIn("counter probe exceeded", caught.exception.reason)
+                self.assertEqual(counter.budgets, [expected_budget])
+                self.assertEqual(runner.commands, [])
+
     def test_seccomp_contract_rejects_unsafe_modes_and_binds_profile_digest(self) -> None:
         with self.assertRaises(DockerSupervisionError):
             replace(
@@ -971,7 +1011,7 @@ class DockerSupervisorTests(unittest.TestCase):
                     [reading(), reading(containers=(CONTAINER_ID,)), reading()]
                 ),
                 FakeLockGuard(),
-                iter((0.0, 0.0, 0.0, 31.0, *([31.0] * 10))).__next__,
+                iter((0.0, 0.0, 0.0, 0.0, 31.0, *([31.0] * 10))).__next__,
             ),
             (
                 "lock",

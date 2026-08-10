@@ -185,17 +185,19 @@
 - RONDO companion 的前两次受监督构建均保留失败 summary：第一次证明 helper 的独立依赖图没有继承
   `codex-core` 的 vendored OpenSSL feature；同次选择 core 后越过该点，但又证明原 V8 gate 按 GNU rustc
   host 选择的归档不能链接 musl。两次均为构建错误、非资源停止，swap 峰值为 0。
-- 独立审查 F-01～F-16 已收口：pair/Harbor identity、公平拓扑、Docker 有效态、watchdog proof、
-  Compose 资源清理、最小外部 metrics、结果交叉约束、crash-consistent 归档、L1 ToolSearch/sink、
-  L2 完整 runtime closure/redirect/model identity 均进入生产门禁与回归。
+- 独立审查的本阶段缺口已收口：pair/Harbor identity、公平拓扑、Docker 有效态、watchdog proof、
+  Compose 资源清理、结果交叉约束、crash-consistent 归档、L1 ToolSearch/sink、L2 完整 runtime
+  closure/redirect/model identity 均进入生产门禁与回归。runner-host 五键 metrics 已接线，但不含 daemon
+  容器进程；容器 CPU/峰值内存明确延期到 paid B3 启用前完成。
 - 固定镜像的 default/custom seccomp 反事实证明 builtin profile 是 nested user namespace 阻断原因；
   受跟踪最小 profile 下 RONDO→Codex no-API 配对 v3 两侧通过，未使用 privileged、`SYS_ADMIN` 或
-  `seccomp=unconfined`。轻量门禁为 233/233，`uv lock --check` 为 85 packages。
+  `seccomp=unconfined`。轻量门禁为 237/237，`uv lock --check` 为 85 packages。
 
 ### 当前工作
 
-- F-01～F-16 修复、定向 Docker 诊断与双侧 no-API 配对均已完成；正在同步权威文档、清理本批工作目录并
-  进行独立终审。实现仍位于 `0810-plan008-review-remediation` 独立 worktree。
+- F-01～F-16 的 B2/当前阶段整改、定向 Docker 诊断与双侧 no-API 配对均已完成；F-16 的容器性能
+  指标按决策 029 延期为 paid B3 启用门禁。正在同步权威文档、清理本批工作目录并进行独立终审。
+  实现仍位于 `0810-plan008-review-remediation` 独立 worktree。
 - 受跟踪 pair lock 当前为 `p1-fix-git-pair-v3`；RONDO 槽位 1 与 Codex 槽位 2 均 completed，旧 v1/v2
   诊断账本保留失败终态，不复用或删除。
 
@@ -214,7 +216,8 @@
 
 - B1 的版本/task/image 资料冻结、Docker hello-world oracle、两侧静态 musl bundle 与目标镜像
   `--version` 探针保留为真实通过项；B2 公平/身份/有效隔离/归档与双侧 no-API 已验收。
-- L1 协议、合法 ToolSearch evidence、最终 sink 与三消费者逐字节 fixture 已验收。L2 是完整闭包已冻结、
+- L1 协议、合法 ToolSearch evidence、最终 sink 与三组 consumer 协议逐字节 fixture 已验收；不宣称三套
+  生产调用端均已实现。L2 是完整闭包已冻结、
   redirect/endpoint/model identity 已收口的无权重前置设施，真实结构化推理仍待模型。
 - 三次旧诊断已迁移为 `infra_failed` 永久记录，预算槽不可复用；本批真实 API 调用 0 次、费用 0 USD。
   B3/M1 未运行，不能由 no-API completed 或 reward 0 结果代替。
@@ -252,3 +255,4 @@
 | 026 | 归档改为 journal v2 + 完整 index 原子 replace | partial write/进程死亡后仍能按 pre/post identity 恢复，拒绝工件篡改 | 结果归档 | 已采纳 |
 | 027 | 以 Moby v0.2.3 为基线，只为 non-CAP_SYS_ADMIN bwrap 增加最小 syscall delta | 定向反事实确认 builtin seccomp 阻断，同时保持 non-root/cap-drop/NNP | B2 Docker | 已采纳 |
 | 028 | Compose provider secret 使用 0600 私有 staging 文件而非 Harbor environment | daemon 能核对 exact RO mount，bearer 不进入 Harbor env/argv，执行后清空 | B2/B3 秘密 | 已采纳 |
+| 029 | runner-host rusage 仅作设施诊断，paid B3 前补容器 CPU/峰值内存 | Docker 进程由 daemon 管理，self+children 不覆盖 agent，不能把局部 RSS 冒充跨侧性能 | B3 metrics | 已采纳 |

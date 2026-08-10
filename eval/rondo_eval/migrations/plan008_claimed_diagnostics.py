@@ -107,9 +107,9 @@ def prepare_migration(
     prepared: list[_PreparedRun] = []
     for run_id, evidence in _EVIDENCE.items():
         source_record = provisional[run_id]
-        work_evidence = _validate_work(common_root, run_id, source_record, evidence)
         run_ledger = ledger["runs"][run_id]
         corrected = _corrected_record(source_record, run_ledger)
+        work_evidence = _expected_work_evidence(run_id, evidence)
         artifact = {
             "schema_version": 1,
             "migration_id": MIGRATION_ID,
@@ -124,12 +124,15 @@ def prepare_migration(
         }
         target = common_root / "eval-data" / "runs" / run_id
         current = existing.get(run_id)
-        if current is None and not _path_present(target):
-            status = "pending"
-        elif current == corrected and _migration_artifact_matches(target, artifact):
+        if current == corrected and _migration_artifact_matches(target, artifact):
             status = "already_applied"
-        else:
+        elif current is not None or _path_present(target):
             status = "conflict"
+        else:
+            actual_work = _validate_work(common_root, run_id, source_record, evidence)
+            if actual_work != work_evidence:
+                raise MigrationError(f"retained work identity differs: {run_id}")
+            status = "pending"
         prepared.append(_PreparedRun(run_id, status, corrected, artifact))
     return tuple(prepared)
 
@@ -164,7 +167,7 @@ def apply_migration(
     *,
     source_bytes: bytes | None = None,
 ) -> tuple[_PreparedRun, ...]:
-    """Publish only pending rows; retained work and the ledger remain read-only."""
+    """Publish pending rows; source work is read-only and may be removed afterward."""
 
     prepared = prepare_migration(
         common_root,
@@ -305,6 +308,15 @@ def _validate_work(
         raise MigrationError(f"retained work duration differs from the provisional row: {run_id}")
     return {
         "relative_path": jobs.parent.parent.relative_to(common_root).as_posix(),
+        "job_result_sha256": expected.job_sha256,
+        "trial_result_sha256": expected.trial_sha256,
+        "exception_type": expected.exception_type,
+    }
+
+
+def _expected_work_evidence(run_id: str, expected: _EvidenceSpec) -> dict[str, Any]:
+    return {
+        "relative_path": f"eval-data/work/{run_id}",
         "job_result_sha256": expected.job_sha256,
         "trial_result_sha256": expected.trial_sha256,
         "exception_type": expected.exception_type,

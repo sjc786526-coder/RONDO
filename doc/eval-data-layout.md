@@ -117,8 +117,10 @@ eval-data/                             # git-ignored
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的
   Docker/watchdog/parser 异常也必须写分类失败行，不允许复用同一 run-id 绕过运行次数上限。
-- Terminal-Bench 生产记录的 `metrics` 固定为进程外采集的 `wall_seconds`、`cpu_user_seconds`、
-  `cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code` 五项；完整探针和细粒度 Guardian 归因仍留给 A4/B5。
+- Terminal-Bench 当前五键 `metrics` 固定为 runner-host `self+children` 的 `wall_seconds`、
+  `cpu_user_seconds`、`cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code`，仅用于设施诊断；Docker daemon
+  管理的容器 CPU/RSS 不在其中。paid B3 在 supervisor 增加并归档同口径容器 CPU/峰值内存前保持禁用；
+  完整探针和细粒度 Guardian 归因仍留给 A4/B5。
 - 发布使用 journal v2：在同一结果锁内绑定工件树摘要、完整 record bytes 及 index 前/后长度与 SHA，
   以同目录临时文件写完整新 index、fsync 后原子 replace。恢复只接受精确 pre/post identity，并重新核对
   工件树；partial write、进程死亡或恢复前篡改均 fail-closed，不再原地 append 半行。

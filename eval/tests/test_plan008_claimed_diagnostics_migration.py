@@ -75,6 +75,25 @@ class Plan008ClaimedDiagnosticsMigrationTests(unittest.TestCase):
         self.assertEqual(ledger_path.read_bytes(), before_ledger)
         self.assertEqual(self._tree_hash(work_root), before_work)
 
+    def test_applied_migration_remains_idempotent_after_work_cleanup(self) -> None:
+        applied = migration.apply_migration(
+            self.root, self.root, source_bytes=self.source
+        )
+        self.assertEqual([item.status for item in applied], ["already_applied"] * 3)
+
+        for run_id in self.evidence:
+            self._remove_tree(self.root / "eval-data/work" / run_id)
+
+        prepared = migration.prepare_migration(
+            self.root, self.root, source_bytes=self.source
+        )
+        self.assertEqual([item.status for item in prepared], ["already_applied"] * 3)
+        migration.apply_migration(self.root, self.root, source_bytes=self.source)
+        self.assertEqual(
+            len((self.root / "eval/results/runs.jsonl").read_text().splitlines()),
+            3,
+        )
+
     def test_changed_retained_result_blocks_without_publication(self) -> None:
         run_id = next(iter(self.evidence))
         job_result = next(
@@ -189,6 +208,14 @@ class Plan008ClaimedDiagnosticsMigrationTests(unittest.TestCase):
         ledger_path.parent.mkdir(parents=True)
         ledger_path.write_bytes(ledger)
         return source, ledger, evidence
+
+    def _remove_tree(self, root: Path) -> None:
+        for path in sorted(root.rglob("*"), reverse=True):
+            if path.is_dir():
+                path.rmdir()
+            else:
+                path.unlink()
+        root.rmdir()
 
     @staticmethod
     def _sha(contents: bytes) -> str:

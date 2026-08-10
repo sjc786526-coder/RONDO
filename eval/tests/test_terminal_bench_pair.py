@@ -182,6 +182,35 @@ class PairIdentityTests(unittest.TestCase):
                 [item["side"] for item in state["runs"]], ["rondo", "codex"]
             )
 
+    def test_abandoned_active_slot_blocks_pair_persistently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pair.json"
+            with PairSequenceLedger(
+                path, identity=self.identity, mode="no_api"
+            ) as sequence:
+                sequence.claim(side=Side.RONDO, run_id="rondo-before-crash")
+                # Deliberately omit finish(), simulating process death after the
+                # durable claim but before result publication.
+
+            with PairSequenceLedger(
+                path, identity=self.identity, mode="no_api"
+            ) as sequence:
+                with self.assertRaisesRegex(PairIdentityError, "abandoned active"):
+                    sequence.claim(side=Side.RONDO, run_id="rondo-replacement")
+
+            state = json.loads(path.read_text(encoding="utf-8"))
+            self.assertTrue(state["blocked"])
+            self.assertEqual(state["next_slot"], 1)
+            self.assertEqual(len(state["runs"]), 1)
+            self.assertEqual(state["runs"][0]["run_id"], "rondo-before-crash")
+            self.assertEqual(state["runs"][0]["status"], "failed")
+
+            with PairSequenceLedger(
+                path, identity=self.identity, mode="no_api"
+            ) as sequence:
+                with self.assertRaisesRegex(PairIdentityError, "earlier failed"):
+                    sequence.claim(side=Side.RONDO, run_id="rondo-third-attempt")
+
     def test_m1_pair_aggregation_keeps_s2_independent(self) -> None:
         records = [
             self._record(Side.RONDO, "2026-08-10T01:00:00Z"),
@@ -235,7 +264,7 @@ class PairIdentityTests(unittest.TestCase):
 
 
 class RunnerMetricsTests(unittest.TestCase):
-    def test_runner_timer_records_fixed_process_tree_shape(self) -> None:
+    def test_runner_timer_records_fixed_runner_host_shape(self) -> None:
         usages = iter(
             (
                 SimpleNamespace(ru_utime=1.0, ru_stime=2.0, ru_maxrss=100),

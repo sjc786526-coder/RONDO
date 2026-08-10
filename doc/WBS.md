@@ -30,14 +30,15 @@
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
 - P1 已落地顶层轻量 `eval/` 体系：Standard/Lite `E_final` 解析、`PolicyIdentity`、
   无工具静态审批协议、严格本地配置、崩溃一致归档、持久费用上限、Docker 监督、
-  Terminal-Bench 公平配对/双适配器与 llama.cpp client/doctor/fake/launcher。233 项
+  Terminal-Bench 公平配对/双适配器与 llama.cpp client/doctor/fake/launcher。237 项
   pure/fake/loopback 设施测试通过，`uv lock --check` 通过。
 - Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest；B2 已生成
   Codex/RONDO 静态 musl CLI + code-mode-host + 官方 bwrap runtime bundle，并由受跟踪 pair lock
   绑定实际 Harbor closure、两侧 bundle 与公平配置。定向反事实确认 Docker builtin seccomp 阻止
   非特权 user namespace；只对该容器使用受跟踪的最小 non-`CAP_SYS_ADMIN` profile 后，RONDO→Codex
   同任务 no-API 配对均完成，未使用 privileged、`SYS_ADMIN` 或 `seccomp=unconfined`。
-- L1 协议与三消费者逐字节投影已完成，合法 `ToolSearchOutput` 可消费且最终 sink fail-closed。
+- L1 协议与三组 consumer 协议/fixture 逐字节投影已完成，合法 `ToolSearchOutput` 可消费且最终 sink
+  fail-closed；本阶段不宣称已有三套独立生产调用端。
   L2 项目局部 llama.cpp `b10333` 完整动态运行闭包、配置、client、doctor、fake 和启动入口已就绪，
   redirect、endpoint/model identity 均受约束；无模型 doctor 返回
   `infrastructure_ready_model_missing`/78。当前无权重，未做真实本地推理、显存/延迟实测或 L2a/L3/L4。
@@ -146,7 +147,9 @@ Docker/最多四个 run/总计 20 USD 授权只对该计划有效，不自动扩
 - 归属界定：Divan / Bazel benchmark 等属于**测评**设施，不算测试体系的一部分。
 - 行为改变型优化：保留仍成立的原测试，修改已不成立的旧语义测试，并需要测评证据证明有效；修 bug 型优化：原测试保留，新增一个"旧实现失败、新实现通过"的回归测试；纯实现优化：原则上不改原测试，性能交给测评体系。
 - **测评（eval）** 是有效代码的一部分，轻量、开箱即用，自动运行、自动记录、自动归档，可出曲线；不做数据资产审计等重机制。
-- 探针只放少量关键节点，内存累积、轮末统一输出。**跨侧对比只用 runner 进程外采集的外部指标**（wall / CPU / RSS）；内部探针只存在于 RONDO，用于自身版本间对比，不往冻结 codex 里打补丁（详见 `doc/WBS/eval-benchmark.md` A4）。
+- 探针只放少量关键节点，内存累积、轮末统一输出。跨侧对比必须使用同口径的外部指标；当前 runner-host
+  `getrusage` 不含 Docker daemon 管理的容器进程，只是设施开销诊断。paid B3 前须由 supervisor 补齐
+  容器 CPU 与峰值内存，内部探针仍只用于 RONDO 自身版本间对比（详见 `doc/WBS/eval-benchmark.md` A4）。
 - 原始 codex 与 RONDO 的对比测评统一关闭 websocket（provider 侧
   `ModelProviderInfo.supports_websockets = false`，见 `codex-rs/model-provider-info/src/lib.rs`）。
 

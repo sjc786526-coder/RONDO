@@ -1,4 +1,4 @@
-"""Minimal process-external metrics required by the inherited B3 contract."""
+"""Runner-host diagnostics; container performance metrics remain a B3 gate."""
 
 from __future__ import annotations
 
@@ -69,10 +69,13 @@ class ExternalRunMetrics:
 
 
 class RunnerMetricsTimer:
-    """Measure one fresh runner process plus all children spawned by that run.
+    """Measure one fresh runner process and its ordinary child processes.
 
     The production CLI executes exactly one run, so Linux ``ru_maxrss`` is a
-    per-invocation process-tree peak rather than a cumulative multi-run value.
+    per-invocation runner-side peak rather than a cumulative multi-run value.
+    Docker container processes belong to the daemon and are deliberately not
+    represented by ``getrusage``; paid B3 must add supervised container CPU/RSS
+    before these values can be treated as agent performance metrics.
     """
 
     def __init__(

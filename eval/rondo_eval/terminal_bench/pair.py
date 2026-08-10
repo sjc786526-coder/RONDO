@@ -164,6 +164,18 @@ class PairSequenceLedger:
 
     def claim(self, *, side: Side, run_id: str) -> PairSlot:
         state = self._require_state()
+        active = [item for item in state["runs"] if item["status"] == "active"]
+        if active:
+            # An active entry surviving a lock handoff means the owning process
+            # exited without publishing a terminal result.  It cannot be
+            # resumed or replaced safely: persist the failed slot before
+            # rejecting every subsequent claim for this pair.
+            if len(active) != 1:
+                raise PairIdentityError("pair sequence active state is ambiguous")
+            active[0]["status"] = "failed"
+            state["blocked"] = True
+            self._persist()
+            raise PairIdentityError("pair sequence is blocked by an abandoned active slot")
         if state["blocked"]:
             raise PairIdentityError("pair sequence is blocked by an earlier failed slot")
         slot = self.identity.slot_for(side)

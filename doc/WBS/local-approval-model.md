@@ -12,7 +12,8 @@
   身份哈希、provider-neutral canonical payload 与结构化决策校验。出站静态 payload 同时排除
   顶层 `tools`、Lite `additional_tools`、warehouse-only metadata 和 provider-private 运输字段，
   malformed/歧义证据 fail-closed；合法 `ToolSearchOutput.tools` 作为既有证据保留，Luna/Sol/Local
-  三个 consumer projection 对同一 Standard/Lite fixture 产生完全相同的 canonical bytes。
+  三组 consumer 协议投影对同一 Standard/Lite fixture 产生完全相同的 canonical bytes；这项验收不等同于
+  三套生产调用端均已实现。
 - **L2 前置设施就绪，真实验收未运行**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 运行时、Responses
   client、doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录

@@ -24,6 +24,7 @@ from .exit_codes import INFRA_ERROR
 
 
 SAMPLE_INTERVAL_SECONDS = 5.0
+COUNTER_SAMPLE_TIMEOUT_SECONDS = 5.0
 FAILURE_CLEANUP_TIMEOUT_SECONDS = 30.0
 HOST_SUCCESS_TEARDOWN_GRACE_SECONDS = 30.0
 DOCKER_GROWTH_WARN_BYTES = 40_000_000_000
@@ -1127,15 +1128,16 @@ class DockerSupervisor:
         self._assert_lock(lease, samples=samples)
         if deadline is not None and self._monotonic() >= deadline:
             raise DockerSupervisionError("Docker supervision deadline exceeded", samples=samples)
+        sample_deadline = self._counter_sample_deadline(deadline)
         try:
             reading = self._counter.sample(
                 identity=identity,
                 operation=operation,
                 compose_contract=compose_contract,
-                deadline=deadline,
+                deadline=sample_deadline,
             )
             reading.validate()
-            if deadline is not None and self._monotonic() >= deadline:
+            if self._monotonic() >= sample_deadline:
                 raise DockerSupervisionError(
                     "Docker counter probe exceeded its absolute deadline",
                     samples=samples,
@@ -1298,14 +1300,15 @@ class DockerSupervisor:
         try:
             if deadline is not None and self._monotonic() >= deadline:
                 raise DockerSupervisionError("Docker cleanup deadline exceeded")
+            sample_deadline = self._counter_sample_deadline(deadline)
             reading = self._counter.sample(
                 identity=identity,
                 operation=operation,
                 compose_contract=compose_contract,
-                deadline=deadline,
+                deadline=sample_deadline,
             )
             reading.validate()
-            if deadline is not None and self._monotonic() >= deadline:
+            if self._monotonic() >= sample_deadline:
                 raise DockerSupervisionError("Docker cleanup probe exceeded its deadline")
             return reading
         except DockerSupervisionError:
@@ -1314,6 +1317,17 @@ class DockerSupervisor:
             raise DockerSupervisionError(
                 "Docker cleanup counters are unavailable"
             ) from exc
+
+    def _counter_sample_deadline(self, outer_deadline: float | None) -> float:
+        """Give one complete multi-probe sample a fresh, short time budget."""
+
+        now = self._monotonic()
+        sample_deadline = now + COUNTER_SAMPLE_TIMEOUT_SECONDS
+        if outer_deadline is not None:
+            sample_deadline = min(sample_deadline, outer_deadline)
+        if sample_deadline <= now:
+            raise DockerSupervisionError("Docker counter deadline expired")
+        return sample_deadline
 
     def _assert_lock(
         self,
