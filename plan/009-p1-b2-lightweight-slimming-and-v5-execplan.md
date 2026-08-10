@@ -129,7 +129,8 @@
 
 ### 已完成
 
-- 当前执行者 worktree HEAD 为 `a98914cf6bd621ce58051c38c3c6421735ab41e5`；`main == origin/main ==
+- 当前执行者 worktree 从 `aa73ecf551e60a56807307896bab5fbbacd02e5f` clean commit 进入真实执行阶段；
+  `main == origin/main ==
   2cc9140022f69803afff7bc373e3beeee0579be9`，尚未合并、未推送。
 - v4 RONDO 真实 Docker 失败已保留，Codex 未运行；v5 ledger/receipt 尚不存在。
 - scoped `safe.directory`、UID 1000 前置 Git probe、cleanup 明确 phase、失败事实与 65/70 分类已进入代码。
@@ -153,19 +154,23 @@
 
 ### 当前工作
 
-- 轻量代码阶段、测试做减法、统一入口与实时文档已完成，正在形成当前 worktree 的单一提交。
-- 第六次独立审查日志保持原样并纳入提交；本批另写一份 Plan 009 实施日志，不重复改写历史审查结论。
+- 用户已授权下一阶段真实 B2：固定 host-volume 为此前真实 v4 已验证的 `/mnt/c`，fresh metrics dir 为
+  `/home/sjc/desktop/RONDO/eval-data/build-metrics/plan009-b2-aa73ecf`。两者与
+  `/home/sjc/desktop/RONDO/eval-data/b2/current.json` 已核对为未创建。
+- 受跟踪 pinned image digest 已存在于 daemon；执行前没有本项目 managed container/network/volume。
+- 先提交本节执行状态使 worktree clean，再只调用一次
+  `just eval-b2-no-api /mnt/c /home/sjc/desktop/RONDO/eval-data/build-metrics/plan009-b2-aa73ecf`。
 
 ### 后续计划
 
-1. 保持本次轻量提交，不继续添加审计、迁移或兼容状态机。
-2. 后续获得单独执行授权后，通过唯一入口串行运行 RONDO→Codex no-API Docker；首侧失败即停。
-3. 双侧通过后冻结 B2，不再继续增强；只更新当前收据、实时 WBS 和一份实质验收日志。
+1. 记录执行前 Docker system df、宿主 `/mnt/c` 剩余空间和 pinned image identity，不拉取或构建。
+2. 在 canonical watchdog 内串行运行 RONDO→Codex；首侧失败立即停止，不自动重试。
+3. 失败时只修复本次真实链路的直接阻塞并跑相关测试；双侧通过时只更新 current receipt、实时 WBS 和一份日志。
 
 ### 阻塞项
 
-- v5 真实 Docker 尚未运行；当前不能宣告 B2 完成。
-- 真实 Docker 属下一执行阶段；本计划文件的创建本身不构成运行授权。
+- 本次真实 Docker 尚未启动；当前不能宣告 B2 完成。
+- 若 pinned 资产缺失、watchdog/资源事实不可用或 RONDO 首侧失败，按合同立即停止。
 
 ### 当前验收状态
 
@@ -189,3 +194,4 @@
 | 006 | 以生产代码净删除、状态/schema 减少和测试解耦作为轻量验收 | 防止“瘦身”再次变成新增抽象和新状态机；提交和历史日志不计入成果 | 全任务 | 已采纳 |
 | 007 | B2 双侧通过后立即冻结，不处理低风险理论增强 | 当前目标是跑通最小真实链路，不是构建审计系统 | B2 验收 | 已采纳 |
 | 008 | no-API 只保留一个可替换 current receipt，pair ledger 仅服务 paid | no-API 可安全重跑，不需要不可复用状态或 retirement | B2、paid 边界 | 已落地 |
+| 009 | 本次真实 B2 只使用 `/mnt/c` 与 fresh metrics `plan009-b2-aa73ecf`，一次命令、无重试 | 复用此前已验证 Docker Desktop 宿主盘事实，并保证本批可定位、可停止 | B2 真实执行 | 已采纳 |
