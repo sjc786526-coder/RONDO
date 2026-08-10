@@ -511,7 +511,9 @@ class TerminalBenchTests(unittest.TestCase):
                     f"sha256sum -- {adapter.remote_code_mode_host_path}", commands
                 )
                 self.assertIn(f"sha256sum -- {adapter.remote_bwrap_path}", commands)
-                self.assertNotIn("apt", commands)
+                self.assertNotIn("apt-get", commands)
+                self.assertIn("/var/lib/apt/lists/partial", commands)
+                self.assertIn("/var/cache/apt/archives/partial", commands)
                 self.assertNotIn("command -v bwrap", commands)
                 self.assertIn(f"{adapter.remote_path} --version", commands)
                 self.assertTrue(environment.calls)
@@ -1091,7 +1093,10 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         argv = fake_supervisor.supervise_host_command.call_args.args[1]
         self.assertEqual(argv[1:3], ("trials", "start"))
-        self.assertEqual(argv[argv.index("--agent") + 1], "oracle")
+        self.assertEqual(
+            argv[argv.index("--agent") + 1],
+            "rondo_eval.terminal_bench.oracle_smoke:PreparedOracleAgent",
+        )
         self.assertNotIn("--model", argv)
         self.assertNotIn("--agent-kwarg", argv)
         self.assertNotIn("--agent-env", argv)

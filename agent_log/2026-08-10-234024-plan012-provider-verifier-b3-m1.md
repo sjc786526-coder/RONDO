@@ -90,3 +90,16 @@
 - 直接修复不修改 frozen `solve.sh`/`test.sh`：`solution.env` 只为 `/app/personal-site` 投影 scoped Git
   `safe.directory`；`verifier.env` 增加 `/tests/rondo-apt.conf`，内容仅令 apt sandbox 保持 root，避免新增
   `SETUID/SETGID/CHOWN/DAC_OVERRIDE` capability。配置文件随 tests 以 `0444` 上传并由 materializer 精确复核。
+
+## 8. Oracle Docker 运行 3（评分失败并已清理）
+
+- clean commit `43cab287b8bac6f5282128f9fc7a42355a1cfe14` 的运行证明脚本权限和 Git trust 已生效，但 oracle
+  写 `.git/index.lock` 时仍因 root-owned repository 不可写而失败。
+- apt sandbox 已保持 root，不再出现 setuid/setgid 错误；剩余失败是三个 `_apt` 所有的 cache/list 目录在
+  `cap_drop=ALL` 下不可由 root 改写，因而 update 未刷新旧 package index，curl 安装得到 404。
+- 运行产生可信 `reward=0`、watchdog `run_rc=65`；Docker effective contract 与 exact cleanup 再次通过，API/key/
+  cost 仍为 0。
+- 下一处修复复用产品 adapter 已有的精确 workdir `a+rwX` 做法，为 frozen Oracle 提供一个仅含 filesystem
+  preflight 的薄 subclass；apt 的三个固定 cache 目录只接受实际 owner `root` 或 Debian `_apt`，再由该 owner
+  改为 verifier 所需的可写模式。paid adapters 复用同一 apt 准备函数。没有增加 capability、修改 frozen
+  solution/verifier 或改变 agent UID。

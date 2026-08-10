@@ -600,7 +600,7 @@ def _harbor_oracle_argv(
         "--extra-docker-compose",
         str(materialized.overlay_path),
         "--agent",
-        "oracle",
+        "rondo_eval.terminal_bench.oracle_smoke:PreparedOracleAgent",
         "--delete",
     )
     if any(

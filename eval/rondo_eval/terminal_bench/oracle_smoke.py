@@ -25,9 +25,21 @@ from .materialize import PinnedTaskMaterializer
 from .pair import load_pair_identity, validate_harbor_installation
 from .results import ParsedHarborResult, parse_single_task_result, validate_eval_harness_checkout
 from .runner import DockerSupervisedHostHarborExecutor, HARBOR_EXECUTABLE, HostHarborResult
+from .verifier_runtime import prepare_fix_git_workdir, prepare_verifier_apt_dirs
+
+from harbor.agents.oracle import OracleAgent
+from harbor.environments.base import BaseEnvironment
 
 
 ORACLE_BATCH_ID = "p1-plan012-oracle-verifier"
+
+
+class PreparedOracleAgent(OracleAgent):
+    """Frozen Harbor oracle with only the task/verifier filesystem preflight."""
+
+    async def setup(self, environment: BaseEnvironment) -> None:
+        await prepare_fix_git_workdir(environment)
+        await prepare_verifier_apt_dirs(environment)
 
 
 class OracleVerifierSmokeError(ValueError):
