@@ -50,6 +50,7 @@ from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
 from rondo_eval.terminal_bench.freeze import FreezeError, validate_runtime_image_digest  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerExecutionResult,
+    DockerImageIdentity,
     DockerOperation,
     HeavyLockLease,
 )
@@ -720,6 +721,10 @@ class TerminalBenchTests(unittest.TestCase):
     def test_concrete_host_executor_uses_public_full_lifetime_supervisor(self) -> None:
         prepared = self.prepare()
         fake_supervisor = mock.Mock()
+        fake_supervisor.resolve_image_identity.return_value = DockerImageIdentity(
+            FIX_GIT_IMAGE_REF,
+            f"sha256:{'a' * 64}",
+        )
         fake_supervisor.supervise_host_command.return_value = DockerExecutionResult(
             operation=DockerOperation.HOST,
             argv=prepared.command.argv,
@@ -756,6 +761,13 @@ class TerminalBenchTests(unittest.TestCase):
             },
         )
         fake_supervisor.supervise_host_command.assert_called_once()
+        fake_supervisor.resolve_image_identity.assert_called_once()
+        bound_contract = fake_supervisor.supervise_host_command.call_args.kwargs[
+            "compose_contract"
+        ]
+        self.assertTrue(bound_contract.container.require_image_identity)
+        self.assertEqual(bound_contract.container.image_reference, FIX_GIT_IMAGE_REF)
+        self.assertEqual(bound_contract.container.image_id, f"sha256:{'a' * 64}")
 
     def test_budgeted_live_path_keeps_official_key_out_of_harbor_and_requires_evidence(self) -> None:
         jobs = self.root / "jobs"
@@ -790,6 +802,9 @@ class TerminalBenchTests(unittest.TestCase):
         metadata.write_text(json.dumps({
             "requests": [{
                 "role": "guardian",
+                "role_provenance": "declared",
+                "declared_role": "guardian",
+                "inferred_role": "guardian",
                 "contract_match": True,
                 "usage_valid": True,
             }]

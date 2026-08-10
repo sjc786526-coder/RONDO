@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from .docker_supervisor import (
         ComposeRunContract,
         DockerCounterReading,
+        DockerImageIdentity,
         DockerOperation,
         DockerTaskIdentity,
     )
@@ -51,17 +52,21 @@ _REQUIRED_CGROUP_COUNTERS = (
 _DEFAULT_MEMORY_HIGH_BYTES = 19 * 1024**3
 _DEFAULT_MEMORY_MAX_BYTES = 21 * 1024**3
 _DEFAULT_SWAP_MAX_BYTES = 5 * 1024**3
-_WATCHDOG_OVERRIDE_ENV = (
-    "RONDO_BUILD_LOCK",
-    "RONDO_BUILD_WATCHDOG",
-    "RONDO_BUILD_MEMORY_HIGH",
-    "RONDO_BUILD_MEMORY_MAX",
-    "RONDO_BUILD_SWAP_MAX",
-)
 _DF_TYPES = ("Images", "Containers", "Local Volumes", "Build Cache")
 _SIZE = re.compile(r"([0-9]+(?:[.][0-9]+)?)(B|kB|MB|GB|TB|PB|KiB|MiB|GiB|TiB|PiB)\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 _RESOURCE_NAME = re.compile(r"[0-9A-Za-z][0-9A-Za-z_.-]{0,127}\Z")
+_SHA256_IMAGE = re.compile(r"[^\s]+@sha256:[0-9a-f]{64}\Z")
+_CONTAINER_CGROUP_METRIC_SCRIPT = """
+cpu_usage_usec=
+while read -r key value rest; do
+  if [ "$key" = usage_usec ]; then cpu_usage_usec="$value"; fi
+done < /sys/fs/cgroup/cpu.stat
+IFS= read -r memory_peak_bytes < /sys/fs/cgroup/memory.peak
+case "$cpu_usage_usec" in ''|*[!0-9]*) exit 70;; esac
+case "$memory_peak_bytes" in ''|*[!0-9]*) exit 70;; esac
+printf 'cpu_usage_microseconds=%s\\npeak_memory_bytes=%s\\n' "$cpu_usage_usec" "$memory_peak_bytes"
+""".strip()
 _SIZE_FACTORS = {
     "B": 1,
     "kB": 1_000,
@@ -101,6 +106,15 @@ class WatchdogProof:
     guard: "CgroupWatchdogGuard"
 
 
+@dataclass(frozen=True)
+class MachineWatchdogIdentity:
+    common_root: Path
+    root_device: int
+    root_inode: int
+    metrics_root: Path | None
+    cargo_target: Path | None
+
+
 class CgroupWatchdogGuard:
     """Revalidates the same cgroup and all required counters on every check."""
 
@@ -115,6 +129,7 @@ class CgroupWatchdogGuard:
         pid: int,
         lock_path: Path,
         lock_identity: tuple[int, int],
+        machine_identity: MachineWatchdogIdentity,
     ) -> None:
         self._token = token
         self._proc_cgroup_path = proc_cgroup_path
@@ -124,6 +139,7 @@ class CgroupWatchdogGuard:
         self._pid = pid
         self._lock_path = lock_path
         self._lock_identity = lock_identity
+        self._machine_identity = machine_identity
 
     def is_held(self, lease: object) -> bool:
         try:
@@ -143,6 +159,8 @@ class CgroupWatchdogGuard:
             _read_required_cgroup_counters(current_directory, self._pid)
             if _canonical_lock_is_held(self._lock_path) != self._lock_identity:
                 return False
+            if _machine_watchdog_identity() != self._machine_identity:
+                return False
             return True
         except (AttributeError, OSError, RuntimeBridgeError, TypeError):
             return False
@@ -161,7 +179,7 @@ def lease_from_watchdog(
 
     pid = os.getpid()
     try:
-        _reject_watchdog_overrides()
+        machine_identity = _machine_watchdog_identity()
         lock_path = _canonical_lock_path(os.getuid())
         lock_identity = _canonical_lock_is_held(lock_path)
         root = cgroup_fs_root.resolve(strict=True)
@@ -181,6 +199,7 @@ def lease_from_watchdog(
         pid=pid,
         lock_path=lock_path,
         lock_identity=lock_identity,
+        machine_identity=machine_identity,
     )
     lease = WatchdogLease(token=token)
     if guard.is_held(lease) is not True:
@@ -245,9 +264,121 @@ def _read_required_cgroup_counters(directory: Path, pid: int) -> None:
     _parse_pressure(values["memory.pressure"])
 
 
-def _reject_watchdog_overrides() -> None:
-    if any(name in os.environ for name in _WATCHDOG_OVERRIDE_ENV):
+def _reject_watchdog_overrides(common_root: Path) -> tuple[Path | None, Path | None]:
+    allowed = {"RONDO_BUILD_METRICS_DIR"}
+    if any(
+        name.startswith("RONDO_BUILD_") and name not in allowed
+        for name in os.environ
+    ):
         raise RuntimeBridgeError("watchdog overrides are forbidden for production proof")
+    project_override = os.environ.get("RONDO_PROJECT_ROOT")
+    if project_override is not None and _project_path(project_override) != common_root:
+        raise RuntimeBridgeError("watchdog project root differs from RONDO common root")
+    metrics_root = _optional_project_directory(
+        os.environ.get("RONDO_BUILD_METRICS_DIR"), common_root, "watchdog metrics root"
+    )
+    cargo_target = _optional_project_directory(
+        os.environ.get("CARGO_TARGET_DIR"), common_root, "Cargo target root"
+    )
+    return metrics_root, cargo_target
+
+
+def _machine_watchdog_identity() -> MachineWatchdogIdentity:
+    module_root = _repository_common_root(Path(__file__).resolve(strict=True))
+    current_root = _repository_common_root(Path.cwd().resolve(strict=True))
+    if module_root != current_root:
+        raise RuntimeBridgeError("watchdog process is outside the RONDO common root")
+    root_stat = module_root.stat()
+    metrics_root, cargo_target = _reject_watchdog_overrides(module_root)
+    return MachineWatchdogIdentity(
+        common_root=module_root,
+        root_device=root_stat.st_dev,
+        root_inode=root_stat.st_ino,
+        metrics_root=metrics_root,
+        cargo_target=cargo_target,
+    )
+
+
+def _project_path(value: str) -> Path:
+    if not value or "\x00" in value:
+        raise RuntimeBridgeError("watchdog project path is invalid")
+    path = Path(value)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    try:
+        return path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeBridgeError("watchdog project path is unavailable") from exc
+
+
+def _optional_project_directory(
+    value: str | None,
+    common_root: Path,
+    label: str,
+) -> Path | None:
+    if value is None:
+        return None
+    raw_path = Path(value)
+    if not raw_path.is_absolute():
+        raw_path = Path.cwd() / raw_path
+    try:
+        raw_stat = raw_path.lstat()
+    except OSError as exc:
+        raise RuntimeBridgeError(f"{label} is unavailable") from exc
+    if stat.S_ISLNK(raw_stat.st_mode):
+        raise RuntimeBridgeError(f"{label} is unsafe")
+    resolved = _project_path(value)
+    try:
+        path_stat = resolved.lstat()
+    except OSError as exc:
+        raise RuntimeBridgeError(f"{label} is unavailable") from exc
+    if (
+        stat.S_ISLNK(path_stat.st_mode)
+        or not stat.S_ISDIR(path_stat.st_mode)
+        or not resolved.is_relative_to(common_root)
+        or resolved == common_root
+    ):
+        raise RuntimeBridgeError(f"{label} must be a directory inside RONDO common root")
+    return resolved
+
+
+def _repository_common_root(start: Path) -> Path:
+    checkout: Path | None = None
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            checkout = candidate
+            break
+    if checkout is None:
+        raise RuntimeBridgeError("RONDO Git common root is unavailable")
+    git_entry = checkout / ".git"
+    entry_stat = git_entry.lstat()
+    if stat.S_ISLNK(entry_stat.st_mode):
+        raise RuntimeBridgeError("RONDO Git metadata path is unsafe")
+    if stat.S_ISDIR(entry_stat.st_mode):
+        git_directory = git_entry.resolve(strict=True)
+    elif stat.S_ISREG(entry_stat.st_mode):
+        line = git_entry.read_text(encoding="utf-8").strip()
+        prefix = "gitdir: "
+        if not line.startswith(prefix) or "\n" in line or "\x00" in line:
+            raise RuntimeBridgeError("RONDO worktree metadata is invalid")
+        raw_git_directory = Path(line[len(prefix):])
+        if not raw_git_directory.is_absolute():
+            raw_git_directory = checkout / raw_git_directory
+        git_directory = raw_git_directory.resolve(strict=True)
+    else:
+        raise RuntimeBridgeError("RONDO Git metadata path is invalid")
+    common_pointer = git_directory / "commondir"
+    if common_pointer.exists():
+        pointer_stat = common_pointer.lstat()
+        if stat.S_ISLNK(pointer_stat.st_mode) or not stat.S_ISREG(pointer_stat.st_mode):
+            raise RuntimeBridgeError("RONDO common metadata pointer is unsafe")
+        raw_common = Path(common_pointer.read_text(encoding="utf-8").strip())
+        common_git = (git_directory / raw_common).resolve(strict=True)
+    else:
+        common_git = git_directory
+    if common_git.name != ".git" or not common_git.is_dir():
+        raise RuntimeBridgeError("RONDO Git common directory is invalid")
+    return common_git.parent.resolve(strict=True)
 
 
 def _canonical_lock_path(uid: int) -> Path:
@@ -751,6 +882,12 @@ class DockerCliCounter:
                 container_ids,
                 deadline=deadline,
             )
+            container_metrics: tuple[object, ...] = ()
+            if compose_contract is not None and compose_contract.container.require_container_metrics:
+                container_metrics = self._container_metrics(
+                    container_facts,
+                    deadline=deadline,
+                )
             image_bytes = self._image_bytes(identity, image_ids, deadline=deadline)
             network_facts: tuple[object, ...] = ()
             volume_facts: tuple[object, ...] = ()
@@ -783,13 +920,36 @@ class DockerCliCounter:
             task_bytes=container_bytes + image_bytes,
             data_root=str(host_root),
             data_root_filesystem_free_bytes=free_bytes,
+            docker_desktop_vhdx_bytes=(
+                desktop_reading.vhd_size_bytes
+                if desktop_reading is not None
+                else None
+            ),
             task_container_ids=container_ids,
             task_image_ids=image_ids,
             task_containers=container_facts,
+            task_container_metrics=container_metrics,
             task_networks=network_facts,
             task_volumes=volume_facts,
             daemon_security_options=security_options,
         )
+
+    def resolve_image_identity(
+        self,
+        image_reference: str,
+        *,
+        deadline: float | None = None,
+    ) -> "DockerImageIdentity":
+        """Resolve a frozen manifest digest to the daemon's actual image id."""
+
+        if not _SHA256_IMAGE.fullmatch(image_reference):
+            raise RuntimeBridgeError("Docker image reference must be digest pinned")
+        if deadline is None:
+            deadline = self._monotonic() + self._probe_timeout_seconds
+        payload = _parse_json_array(
+            self._run(("docker", "image", "inspect", image_reference), deadline=deadline)
+        )
+        return _validate_resolved_image_identity(payload, image_reference)
 
     def _remaining(self, deadline: float) -> float:
         remaining = deadline - self._monotonic()
@@ -848,6 +1008,40 @@ class DockerCliCounter:
             identity=identity,
             kind="image",
         )
+
+    def _container_metrics(
+        self,
+        container_facts: tuple[object, ...],
+        *,
+        deadline: float,
+    ) -> tuple[object, ...]:
+        from .docker_supervisor import DockerContainerMetricFact
+
+        metrics: list[DockerContainerMetricFact] = []
+        for fact in container_facts:
+            container_id = getattr(fact, "container_id", None)
+            user = getattr(fact, "user", None)
+            if not isinstance(container_id, str) or not isinstance(user, str):
+                raise RuntimeBridgeError("Docker container metric target is invalid")
+            output = self._run(
+                (
+                    "docker", "container", "exec", "--user", user,
+                    container_id, "/bin/sh", "-ceu", _CONTAINER_CGROUP_METRIC_SCRIPT,
+                ),
+                deadline=deadline,
+            )
+            values = _parse_exact_uint_lines(
+                output,
+                ("cpu_usage_microseconds", "peak_memory_bytes"),
+            )
+            metric = DockerContainerMetricFact(
+                container_id=container_id,
+                cpu_usage_microseconds=values["cpu_usage_microseconds"],
+                peak_memory_bytes=values["peak_memory_bytes"],
+            )
+            metric.validate()
+            metrics.append(metric)
+        return tuple(metrics)
 
     def _compose_networks(self, project: str, *, deadline: float) -> tuple[object, ...]:
         from .docker_supervisor import ComposeResourceFact
@@ -1206,6 +1400,12 @@ def _validate_inspected_containers(
         if match is None or match.group(1) in facts:
             raise RuntimeBridgeError("Docker inspect object id is invalid")
         object_id = match.group(1)
+        raw_image_id = item.get("Image")
+        if not isinstance(raw_image_id, str) or _OBJECT_ID.fullmatch(raw_image_id) is None:
+            raise RuntimeBridgeError("Docker container image id is invalid")
+        image_id_match = _OBJECT_ID.fullmatch(raw_image_id)
+        assert image_id_match is not None
+        image_id = f"sha256:{image_id_match.group(1)}"
         config = item.get("Config")
         host = item.get("HostConfig")
         network_settings = item.get("NetworkSettings")
@@ -1268,11 +1468,14 @@ def _validate_inspected_containers(
             memory_swap_bytes=_required_nonnegative_int(host, "MemorySwap"),
             pids_limit=_required_nonnegative_int(host, "PidsLimit"),
             read_only_rootfs=_required_bool(host, "ReadonlyRootfs"),
+            cgroupns_mode=_required_string(host, "CgroupnsMode"),
             network_mode=network_mode,
             networks=networks,
             mounts=tuple(sorted(mounts)),
             compose_project=compose_project,
             compose_service=compose_service,
+            image_reference=_required_string(config, "Image"),
+            image_id=image_id,
             seccomp_profile_sha256=seccomp_profile_sha256,
         )
         try:
@@ -1284,6 +1487,46 @@ def _validate_inspected_containers(
     if set(facts) != set(expected_ids):
         raise RuntimeBridgeError("Docker inspect object set changed")
     return sum(sizes.values()), tuple(facts[value] for value in expected_ids)
+
+
+def _validate_resolved_image_identity(
+    payload: list[object],
+    image_reference: str,
+) -> object:
+    from .docker_supervisor import DockerImageIdentity
+
+    if len(payload) != 1 or not isinstance(payload[0], dict):
+        raise RuntimeBridgeError("Docker image identity is unavailable")
+    raw_id = payload[0].get("Id")
+    repo_digests = payload[0].get("RepoDigests")
+    if (
+        not isinstance(raw_id, str)
+        or _OBJECT_ID.fullmatch(raw_id) is None
+        or not isinstance(repo_digests, list)
+        or any(not isinstance(value, str) for value in repo_digests)
+        or image_reference not in repo_digests
+    ):
+        raise RuntimeBridgeError("Docker image identity differs from frozen digest")
+    match = _OBJECT_ID.fullmatch(raw_id)
+    assert match is not None
+    identity = DockerImageIdentity(image_reference, f"sha256:{match.group(1)}")
+    try:
+        identity.validate()
+    except Exception as exc:
+        raise RuntimeBridgeError("Docker image identity is invalid") from exc
+    return identity
+
+
+def _parse_exact_uint_lines(output: str, expected: tuple[str, ...]) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for line in output.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key not in expected or key in values:
+            raise RuntimeBridgeError("Docker container metric output is invalid")
+        values[key] = _parse_uint(value)
+    if set(values) != set(expected):
+        raise RuntimeBridgeError("Docker container metric output is incomplete")
+    return values
 
 
 def _required_string(payload: Mapping[str, object], key: str) -> str:

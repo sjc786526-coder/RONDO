@@ -293,9 +293,12 @@ def publish_terminal_bench_result(
         "summary": summary["summary"],
         "tasks": summary["tasks"],
         "metrics": dict(publication.metrics),
-        "cost": {"estimated_usd": spent, "actual_usd": spent},
+        "cost": _cost_from_budget_spend(spent),
         "artifacts": f"eval-data/runs/{run_id}",
-        "notes": "API usage priced at the frozen official Luna Standard rates; no invoice query.",
+        "notes": (
+            "estimated_usd is local budget accounting from frozen Luna Standard rates and "
+            "reservations; actual_usd is null for non-zero spend because no invoice was queried."
+        ),
     }
     _validate_terminal_bench_record(record)
     return writer.finalize(record, secrets=live_result.redaction_secrets)
@@ -369,11 +372,15 @@ def publish_terminal_bench_failure(
     request_roles: tuple[str, ...] = ()
     try:
         candidate_metadata = _read_json_object(metadata_path)
-        request_roles = _request_roles(candidate_metadata)
         metadata = candidate_metadata
     except HarborResultError:
         pass
-    metadata_ready = metadata is not None
+    if metadata is not None:
+        try:
+            request_roles = _request_roles(metadata)
+        except HarborResultError:
+            request_roles = ()
+    metadata_ready = bool(request_roles)
     summary = {
         "tasks_total": 1,
         "infra_failed": 1 if outcome is RunOutcome.INFRA_FAILED else 0,
@@ -428,9 +435,12 @@ def publish_terminal_bench_failure(
         "summary": summary,
         "tasks": tasks,
         "metrics": dict(publication.metrics),
-        "cost": {"estimated_usd": spent, "actual_usd": spent},
+        "cost": _cost_from_budget_spend(spent),
         "artifacts": f"eval-data/runs/{run_id}",
-        "notes": "Run exited after its paid-run claim; failure details are intentionally categorical.",
+        "notes": (
+            "Run exited after its paid-run claim; failure details are intentionally categorical. "
+            "estimated_usd is local budget accounting; actual_usd is null for non-zero spend."
+        ),
     }
     _validate_terminal_bench_record(record)
     return writer.finalize(record, secrets=secrets)
@@ -805,6 +815,9 @@ def _request_roles(metadata: Mapping[str, Any]) -> tuple[str, ...]:
         if (
             not isinstance(request, dict)
             or request.get("role") not in {"main", "guardian"}
+            or request.get("role_provenance") != "declared"
+            or request.get("declared_role") != request.get("role")
+            or request.get("inferred_role") != request.get("role")
             or request.get("contract_match") is not True
             or request.get("usage_valid") is not True
         ):
@@ -853,6 +866,15 @@ def _run_spend(snapshot: Mapping[str, object], run_id: str) -> float:
     if not amount.is_finite() or amount < 0 or amount > Decimal("5"):
         raise HarborResultError("budget snapshot run spend is invalid")
     return float(amount)
+
+
+def _cost_from_budget_spend(spent: float) -> dict[str, float | None]:
+    """Keep schema v1 while refusing to call local pricing an invoiced actual."""
+
+    return {
+        "estimated_usd": spent,
+        "actual_usd": 0.0 if spent == 0.0 else None,
+    }
 
 
 def _child_directories(root: Path, *, allow_regular_files: bool = False) -> list[Path]:

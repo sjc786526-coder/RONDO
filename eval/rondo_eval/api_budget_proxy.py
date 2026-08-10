@@ -464,6 +464,9 @@ class RedactedMetadataStore:
             "request_id",
             "body_sha256",
             "role",
+            "role_provenance",
+            "declared_role",
+            "inferred_role",
             "model",
             "reasoning_effort",
             "stream",
@@ -691,10 +694,11 @@ class LoopbackResponsesProxy:
             self._reject(handler, 400, "invalid_lite_header")
             return
         request_id = handler.headers.get("X-RONDO-Eval-Request-Id") or uuid.uuid4().hex
-        role = handler.headers.get("X-RONDO-Eval-Role", "unknown").strip().lower()
+        role_header = handler.headers.get("X-RONDO-Eval-Role")
+        declared_role = role_header.strip().lower() if role_header is not None else None
         try:
             _require_safe_id(request_id, "request id")
-            request_metadata = _inspect_request(body, role)
+            request_metadata = _inspect_request(body, declared_role)
             self._ledger.reserve(self._run_id, request_id)
         except BudgetStopped:
             self._reject(handler, 429, "budget_stopped")
@@ -848,6 +852,9 @@ def milestone_metadata_ready(metadata_path: Path) -> bool:
     return bool(requests) and all(
         isinstance(item, dict)
         and item.get("role") in {"main", "guardian"}
+        and item.get("role_provenance") == "declared"
+        and item.get("declared_role") == item.get("role")
+        and item.get("inferred_role") == item.get("role")
         and item.get("contract_match") is True
         and item.get("usage_valid") is True
         for item in requests
@@ -863,7 +870,7 @@ def _validated_lite_header(headers: Any) -> bool:
     return True
 
 
-def _inspect_request(body: bytes, declared_role: str) -> dict[str, Any]:
+def _inspect_request(body: bytes, declared_role: str | None) -> dict[str, Any]:
     try:
         value = json.loads(body)
     except (UnicodeError, json.JSONDecodeError) as exc:
@@ -900,8 +907,10 @@ def _inspect_request(body: bytes, declared_role: str) -> dict[str, Any]:
         if declared_role != inferred_role:
             raise ApiBudgetProxyError("declared request role conflicts with request shape")
         role = declared_role
-    elif declared_role == "unknown":
+        role_provenance = "declared"
+    elif declared_role is None:
         role = inferred_role
+        role_provenance = "inferred"
     else:
         raise ApiBudgetProxyError("declared request role is invalid")
     contract_match = model == OFFICIAL_MODEL and (
@@ -925,6 +934,9 @@ def _inspect_request(body: bytes, declared_role: str) -> dict[str, Any]:
     return {
         "body_sha256": hashlib.sha256(body).hexdigest(),
         "role": role,
+        "role_provenance": role_provenance,
+        "declared_role": declared_role,
+        "inferred_role": inferred_role,
         "model": model,
         "reasoning_effort": effort,
         "stream": stream,

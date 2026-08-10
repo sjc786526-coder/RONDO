@@ -235,3 +235,19 @@ standard/Lite 形态均补回归。
 - 最终轻量设施门禁 237/237、`uv lock --check` 85 packages；无模型 doctor 为
   `infrastructure_ready_model_missing`/78。本批没有 Cargo、真实 API、权重或真实推理；B3/M1、L2 真模型、
   L2a/L3/L4、训练和 canary 继续保持未完成。
+
+### 2026-08-10 Plan 008 第二轮审查后的机器合同加固
+
+- 第二轮独立审查证明上述 B2 “完整验收”口径过强：旧 no-API v3 确实是旧
+  lock/schema 下的双侧正常路径证据，但当时未绑定 pair 原子更新、跨槽 harness commit、
+  VHDX 增长、daemon actual image、container metrics 和 M1 durable ledger。新 identity 推进为
+  `p1-fix-git-pair-v4`；历史 v3 ledger 保留原身份，不复用或冒充新 schema 的 Docker 验收。
+- 机器合同已增加 stable sidecar pair lock + atomic replace、harness commit 绑定、paid
+  `publishing`→record digest→`completed` 恢复状态机、M1 对 result/ledger 联合核对、去敏 no-API
+  safe summary、Harbor console/package/传递依赖闭包、watchdog override/VHDX/image/container metrics、
+  paid custom seccomp、declared request role 和 `actual_usd` 未知口径。migration apply 也在分类前先恢复
+  journal v2。
+- L2 状态收窄为 CPU x64 frontend/runtime closure；model-backed client 强制重验 launcher 实例
+  receipt，但 GPU runtime、真模型服务和结构化推理仍未实现验收。本轮只做 pure/fake/
+  loopback 验证，统一轻量门禁 269/269，`uv lock --check` 为 85 packages。未运行 Docker、
+  Cargo、真实 API 或模型；B2 新门禁待 Docker 重验，B3/M1 保持 hard-disabled/未运行。

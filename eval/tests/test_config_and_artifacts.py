@@ -554,6 +554,23 @@ raise AssertionError("crash point was not reached")
                 with self.assertRaises(ArtifactError):
                     writer.finalize(record, secrets=())
 
+    def test_completed_record_allows_unknown_actual_cost_but_requires_estimate(
+        self,
+    ) -> None:
+        run_id = "20260809-000000012-tb-rondo-r1"
+        record = self._record(run_id)
+        record["cost"] = {"estimated_usd": 0.125, "actual_usd": None}
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json("result.json", {"ok": True})
+        writer.finalize(record, secrets=())
+
+        missing_estimate = self._record("20260809-000000013-tb-rondo-r1")
+        missing_estimate["cost"] = {"estimated_usd": None, "actual_usd": None}
+        writer = ArtifactWriter(self.paths, missing_estimate["run_id"]).start()
+        writer.write_json("result.json", {"ok": True})
+        with self.assertRaises(ArtifactError):
+            writer.finalize(missing_estimate, secrets=())
+
 
 if __name__ == "__main__":
     unittest.main()

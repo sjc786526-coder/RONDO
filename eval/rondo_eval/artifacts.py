@@ -122,6 +122,14 @@ class ArtifactWriter:
         self._started = True
         return self
 
+    def recover_only(self) -> None:
+        """Recover existing publication journals without claiming new staging."""
+
+        self._validate_roots()
+        _require_directory(self.runs_root, "artifact runs root")
+        self._assert_run_paths()
+        self._recover_pending_publications()
+
     def write_json(self, relative_path: str, value: Any) -> None:
         try:
             contents = json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8")
@@ -450,7 +458,7 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
     if not isinstance(record.get("notes"), str):
         raise ArtifactError("run record notes must be a string")
     if outcome is RunOutcome.COMPLETED:
-        if not config or not summary or any(value is None for value in cost.values()):
+        if not config or not summary or cost["estimated_usd"] is None:
             raise ArtifactError("completed run record is missing required results")
         if track == "tb" and (not tasks or metrics is None):
             raise ArtifactError("completed Terminal-Bench run requires tasks and external metrics")

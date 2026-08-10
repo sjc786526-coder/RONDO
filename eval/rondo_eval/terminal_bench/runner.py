@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import os
 import stat
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
 from urllib.parse import urlsplit
@@ -71,6 +71,7 @@ class TerminalBenchRequest:
     seccomp_profile_path: str | None = None
     seccomp_profile_source_sha256: str | None = None
     seccomp_profile_effective_sha256: str | None = None
+    require_container_metrics: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,7 @@ class HarborCommand:
     required_secret_env: str
     provider_transport_base_url: str
     image_ref: str
+    require_container_metrics: bool
     source_repo_ref: str
     task_source_digest: str
     task_label: str
@@ -116,6 +118,7 @@ class HarborCommand:
             materialized,
             trial_name=self.trial_name,
             trials_dir=self.trials_dir,
+            require_container_metrics=self.require_container_metrics,
         )
         if self.compose_contract != expected_contract:
             raise TerminalBenchRunError("Docker Compose contract differs from the frozen trial")
@@ -316,13 +319,26 @@ class DockerSupervisedHostHarborExecutor:
             lock_guard=self._lock_guard,
             cleanup_runner=SubprocessDockerCommandRunner(),
         )
+        image_identity = supervisor.resolve_image_identity(
+            identity,
+            FIX_GIT_IMAGE_REF,
+            lease=self._lease,
+            timeout_seconds=5,
+        )
+        bound_container = replace(
+            compose_contract.container,
+            image_reference=image_identity.image_reference,
+            image_id=image_identity.image_id,
+            require_image_identity=True,
+        )
+        bound_contract = replace(compose_contract, container=bound_container)
         evidence = await asyncio.to_thread(
             supervisor.supervise_host_command,
             identity,
             argv,
             lease=self._lease,
             timeout_seconds=timeout_seconds,
-            compose_contract=compose_contract,
+            compose_contract=bound_contract,
         )
         trials_dir = Path(argv[argv.index("--trials-dir") + 1])
         trial_name = argv[argv.index("--trial-name") + 1]
@@ -368,6 +384,8 @@ def prepare_terminal_bench_run(
         or not Path(request.seccomp_profile_path or "").is_absolute()
     ):
         raise TerminalBenchRunError("Terminal-Bench seccomp profile is incomplete")
+    if not isinstance(request.require_container_metrics, bool):
+        raise TerminalBenchRunError("Terminal-Bench container metric gate is invalid")
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
     spec = config_module.make_run_spec(
@@ -432,6 +450,7 @@ def prepare_terminal_bench_run(
         required_secret_env=spec.provider.api_key_env,
         provider_transport_base_url=transport_base_url,
         image_ref=materialized.runtime_image_ref,
+        require_container_metrics=request.require_container_metrics,
         source_repo_ref=materialized.source_repo_ref,
         task_source_digest=materialized.source_digest,
         task_label=materialized.task_label,
@@ -441,6 +460,7 @@ def prepare_terminal_bench_run(
             materialized,
             trial_name=trial_name,
             trials_dir=trials_dir,
+            require_container_metrics=request.require_container_metrics,
         ),
     )
     prepared = PreparedTerminalBenchRun(
@@ -507,6 +527,7 @@ def _compose_run_contract(
     *,
     trial_name: str,
     trials_dir: Path,
+    require_container_metrics: bool,
 ) -> ComposeRunContract:
     """Project Harbor 0.20's fixed single-trial Compose topology exactly."""
 
@@ -545,6 +566,7 @@ def _compose_run_contract(
             network_mode=network,
             networks=(network,),
             mounts=mounts,
+            require_container_metrics=require_container_metrics,
             compose_secret_mount=None,
             security_opt=security_opt,
             seccomp_profile_sha256=seccomp_profile_sha256,

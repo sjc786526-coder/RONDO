@@ -24,6 +24,7 @@ from .freeze import FIX_GIT_IMAGE_DIGEST
 from .live import run_budgeted_terminal_bench
 from .metrics import RunnerMetricsTimer
 from .pair import (
+    PairIdentity,
     PairIdentityError,
     PairSequenceLedger,
     load_pair_identity,
@@ -68,9 +69,43 @@ def main(argv: list[str] | None = None) -> int:
         slot = pair_identity.slot_for(side)
         if args.batch_id != paid_mode.batch_id or args.run_id != slot.paid_run_id:
             raise ConfigError("run id or batch differs from the authorized paid pair")
+        results_root = validate_results_worktree(
+            args.results_worktree_root,
+            common_root=paths.common_root,
+        )
+        sequence_path = (
+            paths.common_root
+            / "eval-data"
+            / "pairs"
+            / f"{pair_identity.pair_id}-paid.json"
+        )
+        if _recover_prior_paid_publication(
+            paths=paths,
+            sequence_path=sequence_path,
+            identity=pair_identity,
+            run_id=args.run_id,
+            results_root=results_root,
+        ):
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "run_id": args.run_id,
+                        "side": args.side,
+                        "outcome": RunOutcome.COMPLETED.value,
+                        "status": "reconciled_without_reexecution",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+            return 0
         config = load_runtime_config(paths)
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
+        seccomp_profile = pair_identity.validate_runtime_seccomp(
+            project_root=paths.worktree_root
+        )
         pair_identity.validate_manifest(
             common_root=paths.common_root,
             side=side,
@@ -78,10 +113,6 @@ def main(argv: list[str] | None = None) -> int:
             manifest=manifest,
         )
         validate_harbor_installation(pair_identity, executable=HARBOR_EXECUTABLE)
-        results_root = validate_results_worktree(
-            args.results_worktree_root,
-            common_root=paths.common_root,
-        )
         git_commit = validate_measurement_checkout(paths, side=side, manifest=manifest)
         _secret_name, api_key = load_provider_secret(config, "openai")
         source = paths.common_root / "eval-data" / "sources" / "terminal-bench-2-1-ffccbe05"
@@ -103,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=args.timeout_seconds,
             max_retries=0,
             budget_usd=5.0,
+            seccomp_profile_path=str(seccomp_profile),
+            seccomp_profile_source_sha256=pair_identity.no_api_seccomp.source_sha256,
+            seccomp_profile_effective_sha256=pair_identity.no_api_seccomp.effective_sha256,
+            require_container_metrics=True,
         )
         proof = lease_from_watchdog()
         counter = DockerCliCounter(
@@ -111,19 +146,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         ledger_path = paths.common_root / "eval-data" / "budgets" / f"{args.batch_id}.json"
         metadata_path = work_root / "api-metadata.json"
-        writer = ArtifactWriter(
-            paths,
-            results_worktree_root=results_root,
-            run_id=args.run_id,
-        ).start()
+        writer: ArtifactWriter | None = None
         metrics_timer = RunnerMetricsTimer()
         claimed = False
-        sequence_path = (
-            paths.common_root
-            / "eval-data"
-            / "pairs"
-            / f"{pair_identity.pair_id}-paid.json"
-        )
         sequence = PairSequenceLedger(
             sequence_path,
             identity=pair_identity,
@@ -131,9 +156,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         sequence.__enter__()
         sequence_active = False
+        publication_staged = False
         try:
-            sequence.claim(side=side, run_id=args.run_id)
+            sequence.claim(
+                side=side,
+                run_id=args.run_id,
+                eval_harness_commit=eval_harness_commit,
+            )
             sequence_active = True
+            writer = ArtifactWriter(
+                paths,
+                results_worktree_root=results_root,
+                run_id=args.run_id,
+            ).start()
             with PersistentBudgetLedger(ledger_path, batch_id=args.batch_id) as ledger:
                 try:
                     ledger.claim_run(args.run_id)
@@ -165,6 +200,14 @@ def main(argv: list[str] | None = None) -> int:
                         != eval_harness_commit
                     ):
                         raise TerminalBenchRunError("eval harness commit changed during the run")
+                    container_metrics = _paid_container_metrics(result.harbor.docker_evidence)
+                    if parsed.outcome is RunOutcome.COMPLETED:
+                        sequence.stage_paid_publication(
+                            run_id=args.run_id,
+                            eval_harness_commit=eval_harness_commit,
+                            container_metrics=container_metrics,
+                        )
+                        publication_staged = True
                     artifact_path = publish_terminal_bench_result(
                         paths,
                         results_worktree_root=results_root,
@@ -185,11 +228,15 @@ def main(argv: list[str] | None = None) -> int:
                         writer=writer,
                     )
                 except (Exception, KeyboardInterrupt, asyncio.CancelledError) as exc:
+                    if publication_staged:
+                        raise
                     if not claimed:
                         raise
                     snapshot = ledger.snapshot()
                     outcome, failure_stage, exit_code = _exception_failure(exc)
                     try:
+                        if writer is None:
+                            raise ArtifactError("artifact writer was not initialized")
                         writer.abort()
                         writer = ArtifactWriter(
                             paths,
@@ -219,7 +266,11 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     except Exception:
                         return EVIDENCE_ERROR
-                    sequence.finish(run_id=args.run_id, completed=False)
+                    sequence.finish(
+                        run_id=args.run_id,
+                        completed=False,
+                        eval_harness_commit=eval_harness_commit,
+                    )
                     sequence_active = False
                     print(
                         json.dumps(
@@ -239,16 +290,29 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                     return exit_code
-            sequence.finish(
-                run_id=args.run_id,
-                completed=parsed.outcome is RunOutcome.COMPLETED,
-            )
+            if parsed.outcome is RunOutcome.COMPLETED:
+                sequence.reconcile_paid_publication(
+                    run_id=args.run_id,
+                    eval_harness_commit=eval_harness_commit,
+                    index_path=results_root / "eval" / "results" / "runs.jsonl",
+                )
+            else:
+                sequence.finish(
+                    run_id=args.run_id,
+                    completed=False,
+                    eval_harness_commit=eval_harness_commit,
+                )
             sequence_active = False
         finally:
-            writer.abort()
-            if sequence_active:
+            if writer is not None:
+                writer.abort()
+            if sequence_active and not publication_staged:
                 try:
-                    sequence.finish(run_id=args.run_id, completed=False)
+                    sequence.finish(
+                        run_id=args.run_id,
+                        completed=False,
+                        eval_harness_commit=eval_harness_commit,
+                    )
                 except PairIdentityError:
                     pass
             sequence.__exit__(None, None, None)
@@ -305,6 +369,59 @@ def _outcome_exit_code(outcome: RunOutcome) -> int:
     if outcome is RunOutcome.INFRA_FAILED:
         return INFRA_ERROR
     return EVIDENCE_ERROR
+
+
+def _recover_prior_paid_publication(
+    *,
+    paths: RepoPaths,
+    sequence_path: Path,
+    identity: PairIdentity,
+    run_id: str,
+    results_root: Path,
+) -> bool:
+    """Converge only an already-staged publication before normal preflight."""
+
+    with PairSequenceLedger(
+        sequence_path,
+        identity=identity,
+        mode="paid",
+    ) as sequence:
+        matches = [
+            item
+            for item in sequence.snapshot()["runs"]
+            if item["run_id"] == run_id and item["status"] == "publishing"
+        ]
+        if not matches:
+            return False
+        if len(matches) != 1:
+            raise PairIdentityError("paid publishing state is ambiguous")
+        bound_commit = matches[0]["eval_harness_commit"]
+        ArtifactWriter(
+            paths,
+            run_id,
+            results_worktree_root=results_root,
+        ).recover_only()
+        sequence.reconcile_paid_publication(
+            run_id=run_id,
+            eval_harness_commit=bound_commit,
+            index_path=results_root / "eval" / "results" / "runs.jsonl",
+        )
+        return True
+
+
+def _paid_container_metrics(evidence: object) -> dict[str, object]:
+    metrics = getattr(evidence, "container_metrics", None)
+    if metrics is None:
+        raise TerminalBenchRunError("paid run lacks supervised container metrics")
+    try:
+        metrics.validate()
+        return {
+            "container_id": metrics.container_id,
+            "cpu_usage_seconds": metrics.cpu_usage_seconds,
+            "peak_memory_bytes": metrics.peak_memory_bytes,
+        }
+    except (AttributeError, DockerSupervisionError) as exc:
+        raise TerminalBenchRunError("paid container metrics are invalid") from exc
 
 
 def _exception_failure(exc: BaseException) -> tuple[RunOutcome, str, int]:

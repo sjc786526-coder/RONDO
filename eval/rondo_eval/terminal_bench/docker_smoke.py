@@ -41,6 +41,7 @@ from .pair import (
     PairIdentity,
     PairSequenceLedger,
     load_pair_identity,
+    persist_no_api_safe_summary,
     validate_harbor_installation,
 )
 from .runner import (
@@ -129,6 +130,13 @@ class DockerNoApiSmokeResult:
         if evidence is None or not evidence.samples:
             summary["docker"] = None
         else:
+            image = evidence.image_identity
+            vhdx = evidence.desktop_vhdx
+            metrics = evidence.container_metrics
+            seccomp = evidence.effective_seccomp
+            for item in (image, vhdx, metrics, seccomp):
+                if item is not None:
+                    item.validate()
             baseline, final = evidence.samples[0], evidence.samples[-1]
             summary["docker"] = {
                 "sample_count": len(evidence.samples),
@@ -140,6 +148,41 @@ class DockerNoApiSmokeResult:
                 "final_task_bytes": final.task_bytes,
                 "baseline_data_root_free_bytes": baseline.data_root_filesystem_free_bytes,
                 "final_data_root_free_bytes": final.data_root_filesystem_free_bytes,
+                "image_identity": (
+                    {
+                        "image_reference": image.image_reference,
+                        "image_id": image.image_id,
+                    }
+                    if image is not None
+                    else None
+                ),
+                "desktop_vhdx": (
+                    {
+                        "baseline_bytes": vhdx.baseline_bytes,
+                        "peak_bytes": vhdx.peak_bytes,
+                        "final_bytes": vhdx.final_bytes,
+                        "peak_growth_bytes": vhdx.peak_growth_bytes,
+                    }
+                    if vhdx is not None
+                    else None
+                ),
+                "container_metrics": (
+                    {
+                        "container_id": metrics.container_id,
+                        "cpu_usage_seconds": metrics.cpu_usage_seconds,
+                        "peak_memory_bytes": metrics.peak_memory_bytes,
+                    }
+                    if metrics is not None
+                    else None
+                ),
+                "effective_seccomp": (
+                    {
+                        "profile_kind": seccomp.profile_kind,
+                        "profile_sha256": seccomp.profile_sha256,
+                    }
+                    if seccomp is not None
+                    else None
+                ),
             }
         return summary
 
@@ -581,7 +624,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         paths = RepoPaths.discover(Path.cwd())
-        validate_eval_harness_checkout(common_root=paths.common_root)
+        eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
         side = Side(args.side)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
@@ -625,6 +668,7 @@ def main(argv: list[str] | None = None) -> int:
             seccomp_profile_path=str(seccomp_profile),
             seccomp_profile_source_sha256=pair_identity.no_api_seccomp.source_sha256,
             seccomp_profile_effective_sha256=pair_identity.no_api_seccomp.effective_sha256,
+            require_container_metrics=True,
         )
         proof = lease_from_watchdog()
         counter = DockerCliCounter(
@@ -643,7 +687,11 @@ def main(argv: list[str] | None = None) -> int:
                 identity=pair_identity,
                 mode="no_api",
             ) as sequence:
-                sequence.claim(side=side, run_id=smoke_id)
+                sequence.claim(
+                    side=side,
+                    run_id=smoke_id,
+                    eval_harness_commit=eval_harness_commit,
+                )
                 try:
                     result = asyncio.run(
                         run_docker_no_api_smoke(
@@ -656,10 +704,39 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     )
                 except BaseException:
-                    sequence.finish(run_id=smoke_id, completed=False)
+                    sequence.finish(
+                        run_id=smoke_id,
+                        completed=False,
+                        eval_harness_commit=eval_harness_commit,
+                    )
                     raise
-                sequence.finish(run_id=smoke_id, completed=result.passed)
-            result = replace(result, pair_validation=True)
+                result = replace(result, pair_validation=True)
+                if result.passed:
+                    summary_sha256 = persist_no_api_safe_summary(
+                        paths.common_root
+                        / "eval-data"
+                        / "pairs"
+                        / pair_identity.pair_id
+                        / "no-api-safe"
+                        / f"{smoke_id}.json",
+                        identity=pair_identity,
+                        side=side,
+                        run_id=smoke_id,
+                        eval_harness_commit=eval_harness_commit,
+                        summary=result.safe_summary(),
+                    )
+                    sequence.finish(
+                        run_id=smoke_id,
+                        completed=True,
+                        eval_harness_commit=eval_harness_commit,
+                        safe_summary_sha256=summary_sha256,
+                    )
+                else:
+                    sequence.finish(
+                        run_id=smoke_id,
+                        completed=False,
+                        eval_harness_commit=eval_harness_commit,
+                    )
         else:
             result = asyncio.run(
                 run_docker_no_api_smoke(

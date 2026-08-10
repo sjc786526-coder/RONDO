@@ -18,17 +18,25 @@
 - **B1 完成**：Harbor 固定为 `0.20.0`，TB 2.1 数据集固定为 commit
   `ffccbe05ee73a9d59518217f294ad711bda39304`；`terminal-bench/fix-git` 的 task archive 和
   `linux/amd64` 镜像均以 SHA-256 锁定。受监督 Docker 下官方 hello-world oracle 为
-  `completed`/reward 1.0。
-- **B2 完成**：统一 runner、双 adapter、结果解析/归档、费用代理与 Docker 监督已接线。
-  受跟踪 pair lock 绑定 Harbor 0.20.0 安装闭包、两侧静态 musl CLI/code-mode-host/bwrap bundle、
-  公平字段和 RONDO→Codex 拓扑。默认/custom seccomp 反事实确认 builtin profile 阻止非特权 user
-  namespace；受跟踪 profile 只为 non-`CAP_SYS_ADMIN` bwrap 放开 `clone/mount/pivot_root/umount2/unshare`，
-  不使用 privileged、`SYS_ADMIN` 或 `seccomp=unconfined`。`fix-git` 的 RONDO/Codex no-API 配对 v3
-  均为 host 0、2 次 fake 请求、code-mode tool round-trip 成立、任务 Docker 残留 0。
+  `completed`/reward 1.0。受跟踪 lock 同时绑定 Harbor console entry bytes、package files、
+  marker-active 传递运行依赖版本与文件闭包。
+- **B2 新门禁待 Docker 重验**：统一 runner、双 adapter、结果解析/归档、费用代理与
+  Docker 监督已接线。旧 pair lock/schema 下的 `fix-git` no-API v3 保留 RONDO→Codex 正常路径
+  completed 的历史证据，但它不包含第二轮新增的持久化契约。新契约使用 stable
+  sidecar lock + temp/fsync/atomic replace/parent fsync 保存 pair ledger，绑定两槽共用的 clean
+  eval harness commit，并对 no-API 原子保留去敏 safe summary。Docker 有效态另绑定 daemon
+  actual image ID、Desktop VHDX 增长、private cgroup namespace、容器 cgroup v2 CPU/峰值内存、
+  daemon 回显的有效 seccomp、规范 watchdog 阈值与安全 override；这些字段必须存在于去敏 safe
+  summary，缺失不能完成 pair。新 identity 为 `p1-fix-git-pair-v4`，不复用保留的 v3 ledger。本轮只做
+  pure/fake/loopback 验证，未重跑真实 Docker，不把旧 v3 升格为新
+  schema 的 B2 完整验收。
 - **B3/M1 未完成**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
   `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
-  公平 pair，paid 入口 hard-disabled。继续 B3 必须先冻结新的 pair/batch/轮次/预算并重新授权；没有同一
-  任务两侧真实 API `completed` 证据，不得声称 M1。
+  公平 pair，paid 入口 hard-disabled。后续除新 pair/batch/轮次/预算和新授权外，还须在真实
+  Docker 中验证 custom seccomp、container metrics 与 image/VHDX 契约。paid publication 先将 ledger 置为
+  `publishing`，持久结果后回读 record digest 再收敛为 `completed`；M1 必须同时核对两条
+  record 与 durable paid pair ledger、harness commit、publication digest、declared request role 和容器
+  metrics。任一不一致都不能通过 M1。
 
 ## E-B 真实 Terminal-Bench 2.1 测评
 
@@ -123,9 +131,11 @@
 
 - **两类指标必须分开，不能混谈**：
   - **外部指标**（wall time、CPU time、峰值内存、退出码）由 runner/supervisor 在**进程外**统一采集。
-    当前 `getrusage(self+children)` 只覆盖宿主 runner/CLI，Docker 容器进程归 daemon 管理，不计入该
-    CPU/RSS；因此它仅是设施诊断，不能冒充 agent 性能。paid B3 启用前必须增加同采样周期的容器 CPU
-    与峰值内存，并绑定到正式 record；冻结 codex 不加补丁，两侧使用完全相同的采集方式。
+    `getrusage(self+children)` 只覆盖宿主 runner/CLI，仍仅作设施诊断。supervisor 已对 exact
+    container 读取 cgroup v2 `cpu.stat usage_usec` 与 `memory.peak`，生成
+    `container_id/cpu_usage_seconds/peak_memory_bytes`，并作为 paid publication/pair/M1 的强制机器
+    门禁。当前只有 pure/fake 验证，真实 Docker 口径待 B2 重验；冻结 codex 不加补丁，
+    两侧使用完全相同的采集方式。
   - **内部探针**（轮次数、工具调用次数与耗时、序列化耗时、审批往返耗时）只存在于 RONDO 内部，用于 **RONDO 自身版本间**的对比与找瓶颈，**不用于与冻结 codex 横比**。
   - 原先"baseline 同样加载探针"的说法含糊：往冻结 codex 里打探针就破坏了"冻结"的意义，因此明确改为上面的分工。
 - 实现要求：原子累加、内存累积、**轮末统一输出**，运行中不持续写盘。

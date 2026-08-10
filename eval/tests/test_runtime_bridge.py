@@ -31,6 +31,8 @@ from rondo_eval.runtime_bridge import (  # noqa: E402
     SubprocessCommandHandle,
     SubprocessDockerCommandRunner,
     SubprocessHostCommandRunner,
+    _repository_common_root,
+    _validate_inspected_containers,
     lease_from_watchdog,
 )
 
@@ -38,6 +40,8 @@ from rondo_eval.runtime_bridge import (  # noqa: E402
 TASK_ID = "20260810-runtime-bridge-r1"
 CONTAINER_ID = "a" * 64
 IMAGE_ID = "b" * 64
+RUNTIME_IMAGE_REF = f"example.invalid/rondo/task@sha256:{'c' * 64}"
+RUNTIME_IMAGE_ID = f"sha256:{'d' * 64}"
 
 
 def _write_counter_tree(root: Path, relative: str) -> tuple[Path, Path]:
@@ -125,6 +129,77 @@ class WatchdogBridgeTests(unittest.TestCase):
                 with mock.patch.dict(os.environ, {"RONDO_BUILD_LOCK": "0"}):
                     with self.assertRaises(RuntimeBridgeError):
                         lease_from_watchdog(proc_cgroup_path=proc, cgroup_fs_root=cgroup_root)
+
+                for name in (
+                    "RONDO_BUILD_WATCHDOG",
+                    "RONDO_BUILD_MEMORY_HIGH",
+                    "RONDO_BUILD_MEMORY_MAX",
+                    "RONDO_BUILD_SWAP_MAX",
+                    "RONDO_BUILD_PROJECT_WARN_BYTES",
+                    "RONDO_BUILD_PROJECT_STOP_BYTES",
+                    "RONDO_BUILD_PROJECT_MAX_BYTES",
+                    "RONDO_BUILD_FILESYSTEM_FREE_STOP_BYTES",
+                    "RONDO_BUILD_NONRECLAIMABLE_STOP_BYTES",
+                    "RONDO_BUILD_SWAP_SUSTAINED_STOP_BYTES",
+                    "RONDO_BUILD_SWAP_EMERGENCY_STOP_BYTES",
+                    "RONDO_BUILD_SWAP_STOP_SECONDS",
+                    "RONDO_BUILD_HOST_AVAILABLE_STOP_KB",
+                    "RONDO_BUILD_PSI_FULL_STOP_BP",
+                    "RONDO_BUILD_PSI_STOP_SECONDS",
+                    "RONDO_BUILD_DISK_SAMPLE_INTERVAL",
+                    "RONDO_BUILD_RESIDUAL_GRACE_SECONDS",
+                ):
+                    with self.subTest(name=name), mock.patch.dict(os.environ, {name: "1"}):
+                        with self.assertRaises(RuntimeBridgeError):
+                            lease_from_watchdog(
+                                proc_cgroup_path=proc,
+                                cgroup_fs_root=cgroup_root,
+                            )
+
+    def test_watchdog_paths_are_bound_to_real_common_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "/user.slice/rondo-build-1000-20260810-123.scope"
+            proc, cgroup_root = _write_counter_tree(root, relative)
+            lock_path, lock_handle = self._held_lock(root)
+            self.addCleanup(lock_handle.close)
+            common_root = _repository_common_root(EVAL_ROOT)
+            with mock.patch(
+                "rondo_eval.runtime_bridge._canonical_lock_path",
+                return_value=lock_path,
+            ):
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "RONDO_PROJECT_ROOT": str(common_root),
+                        "RONDO_BUILD_METRICS_DIR": str(EVAL_ROOT),
+                        "CARGO_TARGET_DIR": str(EVAL_ROOT),
+                    },
+                ):
+                    proof = lease_from_watchdog(
+                        proc_cgroup_path=proc,
+                        cgroup_fs_root=cgroup_root,
+                    )
+                    self.assertTrue(proof.guard.is_held(proof.lease))
+                with mock.patch.dict(
+                    os.environ,
+                    {"RONDO_PROJECT_ROOT": str(root)},
+                ):
+                    with self.assertRaises(RuntimeBridgeError):
+                        lease_from_watchdog(
+                            proc_cgroup_path=proc,
+                            cgroup_fs_root=cgroup_root,
+                        )
+                for name in ("RONDO_BUILD_METRICS_DIR", "CARGO_TARGET_DIR"):
+                    with self.subTest(name=name), mock.patch.dict(
+                        os.environ,
+                        {name: str(root)},
+                    ):
+                        with self.assertRaises(RuntimeBridgeError):
+                            lease_from_watchdog(
+                                proc_cgroup_path=proc,
+                                cgroup_fs_root=cgroup_root,
+                            )
 
     def test_refuses_missing_or_non_rondo_cgroup_and_detects_movement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -333,8 +408,10 @@ def _container_inspect(
         [
             {
                 "Id": CONTAINER_ID,
+                "Image": RUNTIME_IMAGE_ID,
                 "Config": {
                     "User": "1000:1000",
+                    "Image": RUNTIME_IMAGE_REF,
                     "Labels": {
                         "dev.rondo.eval.task": task_id,
                         "com.docker.compose.project": "rondoeval0810",
@@ -350,6 +427,7 @@ def _container_inspect(
                     "MemorySwap": 100,
                     "PidsLimit": 2,
                     "ReadonlyRootfs": False,
+                    "CgroupnsMode": "private",
                     "NetworkMode": network_mode,
                     "Tmpfs": tmpfs,
                 },
@@ -374,6 +452,17 @@ def _image_inspect(*, task_id: str = TASK_ID) -> str:
 
 
 class DockerCounterTests(unittest.TestCase):
+    def test_inspect_requires_literal_private_cgroup_namespace(self) -> None:
+        for mode in ("host", "default", ""):
+            payload = json.loads(_container_inspect())
+            payload[0]["HostConfig"]["CgroupnsMode"] = mode
+            with self.subTest(mode=mode), self.assertRaises(RuntimeBridgeError):
+                _validate_inspected_containers(
+                    payload,
+                    expected_ids=(CONTAINER_ID,),
+                    identity=DockerTaskIdentity(TASK_ID),
+                )
+
     def _native_counter(
         self,
         root: Path,
@@ -418,8 +507,11 @@ class DockerCounterTests(unittest.TestCase):
             self.assertEqual(fact.memory_bytes, 100)
             self.assertEqual(fact.memory_swap_bytes, 100)
             self.assertEqual(fact.pids_limit, 2)
+            self.assertEqual(fact.cgroupns_mode, "private")
             self.assertEqual(fact.compose_project, "rondoeval0810")
             self.assertEqual(fact.networks, ("rondoeval0810_default",))
+            self.assertEqual(fact.image_reference, RUNTIME_IMAGE_REF)
+            self.assertEqual(fact.image_id, RUNTIME_IMAGE_ID)
             self.assertEqual(
                 first.daemon_security_options,
                 ("name=seccomp,profile=builtin",),
@@ -692,7 +784,82 @@ class DockerCounterTests(unittest.TestCase):
 
             self.assertEqual(reading.data_root, str(root))
             self.assertEqual(reading.data_root_filesystem_free_bytes, 190 * 1024**3)
+            self.assertEqual(reading.docker_desktop_vhdx_bytes, 70_000_000_000)
             self.assertEqual(probe.calls, 1)
+
+    def test_resolves_frozen_manifest_to_daemon_image_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    json.dumps(
+                        [
+                            {
+                                "Id": RUNTIME_IMAGE_ID,
+                                "RepoDigests": [RUNTIME_IMAGE_REF],
+                            }
+                        ]
+                    )
+                ],
+            )
+            identity = counter.resolve_image_identity(RUNTIME_IMAGE_REF)
+
+        self.assertEqual(identity.image_reference, RUNTIME_IMAGE_REF)
+        self.assertEqual(identity.image_id, RUNTIME_IMAGE_ID)
+        self.assertEqual(
+            executor.commands,
+            [("docker", "image", "inspect", RUNTIME_IMAGE_REF)],
+        )
+
+    def test_required_container_metrics_use_exact_container_cgroup_probe(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(),
+                    "cpu_usage_microseconds=1250000\npeak_memory_bytes=456789\n",
+                    "",
+                    "",
+                ],
+            )
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.HOST,
+                compose_contract=contract,
+            )
+
+        self.assertEqual(reading.task_container_metrics[0].cpu_usage_microseconds, 1_250_000)
+        self.assertEqual(reading.task_container_metrics[0].peak_memory_bytes, 456_789)
+        metric_command = executor.commands[5]
+        self.assertEqual(metric_command[:5], ("docker", "container", "exec", "--user", "1000:1000"))
+        self.assertEqual(metric_command[5], CONTAINER_ID)
 
     def test_compose_resources_are_selected_and_inspected_by_exact_project(self) -> None:
         network_id = "c" * 64

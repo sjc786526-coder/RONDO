@@ -11,6 +11,7 @@ import unittest
 from dataclasses import replace
 from contextlib import redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 from urllib.parse import urlsplit
 
@@ -20,7 +21,13 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.config import RuntimeConfig  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, RunOutcome, Side  # noqa: E402
-from rondo_eval.docker_supervisor import HeavyLockLease  # noqa: E402
+from rondo_eval.docker_supervisor import (  # noqa: E402
+    DockerContainerMetrics,
+    DockerDesktopVhdxEvidence,
+    DockerImageIdentity,
+    DockerSeccompEvidence,
+    HeavyLockLease,
+)
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
 from rondo_eval.terminal_bench.docker_smoke import (  # noqa: E402
     NO_API_SMOKE_BEARER,
@@ -311,6 +318,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             seccomp_profile_effective_sha256=(
                 "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
             ),
+            require_container_metrics=True,
         )
 
     def test_full_function_uses_real_prepare_backend_and_parser_with_reward_zero(self) -> None:
@@ -337,6 +345,38 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertTrue(all(item.model == "gpt-5.6-luna" for item in result.requests))
         self.assertTrue(all(item.authorized for item in result.requests))
         self.assertTrue(result.safe_summary()["code_mode_tool_round_trip"])
+        samples = (
+            SimpleNamespace(
+                docker_total_bytes=10,
+                task_bytes=2,
+                data_root_filesystem_free_bytes=100,
+            ),
+            SimpleNamespace(
+                docker_total_bytes=11,
+                task_bytes=3,
+                data_root_filesystem_free_bytes=99,
+                data_root="/must-not-be-persisted",
+            ),
+        )
+        evidence = SimpleNamespace(
+            samples=samples,
+            warnings=(),
+            image_identity=DockerImageIdentity(FIX_GIT_IMAGE_REF, f"sha256:{'a' * 64}"),
+            desktop_vhdx=DockerDesktopVhdxEvidence(1000, 1200, 1100, 200),
+            container_metrics=DockerContainerMetrics("b" * 64, 1.5, 4096),
+            effective_seccomp=DockerSeccompEvidence(
+                "custom",
+                "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf",
+            ),
+        )
+        durable = replace(
+            result,
+            harbor=replace(result.harbor, docker_evidence=evidence),
+        ).safe_summary()["docker"]
+        self.assertEqual(durable["image_identity"]["image_id"], f"sha256:{'a' * 64}")
+        self.assertEqual(durable["desktop_vhdx"]["peak_growth_bytes"], 200)
+        self.assertEqual(durable["container_metrics"]["peak_memory_bytes"], 4096)
+        self.assertEqual(durable["effective_seccomp"]["profile_kind"], "custom")
         self.assertIn(
             '      - "seccomp=',
             result.prepared.materialized_task.overlay_path.read_text(encoding="utf-8"),
@@ -348,6 +388,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(
             result.prepared.command.compose_contract.container.security_opt,
             ("no-new-privileges:true",),
+        )
+        self.assertTrue(
+            result.prepared.command.compose_contract.container.require_container_metrics
         )
         _argv, kwargs = FakeHostExecutor.calls[0]
         self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off"})

@@ -12,6 +12,7 @@ from unittest import mock
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
+from rondo_eval import artifacts  # noqa: E402
 from rondo_eval.migrations import plan008_claimed_diagnostics as migration  # noqa: E402
 
 
@@ -94,6 +95,15 @@ class Plan008ClaimedDiagnosticsMigrationTests(unittest.TestCase):
             3,
         )
 
+    def test_apply_recovers_after_journal_crash_in_one_rerun(self) -> None:
+        self._assert_durable_crash_recovers(self._crash_after_journal())
+
+    def test_apply_recovers_after_target_crash_in_one_rerun(self) -> None:
+        self._assert_durable_crash_recovers(self._crash_before_index())
+
+    def test_apply_recovers_after_index_crash_in_one_rerun(self) -> None:
+        self._assert_durable_crash_recovers(self._crash_after_index())
+
     def test_changed_retained_result_blocks_without_publication(self) -> None:
         run_id = next(iter(self.evidence))
         job_result = next(
@@ -103,6 +113,66 @@ class Plan008ClaimedDiagnosticsMigrationTests(unittest.TestCase):
         with self.assertRaisesRegex(migration.MigrationError, "digest differs"):
             migration.apply_migration(self.root, self.root, source_bytes=self.source)
         self.assertFalse((self.root / "eval/results/runs.jsonl").exists())
+
+    @staticmethod
+    def _crash_after_journal():
+        original = migration.ArtifactWriter._write_journal
+
+        def crash(writer, *args, **kwargs):
+            original(writer, *args, **kwargs)
+            raise KeyboardInterrupt
+
+        return mock.patch.object(migration.ArtifactWriter, "_write_journal", crash)
+
+    @staticmethod
+    def _crash_before_index():
+        return mock.patch.object(
+            artifacts, "_atomic_replace_index", side_effect=KeyboardInterrupt
+        )
+
+    @staticmethod
+    def _crash_after_index():
+        original = artifacts._atomic_replace_index
+
+        def crash(*args, **kwargs):
+            original(*args, **kwargs)
+            raise KeyboardInterrupt
+
+        return mock.patch.object(artifacts, "_atomic_replace_index", crash)
+
+    def _assert_durable_crash_recovers(self, crasher) -> None:
+        with crasher:
+            with self.assertRaises(KeyboardInterrupt):
+                migration.apply_migration(
+                    self.root, self.root, source_bytes=self.source
+                )
+
+        run_id = next(iter(self.evidence))
+        journal = self.root / "eval-data/runs" / f".{run_id}.publish.json"
+        self.assertTrue(journal.is_file())
+        with self.assertRaisesRegex(
+            migration.MigrationError, "use --apply to recover"
+        ):
+            migration.prepare_migration(
+                self.root, self.root, source_bytes=self.source
+            )
+        self.assertTrue(journal.is_file())
+
+        applied = migration.apply_migration(
+            self.root, self.root, source_bytes=self.source
+        )
+        self.assertEqual(
+            [item.status for item in applied], ["already_applied"] * 3
+        )
+        self.assertFalse(journal.exists())
+        self.assertEqual(
+            len(
+                (self.root / "eval/results/runs.jsonl")
+                .read_text()
+                .splitlines()
+            ),
+            3,
+        )
 
     def _fixture(self):
         run_ids = tuple(migration._EVIDENCE)

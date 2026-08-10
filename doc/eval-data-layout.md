@@ -44,7 +44,8 @@ eval-data/                             # git-ignored
 ├── tools/                             # 项目局部工具（例如 llama.cpp runtime）
 ├── build-metrics/                     # 看门狗 summary/JUnit/受限日志
 ├── budgets/                           # 持久费用预留/结算账本，0600
-├── pairs/                             # no-API/paid 双侧顺序与终态账本，0600
+├── pairs/                             # no-API/paid 双侧顺序、终态账本与去敏 safe summary，0600
+├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
 ├── work/                              # materialize 和 no-API 工作目录
 ├── recordings/<recording_id>/         # A1 录制包（原始 HTTP exchange + SSE）
 ├── evidence/                          # 审批证据包
@@ -107,25 +108,37 @@ eval-data/                             # git-ignored
     { "task_id": "…", "outcome": "pass|fail", "attribution": "agent|guardian_correct_deny|guardian_false_deny|infra", "duration_s": 182, "tokens_in": 0, "tokens_out": 0 }
   ],
   "metrics": { "wall_seconds": 182.0, "cpu_user_seconds": 21.0, "cpu_system_seconds": 3.0, "peak_rss_bytes": 536870912, "exit_code": 0 },
-  "cost": { "estimated_usd": 1.2, "actual_usd": 1.05 },
+  "cost": { "estimated_usd": 1.2, "actual_usd": null },
   "artifacts": "eval-data/runs/20260812-143005182-tb-rondo-r1",
   "notes": ""
 }
 ```
 
-- 当前 ArtifactWriter v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
+- 当前 record schema v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的
   Docker/watchdog/parser 异常也必须写分类失败行，不允许复用同一 run-id 绕过运行次数上限。
-- Terminal-Bench 当前五键 `metrics` 固定为 runner-host `self+children` 的 `wall_seconds`、
-  `cpu_user_seconds`、`cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code`，仅用于设施诊断；Docker daemon
-  管理的容器 CPU/RSS 不在其中。paid B3 在 supervisor 增加并归档同口径容器 CPU/峰值内存前保持禁用；
-  完整探针和细粒度 Guardian 归因仍留给 A4/B5。
+- Terminal-Bench 五键 host `metrics` 固定为 runner-host `self+children` 的 `wall_seconds`、
+  `cpu_user_seconds`、`cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code`，仅用于设施诊断。
+  supervisor 在 daemon 确认 private cgroup namespace 后，另从 exact container 的 cgroup v2 生成
+  `container_id`、`cpu_usage_seconds`、`peak_memory_bytes`；no-API safe summary、paid publication、
+  pair ledger 与 M1 必须持有该组机器证据。本轮未用真实
+  Docker 重验新字段，paid B3 仍 hard-disabled；完整探针和细粒度 Guardian 归因留给 A4/B5。
 - 发布使用 journal v2：在同一结果锁内绑定工件树摘要、完整 record bytes 及 index 前/后长度与 SHA，
   以同目录临时文件写完整新 index、fsync 后原子 replace。恢复只接受精确 pre/post identity，并重新核对
   工件树；partial write、进程死亡或恢复前篡改均 fail-closed，不再原地 append 半行。
+- pair sequence 使用稳定 `<ledger>.lock` 侧车 flock，ledger 本体通过 0600 temp write + fsync +
+  atomic replace + parent fsync 更新；已存在的空文件视为损坏，不能重置为 slot 1。两槽绑定
+  同一 `eval_harness_commit`。paid 槽先进入 `publishing`，结果持久后回读 record SHA-256 再收敛为
+  `completed`；M1 同时核对 durable ledger 与 result index，不仅聚合两条 record。
+- 后续 no-API 成功槽在账本写 `completed` 前，先原子写入
+  `eval-data/pairs/<pair_id>/no-api-safe/<run_id>.json`，只保留 pair/bundle/Harbor/seccomp/harness 身份和去敏
+  计数/有效态摘要，以及实际 daemon image ID、VHDX baseline/peak/final/growth、exact container
+  CPU/峰值内存和 daemon 回显的有效 seccomp。`docker=null` 或任一字段缺失都不能完成 pair。旧 no-API
+  v3 原始 trial/safe summary 已按原保留策略清理，不能事后补写或
+  冒充新机器证据。
 - `git_commit` 记录冻结产品/二进制的 measurement commit；若 eval harness 从另一 clean worktree 加载，
-  其独立 commit 必须写入 `config.eval_harness_commit`。
+  其独立 commit 必须写入 `config.eval_harness_commit`，并与 pair ledger 首次 claim 绑定的 commit 一致。
 - Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source
   tag/commit 与 effective policy hash 后单独归档，不复制 config、lock、raw log 或 exception trace。
 - `track = replay` 时 `tasks` 为 `null`，改填 `metrics`：`{ wall_ms, cpu_ms, peak_rss_kb, turns, tool_calls, drift }`。
@@ -134,6 +147,9 @@ eval-data/                             # git-ignored
 - `upstream_codex.workspace_lock_normalization` 只描述构建只读官方基线时在隔离 scratch 副本中的
   机械变换；RONDO 运行也记录它，便于证明两侧基线来源一致。不得把规范化后的 lock 哈希写成
   官方 tag 文件哈希。
+- `estimated_usd` 是本地冻结价格 × usage 的预算计价。没有查询供应商账单时，非零
+  `actual_usd` 必须为 `null`；零请求/零费用可记 `0.0`。请求 role 允许为诊断做 shape inference，
+  但只有显式 header 产生的 `role_provenance=declared` 可满足 completed/M1。
 
 ### 隐藏集的特殊规则
 

@@ -76,6 +76,20 @@ class _PreparedRun:
     artifact: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class _CandidateRun:
+    run_id: str
+    record: dict[str, Any]
+    artifact: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _MigrationInputs:
+    common_root: Path
+    results_worktree_root: Path
+    runs: tuple[_CandidateRun, ...]
+
+
 def prepare_migration(
     common_root: Path,
     results_worktree_root: Path,
@@ -83,6 +97,23 @@ def prepare_migration(
     source_bytes: bytes | None = None,
 ) -> tuple[_PreparedRun, ...]:
     """Validate all immutable evidence and return a side-effect-free migration plan."""
+
+    inputs = _validate_migration_inputs(
+        common_root,
+        results_worktree_root,
+        source_bytes=source_bytes,
+    )
+    _require_no_pending_migration_publications(inputs)
+    return _classify_migration(inputs)
+
+
+def _validate_migration_inputs(
+    common_root: Path,
+    results_worktree_root: Path,
+    *,
+    source_bytes: bytes | None,
+) -> _MigrationInputs:
+    """Validate frozen inputs without inspecting mutable publication state."""
 
     common_root = _real_directory(common_root, "common root")
     results_worktree_root = _real_directory(results_worktree_root, "results worktree root")
@@ -101,10 +132,7 @@ def prepare_migration(
     ledger = _json_object(ledger_bytes, "budget ledger")
     _validate_ledger(ledger)
 
-    results_path = results_worktree_root / "eval" / "results" / "runs.jsonl"
-    _contents, existing_rows = _read_index(results_path)
-    existing = {row["run_id"]: row for row in existing_rows}
-    prepared: list[_PreparedRun] = []
+    candidates: list[_CandidateRun] = []
     for run_id, evidence in _EVIDENCE.items():
         source_record = provisional[run_id]
         run_ledger = ledger["runs"][run_id]
@@ -122,19 +150,76 @@ def prepare_migration(
             "work": work_evidence,
             "correction": {"outcome": "infra_failed", "attribution": "infra"},
         }
-        target = common_root / "eval-data" / "runs" / run_id
+        candidates.append(_CandidateRun(run_id, corrected, artifact))
+    return _MigrationInputs(common_root, results_worktree_root, tuple(candidates))
+
+
+def _classify_migration(inputs: _MigrationInputs) -> tuple[_PreparedRun, ...]:
+    results_path = inputs.results_worktree_root / "eval" / "results" / "runs.jsonl"
+    _contents, existing_rows = _read_index(results_path)
+    existing = {row["run_id"]: row for row in existing_rows}
+    prepared: list[_PreparedRun] = []
+    for candidate in inputs.runs:
+        run_id = candidate.run_id
+        target = inputs.common_root / "eval-data" / "runs" / run_id
         current = existing.get(run_id)
-        if current == corrected and _migration_artifact_matches(target, artifact):
+        if current == candidate.record and _migration_artifact_matches(
+            target, candidate.artifact
+        ):
             status = "already_applied"
         elif current is not None or _path_present(target):
             status = "conflict"
         else:
-            actual_work = _validate_work(common_root, run_id, source_record, evidence)
-            if actual_work != work_evidence:
+            evidence = _EVIDENCE[run_id]
+            actual_work = _validate_work(
+                inputs.common_root,
+                run_id,
+                candidate.record,
+                evidence,
+            )
+            if actual_work != candidate.artifact["work"]:
                 raise MigrationError(f"retained work identity differs: {run_id}")
             status = "pending"
-        prepared.append(_PreparedRun(run_id, status, corrected, artifact))
+        prepared.append(
+            _PreparedRun(run_id, status, candidate.record, candidate.artifact)
+        )
     return tuple(prepared)
+
+
+def _require_no_pending_migration_publications(inputs: _MigrationInputs) -> None:
+    pending = _pending_migration_publications(inputs)
+    if pending:
+        raise MigrationError(
+            "migration has an interrupted publication; use --apply to recover it: "
+            + ", ".join(pending)
+        )
+
+
+def _pending_migration_publications(inputs: _MigrationInputs) -> list[str]:
+    runs_root = inputs.common_root / "eval-data" / "runs"
+    return [
+        item.run_id
+        for item in inputs.runs
+        if _path_present(runs_root / f".{item.run_id}.publish.json")
+    ]
+
+
+def _recover_migration_publications(inputs: _MigrationInputs) -> None:
+    """Converge ArtifactWriter journal v2 before classifying migration state."""
+
+    if not _pending_migration_publications(inputs):
+        return
+    representative = inputs.runs[0]
+    writer = ArtifactWriter(
+        RepoPaths(inputs.common_root, inputs.results_worktree_root),
+        representative.run_id,
+        results_worktree_root=inputs.results_worktree_root,
+    )
+    # Use the same locked recovery path as start(), without creating a new
+    # staging claim that would make a still-pending migration look occupied.
+    writer._validate_roots()
+    writer._assert_run_paths()
+    writer._recover_pending_publications()
 
 
 def preview(prepared: tuple[_PreparedRun, ...]) -> dict[str, Any]:
@@ -169,30 +254,28 @@ def apply_migration(
 ) -> tuple[_PreparedRun, ...]:
     """Publish pending rows; source work is read-only and may be removed afterward."""
 
-    prepared = prepare_migration(
+    inputs = _validate_migration_inputs(
         common_root,
         results_worktree_root,
         source_bytes=source_bytes,
     )
+    _recover_migration_publications(inputs)
+    prepared = _classify_migration(inputs)
     conflicts = [item.run_id for item in prepared if item.status == "conflict"]
     if conflicts:
         raise MigrationError(f"migration conflicts with existing state: {', '.join(conflicts)}")
-    paths = RepoPaths(Path(common_root), Path(results_worktree_root))
+    paths = RepoPaths(inputs.common_root, inputs.results_worktree_root)
     for item in prepared:
         if item.status == "already_applied":
             continue
         writer = ArtifactWriter(
             paths,
             item.run_id,
-            results_worktree_root=Path(results_worktree_root),
+            results_worktree_root=inputs.results_worktree_root,
         ).start()
         writer.write_json("migration.json", item.artifact)
         writer.finalize(item.record, secrets=())
-    return prepare_migration(
-        common_root,
-        results_worktree_root,
-        source_bytes=source_bytes,
-    )
+    return _classify_migration(inputs)
 
 
 def _git_source(common_root: Path) -> bytes:

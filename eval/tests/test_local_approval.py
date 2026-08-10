@@ -33,6 +33,10 @@ from rondo_eval.local_approval.client import (  # noqa: E402
 )
 from rondo_eval.local_approval.doctor import run_doctor  # noqa: E402
 from rondo_eval.local_approval.fake_server import FakeApprovalServer  # noqa: E402
+from rondo_eval.local_approval.identity import (  # noqa: E402
+    clear_launcher_identity,
+    publish_launcher_identity,
+)
 from rondo_eval.local_approval.launcher import (  # noqa: E402
     LLAMA_CPP_ASSET_SHA256,
     LLAMA_CPP_BINARY_SHA256,
@@ -47,6 +51,7 @@ from rondo_eval.local_approval.launcher import (  # noqa: E402
     _verify_runtime_closure,
     build_serve_command,
     inspect_runtime,
+    main as launcher_main,
     model_path,
     run_server,
     serve_environment,
@@ -125,6 +130,11 @@ def _canonical_payload(
         sort_keys=True,
     ).encode("utf-8")
     return StaticApprovalPayload(payload.policy_identity, canonical, logical_payload)
+
+
+def _current_process_command() -> list[str]:
+    raw = Path("/proc/self/cmdline").read_bytes().rstrip(b"\0")
+    return [os.fsdecode(item) for item in raw.split(b"\0")]
 
 
 class LocalApprovalClientTests(unittest.TestCase):
@@ -259,6 +269,22 @@ class LocalApprovalClientTests(unittest.TestCase):
             with self.assertRaises(StructuredOutputError):
                 LocalApprovalClient(self._config(fake.base_url)).decide(_payload())
 
+    def test_model_backed_consumer_cannot_bypass_launcher_identity(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        with FakeApprovalServer(model_path=os.fspath(model)) as fake:
+            client = LocalApprovalClient(
+                self._config(
+                    fake.base_url,
+                    model_path_value=os.fspath(model),
+                    model_sha256_value=digest,
+                )
+            )
+            with self.assertRaises(ServiceUnavailableError):
+                client.decide(_payload())
+        self.assertEqual(fake.requests, [])
+
     def test_optional_secret_is_sent_as_bearer_without_entering_request_body(self) -> None:
         secret = "local-test-secret"
         (self.root / ".env.local").write_text(
@@ -337,9 +363,44 @@ class LauncherAndDoctorTests(unittest.TestCase):
             "0" * 64,
         )
 
+    def _publish_identity(
+        self, config: RuntimeConfig, model: Path, *, runtime_sha256: str = "a" * 64
+    ):
+        settings = settings_from_config(config)
+        return publish_launcher_identity(
+            config,
+            pid=os.getpid(),
+            command=_current_process_command(),
+            runtime_sha256=runtime_sha256,
+            model_sha256=settings.model_sha256,
+            model_path=model,
+            model_id=settings.model_id,
+            base_url=settings.base_url,
+            host=settings.host,
+            port=settings.port,
+        )
+
     @staticmethod
     def _ready_runtime(_config: RuntimeConfig, _settings: object) -> RuntimeInspection:
-        return RuntimeInspection("runtime_ready", Path("/fake/llama-server"), "ready")
+        return RuntimeInspection(
+            "runtime_ready",
+            Path("/fake/llama-server"),
+            "ready",
+            "a" * 64,
+            "cpu_only_x64",
+            "not_run",
+        )
+
+    @staticmethod
+    def _gpu_ready_runtime(_config: RuntimeConfig, _settings: object) -> RuntimeInspection:
+        return RuntimeInspection(
+            "runtime_ready",
+            Path("/fake/llama-server"),
+            "fixture-only GPU/model capability",
+            "a" * 64,
+            "gpu_model_serving_validated",
+            "fixture_only",
+        )
 
     @staticmethod
     def _ready_router(
@@ -353,6 +414,23 @@ class LauncherAndDoctorTests(unittest.TestCase):
         with self.assertRaises(ModelMissingError) as raised:
             model_path(config, settings)
         self.assertEqual(raised.exception.exit_code, MODEL_MISSING)
+
+    def test_launcher_model_missing_status_does_not_claim_gpu_readiness(self) -> None:
+        config = self._config()
+        with mock.patch(
+            "rondo_eval.local_approval.launcher.RepoPaths.discover",
+            return_value=self.paths,
+        ), mock.patch(
+            "rondo_eval.local_approval.launcher.load_runtime_config",
+            return_value=config,
+        ), mock.patch(
+            "rondo_eval.local_approval.launcher.run_server",
+            side_effect=ModelMissingError("missing"),
+        ), mock.patch("builtins.print") as output:
+            exit_code = launcher_main(["--repo", os.fspath(self.root)])
+        self.assertEqual(exit_code, MODEL_MISSING)
+        status = json.loads(output.call_args.args[0])
+        self.assertEqual(status["status"], "model_missing_gpu_runtime_unvalidated")
 
     def test_model_requires_gguf_header_and_configured_digest(self) -> None:
         model = self.root / "model.gguf"
@@ -393,6 +471,26 @@ class LauncherAndDoctorTests(unittest.TestCase):
         runtime_probe.assert_not_called()
         popen.assert_not_called()
 
+    def test_run_server_rejects_current_cpu_only_runtime_with_model(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        lease = runtime_bridge.WatchdogLease(token="c" * 48)
+        guard = mock.Mock()
+        guard.is_held.return_value = True
+        watchdog = runtime_bridge.WatchdogProof(lease=lease, guard=guard)
+        popen = mock.Mock()
+        with mock.patch(
+            "rondo_eval.local_approval.launcher.inspect_runtime",
+            side_effect=self._ready_runtime,
+        ):
+            with self.assertRaises(LauncherError):
+                run_server(
+                    self._config(model=os.fspath(model)),
+                    watchdog_factory=lambda: watchdog,
+                    popen=popen,
+                )
+        popen.assert_not_called()
+
     def test_run_server_guards_the_full_mocked_process_lifecycle(self) -> None:
         model = self.root / "model.gguf"
         model.write_bytes(b"GGUFfake-model-fixture")
@@ -410,7 +508,11 @@ class LauncherAndDoctorTests(unittest.TestCase):
             "runtime_ready",
             self.root / "llama-server",
             "ready",
+            "a" * 64,
+            "gpu_model_serving_validated",
         )
+        identity_publisher = mock.Mock(return_value=mock.sentinel.identity)
+        identity_clearer = mock.Mock()
         with mock.patch(
             "rondo_eval.local_approval.launcher.inspect_runtime",
             return_value=runtime,
@@ -419,6 +521,8 @@ class LauncherAndDoctorTests(unittest.TestCase):
                 self._config(model=os.fspath(model)),
                 watchdog_factory=lambda: watchdog,
                 popen=popen,
+                identity_publisher=identity_publisher,
+                identity_clearer=identity_clearer,
                 watchdog_interval_seconds=0.01,
             )
         self.assertEqual(result, 0)
@@ -426,6 +530,26 @@ class LauncherAndDoctorTests(unittest.TestCase):
         popen.assert_called_once()
         process.terminate.assert_not_called()
         process.kill.assert_not_called()
+        identity_publisher.assert_called_once()
+        identity_clearer.assert_called_once_with(
+            mock.ANY, mock.sentinel.identity
+        )
+
+    def test_launcher_identity_receipt_is_private_and_rejects_symlinked_parent(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        config = self._config(model=os.fspath(model))
+        identity = self._publish_identity(config, model)
+        receipt = self.root / "eval-data/local-approval/launcher-identity.json"
+        self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
+        clear_launcher_identity(config, identity)
+
+        (self.root / "outside").mkdir()
+        receipt.parent.rmdir()
+        (self.root / "eval-data").rmdir()
+        (self.root / "eval-data").symlink_to("outside", target_is_directory=True)
+        with self.assertRaises(ConfigError):
+            self._publish_identity(config, model)
 
     def test_run_server_terminates_then_kills_on_watchdog_loss(self) -> None:
         model = self.root / "model.gguf"
@@ -445,7 +569,11 @@ class LauncherAndDoctorTests(unittest.TestCase):
             "runtime_ready",
             self.root / "llama-server",
             "ready",
+            "b" * 64,
+            "gpu_model_serving_validated",
         )
+        identity_publisher = mock.Mock(return_value=mock.sentinel.identity)
+        identity_clearer = mock.Mock()
         with mock.patch(
             "rondo_eval.local_approval.launcher.inspect_runtime",
             return_value=runtime,
@@ -455,11 +583,16 @@ class LauncherAndDoctorTests(unittest.TestCase):
                     self._config(model=os.fspath(model)),
                     watchdog_factory=lambda: watchdog,
                     popen=popen,
+                    identity_publisher=identity_publisher,
+                    identity_clearer=identity_clearer,
                     watchdog_interval_seconds=0.01,
                 )
         self.assertEqual(raised.exception.exit_code, INFRA_ERROR)
         process.terminate.assert_called_once_with()
         process.kill.assert_called_once_with()
+        identity_clearer.assert_called_once_with(
+            mock.ANY, mock.sentinel.identity
+        )
 
     def test_serve_command_is_pinned_loopback_offline_and_contains_no_secret(self) -> None:
         model = self.root / "model.gguf"
@@ -508,15 +641,38 @@ class LauncherAndDoctorTests(unittest.TestCase):
         report = run_doctor(self._config(), runtime_inspector=runtime_missing)
         self.assertEqual((report.status, report.exit_code), ("runtime_missing", INFRA_ERROR))
 
-    def test_doctor_reports_only_waiting_for_model_after_router_probe(self) -> None:
+    def test_doctor_reports_model_missing_and_gpu_unvalidated_after_router_probe(self) -> None:
         report = run_doctor(
             self._config(),
             runtime_inspector=self._ready_runtime,
             router_probe=self._ready_router,
         )
-        self.assertEqual(report.status, "infrastructure_ready_model_missing")
+        self.assertEqual(
+            report.status,
+            "cpu_frontend_ready_model_missing_gpu_unvalidated",
+        )
         self.assertEqual(report.exit_code, MODEL_MISSING)
+        self.assertEqual(report.runtime, "cpu_only_ready")
         self.assertEqual(report.service, "not_started")
+        self.assertEqual(report.runtime_capability, "cpu_only_x64")
+        self.assertEqual(report.model_backed_validation, "not_run")
+
+    def test_doctor_reports_cpu_runtime_is_not_gpu_model_ready(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        identity_probe = mock.Mock()
+        decision_probe = mock.Mock()
+        report = run_doctor(
+            self._config(model=os.fspath(model)),
+            runtime_inspector=self._ready_runtime,
+            identity_probe=identity_probe,
+            decision_probe=decision_probe,
+        )
+        self.assertEqual((report.status, report.exit_code), ("gpu_runtime_not_validated", INFRA_ERROR))
+        self.assertEqual(report.runtime_capability, "cpu_only_x64")
+        self.assertEqual(report.model_backed_validation, "not_run")
+        identity_probe.assert_not_called()
+        decision_probe.assert_not_called()
 
     def test_doctor_distinguishes_service_schema_and_success(self) -> None:
         model = self.root / "model.gguf"
@@ -528,7 +684,7 @@ class LauncherAndDoctorTests(unittest.TestCase):
 
         report = run_doctor(
             config,
-            runtime_inspector=self._ready_runtime,
+            runtime_inspector=self._gpu_ready_runtime,
             identity_probe=lambda _config, _model: None,
             decision_probe=unavailable,
         )
@@ -539,7 +695,7 @@ class LauncherAndDoctorTests(unittest.TestCase):
 
         report = run_doctor(
             config,
-            runtime_inspector=self._ready_runtime,
+            runtime_inspector=self._gpu_ready_runtime,
             identity_probe=lambda _config, _model: None,
             decision_probe=bad_schema,
         )
@@ -547,7 +703,7 @@ class LauncherAndDoctorTests(unittest.TestCase):
 
         report = run_doctor(
             config,
-            runtime_inspector=self._ready_runtime,
+            runtime_inspector=self._gpu_ready_runtime,
             identity_probe=lambda _config, _model: None,
             decision_probe=lambda _config: {"outcome": "deny"},
         )
@@ -566,8 +722,21 @@ class LauncherAndDoctorTests(unittest.TestCase):
                 ),
                 "0" * 64,
             )
-            report = run_doctor(config, runtime_inspector=self._ready_runtime)
+            identity = self._publish_identity(config, model)
+            try:
+                with mock.patch(
+                    "rondo_eval.local_approval.launcher._load_runtime_lock"
+                ) as runtime_lock:
+                    runtime_lock.return_value.identity_sha256 = "a" * 64
+                    report = run_doctor(config, runtime_inspector=self._gpu_ready_runtime)
+            finally:
+                clear_launcher_identity(config, identity)
         self.assertEqual((report.status, report.exit_code), ("ready", SUCCESS))
+        self.assertEqual(report.runtime_capability, "gpu_model_serving_validated")
+        self.assertEqual(
+            report.model_backed_validation,
+            "model_schema_probe_passed",
+        )
 
     def test_doctor_rejects_endpoint_with_different_model_identity(self) -> None:
         model = self.root / "model.gguf"
@@ -583,11 +752,46 @@ class LauncherAndDoctorTests(unittest.TestCase):
                 ),
                 "0" * 64,
             )
-            report = run_doctor(config, runtime_inspector=self._ready_runtime)
+            identity = self._publish_identity(config, model)
+            try:
+                with mock.patch(
+                    "rondo_eval.local_approval.launcher._load_runtime_lock"
+                ) as runtime_lock:
+                    runtime_lock.return_value.identity_sha256 = "a" * 64
+                    report = run_doctor(config, runtime_inspector=self._gpu_ready_runtime)
+            finally:
+                clear_launcher_identity(config, identity)
         self.assertEqual(
             (report.status, report.exit_code),
             ("service_schema_error", STRUCTURED_OUTPUT_ERROR),
         )
+
+    def test_decision_rejects_launcher_receipt_replacement_mid_request(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        receipt_path = self.root / "eval-data/local-approval/launcher-identity.json"
+        with FakeApprovalServer(
+            model_path=os.fspath(model),
+            on_decision=lambda: receipt_path.unlink(),
+        ) as fake:
+            config = RuntimeConfig(
+                self.paths,
+                _local_data(
+                    fake.base_url,
+                    model_path_value=os.fspath(model),
+                    model_sha256_value=hashlib.sha256(model.read_bytes()).hexdigest(),
+                ),
+                "0" * 64,
+            )
+            identity = self._publish_identity(config, model)
+            with mock.patch(
+                "rondo_eval.local_approval.launcher._load_runtime_lock"
+            ) as runtime_lock:
+                runtime_lock.return_value.identity_sha256 = "a" * 64
+                with self.assertRaises(ServiceUnavailableError):
+                    LocalApprovalClient(config).decide(_payload())
+            clear_launcher_identity(config, identity)
+        self.assertEqual(len(fake.requests), 1)
 
     def test_pin_constants_are_exact(self) -> None:
         self.assertEqual(LLAMA_CPP_BUILD, 10333)

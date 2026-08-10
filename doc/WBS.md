@@ -30,19 +30,27 @@
   policy 仍须由 P1 从 `E_final` 提取并哈希，不能用源码版本替代。
 - P1 已落地顶层轻量 `eval/` 体系：Standard/Lite `E_final` 解析、`PolicyIdentity`、
   无工具静态审批协议、严格本地配置、崩溃一致归档、持久费用上限、Docker 监督、
-  Terminal-Bench 公平配对/双适配器与 llama.cpp client/doctor/fake/launcher。237 项
-  pure/fake/loopback 设施测试通过，`uv lock --check` 通过。
-- Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest；B2 已生成
-  Codex/RONDO 静态 musl CLI + code-mode-host + 官方 bwrap runtime bundle，并由受跟踪 pair lock
-  绑定实际 Harbor closure、两侧 bundle 与公平配置。定向反事实确认 Docker builtin seccomp 阻止
-  非特权 user namespace；只对该容器使用受跟踪的最小 non-`CAP_SYS_ADMIN` profile 后，RONDO→Codex
-  同任务 no-API 配对均完成，未使用 privileged、`SYS_ADMIN` 或 `seccomp=unconfined`。
+  Terminal-Bench 公平配对/双适配器与 llama.cpp client/doctor/fake/launcher。第二轮审查后，
+  pair 原子账本、跨槽 harness commit、Harbor 安装闭包、发布恢复、watchdog override、VHDX/
+  image/container metrics、paid custom seccomp、request role provenance 与费用口径已进入代码门禁；
+  统一轻量门禁 269/269，`uv lock --check` 为 85 packages。本轮只做 pure/fake/loopback 验证，
+  没有重跑 Docker。
+- Terminal-Bench B1 已冻结 Harbor `0.20.0`、TB 2.1 commit、`fix-git` task/image digest，Harbor
+  入口字节及 marker-active 传递依赖闭包由受跟踪 lock 绑定。Codex/RONDO 静态 musl CLI +
+  code-mode-host + 官方 bwrap runtime bundle 保持冻结。旧 no-API v3 在旧 pair schema 下证明
+  RONDO→Codex 正常路径完成；新 identity `p1-fix-git-pair-v4` 另外绑定 harness commit、
+  daemon 实际镜像、private cgroup namespace、容器 CPU/峰值内存、VHDX 增长与去敏 safe summary，不复用保留的 v3
+  ledger。v4 尚未用真实 Docker 重验，因此 B2 不称新
+  门禁已完整验收。
 - L1 协议与三组 consumer 协议/fixture 逐字节投影已完成，合法 `ToolSearchOutput` 可消费且最终 sink
   fail-closed；本阶段不宣称已有三套独立生产调用端。
-  L2 项目局部 llama.cpp `b10333` 完整动态运行闭包、配置、client、doctor、fake 和启动入口已就绪，
-  redirect、endpoint/model identity 均受约束；无模型 doctor 返回
-  `infrastructure_ready_model_missing`/78。当前无权重，未做真实本地推理、显存/延迟实测或 L2a/L3/L4。
-- **当前阶段：Plan 008 基础设施整改与 B2 no-API 验收完成，B3/M1 待新授权。** 三次早期诊断均在
+  L2 项目局部 llama.cpp `b10333` 已冻结 CPU x64 前端/动态运行闭包、配置、client、
+  doctor、fake 和启动入口。model-backed client 必须校验 launcher 私有 receipt，并在请求前后
+  重验 PID/start ticks、cmdline、监听 socket、runtime/model digest 与 endpoint。当前无权重，
+  CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
+  L2a/L3/L4 均未实现验收，不称“只差权重”。
+- **当前阶段：Plan 008 第二轮机器门禁整改已落地，B2 待新 schema 的 Docker 重验，
+  B3/M1 保持 hard-disabled/未运行。** 三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。旧付费批次不再用于配对，生产 paid 入口保持 hard-disabled；若继续 B3，需以新的
   pair/batch、轮次与预算单独授权。
@@ -53,9 +61,9 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1、B2 与双侧 no-API 配对已完成；B3/M1 待新的真实 API 授权 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1 完成；B2 旧 no-API 正常路径有历史证据，第二轮新门禁待 Docker 重验；B3/M1 hard-disabled/未运行 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | L1 已完成；L2 前置设施只待模型接入，真实验收未运行 |
+| 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -80,7 +88,7 @@ P0 共享地基 ────────┤                          ├─→ �
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1、B2/no-API、L1、L2 前置完成；B3/M1 待新授权 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/L1 完成；B2 新门禁待 Docker 重验；L2 仅 CPU 前端；B3/M1 hard-disabled |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
@@ -118,11 +126,15 @@ P0 共享地基 ────────┤                          ├─→ �
 ## 5. 当前阶段任务
 
 P0 已完成定向门禁并合入主线；P1 执行合同见
-`plan/008-p1-terminal-bench-and-local-approval-execplan.md`。本批已完成共享 eval 合同、B1、B2
-双侧 no-API、L1 和 L2 前置设施，并保留 pure/fake、Docker、真实 API 与未运行项的证据分层。
-默认 seccomp 与最小容器 profile 的反事实已定位 bwrap 阻断；生产 no-API 只使用受跟踪 profile，仍保持
-non-root、cap-drop、no-new-privileges 与资源/挂载/网络有效态检查。B3/M1 与真实 `E_final` 种子因本批
-未调用真实 API 而保持待完成。执行细节和验收差集记录在本批 `agent_log`。
+`plan/008-p1-terminal-bench-and-local-approval-execplan.md`。本批共享 eval 合同、B1 与 L1 保持可用。B2 的旧
+no-API v3 仍只是旧 lock/schema 下的历史正常路径证据；新 identity
+`p1-fix-git-pair-v4` 不复用或改写保留的 v3 ledger。第二轮审查后的新门禁已覆盖
+pair 原子持久化和跨事务恢复、跨槽 harness identity、Harbor 可移植安装闭包、规范
+watchdog/VHDX/image/container metrics、paid custom seccomp、declared role 和可解释费用口径。这些
+修改本轮只通过 pure/fake/loopback 验证，还需在新 schema 下重跑双侧 Docker no-API 才能重新
+认定 B2 完整验收。B3/M1 继续 hard-disabled/未运行，不存在可用的真实 `E_final` 种子。
+L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
+执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，
@@ -147,9 +159,10 @@ Docker/最多四个 run/总计 20 USD 授权只对该计划有效，不自动扩
 - 归属界定：Divan / Bazel benchmark 等属于**测评**设施，不算测试体系的一部分。
 - 行为改变型优化：保留仍成立的原测试，修改已不成立的旧语义测试，并需要测评证据证明有效；修 bug 型优化：原测试保留，新增一个"旧实现失败、新实现通过"的回归测试；纯实现优化：原则上不改原测试，性能交给测评体系。
 - **测评（eval）** 是有效代码的一部分，轻量、开箱即用，自动运行、自动记录、自动归档，可出曲线；不做数据资产审计等重机制。
-- 探针只放少量关键节点，内存累积、轮末统一输出。跨侧对比必须使用同口径的外部指标；当前 runner-host
-  `getrusage` 不含 Docker daemon 管理的容器进程，只是设施开销诊断。paid B3 前须由 supervisor 补齐
-  容器 CPU 与峰值内存，内部探针仍只用于 RONDO 自身版本间对比（详见 `doc/WBS/eval-benchmark.md` A4）。
+- 探针只放少量关键节点，内存累积、轮末统一输出。跨侧对比必须使用同口径的外部指标；runner-host
+  `getrusage` 仍只是设施开销诊断。supervisor 已增加 exact container cgroup v2 CPU 与峰值内存采集，
+  paid publication/pair/M1 要求该机器证据；本轮没有真实 Docker 重验，所以 paid B3 仍保持
+  hard-disabled。完整探针和细粒度 Guardian 归因仍留给 A4/B5（详见 `doc/WBS/eval-benchmark.md`）。
 - 原始 codex 与 RONDO 的对比测评统一关闭 websocket（provider 侧
   `ModelProviderInfo.supports_websockets = false`，见 `codex-rs/model-provider-info/src/lib.rs`）。
 
