@@ -31,7 +31,8 @@
 - P1 已落地顶层 `eval/` 体系：Standard/Lite `E_final`、静态审批、严格本地配置、付费预算与发布恢复、
   Docker/watchdog 监督、Terminal-Bench 双适配器和 llama.cpp 前置设施。Plan 009 将 no-API 从付费式
   permanent ledger、retirement、崩溃恢复和一次性 migration 中解耦；这些历史机制不再是 B2 生产路径。
-  Plan 010 已冻结唯一 paid v6 pair，预算、不可复用 run、append-only publication 与恢复保持；真实批次仍待单独授权。
+  Plan 010 的 paid v6 pair 已按授权执行 RONDO 首槽，但宿主预算代理因 canonical shell 清除 HTTP(S) proxy
+  而等待上游超时；该 pair 已失败并按零重试合同阻断，Codex 与 M1 未运行。
 - Terminal-Bench B1 固定 Harbor `0.20.0`、`uv.lock`、TB 2.1 commit、`fix-git` task/image digest 和两侧
   runtime bundle。Harbor 启动前只核对版本、console/interpreter 与三个关键模块，不再扫描数千个依赖文件。
   B2 由唯一入口在同一进程中严格执行 RONDO→Codex，首侧失败立即停止；成功后只替换一个
@@ -47,11 +48,12 @@
   仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。当前无权重，
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
-- **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 010 的 B3/M1 最小 paid
-  启动合同已冻结，真实 API 仍未运行。** 三次早期诊断均在
+- **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 010 的 v6 paid 首槽已失败，
+  B3/M1 未通过。** 三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
-  0 次、费用 0 USD。旧付费批次不再用于配对；当前 v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试，
-  每 run 5 USD、批次硬上限 20 USD，执行前仍需单独授权。
+  0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
+  上游响应或 usage，ledger 保留 0.755400 USD reservation，实际账单未查询。v6 已 `failed/blocked`，
+  Codex 与 M1 未运行；继续 B3 需新 pair 与单独 API 授权，paid shell 必须保留宿主 HTTP(S) proxy。
 
 ## 2. 方向与依赖
 
@@ -59,7 +61,7 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；B3/M1 paid 合同就绪、待授权运行 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；v6 paid 首槽 infra_failed，B3/M1 未通过 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
 | 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
@@ -86,7 +88,7 @@ P0 共享地基 ────────┤                          ├─→ �
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/B2/L1 完成；L2 仅 CPU 前端；B3/M1 待授权运行 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/B2/L1 完成；L2 仅 CPU 前端；v6 首槽失败，B3/M1 未通过 |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
@@ -131,7 +133,7 @@ B2 删除 no-API permanent ledger/retirement/summary recovery、一次性 migrat
 UID/GID 1000、精确 `/app/personal-site` Git probe、custom seccomp、`cap_drop=ALL`、资源阈值和清理成功；
 marker 只接受成功的结构化 `exec_command` 结果。双侧已在真实 Docker 中以同一 pinned
 image 和同一运行合同完成 no-API 链路，current receipt 与看门狗 summary 保留在项目本地数据目录。
-B3 的 v6 pair 已冻结但未运行，不存在可用的真实 `E_final` 种子。
+B3 的 v6 pair 已运行 RONDO 首槽但在上游响应前超时，不存在可用的真实 `E_final` 种子；Codex 与 M1 未运行。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
 
@@ -161,7 +163,8 @@ Docker/最多四个 run/总计 20 USD 授权只对该计划有效，不自动扩
 - 探针只放少量关键节点，内存累积、轮末统一输出。跨侧对比必须使用同口径的外部指标；runner-host
   `getrusage` 仍只是设施开销诊断。supervisor 已增加 exact container cgroup v2 CPU 与峰值内存采集，
   paid publication/pair/M1 要求该机器证据；v4 只走到 RONDO 失败路径，Plan 009 已以轻量
-  current receipt 完成双侧 no-API 重验；该证据不代替付费批次。Plan 010 paid v6 仍待单独 API 授权。
+  current receipt 完成双侧 no-API 重验；该证据不代替付费批次。Plan 010 paid v6 已失败并阻断，继续运行需
+  新 pair 与单独 API 授权。
   完整探针和细粒度 Guardian 归因仍留给 A4/B5（详见 `doc/WBS/eval-benchmark.md`）。
 - 原始 codex 与 RONDO 的对比测评统一关闭 websocket（provider 侧
   `ModelProviderInfo.supports_websockets = false`，见 `codex-rs/model-provider-info/src/lib.rs`）。

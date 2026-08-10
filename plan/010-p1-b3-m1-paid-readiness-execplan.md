@@ -108,26 +108,37 @@
 - paid CLI 已显式接收 detached measurement worktree；watchdog/harness/结果 worktree 仍各自按原合同校验。
 - focused pure/fake/loopback：proxy + artifacts/config + pair + results 81/81，Terminal runner/adapter 18/18，
   合计 99/99；`py_compile`、CLI help 与 `git diff --check` 通过。
+- 用户随后授权执行唯一 v6 paid pair。clean harness `1d36eab9bf2b5462347cb304116656f47ef9c2af` 上的
+  RONDO slot 1 在约 975 秒后以 `AgentTimeoutError` / `infra_failed` 收敛；pair ledger 已
+  `failed/blocked`，零重试合同生效，Codex slot 2 与 M1 均未运行。
+- 该 run 启动了一个 main 请求，但没有收到上游响应或 usage；预算 ledger 保留 0.755400 USD reservation，
+  `charged_usd=null`、`spent_usd=0`。未查询账单，因此真实计费不作 0 USD 断言。
+- 直接原因是本计划原 canonical shell 清除了宿主 HTTP(S) proxy。无认证对照中，清除 proxy 后访问官方 endpoint
+  15.010 秒超时；保留宿主网络环境时 0.494 秒返回预期 401。未来 paid 命令必须保留宿主 proxy，只设置
+  loopback `NO_PROXY=127.0.0.1,localhost`。
+- watchdog 正常收尾，132 个 Docker samples 无 warning；运行后 Docker 为 0 容器、0 卷，image/build-cache
+  与运行前相同，项目盘仍有 846GB 可用空间。
 
 ### 当前工作
 
-- 无；等待用户对冻结 paid pair 的单独真实 API 批量授权。
+- 无；v6 首槽已失败并完成结果归档、费用保留和直接原因诊断。
 
 ### 后续计划
 
-1. 输出精确执行参数/命令并申请一次单独真实 API 批次授权。
-2. 授权后另建同 commit 的结果 worktree，保持 harness clean；严格 RONDO→Codex，任一失败停止，最后运行
-   既有 `assess_m1`。
+1. 不复用 v6，不运行 Codex；若继续 B3，须另行冻结新 pair，并再次取得明确真实 API 批量授权。
+2. 新 pair 的 canonical 命令保留宿主 HTTP(S) proxy，仅让 loopback 地址绕过 proxy；仍严格 RONDO→Codex、
+   零重试、首侧失败停止。
 
 ### 阻塞项
 
-- 真实 B3/M1 由用户单独 API 批量授权门阻断；受跟踪 pair 只表示参数冻结，不表示已获执行授权。
+- v6 已按授权执行一次并因首槽 infra failure 永久阻断；继续 B3/M1 需要新 pair 与新的单独 API 批量授权。
 
 ### 当前验收状态
 
 - Plan 009 B2：已通过并已合并推送。
 - Plan 010 paid readiness：代码、focused 门禁、文档与日志完成。
-- B3/M1：未运行；真实 API 请求 0，费用 0 USD。
+- B3/M1：RONDO slot 1 已尝试但未完成；Codex 与 M1 未运行。一个上游请求未返回，ledger 保留
+  0.755400 USD reservation，实际账单费用未知。
 
 ## 6. 关键决策记录
 
@@ -142,3 +153,4 @@
 | 005 | 本批只做 readiness 并提交 worktree，真实 API 必须下一次单独授权 | 用户明确要求先给参数/命令再停止 | 执行边界 | 已采纳 |
 | 006 | paid CLI 显式接收 detached measurement worktree，harness/watchdog 仍在当前 clean checkout | 当前 eval harness 与冻结 RONDO 产品提交不同，单一 cwd 无法同时证明两种身份 | CLI 启动命令 | 已采纳 |
 | 007 | 真实执行时使用同 readiness commit 的独立 results worktree | 首侧 append-only result 会弄脏 results checkout，不能同时弄脏第二槽所需的 clean harness | paid 执行拓扑 | 已采纳 |
+| 008 | paid host 进程保留宿主 HTTP(S) proxy，只对 loopback 设置 `NO_PROXY` | 当前机器直连官方 endpoint 超时，预算代理需要宿主网络路径；Harbor 子进程环境仍由 runner 最小化 | canonical shell | 已采纳 |
