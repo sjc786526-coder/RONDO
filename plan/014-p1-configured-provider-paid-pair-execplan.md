@@ -146,18 +146,26 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - pair sequence ledger schema v5 在 slot 1 claim 绑定 selected profile/endpoint SHA；正式入口在首次 claim、completed
   发布前、durable publication 收口及 slot 2 新进程 claim 时重投影本地 profile。public success/failure 直接使用 lock
   的同一 redacted profile，M1 对两侧 result、lock 与 ledger 做精确三方比较；focused tests 与完整 eval 325/325 通过。
+- canary 的总 logical-request 门禁已落地并提交为 `f7c21f8`：source-bound frozen Codex 只允许
+  `main` 与 `main → guardian → main`，分阶段硬 cap 为 1+3 USD，内部与外层 retry 均为 0；完整 eval
+  328/328 通过。fresh Sol/Sol canary 随后 4/4 请求均一次成功、usage valid，审批命令和终态精确闭环，
+  本地估算 `$0.225706`。
+- 唯一 v9 pair 已执行 RONDO slot 1 并收敛为 `infra_failed/blocked`：6 个 Sol/medium main 请求均一次成功、
+  usage valid，本地估算 `$0.161198`、无 reservation；自然 Guardian `E_final` 已生成且为 Sol/low、schema/source
+  正确，但 review session 在请求进入 budget proxy 前以 HTTP 429 `session_error` fail-closed。Codex slot 2 与 M1
+  按计划未运行，这份未绑定真实 Guardian usage 的 evidence 不算可用 S2。
 
 ### 当前工作
 
-- 离线身份、漂移和聚合门禁已完成，工作树在已审查提交 `5dd373d`。本轮先补 canary 的 4-request/4-USD
-  执行级硬门禁并形成干净提交，随后按 `fresh canary → 资源门禁 → RONDO → Codex → M1` 严格串行执行。
-- 本计划已获得一次性真实执行授权：canary 最多 4 USD，pair 每侧最多 5 USD、合计最多 10 USD；总上限
-  14 USD。项目剩余总预算不属于本阶段可消费额度。
+- 本次正式执行已按第一处失败停止。v9 identity/result/ledger 为唯一失败终态，不重跑、不改写，也不创建替代 pair。
+- 下一步只做新的离线根因修复计划：证明 RONDO Guardian 首请求进入 loopback proxy 并由同一 budget/role/profile
+  合同记录。修复后必须使用新的 identity 和单独估算/授权，不能继续消费本计划剩余名义额度。
 
 ### 阻塞项
 
-- active Sol/Sol profile 在正式 pair 前仍须通过本计划自己的 fresh exact-wire canary；任何 profile/model/catalog/
-  identity 漂移都必须暂停，不能修改或替换 v9 后继续消费。
+- RONDO 自然 Guardian 在 proxy 未记录请求的情况下快速得到 HTTP 429，`meta` 为
+  `failed_closed/session_error`。在离线复现并闭合 Guardian transport→proxy 绑定之前不得启动新 paid pair。
+- v9 已消费并 blocked；任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与授权门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 
 ## 6. 关键决策记录
@@ -178,3 +186,4 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 012 | CLI 诊断只接受未停止 ledger、单一最终消息、成对且先于消息的固定审批命令和成功 turn 终态 | 历史 `expected_command=false` 收据只能保留为稳定性事实，不能充当新门禁证据 | 已采纳 |
 | 013 | Plan 014 canary 使用 source-bound frozen Codex 且硬限制四个 logical request、零 retry、4 USD | 仅靠事后序列检查不能证明 14 USD 总预算不会先超限再失败 | 已采纳 |
 | 014 | v9 任一正式侧失败后保留唯一终态并停止，不创建替代 pair | 防止为追求绿结果连续消费预算或破坏 identity 一次性语义 | 已采纳 |
+| 015 | v9 RONDO Guardian 失败后不把已生成但未绑定 usage 的 `E_final` 计为 S2 | 请求未进入预算 metadata，不能证明审批模型真实完成 | 已采纳 |
