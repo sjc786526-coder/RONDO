@@ -242,3 +242,20 @@
 - 本阶段既有探针 `$7.570095` 加 v8 `$5.000000` 后，本地保守计价累计 `$12.570095`，全部 reservation 已
   收敛；中转站实际账单没有查询或猜测。剩余本地授权空间不足以覆盖另一个完整的 10 USD pair，且本次属于明确的
   Guardian 模型可用性边界，因此停止，不创建替代 pair。
+
+## 20. 失败角色计数与 Terra 小探针
+
+- v8 append-only 历史行保持不变。后续 exceptional publication 将“声明角色有效”与“全部 usage 有效”分开：
+  合法声明的请求仍逐项计入 `api_request_roles`，任一 usage invalid 时 `metadata_ready` 继续为 false。回归覆盖
+  5 个 main + 1 个 usage-invalid Guardian，期望计数 `main=5/guardian=1`。
+- provider probe 可从本地配置选择 Sol 或 Terra；paid pair 默认模型仍是冻结 Sol。Terra 按 2026-08-10 OpenAI
+  官方页面的 `$2/$0.20/$12` 每百万 input/cached/output token 计价，provider、base URL、credential loader、
+  role、timeout 与 redirect 边界均未改变。
+- 首次 `plan012-terra-availability-r1` 被开发沙箱在外网连接前中断，不作为供应商结果；其 `$0.25` reservation 已
+  按 interrupted-request 合同结算并停止。随后沙箱外的 `r2` 非流请求在约 6 秒内得到 HTTP 403、usage invalid，
+  同样结算 `$0.25` 并停止，因此未发送流式第二请求。不能由此声称 Terra 模型全局不可用，只能确认当前配置、
+  Codex User-Agent 和 credential 组合返回 403。
+- ignored `rondo.local.toml` 已恢复 `gpt-5.6-sol`；两个 Terra ledger 均无 active reservation，响应正文和 key
+  未保存或输出。本阶段本地保守累计由 `$12.570095` 增至 `$13.070095`，实际中转账单仍未知。
+- 聚焦 pure/fake/loopback 门禁 63/63 通过，`py_compile` 与 `git diff --check` 通过；未运行 Docker、Cargo 或
+  本地模型。

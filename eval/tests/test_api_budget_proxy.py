@@ -23,6 +23,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     MAX_REQUEST_RESERVATION_USD,
     PRICE_SNAPSHOT_DATE,
     PRICE_SOURCE_URL,
+    TERRA_PRICE_SOURCE_URL,
     UPSTREAM_TIMEOUT_SECONDS,
     ApiBudgetProxyError,
     BudgetStopped,
@@ -701,6 +702,14 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
         )
         self.assertEqual(price_usage(usage), Decimal("2.675000"))
+        self.assertEqual(
+            TERRA_PRICE_SOURCE_URL,
+            "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+        )
+        self.assertEqual(
+            price_usage(usage, model="gpt-5.6-terra"),
+            Decimal("1.070000"),
+        )
         self.assertEqual(
             price_usage(usage, model="gpt-5.6-luna"),
             Decimal("0.107000"),

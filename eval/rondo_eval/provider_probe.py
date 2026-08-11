@@ -14,6 +14,7 @@ from urllib.request import Request, build_opener, urlopen
 
 from .api_budget_proxy import (
     OFFICIAL_MODEL,
+    TERRA_MODEL,
     UPSTREAM_TIMEOUT_SECONDS,
     ApiBudgetProxyError,
     LoopbackResponsesProxy,
@@ -116,7 +117,7 @@ def run_provider_probes(
     provider = config.provider("openai")
     base_url = provider.get("base_url")
     model = provider.get("main_model")
-    if not isinstance(base_url, str) or model != OFFICIAL_MODEL:
+    if not isinstance(base_url, str) or model not in {OFFICIAL_MODEL, TERRA_MODEL}:
         raise ProviderProbeError("provider probe configuration differs from the frozen main model")
     output_root = Path(output_root)
     if output_root.exists() or output_root.is_symlink():
@@ -139,17 +140,23 @@ def run_provider_probes(
             ledger=ledger,
             run_id=PROBE_RUN_ID,
             metadata_path=metadata_path,
+            main_model=model,
             timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
             _transport=_transport,
         ) as proxy:
             for name, stream in (("nonstream", False), ("stream", True)):
-                probes.append(_run_responses_probe(proxy, ledger, name=name, stream=stream))
+                probes.append(
+                    _run_responses_probe(
+                        proxy, ledger, name=name, stream=stream, model=model
+                    )
+                )
         snapshot = ledger.snapshot()
     if snapshot["reserved_usd"] != "0.000000":
         raise ProviderProbeError("provider probe reservation did not settle")
     receipt: dict[str, object] = {
         "schema_version": 1,
         "batch_id": PROBE_BATCH_ID,
+        "model": model,
         "request_count": 2,
         "responses": [probe.__dict__ for probe in probes],
         "spent_usd": snapshot["spent_usd"],
@@ -166,10 +173,11 @@ def _run_responses_probe(
     *,
     name: str,
     stream: bool,
+    model: str = OFFICIAL_MODEL,
 ) -> ProviderResponseProbe:
     body = json.dumps(
         {
-            "model": OFFICIAL_MODEL,
+            "model": model,
             "input": "Reply only with OK.",
             "reasoning": {"effort": "low"},
             "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,

@@ -30,12 +30,17 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 OFFICIAL_MODEL = "gpt-5.6-sol"
+TERRA_MODEL = "gpt-5.6-terra"
 GUARDIAN_MODEL = "gpt-5.6-luna"
 PRICE_SNAPSHOT_DATE = "2026-08-10"
 PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+TERRA_PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
 INPUT_USD_PER_MILLION = Decimal("5.00")
 CACHED_INPUT_USD_PER_MILLION = Decimal("0.50")
 OUTPUT_USD_PER_MILLION = Decimal("30.00")
+TERRA_INPUT_USD_PER_MILLION = Decimal("2.00")
+TERRA_CACHED_INPUT_USD_PER_MILLION = Decimal("0.20")
+TERRA_OUTPUT_USD_PER_MILLION = Decimal("12.00")
 GUARDIAN_INPUT_USD_PER_MILLION = Decimal("0.20")
 GUARDIAN_CACHED_INPUT_USD_PER_MILLION = Decimal("0.02")
 GUARDIAN_OUTPUT_USD_PER_MILLION = Decimal("1.20")
@@ -140,6 +145,10 @@ def price_usage(usage: Usage, *, model: str = OFFICIAL_MODEL) -> Decimal:
         input_rate = INPUT_USD_PER_MILLION
         cached_input_rate = CACHED_INPUT_USD_PER_MILLION
         output_rate = OUTPUT_USD_PER_MILLION
+    elif model == TERRA_MODEL:
+        input_rate = TERRA_INPUT_USD_PER_MILLION
+        cached_input_rate = TERRA_CACHED_INPUT_USD_PER_MILLION
+        output_rate = TERRA_OUTPUT_USD_PER_MILLION
     elif model == GUARDIAN_MODEL:
         input_rate = GUARDIAN_INPUT_USD_PER_MILLION
         cached_input_rate = GUARDIAN_CACHED_INPUT_USD_PER_MILLION
@@ -588,6 +597,7 @@ class LoopbackResponsesProxy:
         ledger: PersistentBudgetLedger,
         run_id: str,
         metadata_path: Path,
+        main_model: str = OFFICIAL_MODEL,
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         _transport: _UrllibTransport | None = None,
     ):
@@ -601,11 +611,14 @@ class LoopbackResponsesProxy:
         ):
             raise ApiBudgetProxyError("proxy timeout must be within the 90 second limit")
         _require_safe_id(run_id, "run id")
+        if main_model not in {OFFICIAL_MODEL, TERRA_MODEL}:
+            raise ApiBudgetProxyError("proxy main model is unsupported")
         ledger.ensure_run(run_id)
         self._api_key = api_key
         self._downstream_api_key = "rondo-eval-" + secrets.token_urlsafe(32)
         self._ledger = ledger
         self._run_id = run_id
+        self._main_model = main_model
         self._metadata = RedactedMetadataStore(
             metadata_path,
             secrets_to_exclude=(api_key, self._downstream_api_key),
@@ -752,7 +765,9 @@ class LoopbackResponsesProxy:
         declared_role = role_header.strip().lower() if role_header is not None else None
         try:
             _require_safe_id(request_id, "request id")
-            request_metadata = _inspect_request(body, declared_role)
+            request_metadata = _inspect_request(
+                body, declared_role, main_model=self._main_model
+            )
             if declared_role is None:
                 declared_role = request_metadata["role"]
                 request_metadata["role_provenance"] = "declared"
@@ -992,7 +1007,9 @@ def _validated_originator(headers: Any) -> str | None:
     return value
 
 
-def _inspect_request(body: bytes, declared_role: str | None) -> dict[str, Any]:
+def _inspect_request(
+    body: bytes, declared_role: str | None, *, main_model: str = OFFICIAL_MODEL
+) -> dict[str, Any]:
     try:
         value = json.loads(body)
     except (UnicodeError, json.JSONDecodeError) as exc:
@@ -1033,7 +1050,7 @@ def _inspect_request(body: bytes, declared_role: str | None) -> dict[str, Any]:
         role_provenance = "inferred"
     else:
         raise ApiBudgetProxyError("declared request role is invalid")
-    expected_model = OFFICIAL_MODEL if role == "main" else GUARDIAN_MODEL
+    expected_model = main_model if role == "main" else GUARDIAN_MODEL
     contract_match = model == expected_model and (role == "main" or effort == "low")
     if not contract_match:
         raise ApiBudgetProxyError("request model or Guardian effort differs from the frozen pair")

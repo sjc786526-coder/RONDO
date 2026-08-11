@@ -161,11 +161,42 @@ class ProviderProbeTests(unittest.TestCase):
             self.assertEqual(item["user_agent"], PROBE_USER_AGENT)
             self.assertEqual(item["originator"], "codex_cli_rs")
             body = item["body"]
+            self.assertEqual(body["model"], "gpt-5.6-sol")
             self.assertEqual(body["max_output_tokens"], 64)
             self.assertEqual(body["reasoning"], {"effort": "low"})
         for path in (self.root / "probe").iterdir():
             if path.is_file():
                 self.assertNotIn(self.provider.secret.encode(), path.read_bytes())
+
+    def test_terra_uses_the_same_configured_provider_path(self) -> None:
+        paths = RepoPaths(self.root, self.root)
+        config = RuntimeConfig(paths, {
+            "providers": {
+                "openai": {
+                    "api": "responses",
+                    "base_url": "https://provider.example/v1",
+                    "api_key_env": "OPENAI_API_KEY",
+                    "main_model": "gpt-5.6-terra",
+                    "guardian_model": "gpt-5.6-luna",
+                    "guardian_reasoning_effort": "low",
+                }
+            }
+        }, "b" * 64)
+
+        receipt = run_provider_probes(
+            config,
+            self.provider.secret,
+            output_root=self.root / "terra-probe",
+            _transport=_UrllibTransport(
+                endpoint_override=self.provider.base + "/responses"
+            ),
+        )
+
+        self.assertEqual(receipt["model"], "gpt-5.6-terra")
+        self.assertEqual(
+            [item["body"]["model"] for item in self.provider.requests],
+            ["gpt-5.6-terra", "gpt-5.6-terra"],
+        )
 
     def test_models_status_probe_uses_codex_user_agent_and_discards_body(self) -> None:
         status = probe_models_status(
