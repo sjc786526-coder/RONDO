@@ -119,26 +119,29 @@
 
 ### 当前工作
 
-- frozen Codex v0.147 的 Sol 真实 wire 已通过配置所指 provider，得到 terminal response、合法 usage 和 settled
-  ledger；正在从 clean readiness commit 执行唯一 v8 paid pair。
+- v8 已从 clean readiness commit 执行 RONDO slot 1，并在自然触发 Guardian 后按零重试合同停止；Codex slot 2
+  与 M1 均未运行。当前只保留终态、结果和执行日志，不创建替代 pair。
 
 ### 后续计划
 
-1. 保留全部 stopped probe ledger、去敏 metadata、oracle Docker evidence 与 watchdog summary，不复用或改写。
-2. v8 固定主 Agent `gpt-5.6-sol`；冻结 Codex API-key Guardian 的有效默认仍是 `gpt-5.6-luna`，RONDO 同样显式
-   固定 Luna/low，保证两侧 Guardian 公平。若 Luna Guardian 自然触发后失败，如实停止，不改写为 Sol。
-3. v8 严格 RONDO→Codex、每侧一次、零重试；只有双侧 completed 后才运行 M1。
+1. 保留全部 stopped probe/v8 ledger、去敏 metadata、Docker evidence、watchdog summary 与 append-only result，
+   不复用或改写。
+2. 冻结 Codex API-key Guardian 的有效默认仍是 `gpt-5.6-luna`；v8 已证明 Sol 主 Agent 可完成真实请求，但
+   Luna Guardian 返回 HTTP 503。不得把 Guardian 改写为 Sol 后冒充同一公平 pair。
+3. B3/M1 保持未通过；后续若改变 Guardian/provider 合同或供应商模型能力，作为新的独立计划与授权处理。
 
 ### 阻塞项
 
-- Luna 主请求不可用，但 Sol 的 frozen-Codex wire 已成功。直接连接在 authenticated 长响应上仍无终态；保留宿主
-  网络代理后，Sol 在 14.3 秒内完成，usage 合法且本地按官方费率结算 `$0.016095`。容器只接触 loopback proxy，
-  不接收宿主代理变量或真实 key。
+- Sol 主链路可用，但 frozen Codex v0.147 的公平 Guardian 合同仍要求 Luna。v8 的 5 个 Sol main 请求均为
+  HTTP 200 且 usage 合法；唯一 Guardian Luna 请求为 HTTP 503/usage invalid，因而不能完成 RONDO slot 1。
+  容器只接触 loopback proxy，不接收宿主代理变量或真实 key。
 
 ### 当前验收状态
 
 - provider/verifier 的 pure/fake/loopback 门禁已通过；真实 oracle/verifier `reward=1`，Sol frozen-Codex wire
-  terminal/usage/settlement 通过。v8 已冻结但尚未执行；本阶段本地保守 API 计价累计 `$7.570095`，实际账单未知。
+  terminal/usage/settlement 通过。v8 RONDO 运行的本地预算已完整结算为 `$5.000000`、reservation 为 0；连同
+  既有探针，本阶段本地保守计价累计 `$12.570095`，`actual_usd` 保持未知。Codex/M1 未运行，也没有可归档的
+  `E_final`。
 
 ## 6. 关键决策记录
 

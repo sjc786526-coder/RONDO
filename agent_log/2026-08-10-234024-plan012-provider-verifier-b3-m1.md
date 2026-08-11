@@ -217,3 +217,28 @@
 - 聚焦轻量门禁：proxy/provider 29/29，config/contracts/Terminal-Bench 85/85，`uv lock --check --offline`
   85 packages；最终 `just eval-test` 273/273、`just eval-lock` 85 packages、`git diff --check` 通过。尚未执行
   v8 Docker 或 M1。
+
+## 19. v8 RONDO 真实执行与硬停止
+
+- 从 clean readiness commit `0f88d7245cc63e33814e0d2539a68fe611b91bbf` 执行
+  `20260811-090000000-tb-rondo-r1`；pair/batch 分别为 `p1-fix-git-pair-v8` 与
+  `p1-fix-git-b3-m1-v3`。配置 SHA 与 pair lock SHA 均在启动前复核，无漂移。
+- 主 Agent 共发出 5 个声明且推断角色均为 `main` 的 Sol 请求，全部得到 HTTP 200、合法 terminal usage 并
+  settlement；对应本地计算费用依次为 `$0.074875`、`$0.027754`、`$0.022861`、`$0.016773`、
+  `$0.021193`。
+- RONDO 随后自然触发 Guardian。该请求声明/推断角色均为 `guardian`，模型为冻结公平合同要求的
+  `gpt-5.6-luna`、effort low；上游返回 HTTP 503 且无合法 usage。预算代理按 fail-closed 合同结算当时剩余的
+  `$4.836544` reservation，run 最终 `spent_usd=5.000000`、`reserved_usd=0`、
+  `stop_reason=missing_or_invalid_usage`。
+- run 以 exit 65 归档为 `infra_failed`，`actual_usd=null`、`estimated_usd=5.0`。v8 pair 已
+  `failed/blocked`、`next_slot=1`，只有 RONDO slot 1；零重试合同阻止 Codex slot 2，因此 M1 未运行。
+- Guardian 没有完成，故不存在可保存的 `E_final/meta`；没有伪造 E_final，也没有把 S2 写成已验收。失败直接说明
+  当前公平组合的主 Sol 可用而 Guardian Luna 不可用；把 RONDO Guardian 单独改成 Sol 会破坏与冻结 Codex 的公平性，
+  不作为本 pair 的修复或重跑理由。
+- watchdog `rondo-build-1000-20260811085847-50122.scope` 完成，`stop_reason=none`、
+  `cleanup_reason=none`；运行前后 Windows C: 可用字节为 `195236925440` / `195236298752`，memory peak
+  `1997164544` bytes，swap peak 0。最终 scope 为 inactive，精确 task label 下容器/网络/卷均为空；全局
+  `docker system df` 为 0 containers、0 local volumes，未清理任何既有 image/build cache。
+- 本阶段既有探针 `$7.570095` 加 v8 `$5.000000` 后，本地保守计价累计 `$12.570095`，全部 reservation 已
+  收敛；中转站实际账单没有查询或猜测。剩余本地授权空间不足以覆盖另一个完整的 10 USD pair，且本次属于明确的
+  Guardian 模型可用性边界，因此停止，不创建替代 pair。
