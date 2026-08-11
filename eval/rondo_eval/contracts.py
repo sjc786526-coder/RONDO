@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from dataclasses import asdict, dataclass
@@ -343,6 +344,29 @@ class ProviderProjection:
             "profile_sha256": self.profile_sha256,
             "config_sha256": self.config_sha256,
             "config_source": self.config_source,
+        }
+
+    def to_public_dict(self) -> dict[str, Any]:
+        """Return the tracked-result projection without local provider identity."""
+
+        self.validate()
+        return {
+            "provider": self.provider_id,
+            "provider_api": self.api,
+            "provider_profile_sha256": self.profile_sha256,
+            "provider_endpoint_sha256": hashlib.sha256(
+                self.base_url.encode("utf-8")
+            ).hexdigest(),
+            "main_model": self.main_model,
+            "guardian_model": self.guardian_model,
+            "guardian_effort": self.guardian_effort,
+            "main_pricing": self.main_pricing.to_dict(),
+            "guardian_pricing": self.guardian_pricing.to_dict(),
+            "provider_max_attempts": self.max_attempts,
+            "provider_retry_backoff_seconds": self.retry_backoff_seconds,
+            "provider_unbilled_retry_statuses": list(
+                self.unbilled_retry_statuses
+            ),
         }
 
 

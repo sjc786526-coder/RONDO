@@ -652,6 +652,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             git_commit="e" * 40,
             eval_harness_commit="f" * 40,
             manifest=live_result.prepared.spec.binary,
+            provider=live_result.prepared.spec.provider,
             budget_snapshot=budget_snapshot,
             metadata_path=self.root / "missing-api-metadata.json",
             outcome=RunOutcome.INFRA_FAILED,
@@ -664,6 +665,18 @@ class TerminalBenchResultTests(unittest.TestCase):
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "docker")
+        self.assertEqual(
+            record["config"]["provider_profile_sha256"],
+            live_result.prepared.spec.provider.profile_sha256,
+        )
+        self.assertEqual(
+            len(record["config"]["provider_endpoint_sha256"]),
+            64,
+        )
+        serialized = json.dumps(record, sort_keys=True)
+        self.assertNotIn(live_result.prepared.spec.provider.base_url, serialized)
+        self.assertNotIn(live_result.prepared.spec.provider.display_name, serialized)
+        self.assertNotIn(live_result.prepared.spec.provider.api_key_env, serialized)
         self.assertEqual(
             record["cost"], {"estimated_usd": 0.0, "actual_usd": None}
         )
@@ -684,6 +697,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             git_commit="e" * 40,
             eval_harness_commit="f" * 40,
             manifest=live_result.prepared.spec.binary,
+            provider=live_result.prepared.spec.provider,
             budget_snapshot=live_result.budget_snapshot,
             metadata_path=metadata,
             outcome=RunOutcome.INFRA_FAILED,
@@ -718,6 +732,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             git_commit="e" * 40,
             eval_harness_commit="f" * 40,
             manifest=live_result.prepared.spec.binary,
+            provider=live_result.prepared.spec.provider,
             budget_snapshot=live_result.budget_snapshot,
             metadata_path=metadata,
             outcome=RunOutcome.INFRA_FAILED,
@@ -748,6 +763,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             git_commit="e" * 40,
             eval_harness_commit="f" * 40,
             manifest=live_result.prepared.spec.binary,
+            provider=live_result.prepared.spec.provider,
             budget_snapshot=live_result.budget_snapshot,
             metadata_path=metadata,
             outcome=RunOutcome.INFRA_FAILED,
@@ -1263,7 +1279,11 @@ class TerminalBenchResultTests(unittest.TestCase):
         ), patch.object(
             terminal_bench_main, "validate_harbor_installation"
         ), patch.object(
-            terminal_bench_main, "load_runtime_config", return_value=object()
+            terminal_bench_main,
+            "load_runtime_config",
+            return_value=SimpleNamespace(
+                paid_provider_projection=lambda: live.prepared.spec.provider
+            ),
         ), patch.object(
             terminal_bench_main, "validate_eval_harness_checkout", return_value="f" * 40
         ), patch.object(
@@ -1353,7 +1373,11 @@ class TerminalBenchResultTests(unittest.TestCase):
         ), patch.object(
             terminal_bench_main, "validate_harbor_installation"
         ), patch.object(
-            terminal_bench_main, "load_runtime_config", return_value=object()
+            terminal_bench_main,
+            "load_runtime_config",
+            return_value=SimpleNamespace(
+                paid_provider_projection=lambda: live.prepared.spec.provider
+            ),
         ), patch.object(
             terminal_bench_main,
             "validate_eval_harness_checkout",

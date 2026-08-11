@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -16,7 +15,7 @@ from typing import Any, Mapping
 
 from ..artifacts import ArtifactWriter
 from ..config import RepoPaths
-from ..contracts import BinaryManifest, RunOutcome, Side
+from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
     FIX_GIT_TASK_ID,
@@ -332,6 +331,7 @@ def publish_terminal_bench_failure(
     git_commit: str,
     eval_harness_commit: str,
     manifest: BinaryManifest,
+    provider: ProviderProjection,
     budget_snapshot: Mapping[str, object],
     metadata_path: Path,
     outcome: RunOutcome,
@@ -360,12 +360,17 @@ def publish_terminal_bench_failure(
         raise HarborResultError("exceptional publication commit is invalid")
     if writer.run_id != run_id or writer.paths.common_root != paths.common_root:
         raise HarborResultError("artifact writer claim differs from the failed run")
+    try:
+        provider_public = provider.to_public_dict()
+    except ValueError as exc:
+        raise HarborResultError("exceptional publication provider is invalid") from exc
     _validate_publication_context(publication, side=side)
     spent = _run_spend(budget_snapshot, run_id)
     has_unsettled_reservation = _run_has_unsettled_reservation(
         budget_snapshot, run_id
     )
     config = {
+        **provider_public,
         "batch_id": budget_snapshot.get("batch_id"),
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
         "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
@@ -514,22 +519,7 @@ def _safe_summary(
         "git_commit": git_commit,
         "outcome": parsed.outcome.value,
         "config": {
-            "main_model": spec.provider.main_model,
-            "guardian_model": spec.provider.guardian_model,
-            "guardian_effort": spec.provider.guardian_effort,
-            "provider": spec.provider.provider_id,
-            "provider_api": spec.provider.api,
-            "provider_profile_sha256": spec.provider.profile_sha256,
-            "provider_endpoint_sha256": hashlib.sha256(
-                spec.provider.base_url.encode("utf-8")
-            ).hexdigest(),
-            "main_pricing": spec.provider.main_pricing.to_dict(),
-            "guardian_pricing": spec.provider.guardian_pricing.to_dict(),
-            "provider_max_attempts": spec.provider.max_attempts,
-            "provider_retry_backoff_seconds": spec.provider.retry_backoff_seconds,
-            "provider_unbilled_retry_statuses": list(
-                spec.provider.unbilled_retry_statuses
-            ),
+            **spec.provider.to_public_dict(),
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,

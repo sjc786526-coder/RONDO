@@ -124,16 +124,18 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   `models.json`，输出最小 `0400` catalog，并由 runner/adapter 绑定 source commit、SHA256、owner、只读性和
   `model_catalog_json` 启动参数。实际 active Sol/Sol profile 投影只含 Sol 且 override 为 Sol；相关 focused
   tests 25/25 通过。
+- provider 已有专门的 public result 投影；success 与 claimed failure 统一保存 profile/endpoint hash、模型、
+  价卡和 retry 合同，且回归证明不会持久化 raw endpoint、display name、key env 或整份 local config SHA。
 
 ### 当前工作
 
-- 正在离线实现新 pair identity、profile drift 与 public/redacted result 门禁。正式 exact-wire canary、
+- 正在离线实现新 pair identity 与 profile drift 门禁。正式 exact-wire canary、
   Docker 和 paid pair 尚未获得本计划自己的范围授权，也未运行；
   既有 3 轮稳定性诊断只用于选定 Sol/Sol 候选，不能回填为 pair 结果。
 
 ### 阻塞项
 
-- paid 前必须完成新 pair/profile drift 与 public/redacted result 的剩余 focused 门禁。
+- paid 前必须完成新 pair/profile drift 的剩余 focused 门禁。
 - active Sol/Sol profile 在正式 pair 前仍须通过本计划自己的 fresh exact-wire canary；Terra 的持续 403 需供应商侧
   访问能力变化后再考虑。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。

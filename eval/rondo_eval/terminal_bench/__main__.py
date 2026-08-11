@@ -107,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         config = load_runtime_config(paths)
+        provider = config.paid_provider_projection()
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
         seccomp_profile = pair_identity.validate_runtime_seccomp(
@@ -265,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
                             git_commit=git_commit,
                             eval_harness_commit=eval_harness_commit,
                             manifest=manifest,
+                            provider=provider,
                             budget_snapshot=snapshot,
                             metadata_path=metadata_path,
                             outcome=outcome,

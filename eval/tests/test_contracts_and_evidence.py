@@ -325,6 +325,20 @@ class ContractTests(unittest.TestCase):
     def test_fair_pair_accepts_only_side_difference(self) -> None:
         assert_fair_pair(self._spec(Side.CODEX), self._spec(Side.RONDO))
 
+    def test_public_provider_projection_is_complete_and_redacted(self) -> None:
+        provider = self._spec(Side.CODEX).provider
+        projected = provider.to_public_dict()
+        serialized = json.dumps(projected, sort_keys=True)
+
+        self.assertEqual(projected["provider_profile_sha256"], "3" * 64)
+        self.assertEqual(len(projected["provider_endpoint_sha256"]), 64)
+        self.assertEqual(projected["main_model"], "test-main-model")
+        self.assertEqual(projected["guardian_model"], "test-guardian-model")
+        self.assertNotIn(provider.base_url, serialized)
+        self.assertNotIn(provider.display_name, serialized)
+        self.assertNotIn(provider.api_key_env, serialized)
+        self.assertNotIn(provider.config_sha256, serialized)
+
     def test_fair_pair_rejects_configuration_drift(self) -> None:
         drifted = self._spec(Side.RONDO)
         object.__setattr__(drifted, "timeout_seconds", 99)

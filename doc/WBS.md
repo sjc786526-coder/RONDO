@@ -170,8 +170,8 @@ Plan 012 已验证 oracle/root verifier 的真实评分链为 `reward=1`，并�
 Sol 429、Luna 503 仍作为波动边界保留，不能再笼统归因于本地网络。
 这些诊断不是 paid pair，也没有运行 Docker/M1；供应商实际账单仍未知。Plan 014 已完成固定单审批 task 的
 charged parse replay 上游阻断，并将 frozen Codex catalog override 接入 source-bound 正式投影；正离线闭合
-新 pair identity、profile drift 与 public/redacted result。正式 canary/pair/Docker 仍须在离线门禁完成后按该计划
-范围单独授权。
+新 pair identity 与 profile drift；success/claimed failure 已共用不含本机 provider 字段的 public result 投影。
+正式 canary/pair/Docker 仍须在离线门禁完成后按该计划范围单独授权。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
 
