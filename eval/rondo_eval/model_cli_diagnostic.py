@@ -11,6 +11,7 @@ continues to come exclusively from ``rondo.local.toml``.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import shutil
@@ -168,7 +169,18 @@ def _remove_generated_plugin_cache(codex_home: Path) -> None:
         if cache.is_symlink():
             cache.unlink()
         elif cache.is_dir():
-            shutil.rmtree(cache)
+            for attempt in range(5):
+                try:
+                    shutil.rmtree(cache)
+                    break
+                except FileNotFoundError:
+                    break
+                except OSError as exc:
+                    if exc.errno not in {errno.EEXIST, errno.ENOTEMPTY}:
+                        raise
+                    if attempt == 4:
+                        break
+                    time.sleep(0.05)
 
 
 def _prompt(kind: str) -> str:
@@ -1128,7 +1140,7 @@ def main() -> int:
     parser.add_argument(
         "--plan014-canary",
         action="store_true",
-        help="run the fresh frozen-Codex four-request canary under the v9 pair lock",
+        help="run the fresh frozen-Codex four-request canary under the active pair lock",
     )
     args = parser.parse_args()
     try:

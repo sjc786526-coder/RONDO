@@ -31,30 +31,15 @@
   Plan 009 在 commit `b47a7b4` 上以已存在的 pinned image 严格串行运行 RONDO→Codex：两侧均
   completed，各 2 次 fake 请求、tool round-trip 成功、cleanup verified empty；官方 API 0 次、
   费用 0 USD。`reward=0` 是 no-API marker 诊断不解真实 task 的预期结果，不冒充 B3 成绩。
-- **B3/M1 未通过**：三条旧 Codex 诊断均在首个官方 API 请求前 fail-closed，现已一次性迁移为
-  `infra_failed` 永久结果并保留不可重用预算槽。实际 API 调用 0 次、费用 0 USD；旧付费批次不能形成
-  公平 pair。Plan 010 的 `p1-fix-git-pair-v6` / `p1-fix-git-b3-m1-v1` 已按授权启动：同一 `fix-git`，
-  RONDO、Codex 各一轮，零重试，每 run 5 USD、批次硬上限 20 USD。RONDO 首槽因当时本地配置、pair lock 和
-  budget proxy 都把 provider 错误固定为官方 OpenAI endpoint，在等待错误上游时出现 `AgentTimeoutError`；一个 main 请求无响应/usage，预算 ledger 保留
-  0.755400 USD reservation，实际账单未知。pair 已 `failed/blocked`，所以 Codex 与 M1 未运行。本地预算代理按严格请求
-  形状投影并验证 main/guardian declared role，journal 创建前的确定性 publication 校验失败会收敛为既有
-  失败终态；本次 watchdog/Docker cleanup 正常且运行后无容器/卷残留。Plan 011 将 proxy 改为从 ignored
-  `rondo.local.toml` 接受通用 credential-free HTTPS base URL 并拼接 `/responses`；tracked v7 不冻结供应商域名，
-  两侧 base URL 与 config SHA 由 M1 比较。canonical shell 继续清除 ambient proxy，只设置 loopback `NO_PROXY`。
-  paid publication 先将 ledger 置为
-  `publishing`，持久结果后回读 record digest 再收敛为 `completed`；M1 必须同时核对两条
-  record 与 durable paid pair ledger、harness commit、publication digest、declared request role 和容器
-  metrics。任一不一致都不能通过 M1。
-  Plan 012 进一步把上游 transport timeout 限为 90 秒、以合法 `response.completed + usage` 收束 SSE，并在真实
-  Docker 中让 frozen solution/root verifier 得到 `reward=1`。frozen Codex v0.147 的 Sol real-wire 在保留宿主
-  网络代理时于 14.3 秒内完成，usage 合法且 ledger settled。v8 固定主 Sol、两侧 Guardian Luna/low；RONDO
-  slot 1 的 5 个 Sol main 请求均 HTTP 200/usage valid，但自然触发的 Guardian Luna 请求返回 HTTP 503，故 pair
-  `failed/blocked`，Codex slot 2 与 M1 未运行。B3/M1 状态不变，也没有伪造 `E_final` 或 S2。
-  Plan 014 随后冻结 v9 Sol/Sol identity/profile，并以 4-request/4-USD 硬门禁通过 fresh frozen-Codex canary：
-  4/4 请求一次成功、usage valid，本地估算 `$0.225706`。v9 RONDO slot 1 的 6 个 Sol/medium main 请求同样
-  一次成功并结算 `$0.161198`，但自然 Guardian review 在 budget proxy 没有记录到 Guardian 请求时快速得到
-  HTTP 429，`E_final/meta` 为 Sol/low、`failed_closed/session_error`。pair 已 `failed/blocked`，Codex/M1 未运行；
-  该 evidence 未绑定真实 Guardian usage，不计为 S2。下一步必须先离线闭合 Guardian transport→proxy 绑定。
+- **B3/M1 完成**：Plan 014 v19 冻结唯一 pair/batch/run IDs、Sol/medium main、Sol/low Guardian、source-bound
+  frozen Codex catalog、价卡/retry、profile/endpoint SHA 与 20 USD pair cap。fresh exact-wire canary 4/4 请求
+  attempt 1、usage valid 后，正式运行严格按 RONDO→frozen Codex 串行完成同一 `fix-git` task：RONDO 17/17、
+  Codex 18/18 upstream request 均 attempt 1、usage-priced，双侧 `completed`/reward 1、reservation 0。
+  RONDO 两份自然 Guardian `E_final/meta` 均 Sol/low、approved，S2 request/evidence 集合绑定 verified。
+  durable public result、pair lock、sequence ledger、profile/endpoint 和 container metrics 经既有 `assess_m1`
+  得到 `m1=passed`、`reasons=[]`、`s2=verified`。v19 正式费用 `$0.870787`；Plan 014 含历史 canary/失败终态
+  的累计本地估算 `$6.988825 < $280`，全部 reservation settled，`actual_usd=null`。旧失败 pair 均保持不可复用，
+  详见 Plan 014 与执行日志。
 
 ## E-B 真实 Terminal-Bench 2.1 测评
 
@@ -78,8 +63,8 @@
   - `approvals_reviewer = "auto_review"`
   - `approval_policy = "on-request"`
   - `sandbox_mode = "workspace-write"`（三项合起来才等价于 0.147 的 `--approve-for-me`）
-  - Guardian 覆盖为 `gpt-5.6-luna` + `low`（依赖 S1）
-  - 相同主模型 GPT-5.6-luna、相同超时与重试策略
+  - Guardian model/effort 由本地 paid profile 选择并由每批 pair lock 冻结（依赖 S1）
+  - 相同主模型、reasoning effort、provider profile、价卡与重试策略
 - `v0.147.0` 的 Guardian 默认模型会随 provider/auth 改变，所以测评配置和结果元数据必须记录
   **显式** model/effort，不得以当前 API-key 路径恰好默认 Luna 为由省略配置。
 - 验收：同一任务两侧各跑一次，运行条件在结果元数据里可核对。
@@ -88,6 +73,8 @@
 
 - 1~2 个任务的端到端，结果落盘归档。
 - 同步开启 S2，确认真实审批过程能产出 `E_final`。
+- **已完成**：v19 在 `terminal-bench/fix-git` 上完成双侧真实运行，M1 passed、S2 verified；后续运行不复用该
+  identity，B7 仍需按 B6 单独预算和授权。
 
 ### B4 任务分层与冻结清单（规模 S）
 

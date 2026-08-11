@@ -41,12 +41,63 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v2.json"
+PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v12.json"
+PREVIOUS_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v11.json"
+)
+CONSUMED_V17_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v10.json"
+)
+CONSUMED_V16_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v9.json"
+)
+CONSUMED_V15_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v8.json"
+)
+CONSUMED_V14_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v7.json"
+)
+CONSUMED_V13_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v6.json"
+)
+CONSUMED_V12_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v5.json"
+)
+CONSUMED_V11_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v4.json"
+)
+CONSUMED_V10_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v3.json"
+)
+CONSUMED_V9_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v2.json"
+)
 LEGACY_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
 )
-P1_PAIR_ID = "p1-fix-git-pair-v9"
+P1_PAIR_ID = "p1-fix-git-pair-v19"
+PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v18"
+CONSUMED_V17_P1_PAIR_ID = "p1-fix-git-pair-v17"
+CONSUMED_V16_P1_PAIR_ID = "p1-fix-git-pair-v16"
+CONSUMED_V15_P1_PAIR_ID = "p1-fix-git-pair-v15"
+CONSUMED_V14_P1_PAIR_ID = "p1-fix-git-pair-v14"
+CONSUMED_V13_P1_PAIR_ID = "p1-fix-git-pair-v13"
+CONSUMED_V12_P1_PAIR_ID = "p1-fix-git-pair-v12"
+CONSUMED_V11_P1_PAIR_ID = "p1-fix-git-pair-v11"
+CONSUMED_V10_P1_PAIR_ID = "p1-fix-git-pair-v10"
+CONSUMED_V9_P1_PAIR_ID = "p1-fix-git-pair-v9"
 LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
+_TEN_USD_PAIR_IDS = {
+    P1_PAIR_ID,
+    PREVIOUS_P1_PAIR_ID,
+    CONSUMED_V17_P1_PAIR_ID,
+    CONSUMED_V16_P1_PAIR_ID,
+    CONSUMED_V15_P1_PAIR_ID,
+    CONSUMED_V14_P1_PAIR_ID,
+    CONSUMED_V13_P1_PAIR_ID,
+    CONSUMED_V12_P1_PAIR_ID,
+    CONSUMED_V11_P1_PAIR_ID,
+}
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_V1_KEYS = {
     "schema_version",
@@ -179,8 +230,10 @@ class PairSequenceLedger:
         self._state: dict[str, Any] | None = None
         self._persist_hook = persist_hook or (lambda _point: None)
         self._read_only = read_only
-        if identity.schema_version != 2 and not read_only:
-            raise PairIdentityError("legacy pair identity is read-only")
+        if (
+            identity.schema_version != 2 or identity.pair_id != P1_PAIR_ID
+        ) and not read_only:
+            raise PairIdentityError("historical pair identity is read-only")
 
     def __enter__(self) -> PairSequenceLedger:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -817,6 +870,84 @@ def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentit
     return _load_pair_identity(path, schema_version=1, pair_id=LEGACY_P1_PAIR_ID)
 
 
+def load_previous_pair_identity(path: Path = PREVIOUS_PAIR_LOCK_PATH) -> PairIdentity:
+    """Load the Codex-install-failed v18 identity for read-only assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=PREVIOUS_P1_PAIR_ID)
+
+
+def load_consumed_v17_pair_identity(
+    path: Path = CONSUMED_V17_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the Docker-failed v17 identity for read-only assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V17_P1_PAIR_ID)
+
+
+def load_consumed_v16_pair_identity(
+    path: Path = CONSUMED_V16_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the publication-failed v16 identity for read-only assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V16_P1_PAIR_ID)
+
+
+def load_consumed_v15_pair_identity(
+    path: Path = CONSUMED_V15_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the third-approval-failed v15 identity for read-only assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V15_P1_PAIR_ID)
+
+
+def load_consumed_v14_pair_identity(
+    path: Path = CONSUMED_V14_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the second-approval-failed v14 identity for read-only assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V14_P1_PAIR_ID)
+
+
+def load_consumed_v13_pair_identity(
+    path: Path = CONSUMED_V13_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the Guardian-failed v13 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V13_P1_PAIR_ID)
+
+
+def load_consumed_v12_pair_identity(
+    path: Path = CONSUMED_V12_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the canary-failed v12 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V12_P1_PAIR_ID)
+
+
+def load_consumed_v11_pair_identity(
+    path: Path = CONSUMED_V11_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the preflight-failed v11 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V11_P1_PAIR_ID)
+
+
+def load_consumed_v10_pair_identity(
+    path: Path = CONSUMED_V10_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the consumed v10 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V10_P1_PAIR_ID)
+
+
+def load_consumed_v9_pair_identity(
+    path: Path = CONSUMED_V9_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the consumed v9 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V9_P1_PAIR_ID)
+
+
 def _load_pair_identity(
     path: Path,
     *,
@@ -839,7 +970,11 @@ def _load_pair_identity(
         raise PairIdentityError("pair lock identity differs from P1")
     modes = _parse_modes(value["modes"])
     topology = _parse_topology(value["topology"], modes=modes)
-    fairness = _parse_fairness(value["fairness"], schema_version=schema_version)
+    fairness = _parse_fairness(
+        value["fairness"],
+        schema_version=schema_version,
+        pair_id=pair_id,
+    )
     harbor = _parse_harbor(value["harbor"])
     no_api_seccomp = _parse_no_api_seccomp(value["no_api_seccomp"])
     runtime_requirements = _parse_runtime_requirements(value["runtime_requirements"])
@@ -850,7 +985,7 @@ def _load_pair_identity(
         else None
     )
     paid_budget = (
-        _parse_paid_budget(value["paid_budget"])
+        _parse_paid_budget(value["paid_budget"], pair_id=pair_id)
         if schema_version == 2
         else None
     )
@@ -1038,8 +1173,23 @@ def assess_m1(
         if (
             not isinstance(summary, dict)
             or summary.get("metadata_ready") is not True
-            or roles != {"main": 2, "guardian": 1}
-            or sequence != ["main", "guardian", "main"]
+            or not isinstance(roles, dict)
+            or set(roles) != {"main", "guardian"}
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+                for value in roles.values()
+            )
+            or roles.get("main") != (
+                sequence.count("main") if isinstance(sequence, list) else -1
+            )
+            or roles.get("guardian") != (
+                sequence.count("guardian") if isinstance(sequence, list) else -1
+            )
+            or not has_complete_guardian_approval_sequence(sequence)
+            or roles.get("guardian", 0)
+            > identity.require_selected_profile().max_guardian_logical_requests
         ):
             reasons.append(f"{slot.side.value}_guardian_approval_incomplete")
         ledger_run = ledger_runs.get(slot.slot)
@@ -1077,6 +1227,24 @@ def assess_m1(
     result["reasons"] = sorted(set(reasons))
     result["m1"] = "passed" if not reasons else "failed"
     return result
+
+
+def has_complete_guardian_approval_sequence(sequence: object) -> bool:
+    """Accept bounded approvals separated and bracketed by ordinary model turns."""
+
+    if not isinstance(sequence, (list, tuple)) or len(sequence) < 3:
+        return False
+    if any(role not in {"main", "guardian"} for role in sequence):
+        return False
+    guardian_count = sequence.count("guardian")
+    if not 1 <= guardian_count <= 3:
+        return False
+    if sequence[0] == "guardian" or sequence[-1] == "guardian":
+        return False
+    return all(
+        current != "guardian" or previous == "main"
+        for previous, current in zip(sequence, sequence[1:], strict=False)
+    )
 
 
 def terminal_record_sha256(record: Mapping[str, Any]) -> str:
@@ -1292,7 +1460,13 @@ def _parse_topology(value: object, *, modes: Mapping[str, PairMode]) -> tuple[Pa
     return tuple(sorted(slots, key=lambda slot: slot.slot))
 
 
-def _parse_fairness(value: object, *, schema_version: int) -> dict[str, object]:
+def _parse_fairness(
+    value: object,
+    *,
+    schema_version: int,
+    pair_id: str,
+) -> dict[str, object]:
+    budget_usd = 10.0 if pair_id in _TEN_USD_PAIR_IDS else 5.0
     expected = {
         "task_id": FIX_GIT_TASK_ID,
         "task_image_digest": FIX_GIT_IMAGE_DIGEST,
@@ -1305,7 +1479,7 @@ def _parse_fairness(value: object, *, schema_version: int) -> dict[str, object]:
         "code_mode_host": True,
         "timeout_seconds": 1800,
         "max_retries": 0,
-        "budget_usd": 5.0,
+        "budget_usd": budget_usd,
     }
     keys = _FAIRNESS_V2_KEYS
     if schema_version == 1:
@@ -1327,18 +1501,20 @@ def _parse_fairness(value: object, *, schema_version: int) -> dict[str, object]:
     return dict(value)
 
 
-def _parse_paid_budget(value: object) -> PaidBudgetIdentity:
+def _parse_paid_budget(value: object, *, pair_id: str) -> PaidBudgetIdentity:
     if not isinstance(value, dict) or set(value) != _PAID_BUDGET_KEYS:
         raise PairIdentityError("paid pair budget differs from schema v2")
     per_side = value["per_side_usd"]
     pair = value["pair_usd"]
+    expected_per_side = 10.0 if pair_id in _TEN_USD_PAIR_IDS else 5.0
+    expected_pair = expected_per_side * 2.0
     if (
         isinstance(per_side, bool)
         or not isinstance(per_side, (int, float))
         or isinstance(pair, bool)
         or not isinstance(pair, (int, float))
-        or float(per_side) != 5.0
-        or float(pair) != 10.0
+        or float(per_side) != expected_per_side
+        or float(pair) != expected_pair
     ):
         raise PairIdentityError("paid pair budget differs from Plan 014")
     return PaidBudgetIdentity(float(per_side), float(pair))
@@ -1395,13 +1571,18 @@ def _parse_selected_profile(value: object) -> SelectedProfileIdentity:
     catalog_sha256 = value.get("frozen_codex_model_catalog_sha256")
     _require_commit(source_commit, "frozen model catalog source commit")
     _require_sha256(catalog_sha256, "frozen model catalog sha256")
-    if value.get("max_guardian_logical_requests") != 1:
+    guardian_limit = value.get("max_guardian_logical_requests")
+    if (
+        isinstance(guardian_limit, bool)
+        or not isinstance(guardian_limit, int)
+        or not 1 <= guardian_limit <= 3
+    ):
         raise PairIdentityError("selected paid Guardian request limit is invalid")
     return SelectedProfileIdentity(
         provider_public={key: value[key] for key in _PUBLIC_PROVIDER_KEYS},
         frozen_codex_model_catalog_source_commit=source_commit,
         frozen_codex_model_catalog_sha256=catalog_sha256,
-        max_guardian_logical_requests=1,
+        max_guardian_logical_requests=guardian_limit,
     )
 
 

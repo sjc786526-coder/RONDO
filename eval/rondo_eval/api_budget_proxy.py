@@ -35,6 +35,8 @@ MAX_INPUT_TOKENS = 1_050_000
 MAX_OUTPUT_TOKENS = 128_000
 BATCH_CAP_USD = Decimal("10.00")
 RUN_CAP_USD = Decimal("5.00")
+_MAX_EXPLICIT_BATCH_CAP_USD = Decimal("20.00")
+_MAX_EXPLICIT_RUN_CAP_USD = Decimal("10.00")
 MAX_BENCHMARK_RUNS = 4
 _MONEY_QUANTUM = Decimal("0.000001")
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -82,6 +84,7 @@ _STOP_REASONS = {
     "operator_confirmed_unbilled_attempts_exhausted",
     "operator_confirmed_unbilled_deadline_exhausted",
     "operator_confirmed_unbilled_proxy_closing",
+    "guardian_duplicate_logical_request_rejected",
     "guardian_logical_request_limit_exceeded",
     "logical_request_limit_exceeded",
     "proxy_closing",
@@ -117,6 +120,10 @@ class BudgetStopped(ApiBudgetProxyError):
 
 class _GuardianLogicalRequestLimitExceeded(ApiBudgetProxyError):
     """Raised before reserve/forward when a run exceeds its declared approvals."""
+
+
+class _GuardianDuplicateLogicalRequest(ApiBudgetProxyError):
+    """Raised before reserve/forward for a charged review body replay."""
 
 
 class _LogicalRequestLimitExceeded(ApiBudgetProxyError):
@@ -218,10 +225,10 @@ class PersistentBudgetLedger:
         self.total_cap = _money(total_cap_usd)
         self.default_run_cap = _money(default_run_cap_usd)
         self.max_runs = max_runs
-        if self.total_cap <= 0 or self.total_cap > BATCH_CAP_USD:
-            raise ApiBudgetProxyError("batch cap exceeds the authorized 10 USD maximum")
-        if self.default_run_cap <= 0 or self.default_run_cap > RUN_CAP_USD:
-            raise ApiBudgetProxyError("run cap exceeds the authorized 5 USD maximum")
+        if self.total_cap <= 0 or self.total_cap > _MAX_EXPLICIT_BATCH_CAP_USD:
+            raise ApiBudgetProxyError("batch cap exceeds the authorized 20 USD maximum")
+        if self.default_run_cap <= 0 or self.default_run_cap > _MAX_EXPLICIT_RUN_CAP_USD:
+            raise ApiBudgetProxyError("run cap exceeds the authorized 10 USD maximum")
         if not isinstance(max_runs, int) or isinstance(max_runs, bool) or not 1 <= max_runs <= 4:
             raise ApiBudgetProxyError("benchmark run count exceeds the authorized maximum of four")
         self._lock = threading.RLock()
@@ -790,10 +797,11 @@ class LoopbackResponsesProxy:
             raise ApiBudgetProxyError("proxy unbilled retry statuses are invalid")
         if max_guardian_logical_requests is not None and (
             isinstance(max_guardian_logical_requests, bool)
-            or max_guardian_logical_requests != 1
+            or not isinstance(max_guardian_logical_requests, int)
+            or not 1 <= max_guardian_logical_requests <= 3
         ):
             raise ApiBudgetProxyError(
-                "proxy Guardian logical request limit must be exactly one when enabled"
+                "proxy Guardian logical request limit must be between one and three"
             )
         if max_logical_requests is not None and (
             isinstance(max_logical_requests, bool)
@@ -824,6 +832,7 @@ class LoopbackResponsesProxy:
         self._request_reservation = request_reservation
         self._max_guardian_logical_requests = max_guardian_logical_requests
         self._guardian_logical_requests = 0
+        self._guardian_body_sha256s: set[str] = set()
         self._max_logical_requests = max_logical_requests
         self._logical_requests = 0
         self._request_policy_lock = threading.Lock()
@@ -1005,12 +1014,17 @@ class LoopbackResponsesProxy:
                 if self._closing.is_set():
                     self._reject(handler, 503, "proxy_closing")
                     return
-                self._claim_logical_request(request_metadata["role"])
+                self._claim_logical_request(
+                    request_metadata["role"], request_metadata["body_sha256"]
+                )
                 self._ledger.reserve(
                     self._run_id,
                     request_id,
                     amount_usd=self._request_reservation,
                 )
+        except _GuardianDuplicateLogicalRequest:
+            self._reject(handler, 409, "guardian_duplicate_logical_request_rejected")
+            return
         except _GuardianLogicalRequestLimitExceeded:
             self._reject(handler, 409, "guardian_logical_request_limit_exceeded")
             return
@@ -1228,13 +1242,21 @@ class LoopbackResponsesProxy:
             if delay:
                 self._sleep(delay)
 
-    def _claim_logical_request(self, role: str) -> None:
+    def _claim_logical_request(self, role: str, body_sha256: str) -> None:
         if (
             self._max_logical_requests is None
             and (role != "guardian" or self._max_guardian_logical_requests is None)
         ):
             return
         with self._request_policy_lock:
+            if role == "guardian" and body_sha256 in self._guardian_body_sha256s:
+                self._ledger.stop_run(
+                    self._run_id,
+                    stop_reason="guardian_duplicate_logical_request_rejected",
+                )
+                raise _GuardianDuplicateLogicalRequest(
+                    "A settled Guardian request body cannot be replayed"
+                )
             if (
                 self._max_logical_requests is not None
                 and self._logical_requests >= self._max_logical_requests
@@ -1262,6 +1284,7 @@ class LoopbackResponsesProxy:
             self._logical_requests += 1
             if role == "guardian":
                 self._guardian_logical_requests += 1
+                self._guardian_body_sha256s.add(body_sha256)
 
     def _stop_confirmed_unbilled(
         self,
@@ -1319,6 +1342,7 @@ class LoopbackResponsesProxy:
             collector = _SseUsageCollector()
             total = 0
             writable = True
+            pending_event = bytearray()
             try:
                 while True:
                     _enforce_upstream_deadline(
@@ -1337,21 +1361,70 @@ class LoopbackResponsesProxy:
                     if not chunk:
                         collector.finish()
                         usage = collector.usage if collector.completed else None
+                        if collector.terminal_seen:
+                            settlement = self._ledger.settle(
+                                self._run_id,
+                                request_id,
+                                usage,
+                                pricing=pricing,
+                                stop_reason=stop_reason,
+                            )
+                            self._save_observation(
+                                request_id,
+                                request_metadata,
+                                status,
+                                settlement,
+                            )
+                        if pending_event and writable:
+                            try:
+                                handler.wfile.write(pending_event)
+                                handler.wfile.flush()
+                            except (BrokenPipeError, ConnectionResetError):
+                                writable = False
+                        if collector.terminal_seen:
+                            return
                         break
                     total += len(chunk)
                     if total > _MAX_RESPONSE_BYTES:
                         usage = None
                         break
+                    pending_event.extend(chunk)
                     collector.feed(chunk)
-                    if writable:
+                    terminal_seen = collector.terminal_seen
+                    if terminal_seen:
+                        usage = collector.usage if collector.completed else None
+                        # Release the conservative reservation before exposing
+                        # response.completed to Codex.  Guardian review can start
+                        # as soon as the downstream observes this line; writing it
+                        # first creates a race where the still-reserved main request
+                        # makes the Guardian request fail locally with HTTP 429.
+                        settlement = self._ledger.settle(
+                            self._run_id,
+                            request_id,
+                            usage,
+                            pricing=pricing,
+                            stop_reason=stop_reason,
+                        )
+                        self._save_observation(
+                            request_id,
+                            request_metadata,
+                            status,
+                            settlement,
+                        )
+                    # Hold one complete SSE event until it has been classified.
+                    # This is the smallest buffer that prevents a terminal event
+                    # from becoming visible before its reservation is released.
+                    event_complete = chunk in {b"\n", b"\r\n"}
+                    if event_complete and writable:
                         try:
-                            handler.wfile.write(chunk)
+                            handler.wfile.write(pending_event)
                             handler.wfile.flush()
                         except (BrokenPipeError, ConnectionResetError):
                             writable = False
-                    if collector.terminal_seen:
-                        usage = collector.usage if collector.completed else None
-                        break
+                    if event_complete:
+                        pending_event.clear()
+                    if terminal_seen:
+                        return
             except (OSError, URLError, TimeoutError, socket.timeout):
                 usage = None
                 status = 0

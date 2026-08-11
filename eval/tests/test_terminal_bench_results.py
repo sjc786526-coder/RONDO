@@ -104,7 +104,7 @@ class TerminalBenchResultTests(unittest.TestCase):
     ) -> RunPublicationContext:
         provider = self._live_result("publication-fixture").prepared.spec.provider
         return RunPublicationContext(
-            pair_id="p1-fix-git-pair-v9",
+            pair_id="p1-fix-git-pair-v19",
             pair_lock_sha256="9" * 64,
             pair_slot=1 if side is Side.RONDO else 2,
             pair_round=1,
@@ -119,7 +119,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                 **provider.to_public_dict(),
                 "frozen_codex_model_catalog_source_commit": "a" * 40,
                 "frozen_codex_model_catalog_sha256": "b" * 64,
-                "max_guardian_logical_requests": 1,
+                "max_guardian_logical_requests": 2,
             },
         )
 
@@ -239,6 +239,15 @@ class TerminalBenchResultTests(unittest.TestCase):
                 {
                     "instructions": "frozen guardian policy",
                     "input": [{"role": "user", "content": "approval evidence"}],
+                    "text": {
+                        "format": {
+                            "schema": {
+                                "properties": {
+                                    "user_authorization": {"type": "string"}
+                                }
+                            }
+                        }
+                    },
                     "tools": [],
                 }
             ),
@@ -538,7 +547,7 @@ class TerminalBenchResultTests(unittest.TestCase):
     def test_publication_copies_private_tree_and_appends_strict_index(self) -> None:
         run_id = "20260810-010000001-tb-codex-r1"
         metadata = self.root / "work" / "api-metadata.json"
-        self._write_metadata(metadata, "main", "guardian", "main")
+        self._write_metadata(metadata, "main", "main", "guardian", "main", "main")
         (self.trial / "agent").mkdir()
         (self.trial / "agent" / "codex.txt").write_text(
             '{"type":"turn.completed"}\n', encoding="utf-8"
@@ -995,18 +1004,29 @@ class TerminalBenchResultTests(unittest.TestCase):
 
     def test_completed_rondo_archives_revalidated_e_final_and_meta(self) -> None:
         run_id = "20260810-010000008-tb-rondo-r1"
-        relative = self._write_guardian_bundle()
-        observation, _e_final, _meta = load_guardian_evidence_bundle(
-            self.jobs,
-            relative,
-            expected_model="gpt-5.6-luna",
-            expected_effort="low",
+        observations = tuple(
+            load_guardian_evidence_bundle(
+                self.jobs,
+                self._write_guardian_bundle(review_id),
+                expected_model="gpt-5.6-luna",
+                expected_effort="low",
+            )[0]
+            for review_id in ("review-1", "review-2")
         )
         live_result = self._live_result(run_id)
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
-        object.__setattr__(live_result, "evidence", (observation,))
+        object.__setattr__(live_result, "evidence", observations)
         metadata = self.root / "work" / "api-metadata.json"
-        self._write_metadata(metadata, "main", "guardian", "main")
+        self._write_metadata(
+            metadata,
+            "main",
+            "main",
+            "guardian",
+            "main",
+            "guardian",
+            "main",
+            "main",
+        )
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
 
         target = publish_terminal_bench_result(
@@ -1032,7 +1052,12 @@ class TerminalBenchResultTests(unittest.TestCase):
             summary["summary"]["evidence"][0]["guardian_source_commit"],
             UPSTREAM_CODEX["commit"],
         )
-        self.assertEqual(summary["summary"]["s2_request_evidence_binding"], "unbound")
+        self.assertEqual(
+            summary["summary"]["api_request_sequence"],
+            ["main", "main", "guardian", "main", "guardian", "main", "main"],
+        )
+        self.assertEqual(len(summary["summary"]["evidence"]), 2)
+        self.assertEqual(summary["summary"]["s2_request_evidence_binding"], "verified")
 
     def test_guardian_meta_source_drift_is_rejected(self) -> None:
         relative = self._write_guardian_bundle()
@@ -1403,8 +1428,12 @@ class TerminalBenchResultTests(unittest.TestCase):
             side_effect=DockerSupervisionError("redacted test failure")
         )
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v9",
+            pair_id="p1-fix-git-pair-v19",
             lock_sha256="9" * 64,
+        )
+        pair_identity.paid_budget = SimpleNamespace(
+            per_side_usd=10.0,
+            pair_usd=20.0,
         )
         pair_identity.require_selected_profile.return_value.to_dict.return_value = {
             **live.prepared.spec.provider.to_public_dict(),
@@ -1502,8 +1531,12 @@ class TerminalBenchResultTests(unittest.TestCase):
             return measurement_paths if Path(start) == measurement_root else paths
 
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v9",
+            pair_id="p1-fix-git-pair-v19",
             lock_sha256="9" * 64,
+        )
+        pair_identity.paid_budget = SimpleNamespace(
+            per_side_usd=10.0,
+            pair_usd=20.0,
         )
         pair_identity.mode.return_value = SimpleNamespace(
             batch_id=terminal_bench_main.P1_BATCH_ID

@@ -28,7 +28,8 @@ _TIMESTAMP = re.compile(
 )
 _MAX_SCAN_BYTES = 128 * 1024 * 1024
 _SENSITIVE_ASSIGNMENT = re.compile(
-    rb"(?:^|[,{\s])[\"']?(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|bearer[-_]?token|"
+    rb"(?:^|[,{\s])(?![\"']?user_authorization[\"']?\s*[:=])[\"']?"
+    rb"(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|bearer[-_]?token|"
     rb"client[-_]?secret|refresh[-_]?token|private[-_]?key|password|secret|token|authorization|"
     rb"proxy-authorization|x-api-key)[\"']?\s*[:=]\s*[\"']?\s*[^\s\"'},\]]+",
     re.IGNORECASE,

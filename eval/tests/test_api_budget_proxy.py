@@ -391,10 +391,10 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
 
-    def test_guardian_logical_request_limit_only_accepts_exactly_one(self) -> None:
-        for number, limit in enumerate((True, False, 0, 2, -1)):
+    def test_guardian_logical_request_limit_is_bounded(self) -> None:
+        for number, limit in enumerate((True, False, 0, 4, -1)):
             with self.subTest(limit=limit), self.assertRaisesRegex(
-                ApiBudgetProxyError, "exactly one"
+                ApiBudgetProxyError, "between one and three"
             ):
                 LoopbackResponsesProxy(
                     upstream_base_url="https://provider.example/v1",
@@ -456,10 +456,11 @@ class ApiBudgetProxyTests(unittest.TestCase):
         stream: bool = False,
         effort: str | None = "low",
         guardian: bool = False,
+        prompt: str = "secret prompt is never recorded",
     ) -> dict[str, object]:
         body: dict[str, object] = {
             "model": GUARDIAN_PRICING.model_id if guardian else MAIN_PRICING.model_id,
-            "input": [{"role": "user", "content": "secret prompt is never recorded"}],
+            "input": [{"role": "user", "content": prompt}],
             "stream": stream,
             "tools": [{"type": "function", "name": "local_tool"}],
         }
@@ -652,6 +653,128 @@ class ApiBudgetProxyTests(unittest.TestCase):
             self.upstream.release_sse.set()
             thread.join(timeout=2)
 
+    def test_sse_terminal_is_not_visible_until_reservation_is_settled(self) -> None:
+        self.upstream.mode = "sse"
+        settle_started = threading.Event()
+        release_settle = threading.Event()
+        terminal_visible = threading.Event()
+        original_settle = self.ledger.settle
+
+        def blocking_settle(*args: object, **kwargs: object):
+            settle_started.set()
+            if not release_settle.wait(timeout=2):
+                raise AssertionError("test did not release budget settlement")
+            return original_settle(*args, **kwargs)
+
+        self.ledger.settle = blocking_settle  # type: ignore[method-assign]
+        parsed_host_port = self.proxy.base_url.removeprefix("http://").removesuffix("/v1")
+        host, port_text = parsed_host_port.rsplit(":", 1)
+        connection = HTTPConnection(host, int(port_text), timeout=5)
+        encoded = json.dumps(self._body(stream=True)).encode()
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=encoded,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(encoded)),
+                "Authorization": f"Bearer {self.proxy.downstream_api_key}",
+                "X-RONDO-Eval-Request-Id": "sse-settlement-order",
+                "X-RONDO-Eval-Role": "main",
+                "User-Agent": "codex_cli_rs/0.147.0 (proxy-test)",
+                "originator": "codex_cli_rs",
+            },
+        )
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+
+        terminal_line: list[bytes] = []
+
+        def read_terminal() -> None:
+            terminal_line.append(response.readline())
+            terminal_visible.set()
+
+        reader = threading.Thread(target=read_terminal)
+        reader.start()
+        try:
+            self.assertTrue(settle_started.wait(timeout=2))
+            self.assertFalse(
+                terminal_visible.wait(timeout=0.1),
+                "response.completed became visible before budget settlement",
+            )
+            release_settle.set()
+            self.assertTrue(terminal_visible.wait(timeout=2))
+            self.assertEqual(terminal_line, [b"event: response.completed\n"])
+            self.assertIn(b'"type": "response.completed"', response.readline())
+            request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
+                "sse-settlement-order"
+            ]
+            self.assertEqual(request["status"], "settled")
+            self.assertTrue(request["usage_valid"])
+        finally:
+            release_settle.set()
+            reader.join(timeout=2)
+            connection.close()
+            self.ledger.settle = original_settle  # type: ignore[method-assign]
+
+    def test_settled_main_terminal_allows_immediate_guardian_reservation(self) -> None:
+        self.upstream.modes = ["sse", "json"]
+        original_settle = self.ledger.settle
+
+        def delayed_main_settle(*args: object, **kwargs: object):
+            if len(args) >= 2 and args[1] == "main-before-guardian":
+                # Widen the old write-before-settle race deterministically.
+                threading.Event().wait(timeout=0.2)
+            return original_settle(*args, **kwargs)
+
+        self.ledger.settle = delayed_main_settle  # type: ignore[method-assign]
+        parsed_host_port = self.proxy.base_url.removeprefix("http://").removesuffix("/v1")
+        host, port_text = parsed_host_port.rsplit(":", 1)
+        connection = HTTPConnection(host, int(port_text), timeout=5)
+        encoded = json.dumps(self._body(stream=True)).encode()
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=encoded,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(encoded)),
+                "Authorization": f"Bearer {self.proxy.downstream_api_key}",
+                "X-RONDO-Eval-Request-Id": "main-before-guardian",
+                "X-RONDO-Eval-Role": "main",
+                "User-Agent": "codex_cli_rs/0.147.0 (proxy-test)",
+                "originator": "codex_cli_rs",
+            },
+        )
+        response = connection.getresponse()
+        try:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.readline(), b"event: response.completed\n")
+            self.assertIn(b'"type": "response.completed"', response.readline())
+            self.assertEqual(response.readline(), b"\n")
+            guardian_status, _body, _headers = self._post(
+                self._body(effort="low", guardian=True),
+                role="guardian",
+                request_id="guardian-after-main",
+            )
+            self.assertEqual(guardian_status, 200)
+            snapshot = self.ledger.snapshot()
+            self.assertEqual(snapshot["reserved_usd"], "0.000000")
+            self.assertEqual(
+                list(snapshot["runs"]["benchmark-r1"]["requests"]),
+                ["main-before-guardian", "guardian-after-main"],
+            )
+            observations = json.loads((self.root / "metadata.json").read_text())[
+                "requests"
+            ]
+            self.assertEqual(
+                [observation["role"] for observation in observations],
+                ["main", "guardian"],
+            )
+        finally:
+            connection.close()
+            self.ledger.settle = original_settle  # type: ignore[method-assign]
+
     def test_nonstream_completed_usage_settles_before_upstream_eof(self) -> None:
         self.upstream.mode = "json_hold_open"
         result: list[tuple[int, bytes, object]] = []
@@ -792,7 +915,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertNotIn("wrong-main-effort", requests)
         self.assertIn("matching-main-effort", requests)
 
-    def test_single_guardian_contract_blocks_charged_parse_replay_before_reserve(self) -> None:
+    def test_guardian_contract_blocks_duplicate_charged_parse_replay_before_reserve(self) -> None:
         self.proxy.close()
         self.proxy = LoopbackResponsesProxy(
             upstream_base_url="https://provider.example/v1",
@@ -832,7 +955,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertEqual(
             json.loads(body)["error"]["code"],
-            "guardian_logical_request_limit_exceeded",
+            "guardian_duplicate_logical_request_rejected",
         )
         self.assertEqual(len(self.upstream.requests), upstream_before_replay)
         metadata = json.loads(
@@ -847,8 +970,47 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertTrue(run["stopped"])
         self.assertEqual(
             run["stop_reason"],
+            "guardian_duplicate_logical_request_rejected",
+        )
+
+    def test_two_distinct_guardian_reviews_are_allowed_but_a_third_is_bounded(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="two-guardian-run",
+            metadata_path=self.root / "two-guardian-metadata.json",
+            **self._profile_kwargs(),
+            max_guardian_logical_requests=2,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+
+        for number in (1, 2):
+            status, _body, _headers = self._post(
+                self._body(
+                    effort="low",
+                    guardian=True,
+                    prompt=f"distinct review {number}",
+                ),
+                role="guardian",
+                request_id=f"guardian-{number}",
+            )
+            self.assertEqual(status, 200)
+        upstream_before_limit = len(self.upstream.requests)
+
+        status, body, _headers = self._post(
+            self._body(effort="low", guardian=True, prompt="distinct review 3"),
+            role="guardian",
+            request_id="guardian-3",
+        )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            json.loads(body)["error"]["code"],
             "guardian_logical_request_limit_exceeded",
         )
+        self.assertEqual(len(self.upstream.requests), upstream_before_limit)
 
     def test_single_guardian_contract_keeps_unbilled_attempts_inside_first_request(self) -> None:
         self.proxy.close()
@@ -1312,9 +1474,29 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
                 ledger.claim_run("run-1")
 
     def test_invalid_state_and_over_authorized_configuration_fail_closed(self) -> None:
+        with PersistentBudgetLedger(
+            self.root / "formal-concurrent.json",
+            batch_id="formal-concurrent",
+            total_cap_usd="20",
+            default_run_cap_usd="10",
+        ) as ledger:
+            ledger.claim_run("rondo")
+            ledger.reserve("rondo", "main", amount_usd="5")
+            ledger.reserve("rondo", "guardian", amount_usd="5")
+            requests = ledger.snapshot()["runs"]["rondo"]["requests"]
+            self.assertEqual(
+                sum(Decimal(request["reserved_usd"]) for request in requests.values()),
+                Decimal("10.000000"),
+            )
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
-                self.root / "too-much.json", batch_id="bad", total_cap_usd="10.01"
+                self.root / "too-much.json", batch_id="bad", total_cap_usd="20.01"
+            )
+        with self.assertRaises(ApiBudgetProxyError):
+            PersistentBudgetLedger(
+                self.root / "too-much-run.json",
+                batch_id="bad-run",
+                default_run_cap_usd="10.01",
             )
         path = self.root / "bad-mode.json"
         path.write_text("{}", encoding="utf-8")

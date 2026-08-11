@@ -619,6 +619,13 @@ class TerminalBenchTests(unittest.TestCase):
             f"sha256sum -- {adapter.remote_frozen_model_catalog_path}",
             install_commands,
         )
+        catalog_digest_calls = [
+            call
+            for call in environment.calls
+            if f"sha256sum -- {adapter.remote_frozen_model_catalog_path}" in call[0]
+        ]
+        self.assertEqual(len(catalog_digest_calls), 1)
+        self.assertIsNone(catalog_digest_calls[0][3])
         self.assertIn(
             f"stat -c '%a' -- {adapter.remote_frozen_model_catalog_path}",
             install_commands,
@@ -846,6 +853,10 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertTrue(
             any(
                 'git config --global --replace-all safe.directory "$task_workdir"'
+                in call[0]
+                and "git config --global --replace-all user.name 'Test User'"
+                in call[0]
+                and "git config --global --replace-all user.email test@example.com"
                 in call[0]
                 and 'git -C "$task_workdir" status --porcelain=v1'
                 in call[0]

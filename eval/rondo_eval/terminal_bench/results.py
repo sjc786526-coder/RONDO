@@ -24,7 +24,11 @@ from .freeze import (
 )
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 from .metrics import RunMetricsError, metrics_from_dict
-from .pair import P1_PAIR_ID, RunPublicationContext
+from .pair import (
+    P1_PAIR_ID,
+    RunPublicationContext,
+    has_complete_guardian_approval_sequence,
+)
 
 
 UPSTREAM_CODEX = {
@@ -511,11 +515,21 @@ def _safe_summary(
         else 0.0
     )
     guardian_requests = request_roles.count("guardian")
-    s2_binding = (
-        "not_triggered"
-        if guardian_requests == 0 and not evidence
-        else "unbound"
-    )
+    if side is Side.RONDO and (
+        parsed.outcome is RunOutcome.COMPLETED
+        and guardian_requests >= 1
+        and len(evidence) == guardian_requests
+        and all(item["terminal_status"] == "approved" for item in evidence)
+        and has_complete_guardian_approval_sequence(request_roles)
+    ):
+        # The paid pair bounds distinct Guardian request bodies and rejects a
+        # duplicate charged replay. Equal verified request/evidence counts form
+        # a task-scoped set binding without persisting a private request body.
+        s2_binding = "verified"
+    elif side is Side.RONDO and (guardian_requests or evidence):
+        s2_binding = "unbound"
+    else:
+        s2_binding = "not_triggered"
     provider_public = spec.provider.to_public_dict()
     selected_profile = dict(publication.selected_profile)
     if any(selected_profile.get(key) != value for key, value in provider_public.items()):
@@ -573,9 +587,6 @@ def _safe_summary(
             if live_result.harbor.docker_evidence is not None
             else [],
             "evidence": evidence,
-            # M1 does not depend on S2.  Existing E_final metadata has no
-            # request-id/body-hash binding, so a triggered chain is explicitly
-            # unbound rather than being misreported as S2 evidence.
             "s2_request_evidence_binding": s2_binding,
         },
         "tasks": [
@@ -723,14 +734,20 @@ def _validate_publication_evidence(
         if not live_result.metadata_ready:
             raise HarborResultError("completed run lacks verified API metadata")
         roles = _verified_request_roles(metadata_path)
-        if roles != ("main", "guardian", "main"):
+        if not has_complete_guardian_approval_sequence(roles):
             raise HarborResultError(
                 "completed run lacks the verified main-Guardian-main sequence"
             )
         if live_result.prepared.spec.side is Side.RONDO:
-            if len(live_result.evidence) != 1:
+            if (
+                len(live_result.evidence) != roles.count("guardian")
+                or any(
+                    item.terminal_status != "approved"
+                    for item in live_result.evidence
+                )
+            ):
                 raise HarborResultError(
-                    "RONDO completed run requires one Guardian evidence bundle"
+                    "RONDO completed run requires one approved evidence per Guardian request"
                 )
         elif live_result.evidence:
             raise HarborResultError("frozen Codex cannot publish RONDO Guardian evidence")
@@ -828,8 +845,34 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or sequence.count("guardian") != roles["guardian"]
     ):
         raise HarborResultError("Terminal-Bench API request sequence is invalid")
-    if outcome is RunOutcome.COMPLETED and sequence != ["main", "guardian", "main"]:
+    if outcome is RunOutcome.COMPLETED and not has_complete_guardian_approval_sequence(
+        sequence
+    ):
         raise HarborResultError("completed Terminal-Bench approval sequence is incomplete")
+    guardian_limit = config.get("max_guardian_logical_requests")
+    if outcome is RunOutcome.COMPLETED and (
+        isinstance(guardian_limit, bool)
+        or not isinstance(guardian_limit, int)
+        or roles["guardian"] > guardian_limit
+    ):
+        raise HarborResultError("completed Terminal-Bench approval count exceeds its lock")
+    if outcome is RunOutcome.COMPLETED:
+        evidence = summary.get("evidence")
+        binding = summary.get("s2_request_evidence_binding")
+        if record.get("side") == Side.RONDO.value:
+            if (
+                not isinstance(evidence, list)
+                or len(evidence) != roles["guardian"]
+                or any(
+                    not isinstance(item, dict)
+                    or item.get("terminal_status") != "approved"
+                    for item in evidence
+                )
+                or binding != "verified"
+            ):
+                raise HarborResultError("completed RONDO Guardian evidence is not bound")
+        elif evidence or binding != "not_triggered":
+            raise HarborResultError("completed frozen Codex record contains RONDO evidence")
     if (
         config.get("pair_id") != P1_PAIR_ID
         or not isinstance(config.get("pair_lock_sha256"), str)
@@ -910,7 +953,7 @@ def _run_spend(snapshot: Mapping[str, object], run_id: str) -> float:
         amount = Decimal(value)
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise HarborResultError("budget snapshot lacks run spend") from exc
-    if not amount.is_finite() or amount < 0 or amount > Decimal("5"):
+    if not amount.is_finite() or amount < 0 or amount > Decimal("10"):
         raise HarborResultError("budget snapshot run spend is invalid")
     return float(amount)
 
