@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from ..api_budget_proxy import (
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
+    UPSTREAM_TIMEOUT_SECONDS,
     milestone_metadata_ready,
 )
 from ..config import RuntimeConfig
@@ -106,7 +107,7 @@ async def run_budgeted_terminal_bench(
         ledger=ledger,
         run_id=request.docker_task_id,
         metadata_path=metadata_path,
-        timeout_seconds=float(request.timeout_seconds),
+        timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
     )
     with proxy:
         prepared = prepare_terminal_bench_run(

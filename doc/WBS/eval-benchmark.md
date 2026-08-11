@@ -1,6 +1,6 @@
 # 方向 0：量化测评基准
 
-最后更新：2026-08-10 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-11 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
@@ -45,6 +45,11 @@
   `publishing`，持久结果后回读 record digest 再收敛为 `completed`；M1 必须同时核对两条
   record 与 durable paid pair ledger、harness commit、publication digest、declared request role 和容器
   metrics。任一不一致都不能通过 M1。
+  Plan 012 进一步把上游 transport timeout 限为 90 秒、以合法 `response.completed + usage` 收束 SSE，并在真实
+  Docker 中让 frozen solution/root verifier 得到 `reward=1`。frozen Codex v0.147 的 Sol real-wire 在保留宿主
+  网络代理时于 14.3 秒内完成，usage 合法且 ledger settled。v8 固定主 Sol、两侧 Guardian Luna/low；RONDO
+  slot 1 的 5 个 Sol main 请求均 HTTP 200/usage valid，但自然触发的 Guardian Luna 请求返回 HTTP 503，故 pair
+  `failed/blocked`，Codex slot 2 与 M1 未运行。B3/M1 状态不变，也没有伪造 `E_final` 或 S2。
 
 ## E-B 真实 Terminal-Bench 2.1 测评
 

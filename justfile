@@ -22,6 +22,24 @@ eval-lock:
 
 eval-check: eval-lock eval-test
 
+# One supervised no-key oracle run. It must prove the frozen solution and
+# verifier can produce reward=1 before any paid provider probe is allowed.
+eval-b3-oracle-no-api docker_host_volume metrics_dir:
+    @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
+    @env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
+        "$PWD/mydev/scripts/with-build-lock.sh" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.oracle_smoke \
+        --docker-host-volume "{{docker_host_volume}}"
+
+# Two strictly sequential real-provider Responses requests, capped by a private
+# 1 USD ledger: non-stream first, then stream only after valid terminal usage.
+eval-plan012-provider-probes:
+    @env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.provider_probe
+
 # One supervised B2 attempt: RONDO first, Codex second, stop on the first failure.
 # The caller supplies the Docker Desktop host-volume path and a fresh metrics dir.
 eval-b2-no-api docker_host_volume metrics_dir:

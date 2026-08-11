@@ -386,10 +386,15 @@ def publish_terminal_bench_failure(
         pass
     if metadata is not None:
         try:
-            request_roles = _request_roles(metadata)
+            request_roles = _declared_request_roles(metadata)
         except HarborResultError:
             request_roles = ()
-    metadata_ready = bool(request_roles)
+    try:
+        metadata_ready = (
+            bool(_request_roles(metadata)) if metadata is not None else False
+        )
+    except HarborResultError:
+        metadata_ready = False
     summary = {
         "tasks_total": 1,
         "infra_failed": 1 if outcome is RunOutcome.INFRA_FAILED else 0,
@@ -817,6 +822,14 @@ def _verified_request_roles(metadata_path: Path) -> tuple[str, ...]:
 
 
 def _request_roles(metadata: Mapping[str, Any]) -> tuple[str, ...]:
+    roles = _declared_request_roles(metadata)
+    requests = metadata["requests"]
+    if any(request.get("usage_valid") is not True for request in requests):
+        raise HarborResultError("API metadata contains a request without valid usage")
+    return roles
+
+
+def _declared_request_roles(metadata: Mapping[str, Any]) -> tuple[str, ...]:
     if set(metadata) != {"schema_version", "requests"} or metadata.get("schema_version") != 1:
         raise HarborResultError("API metadata differs from schema v1")
     requests = metadata.get("requests")
@@ -831,7 +844,6 @@ def _request_roles(metadata: Mapping[str, Any]) -> tuple[str, ...]:
             or request.get("declared_role") != request.get("role")
             or request.get("inferred_role") != request.get("role")
             or request.get("contract_match") is not True
-            or request.get("usage_valid") is not True
         ):
             raise HarborResultError("API metadata contains an unverified request")
         roles.append(request["role"])

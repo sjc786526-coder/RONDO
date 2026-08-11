@@ -274,7 +274,7 @@ class ContractTests(unittest.TestCase):
             api="responses",
             base_url="https://api.openai.com/v1",
             api_key_env="OPENAI_API_KEY",
-            main_model="gpt-5.6-luna",
+            main_model="gpt-5.6-sol",
             guardian_model="gpt-5.6-luna",
             guardian_effort="low",
             config_sha256="d" * 64,

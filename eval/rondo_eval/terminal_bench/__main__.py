@@ -43,7 +43,7 @@ from .results import (
 from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
 
 
-P1_BATCH_ID = "p1-fix-git-b3-m1-v2"
+P1_BATCH_ID = "p1-fix-git-b3-m1-v3"
 
 
 def _parser() -> argparse.ArgumentParser:

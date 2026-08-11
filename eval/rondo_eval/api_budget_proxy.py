@@ -29,12 +29,21 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-OFFICIAL_MODEL = "gpt-5.6-luna"
+OFFICIAL_MODEL = "gpt-5.6-sol"
+TERRA_MODEL = "gpt-5.6-terra"
+GUARDIAN_MODEL = "gpt-5.6-luna"
 PRICE_SNAPSHOT_DATE = "2026-08-10"
-PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
-INPUT_USD_PER_MILLION = Decimal("0.20")
-CACHED_INPUT_USD_PER_MILLION = Decimal("0.02")
-OUTPUT_USD_PER_MILLION = Decimal("1.20")
+PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+TERRA_PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+INPUT_USD_PER_MILLION = Decimal("5.00")
+CACHED_INPUT_USD_PER_MILLION = Decimal("0.50")
+OUTPUT_USD_PER_MILLION = Decimal("30.00")
+TERRA_INPUT_USD_PER_MILLION = Decimal("2.00")
+TERRA_CACHED_INPUT_USD_PER_MILLION = Decimal("0.20")
+TERRA_OUTPUT_USD_PER_MILLION = Decimal("12.00")
+GUARDIAN_INPUT_USD_PER_MILLION = Decimal("0.20")
+GUARDIAN_CACHED_INPUT_USD_PER_MILLION = Decimal("0.02")
+GUARDIAN_OUTPUT_USD_PER_MILLION = Decimal("1.20")
 LONG_CONTEXT_THRESHOLD = 272_000
 LONG_INPUT_MULTIPLIER = Decimal("2")
 LONG_OUTPUT_MULTIPLIER = Decimal("1.5")
@@ -66,6 +75,8 @@ _RETRY_HEADERS = (
     "x-rondo-eval-attempt",
 )
 _LITE_HEADER = "x-openai-internal-codex-responses-lite"
+_MAX_USER_AGENT_BYTES = 512
+_MAX_ORIGINATOR_BYTES = 64
 GUARDIAN_OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -126,35 +137,59 @@ class Settlement:
     run_stopped: bool
 
 
-def price_usage(usage: Usage) -> Decimal:
-    """Price one Luna request using the frozen Standard rates."""
+def price_usage(usage: Usage, *, model: str = OFFICIAL_MODEL) -> Decimal:
+    """Price one frozen main or Guardian request using official Standard rates."""
 
     usage.validate()
+    if model == OFFICIAL_MODEL:
+        input_rate = INPUT_USD_PER_MILLION
+        cached_input_rate = CACHED_INPUT_USD_PER_MILLION
+        output_rate = OUTPUT_USD_PER_MILLION
+    elif model == TERRA_MODEL:
+        input_rate = TERRA_INPUT_USD_PER_MILLION
+        cached_input_rate = TERRA_CACHED_INPUT_USD_PER_MILLION
+        output_rate = TERRA_OUTPUT_USD_PER_MILLION
+    elif model == GUARDIAN_MODEL:
+        input_rate = GUARDIAN_INPUT_USD_PER_MILLION
+        cached_input_rate = GUARDIAN_CACHED_INPUT_USD_PER_MILLION
+        output_rate = GUARDIAN_OUTPUT_USD_PER_MILLION
+    else:
+        raise ApiBudgetProxyError("usage model differs from the frozen pair")
     long_context = usage.input_tokens > LONG_CONTEXT_THRESHOLD
     input_multiplier = LONG_INPUT_MULTIPLIER if long_context else Decimal(1)
     output_multiplier = LONG_OUTPUT_MULTIPLIER if long_context else Decimal(1)
     uncached = usage.input_tokens - usage.cached_input_tokens - usage.cache_write_input_tokens
     input_cost = (
-        Decimal(uncached) * INPUT_USD_PER_MILLION
-        + Decimal(usage.cached_input_tokens) * CACHED_INPUT_USD_PER_MILLION
+        Decimal(uncached) * input_rate
+        + Decimal(usage.cached_input_tokens) * cached_input_rate
         + Decimal(usage.cache_write_input_tokens)
-        * INPUT_USD_PER_MILLION
+        * input_rate
         * CACHE_WRITE_MULTIPLIER
     ) * input_multiplier
-    output_cost = Decimal(usage.output_tokens) * OUTPUT_USD_PER_MILLION * output_multiplier
+    output_cost = Decimal(usage.output_tokens) * output_rate * output_multiplier
     return ((input_cost + output_cost) / Decimal(1_000_000)).quantize(
         _MONEY_QUANTUM, rounding=ROUND_UP
     )
 
 
-MAX_REQUEST_RESERVATION_USD = price_usage(
-    Usage(
-        input_tokens=MAX_INPUT_TOKENS,
-        cached_input_tokens=0,
-        cache_write_input_tokens=MAX_INPUT_TOKENS,
-        output_tokens=MAX_OUTPUT_TOKENS,
-    )
+_MAX_REQUEST_USAGE = Usage(
+    input_tokens=MAX_INPUT_TOKENS,
+    cached_input_tokens=0,
+    cache_write_input_tokens=MAX_INPUT_TOKENS,
+    output_tokens=MAX_OUTPUT_TOKENS,
 )
+MAX_REQUEST_RESERVATION_USD = min(
+    RUN_CAP_USD,
+    max(
+        price_usage(_MAX_REQUEST_USAGE, model=OFFICIAL_MODEL),
+        price_usage(_MAX_REQUEST_USAGE, model=GUARDIAN_MODEL),
+    ),
+).quantize(_MONEY_QUANTUM)
+
+# This transport deadline is deliberately independent from the 900/1800 second
+# Harbor task deadline.  A provider request must settle while the agent is
+# still alive so an upstream stall cannot leave only a reservation behind.
+UPSTREAM_TIMEOUT_SECONDS = 90.0
 
 
 class PersistentBudgetLedger:
@@ -264,13 +299,10 @@ class PersistentBudgetLedger:
         self,
         run_id: str,
         request_id: str,
-        amount_usd: Decimal | str = MAX_REQUEST_RESERVATION_USD,
+        amount_usd: Decimal | str | None = None,
     ) -> Decimal:
         _require_safe_id(run_id, "run id")
         _require_safe_id(request_id, "request id")
-        amount = _money(amount_usd)
-        if amount <= 0 or amount > MAX_REQUEST_RESERVATION_USD:
-            raise ApiBudgetProxyError("request reservation exceeds the frozen maximum")
         with self._lock:
             self._assert_open()
             run = self._require_run(run_id)
@@ -281,6 +313,16 @@ class PersistentBudgetLedger:
             run_spent = Decimal(run["spent_usd"])
             run_reserved = _reserved_total(run)
             batch_spent, batch_reserved = self._totals()
+            if amount_usd is None:
+                amount = min(
+                    MAX_REQUEST_RESERVATION_USD,
+                    Decimal(run["cap_usd"]) - run_spent - run_reserved,
+                    self.total_cap - batch_spent - batch_reserved,
+                ).quantize(_MONEY_QUANTUM)
+            else:
+                amount = _money(amount_usd)
+            if amount <= 0 or amount > MAX_REQUEST_RESERVATION_USD:
+                raise BudgetStopped("request reservation has no authorized capacity")
             if run_spent + run_reserved + amount > Decimal(run["cap_usd"]):
                 raise BudgetStopped("request reservation would exceed the run cost cap")
             if batch_spent + batch_reserved + amount > self.total_cap:
@@ -294,7 +336,14 @@ class PersistentBudgetLedger:
             self._persist()
             return amount
 
-    def settle(self, run_id: str, request_id: str, usage: Usage | None) -> Settlement:
+    def settle(
+        self,
+        run_id: str,
+        request_id: str,
+        usage: Usage | None,
+        *,
+        model: str = OFFICIAL_MODEL,
+    ) -> Settlement:
         with self._lock:
             self._assert_open()
             run = self._require_run(run_id)
@@ -306,7 +355,7 @@ class PersistentBudgetLedger:
             try:
                 if usage is None:
                     raise ApiBudgetProxyError("response usage is missing")
-                charged = price_usage(usage)
+                charged = price_usage(usage, model=model)
                 if charged > reserved:
                     raise ApiBudgetProxyError("response usage exceeds the request reservation")
             except ApiBudgetProxyError:
@@ -548,20 +597,28 @@ class LoopbackResponsesProxy:
         ledger: PersistentBudgetLedger,
         run_id: str,
         metadata_path: Path,
-        timeout_seconds: float = 120.0,
+        main_model: str = OFFICIAL_MODEL,
+        timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         _transport: _UrllibTransport | None = None,
     ):
         self.upstream_endpoint = _compatible_responses_endpoint(upstream_base_url)
         if not api_key or "\r" in api_key or "\n" in api_key:
             raise ApiBudgetProxyError("an in-memory API key is required")
-        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
-            raise ApiBudgetProxyError("proxy timeout must be positive")
+        if (
+            not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+            or timeout_seconds > UPSTREAM_TIMEOUT_SECONDS
+        ):
+            raise ApiBudgetProxyError("proxy timeout must be within the 90 second limit")
         _require_safe_id(run_id, "run id")
+        if main_model not in {OFFICIAL_MODEL, TERRA_MODEL}:
+            raise ApiBudgetProxyError("proxy main model is unsupported")
         ledger.ensure_run(run_id)
         self._api_key = api_key
         self._downstream_api_key = "rondo-eval-" + secrets.token_urlsafe(32)
         self._ledger = ledger
         self._run_id = run_id
+        self._main_model = main_model
         self._metadata = RedactedMetadataStore(
             metadata_path,
             secrets_to_exclude=(api_key, self._downstream_api_key),
@@ -693,12 +750,24 @@ class LoopbackResponsesProxy:
         except ApiBudgetProxyError:
             self._reject(handler, 400, "invalid_lite_header")
             return
+        try:
+            user_agent = _validated_user_agent(handler.headers)
+        except ApiBudgetProxyError:
+            self._reject(handler, 400, "invalid_user_agent")
+            return
+        try:
+            originator = _validated_originator(handler.headers)
+        except ApiBudgetProxyError:
+            self._reject(handler, 400, "invalid_originator")
+            return
         request_id = handler.headers.get("X-RONDO-Eval-Request-Id") or uuid.uuid4().hex
         role_header = handler.headers.get("X-RONDO-Eval-Role")
         declared_role = role_header.strip().lower() if role_header is not None else None
         try:
             _require_safe_id(request_id, "request id")
-            request_metadata = _inspect_request(body, declared_role)
+            request_metadata = _inspect_request(
+                body, declared_role, main_model=self._main_model
+            )
             if declared_role is None:
                 declared_role = request_metadata["role"]
                 request_metadata["role_provenance"] = "declared"
@@ -715,9 +784,11 @@ class LoopbackResponsesProxy:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "Accept": handler.headers.get("Accept", "application/json"),
-            "User-Agent": "rondo-eval-budget-proxy/1",
+            "User-Agent": user_agent,
             "X-RONDO-Eval-Role": declared_role,
         }
+        if originator is not None:
+            headers["originator"] = originator
         if forward_lite_header:
             headers[_LITE_HEADER] = "true"
         for name in ("OpenAI-Beta", "OpenAI-Organization", "OpenAI-Project"):
@@ -774,32 +845,55 @@ class LoopbackResponsesProxy:
             collector = _SseUsageCollector()
             total = 0
             writable = True
-            while True:
-                chunk = upstream.read(8192)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > _MAX_RESPONSE_BYTES:
-                    usage = None
-                    break
-                collector.feed(chunk)
-                if writable:
-                    try:
-                        handler.wfile.write(chunk)
-                        handler.wfile.flush()
-                    except (BrokenPipeError, ConnectionResetError):
-                        writable = False
-            collector.finish()
-            usage = collector.usage
-            upstream.close()
-            settlement = self._ledger.settle(self._run_id, request_id, usage)
+            try:
+                while True:
+                    remaining = _MAX_RESPONSE_BYTES - total
+                    if remaining <= 0:
+                        usage = None
+                        break
+                    # BufferedResponse.read(8192) may wait for the buffer to fill
+                    # on a keep-alive SSE connection.  Reading one bounded line at
+                    # a time lets a complete terminal event settle immediately.
+                    chunk = upstream.readline(min(8192, remaining + 1))
+                    if not chunk:
+                        collector.finish()
+                        usage = collector.usage if collector.completed else None
+                        break
+                    total += len(chunk)
+                    if total > _MAX_RESPONSE_BYTES:
+                        usage = None
+                        break
+                    collector.feed(chunk)
+                    if writable:
+                        try:
+                            handler.wfile.write(chunk)
+                            handler.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError):
+                            writable = False
+                    if collector.terminal_seen:
+                        usage = collector.usage if collector.completed else None
+                        break
+            except (OSError, URLError, TimeoutError, socket.timeout):
+                usage = None
+                status = 0
+            finally:
+                upstream.close()
+            settlement = self._ledger.settle(
+                self._run_id,
+                request_id,
+                usage,
+                model=request_metadata["model"],
+            )
             self._save_observation(request_id, request_metadata, status, settlement)
         else:
-            response_body = upstream.read(_MAX_RESPONSE_BYTES + 1)
-            if len(response_body) <= _MAX_RESPONSE_BYTES:
-                usage = _usage_from_json_bytes(response_body)
+            response_body, usage = _read_completed_json_response(upstream)
             upstream.close()
-            settlement = self._ledger.settle(self._run_id, request_id, usage)
+            settlement = self._ledger.settle(
+                self._run_id,
+                request_id,
+                usage,
+                model=request_metadata["model"],
+            )
             self._save_observation(request_id, request_metadata, status, settlement)
             handler.send_response(status)
             handler.send_header("Content-Type", content_type)
@@ -875,7 +969,47 @@ def _validated_lite_header(headers: Any) -> bool:
     return True
 
 
-def _inspect_request(body: bytes, declared_role: str | None) -> dict[str, Any]:
+def _validated_user_agent(headers: Any) -> str:
+    """Return one safe downstream User-Agent for the compatible upstream."""
+
+    values = headers.get_all("User-Agent", [])
+    if len(values) != 1 or not isinstance(values[0], str):
+        raise ApiBudgetProxyError("exactly one User-Agent header is required")
+    value = values[0]
+    try:
+        encoded = value.encode("ascii", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise ApiBudgetProxyError("User-Agent header is invalid") from exc
+    if not encoded or len(encoded) > _MAX_USER_AGENT_BYTES:
+        raise ApiBudgetProxyError("User-Agent header is invalid")
+    if any(byte < 0x20 or byte > 0x7E for byte in encoded):
+        raise ApiBudgetProxyError("User-Agent header is invalid")
+    return value
+
+
+def _validated_originator(headers: Any) -> str | None:
+    """Forward one bounded printable Codex originator when it is present."""
+
+    values = headers.get_all("originator", [])
+    if not values:
+        return None
+    if len(values) != 1 or not isinstance(values[0], str):
+        raise ApiBudgetProxyError("originator header is invalid")
+    value = values[0]
+    try:
+        encoded = value.encode("ascii", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise ApiBudgetProxyError("originator header is invalid") from exc
+    if not encoded or len(encoded) > _MAX_ORIGINATOR_BYTES:
+        raise ApiBudgetProxyError("originator header is invalid")
+    if any(byte < 0x20 or byte > 0x7E for byte in encoded):
+        raise ApiBudgetProxyError("originator header is invalid")
+    return value
+
+
+def _inspect_request(
+    body: bytes, declared_role: str | None, *, main_model: str = OFFICIAL_MODEL
+) -> dict[str, Any]:
     try:
         value = json.loads(body)
     except (UnicodeError, json.JSONDecodeError) as exc:
@@ -883,8 +1017,6 @@ def _inspect_request(body: bytes, declared_role: str | None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ApiBudgetProxyError("request body must be a JSON object")
     model = value.get("model")
-    if model != OFFICIAL_MODEL:
-        raise ApiBudgetProxyError("request model differs from the frozen Luna contract")
     stream = value.get("stream", False)
     if not isinstance(stream, bool):
         raise ApiBudgetProxyError("stream must be boolean")
@@ -918,11 +1050,10 @@ def _inspect_request(body: bytes, declared_role: str | None) -> dict[str, Any]:
         role_provenance = "inferred"
     else:
         raise ApiBudgetProxyError("declared request role is invalid")
-    contract_match = model == OFFICIAL_MODEL and (
-        role == "main" or (role == "guardian" and effort == "low")
-    )
-    if role == "guardian" and not contract_match:
-        raise ApiBudgetProxyError("guardian request is not Luna with low reasoning effort")
+    expected_model = main_model if role == "main" else GUARDIAN_MODEL
+    contract_match = model == expected_model and (role == "main" or effort == "low")
+    if not contract_match:
+        raise ApiBudgetProxyError("request model or Guardian effort differs from the frozen pair")
     input_value = value.get("input")
     if isinstance(input_value, list):
         input_kind = "array"
@@ -983,6 +1114,46 @@ def _usage_from_json_bytes(body: bytes) -> Usage | None:
         return None
 
 
+def _read_completed_json_response(upstream: Any) -> tuple[bytes, Usage | None]:
+    """Read one bounded JSON response without waiting for keep-alive EOF."""
+
+    body = bytearray()
+    read1 = getattr(upstream, "read1", None)
+    while len(body) <= _MAX_RESPONSE_BYTES:
+        remaining = _MAX_RESPONSE_BYTES + 1 - len(body)
+        if remaining <= 0:
+            break
+        if callable(read1):
+            chunk = read1(min(8192, remaining))
+        else:
+            # A one-byte fallback preserves the no-EOF contract for injected
+            # transports that do not expose BufferedIOBase.read1().
+            chunk = upstream.read(1)
+        if not chunk:
+            break
+        body.extend(chunk)
+        if len(body) > _MAX_RESPONSE_BYTES:
+            break
+        try:
+            text = bytes(body).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            if exc.reason == "unexpected end of data" and exc.end == len(body):
+                continue
+            break
+        start = len(text) - len(text.lstrip())
+        try:
+            value, end = json.JSONDecoder().raw_decode(text, start)
+        except json.JSONDecodeError:
+            continue
+        if text[end:].strip():
+            break
+        usage = None
+        if isinstance(value, dict) and value.get("status") == "completed":
+            usage = _usage_from_json_bytes(bytes(body))
+        return bytes(body), usage
+    return bytes(body), None
+
+
 def _parse_usage(value: object) -> Usage:
     if not isinstance(value, dict):
         raise ApiBudgetProxyError("response usage is missing")
@@ -1010,6 +1181,8 @@ class _SseUsageCollector:
     def __init__(self) -> None:
         self._buffer = bytearray()
         self.usage: Usage | None = None
+        self.terminal_seen = False
+        self.completed = False
 
     def feed(self, chunk: bytes) -> None:
         self._buffer.extend(chunk)
@@ -1029,14 +1202,39 @@ class _SseUsageCollector:
             self._buffer.clear()
 
     def _consume(self, event: bytes) -> None:
+        event_names = [
+            line[6:].strip()
+            for line in event.splitlines()
+            if line.startswith(b"event:")
+        ]
         data = b"\n".join(
             line[5:].lstrip() for line in event.splitlines() if line.startswith(b"data:")
         )
         if not data or data == b"[DONE]":
             return
+        try:
+            value = json.loads(data)
+        except (UnicodeError, json.JSONDecodeError):
+            return
+        if not isinstance(value, dict):
+            return
+        event_type = value.get("type")
+        if event_type not in {
+            "response.completed",
+            "response.failed",
+            "response.incomplete",
+            "error",
+        }:
+            return
+        self.terminal_seen = True
+        if event_type != "response.completed":
+            return
+        if event_names and event_names != [b"response.completed"]:
+            return
         parsed = _usage_from_json_bytes(data)
         if parsed is not None:
             self.usage = parsed
+            self.completed = True
 
 
 def _compatible_responses_endpoint(base_url: str) -> str:

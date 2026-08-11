@@ -20,6 +20,7 @@ from .compat import (
     with_prompt_template,
 )
 from .materialize import TERMINAL_BENCH_AGENT_USER
+from .verifier_runtime import VerifierRuntimeError, prepare_verifier_apt_dirs
 
 
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
@@ -195,6 +196,15 @@ class UploadBinaryAdapter(HarborCodexAgent):
         code_mode_host_source = Path(self.manifest.code_mode_host_path)
         bwrap_source = Path(self.manifest.bwrap_path)
         self.validate_local_binary()
+
+        try:
+            await prepare_verifier_apt_dirs(environment)
+        except VerifierRuntimeError:
+            raise _diagnostic_error(
+                stage="install",
+                command_id="prepare_verifier_apt",
+                stderr_summary="other_redacted",
+            ) from None
 
         await _checked_exec(
             environment,

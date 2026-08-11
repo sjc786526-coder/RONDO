@@ -33,6 +33,20 @@ TERMINAL_BENCH_AGENT_GID = 1000
 TERMINAL_BENCH_AGENT_USER = (
     f"{TERMINAL_BENCH_AGENT_UID}:{TERMINAL_BENCH_AGENT_GID}"
 )
+TERMINAL_BENCH_VERIFIER_USER = "root"
+TERMINAL_BENCH_VERIFIER_HOME = "/root"
+TERMINAL_BENCH_APT_CONFIG = "/tests/rondo-apt.conf"
+TERMINAL_BENCH_WORKDIR = "/app/personal-site"
+_APT_CONFIG_TEXT = 'APT::Sandbox::User "root";\n'
+_SOLUTION_ENV = {
+    "GIT_CONFIG_COUNT": "3",
+    "GIT_CONFIG_KEY_0": "safe.directory",
+    "GIT_CONFIG_VALUE_0": TERMINAL_BENCH_WORKDIR,
+    "GIT_CONFIG_KEY_1": "user.name",
+    "GIT_CONFIG_VALUE_1": "Test User",
+    "GIT_CONFIG_KEY_2": "user.email",
+    "GIT_CONFIG_VALUE_2": "test@example.com",
+}
 
 
 def _create_secret_placeholder(path: Path) -> None:
@@ -245,6 +259,11 @@ class PinnedTaskMaterializer:
         staging_root.chmod(0o700)
         _create_secret_placeholder(provider_secret)
         shutil.copytree(source_task, destination, symlinks=True)
+        (destination / "tests" / "rondo-apt.conf").write_text(
+            _APT_CONFIG_TEXT,
+            encoding="utf-8",
+        )
+        _normalize_phase_inputs(destination)
         verifier_script = destination / "tests" / "test.sh"
         verifier_metadata = verifier_script.lstat()
         if stat.S_ISLNK(verifier_metadata.st_mode) or not stat.S_ISREG(
@@ -271,6 +290,37 @@ class PinnedTaskMaterializer:
             ),
             encoding="utf-8",
         )
+        text = task_toml.read_text(encoding="utf-8")
+        verifier_needle = "[verifier]\n"
+        verifier_env_needle = "[verifier.env]\n"
+        solution_env_needle = "[solution.env]\n"
+        if (
+            text.count(verifier_needle) != 1
+            or text.count(verifier_env_needle) != 1
+            or text.count(solution_env_needle) != 1
+        ):
+            raise MaterializationError("task verifier metadata is missing or ambiguous")
+        text = text.replace(
+            verifier_needle,
+            f'{verifier_needle}user = "{TERMINAL_BENCH_VERIFIER_USER}"\n',
+        ).replace(
+            verifier_env_needle,
+            (
+                f'{verifier_env_needle}HOME = "{TERMINAL_BENCH_VERIFIER_HOME}"\n'
+                f'APT_CONFIG = "{TERMINAL_BENCH_APT_CONFIG}"\n'
+                'TAR_OPTIONS = "--no-same-owner"\n'
+            ),
+        ).replace(
+            solution_env_needle,
+            (
+                solution_env_needle
+                + "".join(
+                    f"{key} = {json.dumps(value)}\n"
+                    for key, value in _SOLUTION_ENV.items()
+                )
+            ),
+        )
+        task_toml.write_text(text, encoding="utf-8")
         _validate_staged_task(_read_toml(task_toml))
 
         overlay.write_text(
@@ -363,6 +413,33 @@ def _read_toml(path: Path) -> dict:
     return document
 
 
+def _normalize_phase_inputs(task_path: Path) -> None:
+    """Keep frozen oracle/verifier inputs executable without container capabilities."""
+
+    expected_files = {
+        task_path / "solution" / "solve.sh": 0o555,
+        task_path / "tests" / "test.sh": 0o555,
+        task_path / "tests" / "test_outputs.py": 0o444,
+        task_path / "tests" / "rondo-apt.conf": 0o444,
+    }
+    for directory in (task_path / "solution", task_path / "tests"):
+        try:
+            metadata = directory.lstat()
+        except OSError as exc:
+            raise MaterializationError("frozen phase input directory is unavailable") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise MaterializationError("frozen phase input directory is unsafe")
+        directory.chmod(0o555)
+    for path, mode in expected_files.items():
+        try:
+            metadata = path.lstat()
+        except OSError as exc:
+            raise MaterializationError("frozen phase input is unavailable") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            raise MaterializationError("frozen phase input is unsafe")
+        path.chmod(mode)
+
+
 def _validate_task_metadata(document: dict) -> None:
     task = document.get("task")
     metadata = document.get("metadata")
@@ -409,6 +486,21 @@ def _validate_staged_task(document: dict) -> None:
     agent = document.get("agent")
     if not isinstance(agent, dict) or agent.get("user") != TERMINAL_BENCH_AGENT_USER:
         raise MaterializationError("staged task did not receive the pinned runtime user")
+    verifier = document.get("verifier")
+    solution = document.get("solution")
+    if (
+        not isinstance(verifier, dict)
+        or verifier.get("user") != TERMINAL_BENCH_VERIFIER_USER
+        or verifier.get("env")
+        != {
+            "HOME": TERMINAL_BENCH_VERIFIER_HOME,
+            "APT_CONFIG": TERMINAL_BENCH_APT_CONFIG,
+            "TAR_OPTIONS": "--no-same-owner",
+        }
+        or not isinstance(solution, dict)
+        or solution.get("env") != _SOLUTION_ENV
+    ):
+        raise MaterializationError("staged verifier identity differs from the pinned root phase")
 
 
 def _validate_dataset_manifest(document: dict) -> None:

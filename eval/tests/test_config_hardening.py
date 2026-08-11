@@ -25,7 +25,7 @@ OPENAI_CONFIG = """\
 api = "responses"
 base_url = "https://provider.example/v1"
 api_key_env = "OPENAI_API_KEY"
-main_model = "gpt-5.6-luna"
+main_model = "gpt-5.6-sol"
 guardian_model = "gpt-5.6-luna"
 guardian_reasoning_effort = "low"
 """

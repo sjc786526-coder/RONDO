@@ -61,7 +61,7 @@ from .runner import (
 
 
 NO_API_SMOKE_BEARER = "rondo-terminal-bench-no-api-smoke"
-NO_API_SMOKE_MODEL = "gpt-5.6-luna"
+NO_API_SMOKE_MODEL = "gpt-5.6-sol"
 NO_API_SMOKE_CALL_ID = "rondo-code-mode-smoke-call"
 NO_API_SMOKE_MARKER = "rondo_code_mode_smoke"
 NO_API_SMOKE_COMMAND = (

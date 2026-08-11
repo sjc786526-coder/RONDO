@@ -1,0 +1,261 @@
+# Plan 012 provider/verifier 与 B3/M1 最小链路日志
+
+## 1. 起点与边界
+
+- Plan 011 readiness `e50a2343df7e08a96874d31ab0e4ada96b6a09ca` 和 results
+  `c3411b9b77227e20ca2892ddc4b0245fe5d8a3be` 已分别合并；本地与远端 main 均为
+  `7bb03d0e23bcbc27dd49e66485652a502e44b0d5`。
+- v7 的 failed/blocked pair、budget reservation、artifact 和 append-only result 原样保留，没有复用或改写。
+- 本批禁止 Cargo、本地模型、Docker pull/build、自动重试和隔离边界放宽。真实探针保持极小且严格串行；最多两个
+  新 paid pair，每个 RONDO→Codex 各一次、零重试、5 USD/run、10 USD/pair。探针与 benchmark 的新增费用按官方
+  Luna 价格合计不得超过 20 USD；第二 pair 仅限明确基础设施故障修复后的重验。
+- `.env.local` 未被打开、搜索、打印或复制；只通过既有严格 loader 静默确认目标 credential 可用。
+
+## 2. 直接阻塞修复
+
+### Provider transport
+
+- 找到真实根因：`LoopbackResponsesProxy` 默认虽为 120 秒，paid live 路径却把 Harbor 的 1800 秒 task timeout
+  显式传入，导致 Agent 先结束而 upstream request 仍 reserved。
+- 上游 transport deadline 现独立固定为 90 秒；构造器拒绝更长值，paid live 不再复用 task timeout。
+- SSE relay 改为有界逐行读取，只在完整 `response.completed` 且 usage 合法时结算成功并主动关闭 upstream，
+  不再等待 `[DONE]` 或 EOF。timeout、断连、失败/不完整终态和非法 usage 仍按原预算合同结算并停 run。
+- 新增保持 TCP 连接不关闭的 SSE fake，以及 headers 前 timeout fake；前者在 upstream EOF 前返回并 settlement，
+  后者得到安全 502、reservation 归零并按最大 reservation 结算。
+
+### Verifier 与 oracle
+
+- frozen fix-git staging 现在明确写入 `[verifier] user="root"` 与 `[verifier.env] HOME="/root"`，并在消费端
+  精确复核；Compose service 和 `[agent].user` 保持 `1000:1000`。
+- 新增严格 oracle command：只允许 `harbor trials start ... --agent oracle --delete`，不含 model、provider kwarg、
+  agent env 或真实 key；复用既有 DockerSupervisor、pinned image、custom seccomp、资源限制和 cleanup。
+- oracle 结果必须解析 exact `result.json` 并满足 completed + reward=1，不能只看 Harbor host return code。
+
+### 小额 provider 探针
+
+- 新入口固定三步：authenticated `/models` status、non-stream Responses、stream Responses。两次 Responses 均为
+  Luna + low、`max_output_tokens=64`，通过 loopback budget proxy 和 host-only key；不保存或打印响应正文。
+- 探针使用一个 max 1 USD、单 run、零重试 ledger；redirect、非 2xx、timeout、terminal/usage 缺失或未 settlement
+  会立即停止后续请求。
+
+## 3. 当前验证
+
+- `just eval-sync`：按 `uv.lock` 安装 83 个包到本 worktree ignored `.venv`。
+- `just eval-lock`：85 packages。
+- focused proxy/provider/Terminal-Bench：45/45。
+- `just eval-test`：270/270。
+- `py_compile` 与 `git diff --check`：通过。
+- 未运行 Docker、真实 API、Cargo 或模型；未创建 Plan 012 probe ledger、v8 pair/budget/run 或 metrics。
+
+## 4. 下一步
+
+1. 从 clean Plan 012 commit 在 watchdog 内运行一次 oracle，要求 reward=1。
+2. oracle 通过后运行现有 RONDO→Codex no-API；三者合计最多三个 Docker task run。
+3. Docker 门禁通过后运行唯一三请求/1 USD provider 探针；任一异常停止。
+4. 只有以上全部通过才冻结 v8 并执行授权的唯一 paid pair；双侧 completed 后才运行 M1。
+
+## 5. Docker 尝试 0（未进入 Docker）
+
+- clean commit `6a36560ce76550f8361ab07d68b445514e5c389c` 的首次 oracle 命令在 watchdog 内建立了
+  `plan012-oracle-verifier/20260810-234558-1000-77761`，随后在 Harbor 安装预检处因 CLI 漏传 frozen
+  executable 参数直接返回 1。
+- watcher `status=1/command_status=1`、`stop=none/cleanup=none`；没有启动 Docker、没有读取 key、没有 API
+  或费用，因此不计入三个 Docker task run。
+- 只补齐 `validate_harbor_installation(..., executable=HARBOR_EXECUTABLE)`，不改变任何执行或隔离合同；后续使用
+  全新的 metrics 目录。
+
+## 6. Oracle Docker 运行 1（失败并已清理）
+
+- clean commit `9eba57031c9f642f8d5b2a8ef5ec3a606427bb1c` 在规范 watchdog 内启动了一个 pinned
+  fix-git 容器；没有 API 请求、没有加载 key，费用为 0。
+- Docker 有效态门禁通过：exact pinned image、UID/GID `1000:1000`、`cap_drop=ALL`、private cgroup、custom
+  seccomp、2 GiB memory、3 GiB memory+swap、256 pids。容器、network 与 volume 最终均为 0，cleanup 为
+  `verified_empty`；watchdog 自身没有资源停机或清理异常。
+- Harbor structured result 为 `infra_failed`：oracle stdout 是 `/solution/solve.sh: Permission denied`，verifier
+  stdout 是 `/tests/test.sh: Permission denied`，最终 `RewardFileNotFoundError`。未把 reward=0 冒充验收通过。
+- 根因是冻结 checkout 的 `solution/`、`tests/` 目录为 `0700`，`solve.sh` 为 `0600`。文件由 UID 1000 上传后，
+  UID 1000 oracle 无执行位；root verifier 在 `cap_drop=ALL` 下也没有 `DAC_OVERRIDE/FOWNER` 去穿越或修正这些
+  UID 1000 拥有的目录。
+- 最小修复只在 task staging 中把固定 `solution/`、`tests/` 目录规范化为 `0555`，两个 shell 脚本为 `0555`，
+  verifier Python 输入为 `0444`。没有增加 capability、改变容器用户或放宽 seccomp；相关 materializer 回归
+  19/19 通过。
+
+## 7. Oracle Docker 运行 2（评分失败并已清理）
+
+- clean commit `53bc705c66dc86ddee2691278fec5a38e1078425` 的第二次运行已正常完成 oracle 与 verifier
+  生命周期，Harbor host return code 为 0，但可信 verifier 明确给出 `reward=0`，所以入口返回失败。
+- Oracle 的三个 Git 命令均被 `detected dubious ownership` 拒绝；verifier 已以 root、`HOME=/root` 启动，但
+  `apt` 默认尝试切换 `_apt` 用户，在 `cap_drop=ALL` 下被 setuid/setgid 门禁拒绝，继而 curl/uvx 不存在。
+- Docker 仍使用同一 pinned image/UID/cap/seccomp/private-cgroup/resource 合同，最终 cleanup 为
+  `verified_empty`；没有 API 请求、key 加载或费用。
+- 直接修复不修改 frozen `solve.sh`/`test.sh`：`solution.env` 只为 `/app/personal-site` 投影 scoped Git
+  `safe.directory`；`verifier.env` 增加 `/tests/rondo-apt.conf`，内容仅令 apt sandbox 保持 root，避免新增
+  `SETUID/SETGID/CHOWN/DAC_OVERRIDE` capability。配置文件随 tests 以 `0444` 上传并由 materializer 精确复核。
+
+## 8. Oracle Docker 运行 3（评分失败并已清理）
+
+- clean commit `43cab287b8bac6f5282128f9fc7a42355a1cfe14` 的运行证明脚本权限和 Git trust 已生效，但 oracle
+  写 `.git/index.lock` 时仍因 root-owned repository 不可写而失败。
+- apt sandbox 已保持 root，不再出现 setuid/setgid 错误；剩余失败是三个 `_apt` 所有的 cache/list 目录在
+  `cap_drop=ALL` 下不可由 root 改写，因而 update 未刷新旧 package index，curl 安装得到 404。
+- 运行产生可信 `reward=0`、watchdog `run_rc=65`；Docker effective contract 与 exact cleanup 再次通过，API/key/
+  cost 仍为 0。
+- 下一处修复复用产品 adapter 已有的精确 workdir `a+rwX` 做法，为 frozen Oracle 提供一个仅含 filesystem
+  preflight 的薄 subclass；apt 的三个固定 cache 目录只接受实际 owner `root` 或 Debian `_apt`，再由该 owner
+  改为 verifier 所需的可写模式。paid adapters 复用同一 apt 准备函数。没有增加 capability、修改 frozen
+  solution/verifier 或改变 agent UID。
+
+## 9. Oracle Docker 运行 4（容器创建前失败）
+
+- clean commit `cf39e46` 的 Harbor 进程创建了 trial lock，但在任何 task container 出现前退出；supervisor 因
+  `host harness task container was never observed` 返回 70。没有 Docker 对象、API 或费用。
+- 原因是 Harbor 0.20 仅在 agent name 字面等于内置 `oracle` 时注入 `task_dir/trial_paths`；import-path subclass
+  未收到 Oracle 构造所需参数。修复后 `task_dir` 是唯一非密钥 `--agent-kwarg`，`trial_paths` 从 Harbor 提供的
+  `logs_dir` 确定性派生，timeout 仍是 frozen 900 秒。
+- 使用失败 trial 的 frozen staging 做了无 Docker 构造复现，`PreparedOracleAgent` 已能完成构造；相关 Terminal-
+  Bench 单测 19/19 通过。
+
+## 10. Oracle Docker 运行 5（评分失败并已清理）
+
+- clean commit `b8ac152c3f60a46d3b5e806db7e47a9f00a1413a` 已完整运行 prepared oracle 与 root verifier。
+  Oracle 成功创建/切换 recovery branch，最后仅因 UID 1000 没有 Git author identity 而无法 merge commit。
+- verifier 的 apt update 与 curl 安装均成功；uv installer 解包时 GNU tar 尝试恢复 archive UID/GID，在
+  `cap_drop=ALL` 下被拒绝，故 uvx 未安装、reward=0。该结果不是 Agent 性能失败。
+- Docker contract/metrics/cleanup 仍完整，API/key/cost 为 0。修复只在 scoped `solution.env` 增加 frozen image
+  同值的 `Test User/test@example.com`，在 `verifier.env` 增加 `TAR_OPTIONS=--no-same-owner`；不修改 frozen
+  脚本、不授予 chown/setuid 能力。
+
+## 11. Oracle Docker 运行 6（通过）
+
+- clean commit `0fe5d2b725bae40886c8adc5f149f080fe913771` 完成 frozen solution，可信 root verifier 通过
+  pytest 并产出 `reward=1`；Harbor outcome/task_outcome 分别为 `completed/pass`。
+- Agent/oracle 仍为 UID/GID 1000，verifier 仅阶段性使用 root；pinned image、`cap_drop=ALL`、private cgroup、
+  custom seccomp、2/3 GiB memory/swap 与 256 pids 均由 daemon facts 复核。CPU 4.164891 秒、peak memory
+  335413248 bytes；cleanup 为 `verified_empty`，Docker/VHDX 没有新增占用。
+- 六次 no-API 诊断额度已用完；本批没有再启动额外 no-API Docker。Oracle/Verifier 门禁已成立。
+
+## 12. Provider 探针 1（Models API 无终态）
+
+- 配置驱动的 authenticated `GET /models` 在 90 秒有界 transport 内没有取得 HTTP status，入口返回
+  `models endpoint transport failed`；non-stream/stream 两个 Responses 请求未执行。
+- 失败发生在 budget ledger 创建前，因此没有 reservation、token usage 或费用；空的私有 one-shot 输出目录
+  `eval-data/provider-probes/plan012-v8` 保留，不复用。
+- 供应商教程只承诺 OpenAI Responses-compatible `/v1/responses`，不承诺 Models API。后续不重试 `/models`，
+  而是把剩余两次授权分别用于 non-stream 与 stream Responses；新 one-shot 目录为
+  `plan012-v8-responses`，两请求仍共享 1 USD hard cap。对应 loopback 回归 25/25 通过。
+
+## 13. Provider 探针 2（Responses 无 HTTP 终态）
+
+- 新 one-shot `plan012-v8-responses` 的 non-stream Responses 请求通过全部本地请求合同并完成 `$0.755400`
+  reservation；90 秒内上游没有返回 HTTP status，代理以去敏 502 收束。stream 请求未执行。
+- ledger 已把该 request 结算为 usage invalid、run stopped，`reserved_usd=0`；按冻结官方价格计入本阶段的保守费用为
+  `$0.755400`，中转站账单实扣未知且未猜测。该 one-shot 目录不复用。
+- 直接兼容根因是代理把冻结 Codex 的 `codex_cli_rs/...` User-Agent 覆盖为自身身份；供应商兼容说明明确将 Codex
+  User-Agent 作为路由/排障条件。代理现只接受一个长度受限的可打印 ASCII User-Agent，并逐字转发；provider probe
+  使用冻结 Codex 形状。实现仍由通用 HTTPS base URL 配置驱动，没有供应商域名或专用类型。
+- 新探针 identity/output 为 `plan012-provider-responses-r2` / `plan012-v8-responses-r2`。focused proxy/provider/
+  Terminal-Bench 回归 45/45 通过；尚未发出 r2 真实请求。
+
+## 14. Provider 探针 3（明确 HTTP 503）
+
+- clean `4ba05f8` 的 r2 non-stream 请求在一秒内收到上游 HTTP 503，证明 Codex User-Agent 已使请求进入明确的
+  上游响应路径；stream 请求按停止规则没有发送。
+- r2 ledger 已结算为 usage invalid、run stopped，`reserved_usd=0`，保守计价 `$0.755400`。连同上一轮，本阶段
+  已按官方价格保守计入 `$1.510800`；中转站实扣仍未知且未猜测。
+- 供应商公开故障说明把 503 归为 `model_not_found`/当前渠道不可用。下一步仅运行一次不生成 token、丢弃正文的
+  authenticated `/models` 状态探测，并使用同一 Codex User-Agent；它只区分 key/分组端点是否整体可达，不重复
+  Responses 或绕过 Luna 固定模型。
+
+## 15. Provider 状态探测与停止结论
+
+- clean `9b814c6` 使用严格 loader 和 Codex User-Agent 运行一次 authenticated `/models` 状态检查；90 秒内仍未取得
+  HTTP status。该请求不生成 token、不创建 budget reservation，响应正文未保存或打印。
+- 当前可复核组合是：旧 UA 的 Responses 无终态；转发 Codex UA 后 Responses 明确 HTTP 503；旧/新 UA 的
+  `/models` 均无终态。CCTQ 公开文档将 503 说明为 `model_not_found`/当前渠道不可用，同时指出 token 分组、模型和
+  Codex UA 必须匹配。由于本任务刻意不读取错误正文，不能把具体 error subtype 冒充为本地实测值。
+- 这已经超出可由 proxy/verifier/eval harness 直接修复的范围；按授权中的供应商错误停止条件，不再更换 ID 发出
+  Responses，不创建 paid pair，不运行 Codex 或 M1。两个 Responses probe 均 settled、无悬挂 reservation，按官方
+  Luna 价格的保守累计为 `$1.510800`，中转站实际账单未查询也未猜测。
+
+## 16. Plan 012 最终能力边界
+
+- 已成立：90 秒 transport 收敛、SSE terminal+usage 提前结束、通用 User-Agent 转发、host-only key、root verifier
+  与 UID1000 agent 分离、frozen oracle reward=1、Docker 精确 cleanup。
+- 未成立：配置所指 provider 的 Luna terminal response + usage、任何新 paid pair、双侧 B3、M1、自然 Guardian
+  `E_final`/S2。没有伪造 `E_final`，也没有把 oracle 或 503 探针冒充 B3 成绩。
+- 最终轻量门禁：`just eval-test` 271/271，`just eval-lock` 85 packages，`git diff --check` 通过；最终收口没有再
+  运行 Docker、Cargo、模型或真实 API。
+
+## 17. Sol/Terra 可用性与传输根因
+
+- 用户在供应商侧确认一次 Sol 非流请求实际成功。为避免手写请求形状误导判断，后续用冻结 Codex v0.147 真实 wire
+  做最小探针；不保存或输出响应正文、请求正文和 key。
+- Terra 的 stream/non-stream 均得到明确 HTTP 403；未把它写入本地配置或 pair。Sol 的 direct transport 仍在
+  90 秒内无 HTTP 终态，但保留宿主已有网络代理、仅为 loopback 设置 `NO_PROXY` 后，真实 frozen-Codex 请求在
+  14.3 秒内成功：`turn.completed=1`、request count 1、usage valid、reservation 归零、按官方 Sol 费率结算
+  `$0.016095`。
+- 根因是当前区域到配置所指 provider 的 authenticated 长响应直连不稳定；短时无认证 401 可达不能证明真实响应链。
+  CCTQ 的公开排障文档也提示部分地区会断连并建议使用代理。正式 shell 因而保留宿主代理；Docker 子进程仍只得到
+  loopback base URL 和随机临时 bearer，不继承宿主代理，也不接触真实 key。
+- proxy 补齐冻结 Codex 的 `originator` 透传；非流 Responses 现在在解析出一个完整 `status=completed` JSON 且 usage
+  合法后结束，不再要求 upstream EOF。SSE 的 terminal+usage 提前收束保持不变。
+
+## 18. v8 readiness
+
+- frozen pair：`p1-fix-git-pair-v8`；budget batch：`p1-fix-git-b3-m1-v3`；任务仍为
+  `terminal-bench/fix-git`，RONDO slot 1 后 Codex slot 2，各一次、零重试。
+- run IDs：`20260811-090000000-tb-rondo-r1`、`20260811-090000001-tb-codex-r1`。
+- 主 Agent 为 `gpt-5.6-sol`；Codex v0.147 的 API-key Guardian 不能接受 RONDO 新增的 auto-review model override，
+  有效默认仍是 `gpt-5.6-luna`。为保持公平，RONDO Guardian 同样固定 Luna/low。若 Guardian 自然触发且 Luna 不可用，
+  按真实失败停止；不伪造 Sol Guardian 或 `E_final`。
+- 计价按实际请求模型：Sol `$5/$0.50/$30`，Luna `$0.20/$0.02/$1.20` 每百万 input/cached/output token。
+  reservation 受 5 USD/run 硬上限约束；pair 最多 10 USD，Plan 012 本地历史保守计价 `$7.570095`，因此唯一 v8
+  的最坏合计 `$17.570095 < 20`。失败探针是否产生供应商账单不作猜测。
+- 当前 config SHA 为 `eb110baabcce90a9dc8361655e358bdfd35a73d872dc4cacd2c569e5d3444898`，pair lock SHA 为
+  `3cc49caadc5ad6d2ed24e4df707c77c8f25152b3c2a874bd093449cc730e6089`。每侧前复核 config SHA；v8
+  pair/budget/work/metrics 均尚不存在。
+- 聚焦轻量门禁：proxy/provider 29/29，config/contracts/Terminal-Bench 85/85，`uv lock --check --offline`
+  85 packages；最终 `just eval-test` 273/273、`just eval-lock` 85 packages、`git diff --check` 通过。尚未执行
+  v8 Docker 或 M1。
+
+## 19. v8 RONDO 真实执行与硬停止
+
+- 从 clean readiness commit `0f88d7245cc63e33814e0d2539a68fe611b91bbf` 执行
+  `20260811-090000000-tb-rondo-r1`；pair/batch 分别为 `p1-fix-git-pair-v8` 与
+  `p1-fix-git-b3-m1-v3`。配置 SHA 与 pair lock SHA 均在启动前复核，无漂移。
+- 主 Agent 共发出 5 个声明且推断角色均为 `main` 的 Sol 请求，全部得到 HTTP 200、合法 terminal usage 并
+  settlement；对应本地计算费用依次为 `$0.074875`、`$0.027754`、`$0.022861`、`$0.016773`、
+  `$0.021193`。
+- RONDO 随后自然触发 Guardian。该请求声明/推断角色均为 `guardian`，模型为冻结公平合同要求的
+  `gpt-5.6-luna`、effort low；上游返回 HTTP 503 且无合法 usage。预算代理按 fail-closed 合同结算当时剩余的
+  `$4.836544` reservation，run 最终 `spent_usd=5.000000`、`reserved_usd=0`、
+  `stop_reason=missing_or_invalid_usage`。
+- run 以 exit 65 归档为 `infra_failed`，`actual_usd=null`、`estimated_usd=5.0`。v8 pair 已
+  `failed/blocked`、`next_slot=1`，只有 RONDO slot 1；零重试合同阻止 Codex slot 2，因此 M1 未运行。
+- Guardian 没有完成，故不存在可保存的 `E_final/meta`；没有伪造 E_final，也没有把 S2 写成已验收。失败直接说明
+  当前公平组合的主 Sol 可用而 Guardian Luna 不可用；把 RONDO Guardian 单独改成 Sol 会破坏与冻结 Codex 的公平性，
+  不作为本 pair 的修复或重跑理由。
+- watchdog `rondo-build-1000-20260811085847-50122.scope` 完成，`stop_reason=none`、
+  `cleanup_reason=none`；运行前后 Windows C: 可用字节为 `195236925440` / `195236298752`，memory peak
+  `1997164544` bytes，swap peak 0。最终 scope 为 inactive，精确 task label 下容器/网络/卷均为空；全局
+  `docker system df` 为 0 containers、0 local volumes，未清理任何既有 image/build cache。
+- 本阶段既有探针 `$7.570095` 加 v8 `$5.000000` 后，本地保守计价累计 `$12.570095`，全部 reservation 已
+  收敛；中转站实际账单没有查询或猜测。剩余本地授权空间不足以覆盖另一个完整的 10 USD pair，且本次属于明确的
+  Guardian 模型可用性边界，因此停止，不创建替代 pair。
+
+## 20. 失败角色计数与 Terra 小探针
+
+- v8 append-only 历史行保持不变。后续 exceptional publication 将“声明角色有效”与“全部 usage 有效”分开：
+  合法声明的请求仍逐项计入 `api_request_roles`，任一 usage invalid 时 `metadata_ready` 继续为 false。回归覆盖
+  5 个 main + 1 个 usage-invalid Guardian，期望计数 `main=5/guardian=1`。
+- provider probe 可从本地配置选择 Sol 或 Terra；paid pair 默认模型仍是冻结 Sol。Terra 按 2026-08-10 OpenAI
+  官方页面的 `$2/$0.20/$12` 每百万 input/cached/output token 计价，provider、base URL、credential loader、
+  role、timeout 与 redirect 边界均未改变。
+- 首次 `plan012-terra-availability-r1` 被开发沙箱在外网连接前中断，不作为供应商结果；其 `$0.25` reservation 已
+  按 interrupted-request 合同结算并停止。随后沙箱外的 `r2` 非流请求在约 6 秒内得到 HTTP 403、usage invalid，
+  同样结算 `$0.25` 并停止，因此未发送流式第二请求。不能由此声称 Terra 模型全局不可用，只能确认当前配置、
+  Codex User-Agent 和 credential 组合返回 403。
+- ignored `rondo.local.toml` 已恢复 `gpt-5.6-sol`；两个 Terra ledger 均无 active reservation，响应正文和 key
+  未保存或输出。本阶段本地保守累计由 `$12.570095` 增至 `$13.070095`，实际中转账单仍未知。
+- 聚焦 pure/fake/loopback 门禁 63/63 通过，`py_compile` 与 `git diff --check` 通过；未运行 Docker、Cargo 或
+  本地模型。

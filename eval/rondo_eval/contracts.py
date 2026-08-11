@@ -130,7 +130,7 @@ class ProviderProjection:
         if not _ENV_NAME.fullmatch(self.api_key_env):
             raise ContractError("provider api_key_env is invalid")
         if (
-            self.main_model != "gpt-5.6-luna"
+            self.main_model != "gpt-5.6-sol"
             or self.guardian_model != "gpt-5.6-luna"
             or self.guardian_effort != "low"
         ):

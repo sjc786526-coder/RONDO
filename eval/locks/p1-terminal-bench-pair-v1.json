@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "pair_id": "p1-fix-git-pair-v7",
+  "pair_id": "p1-fix-git-pair-v8",
   "modes": {
     "paid": {
       "enabled": true,
-      "batch_id": "p1-fix-git-b3-m1-v2",
+      "batch_id": "p1-fix-git-b3-m1-v3",
       "disabled_reason": null
     }
   },
@@ -13,13 +13,13 @@
       "slot": 1,
       "side": "rondo",
       "round": 1,
-      "paid_run_id": "20260810-233000000-tb-rondo-r1"
+      "paid_run_id": "20260811-090000000-tb-rondo-r1"
     },
     {
       "slot": 2,
       "side": "codex",
       "round": 1,
-      "paid_run_id": "20260810-233000001-tb-codex-r1"
+      "paid_run_id": "20260811-090000001-tb-codex-r1"
     }
   ],
   "fairness": {
@@ -29,7 +29,7 @@
     "provider_id": "openai",
     "provider_api": "responses",
     "provider_api_key_env": "OPENAI_API_KEY",
-    "main_model": "gpt-5.6-luna",
+    "main_model": "gpt-5.6-sol",
     "guardian_model": "gpt-5.6-luna",
     "guardian_effort": "low",
     "approvals_reviewer": "auto_review",

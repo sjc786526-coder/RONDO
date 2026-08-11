@@ -207,7 +207,10 @@ class FakeHostExecutor:
 
 
 class FakeBudgetProxy:
+    last_kwargs: dict[str, object] = {}
+
     def __init__(self, **kwargs) -> None:
+        type(self).last_kwargs = dict(kwargs)
         self.kwargs = kwargs
         kwargs["ledger"].ensure_run(kwargs["run_id"])
         self.docker_base_url = "http://host.docker.internal:43123/v1"
@@ -276,7 +279,7 @@ class TerminalBenchTests(unittest.TestCase):
                         "api": "responses",
                         "base_url": "https://provider.example/v1",
                         "api_key_env": "OPENAI_API_KEY",
-                        "main_model": "gpt-5.6-luna",
+                        "main_model": "gpt-5.6-sol",
                         "guardian_model": "gpt-5.6-luna",
                         "guardian_reasoning_effort": "low",
                     }
@@ -304,7 +307,7 @@ class TerminalBenchTests(unittest.TestCase):
         manifest = self.manifest()
         return adapter_type(
             logs_dir=self.root / "logs",
-            model_name="openai/gpt-5.6-luna",
+            model_name="openai/gpt-5.6-sol",
             binary_path=manifest.path,
             binary_sha256=manifest.sha256,
             binary_code_mode_host_path=manifest.code_mode_host_path,
@@ -508,7 +511,9 @@ class TerminalBenchTests(unittest.TestCase):
                     f"sha256sum -- {adapter.remote_code_mode_host_path}", commands
                 )
                 self.assertIn(f"sha256sum -- {adapter.remote_bwrap_path}", commands)
-                self.assertNotIn("apt", commands)
+                self.assertNotIn("apt-get", commands)
+                self.assertIn("/var/lib/apt/lists/partial", commands)
+                self.assertIn("/var/cache/apt/archives/partial", commands)
                 self.assertNotIn("command -v bwrap", commands)
                 self.assertIn(f"{adapter.remote_path} --version", commands)
                 self.assertTrue(environment.calls)
@@ -829,6 +834,7 @@ class TerminalBenchTests(unittest.TestCase):
         (task / "README.md").write_text("readme\n")
         (task / "environment" / "Dockerfile").write_text("FROM scratch\n")
         (task / "tests" / "test.sh").write_text("true\n")
+        (task / "tests" / "test_outputs.py").write_text("def test_ok():\n    pass\n")
         (task / "solution" / "solve.sh").write_text("true\n")
         (task / "task.toml").write_text(_TASK_TOML)
         (source / "tasks" / "dataset.toml").write_text(
@@ -877,11 +883,63 @@ class TerminalBenchTests(unittest.TestCase):
             (result.task_path / "tests" / "test.sh").stat().st_mode & 0o777,
             0o555,
         )
+        self.assertEqual(
+            (result.task_path / "solution").stat().st_mode & 0o777,
+            0o555,
+        )
+        self.assertEqual(
+            (result.task_path / "solution" / "solve.sh").stat().st_mode & 0o777,
+            0o555,
+        )
+        self.assertEqual(
+            (result.task_path / "tests").stat().st_mode & 0o777,
+            0o555,
+        )
+        self.assertEqual(
+            (result.task_path / "tests" / "test_outputs.py").stat().st_mode & 0o777,
+            0o444,
+        )
+        self.assertEqual(
+            (result.task_path / "tests" / "rondo-apt.conf").read_text(),
+            'APT::Sandbox::User "root";\n',
+        )
+        self.assertEqual(
+            (result.task_path / "tests" / "rondo-apt.conf").stat().st_mode & 0o777,
+            0o444,
+        )
         self.assertIn('user: "1000:1000"', overlay)
         self.assertIn("    cap_drop:\n      - ALL\n", overlay)
         self.assertEqual(result.runtime_user, "1000:1000")
         staged_document = materialize_module._read_toml(result.task_path / "task.toml")
         self.assertEqual(staged_document["agent"]["user"], "1000:1000")
+        self.assertEqual(staged_document["verifier"]["user"], "root")
+        self.assertEqual(
+            staged_document["verifier"]["env"],
+            {
+                "HOME": "/root",
+                "APT_CONFIG": "/tests/rondo-apt.conf",
+                "TAR_OPTIONS": "--no-same-owner",
+            },
+        )
+        self.assertEqual(
+            staged_document["solution"]["env"],
+            {
+                "GIT_CONFIG_COUNT": "3",
+                "GIT_CONFIG_KEY_0": "safe.directory",
+                "GIT_CONFIG_VALUE_0": "/app/personal-site",
+                "GIT_CONFIG_KEY_1": "user.name",
+                "GIT_CONFIG_VALUE_1": "Test User",
+                "GIT_CONFIG_KEY_2": "user.email",
+                "GIT_CONFIG_VALUE_2": "test@example.com",
+            },
+        )
+        for field, value in (("user", "1000:1000"), ("env", {"HOME": "/tmp"})):
+            with self.subTest(verifier_field=field):
+                original = staged_document["verifier"][field]
+                staged_document["verifier"][field] = value
+                with self.assertRaises(MaterializationError):
+                    materialize_module._validate_staged_task(staged_document)
+                staged_document["verifier"][field] = original
         object.__setattr__(
             result,
             "staged_task_digest",
@@ -1013,6 +1071,53 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(bound_contract.container.image_reference, FIX_GIT_IMAGE_REF)
         self.assertEqual(bound_contract.container.image_id, f"sha256:{'a' * 64}")
 
+    def test_supervised_oracle_uses_no_model_key_or_custom_agent(self) -> None:
+        prepared = self.prepare()
+        materialized = prepared.materialized_task
+        fake_supervisor = mock.Mock()
+        fake_supervisor.resolve_image_identity.return_value = DockerImageIdentity(
+            FIX_GIT_IMAGE_REF,
+            f"sha256:{'a' * 64}",
+        )
+        fake_supervisor.supervise_host_command.return_value = DockerExecutionResult(
+            operation=DockerOperation.HOST,
+            argv=(),
+            returncode=0,
+            samples=(),
+            warnings=(),
+        )
+        with mock.patch.object(runner_module, "SubprocessHostCommandRunner"), mock.patch.object(
+            runner_module, "DockerSupervisor", return_value=fake_supervisor
+        ):
+            executor = DockerSupervisedHostHarborExecutor(
+                counter=mock.Mock(),
+                lock_guard=mock.Mock(),
+                lease=HeavyLockLease(token="x" * 16, held=True),
+            )
+            result = asyncio.run(
+                executor.run_oracle(materialized, timeout_seconds=1800)
+            )
+
+        self.assertEqual(result.returncode, 0)
+        argv = fake_supervisor.supervise_host_command.call_args.args[1]
+        self.assertEqual(argv[1:3], ("trials", "start"))
+        self.assertEqual(
+            argv[argv.index("--agent") + 1],
+            "rondo_eval.terminal_bench.oracle_smoke:PreparedOracleAgent",
+        )
+        self.assertNotIn("--model", argv)
+        self.assertEqual(
+            argv[argv.index("--agent-kwarg") + 1],
+            f"task_dir={materialized.task_path}",
+        )
+        self.assertNotIn("--agent-env", argv)
+        self.assertEqual(materialized.provider_secret_path.read_bytes(), b"")
+        contract = fake_supervisor.supervise_host_command.call_args.kwargs[
+            "compose_contract"
+        ]
+        self.assertTrue(contract.container.require_container_metrics)
+        self.assertEqual(contract.container.user, "1000:1000")
+
     def test_budgeted_live_path_keeps_official_key_out_of_harbor_and_requires_evidence(self) -> None:
         jobs = self.root / "jobs"
         bundle = jobs / "trial" / "agent" / "guardian-evidence" / "review-1"
@@ -1093,6 +1198,11 @@ class TerminalBenchTests(unittest.TestCase):
             {"HARBOR_TELEMETRY": "off"},
         )
         self.assertNotIn("official-key-sentinel", "\0".join(observed["argv"]))
+        self.assertEqual(FakeBudgetProxy.last_kwargs["timeout_seconds"], 90.0)
+        self.assertNotEqual(
+            FakeBudgetProxy.last_kwargs["timeout_seconds"],
+            self.request(Side.RONDO).timeout_seconds,
+        )
 
     def test_prepare_rejects_every_non_b1_image_before_materialization(self) -> None:
         for value in (FIX_GIT_IMAGE_TAG, f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}", f"sha256:{'c' * 64}"):
@@ -1145,6 +1255,12 @@ memory_mb = 2048
 storage_mb = 10240
 gpus = 0
 allow_internet = true
+
+[verifier.env]
+
+[environment.env]
+
+[solution.env]
 '''
 
 

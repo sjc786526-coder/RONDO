@@ -170,13 +170,13 @@ class PairIdentityTests(unittest.TestCase):
             self.identity.no_api_seccomp.source_sha256,
         )
         paid = self.identity.mode("paid")
-        self.assertEqual(self.identity.pair_id, "p1-fix-git-pair-v7")
-        self.assertEqual(paid.batch_id, "p1-fix-git-b3-m1-v2")
+        self.assertEqual(self.identity.pair_id, "p1-fix-git-pair-v8")
+        self.assertEqual(paid.batch_id, "p1-fix-git-b3-m1-v3")
         self.assertEqual(
             [slot.paid_run_id for slot in self.identity.topology],
             [
-                "20260810-233000000-tb-rondo-r1",
-                "20260810-233000001-tb-codex-r1",
+                "20260811-090000000-tb-rondo-r1",
+                "20260811-090000001-tb-codex-r1",
             ],
         )
         self.assertNotIn("provider_base_url", self.identity.fairness)

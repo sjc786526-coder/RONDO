@@ -94,7 +94,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         *, side: Side = Side.CODEX, exit_code: int = 0
     ) -> RunPublicationContext:
         return RunPublicationContext(
-            pair_id="p1-fix-git-pair-v7",
+            pair_id="p1-fix-git-pair-v8",
             pair_lock_sha256="9" * 64,
             pair_slot=1 if side is Side.RONDO else 2,
             pair_round=1,
@@ -159,7 +159,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             api="responses",
             base_url="https://provider.example/v1",
             api_key_env="OPENAI_API_KEY",
-            main_model="gpt-5.6-luna",
+            main_model="gpt-5.6-sol",
             guardian_model="gpt-5.6-luna",
             guardian_effort="low",
             config_sha256="b" * 64,
@@ -648,6 +648,39 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertTrue(record["summary"]["metadata_ready"])
         self.assertEqual(
             record["summary"]["api_request_roles"], {"main": 1, "guardian": 1}
+        )
+
+    def test_claimed_failure_counts_declared_roles_when_one_usage_is_invalid(self) -> None:
+        run_id = "20260810-010000017-tb-rondo-r1"
+        paths = RepoPaths(self.root, self.root)
+        writer = ArtifactWriter(paths, run_id, results_worktree_root=self.root).start()
+        live_result = self._live_result(run_id)
+        metadata = self.root / "api-metadata.json"
+        self._write_metadata(metadata, *("main",) * 5, "guardian")
+        value = json.loads(metadata.read_text(encoding="utf-8"))
+        value["requests"][-1]["usage_valid"] = False
+        metadata.write_text(json.dumps(value) + "\n", encoding="utf-8")
+
+        publish_terminal_bench_failure(
+            paths,
+            writer=writer,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            manifest=live_result.prepared.spec.binary,
+            budget_snapshot=live_result.budget_snapshot,
+            metadata_path=metadata,
+            outcome=RunOutcome.INFRA_FAILED,
+            failure_stage="result",
+            publication=self._publication(exit_code=70, side=Side.RONDO),
+            secrets=("never-persist",),
+        )
+
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertFalse(record["summary"]["metadata_ready"])
+        self.assertEqual(
+            record["summary"]["api_request_roles"], {"main": 5, "guardian": 1}
         )
 
     def test_claimed_failure_archives_inferred_role_only_as_diagnostic(self) -> None:
@@ -1153,7 +1186,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             side_effect=DockerSupervisionError("redacted test failure")
         )
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v7",
+            pair_id="p1-fix-git-pair-v8",
             lock_sha256="9" * 64,
         )
         pair_identity.mode.return_value = SimpleNamespace(
@@ -1240,7 +1273,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             return measurement_paths if Path(start) == measurement_root else paths
 
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v7",
+            pair_id="p1-fix-git-pair-v8",
             lock_sha256="9" * 64,
         )
         pair_identity.mode.return_value = SimpleNamespace(
