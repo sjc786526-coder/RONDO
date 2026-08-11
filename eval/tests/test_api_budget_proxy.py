@@ -1434,9 +1434,29 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
                 ledger.claim_run("run-1")
 
     def test_invalid_state_and_over_authorized_configuration_fail_closed(self) -> None:
+        with PersistentBudgetLedger(
+            self.root / "formal-concurrent.json",
+            batch_id="formal-concurrent",
+            total_cap_usd="20",
+            default_run_cap_usd="10",
+        ) as ledger:
+            ledger.claim_run("rondo")
+            ledger.reserve("rondo", "main", amount_usd="5")
+            ledger.reserve("rondo", "guardian", amount_usd="5")
+            requests = ledger.snapshot()["runs"]["rondo"]["requests"]
+            self.assertEqual(
+                sum(Decimal(request["reserved_usd"]) for request in requests.values()),
+                Decimal("10.000000"),
+            )
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
-                self.root / "too-much.json", batch_id="bad", total_cap_usd="10.01"
+                self.root / "too-much.json", batch_id="bad", total_cap_usd="20.01"
+            )
+        with self.assertRaises(ApiBudgetProxyError):
+            PersistentBudgetLedger(
+                self.root / "too-much-run.json",
+                batch_id="bad-run",
+                default_run_cap_usd="10.01",
             )
         path = self.root / "bad-mode.json"
         path.write_text("{}", encoding="utf-8")

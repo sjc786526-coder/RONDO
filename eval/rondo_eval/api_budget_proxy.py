@@ -35,6 +35,8 @@ MAX_INPUT_TOKENS = 1_050_000
 MAX_OUTPUT_TOKENS = 128_000
 BATCH_CAP_USD = Decimal("10.00")
 RUN_CAP_USD = Decimal("5.00")
+_MAX_EXPLICIT_BATCH_CAP_USD = Decimal("20.00")
+_MAX_EXPLICIT_RUN_CAP_USD = Decimal("10.00")
 MAX_BENCHMARK_RUNS = 4
 _MONEY_QUANTUM = Decimal("0.000001")
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -218,10 +220,10 @@ class PersistentBudgetLedger:
         self.total_cap = _money(total_cap_usd)
         self.default_run_cap = _money(default_run_cap_usd)
         self.max_runs = max_runs
-        if self.total_cap <= 0 or self.total_cap > BATCH_CAP_USD:
-            raise ApiBudgetProxyError("batch cap exceeds the authorized 10 USD maximum")
-        if self.default_run_cap <= 0 or self.default_run_cap > RUN_CAP_USD:
-            raise ApiBudgetProxyError("run cap exceeds the authorized 5 USD maximum")
+        if self.total_cap <= 0 or self.total_cap > _MAX_EXPLICIT_BATCH_CAP_USD:
+            raise ApiBudgetProxyError("batch cap exceeds the authorized 20 USD maximum")
+        if self.default_run_cap <= 0 or self.default_run_cap > _MAX_EXPLICIT_RUN_CAP_USD:
+            raise ApiBudgetProxyError("run cap exceeds the authorized 10 USD maximum")
         if not isinstance(max_runs, int) or isinstance(max_runs, bool) or not 1 <= max_runs <= 4:
             raise ApiBudgetProxyError("benchmark run count exceeds the authorized maximum of four")
         self._lock = threading.RLock()

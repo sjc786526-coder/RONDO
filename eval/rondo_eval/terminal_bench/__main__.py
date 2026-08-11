@@ -49,7 +49,7 @@ from .results import (
 from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
 
 
-P1_BATCH_ID = "p1-fix-git-b4-m1-v2"
+P1_BATCH_ID = "p1-fix-git-b4-m1-v3"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -78,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
             raise ConfigError("measurement worktree belongs to another repository")
         pair_identity = load_pair_identity()
         paid_mode = pair_identity.mode("paid")
+        paid_budget = pair_identity.paid_budget
+        if paid_budget is None:
+            raise ConfigError("active paid pair is missing its budget identity")
         slot = pair_identity.slot_for(side)
         if args.batch_id != paid_mode.batch_id or args.run_id != slot.paid_run_id:
             raise ConfigError("run id or batch differs from the authorized paid pair")
@@ -150,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             provider_transport_base_url=None,
             timeout_seconds=args.timeout_seconds,
             max_retries=0,
-            budget_usd=5.0,
+            budget_usd=paid_budget.per_side_usd,
             seccomp_profile_path=str(seccomp_profile),
             seccomp_profile_source_sha256=pair_identity.no_api_seccomp.source_sha256,
             seccomp_profile_effective_sha256=pair_identity.no_api_seccomp.effective_sha256,
@@ -187,7 +190,12 @@ def main(argv: list[str] | None = None) -> int:
                 results_worktree_root=results_root,
                 run_id=args.run_id,
             ).start()
-            with PersistentBudgetLedger(ledger_path, batch_id=args.batch_id) as ledger:
+            with PersistentBudgetLedger(
+                ledger_path,
+                batch_id=args.batch_id,
+                total_cap_usd=paid_budget.pair_usd,
+                default_run_cap_usd=paid_budget.per_side_usd,
+            ) as ledger:
                 try:
                     ledger.claim_run(args.run_id)
                     claimed = True

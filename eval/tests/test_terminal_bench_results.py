@@ -104,7 +104,7 @@ class TerminalBenchResultTests(unittest.TestCase):
     ) -> RunPublicationContext:
         provider = self._live_result("publication-fixture").prepared.spec.provider
         return RunPublicationContext(
-            pair_id="p1-fix-git-pair-v10",
+            pair_id="p1-fix-git-pair-v11",
             pair_lock_sha256="9" * 64,
             pair_slot=1 if side is Side.RONDO else 2,
             pair_round=1,
@@ -1403,8 +1403,12 @@ class TerminalBenchResultTests(unittest.TestCase):
             side_effect=DockerSupervisionError("redacted test failure")
         )
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v10",
+            pair_id="p1-fix-git-pair-v11",
             lock_sha256="9" * 64,
+        )
+        pair_identity.paid_budget = SimpleNamespace(
+            per_side_usd=10.0,
+            pair_usd=20.0,
         )
         pair_identity.require_selected_profile.return_value.to_dict.return_value = {
             **live.prepared.spec.provider.to_public_dict(),
@@ -1502,8 +1506,12 @@ class TerminalBenchResultTests(unittest.TestCase):
             return measurement_paths if Path(start) == measurement_root else paths
 
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v10",
+            pair_id="p1-fix-git-pair-v11",
             lock_sha256="9" * 64,
+        )
+        pair_identity.paid_budget = SimpleNamespace(
+            per_side_usd=10.0,
+            pair_usd=20.0,
         )
         pair_identity.mode.return_value = SimpleNamespace(
             batch_id=terminal_bench_main.P1_BATCH_ID

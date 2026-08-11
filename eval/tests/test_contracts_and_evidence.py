@@ -385,7 +385,7 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             spec.validate()
         spec = self._spec(Side.CODEX)
-        object.__setattr__(spec, "budget_usd", 5.01)
+        object.__setattr__(spec, "budget_usd", 10.01)
         with self.assertRaises(ContractError):
             spec.validate()
         spec = self._spec(Side.CODEX)

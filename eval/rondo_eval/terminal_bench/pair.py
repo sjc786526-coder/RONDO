@@ -41,15 +41,19 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v3.json"
+PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v4.json"
 PREVIOUS_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v3.json"
+)
+CONSUMED_V9_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v2.json"
 )
 LEGACY_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
 )
-P1_PAIR_ID = "p1-fix-git-pair-v10"
-PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v9"
+P1_PAIR_ID = "p1-fix-git-pair-v11"
+PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v10"
+CONSUMED_V9_P1_PAIR_ID = "p1-fix-git-pair-v9"
 LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_V1_KEYS = {
@@ -824,9 +828,17 @@ def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentit
 
 
 def load_previous_pair_identity(path: Path = PREVIOUS_PAIR_LOCK_PATH) -> PairIdentity:
-    """Load the consumed v9 identity for read-only historical assessment."""
+    """Load the consumed v10 identity for read-only historical assessment."""
 
     return _load_pair_identity(path, schema_version=2, pair_id=PREVIOUS_P1_PAIR_ID)
+
+
+def load_consumed_v9_pair_identity(
+    path: Path = CONSUMED_V9_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the consumed v9 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V9_P1_PAIR_ID)
 
 
 def _load_pair_identity(
@@ -851,7 +863,11 @@ def _load_pair_identity(
         raise PairIdentityError("pair lock identity differs from P1")
     modes = _parse_modes(value["modes"])
     topology = _parse_topology(value["topology"], modes=modes)
-    fairness = _parse_fairness(value["fairness"], schema_version=schema_version)
+    fairness = _parse_fairness(
+        value["fairness"],
+        schema_version=schema_version,
+        pair_id=pair_id,
+    )
     harbor = _parse_harbor(value["harbor"])
     no_api_seccomp = _parse_no_api_seccomp(value["no_api_seccomp"])
     runtime_requirements = _parse_runtime_requirements(value["runtime_requirements"])
@@ -862,7 +878,7 @@ def _load_pair_identity(
         else None
     )
     paid_budget = (
-        _parse_paid_budget(value["paid_budget"])
+        _parse_paid_budget(value["paid_budget"], pair_id=pair_id)
         if schema_version == 2
         else None
     )
@@ -1304,7 +1320,13 @@ def _parse_topology(value: object, *, modes: Mapping[str, PairMode]) -> tuple[Pa
     return tuple(sorted(slots, key=lambda slot: slot.slot))
 
 
-def _parse_fairness(value: object, *, schema_version: int) -> dict[str, object]:
+def _parse_fairness(
+    value: object,
+    *,
+    schema_version: int,
+    pair_id: str,
+) -> dict[str, object]:
+    budget_usd = 10.0 if pair_id == P1_PAIR_ID else 5.0
     expected = {
         "task_id": FIX_GIT_TASK_ID,
         "task_image_digest": FIX_GIT_IMAGE_DIGEST,
@@ -1317,7 +1339,7 @@ def _parse_fairness(value: object, *, schema_version: int) -> dict[str, object]:
         "code_mode_host": True,
         "timeout_seconds": 1800,
         "max_retries": 0,
-        "budget_usd": 5.0,
+        "budget_usd": budget_usd,
     }
     keys = _FAIRNESS_V2_KEYS
     if schema_version == 1:
@@ -1339,18 +1361,20 @@ def _parse_fairness(value: object, *, schema_version: int) -> dict[str, object]:
     return dict(value)
 
 
-def _parse_paid_budget(value: object) -> PaidBudgetIdentity:
+def _parse_paid_budget(value: object, *, pair_id: str) -> PaidBudgetIdentity:
     if not isinstance(value, dict) or set(value) != _PAID_BUDGET_KEYS:
         raise PairIdentityError("paid pair budget differs from schema v2")
     per_side = value["per_side_usd"]
     pair = value["pair_usd"]
+    expected_per_side = 10.0 if pair_id == P1_PAIR_ID else 5.0
+    expected_pair = expected_per_side * 2.0
     if (
         isinstance(per_side, bool)
         or not isinstance(per_side, (int, float))
         or isinstance(pair, bool)
         or not isinstance(pair, (int, float))
-        or float(per_side) != 5.0
-        or float(pair) != 10.0
+        or float(per_side) != expected_per_side
+        or float(pair) != expected_pair
     ):
         raise PairIdentityError("paid pair budget differs from Plan 014")
     return PaidBudgetIdentity(float(per_side), float(pair))
