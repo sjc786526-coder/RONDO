@@ -226,6 +226,10 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - v18 Codex 根因是 capability-drop-all 容器中 root 没有 DAC override，不能读取 agent `1000:1000` 所有的 0400
   catalog；类型、mode 与 owner 校验均成功，随后 root `sha256sum` 返回空 stderr。catalog hash 改由文件 owner
   身份读取；目录与可执行 bundle 的 root 校验、0400/owner 合同及本地预校验均保持不变。
+- v19 使用新 schema-v2 v12 lock，pair/batch 为 `p1-fix-git-pair-v19` / `p1-fix-git-b4-m1-v11`，两侧 run 为
+  `20260811-190000000-tb-rondo-r1` / `20260811-190000001-tb-codex-r1`；lock SHA 为
+  `28660701d92055b415ebc7e5df0fbadae0996bae7ca8294e31ab92323febf411`。profile/model/catalog/bundle 均不变，
+  v18/v17 lock 均只有显式只读入口。focused 155/155、`eval-lock` 85 packages 与完整 eval 345/345 均通过。
 
 ### 阻塞项
 
