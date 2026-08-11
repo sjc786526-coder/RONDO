@@ -3,7 +3,7 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；Plan 014 已发生的 canary、v9、v10 与 v11 canary 费用 `$1.122327` 必须计入该上限。
+> 回填；Plan 014 已发生的 canary、v9、v10、v11 与 v12 canary 费用 `$1.238773` 必须计入该上限。
 
 ## 1. 目标
 
@@ -55,7 +55,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 ## 3. 硬约束
 
 1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，起始已发生
-   `$1.122327`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
+   `$1.238773`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
    每侧最多 10 USD。只有离线分析与修复已经完成并形成干净提交，才可启动下一轮真实执行；不得把项目其余
    600 USD 预算当成本阶段消费目标。
 2. **有效条件公平**：main/Guardian requested/effective model、effort、provider endpoint、请求能力和 rate card
@@ -177,14 +177,17 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - v11 schema-v2 v4 lock 与并发预算合同提交 `223ae60` 已通过 `eval-lock` 和完整 eval 332/332；fresh canary 4/4
   一次成功并结算 `$0.285275`。资源门禁随后通过，但正式启动误用相对 watchdog 路径，canonical `/proc` 身份门禁
   在 pair claim/API/Docker 前以 INFRA_ERROR 拒绝；v11 仅留下未绑定空 sequence ledger 与 watchdog 证据，费用为 0。
-- v11 不重用。当前冻结 schema-v2 v5 lock、唯一 v12 pair/batch/run IDs；正式命令改用 active checkout 下
-  `with-build-lock.sh` 的绝对路径。完成 focused/lock 与干净 identity 提交后重新执行 fresh canary、资源门禁和
-  RONDO → frozen Codex → M1。
+- v11 不重用。v12 schema-v2 v5 lock 提交后，fresh canary 的四个 request 均一次成功、usage-priced 且无 reservation，
+  共结算 `$0.116446`；但冻结 CLI 退出时其 plugin cache 后台写入与诊断清理发生 ENOTEMPTY 竞态，导致 campaign
+  fail-closed。原 phase ledgers/目录保留，并新增只读 terminal failure 摘要；v12 不计为 canary 通过且不重用。
+- plugin cache 仅是私有诊断临时数据；清理现只对 ENOTEMPTY/EEXIST 做 5 次有界等待，仍冲突则保留目录而不抹掉
+  已完成的 API/CLI 事实，其他 I/O 错误继续 fail-closed。当前冻结 schema-v2 v6 lock 与唯一 v13 IDs；完成 focused、
+  lock、干净提交后从 fresh canary 继续，正式命令使用 active checkout 的绝对 watchdog 路径。
 
 ### 阻塞项
 
-- v9/v10 已消费并 blocked，v11 在 claim 前 fail-closed 且已退役；任何后续正式执行都必须新建 lock/IDs，并重新
-  通过 fresh canary 与资源/预算门。
+- v9/v10 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；三者均已退役。
+  任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与资源/预算门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 
 ## 6. 关键决策记录
@@ -210,3 +213,4 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 017 | v10 使用新的 v3 lock、batch 与两条 run ID，v9 v2 lock 只读保留 | 运行失败身份不可复用，profile/bundle 未变化时无需重建二进制 | 已采纳 |
 | 018 | v11 保持正式单请求 5 USD reservation，但把单侧/pair cap 冻结为 10/20 USD | RONDO 在 main tool-call 流结束前并发启动唯一 Guardian；5 USD 单侧 cap 会把合法 Guardian 本地拒绝 | 已采纳 |
 | 019 | v11 claim 前启动失败后退役该 identity，v12 只用 active checkout 的绝对 watchdog 路径 | canonical watcher 门禁拒绝相对 argv；即使零费用、零 claim，也不把正式尝试身份重新投入使用 | 已采纳 |
+| 020 | v12 canary 清理竞态后退役 identity；v13 对临时 plugin cache 的 ENOTEMPTY 做有界 best-effort | 私有缓存清理不能在四个请求已安全结算后制造假失败，其他清理异常仍须暴露 | 已采纳 |

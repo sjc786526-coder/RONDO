@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import tempfile
 import types
@@ -326,7 +327,7 @@ class ModelCliDiagnosticTests(unittest.TestCase):
             "main_model": "sol",
             "guardian_model": "sol",
         }
-        identity = mock.Mock(pair_id="p1-fix-git-pair-v12", lock_sha256="b" * 64)
+        identity = mock.Mock(pair_id="p1-fix-git-pair-v13", lock_sha256="b" * 64)
         targets = {
             side: BinaryTarget(side, Path(f"/{side}"), side[0] * 64, side[0] * 40)
             for side in ("codex", "rondo")
@@ -376,7 +377,7 @@ class ModelCliDiagnosticTests(unittest.TestCase):
 
         self.assertEqual(receipt["status"], "completed")
         self.assertEqual(receipt["campaign_cap_usd"], "4")
-        self.assertEqual(receipt["pair_id"], "p1-fix-git-pair-v12")
+        self.assertEqual(receipt["pair_id"], "p1-fix-git-pair-v13")
         identity.validate_selected_profile.assert_called_once_with(provider)
         self.assertEqual(run_phase.call_count, 2)
         self.assertEqual(
@@ -502,6 +503,23 @@ class ModelCliDiagnosticTests(unittest.TestCase):
             self.assertFalse(clone.exists())
             self.assertEqual(retained.read_text(encoding="utf-8"), "keep")
             self.assertEqual(evidence.read_text(encoding="utf-8"), "evidence")
+
+    def test_generated_plugin_cache_cleanup_tolerates_a_live_writer_race(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory)
+            cache = codex_home / ".tmp" / "plugins"
+            cache.mkdir(parents=True)
+            race = OSError(errno.ENOTEMPTY, "directory not empty")
+            with mock.patch(
+                "rondo_eval.model_cli_diagnostic.shutil.rmtree",
+                side_effect=[race, race, race, race, race],
+            ) as rmtree, mock.patch(
+                "rondo_eval.model_cli_diagnostic.time.sleep"
+            ) as sleep:
+                _remove_generated_plugin_cache(codex_home)
+            self.assertEqual(rmtree.call_count, 5)
+            self.assertEqual(sleep.call_count, 4)
+            self.assertTrue(cache.is_dir())
 
 
 if __name__ == "__main__":
