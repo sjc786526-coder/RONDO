@@ -28,6 +28,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     PairSequenceLedger,
     PairIdentityError,
     assess_m1,
+    load_consumed_v10_pair_identity,
     load_consumed_v9_pair_identity,
     load_legacy_pair_identity,
     load_pair_identity,
@@ -207,13 +208,13 @@ class PairIdentityTests(unittest.TestCase):
             identity.no_api_seccomp.source_sha256,
         )
         paid = identity.mode("paid")
-        self.assertEqual(identity.pair_id, "p1-fix-git-pair-v11")
-        self.assertEqual(paid.batch_id, "p1-fix-git-b4-m1-v3")
+        self.assertEqual(identity.pair_id, "p1-fix-git-pair-v12")
+        self.assertEqual(paid.batch_id, "p1-fix-git-b4-m1-v4")
         self.assertEqual(
             [slot.paid_run_id for slot in identity.topology],
             [
-                "20260811-143000000-tb-rondo-r1",
-                "20260811-143000001-tb-codex-r1",
+                "20260811-150000000-tb-rondo-r1",
+                "20260811-150000001-tb-codex-r1",
             ],
         )
         selected = identity.require_selected_profile().to_dict()
@@ -266,9 +267,9 @@ class PairIdentityTests(unittest.TestCase):
                 mode="paid",
             )
 
-    def test_consumed_v10_identity_is_explicit_and_read_only(self) -> None:
+    def test_preflight_failed_v11_identity_is_explicit_and_read_only(self) -> None:
         previous = load_previous_pair_identity()
-        self.assertEqual(previous.pair_id, "p1-fix-git-pair-v10")
+        self.assertEqual(previous.pair_id, "p1-fix-git-pair-v11")
         self.assertNotEqual(previous.pair_id, self.tracked_identity.pair_id)
         self.assertTrue(
             {slot.paid_run_id for slot in previous.topology}.isdisjoint(
@@ -283,6 +284,26 @@ class PairIdentityTests(unittest.TestCase):
             PairSequenceLedger(
                 Path(directory) / "previous.json",
                 identity=previous,
+                mode="paid",
+            )
+
+    def test_consumed_v10_identity_remains_explicit_and_read_only(self) -> None:
+        consumed = load_consumed_v10_pair_identity()
+        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v10")
+        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
+        self.assertTrue(
+            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
+                slot.paid_run_id for slot in self.tracked_identity.topology
+            )
+        )
+        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
+            load_pair_identity(pair_module.CONSUMED_V10_PAIR_LOCK_PATH)
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            PairIdentityError, "read-only"
+        ):
+            PairSequenceLedger(
+                Path(directory) / "consumed-v10.json",
+                identity=consumed,
                 mode="paid",
             )
 

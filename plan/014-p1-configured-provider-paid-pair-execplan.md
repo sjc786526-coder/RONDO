@@ -3,7 +3,7 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；Plan 014 已发生的 canary、v9 与 v10 费用 `$0.837052` 必须计入该上限。
+> 回填；Plan 014 已发生的 canary、v9、v10 与 v11 canary 费用 `$1.122327` 必须计入该上限。
 
 ## 1. 目标
 
@@ -55,7 +55,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 ## 3. 硬约束
 
 1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，起始已发生
-   `$0.837052`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
+   `$1.122327`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
    每侧最多 10 USD。只有离线分析与修复已经完成并形成干净提交，才可启动下一轮真实执行；不得把项目其余
    600 USD 预算当成本阶段消费目标。
 2. **有效条件公平**：main/Guardian requested/effective model、effort、provider endpoint、请求能力和 rate card
@@ -174,12 +174,17 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - v10 证明真实触发点早于 main `response.completed`：RONDO 可在主 SSE tool-call 阶段并发启动 Guardian，无法靠“主终态
   先结算”消除 reservation 重叠。正式单请求仍必须保守预留 5 USD；故 v11 将正式单侧 cap 冻结为 10 USD、pair cap
   冻结为 20 USD，允许且仅允许一个 main 与一个 Guardian reservation 重叠，不改变上游 retry/计费合同。
-- 当前冻结新的 schema-v2 v4 lock、唯一 v11 pair/batch/run IDs，并使正式入口从 lock 投影 per-side/pair cap；完成
-  focused/lock/full 门禁与干净提交后，重新执行 fresh canary、资源门禁和 RONDO → frozen Codex → M1。
+- v11 schema-v2 v4 lock 与并发预算合同提交 `223ae60` 已通过 `eval-lock` 和完整 eval 332/332；fresh canary 4/4
+  一次成功并结算 `$0.285275`。资源门禁随后通过，但正式启动误用相对 watchdog 路径，canonical `/proc` 身份门禁
+  在 pair claim/API/Docker 前以 INFRA_ERROR 拒绝；v11 仅留下未绑定空 sequence ledger 与 watchdog 证据，费用为 0。
+- v11 不重用。当前冻结 schema-v2 v5 lock、唯一 v12 pair/batch/run IDs；正式命令改用 active checkout 下
+  `with-build-lock.sh` 的绝对路径。完成 focused/lock 与干净 identity 提交后重新执行 fresh canary、资源门禁和
+  RONDO → frozen Codex → M1。
 
 ### 阻塞项
 
-- v9/v10 已消费并 blocked；任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与资源/预算门。
+- v9/v10 已消费并 blocked，v11 在 claim 前 fail-closed 且已退役；任何后续正式执行都必须新建 lock/IDs，并重新
+  通过 fresh canary 与资源/预算门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 
 ## 6. 关键决策记录
@@ -204,3 +209,4 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 016 | v9 后允许在 280 USD 累计硬上限内按“修复后新 identity”有界迭代 | 普通运行失败不应盲重跑，也不应阻止已定位修复后的 B3/M1 闭环 | 已采纳 |
 | 017 | v10 使用新的 v3 lock、batch 与两条 run ID，v9 v2 lock 只读保留 | 运行失败身份不可复用，profile/bundle 未变化时无需重建二进制 | 已采纳 |
 | 018 | v11 保持正式单请求 5 USD reservation，但把单侧/pair cap 冻结为 10/20 USD | RONDO 在 main tool-call 流结束前并发启动唯一 Guardian；5 USD 单侧 cap 会把合法 Guardian 本地拒绝 | 已采纳 |
+| 019 | v11 claim 前启动失败后退役该 identity，v12 只用 active checkout 的绝对 watchdog 路径 | canonical watcher 门禁拒绝相对 argv；即使零费用、零 claim，也不把正式尝试身份重新投入使用 | 已采纳 |

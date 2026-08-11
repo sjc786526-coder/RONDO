@@ -326,7 +326,7 @@ class ModelCliDiagnosticTests(unittest.TestCase):
             "main_model": "sol",
             "guardian_model": "sol",
         }
-        identity = mock.Mock(pair_id="p1-fix-git-pair-v11", lock_sha256="b" * 64)
+        identity = mock.Mock(pair_id="p1-fix-git-pair-v12", lock_sha256="b" * 64)
         targets = {
             side: BinaryTarget(side, Path(f"/{side}"), side[0] * 64, side[0] * 40)
             for side in ("codex", "rondo")
@@ -376,7 +376,7 @@ class ModelCliDiagnosticTests(unittest.TestCase):
 
         self.assertEqual(receipt["status"], "completed")
         self.assertEqual(receipt["campaign_cap_usd"], "4")
-        self.assertEqual(receipt["pair_id"], "p1-fix-git-pair-v11")
+        self.assertEqual(receipt["pair_id"], "p1-fix-git-pair-v12")
         identity.validate_selected_profile.assert_called_once_with(provider)
         self.assertEqual(run_phase.call_count, 2)
         self.assertEqual(
