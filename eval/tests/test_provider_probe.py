@@ -41,6 +41,7 @@ class _Provider:
                     "method": "GET",
                     "authorization": self.headers.get("Authorization"),
                     "user_agent": self.headers.get("User-Agent"),
+                    "originator": self.headers.get("originator"),
                 })
                 if owner.models_redirect:
                     self.send_response(302)
@@ -63,6 +64,7 @@ class _Provider:
                     "authorization": self.headers.get("Authorization"),
                     "role": self.headers.get("X-RONDO-Eval-Role"),
                     "user_agent": self.headers.get("User-Agent"),
+                    "originator": self.headers.get("originator"),
                     "body": body,
                 })
                 usage = {
@@ -126,7 +128,7 @@ class ProviderProbeTests(unittest.TestCase):
                     "api": "responses",
                     "base_url": "https://provider.example/v1",
                     "api_key_env": "OPENAI_API_KEY",
-                    "main_model": "gpt-5.6-luna",
+                    "main_model": "gpt-5.6-sol",
                     "guardian_model": "gpt-5.6-luna",
                     "guardian_reasoning_effort": "low",
                 }
@@ -157,6 +159,7 @@ class ProviderProbeTests(unittest.TestCase):
         for item in self.provider.requests:
             self.assertEqual(item["role"], "main")
             self.assertEqual(item["user_agent"], PROBE_USER_AGENT)
+            self.assertEqual(item["originator"], "codex_cli_rs")
             body = item["body"]
             self.assertEqual(body["max_output_tokens"], 64)
             self.assertEqual(body["reasoning"], {"effort": "low"})
@@ -175,6 +178,7 @@ class ProviderProbeTests(unittest.TestCase):
             "method": "GET",
             "authorization": f"Bearer {self.provider.secret}",
             "user_agent": PROBE_USER_AGENT,
+            "originator": "codex_cli_rs",
         }])
 
 if __name__ == "__main__":

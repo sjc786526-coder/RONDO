@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-10
+最后更新：2026-08-11
 
 本文件只记录**当前阶段**与**方向级路线、依赖和授权门**。方向内部的详细分解见 `doc/WBS/`，
 单次任务的execplan见 `plan/`，已完成成果见 `doc/WBS-COMPLETED.md`。
@@ -37,8 +37,9 @@
   v7 随后按单独授权执行 RONDO 首槽，但在没有响应或 usage 时以 `AgentTimeoutError` 收敛为 `infra_failed`。Codex 与
   M1 未运行，v7 pair 已 failed/blocked。Plan 012 已把 transport timeout 限为 90 秒、让 SSE 在合法 terminal
   event + usage 后主动结束，并修通 frozen solution/root verifier，真实 oracle 得到 `reward=1`。配置所指 provider
-  仍未通过 Luna 门禁：一次 Responses 无 HTTP 终态，转发 Codex User-Agent 后一次明确 HTTP 503，两次 `/models`
-  状态检查也无 HTTP 终态；paid pair 未创建。
+  Luna 主请求未通过门禁；随后 frozen Codex v0.147 的 Sol real-wire 在保留宿主网络代理时得到 terminal response、
+  合法 usage 和 settled ledger。主 Agent 已切为 Sol，两侧 API-key Guardian 仍按冻结 Codex 可实现的 Luna/low 保持
+  公平；全新 v8 pair 已冻结，尚未执行。
 - Terminal-Bench B1 固定 Harbor `0.20.0`、`uv.lock`、TB 2.1 commit、`fix-git` task/image digest 和两侧
   runtime bundle。Harbor 启动前只核对版本、console/interpreter 与三个关键模块，不再扫描数千个依赖文件。
   B2 由唯一入口在同一进程中严格执行 RONDO→Codex，首侧失败立即停止；成功后只替换一个
@@ -55,15 +56,16 @@
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
 - **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 010 v6 与 Plan 011 v7 的 paid
-  RONDO 首槽均已失败，Plan 012 oracle/verifier 已通过但 provider 门禁失败，B3/M1 未通过。** 三次早期诊断均在
+  RONDO 首槽均已失败，Plan 012 oracle/verifier 与 Sol provider real-wire 已通过，v8 尚未执行，B3/M1 未通过。** 三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
   上游响应或 usage，ledger 保留 0.755400 USD reservation，实际账单未查询。v6 已 `failed/blocked`，
   Codex 与 M1 未运行；继续 B3 需新 pair 与单独 API 授权。v7 同样只运行 RONDO：一个请求保留 0.755400 USD
   未结算 reservation，settled local spend 为 0，`actual_usd=null`；任务以 `AgentTimeoutError` 失败，Codex/M1
   未运行。v7 shell 清除了 ambient HTTP(S)/ALL proxy，仅保留 loopback `NO_PROXY`；tracked pair 不冻结供应商域名。
-  Plan 012 两个 Responses one-shot 均 settled、没有悬挂 reservation，按官方 Luna 价格各保守计入 `$0.755400`，
-  合计 `$1.510800`；实际中转账单未知。HTTP 503 与 `/models` 无终态不支持继续付费跑批。
+  Plan 012 所有真实探针 ledger 都已 settled、没有悬挂 reservation；本地历史保守计价累计 `$7.570095`，其中
+  最终 frozen-Codex Sol 成功请求按合法 usage 结算 `$0.016095`，实际中转账单未查询。v8 仍受 5 USD/run、
+  10 USD/pair 和本阶段 20 USD 总上限约束。
 
 ## 2. 方向与依赖
 
@@ -71,7 +73,7 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；Plan 012 oracle reward=1，provider 未就绪，B3/M1 未通过 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；Plan 012 oracle reward=1、Sol wire 通过，v8 未执行，B3/M1 未通过 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
 | 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |

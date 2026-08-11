@@ -140,7 +140,7 @@ class FakeHostExecutor:
         ]
         assert len(secret_mounts) == 1
         bearer = Path(secret_mounts[0].source).read_text(encoding="utf-8")
-        body = json.dumps({"model": "gpt-5.6-luna", "stream": True, "input": "fix"})
+        body = json.dumps({"model": "gpt-5.6-sol", "stream": True, "input": "fix"})
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         connection.request(
             "POST",
@@ -162,7 +162,7 @@ class FakeHostExecutor:
             raise AssertionError("loopback fake did not request the frozen code-mode call")
         follow_up = json.dumps(
             {
-                "model": "gpt-5.6-luna",
+                "model": "gpt-5.6-sol",
                 "stream": True,
                 "input": [
                     {
@@ -289,7 +289,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                         "api": "responses",
                         "base_url": "https://provider.example/v1",
                         "api_key_env": "OPENAI_API_KEY",
-                        "main_model": "gpt-5.6-luna",
+                        "main_model": "gpt-5.6-sol",
                         "guardian_model": "gpt-5.6-luna",
                         "guardian_reasoning_effort": "low",
                     }
@@ -365,7 +365,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(result.agent_json_events, 3)
         self.assertTrue(result.tool_round_trip)
         self.assertEqual(len(result.requests), 2)
-        self.assertTrue(all(item.model == "gpt-5.6-luna" for item in result.requests))
+        self.assertTrue(all(item.model == "gpt-5.6-sol" for item in result.requests))
         self.assertTrue(all(item.authorized for item in result.requests))
         docker_receipt = {"schema_version": 1, "cleanup": "verified_empty"}
         durable = replace(
@@ -453,9 +453,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     "Content-Type": "application/json",
                 }
                 for body in (
-                    {"model": "gpt-5.6-luna", "stream": True, "input": "fix"},
+                    {"model": "gpt-5.6-sol", "stream": True, "input": "fix"},
                     {
-                        "model": "gpt-5.6-luna",
+                        "model": "gpt-5.6-sol",
                         "stream": True,
                         "input": [{
                             "type": "custom_tool_call_output",
@@ -541,7 +541,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             connection.request(
                 "POST",
                 "/v1/responses",
-                body=json.dumps({"model": "gpt-5.6-luna", "stream": True}),
+                body=json.dumps({"model": "gpt-5.6-sol", "stream": True}),
                 headers={
                     "Authorization": f"Bearer {NO_API_SMOKE_BEARER}",
                     "Upgrade": "websocket",

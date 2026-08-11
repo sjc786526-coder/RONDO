@@ -31,7 +31,7 @@ from .exit_codes import EVIDENCE_ERROR, SUCCESS
 
 PROBE_BATCH_ID = "plan012-provider-responses-r2"
 PROBE_RUN_ID = "plan012-provider-responses-r2"
-PROBE_TOTAL_CAP_USD = Decimal("1")
+PROBE_TOTAL_CAP_USD = Decimal("5")
 PROBE_MAX_OUTPUT_TOKENS = 64
 PROBE_CLIENT_TIMEOUT_SECONDS = 120.0
 PROBE_USER_AGENT = "codex_cli_rs/0.147.0 (rondo-eval-provider-probe)"
@@ -86,6 +86,7 @@ def probe_models_status(
             "Authorization": f"Bearer {api_key}",
             "Accept": "application/json",
             "User-Agent": PROBE_USER_AGENT,
+            "originator": "codex_cli_rs",
         },
         method="GET",
     )
@@ -116,7 +117,7 @@ def run_provider_probes(
     base_url = provider.get("base_url")
     model = provider.get("main_model")
     if not isinstance(base_url, str) or model != OFFICIAL_MODEL:
-        raise ProviderProbeError("provider probe configuration differs from Luna")
+        raise ProviderProbeError("provider probe configuration differs from the frozen main model")
     output_root = Path(output_root)
     if output_root.exists() or output_root.is_symlink():
         raise ProviderProbeError("provider probe output already exists; retries are disabled")
@@ -186,6 +187,7 @@ def _run_responses_probe(
             "X-RONDO-Eval-Role": "main",
             "X-RONDO-Eval-Request-Id": f"plan012-{name}",
             "User-Agent": PROBE_USER_AGENT,
+            "originator": "codex_cli_rs",
         },
         method="POST",
     )

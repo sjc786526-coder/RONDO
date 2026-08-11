@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
-P1_PAIR_ID = "p1-fix-git-pair-v7"
+P1_PAIR_ID = "p1-fix-git-pair-v8"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_KEYS = {
     "schema_version",
@@ -1026,7 +1026,7 @@ def _parse_fairness(value: object) -> dict[str, object]:
         "provider_id": "openai",
         "provider_api": "responses",
         "provider_api_key_env": "OPENAI_API_KEY",
-        "main_model": "gpt-5.6-luna",
+        "main_model": "gpt-5.6-sol",
         "guardian_model": "gpt-5.6-luna",
         "guardian_effort": "low",
         "approvals_reviewer": "auto_review",

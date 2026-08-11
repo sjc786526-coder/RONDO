@@ -185,3 +185,35 @@
   `E_final`/S2。没有伪造 `E_final`，也没有把 oracle 或 503 探针冒充 B3 成绩。
 - 最终轻量门禁：`just eval-test` 271/271，`just eval-lock` 85 packages，`git diff --check` 通过；最终收口没有再
   运行 Docker、Cargo、模型或真实 API。
+
+## 17. Sol/Terra 可用性与传输根因
+
+- 用户在供应商侧确认一次 Sol 非流请求实际成功。为避免手写请求形状误导判断，后续用冻结 Codex v0.147 真实 wire
+  做最小探针；不保存或输出响应正文、请求正文和 key。
+- Terra 的 stream/non-stream 均得到明确 HTTP 403；未把它写入本地配置或 pair。Sol 的 direct transport 仍在
+  90 秒内无 HTTP 终态，但保留宿主已有网络代理、仅为 loopback 设置 `NO_PROXY` 后，真实 frozen-Codex 请求在
+  14.3 秒内成功：`turn.completed=1`、request count 1、usage valid、reservation 归零、按官方 Sol 费率结算
+  `$0.016095`。
+- 根因是当前区域到配置所指 provider 的 authenticated 长响应直连不稳定；短时无认证 401 可达不能证明真实响应链。
+  CCTQ 的公开排障文档也提示部分地区会断连并建议使用代理。正式 shell 因而保留宿主代理；Docker 子进程仍只得到
+  loopback base URL 和随机临时 bearer，不继承宿主代理，也不接触真实 key。
+- proxy 补齐冻结 Codex 的 `originator` 透传；非流 Responses 现在在解析出一个完整 `status=completed` JSON 且 usage
+  合法后结束，不再要求 upstream EOF。SSE 的 terminal+usage 提前收束保持不变。
+
+## 18. v8 readiness
+
+- frozen pair：`p1-fix-git-pair-v8`；budget batch：`p1-fix-git-b3-m1-v3`；任务仍为
+  `terminal-bench/fix-git`，RONDO slot 1 后 Codex slot 2，各一次、零重试。
+- run IDs：`20260811-090000000-tb-rondo-r1`、`20260811-090000001-tb-codex-r1`。
+- 主 Agent 为 `gpt-5.6-sol`；Codex v0.147 的 API-key Guardian 不能接受 RONDO 新增的 auto-review model override，
+  有效默认仍是 `gpt-5.6-luna`。为保持公平，RONDO Guardian 同样固定 Luna/low。若 Guardian 自然触发且 Luna 不可用，
+  按真实失败停止；不伪造 Sol Guardian 或 `E_final`。
+- 计价按实际请求模型：Sol `$5/$0.50/$30`，Luna `$0.20/$0.02/$1.20` 每百万 input/cached/output token。
+  reservation 受 5 USD/run 硬上限约束；pair 最多 10 USD，Plan 012 本地历史保守计价 `$7.570095`，因此唯一 v8
+  的最坏合计 `$17.570095 < 20`。失败探针是否产生供应商账单不作猜测。
+- 当前 config SHA 为 `eb110baabcce90a9dc8361655e358bdfd35a73d872dc4cacd2c569e5d3444898`，pair lock SHA 为
+  `3cc49caadc5ad6d2ed24e4df707c77c8f25152b3c2a874bd093449cc730e6089`。每侧前复核 config SHA；v8
+  pair/budget/work/metrics 均尚不存在。
+- 聚焦轻量门禁：proxy/provider 29/29，config/contracts/Terminal-Bench 85/85，`uv lock --check --offline`
+  85 packages；最终 `just eval-test` 273/273、`just eval-lock` 85 packages、`git diff --check` 通过。尚未执行
+  v8 Docker 或 M1。

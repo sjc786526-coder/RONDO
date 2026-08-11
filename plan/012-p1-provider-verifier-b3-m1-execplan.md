@@ -31,7 +31,7 @@
   no-API；使用既有 pinned image，禁止 pull/build，精确清理并保留 Windows C:、Docker df、receipt 与 watchdog evidence。
 - provider 真实探针使用极小 Responses 请求，`max_output_tokens <= 64`、reasoning effort low、每次 timeout
   `<=120` 秒；任一 usage 缺失或未结算即停止同一诊断序列。探针与正式 benchmark 的本阶段新增费用合计不得超过
-  20 USD（按冻结的官方 Luna 价格核算）。
+  20 USD（主 Agent 按官方 Sol 价格、Guardian 按官方 Luna 价格核算）。
 - 仅当上述门禁全部通过，冻结全新 pair/batch/run IDs；固定 `terminal-bench/fix-git`、RONDO→Codex、零重试、
   5 USD/run、10 USD/pair。本阶段探针与最多两个 pair 的新增真实 API 总上限为 20 USD。
 - 每个新 pair 任一侧失败即保留终态并停止；只有明确的 provider/proxy/verifier/Docker/eval harness 基础设施故障
@@ -119,23 +119,26 @@
 
 ### 当前工作
 
-- provider 门禁未通过，按停止合同进行文档与提交收口；没有冻结 paid pair。
+- frozen Codex v0.147 的 Sol 真实 wire 已通过配置所指 provider，得到 terminal response、合法 usage 和 settled
+  ledger；正在从 clean readiness commit 执行唯一 v8 paid pair。
 
 ### 后续计划
 
-1. 保留两个 stopped probe ledger、去敏 metadata、oracle Docker evidence 与 watchdog summary，不复用或改写。
-2. 等待配置所指 provider 明确恢复 Luna Responses 可用性；不得对当前 503/无终态换 ID 碰运气。
-3. 后续只有新的 provider 门禁成功并取得合法 usage 后，才可冻结 paid pair；双侧 completed 后才运行 M1。
+1. 保留全部 stopped probe ledger、去敏 metadata、oracle Docker evidence 与 watchdog summary，不复用或改写。
+2. v8 固定主 Agent `gpt-5.6-sol`；冻结 Codex API-key Guardian 的有效默认仍是 `gpt-5.6-luna`，RONDO 同样显式
+   固定 Luna/low，保证两侧 Guardian 公平。若 Luna Guardian 自然触发后失败，如实停止，不改写为 Sol。
+3. v8 严格 RONDO→Codex、每侧一次、零重试；只有双侧 completed 后才运行 M1。
 
 ### 阻塞项
 
-- User-Agent 覆盖问题已排除，但 provider 对 Luna non-stream Responses 明确返回 HTTP 503，`/models` 又无 HTTP
-  终态。供应商文档将 503 映射为当前渠道模型不可用；由于响应正文按边界未读取，只能把精确 subtype 记为未独立确认。
+- Luna 主请求不可用，但 Sol 的 frozen-Codex wire 已成功。直接连接在 authenticated 长响应上仍无终态；保留宿主
+  网络代理后，Sol 在 14.3 秒内完成，usage 合法且本地按官方费率结算 `$0.016095`。容器只接触 loopback proxy，
+  不接收宿主代理变量或真实 key。
 
 ### 当前验收状态
 
-- provider/verifier 的 pure/fake/loopback 门禁已通过；真实 oracle/verifier `reward=1`。真实 provider 门禁失败，
-  paid pair 与 M1 未创建、未运行；本阶段保守 API 计价累计 `$1.510800`，实际账单未知。
+- provider/verifier 的 pure/fake/loopback 门禁已通过；真实 oracle/verifier `reward=1`，Sol frozen-Codex wire
+  terminal/usage/settlement 通过。v8 已冻结但尚未执行；本阶段本地保守 API 计价累计 `$7.570095`，实际账单未知。
 
 ## 6. 关键决策记录
 
@@ -149,3 +152,5 @@
 | 006 | v8 仅在全部前置门禁通过后冻结 | 避免未就绪 identity 被消费后再次遗留不可复用失败批次 | paid readiness | 已采纳 |
 | 007 | 代理逐字转发一个经语法校验的下游 User-Agent | OpenAI-compatible 中转可能以 Codex User-Agent 路由；代理身份覆盖会破坏兼容 | provider transport | 已采纳 |
 | 008 | 探针与最多两个新 paid pair 共用 20 USD 总授权 | 用户扩大诊断次数但收紧本阶段总费用；第二 pair 仅限基础设施修复后重验 | provider/budget/pair | 已采纳 |
+| 009 | v8 主 Agent 使用 Sol；两侧 Guardian 保持 Luna/low | Codex v0.147 的 API-key Guardian 默认固定 Luna，不能虚构 Sol override；主 Sol 已由真实 wire 验证 | pair/model/budget | 已采纳 |
+| 010 | authenticated provider 传输保留宿主代理，容器仍只使用 loopback proxy | 当前区域直连只证明短 401 可达，真实长响应直连无终态；宿主代理下真实 Sol wire 成功 | canonical shell/network | 已采纳 |

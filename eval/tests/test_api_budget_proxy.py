@@ -31,6 +31,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     Usage,
     _UrllibTransport,
     _validated_lite_header,
+    _validated_originator,
     _validated_user_agent,
     milestone_metadata_ready,
     price_usage,
@@ -43,6 +44,7 @@ class _FakeUpstream:
         self.redirect_hits = 0
         self.requests: list[dict[str, object]] = []
         self.sse_terminal_sent = threading.Event()
+        self.json_terminal_sent = threading.Event()
         self.release_sse = threading.Event()
         self.hang_started = threading.Event()
         self._lock = threading.Lock()
@@ -70,6 +72,7 @@ class _FakeUpstream:
                             ),
                             "role": self.headers.get("X-RONDO-Eval-Role"),
                             "user_agent": self.headers.get("User-Agent"),
+                            "originator": self.headers.get("originator"),
                             "body": body,
                         }
                     )
@@ -134,6 +137,7 @@ class _FakeUpstream:
                     return
                 response = {
                     "id": "fake-response",
+                    "status": "completed",
                     "output": [],
                     "usage": {
                         "input_tokens": 1000,
@@ -145,9 +149,14 @@ class _FakeUpstream:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Authorization", "must-not-be-relayed")
-                self.send_header("Content-Length", str(len(encoded)))
+                if mode != "json_hold_open":
+                    self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
                 self.wfile.write(encoded)
+                self.wfile.flush()
+                if mode == "json_hold_open":
+                    owner.json_terminal_sent.set()
+                    owner.release_sse.wait(timeout=5)
 
             def log_message(self, _format: str, *_args: object) -> None:
                 return
@@ -208,6 +217,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             "Content-Type": "application/json",
             "X-RONDO-Eval-Request-Id": request_id,
             "User-Agent": "codex_cli_rs/0.147.0 (proxy-test)",
+            "originator": "codex_cli_rs",
         }
         if authenticate:
             headers["Authorization"] = f"Bearer {self.proxy.downstream_api_key}"
@@ -303,7 +313,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         guardian: bool = False,
     ) -> dict[str, object]:
         body: dict[str, object] = {
-            "model": "gpt-5.6-luna",
+            "model": "gpt-5.6-luna" if guardian else "gpt-5.6-sol",
             "input": [{"role": "user", "content": "secret prompt is never recorded"}],
             "stream": stream,
             "tools": [{"type": "function", "name": "local_tool"}],
@@ -340,6 +350,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             self.upstream.requests[0]["user_agent"],
             "codex_cli_rs/0.147.0 (proxy-test)",
         )
+        self.assertEqual(self.upstream.requests[0]["originator"], "codex_cli_rs")
         metadata_bytes = (self.root / "metadata.json").read_bytes()
         ledger_bytes = (self.root / "budget.json").read_bytes()
         self.assertNotIn(self.secret.encode(), metadata_bytes)
@@ -352,7 +363,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(observation["role_provenance"], "declared")
         self.assertEqual(observation["declared_role"], "main")
         self.assertEqual(observation["inferred_role"], "main")
-        self.assertEqual(observation["model"], "gpt-5.6-luna")
+        self.assertEqual(observation["model"], "gpt-5.6-sol")
         self.assertEqual(observation["shape"]["input_items"], 1)
         self.assertEqual(len(observation["body_sha256"]), 64)
         self.assertTrue(observation["contract_match"])
@@ -426,6 +437,25 @@ class ApiBudgetProxyTests(unittest.TestCase):
             with self.subTest(values=values), self.assertRaises(ApiBudgetProxyError):
                 _validated_user_agent(Headers(values))
 
+    def test_single_printable_codex_originator_is_forwarded(self) -> None:
+        class Headers:
+            def __init__(self, values: list[str]):
+                self.values = values
+
+            def get_all(self, _name: str, _default: list[str]) -> list[str]:
+                return self.values
+
+        self.assertIsNone(_validated_originator(Headers([])))
+        self.assertEqual(_validated_originator(Headers(["codex_cli_rs"])), "codex_cli_rs")
+        self.assertEqual(_validated_originator(Headers(["codex_exec"])), "codex_exec")
+        for values in (
+            ["codex_cli_rs", "codex_cli_rs"],
+            ["bad\noriginator"],
+            ["x" * 65],
+        ):
+            with self.subTest(values=values), self.assertRaises(ApiBudgetProxyError):
+                _validated_originator(Headers(values))
+
     def test_sse_is_streamed_and_completed_usage_is_settled(self) -> None:
         self.upstream.mode = "sse"
         status, response_body, _headers = self._post(
@@ -468,6 +498,35 @@ class ApiBudgetProxyTests(unittest.TestCase):
             self.assertIn(b"response.completed", result[0][1])
             snapshot = self.ledger.snapshot()
             request = snapshot["runs"]["benchmark-r1"]["requests"]["sse-hold-open"]
+            self.assertEqual(request["status"], "settled")
+            self.assertTrue(request["usage_valid"])
+            self.assertEqual(snapshot["reserved_usd"], "0.000000")
+        finally:
+            self.upstream.release_sse.set()
+            thread.join(timeout=2)
+
+    def test_nonstream_completed_usage_settles_before_upstream_eof(self) -> None:
+        self.upstream.mode = "json_hold_open"
+        result: list[tuple[int, bytes, object]] = []
+        error: list[BaseException] = []
+
+        def send() -> None:
+            try:
+                result.append(self._post(self._body(), request_id="json-hold-open"))
+            except BaseException as exc:  # pragma: no cover - asserted below
+                error.append(exc)
+
+        thread = threading.Thread(target=send)
+        thread.start()
+        self.assertTrue(self.upstream.json_terminal_sent.wait(timeout=2))
+        thread.join(timeout=2)
+        try:
+            self.assertFalse(thread.is_alive(), "proxy waited for upstream EOF")
+            self.assertEqual(error, [])
+            self.assertEqual(result[0][0], 200)
+            self.assertEqual(json.loads(result[0][1])["status"], "completed")
+            snapshot = self.ledger.snapshot()
+            request = snapshot["runs"]["benchmark-r1"]["requests"]["json-hold-open"]
             self.assertEqual(request["status"], "settled")
             self.assertTrue(request["usage_valid"])
             self.assertEqual(snapshot["reserved_usd"], "0.000000")
@@ -629,7 +688,7 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_frozen_luna_pricing_and_reservation(self) -> None:
+    def test_frozen_main_and_guardian_pricing_and_reservation(self) -> None:
         usage = Usage(
             input_tokens=300_000,
             cached_input_tokens=100_000,
@@ -639,10 +698,14 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
         self.assertEqual(PRICE_SNAPSHOT_DATE, "2026-08-10")
         self.assertEqual(
             PRICE_SOURCE_URL,
-            "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+            "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
         )
-        self.assertEqual(price_usage(usage), Decimal("0.107000"))
-        self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("0.755400"))
+        self.assertEqual(price_usage(usage), Decimal("2.675000"))
+        self.assertEqual(
+            price_usage(usage, model="gpt-5.6-luna"),
+            Decimal("0.107000"),
+        )
+        self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("5.000000"))
 
     def test_four_runs_can_reserve_and_settle_concurrently(self) -> None:
         path = self.root / "budget.json"

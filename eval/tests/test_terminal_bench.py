@@ -279,7 +279,7 @@ class TerminalBenchTests(unittest.TestCase):
                         "api": "responses",
                         "base_url": "https://provider.example/v1",
                         "api_key_env": "OPENAI_API_KEY",
-                        "main_model": "gpt-5.6-luna",
+                        "main_model": "gpt-5.6-sol",
                         "guardian_model": "gpt-5.6-luna",
                         "guardian_reasoning_effort": "low",
                     }
@@ -307,7 +307,7 @@ class TerminalBenchTests(unittest.TestCase):
         manifest = self.manifest()
         return adapter_type(
             logs_dir=self.root / "logs",
-            model_name="openai/gpt-5.6-luna",
+            model_name="openai/gpt-5.6-sol",
             binary_path=manifest.path,
             binary_sha256=manifest.sha256,
             binary_code_mode_host_path=manifest.code_mode_host_path,
