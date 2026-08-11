@@ -1,0 +1,137 @@
+{
+  "schema_version": 2,
+  "pair_id": "p1-fix-git-pair-v14",
+  "modes": {
+    "paid": {
+      "enabled": true,
+      "batch_id": "p1-fix-git-b4-m1-v6",
+      "disabled_reason": null
+    }
+  },
+  "paid_budget": {
+    "per_side_usd": 10.0,
+    "pair_usd": 20.0
+  },
+  "topology": [
+    {
+      "slot": 1,
+      "side": "rondo",
+      "round": 1,
+      "paid_run_id": "20260811-160000000-tb-rondo-r1"
+    },
+    {
+      "slot": 2,
+      "side": "codex",
+      "round": 1,
+      "paid_run_id": "20260811-160000001-tb-codex-r1"
+    }
+  ],
+  "fairness": {
+    "task_id": "terminal-bench/fix-git",
+    "task_image_digest": "sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74",
+    "terminal_bench_version": "terminal-bench/terminal-bench-2-1@ffccbe05ee73a9d59518217f294ad711bda39304",
+    "approvals_reviewer": "auto_review",
+    "approval_policy": "on-request",
+    "sandbox_mode": "workspace-write",
+    "sandbox_network_access": true,
+    "websocket": false,
+    "code_mode_host": true,
+    "timeout_seconds": 1800,
+    "max_retries": 0,
+    "budget_usd": 10.0
+  },
+  "selected_profile": {
+    "provider": "relay",
+    "provider_api": "responses",
+    "provider_profile_sha256": "aca100b0fb0cd51b54d0005b1b106737a94a4c374552429ffef542bd3d20dd15",
+    "provider_endpoint_sha256": "349d8f7aeba75e4610bca5db1c0c294e04c1bdaf5408e44a7753e5c78ac197a9",
+    "main_model": "gpt-5.6-sol",
+    "main_effort": "medium",
+    "guardian_model": "gpt-5.6-sol",
+    "guardian_effort": "low",
+    "requested_main_model": "gpt-5.6-sol",
+    "effective_main_model": "gpt-5.6-sol",
+    "requested_guardian_model": "gpt-5.6-sol",
+    "effective_guardian_model": "gpt-5.6-sol",
+    "main_pricing": {
+      "model_id": "gpt-5.6-sol",
+      "input_usd_per_million": "5",
+      "cached_input_usd_per_million": "0.5",
+      "output_usd_per_million": "30",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-11",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "guardian_pricing": {
+      "model_id": "gpt-5.6-sol",
+      "input_usd_per_million": "5",
+      "cached_input_usd_per_million": "0.5",
+      "output_usd_per_million": "30",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-11",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "provider_max_attempts": 5,
+    "provider_retry_backoff_seconds": 1.0,
+    "provider_unbilled_retry_statuses": [429, 500, 502, 503, 504],
+    "frozen_codex_model_catalog_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+    "frozen_codex_model_catalog_sha256": "21f7805b7aa9d9ad84e09636b32355b912880ea973e7c3b70cf895d1b5b974e7",
+    "max_guardian_logical_requests": 1
+  },
+  "harbor": {
+    "package": "harbor",
+    "version": "0.20.0",
+    "release_commit": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
+    "wheel_sha256": "4b7e48223aea2384cdb8c9eff35eaebd482fc9b1ec09f8193a121c47356ff19a",
+    "uv_lock_sha256": "0ae149ea87324439c8fe56d05a8dd14ed6af6b50140363f62d31d0615b449014",
+    "console_script_normalized_sha256": "5cba75527afc99b8f826fa5e15c001131d83fa734ab840a959779e56c1566e45",
+    "console_script_normalization": "absolute_shebang_to_#!<RONDO_EVAL_PYTHON>",
+    "key_files": {
+      "harbor/__init__.py": "03274b7cebb4a8b4faedd0b7397e93524a753f140503bc6bfee16f907808301b",
+      "harbor/cli/main.py": "6f2d2c147f79b6ba6d40551f025555f85992f9779ef1263f3c91009b79ab2a2e",
+      "harbor/agents/installed/base.py": "ceb37980afe9e9d3f3dcd4a667364b22169ffa3939e0cf19ec9ca07af41a889b"
+    }
+  },
+  "no_api_seccomp": {
+    "profile_path": "eval/seccomp/plan008-userns-minimal-v0.2.3.json",
+    "source_sha256": "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f",
+    "effective_sha256": "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+  },
+  "runtime_requirements": {
+    "paid_custom_seccomp_required": true,
+    "m1_pair_ledger_required": true,
+    "m1_container_metrics_required": true
+  },
+  "bundles": {
+    "rondo": {
+      "manifest_path": "eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "3a742072ebc771177c5f504348c9c7b8ef371bad0e450e95f09d9d48258878bd",
+      "cli_sha256": "d2f5063aaf908d0d9f9409af44eebf4b57784b307c3e18957da912e4874767fb",
+      "cli_size": 1259525480,
+      "code_mode_host_sha256": "302cc74803d3a37822b4dd30e5c6496fb2ec9bfd60f9f01552eb6c24bb307293",
+      "code_mode_host_size": 87415520,
+      "bwrap_sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+      "bwrap_size": 529776,
+      "source_commit": "cb652e1418e06d53171755963ad9eb8075259ffc",
+      "workspace_lock_normalization": null
+    },
+    "codex": {
+      "manifest_path": "eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "e13a9d0fe8c51ab09ea4552749afb437db6915eb2b069291c918ebf8075b5981",
+      "cli_sha256": "8bd5f096af8302c0d5bf272a15a563d243fe77e8b704b749321a437c815f1a80",
+      "cli_size": 1257563472,
+      "code_mode_host_sha256": "93e16201d425f9024992052dd0e9c44ef5c5a639807be196a017be3aca9be56a",
+      "code_mode_host_size": 87415456,
+      "bwrap_sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+      "bwrap_size": 529776,
+      "source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+      "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0"
+    }
+  }
+}

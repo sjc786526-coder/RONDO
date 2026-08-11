@@ -41,8 +41,11 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v6.json"
+PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v7.json"
 PREVIOUS_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v6.json"
+)
+CONSUMED_V12_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v5.json"
 )
 CONSUMED_V11_PAIR_LOCK_PATH = (
@@ -57,12 +60,19 @@ CONSUMED_V9_PAIR_LOCK_PATH = (
 LEGACY_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
 )
-P1_PAIR_ID = "p1-fix-git-pair-v13"
-PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v12"
+P1_PAIR_ID = "p1-fix-git-pair-v14"
+PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v13"
+CONSUMED_V12_P1_PAIR_ID = "p1-fix-git-pair-v12"
 CONSUMED_V11_P1_PAIR_ID = "p1-fix-git-pair-v11"
 CONSUMED_V10_P1_PAIR_ID = "p1-fix-git-pair-v10"
 CONSUMED_V9_P1_PAIR_ID = "p1-fix-git-pair-v9"
 LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
+_TEN_USD_PAIR_IDS = {
+    P1_PAIR_ID,
+    PREVIOUS_P1_PAIR_ID,
+    CONSUMED_V12_P1_PAIR_ID,
+    CONSUMED_V11_P1_PAIR_ID,
+}
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_V1_KEYS = {
     "schema_version",
@@ -836,9 +846,17 @@ def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentit
 
 
 def load_previous_pair_identity(path: Path = PREVIOUS_PAIR_LOCK_PATH) -> PairIdentity:
-    """Load the canary-failed v12 identity for read-only historical assessment."""
+    """Load the Guardian-failed v13 identity for read-only historical assessment."""
 
     return _load_pair_identity(path, schema_version=2, pair_id=PREVIOUS_P1_PAIR_ID)
+
+
+def load_consumed_v12_pair_identity(
+    path: Path = CONSUMED_V12_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the canary-failed v12 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V12_P1_PAIR_ID)
 
 
 def load_consumed_v11_pair_identity(
@@ -1090,8 +1108,21 @@ def assess_m1(
         if (
             not isinstance(summary, dict)
             or summary.get("metadata_ready") is not True
-            or roles != {"main": 2, "guardian": 1}
-            or sequence != ["main", "guardian", "main"]
+            or not isinstance(roles, dict)
+            or set(roles) != {"main", "guardian"}
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+                for value in roles.values()
+            )
+            or roles.get("main") != (
+                sequence.count("main") if isinstance(sequence, list) else -1
+            )
+            or roles.get("guardian") != (
+                sequence.count("guardian") if isinstance(sequence, list) else -1
+            )
+            or not has_complete_guardian_approval_sequence(sequence)
         ):
             reasons.append(f"{slot.side.value}_guardian_approval_incomplete")
         ledger_run = ledger_runs.get(slot.slot)
@@ -1129,6 +1160,19 @@ def assess_m1(
     result["reasons"] = sorted(set(reasons))
     result["m1"] = "passed" if not reasons else "failed"
     return result
+
+
+def has_complete_guardian_approval_sequence(sequence: object) -> bool:
+    """Accept one approval bracketed by one or more ordinary model turns."""
+
+    if not isinstance(sequence, (list, tuple)) or len(sequence) < 3:
+        return False
+    if any(role not in {"main", "guardian"} for role in sequence):
+        return False
+    if sequence.count("guardian") != 1:
+        return False
+    guardian_index = sequence.index("guardian")
+    return guardian_index > 0 and guardian_index < len(sequence) - 1
 
 
 def terminal_record_sha256(record: Mapping[str, Any]) -> str:
@@ -1350,11 +1394,7 @@ def _parse_fairness(
     schema_version: int,
     pair_id: str,
 ) -> dict[str, object]:
-    budget_usd = (
-        10.0
-        if pair_id in {P1_PAIR_ID, PREVIOUS_P1_PAIR_ID, CONSUMED_V11_P1_PAIR_ID}
-        else 5.0
-    )
+    budget_usd = 10.0 if pair_id in _TEN_USD_PAIR_IDS else 5.0
     expected = {
         "task_id": FIX_GIT_TASK_ID,
         "task_image_digest": FIX_GIT_IMAGE_DIGEST,
@@ -1394,11 +1434,7 @@ def _parse_paid_budget(value: object, *, pair_id: str) -> PaidBudgetIdentity:
         raise PairIdentityError("paid pair budget differs from schema v2")
     per_side = value["per_side_usd"]
     pair = value["pair_usd"]
-    expected_per_side = (
-        10.0
-        if pair_id in {P1_PAIR_ID, PREVIOUS_P1_PAIR_ID, CONSUMED_V11_P1_PAIR_ID}
-        else 5.0
-    )
+    expected_per_side = 10.0 if pair_id in _TEN_USD_PAIR_IDS else 5.0
     expected_pair = expected_per_side * 2.0
     if (
         isinstance(per_side, bool)

@@ -3,7 +3,7 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；Plan 014 已发生的 canary、v9、v10、v11 与 v12 canary 费用 `$1.238773` 必须计入该上限。
+> 回填；Plan 014 已发生的 canary、v9、v10、v11、v12 与 v13 费用 `$1.794071` 必须计入该上限。
 
 ## 1. 目标
 
@@ -55,7 +55,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 ## 3. 硬约束
 
 1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，起始已发生
-   `$1.238773`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
+   `$1.794071`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
    每侧最多 10 USD。只有离线分析与修复已经完成并形成干净提交，才可启动下一轮真实执行；不得把项目其余
    600 USD 预算当成本阶段消费目标。
 2. **有效条件公平**：main/Guardian requested/effective model、effort、provider endpoint、请求能力和 rate card
@@ -146,7 +146,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - provider 已有专门的 public result 投影；success 与 claimed failure 统一保存 profile/endpoint hash、模型、
   价卡和 retry 合同，且回归证明不会持久化 raw endpoint、display name、key env 或整份 local config SHA。
 - 正式链路审查发现的七项缺陷已完成窄修复：proxy close 会等待所有 handler 收口且关闭后不再开始新 forward；
-  public producer 可直接通过 M1；completed 与 M1 都要求精确 `main → guardian → main`；main effort 已进入
+  public producer 可直接通过 M1；completed 与 M1 都要求唯一 Guardian 前后各至少一个 main turn，并允许真实任务
+  在审批前后产生额外 main turns；main effort 已进入
   local profile、canonical SHA、adapter、proxy 和 public result；CLI 诊断改为精确消息/命令/请求状态合同、
   显式环境白名单及剩余 retry 配额，并要求 ledger run 未停止、命令先于最终消息、唯一 `turn.completed` 且无
   `turn.failed`。真实 public producer→pair ledger→M1 集成回归和完整 eval 323/323 通过。
@@ -181,12 +182,19 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   共结算 `$0.116446`；但冻结 CLI 退出时其 plugin cache 后台写入与诊断清理发生 ENOTEMPTY 竞态，导致 campaign
   fail-closed。原 phase ledgers/目录保留，并新增只读 terminal failure 摘要；v12 不计为 canary 通过且不重用。
 - plugin cache 仅是私有诊断临时数据；清理现只对 ENOTEMPTY/EEXIST 做 5 次有界等待，仍冲突则保留目录而不抹掉
-  已完成的 API/CLI 事实，其他 I/O 错误继续 fail-closed。当前冻结 schema-v2 v6 lock 与唯一 v13 IDs；完成 focused、
-  lock、干净提交后从 fresh canary 继续，正式命令使用 active checkout 的绝对 watchdog 路径。
+  已完成的 API/CLI 事实，其他 I/O 错误继续 fail-closed。
+- v13 fresh canary 4/4 请求一次成功并结算 `$0.225666`。正式 RONDO 9 个上游请求全部 HTTP 200、usage valid、
+  settled，结算 `$0.329632`；第一个真实 Sol/low Guardian 审批已 approved，但适配器重建私有 Git 配置时只保留
+  `safe.directory`，丢失 fix-git 任务预置的 committer identity。后续 merge 失败触发第二个 Guardian logical
+  request，并被单审批上限在转发前正确阻断；Codex 与 M1 未运行，v13 永久 blocked。
+- v14 仅修复双方共享适配器的任务 Git identity 投影，并把 completed/M1 从“恰好三次请求”收窄为“唯一 Guardian
+  由 main turns 前后包围”。唯一有效 Guardian 请求与唯一 approved `E_final/meta` 在单审批合同下形成 task-scoped
+  S2 绑定；当前冻结 schema-v2 v7 lock 与唯一 v14 pair/batch/run IDs，待完整离线门禁和干净提交后运行 fresh
+  canary 与正式 pair。
 
 ### 阻塞项
 
-- v9/v10 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；三者均已退役。
+- v9/v10/v13 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
   任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与资源/预算门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 
@@ -204,7 +212,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 008 | frozen Codex 用 source-bound 最小 model catalog 选择 Guardian | 这是冻结源码已有启动能力，可让 requested/effective 都为 Sol，无需请求改写 | 已采纳 |
 | 009 | 固定单审批 task 声明 Guardian logical request 上限为 1 | 在不知道 frozen review id 的情况下，仍可在任何 charged parse replay 上游发送前可靠停止 | 已采纳 |
 | 010 | 短测每 upstream request 预留 1 USD，正式/大请求按 5 USD | 兼顾高频小探针与正式任务 fail-closed 暴露上限 | 已采纳 |
-| 011 | completed/M1 必须消费精确审批序列，main effort 与 Guardian effort 同级冻结 | 防止主请求或 effort 漂移产生可发布的假成功 | 已采纳 |
+| 011 | completed/M1 必须消费唯一且由 main turns 前后包围的审批序列，main/Guardian effort 同级冻结 | 防止审批缺失或 effort 漂移，同时允许真实任务的多轮 main 请求 | 已采纳 |
 | 012 | CLI 诊断只接受未停止 ledger、单一最终消息、成对且先于消息的固定审批命令和成功 turn 终态 | 历史 `expected_command=false` 收据只能保留为稳定性事实，不能充当新门禁证据 | 已采纳 |
 | 013 | Plan 014 canary 使用 source-bound frozen Codex 且硬限制四个 logical request、零 retry、4 USD | 仅靠事后序列检查不能证明 14 USD 总预算不会先超限再失败 | 已采纳 |
 | 014 | v9 任一正式侧失败后保留唯一终态并停止，不创建替代 pair | 防止为追求绿结果连续消费预算或破坏 identity 一次性语义 | 已采纳 |
@@ -214,3 +222,5 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 018 | v11 保持正式单请求 5 USD reservation，但把单侧/pair cap 冻结为 10/20 USD | RONDO 在 main tool-call 流结束前并发启动唯一 Guardian；5 USD 单侧 cap 会把合法 Guardian 本地拒绝 | 已采纳 |
 | 019 | v11 claim 前启动失败后退役该 identity，v12 只用 active checkout 的绝对 watchdog 路径 | canonical watcher 门禁拒绝相对 argv；即使零费用、零 claim，也不把正式尝试身份重新投入使用 | 已采纳 |
 | 020 | v12 canary 清理竞态后退役 identity；v13 对临时 plugin cache 的 ENOTEMPTY 做有界 best-effort | 私有缓存清理不能在四个请求已安全结算后制造假失败，其他清理异常仍须暴露 | 已采纳 |
+| 021 | v13 后将 fix-git 预置 committer identity 投影进双方私有 Git 配置 | 私有配置隔离不应删除冻结任务明确需要的 Git 身份并制造第二次审批 | 已采纳 |
+| 022 | 单 Guardian pair 以“一份 valid request + 一份 approved production evidence”的唯一性建立 S2 | 不持久化私有请求正文，也能在 task-scoped 单审批合同内得到一一绑定 | 已采纳 |

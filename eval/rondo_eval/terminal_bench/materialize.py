@@ -37,15 +37,17 @@ TERMINAL_BENCH_VERIFIER_USER = "root"
 TERMINAL_BENCH_VERIFIER_HOME = "/root"
 TERMINAL_BENCH_APT_CONFIG = "/tests/rondo-apt.conf"
 TERMINAL_BENCH_WORKDIR = "/app/personal-site"
+FIX_GIT_GIT_USER_NAME = "Test User"
+FIX_GIT_GIT_USER_EMAIL = "test@example.com"
 _APT_CONFIG_TEXT = 'APT::Sandbox::User "root";\n'
 _SOLUTION_ENV = {
     "GIT_CONFIG_COUNT": "3",
     "GIT_CONFIG_KEY_0": "safe.directory",
     "GIT_CONFIG_VALUE_0": TERMINAL_BENCH_WORKDIR,
     "GIT_CONFIG_KEY_1": "user.name",
-    "GIT_CONFIG_VALUE_1": "Test User",
+    "GIT_CONFIG_VALUE_1": FIX_GIT_GIT_USER_NAME,
     "GIT_CONFIG_KEY_2": "user.email",
-    "GIT_CONFIG_VALUE_2": "test@example.com",
+    "GIT_CONFIG_VALUE_2": FIX_GIT_GIT_USER_EMAIL,
 }
 
 

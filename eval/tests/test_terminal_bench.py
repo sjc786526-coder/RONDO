@@ -847,6 +847,10 @@ class TerminalBenchTests(unittest.TestCase):
             any(
                 'git config --global --replace-all safe.directory "$task_workdir"'
                 in call[0]
+                and "git config --global --replace-all user.name 'Test User'"
+                in call[0]
+                and "git config --global --replace-all user.email test@example.com"
+                in call[0]
                 and 'git -C "$task_workdir" status --porcelain=v1'
                 in call[0]
                 for call in agent_calls

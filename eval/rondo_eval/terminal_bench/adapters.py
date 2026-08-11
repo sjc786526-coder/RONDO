@@ -19,7 +19,11 @@ from .compat import (
     exec_result,
     with_prompt_template,
 )
-from .materialize import TERMINAL_BENCH_AGENT_USER
+from .materialize import (
+    FIX_GIT_GIT_USER_EMAIL,
+    FIX_GIT_GIT_USER_NAME,
+    TERMINAL_BENCH_AGENT_USER,
+)
 from .verifier_runtime import VerifierRuntimeError, prepare_verifier_apt_dirs
 
 
@@ -476,6 +480,16 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 'git config --global --replace-all safe.directory "$task_workdir"; '
                 'test "$(git config --global --get-all safe.directory | wc -l)" -eq 1; '
                 'test "$(git config --global --get-all safe.directory)" = "$task_workdir"; '
+                "git config --global --replace-all user.name "
+                f"{shlex.quote(FIX_GIT_GIT_USER_NAME)}; "
+                'test "$(git config --global --get-all user.name | wc -l)" -eq 1; '
+                "test \"$(git config --global --get-all user.name)\" = "
+                f"{shlex.quote(FIX_GIT_GIT_USER_NAME)}; "
+                "git config --global --replace-all user.email "
+                f"{shlex.quote(FIX_GIT_GIT_USER_EMAIL)}; "
+                'test "$(git config --global --get-all user.email | wc -l)" -eq 1; '
+                "test \"$(git config --global --get-all user.email)\" = "
+                f"{shlex.quote(FIX_GIT_GIT_USER_EMAIL)}; "
                 'test "$(git -C "$task_workdir" rev-parse --is-inside-work-tree)" = true; '
                 'git -C "$task_workdir" status --porcelain=v1 --untracked-files=no >/dev/null'
             ),
