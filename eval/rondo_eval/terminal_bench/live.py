@@ -112,6 +112,7 @@ async def run_budgeted_terminal_bench(
         max_attempts=provider.max_attempts,
         retry_backoff_seconds=provider.retry_backoff_seconds,
         unbilled_retry_statuses=provider.unbilled_retry_statuses,
+        max_guardian_logical_requests=1,
         timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
     )
     with proxy:

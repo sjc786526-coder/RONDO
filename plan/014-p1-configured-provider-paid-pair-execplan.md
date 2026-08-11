@@ -116,17 +116,20 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - frozen Codex 与 RONDO 已连续完成 3 轮 Sol/Sol 零重试短测：24/24 个 upstream request 一次成功且 usage valid，
   两侧审批链均为 `main → guardian → main`，本地价卡估算合计 1.234473 USD。早期 Luna 503、Sol 429/缺 usage、
   Terra 26/26 HTTP 403 仍作为波动边界保留；短测不是 paid pair。
+- declared single-Guardian gate 已落到 proxy、短测入口和正式 live 路径：首个 Guardian logical request 内可继续
+  operator-confirmed-unbilled attempts，第二个 Guardian request 在 reservation/forward 前以本地 409 停止 run。
+  focused loopback 覆盖正常 `main → guardian → main`、首请求两次 upstream attempts 和 charged parse replay；
+  相关 proxy/diagnostic/provider/live 58/58 通过。
 
 ### 当前工作
 
-- 正在离线实现单审批 task 的 charged-parse replay 阻断、catalog/source identity 公平投影、新 pair identity 与
-  profile drift 门禁。正式 exact-wire canary、Docker 和 paid pair 尚未获得本计划自己的范围授权，也未运行；
+- 正在离线实现 catalog/source identity 公平投影、新 pair identity 与 profile drift 门禁。正式 exact-wire canary、
+  Docker 和 paid pair 尚未获得本计划自己的范围授权，也未运行；
   既有 3 轮稳定性诊断只用于选定 Sol/Sol 候选，不能回填为 pair 结果。
 
 ### 阻塞项
 
-- paid 前必须由 focused loopback 证明 declared single-Guardian gate 在第二次 reserve/forward 前停止，同时不阻断
-  第一个 logical request 内的 operator-confirmed-unbilled transport retry。
+- paid 前必须完成 catalog/source identity、新 pair/profile drift 与 public/redacted result 的剩余 focused 门禁。
 - active Sol/Sol profile 在正式 pair 前仍须通过本计划自己的 fresh exact-wire canary；Terra 的持续 403 需供应商侧
   访问能力变化后再考虑。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。

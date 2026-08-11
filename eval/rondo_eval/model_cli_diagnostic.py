@@ -514,6 +514,7 @@ def _run_phase_once(
             retry_backoff_seconds=provider.retry_backoff_seconds,
             unbilled_retry_statuses=provider.unbilled_retry_statuses,
             request_reservation_usd=SHORT_REQUEST_RESERVATION_USD,
+            max_guardian_logical_requests=1,
         ) as proxy:
             _write_auth(auth_path, proxy.downstream_api_key)
             started = time.monotonic()
@@ -868,6 +869,7 @@ def run_campaign(
             provider.guardian_model if frozen_model_catalog is not None else None
         ),
         "request_reservation_usd": format(SHORT_REQUEST_RESERVATION_USD, "f"),
+        "max_guardian_logical_requests": 1,
         "campaign_cap_usd": format(MODEL_CAMPAIGN_CAP_USD, "f"),
         "prior_diagnostic_debit_usd": format(prior_debit_usd, "f"),
         "prior_retry_count": prior_retry_count,

@@ -390,6 +390,22 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
 
+    def test_guardian_logical_request_limit_only_accepts_exactly_one(self) -> None:
+        for number, limit in enumerate((True, False, 0, 2, -1)):
+            with self.subTest(limit=limit), self.assertRaisesRegex(
+                ApiBudgetProxyError, "exactly one"
+            ):
+                LoopbackResponsesProxy(
+                    upstream_base_url="https://provider.example/v1",
+                    api_key=self.secret,
+                    ledger=self.ledger,
+                    run_id=f"invalid-guardian-limit-{number}",
+                    metadata_path=self.root / f"invalid-guardian-limit-{number}.json",
+                    **self._profile_kwargs(),
+                    max_guardian_logical_requests=limit,
+                    _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+                )
+
     def test_invalid_compatible_base_urls_are_rejected_before_registration(self) -> None:
         for number, base_url in enumerate(
             (
@@ -749,6 +765,92 @@ class ApiBudgetProxyTests(unittest.TestCase):
             (self.root / "high-effort-metadata.json").read_text(encoding="utf-8")
         )["requests"][0]
         self.assertEqual(observation["reasoning_effort"], "high")
+
+    def test_single_guardian_contract_blocks_charged_parse_replay_before_reserve(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="single-guardian-run",
+            metadata_path=self.root / "single-guardian-metadata.json",
+            **self._profile_kwargs(),
+            max_guardian_logical_requests=1,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+
+        sequence = (
+            (self._body(), "main", "main-before"),
+            (
+                self._body(effort="low", guardian=True),
+                "guardian",
+                "guardian-first",
+            ),
+            (self._body(), "main", "main-after"),
+        )
+        for body, role, request_id in sequence:
+            status, _response, _headers = self._post(
+                body,
+                role=role,
+                request_id=request_id,
+            )
+            self.assertEqual(status, 200)
+        upstream_before_replay = len(self.upstream.requests)
+
+        status, body, _headers = self._post(
+            self._body(effort="low", guardian=True),
+            role="guardian",
+            request_id="guardian-charged-parse-replay",
+        )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            json.loads(body)["error"]["code"],
+            "guardian_logical_request_limit_exceeded",
+        )
+        self.assertEqual(len(self.upstream.requests), upstream_before_replay)
+        metadata = json.loads(
+            (self.root / "single-guardian-metadata.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(metadata["requests"]), 3)
+        run = self.ledger.snapshot()["runs"]["single-guardian-run"]
+        self.assertEqual(
+            set(run["requests"]),
+            {"main-before", "guardian-first", "main-after"},
+        )
+        self.assertTrue(run["stopped"])
+        self.assertEqual(
+            run["stop_reason"],
+            "guardian_logical_request_limit_exceeded",
+        )
+
+    def test_single_guardian_contract_keeps_unbilled_attempts_inside_first_request(self) -> None:
+        self.proxy.close()
+        self.upstream.modes = ["unbilled_503", "json"]
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="single-guardian-unbilled-run",
+            metadata_path=self.root / "single-guardian-unbilled-metadata.json",
+            **self._profile_kwargs(),
+            max_guardian_logical_requests=1,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+
+        status, _body, _headers = self._post(
+            self._body(effort="low", guardian=True),
+            role="guardian",
+            request_id="guardian-first-logical-request",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(len(self.upstream.requests), 2)
+        request = self.ledger.snapshot()["runs"]["single-guardian-unbilled-run"][
+            "requests"
+        ]["guardian-first-logical-request"]
+        self.assertEqual(request["attempt_count"], 2)
+        self.assertEqual(request["settlement_kind"], "usage_priced")
 
     def test_missing_usage_charges_reservation_stops_run_and_prevents_forward(self) -> None:
         self.upstream.mode = "missing_usage"

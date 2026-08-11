@@ -1243,6 +1243,9 @@ class TerminalBenchTests(unittest.TestCase):
         )
         self.assertNotIn("official-key-sentinel", "\0".join(observed["argv"]))
         self.assertEqual(FakeBudgetProxy.last_kwargs["timeout_seconds"], 90.0)
+        self.assertEqual(
+            FakeBudgetProxy.last_kwargs["max_guardian_logical_requests"], 1
+        )
         self.assertNotEqual(
             FakeBudgetProxy.last_kwargs["timeout_seconds"],
             self.request(Side.RONDO).timeout_seconds,

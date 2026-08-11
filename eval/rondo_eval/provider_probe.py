@@ -138,6 +138,7 @@ def run_provider_probes(
         "guardian_model": provider.guardian_model,
         "guardian_effort": provider.guardian_effort,
         "request_reservation_usd": format(SHORT_REQUEST_RESERVATION_USD, "f"),
+        "max_guardian_logical_requests": 1,
         "total_cap_usd": format(PROBE_TOTAL_CAP_USD, "f"),
     }
     _atomic_private_json(output_root / "profile.json", profile_summary)
@@ -167,6 +168,7 @@ def run_provider_probes(
                 retry_backoff_seconds=provider.retry_backoff_seconds,
                 unbilled_retry_statuses=provider.unbilled_retry_statuses,
                 request_reservation_usd=SHORT_REQUEST_RESERVATION_USD,
+                max_guardian_logical_requests=1,
                 timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
                 _transport=_transport,
             ) as proxy:
