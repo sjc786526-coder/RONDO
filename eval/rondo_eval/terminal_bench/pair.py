@@ -41,8 +41,11 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v7.json"
+PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v8.json"
 PREVIOUS_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v7.json"
+)
+CONSUMED_V13_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v6.json"
 )
 CONSUMED_V12_PAIR_LOCK_PATH = (
@@ -60,8 +63,9 @@ CONSUMED_V9_PAIR_LOCK_PATH = (
 LEGACY_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
 )
-P1_PAIR_ID = "p1-fix-git-pair-v14"
-PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v13"
+P1_PAIR_ID = "p1-fix-git-pair-v15"
+PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v14"
+CONSUMED_V13_P1_PAIR_ID = "p1-fix-git-pair-v13"
 CONSUMED_V12_P1_PAIR_ID = "p1-fix-git-pair-v12"
 CONSUMED_V11_P1_PAIR_ID = "p1-fix-git-pair-v11"
 CONSUMED_V10_P1_PAIR_ID = "p1-fix-git-pair-v10"
@@ -70,6 +74,7 @@ LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
 _TEN_USD_PAIR_IDS = {
     P1_PAIR_ID,
     PREVIOUS_P1_PAIR_ID,
+    CONSUMED_V13_P1_PAIR_ID,
     CONSUMED_V12_P1_PAIR_ID,
     CONSUMED_V11_P1_PAIR_ID,
 }
@@ -846,9 +851,17 @@ def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentit
 
 
 def load_previous_pair_identity(path: Path = PREVIOUS_PAIR_LOCK_PATH) -> PairIdentity:
-    """Load the Guardian-failed v13 identity for read-only historical assessment."""
+    """Load the second-approval-failed v14 identity for read-only assessment."""
 
     return _load_pair_identity(path, schema_version=2, pair_id=PREVIOUS_P1_PAIR_ID)
+
+
+def load_consumed_v13_pair_identity(
+    path: Path = CONSUMED_V13_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the Guardian-failed v13 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V13_P1_PAIR_ID)
 
 
 def load_consumed_v12_pair_identity(
@@ -1123,6 +1136,8 @@ def assess_m1(
                 sequence.count("guardian") if isinstance(sequence, list) else -1
             )
             or not has_complete_guardian_approval_sequence(sequence)
+            or roles.get("guardian", 0)
+            > identity.require_selected_profile().max_guardian_logical_requests
         ):
             reasons.append(f"{slot.side.value}_guardian_approval_incomplete")
         ledger_run = ledger_runs.get(slot.slot)
@@ -1163,16 +1178,21 @@ def assess_m1(
 
 
 def has_complete_guardian_approval_sequence(sequence: object) -> bool:
-    """Accept one approval bracketed by one or more ordinary model turns."""
+    """Accept bounded approvals separated and bracketed by ordinary model turns."""
 
     if not isinstance(sequence, (list, tuple)) or len(sequence) < 3:
         return False
     if any(role not in {"main", "guardian"} for role in sequence):
         return False
-    if sequence.count("guardian") != 1:
+    guardian_count = sequence.count("guardian")
+    if not 1 <= guardian_count <= 3:
         return False
-    guardian_index = sequence.index("guardian")
-    return guardian_index > 0 and guardian_index < len(sequence) - 1
+    if sequence[0] == "guardian" or sequence[-1] == "guardian":
+        return False
+    return all(
+        current != "guardian" or previous == "main"
+        for previous, current in zip(sequence, sequence[1:], strict=False)
+    )
 
 
 def terminal_record_sha256(record: Mapping[str, Any]) -> str:
@@ -1499,13 +1519,18 @@ def _parse_selected_profile(value: object) -> SelectedProfileIdentity:
     catalog_sha256 = value.get("frozen_codex_model_catalog_sha256")
     _require_commit(source_commit, "frozen model catalog source commit")
     _require_sha256(catalog_sha256, "frozen model catalog sha256")
-    if value.get("max_guardian_logical_requests") != 1:
+    guardian_limit = value.get("max_guardian_logical_requests")
+    if (
+        isinstance(guardian_limit, bool)
+        or not isinstance(guardian_limit, int)
+        or not 1 <= guardian_limit <= 3
+    ):
         raise PairIdentityError("selected paid Guardian request limit is invalid")
     return SelectedProfileIdentity(
         provider_public={key: value[key] for key in _PUBLIC_PROVIDER_KEYS},
         frozen_codex_model_catalog_source_commit=source_commit,
         frozen_codex_model_catalog_sha256=catalog_sha256,
-        max_guardian_logical_requests=1,
+        max_guardian_logical_requests=guardian_limit,
     )
 
 

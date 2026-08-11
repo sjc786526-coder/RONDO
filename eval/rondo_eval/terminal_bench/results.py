@@ -517,14 +517,14 @@ def _safe_summary(
     guardian_requests = request_roles.count("guardian")
     if side is Side.RONDO and (
         parsed.outcome is RunOutcome.COMPLETED
-        and guardian_requests == 1
-        and len(evidence) == 1
-        and evidence[0]["terminal_status"] == "approved"
+        and guardian_requests >= 1
+        and len(evidence) == guardian_requests
+        and all(item["terminal_status"] == "approved" for item in evidence)
         and has_complete_guardian_approval_sequence(request_roles)
     ):
-        # The paid pair permits exactly one Guardian logical request.  One
-        # verified request and one approved production evidence bundle form a
-        # unique task-scoped binding without persisting a private request body.
+        # The paid pair bounds distinct Guardian request bodies and rejects a
+        # duplicate charged replay. Equal verified request/evidence counts form
+        # a task-scoped set binding without persisting a private request body.
         s2_binding = "verified"
     elif side is Side.RONDO and (guardian_requests or evidence):
         s2_binding = "unbound"
@@ -740,11 +740,14 @@ def _validate_publication_evidence(
             )
         if live_result.prepared.spec.side is Side.RONDO:
             if (
-                len(live_result.evidence) != 1
-                or live_result.evidence[0].terminal_status != "approved"
+                len(live_result.evidence) != roles.count("guardian")
+                or any(
+                    item.terminal_status != "approved"
+                    for item in live_result.evidence
+                )
             ):
                 raise HarborResultError(
-                    "RONDO completed run requires one approved Guardian evidence bundle"
+                    "RONDO completed run requires one approved evidence per Guardian request"
                 )
         elif live_result.evidence:
             raise HarborResultError("frozen Codex cannot publish RONDO Guardian evidence")
@@ -846,15 +849,25 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         sequence
     ):
         raise HarborResultError("completed Terminal-Bench approval sequence is incomplete")
+    guardian_limit = config.get("max_guardian_logical_requests")
+    if outcome is RunOutcome.COMPLETED and (
+        isinstance(guardian_limit, bool)
+        or not isinstance(guardian_limit, int)
+        or roles["guardian"] > guardian_limit
+    ):
+        raise HarborResultError("completed Terminal-Bench approval count exceeds its lock")
     if outcome is RunOutcome.COMPLETED:
         evidence = summary.get("evidence")
         binding = summary.get("s2_request_evidence_binding")
         if record.get("side") == Side.RONDO.value:
             if (
                 not isinstance(evidence, list)
-                or len(evidence) != 1
-                or not isinstance(evidence[0], dict)
-                or evidence[0].get("terminal_status") != "approved"
+                or len(evidence) != roles["guardian"]
+                or any(
+                    not isinstance(item, dict)
+                    or item.get("terminal_status") != "approved"
+                    for item in evidence
+                )
                 or binding != "verified"
             ):
                 raise HarborResultError("completed RONDO Guardian evidence is not bound")

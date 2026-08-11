@@ -3,7 +3,7 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；Plan 014 已发生的 canary、v9、v10、v11、v12 与 v13 费用 `$1.794071` 必须计入该上限。
+> 回填；Plan 014 已发生的 canary、v9、v10、v11、v12、v13 与 v14 费用 `$2.270206` 必须计入该上限。
 
 ## 1. 目标
 
@@ -55,7 +55,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 ## 3. 硬约束
 
 1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，起始已发生
-   `$1.794071`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
+   `$2.270206`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
    每侧最多 10 USD。只有离线分析与修复已经完成并形成干净提交，才可启动下一轮真实执行；不得把项目其余
    600 USD 预算当成本阶段消费目标。
 2. **有效条件公平**：main/Guardian requested/effective model、effort、provider endpoint、请求能力和 rate card
@@ -63,10 +63,10 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 3. **catalog 边界**：只从 git-ignored、只读且 HEAD 等于 frozen bundle manifest `source_commit` 的上游
    `models.json` 选择精确 main/Guardian 条目，输出最小私有 catalog；只允许修改主条目的
    `auto_review_model_override`。原 catalog、冻结源码/二进制、其他模型元数据均不修改，catalog SHA 进入 receipt。
-4. **已计费解析重放**：本次固定 Terminal-Bench task 的 pair contract 只允许一个 Guardian logical request。
-   proxy 在任何第二个 Guardian downstream request 转发前本地拒绝并停止 run；第一个 logical request 内仍只允许
-   operator-confirmed-unbilled transport retry。这样不需要猜测 frozen review id，也不会把第二次独立审批误发上游；
-   若任务实际需要第二次审批，本 pair 直接 fail-closed，另行设计通用 correlation contract。
+4. **已计费解析重放**：v14 证明固定 Terminal-Bench task 会自然需要第二个不同审批。正式 pair 最多允许两个
+   Guardian logical request，但 proxy 对已见过的 exact request-body SHA 在 reserve/forward 前本地拒绝并停止；
+   因此 completed+usage 后的同体 parse replay 不会再次上游计费，而两个不同 action 的审批仍可完成。每个 logical
+   request 内仍只允许 operator-confirmed-unbilled transport retry；第三个不同审批继续 fail-closed。
 5. **未计费 retry**：继续沿用 Plan 013 proxy 内 `max_attempts<=5`、单 reservation、共享 90 秒 transport budget 与
    operator-confirmed-unbilled 门禁。task/run/pair 仍为零重试。
 6. **配置绑定**：sequence ledger 绑定 canonical selected profile，不绑定整个 `rondo.local.toml`；无关 local-model
@@ -92,8 +92,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 1. **先闭合公平合同（纯测试）**
    - 将已验证的 frozen catalog override 投影抽成可复用的私有启动合同，记录 source commit、catalog SHA、
      requested/effective model；RONDO 保持显式 `[auto_review]`。
-   - 给本 pair 增加 declared `max_guardian_logical_requests=1`，第二个 Guardian request 在 reserve/forward 前停止；
-     补两侧一次审批允许、同 logical request 未计费 retry 允许、charged parse replay/第二次审批拒绝的回归。
+   - 给本 pair 增加 declared Guardian logical request 上限与已见 body SHA 集合；允许至多两个不同审批，同体 replay
+     在 reserve/forward 前停止。补不同审批、同 logical request 未计费 retry 与 charged duplicate replay 回归。
    - 补 main/Guardian、双侧、catalog source identity/选择/篡改拒绝和 public/redacted projection 回归。
 2. **新 identity 与漂移门禁**
    - 新建 lock schema 和唯一 pair/batch/run IDs。
@@ -135,8 +135,9 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - frozen Codex 与 RONDO 已连续完成 3 轮 Sol/Sol 零重试短测：24/24 个 upstream request 一次成功且 usage valid，
   两侧审批链均为 `main → guardian → main`，本地价卡估算合计 1.234473 USD。早期 Luna 503、Sol 429/缺 usage、
   Terra 26/26 HTTP 403 仍作为波动边界保留；短测不是 paid pair。
-- declared single-Guardian gate 已落到 proxy、短测入口和正式 live 路径：首个 Guardian logical request 内可继续
-  operator-confirmed-unbilled attempts，第二个 Guardian request 在 reservation/forward 前以本地 409 停止 run。
+- declared Guardian gate 已落到 proxy、短测入口和正式 live 路径：logical request 内可继续 operator-confirmed-
+  unbilled attempts；正式 v15 最多允许两个不同 body，任何已计费同体 replay 在 reservation/forward 前以本地 409
+  停止 run。
   focused loopback 覆盖正常 `main → guardian → main`、首请求两次 upstream attempts 和 charged parse replay；
   相关 proxy/diagnostic/provider/live 58/58 通过。
 - frozen Codex catalog 已从诊断逻辑提取为正式 source-bound 投影：从 manifest 指定 commit 的 git object 取
@@ -146,8 +147,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - provider 已有专门的 public result 投影；success 与 claimed failure 统一保存 profile/endpoint hash、模型、
   价卡和 retry 合同，且回归证明不会持久化 raw endpoint、display name、key env 或整份 local config SHA。
 - 正式链路审查发现的七项缺陷已完成窄修复：proxy close 会等待所有 handler 收口且关闭后不再开始新 forward；
-  public producer 可直接通过 M1；completed 与 M1 都要求唯一 Guardian 前后各至少一个 main turn，并允许真实任务
-  在审批前后产生额外 main turns；main effort 已进入
+  public producer 可直接通过 M1；completed 与 M1 要求 1—3 个 Guardian 均由 main turns 分隔并前后包围，允许真实
+  任务在审批前后产生额外 main turns；main effort 已进入
   local profile、canonical SHA、adapter、proxy 和 public result；CLI 诊断改为精确消息/命令/请求状态合同、
   显式环境白名单及剩余 retry 配额，并要求 ledger run 未停止、命令先于最终消息、唯一 `turn.completed` 且无
   `turn.failed`。真实 public producer→pair ledger→M1 集成回归和完整 eval 323/323 通过。
@@ -188,13 +189,16 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   `safe.directory`，丢失 fix-git 任务预置的 committer identity。后续 merge 失败触发第二个 Guardian logical
   request，并被单审批上限在转发前正确阻断；Codex 与 M1 未运行，v13 永久 blocked。
 - v14 仅修复双方共享适配器的任务 Git identity 投影，并把 completed/M1 从“恰好三次请求”收窄为“唯一 Guardian
-  由 main turns 前后包围”。唯一有效 Guardian 请求与唯一 approved `E_final/meta` 在单审批合同下形成 task-scoped
-  S2 绑定；当前冻结 schema-v2 v7 lock 与唯一 v14 pair/batch/run IDs，待完整离线门禁和干净提交后运行 fresh
-  canary 与正式 pair。
+  由 main turns 前后包围”。fresh canary 4/4 一次成功并结算 `$0.175925`；正式 RONDO 10 个真实上游请求也全部
+  HTTP 200、usage valid、结算 `$0.300210`，但解决 cherry-pick conflict 的第二个不同 action 确实需要新审批，
+  仍被单审批上限阻断；Codex/M1 未运行，v14 永久 blocked。
+- v15 把正式上限改为两个不同 Guardian body，并在 proxy 前置拒绝 exact body SHA 重放；completed RONDO 要求每个
+  Guardian request 都有一份 approved production evidence，等量集合形成 task-scoped S2 绑定。当前冻结
+  schema-v2 v8 lock 与唯一 v15 pair/batch/run IDs，待离线门禁与干净提交后从 fresh canary 继续。
 
 ### 阻塞项
 
-- v9/v10/v13 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
+- v9/v10/v13/v14 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
   任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与资源/预算门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 
@@ -210,7 +214,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 006 | 新 lock/result 使用专门的 public/redacted projection | 通用运行时 `to_dict()` 含本机 endpoint/display/key env，不可直接持久化 | 已采纳 |
 | 007 | paid pair 前增加最多 4 USD exact-wire short canary | 早期 relay 同时出现成功与 403/429/503，先验证当下稳定性可避免消费 pair identity | 已采纳 |
 | 008 | frozen Codex 用 source-bound 最小 model catalog 选择 Guardian | 这是冻结源码已有启动能力，可让 requested/effective 都为 Sol，无需请求改写 | 已采纳 |
-| 009 | 固定单审批 task 声明 Guardian logical request 上限为 1 | 在不知道 frozen review id 的情况下，仍可在任何 charged parse replay 上游发送前可靠停止 | 已采纳 |
+| 009 | 固定任务最初声明 Guardian logical request 上限为 1 | v13 前用于阻断 charged parse replay；v14 已证明会误拒第二个不同审批 | 已由 023 替代 |
 | 010 | 短测每 upstream request 预留 1 USD，正式/大请求按 5 USD | 兼顾高频小探针与正式任务 fail-closed 暴露上限 | 已采纳 |
 | 011 | completed/M1 必须消费唯一且由 main turns 前后包围的审批序列，main/Guardian effort 同级冻结 | 防止审批缺失或 effort 漂移，同时允许真实任务的多轮 main 请求 | 已采纳 |
 | 012 | CLI 诊断只接受未停止 ledger、单一最终消息、成对且先于消息的固定审批命令和成功 turn 终态 | 历史 `expected_command=false` 收据只能保留为稳定性事实，不能充当新门禁证据 | 已采纳 |
@@ -223,4 +227,5 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 019 | v11 claim 前启动失败后退役该 identity，v12 只用 active checkout 的绝对 watchdog 路径 | canonical watcher 门禁拒绝相对 argv；即使零费用、零 claim，也不把正式尝试身份重新投入使用 | 已采纳 |
 | 020 | v12 canary 清理竞态后退役 identity；v13 对临时 plugin cache 的 ENOTEMPTY 做有界 best-effort | 私有缓存清理不能在四个请求已安全结算后制造假失败，其他清理异常仍须暴露 | 已采纳 |
 | 021 | v13 后将 fix-git 预置 committer identity 投影进双方私有 Git 配置 | 私有配置隔离不应删除冻结任务明确需要的 Git 身份并制造第二次审批 | 已采纳 |
-| 022 | 单 Guardian pair 以“一份 valid request + 一份 approved production evidence”的唯一性建立 S2 | 不持久化私有请求正文，也能在 task-scoped 单审批合同内得到一一绑定 | 已采纳 |
+| 022 | completed RONDO 以等量 valid Guardian requests 与 approved production evidence 建立 task-scoped 集合绑定 | 不持久化私有请求正文，且失败/缺失 evidence 不能成为 S2 | 已采纳 |
+| 023 | v15 允许两个不同 Guardian body，并前置拒绝已见 exact body SHA 与第三个不同审批 | 兼容真实冲突解决的第二次审批，同时阻断 completed+usage 后的同体 parse replay | 已采纳 |

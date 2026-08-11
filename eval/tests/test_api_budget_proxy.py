@@ -391,10 +391,10 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
 
-    def test_guardian_logical_request_limit_only_accepts_exactly_one(self) -> None:
-        for number, limit in enumerate((True, False, 0, 2, -1)):
+    def test_guardian_logical_request_limit_is_bounded(self) -> None:
+        for number, limit in enumerate((True, False, 0, 4, -1)):
             with self.subTest(limit=limit), self.assertRaisesRegex(
-                ApiBudgetProxyError, "exactly one"
+                ApiBudgetProxyError, "between one and three"
             ):
                 LoopbackResponsesProxy(
                     upstream_base_url="https://provider.example/v1",
@@ -456,10 +456,11 @@ class ApiBudgetProxyTests(unittest.TestCase):
         stream: bool = False,
         effort: str | None = "low",
         guardian: bool = False,
+        prompt: str = "secret prompt is never recorded",
     ) -> dict[str, object]:
         body: dict[str, object] = {
             "model": GUARDIAN_PRICING.model_id if guardian else MAIN_PRICING.model_id,
-            "input": [{"role": "user", "content": "secret prompt is never recorded"}],
+            "input": [{"role": "user", "content": prompt}],
             "stream": stream,
             "tools": [{"type": "function", "name": "local_tool"}],
         }
@@ -914,7 +915,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertNotIn("wrong-main-effort", requests)
         self.assertIn("matching-main-effort", requests)
 
-    def test_single_guardian_contract_blocks_charged_parse_replay_before_reserve(self) -> None:
+    def test_guardian_contract_blocks_duplicate_charged_parse_replay_before_reserve(self) -> None:
         self.proxy.close()
         self.proxy = LoopbackResponsesProxy(
             upstream_base_url="https://provider.example/v1",
@@ -954,7 +955,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertEqual(
             json.loads(body)["error"]["code"],
-            "guardian_logical_request_limit_exceeded",
+            "guardian_duplicate_logical_request_rejected",
         )
         self.assertEqual(len(self.upstream.requests), upstream_before_replay)
         metadata = json.loads(
@@ -969,8 +970,47 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertTrue(run["stopped"])
         self.assertEqual(
             run["stop_reason"],
+            "guardian_duplicate_logical_request_rejected",
+        )
+
+    def test_two_distinct_guardian_reviews_are_allowed_but_a_third_is_bounded(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="two-guardian-run",
+            metadata_path=self.root / "two-guardian-metadata.json",
+            **self._profile_kwargs(),
+            max_guardian_logical_requests=2,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+
+        for number in (1, 2):
+            status, _body, _headers = self._post(
+                self._body(
+                    effort="low",
+                    guardian=True,
+                    prompt=f"distinct review {number}",
+                ),
+                role="guardian",
+                request_id=f"guardian-{number}",
+            )
+            self.assertEqual(status, 200)
+        upstream_before_limit = len(self.upstream.requests)
+
+        status, body, _headers = self._post(
+            self._body(effort="low", guardian=True, prompt="distinct review 3"),
+            role="guardian",
+            request_id="guardian-3",
+        )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            json.loads(body)["error"]["code"],
             "guardian_logical_request_limit_exceeded",
         )
+        self.assertEqual(len(self.upstream.requests), upstream_before_limit)
 
     def test_single_guardian_contract_keeps_unbilled_attempts_inside_first_request(self) -> None:
         self.proxy.close()
