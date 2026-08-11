@@ -172,6 +172,10 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   `eval-lock` 85 packages 通过。
 - 当前先提交根因修复，再冻结新 identity；随后通过当前 Sol/medium + Sol/low profile 的 fresh exact-wire canary 和
   Docker/Windows C:/build-lock 门禁，按 RONDO → frozen Codex 执行。Plan 014 累计费用从 `$0.386904` 起算。
+- 根因修复已提交为 `22ddcdc`。新 schema-v2 v3 lock 冻结 `p1-fix-git-pair-v10`、
+  `p1-fix-git-b4-m1-v2`、RONDO run `20260811-140000000-tb-rondo-r1` 与 frozen Codex run
+  `20260811-140000001-tb-codex-r1`；v9 v2 lock 保持原文件，并新增显式只读隔离回归。identity/profile focused
+  tests 59/59 与 `eval-lock` 85 packages 通过，待完整 eval 门禁和 identity 提交。
 
 ### 阻塞项
 
@@ -198,3 +202,4 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 014 | v9 任一正式侧失败后保留唯一终态并停止，不创建替代 pair | 防止为追求绿结果连续消费预算或破坏 identity 一次性语义 | 已采纳 |
 | 015 | v9 RONDO Guardian 失败后不把已生成但未绑定 usage 的 `E_final` 计为 S2 | 请求未进入预算 metadata，不能证明审批模型真实完成 | 已采纳 |
 | 016 | v9 后允许在 280 USD 累计硬上限内按“修复后新 identity”有界迭代 | 普通运行失败不应盲重跑，也不应阻止已定位修复后的 B3/M1 闭环 | 已采纳 |
+| 017 | v10 使用新的 v3 lock、batch 与两条 run ID，v9 v2 lock 只读保留 | 运行失败身份不可复用，profile/bundle 未变化时无需重建二进制 | 已采纳 |

@@ -30,6 +30,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     assess_m1,
     load_legacy_pair_identity,
     load_pair_identity,
+    load_previous_pair_identity,
     terminal_record_sha256,
     validate_harbor_installation,
 )
@@ -205,13 +206,13 @@ class PairIdentityTests(unittest.TestCase):
             identity.no_api_seccomp.source_sha256,
         )
         paid = identity.mode("paid")
-        self.assertEqual(identity.pair_id, "p1-fix-git-pair-v9")
-        self.assertEqual(paid.batch_id, "p1-fix-git-b4-m1-v1")
+        self.assertEqual(identity.pair_id, "p1-fix-git-pair-v10")
+        self.assertEqual(paid.batch_id, "p1-fix-git-b4-m1-v2")
         self.assertEqual(
             [slot.paid_run_id for slot in identity.topology],
             [
-                "20260811-120000000-tb-rondo-r1",
-                "20260811-120000001-tb-codex-r1",
+                "20260811-140000000-tb-rondo-r1",
+                "20260811-140000001-tb-codex-r1",
             ],
         )
         selected = identity.require_selected_profile().to_dict()
@@ -260,6 +261,26 @@ class PairIdentityTests(unittest.TestCase):
             PairSequenceLedger(
                 Path(directory) / "legacy.json",
                 identity=legacy,
+                mode="paid",
+            )
+
+    def test_consumed_v9_identity_is_explicit_and_read_only(self) -> None:
+        previous = load_previous_pair_identity()
+        self.assertEqual(previous.pair_id, "p1-fix-git-pair-v9")
+        self.assertNotEqual(previous.pair_id, self.tracked_identity.pair_id)
+        self.assertTrue(
+            {slot.paid_run_id for slot in previous.topology}.isdisjoint(
+                slot.paid_run_id for slot in self.tracked_identity.topology
+            )
+        )
+        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
+            load_pair_identity(pair_module.PREVIOUS_PAIR_LOCK_PATH)
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            PairIdentityError, "read-only"
+        ):
+            PairSequenceLedger(
+                Path(directory) / "previous.json",
+                identity=previous,
                 mode="paid",
             )
 

@@ -1128,7 +1128,7 @@ def main() -> int:
     parser.add_argument(
         "--plan014-canary",
         action="store_true",
-        help="run the fresh frozen-Codex four-request canary under the v9 pair lock",
+        help="run the fresh frozen-Codex four-request canary under the active pair lock",
     )
     args = parser.parse_args()
     try:

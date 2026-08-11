@@ -41,11 +41,15 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v2.json"
+PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v3.json"
+PREVIOUS_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v2.json"
+)
 LEGACY_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
 )
-P1_PAIR_ID = "p1-fix-git-pair-v9"
+P1_PAIR_ID = "p1-fix-git-pair-v10"
+PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v9"
 LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_V1_KEYS = {
@@ -179,8 +183,10 @@ class PairSequenceLedger:
         self._state: dict[str, Any] | None = None
         self._persist_hook = persist_hook or (lambda _point: None)
         self._read_only = read_only
-        if identity.schema_version != 2 and not read_only:
-            raise PairIdentityError("legacy pair identity is read-only")
+        if (
+            identity.schema_version != 2 or identity.pair_id != P1_PAIR_ID
+        ) and not read_only:
+            raise PairIdentityError("historical pair identity is read-only")
 
     def __enter__(self) -> PairSequenceLedger:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -815,6 +821,12 @@ def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentit
     """Load the consumed v8 identity for read-only historical assessment."""
 
     return _load_pair_identity(path, schema_version=1, pair_id=LEGACY_P1_PAIR_ID)
+
+
+def load_previous_pair_identity(path: Path = PREVIOUS_PAIR_LOCK_PATH) -> PairIdentity:
+    """Load the consumed v9 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=PREVIOUS_P1_PAIR_ID)
 
 
 def _load_pair_identity(
