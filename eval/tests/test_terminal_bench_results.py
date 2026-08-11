@@ -239,6 +239,15 @@ class TerminalBenchResultTests(unittest.TestCase):
                 {
                     "instructions": "frozen guardian policy",
                     "input": [{"role": "user", "content": "approval evidence"}],
+                    "text": {
+                        "format": {
+                            "schema": {
+                                "properties": {
+                                    "user_authorization": {"type": "string"}
+                                }
+                            }
+                        }
+                    },
                     "tools": [],
                 }
             ),
