@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -48,6 +47,10 @@ EXPECTED_MAIN_EFFORT = "medium"
 EXPECTED_GUARDIAN_EFFORT = "low"
 DEFAULT_GUARDIAN_ALIAS = "luna"
 SUPPORTED_MAIN_ALIASES = ("luna", "terra", "sol")
+_EXPECTED_APPROVAL_COMMANDS = {
+    "touch guardian-approved.tmp",
+    "/bin/bash -lc 'touch guardian-approved.tmp'",
+}
 
 
 class ModelDiagnosticError(RuntimeError):
@@ -235,18 +238,17 @@ def _codex_command(
 
 
 def _safe_environment(codex_home: Path) -> dict[str, str]:
-    environment = dict(os.environ)
-    environment["CODEX_HOME"] = str(codex_home)
-    existing = environment.get("NO_PROXY", environment.get("no_proxy", ""))
-    entries = [item for item in existing.split(",") if item]
-    for item in ("127.0.0.1", "localhost"):
-        if item not in entries:
-            entries.append(item)
-    no_proxy = ",".join(entries)
-    environment["NO_PROXY"] = no_proxy
-    environment["no_proxy"] = no_proxy
-    environment.pop("OPENAI_API_KEY", None)
-    return environment
+    # Do not inherit ambient credentials, provider endpoints, proxy settings,
+    # hooks, or tool configuration into the evaluated CLI and its children.
+    return {
+        "CODEX_HOME": str(codex_home),
+        "HOME": str(codex_home),
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "NO_PROXY": "127.0.0.1,localhost",
+        "no_proxy": "127.0.0.1,localhost",
+    }
 
 
 def _request_states(snapshot: dict[str, Any], run_id: str) -> list[dict[str, Any]]:
@@ -255,7 +257,11 @@ def _request_states(snapshot: dict[str, Any], run_id: str) -> list[dict[str, Any
     requests = run.get("requests") if isinstance(run, dict) else None
     if not isinstance(requests, dict):
         return []
-    return [value for value in requests.values() if isinstance(value, dict)]
+    return [
+        {**value, "request_id": request_id}
+        for request_id, value in requests.items()
+        if isinstance(request_id, str) and isinstance(value, dict)
+    ]
 
 
 def _phase_succeeded(
@@ -264,25 +270,49 @@ def _phase_succeeded(
     returncode: int,
     snapshot: dict[str, Any],
     run_id: str,
-    roles: list[str],
+    requests: list[dict[str, Any]],
 ) -> bool:
     states = _request_states(snapshot, run_id)
     if returncode != 0 or snapshot.get("reserved_usd") != "0.000000":
         return False
-    settled_roles = {
-        role
-        for state, role in zip(states, roles, strict=False)
+    expected_roles = ["main"] if phase.kind == "main" else ["main", "guardian", "main"]
+    if [request.get("role") for request in requests] != expected_roles:
+        return False
+    if len(states) != len(requests):
+        return False
+    states_by_id = {state.get("request_id"): state for state in states}
+    request_ids = [request.get("request_id") for request in requests]
+    if (
+        any(not isinstance(request_id, str) for request_id in request_ids)
+        or len(set(request_ids)) != len(request_ids)
+        or set(request_ids) != set(states_by_id)
+    ):
+        return False
+    for request in requests:
         if (
-            state.get("status") == "settled"
-            and state.get("usage_valid") is True
-            and state.get("settlement_kind") == "usage_priced"
-        )
-    }
-    expected = {"main"} if phase.kind == "main" else {"main", "guardian"}
-    return expected.issubset(settled_roles)
+            request.get("role_provenance") != "declared"
+            or request.get("declared_role") != request.get("role")
+            or request.get("inferred_role") != request.get("role")
+            or request.get("contract_match") is not True
+            or request.get("usage_valid") is not True
+            or request.get("settlement_kind") != "usage_priced"
+            or isinstance(request.get("attempt_count"), bool)
+            or not isinstance(request.get("attempt_count"), int)
+            or request["attempt_count"] < 1
+        ):
+            return False
+        state = states_by_id[request["request_id"]]
+        if (
+            state.get("status") != "settled"
+            or state.get("usage_valid") is not True
+            or state.get("settlement_kind") != "usage_priced"
+            or state.get("attempt_count") != request.get("attempt_count")
+        ):
+            return False
+    return True
 
 
-def _roles_from_metadata(path: Path) -> list[str]:
+def _requests_from_metadata(path: Path) -> list[dict[str, Any]]:
     if path.is_symlink() or not path.is_file():
         return []
     try:
@@ -292,11 +322,9 @@ def _roles_from_metadata(path: Path) -> list[str]:
     requests = value.get("requests") if isinstance(value, dict) else None
     if not isinstance(requests, list):
         return []
-    roles: list[str] = []
-    for request in requests:
-        if isinstance(request, dict) and request.get("role") in {"main", "guardian"}:
-            roles.append(request["role"])
-    return roles
+    if not all(isinstance(request, dict) for request in requests):
+        return []
+    return [dict(request) for request in requests]
 
 
 def _diagnostic_retryable(
@@ -320,6 +348,31 @@ def _outer_retry_delay_seconds(retry_count: int) -> int:
     return min(OUTER_RETRY_MAX_SECONDS, OUTER_RETRY_BASE_SECONDS * (2**exponent))
 
 
+def _max_attempts_for_retry_budget(
+    *,
+    provider_max_attempts: int,
+    retry_count: int,
+    max_retries: int,
+    phase_attempt: int,
+) -> int:
+    """Return the bounded upstream attempts for the next CLI invocation.
+
+    The first upstream attempt of the first process is not a retry. Every
+    additional proxy attempt and every repeated CLI process consumes one shared
+    campaign retry unit.
+    """
+
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in (provider_max_attempts, retry_count, max_retries, phase_attempt)
+    ) or not 1 <= provider_max_attempts <= 5:
+        raise ModelDiagnosticError("diagnostic retry budget is invalid")
+    remaining = max_retries - retry_count - (1 if phase_attempt else 0)
+    if remaining < 0:
+        return 0
+    return min(provider_max_attempts, remaining + 1)
+
+
 def _redacted_cli_observation(
     raw: bytes, *, expected_final_message: str | None = None
 ) -> dict[str, object]:
@@ -327,7 +380,7 @@ def _redacted_cli_observation(
         raise ModelDiagnosticError("CLI JSONL exceeded the diagnostic size limit")
     event_types: list[str] = []
     command_events: list[dict[str, object]] = []
-    exact_final_message = False
+    agent_messages: list[str] = []
     for line in raw.splitlines():
         if not line:
             continue
@@ -344,33 +397,59 @@ def _redacted_cli_observation(
             event_type == "item.completed"
             and isinstance(item, dict)
             and item.get("type") == "agent_message"
-            and isinstance(expected_final_message, str)
-            and item.get("text") == expected_final_message
+            and isinstance(item.get("text"), str)
         ):
-            exact_final_message = True
+            agent_messages.append(item["text"])
         if (
             event_type in {"item.started", "item.completed"}
             and isinstance(item, dict)
             and item.get("type") == "command_execution"
         ):
             command = item.get("command")
+            item_id = item.get("id")
             command_events.append(
                 {
                     "event": event_type,
-                    "expected_command": command == "touch guardian-approved.tmp",
+                    "expected_command": command in _EXPECTED_APPROVAL_COMMANDS,
                     "command_sha256": (
                         hashlib.sha256(command.encode()).hexdigest()
                         if isinstance(command, str)
+                        else None
+                    ),
+                    "item_id_sha256": (
+                        hashlib.sha256(item_id.encode()).hexdigest()
+                        if isinstance(item_id, str) and item_id
                         else None
                     ),
                     "status": item.get("status"),
                     "exit_code": item.get("exit_code"),
                 }
             )
+    exact_final_message = (
+        isinstance(expected_final_message, str)
+        and agent_messages == [expected_final_message]
+    )
+    approval_command_succeeded = (
+        len(command_events) == 2
+        and command_events[0]["event"] == "item.started"
+        and command_events[0]["status"] == "in_progress"
+        and command_events[0]["exit_code"] is None
+        and command_events[1]["event"] == "item.completed"
+        and command_events[1]["status"] == "completed"
+        and command_events[1]["exit_code"] == 0
+        and command_events[0]["expected_command"] is True
+        and command_events[1]["expected_command"] is True
+        and command_events[0]["command_sha256"]
+        == command_events[1]["command_sha256"]
+        and command_events[0]["item_id_sha256"] is not None
+        and command_events[0]["item_id_sha256"]
+        == command_events[1]["item_id_sha256"]
+    )
     return {
         "event_types": event_types,
         "command_events": command_events,
         "exact_final_message": exact_final_message,
+        "approval_command_succeeded": approval_command_succeeded,
     }
 
 
@@ -380,7 +459,7 @@ def _redacted_attempt(
     target: BinaryTarget,
     snapshot: dict[str, Any],
     run_id: str,
-    roles: list[str],
+    requests: list[dict[str, Any]],
     returncode: int,
     duration_seconds: float,
     cli_observation: dict[str, object],
@@ -397,7 +476,7 @@ def _redacted_attempt(
         "duration_seconds": round(duration_seconds, 3),
         "cli_observation": cli_observation,
         "model_catalog_sha256": model_catalog_sha256,
-        "roles": roles,
+        "roles": [request.get("role") for request in requests],
         "logical_request_count": len(states),
         "upstream_attempt_count": sum(
             int(value.get("attempt_count", 0)) for value in states
@@ -458,6 +537,7 @@ def _run_phase_once(
             run_id=run_id,
             metadata_path=metadata_path,
             main_model=provider.main_model,
+            main_effort=provider.main_effort,
             main_pricing=provider.main_pricing,
             guardian_model=provider.guardian_model,
             guardian_pricing=provider.guardian_pricing,
@@ -500,7 +580,7 @@ def _run_phase_once(
                 _remove_generated_plugin_cache(codex_home)
             duration = time.monotonic() - started
         snapshot = ledger.snapshot()
-    roles = _roles_from_metadata(metadata_path)
+    requests = _requests_from_metadata(metadata_path)
     cli_observation = _redacted_cli_observation(
         raw_cli_jsonl,
         expected_final_message="OK" if phase.kind == "main" else "DONE",
@@ -511,13 +591,16 @@ def _run_phase_once(
         returncode=returncode,
         snapshot=snapshot,
         run_id=run_id,
-        roles=roles,
+        requests=requests,
     )
     success = success and cli_observation["exact_final_message"] is True
-    if phase.kind == "approval":
+    if phase.kind == "main":
+        success = success and cli_observation["command_events"] == []
+    else:
         marker = workspace / "guardian-approved.tmp"
         success = (
             success
+            and cli_observation["approval_command_succeeded"] is True
             and marker.is_file()
             and not marker.is_symlink()
             and marker.stat().st_size == 0
@@ -537,7 +620,7 @@ def _run_phase_once(
         target=target,
         snapshot=snapshot,
         run_id=run_id,
-        roles=roles,
+        requests=requests,
         returncode=returncode,
         duration_seconds=duration,
         cli_observation=cli_observation,
@@ -608,10 +691,13 @@ def _run_direct_codex_phase_once(
         expected_final_message="OK" if phase.kind == "main" else "DONE",
     )
     success = returncode == 0 and observation["exact_final_message"] is True
-    if phase.kind == "approval":
+    if phase.kind == "main":
+        success = success and observation["command_events"] == []
+    else:
         marker = workspace / "guardian-approved.tmp"
         success = (
             success
+            and observation["approval_command_succeeded"] is True
             and marker.is_file()
             and not marker.is_symlink()
             and marker.stat().st_size == 0
@@ -649,6 +735,7 @@ def run_direct_codex_campaign(
     if (
         paid_eval["main_model"] != main_model_alias
         or paid_eval["guardian_model"] != DEFAULT_GUARDIAN_ALIAS
+        or provider.main_effort != EXPECTED_MAIN_EFFORT
         or provider.guardian_effort != EXPECTED_GUARDIAN_EFFORT
     ):
         raise ModelDiagnosticError(
@@ -771,6 +858,7 @@ def run_campaign(
     if (
         paid_eval["main_model"] != main_model_alias
         or paid_eval["guardian_model"] != guardian_model_alias
+        or provider.main_effort != EXPECTED_MAIN_EFFORT
         or provider.guardian_effort != EXPECTED_GUARDIAN_EFFORT
     ):
         raise ModelDiagnosticError(
@@ -852,6 +940,16 @@ def run_campaign(
                 status = "budget_exhausted"
                 stopped_phase = phase.name
                 break
+            bounded_attempts = _max_attempts_for_retry_budget(
+                provider_max_attempts=provider.max_attempts,
+                retry_count=retry_count,
+                max_retries=max_retries,
+                phase_attempt=phase_attempt,
+            )
+            if bounded_attempts == 0:
+                status = "failed"
+                stopped_phase = phase.name
+                break
             attempt_root = output_root / f"{len(attempts) + 1:03d}-{phase.name}"
             attempt, success, retryable, internal_retries = _run_phase_once(
                 phase=phase,
@@ -859,11 +957,7 @@ def run_campaign(
                 provider=provider,
                 api_key=api_key,
                 attempt_root=attempt_root,
-                max_attempts=(
-                    1
-                    if retry_count >= max_retries
-                    else provider.max_attempts
-                ),
+                max_attempts=bounded_attempts,
                 frozen_model_catalog=(
                     frozen_model_catalog if phase.side == "codex" else None
                 ),

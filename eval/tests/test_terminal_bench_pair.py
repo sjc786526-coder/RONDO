@@ -86,6 +86,7 @@ class PairIdentityTests(unittest.TestCase):
                 base_url=base_url,
                 api_key_env=fair["provider_api_key_env"],
                 main_model=fair["main_model"],
+                main_effort="medium",
                 guardian_model=fair["guardian_model"],
                 guardian_effort=fair["guardian_effort"],
                 main_pricing=ModelPricing(
@@ -133,13 +134,13 @@ class PairIdentityTests(unittest.TestCase):
             "pair_round": slot.round,
             "eval_harness_commit": self.HARNESS_COMMIT,
             "main_model": fair["main_model"],
+            "main_effort": "medium",
             "guardian_model": fair["guardian_model"],
             "guardian_effort": fair["guardian_effort"],
             "provider": fair["provider_id"],
             "provider_api": fair["provider_api"],
-            "provider_base_url": "https://provider.example/v1",
-            "provider_api_key_env": fair["provider_api_key_env"],
-            "provider_config_sha256": "c" * 64,
+            "provider_profile_sha256": "d" * 64,
+            "provider_endpoint_sha256": "e" * 64,
             "approvals_reviewer": fair["approvals_reviewer"],
             "approval_policy": fair["approval_policy"],
             "sandbox_mode": fair["sandbox_mode"],
@@ -162,7 +163,8 @@ class PairIdentityTests(unittest.TestCase):
             "config": config,
             "summary": {
                 "metadata_ready": True,
-                "api_request_roles": {"main": 1, "guardian": 1 if side is Side.RONDO else 0},
+                "api_request_roles": {"main": 2, "guardian": 1},
+                "api_request_sequence": ["main", "guardian", "main"],
                 "evidence": [{"relative_path": "e"}] if side is Side.RONDO else [],
                 "s2_request_evidence_binding": "unbound" if side is Side.RONDO else "not_triggered",
             },
@@ -305,14 +307,32 @@ class PairIdentityTests(unittest.TestCase):
             self.assertEqual(result["reasons"], [])
 
             provider_drift = json.loads(json.dumps(records))
-            provider_drift[1]["config"]["provider_base_url"] = (
-                "https://different-provider.example/v1"
-            )
+            provider_drift[1]["config"]["provider_endpoint_sha256"] = "f" * 64
             drifted = assess_m1(
                 provider_drift, paid_identity, pair_ledger_path=ledger_path
             )
             self.assertEqual(drifted["m1"], "failed")
-            self.assertIn("pair_provider_base_url_mismatch", drifted["reasons"])
+            self.assertIn("pair_provider_endpoint_mismatch", drifted["reasons"])
+
+            effort_drift = json.loads(json.dumps(records))
+            effort_drift[1]["config"]["main_effort"] = "high"
+            effort_result = assess_m1(
+                effort_drift, paid_identity, pair_ledger_path=ledger_path
+            )
+            self.assertIn("pair_main_effort_mismatch", effort_result["reasons"])
+
+            incomplete_approval = json.loads(json.dumps(records))
+            incomplete_approval[1]["summary"]["api_request_roles"] = {
+                "main": 1,
+                "guardian": 0,
+            }
+            incomplete_approval[1]["summary"]["api_request_sequence"] = ["main"]
+            approval_result = assess_m1(
+                incomplete_approval, paid_identity, pair_ledger_path=ledger_path
+            )
+            self.assertIn(
+                "codex_guardian_approval_incomplete", approval_result["reasons"]
+            )
 
             hashed_records = json.loads(json.dumps(records))
             for record in hashed_records:

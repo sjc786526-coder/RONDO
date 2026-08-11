@@ -135,6 +135,7 @@ def run_provider_probes(
             base_url.encode("utf-8")
         ).hexdigest(),
         "main_model": provider.main_model,
+        "main_effort": provider.main_effort,
         "guardian_model": provider.guardian_model,
         "guardian_effort": provider.guardian_effort,
         "request_reservation_usd": format(SHORT_REQUEST_RESERVATION_USD, "f"),
@@ -160,6 +161,7 @@ def run_provider_probes(
                 run_id=PROBE_RUN_ID,
                 metadata_path=metadata_path,
                 main_model=provider.main_model,
+                main_effort=provider.main_effort,
                 main_pricing=provider.main_pricing,
                 guardian_model=provider.guardian_model,
                 guardian_pricing=provider.guardian_pricing,
@@ -183,6 +185,7 @@ def run_provider_probes(
                             name=name,
                             role=role,
                             model=model,
+                            main_effort=provider.main_effort,
                             guardian_effort=provider.guardian_effort,
                         )
                     )
@@ -328,6 +331,7 @@ def _run_responses_probe(
     name: str,
     role: str,
     model: str,
+    main_effort: str,
     guardian_effort: str,
 ) -> ProviderResponseProbe:
     if role not in {"main", "guardian"}:
@@ -339,7 +343,9 @@ def _run_responses_probe(
             if role == "guardian"
             else "Reply only with OK."
         ),
-        "reasoning": {"effort": guardian_effort if role == "guardian" else "low"},
+        "reasoning": {
+            "effort": guardian_effort if role == "guardian" else main_effort
+        },
         "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
         "stream": False,
         # Frozen Codex/RONDO send store=false for non-Azure Responses

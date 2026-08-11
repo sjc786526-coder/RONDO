@@ -7,6 +7,7 @@
 active_provider = "relay"
 main_model = "sol"
 guardian_model = "luna"
+main_reasoning_effort = "medium"
 guardian_reasoning_effort = "low"
 # Total upstream attempts, including the first one. Only the explicitly listed
 # complete non-2xx responses below are eligible for an unbilled retry.

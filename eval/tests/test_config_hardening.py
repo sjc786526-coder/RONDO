@@ -26,6 +26,7 @@ PAID_EVAL_CONFIG = """\
 active_provider = "relay"
 main_model = "sol"
 guardian_model = "luna"
+main_reasoning_effort = "medium"
 guardian_reasoning_effort = "low"
 max_attempts = 5
 retry_backoff_seconds = 1.0
@@ -126,6 +127,7 @@ class ConfigHardeningTests(unittest.TestCase):
         self.assertEqual(spec.provider.config_source, "rondo.local.toml")
         self.assertEqual(spec.provider.provider_id, "relay")
         self.assertEqual(spec.provider.main_model, "test-sol-model")
+        self.assertEqual(spec.provider.main_effort, "medium")
         self.assertEqual(spec.provider.guardian_model, "test-luna-model")
         self.assertEqual(spec.provider.max_attempts, 5)
         self.assertEqual(
@@ -183,6 +185,10 @@ class ConfigHardeningTests(unittest.TestCase):
 
         for original, changed in (
             (
+                'main_reasoning_effort = "medium"',
+                'main_reasoning_effort = "high"',
+            ),
+            (
                 "long_context_threshold_tokens = 272000",
                 "long_context_threshold_tokens = 272001",
             ),
@@ -237,6 +243,10 @@ class ConfigHardeningTests(unittest.TestCase):
 
     def test_retry_and_model_metadata_fail_closed(self) -> None:
         invalid_configs = (
+            PAID_EVAL_CONFIG.replace(
+                'main_reasoning_effort = "medium"',
+                'main_reasoning_effort = "ultra"',
+            ),
             PAID_EVAL_CONFIG.replace("max_attempts = 5", "max_attempts = 0"),
             PAID_EVAL_CONFIG.replace("max_attempts = 5", "max_attempts = 6"),
             PAID_EVAL_CONFIG.replace(

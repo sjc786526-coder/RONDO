@@ -100,6 +100,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         binary_workspace_lock_normalization: str | None,
         provider_base_url: str,
         provider_api_key_env: str,
+        main_effort: str,
         guardian_model: str,
         guardian_effort: str,
         frozen_model_catalog_path: str | None = None,
@@ -142,6 +143,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
         ):
             raise AdapterError("model_name is required and unsafe")
         _validate_provider_inputs(provider_base_url, provider_api_key_env)
+        if main_effort not in _REASONING_EFFORTS:
+            raise AdapterError("main reasoning effort is unsupported")
         if not _MODEL_NAME.fullmatch(guardian_model):
             raise AdapterError("guardian model is required and unsafe")
         if guardian_effort not in _REASONING_EFFORTS:
@@ -180,6 +183,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._manifest = manifest
         self._provider_base_url = provider_base_url
         self._provider_api_key_env = provider_api_key_env
+        self._main_effort = main_effort
         self._guardian_model = guardian_model
         self._guardian_effort = guardian_effort
         self._frozen_model_catalog_path = frozen_model_catalog_path
@@ -561,6 +565,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"model_providers.{_EVAL_PROVIDER_ID}.supports_websockets=false",
                 f"model_providers.{_EVAL_PROVIDER_ID}.request_max_retries=0",
                 f"model_providers.{_EVAL_PROVIDER_ID}.stream_max_retries=0",
+                f'model_reasoning_effort={json.dumps(self._main_effort)}',
             )
             if self.side is Side.RONDO:
                 overrides = (
@@ -596,6 +601,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
             _validate_safe_codex_command(
                 command,
                 side=self.side,
+                main_effort=self._main_effort,
                 guardian_model=self._guardian_model,
                 guardian_effort=self._guardian_effort,
                 frozen_model_catalog_path=(
@@ -649,6 +655,7 @@ def adapter_for(
     model_name: str,
     provider_base_url: str,
     provider_api_key_env: str,
+    main_effort: str,
     guardian_model: str,
     guardian_effort: str,
     frozen_model_catalog_path: str | None = None,
@@ -682,6 +689,7 @@ def adapter_for(
         binary_workspace_lock_normalization=manifest.workspace_lock_normalization,
         provider_base_url=provider_base_url,
         provider_api_key_env=provider_api_key_env,
+        main_effort=main_effort,
         guardian_model=guardian_model,
         guardian_effort=guardian_effort,
         frozen_model_catalog_path=frozen_model_catalog_path,
@@ -728,6 +736,7 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         ),
         ("provider_base_url", adapter._provider_base_url),
         ("provider_api_key_env", adapter._provider_api_key_env),
+        ("main_effort", adapter._main_effort),
         ("guardian_model", adapter._guardian_model),
         ("guardian_effort", adapter._guardian_effort),
     ]
@@ -767,6 +776,7 @@ def _validate_safe_codex_command(
     command: str,
     *,
     side: Side,
+    main_effort: str,
     guardian_model: str,
     guardian_effort: str,
     frozen_model_catalog_path: str | None = None,
@@ -799,6 +809,7 @@ def _validate_safe_codex_command(
         "model_providers.rondo_eval_provider.supports_websockets=false",
         "model_providers.rondo_eval_provider.request_max_retries=0",
         "model_providers.rondo_eval_provider.stream_max_retries=0",
+        f"model_reasoning_effort={json.dumps(main_effort)}",
     )
     if any(value not in command for value in required):
         raise AdapterError("safe Codex execution options are incomplete")

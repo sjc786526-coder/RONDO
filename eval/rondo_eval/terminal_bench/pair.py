@@ -789,14 +789,16 @@ def assess_m1(
             reasons.append(f"{slot.side.value}_metrics_invalid")
         summary = record.get("summary")
         roles = summary.get("api_request_roles") if isinstance(summary, dict) else None
+        sequence = (
+            summary.get("api_request_sequence") if isinstance(summary, dict) else None
+        )
         if (
             not isinstance(summary, dict)
             or summary.get("metadata_ready") is not True
-            or not isinstance(roles, dict)
-            or not isinstance(roles.get("main"), int)
-            or roles["main"] < 1
+            or roles != {"main": 2, "guardian": 1}
+            or sequence != ["main", "guardian", "main"]
         ):
-            reasons.append(f"{slot.side.value}_real_api_evidence_missing")
+            reasons.append(f"{slot.side.value}_guardian_approval_incomplete")
         ledger_run = ledger_runs.get(slot.slot)
         eval_commit = config.get("eval_harness_commit") if isinstance(config, dict) else None
         if (
@@ -1224,7 +1226,6 @@ def _compare_record_fairness(
         "terminal_bench_version": "terminal_bench_version",
         "provider_id": "provider",
         "provider_api": "provider_api",
-        "provider_api_key_env": "provider_api_key_env",
         "task_image_digest": "task_image_digest",
         "timeout_seconds": "timeout_seconds",
         "max_retries": "max_retries",
@@ -1243,6 +1244,12 @@ def _compare_record_fairness(
     if projected[0] != projected[1] or projected[0] != expected:
         reasons.append("pair_fairness_mismatch")
     configs = [record["config"] for record in records]
+    main_efforts = [config.get("main_effort") for config in configs]
+    if (
+        any(not isinstance(effort, str) for effort in main_efforts)
+        or main_efforts[0] != main_efforts[1]
+    ):
+        reasons.append("pair_main_effort_mismatch")
     profile_hashes = [config.get("provider_profile_sha256") for config in configs]
     endpoint_hashes = [config.get("provider_endpoint_sha256") for config in configs]
     if all(isinstance(value, str) for value in profile_hashes + endpoint_hashes):

@@ -28,6 +28,7 @@ PAID_EVAL_CONFIG = """\
 active_provider = "relay"
 main_model = "main"
 guardian_model = "guardian"
+main_reasoning_effort = "medium"
 guardian_reasoning_effort = "low"
 max_attempts = 1
 retry_backoff_seconds = 0

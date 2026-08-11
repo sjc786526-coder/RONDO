@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from rondo_eval.model_cli_diagnostic import (
@@ -16,10 +18,12 @@ from rondo_eval.model_cli_diagnostic import (
     _catalog_with_auto_review_override,
     _codex_command,
     _diagnostic_retryable,
+    _max_attempts_for_retry_budget,
     _outer_retry_delay_seconds,
     _phase_succeeded,
     _redacted_cli_observation,
     _remove_generated_plugin_cache,
+    _safe_environment,
 )
 
 
@@ -94,21 +98,36 @@ class ModelCliDiagnosticTests(unittest.TestCase):
 
     def test_success_requires_guardian_usage_for_approval(self) -> None:
         run_id = "run"
+        requests = [
+            {
+                "request_id": request_id,
+                "role": role,
+                "role_provenance": "declared",
+                "declared_role": role,
+                "inferred_role": role,
+                "contract_match": True,
+                "usage_valid": True,
+                "attempt_count": 1,
+                "settlement_kind": "usage_priced",
+            }
+            for request_id, role in (
+                ("main-before", "main"),
+                ("guardian", "guardian"),
+                ("main-after", "main"),
+            )
+        ]
         snapshot = {
             "reserved_usd": "0.000000",
             "runs": {
                 run_id: {
                     "requests": {
-                        "main": {
+                        request["request_id"]: {
                             "status": "settled",
                             "usage_valid": True,
+                            "attempt_count": 1,
                             "settlement_kind": "usage_priced",
-                        },
-                        "guardian": {
-                            "status": "settled",
-                            "usage_valid": True,
-                            "settlement_kind": "usage_priced",
-                        },
+                        }
+                        for request in requests
                     }
                 }
             },
@@ -119,7 +138,7 @@ class ModelCliDiagnosticTests(unittest.TestCase):
                 returncode=0,
                 snapshot=snapshot,
                 run_id=run_id,
-                roles=["main", "guardian"],
+                requests=requests,
             )
         )
         self.assertFalse(
@@ -128,7 +147,18 @@ class ModelCliDiagnosticTests(unittest.TestCase):
                 returncode=0,
                 snapshot=snapshot,
                 run_id=run_id,
-                roles=["main", "main"],
+                requests=requests[:-1],
+            )
+        )
+        invalid = [dict(request) for request in requests]
+        invalid[1]["contract_match"] = False
+        self.assertFalse(
+            _phase_succeeded(
+                Phase("codex", "approval"),
+                returncode=0,
+                snapshot=snapshot,
+                run_id=run_id,
+                requests=invalid,
             )
         )
 
@@ -182,6 +212,35 @@ class ModelCliDiagnosticTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "retry count"):
             _outer_retry_delay_seconds(-1)
 
+    def test_proxy_attempts_are_bounded_by_remaining_campaign_retries(self) -> None:
+        self.assertEqual(
+            _max_attempts_for_retry_budget(
+                provider_max_attempts=5,
+                retry_count=24,
+                max_retries=25,
+                phase_attempt=0,
+            ),
+            2,
+        )
+        self.assertEqual(
+            _max_attempts_for_retry_budget(
+                provider_max_attempts=5,
+                retry_count=24,
+                max_retries=25,
+                phase_attempt=1,
+            ),
+            1,
+        )
+        self.assertEqual(
+            _max_attempts_for_retry_budget(
+                provider_max_attempts=5,
+                retry_count=25,
+                max_retries=25,
+                phase_attempt=1,
+            ),
+            0,
+        )
+
     def test_short_canary_retry_limit_is_accepted_by_campaign_contract(self) -> None:
         self.assertGreaterEqual(MAX_RETRIES_PER_MODEL, 5)
         self.assertFalse(
@@ -194,8 +253,12 @@ class ModelCliDiagnosticTests(unittest.TestCase):
 
     def test_cli_observation_does_not_persist_text_or_command_output(self) -> None:
         observation = _redacted_cli_observation(
+            b'{"type":"item.started","item":{"id":"cmd-1",'
+            b'"type":"command_execution","command":"/bin/bash -lc '
+            b"'touch guardian-approved.tmp'\",\"status\":\"in_progress\"}}\n"
             b'{"type":"item.completed","item":{"type":"command_execution",'
-            b'"command":"touch guardian-approved.tmp","aggregated_output":"private",'
+            b'"id":"cmd-1","command":"/bin/bash -lc '
+            b"'touch guardian-approved.tmp'\",\"aggregated_output\":\"private\","
             b'"exit_code":0,"status":"completed"}}\n'
             b'{"type":"item.completed","item":{"type":"agent_message",'
             b'"text":"private response"}}\n',
@@ -208,6 +271,42 @@ class ModelCliDiagnosticTests(unittest.TestCase):
         self.assertNotIn("private", encoded)
         self.assertNotIn("guardian-approved.tmp", encoded)
         self.assertIs(observation["exact_final_message"], True)
+        self.assertIs(observation["approval_command_succeeded"], True)
+
+    def test_cli_observation_rejects_extra_message_or_incomplete_command(self) -> None:
+        extra_message = _redacted_cli_observation(
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n'
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"ERROR"}}\n',
+            expected_final_message="OK",
+        )
+        self.assertIs(extra_message["exact_final_message"], False)
+        incomplete = _redacted_cli_observation(
+            b'{"type":"item.completed","item":{"id":"cmd-1",'
+            b'"type":"command_execution","command":"touch guardian-approved.tmp",'
+            b'"status":"completed","exit_code":1}}\n',
+            expected_final_message=None,
+        )
+        self.assertIs(incomplete["approval_command_succeeded"], False)
+
+    def test_child_environment_is_an_explicit_nonsecret_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "secret",
+                "ANTHROPIC_API_KEY": "secret",
+                "AWS_SECRET_ACCESS_KEY": "secret",
+                "HTTP_PROXY": "http://proxy.example",
+                "CUSTOM_TOKEN": "secret",
+            },
+            clear=False,
+        ):
+            environment = _safe_environment(Path(directory))
+        self.assertEqual(
+            set(environment),
+            {"CODEX_HOME", "HOME", "PATH", "LANG", "LC_ALL", "NO_PROXY", "no_proxy"},
+        )
+        self.assertFalse(any("secret" in value for value in environment.values()))
+        self.assertEqual(environment["NO_PROXY"], "127.0.0.1,localhost")
 
     def test_generated_plugin_cache_cleanup_is_narrow(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

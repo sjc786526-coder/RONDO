@@ -67,8 +67,9 @@
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
 - **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 013 的配置化 provider/model/rate 与
-  未计费 retry 设施已完成；双端 Sol/Sol 已连续 3 轮零重试通过，Plan 014 的单审批付费重放阻断已通过 focused
-  门禁，正离线落地新 pair/公平合同，B3/M1 尚未运行。** Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
+  未计费 retry 设施已完成；双端 Sol/Sol 已连续 3 轮零重试通过。Plan 014 已闭合 proxy 生命周期、main effort、
+  Guardian 审批序列、公开结果→M1 schema 与 CLI 诊断假成功问题，完整 eval 321/321 通过；新 pair identity/profile
+  drift 仍待落地，B3/M1 尚未运行。** Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
   上游响应或 usage，ledger 保留 0.755400 USD reservation，实际账单未查询。v6 已 `failed/blocked`，
@@ -169,8 +170,10 @@ Plan 012 已验证 oracle/root verifier 的真实评分链为 `reward=1`，并�
 均可运行 Luna/Luna，并以两端 Sol/Sol 连续 3 轮、24 请求零重试完成当前 profile 稳定性短测。早期 Terra 403、
 Sol 429、Luna 503 仍作为波动边界保留，不能再笼统归因于本地网络。
 这些诊断不是 paid pair，也没有运行 Docker/M1；供应商实际账单仍未知。Plan 014 已完成固定单审批 task 的
-charged parse replay 上游阻断，并将 frozen Codex catalog override 接入 source-bound 正式投影；正离线闭合
-新 pair identity 与 profile drift；success/claimed failure 已共用不含本机 provider 字段的 public result 投影。
+charged parse replay 上游阻断，并将 frozen Codex catalog override 接入 source-bound 正式投影；正式结果现在
+要求精确 `main → guardian → main`，main effort 与 Guardian effort 均由 profile 投影并由 proxy 强制验证，
+success/claimed failure 共用不含本机 provider 字段的 public result，真实 producer→pair ledger→M1 回归通过。
+当前继续离线闭合新 pair identity 与 profile drift。
 正式 canary/pair/Docker 仍须在离线门禁完成后按该计划范围单独授权。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。

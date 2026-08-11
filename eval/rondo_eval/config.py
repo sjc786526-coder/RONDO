@@ -29,6 +29,7 @@ _CONFIG_KEYS: dict[str, Any] = {
         "active_provider",
         "main_model",
         "guardian_model",
+        "main_reasoning_effort",
         "guardian_reasoning_effort",
         "max_attempts",
         "retry_backoff_seconds",
@@ -375,9 +376,10 @@ def _validate_paid_eval_schema(value: object) -> None:
         selected = value.get(key)
         if not isinstance(selected, str) or not _PROFILE_NAME.fullmatch(selected):
             raise ConfigError(f"paid_eval {key} is invalid")
-    effort = value.get("guardian_reasoning_effort")
-    if not isinstance(effort, str) or effort not in _REASONING_EFFORTS:
-        raise ConfigError("paid_eval guardian reasoning effort is invalid")
+    for role in ("main", "guardian"):
+        effort = value.get(f"{role}_reasoning_effort")
+        if not isinstance(effort, str) or effort not in _REASONING_EFFORTS:
+            raise ConfigError(f"paid_eval {role} reasoning effort is invalid")
     attempts = value.get("max_attempts")
     if isinstance(attempts, bool) or not isinstance(attempts, int) or not 1 <= attempts <= 5:
         raise ConfigError("paid_eval max_attempts must be an integer from 1 through 5")
@@ -538,6 +540,7 @@ def _resolve_paid_provider_projection(
         },
         "main_model_alias": main_alias,
         "main_model": main_pricing.to_dict(),
+        "main_reasoning_effort": paid_eval["main_reasoning_effort"],
         "guardian_model_alias": guardian_alias,
         "guardian_model": guardian_pricing.to_dict(),
         "guardian_reasoning_effort": paid_eval["guardian_reasoning_effort"],
@@ -556,6 +559,7 @@ def _resolve_paid_provider_projection(
         base_url=provider["base_url"],
         api_key_env=provider["api_key_env"],
         main_model=main_pricing.model_id,
+        main_effort=paid_eval["main_reasoning_effort"],
         guardian_model=guardian_pricing.model_id,
         guardian_effort=paid_eval["guardian_reasoning_effort"],
         main_pricing=main_pricing,

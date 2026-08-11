@@ -222,6 +222,7 @@ class ProviderProjection:
     base_url: str
     api_key_env: str
     main_model: str
+    main_effort: str
     guardian_model: str
     guardian_effort: str
     main_pricing: ModelPricing
@@ -287,6 +288,11 @@ class ProviderProjection:
         if self.main_model == self.guardian_model and self.main_pricing != self.guardian_pricing:
             raise ContractError("one model id cannot have conflicting price profiles")
         if (
+            not isinstance(self.main_effort, str)
+            or self.main_effort not in _REASONING_EFFORTS
+        ):
+            raise ContractError("main reasoning effort is invalid")
+        if (
             not isinstance(self.guardian_effort, str)
             or self.guardian_effort not in _REASONING_EFFORTS
         ):
@@ -334,6 +340,7 @@ class ProviderProjection:
             "base_url": self.base_url,
             "api_key_env": self.api_key_env,
             "main_model": self.main_model,
+            "main_effort": self.main_effort,
             "guardian_model": self.guardian_model,
             "guardian_effort": self.guardian_effort,
             "main_pricing": self.main_pricing.to_dict(),
@@ -358,6 +365,7 @@ class ProviderProjection:
                 self.base_url.encode("utf-8")
             ).hexdigest(),
             "main_model": self.main_model,
+            "main_effort": self.main_effort,
             "guardian_model": self.guardian_model,
             "guardian_effort": self.guardian_effort,
             "main_pricing": self.main_pricing.to_dict(),

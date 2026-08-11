@@ -288,6 +288,7 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     "active_provider": "openai",
                     "main_model": "sol",
                     "guardian_model": "luna",
+                    "main_reasoning_effort": "medium",
                     "guardian_reasoning_effort": "low",
                     "max_attempts": 5,
                     "retry_backoff_seconds": 1.0,

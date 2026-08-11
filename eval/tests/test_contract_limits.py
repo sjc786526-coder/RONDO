@@ -75,6 +75,7 @@ def _spec() -> RunSpec:
         base_url="https://relay.example/v1",
         api_key_env="OPENAI_API_KEY",
         main_model=main_pricing.model_id,
+        main_effort="medium",
         guardian_model=guardian_pricing.model_id,
         guardian_effort="low",
         main_pricing=main_pricing,

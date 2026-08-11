@@ -302,6 +302,7 @@ class ContractTests(unittest.TestCase):
             base_url="https://relay.example/v1",
             api_key_env="OPENAI_API_KEY",
             main_model=main_pricing.model_id,
+            main_effort="medium",
             guardian_model=guardian_pricing.model_id,
             guardian_effort="low",
             main_pricing=main_pricing,
@@ -333,6 +334,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(projected["provider_profile_sha256"], "3" * 64)
         self.assertEqual(len(projected["provider_endpoint_sha256"]), 64)
         self.assertEqual(projected["main_model"], "test-main-model")
+        self.assertEqual(projected["main_effort"], "medium")
         self.assertEqual(projected["guardian_model"], "test-guardian-model")
         self.assertNotIn(provider.base_url, serialized)
         self.assertNotIn(provider.display_name, serialized)

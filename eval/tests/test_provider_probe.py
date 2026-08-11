@@ -60,6 +60,7 @@ def _paid_eval_config(
                 "active_provider": "relay",
                 "main_model": "main",
                 "guardian_model": "guardian",
+                "main_reasoning_effort": "medium",
                 "guardian_reasoning_effort": guardian_effort,
                 "max_attempts": 5,
                 "retry_backoff_seconds": 0.0,
@@ -234,7 +235,10 @@ class ProviderProbeTests(unittest.TestCase):
             body = item["body"]
             self.assertEqual(body["model"], ("gpt-test-main", "gpt-test-guardian")[index])
             self.assertEqual(body["max_output_tokens"], 64)
-            self.assertEqual(body["reasoning"], {"effort": "low"})
+            self.assertEqual(
+                body["reasoning"],
+                {"effort": ("medium", "low")[index]},
+            )
             self.assertIs(body["store"], False)
         self.assertNotIn("text", self.provider.requests[0]["body"])
         self.assertEqual(
@@ -274,7 +278,7 @@ class ProviderProbeTests(unittest.TestCase):
         )
         self.assertEqual(
             [item["body"]["reasoning"]["effort"] for item in self.provider.requests],
-            ["low", "medium"],
+            ["medium", "medium"],
         )
 
     def test_models_status_probe_uses_codex_user_agent_and_discards_body(self) -> None:

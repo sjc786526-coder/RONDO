@@ -81,7 +81,9 @@ _STOP_REASONS = {
     "upstream_response_unavailable",
     "operator_confirmed_unbilled_attempts_exhausted",
     "operator_confirmed_unbilled_deadline_exhausted",
+    "operator_confirmed_unbilled_proxy_closing",
     "guardian_logical_request_limit_exceeded",
+    "proxy_closing",
 }
 GUARDIAN_OUTPUT_SCHEMA = {
     "type": "object",
@@ -429,6 +431,7 @@ class PersistentBudgetLedger:
         if stop_reason not in {
             "operator_confirmed_unbilled_attempts_exhausted",
             "operator_confirmed_unbilled_deadline_exhausted",
+            "operator_confirmed_unbilled_proxy_closing",
         }:
             raise ApiBudgetProxyError("budget stop reason is invalid")
         with self._lock:
@@ -687,7 +690,10 @@ class _UrllibTransport:
 
 
 class _LoopbackServer(ThreadingHTTPServer):
-    daemon_threads = True
+    # server_close() must join every active handler before the enclosing budget
+    # ledger or metadata lifecycle may advance.
+    daemon_threads = False
+    block_on_close = True
     allow_reuse_address = False
 
 
@@ -703,6 +709,7 @@ class LoopbackResponsesProxy:
         run_id: str,
         metadata_path: Path,
         main_model: str,
+        main_effort: str,
         main_pricing: ModelPricing,
         guardian_model: str,
         guardian_pricing: ModelPricing,
@@ -736,6 +743,8 @@ class LoopbackResponsesProxy:
             raise ApiBudgetProxyError("proxy model differs from its pricing snapshot")
         if main_model == guardian_model and main_pricing != guardian_pricing:
             raise ApiBudgetProxyError("one proxy model cannot have conflicting pricing")
+        if main_effort not in _GUARDIAN_EFFORTS:
+            raise ApiBudgetProxyError("proxy main reasoning effort is invalid")
         if guardian_effort not in _GUARDIAN_EFFORTS:
             raise ApiBudgetProxyError("proxy Guardian reasoning effort is invalid")
         if (
@@ -788,6 +797,7 @@ class LoopbackResponsesProxy:
         self._ledger = ledger
         self._run_id = run_id
         self._main_model = main_model
+        self._main_effort = main_effort
         self._guardian_model = guardian_model
         self._guardian_effort = guardian_effort
         self._pricing_by_role = {
@@ -801,6 +811,8 @@ class LoopbackResponsesProxy:
         self._max_guardian_logical_requests = max_guardian_logical_requests
         self._guardian_logical_requests = 0
         self._request_policy_lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
+        self._closing = threading.Event()
         self._metadata = RedactedMetadataStore(
             metadata_path,
             secrets_to_exclude=(api_key, self._downstream_api_key),
@@ -855,6 +867,10 @@ class LoopbackResponsesProxy:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
 
+            def setup(self) -> None:
+                super().setup()
+                self.connection.settimeout(owner._timeout)
+
             def do_POST(self) -> None:  # noqa: N802
                 owner._handle(self)
 
@@ -891,15 +907,23 @@ class LoopbackResponsesProxy:
     def close(self) -> None:
         server = self._server
         thread = self._thread
+        # Linearize shutdown against the start of every paid upstream forward.
+        # A forward that owns this lock is already persisted and must settle;
+        # after this flag is set no transport call can begin.
+        with self._lifecycle_lock:
+            self._closing.set()
         self._server = None
         self._thread = None
         if server is not None:
             server.shutdown()
             server.server_close()
         if thread is not None:
-            thread.join(timeout=5)
+            thread.join()
 
     def _handle(self, handler: BaseHTTPRequestHandler) -> None:
+        if self._closing.is_set():
+            self._reject(handler, 503, "proxy_closing")
+            return
         if not self._authenticate(handler):
             self._reject(handler, 401, "unauthorized")
             return
@@ -953,6 +977,7 @@ class LoopbackResponsesProxy:
                 body,
                 declared_role,
                 main_model=self._main_model,
+                main_effort=self._main_effort,
                 guardian_model=self._guardian_model,
                 guardian_effort=self._guardian_effort,
             )
@@ -960,12 +985,16 @@ class LoopbackResponsesProxy:
                 declared_role = request_metadata["role"]
                 request_metadata["role_provenance"] = "declared"
                 request_metadata["declared_role"] = declared_role
-            self._claim_guardian_logical_request(request_metadata["role"])
-            self._ledger.reserve(
-                self._run_id,
-                request_id,
-                amount_usd=self._request_reservation,
-            )
+            with self._lifecycle_lock:
+                if self._closing.is_set():
+                    self._reject(handler, 503, "proxy_closing")
+                    return
+                self._claim_guardian_logical_request(request_metadata["role"])
+                self._ledger.reserve(
+                    self._run_id,
+                    request_id,
+                    amount_usd=self._request_reservation,
+                )
         except _GuardianLogicalRequestLimitExceeded:
             self._reject(handler, 409, "guardian_logical_request_limit_exceeded")
             return
@@ -994,6 +1023,32 @@ class LoopbackResponsesProxy:
         deadline = self._monotonic() + self._timeout
         last_unbilled_status = 0
         while True:
+            with self._lifecycle_lock:
+                if self._closing.is_set():
+                    if last_unbilled_status:
+                        self._stop_confirmed_unbilled(
+                            handler,
+                            request_id,
+                            request_metadata,
+                            last_unbilled_status,
+                            "operator_confirmed_unbilled_proxy_closing",
+                        )
+                    else:
+                        settlement = self._ledger.settle(
+                            self._run_id,
+                            request_id,
+                            None,
+                            pricing=pricing,
+                            stop_reason="proxy_closing",
+                        )
+                        self._save_observation(
+                            request_id,
+                            request_metadata,
+                            0,
+                            settlement,
+                        )
+                        self._reject(handler, 503, "proxy_closing")
+                    return
             remaining = deadline - self._monotonic()
             if remaining <= 0:
                 if last_unbilled_status:
@@ -1016,18 +1071,47 @@ class LoopbackResponsesProxy:
                     self._reject(handler, 502, "upstream_deadline_exhausted")
                 return
 
-            attempt_count = self._ledger.begin_attempt(
-                self._run_id,
-                request_id,
-                max_attempts=self._max_attempts,
-            )
             try:
-                upstream = self._transport.open(
-                    self.upstream_endpoint,
-                    body=body,
-                    headers=headers,
-                    timeout=remaining,
-                )
+                # Persist and start the forward under the same lifecycle lock.
+                # close() may wait for an in-flight response, but cannot race a
+                # newly billed attempt after shutdown has started.
+                with self._lifecycle_lock:
+                    if self._closing.is_set():
+                        if last_unbilled_status:
+                            self._stop_confirmed_unbilled(
+                                handler,
+                                request_id,
+                                request_metadata,
+                                last_unbilled_status,
+                                "operator_confirmed_unbilled_proxy_closing",
+                            )
+                        else:
+                            settlement = self._ledger.settle(
+                                self._run_id,
+                                request_id,
+                                None,
+                                pricing=pricing,
+                                stop_reason="proxy_closing",
+                            )
+                            self._save_observation(
+                                request_id,
+                                request_metadata,
+                                0,
+                                settlement,
+                            )
+                            self._reject(handler, 503, "proxy_closing")
+                        return
+                    attempt_count = self._ledger.begin_attempt(
+                        self._run_id,
+                        request_id,
+                        max_attempts=self._max_attempts,
+                    )
+                    upstream = self._transport.open(
+                        self.upstream_endpoint,
+                        body=body,
+                        headers=headers,
+                        timeout=remaining,
+                    )
             except HTTPError as response:
                 upstream = response
             except (OSError, URLError, TimeoutError, socket.timeout):
@@ -1392,6 +1476,7 @@ def _inspect_request(
     declared_role: str | None,
     *,
     main_model: str,
+    main_effort: str,
     guardian_model: str,
     guardian_effort: str,
 ) -> dict[str, Any]:
@@ -1436,11 +1521,10 @@ def _inspect_request(
     else:
         raise ApiBudgetProxyError("declared request role is invalid")
     expected_model = main_model if role == "main" else guardian_model
-    contract_match = model == expected_model and (
-        role == "main" or effort == guardian_effort
-    )
+    expected_effort = main_effort if role == "main" else guardian_effort
+    contract_match = model == expected_model and effort == expected_effort
     if not contract_match:
-        raise ApiBudgetProxyError("request model or Guardian effort differs from the frozen pair")
+        raise ApiBudgetProxyError("request model or reasoning effort differs from the frozen pair")
     input_value = value.get("input")
     if isinstance(input_value, list):
         input_kind = "array"

@@ -291,3 +291,16 @@ standard/Lite 形态均补回归。
   `main → guardian → main`；本地价卡估算合计 `1.234473` USD，`actual_usd=null`。
 - 短测按每个 upstream request 预留 1 USD，正式/大请求继续按 5 USD；定向本地回环验收 62/62 通过，独立
   ledger 5/5 通过。没有 Docker、Cargo、paid pair、M1、合并或推送。
+
+### 2026-08-11 Plan 014 正式链路审查修复
+
+- proxy shutdown 与 handler 生命周期统一：close 先与 paid forward 起点线性化，再等待全部非 daemon handler
+  结算退出；confirmed-unbilled retry 在关闭后不再产生下一次 upstream 请求。
+- `main_reasoning_effort` 进入本地 profile、canonical SHA、RunSpec、Terminal-Bench adapter、proxy 请求校验和
+  public result；completed/publication/M1 均要求精确 `main → guardian → main`，RONDO 另要求一份 Guardian evidence。
+- M1 改为消费去敏 public provider schema，不再要求已移除的 key env；新增真实 public producer→双侧 record→
+  pair ledger→M1 集成回归，避免手写旧 schema 掩盖 producer/consumer 断裂。
+- CLI 诊断以环境白名单启动子进程，精确校验请求顺序/数量/usage/settlement、唯一最终消息以及固定审批命令的
+  started/completed/exit-code 配对，并按剩余 campaign retry 配额缩小单次 proxy attempts。
+- `just eval-lock` 解析 85 packages；纯/fake/loopback 完整 eval 321/321 通过。没有运行真实 API、Docker、Cargo、
+  paid pair 或 M1；新 pair identity/profile drift 仍是正式付费运行前置条件。

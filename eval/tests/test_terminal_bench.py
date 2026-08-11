@@ -278,6 +278,7 @@ class TerminalBenchTests(unittest.TestCase):
                     "active_provider": "relay",
                     "main_model": "sol",
                     "guardian_model": "luna",
+                    "main_reasoning_effort": "medium",
                     "guardian_reasoning_effort": "low",
                     "max_attempts": 5,
                     "retry_backoff_seconds": 1.0,
@@ -388,6 +389,7 @@ class TerminalBenchTests(unittest.TestCase):
             binary_workspace_lock_normalization=manifest.workspace_lock_normalization,
             provider_base_url="https://provider.example/v1",
             provider_api_key_env="OPENAI_API_KEY",
+            main_effort="medium",
             guardian_model="gpt-5.6-luna",
             guardian_effort="low",
             extra_env=extra_env,
@@ -732,6 +734,7 @@ class TerminalBenchTests(unittest.TestCase):
         )
         self.assertTrue(raw_codex_command.startswith("set -o pipefail; "))
         self.assertIn("--enable unified_exec", raw_codex_command)
+        self.assertIn('model_reasoning_effort="medium"', raw_codex_command)
         self.assertEqual(raw_codex_command.count("set -o pipefail; "), 1)
         self.assertNotIn("2>&1", raw_codex_command)
         self.assertIn("2>/logs/agent/codex.stderr.txt", raw_codex_command)
@@ -746,6 +749,7 @@ class TerminalBenchTests(unittest.TestCase):
                     "2>&1",
                 ),
                 side=Side.CODEX,
+                main_effort="medium",
                 guardian_model="gpt-5.6-luna",
                 guardian_effort="low",
             )
@@ -753,6 +757,7 @@ class TerminalBenchTests(unittest.TestCase):
             adapters_module._validate_safe_codex_command(
                 raw_codex_command.replace("features.code_mode_host=true", ""),
                 side=Side.CODEX,
+                main_effort="medium",
                 guardian_model="gpt-5.6-luna",
                 guardian_effort="low",
             )
@@ -762,6 +767,7 @@ class TerminalBenchTests(unittest.TestCase):
                     "sandbox_workspace_write.network_access=true", ""
                 ),
                 side=Side.CODEX,
+                main_effort="medium",
                 guardian_model="gpt-5.6-luna",
                 guardian_effort="low",
             )
@@ -772,6 +778,7 @@ class TerminalBenchTests(unittest.TestCase):
                     "features.code_mode_host=false",
                 ),
                 side=Side.CODEX,
+                main_effort="medium",
                 guardian_model="gpt-5.6-luna",
                 guardian_effort="low",
             )

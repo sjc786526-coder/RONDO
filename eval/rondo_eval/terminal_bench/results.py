@@ -412,6 +412,7 @@ def publish_terminal_bench_failure(
             "main": request_roles.count("main"),
             "guardian": request_roles.count("guardian"),
         },
+        "api_request_sequence": list(request_roles),
     }
     tasks = [
         {
@@ -557,6 +558,7 @@ def _safe_summary(
                 "main": request_roles.count("main"),
                 "guardian": guardian_requests,
             },
+            "api_request_sequence": list(request_roles),
             "docker_samples": len(live_result.harbor.docker_evidence.samples)
             if live_result.harbor.docker_evidence is not None
             else 0,
@@ -714,15 +716,17 @@ def _validate_publication_evidence(
         if not live_result.metadata_ready:
             raise HarborResultError("completed run lacks verified API metadata")
         roles = _verified_request_roles(metadata_path)
-        if "main" not in roles:
-            raise HarborResultError("completed run lacks a verified main-model request")
+        if roles != ("main", "guardian", "main"):
+            raise HarborResultError(
+                "completed run lacks the verified main-Guardian-main sequence"
+            )
         if live_result.prepared.spec.side is Side.RONDO:
-            guardian_observed = "guardian" in roles
-            evidence_observed = bool(live_result.evidence)
-            if guardian_observed != evidence_observed:
+            if len(live_result.evidence) != 1:
                 raise HarborResultError(
-                    "RONDO Guardian request and E_final evidence do not agree"
+                    "RONDO completed run requires one Guardian evidence bundle"
                 )
+        elif live_result.evidence:
+            raise HarborResultError("frozen Codex cannot publish RONDO Guardian evidence")
     elif (
         parsed.outcome is RunOutcome.INFRA_FAILED
         and host_returncode == 0
@@ -809,6 +813,16 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         for value in roles.values()
     ):
         raise HarborResultError("Terminal-Bench API role summary is invalid")
+    sequence = summary.get("api_request_sequence")
+    if (
+        not isinstance(sequence, list)
+        or any(role not in {"main", "guardian"} for role in sequence)
+        or sequence.count("main") != roles["main"]
+        or sequence.count("guardian") != roles["guardian"]
+    ):
+        raise HarborResultError("Terminal-Bench API request sequence is invalid")
+    if outcome is RunOutcome.COMPLETED and sequence != ["main", "guardian", "main"]:
+        raise HarborResultError("completed Terminal-Bench approval sequence is incomplete")
     if (
         config.get("pair_id") != P1_PAIR_ID
         or not isinstance(config.get("pair_lock_sha256"), str)

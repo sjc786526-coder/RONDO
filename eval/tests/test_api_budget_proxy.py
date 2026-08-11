@@ -258,6 +258,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
     def _profile_kwargs(**overrides: object) -> dict[str, object]:
         values: dict[str, object] = {
             "main_model": MAIN_PRICING.model_id,
+            "main_effort": "low",
             "main_pricing": MAIN_PRICING,
             "guardian_model": GUARDIAN_PRICING.model_id,
             "guardian_pricing": GUARDIAN_PRICING,
@@ -453,7 +454,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
     def _body(
         *,
         stream: bool = False,
-        effort: str | None = None,
+        effort: str | None = "low",
         guardian: bool = False,
     ) -> dict[str, object]:
         body: dict[str, object] = {
@@ -766,6 +767,31 @@ class ApiBudgetProxyTests(unittest.TestCase):
         )["requests"][0]
         self.assertEqual(observation["reasoning_effort"], "high")
 
+    def test_configured_main_effort_is_enforced_before_reservation(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="main-effort-run",
+            metadata_path=self.root / "main-effort-metadata.json",
+            **self._profile_kwargs(main_effort="medium"),
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+        rejected, _body, _headers = self._post(
+            self._body(effort="low"),
+            request_id="wrong-main-effort",
+        )
+        accepted, _body, _headers = self._post(
+            self._body(effort="medium"),
+            request_id="matching-main-effort",
+        )
+        self.assertEqual(rejected, 400)
+        self.assertEqual(accepted, 200)
+        requests = self.ledger.snapshot()["runs"]["main-effort-run"]["requests"]
+        self.assertNotIn("wrong-main-effort", requests)
+        self.assertIn("matching-main-effort", requests)
+
     def test_single_guardian_contract_blocks_charged_parse_replay_before_reserve(self) -> None:
         self.proxy.close()
         self.proxy = LoopbackResponsesProxy(
@@ -1070,6 +1096,60 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(run["spent_usd"], "0.000000")
         self.assertEqual(run["stop_reason"], "operator_confirmed_unbilled_deadline_exhausted")
         self.assertEqual(now[0], 30.0)
+
+    def test_close_waits_for_handler_and_prevents_a_post_close_retry(self) -> None:
+        self.proxy.close()
+        sleep_started = threading.Event()
+        release_sleep = threading.Event()
+
+        def blocking_sleep(_seconds: float) -> None:
+            sleep_started.set()
+            release_sleep.wait(timeout=5)
+
+        self.upstream.mode = "unbilled_503"
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="close-lifecycle-run",
+            metadata_path=self.root / "close-lifecycle-metadata.json",
+            **self._profile_kwargs(retry_backoff_seconds=1.0),
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+            _sleep=blocking_sleep,
+        ).start()
+        client_result: list[tuple[int, bytes, object]] = []
+        client = threading.Thread(
+            target=lambda: client_result.append(
+                self._post(self._body(), request_id="close-lifecycle-request")
+            )
+        )
+        client.start()
+        self.assertTrue(sleep_started.wait(timeout=2))
+
+        closed = threading.Event()
+
+        def close_proxy() -> None:
+            self.proxy.close()
+            closed.set()
+
+        closer = threading.Thread(target=close_proxy)
+        closer.start()
+        self.assertTrue(self.proxy._closing.wait(timeout=2))
+        self.assertFalse(closed.is_set())
+        release_sleep.set()
+        closer.join(timeout=2)
+        client.join(timeout=2)
+
+        self.assertTrue(closed.is_set())
+        self.assertFalse(closer.is_alive())
+        self.assertFalse(client.is_alive())
+        self.assertEqual(len(self.upstream.requests), 1)
+        self.assertEqual(client_result[0][0], 409)
+        run = self.ledger.snapshot()["runs"]["close-lifecycle-run"]
+        request = run["requests"]["close-lifecycle-request"]
+        self.assertEqual(request["attempt_count"], 1)
+        self.assertEqual(request["settlement_kind"], "operator_confirmed_unbilled")
+        self.assertEqual(run["stop_reason"], "operator_confirmed_unbilled_proxy_closing")
 
 
 class PersistentBudgetLedgerTests(unittest.TestCase):

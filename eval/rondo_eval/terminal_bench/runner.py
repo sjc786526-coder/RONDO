@@ -487,6 +487,7 @@ def prepare_terminal_bench_run(
         model_name=model_name,
         provider_base_url=transport_base_url,
         provider_api_key_env=spec.provider.api_key_env,
+        main_effort=spec.provider.main_effort,
         guardian_model=spec.provider.guardian_model,
         guardian_effort=spec.provider.guardian_effort,
         frozen_model_catalog_path=request.frozen_model_catalog_path,

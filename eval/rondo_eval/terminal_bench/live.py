@@ -106,6 +106,7 @@ async def run_budgeted_terminal_bench(
         run_id=request.docker_task_id,
         metadata_path=metadata_path,
         main_model=provider.main_model,
+        main_effort=provider.main_effort,
         main_pricing=provider.main_pricing,
         guardian_model=provider.guardian_model,
         guardian_pricing=provider.guardian_pricing,

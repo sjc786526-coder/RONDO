@@ -37,7 +37,9 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     PairMode,
     PairSequenceLedger,
     RunPublicationContext,
+    assess_m1,
     load_pair_identity,
+    terminal_record_sha256,
 )
 from rondo_eval.terminal_bench.results import (  # noqa: E402
     HarborResultError,
@@ -193,6 +195,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             base_url="https://provider.example/v1",
             api_key_env="OPENAI_API_KEY",
             main_model="gpt-5.6-sol",
+            main_effort="medium",
             guardian_model="gpt-5.6-luna",
             guardian_effort="low",
             main_pricing=main_pricing,
@@ -529,7 +532,7 @@ class TerminalBenchResultTests(unittest.TestCase):
     def test_publication_copies_private_tree_and_appends_strict_index(self) -> None:
         run_id = "20260810-010000001-tb-codex-r1"
         metadata = self.root / "work" / "api-metadata.json"
-        self._write_metadata(metadata, "main")
+        self._write_metadata(metadata, "main", "guardian", "main")
         (self.trial / "agent").mkdir()
         (self.trial / "agent" / "codex.txt").write_text(
             '{"type":"turn.completed"}\n', encoding="utf-8"
@@ -594,6 +597,104 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
         self.assertEqual(summary["config"]["bwrap_archive_sha256"], "1" * 64)
         self.assertEqual(summary["config"]["bwrap_source_tree_sha256"], "2" * 64)
+
+    def test_public_results_feed_m1_without_private_provider_fields(self) -> None:
+        identity = load_pair_identity()
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        relative = self._write_guardian_bundle("producer-m1-review")
+        evidence, _e_final, _meta = load_guardian_evidence_bundle(
+            self.jobs,
+            relative,
+            expected_model="gpt-5.6-luna",
+            expected_effort="low",
+        )
+        harness_commit = "f" * 40
+        records: list[dict[str, object]] = []
+        for slot in identity.topology:
+            self.assertIsNotNone(slot.paid_run_id)
+            run_id = slot.paid_run_id or ""
+            live_result = self._live_result(run_id)
+            bundle = identity.bundles[slot.side]
+            binary = replace(
+                live_result.prepared.spec.binary,
+                sha256=bundle.cli_sha256,
+                code_mode_host_sha256=bundle.code_mode_host_sha256,
+                bwrap_sha256=bundle.bwrap_sha256,
+                source_commit=bundle.source_commit,
+                workspace_lock_normalization=bundle.workspace_lock_normalization,
+            )
+            spec = replace(
+                live_result.prepared.spec,
+                side=slot.side,
+                batch_id=identity.mode("paid").batch_id or "",
+                task_id=identity.fairness["task_id"],
+                task_image_digest=identity.fairness["task_image_digest"],
+                terminal_bench_version=identity.fairness["terminal_bench_version"],
+                binary=binary,
+                timeout_seconds=identity.fairness["timeout_seconds"],
+                max_retries=identity.fairness["max_retries"],
+                budget_usd=identity.fairness["budget_usd"],
+            )
+            object.__setattr__(live_result, "prepared", SimpleNamespace(spec=spec))
+            object.__setattr__(
+                live_result,
+                "evidence",
+                (evidence,) if slot.side is Side.RONDO else (),
+            )
+            metadata = self.root / f"{slot.side.value}-api-metadata.json"
+            self._write_metadata(metadata, "main", "guardian", "main")
+            publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=slot.side,
+                git_commit="e" * 40,
+                eval_harness_commit=harness_commit,
+                live_result=live_result,
+                parsed=parsed,
+                metadata_path=metadata,
+                publication=RunPublicationContext(
+                    pair_id=identity.pair_id,
+                    pair_lock_sha256=identity.lock_sha256,
+                    pair_slot=slot.slot,
+                    pair_round=slot.round,
+                    metrics={
+                        "wall_seconds": 1.25,
+                        "cpu_user_seconds": 0.5,
+                        "cpu_system_seconds": 0.25,
+                        "peak_rss_bytes": 1024,
+                        "exit_code": 0,
+                    },
+                ),
+            )
+        index_path = self.root / "eval/results/runs.jsonl"
+        records = [json.loads(line) for line in index_path.read_text().splitlines()]
+        self.assertEqual(len(records), 2)
+        self.assertTrue(
+            all("provider_api_key_env" not in record["config"] for record in records)
+        )
+        ledger_path = self.root / "pair-sequence.json"
+        with PairSequenceLedger(ledger_path, identity=identity, mode="paid") as ledger:
+            for slot, record in zip(identity.topology, records, strict=True):
+                ledger.claim(
+                    side=slot.side,
+                    run_id=record["run_id"],
+                    eval_harness_commit=harness_commit,
+                )
+                ledger.finish(
+                    run_id=record["run_id"],
+                    completed=True,
+                    eval_harness_commit=harness_commit,
+                    publication_sha256=terminal_record_sha256(record),
+                    container_metrics={
+                        "container_id": ("a" if slot.side is Side.RONDO else "b") * 64,
+                        "cpu_usage_seconds": 1.25,
+                        "peak_memory_bytes": 4096,
+                    },
+                )
+        result = assess_m1(records, identity, pair_ledger_path=ledger_path)
+        self.assertEqual(result["m1"], "passed", result["reasons"])
+        self.assertNotIn("pair_fairness_mismatch", result["reasons"])
 
     def test_infra_without_job_tree_or_metadata_is_archived_explicitly(self) -> None:
         run_id = "20260810-010000002-tb-codex-r1"
@@ -779,6 +880,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(
             record["summary"]["api_request_roles"], {"main": 0, "guardian": 0}
         )
+        self.assertEqual(record["summary"]["api_request_sequence"], [])
 
     def test_completed_publication_keeps_metadata_gate(self) -> None:
         run_id = "20260810-010000003-tb-codex-r1"
@@ -819,7 +921,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                 publication=self._publication(),
             )
 
-    def test_completed_rondo_without_guardian_request_does_not_invent_e_final(self) -> None:
+    def test_completed_rondo_without_guardian_request_is_rejected(self) -> None:
         run_id = "20260810-010000004-tb-rondo-r1"
         live_result = self._live_result(run_id)
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
@@ -827,30 +929,26 @@ class TerminalBenchResultTests(unittest.TestCase):
         self._write_metadata(metadata, "main")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
 
-        target = publish_terminal_bench_result(
-            RepoPaths(self.root, self.root),
-            results_worktree_root=self.root,
-            run_id=run_id,
-            side=Side.RONDO,
-            git_commit="e" * 40,
-            eval_harness_commit="f" * 40,
-            live_result=live_result,
-            parsed=parsed,
-            metadata_path=metadata,
-            publication=self._publication(side=Side.RONDO),
-        )
-
-        summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
-        self.assertEqual(summary["summary"]["api_request_roles"], {"main": 1, "guardian": 0})
-        self.assertEqual(summary["summary"]["evidence"], [])
-        self.assertEqual(summary["summary"]["s2_request_evidence_binding"], "not_triggered")
+        with self.assertRaisesRegex(HarborResultError, "main-Guardian-main"):
+            publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=Side.RONDO,
+                git_commit="e" * 40,
+                eval_harness_commit="f" * 40,
+                live_result=live_result,
+                parsed=parsed,
+                metadata_path=metadata,
+                publication=self._publication(side=Side.RONDO),
+            )
 
     def test_completed_rondo_guardian_request_requires_e_final(self) -> None:
         run_id = "20260810-010000006-tb-rondo-r1"
         live_result = self._live_result(run_id)
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
         metadata = self.root / "work" / "api-metadata.json"
-        self._write_metadata(metadata, "main", "guardian")
+        self._write_metadata(metadata, "main", "guardian", "main")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         with self.assertRaises(HarborResultError):
             publish_terminal_bench_result(
@@ -879,7 +977,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
         object.__setattr__(live_result, "evidence", (observation,))
         metadata = self.root / "work" / "api-metadata.json"
-        self._write_metadata(metadata, "main", "guardian")
+        self._write_metadata(metadata, "main", "guardian", "main")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
 
         target = publish_terminal_bench_result(
