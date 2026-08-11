@@ -3,7 +3,7 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；Plan 014 已发生的 canary、v9、v10、v11、v12、v13、v14、v15 与 v16 费用 `$3.521019` 必须计入该上限。
+> 回填；截至 v17 失败终态，Plan 014 累计本地估算费用为 `$5.234734`，必须计入该上限。
 
 ## 1. 目标
 
@@ -54,8 +54,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 
 ## 3. 硬约束
 
-1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，起始已发生
-   `$3.521019`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
+1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，v17 结束时已发生
+   `$5.234734`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
    每侧最多 10 USD。只有离线分析与修复已经完成并形成干净提交，才可启动下一轮真实执行；不得把项目其余
    600 USD 预算当成本阶段消费目标。
 2. **有效条件公平**：main/Guardian requested/effective model、effort、provider endpoint、请求能力和 rate card
@@ -206,14 +206,19 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   该已知 Guardian schema 字段，Authorization header、API key/token、URL credential 与 exact secret 扫描保持原门禁；
   v16 原始证据的临时离线发布已通过，相关 61/61 回归通过。
 - v17 已冻结 schema-v2 v10 lock，pair/batch 为 `p1-fix-git-pair-v17` / `p1-fix-git-b4-m1-v9`，两侧 run 为
-  `20260811-173000000-tb-rondo-r1` / `20260811-173000001-tb-codex-r1`；lock SHA 为
-  `825e3593ac7a7ab5a0b51670d23875994cf8c50c997c222ffb36e6002d970466`，selected profile 与 bundle/catalog
-  均未变化。focused 95/95、`eval-lock` 85 packages 和完整 eval 342/342 已通过；待干净提交后从 fresh canary
-  继续。
+  `20260811-173000000-tb-rondo-r1` / `20260811-173000001-tb-codex-r1`。第一次 canary 被开发沙箱在 provider
+  连接前阻断，唯一 1 USD reservation 已按 interrupted request 保守结算；第二次 fresh canary 4/4 一次成功并
+  结算 `$0.207316`。正式 RONDO 的 14 个 upstream request 全部一次成功、usage valid，结算 `$0.506399`，
+  两份 Sol/low Guardian evidence 均 approved，verifier reward 为 1；但 Docker supervisor 在 Harbor 发布
+  `result.json` 前以 SIGKILL 终止容器，v17 收敛为 `docker/infra_failed`，Codex/M1 未运行。
+- v17 daemon 事件与代码路径共同定位到资源计数器时限：最后一次容器 cgroup probe 在 `1786462474` 成功，容器在
+  `1786462481` 被 supervisor SIGKILL；一次完整 host sample 串行执行 Docker Desktop、container/image、cgroup、
+  network/volume 等探针，却只共享 5 秒绝对预算。采样仍保持单个绝对 deadline 与 fail-closed，只把完整采样预算
+  提高到 15 秒；回归覆盖一次合法采样可长于 5 秒调度周期、仍必须短于 15 秒和外层 wall deadline。
 
 ### 阻塞项
 
-- v9/v10/v13/v14/v15/v16 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
+- v9/v10/v13/v14/v15/v16/v17 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
   任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与资源/预算门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 

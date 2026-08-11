@@ -930,6 +930,40 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertIn("absolute deadline", caught.exception.reason)
         self.assertEqual(handle.terminated, 1)
 
+    def test_complete_counter_round_may_exceed_sampling_interval(self) -> None:
+        clock = FakeClock()
+
+        class BoundedCounter(FakeCounter):
+            def __init__(self):
+                super().__init__([reading(), reading()])
+                self.budgets: list[float] = []
+
+            def sample(self, **kwargs):
+                self.budgets.append(kwargs["deadline"] - clock.now)
+                clock.now += 6.0
+                return super().sample(**kwargs)
+
+        counter = BoundedCounter()
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([0])],
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+
+        result = supervisor.pull(
+            self.identity,
+            IMAGE,
+            lease=self.lease,
+            timeout_seconds=60,
+        )
+
+        self.assertEqual(
+            [sample.phase for sample in result.samples],
+            ["baseline", "final"],
+        )
+        self.assertEqual(counter.budgets, [15.0, 15.0])
+
     def test_each_counter_round_gets_short_deadline_bounded_by_global_deadline(self) -> None:
         for global_timeout, expected_budget in (
             (60, COUNTER_SAMPLE_TIMEOUT_SECONDS),
