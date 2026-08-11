@@ -31,6 +31,10 @@ from .api_budget_proxy import (
     _atomic_private_json,
 )
 from .config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
+from .frozen_model_catalog import (
+    _catalog_with_auto_review_override,
+    load_frozen_model_catalog,
+)
 
 
 MODEL_CAMPAIGN_CAP_USD = Decimal("150")
@@ -122,29 +126,6 @@ def _binary_target(common_root: Path, side: str) -> BinaryTarget:
     return BinaryTarget(side, path, digest, source_commit)
 
 
-def _catalog_with_auto_review_override(
-    value: object,
-    *,
-    main_model: str,
-    guardian_model: str,
-) -> dict[str, object]:
-    models = value.get("models") if isinstance(value, dict) else None
-    if not isinstance(models, list):
-        raise ModelDiagnosticError("frozen model catalog is invalid")
-    selected: list[dict[str, object]] = []
-    for slug in dict.fromkeys((main_model, guardian_model)):
-        matches = [
-            model
-            for model in models
-            if isinstance(model, dict) and model.get("slug") == slug
-        ]
-        if len(matches) != 1:
-            raise ModelDiagnosticError("selected model is absent from frozen catalog")
-        selected.append(json.loads(json.dumps(matches[0])))
-    selected[0]["auto_review_model_override"] = guardian_model
-    return {"models": selected}
-
-
 def _load_frozen_model_catalog(
     paths: RepoPaths,
     target: BinaryTarget,
@@ -152,41 +133,12 @@ def _load_frozen_model_catalog(
     main_model: str,
     guardian_model: str,
 ) -> dict[str, object]:
-    source_root = paths.common_root / "codex-source-code"
-    models_path = source_root / "codex-rs" / "models-manager" / "models.json"
-    if (
-        source_root.is_symlink()
-        or not source_root.is_dir()
-        or models_path.is_symlink()
-        or not models_path.is_file()
-    ):
-        raise ModelDiagnosticError("frozen Codex source catalog is unavailable")
-    try:
-        completed = subprocess.run(
-            ("git", "-C", str(source_root), "rev-parse", "HEAD"),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-            check=False,
-            text=True,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ModelDiagnosticError("frozen Codex source identity is unavailable") from exc
-    if completed.returncode != 0 or completed.stdout.strip() != target.source_commit:
-        raise ModelDiagnosticError("frozen Codex source differs from its binary manifest")
-    try:
-        raw = models_path.read_bytes()
-        if len(raw) > 4 * 1024 * 1024:
-            raise ModelDiagnosticError("frozen model catalog exceeds the size limit")
-        value = json.loads(raw)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ModelDiagnosticError("frozen model catalog is invalid") from exc
-    return _catalog_with_auto_review_override(
-        value,
+    return load_frozen_model_catalog(
+        paths.common_root,
+        source_commit=target.source_commit,
         main_model=main_model,
         guardian_model=guardian_model,
-    )
+    ).to_dict()
 
 
 def _private_directory(path: Path) -> None:

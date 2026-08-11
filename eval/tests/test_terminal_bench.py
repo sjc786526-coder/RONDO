@@ -336,7 +336,35 @@ class TerminalBenchTests(unittest.TestCase):
             provider_transport_base_url="http://host.docker.internal:43123/v1",
         )
 
-    def adapter(self, adapter_type=CodexUploadAdapter, *, extra_env=None):
+    def frozen_catalog(self) -> tuple[Path, str]:
+        path = self.root / "frozen-model-catalog.json"
+        encoded = (
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "slug": "gpt-5.6-sol",
+                            "auto_review_model_override": "gpt-5.6-luna",
+                        },
+                        {"slug": "gpt-5.6-luna"},
+                    ]
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode()
+        path.write_bytes(encoded)
+        path.chmod(0o400)
+        return path, hashlib.sha256(encoded).hexdigest()
+
+    def adapter(
+        self,
+        adapter_type=CodexUploadAdapter,
+        *,
+        extra_env=None,
+        **overrides,
+    ):
         manifest = self.manifest()
         return adapter_type(
             logs_dir=self.root / "logs",
@@ -363,6 +391,7 @@ class TerminalBenchTests(unittest.TestCase):
             guardian_model="gpt-5.6-luna",
             guardian_effort="low",
             extra_env=extra_env,
+            **overrides,
         )
 
     def prepare(self, side=Side.CODEX):
@@ -568,6 +597,87 @@ class TerminalBenchTests(unittest.TestCase):
                 ):
                     self.assertIn(f"stat -c '%a' -- {remote_path}", commands)
                 self.assertNotIn("chmod 0555", commands)
+
+    def test_frozen_adapter_uploads_and_uses_source_bound_model_catalog(self) -> None:
+        catalog_path, catalog_sha256 = self.frozen_catalog()
+        adapter = self.adapter(
+            frozen_model_catalog_path=str(catalog_path),
+            frozen_model_catalog_sha256=catalog_sha256,
+            frozen_model_catalog_source_commit=self.manifest().source_commit,
+        )
+        environment = FakeEnvironment()
+        asyncio.run(adapter.install(environment))
+        self.assertEqual(
+            environment.uploads[-1],
+            (catalog_path, adapter.remote_frozen_model_catalog_path),
+        )
+        install_commands = "\n".join(call[0] for call in environment.calls)
+        self.assertIn(
+            f"sha256sum -- {adapter.remote_frozen_model_catalog_path}",
+            install_commands,
+        )
+        self.assertIn(
+            f"stat -c '%a' -- {adapter.remote_frozen_model_catalog_path}",
+            install_commands,
+        )
+
+        environment.calls.clear()
+        asyncio.run(adapter.run("repair the repository", environment, mock.Mock()))
+        run_commands = "\n".join(call[0] for call in environment.calls)
+        self.assertIn(
+            f'model_catalog_json="{adapter.remote_frozen_model_catalog_path}"',
+            run_commands,
+        )
+        self.assertIn(
+            f"test -r {adapter.remote_frozen_model_catalog_path}",
+            run_commands,
+        )
+        self.assertIn(
+            f"test ! -w {adapter.remote_frozen_model_catalog_path}",
+            run_commands,
+        )
+
+        with self.assertRaisesRegex(AdapterError, "RONDO"):
+            self.adapter(
+                RondoUploadAdapter,
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=catalog_sha256,
+                frozen_model_catalog_source_commit=self.manifest().source_commit,
+            )
+
+    def test_prepare_projects_frozen_catalog_and_rejects_identity_drift(self) -> None:
+        catalog_path, catalog_sha256 = self.frozen_catalog()
+        config = self.runtime_config()
+        config.paths.common_root = self.root
+        request = replace(
+            self.request(),
+            frozen_model_catalog_path=str(catalog_path),
+            frozen_model_catalog_sha256=catalog_sha256,
+            frozen_model_catalog_source_commit=self.manifest().source_commit,
+        )
+        materializer = FakeMaterializer(self.root / "fake-catalog")
+        materializer.root.mkdir()
+        prepared = prepare_terminal_bench_run(
+            config,
+            request,
+            materializer=materializer,
+        )
+        joined = "\0".join(prepared.command.argv)
+        self.assertIn(f"frozen_model_catalog_path={catalog_path}", joined)
+        self.assertIn(f"frozen_model_catalog_sha256={catalog_sha256}", joined)
+
+        for drifted in (
+            replace(request, frozen_model_catalog_sha256="0" * 64),
+            replace(request, side=Side.RONDO),
+        ):
+            with self.subTest(side=drifted.side), self.assertRaises(
+                runner_module.TerminalBenchRunError
+            ):
+                prepare_terminal_bench_run(
+                    config,
+                    drifted,
+                    materializer=mock.Mock(),
+                )
 
     def test_adapter_install_rejects_uploaded_file_owner_drift(self) -> None:
         adapter = self.adapter()
@@ -1249,6 +1359,106 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotEqual(
             FakeBudgetProxy.last_kwargs["timeout_seconds"],
             self.request(Side.RONDO).timeout_seconds,
+        )
+
+    def test_budgeted_frozen_live_path_projects_source_bound_catalog(self) -> None:
+        jobs = self.root / "jobs-codex"
+        jobs.mkdir()
+        metadata = self.root / "api-metadata.json"
+        metadata.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "requests": [
+                        {
+                            "role": "main",
+                            "role_provenance": "declared",
+                            "declared_role": "main",
+                            "inferred_role": "main",
+                            "contract_match": True,
+                            "usage_valid": True,
+                            "attempt_count": 1,
+                            "settlement_kind": "usage_priced",
+                        }
+                    ],
+                }
+            )
+        )
+        catalog_bytes = b'{"models":[]}\n'
+        catalog_sha256 = hashlib.sha256(catalog_bytes).hexdigest()
+        projection = mock.Mock(
+            source_commit=self.manifest().source_commit,
+            sha256=catalog_sha256,
+        )
+
+        def write_private(path: Path) -> None:
+            path.write_bytes(catalog_bytes)
+            path.chmod(0o400)
+
+        projection.write_private.side_effect = write_private
+        observed: dict[str, object] = {}
+
+        class FakeSupervisedExecutor:
+            def __init__(self, **kwargs):
+                observed["constructor"] = kwargs
+
+            async def run(self, argv, **kwargs):
+                observed["argv"] = argv
+                return HostHarborResult(0, jobs)
+
+        config = self.runtime_config()
+        config.paths.common_root = self.root
+        materializer = FakeMaterializer(self.root / "fake-live-codex")
+        materializer.root.mkdir()
+        ledger_path = self.root / "budget-codex.json"
+        loader = mock.Mock(return_value=projection)
+        with PersistentBudgetLedger(
+            ledger_path,
+            batch_id="p1-live-codex",
+        ) as ledger, mock.patch.object(
+            live_module,
+            "LoopbackResponsesProxy",
+            FakeBudgetProxy,
+        ), mock.patch.object(
+            live_module,
+            "DockerSupervisedHostHarborExecutor",
+            FakeSupervisedExecutor,
+        ), mock.patch.object(
+            live_module,
+            "load_frozen_model_catalog",
+            loader,
+        ):
+            result = asyncio.run(
+                live_module.run_budgeted_terminal_bench(
+                    config,
+                    self.request(Side.CODEX),
+                    api_key="official-key-sentinel",
+                    ledger=ledger,
+                    metadata_path=metadata,
+                    counter=mock.Mock(),
+                    lock_guard=mock.Mock(),
+                    lease=HeavyLockLease(token="x" * 16, held=True),
+                    pair_identity=mock.Mock(),
+                    materializer=materializer,
+                )
+            )
+
+        loader.assert_called_once_with(
+            self.root,
+            source_commit=self.manifest().source_commit,
+            main_model="gpt-5.6-sol",
+            guardian_model="gpt-5.6-luna",
+        )
+        projection.write_private.assert_called_once_with(
+            metadata.with_name("frozen-model-catalog.json")
+        )
+        self.assertEqual(
+            result.prepared.adapter._frozen_model_catalog_sha256,
+            catalog_sha256,
+        )
+        self.assertIn(
+            f"frozen_model_catalog_sha256={catalog_sha256}",
+            "\0".join(observed["argv"]),
         )
 
     def test_prepare_rejects_every_non_b1_image_before_materialization(self) -> None:

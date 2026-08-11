@@ -74,6 +74,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
     _STDERR_FILENAME: ClassVar[str] = "codex.stderr.txt"
     _REMOTE_CODEX_HOME = PurePosixPath("/tmp/rondo-eval-codex-home")
     _REMOTE_CODEX_SECRETS_DIR = PurePosixPath("/tmp/rondo-eval-codex-secrets")
+    _REMOTE_FROZEN_MODEL_CATALOG = PurePosixPath(
+        "/opt/rondo-eval/bin/frozen-model-catalog.json"
+    )
 
     def __init__(
         self,
@@ -99,6 +102,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
         provider_api_key_env: str,
         guardian_model: str,
         guardian_effort: str,
+        frozen_model_catalog_path: str | None = None,
+        frozen_model_catalog_sha256: str | None = None,
+        frozen_model_catalog_source_commit: str | None = None,
         extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -140,6 +146,27 @@ class UploadBinaryAdapter(HarborCodexAgent):
             raise AdapterError("guardian model is required and unsafe")
         if guardian_effort not in _REASONING_EFFORTS:
             raise AdapterError("guardian reasoning effort is unsupported")
+        catalog_values = (
+            frozen_model_catalog_path,
+            frozen_model_catalog_sha256,
+            frozen_model_catalog_source_commit,
+        )
+        if self.side is Side.RONDO and any(value is not None for value in catalog_values):
+            raise AdapterError("RONDO cannot receive a frozen model catalog")
+        if any(value is not None for value in catalog_values) and not all(
+            isinstance(value, str) and value for value in catalog_values
+        ):
+            raise AdapterError("frozen model catalog identity is incomplete")
+        if frozen_model_catalog_path is not None:
+            catalog_path = Path(frozen_model_catalog_path)
+            if (
+                self.side is not Side.CODEX
+                or not catalog_path.is_absolute()
+                or frozen_model_catalog_source_commit != manifest.source_commit
+                or not isinstance(frozen_model_catalog_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", frozen_model_catalog_sha256)
+            ):
+                raise AdapterError("frozen model catalog identity is invalid")
 
         # Harbor supplies logger/mcp_servers/skills_dir through kwargs.  Its base
         # constructor owns these fields and its post-run parser depends on them.
@@ -155,6 +182,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._provider_api_key_env = provider_api_key_env
         self._guardian_model = guardian_model
         self._guardian_effort = guardian_effort
+        self._frozen_model_catalog_path = frozen_model_catalog_path
+        self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
+        self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
 
     @property
     def manifest(self) -> BinaryManifest:
@@ -183,6 +213,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
     def remote_bwrap_path(self) -> str:
         return str(self.remote_directory / self.remote_bwrap_relative_path)
 
+    @property
+    def remote_frozen_model_catalog_path(self) -> str:
+        return str(self._REMOTE_FROZEN_MODEL_CATALOG)
+
     def get_version_command(self) -> str:
         return f"{shlex.quote(self.remote_path)} --version"
 
@@ -193,6 +227,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
             self.manifest.code_mode_host_sha256,
         )
         _verify_local_binary(Path(self.manifest.bwrap_path), self.manifest.bwrap_sha256)
+        if self._frozen_model_catalog_path is not None:
+            _verify_local_data_file(
+                Path(self._frozen_model_catalog_path),
+                self._frozen_model_catalog_sha256 or "",
+                expected_mode=0o400,
+            )
 
     async def install(self, environment: EnvironmentLike) -> None:
         source = Path(self.manifest.path)
@@ -225,6 +265,11 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 self.remote_code_mode_host_path,
             )
             await environment.upload_file(bwrap_source, self.remote_bwrap_path)
+            if self._frozen_model_catalog_path is not None:
+                await environment.upload_file(
+                    Path(self._frozen_model_catalog_path),
+                    self.remote_frozen_model_catalog_path,
+                )
         except Exception:
             raise _diagnostic_error(
                 stage="install",
@@ -309,6 +354,54 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 raise _diagnostic_error(
                     stage="install",
                     command_id="verify_bundle_sha256",
+                    stderr_summary="other_redacted",
+                )
+        if self._frozen_model_catalog_path is not None:
+            catalog_path = self.remote_frozen_model_catalog_path
+            quoted = shlex.quote(catalog_path)
+            await _checked_exec(
+                environment,
+                f'test -f {quoted} && test ! -L {quoted} && '
+                f'test "$(stat -c \'%a\' -- {quoted})" = 400',
+                stage="install",
+                command_id="verify_model_catalog_mode",
+            )
+            ownership = await _checked_exec(
+                environment,
+                f"stat -c '%u:%g' -- {quoted}",
+                stage="install",
+                command_id="verify_model_catalog_owner",
+            )
+            try:
+                _require_ownership(
+                    ownership,
+                    catalog_path,
+                    TERMINAL_BENCH_AGENT_USER,
+                )
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id="verify_model_catalog_owner",
+                    stderr_summary="other_redacted",
+                ) from None
+            result = await _checked_exec(
+                environment,
+                f"sha256sum -- {quoted}",
+                stage="install",
+                command_id="verify_model_catalog_sha256",
+            )
+            try:
+                remote_digest = _parse_sha256sum(result, catalog_path)
+            except AdapterError:
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id="verify_model_catalog_sha256",
+                    stderr_summary="other_redacted",
+                ) from None
+            if remote_digest != self._frozen_model_catalog_sha256:
+                raise _diagnostic_error(
+                    stage="install",
+                    command_id="verify_model_catalog_sha256",
                     stderr_summary="other_redacted",
                 )
         await _checked_exec(
@@ -440,6 +533,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
                     f"&& test ! -w {shlex.quote(self.remote_path)} "
                     f"&& test ! -w {shlex.quote(self.remote_code_mode_host_path)} "
                     f"&& test ! -w {shlex.quote(self.remote_bwrap_path)}"
+                    + (
+                        f" && test -r {shlex.quote(self.remote_frozen_model_catalog_path)}"
+                        f" && test ! -w {shlex.quote(self.remote_frozen_model_catalog_path)}"
+                        if self._frozen_model_catalog_path is not None
+                        else ""
+                    )
                 ),
                 env=nonsecret_env,
                 stage="run",
@@ -474,7 +573,17 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 # Frozen Codex v0.147 does not deserialize RONDO's three new
                 # auto_review fields.  Its effective Guardian model/effort are
                 # verified from the outbound request by the budget proxy.
-                overrides = common_overrides
+                overrides = (
+                    *common_overrides,
+                    *(
+                        (
+                            "model_catalog_json="
+                            f"{json.dumps(self.remote_frozen_model_catalog_path)}",
+                        )
+                        if self._frozen_model_catalog_path is not None
+                        else ()
+                    ),
+                )
             override_args = " ".join(f"-c {shlex.quote(value)}" for value in overrides)
             command = (
                 f"set -o pipefail; {shlex.quote(self.remote_path)} exec "
@@ -489,6 +598,11 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 side=self.side,
                 guardian_model=self._guardian_model,
                 guardian_effort=self._guardian_effort,
+                frozen_model_catalog_path=(
+                    self.remote_frozen_model_catalog_path
+                    if self._frozen_model_catalog_path is not None
+                    else None
+                ),
             )
             await _checked_exec_as_agent(
                 environment,
@@ -537,6 +651,9 @@ def adapter_for(
     provider_api_key_env: str,
     guardian_model: str,
     guardian_effort: str,
+    frozen_model_catalog_path: str | None = None,
+    frozen_model_catalog_sha256: str | None = None,
+    frozen_model_catalog_source_commit: str | None = None,
 ) -> UploadBinaryAdapter:
     adapter_type: type[UploadBinaryAdapter]
     if side is Side.CODEX:
@@ -567,6 +684,9 @@ def adapter_for(
         provider_api_key_env=provider_api_key_env,
         guardian_model=guardian_model,
         guardian_effort=guardian_effort,
+        frozen_model_catalog_path=frozen_model_catalog_path,
+        frozen_model_catalog_sha256=frozen_model_catalog_sha256,
+        frozen_model_catalog_source_commit=frozen_model_catalog_source_commit,
     )
 
 
@@ -574,7 +694,7 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
     """Return Harbor-parseable, non-secret constructor kwargs."""
 
     manifest = adapter.manifest
-    return (
+    values = [
         ("binary_path", manifest.path),
         ("binary_sha256", manifest.sha256),
         ("binary_code_mode_host_path", manifest.code_mode_host_path),
@@ -610,7 +730,22 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         ("provider_api_key_env", adapter._provider_api_key_env),
         ("guardian_model", adapter._guardian_model),
         ("guardian_effort", adapter._guardian_effort),
-    )
+    ]
+    if adapter._frozen_model_catalog_path is not None:
+        values.extend(
+            (
+                ("frozen_model_catalog_path", adapter._frozen_model_catalog_path),
+                (
+                    "frozen_model_catalog_sha256",
+                    adapter._frozen_model_catalog_sha256 or "",
+                ),
+                (
+                    "frozen_model_catalog_source_commit",
+                    adapter._frozen_model_catalog_source_commit or "",
+                ),
+            )
+        )
+    return tuple(values)
 
 
 def _validate_provider_inputs(base_url: str, api_key_env: str) -> None:
@@ -634,6 +769,7 @@ def _validate_safe_codex_command(
     side: Side,
     guardian_model: str,
     guardian_effort: str,
+    frozen_model_catalog_path: str | None = None,
 ) -> None:
     if not command.startswith("set -o pipefail; "):
         raise AdapterError("Codex output pipeline must preserve the command exit status")
@@ -681,6 +817,17 @@ def _validate_safe_codex_command(
         raise AdapterError("RONDO Guardian overrides are incomplete")
     if side is Side.CODEX and any(value in command for value in rondo_only):
         raise AdapterError("frozen Codex received unsupported RONDO config fields")
+    catalog_override = (
+        f"model_catalog_json={json.dumps(frozen_model_catalog_path)}"
+        if frozen_model_catalog_path is not None
+        else None
+    )
+    if side is Side.RONDO and "model_catalog_json=" in command:
+        raise AdapterError("RONDO received a frozen model catalog")
+    if side is Side.CODEX and catalog_override is not None and catalog_override not in command:
+        raise AdapterError("frozen Codex model catalog override is incomplete")
+    if side is Side.CODEX and catalog_override is None and "model_catalog_json=" in command:
+        raise AdapterError("frozen Codex received an undeclared model catalog")
 
 
 def _verify_local_binary(path: Path, expected: str) -> None:
@@ -699,6 +846,30 @@ def _verify_local_binary(path: Path, expected: str) -> None:
         raise AdapterError("manifest binary cannot be read") from exc
     if digest.hexdigest() != expected:
         raise AdapterError("local binary sha256 does not match BinaryManifest")
+
+
+def _verify_local_data_file(path: Path, expected: str, *, expected_mode: int) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise AdapterError("local frozen model catalog is unavailable") from exc
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != expected_mode
+        or metadata.st_size <= 0
+        or metadata.st_size > 4 * 1024 * 1024
+    ):
+        raise AdapterError("local frozen model catalog is unsafe")
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise AdapterError("local frozen model catalog is unreadable") from exc
+    if digest.hexdigest() != expected:
+        raise AdapterError("local frozen model catalog digest differs")
 
 
 async def _checked_exec(

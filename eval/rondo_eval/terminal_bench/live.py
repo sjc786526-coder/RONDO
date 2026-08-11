@@ -18,6 +18,7 @@ from ..config import RuntimeConfig
 from ..contracts import Side
 from ..docker_supervisor import DockerCounter, HeavyLockGuard, HeavyLockLease
 from ..evidence import PolicyIdentity, policy_identity
+from ..frozen_model_catalog import load_frozen_model_catalog
 from .runner import (
     DockerSupervisedHostHarborExecutor,
     HostHarborResult,
@@ -116,9 +117,28 @@ async def run_budgeted_terminal_bench(
         timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
     )
     with proxy:
+        projected_request = replace(
+            request,
+            provider_transport_base_url=proxy.docker_base_url,
+        )
+        if request.side is Side.CODEX:
+            catalog = load_frozen_model_catalog(
+                config.paths.common_root,
+                source_commit=request.binary.source_commit,
+                main_model=provider.main_model,
+                guardian_model=provider.guardian_model,
+            )
+            catalog_path = metadata_path.with_name("frozen-model-catalog.json")
+            catalog.write_private(catalog_path)
+            projected_request = replace(
+                projected_request,
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=catalog.sha256,
+                frozen_model_catalog_source_commit=catalog.source_commit,
+            )
         prepared = prepare_terminal_bench_run(
             config,
-            replace(request, provider_transport_base_url=proxy.docker_base_url),
+            projected_request,
             materializer=materializer,
         )
         pair_identity.validate_prepared(prepared, mode="paid")

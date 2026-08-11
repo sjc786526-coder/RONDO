@@ -72,6 +72,9 @@ class TerminalBenchRequest:
     seccomp_profile_source_sha256: str | None = None
     seccomp_profile_effective_sha256: str | None = None
     require_container_metrics: bool = False
+    frozen_model_catalog_path: str | None = None
+    frozen_model_catalog_sha256: str | None = None
+    frozen_model_catalog_source_commit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -437,6 +440,7 @@ def prepare_terminal_bench_run(
         raise TerminalBenchRunError("Terminal-Bench seccomp profile is incomplete")
     if not isinstance(request.require_container_metrics, bool):
         raise TerminalBenchRunError("Terminal-Bench container metric gate is invalid")
+    _validate_frozen_model_catalog_request(config, request)
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
     spec = config_module.make_run_spec(
@@ -485,6 +489,9 @@ def prepare_terminal_bench_run(
         provider_api_key_env=spec.provider.api_key_env,
         guardian_model=spec.provider.guardian_model,
         guardian_effort=spec.provider.guardian_effort,
+        frozen_model_catalog_path=request.frozen_model_catalog_path,
+        frozen_model_catalog_sha256=request.frozen_model_catalog_sha256,
+        frozen_model_catalog_source_commit=request.frozen_model_catalog_source_commit,
     )
     trial_name = _trial_name(materialized.task_label, spec.side)
     trials_dir = materialized.task_path.parent / "trials"
@@ -522,6 +529,51 @@ def prepare_terminal_bench_run(
     )
     prepared.validate()
     return prepared
+
+
+def _validate_frozen_model_catalog_request(
+    config: RuntimeConfig,
+    request: TerminalBenchRequest,
+) -> None:
+    values = (
+        request.frozen_model_catalog_path,
+        request.frozen_model_catalog_sha256,
+        request.frozen_model_catalog_source_commit,
+    )
+    if request.side is Side.RONDO:
+        if any(value is not None for value in values):
+            raise TerminalBenchRunError("RONDO cannot receive a frozen model catalog")
+        return
+    if all(value is None for value in values):
+        return
+    if not all(isinstance(value, str) and value for value in values):
+        raise TerminalBenchRunError("frozen model catalog identity is incomplete")
+    path = Path(request.frozen_model_catalog_path or "")
+    try:
+        common_root = config.paths.common_root.resolve(strict=True)
+        resolved = path.resolve(strict=True)
+        metadata = path.lstat()
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise TerminalBenchRunError("frozen model catalog is unavailable") from exc
+    if (
+        not path.is_absolute()
+        or path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o400
+        or not resolved.is_relative_to(common_root)
+        or not raw
+        or len(raw) > 4 * 1024 * 1024
+    ):
+        raise TerminalBenchRunError("frozen model catalog file is unsafe")
+    expected_sha256 = request.frozen_model_catalog_sha256 or ""
+    if (
+        len(expected_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in expected_sha256)
+        or hashlib.sha256(raw).hexdigest() != expected_sha256
+        or request.frozen_model_catalog_source_commit != request.binary.source_commit
+    ):
+        raise TerminalBenchRunError("frozen model catalog identity differs")
 
 
 def _harbor_argv(

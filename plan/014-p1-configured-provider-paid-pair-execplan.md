@@ -120,16 +120,20 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   operator-confirmed-unbilled attempts，第二个 Guardian request 在 reservation/forward 前以本地 409 停止 run。
   focused loopback 覆盖正常 `main → guardian → main`、首请求两次 upstream attempts 和 charged parse replay；
   相关 proxy/diagnostic/provider/live 58/58 通过。
+- frozen Codex catalog 已从诊断逻辑提取为正式 source-bound 投影：从 manifest 指定 commit 的 git object 取
+  `models.json`，输出最小 `0400` catalog，并由 runner/adapter 绑定 source commit、SHA256、owner、只读性和
+  `model_catalog_json` 启动参数。实际 active Sol/Sol profile 投影只含 Sol 且 override 为 Sol；相关 focused
+  tests 25/25 通过。
 
 ### 当前工作
 
-- 正在离线实现 catalog/source identity 公平投影、新 pair identity 与 profile drift 门禁。正式 exact-wire canary、
+- 正在离线实现新 pair identity、profile drift 与 public/redacted result 门禁。正式 exact-wire canary、
   Docker 和 paid pair 尚未获得本计划自己的范围授权，也未运行；
   既有 3 轮稳定性诊断只用于选定 Sol/Sol 候选，不能回填为 pair 结果。
 
 ### 阻塞项
 
-- paid 前必须完成 catalog/source identity、新 pair/profile drift 与 public/redacted result 的剩余 focused 门禁。
+- paid 前必须完成新 pair/profile drift 与 public/redacted result 的剩余 focused 门禁。
 - active Sol/Sol profile 在正式 pair 前仍须通过本计划自己的 fresh exact-wire canary；Terra 的持续 403 需供应商侧
   访问能力变化后再考虑。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
