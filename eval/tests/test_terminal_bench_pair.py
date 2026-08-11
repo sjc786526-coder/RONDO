@@ -33,6 +33,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     load_consumed_v11_pair_identity,
     load_consumed_v12_pair_identity,
     load_consumed_v13_pair_identity,
+    load_consumed_v14_pair_identity,
     load_consumed_v9_pair_identity,
     load_legacy_pair_identity,
     load_pair_identity,
@@ -212,20 +213,20 @@ class PairIdentityTests(unittest.TestCase):
             identity.no_api_seccomp.source_sha256,
         )
         paid = identity.mode("paid")
-        self.assertEqual(identity.pair_id, "p1-fix-git-pair-v15")
-        self.assertEqual(paid.batch_id, "p1-fix-git-b4-m1-v7")
+        self.assertEqual(identity.pair_id, "p1-fix-git-pair-v16")
+        self.assertEqual(paid.batch_id, "p1-fix-git-b4-m1-v8")
         self.assertEqual(
             [slot.paid_run_id for slot in identity.topology],
             [
-                "20260811-163000000-tb-rondo-r1",
-                "20260811-163000001-tb-codex-r1",
+                "20260811-170000000-tb-rondo-r1",
+                "20260811-170000001-tb-codex-r1",
             ],
         )
         selected = identity.require_selected_profile().to_dict()
         self.assertNotIn("provider_base_url", selected)
         self.assertNotIn("provider_api_key_env", selected)
         self.assertEqual(selected["requested_guardian_model"], "gpt-5.6-sol")
-        self.assertEqual(selected["max_guardian_logical_requests"], 2)
+        self.assertEqual(selected["max_guardian_logical_requests"], 3)
         self.assertEqual(identity.fairness["max_retries"], 0)
         self.assertEqual(identity.fairness["budget_usd"], 10.0)
         self.assertEqual(identity.paid_budget.per_side_usd, 10.0)
@@ -272,9 +273,9 @@ class PairIdentityTests(unittest.TestCase):
                 mode="paid",
             )
 
-    def test_second_approval_failed_v14_identity_is_explicit_and_read_only(self) -> None:
+    def test_third_approval_failed_v15_identity_is_explicit_and_read_only(self) -> None:
         previous = load_previous_pair_identity()
-        self.assertEqual(previous.pair_id, "p1-fix-git-pair-v14")
+        self.assertEqual(previous.pair_id, "p1-fix-git-pair-v15")
         self.assertNotEqual(previous.pair_id, self.tracked_identity.pair_id)
         self.assertTrue(
             {slot.paid_run_id for slot in previous.topology}.isdisjoint(
@@ -289,6 +290,26 @@ class PairIdentityTests(unittest.TestCase):
             PairSequenceLedger(
                 Path(directory) / "previous.json",
                 identity=previous,
+                mode="paid",
+            )
+
+    def test_second_approval_failed_v14_identity_remains_read_only(self) -> None:
+        consumed = load_consumed_v14_pair_identity()
+        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v14")
+        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
+        self.assertTrue(
+            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
+                slot.paid_run_id for slot in self.tracked_identity.topology
+            )
+        )
+        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
+            load_pair_identity(pair_module.CONSUMED_V14_PAIR_LOCK_PATH)
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            PairIdentityError, "read-only"
+        ):
+            PairSequenceLedger(
+                Path(directory) / "consumed-v14.json",
+                identity=consumed,
                 mode="paid",
             )
 
