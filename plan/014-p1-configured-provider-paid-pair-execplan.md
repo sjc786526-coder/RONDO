@@ -3,7 +3,7 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；Plan 014 已发生的 canary、v9、v10、v11、v12、v13、v14 与 v15 费用 `$2.808015` 必须计入该上限。
+> 回填；Plan 014 已发生的 canary、v9、v10、v11、v12、v13、v14、v15 与 v16 费用 `$3.521019` 必须计入该上限。
 
 ## 1. 目标
 
@@ -55,7 +55,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 ## 3. 硬约束
 
 1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，起始已发生
-   `$2.808015`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
+   `$3.521019`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
    每侧最多 10 USD。只有离线分析与修复已经完成并形成干净提交，才可启动下一轮真实执行；不得把项目其余
    600 USD 预算当成本阶段消费目标。
 2. **有效条件公平**：main/Guardian requested/effective model、effort、provider endpoint、请求能力和 rate card
@@ -197,12 +197,23 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   一次成功并结算 `$0.179983`；正式 RONDO 12 个上游请求也全部成功并结算 `$0.357826`，但 `git diff --check`
   首次失败并修复 whitespace 后，同一 Git command 的新 transcript/action body 需要第三次真实审批，仍被上限阻断；
   Codex/M1 未运行，v15 永久 blocked。
-- v16 保留 duplicate-body replay 前置拒绝，只把不同 body 上限从 2 提高到已有真实证据所需的 3。当前冻结
-  schema-v2 v9 lock 与唯一 v16 pair/batch/run IDs，待 focused lock、干净提交后从 fresh canary 继续。
+- v16 保留 duplicate-body replay 前置拒绝，只把不同 body 上限从 2 提高到已有真实证据所需的 3。fresh canary
+  4/4 一次成功并结算 `$0.225611`；正式 RONDO 的 15 个 upstream request 也全部一次成功、usage valid、settled，
+  结算 `$0.487393`，Harbor task 自然 `completed`、reward `1.0`，两份 Sol/low Guardian evidence 均 approved。
+  但 artifact secret scanner 把 E_final 输出 schema 的合法 `user_authorization` 字段误判为 credential assignment，
+  completed publication 因而 fail-closed；v16 public failure、artifact、ledger 与费用保持不可复用终态，Codex/M1 未运行。
+- 离线使用 v16 原始 trial/API metadata/两份 E_final 完整重放发布器，确认唯一拒绝点为上述字段误报。scanner 现只豁免
+  该已知 Guardian schema 字段，Authorization header、API key/token、URL credential 与 exact secret 扫描保持原门禁；
+  v16 原始证据的临时离线发布已通过，相关 61/61 回归通过。
+- v17 已冻结 schema-v2 v10 lock，pair/batch 为 `p1-fix-git-pair-v17` / `p1-fix-git-b4-m1-v9`，两侧 run 为
+  `20260811-173000000-tb-rondo-r1` / `20260811-173000001-tb-codex-r1`；lock SHA 为
+  `825e3593ac7a7ab5a0b51670d23875994cf8c50c997c222ffb36e6002d970466`，selected profile 与 bundle/catalog
+  均未变化。focused 95/95、`eval-lock` 85 packages 和完整 eval 342/342 已通过；待干净提交后从 fresh canary
+  继续。
 
 ### 阻塞项
 
-- v9/v10/v13/v14/v15 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
+- v9/v10/v13/v14/v15/v16 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
   任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与资源/预算门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 
@@ -234,3 +245,4 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 022 | completed RONDO 以等量 valid Guardian requests 与 approved production evidence 建立 task-scoped 集合绑定 | 不持久化私有请求正文，且失败/缺失 evidence 不能成为 S2 | 已采纳 |
 | 023 | v15 允许两个不同 Guardian body，并前置拒绝已见 exact body SHA | 兼容真实冲突解决的第二次审批，同时阻断 completed+usage 后的同体 parse replay | 已采纳 |
 | 024 | v16 仅把不同 Guardian body 上限从 2 提高到 3 | v15 证明 whitespace 修复后第三次审批是新 transcript/body，不是同体 parse replay | 已采纳 |
+| 025 | artifact scanner 明确允许 E_final 的 `user_authorization` schema 字段，其他凭据扫描不变 | v16 completed 事实被该合法 Guardian 合同字段误报阻断；原始 evidence 离线重放证明修复充分 | 已采纳 |

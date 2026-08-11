@@ -41,8 +41,11 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v9.json"
+PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v10.json"
 PREVIOUS_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v9.json"
+)
+CONSUMED_V15_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v8.json"
 )
 CONSUMED_V14_PAIR_LOCK_PATH = (
@@ -66,8 +69,9 @@ CONSUMED_V9_PAIR_LOCK_PATH = (
 LEGACY_PAIR_LOCK_PATH = (
     Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
 )
-P1_PAIR_ID = "p1-fix-git-pair-v16"
-PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v15"
+P1_PAIR_ID = "p1-fix-git-pair-v17"
+PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v16"
+CONSUMED_V15_P1_PAIR_ID = "p1-fix-git-pair-v15"
 CONSUMED_V14_P1_PAIR_ID = "p1-fix-git-pair-v14"
 CONSUMED_V13_P1_PAIR_ID = "p1-fix-git-pair-v13"
 CONSUMED_V12_P1_PAIR_ID = "p1-fix-git-pair-v12"
@@ -78,6 +82,7 @@ LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
 _TEN_USD_PAIR_IDS = {
     P1_PAIR_ID,
     PREVIOUS_P1_PAIR_ID,
+    CONSUMED_V15_P1_PAIR_ID,
     CONSUMED_V14_P1_PAIR_ID,
     CONSUMED_V13_P1_PAIR_ID,
     CONSUMED_V12_P1_PAIR_ID,
@@ -856,9 +861,17 @@ def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentit
 
 
 def load_previous_pair_identity(path: Path = PREVIOUS_PAIR_LOCK_PATH) -> PairIdentity:
-    """Load the third-approval-failed v15 identity for read-only assessment."""
+    """Load the publication-failed v16 identity for read-only assessment."""
 
     return _load_pair_identity(path, schema_version=2, pair_id=PREVIOUS_P1_PAIR_ID)
+
+
+def load_consumed_v15_pair_identity(
+    path: Path = CONSUMED_V15_PAIR_LOCK_PATH,
+) -> PairIdentity:
+    """Load the third-approval-failed v15 identity for read-only assessment."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V15_P1_PAIR_ID)
 
 
 def load_consumed_v14_pair_identity(
