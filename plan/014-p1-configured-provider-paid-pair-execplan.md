@@ -3,7 +3,7 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；截至 v17 失败终态，Plan 014 累计本地估算费用为 `$5.234734`，必须计入该上限。
+> 回填；截至 v18 失败终态，Plan 014 累计本地估算费用为 `$5.833738`，必须计入该上限。
 
 ## 1. 目标
 
@@ -54,8 +54,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 
 ## 3. 硬约束
 
-1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，v17 结束时已发生
-   `$5.234734`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
+1. **本阶段授权**：Plan 014 canary 与正式 pair 的累计本地估算费用不得超过 280 USD，v18 结束时已发生
+   `$5.833738`；每轮 canary 仍最多 4 个 upstream request、每请求预留 1 USD，每个正式 pair 两侧各 1 轮、
    每侧最多 10 USD。只有离线分析与修复已经完成并形成干净提交，才可启动下一轮真实执行；不得把项目其余
    600 USD 预算当成本阶段消费目标。
 2. **有效条件公平**：main/Guardian requested/effective model、effort、provider endpoint、请求能力和 rate card
@@ -219,11 +219,17 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   `20260811-180000000-tb-rondo-r1` / `20260811-180000001-tb-codex-r1`；lock SHA 为
   `f588c05e5328c5a9030b487d212e0b7d38047c23f6a528aacbe59ab86228f830`。selected profile、Sol/medium main、
   Sol/low Guardian、catalog 与两侧 runtime bundle 均保持不变；v17 lock 已转为显式只读历史入口。focused
-  132/132、`eval-lock` 85 packages 与完整 eval 344/344 均通过。
+  132/132、`eval-lock` 85 packages 与完整 eval 344/344 均通过。fresh canary 4/4 一次成功并结算 `$0.224146`；
+  RONDO slot 1 正式 completed、reward 1、13/13 request 一次成功，两个 Guardian 均 approved，结算
+  `$0.374858`。frozen Codex slot 2 在 install 阶段校验 0400 model catalog 时失败，0 request/0 USD；pair 永久
+  blocked，M1 未运行。
+- v18 Codex 根因是 capability-drop-all 容器中 root 没有 DAC override，不能读取 agent `1000:1000` 所有的 0400
+  catalog；类型、mode 与 owner 校验均成功，随后 root `sha256sum` 返回空 stderr。catalog hash 改由文件 owner
+  身份读取；目录与可执行 bundle 的 root 校验、0400/owner 合同及本地预校验均保持不变。
 
 ### 阻塞项
 
-- v9/v10/v13/v14/v15/v16/v17 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
+- v9/v10/v13/v14/v15/v16/v17/v18 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；均已退役。
   任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与资源/预算门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 

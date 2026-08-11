@@ -619,6 +619,13 @@ class TerminalBenchTests(unittest.TestCase):
             f"sha256sum -- {adapter.remote_frozen_model_catalog_path}",
             install_commands,
         )
+        catalog_digest_calls = [
+            call
+            for call in environment.calls
+            if f"sha256sum -- {adapter.remote_frozen_model_catalog_path}" in call[0]
+        ]
+        self.assertEqual(len(catalog_digest_calls), 1)
+        self.assertIsNone(catalog_digest_calls[0][3])
         self.assertIn(
             f"stat -c '%a' -- {adapter.remote_frozen_model_catalog_path}",
             install_commands,

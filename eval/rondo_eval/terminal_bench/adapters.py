@@ -392,9 +392,13 @@ class UploadBinaryAdapter(HarborCodexAgent):
                     command_id="verify_model_catalog_owner",
                     stderr_summary="other_redacted",
                 ) from None
-            result = await _checked_exec(
+            # The catalog is intentionally 0400 and owned by Harbor's agent
+            # user.  Root runs without DAC override in the capability-dropped
+            # container, so only the owner can read the bytes for this check.
+            result = await _checked_exec_as_agent(
                 environment,
-                f"sha256sum -- {quoted}",
+                command=f"sha256sum -- {quoted}",
+                env={},
                 stage="install",
                 command_id="verify_model_catalog_sha256",
             )
