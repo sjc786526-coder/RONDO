@@ -99,6 +99,8 @@ async def run_budgeted_terminal_bench(
     if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
         raise TerminalBenchRunError("the in-memory provider key is invalid")
     provider = config.paid_provider_projection(request.provider_name)
+    pair_identity.validate_selected_profile(provider)
+    selected_profile = pair_identity.require_selected_profile()
     proxy = LoopbackResponsesProxy(
         upstream_base_url=provider.base_url,
         api_key=api_key,
@@ -114,7 +116,7 @@ async def run_budgeted_terminal_bench(
         max_attempts=provider.max_attempts,
         retry_backoff_seconds=provider.retry_backoff_seconds,
         unbilled_retry_statuses=provider.unbilled_retry_statuses,
-        max_guardian_logical_requests=1,
+        max_guardian_logical_requests=selected_profile.max_guardian_logical_requests,
         timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
     )
     with proxy:
@@ -128,6 +130,12 @@ async def run_budgeted_terminal_bench(
                 source_commit=request.binary.source_commit,
                 main_model=provider.main_model,
                 guardian_model=provider.guardian_model,
+            )
+            pair_identity.validate_frozen_model_catalog(
+                source_commit=catalog.source_commit,
+                sha256=catalog.sha256,
+                main_model=catalog.main_model,
+                guardian_model=catalog.guardian_model,
             )
             catalog_path = metadata_path.with_name("frozen-model-catalog.json")
             catalog.write_private(catalog_path)

@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -1332,6 +1333,10 @@ class TerminalBenchTests(unittest.TestCase):
 
         materializer = FakeMaterializer(self.root / "fake-live")
         materializer.root.mkdir()
+        pair_identity = mock.Mock()
+        pair_identity.require_selected_profile.return_value = SimpleNamespace(
+            max_guardian_logical_requests=1
+        )
         ledger_path = self.root / "budget.json"
         with PersistentBudgetLedger(ledger_path, batch_id="p1-live") as ledger, mock.patch.object(
             live_module, "LoopbackResponsesProxy", FakeBudgetProxy
@@ -1347,7 +1352,7 @@ class TerminalBenchTests(unittest.TestCase):
                 counter=mock.Mock(),
                 lock_guard=mock.Mock(),
                 lease=HeavyLockLease(token="x" * 16, held=True),
-                pair_identity=mock.Mock(),
+                pair_identity=pair_identity,
                 materializer=materializer,
             ))
 
@@ -1419,6 +1424,10 @@ class TerminalBenchTests(unittest.TestCase):
         materializer.root.mkdir()
         ledger_path = self.root / "budget-codex.json"
         loader = mock.Mock(return_value=projection)
+        pair_identity = mock.Mock()
+        pair_identity.require_selected_profile.return_value = SimpleNamespace(
+            max_guardian_logical_requests=1
+        )
         with PersistentBudgetLedger(
             ledger_path,
             batch_id="p1-live-codex",
@@ -1445,7 +1454,7 @@ class TerminalBenchTests(unittest.TestCase):
                     counter=mock.Mock(),
                     lock_guard=mock.Mock(),
                     lease=HeavyLockLease(token="x" * 16, held=True),
-                    pair_identity=mock.Mock(),
+                    pair_identity=pair_identity,
                     materializer=materializer,
                 )
             )

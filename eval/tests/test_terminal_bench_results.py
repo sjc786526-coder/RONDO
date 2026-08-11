@@ -99,12 +99,12 @@ class TerminalBenchResultTests(unittest.TestCase):
         (self.job / "job.log").write_text("safe log\n", encoding="utf-8")
         (self.job / "config.json").write_text("{}\n", encoding="utf-8")
 
-    @staticmethod
     def _publication(
-        *, side: Side = Side.CODEX, exit_code: int = 0
+        self, *, side: Side = Side.CODEX, exit_code: int = 0
     ) -> RunPublicationContext:
+        provider = self._live_result("publication-fixture").prepared.spec.provider
         return RunPublicationContext(
-            pair_id="p1-fix-git-pair-v8",
+            pair_id="p1-fix-git-pair-v9",
             pair_lock_sha256="9" * 64,
             pair_slot=1 if side is Side.RONDO else 2,
             pair_round=1,
@@ -114,6 +114,12 @@ class TerminalBenchResultTests(unittest.TestCase):
                 "cpu_system_seconds": 0.25,
                 "peak_rss_bytes": 1024,
                 "exit_code": exit_code,
+            },
+            selected_profile={
+                **provider.to_public_dict(),
+                "frozen_codex_model_catalog_source_commit": "a" * 40,
+                "frozen_codex_model_catalog_sha256": "b" * 64,
+                "max_guardian_logical_requests": 1,
             },
         )
 
@@ -584,6 +590,18 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", serialized_config)
         self.assertEqual(record["config"]["provider_profile_sha256"], "d" * 64)
         self.assertEqual(len(record["config"]["provider_endpoint_sha256"]), 64)
+        self.assertEqual(
+            record["config"]["requested_main_model"],
+            record["config"]["effective_main_model"],
+        )
+        self.assertEqual(
+            record["config"]["requested_guardian_model"],
+            record["config"]["effective_guardian_model"],
+        )
+        self.assertEqual(
+            record["config"]["frozen_codex_model_catalog_sha256"],
+            "b" * 64,
+        )
         summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
         self.assertEqual(
             summary["config"]["bwrap_runtime_path"],
@@ -600,6 +618,14 @@ class TerminalBenchResultTests(unittest.TestCase):
 
     def test_public_results_feed_m1_without_private_provider_fields(self) -> None:
         identity = load_pair_identity()
+        fixture_provider = self._live_result("m1-fixture").prepared.spec.provider
+        identity = replace(
+            identity,
+            selected_profile=replace(
+                identity.require_selected_profile(),
+                provider_public=fixture_provider.to_public_dict(),
+            ),
+        )
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         relative = self._write_guardian_bundle("producer-m1-review")
         evidence, _e_final, _meta = load_guardian_evidence_bundle(
@@ -665,6 +691,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                         "peak_rss_bytes": 1024,
                         "exit_code": 0,
                     },
+                    selected_profile=identity.require_selected_profile().to_dict(),
                 ),
             )
         index_path = self.root / "eval/results/runs.jsonl"
@@ -680,6 +707,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                     side=slot.side,
                     run_id=record["run_id"],
                     eval_harness_commit=harness_commit,
+                    provider=fixture_provider,
                 )
                 ledger.finish(
                     run_id=record["run_id"],
@@ -691,6 +719,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                         "cpu_usage_seconds": 1.25,
                         "peak_memory_bytes": 4096,
                     },
+                    provider=fixture_provider,
                 )
         result = assess_m1(records, identity, pair_ledger_path=ledger_path)
         self.assertEqual(result["m1"], "passed", result["reasons"])
@@ -1095,6 +1124,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             "binary_sha256": "b" * 64,
             "upstream_codex": dict(UPSTREAM_CODEX),
             "config": {
+                **identity.require_selected_profile().to_dict(),
                 "pair_id": identity.pair_id,
                 "pair_lock_sha256": identity.lock_sha256,
                 "pair_slot": slot.slot,
@@ -1126,6 +1156,14 @@ class TerminalBenchResultTests(unittest.TestCase):
         batch_id = "p1-paid-recovery"
         harness_commit = "f" * 40
         identity = load_pair_identity()
+        provider = self._live_result("recovery-provider").prepared.spec.provider
+        identity = replace(
+            identity,
+            selected_profile=replace(
+                identity.require_selected_profile(),
+                provider_public=provider.to_public_dict(),
+            ),
+        )
         modes = dict(identity.modes)
         modes["paid"] = PairMode(True, batch_id)
         topology = tuple(
@@ -1146,6 +1184,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                 side=Side.RONDO,
                 run_id=run_id,
                 eval_harness_commit=harness_commit,
+                provider=provider,
             )
             sequence.stage_paid_publication(
                 run_id=run_id,
@@ -1155,6 +1194,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                     "cpu_usage_seconds": 1.0,
                     "peak_memory_bytes": 4096,
                 },
+                provider=provider,
             )
         if write_record:
             target = self.root / "eval-data" / "runs" / run_id
@@ -1184,6 +1224,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         batch_id: str,
     ) -> tuple[int, tuple[mock.Mock, ...]]:
         paths = RepoPaths(self.root, self.root)
+        provider = self._live_result("recovery-provider").prepared.spec.provider
         with patch.object(
             terminal_bench_main.RepoPaths, "discover", return_value=paths
         ), patch.object(
@@ -1191,8 +1232,12 @@ class TerminalBenchResultTests(unittest.TestCase):
         ), patch.object(
             terminal_bench_main, "validate_results_worktree", return_value=self.root
         ), patch.object(
-            terminal_bench_main, "load_runtime_config"
-        ) as load_config, patch.object(
+            terminal_bench_main,
+            "load_runtime_config",
+            return_value=SimpleNamespace(
+                paid_provider_projection=lambda: provider
+            ),
+        ), patch.object(
             terminal_bench_main, "load_provider_secret"
         ) as load_secret, patch.object(
             terminal_bench_main, "lease_from_watchdog"
@@ -1222,7 +1267,6 @@ class TerminalBenchResultTests(unittest.TestCase):
                 ]
             )
         return result, (
-            load_config,
             load_secret,
             watchdog,
             backend,
@@ -1359,9 +1403,15 @@ class TerminalBenchResultTests(unittest.TestCase):
             side_effect=DockerSupervisionError("redacted test failure")
         )
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v8",
+            pair_id="p1-fix-git-pair-v9",
             lock_sha256="9" * 64,
         )
+        pair_identity.require_selected_profile.return_value.to_dict.return_value = {
+            **live.prepared.spec.provider.to_public_dict(),
+            "frozen_codex_model_catalog_source_commit": "a" * 40,
+            "frozen_codex_model_catalog_sha256": "b" * 64,
+            "max_guardian_logical_requests": 1,
+        }
         pair_identity.mode.return_value = SimpleNamespace(
             batch_id=terminal_bench_main.P1_BATCH_ID
         )
@@ -1423,11 +1473,13 @@ class TerminalBenchResultTests(unittest.TestCase):
             side=Side.CODEX,
             run_id=run_id,
             eval_harness_commit="f" * 40,
+            provider=live.prepared.spec.provider,
         )
         sequence.finish.assert_called_once_with(
             run_id=run_id,
             completed=False,
             eval_harness_commit="f" * 40,
+            provider=live.prepared.spec.provider,
         )
         safe_print.assert_called_once()
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
@@ -1450,7 +1502,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             return measurement_paths if Path(start) == measurement_root else paths
 
         pair_identity = mock.Mock(
-            pair_id="p1-fix-git-pair-v8",
+            pair_id="p1-fix-git-pair-v9",
             lock_sha256="9" * 64,
         )
         pair_identity.mode.return_value = SimpleNamespace(
@@ -1553,11 +1605,21 @@ class TerminalBenchResultTests(unittest.TestCase):
                 for call in validate_measurement.call_args_list
             )
         )
-        sequence.stage_paid_publication.assert_called_once()
+        sequence.stage_paid_publication.assert_called_once_with(
+            run_id=run_id,
+            eval_harness_commit="f" * 40,
+            container_metrics={
+                "container_id": "a" * 64,
+                "cpu_usage_seconds": 1.0,
+                "peak_memory_bytes": 4096,
+            },
+            provider=live.prepared.spec.provider,
+        )
         sequence.finish.assert_called_once_with(
             run_id=run_id,
             completed=False,
             eval_harness_commit="f" * 40,
+            provider=live.prepared.spec.provider,
         )
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")

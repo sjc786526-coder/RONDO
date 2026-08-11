@@ -24,7 +24,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   requested/effective model，且两者都必须等于 selected profile。
 - pair 前先用相同 frozen CLI/request shape 做一次短测 profile canary；每个 upstream request 预留 1 USD、
   main+approval 最多 4 个请求/4 USD，main 与 Guardian 均须
-  terminal+valid usage，任一 403/429/5xx、缺 usage 或审批未闭环都停止，不创建/claim pair identity。
+  terminal+valid usage，任一 403/429/5xx、缺 usage 或审批未闭环都停止，不创建/claim pair ledger；预留的 tracked
+  identity 保持未消费，若 selected profile 变化则必须新建 lock/IDs，不能改写 v9。
 - 任何 completed+usage 的 Guardian 响应之后，产品层 parse failure 不得再产生第二个付费 upstream request；
   无法为 frozen Codex 建立可靠门禁时，本阶段 fail-closed，不运行 paid pair。
 - sequence ledger 在 slot 1 claim 时绑定 selected profile canonical SHA；slot 1 启动前、slot 1 结束时、slot 2 claim
@@ -98,8 +99,9 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
    - 独立审查 secret redaction、预算恢复、旧 ID 拒绝与 pair 顺序。
 4. **一次真实执行**
    - 获得新授权并确认候选 active profile/credential、Windows C:、Docker 基线与 build lock。
-   - 先运行与 frozen CLI 完全同 shape 的 main+Guardian canary；只有 terminal+valid usage 且审批闭环才冻结
-     selected profile 并创建新 pair identity。Terra 在持续 403 的访问问题解除前不作为候选。
+   - 先运行与 frozen CLI 完全同 shape 的 main+Guardian canary；只有 terminal+valid usage、审批闭环且 fresh profile
+     精确匹配 v9 lock 才创建 sequence ledger 并 claim slot 1。若候选 profile 改变则新建 lock/IDs，不改写 v9；Terra
+     在持续 403 的访问问题解除前不作为候选。
    - RONDO slot 1；只在 completed + metadata ready + ledger settled 时运行 Codex slot 2。
    - 两侧 completed 后运行 M1，归档 result/metrics/cost；任何失败保持新 pair 终态并停止。
 
@@ -131,16 +133,20 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   local profile、canonical SHA、adapter、proxy 和 public result；CLI 诊断改为精确消息/命令/请求状态合同、
   显式环境白名单及剩余 retry 配额，并要求 ledger run 未停止、命令先于最终消息、唯一 `turn.completed` 且无
   `turn.failed`。真实 public producer→pair ledger→M1 集成回归和完整 eval 323/323 通过。
+- 新 schema-v2 lock 已冻结唯一 `p1-fix-git-pair-v9` / `p1-fix-git-b4-m1-v1` 与两侧 run ID、Sol/medium
+  main、Sol/low Guardian、价卡/retry、5 USD 单侧/10 USD pair 上限和 source-bound frozen catalog SHA；lock
+  不包含 raw endpoint、display name 或 key env。v8 只能通过显式 legacy 入口只读加载，不能创建或 claim 新账本。
+- pair sequence ledger schema v5 在 slot 1 claim 绑定 selected profile/endpoint SHA；正式入口在首次 claim、completed
+  发布前、durable publication 收口及 slot 2 新进程 claim 时重投影本地 profile。public success/failure 直接使用 lock
+  的同一 redacted profile，M1 对两侧 result、lock 与 ledger 做精确三方比较；focused tests 与完整 eval 325/325 通过。
 
 ### 当前工作
 
-- 正在离线实现新 pair identity 与 profile drift 门禁。正式 exact-wire canary、
-  Docker 和 paid pair 尚未获得本计划自己的范围授权，也未运行；
-  既有 3 轮稳定性诊断只用于选定 Sol/Sol 候选，不能回填为 pair 结果。
+- 离线身份、漂移和聚合门禁已完成。正式 exact-wire canary、Docker 和 paid pair 尚未获得本计划自己的范围授权，
+  也未运行；既有 3 轮稳定性诊断只用于选定 Sol/Sol 候选，不能回填为 pair 结果。
 
 ### 阻塞项
 
-- paid 前必须完成新 pair/profile drift 的剩余 focused 门禁。
 - active Sol/Sol profile 在正式 pair 前仍须通过本计划自己的 fresh exact-wire canary；Terra 的持续 403 需供应商侧
   访问能力变化后再考虑。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。

@@ -10,8 +10,14 @@ from pathlib import Path
 
 from ..api_budget_proxy import BudgetStopped, PersistentBudgetLedger
 from ..artifacts import ArtifactError, ArtifactWriter, validate_run_id
-from ..config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
-from ..contracts import BinaryManifest, RunOutcome, Side
+from ..config import (
+    ConfigError,
+    RepoPaths,
+    RuntimeConfig,
+    load_provider_secret,
+    load_runtime_config,
+)
+from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
 from ..docker_supervisor import DockerSupervisionError
 from ..exit_codes import BUDGET_STOPPED, CONFIG_ERROR, EVIDENCE_ERROR, INFRA_ERROR
 from ..runtime_bridge import (
@@ -43,7 +49,7 @@ from .results import (
 from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
 
 
-P1_BATCH_ID = "p1-fix-git-b3-m1-v3"
+P1_BATCH_ID = "p1-fix-git-b4-m1-v1"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -85,12 +91,14 @@ def main(argv: list[str] | None = None) -> int:
             / "pairs"
             / f"{pair_identity.pair_id}-paid.json"
         )
+        config, provider = _load_selected_provider(paths, pair_identity)
         if _recover_prior_paid_publication(
             paths=paths,
             sequence_path=sequence_path,
             identity=pair_identity,
             run_id=args.run_id,
             results_root=results_root,
+            provider=provider,
         ):
             print(
                 json.dumps(
@@ -106,8 +114,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 0
-        config = load_runtime_config(paths)
-        provider = config.paid_provider_projection()
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         manifest = _load_manifest(args.binary_manifest, paths.common_root)
         seccomp_profile = pair_identity.validate_runtime_seccomp(
@@ -173,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
                 side=side,
                 run_id=args.run_id,
                 eval_harness_commit=eval_harness_commit,
+                provider=provider,
             )
             sequence_active = True
             writer = ArtifactWriter(
@@ -215,10 +222,14 @@ def main(argv: list[str] | None = None) -> int:
                         raise TerminalBenchRunError("eval harness commit changed during the run")
                     container_metrics = _paid_container_metrics(result.harbor.docker_evidence)
                     if parsed.outcome is RunOutcome.COMPLETED:
+                        _fresh_config, fresh_provider = _load_selected_provider(
+                            paths, pair_identity
+                        )
                         sequence.stage_paid_publication(
                             run_id=args.run_id,
                             eval_harness_commit=eval_harness_commit,
                             container_metrics=container_metrics,
+                            provider=fresh_provider,
                         )
                         publication_staged = True
                     artifact_path = publish_terminal_bench_result(
@@ -286,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                         run_id=args.run_id,
                         completed=False,
                         eval_harness_commit=eval_harness_commit,
+                        provider=provider,
                     )
                     sequence_active = False
                     print(
@@ -307,16 +319,21 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     return exit_code
             if parsed.outcome is RunOutcome.COMPLETED:
+                _fresh_config, fresh_provider = _load_selected_provider(
+                    paths, pair_identity
+                )
                 sequence.reconcile_paid_publication(
                     run_id=args.run_id,
                     eval_harness_commit=eval_harness_commit,
                     index_path=results_root / "eval" / "results" / "runs.jsonl",
+                    provider=fresh_provider,
                 )
             else:
                 sequence.finish(
                     run_id=args.run_id,
                     completed=False,
                     eval_harness_commit=eval_harness_commit,
+                    provider=_load_selected_provider(paths, pair_identity)[1],
                 )
             sequence_active = False
         finally:
@@ -328,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
                         run_id=args.run_id,
                         completed=False,
                         eval_harness_commit=eval_harness_commit,
+                        provider=provider,
                     )
                 except PairIdentityError:
                     pass
@@ -394,6 +412,7 @@ def _recover_prior_paid_publication(
     identity: PairIdentity,
     run_id: str,
     results_root: Path,
+    provider: ProviderProjection,
 ) -> bool:
     """Converge only an already-staged publication before normal preflight."""
 
@@ -421,8 +440,19 @@ def _recover_prior_paid_publication(
             run_id=run_id,
             eval_harness_commit=bound_commit,
             index_path=results_root / "eval" / "results" / "runs.jsonl",
+            provider=provider,
         )
         return True
+
+
+def _load_selected_provider(
+    paths: RepoPaths,
+    identity: PairIdentity,
+) -> tuple[RuntimeConfig, ProviderProjection]:
+    config = load_runtime_config(paths)
+    provider = config.paid_provider_projection()
+    identity.validate_selected_profile(provider)
+    return config, provider
 
 
 def _paid_container_metrics(evidence: object) -> dict[str, object]:

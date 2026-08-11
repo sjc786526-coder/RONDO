@@ -28,6 +28,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
     PairSequenceLedger,
     PairIdentityError,
     assess_m1,
+    load_legacy_pair_identity,
     load_pair_identity,
     terminal_record_sha256,
     validate_harbor_installation,
@@ -39,7 +40,53 @@ class PairIdentityTests(unittest.TestCase):
     HARNESS_COMMIT = "f" * 40
 
     def setUp(self) -> None:
-        self.identity = load_pair_identity()
+        self.tracked_identity = load_pair_identity()
+        self.provider = self._provider()
+        selected = self.tracked_identity.require_selected_profile()
+        self.identity = replace(
+            self.tracked_identity,
+            selected_profile=replace(
+                selected,
+                provider_public=self.provider.to_public_dict(),
+            ),
+        )
+
+    def _provider(
+        self,
+        *,
+        base_url: str = "https://provider.example/v1",
+        config_sha256: str = "a" * 64,
+    ) -> ProviderProjection:
+        pricing = ModelPricing(
+            model_id="gpt-5.6-sol",
+            input_usd_per_million=Decimal("5"),
+            cached_input_usd_per_million=Decimal("0.5"),
+            output_usd_per_million=Decimal("30"),
+            long_context_threshold_tokens=272_000,
+            long_context_input_multiplier=Decimal("2"),
+            long_context_output_multiplier=Decimal("1.5"),
+            cache_write_input_multiplier=Decimal("1.25"),
+            price_snapshot_date="2026-08-11",
+            price_source_url="https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+        )
+        return ProviderProjection(
+            provider_id="test",
+            display_name="Test provider",
+            api="responses",
+            base_url=base_url,
+            api_key_env="TEST_API_KEY",
+            main_model=pricing.model_id,
+            main_effort="medium",
+            guardian_model=pricing.model_id,
+            guardian_effort="low",
+            main_pricing=pricing,
+            guardian_pricing=pricing,
+            max_attempts=5,
+            retry_backoff_seconds=1.0,
+            unbilled_retry_statuses=(429, 500, 502, 503, 504),
+            profile_sha256="d" * 64,
+            config_sha256=config_sha256,
+        )
 
     def _manifest(self, side: Side) -> BinaryManifest:
         bundle = self.identity.bundles[side]
@@ -79,46 +126,7 @@ class PairIdentityTests(unittest.TestCase):
             task_image_digest=fair["task_image_digest"],
             binary=self._manifest(side),
             terminal_bench_version=fair["terminal_bench_version"],
-            provider=ProviderProjection(
-                provider_id=fair["provider_id"],
-                display_name="Test provider",
-                api=fair["provider_api"],
-                base_url=base_url,
-                api_key_env=fair["provider_api_key_env"],
-                main_model=fair["main_model"],
-                main_effort="medium",
-                guardian_model=fair["guardian_model"],
-                guardian_effort=fair["guardian_effort"],
-                main_pricing=ModelPricing(
-                    model_id=fair["main_model"],
-                    input_usd_per_million=Decimal("5"),
-                    cached_input_usd_per_million=Decimal("0.5"),
-                    output_usd_per_million=Decimal("30"),
-                    long_context_threshold_tokens=272_000,
-                    long_context_input_multiplier=Decimal("2"),
-                    long_context_output_multiplier=Decimal("1.5"),
-                    cache_write_input_multiplier=Decimal("1.25"),
-                    price_snapshot_date="2026-08-10",
-                    price_source_url="https://developers.openai.com/api/docs/models/compare",
-                ),
-                guardian_pricing=ModelPricing(
-                    model_id=fair["guardian_model"],
-                    input_usd_per_million=Decimal("0.2"),
-                    cached_input_usd_per_million=Decimal("0.02"),
-                    output_usd_per_million=Decimal("1.2"),
-                    long_context_threshold_tokens=272_000,
-                    long_context_input_multiplier=Decimal("2"),
-                    long_context_output_multiplier=Decimal("1.5"),
-                    cache_write_input_multiplier=Decimal("1.25"),
-                    price_snapshot_date="2026-08-10",
-                    price_source_url="https://developers.openai.com/api/docs/models/compare",
-                ),
-                max_attempts=5,
-                retry_backoff_seconds=1.0,
-                unbilled_retry_statuses=(429, 500, 502, 503, 504),
-                profile_sha256="d" * 64,
-                config_sha256=config_sha256,
-            ),
+            provider=self._provider(base_url=base_url, config_sha256=config_sha256),
             timeout_seconds=fair["timeout_seconds"],
             max_retries=fair["max_retries"],
             budget_usd=fair["budget_usd"],
@@ -128,19 +136,12 @@ class PairIdentityTests(unittest.TestCase):
         slot = self.identity.slot_for(side)
         fair = self.identity.fairness
         config = {
+            **self.identity.require_selected_profile().to_dict(),
             "pair_id": self.identity.pair_id,
             "pair_lock_sha256": self.identity.lock_sha256,
             "pair_slot": slot.slot,
             "pair_round": slot.round,
             "eval_harness_commit": self.HARNESS_COMMIT,
-            "main_model": fair["main_model"],
-            "main_effort": "medium",
-            "guardian_model": fair["guardian_model"],
-            "guardian_effort": fair["guardian_effort"],
-            "provider": fair["provider_id"],
-            "provider_api": fair["provider_api"],
-            "provider_profile_sha256": "d" * 64,
-            "provider_endpoint_sha256": "e" * 64,
             "approvals_reviewer": fair["approvals_reviewer"],
             "approval_policy": fair["approval_policy"],
             "sandbox_mode": fair["sandbox_mode"],
@@ -196,29 +197,71 @@ class PairIdentityTests(unittest.TestCase):
         }
 
     def test_tracked_lock_freezes_one_paid_round_per_side(self) -> None:
-        self.assertNotIn("no_api", self.identity.modes)
-        profile = self.identity.validate_no_api_seccomp(project_root=EVAL_ROOT.parent)
+        identity = self.tracked_identity
+        self.assertNotIn("no_api", identity.modes)
+        profile = identity.validate_no_api_seccomp(project_root=EVAL_ROOT.parent)
         self.assertEqual(
             hashlib.sha256(profile.read_bytes()).hexdigest(),
-            self.identity.no_api_seccomp.source_sha256,
+            identity.no_api_seccomp.source_sha256,
         )
-        paid = self.identity.mode("paid")
-        self.assertEqual(self.identity.pair_id, "p1-fix-git-pair-v8")
-        self.assertEqual(paid.batch_id, "p1-fix-git-b3-m1-v3")
+        paid = identity.mode("paid")
+        self.assertEqual(identity.pair_id, "p1-fix-git-pair-v9")
+        self.assertEqual(paid.batch_id, "p1-fix-git-b4-m1-v1")
         self.assertEqual(
-            [slot.paid_run_id for slot in self.identity.topology],
+            [slot.paid_run_id for slot in identity.topology],
             [
-                "20260811-090000000-tb-rondo-r1",
-                "20260811-090000001-tb-codex-r1",
+                "20260811-120000000-tb-rondo-r1",
+                "20260811-120000001-tb-codex-r1",
             ],
         )
-        self.assertNotIn("provider_base_url", self.identity.fairness)
-        self.assertEqual(self.identity.fairness["max_retries"], 0)
-        self.assertEqual(self.identity.fairness["budget_usd"], 5.0)
+        selected = identity.require_selected_profile().to_dict()
+        self.assertNotIn("provider_base_url", selected)
+        self.assertNotIn("provider_api_key_env", selected)
+        self.assertEqual(selected["requested_guardian_model"], "gpt-5.6-sol")
+        self.assertEqual(identity.fairness["max_retries"], 0)
+        self.assertEqual(identity.fairness["budget_usd"], 5.0)
+        self.assertEqual(identity.paid_budget.pair_usd, 10.0)
+        identity.validate_frozen_model_catalog(
+            source_commit=selected["frozen_codex_model_catalog_source_commit"],
+            sha256=selected["frozen_codex_model_catalog_sha256"],
+            main_model=selected["effective_main_model"],
+            guardian_model=selected["effective_guardian_model"],
+        )
+        with self.assertRaisesRegex(PairIdentityError, "catalog drifted"):
+            identity.validate_frozen_model_catalog(
+                source_commit=selected["frozen_codex_model_catalog_source_commit"],
+                sha256="0" * 64,
+                main_model=selected["effective_main_model"],
+                guardian_model=selected["effective_guardian_model"],
+            )
         validate_harbor_installation(
-            self.identity,
+            identity,
             executable=HARBOR_EXECUTABLE,
         )
+
+    def test_legacy_v8_identity_is_explicit_and_read_only(self) -> None:
+        legacy = load_legacy_pair_identity()
+        self.assertEqual(legacy.pair_id, "p1-fix-git-pair-v8")
+        self.assertNotEqual(legacy.pair_id, self.tracked_identity.pair_id)
+        self.assertNotEqual(
+            legacy.mode("paid").batch_id,
+            self.tracked_identity.mode("paid").batch_id,
+        )
+        self.assertTrue(
+            {slot.paid_run_id for slot in legacy.topology}.isdisjoint(
+                slot.paid_run_id for slot in self.tracked_identity.topology
+            )
+        )
+        with self.assertRaisesRegex(PairIdentityError, "schema v2"):
+            load_pair_identity(pair_module.LEGACY_PAIR_LOCK_PATH)
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            PairIdentityError, "read-only"
+        ):
+            PairSequenceLedger(
+                Path(directory) / "legacy.json",
+                identity=legacy,
+                mode="paid",
+            )
 
     def test_shared_fair_pair_gate_rejects_runtime_drift(self) -> None:
         self.identity.validate_spec(self._spec(Side.CODEX), mode="no_api")
@@ -229,6 +272,40 @@ class PairIdentityTests(unittest.TestCase):
         drifted = replace(self._spec(Side.RONDO), timeout_seconds=900)
         with self.assertRaisesRegex(PairIdentityError, "fairness"):
             self.identity.validate_spec(drifted, mode="no_api")
+
+    def test_sequence_binds_profile_at_slot_one_and_rejects_slot_two_drift(self) -> None:
+        identity = self._paid_identity()
+        rondo_record = self._record(Side.RONDO, "2026-08-11T01:00:00Z")
+        drifted_provider = self._provider(base_url="https://drift.example/v1")
+        with tempfile.TemporaryDirectory() as directory:
+            ledger_path = Path(directory) / "paid.json"
+            with PairSequenceLedger(
+                ledger_path, identity=identity, mode="paid"
+            ) as sequence:
+                sequence.claim(
+                    side=Side.RONDO,
+                    run_id="tb-rondo-run",
+                    eval_harness_commit=self.HARNESS_COMMIT,
+                    provider=self.provider,
+                )
+                sequence.finish(
+                    run_id="tb-rondo-run",
+                    completed=True,
+                    eval_harness_commit=self.HARNESS_COMMIT,
+                    publication_sha256=terminal_record_sha256(rondo_record),
+                    container_metrics=self._container_metrics(Side.RONDO),
+                    provider=self.provider,
+                )
+                with self.assertRaisesRegex(PairIdentityError, "drifted"):
+                    sequence.claim(
+                        side=Side.CODEX,
+                        run_id="tb-codex-run",
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                        provider=drifted_provider,
+                    )
+                snapshot = sequence.snapshot()
+            self.assertEqual(snapshot["selected_profile_sha256"], "d" * 64)
+            self.assertEqual(len(snapshot["runs"]), 1)
 
     @unittest.skipUnless(hasattr(os, "fork"), "requires POSIX process death injection")
     def test_paid_publication_reconciles_after_process_restart(self) -> None:
@@ -247,11 +324,13 @@ class PairIdentityTests(unittest.TestCase):
                         side=Side.RONDO,
                         run_id=record["run_id"],
                         eval_harness_commit=self.HARNESS_COMMIT,
+                        provider=self.provider,
                     )
                     sequence.stage_paid_publication(
                         run_id=record["run_id"],
                         eval_harness_commit=self.HARNESS_COMMIT,
                         container_metrics=self._container_metrics(Side.RONDO),
+                        provider=self.provider,
                     )
                 with index_path.open("w", encoding="utf-8") as handle:
                     handle.write(
@@ -270,6 +349,7 @@ class PairIdentityTests(unittest.TestCase):
                     run_id=record["run_id"],
                     eval_harness_commit=self.HARNESS_COMMIT,
                     index_path=index_path,
+                    provider=self.provider,
                 )
             state = json.loads(ledger_path.read_text(encoding="utf-8"))
             self.assertEqual(state["runs"][0]["status"], "completed")
@@ -291,6 +371,7 @@ class PairIdentityTests(unittest.TestCase):
                         side=side,
                         run_id=record["run_id"],
                         eval_harness_commit=self.HARNESS_COMMIT,
+                        provider=self.provider,
                     )
                     sequence.finish(
                         run_id=record["run_id"],
@@ -298,6 +379,7 @@ class PairIdentityTests(unittest.TestCase):
                         eval_harness_commit=self.HARNESS_COMMIT,
                         publication_sha256=terminal_record_sha256(record),
                         container_metrics=self._container_metrics(side),
+                        provider=self.provider,
                     )
             result = assess_m1(
                 records, paid_identity, pair_ledger_path=ledger_path
@@ -312,14 +394,15 @@ class PairIdentityTests(unittest.TestCase):
                 provider_drift, paid_identity, pair_ledger_path=ledger_path
             )
             self.assertEqual(drifted["m1"], "failed")
-            self.assertIn("pair_provider_endpoint_mismatch", drifted["reasons"])
+            self.assertIn("pair_selected_profile_mismatch", drifted["reasons"])
+            self.assertIn("pair_selected_profile_lock_mismatch", drifted["reasons"])
 
             effort_drift = json.loads(json.dumps(records))
             effort_drift[1]["config"]["main_effort"] = "high"
             effort_result = assess_m1(
                 effort_drift, paid_identity, pair_ledger_path=ledger_path
             )
-            self.assertIn("pair_main_effort_mismatch", effort_result["reasons"])
+            self.assertIn("pair_selected_profile_mismatch", effort_result["reasons"])
 
             incomplete_approval = json.loads(json.dumps(records))
             incomplete_approval[1]["summary"]["api_request_roles"] = {
@@ -333,39 +416,6 @@ class PairIdentityTests(unittest.TestCase):
             self.assertIn(
                 "codex_guardian_approval_incomplete", approval_result["reasons"]
             )
-
-            hashed_records = json.loads(json.dumps(records))
-            for record in hashed_records:
-                record["config"]["provider_profile_sha256"] = "d" * 64
-                record["config"]["provider_endpoint_sha256"] = "e" * 64
-            hashed_ledger_path = Path(directory) / "paid-hashed.json"
-            with PairSequenceLedger(
-                hashed_ledger_path, identity=paid_identity, mode="paid"
-            ) as hashed_sequence:
-                for side, record in zip(
-                    (Side.RONDO, Side.CODEX), hashed_records, strict=True
-                ):
-                    hashed_sequence.claim(
-                        side=side,
-                        run_id=record["run_id"],
-                        eval_harness_commit=self.HARNESS_COMMIT,
-                    )
-                    hashed_sequence.finish(
-                        run_id=record["run_id"],
-                        completed=True,
-                        eval_harness_commit=self.HARNESS_COMMIT,
-                        publication_sha256=terminal_record_sha256(record),
-                        container_metrics=self._container_metrics(side),
-                    )
-            hashed = assess_m1(
-                hashed_records, paid_identity, pair_ledger_path=hashed_ledger_path
-            )
-            self.assertEqual(hashed["m1"], "passed")
-            hashed_records[1]["config"]["provider_endpoint_sha256"] = "f" * 64
-            hashed_drift = assess_m1(
-                hashed_records, paid_identity, pair_ledger_path=hashed_ledger_path
-            )
-            self.assertIn("pair_provider_endpoint_mismatch", hashed_drift["reasons"])
 
             split = json.loads(ledger_path.read_text(encoding="utf-8"))
             split["runs"][1]["status"] = "publishing"
