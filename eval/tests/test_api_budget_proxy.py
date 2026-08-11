@@ -278,7 +278,9 @@ class ApiBudgetProxyTests(unittest.TestCase):
         extra_headers: dict[str, str] | None = None,
         path: str = "/responses",
         authenticate: bool = True,
+        proxy: LoopbackResponsesProxy | None = None,
     ) -> tuple[int, bytes, object]:
+        active_proxy = proxy or self.proxy
         encoded = json.dumps(body).encode()
         headers = {
             "Content-Type": "application/json",
@@ -287,13 +289,13 @@ class ApiBudgetProxyTests(unittest.TestCase):
             "originator": "codex_cli_rs",
         }
         if authenticate:
-            headers["Authorization"] = f"Bearer {self.proxy.downstream_api_key}"
+            headers["Authorization"] = f"Bearer {active_proxy.downstream_api_key}"
         if role is not None:
             headers["X-RONDO-Eval-Role"] = role
         if extra_headers:
             headers.update(extra_headers)
         request = Request(
-            self.proxy.base_url + path,
+            active_proxy.base_url + path,
             data=encoded,
             headers=headers,
             method="POST",
@@ -344,6 +346,49 @@ class ApiBudgetProxyTests(unittest.TestCase):
                 timeout_seconds=900.0,
                 _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
             )
+
+    def test_short_probe_can_reserve_one_dollar_per_request(self) -> None:
+        short_proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="short-probe",
+            metadata_path=self.root / "short-probe.json",
+            **self._profile_kwargs(),
+            request_reservation_usd="1",
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+        self.upstream.mode = "disconnect"
+        try:
+            status, _body, _headers = self._post(
+                self._body(),
+                request_id="short-request",
+                proxy=short_proxy,
+            )
+        finally:
+            short_proxy.close()
+        self.assertEqual(status, 502)
+        request = self.ledger.snapshot()["runs"]["short-probe"]["requests"][
+            "short-request"
+        ]
+        self.assertEqual(request["reserved_usd"], "1.000000")
+        self.assertEqual(request["charged_usd"], "1.000000")
+
+    def test_invalid_request_reservations_are_rejected(self) -> None:
+        for number, reservation in enumerate(("0", "5.000001", "nan", True)):
+            with self.subTest(reservation=reservation), self.assertRaisesRegex(
+                ApiBudgetProxyError, "request reservation"
+            ):
+                LoopbackResponsesProxy(
+                    upstream_base_url="https://provider.example/v1",
+                    api_key=self.secret,
+                    ledger=self.ledger,
+                    run_id=f"invalid-reservation-{number}",
+                    metadata_path=self.root / f"invalid-reservation-{number}.json",
+                    **self._profile_kwargs(),
+                    request_reservation_usd=reservation,
+                    _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+                )
 
     def test_invalid_compatible_base_urls_are_rejected_before_registration(self) -> None:
         for number, base_url in enumerate(
@@ -428,7 +473,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(
             self.upstream.requests[0]["authorization"], f"Bearer {self.secret}"
         )
-        self.assertEqual(self.upstream.requests[0]["role"], "main")
+        self.assertIsNone(self.upstream.requests[0]["role"])
         self.assertEqual(
             self.upstream.requests[0]["user_agent"],
             "codex_cli_rs/0.147.0 (proxy-test)",
@@ -665,7 +710,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(observation["declared_role"], "main")
         self.assertEqual(observation["inferred_role"], "main")
         self.assertTrue(observation["contract_match"])
-        self.assertEqual(self.upstream.requests[0]["role"], "main")
+        self.assertIsNone(self.upstream.requests[0]["role"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
 
     def test_missing_role_header_projects_declared_guardian_from_exact_schema(self) -> None:
@@ -680,7 +725,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(observation["declared_role"], "guardian")
         self.assertEqual(observation["inferred_role"], "guardian")
         self.assertTrue(observation["contract_match"])
-        self.assertEqual(self.upstream.requests[0]["role"], "guardian")
+        self.assertIsNone(self.upstream.requests[0]["role"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
 
     def test_configured_non_low_guardian_effort_is_enforced(self) -> None:
@@ -814,7 +859,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             request_id="guardian-retry",
         )
         self.assertEqual(status, 200)
-        self.assertEqual([item["role"] for item in self.upstream.requests], ["guardian"] * 2)
+        self.assertEqual([item["role"] for item in self.upstream.requests], [None, None])
         request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
             "guardian-retry"
         ]

@@ -276,3 +276,18 @@ standard/Lite 形态均补回归。
 - `just eval-lock` 解析 85 packages；纯/fake/loopback 完整 eval 293/293 通过。没有运行 Docker、Cargo、B3、Codex
   paid slot 或 M1。旧 v8 保持 failed/blocked；下一阶段由 Plan 014 新建 identity，并先解决 charged Guardian
   parse retry 与 requested/effective 双侧公平门禁。
+
+### 2026-08-11 配置化 Provider 的真实 CLI 诊断
+
+- synthetic probe 已与真实 Codex/RONDO 请求对齐：`store=false`、Guardian `codex_output_schema`/
+  `strict=false`；项目私有 role header 只在 loopback proxy 内校验，不再转发给上游。
+- 新增去敏、有界 CLI 诊断入口。真实证据确认冻结 Codex 与 RONDO 的 Luna main/Guardian 均可完成；仅运行
+  RONDO 的 Sol main + Sol/low Guardian 也在 4 次重试后完成 `main → guardian → main`、命令和最终消息闭环。
+- 同批早期仍观察到 Terra 403、Sol 429、Luna 503 与缺 usage；一次成功不作为 provider 稳定或 B3/M1 通过证据。
+  三笔独立授权的本地保守借记合计 `790.856957` USD，分别未超过 300/300/600 USD；实际账单未知。
+- 冻结 Codex 通过与 bundle source commit 一致的最小 `model_catalog_json`，把 Sol 条目的
+  `auto_review_model_override` 设为 Sol；RONDO 使用自身 `[auto_review]`，无需修改冻结源码。随后 3 轮双端
+  Sol/Sol 零重试短测连续完成，24/24 个 upstream request 一次成功且 usage valid，两端审批均闭合为
+  `main → guardian → main`；本地价卡估算合计 `1.234473` USD，`actual_usd=null`。
+- 短测按每个 upstream request 预留 1 USD，正式/大请求继续按 5 USD；定向本地回环验收 62/62 通过，独立
+  ledger 5/5 通过。没有 Docker、Cargo、paid pair、M1、合并或推送。

@@ -14,6 +14,7 @@ EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.api_budget_proxy import (  # noqa: E402
+    GUARDIAN_OUTPUT_SCHEMA,
     PersistentBudgetLedger,
     _UrllibTransport,
 )
@@ -118,15 +119,24 @@ class _Provider:
             def do_POST(self) -> None:  # noqa: N802
                 length = int(self.headers["Content-Length"])
                 body = json.loads(self.rfile.read(length))
+                text = body.get("text")
+                output_format = text.get("format") if isinstance(text, dict) else None
+                role = (
+                    "guardian"
+                    if isinstance(output_format, dict)
+                    and output_format.get("schema") == GUARDIAN_OUTPUT_SCHEMA
+                    else "main"
+                )
                 owner.requests.append({
                     "method": "POST",
                     "authorization": self.headers.get("Authorization"),
-                    "role": self.headers.get("X-RONDO-Eval-Role"),
+                    "role": role,
+                    "eval_role_header": self.headers.get("X-RONDO-Eval-Role"),
                     "user_agent": self.headers.get("User-Agent"),
                     "originator": self.headers.get("originator"),
                     "body": body,
                 })
-                if owner.guardian_failure and self.headers.get("X-RONDO-Eval-Role") == "guardian":
+                if owner.guardian_failure and role == "guardian":
                     payload = b'{"error":{"code":"temporary_unavailable"}}'
                     self.send_response(503)
                     self.send_header("Content-Type", "application/json")
@@ -205,6 +215,7 @@ class ProviderProbeTests(unittest.TestCase):
         )
         self.assertEqual(receipt["logical_request_count"], 2)
         self.assertEqual(receipt["upstream_attempt_count"], 2)
+        self.assertEqual(receipt["request_reservation_usd"], "1")
         self.assertEqual(receipt["reserved_usd"], "0.000000")
         self.assertEqual([item["terminal"] for item in receipt["responses"]], [True, True])
         self.assertEqual([item["role"] for item in receipt["responses"]], ["main", "guardian"])
@@ -217,16 +228,22 @@ class ProviderProbeTests(unittest.TestCase):
         ))
         for index, item in enumerate(self.provider.requests):
             self.assertEqual(item["role"], ("main", "guardian")[index])
+            self.assertIsNone(item["eval_role_header"])
             self.assertEqual(item["user_agent"], PROBE_USER_AGENT)
             self.assertEqual(item["originator"], "codex_cli_rs")
             body = item["body"]
             self.assertEqual(body["model"], ("gpt-test-main", "gpt-test-guardian")[index])
             self.assertEqual(body["max_output_tokens"], 64)
             self.assertEqual(body["reasoning"], {"effort": "low"})
+            self.assertIs(body["store"], False)
         self.assertNotIn("text", self.provider.requests[0]["body"])
         self.assertEqual(
             self.provider.requests[1]["body"]["text"]["format"]["name"],
-            "guardian_decision",
+            "codex_output_schema",
+        )
+        self.assertIs(
+            self.provider.requests[1]["body"]["text"]["format"]["strict"],
+            False,
         )
         for path in (self.root / "probe").iterdir():
             if path.is_file():

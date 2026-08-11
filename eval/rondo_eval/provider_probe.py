@@ -18,6 +18,7 @@ from .api_budget_proxy import (
     ApiBudgetProxyError,
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
+    SHORT_REQUEST_RESERVATION_USD,
     _NoRedirect,
     _UrllibTransport,
     _atomic_private_json,
@@ -136,6 +137,7 @@ def run_provider_probes(
         "main_model": provider.main_model,
         "guardian_model": provider.guardian_model,
         "guardian_effort": provider.guardian_effort,
+        "request_reservation_usd": format(SHORT_REQUEST_RESERVATION_USD, "f"),
         "total_cap_usd": format(PROBE_TOTAL_CAP_USD, "f"),
     }
     _atomic_private_json(output_root / "profile.json", profile_summary)
@@ -164,6 +166,7 @@ def run_provider_probes(
                 max_attempts=provider.max_attempts,
                 retry_backoff_seconds=provider.retry_backoff_seconds,
                 unbilled_retry_statuses=provider.unbilled_retry_statuses,
+                request_reservation_usd=SHORT_REQUEST_RESERVATION_USD,
                 timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
                 _transport=_transport,
             ) as proxy:
@@ -337,13 +340,19 @@ def _run_responses_probe(
         "reasoning": {"effort": guardian_effort if role == "guardian" else "low"},
         "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
         "stream": False,
+        # Frozen Codex/RONDO send store=false for non-Azure Responses
+        # providers.  Keep the synthetic probe on the same privacy contract.
+        "store": False,
     }
     if role == "guardian":
         request_value["text"] = {
             "format": {
                 "type": "json_schema",
-                "name": "guardian_decision",
-                "strict": True,
+                "name": "codex_output_schema",
+                # Guardian intentionally leaves its optional diagnostic fields
+                # optional.  strict=true would require every property to be in
+                # `required` and is not the real Codex request contract.
+                "strict": False,
                 "schema": GUARDIAN_OUTPUT_SCHEMA,
             }
         }

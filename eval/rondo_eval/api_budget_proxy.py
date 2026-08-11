@@ -179,6 +179,7 @@ def price_usage(usage: Usage, *, pricing: ModelPricing) -> Decimal:
 # The reservation is independent of the selected model price.  A profile may
 # switch models without weakening the fail-closed per-run authorization cap.
 MAX_REQUEST_RESERVATION_USD = RUN_CAP_USD.quantize(_MONEY_QUANTUM)
+SHORT_REQUEST_RESERVATION_USD = Decimal("1")
 
 # This transport budget is deliberately independent from the 900/1800 second
 # Harbor task deadline. Attempts, backoff, and body reads consume one monotonic
@@ -691,6 +692,7 @@ class LoopbackResponsesProxy:
         max_attempts: int,
         retry_backoff_seconds: float,
         unbilled_retry_statuses: tuple[int, ...],
+        request_reservation_usd: Decimal | str | None = None,
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         _transport: _UrllibTransport | None = None,
         _monotonic: Any = time.monotonic,
@@ -730,6 +732,16 @@ class LoopbackResponsesProxy:
             or not 0 <= retry_backoff_seconds <= 30
         ):
             raise ApiBudgetProxyError("proxy retry backoff is invalid")
+        request_reservation: Decimal | None = None
+        if request_reservation_usd is not None:
+            if isinstance(request_reservation_usd, bool):
+                raise ApiBudgetProxyError("proxy request reservation is invalid")
+            try:
+                request_reservation = _money(request_reservation_usd)
+            except (ArithmeticError, TypeError, ValueError) as exc:
+                raise ApiBudgetProxyError("proxy request reservation is invalid") from exc
+            if request_reservation <= 0 or request_reservation > MAX_REQUEST_RESERVATION_USD:
+                raise ApiBudgetProxyError("proxy request reservation is invalid")
         if (
             not isinstance(unbilled_retry_statuses, tuple)
             or unbilled_retry_statuses != tuple(sorted(unbilled_retry_statuses))
@@ -759,6 +771,7 @@ class LoopbackResponsesProxy:
         self._max_attempts = max_attempts
         self._retry_backoff_seconds = float(retry_backoff_seconds)
         self._unbilled_retry_statuses = frozenset(unbilled_retry_statuses)
+        self._request_reservation = request_reservation
         self._metadata = RedactedMetadataStore(
             metadata_path,
             secrets_to_exclude=(api_key, self._downstream_api_key),
@@ -918,7 +931,11 @@ class LoopbackResponsesProxy:
                 declared_role = request_metadata["role"]
                 request_metadata["role_provenance"] = "declared"
                 request_metadata["declared_role"] = declared_role
-            self._ledger.reserve(self._run_id, request_id)
+            self._ledger.reserve(
+                self._run_id,
+                request_id,
+                amount_usd=self._request_reservation,
+            )
         except BudgetStopped:
             self._reject(handler, 429, "budget_stopped")
             return
@@ -931,7 +948,6 @@ class LoopbackResponsesProxy:
             "Content-Type": "application/json",
             "Accept": handler.headers.get("Accept", "application/json"),
             "User-Agent": user_agent,
-            "X-RONDO-Eval-Role": declared_role,
         }
         if originator is not None:
             headers["originator"] = originator

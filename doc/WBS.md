@@ -43,11 +43,14 @@
 - Plan 013 已把 paid eval 的 provider、base URL、main/Guardian model、reasoning effort、官方价格快照和
   未计费 attempt 合同统一移入 ignored `rondo.local.toml` profile。proxy 对每个 main/Guardian downstream
   请求最多执行 5 个 operator-confirmed-unbilled upstream attempts，共用一次 reservation 与 90 秒 transport
-  deadline；timeout、断连或无法完整分类的错误仍不重试并保守停止。真实 v2 探针中 Sol main 首次
-  HTTP 200、usage valid、本地估算 `$0.022105`；随后 Sol Guardian HTTP 502 无法明确分类，按合同只发 1 次并
-  保守结算剩余 `$4.977895`。另一个 v1 在开发沙箱中得到 `upstream_status=0` 并本地保守记 `$5.000000`；
-  DNS 阻断来自执行环境观测，ledger 本身只证明没有 HTTP status/usage，不能作为“上游未收到字节”的证明。
-  供应商实际账单未查询；B3/M1 仍未运行，下一阶段见 Plan 014。
+  deadline；timeout、断连或无法完整分类的错误仍不重试并保守停止。后续真实 CLI 诊断修正了 synthetic
+  Guardian 探针与实际请求的偏差：format 使用 `codex_output_schema` + `strict=false`，非 Azure Responses 请求带
+  `store=false`；冻结 API-key Guardian 对 Luna/Sol/Terra 均优先使用 `low`，不能沿用主模型的 `medium`。
+  冻结 Codex 与 RONDO 均已真实跑通 Luna main/Guardian。冻结 Codex 随后用与 bundle source commit 一致的
+  最小 `model_catalog_json` 将 `auto_review_model_override` 设为 Sol，和 RONDO 的显式 `[auto_review]` 一起完成
+  3 轮双端 Sol/Sol 零重试短测：24/24 个 upstream request 一次成功、usage valid，两端审批链均为
+  `main → guardian → main`。早期同一路径出现过 403/429/503 与 200 缺 usage，因此该结论只说明当前短窗口
+  Sol/Sol 稳定性良好，不替代 B3/M1。
 - Terminal-Bench B1 固定 Harbor `0.20.0`、`uv.lock`、TB 2.1 commit、`fix-git` task/image digest 和两侧
   runtime bundle。Harbor 启动前只核对版本、console/interpreter 与三个关键模块，不再扫描数千个依赖文件。
   B2 由唯一入口在同一进程中严格执行 RONDO→Codex，首侧失败立即停止；成功后只替换一个
@@ -64,8 +67,8 @@
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
 - **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 013 的配置化 provider/model/rate 与
-  未计费 retry 设施已完成，Sol main 可用，但当前中转的 Sol Guardian 返回无法明确分类的 HTTP 502；
-  B3/M1 未通过。** Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
+  未计费 retry 设施已完成；双端 Sol/Sol 已连续 3 轮零重试通过，Plan 014 开始离线落地新 pair/公平与付费重放
+  门禁，B3/M1 尚未运行。** Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
   上游响应或 usage，ledger 保留 0.755400 USD reservation，实际账单未查询。v6 已 `failed/blocked`，
@@ -73,11 +76,11 @@
   未结算 reservation，settled local spend 为 0，`actual_usd=null`；任务以 `AgentTimeoutError` 失败，Codex/M1
   未运行。v7 shell 清除了 ambient HTTP(S)/ALL proxy，仅保留 loopback `NO_PROXY`；tracked pair 不冻结供应商域名。
   Plan 012 所有真实探针与 v8 ledger 都已 settled、没有悬挂 reservation；v8 的 5 个 Sol main 请求成功，Guardian
-  Luna 请求 HTTP 503/usage invalid，单 run 本地预算按合同完整结算为 `$5.000000`。本阶段本地历史保守计价累计
-  `$23.070095`（其中 Plan 013 v1 的 `$5.000000` 是沙箱 DNS 阻断期间形成的本地保守 reservation；ledger
-  不能单独证明未外发）；最新 Terra
-  非流探针在当前 provider/credential/UA 组合下返回 HTTP 403。本地 active profile 为 relay + Sol main + Sol
-  Guardian。实际中转账单未查询且 `actual_usd=null`；Codex、M1 与自然完成的 Guardian `E_final` 均不存在。
+  Luna 请求 HTTP 503/usage invalid，单 run 本地预算按合同完整结算为 `$5.000000`。后续模型诊断分别闭合
+  Luna/Luna 与 Sol/Sol，并最终以冻结 Codex/RONDO 各 Sol main + Sol/low Guardian 连续跑完 3 轮；24 个请求
+  零重试，本地价卡估算合计 `$1.234473`。短测以后按每 upstream request 预留 1 USD，正式/大请求继续按
+  5 USD。active profile 当前为 relay + Sol main + Sol Guardian/low。实际中转账单未查询且 `actual_usd=null`；
+  这些诊断不是 paid pair，B3、M1 与可用于训练的自然完成 Guardian `E_final` 均不存在。
 
 ## 2. 方向与依赖
 
@@ -85,7 +88,7 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；配置化 Sol main 可用，Guardian 502 未闭合，B3/M1 未通过 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；双端 Sol/Sol 三轮零重试短测通过，Plan 014 离线落地中，B3/M1 未运行 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
 | 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
@@ -112,7 +115,7 @@ P0 共享地基 ────────┤                          ├─→ �
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/B2/L1 与配置/重试设施完成；Guardian 未就绪，B3/M1 未通过 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/B2/L1 与配置/重试设施完成；provider 稳定性与 paid pair 合同待闭合，B3/M1 未通过 |
 | P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
@@ -151,7 +154,7 @@ P0 共享地基 ────────┤                          ├─→ �
 
 P0 已完成定向门禁并合入主线；B2 合同见
 `plan/009-p1-b2-lightweight-slimming-and-v5-execplan.md`。配置化 provider 与未计费 retry 见 Plan 013；
-下一次新 paid pair/M1 的待落地合同见 `plan/014-p1-configured-provider-paid-pair-execplan.md`。共享 eval 合同、
+下一次新 paid pair/M1 的落地中合同见 `plan/014-p1-configured-provider-paid-pair-execplan.md`。共享 eval 合同、
 B1 与 L1 保持可用。
 B2 删除 no-API permanent ledger/retirement/summary recovery、一次性 migration 和 Harbor 全依赖闭包，
 保留一个当前冻结输入、一个 supervisor Docker receipt 和一个 RONDO→Codex 串行入口。adapter 仍要求
@@ -162,11 +165,12 @@ B3 的 v6 pair 已运行 RONDO 首槽但因错误固定官方 endpoint 在上游
 再次运行 RONDO 首槽，但仍在没有响应或 usage 时以 `AgentTimeoutError` 失败。两批均没有可用真实 `E_final` 种子，
 Codex 与 M1 均未运行；v7 的结果、未结算 reservation、artifact 与 watchdog 终态已保留。
 Plan 012 已验证 oracle/root verifier 的真实评分链为 `reward=1`，并把 provider transport timeout 和 SSE 终态收束
-修到可结算。Sol real-wire 与 v8 的 5 个 main 请求成功；Luna Guardian 返回 HTTP 503，v8 因而停止在 RONDO slot 1，
-Codex/M1 未运行。最新 Terra 非流探针在当前配置下返回 HTTP 403。所有 Plan 012 ledger 均 settled，本地保守累计
-`$13.070095`，实际账单未知。Plan 013 的动态 profile/price/retry 合同已经落地；最新最小探针证明 Sol main
-可完成，但 Sol Guardian 的 HTTP 502 仍属计费未知并停止，不能据此重试。Plan 014 必须先闭合 frozen Codex
-requested/effective Guardian 公平合同与 charged parse retry 门禁，再创建新 pair 并重新取得付费/Docker 授权。
+修到可结算。Plan 013 的动态 profile/price/retry 合同已经落地；真实 CLI 诊断进一步证明冻结 Codex 与 RONDO
+均可运行 Luna/Luna，并以两端 Sol/Sol 连续 3 轮、24 请求零重试完成当前 profile 稳定性短测。早期 Terra 403、
+Sol 429、Luna 503 仍作为波动边界保留，不能再笼统归因于本地网络。
+这些诊断不是 paid pair，也没有运行 Docker/M1；供应商实际账单仍未知。Plan 014 已开始离线闭合 frozen Codex
+catalog override 公平投影、单审批任务的 charged parse replay 阻断和新 pair identity；正式 canary/pair/Docker
+仍须在离线门禁完成后按该计划范围单独授权。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
 
