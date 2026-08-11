@@ -215,6 +215,11 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   `1786462481` 被 supervisor SIGKILL；一次完整 host sample 串行执行 Docker Desktop、container/image、cgroup、
   network/volume 等探针，却只共享 5 秒绝对预算。采样仍保持单个绝对 deadline 与 fail-closed，只把完整采样预算
   提高到 15 秒；回归覆盖一次合法采样可长于 5 秒调度周期、仍必须短于 15 秒和外层 wall deadline。
+- v18 使用新 schema-v2 v11 lock，pair/batch 为 `p1-fix-git-pair-v18` / `p1-fix-git-b4-m1-v10`，两侧 run 为
+  `20260811-180000000-tb-rondo-r1` / `20260811-180000001-tb-codex-r1`；lock SHA 为
+  `f588c05e5328c5a9030b487d212e0b7d38047c23f6a528aacbe59ab86228f830`。selected profile、Sol/medium main、
+  Sol/low Guardian、catalog 与两侧 runtime bundle 均保持不变；v17 lock 已转为显式只读历史入口。focused
+  132/132、`eval-lock` 85 packages 与完整 eval 344/344 均通过。
 
 ### 阻塞项
 
