@@ -66,11 +66,11 @@
   仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。当前无权重，
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。
-- **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 013 的配置化 provider/model/rate 与
-  未计费 retry 设施已完成。Plan 014 的 v9 identity/profile/M1 离线合同和 4-request canary 硬门禁已完成，完整
-  eval 328/328 通过；fresh frozen-Codex Sol/Sol canary 4/4 请求一次成功。唯一 v9 paid pair 的 RONDO slot 1
-  随后因自然 Guardian 在进入 budget proxy 前得到 HTTP 429 而 `infra_failed/blocked`；Codex 与 M1 未运行，
-  B3/M1 仍未通过。** Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽也均已失败。三次早期诊断均在
+- **当前阶段：P1 的 B1、B2、B3、L1 与 L2 CPU x64 前置已整体完成，M1 已通过。Plan 014 v19 在同一冻结
+  Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
+  reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved 且 S2 绑定 verified。
+  `assess_m1` 返回 passed。下一阶段进入 P2：先完成 B4 分层清单与 B5/B6 轻量设施，再单独估算和授权 B7。**
+  Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
   上游响应或 usage，ledger 保留 0.755400 USD reservation，实际账单未查询。v6 已 `failed/blocked`，
@@ -82,9 +82,9 @@
   Luna/Luna 与 Sol/Sol，并最终以冻结 Codex/RONDO 各 Sol main + Sol/low Guardian 连续跑完 3 轮；24 个请求
   零重试，本地价卡估算合计 `$1.234473`。短测以后按每 upstream request 预留 1 USD，正式/大请求继续按
   5 USD。active profile 当前为 relay + Sol main + Sol Guardian/low。实际中转账单未查询且 `actual_usd=null`；
-  Plan 014 canary 与 v9 RONDO 的本地估算合计 `$0.386904`，全部 reservation 已结算，`actual_usd=null`。v9
-  生成的自然 `E_final` 为 Sol/low 且 schema/source 正确，但 `terminal_status=failed_closed`、无 Guardian usage
-  绑定，不能作为可用 S2 或训练 seed。
+  Plan 014 历史失败 identity 均保持不可复用；最终 v19 canary + 双侧 pair 连同此前保守结算后的本阶段累计
+  本地估算为 `$6.988825 < $280`，全部 reservation 已结算，`actual_usd=null`。v19 的真实 evidence 可作为后续
+  确定性 seed/holdout 切分输入，但不得直接进入训练集。
 
 ## 2. 方向与依赖
 
@@ -92,9 +92,9 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；Plan 014 canary 通过但 v9 RONDO Guardian 失败，待离线修复 transport→proxy 绑定后新 pair/B3/M1 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2/B3 与 M1 完成；进入 B4/B5/B6，B7 另行授权 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
+| 2 | 本地审批模型接入与横评 | L1 与 L2 CPU x64 前置完成；已有真实 E_final，GPU/model-backed、L2a/L3/L4 待 P2 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -119,8 +119,8 @@ P0 共享地基 ────────┤                          ├─→ �
 | 阶段 | 内容 | 并行关系 | 依赖 | 授权门 | 状态 |
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
-| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | B1/B2/L1 与配置/重试设施完成；provider 稳定性与 paid pair 合同待闭合，B3/M1 未通过 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 未开始 |
+| P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 当前阶段：先 B4/B5/B6，B7 单独估算授权 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
@@ -158,29 +158,21 @@ P0 共享地基 ────────┤                          ├─→ �
 
 P0 已完成定向门禁并合入主线；B2 合同见
 `plan/009-p1-b2-lightweight-slimming-and-v5-execplan.md`。配置化 provider 与未计费 retry 见 Plan 013；
-下一次新 paid pair/M1 的落地中合同见 `plan/014-p1-configured-provider-paid-pair-execplan.md`。共享 eval 合同、
+已完成的 paid pair/M1 合同见 `plan/014-p1-configured-provider-paid-pair-execplan.md`。共享 eval 合同、
 B1 与 L1 保持可用。
 B2 删除 no-API permanent ledger/retirement/summary recovery、一次性 migration 和 Harbor 全依赖闭包，
 保留一个当前冻结输入、一个 supervisor Docker receipt 和一个 RONDO→Codex 串行入口。adapter 仍要求
 UID/GID 1000、精确 `/app/personal-site` Git probe、custom seccomp、`cap_drop=ALL`、资源阈值和清理成功；
 marker 只接受成功的结构化 `exec_command` 结果。双侧已在真实 Docker 中以同一 pinned
 image 和同一运行合同完成 no-API 链路，current receipt 与看门狗 summary 保留在项目本地数据目录。
-B3 的 v6 pair 已运行 RONDO 首槽但因错误固定官方 endpoint 在上游响应前超时；Plan 011 v7 使用配置驱动 provider
-再次运行 RONDO 首槽，但仍在没有响应或 usage 时以 `AgentTimeoutError` 失败。两批均没有可用真实 `E_final` 种子，
-Codex 与 M1 均未运行；v7 的结果、未结算 reservation、artifact 与 watchdog 终态已保留。
-Plan 012 已验证 oracle/root verifier 的真实评分链为 `reward=1`，并把 provider transport timeout 和 SSE 终态收束
-修到可结算。Plan 013 的动态 profile/price/retry 合同已经落地；真实 CLI 诊断进一步证明冻结 Codex 与 RONDO
-均可运行 Luna/Luna，并以两端 Sol/Sol 连续 3 轮、24 请求零重试完成当前 profile 稳定性短测。早期 Terra 403、
-Sol 429、Luna 503 仍作为波动边界保留，不能再笼统归因于本地网络。
-这些诊断不是 paid pair，也没有运行 Docker/M1；供应商实际账单仍未知。Plan 014 已完成固定单审批 task 的
-charged parse replay 上游阻断，并将 frozen Codex catalog override 接入 source-bound 正式投影；正式结果现在
-要求精确 `main → guardian → main`，main effort 与 Guardian effort 均由 profile 投影并由 proxy 强制验证，
-success/claimed failure 共用不含本机 provider 字段的 public result，真实 producer→pair ledger→M1 回归通过。
-Plan 014 离线身份与 profile drift 门禁已闭合；fresh frozen-Codex canary 已真实通过。v9 RONDO 的 6 个 main
-请求均成功并结算，但自然 Guardian 在 budget proxy 无请求记录时以 HTTP 429 `session_error` fail-closed；v9
-已永久 blocked，Codex/M1 未运行。下一步先离线修复 Guardian transport→proxy 绑定，再以新 identity 和新授权执行。
-L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
-执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
+B3 使用 Plan 014 v19 的 source-bound Sol/Sol profile 与唯一 identity 完成。RONDO 和 frozen Codex 在同一
+`fix-git` task/image 上分别 `completed`/reward 1，全部 35 个 upstream request 均 attempt 1、usage valid，双侧
+预算 run 未停止且 reservation 为 0。RONDO 的两份 Sol/low Guardian `E_final/meta` 均自然 approved，S2 request/
+evidence 集合绑定 verified；两侧 public result、pair lock、sequence ledger、container metrics 和 profile/endpoint
+hash 经既有 `assess_m1` 聚合为 `m1=passed`、`reasons=[]`。v19 正式费用 `$0.870787`，Plan 014 全阶段累计本地估算
+`$6.988825 < $280`，供应商实际账单未知。历史失败 identity 及其 ledger/result/artifact 保持原终态，不回填。
+L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
+下一步是 B4 分层与 B5/B6 轻量设施，不自动启动 B7 付费跑批。执行细节见 Plan 014 与本批 `agent_log`。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，
@@ -208,8 +200,8 @@ Docker/最多四个 run/总计 20 USD 授权只对该计划有效，不自动扩
 - 探针只放少量关键节点，内存累积、轮末统一输出。跨侧对比必须使用同口径的外部指标；runner-host
   `getrusage` 仍只是设施开销诊断。supervisor 已增加 exact container cgroup v2 CPU 与峰值内存采集，
   paid publication/pair/M1 要求该机器证据；v4 只走到 RONDO 失败路径，Plan 009 已以轻量
-  current receipt 完成双侧 no-API 重验；该证据不代替付费批次。Plan 010 paid v6 已失败并阻断，继续运行需
-  新 pair 与单独 API 授权；v7、v9 已失败并 blocked，不得重试。
+  current receipt 完成双侧 no-API 重验；该证据不代替付费批次。Plan 014 v19 已提供双侧 paid container
+  metrics、durable publication 与 M1 联合通过证据；历史失败 identity 仍不可重试。
   完整探针和细粒度 Guardian 归因仍留给 A4/B5（详见 `doc/WBS/eval-benchmark.md`）。
 - 原始 codex 与 RONDO 的对比测评统一关闭 websocket（provider 侧
   `ModelProviderInfo.supports_websockets = false`，见 `codex-rs/model-provider-info/src/lib.rs`）。

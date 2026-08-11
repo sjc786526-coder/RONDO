@@ -314,3 +314,19 @@ standard/Lite 形态均补回归。
   收口和 slot 2 claim 重验；旧 v8 仅允许显式只读加载，不能新建或 claim ledger。
 - success/failure producer 使用 lock 的同一 public profile，M1 精确核对两侧 result、lock 与 ledger。focused 63/63、
   `just eval-lock` 85 packages、完整 eval 325/325 通过；未运行真实 API、Docker、Cargo、paid pair 或 M1。
+
+### 2026-08-11 Plan 014 B3/M1 真实链路闭环
+
+- 针对历史 paid 终态逐轮完成最小修复：Guardian transport/proxy 身份投影、并发 reservation、任务 Git identity、
+  多个不同审批与同体 charged replay 门禁、E_final secret scanner 误报、Docker 完整 counter round 时限，以及
+  cap-drop-all 容器中 0400 frozen catalog 的 owner 读取。所有旧 identity/result/ledger/artifact 与费用事实保持原样。
+- v19 以唯一 schema-v2 lock 和新 pair/batch/run IDs 冻结 Sol/medium main、Sol/low Guardian、provider profile、
+  endpoint hash、价卡/retry、catalog/bundle identity。fresh exact-wire canary 4/4 请求一次成功后，RONDO 与 frozen
+  Codex 严格串行完成同一 `fix-git` task，分别 17/17 与 18/18 upstream request attempt 1、usage valid；双侧均
+  `completed`/reward 1、run 未停止、reservation 0。
+- RONDO 归档两份自然 Sol/low Guardian `E_final/meta`，均 approved，S2 request/evidence 集合绑定为 verified。
+  durable public result、pair lock、sequence ledger、profile/endpoint 和 container metrics 经生产 `assess_m1` 得到
+  `m1=passed`、`reasons=[]`、`s2=verified`。
+- v19 正式 pair 本地估算 `$0.870787`；Plan 014 全阶段累计 `$6.988825 < $280`，无悬挂 reservation，供应商账单
+  未查询且 `actual_usd=null`。focused 155/155、`just eval-lock` 85 packages、完整 eval 345/345 通过；Docker/watchdog
+  最终 `stop=none`、`cleanup=none`，0 containers/volumes。
