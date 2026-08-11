@@ -878,6 +878,50 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(request["attempt_count"], 2)
         self.assertEqual(request["settlement_kind"], "usage_priced")
 
+    def test_short_canary_logical_request_cap_blocks_before_reserve_and_forward(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="short-canary-run",
+            metadata_path=self.root / "short-canary-metadata.json",
+            **self._profile_kwargs(),
+            max_guardian_logical_requests=1,
+            max_logical_requests=2,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+
+        for request_id in ("canary-main-1", "canary-main-2"):
+            status, _body, _headers = self._post(
+                self._body(),
+                role="main",
+                request_id=request_id,
+            )
+            self.assertEqual(status, 200)
+        upstream_before_limit = len(self.upstream.requests)
+
+        status, body, _headers = self._post(
+            self._body(),
+            role="main",
+            request_id="canary-main-over-limit",
+        )
+
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            json.loads(body)["error"]["code"],
+            "logical_request_limit_exceeded",
+        )
+        self.assertEqual(len(self.upstream.requests), upstream_before_limit)
+        run = self.ledger.snapshot()["runs"]["short-canary-run"]
+        self.assertEqual(set(run["requests"]), {"canary-main-1", "canary-main-2"})
+        self.assertTrue(run["stopped"])
+        self.assertEqual(run["stop_reason"], "logical_request_limit_exceeded")
+        metadata = json.loads(
+            (self.root / "short-canary-metadata.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(metadata["requests"]), 2)
+
     def test_missing_usage_charges_reservation_stops_run_and_prevents_forward(self) -> None:
         self.upstream.mode = "missing_usage"
         status, _body, _headers = self._post(self._body(), request_id="missing-1")
