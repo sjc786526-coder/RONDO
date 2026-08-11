@@ -1319,6 +1319,7 @@ class LoopbackResponsesProxy:
             collector = _SseUsageCollector()
             total = 0
             writable = True
+            pending_event = bytearray()
             try:
                 while True:
                     _enforce_upstream_deadline(
@@ -1337,21 +1338,70 @@ class LoopbackResponsesProxy:
                     if not chunk:
                         collector.finish()
                         usage = collector.usage if collector.completed else None
+                        if collector.terminal_seen:
+                            settlement = self._ledger.settle(
+                                self._run_id,
+                                request_id,
+                                usage,
+                                pricing=pricing,
+                                stop_reason=stop_reason,
+                            )
+                            self._save_observation(
+                                request_id,
+                                request_metadata,
+                                status,
+                                settlement,
+                            )
+                        if pending_event and writable:
+                            try:
+                                handler.wfile.write(pending_event)
+                                handler.wfile.flush()
+                            except (BrokenPipeError, ConnectionResetError):
+                                writable = False
+                        if collector.terminal_seen:
+                            return
                         break
                     total += len(chunk)
                     if total > _MAX_RESPONSE_BYTES:
                         usage = None
                         break
+                    pending_event.extend(chunk)
                     collector.feed(chunk)
-                    if writable:
+                    terminal_seen = collector.terminal_seen
+                    if terminal_seen:
+                        usage = collector.usage if collector.completed else None
+                        # Release the conservative reservation before exposing
+                        # response.completed to Codex.  Guardian review can start
+                        # as soon as the downstream observes this line; writing it
+                        # first creates a race where the still-reserved main request
+                        # makes the Guardian request fail locally with HTTP 429.
+                        settlement = self._ledger.settle(
+                            self._run_id,
+                            request_id,
+                            usage,
+                            pricing=pricing,
+                            stop_reason=stop_reason,
+                        )
+                        self._save_observation(
+                            request_id,
+                            request_metadata,
+                            status,
+                            settlement,
+                        )
+                    # Hold one complete SSE event until it has been classified.
+                    # This is the smallest buffer that prevents a terminal event
+                    # from becoming visible before its reservation is released.
+                    event_complete = chunk in {b"\n", b"\r\n"}
+                    if event_complete and writable:
                         try:
-                            handler.wfile.write(chunk)
+                            handler.wfile.write(pending_event)
                             handler.wfile.flush()
                         except (BrokenPipeError, ConnectionResetError):
                             writable = False
-                    if collector.terminal_seen:
-                        usage = collector.usage if collector.completed else None
-                        break
+                    if event_complete:
+                        pending_event.clear()
+                    if terminal_seen:
+                        return
             except (OSError, URLError, TimeoutError, socket.timeout):
                 usage = None
                 status = 0

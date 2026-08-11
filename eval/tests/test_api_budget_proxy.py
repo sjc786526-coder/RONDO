@@ -652,6 +652,128 @@ class ApiBudgetProxyTests(unittest.TestCase):
             self.upstream.release_sse.set()
             thread.join(timeout=2)
 
+    def test_sse_terminal_is_not_visible_until_reservation_is_settled(self) -> None:
+        self.upstream.mode = "sse"
+        settle_started = threading.Event()
+        release_settle = threading.Event()
+        terminal_visible = threading.Event()
+        original_settle = self.ledger.settle
+
+        def blocking_settle(*args: object, **kwargs: object):
+            settle_started.set()
+            if not release_settle.wait(timeout=2):
+                raise AssertionError("test did not release budget settlement")
+            return original_settle(*args, **kwargs)
+
+        self.ledger.settle = blocking_settle  # type: ignore[method-assign]
+        parsed_host_port = self.proxy.base_url.removeprefix("http://").removesuffix("/v1")
+        host, port_text = parsed_host_port.rsplit(":", 1)
+        connection = HTTPConnection(host, int(port_text), timeout=5)
+        encoded = json.dumps(self._body(stream=True)).encode()
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=encoded,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(encoded)),
+                "Authorization": f"Bearer {self.proxy.downstream_api_key}",
+                "X-RONDO-Eval-Request-Id": "sse-settlement-order",
+                "X-RONDO-Eval-Role": "main",
+                "User-Agent": "codex_cli_rs/0.147.0 (proxy-test)",
+                "originator": "codex_cli_rs",
+            },
+        )
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+
+        terminal_line: list[bytes] = []
+
+        def read_terminal() -> None:
+            terminal_line.append(response.readline())
+            terminal_visible.set()
+
+        reader = threading.Thread(target=read_terminal)
+        reader.start()
+        try:
+            self.assertTrue(settle_started.wait(timeout=2))
+            self.assertFalse(
+                terminal_visible.wait(timeout=0.1),
+                "response.completed became visible before budget settlement",
+            )
+            release_settle.set()
+            self.assertTrue(terminal_visible.wait(timeout=2))
+            self.assertEqual(terminal_line, [b"event: response.completed\n"])
+            self.assertIn(b'"type": "response.completed"', response.readline())
+            request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
+                "sse-settlement-order"
+            ]
+            self.assertEqual(request["status"], "settled")
+            self.assertTrue(request["usage_valid"])
+        finally:
+            release_settle.set()
+            reader.join(timeout=2)
+            connection.close()
+            self.ledger.settle = original_settle  # type: ignore[method-assign]
+
+    def test_settled_main_terminal_allows_immediate_guardian_reservation(self) -> None:
+        self.upstream.modes = ["sse", "json"]
+        original_settle = self.ledger.settle
+
+        def delayed_main_settle(*args: object, **kwargs: object):
+            if len(args) >= 2 and args[1] == "main-before-guardian":
+                # Widen the old write-before-settle race deterministically.
+                threading.Event().wait(timeout=0.2)
+            return original_settle(*args, **kwargs)
+
+        self.ledger.settle = delayed_main_settle  # type: ignore[method-assign]
+        parsed_host_port = self.proxy.base_url.removeprefix("http://").removesuffix("/v1")
+        host, port_text = parsed_host_port.rsplit(":", 1)
+        connection = HTTPConnection(host, int(port_text), timeout=5)
+        encoded = json.dumps(self._body(stream=True)).encode()
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=encoded,
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(len(encoded)),
+                "Authorization": f"Bearer {self.proxy.downstream_api_key}",
+                "X-RONDO-Eval-Request-Id": "main-before-guardian",
+                "X-RONDO-Eval-Role": "main",
+                "User-Agent": "codex_cli_rs/0.147.0 (proxy-test)",
+                "originator": "codex_cli_rs",
+            },
+        )
+        response = connection.getresponse()
+        try:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.readline(), b"event: response.completed\n")
+            self.assertIn(b'"type": "response.completed"', response.readline())
+            self.assertEqual(response.readline(), b"\n")
+            guardian_status, _body, _headers = self._post(
+                self._body(effort="low", guardian=True),
+                role="guardian",
+                request_id="guardian-after-main",
+            )
+            self.assertEqual(guardian_status, 200)
+            snapshot = self.ledger.snapshot()
+            self.assertEqual(snapshot["reserved_usd"], "0.000000")
+            self.assertEqual(
+                list(snapshot["runs"]["benchmark-r1"]["requests"]),
+                ["main-before-guardian", "guardian-after-main"],
+            )
+            observations = json.loads((self.root / "metadata.json").read_text())[
+                "requests"
+            ]
+            self.assertEqual(
+                [observation["role"] for observation in observations],
+                ["main", "guardian"],
+            )
+        finally:
+            connection.close()
+            self.ledger.settle = original_settle  # type: ignore[method-assign]
+
     def test_nonstream_completed_usage_settles_before_upstream_eof(self) -> None:
         self.upstream.mode = "json_hold_open"
         result: list[tuple[int, bytes, object]] = []
