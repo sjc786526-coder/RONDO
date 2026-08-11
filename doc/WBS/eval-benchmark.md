@@ -50,6 +50,11 @@
   网络代理时于 14.3 秒内完成，usage 合法且 ledger settled。v8 固定主 Sol、两侧 Guardian Luna/low；RONDO
   slot 1 的 5 个 Sol main 请求均 HTTP 200/usage valid，但自然触发的 Guardian Luna 请求返回 HTTP 503，故 pair
   `failed/blocked`，Codex slot 2 与 M1 未运行。B3/M1 状态不变，也没有伪造 `E_final` 或 S2。
+  Plan 014 随后冻结 v9 Sol/Sol identity/profile，并以 4-request/4-USD 硬门禁通过 fresh frozen-Codex canary：
+  4/4 请求一次成功、usage valid，本地估算 `$0.225706`。v9 RONDO slot 1 的 6 个 Sol/medium main 请求同样
+  一次成功并结算 `$0.161198`，但自然 Guardian review 在 budget proxy 没有记录到 Guardian 请求时快速得到
+  HTTP 429，`E_final/meta` 为 Sol/low、`failed_closed/session_error`。pair 已 `failed/blocked`，Codex/M1 未运行；
+  该 evidence 未绑定真实 Guardian usage，不计为 S2。下一步必须先离线闭合 Guardian transport→proxy 绑定。
 
 ## E-B 真实 Terminal-Bench 2.1 测评
 

@@ -7,14 +7,24 @@ import importlib.metadata
 import fcntl
 import json
 import os
+import re
 import stat
 import sys
 import tempfile
 from dataclasses import dataclass, replace
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 
-from ..contracts import BinaryManifest, RunOutcome, RunSpec, Side, assert_fair_pair
+from ..contracts import (
+    BinaryManifest,
+    ModelPricing,
+    ProviderProjection,
+    RunOutcome,
+    RunSpec,
+    Side,
+    assert_fair_pair,
+)
 from ..exit_codes import EVIDENCE_ERROR, INFRA_ERROR
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
@@ -31,10 +41,14 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
-P1_PAIR_ID = "p1-fix-git-pair-v8"
+PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v2.json"
+LEGACY_PAIR_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
+)
+P1_PAIR_ID = "p1-fix-git-pair-v9"
+LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
-_PAIR_LOCK_KEYS = {
+_PAIR_LOCK_V1_KEYS = {
     "schema_version",
     "pair_id",
     "modes",
@@ -45,7 +59,9 @@ _PAIR_LOCK_KEYS = {
     "runtime_requirements",
     "bundles",
 }
+_PAIR_LOCK_V2_KEYS = _PAIR_LOCK_V1_KEYS | {"paid_budget", "selected_profile"}
 _PAID_MODE_KEYS = {"enabled", "batch_id", "disabled_reason"}
+_PAID_BUDGET_KEYS = {"per_side_usd", "pair_usd"}
 _SLOT_KEYS = {"slot", "side", "round", "paid_run_id"}
 _BUNDLE_KEYS = {
     "manifest_path",
@@ -59,7 +75,7 @@ _BUNDLE_KEYS = {
     "source_commit",
     "workspace_lock_normalization",
 }
-_FAIRNESS_KEYS = {
+_FAIRNESS_V1_KEYS = {
     "task_id",
     "task_image_digest",
     "terminal_bench_version",
@@ -78,6 +94,44 @@ _FAIRNESS_KEYS = {
     "timeout_seconds",
     "max_retries",
     "budget_usd",
+}
+_FAIRNESS_V2_KEYS = {
+    "task_id",
+    "task_image_digest",
+    "terminal_bench_version",
+    "approvals_reviewer",
+    "approval_policy",
+    "sandbox_mode",
+    "sandbox_network_access",
+    "websocket",
+    "code_mode_host",
+    "timeout_seconds",
+    "max_retries",
+    "budget_usd",
+}
+_PUBLIC_PROVIDER_KEYS = {
+    "provider",
+    "provider_api",
+    "provider_profile_sha256",
+    "provider_endpoint_sha256",
+    "main_model",
+    "main_effort",
+    "guardian_model",
+    "guardian_effort",
+    "requested_main_model",
+    "effective_main_model",
+    "requested_guardian_model",
+    "effective_guardian_model",
+    "main_pricing",
+    "guardian_pricing",
+    "provider_max_attempts",
+    "provider_retry_backoff_seconds",
+    "provider_unbilled_retry_statuses",
+}
+_SELECTED_PROFILE_KEYS = _PUBLIC_PROVIDER_KEYS | {
+    "frozen_codex_model_catalog_source_commit",
+    "frozen_codex_model_catalog_sha256",
+    "max_guardian_logical_requests",
 }
 _HARBOR_KEYS = {
     "package",
@@ -111,6 +165,7 @@ class PairSequenceLedger:
         identity: PairIdentity,
         mode: str,
         persist_hook: Callable[[str], None] | None = None,
+        read_only: bool = False,
     ) -> None:
         if mode != "paid":
             raise PairIdentityError("pair sequence ledger is paid-only")
@@ -123,6 +178,9 @@ class PairSequenceLedger:
         self._handle: Any | None = None
         self._state: dict[str, Any] | None = None
         self._persist_hook = persist_hook or (lambda _point: None)
+        self._read_only = read_only
+        if identity.schema_version != 2 and not read_only:
+            raise PairIdentityError("legacy pair identity is read-only")
 
     def __enter__(self) -> PairSequenceLedger:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -168,13 +226,18 @@ class PairSequenceLedger:
                 raise
             self._state = state
         else:
+            if self._read_only:
+                self.__exit__(None, None, None)
+                raise PairIdentityError("read-only pair sequence ledger is unavailable")
             self._state = {
-                "schema_version": 4,
+                "schema_version": 5,
                 "pair_id": self.identity.pair_id,
                 "pair_lock_sha256": self.identity.lock_sha256,
                 "mode": self.mode_name,
                 "batch_id": self.batch_id,
                 "eval_harness_commit": None,
+                "selected_profile_sha256": None,
+                "selected_endpoint_sha256": None,
                 "next_slot": 1,
                 "blocked": False,
                 "runs": [],
@@ -196,8 +259,16 @@ class PairSequenceLedger:
             finally:
                 handle.close()
 
-    def claim(self, *, side: Side, run_id: str, eval_harness_commit: str) -> PairSlot:
+    def claim(
+        self,
+        *,
+        side: Side,
+        run_id: str,
+        eval_harness_commit: str,
+        provider: ProviderProjection,
+    ) -> PairSlot:
         state = self._require_state()
+        self._require_writable()
         active = [item for item in state["runs"] if item["status"] == "active"]
         if active:
             if len(active) != 1:
@@ -223,6 +294,7 @@ class PairSequenceLedger:
             raise PairIdentityError("paid run id differs from the tracked pair slot")
         if any(item["run_id"] == run_id for item in state["runs"]):
             raise PairIdentityError("pair sequence run id was already claimed")
+        selected = self._bind_or_validate_provider(provider)
         state["runs"].append(
             {
                 "slot": slot.slot,
@@ -231,6 +303,8 @@ class PairSequenceLedger:
                 "run_id": run_id,
                 "status": "active",
                 "eval_harness_commit": eval_harness_commit,
+                "selected_profile_sha256": selected.profile_sha256,
+                "selected_endpoint_sha256": selected.endpoint_sha256,
                 "publication_sha256": None,
                 "container_metrics": None,
             }
@@ -246,8 +320,11 @@ class PairSequenceLedger:
         eval_harness_commit: str,
         publication_sha256: str | None = None,
         container_metrics: Mapping[str, object] | None = None,
+        provider: ProviderProjection,
     ) -> None:
         state = self._require_state()
+        self._require_writable()
+        self._bind_or_validate_provider(provider)
         matches = [item for item in state["runs"] if item["run_id"] == run_id]
         if len(matches) != 1 or matches[0]["status"] not in {"active", "publishing"}:
             raise PairIdentityError("pair sequence active run is unavailable")
@@ -279,10 +356,13 @@ class PairSequenceLedger:
         run_id: str,
         eval_harness_commit: str,
         container_metrics: Mapping[str, object],
+        provider: ProviderProjection,
     ) -> None:
         """Durably retain metrics before the external result transaction begins."""
 
         state = self._require_state()
+        self._require_writable()
+        self._bind_or_validate_provider(provider)
         matches = [item for item in state["runs"] if item["run_id"] == run_id]
         if len(matches) != 1 or matches[0]["status"] != "active":
             raise PairIdentityError("pair sequence active run is unavailable")
@@ -302,16 +382,24 @@ class PairSequenceLedger:
         run_id: str,
         eval_harness_commit: str,
         index_path: Path,
+        provider: ProviderProjection,
     ) -> str:
         """Converge a staged slot after ArtifactWriter made its record durable."""
 
         state = self._require_state()
+        self._require_writable()
+        selected = self._bind_or_validate_provider(provider)
         matches = [item for item in state["runs"] if item["run_id"] == run_id]
         if len(matches) != 1 or matches[0]["status"] != "publishing":
             raise PairIdentityError("pair sequence publishing run is unavailable")
         record = _published_terminal_record(index_path, run_id=run_id)
         config = record.get("config")
         run = matches[0]
+        published_profile = (
+            {key: config.get(key) for key in _SELECTED_PROFILE_KEYS}
+            if isinstance(config, Mapping)
+            else None
+        )
         if (
             record.get("outcome") != RunOutcome.COMPLETED.value
             or record.get("side") != run["side"]
@@ -321,6 +409,9 @@ class PairSequenceLedger:
             or config.get("pair_slot") != run["slot"]
             or config.get("pair_round") != run["round"]
             or config.get("eval_harness_commit") != eval_harness_commit
+            or config.get("provider_profile_sha256") != selected.profile_sha256
+            or config.get("provider_endpoint_sha256") != selected.endpoint_sha256
+            or published_profile != selected.to_dict()
         ):
             raise PairIdentityError("durable publication differs from the staged pair slot")
         digest = terminal_record_sha256(record)
@@ -330,6 +421,7 @@ class PairSequenceLedger:
             eval_harness_commit=eval_harness_commit,
             publication_sha256=digest,
             container_metrics=matches[0]["container_metrics"],
+            provider=provider,
         )
         return digest
 
@@ -343,6 +435,30 @@ class PairSequenceLedger:
         if self._handle is None or self._state is None:
             raise PairIdentityError("pair sequence ledger is not locked")
         return self._state
+
+    def _require_writable(self) -> None:
+        if self._read_only:
+            raise PairIdentityError("pair sequence ledger is read-only")
+
+    def _bind_or_validate_provider(
+        self, provider: ProviderProjection
+    ) -> SelectedProfileIdentity:
+        state = self._require_state()
+        selected = self.identity.require_selected_profile()
+        selected.validate_provider(provider)
+        bound_profile = state["selected_profile_sha256"]
+        bound_endpoint = state["selected_endpoint_sha256"]
+        if bound_profile is None and bound_endpoint is None:
+            if state["runs"]:
+                raise PairIdentityError("pair profile binding is absent after slot claim")
+            state["selected_profile_sha256"] = selected.profile_sha256
+            state["selected_endpoint_sha256"] = selected.endpoint_sha256
+        elif (
+            bound_profile != selected.profile_sha256
+            or bound_endpoint != selected.endpoint_sha256
+        ):
+            raise PairIdentityError("pair slots require the same selected provider profile")
+        return selected
 
     def _persist(self) -> None:
         state = self._require_state()
@@ -406,7 +522,50 @@ class RuntimeRequirements:
 
 
 @dataclass(frozen=True)
+class PaidBudgetIdentity:
+    per_side_usd: float
+    pair_usd: float
+
+
+@dataclass(frozen=True)
+class SelectedProfileIdentity:
+    provider_public: Mapping[str, object]
+    frozen_codex_model_catalog_source_commit: str
+    frozen_codex_model_catalog_sha256: str
+    max_guardian_logical_requests: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **dict(self.provider_public),
+            "frozen_codex_model_catalog_source_commit": (
+                self.frozen_codex_model_catalog_source_commit
+            ),
+            "frozen_codex_model_catalog_sha256": (
+                self.frozen_codex_model_catalog_sha256
+            ),
+            "max_guardian_logical_requests": self.max_guardian_logical_requests,
+        }
+
+    @property
+    def profile_sha256(self) -> str:
+        return str(self.provider_public["provider_profile_sha256"])
+
+    @property
+    def endpoint_sha256(self) -> str:
+        return str(self.provider_public["provider_endpoint_sha256"])
+
+    def validate_provider(self, provider: ProviderProjection) -> None:
+        try:
+            actual = provider.to_public_dict()
+        except ValueError as exc:
+            raise PairIdentityError("selected paid provider profile is invalid") from exc
+        if actual != dict(self.provider_public):
+            raise PairIdentityError("selected paid provider profile drifted from the pair lock")
+
+
+@dataclass(frozen=True)
 class PairIdentity:
+    schema_version: int
     pair_id: str
     modes: Mapping[str, PairMode]
     topology: tuple[PairSlot, ...]
@@ -416,6 +575,8 @@ class PairIdentity:
     runtime_requirements: RuntimeRequirements
     bundles: Mapping[Side, BundleIdentity]
     lock_sha256: str
+    selected_profile: SelectedProfileIdentity | None = None
+    paid_budget: PaidBudgetIdentity | None = None
 
     def mode(self, name: str) -> PairMode:
         mode = self.modes.get(name)
@@ -432,6 +593,32 @@ class PairIdentity:
         if len(matches) != 1:
             raise PairIdentityError("pair topology does not contain exactly one slot per side")
         return matches[0]
+
+    def require_selected_profile(self) -> SelectedProfileIdentity:
+        if self.schema_version != 2 or self.selected_profile is None:
+            raise PairIdentityError("legacy pair identity cannot be used for a new paid run")
+        return self.selected_profile
+
+    def validate_selected_profile(self, provider: ProviderProjection) -> None:
+        self.require_selected_profile().validate_provider(provider)
+
+    def validate_frozen_model_catalog(
+        self,
+        *,
+        source_commit: str,
+        sha256: str,
+        main_model: str,
+        guardian_model: str,
+    ) -> None:
+        selected = self.require_selected_profile()
+        public = selected.provider_public
+        if (
+            source_commit != selected.frozen_codex_model_catalog_source_commit
+            or sha256 != selected.frozen_codex_model_catalog_sha256
+            or main_model != public["effective_main_model"]
+            or guardian_model != public["effective_guardian_model"]
+        ):
+            raise PairIdentityError("frozen model catalog drifted from the pair lock")
 
     def validate_manifest(
         self,
@@ -489,16 +676,10 @@ class PairIdentity:
         slot = self.slot_for(spec.side)
         if spec.batch_id != batch_id:
             raise PairIdentityError("RunSpec batch differs from the tracked pair mode")
-        actual = {
+        core_actual = {
             "task_id": spec.task_id,
             "task_image_digest": spec.task_image_digest,
             "terminal_bench_version": spec.terminal_bench_version,
-            "provider_id": spec.provider.provider_id,
-            "provider_api": spec.provider.api,
-            "provider_api_key_env": spec.provider.api_key_env,
-            "main_model": spec.provider.main_model,
-            "guardian_model": spec.provider.guardian_model,
-            "guardian_effort": spec.provider.guardian_effort,
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,
@@ -509,8 +690,29 @@ class PairIdentity:
             "max_retries": spec.max_retries,
             "budget_usd": spec.budget_usd,
         }
+        if self.schema_version == 1:
+            actual = {
+                **core_actual,
+                "provider_id": spec.provider.provider_id,
+                "provider_api": spec.provider.api,
+                "provider_api_key_env": spec.provider.api_key_env,
+                "main_model": spec.provider.main_model,
+                "guardian_model": spec.provider.guardian_model,
+                "guardian_effort": spec.provider.guardian_effort,
+            }
+        else:
+            actual = core_actual
         if actual != dict(self.fairness):
             raise PairIdentityError("RunSpec fairness fields differ from the tracked pair")
+        if mode == "paid":
+            self.validate_selected_profile(spec.provider)
+            paid_budget = self.paid_budget
+            if (
+                paid_budget is None
+                or spec.budget_usd != paid_budget.per_side_usd
+                or paid_budget.pair_usd != paid_budget.per_side_usd * 2
+            ):
+                raise PairIdentityError("paid run budget differs from the tracked pair")
         counterpart = replace(
             spec,
             side=Side.RONDO if spec.side is Side.CODEX else Side.CODEX,
@@ -588,6 +790,7 @@ class RunPublicationContext:
     pair_slot: int
     pair_round: int
     metrics: Mapping[str, object]
+    selected_profile: Mapping[str, object]
 
     def validate(self) -> None:
         if self.pair_id != P1_PAIR_ID:
@@ -599,9 +802,27 @@ class RunPublicationContext:
             metrics_from_dict(self.metrics)
         except RunMetricsError as exc:
             raise PairIdentityError("publication metrics are invalid") from exc
+        _parse_selected_profile(self.selected_profile)
 
 
 def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
+    """Load only the active schema-v2 paid identity."""
+
+    return _load_pair_identity(path, schema_version=2, pair_id=P1_PAIR_ID)
+
+
+def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentity:
+    """Load the consumed v8 identity for read-only historical assessment."""
+
+    return _load_pair_identity(path, schema_version=1, pair_id=LEGACY_P1_PAIR_ID)
+
+
+def _load_pair_identity(
+    path: Path,
+    *,
+    schema_version: int,
+    pair_id: str,
+) -> PairIdentity:
     try:
         if path.is_symlink() or not stat.S_ISREG(path.lstat().st_mode):
             raise PairIdentityError("pair lock must be a regular non-symlink file")
@@ -611,18 +832,36 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
         raise
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise PairIdentityError("pair lock is unreadable") from exc
-    if not isinstance(value, dict) or set(value) != _PAIR_LOCK_KEYS:
-        raise PairIdentityError("pair lock differs from schema v1")
-    if value["schema_version"] != 1 or value["pair_id"] != P1_PAIR_ID:
+    expected_keys = _PAIR_LOCK_V2_KEYS if schema_version == 2 else _PAIR_LOCK_V1_KEYS
+    if not isinstance(value, dict) or set(value) != expected_keys:
+        raise PairIdentityError(f"pair lock differs from schema v{schema_version}")
+    if value["schema_version"] != schema_version or value["pair_id"] != pair_id:
         raise PairIdentityError("pair lock identity differs from P1")
     modes = _parse_modes(value["modes"])
     topology = _parse_topology(value["topology"], modes=modes)
-    fairness = _parse_fairness(value["fairness"])
+    fairness = _parse_fairness(value["fairness"], schema_version=schema_version)
     harbor = _parse_harbor(value["harbor"])
     no_api_seccomp = _parse_no_api_seccomp(value["no_api_seccomp"])
     runtime_requirements = _parse_runtime_requirements(value["runtime_requirements"])
     bundles = _parse_bundles(value["bundles"])
+    selected_profile = (
+        _parse_selected_profile(value["selected_profile"])
+        if schema_version == 2
+        else None
+    )
+    paid_budget = (
+        _parse_paid_budget(value["paid_budget"])
+        if schema_version == 2
+        else None
+    )
+    if (
+        selected_profile is not None
+        and selected_profile.frozen_codex_model_catalog_source_commit
+        != bundles[Side.CODEX].source_commit
+    ):
+        raise PairIdentityError("frozen model catalog source differs from the Codex bundle")
     identity = PairIdentity(
+        schema_version=schema_version,
         pair_id=value["pair_id"],
         modes=modes,
         topology=topology,
@@ -632,6 +871,8 @@ def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
         runtime_requirements=runtime_requirements,
         bundles=bundles,
         lock_sha256=hashlib.sha256(raw).hexdigest(),
+        selected_profile=selected_profile,
+        paid_budget=paid_budget,
     )
     # Exercise the existing two-sided contract with synthetic specs only in
     # aggregation; runtime validation below compares every shared field.
@@ -695,6 +936,7 @@ def publication_context(
         pair_slot=slot.slot,
         pair_round=slot.round,
         metrics=dict(metrics),
+        selected_profile=identity.require_selected_profile().to_dict(),
     )
     context.validate()
     return context
@@ -747,6 +989,7 @@ def assess_m1(
                 pair_ledger_path,
                 identity=identity,
                 mode="paid",
+                read_only=True,
             ) as sequence:
                 ledger = sequence.snapshot()
         except PairIdentityError:
@@ -918,10 +1161,16 @@ def _validate_sequence_state(
         "blocked",
         "runs",
     }
+    if identity.schema_version == 2:
+        expected_keys |= {
+            "selected_profile_sha256",
+            "selected_endpoint_sha256",
+        }
     if not isinstance(value, dict) or set(value) != expected_keys:
-        raise PairIdentityError("pair sequence ledger differs from schema v4")
+        raise PairIdentityError("pair sequence ledger differs from its pair schema")
+    expected_schema = 5 if identity.schema_version == 2 else 4
     if (
-        value["schema_version"] != 4
+        value["schema_version"] != expected_schema
         or value["pair_id"] != identity.pair_id
         or value["pair_lock_sha256"] != identity.lock_sha256
         or value["mode"] != mode
@@ -932,6 +1181,19 @@ def _validate_sequence_state(
         or len(value["runs"]) > 2
     ):
         raise PairIdentityError("pair sequence ledger identity is invalid")
+    selected = identity.selected_profile
+    if identity.schema_version == 2:
+        profile_hash = value["selected_profile_sha256"]
+        endpoint_hash = value["selected_endpoint_sha256"]
+        if not value["runs"]:
+            if profile_hash is not None or endpoint_hash is not None:
+                raise PairIdentityError("unclaimed pair sequence already binds a profile")
+        elif (
+            selected is None
+            or profile_hash != selected.profile_sha256
+            or endpoint_hash != selected.endpoint_sha256
+        ):
+            raise PairIdentityError("pair sequence selected profile binding is invalid")
     harness_commit = value["eval_harness_commit"]
     if harness_commit is not None:
         _require_commit(harness_commit, "pair sequence eval harness commit")
@@ -939,7 +1201,7 @@ def _validate_sequence_state(
         raise PairIdentityError("pair sequence harness binding is inconsistent")
     statuses: list[str] = []
     for index, item in enumerate(value["runs"], start=1):
-        if not isinstance(item, dict) or set(item) != {
+        run_keys = {
             "slot",
             "side",
             "round",
@@ -948,8 +1210,14 @@ def _validate_sequence_state(
             "eval_harness_commit",
             "publication_sha256",
             "container_metrics",
-        }:
-            raise PairIdentityError("pair sequence run differs from schema v4")
+        }
+        if identity.schema_version == 2:
+            run_keys |= {
+                "selected_profile_sha256",
+                "selected_endpoint_sha256",
+            }
+        if not isinstance(item, dict) or set(item) != run_keys:
+            raise PairIdentityError("pair sequence run differs from its pair schema")
         slot = identity.topology[index - 1]
         if (
             item["slot"] != slot.slot
@@ -962,6 +1230,12 @@ def _validate_sequence_state(
             or item["eval_harness_commit"] != harness_commit
         ):
             raise PairIdentityError("pair sequence run is invalid")
+        if identity.schema_version == 2 and (
+            selected is None
+            or item["selected_profile_sha256"] != selected.profile_sha256
+            or item["selected_endpoint_sha256"] != selected.endpoint_sha256
+        ):
+            raise PairIdentityError("pair sequence run profile binding is invalid")
         if item["publication_sha256"] is not None:
             _require_sha256(item["publication_sha256"], "pair publication sha256")
         metrics = _container_metrics(item["container_metrics"])
@@ -1018,19 +1292,11 @@ def _parse_topology(value: object, *, modes: Mapping[str, PairMode]) -> tuple[Pa
     return tuple(sorted(slots, key=lambda slot: slot.slot))
 
 
-def _parse_fairness(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != _FAIRNESS_KEYS:
-        raise PairIdentityError("pair fairness fields differ from schema v1")
+def _parse_fairness(value: object, *, schema_version: int) -> dict[str, object]:
     expected = {
         "task_id": FIX_GIT_TASK_ID,
         "task_image_digest": FIX_GIT_IMAGE_DIGEST,
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
-        "provider_id": "openai",
-        "provider_api": "responses",
-        "provider_api_key_env": "OPENAI_API_KEY",
-        "main_model": "gpt-5.6-sol",
-        "guardian_model": "gpt-5.6-luna",
-        "guardian_effort": "low",
         "approvals_reviewer": "auto_review",
         "approval_policy": "on-request",
         "sandbox_mode": "workspace-write",
@@ -1041,9 +1307,138 @@ def _parse_fairness(value: object) -> dict[str, object]:
         "max_retries": 0,
         "budget_usd": 5.0,
     }
+    keys = _FAIRNESS_V2_KEYS
+    if schema_version == 1:
+        keys = _FAIRNESS_V1_KEYS
+        expected |= {
+            "provider_id": "openai",
+            "provider_api": "responses",
+            "provider_api_key_env": "OPENAI_API_KEY",
+            "main_model": "gpt-5.6-sol",
+            "guardian_model": "gpt-5.6-luna",
+            "guardian_effort": "low",
+        }
+    if not isinstance(value, dict) or set(value) != keys:
+        raise PairIdentityError(
+            f"pair fairness fields differ from schema v{schema_version}"
+        )
     if value != expected:
         raise PairIdentityError("pair fairness values differ from P1")
     return dict(value)
+
+
+def _parse_paid_budget(value: object) -> PaidBudgetIdentity:
+    if not isinstance(value, dict) or set(value) != _PAID_BUDGET_KEYS:
+        raise PairIdentityError("paid pair budget differs from schema v2")
+    per_side = value["per_side_usd"]
+    pair = value["pair_usd"]
+    if (
+        isinstance(per_side, bool)
+        or not isinstance(per_side, (int, float))
+        or isinstance(pair, bool)
+        or not isinstance(pair, (int, float))
+        or float(per_side) != 5.0
+        or float(pair) != 10.0
+    ):
+        raise PairIdentityError("paid pair budget differs from Plan 014")
+    return PaidBudgetIdentity(float(per_side), float(pair))
+
+
+def _parse_selected_profile(value: object) -> SelectedProfileIdentity:
+    if not isinstance(value, dict) or set(value) != _SELECTED_PROFILE_KEYS:
+        raise PairIdentityError("selected paid profile differs from schema v2")
+    provider = value.get("provider")
+    if (
+        not isinstance(provider, str)
+        or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", provider)
+        or value.get("provider_api") != "responses"
+    ):
+        raise PairIdentityError("selected paid provider identity is invalid")
+    for key in ("provider_profile_sha256", "provider_endpoint_sha256"):
+        _require_sha256(value.get(key), key)
+    for prefix in ("main", "guardian"):
+        model = value.get(f"{prefix}_model")
+        effort = value.get(f"{prefix}_effort")
+        if (
+            not isinstance(model, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model)
+            or effort not in {"none", "minimal", "low", "medium", "high", "xhigh"}
+            or value.get(f"requested_{prefix}_model") != model
+            or value.get(f"effective_{prefix}_model") != model
+        ):
+            raise PairIdentityError("selected paid model contract is invalid")
+        pricing = _parse_public_pricing(value.get(f"{prefix}_pricing"))
+        if pricing.model_id != model:
+            raise PairIdentityError("selected paid model differs from its price card")
+    attempts = value.get("provider_max_attempts")
+    backoff = value.get("provider_retry_backoff_seconds")
+    statuses = value.get("provider_unbilled_retry_statuses")
+    if (
+        isinstance(attempts, bool)
+        or not isinstance(attempts, int)
+        or not 1 <= attempts <= 5
+        or isinstance(backoff, bool)
+        or not isinstance(backoff, (int, float))
+        or not 0 <= float(backoff) <= 30
+        or not isinstance(statuses, list)
+        or any(
+            isinstance(status, bool)
+            or not isinstance(status, int)
+            or not 400 <= status <= 599
+            for status in statuses
+        )
+        or statuses != sorted(set(statuses))
+        or (attempts > 1 and not statuses)
+    ):
+        raise PairIdentityError("selected paid retry contract is invalid")
+    source_commit = value.get("frozen_codex_model_catalog_source_commit")
+    catalog_sha256 = value.get("frozen_codex_model_catalog_sha256")
+    _require_commit(source_commit, "frozen model catalog source commit")
+    _require_sha256(catalog_sha256, "frozen model catalog sha256")
+    if value.get("max_guardian_logical_requests") != 1:
+        raise PairIdentityError("selected paid Guardian request limit is invalid")
+    return SelectedProfileIdentity(
+        provider_public={key: value[key] for key in _PUBLIC_PROVIDER_KEYS},
+        frozen_codex_model_catalog_source_commit=source_commit,
+        frozen_codex_model_catalog_sha256=catalog_sha256,
+        max_guardian_logical_requests=1,
+    )
+
+
+def _parse_public_pricing(value: object) -> ModelPricing:
+    expected_keys = {
+        "model_id",
+        "input_usd_per_million",
+        "cached_input_usd_per_million",
+        "output_usd_per_million",
+        "long_context_threshold_tokens",
+        "long_context_input_multiplier",
+        "long_context_output_multiplier",
+        "cache_write_input_multiplier",
+        "price_snapshot_date",
+        "price_source_url",
+    }
+    if not isinstance(value, dict) or set(value) != expected_keys:
+        raise PairIdentityError("selected paid price card differs from schema v2")
+    try:
+        pricing = ModelPricing(
+            model_id=value["model_id"],
+            input_usd_per_million=Decimal(value["input_usd_per_million"]),
+            cached_input_usd_per_million=Decimal(value["cached_input_usd_per_million"]),
+            output_usd_per_million=Decimal(value["output_usd_per_million"]),
+            long_context_threshold_tokens=int(value["long_context_threshold_tokens"]),
+            long_context_input_multiplier=Decimal(value["long_context_input_multiplier"]),
+            long_context_output_multiplier=Decimal(value["long_context_output_multiplier"]),
+            cache_write_input_multiplier=Decimal(value["cache_write_input_multiplier"]),
+            price_snapshot_date=value["price_snapshot_date"],
+            price_source_url=value["price_source_url"],
+        )
+        pricing.validate()
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise PairIdentityError("selected paid price card is invalid") from exc
+    if pricing.to_dict() != value:
+        raise PairIdentityError("selected paid price card is not canonical")
+    return pricing
 
 
 def _parse_harbor(value: object) -> HarborIdentity:
@@ -1213,10 +1608,7 @@ def _compare_record_fairness(
     identity: PairIdentity,
     reasons: list[str],
 ) -> None:
-    keys = {
-        "main_model": "main_model",
-        "guardian_model": "guardian_model",
-        "guardian_effort": "guardian_effort",
+    core_keys = {
         "approvals_reviewer": "approvals_reviewer",
         "approval_policy": "approval_policy",
         "sandbox_mode": "sandbox_mode",
@@ -1224,13 +1616,23 @@ def _compare_record_fairness(
         "websocket": "websocket",
         "code_mode_host": "code_mode_host",
         "terminal_bench_version": "terminal_bench_version",
-        "provider_id": "provider",
-        "provider_api": "provider_api",
         "task_image_digest": "task_image_digest",
         "timeout_seconds": "timeout_seconds",
         "max_retries": "max_retries",
         "budget_usd": "budget_usd",
     }
+    legacy_provider_keys = {
+        "main_model": "main_model",
+        "guardian_model": "guardian_model",
+        "guardian_effort": "guardian_effort",
+        "provider_id": "provider",
+        "provider_api": "provider_api",
+    }
+    keys = (
+        core_keys | legacy_provider_keys
+        if identity.schema_version == 1
+        else core_keys
+    )
     projected: list[dict[str, object]] = []
     for record in records:
         config = record.get("config")
@@ -1244,30 +1646,43 @@ def _compare_record_fairness(
     if projected[0] != projected[1] or projected[0] != expected:
         reasons.append("pair_fairness_mismatch")
     configs = [record["config"] for record in records]
-    main_efforts = [config.get("main_effort") for config in configs]
-    if (
-        any(not isinstance(effort, str) for effort in main_efforts)
-        or main_efforts[0] != main_efforts[1]
-    ):
-        reasons.append("pair_main_effort_mismatch")
-    profile_hashes = [config.get("provider_profile_sha256") for config in configs]
-    endpoint_hashes = [config.get("provider_endpoint_sha256") for config in configs]
-    if all(isinstance(value, str) for value in profile_hashes + endpoint_hashes):
-        if profile_hashes[0] != profile_hashes[1]:
-            reasons.append("pair_provider_profile_mismatch")
-        if endpoint_hashes[0] != endpoint_hashes[1]:
-            reasons.append("pair_provider_endpoint_mismatch")
-    elif all(config.get("provider_base_url") is not None for config in configs):
-        # Compatibility for append-only v8 records. New results never publish
-        # the raw endpoint or whole local-config digest.
-        if configs[0].get("provider_base_url") != configs[1].get("provider_base_url"):
-            reasons.append("pair_provider_base_url_mismatch")
-        if configs[0].get("provider_config_sha256") != configs[1].get(
-            "provider_config_sha256"
-        ):
-            reasons.append("pair_provider_config_mismatch")
+    if identity.schema_version == 2:
+        selected = identity.require_selected_profile().to_dict()
+        projected_profiles = [
+            {key: config.get(key) for key in _SELECTED_PROFILE_KEYS}
+            for config in configs
+        ]
+        if projected_profiles[0] != projected_profiles[1]:
+            reasons.append("pair_selected_profile_mismatch")
+        if any(profile != selected for profile in projected_profiles):
+            reasons.append("pair_selected_profile_lock_mismatch")
     else:
-        reasons.append("pair_provider_profile_missing")
+        main_efforts = [config.get("main_effort") for config in configs]
+        if (
+            any(not isinstance(effort, str) for effort in main_efforts)
+            or main_efforts[0] != main_efforts[1]
+        ):
+            reasons.append("pair_main_effort_mismatch")
+        profile_hashes = [config.get("provider_profile_sha256") for config in configs]
+        endpoint_hashes = [config.get("provider_endpoint_sha256") for config in configs]
+        if all(isinstance(value, str) for value in profile_hashes + endpoint_hashes):
+            if profile_hashes[0] != profile_hashes[1]:
+                reasons.append("pair_provider_profile_mismatch")
+            if endpoint_hashes[0] != endpoint_hashes[1]:
+                reasons.append("pair_provider_endpoint_mismatch")
+        elif all(config.get("provider_base_url") is not None for config in configs):
+            # Compatibility for append-only v8 records. New results never publish
+            # the raw endpoint or whole local-config digest.
+            if configs[0].get("provider_base_url") != configs[1].get(
+                "provider_base_url"
+            ):
+                reasons.append("pair_provider_base_url_mismatch")
+            if configs[0].get("provider_config_sha256") != configs[1].get(
+                "provider_config_sha256"
+            ):
+                reasons.append("pair_provider_config_mismatch")
+        else:
+            reasons.append("pair_provider_profile_missing")
     for record in records:
         side = Side(record["side"])
         if record.get("binary_sha256") != identity.bundles[side].cli_sha256:

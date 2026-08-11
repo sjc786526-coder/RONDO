@@ -38,6 +38,7 @@ from .frozen_model_catalog import (
 
 MODEL_CAMPAIGN_CAP_USD = Decimal("150")
 RUN_CAP_USD = Decimal("5")
+PLAN014_CANARY_CAP_USD = Decimal("4")
 MAX_RETRIES_PER_MODEL = 25
 OUTER_RETRY_BASE_SECONDS = 5
 OUTER_RETRY_MAX_SECONDS = 60
@@ -531,6 +532,8 @@ def _run_phase_once(
     attempt_root: Path,
     max_attempts: int,
     frozen_model_catalog: dict[str, object] | None = None,
+    run_cap_usd: Decimal = RUN_CAP_USD,
+    max_logical_requests: int | None = None,
 ) -> tuple[dict[str, object], bool, bool, int]:
     _private_directory(attempt_root)
     codex_home = attempt_root / "codex-home"
@@ -552,9 +555,9 @@ def _run_phase_once(
     with PersistentBudgetLedger(
         ledger_path,
         batch_id=run_id,
-        total_cap_usd=RUN_CAP_USD,
+        total_cap_usd=run_cap_usd,
         max_runs=1,
-        default_run_cap_usd=RUN_CAP_USD,
+        default_run_cap_usd=run_cap_usd,
     ) as ledger:
         with LoopbackResponsesProxy(
             upstream_base_url=provider.base_url,
@@ -573,6 +576,7 @@ def _run_phase_once(
             unbilled_retry_statuses=provider.unbilled_retry_statuses,
             request_reservation_usd=SHORT_REQUEST_RESERVATION_USD,
             max_guardian_logical_requests=1,
+            max_logical_requests=max_logical_requests,
         ) as proxy:
             _write_auth(auth_path, proxy.downstream_api_key)
             started = time.monotonic()
@@ -842,6 +846,32 @@ def run_direct_codex_campaign(
     return receipt
 
 
+def _selected_campaign_phases(
+    *, start_side: str, phase_kind: str | None, plan014_canary: bool
+) -> tuple[Phase, ...]:
+    phases = (
+        tuple(phase for phase in PHASES if phase.side == "codex")
+        if plan014_canary
+        else (
+            PHASES
+            if start_side == "codex"
+            else tuple(phase for phase in PHASES if phase.side == "rondo")
+        )
+    )
+    if phase_kind is not None:
+        phases = tuple(phase for phase in phases if phase.kind == phase_kind)
+    return phases
+
+
+def _phase_budget_contract(
+    phase: Phase, *, plan014_canary: bool
+) -> tuple[Decimal, int | None]:
+    if not plan014_canary:
+        return RUN_CAP_USD, None
+    logical_requests = 1 if phase.kind == "main" else 3
+    return Decimal(logical_requests), logical_requests
+
+
 def run_campaign(
     paths: RepoPaths,
     *,
@@ -853,6 +883,7 @@ def run_campaign(
     main_model_alias: str,
     guardian_model_alias: str = DEFAULT_GUARDIAN_ALIAS,
     max_retries: int = MAX_RETRIES_PER_MODEL,
+    plan014_canary: bool = False,
 ) -> dict[str, object]:
     if prior_debit_usd < 0 or prior_debit_usd >= MODEL_CAMPAIGN_CAP_USD:
         raise ModelDiagnosticError(
@@ -878,6 +909,16 @@ def run_campaign(
         raise ModelDiagnosticError("diagnostic main model alias is invalid")
     if guardian_model_alias not in SUPPORTED_MAIN_ALIASES:
         raise ModelDiagnosticError("diagnostic Guardian model alias is invalid")
+    if plan014_canary and (
+        prior_debit_usd != 0
+        or prior_retry_count != 0
+        or start_side != "codex"
+        or phase_kind is not None
+        or max_retries != 0
+    ):
+        raise ModelDiagnosticError(
+            "Plan 014 canary requires fresh frozen-Codex main+approval with zero retries"
+        )
     config = load_runtime_config(paths)
     provider = config.paid_provider_projection()
     paid_eval = config.paid_eval()
@@ -890,6 +931,12 @@ def run_campaign(
         raise ModelDiagnosticError(
             "active paid profile does not match the selected main/Guardian models and effort"
         )
+    pair_identity = None
+    if plan014_canary:
+        from .terminal_bench.pair import load_pair_identity
+
+        pair_identity = load_pair_identity()
+        pair_identity.validate_selected_profile(provider)
     _secret_name, api_key = load_provider_secret(config)
     targets = {
         side: _binary_target(paths.common_root, side) for side in ("codex", "rondo")
@@ -936,7 +983,15 @@ def run_campaign(
         ),
         "request_reservation_usd": format(SHORT_REQUEST_RESERVATION_USD, "f"),
         "max_guardian_logical_requests": 1,
-        "campaign_cap_usd": format(MODEL_CAMPAIGN_CAP_USD, "f"),
+        "campaign_cap_usd": format(
+            PLAN014_CANARY_CAP_USD if plan014_canary else MODEL_CAMPAIGN_CAP_USD,
+            "f",
+        ),
+        "plan014_canary": plan014_canary,
+        "pair_id": pair_identity.pair_id if pair_identity is not None else None,
+        "pair_lock_sha256": (
+            pair_identity.lock_sha256 if pair_identity is not None else None
+        ),
         "prior_diagnostic_debit_usd": format(prior_debit_usd, "f"),
         "prior_retry_count": prior_retry_count,
         "start_side": start_side,
@@ -950,19 +1005,22 @@ def run_campaign(
     conservative_spent = prior_debit_usd
     status = "completed"
     stopped_phase: str | None = None
-    selected_phases = (
-        PHASES
-        if start_side == "codex"
-        else tuple(phase for phase in PHASES if phase.side == "rondo")
+    selected_phases = _selected_campaign_phases(
+        start_side=start_side,
+        phase_kind=phase_kind,
+        plan014_canary=plan014_canary,
     )
-    if phase_kind is not None:
-        selected_phases = tuple(
-            phase for phase in selected_phases if phase.kind == phase_kind
-        )
     for phase in selected_phases:
         phase_attempt = 0
+        phase_run_cap, phase_logical_request_cap = _phase_budget_contract(
+            phase,
+            plan014_canary=plan014_canary,
+        )
+        campaign_cap = (
+            PLAN014_CANARY_CAP_USD if plan014_canary else MODEL_CAMPAIGN_CAP_USD
+        )
         while True:
-            if conservative_spent + RUN_CAP_USD > MODEL_CAMPAIGN_CAP_USD:
+            if conservative_spent + phase_run_cap > campaign_cap:
                 status = "budget_exhausted"
                 stopped_phase = phase.name
                 break
@@ -987,6 +1045,8 @@ def run_campaign(
                 frozen_model_catalog=(
                     frozen_model_catalog if phase.side == "codex" else None
                 ),
+                run_cap_usd=phase_run_cap,
+                max_logical_requests=phase_logical_request_cap,
             )
             attempts.append(attempt)
             conservative_spent += Decimal(str(attempt["spent_usd"]))
@@ -1023,6 +1083,19 @@ def run_campaign(
         "estimated_spent_usd": format(conservative_spent, "f"),
         "attempts": attempts,
     }
+    if plan014_canary and status == "completed" and (
+        [attempt.get("phase") for attempt in attempts]
+        != ["codex-main", "codex-approval"]
+        or [attempt.get("logical_request_count") for attempt in attempts] != [1, 3]
+        or any(
+            attempt.get("upstream_attempt_count")
+            != attempt.get("logical_request_count")
+            for attempt in attempts
+        )
+        or conservative_spent > PLAN014_CANARY_CAP_USD
+    ):
+        receipt["status"] = "failed"
+        receipt["stopped_phase"] = "canary_contract"
     _atomic_private_json(output_root / "receipt.json", receipt)
     return receipt
 
@@ -1052,6 +1125,11 @@ def main() -> int:
     )
     parser.add_argument("--start-side", choices=("codex", "rondo"), default="codex")
     parser.add_argument("--phase-kind", choices=("main", "approval"))
+    parser.add_argument(
+        "--plan014-canary",
+        action="store_true",
+        help="run the fresh frozen-Codex four-request canary under the v9 pair lock",
+    )
     args = parser.parse_args()
     try:
         paths = RepoPaths.discover(Path.cwd())
@@ -1071,6 +1149,7 @@ def main() -> int:
                 or args.start_side != "codex"
                 or args.phase_kind is not None
                 or args.guardian_model_alias != DEFAULT_GUARDIAN_ALIAS
+                or args.plan014_canary
             ):
                 raise ModelDiagnosticError(
                     "direct diagnostic does not accept continuation or phase selection"
@@ -1091,6 +1170,7 @@ def main() -> int:
                 main_model_alias=args.main_model_alias,
                 guardian_model_alias=args.guardian_model_alias,
                 max_retries=args.max_retries,
+                plan014_canary=args.plan014_canary,
             )
         print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
         return 0 if receipt["status"] == "completed" else 1

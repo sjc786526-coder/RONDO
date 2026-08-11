@@ -305,3 +305,12 @@ standard/Lite 形态均补回归。
   campaign retry 配额缩小。
 - `just eval-lock` 解析 85 packages；纯/fake/loopback 完整 eval 323/323 通过。没有运行真实 API、Docker、Cargo、
   paid pair 或 M1；新 pair identity/profile drift 仍是正式付费运行前置条件。
+
+### 2026-08-11 Plan 014 新 Pair Identity 与 Profile Drift 离线门禁
+
+- 新增 schema-v2 lock，唯一冻结 v9 pair、b4 batch、两侧 run ID、Sol/medium main、Sol/low Guardian、价卡/retry、
+  单侧 5 USD/pair 10 USD 与 frozen Codex catalog source/SHA；tracked lock/result 不保存 raw endpoint、display 或 key env。
+- sequence ledger v5 在 slot 1 claim 绑定 selected profile/endpoint SHA，并在 completed 发布前、durable publication
+  收口和 slot 2 claim 重验；旧 v8 仅允许显式只读加载，不能新建或 claim ledger。
+- success/failure producer 使用 lock 的同一 public profile，M1 精确核对两侧 result、lock 与 ledger。focused 63/63、
+  `just eval-lock` 85 packages、完整 eval 325/325 通过；未运行真实 API、Docker、Cargo、paid pair 或 M1。

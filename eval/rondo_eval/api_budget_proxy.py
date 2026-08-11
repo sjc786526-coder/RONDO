@@ -83,6 +83,7 @@ _STOP_REASONS = {
     "operator_confirmed_unbilled_deadline_exhausted",
     "operator_confirmed_unbilled_proxy_closing",
     "guardian_logical_request_limit_exceeded",
+    "logical_request_limit_exceeded",
     "proxy_closing",
 }
 GUARDIAN_OUTPUT_SCHEMA = {
@@ -116,6 +117,10 @@ class BudgetStopped(ApiBudgetProxyError):
 
 class _GuardianLogicalRequestLimitExceeded(ApiBudgetProxyError):
     """Raised before reserve/forward when a run exceeds its declared approvals."""
+
+
+class _LogicalRequestLimitExceeded(ApiBudgetProxyError):
+    """Raised before reserve/forward when a short diagnostic exceeds its cap."""
 
 
 @dataclass(frozen=True)
@@ -719,6 +724,7 @@ class LoopbackResponsesProxy:
         unbilled_retry_statuses: tuple[int, ...],
         request_reservation_usd: Decimal | str | None = None,
         max_guardian_logical_requests: int | None = None,
+        max_logical_requests: int | None = None,
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         _transport: _UrllibTransport | None = None,
         _monotonic: Any = time.monotonic,
@@ -789,6 +795,14 @@ class LoopbackResponsesProxy:
             raise ApiBudgetProxyError(
                 "proxy Guardian logical request limit must be exactly one when enabled"
             )
+        if max_logical_requests is not None and (
+            isinstance(max_logical_requests, bool)
+            or not isinstance(max_logical_requests, int)
+            or not 1 <= max_logical_requests <= 4
+        ):
+            raise ApiBudgetProxyError(
+                "proxy short-test logical request limit must be between one and four"
+            )
         if not callable(_monotonic) or not callable(_sleep):
             raise ApiBudgetProxyError("proxy clock is invalid")
         ledger.ensure_run(run_id)
@@ -810,6 +824,8 @@ class LoopbackResponsesProxy:
         self._request_reservation = request_reservation
         self._max_guardian_logical_requests = max_guardian_logical_requests
         self._guardian_logical_requests = 0
+        self._max_logical_requests = max_logical_requests
+        self._logical_requests = 0
         self._request_policy_lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
         self._closing = threading.Event()
@@ -989,7 +1005,7 @@ class LoopbackResponsesProxy:
                 if self._closing.is_set():
                     self._reject(handler, 503, "proxy_closing")
                     return
-                self._claim_guardian_logical_request(request_metadata["role"])
+                self._claim_logical_request(request_metadata["role"])
                 self._ledger.reserve(
                     self._run_id,
                     request_id,
@@ -997,6 +1013,9 @@ class LoopbackResponsesProxy:
                 )
         except _GuardianLogicalRequestLimitExceeded:
             self._reject(handler, 409, "guardian_logical_request_limit_exceeded")
+            return
+        except _LogicalRequestLimitExceeded:
+            self._reject(handler, 409, "logical_request_limit_exceeded")
             return
         except BudgetStopped:
             self._reject(handler, 429, "budget_stopped")
@@ -1209,11 +1228,30 @@ class LoopbackResponsesProxy:
             if delay:
                 self._sleep(delay)
 
-    def _claim_guardian_logical_request(self, role: str) -> None:
-        if role != "guardian" or self._max_guardian_logical_requests is None:
+    def _claim_logical_request(self, role: str) -> None:
+        if (
+            self._max_logical_requests is None
+            and (role != "guardian" or self._max_guardian_logical_requests is None)
+        ):
             return
         with self._request_policy_lock:
-            if self._guardian_logical_requests >= self._max_guardian_logical_requests:
+            if (
+                self._max_logical_requests is not None
+                and self._logical_requests >= self._max_logical_requests
+            ):
+                self._ledger.stop_run(
+                    self._run_id,
+                    stop_reason="logical_request_limit_exceeded",
+                )
+                raise _LogicalRequestLimitExceeded(
+                    "Short-test logical request limit is exhausted"
+                )
+            if (
+                role == "guardian"
+                and self._max_guardian_logical_requests is not None
+                and self._guardian_logical_requests
+                >= self._max_guardian_logical_requests
+            ):
                 self._ledger.stop_run(
                     self._run_id,
                     stop_reason="guardian_logical_request_limit_exceeded",
@@ -1221,7 +1259,9 @@ class LoopbackResponsesProxy:
                 raise _GuardianLogicalRequestLimitExceeded(
                     "Guardian logical request limit is exhausted"
                 )
-            self._guardian_logical_requests += 1
+            self._logical_requests += 1
+            if role == "guardian":
+                self._guardian_logical_requests += 1
 
     def _stop_confirmed_unbilled(
         self,

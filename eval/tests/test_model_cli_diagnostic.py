@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from unittest import mock
 from rondo_eval.model_cli_diagnostic import (
     MAX_RETRIES_PER_MODEL,
     MODEL_CAMPAIGN_CAP_USD,
+    PLAN014_CANARY_CAP_USD,
     PHASES,
     SHORT_REQUEST_RESERVATION_USD,
     DEFAULT_GUARDIAN_ALIAS,
@@ -22,9 +24,12 @@ from rondo_eval.model_cli_diagnostic import (
     _max_attempts_for_retry_budget,
     _outer_retry_delay_seconds,
     _phase_succeeded,
+    _phase_budget_contract,
     _redacted_cli_observation,
     _remove_generated_plugin_cache,
     _safe_environment,
+    _selected_campaign_phases,
+    run_campaign,
 )
 
 
@@ -275,6 +280,116 @@ class ModelCliDiagnosticTests(unittest.TestCase):
                 snapshot={"reserved_usd": "0.000000"},
                 states=[{"settlement_kind": "usage_priced"}],
             )
+        )
+
+    def test_plan014_canary_is_exactly_frozen_codex_four_request_zero_retry_shape(self) -> None:
+        phases = _selected_campaign_phases(
+            start_side="codex",
+            phase_kind=None,
+            plan014_canary=True,
+        )
+        self.assertEqual(
+            [phase.name for phase in phases],
+            ["codex-main", "codex-approval"],
+        )
+        contracts = [
+            _phase_budget_contract(phase, plan014_canary=True) for phase in phases
+        ]
+        self.assertEqual(contracts, [(1, 1), (3, 3)])
+        self.assertEqual(sum((contract[0] for contract in contracts), start=0), 4)
+        self.assertEqual(PLAN014_CANARY_CAP_USD, 4)
+
+        ordinary = _selected_campaign_phases(
+            start_side="rondo",
+            phase_kind="approval",
+            plan014_canary=False,
+        )
+        self.assertEqual([phase.name for phase in ordinary], ["rondo-approval"])
+        self.assertEqual(
+            _phase_budget_contract(ordinary[0], plan014_canary=False),
+            (5, None),
+        )
+
+    def test_plan014_campaign_binds_pair_and_projects_one_plus_three_caps(self) -> None:
+        provider = types.SimpleNamespace(
+            profile_sha256="a" * 64,
+            base_url="https://provider.example/v1",
+            main_model="gpt-5.6-sol",
+            guardian_model="gpt-5.6-sol",
+            main_effort="medium",
+            guardian_effort="low",
+            max_attempts=5,
+        )
+        config = mock.Mock()
+        config.paid_provider_projection.return_value = provider
+        config.paid_eval.return_value = {
+            "main_model": "sol",
+            "guardian_model": "sol",
+        }
+        identity = mock.Mock(pair_id="p1-fix-git-pair-v9", lock_sha256="b" * 64)
+        targets = {
+            side: BinaryTarget(side, Path(f"/{side}"), side[0] * 64, side[0] * 40)
+            for side in ("codex", "rondo")
+        }
+        phase_attempts = [
+            {
+                "phase": "codex-main",
+                "spent_usd": "0.100000",
+                "logical_request_count": 1,
+                "upstream_attempt_count": 1,
+            },
+            {
+                "phase": "codex-approval",
+                "spent_usd": "0.200000",
+                "logical_request_count": 3,
+                "upstream_attempt_count": 3,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory, mock.patch(
+            "rondo_eval.model_cli_diagnostic.load_runtime_config", return_value=config
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic.load_provider_secret",
+            return_value=("KEY", "secret"),
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic._binary_target",
+            side_effect=lambda _root, side: targets[side],
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic._load_frozen_model_catalog",
+            return_value={"models": []},
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic._run_phase_once",
+            side_effect=[
+                (phase_attempts[0], True, False, 0),
+                (phase_attempts[1], True, False, 0),
+            ],
+        ) as run_phase, mock.patch(
+            "rondo_eval.terminal_bench.pair.load_pair_identity", return_value=identity
+        ):
+            receipt = run_campaign(
+                types.SimpleNamespace(common_root=Path(directory)),
+                output_root=Path(directory) / "canary",
+                main_model_alias="sol",
+                guardian_model_alias="sol",
+                max_retries=0,
+                plan014_canary=True,
+            )
+
+        self.assertEqual(receipt["status"], "completed")
+        self.assertEqual(receipt["campaign_cap_usd"], "4")
+        self.assertEqual(receipt["pair_id"], "p1-fix-git-pair-v9")
+        identity.validate_selected_profile.assert_called_once_with(provider)
+        self.assertEqual(run_phase.call_count, 2)
+        self.assertEqual(
+            [call.kwargs["max_attempts"] for call in run_phase.call_args_list],
+            [1, 1],
+        )
+        self.assertEqual(
+            [call.kwargs["run_cap_usd"] for call in run_phase.call_args_list],
+            [1, 3],
+        )
+        self.assertEqual(
+            [call.kwargs["max_logical_requests"] for call in run_phase.call_args_list],
+            [1, 3],
         )
 
     def test_cli_observation_does_not_persist_text_or_command_output(self) -> None:

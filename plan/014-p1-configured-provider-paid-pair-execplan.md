@@ -1,8 +1,8 @@
 # Plan 014：P1 配置化 Provider 的新 Paid Pair 与 M1
 
-> 本计划已进入离线落地阶段，是 Plan 013 完成后的下一阶段执行合同。
-> 离线实现不产生 API/Docker 影响；正式 canary、paid pair 与 Docker 执行前仍须按本计划范围单独授权，不回填
-> Plan 013 或模型诊断的预算与结果。
+> 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；用户已授权在本计划内运行
+> 一次最多 4 USD 的 fresh exact-wire canary、一个最多 10 USD 的 v9 paid pair 及对应 Docker，合计硬上限
+> 14 USD。Plan 013 或既有模型诊断的预算与结果不得回填。
 
 ## 1. 目标
 
@@ -24,7 +24,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   requested/effective model，且两者都必须等于 selected profile。
 - pair 前先用相同 frozen CLI/request shape 做一次短测 profile canary；每个 upstream request 预留 1 USD、
   main+approval 最多 4 个请求/4 USD，main 与 Guardian 均须
-  terminal+valid usage，任一 403/429/5xx、缺 usage 或审批未闭环都停止，不创建/claim pair identity。
+  terminal+valid usage，任一 403/429/5xx、缺 usage 或审批未闭环都停止，不创建/claim pair ledger；预留的 tracked
+  identity 保持未消费，若 selected profile 变化则必须新建 lock/IDs，不能改写 v9。
 - 任何 completed+usage 的 Guardian 响应之后，产品层 parse failure 不得再产生第二个付费 upstream request；
   无法为 frozen Codex 建立可靠门禁时，本阶段 fail-closed，不运行 paid pair。
 - sequence ledger 在 slot 1 claim 时绑定 selected profile canonical SHA；slot 1 启动前、slot 1 结束时、slot 2 claim
@@ -97,11 +98,19 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
    - 跑 focused tests、`just eval-lock`、`just eval-test`；不重复 B1/B2 paid/no-api 已完成证据。
    - 独立审查 secret redaction、预算恢复、旧 ID 拒绝与 pair 顺序。
 4. **一次真实执行**
-   - 获得新授权并确认候选 active profile/credential、Windows C:、Docker 基线与 build lock。
-   - 先运行与 frozen CLI 完全同 shape 的 main+Guardian canary；只有 terminal+valid usage 且审批闭环才冻结
-     selected profile 并创建新 pair identity。Terra 在持续 403 的访问问题解除前不作为候选。
+   - 确认 active profile/credential、Windows C:、Docker 基线与 build lock；先把 canary 的四个 logical request
+     和 4 USD 保守预算做成运行时硬门禁并完成干净提交。
+   - 用 source-bound frozen Codex 运行 fresh `main` + `approval` exact-wire canary：只允许
+     `main` 与 `main → guardian → main`，每 request 预留 1 USD、总 logical request 上限 4、所有 upstream
+     attempt 必须为 1。只有 terminal+valid usage、审批闭环且 fresh profile 精确匹配 v9 lock 才创建 sequence
+     ledger 并 claim slot 1；profile、catalog 或 identity 变化时停止，不改写 v9。
    - RONDO slot 1；只在 completed + metadata ready + ledger settled 时运行 Codex slot 2。
    - 两侧 completed 后运行 M1，归档 result/metrics/cost；任何失败保持新 pair 终态并停止。
+5. **交付收口**
+   - 检查 RONDO 结果中唯一自然 Guardian evidence 的 `E_final/meta` 绑定、两侧预算 settled、pair ledger completed、
+     M1 `passed` 且 S2 `verified`；本地 canary + pair 保守费用不得超过 14 USD，`actual_usd` 无账单事实时保持 null。
+   - 合并真实 public result，更新 Plan 当前状态、WBS 当前事实和一份精炼执行日志；运行受影响测试和结构门禁。
+   - 提交后合并本地 main 并推送；保留历史数据，不重写失败终态，不为失败创建第二个 pair。
 
 ## 5. 当前状态
 
@@ -131,18 +140,32 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   local profile、canonical SHA、adapter、proxy 和 public result；CLI 诊断改为精确消息/命令/请求状态合同、
   显式环境白名单及剩余 retry 配额，并要求 ledger run 未停止、命令先于最终消息、唯一 `turn.completed` 且无
   `turn.failed`。真实 public producer→pair ledger→M1 集成回归和完整 eval 323/323 通过。
+- 新 schema-v2 lock 已冻结唯一 `p1-fix-git-pair-v9` / `p1-fix-git-b4-m1-v1` 与两侧 run ID、Sol/medium
+  main、Sol/low Guardian、价卡/retry、5 USD 单侧/10 USD pair 上限和 source-bound frozen catalog SHA；lock
+  不包含 raw endpoint、display name 或 key env。v8 只能通过显式 legacy 入口只读加载，不能创建或 claim 新账本。
+- pair sequence ledger schema v5 在 slot 1 claim 绑定 selected profile/endpoint SHA；正式入口在首次 claim、completed
+  发布前、durable publication 收口及 slot 2 新进程 claim 时重投影本地 profile。public success/failure 直接使用 lock
+  的同一 redacted profile，M1 对两侧 result、lock 与 ledger 做精确三方比较；focused tests 与完整 eval 325/325 通过。
+- canary 的总 logical-request 门禁已落地并提交为 `f7c21f8`：source-bound frozen Codex 只允许
+  `main` 与 `main → guardian → main`，分阶段硬 cap 为 1+3 USD，内部与外层 retry 均为 0；完整 eval
+  328/328 通过。fresh Sol/Sol canary 随后 4/4 请求均一次成功、usage valid，审批命令和终态精确闭环，
+  本地估算 `$0.225706`。
+- 唯一 v9 pair 已执行 RONDO slot 1 并收敛为 `infra_failed/blocked`：6 个 Sol/medium main 请求均一次成功、
+  usage valid，本地估算 `$0.161198`、无 reservation；自然 Guardian `E_final` 已生成且为 Sol/low、schema/source
+  正确，但 review session 在请求进入 budget proxy 前以 HTTP 429 `session_error` fail-closed。Codex slot 2 与 M1
+  按计划未运行，这份未绑定真实 Guardian usage 的 evidence 不算可用 S2。
 
 ### 当前工作
 
-- 正在离线实现新 pair identity 与 profile drift 门禁。正式 exact-wire canary、
-  Docker 和 paid pair 尚未获得本计划自己的范围授权，也未运行；
-  既有 3 轮稳定性诊断只用于选定 Sol/Sol 候选，不能回填为 pair 结果。
+- 本次正式执行已按第一处失败停止。v9 identity/result/ledger 为唯一失败终态，不重跑、不改写，也不创建替代 pair。
+- 下一步只做新的离线根因修复计划：证明 RONDO Guardian 首请求进入 loopback proxy 并由同一 budget/role/profile
+  合同记录。修复后必须使用新的 identity 和单独估算/授权，不能继续消费本计划剩余名义额度。
 
 ### 阻塞项
 
-- paid 前必须完成新 pair/profile drift 的剩余 focused 门禁。
-- active Sol/Sol profile 在正式 pair 前仍须通过本计划自己的 fresh exact-wire canary；Terra 的持续 403 需供应商侧
-  访问能力变化后再考虑。
+- RONDO 自然 Guardian 在 proxy 未记录请求的情况下快速得到 HTTP 429，`meta` 为
+  `failed_closed/session_error`。在离线复现并闭合 Guardian transport→proxy 绑定之前不得启动新 paid pair。
+- v9 已消费并 blocked；任何后续正式执行都必须新建 lock/IDs，并重新通过 fresh canary 与授权门。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
 
 ## 6. 关键决策记录
@@ -161,3 +184,6 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 010 | 短测每 upstream request 预留 1 USD，正式/大请求按 5 USD | 兼顾高频小探针与正式任务 fail-closed 暴露上限 | 已采纳 |
 | 011 | completed/M1 必须消费精确审批序列，main effort 与 Guardian effort 同级冻结 | 防止主请求或 effort 漂移产生可发布的假成功 | 已采纳 |
 | 012 | CLI 诊断只接受未停止 ledger、单一最终消息、成对且先于消息的固定审批命令和成功 turn 终态 | 历史 `expected_command=false` 收据只能保留为稳定性事实，不能充当新门禁证据 | 已采纳 |
+| 013 | Plan 014 canary 使用 source-bound frozen Codex 且硬限制四个 logical request、零 retry、4 USD | 仅靠事后序列检查不能证明 14 USD 总预算不会先超限再失败 | 已采纳 |
+| 014 | v9 任一正式侧失败后保留唯一终态并停止，不创建替代 pair | 防止为追求绿结果连续消费预算或破坏 identity 一次性语义 | 已采纳 |
+| 015 | v9 RONDO Guardian 失败后不把已生成但未绑定 usage 的 `E_final` 计为 S2 | 请求未进入预算 metadata，不能证明审批模型真实完成 | 已采纳 |

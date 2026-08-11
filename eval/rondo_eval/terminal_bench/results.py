@@ -365,12 +365,15 @@ def publish_terminal_bench_failure(
     except ValueError as exc:
         raise HarborResultError("exceptional publication provider is invalid") from exc
     _validate_publication_context(publication, side=side)
+    selected_profile = dict(publication.selected_profile)
+    if any(selected_profile.get(key) != value for key, value in provider_public.items()):
+        raise HarborResultError("exceptional publication provider differs from the pair lock")
     spent = _run_spend(budget_snapshot, run_id)
     has_unsettled_reservation = _run_has_unsettled_reservation(
         budget_snapshot, run_id
     )
     config = {
-        **provider_public,
+        **selected_profile,
         "batch_id": budget_snapshot.get("batch_id"),
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
         "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
@@ -513,6 +516,10 @@ def _safe_summary(
         if guardian_requests == 0 and not evidence
         else "unbound"
     )
+    provider_public = spec.provider.to_public_dict()
+    selected_profile = dict(publication.selected_profile)
+    if any(selected_profile.get(key) != value for key, value in provider_public.items()):
+        raise HarborResultError("result provider differs from the selected pair profile")
     return {
         "schema_version": 1,
         "run_id": run_id,
@@ -520,7 +527,7 @@ def _safe_summary(
         "git_commit": git_commit,
         "outcome": parsed.outcome.value,
         "config": {
-            **spec.provider.to_public_dict(),
+            **selected_profile,
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,
