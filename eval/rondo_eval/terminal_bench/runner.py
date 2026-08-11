@@ -64,7 +64,7 @@ class TerminalBenchRequest:
     memory_swap_bytes: int
     pids_limit: int
     provider_transport_base_url: str
-    provider_name: str = "openai"
+    provider_name: str | None = None
     timeout_seconds: int = 1800
     max_retries: int = 0
     budget_usd: float = 5.0

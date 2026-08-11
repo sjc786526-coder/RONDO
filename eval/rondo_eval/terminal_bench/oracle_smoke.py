@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         pair_identity = load_pair_identity()
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
-        provider = config.provider("openai")
+        provider = config.paid_provider()
         api_key_env = provider.get("api_key_env")
         if not isinstance(api_key_env, str) or not api_key_env:
             raise OracleVerifierSmokeError("provider key variable name is unavailable")

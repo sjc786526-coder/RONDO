@@ -1,14 +1,69 @@
 # Copy this file to the ignored repository-root `rondo.local.toml` and fill only
 # machine-specific values. The committed example is the stable loader contract.
 
-[providers.openai]
-api = "responses"
-# Any credential-free HTTPS OpenAI-compatible base URL may be used here.
-base_url = "https://api.example.com/v1"
-api_key_env = "OPENAI_API_KEY"
-main_model = "gpt-5.6-sol"
-guardian_model = "gpt-5.6-luna"
+[paid_eval]
+# Switch these three aliases in the ignored local copy; do not commit the real
+# provider domain, model identifiers, or prices.
+active_provider = "relay"
+main_model = "sol"
+guardian_model = "luna"
 guardian_reasoning_effort = "low"
+# Total upstream attempts, including the first one. Only the explicitly listed
+# complete non-2xx responses below are eligible for an unbilled retry.
+max_attempts = 5
+retry_backoff_seconds = 1.0
+
+[paid_eval.providers.relay]
+display_name = "Example Responses relay"
+api = "responses"
+base_url = "https://relay.example.com/v1"
+api_key_env = "OPENAI_API_KEY"
+unbilled_retry_statuses = [429, 500, 502, 503, 504]
+
+[paid_eval.providers.official]
+display_name = "Example official endpoint"
+api = "responses"
+base_url = "https://official.example.com/v1"
+api_key_env = "OPENAI_OFFICIAL_API_KEY"
+unbilled_retry_statuses = [429, 500, 502, 503, 504]
+
+# Prices are decimal strings in USD per million tokens. Replace every example
+# model id and rate from the official price source on the snapshot date.
+[paid_eval.models.sol]
+model_id = "example-sol-model"
+input_usd_per_million = "1.00"
+cached_input_usd_per_million = "0.10"
+output_usd_per_million = "6.00"
+long_context_threshold_tokens = 272000
+long_context_input_multiplier = "2"
+long_context_output_multiplier = "1.5"
+cache_write_input_multiplier = "1.25"
+price_snapshot_date = "2026-08-10"
+price_source_url = "https://developers.openai.com/api/docs/models/compare"
+
+[paid_eval.models.terra]
+model_id = "example-terra-model"
+input_usd_per_million = "1.00"
+cached_input_usd_per_million = "0.10"
+output_usd_per_million = "6.00"
+long_context_threshold_tokens = 272000
+long_context_input_multiplier = "2"
+long_context_output_multiplier = "1.5"
+cache_write_input_multiplier = "1.25"
+price_snapshot_date = "2026-08-10"
+price_source_url = "https://developers.openai.com/api/docs/models/compare"
+
+[paid_eval.models.luna]
+model_id = "example-luna-model"
+input_usd_per_million = "1.00"
+cached_input_usd_per_million = "0.10"
+output_usd_per_million = "6.00"
+long_context_threshold_tokens = 272000
+long_context_input_multiplier = "2"
+long_context_output_multiplier = "1.5"
+cache_write_input_multiplier = "1.25"
+price_snapshot_date = "2026-08-10"
+price_source_url = "https://developers.openai.com/api/docs/models/compare"
 
 [providers.deepseek]
 api = "chat_completions"

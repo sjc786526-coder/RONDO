@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -18,7 +19,14 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.config import RepoPaths  # noqa: E402
 from rondo_eval.artifacts import ArtifactError, ArtifactWriter  # noqa: E402
 from rondo_eval import artifacts as artifacts_module  # noqa: E402
-from rondo_eval.contracts import BinaryManifest, ProviderProjection, RunOutcome, RunSpec, Side  # noqa: E402
+from rondo_eval.contracts import (  # noqa: E402
+    BinaryManifest,
+    ModelPricing,
+    ProviderProjection,
+    RunOutcome,
+    RunSpec,
+    Side,
+)
 from rondo_eval.docker_supervisor import DockerSupervisionError  # noqa: E402
 from rondo_eval.terminal_bench.live import (  # noqa: E402
     BudgetedTerminalBenchResult,
@@ -154,14 +162,45 @@ class TerminalBenchResultTests(unittest.TestCase):
             code_mode_host_build_command=("supervised", "build-code-mode-host"),
             workspace_lock_normalization=UPSTREAM_CODEX["workspace_lock_normalization"],
         )
+        main_pricing = ModelPricing(
+            model_id="gpt-5.6-sol",
+            input_usd_per_million=Decimal("5"),
+            cached_input_usd_per_million=Decimal("0.5"),
+            output_usd_per_million=Decimal("30"),
+            long_context_threshold_tokens=272_000,
+            long_context_input_multiplier=Decimal("2"),
+            long_context_output_multiplier=Decimal("1.5"),
+            cache_write_input_multiplier=Decimal("1.25"),
+            price_snapshot_date="2026-08-10",
+            price_source_url="https://developers.openai.com/api/docs/models/compare",
+        )
+        guardian_pricing = ModelPricing(
+            model_id="gpt-5.6-luna",
+            input_usd_per_million=Decimal("0.2"),
+            cached_input_usd_per_million=Decimal("0.02"),
+            output_usd_per_million=Decimal("1.2"),
+            long_context_threshold_tokens=272_000,
+            long_context_input_multiplier=Decimal("2"),
+            long_context_output_multiplier=Decimal("1.5"),
+            cache_write_input_multiplier=Decimal("1.25"),
+            price_snapshot_date="2026-08-10",
+            price_source_url="https://developers.openai.com/api/docs/models/compare",
+        )
         provider = ProviderProjection(
             provider_id="openai",
+            display_name="Test provider",
             api="responses",
             base_url="https://provider.example/v1",
             api_key_env="OPENAI_API_KEY",
             main_model="gpt-5.6-sol",
             guardian_model="gpt-5.6-luna",
             guardian_effort="low",
+            main_pricing=main_pricing,
+            guardian_pricing=guardian_pricing,
+            max_attempts=5,
+            retry_backoff_seconds=1.0,
+            unbilled_retry_statuses=(429, 500, 502, 503, 504),
+            profile_sha256="d" * 64,
             config_sha256="b" * 64,
         )
         spec = RunSpec(
@@ -532,6 +571,16 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(
             record["cost"], {"estimated_usd": 0.012345, "actual_usd": None}
         )
+        self.assertNotIn("provider_base_url", record["config"])
+        self.assertNotIn("provider_display_name", record["config"])
+        self.assertNotIn("provider_api_key_env", record["config"])
+        self.assertNotIn("provider_config_sha256", record["config"])
+        serialized_config = json.dumps(record["config"], sort_keys=True)
+        self.assertNotIn("Test provider", serialized_config)
+        self.assertNotIn("https://provider.example/v1", serialized_config)
+        self.assertNotIn("OPENAI_API_KEY", serialized_config)
+        self.assertEqual(record["config"]["provider_profile_sha256"], "d" * 64)
+        self.assertEqual(len(record["config"]["provider_endpoint_sha256"]), 64)
         summary = json.loads((target / "run-summary.json").read_text(encoding="utf-8"))
         self.assertEqual(
             summary["config"]["bwrap_runtime_path"],
@@ -804,7 +853,12 @@ class TerminalBenchResultTests(unittest.TestCase):
     def test_completed_rondo_archives_revalidated_e_final_and_meta(self) -> None:
         run_id = "20260810-010000008-tb-rondo-r1"
         relative = self._write_guardian_bundle()
-        observation, _e_final, _meta = load_guardian_evidence_bundle(self.jobs, relative)
+        observation, _e_final, _meta = load_guardian_evidence_bundle(
+            self.jobs,
+            relative,
+            expected_model="gpt-5.6-luna",
+            expected_effort="low",
+        )
         live_result = self._live_result(run_id)
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
         object.__setattr__(live_result, "evidence", (observation,))
@@ -845,7 +899,12 @@ class TerminalBenchResultTests(unittest.TestCase):
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
         with self.assertRaises(TerminalBenchRunError):
-            load_guardian_evidence_bundle(self.jobs, relative)
+            load_guardian_evidence_bundle(
+                self.jobs,
+                relative,
+                expected_model="gpt-5.6-luna",
+                expected_effort="low",
+            )
 
     def test_outcome_exit_codes_preserve_infra_classification(self) -> None:
         self.assertEqual(terminal_bench_main._outcome_exit_code(RunOutcome.COMPLETED), 0)

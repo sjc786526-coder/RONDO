@@ -19,11 +19,9 @@ EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.api_budget_proxy import (  # noqa: E402
+    BATCH_CAP_USD,
     GUARDIAN_OUTPUT_SCHEMA,
     MAX_REQUEST_RESERVATION_USD,
-    PRICE_SNAPSHOT_DATE,
-    PRICE_SOURCE_URL,
-    TERRA_PRICE_SOURCE_URL,
     UPSTREAM_TIMEOUT_SECONDS,
     ApiBudgetProxyError,
     BudgetStopped,
@@ -37,11 +35,39 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     milestone_metadata_ready,
     price_usage,
 )
+from rondo_eval.contracts import ModelPricing  # noqa: E402
+
+
+MAIN_PRICING = ModelPricing(
+    model_id="profile-main-model",
+    input_usd_per_million=Decimal("5.00"),
+    cached_input_usd_per_million=Decimal("0.50"),
+    output_usd_per_million=Decimal("30.00"),
+    long_context_threshold_tokens=272_000,
+    long_context_input_multiplier=Decimal("2"),
+    long_context_output_multiplier=Decimal("1.5"),
+    cache_write_input_multiplier=Decimal("1.25"),
+    price_snapshot_date="2026-08-10",
+    price_source_url="https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+)
+GUARDIAN_PRICING = ModelPricing(
+    model_id="profile-guardian-model",
+    input_usd_per_million=Decimal("0.20"),
+    cached_input_usd_per_million=Decimal("0.02"),
+    output_usd_per_million=Decimal("1.20"),
+    long_context_threshold_tokens=272_000,
+    long_context_input_multiplier=Decimal("2"),
+    long_context_output_multiplier=Decimal("1.5"),
+    cache_write_input_multiplier=Decimal("1.25"),
+    price_snapshot_date="2026-08-10",
+    price_source_url="https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+)
 
 
 class _FakeUpstream:
     def __init__(self) -> None:
         self.mode = "json"
+        self.modes: list[str] = []
         self.redirect_hits = 0
         self.requests: list[dict[str, object]] = []
         self.sse_terminal_sent = threading.Event()
@@ -77,7 +103,7 @@ class _FakeUpstream:
                             "body": body,
                         }
                     )
-                    mode = owner.mode
+                    mode = owner.modes.pop(0) if owner.modes else owner.mode
                 if mode == "disconnect":
                     self.connection.shutdown(socket.SHUT_RDWR)
                     self.connection.close()
@@ -91,6 +117,30 @@ class _FakeUpstream:
                     self.send_header("Location", owner.endpoint + "/redirect-target")
                     self.send_header("Content-Length", "0")
                     self.end_headers()
+                    return
+                if mode in {
+                    "unbilled_503",
+                    "unbilled_503_with_usage",
+                    "unbilled_503_with_terminal",
+                    "malformed_503",
+                }:
+                    if mode == "malformed_503":
+                        encoded = b'{"error":'
+                    else:
+                        error: dict[str, object] = {
+                            "code": "gateway_overloaded",
+                            "message": "upstream-error-sentinel-must-not-persist",
+                        }
+                        if mode == "unbilled_503_with_usage":
+                            error["usage"] = {"input_tokens": 1, "output_tokens": 0}
+                        if mode == "unbilled_503_with_terminal":
+                            error["response"] = {"status": "completed"}
+                        encoded = json.dumps({"error": error}).encode()
+                    self.send_response(503)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(encoded)))
+                    self.end_headers()
+                    self.wfile.write(encoded)
                     return
                 if mode in {"missing_usage", "invalid_usage"}:
                     response: dict[str, object] = {"id": "fake-response", "output": []}
@@ -194,6 +244,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             ledger=self.ledger,
             run_id="benchmark-r1",
             metadata_path=self.root / "metadata.json",
+            **self._profile_kwargs(),
             _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
         ).start()
 
@@ -202,6 +253,21 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.ledger.close()
         self.upstream.close()
         self.temp.cleanup()
+
+    @staticmethod
+    def _profile_kwargs(**overrides: object) -> dict[str, object]:
+        values: dict[str, object] = {
+            "main_model": MAIN_PRICING.model_id,
+            "main_pricing": MAIN_PRICING,
+            "guardian_model": GUARDIAN_PRICING.model_id,
+            "guardian_pricing": GUARDIAN_PRICING,
+            "guardian_effort": "low",
+            "max_attempts": 5,
+            "retry_backoff_seconds": 0.0,
+            "unbilled_retry_statuses": (503,),
+        }
+        values.update(overrides)
+        return values
 
     def _post(
         self,
@@ -260,6 +326,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     ledger=self.ledger,
                     run_id=f"valid-upstream-{number}",
                     metadata_path=self.root / f"valid-upstream-{number}.json",
+                    **self._profile_kwargs(),
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
                 self.assertEqual(proxy.upstream_endpoint, endpoint)
@@ -273,6 +340,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
                 ledger=self.ledger,
                 run_id="overlong-timeout",
                 metadata_path=self.root / "overlong-timeout.json",
+                **self._profile_kwargs(),
                 timeout_seconds=900.0,
                 _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
             )
@@ -297,6 +365,20 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     ledger=self.ledger,
                     run_id=f"invalid-upstream-{number}",
                     metadata_path=self.root / f"invalid-upstream-{number}.json",
+                    **self._profile_kwargs(),
+                    _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+                )
+
+    def test_direct_proxy_boundary_requires_sorted_unique_retry_statuses(self) -> None:
+        for number, statuses in enumerate(((503, 429), (503, 503), (399,), (600,))):
+            with self.subTest(statuses=statuses), self.assertRaises(ApiBudgetProxyError):
+                LoopbackResponsesProxy(
+                    upstream_base_url="https://provider.example/v1",
+                    api_key=self.secret,
+                    ledger=self.ledger,
+                    run_id=f"invalid-statuses-{number}",
+                    metadata_path=self.root / f"invalid-statuses-{number}.json",
+                    **self._profile_kwargs(unbilled_retry_statuses=statuses),
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
 
@@ -314,7 +396,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         guardian: bool = False,
     ) -> dict[str, object]:
         body: dict[str, object] = {
-            "model": "gpt-5.6-luna" if guardian else "gpt-5.6-sol",
+            "model": GUARDIAN_PRICING.model_id if guardian else MAIN_PRICING.model_id,
             "input": [{"role": "user", "content": "secret prompt is never recorded"}],
             "stream": stream,
             "tools": [{"type": "function", "name": "local_tool"}],
@@ -339,7 +421,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             r"^http://host[.]docker[.]internal:[0-9]+/v1$",
         )
         status, response_body, headers = self._post(self._body(), role="main")
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 200, response_body)
         self.assertEqual(json.loads(response_body)["id"], "fake-response")
         self.assertIsNone(headers.get("Authorization"))
         self.assertEqual(len(self.upstream.requests), 1)
@@ -364,7 +446,9 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(observation["role_provenance"], "declared")
         self.assertEqual(observation["declared_role"], "main")
         self.assertEqual(observation["inferred_role"], "main")
-        self.assertEqual(observation["model"], "gpt-5.6-sol")
+        self.assertEqual(observation["model"], MAIN_PRICING.model_id)
+        self.assertEqual(observation["attempt_count"], 1)
+        self.assertEqual(observation["settlement_kind"], "usage_priced")
         self.assertEqual(observation["shape"]["input_items"], 1)
         self.assertEqual(len(observation["body_sha256"]), 64)
         self.assertTrue(observation["contract_match"])
@@ -544,6 +628,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             ledger=self.ledger,
             run_id="timeout-run",
             metadata_path=self.root / "timeout-metadata.json",
+            **self._profile_kwargs(),
             timeout_seconds=0.1,
             _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
         ).start()
@@ -561,6 +646,9 @@ class ApiBudgetProxyTests(unittest.TestCase):
         request = run["requests"]["timeout-request"]
         self.assertEqual(request["status"], "settled")
         self.assertFalse(request["usage_valid"])
+        self.assertEqual(request["attempt_count"], 1)
+        self.assertEqual(request["settlement_kind"], "conservative_reservation")
+        self.assertEqual(request["charged_usd"], format(MAX_REQUEST_RESERVATION_USD, "f"))
         self.assertTrue(run["stopped"])
         self.assertEqual(snapshot["reserved_usd"], "0.000000")
         observation = json.loads(
@@ -594,6 +682,28 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertTrue(observation["contract_match"])
         self.assertEqual(self.upstream.requests[0]["role"], "guardian")
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
+
+    def test_configured_non_low_guardian_effort_is_enforced(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="high-effort-run",
+            metadata_path=self.root / "high-effort-metadata.json",
+            **self._profile_kwargs(guardian_effort="high"),
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+        status, _body, _headers = self._post(
+            self._body(effort="high", guardian=True),
+            role="guardian",
+            request_id="high-effort",
+        )
+        self.assertEqual(status, 200)
+        observation = json.loads(
+            (self.root / "high-effort-metadata.json").read_text(encoding="utf-8")
+        )["requests"][0]
+        self.assertEqual(observation["reasoning_effort"], "high")
 
     def test_missing_usage_charges_reservation_stops_run_and_prevents_forward(self) -> None:
         self.upstream.mode = "missing_usage"
@@ -680,6 +790,140 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertNotIn(self.secret.encode(), (self.root / "metadata.json").read_bytes())
         self.assertNotIn(self.secret.encode(), (self.root / "budget.json").read_bytes())
 
+    def test_main_attempt_counts_one_through_five_share_one_reservation(self) -> None:
+        for expected_attempts in range(1, 6):
+            with self.subTest(expected_attempts=expected_attempts):
+                self.upstream.modes = ["unbilled_503"] * (expected_attempts - 1) + ["json"]
+                status, _body, _headers = self._post(
+                    self._body(),
+                    request_id=f"attempts-{expected_attempts}",
+                )
+                self.assertEqual(status, 200)
+                request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
+                    f"attempts-{expected_attempts}"
+                ]
+                self.assertEqual(request["attempt_count"], expected_attempts)
+                self.assertEqual(request["settlement_kind"], "usage_priced")
+                self.assertTrue(request["usage_valid"])
+
+    def test_guardian_canonical_unbilled_failure_is_retried_then_priced_once(self) -> None:
+        self.upstream.modes = ["unbilled_503", "json"]
+        status, _body, _headers = self._post(
+            self._body(effort="low", guardian=True),
+            role="guardian",
+            request_id="guardian-retry",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual([item["role"] for item in self.upstream.requests], ["guardian"] * 2)
+        request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
+            "guardian-retry"
+        ]
+        self.assertEqual(request["attempt_count"], 2)
+        self.assertEqual(request["charged_usd"], "0.000242")
+
+    def test_five_confirmed_unbilled_attempts_stop_at_zero_and_block_followup(self) -> None:
+        self.upstream.mode = "unbilled_503"
+        status, body, _headers = self._post(self._body(), request_id="exhausted")
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body)["error"]["code"], "unbilled_retry_exhausted")
+        self.assertEqual(len(self.upstream.requests), 5)
+        run = self.ledger.snapshot()["runs"]["benchmark-r1"]
+        request = run["requests"]["exhausted"]
+        self.assertEqual(request["attempt_count"], 5)
+        self.assertEqual(request["charged_usd"], "0.000000")
+        self.assertFalse(request["usage_valid"])
+        self.assertEqual(request["settlement_kind"], "operator_confirmed_unbilled")
+        self.assertEqual(run["stop_reason"], "operator_confirmed_unbilled_attempts_exhausted")
+        metadata_bytes = (self.root / "metadata.json").read_bytes()
+        ledger_bytes = (self.root / "budget.json").read_bytes()
+        observation = json.loads(metadata_bytes)["requests"][0]
+        self.assertEqual(observation["attempt_count"], 5)
+        self.assertEqual(
+            observation["settlement_kind"],
+            "operator_confirmed_unbilled",
+        )
+        self.assertNotIn(b"upstream-error-sentinel-must-not-persist", metadata_bytes)
+        self.assertNotIn(b"upstream-error-sentinel-must-not-persist", ledger_bytes)
+        before = len(self.upstream.requests)
+        status, _body, _headers = self._post(self._body(), request_id="after-exhausted")
+        self.assertEqual(status, 429)
+        self.assertEqual(len(self.upstream.requests), before)
+
+    def test_configured_status_with_usage_is_unknown_and_never_retried(self) -> None:
+        self.upstream.mode = "unbilled_503_with_usage"
+        status, body, _headers = self._post(self._body(), request_id="ambiguous")
+        self.assertEqual(status, 502)
+        self.assertEqual(json.loads(body)["error"]["code"], "unclassified_upstream_failure")
+        self.assertEqual(len(self.upstream.requests), 1)
+        run = self.ledger.snapshot()["runs"]["benchmark-r1"]
+        request = run["requests"]["ambiguous"]
+        self.assertEqual(request["attempt_count"], 1)
+        self.assertEqual(request["charged_usd"], format(MAX_REQUEST_RESERVATION_USD, "f"))
+        self.assertEqual(request["settlement_kind"], "conservative_reservation")
+        self.assertEqual(run["stop_reason"], "unclassified_upstream_failure")
+
+    def test_configured_status_with_terminal_evidence_is_never_retried(self) -> None:
+        self.upstream.mode = "unbilled_503_with_terminal"
+        status, body, _headers = self._post(
+            self._body(), request_id="terminal-ambiguous"
+        )
+        self.assertEqual(status, 502)
+        self.assertEqual(
+            json.loads(body)["error"]["code"], "unclassified_upstream_failure"
+        )
+        self.assertEqual(len(self.upstream.requests), 1)
+        request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
+            "terminal-ambiguous"
+        ]
+        self.assertEqual(request["attempt_count"], 1)
+        self.assertEqual(request["settlement_kind"], "conservative_reservation")
+
+    def test_allowlisted_malformed_response_is_unknown_and_never_retried(self) -> None:
+        self.upstream.mode = "malformed_503"
+        status, body, _headers = self._post(
+            self._body(), request_id="malformed-ambiguous"
+        )
+        self.assertEqual(status, 502)
+        self.assertEqual(
+            json.loads(body)["error"]["code"], "unclassified_upstream_failure"
+        )
+        self.assertEqual(len(self.upstream.requests), 1)
+        request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
+            "malformed-ambiguous"
+        ]
+        self.assertEqual(request["attempt_count"], 1)
+        self.assertEqual(request["settlement_kind"], "conservative_reservation")
+
+    def test_retry_backoff_and_attempts_share_one_transport_budget(self) -> None:
+        self.proxy.close()
+        now = [0.0]
+
+        def monotonic() -> float:
+            return now[0]
+
+        def sleep(seconds: float) -> None:
+            now[0] += seconds
+
+        self.upstream.mode = "unbilled_503"
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="deadline-run",
+            metadata_path=self.root / "deadline-metadata.json",
+            **self._profile_kwargs(retry_backoff_seconds=30.0),
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+            _monotonic=monotonic,
+            _sleep=sleep,
+        ).start()
+        status, _body, _headers = self._post(self._body(), request_id="deadline")
+        self.assertEqual(status, 409)
+        run = self.ledger.snapshot()["runs"]["deadline-run"]
+        self.assertEqual(run["requests"]["deadline"]["attempt_count"], 2)
+        self.assertEqual(run["spent_usd"], "0.000000")
+        self.assertEqual(run["stop_reason"], "operator_confirmed_unbilled_deadline_exhausted")
+        self.assertEqual(now[0], 30.0)
+
 
 class PersistentBudgetLedgerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -689,31 +933,51 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_frozen_main_and_guardian_pricing_and_reservation(self) -> None:
+    def test_explicit_profile_pricing_and_authorized_caps(self) -> None:
         usage = Usage(
             input_tokens=300_000,
             cached_input_tokens=100_000,
             cache_write_input_tokens=50_000,
             output_tokens=10_000,
         )
-        self.assertEqual(PRICE_SNAPSHOT_DATE, "2026-08-10")
-        self.assertEqual(
-            PRICE_SOURCE_URL,
-            "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+        terra_pricing = ModelPricing(
+            model_id="locally-selected-terra-alias",
+            input_usd_per_million=Decimal("2.00"),
+            cached_input_usd_per_million=Decimal("0.20"),
+            output_usd_per_million=Decimal("12.00"),
+            long_context_threshold_tokens=272_000,
+            long_context_input_multiplier=Decimal("2"),
+            long_context_output_multiplier=Decimal("1.5"),
+            cache_write_input_multiplier=Decimal("1.25"),
+            price_snapshot_date="2026-08-10",
+            price_source_url="https://developers.openai.com/api/docs/models/gpt-5.6-terra",
         )
-        self.assertEqual(price_usage(usage), Decimal("2.675000"))
-        self.assertEqual(
-            TERRA_PRICE_SOURCE_URL,
-            "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+        alternate_policy = ModelPricing(
+            model_id="local-model-with-different-pricing-policy",
+            input_usd_per_million=Decimal("5.00"),
+            cached_input_usd_per_million=Decimal("0.50"),
+            output_usd_per_million=Decimal("30.00"),
+            long_context_threshold_tokens=500_000,
+            long_context_input_multiplier=Decimal("1"),
+            long_context_output_multiplier=Decimal("1"),
+            cache_write_input_multiplier=Decimal("1"),
+            price_snapshot_date="2026-08-10",
+            price_source_url="https://developers.openai.com/api/docs/models/compare",
         )
+        self.assertEqual(price_usage(usage, pricing=MAIN_PRICING), Decimal("2.675000"))
         self.assertEqual(
-            price_usage(usage, model="gpt-5.6-terra"),
+            price_usage(usage, pricing=terra_pricing),
             Decimal("1.070000"),
         )
         self.assertEqual(
-            price_usage(usage, model="gpt-5.6-luna"),
+            price_usage(usage, pricing=GUARDIAN_PRICING),
             Decimal("0.107000"),
         )
+        self.assertEqual(
+            price_usage(usage, pricing=alternate_policy),
+            Decimal("1.350000"),
+        )
+        self.assertEqual(BATCH_CAP_USD, Decimal("10.00"))
         self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("5.000000"))
 
     def test_four_runs_can_reserve_and_settle_concurrently(self) -> None:
@@ -727,11 +991,13 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
         def worker(number: int) -> None:
             try:
                 barrier.wait(timeout=5)
-                ledger.reserve(f"r{number}", f"q{number}")
+                ledger.reserve(f"r{number}", f"q{number}", amount_usd=Decimal("2.5"))
+                ledger.begin_attempt(f"r{number}", f"q{number}", max_attempts=1)
                 ledger.settle(
                     f"r{number}",
                     f"q{number}",
                     Usage(1000, 0, 0, 10),
+                    pricing=MAIN_PRICING,
                 )
             except BaseException as exc:  # pragma: no cover - asserted below
                 errors.append(exc)
@@ -758,6 +1024,11 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
         self.assertTrue(run["stopped"])
         self.assertEqual(run["stop_reason"], "interrupted_request")
         self.assertEqual(run["spent_usd"], format(MAX_REQUEST_RESERVATION_USD, "f"))
+        self.assertEqual(run["requests"]["q1"]["attempt_count"], 0)
+        self.assertEqual(
+            run["requests"]["q1"]["settlement_kind"],
+            "conservative_reservation",
+        )
         with self.assertRaises(BudgetStopped):
             reopened.reserve("r1", "q2")
         reopened.close()
@@ -772,7 +1043,7 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
     def test_invalid_state_and_over_authorized_configuration_fail_closed(self) -> None:
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
-                self.root / "too-much.json", batch_id="bad", total_cap_usd="20.01"
+                self.root / "too-much.json", batch_id="bad", total_cap_usd="10.01"
             )
         path = self.root / "bad-mode.json"
         path.write_text("{}", encoding="utf-8")

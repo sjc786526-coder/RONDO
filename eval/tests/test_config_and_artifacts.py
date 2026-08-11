@@ -23,6 +23,48 @@ from rondo_eval.config import (  # noqa: E402
 )
 
 
+PAID_EVAL_CONFIG = """\
+[paid_eval]
+active_provider = "relay"
+main_model = "main"
+guardian_model = "guardian"
+guardian_reasoning_effort = "low"
+max_attempts = 1
+retry_backoff_seconds = 0
+
+[paid_eval.providers.relay]
+display_name = "Test relay"
+api = "responses"
+base_url = "https://relay.example/v1"
+api_key_env = "OPENAI_API_KEY"
+unbilled_retry_statuses = []
+
+[paid_eval.models.main]
+model_id = "test-main-model"
+input_usd_per_million = "1.00"
+cached_input_usd_per_million = "0.10"
+output_usd_per_million = "6.00"
+long_context_threshold_tokens = 272000
+long_context_input_multiplier = "2"
+long_context_output_multiplier = "1.5"
+cache_write_input_multiplier = "1.25"
+price_snapshot_date = "2026-08-10"
+price_source_url = "https://developers.openai.com/api/docs/models/compare"
+
+[paid_eval.models.guardian]
+model_id = "test-guardian-model"
+input_usd_per_million = "0.20"
+cached_input_usd_per_million = "0.02"
+output_usd_per_million = "1.20"
+long_context_threshold_tokens = 272000
+long_context_input_multiplier = "2"
+long_context_output_multiplier = "1.5"
+cache_write_input_multiplier = "1.25"
+price_snapshot_date = "2026-08-10"
+price_source_url = "https://developers.openai.com/api/docs/models/compare"
+"""
+
+
 class ConfigTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -30,7 +72,7 @@ class ConfigTests(unittest.TestCase):
         self.paths = RepoPaths(root, root)
         (root / "rondo.secrets.example.env").write_text("OPENAI_API_KEY=\n", encoding="utf-8")
         (root / "rondo.local.toml").write_text(
-            "[providers.openai]\napi_key_env = \"OPENAI_API_KEY\"\n",
+            PAID_EVAL_CONFIG,
             encoding="utf-8",
         )
         (root / ".env.local").write_text("OPENAI_API_KEY=secret-test-value\n", encoding="utf-8")
@@ -41,7 +83,10 @@ class ConfigTests(unittest.TestCase):
 
     def test_loader_returns_only_selected_secret(self) -> None:
         config = load_runtime_config(self.paths)
-        self.assertEqual(load_provider_secret(config, "openai"), ("OPENAI_API_KEY", "secret-test-value"))
+        self.assertEqual(
+            load_provider_secret(config),
+            ("OPENAI_API_KEY", "secret-test-value"),
+        )
 
     def test_shell_syntax_is_rejected(self) -> None:
         (self.paths.common_root / ".env.local").write_text(
@@ -49,11 +94,15 @@ class ConfigTests(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaises(ConfigError):
-            load_provider_secret(load_runtime_config(self.paths), "openai")
+            load_provider_secret(load_runtime_config(self.paths))
 
     def test_direct_secret_in_toml_is_rejected(self) -> None:
         (self.paths.common_root / "rondo.local.toml").write_text(
-            "[providers.openai]\napi_key = \"never-here\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+            PAID_EVAL_CONFIG.replace(
+                'api_key_env = "OPENAI_API_KEY"',
+                'api_key_env = "OPENAI_API_KEY"\napi_key = "never-here"',
+                1,
+            ),
             encoding="utf-8",
         )
         with self.assertRaises(ConfigError):
@@ -65,8 +114,8 @@ class ConfigTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.paths.common_root / "rondo.local.toml").write_text(
-            "[providers.openai]\napi_key_env = \"OPENAI_API_KEY\"\n"
-            "[local_model]\napi_key_env = \"RONDO_LOCAL_MODEL_API_KEY\"\n",
+            PAID_EVAL_CONFIG
+            + "[local_model]\napi_key_env = \"RONDO_LOCAL_MODEL_API_KEY\"\n",
             encoding="utf-8",
         )
         (self.paths.common_root / ".env.local").write_text(
@@ -85,8 +134,8 @@ class ConfigTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.paths.common_root / "rondo.local.toml").write_text(
-            "[providers.openai]\napi_key_env = \"OPENAI_API_KEY\"\n"
-            "[local_model]\napi_key_env = \"RONDO_LOCAL_MODEL_API_KEY\"\n",
+            PAID_EVAL_CONFIG
+            + "[local_model]\napi_key_env = \"RONDO_LOCAL_MODEL_API_KEY\"\n",
             encoding="utf-8",
         )
         (self.paths.common_root / ".env.local").write_text(

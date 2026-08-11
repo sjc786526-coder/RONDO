@@ -25,7 +25,8 @@ from .verifier_runtime import VerifierRuntimeError, prepare_verifier_apt_dirs
 
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
 _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-_EVAL_PROVIDER_ID = "rondo_eval_openai"
+_EVAL_PROVIDER_ID = "rondo_eval_provider"
+_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 FIX_GIT_CANONICAL_WORKDIR = "/app/personal-site"
 
 
@@ -135,8 +136,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
         ):
             raise AdapterError("model_name is required and unsafe")
         _validate_provider_inputs(provider_base_url, provider_api_key_env)
-        if guardian_model != "gpt-5.6-luna" or guardian_effort != "low":
-            raise AdapterError("guardian projection differs from the frozen P1 contract")
+        if not _MODEL_NAME.fullmatch(guardian_model):
+            raise AdapterError("guardian model is required and unsafe")
+        if guardian_effort not in _REASONING_EFFORTS:
+            raise AdapterError("guardian reasoning effort is unsupported")
 
         # Harbor supplies logger/mcp_servers/skills_dir through kwargs.  Its base
         # constructor owns these fields and its post-run parser depends on them.
@@ -451,7 +454,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 "sandbox_workspace_write.network_access=true",
                 "features.code_mode_host=true",
                 f'model_provider={json.dumps(_EVAL_PROVIDER_ID)}',
-                f'model_providers.{_EVAL_PROVIDER_ID}.name="OpenAI"',
+                f'model_providers.{_EVAL_PROVIDER_ID}.name="Configured Provider"',
                 f'model_providers.{_EVAL_PROVIDER_ID}.base_url='
                 f'{json.dumps(self._provider_base_url)}',
                 f'model_providers.{_EVAL_PROVIDER_ID}.wire_api="responses"',
@@ -481,7 +484,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"{override_args} -- {shlex.quote(instruction)} "
                 f"</dev/null 2>{shlex.quote(stderr_path)} | tee {shlex.quote(output_path)}"
             )
-            _validate_safe_codex_command(command, side=self.side)
+            _validate_safe_codex_command(
+                command,
+                side=self.side,
+                guardian_model=self._guardian_model,
+                guardian_effort=self._guardian_effort,
+            )
             await _checked_exec_as_agent(
                 environment,
                 command=command,
@@ -620,7 +628,13 @@ def _validate_provider_inputs(base_url: str, api_key_env: str) -> None:
         raise AdapterError("provider_api_key_env is invalid")
 
 
-def _validate_safe_codex_command(command: str, *, side: Side) -> None:
+def _validate_safe_codex_command(
+    command: str,
+    *,
+    side: Side,
+    guardian_model: str,
+    guardian_effort: str,
+) -> None:
     if not command.startswith("set -o pipefail; "):
         raise AdapterError("Codex output pipeline must preserve the command exit status")
     forbidden = (
@@ -641,14 +655,14 @@ def _validate_safe_codex_command(command: str, *, side: Side) -> None:
         'sandbox_mode="workspace-write"',
         "sandbox_workspace_write.network_access=true",
         "features.code_mode_host=true",
-        'model_provider="rondo_eval_openai"',
-        'model_providers.rondo_eval_openai.name="OpenAI"',
-        "model_providers.rondo_eval_openai.base_url=",
-        'model_providers.rondo_eval_openai.wire_api="responses"',
-        "model_providers.rondo_eval_openai.requires_openai_auth=true",
-        "model_providers.rondo_eval_openai.supports_websockets=false",
-        "model_providers.rondo_eval_openai.request_max_retries=0",
-        "model_providers.rondo_eval_openai.stream_max_retries=0",
+        'model_provider="rondo_eval_provider"',
+        'model_providers.rondo_eval_provider.name="Configured Provider"',
+        "model_providers.rondo_eval_provider.base_url=",
+        'model_providers.rondo_eval_provider.wire_api="responses"',
+        "model_providers.rondo_eval_provider.requires_openai_auth=true",
+        "model_providers.rondo_eval_provider.supports_websockets=false",
+        "model_providers.rondo_eval_provider.request_max_retries=0",
+        "model_providers.rondo_eval_provider.stream_max_retries=0",
     )
     if any(value not in command for value in required):
         raise AdapterError("safe Codex execution options are incomplete")
@@ -659,8 +673,8 @@ def _validate_safe_codex_command(command: str, *, side: Side) -> None:
     if "model_providers.openai." in command:
         raise AdapterError("built-in OpenAI provider may not be overridden")
     rondo_only = (
-        'auto_review.model="gpt-5.6-luna"',
-        'auto_review.reasoning_effort="low"',
+        f"auto_review.model={json.dumps(guardian_model)}",
+        f"auto_review.reasoning_effort={json.dumps(guardian_effort)}",
         'auto_review.evidence_dir="/logs/agent/guardian-evidence"',
     )
     if side is Side.RONDO and any(value not in command for value in rondo_only):

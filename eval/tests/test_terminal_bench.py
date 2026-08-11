@@ -274,15 +274,48 @@ class TerminalBenchTests(unittest.TestCase):
         return RuntimeConfig(
             paths=mock.Mock(),
             data={
-                "providers": {
-                    "openai": {
-                        "api": "responses",
-                        "base_url": "https://provider.example/v1",
-                        "api_key_env": "OPENAI_API_KEY",
-                        "main_model": "gpt-5.6-sol",
-                        "guardian_model": "gpt-5.6-luna",
-                        "guardian_reasoning_effort": "low",
-                    }
+                "paid_eval": {
+                    "active_provider": "relay",
+                    "main_model": "sol",
+                    "guardian_model": "luna",
+                    "guardian_reasoning_effort": "low",
+                    "max_attempts": 5,
+                    "retry_backoff_seconds": 1.0,
+                    "providers": {
+                        "relay": {
+                            "display_name": "Test relay",
+                            "api": "responses",
+                            "base_url": "https://provider.example/v1",
+                            "api_key_env": "OPENAI_API_KEY",
+                            "unbilled_retry_statuses": [429, 500, 502, 503, 504],
+                        }
+                    },
+                    "models": {
+                        "sol": {
+                            "model_id": "gpt-5.6-sol",
+                            "input_usd_per_million": "5",
+                            "cached_input_usd_per_million": "0.5",
+                            "output_usd_per_million": "30",
+                            "long_context_threshold_tokens": 272_000,
+                            "long_context_input_multiplier": "2",
+                            "long_context_output_multiplier": "1.5",
+                            "cache_write_input_multiplier": "1.25",
+                            "price_snapshot_date": "2026-08-10",
+                            "price_source_url": "https://developers.openai.com/api/docs/models/compare",
+                        },
+                        "luna": {
+                            "model_id": "gpt-5.6-luna",
+                            "input_usd_per_million": "0.2",
+                            "cached_input_usd_per_million": "0.02",
+                            "output_usd_per_million": "1.2",
+                            "long_context_threshold_tokens": 272_000,
+                            "long_context_input_multiplier": "2",
+                            "long_context_output_multiplier": "1.5",
+                            "cache_write_input_multiplier": "1.25",
+                            "price_snapshot_date": "2026-08-10",
+                            "price_source_url": "https://developers.openai.com/api/docs/models/compare",
+                        },
+                    },
                 }
             },
             source_sha256="b" * 64,
@@ -563,21 +596,21 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('sandbox_mode="workspace-write"', commands)
         self.assertIn("sandbox_workspace_write.network_access=true", commands)
         self.assertIn("features.code_mode_host=true", commands)
-        self.assertIn('model_provider="rondo_eval_openai"', commands)
+        self.assertIn('model_provider="rondo_eval_provider"', commands)
         self.assertIn(
-            'model_providers.rondo_eval_openai.wire_api="responses"',
+            'model_providers.rondo_eval_provider.wire_api="responses"',
             commands,
         )
         self.assertIn(
-            "model_providers.rondo_eval_openai.supports_websockets=false",
+            "model_providers.rondo_eval_provider.supports_websockets=false",
             commands,
         )
         self.assertIn(
-            "model_providers.rondo_eval_openai.request_max_retries=0",
+            "model_providers.rondo_eval_provider.request_max_retries=0",
             commands,
         )
         self.assertIn(
-            "model_providers.rondo_eval_openai.stream_max_retries=0",
+            "model_providers.rondo_eval_provider.stream_max_retries=0",
             commands,
         )
         self.assertNotIn("model_providers.openai.", commands)
@@ -603,11 +636,15 @@ class TerminalBenchTests(unittest.TestCase):
                     "2>&1",
                 ),
                 side=Side.CODEX,
+                guardian_model="gpt-5.6-luna",
+                guardian_effort="low",
             )
         with self.assertRaises(AdapterError):
             adapters_module._validate_safe_codex_command(
                 raw_codex_command.replace("features.code_mode_host=true", ""),
                 side=Side.CODEX,
+                guardian_model="gpt-5.6-luna",
+                guardian_effort="low",
             )
         with self.assertRaises(AdapterError):
             adapters_module._validate_safe_codex_command(
@@ -615,6 +652,8 @@ class TerminalBenchTests(unittest.TestCase):
                     "sandbox_workspace_write.network_access=true", ""
                 ),
                 side=Side.CODEX,
+                guardian_model="gpt-5.6-luna",
+                guardian_effort="low",
             )
         with self.assertRaises(AdapterError):
             adapters_module._validate_safe_codex_command(
@@ -623,6 +662,8 @@ class TerminalBenchTests(unittest.TestCase):
                     "features.code_mode_host=false",
                 ),
                 side=Side.CODEX,
+                guardian_model="gpt-5.6-luna",
+                guardian_effort="low",
             )
         self.assertTrue(
             all(
@@ -1149,6 +1190,7 @@ class TerminalBenchTests(unittest.TestCase):
         )
         metadata = self.root / "api-metadata.json"
         metadata.write_text(json.dumps({
+            "schema_version": 1,
             "requests": [{
                 "role": "guardian",
                 "role_provenance": "declared",
@@ -1156,6 +1198,8 @@ class TerminalBenchTests(unittest.TestCase):
                 "inferred_role": "guardian",
                 "contract_match": True,
                 "usage_valid": True,
+                "attempt_count": 1,
+                "settlement_kind": "usage_priced",
             }]
         }))
         observed: dict[str, object] = {}

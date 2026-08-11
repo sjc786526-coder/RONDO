@@ -1,9 +1,9 @@
-"""Bounded Plan 012 provider probes with no response-body logging."""
+"""Bounded configured-provider probes with no response-body logging."""
 
 from __future__ import annotations
 
+import hashlib
 import json
-import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -13,14 +13,12 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, urlopen
 
 from .api_budget_proxy import (
-    OFFICIAL_MODEL,
-    TERRA_MODEL,
+    GUARDIAN_OUTPUT_SCHEMA,
     UPSTREAM_TIMEOUT_SECONDS,
     ApiBudgetProxyError,
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
     _NoRedirect,
-    _SseUsageCollector,
     _UrllibTransport,
     _atomic_private_json,
     _compatible_responses_endpoint,
@@ -30,8 +28,10 @@ from .config import ConfigError, RepoPaths, RuntimeConfig, load_provider_secret,
 from .exit_codes import EVIDENCE_ERROR, SUCCESS
 
 
-PROBE_BATCH_ID = "plan012-provider-responses-r2"
-PROBE_RUN_ID = "plan012-provider-responses-r2"
+PROBE_BATCH_ID = "plan013-configured-provider-probe-v2"
+PROBE_RUN_ID = "plan013-configured-provider-probe-v2"
+# v2 receives only the remaining 5 USD of Plan 013's local authorization. The
+# execution log distinguishes the earlier v1 transport failure from ledger facts.
 PROBE_TOTAL_CAP_USD = Decimal("5")
 PROBE_MAX_OUTPUT_TOKENS = 64
 PROBE_CLIENT_TIMEOUT_SECONDS = 120.0
@@ -47,11 +47,15 @@ class ProviderProbeError(RuntimeError):
 @dataclass(frozen=True)
 class ProviderResponseProbe:
     name: str
+    role: str
+    model: str
     http_status: int
     stream: bool
     terminal: bool
     usage_valid: bool
     charged_usd: str
+    attempt_count: int
+    settlement_kind: str
 
 
 def probe_models_status(
@@ -112,18 +116,29 @@ def run_provider_probes(
     output_root: Path,
     _transport: _UrllibTransport | None = None,
 ) -> dict[str, object]:
-    """Run the two remaining bounded Responses probes after the models timeout."""
+    """Run one main and one Guardian-shaped request through the budget proxy."""
 
-    provider = config.provider("openai")
-    base_url = provider.get("base_url")
-    model = provider.get("main_model")
-    if not isinstance(base_url, str) or model not in {OFFICIAL_MODEL, TERRA_MODEL}:
-        raise ProviderProbeError("provider probe configuration differs from the frozen main model")
+    provider = config.paid_provider_projection()
+    base_url = provider.base_url
     output_root = Path(output_root)
     if output_root.exists() or output_root.is_symlink():
-        raise ProviderProbeError("provider probe output already exists; retries are disabled")
+        _reconcile_existing_probe(output_root)
     output_root.mkdir(parents=True, mode=0o700)
     output_root.chmod(0o700)
+    profile_summary: dict[str, object] = {
+        "schema_version": 1,
+        "batch_id": PROBE_BATCH_ID,
+        "run_id": PROBE_RUN_ID,
+        "provider_profile_sha256": provider.profile_sha256,
+        "provider_endpoint_sha256": hashlib.sha256(
+            base_url.encode("utf-8")
+        ).hexdigest(),
+        "main_model": provider.main_model,
+        "guardian_model": provider.guardian_model,
+        "guardian_effort": provider.guardian_effort,
+        "total_cap_usd": format(PROBE_TOTAL_CAP_USD, "f"),
+    }
+    _atomic_private_json(output_root / "profile.json", profile_summary)
     metadata_path = output_root / "api-metadata.json"
     probes: list[ProviderResponseProbe] = []
     ledger_path = output_root / "budget.json"
@@ -132,39 +147,173 @@ def run_provider_probes(
         batch_id=PROBE_BATCH_ID,
         total_cap_usd=PROBE_TOTAL_CAP_USD,
         max_runs=1,
-        default_run_cap_usd=PROBE_TOTAL_CAP_USD,
+        default_run_cap_usd=Decimal("5"),
     ) as ledger:
-        with LoopbackResponsesProxy(
-            upstream_base_url=base_url,
-            api_key=api_key,
-            ledger=ledger,
-            run_id=PROBE_RUN_ID,
-            metadata_path=metadata_path,
-            main_model=model,
-            timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
-            _transport=_transport,
-        ) as proxy:
-            for name, stream in (("nonstream", False), ("stream", True)):
-                probes.append(
-                    _run_responses_probe(
-                        proxy, ledger, name=name, stream=stream, model=model
+        try:
+            with LoopbackResponsesProxy(
+                upstream_base_url=base_url,
+                api_key=api_key,
+                ledger=ledger,
+                run_id=PROBE_RUN_ID,
+                metadata_path=metadata_path,
+                main_model=provider.main_model,
+                main_pricing=provider.main_pricing,
+                guardian_model=provider.guardian_model,
+                guardian_pricing=provider.guardian_pricing,
+                guardian_effort=provider.guardian_effort,
+                max_attempts=provider.max_attempts,
+                retry_backoff_seconds=provider.retry_backoff_seconds,
+                unbilled_retry_statuses=provider.unbilled_retry_statuses,
+                timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
+                _transport=_transport,
+            ) as proxy:
+                for name, role, model in (
+                    ("main", "main", provider.main_model),
+                    ("guardian", "guardian", provider.guardian_model),
+                ):
+                    probes.append(
+                        _run_responses_probe(
+                            proxy,
+                            ledger,
+                            name=name,
+                            role=role,
+                            model=model,
+                            guardian_effort=provider.guardian_effort,
+                        )
                     )
-                )
-        snapshot = ledger.snapshot()
+            snapshot = ledger.snapshot()
+        except (ApiBudgetProxyError, ProviderProbeError, OSError, ValueError) as exc:
+            snapshot = ledger.snapshot()
+            _atomic_private_json(
+                output_root / "receipt.json",
+                _probe_receipt(
+                    profile_summary,
+                    snapshot,
+                    probes=probes,
+                    status="failed",
+                    failure_reason=_safe_failure_reason(exc),
+                ),
+            )
+            raise
     if snapshot["reserved_usd"] != "0.000000":
         raise ProviderProbeError("provider probe reservation did not settle")
-    receipt: dict[str, object] = {
-        "schema_version": 1,
-        "batch_id": PROBE_BATCH_ID,
-        "model": model,
-        "request_count": 2,
-        "responses": [probe.__dict__ for probe in probes],
-        "spent_usd": snapshot["spent_usd"],
-        "reserved_usd": snapshot["reserved_usd"],
-        "total_cap_usd": snapshot["total_cap_usd"],
-    }
+    receipt = _probe_receipt(profile_summary, snapshot, probes=probes, status="completed")
     _atomic_private_json(output_root / "receipt.json", receipt)
     return receipt
+
+
+def _probe_receipt(
+    profile_summary: dict[str, object],
+    snapshot: dict[str, Any],
+    *,
+    probes: list[ProviderResponseProbe],
+    status: str,
+    failure_reason: str | None = None,
+) -> dict[str, object]:
+    runs = snapshot.get("runs")
+    run = runs.get(PROBE_RUN_ID) if isinstance(runs, dict) else None
+    requests = run.get("requests") if isinstance(run, dict) else {}
+    if not isinstance(requests, dict):
+        requests = {}
+    receipt: dict[str, object] = {
+        **profile_summary,
+        "schema_version": 2,
+        "status": status,
+        "logical_request_count": len(requests),
+        "upstream_attempt_count": sum(
+            item.get("attempt_count", 0)
+            for item in requests.values()
+            if isinstance(item, dict) and isinstance(item.get("attempt_count"), int)
+        ),
+        "responses": [probe.__dict__ for probe in probes],
+        "settlements": {
+            request_id: {
+                key: item.get(key)
+                for key in (
+                    "status",
+                    "charged_usd",
+                    "usage_valid",
+                    "attempt_count",
+                    "settlement_kind",
+                )
+            }
+            for request_id, item in requests.items()
+            if isinstance(request_id, str) and isinstance(item, dict)
+        },
+        "estimated_spent_usd": snapshot["spent_usd"],
+        "actual_usd": None,
+        "reserved_usd": snapshot["reserved_usd"],
+    }
+    if failure_reason is not None:
+        receipt["failure_reason"] = failure_reason
+    return receipt
+
+
+def _reconcile_existing_probe(output_root: Path) -> None:
+    if output_root.is_symlink() or not output_root.is_dir():
+        raise ProviderProbeError("provider probe output path is unsafe")
+    ledger_path = output_root / "budget.json"
+    if ledger_path.is_symlink() or not ledger_path.is_file():
+        raise ProviderProbeError("existing provider probe has no safe budget ledger")
+    with PersistentBudgetLedger(
+        ledger_path,
+        batch_id=PROBE_BATCH_ID,
+        total_cap_usd=PROBE_TOTAL_CAP_USD,
+        max_runs=1,
+        default_run_cap_usd=Decimal("5"),
+    ) as ledger:
+        snapshot = ledger.snapshot()
+    receipt_path = output_root / "receipt.json"
+    profile_path = output_root / "profile.json"
+    if profile_path.is_file() and not profile_path.is_symlink():
+        try:
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ProviderProbeError("existing provider probe profile is unreadable") from exc
+        if not isinstance(profile, dict):
+            raise ProviderProbeError("existing provider probe profile is invalid")
+        previous_receipt: object = None
+        if receipt_path.exists() or receipt_path.is_symlink():
+            if receipt_path.is_symlink() or not receipt_path.is_file():
+                raise ProviderProbeError("existing provider probe receipt is unsafe")
+            try:
+                previous_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ProviderProbeError("existing provider probe receipt is unreadable") from exc
+            if not isinstance(previous_receipt, dict):
+                raise ProviderProbeError("existing provider probe receipt is invalid")
+        current_summary = _probe_receipt(
+            profile,
+            snapshot,
+            probes=[],
+            status="reconciled_without_retry",
+        )
+        comparison_keys = (
+            "logical_request_count",
+            "upstream_attempt_count",
+            "settlements",
+            "estimated_spent_usd",
+            "reserved_usd",
+        )
+        receipt_is_current = isinstance(previous_receipt, dict) and all(
+            previous_receipt.get(key) == current_summary[key]
+            for key in comparison_keys
+        )
+        if not receipt_is_current:
+            current_summary["failure_reason"] = (
+                "previous_process_ended_before_receipt"
+                if previous_receipt is None
+                else "previous_receipt_updated_after_ledger_recovery"
+            )
+            _atomic_private_json(receipt_path, current_summary)
+    raise ProviderProbeError("provider probe output already exists; ledger reconciled without retry")
+
+
+def _safe_failure_reason(exc: BaseException) -> str:
+    reason = str(exc)
+    if not reason or len(reason) > 256 or any(character in reason for character in "\r\n\0"):
+        return "provider probe failed"
+    return reason
 
 
 def _run_responses_probe(
@@ -172,28 +321,42 @@ def _run_responses_probe(
     ledger: PersistentBudgetLedger,
     *,
     name: str,
-    stream: bool,
-    model: str = OFFICIAL_MODEL,
+    role: str,
+    model: str,
+    guardian_effort: str,
 ) -> ProviderResponseProbe:
-    body = json.dumps(
-        {
-            "model": model,
-            "input": "Reply only with OK.",
-            "reasoning": {"effort": "low"},
-            "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
-            "stream": stream,
-        },
-        separators=(",", ":"),
-    ).encode("utf-8")
+    if role not in {"main", "guardian"}:
+        raise ProviderProbeError("provider probe role is invalid")
+    request_value: dict[str, object] = {
+        "model": model,
+        "input": (
+            "Return an allow decision that matches the required JSON schema."
+            if role == "guardian"
+            else "Reply only with OK."
+        ),
+        "reasoning": {"effort": guardian_effort if role == "guardian" else "low"},
+        "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
+        "stream": False,
+    }
+    if role == "guardian":
+        request_value["text"] = {
+            "format": {
+                "type": "json_schema",
+                "name": "guardian_decision",
+                "strict": True,
+                "schema": GUARDIAN_OUTPUT_SCHEMA,
+            }
+        }
+    body = json.dumps(request_value, separators=(",", ":")).encode("utf-8")
     request = Request(
         proxy.base_url + "/responses",
         data=body,
         headers={
             "Authorization": f"Bearer {proxy.downstream_api_key}",
             "Content-Type": "application/json",
-            "Accept": "text/event-stream" if stream else "application/json",
-            "X-RONDO-Eval-Role": "main",
-            "X-RONDO-Eval-Request-Id": f"plan012-{name}",
+            "Accept": "application/json",
+            "X-RONDO-Eval-Role": role,
+            "X-RONDO-Eval-Request-Id": f"plan013-{name}",
             "User-Agent": PROBE_USER_AGENT,
             "originator": "codex_cli_rs",
         },
@@ -211,21 +374,14 @@ def _run_responses_probe(
         raise ProviderProbeError(f"{name} Responses probe transport failed") from exc
     if len(payload) > _MAX_PROBE_RESPONSE_BYTES or not 200 <= status < 300:
         raise ProviderProbeError(f"{name} Responses probe returned an invalid response")
-    if stream:
-        collector = _SseUsageCollector()
-        collector.feed(payload)
-        collector.finish()
-        terminal = collector.completed
-        usage_valid = collector.usage is not None
-    else:
-        try:
-            response_value = json.loads(payload)
-        except (UnicodeError, json.JSONDecodeError):
-            response_value = None
-        terminal = isinstance(response_value, dict) and response_value.get("status") == "completed"
-        usage_valid = _usage_from_json_bytes(payload) is not None
+    try:
+        response_value = json.loads(payload)
+    except (UnicodeError, json.JSONDecodeError):
+        response_value = None
+    terminal = isinstance(response_value, dict) and response_value.get("status") == "completed"
+    usage_valid = _usage_from_json_bytes(payload) is not None
     snapshot = ledger.snapshot()
-    request_state = snapshot["runs"][PROBE_RUN_ID]["requests"].get(f"plan012-{name}")
+    request_state = snapshot["runs"][PROBE_RUN_ID]["requests"].get(f"plan013-{name}")
     settled = (
         isinstance(request_state, dict)
         and request_state.get("status") == "settled"
@@ -235,11 +391,15 @@ def _run_responses_probe(
         raise ProviderProbeError(f"{name} Responses probe lacked terminal usage settlement")
     return ProviderResponseProbe(
         name=name,
+        role=role,
+        model=model,
         http_status=status,
-        stream=stream,
+        stream=False,
         terminal=terminal,
         usage_valid=usage_valid,
         charged_usd=str(request_state["charged_usd"]),
+        attempt_count=int(request_state["attempt_count"]),
+        settlement_kind=str(request_state["settlement_kind"]),
     )
 
 
@@ -247,7 +407,7 @@ def main() -> int:
     try:
         paths = RepoPaths.discover(Path.cwd())
         config = load_runtime_config(paths)
-        _secret_name, api_key = load_provider_secret(config, "openai")
+        _secret_name, api_key = load_provider_secret(config)
         receipt = run_provider_probes(
             config,
             api_key,
@@ -255,7 +415,7 @@ def main() -> int:
                 paths.common_root
                 / "eval-data"
                 / "provider-probes"
-                / "plan012-v8-responses-r2"
+                / "plan013-configured-provider-probe-v2"
             ),
         )
         print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))

@@ -284,15 +284,48 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         return RuntimeConfig(
             paths=mock.Mock(),
             data={
-                "providers": {
-                    "openai": {
-                        "api": "responses",
-                        "base_url": "https://provider.example/v1",
-                        "api_key_env": "OPENAI_API_KEY",
-                        "main_model": "gpt-5.6-sol",
-                        "guardian_model": "gpt-5.6-luna",
-                        "guardian_reasoning_effort": "low",
-                    }
+                "paid_eval": {
+                    "active_provider": "openai",
+                    "main_model": "sol",
+                    "guardian_model": "luna",
+                    "guardian_reasoning_effort": "low",
+                    "max_attempts": 5,
+                    "retry_backoff_seconds": 1.0,
+                    "providers": {
+                        "openai": {
+                            "display_name": "No-API fixture",
+                            "api": "responses",
+                            "base_url": "https://provider.example/v1",
+                            "api_key_env": "OPENAI_API_KEY",
+                            "unbilled_retry_statuses": [429, 500, 502, 503, 504],
+                        }
+                    },
+                    "models": {
+                        "sol": {
+                            "model_id": "gpt-5.6-sol",
+                            "input_usd_per_million": "5",
+                            "cached_input_usd_per_million": "0.5",
+                            "output_usd_per_million": "30",
+                            "long_context_threshold_tokens": 272_000,
+                            "long_context_input_multiplier": "2",
+                            "long_context_output_multiplier": "1.5",
+                            "cache_write_input_multiplier": "1.25",
+                            "price_snapshot_date": "2026-08-10",
+                            "price_source_url": "https://developers.openai.com/api/docs/models/compare",
+                        },
+                        "luna": {
+                            "model_id": "gpt-5.6-luna",
+                            "input_usd_per_million": "0.2",
+                            "cached_input_usd_per_million": "0.02",
+                            "output_usd_per_million": "1.2",
+                            "long_context_threshold_tokens": 272_000,
+                            "long_context_input_multiplier": "2",
+                            "long_context_output_multiplier": "1.5",
+                            "cache_write_input_multiplier": "1.25",
+                            "price_snapshot_date": "2026-08-10",
+                            "price_source_url": "https://developers.openai.com/api/docs/models/compare",
+                        },
+                    },
                 }
             },
             source_sha256="b" * 64,

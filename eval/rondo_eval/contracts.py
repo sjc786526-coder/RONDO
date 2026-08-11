@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import asdict, dataclass
+from datetime import date
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit
@@ -12,8 +14,14 @@ from urllib.parse import urlsplit
 
 SCHEMA_VERSION = 1
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
+_PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _MAX_RUN_TIMEOUT_SECONDS = 3600
 _MAX_RUN_RETRIES = 10
+_MAX_RETRY_BACKOFF_SECONDS = 30.0
+_MAX_RATE_USD_PER_MILLION = Decimal("1000")
+_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
+_OFFICIAL_PRICE_SOURCE_HOSTS = {"developers.openai.com", "platform.openai.com"}
 
 
 class ContractError(ValueError):
@@ -101,43 +109,241 @@ class BinaryManifest:
 
 
 @dataclass(frozen=True)
+class ModelPricing:
+    """Immutable official Standard token pricing for one configured model."""
+
+    model_id: str
+    input_usd_per_million: Decimal
+    cached_input_usd_per_million: Decimal
+    output_usd_per_million: Decimal
+    long_context_threshold_tokens: int
+    long_context_input_multiplier: Decimal
+    long_context_output_multiplier: Decimal
+    cache_write_input_multiplier: Decimal
+    price_snapshot_date: str
+    price_source_url: str
+
+    def validate(self) -> None:
+        if not isinstance(self.model_id, str) or not _MODEL_ID.fullmatch(self.model_id):
+            raise ContractError("model id is invalid")
+        for value in (
+            self.input_usd_per_million,
+            self.cached_input_usd_per_million,
+            self.output_usd_per_million,
+            self.long_context_input_multiplier,
+            self.long_context_output_multiplier,
+            self.cache_write_input_multiplier,
+        ):
+            if (
+                not isinstance(value, Decimal)
+                or not value.is_finite()
+                or value <= 0
+                or value > _MAX_RATE_USD_PER_MILLION
+            ):
+                raise ContractError("model price must be a positive bounded Decimal")
+        if (
+            isinstance(self.long_context_threshold_tokens, bool)
+            or not isinstance(self.long_context_threshold_tokens, int)
+            or not 1 <= self.long_context_threshold_tokens <= 10_000_000
+        ):
+            raise ContractError("long-context threshold must be a bounded token count")
+        if not isinstance(self.price_snapshot_date, str):
+            raise ContractError("model price snapshot date must be ISO YYYY-MM-DD")
+        try:
+            parsed_date = date.fromisoformat(self.price_snapshot_date)
+        except (TypeError, ValueError) as exc:
+            raise ContractError("model price snapshot date must be ISO YYYY-MM-DD") from exc
+        if parsed_date.isoformat() != self.price_snapshot_date:
+            raise ContractError("model price snapshot date must be ISO YYYY-MM-DD")
+        if not isinstance(self.price_source_url, str):
+            raise ContractError("model price source URL is invalid")
+        if (
+            self.price_source_url != self.price_source_url.strip()
+            or any(
+                ord(character) < 0x20 or character == "\\"
+                for character in self.price_source_url
+            )
+        ):
+            raise ContractError("model price source URL is invalid")
+        try:
+            parsed_url = urlsplit(self.price_source_url)
+            parsed_url.port
+        except (TypeError, ValueError) as exc:
+            raise ContractError("model price source URL is invalid") from exc
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname not in _OFFICIAL_PRICE_SOURCE_HOSTS
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or parsed_url.query
+            or parsed_url.fragment
+            or not parsed_url.path.startswith("/")
+        ):
+            raise ContractError("model price source must be an official HTTPS URL")
+
+    def to_dict(self) -> dict[str, str]:
+        self.validate()
+        return {
+            "model_id": self.model_id,
+            "input_usd_per_million": _canonical_decimal(
+                self.input_usd_per_million
+            ),
+            "cached_input_usd_per_million": _canonical_decimal(
+                self.cached_input_usd_per_million
+            ),
+            "output_usd_per_million": _canonical_decimal(
+                self.output_usd_per_million
+            ),
+            "long_context_threshold_tokens": str(
+                self.long_context_threshold_tokens
+            ),
+            "long_context_input_multiplier": _canonical_decimal(
+                self.long_context_input_multiplier
+            ),
+            "long_context_output_multiplier": _canonical_decimal(
+                self.long_context_output_multiplier
+            ),
+            "cache_write_input_multiplier": _canonical_decimal(
+                self.cache_write_input_multiplier
+            ),
+            "price_snapshot_date": self.price_snapshot_date,
+            "price_source_url": self.price_source_url,
+        }
+
+
+@dataclass(frozen=True)
 class ProviderProjection:
-    """Immutable, non-secret projection of one provider from rondo.local.toml."""
+    """Immutable, non-secret paid-eval profile resolved from rondo.local.toml."""
 
     provider_id: str
+    display_name: str
     api: str
     base_url: str
     api_key_env: str
     main_model: str
     guardian_model: str
     guardian_effort: str
+    main_pricing: ModelPricing
+    guardian_pricing: ModelPricing
+    max_attempts: int
+    retry_backoff_seconds: float
+    unbilled_retry_statuses: tuple[int, ...]
+    profile_sha256: str
     config_sha256: str
     config_source: str = "rondo.local.toml"
 
     def validate(self) -> None:
-        if not self.provider_id or self.api != "responses":
-            raise ContractError("provider id and Responses API are required")
-        parsed = urlsplit(self.base_url)
+        if not isinstance(self.provider_id, str) or not _PROFILE_NAME.fullmatch(
+            self.provider_id
+        ):
+            raise ContractError("provider id is invalid")
         if (
-            parsed.scheme not in {"http", "https"}
+            not isinstance(self.display_name, str)
+            or self.display_name != self.display_name.strip()
+            or not 1 <= len(self.display_name) <= 128
+            or any(ord(character) < 0x20 for character in self.display_name)
+        ):
+            raise ContractError("provider display name is invalid")
+        if self.api != "responses":
+            raise ContractError("provider id and Responses API are required")
+        if (
+            not isinstance(self.base_url, str)
+            or not self.base_url
+            or self.base_url != self.base_url.strip()
+            or any(ord(character) < 0x20 or character == "\\" for character in self.base_url)
+        ):
+            raise ContractError("provider base_url must be a credential-free HTTPS URL")
+        try:
+            parsed = urlsplit(self.base_url)
+            parsed.port
+        except ValueError as exc:
+            raise ContractError("provider base_url must be a credential-free HTTPS URL") from exc
+        if (
+            parsed.scheme != "https"
             or not parsed.netloc
+            or parsed.hostname is None
             or parsed.username is not None
             or parsed.password is not None
             or parsed.query
             or parsed.fragment
         ):
-            raise ContractError("provider base_url must be a credential-free HTTP URL")
-        if not _ENV_NAME.fullmatch(self.api_key_env):
-            raise ContractError("provider api_key_env is invalid")
-        if (
-            self.main_model != "gpt-5.6-sol"
-            or self.guardian_model != "gpt-5.6-luna"
-            or self.guardian_effort != "low"
+            raise ContractError("provider base_url must be a credential-free HTTPS URL")
+        if not isinstance(self.api_key_env, str) or not _ENV_NAME.fullmatch(
+            self.api_key_env
         ):
-            raise ContractError("provider projection differs from the frozen P1 model contract")
+            raise ContractError("provider api_key_env is invalid")
+        if not isinstance(self.main_pricing, ModelPricing) or not isinstance(
+            self.guardian_pricing, ModelPricing
+        ):
+            raise ContractError("provider pricing profiles are invalid")
+        self.main_pricing.validate()
+        self.guardian_pricing.validate()
+        if (
+            self.main_model != self.main_pricing.model_id
+            or self.guardian_model != self.guardian_pricing.model_id
+        ):
+            raise ContractError("provider models differ from their pricing profiles")
+        if self.main_model == self.guardian_model and self.main_pricing != self.guardian_pricing:
+            raise ContractError("one model id cannot have conflicting price profiles")
+        if (
+            not isinstance(self.guardian_effort, str)
+            or self.guardian_effort not in _REASONING_EFFORTS
+        ):
+            raise ContractError("guardian reasoning effort is invalid")
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or not 1 <= self.max_attempts <= 5
+        ):
+            raise ContractError("provider max_attempts must be an integer from 1 through 5")
+        if (
+            isinstance(self.retry_backoff_seconds, bool)
+            or not isinstance(self.retry_backoff_seconds, (int, float))
+            or not math.isfinite(self.retry_backoff_seconds)
+            or not 0 <= self.retry_backoff_seconds <= _MAX_RETRY_BACKOFF_SECONDS
+        ):
+            raise ContractError("provider retry backoff must be from 0 through 30 seconds")
+        if (
+            not isinstance(self.unbilled_retry_statuses, tuple)
+            or any(
+                isinstance(status, bool)
+                or not isinstance(status, int)
+                or not 400 <= status <= 599
+                for status in self.unbilled_retry_statuses
+            )
+            or len(self.unbilled_retry_statuses)
+            != len(set(self.unbilled_retry_statuses))
+            or self.unbilled_retry_statuses
+            != tuple(sorted(self.unbilled_retry_statuses))
+        ):
+            raise ContractError("unbilled retry statuses must be unique sorted HTTP errors")
+        if self.max_attempts > 1 and not self.unbilled_retry_statuses:
+            raise ContractError("multiple attempts require an unbilled retry status allowlist")
+        _require_sha256(self.profile_sha256, "paid eval profile sha256")
         _require_sha256(self.config_sha256, "runtime config sha256")
         if self.config_source != "rondo.local.toml":
             raise ContractError("provider projection must originate from rondo.local.toml")
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        return {
+            "provider_id": self.provider_id,
+            "display_name": self.display_name,
+            "api": self.api,
+            "base_url": self.base_url,
+            "api_key_env": self.api_key_env,
+            "main_model": self.main_model,
+            "guardian_model": self.guardian_model,
+            "guardian_effort": self.guardian_effort,
+            "main_pricing": self.main_pricing.to_dict(),
+            "guardian_pricing": self.guardian_pricing.to_dict(),
+            "max_attempts": self.max_attempts,
+            "retry_backoff_seconds": self.retry_backoff_seconds,
+            "unbilled_retry_statuses": list(self.unbilled_retry_statuses),
+            "profile_sha256": self.profile_sha256,
+            "config_sha256": self.config_sha256,
+            "config_source": self.config_source,
+        }
 
 
 @dataclass(frozen=True)
@@ -210,7 +416,7 @@ class RunSpec:
             "task_id": self.task_id,
             "task_image_digest": self.task_image_digest,
             "terminal_bench_version": self.terminal_bench_version,
-            "provider": asdict(self.provider),
+            "provider": self.provider.to_dict(),
             "approvals_reviewer": self.approvals_reviewer,
             "approval_policy": self.approval_policy,
             "sandbox_mode": self.sandbox_mode,
@@ -226,6 +432,7 @@ class RunSpec:
         self.validate()
         value = asdict(self)
         value["side"] = self.side.value
+        value["provider"] = self.provider.to_dict()
         value["binary"]["build_command"] = list(self.binary.build_command)
         value["binary"]["code_mode_host_build_command"] = list(
             self.binary.code_mode_host_build_command
@@ -255,10 +462,22 @@ def assert_fair_pair(first: RunSpec, second: RunSpec) -> None:
 
 
 def _require_sha256(value: str, label: str) -> None:
-    if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(char not in "0123456789abcdef" for char in value)
+    ):
         raise ContractError(f"{label} must be 64 lowercase hexadecimal characters")
 
 
 def _require_commit(value: str, label: str) -> None:
-    if len(value) != 40 or any(char not in "0123456789abcdef" for char in value):
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(char not in "0123456789abcdef" for char in value)
+    ):
         raise ContractError(f"{label} must be 40 lowercase hexadecimal characters")
+
+
+def _canonical_decimal(value: Decimal) -> str:
+    return format(value.normalize(), "f")

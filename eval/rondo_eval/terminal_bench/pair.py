@@ -1243,10 +1243,24 @@ def _compare_record_fairness(
     if projected[0] != projected[1] or projected[0] != expected:
         reasons.append("pair_fairness_mismatch")
     configs = [record["config"] for record in records]
-    if configs[0].get("provider_base_url") != configs[1].get("provider_base_url"):
-        reasons.append("pair_provider_base_url_mismatch")
-    if configs[0].get("provider_config_sha256") != configs[1].get("provider_config_sha256"):
-        reasons.append("pair_provider_config_mismatch")
+    profile_hashes = [config.get("provider_profile_sha256") for config in configs]
+    endpoint_hashes = [config.get("provider_endpoint_sha256") for config in configs]
+    if all(isinstance(value, str) for value in profile_hashes + endpoint_hashes):
+        if profile_hashes[0] != profile_hashes[1]:
+            reasons.append("pair_provider_profile_mismatch")
+        if endpoint_hashes[0] != endpoint_hashes[1]:
+            reasons.append("pair_provider_endpoint_mismatch")
+    elif all(config.get("provider_base_url") is not None for config in configs):
+        # Compatibility for append-only v8 records. New results never publish
+        # the raw endpoint or whole local-config digest.
+        if configs[0].get("provider_base_url") != configs[1].get("provider_base_url"):
+            reasons.append("pair_provider_base_url_mismatch")
+        if configs[0].get("provider_config_sha256") != configs[1].get(
+            "provider_config_sha256"
+        ):
+            reasons.append("pair_provider_config_mismatch")
+    else:
+        reasons.append("pair_provider_profile_missing")
     for record in records:
         side = Side(record["side"])
         if record.get("binary_sha256") != identity.bundles[side].cli_sha256:

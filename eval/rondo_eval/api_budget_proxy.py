@@ -18,6 +18,7 @@ import secrets
 import socket
 import stat
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_UP
@@ -28,29 +29,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .contracts import ModelPricing
 
-OFFICIAL_MODEL = "gpt-5.6-sol"
-TERRA_MODEL = "gpt-5.6-terra"
-GUARDIAN_MODEL = "gpt-5.6-luna"
-PRICE_SNAPSHOT_DATE = "2026-08-10"
-PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
-TERRA_PRICE_SOURCE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
-INPUT_USD_PER_MILLION = Decimal("5.00")
-CACHED_INPUT_USD_PER_MILLION = Decimal("0.50")
-OUTPUT_USD_PER_MILLION = Decimal("30.00")
-TERRA_INPUT_USD_PER_MILLION = Decimal("2.00")
-TERRA_CACHED_INPUT_USD_PER_MILLION = Decimal("0.20")
-TERRA_OUTPUT_USD_PER_MILLION = Decimal("12.00")
-GUARDIAN_INPUT_USD_PER_MILLION = Decimal("0.20")
-GUARDIAN_CACHED_INPUT_USD_PER_MILLION = Decimal("0.02")
-GUARDIAN_OUTPUT_USD_PER_MILLION = Decimal("1.20")
-LONG_CONTEXT_THRESHOLD = 272_000
-LONG_INPUT_MULTIPLIER = Decimal("2")
-LONG_OUTPUT_MULTIPLIER = Decimal("1.5")
-CACHE_WRITE_MULTIPLIER = Decimal("1.25")
 MAX_INPUT_TOKENS = 1_050_000
 MAX_OUTPUT_TOKENS = 128_000
-BATCH_CAP_USD = Decimal("20.00")
+BATCH_CAP_USD = Decimal("10.00")
 RUN_CAP_USD = Decimal("5.00")
 MAX_BENCHMARK_RUNS = 4
 _MONEY_QUANTUM = Decimal("0.000001")
@@ -77,6 +60,28 @@ _RETRY_HEADERS = (
 _LITE_HEADER = "x-openai-internal-codex-responses-lite"
 _MAX_USER_AGENT_BYTES = 512
 _MAX_ORIGINATOR_BYTES = 64
+_MAX_UPSTREAM_ATTEMPTS = 5
+_GUARDIAN_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
+_SETTLEMENT_USAGE_PRICED = "usage_priced"
+_SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED = "operator_confirmed_unbilled"
+_SETTLEMENT_CONSERVATIVE_RESERVATION = "conservative_reservation"
+_SETTLEMENT_KINDS = {
+    _SETTLEMENT_USAGE_PRICED,
+    _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED,
+    _SETTLEMENT_CONSERVATIVE_RESERVATION,
+}
+_STOP_REASONS = {
+    "missing_or_invalid_usage",
+    "interrupted_request",
+    "upstream_deadline_exhausted",
+    "upstream_unavailable",
+    "upstream_failure",
+    "unclassified_upstream_failure",
+    "upstream_non_success",
+    "upstream_response_unavailable",
+    "operator_confirmed_unbilled_attempts_exhausted",
+    "operator_confirmed_unbilled_deadline_exhausted",
+}
 GUARDIAN_OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -135,36 +140,35 @@ class Settlement:
     charged_usd: Decimal
     usage_valid: bool
     run_stopped: bool
+    attempt_count: int
+    settlement_kind: str
 
 
-def price_usage(usage: Usage, *, model: str = OFFICIAL_MODEL) -> Decimal:
-    """Price one frozen main or Guardian request using official Standard rates."""
+def price_usage(usage: Usage, *, pricing: ModelPricing) -> Decimal:
+    """Price one request using the selected local provider profile snapshot."""
 
     usage.validate()
-    if model == OFFICIAL_MODEL:
-        input_rate = INPUT_USD_PER_MILLION
-        cached_input_rate = CACHED_INPUT_USD_PER_MILLION
-        output_rate = OUTPUT_USD_PER_MILLION
-    elif model == TERRA_MODEL:
-        input_rate = TERRA_INPUT_USD_PER_MILLION
-        cached_input_rate = TERRA_CACHED_INPUT_USD_PER_MILLION
-        output_rate = TERRA_OUTPUT_USD_PER_MILLION
-    elif model == GUARDIAN_MODEL:
-        input_rate = GUARDIAN_INPUT_USD_PER_MILLION
-        cached_input_rate = GUARDIAN_CACHED_INPUT_USD_PER_MILLION
-        output_rate = GUARDIAN_OUTPUT_USD_PER_MILLION
-    else:
-        raise ApiBudgetProxyError("usage model differs from the frozen pair")
-    long_context = usage.input_tokens > LONG_CONTEXT_THRESHOLD
-    input_multiplier = LONG_INPUT_MULTIPLIER if long_context else Decimal(1)
-    output_multiplier = LONG_OUTPUT_MULTIPLIER if long_context else Decimal(1)
+    try:
+        pricing.validate()
+    except (AttributeError, ValueError) as exc:
+        raise ApiBudgetProxyError("model pricing is invalid") from exc
+    input_rate = pricing.input_usd_per_million
+    cached_input_rate = pricing.cached_input_usd_per_million
+    output_rate = pricing.output_usd_per_million
+    long_context = usage.input_tokens > pricing.long_context_threshold_tokens
+    input_multiplier = (
+        pricing.long_context_input_multiplier if long_context else Decimal(1)
+    )
+    output_multiplier = (
+        pricing.long_context_output_multiplier if long_context else Decimal(1)
+    )
     uncached = usage.input_tokens - usage.cached_input_tokens - usage.cache_write_input_tokens
     input_cost = (
         Decimal(uncached) * input_rate
         + Decimal(usage.cached_input_tokens) * cached_input_rate
         + Decimal(usage.cache_write_input_tokens)
         * input_rate
-        * CACHE_WRITE_MULTIPLIER
+        * pricing.cache_write_input_multiplier
     ) * input_multiplier
     output_cost = Decimal(usage.output_tokens) * output_rate * output_multiplier
     return ((input_cost + output_cost) / Decimal(1_000_000)).quantize(
@@ -172,23 +176,14 @@ def price_usage(usage: Usage, *, model: str = OFFICIAL_MODEL) -> Decimal:
     )
 
 
-_MAX_REQUEST_USAGE = Usage(
-    input_tokens=MAX_INPUT_TOKENS,
-    cached_input_tokens=0,
-    cache_write_input_tokens=MAX_INPUT_TOKENS,
-    output_tokens=MAX_OUTPUT_TOKENS,
-)
-MAX_REQUEST_RESERVATION_USD = min(
-    RUN_CAP_USD,
-    max(
-        price_usage(_MAX_REQUEST_USAGE, model=OFFICIAL_MODEL),
-        price_usage(_MAX_REQUEST_USAGE, model=GUARDIAN_MODEL),
-    ),
-).quantize(_MONEY_QUANTUM)
+# The reservation is independent of the selected model price.  A profile may
+# switch models without weakening the fail-closed per-run authorization cap.
+MAX_REQUEST_RESERVATION_USD = RUN_CAP_USD.quantize(_MONEY_QUANTUM)
 
-# This transport deadline is deliberately independent from the 900/1800 second
-# Harbor task deadline.  A provider request must settle while the agent is
-# still alive so an upstream stall cannot leave only a reservation behind.
+# This transport budget is deliberately independent from the 900/1800 second
+# Harbor task deadline. Attempts, backoff, and body reads consume one monotonic
+# budget; urllib cannot hard-cancel DNS/connect/header work, so crash recovery
+# still conservatively settles any reservation that outlives the process.
 UPSTREAM_TIMEOUT_SECONDS = 90.0
 
 
@@ -211,7 +206,7 @@ class PersistentBudgetLedger:
         self.default_run_cap = _money(default_run_cap_usd)
         self.max_runs = max_runs
         if self.total_cap <= 0 or self.total_cap > BATCH_CAP_USD:
-            raise ApiBudgetProxyError("batch cap exceeds the authorized 20 USD maximum")
+            raise ApiBudgetProxyError("batch cap exceeds the authorized 10 USD maximum")
         if self.default_run_cap <= 0 or self.default_run_cap > RUN_CAP_USD:
             raise ApiBudgetProxyError("run cap exceeds the authorized 5 USD maximum")
         if not isinstance(max_runs, int) or isinstance(max_runs, bool) or not 1 <= max_runs <= 4:
@@ -332,9 +327,39 @@ class PersistentBudgetLedger:
                 "reserved_usd": _money_text(amount),
                 "charged_usd": None,
                 "usage_valid": None,
+                "attempt_count": 0,
+                "settlement_kind": None,
             }
             self._persist()
             return amount
+
+    def begin_attempt(self, run_id: str, request_id: str, *, max_attempts: int) -> int:
+        """Persist one upstream attempt before any bytes can leave the process."""
+
+        if (
+            isinstance(max_attempts, bool)
+            or not isinstance(max_attempts, int)
+            or not 1 <= max_attempts <= _MAX_UPSTREAM_ATTEMPTS
+        ):
+            raise ApiBudgetProxyError("upstream attempt limit is invalid")
+        with self._lock:
+            self._assert_open()
+            run = self._require_run(run_id)
+            request_state = run["requests"].get(request_id)
+            if not isinstance(request_state, dict) or request_state.get("status") != "reserved":
+                raise ApiBudgetProxyError("request has no active reservation")
+            attempt_count = request_state["attempt_count"]
+            if (
+                isinstance(attempt_count, bool)
+                or not isinstance(attempt_count, int)
+                or attempt_count < 0
+                or attempt_count >= max_attempts
+            ):
+                raise ApiBudgetProxyError("upstream attempt limit is exhausted")
+            attempt_count += 1
+            request_state["attempt_count"] = attempt_count
+            self._persist()
+            return attempt_count
 
     def settle(
         self,
@@ -342,8 +367,11 @@ class PersistentBudgetLedger:
         request_id: str,
         usage: Usage | None,
         *,
-        model: str = OFFICIAL_MODEL,
+        pricing: ModelPricing,
+        stop_reason: str | None = None,
     ) -> Settlement:
+        if stop_reason is not None and stop_reason not in _STOP_REASONS:
+            raise ApiBudgetProxyError("budget stop reason is invalid")
         with self._lock:
             self._assert_open()
             run = self._require_run(run_id)
@@ -355,20 +383,75 @@ class PersistentBudgetLedger:
             try:
                 if usage is None:
                     raise ApiBudgetProxyError("response usage is missing")
-                charged = price_usage(usage, model=model)
+                charged = price_usage(usage, pricing=pricing)
                 if charged > reserved:
                     raise ApiBudgetProxyError("response usage exceeds the request reservation")
             except ApiBudgetProxyError:
                 charged = reserved
                 usage_valid = False
                 run["stopped"] = True
-                run["stop_reason"] = "missing_or_invalid_usage"
+                run["stop_reason"] = stop_reason or "missing_or_invalid_usage"
+                settlement_kind = _SETTLEMENT_CONSERVATIVE_RESERVATION
+            else:
+                settlement_kind = _SETTLEMENT_USAGE_PRICED
+                if stop_reason is not None:
+                    run["stopped"] = True
+                    run["stop_reason"] = stop_reason
             request_state["status"] = "settled"
             request_state["charged_usd"] = _money_text(charged)
             request_state["usage_valid"] = usage_valid
+            request_state["settlement_kind"] = settlement_kind
             run["spent_usd"] = _money_text(Decimal(run["spent_usd"]) + charged)
             self._persist()
-            return Settlement(charged, usage_valid, bool(run["stopped"]))
+            return Settlement(
+                charged,
+                usage_valid,
+                bool(run["stopped"]),
+                request_state["attempt_count"],
+                settlement_kind,
+            )
+
+    def settle_operator_confirmed_unbilled(
+        self,
+        run_id: str,
+        request_id: str,
+        *,
+        stop_reason: str,
+    ) -> Settlement:
+        """Settle an allowlisted canonical provider rejection at zero charge."""
+
+        if stop_reason not in {
+            "operator_confirmed_unbilled_attempts_exhausted",
+            "operator_confirmed_unbilled_deadline_exhausted",
+        }:
+            raise ApiBudgetProxyError("budget stop reason is invalid")
+        with self._lock:
+            self._assert_open()
+            run = self._require_run(run_id)
+            request_state = run["requests"].get(request_id)
+            if not isinstance(request_state, dict) or request_state.get("status") != "reserved":
+                raise ApiBudgetProxyError("request has no active reservation")
+            attempt_count = request_state["attempt_count"]
+            if (
+                isinstance(attempt_count, bool)
+                or not isinstance(attempt_count, int)
+                or not 1 <= attempt_count <= _MAX_UPSTREAM_ATTEMPTS
+            ):
+                raise ApiBudgetProxyError("unbilled settlement has no persisted attempt")
+            request_state["status"] = "settled"
+            request_state["charged_usd"] = _money_text(Decimal(0))
+            request_state["usage_valid"] = False
+            request_state["settlement_kind"] = _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED
+            run["stopped"] = True
+            run["stop_reason"] = stop_reason
+            self._persist()
+            return Settlement(
+                Decimal(0),
+                False,
+                True,
+                attempt_count,
+                _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED,
+            )
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -439,6 +522,7 @@ class PersistentBudgetLedger:
                 request_state["status"] = "settled"
                 request_state["charged_usd"] = _money_text(charged)
                 request_state["usage_valid"] = False
+                request_state["settlement_kind"] = _SETTLEMENT_CONSERVATIVE_RESERVATION
                 run["spent_usd"] = _money_text(Decimal(run["spent_usd"]) + charged)
                 run["stopped"] = True
                 run["stop_reason"] = "interrupted_request"
@@ -524,6 +608,8 @@ class RedactedMetadataStore:
             "upstream_status",
             "usage_valid",
             "charged_usd",
+            "attempt_count",
+            "settlement_kind",
         }
         if set(observation) != expected:
             raise ApiBudgetProxyError("metadata observation differs from schema v1")
@@ -597,9 +683,18 @@ class LoopbackResponsesProxy:
         ledger: PersistentBudgetLedger,
         run_id: str,
         metadata_path: Path,
-        main_model: str = OFFICIAL_MODEL,
+        main_model: str,
+        main_pricing: ModelPricing,
+        guardian_model: str,
+        guardian_pricing: ModelPricing,
+        guardian_effort: str,
+        max_attempts: int,
+        retry_backoff_seconds: float,
+        unbilled_retry_statuses: tuple[int, ...],
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         _transport: _UrllibTransport | None = None,
+        _monotonic: Any = time.monotonic,
+        _sleep: Any = time.sleep,
     ):
         self.upstream_endpoint = _compatible_responses_endpoint(upstream_base_url)
         if not api_key or "\r" in api_key or "\n" in api_key:
@@ -611,20 +706,67 @@ class LoopbackResponsesProxy:
         ):
             raise ApiBudgetProxyError("proxy timeout must be within the 90 second limit")
         _require_safe_id(run_id, "run id")
-        if main_model not in {OFFICIAL_MODEL, TERRA_MODEL}:
-            raise ApiBudgetProxyError("proxy main model is unsupported")
+        try:
+            main_pricing.validate()
+            guardian_pricing.validate()
+        except (AttributeError, ValueError) as exc:
+            raise ApiBudgetProxyError("proxy model pricing is invalid") from exc
+        if main_model != main_pricing.model_id or guardian_model != guardian_pricing.model_id:
+            raise ApiBudgetProxyError("proxy model differs from its pricing snapshot")
+        if main_model == guardian_model and main_pricing != guardian_pricing:
+            raise ApiBudgetProxyError("one proxy model cannot have conflicting pricing")
+        if guardian_effort not in _GUARDIAN_EFFORTS:
+            raise ApiBudgetProxyError("proxy Guardian reasoning effort is invalid")
+        if (
+            isinstance(max_attempts, bool)
+            or not isinstance(max_attempts, int)
+            or not 1 <= max_attempts <= _MAX_UPSTREAM_ATTEMPTS
+        ):
+            raise ApiBudgetProxyError("proxy attempts must be between one and five")
+        if (
+            isinstance(retry_backoff_seconds, bool)
+            or not isinstance(retry_backoff_seconds, (int, float))
+            or not math.isfinite(retry_backoff_seconds)
+            or not 0 <= retry_backoff_seconds <= 30
+        ):
+            raise ApiBudgetProxyError("proxy retry backoff is invalid")
+        if (
+            not isinstance(unbilled_retry_statuses, tuple)
+            or unbilled_retry_statuses != tuple(sorted(unbilled_retry_statuses))
+            or len(set(unbilled_retry_statuses)) != len(unbilled_retry_statuses)
+            or any(
+                isinstance(status, bool)
+                or not isinstance(status, int)
+                or not 400 <= status <= 599
+                for status in unbilled_retry_statuses
+            )
+        ):
+            raise ApiBudgetProxyError("proxy unbilled retry statuses are invalid")
+        if not callable(_monotonic) or not callable(_sleep):
+            raise ApiBudgetProxyError("proxy clock is invalid")
         ledger.ensure_run(run_id)
         self._api_key = api_key
         self._downstream_api_key = "rondo-eval-" + secrets.token_urlsafe(32)
         self._ledger = ledger
         self._run_id = run_id
         self._main_model = main_model
+        self._guardian_model = guardian_model
+        self._guardian_effort = guardian_effort
+        self._pricing_by_role = {
+            "main": main_pricing,
+            "guardian": guardian_pricing,
+        }
+        self._max_attempts = max_attempts
+        self._retry_backoff_seconds = float(retry_backoff_seconds)
+        self._unbilled_retry_statuses = frozenset(unbilled_retry_statuses)
         self._metadata = RedactedMetadataStore(
             metadata_path,
             secrets_to_exclude=(api_key, self._downstream_api_key),
         )
         self._timeout = timeout_seconds
         self._transport = _transport or _UrllibTransport()
+        self._monotonic = _monotonic
+        self._sleep = _sleep
         self._server: _LoopbackServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -766,7 +908,11 @@ class LoopbackResponsesProxy:
         try:
             _require_safe_id(request_id, "request id")
             request_metadata = _inspect_request(
-                body, declared_role, main_model=self._main_model
+                body,
+                declared_role,
+                main_model=self._main_model,
+                guardian_model=self._guardian_model,
+                guardian_effort=self._guardian_effort,
             )
             if declared_role is None:
                 declared_role = request_metadata["role"]
@@ -795,24 +941,160 @@ class LoopbackResponsesProxy:
             value = handler.headers.get(name)
             if value:
                 headers[name] = value
-        try:
-            upstream = self._transport.open(
-                self.upstream_endpoint,
-                body=body,
-                headers=headers,
-                timeout=self._timeout,
+        pricing = self._pricing_by_role[request_metadata["role"]]
+        deadline = self._monotonic() + self._timeout
+        last_unbilled_status = 0
+        while True:
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                if last_unbilled_status:
+                    self._stop_confirmed_unbilled(
+                        handler,
+                        request_id,
+                        request_metadata,
+                        last_unbilled_status,
+                        "operator_confirmed_unbilled_deadline_exhausted",
+                    )
+                else:
+                    settlement = self._ledger.settle(
+                        self._run_id,
+                        request_id,
+                        None,
+                        pricing=pricing,
+                        stop_reason="upstream_deadline_exhausted",
+                    )
+                    self._save_observation(request_id, request_metadata, 0, settlement)
+                    self._reject(handler, 502, "upstream_deadline_exhausted")
+                return
+            attempt_count = self._ledger.begin_attempt(
+                self._run_id,
+                request_id,
+                max_attempts=self._max_attempts,
             )
-            self._relay(handler, upstream, request_id, request_metadata)
-        except HTTPError as response:
-            self._relay(handler, response, request_id, request_metadata)
-        except (OSError, URLError, TimeoutError, socket.timeout):
-            settlement = self._ledger.settle(self._run_id, request_id, None)
-            self._save_observation(request_id, request_metadata, 0, settlement)
-            self._reject(handler, 502, "upstream_unavailable")
-        except Exception:
-            settlement = self._ledger.settle(self._run_id, request_id, None)
-            self._save_observation(request_id, request_metadata, 0, settlement)
-            self._reject(handler, 502, "upstream_failure")
+            try:
+                upstream = self._transport.open(
+                    self.upstream_endpoint,
+                    body=body,
+                    headers=headers,
+                    timeout=remaining,
+                )
+            except HTTPError as response:
+                upstream = response
+            except (OSError, URLError, TimeoutError, socket.timeout):
+                settlement = self._ledger.settle(
+                    self._run_id,
+                    request_id,
+                    None,
+                    pricing=pricing,
+                    stop_reason="upstream_unavailable",
+                )
+                self._save_observation(request_id, request_metadata, 0, settlement)
+                self._reject(handler, 502, "upstream_unavailable")
+                return
+            except Exception:
+                settlement = self._ledger.settle(
+                    self._run_id,
+                    request_id,
+                    None,
+                    pricing=pricing,
+                    stop_reason="upstream_failure",
+                )
+                self._save_observation(request_id, request_metadata, 0, settlement)
+                self._reject(handler, 502, "upstream_failure")
+                return
+
+            try:
+                status = int(getattr(upstream, "status", getattr(upstream, "code", 502)))
+            except (TypeError, ValueError):
+                try:
+                    upstream.close()
+                except Exception:
+                    pass
+                settlement = self._ledger.settle(
+                    self._run_id,
+                    request_id,
+                    None,
+                    pricing=pricing,
+                    stop_reason="unclassified_upstream_failure",
+                )
+                self._save_observation(request_id, request_metadata, 0, settlement)
+                self._reject(handler, 502, "unclassified_upstream_failure")
+                return
+            if status not in self._unbilled_retry_statuses:
+                self._relay(
+                    handler,
+                    upstream,
+                    request_id,
+                    request_metadata,
+                    deadline=deadline,
+                    stop_reason=None if 200 <= status <= 299 else "upstream_non_success",
+                )
+                return
+            confirmed_unbilled = _is_operator_confirmed_unbilled(
+                upstream,
+                deadline=deadline,
+                monotonic=self._monotonic,
+            )
+            try:
+                upstream.close()
+            except Exception:
+                confirmed_unbilled = False
+            if not confirmed_unbilled:
+                settlement = self._ledger.settle(
+                    self._run_id,
+                    request_id,
+                    None,
+                    pricing=pricing,
+                    stop_reason="unclassified_upstream_failure",
+                )
+                self._save_observation(request_id, request_metadata, status, settlement)
+                self._reject(handler, 502, "unclassified_upstream_failure")
+                return
+
+            last_unbilled_status = status
+            if attempt_count >= self._max_attempts:
+                self._stop_confirmed_unbilled(
+                    handler,
+                    request_id,
+                    request_metadata,
+                    status,
+                    "operator_confirmed_unbilled_attempts_exhausted",
+                )
+                return
+            delay = self._retry_backoff_seconds * (2 ** (attempt_count - 1))
+            remaining = deadline - self._monotonic()
+            if delay >= remaining:
+                self._stop_confirmed_unbilled(
+                    handler,
+                    request_id,
+                    request_metadata,
+                    status,
+                    "operator_confirmed_unbilled_deadline_exhausted",
+                )
+                return
+            if delay:
+                self._sleep(delay)
+
+    def _stop_confirmed_unbilled(
+        self,
+        handler: BaseHTTPRequestHandler,
+        request_id: str,
+        request_metadata: Mapping[str, Any],
+        upstream_status: int,
+        stop_reason: str,
+    ) -> None:
+        settlement = self._ledger.settle_operator_confirmed_unbilled(
+            self._run_id,
+            request_id,
+            stop_reason=stop_reason,
+        )
+        self._save_observation(
+            request_id,
+            request_metadata,
+            upstream_status,
+            settlement,
+        )
+        self._reject(handler, 409, "unbilled_retry_exhausted")
 
     def _authenticate(self, handler: BaseHTTPRequestHandler) -> bool:
         values = handler.headers.get_all("Authorization", [])
@@ -832,9 +1114,13 @@ class LoopbackResponsesProxy:
         upstream: Any,
         request_id: str,
         request_metadata: dict[str, Any],
+        *,
+        deadline: float,
+        stop_reason: str | None,
     ) -> None:
         status = int(getattr(upstream, "status", getattr(upstream, "code", 502)))
         content_type = upstream.headers.get("Content-Type", "application/json")
+        pricing = self._pricing_by_role[request_metadata["role"]]
         usage: Usage | None = None
         if content_type.lower().split(";", 1)[0].strip() == "text/event-stream":
             handler.send_response(status)
@@ -847,6 +1133,11 @@ class LoopbackResponsesProxy:
             writable = True
             try:
                 while True:
+                    _enforce_upstream_deadline(
+                        upstream,
+                        deadline=deadline,
+                        monotonic=self._monotonic,
+                    )
                     remaining = _MAX_RESPONSE_BYTES - total
                     if remaining <= 0:
                         usage = None
@@ -876,23 +1167,43 @@ class LoopbackResponsesProxy:
             except (OSError, URLError, TimeoutError, socket.timeout):
                 usage = None
                 status = 0
+                stop_reason = "upstream_response_unavailable"
             finally:
                 upstream.close()
             settlement = self._ledger.settle(
                 self._run_id,
                 request_id,
                 usage,
-                model=request_metadata["model"],
+                pricing=pricing,
+                stop_reason=stop_reason,
             )
             self._save_observation(request_id, request_metadata, status, settlement)
         else:
-            response_body, usage = _read_completed_json_response(upstream)
+            try:
+                response_body, usage = _read_completed_json_response(
+                    upstream,
+                    deadline=deadline,
+                    monotonic=self._monotonic,
+                )
+            except (OSError, URLError, TimeoutError, socket.timeout):
+                upstream.close()
+                settlement = self._ledger.settle(
+                    self._run_id,
+                    request_id,
+                    None,
+                    pricing=pricing,
+                    stop_reason="upstream_response_unavailable",
+                )
+                self._save_observation(request_id, request_metadata, 0, settlement)
+                self._reject(handler, 502, "upstream_response_unavailable")
+                return
             upstream.close()
             settlement = self._ledger.settle(
                 self._run_id,
                 request_id,
                 usage,
-                model=request_metadata["model"],
+                pricing=pricing,
+                stop_reason=stop_reason,
             )
             self._save_observation(request_id, request_metadata, status, settlement)
             handler.send_response(status)
@@ -920,6 +1231,8 @@ class LoopbackResponsesProxy:
                 "upstream_status": status,
                 "usage_valid": settlement.usage_valid,
                 "charged_usd": _money_text(settlement.charged_usd),
+                "attempt_count": settlement.attempt_count,
+                "settlement_kind": settlement.settlement_kind,
             }
         )
         self._metadata.append(observation)
@@ -956,6 +1269,9 @@ def milestone_metadata_ready(metadata_path: Path) -> bool:
         and item.get("inferred_role") == item.get("role")
         and item.get("contract_match") is True
         and item.get("usage_valid") is True
+        and item.get("settlement_kind") == _SETTLEMENT_USAGE_PRICED
+        and isinstance(item.get("attempt_count"), int)
+        and 1 <= item["attempt_count"] <= _MAX_UPSTREAM_ATTEMPTS
         for item in requests
     )
 
@@ -1008,7 +1324,12 @@ def _validated_originator(headers: Any) -> str | None:
 
 
 def _inspect_request(
-    body: bytes, declared_role: str | None, *, main_model: str = OFFICIAL_MODEL
+    body: bytes,
+    declared_role: str | None,
+    *,
+    main_model: str,
+    guardian_model: str,
+    guardian_effort: str,
 ) -> dict[str, Any]:
     try:
         value = json.loads(body)
@@ -1050,8 +1371,10 @@ def _inspect_request(
         role_provenance = "inferred"
     else:
         raise ApiBudgetProxyError("declared request role is invalid")
-    expected_model = main_model if role == "main" else GUARDIAN_MODEL
-    contract_match = model == expected_model and (role == "main" or effort == "low")
+    expected_model = main_model if role == "main" else guardian_model
+    contract_match = model == expected_model and (
+        role == "main" or effort == guardian_effort
+    )
     if not contract_match:
         raise ApiBudgetProxyError("request model or Guardian effort differs from the frozen pair")
     input_value = value.get("input")
@@ -1114,12 +1437,111 @@ def _usage_from_json_bytes(body: bytes) -> Usage | None:
         return None
 
 
-def _read_completed_json_response(upstream: Any) -> tuple[bytes, Usage | None]:
+def _enforce_upstream_deadline(
+    upstream: Any,
+    *,
+    deadline: float,
+    monotonic: Any,
+) -> None:
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise TimeoutError("upstream absolute deadline exhausted")
+    # urllib applies its timeout per socket operation.  Tighten the live socket
+    # before every read so a trickling peer cannot restart the 90 second clock.
+    candidates = [upstream, getattr(upstream, "fp", None)]
+    candidates.append(getattr(candidates[-1], "fp", None))
+    for candidate in candidates:
+        raw = getattr(candidate, "raw", None)
+        sock = getattr(raw, "_sock", None)
+        if sock is not None and hasattr(sock, "settimeout"):
+            sock.settimeout(remaining)
+            break
+
+
+def _contains_usage_or_terminal(value: object) -> bool:
+    if isinstance(value, dict):
+        if "usage" in value or "response" in value or "output" in value:
+            return True
+        if value.get("type") in {
+            "response.completed",
+            "response.failed",
+            "response.incomplete",
+        }:
+            return True
+        if value.get("status") in {"completed", "failed", "incomplete", "cancelled"}:
+            return True
+        if value.get("terminal") is True or value.get("completed") is True:
+            return True
+        return any(_contains_usage_or_terminal(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_usage_or_terminal(item) for item in value)
+    return False
+
+
+def _is_operator_confirmed_unbilled(
+    upstream: Any,
+    *,
+    deadline: float,
+    monotonic: Any,
+) -> bool:
+    """Recognize only a complete bounded canonical non-billing error envelope."""
+
+    content_type = upstream.headers.get("Content-Type", "")
+    if (
+        not isinstance(content_type, str)
+        or content_type.lower().split(";", 1)[0].strip() != "application/json"
+    ):
+        return False
+    raw_length = upstream.headers.get("Content-Length")
+    try:
+        length = int(raw_length)
+    except (TypeError, ValueError):
+        return False
+    if length <= 0 or length > _MAX_RESPONSE_BYTES:
+        return False
+    body = bytearray()
+    try:
+        while len(body) < length:
+            _enforce_upstream_deadline(
+                upstream,
+                deadline=deadline,
+                monotonic=monotonic,
+            )
+            chunk = upstream.read(min(8192, length - len(body)))
+            if not chunk:
+                return False
+            body.extend(chunk)
+    except Exception:
+        return False
+    try:
+        value = json.loads(bytes(body))
+    except (UnicodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(value, dict)
+        and set(value) == {"error"}
+        and isinstance(value["error"], dict)
+        and bool(value["error"])
+        and not _contains_usage_or_terminal(value)
+    )
+
+
+def _read_completed_json_response(
+    upstream: Any,
+    *,
+    deadline: float,
+    monotonic: Any,
+) -> tuple[bytes, Usage | None]:
     """Read one bounded JSON response without waiting for keep-alive EOF."""
 
     body = bytearray()
     read1 = getattr(upstream, "read1", None)
     while len(body) <= _MAX_RESPONSE_BYTES:
+        _enforce_upstream_deadline(
+            upstream,
+            deadline=deadline,
+            monotonic=monotonic,
+        )
         remaining = _MAX_RESPONSE_BYTES + 1 - len(body)
         if remaining <= 0:
             break
@@ -1340,7 +1762,7 @@ def _validate_state(
             raise ApiBudgetProxyError("budget run totals are invalid")
         if not isinstance(run["stopped"], bool) or not isinstance(run["requests"], dict):
             raise ApiBudgetProxyError("budget run state is invalid")
-        if run["stop_reason"] is not None and not isinstance(run["stop_reason"], str):
+        if run["stop_reason"] is not None and run["stop_reason"] not in _STOP_REASONS:
             raise ApiBudgetProxyError("budget stop reason is invalid")
         settled_total = Decimal(0)
         for request_id, request in run["requests"].items():
@@ -1350,19 +1772,51 @@ def _validate_state(
                 "reserved_usd",
                 "charged_usd",
                 "usage_valid",
+                "attempt_count",
+                "settlement_kind",
             }:
                 raise ApiBudgetProxyError("budget request state differs from schema v1")
             reserved = _money(request["reserved_usd"])
             if reserved <= 0 or reserved > MAX_REQUEST_RESERVATION_USD:
                 raise ApiBudgetProxyError("budget reservation is invalid")
+            attempt_count = request["attempt_count"]
+            if (
+                isinstance(attempt_count, bool)
+                or not isinstance(attempt_count, int)
+                or not 0 <= attempt_count <= _MAX_UPSTREAM_ATTEMPTS
+            ):
+                raise ApiBudgetProxyError("budget attempt count is invalid")
             if request["status"] == "reserved":
-                if request["charged_usd"] is not None or request["usage_valid"] is not None:
+                if (
+                    request["charged_usd"] is not None
+                    or request["usage_valid"] is not None
+                    or request["settlement_kind"] is not None
+                ):
                     raise ApiBudgetProxyError("active budget reservation is invalid")
                 total_reserved += reserved
             elif request["status"] == "settled":
                 charged = _money(request["charged_usd"])
-                if charged > reserved or not isinstance(request["usage_valid"], bool):
+                settlement_kind = request["settlement_kind"]
+                if (
+                    charged > reserved
+                    or not isinstance(request["usage_valid"], bool)
+                    or settlement_kind not in _SETTLEMENT_KINDS
+                ):
                     raise ApiBudgetProxyError("settled budget request is invalid")
+                if settlement_kind == _SETTLEMENT_USAGE_PRICED and (
+                    request["usage_valid"] is not True or attempt_count < 1
+                ):
+                    raise ApiBudgetProxyError("priced budget settlement is invalid")
+                if settlement_kind == _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED and (
+                    request["usage_valid"] is not False
+                    or charged != 0
+                    or attempt_count < 1
+                ):
+                    raise ApiBudgetProxyError("unbilled budget settlement is invalid")
+                if settlement_kind == _SETTLEMENT_CONSERVATIVE_RESERVATION and (
+                    request["usage_valid"] is not False or charged != reserved
+                ):
+                    raise ApiBudgetProxyError("conservative budget settlement is invalid")
                 settled_total += charged
             else:
                 raise ApiBudgetProxyError("budget request status is invalid")

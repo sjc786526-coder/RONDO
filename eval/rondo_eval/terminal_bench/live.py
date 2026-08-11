@@ -90,23 +90,28 @@ async def run_budgeted_terminal_bench(
 ) -> BudgetedTerminalBenchResult:
     """Run one side through the only paid path: the local budget proxy.
 
-    The official key remains in this host process.  Harbor receives a random,
+    The selected provider key remains in this host process. Harbor receives a random,
     short-lived placeholder key and the Docker bridge URL for the loopback
-    proxy; direct official-provider transport is rejected by the runner.
+    proxy; direct upstream-provider transport is rejected by the runner.
     """
 
     if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
         raise TerminalBenchRunError("the in-memory provider key is invalid")
-    provider = config.provider(request.provider_name)
-    upstream_base_url = provider.get("base_url")
-    if not isinstance(upstream_base_url, str):
-        raise TerminalBenchRunError("the configured provider base URL is invalid")
+    provider = config.paid_provider_projection(request.provider_name)
     proxy = LoopbackResponsesProxy(
-        upstream_base_url=upstream_base_url,
+        upstream_base_url=provider.base_url,
         api_key=api_key,
         ledger=ledger,
         run_id=request.docker_task_id,
         metadata_path=metadata_path,
+        main_model=provider.main_model,
+        main_pricing=provider.main_pricing,
+        guardian_model=provider.guardian_model,
+        guardian_pricing=provider.guardian_pricing,
+        guardian_effort=provider.guardian_effort,
+        max_attempts=provider.max_attempts,
+        retry_backoff_seconds=provider.retry_backoff_seconds,
+        unbilled_retry_statuses=provider.unbilled_retry_statuses,
         timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
     )
     with proxy:
@@ -133,7 +138,15 @@ async def run_budgeted_terminal_bench(
         redaction_secrets = (api_key, proxy.downstream_api_key)
 
     metadata_ready = milestone_metadata_ready(metadata_path)
-    evidence = _collect_evidence(harbor.jobs_dir) if request.side is Side.RONDO else ()
+    evidence = (
+        _collect_evidence(
+            harbor.jobs_dir,
+            expected_model=provider.guardian_model,
+            expected_effort=provider.guardian_effort,
+        )
+        if request.side is Side.RONDO
+        else ()
+    )
     return BudgetedTerminalBenchResult(
         prepared=prepared,
         harbor=harbor,
@@ -144,7 +157,12 @@ async def run_budgeted_terminal_bench(
     )
 
 
-def _collect_evidence(jobs_dir: Path) -> tuple[EvidenceObservation, ...]:
+def _collect_evidence(
+    jobs_dir: Path,
+    *,
+    expected_model: str,
+    expected_effort: str,
+) -> tuple[EvidenceObservation, ...]:
     try:
         root = jobs_dir.resolve(strict=True)
     except OSError:
@@ -156,6 +174,8 @@ def _collect_evidence(jobs_dir: Path) -> tuple[EvidenceObservation, ...]:
         observation, _e_final_bytes, _meta_bytes = load_guardian_evidence_bundle(
             root,
             e_final_path.relative_to(root).as_posix(),
+            expected_model=expected_model,
+            expected_effort=expected_effort,
         )
         observations.append(observation)
     return tuple(observations)
@@ -164,6 +184,9 @@ def _collect_evidence(jobs_dir: Path) -> tuple[EvidenceObservation, ...]:
 def load_guardian_evidence_bundle(
     jobs_dir: Path,
     relative_path: str,
+    *,
+    expected_model: str,
+    expected_effort: str,
 ) -> tuple[EvidenceObservation, bytes, bytes]:
     """Read and fully revalidate one production Guardian evidence bundle."""
 
@@ -195,7 +218,12 @@ def load_guardian_evidence_bundle(
         raise TerminalBenchRunError("Guardian evidence policy identity is invalid") from exc
     if not identity.aggregatable or not isinstance(meta, dict):
         raise TerminalBenchRunError("Guardian evidence bundle is not aggregatable")
-    _validate_guardian_meta(meta, review_id=review_id)
+    _validate_guardian_meta(
+        meta,
+        review_id=review_id,
+        expected_model=expected_model,
+        expected_effort=expected_effort,
+    )
     return (
         EvidenceObservation(
             relative_path=relative.as_posix(),
@@ -203,8 +231,8 @@ def load_guardian_evidence_bundle(
             guardian_source_baseline=GUARDIAN_SOURCE_BASELINE,
             guardian_source_commit=GUARDIAN_SOURCE_COMMIT,
             policy=identity,
-            model="gpt-5.6-luna",
-            reasoning_effort="low",
+            model=expected_model,
+            reasoning_effort=expected_effort,
             terminal_status=meta["terminal_status"],
         ),
         e_final_bytes,
@@ -212,7 +240,13 @@ def load_guardian_evidence_bundle(
     )
 
 
-def _validate_guardian_meta(meta: Mapping[str, Any], *, review_id: str) -> None:
+def _validate_guardian_meta(
+    meta: Mapping[str, Any],
+    *,
+    review_id: str,
+    expected_model: str,
+    expected_effort: str,
+) -> None:
     if set(meta) != _GUARDIAN_META_FIELDS:
         raise TerminalBenchRunError("Guardian evidence metadata schema differs from production")
     if (
@@ -220,8 +254,8 @@ def _validate_guardian_meta(meta: Mapping[str, Any], *, review_id: str) -> None:
         or meta.get("guardian_source_baseline") != GUARDIAN_SOURCE_BASELINE
         or meta.get("guardian_source_commit") != GUARDIAN_SOURCE_COMMIT
         or meta.get("evidence") != "e_final"
-        or meta.get("model") != "gpt-5.6-luna"
-        or meta.get("reasoning_effort") != "low"
+        or meta.get("model") != expected_model
+        or meta.get("reasoning_effort") != expected_effort
     ):
         raise TerminalBenchRunError("Guardian evidence metadata differs from the freeze")
     decision = meta.get("decision")

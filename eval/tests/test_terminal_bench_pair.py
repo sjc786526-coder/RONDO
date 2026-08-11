@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.contracts import (  # noqa: E402
     BinaryManifest,
+    ModelPricing,
     ProviderProjection,
     RunSpec,
     Side,
@@ -79,12 +81,41 @@ class PairIdentityTests(unittest.TestCase):
             terminal_bench_version=fair["terminal_bench_version"],
             provider=ProviderProjection(
                 provider_id=fair["provider_id"],
+                display_name="Test provider",
                 api=fair["provider_api"],
                 base_url=base_url,
                 api_key_env=fair["provider_api_key_env"],
                 main_model=fair["main_model"],
                 guardian_model=fair["guardian_model"],
                 guardian_effort=fair["guardian_effort"],
+                main_pricing=ModelPricing(
+                    model_id=fair["main_model"],
+                    input_usd_per_million=Decimal("5"),
+                    cached_input_usd_per_million=Decimal("0.5"),
+                    output_usd_per_million=Decimal("30"),
+                    long_context_threshold_tokens=272_000,
+                    long_context_input_multiplier=Decimal("2"),
+                    long_context_output_multiplier=Decimal("1.5"),
+                    cache_write_input_multiplier=Decimal("1.25"),
+                    price_snapshot_date="2026-08-10",
+                    price_source_url="https://developers.openai.com/api/docs/models/compare",
+                ),
+                guardian_pricing=ModelPricing(
+                    model_id=fair["guardian_model"],
+                    input_usd_per_million=Decimal("0.2"),
+                    cached_input_usd_per_million=Decimal("0.02"),
+                    output_usd_per_million=Decimal("1.2"),
+                    long_context_threshold_tokens=272_000,
+                    long_context_input_multiplier=Decimal("2"),
+                    long_context_output_multiplier=Decimal("1.5"),
+                    cache_write_input_multiplier=Decimal("1.25"),
+                    price_snapshot_date="2026-08-10",
+                    price_source_url="https://developers.openai.com/api/docs/models/compare",
+                ),
+                max_attempts=5,
+                retry_backoff_seconds=1.0,
+                unbilled_retry_statuses=(429, 500, 502, 503, 504),
+                profile_sha256="d" * 64,
                 config_sha256=config_sha256,
             ),
             timeout_seconds=fair["timeout_seconds"],
@@ -282,6 +313,39 @@ class PairIdentityTests(unittest.TestCase):
             )
             self.assertEqual(drifted["m1"], "failed")
             self.assertIn("pair_provider_base_url_mismatch", drifted["reasons"])
+
+            hashed_records = json.loads(json.dumps(records))
+            for record in hashed_records:
+                record["config"]["provider_profile_sha256"] = "d" * 64
+                record["config"]["provider_endpoint_sha256"] = "e" * 64
+            hashed_ledger_path = Path(directory) / "paid-hashed.json"
+            with PairSequenceLedger(
+                hashed_ledger_path, identity=paid_identity, mode="paid"
+            ) as hashed_sequence:
+                for side, record in zip(
+                    (Side.RONDO, Side.CODEX), hashed_records, strict=True
+                ):
+                    hashed_sequence.claim(
+                        side=side,
+                        run_id=record["run_id"],
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                    )
+                    hashed_sequence.finish(
+                        run_id=record["run_id"],
+                        completed=True,
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                        publication_sha256=terminal_record_sha256(record),
+                        container_metrics=self._container_metrics(side),
+                    )
+            hashed = assess_m1(
+                hashed_records, paid_identity, pair_ledger_path=hashed_ledger_path
+            )
+            self.assertEqual(hashed["m1"], "passed")
+            hashed_records[1]["config"]["provider_endpoint_sha256"] = "f" * 64
+            hashed_drift = assess_m1(
+                hashed_records, paid_identity, pair_ledger_path=hashed_ledger_path
+            )
+            self.assertIn("pair_provider_endpoint_mismatch", hashed_drift["reasons"])
 
             split = json.loads(ledger_path.read_text(encoding="utf-8"))
             split["runs"][1]["status"] = "publishing"

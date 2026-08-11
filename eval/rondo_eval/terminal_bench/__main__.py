@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
             side=side,
             manifest=manifest,
         )
-        _secret_name, api_key = load_provider_secret(config, "openai")
+        _secret_name, api_key = load_provider_secret(config)
         source = paths.common_root / "eval-data" / "sources" / "terminal-bench-2-1-ffccbe05"
         work_root = paths.common_root / "eval-data" / "work" / args.run_id
         if work_root.exists() or work_root.is_symlink():

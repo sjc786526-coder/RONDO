@@ -4,6 +4,7 @@ import copy
 import json
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -13,6 +14,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.contracts import (  # noqa: E402
     BinaryManifest,
     ContractError,
+    ModelPricing,
     ProviderProjection,
     RunSpec,
     Side,
@@ -269,14 +271,45 @@ class ContractTests(unittest.TestCase):
                 "cargo", "build", "--bin", "codex-code-mode-host"
             ),
         )
+        main_pricing = ModelPricing(
+            model_id="test-main-model",
+            input_usd_per_million=Decimal("5.00"),
+            cached_input_usd_per_million=Decimal("0.50"),
+            output_usd_per_million=Decimal("30.00"),
+            long_context_threshold_tokens=272_000,
+            long_context_input_multiplier=Decimal("2"),
+            long_context_output_multiplier=Decimal("1.5"),
+            cache_write_input_multiplier=Decimal("1.25"),
+            price_snapshot_date="2026-08-10",
+            price_source_url="https://developers.openai.com/api/docs/models/compare",
+        )
+        guardian_pricing = ModelPricing(
+            model_id="test-guardian-model",
+            input_usd_per_million=Decimal("0.20"),
+            cached_input_usd_per_million=Decimal("0.02"),
+            output_usd_per_million=Decimal("1.20"),
+            long_context_threshold_tokens=272_000,
+            long_context_input_multiplier=Decimal("2"),
+            long_context_output_multiplier=Decimal("1.5"),
+            cache_write_input_multiplier=Decimal("1.25"),
+            price_snapshot_date="2026-08-10",
+            price_source_url="https://developers.openai.com/api/docs/models/compare",
+        )
         provider = ProviderProjection(
-            provider_id="openai",
+            provider_id="relay",
+            display_name="Test relay",
             api="responses",
-            base_url="https://api.openai.com/v1",
+            base_url="https://relay.example/v1",
             api_key_env="OPENAI_API_KEY",
-            main_model="gpt-5.6-sol",
-            guardian_model="gpt-5.6-luna",
+            main_model=main_pricing.model_id,
+            guardian_model=guardian_pricing.model_id,
             guardian_effort="low",
+            main_pricing=main_pricing,
+            guardian_pricing=guardian_pricing,
+            max_attempts=5,
+            retry_backoff_seconds=1.0,
+            unbilled_retry_statuses=(429, 500, 502, 503, 504),
+            profile_sha256="3" * 64,
             config_sha256="d" * 64,
         )
         return RunSpec(

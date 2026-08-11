@@ -261,3 +261,18 @@ standard/Lite 形态均补回归。
   费用 0 USD。看门狗、VHDX、容器资源与精确清理证据见本批执行日志。
 - 该验收只证明 B2 设施链路；`reward=0` 不是真实任务成绩。B3/M1 、真实 API 与 L2 model-backed
   仍未运行。
+
+### 2026-08-11 Plan 013 配置化 Provider/Model 与未计费重试
+
+- paid eval 的 provider、HTTPS base URL、main/Guardian model、reasoning effort、Standard 价卡和重试策略已从
+  生产代码固定值迁移到 ignored `rondo.local.toml` profile；active provider/main/Guardian 三个短字段可独立切换。
+  价卡同时包含基础费率、长上下文 threshold/multipliers 和 cache-write multiplier，并进入 canonical profile SHA。
+- 宿主 loopback proxy 对 main/Guardian 的每个 downstream Responses 请求执行最多 5 个 upstream attempts；只有
+  profile allowlist 中完整、规范、无 terminal/usage 的非 2xx 才按 operator-confirmed-unbilled 重试。全部 attempts
+  共用单 reservation；模糊 transport/响应失败仍一次即停并保守结算，crash recovery 不自动重发。
+- 复用既有 active key 的有界真实探针中，v2 Sol main 首次 completed、usage valid，本地价卡估算 `$0.022105`；
+  Sol Guardian 首次 HTTP 502 无法确认未计费，未重试并保守结算 `$4.977895`。加上 v1 沙箱失败的本地保守
+  `$5.000000`，Plan 013 ledger 合计达到授权上限 10 USD；供应商实际账单未查询，`actual_usd=null`。
+- `just eval-lock` 解析 85 packages；纯/fake/loopback 完整 eval 293/293 通过。没有运行 Docker、Cargo、B3、Codex
+  paid slot 或 M1。旧 v8 保持 failed/blocked；下一阶段由 Plan 014 新建 identity，并先解决 charged Guardian
+  parse retry 与 requested/effective 双侧公平门禁。

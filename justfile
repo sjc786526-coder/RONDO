@@ -33,11 +33,13 @@ eval-b3-oracle-no-api docker_host_volume metrics_dir:
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.oracle_smoke \
         --docker-host-volume "{{docker_host_volume}}"
 
-# Two strictly sequential real-provider Responses requests, capped by a private
-# 1 USD ledger: non-stream first, then stream only after valid terminal usage.
-eval-plan012-provider-probes:
+# One main and one Guardian-shaped Responses request, strictly sequential and
+# capped by the remaining private 5 USD v2 ledger within Plan 013's 10 USD
+# authorization, with at most 5 operator-confirmed-unbilled attempts per request.
+eval-plan013-provider-probes:
     @env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$PWD/eval-data/uv-cache" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.provider_probe
 
 # One supervised B2 attempt: RONDO first, Codex second, stop on the first failure.

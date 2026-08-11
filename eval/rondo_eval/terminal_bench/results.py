@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -301,7 +302,8 @@ def publish_terminal_bench_result(
         ),
         "artifacts": f"eval-data/runs/{run_id}",
         "notes": (
-            "estimated_usd is settled local budget accounting from frozen Luna Standard rates; "
+            "estimated_usd is settled local budget accounting from the selected rate-card "
+            "snapshot; "
             "actual_usd is null for non-zero spend or an unsettled reservation because no "
             "invoice was queried."
         ),
@@ -517,9 +519,17 @@ def _safe_summary(
             "guardian_effort": spec.provider.guardian_effort,
             "provider": spec.provider.provider_id,
             "provider_api": spec.provider.api,
-            "provider_base_url": spec.provider.base_url,
-            "provider_api_key_env": spec.provider.api_key_env,
-            "provider_config_sha256": spec.provider.config_sha256,
+            "provider_profile_sha256": spec.provider.profile_sha256,
+            "provider_endpoint_sha256": hashlib.sha256(
+                spec.provider.base_url.encode("utf-8")
+            ).hexdigest(),
+            "main_pricing": spec.provider.main_pricing.to_dict(),
+            "guardian_pricing": spec.provider.guardian_pricing.to_dict(),
+            "provider_max_attempts": spec.provider.max_attempts,
+            "provider_retry_backoff_seconds": spec.provider.retry_backoff_seconds,
+            "provider_unbilled_retry_statuses": list(
+                spec.provider.unbilled_retry_statuses
+            ),
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,
@@ -646,6 +656,8 @@ def _write_guardian_evidence(
         observed, e_final_bytes, meta_bytes = load_guardian_evidence_bundle(
             live_result.harbor.jobs_dir,
             expected.relative_path,
+            expected_model=live_result.prepared.spec.provider.guardian_model,
+            expected_effort=live_result.prepared.spec.provider.guardian_effort,
         )
         if observed != expected:
             raise HarborResultError("Guardian evidence changed before publication")

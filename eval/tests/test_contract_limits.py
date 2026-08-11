@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -11,6 +12,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.contracts import (  # noqa: E402
     BinaryManifest,
     ContractError,
+    ModelPricing,
     ProviderProjection,
     RunSpec,
     Side,
@@ -42,14 +44,45 @@ def _spec() -> RunSpec:
         bwrap_archive_sha256="e" * 64,
         bwrap_source_tree_sha256="f" * 64,
     )
+    main_pricing = ModelPricing(
+        model_id="test-main-model",
+        input_usd_per_million=Decimal("5.00"),
+        cached_input_usd_per_million=Decimal("0.50"),
+        output_usd_per_million=Decimal("30.00"),
+        long_context_threshold_tokens=272_000,
+        long_context_input_multiplier=Decimal("2"),
+        long_context_output_multiplier=Decimal("1.5"),
+        cache_write_input_multiplier=Decimal("1.25"),
+        price_snapshot_date="2026-08-10",
+        price_source_url="https://developers.openai.com/api/docs/models/compare",
+    )
+    guardian_pricing = ModelPricing(
+        model_id="test-guardian-model",
+        input_usd_per_million=Decimal("0.20"),
+        cached_input_usd_per_million=Decimal("0.02"),
+        output_usd_per_million=Decimal("1.20"),
+        long_context_threshold_tokens=272_000,
+        long_context_input_multiplier=Decimal("2"),
+        long_context_output_multiplier=Decimal("1.5"),
+        cache_write_input_multiplier=Decimal("1.25"),
+        price_snapshot_date="2026-08-10",
+        price_source_url="https://developers.openai.com/api/docs/models/compare",
+    )
     provider = ProviderProjection(
-        provider_id="openai",
+        provider_id="relay",
+        display_name="Test relay",
         api="responses",
-        base_url="https://api.openai.com/v1",
+        base_url="https://relay.example/v1",
         api_key_env="OPENAI_API_KEY",
-        main_model="gpt-5.6-sol",
-        guardian_model="gpt-5.6-luna",
+        main_model=main_pricing.model_id,
+        guardian_model=guardian_pricing.model_id,
         guardian_effort="low",
+        main_pricing=main_pricing,
+        guardian_pricing=guardian_pricing,
+        max_attempts=5,
+        retry_backoff_seconds=1.0,
+        unbilled_retry_statuses=(429, 500, 502, 503, 504),
+        profile_sha256="3" * 64,
         config_sha256="1" * 64,
     )
     return RunSpec(
@@ -89,6 +122,48 @@ class RunSpecLimitTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 spec = _spec()
                 object.__setattr__(spec, "max_retries", invalid)
+                with self.assertRaises(ContractError):
+                    spec.validate()
+
+    def test_provider_attempts_backoff_and_statuses_are_strict(self) -> None:
+        for valid in (1, 5):
+            with self.subTest(valid=valid):
+                spec = _spec()
+                object.__setattr__(spec.provider, "max_attempts", valid)
+                spec.validate()
+
+        for field, invalid_values in (
+            ("max_attempts", (False, 0, 1.0, 6)),
+            ("retry_backoff_seconds", (False, -1, float("nan"), float("inf"), 31)),
+            (
+                "unbilled_retry_statuses",
+                ([429], (302,), (429, 429), (500, 429), (True,)),
+            ),
+        ):
+            for invalid in invalid_values:
+                with self.subTest(field=field, invalid=invalid):
+                    spec = _spec()
+                    object.__setattr__(spec.provider, field, invalid)
+                    with self.assertRaises(ContractError):
+                        spec.validate()
+
+    def test_model_pricing_requires_decimal_rates_and_official_snapshot(self) -> None:
+        mutations = (
+            ("input_usd_per_million", 5.0),
+            ("input_usd_per_million", Decimal("NaN")),
+            ("long_context_threshold_tokens", False),
+            ("long_context_threshold_tokens", 0),
+            ("long_context_input_multiplier", 2.0),
+            ("long_context_output_multiplier", Decimal("0")),
+            ("cache_write_input_multiplier", Decimal("NaN")),
+            ("price_snapshot_date", "2026-8-10"),
+            ("price_source_url", "http://developers.openai.com/api/docs/models/compare"),
+            ("price_source_url", "https://prices.example/models"),
+        )
+        for field, invalid in mutations:
+            with self.subTest(field=field, invalid=invalid):
+                spec = _spec()
+                object.__setattr__(spec.provider.main_pricing, field, invalid)
                 with self.assertRaises(ContractError):
                     spec.validate()
 
