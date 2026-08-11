@@ -140,8 +140,8 @@
 
 - provider/verifier 的 pure/fake/loopback 门禁已通过；真实 oracle/verifier `reward=1`，Sol frozen-Codex wire
   terminal/usage/settlement 通过。v8 RONDO 运行的本地预算已完整结算为 `$5.000000`、reservation 为 0；连同
-  既有探针，本阶段本地保守计价累计 `$12.570095`，`actual_usd` 保持未知。Codex/M1 未运行，也没有可归档的
-  `E_final`。
+  既有探针与两个 Terra one-shot，本阶段本地保守计价累计 `$13.070095`，`actual_usd` 保持未知。Terra 在当前
+  provider/credential/UA 组合下返回 HTTP 403，本地配置已恢复 Sol。Codex/M1 未运行，也没有可归档的 `E_final`。
 
 ## 6. 关键决策记录
 

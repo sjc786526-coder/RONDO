@@ -65,7 +65,8 @@
   未运行。v7 shell 清除了 ambient HTTP(S)/ALL proxy，仅保留 loopback `NO_PROXY`；tracked pair 不冻结供应商域名。
   Plan 012 所有真实探针与 v8 ledger 都已 settled、没有悬挂 reservation；v8 的 5 个 Sol main 请求成功，Guardian
   Luna 请求 HTTP 503/usage invalid，单 run 本地预算按合同完整结算为 `$5.000000`。本阶段本地历史保守计价累计
-  `$12.570095`，实际中转账单未查询且 `actual_usd=null`；Codex、M1 与自然完成的 Guardian `E_final` 均不存在。
+  `$13.070095`；最新 Terra 非流探针在当前 provider/credential/UA 组合下返回 HTTP 403，本地配置已恢复 Sol。
+  实际中转账单未查询且 `actual_usd=null`；Codex、M1 与自然完成的 Guardian `E_final` 均不存在。
 
 ## 2. 方向与依赖
 
@@ -73,7 +74,7 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；Plan 012 oracle reward=1、Sol main 可用，v8 停在 Luna Guardian，B3/M1 未通过 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2 完成；Plan 012 oracle reward=1、Sol main 可用，Luna 503/Terra 403，B3/M1 未通过 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
 | 2 | 本地审批模型接入与横评 | L1 已完成；L2 仅 CPU x64 前端/运行闭包就绪，GPU/model-backed 仍待实现和验收 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
@@ -149,8 +150,9 @@ B3 的 v6 pair 已运行 RONDO 首槽但因错误固定官方 endpoint 在上游
 再次运行 RONDO 首槽，但仍在没有响应或 usage 时以 `AgentTimeoutError` 失败。两批均没有可用真实 `E_final` 种子，
 Codex 与 M1 均未运行；v7 的结果、未结算 reservation、artifact 与 watchdog 终态已保留。
 Plan 012 已验证 oracle/root verifier 的真实评分链为 `reward=1`，并把 provider transport timeout 和 SSE 终态收束
-修到可结算；但配置所指上游对 Luna 返回一次无终态、一次 HTTP 503，`/models` 也无终态。两个 probe ledger 均已
-settled，保守计价合计 `$1.510800`；因此没有创建新的 paid pair。
+修到可结算。Sol real-wire 与 v8 的 5 个 main 请求成功；Luna Guardian 返回 HTTP 503，v8 因而停止在 RONDO slot 1，
+Codex/M1 未运行。最新 Terra 非流探针在当前配置下返回 HTTP 403。所有 Plan 012 ledger 均 settled，本地保守累计
+`$13.070095`，实际账单未知。
 L2 当前只承诺 CPU x64 前端/运行闭包，GPU/model-backed 路径待后续实现和实模验收。
 执行细节、历史证据限制和未运行项记录在本批 `agent_log`。
 
