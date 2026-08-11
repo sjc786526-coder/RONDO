@@ -300,7 +300,8 @@ standard/Lite 形态均补回归。
   public result；completed/publication/M1 均要求精确 `main → guardian → main`，RONDO 另要求一份 Guardian evidence。
 - M1 改为消费去敏 public provider schema，不再要求已移除的 key env；新增真实 public producer→双侧 record→
   pair ledger→M1 集成回归，避免手写旧 schema 掩盖 producer/consumer 断裂。
-- CLI 诊断以环境白名单启动子进程，精确校验请求顺序/数量/usage/settlement、唯一最终消息以及固定审批命令的
-  started/completed/exit-code 配对，并按剩余 campaign retry 配额缩小单次 proxy attempts。
-- `just eval-lock` 解析 85 packages；纯/fake/loopback 完整 eval 321/321 通过。没有运行真实 API、Docker、Cargo、
+- CLI 诊断以环境白名单启动子进程，精确校验请求顺序/数量/usage/settlement、未停止 ledger、唯一最终消息、
+  固定审批命令的 started/completed/exit-code 与先后顺序，以及唯一成功 turn 终态；单次 proxy attempts 按剩余
+  campaign retry 配额缩小。
+- `just eval-lock` 解析 85 packages；纯/fake/loopback 完整 eval 323/323 通过。没有运行真实 API、Docker、Cargo、
   paid pair 或 M1；新 pair identity/profile drift 仍是正式付费运行前置条件。

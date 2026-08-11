@@ -68,7 +68,7 @@
   L2a/L3/L4 均未实现验收，不称“只差权重”。
 - **当前阶段：Plan 009 的 B2 轻量双侧 no-API Docker 验收已通过；Plan 013 的配置化 provider/model/rate 与
   未计费 retry 设施已完成；双端 Sol/Sol 已连续 3 轮零重试通过。Plan 014 已闭合 proxy 生命周期、main effort、
-  Guardian 审批序列、公开结果→M1 schema 与 CLI 诊断假成功问题，完整 eval 321/321 通过；新 pair identity/profile
+  Guardian 审批序列、公开结果→M1 schema 与 CLI 诊断假成功问题，完整 eval 323/323 通过；新 pair identity/profile
   drift 仍待落地，B3/M1 尚未运行。** Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到

@@ -272,8 +272,16 @@ def _phase_succeeded(
     run_id: str,
     requests: list[dict[str, Any]],
 ) -> bool:
+    runs = snapshot.get("runs")
+    run = runs.get(run_id) if isinstance(runs, dict) else None
     states = _request_states(snapshot, run_id)
-    if returncode != 0 or snapshot.get("reserved_usd") != "0.000000":
+    if (
+        returncode != 0
+        or snapshot.get("reserved_usd") != "0.000000"
+        or not isinstance(run, dict)
+        or run.get("stopped") is not False
+        or run.get("stop_reason") is not None
+    ):
         return False
     expected_roles = ["main"] if phase.kind == "main" else ["main", "guardian", "main"]
     if [request.get("role") for request in requests] != expected_roles:
@@ -380,7 +388,9 @@ def _redacted_cli_observation(
         raise ModelDiagnosticError("CLI JSONL exceeded the diagnostic size limit")
     event_types: list[str] = []
     command_events: list[dict[str, object]] = []
-    agent_messages: list[str] = []
+    agent_messages: list[tuple[int, str]] = []
+    turn_completed_indexes: list[int] = []
+    turn_failed = False
     for line in raw.splitlines():
         if not line:
             continue
@@ -392,6 +402,11 @@ def _redacted_cli_observation(
             raise ModelDiagnosticError("CLI diagnostic event is invalid")
         event_type = value["type"]
         event_types.append(event_type)
+        event_index = len(event_types) - 1
+        if event_type == "turn.completed":
+            turn_completed_indexes.append(event_index)
+        elif event_type == "turn.failed":
+            turn_failed = True
         item = value.get("item")
         if (
             event_type == "item.completed"
@@ -399,7 +414,7 @@ def _redacted_cli_observation(
             and item.get("type") == "agent_message"
             and isinstance(item.get("text"), str)
         ):
-            agent_messages.append(item["text"])
+            agent_messages.append((event_index, item["text"]))
         if (
             event_type in {"item.started", "item.completed"}
             and isinstance(item, dict)
@@ -410,6 +425,7 @@ def _redacted_cli_observation(
             command_events.append(
                 {
                     "event": event_type,
+                    "sequence_index": event_index,
                     "expected_command": command in _EXPECTED_APPROVAL_COMMANDS,
                     "command_sha256": (
                         hashlib.sha256(command.encode()).hexdigest()
@@ -425,12 +441,17 @@ def _redacted_cli_observation(
                     "exit_code": item.get("exit_code"),
                 }
             )
+    turn_succeeded = not turn_failed and len(turn_completed_indexes) == 1
     exact_final_message = (
         isinstance(expected_final_message, str)
-        and agent_messages == [expected_final_message]
+        and len(agent_messages) == 1
+        and agent_messages[0][1] == expected_final_message
+        and turn_succeeded
+        and agent_messages[0][0] < turn_completed_indexes[0]
     )
     approval_command_succeeded = (
-        len(command_events) == 2
+        exact_final_message
+        and len(command_events) == 2
         and command_events[0]["event"] == "item.started"
         and command_events[0]["status"] == "in_progress"
         and command_events[0]["exit_code"] is None
@@ -444,10 +465,15 @@ def _redacted_cli_observation(
         and command_events[0]["item_id_sha256"] is not None
         and command_events[0]["item_id_sha256"]
         == command_events[1]["item_id_sha256"]
+        and command_events[0]["sequence_index"]
+        < command_events[1]["sequence_index"]
+        < agent_messages[0][0]
+        < turn_completed_indexes[0]
     )
     return {
         "event_types": event_types,
         "command_events": command_events,
+        "turn_succeeded": turn_succeeded,
         "exact_final_message": exact_final_message,
         "approval_command_succeeded": approval_command_succeeded,
     }

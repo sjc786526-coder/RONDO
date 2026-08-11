@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 from rondo_eval.model_cli_diagnostic import (
     MAX_RETRIES_PER_MODEL,
@@ -28,6 +29,49 @@ from rondo_eval.model_cli_diagnostic import (
 
 
 class ModelCliDiagnosticTests(unittest.TestCase):
+    @staticmethod
+    def _successful_approval_contract() -> tuple[
+        list[dict[str, object]], dict[str, Any]
+    ]:
+        run_id = "run"
+        requests = [
+            {
+                "request_id": request_id,
+                "role": role,
+                "role_provenance": "declared",
+                "declared_role": role,
+                "inferred_role": role,
+                "contract_match": True,
+                "usage_valid": True,
+                "attempt_count": 1,
+                "settlement_kind": "usage_priced",
+            }
+            for request_id, role in (
+                ("main-before", "main"),
+                ("guardian", "guardian"),
+                ("main-after", "main"),
+            )
+        ]
+        snapshot: dict[str, Any] = {
+            "reserved_usd": "0.000000",
+            "runs": {
+                run_id: {
+                    "stopped": False,
+                    "stop_reason": None,
+                    "requests": {
+                        request["request_id"]: {
+                            "status": "settled",
+                            "usage_valid": True,
+                            "attempt_count": 1,
+                            "settlement_kind": "usage_priced",
+                        }
+                        for request in requests
+                    },
+                }
+            },
+        }
+        return requests, snapshot
+
     def test_frozen_codex_runs_before_rondo(self) -> None:
         self.assertEqual(
             [phase.name for phase in PHASES],
@@ -98,40 +142,7 @@ class ModelCliDiagnosticTests(unittest.TestCase):
 
     def test_success_requires_guardian_usage_for_approval(self) -> None:
         run_id = "run"
-        requests = [
-            {
-                "request_id": request_id,
-                "role": role,
-                "role_provenance": "declared",
-                "declared_role": role,
-                "inferred_role": role,
-                "contract_match": True,
-                "usage_valid": True,
-                "attempt_count": 1,
-                "settlement_kind": "usage_priced",
-            }
-            for request_id, role in (
-                ("main-before", "main"),
-                ("guardian", "guardian"),
-                ("main-after", "main"),
-            )
-        ]
-        snapshot = {
-            "reserved_usd": "0.000000",
-            "runs": {
-                run_id: {
-                    "requests": {
-                        request["request_id"]: {
-                            "status": "settled",
-                            "usage_valid": True,
-                            "attempt_count": 1,
-                            "settlement_kind": "usage_priced",
-                        }
-                        for request in requests
-                    }
-                }
-            },
-        }
+        requests, snapshot = self._successful_approval_contract()
         self.assertTrue(
             _phase_succeeded(
                 Phase("codex", "approval"),
@@ -159,6 +170,21 @@ class ModelCliDiagnosticTests(unittest.TestCase):
                 snapshot=snapshot,
                 run_id=run_id,
                 requests=invalid,
+            )
+        )
+
+    def test_success_rejects_a_stopped_ledger_run(self) -> None:
+        requests, snapshot = self._successful_approval_contract()
+        run = snapshot["runs"]["run"]
+        run["stopped"] = True
+        run["stop_reason"] = "guardian_logical_request_limit_exceeded"
+        self.assertFalse(
+            _phase_succeeded(
+                Phase("codex", "approval"),
+                returncode=0,
+                snapshot=snapshot,
+                run_id="run",
+                requests=requests,
             )
         )
 
@@ -261,7 +287,8 @@ class ModelCliDiagnosticTests(unittest.TestCase):
             b"'touch guardian-approved.tmp'\",\"aggregated_output\":\"private\","
             b'"exit_code":0,"status":"completed"}}\n'
             b'{"type":"item.completed","item":{"type":"agent_message",'
-            b'"text":"private response"}}\n',
+            b'"text":"private response"}}\n'
+            b'{"type":"turn.completed"}\n',
             expected_final_message="private response",
         )
         self.assertEqual(
@@ -272,6 +299,7 @@ class ModelCliDiagnosticTests(unittest.TestCase):
         self.assertNotIn("guardian-approved.tmp", encoded)
         self.assertIs(observation["exact_final_message"], True)
         self.assertIs(observation["approval_command_succeeded"], True)
+        self.assertIs(observation["turn_succeeded"], True)
 
     def test_cli_observation_rejects_extra_message_or_incomplete_command(self) -> None:
         extra_message = _redacted_cli_observation(
@@ -287,6 +315,36 @@ class ModelCliDiagnosticTests(unittest.TestCase):
             expected_final_message=None,
         )
         self.assertIs(incomplete["approval_command_succeeded"], False)
+
+    def test_cli_observation_rejects_failed_turn_and_post_message_command(self) -> None:
+        completed_command = (
+            b'{"type":"item.started","item":{"id":"cmd-1",'
+            b'"type":"command_execution","command":"touch guardian-approved.tmp",'
+            b'"status":"in_progress"}}\n'
+            b'{"type":"item.completed","item":{"id":"cmd-1",'
+            b'"type":"command_execution","command":"touch guardian-approved.tmp",'
+            b'"status":"completed","exit_code":0}}\n'
+        )
+        failed = _redacted_cli_observation(
+            completed_command
+            + b'{"type":"item.completed","item":{"type":"agent_message","text":"DONE"}}\n'
+            + b'{"type":"turn.failed"}\n'
+            + b'{"type":"turn.completed"}\n',
+            expected_final_message="DONE",
+        )
+        self.assertIs(failed["turn_succeeded"], False)
+        self.assertIs(failed["exact_final_message"], False)
+        self.assertIs(failed["approval_command_succeeded"], False)
+
+        post_message_command = _redacted_cli_observation(
+            b'{"type":"item.completed","item":{"type":"agent_message","text":"DONE"}}\n'
+            + completed_command
+            + b'{"type":"turn.completed"}\n',
+            expected_final_message="DONE",
+        )
+        self.assertIs(post_message_command["turn_succeeded"], True)
+        self.assertIs(post_message_command["exact_final_message"], True)
+        self.assertIs(post_message_command["approval_command_succeeded"], False)
 
     def test_child_environment_is_an_explicit_nonsecret_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as directory, mock.patch.dict(

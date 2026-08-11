@@ -129,7 +129,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 - 正式链路审查发现的七项缺陷已完成窄修复：proxy close 会等待所有 handler 收口且关闭后不再开始新 forward；
   public producer 可直接通过 M1；completed 与 M1 都要求精确 `main → guardian → main`；main effort 已进入
   local profile、canonical SHA、adapter、proxy 和 public result；CLI 诊断改为精确消息/命令/请求状态合同、
-  显式环境白名单及剩余 retry 配额。真实 public producer→pair ledger→M1 集成回归和完整 eval 321/321 通过。
+  显式环境白名单及剩余 retry 配额，并要求 ledger run 未停止、命令先于最终消息、唯一 `turn.completed` 且无
+  `turn.failed`。真实 public producer→pair ledger→M1 集成回归和完整 eval 323/323 通过。
 
 ### 当前工作
 
@@ -159,4 +160,4 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 009 | 固定单审批 task 声明 Guardian logical request 上限为 1 | 在不知道 frozen review id 的情况下，仍可在任何 charged parse replay 上游发送前可靠停止 | 已采纳 |
 | 010 | 短测每 upstream request 预留 1 USD，正式/大请求按 5 USD | 兼顾高频小探针与正式任务 fail-closed 暴露上限 | 已采纳 |
 | 011 | completed/M1 必须消费精确审批序列，main effort 与 Guardian effort 同级冻结 | 防止主请求或 effort 漂移产生可发布的假成功 | 已采纳 |
-| 012 | CLI 诊断只接受单一最终消息和成对成功的固定审批命令 | 历史 `expected_command=false` 收据只能保留为稳定性事实，不能充当新门禁证据 | 已采纳 |
+| 012 | CLI 诊断只接受未停止 ledger、单一最终消息、成对且先于消息的固定审批命令和成功 turn 终态 | 历史 `expected_command=false` 收据只能保留为稳定性事实，不能充当新门禁证据 | 已采纳 |
