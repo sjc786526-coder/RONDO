@@ -64,6 +64,15 @@ class LocalApprovalSettings:
     port: int
     context_size: int
     gpu_layers: int | str
+    fit: str
+    batch_size: int
+    ubatch_size: int
+    cache_type_k: str
+    cache_type_v: str
+    no_mmproj: bool
+    chat_template_file: str
+    chat_template_sha256: str
+    jinja: bool
     flash_attention: str
     parallel: int
     metrics: bool
@@ -131,15 +140,60 @@ def settings_from_config(config: RuntimeConfig) -> LocalApprovalSettings:
         raise ConfigError("local approval server tools and web UI must be disabled")
     metrics = _boolean(server, "metrics")
     slots = _boolean(server, "slots")
-    context_size = _integer(server, "context_size", minimum=0, maximum=10_000_000)
-    parallel = _integer(server, "parallel", minimum=1, maximum=64)
+    context_size = _integer(server, "context_size", minimum=1, maximum=2**31 - 1)
+    parallel = _integer(server, "parallel", minimum=1, maximum=1)
     gpu_layers = server.get("gpu_layers")
-    if gpu_layers != "auto" and (
-        not isinstance(gpu_layers, int) or isinstance(gpu_layers, bool) or gpu_layers < 0
+    if (
+        isinstance(gpu_layers, str)
+        and gpu_layers not in {"auto", "all"}
+    ) or (
+        not isinstance(gpu_layers, str)
+        and (
+            not isinstance(gpu_layers, int)
+            or isinstance(gpu_layers, bool)
+            or not 0 <= gpu_layers <= 2**31 - 1
+        )
     ):
-        raise ConfigError("local_model server gpu_layers must be non-negative or auto")
+        raise ConfigError(
+            "local_model server gpu_layers must be auto, all, or a non-negative integer"
+        )
+    fit = server.get("fit")
+    if not isinstance(fit, str) or fit not in {"on", "off"}:
+        raise ConfigError("local_model server fit must be on or off")
+    batch_size = _integer(server, "batch_size", minimum=1, maximum=2**31 - 1)
+    ubatch_size = _integer(server, "ubatch_size", minimum=1, maximum=2**31 - 1)
+    if ubatch_size > batch_size:
+        raise ConfigError("local_model server ubatch_size must not exceed batch_size")
+    cache_type_k = server.get("cache_type_k")
+    cache_type_v = server.get("cache_type_v")
+    if cache_type_k != "f16" or cache_type_v != "f16":
+        raise ConfigError("local_model server K/V cache types must both be f16")
+    no_mmproj = _boolean(server, "no_mmproj")
+    if no_mmproj is not True:
+        raise ConfigError("local_model server no_mmproj must be enabled")
+    chat_template_file = _nonempty_string(
+        server, "chat_template_file", "local_model server"
+    )
+    template_path = Path(chat_template_file)
+    if (
+        template_path.is_absolute()
+        or template_path.parts in {(), (".",)}
+        or any(part in {"", ".", ".."} for part in template_path.parts)
+        or "\\" in chat_template_file
+        or any(ord(character) < 0x20 for character in chat_template_file)
+    ):
+        raise ConfigError("local_model server chat_template_file is invalid")
+    chat_template_sha256 = server.get("chat_template_sha256")
+    if (
+        not isinstance(chat_template_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", chat_template_sha256) is None
+    ):
+        raise ConfigError("local_model server chat_template_sha256 is invalid")
+    jinja = _boolean(server, "jinja")
+    if jinja is not True:
+        raise ConfigError("local_model server jinja must be enabled")
     flash = server.get("flash_attention")
-    if flash not in {"auto", "on", "off"}:
+    if not isinstance(flash, str) or flash not in {"auto", "on", "off"}:
         raise ConfigError("local_model server flash_attention is invalid")
 
     if request.get("stream") is not False or request.get("max_retries") != 0:
@@ -165,6 +219,15 @@ def settings_from_config(config: RuntimeConfig) -> LocalApprovalSettings:
         port=port,
         context_size=context_size,
         gpu_layers=gpu_layers,
+        fit=fit,
+        batch_size=batch_size,
+        ubatch_size=ubatch_size,
+        cache_type_k=cache_type_k,
+        cache_type_v=cache_type_v,
+        no_mmproj=no_mmproj,
+        chat_template_file=chat_template_file,
+        chat_template_sha256=chat_template_sha256,
+        jinja=jinja,
         flash_attention=flash,
         parallel=parallel,
         metrics=metrics,
@@ -274,9 +337,10 @@ class LocalApprovalClient:
             return None
         try:
             # Imported lazily to keep the launcher -> client module dependency acyclic.
-            from .launcher import _load_runtime_lock
+            from .launcher import _load_runtime_lock, serve_config_sha256
 
             runtime_identity = _load_runtime_lock(self.config).identity_sha256
+            serving_config = serve_config_sha256(self.config, self.settings)
             configured_model = resolve_config_path(
                 self.config, self.settings.model_path
             ).resolve(strict=True)
@@ -289,6 +353,7 @@ class LocalApprovalClient:
                 base_url=self.settings.base_url,
                 host=self.settings.host,
                 port=self.settings.port,
+                serve_config_sha256=serving_config,
             )
         except (ConfigError, OSError) as exc:
             raise ServiceUnavailableError(
@@ -297,7 +362,14 @@ class LocalApprovalClient:
 
     def _revalidate_launcher_identity(self, identity: LauncherIdentity) -> None:
         try:
-            revalidate_launcher_identity(self.config, identity)
+            from .launcher import serve_config_sha256
+
+            serving_config = serve_config_sha256(self.config, self.settings)
+            revalidate_launcher_identity(
+                self.config,
+                identity,
+                serve_config_sha256=serving_config,
+            )
         except (ConfigError, OSError) as exc:
             raise ServiceUnavailableError(
                 "local approval launcher instance changed during request"

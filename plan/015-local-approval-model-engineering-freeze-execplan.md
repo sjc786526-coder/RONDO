@@ -122,6 +122,8 @@
   并推送 `origin/main`；推送后已核对本地与远端同 SHA。审批阶段 worktree/分支保留，不重命名为 `zz-done`。
 - 2026-08-12：逐项复核后续独立审查，再完善 GPU 两阶段验收、Linux CUDA runtime/launcher/template 前置和训练资产边界；
   不改变已冻结 GGUF，也不把下载就绪表述为部署或正式 M3 baseline 就绪。
+- 2026-08-12：Plan 016 已以 model-free 实现冻结当前官方模板并补齐两阶段 launcher/config/receipt v2 合同；这不改变
+  本计划的 GGUF 身份、下载审批状态，也不构成 Linux CUDA、模型或 GPU 验收。
 
 ### 当前工作
 
@@ -132,8 +134,8 @@
 - 当前阶段：Phase A 研究成果已交付；集中报告唯一对象与资源状态后等待用户单项下载授权，不再执行其他操作。
 - 获明确授权后：在保留的独立 worktree 恢复，先重新核对 canary 稳定窗口、Docker/模型进程、Windows `C:` 余量与
   批准对象；只下载唯一文件，验证 exact bytes/SHA 并更新 ignored `rondo.local.toml`。
-- 下载完成后仍不加载模型或使用 GPU；另行补齐项目内 Linux CUDA runtime/依赖闭包、launcher 最小参数合同和唯一模板口径，
-  再做两阶段 CUDA/model-backed smoke、上下文扫描与未微调 M3 baseline。
+- 下载完成后仍不加载模型或使用 GPU；launcher 最小参数合同和唯一官方模板口径见 Plan 016。下一阶段另行构建并冻结
+  项目内 Linux CUDA runtime/依赖闭包，待三项前置汇合后再做两阶段 CUDA/model-backed smoke、上下文扫描与未微调 M3 baseline。
 
 ### 阻塞项
 

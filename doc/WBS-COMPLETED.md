@@ -330,3 +330,17 @@ standard/Lite 形态均补回归。
 - v19 正式 pair 本地估算 `$0.870787`；Plan 014 全阶段累计 `$6.988825 < $280`，无悬挂 reservation，供应商账单
   未查询且 `actual_usd=null`。focused 155/155、`just eval-lock` 85 packages、完整 eval 345/345 通过；Docker/watchdog
   最终 `stop=none`、`cleanup=none`，0 containers/volumes。
+
+### 2026-08-12 Plan 016 本地审批 model-free launcher 与 CUDA 构建前交接
+
+- 依据 llama.cpp `b10333` 精确源码补齐两阶段服务合同：4k 使用原生 `gpu-layers=auto`/fit on，8k baseline 使用
+  all/fit off；两者固定 512/256 batch、F16 K/V、parallel 1、flash on、no-mmproj、单卡 split/main GPU、offline/
+  loopback/no UI/no autoload。配置拒绝未知/缺失/错误类型、bool 整数、越界与任意额外 CLI 透传。
+- 冻结 `mistralai/Ministral-3-8B-Instruct-2512@5b26027…` 的 11,912-byte 官方模板，SHA-256 `74eeb55f…`；
+  launcher 以 exact lock、允许目录、普通非 symlink 文件、size/SHA 验证后显式传 `--jinja --chat-template-file`，
+  不回退 GGUF 内嵌旧模板。现有 b10333 CPU 工具的 parser/model-free 分析通过。
+- launcher receipt 升级 schema v2；在既有进程/runtime/model/endpoint/实际 cmdline 验证外增加
+  `serve_config_sha256`，由生成实际 argv 的同一构造器计算。客户端修改任一关键服务参数后不再接受旧 identity。
+- focused fake/model-free unittest 80/80（45 + 8 + 27）通过，`git diff --check` 和模板/TOML/lock 一致性通过。
+  本批未下载权重，未安装/构建 CUDA 或 llama.cpp，未运行模型/GPU/Docker/Cargo/Bazel/just；当前 CPU lock/capability
+  不变，Plan 015 仍为 `download_ready_blocked_on_user_approval`。Linux CUDA build-ready 合同与三项汇合门见 Plan 016。
