@@ -378,3 +378,7 @@ standard/Lite 形态均补回归。
   多次达到 `256/256` PIDs，故 v11 以本地合同缺陷 blocked，累计 debit `345.963147 USD`、reservation 0；后继
   versioned catalog 仅将 filter PIDs 冻结为 512，历史 catalog/lock/result 不改写；v12 以唯一新 IDs 和精确 prior
   冻结，尚未执行。
+- v12 完成 Oracle 10/10 与 fresh wire 后，在 filter a3 Docker failure 的失败发布处发现 producer 仍限 a1/a2；
+  a3 已结算 `0.381782 USD` 但无 public record，恢复按 operator interruption 保守退役。累计 debit
+  `385.923585 USD`、reservation 0。a1—a4 publication、pre-Oracle crash reconciliation 与 bounded stopped
+  teardown 合同已进入离线回归；v12 无 512 PID 用尽证据，历史 v12 未回填。

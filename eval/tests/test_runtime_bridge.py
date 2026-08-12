@@ -23,6 +23,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerOperation,
     DockerTaskIdentity,
 )
+from rondo_eval import runtime_bridge  # noqa: E402
 from rondo_eval.runtime_bridge import (  # noqa: E402
     CommandOutput,
     DockerCliCounter,
@@ -605,6 +606,15 @@ def _image_inspect(*, task_id: str = TASK_ID) -> str:
 
 
 class DockerCounterTests(unittest.TestCase):
+    def test_stopped_container_disappearance_grace_is_exactly_five_seconds(self) -> None:
+        self.assertEqual(
+            (
+                runtime_bridge._CONTAINER_DISAPPEARANCE_MAX_POLLS - 1
+            )
+            * runtime_bridge._CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS,
+            5.0,
+        )
+
     def test_counter_preserves_bounded_command_failure_at_probe_boundary(self) -> None:
         failure = {
             "exit_code": 1,
@@ -1372,7 +1382,10 @@ class DockerCounterTests(unittest.TestCase):
                 ["name=seccomp,profile=builtin"],
             ])
             counter, _ = self._native_counter(root, responses)
-            with self.assertRaises(RuntimeBridgeError) as caught:
+            with mock.patch(
+                "rondo_eval.runtime_bridge._CONTAINER_DISAPPEARANCE_MAX_POLLS",
+                3,
+            ), self.assertRaises(RuntimeBridgeError) as caught:
                 counter.sample(
                     identity=DockerTaskIdentity(TASK_ID),
                     operation=DockerOperation.HOST,

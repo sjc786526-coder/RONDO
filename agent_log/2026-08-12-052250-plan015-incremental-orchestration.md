@@ -35,3 +35,9 @@
 - 离线门禁 432/432 与 `eval-lock` 85 packages 通过后，生成器冻结 v12：run base `20260812-320000000`、
   lock SHA `05d74b86ced79c68c73c857c3d4cd75b98150c15dafb264b9ae3c98068b20452`、prior `345.963147 USD`；
   v1—v11 均保持只读。
+- v12 Oracle 10/10、wire `0.224821 USD` 完成；filter a3 重现 Docker metric failure 时发现 failure publisher
+  topology 只允许 a1/a2。a3 请求全部 settled，但 tracked record 缺失，恢复保守记 operator interruption；v12
+  blocked，累计 `385.923585 USD`、reservation 0。未回填历史。
+- 离线统一 producer/validator a1—a4 并将 crash reconciliation 提前到 Oracle；后继 Docker 合同只对已验证 stopped
+  object 将 disappearance grace 扩至 5 秒，live/replacement 不放行。v12 没有 512 PID 用尽的持久证据，
+  因此后继仍冻结 catalog v2 的 512 PID，不用新资源上限掩盖 lifecycle 问题。

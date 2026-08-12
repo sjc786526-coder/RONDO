@@ -210,10 +210,18 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 生成器已冻结唯一 v12：campaign/batch `p2-b7-canary-baseline-v12`/`p2-b7-canary-sol-sol-v12`，321 个 run ID
   从 `20260812-320000000` 派生，lock SHA `05d74b86ced79c68c73c857c3d4cd75b98150c15dafb264b9ae3c98068b20452`，
   cap `700 USD`、prior `345.963147 USD`；v1—v11 保持只读。
+- v12 Oracle 10/10 与 fresh wire (`0.224821 USD`) 完成；db a1 provider-integrity 后 a2 pass，extract reward 0；
+  filter a1 provider-integrity、a2 Docker metric exec 128，a3 再现 Docker failure 后暴露 attempt3 failure publisher
+  仍只接受 a1/a2。a3 的 8 个请求 `0.381782 USD` 全部 settled，但 public record 未生成，恢复按
+  `operator_interruption` 保守退役；v12 累计 `385.923585 USD`、reservation 0，全部事实只读。
+- publisher/validator 已统一接受 a1—a4（a5 拒绝），running slot 恢复提前到 Oracle preflight 之前。后继将
+  stopped-container 精确消失宽限从 0.5 秒有界扩至 5 秒，live/replacement 仍 hard fail。v12 没有
+  512 PID 用尽的证据，后继仍复用 catalog v2 的 filter PIDs=512，不另行放宽资源合同。
 
 ### 后续计划
 
-1. 使用 v12 重新执行受共享组件变化影响的 Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
+1. 提交 Docker lifecycle 合同并生成唯一后继 identity（prior `385.923585 USD`）；重新执行受共享组件变化
+   影响的 Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
    infra 必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同分母、费用与资源事实。
 
 ### 阻塞项
@@ -223,8 +231,8 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v11 是保留全部费用事实的 blocked 终态。v11 累计 debit `345.963147 USD`、
-  reservation 0；v12 已冻结且尚未执行。
+- v1 是 API 前失败终态；v2—v12 是保留全部费用事实的 blocked 终态。v12 累计 debit `385.923585 USD`、
+  reservation 0；后继离线修复已通过 focused 门禁，尚未生成 identity。
 
 ## 6. 关键决策记录
 

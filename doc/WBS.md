@@ -73,8 +73,10 @@
   `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B6 预算合同已冻结。B7 v11 已按新规则在同题
   `docker_runtime` 第二次后暂停，no-API RCA 证明 filter 的 Selenium verifier 多次达到冻结的 256 PIDs 上限；
   v11 以 local implementation defect 收口为 blocked，累计本地估算为 `345.963147 USD`、reservation 为 0。
-  v1—v11 全部只读。v12 仅把该题 PIDs 上限冻结为 512，其他任务、profile、bundle 与 700 USD 上限不变，
-  已带入 `345.963147 USD` prior，待从 Oracle 重新执行。**
+  v1—v12 全部只读。v12 在 filter a3 的 Docker failure 发布时暴露 a3/a4 topology 缺口并保守退役，累计
+  `385.923585 USD`、reservation 0。publisher/恢复顺序已离线闭合；后继仅把 stopped-container 宽限有界扩至
+  5 秒；v12 未证明 512 PID 用尽，因此仍冻结 512。其他任务、profile、bundle 与 700 USD 上限不变，
+  待生成新 identity。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -127,7 +129,7 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v1—v11 只读，v12 已冻结待执行 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v1—v12 只读，后继 Docker lifecycle 合同待冻结 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
