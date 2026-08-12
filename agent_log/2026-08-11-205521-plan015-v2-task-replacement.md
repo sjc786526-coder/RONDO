@@ -65,4 +65,16 @@
 - parser 保持不变；synthetic prompt 明确禁止 tool 前 assistant/commentary。v6 使用全新 identity，并将 prior
   更新为 `158.694728 USD`。
 
-后续证据：待 v6 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
+## v6 执行与 Docker 定向诊断
+
+- Oracle 10/10 reward 1，fresh canary completed、估算 `0.225196 USD`。第一轮完成全部首跑及 3 个定点补跑后，
+  两项 `docker_runtime` 与一项 `provider_response_integrity` 仍未恢复；逐轮门禁在第二轮前 blocked。
+- v6 formal 估算 `41.414652 USD`，P2 累计 `200.334576 USD`；94 个 upstream attempt 均已结算，reservation 为 0，
+  `actual_usd=null`。结果提交 `dd3a309`，全部 v6 identity/state/result/artifact 不复用。
+- Docker 失败现保存 bounded 原始 supervisor reason、结构化探针名与耗时。`filter-js-from-html`、`polyglot-c-py`
+  各 5 轮无 API counter/stats/exec 均通过，最慢 stats `1.828s`、exec `115ms`；两项完整官方 Oracle 均 reward 1，
+  单探针最大约 `1.11s`。未复现持续卡顿，未重启/升级 Docker，收口后 0 容器/任务网络/卷。
+- v7 使用全新 identity 与 `20260812-270000000` ID 区间，prior 精确为 `200.334576 USD`；taskset、profile、bundle、
+  TB commit、轮次和停止规则不变。
+
+后续证据：待 v7 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
