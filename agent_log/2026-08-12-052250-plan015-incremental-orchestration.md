@@ -32,3 +32,6 @@
   资源合同缺陷；v11 收口 blocked，本轮 wire+paid `2.066952 USD`，累计 `345.963147 USD`、reservation 0。
 - 后继 versioned catalog 只把 filter 的 PIDs 从 256 提到 512，其他九题保持 256；历史 catalog 由 lock SHA
   继续只读加载，Oracle proof 与 paid request 均从同一 `FrozenTask.pids_limit` 投影。
+- 离线门禁 432/432 与 `eval-lock` 85 packages 通过后，生成器冻结 v12：run base `20260812-320000000`、
+  lock SHA `05d74b86ced79c68c73c857c3d4cd75b98150c15dafb264b9ae3c98068b20452`、prior `345.963147 USD`；
+  v1—v11 均保持只读。

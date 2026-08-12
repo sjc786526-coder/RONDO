@@ -376,4 +376,5 @@ standard/Lite 形态均补回归。
   诊断，不放宽失败标准。完整 eval 430/430、lock 85 packages 通过；生成器随后冻结唯一 v11 identity，尚未执行。
 - v11 的 diagnosis hold 阻止 filter a3：a1/a2 同为 Docker metric exec 128。独立 no-API Oracle 采样确认 Selenium
   多次达到 `256/256` PIDs，故 v11 以本地合同缺陷 blocked，累计 debit `345.963147 USD`、reservation 0；后继
-  versioned catalog 仅将 filter PIDs 冻结为 512，历史 catalog/lock/result 不改写。
+  versioned catalog 仅将 filter PIDs 冻结为 512，历史 catalog/lock/result 不改写；v12 以唯一新 IDs 和精确 prior
+  冻结，尚未执行。

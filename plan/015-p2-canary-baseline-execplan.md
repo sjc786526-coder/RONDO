@@ -99,7 +99,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
    40/60GB 增长与 80GiB C: floor。只清理由本 campaign exact label 创建的对象。
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
-11. v1—v10 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
+11. v1—v11 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
     才可复用，证据不足不回填。700 USD 授权不因 identity、进程或 proof 变化而重置。
 12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
     锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
@@ -207,11 +207,13 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   `345.963147 USD`、reservation 0。
 - 后继 catalog 保留历史 catalog 字节，仅把 `filter-js-from-html` PIDs 上限从 256 冻结为 512；其余九题仍为
   256。loader 按 lock 内 catalog SHA 选择历史/后继版本，Oracle contract 与 paid request 使用同一 task 投影。
+- 生成器已冻结唯一 v12：campaign/batch `p2-b7-canary-baseline-v12`/`p2-b7-canary-sol-sol-v12`，321 个 run ID
+  从 `20260812-320000000` 派生，lock SHA `05d74b86ced79c68c73c857c3d4cd75b98150c15dafb264b9ae3c98068b20452`，
+  cap `700 USD`、prior `345.963147 USD`；v1—v11 保持只读。
 
 ### 后续计划
 
-1. 提交 filter PIDs 合同修复，生成唯一后继 identity（prior `345.963147 USD`），重新执行受共享组件变化影响的
-   Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
+1. 使用 v12 重新执行受共享组件变化影响的 Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
    infra 必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同分母、费用与资源事实。
 
 ### 阻塞项
@@ -222,7 +224,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 ### 当前验收状态
 
 - v1 是 API 前失败终态；v2—v11 是保留全部费用事实的 blocked 终态。v11 累计 debit `345.963147 USD`、
-  reservation 0；后继 filter PIDs 合同已离线回归，尚未生成新 identity。
+  reservation 0；v12 已冻结且尚未执行。
 
 ## 6. 关键决策记录
 
