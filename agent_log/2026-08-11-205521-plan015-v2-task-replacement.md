@@ -89,4 +89,16 @@
   通过，两项受影响镜像官方 no-API Oracle 经正式 parser 复核 completed/reward 1。
 - v8 使用新的 `20260812-280000000` ID 区间和 prior `221.772313 USD`，其余冻结事实不变。
 
-后续证据：待 v8 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
+## v8 执行、根因与 v9 合同
+
+- v8 Oracle 10/10 与 fresh exact-wire canary 均通过，canary 估算 `0.211082 USD`。第一轮三个不同 task 的
+  upstream stream 在 terminal/usage 前结束，按合同各保守结算 `18.885000 USD`，结构化
+  `provider_response_integrity` circuit breaker 将 v8 收口为 blocked。v8 formal `59.734158 USD`，P2 累计
+  `281.718702 USD`，全部 request settled、reservation 为 0，`actual_usd=null`；结果提交 `7b98703`。
+- v8 的另两项执行缺口已离线闭合：auth JSON 改由宿主生成并作为 0400 Compose secret 注入，不依赖 task image
+  的 Python；metrics exec 失败只对同一 identity 且 `State.Running=false` 的容器作 bounded teardown poll。
+  SSE read error 现保留实际 HTTP status 和结构化 `stream_end_kind`，但保守结算不变。相关实现提交 `7e32e32`。
+- 用户追加 `200 USD` 机动授权；v9 使用新的 `20260812-290000000` ID 区间，精确带入
+  `281.718702 USD` prior，P2 总硬上限为 `600 USD`。v1—v8 identity/state/result/artifact 全部只读且不复用。
+
+后续证据：待 v9 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。

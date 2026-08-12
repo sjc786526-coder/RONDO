@@ -1,7 +1,7 @@
 # Plan 015：P2 任务分层、计分预算与首次 Canary 基线
 
 > 本计划是方向 0 的 P2 第一阶段执行合同。Plan 014 v19 及其全部历史 identity/result/ledger/artifact
-> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与 400 USD 独立硬上限。除“当前状态”和
+> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与 600 USD 独立硬上限。除“当前状态”和
 > “关键决策记录”外，其他章节默认不在执行中改写；若必须改变 provider、Sol/medium main、Sol/low Guardian、
 > frozen Codex/RONDO bundle、TB 2.1 commit、10-task 清单、基础轮次或预算，暂停并请求用户确认。
 
@@ -10,7 +10,7 @@
 ### 最终目标
 
 先闭合 Plan 014 成功 CLI 的 durable Guardian evidence 投影，再完成 B4 taskset 冻结、B5 机械计分/归因、
-B6 可复算成本与 400 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
+B6 可复算成本与 600 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
 RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 基线终态。
 
 ### 完成/验收标准
@@ -24,7 +24,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - B5 主指标为 Task Resolution Success Rate；机械区分 `agent`、`guardian_correct_deny`、
   `guardian_false_deny`、`infra`。矛盾/未知 Guardian deny 没有 correct-deny 证明时保守归为 false deny；infra
   不进分母。holdout 只能发布整批聚合，不得持久化单任务明细。
-- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 400 USD 停止语义；campaign
+- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 600 USD 停止语义；campaign
   使用新 lock、ID 和持久 ledger。任何新请求的最大合法 reservation 无法装入剩余全局预算时不启动。
 - B7 基础 40 个运行全部形成唯一终态；同一 RONDO bundle A/A 两轮得到 `sigma`，A/B 差异 `delta <= sigma`。
   `sigma > 2` 机械标为 canary unstable。每个 Codex-pass/RONDO-fail task 两侧各加跑两次；Codex 三次全过且
@@ -34,7 +34,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 同一结构化机械故障类别累计命中 3 个不同 task 时立即熔断，未启动 slot 不再 claim；预算停止导致的 publication
   拒绝继承预算代理的结构化上游根因。`sigma`/`delta` 只在四轮共同有效的同一 task 集合上计算并公开分母，少于
   8 项只发布部分技术事实并把 M2 标为 blocked。
-- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 400 USD 账本；所有 reservation 最终
+- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 600 USD 账本；所有 reservation 最终
   settled，`actual_usd=null`。
 - focused unittest、`just eval-lock` 和阶段末一次 `just eval-test` 通过；正式 B7 前代码/lock 干净提交，Docker、
   Windows C:、watchdog、profile/catalog/bundle 均通过门禁。
@@ -67,7 +67,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ## 3. 硬约束
 
-1. 新 P2 真实 API 本地估算总费用最多 400 USD，独立于 Plan 014。400 USD 是硬停线，不是消费目标，也不是
+1. 新 P2 真实 API 本地估算总费用最多 600 USD，独立于 Plan 014。600 USD 是硬停线，不是消费目标，也不是
    合法 usage 的数学全包保证；不得减任务、减基础轮次或弱化门禁迁就预算。
 2. B4/B5/B6 及最后窄修复不得调用 API 或 Docker；B7 只处理 10 个 canary 所需 exact digest 镜像，pull/run
    并发为 1。不开 Cargo、不重建 bundle、不升级上游。
@@ -105,7 +105,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 已确认成功 CLI 的 evidence 手工投影仍使用 Harbor work 路径且漏 canonical digest；已完成共用 projection、
   RunSpec 错误文字和 v19 S2 文档修复；成功 CLI durable path 回归已通过。
 - B4 已落 10/61/18 三份 ID-only 清单与 pinned catalog/holdout 重算门禁；B5 纯函数计分、矛盾拒绝和 holdout
-  整批聚合已落；B6 可复算成本输出、400 USD/161-slot 共享 ledger 上限与 B7 聚合规则已落并通过 focused tests；
+  整批聚合已落；B6 可复算成本输出、600 USD/161-slot 共享 ledger 上限与 B7 聚合规则已落并通过 focused tests；
   161 包含 1 次 wire canary、40 基础、40 条件、最多 40 基础 infra replacement 与 40 条件 infra replacement。
 
 ### 当前工作
@@ -142,10 +142,20 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   累计 `221.772313 USD`、reservation 为 0。根因是 inspect 后、metrics exec 前容器自然移除的 teardown race，
   不是 30s 控制面卡死。修复仅在 fresh exact-label re-list 证明旧容器已消失时接受空 final observation；容器仍在或
   identity 改变继续硬失败。两项故障镜像的官方 no-API Oracle 均由正式 parser 复核为 completed/reward 1。
+- v8 Oracle 10/10 与 fresh canary 通过；第一轮在三个不同 task 出现真实 `provider_response_integrity` 后按冻结
+  circuit breaker 收口为 blocked。三个无 terminal/usage 的 stream 均按 `18.885000 USD` 保守结算，v8 formal
+  `59.734158 USD`、canary `0.211082 USD`，P2 累计 `281.718702 USD`，reservation 为 0；全部 v8 identity、
+  state、result、artifact 保持只读。
+- v8 同时证明两个独立执行缺口：task image 缺少 Python 时 adapter 无法写 auth，以及 metrics 失败发生在容器
+  stopped-but-not-removed 窗口。auth 现由宿主严格编码为只读 Compose secret；Docker 只对 identity 完全一致且
+  `State.Running=false` 的对象作同一 deadline 内 bounded teardown poll。SSE read error 另保留原 HTTP status 与
+  `stream_end_kind`，计费和失败分类不放宽。
+- 用户追加 `200 USD` 机动授权；v9 使用新 campaign/batch/161 个 run IDs，精确冻结 prior `281.718702 USD`、
+  P2 总硬上限 `600 USD`。taskset、profile、bundle、TB commit、四轮与停止规则均不变。
 
 ### 后续计划
 
-1. 完成 v8 identity/lock、focused unittest、`just eval-lock` 与干净提交。
+1. 完成 v9 identity/lock、focused unittest、`just eval-lock` 与干净提交。
 2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API Oracle、资源门禁和 fresh exact-wire canary。
 3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
@@ -155,7 +165,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v7 是保留全部费用事实的 blocked 终态；v8 尚未执行 Oracle、canary 或正式基线。
+- v1 是 API 前失败终态；v2—v8 是保留全部费用事实的 blocked 终态；v9 尚未执行 Oracle、canary 或正式基线。
 
 ## 6. 关键决策记录
 
@@ -164,7 +174,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 001 | holdout 为无盐 `sha256(task_id)` 排名前 `ceil(N/5)` | 只依赖 ID，无可调 salt，当前精确 18/89 | B4 | 已采纳 |
 | 002 | canary 固定 10 个可见、无 GPU、资源有界且能力差异明确的任务，`fix-git` 作为 P1 锚点 | 兼顾成本、差异和既有链路证据，不看模型结果选题 | B4/B7 | 已采纳 |
 | 003 | `sigma > 2` 机械判 canary unstable | 避免“接近任务总数”主观化，也不放宽 A/B 判据 | B7 | 已采纳 |
-| 004 | 400 USD 用历史 usage 作合理可行性判断，但每个新 request 仍按 18.885 USD 最大合法 reservation 门禁 | 数学最坏 40/80 run 超过授权，不能伪称全包；额度是硬停线而非消费目标 | B6/B7 | 已采纳 |
+| 004 | 当前 600 USD 用历史 usage 作合理可行性判断，但每个新 request 仍按 18.885 USD 最大合法 reservation 门禁 | 数学最坏 40/80 run 超过授权，不能伪称全包；额度是硬停线而非消费目标 | B6/B7 | 已采纳 |
 | 005 | 未有独立 adjudication 证明的 Guardian deny 保守归 false deny | 不用 Guardian 自评循环证明“正确拒绝” | B5 | 已采纳 |
 | 006 | 不扩展 M1 两槽 ledger；B7 使用独立 campaign 状态机并复用单任务 runner/budget ledger | 拓扑不同，避免把历史 pair 语义拉坏 | B6/B7 | 已采纳 |
 | 007 | 在 lock 冻结前以 `build-cython-ext`、`extract-elf` 替换需要 system service/root capability 的两个候选 | 现有两侧非特权容器合同无法公平运行 system-admin 任务；不把确定性环境失败计入 σ | B4/B7 | 已采纳 |
@@ -177,3 +187,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 014 | v5 canary 因 tool 前额外 assistant 消息失败；保持唯一消息 parser，收紧 synthetic prompt 并重冻 v6，prior `158.694728 USD` | 线缆/审批成功不等于精确 CLI 行为成功，不能为继续执行弱化 canary | B6/B7 | 已采纳 |
 | 015 | v6 第一轮补跑后仍有 3 项 infra，逐轮门禁退役 v6；在受影响镜像无 API 稳定性与 Oracle 通过后重冻 v7，prior `200.334576 USD` | 不盲目重跑、不在 campaign 中途升级 Docker；诊断未复现持续故障且剩余预算仍能容纳最大 reservation | B6/B7 | 已采纳 |
 | 016 | v7 熔断后修复已证明的 metrics teardown race 并重冻 v8，prior `221.772313 USD` | 三个 task 的结构化失败探针完全相同；只接受 fresh exact-label 证明的自然消失，不放宽真正的 exec/identity 故障 | B6/B7 | 已采纳 |
+| 017 | v8 因三个 task 的真实 provider response integrity 熔断后退役；修复 task-image-independent auth 与 stopped-container teardown 窗口，用户追加 200 USD 后重冻 v9，prior `281.718702 USD`、cap `600 USD` | 保留三个含糊 stream 的完整保守费用，不把执行缺口或新授权当作重置历史 debit | B6/B7 | 已采纳 |
