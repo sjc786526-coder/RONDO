@@ -48,6 +48,7 @@ from rondo_eval.terminal_bench import (  # noqa: E402
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
 from rondo_eval.terminal_bench import adapters as adapters_module  # noqa: E402
 from rondo_eval.terminal_bench import live as live_module  # noqa: E402
+from rondo_eval.terminal_bench import oracle_smoke as oracle_smoke_module  # noqa: E402
 from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
 from rondo_eval.terminal_bench import verifier_runtime as verifier_runtime_module  # noqa: E402
 from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
@@ -271,6 +272,22 @@ class TerminalBenchTests(unittest.TestCase):
                 for index in (0, 3, 6)
             )
         )
+
+    def test_oracle_solution_defaults_only_unspecified_exec_user_to_root(self) -> None:
+        class Environment:
+            def __init__(self) -> None:
+                self.users: list[object] = []
+
+            async def exec(self, command, **kwargs):
+                del command
+                self.users.append(kwargs.get("user"))
+                return FakeExecResult(0)
+
+        environment = Environment()
+        projection = oracle_smoke_module._RootDefaultEnvironment(environment)
+        asyncio.run(projection.exec("reference solution"))
+        asyncio.run(projection.exec("explicit agent check", user="1000"))
+        self.assertEqual(environment.users, ["root", "1000"])
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()

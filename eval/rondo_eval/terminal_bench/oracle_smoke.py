@@ -29,6 +29,7 @@ from .verifier_runtime import prepare_task_workdir, prepare_verifier_apt_dirs
 
 from harbor.agents.oracle import OracleAgent
 from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
 from harbor.models.trial.paths import TrialPaths
 
 
@@ -71,6 +72,35 @@ class PreparedOracleAgent(OracleAgent):
     async def setup(self, environment: BaseEnvironment) -> None:
         await prepare_task_workdir(environment, self._task_workdir)
         await prepare_verifier_apt_dirs(environment)
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        # The official reference solution is a task/verifier preflight, not a
+        # product-agent execution.  Many TB solutions install system packages;
+        # keep paid agents non-root while running only this solution as root.
+        await super().run(
+            instruction,
+            _RootDefaultEnvironment(environment),
+            context,
+        )
+
+
+class _RootDefaultEnvironment:
+    """Delegate Harbor environment operations, defaulting only exec to root."""
+
+    def __init__(self, environment: BaseEnvironment) -> None:
+        self._environment = environment
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._environment, name)
+
+    async def exec(self, command: str, **kwargs: object) -> object:
+        kwargs.setdefault("user", "root")
+        return await self._environment.exec(command, **kwargs)
 
 
 class OracleVerifierSmokeError(ValueError):
