@@ -971,6 +971,13 @@ fn sanitize_project_config(config: &mut TomlValue) -> Vec<String> {
             ignored_keys.push((*key).to_string());
         }
     }
+    if let Some(auto_review) = table
+        .get_mut("auto_review")
+        .and_then(TomlValue::as_table_mut)
+        && auto_review.remove("model_provider").is_some()
+    {
+        ignored_keys.push("auto_review.model_provider".to_string());
+    }
     if let Some(features) = table.get_mut("features").and_then(TomlValue::as_table_mut)
         && features.remove("respect_system_proxy").is_some()
     {

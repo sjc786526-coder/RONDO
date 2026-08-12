@@ -30,6 +30,8 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::mount_sse_sequence_without_request_count_expectation;
+use core_test_support::responses::received_responses_request_count;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_sandbox;
@@ -390,6 +392,157 @@ async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> R
     assert_eq!(
         (body["model"].clone(), body["reasoning"]["effort"].clone()),
         (json!("gpt-5.5"), json!("high"))
+    );
+
+    Ok(())
+}
+
+/// The main Agent and Guardian must use independently configured provider
+/// transports. Provider-specific headers and query parameters prove that the
+/// Guardian receives the complete registry entry rather than only a base URL.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_review_model_provider_routes_main_and_guardian_to_distinct_endpoints() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let main_server = MockServer::start().await;
+    let guardian_server = MockServer::start().await;
+    let guardian_base_url = format!("{}/v1", guardian_server.uri());
+    let mut builder = test_codex().with_pre_build_hook({
+        let guardian_base_url = guardian_base_url.clone();
+        move |home| {
+            std::fs::write(
+                home.join("config.toml"),
+                format!(
+                    r#"
+[auto_review]
+model = "gpt-5.5"
+model_provider = "guardian-local"
+reasoning_effort = "high"
+
+[model_providers.guardian-local]
+name = "Guardian local"
+base_url = "{guardian_base_url}"
+wire_api = "responses"
+http_headers = {{ "x-guardian-provider" = "isolated" }}
+query_params = {{ "route" = "guardian" }}
+request_max_retries = 7
+stream_max_retries = 9
+supports_websockets = false
+"#,
+                ),
+            )
+            .expect("seed config.toml");
+        }
+    });
+    let test = builder.build(&main_server).await?;
+    let main_base_url = format!("{}/v1", main_server.uri());
+    assert_eq!(
+        (
+            test.config.model_provider_id.as_str(),
+            test.config.model_provider.base_url.as_deref(),
+            test.config.guardian_model_provider_config.as_deref(),
+        ),
+        ("openai", Some(main_base_url.as_str()), Some("guardian-local"))
+    );
+
+    let tool_args = json!({
+        "cmd": "true",
+        "sandbox_permissions": SandboxPermissions::RequireEscalated,
+        "justification": "Exercise the isolated Guardian provider.",
+    });
+    let main_responses = mount_sse_sequence_without_request_count_expectation(
+        &main_server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-main-provider-route"),
+                ev_function_call(
+                    "exec-call-provider-route",
+                    "exec_command",
+                    &serde_json::to_string(&tool_args)?,
+                ),
+                ev_completed("resp-main-provider-route"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-main-provider-route-done"),
+                ev_assistant_message("msg-main-provider-route-done", "done"),
+                ev_completed("resp-main-provider-route-done"),
+            ]),
+        ],
+    )
+    .await;
+    let guardian_responses = mount_sse_sequence_without_request_count_expectation(
+        &guardian_server,
+        vec![sse(vec![
+            ev_response_created("resp-guardian-provider-route"),
+            ev_assistant_message(
+                "msg-guardian-provider-route",
+                &json!({
+                    "risk_level": "low",
+                    "user_authorization": "high",
+                    "outcome": "allow",
+                    "rationale": "The command is inert.",
+                })
+                .to_string(),
+            ),
+            ev_completed("resp-guardian-provider-route"),
+        ])],
+    )
+    .await;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run a command that requires the isolated Guardian provider".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(test.config.cwd.clone())),
+                approval_policy: Some(AskForApproval::OnRequest),
+                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            },
+        })
+        .await?;
+    wait_for_event_with_timeout(
+        &test.codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(15),
+    )
+    .await;
+
+    assert_eq!(received_responses_request_count(&main_server).await?, 2);
+    assert_eq!(
+        received_responses_request_count(&guardian_server).await?,
+        1
+    );
+    let main_requests = main_responses.requests();
+    assert_eq!(main_requests.len(), 2);
+    assert!(main_requests.iter().all(|request| {
+        request.header("x-guardian-provider").is_none()
+            && request.query_param("route").is_none()
+            && request.header("authorization").as_deref() == Some("Bearer dummy")
+    }));
+
+    let guardian_request = guardian_responses.single_request();
+    let body = guardian_request.body_json();
+    assert_eq!(
+        (body["model"].clone(), body["reasoning"]["effort"].clone()),
+        (json!("gpt-5.5"), json!("high"))
+    );
+    assert!(guardian_request.body_contains_text("Exercise the isolated Guardian provider."));
+    assert_eq!(
+        guardian_request.header("x-guardian-provider").as_deref(),
+        Some("isolated")
+    );
+    assert_eq!(guardian_request.header("authorization"), None);
+    assert_eq!(guardian_request.header("chatgpt-account-id"), None);
+    assert_eq!(
+        guardian_request.query_param("route").as_deref(),
+        Some("guardian")
     );
 
     Ok(())

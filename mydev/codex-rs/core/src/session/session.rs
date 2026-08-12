@@ -1155,7 +1155,7 @@ impl Session {
                 attestation_provider: attestation_provider.clone(),
                 time_provider,
                 model_client: ModelClient::new(
-                    Some(Arc::clone(&auth_manager)),
+                    session_configuration.provider.auth_manager(),
                     if config.features.enabled(Feature::UseAgentIdentity) {
                         AgentIdentityAuthPolicy::ChatGptAuth
                     } else {

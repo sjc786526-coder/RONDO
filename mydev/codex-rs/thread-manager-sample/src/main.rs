@@ -211,6 +211,7 @@ fn new_config(model: Option<String>, arg0_paths: Arg0DispatchPaths) -> anyhow::R
         developer_instructions: None,
         guardian_policy_config: None,
         guardian_model_config: None,
+        guardian_model_provider_config: None,
         guardian_reasoning_effort_config: None,
         guardian_evidence_dir: None,
         include_permissions_instructions: false,

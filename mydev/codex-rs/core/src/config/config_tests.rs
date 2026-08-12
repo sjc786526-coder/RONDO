@@ -7682,6 +7682,115 @@ policy = "Use the user-configured guardian policy."
 }
 
 #[tokio::test]
+async fn load_config_resolves_auto_review_model_provider_without_changing_main_provider()
+-> std::io::Result<()> {
+    let codex_home = TempDir::new()?;
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+[auto_review]
+model_provider = "guardian-local"
+
+[model_providers.guardian-local]
+name = "Guardian local"
+base_url = "http://127.0.0.1:8877/v1"
+wire_api = "responses"
+experimental_bearer_token = "guardian-test-token"
+http_headers = { "x-guardian-provider" = "isolated" }
+query_params = { "route" = "guardian" }
+request_max_retries = 7
+stream_max_retries = 9
+stream_idle_timeout_ms = 12345
+supports_websockets = false
+"#,
+    )
+    .expect("TOML deserialization should succeed");
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+
+    assert_eq!(
+        (
+            config.guardian_model_provider_config.as_deref(),
+            config.model_provider_id.as_str(),
+            config.model_provider.clone(),
+        ),
+        (
+            Some("guardian-local"),
+            "openai",
+            built_in_model_providers(/*openai_base_url*/ None)["openai"].clone(),
+        )
+    );
+    assert_eq!(
+        config
+            .model_providers
+            .get("guardian-local")
+            .expect("guardian provider should remain in the merged registry"),
+        &ModelProviderInfo {
+            name: "Guardian local".to_string(),
+            base_url: Some("http://127.0.0.1:8877/v1".to_string()),
+            experimental_bearer_token: Some("guardian-test-token".to_string()),
+            query_params: Some(HashMap::from([(
+                "route".to_string(),
+                "guardian".to_string(),
+            )])),
+            http_headers: Some(HashMap::from([(
+                "x-guardian-provider".to_string(),
+                "isolated".to_string(),
+            )])),
+            request_max_retries: Some(7),
+            stream_max_retries: Some(9),
+            stream_idle_timeout_ms: Some(12_345),
+            supports_websockets: false,
+            wire_api: WireApi::Responses,
+            ..Default::default()
+        }
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn load_config_rejects_unknown_or_empty_auto_review_model_provider() {
+    for model_provider in ["missing-provider", "   "] {
+        let codex_home = TempDir::new().expect("create temp codex home");
+        let mut cfg = ConfigToml {
+            auto_review: Some(AutoReviewToml {
+                model_provider: Some(model_provider.to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        if model_provider.trim().is_empty() {
+            cfg.model_providers.insert(
+                String::new(),
+                ModelProviderInfo {
+                    name: "Empty ID must never be selectable".to_string(),
+                    ..Default::default()
+                },
+            );
+        }
+
+        let err = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await
+        .expect_err("unknown auto-review provider should fail config load");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(
+            err.to_string().contains("Model provider"),
+            "unexpected error: {err}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn load_config_uses_auto_review_guardian_policy_config() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {

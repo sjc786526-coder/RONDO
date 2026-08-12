@@ -9,6 +9,7 @@ use codex_analytics::GuardianReviewAnalyticsResult;
 use codex_analytics::GuardianReviewSessionAnalyticsParams;
 use codex_analytics::GuardianReviewSessionKind;
 use codex_extension_api::UserInstructions;
+use codex_login::AuthManager;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::Personality;
@@ -164,6 +165,7 @@ struct GuardianReviewSessionReuseKey {
     model: Option<String>,
     model_provider_id: String,
     model_provider: ModelProviderInfo,
+    inherits_parent_model_provider_auth: bool,
     model_context_window: Option<i64>,
     model_auto_compact_token_limit: Option<i64>,
     model_auto_compact_token_limit_scope: AutoCompactTokenLimitScope,
@@ -192,6 +194,8 @@ impl GuardianReviewSessionReuseKey {
             model: spawn_config.model.clone(),
             model_provider_id: spawn_config.model_provider_id.clone(),
             model_provider: spawn_config.model_provider.clone(),
+            inherits_parent_model_provider_auth:
+                guardian_model_provider_inherits_parent_auth(spawn_config),
             model_context_window: spawn_config.model_context_window,
             model_auto_compact_token_limit: spawn_config.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: spawn_config.model_auto_compact_token_limit_scope,
@@ -676,9 +680,14 @@ async fn spawn_guardian_review_session(
         ),
         None => (None, 0, None),
     };
+    let model_provider_auth_manager = guardian_model_provider_auth_manager(
+        &spawn_config,
+        &parent_session.services.auth_manager,
+    );
     let (session, io) = Box::pin(run_codex_thread_interactive(
         spawn_config,
         parent_session.services.auth_manager.clone(),
+        model_provider_auth_manager,
         parent_session.services.models_manager.clone(),
         Arc::clone(parent_session),
         Arc::clone(parent_turn),
@@ -702,6 +711,24 @@ async fn spawn_guardian_review_session(
             last_committed_fork_snapshot: None,
         }),
     })
+}
+
+pub(super) fn guardian_model_provider_auth_manager(
+    spawn_config: &Config,
+    parent_auth_manager: &Arc<AuthManager>,
+) -> Option<Arc<AuthManager>> {
+    // An explicit provider owns its authentication. Env/static bearer auth is
+    // read from ModelProviderInfo and command auth creates its own manager, so
+    // passing the parent manager here would leak first-party credentials to a
+    // provider that intentionally has no auth configuration.
+    guardian_model_provider_inherits_parent_auth(spawn_config)
+        .then(|| Arc::clone(parent_auth_manager))
+}
+
+fn guardian_model_provider_inherits_parent_auth(spawn_config: &Config) -> bool {
+    spawn_config.guardian_model_provider_config.is_none()
+        || spawn_config.model_provider.requires_openai_auth
+        || spawn_config.model_provider.is_amazon_bedrock()
 }
 
 async fn run_review_on_session(
@@ -1021,6 +1048,18 @@ pub(crate) fn build_guardian_review_session_config(
     let mut guardian_config = parent_config.clone();
     guardian_config.model = Some(active_model.to_string());
     guardian_config.model_reasoning_effort = reasoning_effort;
+    if let Some(model_provider_id) = parent_config.guardian_model_provider_config.as_deref() {
+        let model_provider = parent_config
+            .model_providers
+            .get(model_provider_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "auto-review model provider `{model_provider_id}` is missing from the runtime registry"
+                )
+            })?;
+        guardian_config.model_provider_id = model_provider_id.to_string();
+        guardian_config.model_provider = model_provider.clone();
+    }
     guardian_config.model_provider.request_max_retries = Some(1);
     guardian_config.model_provider.stream_max_retries = Some(1);
     guardian_config.include_skill_instructions = false;
@@ -1343,6 +1382,57 @@ mod tests {
                 /*user_instructions*/ None,
             )
         );
+    }
+
+    #[tokio::test]
+    async fn guardian_review_session_auth_inheritance_change_invalidates_cached_session() {
+        let mut parent_config = crate::config::test_config().await;
+        parent_config.model_provider_id = "same-provider".to_string();
+        parent_config.model_provider.name = "Same provider".to_string();
+        parent_config.model_provider.requires_openai_auth = false;
+        parent_config.model_providers.insert(
+            parent_config.model_provider_id.clone(),
+            parent_config.model_provider.clone(),
+        );
+
+        let inherited_spawn_config = build_guardian_review_session_config(
+            &parent_config,
+            /*live_network_config*/ None,
+            "active-model",
+            /*reasoning_effort*/ None,
+            /*model_messages*/ None,
+        )
+        .expect("inherited guardian config");
+        let inherited_reuse_key = GuardianReviewSessionReuseKey::from_spawn_config(
+            &inherited_spawn_config,
+            /*user_instructions*/ None,
+        );
+
+        parent_config.guardian_model_provider_config = Some("same-provider".to_string());
+        let explicit_spawn_config = build_guardian_review_session_config(
+            &parent_config,
+            /*live_network_config*/ None,
+            "active-model",
+            /*reasoning_effort*/ None,
+            /*model_messages*/ None,
+        )
+        .expect("explicit guardian config");
+        let explicit_reuse_key = GuardianReviewSessionReuseKey::from_spawn_config(
+            &explicit_spawn_config,
+            /*user_instructions*/ None,
+        );
+
+        assert_eq!(
+            inherited_spawn_config.model_provider_id,
+            explicit_spawn_config.model_provider_id
+        );
+        assert_eq!(
+            inherited_spawn_config.model_provider,
+            explicit_spawn_config.model_provider
+        );
+        assert!(inherited_reuse_key.inherits_parent_model_provider_auth);
+        assert!(!explicit_reuse_key.inherits_parent_model_provider_auth);
+        assert_ne!(inherited_reuse_key, explicit_reuse_key);
     }
 
     #[tokio::test]

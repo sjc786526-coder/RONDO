@@ -422,7 +422,12 @@ pub(crate) struct SessionSpawnArgs {
     pub(crate) allow_provider_model_fallback: bool,
     pub(crate) user_instructions: LoadedUserInstructions,
     pub(crate) installation_id: String,
+    /// Auth used by session-owned services and inherited subagent facilities.
     pub(crate) auth_manager: Arc<AuthManager>,
+    /// Auth exposed only to the configured model provider. This is normally the
+    /// session auth, but isolated providers such as an unauthenticated Guardian
+    /// endpoint can intentionally receive `None`.
+    pub(crate) model_provider_auth_manager: Option<Arc<AuthManager>>,
     pub(crate) models_manager: SharedModelsManager,
     pub(crate) environment_manager: Arc<EnvironmentManager>,
     pub(crate) skills_service: Arc<HostSkillsService>,
@@ -519,6 +524,7 @@ impl Session {
             user_instructions,
             installation_id,
             auth_manager,
+            model_provider_auth_manager,
             models_manager,
             environment_manager,
             skills_service,
@@ -683,7 +689,7 @@ impl Session {
         let session_configuration = SessionConfiguration {
             provider: create_model_provider(
                 config.model_provider.clone(),
-                Some(Arc::clone(&auth_manager)),
+                model_provider_auth_manager,
             ),
             collaboration_mode,
             model_reasoning_summary: config.model_reasoning_summary,

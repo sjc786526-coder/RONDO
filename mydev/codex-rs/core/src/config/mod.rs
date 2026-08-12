@@ -701,9 +701,14 @@ pub struct Config {
 
     /// Guardian review model override from `[auto_review].model`. Takes precedence
     /// over the catalog's `auto_review_model_override` and the provider default.
-    /// This overrides the model slug only; the guardian keeps inheriting the parent
-    /// session's model provider.
+    /// This overrides the model slug only; `[auto_review].model_provider` independently
+    /// selects the provider when configured.
     pub guardian_model_config: Option<String>,
+
+    /// Guardian model provider ID from `[auto_review].model_provider`. The ID is
+    /// validated against the merged model provider registry during config load.
+    /// `None` keeps inheriting the parent session's provider.
+    pub guardian_model_provider_config: Option<String>,
 
     /// Guardian reasoning effort override from `[auto_review].reasoning_effort`.
     /// When `None`, the effort stays derived from the review model's capabilities.
@@ -3945,6 +3950,30 @@ impl Config {
             .map(str::trim)
             .filter(|model| !model.is_empty())
             .map(str::to_string);
+        let guardian_model_provider_config = match cfg
+            .auto_review
+            .as_ref()
+            .and_then(|auto_review| auto_review.model_provider.as_deref())
+        {
+            Some(model_provider_id) => {
+                let model_provider_id = model_provider_id.trim();
+                if model_provider_id.is_empty()
+                    || !model_providers.contains_key(model_provider_id)
+                {
+                    let message = if model_provider_id == LEGACY_OLLAMA_CHAT_PROVIDER_ID {
+                        OLLAMA_CHAT_PROVIDER_REMOVED_ERROR.to_string()
+                    } else {
+                        format!("Model provider `{model_provider_id}` not found")
+                    };
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        message,
+                    ));
+                }
+                Some(model_provider_id.to_string())
+            }
+            None => None,
+        };
         let guardian_reasoning_effort_config = cfg
             .auto_review
             .as_ref()
@@ -4228,6 +4257,7 @@ impl Config {
                 .unwrap_or(false),
             guardian_policy_config,
             guardian_model_config,
+            guardian_model_provider_config,
             guardian_reasoning_effort_config,
             guardian_evidence_dir,
             model_reasoning_effort: cfg.model_reasoning_effort,

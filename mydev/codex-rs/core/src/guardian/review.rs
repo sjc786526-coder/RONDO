@@ -768,9 +768,8 @@ pub(super) async fn guardian_review_session_config(
         }
     };
     // `[auto_review].model` wins over the catalog override, which wins over the
-    // provider default. Only the model slug is overridden here: the guardian keeps
-    // inheriting the parent session's provider, so a configured slug must be one
-    // the parent provider serves.
+    // parent provider default. Provider selection is independent: the guardian
+    // inherits the parent provider unless `[auto_review].model_provider` is set.
     let model_override = turn
         .config
         .guardian_model_config
