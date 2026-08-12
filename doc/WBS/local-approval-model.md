@@ -1,6 +1,6 @@
 # 方向 2：本地审批模型接入与横评
 
-最后更新：2026-08-10 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-12 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
@@ -30,6 +30,13 @@
   model-backed 参数验证前也不启动真实服务。本批未下载权重、未启动模型/推理、未量显存/
   上下文/首 token/总耗时，L2 真实验收与 L2a/L3/L4 保持待后续阶段；当前不表述为
   “只差权重”。
+- **模型工程冻结完成，权重未下载**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
+  Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
+  单文件下载/校验和 8GB 两阶段上下文方案。官方同档和主要社区资产均已比较；当前状态为
+  `download_ready_blocked_on_user_approval`，详见
+  `doc/audit-snapshots/2026-08-12-ministral-3-8b-instruct-2512-gguf-freeze.md`。这不改变上述
+  `cpu_only_no_model`/`not_run` 能力事实。权重下载已就绪，但项目内 Linux CUDA runtime、launcher 最小参数合同和唯一模板
+  口径验收仍是 model-backed smoke/正式 baseline 的前置。
 
 ## 核心设计（已定，不再反复讨论）
 
