@@ -246,23 +246,34 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   `p2-b7-canary-baseline-v16`/`p2-b7-canary-sol-sol-v16`，321 个 run ID 从 `20260812-360000000` 派生，
   lock SHA `8491778a7e358d279e96771f4a97927f9004c57498ba22a3d4e93c28067d4f21`，prior
   `408.561823 USD`；其他九题、taskset、profile、bundle、轮次与 `700 USD` cap 不变。
+- v16 重建并通过十题 Oracle，fresh wire 结算 `0.166529 USD`。两轮 A/A 中
+  `vulnerable-secret` 每轮均三次命中 HTTP 200 流无 terminal usage，两条链均以
+  `task_local_reproducible_infra` 终止。`sanitize-git-repo` 的 provider-integrity a1 由 a2 恢复；
+  A/B RONDO 的 filter 随后命中第三个不同 task 的同类故障，正确触发全局
+  `mechanical_circuit_breaker:provider_response_integrity`。v16 以 blocked 收口，29 个 paid run、229 个
+  upstream attempt、reservation 0，v16 paid `160.692268 USD`，连同 wire 后累计
+  `569.420620 USD`。v16 的 lock/state/ledger/result/artifact 不复用。
+- 离线 RCA 确认三题均是上游 HTTP 200 流已开始后缺少有效终结/usage，没有共同 Docker、
+  RONDO、proxy 或发布链局部缺陷；含糊请求继续保守结算。生成器以该终态冻结唯一 v17：
+  campaign/batch `p2-b7-canary-baseline-v17`/`p2-b7-canary-sol-sol-v17`，321 个 run ID 从
+  `20260812-370000000` 派生，lock SHA
+  `226783e3ce06cee06d0bb632ba881cda3971307456213588e0ae1ad2e0caf116`，prior `569.420620 USD`。
 
 ### 后续计划
 
-1. v16 按共享组件摘要机械决定 Oracle proof 命中或精确失效，全部 proof 合法后执行 fresh wire canary，再逐
-   slot 推进；第二次同类 task infra 必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同
-   分母、费用与资源事实。
+1. v17 命中与 campaign identity 解耦的 Oracle proof 后执行 fresh wire canary，再逐 slot 推进；仍严格执行
+   infra-only a1—a4、第二次同类离线 RCA、第三次 task-local 终止和三个 task 全局熔断。任一
+   next-request 最大合法预留无法装入剩余 `130.579380 USD` 时在 API 前 blocked。
 
 ### 阻塞项
 
-- 无离线阻塞；filter 的 PIDs 合同变化使其旧 proof 精确失效，Docker lifecycle 共享组件变化可使十题 proof
-  一并精确失效。任何官方 Oracle reward 0 均停止并报告，不自动换题。diagnosis hold 是可恢复暂停而非
-  campaign 通过或费用重置。
+- 无离线阻塞；v17 仍可能因上游 provider response integrity 熔断或剩余预算不足而 blocked。
+  diagnosis hold 是可恢复暂停而非 campaign 通过或费用重置。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v15 是保留全部费用事实的 blocked 终态。累计 debit `408.561823 USD`、
-  reservation 0；v16 已冻结，尚未执行 API。
+- v1 是 API 前失败终态；v2—v16 是保留全部费用事实的 blocked 终态。累计 debit `569.420620 USD`、
+  reservation 0；v17 已冻结，尚未执行 API。
 
 ## 6. 关键决策记录
 
@@ -293,3 +304,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 023 | v13 wire 后因本地 worker 控制流缺陷在付费前退役；恢复 post-Oracle 单步路由并以精确 wire debit 重冻 v14 | 不用重启同一 identity 绕过实现缺陷；Oracle proof 与 wire/paid identity 解耦，历史事实保持只读 | B6/B7 | 已采纳 |
 | 024 | v14 第二次同类 filter Docker failure 后先做 no-API RCA；精确 512 PIDs 证明本地资源合同缺少 supervisor 余量，故阻断 v14、仅将 filter 冻结为 1024 PIDs 并重冻 v15 | 不用 a4 绕过已证明的实现缺陷；只使受影响题 Oracle proof 失效，历史 identity 与费用不回填 | B6/B7 | 已采纳 |
 | 025 | v15 第二次同类 filter failure 后停在 a3 前；RCA 证明 1024 PIDs 造成 verifier 假通过，4096 才完成全部批次，并闭合 stopped-container inspect/remove 竞态后重冻 v16 | 不用更多付费 attempt 掩盖本地合同缺陷；资源上限与共享 lifecycle 变更都精确进入 Oracle proof 失效条件 | B6/B7 | 已采纳 |
+| 026 | v16 因 vulnerable、sanitize、filter 三个 task 的真实 provider-integrity 触发全局熔断；保留 229 attempt 与全部保守费用，机械继承 prior 后重冻 v17 | 不将 HTTP 200 无 terminal usage 改判为未计费，不复用 blocked identity；剩余预算仍是硬停线 | B6/B7 | 已采纳 |

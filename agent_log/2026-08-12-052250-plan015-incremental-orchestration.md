@@ -66,3 +66,10 @@
 - catalog v4 仅将 filter 调至 4096 PIDs；生成器冻结 v16：run base `20260812-360000000`、lock SHA
   `8491778a7e358d279e96771f4a97927f9004c57498ba22a3d4e93c28067d4f21`、prior `408.561823 USD`。v1—v15
   及其 lock/state/ledger/result/artifact 均未改写。
+- v16 因三个不同 task 的 `provider_response_integrity` 触发全局熔断：29 个 paid run、229 个
+  upstream attempt，paid `160.692268 USD`、wire `0.166529 USD`，reservation 0，累计
+  `569.420620 USD`。含糊的 HTTP 200 流无 terminal usage 均保留完整保守结算；results 以
+  `4718ba1` 提交，历史资产未回填。
+- 机械生成 v17：run base `20260812-370000000`、lock SHA
+  `226783e3ce06cee06d0bb632ba881cda3971307456213588e0ae1ad2e0caf116`、prior `569.420620 USD`；
+  taskset/catalog/profile/bundle/700 USD cap 不变。
