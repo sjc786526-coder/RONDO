@@ -23,6 +23,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerContainerMetricFact,
     DockerImageIdentity,
     DockerCounterReading,
+    DockerExecutionResult,
     FAILURE_CLEANUP_TIMEOUT_SECONDS,
     HOST_SUCCESS_TEARDOWN_GRACE_SECONDS,
     DockerLimits,
@@ -1306,6 +1307,23 @@ class DockerSupervisorTests(unittest.TestCase):
         assert seccomp is not None
         self.assertEqual(seccomp.profile_kind, "custom")
         self.assertEqual(seccomp.profile_sha256, profile_digest)
+        result = DockerExecutionResult(
+            operation=DockerOperation.HOST,
+            argv=("harbor",),
+            returncode=0,
+            samples=(*samples[:-1], replace(samples[-1], phase="cleanup_verified")),
+            warnings=(),
+            image_identity=image,
+            desktop_vhdx=vhdx,
+            container_metrics=metrics,
+            effective_seccomp=seccomp,
+        )
+        receipt = result.oracle_receipt()
+        self.assertEqual(receipt["image"]["reference"], IMAGE)
+        self.assertEqual(receipt["cleanup"], "verified_empty")
+        self.assertNotIn("metrics", receipt)
+        with self.assertRaises(DockerSupervisionError):
+            result.receipt()
 
     def test_compose_secret_allows_exactly_one_dynamic_source_mount(self) -> None:
         secret = DockerMountFact(

@@ -970,7 +970,7 @@ def _run_oracle_preflight(
             outcome=parsed.outcome.value,
             task_outcome=str(parsed.task_outcome),
             reward=float(parsed.reward),
-            docker_receipt=harbor.docker_evidence.receipt(),
+            docker_receipt=harbor.docker_evidence.oracle_receipt(),
         )
         created += 1
     manifest = store.publish_manifest(catalog=identity.catalog, contracts=contracts)

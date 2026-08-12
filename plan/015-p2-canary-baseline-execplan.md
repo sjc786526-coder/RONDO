@@ -181,7 +181,9 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - v10 已由生成器冻结并激活：campaign/batch 为 `p2-b7-canary-baseline-v10`/
   `p2-b7-canary-sol-sol-v10`，161 个 run ID 从 `20260812-300000000` 派生，lock SHA 为
   `3e51aa222cc222890627036221a8a235e0ff6d95b0c5491b84eb9a2cb48d5d32`，prior 为 `282.287684 USD`；尚未执行
-  Oracle、wire canary、Docker 或 API。
+  wire canary 或 API。首题 Oracle 的官方任务与 Docker 清理完成后，proof 发布误用了强制 paid container metrics 的
+  B2 receipt 而停止；未产生 proof/state/slot/费用。Oracle 专用 compatibility receipt 已保持 paid 门禁不变地补齐，
+  focused 108/108 通过，待干净提交后从缺失 proof 恢复。
 
 ### 后续计划
 
@@ -196,7 +198,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v9 是保留全部费用事实的 blocked 终态；离线编排改进已通过门禁，v10 identity 已冻结、尚未执行。
+- v1 是 API 前失败终态；v2—v9 是保留全部费用事实的 blocked 终态；v10 identity 已冻结，首题 Oracle proof 发布缺口已离线修复、尚无 API 费用。
 
 ## 6. 关键决策记录
 

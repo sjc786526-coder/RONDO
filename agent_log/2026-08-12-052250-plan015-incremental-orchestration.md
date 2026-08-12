@@ -13,4 +13,6 @@
   通过。本批未调用真实 API、Docker 或 Cargo，未读取 `.env.local`，未修改任何 v1—v9 历史资产。
 - 生成器随后冻结 v10：`p2-b7-canary-baseline-v10`、`p2-b7-canary-sol-sol-v10`、run ID base
   `20260812-300000000`、lock SHA `3e51aa222cc222890627036221a8a235e0ff6d95b0c5491b84eb9a2cb48d5d32`，
-  prior `282.287684 USD`。生成阶段未运行 Oracle、Docker、wire canary 或 API。
+  prior `282.287684 USD`。首题 Oracle 官方任务与 Docker 清理完成，但 proof 发布调用了强制 paid metrics 的 B2
+  receipt 而在落盘前停止；无 state/slot/API/费用。新增 Oracle 专用 compatibility receipt，保持 paid receipt 门禁，
+  focused 108/108 与 lock 通过。

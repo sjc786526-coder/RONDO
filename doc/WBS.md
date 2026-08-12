@@ -73,8 +73,8 @@
   `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B6 预算合同已冻结；B7 的 v9 完成 10-task
   Oracle、fresh wire canary 和首个正式任务后，因执行 checkout 与 results worktree 重合而 fail-closed。
   v9 后继累计 debit 为 `282.287684 USD`，reservation 为 0，全部历史事实只读。campaign-independent Oracle
-  proof、单 slot locked worker、安全恢复与 identity 生成入口已通过 420 条离线回归；v10 已精确继承 prior 并
-  激活，尚未执行 Oracle、wire canary 或正式 slot。**
+  proof、单 slot locked worker、安全恢复与 identity 生成入口已通过离线回归；v10 已精确继承 prior 并激活。
+  首题 Oracle 的任务/清理成功但 proof receipt 类型错配，已在 0 API/0 USD 时修复，待从缺失 proof 恢复。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到

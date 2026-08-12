@@ -778,6 +778,80 @@ class DockerExecutionResult:
     container_metrics: DockerContainerMetrics | None = None
     effective_seccomp: DockerSeccompEvidence | None = None
 
+    def oracle_receipt(self) -> dict[str, object]:
+        """Project Oracle compatibility without weakening paid metrics gates."""
+
+        if not self.samples:
+            raise DockerSupervisionError("Docker result has no supervised samples")
+        for item in (self.image_identity, self.desktop_vhdx, self.effective_seccomp):
+            if item is None:
+                raise DockerSupervisionError(
+                    "Docker Oracle result lacks required compatibility evidence"
+                )
+            item.validate()
+        facts = {
+            fact
+            for sample in self.samples
+            for fact in sample.task_containers
+        }
+        if len(facts) != 1:
+            raise DockerSupervisionError(
+                "Docker Oracle result lacks one stable container fact"
+            )
+        fact = next(iter(facts))
+        fact.validate()
+        final = self.samples[-1]
+        if (
+            final.phase != "cleanup_verified"
+            or final.task_container_ids
+            or final.task_networks
+            or final.task_volumes
+        ):
+            raise DockerSupervisionError(
+                "Docker Oracle result cleanup was not verified empty"
+            )
+        return {
+            "schema_version": 1,
+            "operation": self.operation.value,
+            "returncode": self.returncode,
+            "image": {
+                "reference": self.image_identity.image_reference,
+                "id": self.image_identity.image_id,
+            },
+            "container": {
+                "user": fact.user,
+                "privileged": fact.privileged,
+                "cap_add": list(fact.cap_add),
+                "cap_drop": list(fact.cap_drop),
+                "security_opt": [
+                    "seccomp=custom"
+                    if option.casefold().startswith("seccomp=")
+                    else option
+                    for option in fact.security_opt
+                ],
+                "memory": fact.memory_bytes,
+                "memory_swap": fact.memory_swap_bytes,
+                "pids": fact.pids_limit,
+                "read_only_rootfs": fact.read_only_rootfs,
+                "cgroupns": fact.cgroupns_mode,
+                "network_mode": fact.network_mode,
+                "networks": list(fact.networks),
+                "mounts": [
+                    {
+                        "type": mount.kind,
+                        "destination": mount.destination,
+                        "read_only": mount.read_only,
+                    }
+                    for mount in fact.mounts
+                ],
+            },
+            "seccomp": {
+                "kind": self.effective_seccomp.profile_kind,
+                "sha256": self.effective_seccomp.profile_sha256,
+            },
+            "cleanup": "verified_empty",
+        }
+
     def receipt(self) -> dict[str, object]:
         """Return the canonical, path-free B2 Docker result projection."""
 
