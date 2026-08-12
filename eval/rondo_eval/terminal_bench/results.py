@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
-from ..artifacts import ArtifactWriter
+from ..artifacts import ArtifactError, ArtifactWriter, validate_private_artifact_bytes
 from ..config import RepoPaths
 from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
 from .freeze import (
@@ -702,7 +703,21 @@ def _write_harbor_evidence(
         total += len(contents)
         if total > _MAX_ARCHIVE_BYTES:
             raise HarborResultError("Harbor evidence exceeds the bounded archive size")
-        writer.write_bytes(f"harbor/{relative}", contents)
+        destination = f"harbor/{relative}"
+        try:
+            validate_private_artifact_bytes(contents, destination)
+        except ArtifactError:
+            writer.write_json(
+                f"{destination}.redacted.json",
+                {
+                    "schema_version": 1,
+                    "reason": "sensitive_private_artifact_omitted",
+                    "source_size_bytes": len(contents),
+                    "source_sha256": hashlib.sha256(contents).hexdigest(),
+                },
+            )
+        else:
+            writer.write_bytes(destination, contents)
 
 
 def _write_guardian_evidence(

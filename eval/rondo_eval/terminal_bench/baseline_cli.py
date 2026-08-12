@@ -24,6 +24,7 @@ from ..runtime_bridge import (
 )
 from .__main__ import _exception_failure, _load_manifest, _outcome_exit_code
 from .baseline import (
+    BASE_ROUNDS,
     CAMPAIGN_CAP_USD,
     CAMPAIGN_MAX_RUNS,
     RUN_CAP_USD,
@@ -36,6 +37,10 @@ from .baseline import (
     CampaignSlotStatus,
     CampaignStateLedger,
     ConditionalRun,
+    MECHANICAL_CIRCUIT_BREAKER_TASKS,
+    MAX_REMAINING_INFRA_PER_ROUND,
+    MIN_COMMON_VALID_TASKS,
+    MechanicalFailureCategory,
     assess_baseline,
     load_campaign_identity,
 )
@@ -84,6 +89,40 @@ class ExecutedSlot:
     outcome: RunOutcome
     task_outcome: TaskOutcome
     estimated_usd: Decimal
+    failure_category: MechanicalFailureCategory | None = None
+
+
+class MechanicalFailureTracker:
+    """Open the campaign circuit after one category reaches three tasks."""
+
+    def __init__(self) -> None:
+        self._tasks: dict[MechanicalFailureCategory, set[str]] = {
+            item: set() for item in MechanicalFailureCategory
+        }
+
+    def observe(self, executed: ExecutedSlot) -> None:
+        if executed.task_outcome is not TaskOutcome.INFRA:
+            if executed.failure_category is not None:
+                raise CampaignExecutionError(
+                    "non-infra result has a mechanical failure category"
+                )
+            return
+        category = executed.failure_category
+        task_id = executed.slot.task_id
+        if category is None or task_id is None:
+            raise CampaignExecutionError(
+                "infra result lacks a structured mechanical failure category"
+            )
+        if category in {
+            MechanicalFailureCategory.BUDGET_CAPACITY,
+            MechanicalFailureCategory.OPERATOR_INTERRUPTION,
+        }:
+            raise CampaignExecutionError(f"campaign_terminal_failure:{category.value}")
+        self._tasks[category].add(task_id)
+        if len(self._tasks[category]) >= MECHANICAL_CIRCUIT_BREAKER_TASKS:
+            raise CampaignExecutionError(
+                f"mechanical_circuit_breaker:{category.value}"
+            )
 
 
 @dataclass(frozen=True)
@@ -183,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
             default_run_cap_usd=RUN_CAP_USD,
         ) as budget:
             try:
+                failure_tracker = MechanicalFailureTracker()
                 base_runs = _execute_base_rounds(
                     paths=paths,
                     identity=identity,
@@ -199,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
                     measurement_commits=measurement_commits,
                     eval_harness_commit=eval_harness_commit,
                     seccomp_profile=seccomp_profile,
+                    failure_tracker=failure_tracker,
                 )
                 _require_resolved_base_rounds(identity, base_runs)
                 conditional_runs = _execute_conditionals(
@@ -218,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
                     eval_harness_commit=eval_harness_commit,
                     seccomp_profile=seccomp_profile,
                     base_runs=base_runs,
+                    failure_tracker=failure_tracker,
                 )
                 assessment = assess_baseline(
                     tuple(task.task_id for task in identity.catalog.tasks),
@@ -504,69 +546,78 @@ def _execute_wire_canary(
     return spent
 
 
-def _execute_base_rounds(**kwargs: object) -> list[BaselineRun]:
+def _execute_base_rounds(
+    *,
+    failure_tracker: MechanicalFailureTracker | None = None,
+    **kwargs: object,
+) -> list[BaselineRun]:
     identity: CampaignIdentity = kwargs["identity"]
     state: CampaignStateLedger = kwargs["state"]
+    tracker = failure_tracker or MechanicalFailureTracker()
     values: list[BaselineRun] = []
     for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
         side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
-        first: list[ExecutedSlot] = []
+        effective: dict[str, ExecutedSlot] = {}
         for task in identity.catalog.tasks:
-            slot = identity.slot(f"base:{round_id}:{task.task_id}:a1")
-            first.append(_execute_task_slot(slot=slot, task=task, **kwargs))
-        infra = [item for item in first if item.task_outcome is TaskOutcome.INFRA]
-        replace_ids = (
-            {task.task_id for task in identity.catalog.tasks}
-            if len(infra) > 2
-            else {item.slot.task_id for item in infra}
-        )
-        effective: dict[str, ExecutedSlot] = {
-            item.slot.task_id: item for item in first
-        }
-        for task in identity.catalog.tasks:
-            slot = identity.slot(f"base:{round_id}:{task.task_id}:a2")
-            if task.task_id in replace_ids:
-                effective[task.task_id] = _execute_task_slot(
-                    slot=slot, task=task, **kwargs
-                )
-            else:
-                state.skip(slot.slot_id, reason="base_replacement_not_activated")
-        for task in identity.catalog.tasks:
-            item = effective[task.task_id]
+            first_slot = identity.slot(f"base:{round_id}:{task.task_id}:a1")
+            first = _execute_task_slot(slot=first_slot, task=task, **kwargs)
+            tracker.observe(first)
             values.append(
                 BaselineRun(
                     task.task_id,
                     round_id,
                     side,
-                    item.slot.attempt,
-                    item.task_outcome,
-                    item.slot.run_id,
+                    1,
+                    first.task_outcome,
+                    first.slot.run_id,
+                    first.failure_category,
                 )
             )
-        # assess_baseline needs both attempts, not just the selected values.
-        values.extend(
-            BaselineRun(
-                item.slot.task_id,
-                round_id,
-                side,
-                1,
-                item.task_outcome,
-                item.slot.run_id,
+            effective[task.task_id] = first
+            replacement_slot = identity.slot(
+                f"base:{round_id}:{task.task_id}:a2"
             )
-            for item in first
-            if item.slot.task_id in replace_ids
-        )
+            if first.task_outcome is TaskOutcome.INFRA:
+                replacement = _execute_task_slot(
+                    slot=replacement_slot, task=task, **kwargs
+                )
+                tracker.observe(replacement)
+                values.append(
+                    BaselineRun(
+                        task.task_id,
+                        round_id,
+                        side,
+                        2,
+                        replacement.task_outcome,
+                        replacement.slot.run_id,
+                        replacement.failure_category,
+                    )
+                )
+                effective[task.task_id] = replacement
+            else:
+                state.skip(
+                    replacement_slot.slot_id,
+                    reason="base_replacement_not_activated",
+                )
+        if sum(
+            item.task_outcome is TaskOutcome.INFRA for item in effective.values()
+        ) > MAX_REMAINING_INFRA_PER_ROUND:
+            raise CampaignExecutionError(
+                f"base_round_infra_threshold_exceeded:{round_id}"
+            )
     return values
 
 
 def _require_resolved_base_rounds(
     identity: CampaignIdentity,
     runs: list[BaselineRun],
-) -> None:
-    """Stop before conditionals when the single frozen infra replacement failed."""
+) -> tuple[str, ...]:
+    """Validate base completeness and return the common comparison set."""
 
+    effective: dict[str, dict[str, BaselineRun]] = {}
     for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
         expected_side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
+        selected_by_task: dict[str, BaselineRun] = {}
         for task in identity.catalog.tasks:
             candidates = [
                 run
@@ -578,13 +629,28 @@ def _require_resolved_base_rounds(
             selected = max(candidates, key=lambda run: run.attempt)
             if selected.side is not expected_side:
                 raise CampaignExecutionError("base round side is invalid")
-            if selected.outcome is TaskOutcome.INFRA:
-                raise CampaignExecutionError("base infra replacement was exhausted")
+            selected_by_task[task.task_id] = selected
+        effective[round_id] = selected_by_task
+    common = tuple(
+        task.task_id
+        for task in identity.catalog.tasks
+        if all(
+            effective[round_id][task.task_id].outcome is not TaskOutcome.INFRA
+            for round_id in BASE_ROUNDS
+        )
+    )
+    return common
 
 
-def _execute_conditionals(*, base_runs: list[BaselineRun], **kwargs: object) -> list[ConditionalRun]:
+def _execute_conditionals(
+    *,
+    base_runs: list[BaselineRun],
+    failure_tracker: MechanicalFailureTracker | None = None,
+    **kwargs: object,
+) -> list[ConditionalRun]:
     identity: CampaignIdentity = kwargs["identity"]
     state: CampaignStateLedger = kwargs["state"]
+    tracker = failure_tracker or MechanicalFailureTracker()
     tasks = tuple(task.task_id for task in identity.catalog.tasks)
     by_round: dict[str, dict[str, TaskOutcome]] = {}
     for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
@@ -596,9 +662,17 @@ def _execute_conditionals(*, base_runs: list[BaselineRun], **kwargs: object) -> 
             )[-1].outcome
             for task_id in tasks
         }
-    triggers = {
+    common_valid_tasks = {
         task_id
         for task_id in tasks
+        if all(
+            by_round[round_id][task_id] is not TaskOutcome.INFRA
+            for round_id in BASE_ROUNDS
+        )
+    }
+    triggers = {
+        task_id
+        for task_id in common_valid_tasks
         if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
         and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
     }
@@ -612,11 +686,20 @@ def _execute_conditionals(*, base_runs: list[BaselineRun], **kwargs: object) -> 
                 second = identity.slot(
                     f"conditional:{task.task_id}:{side.value}:repeat{repeat}:a2"
                 )
-                if task.task_id not in triggers:
-                    state.skip(first.slot_id, reason="conditional_not_activated")
-                    state.skip(second.slot_id, reason="conditional_not_activated")
+                if (
+                    len(common_valid_tasks) < MIN_COMMON_VALID_TASKS
+                    or task.task_id not in triggers
+                ):
+                    reason = (
+                        "common_valid_task_count_below_minimum"
+                        if len(common_valid_tasks) < MIN_COMMON_VALID_TASKS
+                        else "conditional_not_activated"
+                    )
+                    state.skip(first.slot_id, reason=reason)
+                    state.skip(second.slot_id, reason=reason)
                     continue
                 executed = _execute_task_slot(slot=first, task=task, **kwargs)
+                tracker.observe(executed)
                 values.append(
                     ConditionalRun(
                         task.task_id,
@@ -625,10 +708,12 @@ def _execute_conditionals(*, base_runs: list[BaselineRun], **kwargs: object) -> 
                         1,
                         executed.task_outcome,
                         first.run_id,
+                        executed.failure_category,
                     )
                 )
                 if executed.task_outcome is TaskOutcome.INFRA:
                     replacement = _execute_task_slot(slot=second, task=task, **kwargs)
+                    tracker.observe(replacement)
                     values.append(
                         ConditionalRun(
                             task.task_id,
@@ -637,6 +722,7 @@ def _execute_conditionals(*, base_runs: list[BaselineRun], **kwargs: object) -> 
                             2,
                             replacement.task_outcome,
                             second.run_id,
+                            replacement.failure_category,
                         )
                     )
                 else:
@@ -732,6 +818,8 @@ def _execute_task_slot(
         metrics=timer.snapshot(exit_code=exit_code).to_dict(),
         selected_profile=identity.selected_profile,
     )
+    failure_stage: str | None = None
+    guardian_technical_failure = False
     try:
         live = asyncio.run(
             run_budgeted_terminal_bench(
@@ -755,6 +843,10 @@ def _execute_task_slot(
             expected_task_id=task.task_id,
         )
         parsed = classify_terminal_bench_result(live, parsed)
+        guardian_technical_failure = any(
+            item.terminal_status in {"aborted", "timed_out", "failed_closed"}
+            for item in live.evidence
+        )
         artifact = publish_terminal_bench_result(
             paths,
             results_worktree_root=results_root,
@@ -808,6 +900,12 @@ def _execute_task_slot(
     del secrets
     run = budget.snapshot()["runs"][slot.run_id]
     spent = Decimal(run["spent_usd"])
+    failure_category = _mechanical_failure_category(
+        task_outcome=task_outcome,
+        failure_stage=failure_stage,
+        guardian_technical_failure=guardian_technical_failure,
+        budget_run=run,
+    )
     record_digest = _result_record_sha256(results_root, slot.run_id)
     state.finish(
         slot.slot_id,
@@ -816,10 +914,67 @@ def _execute_task_slot(
         estimated_usd=f"{spent:.6f}",
         artifact_path=artifact.relative_to(paths.common_root).as_posix(),
         result_record_sha256=record_digest,
-        reason=None,
+        reason=failure_category.value if failure_category is not None else None,
     )
     _sample_storage(counter, slot.run_id, baseline=storage_baseline)
-    return ExecutedSlot(slot, outcome, task_outcome, spent)
+    return ExecutedSlot(slot, outcome, task_outcome, spent, failure_category)
+
+
+_PROVIDER_INTEGRITY_STOP_REASONS = frozenset(
+    {
+        "missing_or_invalid_usage",
+        "upstream_deadline_exhausted",
+        "upstream_unavailable",
+        "upstream_failure",
+        "unclassified_upstream_failure",
+        "upstream_non_success",
+        "upstream_response_unavailable",
+        "operator_confirmed_unbilled_attempts_exhausted",
+        "operator_confirmed_unbilled_deadline_exhausted",
+        "operator_confirmed_unbilled_proxy_closing",
+        "proxy_closing",
+    }
+)
+_GUARDIAN_PROTOCOL_STOP_REASONS = frozenset(
+    {
+        "guardian_duplicate_logical_request_rejected",
+        "guardian_logical_request_limit_exceeded",
+        "logical_request_limit_exceeded",
+    }
+)
+
+
+def _mechanical_failure_category(
+    *,
+    task_outcome: TaskOutcome,
+    failure_stage: str | None,
+    guardian_technical_failure: bool,
+    budget_run: object,
+) -> MechanicalFailureCategory | None:
+    """Classify infra from typed stage and ledger state, never message text."""
+
+    if task_outcome is not TaskOutcome.INFRA:
+        return None
+    if not isinstance(budget_run, dict):
+        raise CampaignExecutionError("campaign budget run projection is invalid")
+    stop_reason = budget_run.get("stop_reason")
+    if stop_reason in _PROVIDER_INTEGRITY_STOP_REASONS:
+        return MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
+    if stop_reason in _GUARDIAN_PROTOCOL_STOP_REASONS:
+        return MechanicalFailureCategory.GUARDIAN_RUNTIME
+    if stop_reason == "usage_cost_exceeded_reservation":
+        return MechanicalFailureCategory.BUDGET_CAPACITY
+    if stop_reason == "interrupted_request" or failure_stage == "interrupted":
+        return MechanicalFailureCategory.OPERATOR_INTERRUPTION
+    if failure_stage in {"docker", "runtime"}:
+        return MechanicalFailureCategory.DOCKER_RUNTIME
+    if failure_stage == "publication":
+        return MechanicalFailureCategory.PUBLICATION_INTEGRITY
+    if failure_stage == "budget":
+        return MechanicalFailureCategory.BUDGET_CAPACITY
+    if guardian_technical_failure:
+        return MechanicalFailureCategory.GUARDIAN_RUNTIME
+    return MechanicalFailureCategory.HARNESS_RUNTIME
 
 
 def _result_record_sha256(results_root: Path, run_id: str) -> str:
@@ -1031,7 +1186,10 @@ def _public_assessment(
     rounds: dict[str, object] = {}
     for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
         selected = tuple(
-            item for item in assessment.effective_base_runs if item.round_id == round_id
+            item
+            for item in assessment.effective_base_runs
+            if item.round_id == round_id
+            and item.task_id in assessment.common_valid_tasks
         )
         scores = tuple(_score_record(records[item.run_id]) for item in selected)
         rounds[round_id] = aggregate_scores(scores, taskset="canary")
@@ -1055,10 +1213,34 @@ def _public_assessment(
         "reasons": list(assessment.reasons),
         "sigma": assessment.sigma,
         "delta": assessment.delta,
+        "common_valid_tasks": list(assessment.common_valid_tasks),
+        "common_valid_task_count": len(assessment.common_valid_tasks),
         "conditional_tasks": list(assessment.conditional_tasks),
         "base_rounds": rounds,
         "conditional_runs": conditionals,
+        "infra_failure_categories": _infra_failure_categories(assessment),
     }
+
+
+def _infra_failure_categories(
+    assessment: BaselineAssessment,
+) -> dict[str, int]:
+    counts = {item.value: 0 for item in MechanicalFailureCategory}
+    for item in (
+        *assessment.effective_base_runs,
+        *assessment.effective_conditional_runs,
+    ):
+        if item.outcome is TaskOutcome.INFRA:
+            if item.failure_category is None:
+                raise CampaignExecutionError(
+                    "public infra result lacks a mechanical failure category"
+                )
+            counts[item.failure_category.value] += 1
+        elif item.failure_category is not None:
+            raise CampaignExecutionError(
+                "public non-infra result has a mechanical failure category"
+            )
+    return counts
 
 
 def _score_record(record: dict[str, object]):

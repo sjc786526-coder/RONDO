@@ -22,7 +22,8 @@ from .scoring import TaskOutcome
 from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalog
 
 
-CAMPAIGN_CAP_USD = Decimal("200.000000")
+CAMPAIGN_CAP_USD = Decimal("400.000000")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("158.468137")
 CAMPAIGN_MAX_RUNS = 161
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
@@ -33,11 +34,15 @@ BASE_ROUNDS = (
     "ab-codex-1",
 )
 MAX_SIGMA = 2
-CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v4.json")
+MAX_REMAINING_INFRA_PER_ROUND = 2
+MECHANICAL_CIRCUIT_BREAKER_TASKS = 3
+MIN_COMMON_VALID_TASKS = 8
+CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v5.json")
 RETIRED_CAMPAIGN_LOCK_PATHS = (
     Path("eval/locks/p2-b7-canary-baseline-v1.json"),
     Path("eval/locks/p2-b7-canary-baseline-v2.json"),
     Path("eval/locks/p2-b7-canary-baseline-v3.json"),
+    Path("eval/locks/p2-b7-canary-baseline-v4.json"),
 )
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(
@@ -63,6 +68,18 @@ class CampaignSlotStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class MechanicalFailureCategory(str, Enum):
+    """Bounded failure taxonomy used by the paid campaign circuit breaker."""
+
+    PROVIDER_RESPONSE_INTEGRITY = "provider_response_integrity"
+    DOCKER_RUNTIME = "docker_runtime"
+    GUARDIAN_RUNTIME = "guardian_runtime"
+    PUBLICATION_INTEGRITY = "publication_integrity"
+    HARNESS_RUNTIME = "harness_runtime"
+    BUDGET_CAPACITY = "budget_capacity"
+    OPERATOR_INTERRUPTION = "operator_interruption"
+
+
 @dataclass(frozen=True)
 class BaselineRun:
     task_id: str
@@ -71,6 +88,7 @@ class BaselineRun:
     attempt: int
     outcome: TaskOutcome
     run_id: str
+    failure_category: MechanicalFailureCategory | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +99,7 @@ class ConditionalRun:
     attempt: int
     outcome: TaskOutcome
     run_id: str
+    failure_category: MechanicalFailureCategory | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +108,7 @@ class BaselineAssessment:
     reasons: tuple[str, ...]
     sigma: int | None
     delta: int | None
+    common_valid_tasks: tuple[str, ...]
     conditional_tasks: tuple[str, ...]
     effective_base_runs: tuple[BaselineRun, ...]
     effective_conditional_runs: tuple[ConditionalRun, ...]
@@ -696,10 +716,10 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
     catalog = load_frozen_canary_catalog(paths)
     if (
         value["schema_version"] != 1
-        or value["campaign_id"] != "p2-b7-canary-baseline-v4"
-        or value["batch_id"] != "p2-b7-canary-sol-sol-v4"
+        or value["campaign_id"] != "p2-b7-canary-baseline-v5"
+        or value["batch_id"] != "p2-b7-canary-sol-sol-v5"
         or value["run_id_date"] != "20260811"
-        or value["run_id_sequence_base"] != 240000000
+        or value["run_id_sequence_base"] != 250000000
         or value["taskset_sha256"] != catalog.taskset_sha256
         or value["canary_catalog_sha256"] != catalog.catalog_sha256
         or value["terminal_bench_commit"] != catalog.terminal_bench_commit
@@ -708,8 +728,8 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
         or not isinstance(value["no_api_seccomp"], dict)
         or value["budget"]
         != {
-            "campaign_cap_usd": "200.000000",
-            "prior_estimated_usd": "58.689250",
+            "campaign_cap_usd": "400.000000",
+            "prior_estimated_usd": _money(CAMPAIGN_PRIOR_ESTIMATED_USD),
             "run_cap_usd": "40.000000",
             "max_run_slots": 161,
             "maximum_legal_request_reservation_usd": "18.885000",
@@ -719,7 +739,13 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
         != {
             "base_rounds": list(BASE_ROUNDS),
             "max_sigma": MAX_SIGMA,
-            "infra_round_invalid_threshold": 0.2,
+            "max_remaining_infra_per_round": MAX_REMAINING_INFRA_PER_ROUND,
+            "mechanical_circuit_breaker_tasks": MECHANICAL_CIRCUIT_BREAKER_TASKS,
+            "mechanical_failure_categories": [
+                item.value for item in MechanicalFailureCategory
+            ],
+            "minimum_common_valid_tasks": MIN_COMMON_VALID_TASKS,
+            "base_replacement_policy": "targeted_infra_only",
             "max_base_replacement_attempts": 1,
             "max_conditional_replacement_attempts": 1,
             "conditional_repeats_per_side": 2,
@@ -805,11 +831,14 @@ def cost_forecast() -> dict[str, object]:
     historical_80 = (Decimal("33.176400"), Decimal("36.486560"))
     historical_160 = (Decimal("66.352800"), Decimal("72.973120"))
     observed_shape_stress = Decimal("173.653100")
+    remaining_before_v5_canary = CAMPAIGN_CAP_USD - CAMPAIGN_PRIOR_ESTIMATED_USD
     return {
         "schema_version": 1,
         "currency": "USD",
         "actual_usd": None,
         "campaign_cap_usd": _money(CAMPAIGN_CAP_USD),
+        "prior_estimated_usd": _money(CAMPAIGN_PRIOR_ESTIMATED_USD),
+        "remaining_before_v5_canary_usd": _money(remaining_before_v5_canary),
         "base_runs": 40,
         "maximum_conditional_runs": 40,
         "maximum_infra_replacement_runs": 80,
@@ -825,7 +854,9 @@ def cost_forecast() -> dict[str, object]:
         "maximum_legal_request_reservation_usd": _money(
             SOL_MAX_LEGAL_REQUEST_RESERVATION_USD
         ),
-        "feasible_from_observed_shape": observed_shape_stress < CAMPAIGN_CAP_USD,
+        "feasible_from_observed_shape": (
+            observed_shape_stress < remaining_before_v5_canary
+        ),
         "mathematical_all_legal_usage_guarantee": False,
         "stop_rule": (
             "do not start a request unless its maximum legal reservation fits the "
@@ -859,38 +890,51 @@ def assess_baseline(
             expected_side=expected_sides[round_id],
             label=round_id,
         )
-        if selected is None:
-            blocked.append(f"{round_id}_infra_replacement_exhausted")
-        else:
-            effective_base.extend(selected)
+        effective_base.extend(selected)
+        remaining_infra = sum(
+            item.outcome is TaskOutcome.INFRA for item in selected
+        )
+        if remaining_infra > MAX_REMAINING_INFRA_PER_ROUND:
+            blocked.append(f"{round_id}_infra_threshold_exceeded")
+
+    by_round = {
+        round_id: {item.task_id: item.outcome for item in effective_base if item.round_id == round_id}
+        for round_id in BASE_ROUNDS
+    }
+    common_valid_tasks = tuple(
+        task_id
+        for task_id in task_ids
+        if all(
+            by_round[round_id][task_id] is not TaskOutcome.INFRA
+            for round_id in BASE_ROUNDS
+        )
+    )
+    if len(common_valid_tasks) < MIN_COMMON_VALID_TASKS:
+        blocked.append("common_valid_task_count_below_minimum")
     if blocked:
         return BaselineAssessment(
             BaselineStatus.BLOCKED,
             tuple(blocked),
             None,
             None,
+            common_valid_tasks,
             (),
             tuple(effective_base),
             (),
         )
-
-    by_round = {
-        round_id: {item.task_id: item.outcome for item in effective_base if item.round_id == round_id}
-        for round_id in BASE_ROUNDS
-    }
     sigma = sum(
         by_round["aa-rondo-1"][task_id]
         is not by_round["aa-rondo-2"][task_id]
-        for task_id in task_ids
+        for task_id in common_valid_tasks
     )
     delta = sum(
         by_round["ab-rondo-1"][task_id]
         is not by_round["ab-codex-1"][task_id]
-        for task_id in task_ids
+        for task_id in common_valid_tasks
     )
     triggers = tuple(
         task_id
-        for task_id in task_ids
+        for task_id in common_valid_tasks
         if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
         and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
     )
@@ -916,6 +960,7 @@ def assess_baseline(
             tuple(blocked),
             sigma,
             delta,
+            common_valid_tasks,
             triggers,
             tuple(effective_base),
             tuple(effective_conditional),
@@ -953,6 +998,7 @@ def assess_baseline(
         tuple(reasons),
         sigma,
         delta,
+        common_valid_tasks,
         triggers,
         tuple(effective_base),
         tuple(effective_conditional),
@@ -965,7 +1011,7 @@ def _select_round(
     *,
     expected_side: Side,
     label: str,
-) -> tuple[BaselineRun, ...] | None:
+) -> tuple[BaselineRun, ...]:
     if any(
         item.side is not expected_side
         or item.attempt not in {1, 2}
@@ -979,12 +1025,9 @@ def _select_round(
         raise BaselineError(f"{label} first attempt is incomplete")
     infra_ids = {task_id for task_id, item in first.items() if item.outcome is TaskOutcome.INFRA}
     second = {item.task_id: item for item in values if item.attempt == 2}
-    expected_second = set(task_ids) if len(infra_ids) > 2 else infra_ids
-    if set(second) != expected_second:
+    if set(second) != infra_ids:
         raise BaselineError(f"{label} replacement set differs from the frozen rule")
-    selected = second if len(infra_ids) > 2 else {**first, **second}
-    if any(item.outcome is TaskOutcome.INFRA for item in selected.values()):
-        return None
+    selected = {**first, **second}
     return tuple(selected[task_id] for task_id in task_ids)
 
 

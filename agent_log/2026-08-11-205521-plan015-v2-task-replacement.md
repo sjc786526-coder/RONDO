@@ -34,4 +34,26 @@
 - 窄修复仅对 campaign 允许全 main 请求序列；若出现 Guardian，RONDO 仍必须有对应 E_final digest。P1 pair 的
   `main → guardian → main` 强制闭环未变。v4 lock 冻结全量 prior debit。
 
-后续证据：待 v4 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
+## v4 执行与退役
+
+- 十题 Oracle 全部 reward 1；fresh exact-wire canary completed，估算 `0.198830 USD`。
+- v4 第一轮 10 个首跑后有 5 项 infra；旧合同因此执行全轮 replacement，补跑后仍有 4 项 infra。状态机没有在
+  轮末即时判定，错误启动 `aa-rondo-2` 首个 slot；发现后停止，唯一活跃请求按既有合同保守结算。
+- v4 已收口为 blocked，budget ledger `99.580057 USD`、reservation 为 0；连同 v2/v3 与 v4 canary，P2 累计
+  `158.468137 USD`，`actual_usd=null`。20 条 public run record 已提交到 results 历史；v4 lock/state/budget/
+  artifact/result 均只读且不复用。
+- `sanitize-git-repo` 的官方 verifier 实际 reward 1，但私有 `agent/codex.txt` 含任务 fixture 形式的 secret，被最终
+  artifact scanner 正确拒绝。发布器现先做同一 secret preflight：敏感私有文本不归档，只保存无内容的 bounded
+  omission marker；最终 scanner 未放宽。
+
+## v5 合同
+
+- 用户追加 `200 USD`，P2 总硬上限为 `400 USD`；v5 lock 精确带入 `158.468137 USD` prior debit，使用新的
+  campaign/batch/161 个 run IDs，任务、profile、bundle、TB commit 与四个基础轮次不变。
+- 每个 task 只在首跑 infra 时定点补跑一次；pass/reward 0 不补跑，不再整轮重跑。补跑后每轮最多保留 2 项
+  infra，并在进入下一轮前即时检查。
+- infra 使用冻结枚举分类；同一类别累计命中 3 个不同 task 时立即熔断。预算停止引发的 publication 失败继承
+  ledger stop reason 的上游类别。`sigma`/`delta` 只在四轮共同有效的同一集合上计算，公开精确分母，少于 8 项
+  则 M2 blocked。
+
+后续证据：待 v5 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。

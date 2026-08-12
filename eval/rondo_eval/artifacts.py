@@ -78,6 +78,14 @@ class ArtifactError(ValueError):
     """Raised when artifact publication cannot be completed safely."""
 
 
+def validate_private_artifact_bytes(contents: bytes, relative_path: str) -> None:
+    """Check one prospective private artifact without weakening final scanning."""
+
+    if not isinstance(contents, bytes) or not isinstance(relative_path, str):
+        raise ArtifactError("artifact preflight input is invalid")
+    _scan_artifact_bytes(contents, (), relative_path)
+
+
 def validate_run_id(
     run_id: str,
     *,

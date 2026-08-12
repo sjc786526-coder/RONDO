@@ -1,7 +1,7 @@
 # Plan 015：P2 任务分层、计分预算与首次 Canary 基线
 
 > 本计划是方向 0 的 P2 第一阶段执行合同。Plan 014 v19 及其全部历史 identity/result/ledger/artifact
-> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与 200 USD 独立硬上限。除“当前状态”和
+> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与 400 USD 独立硬上限。除“当前状态”和
 > “关键决策记录”外，其他章节默认不在执行中改写；若必须改变 provider、Sol/medium main、Sol/low Guardian、
 > frozen Codex/RONDO bundle、TB 2.1 commit、10-task 清单、基础轮次或预算，暂停并请求用户确认。
 
@@ -10,7 +10,7 @@
 ### 最终目标
 
 先闭合 Plan 014 成功 CLI 的 durable Guardian evidence 投影，再完成 B4 taskset 冻结、B5 机械计分/归因、
-B6 可复算成本与 200 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
+B6 可复算成本与 400 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
 RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 基线终态。
 
 ### 完成/验收标准
@@ -24,14 +24,17 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - B5 主指标为 Task Resolution Success Rate；机械区分 `agent`、`guardian_correct_deny`、
   `guardian_false_deny`、`infra`。矛盾/未知 Guardian deny 没有 correct-deny 证明时保守归为 false deny；infra
   不进分母。holdout 只能发布整批聚合，不得持久化单任务明细。
-- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 200 USD 停止语义；campaign
+- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 400 USD 停止语义；campaign
   使用新 lock、ID 和持久 ledger。任何新请求的最大合法 reservation 无法装入剩余全局预算时不启动。
 - B7 基础 40 个运行全部形成唯一终态；同一 RONDO bundle A/A 两轮得到 `sigma`，A/B 差异 `delta <= sigma`。
   `sigma > 2` 机械标为 canary unstable。每个 Codex-pass/RONDO-fail task 两侧各加跑两次；Codex 三次全过且
   RONDO 三次全败则 failed。
-- 单轮 infra 比例大于 20% 时该轮无效；每轮最多一次全轮 replacement，比例不超过 20% 时每 task 最多一次
-  定点 replacement。额度耗尽或仍无有效结果则 campaign failed/blocked，不把部分结果称为通过。
-- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 200 USD 账本；所有 reservation 最终
+- 每个 task 的首次结果只有 infra 才激活一次定点 replacement；pass 或正常 reward 0 不补跑，不再执行全轮
+  replacement。补跑后单轮剩余 infra 最多 2 项，超过时在下一轮前立即 blocked。
+- 同一结构化机械故障类别累计命中 3 个不同 task 时立即熔断，未启动 slot 不再 claim；预算停止导致的 publication
+  拒绝继承预算代理的结构化上游根因。`sigma`/`delta` 只在四轮共同有效的同一 task 集合上计算并公开分母，少于
+  8 项只发布部分技术事实并把 M2 标为 blocked。
+- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 400 USD 账本；所有 reservation 最终
   settled，`actual_usd=null`。
 - focused unittest、`just eval-lock` 和阶段末一次 `just eval-test` 通过；正式 B7 前代码/lock 干净提交，Docker、
   Windows C:、watchdog、profile/catalog/bundle 均通过门禁。
@@ -64,7 +67,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ## 3. 硬约束
 
-1. 新 P2 真实 API 本地估算总费用最多 200 USD，独立于 Plan 014。200 USD 是硬停线，不是消费目标，也不是
+1. 新 P2 真实 API 本地估算总费用最多 400 USD，独立于 Plan 014。400 USD 是硬停线，不是消费目标，也不是
    合法 usage 的数学全包保证；不得减任务、减基础轮次或弱化门禁迁就预算。
 2. B4/B5/B6 及最后窄修复不得调用 API 或 Docker；B7 只处理 10 个 canary 所需 exact digest 镜像，pull/run
    并发为 1。不开 Cargo、不重建 bundle、不升级上游。
@@ -102,7 +105,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 已确认成功 CLI 的 evidence 手工投影仍使用 Harbor work 路径且漏 canonical digest；已完成共用 projection、
   RunSpec 错误文字和 v19 S2 文档修复；成功 CLI durable path 回归已通过。
 - B4 已落 10/61/18 三份 ID-only 清单与 pinned catalog/holdout 重算门禁；B5 纯函数计分、矛盾拒绝和 holdout
-  整批聚合已落；B6 可复算成本输出、200 USD/161-slot 共享 ledger 上限与 B7 聚合规则已落并通过 focused tests；
+  整批聚合已落；B6 可复算成本输出、400 USD/161-slot 共享 ledger 上限与 B7 聚合规则已落并通过 focused tests；
   161 包含 1 次 wire canary、40 基础、40 条件、最多 40 基础 infra replacement 与 40 条件 infra replacement。
 
 ### 当前工作
@@ -116,11 +119,16 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   错判为 infra。第 2 个任务运行中主动停止并保守结算；v3 blocked、reservation 为 0，P2 累计估算
   `58.689250 USD`，`actual_usd=null`。
 - B7 campaign 允许零 Guardian 的普通完成；一旦触发仍强制 `main → guardian → main` 与 E_final digest 逐项绑定。
-  P1 pair 的强制审批闭环保持不变。v4 使用全新 identity，并将全部 prior debit 从 200 USD 中扣除。
+  P1 pair 的强制审批闭环保持不变。
+- v4 Oracle 与 wire canary 通过；首轮和旧全轮 replacement 后仍有 4 项 infra。旧状态机错误地在轮门禁前启动
+  下一轮，已人工停止并保守结算。v4 blocked、reservation 为 0，budget ledger `99.580057 USD`；含此前尝试和
+  v4 canary 的 P2 累计为 `158.468137 USD`，全部 v4 identity/state/result/artifact 只读保留。
+- 经追加授权，P2 总硬上限为 `400 USD`。v5 使用新 campaign/batch/run IDs，精确冻结 prior debit
+  `158.468137 USD`，采用 infra-only 定点补跑、逐轮即时门禁、结构化三 task 熔断和至少 8 项共同分母。
 
 ### 后续计划
 
-1. 完成 v4 identity/lock、focused unittest、`just eval-lock` 与干净提交。
+1. 完成 v5 identity/lock、focused unittest、`just eval-lock` 与干净提交。
 2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API Oracle、资源门禁和 fresh exact-wire canary。
 3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
@@ -130,7 +138,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2/v3 是保留全部费用事实的 blocked 付费终态；v4 尚未执行 Oracle、canary 或
+- v1 是 API 前失败终态；v2/v3/v4 是保留全部费用事实的 blocked 付费终态；v5 尚未执行 Oracle、canary 或
   正式 40-run 基线。
 
 ## 6. 关键决策记录
@@ -140,11 +148,13 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 001 | holdout 为无盐 `sha256(task_id)` 排名前 `ceil(N/5)` | 只依赖 ID，无可调 salt，当前精确 18/89 | B4 | 已采纳 |
 | 002 | canary 固定 10 个可见、无 GPU、资源有界且能力差异明确的任务，`fix-git` 作为 P1 锚点 | 兼顾成本、差异和既有链路证据，不看模型结果选题 | B4/B7 | 已采纳 |
 | 003 | `sigma > 2` 机械判 canary unstable | 避免“接近任务总数”主观化，也不放宽 A/B 判据 | B7 | 已采纳 |
-| 004 | 200 USD 用历史 usage 作合理可行性判断，但每个新 request 仍按 18.885 USD 最大合法 reservation 门禁 | 数学最坏 40/80 run 超过授权，不能伪称全包；历史压力区间远低于 200 | B6/B7 | 已采纳 |
+| 004 | 400 USD 用历史 usage 作合理可行性判断，但每个新 request 仍按 18.885 USD 最大合法 reservation 门禁 | 数学最坏 40/80 run 超过授权，不能伪称全包；额度是硬停线而非消费目标 | B6/B7 | 已采纳 |
 | 005 | 未有独立 adjudication 证明的 Guardian deny 保守归 false deny | 不用 Guardian 自评循环证明“正确拒绝” | B5 | 已采纳 |
 | 006 | 不扩展 M1 两槽 ledger；B7 使用独立 campaign 状态机并复用单任务 runner/budget ledger | 拓扑不同，避免把历史 pair 语义拉坏 | B6/B7 | 已采纳 |
 | 007 | 在 lock 冻结前以 `build-cython-ext`、`extract-elf` 替换需要 system service/root capability 的两个候选 | 现有两侧非特权容器合同无法公平运行 system-admin 任务；不把确定性环境失败计入 σ | B4/B7 | 已采纳 |
-| 008 | campaign 冻结 1 canary + 40 base + 40 conditional + 各 40 bounded infra replacement，共 161 个唯一 slot | 单轮 >20% infra 需整轮替换，条件加跑也需一次定点替换；所有可能 ID 事前冻结 | B6/B7 | 已采纳 |
+| 008 | campaign 冻结 1 canary + 40 base + 40 conditional + 各 40 bounded infra replacement，共 161 个唯一 slot | replacement 只按 task 首次 infra 定点激活；所有可能 ID 仍事前冻结 | B6/B7 | 已采纳 |
 | 009 | 经用户批准以 `openssl-selfsigned-cert` 替换官方 verifier reward 0 的 `build-cython-ext`，重冻 v2 identity 并退役 v1 | Oracle 在任何 API 前证明原题自身不可用；不是按模型成绩择题，holdout/预算/profile/bundle/轮次均不变 | B4/B7 | 已采纳 |
 | 010 | v2 在系统性 infra 后主动停止并退役；修复通用执行合同后重冻 v3，lock 扣除 v2 的 `39.269328 USD` | 避免未修复的整轮 replacement 盲目消费，并确保换 identity 不重置 P2 的 200 USD 总硬上限 | B6/B7 | 已采纳 |
 | 011 | B7 的零 Guardian 自然完成合法；触发 Guardian 时仍逐项绑定；P1 强制审批合同不变。v3 退役并重冻 v4 | 多任务性能基线不能把“未需审批”伪装成 infra，同时不能弱化真实审批证据 | B5/B7 | 已采纳 |
+| 012 | v4 退役并重冻 v5；取消全轮 replacement，每轮即时门禁，同类结构化故障命中 3 个 task 熔断，`sigma`/`delta` 使用至少 8 项共同集合 | 避免成功任务重复暴露于随机上游故障，也防止无效轮继续消费 | B6/B7 | 已采纳 |
+| 013 | 用户追加 200 USD，P2 总硬上限改为 400 USD；v5 带入 prior `158.468137 USD` | 新授权不重置历史 debit，任何下一 request 仍须容纳最大合法 reservation | B6/B7 | 已采纳 |
