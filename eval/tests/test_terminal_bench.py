@@ -1377,6 +1377,19 @@ class TerminalBenchTests(unittest.TestCase):
             argv[argv.index("--agent-kwarg") + 1],
             f"task_dir={materialized.task_path}",
         )
+        agent_kwargs = tuple(
+            argv[index + 1]
+            for index, value in enumerate(argv)
+            if value == "--agent-kwarg"
+        )
+        self.assertEqual(
+            agent_kwargs,
+            (
+                f"task_dir={materialized.task_path}",
+                "task_workdir=/app/personal-site",
+                "agent_timeout_seconds=900",
+            ),
+        )
         self.assertNotIn("--agent-env", argv)
         self.assertEqual(materialized.provider_secret_path.read_bytes(), b"")
         fake_supervisor.resolve_image_identity.assert_called_once_with(

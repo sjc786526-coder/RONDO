@@ -37,7 +37,11 @@ from .freeze import (
     validate_freeze,
     validate_runtime_image_digest,
 )
-from .materialize import MaterializedTask, PinnedTaskMaterializer
+from .materialize import (
+    TERMINAL_BENCH_WORKDIR,
+    MaterializedTask,
+    PinnedTaskMaterializer,
+)
 from .tasksets import FrozenTask
 
 
@@ -670,6 +674,13 @@ def _harbor_oracle_argv(
     trial_name: str,
     trials_dir: Path,
 ) -> tuple[str, ...]:
+    frozen_task = materialized.frozen_task
+    task_workdir = (
+        frozen_task.workdir if frozen_task is not None else TERMINAL_BENCH_WORKDIR
+    )
+    agent_timeout_seconds = (
+        frozen_task.agent_timeout_seconds if frozen_task is not None else 900
+    )
     expected = (
         str(HARBOR_EXECUTABLE),
         "trials",
@@ -686,6 +697,10 @@ def _harbor_oracle_argv(
         "rondo_eval.terminal_bench.oracle_smoke:PreparedOracleAgent",
         "--agent-kwarg",
         f"task_dir={materialized.task_path}",
+        "--agent-kwarg",
+        f"task_workdir={task_workdir}",
+        "--agent-kwarg",
+        f"agent_timeout_seconds={agent_timeout_seconds}",
         "--delete",
     )
     if any(
@@ -693,7 +708,7 @@ def _harbor_oracle_argv(
         for token in ("--model", "--agent-env", "--env-file")
     ):
         raise TerminalBenchRunError("oracle command contains provider configuration")
-    if expected.count("--agent-kwarg") != 1:
+    if expected.count("--agent-kwarg") != 3:
         raise TerminalBenchRunError("oracle command task path projection is ambiguous")
     return expected
 
