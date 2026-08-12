@@ -117,8 +117,8 @@
 - **当前状态**：Plan 015 已获累计 600 USD 与串行 Docker 授权；v1—v9 均为只读终态。v9 的 Oracle 10/10、
   wire canary 与首个正式任务有效，但 results worktree 与执行 checkout 重合触发 harness drift 门禁，未进入第二题。
   campaign-independent 单题 Oracle proof、单 Oracle/task-run 重型锁、campaign lease 和单 slot 恢复状态机已通过
-  420 条离线回归；后继 identity 尚未激活。定点 infra replacement、逐轮门禁、三 task 熔断和至少 8 项共同分母
-  保持不变。
+  420 条离线回归；v10 identity 已冻结并精确带入 `282.287684 USD` prior，尚未执行。定点 infra replacement、
+  逐轮门禁、三 task 熔断和至少 8 项共同分母保持不变。
 
 ## E-A 轻量离线冻结回放
 

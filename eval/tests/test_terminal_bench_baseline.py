@@ -206,17 +206,26 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(identity.budget["prior_estimated_usd"], "281.718702")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
 
-    def test_historical_registry_is_read_only_and_slots_are_not_reused(self) -> None:
+    def test_registry_keeps_history_read_only_and_only_latest_active(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
         registry = campaign_lock_registry(paths)
-        self.assertEqual(tuple(item.version for item in registry), tuple(range(1, 10)))
-        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v9")
-        with self.assertRaisesRegex(BaselineError, "no paid B7 campaign"):
-            load_campaign_identity(paths)
+        self.assertEqual(
+            tuple(item.version for item in registry),
+            tuple(range(1, len(registry) + 1)),
+        )
+        self.assertGreaterEqual(len(registry), 10)
+        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v10")
+        active = load_campaign_identity(paths)
+        self.assertEqual(active.campaign_id, registry[-1].campaign_id)
+        self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
         pointer = json.loads(
             (paths.worktree_root / CAMPAIGN_ACTIVE_POINTER_PATH).read_text()
         )
-        self.assertIsNone(pointer["active_lock"])
+        self.assertEqual(pointer["active_lock"], registry[-1].path.as_posix())
+        self.assertEqual(
+            load_historical_campaign_identity(paths, 9).campaign_id,
+            "p2-b7-canary-baseline-v9",
+        )
 
     def test_campaign_registry_sorts_multi_digit_versions_numerically(self) -> None:
         live = RepoPaths.discover(Path.cwd())
@@ -267,7 +276,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         validate_successor_run_range(
             registry,
             run_id_date="20260812",
-            run_id_sequence_base=300000000,
+            run_id_sequence_base=310000000,
         )
 
     def test_campaign_lock_catalog_drift_is_rejected(self) -> None:

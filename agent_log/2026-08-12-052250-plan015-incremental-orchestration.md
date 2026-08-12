@@ -11,3 +11,6 @@
   wire receipt 与完整 budget 重算 prior，并拒绝版本、run-ID、profile/bundle、cap 或 debit 漂移。
 - 验收：focused 185/185、完整 pure/fake/loopback eval 420/420、`just eval-lock` 85 packages、`git diff --check`
   通过。本批未调用真实 API、Docker 或 Cargo，未读取 `.env.local`，未修改任何 v1—v9 历史资产。
+- 生成器随后冻结 v10：`p2-b7-canary-baseline-v10`、`p2-b7-canary-sol-sol-v10`、run ID base
+  `20260812-300000000`、lock SHA `3e51aa222cc222890627036221a8a235e0ff6d95b0c5491b84eb9a2cb48d5d32`，
+  prior `282.287684 USD`。生成阶段未运行 Oracle、Docker、wire canary 或 API。

@@ -178,12 +178,15 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   state、wire receipt 与 settled budget 重算 prior，拒绝版本/ID/profile/bundle/cap 漂移或 debit 缺失。
 - focused 185/185、`just eval-lock` 85 packages、完整 pure/fake/loopback eval 420/420 通过；本轮离线改进未调用
   API、Docker 或 Cargo，未读取 `.env.local`。
+- v10 已由生成器冻结并激活：campaign/batch 为 `p2-b7-canary-baseline-v10`/
+  `p2-b7-canary-sol-sol-v10`，161 个 run ID 从 `20260812-300000000` 派生，lock SHA 为
+  `3e51aa222cc222890627036221a8a235e0ff6d95b0c5491b84eb9a2cb48d5d32`，prior 为 `282.287684 USD`；尚未执行
+  Oracle、wire canary、Docker 或 API。
 
 ### 后续计划
 
-1. 提交已完成的离线编排改进，保持 active pointer 关闭和开发/results worktree 分离。
-2. 从干净开发 worktree 机械生成并提交后继 identity；仅在剩余预算可容纳下一最大 reservation 时复用有效 Oracle
-   proof、执行 fresh wire canary 并逐 slot 推进 B7。
+1. 提交 v10 identity，保持开发/results worktree 分离。
+2. 从缺失的十题增量 Oracle proof 开始；全部有效后执行 fresh wire canary，并逐 slot 推进 B7。
 3. 形成终态后聚合 `sigma`/`delta`、共同分母、条件加跑、费用与资源事实，再同步最终 B7 结果。
 
 ### 阻塞项
@@ -193,7 +196,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v9 是保留全部费用事实的 blocked 终态；离线编排改进已通过门禁，尚未冻结后继 identity。
+- v1 是 API 前失败终态；v2—v9 是保留全部费用事实的 blocked 终态；离线编排改进已通过门禁，v10 identity 已冻结、尚未执行。
 
 ## 6. 关键决策记录
 

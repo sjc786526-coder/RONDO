@@ -73,8 +73,8 @@
   `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B6 预算合同已冻结；B7 的 v9 完成 10-task
   Oracle、fresh wire canary 和首个正式任务后，因执行 checkout 与 results worktree 重合而 fail-closed。
   v9 后继累计 debit 为 `282.287684 USD`，reservation 为 0，全部历史事实只读。campaign-independent Oracle
-  proof、单 slot locked worker、安全恢复与 identity 生成入口已通过 420 条离线回归；active pointer 关闭，后继
-  identity 尚未激活。**
+  proof、单 slot locked worker、安全恢复与 identity 生成入口已通过 420 条离线回归；v10 已精确继承 prior 并
+  激活，尚未执行 Oracle、wire canary 或正式 slot。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -127,7 +127,7 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v9 blocked，只读保留；B7 离线编排改进完成，待生成后继 identity |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v9 blocked，只读保留；B7 离线编排完成，v10 已冻结待执行 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
@@ -186,7 +186,7 @@ L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具�
 Plan 015 已冻结 10/61/18 taskset、10-task exact image catalog、机械计分、161-slot 派生规则与独立 600 USD
 停止合同。v1—v9 均为只读终态；v9 的 Oracle 10/10、wire canary 与首题费用有效，但 harness/results checkout
 重合使其在第二题前 blocked。当前后继 prior 为 `282.287684 USD`；active paid pointer 已关闭，增量 Oracle proof、
-单 slot 重型锁、campaign lease 与机械 identity 生成器已通过离线门禁，待干净提交后生成后继 identity。执行细节见 Plan 015。
+单 slot 重型锁、campaign lease 与机械 identity 生成器已通过离线门禁；v10 已冻结并精确带入 prior，待执行。执行细节见 Plan 015。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，
