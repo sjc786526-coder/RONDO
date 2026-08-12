@@ -357,3 +357,15 @@ standard/Lite 形态均补回归。
   task/batch/run IDs 和 profile/catalog/bundle identity；usage、request/attempt 与费用可从预算/metadata 机械聚合。
 - 通用 10-task materializer/runner、no-API oracle 前置、campaign 状态机、公开结果与 `just eval-b7-baseline`
   已接入既有设施。`just eval-lock` 85 packages、正式离线 unittest 379/379 通过；本条不声称 B7 真实基线已运行。
+
+### 2026-08-12 Plan 015 B7 增量编排与恢复门禁
+
+- v9 保持不可改写的 blocked 终态：Oracle 10/10 与 wire canary 有效，首个正式任务 reward 0、12 个请求全部
+  settled；后继累计 debit 为 `282.287684 USD`，reservation 为 0。
+- Oracle 改为 campaign-independent 单题 proof 与十题 manifest，按 task/source/image、verifier、共享执行组件、
+  Harbor/TB、seccomp 和稳定 Docker 合同精确失效；campaign/profile/wire 不参与 proof identity。
+- campaign coordinator 仅持轻量 lease，每个 Oracle/paid task 由独立 heavy-lock/watchdog worker 推进。已发布且
+  budget 完整的中断 slot 可收敛，其他含糊状态阻断，不重复请求、结算或 run ID。
+- active identity 统一由 tracked pointer 选择，v1—v9 只读 registry 与 161-slot 派生规则不变；生成器机械校验
+  版本、ID、profile/bundle、terminal predecessor、prior debit 和 600 USD cap。
+- focused 185/185、`just eval-lock` 85 packages、完整 eval 420/420 通过；本批未调用 API、Docker 或 Cargo。

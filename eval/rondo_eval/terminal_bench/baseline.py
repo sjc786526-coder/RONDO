@@ -37,17 +37,10 @@ MAX_SIGMA = 2
 MAX_REMAINING_INFRA_PER_ROUND = 2
 MECHANICAL_CIRCUIT_BREAKER_TASKS = 3
 MIN_COMMON_VALID_TASKS = 8
-CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v9.json")
-RETIRED_CAMPAIGN_LOCK_PATHS = (
-    Path("eval/locks/p2-b7-canary-baseline-v1.json"),
-    Path("eval/locks/p2-b7-canary-baseline-v2.json"),
-    Path("eval/locks/p2-b7-canary-baseline-v3.json"),
-    Path("eval/locks/p2-b7-canary-baseline-v4.json"),
-    Path("eval/locks/p2-b7-canary-baseline-v5.json"),
-    Path("eval/locks/p2-b7-canary-baseline-v6.json"),
-    Path("eval/locks/p2-b7-canary-baseline-v7.json"),
-    Path("eval/locks/p2-b7-canary-baseline-v8.json"),
-)
+CAMPAIGN_ACTIVE_POINTER_PATH = Path("eval/locks/p2-b7-active.json")
+_CAMPAIGN_LOCK_NAME = re.compile(r"p2-b7-canary-baseline-v([1-9][0-9]*)\.json")
+_CAMPAIGN_ID = re.compile(r"p2-b7-canary-baseline-v([1-9][0-9]*)")
+_CAMPAIGN_BATCH_ID = re.compile(r"p2-b7-canary-sol-sol-v([1-9][0-9]*)")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(
     r"[0-9]{8}-[0-9]{9}-tb-(?:rondo|codex)-r[1-9][0-9]*"
@@ -129,6 +122,18 @@ class CampaignSlotPlan:
     repeat: int | None
     attempt: int
     run_id: str
+
+
+@dataclass(frozen=True)
+class CampaignLockRegistration:
+    version: int
+    path: Path
+    campaign_id: str
+    batch_id: str
+    run_id_date: str
+    run_id_sequence_base: int
+    max_run_slots: int
+    lock_sha256: str
 
 
 @dataclass(frozen=True)
@@ -691,10 +696,114 @@ class CampaignStateLedger:
         return matches[0]
 
 
-def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
-    """Load the immutable P2 lock and bind it to tasksets/catalog bytes."""
+def campaign_lock_registry(paths: RepoPaths) -> tuple[CampaignLockRegistration, ...]:
+    """Discover immutable historical locks and reject every identity collision."""
 
-    path = paths.worktree_root / CAMPAIGN_LOCK_PATH
+    root = paths.worktree_root / "eval/locks"
+    values: list[CampaignLockRegistration] = []
+    for path in sorted(root.glob("p2-b7-canary-baseline-v*.json")):
+        match = _CAMPAIGN_LOCK_NAME.fullmatch(path.name)
+        if match is None:
+            continue
+        raw = _read_regular_lock(path)
+        try:
+            lock = json.loads(raw)
+            budget = lock["budget"]
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise BaselineError("historical campaign lock is invalid") from exc
+        version = int(match.group(1))
+        campaign_match = _CAMPAIGN_ID.fullmatch(str(lock.get("campaign_id")))
+        batch_match = _CAMPAIGN_BATCH_ID.fullmatch(str(lock.get("batch_id")))
+        max_slots = budget.get("max_run_slots")
+        if (
+            campaign_match is None
+            or batch_match is None
+            or int(campaign_match.group(1)) != version
+            or int(batch_match.group(1)) != version
+            or not isinstance(lock.get("run_id_date"), str)
+            or re.fullmatch(r"[0-9]{8}", lock["run_id_date"]) is None
+            or isinstance(lock.get("run_id_sequence_base"), bool)
+            or not isinstance(lock.get("run_id_sequence_base"), int)
+            or isinstance(max_slots, bool)
+            or not isinstance(max_slots, int)
+            or max_slots < 1
+        ):
+            raise BaselineError("historical campaign identity is invalid")
+        values.append(
+            CampaignLockRegistration(
+                version=version,
+                path=path.relative_to(paths.worktree_root),
+                campaign_id=lock["campaign_id"],
+                batch_id=lock["batch_id"],
+                run_id_date=lock["run_id_date"],
+                run_id_sequence_base=lock["run_id_sequence_base"],
+                max_run_slots=max_slots,
+                lock_sha256=hashlib.sha256(raw).hexdigest(),
+            )
+        )
+    if not values:
+        raise BaselineError("campaign lock registry is empty")
+    if [item.version for item in values] != list(range(1, len(values) + 1)):
+        raise BaselineError("campaign lock versions are not contiguous")
+    if len({item.campaign_id for item in values}) != len(values) or len(
+        {item.batch_id for item in values}
+    ) != len(values):
+        raise BaselineError("campaign identities are duplicated")
+    run_ids: set[tuple[str, int]] = set()
+    for item in values:
+        current = {
+            (item.run_id_date, item.run_id_sequence_base + index)
+            for index in range(item.max_run_slots)
+        }
+        if run_ids.intersection(current):
+            raise BaselineError("campaign run ID ranges collide")
+        run_ids.update(current)
+    return tuple(values)
+
+
+def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
+    """Load only the explicitly active P2 lock; historical locks are read-only."""
+
+    pointer_path = paths.worktree_root / CAMPAIGN_ACTIVE_POINTER_PATH
+    raw = _read_regular_lock(pointer_path)
+    try:
+        pointer = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BaselineError("active campaign pointer is invalid") from exc
+    if not isinstance(pointer, dict) or set(pointer) != {"schema_version", "active_lock"}:
+        raise BaselineError("active campaign pointer schema is invalid")
+    if pointer["schema_version"] != 1:
+        raise BaselineError("active campaign pointer version is invalid")
+    active = pointer["active_lock"]
+    if active is None:
+        raise BaselineError("no paid B7 campaign identity is active")
+    if not isinstance(active, str):
+        raise BaselineError("active campaign lock path is invalid")
+    registry = campaign_lock_registry(paths)
+    matches = [item for item in registry if item.path.as_posix() == active]
+    if len(matches) != 1:
+        raise BaselineError("active campaign lock is not registered")
+    if matches[0] != registry[-1]:
+        raise BaselineError("active campaign lock is historical")
+    return load_campaign_identity_path(paths, matches[0].path)
+
+
+def load_historical_campaign_identity(
+    paths: RepoPaths,
+    version: int,
+) -> CampaignIdentity:
+    matches = [item for item in campaign_lock_registry(paths) if item.version == version]
+    if len(matches) != 1:
+        raise BaselineError("historical campaign version is not registered")
+    return load_campaign_identity_path(paths, matches[0].path)
+
+
+def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> CampaignIdentity:
+    """Load one current-contract lock without making it executable."""
+
+    if relative_path.is_absolute() or relative_path.parent != Path("eval/locks"):
+        raise BaselineError("campaign lock path is outside the registry")
+    path = paths.worktree_root / relative_path
     raw = _read_regular_lock(path)
     try:
         value = json.loads(raw)
@@ -720,25 +829,20 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
     catalog = load_frozen_canary_catalog(paths)
     if (
         value["schema_version"] != 1
-        or value["campaign_id"] != "p2-b7-canary-baseline-v9"
-        or value["batch_id"] != "p2-b7-canary-sol-sol-v9"
-        or value["run_id_date"] != "20260812"
-        or value["run_id_sequence_base"] != 290000000
+        or _CAMPAIGN_ID.fullmatch(str(value["campaign_id"])) is None
+        or _CAMPAIGN_BATCH_ID.fullmatch(str(value["batch_id"])) is None
+        or _CAMPAIGN_ID.fullmatch(value["campaign_id"]).group(1)
+        != _CAMPAIGN_BATCH_ID.fullmatch(value["batch_id"]).group(1)
+        or re.fullmatch(r"[0-9]{8}", str(value["run_id_date"])) is None
+        or isinstance(value["run_id_sequence_base"], bool)
+        or not isinstance(value["run_id_sequence_base"], int)
         or value["taskset_sha256"] != catalog.taskset_sha256
         or value["canary_catalog_sha256"] != catalog.catalog_sha256
         or value["terminal_bench_commit"] != catalog.terminal_bench_commit
         or not isinstance(value["selected_profile"], dict)
         or not isinstance(value["bundles"], dict)
         or not isinstance(value["no_api_seccomp"], dict)
-        or value["budget"]
-        != {
-            "campaign_cap_usd": "600.000000",
-            "prior_estimated_usd": _money(CAMPAIGN_PRIOR_ESTIMATED_USD),
-            "run_cap_usd": "40.000000",
-            "max_run_slots": 161,
-            "maximum_legal_request_reservation_usd": "18.885000",
-            "actual_usd": None,
-        }
+        or not _valid_campaign_budget(value["budget"])
         or value["baseline"]
         != {
             "base_rounds": list(BASE_ROUNDS),
@@ -787,7 +891,38 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
         catalog=catalog,
     )
     _ = identity.slots
+    if not any(
+        item.path == relative_path and item.lock_sha256 == identity.lock_sha256
+        for item in campaign_lock_registry(paths)
+    ):
+        raise BaselineError("campaign lock is not registered")
     return identity
+
+
+def _valid_campaign_budget(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "campaign_cap_usd",
+        "prior_estimated_usd",
+        "run_cap_usd",
+        "max_run_slots",
+        "maximum_legal_request_reservation_usd",
+        "actual_usd",
+    }:
+        return False
+    try:
+        cap = Decimal(value["campaign_cap_usd"])
+        prior = Decimal(value["prior_estimated_usd"])
+    except (ArithmeticError, TypeError):
+        return False
+    return (
+        cap == CAMPAIGN_CAP_USD
+        and Decimal(0) <= prior < cap
+        and value["run_cap_usd"] == _money(RUN_CAP_USD)
+        and value["max_run_slots"] == CAMPAIGN_MAX_RUNS
+        and value["maximum_legal_request_reservation_usd"]
+        == _money(SOL_MAX_LEGAL_REQUEST_RESERVATION_USD)
+        and value["actual_usd"] is None
+    )
 
 
 def _read_regular_lock(path: Path) -> bytes:

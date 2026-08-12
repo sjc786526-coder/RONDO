@@ -105,19 +105,20 @@
 - 跑批前输出预估：任务数 × 轮数 × 模型 × 预估 token → 成本区间。
 - 硬上限：超过预算即中止并保留已完成结果。
 - 每次跑批需单独授权。
-- **当前实现**：Plan 015 独立 campaign cap 为 400 USD，v8 精确扣除既有 `221.772313 USD` debit；161 个
-  一次性 slot 和 18.885 USD 最大合法 request reservation 均预冻结。B6 历史插值与 v19-shape 压力上界可复算，
-  预算不足时在下一 request 前停止。
+- **当前实现**：Plan 015 独立 campaign cap 为 600 USD；v9 终态后的累计 debit 为 `282.287684 USD`。
+  161 个 slot 由代码机械派生，18.885 USD 最大合法 request reservation 与全局 prior/cap 在每个新 identity
+  生成和每次请求前复核。B6 历史插值与 v19-shape 压力上界可复算，预算不足时在下一 request 前停止。
 
 ### B7 首次基线（规模 S，授权门：canary 跑批）—— **M2 的一半**
 
 - 按 `doc/WBS.md` §4「M2 的可执行判据」执行：先用同一 RONDO 二进制跑 2 轮 A/A 得出波动带宽 `σ`，再跑 codex 与 RONDO 各 1 轮 A/B，要求跨侧差异任务数 `≤ σ` 且无单向失败模式。
 - 基础 10 任务 × 4 轮 = 40 次运行，外加条件触发的定点加跑（每个出现 codex-pass/RONDO-fail 的任务两侧各加 2 轮）。按 B6 出预估并单独授权。
 - 不通过则先停下修测评设施，不得先行推进优化。
-- **当前状态**：Plan 015 已获累计 400 USD 与串行 Docker 授权；v1—v7 保持只读。v8 只对首跑 infra 做一次
-  定点补跑，每轮结束立即检查最多 2 项剩余 infra；同一结构化故障命中 3 个 task 时熔断。四轮比较使用至少
-  8 项共同有效 task 的同一分母。代码提交后依次执行 no-API oracle、fresh exact-wire canary、A/A 与
-  RONDO→Codex A/B，再按机械条件激活条件加跑。
+- **当前状态**：Plan 015 已获累计 600 USD 与串行 Docker 授权；v1—v9 均为只读终态。v9 的 Oracle 10/10、
+  wire canary 与首个正式任务有效，但 results worktree 与执行 checkout 重合触发 harness drift 门禁，未进入第二题。
+  campaign-independent 单题 Oracle proof、单 Oracle/task-run 重型锁、campaign lease 和单 slot 恢复状态机已通过
+  420 条离线回归；后继 identity 尚未激活。定点 infra replacement、逐轮门禁、三 task 熔断和至少 8 项共同分母
+  保持不变。
 
 ## E-A 轻量离线冻结回放
 

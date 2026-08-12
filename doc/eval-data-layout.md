@@ -48,7 +48,8 @@ eval-data/                             # git-ignored
 ├── build-metrics/                     # 看门狗 summary/JUnit/受限日志
 ├── budgets/                           # 持久费用预留/结算账本，0600
 ├── pairs/                             # 仅 paid 双侧顺序与发布恢复账本，0600
-├── campaigns/<campaign_id>/           # B7 状态、wire/oracle receipt 与私有聚合，0600
+├── campaigns/<campaign_id>/           # B7 状态、wire/Oracle-manifest 引用与私有聚合，0600
+├── oracle-proofs/p2-b7-v1/             # campaign-independent 单题 Oracle proof + 十题 manifest，0600
 ├── b2/current.json                    # 可替换的当前 no-API 双侧验收收据，0600
 ├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
 ├── work/                              # materialize 和 no-API 工作目录
@@ -143,6 +144,10 @@ eval-data/                             # git-ignored
   `eval-data/b2/current.json`。新运行可替换该收据。收据只保留 harness/lock 身份、两侧状态、0 官方 API/
   0 USD 和 supervisor 已验证的 image、VHDX、容器资源/隔离、metrics、seccomp 与 cleanup；不保存 raw
   argv、stdout/stderr、密钥或宿主 mount source。
+- B7 Oracle proof 按 task/source/image、taskset/catalog entry、共享 runner/materializer/verifier、Harbor/TB、
+  seccomp 与稳定 Docker 兼容事实寻址；不绑定 paid campaign 或整个 Git commit。单题完成清理与最终资源计数后
+  原子落盘，十题 manifest 只引用已验证 proof。paid coordinator 仅持有轻量 campaign lease；每个 Oracle/paid
+  task 单独取得重型 lock/watchdog，slot durable 后释放。
 - `git_commit` 记录冻结产品/二进制的 measurement commit；若 eval harness 从另一 clean worktree 加载，
   其独立 commit 必须写入 `config.eval_harness_commit`，并与 pair ledger 首次 claim 绑定的 commit 一致。
 - Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source

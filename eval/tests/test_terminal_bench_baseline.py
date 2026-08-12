@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import argparse
 import sys
 import tempfile
 import unittest
@@ -16,8 +18,7 @@ from rondo_eval.contracts import RunOutcome, Side  # noqa: E402
 from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
 from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     BASE_ROUNDS,
-    CAMPAIGN_LOCK_PATH,
-    RETIRED_CAMPAIGN_LOCK_PATHS,
+    CAMPAIGN_ACTIVE_POINTER_PATH,
     BaselineError,
     BaselineRun,
     BaselineStatus,
@@ -26,15 +27,27 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     ConditionalRun,
     MechanicalFailureCategory,
     assess_baseline,
+    campaign_lock_registry,
     cost_forecast,
+    load_campaign_identity_path,
+    load_historical_campaign_identity,
     load_campaign_identity,
 )
 from rondo_eval.terminal_bench.scoring import TaskOutcome  # noqa: E402
 from rondo_eval.terminal_bench import baseline_cli  # noqa: E402
+from rondo_eval.terminal_bench.baseline_identity import (  # noqa: E402
+    CampaignIdentityGenerationError,
+    required_successor_prior,
+    validate_successor_run_range,
+)
 
 
 class TerminalBenchBaselineTests(unittest.TestCase):
     tasks = tuple(f"terminal-bench/task-{index}" for index in range(10))
+
+    @staticmethod
+    def _identity():
+        return load_historical_campaign_identity(RepoPaths.discover(Path.cwd()), 9)
 
     def _base(
         self,
@@ -108,9 +121,80 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         )
         self.assertEqual(tracked, forecast)
 
+    def test_results_worktree_cannot_be_the_live_eval_harness(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        with self.assertRaisesRegex(
+            baseline_cli.CampaignExecutionError,
+            "results worktree must be distinct",
+        ):
+            baseline_cli._require_distinct_results_worktree(
+                paths,
+                paths.worktree_root,
+            )
+
+        distinct = paths.common_root / ".claude/worktrees/distinct-results"
+        baseline_cli._require_distinct_results_worktree(paths, distinct)
+
+    def test_campaign_lease_is_exclusive_and_reacquirable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "executor.lock"
+            with baseline_cli.CampaignExecutionLease(path) as lease:
+                self.assertGreaterEqual(lease.descriptor, 0)
+                baseline_cli._require_held_campaign_lease(path, lease.token)
+                with self.assertRaisesRegex(
+                    baseline_cli.CampaignExecutionError,
+                    "already owns",
+                ):
+                    with baseline_cli.CampaignExecutionLease(path):
+                        pass
+            with self.assertRaisesRegex(
+                baseline_cli.CampaignExecutionError,
+                "not held",
+            ):
+                baseline_cli._require_held_campaign_lease(path, path.read_text().strip())
+            with baseline_cli.CampaignExecutionLease(path):
+                pass
+
+    def test_locked_worker_environment_is_minimal_and_secret_free(self) -> None:
+        environment = baseline_cli._locked_worker_environment(
+            {
+                "PATH": "/usr/bin",
+                "HOME": "/tmp/home",
+                "OPENAI_API_KEY": "secret",
+                "OTHER_PROVIDER_TOKEN": "secret",
+                "HTTP_PROXY": "http://ambient.invalid",
+                "RONDO_BUILD_METRICS_DIR": "/tmp/metrics",
+            },
+            worktree_root=Path("/repo"),
+        )
+        self.assertEqual(environment["PATH"], "/usr/bin")
+        self.assertEqual(environment["RONDO_BUILD_METRICS_DIR"], "/tmp/metrics")
+        self.assertNotIn("OPENAI_API_KEY", environment)
+        self.assertNotIn("OTHER_PROVIDER_TOKEN", environment)
+        self.assertNotIn("HTTP_PROXY", environment)
+        self.assertEqual(environment["NO_PROXY"], "127.0.0.1,localhost")
+        self.assertEqual(environment["PYTHONPATH"], "/repo/eval")
+
+    def test_coordinator_projects_one_locked_worker_step(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        args = argparse.Namespace(
+            docker_host_volume=Path("/docker-data"),
+            results_worktree_root=Path("/results"),
+            rondo_measurement_worktree_root=Path("/rondo"),
+            codex_measurement_worktree_root=Path("/codex"),
+        )
+        argv = baseline_cli._locked_worker_argv(paths, args, lease_token="a" * 64)
+        self.assertEqual(
+            argv[0],
+            str(paths.worktree_root / "mydev/scripts/with-build-lock.sh"),
+        )
+        self.assertIn("--worker-step", argv)
+        self.assertEqual(argv.count("--worker-step"), 1)
+        self.assertIn("--campaign-lease-token", argv)
+
     def test_campaign_lock_freezes_unique_full_slot_space_and_profile(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
-        identity = load_campaign_identity(paths)
+        identity = load_historical_campaign_identity(paths, 9)
 
         self.assertEqual(len(identity.slots), 161)
         self.assertEqual(len({item.run_id for item in identity.slots}), 161)
@@ -122,60 +206,57 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(identity.budget["prior_estimated_usd"], "281.718702")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
 
-    def test_retired_identities_and_slots_are_not_reused(self) -> None:
+    def test_historical_registry_is_read_only_and_slots_are_not_reused(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
-        active = load_campaign_identity(paths)
+        registry = campaign_lock_registry(paths)
+        self.assertEqual(tuple(item.version for item in registry), tuple(range(1, 10)))
+        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v9")
+        with self.assertRaisesRegex(BaselineError, "no paid B7 campaign"):
+            load_campaign_identity(paths)
+        pointer = json.loads(
+            (paths.worktree_root / CAMPAIGN_ACTIVE_POINTER_PATH).read_text()
+        )
+        self.assertIsNone(pointer["active_lock"])
+
+    def test_successor_prior_is_derived_from_terminal_v9_facts(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
         self.assertEqual(
-            CAMPAIGN_LOCK_PATH,
-            Path("eval/locks/p2-b7-canary-baseline-v9.json"),
+            required_successor_prior(paths, version=9),
+            Decimal("282.287684"),
         )
-        self.assertEqual(
-            RETIRED_CAMPAIGN_LOCK_PATHS,
-            (
-                Path("eval/locks/p2-b7-canary-baseline-v1.json"),
-                Path("eval/locks/p2-b7-canary-baseline-v2.json"),
-                Path("eval/locks/p2-b7-canary-baseline-v3.json"),
-                Path("eval/locks/p2-b7-canary-baseline-v4.json"),
-                Path("eval/locks/p2-b7-canary-baseline-v5.json"),
-                Path("eval/locks/p2-b7-canary-baseline-v6.json"),
-                Path("eval/locks/p2-b7-canary-baseline-v7.json"),
-                Path("eval/locks/p2-b7-canary-baseline-v8.json"),
-            ),
+
+    def test_successor_run_range_rejects_history_and_accepts_fresh_ids(self) -> None:
+        registry = campaign_lock_registry(RepoPaths.discover(Path.cwd()))
+        with self.assertRaisesRegex(
+            CampaignIdentityGenerationError,
+            "collides",
+        ):
+            validate_successor_run_range(
+                registry,
+                run_id_date=registry[-1].run_id_date,
+                run_id_sequence_base=registry[-1].run_id_sequence_base,
+            )
+        validate_successor_run_range(
+            registry,
+            run_id_date="20260812",
+            run_id_sequence_base=300000000,
         )
-        retired_values = [
-            json.loads((paths.worktree_root / path).read_text(encoding="utf-8"))
-            for path in RETIRED_CAMPAIGN_LOCK_PATHS
-        ]
-        self.assertTrue(
-            all(item["campaign_id"] != active.campaign_id for item in retired_values)
-        )
-        self.assertTrue(
-            all(item["batch_id"] != active.batch_id for item in retired_values)
-        )
-        retired_runs = {
-            item["run_id_sequence_base"] + index
-            for item in retired_values
-            for index in range(1, item["budget"]["max_run_slots"] + 1)
-        }
-        active_runs = {
-            int(slot.run_id.split("-")[1]) for slot in active.slots
-        }
-        self.assertTrue(retired_runs.isdisjoint(active_runs))
 
     def test_campaign_lock_catalog_drift_is_rejected(self) -> None:
         live_paths = RepoPaths.discover(Path.cwd())
-        live = load_campaign_identity(live_paths)
+        live = load_historical_campaign_identity(live_paths, 9)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "eval/locks").mkdir(parents=True)
             lock = json.loads(
                 (
                     live_paths.worktree_root
-                    / CAMPAIGN_LOCK_PATH
+                    / "eval/locks/p2-b7-canary-baseline-v9.json"
                 ).read_text()
             )
             lock["canary_catalog_sha256"] = "0" * 64
-            (root / CAMPAIGN_LOCK_PATH).write_text(
+            lock_path = root / "eval/locks/p2-b7-canary-baseline-v9.json"
+            lock_path.write_text(
                 json.dumps(lock), encoding="utf-8"
             )
             with mock.patch(
@@ -183,10 +264,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 return_value=live.catalog,
             ):
                 with self.assertRaisesRegex(Exception, "contract"):
-                    load_campaign_identity(RepoPaths(root, root))
+                    load_campaign_identity_path(
+                        RepoPaths(root, root),
+                        Path("eval/locks/p2-b7-canary-baseline-v9.json"),
+                    )
 
     def test_campaign_state_ledger_is_single_claim_and_crash_closed(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "campaign.json"
             with CampaignStateLedger(path, identity=identity) as ledger:
@@ -226,8 +310,122 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 self.assertEqual(snapshot["slots"][1]["status"], "failed")
                 self.assertEqual(snapshot["slots"][1]["outcome"], "infra_failed")
 
+    def test_interrupted_paid_slot_reconciles_publication_without_reexecution(self) -> None:
+        identity = self._identity()
+        slot = identity.slots[1]
+        run = {
+            "cap_usd": "40.000000",
+            "spent_usd": "0.100000",
+            "stopped": False,
+            "stop_reason": None,
+            "requests": {
+                "request": {
+                    "status": "settled",
+                    "charged_usd": "0.100000",
+                    "reserved_usd": "18.885000",
+                    "usage_valid": True,
+                    "attempt_count": 1,
+                    "settlement_kind": "usage_priced",
+                }
+            },
+        }
+        record = {
+            "run_id": slot.run_id,
+            "outcome": "completed",
+            "artifacts": f"eval-data/runs/{slot.run_id}",
+            "config": {
+                "campaign_id": identity.campaign_id,
+                "campaign_lock_sha256": identity.lock_sha256,
+                "campaign_slot_id": slot.slot_id,
+            },
+            "cost": {"estimated_usd": 0.1, "actual_usd": None},
+            "summary": {"evidence": []},
+            "tasks": [{"task_id": slot.task_id, "outcome": "fail"}],
+        }
+
+        class Budget:
+            def snapshot(self):
+                return {"runs": {slot.run_id: run}}
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "results"
+            (results / "eval/results").mkdir(parents=True)
+            line = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+            (results / "eval/results/runs.jsonl").write_bytes(line + b"\n")
+            state_path = root / "state.json"
+            with CampaignStateLedger(
+                state_path,
+                identity=identity,
+                allow_interrupted_recovery=True,
+            ) as state:
+                state.claim(slot.slot_id)
+                with mock.patch.object(baseline_cli, "_sample_storage"):
+                    baseline_cli._reconcile_running_paid_slot(
+                        paths=RepoPaths.discover(Path.cwd()),
+                        identity=identity,
+                        state=state,
+                        budget=Budget(),
+                        counter=mock.Mock(),
+                        storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                        results_root=results,
+                    )
+                row = next(
+                    item for item in state.snapshot()["slots"]
+                    if item["slot_id"] == slot.slot_id
+                )
+                self.assertEqual(row["status"], "completed")
+                self.assertEqual(row["estimated_usd"], "0.100000")
+                self.assertEqual(row["result_record_sha256"], hashlib.sha256(line).hexdigest())
+
+    def test_interrupted_paid_slot_without_publication_is_blocked_not_retried(self) -> None:
+        identity = self._identity()
+        slot = identity.slots[1]
+
+        class Budget:
+            def snapshot(self):
+                return {
+                    "runs": {
+                        slot.run_id: {
+                            "spent_usd": "18.885000",
+                            "requests": {},
+                        }
+                    }
+                }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "results"
+            (results / "eval/results").mkdir(parents=True)
+            (results / "eval/results/runs.jsonl").write_text("", encoding="utf-8")
+            with CampaignStateLedger(
+                root / "state.json",
+                identity=identity,
+                allow_interrupted_recovery=True,
+            ) as state:
+                state.claim(slot.slot_id)
+                with self.assertRaisesRegex(
+                    baseline_cli.CampaignExecutionError,
+                    "interrupted ambiguously",
+                ):
+                    baseline_cli._reconcile_running_paid_slot(
+                        paths=RepoPaths.discover(Path.cwd()),
+                        identity=identity,
+                        state=state,
+                        budget=Budget(),
+                        counter=mock.Mock(),
+                        storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                        results_root=results,
+                    )
+                row = next(
+                    item for item in state.snapshot()["slots"]
+                    if item["slot_id"] == slot.slot_id
+                )
+                self.assertEqual(row["status"], "failed")
+                self.assertEqual(row["reason"], "operator_interruption")
+
     def test_campaign_base_orchestrator_activates_only_mechanical_replacements(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
 
         class State:
             skipped: list[str] = []
@@ -257,8 +455,54 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual((len(calls), len(values), len(state.skipped)), (40, 40, 40))
         self.assertTrue(all(":a1" in value for value in calls))
 
+    def test_resumable_orchestrator_executes_at_most_one_paid_slot(self) -> None:
+        identity = self._identity()
+
+        class Budget:
+            def snapshot(self):
+                return {"runs": {}, "spent_usd": "0.000000"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / "results"
+            (results / "eval/results").mkdir(parents=True)
+            (results / "eval/results/runs.jsonl").write_text("", encoding="utf-8")
+            with CampaignStateLedger(root / "state.json", identity=identity) as state:
+                state.claim("wire-canary")
+                state.finish(
+                    "wire-canary",
+                    status=CampaignSlotStatus.COMPLETED,
+                    outcome="completed",
+                    estimated_usd="0.100000",
+                    artifact_path="eval-data/canary/receipt.json",
+                    result_record_sha256="1" * 64,
+                    reason=None,
+                )
+                with mock.patch.object(
+                    baseline_cli,
+                    "_execute_task_slot",
+                    side_effect=baseline_cli._CampaignStepAdvanced,
+                ) as execute:
+                    result = baseline_cli._advance_one_paid_step(
+                        paths=RepoPaths.discover(Path.cwd()),
+                        identity=identity,
+                        state=state,
+                        budget=Budget(),
+                        counter=mock.Mock(),
+                        storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                        results_root=results,
+                        campaign_root=root,
+                        canary_cost=Decimal("0.100000"),
+                    )
+                self.assertEqual(result, 10)
+                execute.assert_called_once()
+                self.assertEqual(
+                    execute.call_args.kwargs["slot"].slot_id,
+                    f"base:aa-rondo-1:{identity.catalog.tasks[0].task_id}:a1",
+                )
+
     def test_targeted_retries_recover_infra_without_rerunning_other_tasks(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
 
         class State:
             skipped: list[str]
@@ -296,7 +540,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len(values), 41)
 
     def test_pass_and_normal_reward_zero_do_not_activate_replacement(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
 
         class State:
             def skip(self, slot_id: str, *, reason: str) -> None:
@@ -322,7 +566,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertTrue(all(":a1" in item for item in calls))
 
     def test_two_remaining_infra_per_round_can_continue(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
 
         class State:
             def skip(self, slot_id: str, *, reason: str) -> None:
@@ -357,7 +601,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len(values), 48)
 
     def test_three_same_category_tasks_open_circuit_before_later_claims(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
 
         class State:
             def skip(self, slot_id: str, *, reason: str) -> None:
@@ -388,7 +632,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertNotIn(identity.catalog.tasks[3].task_id, " ".join(calls))
 
     def test_round_infra_gate_precedes_next_round(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
 
         class State:
             def skip(self, slot_id: str, *, reason: str) -> None:
@@ -625,7 +869,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertIsNone(result.delta)
 
     def test_common_denominator_block_does_not_start_conditionals(self) -> None:
-        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        identity = self._identity()
         task_ids = tuple(item.task_id for item in identity.catalog.tasks)
         outcomes = {
             (BASE_ROUNDS[index], task_ids[index]): TaskOutcome.INFRA

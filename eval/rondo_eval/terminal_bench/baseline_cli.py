@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import hashlib
 import json
+import os
+import stat
+import subprocess
+import sys
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -30,7 +35,6 @@ from .__main__ import (
 )
 from .baseline import (
     BASE_ROUNDS,
-    CAMPAIGN_CAP_USD,
     CAMPAIGN_MAX_RUNS,
     RUN_CAP_USD,
     SOL_MAX_LEGAL_REQUEST_RESERVATION_USD,
@@ -51,6 +55,7 @@ from .baseline import (
 )
 from .live import run_budgeted_terminal_bench
 from .materialize import validate_frozen_task_source
+from .oracle_proof import OracleProofStore, build_oracle_contract
 from .metrics import RunnerMetricsTimer
 from .pair import (
     CampaignPublicationContext,
@@ -86,6 +91,10 @@ _DOCKER_STOP_GROWTH_BYTES = 60 * 1024**3
 
 class CampaignExecutionError(RuntimeError):
     """Raised when the frozen B7 campaign cannot progress safely."""
+
+
+class _CampaignStepAdvanced(RuntimeError):
+    """Internal control flow after one paid slot is durably terminal."""
 
 
 @dataclass(frozen=True)
@@ -137,32 +146,252 @@ class StorageBaseline:
     windows_free_bytes: int
 
 
+class CampaignExecutionLease:
+    """Non-blocking coordinator lease observed by each locked worker."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._descriptor: int | None = None
+        self._token: str | None = None
+
+    def __enter__(self) -> "CampaignExecutionLease":
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor = os.open(
+            self.path,
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            os.close(descriptor)
+            raise CampaignExecutionError("campaign lease path is unsafe")
+        os.fchmod(descriptor, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            os.close(descriptor)
+            raise CampaignExecutionError(
+                "another executor already owns the campaign lease"
+            ) from exc
+        token = os.urandom(32).hex()
+        payload = (token + "\n").encode("ascii")
+        try:
+            os.ftruncate(descriptor, 0)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            if os.write(descriptor, payload) != len(payload):
+                raise OSError("short campaign lease token write")
+            os.fsync(descriptor)
+        except OSError as exc:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+            raise CampaignExecutionError(
+                "campaign lease token write was incomplete"
+            ) from exc
+        self._descriptor = descriptor
+        self._token = token
+        return self
+
+    def __exit__(self, *_ignored: object) -> None:
+        descriptor = self._descriptor
+        self._descriptor = None
+        self._token = None
+        if descriptor is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+    @property
+    def descriptor(self) -> int:
+        if self._descriptor is None:
+            raise CampaignExecutionError("campaign execution lease is not open")
+        return self._descriptor
+
+    @property
+    def token(self) -> str:
+        if self._token is None:
+            raise CampaignExecutionError("campaign execution lease is not open")
+        return self._token
+
+
+def _require_held_campaign_lease(path: Path, token: object) -> None:
+    """Require the coordinator's live lease before a hidden worker can advance."""
+
+    if not isinstance(token, str) or len(token) != 64 or any(
+        character not in "0123456789abcdef" for character in token
+    ):
+        raise CampaignExecutionError("campaign worker has no valid lease token")
+    try:
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise OSError
+        descriptor = os.open(
+            path,
+            os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except (OSError, UnicodeError) as exc:
+        raise CampaignExecutionError("campaign execution lease is unavailable") from exc
+    try:
+        opened = os.fstat(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        observed = os.read(descriptor, 66)
+        if (
+            (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino)
+            or observed != (token + "\n").encode("ascii")
+        ):
+            raise CampaignExecutionError("campaign execution lease changed")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        raise CampaignExecutionError("campaign execution lease is not held")
+    finally:
+        os.close(descriptor)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m rondo_eval.terminal_bench.baseline_cli")
     parser.add_argument("--docker-host-volume", required=True, type=Path)
     parser.add_argument("--results-worktree-root", required=True, type=Path)
     parser.add_argument("--rondo-measurement-worktree-root", required=True, type=Path)
     parser.add_argument("--codex-measurement-worktree-root", required=True, type=Path)
+    parser.add_argument("--worker-step", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--campaign-lease-token", help=argparse.SUPPRESS)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.worker_step:
+        return _worker_step_main(args)
+    return _coordinator_main(args)
+
+
+def _coordinator_main(args: argparse.Namespace) -> int:
     paths = RepoPaths.discover(Path.cwd())
     identity = load_campaign_identity(paths)
+    results_root = validate_results_worktree(
+        args.results_worktree_root,
+        common_root=paths.common_root,
+    )
+    _require_distinct_results_worktree(paths, results_root)
+    campaign_root = paths.common_root / "eval-data/campaigns" / identity.campaign_id
+    campaign_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lease_path = campaign_root / "executor.lock"
+    with CampaignExecutionLease(lease_path) as lease:
+        for _ in range(len(identity.slots) + len(identity.catalog.tasks) + 10):
+            completed = subprocess.run(
+                _locked_worker_argv(paths, args, lease_token=lease.token),
+                cwd=paths.worktree_root,
+                env=_locked_worker_environment(worktree_root=paths.worktree_root),
+                stdin=subprocess.DEVNULL,
+                stdout=None,
+                stderr=None,
+                check=False,
+            )
+            if completed.returncode == 10:
+                continue
+            return completed.returncode
+    raise CampaignExecutionError("campaign step bound was exceeded")
+
+
+def _locked_worker_argv(
+    paths: RepoPaths,
+    args: argparse.Namespace,
+    *,
+    lease_token: str,
+) -> tuple[str, ...]:
+    return (
+        str(paths.worktree_root / "mydev/scripts/with-build-lock.sh"),
+        sys.executable,
+        "-B",
+        "-m",
+        "rondo_eval.terminal_bench.baseline_cli",
+        "--worker-step",
+        "--campaign-lease-token",
+        lease_token,
+        "--docker-host-volume",
+        str(args.docker_host_volume),
+        "--results-worktree-root",
+        str(args.results_worktree_root),
+        "--rondo-measurement-worktree-root",
+        str(args.rondo_measurement_worktree_root),
+        "--codex-measurement-worktree-root",
+        str(args.codex_measurement_worktree_root),
+    )
+
+
+_WORKER_ENV_KEYS = frozenset(
+    {
+        "HOME",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "LANG",
+        "LC_ALL",
+        "LOGNAME",
+        "PATH",
+        "RONDO_BUILD_METRICS_DIR",
+        "SHELL",
+        "SYSTEMD_EXEC_PID",
+        "TERM",
+        "TMPDIR",
+        "USER",
+        "UV_CACHE_DIR",
+        "UV_PROJECT_ENVIRONMENT",
+        "WSL_DISTRO_NAME",
+        "WSL_INTEROP",
+        "XDG_RUNTIME_DIR",
+    }
+)
+
+
+def _locked_worker_environment(
+    source: dict[str, str] | None = None,
+    *,
+    worktree_root: Path | None = None,
+) -> dict[str, str]:
+    source = dict(os.environ if source is None else source)
+    value = {key: source[key] for key in _WORKER_ENV_KEYS if source.get(key)}
+    value["NO_PROXY"] = "127.0.0.1,localhost"
+    value["no_proxy"] = "127.0.0.1,localhost"
+    if worktree_root is not None:
+        value["PYTHONPATH"] = str(worktree_root / "eval")
+    return value
+
+
+def _terminal_exit_code(status: object) -> int:
+    if status == BaselineStatus.PASSED.value:
+        return 0
+    if status == BaselineStatus.FAILED.value:
+        return 2
+    if status == BaselineStatus.BLOCKED.value:
+        return 3
+    raise CampaignExecutionError("campaign terminal status is invalid")
+
+
+def _worker_step_main(args: argparse.Namespace) -> int:
+    paths = RepoPaths.discover(Path.cwd())
+    identity = load_campaign_identity(paths)
+    campaign_root = (
+        paths.common_root / "eval-data" / "campaigns" / identity.campaign_id
+    )
+    _require_held_campaign_lease(
+        campaign_root / "executor.lock",
+        args.campaign_lease_token,
+    )
     config = load_runtime_config(paths)
     provider = config.paid_provider_projection()
     identity.validate_provider(provider)
-    source_checkout = (
-        paths.common_root / "eval-data/sources/terminal-bench-2-1-ffccbe05"
-    )
-    for task in identity.catalog.tasks:
-        validate_frozen_task_source(source_checkout, task)
     eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
     results_root = validate_results_worktree(
         args.results_worktree_root,
         common_root=paths.common_root,
     )
+    _require_distinct_results_worktree(paths, results_root)
     manifests = _load_and_validate_manifests(paths, identity)
     measurement_roots = {
         Side.RONDO: RepoPaths.discover(args.rondo_measurement_worktree_root),
@@ -185,17 +414,18 @@ def main(argv: list[str] | None = None) -> int:
         host_data_root=args.docker_host_volume,
         desktop_host_probe=PowerShellDockerDesktopHostProbe(),
     )
-    storage_baseline = _sample_storage(counter, identity.slots[0].run_id)
-    _validate_daemon_images(identity)
-    campaign_root = (
-        paths.common_root / "eval-data" / "campaigns" / identity.campaign_id
-    )
     state_path = campaign_root / "state.json"
     budget_path = (
         paths.common_root / "eval-data" / "budgets" / f"{identity.batch_id}.json"
     )
     campaign_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _run_oracle_preflight(
+    storage_baseline = _load_or_create_storage_baseline(
+        campaign_root,
+        counter,
+        identity.slots[0].run_id,
+    )
+    _sample_storage(counter, identity.slots[0].run_id, baseline=storage_baseline)
+    oracle_ready = _run_oracle_preflight(
         paths=paths,
         identity=identity,
         campaign_root=campaign_root,
@@ -203,18 +433,49 @@ def main(argv: list[str] | None = None) -> int:
         proof=proof,
         seccomp_profile=seccomp_profile,
         provider_api_key_env=provider.api_key_env,
+        max_new_proofs=1,
     )
-    with CampaignStateLedger(state_path, identity=identity) as state:
-        if state.snapshot()["status"] != "running":
-            raise CampaignExecutionError("campaign is already terminal")
+    if not oracle_ready:
+        return 10
+    with CampaignStateLedger(
+        state_path,
+        identity=identity,
+        allow_interrupted_recovery=True,
+    ) as state:
+        snapshot = state.snapshot()
+        if snapshot["status"] != "running":
+            return _terminal_exit_code(snapshot["status"])
         try:
-            canary_cost = _execute_wire_canary(paths, identity, campaign_root, state)
+            _reconcile_running_wire_canary(
+                paths=paths,
+                identity=identity,
+                campaign_root=campaign_root,
+                state=state,
+                counter=counter,
+                storage_baseline=storage_baseline,
+            )
         except CampaignExecutionError as exc:
-            _skip_planned(state, identity, reason="wire_canary_failed")
+            _skip_planned(state, identity, reason="wire_canary_interrupted")
             state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
             return 3
+        snapshot = state.snapshot()
+        wire = next(row for row in snapshot["slots"] if row["slot_id"] == "wire-canary")
+        if wire["status"] == CampaignSlotStatus.PLANNED.value:
+            try:
+                _execute_wire_canary(paths, identity, campaign_root, state)
+            except CampaignExecutionError as exc:
+                _skip_planned(state, identity, reason="wire_canary_failed")
+                state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
+                return 3
+            return 10
+        if wire["status"] != CampaignSlotStatus.COMPLETED.value:
+            _skip_planned(state, identity, reason="wire_canary_failed")
+            state.finalize(BaselineStatus.BLOCKED, reason="wire_canary_not_completed")
+            return 3
+        canary_cost = Decimal(wire["estimated_usd"])
         prior_cost = Decimal(identity.budget["prior_estimated_usd"])
-        remaining_cap = CAMPAIGN_CAP_USD - prior_cost - canary_cost
+        campaign_cap = Decimal(identity.budget["campaign_cap_usd"])
+        remaining_cap = campaign_cap - prior_cost - canary_cost
         if remaining_cap < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
             state.finalize(BaselineStatus.BLOCKED, reason="budget_after_wire_canary")
             return 3
@@ -227,8 +488,16 @@ def main(argv: list[str] | None = None) -> int:
             default_run_cap_usd=RUN_CAP_USD,
         ) as budget:
             try:
-                failure_tracker = MechanicalFailureTracker()
-                base_runs = _execute_base_rounds(
+                _reconcile_running_paid_slot(
+                    paths=paths,
+                    identity=identity,
+                    state=state,
+                    budget=budget,
+                    counter=counter,
+                    storage_baseline=storage_baseline,
+                    results_root=results_root,
+                )
+                return _advance_one_paid_step(
                     paths=paths,
                     identity=identity,
                     state=state,
@@ -244,32 +513,8 @@ def main(argv: list[str] | None = None) -> int:
                     measurement_commits=measurement_commits,
                     eval_harness_commit=eval_harness_commit,
                     seccomp_profile=seccomp_profile,
-                    failure_tracker=failure_tracker,
-                )
-                _require_resolved_base_rounds(identity, base_runs)
-                conditional_runs = _execute_conditionals(
-                    paths=paths,
-                    identity=identity,
-                    state=state,
-                    budget=budget,
-                    config=config,
-                    provider_key=api_key,
-                    counter=counter,
-                    proof=proof,
-                    storage_baseline=storage_baseline,
-                    results_root=results_root,
-                    manifests=manifests,
-                    measurement_roots=measurement_roots,
-                    measurement_commits=measurement_commits,
-                    eval_harness_commit=eval_harness_commit,
-                    seccomp_profile=seccomp_profile,
-                    base_runs=base_runs,
-                    failure_tracker=failure_tracker,
-                )
-                assessment = assess_baseline(
-                    tuple(task.task_id for task in identity.catalog.tasks),
-                    tuple(base_runs),
-                    tuple(conditional_runs),
+                    campaign_root=campaign_root,
+                    canary_cost=canary_cost,
                 )
             except CampaignExecutionError as exc:
                 _skip_planned(state, identity, reason="campaign_stopped")
@@ -291,25 +536,177 @@ def main(argv: list[str] | None = None) -> int:
                     final_storage=final_storage,
                 )
                 return 3
-            _skip_planned(state, identity, reason="not_activated")
-            state.finalize(assessment.status, reason=";".join(assessment.reasons) or None)
-            final_storage = _sample_storage(
-                counter,
-                identity.slots[0].run_id,
-                baseline=storage_baseline,
-            )
-            _write_aggregate(
-                campaign_root,
-                identity,
-                state,
-                budget.snapshot(),
-                canary_cost,
-                assessment=assessment,
-                results_root=results_root,
-                storage_baseline=storage_baseline,
-                final_storage=final_storage,
-            )
-            return 0 if assessment.status is BaselineStatus.PASSED else 2
+
+
+def _reconcile_running_wire_canary(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    campaign_root: Path,
+    state: CampaignStateLedger,
+    counter: DockerCliCounter,
+    storage_baseline: StorageBaseline,
+) -> None:
+    running = [
+        row for row in state.snapshot()["slots"] if row["status"] == "running"
+    ]
+    if not running:
+        return
+    if len(running) != 1 or running[0]["slot_id"] != "wire-canary":
+        return
+    receipt_path = campaign_root / "wire-canary/receipt.json"
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        state.fail_interrupted(
+            estimated_usd="0.000000",
+            reason=MechanicalFailureCategory.OPERATOR_INTERRUPTION.value,
+        )
+        raise CampaignExecutionError("wire canary was interrupted without a receipt")
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        spent = Decimal(str(receipt["estimated_spent_usd"]))
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, ArithmeticError) as exc:
+        state.fail_interrupted(
+            estimated_usd="0.000000",
+            reason=MechanicalFailureCategory.OPERATOR_INTERRUPTION.value,
+        )
+        raise CampaignExecutionError("wire canary receipt is invalid") from exc
+    if receipt.get("status") != "completed" or spent < 0:
+        state.fail_interrupted(
+            estimated_usd=f"{max(spent, Decimal(0)):.6f}",
+            reason=MechanicalFailureCategory.OPERATOR_INTERRUPTION.value,
+        )
+        raise CampaignExecutionError("wire canary did not complete before interruption")
+    _sample_storage(counter, identity.slots[0].run_id, baseline=storage_baseline)
+    state.finish(
+        "wire-canary",
+        status=CampaignSlotStatus.COMPLETED,
+        outcome="completed",
+        estimated_usd=f"{spent:.6f}",
+        artifact_path=receipt_path.relative_to(paths.common_root).as_posix(),
+        result_record_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+        reason=None,
+    )
+
+
+def _reconcile_running_paid_slot(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    state: CampaignStateLedger,
+    budget: PersistentBudgetLedger,
+    counter: DockerCliCounter,
+    storage_baseline: StorageBaseline,
+    results_root: Path,
+) -> None:
+    running = [
+        row for row in state.snapshot()["slots"] if row["status"] == "running"
+    ]
+    if not running:
+        return
+    if len(running) != 1 or running[0]["slot_id"] == "wire-canary":
+        raise CampaignExecutionError("campaign running slot recovery is ambiguous")
+    row = running[0]
+    slot = identity.slot(row["slot_id"])
+    records, digests = _campaign_records(results_root, identity)
+    budget_snapshot = budget.snapshot()
+    run = budget_snapshot["runs"].get(slot.run_id)
+    record = records.get(slot.run_id)
+    if record is not None and isinstance(run, dict):
+        _validate_recoverable_publication(identity, slot, record, run)
+        _sample_storage(counter, slot.run_id, baseline=storage_baseline)
+        task_outcome = _task_outcome_from_record(record)
+        category = _record_failure_category(record, task_outcome, run)
+        state.finish(
+            slot.slot_id,
+            status=CampaignSlotStatus.COMPLETED,
+            outcome=str(record["outcome"]),
+            estimated_usd=f"{Decimal(run['spent_usd']):.6f}",
+            artifact_path=str(record["artifacts"]),
+            result_record_sha256=digests[slot.run_id],
+            reason=category.value if category is not None else None,
+        )
+        return
+    spent = Decimal(run["spent_usd"]) if isinstance(run, dict) else Decimal(0)
+    state.fail_interrupted(
+        estimated_usd=f"{spent:.6f}",
+        reason=MechanicalFailureCategory.OPERATOR_INTERRUPTION.value,
+    )
+    raise CampaignExecutionError("paid campaign slot was interrupted ambiguously")
+
+
+def _validate_recoverable_publication(
+    identity: CampaignIdentity,
+    slot: CampaignSlotPlan,
+    record: dict[str, object],
+    run: dict[str, object],
+) -> None:
+    config = record.get("config")
+    cost = record.get("cost")
+    requests = run.get("requests")
+    if (
+        record.get("run_id") != slot.run_id
+        or not isinstance(config, dict)
+        or config.get("campaign_id") != identity.campaign_id
+        or config.get("campaign_lock_sha256") != identity.lock_sha256
+        or config.get("campaign_slot_id") != slot.slot_id
+        or not isinstance(cost, dict)
+        or Decimal(str(cost.get("estimated_usd"))) != Decimal(str(run.get("spent_usd")))
+        or not isinstance(requests, dict)
+        or any(
+            not isinstance(request, dict)
+            or request.get("status") != "settled"
+            or request.get("charged_usd") is None
+            for request in requests.values()
+        )
+        or sum(Decimal(request["charged_usd"]) for request in requests.values())
+        != Decimal(str(run.get("spent_usd")))
+    ):
+        raise CampaignExecutionError("interrupted slot publication cannot be reconciled")
+    task_outcome = _task_outcome_from_record(record)
+    if task_outcome is not TaskOutcome.INFRA and not requests:
+        raise CampaignExecutionError("completed task publication has no settled request")
+
+
+def _task_outcome_from_record(record: dict[str, object]) -> TaskOutcome:
+    raw_outcome = record.get("outcome")
+    tasks = record.get("tasks")
+    if raw_outcome in {
+        RunOutcome.INFRA_FAILED.value,
+        RunOutcome.BUDGET_STOPPED.value,
+        RunOutcome.CANCELLED.value,
+    }:
+        return TaskOutcome.INFRA
+    if not isinstance(tasks, list) or len(tasks) != 1 or not isinstance(tasks[0], dict):
+        raise CampaignExecutionError("campaign task result is invalid")
+    return TaskOutcome.PASS if tasks[0].get("outcome") == "pass" else TaskOutcome.FAIL
+
+
+def _record_failure_category(
+    record: dict[str, object],
+    task_outcome: TaskOutcome,
+    run: dict[str, object],
+) -> MechanicalFailureCategory | None:
+    summary = record.get("summary")
+    failure_stage = summary.get("failure_stage") if isinstance(summary, dict) else None
+    evidence = summary.get("evidence", []) if isinstance(summary, dict) else []
+    guardian_technical = isinstance(evidence, list) and any(
+        isinstance(item, dict)
+        and item.get("terminal_status") in {"aborted", "timed_out", "failed_closed"}
+        for item in evidence
+    )
+    return _mechanical_failure_category(
+        task_outcome=task_outcome,
+        failure_stage=failure_stage if isinstance(failure_stage, str) else None,
+        guardian_technical_failure=guardian_technical,
+        budget_run=run,
+    )
+
+
+def _require_distinct_results_worktree(paths: RepoPaths, results_root: Path) -> None:
+    if results_root == paths.worktree_root:
+        raise CampaignExecutionError(
+            "results worktree must be distinct from the eval harness checkout"
+        )
 
 
 def _load_and_validate_manifests(
@@ -379,45 +776,108 @@ def _optional_final_storage(
         return None
 
 
-def _validate_daemon_images(identity: CampaignIdentity) -> None:
-    executor = SubprocessCommandExecutor(timeout_seconds=15)
-    for task in identity.catalog.tasks:
-        output = executor.run(
-            (
-                "docker",
-                "image",
-                "inspect",
-                "--format",
-                "{{json .Id}}",
-                task.image_ref,
-            )
-        ).stdout.strip()
+def _load_or_create_storage_baseline(
+    campaign_root: Path,
+    counter: DockerCliCounter,
+    run_id: str,
+) -> StorageBaseline:
+    path = campaign_root / "storage-baseline.json"
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
+            raise CampaignExecutionError("campaign storage baseline is unsafe")
         try:
-            image_id = json.loads(output)
-        except json.JSONDecodeError as exc:
-            raise CampaignExecutionError("frozen Docker image identity is invalid") from exc
-        if (
-            not isinstance(image_id, str)
-            or not image_id.startswith("sha256:")
-            or len(image_id) != 71
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise CampaignExecutionError("campaign storage baseline is unreadable") from exc
+        if not isinstance(value, dict) or set(value) != {
+            "docker_total_bytes",
+            "docker_desktop_vhdx_bytes",
+            "windows_free_bytes",
+        }:
+            raise CampaignExecutionError("campaign storage baseline is invalid")
+        if any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in value.values()
         ):
-            raise CampaignExecutionError("frozen Docker image is not daemon-resolved")
-        workdir_output = executor.run(
-            (
-                "docker",
-                "image",
-                "inspect",
-                "--format",
-                "{{json .Config.WorkingDir}}",
-                task.image_ref,
-            )
-        ).stdout.strip()
+            raise CampaignExecutionError("campaign storage baseline is invalid")
+        return StorageBaseline(**value)
+    baseline = _sample_storage(counter, run_id)
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    payload = json.dumps(
+        {
+            "docker_total_bytes": baseline.docker_total_bytes,
+            "docker_desktop_vhdx_bytes": baseline.docker_desktop_vhdx_bytes,
+            "windows_free_bytes": baseline.windows_free_bytes,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+        0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
         try:
-            workdir = json.loads(workdir_output)
-        except json.JSONDecodeError as exc:
-            raise CampaignExecutionError("frozen Docker workdir is invalid") from exc
-        if workdir != task.workdir:
-            raise CampaignExecutionError("frozen Docker workdir differs from the catalog")
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        if temporary.exists() and not temporary.is_symlink():
+            temporary.unlink()
+        raise
+    return baseline
+
+
+def _validate_daemon_image(task: object) -> None:
+    from .tasksets import FrozenTask
+
+    if not isinstance(task, FrozenTask):
+        raise CampaignExecutionError("frozen Docker task is invalid")
+    executor = SubprocessCommandExecutor(timeout_seconds=15)
+    output = executor.run(
+        (
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{json .Id}}",
+            task.image_ref,
+        )
+    ).stdout.strip()
+    try:
+        image_id = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise CampaignExecutionError("frozen Docker image identity is invalid") from exc
+    if (
+        not isinstance(image_id, str)
+        or not image_id.startswith("sha256:")
+        or len(image_id) != 71
+    ):
+        raise CampaignExecutionError("frozen Docker image is not daemon-resolved")
+    workdir_output = executor.run(
+        (
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{json .Config.WorkingDir}}",
+            task.image_ref,
+        )
+    ).stdout.strip()
+    try:
+        workdir = json.loads(workdir_output)
+    except json.JSONDecodeError as exc:
+        raise CampaignExecutionError("frozen Docker workdir is invalid") from exc
+    if workdir != task.workdir:
+        raise CampaignExecutionError("frozen Docker workdir differs from the catalog")
 
 
 def _run_oracle_preflight(
@@ -429,32 +889,49 @@ def _run_oracle_preflight(
     proof: object,
     seccomp_profile: Path,
     provider_api_key_env: str,
-) -> None:
+    max_new_proofs: int | None = None,
+) -> bool:
     receipt_path = campaign_root / "oracle-preflight.json"
-    if receipt_path.exists() or receipt_path.is_symlink():
-        raise CampaignExecutionError("fresh oracle preflight output already exists")
     executor = DockerSupervisedHostHarborExecutor(
         counter=counter,
         lock_guard=proof.guard,
         lease=proof.lease,
     )
     source = paths.common_root / "eval-data/sources/terminal-bench-2-1-ffccbe05"
-    root = (
-        paths.common_root
-        / "eval-data/work"
-        / f"{identity.campaign_id}-oracle-preflight"
+    store = OracleProofStore(
+        paths.common_root / "eval-data/oracle-proofs/p2-b7-v1"
     )
-    if root.exists() or root.is_symlink():
-        raise CampaignExecutionError("fresh oracle preflight work already exists")
-    results: list[dict[str, object]] = []
-    for index, task in enumerate(identity.catalog.tasks, start=1):
-        task_root = root / f"{index:02d}-{task.slug}"
+    contracts = tuple(
+        build_oracle_contract(
+            paths,
+            catalog=identity.catalog,
+            task=task,
+            seccomp_source_sha256=identity.no_api_seccomp["source_sha256"],
+            seccomp_effective_sha256=identity.no_api_seccomp["effective_sha256"],
+        )
+        for task in identity.catalog.tasks
+    )
+    created = 0
+    for task, contract in zip(identity.catalog.tasks, contracts, strict=True):
+        if store.valid_proof(contract) is not None:
+            continue
+        if max_new_proofs is not None and created >= max_new_proofs:
+            return False
+        validate_frozen_task_source(source, task)
+        _validate_daemon_image(task)
+        task_root = (
+            paths.common_root
+            / "eval-data/work/oracle-proofs"
+            / f"{contract.sha256}-{os.getpid()}"
+        )
+        if task_root.exists() or task_root.is_symlink():
+            raise CampaignExecutionError("Oracle proof work directory already exists")
         materialized = PinnedTaskMaterializer().materialize(
             source_checkout=source,
             staging_root=task_root,
             staging_name="task",
             image_digest=task.image_digest,
-            task_label=f"dev.rondo.eval.task=p2-b7-oracle-{index:02d}-{task.slug}",
+            task_label=f"dev.rondo.eval.task=oracle-{contract.sha256[:20]}",
             memory_bytes=task.memory_mb * 1024**2,
             memory_swap_bytes=(task.memory_mb + 1024) * 1024**2,
             pids_limit=256,
@@ -481,30 +958,62 @@ def _run_oracle_preflight(
             raise CampaignExecutionError(
                 f"no-API oracle preflight failed for {task.task_id}"
             )
-        results.append(
-            {
-                "task_id": task.task_id,
-                "image_ref": task.image_ref,
-                "source_digest": task.source_digest,
-                "reward": parsed.reward,
-                "docker_samples": len(harbor.docker_evidence.samples),
-            }
+        _sample_storage(
+            counter,
+            identity.slots[0].run_id,
+            baseline=_load_or_create_storage_baseline(
+                campaign_root, counter, identity.slots[0].run_id
+            ),
         )
-    receipt_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "campaign_id": identity.campaign_id,
-                "campaign_lock_sha256": identity.lock_sha256,
-                "tasks": results,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+        store.publish(
+            contract,
+            outcome=parsed.outcome.value,
+            task_outcome=str(parsed.task_outcome),
+            reward=float(parsed.reward),
+            docker_receipt=harbor.docker_evidence.receipt(),
         )
-        + "\n",
-        encoding="utf-8",
+        created += 1
+    manifest = store.publish_manifest(catalog=identity.catalog, contracts=contracts)
+    if manifest is None:
+        return False
+    reference = {
+        "schema_version": 1,
+        "relative_path": manifest.relative_to(paths.common_root).as_posix(),
+        "sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    }
+    payload = json.dumps(reference, sort_keys=True, separators=(",", ":")) + "\n"
+    if receipt_path.exists() or receipt_path.is_symlink():
+        if receipt_path.is_symlink() or receipt_path.read_text(encoding="utf-8") != payload:
+            raise CampaignExecutionError("Oracle manifest reference drifted")
+        return True
+    _write_once_durable_text(receipt_path, payload)
+    return True
+
+
+def _write_once_durable_text(path: Path, payload: str) -> None:
+    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+        0o600,
     )
-    receipt_path.chmod(0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if path.exists() or path.is_symlink():
+            raise CampaignExecutionError("durable destination already exists")
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        if temporary.exists() and not temporary.is_symlink():
+            temporary.unlink()
+        raise
 
 
 def _execute_wire_canary(
@@ -549,6 +1058,140 @@ def _execute_wire_canary(
     if not completed:
         raise CampaignExecutionError("fresh exact-wire canary failed")
     return spent
+
+
+def _advance_one_paid_step(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    state: CampaignStateLedger,
+    budget: PersistentBudgetLedger,
+    counter: DockerCliCounter,
+    storage_baseline: StorageBaseline,
+    results_root: Path,
+    campaign_root: Path,
+    canary_cost: Decimal,
+    **execute_kwargs: object,
+) -> int:
+    """Advance at most one paid task while applying every frozen gate in order."""
+
+    records, digests = _campaign_records(results_root, identity)
+    tracker = MechanicalFailureTracker()
+    resumable = {
+        "paths": paths,
+        "identity": identity,
+        "state": state,
+        "budget": budget,
+        "counter": counter,
+        "storage_baseline": storage_baseline,
+        "results_root": results_root,
+        "records": records,
+        "digests": digests,
+        "resumable": True,
+        **execute_kwargs,
+    }
+    try:
+        base_runs = _execute_base_rounds(
+            failure_tracker=tracker,
+            **resumable,
+        )
+        _require_resolved_base_rounds(identity, base_runs)
+        conditional_runs = _execute_conditionals(
+            base_runs=base_runs,
+            failure_tracker=tracker,
+            **resumable,
+        )
+    except _CampaignStepAdvanced:
+        return 10
+
+    assessment = assess_baseline(
+        tuple(task.task_id for task in identity.catalog.tasks),
+        tuple(base_runs),
+        tuple(conditional_runs),
+    )
+    _skip_planned(state, identity, reason="not_activated")
+    final_storage = _sample_storage(
+        counter,
+        identity.slots[0].run_id,
+        baseline=storage_baseline,
+    )
+    state.finalize(assessment.status, reason=";".join(assessment.reasons) or None)
+    _write_aggregate(
+        campaign_root,
+        identity,
+        state,
+        budget.snapshot(),
+        canary_cost,
+        assessment=assessment,
+        results_root=results_root,
+        storage_baseline=storage_baseline,
+        final_storage=final_storage,
+    )
+    return 0 if assessment.status is BaselineStatus.PASSED else 2
+
+
+def _executed_from_row(
+    slot: CampaignSlotPlan,
+    row: dict[str, object],
+    *,
+    records: dict[str, dict[str, object]],
+    digests: dict[str, str],
+) -> ExecutedSlot:
+    status = row.get("status")
+    if status == CampaignSlotStatus.FAILED.value:
+        try:
+            category = MechanicalFailureCategory(str(row.get("reason")))
+        except ValueError as exc:
+            raise CampaignExecutionError("failed slot lacks a mechanical category") from exc
+        return ExecutedSlot(
+            slot,
+            RunOutcome.INFRA_FAILED,
+            TaskOutcome.INFRA,
+            Decimal(str(row["estimated_usd"])),
+            category,
+        )
+    if status != CampaignSlotStatus.COMPLETED.value:
+        raise CampaignExecutionError("required campaign slot is not completed")
+    record = records.get(slot.run_id)
+    if record is None or digests.get(slot.run_id) != row.get("result_record_sha256"):
+        raise CampaignExecutionError("campaign state differs from its public result")
+    task_outcome = _task_outcome_from_record(record)
+    category: MechanicalFailureCategory | None = None
+    if row.get("reason") is not None:
+        try:
+            category = MechanicalFailureCategory(str(row["reason"]))
+        except ValueError as exc:
+            raise CampaignExecutionError("campaign failure category is invalid") from exc
+    if (task_outcome is TaskOutcome.INFRA) != (category is not None):
+        raise CampaignExecutionError("campaign task outcome and category disagree")
+    return ExecutedSlot(
+        slot,
+        RunOutcome(str(row["outcome"])),
+        task_outcome,
+        Decimal(str(row["estimated_usd"])),
+        category,
+    )
+
+
+def _require_or_skip(
+    state: CampaignStateLedger,
+    slot_id: str,
+    *,
+    reason: str,
+) -> None:
+    row = _state_row(state.snapshot(), slot_id)
+    if row["status"] == CampaignSlotStatus.PLANNED.value:
+        state.skip(slot_id, reason=reason)
+        return
+    if row["status"] != CampaignSlotStatus.SKIPPED.value or row.get("reason") != reason:
+        raise CampaignExecutionError("campaign skip projection drifted")
+
+
+def _state_row(snapshot: dict[str, object], slot_id: str) -> dict[str, object]:
+    rows = [row for row in snapshot["slots"] if row["slot_id"] == slot_id]
+    if len(rows) != 1:
+        raise CampaignExecutionError("campaign state row is ambiguous")
+    return rows[0]
 
 
 def _execute_base_rounds(
@@ -600,10 +1243,17 @@ def _execute_base_rounds(
                 )
                 effective[task.task_id] = replacement
             else:
-                state.skip(
-                    replacement_slot.slot_id,
-                    reason="base_replacement_not_activated",
-                )
+                if kwargs.get("resumable") is True:
+                    _require_or_skip(
+                        state,
+                        replacement_slot.slot_id,
+                        reason="base_replacement_not_activated",
+                    )
+                else:
+                    state.skip(
+                        replacement_slot.slot_id,
+                        reason="base_replacement_not_activated",
+                    )
         if sum(
             item.task_outcome is TaskOutcome.INFRA for item in effective.values()
         ) > MAX_REMAINING_INFRA_PER_ROUND:
@@ -700,8 +1350,12 @@ def _execute_conditionals(
                         if len(common_valid_tasks) < MIN_COMMON_VALID_TASKS
                         else "conditional_not_activated"
                     )
-                    state.skip(first.slot_id, reason=reason)
-                    state.skip(second.slot_id, reason=reason)
+                    if kwargs.get("resumable") is True:
+                        _require_or_skip(state, first.slot_id, reason=reason)
+                        _require_or_skip(state, second.slot_id, reason=reason)
+                    else:
+                        state.skip(first.slot_id, reason=reason)
+                        state.skip(second.slot_id, reason=reason)
                     continue
                 executed = _execute_task_slot(slot=first, task=task, **kwargs)
                 tracker.observe(executed)
@@ -731,7 +1385,17 @@ def _execute_conditionals(
                         )
                     )
                 else:
-                    state.skip(second.slot_id, reason="conditional_replacement_not_activated")
+                    if kwargs.get("resumable") is True:
+                        _require_or_skip(
+                            state,
+                            second.slot_id,
+                            reason="conditional_replacement_not_activated",
+                        )
+                    else:
+                        state.skip(
+                            second.slot_id,
+                            reason="conditional_replacement_not_activated",
+                        )
     return values
 
 
@@ -754,11 +1418,30 @@ def _execute_task_slot(
     measurement_commits: dict[Side, str],
     eval_harness_commit: str,
     seccomp_profile: Path,
+    records: dict[str, dict[str, object]] | None = None,
+    digests: dict[str, str] | None = None,
+    resumable: bool = False,
 ) -> ExecutedSlot:
     from .tasksets import FrozenTask
 
     if not isinstance(task, FrozenTask):
         raise CampaignExecutionError("campaign task projection is invalid")
+    if resumable:
+        if records is None or digests is None:
+            raise CampaignExecutionError("resumable execution lacks public records")
+        row = _state_row(state.snapshot(), slot.slot_id)
+        if row["status"] != CampaignSlotStatus.PLANNED.value:
+            return _executed_from_row(
+                slot,
+                row,
+                records=records,
+                digests=digests,
+            )
+    validate_frozen_task_source(
+        paths.common_root / "eval-data/sources/terminal-bench-2-1-ffccbe05",
+        task,
+    )
+    _validate_daemon_image(task)
     snapshot = budget.snapshot()
     if Decimal(snapshot["remaining_uncommitted_usd"]) < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
         raise CampaignExecutionError("remaining campaign budget cannot fit the next request")
@@ -775,11 +1458,25 @@ def _execute_task_slot(
         != measurement_commits[slot.side]
     ):
         raise CampaignExecutionError("measurement checkout drifted during the campaign")
-    state.claim(slot.slot_id)
-    budget.claim_run(slot.run_id)
     work_root = paths.common_root / "eval-data" / "work" / slot.run_id
     if work_root.exists() or work_root.is_symlink():
         raise CampaignExecutionError("campaign work directory is already present")
+    if slot.run_id in budget.snapshot()["runs"]:
+        raise CampaignExecutionError("campaign budget run ID was already consumed")
+    state.claim(slot.slot_id)
+    try:
+        budget.claim_run(slot.run_id)
+    except Exception as exc:
+        state.finish(
+            slot.slot_id,
+            status=CampaignSlotStatus.FAILED,
+            outcome=RunOutcome.BUDGET_STOPPED.value,
+            estimated_usd="0.000000",
+            artifact_path=None,
+            result_record_sha256=None,
+            reason=MechanicalFailureCategory.BUDGET_CAPACITY.value,
+        )
+        raise CampaignExecutionError("campaign budget run cannot be claimed") from exc
     metadata_path = work_root / "api-metadata.json"
     request = TerminalBenchRequest(
         side=slot.side,
@@ -913,6 +1610,7 @@ def _execute_task_slot(
         budget_run=run,
     )
     record_digest = _result_record_sha256(results_root, slot.run_id)
+    _sample_storage(counter, slot.run_id, baseline=storage_baseline)
     state.finish(
         slot.slot_id,
         status=CampaignSlotStatus.COMPLETED,
@@ -922,8 +1620,10 @@ def _execute_task_slot(
         result_record_sha256=record_digest,
         reason=failure_category.value if failure_category is not None else None,
     )
-    _sample_storage(counter, slot.run_id, baseline=storage_baseline)
-    return ExecutedSlot(slot, outcome, task_outcome, spent, failure_category)
+    executed = ExecutedSlot(slot, outcome, task_outcome, spent, failure_category)
+    if resumable:
+        raise _CampaignStepAdvanced
+    return executed
 
 
 _PROVIDER_INTEGRITY_STOP_REASONS = frozenset(

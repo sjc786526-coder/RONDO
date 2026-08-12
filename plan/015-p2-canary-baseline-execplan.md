@@ -36,6 +36,15 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   8 项只发布部分技术事实并把 M2 标为 blocked。
 - fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 600 USD 账本；所有 reservation 最终
   settled，`actual_usd=null`。
+- Oracle 以单题 proof 增量落盘并由十题 manifest 聚合；proof 不绑定 paid campaign 或整个 Git commit，只绑定
+  task/source/image、taskset/catalog entry、共享执行组件、verifier、seccomp、Harbor/TB 和必要宿主兼容事实。
+  仅 task-local 或共享组件变化时按精确依赖失效，进程中断不丢失已完成单题。
+- wire canary 独立绑定 provider/profile/proxy/model effort/catalog/bundle；新 paid identity 或供应商故障后仍 fresh，
+  但其成功/失败不改变 Oracle proof 有效性。
+- Oracle task 与 paid task 各自独占一次重型 lock/watchdog；取得锁后重验全部运行事实，执行、精确清理、最终资源
+  计数和 durable state 写入完成后释放。campaign 另用轻量 lease 串行推进，一次只 claim 一个 slot。
+- crash/restart 不重复发送已结算请求、不覆盖结果或复用 run ID：已发布且账本完整的 running slot 可机械收敛；
+  其他含糊 running slot 保守结算并阻断。identity 由轻量生成入口派生，版本、ID、SHA、prior debit 与 cap 自动校验。
 - focused unittest、`just eval-lock` 和阶段末一次 `just eval-test` 通过；正式 B7 前代码/lock 干净提交，Docker、
   Windows C:、watchdog、profile/catalog/bundle 均通过门禁。
 - 最终变更与真实结果提交到当前独立审查分支；不合并、不推送。
@@ -47,7 +56,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - `eval/rondo_eval/terminal_bench/` 的 evidence 投影、taskset、通用 frozen task、单任务 runner/materializer、
   scoring、campaign 状态机、结果与成本聚合。
 - `eval/rondo_eval/api_budget_proxy.py` 的通用 campaign cap/run 数和 Guardian outcome 去敏观察。
-- `eval/tasksets/`、一份新的 B7 tracked lock、现有 unittest、必要 `just` 入口。
+- `eval/tasksets/`、B7 active pointer/历史 lock、Oracle proof/manifest、现有 unittest、必要 `just` 入口。
 - `doc/WBS.md`、`doc/WBS/eval-benchmark.md`、`doc/eval-data-layout.md`、
   `doc/WBS-COMPLETED.md`、本计划和一份精炼 `agent_log`。
 
@@ -86,12 +95,17 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
    40/60GB 增长与 80GiB C: floor。只清理由本 campaign exact label 创建的对象。
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
+11. v1—v9 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
+    才可复用，证据不足不回填。600 USD 授权不因 identity、进程或 proof 变化而重置。
+12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
+    锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
 
 ## 4. 软性建议
 
 - B4 用一个 `tasksets.py` 和三份文本清单，不引入数据库或额外 manifest。
 - B5/B6 用纯函数计分器、成本估算器和一个轻量 campaign JSON ledger；继续复用现有 ArtifactWriter、budget
-  proxy、DockerSupervisor 和单任务 runner。
+  proxy、DockerSupervisor、单任务 runner 与 build-lock wrapper。Oracle proof 只增加一个小型 JSON store，
+  不引入数据库、签名或额外审计层。
 - P1 `fix-git` 历史路径保持兼容；通用化通过显式 `FrozenTask` 注入，而不是删除旧常量或改历史 lock。
 - 真实 campaign 若基础设施反复失败，保留终态并停止，不新增第二个 campaign 绕过结果。
 
@@ -152,20 +166,34 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   `stream_end_kind`，计费和失败分类不放宽。
 - 用户追加 `200 USD` 机动授权；v9 使用新 campaign/batch/161 个 run IDs，精确冻结 prior `281.718702 USD`、
   P2 总硬上限 `600 USD`。taskset、profile、bundle、TB commit、四轮与停止规则均不变。
+- v9 完整 Oracle 10/10 与 fresh canary (`0.143029 USD`) 通过，首个正式 `db-wal-recovery` 以 reward 0 自然完成，
+  12 个请求全部 usage-priced settled (`0.425953 USD`)。wrapper 从结果 worktree 启动，首题发布后自身变脏并被
+  harness drift 门禁拒绝；进程自然退出后 v9 收口为 blocked，159 个未启动 slot 均 skipped、reservation 为 0。
+  v9 总后继 prior 为 `282.287684 USD`，全部事实只读保留。
+- campaign-independent Oracle store 已按单题 contract SHA 原子保存 proof，并以十题 manifest 聚合；task/image、
+  verifier、共享执行组件、Harbor/TB、seccomp 或稳定 Docker 合同变化会精确失效，campaign/profile/wire 变化不会。
+- paid coordinator 现只持有轻量 lease；每个 worker 经 build lock/watchdog 独立推进一个 Oracle 或 paid slot，锁内重验
+  profile、identity、task/image、Docker/C:、预算和 checkout。published+settled 的中断 slot 机械收敛，其他中断阻断。
+- 161 slot 仍由代码派生；active pointer 当前为 `null`，v1—v9 由只读 registry 管理。后继生成器从 v9 terminal
+  state、wire receipt 与 settled budget 重算 prior，拒绝版本/ID/profile/bundle/cap 漂移或 debit 缺失。
+- focused 185/185、`just eval-lock` 85 packages、完整 pure/fake/loopback eval 420/420 通过；本轮离线改进未调用
+  API、Docker 或 Cargo，未读取 `.env.local`。
 
 ### 后续计划
 
-1. 完成 v9 identity/lock、focused unittest、`just eval-lock` 与干净提交。
-2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API Oracle、资源门禁和 fresh exact-wire canary。
-3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
+1. 提交已完成的离线编排改进，保持 active pointer 关闭和开发/results worktree 分离。
+2. 从干净开发 worktree 机械生成并提交后继 identity；仅在剩余预算可容纳下一最大 reservation 时复用有效 Oracle
+   proof、执行 fresh wire canary 并逐 slot 推进 B7。
+3. 形成终态后聚合 `sigma`/`delta`、共同分母、条件加跑、费用与资源事实，再同步最终 B7 结果。
 
 ### 阻塞项
 
-- 无离线阻塞；若替换后的 `openssl-selfsigned-cert` 官方 Oracle 仍失败则停止并报告，不再自动换题。
+- 无离线阻塞；现有 v9 Oracle receipt 不足以回填新 proof，因此后继首次运行只增量生成缺失的十题 proof。若任何
+  官方 Oracle reward 0 则停止并报告，不自动换题。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v8 是保留全部费用事实的 blocked 终态；v9 尚未执行 Oracle、canary 或正式基线。
+- v1 是 API 前失败终态；v2—v9 是保留全部费用事实的 blocked 终态；离线编排改进已通过门禁，尚未冻结后继 identity。
 
 ## 6. 关键决策记录
 
@@ -188,3 +216,5 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 015 | v6 第一轮补跑后仍有 3 项 infra，逐轮门禁退役 v6；在受影响镜像无 API 稳定性与 Oracle 通过后重冻 v7，prior `200.334576 USD` | 不盲目重跑、不在 campaign 中途升级 Docker；诊断未复现持续故障且剩余预算仍能容纳最大 reservation | B6/B7 | 已采纳 |
 | 016 | v7 熔断后修复已证明的 metrics teardown race 并重冻 v8，prior `221.772313 USD` | 三个 task 的结构化失败探针完全相同；只接受 fresh exact-label 证明的自然消失，不放宽真正的 exec/identity 故障 | B6/B7 | 已采纳 |
 | 017 | v8 因三个 task 的真实 provider response integrity 熔断后退役；修复 task-image-independent auth 与 stopped-container teardown 窗口，用户追加 200 USD 后重冻 v9，prior `281.718702 USD`、cap `600 USD` | 保留三个含糊 stream 的完整保守费用，不把执行缺口或新授权当作重置历史 debit | B6/B7 | 已采纳 |
+| 018 | v9 因从结果 worktree 启动导致首题发布后 harness dirty 而 blocked；后继执行先改为 campaign-independent Oracle proof、独立 wire canary、per-slot heavy lock + campaign lease、机械 identity generator | 避免重复十题 Oracle 和整段独占重型锁，同时保持每 slot 重验、一次性 ID、预算与 fail-closed 标准 | B6/B7 | 已采纳 |
+| 019 | active pointer 只允许最新 identity；后继 prior 从 terminal state、wire receipt 和完整 settled budget 机械重算，coordinator lease 与每步 heavy lock 分层 | 允许安全恢复和增量执行，同时防止历史 identity、丢失 debit 或并发 worker 被重新执行 | B6/B7 | 已采纳 |
