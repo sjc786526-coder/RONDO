@@ -128,9 +128,9 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
-        self.assertEqual(forecast["prior_estimated_usd"], "385.923585")
+        self.assertEqual(forecast["prior_estimated_usd"], "386.121920")
         self.assertEqual(
-            forecast["remaining_before_successor_canary_usd"], "314.076415"
+            forecast["remaining_before_successor_canary_usd"], "313.878080"
         )
         self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
@@ -240,8 +240,8 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             tuple(item.version for item in registry),
             tuple(range(1, len(registry) + 1)),
         )
-        self.assertGreaterEqual(len(registry), 13)
-        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v13")
+        self.assertGreaterEqual(len(registry), 14)
+        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v14")
         active = load_campaign_identity(paths)
         self.assertEqual(active.campaign_id, registry[-1].campaign_id)
         self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
@@ -249,7 +249,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(active.max_attempts, 4)
         self.assertEqual(len(active.slots), 321)
         self.assertEqual(active.budget["campaign_cap_usd"], "700.000000")
-        self.assertEqual(active.budget["prior_estimated_usd"], "385.923585")
+        self.assertEqual(active.budget["prior_estimated_usd"], "386.121920")
         active_pids = {item.task_id: item.pids_limit for item in active.catalog.tasks}
         self.assertEqual(active_pids["terminal-bench/filter-js-from-html"], 512)
         self.assertEqual(set(active_pids.values()), {256, 512})
@@ -277,6 +277,9 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             v12.catalog.task("terminal-bench/filter-js-from-html").pids_limit,
             512,
         )
+        v13 = load_historical_campaign_identity(paths, 13)
+        self.assertEqual(v13.campaign_id, "p2-b7-canary-baseline-v13")
+        self.assertEqual(v13.budget["prior_estimated_usd"], "385.923585")
         self.assertEqual(
             load_historical_campaign_identity(paths, 9).campaign_id,
             "p2-b7-canary-baseline-v9",
@@ -338,6 +341,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             Decimal("385.923585"),
         )
 
+    def test_successor_prior_includes_the_immutable_v13_terminal_debit(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        self.assertEqual(
+            required_successor_prior(paths, version=13),
+            Decimal("386.121920"),
+        )
+
     def test_successor_run_range_rejects_history_and_accepts_fresh_ids(self) -> None:
         registry = campaign_lock_registry(RepoPaths.discover(Path.cwd()))
         with self.assertRaisesRegex(
@@ -352,7 +362,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         validate_successor_run_range(
             registry,
             run_id_date="20260812",
-            run_id_sequence_base=340000000,
+            run_id_sequence_base=350000000,
         )
 
     def test_campaign_lock_catalog_drift_is_rejected(self) -> None:

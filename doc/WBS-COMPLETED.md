@@ -382,3 +382,7 @@ standard/Lite 形态均补回归。
   a3 已结算 `0.381782 USD` 但无 public record，恢复按 operator interruption 保守退役。累计 debit
   `385.923585 USD`、reservation 0。a1—a4 publication、pre-Oracle crash reconciliation 与 bounded stopped
   teardown 合同已进入离线回归；v12 无 512 PID 用尽证据，历史 v12 未回填。
+- v13 的 Oracle 首次在 sqlite 官方 verifier 下载阶段超时且 API 为 0；增量恢复仅补齐该题并形成 10/10 proof。
+  fresh wire 结算 `0.198335 USD` 后暴露 post-wire paid 分支不可达的本地控制流缺陷，320 个 paid slot 均未
+  claim、paid ledger 未创建。v13 原子 blocked，累计 debit `386.121920 USD`；路由与退役原子性回归闭合后，
+  v14 以全新 run base `20260812-340000000`、lock/IDs 和精确 prior 冻结。

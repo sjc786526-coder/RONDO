@@ -44,3 +44,10 @@
 - focused 132/132 与 `eval-lock` 85 packages 通过后，生成器冻结 v13：run base
   `20260812-330000000`、lock SHA `c99257c15015a334ef46334536b09582ec5b642e1fa21e17c522260693052f1e`、
   prior `385.923585 USD`；v1—v12 保持只读。
+- v13 首次 Oracle 在 sqlite 官方 verifier 的外部下载阶段超时，API/费用为 0；恢复时其余九题 proof 命中，只补
+  sqlite 后聚合 10/10。fresh wire completed 并结算 `0.198335 USD`，但 worker 因 paid 推进块位于恒定提前返回
+  后而退出；没有 paid slot claim、budget ledger 或 reservation。
+- `3ebb97c` 将 post-Oracle wire/paid 单步推进恢复为显式 worker 路由，并增加原子退役和路由回归；focused
+  93/93 与 `eval-lock` 85 packages 通过。v13 以本地 harness defect blocked，生成器机械得出后继 prior
+  `386.121920 USD`，随后冻结 v14：run base `20260812-340000000`、lock SHA
+  `dc4eb0f28a93784e6021782079d6c6993735e1b6cb152b583bb34ad4c417e8a8`；v1—v13 均保持只读。

@@ -99,7 +99,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
    40/60GB 增长与 80GiB C: floor。只清理由本 campaign exact label 创建的对象。
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
-11. v1—v11 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
+11. v1—v13 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
     才可复用，证据不足不回填。700 USD 授权不因 identity、进程或 proof 变化而重置。
 12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
     锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
@@ -221,21 +221,31 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   run ID 从 `20260812-330000000` 派生，lock SHA
   `c99257c15015a334ef46334536b09582ec5b642e1fa21e17c522260693052f1e`，cap `700 USD`、prior
   `385.923585 USD`；v1—v12 保持只读。
+- v13 首次 Oracle 在 `sqlite-db-truncate` 官方 verifier 下载阶段超时，未触发 API；增量恢复只重跑该题并最终
+  聚合 10/10 proof。fresh wire completed (`0.198335 USD`) 后，worker 因 post-wire paid 分支误置于不可达代码而
+  退出，320 个 paid slot 从未 claim、paid ledger 未创建。该本地控制流缺陷已由 worker 路由回归闭合；v13 以
+  `diagnosed_campaign_defect:local_implementation_defect:harness_runtime` 原子退役，累计 debit
+  `386.121920 USD`，历史 state/receipt/proof 不回填。
+- 生成器已冻结唯一 v14：campaign/batch `p2-b7-canary-baseline-v14`/`p2-b7-canary-sol-sol-v14`，321 个
+  run ID 从 `20260812-340000000` 派生，lock SHA
+  `dc4eb0f28a93784e6021782079d6c6993735e1b6cb152b583bb34ad4c417e8a8`，cap `700 USD`、prior
+  `386.121920 USD`；v1—v13 保持只读。
 
 ### 后续计划
 
-1. 从 v13 重新执行受共享组件变化影响的 Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
-   infra 必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同分母、费用与资源事实。
+1. v14 先机械复用仍有效的十题 Oracle proof，执行 fresh wire canary，再逐 slot 推进；第二次同类 task infra
+   必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同分母、费用与资源事实。
 
 ### 阻塞项
 
-- 无离线阻塞；Docker counter 共享组件变化会使十题 proof 精确失效，后继需重新生成，不回填 v10 proof。若任何
-  官方 Oracle reward 0 则停止并报告，不自动换题。diagnosis hold 是可恢复暂停而非 campaign 通过或费用重置。
+- 无离线阻塞；当前 Oracle proof 合同依赖未变，v14 应命中既有十题 proof。若 validator 判定任一 proof 失效，
+  只重跑受影响题；任何官方 Oracle reward 0 均停止并报告，不自动换题。diagnosis hold 是可恢复暂停而非
+  campaign 通过或费用重置。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v12 是保留全部费用事实的 blocked 终态。v12 累计 debit `385.923585 USD`、
-  reservation 0；v13 已冻结，尚未执行 Oracle/API。
+- v1 是 API 前失败终态；v2—v13 是保留全部费用事实的 blocked 终态。v13 仅完成 wire、未创建 paid ledger，
+  累计 debit `386.121920 USD`、reservation 0；v14 已冻结，尚未执行 API。
 
 ## 6. 关键决策记录
 
@@ -263,3 +273,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 020 | v10 保持原 161-slot/600 USD 合同自然熔断；其 Oracle/wire/13 run/费用全部只读，结果提交但不回填为通过 | 第三个不同 task 的真实 provider-integrity 满足冻结 circuit breaker，不能为继续执行改写 identity | B6/B7 | 已采纳 |
 | 021 | 后继 schema-v2 机械派生 321 slot，并采用 infra-only a1—a4、第二次同类诊断暂停、第三次同类 task-local 熔断；用户追加 100 USD 后总 cap 700，prior 精确继承 v10 | 允许少量任务形态复现，同时禁止盲目连续付费；历史 schema-v1 仍按原字节只读加载 | B6/B7 | 已采纳 |
 | 022 | v12 的 a3 发布缺口按 operator interruption 退役；后继提前 crash reconciliation，并仅将已停止的同 identity 容器消失宽限扩至 5 秒 | 不回填缺失 public record，不将无证据的 512 PID 问题冒充根因，live/replacement 仍 fail-closed | B6/B7 | 已采纳 |
+| 023 | v13 wire 后因本地 worker 控制流缺陷在付费前退役；恢复 post-Oracle 单步路由并以精确 wire debit 重冻 v14 | 不用重启同一 identity 绕过实现缺陷；Oracle proof 与 wire/paid identity 解耦，历史事实保持只读 | B6/B7 | 已采纳 |
