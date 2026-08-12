@@ -57,7 +57,7 @@ eval-b2-no-api docker_host_volume metrics_dir:
         --docker-host-volume "{{docker_host_volume}}"
 
 # One frozen P2/B7 campaign. The wrapper owns the heavy lock and watchdog for
-# the complete serial campaign; the Python state machine owns the 200 USD cap.
+# the complete serial campaign; the Python state machine owns the 400 USD cap.
 eval-b7-baseline docker_host_volume results_worktree_root rondo_measurement codex_measurement metrics_dir:
     @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
     @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
