@@ -38,7 +38,7 @@ RUN_CAP_USD = Decimal("5.00")
 _MAX_EXPLICIT_BATCH_CAP_USD = Decimal("400.00")
 _MAX_EXPLICIT_RUN_CAP_USD = Decimal("40.00")
 MAX_BENCHMARK_RUNS = 4
-_MAX_EXPLICIT_BENCHMARK_RUNS = 161
+_MAX_EXPLICIT_BENCHMARK_RUNS = 321
 _MONEY_QUANTUM = Decimal("0.000001")
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 64 * 1024 * 1024
@@ -267,7 +267,7 @@ class PersistentBudgetLedger:
             or not 1 <= max_runs <= _MAX_EXPLICIT_BENCHMARK_RUNS
         ):
             raise ApiBudgetProxyError(
-                "benchmark run count exceeds the supported maximum of 161"
+                "benchmark run count exceeds the supported maximum of 321"
             )
         self._lock = threading.RLock()
         self._closed = False

@@ -106,10 +106,14 @@ class RuntimeBridgeError(RuntimeError):
         *,
         failed_probe: str | None = None,
         probe_timings_ms: Sequence[tuple[str, int]] = (),
+        command_failure: Mapping[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.failed_probe = failed_probe
         self.probe_timings_ms = tuple(probe_timings_ms)
+        self.command_failure = (
+            None if command_failure is None else dict(command_failure)
+        )
 
 
 @dataclass(frozen=True)
@@ -958,7 +962,7 @@ class SubprocessCommandExecutor:
                 shell=False,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 close_fds=True,
                 env=_sanitized_subprocess_env(),
                 text=True,
@@ -967,11 +971,69 @@ class SubprocessCommandExecutor:
                 timeout=effective_timeout,
                 check=False,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeBridgeError(
+                "Docker counter command failed",
+                command_failure=_bounded_command_failure(
+                    stderr=exc.stderr,
+                    exit_code=None,
+                    timed_out=True,
+                ),
+            ) from exc
         except (OSError, subprocess.SubprocessError, UnicodeError, ValueError) as exc:
-            raise RuntimeBridgeError("Docker counter command failed") from exc
+            raise RuntimeBridgeError(
+                "Docker counter command failed",
+                command_failure=_bounded_command_failure(
+                    stderr=None,
+                    exit_code=None,
+                    timed_out=False,
+                ),
+            ) from exc
         if result.returncode != 0:
-            raise RuntimeBridgeError("Docker counter command failed")
+            raise RuntimeBridgeError(
+                "Docker counter command failed",
+                command_failure=_bounded_command_failure(
+                    stderr=result.stderr,
+                    exit_code=result.returncode,
+                    timed_out=False,
+                ),
+            )
         return CommandOutput(returncode=result.returncode, stdout=result.stdout)
+
+
+_DIAGNOSTIC_SECRET = re.compile(
+    r"(?i)(?:bearer[ ]+[!-~]+|sk-[A-Za-z0-9_-]+|"
+    r"[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET)=[^ ]+)"
+)
+
+
+def _bounded_command_failure(
+    *,
+    stderr: str | bytes | None,
+    exit_code: int | None,
+    timed_out: bool,
+) -> dict[str, object]:
+    if isinstance(stderr, bytes):
+        raw = stderr
+        text = stderr.decode("utf-8", errors="replace")
+    elif isinstance(stderr, str):
+        raw = stderr.encode("utf-8", errors="replace")
+        text = stderr
+    else:
+        raw = b""
+        text = ""
+    printable = " ".join(text.replace("\r", "\n").splitlines()).strip()
+    printable = "".join(
+        character if 32 <= ord(character) <= 126 else "?" for character in printable
+    )
+    excerpt = _DIAGNOSTIC_SECRET.sub("[redacted]", printable)[:512]
+    return {
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "stderr_bytes": len(raw),
+        "stderr_sha256": hashlib.sha256(raw).hexdigest(),
+        "stderr_excerpt": excerpt,
+    }
 
 
 class DockerCliCounter:
@@ -1028,6 +1090,11 @@ class DockerCliCounter:
                     message,
                     failed_probe=name,
                     probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+                    command_failure=(
+                        exc.command_failure
+                        if isinstance(exc, RuntimeBridgeError)
+                        else None
+                    ),
                 ) from None
             elapsed_ms = max(0, int((self._monotonic() - started) * 1000))
             probe_timings_ms[name] = probe_timings_ms.get(name, 0) + elapsed_ms
@@ -1166,6 +1233,7 @@ class DockerCliCounter:
                 str(exc),
                 failed_probe=exc.failed_probe,
                 probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+                command_failure=exc.command_failure,
             ) from exc
         except (OSError, TypeError, ValueError) as exc:
             raise RuntimeBridgeError(
@@ -1220,13 +1288,18 @@ class DockerCliCounter:
         return remaining
 
     def _run(self, argv: tuple[str, ...], *, deadline: float) -> str:
+        last_failure: RuntimeBridgeError | None = None
         for attempt in range(_DOCKER_FACT_COMMAND_MAX_ATTEMPTS):
             try:
                 output = self._executor.run(
                     argv,
                     timeout_seconds=self._remaining(deadline),
                 )
+            except RuntimeBridgeError as exc:
+                last_failure = exc
+                output = None
             except Exception:
+                last_failure = None
                 output = None
             if (
                 output is not None
@@ -1239,7 +1312,12 @@ class DockerCliCounter:
                 self._sleeper(
                     min(_DOCKER_FACT_COMMAND_RETRY_DELAY_SECONDS, remaining)
                 )
-        raise RuntimeBridgeError("Docker storage fact command failed") from None
+        raise RuntimeBridgeError(
+            "Docker storage fact command failed",
+            command_failure=(
+                last_failure.command_failure if last_failure is not None else None
+            ),
+        ) from last_failure
 
     def _container_facts(
         self,

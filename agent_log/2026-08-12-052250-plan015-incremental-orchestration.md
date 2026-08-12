@@ -16,3 +16,12 @@
   prior `282.287684 USD`。首题 Oracle 官方任务与 Docker 清理完成，但 proof 发布调用了强制 paid metrics 的 B2
   receipt 而在落盘前停止；无 state/slot/API/费用。新增 Oracle 专用 compatibility receipt，保持 paid receipt 门禁，
   focused 108/108 与 lock 通过。
+- v10 修复后自然完成十题 Oracle 与 fresh wire canary；首轮 13 个 paid run 后，三个不同 task 的
+  `provider_response_integrity` 触发冻结全局熔断。v10 新费用为 wire `$0.225026` + paid `$61.383485`，累计
+  debit `$343.896195`，reservation 0，全部 state/result/artifact 只读。
+- 后继 schema-v2 离线实现 321 个机械 slot、700 USD 累计 cap、infra-only a1—a4、同题同类第二次 durable
+  diagnosis hold、仅外部瞬态 resolution 与第三次 `task_local_reproducible_infra`。本地/shared 缺陷 resolution
+  直接阻断 identity；非 infra 不补跑，既有全局熔断、逐轮门禁和共同分母不变。
+- Docker counter 不再丢弃全部命令失败细节：只发布 exit/timed-out、stderr 长度/SHA 与最多 512 字节的脱敏
+  excerpt，仍严格拒绝 live-container metrics 缺失。focused 170/170、完整 eval 430/430、`eval-lock` 85 packages、
+  `git diff --check` 通过；本离线批次未调用 API、Docker 或 Cargo。

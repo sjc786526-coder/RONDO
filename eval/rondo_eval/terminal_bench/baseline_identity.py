@@ -19,6 +19,7 @@ from .baseline import (
     CAMPAIGN_MAX_RUNS,
     CampaignIdentity,
     CampaignLockRegistration,
+    campaign_baseline_contract,
     campaign_lock_registry,
     load_campaign_identity_path,
     load_historical_campaign_identity,
@@ -182,6 +183,7 @@ def generate_successor_lock(
     lock = _read_json(paths.worktree_root / latest.path)
     lock.update(
         {
+            "schema_version": 2,
             "campaign_id": f"p2-b7-canary-baseline-v{next_version}",
             "batch_id": f"p2-b7-canary-sol-sol-v{next_version}",
             "run_id_date": run_id_date,
@@ -192,7 +194,9 @@ def generate_successor_lock(
         **lock["budget"],
         "campaign_cap_usd": f"{CAMPAIGN_CAP_USD:.6f}",
         "prior_estimated_usd": f"{prior:.6f}",
+        "max_run_slots": CAMPAIGN_MAX_RUNS,
     }
+    lock["baseline"] = campaign_baseline_contract(2)
     relative = Path(f"eval/locks/p2-b7-canary-baseline-v{next_version}.json")
     destination = paths.worktree_root / relative
     if destination.exists() or destination.is_symlink():

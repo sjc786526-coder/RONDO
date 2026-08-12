@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -29,6 +30,7 @@ from rondo_eval.contracts import (  # noqa: E402
     Side,
 )
 from rondo_eval.docker_supervisor import DockerSupervisionError  # noqa: E402
+from rondo_eval.runtime_bridge import RuntimeBridgeError  # noqa: E402
 from rondo_eval.terminal_bench.live import (  # noqa: E402
     BudgetedTerminalBenchResult,
     load_guardian_evidence_bundle,
@@ -1030,6 +1032,13 @@ class TerminalBenchResultTests(unittest.TestCase):
                 "supervisor_reason": "Docker storage counters are unavailable",
                 "failed_probe": "docker_system_df",
                 "probe_timings_ms": {"docker_system_df": 30000},
+                "command_failure": {
+                    "exit_code": 1,
+                    "timed_out": False,
+                    "stderr_bytes": 0,
+                    "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+                    "stderr_excerpt": "",
+                },
             },
         )
 
@@ -1043,6 +1052,13 @@ class TerminalBenchResultTests(unittest.TestCase):
                 "supervisor_reason": "Docker storage counters are unavailable",
                 "failed_probe": "docker_system_df",
                 "probe_timings_ms": {"docker_system_df": 30000},
+                "command_failure": {
+                    "exit_code": 1,
+                    "timed_out": False,
+                    "stderr_bytes": 0,
+                    "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+                    "stderr_excerpt": "",
+                },
             },
         )
         self.assertEqual(
@@ -1100,6 +1116,30 @@ class TerminalBenchResultTests(unittest.TestCase):
                         },
                     )
                 writer.abort()
+
+    def test_docker_failure_diagnostic_keeps_bounded_command_cause(self) -> None:
+        command_failure = {
+            "exit_code": 1,
+            "timed_out": False,
+            "stderr_bytes": 0,
+            "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+            "stderr_excerpt": "",
+        }
+        inner = RuntimeBridgeError(
+            "Docker storage fact command failed",
+            failed_probe="docker_container_metrics",
+            command_failure=command_failure,
+        )
+        try:
+            raise DockerSupervisionError(
+                "Docker storage fact command failed",
+                failed_probe="docker_container_metrics",
+                probe_timings_ms=(("docker_container_metrics", 1700),),
+            ) from inner
+        except DockerSupervisionError as caught:
+            diagnostic = terminal_bench_main._docker_failure_diagnostic(caught)
+        self.assertEqual(diagnostic["command_failure"], command_failure)
+        self.assertEqual(diagnostic["failed_probe"], "docker_container_metrics")
 
     def test_claimed_failure_reports_verified_api_metadata_truthfully(self) -> None:
         run_id = "20260810-010000012-tb-codex-r1"

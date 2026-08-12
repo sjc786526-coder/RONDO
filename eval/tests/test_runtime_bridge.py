@@ -29,6 +29,7 @@ from rondo_eval.runtime_bridge import (  # noqa: E402
     DockerDesktopHostReading,
     PowerShellDockerDesktopHostProbe,
     RuntimeBridgeError,
+    SubprocessCommandExecutor,
     SubprocessCommandHandle,
     SubprocessDockerCommandRunner,
     SubprocessHostCommandRunner,
@@ -604,6 +605,35 @@ def _image_inspect(*, task_id: str = TASK_ID) -> str:
 
 
 class DockerCounterTests(unittest.TestCase):
+    def test_counter_preserves_bounded_command_failure_at_probe_boundary(self) -> None:
+        failure = {
+            "exit_code": 1,
+            "timed_out": False,
+            "stderr_bytes": 0,
+            "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+            "stderr_excerpt": "",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, _ = self._native_counter(
+                root,
+                [
+                    RuntimeBridgeError(
+                        "Docker counter command failed", command_failure=failure
+                    ),
+                    RuntimeBridgeError(
+                        "Docker counter command failed", command_failure=failure
+                    ),
+                ],
+            )
+            with self.assertRaises(RuntimeBridgeError) as caught:
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.RUN,
+                )
+        self.assertEqual(caught.exception.failed_probe, "docker_system_df")
+        self.assertEqual(caught.exception.command_failure, failure)
+
     def test_inspect_requires_literal_private_cgroup_namespace(self) -> None:
         for mode in ("host", "default", ""):
             payload = json.loads(_container_inspect())
@@ -1423,6 +1453,29 @@ class DockerCounterTests(unittest.TestCase):
         self.assertEqual(reading.host_volume_root, Path("/mnt/c"))
         self.assertEqual(reading.vhd_size_bytes, 69467111424)
         self.assertEqual(reading.free_bytes, 196425408512)
+
+    def test_subprocess_counter_failure_captures_redacted_bounded_stderr(self) -> None:
+        stderr = "daemon rejected Bearer hidden-token and sk-hidden\n"
+        completed = mock.Mock(returncode=17, stdout="", stderr=stderr)
+        with mock.patch(
+            "rondo_eval.runtime_bridge.subprocess.run", return_value=completed
+        ) as run:
+            with self.assertRaises(RuntimeBridgeError) as caught:
+                SubprocessCommandExecutor().run(
+                    ("docker", "system", "df", "--format", "{{json .}}"),
+                    timeout_seconds=1,
+                )
+        failure = caught.exception.command_failure
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure["exit_code"], 17)
+        self.assertFalse(failure["timed_out"])
+        self.assertEqual(failure["stderr_bytes"], len(stderr.encode()))
+        self.assertEqual(failure["stderr_sha256"], hashlib.sha256(stderr.encode()).hexdigest())
+        self.assertEqual(
+            failure["stderr_excerpt"],
+            "daemon rejected [redacted] and [redacted]",
+        )
+        self.assertIs(run.call_args.kwargs["stderr"], subprocess.PIPE)
 
 
 if __name__ == "__main__":

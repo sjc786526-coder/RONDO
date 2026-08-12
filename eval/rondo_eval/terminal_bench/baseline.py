@@ -22,9 +22,11 @@ from .scoring import TaskOutcome
 from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalog
 
 
-CAMPAIGN_CAP_USD = Decimal("600.000000")
-CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("281.718702")
-CAMPAIGN_MAX_RUNS = 161
+LEGACY_CAMPAIGN_CAP_USD = Decimal("600.000000")
+LEGACY_CAMPAIGN_MAX_RUNS = 161
+CAMPAIGN_CAP_USD = Decimal("700.000000")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("343.896195")
+CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
 BASE_ROUNDS = (
@@ -75,6 +77,51 @@ class MechanicalFailureCategory(str, Enum):
     HARNESS_RUNTIME = "harness_runtime"
     BUDGET_CAPACITY = "budget_capacity"
     OPERATOR_INTERRUPTION = "operator_interruption"
+
+
+class DiagnosisStatus(str, Enum):
+    REQUIRED = "required"
+    RESOLVED = "resolved"
+    TASK_LOCAL_REPRODUCIBLE_INFRA = "task_local_reproducible_infra"
+
+
+class DiagnosisDisposition(str, Enum):
+    EXTERNAL_TRANSIENT = "external_transient"
+    LOCAL_IMPLEMENTATION_DEFECT = "local_implementation_defect"
+    SHARED_INFRASTRUCTURE_DEFECT = "shared_infrastructure_defect"
+
+
+class DiagnosisEvidenceCode(str, Enum):
+    PROVIDER_STREAM_ENDED_WITHOUT_TERMINAL_USAGE = (
+        "provider_stream_ended_without_terminal_usage"
+    )
+    DOCKER_COUNTER_COMMAND_FAILURE = "docker_counter_command_failure"
+    GUARDIAN_SESSION_FAILED_CLOSED = "guardian_session_failed_closed"
+    PUBLICATION_CONTRACT_REJECTED = "publication_contract_rejected"
+    HARNESS_PROCESS_FAILED = "harness_process_failed"
+    LOCAL_CONTRACT_DEFECT_CONFIRMED = "local_contract_defect_confirmed"
+    SHARED_INFRASTRUCTURE_DEFECT_CONFIRMED = (
+        "shared_infrastructure_defect_confirmed"
+    )
+
+
+_EXTERNAL_DIAGNOSIS_EVIDENCE = {
+    MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY: (
+        DiagnosisEvidenceCode.PROVIDER_STREAM_ENDED_WITHOUT_TERMINAL_USAGE
+    ),
+    MechanicalFailureCategory.DOCKER_RUNTIME: (
+        DiagnosisEvidenceCode.DOCKER_COUNTER_COMMAND_FAILURE
+    ),
+    MechanicalFailureCategory.GUARDIAN_RUNTIME: (
+        DiagnosisEvidenceCode.GUARDIAN_SESSION_FAILED_CLOSED
+    ),
+    MechanicalFailureCategory.PUBLICATION_INTEGRITY: (
+        DiagnosisEvidenceCode.PUBLICATION_CONTRACT_REJECTED
+    ),
+    MechanicalFailureCategory.HARNESS_RUNTIME: (
+        DiagnosisEvidenceCode.HARNESS_PROCESS_FAILED
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -138,6 +185,7 @@ class CampaignLockRegistration:
 
 @dataclass(frozen=True)
 class CampaignIdentity:
+    schema_version: int
     campaign_id: str
     batch_id: str
     run_id_date: str
@@ -152,6 +200,21 @@ class CampaignIdentity:
     baseline: dict[str, object]
     lock_sha256: str
     catalog: FrozenCanaryCatalog
+
+    @property
+    def max_attempts(self) -> int:
+        if self.schema_version == 1:
+            return 2
+        if self.schema_version == 2:
+            return 4
+        raise BaselineError("campaign identity version is unsupported")
+
+    @property
+    def max_run_slots(self) -> int:
+        value = self.budget.get("max_run_slots")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise BaselineError("campaign run-slot limit is invalid")
+        return value
 
     @property
     def max_guardian_logical_requests(self) -> int:
@@ -318,39 +381,26 @@ class CampaignIdentity:
             "ab-rondo-1": Side.RONDO,
             "ab-codex-1": Side.CODEX,
         }
-        for round_id in BASE_ROUNDS:
-            side = round_sides[round_id]
-            for task_id in tasks:
-                values.append(
-                    self._slot(
-                        index=index,
-                        slot_id=f"base:{round_id}:{task_id}:a1",
-                        kind="base",
-                        task_id=task_id,
-                        side=side,
-                        round_id=round_id,
-                        repeat=None,
-                        attempt=1,
+        for attempt in range(1, self.max_attempts + 1):
+            kind = "base" if attempt == 1 else "base_replacement"
+            for round_id in BASE_ROUNDS:
+                side = round_sides[round_id]
+                for task_id in tasks:
+                    values.append(
+                        self._slot(
+                            index=index,
+                            slot_id=f"base:{round_id}:{task_id}:a{attempt}",
+                            kind=kind,
+                            task_id=task_id,
+                            side=side,
+                            round_id=round_id,
+                            repeat=None,
+                            attempt=attempt,
+                        )
                     )
-                )
-                index += 1
-        for round_id in BASE_ROUNDS:
-            side = round_sides[round_id]
-            for task_id in tasks:
-                values.append(
-                    self._slot(
-                        index=index,
-                        slot_id=f"base:{round_id}:{task_id}:a2",
-                        kind="base_replacement",
-                        task_id=task_id,
-                        side=side,
-                        round_id=round_id,
-                        repeat=None,
-                        attempt=2,
-                    )
-                )
-                index += 1
-        for attempt, kind in ((1, "conditional"), (2, "conditional_replacement")):
+                    index += 1
+        for attempt in range(1, self.max_attempts + 1):
+            kind = "conditional" if attempt == 1 else "conditional_replacement"
             for task_id in tasks:
                 for side in (Side.RONDO, Side.CODEX):
                     for repeat in (1, 2):
@@ -370,10 +420,10 @@ class CampaignIdentity:
                             )
                         )
                         index += 1
-        if index != CAMPAIGN_MAX_RUNS:
+        if index != self.max_run_slots:
             raise BaselineError("campaign slot plan differs from the frozen maximum")
         if (
-            len(values) != CAMPAIGN_MAX_RUNS
+            len(values) != self.max_run_slots
             or len({item.slot_id for item in values}) != len(values)
             or len({item.run_id for item in values}) != len(values)
         ):
@@ -413,6 +463,15 @@ class CampaignIdentity:
             attempt,
             run_id,
         )
+
+
+def campaign_slot_chain_id(slot: CampaignSlotPlan) -> str:
+    if slot.kind == "wire_canary" or slot.attempt < 1:
+        raise BaselineError("wire canary has no task attempt chain")
+    suffix = f":a{slot.attempt}"
+    if not slot.slot_id.endswith(suffix):
+        raise BaselineError("campaign slot attempt suffix is invalid")
+    return slot.slot_id[: -len(suffix)]
 
 
 class CampaignStateLedger:
@@ -464,6 +523,15 @@ class CampaignStateLedger:
 
     def claim(self, slot_id: str) -> CampaignSlotPlan:
         state = self._require_state()
+        if self.identity.schema_version >= 2:
+            for diagnosis in state["diagnoses"]:
+                if diagnosis["status"] == DiagnosisStatus.REQUIRED.value:
+                    raise BaselineError("campaign has an unresolved diagnosis hold")
+                if diagnosis.get("disposition") in {
+                    DiagnosisDisposition.LOCAL_IMPLEMENTATION_DEFECT.value,
+                    DiagnosisDisposition.SHARED_INFRASTRUCTURE_DEFECT.value,
+                }:
+                    raise BaselineError("campaign diagnosis requires terminal stop")
         slot = self.identity.slot(slot_id)
         row = self._row(state, slot_id)
         if row["status"] != CampaignSlotStatus.PLANNED.value:
@@ -568,6 +636,128 @@ class CampaignStateLedger:
         state["terminal_reason"] = reason
         self._persist(state)
 
+    def require_diagnosis(
+        self,
+        *,
+        chain_id: str,
+        category: MechanicalFailureCategory,
+        trigger_slot_ids: tuple[str, ...],
+    ) -> dict[str, object]:
+        if self.identity.schema_version < 2:
+            raise BaselineError("diagnosis holds are unavailable for historical campaigns")
+        if len(trigger_slot_ids) < 2 or len(set(trigger_slot_ids)) != len(trigger_slot_ids):
+            raise BaselineError("diagnosis trigger slots are invalid")
+        state = self._require_state()
+        matches = [
+            item
+            for item in state["diagnoses"]
+            if item["chain_id"] == chain_id and item["category"] == category.value
+        ]
+        if matches:
+            if len(matches) != 1 or tuple(matches[0]["trigger_slot_ids"]) != trigger_slot_ids:
+                raise BaselineError("diagnosis hold drifted from its triggering attempts")
+            return json.loads(json.dumps(matches[0]))
+        diagnosis = {
+            "chain_id": chain_id,
+            "category": category.value,
+            "trigger_slot_ids": list(trigger_slot_ids),
+            "status": DiagnosisStatus.REQUIRED.value,
+            "disposition": None,
+            "evidence_code": None,
+            "created_at_unix": int(time.time()),
+            "resolved_at_unix": None,
+        }
+        state["diagnoses"].append(diagnosis)
+        self._persist(state)
+        return json.loads(json.dumps(diagnosis))
+
+    def resolve_diagnosis(
+        self,
+        *,
+        chain_id: str,
+        category: MechanicalFailureCategory,
+        disposition: DiagnosisDisposition,
+        evidence_code: DiagnosisEvidenceCode,
+    ) -> None:
+        if self.identity.schema_version < 2:
+            raise BaselineError("diagnosis holds are unavailable for historical campaigns")
+        allowed_codes = {
+            DiagnosisDisposition.EXTERNAL_TRANSIENT: {
+                _EXTERNAL_DIAGNOSIS_EVIDENCE.get(category)
+            },
+            DiagnosisDisposition.LOCAL_IMPLEMENTATION_DEFECT: {
+                DiagnosisEvidenceCode.LOCAL_CONTRACT_DEFECT_CONFIRMED,
+            },
+            DiagnosisDisposition.SHARED_INFRASTRUCTURE_DEFECT: {
+                DiagnosisEvidenceCode.SHARED_INFRASTRUCTURE_DEFECT_CONFIRMED,
+            },
+        }
+        if evidence_code not in allowed_codes[disposition]:
+            raise BaselineError("diagnosis evidence code disagrees with its disposition")
+        state = self._require_state()
+        matches = [
+            item
+            for item in state["diagnoses"]
+            if item["chain_id"] == chain_id and item["category"] == category.value
+        ]
+        if len(matches) != 1 or matches[0]["status"] != DiagnosisStatus.REQUIRED.value:
+            raise BaselineError("diagnosis hold is not uniquely resolvable")
+        matches[0].update(
+            {
+                "status": DiagnosisStatus.RESOLVED.value,
+                "disposition": disposition.value,
+                "evidence_code": evidence_code.value,
+                "resolved_at_unix": int(time.time()),
+            }
+        )
+        self._persist(state)
+
+    def mark_task_local_reproducible(
+        self,
+        *,
+        chain_id: str,
+        category: MechanicalFailureCategory,
+        trigger_slot_ids: tuple[str, ...],
+    ) -> None:
+        if self.identity.schema_version < 2 or len(trigger_slot_ids) != 3:
+            raise BaselineError("task-local reproducible failure is invalid")
+        state = self._require_state()
+        matches = [
+            item
+            for item in state["diagnoses"]
+            if item["chain_id"] == chain_id and item["category"] == category.value
+        ]
+        if (
+            len(matches) != 1
+            or matches[0]["status"] != DiagnosisStatus.RESOLVED.value
+            or matches[0]["disposition"]
+            != DiagnosisDisposition.EXTERNAL_TRANSIENT.value
+            or tuple(matches[0]["trigger_slot_ids"]) != trigger_slot_ids[:2]
+        ):
+            raise BaselineError("task-local failure lacks its resolved diagnosis")
+        matches[0]["status"] = DiagnosisStatus.TASK_LOCAL_REPRODUCIBLE_INFRA.value
+        matches[0]["trigger_slot_ids"] = list(trigger_slot_ids)
+        matches[0]["resolved_at_unix"] = int(time.time())
+        self._persist(state)
+
+    def diagnosis(
+        self,
+        *,
+        chain_id: str,
+        category: MechanicalFailureCategory,
+    ) -> dict[str, object] | None:
+        state = self._require_state()
+        if self.identity.schema_version < 2:
+            return None
+        matches = [
+            item
+            for item in state["diagnoses"]
+            if item["chain_id"] == chain_id and item["category"] == category.value
+        ]
+        if len(matches) > 1:
+            raise BaselineError("campaign diagnosis identity is duplicated")
+        return json.loads(json.dumps(matches[0])) if matches else None
+
     def _load_or_initialize(self) -> dict[str, object]:
         if self.path.exists():
             try:
@@ -584,12 +774,13 @@ class CampaignStateLedger:
                 )
             return value
         value: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": self.identity.schema_version,
             "campaign_id": self.identity.campaign_id,
             "campaign_lock_sha256": self.identity.lock_sha256,
             "status": "running",
             "actual_usd": None,
             "terminal_reason": None,
+            **({"diagnoses": []} if self.identity.schema_version >= 2 else {}),
             "slots": [
                 {
                     "slot_id": slot.slot_id,
@@ -610,7 +801,7 @@ class CampaignStateLedger:
         return value
 
     def _validate_state(self, value: object) -> None:
-        if not isinstance(value, dict) or set(value) != {
+        expected_keys = {
             "schema_version",
             "campaign_id",
             "campaign_lock_sha256",
@@ -618,11 +809,14 @@ class CampaignStateLedger:
             "actual_usd",
             "terminal_reason",
             "slots",
-        }:
+        }
+        if self.identity.schema_version >= 2:
+            expected_keys.add("diagnoses")
+        if not isinstance(value, dict) or set(value) != expected_keys:
             raise BaselineError("campaign state ledger schema is invalid")
         slots = value["slots"]
         if (
-            value["schema_version"] != 1
+            value["schema_version"] != self.identity.schema_version
             or value["campaign_id"] != self.identity.campaign_id
             or value["campaign_lock_sha256"] != self.identity.lock_sha256
             or value["status"] not in {"running", "passed", "failed", "blocked"}
@@ -656,6 +850,108 @@ class CampaignStateLedger:
             observed[row["slot_id"]] = row["run_id"]
         if observed != expected or len(observed) != len(slots):
             raise BaselineError("campaign state slots drifted from the lock")
+        if self.identity.schema_version >= 2:
+            self._validate_diagnoses(value["diagnoses"], slots=slots)
+
+    def _validate_diagnoses(self, value: object, *, slots: list[object]) -> None:
+        if not isinstance(value, list) or len(value) > len(self.identity.slots):
+            raise BaselineError("campaign diagnosis list is invalid")
+        expected_slots = {item.slot_id: item for item in self.identity.slots}
+        state_rows = {
+            item["slot_id"]: item for item in slots if isinstance(item, dict)
+        }
+        identities: set[tuple[str, str]] = set()
+        for item in value:
+            if not isinstance(item, dict) or set(item) != {
+                "chain_id",
+                "category",
+                "trigger_slot_ids",
+                "status",
+                "disposition",
+                "evidence_code",
+                "created_at_unix",
+                "resolved_at_unix",
+            }:
+                raise BaselineError("campaign diagnosis schema is invalid")
+            try:
+                category = MechanicalFailureCategory(item["category"])
+                status = DiagnosisStatus(item["status"])
+                disposition = (
+                    None
+                    if item["disposition"] is None
+                    else DiagnosisDisposition(item["disposition"])
+                )
+                evidence_code = (
+                    None
+                    if item["evidence_code"] is None
+                    else DiagnosisEvidenceCode(item["evidence_code"])
+                )
+            except (TypeError, ValueError) as exc:
+                raise BaselineError("campaign diagnosis enum is invalid") from exc
+            trigger_ids = item["trigger_slot_ids"]
+            if (
+                not isinstance(item["chain_id"], str)
+                or not item["chain_id"]
+                or len(item["chain_id"]) > 512
+                or not isinstance(trigger_ids, list)
+                or len(trigger_ids) not in {2, 3}
+                or len(set(trigger_ids)) != len(trigger_ids)
+                or any(slot_id not in expected_slots for slot_id in trigger_ids)
+                or any(
+                    state_rows[slot_id]["status"]
+                    not in {
+                        CampaignSlotStatus.COMPLETED.value,
+                        CampaignSlotStatus.FAILED.value,
+                    }
+                    or state_rows[slot_id]["reason"] != category.value
+                    for slot_id in trigger_ids
+                )
+                or any(
+                    campaign_slot_chain_id(expected_slots[slot_id]) != item["chain_id"]
+                    for slot_id in trigger_ids
+                )
+                or [expected_slots[slot_id].attempt for slot_id in trigger_ids]
+                != sorted(expected_slots[slot_id].attempt for slot_id in trigger_ids)
+                or isinstance(item["created_at_unix"], bool)
+                or not isinstance(item["created_at_unix"], int)
+                or item["created_at_unix"] < 0
+            ):
+                raise BaselineError("campaign diagnosis identity is invalid")
+            identity = (item["chain_id"], category.value)
+            if identity in identities:
+                raise BaselineError("campaign diagnosis identity is duplicated")
+            identities.add(identity)
+            if status is DiagnosisStatus.REQUIRED:
+                if disposition is not None or evidence_code is not None or item["resolved_at_unix"] is not None:
+                    raise BaselineError("required diagnosis contains a resolution")
+            else:
+                if (
+                    disposition is None
+                    or evidence_code is None
+                    or isinstance(item["resolved_at_unix"], bool)
+                    or not isinstance(item["resolved_at_unix"], int)
+                    or item["resolved_at_unix"] < item["created_at_unix"]
+                ):
+                    raise BaselineError("resolved diagnosis lacks bounded evidence")
+            if (
+                status is DiagnosisStatus.TASK_LOCAL_REPRODUCIBLE_INFRA
+                and (len(trigger_ids) != 3 or disposition is not DiagnosisDisposition.EXTERNAL_TRANSIENT)
+            ):
+                raise BaselineError("task-local diagnosis is inconsistent")
+            if status is not DiagnosisStatus.REQUIRED:
+                expected_evidence = {
+                    DiagnosisDisposition.EXTERNAL_TRANSIENT: (
+                        _EXTERNAL_DIAGNOSIS_EVIDENCE.get(category)
+                    ),
+                    DiagnosisDisposition.LOCAL_IMPLEMENTATION_DEFECT: (
+                        DiagnosisEvidenceCode.LOCAL_CONTRACT_DEFECT_CONFIRMED
+                    ),
+                    DiagnosisDisposition.SHARED_INFRASTRUCTURE_DEFECT: (
+                        DiagnosisEvidenceCode.SHARED_INFRASTRUCTURE_DEFECT_CONFIRMED
+                    ),
+                }[disposition]
+                if evidence_code is not expected_evidence:
+                    raise BaselineError("diagnosis evidence disagrees with its category")
 
     def _persist(self, value: dict[str, object]) -> None:
         self._validate_state(value)
@@ -828,8 +1124,11 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise BaselineError("campaign lock schema is invalid")
     catalog = load_frozen_canary_catalog(paths)
+    schema_version = value["schema_version"]
     if (
-        value["schema_version"] != 1
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in {1, 2}
         or _CAMPAIGN_ID.fullmatch(str(value["campaign_id"])) is None
         or _CAMPAIGN_BATCH_ID.fullmatch(str(value["batch_id"])) is None
         or _CAMPAIGN_ID.fullmatch(value["campaign_id"]).group(1)
@@ -843,24 +1142,8 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         or not isinstance(value["selected_profile"], dict)
         or not isinstance(value["bundles"], dict)
         or not isinstance(value["no_api_seccomp"], dict)
-        or not _valid_campaign_budget(value["budget"])
-        or value["baseline"]
-        != {
-            "base_rounds": list(BASE_ROUNDS),
-            "max_sigma": MAX_SIGMA,
-            "max_remaining_infra_per_round": MAX_REMAINING_INFRA_PER_ROUND,
-            "mechanical_circuit_breaker_tasks": MECHANICAL_CIRCUIT_BREAKER_TASKS,
-            "mechanical_failure_categories": [
-                item.value for item in MechanicalFailureCategory
-            ],
-            "minimum_common_valid_tasks": MIN_COMMON_VALID_TASKS,
-            "base_replacement_policy": "targeted_infra_only",
-            "max_base_replacement_attempts": 1,
-            "max_conditional_replacement_attempts": 1,
-            "conditional_repeats_per_side": 2,
-            "docker_concurrency": 1,
-            "api_max_retries": 0,
-        }
+        or not _valid_campaign_budget(value["budget"], schema_version=schema_version)
+        or value["baseline"] != campaign_baseline_contract(schema_version)
     ):
         raise BaselineError("campaign lock differs from the frozen B7 contract")
     selected = value["selected_profile"]
@@ -876,6 +1159,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     ):
         raise BaselineError("campaign selected profile hashes are invalid")
     identity = CampaignIdentity(
+        schema_version=schema_version,
         campaign_id=value["campaign_id"],
         batch_id=value["batch_id"],
         run_id_date=value["run_id_date"],
@@ -900,7 +1184,40 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     return identity
 
 
-def _valid_campaign_budget(value: object) -> bool:
+def campaign_baseline_contract(schema_version: int) -> dict[str, object]:
+    common: dict[str, object] = {
+        "base_rounds": list(BASE_ROUNDS),
+        "max_sigma": MAX_SIGMA,
+        "max_remaining_infra_per_round": MAX_REMAINING_INFRA_PER_ROUND,
+        "mechanical_circuit_breaker_tasks": MECHANICAL_CIRCUIT_BREAKER_TASKS,
+        "mechanical_failure_categories": [
+            item.value for item in MechanicalFailureCategory
+        ],
+        "minimum_common_valid_tasks": MIN_COMMON_VALID_TASKS,
+        "conditional_repeats_per_side": 2,
+        "docker_concurrency": 1,
+        "api_max_retries": 0,
+    }
+    if schema_version == 1:
+        return {
+            **common,
+            "base_replacement_policy": "targeted_infra_only",
+            "max_base_replacement_attempts": 1,
+            "max_conditional_replacement_attempts": 1,
+        }
+    if schema_version == 2:
+        return {
+            **common,
+            "base_replacement_policy": "bounded_infra_only_with_diagnosis",
+            "max_base_attempts": 4,
+            "max_conditional_attempts": 4,
+            "same_category_diagnosis_attempts": 2,
+            "task_local_reproducible_infra_attempts": 3,
+        }
+    raise BaselineError("campaign baseline contract version is unsupported")
+
+
+def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
     if not isinstance(value, dict) or set(value) != {
         "campaign_cap_usd",
         "prior_estimated_usd",
@@ -915,11 +1232,16 @@ def _valid_campaign_budget(value: object) -> bool:
         prior = Decimal(value["prior_estimated_usd"])
     except (ArithmeticError, TypeError):
         return False
+    expected_cap, expected_slots = (
+        (LEGACY_CAMPAIGN_CAP_USD, LEGACY_CAMPAIGN_MAX_RUNS)
+        if schema_version == 1
+        else (CAMPAIGN_CAP_USD, CAMPAIGN_MAX_RUNS)
+    )
     return (
-        cap == CAMPAIGN_CAP_USD
+        cap == expected_cap
         and Decimal(0) <= prior < cap
         and value["run_cap_usd"] == _money(RUN_CAP_USD)
-        and value["max_run_slots"] == CAMPAIGN_MAX_RUNS
+        and value["max_run_slots"] == expected_slots
         and value["maximum_legal_request_reservation_usd"]
         == _money(SOL_MAX_LEGAL_REQUEST_RESERVATION_USD)
         and value["actual_usd"] is None
@@ -971,17 +1293,21 @@ def cost_forecast() -> dict[str, object]:
     historical_80 = (Decimal("33.176400"), Decimal("36.486560"))
     historical_160 = (Decimal("66.352800"), Decimal("72.973120"))
     observed_shape_stress = Decimal("173.653100")
-    remaining_before_v9_canary = CAMPAIGN_CAP_USD - CAMPAIGN_PRIOR_ESTIMATED_USD
+    remaining_before_successor_canary = (
+        CAMPAIGN_CAP_USD - CAMPAIGN_PRIOR_ESTIMATED_USD
+    )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "currency": "USD",
         "actual_usd": None,
         "campaign_cap_usd": _money(CAMPAIGN_CAP_USD),
         "prior_estimated_usd": _money(CAMPAIGN_PRIOR_ESTIMATED_USD),
-        "remaining_before_v9_canary_usd": _money(remaining_before_v9_canary),
+        "remaining_before_successor_canary_usd": _money(
+            remaining_before_successor_canary
+        ),
         "base_runs": 40,
         "maximum_conditional_runs": 40,
-        "maximum_infra_replacement_runs": 80,
+        "maximum_infra_reproduction_runs": 240,
         "v19_rondo_run_usd": _money(rondo_v19),
         "v19_codex_run_usd": _money(codex_v19),
         "wire_canary_usd": _money(wire_canary),
@@ -995,7 +1321,7 @@ def cost_forecast() -> dict[str, object]:
             SOL_MAX_LEGAL_REQUEST_RESERVATION_USD
         ),
         "feasible_from_observed_shape": (
-            observed_shape_stress < remaining_before_v9_canary
+            observed_shape_stress < remaining_before_successor_canary
         ),
         "mathematical_all_legal_usage_guarantee": False,
         "stop_rule": (
@@ -1009,6 +1335,8 @@ def assess_baseline(
     task_ids: tuple[str, ...],
     base_runs: tuple[BaselineRun, ...],
     conditional_runs: tuple[ConditionalRun, ...],
+    *,
+    max_attempts: int = 2,
 ) -> BaselineAssessment:
     """Select bounded infra replacements and apply the frozen B7 gates."""
 
@@ -1029,6 +1357,7 @@ def assess_baseline(
             candidates,
             expected_side=expected_sides[round_id],
             label=round_id,
+            max_attempts=max_attempts,
         )
         effective_base.extend(selected)
         remaining_infra = sum(
@@ -1087,6 +1416,7 @@ def assess_baseline(
                     side,
                     repeat,
                     conditional_runs,
+                    max_attempts=max_attempts,
                 )
                 if selected is None:
                     blocked.append(
@@ -1151,23 +1481,39 @@ def _select_round(
     *,
     expected_side: Side,
     label: str,
+    max_attempts: int,
 ) -> tuple[BaselineRun, ...]:
+    if max_attempts not in {2, 4}:
+        raise BaselineError("campaign attempt limit is invalid")
     if any(
         item.side is not expected_side
-        or item.attempt not in {1, 2}
+        or item.attempt not in set(range(1, max_attempts + 1))
         or item.task_id not in task_ids
         for item in values
     ):
         raise BaselineError(f"{label} contains an invalid run")
     _require_unique_runs(values)
-    first = {item.task_id: item for item in values if item.attempt == 1}
-    if set(first) != set(task_ids):
-        raise BaselineError(f"{label} first attempt is incomplete")
-    infra_ids = {task_id for task_id, item in first.items() if item.outcome is TaskOutcome.INFRA}
-    second = {item.task_id: item for item in values if item.attempt == 2}
-    if set(second) != infra_ids:
-        raise BaselineError(f"{label} replacement set differs from the frozen rule")
-    selected = {**first, **second}
+    selected: dict[str, BaselineRun] = {}
+    for task_id in task_ids:
+        attempts = sorted(
+            (item for item in values if item.task_id == task_id),
+            key=lambda item: item.attempt,
+        )
+        if not attempts or [item.attempt for item in attempts] != list(
+            range(1, len(attempts) + 1)
+        ):
+            raise BaselineError(f"{label} attempt chain is incomplete")
+        if any(item.outcome is not TaskOutcome.INFRA for item in attempts[:-1]):
+            raise BaselineError(f"{label} retried a non-infra result")
+        last = attempts[-1]
+        if last.outcome is TaskOutcome.INFRA and len(attempts) < max_attempts:
+            category_counts = {
+                category: sum(item.failure_category is category for item in attempts)
+                for category in MechanicalFailureCategory
+            }
+            if max_attempts == 2 or max(category_counts.values(), default=0) < 3:
+                raise BaselineError(f"{label} infra attempt chain stopped early")
+        selected[task_id] = last
     return tuple(selected[task_id] for task_id in task_ids)
 
 
@@ -1176,29 +1522,35 @@ def _select_conditional(
     side: Side,
     repeat: int,
     values: tuple[ConditionalRun, ...],
+    *,
+    max_attempts: int,
 ) -> ConditionalRun | None:
     matches = tuple(
         item
         for item in values
         if item.task_id == task_id and item.side is side and item.repeat == repeat
     )
-    if not matches or any(item.attempt not in {1, 2} for item in matches):
+    if max_attempts not in {2, 4} or not matches or any(
+        item.attempt not in set(range(1, max_attempts + 1)) for item in matches
+    ):
         raise BaselineError("conditional run is missing or invalid")
     _require_unique_runs(matches)
-    by_attempt = {item.attempt: item for item in matches}
-    first = by_attempt.get(1)
-    if first is None:
-        raise BaselineError("conditional first attempt is missing")
-    if first.outcome is TaskOutcome.INFRA:
-        second = by_attempt.get(2)
-        if set(by_attempt) != {1, 2}:
-            raise BaselineError("conditional infra replacement is incomplete")
-        if second is None or second.outcome is TaskOutcome.INFRA:
-            return None
-        return second
-    if set(by_attempt) != {1}:
-        raise BaselineError("conditional replacement was activated without infra")
-    return first
+    attempts = sorted(matches, key=lambda item: item.attempt)
+    if [item.attempt for item in attempts] != list(range(1, len(attempts) + 1)):
+        raise BaselineError("conditional attempt chain is incomplete")
+    if any(item.outcome is not TaskOutcome.INFRA for item in attempts[:-1]):
+        raise BaselineError("conditional retried a non-infra result")
+    last = attempts[-1]
+    if last.outcome is not TaskOutcome.INFRA:
+        return last
+    if len(attempts) < max_attempts:
+        category_counts = {
+            category: sum(item.failure_category is category for item in attempts)
+            for category in MechanicalFailureCategory
+        }
+        if max_attempts == 2 or max(category_counts.values(), default=0) < 3:
+            raise BaselineError("conditional infra attempt chain stopped early")
+    return None
 
 
 def _require_unique_runs(values: Iterable[BaselineRun | ConditionalRun]) -> None:

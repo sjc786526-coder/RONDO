@@ -492,11 +492,22 @@ def _exception_failure(exc: BaseException) -> tuple[RunOutcome, str, int]:
 def _docker_failure_diagnostic(exc: BaseException) -> dict[str, object] | None:
     if not isinstance(exc, DockerSupervisionError):
         return None
-    return {
+    value: dict[str, object] = {
         "supervisor_reason": exc.reason,
         "failed_probe": exc.failed_probe,
         "probe_timings_ms": dict(exc.probe_timings_ms),
     }
+    from ..runtime_bridge import RuntimeBridgeError
+
+    current: BaseException | None = exc
+    observed: set[int] = set()
+    while current is not None and id(current) not in observed:
+        observed.add(id(current))
+        if isinstance(current, RuntimeBridgeError) and current.command_failure is not None:
+            value["command_failure"] = dict(current.command_failure)
+            break
+        current = current.__cause__ or current.__context__
+    return value
 
 
 def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:

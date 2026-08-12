@@ -81,3 +81,14 @@ eval-b7-next-identity run_id_date run_id_sequence_base:
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_identity \
         --run-id-date "{{run_id_date}}" \
         --run-id-sequence-base "{{run_id_sequence_base}}"
+
+# Resolve one durable schema-v2 RCA hold. This performs no Docker or API work.
+eval-b7-resolve-diagnosis chain_id category disposition evidence_code:
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_diagnosis \
+        --chain-id "{{chain_id}}" \
+        --category "{{category}}" \
+        --disposition "{{disposition}}" \
+        --evidence-code "{{evidence_code}}"

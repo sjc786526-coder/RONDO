@@ -6,6 +6,7 @@ import argparse
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
@@ -25,8 +26,12 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     CampaignSlotStatus,
     CampaignStateLedger,
     ConditionalRun,
+    DiagnosisDisposition,
+    DiagnosisEvidenceCode,
+    DiagnosisStatus,
     MechanicalFailureCategory,
     assess_baseline,
+    campaign_baseline_contract,
     campaign_lock_registry,
     cost_forecast,
     load_campaign_identity_path,
@@ -48,6 +53,21 @@ class TerminalBenchBaselineTests(unittest.TestCase):
     @staticmethod
     def _identity():
         return load_historical_campaign_identity(RepoPaths.discover(Path.cwd()), 9)
+
+    @classmethod
+    def _identity_v2(cls):
+        legacy = cls._identity()
+        return replace(
+            legacy,
+            schema_version=2,
+            budget={
+                **legacy.budget,
+                "campaign_cap_usd": "700.000000",
+                "prior_estimated_usd": "343.896195",
+                "max_run_slots": 321,
+            },
+            baseline=campaign_baseline_contract(2),
+        )
 
     def _base(
         self,
@@ -108,9 +128,9 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
-        self.assertEqual(forecast["prior_estimated_usd"], "281.718702")
+        self.assertEqual(forecast["prior_estimated_usd"], "343.896195")
         self.assertEqual(
-            forecast["remaining_before_v9_canary_usd"], "318.281298"
+            forecast["remaining_before_successor_canary_usd"], "356.103805"
         )
         self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
@@ -206,6 +226,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(identity.budget["prior_estimated_usd"], "281.718702")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
 
+        successor = self._identity_v2()
+        self.assertEqual(successor.schema_version, 2)
+        self.assertEqual(successor.max_attempts, 4)
+        self.assertEqual(len(successor.slots), 321)
+        self.assertEqual(len({item.run_id for item in successor.slots}), 321)
+        self.assertEqual(len({item.slot_id for item in successor.slots}), 321)
+
     def test_registry_keeps_history_read_only_and_only_latest_active(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
         registry = campaign_lock_registry(paths)
@@ -260,6 +287,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(
             required_successor_prior(paths, version=9),
             Decimal("282.287684"),
+        )
+
+    def test_successor_prior_includes_the_immutable_v10_terminal_debit(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        self.assertEqual(
+            required_successor_prior(paths, version=10),
+            Decimal("343.896195"),
         )
 
     def test_successor_run_range_rejects_history_and_accepts_fresh_ids(self) -> None:
@@ -346,6 +380,135 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 snapshot = ledger.snapshot()
                 self.assertEqual(snapshot["slots"][1]["status"], "failed")
                 self.assertEqual(snapshot["slots"][1]["outcome"], "infra_failed")
+
+    def test_schema_v2_diagnosis_hold_is_durable_and_gates_claims(self) -> None:
+        identity = self._identity_v2()
+        task_id = identity.catalog.tasks[0].task_id
+        chain_id = f"base:aa-rondo-1:{task_id}"
+        slots = tuple(identity.slot(f"{chain_id}:a{attempt}") for attempt in range(1, 5))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                for slot in slots[:2]:
+                    ledger.claim(slot.slot_id)
+                    ledger.finish(
+                        slot.slot_id,
+                        status=CampaignSlotStatus.COMPLETED,
+                        outcome="infra_failed",
+                        estimated_usd="0.100000",
+                        artifact_path=f"eval-data/runs/{slot.run_id}",
+                        result_record_sha256="1" * 64,
+                        reason=MechanicalFailureCategory.DOCKER_RUNTIME.value,
+                    )
+                diagnosis = ledger.require_diagnosis(
+                    chain_id=chain_id,
+                    category=MechanicalFailureCategory.DOCKER_RUNTIME,
+                    trigger_slot_ids=tuple(slot.slot_id for slot in slots[:2]),
+                )
+                self.assertEqual(diagnosis["status"], DiagnosisStatus.REQUIRED.value)
+                with self.assertRaisesRegex(BaselineError, "unresolved diagnosis"):
+                    ledger.claim(slots[2].slot_id)
+
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                self.assertEqual(
+                    ledger.snapshot()["diagnoses"][0]["status"],
+                    DiagnosisStatus.REQUIRED.value,
+                )
+                ledger.resolve_diagnosis(
+                    chain_id=chain_id,
+                    category=MechanicalFailureCategory.DOCKER_RUNTIME,
+                    disposition=DiagnosisDisposition.EXTERNAL_TRANSIENT,
+                    evidence_code=DiagnosisEvidenceCode.DOCKER_COUNTER_COMMAND_FAILURE,
+                )
+                ledger.claim(slots[2].slot_id)
+                ledger.finish(
+                    slots[2].slot_id,
+                    status=CampaignSlotStatus.COMPLETED,
+                    outcome="infra_failed",
+                    estimated_usd="0.100000",
+                    artifact_path=f"eval-data/runs/{slots[2].run_id}",
+                    result_record_sha256="2" * 64,
+                    reason=MechanicalFailureCategory.DOCKER_RUNTIME.value,
+                )
+                ledger.mark_task_local_reproducible(
+                    chain_id=chain_id,
+                    category=MechanicalFailureCategory.DOCKER_RUNTIME,
+                    trigger_slot_ids=tuple(slot.slot_id for slot in slots[:3]),
+                )
+                diagnosis = ledger.snapshot()["diagnoses"][0]
+                self.assertEqual(
+                    diagnosis["status"],
+                    DiagnosisStatus.TASK_LOCAL_REPRODUCIBLE_INFRA.value,
+                )
+                self.assertEqual(len(diagnosis["trigger_slot_ids"]), 3)
+                with mock.patch.object(
+                    baseline_cli,
+                    "_execute_task_slot",
+                    side_effect=lambda *, slot, **kwargs: baseline_cli.ExecutedSlot(
+                        slot,
+                        RunOutcome.INFRA_FAILED,
+                        TaskOutcome.INFRA,
+                        Decimal("0.100000"),
+                        MechanicalFailureCategory.DOCKER_RUNTIME,
+                    ),
+                ):
+                    replayed = baseline_cli._execute_attempt_chain(
+                        identity=identity,
+                        state=ledger,
+                        tracker=baseline_cli.MechanicalFailureTracker(),
+                        task=identity.catalog.tasks[0],
+                        chain_id=chain_id,
+                    )
+                self.assertEqual(len(replayed), 3)
+                self.assertEqual(
+                    next(
+                        row
+                        for row in ledger.snapshot()["slots"]
+                        if row["slot_id"] == slots[3].slot_id
+                    )["status"],
+                    CampaignSlotStatus.SKIPPED.value,
+                )
+
+    def test_schema_v2_local_defect_resolution_blocks_any_new_claim(self) -> None:
+        identity = self._identity_v2()
+        task_id = identity.catalog.tasks[0].task_id
+        chain_id = f"base:aa-rondo-1:{task_id}"
+        slots = tuple(identity.slot(f"{chain_id}:a{attempt}") for attempt in range(1, 3))
+        with tempfile.TemporaryDirectory() as directory:
+            with CampaignStateLedger(Path(directory) / "state.json", identity=identity) as ledger:
+                for slot in slots:
+                    ledger.claim(slot.slot_id)
+                    ledger.finish(
+                        slot.slot_id,
+                        status=CampaignSlotStatus.COMPLETED,
+                        outcome="infra_failed",
+                        estimated_usd="0.000000",
+                        artifact_path=None,
+                        result_record_sha256=None,
+                        reason=MechanicalFailureCategory.HARNESS_RUNTIME.value,
+                    )
+                ledger.require_diagnosis(
+                    chain_id=chain_id,
+                    category=MechanicalFailureCategory.HARNESS_RUNTIME,
+                    trigger_slot_ids=tuple(slot.slot_id for slot in slots),
+                )
+                with self.assertRaisesRegex(BaselineError, "evidence code disagrees"):
+                    ledger.resolve_diagnosis(
+                        chain_id=chain_id,
+                        category=MechanicalFailureCategory.HARNESS_RUNTIME,
+                        disposition=DiagnosisDisposition.EXTERNAL_TRANSIENT,
+                        evidence_code=(
+                            DiagnosisEvidenceCode.DOCKER_COUNTER_COMMAND_FAILURE
+                        ),
+                    )
+                ledger.resolve_diagnosis(
+                    chain_id=chain_id,
+                    category=MechanicalFailureCategory.HARNESS_RUNTIME,
+                    disposition=DiagnosisDisposition.LOCAL_IMPLEMENTATION_DEFECT,
+                    evidence_code=DiagnosisEvidenceCode.LOCAL_CONTRACT_DEFECT_CONFIRMED,
+                )
+                with self.assertRaisesRegex(BaselineError, "terminal stop"):
+                    ledger.claim(identity.slots[-1].slot_id)
 
     def test_interrupted_paid_slot_reconciles_publication_without_reexecution(self) -> None:
         identity = self._identity()
@@ -601,6 +764,181 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             baseline_cli._execute_base_rounds(identity=identity, state=State())
         self.assertEqual(len(calls), 40)
         self.assertTrue(all(":a1" in item for item in calls))
+
+    def test_schema_v2_second_same_category_requires_diagnosis_before_a3(self) -> None:
+        identity = self._identity_v2()
+        task = identity.catalog.tasks[0]
+        chain_id = f"base:aa-rondo-1:{task.task_id}"
+
+        class State:
+            def __init__(self) -> None:
+                self.skipped: list[str] = []
+
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                self.skipped.append(f"{slot_id}:{reason}")
+
+            def require_diagnosis(self, **kwargs):
+                del kwargs
+                return {"status": DiagnosisStatus.REQUIRED.value}
+
+            def mark_task_local_reproducible(self, **kwargs) -> None:
+                raise AssertionError(kwargs)
+
+        calls: list[str] = []
+
+        def execute(*, slot, **kwargs):
+            del kwargs
+            calls.append(slot.slot_id)
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED,
+                TaskOutcome.INFRA,
+                Decimal("0.100000"),
+                MechanicalFailureCategory.DOCKER_RUNTIME,
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            with self.assertRaisesRegex(
+                baseline_cli._CampaignDiagnosisRequired,
+                "diagnosis_required",
+            ):
+                baseline_cli._execute_attempt_chain(
+                    identity=identity,
+                    state=State(),
+                    tracker=baseline_cli.MechanicalFailureTracker(),
+                    task=task,
+                    chain_id=chain_id,
+                )
+        self.assertEqual(calls, [f"{chain_id}:a1", f"{chain_id}:a2"])
+
+    def test_schema_v2_external_diagnosis_allows_a3_then_task_local_stop(self) -> None:
+        identity = self._identity_v2()
+        task = identity.catalog.tasks[0]
+        chain_id = f"base:aa-rondo-1:{task.task_id}"
+
+        class State:
+            def __init__(self) -> None:
+                self.skipped: list[str] = []
+                self.marked: tuple[str, ...] | None = None
+
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                self.skipped.append(f"{slot_id}:{reason}")
+
+            def require_diagnosis(self, **kwargs):
+                del kwargs
+                return {
+                    "status": DiagnosisStatus.RESOLVED.value,
+                    "disposition": DiagnosisDisposition.EXTERNAL_TRANSIENT.value,
+                }
+
+            def mark_task_local_reproducible(self, **kwargs) -> None:
+                self.marked = kwargs["trigger_slot_ids"]
+
+        state = State()
+        calls: list[str] = []
+
+        def execute(*, slot, **kwargs):
+            del kwargs
+            calls.append(slot.slot_id)
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED,
+                TaskOutcome.INFRA,
+                Decimal("0.100000"),
+                MechanicalFailureCategory.DOCKER_RUNTIME,
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_attempt_chain(
+                identity=identity,
+                state=state,
+                tracker=baseline_cli.MechanicalFailureTracker(),
+                task=task,
+                chain_id=chain_id,
+            )
+        self.assertEqual(len(values), 3)
+        self.assertEqual(calls, [f"{chain_id}:a1", f"{chain_id}:a2", f"{chain_id}:a3"])
+        self.assertEqual(state.marked, tuple(calls))
+        self.assertEqual(len(state.skipped), 1)
+        self.assertIn("task_local_reproducible_infra:docker_runtime", state.skipped[0])
+
+    def test_schema_v2_mixed_categories_can_reach_a4_and_noninfra_stops(self) -> None:
+        identity = self._identity_v2()
+        task = identity.catalog.tasks[0]
+        chain_id = f"base:aa-rondo-1:{task.task_id}"
+
+        class State:
+            def __init__(self) -> None:
+                self.skipped: list[str] = []
+
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                self.skipped.append(f"{slot_id}:{reason}")
+
+            def require_diagnosis(self, **kwargs):
+                raise AssertionError(kwargs)
+
+            def mark_task_local_reproducible(self, **kwargs) -> None:
+                raise AssertionError(kwargs)
+
+        categories = (
+            MechanicalFailureCategory.DOCKER_RUNTIME,
+            MechanicalFailureCategory.GUARDIAN_RUNTIME,
+            MechanicalFailureCategory.PUBLICATION_INTEGRITY,
+        )
+        calls: list[str] = []
+
+        def execute(*, slot, **kwargs):
+            del kwargs
+            calls.append(slot.slot_id)
+            if slot.attempt == 4:
+                return baseline_cli.ExecutedSlot(
+                    slot,
+                    RunOutcome.COMPLETED,
+                    TaskOutcome.FAIL,
+                    Decimal("0.100000"),
+                )
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED,
+                TaskOutcome.INFRA,
+                Decimal("0.100000"),
+                categories[slot.attempt - 1],
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_attempt_chain(
+                identity=identity,
+                state=State(),
+                tracker=baseline_cli.MechanicalFailureTracker(),
+                task=task,
+                chain_id=chain_id,
+            )
+        self.assertEqual(len(values), 4)
+        self.assertEqual(values[-1].task_outcome, TaskOutcome.FAIL)
+        self.assertEqual(calls[-1], f"{chain_id}:a4")
+
+        state = State()
+        calls.clear()
+        with mock.patch.object(
+            baseline_cli,
+            "_execute_task_slot",
+            return_value=baseline_cli.ExecutedSlot(
+                identity.slot(f"{chain_id}:a1"),
+                RunOutcome.COMPLETED,
+                TaskOutcome.PASS,
+                Decimal("0.100000"),
+            ),
+        ) as execute_mock:
+            values = baseline_cli._execute_attempt_chain(
+                identity=identity,
+                state=state,
+                tracker=baseline_cli.MechanicalFailureTracker(),
+                task=task,
+                chain_id=chain_id,
+            )
+        self.assertEqual(len(values), 1)
+        execute_mock.assert_called_once()
+        self.assertEqual(len(state.skipped), 3)
 
     def test_two_remaining_infra_per_round_can_continue(self) -> None:
         identity = self._identity()

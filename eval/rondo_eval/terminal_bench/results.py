@@ -1116,15 +1116,18 @@ def _validate_infra_diagnostic(
 ) -> None:
     if value is None:
         return
-    if failure_stage != "docker" or not isinstance(value, Mapping) or set(value) != {
-        "supervisor_reason",
-        "failed_probe",
-        "probe_timings_ms",
-    }:
+    required = {"supervisor_reason", "failed_probe", "probe_timings_ms"}
+    if (
+        failure_stage != "docker"
+        or not isinstance(value, Mapping)
+        or not required.issubset(value)
+        or not set(value).issubset(required | {"command_failure"})
+    ):
         raise HarborResultError("infrastructure diagnostic differs from schema v1")
     reason = value.get("supervisor_reason")
     failed_probe = value.get("failed_probe")
     timings = value.get("probe_timings_ms")
+    command_failure = value.get("command_failure")
     if (
         not isinstance(reason, str)
         or not reason
@@ -1142,6 +1145,44 @@ def _validate_infra_diagnostic(
         )
     ):
         raise HarborResultError("infrastructure diagnostic is invalid")
+    if command_failure is not None:
+        _validate_docker_command_failure(command_failure)
+
+
+def _validate_docker_command_failure(value: object) -> None:
+    if not isinstance(value, Mapping) or set(value) != {
+        "exit_code",
+        "timed_out",
+        "stderr_bytes",
+        "stderr_sha256",
+        "stderr_excerpt",
+    }:
+        raise HarborResultError("Docker command failure diagnostic is invalid")
+    exit_code = value.get("exit_code")
+    timed_out = value.get("timed_out")
+    stderr_bytes = value.get("stderr_bytes")
+    stderr_sha256 = value.get("stderr_sha256")
+    excerpt = value.get("stderr_excerpt")
+    if (
+        (exit_code is not None and (
+            isinstance(exit_code, bool)
+            or not isinstance(exit_code, int)
+            or exit_code == 0
+            or not -255 <= exit_code <= 255
+        ))
+        or not isinstance(timed_out, bool)
+        or (timed_out and exit_code is not None)
+        or isinstance(stderr_bytes, bool)
+        or not isinstance(stderr_bytes, int)
+        or not 0 <= stderr_bytes <= 1_000_000_000
+        or not isinstance(stderr_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", stderr_sha256) is None
+        or not isinstance(excerpt, str)
+        or len(excerpt) > 512
+        or any(ord(character) < 32 or ord(character) > 126 for character in excerpt)
+        or (stderr_bytes == 0 and (excerpt or stderr_sha256 != hashlib.sha256(b"").hexdigest()))
+    ):
+        raise HarborResultError("Docker command failure diagnostic is invalid")
 
 
 def _has_valid_completed_request_sequence(

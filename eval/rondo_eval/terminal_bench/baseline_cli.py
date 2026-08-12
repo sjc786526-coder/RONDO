@@ -35,7 +35,6 @@ from .__main__ import (
 )
 from .baseline import (
     BASE_ROUNDS,
-    CAMPAIGN_MAX_RUNS,
     RUN_CAP_USD,
     SOL_MAX_LEGAL_REQUEST_RESERVATION_USD,
     BaselineRun,
@@ -46,11 +45,14 @@ from .baseline import (
     CampaignSlotStatus,
     CampaignStateLedger,
     ConditionalRun,
+    DiagnosisDisposition,
+    DiagnosisStatus,
     MECHANICAL_CIRCUIT_BREAKER_TASKS,
     MAX_REMAINING_INFRA_PER_ROUND,
     MIN_COMMON_VALID_TASKS,
     MechanicalFailureCategory,
     assess_baseline,
+    campaign_slot_chain_id,
     load_campaign_identity,
 )
 from .live import run_budgeted_terminal_bench
@@ -95,6 +97,15 @@ class CampaignExecutionError(RuntimeError):
 
 class _CampaignStepAdvanced(RuntimeError):
     """Internal control flow after one paid slot is durably terminal."""
+
+
+class _CampaignDiagnosisRequired(RuntimeError):
+    """One task chain is safely paused for offline structured RCA."""
+
+    def __init__(self, *, chain_id: str, category: MechanicalFailureCategory) -> None:
+        super().__init__(f"diagnosis_required:{chain_id}:{category.value}")
+        self.chain_id = chain_id
+        self.category = category
 
 
 @dataclass(frozen=True)
@@ -484,7 +495,7 @@ def _worker_step_main(args: argparse.Namespace) -> int:
             budget_path,
             batch_id=identity.batch_id,
             total_cap_usd=remaining_cap,
-            max_runs=CAMPAIGN_MAX_RUNS - 1,
+            max_runs=len(identity.slots) - 1,
             default_run_cap_usd=RUN_CAP_USD,
         ) as budget:
             try:
@@ -516,6 +527,19 @@ def _worker_step_main(args: argparse.Namespace) -> int:
                     campaign_root=campaign_root,
                     canary_cost=canary_cost,
                 )
+            except _CampaignDiagnosisRequired as exc:
+                print(
+                    json.dumps(
+                        {
+                            "status": "diagnosis_required",
+                            "campaign_id": identity.campaign_id,
+                            "chain_id": exc.chain_id,
+                            "category": exc.category.value,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 11
             except CampaignExecutionError as exc:
                 _skip_planned(state, identity, reason="campaign_stopped")
                 state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
@@ -1108,6 +1132,7 @@ def _advance_one_paid_step(
         tuple(task.task_id for task in identity.catalog.tasks),
         tuple(base_runs),
         tuple(conditional_runs),
+        max_attempts=identity.max_attempts,
     )
     _skip_planned(state, identity, reason="not_activated")
     final_storage = _sample_storage(
@@ -1207,53 +1232,25 @@ def _execute_base_rounds(
         side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
         effective: dict[str, ExecutedSlot] = {}
         for task in identity.catalog.tasks:
-            first_slot = identity.slot(f"base:{round_id}:{task.task_id}:a1")
-            first = _execute_task_slot(slot=first_slot, task=task, **kwargs)
-            tracker.observe(first)
-            values.append(
-                BaselineRun(
-                    task.task_id,
-                    round_id,
-                    side,
-                    1,
-                    first.task_outcome,
-                    first.slot.run_id,
-                    first.failure_category,
-                )
+            attempts = _execute_attempt_chain(
+                tracker=tracker,
+                task=task,
+                chain_id=f"base:{round_id}:{task.task_id}",
+                **kwargs,
             )
-            effective[task.task_id] = first
-            replacement_slot = identity.slot(
-                f"base:{round_id}:{task.task_id}:a2"
-            )
-            if first.task_outcome is TaskOutcome.INFRA:
-                replacement = _execute_task_slot(
-                    slot=replacement_slot, task=task, **kwargs
-                )
-                tracker.observe(replacement)
+            for executed in attempts:
                 values.append(
                     BaselineRun(
                         task.task_id,
                         round_id,
                         side,
-                        2,
-                        replacement.task_outcome,
-                        replacement.slot.run_id,
-                        replacement.failure_category,
+                        executed.slot.attempt,
+                        executed.task_outcome,
+                        executed.slot.run_id,
+                        executed.failure_category,
                     )
                 )
-                effective[task.task_id] = replacement
-            else:
-                if kwargs.get("resumable") is True:
-                    _require_or_skip(
-                        state,
-                        replacement_slot.slot_id,
-                        reason="base_replacement_not_activated",
-                    )
-                else:
-                    state.skip(
-                        replacement_slot.slot_id,
-                        reason="base_replacement_not_activated",
-                    )
+            effective[task.task_id] = attempts[-1]
         if sum(
             item.task_outcome is TaskOutcome.INFRA for item in effective.values()
         ) > MAX_REMAINING_INFRA_PER_ROUND:
@@ -1261,6 +1258,124 @@ def _execute_base_rounds(
                 f"base_round_infra_threshold_exceeded:{round_id}"
             )
     return values
+
+
+def _execute_attempt_chain(
+    *,
+    identity: CampaignIdentity,
+    state: CampaignStateLedger,
+    tracker: MechanicalFailureTracker,
+    task: object,
+    chain_id: str,
+    **kwargs: object,
+) -> list[ExecutedSlot]:
+    """Execute or replay one infra-only chain without crossing an RCA hold."""
+
+    values: list[ExecutedSlot] = []
+    for attempt in range(1, identity.max_attempts + 1):
+        slot = identity.slot(f"{chain_id}:a{attempt}")
+        if values and values[-1].task_outcome is not TaskOutcome.INFRA:
+            _skip_inactive_attempt(
+                state,
+                slot.slot_id,
+                resumable=kwargs.get("resumable") is True,
+            )
+            continue
+        executed = _execute_task_slot(
+            slot=slot,
+            task=task,
+            identity=identity,
+            state=state,
+            **kwargs,
+        )
+        tracker.observe(executed)
+        values.append(executed)
+        if executed.task_outcome is not TaskOutcome.INFRA:
+            continue
+        if identity.schema_version < 2:
+            continue
+        category = executed.failure_category
+        if category is None:
+            raise CampaignExecutionError(
+                "infra result lacks a structured mechanical failure category"
+            )
+        same_category = tuple(
+            item.slot.slot_id for item in values if item.failure_category is category
+        )
+        if len(same_category) >= 3:
+            existing = _existing_diagnosis(
+                state,
+                chain_id=campaign_slot_chain_id(slot),
+                category=category,
+            )
+            if existing is None or existing.get("status") != (
+                DiagnosisStatus.TASK_LOCAL_REPRODUCIBLE_INFRA.value
+            ):
+                state.mark_task_local_reproducible(
+                    chain_id=campaign_slot_chain_id(slot),
+                    category=category,
+                    trigger_slot_ids=same_category[:3],
+                )
+            for remaining in range(attempt + 1, identity.max_attempts + 1):
+                _skip_inactive_attempt(
+                    state,
+                    identity.slot(f"{chain_id}:a{remaining}").slot_id,
+                    resumable=kwargs.get("resumable") is True,
+                    reason=f"task_local_reproducible_infra:{category.value}",
+                )
+            break
+        if len(same_category) == 2:
+            existing = _existing_diagnosis(
+                state,
+                chain_id=campaign_slot_chain_id(slot),
+                category=category,
+            )
+            if existing is not None and existing.get("status") == (
+                DiagnosisStatus.TASK_LOCAL_REPRODUCIBLE_INFRA.value
+            ):
+                continue
+            diagnosis = state.require_diagnosis(
+                chain_id=campaign_slot_chain_id(slot),
+                category=category,
+                trigger_slot_ids=same_category,
+            )
+            if diagnosis["status"] == DiagnosisStatus.REQUIRED.value:
+                raise _CampaignDiagnosisRequired(
+                    chain_id=campaign_slot_chain_id(slot),
+                    category=category,
+                )
+            if diagnosis.get("disposition") != DiagnosisDisposition.EXTERNAL_TRANSIENT.value:
+                raise CampaignExecutionError(
+                    f"diagnosed_campaign_defect:{diagnosis.get('disposition')}:{category.value}"
+                )
+    if not values:
+        raise CampaignExecutionError("campaign attempt chain produced no result")
+    return values
+
+
+def _existing_diagnosis(
+    state: CampaignStateLedger,
+    *,
+    chain_id: str,
+    category: MechanicalFailureCategory,
+) -> dict[str, object] | None:
+    loader = getattr(state, "diagnosis", None)
+    if loader is None:
+        return None
+    return loader(chain_id=chain_id, category=category)
+
+
+def _skip_inactive_attempt(
+    state: CampaignStateLedger,
+    slot_id: str,
+    *,
+    resumable: bool,
+    reason: str = "infra_attempt_not_activated",
+) -> None:
+    if resumable:
+        _require_or_skip(state, slot_id, reason=reason)
+    else:
+        state.skip(slot_id, reason=reason)
 
 
 def _require_resolved_base_rounds(
@@ -1335,11 +1450,10 @@ def _execute_conditionals(
     for task in identity.catalog.tasks:
         for side in (Side.RONDO, Side.CODEX):
             for repeat in (1, 2):
-                first = identity.slot(
-                    f"conditional:{task.task_id}:{side.value}:repeat{repeat}:a1"
-                )
-                second = identity.slot(
-                    f"conditional:{task.task_id}:{side.value}:repeat{repeat}:a2"
+                chain_id = f"conditional:{task.task_id}:{side.value}:repeat{repeat}"
+                slots = tuple(
+                    identity.slot(f"{chain_id}:a{attempt}")
+                    for attempt in range(1, identity.max_attempts + 1)
                 )
                 if (
                     len(common_valid_tasks) < MIN_COMMON_VALID_TASKS
@@ -1351,51 +1465,30 @@ def _execute_conditionals(
                         else "conditional_not_activated"
                     )
                     if kwargs.get("resumable") is True:
-                        _require_or_skip(state, first.slot_id, reason=reason)
-                        _require_or_skip(state, second.slot_id, reason=reason)
+                        for slot in slots:
+                            _require_or_skip(state, slot.slot_id, reason=reason)
                     else:
-                        state.skip(first.slot_id, reason=reason)
-                        state.skip(second.slot_id, reason=reason)
+                        for slot in slots:
+                            state.skip(slot.slot_id, reason=reason)
                     continue
-                executed = _execute_task_slot(slot=first, task=task, **kwargs)
-                tracker.observe(executed)
-                values.append(
-                    ConditionalRun(
-                        task.task_id,
-                        side,
-                        repeat,
-                        1,
-                        executed.task_outcome,
-                        first.run_id,
-                        executed.failure_category,
-                    )
+                attempts = _execute_attempt_chain(
+                    tracker=tracker,
+                    task=task,
+                    chain_id=chain_id,
+                    **kwargs,
                 )
-                if executed.task_outcome is TaskOutcome.INFRA:
-                    replacement = _execute_task_slot(slot=second, task=task, **kwargs)
-                    tracker.observe(replacement)
+                for executed in attempts:
                     values.append(
                         ConditionalRun(
                             task.task_id,
                             side,
                             repeat,
-                            2,
-                            replacement.task_outcome,
-                            second.run_id,
-                            replacement.failure_category,
+                            executed.slot.attempt,
+                            executed.task_outcome,
+                            executed.slot.run_id,
+                            executed.failure_category,
                         )
                     )
-                else:
-                    if kwargs.get("resumable") is True:
-                        _require_or_skip(
-                            state,
-                            second.slot_id,
-                            reason="conditional_replacement_not_activated",
-                        )
-                    else:
-                        state.skip(
-                            second.slot_id,
-                            reason="conditional_replacement_not_activated",
-                        )
     return values
 
 
@@ -1730,13 +1823,14 @@ def _write_aggregate(
         for request in run["requests"].values()
     )
     public_assessment = _public_assessment(assessment, records)
+    state_snapshot = state.snapshot()
     value = {
-        "schema_version": 1,
+        "schema_version": identity.schema_version,
         "campaign_id": identity.campaign_id,
         "campaign_lock_sha256": identity.lock_sha256,
         "taskset_sha256": identity.taskset_sha256,
         "canary_catalog_sha256": identity.canary_catalog_sha256,
-        "status": state.snapshot()["status"],
+        "status": state_snapshot["status"],
         "actual_usd": None,
         "estimated_usd": f"{spent:.6f}",
         "prior_estimated_usd": f"{prior_cost:.6f}",
@@ -1749,6 +1843,8 @@ def _write_aggregate(
         "result_record_sha256": record_digests,
         "storage": _storage_projection(storage_baseline, final_storage),
     }
+    if identity.schema_version >= 2:
+        value["diagnoses"] = state_snapshot["diagnoses"]
     path = campaign_root / "aggregate.json"
     temporary = path.with_name(".aggregate.json.tmp")
     temporary.write_text(
@@ -1780,6 +1876,8 @@ def _write_aggregate(
     }
     public["reserved_usd"] = budget["reserved_usd"]
     public["run_slots_used"] = budget["run_slots_used"]
+    if identity.schema_version >= 2:
+        public["diagnoses"] = value["diagnoses"]
     destination = (
         results_root
         / "eval/results/baselines"
