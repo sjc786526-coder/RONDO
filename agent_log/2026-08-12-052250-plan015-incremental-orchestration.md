@@ -73,3 +73,9 @@
 - 机械生成 v17：run base `20260812-370000000`、lock SHA
   `226783e3ce06cee06d0bb632ba881cda3971307456213588e0ae1ad2e0caf116`、prior `569.420620 USD`；
   taskset/catalog/profile/bundle/700 USD cap 不变。
+- v17 命中 Oracle proof，fresh wire `$0.180163`；fix 补跑恢复，vulnerable 三次同类停题，第二轮
+  filter 触发第三个 task 的 provider-integrity 全局熔断。v17 paid `$98.062347`，累计
+  `$667.663130`、reservation 0；results 以 `715c4ce` 提交。
+- 用户追加 `$300`，累计 cap 为 `$1000`。历史 700 USD schema-v2 lock 仍只读有效；机械生成
+  v18：run base `20260812-380000000`、lock SHA
+  `01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346`、prior `$667.663130`。

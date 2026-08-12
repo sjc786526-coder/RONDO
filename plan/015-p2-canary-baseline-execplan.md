@@ -258,22 +258,31 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   campaign/batch `p2-b7-canary-baseline-v17`/`p2-b7-canary-sol-sol-v17`，321 个 run ID 从
   `20260812-370000000` 派生，lock SHA
   `226783e3ce06cee06d0bb632ba881cda3971307456213588e0ae1ad2e0caf116`，prior `569.420620 USD`。
+- v17 命中十题 Oracle proof，fresh wire 结算 `0.180163 USD`。首轮 fix 一次 provider-integrity 后 a2
+  恢复，vulnerable 三次同类后 task-local 终止；第二轮 db/extract completed，filter 命中第三个不同
+  task 的 provider-integrity 并触发全局熔断。v17 blocked，16 个 paid run、117 attempt、paid
+  `98.062347 USD`、reservation 0，累计 `667.663130 USD`。results 已以 `715c4ce` 只读提交。
+- 用户追加 `300 USD`，Plan 015 累计硬上限从 `700 USD` 提至 `1000 USD`，不重置 v1—v17 debit。
+  历史 schema-v2 700 USD lock 继续只读加载，生成器仅对新 identity 投影 1000 USD。唯一 v18：
+  campaign/batch `p2-b7-canary-baseline-v18`/`p2-b7-canary-sol-sol-v18`，run base
+  `20260812-380000000`，lock SHA
+  `01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346`，prior `667.663130 USD`。
 
 ### 后续计划
 
-1. v17 命中与 campaign identity 解耦的 Oracle proof 后执行 fresh wire canary，再逐 slot 推进；仍严格执行
+1. v18 命中与 campaign identity 解耦的 Oracle proof 后执行 fresh wire canary，再逐 slot 推进；仍严格执行
    infra-only a1—a4、第二次同类离线 RCA、第三次 task-local 终止和三个 task 全局熔断。任一
-   next-request 最大合法预留无法装入剩余 `130.579380 USD` 时在 API 前 blocked。
+   next-request 最大合法预留无法装入剩余 `332.336870 USD` 时在 API 前 blocked。
 
 ### 阻塞项
 
-- 无离线阻塞；v17 仍可能因上游 provider response integrity 熔断或剩余预算不足而 blocked。
+- 无离线阻塞；v18 仍可能因上游 provider response integrity 熔断或剩余预算不足而 blocked。
   diagnosis hold 是可恢复暂停而非 campaign 通过或费用重置。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v16 是保留全部费用事实的 blocked 终态。累计 debit `569.420620 USD`、
-  reservation 0；v17 已冻结，尚未执行 API。
+- v1 是 API 前失败终态；v2—v17 是保留全部费用事实的 blocked 终态。累计 debit `667.663130 USD`、
+  reservation 0；v18 已冻结，尚未执行 API。
 
 ## 6. 关键决策记录
 
@@ -305,3 +314,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 024 | v14 第二次同类 filter Docker failure 后先做 no-API RCA；精确 512 PIDs 证明本地资源合同缺少 supervisor 余量，故阻断 v14、仅将 filter 冻结为 1024 PIDs 并重冻 v15 | 不用 a4 绕过已证明的实现缺陷；只使受影响题 Oracle proof 失效，历史 identity 与费用不回填 | B6/B7 | 已采纳 |
 | 025 | v15 第二次同类 filter failure 后停在 a3 前；RCA 证明 1024 PIDs 造成 verifier 假通过，4096 才完成全部批次，并闭合 stopped-container inspect/remove 竞态后重冻 v16 | 不用更多付费 attempt 掩盖本地合同缺陷；资源上限与共享 lifecycle 变更都精确进入 Oracle proof 失效条件 | B6/B7 | 已采纳 |
 | 026 | v16 因 vulnerable、sanitize、filter 三个 task 的真实 provider-integrity 触发全局熔断；保留 229 attempt 与全部保守费用，机械继承 prior 后重冻 v17 | 不将 HTTP 200 无 terminal usage 改判为未计费，不复用 blocked identity；剩余预算仍是硬停线 | B6/B7 | 已采纳 |
+| 027 | v17 因 fix、vulnerable、filter 三 task 真实 provider-integrity 熔断；用户追加 300 USD 后总 cap 提至 1000 USD 并机械重冻 v18 | 新授权不改写 v17 也不重置 667.663130 USD prior；仍保留 fresh wire、task-local 与全局熔断 | B6/B7 | 已采纳 |

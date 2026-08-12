@@ -75,9 +75,9 @@
   证明 1024 PIDs 仅完成 9/28 个 Selenium batch，而 4096 PIDs 完成 28/28，并闭合自然 teardown 的
   inspect/remove 竞态。v16 的十题 Oracle 与 fresh wire 通过，但两轮 A/A 中 vulnerable 均三次命中
   provider-integrity，sanitize 一次后恢复；A/B RONDO 的 filter 随后触发第三个不同 task 的全局
-  circuit breaker。v16 blocked 且 reservation 0，累计 debit `569.420620 USD`。v17 已以 run base
-  `20260812-370000000`、唯一 lock/IDs 和精确 prior 冻结，700 USD 硬上限剩余
-  `130.579380 USD`。**
+  circuit breaker。v16 blocked 后，v17 亦因 fix、vulnerable、filter 三 task 的 provider-integrity 熔断；
+  reservation 0，累计 debit `667.663130 USD`。用户追加 300 USD 后总上限为 1000 USD；v18 已以
+  `20260812-380000000`、唯一 lock/IDs 和精确 prior 冻结，剩余 `332.336870 USD`。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -130,7 +130,7 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v1—v16 只读，v17 冻结待执行 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v1—v17 只读，v18 冻结待执行 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
