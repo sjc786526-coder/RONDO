@@ -95,9 +95,9 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
-        self.assertEqual(forecast["prior_estimated_usd"], "221.772313")
+        self.assertEqual(forecast["prior_estimated_usd"], "281.718702")
         self.assertEqual(
-            forecast["remaining_before_v8_canary_usd"], "178.227687"
+            forecast["remaining_before_v9_canary_usd"], "318.281298"
         )
         self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
@@ -116,10 +116,10 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len({item.run_id for item in identity.slots}), 161)
         self.assertEqual(len({item.slot_id for item in identity.slots}), 161)
         self.assertEqual(identity.slots[0].slot_id, "wire-canary")
-        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v8")
-        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v8")
-        self.assertEqual(identity.budget["campaign_cap_usd"], "400.000000")
-        self.assertEqual(identity.budget["prior_estimated_usd"], "221.772313")
+        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v9")
+        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v9")
+        self.assertEqual(identity.budget["campaign_cap_usd"], "600.000000")
+        self.assertEqual(identity.budget["prior_estimated_usd"], "281.718702")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
 
     def test_retired_identities_and_slots_are_not_reused(self) -> None:
@@ -127,7 +127,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         active = load_campaign_identity(paths)
         self.assertEqual(
             CAMPAIGN_LOCK_PATH,
-            Path("eval/locks/p2-b7-canary-baseline-v8.json"),
+            Path("eval/locks/p2-b7-canary-baseline-v9.json"),
         )
         self.assertEqual(
             RETIRED_CAMPAIGN_LOCK_PATHS,
@@ -139,6 +139,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 Path("eval/locks/p2-b7-canary-baseline-v5.json"),
                 Path("eval/locks/p2-b7-canary-baseline-v6.json"),
                 Path("eval/locks/p2-b7-canary-baseline-v7.json"),
+                Path("eval/locks/p2-b7-canary-baseline-v8.json"),
             ),
         )
         retired_values = [

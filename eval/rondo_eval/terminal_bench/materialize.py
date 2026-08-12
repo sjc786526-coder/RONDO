@@ -254,7 +254,7 @@ class PinnedTaskMaterializer:
             raise MaterializationError("staging name is unsafe")
         destination = staging_root / staging_name
         overlay = staging_root / f"{staging_name}.compose.yaml"
-        provider_secret = staging_root / f"{staging_name}.provider-api-key"
+        provider_secret = staging_root / f"{staging_name}.provider-auth-json"
         if (
             destination.exists()
             or destination.is_symlink()
@@ -704,7 +704,7 @@ def _compose_overlay_text(
         )
     return (
         "secrets:\n"
-        "  rondo_eval_provider_api_key:\n"
+        "  rondo_eval_provider_auth_json:\n"
         f"    file: {json.dumps(str(provider_secret_path))}\n"
         "services:\n"
         "  main:\n"
@@ -718,7 +718,7 @@ def _compose_overlay_text(
         "      - ALL\n"
         f"{seccomp}"
         "    secrets:\n"
-        "      - source: rondo_eval_provider_api_key\n"
-        "        target: rondo_eval_provider_api_key\n"
+        "      - source: rondo_eval_provider_auth_json\n"
+        "        target: rondo_eval_provider_auth_json\n"
         "        mode: \"0400\"\n"
     )

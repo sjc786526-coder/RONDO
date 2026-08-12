@@ -59,6 +59,8 @@ _WATCHDOG_HEARTBEAT_MAX_AGE_NS = 15_000_000_000
 _WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = _WATCHDOG_HEARTBEAT_MAX_AGE_NS
 _DOCKER_FACT_COMMAND_MAX_ATTEMPTS = 2
 _DOCKER_FACT_COMMAND_RETRY_DELAY_SECONDS = 1.0
+_CONTAINER_DISAPPEARANCE_MAX_POLLS = 3
+_CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS = 0.25
 _WATCHDOG_ENV = (
     "RONDO_WATCHDOG_WRAPPER_PID",
     "RONDO_WATCHDOG_WRAPPER_START_TICKS",
@@ -1375,10 +1377,31 @@ class DockerCliCounter:
         try:
             metrics = self._container_metrics(container_facts, deadline=deadline)
         except RuntimeBridgeError:
-            current_ids = self._container_ids(identity, deadline=deadline)
-            if current_ids:
-                raise
-            return (), (), ()
+            # ``docker compose`` can leave an already-stopped container visible
+            # briefly after cgroup exec has become impossible.  Keep the same
+            # exact-label proof, but allow a small bounded grace window for the
+            # object to be removed.  A container that remains visible is still
+            # a hard failure; no missing metric is accepted for a live object.
+            for poll in range(_CONTAINER_DISAPPEARANCE_MAX_POLLS):
+                current_ids = self._container_ids(identity, deadline=deadline)
+                if not current_ids:
+                    return (), (), ()
+                if current_ids != container_ids:
+                    raise
+                if not self._containers_are_stopped(
+                    identity,
+                    current_ids,
+                    deadline=deadline,
+                ):
+                    raise
+                if poll + 1 < _CONTAINER_DISAPPEARANCE_MAX_POLLS:
+                    self._sleeper(
+                        min(
+                            _CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS,
+                            self._remaining(deadline),
+                        )
+                    )
+            raise
         return container_ids, container_facts, metrics
 
     def _compose_networks(self, project: str, *, deadline: float) -> tuple[object, ...]:
@@ -1413,6 +1436,35 @@ class DockerCliCounter:
                 kind="network",
             )
         )
+
+    def _containers_are_stopped(
+        self,
+        identity: "DockerTaskIdentity",
+        object_ids: tuple[str, ...],
+        *,
+        deadline: float,
+    ) -> bool:
+        payload = _parse_json_array(
+            self._run(
+                ("docker", "container", "inspect", "--size", *object_ids),
+                deadline=deadline,
+            )
+        )
+        # Reuse the full identity/security parser before trusting lifecycle
+        # state from an object observed during the teardown grace window.
+        _validate_inspected_containers(
+            payload,
+            expected_ids=object_ids,
+            identity=identity,
+        )
+        running: list[bool] = []
+        for item in payload:
+            state = item.get("State")
+            value = state.get("Running") if isinstance(state, Mapping) else None
+            if not isinstance(value, bool):
+                raise RuntimeBridgeError("Docker container lifecycle state is invalid")
+            running.append(value)
+        return bool(running) and not any(running)
 
     def _compose_volumes(self, project: str, *, deadline: float) -> tuple[object, ...]:
         from .docker_supervisor import ComposeResourceFact

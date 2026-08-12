@@ -690,8 +690,19 @@ class RedactedMetadataStore:
             "settlement_kind",
             "usage",
         }
-        if set(observation) != expected:
+        optional = {"stream_end_kind"}
+        if not expected.issubset(observation) or not set(observation).issubset(
+            expected | optional
+        ):
             raise ApiBudgetProxyError("metadata observation differs from schema v1")
+        if observation.get("stream_end_kind") not in {
+            None,
+            "terminal",
+            "clean_eof",
+            "read_error",
+            "size_limit",
+        }:
+            raise ApiBudgetProxyError("metadata stream end kind is invalid")
         usage = observation["usage"]
         if (
             (observation.get("usage_valid") is True) != isinstance(usage, dict)
@@ -1451,6 +1462,7 @@ class LoopbackResponsesProxy:
                     remaining = _MAX_RESPONSE_BYTES - total
                     if remaining <= 0:
                         usage = None
+                        request_metadata["stream_end_kind"] = "size_limit"
                         break
                     # BufferedResponse.read(8192) may wait for the buffer to fill
                     # on a keep-alive SSE connection.  Reading one bounded line at
@@ -1459,6 +1471,9 @@ class LoopbackResponsesProxy:
                     if not chunk:
                         collector.finish()
                         usage = collector.usage if collector.completed else None
+                        request_metadata["stream_end_kind"] = (
+                            "terminal" if collector.terminal_seen else "clean_eof"
+                        )
                         if collector.terminal_seen:
                             settlement = self._ledger.settle(
                                 self._run_id,
@@ -1485,12 +1500,14 @@ class LoopbackResponsesProxy:
                     total += len(chunk)
                     if total > _MAX_RESPONSE_BYTES:
                         usage = None
+                        request_metadata["stream_end_kind"] = "size_limit"
                         break
                     pending_event.extend(chunk)
                     collector.feed(chunk)
                     terminal_seen = collector.terminal_seen
                     if terminal_seen:
                         usage = collector.usage if collector.completed else None
+                        request_metadata["stream_end_kind"] = "terminal"
                         # Release the conservative reservation before exposing
                         # response.completed to Codex.  Guardian review can start
                         # as soon as the downstream observes this line; writing it
@@ -1525,7 +1542,7 @@ class LoopbackResponsesProxy:
                         return
             except (OSError, URLError, TimeoutError, socket.timeout):
                 usage = None
-                status = 0
+                request_metadata["stream_end_kind"] = "read_error"
                 stop_reason = "upstream_response_unavailable"
             finally:
                 upstream.close()

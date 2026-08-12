@@ -86,7 +86,7 @@ class FakeEnvironment:
         self.corrupt_remote = corrupt_remote
         self.remote_owner = remote_owner
         self.remote_owners = {
-            "/run/secrets/rondo_eval_provider_api_key": "1000:1000",
+            "/run/secrets/rondo_eval_provider_auth_json": "1000:1000",
             **dict(remote_owners or {}),
         }
         self.resolved_pwd = resolved_pwd
@@ -147,7 +147,7 @@ class FakeMaterializer:
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
-        provider_secret = self.root / f"{kwargs['staging_name']}.provider-api-key"
+        provider_secret = self.root / f"{kwargs['staging_name']}.provider-auth-json"
         provider_secret.write_bytes(b"")
         provider_secret.chmod(0o600)
         overlay.write_text(
@@ -217,11 +217,13 @@ class FakeHostExecutor:
         secret_mounts = [
             item
             for item in kwargs["compose_contract"].container.mounts
-            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+            if item.destination == "/run/secrets/rondo_eval_provider_auth_json"
         ]
         if len(secret_mounts) != 1:
             raise AssertionError("expected one exact provider secret mount")
-        self.provider_secrets.append(Path(secret_mounts[0].source).read_text(encoding="utf-8"))
+        self.provider_secrets.append(
+            json.loads(Path(secret_mounts[0].source).read_text(encoding="utf-8"))
+        )
         trials = Path(argv[argv.index("--trials-dir") + 1])
         return HostHarborResult(0, trials / argv[argv.index("--trial-name") + 1])
 
@@ -515,7 +517,7 @@ class TerminalBenchTests(unittest.TestCase):
         secret_mount = next(
             item
             for item in container.mounts
-            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+            if item.destination == "/run/secrets/rondo_eval_provider_auth_json"
         )
         self.assertEqual(
             Path(secret_mount.source),
@@ -906,7 +908,8 @@ class TerminalBenchTests(unittest.TestCase):
                 for call in environment.calls
             )
         )
-        self.assertIn("/run/secrets/rondo_eval_provider_api_key", commands)
+        self.assertIn("/run/secrets/rondo_eval_provider_auth_json", commands)
+        self.assertNotIn("python3 -c", commands)
         self.assertNotIn("auto_review.model", commands)
         self.assertNotIn("auto_review.reasoning_effort", commands)
         self.assertNotIn("auto_review.evidence_dir", commands)
@@ -926,17 +929,17 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('test ! -L "$task_workdir"', root_calls[0][0])
         self.assertIn('chmod -R a+rwX -- "$task_workdir"', root_calls[0][0])
         self.assertNotIn("/logs/agent", root_calls[0][0])
-        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", root_calls[0][0])
+        self.assertNotIn("/run/secrets/rondo_eval_provider_auth_json", root_calls[0][0])
         self.assertNotIn("/tmp/rondo-eval", root_calls[0][0])
         self.assertNotIn("chown", commands)
         secret_agent_calls = [
             call
             for call in agent_calls
-            if "/run/secrets/rondo_eval_provider_api_key" in call[0]
+            if "/run/secrets/rondo_eval_provider_auth_json" in call[0]
         ]
         self.assertEqual(len(secret_agent_calls), 2)
         self.assertTrue(any("stat -c '%u:%g'" in call[0] for call in secret_agent_calls))
-        self.assertTrue(any("chmod 0600" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("ln -sfn" in call[0] for call in secret_agent_calls))
         self.assertTrue(any("test -r /run/secrets/" in call[0] for call in secret_agent_calls))
         self.assertTrue(any("test ! -w /run/secrets/" in call[0] for call in secret_agent_calls))
         self.assertTrue(
@@ -1040,7 +1043,7 @@ class TerminalBenchTests(unittest.TestCase):
 
         secret_environment = FakeEnvironment(
             remote_owners={
-                "/run/secrets/rondo_eval_provider_api_key": "0:0"
+                "/run/secrets/rondo_eval_provider_auth_json": "0:0"
             }
         )
         with self.assertRaisesRegex(AdapterError, "command_id=verify_secret_owner"):
@@ -1060,7 +1063,7 @@ class TerminalBenchTests(unittest.TestCase):
                 adapter.run("repair the repository", git_probe_environment, mock.Mock())
             )
         git_probe_commands = "\n".join(call[0] for call in git_probe_environment.calls)
-        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", git_probe_commands)
+        self.assertNotIn("/run/secrets/rondo_eval_provider_auth_json", git_probe_commands)
 
     def test_checked_exec_diagnostic_is_bounded_and_secret_redacted(self) -> None:
         secret = "sk-secret-must-never-escape"
@@ -1172,7 +1175,7 @@ class TerminalBenchTests(unittest.TestCase):
             f"file: {json.dumps(str(result.provider_secret_path))}",
             overlay,
         )
-        self.assertIn("source: rondo_eval_provider_api_key", overlay)
+        self.assertIn("source: rondo_eval_provider_auth_json", overlay)
         self.assertEqual(result.provider_secret_path.read_bytes(), b"")
         self.assertEqual(result.provider_secret_path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(
@@ -1305,11 +1308,26 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn(secret, "\0".join(argv))
         self.assertNotIn(secret, repr(prepared.command))
         self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off"})
-        self.assertEqual(executor.provider_secrets, [secret])
+        self.assertEqual(executor.provider_secrets, [{"OPENAI_API_KEY": secret}])
         self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
         self.assertEqual(kwargs["exact_task_label"], "dev.rondo.eval.task=p1-b3-rondo")
         self.assertEqual(kwargs["image_reference"], prepared.command.image_ref)
         self.assertEqual(kwargs["compose_contract"], prepared.command.compose_contract)
+
+    def test_injected_backend_auth_json_round_trips_quoted_key(self) -> None:
+        prepared = self.prepare(Side.RONDO)
+        executor = FakeHostExecutor()
+        secret = 'quoted-"-backslash-\\-unicode-\u96ea'
+        backend = InjectedHostHarborBackend(
+            executor,
+            getenv=lambda name: secret if name == "OPENAI_API_KEY" else None,
+        )
+
+        asyncio.run(UnifiedTerminalBenchRunner(backend).run(prepared))
+
+        self.assertEqual(executor.provider_secrets, [{"OPENAI_API_KEY": secret}])
+        self.assertNotIn(secret, repr(prepared.command))
+        self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
 
     def test_injected_backend_clears_provider_secret_after_executor_failure(self) -> None:
         prepared = self.prepare(Side.RONDO)
@@ -1326,7 +1344,10 @@ class TerminalBenchTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "fake host failure"):
             asyncio.run(UnifiedTerminalBenchRunner(backend).run(prepared))
-        self.assertEqual(executor.provider_secrets, ["failure-secret"])
+        self.assertEqual(
+            executor.provider_secrets,
+            [{"OPENAI_API_KEY": "failure-secret"}],
+        )
         self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
 
     def test_concrete_host_executor_uses_public_full_lifetime_supervisor(self) -> None:
