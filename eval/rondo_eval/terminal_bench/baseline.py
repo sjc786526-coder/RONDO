@@ -23,7 +23,7 @@ from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalo
 
 
 CAMPAIGN_CAP_USD = Decimal("400.000000")
-CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("200.334576")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("221.772313")
 CAMPAIGN_MAX_RUNS = 161
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
@@ -37,7 +37,7 @@ MAX_SIGMA = 2
 MAX_REMAINING_INFRA_PER_ROUND = 2
 MECHANICAL_CIRCUIT_BREAKER_TASKS = 3
 MIN_COMMON_VALID_TASKS = 8
-CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v7.json")
+CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v8.json")
 RETIRED_CAMPAIGN_LOCK_PATHS = (
     Path("eval/locks/p2-b7-canary-baseline-v1.json"),
     Path("eval/locks/p2-b7-canary-baseline-v2.json"),
@@ -45,6 +45,7 @@ RETIRED_CAMPAIGN_LOCK_PATHS = (
     Path("eval/locks/p2-b7-canary-baseline-v4.json"),
     Path("eval/locks/p2-b7-canary-baseline-v5.json"),
     Path("eval/locks/p2-b7-canary-baseline-v6.json"),
+    Path("eval/locks/p2-b7-canary-baseline-v7.json"),
 )
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(
@@ -718,10 +719,10 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
     catalog = load_frozen_canary_catalog(paths)
     if (
         value["schema_version"] != 1
-        or value["campaign_id"] != "p2-b7-canary-baseline-v7"
-        or value["batch_id"] != "p2-b7-canary-sol-sol-v7"
+        or value["campaign_id"] != "p2-b7-canary-baseline-v8"
+        or value["batch_id"] != "p2-b7-canary-sol-sol-v8"
         or value["run_id_date"] != "20260812"
-        or value["run_id_sequence_base"] != 270000000
+        or value["run_id_sequence_base"] != 280000000
         or value["taskset_sha256"] != catalog.taskset_sha256
         or value["canary_catalog_sha256"] != catalog.catalog_sha256
         or value["terminal_bench_commit"] != catalog.terminal_bench_commit
@@ -833,14 +834,14 @@ def cost_forecast() -> dict[str, object]:
     historical_80 = (Decimal("33.176400"), Decimal("36.486560"))
     historical_160 = (Decimal("66.352800"), Decimal("72.973120"))
     observed_shape_stress = Decimal("173.653100")
-    remaining_before_v7_canary = CAMPAIGN_CAP_USD - CAMPAIGN_PRIOR_ESTIMATED_USD
+    remaining_before_v8_canary = CAMPAIGN_CAP_USD - CAMPAIGN_PRIOR_ESTIMATED_USD
     return {
         "schema_version": 1,
         "currency": "USD",
         "actual_usd": None,
         "campaign_cap_usd": _money(CAMPAIGN_CAP_USD),
         "prior_estimated_usd": _money(CAMPAIGN_PRIOR_ESTIMATED_USD),
-        "remaining_before_v7_canary_usd": _money(remaining_before_v7_canary),
+        "remaining_before_v8_canary_usd": _money(remaining_before_v8_canary),
         "base_runs": 40,
         "maximum_conditional_runs": 40,
         "maximum_infra_replacement_runs": 80,
@@ -857,7 +858,7 @@ def cost_forecast() -> dict[str, object]:
             SOL_MAX_LEGAL_REQUEST_RESERVATION_USD
         ),
         "feasible_from_observed_shape": (
-            observed_shape_stress < remaining_before_v7_canary
+            observed_shape_stress < remaining_before_v8_canary
         ),
         "mathematical_all_legal_usage_guarantee": False,
         "stop_rule": (

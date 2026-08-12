@@ -77,4 +77,16 @@
 - v7 使用全新 identity 与 `20260812-270000000` ID 区间，prior 精确为 `200.334576 USD`；taskset、profile、bundle、
   TB commit、轮次和停止规则不变。
 
-后续证据：待 v7 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
+## v7 执行与 metrics race 修复
+
+- Oracle 10/10、fresh canary completed (`0.225266 USD`)。第一轮中 `filter-js-from-html`、`fix-git`、
+  `polyglot-c-py` 三个不同 task 均在 `docker_container_metrics` 失败，耗时 `1.205—1.670s`，其余 Docker/VHDX
+  探针均约 1s 内；第三个 task 后 circuit breaker blocked，后续 151 slots 均未 claim。
+- v7 formal `21.212471 USD`、P2 累计 `221.772313 USD`，77 个 upstream attempts 均 settled，reservation 0，
+  `actual_usd=null`；结果提交 `a04e794`，v7 只读退役。
+- 修复只处理 inspect 后容器自然移除的 metrics exec race：fresh exact-label re-list 必须证明旧容器已消失，才接受
+  空 teardown sample，并仍要求早先 durable metrics；容器仍在或 identity 变化继续 fail-closed。148 条 focused tests
+  通过，两项受影响镜像官方 no-API Oracle 经正式 parser 复核 completed/reward 1。
+- v8 使用新的 `20260812-280000000` ID 区间和 prior `221.772313 USD`，其余冻结事实不变。
+
+后续证据：待 v8 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
