@@ -34,6 +34,7 @@ class LauncherIdentity:
     base_url: str
     host: str
     port: int
+    serve_config_sha256: str
     created_ns: int
 
 
@@ -49,13 +50,14 @@ def publish_launcher_identity(
     base_url: str,
     host: str,
     port: int,
+    serve_config_sha256: str,
 ) -> LauncherIdentity:
     """Publish one private receipt after the pinned launcher process starts."""
 
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
         raise ConfigError("local approval launcher PID is invalid")
     identity = LauncherIdentity(
-        schema_version=1,
+        schema_version=2,
         nonce=secrets.token_hex(32),
         pid=pid,
         process_start_ticks=_process_start_ticks(pid),
@@ -67,6 +69,7 @@ def publish_launcher_identity(
         base_url=base_url,
         host=host,
         port=port,
+        serve_config_sha256=serve_config_sha256,
         created_ns=time.time_ns(),
     )
     _validate_identity(identity)
@@ -127,6 +130,7 @@ def require_launcher_identity(
     base_url: str,
     host: str,
     port: int,
+    serve_config_sha256: str,
 ) -> LauncherIdentity:
     """Load and validate the exact live process that owns the configured port."""
 
@@ -139,6 +143,7 @@ def require_launcher_identity(
         base_url,
         host,
         port,
+        serve_config_sha256,
     )
     actual = (
         identity.runtime_sha256,
@@ -148,6 +153,7 @@ def require_launcher_identity(
         identity.base_url,
         identity.host,
         identity.port,
+        identity.serve_config_sha256,
     )
     if actual != expected:
         raise ConfigError("local approval launcher identity differs from configuration")
@@ -156,11 +162,16 @@ def require_launcher_identity(
 
 
 def revalidate_launcher_identity(
-    config: RuntimeConfig, expected: LauncherIdentity
+    config: RuntimeConfig,
+    expected: LauncherIdentity,
+    *,
+    serve_config_sha256: str,
 ) -> None:
     current = _read_identity(_receipt_path(config))
     if current != expected:
         raise ConfigError("local approval launcher identity changed during request")
+    if current.serve_config_sha256 != serve_config_sha256:
+        raise ConfigError("local approval launcher configuration changed during request")
     _verify_process(current, require_listener=True)
 
 
@@ -216,25 +227,37 @@ def _read_identity(path: Path) -> LauncherIdentity:
 
 def _validate_identity(identity: LauncherIdentity) -> None:
     if (
-        identity.schema_version != 1
-        or not _HEX_64.fullmatch(identity.nonce)
+        identity.schema_version != 2
+        or not _is_hex_64(identity.nonce)
         or not isinstance(identity.pid, int)
         or isinstance(identity.pid, bool)
         or identity.pid <= 1
         or not isinstance(identity.process_start_ticks, int)
+        or isinstance(identity.process_start_ticks, bool)
         or identity.process_start_ticks <= 0
-        or not _HEX_64.fullmatch(identity.command_sha256)
-        or not _HEX_64.fullmatch(identity.runtime_sha256)
-        or not _HEX_64.fullmatch(identity.model_sha256)
+        or not _is_hex_64(identity.command_sha256)
+        or not _is_hex_64(identity.runtime_sha256)
+        or not _is_hex_64(identity.model_sha256)
+        or not isinstance(identity.model_path, str)
         or not Path(identity.model_path).is_absolute()
+        or not isinstance(identity.model_id, str)
         or not identity.model_id
+        or not isinstance(identity.base_url, str)
         or not identity.base_url
         or identity.host != "127.0.0.1"
+        or not isinstance(identity.port, int)
+        or isinstance(identity.port, bool)
         or not 1 <= identity.port <= 65535
+        or not _is_hex_64(identity.serve_config_sha256)
         or not isinstance(identity.created_ns, int)
+        or isinstance(identity.created_ns, bool)
         or identity.created_ns <= 0
     ):
         raise ConfigError("local approval launcher identity fields are invalid")
+
+
+def _is_hex_64(value: object) -> bool:
+    return isinstance(value, str) and _HEX_64.fullmatch(value) is not None
 
 
 def _verify_process(identity: LauncherIdentity, *, require_listener: bool) -> None:

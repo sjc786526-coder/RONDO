@@ -14,13 +14,15 @@
   malformed/歧义证据 fail-closed；合法 `ToolSearchOutput.tools` 作为既有证据保留，Luna/Sol/Local
   三组 consumer 协议投影对同一 Standard/Lite fixture 产生完全相同的 canonical bytes；这项验收不等同于
   三套生产调用端均已实现。
-- **L2 仅 CPU x64 前端/运行闭包就绪**：llama.cpp 固定为 `b10333`/commit
+- **L2 仍仅 CPU x64 前端/运行闭包就绪，model-free launcher 前置已收口**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 runtime closure、Responses client、
   doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
-  52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。
+  52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。配置/命令现可精确表达 4k
+  原生 auto+fit smoke 与 8k all+fit-off baseline，固定单卡 split/main GPU、F16 K/V、512/256 batch、no-mmproj、
+  Jinja 和显式官方模板；这只由 fake/model-free 测试验收。
 - model-backed client 必须消费 launcher 写入主仓 `eval-data/local-approval/launcher-identity.json`
   的 0600 私有 receipt，绑定 nonce、PID/start ticks、实际 cmdline、监听 socket、runtime/model
-  identity/path/id 和 endpoint。client 在 identity probe 后、decision 前以及 decision 返回后重验同一
+  identity/path/id、endpoint 和实际服务参数指纹。schema v2 会拒绝旧 receipt；client 在 identity probe 后、decision 前以及 decision 返回后重验同一
   launcher 实例；redirect、receipt 替换、进程/监听者变化都 fail-closed。这是轻量实例身份
   约束，不是签名或权限系统，也不证明 server 实际加载了 receipt 所声明的全部字节，或 launcher 退出后
   server 必然随之退出。
@@ -35,8 +37,9 @@
   单文件下载/校验和 8GB 两阶段上下文方案。官方同档和主要社区资产均已比较；当前状态为
   `download_ready_blocked_on_user_approval`，详见
   `doc/audit-snapshots/2026-08-12-ministral-3-8b-instruct-2512-gguf-freeze.md`。这不改变上述
-  `cpu_only_no_model`/`not_run` 能力事实。权重下载已就绪，但项目内 Linux CUDA runtime、launcher 最小参数合同和唯一模板
-  口径验收仍是 model-backed smoke/正式 baseline 的前置。
+  `cpu_only_no_model`/`not_run` 能力事实。当前官方模板已按 exact revision/bytes/SHA 冻结，launcher/identity 合同也已
+  model-free 收口；权重下载仍未授权，项目内 Linux CUDA runtime/依赖闭包和 exact-GGUF model-backed 4k smoke 仍是
+  `gpu_model_serving_validated` 的硬前置，8k baseline 随后单独验收。
 
 ## 核心设计（已定，不再反复讨论）
 

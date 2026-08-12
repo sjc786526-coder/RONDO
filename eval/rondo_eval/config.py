@@ -72,8 +72,10 @@ _PAID_MODEL_KEYS = {
 _REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 _MAX_PAID_PROFILES = 16
 _LOCAL_SERVER_KEYS = {
-    "binary", "host", "port", "context_size", "gpu_layers", "flash_attention",
-    "parallel", "metrics", "slots", "web_ui", "tools",
+    "binary", "host", "port", "context_size", "gpu_layers", "fit",
+    "batch_size", "ubatch_size", "cache_type_k", "cache_type_v",
+    "no_mmproj", "chat_template_file", "chat_template_sha256", "jinja",
+    "flash_attention", "parallel", "metrics", "slots", "web_ui", "tools",
 }
 _LOCAL_REQUEST_KEYS = {
     "stream", "temperature", "top_p", "seed", "max_output_tokens",

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "repo": "mistralai/Ministral-3-8B-Instruct-2512",
+  "revision": "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d",
+  "source_file": "chat_template.jinja",
+  "installed": {
+    "relative_path": "eval/templates/local-approval/ministral-3-8b-instruct-2512-chat-template.jinja",
+    "size_bytes": 11912,
+    "sha256": "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56"
+  }
+}

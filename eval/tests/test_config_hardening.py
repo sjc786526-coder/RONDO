@@ -241,6 +241,14 @@ class ConfigHardeningTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             load_runtime_config(self.paths)
 
+        (self.paths.common_root / "rondo.local.toml").write_text(
+            PAID_EVAL_CONFIG
+            + "\n[local_model]\n[local_model.server]\nextra_cli_args = [\"--unsafe\"]\n",
+            encoding="utf-8",
+        )
+        with self.assertRaises(ConfigError):
+            load_runtime_config(self.paths)
+
     def test_retry_and_model_metadata_fail_closed(self) -> None:
         invalid_configs = (
             PAID_EVAL_CONFIG.replace(
