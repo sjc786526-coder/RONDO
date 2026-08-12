@@ -217,11 +217,14 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - publisher/validator 已统一接受 a1—a4（a5 拒绝），running slot 恢复提前到 Oracle preflight 之前。后继将
   stopped-container 精确消失宽限从 0.5 秒有界扩至 5 秒，live/replacement 仍 hard fail。v12 没有
   512 PID 用尽的证据，后继仍复用 catalog v2 的 filter PIDs=512，不另行放宽资源合同。
+- 生成器已冻结唯一 v13：campaign/batch `p2-b7-canary-baseline-v13`/`p2-b7-canary-sol-sol-v13`，321 个
+  run ID 从 `20260812-330000000` 派生，lock SHA
+  `c99257c15015a334ef46334536b09582ec5b642e1fa21e17c522260693052f1e`，cap `700 USD`、prior
+  `385.923585 USD`；v1—v12 保持只读。
 
 ### 后续计划
 
-1. 提交 Docker lifecycle 合同并生成唯一后继 identity（prior `385.923585 USD`）；重新执行受共享组件变化
-   影响的 Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
+1. 从 v13 重新执行受共享组件变化影响的 Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
    infra 必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同分母、费用与资源事实。
 
 ### 阻塞项
@@ -232,7 +235,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 ### 当前验收状态
 
 - v1 是 API 前失败终态；v2—v12 是保留全部费用事实的 blocked 终态。v12 累计 debit `385.923585 USD`、
-  reservation 0；后继离线修复已通过 focused 门禁，尚未生成 identity。
+  reservation 0；v13 已冻结，尚未执行 Oracle/API。
 
 ## 6. 关键决策记录
 
@@ -259,3 +262,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 019 | active pointer 只允许最新 identity；后继 prior 从 terminal state、wire receipt 和完整 settled budget 机械重算，coordinator lease 与每步 heavy lock 分层 | 允许安全恢复和增量执行，同时防止历史 identity、丢失 debit 或并发 worker 被重新执行 | B6/B7 | 已采纳 |
 | 020 | v10 保持原 161-slot/600 USD 合同自然熔断；其 Oracle/wire/13 run/费用全部只读，结果提交但不回填为通过 | 第三个不同 task 的真实 provider-integrity 满足冻结 circuit breaker，不能为继续执行改写 identity | B6/B7 | 已采纳 |
 | 021 | 后继 schema-v2 机械派生 321 slot，并采用 infra-only a1—a4、第二次同类诊断暂停、第三次同类 task-local 熔断；用户追加 100 USD 后总 cap 700，prior 精确继承 v10 | 允许少量任务形态复现，同时禁止盲目连续付费；历史 schema-v1 仍按原字节只读加载 | B6/B7 | 已采纳 |
+| 022 | v12 的 a3 发布缺口按 operator interruption 退役；后继提前 crash reconciliation，并仅将已停止的同 identity 容器消失宽限扩至 5 秒 | 不回填缺失 public record，不将无证据的 512 PID 问题冒充根因，live/replacement 仍 fail-closed | B6/B7 | 已采纳 |

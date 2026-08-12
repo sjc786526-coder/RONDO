@@ -240,8 +240,8 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             tuple(item.version for item in registry),
             tuple(range(1, len(registry) + 1)),
         )
-        self.assertGreaterEqual(len(registry), 12)
-        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v12")
+        self.assertGreaterEqual(len(registry), 13)
+        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v13")
         active = load_campaign_identity(paths)
         self.assertEqual(active.campaign_id, registry[-1].campaign_id)
         self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
@@ -249,7 +249,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(active.max_attempts, 4)
         self.assertEqual(len(active.slots), 321)
         self.assertEqual(active.budget["campaign_cap_usd"], "700.000000")
-        self.assertEqual(active.budget["prior_estimated_usd"], "345.963147")
+        self.assertEqual(active.budget["prior_estimated_usd"], "385.923585")
         active_pids = {item.task_id: item.pids_limit for item in active.catalog.tasks}
         self.assertEqual(active_pids["terminal-bench/filter-js-from-html"], 512)
         self.assertEqual(set(active_pids.values()), {256, 512})
@@ -269,6 +269,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(
             {item.pids_limit for item in v11.catalog.tasks},
             {256},
+        )
+        v12 = load_historical_campaign_identity(paths, 12)
+        self.assertEqual(v12.campaign_id, "p2-b7-canary-baseline-v12")
+        self.assertEqual(v12.budget["prior_estimated_usd"], "345.963147")
+        self.assertEqual(
+            v12.catalog.task("terminal-bench/filter-js-from-html").pids_limit,
+            512,
         )
         self.assertEqual(
             load_historical_campaign_identity(paths, 9).campaign_id,
@@ -345,7 +352,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         validate_successor_run_range(
             registry,
             run_id_date="20260812",
-            run_id_sequence_base=330000000,
+            run_id_sequence_base=340000000,
         )
 
     def test_campaign_lock_catalog_drift_is_rejected(self) -> None:

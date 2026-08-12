@@ -41,3 +41,6 @@
 - 离线统一 producer/validator a1—a4 并将 crash reconciliation 提前到 Oracle；后继 Docker 合同只对已验证 stopped
   object 将 disappearance grace 扩至 5 秒，live/replacement 不放行。v12 没有 512 PID 用尽的持久证据，
   因此后继仍冻结 catalog v2 的 512 PID，不用新资源上限掩盖 lifecycle 问题。
+- focused 132/132 与 `eval-lock` 85 packages 通过后，生成器冻结 v13：run base
+  `20260812-330000000`、lock SHA `c99257c15015a334ef46334536b09582ec5b642e1fa21e17c522260693052f1e`、
+  prior `385.923585 USD`；v1—v12 保持只读。
