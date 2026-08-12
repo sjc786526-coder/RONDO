@@ -59,3 +59,10 @@
   v15：run base `20260812-350000000`、lock SHA
   `6749b815023bcca52bc2a57df3faa544eafb5ad38bef5284dc7289644f48f44a`、prior `406.691123 USD`；v1—v14
   的 lock/state/ledger/result/artifact 均未改写。
+- v15 只重跑 filter Oracle，fresh wire `$0.210982`；db pass、extract reward 0，filter a1/a2 同类 Docker failure
+  后在 a3 前诊断并退役。本 identity `$1.870700`，累计 `$408.561823`、reservation 0。no-API RCA 显示
+  1024 PIDs 仅 9/28 Selenium batch 完成、19 次 driver 创建失败；4096 PIDs 下 28/28 完成、峰值 3083，另闭合
+  stopped-container inspect/remove 竞态。focused 164/164、lock 85 packages 通过。
+- catalog v4 仅将 filter 调至 4096 PIDs；生成器冻结 v16：run base `20260812-360000000`、lock SHA
+  `8491778a7e358d279e96771f4a97927f9004c57498ba22a3d4e93c28067d4f21`、prior `408.561823 USD`。v1—v15
+  及其 lock/state/ledger/result/artifact 均未改写。

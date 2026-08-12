@@ -71,11 +71,11 @@
   reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
   只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
   `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B6 预算合同已冻结。v1—v14 均为只读终态。
-  v14 完成 fresh wire 与第一轮前两题，随后 filter 的 a1 provider-integrity、a2/a3 Docker metric failure 触发
-  diagnosis hold；独立 no-API 官方 Oracle 以 512 PIDs 运行到精确上限并 reward 1，确认是本地资源合同缺少
-  supervisor 进程余量。v14 以 local implementation defect 收口，累计 debit `406.691123 USD`、reservation 0。
-  后继 catalog 仅将 filter 提至 1024 PIDs，其他九题、profile、bundle 与 700 USD 上限不变；v15 已以 run base
-  `20260812-350000000` 和全新 lock/IDs 冻结，待增量 Oracle、fresh wire 与正式执行。**
+  v15 在 fresh wire、db pass、extract 正常 reward 0 后，filter a1/a2 同类 Docker failure 触发诊断；no-API RCA
+  证明 1024 PIDs 仅完成 9/28 个 Selenium batch，而 4096 PIDs 完成 28/28，并闭合自然 teardown 的
+  inspect/remove 竞态。v15 以 local implementation defect 收口，累计 debit `408.561823 USD`、reservation 0。
+  后继 catalog 仅将 filter 提至 4096 PIDs，其他九题、profile、bundle 与 700 USD 上限不变；v16 已以 run base
+  `20260812-360000000` 和全新 lock/IDs 冻结，待 Oracle、fresh wire 与正式执行。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -128,7 +128,7 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v1—v14 只读，v15 冻结待执行 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v1—v15 只读，v16 冻结待执行 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
