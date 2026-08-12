@@ -90,10 +90,15 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
   lock 选择与配置切换时点、CUDA 12.6.2 归因和可复现链接。`git diff --check`、lock/Plan 015 精确身份和意外大文件检查通过。
 - 2026-08-12：研究文档提交 `f3c00ece26cf4cf9b9f48302c3ad38372a7effb4`，首次以 merge
   `e99a570d505c0e26b8fd9c3d9c3af458ee83b829` 合并本地 `main` 并推送远端；本 closure 只记录交付状态。
+- 2026-08-12：以 b10333 exact commit 复核官方 Ubuntu CUDA workflow（blob `2528b18573a78a9a8e99783acc7b9f0b81688ec7`）
+  和 CUDA CMake（blob `d3953eee962e7cdc8cd39e6e8c062bced167e200`）。确认 CUDA job 只有 configure/build、没有测试命令；
+  workflow 还使用 permissive linker flag 与 `GGML_CUDA_CUB_3DOT2=ON`，后者会 FetchContent CCCL `v3.2.0`。Plan 018
+  交接已增加选择/冻结门，不改变保留 b10333 的路线。
 
 ### 当前工作
 
-- 本轮调查、决策、检查和 Git 交付已完成；不进入 Plan 018、权重下载或 GPU/model-backed 执行。
+- CUDA workflow 勘误已完成源码复核和文档更新，正在完成轻量检查与 Git 交付；不进入 Plan 018、权重下载或
+  GPU/model-backed 执行。
 
 ### 后续计划
 
@@ -109,7 +114,7 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
 
 ### 当前验收状态
 
-- `research_complete_git_delivered`。
+- `errata_complete_git_delivery_pending`。
 
 ## 6. 关键决策记录
 
@@ -122,3 +127,4 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
 | 003 | 唯一运行路线继续冻结为 b10333 Linux CUDA 项目内源码构建 | b10375 仍无官方 Linux CUDA 包，升级不能省掉 Toolkit/构建；现有 Plan 016 合同已按 b10333 收口 | Plan 018 与 L2 runtime | 已采纳 |
 | 004 | 不以 Vulkan、Windows server、CUDA Docker 或 Ollama 替代当前主路线 | 各路线分别缺少 WSL NVIDIA Vulkan 的稳定设备证据，或引入跨 OS、容器/canary、协议/模板/identity 新控制面 | 备选路线与维护边界 | 已采纳 |
 | 005 | 保留 CPU runtime/lock；CUDA runtime 使用新 ignored 路径和独立 lock，并复用 receipt v2/模板/config 合同 | CPU 资产是 model-free 回滚入口；CUDA backend/host closure 与 capability 需要独立真实证据，但无需重做已验收配置和身份 schema | 下一实现任务 | 已采纳 |
+| 006 | Plan 018 不直接复制官方 CI 的 CUB/linker 两项参数，先关闭可复现依赖与严格链接决策门 | 官方 CUDA job 未运行测试；CUB 开关会按 tag FetchContent CCCL，permissive linker flag 会放宽 undefined-symbol 检查。二者都缺少本机真实构建证据 | Plan 018 configure/build 与 source freeze | 已采纳 |
