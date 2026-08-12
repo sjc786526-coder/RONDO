@@ -1,0 +1,27 @@
+{
+  "actual_usd": null,
+  "base_point_estimate_usd": "17.829510",
+  "base_runs": 40,
+  "campaign_cap_usd": "200.000000",
+  "currency": "USD",
+  "feasible_from_observed_shape": true,
+  "full_condition_point_estimate_usd": "35.529550",
+  "historical_40_run_range_usd": [
+    "16.588200",
+    "18.243280"
+  ],
+  "historical_80_run_range_usd": [
+    "33.176400",
+    "36.486560"
+  ],
+  "mathematical_all_legal_usage_guarantee": false,
+  "maximum_conditional_runs": 40,
+  "maximum_infra_replacement_runs": 40,
+  "maximum_legal_request_reservation_usd": "18.885000",
+  "schema_version": 1,
+  "stop_rule": "do not start a request unless its maximum legal reservation fits the remaining campaign budget",
+  "v19_codex_run_usd": "0.414705",
+  "v19_rondo_run_usd": "0.456082",
+  "v19_shape_stress_with_canary_usd": "86.968700",
+  "wire_canary_usd": "0.284300"
+}

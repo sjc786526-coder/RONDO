@@ -35,9 +35,10 @@
   frozen Codex catalog、价卡/retry、profile/endpoint SHA 与 20 USD pair cap。fresh exact-wire canary 4/4 请求
   attempt 1、usage valid 后，正式运行严格按 RONDO→frozen Codex 串行完成同一 `fix-git` task：RONDO 17/17、
   Codex 18/18 upstream request 均 attempt 1、usage-priced，双侧 `completed`/reward 1、reservation 0。
-  RONDO 两份自然 Guardian `E_final/meta` 均 Sol/low、approved，S2 request/evidence 集合绑定 verified。
+  RONDO 两份自然 Guardian `E_final/meta` 均 Sol/low、approved；不可改写的 v19 public record 只证明
+  task-scoped request/evidence count match，后续新记录才要求 canonical digest 一一绑定后标为 verified。
   durable public result、pair lock、sequence ledger、profile/endpoint 和 container metrics 经既有 `assess_m1`
-  得到 `m1=passed`、`reasons=[]`、`s2=verified`。v19 正式费用 `$0.870787`；Plan 014 含历史 canary/失败终态
+  得到 `m1=passed`、`reasons=[]`、`s2=task_scoped_count_match`。v19 正式费用 `$0.870787`；Plan 014 含历史 canary/失败终态
   的累计本地估算 `$6.988825 < $280`，全部 reservation settled，`actual_usd=null`。旧失败 pair 均保持不可复用，
   详见 Plan 014 与执行日志。
 
@@ -73,7 +74,7 @@
 
 - 1~2 个任务的端到端，结果落盘归档。
 - 同步开启 S2，确认真实审批过程能产出 `E_final`。
-- **已完成**：v19 在 `terminal-bench/fix-git` 上完成双侧真实运行，M1 passed、S2 verified；后续运行不复用该
+- **已完成**：v19 在 `terminal-bench/fix-git` 上完成双侧真实运行，M1 passed、S2 task-scoped count match；后续运行不复用该
   identity，B7 仍需按 B6 单独预算和授权。
 
 ### B4 任务分层与冻结清单（规模 S）

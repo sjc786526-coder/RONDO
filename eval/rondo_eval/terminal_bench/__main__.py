@@ -44,6 +44,7 @@ from .pair import (
 from .results import (
     classify_terminal_bench_result,
     parse_single_task_result,
+    public_guardian_evidence,
     publish_terminal_bench_failure,
     publish_terminal_bench_result,
     validate_eval_harness_checkout,
@@ -372,20 +373,7 @@ def main(argv: list[str] | None = None) -> int:
             "reward": parsed.reward,
             "artifacts": artifact_path.relative_to(paths.common_root).as_posix(),
             "metadata_ready": result.metadata_ready,
-            "evidence": [
-                {
-                    "relative_path": item.relative_path,
-                    "review_id": item.review_id,
-                    "guardian_source_baseline": item.guardian_source_baseline,
-                    "guardian_source_commit": item.guardian_source_commit,
-                    "policy_sha256": item.policy.sha256,
-                    "request_shape": item.policy.request_shape,
-                    "model": item.model,
-                    "reasoning_effort": item.reasoning_effort,
-                    "terminal_status": item.terminal_status,
-                }
-                for item in result.evidence
-            ],
+            "evidence": public_guardian_evidence(result.evidence),
             "budget": result.budget_snapshot,
             "docker_samples": (
                 len(result.harbor.docker_evidence.samples)

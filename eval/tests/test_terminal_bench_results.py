@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -1913,6 +1914,146 @@ class TerminalBenchResultTests(unittest.TestCase):
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "publication")
+
+    def test_success_cli_reports_durable_public_guardian_evidence(self) -> None:
+        run_id = "20260810-010000015-tb-rondo-r1"
+        live = self._live_result(run_id)
+        spec = replace(live.prepared.spec, side=Side.RONDO)
+        object.__setattr__(live, "prepared", SimpleNamespace(spec=spec))
+        evidence_relative = self._write_guardian_bundle()
+        evidence, _e_final, _meta = load_guardian_evidence_bundle(
+            live.harbor.jobs_dir,
+            evidence_relative,
+            expected_model=spec.provider.guardian_model,
+            expected_effort=spec.provider.guardian_effort,
+        )
+        object.__setattr__(live, "evidence", (evidence,))
+        metadata_path = self.root / "eval-data/work" / run_id / "api-metadata.json"
+
+        async def run_live(*_args, **_kwargs):
+            self._write_metadata(
+                metadata_path,
+                "main",
+                "guardian",
+                "main",
+                guardian_digests=(evidence.canonical_request_sha256,),
+            )
+            return live
+        pair_identity = mock.Mock(
+            pair_id="test-cli-public-evidence-pair",
+            lock_sha256="9" * 64,
+        )
+        pair_identity.paid_budget = SimpleNamespace(
+            per_side_usd=10.0,
+            pair_usd=20.0,
+        )
+        pair_identity.require_selected_profile.return_value.to_dict.return_value = {
+            **spec.provider.to_public_dict(),
+            "frozen_codex_model_catalog_source_commit": "a" * 40,
+            "frozen_codex_model_catalog_sha256": "b" * 64,
+            "max_guardian_logical_requests": 2,
+        }
+        pair_identity.mode.return_value = SimpleNamespace(batch_id=self.PAID_BATCH_ID)
+        pair_identity.slot_for.return_value = SimpleNamespace(
+            paid_run_id=run_id,
+            slot=1,
+            round=1,
+        )
+        pair_identity.validate_runtime_seccomp.return_value = self.root / "seccomp.json"
+        pair_identity.no_api_seccomp = SimpleNamespace(
+            source_sha256="c" * 64,
+            effective_sha256="d" * 64,
+        )
+        sequence = mock.MagicMock()
+        sequence.__enter__.return_value = sequence
+        paths = RepoPaths(self.root, self.root)
+        with patch.object(
+            terminal_bench_main.RepoPaths, "discover", return_value=paths
+        ), patch.object(
+            terminal_bench_main, "load_active_pair_identity", return_value=pair_identity
+        ), patch.object(
+            terminal_bench_main, "validate_harbor_installation"
+        ), patch.object(
+            terminal_bench_main,
+            "load_runtime_config",
+            return_value=SimpleNamespace(
+                paid_provider_projection=lambda: spec.provider
+            ),
+        ), patch.object(
+            terminal_bench_main,
+            "validate_eval_harness_checkout",
+            return_value="f" * 40,
+        ), patch.object(
+            terminal_bench_main, "_load_manifest", return_value=spec.binary
+        ), patch.object(
+            terminal_bench_main, "validate_results_worktree", return_value=self.root
+        ), patch.object(
+            terminal_bench_main,
+            "validate_measurement_checkout",
+            return_value="e" * 40,
+        ), patch.object(
+            terminal_bench_main,
+            "load_provider_secret",
+            return_value=("OPENAI_API_KEY", "key"),
+        ), patch.object(
+            terminal_bench_main,
+            "lease_from_watchdog",
+            return_value=SimpleNamespace(lease=object(), guard=object()),
+        ), patch.object(
+            terminal_bench_main,
+            "run_budgeted_terminal_bench",
+            mock.AsyncMock(side_effect=run_live),
+        ), patch.object(
+            terminal_bench_main,
+            "_paid_container_metrics",
+            return_value={
+                "container_id": "a" * 64,
+                "cpu_usage_seconds": 1.0,
+                "peak_memory_bytes": 4096,
+            },
+        ), patch.object(
+            terminal_bench_main,
+            "publication_context",
+            return_value=self._publication(side=Side.RONDO),
+        ), patch.object(
+            terminal_bench_main, "PairSequenceLedger", return_value=sequence
+        ), patch("builtins.print") as safe_print:
+            result = terminal_bench_main.main(
+                [
+                    "--side",
+                    "rondo",
+                    "--batch-id",
+                    self.PAID_BATCH_ID,
+                    "--run-id",
+                    run_id,
+                    "--binary-manifest",
+                    "/ignored/manifest.json",
+                    "--docker-host-volume",
+                    os.fspath(self.root),
+                    "--results-worktree-root",
+                    os.fspath(self.root),
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        receipt = json.loads(safe_print.call_args.args[0])
+        record = json.loads(
+            (self.root / "eval/results/runs.jsonl").read_text(encoding="utf-8")
+        )
+        self.assertEqual(receipt["evidence"], record["summary"]["evidence"])
+        self.assertEqual(
+            receipt["evidence"][0]["canonical_request_sha256"],
+            evidence.canonical_request_sha256,
+        )
+        self.assertEqual(
+            receipt["evidence"][0]["relative_path"],
+            "guardian-evidence/0001/E_final.json",
+        )
+        shutil.rmtree(self.root / "work")
+        artifact_root = self.root / receipt["artifacts"]
+        self.assertTrue(
+            (artifact_root / receipt["evidence"][0]["relative_path"]).is_file()
+        )
         runs_root = self.root / "eval-data" / "runs"
         self.assertFalse((runs_root / f".{run_id}.publish.json").exists())
 

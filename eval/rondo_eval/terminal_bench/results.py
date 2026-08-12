@@ -348,6 +348,28 @@ def classify_terminal_bench_result(
     return parsed
 
 
+def public_guardian_evidence(
+    observations: tuple[EvidenceObservation, ...],
+) -> list[dict[str, str]]:
+    """Project Guardian evidence only to its durable public artifact shape."""
+
+    return [
+        {
+            "relative_path": f"guardian-evidence/{index:04d}/E_final.json",
+            "review_id": item.review_id,
+            "guardian_source_baseline": item.guardian_source_baseline,
+            "guardian_source_commit": item.guardian_source_commit,
+            "policy_sha256": item.policy.sha256,
+            "request_shape": item.policy.request_shape,
+            "model": item.model,
+            "reasoning_effort": item.reasoning_effort,
+            "terminal_status": item.terminal_status,
+            "canonical_request_sha256": item.canonical_request_sha256,
+        }
+        for index, item in enumerate(observations, start=1)
+    ]
+
+
 def publish_terminal_bench_failure(
     paths: RepoPaths,
     *,
@@ -513,24 +535,7 @@ def _safe_summary(
     publication: RunPublicationContext,
 ) -> dict[str, Any]:
     spec = live_result.prepared.spec
-    evidence = [
-        {
-            # Publication revalidates the private Harbor source path, then
-            # archives under a review-id-independent stable location.  Public
-            # consumers must only receive the durable archived path.
-            "relative_path": f"guardian-evidence/{index:04d}/E_final.json",
-            "review_id": item.review_id,
-            "guardian_source_baseline": item.guardian_source_baseline,
-            "guardian_source_commit": item.guardian_source_commit,
-            "policy_sha256": item.policy.sha256,
-            "request_shape": item.policy.request_shape,
-            "model": item.model,
-            "reasoning_effort": item.reasoning_effort,
-            "terminal_status": item.terminal_status,
-            "canonical_request_sha256": item.canonical_request_sha256,
-        }
-        for index, item in enumerate(live_result.evidence, start=1)
-    ]
+    evidence = public_guardian_evidence(live_result.evidence)
     effective_task_outcome = (
         parsed.task_outcome
         if parsed.outcome in {RunOutcome.COMPLETED, RunOutcome.AGENT_FAILED}
