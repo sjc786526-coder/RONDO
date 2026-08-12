@@ -33,10 +33,11 @@ BASE_ROUNDS = (
     "ab-codex-1",
 )
 MAX_SIGMA = 2
-CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v3.json")
+CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v4.json")
 RETIRED_CAMPAIGN_LOCK_PATHS = (
     Path("eval/locks/p2-b7-canary-baseline-v1.json"),
     Path("eval/locks/p2-b7-canary-baseline-v2.json"),
+    Path("eval/locks/p2-b7-canary-baseline-v3.json"),
 )
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(
@@ -695,10 +696,10 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
     catalog = load_frozen_canary_catalog(paths)
     if (
         value["schema_version"] != 1
-        or value["campaign_id"] != "p2-b7-canary-baseline-v3"
-        or value["batch_id"] != "p2-b7-canary-sol-sol-v3"
+        or value["campaign_id"] != "p2-b7-canary-baseline-v4"
+        or value["batch_id"] != "p2-b7-canary-sol-sol-v4"
         or value["run_id_date"] != "20260811"
-        or value["run_id_sequence_base"] != 230000000
+        or value["run_id_sequence_base"] != 240000000
         or value["taskset_sha256"] != catalog.taskset_sha256
         or value["canary_catalog_sha256"] != catalog.catalog_sha256
         or value["terminal_bench_commit"] != catalog.terminal_bench_commit
@@ -708,7 +709,7 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
         or value["budget"]
         != {
             "campaign_cap_usd": "200.000000",
-            "prior_estimated_usd": "39.269328",
+            "prior_estimated_usd": "58.689250",
             "run_cap_usd": "40.000000",
             "max_run_slots": 161,
             "maximum_legal_request_reservation_usd": "18.885000",

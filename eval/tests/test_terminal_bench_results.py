@@ -1262,6 +1262,64 @@ class TerminalBenchResultTests(unittest.TestCase):
                 publication=self._publication(side=Side.RONDO),
             )
 
+    def test_completed_campaign_rondo_without_guardian_is_published(self) -> None:
+        run_id = "20260811-230000001-tb-rondo-r1"
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
+        object.__setattr__(
+            live_result,
+            "budget_snapshot",
+            self._completed_budget_snapshot(run_id, request_count=1),
+        )
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        provider = live_result.prepared.spec.provider
+
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=CampaignPublicationContext(
+                campaign_id="p2-b7-canary-baseline-v3",
+                campaign_lock_sha256="7" * 64,
+                campaign_slot_id="base:aa-rondo-1:terminal-bench/fix-git:a1",
+                campaign_round_id="aa-rondo-1",
+                campaign_attempt=1,
+                taskset_sha256="8" * 64,
+                canary_catalog_sha256="9" * 64,
+                side=Side.RONDO,
+                metrics={
+                    "wall_seconds": 1.0,
+                    "cpu_user_seconds": 0.1,
+                    "cpu_system_seconds": 0.1,
+                    "peak_rss_bytes": 1024,
+                    "exit_code": 0,
+                },
+                selected_profile={
+                    **provider.to_public_dict(),
+                    "frozen_codex_model_catalog_source_commit": "a" * 40,
+                    "frozen_codex_model_catalog_sha256": "b" * 64,
+                    "max_guardian_logical_requests": 3,
+                },
+            ),
+        )
+
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(record["summary"]["api_request_sequence"], ["main"])
+        self.assertEqual(record["summary"]["evidence"], [])
+        self.assertEqual(
+            record["summary"]["s2_request_evidence_binding"], "not_triggered"
+        )
+        self.assertTrue(target.is_dir())
+
     def test_completed_rondo_guardian_request_requires_e_final(self) -> None:
         run_id = "20260810-010000006-tb-rondo-r1"
         live_result = self._live_result(run_id)

@@ -111,9 +111,9 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len({item.run_id for item in identity.slots}), 161)
         self.assertEqual(len({item.slot_id for item in identity.slots}), 161)
         self.assertEqual(identity.slots[0].slot_id, "wire-canary")
-        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v3")
-        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v3")
-        self.assertEqual(identity.budget["prior_estimated_usd"], "39.269328")
+        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v4")
+        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v4")
+        self.assertEqual(identity.budget["prior_estimated_usd"], "58.689250")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
 
     def test_retired_identities_and_slots_are_not_reused(self) -> None:
@@ -121,13 +121,14 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         active = load_campaign_identity(paths)
         self.assertEqual(
             CAMPAIGN_LOCK_PATH,
-            Path("eval/locks/p2-b7-canary-baseline-v3.json"),
+            Path("eval/locks/p2-b7-canary-baseline-v4.json"),
         )
         self.assertEqual(
             RETIRED_CAMPAIGN_LOCK_PATHS,
             (
                 Path("eval/locks/p2-b7-canary-baseline-v1.json"),
                 Path("eval/locks/p2-b7-canary-baseline-v2.json"),
+                Path("eval/locks/p2-b7-canary-baseline-v3.json"),
             ),
         )
         retired_values = [
