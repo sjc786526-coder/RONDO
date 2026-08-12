@@ -297,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                             metadata_path=metadata_path,
                             outcome=outcome,
                             failure_stage=failure_stage,
+                            infra_diagnostic=_docker_failure_diagnostic(exc),
                             publication=publication_context(
                                 pair_identity,
                                 side=side,
@@ -486,6 +487,16 @@ def _exception_failure(exc: BaseException) -> tuple[RunOutcome, str, int]:
     if isinstance(exc, ConfigError):
         return RunOutcome.INFRA_FAILED, "result", CONFIG_ERROR
     return RunOutcome.INFRA_FAILED, "result", EVIDENCE_ERROR
+
+
+def _docker_failure_diagnostic(exc: BaseException) -> dict[str, object] | None:
+    if not isinstance(exc, DockerSupervisionError):
+        return None
+    return {
+        "supervisor_reason": exc.reason,
+        "failed_probe": exc.failed_probe,
+        "probe_timings_ms": dict(exc.probe_timings_ms),
+    }
 
 
 def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:

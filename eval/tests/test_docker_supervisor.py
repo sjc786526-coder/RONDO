@@ -35,6 +35,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     HostContainerContract,
     SAMPLE_INTERVAL_SECONDS,
 )
+from rondo_eval.runtime_bridge import RuntimeBridgeError  # noqa: E402
 
 
 IMAGE = f"example.invalid/rondo/task@sha256:{'a' * 64}"
@@ -991,6 +992,33 @@ class DockerSupervisorTests(unittest.TestCase):
 
         self.assertIn("absolute deadline", caught.exception.reason)
         self.assertEqual(handle.terminated, 1)
+
+    def test_counter_failure_preserves_structured_probe_diagnostic(self) -> None:
+        failure = RuntimeBridgeError(
+            "Docker storage fact command failed",
+            failed_probe="docker_system_df",
+            probe_timings_ms=(("docker_system_df", 30000),),
+        )
+        supervisor, runner = self.supervisor(
+            counter=FakeCounter([failure]),
+            handles=[],
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.pull(
+                self.identity,
+                IMAGE,
+                lease=self.lease,
+                timeout_seconds=60,
+            )
+
+        self.assertEqual(caught.exception.reason, "Docker storage fact command failed")
+        self.assertEqual(caught.exception.failed_probe, "docker_system_df")
+        self.assertEqual(
+            caught.exception.probe_timings_ms,
+            (("docker_system_df", 30000),),
+        )
+        self.assertEqual(runner.commands, [])
 
     def test_complete_counter_round_may_exceed_sampling_interval(self) -> None:
         clock = FakeClock()

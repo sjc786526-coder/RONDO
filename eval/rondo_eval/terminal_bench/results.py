@@ -408,6 +408,7 @@ def publish_terminal_bench_failure(
     secrets: tuple[str, ...],
     task_id: str = FIX_GIT_TASK_ID,
     task_image_digest: str = FIX_GIT_IMAGE_DIGEST,
+    infra_diagnostic: Mapping[str, object] | None = None,
 ) -> Path:
     """Publish a safe terminal record after a claimed run exits exceptionally."""
 
@@ -426,6 +427,7 @@ def publish_terminal_bench_failure(
         "interrupted",
     }:
         raise HarborResultError("exceptional publication stage is invalid")
+    _validate_infra_diagnostic(infra_diagnostic, failure_stage=failure_stage)
     if not _is_commit(git_commit) or not _is_commit(eval_harness_commit):
         raise HarborResultError("exceptional publication commit is invalid")
     if writer.run_id != run_id or writer.paths.common_root != paths.common_root:
@@ -483,6 +485,7 @@ def publish_terminal_bench_failure(
             "guardian": request_roles.count("guardian"),
         },
         "api_request_sequence": list(request_roles),
+        "infra_diagnostic": dict(infra_diagnostic) if infra_diagnostic is not None else None,
     }
     tasks = [
         {
@@ -503,6 +506,9 @@ def publish_terminal_bench_failure(
             "run_id": run_id,
             "outcome": outcome.value,
             "failure_stage": failure_stage,
+            "infra_diagnostic": (
+                dict(infra_diagnostic) if infra_diagnostic is not None else None
+            ),
         },
     )
     if metadata is None:
@@ -973,6 +979,10 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
     ):
         raise HarborResultError("Terminal-Bench API request sequence is invalid")
     budget_accounting = summary.get("budget_accounting")
+    _validate_infra_diagnostic(
+        summary.get("infra_diagnostic"),
+        failure_stage=config.get("failure_stage"),
+    )
     if outcome is RunOutcome.COMPLETED:
         _validate_public_budget_accounting(
             budget_accounting,
@@ -1080,6 +1090,58 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or config.get("campaign_attempt") not in {1, 2}
     ):
         raise HarborResultError("Terminal-Bench campaign identity is invalid")
+
+
+_DOCKER_PROBE_NAMES = frozenset(
+    {
+        "docker_system_df",
+        "docker_info",
+        "docker_desktop_host",
+        "docker_container_list",
+        "docker_image_list",
+        "docker_container_inspect",
+        "docker_container_metrics",
+        "docker_image_inspect",
+        "docker_network_inspect",
+        "docker_volume_inspect",
+        "docker_host_filesystem",
+    }
+)
+
+
+def _validate_infra_diagnostic(
+    value: object,
+    *,
+    failure_stage: object,
+) -> None:
+    if value is None:
+        return
+    if failure_stage != "docker" or not isinstance(value, Mapping) or set(value) != {
+        "supervisor_reason",
+        "failed_probe",
+        "probe_timings_ms",
+    }:
+        raise HarborResultError("infrastructure diagnostic differs from schema v1")
+    reason = value.get("supervisor_reason")
+    failed_probe = value.get("failed_probe")
+    timings = value.get("probe_timings_ms")
+    if (
+        not isinstance(reason, str)
+        or not reason
+        or len(reason) > 1024
+        or any(ord(character) < 32 or ord(character) > 126 for character in reason)
+        or (failed_probe is not None and failed_probe not in _DOCKER_PROBE_NAMES)
+        or not isinstance(timings, Mapping)
+        or not set(timings).issubset(_DOCKER_PROBE_NAMES)
+        or any(
+            isinstance(duration_ms, bool)
+            or not isinstance(duration_ms, int)
+            or duration_ms < 0
+            or duration_ms > 30_000
+            for duration_ms in timings.values()
+        )
+    ):
+        raise HarborResultError("infrastructure diagnostic is invalid")
 
 
 def _has_valid_completed_request_sequence(

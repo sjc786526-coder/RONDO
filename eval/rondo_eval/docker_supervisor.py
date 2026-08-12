@@ -635,6 +635,7 @@ class DockerCounterReading:
     task_networks: tuple[ComposeResourceFact, ...] = ()
     task_volumes: tuple[ComposeResourceFact, ...] = ()
     daemon_security_options: tuple[str, ...] = ()
+    probe_timings_ms: tuple[tuple[str, int], ...] = ()
 
     def validate(self) -> None:
         if not isinstance(self.docker_system_df, Mapping) or not self.docker_system_df:
@@ -684,6 +685,18 @@ class DockerCounterReading:
             not value or "\x00" in value for value in self.daemon_security_options
         ):
             raise DockerSupervisionError("Docker daemon security facts are invalid")
+        if (
+            len(self.probe_timings_ms) != len({name for name, _ in self.probe_timings_ms})
+            or any(
+                not re.fullmatch(r"docker_[a-z_]{1,63}", name)
+                or isinstance(duration_ms, bool)
+                or not isinstance(duration_ms, int)
+                or duration_ms < 0
+                or duration_ms > 30_000
+                for name, duration_ms in self.probe_timings_ms
+            )
+        ):
+            raise DockerSupervisionError("Docker probe timing evidence is invalid")
 
 
 class DockerCounter(Protocol):
@@ -750,6 +763,7 @@ class DockerSample:
     task_networks: tuple[ComposeResourceFact, ...]
     task_volumes: tuple[ComposeResourceFact, ...]
     daemon_security_options: tuple[str, ...]
+    probe_timings_ms: tuple[tuple[str, int], ...]
 
 
 @dataclass(frozen=True)
@@ -853,10 +867,19 @@ class DockerSupervisionError(RuntimeError):
 
     exit_code = INFRA_ERROR
 
-    def __init__(self, reason: str, *, samples: Sequence[DockerSample] = ()):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        samples: Sequence[DockerSample] = (),
+        failed_probe: str | None = None,
+        probe_timings_ms: Sequence[tuple[str, int]] = (),
+    ):
         super().__init__(reason)
         self.reason = reason
         self.samples = tuple(samples)
+        self.failed_probe = failed_probe
+        self.probe_timings_ms = tuple(probe_timings_ms)
 
 
 class _CleanupVerificationError(RuntimeError):
@@ -1352,7 +1375,12 @@ class DockerSupervisor:
                 reason = f"{reason}; automatic task-container cleanup was not verified"
             if process_cleanup_failed:
                 reason = f"{reason}; host process-group cleanup was not verified"
-            raise DockerSupervisionError(reason, samples=samples) from exc
+            raise DockerSupervisionError(
+                reason,
+                samples=samples,
+                failed_probe=exc.failed_probe,
+                probe_timings_ms=exc.probe_timings_ms,
+            ) from exc
         except Exception as exc:
             process_cleanup_failed = False
             if not command_exited or (operation is DockerOperation.HOST and not process_group_closed):
@@ -1458,9 +1486,23 @@ class DockerSupervisor:
             return reading
         except DockerSupervisionError as exc:
             if samples and not exc.samples:
-                raise DockerSupervisionError(exc.reason, samples=samples) from exc
+                raise DockerSupervisionError(
+                    exc.reason,
+                    samples=samples,
+                    failed_probe=exc.failed_probe,
+                    probe_timings_ms=exc.probe_timings_ms,
+                ) from exc
             raise
         except Exception as exc:
+            from .runtime_bridge import RuntimeBridgeError
+
+            if isinstance(exc, RuntimeBridgeError):
+                raise DockerSupervisionError(
+                    str(exc),
+                    samples=samples,
+                    failed_probe=exc.failed_probe,
+                    probe_timings_ms=exc.probe_timings_ms,
+                ) from exc
             raise DockerSupervisionError(
                 "Docker storage counters are unavailable",
                 samples=samples,
@@ -1721,6 +1763,7 @@ class DockerSupervisor:
             task_networks=tuple(reading.task_networks),
             task_volumes=tuple(reading.task_volumes),
             daemon_security_options=tuple(reading.daemon_security_options),
+            probe_timings_ms=tuple(reading.probe_timings_ms),
         )
 
     @staticmethod
@@ -1794,7 +1837,12 @@ class DockerSupervisor:
                     reading.daemon_security_options,
                 )
             except DockerSupervisionError as exc:
-                raise DockerSupervisionError(exc.reason, samples=samples) from exc
+                raise DockerSupervisionError(
+                    exc.reason,
+                    samples=samples,
+                    failed_probe=exc.failed_probe,
+                    probe_timings_ms=exc.probe_timings_ms,
+                ) from exc
         if contract.container.require_container_metrics:
             fact_ids = {fact.container_id for fact in reading.task_containers}
             metric_ids = {

@@ -98,6 +98,17 @@ _SIZE_FACTORS = {
 class RuntimeBridgeError(RuntimeError):
     """Fail-closed infrastructure error with a deliberately redacted message."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        failed_probe: str | None = None,
+        probe_timings_ms: Sequence[tuple[str, int]] = (),
+    ) -> None:
+        super().__init__(message)
+        self.failed_probe = failed_probe
+        self.probe_timings_ms = tuple(probe_timings_ms)
+
 
 @dataclass(frozen=True)
 class WatchdogLease:
@@ -1001,27 +1012,58 @@ class DockerCliCounter:
             deadline = self._monotonic() + self._probe_timeout_seconds
         if compose_contract is not None:
             compose_contract.validate()
+        probe_timings_ms: dict[str, int] = {}
+
+        def probe(name: str, operation: Callable[[], object]) -> object:
+            started = self._monotonic()
+            try:
+                result = operation()
+            except Exception as exc:
+                elapsed_ms = max(0, int((self._monotonic() - started) * 1000))
+                probe_timings_ms[name] = probe_timings_ms.get(name, 0) + elapsed_ms
+                message = str(exc) if isinstance(exc, RuntimeBridgeError) else "Docker probe failed"
+                raise RuntimeBridgeError(
+                    message,
+                    failed_probe=name,
+                    probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+                ) from None
+            elapsed_ms = max(0, int((self._monotonic() - started) * 1000))
+            probe_timings_ms[name] = probe_timings_ms.get(name, 0) + elapsed_ms
+            return result
+
         try:
-            df_output = self._run(
-                ("docker", "system", "df", "--format", "{{json .}}"),
-                deadline=deadline,
-            )
-            docker_df, total_bytes = _parse_system_df(df_output)
-            info_output = self._run(
-                (
-                    "docker",
-                    "info",
-                    "--format",
-                    "[{{json .DockerRootDir}},{{json .OperatingSystem}},{{json .SecurityOptions}}]",
+            docker_df, total_bytes = probe(
+                "docker_system_df",
+                lambda: _parse_system_df(
+                    self._run(
+                        ("docker", "system", "df", "--format", "{{json .}}"),
+                        deadline=deadline,
+                    )
                 ),
-                deadline=deadline,
             )
-            daemon_root, operating_system, security_options = _parse_docker_info(info_output)
+            daemon_root, operating_system, security_options = probe(
+                "docker_info",
+                lambda: _parse_docker_info(
+                    self._run(
+                        (
+                            "docker",
+                            "info",
+                            "--format",
+                            "[{{json .DockerRootDir}},{{json .OperatingSystem}},{{json .SecurityOptions}}]",
+                        ),
+                        deadline=deadline,
+                    )
+                ),
+            )
             desktop_reading: DockerDesktopHostReading | None = None
             if "docker desktop" in operating_system.casefold() and self._desktop_host_probe:
-                desktop_reading = self._desktop_host_probe.sample(
-                    timeout_seconds=self._remaining(deadline)
+                desktop_reading = probe(
+                    "docker_desktop_host",
+                    lambda: self._desktop_host_probe.sample(
+                        timeout_seconds=self._remaining(deadline)
+                    ),
                 )
+                assert isinstance(desktop_reading, DockerDesktopHostReading)
                 desktop_reading.validate()
                 host_root = self._host_data_root.resolve(strict=True)
                 if host_root != desktop_reading.host_volume_root.resolve(strict=True):
@@ -1034,55 +1076,96 @@ class DockerCliCounter:
                     mountinfo_path=self._mountinfo_path,
                 )
             filter_args = identity.exact_label_filter
-            container_ids = self._container_ids(identity, deadline=deadline)
-            image_ids = _parse_id_lines(
-                self._run(
-                    (
-                        "docker",
-                        "image",
-                        "ls",
-                        "--no-trunc",
-                        *filter_args,
-                        "--format",
-                        "{{json .ID}}",
-                    ),
+            container_ids = probe(
+                "docker_container_list",
+                lambda: self._container_ids(identity, deadline=deadline),
+            )
+            assert isinstance(container_ids, tuple)
+            image_ids = probe(
+                "docker_image_list",
+                lambda: _parse_id_lines(
+                    self._run(
+                        (
+                            "docker",
+                            "image",
+                            "ls",
+                            "--no-trunc",
+                            *filter_args,
+                            "--format",
+                            "{{json .ID}}",
+                        ),
+                        deadline=deadline,
+                    )
+                ),
+            )
+            assert isinstance(image_ids, tuple)
+            container_result = probe(
+                "docker_container_inspect",
+                lambda: self._container_facts(
+                    identity,
+                    container_ids,
                     deadline=deadline,
-                )
+                ),
             )
-            container_ids, container_bytes, container_facts = self._container_facts(
-                identity,
-                container_ids,
-                deadline=deadline,
-            )
+            assert isinstance(container_result, tuple)
+            container_ids, container_bytes, container_facts = container_result
             container_metrics: tuple[object, ...] = ()
             if compose_contract is not None and compose_contract.container.require_container_metrics:
-                container_metrics = self._container_metrics(
-                    container_facts,
-                    deadline=deadline,
+                container_metrics = probe(
+                    "docker_container_metrics",
+                    lambda: self._container_metrics(
+                        container_facts,
+                        deadline=deadline,
+                    ),
                 )
-            image_bytes = self._image_bytes(identity, image_ids, deadline=deadline)
+                assert isinstance(container_metrics, tuple)
+            image_bytes = probe(
+                "docker_image_inspect",
+                lambda: self._image_bytes(identity, image_ids, deadline=deadline),
+            )
+            assert isinstance(image_bytes, int)
             network_facts: tuple[object, ...] = ()
             volume_facts: tuple[object, ...] = ()
             if compose_contract is not None:
-                network_facts = self._compose_networks(
-                    compose_contract.container.compose_project,
-                    deadline=deadline,
+                network_facts = probe(
+                    "docker_network_inspect",
+                    lambda: self._compose_networks(
+                        compose_contract.container.compose_project,
+                        deadline=deadline,
+                    ),
                 )
-                volume_facts = self._compose_volumes(
-                    compose_contract.container.compose_project,
-                    deadline=deadline,
+                assert isinstance(network_facts, tuple)
+                volume_facts = probe(
+                    "docker_volume_inspect",
+                    lambda: self._compose_volumes(
+                        compose_contract.container.compose_project,
+                        deadline=deadline,
+                    ),
                 )
+                assert isinstance(volume_facts, tuple)
             if desktop_reading is not None:
                 free_bytes = desktop_reading.free_bytes
             else:
-                filesystem = self._statvfs(host_root)
+                filesystem = probe(
+                    "docker_host_filesystem",
+                    lambda: self._statvfs(host_root),
+                )
                 free_bytes = filesystem.f_bavail * filesystem.f_frsize
             if isinstance(free_bytes, bool) or not isinstance(free_bytes, int) or free_bytes < 0:
                 raise RuntimeBridgeError("Docker host filesystem counter is invalid")
-        except RuntimeBridgeError:
-            raise
+        except RuntimeBridgeError as exc:
+            if exc.probe_timings_ms:
+                raise
+            raise RuntimeBridgeError(
+                str(exc),
+                failed_probe=exc.failed_probe,
+                probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+            ) from exc
         except (OSError, TypeError, ValueError) as exc:
-            raise RuntimeBridgeError("Docker storage facts are unavailable") from exc
+            raise RuntimeBridgeError(
+                "Docker storage facts are unavailable",
+                probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+            ) from exc
 
         from .docker_supervisor import DockerCounterReading
 
@@ -1104,6 +1187,7 @@ class DockerCliCounter:
             task_networks=network_facts,
             task_volumes=volume_facts,
             daemon_security_options=security_options,
+            probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
         )
 
     def resolve_image_identity(
