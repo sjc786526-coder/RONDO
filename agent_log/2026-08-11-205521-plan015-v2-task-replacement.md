@@ -56,4 +56,13 @@
   ledger stop reason 的上游类别。`sigma`/`delta` 只在四轮共同有效的同一集合上计算，公开精确分母，少于 8 项
   则 M2 blocked。
 
-后续证据：待 v5 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
+## v5 执行与退役
+
+- 完整 Oracle 10/10 reward 1；fresh exact-wire canary 的 main 与 approval 共 4 个请求全部 attempt 1、usage valid，
+  审批角色链 `main → guardian → main`，命令 started/completed/exit 0。
+- frozen Codex 在 approval tool call 前额外发出一条 assistant 消息，之后才执行命令并回复 `DONE`；唯一最终消息
+  合同据此拒绝。v5 blocked，无正式 budget/run；canary 估算 `0.226591 USD`，reservation 为 0。
+- parser 保持不变；synthetic prompt 明确禁止 tool 前 assistant/commentary。v6 使用全新 identity，并将 prior
+  更新为 `158.694728 USD`。
+
+后续证据：待 v6 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。

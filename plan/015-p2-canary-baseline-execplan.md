@@ -125,10 +125,15 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   v4 canary 的 P2 累计为 `158.468137 USD`，全部 v4 identity/state/result/artifact 只读保留。
 - 经追加授权，P2 总硬上限为 `400 USD`。v5 使用新 campaign/batch/run IDs，精确冻结 prior debit
   `158.468137 USD`，采用 infra-only 定点补跑、逐轮即时门禁、结构化三 task 熔断和至少 8 项共同分母。
+- v5 完整 Oracle 10/10 reward 1；fresh wire canary 的 4 个请求均 attempt 1、usage valid、角色与审批命令正确，
+  但 frozen Codex 在 tool call 前额外输出一条普通 assistant 消息，唯一最终消息门禁拒绝。v5 blocked，canary
+  估算 `0.226591 USD`，无正式 budget/运行。
+- canary parser 不放宽；synthetic prompt 明确禁止 tool call 前 assistant/commentary。v6 使用新 identity，并把 v5
+  canary 纳入 prior，精确冻结 `158.694728 USD`。
 
 ### 后续计划
 
-1. 完成 v5 identity/lock、focused unittest、`just eval-lock` 与干净提交。
+1. 完成 v6 identity/lock、focused unittest、`just eval-lock` 与干净提交。
 2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API Oracle、资源门禁和 fresh exact-wire canary。
 3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
@@ -138,7 +143,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2/v3/v4 是保留全部费用事实的 blocked 付费终态；v5 尚未执行 Oracle、canary 或
+- v1 是 API 前失败终态；v2/v3/v4/v5 是保留全部费用事实的 blocked 终态；v6 尚未执行 Oracle、canary 或
   正式 40-run 基线。
 
 ## 6. 关键决策记录
@@ -158,3 +163,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 011 | B7 的零 Guardian 自然完成合法；触发 Guardian 时仍逐项绑定；P1 强制审批合同不变。v3 退役并重冻 v4 | 多任务性能基线不能把“未需审批”伪装成 infra，同时不能弱化真实审批证据 | B5/B7 | 已采纳 |
 | 012 | v4 退役并重冻 v5；取消全轮 replacement，每轮即时门禁，同类结构化故障命中 3 个 task 熔断，`sigma`/`delta` 使用至少 8 项共同集合 | 避免成功任务重复暴露于随机上游故障，也防止无效轮继续消费 | B6/B7 | 已采纳 |
 | 013 | 用户追加 200 USD，P2 总硬上限改为 400 USD；v5 带入 prior `158.468137 USD` | 新授权不重置历史 debit，任何下一 request 仍须容纳最大合法 reservation | B6/B7 | 已采纳 |
+| 014 | v5 canary 因 tool 前额外 assistant 消息失败；保持唯一消息 parser，收紧 synthetic prompt 并重冻 v6，prior `158.694728 USD` | 线缆/审批成功不等于精确 CLI 行为成功，不能为继续执行弱化 canary | B6/B7 | 已采纳 |

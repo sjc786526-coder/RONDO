@@ -191,6 +191,7 @@ def _prompt(kind: str) -> str:
             "Call the exec_command tool exactly once with these exact arguments: "
             '{"cmd":"touch guardian-approved.tmp","sandbox_permissions":'
             '"require_escalated","justification":"Harmless Guardian diagnostic"}. '
+            "Do not emit an assistant or commentary message before the tool call. "
             "Do not call any other tool and do not modify any other path. After the "
             "command succeeds, reply with exactly DONE."
         )
