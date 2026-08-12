@@ -12,3 +12,5 @@
   frozen GGUF/template 合同。
 - 未下载大型运行时/权重，未安装依赖/CUDA，未运行构建、Docker、模型、GPU 或 CI/PR；所有 binary/GPU/model-backed
   结论仍待后续授权验收。Plan 015 保持 `download_ready_blocked_on_user_approval`。
+- 研究文档提交为 `f3c00ece26cf4cf9b9f48302c3ad38372a7effb4`，首次合并提交为
+  `e99a570d505c0e26b8fd9c3d9c3af458ee83b829`；已推送远端，本 closure 仅同步最终状态。
