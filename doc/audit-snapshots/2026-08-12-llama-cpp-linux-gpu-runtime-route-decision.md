@@ -38,9 +38,18 @@ Linux/Ubuntu CUDA x86_64 资产集合均为空；CUDA release 资产仍是 Windo
 | Linux Vulkan 对照资产 | `llama-b10375-bin-ubuntu-vulkan-x64.tar.gz`，32,612,910 bytes，SHA-256 `cbf7354e70f9bcda5a389e1f02e2293414d47fe525b271c3a8063327754e3ef9` |
 | Linux CPU 对照资产 | `llama-b10375-bin-ubuntu-x64.tar.gz`，16,601,046 bytes，SHA-256 `b6a7ed005240eccd61e1af42debd75b876c639c1416bfa90985fd02618919a88` |
 
-官方确有 Ubuntu CUDA CI：`nvidia/cuda:12.6.2-devel-ubuntu24.04`、Ada `89-real`、`GGML_NATIVE=OFF`、
-`GGML_CUDA=ON`。但该 workflow 只构建/测试，没有 pack/upload release artifact，也不在 release workflow 的依赖中。
-它证明源码能走 Linux CUDA CI，不是用户可下载的 Linux CUDA runtime。
+`b10333` 官方 Ubuntu CUDA workflow（blob `2528b18573a78a9a8e99783acc7b9f0b81688ec7`）的 CUDA job 使用
+`nvidia/cuda:12.6.2-devel-ubuntu24.04`、Ada `89-real`、
+`GGML_NATIVE=OFF`、`GGML_CUDA=ON`，还传入 `CMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined` 与
+`GGML_CUDA_CUB_3DOT2=ON`。准备步骤之后只执行一次 CMake configure 和 `cmake --build build`，没有 `ctest` 或其他测试命令；
+因此它是官方 Linux CUDA **构建**证据，不是测试通过证据。该 workflow 也没有 pack/upload release artifact，且不在 release
+workflow 的依赖中，所以它不是用户可下载的 Linux CUDA runtime。
+
+同一 exact commit 的 `ggml/src/ggml-cuda/CMakeLists.txt`（blob `d3953eee962e7cdc8cd39e6e8c062bced167e200`）表明：
+打开 `GGML_CUDA_CUB_3DOT2` 时会通过
+`FetchContent_Declare` 从 `https://github.com/nvidia/cccl.git` 浅克隆 `v3.2.0`，执行 `FetchContent_MakeAvailable(CCCL)`，
+并链接 `CCCL::CCCL`。若没有预填充 source，这会在 configure 期间引入额外网络和源码依赖；`v3.2.0` tag 本身也不是 RONDO
+冻结的 40 位 commit。Plan 016 的构建骨架未包含该开关或 CCCL source freeze，Plan 018 必须先做选择，不能静默继承官方 CI。
 
 `b10375` 名称中带 CUDA 的 release asset 具体只有 Windows 组合：
 `llama-b10375-bin-win-cuda-12.4-x64.zip`、`llama-b10375-bin-win-cuda-13.3-x64.zip`、
@@ -172,14 +181,20 @@ pin/capability/闭包、example path 和 focused tests；identity schema v2 本�
    GPU/driver-free。
 2. 冻结 exact CUDA Toolkit（优先从 b10333 官方 Ubuntu CUDA CI 的 12.6.2 候选开始核对），使用 WSL/toolkit-only 安装，
    禁止 Linux display driver。
-3. 以 Plan 016 `Linux CUDA b10333 build-ready 交接` 的 exact commit、`89-real`、server-only、RPATH 和资源锁骨架构建到
+3. 在真实 configure 前关闭两个未决项：
+   - `GGML_CUDA_CUB_3DOT2` 不预先定为 on/off。若采用 `ON`，必须把 CCCL `v3.2.0` 解析并冻结为 exact 40 位 commit、repo 与
+     source identity/SHA，以项目内预取 source 或等价受控方式满足 FetchContent，并证明 configure 没有发生未冻结的临时网络抓取；
+     若省略，则必须由 Plan 018 的 exact configure/build 成功证据支持，并记录相对官方 workflow 的差异。
+   - 默认不采用 `CMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined`。只有严格链接实际失败、错误与根因已保留，且确认该放宽
+     是必要的，才能加入冻结命令；不能为了复制 CI 或绕过未知 undefined symbol 直接启用。
+4. 以 Plan 016 `Linux CUDA b10333 build-ready 交接` 的 exact commit、`89-real`、server-only、RPATH 和资源锁骨架构建到
    项目 ignored 路径 `eval-data/tools/llama-b10333-cuda-linux-x64/`。
-4. 实现 CPU/CUDA exact binary path 到对应 lock 的有限映射、独立 CUDA lock、动态 backend/host dependency closure、
+5. 实现 CPU/CUDA exact binary path 到对应 lock 的有限映射、独立 CUDA lock、动态 backend/host dependency closure、
    capability/doctor 投影和 focused tests；保留旧 CPU runtime。model-free 验收完成后才切换 tracked example binary，实际
    ignored 配置留待 4k acceptance 阶段。
-5. 只做 model-free `--version`、`--help`、`--list-devices`、template parser/router/closure 验收。无 exact GGUF 时停在
+6. 只做 model-free `--version`、`--help`、`--list-devices`、template parser/router/closure 验收。无 exact GGUF 时停在
    `linux_cuda_built_model_unvalidated`；不得晋级 `gpu_model_serving_validated`。
-6. Plan 015 另获 GGUF 下载授权且静态校验后，再在单独 GPU/model-backed 阶段运行 4k smoke；通过后才晋级 capability，
+7. Plan 015 另获 GGUF 下载授权且静态校验后，再在单独 GPU/model-backed 阶段运行 4k smoke；通过后才晋级 capability，
    随后单独验收 8k baseline。
 
 回滚方式：新 runtime/lock 与 b10333 CPU asset 并存，迁移提交可整体 revert，example binary 恢复旧路径即可回到现有
@@ -188,6 +203,8 @@ model-free 状态。旧 CPU runtime 不是 GPU 服务回滚；在 CUDA 4k 验收
 ## 8. 仍未验收
 
 - Windows driver exact 版本与 CUDA 12.6.2/WSL 的实际兼容。
+- CCCL 路径是否采用、采用时的 exact source/offline FetchContent，或省略时相对官方 workflow 的成功构建证据；严格链接是否确需
+  `--allow-shlib-undefined`。
 - Toolkit 安装、b10333 构建、产物 SHA、ELF/RPATH/动态依赖闭包与 CUDA device probe。
 - frozen Bartowski GGUF 的下载、真实 SHA、Mistral3/Q4_K_M load、正数/全层 offload、fit、F16 KV、flash、4k/8k 显存和性能。
 - `/v1/responses`、外部官方 Jinja、结构化审批在 CUDA exact model 上的真实行为。
@@ -203,6 +220,7 @@ model-free 状态。旧 CPU runtime 不是 GPU 服务回滚；在 CUDA 4k 验收
 - b10333 与 b10375 compare：<https://github.com/ggml-org/llama.cpp/compare/b10333...b10375>
 - b10375 release workflow：<https://github.com/ggml-org/llama.cpp/blob/ba360efe1f574ebae727aad64112d18ecedca85a/.github/workflows/release.yml>
 - b10333 Ubuntu CUDA CI：<https://github.com/ggml-org/llama.cpp/blob/08659901c43b51de735740f1cf61bb82fbe0c4e4/.github/workflows/build-cuda-ubuntu.yml>
+- b10333 CUDA CMake：<https://github.com/ggml-org/llama.cpp/blob/08659901c43b51de735740f1cf61bb82fbe0c4e4/ggml/src/ggml-cuda/CMakeLists.txt>
 - b10375 Ubuntu CUDA CI：<https://github.com/ggml-org/llama.cpp/blob/ba360efe1f574ebae727aad64112d18ecedca85a/.github/workflows/build-cuda-ubuntu.yml>
 - b10375 CUDA build docs：<https://github.com/ggml-org/llama.cpp/blob/ba360efe1f574ebae727aad64112d18ecedca85a/docs/build.md#cuda>
 - b10375 Mistral3：<https://github.com/ggml-org/llama.cpp/blob/ba360efe1f574ebae727aad64112d18ecedca85a/src/models/mistral3.cpp>
