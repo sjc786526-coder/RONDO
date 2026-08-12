@@ -17,7 +17,8 @@ artifact，也没有重新发起付费请求。
 - handler 在 lifecycle lock 内、`begin_attempt/open` 前重算 deadline；claim 与 reserve 在同一 policy lock 内提交，
   reserve 失败不消费 Guardian body SHA/计数。
 - completed producer、paid slot 与 M1 共用未停止、零 reservation、全 settled/usage-valid/usage-priced 的预算合同，
-  并核对 budget/API metadata 的精确 request ID 集合。
+  并核对 budget/API metadata 的精确 request ID 集合。M1 还会将每侧公开 `estimated_usd` 与 durable budget
+  `spent_usd` 比较；缺少新版 accounting 的历史记录也不能绕过费用一致性。
 - v8—v19 使用统一 historical registry；v19 仅只读，paid CLI 与 Plan 014 canary 在配置、密钥、账本、Docker/API 前
   因无 active identity 而拒绝。
 - Guardian meta 只接受生产合法终态组合；归档公开路径改为 `guardian-evidence/000N/E_final.json`。后续 S2 将
@@ -30,7 +31,8 @@ artifact，也没有重新发起付费请求。
 
 - 预算代理定向回归：50/50；结果、pair、Docker、scanner 与 CLI diagnostic 回归均纳入完整套件。
 - dependency lock：85 packages。
-- 完整 pure/fake/loopback eval：349/349，58.590 秒。
+- `ba21a48` 完整 pure/fake/loopback eval：349/349，58.590 秒；费用一致性跟进的 pair/results focused
+  回归：49/49。
 - v19 现有两条 public record + pair/budget ledger 只读重放：
   `m1=passed`、`reasons=[]`、`s2=task_scoped_count_match`。
 - `git diff --check` 通过。

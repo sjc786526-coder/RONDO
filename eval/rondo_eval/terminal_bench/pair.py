@@ -1149,6 +1149,23 @@ def assess_m1(
             except ApiBudgetProxyError:
                 reasons.append(f"{slot.side.value}_budget_not_completed")
             else:
+                cost = record.get("cost")
+                try:
+                    public_spend = Decimal(
+                        str(cost.get("estimated_usd"))
+                        if isinstance(cost, Mapping)
+                        else ""
+                    )
+                    ledger_spend = Decimal(str(accounting.get("spent_usd")))
+                except (InvalidOperation, TypeError, ValueError):
+                    reasons.append(f"{slot.side.value}_budget_cost_mismatch")
+                else:
+                    if (
+                        not public_spend.is_finite()
+                        or public_spend < 0
+                        or public_spend != ledger_spend
+                    ):
+                        reasons.append(f"{slot.side.value}_budget_cost_mismatch")
                 public_accounting = (
                     summary.get("budget_accounting")
                     if isinstance(summary, Mapping)

@@ -549,9 +549,8 @@ def _safe_summary(
         and all(item["terminal_status"] == "approved" for item in evidence)
         and has_complete_guardian_approval_sequence(request_roles)
     ):
-        # The paid pair bounds distinct Guardian request bodies and rejects a
-        # duplicate charged replay. Equal verified request/evidence counts form
-        # a task-scoped set binding without persisting a private request body.
+        # Canonical digests bind each archived E_final to exactly one verified
+        # Guardian request without persisting a private request body.
         s2_binding = "verified"
     elif side is Side.RONDO and (guardian_requests or evidence):
         s2_binding = "unbound"

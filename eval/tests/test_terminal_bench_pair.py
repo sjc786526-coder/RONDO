@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -198,6 +199,7 @@ class PairIdentityTests(unittest.TestCase):
                 "peak_rss_bytes": 4096,
                 "exit_code": 0,
             },
+            "cost": {"estimated_usd": 0.0, "actual_usd": 0.0},
             "artifacts": f"eval-data/runs/{side.value}",
         }
 
@@ -522,6 +524,41 @@ class PairIdentityTests(unittest.TestCase):
             self.assertEqual(result["m1"], "passed")
             self.assertEqual(result["s2"], "verified")
             self.assertEqual(result["reasons"], [])
+
+            historical_shape = json.loads(json.dumps(records))
+            for record in historical_shape:
+                record["summary"].pop("budget_accounting")
+            historical_shape[0]["cost"]["estimated_usd"] = 0.000001
+            historical_pair_state = json.loads(
+                ledger_path.read_text(encoding="utf-8")
+            )
+            for run, record in zip(
+                historical_pair_state["runs"], historical_shape, strict=True
+            ):
+                run["publication_sha256"] = terminal_record_sha256(record)
+            historical_ledger_path = root / "historical-paid.json"
+            historical_ledger_path.write_text(
+                json.dumps(
+                    historical_pair_state, sort_keys=True, separators=(",", ":")
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                pair_module,
+                "_HISTORICAL_PAIR_IDS",
+                frozenset({paid_identity.pair_id}),
+            ):
+                historical_cost_drift = assess_m1(
+                    historical_shape,
+                    paid_identity,
+                    pair_ledger_path=historical_ledger_path,
+                    budget_ledger_path=budget_path,
+                )
+            self.assertEqual(historical_cost_drift["m1"], "failed")
+            self.assertEqual(
+                historical_cost_drift["reasons"], ["rondo_budget_cost_mismatch"]
+            )
 
             budget_bytes = budget_path.read_bytes()
             stopped_budget = json.loads(budget_bytes)
