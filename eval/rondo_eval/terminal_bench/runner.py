@@ -340,7 +340,12 @@ class DockerSupervisedHostHarborExecutor:
                 materialized,
                 trial_name=trial_name,
                 trials_dir=trials_dir,
-                require_container_metrics=True,
+                # Oracle proves the official solution/verifier contract before
+                # any API request. Paid campaign runs separately require and
+                # publish CPU/peak-memory metrics; sampling them here can race
+                # the verifier's final container exec without adding task
+                # validity evidence.
+                require_container_metrics=False,
             ),
         )
 

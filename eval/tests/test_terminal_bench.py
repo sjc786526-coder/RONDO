@@ -1442,7 +1442,7 @@ class TerminalBenchTests(unittest.TestCase):
         contract = fake_supervisor.supervise_host_command.call_args.kwargs[
             "compose_contract"
         ]
-        self.assertTrue(contract.container.require_container_metrics)
+        self.assertFalse(contract.container.require_container_metrics)
         self.assertEqual(contract.container.user, "1000:1000")
 
     def test_budgeted_live_path_keeps_official_key_out_of_harbor_and_requires_evidence(self) -> None:
