@@ -112,12 +112,15 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - v2 正式首轮暴露通用非 Git adapter、Guardian E_final digest 与 campaign 中断恢复缺陷；第 8 个 RONDO run
   执行中主动停止，v2 已收口为 blocked 且全部 reservation settled。v2 累计本地估算 `39.269328 USD`，
   `actual_usd=null`；其 identity、slot、ledger、result 与 artifact 不复用。
-- 运行合同修复已通过 137 项 focused unittest；v3 campaign/batch/161 个 run IDs 正在离线冻结，lock 将 v2
-  累计费用作为 `prior_estimated_usd` 扣减，P2 总硬上限仍为 200 USD。
+- v3 十题 Oracle 与 fresh canary 均通过；首个 RONDO 任务实际 reward 1，但结果合同把“未自然触发 Guardian”
+  错判为 infra。第 2 个任务运行中主动停止并保守结算；v3 blocked、reservation 为 0，P2 累计估算
+  `58.689250 USD`，`actual_usd=null`。
+- B7 campaign 允许零 Guardian 的普通完成；一旦触发仍强制 `main → guardian → main` 与 E_final digest 逐项绑定。
+  P1 pair 的强制审批闭环保持不变。v4 使用全新 identity，并将全部 prior debit 从 200 USD 中扣除。
 
 ### 后续计划
 
-1. 完成 v3 identity/lock、focused unittest、`just eval-lock` 与干净提交。
+1. 完成 v4 identity/lock、focused unittest、`just eval-lock` 与干净提交。
 2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API Oracle、资源门禁和 fresh exact-wire canary。
 3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
@@ -127,7 +130,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2 是完成 Oracle/canary 后的 blocked 付费终态；v3 尚未执行 Oracle、canary 或
+- v1 是 API 前失败终态；v2/v3 是保留全部费用事实的 blocked 付费终态；v4 尚未执行 Oracle、canary 或
   正式 40-run 基线。
 
 ## 6. 关键决策记录
@@ -144,3 +147,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 008 | campaign 冻结 1 canary + 40 base + 40 conditional + 各 40 bounded infra replacement，共 161 个唯一 slot | 单轮 >20% infra 需整轮替换，条件加跑也需一次定点替换；所有可能 ID 事前冻结 | B6/B7 | 已采纳 |
 | 009 | 经用户批准以 `openssl-selfsigned-cert` 替换官方 verifier reward 0 的 `build-cython-ext`，重冻 v2 identity 并退役 v1 | Oracle 在任何 API 前证明原题自身不可用；不是按模型成绩择题，holdout/预算/profile/bundle/轮次均不变 | B4/B7 | 已采纳 |
 | 010 | v2 在系统性 infra 后主动停止并退役；修复通用执行合同后重冻 v3，lock 扣除 v2 的 `39.269328 USD` | 避免未修复的整轮 replacement 盲目消费，并确保换 identity 不重置 P2 的 200 USD 总硬上限 | B6/B7 | 已采纳 |
+| 011 | B7 的零 Guardian 自然完成合法；触发 Guardian 时仍逐项绑定；P1 强制审批合同不变。v3 退役并重冻 v4 | 多任务性能基线不能把“未需审批”伪装成 infra，同时不能弱化真实审批证据 | B5/B7 | 已采纳 |

@@ -23,4 +23,15 @@
 - `423e09a` 修复上述合同；137 项 focused unittest 通过。v3 使用全新 campaign/batch/run IDs，并在 lock 中
   冻结 v2 prior debit，P2 200 USD 总硬上限不重置。
 
-后续证据：待 v3 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。
+## v3 执行与退役
+
+- 十题 Oracle 再次全部 reward 1；fresh exact-wire canary completed，4 个请求均一次上游 attempt，估算
+  `0.226121 USD`。
+- 首个 RONDO 任务官方 verifier reward 1、11 个 main 请求全部合法结算，但 producer 错把零 Guardian 的自然完成
+  判为 infra。第 2 个任务运行中主动停止，唯一悬挂请求按 `18.885000 USD` 保守结算。
+- v3 blocked、reservation 为 0；v3 新增估算 `19.419922 USD`，P2 累计 `58.689250 USD`，
+  `actual_usd=null`。v3 identity、state、budget、result、artifact 与 metrics 均保留且不复用。
+- 窄修复仅对 campaign 允许全 main 请求序列；若出现 Guardian，RONDO 仍必须有对应 E_final digest。P1 pair 的
+  `main → guardian → main` 强制闭环未变。v4 lock 冻结全量 prior debit。
+
+后续证据：待 v4 完整 Oracle、fresh exact-wire canary 与正式 campaign 完成后在本日志收口。

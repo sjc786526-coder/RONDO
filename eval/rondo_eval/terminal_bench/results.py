@@ -239,6 +239,7 @@ def publish_terminal_bench_result(
         live_result,
         parsed,
         metadata_path=metadata_path,
+        publication=publication,
     )
     budget_accounting: dict[str, object] | None = None
     if parsed.outcome is RunOutcome.COMPLETED:
@@ -768,6 +769,7 @@ def _validate_publication_evidence(
     parsed: ParsedHarborResult,
     *,
     metadata_path: Path,
+    publication: PublicationContext,
 ) -> tuple[str, ...]:
     host_returncode = live_result.harbor.returncode
     has_trial_result = bool(parsed.trial_result)
@@ -788,7 +790,10 @@ def _validate_publication_evidence(
         if not live_result.metadata_ready:
             raise HarborResultError("completed run lacks verified API metadata")
         roles = _verified_request_roles(metadata_path)
-        if not has_complete_guardian_approval_sequence(roles):
+        if not _has_valid_completed_request_sequence(
+            roles,
+            guardian_optional=isinstance(publication, CampaignPublicationContext),
+        ):
             raise HarborResultError(
                 "completed run lacks the verified main-Guardian-main sequence"
             )
@@ -963,8 +968,21 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         )
     elif budget_accounting is not None:
         raise HarborResultError("non-completed run contains completed budget accounting")
-    if outcome is RunOutcome.COMPLETED and not has_complete_guardian_approval_sequence(
-        sequence
+    pair_fields = {"pair_id", "pair_lock_sha256", "pair_slot", "pair_round"}
+    campaign_fields = {
+        "campaign_id",
+        "campaign_lock_sha256",
+        "campaign_slot_id",
+        "campaign_round_id",
+        "campaign_attempt",
+        "taskset_sha256",
+        "canary_catalog_sha256",
+    }
+    has_pair = any(key in config for key in pair_fields)
+    has_campaign = any(key in config for key in campaign_fields)
+    if outcome is RunOutcome.COMPLETED and not _has_valid_completed_request_sequence(
+        sequence,
+        guardian_optional=has_campaign,
     ):
         raise HarborResultError("completed Terminal-Bench approval sequence is incomplete")
     guardian_limit = config.get("max_guardian_logical_requests")
@@ -978,7 +996,12 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         evidence = summary.get("evidence")
         binding = summary.get("s2_request_evidence_binding")
         if record.get("side") == Side.RONDO.value:
-            if (
+            if roles["guardian"] == 0:
+                if evidence != [] or binding != "not_triggered":
+                    raise HarborResultError(
+                        "completed RONDO without Guardian has contradictory evidence"
+                    )
+            elif (
                 not isinstance(evidence, list)
                 or len(evidence) != roles["guardian"]
                 or any(
@@ -1008,18 +1031,6 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
                 raise HarborResultError("completed RONDO Guardian evidence is not bound")
         elif evidence or binding != "not_triggered":
             raise HarborResultError("completed frozen Codex record contains RONDO evidence")
-    pair_fields = {"pair_id", "pair_lock_sha256", "pair_slot", "pair_round"}
-    campaign_fields = {
-        "campaign_id",
-        "campaign_lock_sha256",
-        "campaign_slot_id",
-        "campaign_round_id",
-        "campaign_attempt",
-        "taskset_sha256",
-        "canary_catalog_sha256",
-    }
-    has_pair = any(key in config for key in pair_fields)
-    has_campaign = any(key in config for key in campaign_fields)
     if has_pair == has_campaign:
         raise HarborResultError("Terminal-Bench execution identity is ambiguous")
     if has_pair and (
@@ -1054,6 +1065,20 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or config.get("campaign_attempt") not in {1, 2}
     ):
         raise HarborResultError("Terminal-Bench campaign identity is invalid")
+
+
+def _has_valid_completed_request_sequence(
+    sequence: object,
+    *,
+    guardian_optional: bool,
+) -> bool:
+    """Keep the P1 approval closure while allowing ordinary P2 task turns."""
+
+    if not isinstance(sequence, (list, tuple)) or not sequence:
+        return False
+    if sequence.count("guardian") == 0:
+        return guardian_optional and all(role == "main" for role in sequence)
+    return has_complete_guardian_approval_sequence(sequence)
 
 
 def _validate_public_budget_accounting(
