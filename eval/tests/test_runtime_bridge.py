@@ -669,6 +669,18 @@ class DockerCounterTests(unittest.TestCase):
             )
             self.assertEqual(first.data_root, str(root))
             self.assertEqual(first.docker_system_df, second.docker_system_df)
+            self.assertEqual(
+                set(dict(first.probe_timings_ms)),
+                {
+                    "docker_system_df",
+                    "docker_info",
+                    "docker_container_list",
+                    "docker_image_list",
+                    "docker_container_inspect",
+                    "docker_image_inspect",
+                    "docker_host_filesystem",
+                },
+            )
             self.assertEqual(len(executor.commands), 12)
             self.assertTrue(all(0 < value <= 30 for value in executor.timeouts))
             expected_filter = f"label=dev.rondo.eval.task={TASK_ID}"
@@ -767,7 +779,7 @@ class DockerCounterTests(unittest.TestCase):
                 probe_timeout_seconds=5.0,
             )
 
-            with self.assertRaises(RuntimeBridgeError):
+            with self.assertRaises(RuntimeBridgeError) as caught:
                 counter.sample(
                     identity=DockerTaskIdentity(TASK_ID),
                     operation=DockerOperation.RUN,
@@ -775,6 +787,16 @@ class DockerCounterTests(unittest.TestCase):
 
         self.assertEqual(executor.timeouts, [5.0, 3.0, 1.0])
         self.assertEqual(len(executor.commands), 3)
+        self.assertEqual(caught.exception.failed_probe, "docker_image_list")
+        self.assertEqual(
+            dict(caught.exception.probe_timings_ms),
+            {
+                "docker_container_list": 2000,
+                "docker_image_list": 0,
+                "docker_info": 2000,
+                "docker_system_df": 2000,
+            },
+        )
 
     def test_normalizes_direct_none_network_nnp_and_effective_tmpfs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1040,6 +1062,7 @@ class DockerCounterTests(unittest.TestCase):
             self.assertEqual(reading.data_root_filesystem_free_bytes, 190 * 1024**3)
             self.assertEqual(reading.docker_desktop_vhdx_bytes, 70_000_000_000)
             self.assertEqual(probe.calls, 1)
+            self.assertIn("docker_desktop_host", dict(reading.probe_timings_ms))
 
     def test_resolves_frozen_manifest_to_daemon_image_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1111,6 +1134,7 @@ class DockerCounterTests(unittest.TestCase):
 
         self.assertEqual(reading.task_container_metrics[0].cpu_usage_microseconds, 1_250_000)
         self.assertEqual(reading.task_container_metrics[0].peak_memory_bytes, 456_789)
+        self.assertIn("docker_container_metrics", dict(reading.probe_timings_ms))
         metric_command = executor.commands[5]
         self.assertEqual(metric_command[:5], ("docker", "container", "exec", "--user", "1000:1000"))
         self.assertEqual(metric_command[5], CONTAINER_ID)

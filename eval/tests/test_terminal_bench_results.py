@@ -1026,12 +1026,29 @@ class TerminalBenchResultTests(unittest.TestCase):
             failure_stage="docker",
             publication=self._publication(exit_code=70),
             secrets=("never-persist",),
+            infra_diagnostic={
+                "supervisor_reason": "Docker storage counters are unavailable",
+                "failed_probe": "docker_system_df",
+                "probe_timings_ms": {"docker_system_df": 30000},
+            },
         )
 
         self.assertTrue((target / "run-failure.json").is_file())
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "docker")
+        self.assertEqual(
+            record["summary"]["infra_diagnostic"],
+            {
+                "supervisor_reason": "Docker storage counters are unavailable",
+                "failed_probe": "docker_system_df",
+                "probe_timings_ms": {"docker_system_df": 30000},
+            },
+        )
+        self.assertEqual(
+            json.loads((target / "run-failure.json").read_text())["infra_diagnostic"],
+            record["summary"]["infra_diagnostic"],
+        )
         self.assertEqual(
             record["config"]["provider_profile_sha256"],
             live_result.prepared.spec.provider.profile_sha256,
@@ -1047,6 +1064,42 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(
             record["cost"], {"estimated_usd": 0.0, "actual_usd": None}
         )
+
+    def test_infra_diagnostic_rejects_unknown_or_non_docker_probe(self) -> None:
+        run_id = "20260810-010000019-tb-codex-r1"
+        paths = RepoPaths(self.root, self.root)
+        live_result = self._live_result(run_id)
+        for failure_stage, failed_probe in (
+            ("result", "docker_system_df"),
+            ("docker", "free_text_probe"),
+        ):
+            with self.subTest(failure_stage=failure_stage, failed_probe=failed_probe):
+                writer = ArtifactWriter(
+                    paths, run_id, results_worktree_root=self.root
+                ).start()
+                with self.assertRaises(HarborResultError):
+                    publish_terminal_bench_failure(
+                        paths,
+                        writer=writer,
+                        run_id=run_id,
+                        side=Side.CODEX,
+                        git_commit="e" * 40,
+                        eval_harness_commit="f" * 40,
+                        manifest=live_result.prepared.spec.binary,
+                        provider=live_result.prepared.spec.provider,
+                        budget_snapshot=live_result.budget_snapshot,
+                        metadata_path=self.root / "missing-api-metadata.json",
+                        outcome=RunOutcome.INFRA_FAILED,
+                        failure_stage=failure_stage,
+                        publication=self._publication(exit_code=70),
+                        secrets=("never-persist",),
+                        infra_diagnostic={
+                            "supervisor_reason": "bounded reason",
+                            "failed_probe": failed_probe,
+                            "probe_timings_ms": {},
+                        },
+                    )
+                writer.abort()
 
     def test_claimed_failure_reports_verified_api_metadata_truthfully(self) -> None:
         run_id = "20260810-010000012-tb-codex-r1"

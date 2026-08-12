@@ -130,10 +130,17 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   估算 `0.226591 USD`，无正式 budget/运行。
 - canary parser 不放宽；synthetic prompt 明确禁止 tool call 前 assistant/commentary。v6 使用新 identity，并把 v5
   canary 纳入 prior，精确冻结 `158.694728 USD`。
+- v6 Oracle 10/10 与 fresh canary 均通过；第一轮 10 个首跑后，`filter-js-from-html`、`polyglot-c-py` 的唯一
+  补跑仍为 `docker_runtime`，`vulnerable-secret` 的唯一补跑仍为 `provider_response_integrity`。逐轮门禁在第二轮
+  前将 campaign 收口为 blocked，formal `41.414652 USD`、canary `0.225196 USD`，累计 `200.334576 USD`，
+  reservation 为 0；v6 identity/state/result/artifact 保持只读。
+- Docker 失败诊断现保留 bounded supervisor reason、结构化 probe 名和耗时。两个受影响镜像各 5 轮无 API
+  counter/stats/exec 与各一次官方 Oracle 均通过，未复现持续故障；不升级或重启 Docker。v7 使用全新
+  campaign/batch/run IDs，精确带入 `200.334576 USD` prior，其他冻结合同不变。
 
 ### 后续计划
 
-1. 完成 v6 identity/lock、focused unittest、`just eval-lock` 与干净提交。
+1. 完成 v7 identity/lock、focused unittest、`just eval-lock` 与干净提交。
 2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API Oracle、资源门禁和 fresh exact-wire canary。
 3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
@@ -143,8 +150,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2/v3/v4/v5 是保留全部费用事实的 blocked 终态；v6 尚未执行 Oracle、canary 或
-  正式 40-run 基线。
+- v1 是 API 前失败终态；v2—v6 是保留全部费用事实的 blocked 终态；v7 尚未执行 Oracle、canary 或正式基线。
 
 ## 6. 关键决策记录
 
@@ -164,3 +170,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 012 | v4 退役并重冻 v5；取消全轮 replacement，每轮即时门禁，同类结构化故障命中 3 个 task 熔断，`sigma`/`delta` 使用至少 8 项共同集合 | 避免成功任务重复暴露于随机上游故障，也防止无效轮继续消费 | B6/B7 | 已采纳 |
 | 013 | 用户追加 200 USD，P2 总硬上限改为 400 USD；v5 带入 prior `158.468137 USD` | 新授权不重置历史 debit，任何下一 request 仍须容纳最大合法 reservation | B6/B7 | 已采纳 |
 | 014 | v5 canary 因 tool 前额外 assistant 消息失败；保持唯一消息 parser，收紧 synthetic prompt 并重冻 v6，prior `158.694728 USD` | 线缆/审批成功不等于精确 CLI 行为成功，不能为继续执行弱化 canary | B6/B7 | 已采纳 |
+| 015 | v6 第一轮补跑后仍有 3 项 infra，逐轮门禁退役 v6；在受影响镜像无 API 稳定性与 Oracle 通过后重冻 v7，prior `200.334576 USD` | 不盲目重跑、不在 campaign 中途升级 Docker；诊断未复现持续故障且剩余预算仍能容纳最大 reservation | B6/B7 | 已采纳 |

@@ -22,7 +22,12 @@ from ..runtime_bridge import (
     SubprocessCommandExecutor,
     lease_from_watchdog,
 )
-from .__main__ import _exception_failure, _load_manifest, _outcome_exit_code
+from .__main__ import (
+    _docker_failure_diagnostic,
+    _exception_failure,
+    _load_manifest,
+    _outcome_exit_code,
+)
 from .baseline import (
     BASE_ROUNDS,
     CAMPAIGN_CAP_USD,
@@ -890,6 +895,7 @@ def _execute_task_slot(
             metadata_path=metadata_path,
             outcome=outcome,
             failure_stage=failure_stage,
+            infra_diagnostic=_docker_failure_diagnostic(exc),
             publication=publication(exit_code),
             secrets=(provider_key,),
             task_id=task.task_id,
