@@ -991,11 +991,13 @@ class TerminalBenchTests(unittest.TestCase):
         prepare = next(
             command
             for command, _env, _timeout, _user in environment.calls
-            if "git config --global" in command
+            if "prepare" not in command and "GIT_CONFIG_GLOBAL" not in command
+            and 'test "$(id -u):$(id -g)"' in command
         )
         self.assertIn('test "$task_workdir" = "/app"', prepare)
         self.assertNotIn('test -d "$task_workdir/.git"', prepare)
         self.assertNotIn('git -C "$task_workdir" status', prepare)
+        self.assertNotIn("git config", prepare)
 
     def test_adapter_run_rejects_root_workdir_and_permission_projection_failure(self) -> None:
         adapter = self.adapter()

@@ -111,31 +111,39 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len({item.run_id for item in identity.slots}), 161)
         self.assertEqual(len({item.slot_id for item in identity.slots}), 161)
         self.assertEqual(identity.slots[0].slot_id, "wire-canary")
-        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v2")
-        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v2")
+        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v3")
+        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v3")
+        self.assertEqual(identity.budget["prior_estimated_usd"], "39.269328")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
 
-    def test_retired_v1_identity_and_slots_are_not_reused(self) -> None:
+    def test_retired_identities_and_slots_are_not_reused(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
         active = load_campaign_identity(paths)
         self.assertEqual(
             CAMPAIGN_LOCK_PATH,
-            Path("eval/locks/p2-b7-canary-baseline-v2.json"),
+            Path("eval/locks/p2-b7-canary-baseline-v3.json"),
         )
         self.assertEqual(
             RETIRED_CAMPAIGN_LOCK_PATHS,
-            (Path("eval/locks/p2-b7-canary-baseline-v1.json"),),
+            (
+                Path("eval/locks/p2-b7-canary-baseline-v1.json"),
+                Path("eval/locks/p2-b7-canary-baseline-v2.json"),
+            ),
         )
-        retired = json.loads(
-            (paths.worktree_root / RETIRED_CAMPAIGN_LOCK_PATHS[0]).read_text(
-                encoding="utf-8"
-            )
+        retired_values = [
+            json.loads((paths.worktree_root / path).read_text(encoding="utf-8"))
+            for path in RETIRED_CAMPAIGN_LOCK_PATHS
+        ]
+        self.assertTrue(
+            all(item["campaign_id"] != active.campaign_id for item in retired_values)
         )
-        self.assertNotEqual(retired["campaign_id"], active.campaign_id)
-        self.assertNotEqual(retired["batch_id"], active.batch_id)
+        self.assertTrue(
+            all(item["batch_id"] != active.batch_id for item in retired_values)
+        )
         retired_runs = {
-            retired["run_id_sequence_base"] + index
-            for index in range(1, retired["budget"]["max_run_slots"] + 1)
+            item["run_id_sequence_base"] + index
+            for item in retired_values
+            for index in range(1, item["budget"]["max_run_slots"] + 1)
         }
         active_runs = {
             int(slot.run_id.split("-")[1]) for slot in active.slots
@@ -192,6 +200,19 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(BaselineError, "crash-interrupted"):
                 with CampaignStateLedger(path, identity=identity):
                     pass
+            with CampaignStateLedger(
+                path,
+                identity=identity,
+                allow_interrupted_recovery=True,
+            ) as ledger:
+                recovered = ledger.fail_interrupted(
+                    estimated_usd="18.885000",
+                    reason="interrupted_request",
+                )
+                self.assertEqual(recovered, identity.slots[1].slot_id)
+                snapshot = ledger.snapshot()
+                self.assertEqual(snapshot["slots"][1]["status"], "failed")
+                self.assertEqual(snapshot["slots"][1]["outcome"], "infra_failed")
 
     def test_campaign_base_orchestrator_activates_only_mechanical_replacements(self) -> None:
         identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))

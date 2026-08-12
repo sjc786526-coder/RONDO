@@ -1788,6 +1788,52 @@ def canonical_request_sha256(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def canonical_guardian_request_sha256(value: object) -> str:
+    """Hash the same normalized Guardian request that RONDO writes as E_final."""
+
+    if not isinstance(value, dict):
+        raise ApiBudgetProxyError("canonical Guardian request must be a JSON object")
+    normalized = json.loads(json.dumps(value))
+    for field in (
+        "client_metadata",
+        "prompt_cache_key",
+        "store",
+        "stream",
+        "stream_options",
+    ):
+        normalized.pop(field, None)
+    call_ids: dict[str, str] = {}
+    turn_ids: dict[str, str] = {}
+    input_items = normalized.get("input")
+    if isinstance(input_items, list):
+        for item in input_items:
+            if not isinstance(item, dict):
+                continue
+            item.pop("id", None)
+            item.pop("encrypted_function_args", None)
+            _canonicalize_guardian_id(item, "call_id", "call", call_ids)
+            metadata = item.get("internal_chat_message_metadata_passthrough")
+            if isinstance(metadata, dict):
+                _canonicalize_guardian_id(
+                    metadata, "turn_id", "turn", turn_ids
+                )
+    return canonical_request_sha256(normalized)
+
+
+def _canonicalize_guardian_id(
+    value: dict[str, object],
+    field: str,
+    prefix: str,
+    observed: dict[str, str],
+) -> None:
+    original = value.get(field)
+    if not isinstance(original, str):
+        return
+    if original not in observed:
+        observed[original] = f"{prefix}_{len(observed)}"
+    value[field] = observed[original]
+
+
 def _inspect_request(
     body: bytes,
     declared_role: str | None,
@@ -1857,7 +1903,11 @@ def _inspect_request(
         input_items = 1
     return {
         "body_sha256": hashlib.sha256(body).hexdigest(),
-        "canonical_body_sha256": canonical_request_sha256(value),
+        "canonical_body_sha256": (
+            canonical_guardian_request_sha256(value)
+            if role == "guardian"
+            else canonical_request_sha256(value)
+        ),
         "role": role,
         "role_provenance": role_provenance,
         "declared_role": declared_role,

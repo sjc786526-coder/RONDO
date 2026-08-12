@@ -169,7 +169,8 @@ def main(argv: list[str] | None = None) -> int:
             _skip_planned(state, identity, reason="wire_canary_failed")
             state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
             return 3
-        remaining_cap = CAMPAIGN_CAP_USD - canary_cost
+        prior_cost = Decimal(identity.budget["prior_estimated_usd"])
+        remaining_cap = CAMPAIGN_CAP_USD - prior_cost - canary_cost
         if remaining_cap < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
             state.finalize(BaselineStatus.BLOCKED, reason="budget_after_wire_canary")
             return 3
@@ -854,7 +855,8 @@ def _write_aggregate(
     storage_baseline: StorageBaseline,
     final_storage: StorageBaseline | None,
 ) -> None:
-    spent = canary_cost + Decimal(budget["spent_usd"])
+    prior_cost = Decimal(identity.budget["prior_estimated_usd"])
+    spent = prior_cost + canary_cost + Decimal(budget["spent_usd"])
     records, record_digests = _campaign_records(results_root, identity)
     usage = _campaign_usage(campaign_root.parents[2], records)
     request_count = sum(
@@ -876,6 +878,7 @@ def _write_aggregate(
         "status": state.snapshot()["status"],
         "actual_usd": None,
         "estimated_usd": f"{spent:.6f}",
+        "prior_estimated_usd": f"{prior_cost:.6f}",
         "wire_canary_usd": f"{canary_cost:.6f}",
         "budget": budget,
         "assessment": public_assessment,
@@ -904,6 +907,7 @@ def _write_aggregate(
             "status",
             "actual_usd",
             "estimated_usd",
+            "prior_estimated_usd",
             "wire_canary_usd",
             "assessment",
             "request_count",

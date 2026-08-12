@@ -107,14 +107,18 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前工作
 
-- attempt 8 在 API 前完成首题官方 solution，但 `build-cython-ext` 的官方 verifier 以 reward 0 停止；该坏题已获批
-  与 validation 中的 `openssl-selfsigned-cert` 交换。holdout 未变，P2 API 累计费用仍为 0。
-- 新 10-task catalog 与 v2 campaign/batch/run identity 正在完成离线门禁；v1 lock 保留为退役历史，不进入执行。
+- v2 完整十题 Oracle 均 reward 1，替换后的 `openssl-selfsigned-cert` 已通过；fresh exact-wire canary completed，
+  本地估算 `0.180523 USD`。
+- v2 正式首轮暴露通用非 Git adapter、Guardian E_final digest 与 campaign 中断恢复缺陷；第 8 个 RONDO run
+  执行中主动停止，v2 已收口为 blocked 且全部 reservation settled。v2 累计本地估算 `39.269328 USD`，
+  `actual_usd=null`；其 identity、slot、ledger、result 与 artifact 不复用。
+- 运行合同修复已通过 137 项 focused unittest；v3 campaign/batch/161 个 run IDs 正在离线冻结，lock 将 v2
+  累计费用作为 `prior_estimated_usd` 扣减，P2 总硬上限仍为 200 USD。
 
 ### 后续计划
 
-1. 完成 v2 focused unittest、taskset/lock 门禁、`just eval-lock` 与干净提交。
-2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API oracle、资源门禁和 fresh exact-wire canary。
+1. 完成 v3 identity/lock、focused unittest、`just eval-lock` 与干净提交。
+2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API Oracle、资源门禁和 fresh exact-wire canary。
 3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
 ### 阻塞项
@@ -123,7 +127,8 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 attempt 8 是 API 前失败终态；v2 尚未运行完整 Oracle、fresh API canary 或正式 40-run 基线。
+- v1 是 API 前失败终态；v2 是完成 Oracle/canary 后的 blocked 付费终态；v3 尚未执行 Oracle、canary 或
+  正式 40-run 基线。
 
 ## 6. 关键决策记录
 
@@ -138,3 +143,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 007 | 在 lock 冻结前以 `build-cython-ext`、`extract-elf` 替换需要 system service/root capability 的两个候选 | 现有两侧非特权容器合同无法公平运行 system-admin 任务；不把确定性环境失败计入 σ | B4/B7 | 已采纳 |
 | 008 | campaign 冻结 1 canary + 40 base + 40 conditional + 各 40 bounded infra replacement，共 161 个唯一 slot | 单轮 >20% infra 需整轮替换，条件加跑也需一次定点替换；所有可能 ID 事前冻结 | B6/B7 | 已采纳 |
 | 009 | 经用户批准以 `openssl-selfsigned-cert` 替换官方 verifier reward 0 的 `build-cython-ext`，重冻 v2 identity 并退役 v1 | Oracle 在任何 API 前证明原题自身不可用；不是按模型成绩择题，holdout/预算/profile/bundle/轮次均不变 | B4/B7 | 已采纳 |
+| 010 | v2 在系统性 infra 后主动停止并退役；修复通用执行合同后重冻 v3，lock 扣除 v2 的 `39.269328 USD` | 避免未修复的整轮 replacement 盲目消费，并确保换 identity 不重置 P2 的 200 USD 总硬上限 | B6/B7 | 已采纳 |

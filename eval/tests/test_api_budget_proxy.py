@@ -33,6 +33,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     _validated_originator,
     _validated_user_agent,
     canonical_request_sha256,
+    canonical_guardian_request_sha256,
     completed_run_accounting,
     milestone_metadata_ready,
     price_usage,
@@ -568,6 +569,48 @@ class ApiBudgetProxyTests(unittest.TestCase):
             completed_run_accounting(snapshot, "benchmark-r1")
         self.assertEqual(os.stat(self.root / "metadata.json").st_mode & 0o777, 0o600)
         self.assertEqual(os.stat(self.root / "budget.json").st_mode & 0o777, 0o600)
+
+    def test_guardian_digest_matches_e_final_normalization(self) -> None:
+        body = self._body(guardian=True)
+        body.update(
+            {
+                "store": False,
+                "prompt_cache_key": "private-cache-key",
+                "client_metadata": {"private": True},
+            }
+        )
+        body["input"] = [
+            {
+                "id": "provider-id",
+                "call_id": "original-call",
+                "encrypted_function_args": "private",
+                "internal_chat_message_metadata_passthrough": {
+                    "turn_id": "original-turn"
+                },
+            },
+            {"call_id": "original-call"},
+        ]
+        status, _response, _headers = self._post(body, role="guardian")
+        self.assertEqual(status, 200)
+        observation = json.loads((self.root / "metadata.json").read_bytes())["requests"][0]
+        self.assertEqual(
+            observation["canonical_body_sha256"],
+            canonical_guardian_request_sha256(body),
+        )
+        normalized = dict(body)
+        for field in ("client_metadata", "prompt_cache_key", "store", "stream"):
+            normalized.pop(field, None)
+        normalized["input"] = [
+            {
+                "call_id": "call_0",
+                "internal_chat_message_metadata_passthrough": {"turn_id": "turn_0"},
+            },
+            {"call_id": "call_0"},
+        ]
+        self.assertEqual(
+            observation["canonical_body_sha256"],
+            canonical_request_sha256(normalized),
+        )
 
     def test_downstream_bearer_is_required_and_is_not_forwarded(self) -> None:
         status, body, _headers = self._post(
