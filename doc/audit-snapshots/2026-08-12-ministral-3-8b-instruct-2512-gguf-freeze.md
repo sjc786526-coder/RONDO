@@ -30,9 +30,9 @@ canary 稳定窗口、Docker/本地模型进程、Windows `C:` 余量和对象�
 | state | dry-run 已通过；文件尚不存在，等待单独下载授权 |
 
 **工程决策**：Q4_K_M 在 8 GiB 显存中比 Q5_K_M 留出约 0.80 GiB 更多权重外余量，又避免 Q3_K_M 更明显的
-质量损失成为审批基线的额外变量。Bartowski 相比官方同档量化披露了 BF16 来源、llama.cpp `b7229`、imatrix 及校准来源，
-更适合冻结训练前基线的量化来源链；官方文件仍作为身份更短但转换过程不透明的主要对照。精确 revision、字节数和 LFS
-内容哈希约束了最终工件身份，不以作者名或下载量替代完整性验证。
+质量损失成为审批 smoke 的额外变量。Bartowski 相比官方同档量化披露了 BF16 来源、llama.cpp `b7229`、imatrix 及校准来源，
+适合冻结首个部署/未微调 smoke baseline；官方文件仍作为身份更短但转换过程不透明的主要对照。精确 revision、字节数和 LFS
+内容哈希约束了最终工件身份，不以作者名或下载量替代完整性验证。当前 GGUF 不是未来 LoRA/QLoRA 训练源，也不承担训练效果归因。
 
 这项选择**不证明** Bartowski 的量化质量一定高于官方，也不证明精确文件已能由 `b10333` CUDA 加载。二者都必须在后续
 model-backed 任务中实测。
@@ -94,9 +94,18 @@ model-backed 任务中实测。
 - 官方 vLLM 路径要求 vLLM `>=0.12.0` 和 mistral-common `>=1.8.6`；这是 vLLM 建议，不能直接当作
   llama.cpp `b10333` 的验收证据。
 
-官方 Instruct/BF16 仓在 2026-06-30 修改 stray `[THINK]` special tokens，又在 2026-07-15 更新 chat template 以匹配
-mistral-common。官方 GGUF binary 自 2025-12-02 上传后未更新，其内嵌模板结构较旧；主要社区 GGUF 同样在 2025-12
-转换，也没有新模板同步证据。未来验收必须记录 GGUF 内嵌模板和实际请求渲染，不能以当前主仓模板替代工件事实。
+2026-08-12 以 Hub `gguf.chat_template` 元数据逐内容哈希复核：官方 GGUF revision `0102285…` 与冻结 Bartowski revision
+`ad82bf…` 的内嵌模板 SHA-256 均为 `749c9389522945c616d66276cda637639fe83ed4c865eb5bb6dcff7bc7fa34c1`，内容相同；
+Bartowski 在 template 新鲜度上不优于官方。两者的相关 binary 都在 2025-12 上传，早于官方 Instruct 仓 commit
+`aae06a2125402f2a89efbacf0881623c15a711d0`（2026-06-30，替换 stray `[THINK]` special tokens）和
+`5b26027e7b19eeb4b7352e1fed3926375dd2cb4d`（2026-07-15，匹配 mistral-common）。当前官方 revision 的
+`chat_template.jinja` SHA-256 为 `74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56`，与内嵌旧模板不同。
+
+模板差异不阻塞唯一 GGUF 下载，但阻塞正式 M3 baseline 和训练数据定稿。下载后必须验证 system prompt、单轮、多轮、真实
+`E_final` 与结构化输出的实际渲染。基线前只允许冻结一种模板口径：优先从官方
+`mistralai/Ministral-3-8B-Instruct-2512@5b26027…` 固定 `chat_template.jinja` 的路径和上述 SHA，再用
+`--chat-template-file` 测试；若 `b10333` 对该模板不兼容，则明确回退并冻结 GGUF 内嵌模板。测评/训练数据保存规范化
+`messages` 与 schema，不保存只适用于某个旧模板的预渲染文本，避免模板选择污染数据资产。
 
 ### 3.4 JSON/结构化审批输出
 
@@ -181,7 +190,8 @@ Bartowski 的相邻量化大小：
 - Bartowski 优势：公开 BF16 来源、量化器 release、imatrix 和校准来源，训练前后复用管线时可控变量更多；风险是多一层
   社区转换信任，且完整命令、精确 BF16 source commit 仍缺失。
 - 两个 Q4_K_M 仅相差约 0.5 MiB，大小不构成实质选择依据；它们内容哈希不同，不能互换。
-- 两者都早于 2026-07 官方 template 更新。选择 Bartowski 不是为了模板更新，而是为了量化来源可解释性。
+- 两者内嵌 chat template 内容相同，且都早于 2026-06-30 tokenizer special-token 与 2026-07-15 官方 template 更新。
+  选择 Bartowski 不是为了模板更新，也不证明量化质量优于官方，而是为了首个部署/smoke 工件的量化来源可解释性。
 - 精确 revision 与 LFS SHA 可验证“下载的是被冻结的社区工件”，不能验证社区声明的转换过程。后续真实质量横评仍需保持相同
   prompt/template/runtime 参数。
 
@@ -204,6 +214,22 @@ Bartowski 的相邻量化大小：
 
 但仓库现有 lock 能力仍为 `cpu_only_no_model`，只验收了 CPU x64 frontend/runtime closure；没有 CUDA runtime，也没有让
 `b10333` 实际解析或加载本文件。因此兼容结论精确表述为：**source/format-level supported, exact CUDA/model-backed not run**。
+
+### 7.1 Linux CUDA runtime 交接项
+
+这不是下载阻塞项，但属于 GPU smoke 的硬前置：
+
+- `eval/locks/llama-cpp-b10333.json` 当前固定资产是 `llama-b10333-bin-ubuntu-x64.tar.gz`，安装闭包只有 CPU backend，
+  capability 仍为 `cpu_only_no_model`。
+- 正式 launcher 会检查 runtime capability；不是 `gpu_model_serving_validated` 就以“GPU/model serving remains unvalidated”
+  拒绝启动，不会因 GGUF 出现在磁盘上而绕过。
+- `b10333` 官方 release 有 Windows CUDA 12.4/13.3 包，但没有 Linux CUDA 预编译资产。当前 WSL 的 Linux ELF runtime、
+  依赖闭包和 launcher 不能直接使用 Windows CUDA 包替代。
+- 下载 GGUF 后仍需另开实现/验收任务：在项目目录内构建精确 `b10333` Linux CUDA runtime，按仓库 build lock/资源门禁执行，
+  冻结二进制与宿主依赖闭包，再用精确模型完成 CUDA/model-backed 验收，满足证据后才能更新 capability。
+
+因此当前准确状态是“**权重下载就绪**”，不是“下载后即可部署”。Linux CUDA 构建/闭包、launcher 参数合同和模板验收均不
+阻塞权重下载，但阻塞 GPU smoke 或正式 baseline 的对应后续阶段。
 
 ## 8. RTX 4060 Laptop 8GB 资源预算
 
@@ -233,13 +259,19 @@ KV bytes/token = 34 * 2(K,V) * 8 * 128 * 2 bytes = 139,264 bytes = 136 KiB
 | **Bartowski Q4_K_M** | **4.841 GiB** | **5.372** | **5.904** | **6.966** | **9.091** |
 | Bartowski Q5_K_M | 5.643 GiB | 6.174 | 6.706 | 7.768 | 9.893 |
 
-**工程建议**：为 CUDA/图和桌面等保留约 1.5 GiB 的保守余量，初始固定 `Q4_K_M + 8192 context + F16 K/V +
-parallel 1`。Q5_K_M 在 8k 时理论仅余约 1.29 GiB，偏紧；Q4_K_M 16k 也偏紧。KV 改为 Q8/Q4 可节省显存，但会引入新的
-质量和兼容变量，不作为未微调首版基线。最终安全 context、全量 offload、显存峰值、共享内存回退和性能均为待实测。
+**工程建议**：为 CUDA/图和桌面等保留约 1.5 GiB 的保守余量，按两阶段推进。第一阶段只做
+`Q4_K_M + 4096 总 context + F16 K/V + parallel 1` 的稳定加载和单请求 smoke，由上游 auto offload/fit 适配显存；记录实际
+offload、fit 后参数和峰值。第二阶段根据该峰值进入目标 `8192 总 context + 全层 offload + fit off` 固定基线。Q5_K_M 在
+8k 时理论仅余约 1.29 GiB，偏紧；Q4_K_M 16k 也偏紧。KV 改为 Q8/Q4 可节省显存，但会引入新的质量和兼容变量，不作为
+未微调首版基线。最终安全 context、全量 offload、显存峰值、共享内存回退和性能均为待实测。
+
+4k/8k 都是模型总窗口，包含渲染后的输入、system prompt、模板与特殊 token、历史消息以及输出。目标 8k 配置保留最多
+512 输出 token 后，渲染后输入理论上限不超过 7680 token；原始 `messages` 的可用正文还要再扣除模板/特殊 token 开销，
+不能把 8192 全部当作输入预算。
 
 ### 8.3 后续建议启动参数（现在不得执行）
 
-在 CUDA `b10333` 和模型另行验收时，以以下参数作为起点：
+以下仅为 CUDA `b10333` 与模型另行验收时的手工参考参数，本次没有执行。第一阶段只建立最小稳定加载/单请求证据：
 
 ```bash
 llama-server \
@@ -249,26 +281,43 @@ llama-server \
   --model /home/sjc/desktop/RONDO/eval-data/models/mistralai_Ministral-3-8B-Instruct-2512-Q4_K_M.gguf \
   --alias rondo-local-approval \
   --no-mmproj \
-  --n-gpu-layers 99 \
+  --gpu-layers auto \
   --split-mode none \
   --main-gpu 0 \
-  --fit off \
-  --ctx-size 8192 \
+  --fit on \
+  --ctx-size 4096 \
   --batch-size 512 \
   --ubatch-size 256 \
   --parallel 1 \
   --flash-attn on \
   --cache-type-k f16 \
   --cache-type-v f16 \
+  --chat-template-file <frozen-current-official-template-file> \
   --jinja \
   --host 127.0.0.1 \
   --port 8080
 ```
 
-这里是参数建议，不是已运行命令。`rondo.local.toml` 当前能表达 context、GPU layers、flash attention 和 parallel，尚不能
-表达 `--no-mmproj`、cache type、batch/ubatch、`--fit off`。RONDO 的 `context_size = 0` 会省略 `--ctx-size`，上下文由模型
-元数据和 b10333 默认 fit 决定，可能从模型上限尝试后自动缩减，不能冻结确定的实验条件；本机首次验收必须显式改成 8192。
-是否需要调整 launcher 参数合同属于后续 GPU smoke 任务。
+模板若不兼容，停止并先明确冻结内嵌模板，不能静默删掉模板参数继续。第一阶段记录峰值和实际 offload/fit 结果后，第二阶段只把
+关键资源条件收紧为：
+
+```text
+--gpu-layers all --fit off --ctx-size 8192
+--batch-size 512 --ubatch-size 256 --parallel 1
+--cache-type-k f16 --cache-type-v f16
+```
+
+当前正式 launcher 与上述建议存在明确差距，本任务只记录、不修改代码：
+
+- 尚不能表达 `--no-mmproj`、`--fit on/off`、`--cache-type-k/v`、`--batch-size`、`--ubatch-size`、
+  `--chat-template-file`。
+- RONDO 的 `gpu_layers = "auto"` 当前映射为 `--n-gpu-layers 99`，不是 llama.cpp 原生 `--gpu-layers auto`，所以不能实现
+  第一阶段所需的上游 auto offload。
+- `b10333` 上游默认 batch/ubatch 为 2048/512，与本文保守建议 512/256 不同；当前 launcher 不传这两个参数。
+- RONDO 的 `context_size = 0` 会省略 `--ctx-size`，上下文由模型元数据和上游默认 fit 决定，不能冻结确定实验条件。
+
+在正式固定基线前，应通过单独实现任务补齐上述最小配置合同并纳入 launcher identity；手工命令只用于受控 smoke/诊断，不能
+成为长期运行入口。
 
 ## 9. 未微调与微调后量化可比性
 
@@ -276,11 +325,15 @@ llama-server \
 
 1. 严格比较应固定同一 BF16 源谱系、tokenizer/chat template、llama.cpp conversion/quantization commit、量化类型、
    imatrix 数据与命令、context、KV type、prompt、seed、sampling 和结构化输出约束。
-2. 本次 Bartowski 文件可作可部署的未微调基线；若未来无法精确取得/复用 Bartowski 的完整 b7229 命令和校准 subset，不能把
-   它与另一条新量化管线的微调模型差异全部归因于训练。
-3. 最干净的未来方案是：在微调产物完成后，用同一个重新冻结的新 llama.cpp commit、同一 imatrix 和同一命令，分别从未经
-   微调 BF16 与微调合并 BF16 生成一对 GGUF，再重跑 baseline/finetuned。原始 Bartowski 结果保留为 deployment baseline。
-4. tokenizer/template 修复、mmproj 是否存在、KV 量化、context 截断或 runtime build 变化都可能污染训练前后对比，必须成为
+2. 当前 Bartowski GGUF 是 inference/deployment 工件；RONDO 训练合同不接受它作为 LoRA/QLoRA 训练源，它也不是未来训练
+   效果归因的 base 权重。即使某些工具能导入/反量化 GGUF，也不得以这种转换后的张量替代单独冻结的官方 BF16 源谱系。
+3. 未来训练应单独冻结官方 BF16 revision、tokenizer/chat-template revision、训练框架/依赖版本、视觉 encoder/projector
+   冻结策略、LoRA/QLoRA 配置和 adapter merge 方案；这些不由本 GGUF revision 代替。
+4. 微调完成后，用同一个重新冻结的新 converter、quantizer、同一 imatrix 和完整命令，分别从 base BF16 与合并后的
+   finetuned BF16 生成一对 GGUF，再在同一 runtime/template/参数下做训练前后比较。
+5. 当前 Bartowski 结果只保留为首个部署/未微调 smoke baseline，不承担训练效果归因；若未来把它与另一条量化管线的微调模型
+   直接比较，差异不能全部归因于训练。
+6. tokenizer/template 修复、mmproj 是否存在、KV 量化、context 截断或 runtime build 变化都可能污染训练前后对比，必须成为
    结果元数据而不是静默变化。
 
 ## 10. 下载、哈希和本地配置冻结
@@ -368,8 +421,10 @@ structured_output = true
 ```
 
 现有 loader 会检查普通非 symlink 文件、GGUF magic 和完整 SHA；`quantization` 目前只是声明字符串，不会反向证明文件内部 quant，
-repo/revision/converter/imatrix 也不在 TOML 表达，故以本档案保存来源冻结。`gpu_layers = "auto"` 是 RONDO policy，会映射为
-`--n-gpu-layers 99`，不是 llama.cpp 原生 auto。下载前不写入机器实际配置。
+repo/revision/converter/imatrix 也不在 TOML 表达，故以本档案保存来源冻结。这里的 `context_size = 8192` 是第二阶段目标配置，
+不是首次启动参数；`gpu_layers = "auto"` 仍会被现有 RONDO 映射为 `--n-gpu-layers 99`，不能冒充第一阶段所需的上游 auto
+offload。第一阶段 4k/auto-fit 必须等 launcher 最小合同补齐后再由正式配置表达；Linux CUDA runtime 与该合同完成前不得据此
+启动服务。下载前不写入机器实际配置。
 
 ## 11. 主机与 canary 下载门禁快照
 
@@ -407,10 +462,12 @@ repo/revision/converter/imatrix 也不在 TOML 表达，故以本档案保存来
 3. 重做第 11 节四项下载前门禁；
 4. 运行第 10.2 节唯一下载命令；
 5. 只运行第 10.3 节 size/SHA 验证并更新 ignored `rondo.local.toml`；
-6. 不启动 llama.cpp、不加载模型、不使用 GPU，另开后续 CUDA/model-backed 验收任务。
+6. 不启动 llama.cpp、不加载模型、不使用 GPU；另开后续任务依次补齐 Linux CUDA runtime/依赖闭包、launcher 最小参数合同和
+   唯一 chat-template 口径，再按第 8.3 节两阶段执行 CUDA/model-backed 验收。
 
-仍未完成：真实文件 SHA、CUDA runtime、GGUF load、GPU offload、显存峰值、最大安全 context、首 token/总耗时、chat template 实际
-渲染、grammar/schema/真实审批输出、未微调 M3 baseline。等待下载批准不是技术失败，以上项目均不得写成通过。
+仍未完成：真实文件 SHA、Linux CUDA runtime/依赖闭包、launcher 最小参数合同、GGUF load、GPU offload、显存峰值、最大安全
+context、首 token/总耗时、唯一 chat-template 口径及实际渲染、grammar/schema/真实审批输出、未微调 M3 baseline。等待下载批准
+不是技术失败，以上项目均不得写成通过；模板问题还阻塞训练数据定稿。
 
 ## 13. 权威和候选资料
 
@@ -427,8 +484,11 @@ repo/revision/converter/imatrix 也不在 TOML 表达，故以本档案保存来
 - mradermacher imatrix 候选：<https://huggingface.co/mradermacher/Ministral-3-8B-Instruct-2512-BF16-i1-GGUF>
 - ggml-org 候选：<https://huggingface.co/ggml-org/Ministral-3-8B-Instruct-2512-GGUF>
 - llama.cpp `b10333` release：<https://github.com/ggml-org/llama.cpp/releases/tag/b10333>
+- llama.cpp `b10333` 参数默认值：<https://github.com/ggml-org/llama.cpp/blob/b10333/common/common.h>
+- llama.cpp `b10333` 参数入口：<https://github.com/ggml-org/llama.cpp/blob/b10333/common/arg.cpp>
 - llama.cpp Mistral3 frozen source：<https://github.com/ggml-org/llama.cpp/blob/b10333/src/models/mistral3.cpp>
 - llama.cpp server：<https://github.com/ggml-org/llama.cpp/blob/b10333/tools/server/README.md>
 - llama.cpp multimodal：<https://github.com/ggml-org/llama.cpp/blob/b10333/tools/mtmd/README.md>
 - Hugging Face download/local-dir：<https://huggingface.co/docs/huggingface_hub/en/guides/download>
 - Hugging Face environment variables：<https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables>
+- 当前官方 `chat_template.jinja`：<https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512/blob/5b26027e7b19eeb4b7352e1fed3926375dd2cb4d/chat_template.jinja>

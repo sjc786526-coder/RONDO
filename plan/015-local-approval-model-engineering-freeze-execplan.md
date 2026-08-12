@@ -120,6 +120,8 @@
   finding；已按审查意见澄清 TOML 仅为差异片段、`context_size = 0`/fit 语义和社区来源声明口径。
 - 2026-08-12：4 份已验收的研究/计划/WBS/日志成果以 `a76795f` 提交，经 merge commit `1b34c27` 合并本地 `main`
   并推送 `origin/main`；推送后已核对本地与远端同 SHA。审批阶段 worktree/分支保留，不重命名为 `zz-done`。
+- 2026-08-12：逐项复核后续独立审查，再完善 GPU 两阶段验收、Linux CUDA runtime/launcher/template 前置和训练资产边界；
+  不改变已冻结 GGUF，也不把下载就绪表述为部署或正式 M3 baseline 就绪。
 
 ### 当前工作
 
@@ -130,7 +132,8 @@
 - 当前阶段：Phase A 研究成果已交付；集中报告唯一对象与资源状态后等待用户单项下载授权，不再执行其他操作。
 - 获明确授权后：在保留的独立 worktree 恢复，先重新核对 canary 稳定窗口、Docker/模型进程、Windows `C:` 余量与
   批准对象；只下载唯一文件，验证 exact bytes/SHA 并更新 ignored `rondo.local.toml`。
-- 下载完成后仍不加载模型或使用 GPU；CUDA/model-backed smoke、上下文扫描与未微调 M3 baseline 另行验收。
+- 下载完成后仍不加载模型或使用 GPU；另行补齐项目内 Linux CUDA runtime/依赖闭包、launcher 最小参数合同和唯一模板口径，
+  再做两阶段 CUDA/model-backed smoke、上下文扫描与未微调 M3 baseline。
 
 ### 阻塞项
 
@@ -153,6 +156,9 @@
 | 002 | 最终 GGUF 来源在证据比较后决定，不预设官方或社区 | 官方与社区资产的转换、量化、imatrix、兼容和可复现性可能不同 | 候选调查与最终冻结 | 已采纳 |
 | 003 | MCP 可见性与成功调用分开验收 | 当前工具已加载但首次服务调用为 `-32603`，不能把配置/可见性当成功使用 | 工具使用记录与降级方案 | 已采纳 |
 | 004 | 不修改或读取 canary results worktree | 其中存在并行会话的未提交结果；本任务只做模型工程准备 | worktree 与资源检查 | 已采纳 |
-| 005 | 唯一基线冻结为 Bartowski `Q4_K_M` revision `ad82bf…` | 相比官方同档，它披露 BF16 来源、llama.cpp b7229、imatrix 和校准来源；精确 revision/LFS SHA 约束社区工件身份。官方转换方法与 imatrix 未披露，两者模板均旧于当前主仓，不能只按官方身份决策 | 下载对象、量化、档案与后续配置 | 已采纳 |
-| 006 | 8GB 首次验收从 8192 context、F16 K/V、单并发开始 | Q4 权重 4.841 GiB，8k F16 KV 估算 1.063 GiB；需给 CUDA/graph/scratch/桌面留余量，262k 模型上限不适合作为本机默认值 | 后续 `rondo.local.toml` 与 GPU smoke | 已采纳 |
+| 005 | 唯一下载对象冻结为 Bartowski `Q4_K_M` revision `ad82bf…`，定位为首个部署/未微调 smoke baseline | 相比官方同档，它披露 BF16 来源、llama.cpp b7229、imatrix 和校准来源；精确 revision/LFS SHA 约束社区工件身份。该选择不证明质量优于官方，GGUF 也不是未来训练源或训练效果归因基线 | 下载对象、量化、档案与后续配置 | 已采纳 |
+| 006 | 8GB GPU 验收分两阶段：先以 4k 总窗口、F16 K/V、单并发、小 batch/ubatch、上游 auto offload/fit 做稳定加载和单请求 smoke；再依据显存峰值进入 8k 总窗口、全层 offload、fit off 的固定基线 | 首次启动同时强制 8k/全层/fit off 会把 runtime、offload 和上下文风险耦合；4k 先建立最小 model-backed 证据，8k 仍是目标配置。8k 包含输入、模板/特殊 token 和最多 512 输出 token，不是 8k 纯输入预算 | 后续 Linux CUDA runtime、launcher 合同、`rondo.local.toml` 与 GPU smoke | 已采纳 |
 | 007 | Phase A 调研成果现在交付，Phase B 下载继续由本计划的条件分支恢复 | 当前可验收成果不依赖权重；下载授权和稳定 canary 窗口仍是硬门，保留 worktree 可避免丢失精确恢复入口 | Git 交付与 worktree 生命周期 | 已采纳 |
+| 008 | 把 Linux CUDA runtime、launcher 最小参数合同和唯一模板口径列为 model-backed 前置，但不升级为权重下载阻塞项 | 当前 lock 是 `cpu_only_no_model`，launcher 会拒绝未标记 `gpu_model_serving_validated` 的 runtime；同时无法表达 auto offload/fit、KV/batch 和模板参数。下载就绪不等于部署就绪 | 下载后交接、GPU smoke 与能力口径 | 已采纳 |
+| 009 | 正式 baseline 前优先验证当前官方 `chat_template.jinja`，不兼容时显式冻结内嵌模板；数据只保存规范化 messages/schema | 官方与 Bartowski 内嵌模板内容相同且都早于 2026-06/07 更新；模板变化会污染 M3 baseline 和训练数据，但不改变 GGUF 下载对象 | 模板验收、测评/训练数据 | 已采纳 |
+| 010 | 当前 Bartowski GGUF 只保留为部署/smoke baseline；未来训练另冻官方 BF16 与训练/merge 合同，并由同一新量化管线生成 base/finetuned GGUF 对 | 推理 GGUF 不承担 RONDO 的 LoRA/QLoRA 源权重或训练效果归因；成对转换才能隔离训练与量化差异 | 未来训练与 M3/M4 比较 | 已采纳 |
