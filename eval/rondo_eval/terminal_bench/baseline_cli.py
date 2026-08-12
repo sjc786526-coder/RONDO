@@ -99,6 +99,10 @@ class _CampaignStepAdvanced(RuntimeError):
     """Internal control flow after one paid slot is durably terminal."""
 
 
+class _CampaignReplayBoundary(RuntimeError):
+    """Recovery replay reached the first slot that has never been claimed."""
+
+
 class _CampaignDiagnosisRequired(RuntimeError):
     """One task chain is safely paused for offline structured RCA."""
 
@@ -436,6 +440,25 @@ def _worker_step_main(args: argparse.Namespace) -> int:
         identity.slots[0].run_id,
     )
     _sample_storage(counter, identity.slots[0].run_id, baseline=storage_baseline)
+    recovery_exit = _reconcile_before_oracle(
+        paths=paths,
+        identity=identity,
+        campaign_root=campaign_root,
+        state_path=state_path,
+        budget_path=budget_path,
+        config=config,
+        counter=counter,
+        proof=proof,
+        storage_baseline=storage_baseline,
+        results_root=results_root,
+        manifests=manifests,
+        measurement_roots=measurement_roots,
+        measurement_commits=measurement_commits,
+        eval_harness_commit=eval_harness_commit,
+        seccomp_profile=seccomp_profile,
+    )
+    if recovery_exit is not None:
+        return recovery_exit
     oracle_ready = _run_oracle_preflight(
         paths=paths,
         identity=identity,
@@ -477,6 +500,139 @@ def _worker_step_main(args: argparse.Namespace) -> int:
             except CampaignExecutionError as exc:
                 _skip_planned(state, identity, reason="wire_canary_failed")
                 state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
+                return 3
+
+
+def _reconcile_before_oracle(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    campaign_root: Path,
+    state_path: Path,
+    budget_path: Path,
+    config: object,
+    counter: DockerCliCounter,
+    proof: object,
+    storage_baseline: StorageBaseline,
+    results_root: Path,
+    manifests: dict[Side, BinaryManifest],
+    measurement_roots: dict[Side, RepoPaths],
+    measurement_commits: dict[Side, str],
+    eval_harness_commit: str,
+    seccomp_profile: Path,
+) -> int | None:
+    """Reconcile the one claimed slot before invalidating or rerunning Oracle proof."""
+
+    with CampaignStateLedger(
+        state_path,
+        identity=identity,
+        allow_interrupted_recovery=True,
+    ) as state:
+        snapshot = state.snapshot()
+        if snapshot["status"] != "running":
+            return _terminal_exit_code(snapshot["status"])
+        running = [row for row in snapshot["slots"] if row["status"] == "running"]
+        if not running:
+            return None
+        if len(running) != 1:
+            raise CampaignExecutionError("campaign running slot recovery is ambiguous")
+        if running[0]["slot_id"] == "wire-canary":
+            try:
+                _reconcile_running_wire_canary(
+                    paths=paths,
+                    identity=identity,
+                    campaign_root=campaign_root,
+                    state=state,
+                    counter=counter,
+                    storage_baseline=storage_baseline,
+                )
+            except CampaignExecutionError as exc:
+                _skip_planned(state, identity, reason="wire_canary_interrupted")
+                state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
+                return 3
+            return 10
+
+        wire = next(
+            row for row in snapshot["slots"] if row["slot_id"] == "wire-canary"
+        )
+        if wire["status"] != CampaignSlotStatus.COMPLETED.value:
+            raise CampaignExecutionError("paid slot exists before completed wire canary")
+        canary_cost = Decimal(str(wire["estimated_usd"]))
+        prior_cost = Decimal(str(identity.budget["prior_estimated_usd"]))
+        campaign_cap = Decimal(str(identity.budget["campaign_cap_usd"]))
+        remaining_cap = campaign_cap - prior_cost - canary_cost
+        with PersistentBudgetLedger(
+            budget_path,
+            batch_id=identity.batch_id,
+            total_cap_usd=remaining_cap,
+            max_runs=len(identity.slots) - 1,
+            default_run_cap_usd=RUN_CAP_USD,
+        ) as budget:
+            try:
+                recovered = _reconcile_running_paid_slot(
+                    paths=paths,
+                    identity=identity,
+                    state=state,
+                    budget=budget,
+                    counter=counter,
+                    storage_baseline=storage_baseline,
+                    results_root=results_root,
+                )
+                if not recovered:
+                    raise CampaignExecutionError(
+                        "campaign running slot recovery disappeared"
+                    )
+                slot = identity.slot(str(running[0]["slot_id"]))
+                _replay_recovered_attempt_chain(
+                    paths=paths,
+                    identity=identity,
+                    state=state,
+                    budget=budget,
+                    config=config,
+                    counter=counter,
+                    proof=proof,
+                    storage_baseline=storage_baseline,
+                    results_root=results_root,
+                    manifests=manifests,
+                    measurement_roots=measurement_roots,
+                    measurement_commits=measurement_commits,
+                    eval_harness_commit=eval_harness_commit,
+                    seccomp_profile=seccomp_profile,
+                    recovered_slot=slot,
+                )
+                return 10
+            except _CampaignDiagnosisRequired as exc:
+                print(
+                    json.dumps(
+                        {
+                            "status": "diagnosis_required",
+                            "campaign_id": identity.campaign_id,
+                            "chain_id": exc.chain_id,
+                            "category": exc.category.value,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                return 11
+            except CampaignExecutionError as exc:
+                _skip_planned(state, identity, reason="campaign_stopped")
+                state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
+                final_storage = _optional_final_storage(
+                    counter,
+                    identity.slots[0].run_id,
+                    baseline=storage_baseline,
+                )
+                _write_aggregate(
+                    campaign_root,
+                    identity,
+                    state,
+                    budget.snapshot(),
+                    canary_cost,
+                    assessment=None,
+                    results_root=results_root,
+                    storage_baseline=storage_baseline,
+                    final_storage=final_storage,
+                )
                 return 3
             return 10
         if wire["status"] != CampaignSlotStatus.COMPLETED.value:
@@ -621,12 +777,12 @@ def _reconcile_running_paid_slot(
     counter: DockerCliCounter,
     storage_baseline: StorageBaseline,
     results_root: Path,
-) -> None:
+) -> bool:
     running = [
         row for row in state.snapshot()["slots"] if row["status"] == "running"
     ]
     if not running:
-        return
+        return False
     if len(running) != 1 or running[0]["slot_id"] == "wire-canary":
         raise CampaignExecutionError("campaign running slot recovery is ambiguous")
     row = running[0]
@@ -649,13 +805,67 @@ def _reconcile_running_paid_slot(
             result_record_sha256=digests[slot.run_id],
             reason=category.value if category is not None else None,
         )
-        return
+        return True
     spent = Decimal(run["spent_usd"]) if isinstance(run, dict) else Decimal(0)
     state.fail_interrupted(
         estimated_usd=f"{spent:.6f}",
         reason=MechanicalFailureCategory.OPERATOR_INTERRUPTION.value,
     )
     raise CampaignExecutionError("paid campaign slot was interrupted ambiguously")
+
+
+def _replay_recovered_attempt_chain(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    state: CampaignStateLedger,
+    budget: PersistentBudgetLedger,
+    config: object,
+    counter: DockerCliCounter,
+    proof: object,
+    storage_baseline: StorageBaseline,
+    results_root: Path,
+    manifests: dict[Side, BinaryManifest],
+    measurement_roots: dict[Side, RepoPaths],
+    measurement_commits: dict[Side, str],
+    eval_harness_commit: str,
+    seccomp_profile: Path,
+    recovered_slot: CampaignSlotPlan,
+) -> None:
+    task = next(
+        (item for item in identity.catalog.tasks if item.task_id == recovered_slot.task_id),
+        None,
+    )
+    if task is None:
+        raise CampaignExecutionError("recovered campaign task is not frozen")
+    records, digests = _campaign_records(results_root, identity)
+    try:
+        _execute_attempt_chain(
+            identity=identity,
+            state=state,
+            tracker=MechanicalFailureTracker(),
+            task=task,
+            chain_id=campaign_slot_chain_id(recovered_slot),
+            paths=paths,
+            budget=budget,
+            config=config,
+            provider_key="",
+            counter=counter,
+            proof=proof,
+            storage_baseline=storage_baseline,
+            results_root=results_root,
+            manifests=manifests,
+            measurement_roots=measurement_roots,
+            measurement_commits=measurement_commits,
+            eval_harness_commit=eval_harness_commit,
+            seccomp_profile=seccomp_profile,
+            records=records,
+            digests=digests,
+            resumable=True,
+            replay_only=True,
+        )
+    except _CampaignReplayBoundary:
+        return
 
 
 def _validate_recoverable_publication(
@@ -1125,7 +1335,7 @@ def _advance_one_paid_step(
             failure_tracker=tracker,
             **resumable,
         )
-    except _CampaignStepAdvanced:
+    except (_CampaignStepAdvanced, _CampaignReplayBoundary):
         return 10
 
     assessment = assess_baseline(
@@ -1514,6 +1724,7 @@ def _execute_task_slot(
     records: dict[str, dict[str, object]] | None = None,
     digests: dict[str, str] | None = None,
     resumable: bool = False,
+    replay_only: bool = False,
 ) -> ExecutedSlot:
     from .tasksets import FrozenTask
 
@@ -1530,6 +1741,8 @@ def _execute_task_slot(
                 records=records,
                 digests=digests,
             )
+        if replay_only:
+            raise _CampaignReplayBoundary
     validate_frozen_task_source(
         paths.common_root / "eval-data/sources/terminal-bench-2-1-ffccbe05",
         task,

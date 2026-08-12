@@ -589,7 +589,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             ) as state:
                 state.claim(slot.slot_id)
                 with mock.patch.object(baseline_cli, "_sample_storage"):
-                    baseline_cli._reconcile_running_paid_slot(
+                    reconciled = baseline_cli._reconcile_running_paid_slot(
                         paths=RepoPaths.discover(Path.cwd()),
                         identity=identity,
                         state=state,
@@ -598,6 +598,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                         storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
                         results_root=results,
                     )
+                self.assertTrue(reconciled)
                 row = next(
                     item for item in state.snapshot()["slots"]
                     if item["slot_id"] == slot.slot_id
@@ -605,6 +606,65 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 self.assertEqual(row["status"], "completed")
                 self.assertEqual(row["estimated_usd"], "0.100000")
                 self.assertEqual(row["result_record_sha256"], hashlib.sha256(line).hexdigest())
+
+    def test_recovery_replay_stops_before_any_unclaimed_attempt(self) -> None:
+        identity = self._identity_v2()
+        task = identity.catalog.tasks[0]
+        first = identity.slot(f"base:aa-rondo-1:{task.task_id}:a1")
+        second = identity.slot(f"base:aa-rondo-1:{task.task_id}:a2")
+        records: dict[str, dict[str, object]] = {}
+        digests: dict[str, str] = {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with CampaignStateLedger(root / "state.json", identity=identity) as state:
+                for index, slot in enumerate((first, second), start=1):
+                    digest = f"{index:064x}"
+                    state.claim(slot.slot_id)
+                    state.finish(
+                        slot.slot_id,
+                        status=CampaignSlotStatus.COMPLETED,
+                        outcome=RunOutcome.INFRA_FAILED.value,
+                        estimated_usd="0.100000",
+                        artifact_path=f"eval-data/runs/{slot.run_id}",
+                        result_record_sha256=digest,
+                        reason=MechanicalFailureCategory.DOCKER_RUNTIME.value,
+                    )
+                    records[slot.run_id] = {
+                        "run_id": slot.run_id,
+                        "outcome": RunOutcome.INFRA_FAILED.value,
+                        "artifacts": f"eval-data/runs/{slot.run_id}",
+                    }
+                    digests[slot.run_id] = digest
+                with mock.patch.object(
+                    baseline_cli,
+                    "_campaign_records",
+                    return_value=(records, digests),
+                ), self.assertRaises(baseline_cli._CampaignDiagnosisRequired):
+                    baseline_cli._replay_recovered_attempt_chain(
+                        paths=RepoPaths.discover(Path.cwd()),
+                        identity=identity,
+                        state=state,
+                        budget=mock.Mock(),
+                        config=mock.Mock(),
+                        counter=mock.Mock(),
+                        proof=mock.Mock(),
+                        storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                        results_root=root,
+                        manifests={},
+                        measurement_roots={},
+                        measurement_commits={},
+                        eval_harness_commit="a" * 40,
+                        seccomp_profile=root / "seccomp.json",
+                        recovered_slot=second,
+                    )
+                third = identity.slot(f"base:aa-rondo-1:{task.task_id}:a3")
+                self.assertEqual(
+                    next(
+                        row for row in state.snapshot()["slots"]
+                        if row["slot_id"] == third.slot_id
+                    )["status"],
+                    CampaignSlotStatus.PLANNED.value,
+                )
 
     def test_interrupted_paid_slot_without_publication_is_blocked_not_retried(self) -> None:
         identity = self._identity()
