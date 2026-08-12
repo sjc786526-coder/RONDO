@@ -27,7 +27,7 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         self.assertEqual(len(set(frozen.all_ids)), 89)
         self.assertEqual(
             frozen.taskset_sha256,
-            "07aa634495ba612667817a68be7f58ad435f1c6e9ada31453d832bfae929ca27",
+            "7b48c5d685ea9386606c3ea829d49c73eff2c870d46a05c314674017d9361cdb",
         )
 
     def test_holdout_is_recomputed_from_ids_without_task_content(self) -> None:
@@ -41,6 +41,18 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         )
 
         self.assertEqual(frozen.holdout, tuple(sorted(ranked[:18])))
+
+    def test_canary_execution_catalog_is_bound_to_the_id_partition(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        task_ids = tasksets.load_frozen_tasksets(paths).canary
+        catalog = tasksets.load_frozen_canary_catalog(paths)
+
+        self.assertEqual(tuple(item.task_id for item in catalog.tasks), task_ids)
+        self.assertEqual(len(catalog.catalog_sha256), 64)
+        self.assertEqual(catalog.task("terminal-bench/fix-git").workdir, "/app/personal-site")
+        self.assertTrue(
+            all(item.image_ref.endswith(item.image_digest) for item in catalog.tasks)
+        )
 
     def test_partition_tampering_is_rejected(self) -> None:
         live = tasksets.load_frozen_tasksets(RepoPaths.discover(Path.cwd()))

@@ -346,3 +346,14 @@ standard/Lite 形态均补回归。
   位置接受 `user_authorization`。
 - dependency lock 解析 85 packages；pure/fake/loopback 完整 eval 349/349 通过。本批未运行真实 API、Docker、Cargo，
   未读取密钥，也未改写真实结果。
+
+### 2026-08-11 P2 B4/B5/B6 与 B7 执行设施
+
+- 仅按 pinned TB 2.1 的 89 个 task ID 用无盐 SHA-256 先冻结 18 个 holdout，再从 71 个可见任务冻结
+  10 canary / 61 validation；tracked catalog 绑定 canary 的 source digest、exact image、workdir、资源和三类 timeout。
+- B5 机械计分覆盖 agent、Guardian correct/false deny 与 infra；未知 deny 保守归 false deny，technical Guardian
+  failure 排除分母，holdout 只允许整批聚合。新 RONDO evidence 以 canonical request digest 一一绑定归档 `E_final`。
+- B6 冻结独立 200 USD campaign、161 个一次性 slot、18.885 USD request reservation、40 USD run cap、唯一
+  task/batch/run IDs 和 profile/catalog/bundle identity；usage、request/attempt 与费用可从预算/metadata 机械聚合。
+- 通用 10-task materializer/runner、no-API oracle 前置、campaign 状态机、公开结果与 `just eval-b7-baseline`
+  已接入既有设施。`just eval-lock` 85 packages、正式离线 unittest 379/379 通过；本条不声称 B7 真实基线已运行。

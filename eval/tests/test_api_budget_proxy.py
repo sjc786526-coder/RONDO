@@ -1717,16 +1717,16 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             self.root / "campaign.json",
             batch_id="campaign",
             total_cap_usd="200",
-            max_runs=120,
+            max_runs=161,
             default_run_cap_usd="40",
         ) as campaign:
-            self.assertEqual(campaign.snapshot()["max_runs"], 120)
+            self.assertEqual(campaign.snapshot()["max_runs"], 161)
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
                 self.root / "too-many-runs.json",
                 batch_id="bad-runs",
                 total_cap_usd="200",
-                max_runs=121,
+                max_runs=162,
                 default_run_cap_usd="40",
             )
         with self.assertRaises(ApiBudgetProxyError):

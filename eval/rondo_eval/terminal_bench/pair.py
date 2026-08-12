@@ -830,6 +830,46 @@ class RunPublicationContext:
         _parse_selected_profile(self.selected_profile)
 
 
+@dataclass(frozen=True)
+class CampaignPublicationContext:
+    campaign_id: str
+    campaign_lock_sha256: str
+    campaign_slot_id: str
+    campaign_round_id: str
+    campaign_attempt: int
+    taskset_sha256: str
+    canary_catalog_sha256: str
+    side: Side
+    metrics: Mapping[str, object]
+    selected_profile: Mapping[str, object]
+
+    def validate(self) -> None:
+        if not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", self.campaign_id
+        ):
+            raise PairIdentityError("publication campaign id is invalid")
+        _require_sha256(self.campaign_lock_sha256, "campaign lock sha256")
+        _require_sha256(self.taskset_sha256, "taskset sha256")
+        _require_sha256(self.canary_catalog_sha256, "canary catalog sha256")
+        if (
+            not isinstance(self.campaign_slot_id, str)
+            or not self.campaign_slot_id
+            or len(self.campaign_slot_id) > 256
+            or not isinstance(self.campaign_round_id, str)
+            or not self.campaign_round_id
+            or len(self.campaign_round_id) > 64
+            or isinstance(self.campaign_attempt, bool)
+            or self.campaign_attempt not in {1, 2}
+            or not isinstance(self.side, Side)
+        ):
+            raise PairIdentityError("publication campaign topology is invalid")
+        try:
+            metrics_from_dict(self.metrics)
+        except RunMetricsError as exc:
+            raise PairIdentityError("publication metrics are invalid") from exc
+        _parse_selected_profile(self.selected_profile)
+
+
 def load_historical_pair_identity(
     name: str = LATEST_HISTORICAL_PAIR_NAME,
     *,

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -49,6 +50,7 @@ from rondo_eval.terminal_bench import live as live_module  # noqa: E402
 from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
 from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
 from rondo_eval.terminal_bench.freeze import FreezeError, validate_runtime_image_digest  # noqa: E402
+from rondo_eval.terminal_bench.tasksets import FrozenTask  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerContainerFact,
     DockerExecutionResult,
@@ -107,7 +109,11 @@ class FakeEnvironment:
             return FakeExecResult(1)
         if (
             "task_workdir=$(pwd -P)" in raw
-            and self.resolved_pwd != adapters_module.FIX_GIT_CANONICAL_WORKDIR
+            and (
+                (match := re.search(r'test "\$task_workdir" = "([^"]+)"', raw))
+                is None
+                or self.resolved_pwd != match.group(1)
+            )
         ):
             return FakeExecResult(1)
         if raw.startswith("stat -c '%u:%g' -- "):
@@ -134,6 +140,7 @@ class FakeMaterializer:
 
     def materialize(self, **kwargs):
         self.calls.append(kwargs)
+        frozen = kwargs.get("frozen_task")
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
@@ -162,9 +169,13 @@ class FakeMaterializer:
             provider_secret_path=provider_secret,
             source_repo_ref=TERMINAL_BENCH_REPO_REF,
             source_commit=TERMINAL_BENCH_COMMIT,
-            source_digest=f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}",
-            source_image_tag=FIX_GIT_IMAGE_TAG,
-            runtime_image_ref=FIX_GIT_IMAGE_REF,
+            source_digest=(
+                frozen.source_digest
+                if frozen is not None
+                else f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}"
+            ),
+            source_image_tag=(frozen.image_tag if frozen is not None else FIX_GIT_IMAGE_TAG),
+            runtime_image_ref=(frozen.image_ref if frozen is not None else FIX_GIT_IMAGE_REF),
             task_label=kwargs["task_label"],
             memory_bytes=kwargs["memory_bytes"],
             memory_swap_bytes=kwargs["memory_swap_bytes"],
@@ -176,6 +187,11 @@ class FakeMaterializer:
             seccomp_profile=kwargs.get("seccomp_profile"),
             seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
             seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
+            task_id=(frozen.task_id if frozen is not None else FIX_GIT_TASK_ID),
+            image_digest=(
+                frozen.image_digest if frozen is not None else FIX_GIT_IMAGE_DIGEST
+            ),
+            frozen_task=frozen,
         )
 
 
@@ -481,6 +497,47 @@ class TerminalBenchTests(unittest.TestCase):
             drifted_command.validate(
                 prepared.spec, prepared.adapter, prepared.materialized_task
             )
+
+    def test_prepare_projects_one_generic_frozen_task_without_cross_wiring(self) -> None:
+        task = FrozenTask(
+            task_id="terminal-bench/build-cython-ext",
+            source_digest="sha256:" + "1" * 64,
+            image_tag="alexgshaw/build-cython-ext:20251031",
+            image_ref="alexgshaw/build-cython-ext@sha256:" + "2" * 64,
+            workdir="/app",
+            memory_mb=2048,
+            timeout_seconds=1800,
+            agent_timeout_seconds=900,
+            verifier_timeout_seconds=900,
+            build_timeout_seconds=600,
+            requires_existing_git_repo=False,
+        )
+        request = replace(
+            self.request(Side.RONDO),
+            image_digest=task.image_digest,
+            frozen_task=task,
+        )
+        materializer = FakeMaterializer(self.root / "generic")
+        materializer.root.mkdir()
+
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+
+        self.assertEqual(prepared.spec.task_id, task.task_id)
+        self.assertEqual(prepared.spec.task_image_digest, task.image_digest)
+        self.assertEqual(prepared.command.image_ref, task.image_ref)
+        self.assertEqual(prepared.command.task_source_digest, task.source_digest)
+        self.assertEqual(prepared.adapter._task_workdir, "/app")
+        self.assertFalse(prepared.adapter._task_requires_existing_git_repo)
+        self.assertIn("build-cython-ext", prepared.materialized_task.task_path.name)
+        with self.assertRaisesRegex(
+            runner_module.TerminalBenchRunError, "materialization"
+        ):
+            replace(
+                prepared.command, task_source_digest="sha256:" + "3" * 64
+            ).validate(prepared.spec, prepared.adapter, prepared.materialized_task)
+        container = prepared.command.compose_contract.container
         observed = DockerContainerFact(
             container_id="b" * 64,
             user=container.user,
@@ -498,7 +555,7 @@ class TerminalBenchTests(unittest.TestCase):
             mounts=container.mounts,
             compose_project=container.compose_project,
             compose_service=container.compose_service,
-            image_reference=FIX_GIT_IMAGE_REF,
+            image_reference=task.image_ref,
             image_id=f"sha256:{'e' * 64}",
         )
         container.validate_observation(
@@ -872,6 +929,25 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('auto_review.model="gpt-5.6-luna"', rondo_commands)
         self.assertIn('auto_review.reasoning_effort="low"', rondo_commands)
         self.assertIn('auto_review.evidence_dir="/logs/agent/guardian-evidence"', rondo_commands)
+
+    def test_adapter_non_git_task_uses_frozen_workdir_without_repo_precondition(self) -> None:
+        adapter = self.adapter(
+            RondoUploadAdapter,
+            task_workdir="/app",
+            task_requires_existing_git_repo=False,
+        )
+        environment = FakeEnvironment(resolved_pwd="/app")
+
+        asyncio.run(adapter.run("do the task", environment, mock.Mock()))
+
+        prepare = next(
+            command
+            for command, _env, _timeout, _user in environment.calls
+            if "git config --global" in command
+        )
+        self.assertIn('test "$task_workdir" = "/app"', prepare)
+        self.assertNotIn('test -d "$task_workdir/.git"', prepare)
+        self.assertNotIn('git -C "$task_workdir" status', prepare)
 
     def test_adapter_run_rejects_root_workdir_and_permission_projection_failure(self) -> None:
         adapter = self.adapter()
@@ -1329,6 +1405,12 @@ class TerminalBenchTests(unittest.TestCase):
                 "inferred_role": "guardian",
                 "contract_match": True,
                 "usage_valid": True,
+                "usage": {
+                    "input_tokens": 10,
+                    "cached_input_tokens": 0,
+                    "cache_write_input_tokens": 0,
+                    "output_tokens": 2,
+                },
                 "attempt_count": 1,
                 "settlement_kind": "usage_priced",
             }]
@@ -1402,6 +1484,12 @@ class TerminalBenchTests(unittest.TestCase):
                             "inferred_role": "main",
                             "contract_match": True,
                             "usage_valid": True,
+                            "usage": {
+                                "input_tokens": 10,
+                                "cached_input_tokens": 0,
+                                "cache_write_input_tokens": 0,
+                                "output_tokens": 2,
+                            },
                             "attempt_count": 1,
                             "settlement_kind": "usage_priced",
                         }
@@ -1535,6 +1623,7 @@ timeout_sec = 900.0
 timeout_sec = 900.0
 
 [environment]
+build_timeout_sec = 600.0
 docker_image = "{FIX_GIT_IMAGE_TAG}"
 cpus = 1
 memory_mb = 2048

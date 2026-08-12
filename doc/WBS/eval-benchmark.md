@@ -88,24 +88,33 @@
   - 隐藏集的**单任务结果不写入结果库明细**，只写聚合分数——否则隐藏集会通过结果库慢慢泄漏。
   - 后续每个任务计划的"不允许读取/查看"一节必须显式列出隐藏分区。
 - 分层清单一经冻结即写入仓库，改动需记录理由。
+- **当前实现**：TB 2.1 pinned 89 个 ID 已按无盐 `sha256(task_id)` 冻结为 10 canary / 61 validation /
+  18 holdout；执行 catalog 另绑定 10 个 source/image/workdir/resource/timeout identity。holdout 划分前未读正文，
+  B7 不运行 holdout。
 
 ### B5 计分与失败归因（规模 M）
 
 - 主指标：Task Resolution Success Rate。
 - 归因分类必须区分：主 Agent/Harness 失败、Guardian 正确拒绝导致的失败、Guardian 误拒、基础设施失败（超时/网络/容器）。
 - Guardian 对危险或未授权动作的**正确**拒绝计入主 Agent 应承担的失败代价，但在报表中单列，避免掩盖 harness 真实能力变化。
+- **当前实现**：纯函数计分器保守拒绝矛盾证据；无独立 adjudication 的 semantic deny 归 `guardian_false_deny`，
+  Guardian technical failure 归 infra 并排除分母；holdout producer 只接受整批聚合。
 
 ### B6 成本与预算护栏（规模 S）
 
 - 跑批前输出预估：任务数 × 轮数 × 模型 × 预估 token → 成本区间。
 - 硬上限：超过预算即中止并保留已完成结果。
 - 每次跑批需单独授权。
+- **当前实现**：Plan 015 独立 campaign cap 为 200 USD，161 个一次性 slot 和 18.885 USD 最大合法 request
+  reservation 均预冻结；B6 历史插值与 v19-shape 压力上界可复算，预算不足时在下一 request 前停止。
 
 ### B7 首次基线（规模 S，授权门：canary 跑批）—— **M2 的一半**
 
 - 按 `doc/WBS.md` §4「M2 的可执行判据」执行：先用同一 RONDO 二进制跑 2 轮 A/A 得出波动带宽 `σ`，再跑 codex 与 RONDO 各 1 轮 A/B，要求跨侧差异任务数 `≤ σ` 且无单向失败模式。
 - 基础 10 任务 × 4 轮 = 40 次运行，外加条件触发的定点加跑（每个出现 codex-pass/RONDO-fail 的任务两侧各加 2 轮）。按 B6 出预估并单独授权。
 - 不通过则先停下修测评设施，不得先行推进优化。
+- **当前状态**：Plan 015 已获一次性 200 USD 与串行 Docker 授权；10 个 exact image 已就绪，代码提交后依次执行
+  no-API oracle、fresh exact-wire canary、A/A 与 RONDO→Codex A/B，最后按机械条件激活 replacement/rerun。
 
 ## E-A 轻量离线冻结回放
 

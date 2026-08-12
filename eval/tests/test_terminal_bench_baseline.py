@@ -2,24 +2,32 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
-from rondo_eval.contracts import Side  # noqa: E402
+from rondo_eval.contracts import RunOutcome, Side  # noqa: E402
+from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
 from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     BASE_ROUNDS,
     BaselineError,
     BaselineRun,
     BaselineStatus,
+    CampaignSlotStatus,
+    CampaignStateLedger,
     ConditionalRun,
     assess_baseline,
     cost_forecast,
+    load_campaign_identity,
 )
 from rondo_eval.terminal_bench.scoring import TaskOutcome  # noqa: E402
+from rondo_eval.terminal_bench import baseline_cli  # noqa: E402
 
 
 class TerminalBenchBaselineTests(unittest.TestCase):
@@ -83,7 +91,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         forecast = cost_forecast()
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
-        self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "86.968700")
+        self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
         self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
         tracked = json.loads(
@@ -92,6 +100,213 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             )
         )
         self.assertEqual(tracked, forecast)
+
+    def test_campaign_lock_freezes_unique_full_slot_space_and_profile(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        identity = load_campaign_identity(paths)
+
+        self.assertEqual(len(identity.slots), 161)
+        self.assertEqual(len({item.run_id for item in identity.slots}), 161)
+        self.assertEqual(len({item.slot_id for item in identity.slots}), 161)
+        self.assertEqual(identity.slots[0].slot_id, "wire-canary")
+        identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
+
+    def test_campaign_lock_catalog_drift_is_rejected(self) -> None:
+        live_paths = RepoPaths.discover(Path.cwd())
+        live = load_campaign_identity(live_paths)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "eval/locks").mkdir(parents=True)
+            lock = json.loads(
+                (
+                    live_paths.worktree_root
+                    / "eval/locks/p2-b7-canary-baseline-v1.json"
+                ).read_text()
+            )
+            lock["canary_catalog_sha256"] = "0" * 64
+            (root / "eval/locks/p2-b7-canary-baseline-v1.json").write_text(
+                json.dumps(lock), encoding="utf-8"
+            )
+            with mock.patch(
+                "rondo_eval.terminal_bench.baseline.load_frozen_canary_catalog",
+                return_value=live.catalog,
+            ):
+                with self.assertRaisesRegex(Exception, "contract"):
+                    load_campaign_identity(RepoPaths(root, root))
+
+    def test_campaign_state_ledger_is_single_claim_and_crash_closed(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                ledger.claim("wire-canary")
+                with self.assertRaisesRegex(BaselineError, "not claimable"):
+                    ledger.claim("wire-canary")
+                ledger.finish(
+                    "wire-canary",
+                    status=CampaignSlotStatus.COMPLETED,
+                    outcome="completed",
+                    estimated_usd="0.123456",
+                    artifact_path="eval-data/campaigns/canary/receipt.json",
+                    result_record_sha256="1" * 64,
+                    reason=None,
+                )
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                snapshot = ledger.snapshot()
+                self.assertEqual(snapshot["slots"][0]["status"], "completed")
+
+            state = json.loads(path.read_text())
+            state["slots"][1]["status"] = "running"
+            path.write_text(json.dumps(state), encoding="utf-8")
+            with self.assertRaisesRegex(BaselineError, "crash-interrupted"):
+                with CampaignStateLedger(path, identity=identity):
+                    pass
+
+    def test_campaign_base_orchestrator_activates_only_mechanical_replacements(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+
+        class State:
+            skipped: list[str] = []
+
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                del reason
+                self.skipped.append(slot_id)
+
+        state = State()
+        calls: list[str] = []
+
+        def execute(*, slot, task, **kwargs):
+            del task, kwargs
+            calls.append(slot.slot_id)
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.COMPLETED,
+                TaskOutcome.PASS,
+                Decimal("0.100000"),
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_base_rounds(
+                identity=identity,
+                state=state,
+            )
+        self.assertEqual((len(calls), len(values), len(state.skipped)), (40, 40, 40))
+        self.assertTrue(all(":a1" in value for value in calls))
+
+    def test_unresolved_base_infra_stops_before_conditionals(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        task_id = identity.catalog.tasks[0].task_id
+        runs = []
+        for round_id in BASE_ROUNDS:
+            side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
+            for index, task in enumerate(identity.catalog.tasks):
+                runs.append(
+                    BaselineRun(
+                        task.task_id,
+                        round_id,
+                        side,
+                        1,
+                        TaskOutcome.PASS,
+                        f"{round_id}-{index}-a1",
+                    )
+                )
+        runs.append(
+            BaselineRun(
+                task_id,
+                "aa-rondo-1",
+                Side.RONDO,
+                2,
+                TaskOutcome.INFRA,
+                "replacement-run",
+            )
+        )
+        with self.assertRaisesRegex(
+            baseline_cli.CampaignExecutionError,
+            "replacement was exhausted",
+        ):
+            baseline_cli._require_resolved_base_rounds(identity, runs)
+
+    def test_storage_projection_keeps_initial_final_and_growth(self) -> None:
+        initial = baseline_cli.StorageBaseline(100, 200, 300)
+        final = baseline_cli.StorageBaseline(120, 250, 280)
+        self.assertEqual(
+            baseline_cli._storage_projection(initial, final),
+            {
+                "initial": {
+                    "docker_total_bytes": 100,
+                    "docker_desktop_vhdx_bytes": 200,
+                    "windows_free_bytes": 300,
+                },
+                "final": {
+                    "docker_total_bytes": 120,
+                    "docker_desktop_vhdx_bytes": 250,
+                    "windows_free_bytes": 280,
+                },
+                "growth_bytes": 50,
+            },
+        )
+        self.assertIsNone(
+            baseline_cli._storage_projection(initial, None)["final"]
+        )
+
+    def test_public_campaign_aggregate_scores_rounds_and_sums_usage(self) -> None:
+        base = self._base()
+        assessment = assess_baseline(self.tasks, base, ())
+        records = {
+            item.run_id: {
+                "outcome": "completed",
+                "tasks": [{"task_id": item.task_id, "outcome": "pass"}],
+                "summary": {"evidence": []},
+            }
+            for item in base
+        }
+        public = baseline_cli._public_assessment(assessment, records)
+        self.assertEqual(public["sigma"], 0)
+        self.assertEqual(
+            public["base_rounds"]["aa-rondo-1"]["summary"]["success_rate"],
+            1.0,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            common = Path(directory)
+            artifact = common / "eval-data/runs/example"
+            artifact.mkdir(parents=True)
+            (artifact / "api-metadata.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "requests": [
+                            {
+                                "usage": {
+                                    "input_tokens": 10,
+                                    "cached_input_tokens": 2,
+                                    "cache_write_input_tokens": 1,
+                                    "output_tokens": 3,
+                                }
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            usage = baseline_cli._campaign_usage(
+                common,
+                {
+                    "run": {
+                        "artifacts": "eval-data/runs/example",
+                        "summary": {"metadata_ready": True},
+                    }
+                },
+            )
+        self.assertEqual(
+            usage,
+            {
+                "input_tokens": 10,
+                "cached_input_tokens": 2,
+                "cache_write_input_tokens": 1,
+                "output_tokens": 3,
+            },
+        )
 
     def test_happy_path_has_zero_sigma_and_delta(self) -> None:
         result = assess_baseline(self.tasks, self._base(), ())

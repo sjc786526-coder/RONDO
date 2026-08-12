@@ -38,7 +38,7 @@ RUN_CAP_USD = Decimal("5.00")
 _MAX_EXPLICIT_BATCH_CAP_USD = Decimal("200.00")
 _MAX_EXPLICIT_RUN_CAP_USD = Decimal("40.00")
 MAX_BENCHMARK_RUNS = 4
-_MAX_EXPLICIT_BENCHMARK_RUNS = 120
+_MAX_EXPLICIT_BENCHMARK_RUNS = 161
 _MONEY_QUANTUM = Decimal("0.000001")
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 64 * 1024 * 1024
@@ -165,6 +165,7 @@ class Settlement:
     run_stopped: bool
     attempt_count: int
     settlement_kind: str
+    usage: Usage | None
 
 
 def price_usage(usage: Usage, *, pricing: ModelPricing) -> Decimal:
@@ -266,7 +267,7 @@ class PersistentBudgetLedger:
             or not 1 <= max_runs <= _MAX_EXPLICIT_BENCHMARK_RUNS
         ):
             raise ApiBudgetProxyError(
-                "benchmark run count exceeds the supported maximum of 120"
+                "benchmark run count exceeds the supported maximum of 161"
             )
         self._lock = threading.RLock()
         self._closed = False
@@ -469,6 +470,7 @@ class PersistentBudgetLedger:
                 bool(run["stopped"]),
                 request_state["attempt_count"],
                 settlement_kind,
+                usage if usage_valid else None,
             )
 
     def settle_operator_confirmed_unbilled(
@@ -512,6 +514,7 @@ class PersistentBudgetLedger:
                 True,
                 attempt_count,
                 _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED,
+                None,
             )
 
     def stop_run(self, run_id: str, *, stop_reason: str) -> None:
@@ -685,9 +688,33 @@ class RedactedMetadataStore:
             "charged_usd",
             "attempt_count",
             "settlement_kind",
+            "usage",
         }
         if set(observation) != expected:
             raise ApiBudgetProxyError("metadata observation differs from schema v1")
+        usage = observation["usage"]
+        if (
+            (observation.get("usage_valid") is True) != isinstance(usage, dict)
+            or (
+                isinstance(usage, dict)
+                and (
+                    set(usage)
+                    != {
+                        "input_tokens",
+                        "cached_input_tokens",
+                        "cache_write_input_tokens",
+                        "output_tokens",
+                    }
+                    or any(
+                        isinstance(value, bool)
+                        or not isinstance(value, int)
+                        or value < 0
+                        for value in usage.values()
+                    )
+                )
+            )
+        ):
+            raise ApiBudgetProxyError("metadata usage observation is invalid")
         encoded_observation = json.dumps(
             dict(observation), sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode()
@@ -1565,6 +1592,18 @@ class LoopbackResponsesProxy:
                 "charged_usd": _money_text(settlement.charged_usd),
                 "attempt_count": settlement.attempt_count,
                 "settlement_kind": settlement.settlement_kind,
+                "usage": (
+                    {
+                        "input_tokens": settlement.usage.input_tokens,
+                        "cached_input_tokens": settlement.usage.cached_input_tokens,
+                        "cache_write_input_tokens": (
+                            settlement.usage.cache_write_input_tokens
+                        ),
+                        "output_tokens": settlement.usage.output_tokens,
+                    }
+                    if settlement.usage is not None
+                    else None
+                ),
             }
         )
         self._metadata.append(observation)
@@ -1606,6 +1645,7 @@ def milestone_metadata_ready(metadata_path: Path) -> bool:
         and item.get("inferred_role") == item.get("role")
         and item.get("contract_match") is True
         and item.get("usage_valid") is True
+        and isinstance(item.get("usage"), dict)
         and item.get("settlement_kind") == _SETTLEMENT_USAGE_PRICED
         and isinstance(item.get("attempt_count"), int)
         and 1 <= item["attempt_count"] <= _MAX_UPSTREAM_ATTEMPTS

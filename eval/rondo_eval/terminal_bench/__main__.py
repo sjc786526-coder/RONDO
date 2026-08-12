@@ -220,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                     parsed = parse_single_task_result(
                         result.harbor.jobs_dir,
                         host_returncode=result.harbor.returncode,
+                        expected_task_id=result.prepared.spec.task_id,
                     )
                     parsed = classify_terminal_bench_result(result, parsed)
                     if validate_measurement_checkout(

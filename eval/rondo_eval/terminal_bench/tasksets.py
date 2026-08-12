@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import stat
@@ -23,6 +24,12 @@ VALIDATION_COUNT = 61
 HOLDOUT_COUNT = 18
 _TASK_ID = re.compile(r"terminal-bench/[a-z0-9][a-z0-9.-]{0,95}")
 _MAX_DATASET_BYTES = 1_000_000
+_SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
+_IMAGE_TAG = re.compile(r"[a-z0-9][a-z0-9._/-]{0,127}:[A-Za-z0-9._-]{1,64}")
+_IMAGE_REF = re.compile(
+    r"(?P<repository>[a-z0-9][a-z0-9._/-]{0,127})@(?P<digest>sha256:[0-9a-f]{64})"
+)
+_WORKDIR = re.compile(r"/[A-Za-z0-9._/-]{0,255}")
 
 
 class TasksetError(ValueError):
@@ -53,6 +60,63 @@ class FrozenTasksets:
             for task_id in values
         )
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class FrozenTask:
+    task_id: str
+    source_digest: str
+    image_tag: str
+    image_ref: str
+    workdir: str
+    memory_mb: int
+    timeout_seconds: int
+    agent_timeout_seconds: int
+    verifier_timeout_seconds: int
+    build_timeout_seconds: int
+    requires_existing_git_repo: bool = False
+
+    @property
+    def slug(self) -> str:
+        return self.task_id.split("/", maxsplit=1)[1]
+
+    @property
+    def image_digest(self) -> str:
+        return self.image_ref.rsplit("@", maxsplit=1)[1]
+
+    def validate(self) -> None:
+        image_match = _IMAGE_REF.fullmatch(self.image_ref)
+        if (
+            _TASK_ID.fullmatch(self.task_id) is None
+            or _SHA256.fullmatch(self.source_digest) is None
+            or _IMAGE_TAG.fullmatch(self.image_tag) is None
+            or image_match is None
+            or self.image_tag.rsplit(":", maxsplit=1)[0]
+            != image_match.group("repository")
+            or _WORKDIR.fullmatch(self.workdir) is None
+            or self.workdir == "/"
+            or self.memory_mb not in {2048, 8192}
+            or self.timeout_seconds != 1800
+            or self.agent_timeout_seconds not in {900, 1800}
+            or self.verifier_timeout_seconds != self.agent_timeout_seconds
+            or self.build_timeout_seconds != 600
+            or not isinstance(self.requires_existing_git_repo, bool)
+        ):
+            raise TasksetError("frozen canary task is invalid")
+
+
+@dataclass(frozen=True)
+class FrozenCanaryCatalog:
+    terminal_bench_commit: str
+    taskset_sha256: str
+    tasks: tuple[FrozenTask, ...]
+    catalog_sha256: str
+
+    def task(self, task_id: str) -> FrozenTask:
+        matches = tuple(item for item in self.tasks if item.task_id == task_id)
+        if len(matches) != 1:
+            raise TasksetError("canary task is not uniquely frozen")
+        return matches[0]
 
 
 def load_frozen_tasksets(paths: RepoPaths) -> FrozenTasksets:
@@ -101,6 +165,63 @@ def load_frozen_tasksets(paths: RepoPaths) -> FrozenTasksets:
         canary=canary,
         validation=validation,
         holdout=holdout,
+    )
+
+
+def load_frozen_canary_catalog(paths: RepoPaths) -> FrozenCanaryCatalog:
+    """Load the B7 execution catalog after validating its ID-only B4 parent."""
+
+    tasksets = load_frozen_tasksets(paths)
+    path = paths.worktree_root / "eval/tasksets/p2-b7-canary-catalog.json"
+    raw = _read_regular(path, limit=1_000_000)
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TasksetError("canary catalog is invalid JSON") from exc
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "terminal_bench_commit",
+        "taskset_sha256",
+        "tasks",
+    }:
+        raise TasksetError("canary catalog schema is invalid")
+    if (
+        value["schema_version"] != 1
+        or value["terminal_bench_commit"] != TERMINAL_BENCH_COMMIT
+        or value["taskset_sha256"] != tasksets.taskset_sha256
+        or not isinstance(value["tasks"], list)
+    ):
+        raise TasksetError("canary catalog identity is invalid")
+    expected_keys = {
+        "task_id",
+        "source_digest",
+        "image_tag",
+        "image_ref",
+        "workdir",
+        "memory_mb",
+        "timeout_seconds",
+        "agent_timeout_seconds",
+        "verifier_timeout_seconds",
+        "build_timeout_seconds",
+        "requires_existing_git_repo",
+    }
+    tasks: list[FrozenTask] = []
+    for item in value["tasks"]:
+        if not isinstance(item, dict) or set(item) != expected_keys:
+            raise TasksetError("canary catalog task shape is invalid")
+        try:
+            task = FrozenTask(**item)
+        except TypeError as exc:
+            raise TasksetError("canary catalog task types are invalid") from exc
+        task.validate()
+        tasks.append(task)
+    if tuple(item.task_id for item in tasks) != tasksets.canary:
+        raise TasksetError("canary catalog order differs from the B4 partition")
+    return FrozenCanaryCatalog(
+        terminal_bench_commit=TERMINAL_BENCH_COMMIT,
+        taskset_sha256=tasksets.taskset_sha256,
+        tasks=tuple(tasks),
+        catalog_sha256=hashlib.sha256(raw).hexdigest(),
     )
 
 

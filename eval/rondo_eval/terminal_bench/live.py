@@ -32,7 +32,9 @@ from .runner import (
     UnifiedTerminalBenchRunner,
     prepare_terminal_bench_run,
 )
+from .baseline import CampaignIdentity, CampaignSlotPlan
 from .pair import PairIdentity
+from .tasksets import FrozenTask
 
 
 GUARDIAN_SOURCE_BASELINE = "rust-v0.147.0"
@@ -74,7 +76,9 @@ class EvidenceObservation:
     policy: PolicyIdentity
     model: str
     reasoning_effort: str
+    decision: str
     terminal_status: str
+    failure_reason: str | None
     canonical_request_sha256: str
 
 
@@ -98,7 +102,11 @@ async def run_budgeted_terminal_bench(
     counter: DockerCounter,
     lock_guard: HeavyLockGuard,
     lease: HeavyLockLease,
-    pair_identity: PairIdentity,
+    pair_identity: PairIdentity | None = None,
+    campaign_identity: CampaignIdentity | None = None,
+    campaign_slot: CampaignSlotPlan | None = None,
+    campaign_task: FrozenTask | None = None,
+    campaign_seccomp_profile: Path | None = None,
     materializer: TaskMaterializer | None = None,
 ) -> BudgetedTerminalBenchResult:
     """Run one side through the only paid path: the local budget proxy.
@@ -110,9 +118,26 @@ async def run_budgeted_terminal_bench(
 
     if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
         raise TerminalBenchRunError("the in-memory provider key is invalid")
+    if (pair_identity is None) == (campaign_identity is None):
+        raise TerminalBenchRunError("exactly one paid execution identity is required")
     provider = config.paid_provider_projection(request.provider_name)
-    pair_identity.validate_selected_profile(provider)
-    selected_profile = pair_identity.require_selected_profile()
+    if campaign_identity is None:
+        assert pair_identity is not None
+        pair_identity.validate_selected_profile(provider)
+        max_guardian_logical_requests = (
+            pair_identity.require_selected_profile().max_guardian_logical_requests
+        )
+    else:
+        if (
+            campaign_slot is None
+            or campaign_task is None
+            or campaign_seccomp_profile is None
+        ):
+            raise TerminalBenchRunError("campaign execution projection is incomplete")
+        campaign_identity.validate_provider(provider)
+        max_guardian_logical_requests = (
+            campaign_identity.max_guardian_logical_requests
+        )
     proxy = LoopbackResponsesProxy(
         upstream_base_url=provider.base_url,
         api_key=api_key,
@@ -128,7 +153,7 @@ async def run_budgeted_terminal_bench(
         max_attempts=provider.max_attempts,
         retry_backoff_seconds=provider.retry_backoff_seconds,
         unbilled_retry_statuses=provider.unbilled_retry_statuses,
-        max_guardian_logical_requests=selected_profile.max_guardian_logical_requests,
+        max_guardian_logical_requests=max_guardian_logical_requests,
         timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
     )
     with proxy:
@@ -143,7 +168,9 @@ async def run_budgeted_terminal_bench(
                 main_model=provider.main_model,
                 guardian_model=provider.guardian_model,
             )
-            pair_identity.validate_frozen_model_catalog(
+            identity = campaign_identity or pair_identity
+            assert identity is not None
+            identity.validate_frozen_model_catalog(
                 source_commit=catalog.source_commit,
                 sha256=catalog.sha256,
                 main_model=catalog.main_model,
@@ -162,7 +189,19 @@ async def run_budgeted_terminal_bench(
             projected_request,
             materializer=materializer,
         )
-        pair_identity.validate_prepared(prepared, mode="paid")
+        if campaign_identity is None:
+            assert pair_identity is not None
+            pair_identity.validate_prepared(prepared, mode="paid")
+        else:
+            assert campaign_slot is not None
+            assert campaign_task is not None
+            assert campaign_seccomp_profile is not None
+            campaign_identity.validate_prepared(
+                prepared,
+                slot=campaign_slot,
+                task=campaign_task,
+                seccomp_profile=campaign_seccomp_profile,
+            )
         executor = DockerSupervisedHostHarborExecutor(
             counter=counter,
             lock_guard=lock_guard,
@@ -276,7 +315,9 @@ def load_guardian_evidence_bundle(
             policy=identity,
             model=expected_model,
             reasoning_effort=expected_effort,
+            decision=meta["decision"],
             terminal_status=meta["terminal_status"],
+            failure_reason=meta["failure_reason"],
             canonical_request_sha256=request_sha256,
         ),
         e_final_bytes,

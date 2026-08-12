@@ -32,10 +32,13 @@ eval/                                  # 入库
 ├── tasksets/                          # 只存任务 id 与分区归属，不存任务正文
 │   ├── canary.txt
 │   ├── validation.txt
-│   └── holdout.txt                    # 只有 id，禁止查看内容
+│   ├── holdout.txt                    # 只有 id，禁止查看内容
+│   ├── p2-b7-canary-catalog.json      # canary 的 source/image/runtime freeze
+│   └── p2-b7-cost-forecast.json       # B6 可复算估算合同
 ├── fixtures/                          # A3 冻结回放用例集（仅当体积可控时入库，见 §6）
 ├── results/
-│   └── runs.jsonl                     # 结果库主表，只追加
+│   ├── runs.jsonl                     # 可见任务结果库主表，只追加
+│   └── baselines/                     # campaign 公开聚合；holdout 未来只允许整批一条
 └── reports/                           # 生成的对比表与曲线（可重生成）
 
 eval-data/                             # git-ignored
@@ -45,6 +48,7 @@ eval-data/                             # git-ignored
 ├── build-metrics/                     # 看门狗 summary/JUnit/受限日志
 ├── budgets/                           # 持久费用预留/结算账本，0600
 ├── pairs/                             # 仅 paid 双侧顺序与发布恢复账本，0600
+├── campaigns/<campaign_id>/           # B7 状态、wire/oracle receipt 与私有聚合，0600
 ├── b2/current.json                    # 可替换的当前 no-API 双侧验收收据，0600
 ├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
 ├── work/                              # materialize 和 no-API 工作目录

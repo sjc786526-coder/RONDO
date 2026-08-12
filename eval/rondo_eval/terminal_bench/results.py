@@ -27,9 +27,13 @@ from .freeze import (
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 from .metrics import RunMetricsError, metrics_from_dict
 from .pair import (
+    CampaignPublicationContext,
     RunPublicationContext,
     has_complete_guardian_approval_sequence,
 )
+
+
+PublicationContext = RunPublicationContext | CampaignPublicationContext
 
 
 UPSTREAM_CODEX = {
@@ -39,6 +43,7 @@ UPSTREAM_CODEX = {
 }
 _MAX_RESULT_BYTES = 8 * 1024 * 1024
 _MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 _AGENT_EXCEPTION_TYPES = {
     "AgentSafetyRefusalError",
     "AgentTimeoutError",
@@ -137,6 +142,7 @@ def parse_single_task_result(
     trial_dir: Path,
     *,
     host_returncode: int,
+    expected_task_id: str = FIX_GIT_TASK_ID,
 ) -> ParsedHarborResult:
     """Parse Harbor 0.20's exact single-trial result; host rc alone is not success."""
 
@@ -166,7 +172,7 @@ def parse_single_task_result(
     else:
         outcome = RunOutcome.INFRA_FAILED
 
-    if trial.get("task_name") != FIX_GIT_TASK_ID:
+    if trial.get("task_name") != expected_task_id:
         raise HarborResultError("Harbor trial task identity differs from the freeze")
     verifier = trial.get("verifier_result")
     rewards = verifier.get("rewards") if isinstance(verifier, dict) else None
@@ -218,7 +224,7 @@ def publish_terminal_bench_result(
     live_result: BudgetedTerminalBenchResult,
     parsed: ParsedHarborResult,
     metadata_path: Path,
-    publication: RunPublicationContext,
+    publication: PublicationContext,
     writer: ArtifactWriter | None = None,
 ) -> Path:
     """Archive private raw evidence and append one strict tracked record."""
@@ -272,7 +278,12 @@ def publish_terminal_bench_result(
     )
     writer.write_json("run-summary.json", summary)
     if parsed.trial_result:
-        _write_harbor_evidence(writer, live_result.harbor.jobs_dir, parsed)
+        _write_harbor_evidence(
+            writer,
+            live_result.harbor.jobs_dir,
+            parsed,
+            task_id=live_result.prepared.spec.task_id,
+        )
     else:
         writer.write_json(
             "harbor/jobs-unavailable.json",
@@ -343,6 +354,11 @@ def classify_terminal_bench_result(
 ) -> ParsedHarborResult:
     """Treat pre-API adapter exits as infrastructure, not model behavior."""
 
+    if any(
+        item.terminal_status in {"aborted", "timed_out", "failed_closed"}
+        for item in live_result.evidence
+    ):
+        return replace(parsed, outcome=RunOutcome.INFRA_FAILED)
     if parsed.outcome is RunOutcome.AGENT_FAILED and not live_result.metadata_ready:
         return replace(parsed, outcome=RunOutcome.INFRA_FAILED)
     return parsed
@@ -350,7 +366,7 @@ def classify_terminal_bench_result(
 
 def public_guardian_evidence(
     observations: tuple[EvidenceObservation, ...],
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """Project Guardian evidence only to its durable public artifact shape."""
 
     return [
@@ -363,7 +379,9 @@ def public_guardian_evidence(
             "request_shape": item.policy.request_shape,
             "model": item.model,
             "reasoning_effort": item.reasoning_effort,
+            "decision": item.decision,
             "terminal_status": item.terminal_status,
+            "failure_reason": item.failure_reason,
             "canonical_request_sha256": item.canonical_request_sha256,
         }
         for index, item in enumerate(observations, start=1)
@@ -384,8 +402,10 @@ def publish_terminal_bench_failure(
     metadata_path: Path,
     outcome: RunOutcome,
     failure_stage: str,
-    publication: RunPublicationContext,
+    publication: PublicationContext,
     secrets: tuple[str, ...],
+    task_id: str = FIX_GIT_TASK_ID,
+    task_image_digest: str = FIX_GIT_IMAGE_DIGEST,
 ) -> Path:
     """Publish a safe terminal record after a claimed run exits exceptionally."""
 
@@ -425,15 +445,12 @@ def publish_terminal_bench_failure(
         "batch_id": budget_snapshot.get("batch_id"),
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
         "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
-        "task_image_digest": FIX_GIT_IMAGE_DIGEST,
+        "task_image_digest": task_image_digest,
         "binary_source_commit": manifest.source_commit,
         "eval_harness_commit": eval_harness_commit,
         "binary_workspace_lock_normalization": manifest.workspace_lock_normalization,
         "failure_stage": failure_stage,
-        "pair_id": publication.pair_id,
-        "pair_lock_sha256": publication.pair_lock_sha256,
-        "pair_slot": publication.pair_slot,
-        "pair_round": publication.pair_round,
+        **_publication_identity_config(publication),
     }
     metadata: dict[str, Any] | None = None
     request_roles: tuple[str, ...] = ()
@@ -467,7 +484,7 @@ def publish_terminal_bench_failure(
     }
     tasks = [
         {
-            "task_id": FIX_GIT_TASK_ID,
+            "task_id": task_id,
             "outcome": "fail",
             "attribution": "infra",
             "reward": 0.0,
@@ -532,7 +549,7 @@ def _safe_summary(
     *,
     request_roles: tuple[str, ...],
     budget_accounting: Mapping[str, object] | None,
-    publication: RunPublicationContext,
+    publication: PublicationContext,
 ) -> dict[str, Any]:
     spec = live_result.prepared.spec
     evidence = public_guardian_evidence(live_result.evidence)
@@ -551,7 +568,11 @@ def _safe_summary(
         parsed.outcome is RunOutcome.COMPLETED
         and guardian_requests >= 1
         and len(evidence) == guardian_requests
-        and all(item["terminal_status"] == "approved" for item in evidence)
+        and all(
+            (item["decision"], item["terminal_status"], item["failure_reason"])
+            in {("approved", "approved", None), ("denied", "denied", None)}
+            for item in evidence
+        )
         and has_complete_guardian_approval_sequence(request_roles)
     ):
         # Canonical digests bind each archived E_final to exactly one verified
@@ -581,7 +602,7 @@ def _safe_summary(
             "code_mode_host": spec.code_mode_host,
             "terminal_bench_version": TERMINAL_BENCH_VERSION,
             "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
-            "task_image_digest": FIX_GIT_IMAGE_DIGEST,
+            "task_image_digest": spec.task_image_digest,
             "binary_source_commit": spec.binary.source_commit,
             "eval_harness_commit": eval_harness_commit,
             "binary_workspace_lock_normalization": spec.binary.workspace_lock_normalization,
@@ -593,10 +614,7 @@ def _safe_summary(
             "timeout_seconds": spec.timeout_seconds,
             "max_retries": spec.max_retries,
             "budget_usd": spec.budget_usd,
-            "pair_id": publication.pair_id,
-            "pair_lock_sha256": publication.pair_lock_sha256,
-            "pair_slot": publication.pair_slot,
-            "pair_round": publication.pair_round,
+            **_publication_identity_config(publication),
         },
         "summary": {
             "success_rate": 1.0
@@ -625,7 +643,7 @@ def _safe_summary(
         },
         "tasks": [
             {
-                "task_id": FIX_GIT_TASK_ID,
+                "task_id": spec.task_id,
                 "outcome": effective_task_outcome,
                 "attribution": "agent"
                 if parsed.outcome in {RunOutcome.COMPLETED, RunOutcome.AGENT_FAILED}
@@ -644,6 +662,8 @@ def _write_harbor_evidence(
     writer: ArtifactWriter,
     source: Path,
     parsed: ParsedHarborResult,
+    *,
+    task_id: str,
 ) -> None:
     """Archive a deliberate private subset, never Harbor configs, locks, or raw logs."""
 
@@ -654,7 +674,7 @@ def _write_harbor_evidence(
         "harbor/trial-result.json",
         {
             "schema_version": 1,
-            "task_name": FIX_GIT_TASK_ID,
+            "task_name": task_id,
             "outcome": parsed.outcome.value,
             "task_outcome": parsed.task_outcome,
             "reward": parsed.reward,
@@ -776,12 +796,20 @@ def _validate_publication_evidence(
             if (
                 len(live_result.evidence) != roles.count("guardian")
                 or any(
-                    item.terminal_status != "approved"
+                    (
+                        item.decision,
+                        item.terminal_status,
+                        item.failure_reason,
+                    )
+                    not in {
+                        ("approved", "approved", None),
+                        ("denied", "denied", None),
+                    }
                     for item in live_result.evidence
                 )
             ):
                 raise HarborResultError(
-                    "RONDO completed run requires one approved evidence per Guardian request"
+                    "RONDO completed run requires one semantic evidence per Guardian request"
                 )
             request_digests = _guardian_request_digests(metadata_path)
             evidence_digests = tuple(
@@ -815,15 +843,39 @@ def _validate_publication_evidence(
 
 
 def _validate_publication_context(
-    publication: RunPublicationContext, *, side: Side
+    publication: PublicationContext, *, side: Side
 ) -> None:
     try:
         publication.validate()
     except ValueError as exc:
         raise HarborResultError("Terminal-Bench publication context is invalid") from exc
-    expected_slot = 1 if side is Side.RONDO else 2
-    if publication.pair_slot != expected_slot:
-        raise HarborResultError("publication side differs from the pair topology")
+    if isinstance(publication, RunPublicationContext):
+        expected_slot = 1 if side is Side.RONDO else 2
+        if publication.pair_slot != expected_slot:
+            raise HarborResultError("publication side differs from the pair topology")
+    elif publication.side is not side:
+        raise HarborResultError("publication side differs from the campaign slot")
+
+
+def _publication_identity_config(
+    publication: PublicationContext,
+) -> dict[str, object]:
+    if isinstance(publication, RunPublicationContext):
+        return {
+            "pair_id": publication.pair_id,
+            "pair_lock_sha256": publication.pair_lock_sha256,
+            "pair_slot": publication.pair_slot,
+            "pair_round": publication.pair_round,
+        }
+    return {
+        "campaign_id": publication.campaign_id,
+        "campaign_lock_sha256": publication.campaign_lock_sha256,
+        "campaign_slot_id": publication.campaign_slot_id,
+        "campaign_round_id": publication.campaign_round_id,
+        "campaign_attempt": publication.campaign_attempt,
+        "taskset_sha256": publication.taskset_sha256,
+        "canary_catalog_sha256": publication.canary_catalog_sha256,
+    }
 
 
 def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
@@ -845,7 +897,16 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
     ):
         raise HarborResultError("Terminal-Bench record sections are invalid")
     task = tasks[0]
-    if task.get("task_id") != FIX_GIT_TASK_ID:
+    if (
+        not isinstance(task.get("task_id"), str)
+        or re.fullmatch(
+            r"terminal-bench/[a-z0-9][a-z0-9.-]{0,95}", task["task_id"]
+        )
+        is None
+        or not isinstance(config.get("task_image_digest"), str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", config["task_image_digest"])
+        is None
+    ):
         raise HarborResultError("Terminal-Bench task identity is invalid")
     if task.get("attribution") not in {"agent", "infra"}:
         raise HarborResultError("Terminal-Bench attribution is invalid")
@@ -922,7 +983,15 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
                 or len(evidence) != roles["guardian"]
                 or any(
                     not isinstance(item, dict)
-                    or item.get("terminal_status") != "approved"
+                    or (
+                        item.get("decision"),
+                        item.get("terminal_status"),
+                        item.get("failure_reason"),
+                    )
+                    not in {
+                        ("approved", "approved", None),
+                        ("denied", "denied", None),
+                    }
                     or not isinstance(item.get("canonical_request_sha256"), str)
                     or re.fullmatch(
                         r"[0-9a-f]{64}", item["canonical_request_sha256"]
@@ -939,14 +1008,52 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
                 raise HarborResultError("completed RONDO Guardian evidence is not bound")
         elif evidence or binding != "not_triggered":
             raise HarborResultError("completed frozen Codex record contains RONDO evidence")
-    if (
+    pair_fields = {"pair_id", "pair_lock_sha256", "pair_slot", "pair_round"}
+    campaign_fields = {
+        "campaign_id",
+        "campaign_lock_sha256",
+        "campaign_slot_id",
+        "campaign_round_id",
+        "campaign_attempt",
+        "taskset_sha256",
+        "canary_catalog_sha256",
+    }
+    has_pair = any(key in config for key in pair_fields)
+    has_campaign = any(key in config for key in campaign_fields)
+    if has_pair == has_campaign:
+        raise HarborResultError("Terminal-Bench execution identity is ambiguous")
+    if has_pair and (
         not isinstance(config.get("pair_id"), str)
-        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", config["pair_id"]) is None
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", config["pair_id"])
+        is None
         or not isinstance(config.get("pair_lock_sha256"), str)
+        or _SHA256.fullmatch(config["pair_lock_sha256"]) is None
         or config.get("pair_slot") not in {1, 2}
         or config.get("pair_round") != 1
     ):
         raise HarborResultError("Terminal-Bench pair identity is invalid")
+    if has_campaign and (
+        not isinstance(config.get("campaign_id"), str)
+        or re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", config["campaign_id"]
+        )
+        is None
+        or any(
+            not isinstance(config.get(key), str)
+            or _SHA256.fullmatch(config[key]) is None
+            for key in (
+                "campaign_lock_sha256",
+                "taskset_sha256",
+                "canary_catalog_sha256",
+            )
+        )
+        or not isinstance(config.get("campaign_slot_id"), str)
+        or not config["campaign_slot_id"]
+        or not isinstance(config.get("campaign_round_id"), str)
+        or not config["campaign_round_id"]
+        or config.get("campaign_attempt") not in {1, 2}
+    ):
+        raise HarborResultError("Terminal-Bench campaign identity is invalid")
 
 
 def _validate_public_budget_accounting(

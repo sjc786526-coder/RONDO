@@ -1,9 +1,9 @@
+terminal-bench/build-cython-ext
 terminal-bench/db-wal-recovery
+terminal-bench/extract-elf
 terminal-bench/filter-js-from-html
 terminal-bench/fix-git
-terminal-bench/git-multibranch
 terminal-bench/headless-terminal
-terminal-bench/nginx-request-logging
 terminal-bench/polyglot-c-py
 terminal-bench/sanitize-git-repo
 terminal-bench/sqlite-db-truncate

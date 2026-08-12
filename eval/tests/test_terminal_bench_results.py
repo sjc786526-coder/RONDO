@@ -35,6 +35,7 @@ from rondo_eval.terminal_bench.live import (  # noqa: E402
 )
 from rondo_eval.terminal_bench import __main__ as terminal_bench_main  # noqa: E402
 from rondo_eval.terminal_bench.pair import (  # noqa: E402
+    CampaignPublicationContext,
     PairMode,
     PairSequenceLedger,
     RunPublicationContext,
@@ -45,6 +46,7 @@ from rondo_eval.terminal_bench.pair import (  # noqa: E402
 from rondo_eval.terminal_bench.results import (  # noqa: E402
     HarborResultError,
     UPSTREAM_CODEX,
+    classify_terminal_bench_result,
     parse_single_task_result,
     publish_terminal_bench_failure,
     publish_terminal_bench_result,
@@ -272,7 +274,14 @@ class TerminalBenchResultTests(unittest.TestCase):
             }
         }
 
-    def _write_guardian_bundle(self, review_id: str = "review-1") -> str:
+    def _write_guardian_bundle(
+        self,
+        review_id: str = "review-1",
+        *,
+        decision: str = "approved",
+        terminal_status: str = "approved",
+        failure_reason: str | None = None,
+    ) -> str:
         bundle = self.trial / "agent" / "guardian-evidence" / review_id
         bundle.mkdir(parents=True)
         (bundle / "E_final.json").write_text(
@@ -307,9 +316,9 @@ class TerminalBenchResultTests(unittest.TestCase):
             "guardian_source_baseline": "rust-v0.147.0",
             "guardian_source_commit": UPSTREAM_CODEX["commit"],
             "evidence": "e_final",
-            "decision": "approved",
-            "terminal_status": "approved",
-            "failure_reason": None,
+            "decision": decision,
+            "terminal_status": terminal_status,
+            "failure_reason": failure_reason,
             "attempt_count": 1,
             "duration_ms": 12,
             "guardian_thread_id": "thread-1",
@@ -682,6 +691,128 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
         self.assertEqual(summary["config"]["bwrap_archive_sha256"], "1" * 64)
         self.assertEqual(summary["config"]["bwrap_source_tree_sha256"], "2" * 64)
+
+    def test_campaign_publication_uses_campaign_identity_not_pair_fields(self) -> None:
+        run_id = "20260811-210000001-tb-codex-r1"
+        metadata = self.root / "work" / "campaign-api-metadata.json"
+        self._write_metadata(metadata, "main", "guardian", "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        live_result = self._live_result(run_id)
+        object.__setattr__(
+            live_result,
+            "budget_snapshot",
+            self._completed_budget_snapshot(run_id, request_count=3),
+        )
+        provider = live_result.prepared.spec.provider
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.CODEX,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=CampaignPublicationContext(
+                campaign_id="p2-b7-canary-baseline-v1",
+                campaign_lock_sha256="7" * 64,
+                campaign_slot_id="base:ab-codex-1:terminal-bench/fix-git:a1",
+                campaign_round_id="ab-codex-1",
+                campaign_attempt=1,
+                taskset_sha256="8" * 64,
+                canary_catalog_sha256="9" * 64,
+                side=Side.CODEX,
+                metrics={
+                    "wall_seconds": 1.0,
+                    "cpu_user_seconds": 0.1,
+                    "cpu_system_seconds": 0.1,
+                    "peak_rss_bytes": 1024,
+                    "exit_code": 0,
+                },
+                selected_profile={
+                    **provider.to_public_dict(),
+                    "frozen_codex_model_catalog_source_commit": "a" * 40,
+                    "frozen_codex_model_catalog_sha256": "b" * 64,
+                    "max_guardian_logical_requests": 3,
+                },
+            ),
+        )
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["config"]["campaign_id"], "p2-b7-canary-baseline-v1")
+        self.assertEqual(record["config"]["campaign_attempt"], 1)
+        self.assertNotIn("pair_id", record["config"])
+        self.assertTrue(target.is_dir())
+
+    def test_semantic_guardian_deny_is_scored_not_reclassified_as_infra(self) -> None:
+        run_id = "20260811-210000002-tb-rondo-r1"
+        relative = self._write_guardian_bundle(
+            "deny-review",
+            decision="denied",
+            terminal_status="denied",
+        )
+        evidence, _e_final, _meta = load_guardian_evidence_bundle(
+            self.jobs,
+            relative,
+            expected_model="gpt-5.6-luna",
+            expected_effort="low",
+        )
+        metadata = self.root / "work" / "deny-api-metadata.json"
+        self._write_metadata(
+            metadata,
+            "main",
+            "guardian",
+            "main",
+            guardian_digests=(evidence.canonical_request_sha256,),
+        )
+        self.trial_result["verifier_result"] = {"rewards": {"reward": 0.0}}
+        self._write_results()
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        live_result = self._live_result(run_id)
+        object.__setattr__(
+            live_result,
+            "prepared",
+            SimpleNamespace(spec=replace(live_result.prepared.spec, side=Side.RONDO)),
+        )
+        object.__setattr__(live_result, "evidence", (evidence,))
+        publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=self._publication(side=Side.RONDO),
+        )
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(record["tasks"][0]["outcome"], "fail")
+        self.assertEqual(record["summary"]["s2_request_evidence_binding"], "verified")
+        self.assertEqual(record["summary"]["evidence"][0]["decision"], "denied")
+
+    def test_guardian_technical_failure_is_infrastructure(self) -> None:
+        relative = self._write_guardian_bundle(
+            "failed-review",
+            decision="denied",
+            terminal_status="failed_closed",
+            failure_reason="session_error",
+        )
+        evidence, _e_final, _meta = load_guardian_evidence_bundle(
+            self.jobs,
+            relative,
+            expected_model="gpt-5.6-luna",
+            expected_effort="low",
+        )
+        live_result = self._live_result("technical-fixture")
+        object.__setattr__(live_result, "evidence", (evidence,))
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        self.assertEqual(
+            classify_terminal_bench_result(live_result, parsed).outcome,
+            RunOutcome.INFRA_FAILED,
+        )
 
     def test_public_results_feed_m1_without_private_provider_fields(self) -> None:
         identity = load_historical_pair_identity()

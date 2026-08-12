@@ -896,6 +896,7 @@ def run_campaign(
     guardian_model_alias: str = DEFAULT_GUARDIAN_ALIAS,
     max_retries: int = MAX_RETRIES_PER_MODEL,
     plan014_canary: bool = False,
+    p2_campaign_identity: object | None = None,
 ) -> dict[str, object]:
     if prior_debit_usd < 0 or prior_debit_usd >= MODEL_CAMPAIGN_CAP_USD:
         raise ModelDiagnosticError(
@@ -931,6 +932,8 @@ def run_campaign(
         raise ModelDiagnosticError(
             "Plan 014 canary requires fresh frozen-Codex main+approval with zero retries"
         )
+    if p2_campaign_identity is not None and not plan014_canary:
+        raise ModelDiagnosticError("P2 identity is valid only for a fresh exact-wire canary")
     config = load_runtime_config(paths)
     provider = config.paid_provider_projection()
     paid_eval = config.paid_eval()
@@ -944,11 +947,19 @@ def run_campaign(
             "active paid profile does not match the selected main/Guardian models and effort"
         )
     pair_identity = None
+    campaign_identity = None
     if plan014_canary:
-        from .terminal_bench.pair import load_active_pair_identity
+        if p2_campaign_identity is None:
+            from .terminal_bench.pair import load_active_pair_identity
 
-        pair_identity = load_active_pair_identity()
-        pair_identity.validate_selected_profile(provider)
+            pair_identity = load_active_pair_identity()
+            pair_identity.validate_selected_profile(provider)
+        else:
+            campaign_identity = p2_campaign_identity
+            try:
+                campaign_identity.validate_provider(provider)
+            except AttributeError as exc:
+                raise ModelDiagnosticError("P2 canary identity is invalid") from exc
     _secret_name, api_key = load_provider_secret(config)
     targets = {
         side: _binary_target(paths.common_root, side) for side in ("codex", "rondo")
@@ -977,6 +988,13 @@ def run_campaign(
         if frozen_model_catalog is not None
         else None
     )
+    if campaign_identity is not None:
+        campaign_identity.validate_frozen_model_catalog(
+            source_commit=targets["codex"].source_commit,
+            sha256=frozen_model_catalog_sha256,
+            main_model=provider.main_model,
+            guardian_model=provider.guardian_model,
+        )
     _private_directory(output_root)
     profile = {
         "schema_version": 1,
@@ -1003,6 +1021,12 @@ def run_campaign(
         "pair_id": pair_identity.pair_id if pair_identity is not None else None,
         "pair_lock_sha256": (
             pair_identity.lock_sha256 if pair_identity is not None else None
+        ),
+        "p2_campaign_id": (
+            campaign_identity.campaign_id if campaign_identity is not None else None
+        ),
+        "p2_campaign_lock_sha256": (
+            campaign_identity.lock_sha256 if campaign_identity is not None else None
         ),
         "prior_diagnostic_debit_usd": format(prior_debit_usd, "f"),
         "prior_retry_count": prior_retry_count,

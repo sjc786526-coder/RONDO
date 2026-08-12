@@ -102,25 +102,28 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 已确认成功 CLI 的 evidence 手工投影仍使用 Harbor work 路径且漏 canonical digest；已完成共用 projection、
   RunSpec 错误文字和 v19 S2 文档修复；成功 CLI durable path 回归已通过。
 - B4 已落 10/61/18 三份 ID-only 清单与 pinned catalog/holdout 重算门禁；B5 纯函数计分、矛盾拒绝和 holdout
-  整批聚合已落；B6 可复算成本输出、200 USD/120-run 共享 ledger 上限与 B7 聚合规则已落并通过 focused tests。
+  整批聚合已落；B6 可复算成本输出、200 USD/161-slot 共享 ledger 上限与 B7 聚合规则已落并通过 focused tests；
+  161 包含 1 次 wire canary、40 基础、40 条件、最多 40 基础 infra replacement 与 40 条件 infra replacement。
 
 ### 当前工作
 
-- 通用化 10-task materializer/runner，冻结 image digest、campaign lock 与唯一 run IDs。
+- 离线实现已完成：10-task catalog/materializer/runner、B5 计分、200 USD/161-slot 状态机、campaign public
+  result、usage/cost 聚合、10-task no-API oracle 前置与正式入口均已落地；正在完成最终离线门禁与干净提交。
 
 ### 后续计划
 
-1. 完成离线实现、focused/full unittest、taskset/cost 报告并提交。
-2. 在授权范围内串行解析/pull 10 个 exact image digest，冻结 campaign lock，再提交。
-3. 通过资源/profile/exact-wire canary 后执行 B7 状态机；聚合并提交真实结果和文档。
+1. 完成 focused/full unittest、taskset/cost 报告并提交。
+2. 在 build lock/watchdog 下执行 10-task no-API oracle、资源门禁和 fresh exact-wire canary。
+3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
 ### 阻塞项
 
-- 当前尚无通用 10-task materializer/campaign runner，也未冻结 10 个 image digest；正式 B7 不可启动。
+- 无离线阻塞；真实执行仍以干净提交、fresh canary、80 GiB C: floor 和完整 watchdog lease 为启动门。
 
 ### 当前验收状态
 
-- Plan 014 post-audit 尚差成功 CLI 回归；B4/B5/B6/B7 待落地，未调用新 API/Docker。
+- Plan 014 post-audit 窄修复、B4/B5/B6 与 B7 离线执行设施已通过 focused tests。10 个 exact image 已按
+  digest 串行拉取并只读解析；尚未运行 B7 oracle、fresh API canary 或正式 40-run 基线。
 
 ## 6. 关键决策记录
 
@@ -132,3 +135,5 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 004 | 200 USD 用历史 usage 作合理可行性判断，但每个新 request 仍按 18.885 USD 最大合法 reservation 门禁 | 数学最坏 40/80 run 超过授权，不能伪称全包；历史压力区间远低于 200 | B6/B7 | 已采纳 |
 | 005 | 未有独立 adjudication 证明的 Guardian deny 保守归 false deny | 不用 Guardian 自评循环证明“正确拒绝” | B5 | 已采纳 |
 | 006 | 不扩展 M1 两槽 ledger；B7 使用独立 campaign 状态机并复用单任务 runner/budget ledger | 拓扑不同，避免把历史 pair 语义拉坏 | B6/B7 | 已采纳 |
+| 007 | 在 lock 冻结前以 `build-cython-ext`、`extract-elf` 替换需要 system service/root capability 的两个候选 | 现有两侧非特权容器合同无法公平运行 system-admin 任务；不把确定性环境失败计入 σ | B4/B7 | 已采纳 |
+| 008 | campaign 冻结 1 canary + 40 base + 40 conditional + 各 40 bounded infra replacement，共 161 个唯一 slot | 单轮 >20% infra 需整轮替换，条件加跑也需一次定点替换；所有可能 ID 事前冻结 | B6/B7 | 已采纳 |

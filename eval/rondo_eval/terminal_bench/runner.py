@@ -37,6 +37,7 @@ from .freeze import (
     validate_runtime_image_digest,
 )
 from .materialize import MaterializedTask, PinnedTaskMaterializer
+from .tasksets import FrozenTask
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[2]
@@ -75,6 +76,7 @@ class TerminalBenchRequest:
     frozen_model_catalog_path: str | None = None
     frozen_model_catalog_sha256: str | None = None
     frozen_model_catalog_source_commit: str | None = None
+    frozen_task: FrozenTask | None = None
 
 
 @dataclass(frozen=True)
@@ -138,8 +140,7 @@ class HarborCommand:
         if self.cwd != EVAL_ROOT:
             raise TerminalBenchRunError("Harbor must run from the locked eval project")
         if (
-            self.image_ref != FIX_GIT_IMAGE_REF
-            or self.image_ref != materialized.runtime_image_ref
+            self.image_ref != materialized.runtime_image_ref
             or self.source_repo_ref != TERMINAL_BENCH_REPO_REF
             or self.source_repo_ref != materialized.source_repo_ref
             or self.task_source_digest != materialized.source_digest
@@ -159,8 +160,8 @@ class HarborCommand:
         )
         if any(value in self.argv or value in joined for value in forbidden):
             raise TerminalBenchRunError("Harbor command contains a forbidden external path")
-        if FIX_GIT_IMAGE_DIGEST not in materialized.runtime_image_ref:
-            raise TerminalBenchRunError("Harbor task image is not the B1 digest")
+        if spec.task_image_digest not in materialized.runtime_image_ref:
+            raise TerminalBenchRunError("Harbor task image differs from RunSpec")
 
 
 @dataclass(frozen=True)
@@ -173,12 +174,12 @@ class PreparedTerminalBenchRun:
     def validate(self) -> None:
         self.spec.validate()
         self.materialized_task.validate()
-        if self.spec.task_id != FIX_GIT_TASK_ID:
-            raise TerminalBenchRunError("RunSpec task differs from the frozen P1 task")
+        if self.spec.task_id != self.materialized_task.task_id:
+            raise TerminalBenchRunError("RunSpec task differs from its materialization")
         if self.spec.terminal_bench_version != TERMINAL_BENCH_VERSION:
             raise TerminalBenchRunError("RunSpec Terminal-Bench version is not commit-pinned")
-        if self.spec.task_image_digest != FIX_GIT_IMAGE_DIGEST:
-            raise TerminalBenchRunError("RunSpec image differs from the supervised B1 digest")
+        if self.spec.task_image_digest != self.materialized_task.image_digest:
+            raise TerminalBenchRunError("RunSpec image differs from its materialization")
         if self.spec.binary.source_dirty:
             raise TerminalBenchRunError("Terminal-Bench requires a clean binary source commit")
         if self.spec.side is not self.adapter.side or self.spec.binary != self.adapter.manifest:
@@ -375,7 +376,7 @@ class DockerSupervisedHostHarborExecutor:
         )
         image_identity = supervisor.resolve_image_identity(
             identity,
-            FIX_GIT_IMAGE_REF,
+            compose_contract.container.image_reference,
             lease=self._lease,
             timeout_seconds=5,
         )
@@ -427,7 +428,18 @@ def prepare_terminal_bench_run(
     """Create the sole B2 projection from config, pinned source, image and binary."""
 
     validate_freeze()
-    image_digest = validate_runtime_image_digest(request.image_digest)
+    frozen_task = request.frozen_task
+    if frozen_task is None:
+        image_digest = validate_runtime_image_digest(request.image_digest)
+        task_id = FIX_GIT_TASK_ID
+        task_slug = "fix-git"
+    else:
+        frozen_task.validate()
+        if request.image_digest != frozen_task.image_digest:
+            raise TerminalBenchRunError("request image differs from the frozen task")
+        image_digest = frozen_task.image_digest
+        task_id = frozen_task.task_id
+        task_slug = frozen_task.slug
     seccomp_values = (
         request.seccomp_profile_path,
         request.seccomp_profile_source_sha256,
@@ -447,7 +459,7 @@ def prepare_terminal_bench_run(
         config,
         side=request.side,
         batch_id=request.batch_id,
-        task_id=FIX_GIT_TASK_ID,
+        task_id=task_id,
         task_image_digest=image_digest,
         binary=request.binary,
         terminal_bench_version=TERMINAL_BENCH_VERSION,
@@ -460,13 +472,14 @@ def prepare_terminal_bench_run(
     materialized = (materializer or PinnedTaskMaterializer()).materialize(
         source_checkout=Path(request.source_checkout),
         staging_root=Path(request.staging_root),
-        staging_name=f"{request.batch_id}-{request.side.value}-fix-git",
+        staging_name=f"{request.batch_id}-{request.side.value}-{task_slug}",
         image_digest=image_digest,
         task_label=task_label,
         memory_bytes=request.memory_bytes,
         memory_swap_bytes=request.memory_swap_bytes,
         pids_limit=request.pids_limit,
         provider_api_key_env=spec.provider.api_key_env,
+        frozen_task=frozen_task,
         seccomp_profile=(
             Path(request.seccomp_profile_path)
             if request.seccomp_profile_path is not None
@@ -490,6 +503,16 @@ def prepare_terminal_bench_run(
         main_effort=spec.provider.main_effort,
         guardian_model=spec.provider.guardian_model,
         guardian_effort=spec.provider.guardian_effort,
+        task_workdir=(
+            frozen_task.workdir
+            if frozen_task is not None
+            else "/app/personal-site"
+        ),
+        task_requires_existing_git_repo=(
+            frozen_task.requires_existing_git_repo
+            if frozen_task is not None
+            else True
+        ),
         frozen_model_catalog_path=request.frozen_model_catalog_path,
         frozen_model_catalog_sha256=request.frozen_model_catalog_sha256,
         frozen_model_catalog_source_commit=request.frozen_model_catalog_source_commit,
