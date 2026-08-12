@@ -166,6 +166,16 @@ class _FakeUpstream:
                     self.end_headers()
                     self.wfile.write(encoded)
                     return
+                if mode == "sse_incomplete":
+                    encoded = b"event: response.output_text.delta\ndata: {\"delta\":\"partial\"}\n\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(encoded)
+                    self.wfile.flush()
+                    self.close_connection = True
+                    return
                 if mode in {"sse", "sse_hold_open"}:
                     response = {
                         "type": "response.completed",
@@ -932,6 +942,23 @@ class ApiBudgetProxyTests(unittest.TestCase):
             (self.root / "timeout-metadata.json").read_text(encoding="utf-8")
         )["requests"][0]
         self.assertEqual(observation["upstream_status"], 0)
+
+    def test_incomplete_sse_preserves_http_status_and_end_kind(self) -> None:
+        self.upstream.mode = "sse_incomplete"
+        status, _body, _headers = self._post(
+            self._body(), request_id="sse-incomplete"
+        )
+        self.assertEqual(status, 200)
+        observation = json.loads(
+            (self.root / "metadata.json").read_text(encoding="utf-8")
+        )["requests"][0]
+        self.assertEqual(observation["upstream_status"], 200)
+        self.assertEqual(observation["stream_end_kind"], "clean_eof")
+        request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"][
+            "sse-incomplete"
+        ]
+        self.assertFalse(request["usage_valid"])
+        self.assertEqual(request["settlement_kind"], "conservative_reservation")
 
     def test_missing_role_header_projects_declared_main_from_request_shape(self) -> None:
         status, _body, _headers = self._post(self._body(), role=None)

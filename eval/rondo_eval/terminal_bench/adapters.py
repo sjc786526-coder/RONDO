@@ -535,7 +535,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
             # Compose mounts the private staging file as a Docker secret.  No
             # environment.exec ``-e KEY=value`` argument is used because Harbor's
             # Docker backend would serialize that value into docker argv.
-            secret_path = "/run/secrets/rondo_eval_provider_api_key"
+            # The host writes the complete, bounded auth.json payload.  Task
+            # images are not required to contain Python merely to JSON-encode
+            # a key that is already protected by the Compose secret mount.
+            secret_path = "/run/secrets/rondo_eval_provider_auth_json"
             secret_owner = await _checked_exec_as_agent(
                 environment,
                 command=f"stat -c '%u:%g' -- {shlex.quote(secret_path)}",
@@ -561,10 +564,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"test -s {shlex.quote(secret_path)}; "
                 f"test -r {shlex.quote(secret_path)}; "
                 f"test ! -w {shlex.quote(secret_path)}; umask 077; "
-                "python3 -c 'import json,sys; print(json.dumps({\"OPENAI_API_KEY\":sys.stdin.read()}))' "
-                f"< {shlex.quote(secret_path)} "
-                f"> {shlex.quote(remote_auth)}; "
-                f"chmod 0600 {shlex.quote(remote_auth)}; "
+                f"ln -sfn {shlex.quote(secret_path)} {shlex.quote(remote_auth)}; "
                 f"ln -sfn {shlex.quote(remote_auth)} "
                 f"{shlex.quote(remote_home + '/auth.json')}"
             )

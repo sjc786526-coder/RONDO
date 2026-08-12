@@ -77,7 +77,7 @@ class FakeMaterializer:
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
-        provider_secret = self.root / f"{kwargs['staging_name']}.provider-api-key"
+        provider_secret = self.root / f"{kwargs['staging_name']}.provider-auth-json"
         provider_secret.write_bytes(b"")
         provider_secret.chmod(0o600)
         overlay.write_text(
@@ -139,10 +139,11 @@ class FakeHostExecutor:
         secret_mounts = [
             item
             for item in kwargs["compose_contract"].container.mounts
-            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+            if item.destination == "/run/secrets/rondo_eval_provider_auth_json"
         ]
         assert len(secret_mounts) == 1
-        bearer = Path(secret_mounts[0].source).read_text(encoding="utf-8")
+        auth = json.loads(Path(secret_mounts[0].source).read_text(encoding="utf-8"))
+        bearer = auth["OPENAI_API_KEY"]
         body = json.dumps({"model": "gpt-5.6-sol", "stream": True, "input": "fix"})
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         connection.request(

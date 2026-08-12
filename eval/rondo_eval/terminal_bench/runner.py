@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import stat
 import sys
@@ -742,7 +743,7 @@ def _compose_run_contract(
         DockerMountFact(
             "bind",
             str(materialized.provider_secret_path),
-            "/run/secrets/rondo_eval_provider_api_key",
+            "/run/secrets/rondo_eval_provider_auth_json",
             True,
         ),
     )
@@ -785,7 +786,15 @@ def _task_label(task_id: str) -> str:
 def _replace_provider_secret(path: Path, value: str) -> None:
     if not isinstance(value, str) or "\0" in value or "\r" in value or "\n" in value:
         raise TerminalBenchRunError("provider key cannot be represented as a Compose secret")
-    payload = value.encode("utf-8")
+    payload = (
+        b""
+        if not value
+        else json.dumps(
+            {"OPENAI_API_KEY": value},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
     if len(payload) > 16 * 1024:
         raise TerminalBenchRunError("provider key exceeds the bounded Compose secret size")
     try:

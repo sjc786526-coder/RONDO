@@ -552,6 +552,7 @@ def _container_inspect(
     network_mode: str = "rondoeval0810_default",
     networks: dict[str, object] | None = None,
     tmpfs: dict[str, str] | None = None,
+    running: bool = True,
 ) -> str:
     network_payload = networks if networks is not None else {network_mode: {}}
     return json.dumps(
@@ -582,6 +583,7 @@ def _container_inspect(
                     "Tmpfs": tmpfs,
                 },
                 "NetworkSettings": {"Networks": network_payload},
+                "State": {"Running": running},
                 "Mounts": [],
                 "SizeRw": 123,
             }
@@ -737,6 +739,7 @@ class DockerCounterTests(unittest.TestCase):
                     CommandOutput(returncode=1, stdout=""),
                     CommandOutput(returncode=1, stdout=""),
                     json.dumps(CONTAINER_ID) + "\n",
+                    _container_inspect(running=True),
                 ],
             )
 
@@ -1231,6 +1234,114 @@ class DockerCounterTests(unittest.TestCase):
                 ],
             )
 
+            with self.assertRaises(RuntimeBridgeError) as caught:
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.HOST,
+                    compose_contract=contract,
+                )
+
+        self.assertEqual(caught.exception.failed_probe, "docker_container_metrics")
+
+    def test_metric_exec_failure_allows_bounded_teardown_grace(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(),
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    _container_inspect(running=False),
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.HOST,
+                compose_contract=contract,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(reading.task_container_metrics, ())
+        self.assertEqual(
+            sum(command[:3] == ("docker", "container", "ls") for command in executor.commands),
+            3,
+        )
+
+    def test_stopped_metric_target_must_disappear_within_grace(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        responses: list[str | CommandOutput | Exception] = [
+            _system_df(),
+            json.dumps([
+                str(Path("/tmp")),
+                "Docker Engine - Community",
+                ["name=seccomp,profile=builtin"],
+            ]),
+            json.dumps(CONTAINER_ID) + "\n",
+            "",
+            _container_inspect(),
+            CommandOutput(returncode=1, stdout=""),
+            CommandOutput(returncode=1, stdout=""),
+        ]
+        for _ in range(3):
+            responses.extend(
+                (json.dumps(CONTAINER_ID) + "\n", _container_inspect(running=False))
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            responses[1] = json.dumps([
+                str(root),
+                "Docker Engine - Community",
+                ["name=seccomp,profile=builtin"],
+            ])
+            counter, _ = self._native_counter(root, responses)
             with self.assertRaises(RuntimeBridgeError) as caught:
                 counter.sample(
                     identity=DockerTaskIdentity(TASK_ID),
