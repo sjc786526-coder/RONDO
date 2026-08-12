@@ -94,11 +94,12 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
   和 CUDA CMake（blob `d3953eee962e7cdc8cd39e6e8c062bced167e200`）。确认 CUDA job 只有 configure/build、没有测试命令；
   workflow 还使用 permissive linker flag 与 `GGML_CUDA_CUB_3DOT2=ON`，后者会 FetchContent CCCL `v3.2.0`。Plan 018
   交接已增加选择/冻结门，不改变保留 b10333 的路线。
+- 2026-08-12：勘误提交 `93811e807abeae4217136067c374fbdc7d304396`，首次以 merge
+  `feb4777a8d062d48df828003f535500467016f4c` 合并本地 `main` 并推送远端；本 closure 只同步最终状态。
 
 ### 当前工作
 
-- CUDA workflow 勘误已完成源码复核和文档更新，正在完成轻量检查与 Git 交付；不进入 Plan 018、权重下载或
-  GPU/model-backed 执行。
+- CUDA workflow 勘误、轻量检查与 Git 交付已完成；不进入 Plan 018、权重下载或 GPU/model-backed 执行。
 
 ### 后续计划
 
@@ -114,7 +115,7 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
 
 ### 当前验收状态
 
-- `errata_complete_git_delivery_pending`。
+- `errata_complete_git_delivered`。
 
 ## 6. 关键决策记录
 

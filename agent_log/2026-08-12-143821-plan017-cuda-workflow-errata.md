@@ -10,3 +10,5 @@
   构建及官方 CI 差异证据。permissive linker flag 默认不采用，只能在严格链接失败且根因明确时加入。
 - 本批只修改 Plan 017、运行路线审计档案和本日志；不改最终路线、Plan 015/016、生产代码、launcher、模板或 runtime lock。
   未安装依赖/CUDA，未构建，未运行 GPU、Docker、模型、Cargo/Bazel/just，也未下载权重。
+- 勘误提交为 `93811e807abeae4217136067c374fbdc7d304396`，首次合并提交为
+  `feb4777a8d062d48df828003f535500467016f4c`；已推送远端，本 closure 仅同步交付状态。
