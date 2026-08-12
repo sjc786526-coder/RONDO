@@ -423,6 +423,112 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 self.assertEqual(snapshot["slots"][1]["status"], "failed")
                 self.assertEqual(snapshot["slots"][1]["outcome"], "infra_failed")
 
+    def test_idle_campaign_retirement_is_atomic_and_preserves_wire_fact(self) -> None:
+        identity = self._identity_v2()
+        reason = (
+            "diagnosed_campaign_defect:"
+            "local_implementation_defect:harness_runtime"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                with self.assertRaisesRegex(BaselineError, "no durable execution fact"):
+                    ledger.retire_blocked(reason=reason)
+                ledger.claim("wire-canary")
+                ledger.finish(
+                    "wire-canary",
+                    status=CampaignSlotStatus.COMPLETED,
+                    outcome="completed",
+                    estimated_usd="0.200000",
+                    artifact_path="eval-data/campaigns/wire/receipt.json",
+                    result_record_sha256="1" * 64,
+                    reason=None,
+                )
+                ledger.retire_blocked(reason=reason)
+
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                snapshot = ledger.snapshot()
+                self.assertEqual(snapshot["status"], BaselineStatus.BLOCKED.value)
+                self.assertEqual(snapshot["terminal_reason"], reason)
+                statuses = [row["status"] for row in snapshot["slots"]]
+                self.assertEqual(statuses.count(CampaignSlotStatus.COMPLETED.value), 1)
+                self.assertEqual(
+                    statuses.count(CampaignSlotStatus.SKIPPED.value),
+                    len(identity.slots) - 1,
+                )
+                self.assertEqual(snapshot["slots"][0]["estimated_usd"], "0.200000")
+
+    def test_post_oracle_worker_returns_after_wire_then_advances_paid_step(self) -> None:
+        identity = self._identity_v2()
+        unused = mock.Mock()
+        kwargs = {
+            "paths": RepoPaths.discover(Path.cwd()),
+            "identity": identity,
+            "campaign_root": Path("/campaign"),
+            "budget_path": Path("/budget.json"),
+            "config": unused,
+            "counter": unused,
+            "proof": unused,
+            "storage_baseline": baseline_cli.StorageBaseline(1, 1, 1),
+            "results_root": Path("/results"),
+            "manifests": {},
+            "measurement_roots": {},
+            "measurement_commits": {},
+            "eval_harness_commit": "a" * 40,
+            "seccomp_profile": Path("/seccomp.json"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                with mock.patch.object(
+                    baseline_cli, "_reconcile_running_wire_canary"
+                ), mock.patch.object(
+                    baseline_cli, "_execute_wire_canary"
+                ) as execute_wire:
+                    self.assertEqual(
+                        baseline_cli._advance_post_oracle_step(
+                            **kwargs,
+                            state=ledger,
+                        ),
+                        10,
+                    )
+                execute_wire.assert_called_once()
+
+                ledger.claim("wire-canary")
+                ledger.finish(
+                    "wire-canary",
+                    status=CampaignSlotStatus.COMPLETED,
+                    outcome="completed",
+                    estimated_usd="0.200000",
+                    artifact_path="eval-data/campaigns/wire/receipt.json",
+                    result_record_sha256="1" * 64,
+                    reason=None,
+                )
+                budget = mock.Mock()
+                budget_context = mock.MagicMock()
+                budget_context.__enter__.return_value = budget
+                with mock.patch.object(
+                    baseline_cli, "_reconcile_running_wire_canary"
+                ), mock.patch.object(
+                    baseline_cli, "load_provider_secret", return_value=("KEY", "secret")
+                ), mock.patch.object(
+                    baseline_cli,
+                    "PersistentBudgetLedger",
+                    return_value=budget_context,
+                ), mock.patch.object(
+                    baseline_cli, "_reconcile_running_paid_slot"
+                ), mock.patch.object(
+                    baseline_cli, "_advance_one_paid_step", return_value=10
+                ) as advance_paid:
+                    self.assertEqual(
+                        baseline_cli._advance_post_oracle_step(
+                            **kwargs,
+                            state=ledger,
+                        ),
+                        10,
+                    )
+                advance_paid.assert_called_once()
+
     def test_schema_v2_diagnosis_hold_is_durable_and_gates_claims(self) -> None:
         identity = self._identity_v2()
         task_id = identity.catalog.tasks[0].task_id

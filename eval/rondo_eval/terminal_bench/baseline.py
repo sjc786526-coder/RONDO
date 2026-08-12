@@ -636,6 +636,34 @@ class CampaignStateLedger:
         state["terminal_reason"] = reason
         self._persist(state)
 
+    def retire_blocked(self, *, reason: str) -> None:
+        """Atomically retire an idle identity after a confirmed local defect."""
+
+        if re.fullmatch(r"[a-z0-9_.:-]{1,256}", reason) is None:
+            raise BaselineError("campaign retirement reason is invalid")
+        state = self._require_state()
+        if state["status"] != "running":
+            raise BaselineError("campaign state is already terminal")
+        if any(row["status"] == CampaignSlotStatus.RUNNING.value for row in state["slots"]):
+            raise BaselineError("campaign cannot retire with a running slot")
+        if not any(
+            row["status"] in {
+                CampaignSlotStatus.COMPLETED.value,
+                CampaignSlotStatus.FAILED.value,
+            }
+            for row in state["slots"]
+        ):
+            raise BaselineError("campaign retirement has no durable execution fact")
+        finished_at = int(time.time())
+        for row in state["slots"]:
+            if row["status"] == CampaignSlotStatus.PLANNED.value:
+                row["status"] = CampaignSlotStatus.SKIPPED.value
+                row["reason"] = "campaign_retired_after_local_defect"
+                row["finished_at_unix"] = finished_at
+        state["status"] = BaselineStatus.BLOCKED.value
+        state["terminal_reason"] = reason
+        self._persist(state)
+
     def require_diagnosis(
         self,
         *,

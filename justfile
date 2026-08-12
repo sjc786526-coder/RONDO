@@ -92,3 +92,11 @@ eval-b7-resolve-diagnosis chain_id category disposition evidence_code:
         --category "{{category}}" \
         --disposition "{{disposition}}" \
         --evidence-code "{{evidence_code}}"
+
+# Retire an idle active campaign after a confirmed local implementation defect.
+eval-b7-retire-local-defect:
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_diagnosis \
+        --retire-local-defect

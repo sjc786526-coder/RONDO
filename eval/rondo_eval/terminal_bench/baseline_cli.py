@@ -476,31 +476,153 @@ def _worker_step_main(args: argparse.Namespace) -> int:
         identity=identity,
         allow_interrupted_recovery=True,
     ) as state:
-        snapshot = state.snapshot()
-        if snapshot["status"] != "running":
-            return _terminal_exit_code(snapshot["status"])
+        return _advance_post_oracle_step(
+            paths=paths,
+            identity=identity,
+            campaign_root=campaign_root,
+            budget_path=budget_path,
+            config=config,
+            counter=counter,
+            proof=proof,
+            storage_baseline=storage_baseline,
+            results_root=results_root,
+            manifests=manifests,
+            measurement_roots=measurement_roots,
+            measurement_commits=measurement_commits,
+            eval_harness_commit=eval_harness_commit,
+            seccomp_profile=seccomp_profile,
+            state=state,
+        )
+
+
+def _advance_post_oracle_step(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    campaign_root: Path,
+    budget_path: Path,
+    config: object,
+    counter: DockerCliCounter,
+    proof: object,
+    storage_baseline: StorageBaseline,
+    results_root: Path,
+    manifests: dict[Side, BinaryManifest],
+    measurement_roots: dict[Side, RepoPaths],
+    measurement_commits: dict[Side, str],
+    eval_harness_commit: str,
+    seccomp_profile: Path,
+    state: CampaignStateLedger,
+) -> int:
+    """Advance exactly one wire or paid step after all Oracle proofs validate."""
+
+    snapshot = state.snapshot()
+    if snapshot["status"] != "running":
+        return _terminal_exit_code(snapshot["status"])
+    try:
+        _reconcile_running_wire_canary(
+            paths=paths,
+            identity=identity,
+            campaign_root=campaign_root,
+            state=state,
+            counter=counter,
+            storage_baseline=storage_baseline,
+        )
+    except CampaignExecutionError as exc:
+        _skip_planned(state, identity, reason="wire_canary_interrupted")
+        state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
+        return 3
+    snapshot = state.snapshot()
+    wire = next(row for row in snapshot["slots"] if row["slot_id"] == "wire-canary")
+    if wire["status"] == CampaignSlotStatus.PLANNED.value:
         try:
-            _reconcile_running_wire_canary(
-                paths=paths,
-                identity=identity,
-                campaign_root=campaign_root,
-                state=state,
-                counter=counter,
-                storage_baseline=storage_baseline,
-            )
+            _execute_wire_canary(paths, identity, campaign_root, state)
         except CampaignExecutionError as exc:
-            _skip_planned(state, identity, reason="wire_canary_interrupted")
+            _skip_planned(state, identity, reason="wire_canary_failed")
             state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
             return 3
-        snapshot = state.snapshot()
-        wire = next(row for row in snapshot["slots"] if row["slot_id"] == "wire-canary")
-        if wire["status"] == CampaignSlotStatus.PLANNED.value:
-            try:
-                _execute_wire_canary(paths, identity, campaign_root, state)
-            except CampaignExecutionError as exc:
-                _skip_planned(state, identity, reason="wire_canary_failed")
-                state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
-                return 3
+        return 10
+    if wire["status"] != CampaignSlotStatus.COMPLETED.value:
+        _skip_planned(state, identity, reason="wire_canary_failed")
+        state.finalize(BaselineStatus.BLOCKED, reason="wire_canary_not_completed")
+        return 3
+    canary_cost = Decimal(wire["estimated_usd"])
+    prior_cost = Decimal(identity.budget["prior_estimated_usd"])
+    campaign_cap = Decimal(identity.budget["campaign_cap_usd"])
+    remaining_cap = campaign_cap - prior_cost - canary_cost
+    if remaining_cap < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
+        _skip_planned(state, identity, reason="budget_after_wire_canary")
+        state.finalize(BaselineStatus.BLOCKED, reason="budget_after_wire_canary")
+        return 3
+    _secret_name, api_key = load_provider_secret(config)
+    with PersistentBudgetLedger(
+        budget_path,
+        batch_id=identity.batch_id,
+        total_cap_usd=remaining_cap,
+        max_runs=len(identity.slots) - 1,
+        default_run_cap_usd=RUN_CAP_USD,
+    ) as budget:
+        try:
+            _reconcile_running_paid_slot(
+                paths=paths,
+                identity=identity,
+                state=state,
+                budget=budget,
+                counter=counter,
+                storage_baseline=storage_baseline,
+                results_root=results_root,
+            )
+            return _advance_one_paid_step(
+                paths=paths,
+                identity=identity,
+                state=state,
+                budget=budget,
+                config=config,
+                provider_key=api_key,
+                counter=counter,
+                proof=proof,
+                storage_baseline=storage_baseline,
+                results_root=results_root,
+                manifests=manifests,
+                measurement_roots=measurement_roots,
+                measurement_commits=measurement_commits,
+                eval_harness_commit=eval_harness_commit,
+                seccomp_profile=seccomp_profile,
+                campaign_root=campaign_root,
+                canary_cost=canary_cost,
+            )
+        except _CampaignDiagnosisRequired as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "diagnosis_required",
+                        "campaign_id": identity.campaign_id,
+                        "chain_id": exc.chain_id,
+                        "category": exc.category.value,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 11
+        except CampaignExecutionError as exc:
+            _skip_planned(state, identity, reason="campaign_stopped")
+            state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
+            final_storage = _optional_final_storage(
+                counter,
+                identity.slots[0].run_id,
+                baseline=storage_baseline,
+            )
+            _write_aggregate(
+                campaign_root,
+                identity,
+                state,
+                budget.snapshot(),
+                canary_cost,
+                assessment=None,
+                results_root=results_root,
+                storage_baseline=storage_baseline,
+                final_storage=final_storage,
+            )
+            return 3
 
 
 def _reconcile_before_oracle(
@@ -635,87 +757,6 @@ def _reconcile_before_oracle(
                 )
                 return 3
             return 10
-        if wire["status"] != CampaignSlotStatus.COMPLETED.value:
-            _skip_planned(state, identity, reason="wire_canary_failed")
-            state.finalize(BaselineStatus.BLOCKED, reason="wire_canary_not_completed")
-            return 3
-        canary_cost = Decimal(wire["estimated_usd"])
-        prior_cost = Decimal(identity.budget["prior_estimated_usd"])
-        campaign_cap = Decimal(identity.budget["campaign_cap_usd"])
-        remaining_cap = campaign_cap - prior_cost - canary_cost
-        if remaining_cap < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
-            state.finalize(BaselineStatus.BLOCKED, reason="budget_after_wire_canary")
-            return 3
-        _secret_name, api_key = load_provider_secret(config)
-        with PersistentBudgetLedger(
-            budget_path,
-            batch_id=identity.batch_id,
-            total_cap_usd=remaining_cap,
-            max_runs=len(identity.slots) - 1,
-            default_run_cap_usd=RUN_CAP_USD,
-        ) as budget:
-            try:
-                _reconcile_running_paid_slot(
-                    paths=paths,
-                    identity=identity,
-                    state=state,
-                    budget=budget,
-                    counter=counter,
-                    storage_baseline=storage_baseline,
-                    results_root=results_root,
-                )
-                return _advance_one_paid_step(
-                    paths=paths,
-                    identity=identity,
-                    state=state,
-                    budget=budget,
-                    config=config,
-                    provider_key=api_key,
-                    counter=counter,
-                    proof=proof,
-                    storage_baseline=storage_baseline,
-                    results_root=results_root,
-                    manifests=manifests,
-                    measurement_roots=measurement_roots,
-                    measurement_commits=measurement_commits,
-                    eval_harness_commit=eval_harness_commit,
-                    seccomp_profile=seccomp_profile,
-                    campaign_root=campaign_root,
-                    canary_cost=canary_cost,
-                )
-            except _CampaignDiagnosisRequired as exc:
-                print(
-                    json.dumps(
-                        {
-                            "status": "diagnosis_required",
-                            "campaign_id": identity.campaign_id,
-                            "chain_id": exc.chain_id,
-                            "category": exc.category.value,
-                        },
-                        sort_keys=True,
-                    )
-                )
-                return 11
-            except CampaignExecutionError as exc:
-                _skip_planned(state, identity, reason="campaign_stopped")
-                state.finalize(BaselineStatus.BLOCKED, reason=str(exc))
-                final_storage = _optional_final_storage(
-                    counter,
-                    identity.slots[0].run_id,
-                    baseline=storage_baseline,
-                )
-                _write_aggregate(
-                    campaign_root,
-                    identity,
-                    state,
-                    budget.snapshot(),
-                    canary_cost,
-                    assessment=None,
-                    results_root=results_root,
-                    storage_baseline=storage_baseline,
-                    final_storage=final_storage,
-                )
-                return 3
 
 
 def _reconcile_running_wire_canary(
