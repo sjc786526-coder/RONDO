@@ -223,6 +223,7 @@ class HostHarborExecutor(Protocol):
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        image_reference: str,
         compose_contract: ComposeRunContract,
     ) -> HostHarborResult: ...
 
@@ -259,6 +260,7 @@ class InjectedHostHarborBackend:
                 injected_env=dict(prepared.command.env),
                 timeout_seconds=prepared.spec.timeout_seconds,
                 exact_task_label=prepared.command.task_label,
+                image_reference=prepared.command.image_ref,
                 compose_contract=prepared.command.compose_contract,
             )
             if not isinstance(result, HostHarborResult):
@@ -293,6 +295,7 @@ class DockerSupervisedHostHarborExecutor:
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        image_reference: str,
         compose_contract: ComposeRunContract,
     ) -> HostHarborResult:
         _require_budget_proxy_argv(argv)
@@ -302,6 +305,7 @@ class DockerSupervisedHostHarborExecutor:
             injected_env=injected_env,
             timeout_seconds=timeout_seconds,
             exact_task_label=exact_task_label,
+            image_reference=image_reference,
             compose_contract=compose_contract,
         )
 
@@ -327,6 +331,7 @@ class DockerSupervisedHostHarborExecutor:
             injected_env={"HARBOR_TELEMETRY": "off"},
             timeout_seconds=timeout_seconds,
             exact_task_label=materialized.task_label,
+            image_reference=materialized.runtime_image_ref,
             compose_contract=_compose_run_contract(
                 materialized,
                 trial_name=trial_name,
@@ -343,6 +348,7 @@ class DockerSupervisedHostHarborExecutor:
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        image_reference: str,
         compose_contract: ComposeRunContract,
     ) -> HostHarborResult:
         prefix = "dev.rondo.eval.task="
@@ -377,7 +383,7 @@ class DockerSupervisedHostHarborExecutor:
         )
         image_identity = supervisor.resolve_image_identity(
             identity,
-            compose_contract.container.image_reference,
+            image_reference,
             lease=self._lease,
             timeout_seconds=5,
         )

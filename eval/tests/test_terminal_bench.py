@@ -1265,6 +1265,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(executor.provider_secrets, [secret])
         self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
         self.assertEqual(kwargs["exact_task_label"], "dev.rondo.eval.task=p1-b3-rondo")
+        self.assertEqual(kwargs["image_reference"], prepared.command.image_ref)
         self.assertEqual(kwargs["compose_contract"], prepared.command.compose_contract)
 
     def test_injected_backend_clears_provider_secret_after_executor_failure(self) -> None:
@@ -1314,6 +1315,7 @@ class TerminalBenchTests(unittest.TestCase):
                     injected_env={"HARBOR_TELEMETRY": "off"},
                     timeout_seconds=prepared.spec.timeout_seconds,
                     exact_task_label=prepared.command.task_label,
+                    image_reference=prepared.command.image_ref,
                     compose_contract=prepared.command.compose_contract,
                 )
             )
@@ -1377,6 +1379,12 @@ class TerminalBenchTests(unittest.TestCase):
         )
         self.assertNotIn("--agent-env", argv)
         self.assertEqual(materialized.provider_secret_path.read_bytes(), b"")
+        fake_supervisor.resolve_image_identity.assert_called_once_with(
+            mock.ANY,
+            materialized.runtime_image_ref,
+            lease=mock.ANY,
+            timeout_seconds=5,
+        )
         contract = fake_supervisor.supervise_host_command.call_args.kwargs[
             "compose_contract"
         ]
