@@ -71,7 +71,7 @@
   reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
   只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
   `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B7 串行执行设施已冻结；B6 经追加授权使用
-  独立 400 USD 总硬上限，v7 带入既有 `200.334576 USD` debit。当前在 Plan 015 v7 干净提交后执行 10-task
+  独立 400 USD 总硬上限，v8 带入既有 `221.772313 USD` debit。当前在 Plan 015 v8 干净提交后执行 10-task
   no-API oracle、fresh wire canary 和首次真实基线。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
@@ -125,7 +125,7 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 与执行设施完成；Plan 015 已获累计 400 USD/B7 Docker 授权，v7 待执行 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 与执行设施完成；Plan 015 已获累计 400 USD/B7 Docker 授权，v8 待执行 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
@@ -182,8 +182,8 @@ Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再�
 通过；本批未调用 API、Docker 或 Cargo。
 L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
 Plan 015 已冻结 10/61/18 taskset、10-task exact image catalog、Sol/Sol campaign identity、161 个一次性 slot、
-机械计分与独立 400 USD 停止合同。v1—v6 均为只读终态；v7 采用定点 infra 补跑、逐轮即时门禁、结构化
-三 task 熔断和至少 8 项共同分母。下一步只按 v7 lock 串行完成 B7；执行细节见 Plan 015。
+机械计分与独立 400 USD 停止合同。v1—v7 均为只读终态；v8 采用定点 infra 补跑、逐轮即时门禁、结构化
+三 task 熔断和至少 8 项共同分母。下一步只按 v8 lock 串行完成 B7；执行细节见 Plan 015。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，

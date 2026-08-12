@@ -1111,13 +1111,17 @@ class DockerCliCounter:
             container_ids, container_bytes, container_facts = container_result
             container_metrics: tuple[object, ...] = ()
             if compose_contract is not None and compose_contract.container.require_container_metrics:
-                container_metrics = probe(
+                metric_result = probe(
                     "docker_container_metrics",
-                    lambda: self._container_metrics(
+                    lambda: self._container_metrics_with_disappearance(
+                        identity,
+                        container_ids,
                         container_facts,
                         deadline=deadline,
                     ),
                 )
+                assert isinstance(metric_result, tuple)
+                container_ids, container_facts, container_metrics = metric_result
                 assert isinstance(container_metrics, tuple)
             image_bytes = probe(
                 "docker_image_inspect",
@@ -1347,6 +1351,35 @@ class DockerCliCounter:
             metric.validate()
             metrics.append(metric)
         return tuple(metrics)
+
+    def _container_metrics_with_disappearance(
+        self,
+        identity: "DockerTaskIdentity",
+        container_ids: tuple[str, ...],
+        container_facts: tuple[object, ...],
+        *,
+        deadline: float,
+    ) -> tuple[tuple[str, ...], tuple[object, ...], tuple[object, ...]]:
+        """Accept only a proven teardown race after a failed metric exec.
+
+        Harbor may remove its single task container after the exact inspect but
+        before the cgroup ``docker exec``.  A fresh exact-label re-list proving
+        that the previously inspected container is now absent is a valid empty
+        final observation; an unchanged or replacement identity remains a hard
+        failure.  Durable result metrics still require an earlier successful
+        sample in ``DockerSupervisor``.
+        """
+
+        if not container_ids:
+            return (), (), ()
+        try:
+            metrics = self._container_metrics(container_facts, deadline=deadline)
+        except RuntimeBridgeError:
+            current_ids = self._container_ids(identity, deadline=deadline)
+            if current_ids:
+                raise
+            return (), (), ()
+        return container_ids, container_facts, metrics
 
     def _compose_networks(self, project: str, *, deadline: float) -> tuple[object, ...]:
         from .docker_supervisor import ComposeResourceFact

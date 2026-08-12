@@ -1139,6 +1139,107 @@ class DockerCounterTests(unittest.TestCase):
         self.assertEqual(metric_command[:5], ("docker", "container", "exec", "--user", "1000:1000"))
         self.assertEqual(metric_command[5], CONTAINER_ID)
 
+    def test_metric_exec_failure_accepts_only_proven_container_disappearance(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(),
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    "",
+                    "",
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.HOST,
+                compose_contract=contract,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(reading.task_containers, ())
+        self.assertEqual(reading.task_container_metrics, ())
+        self.assertEqual(
+            sum(command[:3] == ("docker", "container", "ls") for command in executor.commands),
+            2,
+        )
+
+    def test_metric_exec_failure_with_unchanged_container_remains_hard_failure(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, _ = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(),
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    json.dumps(CONTAINER_ID) + "\n",
+                ],
+            )
+
+            with self.assertRaises(RuntimeBridgeError) as caught:
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.HOST,
+                    compose_contract=contract,
+                )
+
+        self.assertEqual(caught.exception.failed_probe, "docker_container_metrics")
+
     def test_compose_resources_are_selected_and_inspected_by_exact_project(self) -> None:
         network_id = "c" * 64
         project = "rondoeval0810"
