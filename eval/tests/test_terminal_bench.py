@@ -241,6 +241,12 @@ class FakeBudgetProxy:
 
 
 class TerminalBenchTests(unittest.TestCase):
+    def test_harbor_executable_comes_from_the_active_eval_environment(self) -> None:
+        self.assertEqual(
+            runner_module.HARBOR_EXECUTABLE,
+            Path(sys.executable).with_name("harbor"),
+        )
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -446,7 +452,7 @@ class TerminalBenchTests(unittest.TestCase):
         factory.assert_called_once()
         self.assertEqual(materializer.calls[0]["image_digest"], FIX_GIT_IMAGE_DIGEST)
         argv = prepared.command.argv
-        self.assertEqual(Path(argv[0]), EVAL_ROOT / ".venv" / "bin" / "harbor")
+        self.assertEqual(Path(argv[0]), runner_module.HARBOR_EXECUTABLE)
         self.assertEqual(argv[1:3], ("trials", "start"))
         self.assertEqual(Path(argv[argv.index("--path") + 1]), prepared.materialized_task.task_path)
         self.assertNotIn("--repo", argv)
@@ -1301,7 +1307,7 @@ class TerminalBenchTests(unittest.TestCase):
 
         self.assertEqual(result.docker_evidence.operation, DockerOperation.HOST)
         host_runner.assert_called_once_with(
-            executable=EVAL_ROOT / ".venv" / "bin" / "harbor",
+            executable=runner_module.HARBOR_EXECUTABLE,
             cwd=EVAL_ROOT,
             environment={
                 "HARBOR_TELEMETRY": "off",

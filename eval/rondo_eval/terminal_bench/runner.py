@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import os
 import stat
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
@@ -41,7 +42,7 @@ from .tasksets import FrozenTask
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[2]
-HARBOR_EXECUTABLE = EVAL_ROOT / ".venv" / "bin" / "harbor"
+HARBOR_EXECUTABLE = Path(sys.executable).with_name("harbor")
 ADAPTER_IMPORTS = {
     Side.CODEX: "rondo_eval.terminal_bench.adapters:CodexUploadAdapter",
     Side.RONDO: "rondo_eval.terminal_bench.adapters:RondoUploadAdapter",
