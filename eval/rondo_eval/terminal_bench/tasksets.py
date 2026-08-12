@@ -23,7 +23,13 @@ CANARY_COUNT = 10
 VALIDATION_COUNT = 61
 HOLDOUT_COUNT = 18
 _LEGACY_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog.json")
-_SUCCESSOR_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v2.json")
+_PID_512_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v2.json")
+_SUCCESSOR_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v3.json")
+_CANARY_CATALOGS = (
+    _LEGACY_CANARY_CATALOG,
+    _PID_512_CANARY_CATALOG,
+    _SUCCESSOR_CANARY_CATALOG,
+)
 _TASK_ID = re.compile(r"terminal-bench/[a-z0-9][a-z0-9.-]{0,95}")
 _MAX_DATASET_BYTES = 1_000_000
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
@@ -104,7 +110,7 @@ class FrozenTask:
             or self.verifier_timeout_seconds != self.agent_timeout_seconds
             or self.build_timeout_seconds != 600
             or not isinstance(self.requires_existing_git_repo, bool)
-            or self.pids_limit not in {256, 512}
+            or self.pids_limit not in {256, 512, 1024}
         ):
             raise TasksetError("frozen canary task is invalid")
 
@@ -201,7 +207,7 @@ def _catalog_path(paths: RepoPaths, *, expected_sha256: str | None) -> Path:
     if re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
         raise TasksetError("canary catalog SHA-256 is invalid")
     matches: list[Path] = []
-    for relative in (_LEGACY_CANARY_CATALOG, _SUCCESSOR_CANARY_CATALOG):
+    for relative in _CANARY_CATALOGS:
         path = paths.worktree_root / relative
         raw = _read_regular(path, limit=1_000_000)
         if hashlib.sha256(raw).hexdigest() == expected_sha256:
@@ -261,9 +267,15 @@ def _load_frozen_canary_catalog_path(
             raise TasksetError("canary catalog task types are invalid") from exc
         task.validate()
         tasks.append(task)
-    expected_pids = {
-        "terminal-bench/filter-js-from-html": 512,
-    }
+    filter_pids = {
+        _PID_512_CANARY_CATALOG.name: 512,
+        _SUCCESSOR_CANARY_CATALOG.name: 1024,
+    }.get(path.name)
+    expected_pids = (
+        {"terminal-bench/filter-js-from-html": filter_pids}
+        if filter_pids is not None
+        else {}
+    )
     if value["schema_version"] == 2 and any(
         task.pids_limit != expected_pids.get(task.task_id, 256) for task in tasks
     ):

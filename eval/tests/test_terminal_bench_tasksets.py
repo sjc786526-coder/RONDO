@@ -68,6 +68,12 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         paths = RepoPaths.discover(Path.cwd())
         legacy = tasksets.load_frozen_canary_catalog(paths)
         successor = tasksets.load_successor_canary_catalog(paths)
+        pid_512 = tasksets.load_frozen_canary_catalog(
+            paths,
+            expected_sha256=(
+                "c4e303b520d0fd6e4e16f83405e5b7e56e8401ed0ffedd61ac9050351fc88c49"
+            ),
+        )
 
         self.assertNotEqual(successor.catalog_sha256, legacy.catalog_sha256)
         self.assertEqual(
@@ -76,8 +82,13 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         )
         self.assertEqual(
             successor.task("terminal-bench/filter-js-from-html").pids_limit,
+            1024,
+        )
+        self.assertEqual(
+            pid_512.task("terminal-bench/filter-js-from-html").pids_limit,
             512,
         )
+        self.assertNotEqual(pid_512.catalog_sha256, successor.catalog_sha256)
         self.assertTrue(
             all(
                 item.pids_limit == 256
