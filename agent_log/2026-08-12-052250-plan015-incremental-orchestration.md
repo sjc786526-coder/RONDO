@@ -25,3 +25,5 @@
 - Docker counter 不再丢弃全部命令失败细节：只发布 exit/timed-out、stderr 长度/SHA 与最多 512 字节的脱敏
   excerpt，仍严格拒绝 live-container metrics 缺失。focused 170/170、完整 eval 430/430、`eval-lock` 85 packages、
   `git diff --check` 通过；本离线批次未调用 API、Docker 或 Cargo。
+- 生成器以 v10 只读 terminal facts 冻结 v11：schema-v2、321 个唯一 slot、run base `20260812-310000000`、
+  cap `700 USD`、prior `343.896195 USD`，lock SHA `b2ff3698881b0e0626823a72afc62782e21ab9330cca18317f7571085dc40348`。

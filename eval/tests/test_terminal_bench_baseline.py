@@ -240,15 +240,26 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             tuple(item.version for item in registry),
             tuple(range(1, len(registry) + 1)),
         )
-        self.assertGreaterEqual(len(registry), 10)
-        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v10")
+        self.assertGreaterEqual(len(registry), 11)
+        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v11")
         active = load_campaign_identity(paths)
         self.assertEqual(active.campaign_id, registry[-1].campaign_id)
         self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
+        self.assertEqual(active.schema_version, 2)
+        self.assertEqual(active.max_attempts, 4)
+        self.assertEqual(len(active.slots), 321)
+        self.assertEqual(active.budget["campaign_cap_usd"], "700.000000")
+        self.assertEqual(active.budget["prior_estimated_usd"], "343.896195")
         pointer = json.loads(
             (paths.worktree_root / CAMPAIGN_ACTIVE_POINTER_PATH).read_text()
         )
         self.assertEqual(pointer["active_lock"], registry[-1].path.as_posix())
+        retired = load_historical_campaign_identity(paths, 10)
+        self.assertEqual(retired.campaign_id, "p2-b7-canary-baseline-v10")
+        self.assertEqual(retired.schema_version, 1)
+        self.assertEqual(retired.max_attempts, 2)
+        self.assertEqual(len(retired.slots), 161)
+        self.assertEqual(retired.budget["campaign_cap_usd"], "600.000000")
         self.assertEqual(
             load_historical_campaign_identity(paths, 9).campaign_id,
             "p2-b7-canary-baseline-v9",
@@ -310,7 +321,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         validate_successor_run_range(
             registry,
             run_id_date="20260812",
-            run_id_sequence_base=310000000,
+            run_id_sequence_base=320000000,
         )
 
     def test_campaign_lock_catalog_drift_is_rejected(self) -> None:

@@ -373,4 +373,4 @@ standard/Lite 形态均补回归。
   第三个不同 task 的 provider-response-integrity 触发全局熔断；累计 debit `343.896195 USD`、reservation 0。
 - 后继 schema-v2 将 slot 机械扩为 321，冻结 700 USD 累计 cap，并新增 infra-only a1—a4、同类第二次 durable
   diagnosis hold、外部瞬态 resolution 与第三次 task-local 熔断；Docker counter 同时保留有界脱敏的 exit/stderr
-  诊断，不放宽失败标准。完整 eval 430/430、lock 85 packages 通过；本条不声称已生成或执行后继 identity。
+  诊断，不放宽失败标准。完整 eval 430/430、lock 85 packages 通过；生成器随后冻结唯一 v11 identity，尚未执行。
