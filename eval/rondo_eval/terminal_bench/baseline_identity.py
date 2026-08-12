@@ -24,6 +24,7 @@ from .baseline import (
     load_campaign_identity_path,
     load_historical_campaign_identity,
 )
+from .tasksets import load_successor_canary_catalog
 
 
 class CampaignIdentityGenerationError(RuntimeError):
@@ -181,6 +182,14 @@ def generate_successor_lock(
     if prior >= CAMPAIGN_CAP_USD:
         raise CampaignIdentityGenerationError("campaign cap has no remaining capacity")
     lock = _read_json(paths.worktree_root / latest.path)
+    successor_catalog = load_successor_canary_catalog(paths)
+    if (
+        successor_catalog.taskset_sha256 != predecessor.taskset_sha256
+        or successor_catalog.terminal_bench_commit != predecessor.terminal_bench_commit
+    ):
+        raise CampaignIdentityGenerationError(
+            "successor catalog changes the frozen taskset identity"
+        )
     lock.update(
         {
             "schema_version": 2,
@@ -188,6 +197,7 @@ def generate_successor_lock(
             "batch_id": f"p2-b7-canary-sol-sol-v{next_version}",
             "run_id_date": run_id_date,
             "run_id_sequence_base": run_id_sequence_base,
+            "canary_catalog_sha256": successor_catalog.catalog_sha256,
         }
     )
     lock["budget"] = {

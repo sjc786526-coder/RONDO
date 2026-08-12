@@ -55,7 +55,7 @@ class OracleProofTests(unittest.TestCase):
                 "mounts": [],
                 "network_mode": "bridge",
                 "networks": ["default"],
-                "pids": 256,
+                "pids": task.pids_limit,
                 "privileged": False,
                 "read_only_rootfs": False,
                 "security_opt": ["no-new-privileges:true", "seccomp=custom"],

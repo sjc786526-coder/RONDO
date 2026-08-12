@@ -128,9 +128,9 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
-        self.assertEqual(forecast["prior_estimated_usd"], "343.896195")
+        self.assertEqual(forecast["prior_estimated_usd"], "345.963147")
         self.assertEqual(
-            forecast["remaining_before_successor_canary_usd"], "356.103805"
+            forecast["remaining_before_successor_canary_usd"], "354.036853"
         )
         self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
@@ -305,6 +305,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(
             required_successor_prior(paths, version=10),
             Decimal("343.896195"),
+        )
+
+    def test_successor_prior_includes_the_immutable_v11_terminal_debit(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        self.assertEqual(
+            required_successor_prior(paths, version=11),
+            Decimal("345.963147"),
         )
 
     def test_successor_run_range_rejects_history_and_accepts_fresh_ids(self) -> None:

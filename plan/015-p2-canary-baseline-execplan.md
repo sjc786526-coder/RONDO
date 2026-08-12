@@ -200,10 +200,18 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 生成器已冻结 v11：campaign/batch `p2-b7-canary-baseline-v11`/`p2-b7-canary-sol-sol-v11`，321 个 run ID
   从 `20260812-310000000` 派生，lock SHA `b2ff3698881b0e0626823a72afc62782e21ab9330cca18317f7571085dc40348`，
   cap `700 USD`、prior `343.896195 USD`；v1—v10 保持只读。
+- v11 完成十题 Oracle 与 fresh wire (`0.225011 USD`)；第一轮 db/extract completed，filter a1/a2 均在全部请求
+  settled 后触发 `docker_container_metrics` exit 128。第二次同类故障正确进入 diagnosis hold，a3 未 claim。
+  no-API 官方 Oracle 旁路采样多次达到 `256/256` PIDs，确认本地资源合同缺陷；v11 以
+  `diagnosed_campaign_defect:local_implementation_defect:docker_runtime` 收口，paid `1.841941 USD`，累计
+  `345.963147 USD`、reservation 0。
+- 后继 catalog 保留历史 catalog 字节，仅把 `filter-js-from-html` PIDs 上限从 256 冻结为 512；其余九题仍为
+  256。loader 按 lock 内 catalog SHA 选择历史/后继版本，Oracle contract 与 paid request 使用同一 task 投影。
 
 ### 后续计划
 
-1. v11 重新执行受共享组件变化影响的 Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
+1. 提交 filter PIDs 合同修复，生成唯一后继 identity（prior `345.963147 USD`），重新执行受共享组件变化影响的
+   Oracle proof 与 fresh wire canary，再逐 slot 推进；第二次同类 task
    infra 必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同分母、费用与资源事实。
 
 ### 阻塞项
@@ -213,8 +221,8 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v10 是保留全部费用事实的 blocked 终态。v10 累计 debit `343.896195 USD`、
-  reservation 0；v11 已以 schema-v2/321 slots/700 USD cap 唯一冻结，尚未运行 Oracle、wire 或 paid slot。
+- v1 是 API 前失败终态；v2—v11 是保留全部费用事实的 blocked 终态。v11 累计 debit `345.963147 USD`、
+  reservation 0；后继 filter PIDs 合同已离线回归，尚未生成新 identity。
 
 ## 6. 关键决策记录
 

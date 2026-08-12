@@ -27,3 +27,8 @@
   `git diff --check` 通过；本离线批次未调用 API、Docker 或 Cargo。
 - 生成器以 v10 只读 terminal facts 冻结 v11：schema-v2、321 个唯一 slot、run base `20260812-310000000`、
   cap `700 USD`、prior `343.896195 USD`，lock SHA `b2ff3698881b0e0626823a72afc62782e21ab9330cca18317f7571085dc40348`。
+- v11 Oracle 10/10 与 fresh wire 完成；db/extract completed，filter a1/a2 同为 Docker metric exec 128，第二次后
+  durable hold，a3 未 claim。no-API 官方 Oracle 的 PIDs 采样多次达到 `256/256`，确认不是供应商/温度而是本地
+  资源合同缺陷；v11 收口 blocked，本轮 wire+paid `2.066952 USD`，累计 `345.963147 USD`、reservation 0。
+- 后继 versioned catalog 只把 filter 的 PIDs 从 256 提到 512，其他九题保持 256；历史 catalog 由 lock SHA
+  继续只读加载，Oracle proof 与 paid request 均从同一 `FrozenTask.pids_limit` 投影。

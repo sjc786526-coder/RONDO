@@ -25,7 +25,7 @@ from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalo
 LEGACY_CAMPAIGN_CAP_USD = Decimal("600.000000")
 LEGACY_CAMPAIGN_MAX_RUNS = 161
 CAMPAIGN_CAP_USD = Decimal("700.000000")
-CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("343.896195")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("345.963147")
 CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
@@ -1123,8 +1123,17 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     }
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise BaselineError("campaign lock schema is invalid")
-    catalog = load_frozen_canary_catalog(paths)
     schema_version = value["schema_version"]
+    catalog_sha256 = value.get("canary_catalog_sha256")
+    if not isinstance(catalog_sha256, str):
+        raise BaselineError("campaign catalog identity is invalid")
+    try:
+        catalog = load_frozen_canary_catalog(
+            paths,
+            expected_sha256=catalog_sha256,
+        )
+    except ValueError as exc:
+        raise BaselineError("campaign catalog identity is invalid") from exc
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
@@ -1137,7 +1146,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         or isinstance(value["run_id_sequence_base"], bool)
         or not isinstance(value["run_id_sequence_base"], int)
         or value["taskset_sha256"] != catalog.taskset_sha256
-        or value["canary_catalog_sha256"] != catalog.catalog_sha256
+        or catalog_sha256 != catalog.catalog_sha256
         or value["terminal_bench_commit"] != catalog.terminal_bench_commit
         or not isinstance(value["selected_profile"], dict)
         or not isinstance(value["bundles"], dict)

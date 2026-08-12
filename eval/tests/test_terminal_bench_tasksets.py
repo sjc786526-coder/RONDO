@@ -62,6 +62,34 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         self.assertTrue(
             all(item.image_ref.endswith(item.image_digest) for item in catalog.tasks)
         )
+        self.assertTrue(all(item.pids_limit == 256 for item in catalog.tasks))
+
+    def test_successor_catalog_changes_only_the_bounded_filter_pid_policy(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        legacy = tasksets.load_frozen_canary_catalog(paths)
+        successor = tasksets.load_successor_canary_catalog(paths)
+
+        self.assertNotEqual(successor.catalog_sha256, legacy.catalog_sha256)
+        self.assertEqual(
+            tuple(item.task_id for item in successor.tasks),
+            tuple(item.task_id for item in legacy.tasks),
+        )
+        self.assertEqual(
+            successor.task("terminal-bench/filter-js-from-html").pids_limit,
+            512,
+        )
+        self.assertTrue(
+            all(
+                item.pids_limit == 256
+                for item in successor.tasks
+                if item.task_id != "terminal-bench/filter-js-from-html"
+            )
+        )
+        selected = tasksets.load_frozen_canary_catalog(
+            paths,
+            expected_sha256=successor.catalog_sha256,
+        )
+        self.assertEqual(selected, successor)
 
     def test_partition_tampering_is_rejected(self) -> None:
         live = tasksets.load_frozen_tasksets(RepoPaths.discover(Path.cwd()))

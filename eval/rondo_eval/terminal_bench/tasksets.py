@@ -22,6 +22,8 @@ HOLDOUT_SHA256 = "c15845e7e277eb02e4fd637bdf26c59883be368797907902c368ba15e07817
 CANARY_COUNT = 10
 VALIDATION_COUNT = 61
 HOLDOUT_COUNT = 18
+_LEGACY_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog.json")
+_SUCCESSOR_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v2.json")
 _TASK_ID = re.compile(r"terminal-bench/[a-z0-9][a-z0-9.-]{0,95}")
 _MAX_DATASET_BYTES = 1_000_000
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
@@ -75,6 +77,7 @@ class FrozenTask:
     verifier_timeout_seconds: int
     build_timeout_seconds: int
     requires_existing_git_repo: bool = False
+    pids_limit: int = 256
 
     @property
     def slug(self) -> str:
@@ -101,6 +104,7 @@ class FrozenTask:
             or self.verifier_timeout_seconds != self.agent_timeout_seconds
             or self.build_timeout_seconds != 600
             or not isinstance(self.requires_existing_git_repo, bool)
+            or self.pids_limit not in {256, 512}
         ):
             raise TasksetError("frozen canary task is invalid")
 
@@ -168,11 +172,51 @@ def load_frozen_tasksets(paths: RepoPaths) -> FrozenTasksets:
     )
 
 
-def load_frozen_canary_catalog(paths: RepoPaths) -> FrozenCanaryCatalog:
+def load_frozen_canary_catalog(
+    paths: RepoPaths,
+    *,
+    expected_sha256: str | None = None,
+) -> FrozenCanaryCatalog:
     """Load the B7 execution catalog after validating its ID-only B4 parent."""
 
     tasksets = load_frozen_tasksets(paths)
-    path = paths.worktree_root / "eval/tasksets/p2-b7-canary-catalog.json"
+    path = _catalog_path(paths, expected_sha256=expected_sha256)
+    return _load_frozen_canary_catalog_path(paths, tasksets=tasksets, path=path)
+
+
+def load_successor_canary_catalog(paths: RepoPaths) -> FrozenCanaryCatalog:
+    """Load the current successor policy without changing historical catalogs."""
+
+    tasksets = load_frozen_tasksets(paths)
+    return _load_frozen_canary_catalog_path(
+        paths,
+        tasksets=tasksets,
+        path=paths.worktree_root / _SUCCESSOR_CANARY_CATALOG,
+    )
+
+
+def _catalog_path(paths: RepoPaths, *, expected_sha256: str | None) -> Path:
+    if expected_sha256 is None:
+        return paths.worktree_root / _LEGACY_CANARY_CATALOG
+    if re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+        raise TasksetError("canary catalog SHA-256 is invalid")
+    matches: list[Path] = []
+    for relative in (_LEGACY_CANARY_CATALOG, _SUCCESSOR_CANARY_CATALOG):
+        path = paths.worktree_root / relative
+        raw = _read_regular(path, limit=1_000_000)
+        if hashlib.sha256(raw).hexdigest() == expected_sha256:
+            matches.append(path)
+    if len(matches) != 1:
+        raise TasksetError("canary catalog SHA-256 is not uniquely registered")
+    return matches[0]
+
+
+def _load_frozen_canary_catalog_path(
+    paths: RepoPaths,
+    *,
+    tasksets: FrozenTasksets,
+    path: Path,
+) -> FrozenCanaryCatalog:
     raw = _read_regular(path, limit=1_000_000)
     try:
         value = json.loads(raw)
@@ -186,7 +230,7 @@ def load_frozen_canary_catalog(paths: RepoPaths) -> FrozenCanaryCatalog:
     }:
         raise TasksetError("canary catalog schema is invalid")
     if (
-        value["schema_version"] != 1
+        value["schema_version"] not in {1, 2}
         or value["terminal_bench_commit"] != TERMINAL_BENCH_COMMIT
         or value["taskset_sha256"] != tasksets.taskset_sha256
         or not isinstance(value["tasks"], list)
@@ -205,6 +249,8 @@ def load_frozen_canary_catalog(paths: RepoPaths) -> FrozenCanaryCatalog:
         "build_timeout_seconds",
         "requires_existing_git_repo",
     }
+    if value["schema_version"] == 2:
+        expected_keys.add("pids_limit")
     tasks: list[FrozenTask] = []
     for item in value["tasks"]:
         if not isinstance(item, dict) or set(item) != expected_keys:
@@ -215,6 +261,13 @@ def load_frozen_canary_catalog(paths: RepoPaths) -> FrozenCanaryCatalog:
             raise TasksetError("canary catalog task types are invalid") from exc
         task.validate()
         tasks.append(task)
+    expected_pids = {
+        "terminal-bench/filter-js-from-html": 512,
+    }
+    if value["schema_version"] == 2 and any(
+        task.pids_limit != expected_pids.get(task.task_id, 256) for task in tasks
+    ):
+        raise TasksetError("canary catalog PID policy is invalid")
     if tuple(item.task_id for item in tasks) != tasksets.canary:
         raise TasksetError("canary catalog order differs from the B4 partition")
     return FrozenCanaryCatalog(

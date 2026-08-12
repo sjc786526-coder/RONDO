@@ -285,6 +285,7 @@ def _valid_docker_compatibility(
     }
     task = contract.task
     memory_mb = task.get("memory_mb")
+    pids_limit = task.get("pids_limit")
     expected_memory = (
         memory_mb * 1024**2
         if isinstance(memory_mb, int) and not isinstance(memory_mb, bool)
@@ -307,7 +308,9 @@ def _valid_docker_compatibility(
         and expected_memory is not None
         and container.get("memory") == expected_memory
         and container.get("memory_swap") == expected_memory + 1024**3
-        and container.get("pids") == 256
+        and isinstance(pids_limit, int)
+        and not isinstance(pids_limit, bool)
+        and container.get("pids") == pids_limit
         and isinstance(seccomp, dict)
         and set(seccomp) == {"kind", "sha256"}
         and seccomp.get("kind") == "custom"
