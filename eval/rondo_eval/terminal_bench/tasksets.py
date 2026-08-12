@@ -24,10 +24,12 @@ VALIDATION_COUNT = 61
 HOLDOUT_COUNT = 18
 _LEGACY_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog.json")
 _PID_512_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v2.json")
-_SUCCESSOR_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v3.json")
+_PID_1024_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v3.json")
+_SUCCESSOR_CANARY_CATALOG = Path("eval/tasksets/p2-b7-canary-catalog-v4.json")
 _CANARY_CATALOGS = (
     _LEGACY_CANARY_CATALOG,
     _PID_512_CANARY_CATALOG,
+    _PID_1024_CANARY_CATALOG,
     _SUCCESSOR_CANARY_CATALOG,
 )
 _TASK_ID = re.compile(r"terminal-bench/[a-z0-9][a-z0-9.-]{0,95}")
@@ -110,7 +112,7 @@ class FrozenTask:
             or self.verifier_timeout_seconds != self.agent_timeout_seconds
             or self.build_timeout_seconds != 600
             or not isinstance(self.requires_existing_git_repo, bool)
-            or self.pids_limit not in {256, 512, 1024}
+            or self.pids_limit not in {256, 512, 1024, 4096}
         ):
             raise TasksetError("frozen canary task is invalid")
 
@@ -269,7 +271,8 @@ def _load_frozen_canary_catalog_path(
         tasks.append(task)
     filter_pids = {
         _PID_512_CANARY_CATALOG.name: 512,
-        _SUCCESSOR_CANARY_CATALOG.name: 1024,
+        _PID_1024_CANARY_CATALOG.name: 1024,
+        _SUCCESSOR_CANARY_CATALOG.name: 4096,
     }.get(path.name)
     expected_pids = (
         {"terminal-bench/filter-js-from-html": filter_pids}

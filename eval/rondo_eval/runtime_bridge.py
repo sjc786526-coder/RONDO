@@ -1336,12 +1336,19 @@ class DockerCliCounter:
                 )
             )
         except RuntimeBridgeError:
-            # Harbor may remove its task container after ``ls`` but before the
-            # bounded inspect.  Re-list the same exact label once; unchanged
-            # state remains a hard failure, while a completed disappearance is
-            # a valid zero-container observation.
+            # Harbor may stop/remove its task container after ``ls`` but before
+            # the bounded inspect.  Accept only the same exact stopped object
+            # disappearing inside the shared five-second teardown grace.  A
+            # live, replaced, or lingering object remains a hard failure.
             current_ids = self._container_ids(identity, deadline=deadline)
             if current_ids == object_ids:
+                if self._wait_for_stopped_container_disappearance(
+                    identity,
+                    object_ids,
+                    deadline=deadline,
+                    initial_ids=current_ids,
+                ):
+                    return (), 0, ()
                 raise
             if not current_ids:
                 return (), 0, ()
@@ -1460,27 +1467,48 @@ class DockerCliCounter:
             # exact-label proof, but allow a small bounded grace window for the
             # object to be removed.  A container that remains visible is still
             # a hard failure; no missing metric is accepted for a live object.
-            for poll in range(_CONTAINER_DISAPPEARANCE_MAX_POLLS):
-                current_ids = self._container_ids(identity, deadline=deadline)
-                if not current_ids:
-                    return (), (), ()
-                if current_ids != container_ids:
-                    raise
-                if not self._containers_are_stopped(
-                    identity,
-                    current_ids,
-                    deadline=deadline,
-                ):
-                    raise
-                if poll + 1 < _CONTAINER_DISAPPEARANCE_MAX_POLLS:
-                    self._sleeper(
-                        min(
-                            _CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS,
-                            self._remaining(deadline),
-                        )
-                    )
+            if self._wait_for_stopped_container_disappearance(
+                identity,
+                container_ids,
+                deadline=deadline,
+            ):
+                return (), (), ()
             raise
         return container_ids, container_facts, metrics
+
+    def _wait_for_stopped_container_disappearance(
+        self,
+        identity: "DockerTaskIdentity",
+        object_ids: tuple[str, ...],
+        *,
+        deadline: float,
+        initial_ids: tuple[str, ...] | None = None,
+    ) -> bool:
+        """Return true only for one exact stopped object removed in five seconds."""
+
+        current_ids = initial_ids
+        for poll in range(_CONTAINER_DISAPPEARANCE_MAX_POLLS):
+            if current_ids is None:
+                current_ids = self._container_ids(identity, deadline=deadline)
+            if not current_ids:
+                return True
+            if current_ids != object_ids:
+                raise RuntimeBridgeError("Docker container lifecycle identity changed")
+            if not self._containers_are_stopped(
+                identity,
+                current_ids,
+                deadline=deadline,
+            ):
+                return False
+            if poll + 1 < _CONTAINER_DISAPPEARANCE_MAX_POLLS:
+                self._sleeper(
+                    min(
+                        _CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS,
+                        self._remaining(deadline),
+                    )
+                )
+                current_ids = None
+        return False
 
     def _compose_networks(self, project: str, *, deadline: float) -> tuple[object, ...]:
         from .docker_supervisor import ComposeResourceFact

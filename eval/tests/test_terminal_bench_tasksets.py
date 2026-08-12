@@ -74,6 +74,12 @@ class TerminalBenchTasksetTests(unittest.TestCase):
                 "c4e303b520d0fd6e4e16f83405e5b7e56e8401ed0ffedd61ac9050351fc88c49"
             ),
         )
+        pid_1024 = tasksets.load_frozen_canary_catalog(
+            paths,
+            expected_sha256=(
+                "d993f4374a25329118e7bb8e9fb490c5e195d43f2058d0067a9444fd3c53264e"
+            ),
+        )
 
         self.assertNotEqual(successor.catalog_sha256, legacy.catalog_sha256)
         self.assertEqual(
@@ -82,13 +88,18 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         )
         self.assertEqual(
             successor.task("terminal-bench/filter-js-from-html").pids_limit,
-            1024,
+            4096,
         )
         self.assertEqual(
             pid_512.task("terminal-bench/filter-js-from-html").pids_limit,
             512,
         )
+        self.assertEqual(
+            pid_1024.task("terminal-bench/filter-js-from-html").pids_limit,
+            1024,
+        )
         self.assertNotEqual(pid_512.catalog_sha256, successor.catalog_sha256)
+        self.assertNotEqual(pid_1024.catalog_sha256, successor.catalog_sha256)
         self.assertTrue(
             all(
                 item.pids_limit == 256

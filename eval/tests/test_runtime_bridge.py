@@ -789,6 +789,41 @@ class DockerCounterTests(unittest.TestCase):
                     operation=DockerOperation.RUN,
                 )
 
+    def test_container_inspect_failure_allows_bounded_stopped_disappearance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    _container_inspect(running=False),
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.RUN,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(reading.task_containers, ())
+        self.assertEqual(reading.task_bytes, 0)
+        self.assertEqual(
+            sum(command[:3] == ("docker", "container", "ls") for command in executor.commands),
+            3,
+        )
+
     def test_multi_probe_sample_shares_one_absolute_deadline(self) -> None:
         now = [0.0]
 
