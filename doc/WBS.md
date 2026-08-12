@@ -188,7 +188,7 @@ Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再�
 L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
 Plan 015 已冻结 10/61/18 taskset、10-task exact image catalog与机械计分。v10 按原 161-slot/600 USD 合同
 在全局 provider-integrity 熔断后只读退役，累计 debit 为 `343.896195 USD`。后继合同使用 321 个机械派生 slot、
-700 USD 累计硬上限，并在同题同类第二次 infra 后暂停做结构化 RCA；只有外部瞬态才可继续，第三次同类停止该题。
+1000 USD 累计硬上限，并在同题同类第二次 infra 后暂停做结构化 RCA；只有外部瞬态才可继续，第三次同类停止该题。
 campaign-independent Oracle、单 slot heavy lock、轻量 lease、安全恢复和 identity 生成入口保持复用。执行细节见 Plan 015。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。

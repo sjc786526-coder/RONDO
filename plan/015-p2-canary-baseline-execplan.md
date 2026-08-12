@@ -1,7 +1,7 @@
 # Plan 015：P2 任务分层、计分预算与首次 Canary 基线
 
 > 本计划是方向 0 的 P2 第一阶段执行合同。Plan 014 v19 及其全部历史 identity/result/ledger/artifact
-> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与累计 700 USD 独立硬上限。除“当前状态”和
+> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与累计 1000 USD 独立硬上限。除“当前状态”和
 > “关键决策记录”外，其他章节默认不在执行中改写；若必须改变 provider、Sol/medium main、Sol/low Guardian、
 > frozen Codex/RONDO bundle、TB 2.1 commit、10-task 清单、基础轮次或预算，暂停并请求用户确认。
 
@@ -10,7 +10,7 @@
 ### 最终目标
 
 先闭合 Plan 014 成功 CLI 的 durable Guardian evidence 投影，再完成 B4 taskset 冻结、B5 机械计分/归因、
-B6 可复算成本与 700 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
+B6 可复算成本与 1000 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
 RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 基线终态。
 
 ### 完成/验收标准
@@ -24,7 +24,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - B5 主指标为 Task Resolution Success Rate；机械区分 `agent`、`guardian_correct_deny`、
   `guardian_false_deny`、`infra`。矛盾/未知 Guardian deny 没有 correct-deny 证明时保守归为 false deny；infra
   不进分母。holdout 只能发布整批聚合，不得持久化单任务明细。
-- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 700 USD 停止语义；campaign
+- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 1000 USD 停止语义；campaign
   使用新 lock、ID 和持久 ledger。任何新请求的最大合法 reservation 无法装入剩余全局预算时不启动。
 - B7 基础 40 个运行全部形成唯一终态；同一 RONDO bundle A/A 两轮得到 `sigma`，A/B 差异 `delta <= sigma`。
   `sigma > 2` 机械标为 canary unstable。每个 Codex-pass/RONDO-fail task 两侧各加跑两次；Codex 三次全过且
@@ -38,7 +38,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 同一结构化机械故障类别累计命中 3 个不同 task 时立即熔断，未启动 slot 不再 claim；预算停止导致的 publication
   拒绝继承预算代理的结构化上游根因。`sigma`/`delta` 只在四轮共同有效的同一 task 集合上计算并公开分母，少于
   8 项只发布部分技术事实并把 M2 标为 blocked。
-- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 700 USD 账本；所有 reservation 最终
+- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 1000 USD 账本；所有 reservation 最终
   settled，`actual_usd=null`。
 - Oracle 以单题 proof 增量落盘并由十题 manifest 聚合；proof 不绑定 paid campaign 或整个 Git commit，只绑定
   task/source/image、taskset/catalog entry、共享执行组件、verifier、seccomp、Harbor/TB 和必要宿主兼容事实。
@@ -80,7 +80,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ## 3. 硬约束
 
-1. 新 P2 真实 API 本地估算总费用最多 700 USD，独立于 Plan 014。700 USD 是硬停线，不是消费目标，也不是
+1. 新 P2 真实 API 本地估算总费用最多 1000 USD，独立于 Plan 014。1000 USD 是硬停线，不是消费目标，也不是
    合法 usage 的数学全包保证；不得减任务、减基础轮次或弱化门禁迁就预算。
 2. B4/B5/B6 及最后窄修复不得调用 API 或 Docker；B7 只处理 10 个 canary 所需 exact digest 镜像，pull/run
    并发为 1。不开 Cargo、不重建 bundle、不升级上游。
@@ -100,7 +100,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
 11. v1—v14 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
-    才可复用，证据不足不回填。700 USD 授权不因 identity、进程或 proof 变化而重置。
+    才可复用，证据不足不回填。1000 USD 授权不因 identity、进程或 proof 变化而重置。
 12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
     锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
 

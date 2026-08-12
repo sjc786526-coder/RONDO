@@ -24,8 +24,9 @@ from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalo
 
 LEGACY_CAMPAIGN_CAP_USD = Decimal("600.000000")
 LEGACY_CAMPAIGN_MAX_RUNS = 161
-CAMPAIGN_CAP_USD = Decimal("700.000000")
-CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("408.561823")
+HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD = Decimal("700.000000")
+CAMPAIGN_CAP_USD = Decimal("1000.000000")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("667.663130")
 CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
@@ -1269,13 +1270,16 @@ def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
         prior = Decimal(value["prior_estimated_usd"])
     except (ArithmeticError, TypeError):
         return False
-    expected_cap, expected_slots = (
-        (LEGACY_CAMPAIGN_CAP_USD, LEGACY_CAMPAIGN_MAX_RUNS)
+    expected_slots = (
+        LEGACY_CAMPAIGN_MAX_RUNS if schema_version == 1 else CAMPAIGN_MAX_RUNS
+    )
+    valid_caps = (
+        {LEGACY_CAMPAIGN_CAP_USD}
         if schema_version == 1
-        else (CAMPAIGN_CAP_USD, CAMPAIGN_MAX_RUNS)
+        else {HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD, CAMPAIGN_CAP_USD}
     )
     return (
-        cap == expected_cap
+        cap in valid_caps
         and Decimal(0) <= prior < cap
         and value["run_cap_usd"] == _money(RUN_CAP_USD)
         and value["max_run_slots"] == expected_slots
