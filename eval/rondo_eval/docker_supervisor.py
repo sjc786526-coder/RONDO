@@ -25,7 +25,8 @@ from .exit_codes import INFRA_ERROR
 
 
 SAMPLE_INTERVAL_SECONDS = 5.0
-COUNTER_SAMPLE_TIMEOUT_SECONDS = 15.0
+COUNTER_SAMPLE_TIMEOUT_SECONDS = 30.0
+CLEANUP_COUNTER_SAMPLE_TIMEOUT_SECONDS = 15.0
 FAILURE_CLEANUP_TIMEOUT_SECONDS = 30.0
 HOST_SUCCESS_TEARDOWN_GRACE_SECONDS = 30.0
 DOCKER_GROWTH_WARN_BYTES = 40_000_000_000
@@ -1628,7 +1629,10 @@ class DockerSupervisor:
         try:
             if deadline is not None and self._monotonic() >= deadline:
                 raise DockerSupervisionError("Docker cleanup deadline exceeded")
-            sample_deadline = self._counter_sample_deadline(deadline)
+            sample_deadline = self._counter_sample_deadline(
+                deadline,
+                timeout_seconds=CLEANUP_COUNTER_SAMPLE_TIMEOUT_SECONDS,
+            )
             reading = self._counter.sample(
                 identity=identity,
                 operation=operation,
@@ -1646,11 +1650,16 @@ class DockerSupervisor:
                 "Docker cleanup counters are unavailable"
             ) from exc
 
-    def _counter_sample_deadline(self, outer_deadline: float | None) -> float:
+    def _counter_sample_deadline(
+        self,
+        outer_deadline: float | None,
+        *,
+        timeout_seconds: float = COUNTER_SAMPLE_TIMEOUT_SECONDS,
+    ) -> float:
         """Give one complete multi-probe sample a fresh, short time budget."""
 
         now = self._monotonic()
-        sample_deadline = now + COUNTER_SAMPLE_TIMEOUT_SECONDS
+        sample_deadline = now + timeout_seconds
         if outer_deadline is not None:
             sample_deadline = min(sample_deadline, outer_deadline)
         if sample_deadline <= now:

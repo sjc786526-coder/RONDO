@@ -1024,7 +1024,10 @@ class DockerSupervisorTests(unittest.TestCase):
             [sample.phase for sample in result.samples],
             ["baseline", "final"],
         )
-        self.assertEqual(counter.budgets, [15.0, 15.0])
+        self.assertEqual(
+            counter.budgets,
+            [COUNTER_SAMPLE_TIMEOUT_SECONDS, COUNTER_SAMPLE_TIMEOUT_SECONDS],
+        )
 
     def test_each_counter_round_gets_short_deadline_bounded_by_global_deadline(self) -> None:
         for global_timeout, expected_budget in (
