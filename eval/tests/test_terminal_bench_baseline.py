@@ -240,8 +240,8 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             tuple(item.version for item in registry),
             tuple(range(1, len(registry) + 1)),
         )
-        self.assertGreaterEqual(len(registry), 14)
-        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v14")
+        self.assertGreaterEqual(len(registry), 15)
+        self.assertEqual(registry[-1].campaign_id, "p2-b7-canary-baseline-v15")
         active = load_campaign_identity(paths)
         self.assertEqual(active.campaign_id, registry[-1].campaign_id)
         self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
@@ -249,10 +249,10 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(active.max_attempts, 4)
         self.assertEqual(len(active.slots), 321)
         self.assertEqual(active.budget["campaign_cap_usd"], "700.000000")
-        self.assertEqual(active.budget["prior_estimated_usd"], "386.121920")
+        self.assertEqual(active.budget["prior_estimated_usd"], "406.691123")
         active_pids = {item.task_id: item.pids_limit for item in active.catalog.tasks}
-        self.assertEqual(active_pids["terminal-bench/filter-js-from-html"], 512)
-        self.assertEqual(set(active_pids.values()), {256, 512})
+        self.assertEqual(active_pids["terminal-bench/filter-js-from-html"], 1024)
+        self.assertEqual(set(active_pids.values()), {256, 1024})
         pointer = json.loads(
             (paths.worktree_root / CAMPAIGN_ACTIVE_POINTER_PATH).read_text()
         )
@@ -280,6 +280,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         v13 = load_historical_campaign_identity(paths, 13)
         self.assertEqual(v13.campaign_id, "p2-b7-canary-baseline-v13")
         self.assertEqual(v13.budget["prior_estimated_usd"], "385.923585")
+        v14 = load_historical_campaign_identity(paths, 14)
+        self.assertEqual(v14.campaign_id, "p2-b7-canary-baseline-v14")
+        self.assertEqual(v14.budget["prior_estimated_usd"], "386.121920")
+        self.assertEqual(
+            v14.catalog.task("terminal-bench/filter-js-from-html").pids_limit,
+            512,
+        )
         self.assertEqual(
             load_historical_campaign_identity(paths, 9).campaign_id,
             "p2-b7-canary-baseline-v9",
@@ -369,7 +376,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         validate_successor_run_range(
             registry,
             run_id_date="20260812",
-            run_id_sequence_base=350000000,
+            run_id_sequence_base=360000000,
         )
 
     def test_campaign_lock_catalog_drift_is_rejected(self) -> None:

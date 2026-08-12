@@ -51,3 +51,11 @@
   93/93 与 `eval-lock` 85 packages 通过。v13 以本地 harness defect blocked，生成器机械得出后继 prior
   `386.121920 USD`，随后冻结 v14：run base `20260812-340000000`、lock SHA
   `dc4eb0f28a93784e6021782079d6c6993735e1b6cb152b583bb34ad4c417e8a8`；v1—v13 均保持只读。
+- v14 命中十题 Oracle proof，fresh wire `$0.160824`；db/extract completed 后，filter a1 为 provider-integrity，
+  a2/a3 均为 Docker metric exec failure，并按第二次同类规则进入 diagnosis hold。独立 no-API 官方 Oracle 在同一
+  镜像和 512 PIDs 合同下达到精确上限仍 reward 1，证明 supervisor `docker exec` 没有进程余量；未运行 a4。
+- v14 以 local implementation defect blocked：本 identity wire+paid `$20.569203`，累计 `406.691123 USD`、
+  reservation 0。catalog v3 仅将 filter 调至 1024 PIDs；focused 82/82 与 lock 85 packages 通过后，生成器冻结
+  v15：run base `20260812-350000000`、lock SHA
+  `6749b815023bcca52bc2a57df3faa544eafb5ad38bef5284dc7289644f48f44a`、prior `406.691123 USD`；v1—v14
+  的 lock/state/ledger/result/artifact 均未改写。

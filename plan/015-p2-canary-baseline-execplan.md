@@ -99,7 +99,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
    40/60GB 增长与 80GiB C: floor。只清理由本 campaign exact label 创建的对象。
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
-11. v1—v13 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
+11. v1—v14 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
     才可复用，证据不足不回填。700 USD 授权不因 identity、进程或 proof 变化而重置。
 12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
     锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
@@ -230,22 +230,32 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   run ID 从 `20260812-340000000` 派生，lock SHA
   `dc4eb0f28a93784e6021782079d6c6993735e1b6cb152b583bb34ad4c417e8a8`，cap `700 USD`、prior
   `386.121920 USD`；v1—v13 保持只读。
+- v14 命中既有 Oracle proof，fresh wire 结算 `0.160824 USD`；首轮 db/extract completed，filter a1 为
+  provider-integrity，a2/a3 均为 Docker metric exec failure，第二次同类正确进入 diagnosis hold。独立 no-API
+  官方 Oracle 在相同 filter 镜像下达到精确 `512/512` PIDs 后仍 reward 1，确认冻结 PIDs 没有为 supervisor
+  `docker exec` 保留进程余量；v14 以 local implementation defect 收口，累计 debit `406.691123 USD`、
+  reservation 0，全部历史事实只读。
+- catalog v3 仅把 filter PIDs 从 512 提至 1024，其他九题、镜像、taskset、profile、bundle、轮次与 cap 不变。
+  生成器冻结唯一 v15：campaign/batch `p2-b7-canary-baseline-v15`/`p2-b7-canary-sol-sol-v15`，321 个 run ID
+  从 `20260812-350000000` 派生，lock SHA
+  `6749b815023bcca52bc2a57df3faa544eafb5ad38bef5284dc7289644f48f44a`，prior `406.691123 USD`；v1—v14
+  保持只读。
 
 ### 后续计划
 
-1. v14 先机械复用仍有效的十题 Oracle proof，执行 fresh wire canary，再逐 slot 推进；第二次同类 task infra
+1. v15 先机械复用仍有效的九题 Oracle proof，只重跑 contract 变化的 filter，执行 fresh wire canary，再逐 slot 推进；第二次同类 task infra
    必须先离线 RCA，第三次同类终止该题。最终聚合 `sigma`/`delta`、共同分母、费用与资源事实。
 
 ### 阻塞项
 
-- 无离线阻塞；当前 Oracle proof 合同依赖未变，v14 应命中既有十题 proof。若 validator 判定任一 proof 失效，
-  只重跑受影响题；任何官方 Oracle reward 0 均停止并报告，不自动换题。diagnosis hold 是可恢复暂停而非
+- 无离线阻塞；filter 的 PIDs 合同变化使其旧 proof 精确失效，其他九题应命中。若 validator 判定更多 proof 失效，
+  也只重跑受影响题；任何官方 Oracle reward 0 均停止并报告，不自动换题。diagnosis hold 是可恢复暂停而非
   campaign 通过或费用重置。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v13 是保留全部费用事实的 blocked 终态。v13 仅完成 wire、未创建 paid ledger，
-  累计 debit `386.121920 USD`、reservation 0；v14 已冻结，尚未执行 API。
+- v1 是 API 前失败终态；v2—v14 是保留全部费用事实的 blocked 终态。v14 累计 debit `406.691123 USD`、
+  reservation 0；v15 已冻结，尚未执行 API。
 
 ## 6. 关键决策记录
 
@@ -274,3 +284,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 021 | 后继 schema-v2 机械派生 321 slot，并采用 infra-only a1—a4、第二次同类诊断暂停、第三次同类 task-local 熔断；用户追加 100 USD 后总 cap 700，prior 精确继承 v10 | 允许少量任务形态复现，同时禁止盲目连续付费；历史 schema-v1 仍按原字节只读加载 | B6/B7 | 已采纳 |
 | 022 | v12 的 a3 发布缺口按 operator interruption 退役；后继提前 crash reconciliation，并仅将已停止的同 identity 容器消失宽限扩至 5 秒 | 不回填缺失 public record，不将无证据的 512 PID 问题冒充根因，live/replacement 仍 fail-closed | B6/B7 | 已采纳 |
 | 023 | v13 wire 后因本地 worker 控制流缺陷在付费前退役；恢复 post-Oracle 单步路由并以精确 wire debit 重冻 v14 | 不用重启同一 identity 绕过实现缺陷；Oracle proof 与 wire/paid identity 解耦，历史事实保持只读 | B6/B7 | 已采纳 |
+| 024 | v14 第二次同类 filter Docker failure 后先做 no-API RCA；精确 512 PIDs 证明本地资源合同缺少 supervisor 余量，故阻断 v14、仅将 filter 冻结为 1024 PIDs 并重冻 v15 | 不用 a4 绕过已证明的实现缺陷；只使受影响题 Oracle proof 失效，历史 identity 与费用不回填 | B6/B7 | 已采纳 |

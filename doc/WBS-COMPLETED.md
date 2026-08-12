@@ -386,3 +386,7 @@ standard/Lite 形态均补回归。
   fresh wire 结算 `0.198335 USD` 后暴露 post-wire paid 分支不可达的本地控制流缺陷，320 个 paid slot 均未
   claim、paid ledger 未创建。v13 原子 blocked，累计 debit `386.121920 USD`；路由与退役原子性回归闭合后，
   v14 以全新 run base `20260812-340000000`、lock/IDs 和精确 prior 冻结。
+- v14 的 filter a2/a3 在同类 Docker metric failure 后先进入 diagnosis。独立 no-API 官方 Oracle 达到冻结的
+  `512/512` PIDs 后仍 reward 1，机械证明本地资源合同未给 supervisor 进程留余量；v14 未运行 a4并以 local
+  implementation defect blocked，累计 debit `406.691123 USD`、reservation 0。后继 catalog 仅将 filter 提至
+  1024 PIDs，v15 以 run base `20260812-350000000`、全新 lock/IDs 和精确 prior 冻结，v1—v14 保持只读。
