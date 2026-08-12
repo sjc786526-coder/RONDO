@@ -26,6 +26,8 @@
   - `git diff --check`：通过；模板 stat/SHA/cmp 与 TOML/lock 一致性由 focused test 和轻量命令复核。
 - 独立终审在最新 diff 上复跑同一组 80 项测试并通过；其指出的 binary 配置身份绑定、CMake `$ORIGIN` 转义和实际解释器
   命令证据均已闭合，无剩余阻塞 finding。
+- Git 交付：实现提交 `c4a7fc1af55f97d67a4b59e80e718291211cdcad`，no-ff 合并提交
+  `53abd670c361dd67fd85984a2ebb50a4d7f815d2` 已推送并通过 `git ls-remote` 核对；交付收口仅更新本 Plan/日志状态。
 - Linux CUDA 后续以独立 source/build/runtime/lock 落地，先冻结 toolkit-only 工具链、Ada arch 89、完整 CMake argv、ELF/runtime/
   host dependency 闭包；无模型中间能力仅为 `linux_cuda_built_model_unvalidated`。只有 exact GGUF、Linux CUDA runtime 和本轮
   模板/launcher 合同汇合并通过 model-backed 4k smoke 后才能进入 `gpu_model_serving_validated`，8k baseline 仍需另验。
