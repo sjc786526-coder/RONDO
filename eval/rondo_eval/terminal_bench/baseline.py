@@ -701,7 +701,7 @@ def campaign_lock_registry(paths: RepoPaths) -> tuple[CampaignLockRegistration, 
 
     root = paths.worktree_root / "eval/locks"
     values: list[CampaignLockRegistration] = []
-    for path in sorted(root.glob("p2-b7-canary-baseline-v*.json")):
+    for path in root.glob("p2-b7-canary-baseline-v*.json"):
         match = _CAMPAIGN_LOCK_NAME.fullmatch(path.name)
         if match is None:
             continue
@@ -741,6 +741,7 @@ def campaign_lock_registry(paths: RepoPaths) -> tuple[CampaignLockRegistration, 
                 lock_sha256=hashlib.sha256(raw).hexdigest(),
             )
         )
+    values.sort(key=lambda item: item.version)
     if not values:
         raise BaselineError("campaign lock registry is empty")
     if [item.version for item in values] != list(range(1, len(values) + 1)):

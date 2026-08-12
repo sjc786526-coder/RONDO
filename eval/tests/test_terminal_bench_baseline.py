@@ -218,6 +218,34 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         )
         self.assertIsNone(pointer["active_lock"])
 
+    def test_campaign_registry_sorts_multi_digit_versions_numerically(self) -> None:
+        live = RepoPaths.discover(Path.cwd())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            locks = root / "eval/locks"
+            locks.mkdir(parents=True)
+            for version in range(1, 10):
+                source = (
+                    live.worktree_root
+                    / f"eval/locks/p2-b7-canary-baseline-v{version}.json"
+                )
+                (locks / source.name).write_bytes(source.read_bytes())
+            value = json.loads(
+                (locks / "p2-b7-canary-baseline-v9.json").read_text()
+            )
+            value.update(
+                campaign_id="p2-b7-canary-baseline-v10",
+                batch_id="p2-b7-canary-sol-sol-v10",
+                run_id_sequence_base=300000000,
+            )
+            (locks / "p2-b7-canary-baseline-v10.json").write_text(
+                json.dumps(value), encoding="utf-8"
+            )
+            registry = campaign_lock_registry(RepoPaths(root, root))
+            self.assertEqual(
+                tuple(item.version for item in registry), tuple(range(1, 11))
+            )
+
     def test_successor_prior_is_derived_from_terminal_v9_facts(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
         self.assertEqual(
