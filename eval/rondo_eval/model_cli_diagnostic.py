@@ -945,9 +945,9 @@ def run_campaign(
         )
     pair_identity = None
     if plan014_canary:
-        from .terminal_bench.pair import load_pair_identity
+        from .terminal_bench.pair import load_active_pair_identity
 
-        pair_identity = load_pair_identity()
+        pair_identity = load_active_pair_identity()
         pair_identity.validate_selected_profile(provider)
     _secret_name, api_key = load_provider_secret(config)
     targets = {

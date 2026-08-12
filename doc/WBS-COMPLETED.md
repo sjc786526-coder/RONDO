@@ -330,3 +330,19 @@ standard/Lite 形态均补回归。
 - v19 正式 pair 本地估算 `$0.870787`；Plan 014 全阶段累计 `$6.988825 < $280`，无悬挂 reservation，供应商账单
   未查询且 `actual_usd=null`。focused 155/155、`just eval-lock` 85 packages、完整 eval 345/345 通过；Docker/watchdog
   最终 `stop=none`、`cleanup=none`，0 containers/volumes。
+
+### 2026-08-11 Plan 014 运行后预算与结果合同收口
+
+- 保留 v19 双侧 completed/reward 1、M1 passed、35 次一次成功请求与 `$6.988825` 阶段费用事实，不修改任何历史
+  lock/result/ledger/artifact；v8—v19 进入统一只读 registry，正式 paid 与 Plan 014 canary 当前无 active identity。
+- 正式 proxy 默认按模型价卡的最大合法 usage 预留，Sol 当前上界 `$18.885000`；显式短测 overage 会保存完整估价、
+  停止 run，ledger 只对精确 overage delta 放宽持久化校验。claim/reserve 原子化，handler 获得 lifecycle lock 后重算
+  deadline，过期请求不会发往上游。
+- completed/publication/M1 统一要求 budget run 未停止、无 reservation、全部请求 settled/usage valid/usage-priced，且
+  budget request ID 与 API metadata 精确一致。后续 S2 以 canonical Guardian request 与 E_final digest 一一绑定；
+  v19 不可回填的旧 evidence 诚实标为 `task_scoped_count_match`，M1 仍为 passed。
+- Docker counter probe 返回前重验 lease；cleanup 的 counter、wait、terminate、kill、reap 共用 30 秒 absolute
+  deadline。public evidence 路径指向实际归档，Guardian meta 拒绝矛盾组合，secret scanner 只在合法 schema 枚举
+  位置接受 `user_authorization`。
+- dependency lock 解析 85 packages；pure/fake/loopback 完整 eval 349/349 通过。本批未运行真实 API、Docker、Cargo，
+  未读取密钥，也未改写真实结果。

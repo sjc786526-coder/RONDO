@@ -3,8 +3,10 @@
 > 本计划是 Plan 013 完成后的 B3/M1 执行合同。离线 identity/profile 门禁已完成；v9 已作为不可复用的失败终态
 > 保留。用户授权在本计划内对已定位故障执行“离线修复 → fresh exact-wire canary → 新 identity paid pair”的
 > 有界迭代，canary 与正式 pair 的累计本地估算费用硬上限为 280 USD。Plan 013 或既有模型诊断的预算与结果不得
-> 回填；v19 已完成双侧真实运行并通过 M1/S2，Plan 014 最终累计本地估算费用为 `$6.988825`，无悬挂 reservation，
-> `actual_usd=null`。
+> 回填；v19 已完成双侧真实运行并通过 M1，旧 public record 当时将 task-scoped evidence count match 标作 S2
+> verified。Plan 014 最终累计本地估算费用为 `$6.988825`，无悬挂 reservation，
+> `actual_usd=null`。v19 运行事实保持不变；运行后审查发现的预算上界、预算终态、并发生命周期和结果绑定问题已
+> 离线修复。v19 现为不可执行的只读历史 identity，正式 paid 入口关闭，后续付费阶段须创建新 identity/cap。
 
 ## 1. 目标
 
@@ -18,8 +20,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 
 - 新建唯一 pair/batch/run identity 与新 lock schema；旧 v8/v9/v10 继续保持各自历史终态，不改写、不复用。
 - pair lock 冻结 selected provider profile SHA、endpoint SHA、main/Guardian requested/effective model、effort、价格
-  快照、proxy attempt 合同、正式单请求 5 USD reservation、单侧 10 USD 与双侧 20 USD 上限，不写 raw provider URL
-  或密钥变量名。
+  快照、proxy attempt 合同及当轮预算，不写 raw provider URL 或密钥变量名。v19 的历史合同为单请求 5 USD、单侧
+  10 USD/双侧 20 USD；该数值不再作为未来正式请求的充分 reservation。
 - 新增明确的 public/redacted projection；tracked lock/result 禁止直接序列化 `ProviderProjection.to_dict()` 或
   `RunSpec.to_dict()`，因为通用运行时投影仍含 raw endpoint/display/key env。
 - frozen Codex 使用与 bundle source commit 精确一致的最小 `model_catalog_json`，通过主模型条目的
@@ -72,10 +74,12 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
    operator-confirmed-unbilled 门禁。task/run/pair 仍为零重试。
 6. **配置绑定**：sequence ledger 绑定 canonical selected profile，不绑定整个 `rondo.local.toml`；无关 local-model
    编辑不阻断 pair，但 provider/endpoint/model/rate/retry 任何字段漂移必须阻断 slot 2。
-7. **费用边界**：canary 每请求预留 1 USD、最多 4 USD；只有 canary 完成后才创建本轮 pair ledger，正式 pair
-   的 upstream request 按 5 USD（或 run 剩余额度）预留，单 pair 总额最多 20 USD、每侧最多 10 USD。单任务
-   仍串行执行，但允许 RONDO 产品在 main reservation 结算前并发发起唯一 Guardian request；两份 reservation
-   的最坏暴露仍被单侧 10 USD 硬上限覆盖。
+7. **费用边界**：v19 canary 每请求显式预留 1 USD、最多 4 USD；v19 正式 pair 使用当时冻结的 5 USD 单请求、
+   单侧 10 USD/双侧 20 USD 合同，且每个实际请求均低于 5 USD，历史费用事实不受影响。当前代码的未来正式请求
+   必须按所选 role 价卡对合法 usage envelope 的最坏费用预留；当前 Sol 上界为 18.885000 USD。短测只有显式选择
+   1 USD 才使用小 reservation；RONDO 允许 main/Guardian reservation 短暂重叠，因此新的 Sol/Sol pair 单侧 cap
+   至少须覆盖 37.770000 USD，双侧至少 75.540000 USD，并由新 lock/授权选择精确值。若合法 usage 仍超出显式
+   reservation，账本记录完整估价并停止，不得截断。
    每轮启动前必须从所有 Plan 014 durable receipt/ledger 重新计算累计本地估算费用，并确认剩余金额足以覆盖本轮
    最坏 reservation；模糊计费按 reservation 保守结算。第一处失败立即终止该 pair，保留唯一终态，完成根因
    分析与离线修复后才能以新的 lock/pair/batch/run IDs 继续。
@@ -117,8 +121,9 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
    - canary 或 pair 失败时，不复用或改写该轮 identity/ledger/result/artifact；先离线定位、补回归、形成干净提交，
      再冻结新的唯一 identity 并从 fresh canary 重新开始。剩余预算不足以覆盖下一轮最坏暴露时暂停。
 5. **交付收口**
-   - 检查 RONDO 结果中唯一自然 Guardian evidence 的 `E_final/meta` 绑定、两侧预算 settled、pair ledger completed、
-     M1 `passed` 且 S2 `verified`；Plan 014 全部 canary + pair 累计本地估算费用不得超过 280 USD，`actual_usd`
+   - 检查 RONDO 结果中自然 Guardian evidence 的 `E_final/meta`、两侧预算 settled、pair ledger completed 与
+     M1 `passed`；旧 v19 只称 task-scoped count match，后续 schema 只有 canonical request/evidence 一一对应时才称
+     S2 `verified`。Plan 014 全部 canary + pair 累计本地估算费用不得超过 280 USD，`actual_usd`
      无账单事实时保持 null。
    - 合并真实 public result，更新 Plan 当前状态、WBS 当前事实和一份精炼执行日志；运行受影响测试和结构门禁。
    - 提交后合并本地 main 并推送；保留历史数据，不重写失败终态，不为失败创建第二个 pair。
@@ -243,10 +248,20 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
   `{"m1":"passed","reasons":[],"s2":"verified"}`。
 - v19 pair 正式费用为 `$0.870787`；连同全部 Plan 014 canary/失败 pair 的保守结算，本阶段累计 `$6.988825`
   `< $280`，全部 reservation 已结算。供应商账单未查询，所有非零结果继续保持 `actual_usd=null`。
+- v19 后运行审查确认并离线修复预算、生命周期和聚合缺口：正式 proxy 默认 reservation 由价卡最坏合法 usage
+  计算；overage 保存完整估价并停止；completed/slot/M1 要求未停止、零 active reservation、全部 usage-priced 且
+  ledger/API request IDs 精确一致；handler 在 lifecycle lock 内重验 deadline，Guardian claim 与 reserve 原子化；
+  Docker counter 返回前重验 lease，cleanup 共用一个 30 秒 absolute deadline 并 bounded reap。
+- v8—v19 已收敛到统一历史 lock registry，v19 paid CLI/canary 不再有 active identity，配置/密钥/ledger/Docker/API
+  前即 fail-closed。future RONDO evidence 只有在 canonical E_final digest 与 Guardian request digest 唯一一一对应时
+  才标记 S2 `verified`；不可改写的 v19 public record 只证明 `task_scoped_count_match`，M1 仍为 `passed/reasons=[]`。
+  public evidence 使用实际归档路径，Guardian meta 采用合法组合约束，secret scanner 的 `user_authorization` 豁免仅限
+  精确 schema 枚举位置。离线完整 eval 349/349、dependency lock 85 packages 通过；未重跑 API、Docker 或 Cargo。
 
 ### 阻塞项
 
-- Plan 014 的 B3/M1 目标无剩余阻塞；v19 identity 已完成并只作为历史结果读取，不得复用。
+- Plan 014 的 B3/M1 真实运行目标无剩余阻塞；v19 identity 已完成并只作为历史结果读取，不得复用。当前没有 active
+  paid identity，任何后续真实运行都必须由新计划冻结能覆盖所选价卡最坏请求费用的新 cap/IDs。
 - v9/v10/v13/v14/v15/v16/v17/v18 已消费并 blocked，v11 在 claim 前 fail-closed，v12 canary 在本地清理阶段 fail-closed；
   均已退役且保持原 ledger/result/artifact/费用事实。后续 B4/B7 运行须另建 identity 并单独估算、授权。
 - official profile 若无独立 credential，只能保持未选择状态，不挪用中转 key。
@@ -264,7 +279,7 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 007 | paid pair 前增加最多 4 USD exact-wire short canary | 早期 relay 同时出现成功与 403/429/503，先验证当下稳定性可避免消费 pair identity | 已采纳 |
 | 008 | frozen Codex 用 source-bound 最小 model catalog 选择 Guardian | 这是冻结源码已有启动能力，可让 requested/effective 都为 Sol，无需请求改写 | 已采纳 |
 | 009 | 固定任务最初声明 Guardian logical request 上限为 1 | v13 前用于阻断 charged parse replay；v14 已证明会误拒第二个不同审批 | 已由 023 替代 |
-| 010 | 短测每 upstream request 预留 1 USD，正式/大请求按 5 USD | 兼顾高频小探针与正式任务 fail-closed 暴露上限 | 已采纳 |
+| 010 | 短测每 upstream request 预留 1 USD，正式/大请求按 5 USD | v19 历史合同；5 USD 不能覆盖完整合法 usage | 已由 030 替代 |
 | 011 | completed/M1 必须消费唯一且由 main turns 前后包围的审批序列，main/Guardian effort 同级冻结 | 防止审批缺失或 effort 漂移，同时允许真实任务的多轮 main 请求 | 已采纳 |
 | 012 | CLI 诊断只接受未停止 ledger、单一最终消息、成对且先于消息的固定审批命令和成功 turn 终态 | 历史 `expected_command=false` 收据只能保留为稳定性事实，不能充当新门禁证据 | 已采纳 |
 | 013 | Plan 014 canary 使用 source-bound frozen Codex 且硬限制四个 logical request、零 retry、4 USD | 仅靠事后序列检查不能证明 14 USD 总预算不会先超限再失败 | 已采纳 |
@@ -282,4 +297,8 @@ RONDO，再运行 frozen Codex v0.147.0；两侧实际发往上游的 main/Guard
 | 025 | artifact scanner 明确允许 E_final 的 `user_authorization` schema 字段，其他凭据扫描不变 | v16 completed 事实被该合法 Guardian 合同字段误报阻断；原始 evidence 离线重放证明修复充分 | 已采纳 |
 | 026 | Docker 完整 counter round 共用 15 秒绝对预算，调度周期仍为 5 秒 | v17 证明串行 daemon/PowerShell/cgroup 探针可合法超过 5 秒；保留 fail-closed 与外层 wall deadline | 已采纳 |
 | 027 | 0400 frozen catalog 的 digest 由文件 owner 身份计算 | cap-drop-all 容器中的 root 没有 DAC override；类型、mode、owner 与 bundle root 校验保持不变 | 已采纳 |
-| 028 | v19 双侧 completed 后以 durable public result + sequence ledger 直接运行既有 `assess_m1` | 不新增聚合层；同一生产合同已机械验证 M1 passed 与 RONDO S2 verified | 已采纳 |
+| 028 | v19 双侧 completed 后以 durable public result + sequence ledger 直接运行既有 `assess_m1` | 不新增聚合层；同一生产合同机械验证 M1 passed，旧 S2 仅为 task-scoped count match | 已采纳 |
+| 029 | v19 转为历史 registry 且正式 paid/canary 入口无 active identity | 已完成 identity 不能靠本机 ignored ledger 才避免异机重跑 | 已采纳 |
+| 030 | 正式 reservation 按价卡最坏合法 usage 计算，run cap 覆盖 main/Guardian 重叠；显式短测 overage 完整计价后停止 | 5 USD 不能覆盖 Sol 合法 usage 上界，截断会低估费用 | 已采纳 |
+| 031 | completed 与 M1 共同消费完整预算终态和精确 request ID 集合 | Harbor completed 不能掩盖 stopped/unsettled/invalid budget run | 已采纳 |
+| 032 | future S2 以 canonical request/E_final digest 一一绑定，v19 降格为 task-scoped count match | 不改写历史字节，同时不夸大旧记录的证明能力 | 已采纳 |

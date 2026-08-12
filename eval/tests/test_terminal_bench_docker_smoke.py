@@ -45,7 +45,10 @@ from rondo_eval.terminal_bench.freeze import (  # noqa: E402
     TERMINAL_BENCH_REPO_REF,
 )
 from rondo_eval.terminal_bench.materialize import MaterializedTask  # noqa: E402
-from rondo_eval.terminal_bench.pair import B2_NO_API_BATCH_ID, load_pair_identity  # noqa: E402
+from rondo_eval.terminal_bench.pair import (  # noqa: E402
+    B2_NO_API_BATCH_ID,
+    load_no_api_pair_identity,
+)
 from rondo_eval.terminal_bench.results import ParsedHarborResult  # noqa: E402
 from rondo_eval.terminal_bench.__main__ import _load_manifest  # noqa: E402
 from rondo_eval.terminal_bench.runner import (  # noqa: E402
@@ -637,7 +640,9 @@ class DockerNoApiSmokeTests(unittest.TestCase):
                     worktree_root=EVAL_ROOT.parent,
                 ),
             ),
-            mock.patch.object(docker_smoke_module, "load_pair_identity", return_value=identity),
+            mock.patch.object(
+                docker_smoke_module, "load_no_api_pair_identity", return_value=identity
+            ),
             mock.patch.object(docker_smoke_module, "load_runtime_config", return_value=self.config()),
             mock.patch.object(
                 docker_smoke_module,

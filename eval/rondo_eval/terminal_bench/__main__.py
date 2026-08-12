@@ -8,7 +8,11 @@ import json
 import sys
 from pathlib import Path
 
-from ..api_budget_proxy import BudgetStopped, PersistentBudgetLedger
+from ..api_budget_proxy import (
+    BudgetStopped,
+    PersistentBudgetLedger,
+    completed_run_accounting,
+)
 from ..artifacts import ArtifactError, ArtifactWriter, validate_run_id
 from ..config import (
     ConfigError,
@@ -33,7 +37,7 @@ from .pair import (
     PairIdentity,
     PairIdentityError,
     PairSequenceLedger,
-    load_pair_identity,
+    load_active_pair_identity,
     publication_context,
     validate_harbor_installation,
 )
@@ -47,9 +51,6 @@ from .results import (
     validate_results_worktree,
 )
 from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
-
-
-P1_BATCH_ID = "p1-fix-git-b4-m1-v11"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -70,13 +71,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         side = Side(args.side)
         validate_run_id(args.run_id, track="tb", side=side.value)
+        # There is intentionally no active paid identity after the completed v19
+        # pair.  This gate precedes config/secret loading, ledger creation, and
+        # every Docker or provider operation.
+        pair_identity = load_active_pair_identity()
         paths = RepoPaths.discover(Path.cwd())
         measurement_paths = RepoPaths.discover(
             args.measurement_worktree_root or paths.worktree_root
         )
         if measurement_paths.common_root != paths.common_root:
             raise ConfigError("measurement worktree belongs to another repository")
-        pair_identity = load_pair_identity()
         paid_mode = pair_identity.mode("paid")
         paid_budget = pair_identity.paid_budget
         if paid_budget is None:
@@ -230,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
                         raise TerminalBenchRunError("eval harness commit changed during the run")
                     container_metrics = _paid_container_metrics(result.harbor.docker_evidence)
                     if parsed.outcome is RunOutcome.COMPLETED:
+                        completed_run_accounting(result.budget_snapshot, args.run_id)
                         _fresh_config, fresh_provider = _load_selected_provider(
                             paths, pair_identity
                         )

@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..api_budget_proxy import (
+    ApiBudgetProxyError,
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
     UPSTREAM_TIMEOUT_SECONDS,
+    canonical_request_sha256,
     milestone_metadata_ready,
 )
 from ..config import RuntimeConfig
@@ -52,6 +54,15 @@ _GUARDIAN_META_FIELDS = {
     "token_usage",
     "time_to_first_token_ms",
 }
+_GUARDIAN_TERMINAL_COMBINATIONS = {
+    ("approved", "approved", None),
+    ("denied", "denied", None),
+    ("aborted", "aborted", "cancelled"),
+    ("denied", "timed_out", "timeout"),
+    ("denied", "failed_closed", "prompt_build_error"),
+    ("denied", "failed_closed", "session_error"),
+    ("denied", "failed_closed", "parse_error"),
+}
 
 
 @dataclass(frozen=True)
@@ -64,6 +75,7 @@ class EvidenceObservation:
     model: str
     reasoning_effort: str
     terminal_status: str
+    canonical_request_sha256: str
 
 
 @dataclass(frozen=True)
@@ -244,7 +256,8 @@ def load_guardian_evidence_bundle(
         raise TerminalBenchRunError("Guardian evidence bundle is unreadable") from exc
     try:
         identity = policy_identity(e_final)
-    except (TypeError, ValueError) as exc:
+        request_sha256 = canonical_request_sha256(e_final)
+    except (ApiBudgetProxyError, TypeError, ValueError) as exc:
         raise TerminalBenchRunError("Guardian evidence policy identity is invalid") from exc
     if not identity.aggregatable or not isinstance(meta, dict):
         raise TerminalBenchRunError("Guardian evidence bundle is not aggregatable")
@@ -264,6 +277,7 @@ def load_guardian_evidence_bundle(
             model=expected_model,
             reasoning_effort=expected_effort,
             terminal_status=meta["terminal_status"],
+            canonical_request_sha256=request_sha256,
         ),
         e_final_bytes,
         meta_bytes,
@@ -310,6 +324,8 @@ def _validate_guardian_meta(
         "parse_error",
     }:
         raise TerminalBenchRunError("Guardian evidence failure reason is invalid")
+    if (decision, terminal_status, failure_reason) not in _GUARDIAN_TERMINAL_COMBINATIONS:
+        raise TerminalBenchRunError("Guardian evidence terminal fields are contradictory")
     for key in ("attempt_count", "duration_ms"):
         value = meta.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:

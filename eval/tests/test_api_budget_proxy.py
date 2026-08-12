@@ -32,6 +32,8 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     _validated_lite_header,
     _validated_originator,
     _validated_user_agent,
+    canonical_request_sha256,
+    completed_run_accounting,
     milestone_metadata_ready,
     price_usage,
 )
@@ -61,6 +63,12 @@ GUARDIAN_PRICING = ModelPricing(
     cache_write_input_multiplier=Decimal("1.25"),
     price_snapshot_date="2026-08-10",
     price_source_url="https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+)
+MAIN_MAX_USAGE_COST = price_usage(
+    Usage(1_050_000, 0, 1_050_000, 128_000), pricing=MAIN_PRICING
+)
+GUARDIAN_MAX_USAGE_COST = price_usage(
+    Usage(1_050_000, 0, 1_050_000, 128_000), pricing=GUARDIAN_PRICING
 )
 
 
@@ -236,7 +244,10 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.secret = "sk-test-never-persist-this-value"
         self.upstream = _FakeUpstream()
         self.ledger = PersistentBudgetLedger(
-            self.root / "budget.json", batch_id="p1-batch"
+            self.root / "budget.json",
+            batch_id="p1-batch",
+            total_cap_usd="80",
+            default_run_cap_usd="40",
         )
         self.proxy = LoopbackResponsesProxy(
             upstream_base_url="https://provider.example/v1",
@@ -376,7 +387,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(request["charged_usd"], "1.000000")
 
     def test_invalid_request_reservations_are_rejected(self) -> None:
-        for number, reservation in enumerate(("0", "5.000001", "nan", True)):
+        for number, reservation in enumerate(("0", "40.000001", "nan", True)):
             with self.subTest(reservation=reservation), self.assertRaisesRegex(
                 ApiBudgetProxyError, "request reservation"
             ):
@@ -514,9 +525,47 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(observation["settlement_kind"], "usage_priced")
         self.assertEqual(observation["shape"]["input_items"], 1)
         self.assertEqual(len(observation["body_sha256"]), 64)
+        self.assertEqual(
+            observation["canonical_body_sha256"],
+            canonical_request_sha256(self._body()),
+        )
+        self.assertEqual(
+            canonical_request_sha256({"stream": False, "model": "same"}),
+            canonical_request_sha256({"model": "same", "stream": False}),
+        )
         self.assertTrue(observation["contract_match"])
         self.assertTrue(observation["usage_valid"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
+        invalid_metadata = json.loads(metadata_bytes)
+        invalid_metadata["requests"][0]["canonical_body_sha256"] = "not-a-digest"
+        invalid_metadata_path = self.root / "invalid-metadata.json"
+        invalid_metadata_path.write_text(json.dumps(invalid_metadata), encoding="utf-8")
+        self.assertFalse(milestone_metadata_ready(invalid_metadata_path))
+        snapshot = self.ledger.snapshot()
+        request = snapshot["runs"]["benchmark-r1"]["requests"]["request-1"]
+        self.assertEqual(request["reserved_usd"], format(MAIN_MAX_USAGE_COST, "f"))
+        self.assertEqual(
+            completed_run_accounting(snapshot, "benchmark-r1"),
+            {
+                "stopped": False,
+                "stop_reason": None,
+                "reserved_usd": "0.000000",
+                "spent_usd": format(
+                    price_usage(Usage(1000, 100, 0, 50), pricing=MAIN_PRICING), "f"
+                ),
+                "request_count": 1,
+                "settled_request_count": 1,
+                "usage_valid_request_count": 1,
+            },
+        )
+        over_cap = json.loads(json.dumps(snapshot))
+        over_cap["runs"]["benchmark-r1"]["cap_usd"] = "0.000001"
+        with self.assertRaisesRegex(ApiBudgetProxyError, "exceeds its cap"):
+            completed_run_accounting(over_cap, "benchmark-r1")
+        snapshot["runs"]["benchmark-r1"]["stopped"] = True
+        snapshot["runs"]["benchmark-r1"]["stop_reason"] = "proxy_closing"
+        with self.assertRaisesRegex(ApiBudgetProxyError, "must not be stopped"):
+            completed_run_accounting(snapshot, "benchmark-r1")
         self.assertEqual(os.stat(self.root / "metadata.json").st_mode & 0o777, 0o600)
         self.assertEqual(os.stat(self.root / "budget.json").st_mode & 0o777, 0o600)
 
@@ -833,7 +882,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertFalse(request["usage_valid"])
         self.assertEqual(request["attempt_count"], 1)
         self.assertEqual(request["settlement_kind"], "conservative_reservation")
-        self.assertEqual(request["charged_usd"], format(MAX_REQUEST_RESERVATION_USD, "f"))
+        self.assertEqual(request["charged_usd"], format(MAIN_MAX_USAGE_COST, "f"))
         self.assertTrue(run["stopped"])
         self.assertEqual(snapshot["reserved_usd"], "0.000000")
         observation = json.loads(
@@ -852,6 +901,8 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertTrue(observation["contract_match"])
         self.assertIsNone(self.upstream.requests[0]["role"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
+        request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"]["request-1"]
+        self.assertEqual(request["reserved_usd"], format(MAIN_MAX_USAGE_COST, "f"))
 
     def test_missing_role_header_projects_declared_guardian_from_exact_schema(self) -> None:
         status, _body, _headers = self._post(
@@ -867,6 +918,10 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertTrue(observation["contract_match"])
         self.assertIsNone(self.upstream.requests[0]["role"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
+        request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"]["request-1"]
+        self.assertEqual(
+            request["reserved_usd"], format(GUARDIAN_MAX_USAGE_COST, "f")
+        )
 
     def test_configured_non_low_guardian_effort_is_enforced(self) -> None:
         self.proxy.close()
@@ -972,6 +1027,51 @@ class ApiBudgetProxyTests(unittest.TestCase):
             run["stop_reason"],
             "guardian_duplicate_logical_request_rejected",
         )
+
+    def test_failed_reservation_does_not_consume_guardian_body_or_counter(self) -> None:
+        self.proxy.close()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="guardian-reserve-retry-run",
+            metadata_path=self.root / "guardian-reserve-retry-metadata.json",
+            **self._profile_kwargs(),
+            request_reservation_usd="1",
+            max_guardian_logical_requests=1,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+        original_reserve = self.ledger.reserve
+        failed = False
+
+        def fail_once(*args: object, **kwargs: object):
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise BudgetStopped("injected reservation contention")
+            return original_reserve(*args, **kwargs)
+
+        self.ledger.reserve = fail_once  # type: ignore[method-assign]
+        try:
+            first, _body, _headers = self._post(
+                self._body(effort="low", guardian=True),
+                role="guardian",
+                request_id="guardian-reserve-failed",
+            )
+            second, _body, _headers = self._post(
+                self._body(effort="low", guardian=True),
+                role="guardian",
+                request_id="guardian-reserve-retry",
+            )
+        finally:
+            self.ledger.reserve = original_reserve  # type: ignore[method-assign]
+
+        self.assertEqual(first, 429)
+        self.assertEqual(second, 200)
+        self.assertEqual(len(self.upstream.requests), 1)
+        run = self.ledger.snapshot()["runs"]["guardian-reserve-retry-run"]
+        self.assertFalse(run["stopped"])
+        self.assertEqual(set(run["requests"]), {"guardian-reserve-retry"})
 
     def test_two_distinct_guardian_reviews_are_allowed_but_a_third_is_bounded(self) -> None:
         self.proxy.close()
@@ -1091,7 +1191,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         run = self.ledger.snapshot()["runs"]["benchmark-r1"]
         self.assertTrue(run["stopped"])
         self.assertEqual(run["stop_reason"], "missing_or_invalid_usage")
-        self.assertEqual(run["spent_usd"], format(MAX_REQUEST_RESERVATION_USD, "f"))
+        self.assertEqual(run["spent_usd"], format(MAIN_MAX_USAGE_COST, "f"))
         before = len(self.upstream.requests)
         status, body, _headers = self._post(self._body(), request_id="missing-2")
         self.assertEqual(status, 429)
@@ -1104,7 +1204,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(status, 200)
         run = self.ledger.snapshot()["runs"]["benchmark-r1"]
         self.assertTrue(run["stopped"])
-        self.assertEqual(run["spent_usd"], format(MAX_REQUEST_RESERVATION_USD, "f"))
+        self.assertEqual(run["spent_usd"], format(MAIN_MAX_USAGE_COST, "f"))
 
     def test_retries_hosted_tools_wrong_guardian_and_non_responses_path_are_rejected(self) -> None:
         cases = [
@@ -1237,7 +1337,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         run = self.ledger.snapshot()["runs"]["benchmark-r1"]
         request = run["requests"]["ambiguous"]
         self.assertEqual(request["attempt_count"], 1)
-        self.assertEqual(request["charged_usd"], format(MAX_REQUEST_RESERVATION_USD, "f"))
+        self.assertEqual(request["charged_usd"], format(MAIN_MAX_USAGE_COST, "f"))
         self.assertEqual(request["settlement_kind"], "conservative_reservation")
         self.assertEqual(run["stop_reason"], "unclassified_upstream_failure")
 
@@ -1302,6 +1402,44 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(run["spent_usd"], "0.000000")
         self.assertEqual(run["stop_reason"], "operator_confirmed_unbilled_deadline_exhausted")
         self.assertEqual(now[0], 30.0)
+
+    def test_deadline_is_rechecked_after_lifecycle_lock_before_attempt(self) -> None:
+        self.proxy.close()
+        times = iter((0.0, 0.0, 91.0))
+
+        def monotonic() -> float:
+            return next(times, 91.0)
+
+        class RecordingTransport:
+            calls = 0
+
+            def open(self, *_args: object, **_kwargs: object):
+                self.calls += 1
+                raise AssertionError("expired request reached transport")
+
+        transport = RecordingTransport()
+        self.proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="stale-deadline-run",
+            metadata_path=self.root / "stale-deadline-metadata.json",
+            **self._profile_kwargs(),
+            _transport=transport,  # type: ignore[arg-type]
+            _monotonic=monotonic,
+        ).start()
+
+        status, body, _headers = self._post(
+            self._body(), request_id="stale-deadline-request"
+        )
+
+        self.assertEqual(status, 502)
+        self.assertEqual(json.loads(body)["error"]["code"], "upstream_deadline_exhausted")
+        self.assertEqual(transport.calls, 0)
+        request = self.ledger.snapshot()["runs"]["stale-deadline-run"]["requests"][
+            "stale-deadline-request"
+        ]
+        self.assertEqual(request["attempt_count"], 0)
 
     def test_close_waits_for_handler_and_prevents_a_post_close_retry(self) -> None:
         self.proxy.close()
@@ -1413,6 +1551,75 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
         self.assertEqual(BATCH_CAP_USD, Decimal("10.00"))
         self.assertEqual(MAX_REQUEST_RESERVATION_USD, Decimal("5.000000"))
 
+    def test_priced_overage_records_full_cost_and_reopens_fail_closed(self) -> None:
+        path = self.root / "priced-overage.json"
+        ledger = PersistentBudgetLedger(path, batch_id="priced-overage")
+        ledger.ensure_run("r1")
+        ledger.reserve("r1", "q1", amount_usd="1")
+        ledger.begin_attempt("r1", "q1", max_attempts=1)
+        settlement = ledger.settle(
+            "r1",
+            "q1",
+            Usage(1_050_000, 0, 1_050_000, 128_000),
+            pricing=MAIN_PRICING,
+        )
+        self.assertEqual(settlement.charged_usd, Decimal("18.885000"))
+        self.assertTrue(settlement.usage_valid)
+        run = ledger.snapshot()["runs"]["r1"]
+        self.assertEqual(run["spent_usd"], "18.885000")
+        self.assertTrue(run["stopped"])
+        self.assertEqual(run["stop_reason"], "usage_cost_exceeded_reservation")
+        self.assertEqual(
+            run["requests"]["q1"]["settlement_kind"], "usage_priced_overage"
+        )
+        with self.assertRaisesRegex(ApiBudgetProxyError, "must not be stopped"):
+            completed_run_accounting(ledger.snapshot(), "r1")
+        ledger.close()
+
+        reopened = PersistentBudgetLedger(path, batch_id="priced-overage")
+        self.assertEqual(reopened.snapshot()["runs"]["r1"], run)
+        reopened.close()
+
+        original_state = json.loads(path.read_text(encoding="utf-8"))
+        tampered = json.loads(json.dumps(original_state))
+        tampered_run = tampered["runs"]["r1"]
+        tampered_run["requests"]["unreserved-extra"] = {
+            "status": "settled",
+            "reserved_usd": "5.000000",
+            "charged_usd": "5.000000",
+            "usage_valid": True,
+            "attempt_count": 1,
+            "settlement_kind": "usage_priced",
+        }
+        tampered_run["spent_usd"] = "23.885000"
+        path.write_text(json.dumps(tampered), encoding="utf-8")
+        os.chmod(path, 0o600)
+        with self.assertRaisesRegex(ApiBudgetProxyError, "run exceeds its cap"):
+            PersistentBudgetLedger(path, batch_id="priced-overage")
+
+        batch_tampered = json.loads(json.dumps(original_state))
+        for run_id in ("r2", "r3"):
+            batch_tampered["runs"][run_id] = {
+                "cap_usd": "5.000000",
+                "spent_usd": "5.000000",
+                "stopped": False,
+                "stop_reason": None,
+                "requests": {
+                    "q1": {
+                        "status": "settled",
+                        "reserved_usd": "5.000000",
+                        "charged_usd": "5.000000",
+                        "usage_valid": True,
+                        "attempt_count": 1,
+                        "settlement_kind": "usage_priced",
+                    }
+                },
+            }
+        path.write_text(json.dumps(batch_tampered), encoding="utf-8")
+        os.chmod(path, 0o600)
+        with self.assertRaisesRegex(ApiBudgetProxyError, "ledger exceeds its batch cap"):
+            PersistentBudgetLedger(path, batch_id="priced-overage")
+
     def test_four_runs_can_reserve_and_settle_concurrently(self) -> None:
         path = self.root / "budget.json"
         ledger = PersistentBudgetLedger(path, batch_id="concurrent")
@@ -1475,6 +1682,20 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
 
     def test_invalid_state_and_over_authorized_configuration_fail_closed(self) -> None:
         with PersistentBudgetLedger(
+            self.root / "formal-max-envelope.json",
+            batch_id="formal-max-envelope",
+            total_cap_usd="80",
+            default_run_cap_usd="40",
+        ) as ledger:
+            ledger.claim_run("rondo")
+            ledger.reserve("rondo", "main", amount_usd=MAIN_MAX_USAGE_COST)
+            ledger.reserve("rondo", "guardian", amount_usd=MAIN_MAX_USAGE_COST)
+            requests = ledger.snapshot()["runs"]["rondo"]["requests"]
+            self.assertEqual(
+                sum(Decimal(request["reserved_usd"]) for request in requests.values()),
+                Decimal("37.770000"),
+            )
+        with PersistentBudgetLedger(
             self.root / "formal-concurrent.json",
             batch_id="formal-concurrent",
             total_cap_usd="20",
@@ -1490,13 +1711,13 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             )
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
-                self.root / "too-much.json", batch_id="bad", total_cap_usd="20.01"
+                self.root / "too-much.json", batch_id="bad", total_cap_usd="80.01"
             )
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
                 self.root / "too-much-run.json",
                 batch_id="bad-run",
-                default_run_cap_usd="10.01",
+                default_run_cap_usd="40.01",
             )
         path = self.root / "bad-mode.json"
         path.write_text("{}", encoding="utf-8")

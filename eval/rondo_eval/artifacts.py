@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -28,7 +29,7 @@ _TIMESTAMP = re.compile(
 )
 _MAX_SCAN_BYTES = 128 * 1024 * 1024
 _SENSITIVE_ASSIGNMENT = re.compile(
-    rb"(?:^|[,{\s])(?![\"']?user_authorization[\"']?\s*[:=])[\"']?"
+    rb"(?:^|[,{\s])[\"']?"
     rb"(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|bearer[-_]?token|"
     rb"client[-_]?secret|refresh[-_]?token|private[-_]?key|password|secret|token|authorization|"
     rb"proxy-authorization|x-api-key)[\"']?\s*[:=]\s*[\"']?\s*[^\s\"'},\]]+",
@@ -591,7 +592,7 @@ def _artifact_tree_identity(root: Path, secrets: tuple[bytes, ...]) -> dict[str,
             or len(contents) != size
         ):
             raise ArtifactError("artifact changed while it was being scanned")
-        _scan_bytes(contents, secrets, "artifact")
+        _scan_artifact_bytes(contents, secrets, relative)
         entries.append(
             {
                 "path": relative,
@@ -608,6 +609,36 @@ def _artifact_tree_identity(root: Path, secrets: tuple[bytes, ...]) -> dict[str,
         "entries": entries,
     }
     return {**payload, "tree_sha256": hashlib.sha256(_encode_record(payload)).hexdigest()}
+
+
+def _scan_artifact_bytes(contents: bytes, secrets: tuple[bytes, ...], relative_path: str) -> None:
+    """Permit only the frozen Guardian schema's enum key, never an output value."""
+
+    relative = Path(relative_path)
+    if (
+        len(relative.parts) == 3
+        and relative.parts[0] == "guardian-evidence"
+        and re.fullmatch(r"[0-9]{4}", relative.parts[1])
+        and relative.parts[2] == "E_final.json"
+    ):
+        try:
+            value = json.loads(contents.decode("utf-8"))
+            properties = value["text"]["format"]["schema"]["properties"]
+            authorization_schema = properties["user_authorization"]
+        except (UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+            pass
+        else:
+            if authorization_schema == {
+                "type": "string",
+                "enum": ["unknown", "low", "medium", "high"],
+            }:
+                sanitized = copy.deepcopy(value)
+                sanitized_properties = sanitized["text"]["format"]["schema"]["properties"]
+                sanitized_properties["guardian_user_level"] = sanitized_properties.pop(
+                    "user_authorization"
+                )
+                contents = _encode_record(sanitized)
+    _scan_bytes(contents, secrets, "artifact")
 
 
 def _assert_artifact_tree_identity(root: Path, expected: object) -> None:

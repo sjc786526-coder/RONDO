@@ -35,8 +35,8 @@ MAX_INPUT_TOKENS = 1_050_000
 MAX_OUTPUT_TOKENS = 128_000
 BATCH_CAP_USD = Decimal("10.00")
 RUN_CAP_USD = Decimal("5.00")
-_MAX_EXPLICIT_BATCH_CAP_USD = Decimal("20.00")
-_MAX_EXPLICIT_RUN_CAP_USD = Decimal("10.00")
+_MAX_EXPLICIT_BATCH_CAP_USD = Decimal("80.00")
+_MAX_EXPLICIT_RUN_CAP_USD = Decimal("40.00")
 MAX_BENCHMARK_RUNS = 4
 _MONEY_QUANTUM = Decimal("0.000001")
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -65,10 +65,12 @@ _MAX_ORIGINATOR_BYTES = 64
 _MAX_UPSTREAM_ATTEMPTS = 5
 _GUARDIAN_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 _SETTLEMENT_USAGE_PRICED = "usage_priced"
+_SETTLEMENT_USAGE_PRICED_OVERAGE = "usage_priced_overage"
 _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED = "operator_confirmed_unbilled"
 _SETTLEMENT_CONSERVATIVE_RESERVATION = "conservative_reservation"
 _SETTLEMENT_KINDS = {
     _SETTLEMENT_USAGE_PRICED,
+    _SETTLEMENT_USAGE_PRICED_OVERAGE,
     _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED,
     _SETTLEMENT_CONSERVATIVE_RESERVATION,
 }
@@ -88,6 +90,7 @@ _STOP_REASONS = {
     "guardian_logical_request_limit_exceeded",
     "logical_request_limit_exceeded",
     "proxy_closing",
+    "usage_cost_exceeded_reservation",
 }
 GUARDIAN_OUTPUT_SCHEMA = {
     "type": "object",
@@ -195,8 +198,35 @@ def price_usage(usage: Usage, *, pricing: ModelPricing) -> Decimal:
     )
 
 
-# The reservation is independent of the selected model price.  A profile may
-# switch models without weakening the fail-closed per-run authorization cap.
+def _maximum_usage_cost(pricing: ModelPricing) -> Decimal:
+    """Return the highest price admitted by the frozen Usage contract."""
+
+    candidates = {MAX_INPUT_TOKENS}
+    if pricing.long_context_threshold_tokens < MAX_INPUT_TOKENS:
+        candidates.add(pricing.long_context_threshold_tokens)
+    maximum = Decimal(0)
+    for input_tokens in candidates:
+        input_rates = (
+            pricing.input_usd_per_million,
+            pricing.cached_input_usd_per_million,
+            pricing.input_usd_per_million * pricing.cache_write_input_multiplier,
+        )
+        highest = max(range(len(input_rates)), key=input_rates.__getitem__)
+        cached = input_tokens if highest == 1 else 0
+        cache_write = input_tokens if highest == 2 else 0
+        maximum = max(
+            maximum,
+            price_usage(
+                Usage(input_tokens, cached, cache_write, MAX_OUTPUT_TOKENS),
+                pricing=pricing,
+            ),
+        )
+    return maximum.quantize(_MONEY_QUANTUM, rounding=ROUND_UP)
+
+
+# The five-dollar value remains the default for direct ledger users. A formal
+# proxy with no explicit short-test reservation instead reserves the selected
+# role's complete frozen usage envelope before forwarding.
 MAX_REQUEST_RESERVATION_USD = RUN_CAP_USD.quantize(_MONEY_QUANTUM)
 SHORT_REQUEST_RESERVATION_USD = Decimal("1")
 
@@ -226,9 +256,9 @@ class PersistentBudgetLedger:
         self.default_run_cap = _money(default_run_cap_usd)
         self.max_runs = max_runs
         if self.total_cap <= 0 or self.total_cap > _MAX_EXPLICIT_BATCH_CAP_USD:
-            raise ApiBudgetProxyError("batch cap exceeds the authorized 20 USD maximum")
+            raise ApiBudgetProxyError("batch cap exceeds the supported 80 USD maximum")
         if self.default_run_cap <= 0 or self.default_run_cap > _MAX_EXPLICIT_RUN_CAP_USD:
-            raise ApiBudgetProxyError("run cap exceeds the authorized 10 USD maximum")
+            raise ApiBudgetProxyError("run cap exceeds the supported 40 USD maximum")
         if not isinstance(max_runs, int) or isinstance(max_runs, bool) or not 1 <= max_runs <= 4:
             raise ApiBudgetProxyError("benchmark run count exceeds the authorized maximum of four")
         self._lock = threading.RLock()
@@ -336,7 +366,7 @@ class PersistentBudgetLedger:
                 ).quantize(_MONEY_QUANTUM)
             else:
                 amount = _money(amount_usd)
-            if amount <= 0 or amount > MAX_REQUEST_RESERVATION_USD:
+            if amount <= 0 or amount > Decimal(run["cap_usd"]):
                 raise BudgetStopped("request reservation has no authorized capacity")
             if run_spent + run_reserved + amount > Decimal(run["cap_usd"]):
                 raise BudgetStopped("request reservation would exceed the run cost cap")
@@ -404,8 +434,6 @@ class PersistentBudgetLedger:
                 if usage is None:
                     raise ApiBudgetProxyError("response usage is missing")
                 charged = price_usage(usage, pricing=pricing)
-                if charged > reserved:
-                    raise ApiBudgetProxyError("response usage exceeds the request reservation")
             except ApiBudgetProxyError:
                 charged = reserved
                 usage_valid = False
@@ -413,10 +441,15 @@ class PersistentBudgetLedger:
                 run["stop_reason"] = stop_reason or "missing_or_invalid_usage"
                 settlement_kind = _SETTLEMENT_CONSERVATIVE_RESERVATION
             else:
-                settlement_kind = _SETTLEMENT_USAGE_PRICED
-                if stop_reason is not None:
+                if charged > reserved:
                     run["stopped"] = True
-                    run["stop_reason"] = stop_reason
+                    run["stop_reason"] = "usage_cost_exceeded_reservation"
+                    settlement_kind = _SETTLEMENT_USAGE_PRICED_OVERAGE
+                else:
+                    settlement_kind = _SETTLEMENT_USAGE_PRICED
+                    if stop_reason is not None:
+                        run["stopped"] = True
+                        run["stop_reason"] = stop_reason
             request_state["status"] = "settled"
             request_state["charged_usd"] = _money_text(charged)
             request_state["usage_valid"] = usage_valid
@@ -630,6 +663,7 @@ class RedactedMetadataStore:
         expected = {
             "request_id",
             "body_sha256",
+            "canonical_body_sha256",
             "role",
             "role_provenance",
             "declared_role",
@@ -781,7 +815,7 @@ class LoopbackResponsesProxy:
                 request_reservation = _money(request_reservation_usd)
             except (ArithmeticError, TypeError, ValueError) as exc:
                 raise ApiBudgetProxyError("proxy request reservation is invalid") from exc
-            if request_reservation <= 0 or request_reservation > MAX_REQUEST_RESERVATION_USD:
+            if request_reservation <= 0 or request_reservation > _MAX_EXPLICIT_RUN_CAP_USD:
                 raise ApiBudgetProxyError("proxy request reservation is invalid")
         if (
             not isinstance(unbilled_retry_statuses, tuple)
@@ -829,7 +863,10 @@ class LoopbackResponsesProxy:
         self._max_attempts = max_attempts
         self._retry_backoff_seconds = float(retry_backoff_seconds)
         self._unbilled_retry_statuses = frozenset(unbilled_retry_statuses)
-        self._request_reservation = request_reservation
+        self._request_reservations = {
+            "main": request_reservation or _maximum_usage_cost(main_pricing),
+            "guardian": request_reservation or _maximum_usage_cost(guardian_pricing),
+        }
         self._max_guardian_logical_requests = max_guardian_logical_requests
         self._guardian_logical_requests = 0
         self._guardian_body_sha256s: set[str] = set()
@@ -1014,13 +1051,10 @@ class LoopbackResponsesProxy:
                 if self._closing.is_set():
                     self._reject(handler, 503, "proxy_closing")
                     return
-                self._claim_logical_request(
-                    request_metadata["role"], request_metadata["body_sha256"]
-                )
-                self._ledger.reserve(
-                    self._run_id,
+                self._claim_and_reserve_logical_request(
+                    request_metadata["role"],
+                    request_metadata["body_sha256"],
                     request_id,
-                    amount_usd=self._request_reservation,
                 )
         except _GuardianDuplicateLogicalRequest:
             self._reject(handler, 409, "guardian_duplicate_logical_request_rejected")
@@ -1134,6 +1168,32 @@ class LoopbackResponsesProxy:
                             )
                             self._reject(handler, 503, "proxy_closing")
                         return
+                    # Another handler may have held the lifecycle lock for an
+                    # entire upstream header wait. Never start or persist a new
+                    # attempt using the stale value computed before this lock.
+                    remaining = deadline - self._monotonic()
+                    if remaining <= 0:
+                        if last_unbilled_status:
+                            self._stop_confirmed_unbilled(
+                                handler,
+                                request_id,
+                                request_metadata,
+                                last_unbilled_status,
+                                "operator_confirmed_unbilled_deadline_exhausted",
+                            )
+                        else:
+                            settlement = self._ledger.settle(
+                                self._run_id,
+                                request_id,
+                                None,
+                                pricing=pricing,
+                                stop_reason="upstream_deadline_exhausted",
+                            )
+                            self._save_observation(
+                                request_id, request_metadata, 0, settlement
+                            )
+                            self._reject(handler, 502, "upstream_deadline_exhausted")
+                        return
                     attempt_count = self._ledger.begin_attempt(
                         self._run_id,
                         request_id,
@@ -1242,12 +1302,11 @@ class LoopbackResponsesProxy:
             if delay:
                 self._sleep(delay)
 
-    def _claim_logical_request(self, role: str, body_sha256: str) -> None:
-        if (
-            self._max_logical_requests is None
-            and (role != "guardian" or self._max_guardian_logical_requests is None)
-        ):
-            return
+    def _claim_and_reserve_logical_request(
+        self, role: str, body_sha256: str, request_id: str
+    ) -> None:
+        """Persist the reservation before committing in-memory logical claims."""
+
         with self._request_policy_lock:
             if role == "guardian" and body_sha256 in self._guardian_body_sha256s:
                 self._ledger.stop_run(
@@ -1281,6 +1340,11 @@ class LoopbackResponsesProxy:
                 raise _GuardianLogicalRequestLimitExceeded(
                     "Guardian logical request limit is exhausted"
                 )
+            self._ledger.reserve(
+                self._run_id,
+                request_id,
+                amount_usd=self._request_reservations[role],
+            )
             self._logical_requests += 1
             if role == "guardian":
                 self._guardian_logical_requests += 1
@@ -1524,6 +1588,11 @@ def milestone_metadata_ready(metadata_path: Path) -> bool:
     requests = value.get("requests") if isinstance(value, dict) else None
     return bool(requests) and all(
         isinstance(item, dict)
+        and isinstance(item.get("body_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", item["body_sha256"]) is not None
+        and isinstance(item.get("canonical_body_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", item["canonical_body_sha256"])
+        is not None
         and item.get("role") in {"main", "guardian"}
         and item.get("role_provenance") == "declared"
         and item.get("declared_role") == item.get("role")
@@ -1535,6 +1604,74 @@ def milestone_metadata_ready(metadata_path: Path) -> bool:
         and 1 <= item["attempt_count"] <= _MAX_UPSTREAM_ATTEMPTS
         for item in requests
     )
+
+
+def completed_run_accounting(snapshot: Mapping[str, Any], run_id: str) -> dict[str, object]:
+    """Validate and project the exact settled budget state required by completed."""
+
+    _require_safe_id(run_id, "run id")
+    if not isinstance(snapshot, Mapping):
+        raise ApiBudgetProxyError("budget snapshot is invalid")
+    runs = snapshot.get("runs")
+    if not isinstance(runs, Mapping):
+        raise ApiBudgetProxyError("budget snapshot has no runs")
+    run = runs.get(run_id)
+    if not isinstance(run, Mapping) or set(run) != {
+        "cap_usd",
+        "spent_usd",
+        "stopped",
+        "stop_reason",
+        "requests",
+    }:
+        raise ApiBudgetProxyError("budget snapshot has no requested run")
+    if run.get("stopped") is not False or run.get("stop_reason") is not None:
+        raise ApiBudgetProxyError("completed budget run must not be stopped")
+    requests = run.get("requests")
+    if not isinstance(requests, Mapping) or not requests:
+        raise ApiBudgetProxyError("completed budget run has no requests")
+    cap = _money(run.get("cap_usd"))
+    spent = _money(run.get("spent_usd"))
+    if cap <= 0 or spent > cap:
+        raise ApiBudgetProxyError("completed budget run exceeds its cap")
+    settled_total = Decimal(0)
+    for request_id, request in requests.items():
+        _require_safe_id(request_id, "request id")
+        if not isinstance(request, Mapping) or set(request) != {
+            "status",
+            "reserved_usd",
+            "charged_usd",
+            "usage_valid",
+            "attempt_count",
+            "settlement_kind",
+        }:
+            raise ApiBudgetProxyError("completed budget request differs from schema v1")
+        attempt_count = request["attempt_count"]
+        if (
+            request["status"] != "settled"
+            or request["usage_valid"] is not True
+            or request["settlement_kind"] != _SETTLEMENT_USAGE_PRICED
+            or isinstance(attempt_count, bool)
+            or not isinstance(attempt_count, int)
+            or not 1 <= attempt_count <= _MAX_UPSTREAM_ATTEMPTS
+        ):
+            raise ApiBudgetProxyError("completed budget request is not usage-settled")
+        reserved = _money(request["reserved_usd"])
+        charged = _money(request["charged_usd"])
+        if reserved <= 0 or charged > reserved:
+            raise ApiBudgetProxyError("completed budget request totals are invalid")
+        settled_total += charged
+    if settled_total != spent:
+        raise ApiBudgetProxyError("completed budget run total is inconsistent")
+    count = len(requests)
+    return {
+        "stopped": False,
+        "stop_reason": None,
+        "reserved_usd": _money_text(Decimal(0)),
+        "spent_usd": _money_text(spent),
+        "request_count": count,
+        "settled_request_count": count,
+        "usage_valid_request_count": count,
+    }
 
 
 def _validated_lite_header(headers: Any) -> bool:
@@ -1582,6 +1719,26 @@ def _validated_originator(headers: Any) -> str | None:
     if any(byte < 0x20 or byte > 0x7E for byte in encoded):
         raise ApiBudgetProxyError("originator header is invalid")
     return value
+
+
+def canonical_request_sha256(value: object) -> str:
+    """Hash one JSON request using the repository's single canonical encoding."""
+
+    if not isinstance(value, dict):
+        raise ApiBudgetProxyError("canonical request must be a JSON object")
+    try:
+        encoded = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise ApiBudgetProxyError("canonical request is not valid JSON") from exc
+    if len(encoded) > _MAX_RESPONSE_BYTES:
+        raise ApiBudgetProxyError("canonical request is too large")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _inspect_request(
@@ -1653,6 +1810,7 @@ def _inspect_request(
         input_items = 1
     return {
         "body_sha256": hashlib.sha256(body).hexdigest(),
+        "canonical_body_sha256": canonical_request_sha256(value),
         "role": role,
         "role_provenance": role_provenance,
         "declared_role": declared_role,
@@ -2007,6 +2165,7 @@ def _validate_state(
         raise ApiBudgetProxyError("budget ledger does not match the authorized batch")
     total_spent = Decimal(0)
     total_reserved = Decimal(0)
+    total_priced_overage_delta = Decimal(0)
     for run_id, run in value["runs"].items():
         _require_safe_id(run_id, "run id")
         if not isinstance(run, dict) or set(run) != {
@@ -2019,13 +2178,14 @@ def _validate_state(
             raise ApiBudgetProxyError("budget run state differs from schema v1")
         cap = _money(run["cap_usd"])
         spent = _money(run["spent_usd"])
-        if cap <= 0 or cap > default_run_cap or spent > cap:
+        if cap <= 0 or cap > default_run_cap:
             raise ApiBudgetProxyError("budget run totals are invalid")
         if not isinstance(run["stopped"], bool) or not isinstance(run["requests"], dict):
             raise ApiBudgetProxyError("budget run state is invalid")
         if run["stop_reason"] is not None and run["stop_reason"] not in _STOP_REASONS:
             raise ApiBudgetProxyError("budget stop reason is invalid")
         settled_total = Decimal(0)
+        run_priced_overage_delta = Decimal(0)
         for request_id, request in run["requests"].items():
             _require_safe_id(request_id, "request id")
             if not isinstance(request, dict) or set(request) != {
@@ -2038,7 +2198,7 @@ def _validate_state(
             }:
                 raise ApiBudgetProxyError("budget request state differs from schema v1")
             reserved = _money(request["reserved_usd"])
-            if reserved <= 0 or reserved > MAX_REQUEST_RESERVATION_USD:
+            if reserved <= 0 or reserved > cap:
                 raise ApiBudgetProxyError("budget reservation is invalid")
             attempt_count = request["attempt_count"]
             if (
@@ -2059,15 +2219,26 @@ def _validate_state(
                 charged = _money(request["charged_usd"])
                 settlement_kind = request["settlement_kind"]
                 if (
-                    charged > reserved
-                    or not isinstance(request["usage_valid"], bool)
+                    not isinstance(request["usage_valid"], bool)
                     or settlement_kind not in _SETTLEMENT_KINDS
                 ):
                     raise ApiBudgetProxyError("settled budget request is invalid")
+                if settlement_kind != _SETTLEMENT_USAGE_PRICED_OVERAGE and charged > reserved:
+                    raise ApiBudgetProxyError("settled budget request exceeds its reservation")
                 if settlement_kind == _SETTLEMENT_USAGE_PRICED and (
                     request["usage_valid"] is not True or attempt_count < 1
                 ):
                     raise ApiBudgetProxyError("priced budget settlement is invalid")
+                if settlement_kind == _SETTLEMENT_USAGE_PRICED_OVERAGE:
+                    if (
+                        request["usage_valid"] is not True
+                        or attempt_count < 1
+                        or charged <= reserved
+                        or run["stopped"] is not True
+                        or run["stop_reason"] != "usage_cost_exceeded_reservation"
+                    ):
+                        raise ApiBudgetProxyError("priced overage settlement is invalid")
+                    run_priced_overage_delta += charged - reserved
                 if settlement_kind == _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED and (
                     request["usage_valid"] is not False
                     or charged != 0
@@ -2081,10 +2252,16 @@ def _validate_state(
                 settled_total += charged
             else:
                 raise ApiBudgetProxyError("budget request status is invalid")
-        if spent != settled_total or spent + _reserved_total(run) > cap:
+        if spent != settled_total:
+            raise ApiBudgetProxyError("budget run total is inconsistent")
+        run_reserved = _reserved_total(run)
+        if run_priced_overage_delta and run_reserved:
+            raise ApiBudgetProxyError("priced overage run retains a reservation")
+        if spent + run_reserved > cap + run_priced_overage_delta:
             raise ApiBudgetProxyError("budget run exceeds its cap")
+        total_priced_overage_delta += run_priced_overage_delta
         total_spent += spent
-    if total_spent + total_reserved > total_cap:
+    if total_spent + total_reserved > total_cap + total_priced_overage_delta:
         raise ApiBudgetProxyError("budget ledger exceeds its batch cap")
 
 

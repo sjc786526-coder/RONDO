@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import stat
 import subprocess
 from dataclasses import dataclass, replace
@@ -13,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 
+from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
 from ..artifacts import ArtifactWriter
 from ..config import RepoPaths
 from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
@@ -25,7 +27,6 @@ from .freeze import (
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 from .metrics import RunMetricsError, metrics_from_dict
 from .pair import (
-    P1_PAIR_ID,
     RunPublicationContext,
     has_complete_guardian_approval_sequence,
 )
@@ -233,6 +234,26 @@ def publish_terminal_bench_result(
         parsed,
         metadata_path=metadata_path,
     )
+    budget_accounting: dict[str, object] | None = None
+    if parsed.outcome is RunOutcome.COMPLETED:
+        try:
+            budget_accounting = completed_run_accounting(
+                live_result.budget_snapshot, run_id
+            )
+        except ApiBudgetProxyError as exc:
+            raise HarborResultError("completed run budget accounting is invalid") from exc
+        metadata_request_ids = _verified_request_ids(metadata_path)
+        budget_runs = live_result.budget_snapshot.get("runs")
+        budget_run = budget_runs.get(run_id) if isinstance(budget_runs, Mapping) else None
+        budget_requests = (
+            budget_run.get("requests") if isinstance(budget_run, Mapping) else None
+        )
+        if (
+            budget_accounting["request_count"] != len(request_roles)
+            or not isinstance(budget_requests, Mapping)
+            or set(budget_requests) != set(metadata_request_ids)
+        ):
+            raise HarborResultError("completed budget requests differ from API metadata")
     writer = writer or ArtifactWriter(
         paths, run_id, results_worktree_root=results_worktree_root
     ).start()
@@ -246,6 +267,7 @@ def publish_terminal_bench_result(
         live_result,
         parsed,
         request_roles=request_roles,
+        budget_accounting=budget_accounting,
         publication=publication,
     )
     writer.write_json("run-summary.json", summary)
@@ -487,12 +509,16 @@ def _safe_summary(
     parsed: ParsedHarborResult,
     *,
     request_roles: tuple[str, ...],
+    budget_accounting: Mapping[str, object] | None,
     publication: RunPublicationContext,
 ) -> dict[str, Any]:
     spec = live_result.prepared.spec
     evidence = [
         {
-            "relative_path": item.relative_path,
+            # Publication revalidates the private Harbor source path, then
+            # archives under a review-id-independent stable location.  Public
+            # consumers must only receive the durable archived path.
+            "relative_path": f"guardian-evidence/{index:04d}/E_final.json",
             "review_id": item.review_id,
             "guardian_source_baseline": item.guardian_source_baseline,
             "guardian_source_commit": item.guardian_source_commit,
@@ -501,8 +527,9 @@ def _safe_summary(
             "model": item.model,
             "reasoning_effort": item.reasoning_effort,
             "terminal_status": item.terminal_status,
+            "canonical_request_sha256": item.canonical_request_sha256,
         }
-        for item in live_result.evidence
+        for index, item in enumerate(live_result.evidence, start=1)
     ]
     effective_task_outcome = (
         parsed.task_outcome
@@ -580,6 +607,9 @@ def _safe_summary(
                 "guardian": guardian_requests,
             },
             "api_request_sequence": list(request_roles),
+            "budget_accounting": (
+                dict(budget_accounting) if budget_accounting is not None else None
+            ),
             "docker_samples": len(live_result.harbor.docker_evidence.samples)
             if live_result.harbor.docker_evidence is not None
             else 0,
@@ -749,6 +779,18 @@ def _validate_publication_evidence(
                 raise HarborResultError(
                     "RONDO completed run requires one approved evidence per Guardian request"
                 )
+            request_digests = _guardian_request_digests(metadata_path)
+            evidence_digests = tuple(
+                item.canonical_request_sha256 for item in live_result.evidence
+            )
+            if (
+                any(digest is None for digest in evidence_digests)
+                or len(set(evidence_digests)) != len(evidence_digests)
+                or set(evidence_digests) != set(request_digests)
+            ):
+                raise HarborResultError(
+                    "RONDO Guardian evidence is not bound to canonical requests"
+                )
         elif live_result.evidence:
             raise HarborResultError("frozen Codex cannot publish RONDO Guardian evidence")
     elif (
@@ -845,6 +887,17 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or sequence.count("guardian") != roles["guardian"]
     ):
         raise HarborResultError("Terminal-Bench API request sequence is invalid")
+    budget_accounting = summary.get("budget_accounting")
+    if outcome is RunOutcome.COMPLETED:
+        _validate_public_budget_accounting(
+            budget_accounting,
+            request_count=len(sequence),
+            estimated_usd=record.get("cost", {}).get("estimated_usd")
+            if isinstance(record.get("cost"), Mapping)
+            else None,
+        )
+    elif budget_accounting is not None:
+        raise HarborResultError("non-completed run contains completed budget accounting")
     if outcome is RunOutcome.COMPLETED and not has_complete_guardian_approval_sequence(
         sequence
     ):
@@ -866,15 +919,25 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
                 or any(
                     not isinstance(item, dict)
                     or item.get("terminal_status") != "approved"
+                    or not isinstance(item.get("canonical_request_sha256"), str)
+                    or re.fullmatch(
+                        r"[0-9a-f]{64}", item["canonical_request_sha256"]
+                    )
+                    is None
                     for item in evidence
                 )
+                or len(
+                    {item["canonical_request_sha256"] for item in evidence}
+                )
+                != len(evidence)
                 or binding != "verified"
             ):
                 raise HarborResultError("completed RONDO Guardian evidence is not bound")
         elif evidence or binding != "not_triggered":
             raise HarborResultError("completed frozen Codex record contains RONDO evidence")
     if (
-        config.get("pair_id") != P1_PAIR_ID
+        not isinstance(config.get("pair_id"), str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", config["pair_id"]) is None
         or not isinstance(config.get("pair_lock_sha256"), str)
         or config.get("pair_slot") not in {1, 2}
         or config.get("pair_round") != 1
@@ -882,9 +945,77 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         raise HarborResultError("Terminal-Bench pair identity is invalid")
 
 
+def _validate_public_budget_accounting(
+    value: object,
+    *,
+    request_count: int,
+    estimated_usd: object,
+) -> None:
+    expected_keys = {
+        "stopped",
+        "stop_reason",
+        "reserved_usd",
+        "spent_usd",
+        "request_count",
+        "settled_request_count",
+        "usage_valid_request_count",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise HarborResultError("completed budget accounting differs from schema v1")
+    if (
+        value.get("stopped") is not False
+        or value.get("stop_reason") is not None
+        or value.get("reserved_usd") != "0.000000"
+        or value.get("request_count") != request_count
+        or value.get("settled_request_count") != request_count
+        or value.get("usage_valid_request_count") != request_count
+        or request_count < 1
+    ):
+        raise HarborResultError("completed budget accounting is not fully settled")
+    try:
+        spent = Decimal(value.get("spent_usd"))
+        estimated = Decimal(str(estimated_usd))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HarborResultError("completed budget spend is invalid") from exc
+    if not spent.is_finite() or spent < 0 or spent != estimated:
+        raise HarborResultError("completed budget spend differs from the public cost")
+
+
 def _verified_request_roles(metadata_path: Path) -> tuple[str, ...]:
     metadata = _read_json_object(metadata_path)
     return _request_roles(metadata)
+
+
+def _verified_request_ids(metadata_path: Path) -> tuple[str, ...]:
+    metadata = _read_json_object(metadata_path)
+    _request_roles(metadata)
+    request_ids = tuple(item.get("request_id") for item in metadata["requests"])
+    if (
+        any(not isinstance(request_id, str) or not request_id for request_id in request_ids)
+        or len(set(request_ids)) != len(request_ids)
+    ):
+        raise HarborResultError("API metadata request ids are invalid")
+    return request_ids
+
+
+def _guardian_request_digests(metadata_path: Path) -> tuple[str, ...]:
+    metadata = _read_json_object(metadata_path)
+    roles = _request_roles(metadata)
+    requests = metadata["requests"]
+    digests: list[str] = []
+    for role, request in zip(roles, requests, strict=True):
+        if role != "guardian":
+            continue
+        digest = request.get("canonical_body_sha256")
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise HarborResultError("Guardian request canonical digest is invalid")
+        digests.append(digest)
+    if len(set(digests)) != len(digests):
+        raise HarborResultError("Guardian request canonical digest is duplicated")
+    return tuple(digests)
 
 
 def _request_roles(metadata: Mapping[str, Any]) -> tuple[str, ...]:
@@ -949,11 +1080,20 @@ def _run_spend(snapshot: Mapping[str, object], run_id: str) -> float:
     runs = snapshot.get("runs")
     run = runs.get(run_id) if isinstance(runs, dict) else None
     value = run.get("spent_usd") if isinstance(run, dict) else None
+    cap_value = run.get("cap_usd") if isinstance(run, dict) else None
     try:
         amount = Decimal(value)
+        cap = Decimal(cap_value)
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise HarborResultError("budget snapshot lacks run spend") from exc
-    if not amount.is_finite() or amount < 0 or amount > Decimal("10"):
+    if (
+        not amount.is_finite()
+        or not cap.is_finite()
+        or cap <= 0
+        or cap > Decimal("40")
+        or amount < 0
+        or amount > cap
+    ):
         raise HarborResultError("budget snapshot run spend is invalid")
     return float(amount)
 

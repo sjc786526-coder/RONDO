@@ -364,7 +364,8 @@ class ModelCliDiagnosticTests(unittest.TestCase):
                 (phase_attempts[1], True, False, 0),
             ],
         ) as run_phase, mock.patch(
-            "rondo_eval.terminal_bench.pair.load_pair_identity", return_value=identity
+            "rondo_eval.terminal_bench.pair.load_active_pair_identity",
+            return_value=identity,
         ):
             receipt = run_campaign(
                 types.SimpleNamespace(common_root=Path(directory)),

@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 
+from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
 from ..contracts import (
     BinaryManifest,
     ModelPricing,
@@ -41,63 +42,36 @@ if TYPE_CHECKING:
     from .runner import PreparedTerminalBenchRun
 
 
-PAIR_LOCK_PATH = Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v12.json"
-PREVIOUS_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v11.json"
+_LOCKS_ROOT = Path(__file__).resolve().parents[2] / "locks"
+
+
+@dataclass(frozen=True)
+class HistoricalPairLock:
+    """One immutable pair lock retained only for replay and aggregation."""
+
+    name: str
+    path: Path
+    schema_version: int
+    pair_id: str
+    per_side_cap_usd: int
+
+
+HISTORICAL_PAIR_LOCKS: tuple[HistoricalPairLock, ...] = tuple(
+    HistoricalPairLock(
+        name=f"v{pair_version}",
+        path=_LOCKS_ROOT / f"p1-terminal-bench-pair-v{pair_version - 7}.json",
+        schema_version=1 if pair_version == 8 else 2,
+        pair_id=f"p1-fix-git-pair-v{pair_version}",
+        per_side_cap_usd=10 if pair_version >= 11 else 5,
+    )
+    for pair_version in range(8, 20)
 )
-CONSUMED_V17_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v10.json"
-)
-CONSUMED_V16_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v9.json"
-)
-CONSUMED_V15_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v8.json"
-)
-CONSUMED_V14_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v7.json"
-)
-CONSUMED_V13_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v6.json"
-)
-CONSUMED_V12_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v5.json"
-)
-CONSUMED_V11_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v4.json"
-)
-CONSUMED_V10_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v3.json"
-)
-CONSUMED_V9_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v2.json"
-)
-LEGACY_PAIR_LOCK_PATH = (
-    Path(__file__).resolve().parents[2] / "locks" / "p1-terminal-bench-pair-v1.json"
-)
-P1_PAIR_ID = "p1-fix-git-pair-v19"
-PREVIOUS_P1_PAIR_ID = "p1-fix-git-pair-v18"
-CONSUMED_V17_P1_PAIR_ID = "p1-fix-git-pair-v17"
-CONSUMED_V16_P1_PAIR_ID = "p1-fix-git-pair-v16"
-CONSUMED_V15_P1_PAIR_ID = "p1-fix-git-pair-v15"
-CONSUMED_V14_P1_PAIR_ID = "p1-fix-git-pair-v14"
-CONSUMED_V13_P1_PAIR_ID = "p1-fix-git-pair-v13"
-CONSUMED_V12_P1_PAIR_ID = "p1-fix-git-pair-v12"
-CONSUMED_V11_P1_PAIR_ID = "p1-fix-git-pair-v11"
-CONSUMED_V10_P1_PAIR_ID = "p1-fix-git-pair-v10"
-CONSUMED_V9_P1_PAIR_ID = "p1-fix-git-pair-v9"
-LEGACY_P1_PAIR_ID = "p1-fix-git-pair-v8"
-_TEN_USD_PAIR_IDS = {
-    P1_PAIR_ID,
-    PREVIOUS_P1_PAIR_ID,
-    CONSUMED_V17_P1_PAIR_ID,
-    CONSUMED_V16_P1_PAIR_ID,
-    CONSUMED_V15_P1_PAIR_ID,
-    CONSUMED_V14_P1_PAIR_ID,
-    CONSUMED_V13_P1_PAIR_ID,
-    CONSUMED_V12_P1_PAIR_ID,
-    CONSUMED_V11_P1_PAIR_ID,
+_HISTORICAL_PAIR_BY_NAME = {item.name: item for item in HISTORICAL_PAIR_LOCKS}
+_HISTORICAL_PAIR_IDS = frozenset(item.pair_id for item in HISTORICAL_PAIR_LOCKS)
+_HISTORICAL_CAP_BY_ID = {
+    item.pair_id: item.per_side_cap_usd for item in HISTORICAL_PAIR_LOCKS
 }
+LATEST_HISTORICAL_PAIR_NAME = "v19"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
 _PAIR_LOCK_V1_KEYS = {
     "schema_version",
@@ -230,9 +204,7 @@ class PairSequenceLedger:
         self._state: dict[str, Any] | None = None
         self._persist_hook = persist_hook or (lambda _point: None)
         self._read_only = read_only
-        if (
-            identity.schema_version != 2 or identity.pair_id != P1_PAIR_ID
-        ) and not read_only:
+        if identity.pair_id in _HISTORICAL_PAIR_IDS and not read_only:
             raise PairIdentityError("historical pair identity is read-only")
 
     def __enter__(self) -> PairSequenceLedger:
@@ -846,7 +818,7 @@ class RunPublicationContext:
     selected_profile: Mapping[str, object]
 
     def validate(self) -> None:
-        if self.pair_id != P1_PAIR_ID:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", self.pair_id):
             raise PairIdentityError("publication pair id is invalid")
         _require_sha256(self.pair_lock_sha256, "pair lock sha256")
         if self.pair_slot not in {1, 2} or self.pair_round != 1:
@@ -858,94 +830,33 @@ class RunPublicationContext:
         _parse_selected_profile(self.selected_profile)
 
 
-def load_pair_identity(path: Path = PAIR_LOCK_PATH) -> PairIdentity:
-    """Load only the active schema-v2 paid identity."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=P1_PAIR_ID)
-
-
-def load_legacy_pair_identity(path: Path = LEGACY_PAIR_LOCK_PATH) -> PairIdentity:
-    """Load the consumed v8 identity for read-only historical assessment."""
-
-    return _load_pair_identity(path, schema_version=1, pair_id=LEGACY_P1_PAIR_ID)
-
-
-def load_previous_pair_identity(path: Path = PREVIOUS_PAIR_LOCK_PATH) -> PairIdentity:
-    """Load the Codex-install-failed v18 identity for read-only assessment."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=PREVIOUS_P1_PAIR_ID)
-
-
-def load_consumed_v17_pair_identity(
-    path: Path = CONSUMED_V17_PAIR_LOCK_PATH,
+def load_historical_pair_identity(
+    name: str = LATEST_HISTORICAL_PAIR_NAME,
+    *,
+    path: Path | None = None,
 ) -> PairIdentity:
-    """Load the Docker-failed v17 identity for read-only assessment."""
+    """Load one immutable historical identity for replay or no-API checks."""
 
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V17_P1_PAIR_ID)
-
-
-def load_consumed_v16_pair_identity(
-    path: Path = CONSUMED_V16_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the publication-failed v16 identity for read-only assessment."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V16_P1_PAIR_ID)
-
-
-def load_consumed_v15_pair_identity(
-    path: Path = CONSUMED_V15_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the third-approval-failed v15 identity for read-only assessment."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V15_P1_PAIR_ID)
+    registration = _HISTORICAL_PAIR_BY_NAME.get(name)
+    if registration is None:
+        raise PairIdentityError("historical pair identity is unknown")
+    return _load_pair_identity(
+        path or registration.path,
+        schema_version=registration.schema_version,
+        pair_id=registration.pair_id,
+    )
 
 
-def load_consumed_v14_pair_identity(
-    path: Path = CONSUMED_V14_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the second-approval-failed v14 identity for read-only assessment."""
+def load_no_api_pair_identity() -> PairIdentity:
+    """Use the newest completed freeze for offline/no-API compatibility checks."""
 
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V14_P1_PAIR_ID)
+    return load_historical_pair_identity()
 
 
-def load_consumed_v13_pair_identity(
-    path: Path = CONSUMED_V13_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the Guardian-failed v13 identity for read-only historical assessment."""
+def load_active_pair_identity() -> PairIdentity:
+    """Fail closed until a newly authorized paid pair is frozen."""
 
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V13_P1_PAIR_ID)
-
-
-def load_consumed_v12_pair_identity(
-    path: Path = CONSUMED_V12_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the canary-failed v12 identity for read-only historical assessment."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V12_P1_PAIR_ID)
-
-
-def load_consumed_v11_pair_identity(
-    path: Path = CONSUMED_V11_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the preflight-failed v11 identity for read-only historical assessment."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V11_P1_PAIR_ID)
-
-
-def load_consumed_v10_pair_identity(
-    path: Path = CONSUMED_V10_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the consumed v10 identity for read-only historical assessment."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V10_P1_PAIR_ID)
-
-
-def load_consumed_v9_pair_identity(
-    path: Path = CONSUMED_V9_PAIR_LOCK_PATH,
-) -> PairIdentity:
-    """Load the consumed v9 identity for read-only historical assessment."""
-
-    return _load_pair_identity(path, schema_version=2, pair_id=CONSUMED_V9_P1_PAIR_ID)
+    raise PairIdentityError("no active paid pair identity is configured")
 
 
 def _load_pair_identity(
@@ -970,10 +881,15 @@ def _load_pair_identity(
         raise PairIdentityError("pair lock identity differs from P1")
     modes = _parse_modes(value["modes"])
     topology = _parse_topology(value["topology"], modes=modes)
+    paid_budget = (
+        _parse_paid_budget(value["paid_budget"], pair_id=pair_id)
+        if schema_version == 2
+        else None
+    )
     fairness = _parse_fairness(
         value["fairness"],
         schema_version=schema_version,
-        pair_id=pair_id,
+        budget_usd=paid_budget.per_side_usd if paid_budget is not None else 5.0,
     )
     harbor = _parse_harbor(value["harbor"])
     no_api_seccomp = _parse_no_api_seccomp(value["no_api_seccomp"])
@@ -981,11 +897,6 @@ def _load_pair_identity(
     bundles = _parse_bundles(value["bundles"])
     selected_profile = (
         _parse_selected_profile(value["selected_profile"])
-        if schema_version == 2
-        else None
-    )
-    paid_budget = (
-        _parse_paid_budget(value["paid_budget"], pair_id=pair_id)
         if schema_version == 2
         else None
     )
@@ -1039,7 +950,7 @@ def validate_harbor_installation(
         raise PairIdentityError("frozen Harbor distribution is not installed") from exc
     if dist.version != expected.version:
         raise PairIdentityError("installed Harbor version differs from the pair lock")
-    uv_lock = PAIR_LOCK_PATH.parents[1] / "uv.lock"
+    uv_lock = _LOCKS_ROOT.parent / "uv.lock"
     if _file_sha256(uv_lock) != expected.uv_lock_sha256:
         raise PairIdentityError("eval uv.lock differs from the pair lock")
     for relative, digest in expected.key_files.items():
@@ -1082,6 +993,7 @@ def assess_m1(
     identity: PairIdentity,
     *,
     pair_ledger_path: Path,
+    budget_ledger_path: Path | None = None,
 ) -> dict[str, object]:
     """Evaluate M1 only when records and the durable paid ledger agree."""
 
@@ -1116,7 +1028,9 @@ def assess_m1(
     except PairIdentityError:
         reasons.append("paid_pair_disabled")
         ledger: Mapping[str, Any] | None = None
+        paid_mode: PairMode | None = None
     else:
+        paid_mode = identity.mode("paid")
         try:
             if not pair_ledger_path.exists() or pair_ledger_path.is_symlink():
                 raise PairIdentityError("paid pair ledger is unavailable")
@@ -1130,6 +1044,41 @@ def assess_m1(
         except PairIdentityError:
             ledger = None
             reasons.append("paid_pair_ledger_invalid")
+    budget_ledger: Mapping[str, Any] | None = None
+    if budget_ledger_path is None:
+        reasons.append("budget_ledger_invalid")
+    else:
+        try:
+            budget_ledger = _read_budget_ledger(budget_ledger_path)
+            budget_runs = budget_ledger.get("runs")
+            if (
+                paid_mode is None
+                or budget_ledger.get("batch_id") != paid_mode.batch_id
+                or not isinstance(budget_runs, Mapping)
+                or set(budget_runs)
+                != {record.get("run_id") for record in candidates}
+                or identity.paid_budget is None
+                or Decimal(str(budget_ledger.get("total_cap_usd")))
+                != Decimal(str(identity.paid_budget.pair_usd))
+                or Decimal(str(budget_ledger.get("default_run_cap_usd")))
+                != Decimal(str(identity.paid_budget.per_side_usd))
+            ):
+                raise PairIdentityError("budget ledger differs from the pair identity")
+            expected_run_cap = Decimal(str(identity.paid_budget.per_side_usd))
+            total_cap = Decimal(str(identity.paid_budget.pair_usd))
+            run_spent_total = Decimal(0)
+            for budget_run in budget_runs.values():
+                if (
+                    not isinstance(budget_run, Mapping)
+                    or Decimal(str(budget_run.get("cap_usd"))) != expected_run_cap
+                ):
+                    raise PairIdentityError("budget run cap differs from the pair identity")
+                run_spent_total += Decimal(str(budget_run.get("spent_usd")))
+            if run_spent_total > total_cap:
+                raise PairIdentityError("budget ledger exceeds the pair cost cap")
+        except (PairIdentityError, InvalidOperation, TypeError, ValueError):
+            budget_ledger = None
+            reasons.append("budget_ledger_invalid")
     ledger_runs: dict[int, Mapping[str, Any]] = {}
     if ledger is not None:
         raw_runs = ledger.get("runs")
@@ -1192,6 +1141,24 @@ def assess_m1(
             > identity.require_selected_profile().max_guardian_logical_requests
         ):
             reasons.append(f"{slot.side.value}_guardian_approval_incomplete")
+        if budget_ledger is not None:
+            try:
+                accounting = completed_run_accounting(
+                    budget_ledger, str(record.get("run_id"))
+                )
+            except ApiBudgetProxyError:
+                reasons.append(f"{slot.side.value}_budget_not_completed")
+            else:
+                public_accounting = (
+                    summary.get("budget_accounting")
+                    if isinstance(summary, Mapping)
+                    else None
+                )
+                if public_accounting is None:
+                    if identity.pair_id not in _HISTORICAL_PAIR_IDS:
+                        reasons.append(f"{slot.side.value}_budget_accounting_missing")
+                elif public_accounting != accounting:
+                    reasons.append(f"{slot.side.value}_budget_accounting_mismatch")
         ledger_run = ledger_runs.get(slot.slot)
         eval_commit = config.get("eval_harness_commit") if isinstance(config, dict) else None
         if (
@@ -1219,14 +1186,86 @@ def assess_m1(
         guardian = roles.get("guardian", 0) if isinstance(roles, Mapping) else 0
         evidence = summary.get("evidence") if isinstance(summary, Mapping) else None
         if guardian or evidence:
-            result["s2"] = (
-                "verified"
-                if summary.get("s2_request_evidence_binding") == "verified"
-                else "unbound"
+            binding = summary.get("s2_request_evidence_binding")
+            evidence_digests = (
+                [item.get("canonical_request_sha256") for item in evidence]
+                if isinstance(evidence, list)
+                and all(isinstance(item, Mapping) for item in evidence)
+                else []
             )
+            evidence_digests_valid = all(
+                isinstance(digest, str)
+                and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+                for digest in evidence_digests
+            )
+            if (
+                binding == "verified"
+                and len(evidence_digests) == guardian
+                and evidence_digests_valid
+                and len(set(evidence_digests)) == guardian
+            ):
+                result["s2"] = "verified"
+            elif (
+                identity.pair_id in _HISTORICAL_PAIR_IDS
+                and binding == "verified"
+                and isinstance(evidence, list)
+                and len(evidence) == guardian
+            ):
+                # Pre-canonical-digest records prove only a task-scoped count
+                # match. Preserve their immutable bytes without overstating S2.
+                result["s2"] = "task_scoped_count_match"
+            else:
+                result["s2"] = "unbound"
+            if result["s2"] == "unbound":
+                reasons.append("rondo_guardian_evidence_unbound")
     result["reasons"] = sorted(set(reasons))
     result["m1"] = "passed" if not reasons else "failed"
     return result
+
+
+def _read_budget_ledger(path: Path) -> Mapping[str, Any]:
+    """Read a stable existing budget ledger without creating or repairing it."""
+
+    path = Path(path)
+    lock_path = path.with_name(f".{path.name}.lock")
+    try:
+        path_stat = path.lstat()
+        lock_stat = lock_path.lstat()
+        if (
+            path.is_symlink()
+            or lock_path.is_symlink()
+            or not stat.S_ISREG(path_stat.st_mode)
+            or not stat.S_ISREG(lock_stat.st_mode)
+        ):
+            raise PairIdentityError("budget ledger paths are unsafe")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(lock_path, flags)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_SH)
+            raw = path.read_bytes()
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+    except PairIdentityError:
+        raise
+    except OSError as exc:
+        raise PairIdentityError("budget ledger is unavailable") from exc
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        raise PairIdentityError("budget ledger is empty or oversized")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise PairIdentityError("budget ledger is unreadable") from exc
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_version",
+        "batch_id",
+        "total_cap_usd",
+        "max_runs",
+        "default_run_cap_usd",
+        "runs",
+    } or value.get("schema_version") != 1:
+        raise PairIdentityError("budget ledger differs from schema v1")
+    return value
 
 
 def has_complete_guardian_approval_sequence(sequence: object) -> bool:
@@ -1464,9 +1503,8 @@ def _parse_fairness(
     value: object,
     *,
     schema_version: int,
-    pair_id: str,
+    budget_usd: float,
 ) -> dict[str, object]:
-    budget_usd = 10.0 if pair_id in _TEN_USD_PAIR_IDS else 5.0
     expected = {
         "task_id": FIX_GIT_TASK_ID,
         "task_image_digest": FIX_GIT_IMAGE_DIGEST,
@@ -1506,18 +1544,30 @@ def _parse_paid_budget(value: object, *, pair_id: str) -> PaidBudgetIdentity:
         raise PairIdentityError("paid pair budget differs from schema v2")
     per_side = value["per_side_usd"]
     pair = value["pair_usd"]
-    expected_per_side = 10.0 if pair_id in _TEN_USD_PAIR_IDS else 5.0
-    expected_pair = expected_per_side * 2.0
     if (
         isinstance(per_side, bool)
         or not isinstance(per_side, (int, float))
         or isinstance(pair, bool)
         or not isinstance(pair, (int, float))
-        or float(per_side) != expected_per_side
-        or float(pair) != expected_pair
     ):
         raise PairIdentityError("paid pair budget differs from Plan 014")
-    return PaidBudgetIdentity(float(per_side), float(pair))
+    per_side_decimal = Decimal(str(per_side))
+    pair_decimal = Decimal(str(pair))
+    expected_historical_cap = _HISTORICAL_CAP_BY_ID.get(pair_id)
+    if (
+        not per_side_decimal.is_finite()
+        or not pair_decimal.is_finite()
+        or per_side_decimal <= 0
+        or per_side_decimal > Decimal("40")
+        or pair_decimal != per_side_decimal * 2
+        or pair_decimal > Decimal("80")
+        or (
+            expected_historical_cap is not None
+            and per_side_decimal != Decimal(expected_historical_cap)
+        )
+    ):
+        raise PairIdentityError("paid pair budget differs from Plan 014")
+    return PaidBudgetIdentity(float(per_side_decimal), float(pair_decimal))
 
 
 def _parse_selected_profile(value: object) -> SelectedProfileIdentity:

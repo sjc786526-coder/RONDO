@@ -42,7 +42,7 @@ from .results import (
 from .pair import (
     B2_NO_API_BATCH_ID,
     PairIdentity,
-    load_pair_identity,
+    load_no_api_pair_identity,
     validate_harbor_installation,
 )
 from .runner import (
@@ -610,7 +610,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         paths = RepoPaths.discover(Path.cwd())
-        pair_identity = load_pair_identity()
+        pair_identity = load_no_api_pair_identity()
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
         seccomp_profile = pair_identity.validate_no_api_seccomp(

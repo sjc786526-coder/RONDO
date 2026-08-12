@@ -68,7 +68,8 @@
   L2a/L3/L4 均未实现验收，不称“只差权重”。
 - **当前阶段：P1 的 B1、B2、B3、L1 与 L2 CPU x64 前置已整体完成，M1 已通过。Plan 014 v19 在同一冻结
   Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
-  reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved 且 S2 绑定 verified。
+  reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
+  只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
   `assess_m1` 返回 passed。下一阶段进入 P2：先完成 B4 分层清单与 B5/B6 轻量设施，再单独估算和授权 B7。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
@@ -80,8 +81,10 @@
   Plan 012 所有真实探针与 v8 ledger 都已 settled、没有悬挂 reservation；v8 的 5 个 Sol main 请求成功，Guardian
   Luna 请求 HTTP 503/usage invalid，单 run 本地预算按合同完整结算为 `$5.000000`。后续模型诊断分别闭合
   Luna/Luna 与 Sol/Sol，并最终以冻结 Codex/RONDO 各 Sol main + Sol/low Guardian 连续跑完 3 轮；24 个请求
-  零重试，本地价卡估算合计 `$1.234473`。短测以后按每 upstream request 预留 1 USD，正式/大请求继续按
-  5 USD。active profile 当前为 relay + Sol main + Sol Guardian/low。实际中转账单未查询且 `actual_usd=null`；
+  零重试，本地价卡估算合计 `$1.234473`。短测只有显式选择时按每 upstream request 预留 1 USD；后续正式
+  请求按所选价卡的最大合法 usage envelope 预留，当前 Sol 上界为 18.885000 USD。local profile 当前为 relay +
+  Sol main + Sol Guardian/low；main/Guardian 可短暂重叠，后续新 pair 须据此冻结新 cap，但 paid identity/入口当前
+  已关闭。实际中转账单未查询且 `actual_usd=null`；
   Plan 014 历史失败 identity 均保持不可复用；最终 v19 canary + 双侧 pair 连同此前保守结算后的本阶段累计
   本地估算为 `$6.988825 < $280`，全部 reservation 已结算，`actual_usd=null`。v19 的真实 evidence 可作为后续
   确定性 seed/holdout 切分输入，但不得直接进入训练集。
@@ -168,9 +171,13 @@ image 和同一运行合同完成 no-API 链路，current receipt 与看门狗 s
 B3 使用 Plan 014 v19 的 source-bound Sol/Sol profile 与唯一 identity 完成。RONDO 和 frozen Codex 在同一
 `fix-git` task/image 上分别 `completed`/reward 1，全部 35 个 upstream request 均 attempt 1、usage valid，双侧
 预算 run 未停止且 reservation 为 0。RONDO 的两份 Sol/low Guardian `E_final/meta` 均自然 approved，S2 request/
-evidence 集合绑定 verified；两侧 public result、pair lock、sequence ledger、container metrics 和 profile/endpoint
+evidence 在 v19 旧合同下为 task-scoped count match；两侧 public result、pair lock、sequence ledger、container metrics 和 profile/endpoint
 hash 经既有 `assess_m1` 聚合为 `m1=passed`、`reasons=[]`。v19 正式费用 `$0.870787`，Plan 014 全阶段累计本地估算
 `$6.988825 < $280`，供应商实际账单未知。历史失败 identity 及其 ledger/result/artifact 保持原终态，不回填。
+运行后离线修复已使后续 completed/M1 强制消费未停止且完全 usage-priced 的预算终态、精确 request IDs 和 canonical
+Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再可由 paid CLI/canary 重跑。预算 overage 记录完整
+估价并停止，Docker lease/cleanup 与 proxy deadline/claim 生命周期缺口也已闭合。完整 eval 349/349、lock 85 packages
+通过；本批未调用 API、Docker 或 Cargo。
 L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
 下一步是 B4 分层与 B5/B6 轻量设施，不自动启动 B7 付费跑批。执行细节见 Plan 014 与本批 `agent_log`。
 

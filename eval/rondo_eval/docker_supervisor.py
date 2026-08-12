@@ -1448,6 +1448,7 @@ class DockerSupervisor:
                 deadline=sample_deadline,
             )
             reading.validate()
+            self._assert_lock(lease, samples=samples)
             if self._monotonic() >= sample_deadline:
                 raise DockerSupervisionError(
                     "Docker counter probe exceeded its absolute deadline",
@@ -1554,15 +1555,31 @@ class DockerSupervisor:
                     cleanup_failed = True
                     break
                 cleanup_handle = self._cleanup_runner.start(argv)
-                returncode = cleanup_handle.wait(remaining)
+                remaining = cleanup_deadline - self._monotonic()
+                if remaining <= 0:
+                    self._stop_before_deadline(
+                        cleanup_handle,
+                        deadline=cleanup_deadline,
+                    )
+                    cleanup_failed = True
+                    break
+                returncode = cleanup_handle.wait(
+                    max(0.0, remaining - SAMPLE_INTERVAL_SECONDS)
+                )
                 if returncode is None:
-                    self._stop(cleanup_handle, close_group=False)
+                    self._stop_before_deadline(
+                        cleanup_handle,
+                        deadline=cleanup_deadline,
+                    )
                     cleanup_failed = True
                 elif returncode != 0:
                     cleanup_failed = True
             except Exception:
                 if cleanup_handle is not None:
-                    self._stop(cleanup_handle, close_group=False)
+                    self._stop_before_deadline(
+                        cleanup_handle,
+                        deadline=cleanup_deadline,
+                    )
                 cleanup_failed = True
 
         try:
@@ -1941,6 +1958,37 @@ class DockerSupervisor:
         except Exception:
             return False
         return not close_group
+
+    def _stop_before_deadline(
+        self,
+        handle: RunningCommand,
+        *,
+        deadline: float,
+    ) -> bool:
+        """Stop and reap one cleanup process within its existing deadline."""
+
+        try:
+            handle.terminate()
+        except Exception:
+            pass
+        remaining = deadline - self._monotonic()
+        if remaining > 0:
+            try:
+                if handle.wait(remaining / 2) is not None:
+                    return True
+            except Exception:
+                pass
+        try:
+            handle.kill()
+        except Exception:
+            return False
+        remaining = deadline - self._monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            return handle.wait(remaining) is not None
+        except Exception:
+            return False
 
 
 def _require_pinned_image(image: str) -> None:

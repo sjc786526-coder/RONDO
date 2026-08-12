@@ -22,7 +22,7 @@ from ..runtime_bridge import (
 from .docker_smoke import _print_safe_cli_error, _write_current_receipt
 from .freeze import FIX_GIT_IMAGE_DIGEST
 from .materialize import PinnedTaskMaterializer
-from .pair import load_pair_identity, validate_harbor_installation
+from .pair import load_no_api_pair_identity, validate_harbor_installation
 from .results import ParsedHarborResult, parse_single_task_result, validate_eval_harness_checkout
 from .runner import DockerSupervisedHostHarborExecutor, HARBOR_EXECUTABLE, HostHarborResult
 from .verifier_runtime import prepare_fix_git_workdir, prepare_verifier_apt_dirs
@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         paths = RepoPaths.discover(Path.cwd())
-        pair_identity = load_pair_identity()
+        pair_identity = load_no_api_pair_identity()
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
         provider = config.paid_provider()

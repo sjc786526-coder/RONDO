@@ -1322,6 +1322,8 @@ class TerminalBenchTests(unittest.TestCase):
             "schema_version": 1,
             "requests": [{
                 "role": "guardian",
+                "body_sha256": "a" * 64,
+                "canonical_body_sha256": "b" * 64,
                 "role_provenance": "declared",
                 "declared_role": "guardian",
                 "inferred_role": "guardian",
