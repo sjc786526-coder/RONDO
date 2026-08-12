@@ -470,6 +470,25 @@ class UploadBinaryAdapter(HarborCodexAgent):
             if self._task_requires_existing_git_repo
             else ""
         )
+        git_configuration = (
+            ': > {config}; chmod 0600 {config}; '
+            'git config --global --replace-all safe.directory "$task_workdir"; '
+            'test "$(git config --global --get-all safe.directory | wc -l)" -eq 1; '
+            'test "$(git config --global --get-all safe.directory)" = "$task_workdir"; '
+            "git config --global --replace-all user.name {name}; "
+            'test "$(git config --global --get-all user.name | wc -l)" -eq 1; '
+            'test "$(git config --global --get-all user.name)" = {name}; '
+            "git config --global --replace-all user.email {email}; "
+            'test "$(git config --global --get-all user.email | wc -l)" -eq 1; '
+            'test "$(git config --global --get-all user.email)" = {email}; '
+        ).format(
+            config=shlex.quote(remote_gitconfig),
+            name=shlex.quote(FIX_GIT_GIT_USER_NAME),
+            email=shlex.quote(FIX_GIT_GIT_USER_EMAIL),
+        ) if self._task_requires_existing_git_repo else (
+            f": > {shlex.quote(remote_gitconfig)}; "
+            f"chmod 0600 {shlex.quote(remote_gitconfig)}; "
+        )
 
         # Harbor freezes environment.default_user to the task's 1000:1000
         # identity.  Root may only expose the exact current task workdir; all
@@ -504,21 +523,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"test -O {shlex.quote(agent_dir)}; "
                 'test -w "$task_workdir"; '
                 f"{git_tree_checks}"
-                f": > {shlex.quote(remote_gitconfig)}; "
-                f"chmod 0600 {shlex.quote(remote_gitconfig)}; "
-                'git config --global --replace-all safe.directory "$task_workdir"; '
-                'test "$(git config --global --get-all safe.directory | wc -l)" -eq 1; '
-                'test "$(git config --global --get-all safe.directory)" = "$task_workdir"; '
-                "git config --global --replace-all user.name "
-                f"{shlex.quote(FIX_GIT_GIT_USER_NAME)}; "
-                'test "$(git config --global --get-all user.name | wc -l)" -eq 1; '
-                "test \"$(git config --global --get-all user.name)\" = "
-                f"{shlex.quote(FIX_GIT_GIT_USER_NAME)}; "
-                "git config --global --replace-all user.email "
-                f"{shlex.quote(FIX_GIT_GIT_USER_EMAIL)}; "
-                'test "$(git config --global --get-all user.email | wc -l)" -eq 1; '
-                "test \"$(git config --global --get-all user.email)\" = "
-                f"{shlex.quote(FIX_GIT_GIT_USER_EMAIL)}; "
+                f"{git_configuration}"
                 f"{git_status_checks}"
             ),
             env=nonsecret_env,

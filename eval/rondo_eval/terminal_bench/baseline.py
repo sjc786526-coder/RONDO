@@ -387,9 +387,16 @@ class CampaignIdentity:
 class CampaignStateLedger:
     """Small crash-safe state ledger for one frozen campaign slot graph."""
 
-    def __init__(self, path: Path, *, identity: CampaignIdentity) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        identity: CampaignIdentity,
+        allow_interrupted_recovery: bool = False,
+    ) -> None:
         self.path = path
         self.identity = identity
+        self._allow_interrupted_recovery = allow_interrupted_recovery
         self._lock_path = path.with_suffix(path.suffix + ".lock")
         self._lock_handle: object | None = None
         self._state: dict[str, object] | None = None
@@ -474,6 +481,32 @@ class CampaignStateLedger:
         )
         self._persist(state)
 
+    def fail_interrupted(self, *, estimated_usd: str, reason: str) -> str:
+        """Close the one crash-interrupted slot before retiring its identity."""
+
+        if not self._allow_interrupted_recovery:
+            raise BaselineError("campaign interruption recovery is not enabled")
+        if not re.fullmatch(r"[0-9]+\.[0-9]{6}", estimated_usd) or not reason:
+            raise BaselineError("campaign interruption recovery is invalid")
+        state = self._require_state()
+        running = [row for row in state["slots"] if row["status"] == "running"]
+        if len(running) != 1:
+            raise BaselineError("campaign interruption recovery is ambiguous")
+        row = running[0]
+        row.update(
+            {
+                "status": CampaignSlotStatus.FAILED.value,
+                "outcome": "infra_failed",
+                "estimated_usd": estimated_usd,
+                "artifact_path": None,
+                "result_record_sha256": None,
+                "reason": reason,
+                "finished_at_unix": int(time.time()),
+            }
+        )
+        self._persist(state)
+        return row["slot_id"]
+
     def skip(self, slot_id: str, *, reason: str) -> None:
         if not reason:
             raise BaselineError("campaign skip reason is invalid")
@@ -511,7 +544,7 @@ class CampaignStateLedger:
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 raise BaselineError("campaign state ledger is unreadable") from exc
             self._validate_state(value)
-            if any(
+            if not self._allow_interrupted_recovery and any(
                 row["status"] == CampaignSlotStatus.RUNNING.value
                 for row in value["slots"]
             ):

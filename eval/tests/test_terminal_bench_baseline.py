@@ -192,6 +192,19 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(BaselineError, "crash-interrupted"):
                 with CampaignStateLedger(path, identity=identity):
                     pass
+            with CampaignStateLedger(
+                path,
+                identity=identity,
+                allow_interrupted_recovery=True,
+            ) as ledger:
+                recovered = ledger.fail_interrupted(
+                    estimated_usd="18.885000",
+                    reason="interrupted_request",
+                )
+                self.assertEqual(recovered, identity.slots[1].slot_id)
+                snapshot = ledger.snapshot()
+                self.assertEqual(snapshot["slots"][1]["status"], "failed")
+                self.assertEqual(snapshot["slots"][1]["outcome"], "infra_failed")
 
     def test_campaign_base_orchestrator_activates_only_mechanical_replacements(self) -> None:
         identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))

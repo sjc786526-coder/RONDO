@@ -13,7 +13,7 @@ from ..api_budget_proxy import (
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
     UPSTREAM_TIMEOUT_SECONDS,
-    canonical_request_sha256,
+    canonical_guardian_request_sha256,
     milestone_metadata_ready,
 )
 from ..config import RuntimeConfig
@@ -295,7 +295,7 @@ def load_guardian_evidence_bundle(
         raise TerminalBenchRunError("Guardian evidence bundle is unreadable") from exc
     try:
         identity = policy_identity(e_final)
-        request_sha256 = canonical_request_sha256(e_final)
+        request_sha256 = canonical_guardian_request_sha256(e_final)
     except (ApiBudgetProxyError, TypeError, ValueError) as exc:
         raise TerminalBenchRunError("Guardian evidence policy identity is invalid") from exc
     if not identity.aggregatable or not isinstance(meta, dict):
