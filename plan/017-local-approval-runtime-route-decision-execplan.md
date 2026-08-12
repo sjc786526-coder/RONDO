@@ -88,10 +88,12 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
   Plan 018 精确入口。所有 binary/GPU/model-backed 结论保持未验收。
 - 2026-08-12：独立终审无阻塞 finding；现场复核并完善 Windows CUDA 三包成本、device probe 的 GPU 边界、CPU/CUDA
   lock 选择与配置切换时点、CUDA 12.6.2 归因和可复现链接。`git diff --check`、lock/Plan 015 精确身份和意外大文件检查通过。
+- 2026-08-12：研究文档提交 `f3c00ece26cf4cf9b9f48302c3ad38372a7effb4`，首次以 merge
+  `e99a570d505c0e26b8fd9c3d9c3af458ee83b829` 合并本地 `main` 并推送远端；本 closure 只记录交付状态。
 
 ### 当前工作
 
-- 完成文档一致性检查与 Git 交付。
+- 本轮调查、决策、检查和 Git 交付已完成；不进入 Plan 018、权重下载或 GPU/model-backed 执行。
 
 ### 后续计划
 
@@ -107,7 +109,7 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
 
 ### 当前验收状态
 
-- `decision_complete_git_delivery_pending`。
+- `research_complete_git_delivered`。
 
 ## 6. 关键决策记录
 
