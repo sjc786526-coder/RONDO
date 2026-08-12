@@ -52,6 +52,15 @@ async def prepare_task_workdir(
 
 async def prepare_verifier_apt_dirs(environment: EnvironmentLike) -> None:
     for path in _APT_DIRS:
+        ensured = await environment.exec(
+            (
+                f"set -e; test ! -L {path}; mkdir -p -- {path}; "
+                f"test -d {path}"
+            ),
+            timeout_sec=30,
+            user="root",
+        )
+        _require_success(ensured, "verifier apt directory preparation failed")
         inspected = await environment.exec(
             f"stat -c '%u:%g' -- {path}",
             timeout_sec=30,

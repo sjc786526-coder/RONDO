@@ -49,6 +49,7 @@ from rondo_eval.terminal_bench import materialize as materialize_module  # noqa:
 from rondo_eval.terminal_bench import adapters as adapters_module  # noqa: E402
 from rondo_eval.terminal_bench import live as live_module  # noqa: E402
 from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
+from rondo_eval.terminal_bench import verifier_runtime as verifier_runtime_module  # noqa: E402
 from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
 from rondo_eval.terminal_bench.freeze import FreezeError, validate_runtime_image_digest  # noqa: E402
 from rondo_eval.terminal_bench.tasksets import FrozenTask  # noqa: E402
@@ -246,6 +247,29 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(
             runner_module.HARBOR_EXECUTABLE,
             Path(sys.executable).with_name("harbor"),
+        )
+
+    def test_verifier_apt_preparation_creates_missing_dirs_before_owner_check(self) -> None:
+        class AptEnvironment:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, str]] = []
+
+            async def exec(self, command, **kwargs):
+                self.calls.append((command, kwargs["user"]))
+                if command.startswith("stat -c"):
+                    return FakeExecResult(0, stdout="0:0\n")
+                return FakeExecResult(0)
+
+        environment = AptEnvironment()
+        asyncio.run(verifier_runtime_module.prepare_verifier_apt_dirs(environment))
+        self.assertEqual(len(environment.calls), 9)
+        self.assertTrue(
+            all(
+                "test ! -L" in environment.calls[index][0]
+                and "mkdir -p" in environment.calls[index][0]
+                and environment.calls[index][1] == "root"
+                for index in (0, 3, 6)
+            )
         )
 
     def setUp(self) -> None:
