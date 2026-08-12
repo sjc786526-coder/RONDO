@@ -118,6 +118,8 @@
   `doc/audit-snapshots/2026-08-12-ministral-3-8b-instruct-2512-gguf-freeze.md`。
 - 2026-08-12：独立终审复核最终 Bartowski 对象、官方对照、KV 算法、MCP/CLI、b10333/mmproj 和审批边界，无阻塞
   finding；已按审查意见澄清 TOML 仅为差异片段、`context_size = 0`/fit 语义和社区来源声明口径。
+- 2026-08-12：4 份已验收的研究/计划/WBS/日志成果以 `a76795f` 提交，经 merge commit `1b34c27` 合并本地 `main`
+  并推送 `origin/main`；推送后已核对本地与远端同 SHA。审批阶段 worktree/分支保留，不重命名为 `zz-done`。
 
 ### 当前工作
 
@@ -125,7 +127,7 @@
 
 ### 后续计划
 
-- 当前阶段：轻量一致性检查后提交研究成果，合并/推送 `main`，集中报告唯一对象与资源状态。
+- 当前阶段：Phase A 研究成果已交付；集中报告唯一对象与资源状态后等待用户单项下载授权，不再执行其他操作。
 - 获明确授权后：在保留的独立 worktree 恢复，先重新核对 canary 稳定窗口、Docker/模型进程、Windows `C:` 余量与
   批准对象；只下载唯一文件，验证 exact bytes/SHA 并更新 ignored `rondo.local.toml`。
 - 下载完成后仍不加载模型或使用 GPU；CUDA/model-backed smoke、上下文扫描与未微调 M3 baseline 另行验收。
