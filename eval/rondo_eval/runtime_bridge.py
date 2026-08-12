@@ -53,7 +53,10 @@ _DEFAULT_MEMORY_HIGH_BYTES = 19 * 1024**3
 _DEFAULT_MEMORY_MAX_BYTES = 21 * 1024**3
 _DEFAULT_SWAP_MAX_BYTES = 5 * 1024**3
 _WATCHDOG_HEARTBEAT_MAX_AGE_NS = 15_000_000_000
-_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = 1_000_000_000
+# WSL's wall clock can step backwards while the wrapper is refreshing this
+# mtime.  Treat an equally bounded future timestamp as fresh; PID/start-ticks,
+# script, inode, lock, and cgroup identity checks still have to match.
+_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = _WATCHDOG_HEARTBEAT_MAX_AGE_NS
 _WATCHDOG_ENV = (
     "RONDO_WATCHDOG_WRAPPER_PID",
     "RONDO_WATCHDOG_WRAPPER_START_TICKS",

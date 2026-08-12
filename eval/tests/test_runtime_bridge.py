@@ -352,6 +352,35 @@ class WatchdogBridgeTests(unittest.TestCase):
                 (watcher_proc_root / "4242" / "stat").unlink()
                 self.assertFalse(proof.guard.is_held(proof.lease))
 
+    def test_watcher_heartbeat_tolerates_bounded_wall_clock_rollback(self) -> None:
+        with tempfile.TemporaryDirectory(dir=EVAL_ROOT) as temporary:
+            root = Path(temporary)
+            relative = "/user.slice/rondo-build-1000-20260810-123.scope"
+            proc, cgroup_root, watcher_proc_root, watcher_environment = (
+                _write_counter_tree(root, relative)
+            )
+            heartbeat = Path(watcher_environment["RONDO_WATCHDOG_HEARTBEAT_PATH"])
+            heartbeat_ns = time.time_ns()
+            os.utime(heartbeat, ns=(heartbeat_ns, heartbeat_ns))
+            clock_ns = [heartbeat_ns - 2_000_000_000]
+            lock_path, lock_handle = self._held_lock(root)
+            self.addCleanup(lock_handle.close)
+            with mock.patch(
+                "rondo_eval.runtime_bridge._canonical_lock_path",
+                return_value=lock_path,
+            ):
+                proof = lease_from_watchdog(
+                    proc_cgroup_path=proc,
+                    cgroup_fs_root=cgroup_root,
+                    watcher_proc_root=watcher_proc_root,
+                    watchdog_environment=watcher_environment,
+                    heartbeat_clock_ns=lambda: clock_ns[0],
+                )
+                self.assertTrue(proof.guard.is_held(proof.lease))
+
+                clock_ns[0] = heartbeat_ns - 16_000_000_000
+                self.assertFalse(proof.guard.is_held(proof.lease))
+
 
 class FakeProcess:
     def __init__(self) -> None:
