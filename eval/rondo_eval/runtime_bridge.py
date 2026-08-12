@@ -1030,21 +1030,7 @@ class DockerCliCounter:
                     mountinfo_path=self._mountinfo_path,
                 )
             filter_args = identity.exact_label_filter
-            container_ids = _parse_id_lines(
-                self._run(
-                    (
-                        "docker",
-                        "container",
-                        "ls",
-                        "--all",
-                        "--no-trunc",
-                        *filter_args,
-                        "--format",
-                        "{{json .ID}}",
-                    ),
-                    deadline=deadline,
-                )
-            )
+            container_ids = self._container_ids(identity, deadline=deadline)
             image_ids = _parse_id_lines(
                 self._run(
                     (
@@ -1059,7 +1045,7 @@ class DockerCliCounter:
                     deadline=deadline,
                 )
             )
-            container_bytes, container_facts = self._container_facts(
+            container_ids, container_bytes, container_facts = self._container_facts(
                 identity,
                 container_ids,
                 deadline=deadline,
@@ -1157,19 +1143,58 @@ class DockerCliCounter:
         object_ids: tuple[str, ...],
         *,
         deadline: float,
-    ) -> tuple[int, tuple[object, ...]]:
+    ) -> tuple[tuple[str, ...], int, tuple[object, ...]]:
         if not object_ids:
-            return 0, ()
-        payload = _parse_json_array(
+            return (), 0, ()
+        try:
+            payload = _parse_json_array(
+                self._run(
+                    ("docker", "container", "inspect", "--size", *object_ids),
+                    deadline=deadline,
+                )
+            )
+        except RuntimeBridgeError:
+            # Harbor may remove its task container after ``ls`` but before the
+            # bounded inspect.  Re-list the same exact label once; unchanged
+            # state remains a hard failure, while a completed disappearance is
+            # a valid zero-container observation.
+            current_ids = self._container_ids(identity, deadline=deadline)
+            if current_ids == object_ids:
+                raise
+            if not current_ids:
+                return (), 0, ()
+            object_ids = current_ids
+            payload = _parse_json_array(
+                self._run(
+                    ("docker", "container", "inspect", "--size", *object_ids),
+                    deadline=deadline,
+                )
+            )
+        container_bytes, facts = _validate_inspected_containers(
+            payload, expected_ids=object_ids, identity=identity
+        )
+        return object_ids, container_bytes, facts
+
+    def _container_ids(
+        self,
+        identity: "DockerTaskIdentity",
+        *,
+        deadline: float,
+    ) -> tuple[str, ...]:
+        return _parse_id_lines(
             self._run(
-                ("docker", "container", "inspect", "--size", *object_ids),
+                (
+                    "docker",
+                    "container",
+                    "ls",
+                    "--all",
+                    "--no-trunc",
+                    *identity.exact_label_filter,
+                    "--format",
+                    "{{json .ID}}",
+                ),
                 deadline=deadline,
             )
-        )
-        return _validate_inspected_containers(
-            payload,
-            expected_ids=object_ids,
-            identity=identity,
         )
 
     def _image_bytes(
