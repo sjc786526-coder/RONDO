@@ -24,6 +24,7 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     CampaignSlotStatus,
     CampaignStateLedger,
     ConditionalRun,
+    MechanicalFailureCategory,
     assess_baseline,
     cost_forecast,
     load_campaign_identity,
@@ -94,6 +95,10 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
+        self.assertEqual(forecast["prior_estimated_usd"], "158.468137")
+        self.assertEqual(
+            forecast["remaining_before_v5_canary_usd"], "241.531863"
+        )
         self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
         tracked = json.loads(
@@ -111,9 +116,10 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len({item.run_id for item in identity.slots}), 161)
         self.assertEqual(len({item.slot_id for item in identity.slots}), 161)
         self.assertEqual(identity.slots[0].slot_id, "wire-canary")
-        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v4")
-        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v4")
-        self.assertEqual(identity.budget["prior_estimated_usd"], "58.689250")
+        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v5")
+        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v5")
+        self.assertEqual(identity.budget["campaign_cap_usd"], "400.000000")
+        self.assertEqual(identity.budget["prior_estimated_usd"], "158.468137")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
 
     def test_retired_identities_and_slots_are_not_reused(self) -> None:
@@ -121,7 +127,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         active = load_campaign_identity(paths)
         self.assertEqual(
             CAMPAIGN_LOCK_PATH,
-            Path("eval/locks/p2-b7-canary-baseline-v4.json"),
+            Path("eval/locks/p2-b7-canary-baseline-v5.json"),
         )
         self.assertEqual(
             RETIRED_CAMPAIGN_LOCK_PATHS,
@@ -129,6 +135,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 Path("eval/locks/p2-b7-canary-baseline-v1.json"),
                 Path("eval/locks/p2-b7-canary-baseline-v2.json"),
                 Path("eval/locks/p2-b7-canary-baseline-v3.json"),
+                Path("eval/locks/p2-b7-canary-baseline-v4.json"),
             ),
         )
         retired_values = [
@@ -246,38 +253,200 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual((len(calls), len(values), len(state.skipped)), (40, 40, 40))
         self.assertTrue(all(":a1" in value for value in calls))
 
-    def test_unresolved_base_infra_stops_before_conditionals(self) -> None:
+    def test_targeted_retries_recover_infra_without_rerunning_other_tasks(self) -> None:
         identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
-        task_id = identity.catalog.tasks[0].task_id
-        runs = []
-        for round_id in BASE_ROUNDS:
-            side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
-            for index, task in enumerate(identity.catalog.tasks):
-                runs.append(
-                    BaselineRun(
-                        task.task_id,
-                        round_id,
-                        side,
-                        1,
-                        TaskOutcome.PASS,
-                        f"{round_id}-{index}-a1",
-                    )
-                )
-        runs.append(
-            BaselineRun(
-                task_id,
-                "aa-rondo-1",
-                Side.RONDO,
-                2,
-                TaskOutcome.INFRA,
-                "replacement-run",
+
+        class State:
+            skipped: list[str]
+
+            def __init__(self) -> None:
+                self.skipped = []
+
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                del reason
+                self.skipped.append(slot_id)
+
+        calls: list[str] = []
+        target = identity.catalog.tasks[0].task_id
+
+        def execute(*, slot, task, **kwargs):
+            del task, kwargs
+            calls.append(slot.slot_id)
+            infra = slot.task_id == target and slot.round_id == "aa-rondo-1" and slot.attempt == 1
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED if infra else RunOutcome.COMPLETED,
+                TaskOutcome.INFRA if infra else TaskOutcome.PASS,
+                Decimal("0.100000"),
+                (
+                    MechanicalFailureCategory.DOCKER_RUNTIME
+                    if infra
+                    else None
+                ),
             )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_base_rounds(identity=identity, state=State())
+        self.assertEqual(len(calls), 41)
+        self.assertEqual(sum(":a2" in item for item in calls), 1)
+        self.assertEqual(len(values), 41)
+
+    def test_pass_and_normal_reward_zero_do_not_activate_replacement(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+
+        class State:
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                del slot_id, reason
+
+        calls: list[str] = []
+
+        def execute(*, slot, task, **kwargs):
+            del task, kwargs
+            calls.append(slot.slot_id)
+            outcome = (
+                TaskOutcome.FAIL
+                if slot.task_id == identity.catalog.tasks[0].task_id
+                else TaskOutcome.PASS
+            )
+            return baseline_cli.ExecutedSlot(
+                slot, RunOutcome.COMPLETED, outcome, Decimal("0.100000")
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            baseline_cli._execute_base_rounds(identity=identity, state=State())
+        self.assertEqual(len(calls), 40)
+        self.assertTrue(all(":a1" in item for item in calls))
+
+    def test_two_remaining_infra_per_round_can_continue(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+
+        class State:
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                del slot_id, reason
+
+        task_ids = tuple(item.task_id for item in identity.catalog.tasks)
+        calls: list[str] = []
+
+        def execute(*, slot, task, **kwargs):
+            del task, kwargs
+            calls.append(slot.slot_id)
+            index = task_ids.index(slot.task_id)
+            infra = index < 2
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED if infra else RunOutcome.COMPLETED,
+                TaskOutcome.INFRA if infra else TaskOutcome.PASS,
+                Decimal("0.100000"),
+                (
+                    MechanicalFailureCategory.DOCKER_RUNTIME
+                    if infra
+                    else None
+                ),
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_base_rounds(
+                identity=identity,
+                state=State(),
+            )
+        self.assertEqual(len(calls), 48)
+        self.assertEqual(len(values), 48)
+
+    def test_three_same_category_tasks_open_circuit_before_later_claims(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+
+        class State:
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                del slot_id, reason
+
+        calls: list[str] = []
+        task_ids = tuple(item.task_id for item in identity.catalog.tasks)
+
+        def execute(*, slot, task, **kwargs):
+            del task, kwargs
+            calls.append(slot.slot_id)
+            infra = task_ids.index(slot.task_id) < 3
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED if infra else RunOutcome.COMPLETED,
+                TaskOutcome.INFRA if infra else TaskOutcome.PASS,
+                Decimal("0.100000"),
+                MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY if infra else None,
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            with self.assertRaisesRegex(
+                baseline_cli.CampaignExecutionError,
+                "mechanical_circuit_breaker:provider_response_integrity",
+            ):
+                baseline_cli._execute_base_rounds(identity=identity, state=State())
+        self.assertEqual(len(calls), 5)
+        self.assertNotIn(identity.catalog.tasks[3].task_id, " ".join(calls))
+
+    def test_round_infra_gate_precedes_next_round(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+
+        class State:
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                del slot_id, reason
+
+        categories = (
+            MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY,
+            MechanicalFailureCategory.DOCKER_RUNTIME,
+            MechanicalFailureCategory.HARNESS_RUNTIME,
         )
-        with self.assertRaisesRegex(
-            baseline_cli.CampaignExecutionError,
-            "replacement was exhausted",
-        ):
-            baseline_cli._require_resolved_base_rounds(identity, runs)
+        calls: list[str] = []
+        task_ids = tuple(item.task_id for item in identity.catalog.tasks)
+
+        def execute(*, slot, task, **kwargs):
+            del task, kwargs
+            calls.append(slot.slot_id)
+            index = task_ids.index(slot.task_id)
+            infra = index < 3
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED if infra else RunOutcome.COMPLETED,
+                TaskOutcome.INFRA if infra else TaskOutcome.PASS,
+                Decimal("0.100000"),
+                categories[index] if infra else None,
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            with self.assertRaisesRegex(
+                baseline_cli.CampaignExecutionError,
+                "base_round_infra_threshold_exceeded:aa-rondo-1",
+            ):
+                baseline_cli._execute_base_rounds(identity=identity, state=State())
+        self.assertEqual(len(calls), 13)
+        self.assertTrue(all("aa-rondo-1" in item for item in calls))
+
+    def test_structured_failure_category_inherits_budget_root_cause(self) -> None:
+        provider = baseline_cli._mechanical_failure_category(
+            task_outcome=TaskOutcome.INFRA,
+            failure_stage="publication",
+            guardian_technical_failure=False,
+            budget_run={
+                "stopped": True,
+                "stop_reason": "upstream_response_unavailable",
+            },
+        )
+        docker = baseline_cli._mechanical_failure_category(
+            task_outcome=TaskOutcome.INFRA,
+            failure_stage="docker",
+            guardian_technical_failure=False,
+            budget_run={"stopped": False, "stop_reason": None},
+        )
+        ordinary = baseline_cli._mechanical_failure_category(
+            task_outcome=TaskOutcome.FAIL,
+            failure_stage=None,
+            guardian_technical_failure=False,
+            budget_run={"stopped": False, "stop_reason": None},
+        )
+        self.assertEqual(
+            provider, MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
+        )
+        self.assertEqual(docker, MechanicalFailureCategory.DOCKER_RUNTIME)
+        self.assertIsNone(ordinary)
 
     def test_storage_projection_keeps_initial_final_and_growth(self) -> None:
         initial = baseline_cli.StorageBaseline(100, 200, 300)
@@ -365,30 +534,31 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         result = assess_baseline(self.tasks, self._base(), ())
         self.assertEqual((result.status, result.sigma, result.delta), (BaselineStatus.PASSED, 0, 0))
 
-    def test_three_infra_requires_full_round_replacement(self) -> None:
+    def test_three_infra_targeted_replacements_block_round(self) -> None:
         round_id = "aa-rondo-1"
         outcomes = {
             (round_id, task_id): TaskOutcome.INFRA for task_id in self.tasks[:3]
         }
-        partial_second = {
+        targeted_second = {
             (round_id, task_id): TaskOutcome.PASS for task_id in self.tasks[:3]
-        }
-        with self.assertRaisesRegex(BaselineError, "replacement set"):
-            assess_baseline(
-                self.tasks,
-                self._base(outcomes, second=partial_second),
-                (),
-            )
-
-        all_second = {
-            (round_id, task_id): TaskOutcome.PASS for task_id in self.tasks
         }
         result = assess_baseline(
             self.tasks,
-            self._base(outcomes, second=all_second),
+            self._base(outcomes, second=targeted_second),
             (),
         )
         self.assertEqual(result.status, BaselineStatus.PASSED)
+
+        still_infra = {
+            (round_id, task_id): TaskOutcome.INFRA for task_id in self.tasks[:3]
+        }
+        result = assess_baseline(
+            self.tasks,
+            self._base(outcomes, second=still_infra),
+            (),
+        )
+        self.assertEqual(result.status, BaselineStatus.BLOCKED)
+        self.assertIn(f"{round_id}_infra_threshold_exceeded", result.reasons)
 
     def test_two_infra_use_only_targeted_replacements(self) -> None:
         round_id = "aa-rondo-1"
@@ -430,13 +600,82 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             f"stable_directional_regression:{self.tasks[0]}", result.reasons
         )
 
-    def test_exhausted_infra_replacement_is_blocked_not_partial_pass(self) -> None:
+    def test_sigma_delta_share_the_same_common_valid_denominator(self) -> None:
         round_id = "aa-rondo-1"
         outcomes = {(round_id, self.tasks[0]): TaskOutcome.INFRA}
         second = {(round_id, self.tasks[0]): TaskOutcome.INFRA}
         result = assess_baseline(self.tasks, self._base(outcomes, second=second), ())
+        self.assertEqual(result.status, BaselineStatus.PASSED)
+        self.assertEqual(result.common_valid_tasks, self.tasks[1:])
+        self.assertEqual((result.sigma, result.delta), (0, 0))
+
+        outcomes = {
+            (BASE_ROUNDS[index], self.tasks[index]): TaskOutcome.INFRA
+            for index in range(3)
+        }
+        second = dict(outcomes)
+        result = assess_baseline(self.tasks, self._base(outcomes, second=second), ())
         self.assertEqual(result.status, BaselineStatus.BLOCKED)
+        self.assertEqual(len(result.common_valid_tasks), 7)
         self.assertIsNone(result.sigma)
+        self.assertIsNone(result.delta)
+
+    def test_common_denominator_block_does_not_start_conditionals(self) -> None:
+        identity = load_campaign_identity(RepoPaths.discover(Path.cwd()))
+        task_ids = tuple(item.task_id for item in identity.catalog.tasks)
+        outcomes = {
+            (BASE_ROUNDS[index], task_ids[index]): TaskOutcome.INFRA
+            for index in range(3)
+        }
+        runs: list[BaselineRun] = []
+        for round_id in BASE_ROUNDS:
+            side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
+            for index, task_id in enumerate(task_ids):
+                outcome = outcomes.get((round_id, task_id), TaskOutcome.PASS)
+                runs.append(
+                    BaselineRun(
+                        task_id,
+                        round_id,
+                        side,
+                        1,
+                        outcome,
+                        f"{round_id}-{index}-a1",
+                    )
+                )
+                if outcome is TaskOutcome.INFRA:
+                    runs.append(
+                        BaselineRun(
+                            task_id,
+                            round_id,
+                            side,
+                            2,
+                            TaskOutcome.INFRA,
+                            f"{round_id}-{index}-a2",
+                        )
+                    )
+
+        class State:
+            skipped: list[str]
+
+            def __init__(self) -> None:
+                self.skipped = []
+
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                self.skipped.append(f"{slot_id}:{reason}")
+
+        state = State()
+        with mock.patch.object(baseline_cli, "_execute_task_slot") as execute:
+            conditionals = baseline_cli._execute_conditionals(
+                identity=identity,
+                state=state,
+                base_runs=runs,
+            )
+        self.assertEqual(conditionals, [])
+        execute.assert_not_called()
+        self.assertEqual(len(state.skipped), 80)
+        self.assertTrue(
+            all("common_valid_task_count_below_minimum" in item for item in state.skipped)
+        )
 
 
 if __name__ == "__main__":

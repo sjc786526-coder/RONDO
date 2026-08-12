@@ -1273,6 +1273,9 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
         metadata = self.root / "work" / "api-metadata.json"
         self._write_metadata(metadata, "main")
+        private = self.trial / "agent/codex.txt"
+        private.parent.mkdir(parents=True)
+        private.write_text("secret = task-fixture-value\n", encoding="utf-8")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         provider = live_result.prepared.spec.provider
 
@@ -1318,6 +1321,14 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(
             record["summary"]["s2_request_evidence_binding"], "not_triggered"
         )
+        self.assertFalse((target / "harbor/agent/codex.txt").exists())
+        marker = json.loads(
+            (target / "harbor/agent/codex.txt.redacted.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(marker["reason"], "sensitive_private_artifact_omitted")
+        self.assertEqual(marker["source_size_bytes"], len(private.read_bytes()))
         self.assertTrue(target.is_dir())
 
     def test_completed_rondo_guardian_request_requires_e_final(self) -> None:

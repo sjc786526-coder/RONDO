@@ -1754,12 +1754,12 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             )
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
-                self.root / "too-much.json", batch_id="bad", total_cap_usd="200.01"
+                self.root / "too-much.json", batch_id="bad", total_cap_usd="400.01"
             )
         with PersistentBudgetLedger(
             self.root / "campaign.json",
             batch_id="campaign",
-            total_cap_usd="200",
+            total_cap_usd="400",
             max_runs=161,
             default_run_cap_usd="40",
         ) as campaign:
@@ -1768,7 +1768,7 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             PersistentBudgetLedger(
                 self.root / "too-many-runs.json",
                 batch_id="bad-runs",
-                total_cap_usd="200",
+                total_cap_usd="400",
                 max_runs=162,
                 default_run_cap_usd="40",
             )
