@@ -623,6 +623,7 @@ class DockerCounterTests(unittest.TestCase):
             host_data_root=root,
             executor=executor,
             statvfs=lambda path: os.statvfs(path),
+            sleeper=lambda _: None,
         )
         return counter, executor
 
@@ -689,6 +690,7 @@ class DockerCounterTests(unittest.TestCase):
                     json.dumps(CONTAINER_ID) + "\n",
                     "",
                     CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
                     "",
                 ],
             )
@@ -720,6 +722,7 @@ class DockerCounterTests(unittest.TestCase):
                     ]),
                     json.dumps(CONTAINER_ID) + "\n",
                     "",
+                    CommandOutput(returncode=1, stdout=""),
                     CommandOutput(returncode=1, stdout=""),
                     json.dumps(CONTAINER_ID) + "\n",
                 ],
@@ -843,6 +846,50 @@ class DockerCounterTests(unittest.TestCase):
                 )
             self.assertNotIn(secret, str(caught.exception))
             self.assertIsNone(caught.exception.__cause__)
+
+    def test_read_only_docker_fact_command_retries_once_within_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    CommandOutput(returncode=1, stdout=""),
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    "",
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.RUN,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(executor.commands[0], executor.commands[1])
+
+    def test_read_only_docker_fact_command_fails_after_two_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            counter, executor = self._native_counter(
+                Path(temporary).resolve(),
+                [
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                ],
+            )
+
+            with self.assertRaises(RuntimeBridgeError):
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.RUN,
+                )
+
+        self.assertEqual(len(executor.commands), 2)
 
     def test_filter_is_not_trusted_when_inspected_label_is_not_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

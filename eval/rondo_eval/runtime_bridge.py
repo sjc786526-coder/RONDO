@@ -57,6 +57,8 @@ _WATCHDOG_HEARTBEAT_MAX_AGE_NS = 15_000_000_000
 # mtime.  Treat an equally bounded future timestamp as fresh; PID/start-ticks,
 # script, inode, lock, and cgroup identity checks still have to match.
 _WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = _WATCHDOG_HEARTBEAT_MAX_AGE_NS
+_DOCKER_FACT_COMMAND_MAX_ATTEMPTS = 2
+_DOCKER_FACT_COMMAND_RETRY_DELAY_SECONDS = 1.0
 _WATCHDOG_ENV = (
     "RONDO_WATCHDOG_WRAPPER_PID",
     "RONDO_WATCHDOG_WRAPPER_START_TICKS",
@@ -971,6 +973,7 @@ class DockerCliCounter:
         mountinfo_path: Path = Path("/proc/self/mountinfo"),
         statvfs: Callable[[os.PathLike[str]], os.statvfs_result] = os.statvfs,
         monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
         probe_timeout_seconds: float = 30.0,
     ) -> None:
         if not host_data_root.is_absolute() or probe_timeout_seconds <= 0:
@@ -981,6 +984,7 @@ class DockerCliCounter:
         self._mountinfo_path = mountinfo_path
         self._statvfs = statvfs
         self._monotonic = monotonic
+        self._sleeper = sleeper
         self._probe_timeout_seconds = probe_timeout_seconds
 
     def sample(
@@ -1126,16 +1130,26 @@ class DockerCliCounter:
         return remaining
 
     def _run(self, argv: tuple[str, ...], *, deadline: float) -> str:
-        try:
-            output = self._executor.run(
-                argv,
-                timeout_seconds=self._remaining(deadline),
-            )
-        except Exception:
-            raise RuntimeBridgeError("Docker storage fact command failed") from None
-        if output.returncode != 0 or not isinstance(output.stdout, str):
-            raise RuntimeBridgeError("Docker storage fact command failed")
-        return output.stdout
+        for attempt in range(_DOCKER_FACT_COMMAND_MAX_ATTEMPTS):
+            try:
+                output = self._executor.run(
+                    argv,
+                    timeout_seconds=self._remaining(deadline),
+                )
+            except Exception:
+                output = None
+            if (
+                output is not None
+                and output.returncode == 0
+                and isinstance(output.stdout, str)
+            ):
+                return output.stdout
+            if attempt + 1 < _DOCKER_FACT_COMMAND_MAX_ATTEMPTS:
+                remaining = self._remaining(deadline)
+                self._sleeper(
+                    min(_DOCKER_FACT_COMMAND_RETRY_DELAY_SECONDS, remaining)
+                )
+        raise RuntimeBridgeError("Docker storage fact command failed") from None
 
     def _container_facts(
         self,
