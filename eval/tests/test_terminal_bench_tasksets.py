@@ -27,8 +27,11 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         self.assertEqual(len(set(frozen.all_ids)), 89)
         self.assertEqual(
             frozen.taskset_sha256,
-            "7b48c5d685ea9386606c3ea829d49c73eff2c870d46a05c314674017d9361cdb",
+            "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b",
         )
+        self.assertIn("terminal-bench/openssl-selfsigned-cert", frozen.canary)
+        self.assertIn("terminal-bench/build-cython-ext", frozen.validation)
+        self.assertNotIn("terminal-bench/build-cython-ext", frozen.canary)
 
     def test_holdout_is_recomputed_from_ids_without_task_content(self) -> None:
         frozen = tasksets.load_frozen_tasksets(RepoPaths.discover(Path.cwd()))
@@ -50,6 +53,12 @@ class TerminalBenchTasksetTests(unittest.TestCase):
         self.assertEqual(tuple(item.task_id for item in catalog.tasks), task_ids)
         self.assertEqual(len(catalog.catalog_sha256), 64)
         self.assertEqual(catalog.task("terminal-bench/fix-git").workdir, "/app/personal-site")
+        openssl = catalog.task("terminal-bench/openssl-selfsigned-cert")
+        self.assertEqual(openssl.workdir, "/app")
+        self.assertEqual(
+            openssl.image_digest,
+            "sha256:4c948a4e630af2435ae0a19108fc0814a946ac2fa29a512469e0fc77b38c8c12",
+        )
         self.assertTrue(
             all(item.image_ref.endswith(item.image_digest) for item in catalog.tasks)
         )

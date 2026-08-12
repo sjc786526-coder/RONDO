@@ -107,23 +107,23 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 当前工作
 
-- 离线实现已完成：10-task catalog/materializer/runner、B5 计分、200 USD/161-slot 状态机、campaign public
-  result、usage/cost 聚合、10-task no-API oracle 前置与正式入口均已落地；正在完成最终离线门禁与干净提交。
+- attempt 8 在 API 前完成首题官方 solution，但 `build-cython-ext` 的官方 verifier 以 reward 0 停止；该坏题已获批
+  与 validation 中的 `openssl-selfsigned-cert` 交换。holdout 未变，P2 API 累计费用仍为 0。
+- 新 10-task catalog 与 v2 campaign/batch/run identity 正在完成离线门禁；v1 lock 保留为退役历史，不进入执行。
 
 ### 后续计划
 
-1. 完成 focused/full unittest、taskset/cost 报告并提交。
-2. 在 build lock/watchdog 下执行 10-task no-API oracle、资源门禁和 fresh exact-wire canary。
+1. 完成 v2 focused unittest、taskset/lock 门禁、`just eval-lock` 与干净提交。
+2. 在 build lock/watchdog 下从第一项重跑完整 10-task no-API oracle、资源门禁和 fresh exact-wire canary。
 3. 串行执行 B7 状态机；聚合并提交真实结果和文档。
 
 ### 阻塞项
 
-- 无离线阻塞；真实执行仍以干净提交、fresh canary、80 GiB C: floor 和完整 watchdog lease 为启动门。
+- 无离线阻塞；若替换后的 `openssl-selfsigned-cert` 官方 Oracle 仍失败则停止并报告，不再自动换题。
 
 ### 当前验收状态
 
-- Plan 014 post-audit 窄修复、B4/B5/B6 与 B7 离线执行设施已通过 focused tests。10 个 exact image 已按
-  digest 串行拉取并只读解析；尚未运行 B7 oracle、fresh API canary 或正式 40-run 基线。
+- v1 attempt 8 是 API 前失败终态；v2 尚未运行完整 Oracle、fresh API canary 或正式 40-run 基线。
 
 ## 6. 关键决策记录
 
@@ -137,3 +137,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 006 | 不扩展 M1 两槽 ledger；B7 使用独立 campaign 状态机并复用单任务 runner/budget ledger | 拓扑不同，避免把历史 pair 语义拉坏 | B6/B7 | 已采纳 |
 | 007 | 在 lock 冻结前以 `build-cython-ext`、`extract-elf` 替换需要 system service/root capability 的两个候选 | 现有两侧非特权容器合同无法公平运行 system-admin 任务；不把确定性环境失败计入 σ | B4/B7 | 已采纳 |
 | 008 | campaign 冻结 1 canary + 40 base + 40 conditional + 各 40 bounded infra replacement，共 161 个唯一 slot | 单轮 >20% infra 需整轮替换，条件加跑也需一次定点替换；所有可能 ID 事前冻结 | B6/B7 | 已采纳 |
+| 009 | 经用户批准以 `openssl-selfsigned-cert` 替换官方 verifier reward 0 的 `build-cython-ext`，重冻 v2 identity 并退役 v1 | Oracle 在任何 API 前证明原题自身不可用；不是按模型成绩择题，holdout/预算/profile/bundle/轮次均不变 | B4/B7 | 已采纳 |

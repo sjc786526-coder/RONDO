@@ -33,7 +33,10 @@ BASE_ROUNDS = (
     "ab-codex-1",
 )
 MAX_SIGMA = 2
-CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v1.json")
+CAMPAIGN_LOCK_PATH = Path("eval/locks/p2-b7-canary-baseline-v2.json")
+RETIRED_CAMPAIGN_LOCK_PATHS = (
+    Path("eval/locks/p2-b7-canary-baseline-v1.json"),
+)
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(
     r"[0-9]{8}-[0-9]{9}-tb-(?:rondo|codex)-r[1-9][0-9]*"
@@ -658,10 +661,10 @@ def load_campaign_identity(paths: RepoPaths) -> CampaignIdentity:
     catalog = load_frozen_canary_catalog(paths)
     if (
         value["schema_version"] != 1
-        or value["campaign_id"] != "p2-b7-canary-baseline-v1"
-        or value["batch_id"] != "p2-b7-canary-sol-sol-v1"
+        or value["campaign_id"] != "p2-b7-canary-baseline-v2"
+        or value["batch_id"] != "p2-b7-canary-sol-sol-v2"
         or value["run_id_date"] != "20260811"
-        or value["run_id_sequence_base"] != 210000000
+        or value["run_id_sequence_base"] != 220000000
         or value["taskset_sha256"] != catalog.taskset_sha256
         or value["canary_catalog_sha256"] != catalog.catalog_sha256
         or value["terminal_bench_commit"] != catalog.terminal_bench_commit

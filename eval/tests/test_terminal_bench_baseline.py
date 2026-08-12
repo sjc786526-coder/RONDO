@@ -16,6 +16,8 @@ from rondo_eval.contracts import RunOutcome, Side  # noqa: E402
 from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
 from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     BASE_ROUNDS,
+    CAMPAIGN_LOCK_PATH,
+    RETIRED_CAMPAIGN_LOCK_PATHS,
     BaselineError,
     BaselineRun,
     BaselineStatus,
@@ -109,7 +111,36 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len({item.run_id for item in identity.slots}), 161)
         self.assertEqual(len({item.slot_id for item in identity.slots}), 161)
         self.assertEqual(identity.slots[0].slot_id, "wire-canary")
+        self.assertEqual(identity.campaign_id, "p2-b7-canary-baseline-v2")
+        self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v2")
         identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
+
+    def test_retired_v1_identity_and_slots_are_not_reused(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        active = load_campaign_identity(paths)
+        self.assertEqual(
+            CAMPAIGN_LOCK_PATH,
+            Path("eval/locks/p2-b7-canary-baseline-v2.json"),
+        )
+        self.assertEqual(
+            RETIRED_CAMPAIGN_LOCK_PATHS,
+            (Path("eval/locks/p2-b7-canary-baseline-v1.json"),),
+        )
+        retired = json.loads(
+            (paths.worktree_root / RETIRED_CAMPAIGN_LOCK_PATHS[0]).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertNotEqual(retired["campaign_id"], active.campaign_id)
+        self.assertNotEqual(retired["batch_id"], active.batch_id)
+        retired_runs = {
+            retired["run_id_sequence_base"] + index
+            for index in range(1, retired["budget"]["max_run_slots"] + 1)
+        }
+        active_runs = {
+            int(slot.run_id.split("-")[1]) for slot in active.slots
+        }
+        self.assertTrue(retired_runs.isdisjoint(active_runs))
 
     def test_campaign_lock_catalog_drift_is_rejected(self) -> None:
         live_paths = RepoPaths.discover(Path.cwd())
@@ -120,11 +151,11 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             lock = json.loads(
                 (
                     live_paths.worktree_root
-                    / "eval/locks/p2-b7-canary-baseline-v1.json"
+                    / CAMPAIGN_LOCK_PATH
                 ).read_text()
             )
             lock["canary_catalog_sha256"] = "0" * 64
-            (root / "eval/locks/p2-b7-canary-baseline-v1.json").write_text(
+            (root / CAMPAIGN_LOCK_PATH).write_text(
                 json.dumps(lock), encoding="utf-8"
             )
             with mock.patch(

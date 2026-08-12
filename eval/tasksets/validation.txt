@@ -1,5 +1,6 @@
 terminal-bench/bn-fit-modify
 terminal-bench/break-filter-js-from-html
+terminal-bench/build-cython-ext
 terminal-bench/build-pov-ray
 terminal-bench/chess-best-move
 terminal-bench/circuit-fibsqrt
@@ -36,7 +37,6 @@ terminal-bench/mteb-leaderboard
 terminal-bench/mteb-retrieve
 terminal-bench/multi-source-data-merger
 terminal-bench/nginx-request-logging
-terminal-bench/openssl-selfsigned-cert
 terminal-bench/overfull-hbox
 terminal-bench/password-recovery
 terminal-bench/path-tracing-reverse

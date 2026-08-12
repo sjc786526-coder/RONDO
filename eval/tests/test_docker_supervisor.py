@@ -1068,6 +1068,37 @@ class DockerSupervisorTests(unittest.TestCase):
                 self.assertEqual(counter.budgets, [expected_budget])
                 self.assertEqual(runner.commands, [])
 
+    def test_counter_round_finishing_at_30_second_deadline_fails_closed(self) -> None:
+        clock = FakeClock()
+
+        class BoundaryCounter(FakeCounter):
+            def sample(self, **kwargs):
+                self.deadline = kwargs["deadline"]
+                clock.now += COUNTER_SAMPLE_TIMEOUT_SECONDS
+                return super().sample(**kwargs)
+
+        counter = BoundaryCounter([reading()])
+        supervisor, runner = self.supervisor(
+            counter=counter,
+            handles=[],
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+
+        with self.assertRaisesRegex(
+            DockerSupervisionError,
+            "counter probe exceeded",
+        ):
+            supervisor.pull(
+                self.identity,
+                IMAGE,
+                lease=self.lease,
+                timeout_seconds=60,
+            )
+
+        self.assertEqual(counter.deadline, COUNTER_SAMPLE_TIMEOUT_SECONDS)
+        self.assertEqual(runner.commands, [])
+
     def test_seccomp_contract_rejects_unsafe_modes_and_binds_profile_digest(self) -> None:
         with self.assertRaises(DockerSupervisionError):
             replace(

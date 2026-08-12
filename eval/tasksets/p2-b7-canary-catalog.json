@@ -1,21 +1,8 @@
 {
   "schema_version": 1,
   "terminal_bench_commit": "ffccbe05ee73a9d59518217f294ad711bda39304",
-  "taskset_sha256": "7b48c5d685ea9386606c3ea829d49c73eff2c870d46a05c314674017d9361cdb",
+  "taskset_sha256": "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b",
   "tasks": [
-    {
-      "task_id": "terminal-bench/build-cython-ext",
-      "source_digest": "sha256:35dc561790e73f13e59837828ac0863c0893edc6b71d42cf7d58656c843adf12",
-      "image_tag": "alexgshaw/build-cython-ext:20251031",
-      "image_ref": "alexgshaw/build-cython-ext@sha256:3612a38fadb89a96f74a1a951fb0b0af734198fd160571eeaba6401593234594",
-      "workdir": "/app",
-      "memory_mb": 2048,
-      "timeout_seconds": 1800,
-      "agent_timeout_seconds": 900,
-      "verifier_timeout_seconds": 900,
-      "build_timeout_seconds": 600,
-      "requires_existing_git_repo": false
-    },
     {
       "task_id": "terminal-bench/db-wal-recovery",
       "source_digest": "sha256:07e9193513bfce038b9f9d84962ecc85683eee0a642d14ee6fb7104b086ddab4",
@@ -73,6 +60,19 @@
       "source_digest": "sha256:203953871ebdae4efbf163af9499849368dab5e219b70d447e5ee9701ad382d9",
       "image_tag": "alexgshaw/headless-terminal:20251031",
       "image_ref": "alexgshaw/headless-terminal@sha256:eb7e209672bf6cef2785fafd9e13509b10626c327bcc2b37f5bf40ca83eaf3aa",
+      "workdir": "/app",
+      "memory_mb": 2048,
+      "timeout_seconds": 1800,
+      "agent_timeout_seconds": 900,
+      "verifier_timeout_seconds": 900,
+      "build_timeout_seconds": 600,
+      "requires_existing_git_repo": false
+    },
+    {
+      "task_id": "terminal-bench/openssl-selfsigned-cert",
+      "source_digest": "sha256:d4afa2bd2a9ba1420db8d6cfde42ffdb4873ae2d955c35014e8da94444c83302",
+      "image_tag": "alexgshaw/openssl-selfsigned-cert:20251031",
+      "image_ref": "alexgshaw/openssl-selfsigned-cert@sha256:4c948a4e630af2435ae0a19108fc0814a946ac2fa29a512469e0fc77b38c8c12",
       "workdir": "/app",
       "memory_mb": 2048,
       "timeout_seconds": 1800,
