@@ -1087,7 +1087,7 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or not config["campaign_slot_id"]
         or not isinstance(config.get("campaign_round_id"), str)
         or not config["campaign_round_id"]
-        or config.get("campaign_attempt") not in {1, 2}
+        or config.get("campaign_attempt") not in {1, 2, 3, 4}
     ):
         raise HarborResultError("Terminal-Bench campaign identity is invalid")
 

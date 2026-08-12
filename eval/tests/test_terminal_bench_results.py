@@ -38,6 +38,7 @@ from rondo_eval.terminal_bench.live import (  # noqa: E402
 from rondo_eval.terminal_bench import __main__ as terminal_bench_main  # noqa: E402
 from rondo_eval.terminal_bench.pair import (  # noqa: E402
     CampaignPublicationContext,
+    PairIdentityError,
     PairMode,
     PairSequenceLedger,
     RunPublicationContext,
@@ -127,6 +128,40 @@ class TerminalBenchResultTests(unittest.TestCase):
                 "frozen_codex_model_catalog_source_commit": "a" * 40,
                 "frozen_codex_model_catalog_sha256": "b" * 64,
                 "max_guardian_logical_requests": 2,
+            },
+        )
+
+    def _campaign_publication(
+        self,
+        *,
+        side: Side = Side.CODEX,
+        exit_code: int = 0,
+        attempt: int = 1,
+    ) -> CampaignPublicationContext:
+        provider = self._live_result("campaign-publication-fixture").prepared.spec.provider
+        return CampaignPublicationContext(
+            campaign_id="p2-b7-canary-baseline-test",
+            campaign_lock_sha256="7" * 64,
+            campaign_slot_id=(
+                f"base:aa-rondo-1:terminal-bench/fix-git:a{attempt}"
+            ),
+            campaign_round_id="aa-rondo-1",
+            campaign_attempt=attempt,
+            taskset_sha256="8" * 64,
+            canary_catalog_sha256="9" * 64,
+            side=side,
+            metrics={
+                "wall_seconds": 1.0,
+                "cpu_user_seconds": 0.1,
+                "cpu_system_seconds": 0.1,
+                "peak_rss_bytes": 1024,
+                "exit_code": exit_code,
+            },
+            selected_profile={
+                **provider.to_public_dict(),
+                "frozen_codex_model_catalog_source_commit": "a" * 40,
+                "frozen_codex_model_catalog_sha256": "b" * 64,
+                "max_guardian_logical_requests": 3,
             },
         )
 
@@ -1043,6 +1078,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
 
         self.assertTrue((target / "run-failure.json").is_file())
+
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "docker")
@@ -1080,6 +1116,42 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(
             record["cost"], {"estimated_usd": 0.0, "actual_usd": None}
         )
+
+    def test_campaign_failure_publication_accepts_attempt_three_and_four(self) -> None:
+        for attempt in (3, 4):
+            with self.subTest(attempt=attempt), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                run_id = f"20260812-32000008{attempt}-tb-rondo-r{attempt}"
+                paths = RepoPaths(root, root)
+                writer = ArtifactWriter(paths, run_id, results_worktree_root=root).start()
+                live_result = self._live_result(run_id)
+                publish_terminal_bench_failure(
+                    paths,
+                    writer=writer,
+                    run_id=run_id,
+                    side=Side.RONDO,
+                    git_commit="e" * 40,
+                    eval_harness_commit="f" * 40,
+                    manifest=live_result.prepared.spec.binary,
+                    provider=live_result.prepared.spec.provider,
+                    budget_snapshot=live_result.budget_snapshot,
+                    metadata_path=root / "missing-api-metadata.json",
+                    outcome=RunOutcome.INFRA_FAILED,
+                    failure_stage="docker",
+                    publication=self._campaign_publication(
+                        side=Side.RONDO,
+                        exit_code=70,
+                        attempt=attempt,
+                    ),
+                    secrets=("never-persist",),
+                )
+                record = json.loads((root / "eval/results/runs.jsonl").read_text())
+                self.assertEqual(record["config"]["campaign_attempt"], attempt)
+
+        with self.assertRaisesRegex(
+            PairIdentityError, "publication campaign topology is invalid"
+        ):
+            self._campaign_publication(side=Side.RONDO, attempt=5).validate()
 
     def test_infra_diagnostic_rejects_unknown_or_non_docker_probe(self) -> None:
         run_id = "20260810-010000019-tb-codex-r1"

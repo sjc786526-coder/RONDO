@@ -859,7 +859,7 @@ class CampaignPublicationContext:
             or not self.campaign_round_id
             or len(self.campaign_round_id) > 64
             or isinstance(self.campaign_attempt, bool)
-            or self.campaign_attempt not in {1, 2}
+            or self.campaign_attempt not in {1, 2, 3, 4}
             or not isinstance(self.side, Side)
         ):
             raise PairIdentityError("publication campaign topology is invalid")
