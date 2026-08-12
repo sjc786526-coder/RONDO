@@ -110,14 +110,15 @@ build-ready 交接。
   `/home/sjc/desktop/RONDO/eval/.venv/bin/python`，`git diff --check` 通过。
 - 2026-08-12：独立终审复核最新 diff 并独立复跑同一组 80 项 focused 测试；binary 配置绑定、RPATH 转义和测试命令证据
   已收口，无剩余阻塞 finding。
+- 2026-08-12：实现提交 `c4a7fc1af55f97d67a4b59e80e718291211cdcad`，以 `53abd670c361dd67fd85984a2ebb50a4d7f815d2`
+  合并并推送 `origin/main`；远端 exact SHA 已复核。完成分支在交付收口后保留为 `zz-done/0812-plan016-local-launcher`。
 
 ### 当前工作
 
-- 完成 Git 提交、合并与推送；不进入 CUDA、权重或 GPU 执行。
+- 本轮实现与 Git 交付已完成；不进入 CUDA、权重或 GPU 执行。
 
 ### 后续计划
 
-- 本轮：独立审查通过后提交 worktree，合并本地 main、推送 origin/main，并将完成分支重命名为 `zz-done/...`。
 - 下一阶段：在独立授权与资源窗口下冻结 Linux CUDA 工具链并构建 exact b10333 runtime；另待 Plan 015 的 exact GGUF 下载授权，
   “冻结 CUDA runtime + 已校验唯一 GGUF + 当前模板/launcher 合同”三项汇合后再运行 model-backed 4k smoke。
 
@@ -176,7 +177,7 @@ build-ready 交接。
 
 ### 当前验收状态
 
-- `model_free_implementation_passed_pending_git_delivery`：实现、focused/parser 门禁和独立终审已通过，仅余 Git 交付；
+- `model_free_complete_git_delivered`：实现、focused/parser 门禁、独立终审和 Git 交付均已完成；
   权重、CUDA、GPU、Docker、Cargo/Bazel/just 均未运行。
 
 ## 6. 关键决策记录
