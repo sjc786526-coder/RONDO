@@ -20,6 +20,8 @@
   52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。配置/命令现可精确表达 4k
   原生 auto+fit smoke 与 8k all+fit-off baseline，固定单卡 split/main GPU、F16 K/V、512/256 batch、no-mmproj、
   Jinja 和显式官方模板；这只由 fake/model-free 测试验收。
+  截至 2026-08-12 对 `b10375` 的运行路线复核仍未发现官方 Linux CUDA 预编译资产；升级不会省掉 Toolkit/源码构建，
+  因此唯一后续路线继续冻结为项目内构建 exact b10333 Linux CUDA runtime，复用现有 Plan 016 合同。
 - model-backed client 必须消费 launcher 写入主仓 `eval-data/local-approval/launcher-identity.json`
   的 0600 私有 receipt，绑定 nonce、PID/start ticks、实际 cmdline、监听 socket、runtime/model
   identity/path/id、endpoint 和实际服务参数指纹。schema v2 会拒绝旧 receipt；client 在 identity probe 后、decision 前以及 decision 返回后重验同一
