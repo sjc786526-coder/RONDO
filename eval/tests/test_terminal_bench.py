@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -1155,6 +1156,7 @@ class TerminalBenchTests(unittest.TestCase):
             (result.task_path / "tests" / "rondo-apt.conf").read_text(),
             'APT::Sandbox::User "root";\n',
         )
+
         self.assertEqual(
             (result.task_path / "tests" / "rondo-apt.conf").stat().st_mode & 0o777,
             0o444,
@@ -1237,6 +1239,17 @@ class TerminalBenchTests(unittest.TestCase):
         result.overlay_path.write_text(overlay)
         object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
         result.validate()
+
+    def test_ignored_staging_allows_nonexistent_nested_common_root_path(self) -> None:
+        repository = self.root / "repository"
+        repository.mkdir()
+        subprocess.run(("git", "init", "-q", str(repository)), check=True)
+        (repository / ".gitignore").write_text("/eval-data/\n", encoding="utf-8")
+        (repository / "eval-data" / "work").mkdir(parents=True)
+        staging = repository / "eval-data" / "work" / "campaign" / "task"
+
+        materialize_module._require_ignored_staging(staging)
+        self.assertFalse(staging.exists())
 
     def test_injected_backend_never_serializes_provider_key(self) -> None:
         prepared = self.prepare(Side.RONDO)

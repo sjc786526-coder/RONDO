@@ -578,10 +578,33 @@ def _validate_dataset_manifest(
 
 
 def _require_ignored_staging(staging_root: Path) -> None:
+    ancestor = staging_root
+    while not ancestor.exists():
+        if ancestor.parent == ancestor:
+            raise MaterializationError("staging root has no existing repository ancestor")
+        ancestor = ancestor.parent
+    try:
+        metadata = ancestor.lstat()
+        repository_root = Path(
+            _git(ancestor, "rev-parse", "--show-toplevel")
+        ).resolve(strict=True)
+        staging_root.relative_to(repository_root)
+    except (OSError, ValueError) as exc:
+        raise MaterializationError("staging root is outside the RONDO repository") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise MaterializationError("staging root ancestor is unsafe")
     probe = staging_root / ".rondo-ignore-probe"
     try:
         result = subprocess.run(
-            ("git", "-C", str(staging_root.parent), "check-ignore", "--no-index", "-q", str(probe)),
+            (
+                "git",
+                "-C",
+                str(repository_root),
+                "check-ignore",
+                "--no-index",
+                "-q",
+                str(probe),
+            ),
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
