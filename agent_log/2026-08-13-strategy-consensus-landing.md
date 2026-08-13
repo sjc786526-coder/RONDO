@@ -31,6 +31,48 @@
 `mydev/scripts/`，提前改会让安全边界条款指向不存在的路径。该改动已写入 WBS §4.4 与方向 3 的 M-0，
 要求与实际迁移在同一任务内完成。`doc/development-environment.md` 同理未改。
 
+## 审查后修正（同批第二轮）
+
+外部审查指出 4 处问题，经逐条核对全部属实，已修：
+
+1. **Local M3 与 L3/L4 顺序自相矛盾**：顶层 WBS 三处分别写成“M3→L5/L6”“4k→L3/L4→M3”“L3/L4/L7 收口为 M3”，
+   与子 WBS 冲突。统一为 **4k model-backed + L7 → Local M3 → L3/L4 → L5/L6 → Local M4**。
+2. **`product` 字段历史兼容规则不自洽**：原写法把 `codex` 列为产品取值，又规定缺字段的 244 条一律按
+   `rondo-local` 解释。实测 `runs.jsonl` 为 224 条 `side=rondo` + 20 条 `side=codex`，全部无 `product`，
+   该规则会把 20 条上游侧误判为 Local。改为：`product` 只取 `rondo-local`/`rondo-multi`，
+   `side=codex` 的行不写该字段；缺字段时按 `side` 分别解释。产品身份与比较侧确立为正交两维。
+3. **L3 的 Sol 调用路径与订阅入口边界冲突**：原 L3 定义为批量把 `E_final` 喂给云端教师并写入结果库，
+   等于把订阅制 Sol 当程序化后端，且排在产出标签的 L5 之前。按用户裁定采用「人在场、发送预写冻结 prompt、
+   不另开按量 API」方案：L3 只程序化跑 `Local-static`，教师侧改为导入冻结标签；L5 拆为
+   L5a 教师标签生成（先于 L3）与 L5b 合成训练数据（L3/L4 之后）。
+4. **活 WBS 堆入废弃方案与实现级论证**（违反 AGENTS.md 文档纪律）：精简 shim 机制说明、multidev 回退方案
+   论证与旧 M2/M5 退役段落，只保留决定、依赖与可执行约束；论证移到本日志附录。
+
+## 附录：被移出活 WBS 的取舍论证
+
+保留在此以免将来重新讨论；这些是形成时点的判断，不作为当前规划。
+
+**为什么 multidev 直接复制而不回退**
+
+- Guardian 审批子系统是上游自带的：`codex-source-code/codex-rs/core/src/guardian/` 下 8,457 行
+  （`approval_request`、`metrics`、`prompt`、`review`、`review_session`、`tests`）。任何 v0.147.0 基线都带着它，
+  所以“diff 里不许出现 `guardian/`”这条机械门不可执行。
+- 回退收益极小而风险真实：`config/mod.rs` 的 Guardian 字段与无关的 `outbound_proxy_policy_from_config`
+  重构混在同一份 diff；`session/mod.rs` 的 `model_provider_auth_manager` 是对通用 auth 装配路径的结构性改动，
+  回退它是回退一次重构而不是删功能。
+- 反向理由：未来可能把本地 Guardian 作为 Multi 的可选 provider，保留这些默认关闭的接口意味着那条路径较短。
+- 不从纯净 v0.147.0 起步：会原样继承 Plan 004 已修掉的 81 项测试失败。
+- 不用“回退到历史 commit 复制当时的 mydev”：仓库里不存在纯净 v0.147.0 的 mydev commit
+  （初始导入 `0fe9217` 是 v0.146.0，P0 Guardian 改造 `95d3358` 在前，0.147.0 升级 `1001929` 叠在其上）。
+
+**为什么看门狗迁移不走 shim**
+
+`eval/` 侧存在 canonical wrapper 身份校验，把路径当安全断言用：`runtime_bridge.py` 硬编码
+`<checkout>/mydev/scripts/with-build-lock.sh` 并做全等比较，随后再读 `/proc/<pid>/cmdline` 要求该路径逐字
+出现在 watchdog 进程 argv 里；`binary_freeze.py` 另有一处同样的硬编码。shim 用 `exec` 转发会替换进程映像，
+argv 里只剩根路径，因此无论走不走 shim，eval 侧硬编码都必须改成根路径 —— shim 省不下工作量，
+还让“调用的东西”与“被校验的东西”差一跳，与 fail-closed 资源守卫的完整性方向相反。
+
 ## 自查
 
 - 交叉引用与术语扫描：`M2` / `M5` / `E-A` / `方向 1` / `方向 3` / `可插拔` / `Luna` 在活文档中已无残留旧口径；

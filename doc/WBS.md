@@ -67,7 +67,8 @@
 ### 工作包 3：三条线并行
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
-- **3b RONDO Local**：推进方向 2 的 4k model-backed 真实本地审批闭环（Local M3），再到 L5/L6 与 Local M4。
+- **3b RONDO Local**：先以 4k model-backed + 配置切换收口 Local M3，再做 L3/L4 未微调 baseline 与指标口径，
+  然后 L5/L6，最后 Local M4。
 - **3c RONDO Multi**：推进方向 3 的功能路线。其**付费同题退化验收**以工作包 1 闭合为硬前置；
   在那之前 Multi 只做离线验证与功能正确性，不跑付费对比，也不得对外表述“未见退化”。
 
@@ -89,7 +90,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施收口中 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | model-free/静态前置完成 | 无外部阻塞；4k model-backed → L3/L4 → Local M3 |
+| 2 | 本地审批模型接入与横评 | Local | model-free/静态前置完成 | 无外部阻塞；4k model-backed + L7 → Local M3 → L3/L4 → L5/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究完成，产品基线未建立 | 无外部阻塞；付费同题验收不早于工作包 1 闭合 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），
@@ -137,24 +138,23 @@ RONDO/
 API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doctor/runtime、fake/loopback/replay 无 API 测试，
 以及能接收不同二进制与产品 variant 的通用测试与测评入口。
 
-**看门狗迁移（工作包 2 内必做）**：`with-build-lock.sh` 与 `build-watchdog-lib.sh` 目前在 `mydev/scripts/`，
-Multi 一旦构建就形成“Multi 构建依赖 Local 目录里的脚本”这种依赖倒置。两者迁到仓库根 `scripts/`，
-逻辑与阈值不动，**直接改所有引用点，不留 shim** —— `eval/` 侧存在 canonical wrapper 身份校验
-（硬编码路径全等比较 + `/proc/<pid>/cmdline` 逐字匹配），`exec` 转发会替换进程映像使校验失败，
-因此 shim 省不下工作量，且与 fail-closed 资源守卫的完整性方向相反。
+**看门狗迁移（工作包 2 内必做）**：`with-build-lock.sh` 与 `build-watchdog-lib.sh` 迁到仓库根 `scripts/`，
+逻辑与阈值不动，**直接改所有引用点，不留 shim**。约束：
 
-迁移必须在**同一个任务内**同步改写 `CLAUDE.md` / `AGENTS.md` 安全边界条款与
-`doc/development-environment.md` 中的路径 —— 在脚本真正移动前，这些文档仍按现状写 `mydev/scripts/`，
-不得提前改成根路径。`eval/locks/*.json` 中作为冻结 provenance 记录的路径**不得修改**；
-历史 `agent_log/` 与 `doc/audit-snapshots/` 同属冻结证据，不改。
-顺序要点：先改 `mydev/justfile`，再复制生成 `multidev/`，使其天生带正确路径。
+- `eval/` 侧有硬编码的 canonical wrapper 路径校验，**必须一并改成根路径**，否则带锁构建会 fail-closed。
+- `CLAUDE.md` / `AGENTS.md` 安全边界条款与 `doc/development-environment.md` 的路径必须在**同一任务内**
+  同步改写；脚本真正移动前不得提前改。
+- `eval/locks/*.json` 中作为冻结 provenance 记录的路径**不得修改**；`agent_log/` 与 `doc/audit-snapshots/` 同理。
+- 先改 `mydev/justfile`，再复制生成 `multidev/`，使其天生带正确路径。
 
 ### 4.5 产品身份
 
-- **历史结果只加不改**：`eval-data/bin/rondo/` 与既有 244 条 run 一律解释为 RONDO Local，不改名、不回填。
-- Multi 必须显式带 `multi` 字样（`eval-data/bin/rondo-multi/`），产品身份作为独立维度贯通 binary freeze、
-  源码/构建路径、manifest 与结果归档，不能只参数化一个 `bin/rondo/` 路径。比较侧的 `rondo` / `codex`
-  与产品 variant 是不同概念，不被产品身份覆盖。
+- **产品身份与比较侧是正交的两个维度**：`product`（`rondo-local` / `rondo-multi`）说的是哪个 RONDO 产品，
+  `side`（`rondo` / `codex`）说的是 RONDO 侧还是冻结上游侧。`codex` 不是产品取值。
+- **历史结果只加不改**：既有 244 条 run 中 224 条 `side=rondo` 解释为 RONDO Local，20 条 `side=codex`
+  是上游侧、不适用产品身份；一律不改名、不回填。
+- Multi 必须显式带 `multi` 字样（`eval-data/bin/rondo-multi/`），产品身份贯通 binary freeze、
+  源码/构建路径、manifest 与结果归档，不能只参数化一个 `bin/rondo/` 路径。
 - crate 名与二进制名沿用上游（`codex-cli` / `codex`），**不重命名**，保持与 `codex-source-code/` 可直接 diff。
 - 数据目录不顶层并列，只在产品特定层级加命名空间；具体规则见 `doc/eval-data-layout.md`。
 
@@ -164,7 +164,7 @@ Multi 一旦构建就形成“Multi 构建依赖 Local 目录里的脚本”这�
 |---|---|---|
 | P0 | S1 审批模型显式覆盖、S2 审批证据快照 | 已完成 |
 | P1 | B1—B3 最小真实链路；L1/L2 model-free 前置 | 已完成，M1 通过 |
-| P2 | 公平比较设施闭合；B4—B7；L2a/L3/L4/L7，收口为 Local M3 | 进行中 |
+| P2 | 公平比较设施闭合；B4—B7；L2a/L7 + 4k model-backed 收口为 Local M3；随后 L3/L4 出未微调 baseline 与指标口径 | 进行中 |
 | P3 | L5 教师标签与合成数据、L6 微调，收口为 Local M4 | 未开始 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
 | P5 | RONDO Multi 产品线 | 未开始（工作包 2 为其基线） |
@@ -173,26 +173,13 @@ Multi 一旦构建就形成“Multi 构建依赖 Local 目录里的脚本”这�
 |---|---|---|---|
 | M0 | Guardian 模型/effort 显式生效并落盘规范化 `E_final` | 工程验收 | 已完成 |
 | M1 | 冻结 Codex 与 RONDO 同一 TB 2.1 任务端到端可归档 | 工程验收 | 已完成 |
-| M2（旧） | 同时承担“测评设施就绪”与“方向 1 解锁” | —— | **已拆解退役**，见下 |
 | Local M3 | 4k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 未完成 |
 | Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 未完成 |
-| Multi 里程碑 | 由 Multi 自行定义，**不继承旧 M2 的 `σ`/`delta` 总闸门** | 待定 | 待 D1 定下首个增量后确定 |
-| M5（旧） | 首个 harness 优化在 canary 上取得可复现改善 | —— | 随方向 1 挂起 |
+| Multi 里程碑 | 由 Multi 自行定义，**不继承 `σ`/`delta` 总闸门** | 待定 | 待 D1 定下首个增量后确定 |
 
-### 旧 M2 的拆解
-
-方向 1 与 E-A 都已挂起，旧 M2 失去了原有消费者，因此拆开而不是勉强留着：
-
-| 新单元 | 内容 | 性质 |
-|---|---|---|
-| 公平比较设施 | catalog 对称、请求冻结分区、harness/deadline 固定、交错执行、重复与聚合规则冻结 | 设施交付，非里程碑 |
-| Local M3 | 见上表 | 工程验收 |
-| L5/L6 前置 dry-run | 约 5—10 条样本验证教师标签、Local 结构化输出、裁判标准与产物格式；不保存正式分数 | 前置检查，非里程碑 |
-| Local M4 | 见上表 | 人判定 |
-| Multi 里程碑 | 见上表 | 待定 |
-
-**拆解不得丢失的依赖**：Multi 的付费退化验收仍然依赖公平比较设施闭合（§2 工作包 3c）。它不再叫 M2，
-但依赖关系不变。
+**M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
+（设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。
+唯一必须保留的依赖是：Multi 的付费退化验收仍然依赖工作包 1 闭合（§2 工作包 3c）。
 
 ### 公平比较设施保留的机械判据
 
@@ -226,8 +213,9 @@ v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两�
 
 **订阅制入口不计入 API 预算门**：Sol 经开发用 Codex 生成教师标签、Opus 5 经 Claude Code 担任横评裁判，
 二者不额外计费，因此不受 API 预算授权门约束，只受订阅速率与配额限制。相应地它们带两条限制：
-模型版本不由本项目冻结，必须记录**生成/判定时点的模型标识与日期**；且只用于人在场监督的会话内工作，
-**不得**作为程序化批量后端接进 `eval/`。数据外发门与订阅与否无关，仍然适用。
+模型版本不由本项目冻结，必须记录**生成/判定时点的模型标识与日期**；且只用于人在场、发送预写冻结 prompt 的
+会话内工作，**不得**作为程序化批量后端接进 `eval/` —— `eval/` 只导入其冻结产物。
+也不为这些角色另开按量付费 API 入口。数据外发门与订阅与否无关，仍然适用。
 
 ## 7. 测试与测评原则
 

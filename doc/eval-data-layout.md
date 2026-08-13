@@ -46,7 +46,7 @@ eval/                                  # 入库
 └── reports/                           # 生成的对比表与曲线（可重生成）
 
 eval-data/                             # git-ignored
-├── bin/{rondo,rondo-multi,codex}/     # 已冻结的各侧 runtime bundle + manifest（`rondo/` = RONDO Local，见 §3.1）
+├── bin/{rondo,rondo-multi,codex}/     # 已冻结的 runtime bundle + manifest（`rondo/` = RONDO Local；`codex/` 为上游侧，见 §3.1）
 ├── deps/                              # 按 SHA 验证的项目局部运行资产（例如 bwrap）
 ├── tools/                             # 项目局部工具（例如 llama.cpp runtime）
 ├── toolkits/                          # 项目局部 SDK/toolkit 与冻结 installer（不做系统安装）
@@ -79,11 +79,12 @@ eval-data/                             # git-ignored
 
 | 规则 | 内容 |
 |---|---|
-| 取值 | `rondo-local` ｜ `rondo-multi` ｜ `codex`（冻结上游） |
-| 历史解释 | **缺产品字段的历史条目一律解释为 `rondo-local`。** 既有 `eval-data/bin/rondo/` 与 v1—v22 的 244 条 run 全部属于 RONDO Local |
+| 取值 | `rondo-local` ｜ `rondo-multi`。**`codex` 不是产品取值** —— 冻结上游是比较侧，不是本项目的产品线 |
+| 适用范围 | 只对 RONDO 侧的行有意义。`side = "codex"` 的行**不写 `product`**，读取方也不得为其推定产品身份 |
+| 历史解释 | 缺字段且 `side = "rondo"` 的历史行按 `rondo-local` 解释；缺字段且 `side = "codex"` 的行视为不适用。当前 `runs.jsonl` 的 244 条中，224 条 `side=rondo`（即 RONDO Local）、20 条 `side=codex`（冻结上游侧） |
 | 只加不改 | 历史结果**不改名、不回填新 schema**；新字段从后续 campaign 开始使用 |
-| 目录 | 历史 `bin/rondo/` 保持原名不动；Multi 新增 `bin/rondo-multi/`，必须显式带 `multi` 字样 |
-| 与比较侧的区别 | `run_id` 里的 `side`（`rondo` / `codex`）是**比较侧**语义，与产品身份是不同概念，不得互相覆盖 |
+| 目录 | 历史 `bin/rondo/` 保持原名不动，等价于 `rondo-local`；Multi 新增 `bin/rondo-multi/`，必须显式带 `multi` 字样。`bin/codex/` 是冻结上游侧的 bundle，不参与产品身份维度 |
+| 与比较侧的区别 | `run_id` 里的 `side`（`rondo` / `codex`）是**比较侧**语义，与产品身份是**正交的两个维度**，不得互相覆盖。跨产品对比时用 `product` 区分是哪个 RONDO，用 `side` 区分是 RONDO 侧还是上游侧 |
 | 数据目录切分 | **不顶层并列**（不新开 `eval-data-multi/`），只在产品特定的层级加命名空间。`toolkits/`、`models/`、`tools/`、`sources/` 等共享资产保持单份 |
 | crate / 二进制名 | 沿用上游 `codex-cli` / `codex`，**不重命名**；产品身份由本规范的路径与字段承担 |
 
@@ -97,6 +98,8 @@ eval-data/                             # git-ignored
 - `track` ∈ `tb`（真实端到端）｜ `replay`（离线回放，随 E-A 挂起）｜ `shadow`（静态影子横评）
 - `side` ∈ `rondo` ｜ `codex` ｜ 影子横评时用模型标识（`sol-static` / `local-static` / `local-ft-static`；
   历史批次的 `luna-static` 保留不改）。`side` 只表达比较侧，产品身份另用独立字段记录（§3.1）。
+  教师侧（`sol-static`）的行是**人在场生成后导入的冻结标签**，不是 `eval/` 自动运行产物，必须在该行注明
+  来源为导入以及生成时点的模型标识与日期。
 - 例：`20260812-143005182-tb-codex-r1`、`20260815-091200047-shadow-local-static-r1`
 - 生成时若目标 artifacts 目录已存在，视为冲突并直接报错，不覆盖。
 
@@ -151,7 +154,8 @@ eval-data/                             # git-ignored
 }
 ```
 
-- `product` 按 §3.1 取值。历史行没有该字段，读取方一律按 `rondo-local` 解释，**不回填历史行**。
+- `product` 按 §3.1 取值，只在 RONDO 侧的行出现；`side = "codex"` 的行不写该字段。历史行没有该字段时，
+  `side = "rondo"` 按 `rondo-local` 解释，`side = "codex"` 视为不适用。**不回填历史行**。
 - 当前 record schema v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的

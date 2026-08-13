@@ -46,21 +46,14 @@
 
 ### 落地方式：直接复制，不回退
 
-从当前 `mydev/` 复制 git 跟踪的文件，**不删除、不回退 Local 审批代码**。
+从当前 `mydev/` 复制 git 跟踪的文件，**不删除、不回退 Local 审批代码**，也不从纯净 v0.147.0 或历史 commit 起步。
 
-- 原“把 Guardian/config 相关产品文件回退到 v0.147.0 原样，并设‘diff 里不许出现 guardian/ 文件’机械门”的
-  方案**已废弃且不可执行**：Guardian 审批子系统本就是上游自带的
-  （`codex-source-code/codex-rs/core/src/guardian/` 下 8,457 行），任何 v0.147.0 基线都带着它。
-- 回退收益极小、风险真实：Guardian 字段与无关的 `outbound_proxy_policy_from_config` 重构处在同一份 diff；
-  `session/mod.rs` 的 `model_provider_auth_manager` 是对通用 auth 装配路径的结构性改动，回退它是回退一次重构，
-  不是删功能。
-- 反向理由：未来可能把本地 Guardian 作为 Multi 的可选 provider，保留这些默认关闭的接口意味着那条路径较短。
-- 不从纯净 v0.147.0 起步：会原样继承 Plan 004 已修掉的 81 项测试失败，等于重做一遍。
-- 不用“回退到历史 commit 复制当时的 mydev 再合并”：仓库里**不存在**纯净 v0.147.0 的 mydev commit
-  （初始导入 `0fe9217` 是 v0.146.0，P0 Guardian 改造 `95d3358` 在前，0.147.0 升级 `1001929` 叠在其上），
-  产出的是历史快照而非当前基线。
+- 源码纯度门（“diff 里不许出现 `guardian/`”）**不可执行**：Guardian 审批子系统是上游自带的，
+  任何 v0.147.0 基线都带着它。因此改用下文的行为验收门。
 - 复制前必须排除 `mydev/codex-rs/core/` 下未被 git 跟踪的测试残留空目录（`.git`、`.agents`、`.codex`、
   `project`、`absolute-turn`、`request-permissions-environment`）。
+
+（完整取舍论证见 `agent_log/2026-08-13-strategy-consensus-landing.md`。）
 
 ### “干净基线”的定义
 
