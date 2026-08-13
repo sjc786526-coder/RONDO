@@ -292,15 +292,20 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 3. 基础四轮与必要条件加跑完整后机械聚合 `sigma`、`delta`、共同分母、归因、usage 和费用；若下一请求的
    `18.885000 USD` 最大合法 reservation 无法装入剩余 `173.325570 USD`，在 API 前 blocked。
 
+当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v19`/`p2-b7-canary-sol-sol-v19`，run base
+`20260812-390000000`，lock SHA
+`20483f7c3ce6f7fe058bbe34185464dade8c22280a34ece5b8ced009b2d84e73`。321 个新 run ID 唯一，20 条
+v18 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary。
+
 ### 阻塞项
 
-- 无离线阻塞；后继真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
+- 无离线阻塞；v19 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
   provider-integrity 失败不隐藏、不减记，但不再作为本地实现熔断证据。
 
 ### 当前验收状态
 
 - v1 是 API 前失败终态；v2—v18 是保留全部费用事实的 blocked 终态。累计 debit `826.674430 USD`、
-  reservation 0；B7 尚未形成四轮完整共同集合，M2 尚未验收。
+  reservation 0；v19 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
 
 ## 6. 关键决策记录
 
@@ -335,3 +340,4 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 027 | v17 因 fix、vulnerable、filter 三 task 真实 provider-integrity 熔断；用户追加 300 USD 后总 cap 提至 1000 USD 并机械重冻 v18 | 新授权不改写 v17 也不重置 667.663130 USD prior；仍保留 fresh wire、task-local 与全局熔断 | B6/B7 | 已采纳 |
 | 028 | v18 按 schema-v2 因第三个 task 的 provider-integrity 熔断；后继改为引用历史首个非 infra 有效结果，只补 infra/缺失 slot，provider-integrity 不计 task-local/全局熔断 | 中转站波动不是本地实现缺陷；保留全部失败与保守费用，同时避免重复暴露已有效的 pass/reward 0 和选择性重跑美化成绩 | B6/B7 | 已采纳 |
 | 029 | 后继上游逻辑请求 deadline 从 90 秒单调放宽到 180 秒；在 90 秒下完整成功的 v18 结果允许引用，其他 profile/执行合同仍须精确相等 | 中转站记录显示请求完成，90 秒本地终态等待可能过严；单调延长不推翻已在更严格门限下成功的结果 | B6/B7 | 已采纳 |
+| 030 | 生成 schema-v3 v19，冻结 20 条 v18 首个非 infra 结果引用、321 个新 run ID 与精确 prior；v1—v18 继续只读 | 新 identity 只承载缺失/infra 续跑，不能复用旧 run ID、覆盖旧结果或重置累计费用 | B6/B7 | 已采纳 |

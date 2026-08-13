@@ -264,8 +264,14 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         active = load_campaign_identity(paths)
         self.assertEqual(active.campaign_id, registry[-1].campaign_id)
         self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
-        self.assertEqual(active.schema_version, 2)
+        self.assertEqual(active.schema_version, 3)
         self.assertEqual(active.max_attempts, 4)
+        self.assertEqual(active.upstream_timeout_seconds, 180.0)
+        self.assertEqual(len(active.continuation), 20)
+        self.assertEqual(
+            {item.source_campaign_id for item in active.continuation},
+            {"p2-b7-canary-baseline-v18"},
+        )
         self.assertEqual(len(active.slots), 321)
         self.assertIn(
             active.budget["campaign_cap_usd"],

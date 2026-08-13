@@ -75,7 +75,8 @@
   filter 成为第三个 provider-integrity task 并按旧 schema-v2 熔断。v18 paid `158.877192 USD`、wire
   `0.134108 USD`、reservation 0，累计 debit `826.674430 USD`。后继 schema-v3 冻结跨 identity 的首个
   非 infra 结果引用，只重跑 infra/缺失 slot；provider-integrity 仍保守结算但不计本地/任务熔断，上游绝对
-  deadline 单调放宽为 180 秒。1000 USD 总硬上限不重置，当前余量 `173.325570 USD`。**
+  deadline 单调放宽为 180 秒。v19 已以 20 条 v18 引用、321 个唯一新 run ID 和精确 prior 冻结；1000 USD
+  总硬上限不重置，当前余量 `173.325570 USD`。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到

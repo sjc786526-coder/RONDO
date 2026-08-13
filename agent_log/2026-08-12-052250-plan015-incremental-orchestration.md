@@ -90,3 +90,7 @@
 - 上游逻辑请求绝对 deadline 从默认 90 秒为 schema-v3 单调放宽到 180 秒；v1—v18 保留原 90 秒语义，
   只有在更严格/相等 deadline 下已完整 usage-priced 的结果可复用。其他 profile、task/image、bundle、TB、
   seccomp 或公开结果/账本事实漂移均拒绝 continuation。
+- 离线实现以 `3754ec0` 提交；focused 101/101、全量 446/446、`eval-lock` 85 packages 通过。生成 v19：
+  campaign/batch `p2-b7-canary-baseline-v19`/`p2-b7-canary-sol-sol-v19`、run base `20260812-390000000`、
+  321 个唯一 run ID、20 条 v18 continuation，lock SHA
+  `20483f7c3ce6f7fe058bbe34185464dade8c22280a34ece5b8ced009b2d84e73`，prior `$826.674430`。
