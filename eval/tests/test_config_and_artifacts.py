@@ -319,6 +319,7 @@ class ArtifactTests(unittest.TestCase):
         writer.write_json(
             "guardian-evidence/0001/E_final.json",
             {
+                "input": [],
                 "text": {
                     "format": {
                         "schema": {
@@ -347,6 +348,65 @@ class ArtifactTests(unittest.TestCase):
         )
         with self.assertRaises(ArtifactError):
             writer.finalize(self._record(run_id), secrets=())
+
+    def test_secret_scan_allows_credential_shaped_guardian_task_input(self) -> None:
+        run_id = "20260809-000000037-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json(
+            "guardian-evidence/0001/E_final.json",
+            {
+                "input": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "sanitize fixture OPENAI_API_KEY=task-decoy and "
+                            "https://fixture-user:fixture-password@example.invalid/path"
+                        ),
+                    }
+                ],
+                "text": {
+                    "format": {
+                        "schema": {
+                            "properties": {
+                                "user_authorization": {
+                                    "type": "string",
+                                    "enum": ["unknown", "low", "medium", "high"],
+                                }
+                            }
+                        }
+                    }
+                },
+            },
+        )
+
+        target = writer.finalize(self._record(run_id), secrets=("real-runtime-key",))
+
+        self.assertTrue((target / "guardian-evidence/0001/E_final.json").is_file())
+
+    def test_guardian_task_input_still_rejects_exact_configured_secret(self) -> None:
+        run_id = "20260809-000000038-tb-rondo-r1"
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json(
+            "guardian-evidence/0001/E_final.json",
+            {
+                "input": [{"role": "user", "content": "real-runtime-key"}],
+                "text": {
+                    "format": {
+                        "schema": {
+                            "properties": {
+                                "user_authorization": {
+                                    "type": "string",
+                                    "enum": ["unknown", "low", "medium", "high"],
+                                }
+                            }
+                        }
+                    }
+                },
+            },
+        )
+
+        with self.assertRaises(ArtifactError):
+            writer.finalize(self._record(run_id), secrets=("real-runtime-key",))
 
     def test_tracked_record_is_included_in_secret_scan(self) -> None:
         run_id = "20260809-000000006-tb-rondo-r1"

@@ -620,7 +620,16 @@ def _artifact_tree_identity(root: Path, secrets: tuple[bytes, ...]) -> dict[str,
 
 
 def _scan_artifact_bytes(contents: bytes, secrets: tuple[bytes, ...], relative_path: str) -> None:
-    """Permit only the frozen Guardian schema's enum key, never an output value."""
+    """Scan artifacts, treating only verified Guardian request input as untrusted data.
+
+    ``E_final.json`` is the exact request body sent to the Guardian.  Its ``input``
+    deliberately contains the task transcript, which can include credential-shaped
+    fixtures (for example the sanitize-git-repo canary).  Those bytes are evidence,
+    not process credentials.  Keep exact configured-secret matching over the raw
+    file, then remove only the structured ``input`` value before applying generic
+    key/header/URL heuristics.  Malformed lookalikes still take the normal strict
+    path.
+    """
 
     relative = Path(relative_path)
     if (
@@ -631,21 +640,26 @@ def _scan_artifact_bytes(contents: bytes, secrets: tuple[bytes, ...], relative_p
     ):
         try:
             value = json.loads(contents.decode("utf-8"))
+            request_input = value["input"]
             properties = value["text"]["format"]["schema"]["properties"]
             authorization_schema = properties["user_authorization"]
         except (UnicodeError, json.JSONDecodeError, KeyError, TypeError):
             pass
         else:
-            if authorization_schema == {
+            if isinstance(request_input, list) and authorization_schema == {
                 "type": "string",
                 "enum": ["unknown", "low", "medium", "high"],
             }:
+                if any(secret in contents for secret in secrets):
+                    raise ArtifactError("artifact contains a configured secret value")
                 sanitized = copy.deepcopy(value)
+                sanitized["input"] = []
                 sanitized_properties = sanitized["text"]["format"]["schema"]["properties"]
                 sanitized_properties["guardian_user_level"] = sanitized_properties.pop(
                     "user_authorization"
                 )
                 contents = _encode_record(sanitized)
+                secrets = ()
     _scan_bytes(contents, secrets, "artifact")
 
 

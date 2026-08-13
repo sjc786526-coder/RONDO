@@ -84,6 +84,9 @@ _STOP_REASONS = {
     "unclassified_upstream_failure",
     "upstream_non_success",
     "upstream_response_unavailable",
+    "upstream_terminal_error",
+    "upstream_terminal_failed",
+    "upstream_terminal_incomplete",
     "operator_confirmed_unbilled_attempts_exhausted",
     "operator_confirmed_unbilled_deadline_exhausted",
     "operator_confirmed_unbilled_proxy_closing",
@@ -711,7 +714,12 @@ class RedactedMetadataStore:
             "settlement_kind",
             "usage",
         }
-        optional = {"stream_end_kind"}
+        optional = {
+            "stream_end_kind",
+            "terminal_event_type",
+            "terminal_response_status",
+            "terminal_error_code",
+        }
         if not expected.issubset(observation) or not set(observation).issubset(
             expected | optional
         ):
@@ -724,6 +732,30 @@ class RedactedMetadataStore:
             "size_limit",
         }:
             raise ApiBudgetProxyError("metadata stream end kind is invalid")
+        terminal_event_type = observation.get("terminal_event_type")
+        if terminal_event_type not in {
+            None,
+            "response.completed",
+            "response.failed",
+            "response.incomplete",
+            "error",
+        }:
+            raise ApiBudgetProxyError("metadata terminal event type is invalid")
+        terminal_response_status = observation.get("terminal_response_status")
+        if terminal_response_status not in {
+            None,
+            "completed",
+            "failed",
+            "incomplete",
+            "cancelled",
+        }:
+            raise ApiBudgetProxyError("metadata terminal response status is invalid")
+        terminal_error_code = observation.get("terminal_error_code")
+        if terminal_error_code is not None and (
+            not isinstance(terminal_error_code, str)
+            or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", terminal_error_code) is None
+        ):
+            raise ApiBudgetProxyError("metadata terminal error code is invalid")
         usage = observation["usage"]
         if (
             (observation.get("usage_valid") is True) != isinstance(usage, dict)
@@ -1522,12 +1554,14 @@ class LoopbackResponsesProxy:
                             "terminal" if collector.terminal_seen else "clean_eof"
                         )
                         if collector.terminal_seen:
+                            request_metadata.update(collector.safe_terminal_metadata())
+                            terminal_stop_reason = collector.stop_reason
                             settlement = self._ledger.settle(
                                 self._run_id,
                                 request_id,
                                 usage,
                                 pricing=pricing,
-                                stop_reason=stop_reason,
+                                stop_reason=stop_reason or terminal_stop_reason,
                             )
                             self._save_observation(
                                 request_id,
@@ -1555,6 +1589,8 @@ class LoopbackResponsesProxy:
                     if terminal_seen:
                         usage = collector.usage if collector.completed else None
                         request_metadata["stream_end_kind"] = "terminal"
+                        request_metadata.update(collector.safe_terminal_metadata())
+                        terminal_stop_reason = collector.stop_reason
                         # Release the conservative reservation before exposing
                         # response.completed to Codex.  Guardian review can start
                         # as soon as the downstream observes this line; writing it
@@ -1565,7 +1601,7 @@ class LoopbackResponsesProxy:
                             request_id,
                             usage,
                             pricing=pricing,
-                            stop_reason=stop_reason,
+                            stop_reason=stop_reason or terminal_stop_reason,
                         )
                         self._save_observation(
                             request_id,
@@ -2185,6 +2221,27 @@ class _SseUsageCollector:
         self.usage: Usage | None = None
         self.terminal_seen = False
         self.completed = False
+        self.terminal_event_type: str | None = None
+        self.terminal_response_status: str | None = None
+        self.terminal_error_code: str | None = None
+
+    @property
+    def stop_reason(self) -> str | None:
+        return {
+            "response.failed": "upstream_terminal_failed",
+            "response.incomplete": "upstream_terminal_incomplete",
+            "error": "upstream_terminal_error",
+        }.get(self.terminal_event_type)
+
+    def safe_terminal_metadata(self) -> dict[str, str]:
+        result: dict[str, str] = {}
+        if self.terminal_event_type is not None:
+            result["terminal_event_type"] = self.terminal_event_type
+        if self.terminal_response_status is not None:
+            result["terminal_response_status"] = self.terminal_response_status
+        if self.terminal_error_code is not None:
+            result["terminal_error_code"] = self.terminal_error_code
+        return result
 
     def feed(self, chunk: bytes) -> None:
         self._buffer.extend(chunk)
@@ -2229,6 +2286,20 @@ class _SseUsageCollector:
         }:
             return
         self.terminal_seen = True
+        self.terminal_event_type = event_type
+        response = value.get("response")
+        if isinstance(response, dict):
+            response_status = response.get("status")
+            if response_status in {"completed", "failed", "incomplete", "cancelled"}:
+                self.terminal_response_status = response_status
+        error = value.get("error")
+        if not isinstance(error, dict) and isinstance(response, dict):
+            error = response.get("error")
+        error_code = error.get("code") if isinstance(error, dict) else value.get("code")
+        if isinstance(error_code, str) and re.fullmatch(
+            r"[A-Za-z0-9._-]{1,128}", error_code
+        ):
+            self.terminal_error_code = error_code
         if event_type != "response.completed":
             return
         if event_names and event_names != [b"response.completed"]:

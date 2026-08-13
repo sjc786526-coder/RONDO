@@ -176,6 +176,39 @@ class _FakeUpstream:
                     self.wfile.flush()
                     self.close_connection = True
                     return
+                if mode in {"sse_terminal_error", "sse_terminal_failed"}:
+                    if mode == "sse_terminal_error":
+                        event_name = "error"
+                        response = {
+                            "type": "error",
+                            "error": {
+                                "code": "provider_stream_error",
+                                "message": "sensitive-upstream-message-must-not-persist",
+                            },
+                        }
+                    else:
+                        event_name = "response.failed"
+                        response = {
+                            "type": "response.failed",
+                            "response": {
+                                "status": "failed",
+                                "error": {
+                                    "code": "model_failed",
+                                    "message": "another-message-must-not-persist",
+                                },
+                            },
+                        }
+                    encoded = f"event: {event_name}\n".encode()
+                    encoded += b"data: " + json.dumps(response).encode()
+                    encoded += b"\n\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(encoded)
+                    self.wfile.flush()
+                    self.close_connection = True
+                    return
                 if mode in {"sse", "sse_hold_open"}:
                     response = {
                         "type": "response.completed",
@@ -1034,6 +1067,47 @@ class ApiBudgetProxyTests(unittest.TestCase):
         ]
         self.assertFalse(request["usage_valid"])
         self.assertEqual(request["settlement_kind"], "conservative_reservation")
+
+    def test_terminal_error_records_only_bounded_protocol_facts(self) -> None:
+        self.upstream.mode = "sse_terminal_error"
+
+        status, _body, _headers = self._post(
+            self._body(), request_id="sse-terminal-error"
+        )
+
+        self.assertEqual(status, 200)
+        observation = json.loads(
+            (self.root / "metadata.json").read_text(encoding="utf-8")
+        )["requests"][0]
+        self.assertEqual(observation["upstream_status"], 200)
+        self.assertEqual(observation["stream_end_kind"], "terminal")
+        self.assertEqual(observation["terminal_event_type"], "error")
+        self.assertEqual(observation["terminal_error_code"], "provider_stream_error")
+        self.assertNotIn("sensitive-upstream-message", json.dumps(observation))
+        run = self.ledger.snapshot()["runs"]["benchmark-r1"]
+        self.assertTrue(run["stopped"])
+        self.assertEqual(run["stop_reason"], "upstream_terminal_error")
+        request = run["requests"]["sse-terminal-error"]
+        self.assertFalse(request["usage_valid"])
+        self.assertEqual(request["settlement_kind"], "conservative_reservation")
+
+    def test_terminal_failed_records_status_without_message(self) -> None:
+        self.upstream.mode = "sse_terminal_failed"
+
+        status, _body, _headers = self._post(
+            self._body(), request_id="sse-terminal-failed"
+        )
+
+        self.assertEqual(status, 200)
+        observation = json.loads(
+            (self.root / "metadata.json").read_text(encoding="utf-8")
+        )["requests"][0]
+        self.assertEqual(observation["terminal_event_type"], "response.failed")
+        self.assertEqual(observation["terminal_response_status"], "failed")
+        self.assertEqual(observation["terminal_error_code"], "model_failed")
+        self.assertNotIn("another-message", json.dumps(observation))
+        run = self.ledger.snapshot()["runs"]["benchmark-r1"]
+        self.assertEqual(run["stop_reason"], "upstream_terminal_failed")
 
     def test_missing_role_header_projects_declared_main_from_request_shape(self) -> None:
         status, _body, _headers = self._post(self._body(), role=None)
