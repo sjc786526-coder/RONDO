@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -28,7 +29,7 @@ _TIMESTAMP = re.compile(
 )
 _MAX_SCAN_BYTES = 128 * 1024 * 1024
 _SENSITIVE_ASSIGNMENT = re.compile(
-    rb"(?:^|[,{\s])(?![\"']?user_authorization[\"']?\s*[:=])[\"']?"
+    rb"(?:^|[,{\s])[\"']?"
     rb"(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|bearer[-_]?token|"
     rb"client[-_]?secret|refresh[-_]?token|private[-_]?key|password|secret|token|authorization|"
     rb"proxy-authorization|x-api-key)[\"']?\s*[:=]\s*[\"']?\s*[^\s\"'},\]]+",
@@ -75,6 +76,14 @@ _UPSTREAM_CODEX_IDENTITY = {
 
 class ArtifactError(ValueError):
     """Raised when artifact publication cannot be completed safely."""
+
+
+def validate_private_artifact_bytes(contents: bytes, relative_path: str) -> None:
+    """Check one prospective private artifact without weakening final scanning."""
+
+    if not isinstance(contents, bytes) or not isinstance(relative_path, str):
+        raise ArtifactError("artifact preflight input is invalid")
+    _scan_artifact_bytes(contents, (), relative_path)
 
 
 def validate_run_id(
@@ -591,7 +600,7 @@ def _artifact_tree_identity(root: Path, secrets: tuple[bytes, ...]) -> dict[str,
             or len(contents) != size
         ):
             raise ArtifactError("artifact changed while it was being scanned")
-        _scan_bytes(contents, secrets, "artifact")
+        _scan_artifact_bytes(contents, secrets, relative)
         entries.append(
             {
                 "path": relative,
@@ -608,6 +617,50 @@ def _artifact_tree_identity(root: Path, secrets: tuple[bytes, ...]) -> dict[str,
         "entries": entries,
     }
     return {**payload, "tree_sha256": hashlib.sha256(_encode_record(payload)).hexdigest()}
+
+
+def _scan_artifact_bytes(contents: bytes, secrets: tuple[bytes, ...], relative_path: str) -> None:
+    """Scan artifacts, treating only verified Guardian request input as untrusted data.
+
+    ``E_final.json`` is the exact request body sent to the Guardian.  Its ``input``
+    deliberately contains the task transcript, which can include credential-shaped
+    fixtures (for example the sanitize-git-repo canary).  Those bytes are evidence,
+    not process credentials.  Keep exact configured-secret matching over the raw
+    file, then remove only the structured ``input`` value before applying generic
+    key/header/URL heuristics.  Malformed lookalikes still take the normal strict
+    path.
+    """
+
+    relative = Path(relative_path)
+    if (
+        len(relative.parts) == 3
+        and relative.parts[0] == "guardian-evidence"
+        and re.fullmatch(r"[0-9]{4}", relative.parts[1])
+        and relative.parts[2] == "E_final.json"
+    ):
+        try:
+            value = json.loads(contents.decode("utf-8"))
+            request_input = value["input"]
+            properties = value["text"]["format"]["schema"]["properties"]
+            authorization_schema = properties["user_authorization"]
+        except (UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+            pass
+        else:
+            if isinstance(request_input, list) and authorization_schema == {
+                "type": "string",
+                "enum": ["unknown", "low", "medium", "high"],
+            }:
+                if any(secret in contents for secret in secrets):
+                    raise ArtifactError("artifact contains a configured secret value")
+                sanitized = copy.deepcopy(value)
+                sanitized["input"] = []
+                sanitized_properties = sanitized["text"]["format"]["schema"]["properties"]
+                sanitized_properties["guardian_user_level"] = sanitized_properties.pop(
+                    "user_authorization"
+                )
+                contents = _encode_record(sanitized)
+                secrets = ()
+    _scan_bytes(contents, secrets, "artifact")
 
 
 def _assert_artifact_tree_identity(root: Path, expected: object) -> None:

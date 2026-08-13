@@ -68,8 +68,14 @@
   但 GPU runtime、model-backed 启动/推理、显存/延迟与 L3/L4 仍未验收，不称“只差权重”。
 - **当前阶段：P1 的 B1、B2、B3、L1 与 L2 CPU x64 前置已整体完成，M1 已通过。Plan 014 v19 在同一冻结
   Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
-  reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved 且 S2 绑定 verified。
-  `assess_m1` 返回 passed。下一阶段进入 P2：先完成 B4 分层清单与 B5/B6 轻量设施，再单独估算和授权 B7。**
+  reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
+  只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
+  `assess_m1` 返回 passed。B4 分层、B5 计分归因、B6 预算和 B7 首次真实执行均已形成终态。
+  v22 复用 25 条首个非 infra 历史结果，只补齐缺失链；fresh wire 与 202 个 upstream attempt 全部结算。
+  九项共同有效任务上 RONDO A/A 均为 `5/9`，RONDO A/B `5/9`，frozen Codex A/B `4/9`；`sigma=0`、
+  `delta=3`，因此 B7 以 `ab_delta_exceeds_aa_sigma` 真实 failed，而不是 infra blocked。Plan 020 累计本地估算
+  `1466.074133 < 1600 USD`、reservation 0、`actual_usd=null`。`vulnerable-secret` 被供应商以 HTTP 200 SSE
+  `error/cyber_policy` 拒绝并按含糊计费保守结算，未进入共同分母。v1—v22 全部只读，paid active pointer 已关闭。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -80,8 +86,10 @@
   Plan 012 所有真实探针与 v8 ledger 都已 settled、没有悬挂 reservation；v8 的 5 个 Sol main 请求成功，Guardian
   Luna 请求 HTTP 503/usage invalid，单 run 本地预算按合同完整结算为 `$5.000000`。后续模型诊断分别闭合
   Luna/Luna 与 Sol/Sol，并最终以冻结 Codex/RONDO 各 Sol main + Sol/low Guardian 连续跑完 3 轮；24 个请求
-  零重试，本地价卡估算合计 `$1.234473`。短测以后按每 upstream request 预留 1 USD，正式/大请求继续按
-  5 USD。active profile 当前为 relay + Sol main + Sol Guardian/low。实际中转账单未查询且 `actual_usd=null`；
+  零重试，本地价卡估算合计 `$1.234473`。短测只有显式选择时按每 upstream request 预留 1 USD；后续正式
+  请求按所选价卡的最大合法 usage envelope 预留，当前 Sol 上界为 18.885000 USD。local profile 当前为 relay +
+  Sol main + Sol Guardian/low；main/Guardian 可短暂重叠，后续新 pair 须据此冻结新 cap，但 paid identity/入口当前
+  已关闭。实际中转账单未查询且 `actual_usd=null`；
   Plan 014 历史失败 identity 均保持不可复用；最终 v19 canary + 双侧 pair 连同此前保守结算后的本阶段累计
   本地估算为 `$6.988825 < $280`，全部 reservation 已结算，`actual_usd=null`。v19 的真实 evidence 可作为后续
   确定性 seed/holdout 切分输入，但不得直接进入训练集。
@@ -92,9 +100,9 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2/B3 与 M1 完成；进入 B4/B5/B6，B7 另行授权 |
-| 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | L1、L2 CPU x64 前置与 L2a provider 分流完成；GPU/model-backed、L3/L4 待 P2 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1/M1 与 B4—B7 执行完成；B7 门 failed、E-A 待实现，M2 未达成 |
+| 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 可诊断 v22 三项 A/B 差异；正式优化迭代尚未解锁 |
+| 2 | 本地审批模型接入与横评 | L1、L2 CPU x64 前置与 L2a provider 分流完成；已有真实 E_final，GPU/model-backed、L3/L4 待 P2 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -120,9 +128,9 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 当前阶段：先 B4/B5/B6，B7 单独估算授权 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 进行中：B4—B7 已执行并形成有效 failed 基线；E-A 未落地，M2 未达成 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
-| P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
+| P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | M2 通过 | 每轮跑批预算 | 未开始，允许只读差异诊断 |
 
 阶段与任务编号一一对应，不重叠：L1/L2 属 P1，L2a/L3/L4 属 P2，L5/L6/L7 属 P3。
 注意 **L2 可以在 P1 期间先把本地推理服务搭起来并量上下文预算，但它的验收要用真实 `E_final`，因此最终验收挂在 B3 之后**——搭建与验收分处两阶段，不是矛盾。
@@ -149,8 +157,12 @@ P0 共享地基 ────────┤                          ├─→ �
 3. **通过判据（纯机械，不含主观判断）**：
    - 跨侧结果不同的任务数 `≤ σ`；**且**
    - 出现任意「codex 通过 / RONDO 失败」的任务时，对该任务两侧各**加跑 2 轮**；若 RONDO 侧仍全败而 codex 侧全过，判定不通过。单轮结果不足以判断"稳定"，所以用加跑而不是靠人判断。
-4. **基础设施失败**（容器/网络/超时）的任务不计入分子分母，单独重跑；单轮基础设施失败率 > 20% 则该轮作废重跑。
-5. **预算口径**：10 任务 × 4 轮 = 40 次运行，外加可能的定点加跑（每个触发任务 4 次）。按 B6 出预估并单独授权。
+4. **基础设施失败**不计入分子分母，只对 infra 按同题运行链定点补跑；pass 与正常 reward 0 均不重跑。
+   每轮补跑完成后仍有超过 2 项最终 infra 时立即 blocked，不进入下一轮；`σ` 与跨侧差异必须使用至少 8 项的
+   同一共同有效集合。结构化同类故障遵守 task-local/global 熔断，provider response integrity 只豁免熔断、
+   不豁免逐轮 infra 上限。
+5. **预算口径**：10 任务 × 4 轮 = 40 条基础逻辑链，外加可能的机械条件加跑和 infra-only attempts；全部失败
+   attempt、wire canary 与条件加跑均计入冻结的 campaign cap，按 B6 单独估算和授权。
 
 不通过就先修测评设施，不得先推进优化。若 `σ` 本身大到接近任务总数（说明 canary 选得太不稳定），回到 B4 重挑任务，而不是放宽判据。
 
@@ -168,12 +180,20 @@ image 和同一运行合同完成 no-API 链路，current receipt 与看门狗 s
 B3 使用 Plan 014 v19 的 source-bound Sol/Sol profile 与唯一 identity 完成。RONDO 和 frozen Codex 在同一
 `fix-git` task/image 上分别 `completed`/reward 1，全部 35 个 upstream request 均 attempt 1、usage valid，双侧
 预算 run 未停止且 reservation 为 0。RONDO 的两份 Sol/low Guardian `E_final/meta` 均自然 approved，S2 request/
-evidence 集合绑定 verified；两侧 public result、pair lock、sequence ledger、container metrics 和 profile/endpoint
+evidence 在 v19 旧合同下为 task-scoped count match；两侧 public result、pair lock、sequence ledger、container metrics 和 profile/endpoint
 hash 经既有 `assess_m1` 聚合为 `m1=passed`、`reasons=[]`。v19 正式费用 `$0.870787`，Plan 014 全阶段累计本地估算
 `$6.988825 < $280`，供应商实际账单未知。历史失败 identity 及其 ledger/result/artifact 保持原终态，不回填。
+运行后离线修复已使后续 completed/M1 强制消费未停止且完全 usage-priced 的预算终态、精确 request IDs 和 canonical
+Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再可由 paid CLI/canary 重跑。预算 overage 记录完整
+估价并停止，Docker lease/cleanup 与 proxy deadline/claim 生命周期缺口也已闭合。完整 eval 349/349、lock 85 packages
+通过；本批未调用 API、Docker 或 Cargo。
 L2 的 CPU x64 前端/运行闭包前置、首批真实 E_final 输入与 L2a provider 分流现已具备；GPU/model-backed
 实模验收与 L3/L4 留在 P2。
-下一步是 B4 分层与 B5/B6 轻量设施，不自动启动 B7 付费跑批。执行细节见 Plan 014 与本批 `agent_log`。
+Plan 020 的 10/61/18 taskset、10-task exact image catalog、机械计分和增量执行设施已完成首次真实 B7。
+v22 在九项共同有效任务上得到 `sigma=0`、`delta=3`，技术门 failed；四轮有效结果和条件加跑、全部 infra
+attempt、202 个请求及 `1466.074133 USD` 累计费用均保留。active paid identity 已关闭，下一轮不得续跑或复用
+v22 IDs。三项 A/B 差异只作为性能诊断输入；在 B7 门与 E-A/A1—A7 闭合前，不启动方向 1 的正式优化迭代。
+执行细节见 Plan 020。
 
 P0 的能力边界仍需记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。方向 2 的 **L2a** 已补齐
 独立 provider 与 base URL 分流并完成 mock 验收；L7 仍须把 S1 + L2a 配置实际指向已通过 model-backed

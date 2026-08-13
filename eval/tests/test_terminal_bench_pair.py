@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -25,33 +26,21 @@ from rondo_eval.contracts import (  # noqa: E402
 from rondo_eval.terminal_bench import pair as pair_module  # noqa: E402
 from rondo_eval.terminal_bench.metrics import RunnerMetricsTimer, metrics_from_dict  # noqa: E402
 from rondo_eval.terminal_bench.pair import (  # noqa: E402
+    HISTORICAL_PAIR_LOCKS,
     PairSequenceLedger,
     PairIdentityError,
     assess_m1,
     has_complete_guardian_approval_sequence,
-    load_consumed_v17_pair_identity,
-    load_consumed_v16_pair_identity,
-    load_consumed_v10_pair_identity,
-    load_consumed_v11_pair_identity,
-    load_consumed_v12_pair_identity,
-    load_consumed_v13_pair_identity,
-    load_consumed_v14_pair_identity,
-    load_consumed_v15_pair_identity,
-    load_consumed_v9_pair_identity,
-    load_legacy_pair_identity,
-    load_pair_identity,
-    load_previous_pair_identity,
+    load_active_pair_identity,
+    load_historical_pair_identity,
     terminal_record_sha256,
     validate_harbor_installation,
 )
-from rondo_eval.terminal_bench.runner import HARBOR_EXECUTABLE  # noqa: E402
-
-
 class PairIdentityTests(unittest.TestCase):
     HARNESS_COMMIT = "f" * 40
 
     def setUp(self) -> None:
-        self.tracked_identity = load_pair_identity()
+        self.tracked_identity = load_historical_pair_identity()
         self.provider = self._provider()
         selected = self.tracked_identity.require_selected_profile()
         self.identity = replace(
@@ -143,13 +132,20 @@ class PairIdentityTests(unittest.TestCase):
             budget_usd=fair["budget_usd"],
         )
 
-    def _record(self, side: Side, created_at: str) -> dict[str, object]:
-        slot = self.identity.slot_for(side)
-        fair = self.identity.fairness
+    def _record(
+        self,
+        side: Side,
+        created_at: str,
+        *,
+        identity=None,
+    ) -> dict[str, object]:
+        identity = identity or self.identity
+        slot = identity.slot_for(side)
+        fair = identity.fairness
         config = {
-            **self.identity.require_selected_profile().to_dict(),
-            "pair_id": self.identity.pair_id,
-            "pair_lock_sha256": self.identity.lock_sha256,
+            **identity.require_selected_profile().to_dict(),
+            "pair_id": identity.pair_id,
+            "pair_lock_sha256": identity.lock_sha256,
             "pair_slot": slot.slot,
             "pair_round": slot.round,
             "eval_harness_commit": self.HARNESS_COMMIT,
@@ -171,13 +167,29 @@ class PairIdentityTests(unittest.TestCase):
             "created_at": created_at,
             "outcome": "completed",
             "git_dirty": False,
-            "binary_sha256": self.identity.bundles[side].cli_sha256,
+            "binary_sha256": identity.bundles[side].cli_sha256,
             "config": config,
             "summary": {
                 "metadata_ready": True,
                 "api_request_roles": {"main": 2, "guardian": 1},
                 "api_request_sequence": ["main", "guardian", "main"],
-                "evidence": [{"relative_path": "e"}] if side is Side.RONDO else [],
+                "budget_accounting": {
+                    "stopped": False,
+                    "stop_reason": None,
+                    "reserved_usd": "0.000000",
+                    "spent_usd": "0.000000",
+                    "request_count": 3,
+                    "settled_request_count": 3,
+                    "usage_valid_request_count": 3,
+                },
+                "evidence": [
+                    {
+                        "relative_path": "e",
+                        "canonical_request_sha256": "c" * 64,
+                    }
+                ]
+                if side is Side.RONDO
+                else [],
                 "s2_request_evidence_binding": "verified" if side is Side.RONDO else "not_triggered",
             },
             "metrics": {
@@ -187,8 +199,51 @@ class PairIdentityTests(unittest.TestCase):
                 "peak_rss_bytes": 4096,
                 "exit_code": 0,
             },
+            "cost": {"estimated_usd": 0.0, "actual_usd": 0.0},
             "artifacts": f"eval-data/runs/{side.value}",
         }
+
+    @staticmethod
+    def _write_budget_ledger(root: Path, identity, records) -> Path:
+        path = root / "budget.json"
+        runs = {}
+        for record in records:
+            count = len(record["summary"]["api_request_sequence"])
+            runs[record["run_id"]] = {
+                "cap_usd": "10.000000",
+                "spent_usd": "0.000000",
+                "stopped": False,
+                "stop_reason": None,
+                "requests": {
+                    f"request-{number}": {
+                        "status": "settled",
+                        "reserved_usd": "5.000000",
+                        "charged_usd": "0.000000",
+                        "usage_valid": True,
+                        "attempt_count": 1,
+                        "settlement_kind": "usage_priced",
+                    }
+                    for number in range(count)
+                },
+            }
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "batch_id": identity.mode("paid").batch_id,
+                    "total_cap_usd": "20.000000",
+                    "max_runs": 4,
+                    "default_run_cap_usd": "10.000000",
+                    "runs": runs,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        path.with_name(f".{path.name}.lock").touch(mode=0o600)
+        return path
 
     def _paid_identity(self):
         modes = dict(self.identity.modes)
@@ -197,7 +252,12 @@ class PairIdentityTests(unittest.TestCase):
             replace(slot, paid_run_id=f"tb-{slot.side.value}-run")
             for slot in self.identity.topology
         )
-        return replace(self.identity, modes=modes, topology=topology)
+        return replace(
+            self.identity,
+            pair_id="test-paid-pair",
+            modes=modes,
+            topology=topology,
+        )
 
     @staticmethod
     def _container_metrics(side: Side) -> dict[str, object]:
@@ -249,232 +309,69 @@ class PairIdentityTests(unittest.TestCase):
             )
         validate_harbor_installation(
             identity,
-            executable=HARBOR_EXECUTABLE,
+            executable=Path(sys.executable).with_name("harbor"),
         )
 
-    def test_legacy_v8_identity_is_explicit_and_read_only(self) -> None:
-        legacy = load_legacy_pair_identity()
-        self.assertEqual(legacy.pair_id, "p1-fix-git-pair-v8")
-        self.assertNotEqual(legacy.pair_id, self.tracked_identity.pair_id)
-        self.assertNotEqual(
-            legacy.mode("paid").batch_id,
-            self.tracked_identity.mode("paid").batch_id,
+    def test_all_historical_identities_are_registered_unique_and_read_only(self) -> None:
+        self.assertEqual(
+            [registration.name for registration in HISTORICAL_PAIR_LOCKS],
+            [f"v{version}" for version in range(8, 20)],
         )
-        self.assertTrue(
-            {slot.paid_run_id for slot in legacy.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
+        identities = [
+            load_historical_pair_identity(registration.name)
+            for registration in HISTORICAL_PAIR_LOCKS
+        ]
+        self.assertEqual(
+            [identity.pair_id for identity in identities],
+            [registration.pair_id for registration in HISTORICAL_PAIR_LOCKS],
         )
-        with self.assertRaisesRegex(PairIdentityError, "schema v2"):
-            load_pair_identity(pair_module.LEGACY_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "legacy.json",
-                identity=legacy,
-                mode="paid",
-            )
+        self.assertEqual(len({identity.pair_id for identity in identities}), len(identities))
+        all_run_ids = [
+            slot.paid_run_id
+            for identity in identities
+            for slot in identity.topology
+            if slot.paid_run_id is not None
+        ]
+        self.assertEqual(len(all_run_ids), len(set(all_run_ids)))
+        for registration, identity in zip(HISTORICAL_PAIR_LOCKS, identities, strict=True):
+            with self.subTest(registration=registration.name), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(PairIdentityError, "read-only"):
+                    PairSequenceLedger(
+                        Path(directory) / "historical.json",
+                        identity=identity,
+                        mode="paid",
+                    )
 
-    def test_codex_install_failed_v18_identity_is_explicit_and_read_only(self) -> None:
-        previous = load_previous_pair_identity()
-        self.assertEqual(previous.pair_id, "p1-fix-git-pair-v18")
-        self.assertNotEqual(previous.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in previous.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.PREVIOUS_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "previous.json",
-                identity=previous,
-                mode="paid",
-            )
+    def test_no_active_paid_pair_is_configured(self) -> None:
+        with self.assertRaisesRegex(PairIdentityError, "no active paid pair"):
+            load_active_pair_identity()
 
-    def test_docker_failed_v17_identity_remains_read_only(self) -> None:
-        consumed = load_consumed_v17_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v17")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
+    def test_future_pair_budget_is_lock_driven_but_historical_cap_is_frozen(self) -> None:
+        source = HISTORICAL_PAIR_LOCKS[-1].path
+        value = json.loads(source.read_text(encoding="utf-8"))
+        value["pair_id"] = "future-paid-pair"
+        value["fairness"]["budget_usd"] = 40.0
+        value["paid_budget"] = {"per_side_usd": 40.0, "pair_usd": 80.0}
+        with tempfile.TemporaryDirectory() as directory:
+            future_path = Path(directory) / "future.json"
+            future_path.write_text(json.dumps(value), encoding="utf-8")
+            future = pair_module._load_pair_identity(
+                future_path,
+                schema_version=2,
+                pair_id="future-paid-pair",
             )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V17_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v17.json",
-                identity=consumed,
-                mode="paid",
-            )
+            self.assertEqual(future.paid_budget.per_side_usd, 40.0)
+            self.assertEqual(future.fairness["budget_usd"], 40.0)
 
-    def test_publication_failed_v16_identity_remains_read_only(self) -> None:
-        consumed = load_consumed_v16_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v16")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V16_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v16.json",
-                identity=consumed,
-                mode="paid",
-            )
-
-    def test_third_approval_failed_v15_identity_remains_read_only(self) -> None:
-        consumed = load_consumed_v15_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v15")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V15_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v15.json",
-                identity=consumed,
-                mode="paid",
-            )
-
-    def test_second_approval_failed_v14_identity_remains_read_only(self) -> None:
-        consumed = load_consumed_v14_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v14")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V14_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v14.json",
-                identity=consumed,
-                mode="paid",
-            )
-
-    def test_guardian_failed_v13_identity_remains_read_only(self) -> None:
-        consumed = load_consumed_v13_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v13")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V13_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v13.json",
-                identity=consumed,
-                mode="paid",
-            )
-
-    def test_canary_failed_v12_identity_remains_read_only(self) -> None:
-        consumed = load_consumed_v12_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v12")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V12_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v12.json",
-                identity=consumed,
-                mode="paid",
-            )
-
-    def test_preflight_failed_v11_identity_remains_read_only(self) -> None:
-        consumed = load_consumed_v11_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v11")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V11_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v11.json",
-                identity=consumed,
-                mode="paid",
-            )
-
-    def test_consumed_v10_identity_remains_explicit_and_read_only(self) -> None:
-        consumed = load_consumed_v10_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v10")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V10_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v10.json",
-                identity=consumed,
-                mode="paid",
-            )
-
-    def test_consumed_v9_identity_remains_explicit_and_read_only(self) -> None:
-        consumed = load_consumed_v9_pair_identity()
-        self.assertEqual(consumed.pair_id, "p1-fix-git-pair-v9")
-        self.assertNotEqual(consumed.pair_id, self.tracked_identity.pair_id)
-        self.assertTrue(
-            {slot.paid_run_id for slot in consumed.topology}.isdisjoint(
-                slot.paid_run_id for slot in self.tracked_identity.topology
-            )
-        )
-        with self.assertRaisesRegex(PairIdentityError, "identity differs"):
-            load_pair_identity(pair_module.CONSUMED_V9_PAIR_LOCK_PATH)
-        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
-            PairIdentityError, "read-only"
-        ):
-            PairSequenceLedger(
-                Path(directory) / "consumed-v9.json",
-                identity=consumed,
-                mode="paid",
-            )
+            value["pair_id"] = self.tracked_identity.pair_id
+            historical_path = Path(directory) / "historical-tampered.json"
+            historical_path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(PairIdentityError, "budget differs"):
+                pair_module._load_pair_identity(
+                    historical_path,
+                    schema_version=2,
+                    pair_id=self.tracked_identity.pair_id,
+                )
 
     def test_shared_fair_pair_gate_rejects_runtime_drift(self) -> None:
         self.identity.validate_spec(self._spec(Side.CODEX), mode="no_api")
@@ -488,7 +385,9 @@ class PairIdentityTests(unittest.TestCase):
 
     def test_sequence_binds_profile_at_slot_one_and_rejects_slot_two_drift(self) -> None:
         identity = self._paid_identity()
-        rondo_record = self._record(Side.RONDO, "2026-08-11T01:00:00Z")
+        rondo_record = self._record(
+            Side.RONDO, "2026-08-11T01:00:00Z", identity=identity
+        )
         drifted_provider = self._provider(base_url="https://drift.example/v1")
         with tempfile.TemporaryDirectory() as directory:
             ledger_path = Path(directory) / "paid.json"
@@ -523,7 +422,9 @@ class PairIdentityTests(unittest.TestCase):
     @unittest.skipUnless(hasattr(os, "fork"), "requires POSIX process death injection")
     def test_paid_publication_reconciles_after_process_restart(self) -> None:
         paid_identity = self._paid_identity()
-        record = self._record(Side.RONDO, "2026-08-10T01:00:00Z")
+        record = self._record(
+            Side.RONDO, "2026-08-10T01:00:00Z", identity=paid_identity
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             ledger_path = root / "paid.json"
@@ -569,9 +470,14 @@ class PairIdentityTests(unittest.TestCase):
             self.assertEqual(digest, terminal_record_sha256(record))
 
     def test_m1_accepts_real_multi_turn_approval_chain(self) -> None:
+        paid_identity = self._paid_identity()
         records = [
-            self._record(Side.RONDO, "2026-08-10T01:00:00Z"),
-            self._record(Side.CODEX, "2026-08-10T02:00:00Z"),
+            self._record(
+                Side.RONDO, "2026-08-10T01:00:00Z", identity=paid_identity
+            ),
+            self._record(
+                Side.CODEX, "2026-08-10T02:00:00Z", identity=paid_identity
+            ),
         ]
         for record in records:
             record["summary"]["api_request_roles"] = {"main": 4, "guardian": 1}
@@ -582,9 +488,14 @@ class PairIdentityTests(unittest.TestCase):
                 "main",
                 "main",
             ]
-        paid_identity = self._paid_identity()
+            record["summary"]["budget_accounting"].update(
+                request_count=5,
+                settled_request_count=5,
+                usage_valid_request_count=5,
+            )
         with tempfile.TemporaryDirectory() as directory:
-            ledger_path = Path(directory) / "paid.json"
+            root = Path(directory)
+            ledger_path = root / "paid.json"
             with PairSequenceLedger(
                 ledger_path, identity=paid_identity, mode="paid"
             ) as sequence:
@@ -603,17 +514,99 @@ class PairIdentityTests(unittest.TestCase):
                         container_metrics=self._container_metrics(side),
                         provider=self.provider,
                     )
+            budget_path = self._write_budget_ledger(root, paid_identity, records)
             result = assess_m1(
-                records, paid_identity, pair_ledger_path=ledger_path
+                records,
+                paid_identity,
+                pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
             )
             self.assertEqual(result["m1"], "passed")
             self.assertEqual(result["s2"], "verified")
             self.assertEqual(result["reasons"], [])
 
+            historical_shape = json.loads(json.dumps(records))
+            for record in historical_shape:
+                record["summary"].pop("budget_accounting")
+            historical_shape[0]["cost"]["estimated_usd"] = 0.000001
+            historical_pair_state = json.loads(
+                ledger_path.read_text(encoding="utf-8")
+            )
+            for run, record in zip(
+                historical_pair_state["runs"], historical_shape, strict=True
+            ):
+                run["publication_sha256"] = terminal_record_sha256(record)
+            historical_ledger_path = root / "historical-paid.json"
+            historical_ledger_path.write_text(
+                json.dumps(
+                    historical_pair_state, sort_keys=True, separators=(",", ":")
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                pair_module,
+                "_HISTORICAL_PAIR_IDS",
+                frozenset({paid_identity.pair_id}),
+            ):
+                historical_cost_drift = assess_m1(
+                    historical_shape,
+                    paid_identity,
+                    pair_ledger_path=historical_ledger_path,
+                    budget_ledger_path=budget_path,
+                )
+            self.assertEqual(historical_cost_drift["m1"], "failed")
+            self.assertEqual(
+                historical_cost_drift["reasons"], ["rondo_budget_cost_mismatch"]
+            )
+
+            budget_bytes = budget_path.read_bytes()
+            stopped_budget = json.loads(budget_bytes)
+            rondo_run_id = records[0]["run_id"]
+            stopped_budget["runs"][rondo_run_id]["stopped"] = True
+            stopped_budget["runs"][rondo_run_id]["stop_reason"] = (
+                "missing_or_invalid_usage"
+            )
+            budget_path.write_text(
+                json.dumps(stopped_budget, sort_keys=True, separators=(",", ":"))
+                + "\n",
+                encoding="utf-8",
+            )
+            stopped = assess_m1(
+                records,
+                paid_identity,
+                pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
+            )
+            self.assertEqual(stopped["m1"], "failed")
+            self.assertIn("rondo_budget_not_completed", stopped["reasons"])
+            budget_path.write_bytes(budget_bytes)
+
+            oversized_budget = json.loads(budget_bytes)
+            oversized_budget["runs"][rondo_run_id]["cap_usd"] = "20.000000"
+            oversized_budget["runs"][rondo_run_id]["spent_usd"] = "20.000000"
+            budget_path.write_text(
+                json.dumps(oversized_budget, sort_keys=True, separators=(",", ":"))
+                + "\n",
+                encoding="utf-8",
+            )
+            over_cap = assess_m1(
+                records,
+                paid_identity,
+                pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
+            )
+            self.assertEqual(over_cap["m1"], "failed")
+            self.assertIn("budget_ledger_invalid", over_cap["reasons"])
+            budget_path.write_bytes(budget_bytes)
+
             provider_drift = json.loads(json.dumps(records))
             provider_drift[1]["config"]["provider_endpoint_sha256"] = "f" * 64
             drifted = assess_m1(
-                provider_drift, paid_identity, pair_ledger_path=ledger_path
+                provider_drift,
+                paid_identity,
+                pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
             )
             self.assertEqual(drifted["m1"], "failed")
             self.assertIn("pair_selected_profile_mismatch", drifted["reasons"])
@@ -622,7 +615,10 @@ class PairIdentityTests(unittest.TestCase):
             effort_drift = json.loads(json.dumps(records))
             effort_drift[1]["config"]["main_effort"] = "high"
             effort_result = assess_m1(
-                effort_drift, paid_identity, pair_ledger_path=ledger_path
+                effort_drift,
+                paid_identity,
+                pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
             )
             self.assertIn("pair_selected_profile_mismatch", effort_result["reasons"])
 
@@ -633,7 +629,10 @@ class PairIdentityTests(unittest.TestCase):
             }
             incomplete_approval[1]["summary"]["api_request_sequence"] = ["main"]
             approval_result = assess_m1(
-                incomplete_approval, paid_identity, pair_ledger_path=ledger_path
+                incomplete_approval,
+                paid_identity,
+                pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
             )
             self.assertIn(
                 "codex_guardian_approval_incomplete", approval_result["reasons"]
@@ -648,7 +647,10 @@ class PairIdentityTests(unittest.TestCase):
                 encoding="utf-8",
             )
             not_converged = assess_m1(
-                records, paid_identity, pair_ledger_path=ledger_path
+                records,
+                paid_identity,
+                pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
             )
             self.assertEqual(not_converged["m1"], "failed")
             self.assertIn("paid_pair_ledger_not_completed", not_converged["reasons"])
@@ -657,6 +659,7 @@ class PairIdentityTests(unittest.TestCase):
                 [*records, records[1]],
                 paid_identity,
                 pair_ledger_path=ledger_path,
+                budget_ledger_path=budget_path,
             )
             self.assertEqual(duplicate["m1"], "incomplete")
             self.assertIn("exactly_two", duplicate["reasons"][0])

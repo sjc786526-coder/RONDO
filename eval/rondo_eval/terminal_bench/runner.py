@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import stat
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
@@ -36,11 +38,16 @@ from .freeze import (
     validate_freeze,
     validate_runtime_image_digest,
 )
-from .materialize import MaterializedTask, PinnedTaskMaterializer
+from .materialize import (
+    TERMINAL_BENCH_WORKDIR,
+    MaterializedTask,
+    PinnedTaskMaterializer,
+)
+from .tasksets import FrozenTask
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[2]
-HARBOR_EXECUTABLE = EVAL_ROOT / ".venv" / "bin" / "harbor"
+HARBOR_EXECUTABLE = Path(sys.executable).with_name("harbor")
 ADAPTER_IMPORTS = {
     Side.CODEX: "rondo_eval.terminal_bench.adapters:CodexUploadAdapter",
     Side.RONDO: "rondo_eval.terminal_bench.adapters:RondoUploadAdapter",
@@ -75,6 +82,7 @@ class TerminalBenchRequest:
     frozen_model_catalog_path: str | None = None
     frozen_model_catalog_sha256: str | None = None
     frozen_model_catalog_source_commit: str | None = None
+    frozen_task: FrozenTask | None = None
 
 
 @dataclass(frozen=True)
@@ -138,8 +146,7 @@ class HarborCommand:
         if self.cwd != EVAL_ROOT:
             raise TerminalBenchRunError("Harbor must run from the locked eval project")
         if (
-            self.image_ref != FIX_GIT_IMAGE_REF
-            or self.image_ref != materialized.runtime_image_ref
+            self.image_ref != materialized.runtime_image_ref
             or self.source_repo_ref != TERMINAL_BENCH_REPO_REF
             or self.source_repo_ref != materialized.source_repo_ref
             or self.task_source_digest != materialized.source_digest
@@ -159,8 +166,8 @@ class HarborCommand:
         )
         if any(value in self.argv or value in joined for value in forbidden):
             raise TerminalBenchRunError("Harbor command contains a forbidden external path")
-        if FIX_GIT_IMAGE_DIGEST not in materialized.runtime_image_ref:
-            raise TerminalBenchRunError("Harbor task image is not the B1 digest")
+        if spec.task_image_digest not in materialized.runtime_image_ref:
+            raise TerminalBenchRunError("Harbor task image differs from RunSpec")
 
 
 @dataclass(frozen=True)
@@ -173,12 +180,12 @@ class PreparedTerminalBenchRun:
     def validate(self) -> None:
         self.spec.validate()
         self.materialized_task.validate()
-        if self.spec.task_id != FIX_GIT_TASK_ID:
-            raise TerminalBenchRunError("RunSpec task differs from the frozen P1 task")
+        if self.spec.task_id != self.materialized_task.task_id:
+            raise TerminalBenchRunError("RunSpec task differs from its materialization")
         if self.spec.terminal_bench_version != TERMINAL_BENCH_VERSION:
             raise TerminalBenchRunError("RunSpec Terminal-Bench version is not commit-pinned")
-        if self.spec.task_image_digest != FIX_GIT_IMAGE_DIGEST:
-            raise TerminalBenchRunError("RunSpec image differs from the supervised B1 digest")
+        if self.spec.task_image_digest != self.materialized_task.image_digest:
+            raise TerminalBenchRunError("RunSpec image differs from its materialization")
         if self.spec.binary.source_dirty:
             raise TerminalBenchRunError("Terminal-Bench requires a clean binary source commit")
         if self.spec.side is not self.adapter.side or self.spec.binary != self.adapter.manifest:
@@ -221,6 +228,7 @@ class HostHarborExecutor(Protocol):
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        image_reference: str,
         compose_contract: ComposeRunContract,
     ) -> HostHarborResult: ...
 
@@ -257,6 +265,7 @@ class InjectedHostHarborBackend:
                 injected_env=dict(prepared.command.env),
                 timeout_seconds=prepared.spec.timeout_seconds,
                 exact_task_label=prepared.command.task_label,
+                image_reference=prepared.command.image_ref,
                 compose_contract=prepared.command.compose_contract,
             )
             if not isinstance(result, HostHarborResult):
@@ -291,6 +300,7 @@ class DockerSupervisedHostHarborExecutor:
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        image_reference: str,
         compose_contract: ComposeRunContract,
     ) -> HostHarborResult:
         _require_budget_proxy_argv(argv)
@@ -300,6 +310,7 @@ class DockerSupervisedHostHarborExecutor:
             injected_env=injected_env,
             timeout_seconds=timeout_seconds,
             exact_task_label=exact_task_label,
+            image_reference=image_reference,
             compose_contract=compose_contract,
         )
 
@@ -325,11 +336,17 @@ class DockerSupervisedHostHarborExecutor:
             injected_env={"HARBOR_TELEMETRY": "off"},
             timeout_seconds=timeout_seconds,
             exact_task_label=materialized.task_label,
+            image_reference=materialized.runtime_image_ref,
             compose_contract=_compose_run_contract(
                 materialized,
                 trial_name=trial_name,
                 trials_dir=trials_dir,
-                require_container_metrics=True,
+                # Oracle proves the official solution/verifier contract before
+                # any API request. Paid campaign runs separately require and
+                # publish CPU/peak-memory metrics; sampling them here can race
+                # the verifier's final container exec without adding task
+                # validity evidence.
+                require_container_metrics=False,
             ),
         )
 
@@ -341,6 +358,7 @@ class DockerSupervisedHostHarborExecutor:
         injected_env: Mapping[str, str],
         timeout_seconds: int,
         exact_task_label: str,
+        image_reference: str,
         compose_contract: ComposeRunContract,
     ) -> HostHarborResult:
         prefix = "dev.rondo.eval.task="
@@ -375,7 +393,7 @@ class DockerSupervisedHostHarborExecutor:
         )
         image_identity = supervisor.resolve_image_identity(
             identity,
-            FIX_GIT_IMAGE_REF,
+            image_reference,
             lease=self._lease,
             timeout_seconds=5,
         )
@@ -427,7 +445,18 @@ def prepare_terminal_bench_run(
     """Create the sole B2 projection from config, pinned source, image and binary."""
 
     validate_freeze()
-    image_digest = validate_runtime_image_digest(request.image_digest)
+    frozen_task = request.frozen_task
+    if frozen_task is None:
+        image_digest = validate_runtime_image_digest(request.image_digest)
+        task_id = FIX_GIT_TASK_ID
+        task_slug = "fix-git"
+    else:
+        frozen_task.validate()
+        if request.image_digest != frozen_task.image_digest:
+            raise TerminalBenchRunError("request image differs from the frozen task")
+        image_digest = frozen_task.image_digest
+        task_id = frozen_task.task_id
+        task_slug = frozen_task.slug
     seccomp_values = (
         request.seccomp_profile_path,
         request.seccomp_profile_source_sha256,
@@ -447,7 +476,7 @@ def prepare_terminal_bench_run(
         config,
         side=request.side,
         batch_id=request.batch_id,
-        task_id=FIX_GIT_TASK_ID,
+        task_id=task_id,
         task_image_digest=image_digest,
         binary=request.binary,
         terminal_bench_version=TERMINAL_BENCH_VERSION,
@@ -460,13 +489,14 @@ def prepare_terminal_bench_run(
     materialized = (materializer or PinnedTaskMaterializer()).materialize(
         source_checkout=Path(request.source_checkout),
         staging_root=Path(request.staging_root),
-        staging_name=f"{request.batch_id}-{request.side.value}-fix-git",
+        staging_name=f"{request.batch_id}-{request.side.value}-{task_slug}",
         image_digest=image_digest,
         task_label=task_label,
         memory_bytes=request.memory_bytes,
         memory_swap_bytes=request.memory_swap_bytes,
         pids_limit=request.pids_limit,
         provider_api_key_env=spec.provider.api_key_env,
+        frozen_task=frozen_task,
         seccomp_profile=(
             Path(request.seccomp_profile_path)
             if request.seccomp_profile_path is not None
@@ -490,6 +520,16 @@ def prepare_terminal_bench_run(
         main_effort=spec.provider.main_effort,
         guardian_model=spec.provider.guardian_model,
         guardian_effort=spec.provider.guardian_effort,
+        task_workdir=(
+            frozen_task.workdir
+            if frozen_task is not None
+            else "/app/personal-site"
+        ),
+        task_requires_existing_git_repo=(
+            frozen_task.requires_existing_git_repo
+            if frozen_task is not None
+            else True
+        ),
         frozen_model_catalog_path=request.frozen_model_catalog_path,
         frozen_model_catalog_sha256=request.frozen_model_catalog_sha256,
         frozen_model_catalog_source_commit=request.frozen_model_catalog_source_commit,
@@ -640,6 +680,13 @@ def _harbor_oracle_argv(
     trial_name: str,
     trials_dir: Path,
 ) -> tuple[str, ...]:
+    frozen_task = materialized.frozen_task
+    task_workdir = (
+        frozen_task.workdir if frozen_task is not None else TERMINAL_BENCH_WORKDIR
+    )
+    agent_timeout_seconds = (
+        frozen_task.agent_timeout_seconds if frozen_task is not None else 900
+    )
     expected = (
         str(HARBOR_EXECUTABLE),
         "trials",
@@ -656,6 +703,10 @@ def _harbor_oracle_argv(
         "rondo_eval.terminal_bench.oracle_smoke:PreparedOracleAgent",
         "--agent-kwarg",
         f"task_dir={materialized.task_path}",
+        "--agent-kwarg",
+        f"task_workdir={task_workdir}",
+        "--agent-kwarg",
+        f"agent_timeout_seconds={agent_timeout_seconds}",
         "--delete",
     )
     if any(
@@ -663,7 +714,7 @@ def _harbor_oracle_argv(
         for token in ("--model", "--agent-env", "--env-file")
     ):
         raise TerminalBenchRunError("oracle command contains provider configuration")
-    if expected.count("--agent-kwarg") != 1:
+    if expected.count("--agent-kwarg") != 3:
         raise TerminalBenchRunError("oracle command task path projection is ambiguous")
     return expected
 
@@ -692,7 +743,7 @@ def _compose_run_contract(
         DockerMountFact(
             "bind",
             str(materialized.provider_secret_path),
-            "/run/secrets/rondo_eval_provider_api_key",
+            "/run/secrets/rondo_eval_provider_auth_json",
             True,
         ),
     )
@@ -735,7 +786,15 @@ def _task_label(task_id: str) -> str:
 def _replace_provider_secret(path: Path, value: str) -> None:
     if not isinstance(value, str) or "\0" in value or "\r" in value or "\n" in value:
         raise TerminalBenchRunError("provider key cannot be represented as a Compose secret")
-    payload = value.encode("utf-8")
+    payload = (
+        b""
+        if not value
+        else json.dumps(
+            {"OPENAI_API_KEY": value},
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
     if len(payload) > 16 * 1024:
         raise TerminalBenchRunError("provider key exceeds the bounded Compose secret size")
     try:

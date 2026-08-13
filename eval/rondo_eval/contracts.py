@@ -440,9 +440,9 @@ class RunSpec:
             isinstance(self.budget_usd, bool)
             or not isinstance(self.budget_usd, (int, float))
             or not math.isfinite(self.budget_usd)
-            or not 0 < self.budget_usd <= 10.0
+            or not 0 < self.budget_usd <= 40.0
         ):
-            raise ContractError("run budget must be within the frozen 10 USD per-side cap")
+            raise ContractError("run budget must be within the supported 40 USD cap")
 
     def fairness_fingerprint(self) -> dict[str, Any]:
         self.validate()

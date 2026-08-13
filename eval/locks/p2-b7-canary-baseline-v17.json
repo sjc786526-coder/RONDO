@@ -1,0 +1,112 @@
+{
+  "schema_version": 2,
+  "campaign_id": "p2-b7-canary-baseline-v17",
+  "batch_id": "p2-b7-canary-sol-sol-v17",
+  "run_id_date": "20260812",
+  "run_id_sequence_base": 370000000,
+  "taskset_sha256": "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b",
+  "canary_catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf",
+  "terminal_bench_commit": "ffccbe05ee73a9d59518217f294ad711bda39304",
+  "selected_profile": {
+    "provider": "relay",
+    "provider_api": "responses",
+    "provider_profile_sha256": "aca100b0fb0cd51b54d0005b1b106737a94a4c374552429ffef542bd3d20dd15",
+    "provider_endpoint_sha256": "349d8f7aeba75e4610bca5db1c0c294e04c1bdaf5408e44a7753e5c78ac197a9",
+    "main_model": "gpt-5.6-sol",
+    "main_effort": "medium",
+    "guardian_model": "gpt-5.6-sol",
+    "guardian_effort": "low",
+    "requested_main_model": "gpt-5.6-sol",
+    "effective_main_model": "gpt-5.6-sol",
+    "requested_guardian_model": "gpt-5.6-sol",
+    "effective_guardian_model": "gpt-5.6-sol",
+    "main_pricing": {
+      "model_id": "gpt-5.6-sol",
+      "input_usd_per_million": "5",
+      "cached_input_usd_per_million": "0.5",
+      "output_usd_per_million": "30",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-11",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "guardian_pricing": {
+      "model_id": "gpt-5.6-sol",
+      "input_usd_per_million": "5",
+      "cached_input_usd_per_million": "0.5",
+      "output_usd_per_million": "30",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-11",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "provider_max_attempts": 5,
+    "provider_retry_backoff_seconds": 1.0,
+    "provider_unbilled_retry_statuses": [
+      429,
+      500,
+      502,
+      503,
+      504
+    ],
+    "frozen_codex_model_catalog_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+    "frozen_codex_model_catalog_sha256": "21f7805b7aa9d9ad84e09636b32355b912880ea973e7c3b70cf895d1b5b974e7",
+    "max_guardian_logical_requests": 3
+  },
+  "bundles": {
+    "rondo": {
+      "manifest_path": "eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "3a742072ebc771177c5f504348c9c7b8ef371bad0e450e95f09d9d48258878bd"
+    },
+    "codex": {
+      "manifest_path": "eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "e13a9d0fe8c51ab09ea4552749afb437db6915eb2b069291c918ebf8075b5981"
+    }
+  },
+  "no_api_seccomp": {
+    "profile_path": "eval/seccomp/plan008-userns-minimal-v0.2.3.json",
+    "source_sha256": "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f",
+    "effective_sha256": "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+  },
+  "budget": {
+    "campaign_cap_usd": "700.000000",
+    "prior_estimated_usd": "569.420620",
+    "run_cap_usd": "40.000000",
+    "max_run_slots": 321,
+    "maximum_legal_request_reservation_usd": "18.885000",
+    "actual_usd": null
+  },
+  "baseline": {
+    "base_rounds": [
+      "aa-rondo-1",
+      "aa-rondo-2",
+      "ab-rondo-1",
+      "ab-codex-1"
+    ],
+    "max_sigma": 2,
+    "max_remaining_infra_per_round": 2,
+    "mechanical_circuit_breaker_tasks": 3,
+    "mechanical_failure_categories": [
+      "provider_response_integrity",
+      "docker_runtime",
+      "guardian_runtime",
+      "publication_integrity",
+      "harness_runtime",
+      "budget_capacity",
+      "operator_interruption"
+    ],
+    "minimum_common_valid_tasks": 8,
+    "conditional_repeats_per_side": 2,
+    "docker_concurrency": 1,
+    "api_max_retries": 0,
+    "base_replacement_policy": "bounded_infra_only_with_diagnosis",
+    "max_base_attempts": 4,
+    "max_conditional_attempts": 4,
+    "same_category_diagnosis_attempts": 2,
+    "task_local_reproducible_infra_attempts": 3
+  }
+}

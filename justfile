@@ -55,3 +55,48 @@ eval-b2-no-api docker_host_volume metrics_dir:
         --rondo-binary-manifest "$common_root/eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
         --codex-binary-manifest "$common_root/eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
         --docker-host-volume "{{docker_host_volume}}"
+
+# One frozen P2/B7 campaign. The coordinator owns only a lightweight campaign
+# lease; each Oracle/paid step obtains a fresh heavy lock and watchdog lease.
+eval-b7-baseline docker_host_volume results_worktree_root rondo_measurement codex_measurement metrics_dir:
+    @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        test -x "$common_root/eval/.venv/bin/python" || { echo "shared eval environment is missing" >&2; exit 2; }; \
+        env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_cli \
+        --docker-host-volume "{{docker_host_volume}}" \
+        --results-worktree-root "{{results_worktree_root}}" \
+        --rondo-measurement-worktree-root "{{rondo_measurement}}" \
+        --codex-measurement-worktree-root "{{codex_measurement}}"
+
+# Generate and activate one successor identity after its predecessor is terminal.
+eval-b7-next-identity run_id_date run_id_sequence_base:
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_identity \
+        --run-id-date "{{run_id_date}}" \
+        --run-id-sequence-base "{{run_id_sequence_base}}"
+
+# Resolve one durable schema-v2 RCA hold. This performs no Docker or API work.
+eval-b7-resolve-diagnosis chain_id category disposition evidence_code:
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_diagnosis \
+        --chain-id "{{chain_id}}" \
+        --category "{{category}}" \
+        --disposition "{{disposition}}" \
+        --evidence-code "{{evidence_code}}"
+
+# Retire an idle active campaign after a confirmed local implementation defect.
+eval-b7-retire-local-defect:
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_diagnosis \
+        --retire-local-defect

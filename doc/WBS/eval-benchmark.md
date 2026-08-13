@@ -35,9 +35,10 @@
   frozen Codex catalog、价卡/retry、profile/endpoint SHA 与 20 USD pair cap。fresh exact-wire canary 4/4 请求
   attempt 1、usage valid 后，正式运行严格按 RONDO→frozen Codex 串行完成同一 `fix-git` task：RONDO 17/17、
   Codex 18/18 upstream request 均 attempt 1、usage-priced，双侧 `completed`/reward 1、reservation 0。
-  RONDO 两份自然 Guardian `E_final/meta` 均 Sol/low、approved，S2 request/evidence 集合绑定 verified。
+  RONDO 两份自然 Guardian `E_final/meta` 均 Sol/low、approved；不可改写的 v19 public record 只证明
+  task-scoped request/evidence count match，后续新记录才要求 canonical digest 一一绑定后标为 verified。
   durable public result、pair lock、sequence ledger、profile/endpoint 和 container metrics 经既有 `assess_m1`
-  得到 `m1=passed`、`reasons=[]`、`s2=verified`。v19 正式费用 `$0.870787`；Plan 014 含历史 canary/失败终态
+  得到 `m1=passed`、`reasons=[]`、`s2=task_scoped_count_match`。v19 正式费用 `$0.870787`；Plan 014 含历史 canary/失败终态
   的累计本地估算 `$6.988825 < $280`，全部 reservation settled，`actual_usd=null`。旧失败 pair 均保持不可复用，
   详见 Plan 014 与执行日志。
 
@@ -73,7 +74,7 @@
 
 - 1~2 个任务的端到端，结果落盘归档。
 - 同步开启 S2，确认真实审批过程能产出 `E_final`。
-- **已完成**：v19 在 `terminal-bench/fix-git` 上完成双侧真实运行，M1 passed、S2 verified；后续运行不复用该
+- **已完成**：v19 在 `terminal-bench/fix-git` 上完成双侧真实运行，M1 passed、S2 task-scoped count match；后续运行不复用该
   identity，B7 仍需按 B6 单独预算和授权。
 
 ### B4 任务分层与冻结清单（规模 S）
@@ -87,24 +88,37 @@
   - 隐藏集的**单任务结果不写入结果库明细**，只写聚合分数——否则隐藏集会通过结果库慢慢泄漏。
   - 后续每个任务计划的"不允许读取/查看"一节必须显式列出隐藏分区。
 - 分层清单一经冻结即写入仓库，改动需记录理由。
+- **当前实现**：TB 2.1 pinned 89 个 ID 已按无盐 `sha256(task_id)` 冻结为 10 canary / 61 validation /
+  18 holdout；执行 catalog 另绑定 10 个 source/image/workdir/resource/timeout identity。holdout 划分前未读正文，
+  B7 不运行 holdout。
 
 ### B5 计分与失败归因（规模 M）
 
 - 主指标：Task Resolution Success Rate。
 - 归因分类必须区分：主 Agent/Harness 失败、Guardian 正确拒绝导致的失败、Guardian 误拒、基础设施失败（超时/网络/容器）。
 - Guardian 对危险或未授权动作的**正确**拒绝计入主 Agent 应承担的失败代价，但在报表中单列，避免掩盖 harness 真实能力变化。
+- **当前实现**：纯函数计分器保守拒绝矛盾证据；无独立 adjudication 的 semantic deny 归 `guardian_false_deny`，
+  Guardian technical failure 归 infra 并排除分母；holdout producer 只接受整批聚合。
 
 ### B6 成本与预算护栏（规模 S）
 
 - 跑批前输出预估：任务数 × 轮数 × 模型 × 预估 token → 成本区间。
 - 硬上限：超过预算即中止并保留已完成结果。
 - 每次跑批需单独授权。
+- **当前实现**：Plan 020 的累计硬上限最终冻结为 `1600 USD`；v22 终态累计本地估算
+  `1466.074133 USD`。schema-v6 的 321 个 slot 由代码机械派生，18.885 USD 最大合法 request reservation、
+  main/Guardian 并发 admission 与全局 prior/cap 在 identity 生成和每次请求前复核。v1—v22 全部只读，
+  active paid identity 已关闭。
 
 ### B7 首次基线（规模 S，授权门：canary 跑批）—— **M2 的一半**
 
 - 按 `doc/WBS.md` §4「M2 的可执行判据」执行：先用同一 RONDO 二进制跑 2 轮 A/A 得出波动带宽 `σ`，再跑 codex 与 RONDO 各 1 轮 A/B，要求跨侧差异任务数 `≤ σ` 且无单向失败模式。
 - 基础 10 任务 × 4 轮 = 40 次运行，外加条件触发的定点加跑（每个出现 codex-pass/RONDO-fail 的任务两侧各加 2 轮）。按 B6 出预估并单独授权。
 - 不通过则先停下修测评设施，不得先行推进优化。
+- **当前状态**：Plan 020 v22 已完成真实执行并形成有效 failed 基线。九项共同有效任务上 RONDO A/A
+  为 `5/9`、`5/9`，RONDO A/B 为 `5/9`，frozen Codex A/B 为 `4/9`；`sigma=0`、`delta=3`，精确失败原因为
+  `ab_delta_exceeds_aa_sigma`。必要条件加跑未形成稳定的 RONDO 三败/Codex 三过。wire 与 paid 合计均已结算、
+  reservation 0、`actual_usd=null`。这证明 B7 执行和归档完成，不代表 B7/M2 性能门通过；E-A A1—A7 仍待实现。
 
 ## E-A 轻量离线冻结回放
 

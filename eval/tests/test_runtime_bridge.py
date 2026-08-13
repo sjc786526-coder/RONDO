@@ -23,12 +23,14 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerOperation,
     DockerTaskIdentity,
 )
+from rondo_eval import runtime_bridge  # noqa: E402
 from rondo_eval.runtime_bridge import (  # noqa: E402
     CommandOutput,
     DockerCliCounter,
     DockerDesktopHostReading,
     PowerShellDockerDesktopHostProbe,
     RuntimeBridgeError,
+    SubprocessCommandExecutor,
     SubprocessCommandHandle,
     SubprocessDockerCommandRunner,
     SubprocessHostCommandRunner,
@@ -352,6 +354,35 @@ class WatchdogBridgeTests(unittest.TestCase):
                 (watcher_proc_root / "4242" / "stat").unlink()
                 self.assertFalse(proof.guard.is_held(proof.lease))
 
+    def test_watcher_heartbeat_tolerates_bounded_wall_clock_rollback(self) -> None:
+        with tempfile.TemporaryDirectory(dir=EVAL_ROOT) as temporary:
+            root = Path(temporary)
+            relative = "/user.slice/rondo-build-1000-20260810-123.scope"
+            proc, cgroup_root, watcher_proc_root, watcher_environment = (
+                _write_counter_tree(root, relative)
+            )
+            heartbeat = Path(watcher_environment["RONDO_WATCHDOG_HEARTBEAT_PATH"])
+            heartbeat_ns = time.time_ns()
+            os.utime(heartbeat, ns=(heartbeat_ns, heartbeat_ns))
+            clock_ns = [heartbeat_ns - 2_000_000_000]
+            lock_path, lock_handle = self._held_lock(root)
+            self.addCleanup(lock_handle.close)
+            with mock.patch(
+                "rondo_eval.runtime_bridge._canonical_lock_path",
+                return_value=lock_path,
+            ):
+                proof = lease_from_watchdog(
+                    proc_cgroup_path=proc,
+                    cgroup_fs_root=cgroup_root,
+                    watcher_proc_root=watcher_proc_root,
+                    watchdog_environment=watcher_environment,
+                    heartbeat_clock_ns=lambda: clock_ns[0],
+                )
+                self.assertTrue(proof.guard.is_held(proof.lease))
+
+                clock_ns[0] = heartbeat_ns - 16_000_000_000
+                self.assertFalse(proof.guard.is_held(proof.lease))
+
 
 class FakeProcess:
     def __init__(self) -> None:
@@ -523,6 +554,7 @@ def _container_inspect(
     network_mode: str = "rondoeval0810_default",
     networks: dict[str, object] | None = None,
     tmpfs: dict[str, str] | None = None,
+    running: bool = True,
 ) -> str:
     network_payload = networks if networks is not None else {network_mode: {}}
     return json.dumps(
@@ -553,6 +585,7 @@ def _container_inspect(
                     "Tmpfs": tmpfs,
                 },
                 "NetworkSettings": {"Networks": network_payload},
+                "State": {"Running": running},
                 "Mounts": [],
                 "SizeRw": 123,
             }
@@ -573,6 +606,44 @@ def _image_inspect(*, task_id: str = TASK_ID) -> str:
 
 
 class DockerCounterTests(unittest.TestCase):
+    def test_stopped_container_disappearance_grace_is_exactly_five_seconds(self) -> None:
+        self.assertEqual(
+            (
+                runtime_bridge._CONTAINER_DISAPPEARANCE_MAX_POLLS - 1
+            )
+            * runtime_bridge._CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS,
+            5.0,
+        )
+
+    def test_counter_preserves_bounded_command_failure_at_probe_boundary(self) -> None:
+        failure = {
+            "exit_code": 1,
+            "timed_out": False,
+            "stderr_bytes": 0,
+            "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+            "stderr_excerpt": "",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, _ = self._native_counter(
+                root,
+                [
+                    RuntimeBridgeError(
+                        "Docker counter command failed", command_failure=failure
+                    ),
+                    RuntimeBridgeError(
+                        "Docker counter command failed", command_failure=failure
+                    ),
+                ],
+            )
+            with self.assertRaises(RuntimeBridgeError) as caught:
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.RUN,
+                )
+        self.assertEqual(caught.exception.failed_probe, "docker_system_df")
+        self.assertEqual(caught.exception.command_failure, failure)
+
     def test_inspect_requires_literal_private_cgroup_namespace(self) -> None:
         for mode in ("host", "default", ""):
             payload = json.loads(_container_inspect())
@@ -594,6 +665,7 @@ class DockerCounterTests(unittest.TestCase):
             host_data_root=root,
             executor=executor,
             statvfs=lambda path: os.statvfs(path),
+            sleeper=lambda _: None,
         )
         return counter, executor
 
@@ -639,11 +711,118 @@ class DockerCounterTests(unittest.TestCase):
             )
             self.assertEqual(first.data_root, str(root))
             self.assertEqual(first.docker_system_df, second.docker_system_df)
+            self.assertEqual(
+                set(dict(first.probe_timings_ms)),
+                {
+                    "docker_system_df",
+                    "docker_info",
+                    "docker_container_list",
+                    "docker_image_list",
+                    "docker_container_inspect",
+                    "docker_image_inspect",
+                    "docker_host_filesystem",
+                },
+            )
             self.assertEqual(len(executor.commands), 12)
             self.assertTrue(all(0 < value <= 30 for value in executor.timeouts))
             expected_filter = f"label=dev.rondo.eval.task={TASK_ID}"
             self.assertEqual(executor.commands[2][5:7], ("--filter", expected_filter))
             self.assertEqual(executor.commands[3][4:6], ("--filter", expected_filter))
+
+    def test_container_disappearance_during_inspect_is_relisted_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.RUN,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(reading.task_containers, ())
+        self.assertEqual(reading.task_bytes, 0)
+        self.assertEqual(
+            sum(command[:3] == ("docker", "container", "ls") for command in executor.commands),
+            2,
+        )
+
+    def test_container_inspect_failure_with_unchanged_ids_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, _ = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    _container_inspect(running=True),
+                ],
+            )
+
+            with self.assertRaises(RuntimeBridgeError):
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.RUN,
+                )
+
+    def test_container_inspect_failure_allows_bounded_stopped_disappearance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    _container_inspect(running=False),
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.RUN,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(reading.task_containers, ())
+        self.assertEqual(reading.task_bytes, 0)
+        self.assertEqual(
+            sum(command[:3] == ("docker", "container", "ls") for command in executor.commands),
+            3,
+        )
 
     def test_multi_probe_sample_shares_one_absolute_deadline(self) -> None:
         now = [0.0]
@@ -678,7 +857,7 @@ class DockerCounterTests(unittest.TestCase):
                 probe_timeout_seconds=5.0,
             )
 
-            with self.assertRaises(RuntimeBridgeError):
+            with self.assertRaises(RuntimeBridgeError) as caught:
                 counter.sample(
                     identity=DockerTaskIdentity(TASK_ID),
                     operation=DockerOperation.RUN,
@@ -686,6 +865,16 @@ class DockerCounterTests(unittest.TestCase):
 
         self.assertEqual(executor.timeouts, [5.0, 3.0, 1.0])
         self.assertEqual(len(executor.commands), 3)
+        self.assertEqual(caught.exception.failed_probe, "docker_image_list")
+        self.assertEqual(
+            dict(caught.exception.probe_timings_ms),
+            {
+                "docker_container_list": 2000,
+                "docker_image_list": 0,
+                "docker_info": 2000,
+                "docker_system_df": 2000,
+            },
+        )
 
     def test_normalizes_direct_none_network_nnp_and_effective_tmpfs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -757,6 +946,50 @@ class DockerCounterTests(unittest.TestCase):
                 )
             self.assertNotIn(secret, str(caught.exception))
             self.assertIsNone(caught.exception.__cause__)
+
+    def test_read_only_docker_fact_command_retries_once_within_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    CommandOutput(returncode=1, stdout=""),
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    "",
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.RUN,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(executor.commands[0], executor.commands[1])
+
+    def test_read_only_docker_fact_command_fails_after_two_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            counter, executor = self._native_counter(
+                Path(temporary).resolve(),
+                [
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                ],
+            )
+
+            with self.assertRaises(RuntimeBridgeError):
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.RUN,
+                )
+
+        self.assertEqual(len(executor.commands), 2)
 
     def test_filter_is_not_trusted_when_inspected_label_is_not_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -907,6 +1140,7 @@ class DockerCounterTests(unittest.TestCase):
             self.assertEqual(reading.data_root_filesystem_free_bytes, 190 * 1024**3)
             self.assertEqual(reading.docker_desktop_vhdx_bytes, 70_000_000_000)
             self.assertEqual(probe.calls, 1)
+            self.assertIn("docker_desktop_host", dict(reading.probe_timings_ms))
 
     def test_resolves_frozen_manifest_to_daemon_image_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -978,9 +1212,222 @@ class DockerCounterTests(unittest.TestCase):
 
         self.assertEqual(reading.task_container_metrics[0].cpu_usage_microseconds, 1_250_000)
         self.assertEqual(reading.task_container_metrics[0].peak_memory_bytes, 456_789)
+        self.assertIn("docker_container_metrics", dict(reading.probe_timings_ms))
         metric_command = executor.commands[5]
         self.assertEqual(metric_command[:5], ("docker", "container", "exec", "--user", "1000:1000"))
         self.assertEqual(metric_command[5], CONTAINER_ID)
+
+    def test_metric_exec_failure_accepts_only_proven_container_disappearance(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(),
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    "",
+                    "",
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.HOST,
+                compose_contract=contract,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(reading.task_containers, ())
+        self.assertEqual(reading.task_container_metrics, ())
+        self.assertEqual(
+            sum(command[:3] == ("docker", "container", "ls") for command in executor.commands),
+            2,
+        )
+
+    def test_metric_exec_failure_with_unchanged_container_remains_hard_failure(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, _ = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(),
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    json.dumps(CONTAINER_ID) + "\n",
+                ],
+            )
+
+            with self.assertRaises(RuntimeBridgeError) as caught:
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.HOST,
+                    compose_contract=contract,
+                )
+
+        self.assertEqual(caught.exception.failed_probe, "docker_container_metrics")
+
+    def test_metric_exec_failure_allows_bounded_teardown_grace(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, executor = self._native_counter(
+                root,
+                [
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    "",
+                    _container_inspect(),
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    json.dumps(CONTAINER_ID) + "\n",
+                    _container_inspect(running=False),
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+            )
+
+            reading = counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.HOST,
+                compose_contract=contract,
+            )
+
+        self.assertEqual(reading.task_container_ids, ())
+        self.assertEqual(reading.task_container_metrics, ())
+        self.assertEqual(
+            sum(command[:3] == ("docker", "container", "ls") for command in executor.commands),
+            3,
+        )
+
+    def test_stopped_metric_target_must_disappear_within_grace(self) -> None:
+        project = "rondoeval0810"
+        network = f"{project}_default"
+        contract = ComposeRunContract(
+            container=HostContainerContract(
+                user="1000:1000",
+                memory_bytes=100,
+                memory_swap_bytes=100,
+                pids_limit=2,
+                compose_project=project,
+                compose_service="main",
+                network_mode=network,
+                networks=(network,),
+                mounts=(),
+                require_container_metrics=True,
+            ),
+            network_names=(network,),
+        )
+        responses: list[str | CommandOutput | Exception] = [
+            _system_df(),
+            json.dumps([
+                str(Path("/tmp")),
+                "Docker Engine - Community",
+                ["name=seccomp,profile=builtin"],
+            ]),
+            json.dumps(CONTAINER_ID) + "\n",
+            "",
+            _container_inspect(),
+            CommandOutput(returncode=1, stdout=""),
+            CommandOutput(returncode=1, stdout=""),
+        ]
+        for _ in range(3):
+            responses.extend(
+                (json.dumps(CONTAINER_ID) + "\n", _container_inspect(running=False))
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            responses[1] = json.dumps([
+                str(root),
+                "Docker Engine - Community",
+                ["name=seccomp,profile=builtin"],
+            ])
+            counter, _ = self._native_counter(root, responses)
+            with mock.patch(
+                "rondo_eval.runtime_bridge._CONTAINER_DISAPPEARANCE_MAX_POLLS",
+                3,
+            ), self.assertRaises(RuntimeBridgeError) as caught:
+                counter.sample(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    operation=DockerOperation.HOST,
+                    compose_contract=contract,
+                )
+
+        self.assertEqual(caught.exception.failed_probe, "docker_container_metrics")
 
     def test_compose_resources_are_selected_and_inspected_by_exact_project(self) -> None:
         network_id = "c" * 64
@@ -1054,6 +1501,29 @@ class DockerCounterTests(unittest.TestCase):
         self.assertEqual(reading.host_volume_root, Path("/mnt/c"))
         self.assertEqual(reading.vhd_size_bytes, 69467111424)
         self.assertEqual(reading.free_bytes, 196425408512)
+
+    def test_subprocess_counter_failure_captures_redacted_bounded_stderr(self) -> None:
+        stderr = "daemon rejected Bearer hidden-token and sk-hidden\n"
+        completed = mock.Mock(returncode=17, stdout="", stderr=stderr)
+        with mock.patch(
+            "rondo_eval.runtime_bridge.subprocess.run", return_value=completed
+        ) as run:
+            with self.assertRaises(RuntimeBridgeError) as caught:
+                SubprocessCommandExecutor().run(
+                    ("docker", "system", "df", "--format", "{{json .}}"),
+                    timeout_seconds=1,
+                )
+        failure = caught.exception.command_failure
+        self.assertIsNotNone(failure)
+        self.assertEqual(failure["exit_code"], 17)
+        self.assertFalse(failure["timed_out"])
+        self.assertEqual(failure["stderr_bytes"], len(stderr.encode()))
+        self.assertEqual(failure["stderr_sha256"], hashlib.sha256(stderr.encode()).hexdigest())
+        self.assertEqual(
+            failure["stderr_excerpt"],
+            "daemon rejected [redacted] and [redacted]",
+        )
+        self.assertIs(run.call_args.kwargs["stderr"], subprocess.PIPE)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ from .api_budget_proxy import (
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
     SHORT_REQUEST_RESERVATION_USD,
+    UPSTREAM_TIMEOUT_SECONDS,
     _atomic_private_json,
 )
 from .config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
@@ -191,6 +192,7 @@ def _prompt(kind: str) -> str:
             "Call the exec_command tool exactly once with these exact arguments: "
             '{"cmd":"touch guardian-approved.tmp","sandbox_permissions":'
             '"require_escalated","justification":"Harmless Guardian diagnostic"}. '
+            "Do not emit an assistant or commentary message before the tool call. "
             "Do not call any other tool and do not modify any other path. After the "
             "command succeeds, reply with exactly DONE."
         )
@@ -546,6 +548,7 @@ def _run_phase_once(
     frozen_model_catalog: dict[str, object] | None = None,
     run_cap_usd: Decimal = RUN_CAP_USD,
     max_logical_requests: int | None = None,
+    upstream_timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
 ) -> tuple[dict[str, object], bool, bool, int]:
     _private_directory(attempt_root)
     codex_home = attempt_root / "codex-home"
@@ -589,6 +592,7 @@ def _run_phase_once(
             request_reservation_usd=SHORT_REQUEST_RESERVATION_USD,
             max_guardian_logical_requests=1,
             max_logical_requests=max_logical_requests,
+            timeout_seconds=upstream_timeout_seconds,
         ) as proxy:
             _write_auth(auth_path, proxy.downstream_api_key)
             started = time.monotonic()
@@ -896,6 +900,7 @@ def run_campaign(
     guardian_model_alias: str = DEFAULT_GUARDIAN_ALIAS,
     max_retries: int = MAX_RETRIES_PER_MODEL,
     plan014_canary: bool = False,
+    p2_campaign_identity: object | None = None,
 ) -> dict[str, object]:
     if prior_debit_usd < 0 or prior_debit_usd >= MODEL_CAMPAIGN_CAP_USD:
         raise ModelDiagnosticError(
@@ -931,6 +936,8 @@ def run_campaign(
         raise ModelDiagnosticError(
             "Plan 014 canary requires fresh frozen-Codex main+approval with zero retries"
         )
+    if p2_campaign_identity is not None and not plan014_canary:
+        raise ModelDiagnosticError("P2 identity is valid only for a fresh exact-wire canary")
     config = load_runtime_config(paths)
     provider = config.paid_provider_projection()
     paid_eval = config.paid_eval()
@@ -944,11 +951,19 @@ def run_campaign(
             "active paid profile does not match the selected main/Guardian models and effort"
         )
     pair_identity = None
+    campaign_identity = None
     if plan014_canary:
-        from .terminal_bench.pair import load_pair_identity
+        if p2_campaign_identity is None:
+            from .terminal_bench.pair import load_active_pair_identity
 
-        pair_identity = load_pair_identity()
-        pair_identity.validate_selected_profile(provider)
+            pair_identity = load_active_pair_identity()
+            pair_identity.validate_selected_profile(provider)
+        else:
+            campaign_identity = p2_campaign_identity
+            try:
+                campaign_identity.validate_provider(provider)
+            except AttributeError as exc:
+                raise ModelDiagnosticError("P2 canary identity is invalid") from exc
     _secret_name, api_key = load_provider_secret(config)
     targets = {
         side: _binary_target(paths.common_root, side) for side in ("codex", "rondo")
@@ -977,6 +992,18 @@ def run_campaign(
         if frozen_model_catalog is not None
         else None
     )
+    if campaign_identity is not None:
+        campaign_identity.validate_frozen_model_catalog(
+            source_commit=targets["codex"].source_commit,
+            sha256=frozen_model_catalog_sha256,
+            main_model=provider.main_model,
+            guardian_model=provider.guardian_model,
+        )
+    upstream_timeout_seconds = (
+        campaign_identity.upstream_timeout_seconds
+        if campaign_identity is not None
+        else UPSTREAM_TIMEOUT_SECONDS
+    )
     _private_directory(output_root)
     profile = {
         "schema_version": 1,
@@ -1004,12 +1031,19 @@ def run_campaign(
         "pair_lock_sha256": (
             pair_identity.lock_sha256 if pair_identity is not None else None
         ),
+        "p2_campaign_id": (
+            campaign_identity.campaign_id if campaign_identity is not None else None
+        ),
+        "p2_campaign_lock_sha256": (
+            campaign_identity.lock_sha256 if campaign_identity is not None else None
+        ),
         "prior_diagnostic_debit_usd": format(prior_debit_usd, "f"),
         "prior_retry_count": prior_retry_count,
         "start_side": start_side,
         "phase_kind": phase_kind,
         "max_retries": max_retries,
         "actual_usd": None,
+        "provider_upstream_timeout_seconds": upstream_timeout_seconds,
     }
     _atomic_private_json(output_root / "profile.json", profile)
     attempts: list[dict[str, object]] = []
@@ -1059,6 +1093,7 @@ def run_campaign(
                 ),
                 run_cap_usd=phase_run_cap,
                 max_logical_requests=phase_logical_request_cap,
+                upstream_timeout_seconds=upstream_timeout_seconds,
             )
             attempts.append(attempt)
             conservative_spent += Decimal(str(attempt["spent_usd"]))

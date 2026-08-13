@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -46,9 +48,12 @@ from rondo_eval.terminal_bench import (  # noqa: E402
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
 from rondo_eval.terminal_bench import adapters as adapters_module  # noqa: E402
 from rondo_eval.terminal_bench import live as live_module  # noqa: E402
+from rondo_eval.terminal_bench import oracle_smoke as oracle_smoke_module  # noqa: E402
 from rondo_eval.terminal_bench import runner as runner_module  # noqa: E402
+from rondo_eval.terminal_bench import verifier_runtime as verifier_runtime_module  # noqa: E402
 from rondo_eval.terminal_bench.compat import exec_result  # noqa: E402
 from rondo_eval.terminal_bench.freeze import FreezeError, validate_runtime_image_digest  # noqa: E402
+from rondo_eval.terminal_bench.tasksets import FrozenTask  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerContainerFact,
     DockerExecutionResult,
@@ -81,7 +86,7 @@ class FakeEnvironment:
         self.corrupt_remote = corrupt_remote
         self.remote_owner = remote_owner
         self.remote_owners = {
-            "/run/secrets/rondo_eval_provider_api_key": "1000:1000",
+            "/run/secrets/rondo_eval_provider_auth_json": "1000:1000",
             **dict(remote_owners or {}),
         }
         self.resolved_pwd = resolved_pwd
@@ -107,7 +112,11 @@ class FakeEnvironment:
             return FakeExecResult(1)
         if (
             "task_workdir=$(pwd -P)" in raw
-            and self.resolved_pwd != adapters_module.FIX_GIT_CANONICAL_WORKDIR
+            and (
+                (match := re.search(r'test "\$task_workdir" = "([^"]+)"', raw))
+                is None
+                or self.resolved_pwd != match.group(1)
+            )
         ):
             return FakeExecResult(1)
         if raw.startswith("stat -c '%u:%g' -- "):
@@ -134,10 +143,11 @@ class FakeMaterializer:
 
     def materialize(self, **kwargs):
         self.calls.append(kwargs)
+        frozen = kwargs.get("frozen_task")
         task = self.root / kwargs["staging_name"]
         task.mkdir()
         overlay = self.root / f"{kwargs['staging_name']}.compose.yaml"
-        provider_secret = self.root / f"{kwargs['staging_name']}.provider-api-key"
+        provider_secret = self.root / f"{kwargs['staging_name']}.provider-auth-json"
         provider_secret.write_bytes(b"")
         provider_secret.chmod(0o600)
         overlay.write_text(
@@ -162,9 +172,13 @@ class FakeMaterializer:
             provider_secret_path=provider_secret,
             source_repo_ref=TERMINAL_BENCH_REPO_REF,
             source_commit=TERMINAL_BENCH_COMMIT,
-            source_digest=f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}",
-            source_image_tag=FIX_GIT_IMAGE_TAG,
-            runtime_image_ref=FIX_GIT_IMAGE_REF,
+            source_digest=(
+                frozen.source_digest
+                if frozen is not None
+                else f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}"
+            ),
+            source_image_tag=(frozen.image_tag if frozen is not None else FIX_GIT_IMAGE_TAG),
+            runtime_image_ref=(frozen.image_ref if frozen is not None else FIX_GIT_IMAGE_REF),
             task_label=kwargs["task_label"],
             memory_bytes=kwargs["memory_bytes"],
             memory_swap_bytes=kwargs["memory_swap_bytes"],
@@ -176,6 +190,11 @@ class FakeMaterializer:
             seccomp_profile=kwargs.get("seccomp_profile"),
             seccomp_profile_source_sha256=kwargs.get("seccomp_profile_source_sha256"),
             seccomp_profile_effective_sha256=kwargs.get("seccomp_profile_effective_sha256"),
+            task_id=(frozen.task_id if frozen is not None else FIX_GIT_TASK_ID),
+            image_digest=(
+                frozen.image_digest if frozen is not None else FIX_GIT_IMAGE_DIGEST
+            ),
+            frozen_task=frozen,
         )
 
 
@@ -198,11 +217,13 @@ class FakeHostExecutor:
         secret_mounts = [
             item
             for item in kwargs["compose_contract"].container.mounts
-            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+            if item.destination == "/run/secrets/rondo_eval_provider_auth_json"
         ]
         if len(secret_mounts) != 1:
             raise AssertionError("expected one exact provider secret mount")
-        self.provider_secrets.append(Path(secret_mounts[0].source).read_text(encoding="utf-8"))
+        self.provider_secrets.append(
+            json.loads(Path(secret_mounts[0].source).read_text(encoding="utf-8"))
+        )
         trials = Path(argv[argv.index("--trials-dir") + 1])
         return HostHarborResult(0, trials / argv[argv.index("--trial-name") + 1])
 
@@ -225,6 +246,51 @@ class FakeBudgetProxy:
 
 
 class TerminalBenchTests(unittest.TestCase):
+    def test_harbor_executable_comes_from_the_active_eval_environment(self) -> None:
+        self.assertEqual(
+            runner_module.HARBOR_EXECUTABLE,
+            Path(sys.executable).with_name("harbor"),
+        )
+
+    def test_verifier_apt_preparation_creates_missing_dirs_before_owner_check(self) -> None:
+        class AptEnvironment:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, str]] = []
+
+            async def exec(self, command, **kwargs):
+                self.calls.append((command, kwargs["user"]))
+                if command.startswith("stat -c"):
+                    return FakeExecResult(0, stdout="0:0\n")
+                return FakeExecResult(0)
+
+        environment = AptEnvironment()
+        asyncio.run(verifier_runtime_module.prepare_verifier_apt_dirs(environment))
+        self.assertEqual(len(environment.calls), 9)
+        self.assertTrue(
+            all(
+                "test ! -L" in environment.calls[index][0]
+                and "mkdir -p" in environment.calls[index][0]
+                and environment.calls[index][1] == "root"
+                for index in (0, 3, 6)
+            )
+        )
+
+    def test_oracle_solution_defaults_only_unspecified_exec_user_to_root(self) -> None:
+        class Environment:
+            def __init__(self) -> None:
+                self.users: list[object] = []
+
+            async def exec(self, command, **kwargs):
+                del command
+                self.users.append(kwargs.get("user"))
+                return FakeExecResult(0)
+
+        environment = Environment()
+        projection = oracle_smoke_module._RootDefaultEnvironment(environment)
+        asyncio.run(projection.exec("reference solution"))
+        asyncio.run(projection.exec("explicit agent check", user="1000"))
+        self.assertEqual(environment.users, ["root", "1000"])
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -430,7 +496,7 @@ class TerminalBenchTests(unittest.TestCase):
         factory.assert_called_once()
         self.assertEqual(materializer.calls[0]["image_digest"], FIX_GIT_IMAGE_DIGEST)
         argv = prepared.command.argv
-        self.assertEqual(Path(argv[0]), EVAL_ROOT / ".venv" / "bin" / "harbor")
+        self.assertEqual(Path(argv[0]), runner_module.HARBOR_EXECUTABLE)
         self.assertEqual(argv[1:3], ("trials", "start"))
         self.assertEqual(Path(argv[argv.index("--path") + 1]), prepared.materialized_task.task_path)
         self.assertNotIn("--repo", argv)
@@ -451,7 +517,7 @@ class TerminalBenchTests(unittest.TestCase):
         secret_mount = next(
             item
             for item in container.mounts
-            if item.destination == "/run/secrets/rondo_eval_provider_api_key"
+            if item.destination == "/run/secrets/rondo_eval_provider_auth_json"
         )
         self.assertEqual(
             Path(secret_mount.source),
@@ -481,6 +547,47 @@ class TerminalBenchTests(unittest.TestCase):
             drifted_command.validate(
                 prepared.spec, prepared.adapter, prepared.materialized_task
             )
+
+    def test_prepare_projects_one_generic_frozen_task_without_cross_wiring(self) -> None:
+        task = FrozenTask(
+            task_id="terminal-bench/build-cython-ext",
+            source_digest="sha256:" + "1" * 64,
+            image_tag="alexgshaw/build-cython-ext:20251031",
+            image_ref="alexgshaw/build-cython-ext@sha256:" + "2" * 64,
+            workdir="/app",
+            memory_mb=2048,
+            timeout_seconds=1800,
+            agent_timeout_seconds=900,
+            verifier_timeout_seconds=900,
+            build_timeout_seconds=600,
+            requires_existing_git_repo=False,
+        )
+        request = replace(
+            self.request(Side.RONDO),
+            image_digest=task.image_digest,
+            frozen_task=task,
+        )
+        materializer = FakeMaterializer(self.root / "generic")
+        materializer.root.mkdir()
+
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+
+        self.assertEqual(prepared.spec.task_id, task.task_id)
+        self.assertEqual(prepared.spec.task_image_digest, task.image_digest)
+        self.assertEqual(prepared.command.image_ref, task.image_ref)
+        self.assertEqual(prepared.command.task_source_digest, task.source_digest)
+        self.assertEqual(prepared.adapter._task_workdir, "/app")
+        self.assertFalse(prepared.adapter._task_requires_existing_git_repo)
+        self.assertIn("build-cython-ext", prepared.materialized_task.task_path.name)
+        with self.assertRaisesRegex(
+            runner_module.TerminalBenchRunError, "materialization"
+        ):
+            replace(
+                prepared.command, task_source_digest="sha256:" + "3" * 64
+            ).validate(prepared.spec, prepared.adapter, prepared.materialized_task)
+        container = prepared.command.compose_contract.container
         observed = DockerContainerFact(
             container_id="b" * 64,
             user=container.user,
@@ -498,7 +605,7 @@ class TerminalBenchTests(unittest.TestCase):
             mounts=container.mounts,
             compose_project=container.compose_project,
             compose_service=container.compose_service,
-            image_reference=FIX_GIT_IMAGE_REF,
+            image_reference=task.image_ref,
             image_id=f"sha256:{'e' * 64}",
         )
         container.validate_observation(
@@ -801,7 +908,8 @@ class TerminalBenchTests(unittest.TestCase):
                 for call in environment.calls
             )
         )
-        self.assertIn("/run/secrets/rondo_eval_provider_api_key", commands)
+        self.assertIn("/run/secrets/rondo_eval_provider_auth_json", commands)
+        self.assertNotIn("python3 -c", commands)
         self.assertNotIn("auto_review.model", commands)
         self.assertNotIn("auto_review.reasoning_effort", commands)
         self.assertNotIn("auto_review.evidence_dir", commands)
@@ -821,17 +929,17 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('test ! -L "$task_workdir"', root_calls[0][0])
         self.assertIn('chmod -R a+rwX -- "$task_workdir"', root_calls[0][0])
         self.assertNotIn("/logs/agent", root_calls[0][0])
-        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", root_calls[0][0])
+        self.assertNotIn("/run/secrets/rondo_eval_provider_auth_json", root_calls[0][0])
         self.assertNotIn("/tmp/rondo-eval", root_calls[0][0])
         self.assertNotIn("chown", commands)
         secret_agent_calls = [
             call
             for call in agent_calls
-            if "/run/secrets/rondo_eval_provider_api_key" in call[0]
+            if "/run/secrets/rondo_eval_provider_auth_json" in call[0]
         ]
         self.assertEqual(len(secret_agent_calls), 2)
         self.assertTrue(any("stat -c '%u:%g'" in call[0] for call in secret_agent_calls))
-        self.assertTrue(any("chmod 0600" in call[0] for call in secret_agent_calls))
+        self.assertTrue(any("ln -sfn" in call[0] for call in secret_agent_calls))
         self.assertTrue(any("test -r /run/secrets/" in call[0] for call in secret_agent_calls))
         self.assertTrue(any("test ! -w /run/secrets/" in call[0] for call in secret_agent_calls))
         self.assertTrue(
@@ -872,6 +980,27 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('auto_review.model="gpt-5.6-luna"', rondo_commands)
         self.assertIn('auto_review.reasoning_effort="low"', rondo_commands)
         self.assertIn('auto_review.evidence_dir="/logs/agent/guardian-evidence"', rondo_commands)
+
+    def test_adapter_non_git_task_uses_frozen_workdir_without_repo_precondition(self) -> None:
+        adapter = self.adapter(
+            RondoUploadAdapter,
+            task_workdir="/app",
+            task_requires_existing_git_repo=False,
+        )
+        environment = FakeEnvironment(resolved_pwd="/app")
+
+        asyncio.run(adapter.run("do the task", environment, mock.Mock()))
+
+        prepare = next(
+            command
+            for command, _env, _timeout, _user in environment.calls
+            if "prepare" not in command and "GIT_CONFIG_GLOBAL" not in command
+            and 'test "$(id -u):$(id -g)"' in command
+        )
+        self.assertIn('test "$task_workdir" = "/app"', prepare)
+        self.assertNotIn('test -d "$task_workdir/.git"', prepare)
+        self.assertNotIn('git -C "$task_workdir" status', prepare)
+        self.assertNotIn("git config", prepare)
 
     def test_adapter_run_rejects_root_workdir_and_permission_projection_failure(self) -> None:
         adapter = self.adapter()
@@ -914,7 +1043,7 @@ class TerminalBenchTests(unittest.TestCase):
 
         secret_environment = FakeEnvironment(
             remote_owners={
-                "/run/secrets/rondo_eval_provider_api_key": "0:0"
+                "/run/secrets/rondo_eval_provider_auth_json": "0:0"
             }
         )
         with self.assertRaisesRegex(AdapterError, "command_id=verify_secret_owner"):
@@ -934,7 +1063,7 @@ class TerminalBenchTests(unittest.TestCase):
                 adapter.run("repair the repository", git_probe_environment, mock.Mock())
             )
         git_probe_commands = "\n".join(call[0] for call in git_probe_environment.calls)
-        self.assertNotIn("/run/secrets/rondo_eval_provider_api_key", git_probe_commands)
+        self.assertNotIn("/run/secrets/rondo_eval_provider_auth_json", git_probe_commands)
 
     def test_checked_exec_diagnostic_is_bounded_and_secret_redacted(self) -> None:
         secret = "sk-secret-must-never-escape"
@@ -1046,7 +1175,7 @@ class TerminalBenchTests(unittest.TestCase):
             f"file: {json.dumps(str(result.provider_secret_path))}",
             overlay,
         )
-        self.assertIn("source: rondo_eval_provider_api_key", overlay)
+        self.assertIn("source: rondo_eval_provider_auth_json", overlay)
         self.assertEqual(result.provider_secret_path.read_bytes(), b"")
         self.assertEqual(result.provider_secret_path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(
@@ -1073,6 +1202,7 @@ class TerminalBenchTests(unittest.TestCase):
             (result.task_path / "tests" / "rondo-apt.conf").read_text(),
             'APT::Sandbox::User "root";\n',
         )
+
         self.assertEqual(
             (result.task_path / "tests" / "rondo-apt.conf").stat().st_mode & 0o777,
             0o444,
@@ -1156,6 +1286,17 @@ class TerminalBenchTests(unittest.TestCase):
         object.__setattr__(result, "overlay_sha256", original_overlay_sha256)
         result.validate()
 
+    def test_ignored_staging_allows_nonexistent_nested_common_root_path(self) -> None:
+        repository = self.root / "repository"
+        repository.mkdir()
+        subprocess.run(("git", "init", "-q", str(repository)), check=True)
+        (repository / ".gitignore").write_text("/eval-data/\n", encoding="utf-8")
+        (repository / "eval-data" / "work").mkdir(parents=True)
+        staging = repository / "eval-data" / "work" / "campaign" / "task"
+
+        materialize_module._require_ignored_staging(staging)
+        self.assertFalse(staging.exists())
+
     def test_injected_backend_never_serializes_provider_key(self) -> None:
         prepared = self.prepare(Side.RONDO)
         executor = FakeHostExecutor()
@@ -1167,10 +1308,26 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn(secret, "\0".join(argv))
         self.assertNotIn(secret, repr(prepared.command))
         self.assertEqual(kwargs["injected_env"], {"HARBOR_TELEMETRY": "off"})
-        self.assertEqual(executor.provider_secrets, [secret])
+        self.assertEqual(executor.provider_secrets, [{"OPENAI_API_KEY": secret}])
         self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
         self.assertEqual(kwargs["exact_task_label"], "dev.rondo.eval.task=p1-b3-rondo")
+        self.assertEqual(kwargs["image_reference"], prepared.command.image_ref)
         self.assertEqual(kwargs["compose_contract"], prepared.command.compose_contract)
+
+    def test_injected_backend_auth_json_round_trips_quoted_key(self) -> None:
+        prepared = self.prepare(Side.RONDO)
+        executor = FakeHostExecutor()
+        secret = 'quoted-"-backslash-\\-unicode-\u96ea'
+        backend = InjectedHostHarborBackend(
+            executor,
+            getenv=lambda name: secret if name == "OPENAI_API_KEY" else None,
+        )
+
+        asyncio.run(UnifiedTerminalBenchRunner(backend).run(prepared))
+
+        self.assertEqual(executor.provider_secrets, [{"OPENAI_API_KEY": secret}])
+        self.assertNotIn(secret, repr(prepared.command))
+        self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
 
     def test_injected_backend_clears_provider_secret_after_executor_failure(self) -> None:
         prepared = self.prepare(Side.RONDO)
@@ -1187,7 +1344,10 @@ class TerminalBenchTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "fake host failure"):
             asyncio.run(UnifiedTerminalBenchRunner(backend).run(prepared))
-        self.assertEqual(executor.provider_secrets, ["failure-secret"])
+        self.assertEqual(
+            executor.provider_secrets,
+            [{"OPENAI_API_KEY": "failure-secret"}],
+        )
         self.assertEqual(prepared.materialized_task.provider_secret_path.read_bytes(), b"")
 
     def test_concrete_host_executor_uses_public_full_lifetime_supervisor(self) -> None:
@@ -1219,13 +1379,14 @@ class TerminalBenchTests(unittest.TestCase):
                     injected_env={"HARBOR_TELEMETRY": "off"},
                     timeout_seconds=prepared.spec.timeout_seconds,
                     exact_task_label=prepared.command.task_label,
+                    image_reference=prepared.command.image_ref,
                     compose_contract=prepared.command.compose_contract,
                 )
             )
 
         self.assertEqual(result.docker_evidence.operation, DockerOperation.HOST)
         host_runner.assert_called_once_with(
-            executable=EVAL_ROOT / ".venv" / "bin" / "harbor",
+            executable=runner_module.HARBOR_EXECUTABLE,
             cwd=EVAL_ROOT,
             environment={
                 "HARBOR_TELEMETRY": "off",
@@ -1280,12 +1441,31 @@ class TerminalBenchTests(unittest.TestCase):
             argv[argv.index("--agent-kwarg") + 1],
             f"task_dir={materialized.task_path}",
         )
+        agent_kwargs = tuple(
+            argv[index + 1]
+            for index, value in enumerate(argv)
+            if value == "--agent-kwarg"
+        )
+        self.assertEqual(
+            agent_kwargs,
+            (
+                f"task_dir={materialized.task_path}",
+                "task_workdir=/app/personal-site",
+                "agent_timeout_seconds=900",
+            ),
+        )
         self.assertNotIn("--agent-env", argv)
         self.assertEqual(materialized.provider_secret_path.read_bytes(), b"")
+        fake_supervisor.resolve_image_identity.assert_called_once_with(
+            mock.ANY,
+            materialized.runtime_image_ref,
+            lease=mock.ANY,
+            timeout_seconds=5,
+        )
         contract = fake_supervisor.supervise_host_command.call_args.kwargs[
             "compose_contract"
         ]
-        self.assertTrue(contract.container.require_container_metrics)
+        self.assertFalse(contract.container.require_container_metrics)
         self.assertEqual(contract.container.user, "1000:1000")
 
     def test_budgeted_live_path_keeps_official_key_out_of_harbor_and_requires_evidence(self) -> None:
@@ -1322,11 +1502,19 @@ class TerminalBenchTests(unittest.TestCase):
             "schema_version": 1,
             "requests": [{
                 "role": "guardian",
+                "body_sha256": "a" * 64,
+                "canonical_body_sha256": "b" * 64,
                 "role_provenance": "declared",
                 "declared_role": "guardian",
                 "inferred_role": "guardian",
                 "contract_match": True,
                 "usage_valid": True,
+                "usage": {
+                    "input_tokens": 10,
+                    "cached_input_tokens": 0,
+                    "cache_write_input_tokens": 0,
+                    "output_tokens": 2,
+                },
                 "attempt_count": 1,
                 "settlement_kind": "usage_priced",
             }]
@@ -1400,6 +1588,12 @@ class TerminalBenchTests(unittest.TestCase):
                             "inferred_role": "main",
                             "contract_match": True,
                             "usage_valid": True,
+                            "usage": {
+                                "input_tokens": 10,
+                                "cached_input_tokens": 0,
+                                "cache_write_input_tokens": 0,
+                                "output_tokens": 2,
+                            },
                             "attempt_count": 1,
                             "settlement_kind": "usage_priced",
                         }
@@ -1533,6 +1727,7 @@ timeout_sec = 900.0
 timeout_sec = 900.0
 
 [environment]
+build_timeout_sec = 600.0
 docker_image = "{FIX_GIT_IMAGE_TAG}"
 cpus = 1
 memory_mb = 2048

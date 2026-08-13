@@ -22,13 +22,14 @@ from ..runtime_bridge import (
 from .docker_smoke import _print_safe_cli_error, _write_current_receipt
 from .freeze import FIX_GIT_IMAGE_DIGEST
 from .materialize import PinnedTaskMaterializer
-from .pair import load_pair_identity, validate_harbor_installation
+from .pair import load_no_api_pair_identity, validate_harbor_installation
 from .results import ParsedHarborResult, parse_single_task_result, validate_eval_harness_checkout
 from .runner import DockerSupervisedHostHarborExecutor, HARBOR_EXECUTABLE, HostHarborResult
-from .verifier_runtime import prepare_fix_git_workdir, prepare_verifier_apt_dirs
+from .verifier_runtime import prepare_task_workdir, prepare_verifier_apt_dirs
 
 from harbor.agents.oracle import OracleAgent
 from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
 from harbor.models.trial.paths import TrialPaths
 
 
@@ -44,24 +45,62 @@ class PreparedOracleAgent(OracleAgent):
         model_name: str | None = None,
         *,
         task_dir: str,
+        task_workdir: str,
+        agent_timeout_seconds: str,
         **kwargs: object,
     ) -> None:
         logs_dir = Path(logs_dir)
         task_path = Path(task_dir)
         if not task_path.is_absolute() or task_path.is_symlink():
             raise OracleVerifierSmokeError("oracle task path is invalid")
+        try:
+            timeout = int(agent_timeout_seconds)
+        except (TypeError, ValueError) as exc:
+            raise OracleVerifierSmokeError("oracle timeout is invalid") from exc
+        if timeout < 1 or timeout > 7200:
+            raise OracleVerifierSmokeError("oracle timeout is invalid")
+        self._task_workdir = task_workdir
         super().__init__(
             logs_dir=logs_dir,
             model_name=model_name,
             task_dir=task_path,
             trial_paths=TrialPaths(logs_dir.parent),
-            agent_timeout_sec=900.0,
+            agent_timeout_sec=float(timeout),
             **kwargs,
         )
 
     async def setup(self, environment: BaseEnvironment) -> None:
-        await prepare_fix_git_workdir(environment)
+        await prepare_task_workdir(environment, self._task_workdir)
         await prepare_verifier_apt_dirs(environment)
+
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        # The official reference solution is a task/verifier preflight, not a
+        # product-agent execution.  Many TB solutions install system packages;
+        # keep paid agents non-root while running only this solution as root.
+        await super().run(
+            instruction,
+            _RootDefaultEnvironment(environment),
+            context,
+        )
+
+
+class _RootDefaultEnvironment:
+    """Delegate Harbor environment operations, defaulting only exec to root."""
+
+    def __init__(self, environment: BaseEnvironment) -> None:
+        self._environment = environment
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._environment, name)
+
+    async def exec(self, command: str, **kwargs: object) -> object:
+        kwargs.setdefault("user", "root")
+        return await self._environment.exec(command, **kwargs)
 
 
 class OracleVerifierSmokeError(ValueError):
@@ -111,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         paths = RepoPaths.discover(Path.cwd())
-        pair_identity = load_pair_identity()
+        pair_identity = load_no_api_pair_identity()
         eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
         config = load_runtime_config(paths)
         provider = config.paid_provider()

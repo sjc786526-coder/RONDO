@@ -22,6 +22,7 @@ from .freeze import (
     TERMINAL_BENCH_COMMIT,
     TERMINAL_BENCH_REPO_REF,
 )
+from .tasksets import FrozenTask
 
 
 class MaterializationError(RuntimeError):
@@ -49,6 +50,26 @@ _SOLUTION_ENV = {
     "GIT_CONFIG_KEY_2": "user.email",
     "GIT_CONFIG_VALUE_2": FIX_GIT_GIT_USER_EMAIL,
 }
+
+
+def _solution_env(workdir: str) -> dict[str, str]:
+    return {**_SOLUTION_ENV, "GIT_CONFIG_VALUE_0": workdir}
+
+
+def _fix_git_frozen_task() -> FrozenTask:
+    return FrozenTask(
+        task_id=FIX_GIT_TASK_ID,
+        source_digest=f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}",
+        image_tag=FIX_GIT_IMAGE_TAG,
+        image_ref=FIX_GIT_IMAGE_REF,
+        workdir=TERMINAL_BENCH_WORKDIR,
+        memory_mb=2048,
+        timeout_seconds=1800,
+        agent_timeout_seconds=900,
+        verifier_timeout_seconds=900,
+        build_timeout_seconds=600,
+        requires_existing_git_repo=True,
+    )
 
 
 def _create_secret_placeholder(path: Path) -> None:
@@ -91,6 +112,9 @@ class MaterializedTask:
     seccomp_profile: Path | None = None
     seccomp_profile_source_sha256: str | None = None
     seccomp_profile_effective_sha256: str | None = None
+    task_id: str = FIX_GIT_TASK_ID
+    image_digest: str = FIX_GIT_IMAGE_DIGEST
+    frozen_task: FrozenTask | None = None
 
     def validate(self) -> None:
         if (
@@ -112,12 +136,16 @@ class MaterializedTask:
             or self.provider_secret_path.parent != self.overlay_path.parent
         ):
             raise MaterializationError("provider secret placeholder is unsafe")
+        frozen = self.frozen_task or _fix_git_frozen_task()
+        frozen.validate()
         if (
             self.source_repo_ref != TERMINAL_BENCH_REPO_REF
             or self.source_commit != TERMINAL_BENCH_COMMIT
-            or self.source_digest != f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}"
-            or self.source_image_tag != FIX_GIT_IMAGE_TAG
-            or self.runtime_image_ref != FIX_GIT_IMAGE_REF
+            or self.task_id != frozen.task_id
+            or self.source_digest != frozen.source_digest
+            or self.source_image_tag != frozen.image_tag
+            or self.image_digest != frozen.image_digest
+            or self.runtime_image_ref != frozen.image_ref
         ):
             raise MaterializationError("staged task provenance differs from the freeze")
         if not self.task_label.startswith("dev.rondo.eval.task="):
@@ -187,7 +215,7 @@ class MaterializedTask:
 
 
 class PinnedTaskMaterializer:
-    """Copy only fix-git from the pinned checkout and rewrite its image by digest."""
+    """Copy one catalog-frozen task and rewrite its image by exact digest."""
 
     def materialize(
         self,
@@ -201,43 +229,21 @@ class PinnedTaskMaterializer:
         memory_swap_bytes: int,
         pids_limit: int,
         provider_api_key_env: str,
+        frozen_task: FrozenTask | None = None,
         seccomp_profile: Path | None = None,
         seccomp_profile_source_sha256: str | None = None,
         seccomp_profile_effective_sha256: str | None = None,
     ) -> MaterializedTask:
-        if image_digest != FIX_GIT_IMAGE_DIGEST:
-            raise MaterializationError("runtime image digest is not the B1 freeze")
+        frozen = frozen_task or _fix_git_frozen_task()
+        frozen.validate()
+        if image_digest != frozen.image_digest:
+            raise MaterializationError("runtime image digest differs from the task freeze")
         _validate_limits(memory_bytes, memory_swap_bytes, pids_limit)
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", provider_api_key_env):
             raise MaterializationError("provider key variable is invalid")
-        source_checkout = _regular_directory(source_checkout, "dataset checkout")
-        source_task = _regular_directory(source_checkout / "tasks" / "fix-git", "task")
-        dataset_manifest = _regular_file(source_checkout / "tasks" / "dataset.toml")
-
-        if _git(source_checkout, "rev-parse", "HEAD") != TERMINAL_BENCH_COMMIT:
-            raise MaterializationError("dataset checkout commit differs from the freeze")
-        top = Path(_git(source_checkout, "rev-parse", "--show-toplevel")).resolve()
-        if top != source_checkout.resolve():
-            raise MaterializationError("dataset checkout is not its Git worktree root")
-        scoped_status = _git(
-            source_checkout,
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-            "--",
-            "tasks/fix-git",
-            "tasks/dataset.toml",
+        source_task, source_digest = validate_frozen_task_source(
+            source_checkout, frozen
         )
-        if scoped_status:
-            raise MaterializationError("frozen task source or dataset manifest is dirty")
-        _reject_symlinks(source_task)
-
-        task_document = _read_toml(source_task / "task.toml")
-        _validate_task_metadata(task_document)
-        _validate_dataset_manifest(_read_toml(dataset_manifest))
-        source_digest = _harbor_content_digest(source_task)
-        if source_digest != FIX_GIT_TASK_ARCHIVE_SHA256:
-            raise MaterializationError("task content digest differs from dataset.toml")
 
         staging_root = staging_root.resolve()
         _require_ignored_staging(staging_root)
@@ -248,7 +254,7 @@ class PinnedTaskMaterializer:
             raise MaterializationError("staging name is unsafe")
         destination = staging_root / staging_name
         overlay = staging_root / f"{staging_name}.compose.yaml"
-        provider_secret = staging_root / f"{staging_name}.provider-api-key"
+        provider_secret = staging_root / f"{staging_name}.provider-auth-json"
         if (
             destination.exists()
             or destination.is_symlink()
@@ -276,8 +282,8 @@ class PinnedTaskMaterializer:
 
         task_toml = destination / "task.toml"
         text = task_toml.read_text(encoding="utf-8")
-        needle = f'docker_image = "{FIX_GIT_IMAGE_TAG}"'
-        replacement = f'docker_image = "{FIX_GIT_IMAGE_REF}"'
+        needle = f'docker_image = "{frozen.image_tag}"'
+        replacement = f'docker_image = "{frozen.image_ref}"'
         if text.count(needle) != 1:
             raise MaterializationError("task image metadata is missing or ambiguous")
         task_toml.write_text(text.replace(needle, replacement), encoding="utf-8")
@@ -318,12 +324,12 @@ class PinnedTaskMaterializer:
                 solution_env_needle
                 + "".join(
                     f"{key} = {json.dumps(value)}\n"
-                    for key, value in _SOLUTION_ENV.items()
+                    for key, value in _solution_env(frozen.workdir).items()
                 )
             ),
         )
         task_toml.write_text(text, encoding="utf-8")
-        _validate_staged_task(_read_toml(task_toml))
+        _validate_staged_task(_read_toml(task_toml), frozen_task=frozen)
 
         overlay.write_text(
             _compose_overlay_text(
@@ -347,8 +353,8 @@ class PinnedTaskMaterializer:
             source_repo_ref=TERMINAL_BENCH_REPO_REF,
             source_commit=TERMINAL_BENCH_COMMIT,
             source_digest=f"sha256:{source_digest}",
-            source_image_tag=FIX_GIT_IMAGE_TAG,
-            runtime_image_ref=FIX_GIT_IMAGE_REF,
+            source_image_tag=frozen.image_tag,
+            runtime_image_ref=frozen.image_ref,
             task_label=task_label,
             memory_bytes=memory_bytes,
             memory_swap_bytes=memory_swap_bytes,
@@ -360,9 +366,52 @@ class PinnedTaskMaterializer:
             seccomp_profile=seccomp_profile,
             seccomp_profile_source_sha256=seccomp_profile_source_sha256,
             seccomp_profile_effective_sha256=seccomp_profile_effective_sha256,
+            task_id=frozen.task_id,
+            image_digest=frozen.image_digest,
+            frozen_task=frozen,
         )
         result.validate()
         return result
+
+
+def validate_frozen_task_source(
+    source_checkout: Path, frozen_task: FrozenTask
+) -> tuple[Path, str]:
+    """Validate one catalog task without creating staging or contacting Docker."""
+
+    frozen_task.validate()
+    source_checkout = _regular_directory(source_checkout, "dataset checkout")
+    source_task = _regular_directory(
+        source_checkout / "tasks" / frozen_task.slug, "task"
+    )
+    dataset_manifest = _regular_file(source_checkout / "tasks" / "dataset.toml")
+    if _git(source_checkout, "rev-parse", "HEAD") != TERMINAL_BENCH_COMMIT:
+        raise MaterializationError("dataset checkout commit differs from the freeze")
+    top = Path(_git(source_checkout, "rev-parse", "--show-toplevel")).resolve()
+    if top != source_checkout.resolve():
+        raise MaterializationError("dataset checkout is not its Git worktree root")
+    scoped_status = _git(
+        source_checkout,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--",
+        f"tasks/{frozen_task.slug}",
+        "tasks/dataset.toml",
+    )
+    if scoped_status:
+        raise MaterializationError("frozen task source or dataset manifest is dirty")
+    _reject_symlinks(source_task)
+    _validate_task_metadata(
+        _read_toml(source_task / "task.toml"), frozen_task=frozen_task
+    )
+    _validate_dataset_manifest(
+        _read_toml(dataset_manifest), frozen_task=frozen_task
+    )
+    source_digest = _harbor_content_digest(source_task)
+    if f"sha256:{source_digest}" != frozen_task.source_digest:
+        raise MaterializationError("task content digest differs from dataset.toml")
+    return source_task, source_digest
 
 
 def _git(checkout: Path, *args: str) -> str:
@@ -442,7 +491,10 @@ def _normalize_phase_inputs(task_path: Path) -> None:
         path.chmod(mode)
 
 
-def _validate_task_metadata(document: dict) -> None:
+def _validate_task_metadata(
+    document: dict, *, frozen_task: FrozenTask | None = None
+) -> None:
+    frozen = frozen_task or _fix_git_frozen_task()
     task = document.get("task")
     metadata = document.get("metadata")
     verifier = document.get("verifier")
@@ -451,39 +503,45 @@ def _validate_task_metadata(document: dict) -> None:
     expected = (
         document.get("schema_version") == "1.1"
         and isinstance(task, dict)
-        and task.get("name") == FIX_GIT_TASK_ID
+        and task.get("name") == frozen.task_id
         and isinstance(metadata, dict)
-        and metadata.get("difficulty") == "easy"
-        and metadata.get("category") == "software-engineering"
-        and metadata.get("expert_time_estimate_min") == 5.0
+        and isinstance(metadata.get("difficulty"), str)
+        and isinstance(metadata.get("category"), str)
+        and isinstance(metadata.get("expert_time_estimate_min"), (int, float))
         and isinstance(verifier, dict)
-        and verifier.get("timeout_sec") == 900.0
+        and verifier.get("timeout_sec") == float(frozen.verifier_timeout_seconds)
         and isinstance(agent, dict)
-        and agent.get("timeout_sec") == 900.0
+        and agent.get("timeout_sec") == float(frozen.agent_timeout_seconds)
         and isinstance(environment, dict)
-        and environment.get("docker_image") == FIX_GIT_IMAGE_TAG
+        and environment.get("build_timeout_sec")
+        == float(frozen.build_timeout_seconds)
+        and environment.get("docker_image") == frozen.image_tag
         and environment.get("cpus") == 1
-        and environment.get("memory_mb") == 2048
+        and environment.get("memory_mb") == frozen.memory_mb
         and environment.get("storage_mb") == 10240
         and environment.get("gpus") == 0
         and environment.get("allow_internet") is True
     )
     if not expected:
-        raise MaterializationError("fix-git task metadata differs from the freeze")
+        raise MaterializationError("task metadata differs from the freeze")
 
 
-def _validate_staged_task(document: dict) -> None:
+def _validate_staged_task(
+    document: dict, *, frozen_task: FrozenTask | None = None
+) -> None:
+    frozen = frozen_task or _fix_git_frozen_task()
     _validate_task_metadata(
         {
             **document,
             "environment": {
                 **document.get("environment", {}),
-                "docker_image": FIX_GIT_IMAGE_TAG,
+                "docker_image": frozen.image_tag,
             },
-        }
+        },
+        frozen_task=frozen,
     )
     environment = document.get("environment")
-    if not isinstance(environment, dict) or environment.get("docker_image") != FIX_GIT_IMAGE_REF:
+    if not isinstance(environment, dict) or environment.get("docker_image") != frozen.image_ref:
         raise MaterializationError("staged task did not receive the pinned runtime image")
     agent = document.get("agent")
     if not isinstance(agent, dict) or agent.get("user") != TERMINAL_BENCH_AGENT_USER:
@@ -500,27 +558,53 @@ def _validate_staged_task(document: dict) -> None:
             "TAR_OPTIONS": "--no-same-owner",
         }
         or not isinstance(solution, dict)
-        or solution.get("env") != _SOLUTION_ENV
+        or solution.get("env") != _solution_env(frozen.workdir)
     ):
         raise MaterializationError("staged verifier identity differs from the pinned root phase")
 
 
-def _validate_dataset_manifest(document: dict) -> None:
+def _validate_dataset_manifest(
+    document: dict, *, frozen_task: FrozenTask | None = None
+) -> None:
+    frozen = frozen_task or _fix_git_frozen_task()
     tasks = document.get("tasks")
     matches = [
         item
-        for item in tasks if isinstance(item, dict) and item.get("name") == FIX_GIT_TASK_ID
+        for item in tasks if isinstance(item, dict) and item.get("name") == frozen.task_id
     ] if isinstance(tasks, list) else []
-    expected_digest = f"sha256:{FIX_GIT_TASK_ARCHIVE_SHA256}"
+    expected_digest = frozen.source_digest
     if len(matches) != 1 or matches[0].get("digest") != expected_digest:
         raise MaterializationError("dataset manifest does not uniquely pin fix-git")
 
 
 def _require_ignored_staging(staging_root: Path) -> None:
+    ancestor = staging_root
+    while not ancestor.exists():
+        if ancestor.parent == ancestor:
+            raise MaterializationError("staging root has no existing repository ancestor")
+        ancestor = ancestor.parent
+    try:
+        metadata = ancestor.lstat()
+        repository_root = Path(
+            _git(ancestor, "rev-parse", "--show-toplevel")
+        ).resolve(strict=True)
+        staging_root.relative_to(repository_root)
+    except (OSError, ValueError) as exc:
+        raise MaterializationError("staging root is outside the RONDO repository") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise MaterializationError("staging root ancestor is unsafe")
     probe = staging_root / ".rondo-ignore-probe"
     try:
         result = subprocess.run(
-            ("git", "-C", str(staging_root.parent), "check-ignore", "--no-index", "-q", str(probe)),
+            (
+                "git",
+                "-C",
+                str(repository_root),
+                "check-ignore",
+                "--no-index",
+                "-q",
+                str(probe),
+            ),
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -620,7 +704,7 @@ def _compose_overlay_text(
         )
     return (
         "secrets:\n"
-        "  rondo_eval_provider_api_key:\n"
+        "  rondo_eval_provider_auth_json:\n"
         f"    file: {json.dumps(str(provider_secret_path))}\n"
         "services:\n"
         "  main:\n"
@@ -634,7 +718,7 @@ def _compose_overlay_text(
         "      - ALL\n"
         f"{seccomp}"
         "    secrets:\n"
-        "      - source: rondo_eval_provider_api_key\n"
-        "        target: rondo_eval_provider_api_key\n"
+        "      - source: rondo_eval_provider_auth_json\n"
+        "        target: rondo_eval_provider_auth_json\n"
         "        mode: \"0400\"\n"
     )

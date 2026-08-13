@@ -53,7 +53,14 @@ _DEFAULT_MEMORY_HIGH_BYTES = 19 * 1024**3
 _DEFAULT_MEMORY_MAX_BYTES = 21 * 1024**3
 _DEFAULT_SWAP_MAX_BYTES = 5 * 1024**3
 _WATCHDOG_HEARTBEAT_MAX_AGE_NS = 15_000_000_000
-_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = 1_000_000_000
+# WSL's wall clock can step backwards while the wrapper is refreshing this
+# mtime.  Treat an equally bounded future timestamp as fresh; PID/start-ticks,
+# script, inode, lock, and cgroup identity checks still have to match.
+_WATCHDOG_HEARTBEAT_FUTURE_TOLERANCE_NS = _WATCHDOG_HEARTBEAT_MAX_AGE_NS
+_DOCKER_FACT_COMMAND_MAX_ATTEMPTS = 2
+_DOCKER_FACT_COMMAND_RETRY_DELAY_SECONDS = 1.0
+_CONTAINER_DISAPPEARANCE_MAX_POLLS = 21
+_CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS = 0.25
 _WATCHDOG_ENV = (
     "RONDO_WATCHDOG_WRAPPER_PID",
     "RONDO_WATCHDOG_WRAPPER_START_TICKS",
@@ -92,6 +99,21 @@ _SIZE_FACTORS = {
 
 class RuntimeBridgeError(RuntimeError):
     """Fail-closed infrastructure error with a deliberately redacted message."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failed_probe: str | None = None,
+        probe_timings_ms: Sequence[tuple[str, int]] = (),
+        command_failure: Mapping[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.failed_probe = failed_probe
+        self.probe_timings_ms = tuple(probe_timings_ms)
+        self.command_failure = (
+            None if command_failure is None else dict(command_failure)
+        )
 
 
 @dataclass(frozen=True)
@@ -940,7 +962,7 @@ class SubprocessCommandExecutor:
                 shell=False,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 close_fds=True,
                 env=_sanitized_subprocess_env(),
                 text=True,
@@ -949,11 +971,69 @@ class SubprocessCommandExecutor:
                 timeout=effective_timeout,
                 check=False,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeBridgeError(
+                "Docker counter command failed",
+                command_failure=_bounded_command_failure(
+                    stderr=exc.stderr,
+                    exit_code=None,
+                    timed_out=True,
+                ),
+            ) from exc
         except (OSError, subprocess.SubprocessError, UnicodeError, ValueError) as exc:
-            raise RuntimeBridgeError("Docker counter command failed") from exc
+            raise RuntimeBridgeError(
+                "Docker counter command failed",
+                command_failure=_bounded_command_failure(
+                    stderr=None,
+                    exit_code=None,
+                    timed_out=False,
+                ),
+            ) from exc
         if result.returncode != 0:
-            raise RuntimeBridgeError("Docker counter command failed")
+            raise RuntimeBridgeError(
+                "Docker counter command failed",
+                command_failure=_bounded_command_failure(
+                    stderr=result.stderr,
+                    exit_code=result.returncode,
+                    timed_out=False,
+                ),
+            )
         return CommandOutput(returncode=result.returncode, stdout=result.stdout)
+
+
+_DIAGNOSTIC_SECRET = re.compile(
+    r"(?i)(?:bearer[ ]+[!-~]+|sk-[A-Za-z0-9_-]+|"
+    r"[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET)=[^ ]+)"
+)
+
+
+def _bounded_command_failure(
+    *,
+    stderr: str | bytes | None,
+    exit_code: int | None,
+    timed_out: bool,
+) -> dict[str, object]:
+    if isinstance(stderr, bytes):
+        raw = stderr
+        text = stderr.decode("utf-8", errors="replace")
+    elif isinstance(stderr, str):
+        raw = stderr.encode("utf-8", errors="replace")
+        text = stderr
+    else:
+        raw = b""
+        text = ""
+    printable = " ".join(text.replace("\r", "\n").splitlines()).strip()
+    printable = "".join(
+        character if 32 <= ord(character) <= 126 else "?" for character in printable
+    )
+    excerpt = _DIAGNOSTIC_SECRET.sub("[redacted]", printable)[:512]
+    return {
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "stderr_bytes": len(raw),
+        "stderr_sha256": hashlib.sha256(raw).hexdigest(),
+        "stderr_excerpt": excerpt,
+    }
 
 
 class DockerCliCounter:
@@ -968,6 +1048,7 @@ class DockerCliCounter:
         mountinfo_path: Path = Path("/proc/self/mountinfo"),
         statvfs: Callable[[os.PathLike[str]], os.statvfs_result] = os.statvfs,
         monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
         probe_timeout_seconds: float = 30.0,
     ) -> None:
         if not host_data_root.is_absolute() or probe_timeout_seconds <= 0:
@@ -978,6 +1059,7 @@ class DockerCliCounter:
         self._mountinfo_path = mountinfo_path
         self._statvfs = statvfs
         self._monotonic = monotonic
+        self._sleeper = sleeper
         self._probe_timeout_seconds = probe_timeout_seconds
 
     def sample(
@@ -994,27 +1076,63 @@ class DockerCliCounter:
             deadline = self._monotonic() + self._probe_timeout_seconds
         if compose_contract is not None:
             compose_contract.validate()
+        probe_timings_ms: dict[str, int] = {}
+
+        def probe(name: str, operation: Callable[[], object]) -> object:
+            started = self._monotonic()
+            try:
+                result = operation()
+            except Exception as exc:
+                elapsed_ms = max(0, int((self._monotonic() - started) * 1000))
+                probe_timings_ms[name] = probe_timings_ms.get(name, 0) + elapsed_ms
+                message = str(exc) if isinstance(exc, RuntimeBridgeError) else "Docker probe failed"
+                raise RuntimeBridgeError(
+                    message,
+                    failed_probe=name,
+                    probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+                    command_failure=(
+                        exc.command_failure
+                        if isinstance(exc, RuntimeBridgeError)
+                        else None
+                    ),
+                ) from None
+            elapsed_ms = max(0, int((self._monotonic() - started) * 1000))
+            probe_timings_ms[name] = probe_timings_ms.get(name, 0) + elapsed_ms
+            return result
+
         try:
-            df_output = self._run(
-                ("docker", "system", "df", "--format", "{{json .}}"),
-                deadline=deadline,
-            )
-            docker_df, total_bytes = _parse_system_df(df_output)
-            info_output = self._run(
-                (
-                    "docker",
-                    "info",
-                    "--format",
-                    "[{{json .DockerRootDir}},{{json .OperatingSystem}},{{json .SecurityOptions}}]",
+            docker_df, total_bytes = probe(
+                "docker_system_df",
+                lambda: _parse_system_df(
+                    self._run(
+                        ("docker", "system", "df", "--format", "{{json .}}"),
+                        deadline=deadline,
+                    )
                 ),
-                deadline=deadline,
             )
-            daemon_root, operating_system, security_options = _parse_docker_info(info_output)
+            daemon_root, operating_system, security_options = probe(
+                "docker_info",
+                lambda: _parse_docker_info(
+                    self._run(
+                        (
+                            "docker",
+                            "info",
+                            "--format",
+                            "[{{json .DockerRootDir}},{{json .OperatingSystem}},{{json .SecurityOptions}}]",
+                        ),
+                        deadline=deadline,
+                    )
+                ),
+            )
             desktop_reading: DockerDesktopHostReading | None = None
             if "docker desktop" in operating_system.casefold() and self._desktop_host_probe:
-                desktop_reading = self._desktop_host_probe.sample(
-                    timeout_seconds=self._remaining(deadline)
+                desktop_reading = probe(
+                    "docker_desktop_host",
+                    lambda: self._desktop_host_probe.sample(
+                        timeout_seconds=self._remaining(deadline)
+                    ),
                 )
+                assert isinstance(desktop_reading, DockerDesktopHostReading)
                 desktop_reading.validate()
                 host_root = self._host_data_root.resolve(strict=True)
                 if host_root != desktop_reading.host_volume_root.resolve(strict=True):
@@ -1027,69 +1145,101 @@ class DockerCliCounter:
                     mountinfo_path=self._mountinfo_path,
                 )
             filter_args = identity.exact_label_filter
-            container_ids = _parse_id_lines(
-                self._run(
-                    (
-                        "docker",
-                        "container",
-                        "ls",
-                        "--all",
-                        "--no-trunc",
-                        *filter_args,
-                        "--format",
-                        "{{json .ID}}",
-                    ),
+            container_ids = probe(
+                "docker_container_list",
+                lambda: self._container_ids(identity, deadline=deadline),
+            )
+            assert isinstance(container_ids, tuple)
+            image_ids = probe(
+                "docker_image_list",
+                lambda: _parse_id_lines(
+                    self._run(
+                        (
+                            "docker",
+                            "image",
+                            "ls",
+                            "--no-trunc",
+                            *filter_args,
+                            "--format",
+                            "{{json .ID}}",
+                        ),
+                        deadline=deadline,
+                    )
+                ),
+            )
+            assert isinstance(image_ids, tuple)
+            container_result = probe(
+                "docker_container_inspect",
+                lambda: self._container_facts(
+                    identity,
+                    container_ids,
                     deadline=deadline,
-                )
+                ),
             )
-            image_ids = _parse_id_lines(
-                self._run(
-                    (
-                        "docker",
-                        "image",
-                        "ls",
-                        "--no-trunc",
-                        *filter_args,
-                        "--format",
-                        "{{json .ID}}",
-                    ),
-                    deadline=deadline,
-                )
-            )
-            container_bytes, container_facts = self._container_facts(
-                identity,
-                container_ids,
-                deadline=deadline,
-            )
+            assert isinstance(container_result, tuple)
+            container_ids, container_bytes, container_facts = container_result
             container_metrics: tuple[object, ...] = ()
             if compose_contract is not None and compose_contract.container.require_container_metrics:
-                container_metrics = self._container_metrics(
-                    container_facts,
-                    deadline=deadline,
+                metric_result = probe(
+                    "docker_container_metrics",
+                    lambda: self._container_metrics_with_disappearance(
+                        identity,
+                        container_ids,
+                        container_facts,
+                        deadline=deadline,
+                    ),
                 )
-            image_bytes = self._image_bytes(identity, image_ids, deadline=deadline)
+                assert isinstance(metric_result, tuple)
+                container_ids, container_facts, container_metrics = metric_result
+                assert isinstance(container_metrics, tuple)
+            image_bytes = probe(
+                "docker_image_inspect",
+                lambda: self._image_bytes(identity, image_ids, deadline=deadline),
+            )
+            assert isinstance(image_bytes, int)
             network_facts: tuple[object, ...] = ()
             volume_facts: tuple[object, ...] = ()
             if compose_contract is not None:
-                network_facts = self._compose_networks(
-                    compose_contract.container.compose_project,
-                    deadline=deadline,
+                network_facts = probe(
+                    "docker_network_inspect",
+                    lambda: self._compose_networks(
+                        compose_contract.container.compose_project,
+                        deadline=deadline,
+                    ),
                 )
-                volume_facts = self._compose_volumes(
-                    compose_contract.container.compose_project,
-                    deadline=deadline,
+                assert isinstance(network_facts, tuple)
+                volume_facts = probe(
+                    "docker_volume_inspect",
+                    lambda: self._compose_volumes(
+                        compose_contract.container.compose_project,
+                        deadline=deadline,
+                    ),
                 )
+                assert isinstance(volume_facts, tuple)
             if desktop_reading is not None:
                 free_bytes = desktop_reading.free_bytes
             else:
-                filesystem = self._statvfs(host_root)
+                filesystem = probe(
+                    "docker_host_filesystem",
+                    lambda: self._statvfs(host_root),
+                )
                 free_bytes = filesystem.f_bavail * filesystem.f_frsize
             if isinstance(free_bytes, bool) or not isinstance(free_bytes, int) or free_bytes < 0:
                 raise RuntimeBridgeError("Docker host filesystem counter is invalid")
-        except RuntimeBridgeError:
-            raise
+        except RuntimeBridgeError as exc:
+            if exc.probe_timings_ms:
+                raise
+            raise RuntimeBridgeError(
+                str(exc),
+                failed_probe=exc.failed_probe,
+                probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+                command_failure=exc.command_failure,
+            ) from exc
         except (OSError, TypeError, ValueError) as exc:
-            raise RuntimeBridgeError("Docker storage facts are unavailable") from exc
+            raise RuntimeBridgeError(
+                "Docker storage facts are unavailable",
+                probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
+            ) from exc
 
         from .docker_supervisor import DockerCounterReading
 
@@ -1111,6 +1261,7 @@ class DockerCliCounter:
             task_networks=network_facts,
             task_volumes=volume_facts,
             daemon_security_options=security_options,
+            probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
         )
 
     def resolve_image_identity(
@@ -1137,16 +1288,36 @@ class DockerCliCounter:
         return remaining
 
     def _run(self, argv: tuple[str, ...], *, deadline: float) -> str:
-        try:
-            output = self._executor.run(
-                argv,
-                timeout_seconds=self._remaining(deadline),
-            )
-        except Exception:
-            raise RuntimeBridgeError("Docker storage fact command failed") from None
-        if output.returncode != 0 or not isinstance(output.stdout, str):
-            raise RuntimeBridgeError("Docker storage fact command failed")
-        return output.stdout
+        last_failure: RuntimeBridgeError | None = None
+        for attempt in range(_DOCKER_FACT_COMMAND_MAX_ATTEMPTS):
+            try:
+                output = self._executor.run(
+                    argv,
+                    timeout_seconds=self._remaining(deadline),
+                )
+            except RuntimeBridgeError as exc:
+                last_failure = exc
+                output = None
+            except Exception:
+                last_failure = None
+                output = None
+            if (
+                output is not None
+                and output.returncode == 0
+                and isinstance(output.stdout, str)
+            ):
+                return output.stdout
+            if attempt + 1 < _DOCKER_FACT_COMMAND_MAX_ATTEMPTS:
+                remaining = self._remaining(deadline)
+                self._sleeper(
+                    min(_DOCKER_FACT_COMMAND_RETRY_DELAY_SECONDS, remaining)
+                )
+        raise RuntimeBridgeError(
+            "Docker storage fact command failed",
+            command_failure=(
+                last_failure.command_failure if last_failure is not None else None
+            ),
+        ) from last_failure
 
     def _container_facts(
         self,
@@ -1154,19 +1325,65 @@ class DockerCliCounter:
         object_ids: tuple[str, ...],
         *,
         deadline: float,
-    ) -> tuple[int, tuple[object, ...]]:
+    ) -> tuple[tuple[str, ...], int, tuple[object, ...]]:
         if not object_ids:
-            return 0, ()
-        payload = _parse_json_array(
+            return (), 0, ()
+        try:
+            payload = _parse_json_array(
+                self._run(
+                    ("docker", "container", "inspect", "--size", *object_ids),
+                    deadline=deadline,
+                )
+            )
+        except RuntimeBridgeError:
+            # Harbor may stop/remove its task container after ``ls`` but before
+            # the bounded inspect.  Accept only the same exact stopped object
+            # disappearing inside the shared five-second teardown grace.  A
+            # live, replaced, or lingering object remains a hard failure.
+            current_ids = self._container_ids(identity, deadline=deadline)
+            if current_ids == object_ids:
+                if self._wait_for_stopped_container_disappearance(
+                    identity,
+                    object_ids,
+                    deadline=deadline,
+                    initial_ids=current_ids,
+                ):
+                    return (), 0, ()
+                raise
+            if not current_ids:
+                return (), 0, ()
+            object_ids = current_ids
+            payload = _parse_json_array(
+                self._run(
+                    ("docker", "container", "inspect", "--size", *object_ids),
+                    deadline=deadline,
+                )
+            )
+        container_bytes, facts = _validate_inspected_containers(
+            payload, expected_ids=object_ids, identity=identity
+        )
+        return object_ids, container_bytes, facts
+
+    def _container_ids(
+        self,
+        identity: "DockerTaskIdentity",
+        *,
+        deadline: float,
+    ) -> tuple[str, ...]:
+        return _parse_id_lines(
             self._run(
-                ("docker", "container", "inspect", "--size", *object_ids),
+                (
+                    "docker",
+                    "container",
+                    "ls",
+                    "--all",
+                    "--no-trunc",
+                    *identity.exact_label_filter,
+                    "--format",
+                    "{{json .ID}}",
+                ),
                 deadline=deadline,
             )
-        )
-        return _validate_inspected_containers(
-            payload,
-            expected_ids=object_ids,
-            identity=identity,
         )
 
     def _image_bytes(
@@ -1222,6 +1439,77 @@ class DockerCliCounter:
             metrics.append(metric)
         return tuple(metrics)
 
+    def _container_metrics_with_disappearance(
+        self,
+        identity: "DockerTaskIdentity",
+        container_ids: tuple[str, ...],
+        container_facts: tuple[object, ...],
+        *,
+        deadline: float,
+    ) -> tuple[tuple[str, ...], tuple[object, ...], tuple[object, ...]]:
+        """Accept only a proven teardown race after a failed metric exec.
+
+        Harbor may remove its single task container after the exact inspect but
+        before the cgroup ``docker exec``.  A fresh exact-label re-list proving
+        that the previously inspected container is now absent is a valid empty
+        final observation; an unchanged or replacement identity remains a hard
+        failure.  Durable result metrics still require an earlier successful
+        sample in ``DockerSupervisor``.
+        """
+
+        if not container_ids:
+            return (), (), ()
+        try:
+            metrics = self._container_metrics(container_facts, deadline=deadline)
+        except RuntimeBridgeError:
+            # ``docker compose`` can leave an already-stopped container visible
+            # briefly after cgroup exec has become impossible.  Keep the same
+            # exact-label proof, but allow a small bounded grace window for the
+            # object to be removed.  A container that remains visible is still
+            # a hard failure; no missing metric is accepted for a live object.
+            if self._wait_for_stopped_container_disappearance(
+                identity,
+                container_ids,
+                deadline=deadline,
+            ):
+                return (), (), ()
+            raise
+        return container_ids, container_facts, metrics
+
+    def _wait_for_stopped_container_disappearance(
+        self,
+        identity: "DockerTaskIdentity",
+        object_ids: tuple[str, ...],
+        *,
+        deadline: float,
+        initial_ids: tuple[str, ...] | None = None,
+    ) -> bool:
+        """Return true only for one exact stopped object removed in five seconds."""
+
+        current_ids = initial_ids
+        for poll in range(_CONTAINER_DISAPPEARANCE_MAX_POLLS):
+            if current_ids is None:
+                current_ids = self._container_ids(identity, deadline=deadline)
+            if not current_ids:
+                return True
+            if current_ids != object_ids:
+                raise RuntimeBridgeError("Docker container lifecycle identity changed")
+            if not self._containers_are_stopped(
+                identity,
+                current_ids,
+                deadline=deadline,
+            ):
+                return False
+            if poll + 1 < _CONTAINER_DISAPPEARANCE_MAX_POLLS:
+                self._sleeper(
+                    min(
+                        _CONTAINER_DISAPPEARANCE_POLL_DELAY_SECONDS,
+                        self._remaining(deadline),
+                    )
+                )
+                current_ids = None
+        return False
+
     def _compose_networks(self, project: str, *, deadline: float) -> tuple[object, ...]:
         from .docker_supervisor import ComposeResourceFact
 
@@ -1254,6 +1542,35 @@ class DockerCliCounter:
                 kind="network",
             )
         )
+
+    def _containers_are_stopped(
+        self,
+        identity: "DockerTaskIdentity",
+        object_ids: tuple[str, ...],
+        *,
+        deadline: float,
+    ) -> bool:
+        payload = _parse_json_array(
+            self._run(
+                ("docker", "container", "inspect", "--size", *object_ids),
+                deadline=deadline,
+            )
+        )
+        # Reuse the full identity/security parser before trusting lifecycle
+        # state from an object observed during the teardown grace window.
+        _validate_inspected_containers(
+            payload,
+            expected_ids=object_ids,
+            identity=identity,
+        )
+        running: list[bool] = []
+        for item in payload:
+            state = item.get("State")
+            value = state.get("Running") if isinstance(state, Mapping) else None
+            if not isinstance(value, bool):
+                raise RuntimeBridgeError("Docker container lifecycle state is invalid")
+            running.append(value)
+        return bool(running) and not any(running)
 
     def _compose_volumes(self, project: str, *, deadline: float) -> tuple[object, ...]:
         from .docker_supervisor import ComposeResourceFact

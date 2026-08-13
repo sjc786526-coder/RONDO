@@ -8,7 +8,11 @@ import json
 import sys
 from pathlib import Path
 
-from ..api_budget_proxy import BudgetStopped, PersistentBudgetLedger
+from ..api_budget_proxy import (
+    BudgetStopped,
+    PersistentBudgetLedger,
+    completed_run_accounting,
+)
 from ..artifacts import ArtifactError, ArtifactWriter, validate_run_id
 from ..config import (
     ConfigError,
@@ -33,13 +37,14 @@ from .pair import (
     PairIdentity,
     PairIdentityError,
     PairSequenceLedger,
-    load_pair_identity,
+    load_active_pair_identity,
     publication_context,
     validate_harbor_installation,
 )
 from .results import (
     classify_terminal_bench_result,
     parse_single_task_result,
+    public_guardian_evidence,
     publish_terminal_bench_failure,
     publish_terminal_bench_result,
     validate_eval_harness_checkout,
@@ -47,9 +52,6 @@ from .results import (
     validate_results_worktree,
 )
 from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
-
-
-P1_BATCH_ID = "p1-fix-git-b4-m1-v11"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -70,13 +72,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         side = Side(args.side)
         validate_run_id(args.run_id, track="tb", side=side.value)
+        # There is intentionally no active paid identity after the completed v19
+        # pair.  This gate precedes config/secret loading, ledger creation, and
+        # every Docker or provider operation.
+        pair_identity = load_active_pair_identity()
         paths = RepoPaths.discover(Path.cwd())
         measurement_paths = RepoPaths.discover(
             args.measurement_worktree_root or paths.worktree_root
         )
         if measurement_paths.common_root != paths.common_root:
             raise ConfigError("measurement worktree belongs to another repository")
-        pair_identity = load_pair_identity()
         paid_mode = pair_identity.mode("paid")
         paid_budget = pair_identity.paid_budget
         if paid_budget is None:
@@ -215,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
                     parsed = parse_single_task_result(
                         result.harbor.jobs_dir,
                         host_returncode=result.harbor.returncode,
+                        expected_task_id=result.prepared.spec.task_id,
                     )
                     parsed = classify_terminal_bench_result(result, parsed)
                     if validate_measurement_checkout(
@@ -230,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
                         raise TerminalBenchRunError("eval harness commit changed during the run")
                     container_metrics = _paid_container_metrics(result.harbor.docker_evidence)
                     if parsed.outcome is RunOutcome.COMPLETED:
+                        completed_run_accounting(result.budget_snapshot, args.run_id)
                         _fresh_config, fresh_provider = _load_selected_provider(
                             paths, pair_identity
                         )
@@ -290,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                             metadata_path=metadata_path,
                             outcome=outcome,
                             failure_stage=failure_stage,
+                            infra_diagnostic=_docker_failure_diagnostic(exc),
                             publication=publication_context(
                                 pair_identity,
                                 side=side,
@@ -367,20 +375,7 @@ def main(argv: list[str] | None = None) -> int:
             "reward": parsed.reward,
             "artifacts": artifact_path.relative_to(paths.common_root).as_posix(),
             "metadata_ready": result.metadata_ready,
-            "evidence": [
-                {
-                    "relative_path": item.relative_path,
-                    "review_id": item.review_id,
-                    "guardian_source_baseline": item.guardian_source_baseline,
-                    "guardian_source_commit": item.guardian_source_commit,
-                    "policy_sha256": item.policy.sha256,
-                    "request_shape": item.policy.request_shape,
-                    "model": item.model,
-                    "reasoning_effort": item.reasoning_effort,
-                    "terminal_status": item.terminal_status,
-                }
-                for item in result.evidence
-            ],
+            "evidence": public_guardian_evidence(result.evidence),
             "budget": result.budget_snapshot,
             "docker_samples": (
                 len(result.harbor.docker_evidence.samples)
@@ -492,6 +487,27 @@ def _exception_failure(exc: BaseException) -> tuple[RunOutcome, str, int]:
     if isinstance(exc, ConfigError):
         return RunOutcome.INFRA_FAILED, "result", CONFIG_ERROR
     return RunOutcome.INFRA_FAILED, "result", EVIDENCE_ERROR
+
+
+def _docker_failure_diagnostic(exc: BaseException) -> dict[str, object] | None:
+    if not isinstance(exc, DockerSupervisionError):
+        return None
+    value: dict[str, object] = {
+        "supervisor_reason": exc.reason,
+        "failed_probe": exc.failed_probe,
+        "probe_timings_ms": dict(exc.probe_timings_ms),
+    }
+    from ..runtime_bridge import RuntimeBridgeError
+
+    current: BaseException | None = exc
+    observed: set[int] = set()
+    while current is not None and id(current) not in observed:
+        observed.add(id(current))
+        if isinstance(current, RuntimeBridgeError) and current.command_failure is not None:
+            value["command_failure"] = dict(current.command_failure)
+            break
+        current = current.__cause__ or current.__context__
+    return value
 
 
 def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:

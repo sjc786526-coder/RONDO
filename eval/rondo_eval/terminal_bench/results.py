@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+import re
 import stat
 import subprocess
 from dataclasses import dataclass, replace
@@ -13,7 +15,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..artifacts import ArtifactWriter
+from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
+from ..artifacts import ArtifactError, ArtifactWriter, validate_private_artifact_bytes
 from ..config import RepoPaths
 from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
 from .freeze import (
@@ -25,10 +28,13 @@ from .freeze import (
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 from .metrics import RunMetricsError, metrics_from_dict
 from .pair import (
-    P1_PAIR_ID,
+    CampaignPublicationContext,
     RunPublicationContext,
     has_complete_guardian_approval_sequence,
 )
+
+
+PublicationContext = RunPublicationContext | CampaignPublicationContext
 
 
 UPSTREAM_CODEX = {
@@ -38,6 +44,7 @@ UPSTREAM_CODEX = {
 }
 _MAX_RESULT_BYTES = 8 * 1024 * 1024
 _MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 _AGENT_EXCEPTION_TYPES = {
     "AgentSafetyRefusalError",
     "AgentTimeoutError",
@@ -136,6 +143,7 @@ def parse_single_task_result(
     trial_dir: Path,
     *,
     host_returncode: int,
+    expected_task_id: str = FIX_GIT_TASK_ID,
 ) -> ParsedHarborResult:
     """Parse Harbor 0.20's exact single-trial result; host rc alone is not success."""
 
@@ -165,7 +173,7 @@ def parse_single_task_result(
     else:
         outcome = RunOutcome.INFRA_FAILED
 
-    if trial.get("task_name") != FIX_GIT_TASK_ID:
+    if trial.get("task_name") != expected_task_id:
         raise HarborResultError("Harbor trial task identity differs from the freeze")
     verifier = trial.get("verifier_result")
     rewards = verifier.get("rewards") if isinstance(verifier, dict) else None
@@ -217,7 +225,7 @@ def publish_terminal_bench_result(
     live_result: BudgetedTerminalBenchResult,
     parsed: ParsedHarborResult,
     metadata_path: Path,
-    publication: RunPublicationContext,
+    publication: PublicationContext,
     writer: ArtifactWriter | None = None,
 ) -> Path:
     """Archive private raw evidence and append one strict tracked record."""
@@ -232,7 +240,28 @@ def publish_terminal_bench_result(
         live_result,
         parsed,
         metadata_path=metadata_path,
+        publication=publication,
     )
+    budget_accounting: dict[str, object] | None = None
+    if parsed.outcome is RunOutcome.COMPLETED:
+        try:
+            budget_accounting = completed_run_accounting(
+                live_result.budget_snapshot, run_id
+            )
+        except ApiBudgetProxyError as exc:
+            raise HarborResultError("completed run budget accounting is invalid") from exc
+        metadata_request_ids = _verified_request_ids(metadata_path)
+        budget_runs = live_result.budget_snapshot.get("runs")
+        budget_run = budget_runs.get(run_id) if isinstance(budget_runs, Mapping) else None
+        budget_requests = (
+            budget_run.get("requests") if isinstance(budget_run, Mapping) else None
+        )
+        if (
+            budget_accounting["request_count"] != len(request_roles)
+            or not isinstance(budget_requests, Mapping)
+            or set(budget_requests) != set(metadata_request_ids)
+        ):
+            raise HarborResultError("completed budget requests differ from API metadata")
     writer = writer or ArtifactWriter(
         paths, run_id, results_worktree_root=results_worktree_root
     ).start()
@@ -246,11 +275,17 @@ def publish_terminal_bench_result(
         live_result,
         parsed,
         request_roles=request_roles,
+        budget_accounting=budget_accounting,
         publication=publication,
     )
     writer.write_json("run-summary.json", summary)
     if parsed.trial_result:
-        _write_harbor_evidence(writer, live_result.harbor.jobs_dir, parsed)
+        _write_harbor_evidence(
+            writer,
+            live_result.harbor.jobs_dir,
+            parsed,
+            task_id=live_result.prepared.spec.task_id,
+        )
     else:
         writer.write_json(
             "harbor/jobs-unavailable.json",
@@ -321,9 +356,38 @@ def classify_terminal_bench_result(
 ) -> ParsedHarborResult:
     """Treat pre-API adapter exits as infrastructure, not model behavior."""
 
+    if any(
+        item.terminal_status in {"aborted", "timed_out", "failed_closed"}
+        for item in live_result.evidence
+    ):
+        return replace(parsed, outcome=RunOutcome.INFRA_FAILED)
     if parsed.outcome is RunOutcome.AGENT_FAILED and not live_result.metadata_ready:
         return replace(parsed, outcome=RunOutcome.INFRA_FAILED)
     return parsed
+
+
+def public_guardian_evidence(
+    observations: tuple[EvidenceObservation, ...],
+) -> list[dict[str, object]]:
+    """Project Guardian evidence only to its durable public artifact shape."""
+
+    return [
+        {
+            "relative_path": f"guardian-evidence/{index:04d}/E_final.json",
+            "review_id": item.review_id,
+            "guardian_source_baseline": item.guardian_source_baseline,
+            "guardian_source_commit": item.guardian_source_commit,
+            "policy_sha256": item.policy.sha256,
+            "request_shape": item.policy.request_shape,
+            "model": item.model,
+            "reasoning_effort": item.reasoning_effort,
+            "decision": item.decision,
+            "terminal_status": item.terminal_status,
+            "failure_reason": item.failure_reason,
+            "canonical_request_sha256": item.canonical_request_sha256,
+        }
+        for index, item in enumerate(observations, start=1)
+    ]
 
 
 def publish_terminal_bench_failure(
@@ -340,8 +404,11 @@ def publish_terminal_bench_failure(
     metadata_path: Path,
     outcome: RunOutcome,
     failure_stage: str,
-    publication: RunPublicationContext,
+    publication: PublicationContext,
     secrets: tuple[str, ...],
+    task_id: str = FIX_GIT_TASK_ID,
+    task_image_digest: str = FIX_GIT_IMAGE_DIGEST,
+    infra_diagnostic: Mapping[str, object] | None = None,
 ) -> Path:
     """Publish a safe terminal record after a claimed run exits exceptionally."""
 
@@ -360,6 +427,7 @@ def publish_terminal_bench_failure(
         "interrupted",
     }:
         raise HarborResultError("exceptional publication stage is invalid")
+    _validate_infra_diagnostic(infra_diagnostic, failure_stage=failure_stage)
     if not _is_commit(git_commit) or not _is_commit(eval_harness_commit):
         raise HarborResultError("exceptional publication commit is invalid")
     if writer.run_id != run_id or writer.paths.common_root != paths.common_root:
@@ -381,15 +449,12 @@ def publish_terminal_bench_failure(
         "batch_id": budget_snapshot.get("batch_id"),
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
         "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
-        "task_image_digest": FIX_GIT_IMAGE_DIGEST,
+        "task_image_digest": task_image_digest,
         "binary_source_commit": manifest.source_commit,
         "eval_harness_commit": eval_harness_commit,
         "binary_workspace_lock_normalization": manifest.workspace_lock_normalization,
         "failure_stage": failure_stage,
-        "pair_id": publication.pair_id,
-        "pair_lock_sha256": publication.pair_lock_sha256,
-        "pair_slot": publication.pair_slot,
-        "pair_round": publication.pair_round,
+        **_publication_identity_config(publication),
     }
     metadata: dict[str, Any] | None = None
     request_roles: tuple[str, ...] = ()
@@ -420,10 +485,11 @@ def publish_terminal_bench_failure(
             "guardian": request_roles.count("guardian"),
         },
         "api_request_sequence": list(request_roles),
+        "infra_diagnostic": dict(infra_diagnostic) if infra_diagnostic is not None else None,
     }
     tasks = [
         {
-            "task_id": FIX_GIT_TASK_ID,
+            "task_id": task_id,
             "outcome": "fail",
             "attribution": "infra",
             "reward": 0.0,
@@ -440,6 +506,9 @@ def publish_terminal_bench_failure(
             "run_id": run_id,
             "outcome": outcome.value,
             "failure_stage": failure_stage,
+            "infra_diagnostic": (
+                dict(infra_diagnostic) if infra_diagnostic is not None else None
+            ),
         },
     )
     if metadata is None:
@@ -487,23 +556,11 @@ def _safe_summary(
     parsed: ParsedHarborResult,
     *,
     request_roles: tuple[str, ...],
-    publication: RunPublicationContext,
+    budget_accounting: Mapping[str, object] | None,
+    publication: PublicationContext,
 ) -> dict[str, Any]:
     spec = live_result.prepared.spec
-    evidence = [
-        {
-            "relative_path": item.relative_path,
-            "review_id": item.review_id,
-            "guardian_source_baseline": item.guardian_source_baseline,
-            "guardian_source_commit": item.guardian_source_commit,
-            "policy_sha256": item.policy.sha256,
-            "request_shape": item.policy.request_shape,
-            "model": item.model,
-            "reasoning_effort": item.reasoning_effort,
-            "terminal_status": item.terminal_status,
-        }
-        for item in live_result.evidence
-    ]
+    evidence = public_guardian_evidence(live_result.evidence)
     effective_task_outcome = (
         parsed.task_outcome
         if parsed.outcome in {RunOutcome.COMPLETED, RunOutcome.AGENT_FAILED}
@@ -519,12 +576,15 @@ def _safe_summary(
         parsed.outcome is RunOutcome.COMPLETED
         and guardian_requests >= 1
         and len(evidence) == guardian_requests
-        and all(item["terminal_status"] == "approved" for item in evidence)
+        and all(
+            (item["decision"], item["terminal_status"], item["failure_reason"])
+            in {("approved", "approved", None), ("denied", "denied", None)}
+            for item in evidence
+        )
         and has_complete_guardian_approval_sequence(request_roles)
     ):
-        # The paid pair bounds distinct Guardian request bodies and rejects a
-        # duplicate charged replay. Equal verified request/evidence counts form
-        # a task-scoped set binding without persisting a private request body.
+        # Canonical digests bind each archived E_final to exactly one verified
+        # Guardian request without persisting a private request body.
         s2_binding = "verified"
     elif side is Side.RONDO and (guardian_requests or evidence):
         s2_binding = "unbound"
@@ -550,7 +610,7 @@ def _safe_summary(
             "code_mode_host": spec.code_mode_host,
             "terminal_bench_version": TERMINAL_BENCH_VERSION,
             "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
-            "task_image_digest": FIX_GIT_IMAGE_DIGEST,
+            "task_image_digest": spec.task_image_digest,
             "binary_source_commit": spec.binary.source_commit,
             "eval_harness_commit": eval_harness_commit,
             "binary_workspace_lock_normalization": spec.binary.workspace_lock_normalization,
@@ -562,10 +622,7 @@ def _safe_summary(
             "timeout_seconds": spec.timeout_seconds,
             "max_retries": spec.max_retries,
             "budget_usd": spec.budget_usd,
-            "pair_id": publication.pair_id,
-            "pair_lock_sha256": publication.pair_lock_sha256,
-            "pair_slot": publication.pair_slot,
-            "pair_round": publication.pair_round,
+            **_publication_identity_config(publication),
         },
         "summary": {
             "success_rate": 1.0
@@ -580,6 +637,9 @@ def _safe_summary(
                 "guardian": guardian_requests,
             },
             "api_request_sequence": list(request_roles),
+            "budget_accounting": (
+                dict(budget_accounting) if budget_accounting is not None else None
+            ),
             "docker_samples": len(live_result.harbor.docker_evidence.samples)
             if live_result.harbor.docker_evidence is not None
             else 0,
@@ -591,7 +651,7 @@ def _safe_summary(
         },
         "tasks": [
             {
-                "task_id": FIX_GIT_TASK_ID,
+                "task_id": spec.task_id,
                 "outcome": effective_task_outcome,
                 "attribution": "agent"
                 if parsed.outcome in {RunOutcome.COMPLETED, RunOutcome.AGENT_FAILED}
@@ -610,6 +670,8 @@ def _write_harbor_evidence(
     writer: ArtifactWriter,
     source: Path,
     parsed: ParsedHarborResult,
+    *,
+    task_id: str,
 ) -> None:
     """Archive a deliberate private subset, never Harbor configs, locks, or raw logs."""
 
@@ -620,7 +682,7 @@ def _write_harbor_evidence(
         "harbor/trial-result.json",
         {
             "schema_version": 1,
-            "task_name": FIX_GIT_TASK_ID,
+            "task_name": task_id,
             "outcome": parsed.outcome.value,
             "task_outcome": parsed.task_outcome,
             "reward": parsed.reward,
@@ -647,7 +709,21 @@ def _write_harbor_evidence(
         total += len(contents)
         if total > _MAX_ARCHIVE_BYTES:
             raise HarborResultError("Harbor evidence exceeds the bounded archive size")
-        writer.write_bytes(f"harbor/{relative}", contents)
+        destination = f"harbor/{relative}"
+        try:
+            validate_private_artifact_bytes(contents, destination)
+        except ArtifactError:
+            writer.write_json(
+                f"{destination}.redacted.json",
+                {
+                    "schema_version": 1,
+                    "reason": "sensitive_private_artifact_omitted",
+                    "source_size_bytes": len(contents),
+                    "source_sha256": hashlib.sha256(contents).hexdigest(),
+                },
+            )
+        else:
+            writer.write_bytes(destination, contents)
 
 
 def _write_guardian_evidence(
@@ -714,6 +790,7 @@ def _validate_publication_evidence(
     parsed: ParsedHarborResult,
     *,
     metadata_path: Path,
+    publication: PublicationContext,
 ) -> tuple[str, ...]:
     host_returncode = live_result.harbor.returncode
     has_trial_result = bool(parsed.trial_result)
@@ -734,7 +811,10 @@ def _validate_publication_evidence(
         if not live_result.metadata_ready:
             raise HarborResultError("completed run lacks verified API metadata")
         roles = _verified_request_roles(metadata_path)
-        if not has_complete_guardian_approval_sequence(roles):
+        if not _has_valid_completed_request_sequence(
+            roles,
+            guardian_optional=isinstance(publication, CampaignPublicationContext),
+        ):
             raise HarborResultError(
                 "completed run lacks the verified main-Guardian-main sequence"
             )
@@ -742,12 +822,32 @@ def _validate_publication_evidence(
             if (
                 len(live_result.evidence) != roles.count("guardian")
                 or any(
-                    item.terminal_status != "approved"
+                    (
+                        item.decision,
+                        item.terminal_status,
+                        item.failure_reason,
+                    )
+                    not in {
+                        ("approved", "approved", None),
+                        ("denied", "denied", None),
+                    }
                     for item in live_result.evidence
                 )
             ):
                 raise HarborResultError(
-                    "RONDO completed run requires one approved evidence per Guardian request"
+                    "RONDO completed run requires one semantic evidence per Guardian request"
+                )
+            request_digests = _guardian_request_digests(metadata_path)
+            evidence_digests = tuple(
+                item.canonical_request_sha256 for item in live_result.evidence
+            )
+            if (
+                any(digest is None for digest in evidence_digests)
+                or len(set(evidence_digests)) != len(evidence_digests)
+                or set(evidence_digests) != set(request_digests)
+            ):
+                raise HarborResultError(
+                    "RONDO Guardian evidence is not bound to canonical requests"
                 )
         elif live_result.evidence:
             raise HarborResultError("frozen Codex cannot publish RONDO Guardian evidence")
@@ -769,15 +869,42 @@ def _validate_publication_evidence(
 
 
 def _validate_publication_context(
-    publication: RunPublicationContext, *, side: Side
+    publication: PublicationContext, *, side: Side
 ) -> None:
     try:
         publication.validate()
     except ValueError as exc:
         raise HarborResultError("Terminal-Bench publication context is invalid") from exc
-    expected_slot = 1 if side is Side.RONDO else 2
-    if publication.pair_slot != expected_slot:
-        raise HarborResultError("publication side differs from the pair topology")
+    if isinstance(publication, RunPublicationContext):
+        expected_slot = 1 if side is Side.RONDO else 2
+        if publication.pair_slot != expected_slot:
+            raise HarborResultError("publication side differs from the pair topology")
+    elif publication.side is not side:
+        raise HarborResultError("publication side differs from the campaign slot")
+
+
+def _publication_identity_config(
+    publication: PublicationContext,
+) -> dict[str, object]:
+    if isinstance(publication, RunPublicationContext):
+        return {
+            "pair_id": publication.pair_id,
+            "pair_lock_sha256": publication.pair_lock_sha256,
+            "pair_slot": publication.pair_slot,
+            "pair_round": publication.pair_round,
+        }
+    return {
+        "campaign_id": publication.campaign_id,
+        "campaign_lock_sha256": publication.campaign_lock_sha256,
+        "campaign_slot_id": publication.campaign_slot_id,
+        "campaign_round_id": publication.campaign_round_id,
+        "campaign_attempt": publication.campaign_attempt,
+        "taskset_sha256": publication.taskset_sha256,
+        "canary_catalog_sha256": publication.canary_catalog_sha256,
+        "provider_upstream_timeout_seconds": float(
+            publication.provider_upstream_timeout_seconds
+        ),
+    }
 
 
 def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
@@ -799,7 +926,16 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
     ):
         raise HarborResultError("Terminal-Bench record sections are invalid")
     task = tasks[0]
-    if task.get("task_id") != FIX_GIT_TASK_ID:
+    if (
+        not isinstance(task.get("task_id"), str)
+        or re.fullmatch(
+            r"terminal-bench/[a-z0-9][a-z0-9.-]{0,95}", task["task_id"]
+        )
+        is None
+        or not isinstance(config.get("task_image_digest"), str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", config["task_image_digest"])
+        is None
+    ):
         raise HarborResultError("Terminal-Bench task identity is invalid")
     if task.get("attribution") not in {"agent", "infra"}:
         raise HarborResultError("Terminal-Bench attribution is invalid")
@@ -845,8 +981,36 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or sequence.count("guardian") != roles["guardian"]
     ):
         raise HarborResultError("Terminal-Bench API request sequence is invalid")
-    if outcome is RunOutcome.COMPLETED and not has_complete_guardian_approval_sequence(
-        sequence
+    budget_accounting = summary.get("budget_accounting")
+    _validate_infra_diagnostic(
+        summary.get("infra_diagnostic"),
+        failure_stage=config.get("failure_stage"),
+    )
+    if outcome is RunOutcome.COMPLETED:
+        _validate_public_budget_accounting(
+            budget_accounting,
+            request_count=len(sequence),
+            estimated_usd=record.get("cost", {}).get("estimated_usd")
+            if isinstance(record.get("cost"), Mapping)
+            else None,
+        )
+    elif budget_accounting is not None:
+        raise HarborResultError("non-completed run contains completed budget accounting")
+    pair_fields = {"pair_id", "pair_lock_sha256", "pair_slot", "pair_round"}
+    campaign_fields = {
+        "campaign_id",
+        "campaign_lock_sha256",
+        "campaign_slot_id",
+        "campaign_round_id",
+        "campaign_attempt",
+        "taskset_sha256",
+        "canary_catalog_sha256",
+    }
+    has_pair = any(key in config for key in pair_fields)
+    has_campaign = any(key in config for key in campaign_fields)
+    if outcome is RunOutcome.COMPLETED and not _has_valid_completed_request_sequence(
+        sequence,
+        guardian_optional=has_campaign,
     ):
         raise HarborResultError("completed Terminal-Bench approval sequence is incomplete")
     guardian_limit = config.get("max_guardian_logical_requests")
@@ -860,31 +1024,261 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         evidence = summary.get("evidence")
         binding = summary.get("s2_request_evidence_binding")
         if record.get("side") == Side.RONDO.value:
-            if (
+            if roles["guardian"] == 0:
+                if evidence != [] or binding != "not_triggered":
+                    raise HarborResultError(
+                        "completed RONDO without Guardian has contradictory evidence"
+                    )
+            elif (
                 not isinstance(evidence, list)
                 or len(evidence) != roles["guardian"]
                 or any(
                     not isinstance(item, dict)
-                    or item.get("terminal_status") != "approved"
+                    or (
+                        item.get("decision"),
+                        item.get("terminal_status"),
+                        item.get("failure_reason"),
+                    )
+                    not in {
+                        ("approved", "approved", None),
+                        ("denied", "denied", None),
+                    }
+                    or not isinstance(item.get("canonical_request_sha256"), str)
+                    or re.fullmatch(
+                        r"[0-9a-f]{64}", item["canonical_request_sha256"]
+                    )
+                    is None
                     for item in evidence
                 )
+                or len(
+                    {item["canonical_request_sha256"] for item in evidence}
+                )
+                != len(evidence)
                 or binding != "verified"
             ):
                 raise HarborResultError("completed RONDO Guardian evidence is not bound")
         elif evidence or binding != "not_triggered":
             raise HarborResultError("completed frozen Codex record contains RONDO evidence")
-    if (
-        config.get("pair_id") != P1_PAIR_ID
+    if has_pair == has_campaign:
+        raise HarborResultError("Terminal-Bench execution identity is ambiguous")
+    if has_pair and (
+        not isinstance(config.get("pair_id"), str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", config["pair_id"])
+        is None
         or not isinstance(config.get("pair_lock_sha256"), str)
+        or _SHA256.fullmatch(config["pair_lock_sha256"]) is None
         or config.get("pair_slot") not in {1, 2}
         or config.get("pair_round") != 1
     ):
         raise HarborResultError("Terminal-Bench pair identity is invalid")
+    if has_campaign and (
+        not isinstance(config.get("campaign_id"), str)
+        or re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", config["campaign_id"]
+        )
+        is None
+        or any(
+            not isinstance(config.get(key), str)
+            or _SHA256.fullmatch(config[key]) is None
+            for key in (
+                "campaign_lock_sha256",
+                "taskset_sha256",
+                "canary_catalog_sha256",
+            )
+        )
+        or not isinstance(config.get("campaign_slot_id"), str)
+        or not config["campaign_slot_id"]
+        or not isinstance(config.get("campaign_round_id"), str)
+        or not config["campaign_round_id"]
+        or config.get("campaign_attempt") not in {1, 2, 3, 4}
+        or isinstance(config.get("provider_upstream_timeout_seconds", 90.0), bool)
+        or not isinstance(
+            config.get("provider_upstream_timeout_seconds", 90.0), (int, float)
+        )
+        or float(config.get("provider_upstream_timeout_seconds", 90.0))
+        not in {90.0, 180.0}
+    ):
+        raise HarborResultError("Terminal-Bench campaign identity is invalid")
+
+
+_DOCKER_PROBE_NAMES = frozenset(
+    {
+        "docker_system_df",
+        "docker_info",
+        "docker_desktop_host",
+        "docker_container_list",
+        "docker_image_list",
+        "docker_container_inspect",
+        "docker_container_metrics",
+        "docker_image_inspect",
+        "docker_network_inspect",
+        "docker_volume_inspect",
+        "docker_host_filesystem",
+    }
+)
+
+
+def _validate_infra_diagnostic(
+    value: object,
+    *,
+    failure_stage: object,
+) -> None:
+    if value is None:
+        return
+    required = {"supervisor_reason", "failed_probe", "probe_timings_ms"}
+    if (
+        failure_stage != "docker"
+        or not isinstance(value, Mapping)
+        or not required.issubset(value)
+        or not set(value).issubset(required | {"command_failure"})
+    ):
+        raise HarborResultError("infrastructure diagnostic differs from schema v1")
+    reason = value.get("supervisor_reason")
+    failed_probe = value.get("failed_probe")
+    timings = value.get("probe_timings_ms")
+    command_failure = value.get("command_failure")
+    if (
+        not isinstance(reason, str)
+        or not reason
+        or len(reason) > 1024
+        or any(ord(character) < 32 or ord(character) > 126 for character in reason)
+        or (failed_probe is not None and failed_probe not in _DOCKER_PROBE_NAMES)
+        or not isinstance(timings, Mapping)
+        or not set(timings).issubset(_DOCKER_PROBE_NAMES)
+        or any(
+            isinstance(duration_ms, bool)
+            or not isinstance(duration_ms, int)
+            or duration_ms < 0
+            or duration_ms > 30_000
+            for duration_ms in timings.values()
+        )
+    ):
+        raise HarborResultError("infrastructure diagnostic is invalid")
+    if command_failure is not None:
+        _validate_docker_command_failure(command_failure)
+
+
+def _validate_docker_command_failure(value: object) -> None:
+    if not isinstance(value, Mapping) or set(value) != {
+        "exit_code",
+        "timed_out",
+        "stderr_bytes",
+        "stderr_sha256",
+        "stderr_excerpt",
+    }:
+        raise HarborResultError("Docker command failure diagnostic is invalid")
+    exit_code = value.get("exit_code")
+    timed_out = value.get("timed_out")
+    stderr_bytes = value.get("stderr_bytes")
+    stderr_sha256 = value.get("stderr_sha256")
+    excerpt = value.get("stderr_excerpt")
+    if (
+        (exit_code is not None and (
+            isinstance(exit_code, bool)
+            or not isinstance(exit_code, int)
+            or exit_code == 0
+            or not -255 <= exit_code <= 255
+        ))
+        or not isinstance(timed_out, bool)
+        or (timed_out and exit_code is not None)
+        or isinstance(stderr_bytes, bool)
+        or not isinstance(stderr_bytes, int)
+        or not 0 <= stderr_bytes <= 1_000_000_000
+        or not isinstance(stderr_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", stderr_sha256) is None
+        or not isinstance(excerpt, str)
+        or len(excerpt) > 512
+        or any(ord(character) < 32 or ord(character) > 126 for character in excerpt)
+        or (stderr_bytes == 0 and (excerpt or stderr_sha256 != hashlib.sha256(b"").hexdigest()))
+    ):
+        raise HarborResultError("Docker command failure diagnostic is invalid")
+
+
+def _has_valid_completed_request_sequence(
+    sequence: object,
+    *,
+    guardian_optional: bool,
+) -> bool:
+    """Keep the P1 approval closure while allowing ordinary P2 task turns."""
+
+    if not isinstance(sequence, (list, tuple)) or not sequence:
+        return False
+    if sequence.count("guardian") == 0:
+        return guardian_optional and all(role == "main" for role in sequence)
+    return has_complete_guardian_approval_sequence(sequence)
+
+
+def _validate_public_budget_accounting(
+    value: object,
+    *,
+    request_count: int,
+    estimated_usd: object,
+) -> None:
+    expected_keys = {
+        "stopped",
+        "stop_reason",
+        "reserved_usd",
+        "spent_usd",
+        "request_count",
+        "settled_request_count",
+        "usage_valid_request_count",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise HarborResultError("completed budget accounting differs from schema v1")
+    if (
+        value.get("stopped") is not False
+        or value.get("stop_reason") is not None
+        or value.get("reserved_usd") != "0.000000"
+        or value.get("request_count") != request_count
+        or value.get("settled_request_count") != request_count
+        or value.get("usage_valid_request_count") != request_count
+        or request_count < 1
+    ):
+        raise HarborResultError("completed budget accounting is not fully settled")
+    try:
+        spent = Decimal(value.get("spent_usd"))
+        estimated = Decimal(str(estimated_usd))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HarborResultError("completed budget spend is invalid") from exc
+    if not spent.is_finite() or spent < 0 or spent != estimated:
+        raise HarborResultError("completed budget spend differs from the public cost")
 
 
 def _verified_request_roles(metadata_path: Path) -> tuple[str, ...]:
     metadata = _read_json_object(metadata_path)
     return _request_roles(metadata)
+
+
+def _verified_request_ids(metadata_path: Path) -> tuple[str, ...]:
+    metadata = _read_json_object(metadata_path)
+    _request_roles(metadata)
+    request_ids = tuple(item.get("request_id") for item in metadata["requests"])
+    if (
+        any(not isinstance(request_id, str) or not request_id for request_id in request_ids)
+        or len(set(request_ids)) != len(request_ids)
+    ):
+        raise HarborResultError("API metadata request ids are invalid")
+    return request_ids
+
+
+def _guardian_request_digests(metadata_path: Path) -> tuple[str, ...]:
+    metadata = _read_json_object(metadata_path)
+    roles = _request_roles(metadata)
+    requests = metadata["requests"]
+    digests: list[str] = []
+    for role, request in zip(roles, requests, strict=True):
+        if role != "guardian":
+            continue
+        digest = request.get("canonical_body_sha256")
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise HarborResultError("Guardian request canonical digest is invalid")
+        digests.append(digest)
+    if len(set(digests)) != len(digests):
+        raise HarborResultError("Guardian request canonical digest is duplicated")
+    return tuple(digests)
 
 
 def _request_roles(metadata: Mapping[str, Any]) -> tuple[str, ...]:
@@ -949,11 +1343,20 @@ def _run_spend(snapshot: Mapping[str, object], run_id: str) -> float:
     runs = snapshot.get("runs")
     run = runs.get(run_id) if isinstance(runs, dict) else None
     value = run.get("spent_usd") if isinstance(run, dict) else None
+    cap_value = run.get("cap_usd") if isinstance(run, dict) else None
     try:
         amount = Decimal(value)
+        cap = Decimal(cap_value)
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise HarborResultError("budget snapshot lacks run spend") from exc
-    if not amount.is_finite() or amount < 0 or amount > Decimal("10"):
+    if (
+        not amount.is_finite()
+        or not cap.is_finite()
+        or cap <= 0
+        or cap > Decimal("40")
+        or amount < 0
+        or amount > cap
+    ):
         raise HarborResultError("budget snapshot run spend is invalid")
     return float(amount)
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shlex
+from pathlib import PurePosixPath
+
 from .compat import EnvironmentLike, exec_result
 
 
@@ -19,21 +22,45 @@ class VerifierRuntimeError(RuntimeError):
 
 
 async def prepare_fix_git_workdir(environment: EnvironmentLike) -> None:
+    await prepare_task_workdir(environment, FIX_GIT_WORKDIR)
+
+
+async def prepare_task_workdir(
+    environment: EnvironmentLike,
+    task_workdir: str,
+) -> None:
+    if (
+        not isinstance(task_workdir, str)
+        or not task_workdir.startswith("/")
+        or task_workdir == "/"
+        or PurePosixPath(task_workdir).as_posix() != task_workdir
+        or any(character in task_workdir for character in ("\x00", "\n", "\r"))
+    ):
+        raise VerifierRuntimeError("task workdir is invalid")
     result = await environment.exec(
         (
             "set -e; task_workdir=$(pwd -P); "
-            f'test "$task_workdir" = "{FIX_GIT_WORKDIR}"; '
+            f"test \"$task_workdir\" = {shlex.quote(task_workdir)}; "
             'test -d "$task_workdir"; test ! -L "$task_workdir"; '
             'chmod -R a+rwX -- "$task_workdir"'
         ),
         timeout_sec=30,
         user="root",
     )
-    _require_success(result, "fix-git workdir preparation failed")
+    _require_success(result, "task workdir preparation failed")
 
 
 async def prepare_verifier_apt_dirs(environment: EnvironmentLike) -> None:
     for path in _APT_DIRS:
+        ensured = await environment.exec(
+            (
+                f"set -e; test ! -L {path}; mkdir -p -- {path}; "
+                f"test -d {path}"
+            ),
+            timeout_sec=30,
+            user="root",
+        )
+        _require_success(ensured, "verifier apt directory preparation failed")
         inspected = await environment.exec(
             f"stat -c '%u:%g' -- {path}",
             timeout_sec=30,

@@ -25,7 +25,8 @@ from .exit_codes import INFRA_ERROR
 
 
 SAMPLE_INTERVAL_SECONDS = 5.0
-COUNTER_SAMPLE_TIMEOUT_SECONDS = 15.0
+COUNTER_SAMPLE_TIMEOUT_SECONDS = 30.0
+CLEANUP_COUNTER_SAMPLE_TIMEOUT_SECONDS = 15.0
 FAILURE_CLEANUP_TIMEOUT_SECONDS = 30.0
 HOST_SUCCESS_TEARDOWN_GRACE_SECONDS = 30.0
 DOCKER_GROWTH_WARN_BYTES = 40_000_000_000
@@ -634,6 +635,7 @@ class DockerCounterReading:
     task_networks: tuple[ComposeResourceFact, ...] = ()
     task_volumes: tuple[ComposeResourceFact, ...] = ()
     daemon_security_options: tuple[str, ...] = ()
+    probe_timings_ms: tuple[tuple[str, int], ...] = ()
 
     def validate(self) -> None:
         if not isinstance(self.docker_system_df, Mapping) or not self.docker_system_df:
@@ -683,6 +685,18 @@ class DockerCounterReading:
             not value or "\x00" in value for value in self.daemon_security_options
         ):
             raise DockerSupervisionError("Docker daemon security facts are invalid")
+        if (
+            len(self.probe_timings_ms) != len({name for name, _ in self.probe_timings_ms})
+            or any(
+                not re.fullmatch(r"docker_[a-z_]{1,63}", name)
+                or isinstance(duration_ms, bool)
+                or not isinstance(duration_ms, int)
+                or duration_ms < 0
+                or duration_ms > 30_000
+                for name, duration_ms in self.probe_timings_ms
+            )
+        ):
+            raise DockerSupervisionError("Docker probe timing evidence is invalid")
 
 
 class DockerCounter(Protocol):
@@ -749,6 +763,7 @@ class DockerSample:
     task_networks: tuple[ComposeResourceFact, ...]
     task_volumes: tuple[ComposeResourceFact, ...]
     daemon_security_options: tuple[str, ...]
+    probe_timings_ms: tuple[tuple[str, int], ...]
 
 
 @dataclass(frozen=True)
@@ -762,6 +777,80 @@ class DockerExecutionResult:
     desktop_vhdx: DockerDesktopVhdxEvidence | None = None
     container_metrics: DockerContainerMetrics | None = None
     effective_seccomp: DockerSeccompEvidence | None = None
+
+    def oracle_receipt(self) -> dict[str, object]:
+        """Project Oracle compatibility without weakening paid metrics gates."""
+
+        if not self.samples:
+            raise DockerSupervisionError("Docker result has no supervised samples")
+        for item in (self.image_identity, self.desktop_vhdx, self.effective_seccomp):
+            if item is None:
+                raise DockerSupervisionError(
+                    "Docker Oracle result lacks required compatibility evidence"
+                )
+            item.validate()
+        facts = {
+            fact
+            for sample in self.samples
+            for fact in sample.task_containers
+        }
+        if len(facts) != 1:
+            raise DockerSupervisionError(
+                "Docker Oracle result lacks one stable container fact"
+            )
+        fact = next(iter(facts))
+        fact.validate()
+        final = self.samples[-1]
+        if (
+            final.phase != "cleanup_verified"
+            or final.task_container_ids
+            or final.task_networks
+            or final.task_volumes
+        ):
+            raise DockerSupervisionError(
+                "Docker Oracle result cleanup was not verified empty"
+            )
+        return {
+            "schema_version": 1,
+            "operation": self.operation.value,
+            "returncode": self.returncode,
+            "image": {
+                "reference": self.image_identity.image_reference,
+                "id": self.image_identity.image_id,
+            },
+            "container": {
+                "user": fact.user,
+                "privileged": fact.privileged,
+                "cap_add": list(fact.cap_add),
+                "cap_drop": list(fact.cap_drop),
+                "security_opt": [
+                    "seccomp=custom"
+                    if option.casefold().startswith("seccomp=")
+                    else option
+                    for option in fact.security_opt
+                ],
+                "memory": fact.memory_bytes,
+                "memory_swap": fact.memory_swap_bytes,
+                "pids": fact.pids_limit,
+                "read_only_rootfs": fact.read_only_rootfs,
+                "cgroupns": fact.cgroupns_mode,
+                "network_mode": fact.network_mode,
+                "networks": list(fact.networks),
+                "mounts": [
+                    {
+                        "type": mount.kind,
+                        "destination": mount.destination,
+                        "read_only": mount.read_only,
+                    }
+                    for mount in fact.mounts
+                ],
+            },
+            "seccomp": {
+                "kind": self.effective_seccomp.profile_kind,
+                "sha256": self.effective_seccomp.profile_sha256,
+            },
+            "cleanup": "verified_empty",
+        }
 
     def receipt(self) -> dict[str, object]:
         """Return the canonical, path-free B2 Docker result projection."""
@@ -852,10 +941,19 @@ class DockerSupervisionError(RuntimeError):
 
     exit_code = INFRA_ERROR
 
-    def __init__(self, reason: str, *, samples: Sequence[DockerSample] = ()):
+    def __init__(
+        self,
+        reason: str,
+        *,
+        samples: Sequence[DockerSample] = (),
+        failed_probe: str | None = None,
+        probe_timings_ms: Sequence[tuple[str, int]] = (),
+    ):
         super().__init__(reason)
         self.reason = reason
         self.samples = tuple(samples)
+        self.failed_probe = failed_probe
+        self.probe_timings_ms = tuple(probe_timings_ms)
 
 
 class _CleanupVerificationError(RuntimeError):
@@ -1351,7 +1449,12 @@ class DockerSupervisor:
                 reason = f"{reason}; automatic task-container cleanup was not verified"
             if process_cleanup_failed:
                 reason = f"{reason}; host process-group cleanup was not verified"
-            raise DockerSupervisionError(reason, samples=samples) from exc
+            raise DockerSupervisionError(
+                reason,
+                samples=samples,
+                failed_probe=exc.failed_probe,
+                probe_timings_ms=exc.probe_timings_ms,
+            ) from exc
         except Exception as exc:
             process_cleanup_failed = False
             if not command_exited or (operation is DockerOperation.HOST and not process_group_closed):
@@ -1448,6 +1551,7 @@ class DockerSupervisor:
                 deadline=sample_deadline,
             )
             reading.validate()
+            self._assert_lock(lease, samples=samples)
             if self._monotonic() >= sample_deadline:
                 raise DockerSupervisionError(
                     "Docker counter probe exceeded its absolute deadline",
@@ -1456,9 +1560,23 @@ class DockerSupervisor:
             return reading
         except DockerSupervisionError as exc:
             if samples and not exc.samples:
-                raise DockerSupervisionError(exc.reason, samples=samples) from exc
+                raise DockerSupervisionError(
+                    exc.reason,
+                    samples=samples,
+                    failed_probe=exc.failed_probe,
+                    probe_timings_ms=exc.probe_timings_ms,
+                ) from exc
             raise
         except Exception as exc:
+            from .runtime_bridge import RuntimeBridgeError
+
+            if isinstance(exc, RuntimeBridgeError):
+                raise DockerSupervisionError(
+                    str(exc),
+                    samples=samples,
+                    failed_probe=exc.failed_probe,
+                    probe_timings_ms=exc.probe_timings_ms,
+                ) from exc
             raise DockerSupervisionError(
                 "Docker storage counters are unavailable",
                 samples=samples,
@@ -1554,15 +1672,31 @@ class DockerSupervisor:
                     cleanup_failed = True
                     break
                 cleanup_handle = self._cleanup_runner.start(argv)
-                returncode = cleanup_handle.wait(remaining)
+                remaining = cleanup_deadline - self._monotonic()
+                if remaining <= 0:
+                    self._stop_before_deadline(
+                        cleanup_handle,
+                        deadline=cleanup_deadline,
+                    )
+                    cleanup_failed = True
+                    break
+                returncode = cleanup_handle.wait(
+                    max(0.0, remaining - SAMPLE_INTERVAL_SECONDS)
+                )
                 if returncode is None:
-                    self._stop(cleanup_handle, close_group=False)
+                    self._stop_before_deadline(
+                        cleanup_handle,
+                        deadline=cleanup_deadline,
+                    )
                     cleanup_failed = True
                 elif returncode != 0:
                     cleanup_failed = True
             except Exception:
                 if cleanup_handle is not None:
-                    self._stop(cleanup_handle, close_group=False)
+                    self._stop_before_deadline(
+                        cleanup_handle,
+                        deadline=cleanup_deadline,
+                    )
                 cleanup_failed = True
 
         try:
@@ -1611,7 +1745,10 @@ class DockerSupervisor:
         try:
             if deadline is not None and self._monotonic() >= deadline:
                 raise DockerSupervisionError("Docker cleanup deadline exceeded")
-            sample_deadline = self._counter_sample_deadline(deadline)
+            sample_deadline = self._counter_sample_deadline(
+                deadline,
+                timeout_seconds=CLEANUP_COUNTER_SAMPLE_TIMEOUT_SECONDS,
+            )
             reading = self._counter.sample(
                 identity=identity,
                 operation=operation,
@@ -1629,11 +1766,16 @@ class DockerSupervisor:
                 "Docker cleanup counters are unavailable"
             ) from exc
 
-    def _counter_sample_deadline(self, outer_deadline: float | None) -> float:
+    def _counter_sample_deadline(
+        self,
+        outer_deadline: float | None,
+        *,
+        timeout_seconds: float = COUNTER_SAMPLE_TIMEOUT_SECONDS,
+    ) -> float:
         """Give one complete multi-probe sample a fresh, short time budget."""
 
         now = self._monotonic()
-        sample_deadline = now + COUNTER_SAMPLE_TIMEOUT_SECONDS
+        sample_deadline = now + timeout_seconds
         if outer_deadline is not None:
             sample_deadline = min(sample_deadline, outer_deadline)
         if sample_deadline <= now:
@@ -1695,6 +1837,7 @@ class DockerSupervisor:
             task_networks=tuple(reading.task_networks),
             task_volumes=tuple(reading.task_volumes),
             daemon_security_options=tuple(reading.daemon_security_options),
+            probe_timings_ms=tuple(reading.probe_timings_ms),
         )
 
     @staticmethod
@@ -1768,7 +1911,12 @@ class DockerSupervisor:
                     reading.daemon_security_options,
                 )
             except DockerSupervisionError as exc:
-                raise DockerSupervisionError(exc.reason, samples=samples) from exc
+                raise DockerSupervisionError(
+                    exc.reason,
+                    samples=samples,
+                    failed_probe=exc.failed_probe,
+                    probe_timings_ms=exc.probe_timings_ms,
+                ) from exc
         if contract.container.require_container_metrics:
             fact_ids = {fact.container_id for fact in reading.task_containers}
             metric_ids = {
@@ -1941,6 +2089,37 @@ class DockerSupervisor:
         except Exception:
             return False
         return not close_group
+
+    def _stop_before_deadline(
+        self,
+        handle: RunningCommand,
+        *,
+        deadline: float,
+    ) -> bool:
+        """Stop and reap one cleanup process within its existing deadline."""
+
+        try:
+            handle.terminate()
+        except Exception:
+            pass
+        remaining = deadline - self._monotonic()
+        if remaining > 0:
+            try:
+                if handle.wait(remaining / 2) is not None:
+                    return True
+            except Exception:
+                pass
+        try:
+            handle.kill()
+        except Exception:
+            return False
+        remaining = deadline - self._monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            return handle.wait(remaining) is not None
+        except Exception:
+            return False
 
 
 def _require_pinned_image(image: str) -> None:

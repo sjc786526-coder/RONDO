@@ -26,6 +26,7 @@ from rondo_eval.model_cli_diagnostic import (
     _outer_retry_delay_seconds,
     _phase_succeeded,
     _phase_budget_contract,
+    _prompt,
     _redacted_cli_observation,
     _remove_generated_plugin_cache,
     _safe_environment,
@@ -35,6 +36,14 @@ from rondo_eval.model_cli_diagnostic import (
 
 
 class ModelCliDiagnosticTests(unittest.TestCase):
+    def test_approval_prompt_forbids_pre_tool_assistant_message(self) -> None:
+        prompt = _prompt("approval")
+        self.assertIn(
+            "Do not emit an assistant or commentary message before the tool call.",
+            prompt,
+        )
+        self.assertTrue(prompt.endswith("reply with exactly DONE."))
+
     @staticmethod
     def _successful_approval_contract() -> tuple[
         list[dict[str, object]], dict[str, Any]
@@ -364,7 +373,8 @@ class ModelCliDiagnosticTests(unittest.TestCase):
                 (phase_attempts[1], True, False, 0),
             ],
         ) as run_phase, mock.patch(
-            "rondo_eval.terminal_bench.pair.load_pair_identity", return_value=identity
+            "rondo_eval.terminal_bench.pair.load_active_pair_identity",
+            return_value=identity,
         ):
             receipt = run_campaign(
                 types.SimpleNamespace(common_root=Path(directory)),

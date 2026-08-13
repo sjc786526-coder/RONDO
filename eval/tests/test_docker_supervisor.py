@@ -23,6 +23,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerContainerMetricFact,
     DockerImageIdentity,
     DockerCounterReading,
+    DockerExecutionResult,
     FAILURE_CLEANUP_TIMEOUT_SECONDS,
     HOST_SUCCESS_TEARDOWN_GRACE_SECONDS,
     DockerLimits,
@@ -35,6 +36,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     HostContainerContract,
     SAMPLE_INTERVAL_SECONDS,
 )
+from rondo_eval.runtime_bridge import RuntimeBridgeError  # noqa: E402
 
 
 IMAGE = f"example.invalid/rondo/task@sha256:{'a' * 64}"
@@ -547,9 +549,71 @@ class DockerSupervisorTests(unittest.TestCase):
             cleanup_runner.commands,
             [("docker", "container", "rm", "--force", CONTAINER_ID)],
         )
-        self.assertEqual(cleanup_handle.waits, [FAILURE_CLEANUP_TIMEOUT_SECONDS])
+        self.assertEqual(
+            cleanup_handle.waits,
+            [FAILURE_CLEANUP_TIMEOUT_SECONDS - SAMPLE_INTERVAL_SECONDS],
+        )
         self.assertEqual(result.samples[-2].phase, "post_stop")
         self.assertEqual(result.samples[-1].phase, "cleanup_verified")
+
+    def test_hung_cleanup_is_stopped_and_reaped_within_one_deadline(self) -> None:
+        clock = FakeClock()
+
+        class AdvancingCleanupCounter(FakeCounter):
+            def sample(self, **kwargs):
+                value = super().sample(**kwargs)
+                if kwargs["operation"] is DockerOperation.CLEANUP:
+                    clock.now += SAMPLE_INTERVAL_SECONDS
+                return value
+
+        class HungCleanupHandle(FakeHandle):
+            def __init__(self) -> None:
+                super().__init__([])
+                self.wait_states: list[tuple[int, int]] = []
+
+            def wait(self, timeout_seconds):
+                self.waits.append(timeout_seconds)
+                self.wait_states.append((self.terminated, self.killed))
+                clock.now += timeout_seconds
+                return None
+
+        cleanup_handle = HungCleanupHandle()
+        counter = AdvancingCleanupCounter(
+            [
+                reading(),
+                reading(containers=(CONTAINER_ID,)),
+                reading(containers=(CONTAINER_ID,)),
+            ]
+        )
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([7])],
+            cleanup_runner=FakeRunner([cleanup_handle]),
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.supervise_host_command(
+                self.identity,
+                ("/project/eval/.venv/bin/harbor", "run"),
+                lease=self.lease,
+                timeout_seconds=60,
+                compose_contract=self.compose_contract,
+            )
+
+        self.assertIn("cleanup was not verified", caught.exception.reason)
+        self.assertEqual(clock.now, FAILURE_CLEANUP_TIMEOUT_SECONDS)
+        self.assertEqual(
+            sum(cleanup_handle.waits),
+            FAILURE_CLEANUP_TIMEOUT_SECONDS - SAMPLE_INTERVAL_SECONDS,
+        )
+        self.assertEqual(cleanup_handle.terminated, 1)
+        self.assertEqual(cleanup_handle.killed, 1)
+        self.assertEqual(
+            cleanup_handle.wait_states,
+            [(0, 0), (1, 0), (1, 1)],
+        )
 
     def test_nonzero_host_exit_skips_grace_and_cleans_immediately(self) -> None:
         clock = FakeClock()
@@ -653,7 +717,7 @@ class DockerSupervisorTests(unittest.TestCase):
                         reading(),
                     ]
                 ),
-                FakeLockGuard([True, True, True, True, False]),
+                FakeLockGuard([True, True, True, True, True, True, False]),
                 0,
             ),
             (
@@ -930,6 +994,33 @@ class DockerSupervisorTests(unittest.TestCase):
         self.assertIn("absolute deadline", caught.exception.reason)
         self.assertEqual(handle.terminated, 1)
 
+    def test_counter_failure_preserves_structured_probe_diagnostic(self) -> None:
+        failure = RuntimeBridgeError(
+            "Docker storage fact command failed",
+            failed_probe="docker_system_df",
+            probe_timings_ms=(("docker_system_df", 30000),),
+        )
+        supervisor, runner = self.supervisor(
+            counter=FakeCounter([failure]),
+            handles=[],
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.pull(
+                self.identity,
+                IMAGE,
+                lease=self.lease,
+                timeout_seconds=60,
+            )
+
+        self.assertEqual(caught.exception.reason, "Docker storage fact command failed")
+        self.assertEqual(caught.exception.failed_probe, "docker_system_df")
+        self.assertEqual(
+            caught.exception.probe_timings_ms,
+            (("docker_system_df", 30000),),
+        )
+        self.assertEqual(runner.commands, [])
+
     def test_complete_counter_round_may_exceed_sampling_interval(self) -> None:
         clock = FakeClock()
 
@@ -962,7 +1053,10 @@ class DockerSupervisorTests(unittest.TestCase):
             [sample.phase for sample in result.samples],
             ["baseline", "final"],
         )
-        self.assertEqual(counter.budgets, [15.0, 15.0])
+        self.assertEqual(
+            counter.budgets,
+            [COUNTER_SAMPLE_TIMEOUT_SECONDS, COUNTER_SAMPLE_TIMEOUT_SECONDS],
+        )
 
     def test_each_counter_round_gets_short_deadline_bounded_by_global_deadline(self) -> None:
         for global_timeout, expected_budget in (
@@ -1002,6 +1096,37 @@ class DockerSupervisorTests(unittest.TestCase):
                 self.assertIn("counter probe exceeded", caught.exception.reason)
                 self.assertEqual(counter.budgets, [expected_budget])
                 self.assertEqual(runner.commands, [])
+
+    def test_counter_round_finishing_at_30_second_deadline_fails_closed(self) -> None:
+        clock = FakeClock()
+
+        class BoundaryCounter(FakeCounter):
+            def sample(self, **kwargs):
+                self.deadline = kwargs["deadline"]
+                clock.now += COUNTER_SAMPLE_TIMEOUT_SECONDS
+                return super().sample(**kwargs)
+
+        counter = BoundaryCounter([reading()])
+        supervisor, runner = self.supervisor(
+            counter=counter,
+            handles=[],
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+        )
+
+        with self.assertRaisesRegex(
+            DockerSupervisionError,
+            "counter probe exceeded",
+        ):
+            supervisor.pull(
+                self.identity,
+                IMAGE,
+                lease=self.lease,
+                timeout_seconds=60,
+            )
+
+        self.assertEqual(counter.deadline, COUNTER_SAMPLE_TIMEOUT_SECONDS)
+        self.assertEqual(runner.commands, [])
 
     def test_seccomp_contract_rejects_unsafe_modes_and_binds_profile_digest(self) -> None:
         with self.assertRaises(DockerSupervisionError):
@@ -1182,6 +1307,23 @@ class DockerSupervisorTests(unittest.TestCase):
         assert seccomp is not None
         self.assertEqual(seccomp.profile_kind, "custom")
         self.assertEqual(seccomp.profile_sha256, profile_digest)
+        result = DockerExecutionResult(
+            operation=DockerOperation.HOST,
+            argv=("harbor",),
+            returncode=0,
+            samples=(*samples[:-1], replace(samples[-1], phase="cleanup_verified")),
+            warnings=(),
+            image_identity=image,
+            desktop_vhdx=vhdx,
+            container_metrics=metrics,
+            effective_seccomp=seccomp,
+        )
+        receipt = result.oracle_receipt()
+        self.assertEqual(receipt["image"]["reference"], IMAGE)
+        self.assertEqual(receipt["cleanup"], "verified_empty")
+        self.assertNotIn("metrics", receipt)
+        with self.assertRaises(DockerSupervisionError):
+            result.receipt()
 
     def test_compose_secret_allows_exactly_one_dynamic_source_mount(self) -> None:
         secret = DockerMountFact(
@@ -1247,7 +1389,7 @@ class DockerSupervisorTests(unittest.TestCase):
                 FakeCounter(
                     [reading(), reading(containers=(CONTAINER_ID,)), reading()]
                 ),
-                FakeLockGuard([True, True, False]),
+                FakeLockGuard([True, True, True, False]),
                 None,
             ),
             (
@@ -1387,10 +1529,45 @@ class DockerSupervisorTests(unittest.TestCase):
 
         self.assertEqual(runner.commands, [])
 
+    def test_lock_loss_during_baseline_counter_prevents_command_start(self) -> None:
+        counter = FakeCounter([reading()])
+        supervisor, runner = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([0])],
+            lock=FakeLockGuard([True, True, False]),
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.pull(self.identity, IMAGE, lease=self.lease, timeout_seconds=30)
+
+        self.assertEqual(caught.exception.reason, "shared heavy lock was lost")
+        self.assertEqual(len(counter.calls), 1)
+        self.assertEqual(runner.commands, [])
+
+    def test_lock_loss_during_final_counter_cannot_return_success(self) -> None:
+        counter = FakeCounter([reading(), reading()])
+        handle = FakeHandle([0])
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[handle],
+            lock=FakeLockGuard([True, True, True, True, True, False]),
+        )
+
+        with self.assertRaises(DockerSupervisionError) as caught:
+            supervisor.pull(self.identity, IMAGE, lease=self.lease, timeout_seconds=30)
+
+        self.assertEqual(caught.exception.reason, "shared heavy lock was lost")
+        self.assertEqual(handle.terminated, 0)
+        self.assertEqual(len(counter.calls), 4)
+        self.assertEqual(
+            [sample.phase for sample in caught.exception.samples],
+            ["baseline", "post_stop", "cleanup_verified"],
+        )
+
     def test_counter_failure_and_lost_lock_stop_active_command(self) -> None:
         for counter, guard in (
             (FakeCounter([reading(), OSError("counter failed")]), FakeLockGuard()),
-            (FakeCounter([reading(), reading()]), FakeLockGuard([True, True, False])),
+            (FakeCounter([reading(), reading()]), FakeLockGuard([True, True, True, False])),
         ):
             with self.subTest(guard=guard):
                 handle = FakeHandle([None])
@@ -1406,7 +1583,7 @@ class DockerSupervisorTests(unittest.TestCase):
         supervisor, _ = self.supervisor(
             counter=counter,
             handles=[handle],
-            lock=FakeLockGuard([True, True, True, False]),
+            lock=FakeLockGuard([True, True, True, True, False]),
         )
 
         with self.assertRaises(DockerSupervisionError) as caught:

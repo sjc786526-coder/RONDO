@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -28,22 +30,26 @@ from rondo_eval.contracts import (  # noqa: E402
     Side,
 )
 from rondo_eval.docker_supervisor import DockerSupervisionError  # noqa: E402
+from rondo_eval.runtime_bridge import RuntimeBridgeError  # noqa: E402
 from rondo_eval.terminal_bench.live import (  # noqa: E402
     BudgetedTerminalBenchResult,
     load_guardian_evidence_bundle,
 )
 from rondo_eval.terminal_bench import __main__ as terminal_bench_main  # noqa: E402
 from rondo_eval.terminal_bench.pair import (  # noqa: E402
+    CampaignPublicationContext,
+    PairIdentityError,
     PairMode,
     PairSequenceLedger,
     RunPublicationContext,
     assess_m1,
-    load_pair_identity,
+    load_historical_pair_identity,
     terminal_record_sha256,
 )
 from rondo_eval.terminal_bench.results import (  # noqa: E402
     HarborResultError,
     UPSTREAM_CODEX,
+    classify_terminal_bench_result,
     parse_single_task_result,
     publish_terminal_bench_failure,
     publish_terminal_bench_result,
@@ -55,6 +61,8 @@ from rondo_eval.terminal_bench.runner import (  # noqa: E402
 
 
 class TerminalBenchResultTests(unittest.TestCase):
+    PAID_BATCH_ID = "test-active-paid-batch"
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -123,26 +131,74 @@ class TerminalBenchResultTests(unittest.TestCase):
             },
         )
 
+    def _campaign_publication(
+        self,
+        *,
+        side: Side = Side.CODEX,
+        exit_code: int = 0,
+        attempt: int = 1,
+    ) -> CampaignPublicationContext:
+        provider = self._live_result("campaign-publication-fixture").prepared.spec.provider
+        return CampaignPublicationContext(
+            campaign_id="p2-b7-canary-baseline-test",
+            campaign_lock_sha256="7" * 64,
+            campaign_slot_id=(
+                f"base:aa-rondo-1:terminal-bench/fix-git:a{attempt}"
+            ),
+            campaign_round_id="aa-rondo-1",
+            campaign_attempt=attempt,
+            taskset_sha256="8" * 64,
+            canary_catalog_sha256="9" * 64,
+            side=side,
+            metrics={
+                "wall_seconds": 1.0,
+                "cpu_user_seconds": 0.1,
+                "cpu_system_seconds": 0.1,
+                "peak_rss_bytes": 1024,
+                "exit_code": exit_code,
+            },
+            selected_profile={
+                **provider.to_public_dict(),
+                "frozen_codex_model_catalog_source_commit": "a" * 40,
+                "frozen_codex_model_catalog_sha256": "b" * 64,
+                "max_guardian_logical_requests": 3,
+            },
+        )
+
     @staticmethod
     def _write_metadata(
-        path: Path, *roles: str, provenance: str = "declared"
+        path: Path,
+        *roles: str,
+        provenance: str = "declared",
+        guardian_digests: tuple[str, ...] = (),
     ) -> None:
+        guardian_index = 0
+        requests = []
+        for index, role in enumerate(roles):
+            digest = f"{index + 1:064x}"
+            if role == "guardian" and guardian_index < len(guardian_digests):
+                digest = guardian_digests[guardian_index]
+                guardian_index += 1
+            requests.append(
+                {
+                    "request_id": f"request-{index}",
+                    "role": role,
+                    "role_provenance": provenance,
+                    "declared_role": role if provenance == "declared" else None,
+                    "inferred_role": role,
+                    "contract_match": True,
+                    "usage_valid": True,
+                    "canonical_body_sha256": digest,
+                }
+            )
+        if guardian_index != len(guardian_digests):
+            raise AssertionError("unused Guardian request digest fixture")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
-                    "requests": [
-                        {
-                            "role": role,
-                            "role_provenance": provenance,
-                            "declared_role": role if provenance == "declared" else None,
-                            "inferred_role": role,
-                            "contract_match": True,
-                            "usage_valid": True,
-                        }
-                        for role in roles
-                    ],
+                    "requests": requests,
                 }
             )
             + "\n",
@@ -225,25 +281,64 @@ class TerminalBenchResultTests(unittest.TestCase):
         return BudgetedTerminalBenchResult(
             prepared=prepared,
             harbor=HostHarborResult(0, self.jobs),
-            budget_snapshot={"runs": {run_id: {"spent_usd": "0.012345"}}},
+            budget_snapshot=self._completed_budget_snapshot(run_id, request_count=3),
             metadata_ready=True,
             evidence=(),
             redaction_secrets=("never-persist", "temporary-token"),
         )
 
-    def _write_guardian_bundle(self, review_id: str = "review-1") -> str:
+    @staticmethod
+    def _completed_budget_snapshot(run_id: str, *, request_count: int) -> dict:
+        return {
+            "runs": {
+                run_id: {
+                    "cap_usd": "10.000000",
+                    "spent_usd": "0.012345",
+                    "stopped": False,
+                    "stop_reason": None,
+                    "requests": {
+                        f"request-{index}": {
+                            "status": "settled",
+                            "reserved_usd": "5.000000",
+                            "charged_usd": "0.012345" if index == 0 else "0.000000",
+                            "usage_valid": True,
+                            "attempt_count": 1,
+                            "settlement_kind": "usage_priced",
+                        }
+                        for index in range(request_count)
+                    },
+                }
+            }
+        }
+
+    def _write_guardian_bundle(
+        self,
+        review_id: str = "review-1",
+        *,
+        decision: str = "approved",
+        terminal_status: str = "approved",
+        failure_reason: str | None = None,
+    ) -> str:
         bundle = self.trial / "agent" / "guardian-evidence" / review_id
         bundle.mkdir(parents=True)
         (bundle / "E_final.json").write_text(
             json.dumps(
                 {
                     "instructions": "frozen guardian policy",
-                    "input": [{"role": "user", "content": "approval evidence"}],
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": f"approval evidence {review_id}",
+                        }
+                    ],
                     "text": {
                         "format": {
                             "schema": {
                                 "properties": {
-                                    "user_authorization": {"type": "string"}
+                                    "user_authorization": {
+                                        "type": "string",
+                                        "enum": ["unknown", "low", "medium", "high"],
+                                    }
                                 }
                             }
                         }
@@ -253,32 +348,31 @@ class TerminalBenchResultTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        meta = {
+            "review_id": review_id,
+            "guardian_source_baseline": "rust-v0.147.0",
+            "guardian_source_commit": UPSTREAM_CODEX["commit"],
+            "evidence": "e_final",
+            "decision": decision,
+            "terminal_status": terminal_status,
+            "failure_reason": failure_reason,
+            "attempt_count": 1,
+            "duration_ms": 12,
+            "guardian_thread_id": "thread-1",
+            "model": "gpt-5.6-luna",
+            "reasoning_effort": "low",
+            "token_usage": {
+                "input_tokens": 10,
+                "cached_input_tokens": 0,
+                "cache_write_input_tokens": 0,
+                "output_tokens": 2,
+                "reasoning_output_tokens": 1,
+                "total_tokens": 12,
+            },
+            "time_to_first_token_ms": 3,
+        }
         (bundle / "meta.json").write_text(
-            json.dumps(
-                {
-                    "review_id": review_id,
-                    "guardian_source_baseline": "rust-v0.147.0",
-                    "guardian_source_commit": UPSTREAM_CODEX["commit"],
-                    "evidence": "e_final",
-                    "decision": "approved",
-                    "terminal_status": "approved",
-                    "failure_reason": None,
-                    "attempt_count": 1,
-                    "duration_ms": 12,
-                    "guardian_thread_id": "thread-1",
-                    "model": "gpt-5.6-luna",
-                    "reasoning_effort": "low",
-                    "token_usage": {
-                        "input_tokens": 10,
-                        "cached_input_tokens": 0,
-                        "cache_write_input_tokens": 0,
-                        "output_tokens": 2,
-                        "reasoning_output_tokens": 1,
-                        "total_tokens": 12,
-                    },
-                    "time_to_first_token_ms": 3,
-                }
-            ),
+            json.dumps(meta),
             encoding="utf-8",
         )
         return (bundle / "E_final.json").relative_to(self.jobs).as_posix()
@@ -494,7 +588,11 @@ class TerminalBenchResultTests(unittest.TestCase):
         object.__setattr__(
             live_result,
             "budget_snapshot",
-            {"runs": {run_id: {"spent_usd": "0.000000"}}},
+            {
+                "runs": {
+                    run_id: {"cap_usd": "10.000000", "spent_usd": "0.000000"}
+                }
+            },
         )
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
 
@@ -556,6 +654,12 @@ class TerminalBenchResultTests(unittest.TestCase):
             "Authorization: Bearer must-not-be-archived\n", encoding="utf-8"
         )
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        live_result = self._live_result(run_id)
+        object.__setattr__(
+            live_result,
+            "budget_snapshot",
+            self._completed_budget_snapshot(run_id, request_count=5),
+        )
         target = publish_terminal_bench_result(
             RepoPaths(self.root, self.root),
             results_worktree_root=self.root,
@@ -563,7 +667,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             side=Side.CODEX,
             git_commit="e" * 40,
             eval_harness_commit="f" * 40,
-            live_result=self._live_result(run_id),
+            live_result=live_result,
             parsed=parsed,
             metadata_path=metadata,
             publication=self._publication(),
@@ -625,11 +729,134 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(summary["config"]["bwrap_archive_sha256"], "1" * 64)
         self.assertEqual(summary["config"]["bwrap_source_tree_sha256"], "2" * 64)
 
+    def test_campaign_publication_uses_campaign_identity_not_pair_fields(self) -> None:
+        run_id = "20260811-210000001-tb-codex-r1"
+        metadata = self.root / "work" / "campaign-api-metadata.json"
+        self._write_metadata(metadata, "main", "guardian", "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        live_result = self._live_result(run_id)
+        object.__setattr__(
+            live_result,
+            "budget_snapshot",
+            self._completed_budget_snapshot(run_id, request_count=3),
+        )
+        provider = live_result.prepared.spec.provider
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.CODEX,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=CampaignPublicationContext(
+                campaign_id="p2-b7-canary-baseline-v1",
+                campaign_lock_sha256="7" * 64,
+                campaign_slot_id="base:ab-codex-1:terminal-bench/fix-git:a1",
+                campaign_round_id="ab-codex-1",
+                campaign_attempt=1,
+                taskset_sha256="8" * 64,
+                canary_catalog_sha256="9" * 64,
+                side=Side.CODEX,
+                metrics={
+                    "wall_seconds": 1.0,
+                    "cpu_user_seconds": 0.1,
+                    "cpu_system_seconds": 0.1,
+                    "peak_rss_bytes": 1024,
+                    "exit_code": 0,
+                },
+                selected_profile={
+                    **provider.to_public_dict(),
+                    "frozen_codex_model_catalog_source_commit": "a" * 40,
+                    "frozen_codex_model_catalog_sha256": "b" * 64,
+                    "max_guardian_logical_requests": 3,
+                },
+            ),
+        )
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["config"]["campaign_id"], "p2-b7-canary-baseline-v1")
+        self.assertEqual(record["config"]["campaign_attempt"], 1)
+        self.assertNotIn("pair_id", record["config"])
+        self.assertTrue(target.is_dir())
+
+    def test_semantic_guardian_deny_is_scored_not_reclassified_as_infra(self) -> None:
+        run_id = "20260811-210000002-tb-rondo-r1"
+        relative = self._write_guardian_bundle(
+            "deny-review",
+            decision="denied",
+            terminal_status="denied",
+        )
+        evidence, _e_final, _meta = load_guardian_evidence_bundle(
+            self.jobs,
+            relative,
+            expected_model="gpt-5.6-luna",
+            expected_effort="low",
+        )
+        metadata = self.root / "work" / "deny-api-metadata.json"
+        self._write_metadata(
+            metadata,
+            "main",
+            "guardian",
+            "main",
+            guardian_digests=(evidence.canonical_request_sha256,),
+        )
+        self.trial_result["verifier_result"] = {"rewards": {"reward": 0.0}}
+        self._write_results()
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        live_result = self._live_result(run_id)
+        object.__setattr__(
+            live_result,
+            "prepared",
+            SimpleNamespace(spec=replace(live_result.prepared.spec, side=Side.RONDO)),
+        )
+        object.__setattr__(live_result, "evidence", (evidence,))
+        publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=self._publication(side=Side.RONDO),
+        )
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(record["tasks"][0]["outcome"], "fail")
+        self.assertEqual(record["summary"]["s2_request_evidence_binding"], "verified")
+        self.assertEqual(record["summary"]["evidence"][0]["decision"], "denied")
+
+    def test_guardian_technical_failure_is_infrastructure(self) -> None:
+        relative = self._write_guardian_bundle(
+            "failed-review",
+            decision="denied",
+            terminal_status="failed_closed",
+            failure_reason="session_error",
+        )
+        evidence, _e_final, _meta = load_guardian_evidence_bundle(
+            self.jobs,
+            relative,
+            expected_model="gpt-5.6-luna",
+            expected_effort="low",
+        )
+        live_result = self._live_result("technical-fixture")
+        object.__setattr__(live_result, "evidence", (evidence,))
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        self.assertEqual(
+            classify_terminal_bench_result(live_result, parsed).outcome,
+            RunOutcome.INFRA_FAILED,
+        )
+
     def test_public_results_feed_m1_without_private_provider_fields(self) -> None:
-        identity = load_pair_identity()
+        identity = load_historical_pair_identity()
         fixture_provider = self._live_result("m1-fixture").prepared.spec.provider
         identity = replace(
             identity,
+            pair_id="test-producer-m1-pair",
             selected_profile=replace(
                 identity.require_selected_profile(),
                 provider_public=fixture_provider.to_public_dict(),
@@ -677,7 +904,15 @@ class TerminalBenchResultTests(unittest.TestCase):
                 (evidence,) if slot.side is Side.RONDO else (),
             )
             metadata = self.root / f"{slot.side.value}-api-metadata.json"
-            self._write_metadata(metadata, "main", "guardian", "main")
+            self._write_metadata(
+                metadata,
+                "main",
+                "guardian",
+                "main",
+                guardian_digests=(evidence.canonical_request_sha256,)
+                if slot.side is Side.RONDO
+                else (),
+            )
             publish_terminal_bench_result(
                 RepoPaths(self.root, self.root),
                 results_worktree_root=self.root,
@@ -730,7 +965,36 @@ class TerminalBenchResultTests(unittest.TestCase):
                     },
                     provider=fixture_provider,
                 )
-        result = assess_m1(records, identity, pair_ledger_path=ledger_path)
+        budget_path = self.root / "m1-budget.json"
+        budget_runs = {
+            record["run_id"]: self._completed_budget_snapshot(
+                record["run_id"], request_count=3
+            )["runs"][record["run_id"]]
+            for record in records
+        }
+        budget_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "batch_id": identity.mode("paid").batch_id,
+                    "total_cap_usd": "20.000000",
+                    "max_runs": 4,
+                    "default_run_cap_usd": "10.000000",
+                    "runs": budget_runs,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        budget_path.with_name(f".{budget_path.name}.lock").touch(mode=0o600)
+        result = assess_m1(
+            records,
+            identity,
+            pair_ledger_path=ledger_path,
+            budget_ledger_path=budget_path,
+        )
         self.assertEqual(result["m1"], "passed", result["reasons"])
         self.assertNotIn("pair_fairness_mismatch", result["reasons"])
 
@@ -777,6 +1041,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             "batch_id": "p1-b3",
             "runs": {
                 run_id: {
+                    "cap_usd": "10.000000",
                     "spent_usd": "0.000000",
                     "requests": {"request-1": {"status": "reserved"}},
                 }
@@ -798,12 +1063,44 @@ class TerminalBenchResultTests(unittest.TestCase):
             failure_stage="docker",
             publication=self._publication(exit_code=70),
             secrets=("never-persist",),
+            infra_diagnostic={
+                "supervisor_reason": "Docker storage counters are unavailable",
+                "failed_probe": "docker_system_df",
+                "probe_timings_ms": {"docker_system_df": 30000},
+                "command_failure": {
+                    "exit_code": 1,
+                    "timed_out": False,
+                    "stderr_bytes": 0,
+                    "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+                    "stderr_excerpt": "",
+                },
+            },
         )
 
         self.assertTrue((target / "run-failure.json").is_file())
+
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "docker")
+        self.assertEqual(
+            record["summary"]["infra_diagnostic"],
+            {
+                "supervisor_reason": "Docker storage counters are unavailable",
+                "failed_probe": "docker_system_df",
+                "probe_timings_ms": {"docker_system_df": 30000},
+                "command_failure": {
+                    "exit_code": 1,
+                    "timed_out": False,
+                    "stderr_bytes": 0,
+                    "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+                    "stderr_excerpt": "",
+                },
+            },
+        )
+        self.assertEqual(
+            json.loads((target / "run-failure.json").read_text())["infra_diagnostic"],
+            record["summary"]["infra_diagnostic"],
+        )
         self.assertEqual(
             record["config"]["provider_profile_sha256"],
             live_result.prepared.spec.provider.profile_sha256,
@@ -819,6 +1116,102 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(
             record["cost"], {"estimated_usd": 0.0, "actual_usd": None}
         )
+
+    def test_campaign_failure_publication_accepts_attempt_three_and_four(self) -> None:
+        for attempt in (3, 4):
+            with self.subTest(attempt=attempt), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                run_id = f"20260812-32000008{attempt}-tb-rondo-r{attempt}"
+                paths = RepoPaths(root, root)
+                writer = ArtifactWriter(paths, run_id, results_worktree_root=root).start()
+                live_result = self._live_result(run_id)
+                publish_terminal_bench_failure(
+                    paths,
+                    writer=writer,
+                    run_id=run_id,
+                    side=Side.RONDO,
+                    git_commit="e" * 40,
+                    eval_harness_commit="f" * 40,
+                    manifest=live_result.prepared.spec.binary,
+                    provider=live_result.prepared.spec.provider,
+                    budget_snapshot=live_result.budget_snapshot,
+                    metadata_path=root / "missing-api-metadata.json",
+                    outcome=RunOutcome.INFRA_FAILED,
+                    failure_stage="docker",
+                    publication=self._campaign_publication(
+                        side=Side.RONDO,
+                        exit_code=70,
+                        attempt=attempt,
+                    ),
+                    secrets=("never-persist",),
+                )
+                record = json.loads((root / "eval/results/runs.jsonl").read_text())
+                self.assertEqual(record["config"]["campaign_attempt"], attempt)
+
+        with self.assertRaisesRegex(
+            PairIdentityError, "publication campaign topology is invalid"
+        ):
+            self._campaign_publication(side=Side.RONDO, attempt=5).validate()
+
+    def test_infra_diagnostic_rejects_unknown_or_non_docker_probe(self) -> None:
+        run_id = "20260810-010000019-tb-codex-r1"
+        paths = RepoPaths(self.root, self.root)
+        live_result = self._live_result(run_id)
+        for failure_stage, failed_probe in (
+            ("result", "docker_system_df"),
+            ("docker", "free_text_probe"),
+        ):
+            with self.subTest(failure_stage=failure_stage, failed_probe=failed_probe):
+                writer = ArtifactWriter(
+                    paths, run_id, results_worktree_root=self.root
+                ).start()
+                with self.assertRaises(HarborResultError):
+                    publish_terminal_bench_failure(
+                        paths,
+                        writer=writer,
+                        run_id=run_id,
+                        side=Side.CODEX,
+                        git_commit="e" * 40,
+                        eval_harness_commit="f" * 40,
+                        manifest=live_result.prepared.spec.binary,
+                        provider=live_result.prepared.spec.provider,
+                        budget_snapshot=live_result.budget_snapshot,
+                        metadata_path=self.root / "missing-api-metadata.json",
+                        outcome=RunOutcome.INFRA_FAILED,
+                        failure_stage=failure_stage,
+                        publication=self._publication(exit_code=70),
+                        secrets=("never-persist",),
+                        infra_diagnostic={
+                            "supervisor_reason": "bounded reason",
+                            "failed_probe": failed_probe,
+                            "probe_timings_ms": {},
+                        },
+                    )
+                writer.abort()
+
+    def test_docker_failure_diagnostic_keeps_bounded_command_cause(self) -> None:
+        command_failure = {
+            "exit_code": 1,
+            "timed_out": False,
+            "stderr_bytes": 0,
+            "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+            "stderr_excerpt": "",
+        }
+        inner = RuntimeBridgeError(
+            "Docker storage fact command failed",
+            failed_probe="docker_container_metrics",
+            command_failure=command_failure,
+        )
+        try:
+            raise DockerSupervisionError(
+                "Docker storage fact command failed",
+                failed_probe="docker_container_metrics",
+                probe_timings_ms=(("docker_container_metrics", 1700),),
+            ) from inner
+        except DockerSupervisionError as caught:
+            diagnostic = terminal_bench_main._docker_failure_diagnostic(caught)
+        self.assertEqual(diagnostic["command_failure"], command_failure)
+        self.assertEqual(diagnostic["failed_probe"], "docker_container_metrics")
 
     def test_claimed_failure_reports_verified_api_metadata_truthfully(self) -> None:
         run_id = "20260810-010000012-tb-codex-r1"
@@ -939,6 +1332,59 @@ class TerminalBenchResultTests(unittest.TestCase):
                 publication=self._publication(),
             )
 
+    def test_completed_publication_rejects_stopped_budget_run(self) -> None:
+        run_id = "20260810-010000020-tb-codex-r1"
+        live_result = self._live_result(run_id)
+        run = live_result.budget_snapshot["runs"][run_id]
+        run["stopped"] = True
+        run["stop_reason"] = "missing_or_invalid_usage"
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main", "guardian", "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        with self.assertRaisesRegex(
+            HarborResultError, "completed run budget accounting is invalid"
+        ):
+            publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=Side.CODEX,
+                git_commit="e" * 40,
+                eval_harness_commit="f" * 40,
+                live_result=live_result,
+                parsed=parsed,
+                metadata_path=metadata,
+                publication=self._publication(),
+            )
+
+    def test_completed_publication_requires_exact_budget_request_ids(self) -> None:
+        run_id = "20260810-010000021-tb-codex-r1"
+        live_result = self._live_result(run_id)
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main", "guardian", "main")
+        value = json.loads(metadata.read_text(encoding="utf-8"))
+        value["requests"][0]["request_id"] = "different-request"
+        metadata.write_text(json.dumps(value), encoding="utf-8")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        with self.assertRaisesRegex(
+            HarborResultError, "budget requests differ from API metadata"
+        ):
+            publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=Side.CODEX,
+                git_commit="e" * 40,
+                eval_harness_commit="f" * 40,
+                live_result=live_result,
+                parsed=parsed,
+                metadata_path=metadata,
+                publication=self._publication(),
+            )
+        self.assertFalse((self.root / "eval/results/runs.jsonl").exists())
+
     def test_completed_publication_rejects_inferred_only_role(self) -> None:
         run_id = "20260810-010000016-tb-codex-r1"
         metadata = self.root / "work" / "api-metadata.json"
@@ -981,6 +1427,75 @@ class TerminalBenchResultTests(unittest.TestCase):
                 publication=self._publication(side=Side.RONDO),
             )
 
+    def test_completed_campaign_rondo_without_guardian_is_published(self) -> None:
+        run_id = "20260811-230000001-tb-rondo-r1"
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
+        object.__setattr__(
+            live_result,
+            "budget_snapshot",
+            self._completed_budget_snapshot(run_id, request_count=1),
+        )
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main")
+        private = self.trial / "agent/codex.txt"
+        private.parent.mkdir(parents=True)
+        private.write_text("secret = task-fixture-value\n", encoding="utf-8")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        provider = live_result.prepared.spec.provider
+
+        target = publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=live_result,
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=CampaignPublicationContext(
+                campaign_id="p2-b7-canary-baseline-v3",
+                campaign_lock_sha256="7" * 64,
+                campaign_slot_id="base:aa-rondo-1:terminal-bench/fix-git:a1",
+                campaign_round_id="aa-rondo-1",
+                campaign_attempt=1,
+                taskset_sha256="8" * 64,
+                canary_catalog_sha256="9" * 64,
+                side=Side.RONDO,
+                metrics={
+                    "wall_seconds": 1.0,
+                    "cpu_user_seconds": 0.1,
+                    "cpu_system_seconds": 0.1,
+                    "peak_rss_bytes": 1024,
+                    "exit_code": 0,
+                },
+                selected_profile={
+                    **provider.to_public_dict(),
+                    "frozen_codex_model_catalog_source_commit": "a" * 40,
+                    "frozen_codex_model_catalog_sha256": "b" * 64,
+                    "max_guardian_logical_requests": 3,
+                },
+            ),
+        )
+
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(record["summary"]["api_request_sequence"], ["main"])
+        self.assertEqual(record["summary"]["evidence"], [])
+        self.assertEqual(
+            record["summary"]["s2_request_evidence_binding"], "not_triggered"
+        )
+        self.assertFalse((target / "harbor/agent/codex.txt").exists())
+        marker = json.loads(
+            (target / "harbor/agent/codex.txt.redacted.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(marker["reason"], "sensitive_private_artifact_omitted")
+        self.assertEqual(marker["source_size_bytes"], len(private.read_bytes()))
+        self.assertTrue(target.is_dir())
+
     def test_completed_rondo_guardian_request_requires_e_final(self) -> None:
         run_id = "20260810-010000006-tb-rondo-r1"
         live_result = self._live_result(run_id)
@@ -1016,6 +1531,11 @@ class TerminalBenchResultTests(unittest.TestCase):
         live_result = self._live_result(run_id)
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
         object.__setattr__(live_result, "evidence", observations)
+        object.__setattr__(
+            live_result,
+            "budget_snapshot",
+            self._completed_budget_snapshot(run_id, request_count=7),
+        )
         metadata = self.root / "work" / "api-metadata.json"
         self._write_metadata(
             metadata,
@@ -1026,6 +1546,9 @@ class TerminalBenchResultTests(unittest.TestCase):
             "guardian",
             "main",
             "main",
+            guardian_digests=tuple(
+                item.canonical_request_sha256 for item in observations
+            ),
         )
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
 
@@ -1043,6 +1566,16 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
 
         self.assertTrue((target / "guardian-evidence/0001/E_final.json").is_file())
+        public_record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(
+            [item["relative_path"] for item in public_record["summary"]["evidence"]],
+            [
+                "guardian-evidence/0001/E_final.json",
+                "guardian-evidence/0002/E_final.json",
+            ],
+        )
+        for item in public_record["summary"]["evidence"]:
+            self.assertTrue((target / item["relative_path"]).is_file())
         archived_meta = json.loads(
             (target / "guardian-evidence/0001/meta.json").read_text(encoding="utf-8")
         )
@@ -1058,6 +1591,44 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
         self.assertEqual(len(summary["summary"]["evidence"]), 2)
         self.assertEqual(summary["summary"]["s2_request_evidence_binding"], "verified")
+        self.assertEqual(
+            {
+                item["canonical_request_sha256"]
+                for item in summary["summary"]["evidence"]
+            },
+            {item.canonical_request_sha256 for item in observations},
+        )
+
+    def test_completed_rondo_rejects_evidence_request_digest_mismatch(self) -> None:
+        run_id = "20260810-010000021-tb-rondo-r1"
+        observation = load_guardian_evidence_bundle(
+            self.jobs,
+            self._write_guardian_bundle(),
+            expected_model="gpt-5.6-luna",
+            expected_effort="low",
+        )[0]
+        live_result = self._live_result(run_id)
+        object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
+        object.__setattr__(live_result, "evidence", (observation,))
+        metadata = self.root / "work" / "api-metadata.json"
+        self._write_metadata(metadata, "main", "guardian", "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+
+        with self.assertRaisesRegex(
+            HarborResultError, "not bound to canonical requests"
+        ):
+            publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=Side.RONDO,
+                git_commit="e" * 40,
+                eval_harness_commit="f" * 40,
+                live_result=live_result,
+                parsed=parsed,
+                metadata_path=metadata,
+                publication=self._publication(side=Side.RONDO),
+            )
 
     def test_guardian_meta_source_drift_is_rejected(self) -> None:
         relative = self._write_guardian_bundle()
@@ -1067,6 +1638,25 @@ class TerminalBenchResultTests(unittest.TestCase):
         meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
         with self.assertRaises(TerminalBenchRunError):
+            load_guardian_evidence_bundle(
+                self.jobs,
+                relative,
+                expected_model="gpt-5.6-luna",
+                expected_effort="low",
+            )
+
+    def test_guardian_meta_contradictory_terminal_fields_are_rejected(self) -> None:
+        relative = self._write_guardian_bundle()
+        meta_path = self.trial / "agent/guardian-evidence/review-1/meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.update(
+            decision="denied",
+            terminal_status="approved",
+            failure_reason="session_error",
+        )
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+        with self.assertRaisesRegex(TerminalBenchRunError, "contradictory"):
             load_guardian_evidence_bundle(
                 self.jobs,
                 relative,
@@ -1133,6 +1723,37 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(result, terminal_bench_main.CONFIG_ERROR)
         load_config.assert_not_called()
 
+    def test_cli_has_no_active_paid_identity_before_any_external_preflight(self) -> None:
+        argv = [
+            "--side",
+            "codex",
+            "--batch-id",
+            "retired-paid-batch",
+            "--run-id",
+            "20260810-010000022-tb-codex-r1",
+            "--binary-manifest",
+            "/missing/manifest.json",
+            "--docker-host-volume",
+            "/missing/docker-volume",
+            "--results-worktree-root",
+            "/missing/results",
+        ]
+        with (
+            patch.object(terminal_bench_main.RepoPaths, "discover") as discover,
+            patch.object(terminal_bench_main, "load_runtime_config") as load_config,
+            patch.object(terminal_bench_main, "load_provider_secret") as load_secret,
+            patch.object(terminal_bench_main, "PairSequenceLedger") as sequence,
+            patch.object(terminal_bench_main, "lease_from_watchdog") as watchdog,
+        ):
+            result = terminal_bench_main.main(argv)
+
+        self.assertEqual(result, terminal_bench_main.CONFIG_ERROR)
+        discover.assert_not_called()
+        load_config.assert_not_called()
+        load_secret.assert_not_called()
+        sequence.assert_not_called()
+        watchdog.assert_not_called()
+
     @staticmethod
     def _paid_recovery_record(
         *, identity: object, run_id: str, harness_commit: str, drift_side: bool = False
@@ -1180,10 +1801,11 @@ class TerminalBenchResultTests(unittest.TestCase):
         run_id = "20260810-010000012-tb-rondo-r1"
         batch_id = "p1-paid-recovery"
         harness_commit = "f" * 40
-        identity = load_pair_identity()
+        identity = load_historical_pair_identity()
         provider = self._live_result("recovery-provider").prepared.spec.provider
         identity = replace(
             identity,
+            pair_id="test-paid-recovery-pair",
             selected_profile=replace(
                 identity.require_selected_profile(),
                 provider_public=provider.to_public_dict(),
@@ -1253,7 +1875,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         with patch.object(
             terminal_bench_main.RepoPaths, "discover", return_value=paths
         ), patch.object(
-            terminal_bench_main, "load_pair_identity", return_value=identity
+            terminal_bench_main, "load_active_pair_identity", return_value=identity
         ), patch.object(
             terminal_bench_main, "validate_results_worktree", return_value=self.root
         ), patch.object(
@@ -1442,7 +2064,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             "max_guardian_logical_requests": 1,
         }
         pair_identity.mode.return_value = SimpleNamespace(
-            batch_id=terminal_bench_main.P1_BATCH_ID
+            batch_id=self.PAID_BATCH_ID
         )
         pair_identity.slot_for.return_value = SimpleNamespace(
             paid_run_id=run_id,
@@ -1452,7 +2074,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         sequence = mock.MagicMock()
         sequence.__enter__.return_value = sequence
         with patch.object(terminal_bench_main.RepoPaths, "discover", return_value=paths), patch.object(
-            terminal_bench_main, "load_pair_identity", return_value=pair_identity
+            terminal_bench_main, "load_active_pair_identity", return_value=pair_identity
         ), patch.object(
             terminal_bench_main, "validate_harbor_installation"
         ), patch.object(
@@ -1485,7 +2107,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                     "--side",
                     "codex",
                     "--batch-id",
-                    terminal_bench_main.P1_BATCH_ID,
+                    self.PAID_BATCH_ID,
                     "--run-id",
                     run_id,
                     "--binary-manifest",
@@ -1515,7 +2137,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "docker")
         budget = json.loads(
-            (self.root / f"eval-data/budgets/{terminal_bench_main.P1_BATCH_ID}.json").read_text()
+            (self.root / f"eval-data/budgets/{self.PAID_BATCH_ID}.json").read_text()
         )
         self.assertIn(run_id, budget["runs"])
 
@@ -1539,7 +2161,7 @@ class TerminalBenchResultTests(unittest.TestCase):
             pair_usd=20.0,
         )
         pair_identity.mode.return_value = SimpleNamespace(
-            batch_id=terminal_bench_main.P1_BATCH_ID
+            batch_id=self.PAID_BATCH_ID
         )
         pair_identity.slot_for.return_value = SimpleNamespace(
             paid_run_id=run_id,
@@ -1552,7 +2174,7 @@ class TerminalBenchResultTests(unittest.TestCase):
         with patch.object(
             terminal_bench_main.RepoPaths, "discover", side_effect=discover
         ), patch.object(
-            terminal_bench_main, "load_pair_identity", return_value=pair_identity
+            terminal_bench_main, "load_active_pair_identity", return_value=pair_identity
         ), patch.object(
             terminal_bench_main, "validate_harbor_installation"
         ), patch.object(
@@ -1614,7 +2236,7 @@ class TerminalBenchResultTests(unittest.TestCase):
                     "--side",
                     "codex",
                     "--batch-id",
-                    terminal_bench_main.P1_BATCH_ID,
+                    self.PAID_BATCH_ID,
                     "--run-id",
                     run_id,
                     "--binary-manifest",
@@ -1657,6 +2279,146 @@ class TerminalBenchResultTests(unittest.TestCase):
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         self.assertEqual(record["outcome"], "infra_failed")
         self.assertEqual(record["config"]["failure_stage"], "publication")
+
+    def test_success_cli_reports_durable_public_guardian_evidence(self) -> None:
+        run_id = "20260810-010000015-tb-rondo-r1"
+        live = self._live_result(run_id)
+        spec = replace(live.prepared.spec, side=Side.RONDO)
+        object.__setattr__(live, "prepared", SimpleNamespace(spec=spec))
+        evidence_relative = self._write_guardian_bundle()
+        evidence, _e_final, _meta = load_guardian_evidence_bundle(
+            live.harbor.jobs_dir,
+            evidence_relative,
+            expected_model=spec.provider.guardian_model,
+            expected_effort=spec.provider.guardian_effort,
+        )
+        object.__setattr__(live, "evidence", (evidence,))
+        metadata_path = self.root / "eval-data/work" / run_id / "api-metadata.json"
+
+        async def run_live(*_args, **_kwargs):
+            self._write_metadata(
+                metadata_path,
+                "main",
+                "guardian",
+                "main",
+                guardian_digests=(evidence.canonical_request_sha256,),
+            )
+            return live
+        pair_identity = mock.Mock(
+            pair_id="test-cli-public-evidence-pair",
+            lock_sha256="9" * 64,
+        )
+        pair_identity.paid_budget = SimpleNamespace(
+            per_side_usd=10.0,
+            pair_usd=20.0,
+        )
+        pair_identity.require_selected_profile.return_value.to_dict.return_value = {
+            **spec.provider.to_public_dict(),
+            "frozen_codex_model_catalog_source_commit": "a" * 40,
+            "frozen_codex_model_catalog_sha256": "b" * 64,
+            "max_guardian_logical_requests": 2,
+        }
+        pair_identity.mode.return_value = SimpleNamespace(batch_id=self.PAID_BATCH_ID)
+        pair_identity.slot_for.return_value = SimpleNamespace(
+            paid_run_id=run_id,
+            slot=1,
+            round=1,
+        )
+        pair_identity.validate_runtime_seccomp.return_value = self.root / "seccomp.json"
+        pair_identity.no_api_seccomp = SimpleNamespace(
+            source_sha256="c" * 64,
+            effective_sha256="d" * 64,
+        )
+        sequence = mock.MagicMock()
+        sequence.__enter__.return_value = sequence
+        paths = RepoPaths(self.root, self.root)
+        with patch.object(
+            terminal_bench_main.RepoPaths, "discover", return_value=paths
+        ), patch.object(
+            terminal_bench_main, "load_active_pair_identity", return_value=pair_identity
+        ), patch.object(
+            terminal_bench_main, "validate_harbor_installation"
+        ), patch.object(
+            terminal_bench_main,
+            "load_runtime_config",
+            return_value=SimpleNamespace(
+                paid_provider_projection=lambda: spec.provider
+            ),
+        ), patch.object(
+            terminal_bench_main,
+            "validate_eval_harness_checkout",
+            return_value="f" * 40,
+        ), patch.object(
+            terminal_bench_main, "_load_manifest", return_value=spec.binary
+        ), patch.object(
+            terminal_bench_main, "validate_results_worktree", return_value=self.root
+        ), patch.object(
+            terminal_bench_main,
+            "validate_measurement_checkout",
+            return_value="e" * 40,
+        ), patch.object(
+            terminal_bench_main,
+            "load_provider_secret",
+            return_value=("OPENAI_API_KEY", "key"),
+        ), patch.object(
+            terminal_bench_main,
+            "lease_from_watchdog",
+            return_value=SimpleNamespace(lease=object(), guard=object()),
+        ), patch.object(
+            terminal_bench_main,
+            "run_budgeted_terminal_bench",
+            mock.AsyncMock(side_effect=run_live),
+        ), patch.object(
+            terminal_bench_main,
+            "_paid_container_metrics",
+            return_value={
+                "container_id": "a" * 64,
+                "cpu_usage_seconds": 1.0,
+                "peak_memory_bytes": 4096,
+            },
+        ), patch.object(
+            terminal_bench_main,
+            "publication_context",
+            return_value=self._publication(side=Side.RONDO),
+        ), patch.object(
+            terminal_bench_main, "PairSequenceLedger", return_value=sequence
+        ), patch("builtins.print") as safe_print:
+            result = terminal_bench_main.main(
+                [
+                    "--side",
+                    "rondo",
+                    "--batch-id",
+                    self.PAID_BATCH_ID,
+                    "--run-id",
+                    run_id,
+                    "--binary-manifest",
+                    "/ignored/manifest.json",
+                    "--docker-host-volume",
+                    os.fspath(self.root),
+                    "--results-worktree-root",
+                    os.fspath(self.root),
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        receipt = json.loads(safe_print.call_args.args[0])
+        record = json.loads(
+            (self.root / "eval/results/runs.jsonl").read_text(encoding="utf-8")
+        )
+        self.assertEqual(receipt["evidence"], record["summary"]["evidence"])
+        self.assertEqual(
+            receipt["evidence"][0]["canonical_request_sha256"],
+            evidence.canonical_request_sha256,
+        )
+        self.assertEqual(
+            receipt["evidence"][0]["relative_path"],
+            "guardian-evidence/0001/E_final.json",
+        )
+        shutil.rmtree(self.root / "work")
+        artifact_root = self.root / receipt["artifacts"]
+        self.assertTrue(
+            (artifact_root / receipt["evidence"][0]["relative_path"]).is_file()
+        )
         runs_root = self.root / "eval-data" / "runs"
         self.assertFalse((runs_root / f".{run_id}.publish.json").exists())
 

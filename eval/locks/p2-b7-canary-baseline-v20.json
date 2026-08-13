@@ -1,0 +1,308 @@
+{
+  "schema_version": 4,
+  "campaign_id": "p2-b7-canary-baseline-v20",
+  "batch_id": "p2-b7-canary-sol-sol-v20",
+  "run_id_date": "20260812",
+  "run_id_sequence_base": 400000000,
+  "taskset_sha256": "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b",
+  "canary_catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf",
+  "terminal_bench_commit": "ffccbe05ee73a9d59518217f294ad711bda39304",
+  "selected_profile": {
+    "provider": "relay",
+    "provider_api": "responses",
+    "provider_profile_sha256": "aca100b0fb0cd51b54d0005b1b106737a94a4c374552429ffef542bd3d20dd15",
+    "provider_endpoint_sha256": "349d8f7aeba75e4610bca5db1c0c294e04c1bdaf5408e44a7753e5c78ac197a9",
+    "main_model": "gpt-5.6-sol",
+    "main_effort": "medium",
+    "guardian_model": "gpt-5.6-sol",
+    "guardian_effort": "low",
+    "requested_main_model": "gpt-5.6-sol",
+    "effective_main_model": "gpt-5.6-sol",
+    "requested_guardian_model": "gpt-5.6-sol",
+    "effective_guardian_model": "gpt-5.6-sol",
+    "main_pricing": {
+      "model_id": "gpt-5.6-sol",
+      "input_usd_per_million": "5",
+      "cached_input_usd_per_million": "0.5",
+      "output_usd_per_million": "30",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-11",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "guardian_pricing": {
+      "model_id": "gpt-5.6-sol",
+      "input_usd_per_million": "5",
+      "cached_input_usd_per_million": "0.5",
+      "output_usd_per_million": "30",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-11",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
+    },
+    "provider_max_attempts": 5,
+    "provider_retry_backoff_seconds": 1.0,
+    "provider_unbilled_retry_statuses": [
+      429,
+      500,
+      502,
+      503,
+      504
+    ],
+    "frozen_codex_model_catalog_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+    "frozen_codex_model_catalog_sha256": "21f7805b7aa9d9ad84e09636b32355b912880ea973e7c3b70cf895d1b5b974e7",
+    "max_guardian_logical_requests": 3
+  },
+  "bundles": {
+    "rondo": {
+      "manifest_path": "eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "3a742072ebc771177c5f504348c9c7b8ef371bad0e450e95f09d9d48258878bd"
+    },
+    "codex": {
+      "manifest_path": "eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "e13a9d0fe8c51ab09ea4552749afb437db6915eb2b069291c918ebf8075b5981"
+    }
+  },
+  "no_api_seccomp": {
+    "profile_path": "eval/seccomp/plan008-userns-minimal-v0.2.3.json",
+    "source_sha256": "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f",
+    "effective_sha256": "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+  },
+  "budget": {
+    "campaign_cap_usd": "1300.000000",
+    "prior_estimated_usd": "980.271525",
+    "run_cap_usd": "40.000000",
+    "max_run_slots": 321,
+    "maximum_legal_request_reservation_usd": "18.885000",
+    "actual_usd": null
+  },
+  "baseline": {
+    "base_rounds": [
+      "aa-rondo-1",
+      "aa-rondo-2",
+      "ab-rondo-1",
+      "ab-codex-1"
+    ],
+    "max_sigma": 2,
+    "max_remaining_infra_per_round": 2,
+    "mechanical_circuit_breaker_tasks": 3,
+    "mechanical_failure_categories": [
+      "provider_response_integrity",
+      "docker_runtime",
+      "guardian_runtime",
+      "publication_integrity",
+      "harness_runtime",
+      "budget_capacity",
+      "operator_interruption"
+    ],
+    "minimum_common_valid_tasks": 8,
+    "conditional_repeats_per_side": 2,
+    "docker_concurrency": 1,
+    "api_max_retries": 0,
+    "base_replacement_policy": "cross_identity_infra_only_continuation",
+    "max_base_attempts": 4,
+    "max_conditional_attempts": 4,
+    "same_category_diagnosis_attempts": 2,
+    "task_local_reproducible_infra_attempts": 3,
+    "provider_response_integrity_circuit_breaker": false,
+    "upstream_timeout_seconds": "180.000",
+    "timeout_compatibility": "monotonic_extension",
+    "concurrent_guardian_capacity_admission": "main_plus_guardian_max_reservation",
+    "continuation_compatibility": "monotonic_budget_admission_fix"
+  },
+  "continuation": [
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/db-wal-recovery",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/db-wal-recovery:a1",
+      "source_run_id": "20260812-380000001-tb-rondo-r1",
+      "source_result_record_sha256": "18e0dd8a171d7085dcd279d5a95ae0bb84bb1cfc12aec430eed73fb8a5bed166",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/extract-elf",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/extract-elf:a1",
+      "source_run_id": "20260812-380000002-tb-rondo-r1",
+      "source_result_record_sha256": "50dac1c0e40283acad7e18b68ec46c940f87daf4d6ddcb4834b27b0415d4a1a3",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/filter-js-from-html",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/filter-js-from-html:a1",
+      "source_run_id": "20260812-380000003-tb-rondo-r1",
+      "source_result_record_sha256": "210ccfca0e865772a0cd23dcbf47186a3aecfbc8ca1f9cae17e56cf645c1dc28",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/fix-git",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/fix-git:a1",
+      "source_run_id": "20260812-380000004-tb-rondo-r1",
+      "source_result_record_sha256": "8bacd75bd5bc39adbf881bd25e4290354aabaf04030070b8c35fd46e64a8b9eb",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/headless-terminal",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/headless-terminal:a1",
+      "source_run_id": "20260812-380000005-tb-rondo-r1",
+      "source_result_record_sha256": "85d66d1f77bb7842d308446ba08115d519ede8638b3e0b99d66f0a9af88ae8eb",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/openssl-selfsigned-cert",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/openssl-selfsigned-cert:a1",
+      "source_run_id": "20260812-380000006-tb-rondo-r1",
+      "source_result_record_sha256": "f46de7d3624fb7248280d52d91d0546cfd0775eec044619d6b6e595667c26c23",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/polyglot-c-py",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/polyglot-c-py:a1",
+      "source_run_id": "20260812-380000007-tb-rondo-r1",
+      "source_result_record_sha256": "19122207a6b460a9b497b9dd6e431a7837dc041e284e72475184e84b48341e49",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/sanitize-git-repo",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/sanitize-git-repo:a2",
+      "source_run_id": "20260812-380000048-tb-rondo-r2",
+      "source_result_record_sha256": "2f735b9f1dce7e19a15a08f1d8948e9e23eff52dc92e93cec45584ee17a4f805",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-1:terminal-bench/sqlite-db-truncate",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-1:terminal-bench/sqlite-db-truncate:a1",
+      "source_run_id": "20260812-380000009-tb-rondo-r1",
+      "source_result_record_sha256": "d01675740d7b1450d2e164512587908ea4ee4d79e29f9b0c97e6cfc12fb050cd",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/db-wal-recovery",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/db-wal-recovery:a1",
+      "source_run_id": "20260812-380000011-tb-rondo-r1",
+      "source_result_record_sha256": "17fb5f1634bd13bc1cf6f58b30d7712a07cf8736cfb55749040a7470c7672f57",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/extract-elf",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/extract-elf:a1",
+      "source_run_id": "20260812-380000012-tb-rondo-r1",
+      "source_result_record_sha256": "83a0a4ddf1fcf6298104cfd88dfb839b341f8c8d355878b60e80bcc1c9cdecee",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/filter-js-from-html",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/filter-js-from-html:a1",
+      "source_run_id": "20260812-380000013-tb-rondo-r1",
+      "source_result_record_sha256": "e6610e858da732c17d66f5c86dcf03e4ff76c4fe86e6e03f3033dcaf2eaa6837",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/fix-git",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/fix-git:a1",
+      "source_run_id": "20260812-380000014-tb-rondo-r1",
+      "source_result_record_sha256": "56a5d996e2cce86b9f4752f479b7e91d1cce44a9b201af0e24f7966d8886770f",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/headless-terminal",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/headless-terminal:a1",
+      "source_run_id": "20260812-380000015-tb-rondo-r1",
+      "source_result_record_sha256": "77a4c64f15f892b739e8cb8ccee4812b6e82e5ffeed396da693423d7ff33e7b4",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/openssl-selfsigned-cert",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/openssl-selfsigned-cert:a1",
+      "source_run_id": "20260812-380000016-tb-rondo-r1",
+      "source_result_record_sha256": "7e7abbddadf55e1197e81ef33438f3afe9d7aad83f7d60cb468d39e7bb1b3550",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/polyglot-c-py",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/polyglot-c-py:a1",
+      "source_run_id": "20260812-380000017-tb-rondo-r1",
+      "source_result_record_sha256": "e835ae1aff6581a5d8721a26efa708f68c783fb45f0cb3d92f58a78d0648e53a",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/sanitize-git-repo",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/sanitize-git-repo:a1",
+      "source_run_id": "20260812-380000018-tb-rondo-r1",
+      "source_result_record_sha256": "feefec7ed8a8abbe5281bd09a6283eb5034894cf4a05fded7e2a9b7e3230d5f3",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:aa-rondo-2:terminal-bench/sqlite-db-truncate",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:aa-rondo-2:terminal-bench/sqlite-db-truncate:a1",
+      "source_run_id": "20260812-380000019-tb-rondo-r1",
+      "source_result_record_sha256": "60f448985a1bec950d14a80c3b80e3f50262ee4d9291fc87894ba8f7fdd26f2d",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:ab-rondo-1:terminal-bench/db-wal-recovery",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:ab-rondo-1:terminal-bench/db-wal-recovery:a1",
+      "source_run_id": "20260812-380000021-tb-rondo-r1",
+      "source_result_record_sha256": "a6cac51030c29400a3eb7b1aa5e37e447e250ce935d01fd0279fce3dba0b1490",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:ab-rondo-1:terminal-bench/extract-elf",
+      "source_campaign_id": "p2-b7-canary-baseline-v18",
+      "source_campaign_lock_sha256": "01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346",
+      "source_slot_id": "base:ab-rondo-1:terminal-bench/extract-elf:a1",
+      "source_run_id": "20260812-380000022-tb-rondo-r1",
+      "source_result_record_sha256": "16a337ec3715a1e69c07ded785c382dd7648018f69740d803742e8bca723482d",
+      "source_upstream_timeout_seconds": "90.000"
+    },
+    {
+      "chain_id": "base:ab-rondo-1:terminal-bench/filter-js-from-html",
+      "source_campaign_id": "p2-b7-canary-baseline-v19",
+      "source_campaign_lock_sha256": "20483f7c3ce6f7fe058bbe34185464dade8c22280a34ece5b8ced009b2d84e73",
+      "source_slot_id": "base:ab-rondo-1:terminal-bench/filter-js-from-html:a3",
+      "source_run_id": "20260812-390000103-tb-rondo-r3",
+      "source_result_record_sha256": "c5d6f8a0b047304e8a8882e6fc72e2d6e0c35d33fd094502a144f0d4dca775cd",
+      "source_upstream_timeout_seconds": "180.000"
+    }
+  ]
+}

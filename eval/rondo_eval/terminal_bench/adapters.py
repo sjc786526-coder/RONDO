@@ -107,6 +107,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
         main_effort: str,
         guardian_model: str,
         guardian_effort: str,
+        task_workdir: str = FIX_GIT_CANONICAL_WORKDIR,
+        task_requires_existing_git_repo: bool = True,
         frozen_model_catalog_path: str | None = None,
         frozen_model_catalog_sha256: str | None = None,
         frozen_model_catalog_source_commit: str | None = None,
@@ -153,6 +155,16 @@ class UploadBinaryAdapter(HarborCodexAgent):
             raise AdapterError("guardian model is required and unsafe")
         if guardian_effort not in _REASONING_EFFORTS:
             raise AdapterError("guardian reasoning effort is unsupported")
+        if (
+            not isinstance(task_workdir, str)
+            or not task_workdir.startswith("/")
+            or task_workdir == "/"
+            or any(character in task_workdir for character in ("\x00", "\n", "\r"))
+            or PurePosixPath(task_workdir).as_posix() != task_workdir
+        ):
+            raise AdapterError("task workdir is invalid")
+        if not isinstance(task_requires_existing_git_repo, bool):
+            raise AdapterError("task Git policy is invalid")
         catalog_values = (
             frozen_model_catalog_path,
             frozen_model_catalog_sha256,
@@ -190,6 +202,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._main_effort = main_effort
         self._guardian_model = guardian_model
         self._guardian_effort = guardian_effort
+        self._task_workdir = task_workdir
+        self._task_requires_existing_git_repo = task_requires_existing_git_repo
         self._frozen_model_catalog_path = frozen_model_catalog_path
         self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
         self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
@@ -439,6 +453,42 @@ class UploadBinaryAdapter(HarborCodexAgent):
             "CODEX_HOME": remote_home,
             "GIT_CONFIG_GLOBAL": remote_gitconfig,
         }
+        git_tree_checks = (
+            'test -d "$task_workdir/.git"; test -w "$task_workdir/.git"; '
+            'test -d "$task_workdir/.git/refs"; '
+            'test -w "$task_workdir/.git/refs"; '
+            'test -d "$task_workdir/.git/logs"; '
+            'test -w "$task_workdir/.git/logs"; '
+            'test -f "$task_workdir/.git/index"; '
+            'test -w "$task_workdir/.git/index"; '
+            if self._task_requires_existing_git_repo
+            else ""
+        )
+        git_status_checks = (
+            'test "$(git -C "$task_workdir" rev-parse --is-inside-work-tree)" = true; '
+            'git -C "$task_workdir" status --porcelain=v1 --untracked-files=no >/dev/null'
+            if self._task_requires_existing_git_repo
+            else ""
+        )
+        git_configuration = (
+            ': > {config}; chmod 0600 {config}; '
+            'git config --global --replace-all safe.directory "$task_workdir"; '
+            'test "$(git config --global --get-all safe.directory | wc -l)" -eq 1; '
+            'test "$(git config --global --get-all safe.directory)" = "$task_workdir"; '
+            "git config --global --replace-all user.name {name}; "
+            'test "$(git config --global --get-all user.name | wc -l)" -eq 1; '
+            'test "$(git config --global --get-all user.name)" = {name}; '
+            "git config --global --replace-all user.email {email}; "
+            'test "$(git config --global --get-all user.email | wc -l)" -eq 1; '
+            'test "$(git config --global --get-all user.email)" = {email}; '
+        ).format(
+            config=shlex.quote(remote_gitconfig),
+            name=shlex.quote(FIX_GIT_GIT_USER_NAME),
+            email=shlex.quote(FIX_GIT_GIT_USER_EMAIL),
+        ) if self._task_requires_existing_git_repo else (
+            f": > {shlex.quote(remote_gitconfig)}; "
+            f"chmod 0600 {shlex.quote(remote_gitconfig)}; "
+        )
 
         # Harbor freezes environment.default_user to the task's 1000:1000
         # identity.  Root may only expose the exact current task workdir; all
@@ -448,7 +498,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
             environment,
             (
                 "set -e; task_workdir=$(pwd -P); "
-                f'test "$task_workdir" = "{FIX_GIT_CANONICAL_WORKDIR}"; '
+                f'test "$task_workdir" = {json.dumps(self._task_workdir)}; '
                 'test -d "$task_workdir"; '
                 'test ! -L "$task_workdir"; '
                 'chmod -R a+rwX -- "$task_workdir"'
@@ -462,7 +512,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 "set -e; "
                 f'test "$(id -u):$(id -g)" = "{TERMINAL_BENCH_AGENT_USER}"; '
                 "task_workdir=$(pwd -P); "
-                f'test "$task_workdir" = "{FIX_GIT_CANONICAL_WORKDIR}"; '
+                f'test "$task_workdir" = {json.dumps(self._task_workdir)}; '
                 'test -d "$task_workdir"; '
                 f"mkdir -p {shlex.quote(remote_home)} {shlex.quote(remote_secrets)} "
                 f"{shlex.quote(agent_dir)}; "
@@ -472,30 +522,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"test -O {shlex.quote(remote_secrets)}; "
                 f"test -O {shlex.quote(agent_dir)}; "
                 'test -w "$task_workdir"; '
-                'test -d "$task_workdir/.git"; test -w "$task_workdir/.git"; '
-                'test -d "$task_workdir/.git/refs"; '
-                'test -w "$task_workdir/.git/refs"; '
-                'test -d "$task_workdir/.git/logs"; '
-                'test -w "$task_workdir/.git/logs"; '
-                'test -f "$task_workdir/.git/index"; '
-                'test -w "$task_workdir/.git/index"; '
-                f": > {shlex.quote(remote_gitconfig)}; "
-                f"chmod 0600 {shlex.quote(remote_gitconfig)}; "
-                'git config --global --replace-all safe.directory "$task_workdir"; '
-                'test "$(git config --global --get-all safe.directory | wc -l)" -eq 1; '
-                'test "$(git config --global --get-all safe.directory)" = "$task_workdir"; '
-                "git config --global --replace-all user.name "
-                f"{shlex.quote(FIX_GIT_GIT_USER_NAME)}; "
-                'test "$(git config --global --get-all user.name | wc -l)" -eq 1; '
-                "test \"$(git config --global --get-all user.name)\" = "
-                f"{shlex.quote(FIX_GIT_GIT_USER_NAME)}; "
-                "git config --global --replace-all user.email "
-                f"{shlex.quote(FIX_GIT_GIT_USER_EMAIL)}; "
-                'test "$(git config --global --get-all user.email | wc -l)" -eq 1; '
-                "test \"$(git config --global --get-all user.email)\" = "
-                f"{shlex.quote(FIX_GIT_GIT_USER_EMAIL)}; "
-                'test "$(git -C "$task_workdir" rev-parse --is-inside-work-tree)" = true; '
-                'git -C "$task_workdir" status --porcelain=v1 --untracked-files=no >/dev/null'
+                f"{git_tree_checks}"
+                f"{git_configuration}"
+                f"{git_status_checks}"
             ),
             env=nonsecret_env,
             stage="run",
@@ -506,7 +535,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
             # Compose mounts the private staging file as a Docker secret.  No
             # environment.exec ``-e KEY=value`` argument is used because Harbor's
             # Docker backend would serialize that value into docker argv.
-            secret_path = "/run/secrets/rondo_eval_provider_api_key"
+            # The host writes the complete, bounded auth.json payload.  Task
+            # images are not required to contain Python merely to JSON-encode
+            # a key that is already protected by the Compose secret mount.
+            secret_path = "/run/secrets/rondo_eval_provider_auth_json"
             secret_owner = await _checked_exec_as_agent(
                 environment,
                 command=f"stat -c '%u:%g' -- {shlex.quote(secret_path)}",
@@ -532,10 +564,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"test -s {shlex.quote(secret_path)}; "
                 f"test -r {shlex.quote(secret_path)}; "
                 f"test ! -w {shlex.quote(secret_path)}; umask 077; "
-                "python3 -c 'import json,sys; print(json.dumps({\"OPENAI_API_KEY\":sys.stdin.read()}))' "
-                f"< {shlex.quote(secret_path)} "
-                f"> {shlex.quote(remote_auth)}; "
-                f"chmod 0600 {shlex.quote(remote_auth)}; "
+                f"ln -sfn {shlex.quote(secret_path)} {shlex.quote(remote_auth)}; "
                 f"ln -sfn {shlex.quote(remote_auth)} "
                 f"{shlex.quote(remote_home + '/auth.json')}"
             )
@@ -676,6 +705,8 @@ def adapter_for(
     main_effort: str,
     guardian_model: str,
     guardian_effort: str,
+    task_workdir: str = FIX_GIT_CANONICAL_WORKDIR,
+    task_requires_existing_git_repo: bool = True,
     frozen_model_catalog_path: str | None = None,
     frozen_model_catalog_sha256: str | None = None,
     frozen_model_catalog_source_commit: str | None = None,
@@ -710,6 +741,8 @@ def adapter_for(
         main_effort=main_effort,
         guardian_model=guardian_model,
         guardian_effort=guardian_effort,
+        task_workdir=task_workdir,
+        task_requires_existing_git_repo=task_requires_existing_git_repo,
         frozen_model_catalog_path=frozen_model_catalog_path,
         frozen_model_catalog_sha256=frozen_model_catalog_sha256,
         frozen_model_catalog_source_commit=frozen_model_catalog_source_commit,
@@ -757,6 +790,11 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         ("main_effort", adapter._main_effort),
         ("guardian_model", adapter._guardian_model),
         ("guardian_effort", adapter._guardian_effort),
+        ("task_workdir", adapter._task_workdir),
+        (
+            "task_requires_existing_git_repo",
+            json.dumps(adapter._task_requires_existing_git_repo),
+        ),
     ]
     if adapter._frozen_model_catalog_path is not None:
         values.extend(
