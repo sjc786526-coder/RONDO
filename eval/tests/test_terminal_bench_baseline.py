@@ -1489,6 +1489,15 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             guardian_technical_failure=False,
             budget_run={"stopped": False, "stop_reason": None},
         )
+        capacity = baseline_cli._mechanical_failure_category(
+            task_outcome=TaskOutcome.INFRA,
+            failure_stage=None,
+            guardian_technical_failure=True,
+            budget_run={
+                "stopped": True,
+                "stop_reason": "budget_capacity_exhausted",
+            },
+        )
         ordinary = baseline_cli._mechanical_failure_category(
             task_outcome=TaskOutcome.FAIL,
             failure_stage=None,
@@ -1499,6 +1508,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             provider, MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
         )
         self.assertEqual(docker, MechanicalFailureCategory.DOCKER_RUNTIME)
+        self.assertEqual(capacity, MechanicalFailureCategory.BUDGET_CAPACITY)
         self.assertIsNone(ordinary)
 
     def test_storage_projection_keeps_initial_final_and_growth(self) -> None:

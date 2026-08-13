@@ -2102,7 +2102,10 @@ def _mechanical_failure_category(
         return MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
     if stop_reason in _GUARDIAN_PROTOCOL_STOP_REASONS:
         return MechanicalFailureCategory.GUARDIAN_RUNTIME
-    if stop_reason == "usage_cost_exceeded_reservation":
+    if stop_reason in {
+        "usage_cost_exceeded_reservation",
+        "budget_capacity_exhausted",
+    }:
         return MechanicalFailureCategory.BUDGET_CAPACITY
     if stop_reason == "interrupted_request" or failure_stage == "interrupted":
         return MechanicalFailureCategory.OPERATOR_INTERRUPTION

@@ -408,6 +408,70 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(request["reserved_usd"], "1.000000")
         self.assertEqual(request["charged_usd"], "1.000000")
 
+    def test_main_admission_reserves_capacity_for_concurrent_guardian(self) -> None:
+        limited_ledger = PersistentBudgetLedger(
+            self.root / "guardian-headroom-budget.json",
+            batch_id="guardian-headroom",
+            total_cap_usd="1.5",
+            default_run_cap_usd="5",
+        )
+        limited_proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=limited_ledger,
+            run_id="guardian-headroom-run",
+            metadata_path=self.root / "guardian-headroom-metadata.json",
+            **self._profile_kwargs(),
+            request_reservation_usd="1",
+            max_guardian_logical_requests=1,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        ).start()
+        forwarded_before = len(self.upstream.requests)
+        try:
+            status, _body, _headers = self._post(
+                self._body(),
+                request_id="main-without-guardian-headroom",
+                proxy=limited_proxy,
+            )
+        finally:
+            limited_proxy.close()
+        self.assertEqual(status, 429)
+        self.assertEqual(len(self.upstream.requests), forwarded_before)
+        run = limited_ledger.snapshot()["runs"]["guardian-headroom-run"]
+        self.assertTrue(run["stopped"])
+        self.assertEqual(run["stop_reason"], "budget_capacity_exhausted")
+        self.assertEqual(run["requests"], {})
+        limited_ledger.close()
+
+    def test_reserved_main_headroom_allows_concurrent_guardian_claim(self) -> None:
+        ledger = PersistentBudgetLedger(
+            self.root / "guardian-concurrent-budget.json",
+            batch_id="guardian-concurrent",
+            total_cap_usd="2",
+            default_run_cap_usd="5",
+        )
+        proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=ledger,
+            run_id="guardian-concurrent-run",
+            metadata_path=self.root / "guardian-concurrent-metadata.json",
+            **self._profile_kwargs(),
+            request_reservation_usd="1",
+            max_guardian_logical_requests=1,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        )
+        proxy._claim_and_reserve_logical_request("main", "a" * 64, "main")
+        proxy._claim_and_reserve_logical_request("guardian", "b" * 64, "guardian")
+        requests = ledger.snapshot()["runs"]["guardian-concurrent-run"]["requests"]
+        self.assertEqual(set(requests), {"main", "guardian"})
+        self.assertEqual(
+            sum(Decimal(item["reserved_usd"]) for item in requests.values()),
+            Decimal("2.000000"),
+        )
+        proxy.close()
+        ledger.close()
+
     def test_invalid_request_reservations_are_rejected(self) -> None:
         for number, reservation in enumerate(("0", "40.000001", "nan", True)):
             with self.subTest(reservation=reservation), self.assertRaisesRegex(

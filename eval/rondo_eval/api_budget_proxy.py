@@ -92,6 +92,7 @@ _STOP_REASONS = {
     "logical_request_limit_exceeded",
     "proxy_closing",
     "usage_cost_exceeded_reservation",
+    "budget_capacity_exhausted",
 }
 GUARDIAN_OUTPUT_SCHEMA = {
     "type": "object",
@@ -120,6 +121,10 @@ class ApiBudgetProxyError(ValueError):
 
 class BudgetStopped(ApiBudgetProxyError):
     """Raised before forwarding when an authorization limit is exhausted."""
+
+
+class BudgetCapacityExhausted(BudgetStopped):
+    """Raised when a new reservation cannot fit the frozen run or batch cap."""
 
 
 class _GuardianLogicalRequestLimitExceeded(ApiBudgetProxyError):
@@ -354,6 +359,8 @@ class PersistentBudgetLedger:
         run_id: str,
         request_id: str,
         amount_usd: Decimal | str | None = None,
+        *,
+        additional_capacity_usd: Decimal | str = Decimal(0),
     ) -> Decimal:
         _require_safe_id(run_id, "run id")
         _require_safe_id(request_id, "request id")
@@ -375,12 +382,25 @@ class PersistentBudgetLedger:
                 ).quantize(_MONEY_QUANTUM)
             else:
                 amount = _money(amount_usd)
+            additional_capacity = _money(additional_capacity_usd)
             if amount <= 0 or amount > Decimal(run["cap_usd"]):
-                raise BudgetStopped("request reservation has no authorized capacity")
-            if run_spent + run_reserved + amount > Decimal(run["cap_usd"]):
-                raise BudgetStopped("request reservation would exceed the run cost cap")
-            if batch_spent + batch_reserved + amount > self.total_cap:
-                raise BudgetStopped("request reservation would exceed the batch cost cap")
+                raise BudgetCapacityExhausted(
+                    "request reservation has no authorized capacity"
+                )
+            if (
+                run_spent + run_reserved + amount + additional_capacity
+                > Decimal(run["cap_usd"])
+            ):
+                raise BudgetCapacityExhausted(
+                    "request reservation would exceed the run cost cap"
+                )
+            if (
+                batch_spent + batch_reserved + amount + additional_capacity
+                > self.total_cap
+            ):
+                raise BudgetCapacityExhausted(
+                    "request reservation would exceed the batch cost cap"
+                )
             run["requests"][request_id] = {
                 "status": "reserved",
                 "reserved_usd": _money_text(amount),
@@ -916,6 +936,7 @@ class LoopbackResponsesProxy:
         self._max_guardian_logical_requests = max_guardian_logical_requests
         self._guardian_logical_requests = 0
         self._guardian_body_sha256s: set[str] = set()
+        self._main_request_ids: set[str] = set()
         self._max_logical_requests = max_logical_requests
         self._logical_requests = 0
         self._request_policy_lock = threading.Lock()
@@ -1110,6 +1131,13 @@ class LoopbackResponsesProxy:
             return
         except _LogicalRequestLimitExceeded:
             self._reject(handler, 409, "logical_request_limit_exceeded")
+            return
+        except BudgetCapacityExhausted:
+            self._ledger.stop_run(
+                self._run_id,
+                stop_reason="budget_capacity_exhausted",
+            )
+            self._reject(handler, 429, "budget_stopped")
             return
         except BudgetStopped:
             self._reject(handler, 429, "budget_stopped")
@@ -1354,6 +1382,15 @@ class LoopbackResponsesProxy:
         """Persist the reservation before committing in-memory logical claims."""
 
         with self._request_policy_lock:
+            run = self._ledger.snapshot()["runs"].get(self._run_id)
+            if not isinstance(run, dict) or not isinstance(run.get("requests"), dict):
+                raise ApiBudgetProxyError("budget run projection is invalid")
+            if role == "main" and any(
+                isinstance(run["requests"].get(main_request_id), dict)
+                and run["requests"][main_request_id].get("status") == "reserved"
+                for main_request_id in self._main_request_ids
+            ):
+                raise ApiBudgetProxyError("concurrent main requests are disabled")
             if role == "guardian" and body_sha256 in self._guardian_body_sha256s:
                 self._ledger.stop_run(
                     self._run_id,
@@ -1390,9 +1427,18 @@ class LoopbackResponsesProxy:
                 self._run_id,
                 request_id,
                 amount_usd=self._request_reservations[role],
+                additional_capacity_usd=(
+                    self._request_reservations["guardian"]
+                    if role == "main"
+                    and self._max_guardian_logical_requests != 0
+                    and self._max_logical_requests != 1
+                    else Decimal(0)
+                ),
             )
             self._logical_requests += 1
-            if role == "guardian":
+            if role == "main":
+                self._main_request_ids.add(request_id)
+            else:
                 self._guardian_logical_requests += 1
                 self._guardian_body_sha256s.add(body_sha256)
 
