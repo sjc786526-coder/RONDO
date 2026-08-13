@@ -174,7 +174,7 @@ pub struct ConfigToml {
     /// ARC.
     pub approvals_reviewer: Option<ApprovalsReviewer>,
 
-    /// Optional Guardian auto-review policy, model, reasoning, and evidence settings.
+    /// Optional Guardian auto-review policy, model, provider, reasoning, and evidence settings.
     #[serde(default)]
     pub auto_review: Option<AutoReviewToml>,
 
@@ -559,9 +559,13 @@ pub struct AutoReviewToml {
 
     /// Model slug the guardian review session should use. Takes precedence over
     /// the model catalog's `auto_review_model_override` and over the provider's
-    /// default review model. The guardian still inherits the parent session's
-    /// model provider, so this must name a model the parent provider serves.
+    /// default review model. This must name a model served by the guardian's
+    /// selected model provider.
     pub model: Option<String>,
+
+    /// Model provider ID the guardian review session should use from the merged
+    /// `model_providers` registry. Unset keeps inheriting the parent provider.
+    pub model_provider: Option<String>,
 
     /// Reasoning effort the guardian review session should use. When unset, the
     /// effort keeps being derived from the review model's capabilities.

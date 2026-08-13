@@ -344,3 +344,16 @@ standard/Lite 形态均补回归。
 - focused fake/model-free unittest 80/80（45 + 8 + 27）通过，`git diff --check` 和模板/TOML/lock 一致性通过。
   本批未下载权重，未安装/构建 CUDA 或 llama.cpp，未运行模型/GPU/Docker/Cargo/Bazel/just；当前 CPU lock/capability
   不变，Plan 015 仍为 `download_ready_blocked_on_user_approval`。Linux CUDA build-ready 合同与三项汇合门见 Plan 016。
+
+## L2a Guardian 独立 provider 覆盖（2026-08-12）
+
+- `[auto_review].model_provider` 可从合并后的 provider registry 选择 Guardian 独立 provider；未知/空白 ID
+  fail-closed，项目局部配置不能改变 provider 目的地。未配置时继续继承主 Agent provider。
+- Guardian 使用完整 provider 配置并保持 request/stream retry `1/1`；显式无鉴权 provider 不继承主 Agent
+  凭据，provider 鉴权继承策略进入 session 复用键。主 Agent provider 与现有 Guardian 安全收缩不变。
+- 阶段 B 经资源门禁和仓库受锁入口完成 schema、clippy/fix、格式化、11 项 config/Guardian/schema 精确回归、
+  sample crate 编译，以及 2 项非 skip loopback 出站验收。双 endpoint 分别精确收到主 Agent 2 请求与 Guardian
+  1 请求，并验证 Guardian 独立 header/query/model/effort 与无主凭据泄漏。
+- 该阶段只完成 provider 分流能力；没有加载本地模型、调用真实 provider、运行 Docker/GPU，也不宣称 L2
+  model-backed 或 L7 一键切换完成。详细合同与证据见
+  `plan/019-l2a-guardian-provider-override-execplan.md`。

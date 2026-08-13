@@ -166,6 +166,8 @@ use review::GuardianReviewOutcome;
 use review::run_guardian_review_session_with_retry as run_guardian_review_session_for_test;
 #[cfg(test)]
 use review_session::build_guardian_review_session_config as build_guardian_review_session_config_for_test;
+#[cfg(test)]
+use review_session::guardian_model_provider_auth_manager as guardian_model_provider_auth_manager_for_test;
 
 #[cfg(test)]
 mod tests;

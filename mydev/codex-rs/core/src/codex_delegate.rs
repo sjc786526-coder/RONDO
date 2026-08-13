@@ -81,6 +81,7 @@ struct PendingMcpInvocation {
 pub(crate) async fn run_codex_thread_interactive(
     config: Config,
     auth_manager: Arc<AuthManager>,
+    model_provider_auth_manager: Option<Arc<AuthManager>>,
     models_manager: SharedModelsManager,
     parent_session: Arc<Session>,
     parent_ctx: Arc<TurnContext>,
@@ -104,6 +105,7 @@ pub(crate) async fn run_codex_thread_interactive(
         user_instructions,
         installation_id: parent_session.installation_id.clone(),
         auth_manager,
+        model_provider_auth_manager,
         models_manager,
         environment_manager: parent_session
             .services
@@ -216,9 +218,11 @@ pub(crate) async fn run_codex_thread_one_shot(
     // requiring the caller to cancel the parent token.
     let child_cancel = cancel_token.child_token();
     let parent_turn_id = parent_ctx.sub_id.clone();
+    let model_provider_auth_manager = Some(Arc::clone(&auth_manager));
     let (session, io) = Box::pin(run_codex_thread_interactive(
         config,
         auth_manager,
+        model_provider_auth_manager,
         models_manager,
         parent_session,
         parent_ctx,

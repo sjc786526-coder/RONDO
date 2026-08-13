@@ -1698,6 +1698,7 @@ impl ThreadManagerState {
             allow_provider_model_fallback,
             user_instructions,
             installation_id: self.installation_id.clone(),
+            model_provider_auth_manager: Some(Arc::clone(&auth_manager)),
             auth_manager,
             models_manager: Arc::clone(&self.models_manager),
             environment_manager: Arc::clone(&self.environment_manager),

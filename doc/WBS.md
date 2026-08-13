@@ -64,8 +64,8 @@
   doctor、fake 和启动入口。当前官方模板、4k/8k 服务参数命令合同和 receipt v2 配置指纹已通过 model-free 门禁；
   model-backed client 必须在请求前后重验 PID/start ticks、cmdline、监听 socket、runtime/model/endpoint 与当前配置；这
   仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。当前无权重，
-  CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
-  L2a/L3/L4 均未实现验收，不称“只差权重”。
+  CPU frontend/runtime closure 是已验边界；L2a provider 分流已完成受锁回归与双 loopback 端点验收，
+  但 GPU runtime、model-backed 启动/推理、显存/延迟与 L3/L4 仍未验收，不称“只差权重”。
 - **当前阶段：P1 的 B1、B2、B3、L1 与 L2 CPU x64 前置已整体完成，M1 已通过。Plan 014 v19 在同一冻结
   Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
   reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved 且 S2 绑定 verified。
@@ -94,7 +94,7 @@
 |---|---|---|
 | 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1 B1/B2/B3 与 M1 完成；进入 B4/B5/B6，B7 另行授权 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
-| 2 | 本地审批模型接入与横评 | L1 与 L2 CPU x64 前置完成；已有真实 E_final，GPU/model-backed、L2a/L3/L4 待 P2 |
+| 2 | 本地审批模型接入与横评 | L1、L2 CPU x64 前置与 L2a provider 分流完成；GPU/model-backed、L3/L4 待 P2 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -171,14 +171,13 @@ B3 使用 Plan 014 v19 的 source-bound Sol/Sol profile 与唯一 identity 完�
 evidence 集合绑定 verified；两侧 public result、pair lock、sequence ledger、container metrics 和 profile/endpoint
 hash 经既有 `assess_m1` 聚合为 `m1=passed`、`reasons=[]`。v19 正式费用 `$0.870787`，Plan 014 全阶段累计本地估算
 `$6.988825 < $280`，供应商实际账单未知。历史失败 identity 及其 ledger/result/artifact 保持原终态，不回填。
-L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
+L2 的 CPU x64 前端/运行闭包前置、首批真实 E_final 输入与 L2a provider 分流现已具备；GPU/model-backed
+实模验收与 L3/L4 留在 P2。
 下一步是 B4 分层与 B5/B6 轻量设施，不自动启动 B7 付费跑批。执行细节见 Plan 014 与本批 `agent_log`。
 
-P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
-Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，
-已拆为方向 2 的 **L2a**，是 L7 的前置。任何"P0 完成即可一键切换本地模型"的表述都不成立。
-这一边界与 `v0.147.0` 的 provider 默认模型分流不矛盾：默认模型可随 provider/auth 变化，
-但 Guardian 请求仍没有因此切到另一个 provider 或 base_url。
+P0 的能力边界仍需记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。方向 2 的 **L2a** 已补齐
+独立 provider 与 base URL 分流并完成 mock 验收；L7 仍须把 S1 + L2a 配置实际指向已通过 model-backed
+验收的本地服务。任何“只完成 P0 或 L2a 就代表本地模型一键切换已可用”的表述都不成立。
 
 ## 6. 授权门
 

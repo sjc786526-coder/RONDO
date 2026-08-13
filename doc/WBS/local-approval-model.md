@@ -32,7 +32,7 @@
   `not_run`，launcher 的运行时投影为 `cpu_only_x64`。无模型 doctor 返回
   `cpu_frontend_ready_model_missing_gpu_unvalidated`/78；即使补入模型，在 GPU runtime 和
   model-backed 参数验证前也不启动真实服务。本批未下载权重、未启动模型/推理、未量显存/
-  上下文/首 token/总耗时，L2 真实验收与 L2a/L3/L4 保持待后续阶段；当前不表述为
+  上下文/首 token/总耗时，L2 真实验收与 L3/L4 保持待后续阶段；当前不表述为
   “只差权重”。
 - **模型工程冻结完成，权重未下载**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
@@ -104,17 +104,18 @@
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）
 
-L2 只是把本地服务跑起来，**并不等于 Guardian 会把请求发到它那里**。
-`build_guardian_review_session_config`（`core/src/guardian/review_session.rs`）克隆父会话配置，只把
-provider 字段中的 `request_max_retries` / `stream_max_retries` 改为 1，provider id 与 base_url 原样继承。
-`v0.147.0` 新增的 provider/auth 默认模型分流也没有改变这个事实。因此 P0-S1 只改本地
-模型名时，该名称仍会被发往父会话的 provider 端点。
+状态：**已验收**。实现与证据见
+`plan/019-l2a-guardian-provider-override-execplan.md`。
 
-- 目标：让 Guardian 审批会话可以使用与主 Agent **不同的** provider。
-- 落点：在 `[auto_review]` 增加 provider 覆盖项，并在 `build_guardian_review_session_config` 中一并改写 `model_provider_id` / `model_provider`。
-- 需要一并处理的现实问题：本地服务的鉴权形态（多为无鉴权或假 key）、`supports_websockets = false`、超时与重试、本地模型不在模型目录中时的 `ModelInfo` 回退路径（`review.rs` 已有 `model_override.unwrap_or(turn.model_info.slug)` 的 else 分支可用）。
-- 硬约束：不改变主 Agent 的 provider 解析；未配置覆盖时行为与 P0 后完全一致。
-- 验收：主 Agent 用 OpenAI provider、Guardian 用本地 provider 时，两侧请求分别落到各自端点（用两个 mock server 断言）。
+- `[auto_review].model_provider` 引用合并后的 `model_providers` registry；未知或空白 ID 在配置加载时
+  fail-closed，项目局部配置不能重定向 provider。
+- Guardian 替换 provider ID 与完整配置后仍把 request/stream retry 固定为 `1/1`；未配置时继续继承
+  主 Agent provider，主 Agent 配置与端点不变。
+- 显式独立 provider 按自身 env/static bearer/command/无鉴权语义工作；无鉴权 endpoint 不接收主 Agent
+  凭据，鉴权继承策略也参与 Guardian session 复用失效。
+- 阶段 B 已通过 schema、config/Guardian 安全回归与两个 loopback mock endpoint 验收：主 Agent 和
+  Guardian 分别精确命中各自端点。该结论只证明 provider 分流设施，不代表 L2 本地模型已经加载或 L7
+  端到端切换完成。
 
 ### L3 离线影子回放器（规模 M）—— **M3**
 

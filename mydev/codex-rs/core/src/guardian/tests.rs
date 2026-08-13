@@ -28,6 +28,8 @@ use codex_config::config_toml::ConfigToml;
 use codex_config::types::McpServerConfig;
 use codex_exec_server::LOCAL_FS;
 use codex_features::Feature;
+use codex_login::AuthManager;
+use codex_login::CodexAuth;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_4_MODEL_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
@@ -3368,6 +3370,140 @@ async fn guardian_review_session_config_keeps_bedrock_provider_for_bedrock_gpt_5
             expected_model_provider,
         )
     );
+}
+
+#[tokio::test]
+async fn guardian_review_session_config_uses_complete_provider_override_without_mutating_parent() {
+    let mut parent_config = test_config().await;
+    let provider_id = "guardian-local";
+    let provider = ModelProviderInfo {
+        name: "Guardian local".to_string(),
+        base_url: Some("http://127.0.0.1:8877/v1".to_string()),
+        experimental_bearer_token: Some("guardian-test-token".to_string()),
+        query_params: Some(HashMap::from([(
+            "route".to_string(),
+            "guardian".to_string(),
+        )])),
+        http_headers: Some(HashMap::from([(
+            "x-guardian-provider".to_string(),
+            "isolated".to_string(),
+        )])),
+        request_max_retries: Some(7),
+        stream_max_retries: Some(9),
+        stream_idle_timeout_ms: Some(12_345),
+        supports_websockets: false,
+        ..Default::default()
+    };
+    parent_config
+        .model_providers
+        .insert(provider_id.to_string(), provider.clone());
+    parent_config.guardian_model_provider_config = Some(provider_id.to_string());
+    let parent_before = parent_config.clone();
+
+    let guardian_config = build_guardian_review_session_config_for_test(
+        &parent_config,
+        /*live_network_config*/ None,
+        "guardian-local-model",
+        Some(ReasoningEffort::Low),
+        /*model_messages*/ None,
+    )
+    .expect("guardian config");
+
+    let mut expected_provider = provider;
+    expected_provider.request_max_retries = Some(1);
+    expected_provider.stream_max_retries = Some(1);
+    assert_eq!(
+        (
+            guardian_config.model_provider_id,
+            guardian_config.model_provider,
+        ),
+        (provider_id.to_string(), expected_provider)
+    );
+    assert_eq!(parent_config, parent_before);
+}
+
+#[tokio::test]
+async fn guardian_review_session_config_rejects_provider_missing_from_runtime_registry() {
+    let mut parent_config = test_config().await;
+    parent_config.guardian_model_provider_config = Some("missing-provider".to_string());
+
+    let err = build_guardian_review_session_config_for_test(
+        &parent_config,
+        /*live_network_config*/ None,
+        "guardian-local-model",
+        /*reasoning_effort*/ None,
+        /*model_messages*/ None,
+    )
+    .expect_err("runtime provider mismatch should fail closed");
+
+    assert!(
+        err.to_string().contains(
+            "auto-review model provider `missing-provider` is missing from the runtime registry"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn guardian_provider_auth_inherits_only_when_selected_provider_requires_it() {
+    let parent_auth_manager =
+        AuthManager::from_auth_for_testing(CodexAuth::from_api_key("parent-api-key"));
+    let mut config = test_config().await;
+
+    let inherited = guardian_model_provider_auth_manager_for_test(&config, &parent_auth_manager)
+        .expect("an unconfigured Guardian should preserve parent auth behavior");
+    assert!(Arc::ptr_eq(&inherited, &parent_auth_manager));
+
+    config.guardian_model_provider_config = Some("guardian-local".to_string());
+    config.model_provider = ModelProviderInfo {
+        name: "Guardian local".to_string(),
+        base_url: Some("http://127.0.0.1:8877/v1".to_string()),
+        ..Default::default()
+    };
+    assert!(
+        guardian_model_provider_auth_manager_for_test(&config, &parent_auth_manager).is_none(),
+        "an unauthenticated Guardian provider must not receive parent credentials"
+    );
+    let unauthenticated_provider = create_model_provider(
+        config.model_provider.clone(),
+        guardian_model_provider_auth_manager_for_test(&config, &parent_auth_manager),
+    );
+    assert!(
+        unauthenticated_provider
+            .api_auth()
+            .await
+            .expect("unauthenticated provider auth should resolve")
+            .to_auth_headers()
+            .is_empty()
+    );
+
+    config.model_provider.experimental_bearer_token = Some("guardian-provider-token".to_string());
+    let provider = create_model_provider(
+        config.model_provider.clone(),
+        guardian_model_provider_auth_manager_for_test(&config, &parent_auth_manager),
+    );
+    let provider_auth = provider
+        .api_auth()
+        .await
+        .expect("provider-specific bearer auth should resolve")
+        .to_auth_headers();
+    assert_eq!(
+        provider_auth
+            .get("authorization")
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer guardian-provider-token")
+    );
+
+    config.model_provider.experimental_bearer_token = None;
+    config.model_provider.requires_openai_auth = true;
+    let first_party = guardian_model_provider_auth_manager_for_test(&config, &parent_auth_manager)
+        .expect("a provider requiring OpenAI auth should inherit the session manager");
+    assert!(Arc::ptr_eq(&first_party, &parent_auth_manager));
+
+    config.model_provider = ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None);
+    let bedrock = guardian_model_provider_auth_manager_for_test(&config, &parent_auth_manager)
+        .expect("Bedrock should receive the parent manager and filter auth by type");
+    assert!(Arc::ptr_eq(&bedrock, &parent_auth_manager));
 }
 
 #[tokio::test]
