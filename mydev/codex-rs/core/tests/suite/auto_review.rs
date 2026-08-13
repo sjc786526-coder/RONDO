@@ -324,7 +324,7 @@ async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> R
         "sandbox_permissions": SandboxPermissions::RequireEscalated,
         "justification": "Exercise the configured Guardian model.",
     });
-    let responses = mount_sse_sequence(
+    let responses = mount_sse_sequence_without_request_count_expectation(
         &server,
         vec![
             sse(vec![
@@ -376,13 +376,23 @@ async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> R
             },
         })
         .await?;
-    wait_for_event_with_timeout(
+    let turn_complete = wait_for_event_with_timeout(
         &test.codex,
         |event| matches!(event, EventMsg::TurnComplete(_)),
         Duration::from_secs(15),
     )
     .await;
+    let EventMsg::TurnComplete(turn_complete) = turn_complete else {
+        unreachable!("terminal predicate only accepts TurnComplete")
+    };
+    if let Some(error) = turn_complete.error {
+        anyhow::bail!(
+            "parent turn failed before Guardian request: {}",
+            error.message
+        );
+    }
 
+    assert_eq!(received_responses_request_count(&server).await?, 3);
     let guardian_request = responses
         .requests()
         .into_iter()
@@ -443,7 +453,11 @@ supports_websockets = false
             test.config.model_provider.base_url.as_deref(),
             test.config.guardian_model_provider_config.as_deref(),
         ),
-        ("openai", Some(main_base_url.as_str()), Some("guardian-local"))
+        (
+            "openai",
+            Some(main_base_url.as_str()),
+            Some("guardian-local")
+        )
     );
 
     let tool_args = json!({
@@ -507,18 +521,24 @@ supports_websockets = false
             },
         })
         .await?;
-    wait_for_event_with_timeout(
+    let turn_complete = wait_for_event_with_timeout(
         &test.codex,
         |event| matches!(event, EventMsg::TurnComplete(_)),
         Duration::from_secs(15),
     )
     .await;
+    let EventMsg::TurnComplete(turn_complete) = turn_complete else {
+        unreachable!("terminal predicate only accepts TurnComplete")
+    };
+    if let Some(error) = turn_complete.error {
+        anyhow::bail!(
+            "parent turn failed before endpoint assertions: {}",
+            error.message
+        );
+    }
 
     assert_eq!(received_responses_request_count(&main_server).await?, 2);
-    assert_eq!(
-        received_responses_request_count(&guardian_server).await?,
-        1
-    );
+    assert_eq!(received_responses_request_count(&guardian_server).await?, 1);
     let main_requests = main_responses.requests();
     assert_eq!(main_requests.len(), 2);
     assert!(main_requests.iter().all(|request| {

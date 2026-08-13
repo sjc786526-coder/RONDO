@@ -194,8 +194,9 @@ impl GuardianReviewSessionReuseKey {
             model: spawn_config.model.clone(),
             model_provider_id: spawn_config.model_provider_id.clone(),
             model_provider: spawn_config.model_provider.clone(),
-            inherits_parent_model_provider_auth:
-                guardian_model_provider_inherits_parent_auth(spawn_config),
+            inherits_parent_model_provider_auth: guardian_model_provider_inherits_parent_auth(
+                spawn_config,
+            ),
             model_context_window: spawn_config.model_context_window,
             model_auto_compact_token_limit: spawn_config.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: spawn_config.model_auto_compact_token_limit_scope,
@@ -680,10 +681,8 @@ async fn spawn_guardian_review_session(
         ),
         None => (None, 0, None),
     };
-    let model_provider_auth_manager = guardian_model_provider_auth_manager(
-        &spawn_config,
-        &parent_session.services.auth_manager,
-    );
+    let model_provider_auth_manager =
+        guardian_model_provider_auth_manager(&spawn_config, &parent_session.services.auth_manager);
     let (session, io) = Box::pin(run_codex_thread_interactive(
         spawn_config,
         parent_session.services.auth_manager.clone(),

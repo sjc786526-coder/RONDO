@@ -5,8 +5,7 @@
 > 如果必须改变目标、范围、硬约束或完成标准，应暂停执行并请求用户确认。
 
 对应路线：`doc/WBS/local-approval-model.md` 的 L2a。适用源码基线为 Codex CLI
-`v0.147.0`。本计划分阶段 A/B；当前授权只执行阶段 A，阶段 B 必须等待用户明确回复
-“授权开始 L2a 阶段 B 验收”。
+`v0.147.0`。本计划分阶段 A/B；阶段 A 已完成，用户随后明确授权并已执行阶段 B。
 
 ## 1. 目标
 
@@ -154,45 +153,54 @@ headers、query、wire 能力与其他完整配置；随后继续把 Guardian �
   sample crate 验证也已统一。
 - 执行期间并行任务把 `main` 前进到 `21bcf18` 并占用 `plan/015-*`；其源码变更仅涉及方向 2 模型冻结文档，
   与本实现文件不重叠。为避免计划编号冲突，本计划改为 `plan/016-*`；未 rebase、merge 或触碰并行 worktree。
+- 阶段 B 开始前合入 `main@73b0503` 后，main 已交付另一份 `plan/016-*`，且 Plan 018 已由 Plan 017
+  明确预留给 CUDA runtime。为保留两份权威计划并消除编号歧义，本计划最终改为 `plan/019-*`。
+- 阶段 B 资源门禁通过后，受锁完成首次三 crate `just fix`、`just fmt`、`just write-config-schema`；生成
+  schema 只增加 `auto_review.model_provider` 及关联描述。11 项 config/Guardian/schema/安全收缩精确回归
+  全部通过；sample crate 无测试目标，首次 nextest 因 zero tests 返回 4，随后以 `--no-tests pass` 明确完成
+  编译验收。
+- 首次 loopback 运行没有触发 skip，但宿主 HTTP 代理截获 `127.0.0.1` 请求并返回 502，WireMock 因而收到
+  0 请求。测试补充终态错误与精确请求计数后，验收命令为当前进程显式设置
+  `NO_PROXY/no_proxy=127.0.0.1,localhost`；最终两项出站测试真实执行并通过，主端点/Guardian 端点分别
+  精确收到 `2/1` 个请求。
+- 诊断修改后再次受锁执行 `just fix -p codex-core`、`just fmt`、`just fmt-check` 和最终双端点复验；
+  看门狗均 `stop=none`、`cleanup=none`，`git diff --check` 通过。
 
 ### 当前工作
 
-- 阶段 A 已收口；用户后续仅授权把阶段 A 实现提交到本地工作树分支，并把最新本地 `main` 合入该
-  分支。此 Git 交接不授权任何阶段 B 动作，合入后继续保持“实现待验收”。
+- L2a 阶段 B 已验收，正在收口计划、WBS、阶段日志与本地工作树提交。
+- 最新 `main@73b0503` 已以 merge commit `1593ecf` 无冲突合入；独立重叠审查确认 main 与 L2a 源码路径
+  零交集、双方语义均完整保留。
 
 ### 后续计划
 
-- 阶段 B：先完成用户指定的 canary/Docker/build-lock/cgroup/Windows C 盘/target/worktree 门禁；在非
-  Codex sandbox 环境按
-  `just fix -p codex-config -p codex-core -p codex-thread-manager-sample` → `just fmt` →
-  `just write-config-schema` → schema diff 审查的顺序准备最终代码。
-- 阶段 B 非 loopback 定向测试使用下面冻结的精确 filter（命令中的括号用于 nextest `-E` 表达式，不是
+- 本工作树保持待交付状态；未经后续明确授权，不合并到 `main`、不推送，也不启动 L3/L4/L7。
+- 阶段 B 非 loopback 定向测试使用过下面的精确 filter（命令中的括号用于 nextest `-E` 表达式，不是
   shell 进程并发）：
 
   ```bash
   just test -p codex-core -E 'test(/load_config_resolves_auto_review_model_provider_without_changing_main_provider/) or test(/load_config_rejects_unknown_or_empty_auto_review_model_provider/) or test(/project_layer_ignores_unsupported_config_keys/) or test(/config_schema_matches_fixture/) or test(/guardian_review_session_config_keeps_bedrock_provider_for_bedrock_gpt_5_4/) or test(/guardian_review_session_config_uses_complete_provider_override_without_mutating_parent/) or test(/guardian_review_session_config_rejects_provider_missing_from_runtime_registry/) or test(/guardian_provider_auth_inherits_only_when_selected_provider_requires_it/) or test(/guardian_review_session_auth_inheritance_change_invalidates_cached_session/) or test(/guardian_review_session_config_preserves_parent_network_proxy/) or test(/guardian_review_session_config_disables_mcp_apps_plugins_and_memories/)'
   ```
-- 阶段 B 单独执行 `just test -p codex-thread-manager-sample`，确保同步过新增 `Config` 字段的 workspace
-  sample 目标完成编译验收。
-- 阶段 B auto-review 出站验收单独使用：
+- sample crate 使用 `just test -p codex-thread-manager-sample --no-tests pass`，明确把零测试目标作为编译
+  验收，不把 nextest 的 zero-tests 退出码误报成编译失败。
+- auto-review 出站验收使用：
 
   ```bash
-  just test -p codex-core --no-capture -E 'test(/auto_review_config_overrides_guardian_model_and_reasoning_effort/) or test(/auto_review_model_provider_routes_main_and_guardian_to_distinct_endpoints/)'
+  NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost just test -p codex-core --no-capture -E 'test(/auto_review_config_overrides_guardian_model_and_reasoning_effort/) or test(/auto_review_model_provider_routes_main_and_guardian_to_distinct_endpoints/)'
   ```
 
-  运行前确认
-  `CODEX_SANDBOX_NETWORK_DISABLED` 不存在且 `CODEX_SANDBOX != seatbelt`，结果中不得出现两个 skip 宏的
-  文案。最后执行 `just fmt-check` 与 `git diff --check`。
+  运行前已确认 `CODEX_SANDBOX_NETWORK_DISABLED` 不存在且 `CODEX_SANDBOX != seatbelt`，输出没有两个
+  skip 宏的文案。显式 loopback `NO_PROXY` 是为了排除宿主代理，不改变产品 provider 配置或真实网络。
 
 ### 阻塞项
 
-- 阶段 A 无阻塞。
-- 所有正式格式化、schema、构建、测试、mock endpoint 运行与连接验证受阶段 B 授权门阻塞。
+- 无阻塞。
 
 ### 当前验收状态
 
-- 阶段 A：功能与测试代码已实现，静态检查与两轮独立复审已完成；正式验收均未运行。
-- 阶段 B：未授权、未运行。
+- 阶段 A：功能与测试代码、静态检查与两轮独立复审已完成。
+- 阶段 B：资源门禁、受锁 fix、格式化、schema 生成、精确定向测试、sample 编译与双端点验收均已通过；
+  L2a 状态为“已验收、待合并”，不代表已合入或推送 `main`，也不代表 L7 本地模型端到端已完成。
 
 ## 6. 关键决策记录
 
@@ -211,3 +219,5 @@ headers、query、wire 能力与其他完整配置；随后继续把 Guardian �
 | 009 | 双端点正式验收必须在非 sandbox 环境以 `--no-capture` 运行并确认无 skip 文案 | 两个既有 skip 宏会 early-return `Ok(())`，仅看 nextest passed 会产生 false-green | 阶段 B 证据 | 已采纳 |
 | 010 | provider auth 继承策略是 Guardian session 复用键的一部分 | 显式覆盖和继承可能有相同 provider ID/info 但不同 auth manager；复用旧 session 会违反隔离语义 | Guardian session cache | 已采纳 |
 | 011 | 阶段 A 实现可本地提交并接纳最新 main，但不因此改变验收状态 | 用户明确授权该 Git 交接，同时重申不授权阶段 B；提交不等于格式化、schema、构建、测试或双端点通过 | 交接 | 已采纳 |
+| 012 | L2a ExecPlan 从冲突的 016 改号为 019 | 最新 main 已有不同任务的 Plan 016，Plan 018 又有明确后续用途；019 是当前首个未占用且无已知预留的编号 | 计划交接 | 已采纳 |
+| 013 | loopback 验收进程显式设置 `NO_PROXY/no_proxy=127.0.0.1,localhost` | 宿主代理会截获 loopback 并返回 502；进程级绕过使两个 WireMock endpoint 直接可达，不改变产品配置 | 阶段 B 测试环境 | 已采纳 |

@@ -354,7 +354,11 @@
           "description": "Directory that guardian approval evidence bundles are written to. Unset disables evidence capture entirely. Bundles contain the raw approval request, including task context, so point this at a private directory."
         },
         "model": {
-          "description": "Model slug the guardian review session should use. Takes precedence over the model catalog's `auto_review_model_override` and over the provider's default review model. The guardian still inherits the parent session's model provider, so this must name a model the parent provider serves.",
+          "description": "Model slug the guardian review session should use. Takes precedence over the model catalog's `auto_review_model_override` and over the provider's default review model. This must name a model served by the guardian's selected model provider.",
+          "type": "string"
+        },
+        "model_provider": {
+          "description": "Model provider ID the guardian review session should use from the merged `model_providers` registry. Unset keeps inheriting the parent provider.",
           "type": "string"
         },
         "policy": {
@@ -4973,7 +4977,7 @@
         }
       ],
       "default": null,
-      "description": "Optional Guardian auto-review policy, model, reasoning, and evidence settings."
+      "description": "Optional Guardian auto-review policy, model, provider, reasoning, and evidence settings."
     },
     "background_terminal_max_timeout": {
       "description": "Maximum poll window for background terminal output (`write_stdin`), in milliseconds. Default: `300000` (5 minutes).",

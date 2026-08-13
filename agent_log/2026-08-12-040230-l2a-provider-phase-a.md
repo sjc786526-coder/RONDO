@@ -1,6 +1,6 @@
 # L2a Guardian 独立 provider：阶段 A 实现待验收
 
-对应计划：`plan/016-l2a-guardian-provider-override-execplan.md`。本批只执行 canary 安全阶段 A；没有运行
+对应计划：`plan/019-l2a-guardian-provider-override-execplan.md`。本批只执行 canary 安全阶段 A；没有运行
 格式化、schema 生成、Rust 构建/测试、mock server、Docker、本地模型或真实 provider 请求。
 
 ## 实质改动
@@ -36,6 +36,8 @@
 - 阶段 A 期间 `main` 由另一任务前进到 `21bcf18`，只新增/修改本地模型冻结文档，并新建
   `0812-local-model-engineering` worktree；未触碰。并行任务占用了 `plan/015-*`，本计划因此改为
   `plan/016-*`。
+- 阶段 B 开始前合入最新 main 后，另一个已交付任务也使用 Plan 016，且 Plan 018 已预留给 CUDA runtime；
+  L2a ExecPlan 因此改号为 Plan 019，内容与验收边界不变。
 - 提交交接前复核时 `main@fea01f8` 与 `origin/main` 对齐且干净；`0811-plan014-post-audit` 有并行未提交修改，其他
   非本任务 worktree 干净，均未触碰。
 - 当前状态是“实现待验收”。阶段 B 只有在用户明确授权并完成 canary/Docker/build-lock/cgroup/Windows
