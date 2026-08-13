@@ -479,3 +479,12 @@ standard/Lite 形态均补回归。
   因此 v22 机械一致性子门真实 failed，但不能据此归因 RONDO/Codex 的能力或性能差异。
 - catalog 字节/provenance、规范化请求 preflight、同 harness/deadline、交错执行、判据分层与重复数预冻结等
   实验约束已达成共识，报告分歧全部关闭。
+
+### 2026-08-13 P2 v2—v22 公共结果账本交付
+
+- 结果分支使用的执行设施 commit `ba16cb2` 和被测对象 commits `14341a1` / `cb652e1` 均已存在于主线历史；
+  结果分支相对主线的净文件差异仅为 `eval/results/`，没有产品或设施代码。
+- 完整合入 `eval/results/runs.jsonl` 的 227 条增量记录和 v6—v22 的 11 份聚合 JSON；合入后共 244 条唯一
+  `run_id`，其中 v22 为 32 条。全部 JSON/JSONL 解析通过，冻结历史标签“Plan 015”保持不改写。
+- 原 `0811-p2-b7-results@564a602` 提交链完整并入交付历史，完成分支改名为
+  `zz-done/0811-p2-b7-results`；该操作只交付公共结果，不重跑测评或改变 B7 归因。

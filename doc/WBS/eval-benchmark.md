@@ -27,7 +27,8 @@ v22 的 `sigma=0`、`delta=3` 与 `ab_delta_exceeds_aa_sigma` 是对既有冻结
 catalog prompt 相差 161 tokens，同时混有 harness/deadline 和时间分块差异；因此该批次只证明执行、结算、归档和
 机械门运行到了终态。报告见 `doc/research/plan020-b7-canary-baseline-failure-attribution.md`。
 
-tracked v22 结果当前只在本地 `0811-p2-b7-results@564a602`，尚未进入 `main` 或远端；交付顺序见顶层 WBS。
+P2 v2—v22 公共账本已合入当前交付历史：`runs.jsonl` 共 244 条唯一 run，其中 v22 为 32 条；v6—v22
+共 11 份聚合 JSON。历史标签中的“Plan 015”保留原样，当前权威编号仍为 Plan 020。
 
 ## 当前工作包
 
@@ -97,7 +98,7 @@ tracked v22 结果当前只在本地 `0811-p2-b7-results@564a602`，尚未进入
 新的真实 canary 只有在以下条件同时满足后才能申请授权：
 
 - E-B8 无上游 preflight 通过；E-A A1—A7 完成并可一键归档。
-- v22 tracked 结果已完成 Git 交付；新 identity 不复用任何 v1—v22 ID。
+- 新 identity 不复用任何 v1—v22 ID。
 - 任务、轮数、交错顺序、重复规则、模型、价格快照、预算 cap 和停止条件全部预冻结。
 - 按 `doc/WBS.md` 的 M2 机械判据执行，比较合同任一项漂移都先 blocked。
 
