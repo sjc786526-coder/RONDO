@@ -126,27 +126,32 @@
   project Toolkit user-mode libraries、WSL `libcuda.so.1` 和系统依赖闭包均冻结且无 missing dependency。清除
   `LD_LIBRARY_PATH` 后 `--version`/`--help` 成功；宿主 `--list-devices` 识别 RTX 4060 Laptop GPU（8187 MiB）。
 - 2026-08-13：新增独立 CUDA lock、CPU/CUDA exact path selector、ELF/toolchain closure、backend-neutral doctor/client
-  receipt 接线与回归测试。实际 model-free doctor/router 返回 `linux_cuda_built_model_unvalidated`；正式 launcher 对此
-  中间能力仍在 Popen 前拒绝。GGUF 从未加载，model-backed structured output 保持 `not_run`。
+  receipt 接线与回归测试。使用受跟踪示例配置并保持 model path 为空的受控 model-free 复现中，doctor/router 返回
+  `linux_cuda_built_model_unvalidated`；正式 launcher 对此中间能力仍在 Popen 前拒绝。GGUF 从未加载，model-backed
+  structured output 保持 `not_run`。
 - 2026-08-13：focused local-approval tests 58/58、config hardening 8/8、config/artifacts 30/30 通过；独立代码与
   文档收尾审查的 actionable findings 已闭合，`git diff --check`、JSON/Python 静态检查与 ignored 大资产检查通过。
 
 ### 当前工作
 
-- 实现、model-free 验收、focused tests 与独立收尾审查已经闭合；正在执行最终 Git 提交、合并与推送核验。
+- Plan 018 已完成：唯一 GGUF 静态完整性与 CUDA runtime model-free 能力均已验收，Git 提交、合并、推送及真实远端
+  SHA 核验已经闭合。
 
 ### 后续计划
 
-- 提交 worktree 实现，保护并纳入用户已完成的主工作区文档移动，合并本地 `main` 并推送核验远端 SHA。
-- 下一任务才配置真实 ignored model path 并执行 4k/8k model-backed 验收。
+- 下一任务更新真实 ignored `rondo.local.toml`，配置唯一 GGUF，先完成受控 4k 加载与结构化单请求验收并晋级
+  `gpu_model_serving_validated`；随后单独执行 8k baseline 验收。
 
 ### 阻塞项
 
-- 无；若项目局部 Toolkit 安装需要 sudo/apt/系统修改，或任一资源/互斥门禁失败，则按硬约束停止。
+- 无。
 
 ### 当前验收状态
 
-- `linux_cuda_built_model_unvalidated`：唯一 GGUF 静态验收和 CUDA model-free 验收完成；模型从未加载，4k/8k 均未运行。
+- runtime capability 为 `linux_cuda_built_model_unvalidated`：唯一 GGUF 静态验收和 CUDA model-free 验收完成；模型从未
+  加载，4k/8k 均未运行。
+- 当前机器实际配置尚未迁移：直接使用真实 ignored `rondo.local.toml` 运行 doctor 返回 `configuration_error`（exit 64），
+  具体原因为 `local_model context_size is outside its allowed range`。这不改变已验 runtime capability，也不构成服务就绪。
 
 ## 6. 关键决策记录
 

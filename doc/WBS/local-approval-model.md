@@ -36,8 +36,10 @@
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
   单文件下载/校验和 8GB 两阶段上下文方案。2026-08-13 唯一 GGUF 已通过普通文件、精确
   `5,198,387,456` bytes 与 SHA-256 `7deb50ec…54802a` 校验；Git 未跟踪，真实 ignored 配置未写入，模型从未加载。
-  冻结选择见 2026-08-12 快照，本次下载/CUDA 证据见 2026-08-13 快照。exact-GGUF model-backed 4k smoke 仍是
-  `gpu_model_serving_validated` 的硬前置，8k baseline 随后单独验收。
+  当前真实 ignored `rondo.local.toml` 仍是旧合同，直接运行 doctor 会因 `local_model context_size is outside its allowed
+  range` 返回 `configuration_error`；已验的 `linux_cuda_built_model_unvalidated` 来自受跟踪示例配置的 model-free
+  复现，不表示机器配置或模型服务就绪。冻结选择见 2026-08-12 快照，本次下载/CUDA 证据见 2026-08-13 快照。
+  exact-GGUF model-backed 4k smoke 仍是 `gpu_model_serving_validated` 的硬前置，8k baseline 随后单独验收。
 
 ## 核心设计（已定，不再反复讨论）
 

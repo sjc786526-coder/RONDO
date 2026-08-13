@@ -450,5 +450,6 @@ standard/Lite 形态均补回归。
 - 独立 CUDA lock 冻结 source/toolchain/build、9 个 ELF 文件、14 个 symlink、RUNPATH、cudart/cuBLAS、WSL
   `libcuda.so.1` 与系统闭包。version/help、RTX 4060 Laptop device probe 与 model-free router 通过，不依赖调用者
   `LD_LIBRARY_PATH`。
-- CPU/CUDA exact binary path 只映射各自 lock；doctor 返回 `linux_cuda_built_model_unvalidated`，正式 launcher 仍拒绝。
-  focused tests 58/58 通过；4k/8k model-backed、推理与 structured output 均未运行。
+- CPU/CUDA exact binary path 只映射各自 lock；受跟踪示例配置的 model-free doctor 返回
+  `linux_cuda_built_model_unvalidated`，正式 launcher 仍拒绝。真实 ignored 配置未迁移，直接 doctor 仍为
+  `configuration_error`；focused tests 58/58 通过，4k/8k model-backed、推理与 structured output 均未运行。
