@@ -1,4 +1,4 @@
-"""Resolve one durable Plan 015 task-local diagnosis hold without running work."""
+"""Resolve one durable Plan 020 task-local diagnosis hold without running work."""
 
 from __future__ import annotations
 

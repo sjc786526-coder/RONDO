@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-11
+最后更新：2026-08-12
 
 本文件只记录**当前阶段**与**方向级路线、依赖和授权门**。方向内部的详细分解见 `doc/WBS/`，
 单次任务的execplan见 `plan/`，已完成成果见 `doc/WBS-COMPLETED.md`。
@@ -70,10 +70,10 @@
   Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
   reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
   只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
-  `assess_m1` 返回 passed。P2 的 B4 分层、B5 计分归因、B6 预算和 B7 首次真实基线均已形成终态。
+  `assess_m1` 返回 passed。B4 分层、B5 计分归因、B6 预算和 B7 首次真实执行均已形成终态。
   v22 复用 25 条首个非 infra 历史结果，只补齐缺失链；fresh wire 与 202 个 upstream attempt 全部结算。
   九项共同有效任务上 RONDO A/A 均为 `5/9`，RONDO A/B `5/9`，frozen Codex A/B `4/9`；`sigma=0`、
-  `delta=3`，因此 B7 以 `ab_delta_exceeds_aa_sigma` 真实 failed，而不是 infra blocked。Plan 015 累计本地估算
+  `delta=3`，因此 B7 以 `ab_delta_exceeds_aa_sigma` 真实 failed，而不是 infra blocked。Plan 020 累计本地估算
   `1466.074133 < 1600 USD`、reservation 0、`actual_usd=null`。`vulnerable-secret` 被供应商以 HTTP 200 SSE
   `error/cyber_policy` 拒绝并按含糊计费保守结算，未进入共同分母。v1—v22 全部只读，paid active pointer 已关闭。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
@@ -100,8 +100,8 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1/M1、B4/B5/B6/B7 完成；首次 B7 基线真实 failed |
-| 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 可从 v22 三项 A/B 差异开始首轮性能诊断 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1/M1 与 B4—B7 执行完成；B7 门 failed、E-A 待实现，M2 未达成 |
+| 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 可诊断 v22 三项 A/B 差异；正式优化迭代尚未解锁 |
 | 2 | 本地审批模型接入与横评 | L1 与 L2 CPU x64 前置完成；已有真实 E_final，GPU/model-backed、L2a/L3/L4 待 P2 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
@@ -128,9 +128,9 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 已完成；v22 形成 `sigma=0`、`delta=3` 的 failed 基线 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 进行中：B4—B7 已执行并形成有效 failed 基线；E-A 未落地，M2 未达成 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
-| P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
+| P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | M2 通过 | 每轮跑批预算 | 未开始，允许只读差异诊断 |
 
 阶段与任务编号一一对应，不重叠：L1/L2 属 P1，L2a/L3/L4 属 P2，L5/L6/L7 属 P3。
 注意 **L2 可以在 P1 期间先把本地推理服务搭起来并量上下文预算，但它的验收要用真实 `E_final`，因此最终验收挂在 B3 之后**——搭建与验收分处两阶段，不是矛盾。
@@ -184,10 +184,11 @@ Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再�
 估价并停止，Docker lease/cleanup 与 proxy deadline/claim 生命周期缺口也已闭合。完整 eval 349/349、lock 85 packages
 通过；本批未调用 API、Docker 或 Cargo。
 L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
-Plan 015 的 10/61/18 taskset、10-task exact image catalog、机械计分和增量执行设施已完成首次真实 B7。
+Plan 020 的 10/61/18 taskset、10-task exact image catalog、机械计分和增量执行设施已完成首次真实 B7。
 v22 在九项共同有效任务上得到 `sigma=0`、`delta=3`，技术门 failed；四轮有效结果和条件加跑、全部 infra
 attempt、202 个请求及 `1466.074133 USD` 累计费用均保留。active paid identity 已关闭，下一轮不得续跑或复用
-v22 IDs。方向 1 应把三项 A/B 差异作为首个性能诊断输入；执行细节见 Plan 015。
+v22 IDs。三项 A/B 差异只作为性能诊断输入；在 B7 门与 E-A/A1—A7 闭合前，不启动方向 1 的正式优化迭代。
+执行细节见 Plan 020。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，

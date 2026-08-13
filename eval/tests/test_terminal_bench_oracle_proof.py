@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 
+from rondo_eval.config import RepoPaths
 from rondo_eval.terminal_bench.oracle_proof import (
     OracleProofContract,
     OracleProofStore,
+    build_oracle_contract,
 )
 from rondo_eval.terminal_bench.tasksets import FrozenCanaryCatalog, FrozenTask
 
@@ -143,6 +146,64 @@ class OracleProofTests(unittest.TestCase):
                 },
             )
             self.assertIsNone(store.valid_proof(changed_image))
+
+    def test_real_contract_changes_when_harbor_compat_changes(self) -> None:
+        source_components = Path(__file__).resolve().parents[1] / "rondo_eval"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            shutil.copytree(source_components, root / "eval/rondo_eval")
+            task = replace(self._task("one"), source_digest=f"sha256:{'a' * 64}")
+            verifier_root = (
+                root
+                / "eval-data/sources/terminal-bench-2-1-ffccbe05/tasks/one/tests"
+            )
+            verifier_root.mkdir(parents=True)
+            (verifier_root / "test.sh").write_text("exit 0\n", encoding="utf-8")
+            catalog = FrozenCanaryCatalog(
+                "1" * 40,
+                "4" * 64,
+                (task,),
+                "5" * 64,
+            )
+            paths = RepoPaths(root, root)
+            before = build_oracle_contract(
+                paths,
+                catalog=catalog,
+                task=task,
+                seccomp_source_sha256="2" * 64,
+                seccomp_effective_sha256="3" * 64,
+            )
+            compat_path = root / "eval/rondo_eval/terminal_bench/compat.py"
+            compat_path.write_bytes(compat_path.read_bytes() + b"\n# execution drift\n")
+            after = build_oracle_contract(
+                paths,
+                catalog=catalog,
+                task=task,
+                seccomp_source_sha256="2" * 64,
+                seccomp_effective_sha256="3" * 64,
+            )
+
+        self.assertTrue(
+            {
+                "harbor_compat",
+                "frozen_image_contract",
+                "frozen_task_contract",
+                "materializer",
+                "runner",
+                "oracle",
+                "verifier_runtime",
+                "result_parser",
+                "docker_supervisor",
+                "runtime_bridge",
+                "proof_validator",
+            }
+            <= set(before.shared_components)
+        )
+        self.assertNotEqual(
+            before.shared_components["harbor_compat"],
+            after.shared_components["harbor_compat"],
+        )
+        self.assertNotEqual(before.sha256, after.sha256)
 
     def test_proof_rejects_crosswired_image_and_nonpassing_oracle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

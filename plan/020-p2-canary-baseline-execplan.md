@@ -1,4 +1,4 @@
-# Plan 015：P2 任务分层、计分预算与首次 Canary 基线
+# Plan 020：P2 任务分层、计分预算与首次 Canary 基线
 
 > 本计划是方向 0 的 P2 第一阶段执行合同。Plan 014 v19 及其全部历史 identity/result/ledger/artifact
 > 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与累计 1600 USD 独立硬上限。除“当前状态”和
@@ -278,7 +278,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   恢复，vulnerable 三次同类后 task-local 终止；第二轮 db/extract completed，filter 命中第三个不同
   task 的 provider-integrity 并触发全局熔断。v17 blocked，16 个 paid run、117 attempt、paid
   `98.062347 USD`、reservation 0，累计 `667.663130 USD`。results 已以 `715c4ce` 只读提交。
-- 用户追加 `300 USD`，Plan 015 累计硬上限从 `700 USD` 提至 `1000 USD`，不重置 v1—v17 debit。
+- 用户追加 `300 USD`，Plan 020 累计硬上限从 `700 USD` 提至 `1000 USD`，不重置 v1—v17 debit。
   历史 schema-v2 700 USD lock 继续只读加载，生成器仅对新 identity 投影 1000 USD。唯一 v18：
   campaign/batch `p2-b7-canary-baseline-v18`/`p2-b7-canary-sol-sol-v18`，run base
   `20260812-380000000`，lock SHA
@@ -301,11 +301,14 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - v21 fresh wire 4/4 usage-valid，结算 `0.198340 USD`；随后在首个 Terminal-Bench 请求前，remaining campaign
   ledger `464.084812 USD` 被遗留的实现级 400 USD 上限拒绝。v21 无 paid task/budget ledger，以本地实现缺陷退役，
   累计 `1136.113528 USD`。实现上限提高到已授权 1600 USD，campaign 自身仍受 lock cap 与逐请求 reservation 限制。
+- 合并前离线收口补齐 Oracle 共享执行依赖摘要、terminal aggregate 幂等恢复，并恢复 provider-integrity 参与
+  单轮最终 infra 上限；task-local/global breaker 的 provider 豁免保持不变。v22 历史 aggregate 只读投影一致。
 
 ### 后续计划
 
-1. 以 v22 的九项共同有效结果和三项 A/B 差异作为方向 1 的首个性能诊断输入；不为改变本次分数重跑 v22，
-   `vulnerable-secret` 的 provider `cyber_policy` 事实单独保留为供应商能力边界。
+1. 以 v22 的九项共同有效结果和三项 A/B 差异作为只读性能诊断输入；不为改变本次分数重跑 v22，
+   `vulnerable-secret` 的 provider `cyber_policy` 事实单独保留为供应商能力边界。方向 1 的正式优化迭代继续等待
+   B7 性能门与 E-A A1—A7 闭合。
 2. 后续若启动新的付费 campaign，必须重新估算并取得独立授权，生成新 identity/IDs，且不得把 v22 的 failed
    终态或剩余额度视为可续跑状态。
 
@@ -325,9 +328,10 @@ pointer 已关闭，lock/result/ledger/artifact 仅供历史重放。
 - v1 是 API 前失败终态，v2—v21 为保留全部费用事实的 blocked 终态；v22 完成四轮共同集合与条件加跑，
   `sigma=0`、`delta=3`、共同分母 9，最终 `failed`。四轮成功率依次为 RONDO A/A `5/9`、`5/9`，
   RONDO A/B `5/9`，frozen Codex A/B `4/9`；唯一条件任务 `db-wal-recovery` 未形成 RONDO 三败/Codex 三过。
-  v22 wire `0.192860 USD`、paid `329.767745 USD`，Plan 015 累计 `1466.074133 < 1600 USD`；202/202 upstream
+  v22 wire `0.192860 USD`、paid `329.767745 USD`，Plan 020 累计 `1466.074133 < 1600 USD`；202/202 upstream
   attempts 均已结算，reservation 0，`actual_usd=null`。`vulnerable-secret` 四条逻辑链的 HTTP 200 SSE 均以
-  `error/cyber_policy` 终止且无 usage，按合同保守结算并排除共同分母。B4/B5/B6/B7 执行前置已整体完成。
+  `error/cyber_policy` 终止且无 usage，按合同保守结算并排除共同分母。B4—B7 执行与归档已完成，但 B7
+  性能门 failed，E-A A1—A7 未实现，因此 P2/M2 尚未通过。
 
 ## 6. 关键决策记录
 
@@ -364,7 +368,7 @@ pointer 已关闭，lock/result/ledger/artifact 仅供历史重放。
 | 029 | 后继上游逻辑请求 deadline 从 90 秒单调放宽到 180 秒；在 90 秒下完整成功的 v18 结果允许引用，其他 profile/执行合同仍须精确相等 | 中转站记录显示请求完成，90 秒本地终态等待可能过严；单调延长不推翻已在更严格门限下成功的结果 | B6/B7 | 已采纳 |
 | 030 | 生成 schema-v3 v19，冻结 20 条 v18 首个非 infra 结果引用、321 个新 run ID 与精确 prior；v1—v18 继续只读 | 新 identity 只承载缺失/infra 续跑，不能复用旧 run ID、覆盖旧结果或重置累计费用 | B6/B7 | 已采纳 |
 | 031 | v19 fix 的两次 Guardian 429 被证实为本地并发 reservation admission 缺陷；退役 v19，schema-v4 要求 main admission 同时容纳 main+Guardian 最大预留 | Guardian 会在 main terminal usage 到达前启动；只检查单份预留会让已发送的 main 确定性挤掉审批容量 | B6/B7 | 已采纳 |
-| 032 | 用户追加 300 USD，Plan 015 总硬上限提高到 1300 USD；v19 的 `980.271525 USD` 累计事实完整进入后继 prior | 新授权只扩大后继 cap，不改写正在运行或已退役 identity，也不重置既有费用 | B6/B7 | 已采纳 |
+| 032 | 用户追加 300 USD，Plan 020 总硬上限提高到 1300 USD；v19 的 `980.271525 USD` 累计事实完整进入后继 prior | 新授权只扩大后继 cap，不改写正在运行或已退役 identity，也不重置既有费用 | B6/B7 | 已采纳 |
 | 033 | 生成 schema-v4 v20，冻结 21 条 v18/v19 首个非 infra 结果引用、321 个新 run ID 与精确 prior；v1—v19 继续只读 | v20 只补 infra/未启动链，并在发送 main 前执行 main+Guardian 并发容量 admission | B6/B7 | 已采纳 |
 | 034 | v20 因 sanitize Guardian request evidence 的任务凭据样本被通用 scanner 误判而退役；schema-v5 对结构合法 E_final 的 input 使用窄 task-data 规则，原始真实 secret 仍精确拒绝 | 不把 reward 1/0 的有效模型结果伪装成 infra，也不全局豁免 credential 扫描 | B5/B7 | 已采纳 |
 | 035 | v20 vulnerable 的 8 次 HTTP 200 SSE 终态无 usage 均保守结算；后继只记录 bounded terminal type/status/code，用户追加额度后总 cap 1600 USD | 中转面板的 HTTP 成功不等于 Responses `response.completed`；增加可诊断性但不改变结算 | B6/B7 | 已采纳 |
@@ -372,3 +376,4 @@ pointer 已关闭，lock/result/ledger/artifact 仅供历史重放。
 | 037 | v21 wire 成功后在首个 TB 请求前命中实现级 400 USD ledger 上限；计入 `0.198340 USD` wire 后退役，schema-v6 将 ledger 支持范围绑定到已授权 1600 USD | 剩余额度大于旧实现上限不是预算超限，且不能复用已产生 wire 费用的 identity | B6/B7 | 已采纳 |
 | 038 | 生成 schema-v6 v22，冻结 25 条有效引用、321 个新 ID 与精确 `1136.113528 USD` prior；v1—v21 继续只读 | 新 identity 才能在修复后的执行合同下启动 TB | B6/B7 | 已采纳 |
 | 039 | v22 完成九项共同集合与必要条件加跑后以 `sigma=0`、`delta=3` 形成 failed 基线；关闭 active pointer，不为改变分数重跑 | B7 的验收目标是可复算的真实终态，性能门失败必须保留为后续优化输入 | B7 | 已采纳 |
+| 040 | 原暂用的 Plan 015 编号改为 Plan 020；历史 lock/result/ledger/日志中的原标签保持只读 | Plan 015 已由 GGUF 冻结占用，Plan 018/019 分别留给 CUDA runtime 与 L2a；避免合并后的计划编号冲突 | 文档/交付 | 已采纳 |

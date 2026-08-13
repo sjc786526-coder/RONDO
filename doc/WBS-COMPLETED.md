@@ -358,7 +358,7 @@ standard/Lite 形态均补回归。
 - 通用 10-task materializer/runner、no-API oracle 前置、campaign 状态机、公开结果与 `just eval-b7-baseline`
   已接入既有设施。`just eval-lock` 85 packages、正式离线 unittest 379/379 通过；本条不声称 B7 真实基线已运行。
 
-### 2026-08-12 Plan 015 B7 增量编排与恢复门禁
+### 2026-08-12 Plan 020 B7 增量编排与恢复门禁
 
 - v9 保持不可改写的 blocked 终态：Oracle 10/10 与 wire canary 有效，首个正式任务 reward 0、12 个请求全部
   settled；后继累计 debit 为 `282.287684 USD`，reservation 为 0。
@@ -393,7 +393,7 @@ standard/Lite 形态均补回归。
   v15 blocked 后累计 debit `408.561823 USD`、reservation 0；v16 以 run base `20260812-360000000`、全新
   lock/IDs、filter 4096 PIDs 和精确 prior 冻结，v1—v15 保持只读。
 
-### 2026-08-12 Plan 015 首次 B7 真实基线终态
+### 2026-08-12 Plan 020 首次 B7 真实基线终态
 
 - v22 fresh wire 4/4 usage-valid；25 条历史首个非 infra 结果经冻结 SHA 重验后复用，只为缺失/infra 逻辑链
   使用新 IDs。四轮在同一九项共同集合上形成 RONDO A/A `5/9`、`5/9`，RONDO A/B `5/9` 和 frozen Codex
@@ -402,6 +402,14 @@ standard/Lite 形态均补回归。
   `db-wal-recovery` 的两侧各两次加跑未形成 RONDO 三败/Codex 三过；该结果是性能事实，不是设施 blocked。
 - `vulnerable-secret` 的四条逻辑链均收到 HTTP 200 SSE `error/cyber_policy` 且无 usage，按合同各保守结算并
   排除共同分母；其余任务使用首个非 infra 终态，未通过选择性重跑改变成绩。
-- v22 paid `329.767745 USD`、wire `0.192860 USD`，Plan 015 累计 `1466.074133 < 1600 USD`；202/202 upstream
+- v22 paid `329.767745 USD`、wire `0.192860 USD`，Plan 020 累计 `1466.074133 < 1600 USD`；202/202 upstream
   attempts settled、reservation 0、`actual_usd=null`。结果与 aggregate 已进入独立 results 分支；v1—v22
   只读保留，active paid pointer 关闭。
+
+### 2026-08-12 Plan 020 合并前离线收口
+
+- Oracle proof 的执行闭包补入 Harbor compatibility 与 frozen task/image 合同；真实 contract 漂移回归确保这些
+  组件变化会使旧 proof 失效。
+- terminal state 到 private/tracked aggregate 支持幂等恢复；schema-v3+ 的 provider-integrity 只豁免机械熔断，
+  不再绕过单轮最终 infra 上限。
+- v22 历史数据只读重放保持一致；B7 是有效 failed 基线，E-A 与 M2 尚未完成，方向 1 正式优化未解锁。

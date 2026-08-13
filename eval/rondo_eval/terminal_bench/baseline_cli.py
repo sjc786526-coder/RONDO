@@ -525,7 +525,16 @@ def _advance_post_oracle_step(
 
     snapshot = state.snapshot()
     if snapshot["status"] != "running":
-        return _terminal_exit_code(snapshot["status"])
+        return _recover_terminal_aggregate(
+            paths=paths,
+            identity=identity,
+            campaign_root=campaign_root,
+            budget_path=budget_path,
+            counter=counter,
+            storage_baseline=storage_baseline,
+            results_root=results_root,
+            state=state,
+        )
     try:
         _reconcile_running_wire_canary(
             paths=paths,
@@ -633,6 +642,266 @@ def _advance_post_oracle_step(
             return 3
 
 
+def _recover_terminal_aggregate(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    campaign_root: Path,
+    budget_path: Path,
+    counter: DockerCliCounter,
+    storage_baseline: StorageBaseline,
+    results_root: Path,
+    state: CampaignStateLedger,
+) -> int:
+    """Idempotently publish a terminal state after a finalize/write crash."""
+
+    snapshot = state.snapshot()
+    status = snapshot["status"]
+    exit_code = _terminal_exit_code(status)
+    restored, private_aggregate = _restore_tracked_aggregate_from_local(
+        campaign_root=campaign_root,
+        identity=identity,
+        results_root=results_root,
+        expected_status=str(status),
+    )
+    if restored:
+        return exit_code
+    persisted_final_storage = (
+        _validated_persisted_final_storage(
+            private_aggregate,
+            storage_baseline=storage_baseline,
+        )
+        if private_aggregate is not None
+        else None
+    )
+
+    wire = _state_row(snapshot, "wire-canary")
+    canary_cost = Decimal(str(wire["estimated_usd"]))
+    prior_cost = Decimal(str(identity.budget["prior_estimated_usd"]))
+    campaign_cap = Decimal(str(identity.budget["campaign_cap_usd"]))
+    remaining_cap = campaign_cap - prior_cost - canary_cost
+    if remaining_cap < 0:
+        raise CampaignExecutionError("terminal campaign budget projection is invalid")
+
+    if status in {BaselineStatus.PASSED.value, BaselineStatus.FAILED.value}:
+        if budget_path.is_symlink() or not budget_path.is_file():
+            raise CampaignExecutionError("terminal campaign budget ledger is unavailable")
+        with PersistentBudgetLedger(
+            budget_path,
+            batch_id=identity.batch_id,
+            total_cap_usd=remaining_cap,
+            max_runs=len(identity.slots) - 1,
+            default_run_cap_usd=RUN_CAP_USD,
+        ) as budget:
+            assessment = _replay_terminal_assessment(
+                paths=paths,
+                identity=identity,
+                state=state,
+                results_root=results_root,
+            )
+            final_storage = (
+                persisted_final_storage
+                if private_aggregate is not None
+                else _optional_final_storage(
+                    counter,
+                    identity.slots[0].run_id,
+                    baseline=storage_baseline,
+                )
+            )
+            _write_aggregate(
+                campaign_root,
+                identity,
+                state,
+                budget.snapshot(),
+                canary_cost,
+                assessment=assessment,
+                results_root=results_root,
+                storage_baseline=storage_baseline,
+                final_storage=final_storage,
+            )
+        return exit_code
+
+    if budget_path.is_symlink():
+        raise CampaignExecutionError("terminal campaign budget ledger is unsafe")
+    if budget_path.is_file():
+        with PersistentBudgetLedger(
+            budget_path,
+            batch_id=identity.batch_id,
+            total_cap_usd=remaining_cap,
+            max_runs=len(identity.slots) - 1,
+            default_run_cap_usd=RUN_CAP_USD,
+        ) as budget:
+            budget_snapshot = budget.snapshot()
+    else:
+        budget_snapshot = _empty_budget_snapshot(identity, remaining_cap)
+    final_storage = (
+        persisted_final_storage
+        if private_aggregate is not None
+        else _optional_final_storage(
+            counter,
+            identity.slots[0].run_id,
+            baseline=storage_baseline,
+        )
+    )
+    _write_aggregate(
+        campaign_root,
+        identity,
+        state,
+        budget_snapshot,
+        canary_cost,
+        assessment=None,
+        results_root=results_root,
+        storage_baseline=storage_baseline,
+        final_storage=final_storage,
+    )
+    return exit_code
+
+
+def _replay_terminal_assessment(
+    *,
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    state: CampaignStateLedger,
+    results_root: Path,
+) -> BaselineAssessment:
+    records, digests = _campaign_records(results_root, identity)
+    continued, continued_records, continued_digests = _continuation_records(
+        paths,
+        results_root,
+        identity,
+    )
+    all_records = {**continued_records, **records}
+    all_digests = {**continued_digests, **digests}
+    base_runs: list[BaselineRun] = []
+    for round_id in BASE_ROUNDS:
+        side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
+        for task in identity.catalog.tasks:
+            chain_id = f"base:{round_id}:{task.task_id}"
+            attempts = _replay_terminal_chain(
+                identity=identity,
+                state=state,
+                chain_id=chain_id,
+                task=task,
+                records=all_records,
+                digests=all_digests,
+                continued=continued,
+            )
+            if not attempts:
+                raise CampaignExecutionError("terminal base result is incomplete")
+            base_runs.extend(
+                BaselineRun(
+                    task.task_id,
+                    round_id,
+                    side,
+                    item.slot.attempt,
+                    item.task_outcome,
+                    item.slot.run_id,
+                    item.failure_category,
+                )
+                for item in attempts
+            )
+    conditional_runs: list[ConditionalRun] = []
+    for task in identity.catalog.tasks:
+        for side in (Side.RONDO, Side.CODEX):
+            for repeat in (1, 2):
+                chain_id = f"conditional:{task.task_id}:{side.value}:repeat{repeat}"
+                attempts = _replay_terminal_chain(
+                    identity=identity,
+                    state=state,
+                    chain_id=chain_id,
+                    task=task,
+                    records=all_records,
+                    digests=all_digests,
+                    continued=continued,
+                )
+                conditional_runs.extend(
+                    ConditionalRun(
+                        task.task_id,
+                        side,
+                        repeat,
+                        item.slot.attempt,
+                        item.task_outcome,
+                        item.slot.run_id,
+                        item.failure_category,
+                    )
+                    for item in attempts
+                )
+    assessment = assess_baseline(
+        tuple(task.task_id for task in identity.catalog.tasks),
+        tuple(base_runs),
+        tuple(conditional_runs),
+        max_attempts=identity.max_attempts,
+    )
+    snapshot = state.snapshot()
+    reason = ";".join(assessment.reasons) or None
+    if (
+        snapshot["status"] != assessment.status.value
+        or snapshot["terminal_reason"] != reason
+    ):
+        raise CampaignExecutionError(
+            "terminal campaign state differs from the replayed assessment"
+        )
+    return assessment
+
+
+def _replay_terminal_chain(
+    *,
+    identity: CampaignIdentity,
+    state: CampaignStateLedger,
+    chain_id: str,
+    task: object,
+    records: dict[str, dict[str, object]],
+    digests: dict[str, str],
+    continued: dict[str, ExecutedSlot],
+) -> list[ExecutedSlot]:
+    inherited = _continued_executed_slot(
+        identity=identity,
+        chain_id=chain_id,
+        task=task,
+        continued=continued,
+    )
+    if inherited is not None:
+        return [inherited]
+    values: list[ExecutedSlot] = []
+    for attempt in range(1, identity.max_attempts + 1):
+        slot = identity.slot(f"{chain_id}:a{attempt}")
+        row = _state_row(state.snapshot(), slot.slot_id)
+        if row["status"] in {
+            CampaignSlotStatus.COMPLETED.value,
+            CampaignSlotStatus.FAILED.value,
+        }:
+            values.append(
+                _executed_from_row(
+                    slot,
+                    row,
+                    records=records,
+                    digests=digests,
+                )
+            )
+        elif row["status"] != CampaignSlotStatus.SKIPPED.value:
+            raise CampaignExecutionError(
+                "terminal campaign contains a nonterminal task slot"
+            )
+    return values
+
+
+def _empty_budget_snapshot(
+    identity: CampaignIdentity, total_cap: Decimal
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "batch_id": identity.batch_id,
+        "total_cap_usd": f"{total_cap:.6f}",
+        "max_runs": len(identity.slots) - 1,
+        "default_run_cap_usd": f"{RUN_CAP_USD:.6f}",
+        "run_slots_used": 0,
+        "spent_usd": "0.000000",
+        "reserved_usd": "0.000000",
+        "remaining_uncommitted_usd": f"{total_cap:.6f}",
+        "runs": {},
+    }
+
+
 def _reconcile_before_oracle(
     *,
     paths: RepoPaths,
@@ -660,7 +929,16 @@ def _reconcile_before_oracle(
     ) as state:
         snapshot = state.snapshot()
         if snapshot["status"] != "running":
-            return _terminal_exit_code(snapshot["status"])
+            return _recover_terminal_aggregate(
+                paths=paths,
+                identity=identity,
+                campaign_root=campaign_root,
+                budget_path=budget_path,
+                counter=counter,
+                storage_baseline=storage_baseline,
+                results_root=results_root,
+                state=state,
+            )
         running = [row for row in snapshot["slots"] if row["status"] == "running"]
         if not running:
             return None
@@ -1534,11 +1812,6 @@ def _execute_base_rounds(
             effective[task.task_id] = attempts[-1]
         if sum(
             item.task_outcome is TaskOutcome.INFRA
-            and not (
-                identity.schema_version >= 3
-                and item.failure_category
-                is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
-            )
             for item in effective.values()
         ) > MAX_REMAINING_INFRA_PER_ROUND:
             raise CampaignExecutionError(
@@ -2203,13 +2476,22 @@ def _write_aggregate(
     if identity.schema_version >= 2:
         value["diagnoses"] = state_snapshot["diagnoses"]
     path = campaign_root / "aggregate.json"
-    temporary = path.with_name(".aggregate.json.tmp")
-    temporary.write_text(
-        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
+    _write_or_validate_aggregate(path, value)
+    public = _public_aggregate(value, identity=identity)
+    destination = (
+        results_root
+        / "eval/results/baselines"
+        / f"{identity.campaign_id}.json"
     )
-    temporary.chmod(0o600)
-    temporary.replace(path)
+    _write_or_validate_aggregate(destination, public)
+
+
+def _public_aggregate(
+    value: dict[str, object], *, identity: CampaignIdentity
+) -> dict[str, object]:
+    budget = value.get("budget")
+    if not isinstance(budget, dict):
+        raise CampaignExecutionError("private campaign aggregate lacks budget facts")
     public = {
         key: value[key]
         for key in (
@@ -2237,20 +2519,113 @@ def _write_aggregate(
     public["run_slots_used"] = budget["run_slots_used"]
     if identity.schema_version >= 2:
         public["diagnoses"] = value["diagnoses"]
-    destination = (
+    return public
+
+
+def _write_or_validate_aggregate(path: Path, value: dict[str, object]) -> None:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
+            raise CampaignExecutionError("campaign aggregate destination is unsafe")
+        try:
+            observed = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise CampaignExecutionError("campaign aggregate is unreadable") from exc
+        if observed != payload:
+            raise CampaignExecutionError("campaign aggregate differs from terminal state")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_once_durable_text(path, payload)
+
+
+def _restore_tracked_aggregate_from_local(
+    *,
+    campaign_root: Path,
+    identity: CampaignIdentity,
+    results_root: Path,
+    expected_status: str,
+) -> tuple[bool, dict[str, object] | None]:
+    local = campaign_root / "aggregate.json"
+    tracked = (
         results_root
         / "eval/results/baselines"
         / f"{identity.campaign_id}.json"
     )
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() or destination.is_symlink():
-        raise CampaignExecutionError("tracked campaign aggregate already exists")
-    tracked_temporary = destination.with_name(f".{destination.name}.tmp")
-    tracked_temporary.write_text(
-        json.dumps(public, sort_keys=True, separators=(",", ":")) + "\n",
-        encoding="utf-8",
+    if not local.exists() and not local.is_symlink():
+        if tracked.exists() or tracked.is_symlink():
+            raise CampaignExecutionError(
+                "tracked campaign aggregate exists without its private source"
+            )
+        return False, None
+    if local.is_symlink() or not local.is_file():
+        raise CampaignExecutionError("private campaign aggregate is unsafe")
+    try:
+        value = json.loads(local.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise CampaignExecutionError("private campaign aggregate is invalid") from exc
+    if (
+        not isinstance(value, dict)
+        or value.get("campaign_id") != identity.campaign_id
+        or value.get("campaign_lock_sha256") != identity.lock_sha256
+        or value.get("status") != expected_status
+    ):
+        raise CampaignExecutionError("private campaign aggregate identity drifted")
+    if not tracked.exists() and not tracked.is_symlink():
+        # Rebuild state/budget/results/assessment, but retain the already
+        # persisted terminal storage sample. The complete private bytes are
+        # still validated by _write_aggregate before tracked publication.
+        return False, value
+    _write_or_validate_aggregate(
+        tracked,
+        _public_aggregate(value, identity=identity),
     )
-    tracked_temporary.replace(destination)
+    return True, value
+
+
+def _validated_persisted_final_storage(
+    aggregate: dict[str, object],
+    *,
+    storage_baseline: StorageBaseline,
+) -> StorageBaseline | None:
+    storage = aggregate.get("storage")
+    if not isinstance(storage, dict) or set(storage) != {
+        "initial",
+        "final",
+        "growth_bytes",
+    }:
+        raise CampaignExecutionError("private campaign storage projection is invalid")
+    initial = _storage_baseline_from_projection(storage.get("initial"))
+    if initial != storage_baseline:
+        raise CampaignExecutionError("private campaign storage baseline drifted")
+    final_value = storage.get("final")
+    final = (
+        None
+        if final_value is None
+        else _storage_baseline_from_projection(final_value)
+    )
+    growth = storage.get("growth_bytes")
+    if growth is not None and (
+        isinstance(growth, bool) or not isinstance(growth, int)
+    ):
+        raise CampaignExecutionError("private campaign storage projection is invalid")
+    if storage != _storage_projection(storage_baseline, final):
+        raise CampaignExecutionError("private campaign storage projection drifted")
+    return final
+
+
+def _storage_baseline_from_projection(value: object) -> StorageBaseline:
+    if not isinstance(value, dict) or set(value) != {
+        "docker_total_bytes",
+        "docker_desktop_vhdx_bytes",
+        "windows_free_bytes",
+    }:
+        raise CampaignExecutionError("private campaign storage projection is invalid")
+    if any(
+        isinstance(item, bool) or not isinstance(item, int) or item < 0
+        for item in value.values()
+    ):
+        raise CampaignExecutionError("private campaign storage projection is invalid")
+    return StorageBaseline(**value)
 
 
 def _storage_projection(

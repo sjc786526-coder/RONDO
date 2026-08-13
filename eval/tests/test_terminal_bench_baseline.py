@@ -703,6 +703,208 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                     )
                 advance_paid.assert_called_once()
 
+    def test_terminal_state_replays_aggregate_after_finalize_write_failure(self) -> None:
+        identity = self._identity_v3()
+        tasks = tuple(task.task_id for task in identity.catalog.tasks)
+        base_runs = tuple(
+            BaselineRun(
+                task_id,
+                round_id,
+                Side.CODEX if round_id == "ab-codex-1" else Side.RONDO,
+                1,
+                TaskOutcome.PASS,
+                identity.slot(f"base:{round_id}:{task_id}:a1").run_id,
+            )
+            for round_id in BASE_ROUNDS
+            for task_id in tasks
+        )
+        assessment = assess_baseline(tasks, base_runs, ())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            paths = RepoPaths(root, root)
+            campaign_root = root / "eval-data/campaigns" / identity.campaign_id
+            budget_path = root / "eval-data/budgets" / f"{identity.batch_id}.json"
+            results_root = root / "results"
+            (results_root / "eval/results").mkdir(parents=True)
+            (results_root / "eval/results/runs.jsonl").write_text("", encoding="utf-8")
+            campaign_root.mkdir(parents=True)
+            canary_cost = Decimal("0.100000")
+            remaining_cap = (
+                Decimal(identity.budget["campaign_cap_usd"])
+                - Decimal(identity.budget["prior_estimated_usd"])
+                - canary_cost
+            )
+            state_path = campaign_root / "state.json"
+            with CampaignStateLedger(state_path, identity=identity) as state:
+                state.claim("wire-canary")
+                state.finish(
+                    "wire-canary",
+                    status=CampaignSlotStatus.COMPLETED,
+                    outcome="completed",
+                    estimated_usd=f"{canary_cost:.6f}",
+                    artifact_path="eval-data/campaigns/wire/receipt.json",
+                    result_record_sha256="1" * 64,
+                    reason=None,
+                )
+                with baseline_cli.PersistentBudgetLedger(
+                    budget_path,
+                    batch_id=identity.batch_id,
+                    total_cap_usd=remaining_cap,
+                    max_runs=len(identity.slots) - 1,
+                    default_run_cap_usd=baseline_cli.RUN_CAP_USD,
+                ) as budget, mock.patch.object(
+                    baseline_cli, "_execute_base_rounds", return_value=list(base_runs)
+                ), mock.patch.object(
+                    baseline_cli, "_execute_conditionals", return_value=[]
+                ), mock.patch.object(
+                    baseline_cli,
+                    "_sample_storage",
+                    return_value=baseline_cli.StorageBaseline(1, 1, 1),
+                ), mock.patch.object(
+                    baseline_cli, "_public_assessment", return_value={"status": "passed"}
+                ), mock.patch.object(
+                    baseline_cli, "_write_aggregate", side_effect=OSError("write failed")
+                ):
+                    with self.assertRaisesRegex(OSError, "write failed"):
+                        baseline_cli._advance_one_paid_step(
+                            paths=paths,
+                            identity=identity,
+                            state=state,
+                            budget=budget,
+                            counter=mock.Mock(),
+                            storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                            results_root=results_root,
+                            campaign_root=campaign_root,
+                            canary_cost=canary_cost,
+                        )
+                self.assertEqual(state.snapshot()["status"], BaselineStatus.PASSED.value)
+                self.assertFalse((campaign_root / "aggregate.json").exists())
+                self.assertFalse(
+                    (
+                        results_root
+                        / "eval/results/baselines"
+                        / f"{identity.campaign_id}.json"
+                    ).exists()
+                )
+
+            with CampaignStateLedger(state_path, identity=identity) as state, mock.patch.object(
+                baseline_cli, "_replay_terminal_assessment", return_value=assessment
+            ), mock.patch.object(
+                baseline_cli,
+                "_sample_storage",
+                return_value=baseline_cli.StorageBaseline(1, 1, 1),
+            ), mock.patch.object(
+                baseline_cli, "_public_assessment", return_value={"status": "passed"}
+            ):
+                result = baseline_cli._advance_post_oracle_step(
+                    paths=paths,
+                    identity=identity,
+                    campaign_root=campaign_root,
+                    budget_path=budget_path,
+                    config=mock.Mock(),
+                    counter=mock.Mock(),
+                    proof=mock.Mock(),
+                    storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                    results_root=results_root,
+                    manifests={},
+                    measurement_roots={},
+                    measurement_commits={},
+                    eval_harness_commit="a" * 40,
+                    seccomp_profile=root / "seccomp.json",
+                    state=state,
+                )
+            self.assertEqual(result, 0)
+            tracked = (
+                results_root
+                / "eval/results/baselines"
+                / f"{identity.campaign_id}.json"
+            )
+            self.assertTrue(tracked.is_file())
+            local = json.loads((campaign_root / "aggregate.json").read_text())
+            public = json.loads(tracked.read_text())
+            self.assertEqual(public["campaign_id"], local["campaign_id"])
+            self.assertNotIn("budget", public)
+
+            # Simulate a crash after the private aggregate was durable but
+            # before its tracked projection was published. A later host sample
+            # may legitimately differ and must not invalidate terminal replay.
+            tracked.unlink()
+            with CampaignStateLedger(
+                state_path, identity=identity
+            ) as state, mock.patch.object(
+                baseline_cli, "_replay_terminal_assessment", return_value=assessment
+            ), mock.patch.object(
+                baseline_cli,
+                "_sample_storage",
+                return_value=baseline_cli.StorageBaseline(2, 2, 2),
+            ) as sample_storage, mock.patch.object(
+                baseline_cli, "_public_assessment", return_value={"status": "passed"}
+            ):
+                result = baseline_cli._advance_post_oracle_step(
+                    paths=paths,
+                    identity=identity,
+                    campaign_root=campaign_root,
+                    budget_path=budget_path,
+                    config=mock.Mock(),
+                    counter=mock.Mock(),
+                    proof=mock.Mock(),
+                    storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                    results_root=results_root,
+                    manifests={},
+                    measurement_roots={},
+                    measurement_commits={},
+                    eval_harness_commit="a" * 40,
+                    seccomp_profile=root / "seccomp.json",
+                    state=state,
+                )
+            self.assertEqual(result, 0)
+            sample_storage.assert_not_called()
+            self.assertEqual(
+                json.loads(tracked.read_text())["storage"],
+                local["storage"],
+            )
+
+    def test_terminal_chain_replay_reads_public_result_without_execution(self) -> None:
+        identity = self._identity_v3()
+        task = identity.catalog.tasks[0]
+        chain_id = f"base:aa-rondo-1:{task.task_id}"
+        slot = identity.slot(f"{chain_id}:a1")
+        digest = "4" * 64
+        rows = [
+            {
+                "slot_id": identity.slot(f"{chain_id}:a{attempt}").slot_id,
+                "status": (
+                    CampaignSlotStatus.COMPLETED.value
+                    if attempt == 1
+                    else CampaignSlotStatus.SKIPPED.value
+                ),
+                "outcome": RunOutcome.COMPLETED.value if attempt == 1 else None,
+                "estimated_usd": "0.100000" if attempt == 1 else "0.000000",
+                "reason": None if attempt == 1 else "infra_attempt_not_activated",
+                "result_record_sha256": digest if attempt == 1 else None,
+            }
+            for attempt in range(1, identity.max_attempts + 1)
+        ]
+        state = mock.Mock()
+        state.snapshot.return_value = {"slots": rows}
+        result = baseline_cli._replay_terminal_chain(
+            identity=identity,
+            state=state,
+            chain_id=chain_id,
+            task=task,
+            records={
+                slot.run_id: {
+                    "outcome": RunOutcome.COMPLETED.value,
+                    "tasks": [{"task_id": task.task_id, "outcome": "pass"}],
+                }
+            },
+            digests={slot.run_id: digest},
+            continued={},
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].slot, slot)
+        self.assertIs(result[0].task_outcome, TaskOutcome.PASS)
+
     def test_schema_v2_diagnosis_hold_is_durable_and_gates_claims(self) -> None:
         identity = self._identity_v2()
         task_id = identity.catalog.tasks[0].task_id
@@ -1424,7 +1626,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                     )
                 )
 
-    def test_schema_v3_provider_integrity_does_not_trigger_round_infra_gate(self) -> None:
+    def test_schema_v3_provider_integrity_still_triggers_round_infra_gate(self) -> None:
         identity = self._identity_v3()
 
         class State:
@@ -1432,9 +1634,11 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 del slot_id, reason
 
         task_ids = tuple(item.task_id for item in identity.catalog.tasks)
+        calls: list[str] = []
 
         def execute(*, slot, **kwargs):
             del kwargs
+            calls.append(slot.slot_id)
             infra = task_ids.index(slot.task_id) < 3
             return baseline_cli.ExecutedSlot(
                 slot,
@@ -1449,15 +1653,16 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             )
 
         with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
-            values = baseline_cli._execute_base_rounds(
-                identity=identity,
-                state=State(),
-            )
-        self.assertEqual(len(values), 76)
-        self.assertEqual(
-            sum(item.outcome is TaskOutcome.INFRA for item in values),
-            48,
-        )
+            with self.assertRaisesRegex(
+                baseline_cli.CampaignExecutionError,
+                "base_round_infra_threshold_exceeded:aa-rondo-1",
+            ):
+                baseline_cli._execute_base_rounds(
+                    identity=identity,
+                    state=State(),
+                )
+        self.assertEqual(len(calls), 19)
+        self.assertTrue(all("aa-rondo-1" in slot_id for slot_id in calls))
 
     def test_schema_v3_continuation_skips_new_attempts_and_keeps_reward_zero(self) -> None:
         identity = self._identity_v3()
@@ -1589,8 +1794,9 @@ class TerminalBenchBaselineTests(unittest.TestCase):
     def test_storage_projection_keeps_initial_final_and_growth(self) -> None:
         initial = baseline_cli.StorageBaseline(100, 200, 300)
         final = baseline_cli.StorageBaseline(120, 250, 280)
+        storage = baseline_cli._storage_projection(initial, final)
         self.assertEqual(
-            baseline_cli._storage_projection(initial, final),
+            storage,
             {
                 "initial": {
                     "docker_total_bytes": 100,
@@ -1608,6 +1814,21 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertIsNone(
             baseline_cli._storage_projection(initial, None)["final"]
         )
+        self.assertEqual(
+            baseline_cli._validated_persisted_final_storage(
+                {"storage": storage}, storage_baseline=initial
+            ),
+            final,
+        )
+        drifted = json.loads(json.dumps(storage))
+        drifted["growth_bytes"] = 51
+        with self.assertRaisesRegex(
+            baseline_cli.CampaignExecutionError,
+            "storage projection drifted",
+        ):
+            baseline_cli._validated_persisted_final_storage(
+                {"storage": drifted}, storage_baseline=initial
+            )
 
     def test_public_campaign_aggregate_scores_rounds_and_sums_usage(self) -> None:
         base = self._base()

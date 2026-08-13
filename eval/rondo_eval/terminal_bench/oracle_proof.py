@@ -194,6 +194,12 @@ def build_oracle_contract(
     )
     component_root = paths.worktree_root / "eval/rondo_eval"
     component_paths = {
+        # verifier_runtime normalizes every official solution/verifier exec
+        # through compat.exec_result; changing that normalization changes the
+        # fact proved by an otherwise identical Oracle run.
+        "harbor_compat": component_root / "terminal_bench/compat.py",
+        "frozen_image_contract": component_root / "terminal_bench/freeze.py",
+        "frozen_task_contract": component_root / "terminal_bench/tasksets.py",
         "materializer": component_root / "terminal_bench/materialize.py",
         "runner": component_root / "terminal_bench/runner.py",
         "oracle": component_root / "terminal_bench/oracle_smoke.py",

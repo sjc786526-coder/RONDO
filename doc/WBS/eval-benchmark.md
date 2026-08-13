@@ -105,21 +105,20 @@
 - 跑批前输出预估：任务数 × 轮数 × 模型 × 预估 token → 成本区间。
 - 硬上限：超过预算即中止并保留已完成结果。
 - 每次跑批需单独授权。
-- **当前实现**：Plan 015 独立 campaign cap 为 600 USD；v9 终态后的累计 debit 为 `282.287684 USD`。
-  161 个 slot 由代码机械派生，18.885 USD 最大合法 request reservation 与全局 prior/cap 在每个新 identity
-  生成和每次请求前复核。B6 历史插值与 v19-shape 压力上界可复算，预算不足时在下一 request 前停止。
+- **当前实现**：Plan 020 的累计硬上限最终冻结为 `1600 USD`；v22 终态累计本地估算
+  `1466.074133 USD`。schema-v6 的 321 个 slot 由代码机械派生，18.885 USD 最大合法 request reservation、
+  main/Guardian 并发 admission 与全局 prior/cap 在 identity 生成和每次请求前复核。v1—v22 全部只读，
+  active paid identity 已关闭。
 
 ### B7 首次基线（规模 S，授权门：canary 跑批）—— **M2 的一半**
 
 - 按 `doc/WBS.md` §4「M2 的可执行判据」执行：先用同一 RONDO 二进制跑 2 轮 A/A 得出波动带宽 `σ`，再跑 codex 与 RONDO 各 1 轮 A/B，要求跨侧差异任务数 `≤ σ` 且无单向失败模式。
 - 基础 10 任务 × 4 轮 = 40 次运行，外加条件触发的定点加跑（每个出现 codex-pass/RONDO-fail 的任务两侧各加 2 轮）。按 B6 出预估并单独授权。
 - 不通过则先停下修测评设施，不得先行推进优化。
-- **当前状态**：Plan 015 已获累计 600 USD 与串行 Docker 授权；v1—v9 均为只读终态。v9 的 Oracle 10/10、
-  wire canary 与首个正式任务有效，但 results worktree 与执行 checkout 重合触发 harness drift 门禁，未进入第二题。
-  campaign-independent 单题 Oracle proof、单 Oracle/task-run 重型锁、campaign lease 和单 slot 恢复状态机已通过
-  420 条阶段离线回归；v10 identity 已冻结并精确带入 `282.287684 USD` prior。首题 Oracle 在 proof 发布前因
-  B2/Oracle receipt 类型错配停止，0 API/0 USD；专用 compatibility receipt 的 focused 108/108 已通过，待恢复。
-  定点 infra replacement、逐轮门禁、三 task 熔断和至少 8 项共同分母保持不变。
+- **当前状态**：Plan 020 v22 已完成真实执行并形成有效 failed 基线。九项共同有效任务上 RONDO A/A
+  为 `5/9`、`5/9`，RONDO A/B 为 `5/9`，frozen Codex A/B 为 `4/9`；`sigma=0`、`delta=3`，精确失败原因为
+  `ab_delta_exceeds_aa_sigma`。必要条件加跑未形成稳定的 RONDO 三败/Codex 三过。wire 与 paid 合计均已结算、
+  reservation 0、`actual_usd=null`。这证明 B7 执行和归档完成，不代表 B7/M2 性能门通过；E-A A1—A7 仍待实现。
 
 ## E-A 轻量离线冻结回放
 
