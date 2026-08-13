@@ -99,11 +99,21 @@ quantization = "Q4_K_M"
 binary = "eval-data/tools/llama-b10333/llama-server"
 host = "127.0.0.1"
 port = 8080
-# 0 means use the context size stored in the model. L2 acceptance will measure
-# the largest safe context on the actual GPU instead of assuming one here.
-context_size = 0
-gpu_layers = "auto"
-flash_attention = "auto"
+# This is the fixed 8k baseline. For the first 4k smoke only, change exactly
+# context_size to 4096, gpu_layers to "auto", and fit to "on". Do not create
+# a second profile or silently retain the smoke settings as the baseline.
+context_size = 8192
+gpu_layers = "all"
+fit = "off"
+batch_size = 512
+ubatch_size = 256
+cache_type_k = "f16"
+cache_type_v = "f16"
+no_mmproj = true
+chat_template_file = "eval/templates/local-approval/ministral-3-8b-instruct-2512-chat-template.jinja"
+chat_template_sha256 = "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56"
+jinja = true
+flash_attention = "on"
 parallel = 1
 metrics = true
 slots = true

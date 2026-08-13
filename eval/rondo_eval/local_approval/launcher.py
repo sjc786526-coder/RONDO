@@ -34,6 +34,21 @@ LLAMA_CPP_COMMIT = "08659901c43b51de735740f1cf61bb82fbe0c4e4"
 LLAMA_CPP_ASSET_SHA256 = "936ce04d98abe2a977e9dd2ff92659bb96947e136acee8f2bc3e21d8eaebbf23"
 LLAMA_CPP_BINARY_SHA256 = "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c15315dbd8aa4bbe"
 GPU_MODEL_SERVING_CAPABILITY = "gpu_model_serving_validated"
+CHAT_TEMPLATE_REPO = "mistralai/Ministral-3-8B-Instruct-2512"
+CHAT_TEMPLATE_REVISION = "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d"
+CHAT_TEMPLATE_SOURCE_FILE = "chat_template.jinja"
+CHAT_TEMPLATE_RELATIVE_PATH = (
+    "eval/templates/local-approval/"
+    "ministral-3-8b-instruct-2512-chat-template.jinja"
+)
+CHAT_TEMPLATE_SIZE_BYTES = 11_912
+CHAT_TEMPLATE_SHA256 = (
+    "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56"
+)
+_CHAT_TEMPLATE_LOCK_RELATIVE_PATH = Path(
+    "eval/locks/ministral-3-8b-instruct-2512-chat-template.json"
+)
+_CHAT_TEMPLATE_ALLOWED_RELATIVE_ROOT = Path("eval/templates/local-approval")
 _VERSION_TIMEOUT_SECONDS = 10
 _ROUTER_TIMEOUT_SECONDS = 10.0
 _WATCHDOG_INTERVAL_SECONDS = 5.0
@@ -96,6 +111,13 @@ class RuntimeLock:
             sort_keys=True,
         ).encode("utf-8")
         return hashlib.sha256(canonical).hexdigest()
+
+
+@dataclass(frozen=True)
+class ChatTemplateInspection:
+    path: Path
+    size_bytes: int
+    sha256: str
 
 
 def resolve_binary(config: RuntimeConfig, settings: LocalApprovalSettings) -> Path | None:
@@ -437,23 +459,85 @@ def model_path(config: RuntimeConfig, settings: LocalApprovalSettings) -> Path:
     return path.resolve(strict=True)
 
 
-def build_serve_command(
-    config: RuntimeConfig,
+def chat_template(
+    config: RuntimeConfig, settings: LocalApprovalSettings
+) -> ChatTemplateInspection:
+    """Validate the only frozen tracked template without GGUF fallback."""
+
+    lock_path = config.paths.worktree_root / _CHAT_TEMPLATE_LOCK_RELATIVE_PATH
+    if lock_path.is_symlink() or not lock_path.is_file():
+        raise ConfigError("frozen chat template lock is unavailable")
+    try:
+        value = json.loads(lock_path.read_bytes())
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ConfigError("frozen chat template lock is invalid") from exc
+    expected_lock = {
+        "schema_version": 1,
+        "repo": CHAT_TEMPLATE_REPO,
+        "revision": CHAT_TEMPLATE_REVISION,
+        "source_file": CHAT_TEMPLATE_SOURCE_FILE,
+        "installed": {
+            "relative_path": CHAT_TEMPLATE_RELATIVE_PATH,
+            "size_bytes": CHAT_TEMPLATE_SIZE_BYTES,
+            "sha256": CHAT_TEMPLATE_SHA256,
+        },
+    }
+    if value != expected_lock:
+        raise ConfigError("frozen chat template lock identity differs")
+    if (
+        settings.chat_template_file != CHAT_TEMPLATE_RELATIVE_PATH
+        or settings.chat_template_sha256 != CHAT_TEMPLATE_SHA256
+    ):
+        raise ConfigError("configured chat template differs from the frozen lock")
+
+    root = config.paths.worktree_root.resolve(strict=True)
+    allowed_root = root / _CHAT_TEMPLATE_ALLOWED_RELATIVE_ROOT
+    current = root
+    try:
+        for component in _CHAT_TEMPLATE_ALLOWED_RELATIVE_ROOT.parts:
+            current /= component
+            mode = os.lstat(current).st_mode
+            if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+                raise ConfigError("frozen chat template has an unsafe ancestor")
+        candidate = root / CHAT_TEMPLATE_RELATIVE_PATH
+        before = os.lstat(candidate)
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(allowed_root.resolve(strict=True))
+    except ConfigError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise ConfigError("frozen chat template path is unavailable or escapes its root") from exc
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise ConfigError("frozen chat template must be a regular non-symlink file")
+    if before.st_mode & (stat.S_ISUID | stat.S_ISGID | stat.S_IWGRP | stat.S_IWOTH):
+        raise ConfigError("frozen chat template has an unsafe mode")
+    if before.st_size != CHAT_TEMPLATE_SIZE_BYTES:
+        raise ConfigError("frozen chat template size differs")
+    try:
+        digest = _binary_sha256(candidate)
+        after = os.lstat(candidate)
+    except OSError as exc:
+        raise ConfigError("frozen chat template cannot be inspected") from exc
+    if (
+        digest != CHAT_TEMPLATE_SHA256
+        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    ):
+        raise ConfigError("frozen chat template digest or identity differs")
+    return ChatTemplateInspection(resolved, before.st_size, digest)
+
+
+def _serve_arguments(
     settings: LocalApprovalSettings,
-    binary: Path,
+    model: Path,
+    template: ChatTemplateInspection,
 ) -> list[str]:
-    """Build the formal serve command; never falls back to router mode.
-
-    These b10333 model-serving flags are intentionally generated from the
-    frozen TOML contract but remain pending verification with the installed
-    binary and a real model.  In particular, ``gpu_layers = "auto"`` is a
-    RONDO policy mapped to 99 layers, not an upstream llama.cpp ``auto`` value.
-    The model-free doctor path never executes this command.
-    """
-
-    model = model_path(config, settings)
-    command = [
-        os.fspath(binary),
+    gpu_layers = (
+        settings.gpu_layers
+        if isinstance(settings.gpu_layers, str)
+        else str(settings.gpu_layers)
+    )
+    arguments = [
         "--offline",
         "--no-models-autoload",
         "--no-ui",
@@ -465,20 +549,91 @@ def build_serve_command(
         os.fspath(model),
         "--alias",
         settings.model_id,
+        "--no-mmproj",
+        "--gpu-layers",
+        gpu_layers,
+        "--split-mode",
+        "none",
+        "--main-gpu",
+        "0",
+        "--fit",
+        settings.fit,
+        "--ctx-size",
+        str(settings.context_size),
+        "--batch-size",
+        str(settings.batch_size),
+        "--ubatch-size",
+        str(settings.ubatch_size),
         "--parallel",
         str(settings.parallel),
         "--flash-attn",
         settings.flash_attention,
-        "--n-gpu-layers",
-        "99" if settings.gpu_layers == "auto" else str(settings.gpu_layers),
+        "--cache-type-k",
+        settings.cache_type_k,
+        "--cache-type-v",
+        settings.cache_type_v,
+        # b10333 requires --jinja before a non-built-in template file.
+        "--jinja",
+        "--chat-template-file",
+        os.fspath(template.path),
     ]
-    if settings.context_size > 0:
-        command.extend(["--ctx-size", str(settings.context_size)])
     if settings.metrics:
-        command.append("--metrics")
+        arguments.append("--metrics")
     if settings.slots:
-        command.append("--slots")
-    return command
+        arguments.append("--slots")
+    return arguments
+
+
+def _serve_config_sha256(
+    settings: LocalApprovalSettings,
+    arguments: Sequence[str],
+    template: ChatTemplateInspection,
+) -> str:
+    canonical = {
+        "schema_version": 1,
+        "runtime": "llama_cpp",
+        "api": "responses",
+        "format": "gguf",
+        "quantization": settings.quantization,
+        "configured_binary": settings.binary,
+        "tools": False,
+        "web_ui": False,
+        "command_arguments": list(arguments),
+        "chat_template_sha256": template.sha256,
+    }
+    raw = json.dumps(
+        canonical, separators=(",", ":"), sort_keys=True, allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def serve_config_sha256(
+    config: RuntimeConfig, settings: LocalApprovalSettings
+) -> str:
+    """Bind current model-serving configuration without hashing the large GGUF."""
+
+    if not settings.model_path:
+        raise ModelMissingError("local model path is empty")
+    configured_model = resolve_config_path(config, settings.model_path)
+    if configured_model.is_symlink() or not configured_model.is_file():
+        raise ModelMissingError("configured local model is missing")
+    template = chat_template(config, settings)
+    arguments = _serve_arguments(
+        settings, configured_model.resolve(strict=True), template
+    )
+    return _serve_config_sha256(settings, arguments, template)
+
+
+def build_serve_command(
+    config: RuntimeConfig,
+    settings: LocalApprovalSettings,
+    binary: Path,
+) -> list[str]:
+    """Build the formal b10333 command; never falls back to router mode."""
+
+    model = model_path(config, settings)
+    template = chat_template(config, settings)
+    return [os.fspath(binary), *_serve_arguments(settings, model, template)]
 
 
 def serve_environment(config: RuntimeConfig) -> dict[str, str]:
@@ -521,7 +676,10 @@ def run_server(
         raise LauncherError(
             "the pinned runtime is CPU-only; GPU/model serving remains unvalidated"
         )
-    command = build_serve_command(config, settings, runtime.binary)
+    template = chat_template(config, settings)
+    arguments = _serve_arguments(settings, model, template)
+    command = [os.fspath(runtime.binary), *arguments]
+    serving_config = _serve_config_sha256(settings, arguments, template)
     environment = serve_environment(config)
     if not _watchdog_held(watchdog):
         raise LauncherError("shared watchdog lease was lost before server start")
@@ -541,6 +699,7 @@ def run_server(
             base_url=settings.base_url,
             host=settings.host,
             port=settings.port,
+            serve_config_sha256=serving_config,
         )
     except (AttributeError, OSError, ConfigError) as exc:
         _stop_server_process(process)

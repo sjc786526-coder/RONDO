@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-11
+最后更新：2026-08-12
 
 本文件只记录**当前阶段**与**方向级路线、依赖和授权门**。方向内部的详细分解见 `doc/WBS/`，
 单次任务的execplan见 `plan/`，已完成成果见 `doc/WBS-COMPLETED.md`。
@@ -61,8 +61,8 @@
 - L1 协议与三组 consumer 协议/fixture 逐字节投影已完成，合法 `ToolSearchOutput` 可消费且最终 sink
   fail-closed；本阶段不宣称已有三套独立生产调用端。
   L2 项目局部 llama.cpp `b10333` 已冻结 CPU x64 前端/动态运行闭包、配置、client、
-  doctor、fake 和启动入口。model-backed client 必须校验 launcher 私有 receipt，并在请求前后
-  重验 PID/start ticks、cmdline、监听 socket、receipt 中的 runtime/model identity 与 endpoint；这
+  doctor、fake 和启动入口。当前官方模板、4k/8k 服务参数命令合同和 receipt v2 配置指纹已通过 model-free 门禁；
+  model-backed client 必须在请求前后重验 PID/start ticks、cmdline、监听 socket、runtime/model/endpoint 与当前配置；这
   仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。当前无权重，
   CPU frontend/runtime closure 是已验边界；GPU runtime、model-backed 启动/推理、显存/延迟与
   L2a/L3/L4 均未实现验收，不称“只差权重”。

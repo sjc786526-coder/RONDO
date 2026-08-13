@@ -6,12 +6,14 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
 
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = EVAL_ROOT.parent
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval import runtime_bridge  # noqa: E402
@@ -38,6 +40,12 @@ from rondo_eval.local_approval.identity import (  # noqa: E402
     publish_launcher_identity,
 )
 from rondo_eval.local_approval.launcher import (  # noqa: E402
+    CHAT_TEMPLATE_RELATIVE_PATH,
+    CHAT_TEMPLATE_REPO,
+    CHAT_TEMPLATE_REVISION,
+    CHAT_TEMPLATE_SHA256,
+    CHAT_TEMPLATE_SIZE_BYTES,
+    CHAT_TEMPLATE_SOURCE_FILE,
     LLAMA_CPP_ASSET_SHA256,
     LLAMA_CPP_BINARY_SHA256,
     LLAMA_CPP_BUILD,
@@ -50,12 +58,44 @@ from rondo_eval.local_approval.launcher import (  # noqa: E402
     _verify_host_dependency_closure,
     _verify_runtime_closure,
     build_serve_command,
+    chat_template,
     inspect_runtime,
     main as launcher_main,
     model_path,
     run_server,
+    serve_config_sha256,
     serve_environment,
 )
+
+
+FROZEN_TEMPLATE = REPO_ROOT / CHAT_TEMPLATE_RELATIVE_PATH
+FROZEN_TEMPLATE_LOCK = (
+    REPO_ROOT / "eval/locks/ministral-3-8b-instruct-2512-chat-template.json"
+)
+
+
+def _install_template_fixture(root: Path) -> None:
+    target = root / CHAT_TEMPLATE_RELATIVE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(FROZEN_TEMPLATE.read_bytes())
+    lock = root / "eval/locks/ministral-3-8b-instruct-2512-chat-template.json"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "repo": CHAT_TEMPLATE_REPO,
+                "revision": CHAT_TEMPLATE_REVISION,
+                "source_file": CHAT_TEMPLATE_SOURCE_FILE,
+                "installed": {
+                    "relative_path": CHAT_TEMPLATE_RELATIVE_PATH,
+                    "size_bytes": CHAT_TEMPLATE_SIZE_BYTES,
+                    "sha256": CHAT_TEMPLATE_SHA256,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def _local_data(
@@ -64,6 +104,7 @@ def _local_data(
     model_path_value: str = "",
     model_sha256_value: str = "",
     api_key_env: bool = False,
+    server_overrides: dict | None = None,
 ) -> dict:
     local_model: dict = {
         "runtime": "llama_cpp",
@@ -78,9 +119,18 @@ def _local_data(
             "binary": "llama-server",
             "host": "127.0.0.1",
             "port": int(base_url.rsplit(":", 1)[1].split("/", 1)[0]),
-            "context_size": 0,
+            "context_size": 4096,
             "gpu_layers": "auto",
-            "flash_attention": "auto",
+            "fit": "on",
+            "batch_size": 512,
+            "ubatch_size": 256,
+            "cache_type_k": "f16",
+            "cache_type_v": "f16",
+            "no_mmproj": True,
+            "chat_template_file": CHAT_TEMPLATE_RELATIVE_PATH,
+            "chat_template_sha256": CHAT_TEMPLATE_SHA256,
+            "jinja": True,
+            "flash_attention": "on",
             "parallel": 1,
             "metrics": True,
             "slots": True,
@@ -98,6 +148,8 @@ def _local_data(
             "structured_output": True,
         },
     }
+    if server_overrides:
+        local_model["server"].update(server_overrides)
     if api_key_env:
         local_model["api_key_env"] = "RONDO_LOCAL_MODEL_API_KEY"
     return {"local_model": local_model}
@@ -142,6 +194,7 @@ class LocalApprovalClientTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.paths = RepoPaths(self.root, self.root)
+        _install_template_fixture(self.root)
         (self.root / "rondo.secrets.example.env").write_text(
             "RONDO_LOCAL_MODEL_API_KEY=\n",
             encoding="utf-8",
@@ -337,12 +390,106 @@ class LocalApprovalClientTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             settings_from_config(config)
 
+    def test_server_contract_rejects_missing_wrong_type_and_unsupported_values(self) -> None:
+        required = (
+            "context_size",
+            "gpu_layers",
+            "fit",
+            "batch_size",
+            "ubatch_size",
+            "cache_type_k",
+            "cache_type_v",
+            "no_mmproj",
+            "chat_template_file",
+            "chat_template_sha256",
+            "jinja",
+            "flash_attention",
+            "parallel",
+        )
+        for key in required:
+            with self.subTest(missing=key):
+                config = self._config("http://127.0.0.1:8080/v1")
+                del config.data["local_model"]["server"][key]
+                with self.assertRaises(ConfigError):
+                    settings_from_config(config)
+
+        invalid = (
+            ("context_size", True),
+            ("context_size", 0),
+            ("context_size", 2**31),
+            ("gpu_layers", True),
+            ("gpu_layers", -1),
+            ("gpu_layers", 2**31),
+            ("gpu_layers", "99"),
+            ("gpu_layers", "AUTO"),
+            ("gpu_layers", []),
+            ("fit", True),
+            ("fit", "auto"),
+            ("batch_size", True),
+            ("batch_size", 0),
+            ("ubatch_size", True),
+            ("ubatch_size", 0),
+            ("ubatch_size", 513),
+            ("cache_type_k", "q8_0"),
+            ("cache_type_v", "q4_0"),
+            ("no_mmproj", False),
+            ("no_mmproj", 1),
+            ("jinja", False),
+            ("jinja", 1),
+            ("parallel", True),
+            ("parallel", 2),
+            ("flash_attention", []),
+            ("chat_template_file", "../outside.jinja"),
+            ("chat_template_file", "/outside.jinja"),
+            ("chat_template_sha256", "A" * 64),
+        )
+        for key, value in invalid:
+            with self.subTest(key=key, value=value):
+                config = self._config("http://127.0.0.1:8080/v1")
+                config.data["local_model"]["server"][key] = value
+                with self.assertRaises(ConfigError):
+                    settings_from_config(config)
+
+    def test_gpu_layer_auto_all_and_integer_boundaries_are_supported(self) -> None:
+        for value in ("auto", "all", 0, 2**31 - 1):
+            with self.subTest(value=value):
+                config = self._config(
+                    "http://127.0.0.1:8080/v1",
+                    server_overrides={"gpu_layers": value},
+                )
+                self.assertEqual(settings_from_config(config).gpu_layers, value)
+
+    def test_tracked_example_is_the_exact_8k_baseline_contract(self) -> None:
+        data = tomllib.loads(
+            (REPO_ROOT / "rondo.local.example.toml").read_text(encoding="utf-8")
+        )
+        config = RuntimeConfig(RepoPaths(REPO_ROOT, REPO_ROOT), data, "0" * 64)
+        settings = settings_from_config(config)
+        self.assertEqual(
+            (
+                settings.context_size,
+                settings.gpu_layers,
+                settings.fit,
+                settings.batch_size,
+                settings.ubatch_size,
+                settings.parallel,
+                settings.flash_attention,
+                settings.cache_type_k,
+                settings.cache_type_v,
+                settings.no_mmproj,
+                settings.jinja,
+            ),
+            (8192, "all", "off", 512, 256, 1, "on", "f16", "f16", True, True),
+        )
+        self.assertEqual(chat_template(config, settings).sha256, CHAT_TEMPLATE_SHA256)
+
 
 class LauncherAndDoctorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.paths = RepoPaths(self.root, self.root)
+        _install_template_fixture(self.root)
         (self.root / "rondo.secrets.example.env").write_text(
             "RONDO_LOCAL_MODEL_API_KEY=\n",
             encoding="utf-8",
@@ -351,7 +498,13 @@ class LauncherAndDoctorTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def _config(self, *, model: str = "", port: int = 8080) -> RuntimeConfig:
+    def _config(
+        self,
+        *,
+        model: str = "",
+        port: int = 8080,
+        server_overrides: dict | None = None,
+    ) -> RuntimeConfig:
         digest = hashlib.sha256(Path(model).read_bytes()).hexdigest() if model else ""
         return RuntimeConfig(
             self.paths,
@@ -359,6 +512,7 @@ class LauncherAndDoctorTests(unittest.TestCase):
                 f"http://127.0.0.1:{port}/v1",
                 model_path_value=model,
                 model_sha256_value=digest,
+                server_overrides=server_overrides,
             ),
             "0" * 64,
         )
@@ -378,6 +532,7 @@ class LauncherAndDoctorTests(unittest.TestCase):
             base_url=settings.base_url,
             host=settings.host,
             port=settings.port,
+            serve_config_sha256=serve_config_sha256(config, settings),
         )
 
     @staticmethod
@@ -407,6 +562,72 @@ class LauncherAndDoctorTests(unittest.TestCase):
         _config: RuntimeConfig, _settings: object, _runtime: RuntimeInspection
     ) -> RouterProbe:
         return RouterProbe("router_ready", "ready")
+
+    def test_frozen_official_template_lock_bytes_and_sha_are_exact(self) -> None:
+        self.assertEqual(FROZEN_TEMPLATE.stat().st_size, CHAT_TEMPLATE_SIZE_BYTES)
+        self.assertEqual(
+            hashlib.sha256(FROZEN_TEMPLATE.read_bytes()).hexdigest(),
+            CHAT_TEMPLATE_SHA256,
+        )
+        lock = json.loads(FROZEN_TEMPLATE_LOCK.read_bytes())
+        self.assertEqual(
+            lock,
+            {
+                "schema_version": 1,
+                "repo": CHAT_TEMPLATE_REPO,
+                "revision": CHAT_TEMPLATE_REVISION,
+                "source_file": CHAT_TEMPLATE_SOURCE_FILE,
+                "installed": {
+                    "relative_path": CHAT_TEMPLATE_RELATIVE_PATH,
+                    "size_bytes": CHAT_TEMPLATE_SIZE_BYTES,
+                    "sha256": CHAT_TEMPLATE_SHA256,
+                },
+            },
+        )
+        config = RuntimeConfig(
+            RepoPaths(REPO_ROOT, REPO_ROOT),
+            _local_data("http://127.0.0.1:8080/v1"),
+            "0" * 64,
+        )
+        inspection = chat_template(config, settings_from_config(config))
+        self.assertEqual(inspection.path, FROZEN_TEMPLATE.resolve())
+        self.assertEqual(inspection.sha256, CHAT_TEMPLATE_SHA256)
+
+    def test_template_validation_rejects_missing_symlink_size_hash_and_lock_drift(self) -> None:
+        cases = ("missing", "symlink", "size", "hash", "lock")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                _install_template_fixture(root)
+                target = root / CHAT_TEMPLATE_RELATIVE_PATH
+                lock_path = (
+                    root
+                    / "eval/locks/ministral-3-8b-instruct-2512-chat-template.json"
+                )
+                if case == "missing":
+                    target.unlink()
+                elif case == "symlink":
+                    outside = root / "outside.jinja"
+                    outside.write_bytes(FROZEN_TEMPLATE.read_bytes())
+                    target.unlink()
+                    target.symlink_to(outside)
+                elif case == "size":
+                    target.write_bytes(FROZEN_TEMPLATE.read_bytes() + b"x")
+                elif case == "hash":
+                    changed = bytearray(FROZEN_TEMPLATE.read_bytes())
+                    changed[0] ^= 1
+                    target.write_bytes(changed)
+                else:
+                    lock = json.loads(lock_path.read_bytes())
+                    lock["revision"] = "0" * 40
+                    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+                config = RuntimeConfig(
+                    RepoPaths(root, root),
+                    _local_data("http://127.0.0.1:8080/v1"),
+                    "0" * 64,
+                )
+                with self.assertRaises(ConfigError):
+                    chat_template(config, settings_from_config(config))
 
     def test_formal_launcher_stops_at_model_missing_without_router_fallback(self) -> None:
         config = self._config()
@@ -542,6 +763,9 @@ class LauncherAndDoctorTests(unittest.TestCase):
         identity = self._publish_identity(config, model)
         receipt = self.root / "eval-data/local-approval/launcher-identity.json"
         self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
+        raw_receipt = receipt.read_text(encoding="utf-8")
+        self.assertEqual(json.loads(raw_receipt)["schema_version"], 2)
+        self.assertNotIn("api_key", raw_receipt.lower())
         clear_launcher_identity(config, identity)
 
         (self.root / "outside").mkdir()
@@ -594,19 +818,108 @@ class LauncherAndDoctorTests(unittest.TestCase):
             mock.ANY, mock.sentinel.identity
         )
 
-    def test_serve_command_is_pinned_loopback_offline_and_contains_no_secret(self) -> None:
+    def test_serve_commands_exactly_express_4k_smoke_and_8k_baseline(self) -> None:
         model = self.root / "model.gguf"
         model.write_bytes(b"GGUFfake-model-fixture")
-        config = self._config(model=os.fspath(model))
-        settings = settings_from_config(config)
-        command = build_serve_command(config, settings, Path("/runtime/llama-server"))
-        self.assertIn("--offline", command)
-        self.assertIn("--no-models-autoload", command)
-        self.assertIn("--no-ui", command)
-        self.assertEqual(command[command.index("--host") + 1], "127.0.0.1")
-        self.assertEqual(command[command.index("--alias") + 1], "rondo-local-approval")
-        self.assertEqual(command[command.index("--n-gpu-layers") + 1], "99")
-        self.assertNotIn("LLAMA_API_KEY", command)
+        common = [
+            "/runtime/llama-server",
+            "--offline",
+            "--no-models-autoload",
+            "--no-ui",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8080",
+            "--model",
+            os.fspath(model.resolve()),
+            "--alias",
+            "rondo-local-approval",
+            "--no-mmproj",
+        ]
+        common_tail = [
+            "--split-mode",
+            "none",
+            "--main-gpu",
+            "0",
+            "--batch-size",
+            "512",
+            "--ubatch-size",
+            "256",
+            "--parallel",
+            "1",
+            "--flash-attn",
+            "on",
+            "--cache-type-k",
+            "f16",
+            "--cache-type-v",
+            "f16",
+            "--jinja",
+            "--chat-template-file",
+            os.fspath((self.root / CHAT_TEMPLATE_RELATIVE_PATH).resolve()),
+            "--metrics",
+            "--slots",
+        ]
+        cases = (
+            (
+                {},
+                [
+                    *common,
+                    "--gpu-layers",
+                    "auto",
+                    "--split-mode",
+                    "none",
+                    "--main-gpu",
+                    "0",
+                    "--fit",
+                    "on",
+                    "--ctx-size",
+                    "4096",
+                    *common_tail[4:],
+                ],
+            ),
+            (
+                {"context_size": 8192, "gpu_layers": "all", "fit": "off"},
+                [
+                    *common,
+                    "--gpu-layers",
+                    "all",
+                    "--split-mode",
+                    "none",
+                    "--main-gpu",
+                    "0",
+                    "--fit",
+                    "off",
+                    "--ctx-size",
+                    "8192",
+                    *common_tail[4:],
+                ],
+            ),
+        )
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                config = self._config(
+                    model=os.fspath(model), server_overrides=overrides
+                )
+                command = build_serve_command(
+                    config,
+                    settings_from_config(config),
+                    Path("/runtime/llama-server"),
+                )
+                self.assertEqual(command, expected)
+                self.assertNotIn("99", command)
+                self.assertNotIn("LLAMA_API_KEY", command)
+        self.assertLess(expected.index("--jinja"), expected.index("--chat-template-file"))
+
+    def test_integer_gpu_layers_are_passed_as_exact_decimal(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        config = self._config(
+            model=os.fspath(model), server_overrides={"gpu_layers": 17}
+        )
+        command = build_serve_command(
+            config, settings_from_config(config), Path("/runtime/llama-server")
+        )
+        self.assertEqual(command[command.index("--gpu-layers") + 1], "17")
 
     def test_launcher_maps_only_local_secret_to_llama_api_key(self) -> None:
         config = self._config()
@@ -792,6 +1105,136 @@ class LauncherAndDoctorTests(unittest.TestCase):
                     LocalApprovalClient(config).decide(_payload())
             clear_launcher_identity(config, identity)
         self.assertEqual(len(fake.requests), 1)
+
+    def test_old_identity_is_rejected_after_any_service_configuration_change(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        with FakeApprovalServer(model_path=os.fspath(model)) as fake:
+            original = RuntimeConfig(
+                self.paths,
+                _local_data(
+                    fake.base_url,
+                    model_path_value=os.fspath(model),
+                    model_sha256_value=hashlib.sha256(model.read_bytes()).hexdigest(),
+                ),
+                "0" * 64,
+            )
+            identity = self._publish_identity(original, model)
+            try:
+                valid_changes = (
+                    {"context_size": 8192},
+                    {"gpu_layers": "all"},
+                    {"gpu_layers": 17},
+                    {"fit": "off"},
+                    {"batch_size": 1024},
+                    {"ubatch_size": 128},
+                    {"flash_attention": "off"},
+                    {"metrics": False},
+                    {"slots": False},
+                    {"binary": "eval-data/tools/other/llama-server"},
+                    {"chat_template_sha256": "0" * 64},
+                    {
+                        "chat_template_file":
+                        "eval/templates/local-approval/other.jinja"
+                    },
+                )
+                with mock.patch(
+                    "rondo_eval.local_approval.launcher._load_runtime_lock"
+                ) as runtime_lock:
+                    runtime_lock.return_value.identity_sha256 = "a" * 64
+                    for change in valid_changes:
+                        with self.subTest(change=change):
+                            changed = RuntimeConfig(
+                                self.paths,
+                                _local_data(
+                                    fake.base_url,
+                                    model_path_value=os.fspath(model),
+                                    model_sha256_value=hashlib.sha256(
+                                        model.read_bytes()
+                                    ).hexdigest(),
+                                    server_overrides=change,
+                                ),
+                                "0" * 64,
+                            )
+                            with self.assertRaises(ServiceUnavailableError):
+                                LocalApprovalClient(changed).decide(_payload())
+
+                changed_quantization = RuntimeConfig(
+                    self.paths,
+                    _local_data(
+                        fake.base_url,
+                        model_path_value=os.fspath(model),
+                        model_sha256_value=hashlib.sha256(model.read_bytes()).hexdigest(),
+                    ),
+                    "0" * 64,
+                )
+                changed_quantization.data["local_model"]["quantization"] = "Q4_K_S"
+                with mock.patch(
+                    "rondo_eval.local_approval.launcher._load_runtime_lock"
+                ) as runtime_lock:
+                    runtime_lock.return_value.identity_sha256 = "a" * 64
+                    with self.assertRaises(ServiceUnavailableError):
+                        LocalApprovalClient(changed_quantization).decide(_payload())
+
+                invalid_changes = (
+                    {"cache_type_k": "q8_0"},
+                    {"cache_type_v": "q8_0"},
+                    {"no_mmproj": False},
+                    {"jinja": False},
+                    {"parallel": 2},
+                )
+                for change in invalid_changes:
+                    with self.subTest(change=change), self.assertRaises(ConfigError):
+                        LocalApprovalClient(
+                            RuntimeConfig(
+                                self.paths,
+                                _local_data(
+                                    fake.base_url,
+                                    model_path_value=os.fspath(model),
+                                    model_sha256_value=hashlib.sha256(
+                                        model.read_bytes()
+                                    ).hexdigest(),
+                                    server_overrides=change,
+                                ),
+                                "0" * 64,
+                            )
+                        )
+            finally:
+                clear_launcher_identity(original, identity)
+        self.assertEqual(fake.requests, [])
+
+    def test_legacy_and_malformed_receipts_are_rejected_before_network(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        with FakeApprovalServer(model_path=os.fspath(model)) as fake:
+            config = RuntimeConfig(
+                self.paths,
+                _local_data(
+                    fake.base_url,
+                    model_path_value=os.fspath(model),
+                    model_sha256_value=hashlib.sha256(model.read_bytes()).hexdigest(),
+                ),
+                "0" * 64,
+            )
+            receipt = self.root / "eval-data/local-approval/launcher-identity.json"
+            for case in ("v1", "malformed"):
+                with self.subTest(case=case):
+                    self._publish_identity(config, model)
+                    value = json.loads(receipt.read_bytes())
+                    if case == "v1":
+                        value["schema_version"] = 1
+                        value.pop("serve_config_sha256")
+                    else:
+                        value["serve_config_sha256"] = 7
+                    receipt.write_text(json.dumps(value), encoding="utf-8")
+                    os.chmod(receipt, 0o600)
+                    with mock.patch(
+                        "rondo_eval.local_approval.launcher._load_runtime_lock"
+                    ) as runtime_lock:
+                        runtime_lock.return_value.identity_sha256 = "a" * 64
+                        with self.assertRaises(ServiceUnavailableError):
+                            LocalApprovalClient(config).decide(_payload())
+        self.assertEqual(fake.requests, [])
 
     def test_pin_constants_are_exact(self) -> None:
         self.assertEqual(LLAMA_CPP_BUILD, 10333)
