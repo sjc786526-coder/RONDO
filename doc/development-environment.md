@@ -392,9 +392,11 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 `v0.146.1` 产品树曾于 2026-08-08 完整跑过 `just test`：13,135 项运行，13,062 通过 /
 73 失败 / 23 跳过 / 25 flaky，且无 OOM；这是旧基线历史证据，详见
 `agent_log/2026-08-08-031500-full-test-backfill.md`。`v0.147.0` 的纯上游与 RONDO 产品树也均完成完整
-workspace 运行；最新 RONDO 全量结果为 14,077 项、13,996 通过 / 81 失败 / 23 跳过 / 27 flaky，
-逐类归因见 `agent_log/2026-08-08-233753-p0-strict-acceptance.md`。P0 的当前结论以定向复验为准，
-见 `agent_log/2026-08-09-020200-baseline-p0-test-audit.md`；全量结果不作为 P0 的通过依据。
+workspace 运行；Plan 004 分批整改旧 81 项失败后，最近一次有记录的 RONDO 全量实际执行 14,092 项，
+14,060 通过 / 31 失败 / 1 超时，Nextest 另列 23 项 ignored，详见
+`agent_log/2026-08-09-224108-v8-sandbox-local-gate.md`。此后未重跑全 workspace，因此该历史结果既不代表
+当前全绿，也不代表 32 项终态未通过在当前 main 上仍可复现。P0 的结论以定向复验为准，见
+`agent_log/2026-08-09-020200-baseline-p0-test-audit.md`；全量结果不作为 P0 的通过依据。
 Bazel 门禁与 `just argument-comment-lint` 仍未运行。
 
 这些工具只在对应任务真正需要时安装，避免提前引入较大的下载、构建时间和缓存占用。DotSlash 已具备，可在仓库命令需要时获取其固定的预构建辅助工具。
