@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-12
+最后更新：2026-08-13
 
 本文件只记录**当前阶段**与**方向级路线、依赖和授权门**。方向内部的详细分解见 `doc/WBS/`，
 单次任务的execplan见 `plan/`，已完成成果见 `doc/WBS-COMPLETED.md`。
@@ -60,13 +60,14 @@
   官方 API 0 次、费用 0 USD，两侧均精确清理为空。
 - L1 协议与三组 consumer 协议/fixture 逐字节投影已完成，合法 `ToolSearchOutput` 可消费且最终 sink
   fail-closed；本阶段不宣称已有三套独立生产调用端。
-  L2 项目局部 llama.cpp `b10333` 已冻结 CPU x64 前端/动态运行闭包、配置、client、
+  L2 项目局部 llama.cpp `b10333` 已冻结 CPU x64 与 Linux CUDA model-free 动态运行闭包、配置、client、
   doctor、fake 和启动入口。当前官方模板、4k/8k 服务参数命令合同和 receipt v2 配置指纹已通过 model-free 门禁；
   model-backed client 必须在请求前后重验 PID/start ticks、cmdline、监听 socket、runtime/model/endpoint 与当前配置；这
-  仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。当前无权重，
-  CPU frontend/runtime closure 是已验边界；L2a provider 分流已完成受锁回归与双 loopback 端点验收，
-  但 GPU runtime、model-backed 启动/推理、显存/延迟与 L3/L4 仍未验收，不称“只差权重”。
-- **当前阶段：P1 的 B1、B2、B3、L1 与 L2 CPU x64 前置已整体完成，M1 已通过。Plan 014 v19 在同一冻结
+  仍未证明 server 实际加载字节，也未证明 launcher 死亡后 server 必然随之退出。唯一 GGUF 已完成 exact
+  bytes/SHA 静态验收，但未配置、未加载；CUDA device/router probe 的已验边界是
+  `linux_cuda_built_model_unvalidated`。L2a provider 分流已完成受锁回归与双 loopback 端点验收，
+  model-backed 启动/推理、显存/延迟与 L3/L4 仍未验收，不称“只差权重”。
+- **当前阶段：P1 的 B1、B2、B3、L1 与 L2 model-free 前置已整体完成，M1 已通过。Plan 014 v19 在同一冻结
   Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
   reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
   只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
@@ -102,7 +103,7 @@
 |---|---|---|
 | 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1/M1 与 B4—B7 执行完成；B7 门 failed、E-A 待实现，M2 未达成 |
 | 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 可诊断 v22 三项 A/B 差异；正式优化迭代尚未解锁 |
-| 2 | 本地审批模型接入与横评 | L1、L2 CPU x64 前置与 L2a provider 分流完成；已有真实 E_final，GPU/model-backed、L3/L4 待 P2 |
+| 2 | 本地审批模型接入与横评 | L1、L2a 与 CPU/CUDA model-free 前置完成；唯一 GGUF 静态验收完成，4k/8k model-backed、L3/L4 待 P2 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
 依赖形状是 Y 形，不是两条平行线：
@@ -187,8 +188,9 @@ hash 经既有 `assess_m1` 聚合为 `m1=passed`、`reasons=[]`。v19 正式费�
 Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再可由 paid CLI/canary 重跑。预算 overage 记录完整
 估价并停止，Docker lease/cleanup 与 proxy deadline/claim 生命周期缺口也已闭合。完整 eval 349/349、lock 85 packages
 通过；本批未调用 API、Docker 或 Cargo。
-L2 的 CPU x64 前端/运行闭包前置、首批真实 E_final 输入与 L2a provider 分流现已具备；GPU/model-backed
-实模验收与 L3/L4 留在 P2。
+L2 的 CPU/CUDA model-free 运行闭包、唯一 GGUF 静态完整性、首批真实 E_final 输入与 L2a provider 分流现已具备；
+当前能力精确为 `linux_cuda_built_model_unvalidated`，正式 launcher 仍拒绝。4k/8k model-backed 实模验收与 L3/L4
+留在 P2。
 Plan 020 的 10/61/18 taskset、10-task exact image catalog、机械计分和增量执行设施已完成首次真实 B7。
 v22 在九项共同有效任务上得到 `sigma=0`、`delta=3`，技术门 failed；四轮有效结果和条件加跑、全部 infra
 attempt、202 个请求及 `1466.074133 USD` 累计费用均保留。active paid identity 已关闭，下一轮不得续跑或复用

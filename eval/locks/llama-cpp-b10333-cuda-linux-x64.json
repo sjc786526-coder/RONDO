@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "project": "ggml-org/llama.cpp",
+  "release": "b10333",
+  "source": {
+    "repo": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "b10333",
+    "commit": "08659901c43b51de735740f1cf61bb82fbe0c4e4",
+    "tree": "9ae780f13650ac3d45e4e345f208163ad744dd6d",
+    "clean": true
+  },
+  "toolkit": {
+    "version": "12.6.2",
+    "local_path": "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2",
+    "version_json_sha256": "81d2854ee182334d49a1f181d38a55feb1cbc3df7ba93d32ff9d647c511a1b59",
+    "installer": {
+      "url": "https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda_12.6.2_560.35.03_linux.run",
+      "size_bytes": 4446677374,
+      "md5": "dcba85e2d49d7e6d93d8626f708276a4",
+      "sha256": "3729a89cb58f7ca6a46719cff110d6292aec7577585a8d71340f0dbac54fb237"
+    },
+    "nvcc": {
+      "path": "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/bin/nvcc",
+      "release": "12.6",
+      "build": "12.6.77",
+      "sha256": "4101d601fa1edc5538265ecaa57ecb61be56deb6f6c80fba6e6362fc1b6bae5b"
+    }
+  },
+  "toolchain": {
+    "versions": {
+      "cmake": "3.28.3",
+      "gcc": "13.3.0",
+      "g++": "13.3.0",
+      "make": "4.3",
+      "nvcc": "12.6.77",
+      "glibc": "2.39-0ubuntu8.8",
+      "binutils": "2.42"
+    },
+    "identity_files": {
+      "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/bin/nvcc": "4101d601fa1edc5538265ecaa57ecb61be56deb6f6c80fba6e6362fc1b6bae5b",
+      "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/version.json": "81d2854ee182334d49a1f181d38a55feb1cbc3df7ba93d32ff9d647c511a1b59",
+      "/usr/bin/cmake": "1c5227af4edd22d8d689def545e18ee458260c0fd579eba2187967f38817e638",
+      "/usr/bin/ldd": "4f1d37e25f27535e3f02a5b7da63e1ce18d4982445db2c25fc8f985a3d395cc3",
+      "/usr/bin/make": "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965",
+      "/usr/bin/x86_64-linux-gnu-g++-13": "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+      "/usr/bin/x86_64-linux-gnu-gcc-13": "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+      "/usr/bin/x86_64-linux-gnu-objdump": "325c4205a4c658a9d1e1ebc469ae55975a2b897a3d3c1e79d9b158612d37f745",
+      "/usr/bin/x86_64-linux-gnu-readelf": "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0"
+    }
+  },
+  "build": {
+    "source_path": "/home/sjc/desktop/RONDO/eval-data/sources/llama.cpp-b10333-08659901",
+    "build_path": "/home/sjc/desktop/RONDO/eval-data/build/llama.cpp-b10333-cuda-linux-x64",
+    "runtime_path": "/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64",
+    "generator": "Unix Makefiles",
+    "architecture": "89-real",
+    "configure_argv": [
+      "/usr/bin/cmake",
+      "-S", "/home/sjc/desktop/RONDO/eval-data/sources/llama.cpp-b10333-08659901",
+      "-B", "/home/sjc/desktop/RONDO/eval-data/build/llama.cpp-b10333-cuda-linux-x64",
+      "-G", "Unix Makefiles",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DCMAKE_C_COMPILER=/usr/bin/gcc",
+      "-DCMAKE_CXX_COMPILER=/usr/bin/g++",
+      "-DCMAKE_CUDA_COMPILER=/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/bin/nvcc",
+      "-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++",
+      "-DCUDAToolkit_ROOT=/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2",
+      "-DCMAKE_CUDA_ARCHITECTURES=89-real",
+      "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64",
+      "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64",
+      "-DCMAKE_BUILD_RPATH=/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/lib64;$ORIGIN",
+      "-DCMAKE_INSTALL_RPATH=/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/lib64;$ORIGIN",
+      "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON",
+      "-DBUILD_SHARED_LIBS=ON",
+      "-DGGML_BACKEND_DL=OFF",
+      "-DGGML_NATIVE=OFF",
+      "-DGGML_CPU=ON",
+      "-DGGML_OPENMP=ON",
+      "-DGGML_CUDA=ON",
+      "-DGGML_CUDA_FA=ON",
+      "-DGGML_CUDA_FA_ALL_QUANTS=OFF",
+      "-DGGML_CUDA_GRAPHS=ON",
+      "-DGGML_CUDA_NCCL=OFF",
+      "-DGGML_CUDA_FORCE_MMQ=OFF",
+      "-DGGML_CUDA_FORCE_CUBLAS=OFF",
+      "-DGGML_CUDA_CUB_3DOT2=OFF",
+      "-DGGML_CUDA_COMPRESSION_MODE=size",
+      "-DGGML_RPC=OFF",
+      "-DGGML_CCACHE=OFF",
+      "-DLLAMA_BUILD_COMMON=ON",
+      "-DLLAMA_BUILD_APP=OFF",
+      "-DLLAMA_BUILD_TOOLS=ON",
+      "-DLLAMA_BUILD_SERVER=ON",
+      "-DLLAMA_OPENSSL=OFF",
+      "-DLLAMA_BUILD_TESTS=OFF",
+      "-DLLAMA_BUILD_EXAMPLES=OFF",
+      "-DLLAMA_BUILD_UI=OFF",
+      "-DLLAMA_USE_PREBUILT_UI=OFF"
+    ],
+    "build_argv": [
+      "/usr/bin/cmake",
+      "--build", "/home/sjc/desktop/RONDO/eval-data/build/llama.cpp-b10333-cuda-linux-x64",
+      "--config", "Release",
+      "--target", "llama-server",
+      "--parallel", "6"
+    ],
+    "cmake_cache_sha256": "145c4f57d56d453737634ebd620eef1296774e1458e7a8770c9cb057034b6237",
+    "build_lock": {
+      "wrapper": "mydev/scripts/with-build-lock.sh",
+      "watchdog": true,
+      "configure_metrics": "eval-data/build-metrics/plan018-cuda/20260813-004111-1000-11588",
+      "build_metrics": "eval-data/build-metrics/plan018-cuda/20260813-004145-1000-14013",
+      "build_status": 0
+    },
+    "artifact_staging": {
+      "source": "/home/sjc/desktop/RONDO/eval-data/build/llama.cpp-b10333-cuda-linux-x64/bin",
+      "destination": "/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64",
+      "method": "copy exact bin closure, preserve symlinks, set runtime files 0755"
+    },
+    "cub_3dot2": false,
+    "permissive_linker_flag": false
+  },
+  "installed_runtime": {
+    "relative_path": "eval-data/tools/llama-b10333-cuda-linux-x64",
+    "regular_files": {
+      "libggml-base.so.0.19.0": "938adc05ab4bd524261be0a5b8a1ed046b94c9e4592c6f49b421bd5e1f3d1c1a",
+      "libggml-cpu.so.0.19.0": "817cbd39b0dc4c14fe11c697280037195d647d29eab17e476f5d3631872613b5",
+      "libggml-cuda.so.0.19.0": "eaa7f0589c4aec4b6d1ff9df8ed67d22c50af19b0d410a95bf3922f71b6c1aa6",
+      "libggml.so.0.19.0": "369d805b8ad0324fffbadabbc6d4bb63756155a34936e1debeabb52250909904",
+      "libllama-common.so.0.0.1": "6256931c30403ebb4635d5fa997a3f8d48f05fecfaf7d6f6c3b9dd6d4daf862b",
+      "libllama-server-impl.so": "d57f76b82bb8dfbee4947abbf99e3f0107603ffb9fd3d46905d111f0342a0de0",
+      "libllama.so.0.0.1": "bfb36ad71b56efd73a8c99fa8acf5ed8089a213631d9f9272dcca4a0e0c6d9ca",
+      "libmtmd.so.0.0.1": "ae9db8ad95982695f94d1b3c1eaeaa61dad6a86ad06c533031ab3dc05d7f62aa",
+      "llama-server": "97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd"
+    },
+    "symlinks": {
+      "libggml-base.so": "libggml-base.so.0",
+      "libggml-base.so.0": "libggml-base.so.0.19.0",
+      "libggml-cpu.so": "libggml-cpu.so.0",
+      "libggml-cpu.so.0": "libggml-cpu.so.0.19.0",
+      "libggml-cuda.so": "libggml-cuda.so.0",
+      "libggml-cuda.so.0": "libggml-cuda.so.0.19.0",
+      "libggml.so": "libggml.so.0",
+      "libggml.so.0": "libggml.so.0.19.0",
+      "libllama-common.so": "libllama-common.so.0",
+      "libllama-common.so.0": "libllama-common.so.0.0.1",
+      "libllama.so": "libllama.so.0",
+      "libllama.so.0": "libllama.so.0.0.1",
+      "libmtmd.so": "libmtmd.so.0",
+      "libmtmd.so.0": "libmtmd.so.0.0.1"
+    },
+    "dependency_targets": [
+      "llama-server",
+      "libggml-base.so.0.19.0",
+      "libggml-cpu.so.0.19.0",
+      "libggml-cuda.so.0.19.0",
+      "libggml.so.0.19.0",
+      "libllama.so.0.0.1",
+      "libllama-common.so.0.0.1",
+      "libmtmd.so.0.0.1",
+      "libllama-server-impl.so"
+    ],
+    "dependency_probe": {
+      "canonical_path": "/usr/bin/ldd",
+      "sha256": "4f1d37e25f27535e3f02a5b7da63e1ce18d4982445db2c25fc8f985a3d395cc3"
+    },
+    "elf_probe": {
+      "canonical_path": "/usr/bin/x86_64-linux-gnu-readelf",
+      "sha256": "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0"
+    },
+    "elf_runpath": "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/lib64:$ORIGIN",
+    "elf_needed": {
+      "llama-server": ["libc.so.6", "libgcc_s.so.1", "libllama-server-impl.so", "libstdc++.so.6"],
+      "libggml-base.so.0.19.0": ["libc.so.6", "libgcc_s.so.1", "libgomp.so.1", "libm.so.6", "libstdc++.so.6"],
+      "libggml-cpu.so.0.19.0": ["libc.so.6", "libgcc_s.so.1", "libggml-base.so.0", "libgomp.so.1", "libm.so.6", "libstdc++.so.6"],
+      "libggml-cuda.so.0.19.0": ["libc.so.6", "libcublas.so.12", "libcuda.so.1", "libcudart.so.12", "libgcc_s.so.1", "libggml-base.so.0", "libm.so.6", "libstdc++.so.6"],
+      "libggml.so.0.19.0": ["libc.so.6", "libgcc_s.so.1", "libggml-base.so.0", "libggml-cpu.so.0", "libggml-cuda.so.0", "libstdc++.so.6"],
+      "libllama.so.0.0.1": ["ld-linux-x86-64.so.2", "libc.so.6", "libgcc_s.so.1", "libggml-base.so.0", "libggml.so.0", "libm.so.6", "libstdc++.so.6"],
+      "libllama-common.so.0.0.1": ["ld-linux-x86-64.so.2", "libc.so.6", "libgcc_s.so.1", "libggml-base.so.0", "libggml.so.0", "libllama.so.0", "libm.so.6", "libstdc++.so.6"],
+      "libmtmd.so.0.0.1": ["ld-linux-x86-64.so.2", "libc.so.6", "libgcc_s.so.1", "libggml-base.so.0", "libggml.so.0", "libllama.so.0", "libm.so.6", "libstdc++.so.6"],
+      "libllama-server-impl.so": ["ld-linux-x86-64.so.2", "libc.so.6", "libgcc_s.so.1", "libggml-base.so.0", "libggml.so.0", "libllama-common.so.0", "libllama.so.0", "libm.so.6", "libmtmd.so.0", "libstdc++.so.6"]
+    },
+    "external_dependencies": {
+      "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/targets/x86_64-linux/lib/libcublas.so.12.6.3.3": "ba1f6659accd9dddfd434f90a8cae7f0cd750fa8302c5125b94e17783b4e9944",
+      "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/targets/x86_64-linux/lib/libcublasLt.so.12.6.3.3": "dd8e52dba3944b07d9d264c0bb58a27cbb96ec3ce8979c51d75d5de893d02a8e",
+      "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/targets/x86_64-linux/lib/libcudart.so.12.6.77": "095296727cfb5f51e5b3ae69a3cb88cbd7b6592f314ace0fdfc4e1d758c2aa85",
+      "/usr/lib/wsl/lib/libcuda.so.1": "57e0db4fcada1712297e0c9ab0d7d4beff59c663468876f77a262eda98a6e0b8",
+      "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "cd4df4f3c7b83673d61189bf2eaebd33ca4f2853ab9772b8a25e025ef99b1e81",
+      "/usr/lib/x86_64-linux-gnu/libc.so.6": "8db37cf3f2169f59a0f07ef1fea308c35656668c64c8ff294e1860f4121eb161",
+      "/usr/lib/x86_64-linux-gnu/libdl.so.2": "292d5f5af2e7360b3e18c56591a4960115373ecf40627660f9149b6c68a33f80",
+      "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1": "d93224d2b0dab4247598be683adca02f5cf00586f99c187579cd7e92058fb7cb",
+      "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0": "135f3c8f006d2fe5e68e51281c7974cb991a03de3bfb3593d68d174dfcf854d1",
+      "/usr/lib/x86_64-linux-gnu/libm.so.6": "e9c4b28d340e415b8137480ec442662f981e1399386c5931dae0e886e3639e91",
+      "/usr/lib/x86_64-linux-gnu/libpthread.so.0": "a27ffa9bf233d61a5f02ddb0cf770dd6579021afc1aa8aec0fb58ee4a965281a",
+      "/usr/lib/x86_64-linux-gnu/librt.so.1": "c6e6288545e24b0b3cfbf33320bda9236521625d8c3d628f3444f1ed40e5c7c5",
+      "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33": "1fd75fe70354a416d75aef22bcae68c47bd25d20e2d0568c30b1a9838cf62f11"
+    }
+  },
+  "device_probe": {
+    "command": [
+      "/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64/llama-server",
+      "--list-devices"
+    ],
+    "environment": "LD_LIBRARY_PATH unset",
+    "exit_code": 0,
+    "device": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "compute_capability": "8.9",
+    "memory_mib": 8187,
+    "windows_driver": "595.79",
+    "wsl_libcuda": {
+      "canonical_path": "/usr/lib/wsl/lib/libcuda.so.1",
+      "size_bytes": 183752,
+      "sha256": "57e0db4fcada1712297e0c9ab0d7d4beff59c663468876f77a262eda98a6e0b8"
+    },
+    "model_loaded": false
+  },
+  "capability": "linux_cuda_built_model_unvalidated",
+  "model_backed_structured_output": "not_run"
+}

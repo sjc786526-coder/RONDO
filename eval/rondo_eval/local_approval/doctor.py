@@ -29,6 +29,7 @@ from .launcher import (
     GPU_MODEL_SERVING_CAPABILITY,
     LLAMA_CPP_BUILD,
     LLAMA_CPP_COMMIT,
+    LLAMA_CPP_CUDA_CAPABILITY,
     ModelMissingError,
     RouterProbe,
     RuntimeInspection,
@@ -127,11 +128,16 @@ def run_doctor(
                 "not_checked",
                 "not_checked",
             )
+        cuda_intermediate = runtime.capability == LLAMA_CPP_CUDA_CAPABILITY
         return DoctorReport(
-            "cpu_frontend_ready_model_missing_gpu_unvalidated",
+            (
+                LLAMA_CPP_CUDA_CAPABILITY
+                if cuda_intermediate
+                else "cpu_frontend_ready_model_missing_gpu_unvalidated"
+            ),
             MODEL_MISSING,
             "valid",
-            "cpu_only_ready",
+            LLAMA_CPP_CUDA_CAPABILITY if cuda_intermediate else "cpu_only_ready",
             "missing",
             "not_started",
             "not_checked",
@@ -150,11 +156,12 @@ def run_doctor(
         )
 
     if runtime.capability != GPU_MODEL_SERVING_CAPABILITY:
+        cuda_intermediate = runtime.capability == LLAMA_CPP_CUDA_CAPABILITY
         return DoctorReport(
-            "gpu_runtime_not_validated",
+            LLAMA_CPP_CUDA_CAPABILITY if cuda_intermediate else "gpu_runtime_not_validated",
             INFRA_ERROR,
             "valid",
-            "cpu_only",
+            runtime.capability if cuda_intermediate else "cpu_only",
             "present",
             "not_started",
             "not_checked",

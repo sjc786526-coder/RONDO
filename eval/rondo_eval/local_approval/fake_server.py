@@ -24,6 +24,7 @@ class FakeApprovalServer:
         response_override: Any | None = None,
         required_bearer: str | None = None,
         redirect_to: str | None = None,
+        get_redirect_to: str | None = None,
         model_id: str = "rondo-local-approval",
         model_path: str = "/fake/model.gguf",
         on_decision: Callable[[], None] | None = None,
@@ -35,6 +36,7 @@ class FakeApprovalServer:
         self.response_override = response_override
         self.required_bearer = required_bearer
         self.redirect_to = redirect_to
+        self.get_redirect_to = get_redirect_to
         self.model_id = model_id
         self.model_path = model_path
         self.on_decision = on_decision
@@ -80,6 +82,12 @@ def _handler_type(fake: FakeApprovalServer):
             return
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+            if fake.get_redirect_to is not None:
+                self.send_response(302)
+                self.send_header("Location", fake.get_redirect_to)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if self.path in {"/health", "/v1/health"}:
                 self._json(200, {"status": "ok"})
                 return

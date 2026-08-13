@@ -1,6 +1,6 @@
 # 测评结果与数据资产保存规范
 
-最后更新：2026-08-10
+最后更新：2026-08-13
 
 适用于全部测评产出：离线冻结回放（E-A）、真实 Terminal-Bench 2.1 端到端（E-B）、静态影子审批横评（L3）。
 目标是**结构清楚、便于管理、可长期追溯**，同时保持轻量——不做数据资产审计、可信链或权限系统。
@@ -45,6 +45,9 @@ eval-data/                             # git-ignored
 ├── bin/{rondo,codex}/                # 已冻结的两侧 runtime bundle + manifest
 ├── deps/                              # 按 SHA 验证的项目局部运行资产（例如 bwrap）
 ├── tools/                             # 项目局部工具（例如 llama.cpp runtime）
+├── toolkits/                          # 项目局部 SDK/toolkit 与冻结 installer（不做系统安装）
+├── sources/                           # 精确 revision 的大型上游源码快照
+├── build/                             # 受项目锁/看门狗约束的临时构建树
 ├── build-metrics/                     # 看门狗 summary/JUnit/受限日志
 ├── budgets/                           # 持久费用预留/结算账本，0600
 ├── pairs/                             # 仅 paid 双侧顺序与发布恢复账本，0600

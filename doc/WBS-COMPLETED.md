@@ -440,3 +440,15 @@ standard/Lite 形态均补回归。
 - terminal state 到 private/tracked aggregate 支持幂等恢复；schema-v3+ 的 provider-integrity 只豁免机械熔断，
   不再绕过单轮最终 infra 上限。
 - v22 历史数据只读重放保持一致；B7 是有效 failed 基线，E-A 与 M2 尚未完成，方向 1 正式优化未解锁。
+
+### 2026-08-13 Plan 018 GGUF 静态验收与 b10333 Linux CUDA model-free runtime
+
+- 唯一冻结 Bartowski Q4_K_M GGUF 下载至项目 ignored 路径，普通文件、`5,198,387,456` bytes 与完整 SHA-256
+  `7deb50ec…54802a` 精确匹配；没有下载其他模型资产，没有加载 GGUF。
+- 官方 CUDA 12.6.2 以项目局部 toolkit-only 方式安装；exact b10333/`08659901…` source 在项目 build lock/watchdog
+  内以 Ada `89-real` strict link 成功，无 CCCL/CUB 3DOT2 或 permissive linker flag。
+- 独立 CUDA lock 冻结 source/toolchain/build、9 个 ELF 文件、14 个 symlink、RUNPATH、cudart/cuBLAS、WSL
+  `libcuda.so.1` 与系统闭包。version/help、RTX 4060 Laptop device probe 与 model-free router 通过，不依赖调用者
+  `LD_LIBRARY_PATH`。
+- CPU/CUDA exact binary path 只映射各自 lock；doctor 返回 `linux_cuda_built_model_unvalidated`，正式 launcher 仍拒绝。
+  focused tests 58/58 通过；4k/8k model-backed、推理与 structured output 均未运行。
