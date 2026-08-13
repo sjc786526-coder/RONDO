@@ -1,7 +1,7 @@
 # Plan 015：P2 任务分层、计分预算与首次 Canary 基线
 
 > 本计划是方向 0 的 P2 第一阶段执行合同。Plan 014 v19 及其全部历史 identity/result/ledger/artifact
-> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与累计 1300 USD 独立硬上限。除“当前状态”和
+> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与累计 1600 USD 独立硬上限。除“当前状态”和
 > “关键决策记录”外，其他章节默认不在执行中改写；若必须改变 provider、Sol/medium main、Sol/low Guardian、
 > frozen Codex/RONDO bundle、TB 2.1 commit、10-task 清单、基础轮次或预算，暂停并请求用户确认。
 
@@ -10,7 +10,7 @@
 ### 最终目标
 
 先闭合 Plan 014 成功 CLI 的 durable Guardian evidence 投影，再完成 B4 taskset 冻结、B5 机械计分/归因、
-B6 可复算成本与 1300 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
+B6 可复算成本与 1600 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
 RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 基线终态。
 
 ### 完成/验收标准
@@ -24,7 +24,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - B5 主指标为 Task Resolution Success Rate；机械区分 `agent`、`guardian_correct_deny`、
   `guardian_false_deny`、`infra`。矛盾/未知 Guardian deny 没有 correct-deny 证明时保守归为 false deny；infra
   不进分母。holdout 只能发布整批聚合，不得持久化单任务明细。
-- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 1300 USD 停止语义；campaign
+- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 1600 USD 停止语义；campaign
   使用新 lock、ID 和持久 ledger。任何新请求的最大合法 reservation 无法装入剩余全局预算时不启动。
 - B7 基础 40 个运行全部形成唯一终态；同一 RONDO bundle A/A 两轮得到 `sigma`，A/B 差异 `delta <= sigma`。
   `sigma > 2` 机械标为 canary unstable。每个 Codex-pass/RONDO-fail task 两侧各加跑两次；Codex 三次全过且
@@ -51,7 +51,10 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - schema-v4 在每个 main admission 时同时要求剩余 run/batch 容量可容纳一份 main 与一份 Guardian 最大合法
   reservation（合计 `37.770000 USD`）；容量不足必须在发送 main 前以 `budget_capacity_exhausted` 停止，不能让
   main 占满额度后由本地 429 把并发 Guardian 误分类为审批运行时故障。
-- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 1300 USD 累计账本；所有 reservation 最终
+- schema-v5 仅对结构合法的 Guardian `E_final.json` 先在原始字节上匹配真实运行 secret，再把结构化 `input`
+  当作任务数据排除通用 credential-shape 启发式；其他字段、畸形证据与所有其他 artifact 继续严格扫描。provider
+  SSE 非 completed 终态只公开 bounded event type/status/error code，不保存 message 或响应正文。
+- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 1600 USD 累计账本；所有 reservation 最终
   settled，`actual_usd=null`。
 - Oracle 以单题 proof 增量落盘并由十题 manifest 聚合；proof 不绑定 paid campaign 或整个 Git commit，只绑定
   task/source/image、taskset/catalog entry、共享执行组件、verifier、seccomp、Harbor/TB 和必要宿主兼容事实。
@@ -93,7 +96,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ## 3. 硬约束
 
-1. 新 P2 真实 API 本地估算总费用最多 1300 USD，独立于 Plan 014。1300 USD 是硬停线，不是消费目标，也不是
+1. 新 P2 真实 API 本地估算总费用最多 1600 USD，独立于 Plan 014。1600 USD 是硬停线，不是消费目标，也不是
    合法 usage 的数学全包保证；不得减任务、减基础轮次或弱化门禁迁就预算。
 2. B4/B5/B6 及最后窄修复不得调用 API 或 Docker；B7 只处理 10 个 canary 所需 exact digest 镜像，pull/run
    并发为 1。不开 Cargo、不重建 bundle、不升级上游。
@@ -112,8 +115,8 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
    40/60GB 增长与 80GiB C: floor。只清理由本 campaign exact label 创建的对象。
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
-11. v1—v19 lock/ledger/result/artifact/receipt 只读；旧 Oracle 或 paid result 只有新 validator 能从已有字段机械证明完整匹配时
-    才可复用，证据不足不回填。1300 USD 授权不因 identity、进程或 proof 变化而重置。
+11. v1—v20 lock/ledger/result/artifact/receipt 只读；旧 Oracle 或 paid result 只有新 validator 能从已有字段机械证明完整匹配时
+    才可复用，证据不足不回填。1600 USD 授权不因 identity、进程或 proof 变化而重置。
 12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
     锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
 
@@ -290,35 +293,36 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   fix a1/a2 均因本地 Guardian 429 进入 diagnosis hold。RCA 证明 main 活跃 reservation 占用所剩容量，使 Guardian
   未到上游；这是代理 admission 缺陷。v19 以 local implementation defect 只读退役：13 个 paid run、61 个
   upstream attempt 全 settled、reservation 0、paid `153.404245 USD`，累计 `980.271525 USD`；results `38b9420`。
+- v20 fresh wire `0.194082 USD`。两轮 vulnerable 共 8 次均为 HTTP 200 SSE 非 completed 终态且无 usage，按
+  `18.885000 USD` 各自保守结算；fix、headless、openssl、polyglot 形成 4 条新有效链。sanitize a1/a2 的 verifier
+  分别为 reward 1/0，但 Guardian 请求证据包含题目故意植入的 credential-shaped fixture，被通用 artifact 扫描误判，
+  因连续两次 `publication_integrity` 暂停。v20 以 local implementation defect 退役：14 个 paid run、paid
+  `155.449581 USD`、reservation 0，累计 `1135.915188 USD`；results `441c344`。
 
 ### 后续计划
 
-1. 离线落地 schema-v3 continuation manifest、历史结果引用验证、provider-integrity 熔断豁免和 180 秒冻结
-   deadline；focused、`eval-lock` 与阶段末全量测试通过并形成干净提交。
-2. 由生成器冻结唯一 schema-v4 后继 identity，精确带入 `980.271525 USD` prior。新 identity 引用 v18/v19 的
-   21 个首个非 infra 有效结果，只为 infra/未启动逻辑 slot 分配并 claim 新 run ID；fresh wire 成功后逐项补齐。
+1. 用 schema-v5 的结构化 Guardian task-input 扫描与 bounded provider terminal diagnostics 闭合 v20 RCA；focused、
+   `eval-lock` 与阶段末全量测试通过并形成干净提交。
+2. 由生成器冻结唯一 schema-v5 后继 identity，精确带入 `1135.915188 USD` prior。新 identity 引用 v18/v19/v20
+   的 25 个首个非 infra 有效结果，只为 infra/未启动逻辑 slot 分配并 claim 新 run ID；fresh wire 成功后逐项补齐。
 3. 基础四轮与必要条件加跑完整后机械聚合 `sigma`、`delta`、共同分母、归因、usage 和费用；若下一请求的
-   main+Guardian 的 `37.770000 USD` admission 容量无法装入剩余 `319.728475 USD` 时，在发送 main 前 blocked。
+   main+Guardian 的 `37.770000 USD` admission 容量无法装入剩余预算时，在发送 main 前 blocked。
 
-当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v20`/`p2-b7-canary-sol-sol-v20`，run base
-`20260812-400000000`，lock SHA
-`1cf8e9352d8bd6c9ab05ff22a2d32680a40a37b4273904dc1e5811beead74edc`。321 个新 run ID 唯一，21 条
-v18/v19 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary。
-
-当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v19`/`p2-b7-canary-sol-sol-v19`，run base
-`20260812-390000000`，lock SHA
-`20483f7c3ce6f7fe058bbe34185464dade8c22280a34ece5b8ced009b2d84e73`。321 个新 run ID 唯一，20 条
-v18 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary。
+当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v21`/`p2-b7-canary-sol-sol-v21`，run base
+`20260812-410000000`，lock SHA
+`7d4d8997e9cb942ccbc60435874a2533bc79a96a59e0c224fc701a0f571a3464`。321 个新 run ID 唯一，25 条
+v18/v19/v20 有效逻辑结果引用已冻结；正式执行前仍须
+fresh wire canary。
 
 ### 阻塞项
 
-- 无离线阻塞；v20 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
+- 无离线阻塞；v21 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
   provider-integrity 失败不隐藏、不减记，但不再作为本地实现熔断证据。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v19 是保留全部费用事实的 blocked 终态。累计 debit `980.271525 USD`、
-  reservation 0；v20 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
+- v1 是 API 前失败终态；v2—v20 是保留全部费用事实的 blocked 终态。累计 debit `1135.915188 USD`、
+  reservation 0；v21 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
 
 ## 6. 关键决策记录
 
@@ -357,3 +361,6 @@ v18 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary�
 | 031 | v19 fix 的两次 Guardian 429 被证实为本地并发 reservation admission 缺陷；退役 v19，schema-v4 要求 main admission 同时容纳 main+Guardian 最大预留 | Guardian 会在 main terminal usage 到达前启动；只检查单份预留会让已发送的 main 确定性挤掉审批容量 | B6/B7 | 已采纳 |
 | 032 | 用户追加 300 USD，Plan 015 总硬上限提高到 1300 USD；v19 的 `980.271525 USD` 累计事实完整进入后继 prior | 新授权只扩大后继 cap，不改写正在运行或已退役 identity，也不重置既有费用 | B6/B7 | 已采纳 |
 | 033 | 生成 schema-v4 v20，冻结 21 条 v18/v19 首个非 infra 结果引用、321 个新 run ID 与精确 prior；v1—v19 继续只读 | v20 只补 infra/未启动链，并在发送 main 前执行 main+Guardian 并发容量 admission | B6/B7 | 已采纳 |
+| 034 | v20 因 sanitize Guardian request evidence 的任务凭据样本被通用 scanner 误判而退役；schema-v5 对结构合法 E_final 的 input 使用窄 task-data 规则，原始真实 secret 仍精确拒绝 | 不把 reward 1/0 的有效模型结果伪装成 infra，也不全局豁免 credential 扫描 | B5/B7 | 已采纳 |
+| 035 | v20 vulnerable 的 8 次 HTTP 200 SSE 终态无 usage 均保守结算；后继只记录 bounded terminal type/status/code，用户追加额度后总 cap 1600 USD | 中转面板的 HTTP 成功不等于 Responses `response.completed`；增加可诊断性但不改变结算 | B6/B7 | 已采纳 |
+| 036 | 生成 schema-v5 v21，冻结 25 条首个非 infra 结果、321 个新 run ID 与精确 `1135.915188 USD` prior；v1—v20 继续只读 | 只补 sanitize、vulnerable 及未启动逻辑链，避免重跑有效 pass/reward 0 | B6/B7 | 已采纳 |

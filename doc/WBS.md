@@ -77,9 +77,12 @@
   非 infra 结果引用，只重跑 infra/缺失 slot；provider-integrity 仍保守结算但不计本地/任务熔断，上游绝对
   deadline 单调放宽为 180 秒。v19 复用 20 条 v18 有效链，新增 filter 的有效链后，在 fix 两次 Guardian 本地
   429 处发现并发预算 admission 缺陷并只读退役；13 个 paid run、61 个 attempt 全 settled，累计 debit
-  `980.271525 USD`。schema-v4 要求 main admission 同时容纳 main+Guardian 两份最大预留。用户追加 300 USD 后
-  总硬上限为 1300 USD；v20 已以 21 条 v18/v19 有效引用、321 个唯一新 run ID 与精确 prior 冻结，当前余量
-  `319.728475 USD`。**
+  `980.271525 USD`。schema-v4 要求 main admission 同时容纳 main+Guardian 两份最大预留。v20 验证该缺陷已闭合，
+  新增 fix/headless/openssl/polyglot 四条有效链；两轮 vulnerable 共 8 次均为 HTTP 200 SSE 非 completed 终态且无
+  usage，sanitize 则因 Guardian task transcript 的 credential-shaped fixture 被发布扫描误判而在第二次后暂停。
+  v20 只读退役后累计 debit `1135.915188 USD`、reservation 0。schema-v5 使用窄结构化 task-input 扫描并记录有界
+  provider terminal type/status/code；用户追加额度后总硬上限为 1600 USD，v21 以 25 条有效引用、321 个唯一新
+  run ID 与精确 prior 冻结，当前余量 `464.084812 USD`。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -190,7 +193,7 @@ Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再�
 L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
 Plan 015 已冻结 10/61/18 taskset、10-task exact image catalog与机械计分。v10 按原 161-slot/600 USD 合同
 在全局 provider-integrity 熔断后只读退役，累计 debit 为 `343.896195 USD`。后继合同使用 321 个机械派生 slot、
-1300 USD 累计硬上限；非 provider 类别仍在同题同类第二次 infra 后暂停做结构化 RCA，只有外部瞬态才可继续，
+1600 USD 累计硬上限；非 provider 类别仍在同题同类第二次 infra 后暂停做结构化 RCA，只有外部瞬态才可继续，
 第三次同类停止该题。provider-integrity 由 fresh wire 作为恢复门禁并跨 identity 只补缺失逻辑 slot，不重新执行已有效
 的 pass/reward 0。campaign-independent Oracle、单 slot heavy lock、轻量 lease、安全恢复和 identity 生成入口保持复用。
 执行细节见 Plan 015。

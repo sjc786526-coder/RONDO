@@ -104,3 +104,12 @@
 - 生成 v20：campaign/batch `p2-b7-canary-baseline-v20`/`p2-b7-canary-sol-sol-v20`、run base
   `20260812-400000000`、321 个唯一 run ID、21 条 v18/v19 continuation，lock SHA
   `1cf8e9352d8bd6c9ab05ff22a2d32680a40a37b4273904dc1e5811beead74edc`，prior `$980.271525`。
+- v20 wire `$0.194082`。vulnerable 两轮共 8 个 HTTP 200 非 completed SSE 终态均无 usage并各保守结算
+  `$18.885000`；fix/headless/openssl/polyglot 新增 4 条有效链。sanitize 两次 verifier 为 reward 1/0，但
+  Guardian E_final 的任务凭据样本触发 publication scanner，第二次后 diagnosis-required。v20 以本地实现缺陷退役，
+  paid `$155.449581`、reservation 0、累计 `$1135.915188`；results `441c344`。
+- 修复只对结构合法 E_final 的 input 排除 credential-shape 启发式，原始配置 secret 仍精确扫描；proxy 增加不含
+  message/正文的 terminal event/status/code 观察。focused 182/182 与 baseline 50/50、`eval-lock` 85 packages 通过。
+- 用户追加额度后总 cap `$1600`。生成 schema-v5 v21：run base `20260812-410000000`、321 个唯一 ID、25 条
+  v18/v19/v20 continuation、prior `$1135.915188`、lock SHA
+  `7d4d8997e9cb942ccbc60435874a2533bc79a96a59e0c224fc701a0f571a3464`；v1—v20 只读保留。
