@@ -1,7 +1,7 @@
 # Plan 015：P2 任务分层、计分预算与首次 Canary 基线
 
 > 本计划是方向 0 的 P2 第一阶段执行合同。Plan 014 v19 及其全部历史 identity/result/ledger/artifact
-> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与累计 1000 USD 独立硬上限。除“当前状态”和
+> 保持只读；本计划使用新的 taskset、campaign identity、run IDs 与累计 1300 USD 独立硬上限。除“当前状态”和
 > “关键决策记录”外，其他章节默认不在执行中改写；若必须改变 provider、Sol/medium main、Sol/low Guardian、
 > frozen Codex/RONDO bundle、TB 2.1 commit、10-task 清单、基础轮次或预算，暂停并请求用户确认。
 
@@ -10,7 +10,7 @@
 ### 最终目标
 
 先闭合 Plan 014 成功 CLI 的 durable Guardian evidence 投影，再完成 B4 taskset 冻结、B5 机械计分/归因、
-B6 可复算成本与 1000 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
+B6 可复算成本与 1300 USD campaign 护栏，最后在相同 TB 2.1、任务顺序、profile、参数和冻结二进制下执行
 RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 基线终态。
 
 ### 完成/验收标准
@@ -24,7 +24,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - B5 主指标为 Task Resolution Success Rate；机械区分 `agent`、`guardian_correct_deny`、
   `guardian_false_deny`、`infra`。矛盾/未知 Guardian deny 没有 correct-deny 证明时保守归为 false deny；infra
   不进分母。holdout 只能发布整批聚合，不得持久化单任务明细。
-- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 1000 USD 停止语义；campaign
+- B6 在 API 前输出历史 usage 插值、v19-shape 压力区间、基础/全条件轮数与 1300 USD 停止语义；campaign
   使用新 lock、ID 和持久 ledger。任何新请求的最大合法 reservation 无法装入剩余全局预算时不启动。
 - B7 基础 40 个运行全部形成唯一终态；同一 RONDO bundle A/A 两轮得到 `sigma`，A/B 差异 `delta <= sigma`。
   `sigma > 2` 机械标为 canary unstable。每个 Codex-pass/RONDO-fail task 两侧各加跑两次；Codex 三次全过且
@@ -48,7 +48,10 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 下一 identity 把上游单逻辑请求绝对 deadline 从 90 秒单调放宽到 180 秒并冻结在 lock/profile 投影中。只允许
   复用在更严格或相等 deadline 下已完整完成且 usage-valid 的历史结果；deadline 缩短、其他执行合同变化或无法证明
   兼容时拒绝引用。wire canary 在新 deadline 下失败则不启动 Terminal-Bench。
-- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 1000 USD 账本；所有 reservation 最终
+- schema-v4 在每个 main admission 时同时要求剩余 run/batch 容量可容纳一份 main 与一份 Guardian 最大合法
+  reservation（合计 `37.770000 USD`）；容量不足必须在发送 main 前以 `budget_capacity_exhausted` 停止，不能让
+  main 占满额度后由本地 429 把并发 Guardian 误分类为审批运行时故障。
+- fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 1300 USD 累计账本；所有 reservation 最终
   settled，`actual_usd=null`。
 - Oracle 以单题 proof 增量落盘并由十题 manifest 聚合；proof 不绑定 paid campaign 或整个 Git commit，只绑定
   task/source/image、taskset/catalog entry、共享执行组件、verifier、seccomp、Harbor/TB 和必要宿主兼容事实。
@@ -90,7 +93,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ## 3. 硬约束
 
-1. 新 P2 真实 API 本地估算总费用最多 1000 USD，独立于 Plan 014。1000 USD 是硬停线，不是消费目标，也不是
+1. 新 P2 真实 API 本地估算总费用最多 1300 USD，独立于 Plan 014。1300 USD 是硬停线，不是消费目标，也不是
    合法 usage 的数学全包保证；不得减任务、减基础轮次或弱化门禁迁就预算。
 2. B4/B5/B6 及最后窄修复不得调用 API 或 Docker；B7 只处理 10 个 canary 所需 exact digest 镜像，pull/run
    并发为 1。不开 Cargo、不重建 bundle、不升级上游。
@@ -109,8 +112,8 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
    40/60GB 增长与 80GiB C: floor。只清理由本 campaign exact label 创建的对象。
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
-11. v1—v18 lock/ledger/result/artifact/receipt 只读；旧 Oracle 或 paid result 只有新 validator 能从已有字段机械证明完整匹配时
-    才可复用，证据不足不回填。1000 USD 授权不因 identity、进程或 proof 变化而重置。
+11. v1—v19 lock/ledger/result/artifact/receipt 只读；旧 Oracle 或 paid result 只有新 validator 能从已有字段机械证明完整匹配时
+    才可复用，证据不足不回填。1300 USD 授权不因 identity、进程或 proof 变化而重置。
 12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
     锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
 
@@ -282,15 +285,20 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   provider-integrity，A/B RONDO filter 又成为第三个不同 task，按冻结 schema-v2 全局熔断。v18 blocked，
   28 个 paid run、218 个 upstream attempt、paid `158.877192 USD`、reservation 0，累计 `826.674430 USD`；
   results 已以 `c2398bb` 只读提交。
+- v19 fresh wire `0.192850 USD`；复用 v18 的 20 条有效链，只运行缺口。两轮 vulnerable 的 a1—a4 均为
+  provider-integrity；A/B RONDO filter 经 Docker/Guardian infra 后 a3 completed，形成第 21 条可复用有效链。
+  fix a1/a2 均因本地 Guardian 429 进入 diagnosis hold。RCA 证明 main 活跃 reservation 占用所剩容量，使 Guardian
+  未到上游；这是代理 admission 缺陷。v19 以 local implementation defect 只读退役：13 个 paid run、61 个
+  upstream attempt 全 settled、reservation 0、paid `153.404245 USD`，累计 `980.271525 USD`；results `38b9420`。
 
 ### 后续计划
 
 1. 离线落地 schema-v3 continuation manifest、历史结果引用验证、provider-integrity 熔断豁免和 180 秒冻结
    deadline；focused、`eval-lock` 与阶段末全量测试通过并形成干净提交。
-2. 由生成器冻结唯一后继 identity，精确带入 `826.674430 USD` prior。新 identity 引用 v18 的首个非 infra
-   有效结果，只为 v18 的 infra/未启动逻辑 slot 分配并 claim 新 run ID；fresh wire 成功后逐项补齐。
+2. 由生成器冻结唯一 schema-v4 后继 identity，精确带入 `980.271525 USD` prior。新 identity 引用 v18/v19 的
+   21 个首个非 infra 有效结果，只为 infra/未启动逻辑 slot 分配并 claim 新 run ID；fresh wire 成功后逐项补齐。
 3. 基础四轮与必要条件加跑完整后机械聚合 `sigma`、`delta`、共同分母、归因、usage 和费用；若下一请求的
-   `18.885000 USD` 最大合法 reservation 无法装入剩余 `173.325570 USD`，在 API 前 blocked。
+   main+Guardian 的 `37.770000 USD` admission 容量无法装入剩余 `319.728475 USD` 时，在发送 main 前 blocked。
 
 当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v19`/`p2-b7-canary-sol-sol-v19`，run base
 `20260812-390000000`，lock SHA
@@ -304,8 +312,8 @@ v18 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary�
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v18 是保留全部费用事实的 blocked 终态。累计 debit `826.674430 USD`、
-  reservation 0；v19 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
+- v1 是 API 前失败终态；v2—v19 是保留全部费用事实的 blocked 终态。累计 debit `980.271525 USD`、
+  reservation 0；后继尚未冻结，B7 尚未形成四轮完整共同集合，M2 尚未验收。
 
 ## 6. 关键决策记录
 
@@ -341,3 +349,5 @@ v18 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary�
 | 028 | v18 按 schema-v2 因第三个 task 的 provider-integrity 熔断；后继改为引用历史首个非 infra 有效结果，只补 infra/缺失 slot，provider-integrity 不计 task-local/全局熔断 | 中转站波动不是本地实现缺陷；保留全部失败与保守费用，同时避免重复暴露已有效的 pass/reward 0 和选择性重跑美化成绩 | B6/B7 | 已采纳 |
 | 029 | 后继上游逻辑请求 deadline 从 90 秒单调放宽到 180 秒；在 90 秒下完整成功的 v18 结果允许引用，其他 profile/执行合同仍须精确相等 | 中转站记录显示请求完成，90 秒本地终态等待可能过严；单调延长不推翻已在更严格门限下成功的结果 | B6/B7 | 已采纳 |
 | 030 | 生成 schema-v3 v19，冻结 20 条 v18 首个非 infra 结果引用、321 个新 run ID 与精确 prior；v1—v18 继续只读 | 新 identity 只承载缺失/infra 续跑，不能复用旧 run ID、覆盖旧结果或重置累计费用 | B6/B7 | 已采纳 |
+| 031 | v19 fix 的两次 Guardian 429 被证实为本地并发 reservation admission 缺陷；退役 v19，schema-v4 要求 main admission 同时容纳 main+Guardian 最大预留 | Guardian 会在 main terminal usage 到达前启动；只检查单份预留会让已发送的 main 确定性挤掉审批容量 | B6/B7 | 已采纳 |
+| 032 | 用户追加 300 USD，Plan 015 总硬上限提高到 1300 USD；v19 的 `980.271525 USD` 累计事实完整进入后继 prior | 新授权只扩大后继 cap，不改写正在运行或已退役 identity，也不重置既有费用 | B6/B7 | 已采纳 |

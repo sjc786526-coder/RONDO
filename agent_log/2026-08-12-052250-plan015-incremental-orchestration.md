@@ -94,3 +94,10 @@
   campaign/batch `p2-b7-canary-baseline-v19`/`p2-b7-canary-sol-sol-v19`、run base `20260812-390000000`、
   321 个唯一 run ID、20 条 v18 continuation，lock SHA
   `20483f7c3ce6f7fe058bbe34185464dade8c22280a34ece5b8ced009b2d84e73`，prior `$826.674430`。
+- v19 wire `$0.192850`；只补缺口后，vulnerable 两轮 8 个 provider-integrity attempt 均保守结算，filter a3
+  completed。fix a1/a2 的 Guardian `failed_closed/session_error` 都是本地 429：main 活跃 `$18.885` reservation
+  留给 Guardian 的 batch 容量仅 `$1.219972`/`$0.927932`，请求未到上游。以 local implementation defect 退役
+  v19；paid `$153.404245`、61/61 attempt settled、reservation 0，累计 `$980.271525`，results `38b9420`。
+- 代理修复 `1104d99` 在 main admission 时额外校验一份 Guardian 最大预留，容量不足在 main 上游前以
+  `budget_capacity_exhausted` 停止；focused 103/103、`eval-lock` 通过。用户追加 `$300`，后继 schema-v4 cap
+  `$1300`，不会改写 v19；可复用链增至 21 条。

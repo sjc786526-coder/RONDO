@@ -85,6 +85,20 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             baseline=campaign_baseline_contract(3),
         )
 
+    @classmethod
+    def _identity_v4(cls):
+        legacy = cls._identity_v3()
+        return replace(
+            legacy,
+            schema_version=4,
+            budget={
+                **legacy.budget,
+                "campaign_cap_usd": "1300.000000",
+                "prior_estimated_usd": "980.271525",
+            },
+            baseline=campaign_baseline_contract(4),
+        )
+
     def _base(
         self,
         outcomes: dict[tuple[str, str], TaskOutcome] | None = None,
@@ -144,11 +158,11 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
-        self.assertEqual(forecast["prior_estimated_usd"], "826.674430")
+        self.assertEqual(forecast["prior_estimated_usd"], "980.271525")
         self.assertEqual(
-            forecast["remaining_before_successor_canary_usd"], "173.325570"
+            forecast["remaining_before_successor_canary_usd"], "319.728475"
         )
-        self.assertFalse(forecast["feasible_from_observed_shape"])
+        self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
         tracked = json.loads(
             (EVAL_ROOT / "tasksets/p2-b7-cost-forecast.json").read_text(
@@ -429,6 +443,31 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(
             {row["source_upstream_timeout_seconds"] for row in rows},
             {"90.000"},
+        )
+
+    def test_v19_prior_and_continuation_preserve_valid_results_only(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        source = load_historical_campaign_identity(paths, 19)
+        self.assertEqual(
+            required_successor_prior(paths, version=19),
+            Decimal("980.271525"),
+        )
+        rows = _successor_continuation(paths, source)
+        by_chain = {row["chain_id"]: row for row in rows}
+        self.assertEqual(len(by_chain), 21)
+        self.assertEqual(
+            by_chain[
+                "base:ab-rondo-1:terminal-bench/filter-js-from-html"
+            ]["source_run_id"],
+            "20260812-390000103-tb-rondo-r3",
+        )
+        self.assertNotIn(
+            "base:ab-rondo-1:terminal-bench/fix-git",
+            by_chain,
+        )
+        self.assertNotIn(
+            "base:aa-rondo-1:terminal-bench/vulnerable-secret",
+            by_chain,
         )
 
     def test_successor_run_range_rejects_history_and_accepts_fresh_ids(self) -> None:

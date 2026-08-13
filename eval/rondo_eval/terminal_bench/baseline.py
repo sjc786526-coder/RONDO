@@ -25,8 +25,9 @@ from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalo
 LEGACY_CAMPAIGN_CAP_USD = Decimal("600.000000")
 LEGACY_CAMPAIGN_MAX_RUNS = 161
 HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD = Decimal("700.000000")
-CAMPAIGN_CAP_USD = Decimal("1000.000000")
-CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("826.674430")
+HISTORICAL_SCHEMA_V3_CAMPAIGN_CAP_USD = Decimal("1000.000000")
+CAMPAIGN_CAP_USD = Decimal("1300.000000")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("980.271525")
 CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
@@ -220,7 +221,7 @@ class CampaignIdentity:
     def max_attempts(self) -> int:
         if self.schema_version == 1:
             return 2
-        if self.schema_version in {2, 3}:
+        if self.schema_version in {2, 3, 4}:
             return 4
         raise BaselineError("campaign identity version is unsupported")
 
@@ -1183,7 +1184,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         "budget",
         "baseline",
     }
-    if isinstance(value, dict) and value.get("schema_version") == 3:
+    if isinstance(value, dict) and value.get("schema_version") in {3, 4}:
         expected_keys.add("continuation")
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise BaselineError("campaign lock schema is invalid")
@@ -1201,7 +1202,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in {1, 2, 3}
+        or schema_version not in {1, 2, 3, 4}
         or _CAMPAIGN_ID.fullmatch(str(value["campaign_id"])) is None
         or _CAMPAIGN_BATCH_ID.fullmatch(str(value["batch_id"])) is None
         or _CAMPAIGN_ID.fullmatch(value["campaign_id"]).group(1)
@@ -1308,6 +1309,14 @@ def campaign_baseline_contract(schema_version: int) -> dict[str, object]:
             "upstream_timeout_seconds": f"{CAMPAIGN_UPSTREAM_TIMEOUT_SECONDS:.3f}",
             "timeout_compatibility": "monotonic_extension",
         }
+    if schema_version == 4:
+        return {
+            **campaign_baseline_contract(3),
+            "concurrent_guardian_capacity_admission": (
+                "main_plus_guardian_max_reservation"
+            ),
+            "continuation_compatibility": "monotonic_budget_admission_fix",
+        }
     raise BaselineError("campaign baseline contract version is unsupported")
 
 
@@ -1327,11 +1336,15 @@ def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
     except (ArithmeticError, TypeError):
         return False
     expected_slots = LEGACY_CAMPAIGN_MAX_RUNS if schema_version == 1 else CAMPAIGN_MAX_RUNS
-    valid_caps = (
-        {LEGACY_CAMPAIGN_CAP_USD}
-        if schema_version == 1
-        else {HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD, CAMPAIGN_CAP_USD}
-    )
+    valid_caps = {
+        1: {LEGACY_CAMPAIGN_CAP_USD},
+        2: {
+            HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD,
+            HISTORICAL_SCHEMA_V3_CAMPAIGN_CAP_USD,
+        },
+        3: {HISTORICAL_SCHEMA_V3_CAMPAIGN_CAP_USD},
+        4: {CAMPAIGN_CAP_USD},
+    }[schema_version]
     return (
         cap in valid_caps
         and Decimal(0) <= prior < cap
