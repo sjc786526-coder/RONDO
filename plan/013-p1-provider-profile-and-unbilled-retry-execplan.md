@@ -131,7 +131,9 @@ Terminal-Bench paid pair、B3/M1 和 Docker 运行属于下一阶段，不在本
 
 - 代码、测试、真实 probe 与文档收口完成；保留在独立 worktree，未改写 v8 或启动 Plan 014 paid pair。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映本计划结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 1. 用户验收本 worktree 交付后，再决定是否提交、合并和推送；本任务未获授权时不自行改变 main/远端。
 2. 下一阶段按 Plan 014 先闭合 charged Guardian parse retry 与双侧 effective 条件，再申请新的 paid/Docker 授权。

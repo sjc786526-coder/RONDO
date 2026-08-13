@@ -159,7 +159,9 @@ just eval-tb-run --side codex|rondo --task <task_id> --budget-usd <amount>
 
 - 仅形成草稿；未安装 Terminal-Bench，未拉镜像，未运行 Docker，未调用真实 API。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映草稿形成时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 - 用户/Claude 审查并决定是否接收 P0 和看门狗小修。
 - 用户确认 P1 草稿后，先单独授权 B1 Docker 勘察；以实测接口更新版本、文件布局和稳定命令。

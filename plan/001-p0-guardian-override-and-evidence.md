@@ -257,7 +257,9 @@ override 的测试失去区分度；S2 需要剥离新增的 `encrypted_function
 - **P0 定向功能复验收口；不等价于完整 workspace 全绿，改动仍待审查/合并。**
 - Bazel 门禁与 `just argument-comment-lint` 未运行（本机未装 Bazel）。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映本计划结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 本轮改动经审查/合并且用户确认对应草稿后，才按 `doc/WBS.md` 进入 P1/L1/L2；`E_final` 首次用于
 跨侧对比前，仍需人工抽查 standard Responses 与 Responses Lite 样本的正文边界，并为有效 policy

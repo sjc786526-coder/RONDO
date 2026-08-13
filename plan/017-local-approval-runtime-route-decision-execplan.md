@@ -101,17 +101,14 @@ llama.cpp、NVIDIA 与 WSL 的权威资料和 RONDO 当前合同，决定继续�
 
 - CUDA workflow 勘误、轻量检查与 Git 交付已完成；不进入 Plan 018、权重下载或 GPU/model-backed 执行。
 
-### 后续计划
+### 交接边界（后由 Plan 018 完成）
 
-- 下一任务 Plan 018：在覆盖 CUDA device probe/GPU 访问的新授权和资源门禁下冻结 exact CUDA Toolkit，构建 b10333 Linux
-  CUDA runtime，补齐 CPU/CUDA exact binary path 到对应 lock 的有限映射、动态依赖闭包和 backend-neutral
-  capability/doctor 投影，只完成不加载 GGUF/不推理的 model-free 验收。
-- Plan 015 另获唯一 GGUF 下载授权后，再单独执行 4k model-backed smoke；通过后才可晋级
-  `gpu_model_serving_validated`，8k baseline 随后验收。
+- 本计划只完成 runtime 路线决策与 build-ready 边界。Plan 018 后来按该决策完成 exact CUDA runtime 与
+  model-free 验收；model-backed 不属于本计划，当前路线只见 `doc/WBS/local-approval-model.md`。
 
 ### 阻塞项
 
-- 无。二进制、GPU 与模型实测属于下一阶段授权范围，不是本调查的技术阻塞。
+- 无。二进制、GPU 与模型实测不属于本调查。
 
 ### 当前验收状态
 

@@ -1,5 +1,8 @@
 # Plan 020 B7 canary 基线 failed 的归因调研
 
+> 本报告的归因结论和实验约束已固定，分歧全部关闭；它不决定是否或何时重跑。当前实施顺序只见
+> `doc/WBS.md` 与 `doc/WBS/eval-benchmark.md`。
+
 > 文档性质：只读归因调研结论，不是实施计划，也不是对 RONDO 能力的评价结论。
 > 调研日期：2026-08-13。
 > 调研对象：Plan 020 B7 campaign v22（`p2-b7-canary-baseline-v22`）的 `failed` 终态。
@@ -247,7 +250,7 @@ iid 假设被多重违反。该数字仅作数量级 sanity check，不得作为
   `plan/020` 的阻塞项与当前验收状态、`agent_log/2026-08-12-230705` 写作"B7 性能门"，
   且 assessment 只输出统一的 `reasons`、不单列两个子门状态。要调整的是下游表述与 assessment 输出结构。
 
-## 8. 重跑前的共识修正项
+## 8. 若另行执行时必须满足的实验约束
 
 ### 8.1 catalog 字节一致 + provenance 绑定
 

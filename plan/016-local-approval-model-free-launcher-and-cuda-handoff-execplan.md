@@ -117,12 +117,12 @@ build-ready 交接。
 
 - 本轮实现与 Git 交付已完成；不进入 CUDA、权重或 GPU 执行。
 
-### 后续计划
+### 交接边界（后由 Plan 018 完成）
 
-- 下一阶段：在独立授权与资源窗口下冻结 Linux CUDA 工具链并构建 exact b10333 runtime；另待 Plan 015 的 exact GGUF 下载授权，
-  “冻结 CUDA runtime + 已校验唯一 GGUF + 当前模板/launcher 合同”三项汇合后再运行 model-backed 4k smoke。
+- 本计划终止于 model-free launcher、模板、参数和 receipt v2 合同。其 Linux CUDA build-ready 交接后来由
+  Plan 018 完成；model-backed 验收不属于本计划，当前路线只见 `doc/WBS/local-approval-model.md`。
 
-#### Linux CUDA b10333 build-ready 交接（本轮未执行）
+#### Linux CUDA b10333 build-ready 历史交接（本轮未执行，后由 Plan 018 完成）
 
 - 源码必须是 `ggml-org/llama.cpp` tag `b10333` peeled commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4` 的 clean tree。建议 ignored 路径：

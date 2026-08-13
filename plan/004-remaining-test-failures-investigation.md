@@ -611,7 +611,9 @@ just test -p codex-cli --retries 0 --flaky-result fail -E 'test(/mcp_login_no_op
 
 - 当前平台实现、独立整改、定向/压力/静态门禁、V8 sandbox补验均已完成；当前没有待提交产品代码。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映本计划结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 - Windows环境可用时补PowerShell正向门禁。workspace已真实执行且非全绿，32项终态未通过应另立测试维护任务；
   已通过的当前平台定向、V8 canary与host smoke不作无意义重复运行。

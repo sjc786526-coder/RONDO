@@ -76,5 +76,5 @@ SHA-256，未读取 GGUF 元数据、未加载模型、未推理。
 ## 边界与剩余工作
 
 GGUF 始终未加载，未运行推理、token generation、4k smoke 或 8k baseline，也未修改真实 ignored
-`rondo.local.toml`。本快照只证明唯一权重的静态完整性、Linux CUDA build/runtime/device 的 model-free 闭包；下一任务
-才更新真实配置并执行受控 4k model-backed 验收，通过后晋级 `gpu_model_serving_validated`，8k baseline 随后单独验收。
+`rondo.local.toml`。本快照只证明唯一权重的静态完整性、Linux CUDA build/runtime/device 的 model-free 闭包；
+当前配置迁移与 model-backed 验收路线见 `doc/WBS/local-approval-model.md`。

@@ -171,7 +171,9 @@
   clean commit `b47a7b4` 上完成 RONDO→Codex：两侧均 completed、fake 请求各 2 次、
   tool round-trip 成功、cleanup verified empty，官方 API 0 次、费用 0 USD。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映本计划结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 1. B2 以 current receipt 作为当前轻量验收事实，不继续扩展 no-API 审计或状态机。
 2. B3/M1 只能在新的真实 API 批次、轮数、模型和 USD 授权后启用。

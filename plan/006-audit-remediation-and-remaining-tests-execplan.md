@@ -93,7 +93,9 @@
 - [x] 收口脚本/代码轻量回归，修订权威文档与最终版 `plan/004`。
 - [ ] 在user D-Bus恢复后补跑Rust定向测试与相关clippy；当前不能绕过看门狗。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映该任务中断时的恢复入口；它不构成当前队列，当前路线以 `doc/WBS.md` 为准。
 
 1. D-Bus恢复后串行补跑skills、TUI、core定向测试与相关clippy，检查JUnit retained/not_applicable。
 2. 复核diff、受保护边界、看门狗summary/JUnit和残留进程，提交当前分支。
