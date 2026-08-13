@@ -901,6 +901,9 @@ def _publication_identity_config(
         "campaign_attempt": publication.campaign_attempt,
         "taskset_sha256": publication.taskset_sha256,
         "canary_catalog_sha256": publication.canary_catalog_sha256,
+        "provider_upstream_timeout_seconds": float(
+            publication.provider_upstream_timeout_seconds
+        ),
     }
 
 
@@ -1088,6 +1091,12 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or not isinstance(config.get("campaign_round_id"), str)
         or not config["campaign_round_id"]
         or config.get("campaign_attempt") not in {1, 2, 3, 4}
+        or isinstance(config.get("provider_upstream_timeout_seconds", 90.0), bool)
+        or not isinstance(
+            config.get("provider_upstream_timeout_seconds", 90.0), (int, float)
+        )
+        or float(config.get("provider_upstream_timeout_seconds", 90.0))
+        not in {90.0, 180.0}
     ):
         raise HarborResultError("Terminal-Bench campaign identity is invalid")
 

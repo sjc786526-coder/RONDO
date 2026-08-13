@@ -237,6 +237,7 @@ SHORT_REQUEST_RESERVATION_USD = Decimal("1")
 # budget; urllib cannot hard-cancel DNS/connect/header work, so crash recovery
 # still conservatively settles any reservation that outlives the process.
 UPSTREAM_TIMEOUT_SECONDS = 90.0
+_MAX_UPSTREAM_TIMEOUT_SECONDS = 180.0
 
 
 class PersistentBudgetLedger:
@@ -822,9 +823,9 @@ class LoopbackResponsesProxy:
         if (
             not math.isfinite(timeout_seconds)
             or timeout_seconds <= 0
-            or timeout_seconds > UPSTREAM_TIMEOUT_SECONDS
+            or timeout_seconds > _MAX_UPSTREAM_TIMEOUT_SECONDS
         ):
-            raise ApiBudgetProxyError("proxy timeout must be within the 90 second limit")
+            raise ApiBudgetProxyError("proxy timeout must be within the 180 second limit")
         _require_safe_id(run_id, "run id")
         try:
             main_pricing.validate()

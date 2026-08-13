@@ -8,14 +8,15 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from pathlib import Path
 
-from ..api_budget_proxy import PersistentBudgetLedger
+from ..api_budget_proxy import PersistentBudgetLedger, completed_run_accounting
 from ..artifacts import ArtifactWriter
 from ..config import RepoPaths, load_provider_secret, load_runtime_config
 from ..contracts import BinaryManifest, RunOutcome, Side
@@ -54,6 +55,7 @@ from .baseline import (
     assess_baseline,
     campaign_slot_chain_id,
     load_campaign_identity,
+    load_historical_campaign_identity,
 )
 from .live import run_budgeted_terminal_bench
 from .materialize import validate_frozen_task_source
@@ -124,7 +126,8 @@ class ExecutedSlot:
 class MechanicalFailureTracker:
     """Open the campaign circuit after one category reaches three tasks."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, ignore_provider_integrity: bool = False) -> None:
+        self._ignore_provider_integrity = ignore_provider_integrity
         self._tasks: dict[MechanicalFailureCategory, set[str]] = {
             item: set() for item in MechanicalFailureCategory
         }
@@ -147,6 +150,11 @@ class MechanicalFailureTracker:
             MechanicalFailureCategory.OPERATOR_INTERRUPTION,
         }:
             raise CampaignExecutionError(f"campaign_terminal_failure:{category.value}")
+        if (
+            self._ignore_provider_integrity
+            and category is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
+        ):
+            return
         self._tasks[category].add(task_id)
         if len(self._tasks[category]) >= MECHANICAL_CIRCUIT_BREAKER_TASKS:
             raise CampaignExecutionError(
@@ -880,11 +888,20 @@ def _replay_recovered_attempt_chain(
     if task is None:
         raise CampaignExecutionError("recovered campaign task is not frozen")
     records, digests = _campaign_records(results_root, identity)
+    continued, continued_records, continued_digests = _continuation_records(
+        paths,
+        results_root,
+        identity,
+    )
+    all_records = {**continued_records, **records}
+    all_digests = {**continued_digests, **digests}
     try:
         _execute_attempt_chain(
             identity=identity,
             state=state,
-            tracker=MechanicalFailureTracker(),
+            tracker=MechanicalFailureTracker(
+                ignore_provider_integrity=identity.schema_version >= 3
+            ),
             task=task,
             chain_id=campaign_slot_chain_id(recovered_slot),
             paths=paths,
@@ -900,8 +917,9 @@ def _replay_recovered_attempt_chain(
             measurement_commits=measurement_commits,
             eval_harness_commit=eval_harness_commit,
             seccomp_profile=seccomp_profile,
-            records=records,
-            digests=digests,
+            records=all_records,
+            digests=all_digests,
+            continued=continued,
             resumable=True,
             replay_only=True,
         )
@@ -1351,7 +1369,16 @@ def _advance_one_paid_step(
     """Advance at most one paid task while applying every frozen gate in order."""
 
     records, digests = _campaign_records(results_root, identity)
-    tracker = MechanicalFailureTracker()
+    continued, continued_records, continued_digests = _continuation_records(
+        paths,
+        results_root,
+        identity,
+    )
+    all_records = {**continued_records, **records}
+    all_digests = {**continued_digests, **digests}
+    tracker = MechanicalFailureTracker(
+        ignore_provider_integrity=identity.schema_version >= 3
+    )
     resumable = {
         "paths": paths,
         "identity": identity,
@@ -1360,8 +1387,9 @@ def _advance_one_paid_step(
         "counter": counter,
         "storage_baseline": storage_baseline,
         "results_root": results_root,
-        "records": records,
-        "digests": digests,
+        "records": all_records,
+        "digests": all_digests,
+        "continued": continued,
         "resumable": True,
         **execute_kwargs,
     }
@@ -1477,7 +1505,9 @@ def _execute_base_rounds(
 ) -> list[BaselineRun]:
     identity: CampaignIdentity = kwargs["identity"]
     state: CampaignStateLedger = kwargs["state"]
-    tracker = failure_tracker or MechanicalFailureTracker()
+    tracker = failure_tracker or MechanicalFailureTracker(
+        ignore_provider_integrity=identity.schema_version >= 3
+    )
     values: list[BaselineRun] = []
     for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
         side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
@@ -1503,7 +1533,13 @@ def _execute_base_rounds(
                 )
             effective[task.task_id] = attempts[-1]
         if sum(
-            item.task_outcome is TaskOutcome.INFRA for item in effective.values()
+            item.task_outcome is TaskOutcome.INFRA
+            and not (
+                identity.schema_version >= 3
+                and item.failure_category
+                is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
+            )
+            for item in effective.values()
         ) > MAX_REMAINING_INFRA_PER_ROUND:
             raise CampaignExecutionError(
                 f"base_round_infra_threshold_exceeded:{round_id}"
@@ -1521,6 +1557,23 @@ def _execute_attempt_chain(
     **kwargs: object,
 ) -> list[ExecutedSlot]:
     """Execute or replay one infra-only chain without crossing an RCA hold."""
+
+    continued_results = kwargs.pop("continued", None)
+    continued = _continued_executed_slot(
+        identity=identity,
+        chain_id=chain_id,
+        task=task,
+        continued=continued_results,
+    )
+    if continued is not None:
+        for attempt in range(1, identity.max_attempts + 1):
+            _skip_inactive_attempt(
+                state,
+                identity.slot(f"{chain_id}:a{attempt}").slot_id,
+                resumable=kwargs.get("resumable") is True,
+                reason="continued_valid_result",
+            )
+        return [continued]
 
     values: list[ExecutedSlot] = []
     for attempt in range(1, identity.max_attempts + 1):
@@ -1550,6 +1603,11 @@ def _execute_attempt_chain(
             raise CampaignExecutionError(
                 "infra result lacks a structured mechanical failure category"
             )
+        if (
+            identity.schema_version >= 3
+            and category is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
+        ):
+            continue
         same_category = tuple(
             item.slot.slot_id for item in values if item.failure_category is category
         )
@@ -1602,6 +1660,32 @@ def _execute_attempt_chain(
     if not values:
         raise CampaignExecutionError("campaign attempt chain produced no result")
     return values
+
+
+def _continued_executed_slot(
+    *,
+    identity: CampaignIdentity,
+    chain_id: str,
+    task: object,
+    continued: object,
+) -> ExecutedSlot | None:
+    reference = identity.continuation_for(chain_id)
+    if reference is None:
+        return None
+    if not isinstance(continued, dict):
+        raise CampaignExecutionError("campaign continuation results are unavailable")
+    executed = continued.get(chain_id)
+    if not isinstance(executed, ExecutedSlot):
+        raise CampaignExecutionError("campaign continuation result is invalid")
+    if (
+        executed.slot.task_id != getattr(task, "task_id", None)
+        or campaign_slot_chain_id(executed.slot) != chain_id
+        or executed.slot.run_id != reference.source_run_id
+        or executed.task_outcome is TaskOutcome.INFRA
+        or executed.failure_category is not None
+    ):
+        raise CampaignExecutionError("campaign continuation result drifted")
+    return executed
 
 
 def _existing_diagnosis(
@@ -1671,7 +1755,9 @@ def _execute_conditionals(
 ) -> list[ConditionalRun]:
     identity: CampaignIdentity = kwargs["identity"]
     state: CampaignStateLedger = kwargs["state"]
-    tracker = failure_tracker or MechanicalFailureTracker()
+    tracker = failure_tracker or MechanicalFailureTracker(
+        ignore_provider_integrity=identity.schema_version >= 3
+    )
     tasks = tuple(task.task_id for task in identity.catalog.tasks)
     by_round: dict[str, dict[str, TaskOutcome]] = {}
     for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
@@ -1866,6 +1952,7 @@ def _execute_task_slot(
         side=slot.side,
         metrics=timer.snapshot(exit_code=exit_code).to_dict(),
         selected_profile=identity.selected_profile,
+        provider_upstream_timeout_seconds=identity.upstream_timeout_seconds,
     )
     failure_stage: str | None = None
     guardian_technical_failure = False
@@ -2066,6 +2153,12 @@ def _write_aggregate(
     prior_cost = Decimal(identity.budget["prior_estimated_usd"])
     spent = prior_cost + canary_cost + Decimal(budget["spent_usd"])
     records, record_digests = _campaign_records(results_root, identity)
+    _continued, continued_records, continued_digests = _continuation_records(
+        campaign_root.parents[2],
+        results_root,
+        identity,
+    )
+    assessment_records = {**continued_records, **records}
     usage = _campaign_usage(campaign_root.parents[2], records)
     request_count = sum(
         len(run["requests"])
@@ -2076,7 +2169,7 @@ def _write_aggregate(
         for run in budget["runs"].values()
         for request in run["requests"].values()
     )
-    public_assessment = _public_assessment(assessment, records)
+    public_assessment = _public_assessment(assessment, assessment_records)
     state_snapshot = state.snapshot()
     value = {
         "schema_version": identity.schema_version,
@@ -2095,6 +2188,10 @@ def _write_aggregate(
         "upstream_attempt_count": upstream_attempt_count,
         "usage": usage,
         "result_record_sha256": record_digests,
+        "continued_result_record_sha256": continued_digests,
+        "continued_logical_slots": {
+            item.chain_id: item.source_run_id for item in identity.continuation
+        },
         "storage": _storage_projection(storage_baseline, final_storage),
     }
     if identity.schema_version >= 2:
@@ -2125,6 +2222,8 @@ def _write_aggregate(
             "upstream_attempt_count",
             "usage",
             "result_record_sha256",
+            "continued_result_record_sha256",
+            "continued_logical_slots",
             "storage",
         )
     }
@@ -2191,6 +2290,166 @@ def _campaign_records(
         records[run_id] = record
         digests[run_id] = hashlib.sha256(line).hexdigest()
     return records, dict(sorted(digests.items()))
+
+
+def _continuation_records(
+    paths_or_root: RepoPaths | Path,
+    results_root: Path,
+    identity: CampaignIdentity,
+) -> tuple[
+    dict[str, ExecutedSlot],
+    dict[str, dict[str, object]],
+    dict[str, str],
+]:
+    if not identity.continuation:
+        return {}, {}, {}
+    common_root = (
+        paths_or_root.common_root
+        if isinstance(paths_or_root, RepoPaths)
+        else paths_or_root
+    )
+    source_paths = RepoPaths.discover(Path(__file__).resolve().parent)
+    if source_paths.common_root != common_root:
+        raise CampaignExecutionError("continued source repository is invalid")
+    indexed: dict[str, tuple[dict[str, object], str]] = {}
+    expected_runs = {item.source_run_id for item in identity.continuation}
+    path = results_root / "eval/results/runs.jsonl"
+    for line in path.read_bytes().splitlines():
+        record = json.loads(line)
+        run_id = record.get("run_id") if isinstance(record, dict) else None
+        if run_id not in expected_runs:
+            continue
+        if run_id in indexed:
+            raise CampaignExecutionError("continued public result is duplicated")
+        indexed[run_id] = (record, hashlib.sha256(line).hexdigest())
+    continued: dict[str, ExecutedSlot] = {}
+    records: dict[str, dict[str, object]] = {}
+    digests: dict[str, str] = {}
+    for reference in identity.continuation:
+        pair = indexed.get(reference.source_run_id)
+        if pair is None or pair[1] != reference.source_result_record_sha256:
+            raise CampaignExecutionError("continued public result digest is invalid")
+        record, digest = pair
+        match = re.fullmatch(
+            r"p2-b7-canary-baseline-v([1-9][0-9]*)",
+            reference.source_campaign_id,
+        )
+        if match is None:
+            raise CampaignExecutionError("continued source campaign is invalid")
+        source = load_historical_campaign_identity(source_paths, int(match.group(1)))
+        if (
+            source.campaign_id != reference.source_campaign_id
+            or source.lock_sha256 != reference.source_campaign_lock_sha256
+            or source.taskset_sha256 != identity.taskset_sha256
+            or source.terminal_bench_commit != identity.terminal_bench_commit
+            or source.selected_profile != identity.selected_profile
+            or source.bundles != identity.bundles
+            or source.no_api_seccomp != identity.no_api_seccomp
+            or source.upstream_timeout_seconds
+            != float(reference.source_upstream_timeout_seconds)
+            or source.upstream_timeout_seconds > identity.upstream_timeout_seconds
+        ):
+            raise CampaignExecutionError("continued execution contract drifted")
+        source_slot = source.slot(reference.source_slot_id)
+        successor_task = identity.catalog.task(str(source_slot.task_id))
+        if (
+            source_slot.run_id != reference.source_run_id
+            or campaign_slot_chain_id(source_slot) != reference.chain_id
+            or source.catalog.task(str(source_slot.task_id)) != successor_task
+        ):
+            raise CampaignExecutionError("continued task identity drifted")
+        state_path = (
+            common_root
+            / "eval-data/campaigns"
+            / source.campaign_id
+            / "state.json"
+        )
+        budget_path = (
+            common_root / "eval-data/budgets" / f"{source.batch_id}.json"
+        )
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        rows = [
+            row
+            for row in state.get("slots", [])
+            if isinstance(row, dict) and row.get("slot_id") == source_slot.slot_id
+        ]
+        budget = json.loads(budget_path.read_text(encoding="utf-8"))
+        if len(rows) != 1:
+            raise CampaignExecutionError("continued source state is ambiguous")
+        row = rows[0]
+        if (
+            state.get("campaign_id") != source.campaign_id
+            or state.get("campaign_lock_sha256") != source.lock_sha256
+            or state.get("status") not in {"passed", "failed", "blocked"}
+            or row.get("run_id") != source_slot.run_id
+            or row.get("status") != CampaignSlotStatus.COMPLETED.value
+            or row.get("outcome")
+            not in {RunOutcome.COMPLETED.value, RunOutcome.AGENT_FAILED.value}
+            or row.get("reason") is not None
+            or row.get("result_record_sha256") != digest
+        ):
+            raise CampaignExecutionError("continued source state is not valid")
+        accounting = completed_run_accounting(budget, run_id=source_slot.run_id)
+        config = record.get("config")
+        summary = record.get("summary")
+        tasks = record.get("tasks")
+        task_outcome = _task_outcome_from_record(record)
+        if (
+            record.get("outcome")
+            not in {RunOutcome.COMPLETED.value, RunOutcome.AGENT_FAILED.value}
+            or task_outcome is TaskOutcome.INFRA
+            or not isinstance(config, dict)
+            or config.get("campaign_id") != source.campaign_id
+            or config.get("campaign_lock_sha256") != source.lock_sha256
+            or config.get("campaign_slot_id") != source_slot.slot_id
+            or config.get("campaign_round_id") != source_slot.round_id
+            or config.get("campaign_attempt") != source_slot.attempt
+            or _continued_source_timeout(config)
+            != Decimal(str(source.upstream_timeout_seconds))
+            or config.get("taskset_sha256") != source.taskset_sha256
+            or config.get("canary_catalog_sha256") != source.canary_catalog_sha256
+            or any(config.get(key) != value for key, value in source.selected_profile.items())
+            or not isinstance(tasks, list)
+            or len(tasks) != 1
+            or not isinstance(tasks[0], dict)
+            or tasks[0].get("task_id") != source_slot.task_id
+            or tasks[0].get("outcome") not in {"pass", "fail"}
+            or tasks[0].get("reward") not in {0.0, 1.0}
+            or not isinstance(summary, dict)
+            or summary.get("infra_failed") != 0
+            or summary.get("metadata_ready") is not True
+            or summary.get("budget_accounting") != accounting
+            or Decimal(str(row.get("estimated_usd")))
+            != Decimal(str(accounting["spent_usd"]))
+        ):
+            raise CampaignExecutionError("continued public result contract is invalid")
+        effective_slot = replace(
+            identity.slot(f"{reference.chain_id}:a1"),
+            run_id=source_slot.run_id,
+        )
+        continued[reference.chain_id] = ExecutedSlot(
+            effective_slot,
+            RunOutcome(str(record["outcome"])),
+            task_outcome,
+            Decimal(str(row["estimated_usd"])),
+            None,
+        )
+        records[source_slot.run_id] = record
+        digests[source_slot.run_id] = digest
+    return continued, records, dict(sorted(digests.items()))
+
+
+def _continued_source_timeout(config: dict[str, object]) -> Decimal:
+    value = config.get("provider_upstream_timeout_seconds", 90.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise CampaignExecutionError("continued source timeout is invalid")
+    try:
+        timeout = Decimal(str(value))
+    except ArithmeticError as exc:
+        raise CampaignExecutionError("continued source timeout is invalid") from exc
+    if timeout not in {Decimal("90.0"), Decimal("180.0")}:
+        raise CampaignExecutionError("continued source timeout is invalid")
+    return timeout
 
 
 def _campaign_usage(

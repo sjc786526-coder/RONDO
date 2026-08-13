@@ -358,7 +358,18 @@ class ApiBudgetProxyTests(unittest.TestCase):
 
     def test_transport_timeout_is_bounded_independently_from_agent_timeout(self) -> None:
         self.assertEqual(UPSTREAM_TIMEOUT_SECONDS, 90.0)
-        with self.assertRaisesRegex(ApiBudgetProxyError, "90 second"):
+        proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=self.ledger,
+            run_id="extended-timeout",
+            metadata_path=self.root / "extended-timeout.json",
+            **self._profile_kwargs(),
+            timeout_seconds=180.0,
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        )
+        self.assertEqual(proxy._timeout, 180.0)
+        with self.assertRaisesRegex(ApiBudgetProxyError, "180 second"):
             LoopbackResponsesProxy(
                 upstream_base_url="https://provider.example/v1",
                 api_key=self.secret,

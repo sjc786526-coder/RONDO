@@ -29,7 +29,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - B7 基础 40 个运行全部形成唯一终态；同一 RONDO bundle A/A 两轮得到 `sigma`，A/B 差异 `delta <= sigma`。
   `sigma > 2` 机械标为 canary unstable。每个 Codex-pass/RONDO-fail task 两侧各加跑两次；Codex 三次全过且
   RONDO 三次全败则 failed。
-- 后继 identity 的每条 task/round/side/repeat 运行链只对 infra 激活后续 attempt，最多 `a1`—`a4`；首个
+- schema-v2 identity 的每条 task/round/side/repeat 运行链只对 infra 激活后续 attempt，最多 `a1`—`a4`；首个
   pass 或正常 reward 0 等有效结果立即跳过余下 attempt。`a1` infra 后紧接同题 `a2`；同一结构化类别第二次
   出现时先落 durable diagnosis hold，未经结构化 RCA resolution 不得 claim 下一 attempt。本地实现或共享基础设施
   缺陷使当前 identity blocked；仅结论为外部瞬态时允许继续。任一类别第三次出现标为
@@ -38,6 +38,16 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 同一结构化机械故障类别累计命中 3 个不同 task 时立即熔断，未启动 slot 不再 claim；预算停止导致的 publication
   拒绝继承预算代理的结构化上游根因。`sigma`/`delta` 只在四轮共同有效的同一 task 集合上计算并公开分母，少于
   8 项只发布部分技术事实并把 M2 标为 blocked。
+- schema-v3 后继 identity 可以引用历史 blocked campaign 的首个非 infra 有效结果；引用必须冻结 source
+  campaign/lock/slot/run/public-result SHA，并机械验证 task、round、side、taskset/catalog、provider/model/effort、
+  bundle、TB commit 与共享执行合同。pass 与正常 reward 0 都是不可选择性重跑的有效终态；infra、缺失或证据不全
+  的 slot 必须使用新 run ID。历史 attempt、失败和费用只读保留且全部计入累计 debit。
+- schema-v3 的 `provider_response_integrity` 仍按含糊计费保守结算，但不进入 task-local 或跨 task 熔断；单个
+  identity 的 attempt 仍由冻结 slot 数有界，耗尽后 blocked，只有下一 identity 的 fresh wire canary 成功才可继续。
+  其他 Docker/runner/Guardian/publication 等本地机械类别继续使用诊断与熔断合同。
+- 下一 identity 把上游单逻辑请求绝对 deadline 从 90 秒单调放宽到 180 秒并冻结在 lock/profile 投影中。只允许
+  复用在更严格或相等 deadline 下已完整完成且 usage-valid 的历史结果；deadline 缩短、其他执行合同变化或无法证明
+  兼容时拒绝引用。wire canary 在新 deadline 下失败则不启动 Terminal-Bench。
 - fresh exact-wire canary、失败运行、replacement 与条件加跑均进入同一 1000 USD 账本；所有 reservation 最终
   settled，`actual_usd=null`。
 - Oracle 以单题 proof 增量落盘并由十题 manifest 聚合；proof 不绑定 paid campaign 或整个 Git commit，只绑定
@@ -99,7 +109,7 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
    40/60GB 增长与 80GiB C: floor。只清理由本 campaign exact label 创建的对象。
 10. 所有真实执行前必须有 clean commit、fresh profile canary、冻结 catalog/bundle/lock/taskset SHA；发生 drift
     立即停止，不创建替代 identity 继续花费。
-11. v1—v14 lock/ledger/result/artifact/receipt 只读；旧 Oracle 只有新 validator 能从已有字段机械证明完整匹配时
+11. v1—v18 lock/ledger/result/artifact/receipt 只读；旧 Oracle 或 paid result 只有新 validator 能从已有字段机械证明完整匹配时
     才可复用，证据不足不回填。1000 USD 授权不因 identity、进程或 proof 变化而重置。
 12. coordinator 不持有重型 lock；它只持有 campaign lease 并逐个调用 locked worker。worker 等锁前不得 claim，
     锁内必须先完成 profile/identity/task/image/Docker/C:/budget/watchdog 重验，结束时先落 durable slot/proof 再释放。
@@ -267,22 +277,30 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   campaign/batch `p2-b7-canary-baseline-v18`/`p2-b7-canary-sol-sol-v18`，run base
   `20260812-380000000`，lock SHA
   `01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346`，prior `667.663130 USD`。
+- v18 命中十题 Oracle proof，fresh wire 结算 `0.134108 USD`。两轮 A/A 已得到 18 个非 infra 有效逻辑结果，
+  A/B RONDO 的 db 为正常 reward 0、extract 为 pass；sanitize 的 A/A 第一轮经 a2 恢复。vulnerable 两轮均为
+  provider-integrity，A/B RONDO filter 又成为第三个不同 task，按冻结 schema-v2 全局熔断。v18 blocked，
+  28 个 paid run、218 个 upstream attempt、paid `158.877192 USD`、reservation 0，累计 `826.674430 USD`；
+  results 已以 `c2398bb` 只读提交。
 
 ### 后续计划
 
-1. v18 命中与 campaign identity 解耦的 Oracle proof 后执行 fresh wire canary，再逐 slot 推进；仍严格执行
-   infra-only a1—a4、第二次同类离线 RCA、第三次 task-local 终止和三个 task 全局熔断。任一
-   next-request 最大合法预留无法装入剩余 `332.336870 USD` 时在 API 前 blocked。
+1. 离线落地 schema-v3 continuation manifest、历史结果引用验证、provider-integrity 熔断豁免和 180 秒冻结
+   deadline；focused、`eval-lock` 与阶段末全量测试通过并形成干净提交。
+2. 由生成器冻结唯一后继 identity，精确带入 `826.674430 USD` prior。新 identity 引用 v18 的首个非 infra
+   有效结果，只为 v18 的 infra/未启动逻辑 slot 分配并 claim 新 run ID；fresh wire 成功后逐项补齐。
+3. 基础四轮与必要条件加跑完整后机械聚合 `sigma`、`delta`、共同分母、归因、usage 和费用；若下一请求的
+   `18.885000 USD` 最大合法 reservation 无法装入剩余 `173.325570 USD`，在 API 前 blocked。
 
 ### 阻塞项
 
-- 无离线阻塞；v18 仍可能因上游 provider response integrity 熔断或剩余预算不足而 blocked。
-  diagnosis hold 是可恢复暂停而非 campaign 通过或费用重置。
+- 无离线阻塞；后继真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
+  provider-integrity 失败不隐藏、不减记，但不再作为本地实现熔断证据。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v17 是保留全部费用事实的 blocked 终态。累计 debit `667.663130 USD`、
-  reservation 0；v18 已冻结，尚未执行 API。
+- v1 是 API 前失败终态；v2—v18 是保留全部费用事实的 blocked 终态。累计 debit `826.674430 USD`、
+  reservation 0；B7 尚未形成四轮完整共同集合，M2 尚未验收。
 
 ## 6. 关键决策记录
 
@@ -315,3 +333,5 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 | 025 | v15 第二次同类 filter failure 后停在 a3 前；RCA 证明 1024 PIDs 造成 verifier 假通过，4096 才完成全部批次，并闭合 stopped-container inspect/remove 竞态后重冻 v16 | 不用更多付费 attempt 掩盖本地合同缺陷；资源上限与共享 lifecycle 变更都精确进入 Oracle proof 失效条件 | B6/B7 | 已采纳 |
 | 026 | v16 因 vulnerable、sanitize、filter 三个 task 的真实 provider-integrity 触发全局熔断；保留 229 attempt 与全部保守费用，机械继承 prior 后重冻 v17 | 不将 HTTP 200 无 terminal usage 改判为未计费，不复用 blocked identity；剩余预算仍是硬停线 | B6/B7 | 已采纳 |
 | 027 | v17 因 fix、vulnerable、filter 三 task 真实 provider-integrity 熔断；用户追加 300 USD 后总 cap 提至 1000 USD 并机械重冻 v18 | 新授权不改写 v17 也不重置 667.663130 USD prior；仍保留 fresh wire、task-local 与全局熔断 | B6/B7 | 已采纳 |
+| 028 | v18 按 schema-v2 因第三个 task 的 provider-integrity 熔断；后继改为引用历史首个非 infra 有效结果，只补 infra/缺失 slot，provider-integrity 不计 task-local/全局熔断 | 中转站波动不是本地实现缺陷；保留全部失败与保守费用，同时避免重复暴露已有效的 pass/reward 0 和选择性重跑美化成绩 | B6/B7 | 已采纳 |
+| 029 | 后继上游逻辑请求 deadline 从 90 秒单调放宽到 180 秒；在 90 秒下完整成功的 v18 结果允许引用，其他 profile/执行合同仍须精确相等 | 中转站记录显示请求完成，90 秒本地终态等待可能过严；单调延长不推翻已在更严格门限下成功的结果 | B6/B7 | 已采纳 |

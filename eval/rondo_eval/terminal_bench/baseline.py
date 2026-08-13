@@ -26,10 +26,12 @@ LEGACY_CAMPAIGN_CAP_USD = Decimal("600.000000")
 LEGACY_CAMPAIGN_MAX_RUNS = 161
 HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD = Decimal("700.000000")
 CAMPAIGN_CAP_USD = Decimal("1000.000000")
-CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("667.663130")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("826.674430")
 CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
+LEGACY_UPSTREAM_TIMEOUT_SECONDS = Decimal("90.000")
+CAMPAIGN_UPSTREAM_TIMEOUT_SECONDS = Decimal("180.000")
 BASE_ROUNDS = (
     "aa-rondo-1",
     "aa-rondo-2",
@@ -185,6 +187,17 @@ class CampaignLockRegistration:
 
 
 @dataclass(frozen=True)
+class ContinuationReference:
+    chain_id: str
+    source_campaign_id: str
+    source_campaign_lock_sha256: str
+    source_slot_id: str
+    source_run_id: str
+    source_result_record_sha256: str
+    source_upstream_timeout_seconds: Decimal
+
+
+@dataclass(frozen=True)
 class CampaignIdentity:
     schema_version: int
     campaign_id: str
@@ -201,14 +214,34 @@ class CampaignIdentity:
     baseline: dict[str, object]
     lock_sha256: str
     catalog: FrozenCanaryCatalog
+    continuation: tuple[ContinuationReference, ...] = ()
 
     @property
     def max_attempts(self) -> int:
         if self.schema_version == 1:
             return 2
-        if self.schema_version == 2:
+        if self.schema_version in {2, 3}:
             return 4
         raise BaselineError("campaign identity version is unsupported")
+
+    @property
+    def upstream_timeout_seconds(self) -> float:
+        if self.schema_version < 3:
+            return float(LEGACY_UPSTREAM_TIMEOUT_SECONDS)
+        value = self.baseline.get("upstream_timeout_seconds")
+        try:
+            timeout = Decimal(str(value))
+        except ArithmeticError as exc:
+            raise BaselineError("campaign upstream timeout is invalid") from exc
+        if timeout != CAMPAIGN_UPSTREAM_TIMEOUT_SECONDS:
+            raise BaselineError("campaign upstream timeout differs from the freeze")
+        return float(timeout)
+
+    def continuation_for(self, chain_id: str) -> ContinuationReference | None:
+        matches = tuple(item for item in self.continuation if item.chain_id == chain_id)
+        if len(matches) > 1:
+            raise BaselineError("campaign continuation chain is duplicated")
+        return matches[0] if matches else None
 
     @property
     def max_run_slots(self) -> int:
@@ -1150,6 +1183,8 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         "budget",
         "baseline",
     }
+    if isinstance(value, dict) and value.get("schema_version") == 3:
+        expected_keys.add("continuation")
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise BaselineError("campaign lock schema is invalid")
     schema_version = value["schema_version"]
@@ -1166,7 +1201,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in {1, 2}
+        or schema_version not in {1, 2, 3}
         or _CAMPAIGN_ID.fullmatch(str(value["campaign_id"])) is None
         or _CAMPAIGN_BATCH_ID.fullmatch(str(value["batch_id"])) is None
         or _CAMPAIGN_ID.fullmatch(value["campaign_id"]).group(1)
@@ -1196,6 +1231,13 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         for key in required_selected
     ):
         raise BaselineError("campaign selected profile hashes are invalid")
+    continuation = _parse_continuation_references(
+        value.get("continuation", []),
+        schema_version=schema_version,
+        successor_timeout=Decimal(
+            str(value["baseline"].get("upstream_timeout_seconds", LEGACY_UPSTREAM_TIMEOUT_SECONDS))
+        ),
+    )
     identity = CampaignIdentity(
         schema_version=schema_version,
         campaign_id=value["campaign_id"],
@@ -1212,7 +1254,9 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         baseline=dict(value["baseline"]),
         lock_sha256=hashlib.sha256(raw).hexdigest(),
         catalog=catalog,
+        continuation=continuation,
     )
+    _validate_continuation_topology(identity)
     _ = identity.slots
     if not any(
         item.path == relative_path and item.lock_sha256 == identity.lock_sha256
@@ -1252,6 +1296,18 @@ def campaign_baseline_contract(schema_version: int) -> dict[str, object]:
             "same_category_diagnosis_attempts": 2,
             "task_local_reproducible_infra_attempts": 3,
         }
+    if schema_version == 3:
+        return {
+            **common,
+            "base_replacement_policy": "cross_identity_infra_only_continuation",
+            "max_base_attempts": 4,
+            "max_conditional_attempts": 4,
+            "same_category_diagnosis_attempts": 2,
+            "task_local_reproducible_infra_attempts": 3,
+            "provider_response_integrity_circuit_breaker": False,
+            "upstream_timeout_seconds": f"{CAMPAIGN_UPSTREAM_TIMEOUT_SECONDS:.3f}",
+            "timeout_compatibility": "monotonic_extension",
+        }
     raise BaselineError("campaign baseline contract version is unsupported")
 
 
@@ -1270,9 +1326,7 @@ def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
         prior = Decimal(value["prior_estimated_usd"])
     except (ArithmeticError, TypeError):
         return False
-    expected_slots = (
-        LEGACY_CAMPAIGN_MAX_RUNS if schema_version == 1 else CAMPAIGN_MAX_RUNS
-    )
+    expected_slots = LEGACY_CAMPAIGN_MAX_RUNS if schema_version == 1 else CAMPAIGN_MAX_RUNS
     valid_caps = (
         {LEGACY_CAMPAIGN_CAP_USD}
         if schema_version == 1
@@ -1287,6 +1341,93 @@ def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
         == _money(SOL_MAX_LEGAL_REQUEST_RESERVATION_USD)
         and value["actual_usd"] is None
     )
+
+
+def _parse_continuation_references(
+    value: object,
+    *,
+    schema_version: int,
+    successor_timeout: Decimal,
+) -> tuple[ContinuationReference, ...]:
+    if schema_version < 3:
+        if value != []:
+            raise BaselineError("historical campaign unexpectedly has continuation data")
+        return ()
+    if not isinstance(value, list) or len(value) > 80:
+        raise BaselineError("campaign continuation list is invalid")
+    values: list[ContinuationReference] = []
+    expected_keys = {
+        "chain_id",
+        "source_campaign_id",
+        "source_campaign_lock_sha256",
+        "source_slot_id",
+        "source_run_id",
+        "source_result_record_sha256",
+        "source_upstream_timeout_seconds",
+    }
+    for item in value:
+        if not isinstance(item, dict) or set(item) != expected_keys:
+            raise BaselineError("campaign continuation reference schema is invalid")
+        try:
+            source_timeout = Decimal(str(item["source_upstream_timeout_seconds"]))
+        except ArithmeticError as exc:
+            raise BaselineError("campaign continuation timeout is invalid") from exc
+        if (
+            not isinstance(item["chain_id"], str)
+            or not item["chain_id"]
+            or len(item["chain_id"]) > 512
+            or _CAMPAIGN_ID.fullmatch(str(item["source_campaign_id"])) is None
+            or not isinstance(item["source_slot_id"], str)
+            or not item["source_slot_id"]
+            or len(item["source_slot_id"]) > 512
+            or _RUN_ID.fullmatch(str(item["source_run_id"])) is None
+            or any(
+                _SHA256.fullmatch(str(item[key])) is None
+                for key in (
+                    "source_campaign_lock_sha256",
+                    "source_result_record_sha256",
+                )
+            )
+            or source_timeout < LEGACY_UPSTREAM_TIMEOUT_SECONDS
+            or source_timeout > successor_timeout
+        ):
+            raise BaselineError("campaign continuation reference is invalid")
+        values.append(
+            ContinuationReference(
+                chain_id=item["chain_id"],
+                source_campaign_id=item["source_campaign_id"],
+                source_campaign_lock_sha256=item["source_campaign_lock_sha256"],
+                source_slot_id=item["source_slot_id"],
+                source_run_id=item["source_run_id"],
+                source_result_record_sha256=item["source_result_record_sha256"],
+                source_upstream_timeout_seconds=source_timeout,
+            )
+        )
+    if (
+        len({item.chain_id for item in values}) != len(values)
+        or len({item.source_run_id for item in values}) != len(values)
+    ):
+        raise BaselineError("campaign continuation identity is duplicated")
+    return tuple(values)
+
+
+def _validate_continuation_topology(identity: CampaignIdentity) -> None:
+    if identity.schema_version < 3:
+        if identity.continuation:
+            raise BaselineError("historical campaign continuation is invalid")
+        return
+    chains = {
+        campaign_slot_chain_id(slot)
+        for slot in identity.slots
+        if slot.kind != "wire_canary"
+    }
+    for reference in identity.continuation:
+        if (
+            reference.chain_id not in chains
+            or not reference.source_slot_id.startswith(reference.chain_id + ":a")
+            or reference.source_campaign_id == identity.campaign_id
+        ):
+            raise BaselineError("campaign continuation topology is invalid")
 
 
 def _read_regular_lock(path: Path) -> bytes:

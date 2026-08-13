@@ -79,3 +79,14 @@
 - 用户追加 `$300`，累计 cap 为 `$1000`。历史 700 USD schema-v2 lock 仍只读有效；机械生成
   v18：run base `20260812-380000000`、lock SHA
   `01827cdb81b2d5fe3c8095c28f3c01be524f9e966e76ef044b2d952dbb710346`、prior `$667.663130`。
+- v18 命中十题 Oracle proof，fresh wire `$0.134108`。两轮 A/A 保留 18 个非 infra 有效逻辑结果，
+  A/B RONDO 的 db 为正常 reward 0、extract 为 pass；vulnerable 两轮多次 provider-integrity，A/B filter
+  成为第三个不同 task 后按冻结 schema-v2 熔断。v18 paid `$158.877192`、218 upstream attempt、
+  reservation 0，累计 `$826.674430`；results 以 `c2398bb` 提交。
+- 后继 schema-v3 采用跨 identity continuation：source campaign/lock/slot/run/public-result SHA 全部冻结并重验，
+  每条逻辑链只接受历史首个非 infra 终态，pass 与正常 reward 0 同等不可重跑；infra/缺失使用新 run ID。
+  v18 只读重放机械识别 20 条可复用逻辑链，其中 9 条为正常 fail/reward 0。provider-integrity 继续完整保守
+  结算，但不再计入 task-local、三 task 或逐轮本地 infra 熔断；fresh wire 失败仍在 TB 前停止。
+- 上游逻辑请求绝对 deadline 从默认 90 秒为 schema-v3 单调放宽到 180 秒；v1—v18 保留原 90 秒语义，
+  只有在更严格/相等 deadline 下已完整 usage-priced 的结果可复用。其他 profile、task/image、bundle、TB、
+  seccomp 或公开结果/账本事实漂移均拒绝 continuation。

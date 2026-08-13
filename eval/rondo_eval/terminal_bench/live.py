@@ -154,7 +154,11 @@ async def run_budgeted_terminal_bench(
         retry_backoff_seconds=provider.retry_backoff_seconds,
         unbilled_retry_statuses=provider.unbilled_retry_statuses,
         max_guardian_logical_requests=max_guardian_logical_requests,
-        timeout_seconds=UPSTREAM_TIMEOUT_SECONDS,
+        timeout_seconds=(
+            campaign_identity.upstream_timeout_seconds
+            if campaign_identity is not None
+            else UPSTREAM_TIMEOUT_SECONDS
+        ),
     )
     with proxy:
         projected_request = replace(

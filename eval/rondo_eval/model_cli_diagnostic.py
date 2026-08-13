@@ -28,6 +28,7 @@ from .api_budget_proxy import (
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
     SHORT_REQUEST_RESERVATION_USD,
+    UPSTREAM_TIMEOUT_SECONDS,
     _atomic_private_json,
 )
 from .config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
@@ -547,6 +548,7 @@ def _run_phase_once(
     frozen_model_catalog: dict[str, object] | None = None,
     run_cap_usd: Decimal = RUN_CAP_USD,
     max_logical_requests: int | None = None,
+    upstream_timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
 ) -> tuple[dict[str, object], bool, bool, int]:
     _private_directory(attempt_root)
     codex_home = attempt_root / "codex-home"
@@ -590,6 +592,7 @@ def _run_phase_once(
             request_reservation_usd=SHORT_REQUEST_RESERVATION_USD,
             max_guardian_logical_requests=1,
             max_logical_requests=max_logical_requests,
+            timeout_seconds=upstream_timeout_seconds,
         ) as proxy:
             _write_auth(auth_path, proxy.downstream_api_key)
             started = time.monotonic()
@@ -996,6 +999,11 @@ def run_campaign(
             main_model=provider.main_model,
             guardian_model=provider.guardian_model,
         )
+    upstream_timeout_seconds = (
+        campaign_identity.upstream_timeout_seconds
+        if campaign_identity is not None
+        else UPSTREAM_TIMEOUT_SECONDS
+    )
     _private_directory(output_root)
     profile = {
         "schema_version": 1,
@@ -1035,6 +1043,7 @@ def run_campaign(
         "phase_kind": phase_kind,
         "max_retries": max_retries,
         "actual_usd": None,
+        "provider_upstream_timeout_seconds": upstream_timeout_seconds,
     }
     _atomic_private_json(output_root / "profile.json", profile)
     attempts: list[dict[str, object]] = []
@@ -1084,6 +1093,7 @@ def run_campaign(
                 ),
                 run_cap_usd=phase_run_cap,
                 max_logical_requests=phase_logical_request_cap,
+                upstream_timeout_seconds=upstream_timeout_seconds,
             )
             attempts.append(attempt)
             conservative_spent += Decimal(str(attempt["spent_usd"]))

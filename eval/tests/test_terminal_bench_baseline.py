@@ -26,6 +26,7 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     CampaignSlotStatus,
     CampaignStateLedger,
     ConditionalRun,
+    ContinuationReference,
     DiagnosisDisposition,
     DiagnosisEvidenceCode,
     DiagnosisStatus,
@@ -42,6 +43,7 @@ from rondo_eval.terminal_bench.scoring import TaskOutcome  # noqa: E402
 from rondo_eval.terminal_bench import baseline_cli  # noqa: E402
 from rondo_eval.terminal_bench.baseline_identity import (  # noqa: E402
     CampaignIdentityGenerationError,
+    _successor_continuation,
     required_successor_prior,
     validate_successor_run_range,
 )
@@ -67,6 +69,20 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 "max_run_slots": 321,
             },
             baseline=campaign_baseline_contract(2),
+        )
+
+    @classmethod
+    def _identity_v3(cls):
+        legacy = cls._identity_v2()
+        return replace(
+            legacy,
+            schema_version=3,
+            budget={
+                **legacy.budget,
+                "campaign_cap_usd": "1000.000000",
+                "prior_estimated_usd": "826.674430",
+            },
+            baseline=campaign_baseline_contract(3),
         )
 
     def _base(
@@ -128,11 +144,11 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
-        self.assertEqual(forecast["prior_estimated_usd"], "667.663130")
+        self.assertEqual(forecast["prior_estimated_usd"], "826.674430")
         self.assertEqual(
-            forecast["remaining_before_successor_canary_usd"], "332.336870"
+            forecast["remaining_before_successor_canary_usd"], "173.325570"
         )
-        self.assertTrue(forecast["feasible_from_observed_shape"])
+        self.assertFalse(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
         tracked = json.loads(
             (EVAL_ROOT / "tasksets/p2-b7-cost-forecast.json").read_text(
@@ -383,6 +399,30 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(
             required_successor_prior(paths, version=15),
             Decimal("408.561823"),
+        )
+
+    def test_v18_continuation_reuses_first_noninfra_including_reward_zero(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        source = load_historical_campaign_identity(paths, 18)
+        self.assertEqual(required_successor_prior(paths, version=18), Decimal("826.674430"))
+        rows = _successor_continuation(paths, source)
+        by_chain = {row["chain_id"]: row for row in rows}
+        self.assertEqual(len(by_chain), 20)
+        self.assertEqual(
+            by_chain["base:aa-rondo-1:terminal-bench/sanitize-git-repo"]["source_run_id"],
+            "20260812-380000048-tb-rondo-r2",
+        )
+        self.assertEqual(
+            by_chain["base:ab-rondo-1:terminal-bench/db-wal-recovery"]["source_run_id"],
+            "20260812-380000021-tb-rondo-r1",
+        )
+        self.assertNotIn(
+            "base:aa-rondo-1:terminal-bench/vulnerable-secret",
+            by_chain,
+        )
+        self.assertEqual(
+            {row["source_upstream_timeout_seconds"] for row in rows},
+            {"90.000"},
         )
 
     def test_successor_run_range_rejects_history_and_accepts_fresh_ids(self) -> None:
@@ -1266,6 +1306,129 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 baseline_cli._execute_base_rounds(identity=identity, state=State())
         self.assertEqual(len(calls), 5)
         self.assertNotIn(identity.catalog.tasks[3].task_id, " ".join(calls))
+
+    def test_schema_v3_provider_integrity_does_not_open_local_circuit(self) -> None:
+        identity = self._identity_v3()
+        tracker = baseline_cli.MechanicalFailureTracker(
+            ignore_provider_integrity=True
+        )
+        for task in identity.catalog.tasks[:4]:
+            slot = identity.slot(
+                f"base:aa-rondo-1:{task.task_id}:a1"
+            )
+            tracker.observe(
+                baseline_cli.ExecutedSlot(
+                    slot,
+                    RunOutcome.INFRA_FAILED,
+                    TaskOutcome.INFRA,
+                    Decimal("18.885000"),
+                    MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY,
+                )
+            )
+        docker = MechanicalFailureCategory.DOCKER_RUNTIME
+        with self.assertRaisesRegex(
+            baseline_cli.CampaignExecutionError,
+            "mechanical_circuit_breaker:docker_runtime",
+        ):
+            for task in identity.catalog.tasks[:3]:
+                tracker.observe(
+                    baseline_cli.ExecutedSlot(
+                        identity.slot(
+                            f"base:aa-rondo-2:{task.task_id}:a1"
+                        ),
+                        RunOutcome.INFRA_FAILED,
+                        TaskOutcome.INFRA,
+                        Decimal("0.000000"),
+                        docker,
+                    )
+                )
+
+    def test_schema_v3_provider_integrity_does_not_trigger_round_infra_gate(self) -> None:
+        identity = self._identity_v3()
+
+        class State:
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                del slot_id, reason
+
+        task_ids = tuple(item.task_id for item in identity.catalog.tasks)
+
+        def execute(*, slot, **kwargs):
+            del kwargs
+            infra = task_ids.index(slot.task_id) < 3
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED if infra else RunOutcome.COMPLETED,
+                TaskOutcome.INFRA if infra else TaskOutcome.PASS,
+                Decimal("18.885000") if infra else Decimal("0.100000"),
+                (
+                    MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
+                    if infra
+                    else None
+                ),
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_base_rounds(
+                identity=identity,
+                state=State(),
+            )
+        self.assertEqual(len(values), 76)
+        self.assertEqual(
+            sum(item.outcome is TaskOutcome.INFRA for item in values),
+            48,
+        )
+
+    def test_schema_v3_continuation_skips_new_attempts_and_keeps_reward_zero(self) -> None:
+        identity = self._identity_v3()
+        task = identity.catalog.tasks[0]
+        chain_id = f"base:ab-rondo-1:{task.task_id}"
+        source_slot = replace(
+            identity.slot(f"{chain_id}:a1"),
+            run_id="20260812-380000021-tb-rondo-r1",
+        )
+        reference = ContinuationReference(
+            chain_id=chain_id,
+            source_campaign_id="p2-b7-canary-baseline-v18",
+            source_campaign_lock_sha256="a" * 64,
+            source_slot_id=f"{chain_id}:a1",
+            source_run_id=source_slot.run_id,
+            source_result_record_sha256="b" * 64,
+            source_upstream_timeout_seconds=Decimal("90.000"),
+        )
+        identity = replace(identity, continuation=(reference,))
+
+        class State:
+            def __init__(self) -> None:
+                self.skipped: list[tuple[str, str]] = []
+
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                self.skipped.append((slot_id, reason))
+
+        continued = baseline_cli.ExecutedSlot(
+            source_slot,
+            RunOutcome.COMPLETED,
+            TaskOutcome.FAIL,
+            Decimal("0.476415"),
+        )
+        state = State()
+        with mock.patch.object(
+            baseline_cli,
+            "_execute_task_slot",
+            side_effect=AssertionError("continued result was rerun"),
+        ):
+            values = baseline_cli._execute_attempt_chain(
+                identity=identity,
+                state=state,
+                tracker=baseline_cli.MechanicalFailureTracker(
+                    ignore_provider_integrity=True
+                ),
+                task=task,
+                chain_id=chain_id,
+                continued={chain_id: continued},
+            )
+        self.assertEqual(values, [continued])
+        self.assertEqual(len(state.skipped), 4)
+        self.assertEqual({reason for _slot, reason in state.skipped}, {"continued_valid_result"})
 
     def test_round_infra_gate_precedes_next_round(self) -> None:
         identity = self._identity()

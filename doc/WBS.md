@@ -70,14 +70,12 @@
   Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
   reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
   只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
-  `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B6 预算合同已冻结。v1—v14 均为只读终态。
-  v15 在 fresh wire、db pass、extract 正常 reward 0 后，filter a1/a2 同类 Docker failure 触发诊断；no-API RCA
-  证明 1024 PIDs 仅完成 9/28 个 Selenium batch，而 4096 PIDs 完成 28/28，并闭合自然 teardown 的
-  inspect/remove 竞态。v16 的十题 Oracle 与 fresh wire 通过，但两轮 A/A 中 vulnerable 均三次命中
-  provider-integrity，sanitize 一次后恢复；A/B RONDO 的 filter 随后触发第三个不同 task 的全局
-  circuit breaker。v16 blocked 后，v17 亦因 fix、vulnerable、filter 三 task 的 provider-integrity 熔断；
-  reservation 0，累计 debit `667.663130 USD`。用户追加 300 USD 后总上限为 1000 USD；v18 已以
-  `20260812-380000000`、唯一 lock/IDs 和精确 prior 冻结，剩余 `332.336870 USD`。**
+  `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B6 预算合同已冻结。v1—v18 均为只读终态；
+  v18 两轮 A/A 已产生 18 个非 infra 有效逻辑结果，A/B RONDO 的 db 正常 reward 0、extract pass，随后
+  filter 成为第三个 provider-integrity task 并按旧 schema-v2 熔断。v18 paid `158.877192 USD`、wire
+  `0.134108 USD`、reservation 0，累计 debit `826.674430 USD`。后继 schema-v3 冻结跨 identity 的首个
+  非 infra 结果引用，只重跑 infra/缺失 slot；provider-integrity 仍保守结算但不计本地/任务熔断，上游绝对
+  deadline 单调放宽为 180 秒。1000 USD 总硬上限不重置，当前余量 `173.325570 USD`。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -188,8 +186,10 @@ Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再�
 L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
 Plan 015 已冻结 10/61/18 taskset、10-task exact image catalog与机械计分。v10 按原 161-slot/600 USD 合同
 在全局 provider-integrity 熔断后只读退役，累计 debit 为 `343.896195 USD`。后继合同使用 321 个机械派生 slot、
-1000 USD 累计硬上限，并在同题同类第二次 infra 后暂停做结构化 RCA；只有外部瞬态才可继续，第三次同类停止该题。
-campaign-independent Oracle、单 slot heavy lock、轻量 lease、安全恢复和 identity 生成入口保持复用。执行细节见 Plan 015。
+1000 USD 累计硬上限；非 provider 类别仍在同题同类第二次 infra 后暂停做结构化 RCA，只有外部瞬态才可继续，
+第三次同类停止该题。provider-integrity 由 fresh wire 作为恢复门禁并跨 identity 只补缺失逻辑 slot，不重新执行已有效
+的 pass/reward 0。campaign-independent Oracle、单 slot heavy lock、轻量 lease、安全恢复和 identity 生成入口保持复用。
+执行细节见 Plan 015。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，

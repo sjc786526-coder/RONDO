@@ -842,6 +842,7 @@ class CampaignPublicationContext:
     side: Side
     metrics: Mapping[str, object]
     selected_profile: Mapping[str, object]
+    provider_upstream_timeout_seconds: float = 90.0
 
     def validate(self) -> None:
         if not re.fullmatch(
@@ -861,6 +862,9 @@ class CampaignPublicationContext:
             or isinstance(self.campaign_attempt, bool)
             or self.campaign_attempt not in {1, 2, 3, 4}
             or not isinstance(self.side, Side)
+            or isinstance(self.provider_upstream_timeout_seconds, bool)
+            or not isinstance(self.provider_upstream_timeout_seconds, (int, float))
+            or float(self.provider_upstream_timeout_seconds) not in {90.0, 180.0}
         ):
             raise PairIdentityError("publication campaign topology is invalid")
         try:
