@@ -80,7 +80,7 @@ eval-data/                             # git-ignored
 | 规则 | 内容 |
 |---|---|
 | 取值 | `rondo-local` ｜ `rondo-multi`。**`codex` 不是产品取值** —— 冻结上游是比较侧，不是本项目的产品线 |
-| 适用范围 | 只对 RONDO 侧的行有意义。`side = "codex"` 的行**不写 `product`**，读取方也不得为其推定产品身份 |
+| 适用范围 | 只在被评对象是本项目的 RONDO 产品时写。`side = "codex"`（冻结上游）与 `side = "sol-static"`（云端教师）等非本项目产品的行**不写 `product`**，读取方也不得为其推定产品身份 |
 | 历史解释 | 缺字段且 `side = "rondo"` 的历史行按 `rondo-local` 解释；缺字段且 `side = "codex"` 的行视为不适用。当前 `runs.jsonl` 的 244 条中，224 条 `side=rondo`（即 RONDO Local）、20 条 `side=codex`（冻结上游侧） |
 | 只加不改 | 历史结果**不改名、不回填新 schema**；新字段从后续 campaign 开始使用 |
 | 目录 | 历史 `bin/rondo/` 保持原名不动，等价于 `rondo-local`；Multi 新增 `bin/rondo-multi/`，必须显式带 `multi` 字样。`bin/codex/` 是冻结上游侧的 bundle，不参与产品身份维度 |
@@ -98,8 +98,8 @@ eval-data/                             # git-ignored
 - `track` ∈ `tb`（真实端到端）｜ `replay`（离线回放，随 E-A 挂起）｜ `shadow`（静态影子横评）
 - `side` ∈ `rondo` ｜ `codex` ｜ 影子横评时用模型标识（`sol-static` / `local-static` / `local-ft-static`；
   历史批次的 `luna-static` 保留不改）。`side` 只表达比较侧，产品身份另用独立字段记录（§3.1）。
-  教师侧（`sol-static`）的行是**人在场生成后导入的冻结标签**，不是 `eval/` 自动运行产物，必须在该行注明
-  来源为导入以及生成时点的模型标识与日期。
+  教师侧（`sol-static`）的行是**人在场生成后导入的冻结标签**，不是 `eval/` 自动运行产物；
+  字段合同见 §4「shadow 行的最小字段合同」。
 - 例：`20260812-143005182-tb-codex-r1`、`20260815-091200047-shadow-local-static-r1`
 - 生成时若目标 artifacts 目录已存在，视为冲突并直接报错，不覆盖。
 
@@ -154,8 +154,9 @@ eval-data/                             # git-ignored
 }
 ```
 
-- `product` 按 §3.1 取值，只在 RONDO 侧的行出现；`side = "codex"` 的行不写该字段。历史行没有该字段时，
-  `side = "rondo"` 按 `rondo-local` 解释，`side = "codex"` 视为不适用。**不回填历史行**。
+- `product` 按 §3.1 取值，只在被评对象是 RONDO 产品时出现；`side = "codex"` 与 `side = "sol-static"`
+  的行不写该字段。历史行没有该字段时，`side = "rondo"` 按 `rondo-local` 解释，`side = "codex"` 视为不适用。
+  **不回填历史行**。
 - 当前 record schema v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的
@@ -190,9 +191,11 @@ eval-data/                             # git-ignored
   tag/commit 与 effective policy hash 后单独归档，不复制 config、lock、raw log 或 exception trace。
 - `track = replay` 时 `tasks` 为 `null`，改填 `metrics`：`{ wall_ms, cpu_ms, peak_rss_kb, turns, tool_calls, drift }`。
   该 track 随 E-A 挂起，schema 保留但当前不产生新行。
-- `track = shadow` 时 `metrics` 填**教师一致率**（相对 Sol 教师标签）、结构化输出解析失败率、
-  超时与 fail-closed 次数、P50/P95 延迟、显存峰值。**漏放 / 误拦只有在有独立裁判结果时才可填**
-  （见 `doc/WBS/local-approval-model.md` L4）；单纯相对教师标签的差异不得写成 false allow / false deny。
+- `track = shadow` 且 `source = "auto"` 时 `metrics` 填**教师一致率**（相对 Sol 教师标签）、
+  结构化输出解析失败率、超时与 fail-closed 次数、P50/P95 延迟、显存峰值。
+  **漏放 / 误拦只有在有独立裁判结果时才可填**（见 `doc/WBS/local-approval-model.md` L4）；
+  单纯相对教师标签的差异不得写成 false allow / false deny。
+  `source = "imported"` 的行 `metrics` 为 `null`（教师标签没有本地运行指标），见下文字段合同。
 - **`git_dirty = true` 的运行结果只能用于调试，不得作为里程碑证据**。
 - `upstream_codex.workspace_lock_normalization` 只描述构建只读官方基线时在隔离 scratch 副本中的
   机械变换；RONDO 运行也记录它，便于证明两侧基线来源一致。不得把规范化后的 lock 哈希写成
@@ -201,6 +204,25 @@ eval-data/                             # git-ignored
   `actual_usd` 必须为 `null`；零请求/零费用可记 `0.0`。请求 role 允许为诊断做 shape inference，
   本地预算代理必须先验证请求形状，再把一致的 main/guardian role 投影为出站 declared header；调用方已有
   header 时必须与形状一致。只有该 declared+inferred 一致的元数据可满足 completed/M1。
+
+### shadow 行的最小字段合同
+
+`track = "shadow"` 有两类来源，必须靠字段区分，不能靠 `side` 猜：
+
+| 类别 | `side` | `product` | `source` |
+|---|---|---|---|
+| 程序化运行的本地被评方 | `local-static` / `local-ft-static` | `rondo-local` | `auto` |
+| 导入的教师标签 | `sol-static` | **不写**（教师不是本项目产品） | `imported` |
+
+- `source` ∈ `auto` ｜ `imported`，**shadow 行必填**。历史行没有该字段时按 `auto` 解释（历史上不存在导入行）。
+- `source = "imported"` 时**必填**：`config.teacher_model`（生成时点的模型标识）、`config.generated_at`
+  （生成日期）、`config.prompt_version` 与 `config.prompt_sha256`（所用冻结 prompt 的版本标识与内容哈希）。
+- `source = "imported"` 时下列运行字段无意义，**必须显式为 `null`，不得伪造**：`binary_sha256`、`metrics`、
+  `cost.actual_usd`。`cost.estimated_usd` 记 `0.0`（订阅制入口不额外计费）。
+- `git_commit` 对导入行记录**执行导入时**的 eval harness commit（谁做的导入），不是被测二进制的 commit；
+  `git_dirty` 规则不变。
+- `artifacts` 对导入行指向冻结标签文件所在目录。
+- `local-*` 两类必须写 `product = "rondo-local"`；将来若 Multi 也做影子横评，按 §3.1 写 `rondo-multi`。
 
 ### 隐藏集的特殊规则
 

@@ -48,6 +48,23 @@
 4. **活 WBS 堆入废弃方案与实现级论证**（违反 AGENTS.md 文档纪律）：精简 shim 机制说明、multidev 回退方案
    论证与旧 M2/M5 退役段落，只保留决定、依赖与可执行约束；论证移到本日志附录。
 
+## 审查后修正（同批第三轮）
+
+第二轮修复留下 4 处未闭合，经核对全部属实，已修：
+
+1. **顶层路线仍遗漏 L5a 前置**：第二轮只统一了"M3 → L3/L4 → L5/L6 → M4"，但子 WBS 规定 L5a 必须先于 L3。
+   顶层三处（3b、方向表、阶段表）统一为 **M3 → L5a → L3/L4 → L5b/L6 → M4**，L5a 归 P2、L5b 归 P3。
+2. **Sol 与 Opus 角色再次混用**：L3 一句"经开发用 Codex / Claude Code 生成"把裁判入口放回了教师标签生成。
+   改为教师标签**只经开发用 Codex（Sol）**，明确不走 Claude Code / Opus 5。
+3. **holdout 条款自相矛盾**：L5a 要把 holdout 发给 Sol 生成评测标签，分区表却绝对禁止 holdout 进入"提示词或
+   人工参考"。把禁令范围收窄到**合成/训练**（L5b 合成上下文、合成 prompt、合成期人工参考），
+   明确为评测生成教师标签与裁判判定属允许用途。
+4. **导入式 shadow 行 schema 未闭合**：新增最小字段合同 —— `source` ∈ `auto`/`imported` 必填；
+   `local-*` 写 `product=rondo-local`，`sol-static` 不写 `product`；导入行必填
+   `teacher_model`/`generated_at`/`prompt_version`/`prompt_sha256`，`binary_sha256`/`metrics`/`actual_usd`
+   必须显式 `null`，`estimated_usd=0.0`，`git_commit` 记导入时的 eval harness commit。
+   同时把 shadow 的 `metrics` 口径限定为 `source="auto"` 的行，避免与 `metrics=null` 冲突。
+
 ## 附录：被移出活 WBS 的取舍论证
 
 保留在此以免将来重新讨论；这些是形成时点的判断，不作为当前规划。

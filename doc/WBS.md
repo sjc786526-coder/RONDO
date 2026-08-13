@@ -67,8 +67,8 @@
 ### 工作包 3：三条线并行
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
-- **3b RONDO Local**：先以 4k model-backed + 配置切换收口 Local M3，再做 L3/L4 未微调 baseline 与指标口径，
-  然后 L5/L6，最后 Local M4。
+- **3b RONDO Local**：先以 4k model-backed + 配置切换收口 Local M3，再由 L5a 生成冻结教师标签，
+  然后 L3/L4 出未微调 baseline 与指标口径，之后 L5b/L6，最后 Local M4。
 - **3c RONDO Multi**：推进方向 3 的功能路线。其**付费同题退化验收**以工作包 1 闭合为硬前置；
   在那之前 Multi 只做离线验证与功能正确性，不跑付费对比，也不得对外表述“未见退化”。
 
@@ -90,7 +90,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施收口中 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | model-free/静态前置完成 | 无外部阻塞；4k model-backed + L7 → Local M3 → L3/L4 → L5/L6 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | model-free/静态前置完成 | 无外部阻塞；4k model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究完成，产品基线未建立 | 无外部阻塞；付费同题验收不早于工作包 1 闭合 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），
@@ -164,8 +164,8 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 |---|---|---|
 | P0 | S1 审批模型显式覆盖、S2 审批证据快照 | 已完成 |
 | P1 | B1—B3 最小真实链路；L1/L2 model-free 前置 | 已完成，M1 通过 |
-| P2 | 公平比较设施闭合；B4—B7；L2a/L7 + 4k model-backed 收口为 Local M3；随后 L3/L4 出未微调 baseline 与指标口径 | 进行中 |
-| P3 | L5 教师标签与合成数据、L6 微调，收口为 Local M4 | 未开始 |
+| P2 | 公平比较设施闭合；B4—B7；L2a/L7 + 4k model-backed 收口为 Local M3；随后 L5a 教师标签与 L3/L4 未微调 baseline | 进行中 |
+| P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 未开始 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
 | P5 | RONDO Multi 产品线 | 未开始（工作包 2 为其基线） |
 
