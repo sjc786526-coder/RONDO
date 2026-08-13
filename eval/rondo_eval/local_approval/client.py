@@ -337,9 +337,14 @@ class LocalApprovalClient:
             return None
         try:
             # Imported lazily to keep the launcher -> client module dependency acyclic.
-            from .launcher import _load_runtime_lock, serve_config_sha256
+            from .launcher import _load_runtime_lock, resolve_binary, serve_config_sha256
 
-            runtime_identity = _load_runtime_lock(self.config).identity_sha256
+            binary = resolve_binary(self.config, self.settings)
+            if binary is None:
+                raise OSError("configured llama.cpp runtime is unavailable")
+            runtime_identity = _load_runtime_lock(
+                self.config, binary
+            ).identity_sha256
             serving_config = serve_config_sha256(self.config, self.settings)
             configured_model = resolve_config_path(
                 self.config, self.settings.model_path
@@ -355,7 +360,7 @@ class LocalApprovalClient:
                 port=self.settings.port,
                 serve_config_sha256=serving_config,
             )
-        except (ConfigError, OSError) as exc:
+        except (ConfigError, OSError, ValueError) as exc:
             raise ServiceUnavailableError(
                 "local approval launcher instance is unavailable"
             ) from exc

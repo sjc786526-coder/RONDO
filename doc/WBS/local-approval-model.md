@@ -1,6 +1,6 @@
 # 方向 2：本地审批模型接入与横评
 
-最后更新：2026-08-12 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-13 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
@@ -14,33 +14,29 @@
   malformed/歧义证据 fail-closed；合法 `ToolSearchOutput.tools` 作为既有证据保留，Luna/Sol/Local
   三组 consumer 协议投影对同一 Standard/Lite fixture 产生完全相同的 canonical bytes；这项验收不等同于
   三套生产调用端均已实现。
-- **L2 仍仅 CPU x64 前端/运行闭包就绪，model-free launcher 前置已收口**：llama.cpp 固定为 `b10333`/commit
+- **L2 的 CPU 与 Linux CUDA model-free 运行闭包均已就绪**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 runtime closure、Responses client、
   doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
   52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。配置/命令现可精确表达 4k
   原生 auto+fit smoke 与 8k all+fit-off baseline，固定单卡 split/main GPU、F16 K/V、512/256 batch、no-mmproj、
-  Jinja 和显式官方模板；这只由 fake/model-free 测试验收。
-  截至 2026-08-12 对 `b10375` 的运行路线复核仍未发现官方 Linux CUDA 预编译资产；升级不会省掉 Toolkit/源码构建，
-  因此唯一后续路线继续冻结为项目内构建 exact b10333 Linux CUDA runtime，复用现有 Plan 016 合同。
+  Jinja 和显式官方模板。2026-08-13 已以项目局部 CUDA Toolkit 12.6.2、Ada `89-real` strict link 构建 exact
+  b10333 CUDA runtime；独立 lock 冻结 source/tree、工具链、configure/build、9 个 ELF 文件、14 个 symlink、
+  RUNPATH、cudart/cuBLAS、WSL `libcuda.so.1` 与系统闭包。清除 `LD_LIBRARY_PATH` 后 version/help 成功，model-free
+  device/router probe 识别 RTX 4060 Laptop 并返回 `linux_cuda_built_model_unvalidated`。
 - model-backed client 必须消费 launcher 写入主仓 `eval-data/local-approval/launcher-identity.json`
   的 0600 私有 receipt，绑定 nonce、PID/start ticks、实际 cmdline、监听 socket、runtime/model
   identity/path/id、endpoint 和实际服务参数指纹。schema v2 会拒绝旧 receipt；client 在 identity probe 后、decision 前以及 decision 返回后重验同一
   launcher 实例；redirect、receipt 替换、进程/监听者变化都 fail-closed。这是轻量实例身份
   约束，不是签名或权限系统，也不证明 server 实际加载了 receipt 所声明的全部字节，或 launcher 退出后
   server 必然随之退出。
-- 当前未提供本地模型权重；冻结 lock 的能力状态为 `cpu_only_no_model`，结构化 model-backed 输出为
-  `not_run`，launcher 的运行时投影为 `cpu_only_x64`。无模型 doctor 返回
-  `cpu_frontend_ready_model_missing_gpu_unvalidated`/78；即使补入模型，在 GPU runtime 和
-  model-backed 参数验证前也不启动真实服务。本批未下载权重、未启动模型/推理、未量显存/
-  上下文/首 token/总耗时，L2 真实验收与 L3/L4 保持待后续阶段；当前不表述为
-  “只差权重”。
-- **模型工程冻结完成，权重未下载**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
+- CUDA lock 的 model-backed structured output 仍为 `not_run`；正式 launcher 对
+  `linux_cuda_built_model_unvalidated` 继续在进程启动前拒绝。模型未加载、未推理、未量 model-backed 显存/
+  上下文/首 token/总耗时，4k/8k 与 L3/L4 保持待后续阶段。
+- **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
-  单文件下载/校验和 8GB 两阶段上下文方案。官方同档和主要社区资产均已比较；当前状态为
-  `download_ready_blocked_on_user_approval`，详见
-  `doc/audit-snapshots/2026-08-12-ministral-3-8b-instruct-2512-gguf-freeze.md`。这不改变上述
-  `cpu_only_no_model`/`not_run` 能力事实。当前官方模板已按 exact revision/bytes/SHA 冻结，launcher/identity 合同也已
-  model-free 收口；权重下载仍未授权，项目内 Linux CUDA runtime/依赖闭包和 exact-GGUF model-backed 4k smoke 仍是
+  单文件下载/校验和 8GB 两阶段上下文方案。2026-08-13 唯一 GGUF 已通过普通文件、精确
+  `5,198,387,456` bytes 与 SHA-256 `7deb50ec…54802a` 校验；Git 未跟踪，真实 ignored 配置未写入，模型从未加载。
+  冻结选择见 2026-08-12 快照，本次下载/CUDA 证据见 2026-08-13 快照。exact-GGUF model-backed 4k smoke 仍是
   `gpu_model_serving_validated` 的硬前置，8k baseline 随后单独验收。
 
 ## 核心设计（已定，不再反复讨论）

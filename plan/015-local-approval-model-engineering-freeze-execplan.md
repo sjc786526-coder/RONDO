@@ -124,29 +124,28 @@
   不改变已冻结 GGUF，也不把下载就绪表述为部署或正式 M3 baseline 就绪。
 - 2026-08-12：Plan 016 已以 model-free 实现冻结当前官方模板并补齐两阶段 launcher/config/receipt v2 合同；这不改变
   本计划的 GGUF 身份、下载审批状态，也不构成 Linux CUDA、模型或 GPU 验收。
+- 2026-08-13：用户对冻结的唯一 GGUF 给出明确下载授权，Plan 018 在新的独立 worktree 接管执行；下载前重新通过
+  exact dry-run、Windows `C:`、Docker/构建/模型进程门禁。目标文件实测为普通非 symlink、`5,198,387,456` bytes，
+  SHA-256 精确为 `7deb50ecb3afca928f0aa6dccdb87ed4ce4ab3991797e5fc0e0dedb92754802a`。未修改真实 ignored
+  `rondo.local.toml`，GGUF 从未加载。
 
 ### 当前工作
 
-- 等待用户对已冻结唯一 GGUF 的单独下载授权；研究和下载准备阶段没有其他待执行项。
+- 唯一 GGUF 的授权、下载与静态完整性验收已由 Plan 018 完成；本计划没有待执行下载项。
 
 ### 后续计划
 
-- 当前阶段：Phase A 研究成果已交付；集中报告唯一对象与资源状态后等待用户单项下载授权，不再执行其他操作。
-- 获明确授权后：在保留的独立 worktree 恢复，先重新核对 canary 稳定窗口、Docker/模型进程、Windows `C:` 余量与
-  批准对象；只下载唯一文件，验证 exact bytes/SHA 并更新 ignored `rondo.local.toml`。
-- 下载完成后仍不加载模型或使用 GPU；launcher 最小参数合同和唯一官方模板口径见 Plan 016。下一阶段另行构建并冻结
-  项目内 Linux CUDA runtime/依赖闭包，待三项前置汇合后再做两阶段 CUDA/model-backed smoke、上下文扫描与未微调 M3 baseline。
+- Plan 018 已完成 CUDA model-free runtime；下一独立任务才配置真实 ignored `rondo.local.toml`，执行 4k/8k
+  exact-model smoke、上下文扫描与未微调 M3 baseline。
 
 ### 阻塞项
 
-- 权重下载未授权；在研究和 dry-run 完成后必须转为
-  `download_ready_blocked_on_user_approval`，这不是技术失败。
-- canary 由另一会话调度；当前没有调度者对稳定下载窗口的明确保证。
+- 无；模型加载与 model-backed 验收属于下一任务边界，不是本计划阻塞。
 
 ### 当前验收状态
 
-- `download_ready_blocked_on_user_approval`：模型工程调查、唯一候选冻结、精确 dry-run、磁盘/资源核算和下载方案已完成；
-  没有下载、加载或验收任何模型权重。当前阻塞是预期审批门，不是技术失败。
+- `gguf_downloaded_static_integrity_validated`：唯一冻结 GGUF 已下载并通过 exact bytes/SHA 静态验收；模型从未加载，
+  4k/8k model-backed 验收仍未运行。
 
 ## 6. 关键决策记录
 
@@ -164,3 +163,4 @@
 | 008 | 把 Linux CUDA runtime、launcher 最小参数合同和唯一模板口径列为 model-backed 前置，但不升级为权重下载阻塞项 | 当前 lock 是 `cpu_only_no_model`，launcher 会拒绝未标记 `gpu_model_serving_validated` 的 runtime；同时无法表达 auto offload/fit、KV/batch 和模板参数。下载就绪不等于部署就绪 | 下载后交接、GPU smoke 与能力口径 | 已采纳 |
 | 009 | 正式 baseline 前优先验证当前官方 `chat_template.jinja`，不兼容时显式冻结内嵌模板；数据只保存规范化 messages/schema | 官方与 Bartowski 内嵌模板内容相同且都早于 2026-06/07 更新；模板变化会污染 M3 baseline 和训练数据，但不改变 GGUF 下载对象 | 模板验收、测评/训练数据 | 已采纳 |
 | 010 | 当前 Bartowski GGUF 只保留为部署/smoke baseline；未来训练另冻官方 BF16 与训练/merge 合同，并由同一新量化管线生成 base/finetuned GGUF 对 | 推理 GGUF 不承担 RONDO 的 LoRA/QLoRA 源权重或训练效果归因；成对转换才能隔离训练与量化差异 | 未来训练与 M3/M4 比较 | 已采纳 |
+| 011 | 下载授权由新 Plan 018 worktree 消费，真实 ignored `rondo.local.toml` 留到 4k model-backed 任务 | 当前任务只做静态 GGUF 与 model-free CUDA 验收，避免文件存在被误写成已配置/已加载 | Plan 015/018、ignored config、交付口径 | 已采纳 |

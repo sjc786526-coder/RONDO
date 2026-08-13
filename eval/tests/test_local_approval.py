@@ -8,6 +8,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -50,11 +51,16 @@ from rondo_eval.local_approval.launcher import (  # noqa: E402
     LLAMA_CPP_BINARY_SHA256,
     LLAMA_CPP_BUILD,
     LLAMA_CPP_COMMIT,
+    LLAMA_CPP_CUDA_BINARY_SHA256,
+    LLAMA_CPP_CUDA_CAPABILITY,
     LauncherError,
     ModelMissingError,
     RouterProbe,
     RuntimeInspection,
     RuntimeLock,
+    _get_json,
+    _load_runtime_lock,
+    _verify_elf_metadata,
     _verify_host_dependency_closure,
     _verify_runtime_closure,
     build_serve_command,
@@ -62,6 +68,7 @@ from rondo_eval.local_approval.launcher import (  # noqa: E402
     inspect_runtime,
     main as launcher_main,
     model_path,
+    resolve_binary,
     run_server,
     serve_config_sha256,
     serve_environment,
@@ -338,6 +345,27 @@ class LocalApprovalClientTests(unittest.TestCase):
                 client.decide(_payload())
         self.assertEqual(fake.requests, [])
 
+    def test_model_backed_consumer_converts_runtime_lock_drift_before_network(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        with FakeApprovalServer(model_path=os.fspath(model)) as fake:
+            config = self._config(
+                fake.base_url,
+                model_path_value=os.fspath(model),
+                model_sha256_value=digest,
+            )
+            with mock.patch(
+                "rondo_eval.local_approval.launcher.resolve_binary",
+                return_value=self.root / "llama-server",
+            ), mock.patch(
+                "rondo_eval.local_approval.launcher._load_runtime_lock",
+                side_effect=ValueError("lock drift"),
+            ):
+                with self.assertRaises(ServiceUnavailableError):
+                    LocalApprovalClient(config).decide(_payload())
+        self.assertEqual(fake.requests, [])
+
     def test_optional_secret_is_sent_as_bearer_without_entering_request_body(self) -> None:
         secret = "local-test-secret"
         (self.root / ".env.local").write_text(
@@ -481,6 +509,10 @@ class LocalApprovalClientTests(unittest.TestCase):
             ),
             (8192, "all", "off", 512, 256, 1, "on", "f16", "f16", True, True),
         )
+        self.assertEqual(
+            settings.binary,
+            "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server",
+        )
         self.assertEqual(chat_template(config, settings).sha256, CHAT_TEMPLATE_SHA256)
 
 
@@ -555,6 +587,19 @@ class LauncherAndDoctorTests(unittest.TestCase):
             "a" * 64,
             "gpu_model_serving_validated",
             "fixture_only",
+        )
+
+    @staticmethod
+    def _cuda_model_free_runtime(
+        _config: RuntimeConfig, _settings: object
+    ) -> RuntimeInspection:
+        return RuntimeInspection(
+            "runtime_ready",
+            Path("/fake/llama-server"),
+            "fixture-only CUDA model-free capability",
+            "b" * 64,
+            LLAMA_CPP_CUDA_CAPABILITY,
+            "not_run",
         )
 
     @staticmethod
@@ -703,6 +748,26 @@ class LauncherAndDoctorTests(unittest.TestCase):
         with mock.patch(
             "rondo_eval.local_approval.launcher.inspect_runtime",
             side_effect=self._ready_runtime,
+        ):
+            with self.assertRaises(LauncherError):
+                run_server(
+                    self._config(model=os.fspath(model)),
+                    watchdog_factory=lambda: watchdog,
+                    popen=popen,
+                )
+        popen.assert_not_called()
+
+    def test_run_server_rejects_cuda_runtime_without_model_backed_validation(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        lease = runtime_bridge.WatchdogLease(token="d" * 48)
+        guard = mock.Mock()
+        guard.is_held.return_value = True
+        watchdog = runtime_bridge.WatchdogProof(lease=lease, guard=guard)
+        popen = mock.Mock()
+        with mock.patch(
+            "rondo_eval.local_approval.launcher.inspect_runtime",
+            side_effect=self._cuda_model_free_runtime,
         ):
             with self.assertRaises(LauncherError):
                 run_server(
@@ -954,6 +1019,24 @@ class LauncherAndDoctorTests(unittest.TestCase):
         report = run_doctor(self._config(), runtime_inspector=runtime_missing)
         self.assertEqual((report.status, report.exit_code), ("runtime_missing", INFRA_ERROR))
 
+    def test_model_free_loopback_probe_does_not_use_ambient_proxy(self) -> None:
+        with FakeApprovalServer() as fake, mock.patch.dict(
+            os.environ,
+            {"HTTP_PROXY": "http://127.0.0.1:1", "NO_PROXY": ""},
+            clear=False,
+        ):
+            props_url = fake.base_url.removesuffix("/v1") + "/props"
+            props = _get_json(props_url, timeout=1.0)
+        self.assertEqual(props["role"], "router")
+
+    def test_model_free_loopback_probe_rejects_redirect(self) -> None:
+        with FakeApprovalServer() as target:
+            target_health = target.base_url.removesuffix("/v1") + "/health"
+            with FakeApprovalServer(get_redirect_to=target_health) as redirect:
+                health_url = redirect.base_url.removesuffix("/v1") + "/health"
+                with self.assertRaises(urllib.error.HTTPError):
+                    _get_json(health_url, timeout=1.0)
+
     def test_doctor_reports_model_missing_and_gpu_unvalidated_after_router_probe(self) -> None:
         report = run_doctor(
             self._config(),
@@ -983,6 +1066,44 @@ class LauncherAndDoctorTests(unittest.TestCase):
         )
         self.assertEqual((report.status, report.exit_code), ("gpu_runtime_not_validated", INFRA_ERROR))
         self.assertEqual(report.runtime_capability, "cpu_only_x64")
+        self.assertEqual(report.model_backed_validation, "not_run")
+        identity_probe.assert_not_called()
+        decision_probe.assert_not_called()
+
+    def test_doctor_reports_exact_cuda_intermediate_state_without_model(self) -> None:
+        identity_probe = mock.Mock()
+        decision_probe = mock.Mock()
+        report = run_doctor(
+            self._config(),
+            runtime_inspector=self._cuda_model_free_runtime,
+            router_probe=self._ready_router,
+            identity_probe=identity_probe,
+            decision_probe=decision_probe,
+        )
+        self.assertEqual(report.status, LLAMA_CPP_CUDA_CAPABILITY)
+        self.assertEqual(report.exit_code, MODEL_MISSING)
+        self.assertEqual(report.runtime, LLAMA_CPP_CUDA_CAPABILITY)
+        self.assertEqual(report.model, "missing")
+        self.assertEqual(report.service, "not_started")
+        self.assertEqual(report.runtime_capability, LLAMA_CPP_CUDA_CAPABILITY)
+        self.assertEqual(report.model_backed_validation, "not_run")
+        identity_probe.assert_not_called()
+        decision_probe.assert_not_called()
+
+    def test_doctor_does_not_promote_cuda_intermediate_state_with_model(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        identity_probe = mock.Mock()
+        decision_probe = mock.Mock()
+        report = run_doctor(
+            self._config(model=os.fspath(model)),
+            runtime_inspector=self._cuda_model_free_runtime,
+            identity_probe=identity_probe,
+            decision_probe=decision_probe,
+        )
+        self.assertEqual((report.status, report.exit_code), (LLAMA_CPP_CUDA_CAPABILITY, INFRA_ERROR))
+        self.assertEqual(report.runtime, LLAMA_CPP_CUDA_CAPABILITY)
+        self.assertEqual(report.model, "present")
         self.assertEqual(report.model_backed_validation, "not_run")
         identity_probe.assert_not_called()
         decision_probe.assert_not_called()
@@ -1038,10 +1159,14 @@ class LauncherAndDoctorTests(unittest.TestCase):
             identity = self._publish_identity(config, model)
             try:
                 with mock.patch(
+                    "rondo_eval.local_approval.launcher.resolve_binary",
+                    return_value=self.root / "llama-server",
+                ), mock.patch(
                     "rondo_eval.local_approval.launcher._load_runtime_lock"
                 ) as runtime_lock:
                     runtime_lock.return_value.identity_sha256 = "a" * 64
                     report = run_doctor(config, runtime_inspector=self._gpu_ready_runtime)
+                    runtime_lock.assert_called_with(config, self.root / "llama-server")
             finally:
                 clear_launcher_identity(config, identity)
         self.assertEqual((report.status, report.exit_code), ("ready", SUCCESS))
@@ -1068,6 +1193,9 @@ class LauncherAndDoctorTests(unittest.TestCase):
             identity = self._publish_identity(config, model)
             try:
                 with mock.patch(
+                    "rondo_eval.local_approval.launcher.resolve_binary",
+                    return_value=self.root / "llama-server",
+                ), mock.patch(
                     "rondo_eval.local_approval.launcher._load_runtime_lock"
                 ) as runtime_lock:
                     runtime_lock.return_value.identity_sha256 = "a" * 64
@@ -1098,6 +1226,9 @@ class LauncherAndDoctorTests(unittest.TestCase):
             )
             identity = self._publish_identity(config, model)
             with mock.patch(
+                "rondo_eval.local_approval.launcher.resolve_binary",
+                return_value=self.root / "llama-server",
+            ), mock.patch(
                 "rondo_eval.local_approval.launcher._load_runtime_lock"
             ) as runtime_lock:
                 runtime_lock.return_value.identity_sha256 = "a" * 64
@@ -1247,16 +1378,156 @@ class LauncherAndDoctorTests(unittest.TestCase):
             LLAMA_CPP_BINARY_SHA256,
             "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c15315dbd8aa4bbe",
         )
+        self.assertEqual(
+            LLAMA_CPP_CUDA_BINARY_SHA256,
+            "97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd",
+        )
+        self.assertEqual(
+            LLAMA_CPP_CUDA_CAPABILITY,
+            "linux_cuda_built_model_unvalidated",
+        )
+
+    def test_runtime_lock_selector_is_exact_for_cpu_cuda_and_unknown_paths(self) -> None:
+        for relative in (
+            "eval-data/tools/llama-b10333/llama-server",
+            "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server",
+        ):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"server")
+        cpu_lock = self.root / "eval/locks/llama-cpp-b10333.json"
+        cpu_lock.parent.mkdir(parents=True, exist_ok=True)
+        cpu_lock.write_bytes((REPO_ROOT / "eval/locks/llama-cpp-b10333.json").read_bytes())
+        cuda_lock = self.root / "eval/locks/llama-cpp-b10333-cuda-linux-x64.json"
+        cuda_lock.write_bytes(
+            (REPO_ROOT / "eval/locks/llama-cpp-b10333-cuda-linux-x64.json").read_bytes()
+        )
+        config = self._config()
+        cpu = _load_runtime_lock(
+            config, self.root / "eval-data/tools/llama-b10333/llama-server"
+        )
+        cuda = _load_runtime_lock(
+            config,
+            self.root
+            / "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server",
+        )
+        self.assertEqual(cpu.capability, "cpu_only_x64")
+        self.assertEqual(cuda.capability, LLAMA_CPP_CUDA_CAPABILITY)
+        unknown = self.root / "eval-data/tools/other/llama-server"
+        unknown.parent.mkdir(parents=True)
+        unknown.write_bytes(b"server")
+        with self.assertRaises(ValueError):
+            _load_runtime_lock(config, unknown)
+
+    def test_configured_binary_rejects_path_command_absolute_and_symlink_alias(self) -> None:
+        cuda = self.root / "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server"
+        cuda.parent.mkdir(parents=True)
+        cuda.write_bytes(b"server")
+        os.chmod(cuda, 0o700)
+        alias = self.root / "eval-data/tools/alias/llama-server"
+        alias.parent.mkdir(parents=True)
+        alias.symlink_to(cuda)
+        for configured in (
+            "llama-server",
+            os.fspath(cuda),
+            "eval-data/tools/alias/llama-server",
+            "eval-data/tools/other/llama-server",
+        ):
+            with self.subTest(configured=configured):
+                config = self._config(server_overrides={"binary": configured})
+                self.assertIsNone(resolve_binary(config, settings_from_config(config)))
+
+    def test_exact_cuda_spelling_cannot_cross_link_to_cpu_runtime(self) -> None:
+        cpu = self.root / "eval-data/tools/llama-b10333/llama-server"
+        cpu.parent.mkdir(parents=True)
+        cpu.write_bytes(b"cpu-server")
+        os.chmod(cpu, 0o700)
+        cuda_relative = "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server"
+        cuda = self.root / cuda_relative
+        cuda.parent.mkdir(parents=True)
+        cuda.symlink_to(cpu)
+        config = self._config(server_overrides={"binary": cuda_relative})
+        self.assertIsNone(resolve_binary(config, settings_from_config(config)))
+
+        cuda.unlink()
+        cuda.parent.rmdir()
+        cuda.parent.symlink_to(cpu.parent, target_is_directory=True)
+        self.assertIsNone(resolve_binary(config, settings_from_config(config)))
+
+    def test_cuda_lock_schema_and_build_choices_are_frozen(self) -> None:
+        value = json.loads(
+            (REPO_ROOT / "eval/locks/llama-cpp-b10333-cuda-linux-x64.json").read_bytes()
+        )
+        self.assertEqual(value["source"]["commit"], LLAMA_CPP_COMMIT)
+        self.assertEqual(value["toolkit"]["version"], "12.6.2")
+        self.assertEqual(value["build"]["architecture"], "89-real")
+        self.assertFalse(value["build"]["cub_3dot2"])
+        self.assertFalse(value["build"]["permissive_linker_flag"])
+        self.assertEqual(value["capability"], LLAMA_CPP_CUDA_CAPABILITY)
+        self.assertEqual(value["model_backed_structured_output"], "not_run")
+
+    def test_cuda_lock_rejects_missing_toolchain_identity(self) -> None:
+        lock_path = self.root / "eval/locks/llama-cpp-b10333-cuda-linux-x64.json"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        value = json.loads(
+            (REPO_ROOT / "eval/locks/llama-cpp-b10333-cuda-linux-x64.json").read_bytes()
+        )
+        value["toolchain"]["identity_files"].pop("/usr/bin/cmake")
+        lock_path.write_text(json.dumps(value), encoding="utf-8")
+        binary = self.root / "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server"
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b"server")
+        with self.assertRaises(ValueError):
+            _load_runtime_lock(self._config(), binary)
+
+    def test_cuda_elf_probe_rejects_needed_or_runpath_drift(self) -> None:
+        runtime = self.root / "runtime"
+        runtime.mkdir()
+        binary = runtime / "llama-server"
+        binary.write_bytes(b"server")
+        probe = self.root / "readelf"
+        probe.write_text(
+            "#!/bin/sh\nprintf '%s\\n' "
+            "' 0x1 (NEEDED) Shared library: [libfixture.so]' "
+            "' 0x1d (RUNPATH) Library runpath: [/toolkit/lib64:$ORIGIN]'\n",
+            encoding="utf-8",
+        )
+        os.chmod(probe, 0o700)
+        lock = RuntimeLock(
+            runtime.name,
+            {binary.name: hashlib.sha256(binary.read_bytes()).hexdigest()},
+            {},
+            dependency_targets=(binary.name,),
+            elf_probe_path=os.fspath(probe),
+            elf_probe_sha256=hashlib.sha256(probe.read_bytes()).hexdigest(),
+            elf_runpath="/toolkit/lib64:$ORIGIN",
+            elf_needed={binary.name: ("libfixture.so",)},
+        )
+        _verify_elf_metadata(lock, runtime)
+        changed = RuntimeLock(
+            runtime.name,
+            lock.regular_files,
+            {},
+            dependency_targets=(binary.name,),
+            elf_probe_path=os.fspath(probe),
+            elf_probe_sha256=lock.elf_probe_sha256,
+            elf_runpath="/wrong:$ORIGIN",
+            elf_needed=lock.elf_needed,
+        )
+        with self.assertRaises(ValueError):
+            _verify_elf_metadata(changed, runtime)
 
     def test_runtime_version_probe_requires_build_and_commit(self) -> None:
-        binary = self.root / "llama-server"
+        relative_binary = "eval-data/tools/llama-b10333/llama-server"
+        binary = self.root / relative_binary
+        binary.parent.mkdir(parents=True)
         binary.write_text(
             "#!/bin/sh\nprintf '%s\\n' 'version: 10333 (08659901)'\n",
             encoding="utf-8",
         )
         os.chmod(binary, 0o700)
         config = self._config()
-        config.data["local_model"]["server"]["binary"] = os.fspath(binary)
+        config.data["local_model"]["server"]["binary"] = relative_binary
         settings = settings_from_config(config)
         with mock.patch(
             "rondo_eval.local_approval.launcher._verify_runtime_closure",
@@ -1271,12 +1542,52 @@ class LauncherAndDoctorTests(unittest.TestCase):
         ):
             self.assertEqual(inspect_runtime(config, settings).status, "runtime_pin_mismatch")
 
+    def test_cuda_runtime_requires_current_exact_device_probe(self) -> None:
+        relative_binary = (
+            "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server"
+        )
+        binary = self.root / relative_binary
+        binary.parent.mkdir(parents=True)
+        binary.write_text(
+            "#!/bin/sh\n"
+            "if [ \"$1\" = --version ]; then\n"
+            "  printf '%s\\n' 'version: 1 (0865990)'\n"
+            "else\n"
+            "  printf '%s\\n' 'Available devices:' "
+            "'  CUDA0: NVIDIA GeForce RTX 4060 Laptop GPU (8187 MiB)'\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        os.chmod(binary, 0o700)
+        config = self._config(server_overrides={"binary": relative_binary})
+        settings = settings_from_config(config)
+        with mock.patch(
+            "rondo_eval.local_approval.launcher._verify_runtime_closure",
+            return_value="b" * 64,
+        ):
+            inspection = inspect_runtime(config, settings)
+            self.assertEqual(inspection.status, "runtime_ready")
+            self.assertEqual(inspection.capability, LLAMA_CPP_CUDA_CAPABILITY)
+            binary.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = --version ]; then "
+                "printf '%s\\n' 'version: 1 (0865990)'; "
+                "else printf '%s\\n' 'Available devices:'; fi\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                inspect_runtime(config, settings).status,
+                "runtime_device_unavailable",
+            )
+
     def test_runtime_closure_mismatch_is_rejected_before_version_probe(self) -> None:
-        binary = self.root / "llama-server"
+        relative_binary = "eval-data/tools/llama-b10333/llama-server"
+        binary = self.root / relative_binary
+        binary.parent.mkdir(parents=True)
         binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         os.chmod(binary, 0o700)
         config = self._config()
-        config.data["local_model"]["server"]["binary"] = os.fspath(binary)
+        config.data["local_model"]["server"]["binary"] = relative_binary
         settings = settings_from_config(config)
         with mock.patch(
             "rondo_eval.local_approval.launcher._verify_runtime_closure",

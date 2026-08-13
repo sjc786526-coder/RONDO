@@ -94,9 +94,11 @@ format = "gguf"
 quantization = "Q4_K_M"
 
 [local_model.server]
-# Install the digest-pinned b10333 asset from eval/locks/llama-cpp-b10333.json
-# below this ignored project-local path. Global/PATH binaries are rejected.
-binary = "eval-data/tools/llama-b10333/llama-server"
+# Install the source-built runtime frozen by
+# eval/locks/llama-cpp-b10333-cuda-linux-x64.json below this ignored
+# project-local path. Global/PATH binaries are rejected; the CPU lock remains
+# available for its separate exact path.
+binary = "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server"
 host = "127.0.0.1"
 port = 8080
 # This is the fixed 8k baseline. For the first 4k smoke only, change exactly

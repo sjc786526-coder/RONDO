@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import socket
 import stat
 import subprocess
@@ -33,6 +32,12 @@ LLAMA_CPP_BUILD = 10333
 LLAMA_CPP_COMMIT = "08659901c43b51de735740f1cf61bb82fbe0c4e4"
 LLAMA_CPP_ASSET_SHA256 = "936ce04d98abe2a977e9dd2ff92659bb96947e136acee8f2bc3e21d8eaebbf23"
 LLAMA_CPP_BINARY_SHA256 = "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c15315dbd8aa4bbe"
+LLAMA_CPP_CUDA_BINARY_SHA256 = "97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd"
+LLAMA_CPP_CUDA_CAPABILITY = "linux_cuda_built_model_unvalidated"
+_CPU_RUNTIME_RELATIVE_PATH = "eval-data/tools/llama-b10333"
+_CUDA_RUNTIME_RELATIVE_PATH = "eval-data/tools/llama-b10333-cuda-linux-x64"
+_CPU_RUNTIME_LOCK = "eval/locks/llama-cpp-b10333.json"
+_CUDA_RUNTIME_LOCK = "eval/locks/llama-cpp-b10333-cuda-linux-x64.json"
 GPU_MODEL_SERVING_CAPABILITY = "gpu_model_serving_validated"
 CHAT_TEMPLATE_REPO = "mistralai/Ministral-3-8B-Instruct-2512"
 CHAT_TEMPLATE_REVISION = "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d"
@@ -50,9 +55,29 @@ _CHAT_TEMPLATE_LOCK_RELATIVE_PATH = Path(
 )
 _CHAT_TEMPLATE_ALLOWED_RELATIVE_ROOT = Path("eval/templates/local-approval")
 _VERSION_TIMEOUT_SECONDS = 10
+_DEVICE_TIMEOUT_SECONDS = 10
 _ROUTER_TIMEOUT_SECONDS = 10.0
 _WATCHDOG_INTERVAL_SECONDS = 5.0
 _WATCHDOG_SHUTDOWN_SECONDS = 5.0
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Mapping[str, str],
+        newurl: str,
+    ) -> None:
+        return None
+
+
+_LOOPBACK_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    _NoRedirectHandler(),
+)
 
 
 class LauncherError(RuntimeError):
@@ -95,18 +120,42 @@ class RuntimeLock:
     dependency_probe_path: str = "/usr/bin/ldd"
     dependency_probe_sha256: str = ""
     host_dependencies: dict[str, str] | None = None
+    capability: str = "cpu_only_x64"
+    model_backed_validation: str = "not_run"
+    dependency_targets: tuple[str, ...] = ()
+    elf_probe_path: str = ""
+    elf_probe_sha256: str = ""
+    elf_runpath: str = ""
+    elf_needed: dict[str, tuple[str, ...]] | None = None
+    identity_files: dict[str, str] | None = None
+    identity_extra: dict[str, Any] | None = None
 
     @property
     def identity_sha256(self) -> str:
+        value: dict[str, Any] = {
+            "regular_files": self.regular_files,
+            "relative_path": self.relative_path,
+            "symlinks": self.symlinks,
+            "dependency_probe_path": self.dependency_probe_path,
+            "dependency_probe_sha256": self.dependency_probe_sha256,
+            "host_dependencies": self.host_dependencies,
+        }
+        if self.identity_extra is not None:
+            value.update(
+                {
+                    "capability": self.capability,
+                    "model_backed_validation": self.model_backed_validation,
+                    "dependency_targets": self.dependency_targets,
+                    "elf_probe_path": self.elf_probe_path,
+                    "elf_probe_sha256": self.elf_probe_sha256,
+                    "elf_runpath": self.elf_runpath,
+                    "elf_needed": self.elf_needed,
+                    "identity_files": self.identity_files,
+                    "identity_extra": self.identity_extra,
+                }
+            )
         canonical = json.dumps(
-            {
-                "regular_files": self.regular_files,
-                "relative_path": self.relative_path,
-                "symlinks": self.symlinks,
-                "dependency_probe_path": self.dependency_probe_path,
-                "dependency_probe_sha256": self.dependency_probe_sha256,
-                "host_dependencies": self.host_dependencies,
-            },
+            value,
             separators=(",", ":"),
             sort_keys=True,
         ).encode("utf-8")
@@ -122,12 +171,29 @@ class ChatTemplateInspection:
 
 def resolve_binary(config: RuntimeConfig, settings: LocalApprovalSettings) -> Path | None:
     configured = Path(settings.binary)
-    if configured.is_absolute() or configured.parent != Path("."):
-        candidate = resolve_config_path(config, settings.binary)
-        found = candidate if candidate.is_file() and os.access(candidate, os.X_OK) else None
-    else:
-        path_value = shutil.which(settings.binary)
-        found = Path(path_value).resolve() if path_value else None
+    allowed = {
+        Path(_CPU_RUNTIME_RELATIVE_PATH) / "llama-server",
+        Path(_CUDA_RUNTIME_RELATIVE_PATH) / "llama-server",
+    }
+    if configured.is_absolute() or configured not in allowed:
+        return None
+    candidate = resolve_config_path(config, settings.binary)
+    current = config.paths.common_root.resolve(strict=True)
+    try:
+        for index, component in enumerate(configured.parts):
+            current /= component
+            mode = os.lstat(current).st_mode
+            if stat.S_ISLNK(mode):
+                return None
+            if index < len(configured.parts) - 1 and not stat.S_ISDIR(mode):
+                return None
+        found = (
+            candidate
+            if stat.S_ISREG(mode) and os.access(candidate, os.X_OK)
+            else None
+        )
+    except OSError:
+        found = None
     if found is None:
         return None
     try:
@@ -153,6 +219,15 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
             "llama.cpp runtime directory closure does not match b10333",
         )
     try:
+        is_cuda = (
+            _runtime_relative_path_for_binary(config, binary)
+            == _CUDA_RUNTIME_RELATIVE_PATH
+        )
+    except (OSError, ValueError):
+        # The real closure verifier rejects unknown paths. This fallback keeps
+        # isolated probe fixtures backend-neutral when that verifier is mocked.
+        is_cuda = False
+    try:
         completed = subprocess.run(
             [os.fspath(binary), "--version"],
             check=False,
@@ -164,16 +239,50 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
     except (OSError, subprocess.SubprocessError):
         return RuntimeInspection("runtime_invalid", binary, "llama-server version probe failed")
     version = f"{completed.stdout}\n{completed.stderr}"
-    commit_matches = LLAMA_CPP_COMMIT in version or LLAMA_CPP_COMMIT[:8] in version
-    build_matches = re.search(r"(?<!\d)10333(?!\d)", version) is not None
+    commit_prefix = LLAMA_CPP_COMMIT[:7] if is_cuda else LLAMA_CPP_COMMIT[:8]
+    commit_matches = LLAMA_CPP_COMMIT in version or commit_prefix in version
+    # A source build from the shallow b10333 tag reports build number 1; its
+    # exact binary, commit, source tree and configure identity are bound by the
+    # CUDA lock. The upstream release bundle continues to require 10333 here.
+    build_matches = is_cuda or re.search(r"(?<!\d)10333(?!\d)", version) is not None
     if completed.returncode != 0 or not build_matches or not commit_matches:
         return RuntimeInspection("runtime_pin_mismatch", binary, "llama-server does not match b10333")
+    if is_cuda:
+        try:
+            devices = subprocess.run(
+                [os.fspath(binary), "--list-devices"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=_DEVICE_TIMEOUT_SECONDS,
+                env=_sanitized_environment(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return RuntimeInspection(
+                "runtime_device_unavailable",
+                binary,
+                "llama-server CUDA device probe failed",
+            )
+        device_output = f"{devices.stdout}\n{devices.stderr}"
+        if (
+            devices.returncode != 0
+            or "CUDA0: NVIDIA GeForce RTX 4060 Laptop GPU" not in device_output
+        ):
+            return RuntimeInspection(
+                "runtime_device_unavailable",
+                binary,
+                "the frozen CUDA runtime cannot enumerate the RTX 4060 Laptop GPU",
+            )
     return RuntimeInspection(
         "runtime_ready",
         binary,
-        "llama.cpp b10333 CPU x64 runtime is available; model/GPU serving is not validated",
+        (
+            "llama.cpp b10333 Linux CUDA runtime is available; model-backed serving is not validated"
+            if is_cuda
+            else "llama.cpp b10333 CPU x64 runtime is available; model/GPU serving is not validated"
+        ),
         runtime_identity,
-        "cpu_only_x64",
+        LLAMA_CPP_CUDA_CAPABILITY if is_cuda else "cpu_only_x64",
         "not_run",
     )
 
@@ -200,14 +309,36 @@ def _binary_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _load_runtime_lock(config: RuntimeConfig) -> RuntimeLock:
-    path = config.paths.worktree_root / "eval/locks/llama-cpp-b10333.json"
+def _runtime_relative_path_for_binary(config: RuntimeConfig, binary: Path) -> str:
+    common_root = config.paths.common_root.resolve(strict=True)
+    resolved = binary.resolve(strict=True)
+    for relative_path in (_CPU_RUNTIME_RELATIVE_PATH, _CUDA_RUNTIME_RELATIVE_PATH):
+        expected = (common_root / relative_path / "llama-server").resolve(strict=False)
+        if resolved == expected:
+            return relative_path
+    raise ValueError("configured llama-server does not map to a frozen runtime")
+
+
+def _load_runtime_lock(config: RuntimeConfig, binary: Path) -> RuntimeLock:
+    relative_path = _runtime_relative_path_for_binary(config, binary)
+    lock_relative_path = (
+        _CUDA_RUNTIME_LOCK
+        if relative_path == _CUDA_RUNTIME_RELATIVE_PATH
+        else _CPU_RUNTIME_LOCK
+    )
+    path = config.paths.worktree_root / lock_relative_path
     if path.is_symlink() or not path.is_file():
         raise OSError("llama.cpp runtime lock is unavailable")
     try:
         value = json.loads(path.read_bytes())
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise OSError("llama.cpp runtime lock is invalid") from exc
+    if relative_path == _CUDA_RUNTIME_RELATIVE_PATH:
+        return _load_cuda_runtime_lock(value)
+    return _load_cpu_runtime_lock(value)
+
+
+def _load_cpu_runtime_lock(value: Any) -> RuntimeLock:
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
         "project",
@@ -245,7 +376,7 @@ def _load_runtime_lock(config: RuntimeConfig) -> RuntimeLock:
     dependency_probe = installed.get("dependency_probe")
     host_dependencies = installed.get("host_dependencies")
     if (
-        relative_path != "eval-data/tools/llama-b10333"
+        relative_path != _CPU_RUNTIME_RELATIVE_PATH
         or not isinstance(regular_files, dict)
         or not isinstance(symlinks, dict)
         or not isinstance(dependency_probe, dict)
@@ -268,6 +399,286 @@ def _load_runtime_lock(config: RuntimeConfig) -> RuntimeLock:
         dependency_probe["canonical_path"],
         dependency_probe["sha256"],
         dict(host_dependencies),
+    )
+
+
+def _require_sha256(value: Any, label: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError(f"{label} digest is invalid")
+    return value
+
+
+def _load_cuda_runtime_lock(value: Any) -> RuntimeLock:
+    expected_top_level = {
+        "schema_version",
+        "project",
+        "release",
+        "source",
+        "toolkit",
+        "toolchain",
+        "build",
+        "installed_runtime",
+        "device_probe",
+        "capability",
+        "model_backed_structured_output",
+    }
+    if not isinstance(value, dict) or set(value) != expected_top_level:
+        raise ValueError("llama.cpp CUDA runtime lock schema differs")
+    source = value.get("source")
+    toolkit = value.get("toolkit")
+    toolchain = value.get("toolchain")
+    build = value.get("build")
+    installed = value.get("installed_runtime")
+    device_probe = value.get("device_probe")
+    if (
+        value.get("schema_version") != 1
+        or value.get("project") != "ggml-org/llama.cpp"
+        or value.get("release") != "b10333"
+        or value.get("capability") != LLAMA_CPP_CUDA_CAPABILITY
+        or value.get("model_backed_structured_output") != "not_run"
+        or not isinstance(source, dict)
+        or set(source) != {"repo", "tag", "commit", "tree", "clean"}
+        or source.get("repo") != "https://github.com/ggml-org/llama.cpp.git"
+        or source.get("tag") != "b10333"
+        or source.get("commit") != LLAMA_CPP_COMMIT
+        or source.get("tree") != "9ae780f13650ac3d45e4e345f208163ad744dd6d"
+        or source.get("clean") is not True
+        or not isinstance(toolkit, dict)
+        or not isinstance(toolchain, dict)
+        or not isinstance(build, dict)
+        or not isinstance(installed, dict)
+        or not isinstance(device_probe, dict)
+    ):
+        raise ValueError("llama.cpp CUDA runtime lock identity differs")
+    installer = toolkit.get("installer")
+    nvcc = toolkit.get("nvcc")
+    if (
+        set(toolkit) != {"version", "local_path", "version_json_sha256", "installer", "nvcc"}
+        or toolkit.get("version") != "12.6.2"
+        or toolkit.get("local_path")
+        != "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2"
+        or not isinstance(installer, dict)
+        or set(installer) != {"url", "size_bytes", "md5", "sha256"}
+        or installer.get("url")
+        != "https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda_12.6.2_560.35.03_linux.run"
+        or installer.get("size_bytes") != 4_446_677_374
+        or installer.get("md5") != "dcba85e2d49d7e6d93d8626f708276a4"
+        or installer.get("sha256")
+        != "3729a89cb58f7ca6a46719cff110d6292aec7577585a8d71340f0dbac54fb237"
+        or not isinstance(nvcc, dict)
+        or set(nvcc) != {"path", "release", "build", "sha256"}
+        or nvcc.get("path")
+        != "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/bin/nvcc"
+        or nvcc.get("release") != "12.6"
+        or nvcc.get("build") != "12.6.77"
+        or nvcc.get("sha256")
+        != "4101d601fa1edc5538265ecaa57ecb61be56deb6f6c80fba6e6362fc1b6bae5b"
+    ):
+        raise ValueError("llama.cpp CUDA Toolkit identity differs")
+    _require_sha256(toolkit.get("version_json_sha256"), "CUDA version.json")
+
+    identity_files = toolchain.get("identity_files")
+    expected_versions = {
+        "cmake": "3.28.3",
+        "gcc": "13.3.0",
+        "g++": "13.3.0",
+        "make": "4.3",
+        "nvcc": "12.6.77",
+        "glibc": "2.39-0ubuntu8.8",
+        "binutils": "2.42",
+    }
+    expected_toolchain_sha256 = {
+        "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/bin/nvcc":
+        "4101d601fa1edc5538265ecaa57ecb61be56deb6f6c80fba6e6362fc1b6bae5b",
+        "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/version.json":
+        "81d2854ee182334d49a1f181d38a55feb1cbc3df7ba93d32ff9d647c511a1b59",
+    }
+    expected_identity_files = {
+        "/usr/bin/cmake":
+        "1c5227af4edd22d8d689def545e18ee458260c0fd579eba2187967f38817e638",
+        "/usr/bin/ldd":
+        "4f1d37e25f27535e3f02a5b7da63e1ce18d4982445db2c25fc8f985a3d395cc3",
+        "/usr/bin/make":
+        "d78b8f1d099fbcfb6f2f49ab87223b9b68fb3956642f92d6ec6de812e8afa965",
+        "/usr/bin/x86_64-linux-gnu-g++-13":
+        "1353e9bdd29a7295c7226bf6c63abccce056d8cac31f112e5cdbecc3f28c2769",
+        "/usr/bin/x86_64-linux-gnu-gcc-13":
+        "1b99826121ae6682a634e5efe09bd3e3df58ce58e0b28f849114ab5b89139c26",
+        "/usr/bin/x86_64-linux-gnu-objdump":
+        "325c4205a4c658a9d1e1ebc469ae55975a2b897a3d3c1e79d9b158612d37f745",
+        "/usr/bin/x86_64-linux-gnu-readelf":
+        "64c58e15274bbbb5153f31078e455e9e77ee5f51489e709bba5bb788ce9df2b0",
+    }
+    if set(toolchain) != {"versions", "identity_files"} or not isinstance(
+        identity_files, dict
+    ):
+        raise ValueError("llama.cpp CUDA toolchain lock is invalid")
+    _validate_host_dependencies(identity_files)
+    if (
+        toolchain.get("versions") != expected_versions
+        or identity_files
+        != {**expected_toolchain_sha256, **expected_identity_files}
+        or expected_toolchain_sha256[nvcc["path"]] != nvcc["sha256"]
+        or expected_toolchain_sha256[
+            "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/version.json"
+        ] != toolkit["version_json_sha256"]
+    ):
+        raise ValueError("llama.cpp CUDA toolchain versions are invalid")
+
+    required_build = {
+        "source_path",
+        "build_path",
+        "runtime_path",
+        "generator",
+        "architecture",
+        "configure_argv",
+        "build_argv",
+        "cmake_cache_sha256",
+        "build_lock",
+        "artifact_staging",
+        "cub_3dot2",
+        "permissive_linker_flag",
+    }
+    if (
+        set(build) != required_build
+        or build.get("source_path")
+        != "/home/sjc/desktop/RONDO/eval-data/sources/llama.cpp-b10333-08659901"
+        or build.get("build_path")
+        != "/home/sjc/desktop/RONDO/eval-data/build/llama.cpp-b10333-cuda-linux-x64"
+        or build.get("runtime_path")
+        != "/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64"
+        or build.get("generator") != "Unix Makefiles"
+        or build.get("architecture") != "89-real"
+        or build.get("cub_3dot2") is not False
+        or build.get("permissive_linker_flag") is not False
+        or not isinstance(build.get("configure_argv"), list)
+        or not build["configure_argv"]
+        or not isinstance(build.get("build_argv"), list)
+        or not build["build_argv"]
+        or not isinstance(build.get("build_lock"), dict)
+        or build.get("artifact_staging")
+        != {
+            "source": "/home/sjc/desktop/RONDO/eval-data/build/llama.cpp-b10333-cuda-linux-x64/bin",
+            "destination": "/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64",
+            "method": "copy exact bin closure, preserve symlinks, set runtime files 0755",
+        }
+    ):
+        raise ValueError("llama.cpp CUDA build lock is invalid")
+    _require_sha256(build.get("cmake_cache_sha256"), "CMake cache")
+
+    required_installed = {
+        "relative_path",
+        "regular_files",
+        "symlinks",
+        "dependency_targets",
+        "dependency_probe",
+        "elf_probe",
+        "elf_runpath",
+        "elf_needed",
+        "external_dependencies",
+    }
+    if set(installed) != required_installed:
+        raise ValueError("llama.cpp CUDA runtime manifest schema differs")
+    relative_path = installed.get("relative_path")
+    regular_files = installed.get("regular_files")
+    symlinks = installed.get("symlinks")
+    dependency_targets = installed.get("dependency_targets")
+    dependency_probe = installed.get("dependency_probe")
+    elf_probe = installed.get("elf_probe")
+    elf_needed = installed.get("elf_needed")
+    external_dependencies = installed.get("external_dependencies")
+    expected_runpath = (
+        "/home/sjc/desktop/RONDO/eval-data/toolkits/cuda-12.6.2/lib64:$ORIGIN"
+    )
+    if (
+        relative_path != _CUDA_RUNTIME_RELATIVE_PATH
+        or not isinstance(regular_files, dict)
+        or regular_files.get("llama-server") != LLAMA_CPP_CUDA_BINARY_SHA256
+        or not isinstance(symlinks, dict)
+        or not isinstance(dependency_targets, list)
+        or set(dependency_targets) != set(regular_files)
+        or not isinstance(dependency_probe, dict)
+        or set(dependency_probe) != {"canonical_path", "sha256"}
+        or dependency_probe.get("canonical_path") != "/usr/bin/ldd"
+        or not isinstance(elf_probe, dict)
+        or set(elf_probe) != {"canonical_path", "sha256"}
+        or elf_probe.get("canonical_path") != "/usr/bin/x86_64-linux-gnu-readelf"
+        or installed.get("elf_runpath") != expected_runpath
+        or not isinstance(elf_needed, dict)
+        or set(elf_needed) != set(dependency_targets)
+        or not isinstance(external_dependencies, dict)
+        or not external_dependencies
+    ):
+        raise ValueError("llama.cpp CUDA runtime manifest is invalid")
+    _validate_runtime_entries(regular_files, symlinks)
+    _validate_host_dependencies(external_dependencies)
+    _require_sha256(dependency_probe.get("sha256"), "dependency probe")
+    _require_sha256(elf_probe.get("sha256"), "ELF probe")
+    normalized_needed: dict[str, tuple[str, ...]] = {}
+    for target, needed in elf_needed.items():
+        if not isinstance(needed, list) or any(
+            not isinstance(item, str) or not item for item in needed
+        ):
+            raise ValueError("llama.cpp CUDA DT_NEEDED manifest is invalid")
+        normalized_needed[target] = tuple(sorted(needed))
+
+    required_device_probe = {
+        "command",
+        "environment",
+        "exit_code",
+        "device",
+        "compute_capability",
+        "memory_mib",
+        "windows_driver",
+        "wsl_libcuda",
+        "model_loaded",
+    }
+    wsl_libcuda = device_probe.get("wsl_libcuda")
+    if (
+        set(device_probe) != required_device_probe
+        or device_probe.get("command")
+        != [
+            "/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64/llama-server",
+            "--list-devices",
+        ]
+        or device_probe.get("environment") != "LD_LIBRARY_PATH unset"
+        or device_probe.get("exit_code") != 0
+        or device_probe.get("device") != "NVIDIA GeForce RTX 4060 Laptop GPU"
+        or device_probe.get("compute_capability") != "8.9"
+        or device_probe.get("memory_mib") != 8187
+        or device_probe.get("windows_driver") != "595.79"
+        or device_probe.get("model_loaded") is not False
+        or wsl_libcuda
+        != {
+            "canonical_path": "/usr/lib/wsl/lib/libcuda.so.1",
+            "size_bytes": 183_752,
+            "sha256": "57e0db4fcada1712297e0c9ab0d7d4beff59c663468876f77a262eda98a6e0b8",
+        }
+    ):
+        raise ValueError("llama.cpp CUDA device probe identity differs")
+
+    return RuntimeLock(
+        relative_path,
+        dict(regular_files),
+        dict(symlinks),
+        dependency_probe["canonical_path"],
+        dependency_probe["sha256"],
+        dict(external_dependencies),
+        LLAMA_CPP_CUDA_CAPABILITY,
+        "not_run",
+        tuple(dependency_targets),
+        elf_probe["canonical_path"],
+        elf_probe["sha256"],
+        expected_runpath,
+        normalized_needed,
+        dict(identity_files),
+        {
+            "source": source,
+            "toolkit": toolkit,
+            "toolchain_versions": toolchain["versions"],
+            "build": build,
+            "device_probe": device_probe,
+        },
     )
 
 
@@ -318,7 +729,7 @@ def _validate_host_dependencies(host_dependencies: Mapping[str, Any]) -> None:
 
 
 def _verify_runtime_closure(config: RuntimeConfig, binary: Path) -> str:
-    runtime_lock = _load_runtime_lock(config)
+    runtime_lock = _load_runtime_lock(config, binary)
     configured_root = config.paths.common_root / runtime_lock.relative_path
     root_before = os.lstat(configured_root)
     if not stat.S_ISDIR(root_before.st_mode) or stat.S_ISLNK(root_before.st_mode):
@@ -337,6 +748,8 @@ def _verify_runtime_closure(config: RuntimeConfig, binary: Path) -> str:
     for name, expected in runtime_lock.symlinks.items():
         if os.readlink(runtime_root / name) != expected:
             raise ValueError("llama.cpp runtime symlink differs")
+    _verify_identity_files(runtime_lock)
+    _verify_elf_metadata(runtime_lock, runtime_root)
     _verify_host_dependency_closure(runtime_lock, runtime_root)
     if _scan_runtime_root(runtime_root) != expected_entries:
         raise ValueError("llama.cpp runtime changed during inspection")
@@ -354,6 +767,59 @@ def _verify_runtime_closure(config: RuntimeConfig, binary: Path) -> str:
     ):
         raise ValueError("llama.cpp runtime root changed during inspection")
     return runtime_lock.identity_sha256
+
+
+def _verify_identity_files(runtime_lock: RuntimeLock) -> None:
+    identity_files = runtime_lock.identity_files
+    if identity_files is None:
+        return
+    for path, digest in identity_files.items():
+        identity_file = Path(path)
+        if not identity_file.is_file():
+            raise ValueError("llama.cpp toolchain identity file is unavailable")
+        resolved = identity_file.resolve(strict=True)
+        _reject_unsafe_mode(os.lstat(resolved).st_mode, path)
+        if _binary_sha256(resolved) != digest:
+            raise ValueError("llama.cpp toolchain identity differs")
+
+
+def _verify_elf_metadata(runtime_lock: RuntimeLock, runtime_root: Path) -> None:
+    expected_needed = runtime_lock.elf_needed
+    if expected_needed is None:
+        return
+    probe = Path(runtime_lock.elf_probe_path)
+    if probe.is_symlink() or not probe.is_file():
+        raise ValueError("llama.cpp ELF probe is unavailable")
+    _reject_unsafe_mode(os.lstat(probe).st_mode, "llama.cpp ELF probe")
+    if _binary_sha256(probe) != runtime_lock.elf_probe_sha256:
+        raise ValueError("llama.cpp ELF probe identity differs")
+    for name in runtime_lock.dependency_targets:
+        try:
+            completed = subprocess.run(
+                [os.fspath(probe), "-d", os.fspath(runtime_root / name)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=_VERSION_TIMEOUT_SECONDS,
+                env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError("llama.cpp ELF probe failed") from exc
+        if completed.returncode != 0:
+            raise ValueError("llama.cpp ELF probe failed")
+        needed = tuple(
+            sorted(re.findall(r"Shared library: \[([^]]+)\]", completed.stdout))
+        )
+        runpaths = re.findall(r"Library runpath: \[([^]]+)\]", completed.stdout)
+        rpaths = re.findall(r"Library rpath: \[([^]]+)\]", completed.stdout)
+        if (
+            needed != expected_needed[name]
+            or runpaths != [runtime_lock.elf_runpath]
+            or rpaths
+        ):
+            raise ValueError("llama.cpp ELF metadata differs")
+    if _binary_sha256(probe) != runtime_lock.elf_probe_sha256:
+        raise ValueError("llama.cpp ELF probe changed during inspection")
 
 
 def _scan_runtime_root(runtime_root: Path) -> tuple[set[str], set[str]]:
@@ -390,11 +856,14 @@ def _verify_host_dependency_closure(
     if _binary_sha256(probe) != runtime_lock.dependency_probe_sha256:
         raise ValueError("llama.cpp dependency probe digest differs")
 
-    candidates = [runtime_root / "llama-server"] + [
-        runtime_root / name
-        for name in sorted(runtime_lock.regular_files)
-        if name.startswith("libggml-cpu-") and name.endswith(".so")
-    ]
+    if runtime_lock.dependency_targets:
+        candidates = [runtime_root / name for name in runtime_lock.dependency_targets]
+    else:
+        candidates = [runtime_root / "llama-server"] + [
+            runtime_root / name
+            for name in sorted(runtime_lock.regular_files)
+            if name.startswith("libggml-cpu-") and name.endswith(".so")
+        ]
     observed: set[str] = set()
     for candidate in candidates:
         try:
@@ -674,7 +1143,7 @@ def run_server(
         raise LauncherError(runtime.detail)
     if runtime.capability != GPU_MODEL_SERVING_CAPABILITY:
         raise LauncherError(
-            "the pinned runtime is CPU-only; GPU/model serving remains unvalidated"
+            "model-backed GPU serving remains unvalidated for the selected runtime"
         )
     template = chat_template(config, settings)
     arguments = _serve_arguments(settings, model, template)
@@ -799,8 +1268,16 @@ def probe_router_runtime(
             not isinstance(props, dict)
             or props.get("role") != "router"
             or not isinstance(build_info, str)
-            or str(LLAMA_CPP_BUILD) not in build_info
-            or LLAMA_CPP_COMMIT[:8] not in build_info
+            or (
+                runtime.capability != LLAMA_CPP_CUDA_CAPABILITY
+                and str(LLAMA_CPP_BUILD) not in build_info
+            )
+            or (
+                LLAMA_CPP_COMMIT[:7]
+                if runtime.capability == LLAMA_CPP_CUDA_CAPABILITY
+                else LLAMA_CPP_COMMIT[:8]
+            )
+            not in build_info
         ):
             return RouterProbe("router_schema_invalid", "model-free router props do not match b10333")
         return RouterProbe("router_ready", "model-free b10333 router probe passed")
@@ -816,8 +1293,8 @@ def probe_router_runtime(
 
 def _get_json(url: str, *, timeout: float) -> Any:
     request = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        if response.status != 200:
+    with _LOOPBACK_OPENER.open(request, timeout=timeout) as response:
+        if response.status != 200 or response.geturl() != url:
             raise ValueError("non-200 response")
         raw = response.read(_MAX_PROBE_BYTES + 1)
     if len(raw) > _MAX_PROBE_BYTES:
