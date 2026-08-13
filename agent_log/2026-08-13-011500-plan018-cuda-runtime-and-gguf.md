@@ -6,6 +6,7 @@
   或 permissive linker flag。
 - 新增独立 CUDA lock 与 CPU/CUDA exact binary-to-lock 映射，验证 toolchain、全部 runtime bytes、DT_NEEDED、RUNPATH、
   project Toolkit/WSL/system 依赖；client receipt 使用所选 lock 身份。
-- doctor 精确投影 `linux_cuda_built_model_unvalidated`，loopback probe 禁用 ambient proxy；正式 launcher 仍拒绝
-  model-free 中间能力。focused local-approval tests 58/58 通过。
+- 受跟踪示例配置、空 model path 的 model-free doctor 精确投影 `linux_cuda_built_model_unvalidated`，loopback probe
+  禁用 ambient proxy；正式 launcher 仍拒绝该中间能力。真实 ignored 配置尚未迁移，直接 doctor 因
+  `local_model context_size is outside its allowed range` 返回 `configuration_error`。focused local-approval tests 58/58 通过。
 - model-free `--list-devices` 识别 RTX 4060 Laptop；没有运行 GGUF、4k/8k、推理或 structured model-backed probe。

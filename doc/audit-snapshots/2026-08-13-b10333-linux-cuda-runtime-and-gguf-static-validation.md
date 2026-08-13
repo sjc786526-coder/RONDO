@@ -64,12 +64,17 @@ SHA-256，未读取 GGUF 元数据、未加载模型、未推理。
 - 新 lock：`eval/locks/llama-cpp-b10333-cuda-linux-x64.json`；锁身份
   `abe7f763a18e7c801ca8d024a5d4d2a9036847c80eb32e1661baab6c1e2c03da`。它与现有 CPU lock 分离，冻结
   source、Toolkit、工具链、build argv/cache、runtime、DT_NEEDED/RUNPATH、全部外部依赖和 device probe。
-- model-free doctor/router 真实输出：`status=runtime=runtime_capability=linux_cuda_built_model_unvalidated`，
-  `model=missing`、`service=not_started`、`model_backed_validation=not_run`。正式 launcher 的 production gate 仍只接受
-  `gpu_model_serving_validated`，单测确认此中间能力不会调用 Popen。
+- 使用受跟踪示例配置并保持 model path 为空的受控 model-free 复现中，doctor/router 输出
+  `status=runtime=runtime_capability=linux_cuda_built_model_unvalidated`、`model=missing`、`service=not_started`、
+  `model_backed_validation=not_run`。正式 launcher 的 production gate 仍只接受 `gpu_model_serving_validated`，单测确认
+  此中间能力不会调用 Popen。
+
+当前机器的真实 ignored `rondo.local.toml` 尚未迁移到新合同；直接运行 doctor 返回 `configuration_error`（exit 64），设置
+投影的具体错误为 `local_model context_size is outside its allowed range`，且在 runtime/device/model 检查前停止。因此
+`linux_cuda_built_model_unvalidated` 是已经验收的 runtime capability，不表示当前机器配置或正式模型服务已经就绪。
 
 ## 边界与剩余工作
 
 GGUF 始终未加载，未运行推理、token generation、4k smoke 或 8k baseline，也未修改真实 ignored
-`rondo.local.toml`。本快照只证明唯一权重的静态完整性、Linux CUDA build/runtime/device 的 model-free 闭包；
-model-backed 4k/8k 和 `gpu_model_serving_validated` 留给下一任务。
+`rondo.local.toml`。本快照只证明唯一权重的静态完整性、Linux CUDA build/runtime/device 的 model-free 闭包；下一任务
+才更新真实配置并执行受控 4k model-backed 验收，通过后晋级 `gpu_model_serving_validated`，8k baseline 随后单独验收。
