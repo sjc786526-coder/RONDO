@@ -28,7 +28,7 @@ HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD = Decimal("700.000000")
 HISTORICAL_SCHEMA_V3_CAMPAIGN_CAP_USD = Decimal("1000.000000")
 HISTORICAL_SCHEMA_V4_CAMPAIGN_CAP_USD = Decimal("1300.000000")
 CAMPAIGN_CAP_USD = Decimal("1600.000000")
-CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("1135.915188")
+CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("1136.113528")
 CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
@@ -222,7 +222,7 @@ class CampaignIdentity:
     def max_attempts(self) -> int:
         if self.schema_version == 1:
             return 2
-        if self.schema_version in {2, 3, 4, 5}:
+        if self.schema_version in {2, 3, 4, 5, 6}:
             return 4
         raise BaselineError("campaign identity version is unsupported")
 
@@ -1185,7 +1185,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         "budget",
         "baseline",
     }
-    if isinstance(value, dict) and value.get("schema_version") in {3, 4, 5}:
+    if isinstance(value, dict) and value.get("schema_version") in {3, 4, 5, 6}:
         expected_keys.add("continuation")
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise BaselineError("campaign lock schema is invalid")
@@ -1203,7 +1203,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in {1, 2, 3, 4, 5}
+        or schema_version not in {1, 2, 3, 4, 5, 6}
         or _CAMPAIGN_ID.fullmatch(str(value["campaign_id"])) is None
         or _CAMPAIGN_BATCH_ID.fullmatch(str(value["batch_id"])) is None
         or _CAMPAIGN_ID.fullmatch(value["campaign_id"]).group(1)
@@ -1329,6 +1329,12 @@ def campaign_baseline_contract(schema_version: int) -> dict[str, object]:
                 "monotonic_publication_scanner_and_terminal_diagnostics"
             ),
         }
+    if schema_version == 6:
+        return {
+            **campaign_baseline_contract(5),
+            "campaign_ledger_capacity": "authorized_remaining_cap_up_to_1600_usd",
+            "continuation_compatibility": "monotonic_campaign_ledger_capacity_fix",
+        }
     raise BaselineError("campaign baseline contract version is unsupported")
 
 
@@ -1357,6 +1363,7 @@ def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
         3: {HISTORICAL_SCHEMA_V3_CAMPAIGN_CAP_USD},
         4: {HISTORICAL_SCHEMA_V4_CAMPAIGN_CAP_USD},
         5: {CAMPAIGN_CAP_USD},
+        6: {CAMPAIGN_CAP_USD},
     }[schema_version]
     return (
         cap in valid_caps
