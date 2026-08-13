@@ -2,7 +2,8 @@
 
 最后更新：2026-08-13
 
-适用于全部测评产出：离线冻结回放（E-A）、真实 Terminal-Bench 2.1 端到端（E-B）、静态影子审批横评（L3）。
+适用于全部测评产出：真实 Terminal-Bench 2.1 端到端（E-B）、静态影子审批横评（L3）、会话内人判定横评
+（Local M4）。离线冻结回放（E-A）的 schema 保留在本文件中，但该轨已随方向 1 挂起（见 `doc/WBS.md`）。
 目标是**结构清楚、便于管理、可长期追溯**，同时保持轻量——不做数据资产审计、可信链或权限系统。
 
 ## 1. 两个根目录，按"轻/重"分家
@@ -35,14 +36,17 @@ eval/                                  # 入库
 │   ├── holdout.txt                    # 只有 id，禁止查看内容
 │   ├── p2-b7-canary-catalog.json      # canary 的 source/image/runtime freeze
 │   └── p2-b7-cost-forecast.json       # B6 可复算估算合同
-├── fixtures/                          # A3 冻结回放用例集（仅当体积可控时入库，见 §6）
+├── templates/                         # 版本化 prompt / 产物模板，冻结后按版本记哈希
+│   ├── local-approval/                # 本地审批结构化输出模板
+│   └── cross-eval-judge/              # Local M4 裁判 prompt 与判定标准
+├── fixtures/                          # A3 冻结回放用例集（E-A 挂起；仅当体积可控时入库，见 §6）
 ├── results/
 │   ├── runs.jsonl                     # 可见任务结果库主表，只追加
 │   └── baselines/                     # campaign 公开聚合；holdout 未来只允许整批一条
 └── reports/                           # 生成的对比表与曲线（可重生成）
 
 eval-data/                             # git-ignored
-├── bin/{rondo,codex}/                # 已冻结的两侧 runtime bundle + manifest
+├── bin/{rondo,rondo-multi,codex}/     # 已冻结的各侧 runtime bundle + manifest（`rondo/` = RONDO Local，见 §3.1）
 ├── deps/                              # 按 SHA 验证的项目局部运行资产（例如 bwrap）
 ├── tools/                             # 项目局部工具（例如 llama.cpp runtime）
 ├── toolkits/                          # 项目局部 SDK/toolkit 与冻结 installer（不做系统安装）
@@ -53,6 +57,7 @@ eval-data/                             # git-ignored
 ├── pairs/                             # 仅 paid 双侧顺序与发布恢复账本，0600
 ├── campaigns/<campaign_id>/           # B7 状态、wire/Oracle-manifest 引用与私有聚合，0600
 ├── oracle-proofs/p2-b7-v1/             # campaign-independent 单题 Oracle proof + 十题 manifest，0600
+├── cross-eval/<batch_id>/              # Local M4 会话内人判定的冻结 JSONL 与证据哈希，0600
 ├── b2/current.json                    # 可替换的当前 no-API 双侧验收收据，0600
 ├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
 ├── work/                              # materialize 和 no-API 工作目录
@@ -67,13 +72,35 @@ eval-data/                             # git-ignored
 
 ## 3. 命名
 
+### 3.1 产品身份
+
+项目有两条产品线：**RONDO Local**（`mydev/`）与 **RONDO Multi**（`multidev/`）。产品身份是一个
+**独立维度**，必须贯通 binary freeze、源码/构建路径、manifest 与结果归档，不能只靠参数化一个路径。
+
+| 规则 | 内容 |
+|---|---|
+| 取值 | `rondo-local` ｜ `rondo-multi` ｜ `codex`（冻结上游） |
+| 历史解释 | **缺产品字段的历史条目一律解释为 `rondo-local`。** 既有 `eval-data/bin/rondo/` 与 v1—v22 的 244 条 run 全部属于 RONDO Local |
+| 只加不改 | 历史结果**不改名、不回填新 schema**；新字段从后续 campaign 开始使用 |
+| 目录 | 历史 `bin/rondo/` 保持原名不动；Multi 新增 `bin/rondo-multi/`，必须显式带 `multi` 字样 |
+| 与比较侧的区别 | `run_id` 里的 `side`（`rondo` / `codex`）是**比较侧**语义，与产品身份是不同概念，不得互相覆盖 |
+| 数据目录切分 | **不顶层并列**（不新开 `eval-data-multi/`），只在产品特定的层级加命名空间。`toolkits/`、`models/`、`tools/`、`sources/` 等共享资产保持单份 |
+| crate / 二进制名 | 沿用上游 `codex-cli` / `codex`，**不重命名**；产品身份由本规范的路径与字段承担 |
+
+`test-data/` 同理：内部按产品分子目录，不顶层并列。
+
+### 3.2 标识符
+
 **run_id**：`<YYYYMMDD-HHMMSSmmm>-<track>-<side>-r<round>`
 
 - 时间戳精确到**毫秒**，并带轮次后缀。只精确到秒时，并行跑批或同秒重试会覆盖同一个 artifacts 目录。
-- `track` ∈ `tb`（真实端到端）｜ `replay`（离线回放）｜ `shadow`（静态影子横评）
-- `side` ∈ `rondo` ｜ `codex` ｜ 影子横评时用模型标识（`luna-static` / `sol-static` / `local-static`）
+- `track` ∈ `tb`（真实端到端）｜ `replay`（离线回放，随 E-A 挂起）｜ `shadow`（静态影子横评）
+- `side` ∈ `rondo` ｜ `codex` ｜ 影子横评时用模型标识（`sol-static` / `local-static` / `local-ft-static`；
+  历史批次的 `luna-static` 保留不改）。`side` 只表达比较侧，产品身份另用独立字段记录（§3.1）。
 - 例：`20260812-143005182-tb-codex-r1`、`20260815-091200047-shadow-local-static-r1`
 - 生成时若目标 artifacts 目录已存在，视为冲突并直接报错，不覆盖。
+
+**batch_id**（Local M4 会话内判定）：`<YYYYMMDD>-cross-eval-<序号>`，一批一目录一份冻结 JSONL。
 
 **recording_id**：`<YYYYMMDD-HHMMSS>-<任务或场景短名>`
 **review_id**：沿用 `new_guardian_review_id()` 的既有值，不另起体系。
@@ -88,6 +115,7 @@ eval-data/                             # git-ignored
   "created_at": "2026-08-12T14:30:05+08:00",
   "track": "tb",
   "side": "rondo",
+  "product": "rondo-local",
   "git_commit": "4355362",
   "git_dirty": false,
   "binary_sha256": "…",
@@ -123,6 +151,7 @@ eval-data/                             # git-ignored
 }
 ```
 
+- `product` 按 §3.1 取值。历史行没有该字段，读取方一律按 `rondo-local` 解释，**不回填历史行**。
 - 当前 record schema v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的
@@ -156,7 +185,10 @@ eval-data/                             # git-ignored
 - Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source
   tag/commit 与 effective policy hash 后单独归档，不复制 config、lock、raw log 或 exception trace。
 - `track = replay` 时 `tasks` 为 `null`，改填 `metrics`：`{ wall_ms, cpu_ms, peak_rss_kb, turns, tool_calls, drift }`。
-- `track = shadow` 时 `metrics` 填一致率、false allow / false deny 率、P50/P95 延迟、显存峰值。
+  该 track 随 E-A 挂起，schema 保留但当前不产生新行。
+- `track = shadow` 时 `metrics` 填**教师一致率**（相对 Sol 教师标签）、结构化输出解析失败率、
+  超时与 fail-closed 次数、P50/P95 延迟、显存峰值。**漏放 / 误拦只有在有独立裁判结果时才可填**
+  （见 `doc/WBS/local-approval-model.md` L4）；单纯相对教师标签的差异不得写成 false allow / false deny。
 - **`git_dirty = true` 的运行结果只能用于调试，不得作为里程碑证据**。
 - `upstream_codex.workspace_lock_normalization` 只描述构建只读官方基线时在隔离 scratch 副本中的
   机械变换；RONDO 运行也记录它，便于证明两侧基线来源一致。不得把规范化后的 lock 哈希写成
@@ -170,6 +202,20 @@ eval-data/                             # git-ignored
 
 `taskset = "holdout"` 的运行**只写 `summary`，`tasks` 必须为 `null`**。否则隐藏集会通过结果库逐次泄漏单任务结果，几轮之后就不再隐藏。
 
+### 会话内人判定横评（Local M4）的产物
+
+M4 由 Opus 5 在 Claude Code 会话内判定，**不满足“自动运行、自动记录、自动归档”**，因此不进 `runs.jsonl`，
+改用固定产物格式约束：
+
+1. 每批输出一份**冻结 JSONL**，落到 `eval-data/cross-eval/<batch_id>/`，权限 0600。
+2. 每行至少含：证据哈希、所用裁判 prompt 文件的版本标识与内容哈希、各被评方输出、裁判结论与理由。
+3. 被评方在裁判侧**匿名化且顺序随机**；匿名标签到真实被评方的映射与结果同批保存，不在判定时可见。
+4. 必须记录**裁判模型标识与判定日期**，并把该批标注为“该时点判定”；订阅侧模型版本不由本项目冻结，
+   不假装可重跑复现。
+5. **合成证据主体与真实 `E_final` holdout 锚点分成两组记录，不混算**。真实 holdout 只作 sanity anchor。
+6. 需要公共可见时，只在 `eval/results/baselines/` 登记一行人工摘要（批次 id、样本数、prompt 版本哈希、
+   裁判模型与日期、结论），逐条判定留在 `eval-data/`。
+
 ## 5. 证据包分区
 
 1. S2 运行时统一落到 `eval-data/evidence/raw/<review_id>/`（`review_id` 只作文件名，保证实例唯一）。
@@ -178,7 +224,7 @@ eval-data/                             # git-ignored
 3. 划分结果写入清单并冻结；后续新增证据按同一规则增量划分，不重划历史。
 4. 证据包**按原始会话记录对待**：可能含任务上下文里出现的任何敏感内容，不入库；Unix/WSL 目录
    权限 `0700`，Windows 继承配置目录 ACL。
-5. 外发给云端模型（Luna / Sol 静态影子）属于数据外发，须单独授权。
+5. 外发给云端模型（Sol 等静态影子）属于数据外发，须单独授权；订阅制入口不额外计费，但不豁免该门。
 6. `v0.147.0` 下 `E_final` 可以是标准 Responses 或 Responses Lite：前者的 policy 位于
    `instructions`，后者位于 `input` 的 developer message。规范化后两种形态都必须保留等价的
    policy / 任务上下文 / 工具调用结果，并剔除 `encrypted_function_args` 等 provider 私有运输字段。
@@ -194,8 +240,9 @@ eval-data/                             # git-ignored
 |---|---|
 | `eval/results/runs.jsonl` | 永久。文本且体积小；合入主线后的内容是已交付公共结果的唯一历史真相 |
 | `eval/reports/` | 可随时重生成，只保留最新一版 |
-| `eval-data/runs/<run_id>/` | 保留最近 20 次 + 所有里程碑（M0~M5）标记的运行 |
-| `eval-data/recordings/` | 冻结用例集对应的录制永久保留；探索性录制可清 |
+| `eval-data/runs/<run_id>/` | 保留最近 20 次 + 所有里程碑标记的运行 |
+| `eval-data/cross-eval/<batch_id>/` | 永久。会话内判定不可重跑复现，删掉就没有第二份 |
+| `eval-data/recordings/` | E-A 挂起期间不新增；已有录制按原规则保留 |
 | `eval-data/evidence/` | `seed` 与 `holdout` 永久（体量小）；`raw` 在完成划分后可清 |
 | `eval-data/models/` | 只保留当前在用与上一版权重，其余按需重新下载 |
 
