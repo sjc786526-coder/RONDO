@@ -101,3 +101,6 @@
 - 代理修复 `1104d99` 在 main admission 时额外校验一份 Guardian 最大预留，容量不足在 main 上游前以
   `budget_capacity_exhausted` 停止；focused 103/103、`eval-lock` 通过。用户追加 `$300`，后继 schema-v4 cap
   `$1300`，不会改写 v19；可复用链增至 21 条。
+- 生成 v20：campaign/batch `p2-b7-canary-baseline-v20`/`p2-b7-canary-sol-sol-v20`、run base
+  `20260812-400000000`、321 个唯一 run ID、21 条 v18/v19 continuation，lock SHA
+  `1cf8e9352d8bd6c9ab05ff22a2d32680a40a37b4273904dc1e5811beead74edc`，prior `$980.271525`。

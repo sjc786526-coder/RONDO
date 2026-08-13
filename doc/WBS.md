@@ -78,7 +78,8 @@
   deadline 单调放宽为 180 秒。v19 复用 20 条 v18 有效链，新增 filter 的有效链后，在 fix 两次 Guardian 本地
   429 处发现并发预算 admission 缺陷并只读退役；13 个 paid run、61 个 attempt 全 settled，累计 debit
   `980.271525 USD`。schema-v4 要求 main admission 同时容纳 main+Guardian 两份最大预留。用户追加 300 USD 后
-  总硬上限为 1300 USD，当前余量 `319.728475 USD`。**
+  总硬上限为 1300 USD；v20 已以 21 条 v18/v19 有效引用、321 个唯一新 run ID 与精确 prior 冻结，当前余量
+  `319.728475 USD`。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到

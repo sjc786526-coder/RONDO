@@ -300,6 +300,11 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 3. 基础四轮与必要条件加跑完整后机械聚合 `sigma`、`delta`、共同分母、归因、usage 和费用；若下一请求的
    main+Guardian 的 `37.770000 USD` admission 容量无法装入剩余 `319.728475 USD` 时，在发送 main 前 blocked。
 
+当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v20`/`p2-b7-canary-sol-sol-v20`，run base
+`20260812-400000000`，lock SHA
+`1cf8e9352d8bd6c9ab05ff22a2d32680a40a37b4273904dc1e5811beead74edc`。321 个新 run ID 唯一，21 条
+v18/v19 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary。
+
 当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v19`/`p2-b7-canary-sol-sol-v19`，run base
 `20260812-390000000`，lock SHA
 `20483f7c3ce6f7fe058bbe34185464dade8c22280a34ece5b8ced009b2d84e73`。321 个新 run ID 唯一，20 条
@@ -307,13 +312,13 @@ v18 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary�
 
 ### 阻塞项
 
-- 无离线阻塞；v19 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
+- 无离线阻塞；v20 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
   provider-integrity 失败不隐藏、不减记，但不再作为本地实现熔断证据。
 
 ### 当前验收状态
 
 - v1 是 API 前失败终态；v2—v19 是保留全部费用事实的 blocked 终态。累计 debit `980.271525 USD`、
-  reservation 0；后继尚未冻结，B7 尚未形成四轮完整共同集合，M2 尚未验收。
+  reservation 0；v20 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
 
 ## 6. 关键决策记录
 
@@ -351,3 +356,4 @@ v18 有效逻辑结果引用已冻结；正式执行前仍须 fresh wire canary�
 | 030 | 生成 schema-v3 v19，冻结 20 条 v18 首个非 infra 结果引用、321 个新 run ID 与精确 prior；v1—v18 继续只读 | 新 identity 只承载缺失/infra 续跑，不能复用旧 run ID、覆盖旧结果或重置累计费用 | B6/B7 | 已采纳 |
 | 031 | v19 fix 的两次 Guardian 429 被证实为本地并发 reservation admission 缺陷；退役 v19，schema-v4 要求 main admission 同时容纳 main+Guardian 最大预留 | Guardian 会在 main terminal usage 到达前启动；只检查单份预留会让已发送的 main 确定性挤掉审批容量 | B6/B7 | 已采纳 |
 | 032 | 用户追加 300 USD，Plan 015 总硬上限提高到 1300 USD；v19 的 `980.271525 USD` 累计事实完整进入后继 prior | 新授权只扩大后继 cap，不改写正在运行或已退役 identity，也不重置既有费用 | B6/B7 | 已采纳 |
+| 033 | 生成 schema-v4 v20，冻结 21 条 v18/v19 首个非 infra 结果引用、321 个新 run ID 与精确 prior；v1—v19 继续只读 | v20 只补 infra/未启动链，并在发送 main 前执行 main+Guardian 并发容量 admission | B6/B7 | 已采纳 |
