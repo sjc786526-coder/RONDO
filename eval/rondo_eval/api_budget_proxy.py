@@ -35,7 +35,7 @@ MAX_INPUT_TOKENS = 1_050_000
 MAX_OUTPUT_TOKENS = 128_000
 BATCH_CAP_USD = Decimal("10.00")
 RUN_CAP_USD = Decimal("5.00")
-_MAX_EXPLICIT_BATCH_CAP_USD = Decimal("400.00")
+_MAX_EXPLICIT_BATCH_CAP_USD = Decimal("1600.00")
 _MAX_EXPLICIT_RUN_CAP_USD = Decimal("40.00")
 MAX_BENCHMARK_RUNS = 4
 _MAX_EXPLICIT_BENCHMARK_RUNS = 321
@@ -267,7 +267,7 @@ class PersistentBudgetLedger:
         self.default_run_cap = _money(default_run_cap_usd)
         self.max_runs = max_runs
         if self.total_cap <= 0 or self.total_cap > _MAX_EXPLICIT_BATCH_CAP_USD:
-            raise ApiBudgetProxyError("batch cap exceeds the supported 400 USD maximum")
+            raise ApiBudgetProxyError("batch cap exceeds the supported 1600 USD maximum")
         if self.default_run_cap <= 0 or self.default_run_cap > _MAX_EXPLICIT_RUN_CAP_USD:
             raise ApiBudgetProxyError("run cap exceeds the supported 40 USD maximum")
         if (
