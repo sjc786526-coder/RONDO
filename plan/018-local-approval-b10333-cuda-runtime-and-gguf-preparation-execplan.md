@@ -137,10 +137,10 @@
 - Plan 018 已完成：唯一 GGUF 静态完整性与 CUDA runtime model-free 能力均已验收，Git 提交、合并、推送及真实远端
   SHA 核验已经闭合。
 
-### 后续计划
+### 交接边界
 
-- 下一任务更新真实 ignored `rondo.local.toml`，配置唯一 GGUF，先完成受控 4k 加载与结构化单请求验收并晋级
-  `gpu_model_serving_validated`；随后单独执行 8k baseline 验收。
+- 本计划终止于 GGUF 静态完整性和 CUDA model-free 验收；不维护真实配置、4k/8k 或 L3/L4 的后续顺序。
+  当前路线只见 `doc/WBS/local-approval-model.md`。
 
 ### 阻塞项
 

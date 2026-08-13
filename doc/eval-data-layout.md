@@ -14,7 +14,7 @@
 
 分家的理由：结果库和清单必须跟着 commit 走才能回答"这个分数是哪版代码跑的"；而录制包和容器日志放进 git 会让仓库迅速不可用。
 
-落地时需在 `.gitignore` 追加：
+`.gitignore` 已包含：
 
 ```gitignore
 # 测评重资产：录制包、证据包、运行产物、模型权重
@@ -131,8 +131,8 @@ eval-data/                             # git-ignored
   `cpu_user_seconds`、`cpu_system_seconds`、`peak_rss_bytes` 与 `exit_code`，仅用于设施诊断。
   supervisor 在 daemon 确认 private cgroup namespace 后，另从 exact container 的 cgroup v2 生成
   `container_id`、`cpu_usage_seconds`、`peak_memory_bytes`；B2 当前收据直接复用 supervisor 的
-  canonical Docker receipt，paid publication、pair ledger 与 M1 继续持有该组机器证据。Plan 010 的 paid v6
-  参数已冻结，但真实 B3 仍待单独授权；完整探针和细粒度 Guardian 归因留给 A4/B5。
+  canonical Docker receipt，paid publication、pair ledger 与 M1 继续持有该组机器证据。B3/M1 已形成历史
+  真实证据；完整探针和细粒度 Guardian 归因仍由当前 WBS 的 A4/B5 路线管理。
 - 发布使用 journal v2：在同一结果锁内绑定工件树摘要、完整 record bytes 及 index 前/后长度与 SHA，
   以同目录临时文件写完整新 index、fsync 后原子 replace。恢复只接受精确 pre/post identity，并重新核对
   工件树；partial write、进程死亡或恢复前篡改均 fail-closed，不再原地 append 半行。paid 槽进入
@@ -192,7 +192,7 @@ eval-data/                             # git-ignored
 
 | 数据 | 保留策略 |
 |---|---|
-| `eval/results/runs.jsonl` | 永久。文本且体积小，是唯一的历史真相 |
+| `eval/results/runs.jsonl` | 永久。文本且体积小；合入主线后的内容是已交付公共结果的唯一历史真相 |
 | `eval/reports/` | 可随时重生成，只保留最新一版 |
 | `eval-data/runs/<run_id>/` | 保留最近 20 次 + 所有里程碑（M0~M5）标记的运行 |
 | `eval-data/recordings/` | 冻结用例集对应的录制永久保留；探索性录制可清 |
@@ -202,11 +202,15 @@ eval-data/                             # git-ignored
 当前尚未实现通用 `eval-gc`。清理只能针对本次已知的精确 target/scratch/任务容器，
 必须在操作前打印目标和体积，重型产物仍经项目看门狗；不静默清理来源不明的历史资产。
 
+tracked 结果可以先在专用本地 results 分支收敛，但该分支只算**待交付暂存**：必须核对结果差异、合入 `main`
+并推送后，才进入已交付公共历史。关闭 results worktree 不等于删除分支；未合入结果不得因工作树清理而丢失，
+也不得在文档中冒充已进入主线。当前具体分支状态只写 WBS，不固化在本规范。
+
 `eval/fixtures/` 入库阈值：总量 ≤ 50MB 且单文件 ≤ 10MB。超过则只入库精简后的规范化包，原始录制留在 `eval-data/`。
 
 ## 7. 不做什么
 
 - 不做数据资产审计、访问控制、可信链或签名体系。
 - 不建数据库，`runs.jsonl` + 目录约定足够，需要查询时用 `jq`。
-- 不做自动上传或远端同步；所有产物留在本机。
+- 不自动上传或同步 ignored 私有资产；受跟踪的轻量公共结果按 Git 交付流程进入主线和远端。
 - 不为"完整性"保留无人会看的中间产物。

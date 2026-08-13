@@ -228,7 +228,9 @@
   事实和原始 65/70 分类，保存 container user、精确资源 limits、network/rootfs；cleanup 仅接受 supervisor
   明确 `cleanup_verified`，无法复核时保持 `unverified`/`null`。这些改动仍只有 pure/fake 验证。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映本计划结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 - adapter 已移除 install/run 的运行时 ownership mutation，改为实际 ownership 验证、agent 用户自建
   私有文件，并只对固定 `/app/personal-site` 投影递归写权限；scoped Git probe 与 marker 依赖已经加入，

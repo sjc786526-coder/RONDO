@@ -133,14 +133,14 @@
 
 - 唯一 GGUF 的授权、下载与静态完整性验收已由 Plan 018 完成；本计划没有待执行下载项。
 
-### 后续计划
+### 交接边界
 
-- Plan 018 已完成 CUDA model-free runtime；下一独立任务才配置真实 ignored `rondo.local.toml`，执行 4k/8k
-  exact-model smoke、上下文扫描与未微调 M3 baseline。
+- 本计划终止于唯一 GGUF 的选择、下载与静态完整性验收。CUDA model-free runtime 后由 Plan 018 完成；
+  model-backed、L3/L4/M3 均不属于本计划，当前路线只见 `doc/WBS/local-approval-model.md`。
 
 ### 阻塞项
 
-- 无；模型加载与 model-backed 验收属于下一任务边界，不是本计划阻塞。
+- 无；模型加载与 model-backed 验收不属于本计划。
 
 ### 当前验收状态
 

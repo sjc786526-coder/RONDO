@@ -1,192 +1,112 @@
 # 方向 0：量化测评基准
 
-最后更新：2026-08-11 ｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-13 ｜ 依赖：P0（S1/S2）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
-为 RONDO 建立可重复、可归档、可出曲线的性能判据，使后续优化"有效与否"有据可依，并保证与冻结 codex 的对比公平。
+建立可重复、可归档、可出曲线的性能判据，并保证冻结 Codex 与 RONDO 的真实比较满足等条件合同。
 
-两条子轨：
+- **E-A 离线冻结回放**：低成本、高频验证行为保持型变化与设施故障路径。
+- **E-B 真实 API + Terminal-Bench 2.1**：低频验证行为改变型优化，是能力与性能结论的最终来源。
+- **E-C 设施自测**：保证记录、计分、归因和门禁本身不会说假话。
 
-- **E-A 轻量离线冻结回放**：测行为保持型优化（运行时、数据结构、工具执行）与故障注入，成本近零，可高频跑。建设原则是**轻量化，合理复用现有测试/诊断/测评设施**，不大规模另起炉灶。
-- **E-B 真实 API + Terminal-Bench 2.1**：测行为改变型优化，是最终可信指标，成本高、低频跑。
+## 当前状态
 
-按已定排序，**E-B 的最小真实链路先行**，它同时产出 E-A 需要的高保真录制素材和方向 2 需要的证据包模板。
+| 工作项 | 状态 | 当前边界 |
+|---|---|---|
+| B1 环境与接口 | 完成 | Harbor `0.20.0`、TB 2.1 commit、task/image、双侧 bundle 已冻结。 |
+| B2 双侧 no-API | 完成 | 同进程 RONDO→Codex 串行、Docker/watchdog、tool round-trip 与清理证据通过。 |
+| B3 / M1 | 完成 | v19 双侧真实 `fix-git` completed/reward 1，M1 passed；历史 identity 不可复用。 |
+| B4 分层 | 完成 | 10 canary / 61 validation / 18 holdout 已按 task ID 哈希冻结。 |
+| B5 计分归因 | 完成首版 | agent、Guardian 与 infra 可分离；后续 assessment 需再拆方向性与行为一致性。 |
+| B6 预算 | 完成首版 | v1—v22 只读，active paid identity 已关闭。 |
+| B7 首次执行 | 执行完成、结论不可归因 | v22 机械一致性子门 failed，但比较条件不对称，不能解释为 RONDO/Codex 能力或性能差异。 |
+| E-A A1—A7 | 未实现 | M2 的另一组成部分尚缺。 |
 
-## P1 当前状态
+v22 的 `sigma=0`、`delta=3` 与 `ab_delta_exceeds_aa_sigma` 是对既有冻结输入的机械结果。固定归因报告确认
+catalog prompt 相差 161 tokens，同时混有 harness/deadline 和时间分块差异；因此该批次只证明执行、结算、归档和
+机械门运行到了终态。报告见 `doc/research/plan020-b7-canary-baseline-failure-attribution.md`。
 
-- **B1 完成**：Harbor 固定为 `0.20.0`，TB 2.1 数据集固定为 commit
-  `ffccbe05ee73a9d59518217f294ad711bda39304`；`terminal-bench/fix-git` 的 task archive 和
-  `linux/amd64` 镜像均以 SHA-256 锁定。受监督 Docker 下官方 hello-world oracle 为
-  `completed`/reward 1.0。受跟踪 lock 绑定 `uv.lock`、Harbor 版本、console/interpreter 和三个关键模块；
-  不再遍历 site-packages 或维护传递依赖文件闭包。
-- **B2 完成**：统一 runner、双 adapter 与 Docker/watchdog 监督保持。no-API 不再使用
-  permanent pair ledger、retirement、失败摘要恢复或一次性 migration；失败可在修复后由用户重新启动。
-  canonical `just eval-b2-no-api` 在一个进程中按 RONDO→Codex 严格串行，首侧失败立即停止。成功时只替换
-  `eval-data/b2/current.json`，其中 Docker 字段直接来自 supervisor 的唯一 receipt。
-  adapter 仍要求 bundle 目录 root-owned、三个固定文件为 agent UID/GID 1000 且 mode 0555、
-  精确 `/app/personal-site` Git probe、
-  custom seccomp、`cap_drop=ALL`、private cgroup、容器 metrics、VHDX 与 cleanup；marker 还必须来自
-  冻结 code-mode 两项 structured output 的第二项，且其中投影后的 `exit_code=0`、stdout 精确等于固定值。
-  Plan 009 在 commit `b47a7b4` 上以已存在的 pinned image 严格串行运行 RONDO→Codex：两侧均
-  completed，各 2 次 fake 请求、tool round-trip 成功、cleanup verified empty；官方 API 0 次、
-  费用 0 USD。`reward=0` 是 no-API marker 诊断不解真实 task 的预期结果，不冒充 B3 成绩。
-- **B3/M1 完成**：Plan 014 v19 冻结唯一 pair/batch/run IDs、Sol/medium main、Sol/low Guardian、source-bound
-  frozen Codex catalog、价卡/retry、profile/endpoint SHA 与 20 USD pair cap。fresh exact-wire canary 4/4 请求
-  attempt 1、usage valid 后，正式运行严格按 RONDO→frozen Codex 串行完成同一 `fix-git` task：RONDO 17/17、
-  Codex 18/18 upstream request 均 attempt 1、usage-priced，双侧 `completed`/reward 1、reservation 0。
-  RONDO 两份自然 Guardian `E_final/meta` 均 Sol/low、approved；不可改写的 v19 public record 只证明
-  task-scoped request/evidence count match，后续新记录才要求 canonical digest 一一绑定后标为 verified。
-  durable public result、pair lock、sequence ledger、profile/endpoint 和 container metrics 经既有 `assess_m1`
-  得到 `m1=passed`、`reasons=[]`、`s2=task_scoped_count_match`。v19 正式费用 `$0.870787`；Plan 014 含历史 canary/失败终态
-  的累计本地估算 `$6.988825 < $280`，全部 reservation settled，`actual_usd=null`。旧失败 pair 均保持不可复用，
-  详见 Plan 014 与执行日志。
+tracked v22 结果当前只在本地 `0811-p2-b7-results@564a602`，尚未进入 `main` 或远端；交付顺序见顶层 WBS。
 
-## E-B 真实 Terminal-Bench 2.1 测评
+## 当前工作包
 
-### B1 环境与接口勘察（规模 S，授权门：Docker）
+### E-B8 公平比较合同闭合（无真实 API）
 
-- 沙箱外验证 Docker Desktop daemon 与镜像拉取可用（`doc/development-environment.md` 第 7 节已确认握手成功，未拉过镜像）。
-- 用 uv 安装 TB 2.1 官方 harness，勘察其 agent 适配接口的**实际**形态（版本以安装后为准，不预设）。
-- **勘察完立即冻结版本**：把 harness 的精确版本号与依赖锁文件写入仓库（uv lock / 明确 pin），任务镜像记录 digest。"以安装后为准"只适用于第一次勘察，之后基线必须可复现，不能随上游漂移。
-- 产出：接口勘察笔记 + 版本冻结记录 + 最小可跑通的官方示例任务一条。
+1. **catalog 对称**：两侧使用同一份完整 8-model catalog bytes；lock 记录最终 artifact SHA，上游/RONDO 两个
+   来源各自的 commit/path/blob ID，投影算法/schema，main/Guardian model 与 override 目标 entry。
+2. **请求前置硬门**：规范化并比较剔除任务内容后的 task-independent tool specs、instructions、输出 schema 等
+   冻结分区；完整请求 digest 各侧分别记录用于 provenance/drift，不要求轨迹分叉后的动态请求逐字节相等。
+   先用禁止上游调用的 stub preflight 证明冻结分区不对称会 fail-closed。
+3. **执行条件统一**：冻结同一 harness commit、timeout/deadline、task/image 与 provider profile；按任务交错 A/A、A/B，
+   不按整轮时间块串行。
+4. **判据分层**：assessment 分别报告方向性分数、跨侧差异与 A/A 行为一致性，不再用“性能门”概括全部结论；
+   条件加跑必须进入聚合。
+5. **重复规则预冻结**：pilot 后、正式执行前冻结次数；波动任务使用奇数且至少 3 次；不得看结果后删样本或改轮数。
+6. **保留 M2 机械判据**：不使用 pairwise-max `σ` 等事后放宽办法。比较合同不成立时直接 blocked，不计算能力归因。
 
-### B2 双侧 agent 适配器（规模 M）
-
-- 把**冻结 codex**（`codex-source-code/` 构建产物）与 **RONDO**（`mydev/`）都接入同一 agent 适配接口。
-- **基线二进制的构建方式**：`codex-source-code/` 是纯净只读快照，官方 0.147 `Cargo.lock` 的
-  135 个 workspace package 仍写作 `0.0.0`。构建必须复制到隔离 scratch source，只在副本中把这
-  135 项机械规范化为 `0.147.0`，并指定项目专用 scratch `CARGO_TARGET_DIR`；不得改写只读快照或
-  把 scratch lock 冒充官方文件。基线二进制**构建一次后固化**，记录上游 tag/commit、规范化规则、
-  二进制 SHA256 与工具链版本；后续跑批直接复用，不每轮重编。所有重型构建仍走项目看门狗。
-- 统一运行条件，写死在适配器里而不是靠人工记忆：
-  - 关闭 websocket（provider `supports_websockets = false`）
-  - `approvals_reviewer = "auto_review"`
-  - `approval_policy = "on-request"`
-  - `sandbox_mode = "workspace-write"`（三项合起来才等价于 0.147 的 `--approve-for-me`）
-  - Guardian model/effort 由本地 paid profile 选择并由每批 pair lock 冻结（依赖 S1）
-  - 相同主模型、reasoning effort、provider profile、价卡与重试策略
-- `v0.147.0` 的 Guardian 默认模型会随 provider/auth 改变，所以测评配置和结果元数据必须记录
-  **显式** model/effort，不得以当前 API-key 路径恰好默认 Luna 为由省略配置。
-- 验收：同一任务两侧各跑一次，运行条件在结果元数据里可核对。
-
-### B3 最小真实链路跑通（规模 S，授权门：小额真实 API）—— **M1**
-
-- 1~2 个任务的端到端，结果落盘归档。
-- 同步开启 S2，确认真实审批过程能产出 `E_final`。
-- **已完成**：v19 在 `terminal-bench/fix-git` 上完成双侧真实运行，M1 passed、S2 task-scoped count match；后续运行不复用该
-  identity，B7 仍需按 B6 单独预算和授权。
-
-### B4 任务分层与冻结清单（规模 S）
-
-- **canary 子集**：10 个任务，要求彼此差异大、覆盖典型能力、单任务成本可控。作为阶段性日常测评。
-- **验证集**：其余可见任务，低频使用，用于检查是否过拟合 canary。
-- **隐藏集**：预先划出并冻结，**不查看任务内容、失败日志、验证器与单任务结果**，只在重大阶段验收时看总分。
-- **隐藏集的实际隔离方法**（光把清单写进仓库不构成隐藏）：
-  - 用**确定性哈希划分**决定归属（如 `sha256(task_id)` 落桶），划分过程只读任务 id，不需要查看任务内容。
-  - 仓库内只存"分区归属"，不存任务正文、验证器或失败日志。
-  - 隐藏集的**单任务结果不写入结果库明细**，只写聚合分数——否则隐藏集会通过结果库慢慢泄漏。
-  - 后续每个任务计划的"不允许读取/查看"一节必须显式列出隐藏分区。
-- 分层清单一经冻结即写入仓库，改动需记录理由。
-- **当前实现**：TB 2.1 pinned 89 个 ID 已按无盐 `sha256(task_id)` 冻结为 10 canary / 61 validation /
-  18 holdout；执行 catalog 另绑定 10 个 source/image/workdir/resource/timeout identity。holdout 划分前未读正文，
-  B7 不运行 holdout。
-
-### B5 计分与失败归因（规模 M）
-
-- 主指标：Task Resolution Success Rate。
-- 归因分类必须区分：主 Agent/Harness 失败、Guardian 正确拒绝导致的失败、Guardian 误拒、基础设施失败（超时/网络/容器）。
-- Guardian 对危险或未授权动作的**正确**拒绝计入主 Agent 应承担的失败代价，但在报表中单列，避免掩盖 harness 真实能力变化。
-- **当前实现**：纯函数计分器保守拒绝矛盾证据；无独立 adjudication 的 semantic deny 归 `guardian_false_deny`，
-  Guardian technical failure 归 infra 并排除分母；holdout producer 只接受整批聚合。
-
-### B6 成本与预算护栏（规模 S）
-
-- 跑批前输出预估：任务数 × 轮数 × 模型 × 预估 token → 成本区间。
-- 硬上限：超过预算即中止并保留已完成结果。
-- 每次跑批需单独授权。
-- **当前实现**：Plan 020 的累计硬上限最终冻结为 `1600 USD`；v22 终态累计本地估算
-  `1466.074133 USD`。schema-v6 的 321 个 slot 由代码机械派生，18.885 USD 最大合法 request reservation、
-  main/Guardian 并发 admission 与全局 prior/cap 在 identity 生成和每次请求前复核。v1—v22 全部只读，
-  active paid identity 已关闭。
-
-### B7 首次基线（规模 S，授权门：canary 跑批）—— **M2 的一半**
-
-- 按 `doc/WBS.md` §4「M2 的可执行判据」执行：先用同一 RONDO 二进制跑 2 轮 A/A 得出波动带宽 `σ`，再跑 codex 与 RONDO 各 1 轮 A/B，要求跨侧差异任务数 `≤ σ` 且无单向失败模式。
-- 基础 10 任务 × 4 轮 = 40 次运行，外加条件触发的定点加跑（每个出现 codex-pass/RONDO-fail 的任务两侧各加 2 轮）。按 B6 出预估并单独授权。
-- 不通过则先停下修测评设施，不得先行推进优化。
-- **当前状态**：Plan 020 v22 已完成真实执行并形成有效 failed 基线。九项共同有效任务上 RONDO A/A
-  为 `5/9`、`5/9`，RONDO A/B 为 `5/9`，frozen Codex A/B 为 `4/9`；`sigma=0`、`delta=3`，精确失败原因为
-  `ab_delta_exceeds_aa_sigma`。必要条件加跑未形成稳定的 RONDO 三败/Codex 三过。wire 与 paid 合计均已结算、
-  reservation 0、`actual_usd=null`。这证明 B7 执行和归档完成，不代表 B7/M2 性能门通过；E-A A1—A7 仍待实现。
+验收只运行 pure/fake/loopback/stub 定向门禁，不调用真实 API。完成后才可制定新的 B7 campaign；新 campaign
+必须使用新 IDs、独立 cap 和单独授权。
 
 ## E-A 轻量离线冻结回放
 
 ### A1 录制器（规模 M）
 
-- 在 HTTP 层录制，不侵入核心代码路径：provider `base_url` 指向本地录制代理。
-- 复用 `codex-rs/responses-api-proxy/src/dump.rs` 的 `ExchangeDumper`（已带 authorization 脱敏与序号），按需扩展 SSE 流的完整留存。
-- 录制元数据必须标记 Guardian 请求是标准 Responses 还是 Responses Lite。`v0.147.0` 的 Luna
-  使用 Lite，policy 和工具声明的 JSON 位置与标准 Responses 不同；request drift 只能在同一
-  完整逻辑请求形态或先规范化为统一逻辑 payload 后比较。
-- 录制元数据还必须写入上游 baseline tag/commit、Guardian source tag/peeled commit 与有效 policy 内容哈希；
-  Guardian两字段取自 `mydev/codex-rs/core/upstream-source-baseline.toml`。
-  0.147 的 policy/template 和 approval/retry reason 输入与 0.146.1 不同；同一源码版本也可能使用
-  requirements/config/catalog policy，不能在没有两层标记时合并统计。
-- 录制可以重、可以慢、低频执行，**不作为基线**，只作素材来源。
+- 在 HTTP 层录制完整请求/SSE，复用现有 proxy/dumper；authorization 等敏感字段脱敏。
+- 同时记录 Standard/Responses Lite 形态、baseline/source commit、有效 policy hash 与请求规范化版本。
+- 录制只作素材，不作为性能基线；低频运行，不进入严格耗时测评热路径。
 
 ### A2 回放服务器（规模 M）
 
-- 读取录制包，按**轮次序号**返回对应 SSE 响应，不做请求体严格匹配。
-- 但要计算并报告 **request drift**：本轮实际请求与录制时请求的结构化差异。drift 为零表示这是纯行为保持型改动，回放结论可信；drift 非零要在报告里显式标红，说明该用例已不适用于回放判据。
-- 验收：同一录制包连续两次回放，指标波动在阈值内且 drift 为零。
+- 按轮次返回冻结 SSE，计算实际请求与录制请求的结构化 drift。
+- drift 为零才可用于行为保持型判据；非零必须显式标记为不适用，不用人工解释成通过。
+- 同一录制包连续两次回放，输出、归档和外部指标应在冻结阈值内稳定。
 
 ### A3 冻结用例集（规模 S）
 
-- 从 B3/B7 的真实运行中挑选，覆盖：长轨迹、多工具调用、含审批、含压缩/compact、含失败重试。
-- 用例集冻结并写入仓库（体积受控，必要时只存规范化后的精简包）。
+- 从已交付的真实运行中选取长轨迹、多工具、审批、compact 与失败恢复样本。
+- 体积受控；隐藏分区内容和单任务结果不得进入仓库或日常开发循环。
 
 ### A4 探针与指标（规模 M）
 
-- **两类指标必须分开，不能混谈**：
-  - **外部指标**（wall time、CPU time、峰值内存、退出码）由 runner/supervisor 在**进程外**统一采集。
-    `getrusage(self+children)` 只覆盖宿主 runner/CLI，仍仅作设施诊断。supervisor 已对 exact
-    container 读取 cgroup v2 `cpu.stat usage_usec` 与 `memory.peak`，生成
-    `container_id/cpu_usage_seconds/peak_memory_bytes`，并作为 paid publication/pair/M1 的强制机器
-    门禁。Plan 009 已在双侧真实 no-API Docker 中采集 container CPU/峰值内存，并核对
-    pinned image、VHDX、custom seccomp 与 cleanup；冻结 codex 不加补丁，
-    两侧使用完全相同的采集方式。
-  - **内部探针**（轮次数、工具调用次数与耗时、序列化耗时、审批往返耗时）只存在于 RONDO 内部，用于 **RONDO 自身版本间**的对比与找瓶颈，**不用于与冻结 codex 横比**。
-  - 原先"baseline 同样加载探针"的说法含糊：往冻结 codex 里打探针就破坏了"冻结"的意义，因此明确改为上面的分工。
-- 实现要求：原子累加、内存累积、**轮末统一输出**，运行中不持续写盘。
-- 默认关闭，关闭时零开销；关闭状态下的外部指标即为公平对比基准。
+- 外部指标：wall time、CPU time、peak memory、exit status，由同一 runner/supervisor 采集，用于公平横比。
+- 内部指标：轮次、工具耗时、序列化、审批往返，只用于 RONDO 自身诊断。
+- 探针默认关闭；开启时内存累积、轮末统一输出，不常驻写盘。
 
 ### A5 故障注入（规模 S）
 
-- 确定性注入：请求超时、SSE 中途断流、工具执行失败、沙箱拒绝、审批超时。
-- 用途是测健壮性路径的行为与耗时，不是压力测试。
+确定性覆盖请求超时、SSE 断流、工具失败、沙箱拒绝与审批超时；验证恢复与归因，不做压力测试。
 
 ### A6 结果归档与曲线（规模 S）
 
-- 目录布局、命名、结果库 schema、保留策略与 git 跟踪边界统一遵循 **`doc/eval-data-layout.md`**，本文不重复定义。
-- 绘图脚本用 `mydev/scripts/.venv`（uv 管理）出趋势曲线，按需运行，不常驻。
+统一写入 `eval/results/runs.jsonl` 与 `eval/results/baselines/`，schema、Git 交付和私有重资产边界遵循
+`doc/eval-data-layout.md`。绘图按需运行，不常驻服务。
 
-### A7 一键入口（规模 S）—— **M2 的另一半**
+### A7 一键入口（规模 S）—— M2 的离线部分
 
-- `just` 任务一键跑离线回放并输出与上次的对比表。
+提供一个 `just` 入口完成回放、判据、归档并输出与上一基线的对比；失败时保留可恢复证据并返回非零。
 
 ## E-C 测评设施自测
 
-测评设施说了假话比没有测评更糟，因此设施本身要有测试：
+- 单测覆盖规范化器、回放服务器、计分器、归因分类器、结果 schema 与 active identity 门禁。
+- 注入已知延迟、额外轮次和请求不对称，证明报告能检出且 fail-closed。
+- 测试并入已有体系，不另起框架；只运行与本次改动相关的必要门禁。
 
-- 回放服务器、规范化器、计分器、归因分类器的单元测试。
-- **注入已知退化能被检出**：人为在回放路径插入固定延迟或多余轮次，验证报告确实标出退化。
-- 这些测试并入既有 Nextest 体系，不另起框架。
+## 再次执行 B7 的前置与验收
+
+新的真实 canary 只有在以下条件同时满足后才能申请授权：
+
+- E-B8 无上游 preflight 通过；E-A A1—A7 完成并可一键归档。
+- v22 tracked 结果已完成 Git 交付；新 identity 不复用任何 v1—v22 ID。
+- 任务、轮数、交错顺序、重复规则、模型、价格快照、预算 cap 和停止条件全部预冻结。
+- 按 `doc/WBS.md` 的 M2 机械判据执行，比较合同任一项漂移都先 blocked。
+
+通过只表示在冻结样本与合同下达到 M2；不自动推广到全量 TB 2.1，也不自动解锁未获授权的下一轮费用。
 
 ## 硬约束
 
-- 测评设施对功能代码的性能影响必须可忽略，且默认关闭。
-- 冻结 codex 与 RONDO 的运行条件由适配器统一写死，不依赖人工保证。
-- 隐藏集信息不得进入日常开发循环。
-- 任何真实 API 跑批前须单独授权并给出预算。
-- skip、未运行、fake 结果不得表述为通过；离线回放结论不得冒充真实任务成绩。
+- 测评默认关闭，对功能路径的性能影响必须可忽略。
+- 冻结 Codex 与 RONDO 的条件由设施机械写死和核验，不依赖人工保证。
+- 隐藏集信息不得进入日常开发；只保留聚合结果。
+- 任何真实 API 跑批须单独授权并给出任务、轮数、模型和预算。
+- fake、skip、未运行、无效比较和 infra 不得表述为能力通过。

@@ -324,9 +324,10 @@ standard/Lite 形态均补回归。
   endpoint hash、价卡/retry、catalog/bundle identity。fresh exact-wire canary 4/4 请求一次成功后，RONDO 与 frozen
   Codex 严格串行完成同一 `fix-git` task，分别 17/17 与 18/18 upstream request attempt 1、usage valid；双侧均
   `completed`/reward 1、run 未停止、reservation 0。
-- RONDO 归档两份自然 Sol/low Guardian `E_final/meta`，均 approved，S2 request/evidence 集合绑定为 verified。
+- RONDO 归档两份自然 Sol/low Guardian `E_final/meta`，均 approved；v19 的不可改写旧合同只能证明
+  task-scoped request/evidence count match，后续合同才要求 canonical digest 一一绑定。
   durable public result、pair lock、sequence ledger、profile/endpoint 和 container metrics 经生产 `assess_m1` 得到
-  `m1=passed`、`reasons=[]`、`s2=verified`。
+  `m1=passed`、`reasons=[]`、`s2=task_scoped_count_match`。
 - v19 正式 pair 本地估算 `$0.870787`；Plan 014 全阶段累计 `$6.988825 < $280`，无悬挂 reservation，供应商账单
   未查询且 `actual_usd=null`。focused 155/155、`just eval-lock` 85 packages、完整 eval 345/345 通过；Docker/watchdog
   最终 `stop=none`、`cleanup=none`，0 containers/volumes。
@@ -425,8 +426,9 @@ standard/Lite 形态均补回归。
 - v22 fresh wire 4/4 usage-valid；25 条历史首个非 infra 结果经冻结 SHA 重验后复用，只为缺失/infra 逻辑链
   使用新 IDs。四轮在同一九项共同集合上形成 RONDO A/A `5/9`、`5/9`，RONDO A/B `5/9` 和 frozen Codex
   A/B `4/9`。
-- `sigma=0`、`delta=3`，因此冻结的 `delta <= sigma` 门以 `ab_delta_exceeds_aa_sigma` 判 failed。唯一条件任务
-  `db-wal-recovery` 的两侧各两次加跑未形成 RONDO 三败/Codex 三过；该结果是性能事实，不是设施 blocked。
+- `sigma=0`、`delta=3`，因此冻结的 `delta <= sigma` 机械一致性子门以 `ab_delta_exceeds_aa_sigma` 判 failed。
+  唯一条件任务 `db-wal-recovery` 的两侧各两次加跑未形成 RONDO 三败/Codex 三过；这不是设施 blocked，
+  但后续归因确认比较条件不对称，不能解释为产品能力或性能差异。
 - `vulnerable-secret` 的四条逻辑链均收到 HTTP 200 SSE `error/cyber_policy` 且无 usage，按合同各保守结算并
   排除共同分母；其余任务使用首个非 infra 终态，未通过选择性重跑改变成绩。
 - v22 paid `329.767745 USD`、wire `0.192860 USD`，Plan 020 累计 `1466.074133 < 1600 USD`；202/202 upstream
@@ -439,7 +441,8 @@ standard/Lite 形态均补回归。
   组件变化会使旧 proof 失效。
 - terminal state 到 private/tracked aggregate 支持幂等恢复；schema-v3+ 的 provider-integrity 只豁免机械熔断，
   不再绕过单轮最终 infra 上限。
-- v22 历史数据只读重放保持一致；B7 是有效 failed 基线，E-A 与 M2 尚未完成，方向 1 正式优化未解锁。
+- v22 历史数据只读重放保持一致；机械一致性子门 failed，但该批比较不具备能力归因条件。E-A 与 M2 尚未完成，
+  方向 1 正式优化未解锁。
 
 ### 2026-08-13 Plan 018 GGUF 静态验收与 b10333 Linux CUDA model-free runtime
 
@@ -453,3 +456,26 @@ standard/Lite 形态均补回归。
 - CPU/CUDA exact binary path 只映射各自 lock；受跟踪示例配置的 model-free doctor 返回
   `linux_cuda_built_model_unvalidated`，正式 launcher 仍拒绝。真实 ignored 配置未迁移，直接 doctor 仍为
   `configuration_error`；focused tests 58/58 通过，4k/8k model-backed、推理与 structured output 均未运行。
+
+### 2026-08-13 教师 harness 性能候选调研
+
+- 完成 Claude Code、Kimi Code、OpenCode 与 OpenHands SDK 的主题化源码比较，以及与冻结 Codex `v0.147.0`
+  的差异矩阵；只学习机制，没有复制教师源码或运行产品代码。
+- 形成 C1—C13 候选及证据等级、适用条件、风险、测评轨和否证边界。候选是待验证假设，不代表收益或实施已解锁。
+- 研究交付为 `doc/research/teacher-harness-performance-candidates.md`；方向 1 的当前顺序统一由 WBS 管理。
+
+### 2026-08-13 可信证据型多智能体内核调研
+
+- 完成公开研究、冻结 Codex 和本地教师源码的对照，收敛出“私有上下文 + 持久证据引用 + ResultCard 原件定位 +
+  有界复核 + root 合成”的候选内核语义。
+- 明确 root 单 writer 起步、持久化先于发布、恢复不可伪装成功、开放第二 writer 前必须有 Workspace Manager 等边界，
+  并排除自由群聊、投票、trust score、平行鉴权和通用副作用缓存等低收益复杂化。
+- 研究交付为 `doc/research/multi-agent-trusted-evidence-research.md`；产品实现未开始，阶段路线统一由 WBS 管理。
+
+### 2026-08-13 Plan 020 B7 failed 归因收口
+
+- 对产品源码、四轮结果和执行时间线完成独立复核，未发现能解释三项 delta 的 RONDO 产品机制退化。
+- 确认 A/B 两侧存在完整 catalog prompt 161-token 非对称，同时混有 harness/deadline 与非交错时间块差异；
+  因此 v22 机械一致性子门真实 failed，但不能据此归因 RONDO/Codex 的能力或性能差异。
+- catalog 字节/provenance、规范化请求 preflight、同 harness/deadline、交错执行、判据分层与重复数预冻结等
+  实验约束已达成共识，报告分歧全部关闭。

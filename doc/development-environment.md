@@ -1,6 +1,6 @@
 # RONDO 开发环境基线
 
-最后核对时间：2026-08-10（Asia/Shanghai）
+最后状态同步：2026-08-13（环境版本未在本次文档整理中全量重探测）
 
 适用工作区：`/home/sjc/desktop/RONDO`，主要源码位于 `mydev/`。
 
@@ -370,13 +370,14 @@ client=29.6.2 server=29.6.2 api=1.55 os=linux/amd64
 - Terminal-Bench `fix-git` `linux/amd64` 镜像 digest：
   `sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74`。
 - hello-world oracle 的 Docker no-API 生命周期验收通过，reward 1.0。
-- 测试基线与收尾的 Docker 总占用均为 18.128GB，本任务残留容器/卷为 0，
+- 对应验收批次基线与收尾的 Docker 总占用均为 18.128GB，该批次残留容器/卷为 0，
   未触发 40/60GB 增量或 Windows `C:` 盘实际剩余 80GiB 停机线。
 - 早期 builtin seccomp 诊断中，冻结 Codex 在任务容器内以 root 与 UID/GID 1000 两种形态都无法再创建
-  user namespace。后续项目内最小 custom seccomp、`cap_drop=ALL`、private cgroup 与有效态监督已进入
-  机器合同；v4 RONDO 重验随后在 adapter 安装阶段失败并退休。当前不授予 privileged/`SYS_ADMIN`，也不
-  使用 `seccomp=unconfined`。v5 adapter/Git/cleanup 合同尚未运行真实 Docker，因此 Terminal-Bench 双侧
-  no-API 仍不是通过项。
+  user namespace。项目内最小 custom seccomp、`cap_drop=ALL`、private cgroup 与有效态监督随后进入
+  机器合同；当前不授予 privileged/`SYS_ADMIN`，也不使用 `seccomp=unconfined`。
+- Plan 009 已在受监督的真实 Docker 中按 RONDO→Codex 串行完成 B2 no-API：两侧均 completed、各 2 次
+  fake 请求且 tool round-trip 成功，官方 API 0 次、费用 0 USD，精确清理为空。该结果证明 B2 设施链路，
+  不代替真实 API 的 B3/M1 证据。
 
 ## 8. 当前未安装或未执行的重型工具
 
@@ -419,18 +420,22 @@ Bazel 门禁与 `just argument-comment-lint` 仍未运行。
 任务需要的变量注入目标子进程；日志、命令行、测试工件和错误消息均不得包含值。AI 验证配置时只返回
 `present`、`missing` 或 `empty`，不得读取后回显、报告长度、前后缀或哈希。
 
-linked worktree 不复制凭据。后续加载器通过 `git rev-parse --git-common-dir` 定位 common Git directory，
+linked worktree 不复制凭据。加载器已通过 `git rev-parse --git-common-dir` 定位 common Git directory，
 再取其父目录作为主仓库根，从同一处读取 `.env.local` 和 `rondo.local.toml`。B3 只要求
 `OPENAI_API_KEY`；DeepSeek/Qwen 仅在对应 provider 实际使用时要求各自密钥；只监听 `127.0.0.1` 且未启用
 `--api-key` 的 llama.cpp server 不要求 `RONDO_LOCAL_MODEL_API_KEY`。
 
-### 9.1 P1 本地运行时状态
+### 9.1 项目局部运行时状态
 
-- llama.cpp 固定为 `b10333`/commit `08659901c43b51de735740f1cf61bb82fbe0c4e4`，CPU x64
-  asset 安装于 ignored `eval-data/tools/llama-b10333/`；launcher/doctor 先核对安装 binary SHA，
-  再核对 `--version` build/commit。`doctor` 在无权重时只做短生命周期
-  router 身份/健康探针，终态为 `cpu_frontend_ready_model_missing_gpu_unvalidated`/78；未下载模型、
-  未启动真实推理。
+- llama.cpp 固定为 `b10333`/commit `08659901c43b51de735740f1cf61bb82fbe0c4e4`。CPU x64 与 Linux CUDA
+  两套项目局部 runtime/lock 并存；CUDA 使用项目局部 Toolkit 12.6.2、Ada `89-real` strict-link，
+  version/help/device/router 与动态依赖闭包已通过 model-free 验收。当前能力精确为
+  `linux_cuda_built_model_unvalidated`，正式 launcher 仍拒绝启动模型服务。
+- 唯一 Bartowski Ministral 3 8B Instruct 2512 `Q4_K_M` GGUF 已在 ignored 路径完成普通文件、精确
+  `5,198,387,456` bytes 与 SHA-256 静态验收；模型从未加载或推理，4k/8k、显存、延迟和结构化输出均未验。
+- 真实 ignored `rondo.local.toml` 仍是旧合同，直接 doctor 会在 runtime/device/model 检查前以
+  `configuration_error` 停止。因此已验 runtime 能力不表示当前机器配置或本地审批服务就绪；当前安排只见
+  `doc/WBS/local-approval-model.md`。
 - Terminal-Bench 两侧静态 musl runtime bundle 位于 ignored `eval-data/bin/{rondo,codex}/`；
   内含 CLI、`codex-code-mode-host` 与同一官方 v0.147.0 musl bwrap，详细 SHA 在各 bundle
   `manifest.json` 和 `agent_log/` 的 P1 日志中。

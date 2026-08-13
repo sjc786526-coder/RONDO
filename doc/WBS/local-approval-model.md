@@ -6,7 +6,7 @@
 
 把 Codex `approve for me` 的审批模型换成可在本地推理的小模型，量化其审批质量与成本相对云端模型的差距。能力必须**可插拔、一键切换**，且不影响原有功能与性能。
 
-## P1 当前状态
+## 当前状态
 
 - **L1 完成**：已落地 Standard/Responses Lite 双形态 `E_final` 解析、exact policy bytes
   身份哈希、provider-neutral canonical payload 与结构化决策校验。出站静态 payload 同时排除
@@ -40,6 +40,16 @@
   range` 返回 `configuration_error`；已验的 `linux_cuda_built_model_unvalidated` 来自受跟踪示例配置的 model-free
   复现，不表示机器配置或模型服务就绪。冻结选择见 2026-08-12 快照，本次下载/CUDA 证据见 2026-08-13 快照。
   exact-GGUF model-backed 4k smoke 仍是 `gpu_model_serving_validated` 的硬前置，8k baseline 随后单独验收。
+
+### 当前推进顺序
+
+1. 把真实 ignored 配置迁移到当前合同并只做配置/doctor 核验。
+2. 使用唯一已静态验收的 GGUF 完成 4k model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出。
+3. 4k 通过后再单独验证 8k baseline；失败时保留 4k 可用结论，不通过弱化 identity 或输出校验凑绿。
+4. 之后进入 L3/L4 同证据横评并形成 M3；L5—L7 仍属于后续阶段和各自授权门。
+
+真实模型加载/推理与重型 Cargo、Docker 互斥；未完成 4k 前，能力只称
+`linux_cuda_built_model_unvalidated`。
 
 ## 核心设计（已定，不再反复讨论）
 

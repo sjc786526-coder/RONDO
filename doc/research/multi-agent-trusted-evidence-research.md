@@ -6,6 +6,7 @@
 > 调研范围：同行评审论文、近期预印本、标准、头部实验室公开资料、冻结 Codex 与本地教师源码快照。
 > 执行边界：本轮只读源码和资料，没有运行 Cargo、Docker、测试、真实模型或真实 API，没有修改运行中实例；本文是唯一交付物。
 > 时效说明：在线产品文档和预印本均按 2026-08-12 可见版本阅读，后续实现前应重新核验。
+> 规划归属：本文只保存研究证据、候选设计与复杂度边界；当前状态、阶段顺序与实施任务只以 `doc/WBS/multi-agent-trusted-evidence.md` 为准。
 
 ## 摘要
 
@@ -21,32 +22,24 @@ RONDO 不应把未来路线定义成“多个智能体互相发消息”，也�
 
 现有受控研究也不支持“智能体越多越好”。同预算下，强单智能体、自一致性或对初始独立答案直接投票，常常追平或超过多轮辩论；多智能体的稳定收益集中在可并行宽搜、上下文覆盖不足、真正异构的工具/知识来源，以及可验证的中间结果。依赖密集、共享可变状态、严格顺序推理和强单体已足够好的任务，反而容易退化。
 
-这对 RONDO 的直接含义是：
+研究证据对 RONDO 支持以下设计原则：
 
-1. 多智能体作为确定要实现的产品能力推进，不以“必须证明全面胜过单体”作为立项门槛。
-2. 从小团队、短协议和一条可恢复的纵向闭环开始；它可以触及工具、session、持久化、completion 和 context 构建等内核边界，但不同时展开所有长期能力。
-3. 共享的是带来源、范围和时效的观测，不是“团队共同相信的事实”。
-4. 初始分析应盲独立，避免先发言者、模型身份、答案长度和多数意见污染后续判断。
-5. 每个智能体只发布短的 <code>ResultCard</code>，不公开完整思维链。
-6. 一个弱模型提供的可复现反例，可以推翻主候选的局部主张；十个弱模型重复“不同意”，不能靠票数覆盖它。
-7. 最终合成应保存主候选，以其为骨架吸收有明确证据的局部改进，并保留未解决异议。
-8. 对照与指标用于找到瓶颈、指导优化，不作为功能存在的资格审查。
+1. 共享的是带来源、范围和时效的观测，不是“团队共同相信的事实”。
+2. 初始分析应盲独立，避免先发言者、模型身份、答案长度和多数意见污染后续判断。
+3. 智能体只发布短的 <code>ResultCard</code> 与原件定位，不公开完整思维链。
+4. 一个弱模型提供的可复现反例，可以推翻主候选的局部主张；重复“不同意”不能靠票数覆盖它。
+5. 合成应保存主候选，以其为骨架吸收有证据的局部改进，并保留未解决异议。
+6. 对照与指标适合发现瓶颈，不能单凭 agent 数量或讨论轮数证明系统更强。
 
 本文建议将该方向暂称为 **Evidence-Centered Deliberation（证据中心协作）**。它仍使用 agent，但创新重点从“会话数量”转向“证据复用、独立判断、分歧解析和高质量合成”。
 
-> RONDO 多智能体不是一个聊天群，也不是一套审计平台；它是一场围绕“私有判断、可恢复共享观测、有限分歧协作”的渐进内核演进。首个切片尽量窄，目标架构却不被限制成外围内存插件。
+> 候选产品不应是聊天群或审计平台；其辨识度来自“私有判断、可恢复共享观测、有限分歧协作”。
 
 ### 工程目标优先
 
-本方向首先是一项有实际用途的工程功能，也是训练复杂系统设计能力的创新尝试。本文引用负面研究，是为了避开已经暴露的坑，而不是论证“够不够资格实现”。这里的“轻量”约束的是**每个阶段同时引入的概念、风险和未知量**，不是最终允许触达的源码层级、文件数量或重构深度。应优先最小完备切片，而不是机械追求最小 diff；若局部补丁会制造双重状态源、不可恢复数据或长期耦合，就应主动做边界清晰的内核重构。
-
-后续开发遵循五条取舍：
-
-- **确定实现**：不设置学术式 go/no-go 门槛。
-- **渐进纵切**：每个对外里程碑交付端到端闭环；允许紧邻产品切片的短内核前置批次，但不能演变成长期独立重构项目，更不做先重写一切再见产品价值的 big-bang rewrite。
-- **效果导向**：先做能改善协作质量的核心机制，再用少量测评迭代。
-- **必要时深改**：允许调整 AgentControl、工具完成与落盘、context projection、completion、恢复和 workspace 等内核边界。
-- **复用而不迁就**：优先建立在冻结 Codex 已有 thread、rollout、AgentGraphStore 和控制面之上；现有语义不足时补最小版本化记录，不在旁边平行重造审计、授权或分布式平台。
+这里的“轻量”是研究筛选原则：控制同时引入的概念、风险和未知量，而不是机械限制 diff 大小。候选设计应复用
+冻结 Codex 已有 thread、rollout、AgentGraphStore 和控制面；局部补丁若会制造双重真相源、不可恢复数据或长期耦合，
+则内核边界重构可能比外围补丁更合理。是否实施、如何分阶段不由本文决定。
 
 ## 1. 调研问题、方法与证据边界
 
@@ -205,7 +198,8 @@ RONDO 不应把未来路线定义成“多个智能体互相发消息”，也�
 
 ## 3. 推荐架构：核心语义与可演进内核边界
 
-用户设想中的“共享可信证据”应做成运行时协作能力，而不是审计产品。这里的目标不是一次建完下图中的所有模块，而是先做一条小而完整的纵向切片，再把已经证明必要的职责逐步抽出来：
+“共享可信证据”若成为产品，应是运行时协作能力而不是审计产品。下图表达候选职责边界，不表示这些模块需要
+同时建设，也不规定当前实施顺序：
 
 ~~~text
 TUI / app-server
@@ -223,7 +217,8 @@ Context Projection  ←  Collaboration Runtime  ←  AgentControl façade
                      Workspace Manager
 ~~~
 
-首个可用切片仍然可以只有 root、两个只读 worker、少量结果类型和内存索引；图中的 Task Runtime、Scheduler、CollaborationStore 与 Workspace Manager 只有在对应语义真实出现时才独立成层。`AgentControl` 先作为兼容入口，随后逐步变成 façade，而不是继续承载所有新增状态。
+root、少量只读 worker、结果类型和内存索引足以说明最小语义；Task Runtime、Scheduler、CollaborationStore 与
+Workspace Manager 只有在对应语义真实出现时才值得独立成层。`AgentControl` 适合作为兼容 façade，避免承载全部新增状态。
 
 ### 3.1 私有 agent 上下文
 
@@ -281,7 +276,7 @@ Coordinator 的职责是：
 | 架构不变量 | 起步策略 | 可演进方向 |
 |---|---|---|
 | 私有上下文与共享证据分离 | root + 两个只读 worker | 独立的 Context Projection 层 |
-| 已发布证据具有可恢复来源 | 首批只适配已落盘 FunctionCallOutput | 更多 observation adapter 与 artifact |
+| 已发布证据具有可恢复来源 | 最窄候选只覆盖已落盘 FunctionCallOutput | 更多 observation adapter 与 artifact |
 | 内存板只是持久记录的投影 | 有界 ID 索引和 payload LRU | checkpoint + tail scan / 可重建查询投影 |
 | 写 agent 必须隔离 | root 唯一 writer | 每 writer 独立 worktree + 单一 integrator |
 | 副作用不能因复用自动重放 | 显式引用既有结果 | 按工具证明 ExactReuse/幂等性 |
@@ -308,7 +303,7 @@ Coordinator 的职责是：
 
 ### 4.2 最简单可靠的 scope
 
-阶段 B 不做判等缓存，只在显示时携带足够上下文：
+最小显式引用语义不做判等缓存，只在显示时携带足够上下文：
 
 - 工具名与 cwd/worktree；
 - 调用参数的短导航信息；
@@ -316,7 +311,7 @@ Coordinator 的职责是：
 - 时间敏感来源的读取时间；
 - 源 thread + call ID。
 
-阶段 D 若为某个明确纯读工具专门增加自动复用，再由该适配器定义 <code>CallKey</code> 和 <code>SnapshotKey</code>。共享可变 cwd 不存在一个轻量而可靠的通用快照计数：shell 或项目外进程都可能绕过 RONDO 写工具，所以不能把简单计数器当作测试复用依据。
+若为某个明确纯读工具增加自动复用，应由该适配器定义 <code>CallKey</code> 和 <code>SnapshotKey</code>。共享可变 cwd 不存在一个轻量而可靠的通用快照计数：shell 或项目外进程都可能绕过 RONDO 写工具，所以不能把简单计数器当作测试复用依据。
 
 若 root 打算让另一个 agent 据此跳过重跑，测试结果的上下文提示应尽量包含：
 
@@ -334,20 +329,23 @@ stdout/stderr 或报告引用
 
 ### 4.3 复用规则
 
-阶段 B 的默认复用是**显式引用**：A 跑完后得到 E17，B 看到 E17 并读取原结果，因此不再自己运行。它已经实现用户需要的共享，同时不要求 runtime 猜测任意 shell/MCP/Web 调用是否等价。阶段 D 才从少量明确标成 shareable 的工具开始增加透明命中和 single-flight：
+最低风险的复用是**显式引用**：A 跑完后得到 E17，B 看到 E17 并读取原结果，因此不再自己运行。它不要求
+runtime 猜测任意 shell/MCP/Web 调用是否等价。透明命中和 single-flight 只适合少量明确标成 shareable 的工具：
 
 | 调用 | 默认规则 |
 |---|---|
-| 相同不可变输入的纯读工具 | 阶段 D 可自动复用 |
-| task-owned 只读 snapshot 的文件读取 | 阶段 B 引用既有结果；阶段 D 可自动复用 |
-| 测试与构建 | 阶段 B 由 agent 引用；仅专门适配后才自动复用 |
+| 相同不可变输入的纯读工具 | 可评估自动复用 |
+| task-owned 只读 snapshot 的文件读取 | 默认引用既有结果；专门适配后才自动复用 |
+| 测试与构建 | 默认由 agent 引用；仅专门适配后才自动复用 |
 | 网页/远端状态 | 默认只引用已有内容；专门适配后才按短 TTL 复用 |
 | 会写文件的工具 | 不缓存执行，只共享结果/receipt |
 | 真实外部副作用 | 永不因恢复或其他 agent 请求而自动重放 |
 
 同一 payload 被五个 finding 引用仍是一份证据，不算五次独立支持。若确实重新执行了测试，则是第二次 observation；可以共用同一 payload 存储，但保留两个运行结果。
 
-阶段 D 的透明命中先限制在 task-owned 的只读 snapshot，或所有写入都能由 RONDO gateway 精确观察的隔离 worktree；契约成熟后可以扩到明确证明幂等/隔离的其他类别。共享可变 cwd 可能被 shell 或外部进程修改，因此只允许显式引用旧观察。任何支持复用的工具还应提供 <code>fresh=true</code>，用于 flaky test、用户明确要求复核或 verifier 独立重跑。
+透明命中必须限制在 task-owned 的只读 snapshot，或所有写入都能由 RONDO gateway 精确观察的隔离 worktree；
+只有明确证明幂等/隔离的类别才可扩展。共享可变 cwd 只允许显式引用旧观察。支持复用的工具还应提供
+<code>fresh=true</code>，用于 flaky test、用户明确要求复核或 verifier 独立重跑。
 
 ### 4.4 持久化、写入顺序与上下文效率
 
@@ -425,17 +423,20 @@ struct ResultCard {
 }
 ~~~
 
-<code>EvidenceId</code> 应是稳定、不透明的产品身份，不能把首批工具路径永久写死成身份模型。<code>ResultLocator</code> 才表达来源变体：首批 FunctionCallOutput 使用 storage-neutral 的 <code>(thread_id, turn_id, response_item_id)</code> 定位，<code>call_id</code> 只作辅助关联/扫描 fallback；child 原件用 child thread + turn/final response item；项目文件用 workspace + 相对路径。当前 ThreadStore 尚无按该 locator 随机读取 raw ResponseItem 的 API，首切可以全读小历史，随后按需要增加 lookup。不要把本地 JSONL 路径或字节偏移写进协议，因为压缩、归档和远程 ThreadStore 会使它失效。
+<code>EvidenceId</code> 应是稳定、不透明的产品身份，不能把某条工具路径永久写死成身份模型。<code>ResultLocator</code>
+才表达来源变体：FunctionCallOutput 可使用 storage-neutral 的 <code>(thread_id, turn_id, response_item_id)</code>
+定位，<code>call_id</code> 只作辅助关联/扫描 fallback；child 原件用 child thread + turn/final response item；项目文件用
+workspace + 相对路径。当前 ThreadStore 尚无按该 locator 随机读取 raw ResponseItem 的 API，小历史可全读，查询成为
+瓶颈后才值得增加 lookup。不要把本地 JSONL 路径或字节偏移写进协议，因为压缩、归档和远程 ThreadStore 会使它失效。
 
 <code>source</code> 很重要：冻结 Codex 的正常 completion 会把最后一段自由文本 final answer 原样转发，但没有结构化结果或原件定位契约；复杂方案、完整审查与候选补丁如果只靠一次自由文本交接，仍容易被后续合成改写或遗漏。首版把 child ThreadStore 中该 turn 的 final response（thread + turn/response item locator）作为原件；补丁、报告等不适合消息保存的内容再引用项目已有文件，不新建 artifact store。ResultCard 只提供短导航和稳定定位。
 
 任务说明起步时继续使用现有 spawn/follow-up 参数，不必先发明通用 DAG。<code>CallKey + SnapshotKey</code> 只属于 ExactReuse 适配器，也不进入基础 evidence 身份。
 
-记录载体可以渐进演进：
-
-1. 阶段 A 复用已持久化的 FunctionCallOutput、<code>report_result</code> FunctionCall/Output，以及**已经在接收方 turn 被消费并写入 rollout** 的 InterAgentCommunication，先验证 capture 与 locator 接缝；这还不是可恢复产品承诺。
-2. 阶段 B 在既有 rollout 中加入小型、版本化且默认不进入模型上下文的 <code>CollaborationRecord</code>。最低只需表达 EvidenceObserved、ResultCommitted 和 EvidencePublished；大 payload 仍留在原 ResponseItem/项目工件。Team membership 优先由 AgentGraphStore 的全状态边发现，并用 SessionMeta 的 parent 关系修复/兜底；只有实作证明两者仍无法可靠恢复时才新增 membership record。
-3. 阶段 D 只有在跨 thread 全扫/查询成本或多个消费者带来真实压力时，才增加 TeamCheckpoint，或在现有 state DB 旁增加可重建的 CollaborationStore 投影；现有归档/压缩 reader 应保持透明，rollout 仍是 canonical history，不双写两套真相。
+记录载体的研究结论是分层而非一次建全：已有持久 FunctionCallOutput 与已被接收方写入 rollout 的通信可以用于
+验证 capture/locator 接缝，但不构成恢复承诺；若 WBS 选择可恢复产品闭环，需要小型、版本化且默认不进模型上下文的
+<code>CollaborationRecord</code> 表达 observed/committed/published 关系，大 payload 继续留在原 ResponseItem 或项目工件。
+只有跨 thread 扫描或多消费者查询出现真实压力时，才值得评估 checkpoint 或可由 rollout 重建的 store 投影。
 
 这不是从头建设事件溯源平台，而是让产品状态能够恢复。新 reader 应能跳过未知版本/字段，旧 rollout 正常加载；checkpoint 只是加速器，不是新的真相来源。
 
@@ -571,7 +572,7 @@ root：按原始引用综合，必要时追问一个冲突点
 结论：缺少恢复失败语义
 证据：源码目前只有一次性 run 路径 [E17, E23]
 未知：resume 接口是否由另一个模块承接
-下一步：读取 registry/residency 的恢复路径
+判别动作：读取 registry/residency 的恢复路径
 ~~~
 
 Root 读取一次补充源码证据后决定是否在原计划中加入对应小节。审查意见不会成为一个与原计划竞争的全文。
@@ -661,7 +662,9 @@ CollaborationRuntime
   └─ Workspace Manager（开放多 writer 前抽出）
 ~~~
 
-首个切片可以先把 runtime 放在 core 内部并保持旧 API；长期则让 <code>AgentControl</code> 成为 façade，避免把任务、证据、调度和 workspace 状态全塞进一个结构。EvidenceId 使用稳定、不透明身份，工具来源由第 5.1 节的 typed locator 表达；不把 <code>thread_id + call_id</code> 固化成所有证据的永久身份。
+源码接缝分析表明，runtime 可以位于 core 内并由 <code>AgentControl</code> façade 隔离，避免把任务、证据、调度和
+workspace 状态全塞进一个结构。EvidenceId 应使用稳定、不透明身份，工具来源由第 5.1 节的 typed locator 表达；
+不应把 <code>thread_id + call_id</code> 固化成所有证据的永久身份。具体切片由 WBS 决定。
 
 工具结果管线至少有三个不同职责，不能伪装成一个 hook：
 
@@ -679,9 +682,13 @@ core/src/agent/collaboration/*（候选边界）
 
 <code>ToolRegistry::dispatch_any_with_terminal_outcome()</code> 是直接工具成功结果的来源，但 <code>AnyToolResult</code> 还要在 <code>ToolCallRuntime</code> 中转换成模型可见的 ResponseInputItem，最终由 <code>drain_in_flight()</code> 写入 conversation history。原始 ResponseItem 的宿主 ID 是在 <code>record_conversation_items()</code> 内部 clone 后才补齐，现有 API 又返回 <code>()</code>；所以“drain 后读原对象并登记”拿不到可靠 locator，checked API 应返回规范化且已持久化的 item/receipt。
 
-首批适配通过直接工具路径形成并获得持久回执的 FunctionCallOutput，包括带明确输出的失败结果；EvidenceRecord 保留状态，不能把 <code>success=false</code> 等同于“没有 observation”。Unsupported tool、pre/post-hook block、未形成可共享 output 的 handler error、CustomToolCallOutput、ToolSearchOutput 和 provider-native WebSearch 等路径后续逐类适配。Code Mode 的嵌套调用走 <code>handle_tool_call_with_source() → code_mode_result()</code>，不经过这条 <code>drain_in_flight()</code> 路径，也不纳入首批。ExactReuse 则必须在 dispatch **之前**另加 lookup。控制类工具跳过递归登记；写工具的执行结果可以被引用，但绝不因此缓存或代替再次执行。
+直接工具路径形成且获得持久回执的 FunctionCallOutput 是最窄的候选 observation 来源，包括带明确输出的失败结果；
+EvidenceRecord 必须保留状态，不能把 <code>success=false</code> 等同于“没有 observation”。Unsupported tool、hook block、
+未形成可共享 output 的 handler error、CustomToolCallOutput、ToolSearchOutput、provider-native WebSearch 与 Code Mode
+走不同路径，需要各自适配后才能宣称覆盖。ExactReuse 必须在 dispatch **之前**另加 lookup；写工具结果可以被引用，
+但绝不因此缓存或代替再次执行。
 
-最小可先提供两个内部工具：
+研究中用两个内部原语说明最小语义：
 
 ~~~text
 read_shared_evidence(ids?)
@@ -692,15 +699,15 @@ report_result(conclusion, findings[{text, evidence_ids}], unknowns, suggested_ne
 - <code>report_result</code> 只接受模型提供的判断与引用，宿主分配 ResultId；作者、thread、schema version 和 final locator 由宿主写入后续 <code>ResultCommitted</code> envelope；
 - 宿主校验引用存在、属于同一 agent tree 且已经发布给该 task；无效 ID 返回普通工具错误或降为无证据 claim；
 - 没有 evidence 的设计建议仍允许提交，只明确它是 claim；
-- 两个工具可沿用 <code>core/src/tools/spec_plan.rs</code> 的 MultiAgentV2 注册与 namespace，但需明确 exposure：当前 <code>non_code_mode_only=true</code>，未来编码模式不能让共享读取工具被一并隐藏。
+- 两个原语可沿用 <code>core/src/tools/spec_plan.rs</code> 的 MultiAgentV2 注册与 namespace；当前
+  <code>non_code_mode_only=true</code> 是必须在实现时处理的 exposure 事实，不能据此假设编码模式已覆盖。
 
-持久记录载体不宜在调研阶段假装已经唯一确定。推荐的演进判断是：
+持久记录载体在调研阶段不能假装已经唯一确定。研究支持：原始 tool output 和 child final 继续保存在既有
+ResponseItem，不复制 payload；可恢复关系需要最小版本化记录，而不是只留 RAM；数据量小时可以扫描完整 raw rollout，
+只有全读成为瓶颈时才评估 raw lookup/checkpoint/tail scan 或可重建投影。
 
-1. 原始 tool output 和 child final 继续保存在既有 ResponseItem，不复制 payload。
-2. 阶段 A 可复用 <code>report_result</code> FunctionCall/Output 验证接缝；阶段 B 用最小、版本化、默认不进模型上下文的 <code>CollaborationRecord</code> 保存 opaque evidence/result ID、ResultCommitted 与 publication，避免把关键关系留在 RAM；成员关系先复用 AgentGraphStore + SessionMeta。
-3. 数据量小时可扫描 root 与全部 descendant 的完整 raw rollout；现有 ThreadStore 没有按 call/item ID 随机读取 raw ResponseItem 的现成 API，<code>load_latest_model_context</code> 在 compaction 后也不适合作完整 evidence 重建。只有全读已成为瓶颈时，才增加 raw lookup/checkpoint + tail scan，或把元数据索引抽进可由 rollout 重建的 CollaborationStore/SQLite 投影。
-
-共享结果不主动广播正文。第一轮 worker 使用冻结的初始 evidence 集，不看到兄弟的新 ID；提交第一张 ResultCard 后，由 root 显式发布与定向复核相关的引用。若后续增加 cooperative 实时共享模式，可在现有 world-state 构建路径增加一个 phase-gated 的小型增量段：
+候选协议不应主动广播正文；独立首答使用冻结 evidence 集，定向复核才由 root 显式发布相关引用。若 WBS 选择
+cooperative 实时共享模式，可在现有 world-state 构建路径评估 phase-gated 小型增量段：
 
 ~~~text
 New sibling tool results:
@@ -716,7 +723,7 @@ These are host-captured tool results, not agent conclusions.
 
 这里还有一个不能靠内存板掩盖的崩溃窗口：<code>trigger_turn=false</code> 的 inter-agent completion 成功只代表消息进入父 Session 的内存 mailbox；闲置父线程不会立刻把它写入 history。可靠方案可以是先持久化 publication/completion outbox 再幂等投递，也可以在恢复时扫描 child 的最终 ResultCard 并补送；具体接口后续定，但“完成记录先可恢复，父通知后发送”应成为顺序约束。
 
-启动阶段的边界建议：
+无论 WBS 选择哪个阶段，下列边界都成立：
 
 - 内存元数据和热 payload 有界，淘汰后仍可从持久来源读取；
 - 每个 finding 最多引用少量 evidence；
@@ -725,7 +732,8 @@ These are host-captured tool results, not agent conclusions.
 - 进程在副作用已发生但结果尚未落盘时崩溃，恢复为 uncertain/interrupted，默认不自动重放；
 - 用 feature flag 和 façade 做 strangler migration，功能关闭时旧路径行为不变，避免长期双写两套事实源。
 
-这条路线的重点不是承诺“只改几个文件”，而是把改动集中在真正有价值的内核接缝：工具结果规范化与确认落盘、协作记录、热投影、上下文编译、completion 交付与恢复。这样可以复用现有控制面和持久原件，又不会让一个临时内存对象成为未来架构上限。
+研究识别的高价值内核接缝是工具结果规范化与确认落盘、协作记录、热投影、上下文编译、completion 交付与恢复；
+这些结论用于约束设计，不构成实施顺序。
 
 ### 8.2 Kimi Code 0.32.0
 
@@ -800,96 +808,14 @@ These are host-captured tool results, not agent conclusions.
 
 这说明 RONDO 可以做出有辨识度的创新，而不必先造一个庞大的新框架。
 
-## 9. 从轻到重的渐进内核路线
+## 9. 研究交接
 
-这不是正式 execplan，也不承诺具体版本号；它表达依赖顺序和宏观方向。每阶段只引入一组新的核心语义，完成一个可验证闭环，再根据真实使用决定下一步。可以深入修改多个内核模块，但不在同一阶段同时建设持久层、通用 DAG、缓存、多 writer、复杂 UI 和跨主机协议。
+本调研曾据研究结果推导出从最小只读闭环到多 writer 的候选分层。为避免研究报告成为第二套实时路线，
+阶段顺序、首个产品切片、分层触发条件与验收口径已统一迁入
+`doc/WBS/multi-agent-trusted-evidence.md`。本文其余章节只保留该路线背后的对象语义、源码证据、候选产品形态、
+测试关注点和复杂度边界；它们不决定何时实施。
 
-### 阶段 A：建立协作内核接缝，不改变旧的外部功能行为
-
-- 由 <code>AgentControl</code> 持有 <code>Arc&lt;CollaborationRuntime&gt;</code>，旧 spawn/send/wait/resume 通过 façade 继续工作；
-- 抽出 EvidenceId、typed locator、ResultCard 与 Context Projection 的内部边界；
-- 给 session/ThreadStore 增加可确认 canonical append 的窄接口，返回规范化 item/locator 和分层结果；canonical 写入成功但后续 metadata 失败不能被误读成“源记录一定没写”，也不能盲目重放；若需观察 SQLite 投影失败，再单独扩展 writer 状态；
-- 用 characterization tests 固定旧行为，功能开关关闭时不构建 board、不扫描历史；
-- 不在此阶段实现通用 scheduler、DAG、artifact store 或新 TUI。
-
-这一步可能改到 AgentControl、session、rollout 与工具流水多个文件，但只解决“以后从哪里扩展、哪一层是真相”。它是阶段 B 紧邻的短前置批次，必须与第一个产品切片放在同一对外里程碑验收，不能独立演变成长期基础设施工程。
-
-### 阶段 B：可恢复的只读证据协作闭环
-
-这是第一个实际产品切片：
-
-- 固定 root + 默认两个只读 worker，首批支持已持久化 FunctionCallOutput observation；
-- <code>read_shared_evidence</code>、<code>report_result</code>、私有首答、主候选原件和默认一次定向复核形成端到端闭环；
-- 所有可发布 evidence 先取得持久 locator，ResultCard 与 final locator 在 completion 通知前可恢复；
-- 小团队重启时全读 root 与全部 descendant rollout，重建 Evidence/Result/visibility 投影；运行中的旧调用恢复为 interrupted/uncertain，而不是伪装继续执行；
-- 在既有 rollout 中加入最小版本化 CollaborationRecord，明确 observation、Result commit 与 publication/completion 顺序；成员关系先复用 AgentGraphStore 全状态边 + SessionMeta；
-- root 是唯一 writer，child 的只读必须由新增的宿主策略在 runtime overrides 之后强制收窄，并禁止通过审批/提权路径重新获得写入，不能只靠角色提示词。
-
-首批工作流是并行源码/资料调查、主方案 + 独立 plan/code review 和 bug diagnosis。若任务需要写入或只读 sandbox 不允许的重型验证，由 root 串行实施；Cargo、Docker、真实模型继续服从 RONDO 已有的全项目互斥和资源门禁，多智能体层不复制也不绕过它们。
-
-核心验收是：私有历史不泄漏；A 的已持久结果能被 B 按引用读取而不重复执行；重启后结果、ResultCard、原件和发布边界仍能重建；持久化失败不会向其他 agent 发布悬空 ID；父协调器能保留冲突与主候选原件。
-
-### 阶段 C：Task Runtime、Context Projection 与确定性调度
-
-- 将反复出现的 task 身份、阶段、取消、超时、失败和恢复状态从自由文本逐步抽进 Task Runtime；暂不实现通用 DAG；
-- Scheduler 只确定性管理模型槽、重工具槽、排队、取消和资源类别；任务拆解、语义裁决与合成仍由强 root 模型完成；
-- Context Projection 统一实现初答隔离、EvidenceRef 可见性、定向 follow-up 和上下文预算，不让这些规则长期散落在提示字符串中；
-- 增加 direct tool 之外真正需要的 observation adapter，包括 Code Mode、CustomTool、ToolSearch、Web/MCP 等；
-- TUI/app-server 开始消费 typed team projection，静态 role profile 替代零散提示模板。
-
-这一阶段解决的是“协作如何稳定运行”，不是建设一个自动裁判。若持久恢复先成为瓶颈，可以提前做阶段 D 中最小的 store 投影；C 与 D 的内部先后允许按真实痛点调整。
-
-### 阶段 D：持久投影、投递闭环与选择性复用
-
-本阶段是一组可独立选择的需求驱动增量，不构成同一开发批次；可靠投递、查询扩展、ExactReuse、artifact 和角色调优分别按真实痛点进入单独 execplan：
-
-- 当全量扫描或跨 thread 查询开始变慢时，增加 checkpoint + per-thread tail scan、raw item lookup，或轻量 CollaborationStore；它只保存元数据/locator，可由 rollout 重建；归档和压缩本身继续由 ThreadStore 透明处理；
-- 阶段 B 保留基于 ResultId 的恢复 reconcile 与幂等补送；若要求无需等待恢复动作也可靠通知，再增加持久 outbox/delivery ID；
-- 先给语义稳定的纯读工具加入 ExactReuse/single-flight，随后只扩展到能明确证明幂等或快照隔离的工具类别；
-- <code>tool + canonical args + workspace snapshot</code> 完全匹配才自动命中，并提供 <code>fresh=true</code>；shell、未知 MCP、共享可变 cwd 和副作用调用继续只允许显式引用旧 observation，不做透明命中或自动重放；
-- 大输出确实超出 rollout/项目文件能力时，再增加受控 artifact/blob abstraction；没有需求时不建设全局 CAS；
-- 用实际使用记录手工调整角色/模型默认值，不做信誉学习或在线路由平台。
-
-持久恢复是确定方向；是否立即加入 SQLite 投影、outbox、artifact 和高级 UI 则由规模与使用场景决定。完成后的有效协作产物不能最终只存在 RAM。
-
-### 阶段 E：Workspace 内核与多 writer 编码协作
-
-开放第二个 writer 之前必须先抽出 Workspace Manager：
-
-- 每个 writer 使用项目确证拥有的独立 worktree/lease，evidence 从早期就携带 opaque WorkspaceRef；
-- 任务说明带 base commit、目标模块和输出 commit/文件引用；
-- Scheduler 将模型槽、重工具锁和 workspace 可用性视为不同资源；
-- 一个强 integrator 串行选择/合并，组合后的新 tree 重新运行必要检查；
-- UI 明示候选/worktree 状态，只清理 RONDO 确认拥有且无未保存工作的对象；
-- 起始工作区脏、非 Git 或所有权不清时退化为单 writer，其他 child 只读。
-
-这是明显的内核级重构，但它解决真实的多 writer 正确性，不能用 SharedContextBoard 或 task owner 代替。
-
-### 阶段 F：成熟 RONDO 多智能体内核（只定方向）
-
-后续可探索：
-
-- 更丰富的 task DAG、条件分支、嵌套团队和长任务恢复；
-- 可替换的协调拓扑、调度策略与模型/工具/角色异构路由；
-- 跨 session 的证据与工件复用，以及更丰富的失效/保留策略；
-- 按新增证据、冲突收敛和预算动态决定验证轮次；
-- 更完整的 team UI、后台执行、非 Git workspace、隔离环境或远程 worker；
-- 需求成熟后的多进程乃至跨主机协作。
-
-这些只是宏观扩展点，不在现在预先设计分布式协议、跨主机身份、全局 provenance graph 或公共 API。稳定的记录语义与真实需求出现后，再决定边界。
-
-### 何时值得正式拆层
-
-| 层 | 可以暂不独立 | 应当抽出的信号 |
-|---|---|---|
-| CollaborationStore | 少量 thread，可全读 raw rollout | 查询频繁、恢复变慢或多个消费者反复需要同一投影 |
-| Scheduler | 固定 root + 两个 worker、一次性任务 | 多种策略、持久队列、资源类别或复杂取消/恢复反复出现 |
-| Workspace Manager | root 唯一 writer | 开放第二个 writer 之前必须抽出 |
-| Artifact 层 | rollout 与项目文件足够 | 完整大输出有独立生命周期或需要跨 session 复用 |
-| 公共 team API | 只有 core 内实验开关 | TUI、app-server、extension 等多个消费者需要稳定事件形状 |
-| 通用 task DAG | 固定工作流足够 | 条件依赖、动态重规划或嵌套所有权成为常见需求 |
-
-## 10. 运行效率、持久化与恢复语义
+## 10. 候选运行语义（研究结论，不是实施路线）
 
 ### 10.1 持久来源与数据热路径
 
@@ -910,9 +836,9 @@ struct SharedContextBoard {
 - preview 在登记时确定性生成一次；
 - context builder 只拷贝小字段，大 payload 懒加载；
 - board 可随 team 结束、LRU 或进程退出释放，持久原件与协作记录不因此删除；
-- 首批不做跨 session 全局缓存。
+- 研究非目标包括跨 session 全局缓存。
 
-后续为适合 ExactReuse 的工具增加独立 <code>by_call</code> 状态。可以用 watch/oneshot 广播可克隆结果，或显式 <code>Running { leader, waiters } / Ready</code>；失败、取消和 waiter 清理属于该工具适配器，不能假定任意 Future/Error 天然可共享。
+若未来 WBS 选择 ExactReuse，可为适合的工具增加独立 <code>by_call</code> 状态。可以用 watch/oneshot 广播可克隆结果，或显式 <code>Running { leader, waiters } / Ready</code>；失败、取消和 waiter 清理属于该工具适配器，不能假定任意 Future/Error 天然可共享。
 
 ### 10.2 上下文预算
 
@@ -949,7 +875,7 @@ get: evidence.get(E17)
 3. 按稳定 EvidenceId/ResultId 幂等重建 observation、ResultCard 和 publication 关系；重复扫描或重复投递不会复制逻辑记录。
 4. 有 FunctionCall 而无对应 output、旧 Running 状态或崩溃窗口中的副作用调用恢复为 interrupted/uncertain；只读或已证明幂等的动作才允许显式重新核验。
 5. 已提交 ResultCard 但父 completion 缺失时，按 ResultId reconcile 并补建父视图；child final locator 不可解析时保留卡片但明确标为 missing。
-6. 阶段 B 默认要求参与可恢复协作的 child 使用 durable ThreadStore。若允许 ephemeral/InMemory child，结束前必须把 ResultCard 及被引用的 final/observation 内容复制到 root 的持久记录或项目工件；只复制一个会失效的 locator 不够。否则明确属于不可恢复模式。
+6. 可恢复协作要求 child 使用 durable ThreadStore。若允许 ephemeral/InMemory child，结束前必须把 ResultCard 及被引用的 final/observation 内容复制到 root 的持久记录或项目工件；只复制一个会失效的 locator 不够。否则应明确属于不可恢复模式。
 
 典型崩溃窗口及语义：
 
@@ -973,20 +899,21 @@ get: evidence.get(E17)
 - 旧 rollout 没有 CollaborationRecord 时正常加载，可按支持的 ResponseItem 做尽力恢复并明确能力边界；
 - 每条持久 CollaborationRecord envelope 统一携带小整数 <code>schema_version</code>、作者与 thread 等宿主字段，EvidenceRecord/ResultCard payload 不再维护第二份版本来源；reader 用 lazy upcast/optional 字段，尽量不重写历史；
 - rollout 是 canonical history，SQLite/CollaborationStore 只是可重建投影，不把双写结果变成两份真相；
-- 内存可自由 LRU，早期 evidence 生命周期跟随所属 team/thread；现有 hard-delete 引用保护只理解 fork history，不理解 root evidence → child rollout。阶段 B 应以整棵 team 为保留/删除单位，或加入窄的 evidence 引用保护；压缩/归档继续复用现有机制，不另建 evidence GC。大型 artifact 与跨 session 保留到需求出现后再独立设计；
+- 内存可自由 LRU，evidence 生命周期跟随所属 team/thread；现有 hard-delete 引用保护只理解 fork history，不理解 root evidence → child rollout。若实现持久证据，需要以整棵 team 为保留/删除单位，或加入窄的引用保护；压缩/归档继续复用现有机制，不另建 evidence GC。大型 artifact 与跨 session 保留需由真实需求触发；
 - 自由文本 inter-agent message 保留用于协调，关键结果和发布关系走可恢复记录。
 
-## 11. 产品形态与用户体验
+## 11. 候选产品形态（研究结论，不是实施路线）
 
 ### 11.1 一个明确入口
 
-建议提供：
+候选入口形态是：
 
 ~~~text
 /team <任务>
 ~~~
 
-语义是“本轮使用多智能体协作”，不是请求系统再做一次值不值得启用的准入判断。Root 总能找到一种协作方式：天然可并行时分片，不适合并行时采用“主方案 + 审查者”。
+其候选语义是“本轮使用多智能体协作”，不是学术式准入判断。天然可并行时可以分片，不适合并行时可采用
+“主方案 + 审查者”；是否采用该命令形态由 WBS 后续任务决定。
 
 可选的 <code>/team on|off</code> 作为会话级实验开关，但用户不应被要求手选模型、角色、并发数或配置文件。自然语言明确要求多智能体时，与 <code>/team</code> 等价。
 
@@ -997,9 +924,9 @@ get: evidence.get(E17)
 - <code>tui/src/multi_agents.rs</code>
 - <code>tui/src/app/agent_status_feed.rs</code>
 
-当前相同，已经具备 <code>/agent</code> 线程选择、Alt+左右切 thread、状态/最近活动预览，以及 Spawn/Wait/Resume/Close 生命周期事件的渲染。Picker 本身不是这些操作的控制面。后续可以复用现有线程导航与事件投影，无需重做底层任务 UI。
+当前相同，已经具备 <code>/agent</code> 线程选择、Alt+左右切 thread、状态/最近活动预览，以及 Spawn/Wait/Resume/Close 生命周期事件的渲染。Picker 本身不是这些操作的控制面。这证明现有线程导航与事件投影可作为候选复用点。
 
-<code>/team</code> 和下列内联卡片属于阶段 C/D 的体验增强；阶段 B 先用自然语言触发和现有 <code>/agent</code> 即可。若实际使用证明需要聚合视图，主线程可显示一个原地更新、默认折叠的 team card：
+若实际使用证明需要聚合视图，候选形态是原地更新、默认折叠的 team card；下例只说明信息层级，不是 UI 实施计划：
 
 ~~~text
 ┌ 协作：修复配置加载错误              2/3 完成
@@ -1024,7 +951,7 @@ A · implement：保持兼容并回退
 B · review：立即报错
     依据：E6、README 的失败语义
 
-下一步：只新增一个旧配置测试来区分
+判别动作：只新增一个旧配置测试来区分
 ~~~
 
 用户平时不需要看到 EvidenceId；复用时显示：
@@ -1035,20 +962,13 @@ B · review：立即报错
 
 需要时再展开原始输出。
 
-### 11.4 默认并发
+### 11.4 并发研究边界
 
-冻结 Codex 当前 V2 的默认总并发配置为 4；实现会为 root 保留一槽，subagent limiter 允许 3 个活跃执行。它限制活跃执行，不等于只允许四条持久 thread。RONDO 阶段 B 可以采用：
+冻结 Codex 当前 V2 的默认总并发配置为 4；subagent limiter 限制活跃执行，不限制持久 thread 数。研究只支持
+“小团队、无 all-to-all、保留 verifier 容量”作为低风险起点，不能据此冻结 RONDO 的默认 worker 数、深度或模型组合；
+这些参数必须由 WBS 中的实际任务和资源测量决定。
 
-- root 1；
-- 默认 workers 2；
-- 保留 1 个槽给临时 verifier 或失败替代者；
-- 新增深度 1 的协作策略，只允许 root 创建 child；冻结 Codex 本身目前允许 child 再 spawn；
-- 不做 all-to-all 群聊；
-- 大型调研可以显式增加 scout，但仍服从全局上限。
-
-默认 root + 2 已经足够体现不同假设与互补角色，也不会把 UI、Token 和 rate limit 复杂度迅速放大。
-
-### 11.5 失败、停止和恢复
+### 11.5 候选失败、停止和恢复语义
 
 - 一个非关键 child 失败，root 使用已有结果继续；
 - 临时模型错误可在同一 thread 自动恢复一次；工具只在明确幂等且能确认未产生副作用时重试；
@@ -1056,13 +976,13 @@ B · review：立即报错
 - 超时 child 返回 partial，已登记 evidence/finding 仍可用；
 - <code>Esc</code> 或 <code>/team stop</code> 停止整组，保留已完成结果；
 - 在 <code>/agent</code> 中可单独中断成员；
-- 阶段 B 起由新增的 resume reconciler 复用 AgentPath、thread、raw rollout 和协作记录重建卡片；这不是现有 Codex residency 已有保证；
+- 若实现 resume reconciler，应复用 AgentPath、thread、raw rollout 和协作记录重建卡片；这不是现有 Codex residency 已有保证；
 - 恢复规则把旧运行中调用标为 interrupted/uncertain，不能假装已完成；
 - 不等待最慢 child 才开始处理先返回结果。
 
-### 11.6 写入隔离的无感退化
+### 11.6 候选写入隔离边界
 
-后期编码模式应做到：
+若开放编码协作，必须做到：
 
 - 干净 Git 项目：写 agent 自动进入项目规定的独立 worktree；
 - root 是唯一 integrator；
@@ -1071,21 +991,22 @@ B · review：立即报错
 - 起始工作区有未知修改：退化为当前工作区只有一个 writer，其他 child 只读，不 stash、不覆盖；
 - 非 Git 项目：同样退化为单 writer，不引入 overlay filesystem。
 
-多智能体不增加一套平行授权体系。Child 以根会话现有 sandbox/工具/审批语义为基础，阶段 B 再施加宿主强制的 child-only 只读收窄，阶段 E 才按 owned worktree 开放 writer；证据层不缓存、合并或解释审批，只有实际执行完成并得到持久回执的工具结果才可能共享。
+多智能体不增加平行授权体系。Child 以根会话现有 sandbox/工具/审批语义为基础；只读 child 必须由宿主强制收窄，
+writer 必须绑定 owned worktree。证据层不缓存、合并或解释审批，只有实际执行完成并得到持久回执的工具结果才可能共享。
 
-## 12. 功能测试与轻量调优
+## 12. 候选验收关注点（研究结论，不是测试计划）
 
-多智能体会实现，以下观察只用于把功能做得更好，而不是作为上线资格。
+若 WBS 启动实现，以下是研究识别出的正确性风险，不是当前测试计划。
 
 ### 12.1 功能正确性测试
 
-阶段 A 先固定内核接缝：
+内核接缝需要覆盖：
 
 - 功能开关关闭时旧 multi-agent 行为与 rollout 形状不变；
 - checked record 返回规范化 locator，并至少区分 canonical append 与 metadata 结果；若阶段实现了 SQLite 状态出口，再验证投影失败不污染 canonical 真相；
 - 持久结果不确定时不向其他 agent 发布，但也不盲目重跑可能已有副作用的工具。
 
-阶段 B 验证首个产品闭环：
+可恢复只读闭环需要覆盖：
 
 - EvidenceId 能读取到正确的已存 FunctionCallOutput；
 - 引用存在、属于同一 agent tree 且已经发布给当前 task；
@@ -1099,36 +1020,36 @@ B · review：立即报错
 - read-only worker profile 的 child 不能写当前工作区；
 - root 是唯一 writer，重型工具仍走原有入口和全局互斥。
 
-阶段 D 实现对应能力时再验证：
+只有实现对应能力时才需要覆盖：
 
 - ExactReuse 的 CallKey/SnapshotKey 命中和 <code>fresh=true</code>；
 - 副作用调用不自动重放；
 - publication/completion 重投按稳定 ID 幂等；
 - checkpoint/tail scan 或索引投影与 canonical rollout 一致，投影损坏可重建。
 
-阶段 E 再验证每 writer 独立 worktree、单一集成和合并后复验。
+开放多 writer 时还必须验证每 writer 独立 worktree、单一集成和合并后复验。
 
 这些是普通测试体系的一部分，不是建立一套“可信审计测试”。
 
 ### 12.2 少量调优观察
 
-建议记录在现有 eval/usage 出口中：
+可观测性候选包括：
 
 - 任务完成质量与用户返工情况；
 - 总 Token 与 wall time；
-- 重复工具调用、显式复用和阶段 D single-flight 命中；
+- 重复工具调用、显式复用和已实现时的 single-flight 命中；
 - child failure 和冲突/返工情况。
 
 这些数据回答“哪里值得继续优化”：
 
-- 若共享结果几乎不被复用，检查任务拆分是否重叠；阶段 D 再检查 ExactReuse 键是否过严；
+- 若共享结果几乎不被复用，检查任务拆分是否重叠；若已实现 ExactReuse，再检查键是否过严；
 - 若大量 follow-up 无新信息，收紧 ResultCard 和停止规则；
 - 若 reviewer 常修正主候选，增强 challenger/verifier profile；
 - 若 reviewer 常制造噪声，缩小其任务和输出范围。
 
 可以保留强单体、Self-Consistency、独立候选和自由 debate 作为小规模对照，帮助理解哪条协议起作用；无论结果是否全面占优，都不影响该功能继续作为工程与创新路线演进。
 
-## 13. 复杂度纪律：稳定非目标与延后扩展点
+## 13. 研究复杂度边界
 
 ### 稳定非目标
 
@@ -1142,22 +1063,22 @@ B · review：立即报错
 - 多 writer 共享 cwd；
 - 为证明全面胜过单体而建设庞大学术 benchmark 或 admission/kill gate。
 
-### 确定预留、按需求细化
+### 候选扩展点与触发条件
 
-这些不是“永远不做”，而是只确定演进接口与触发条件，不在今天猜完整设计：
+这些不是当前路线，只是研究阶段识别出的接口与触发条件；是否采用及顺序只见 WBS：
 
-- CollaborationRecord 在阶段 B 只做最低恢复语义；可重建 CollaborationStore 等扫描/消费者增多后再正式拆层；
+- 最小 CollaborationRecord 与可重建 CollaborationStore：只有扫描/消费者增多后才值得拆层；
 - artifact/blob 层与跨 session 工件复用：已有 rollout/项目文件不足时再加入；
-- Task Runtime、通用 DAG、更多 observation adapter 与动态验证轮次：按阶段 C/F 演进；
-- Workspace Manager、多 writer 文件边界与非 Git workspace：按阶段 E 演进；
+- Task Runtime、通用 DAG、更多 observation adapter 与动态验证轮次：按实际协议复杂度触发；
+- Workspace Manager、多 writer 文件边界与非 Git workspace：只在开放额外 writer 前触发；
 - 更精确的外部文件变更探测、更丰富 cache policy 和模型/角色默认值；
 - 多进程、远程 worker、跨主机 agent 及其必要身份机制。
 
 checked persistence、ResultCard 的持久提交和基本重启恢复不在延后清单里，它们是“共享证据最终不能只存在内存”的最低完整性。反过来，“未来可能有用”也不足以让某个阶段同时建设全部扩展点。
 
-## 14. 结论
+## 14. 研究结论
 
-RONDO 应确定实现多智能体，但把它实现成一个紧凑、好用、有辨识度的工程功能：
+若 RONDO 按 WBS 启动多智能体实现，研究证据支持把它做成紧凑、好用、有辨识度的工程功能：
 
 1. 复用冻结 Codex 已有的 thread、agent graph、spawn/wait/resume 和 TUI；
 2. 以 AgentControl façade + CollaborationRuntime 建立演进接缝，逐步抽出证据、任务、调度、上下文和 workspace 职责；
@@ -1165,7 +1086,7 @@ RONDO 应确定实现多智能体，但把它实现成一个紧凑、好用、�
 4. 补齐规范化 ID、checked canonical append、completion reconcile 和基本重启恢复，不把内存状态伪装成持久状态；
 5. 保持 agent 私有上下文，先独立产出，再围绕具体分歧做有界验证；
 6. 以主候选为底稿吸收局部证据增量，不投票、不让弱 summarizer 重写；
-7. 先落地调研、plan review、code review 和 bug diagnosis，由宿主强制 read-only worker；随后再扩 Task Runtime、更多 observation adapter 与 ExactReuse；
+7. 首个候选闭环适合调研、plan review、code review 和 bug diagnosis，并由宿主强制 read-only worker；Task Runtime、更多 observation adapter 与 ExactReuse 是否扩展由使用证据决定；
 8. 开放第二个 writer 前完成 Workspace Manager，以每 writer 独立 worktree、单一 integrator 和组合后复验保证编码协作。
 
 这个方向同时满足三个目标：
@@ -1174,11 +1095,11 @@ RONDO 应确定实现多智能体，但把它实现成一个紧凑、好用、�
 - **有创新性**：共享运行时观察、隔离 AI 判断，并把分歧编译成验证动作；
 - **有工程锻炼价值**：涉及异步调度、结构化协议、持久化、上下文编译、缓存、恢复、TUI 和 worktree 集成，并允许逐步形成真正的协作内核。
 
-最推荐的第一条实现闭环不是“让更多 agent 开会”，而是：
+研究上最小且可验证的候选闭环不是“让更多 agent 开会”，而是：
 
 > **原件与协作记录先可恢复 → 工具结果一次注册、多方引用 → 独立 finding → 有界判别验证 → 主候选局部合成。**
 
-这条闭环可以从窄切片开始，也已经与现有开源实现形成明显差异。这里的高效不等于永远少改代码，而是每一份新增复杂度都直接服务证据复用、恢复、协作质量或写入正确性；拒绝的是低收益的系统重造，不是必要的深层改造。
+这条闭环与现有开源实现形成明显差异。这里的高效不等于永远少改代码，而是每一份新增复杂度都应直接服务证据复用、恢复、协作质量或写入正确性；拒绝的是低收益的系统重造，不是必要的深层改造。何时实现以及采用哪些层次只由 WBS 决定。
 
 ---
 

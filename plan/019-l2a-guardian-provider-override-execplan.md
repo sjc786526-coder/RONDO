@@ -168,13 +168,12 @@ headers、query、wire 能力与其他完整配置；随后继续把 Guardian �
 
 ### 当前工作
 
-- L2a 阶段 B 与本地工作树提交已完成；用户已授权清理本 worktree 中间产物并合入本地 `main`，未授权推送。
-- 最新 `main@73b0503` 已以 merge commit `1593ecf` 无冲突合入；独立重叠审查确认 main 与 L2a 源码路径
-  零交集、双方语义均完整保留。
+- L2a 已完成，并经 merge `6ffcfeb` 进入已推送的 `main` 历史；本计划不再维护移动中的分支头 SHA。
+- 合并时独立重叠审查确认 main 与 L2a 源码路径零交集、双方语义均完整保留。
 
-### 后续计划
+### 交接与复验证据
 
-- 本工作树保持待交付状态；未经后续明确授权，不合并到 `main`、不推送，也不启动 L3/L4/L7。
+- 本计划不维护 L3/L4/L7 路线，当前顺序只见 `doc/WBS/local-approval-model.md`。
 - 阶段 B 非 loopback 定向测试使用过下面的精确 filter（命令中的括号用于 nextest `-E` 表达式，不是
   shell 进程并发）：
 

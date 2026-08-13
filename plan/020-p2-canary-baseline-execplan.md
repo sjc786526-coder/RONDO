@@ -304,13 +304,12 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 - 合并前离线收口补齐 Oracle 共享执行依赖摘要、terminal aggregate 幂等恢复，并恢复 provider-integrity 参与
   单轮最终 infra 上限；task-local/global breaker 的 provider 豁免保持不变。v22 历史 aggregate 只读投影一致。
 
-### 后续计划
+### 终态与交接边界
 
-1. 以 v22 的九项共同有效结果和三项 A/B 差异作为只读性能诊断输入；不为改变本次分数重跑 v22，
-   `vulnerable-secret` 的 provider `cyber_policy` 事实单独保留为供应商能力边界。方向 1 的正式优化迭代继续等待
-   B7 性能门与 E-A A1—A7 闭合。
-2. 后续若启动新的付费 campaign，必须重新估算并取得独立授权，生成新 identity/IDs，且不得把 v22 的 failed
-   终态或剩余额度视为可续跑状态。
+1. v22 的冻结分数和三项 A/B 差异只作历史机械结果；归因报告已确认比较条件不对称，不能作为 RONDO/Codex
+   能力或性能诊断输入。`vulnerable-secret` 的 provider `cyber_policy` 事实仍作为供应商边界保留。
+2. 本计划不安排新 campaign、E-A 或方向 1。任何新执行都不得复用 v22 identity/IDs/余额，当前路线、前置和
+   授权门只见 `doc/WBS.md` 与 `doc/WBS/eval-benchmark.md`。
 
 schema-v6 v22 使用 campaign/batch `p2-b7-canary-baseline-v22`/`p2-b7-canary-sol-sol-v22`、run base
 `20260812-420000000` 与 lock SHA
@@ -320,8 +319,8 @@ pointer 已关闭，lock/result/ledger/artifact 仅供历史重放。
 
 ### 阻塞项
 
-- B7 执行设施无未结算状态；技术门未通过：九项共同有效任务上 `sigma=0`、`delta=3`，原因精确为
-  `ab_delta_exceeds_aa_sigma`。这是真实 failed 基线，不是 infra/预算 blocked。
+- B7 执行设施无未结算状态；机械一致性子门未通过：九项共同有效任务上 `sigma=0`、`delta=3`，原因精确为
+  `ab_delta_exceeds_aa_sigma`。它不是 infra/预算 blocked，但因比较合同不对称也不是可归因的能力基线。
 
 ### 当前验收状态
 
@@ -331,7 +330,7 @@ pointer 已关闭，lock/result/ledger/artifact 仅供历史重放。
   v22 wire `0.192860 USD`、paid `329.767745 USD`，Plan 020 累计 `1466.074133 < 1600 USD`；202/202 upstream
   attempts 均已结算，reservation 0，`actual_usd=null`。`vulnerable-secret` 四条逻辑链的 HTTP 200 SSE 均以
   `error/cyber_policy` 终止且无 usage，按合同保守结算并排除共同分母。B4—B7 执行与归档已完成，但 B7
-  性能门 failed，E-A A1—A7 未实现，因此 P2/M2 尚未通过。
+  机械一致性子门 failed；比较合同不满足严格等条件，不能形成能力归因。E-A A1—A7 未实现，因此 P2/M2 尚未通过。
 
 ## 6. 关键决策记录
 
@@ -375,5 +374,5 @@ pointer 已关闭，lock/result/ledger/artifact 仅供历史重放。
 | 036 | 生成 schema-v5 v21，冻结 25 条首个非 infra 结果、321 个新 run ID 与精确 `1135.915188 USD` prior；v1—v20 继续只读 | 只补 sanitize、vulnerable 及未启动逻辑链，避免重跑有效 pass/reward 0 | B6/B7 | 已采纳 |
 | 037 | v21 wire 成功后在首个 TB 请求前命中实现级 400 USD ledger 上限；计入 `0.198340 USD` wire 后退役，schema-v6 将 ledger 支持范围绑定到已授权 1600 USD | 剩余额度大于旧实现上限不是预算超限，且不能复用已产生 wire 费用的 identity | B6/B7 | 已采纳 |
 | 038 | 生成 schema-v6 v22，冻结 25 条有效引用、321 个新 ID 与精确 `1136.113528 USD` prior；v1—v21 继续只读 | 新 identity 才能在修复后的执行合同下启动 TB | B6/B7 | 已采纳 |
-| 039 | v22 完成九项共同集合与必要条件加跑后以 `sigma=0`、`delta=3` 形成 failed 基线；关闭 active pointer，不为改变分数重跑 | B7 的验收目标是可复算的真实终态，性能门失败必须保留为后续优化输入 | B7 | 已采纳 |
+| 039 | v22 完成九项共同集合与必要条件加跑后以 `sigma=0`、`delta=3` 形成机械一致性子门 failed；关闭 active pointer，不为改变分数重跑 | 历史结果必须保留，但后续归因确认比较条件不对称，不能把该批次作为能力/性能优化输入 | B7 | 已采纳 |
 | 040 | 原暂用的 Plan 015 编号改为 Plan 020；历史 lock/result/ledger/日志中的原标签保持只读 | Plan 015 已由 GGUF 冻结占用，Plan 018/019 分别留给 CUDA runtime 与 L2a；避免合并后的计划编号冲突 | 文档/交付 | 已采纳 |

@@ -122,7 +122,9 @@
 - v8 已从 clean readiness commit 执行 RONDO slot 1，并在自然触发 Guardian 后按零重试合同停止；Codex slot 2
   与 M1 均未运行。当前只保留终态、结果和执行日志，不创建替代 pair。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映 v8 结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 1. 保留全部 stopped probe/v8 ledger、去敏 metadata、Docker evidence、watchdog summary 与 append-only result，
    不复用或改写。

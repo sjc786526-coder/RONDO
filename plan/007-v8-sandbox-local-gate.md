@@ -217,7 +217,9 @@ canary必须精确执行1项；host smoke必须精确执行1项。workspace结�
 - [x] workspace中的V8 POC 7/7及Code Mode专属crate 167/167通过；严格canary与真实host smoke均实际执行，
   没有V8/Code Mode目标失败。23项ignored已通过只读Nextest列表逐名核对，不含V8 canary或host smoke。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映本计划结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 1. 本工作树提交后，是否合并/推送由用户另行指示。
 2. Plan 004的Windows PowerShell门禁留待Windows环境；workspace的32项终态未通过另立测试维护任务，

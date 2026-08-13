@@ -1,5 +1,8 @@
 # llama.cpp Linux GPU 运行路线决策（2026-08-12）
 
+> 本文是 2026-08-12 的路线选择证据，不维护当前任务顺序。其 Plan 018 交接已在 2026-08-13 完成；当前状态与
+> 后续安排只以 `doc/WBS/local-approval-model.md` 为准。
+
 ## 1. 决策
 
 **唯一建议：保留 llama.cpp `b10333` / commit
@@ -110,8 +113,8 @@ NVIDIA 官方 CUDA on WSL 文档明确区分运行与构建：
 当前只读宿主快照是 Ubuntu 24.04.4 / WSL2，`nvcc` 不存在，`/usr/lib/wsl/lib/libcuda.so.1` 可见。它只说明 WSL driver
 stub 存在，不证明任一 CUDA runtime、GPU offload 或模型可用。
 
-本次复核确认 `b10333` 官方 Ubuntu CUDA CI 使用 CUDA 12.6.2，因而它是下一任务的有力候选；Plan 016 只冻结了
-RTX 4060/Ada `89-real` 构建骨架和“必须另选 exact Toolkit”的边界。下一任务仍须基于 Windows driver 实际版本重新冻结
+本次复核确认 `b10333` 官方 Ubuntu CUDA CI 使用 CUDA 12.6.2，因而它在当时是 Plan 018 的有力候选；Plan 016 只冻结了
+RTX 4060/Ada `89-real` 构建骨架和“必须另选 exact Toolkit”的边界。当时的交接要求基于 Windows driver 实际版本重新冻结
 exact Toolkit。NVIDIA 的一般兼容表给出 CUDA 12.x minor compatibility
 最低 driver family 525；CUDA 12.6 GA 对应 Windows driver 560.76。实际选择不能只取一般下限，还要核对 b10333 构建所用
 Toolkit、目标功能与当时 driver，并在 WSL 实测。
@@ -148,8 +151,8 @@ commit 的证据。即使有镜像，也仍需宿主 driver/NVIDIA Container Too
 - receipt schema v2、`serve_config_sha256`、PID/start ticks、实际 `/proc/<pid>/cmdline`、listener、model 和 endpoint 身份不变。
 - client 的当前 llama.cpp Responses request/response 投影不需要换成另一套 API。
 
-下一实现任务仍不是“只编译一下”。当前 CPU lock、launcher 和 doctor 把 `b10333` CPU asset/capability 写死；CUDA runtime 必须以
-新 ignored 路径和独立 lock 并存，不能覆盖 CPU 回滚资产。实现至少需要：
+本文形成时确认该工作不是“只编译一下”：当时 CPU lock、launcher 和 doctor 把 `b10333` CPU asset/capability 写死；CUDA runtime 必须以
+新 ignored 路径和独立 lock 并存，不能覆盖 CPU 回滚资产。研究交接包含：
 
 1. 新增 `eval/locks/llama-cpp-b10333-cuda-linux-x64.json`，冻结 source、toolchain、完整 configure/build argv、runtime 文件、
    symlink、RPATH/RUNPATH、`llama-server --version` 和全部 host dependency。
@@ -162,7 +165,7 @@ commit 的证据。即使有镜像，也仍需宿主 driver/NVIDIA Container Too
 5. 复核 `--version`、`--help`、model-free router `/health`/`/props`、官方 template parser 和环境清洗后的动态依赖；更新
    pin/closure/capability focused tests。配置 schema、template lock 和 receipt v2 预计无需重做。
 
-runtime 选择合同也必须在 Plan 018 显式落地：launcher 只允许按 configured binary 的两个 exact project-relative path 做有限映射，
+runtime 选择合同随后由 Plan 018 落地：launcher 只允许按 configured binary 的两个 exact project-relative path 做有限映射，
 CPU 路径选择现有 `llama-cpp-b10333.json`，CUDA 路径选择新 lock，任何其他路径或 lock 身份均拒绝。CUDA runtime lock 与
 model-free checks 完成前，受跟踪 example binary 继续指向 CPU 路径；完成后才在同一实现提交中切到 CUDA 路径。用户实际 ignored
 `rondo.local.toml` 在后续获批的 4k acceptance 阶段才更新，不由 Plan 018 静默修改。receipt v2 无需改 schema，binary/path/lock
@@ -172,46 +175,25 @@ model-free checks 完成前，受跟踪 example binary 继续指向 CPU 路径�
 pin/capability/闭包、example path 和 focused tests；identity schema v2 本身可复用。若换 Windows、Docker 或 Ollama，则必须
 重新设计进程/容器身份、生命周期或协议/模板合同，成本显著更高。
 
-## 7. 下一任务精确入口
+## 7. 历史交接（Plan 018 已完成）
 
-下一任务建议命名：**Plan 018：b10333 Linux CUDA runtime 构建、闭包冻结与 model-free 验收**。执行边界：
+Plan 018 已按本研究冻结的 `b10333`、CUDA 12.6.2、Ada `89-real`、strict-link 和独立 CPU/CUDA lock 路线完成：
+项目局部 Toolkit、build/runtime/device 闭包与 model-free doctor 已验收，未采用 CCCL 3DOT2 或
+`--allow-shlib-undefined`，能力停在 `linux_cuda_built_model_unvalidated`。唯一 GGUF 也已完成静态 bytes/SHA 验收；
+没有加载模型或运行推理。详细证据见 2026-08-13 audit snapshot 与 Plan 018。
 
-1. 进入时先复核 Windows NVIDIA driver、WSL kernel、`libcuda.so`、canary 全窗口互斥、Docker/Cargo/model process 和宿主容量；
-   安装/构建及 CUDA device probe/GPU 设备访问需要新的明确授权。这里的 model-free 只表示不加载 GGUF、不推理，不表示
-   GPU/driver-free。
-2. 冻结 exact CUDA Toolkit（优先从 b10333 官方 Ubuntu CUDA CI 的 12.6.2 候选开始核对），使用 WSL/toolkit-only 安装，
-   禁止 Linux display driver。
-3. 在真实 configure 前关闭两个未决项：
-   - `GGML_CUDA_CUB_3DOT2` 不预先定为 on/off。若采用 `ON`，必须把 CCCL `v3.2.0` 解析并冻结为 exact 40 位 commit、repo 与
-     source identity/SHA，以项目内预取 source 或等价受控方式满足 FetchContent，并证明 configure 没有发生未冻结的临时网络抓取；
-     若省略，则必须由 Plan 018 的 exact configure/build 成功证据支持，并记录相对官方 workflow 的差异。
-   - 默认不采用 `CMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined`。只有严格链接实际失败、错误与根因已保留，且确认该放宽
-     是必要的，才能加入冻结命令；不能为了复制 CI 或绕过未知 undefined symbol 直接启用。
-4. 以 Plan 016 `Linux CUDA b10333 build-ready 交接` 的 exact commit、`89-real`、server-only、RPATH 和资源锁骨架构建到
-   项目 ignored 路径 `eval-data/tools/llama-b10333-cuda-linux-x64/`。
-5. 实现 CPU/CUDA exact binary path 到对应 lock 的有限映射、独立 CUDA lock、动态 backend/host dependency closure、
-   capability/doctor 投影和 focused tests；保留旧 CPU runtime。model-free 验收完成后才切换 tracked example binary，实际
-   ignored 配置留待 4k acceptance 阶段。
-6. 只做 model-free `--version`、`--help`、`--list-devices`、template parser/router/closure 验收。无 exact GGUF 时停在
-   `linux_cuda_built_model_unvalidated`；不得晋级 `gpu_model_serving_validated`。
-7. Plan 015 另获 GGUF 下载授权且静态校验后，再在单独 GPU/model-backed 阶段运行 4k smoke；通过后才晋级 capability，
-   随后单独验收 8k baseline。
+新 runtime/lock 与 CPU asset 并存，旧 CPU runtime 不是 GPU 服务回滚；4k model-backed 未通过前不得表述为已有可工作的
+GPU 审批服务。当前实施顺序不在本文维护。
 
-回滚方式：新 runtime/lock 与 b10333 CPU asset 并存，迁移提交可整体 revert，example binary 恢复旧路径即可回到现有
-model-free 状态。旧 CPU runtime 不是 GPU 服务回滚；在 CUDA 4k 验收前不得表述为已有可工作的 GPU fallback。
+## 8. 当前仍未由该路线证据覆盖的能力
 
-## 8. 仍未验收
+- 真实 ignored `rondo.local.toml` 的当前合同迁移与可用配置。
+- frozen Bartowski Q4_K_M 的真实 load、offload、fit、F16 KV、flash、4k/8k 显存和性能。
+- `/v1/responses`、官方 Jinja 与结构化审批在 exact CUDA model 上的真实行为。
+- launcher 退出后的 server 生命周期保证。
+- Vulkan、Windows、Docker GPU 与 Ollama 路线；它们不是当前主路线，也未验收。
 
-- Windows driver exact 版本与 CUDA 12.6.2/WSL 的实际兼容。
-- CCCL 路径是否采用、采用时的 exact source/offline FetchContent，或省略时相对官方 workflow 的成功构建证据；严格链接是否确需
-  `--allow-shlib-undefined`。
-- Toolkit 安装、b10333 构建、产物 SHA、ELF/RPATH/动态依赖闭包与 CUDA device probe。
-- frozen Bartowski GGUF 的下载、真实 SHA、Mistral3/Q4_K_M load、正数/全层 offload、fit、F16 KV、flash、4k/8k 显存和性能。
-- `/v1/responses`、外部官方 Jinja、结构化审批在 CUDA exact model 上的真实行为。
-- Vulkan 的实际 ICD/设备选择/显存/性能；Windows NAT/mirrored/firewall 路线；Docker GPU/镜像 digest；Ollama 对该 exact
-  GGUF/模板/协议的实际行为。
-
-静态源码支持、release 资产清单、model-free 既有测试和本文工程判断都不能替代上述验收。
+静态 GGUF、model-free runtime/device 证据和本文工程判断都不能替代 model-backed 验收。
 
 ## 9. 权威资料
 

@@ -360,39 +360,12 @@ foreground success。它主要可能减少过载时的尾延迟和重试放大�
   因此未来小样本涨跌若没有 exact paired 环境，不应归因给 harness：
   [Quantifying infrastructure noise in agentic coding evals](https://www.anthropic.com/engineering/infrastructure-noise)。
 
-## 8. 建议的探索顺序
+## 8. 研究交接
 
-以下只是与当前 WBS 对齐的宏观顺序，不越过当前 P2/M2 门禁，也不构成真实 API 测评授权：
-
-1. **把 A4 作为 M2 建设的一部分完成**：先接出已有安全聚合值，确认结果 schema、覆盖边界和开销。
-2. **M2 后由方向 1 读取失败轨迹**：看输出截断、重复调用、prompt cache miss、pending-input 估算误差、overflow/`response.incomplete`、
-   工具参数错误、重试等待、成功子智能体 payload 和结果可见性各自占比。
-3. **一次只改一个机制**：优先可恢复输出、停滞观测/单次提醒；异常响应有实际成本时试 C11。只有子智能体使用率和回传体积有证据时
-   才做 completion envelope。
-4. **按失败簇选择中优先候选**：若可证明的参数类型错误突出，试 C12；若编辑错误传播突出，试增量诊断；若提前结束突出，试完成证据检查；
-   若长轨迹 context 浪费突出，试旧结果清理与状态锚点；只有过载尾时延存在 optional 重试放大时才试 C13。
-5. **最后再碰调度与工作流**：只有明确的串行工具或任务类型证据时，才试资源键并行、task router 或 scout/verifier。
-
-每个行为改变型候选都应：
-
-- 先用 E-A 验证 schema、截断、计数、取消和失败语义，再用 E-B/真实 Terminal-Bench 验证结果；
-- 固定所有非被测变量，采用 paired 对照；若候选本身改 prompt，则两侧 exact prompt/hash 是唯一自变量并被记录；基础设施异常单独归因；
-- 同时看成功率、token、墙钟时延、重复动作、额外测试/读取和 Guardian 指标，不能只优化一个代理指标；
-- 保留明确、低风险的 Git 回退路径；只有并行实验或风险较高的改动才增加开关，不强制每个方向长期可插拔；
-- Core 内部探针只做 RONDO 版本内归因；冻结 Codex/RONDO 双侧对比只采用双方共同可见的 runner/supervisor 指标；
-- 批量真实 API 测评仍需另行明确范围、轮数和预算并取得授权。
-
-### 8.1 零收益和负收益也是正式产出
-
-候选被 valid paired 实验判定为 `neutral` 或 `regressed`，与 `improved` 一样应长期保留；它能界定无效模型/任务域、校准触发阈值并避免
-后续重复投入。基础设施失败、控制变量不一致或样本不足只能记为 `inconclusive`，不能伪装成“候选无效”。
-
-未来真正实施候选时，建议在现有 eval 体系内增加一个轻量、只追加的实验结论索引，引用而不复制单次运行记录和原始工件；至少绑定候选编号、
-baseline/variant commit、模型与配置身份、taskset/seed、paired run ids、主指标与护栏、机制指标、原始 artifact、判定/停止理由和回退 commit。
-`verdict` 可区分 `improved|neutral|regressed|inconclusive`，只有有效受控对照才能得出前三类结论；基础设施失败、样本不足或控制变量不一致只能
-记为 `inconclusive`。C11 还应记录请求估算误差、overflow/incomplete reason、恢复路径和重复副作用，C12 记录 repair kind/最终校验，C13
-记录 workload/error class/等待与丢弃情况。实现被回退也不删除结果；模型、provider、任务分布或候选实现实质变化时可以重测，但旧结论只在
-原 scope 内成立。本段只是本报告的后续建议，不修改或替代当前 `doc/eval-data-layout.md` 数据规范。
+本调研只保留候选、证据等级、适用条件和否证边界，不再维护候选的实施顺序、实验队列或数据设施规划。
+当前解锁条件、候选顺序与单项实验合同统一见 `doc/WBS/teacher-harness-study.md`；测评设施路线见
+`doc/WBS/eval-benchmark.md`。零收益、负收益与 inconclusive 的记录原则也由上述 WBS 和
+`doc/eval-data-layout.md` 统一约束。
 
 ## 9. 明确暂缓或排除的方向
 
@@ -409,16 +382,8 @@ baseline/variant commit、模型与配置身份、taskset/seed、paired run ids�
 - **不直接采用 Claude Code 2.1.88 的内部阈值、feature flag 或收益数字**：官方旧版实现可以证明机制存在，但版本、模型、API 和任务分布
   都不同；本地许可证也未确认，只迁移经 RONDO 数据支持的设计并独立实现。
 
-## 10. 后续决策的最小清单
+## 10. 研究结论的使用边界
 
-未来挑选候选进入 plan 前，只需回答以下问题：
-
-1. A4 数据是否证明这个问题在 RONDO 中真实出现，频率和成本是多少？
-2. 能否通过现有 extension/hook/result schema 窄改，还是需要核心 loop 重构？
-3. 是行为保持、行为改变还是 bugfix；对应 E-A/E-B 轨道是什么？
-4. 成功判据是否同时覆盖任务成功率、token、时延和副作用，而不是单一代理指标？
-5. 是否有明确失败语义和低风险 Git 回退路径；若并行实验或风险较高，是否需要临时开关？
-6. 是否保持 Guardian、approval、sandbox、测试强度和真实外部交互边界不变？
-7. 无论 improved/neutral/regressed，是否能以 exact scope、run ids 和原始工件引用形成可复用结论？
-
-若第 1 项没有证据，默认先补观测；若第 6 项答案是否定的，该方向直接排除。
+候选进入实现前仍须证明问题在 RONDO 中真实发生，并明确改动类型、机制指标、主指标、安全边界和回滚方式；
+这些是研究结论的适用条件，不构成当前任务队列。何时选择哪个候选只以
+`doc/WBS/teacher-harness-study.md` 为准。

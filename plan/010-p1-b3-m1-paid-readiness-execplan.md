@@ -124,7 +124,9 @@
 
 - 无；v6 首槽已失败并完成结果归档、费用保留和直接原因诊断。
 
-### 后续计划
+### 历史交接（不是当前规划）
+
+> 以下记录只反映 v6 结束时的交接判断；当前路线以 `doc/WBS.md` 为准。
 
 1. 不复用 v6，不运行 Codex；若继续 B3，须另行冻结新 pair，并再次取得明确真实 API 批量授权。
 2. 新 pair 的 canonical 命令从 ignored 配置读取 provider，清除 ambient HTTP(S)/ALL proxy，仅保留 loopback
