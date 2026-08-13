@@ -81,8 +81,9 @@
   新增 fix/headless/openssl/polyglot 四条有效链；两轮 vulnerable 共 8 次均为 HTTP 200 SSE 非 completed 终态且无
   usage，sanitize 则因 Guardian task transcript 的 credential-shaped fixture 被发布扫描误判而在第二次后暂停。
   v20 只读退役后累计 debit `1135.915188 USD`、reservation 0。schema-v5 使用窄结构化 task-input 扫描并记录有界
-  provider terminal type/status/code；用户追加额度后总硬上限为 1600 USD，v21 以 25 条有效引用、321 个唯一新
-  run ID 与精确 prior 冻结，当前余量 `464.084812 USD`。**
+  provider terminal type/status/code。v21 wire 4/4 usage-valid并结算 `0.198340 USD`，随后在任何 TB 请求前被遗留的
+  400 USD ledger 实现上限阻止并只读退役。schema-v6 将 ledger 支持范围绑定到已授权 1600 USD；v22 以 25 条有效
+  引用、321 个唯一新 run ID 与精确 `1136.113528 USD` prior 冻结，当前余量 `463.886472 USD`。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到

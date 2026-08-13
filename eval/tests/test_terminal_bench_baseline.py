@@ -306,7 +306,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         active = load_campaign_identity(paths)
         self.assertEqual(active.campaign_id, registry[-1].campaign_id)
         self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
-        self.assertEqual(active.schema_version, 5)
+        self.assertEqual(active.schema_version, 6)
         self.assertEqual(active.max_attempts, 4)
         self.assertEqual(active.upstream_timeout_seconds, 180.0)
         self.assertEqual(len(active.continuation), 25)

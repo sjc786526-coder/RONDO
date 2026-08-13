@@ -113,3 +113,8 @@
 - 用户追加额度后总 cap `$1600`。生成 schema-v5 v21：run base `20260812-410000000`、321 个唯一 ID、25 条
   v18/v19/v20 continuation、prior `$1135.915188`、lock SHA
   `7d4d8997e9cb942ccbc60435874a2533bc79a96a59e0c224fc701a0f571a3464`；v1—v20 只读保留。
+- v21 wire 4/4 usage-valid、`$0.198340`；首个 TB 请求前，remaining ledger `$464.084812` 被遗留的 400 USD
+  实现上限拒绝。v21 无 paid task/budget ledger，以本地缺陷退役；累计 `$1136.113528`。
+- 将 ledger 支持上限提高到已授权 `$1600` 并保留 lock/逐请求硬门禁，proxy 56/56、baseline 50/50 通过。
+  生成 schema-v6 v22：run base `20260812-420000000`、25 条 continuation、prior `$1136.113528`、lock SHA
+  `740862459fc3a263ee6ceab893db3b79a236eb04d39c0df286a6941f6814ffb0`；v1—v21 只读保留。

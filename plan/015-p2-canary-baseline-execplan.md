@@ -298,31 +298,35 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
   分别为 reward 1/0，但 Guardian 请求证据包含题目故意植入的 credential-shaped fixture，被通用 artifact 扫描误判，
   因连续两次 `publication_integrity` 暂停。v20 以 local implementation defect 退役：14 个 paid run、paid
   `155.449581 USD`、reservation 0，累计 `1135.915188 USD`；results `441c344`。
+- v21 fresh wire 4/4 usage-valid，结算 `0.198340 USD`；随后在首个 Terminal-Bench 请求前，remaining campaign
+  ledger `464.084812 USD` 被遗留的实现级 400 USD 上限拒绝。v21 无 paid task/budget ledger，以本地实现缺陷退役，
+  累计 `1136.113528 USD`。实现上限提高到已授权 1600 USD，campaign 自身仍受 lock cap 与逐请求 reservation 限制。
 
 ### 后续计划
 
-1. 用 schema-v5 的结构化 Guardian task-input 扫描与 bounded provider terminal diagnostics 闭合 v20 RCA；focused、
+1. 用 schema-v5 的结构化 Guardian task-input 扫描与 bounded provider terminal diagnostics 闭合 v20 RCA，并用
+   schema-v6 绑定已授权 campaign ledger capacity；focused、
    `eval-lock` 与阶段末全量测试通过并形成干净提交。
-2. 由生成器冻结唯一 schema-v5 后继 identity，精确带入 `1135.915188 USD` prior。新 identity 引用 v18/v19/v20
+2. 由生成器冻结唯一 schema-v6 后继 identity，精确带入 `1136.113528 USD` prior。新 identity 引用 v18/v19/v20
    的 25 个首个非 infra 有效结果，只为 infra/未启动逻辑 slot 分配并 claim 新 run ID；fresh wire 成功后逐项补齐。
 3. 基础四轮与必要条件加跑完整后机械聚合 `sigma`、`delta`、共同分母、归因、usage 和费用；若下一请求的
    main+Guardian 的 `37.770000 USD` admission 容量无法装入剩余预算时，在发送 main 前 blocked。
 
-当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v21`/`p2-b7-canary-sol-sol-v21`，run base
-`20260812-410000000`，lock SHA
-`7d4d8997e9cb942ccbc60435874a2533bc79a96a59e0c224fc701a0f571a3464`。321 个新 run ID 唯一，25 条
+当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v22`/`p2-b7-canary-sol-sol-v22`，run base
+`20260812-420000000`，lock SHA
+`740862459fc3a263ee6ceab893db3b79a236eb04d39c0df286a6941f6814ffb0`。321 个新 run ID 唯一，25 条
 v18/v19/v20 有效逻辑结果引用已冻结；正式执行前仍须
 fresh wire canary。
 
 ### 阻塞项
 
-- 无离线阻塞；v21 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
+- 无离线阻塞；v22 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
   provider-integrity 失败不隐藏、不减记，但不再作为本地实现熔断证据。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v20 是保留全部费用事实的 blocked 终态。累计 debit `1135.915188 USD`、
-  reservation 0；v21 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
+- v1 是 API 前失败终态；v2—v21 是保留全部费用事实的 blocked 终态。累计 debit `1136.113528 USD`、
+  reservation 0；v22 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
 
 ## 6. 关键决策记录
 
@@ -364,3 +368,5 @@ fresh wire canary。
 | 034 | v20 因 sanitize Guardian request evidence 的任务凭据样本被通用 scanner 误判而退役；schema-v5 对结构合法 E_final 的 input 使用窄 task-data 规则，原始真实 secret 仍精确拒绝 | 不把 reward 1/0 的有效模型结果伪装成 infra，也不全局豁免 credential 扫描 | B5/B7 | 已采纳 |
 | 035 | v20 vulnerable 的 8 次 HTTP 200 SSE 终态无 usage 均保守结算；后继只记录 bounded terminal type/status/code，用户追加额度后总 cap 1600 USD | 中转面板的 HTTP 成功不等于 Responses `response.completed`；增加可诊断性但不改变结算 | B6/B7 | 已采纳 |
 | 036 | 生成 schema-v5 v21，冻结 25 条首个非 infra 结果、321 个新 run ID 与精确 `1135.915188 USD` prior；v1—v20 继续只读 | 只补 sanitize、vulnerable 及未启动逻辑链，避免重跑有效 pass/reward 0 | B6/B7 | 已采纳 |
+| 037 | v21 wire 成功后在首个 TB 请求前命中实现级 400 USD ledger 上限；计入 `0.198340 USD` wire 后退役，schema-v6 将 ledger 支持范围绑定到已授权 1600 USD | 剩余额度大于旧实现上限不是预算超限，且不能复用已产生 wire 费用的 identity | B6/B7 | 已采纳 |
+| 038 | 生成 schema-v6 v22，冻结 25 条有效引用、321 个新 ID 与精确 `1136.113528 USD` prior；v1—v21 继续只读 | 新 identity 才能在修复后的执行合同下启动 TB | B6/B7 | 已采纳 |
