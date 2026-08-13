@@ -31,11 +31,11 @@
   endpoint 精确 1 请求；Guardian 请求携带独立 model/effort/header/query，不含主 Authorization 或
   ChatGPT account header。
 - `git diff --check` 通过。未运行全量 workspace/Bazel；未调用真实 provider，未运行 Docker、本地模型或 GPU。
-- 阶段 B 保留 git-ignored 构建/工具缓存供本工作树后续交付：`mydev/codex-rs/target` 约 33GB、两个
-  `.venv` 合计约 55MB、两个 Ruff cache 不到 1MB；均不进入提交。未发现 `.snap.new`、`.rej`、`.orig`
-  或其他临时冲突产物，也未清理来源不明的其他 worktree 资产。
+- 阶段 B 一度生成 git-ignored 构建/工具缓存：`mydev/codex-rs/target` 约 33GB、两个 `.venv` 合计约
+  55MB、两个 Ruff cache 不到 1MB，以及约 452KB watchdog 临时目录；交付合并前按用户授权从本 worktree
+  精确清理。未发现 `.snap.new`、`.rej`、`.orig` 或其他临时冲突产物，也未清理其他 worktree 资产。
 
 ## 结论
 
-L2a provider 分流已完成阶段 B 验收，工作树状态为“已验收、待合并”。这不代表 L2 model-backed 推理或
-L7 一键切换完成，也未把本工作树合并/推送到 main。
+L2a provider 分流已完成阶段 B 验收。这不代表 L2 model-backed 推理或 L7 一键切换完成；本日志收口时
+尚未合并/推送 main，后续交付动作按用户单独授权执行。

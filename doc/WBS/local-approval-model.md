@@ -104,7 +104,7 @@
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）
 
-状态：**已验收、待合并**。实现与证据见
+状态：**已验收**。实现与证据见
 `plan/019-l2a-guardian-provider-override-execplan.md`。
 
 - `[auto_review].model_provider` 引用合并后的 `model_providers` registry；未知或空白 ID 在配置加载时
