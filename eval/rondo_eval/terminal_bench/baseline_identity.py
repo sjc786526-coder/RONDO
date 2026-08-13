@@ -196,7 +196,7 @@ def generate_successor_lock(
     continuation = _successor_continuation(paths, predecessor)
     lock.update(
         {
-            "schema_version": 4,
+            "schema_version": 5,
             "campaign_id": f"p2-b7-canary-baseline-v{next_version}",
             "batch_id": f"p2-b7-canary-sol-sol-v{next_version}",
             "run_id_date": run_id_date,
@@ -211,7 +211,7 @@ def generate_successor_lock(
         "prior_estimated_usd": f"{prior:.6f}",
         "max_run_slots": CAMPAIGN_MAX_RUNS,
     }
-    lock["baseline"] = campaign_baseline_contract(4)
+    lock["baseline"] = campaign_baseline_contract(5)
     relative = Path(f"eval/locks/p2-b7-canary-baseline-v{next_version}.json")
     destination = paths.worktree_root / relative
     if destination.exists() or destination.is_symlink():

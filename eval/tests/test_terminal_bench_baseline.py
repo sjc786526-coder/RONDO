@@ -99,6 +99,20 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             baseline=campaign_baseline_contract(4),
         )
 
+    @classmethod
+    def _identity_v5(cls):
+        legacy = cls._identity_v4()
+        return replace(
+            legacy,
+            schema_version=5,
+            budget={
+                **legacy.budget,
+                "campaign_cap_usd": "1600.000000",
+                "prior_estimated_usd": "1135.915188",
+            },
+            baseline=campaign_baseline_contract(5),
+        )
+
     def _base(
         self,
         outcomes: dict[tuple[str, str], TaskOutcome] | None = None,
@@ -158,9 +172,10 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(forecast["base_point_estimate_usd"], "17.829510")
         self.assertEqual(forecast["full_condition_point_estimate_usd"], "35.529550")
         self.assertEqual(forecast["v19_shape_stress_with_canary_usd"], "173.653100")
-        self.assertEqual(forecast["prior_estimated_usd"], "980.271525")
+        self.assertEqual(forecast["prior_estimated_usd"], "1135.915188")
+        self.assertEqual(forecast["campaign_cap_usd"], "1600.000000")
         self.assertEqual(
-            forecast["remaining_before_successor_canary_usd"], "319.728475"
+            forecast["remaining_before_successor_canary_usd"], "464.084812"
         )
         self.assertTrue(forecast["feasible_from_observed_shape"])
         self.assertFalse(forecast["mathematical_all_legal_usage_guarantee"])
