@@ -70,20 +70,12 @@
   Sol/medium main + Sol/low Guardian profile 下按 RONDO→frozen Codex 完成 `fix-git` 双侧真实链路；两侧
   reward 均为 1、预算均 settled，RONDO 的两份自然 Guardian `E_final/meta` approved。不可改写的 v19 旧合同
   只能证明 task-scoped request/evidence count match；后续结果须通过 canonical request digest 一一绑定才称 S2 verified。
-  `assess_m1` 返回 passed。P2 的 B4 分层清单、B5 计分归因与 B6 预算合同已冻结。v1—v19 均为只读终态；
-  v18 两轮 A/A 已产生 18 个非 infra 有效逻辑结果，A/B RONDO 的 db 正常 reward 0、extract pass，随后
-  filter 成为第三个 provider-integrity task 并按旧 schema-v2 熔断。v18 paid `158.877192 USD`、wire
-  `0.134108 USD`、reservation 0，累计 debit `826.674430 USD`。后继 schema-v3 冻结跨 identity 的首个
-  非 infra 结果引用，只重跑 infra/缺失 slot；provider-integrity 仍保守结算但不计本地/任务熔断，上游绝对
-  deadline 单调放宽为 180 秒。v19 复用 20 条 v18 有效链，新增 filter 的有效链后，在 fix 两次 Guardian 本地
-  429 处发现并发预算 admission 缺陷并只读退役；13 个 paid run、61 个 attempt 全 settled，累计 debit
-  `980.271525 USD`。schema-v4 要求 main admission 同时容纳 main+Guardian 两份最大预留。v20 验证该缺陷已闭合，
-  新增 fix/headless/openssl/polyglot 四条有效链；两轮 vulnerable 共 8 次均为 HTTP 200 SSE 非 completed 终态且无
-  usage，sanitize 则因 Guardian task transcript 的 credential-shaped fixture 被发布扫描误判而在第二次后暂停。
-  v20 只读退役后累计 debit `1135.915188 USD`、reservation 0。schema-v5 使用窄结构化 task-input 扫描并记录有界
-  provider terminal type/status/code。v21 wire 4/4 usage-valid并结算 `0.198340 USD`，随后在任何 TB 请求前被遗留的
-  400 USD ledger 实现上限阻止并只读退役。schema-v6 将 ledger 支持范围绑定到已授权 1600 USD；v22 以 25 条有效
-  引用、321 个唯一新 run ID 与精确 `1136.113528 USD` prior 冻结，当前余量 `463.886472 USD`。**
+  `assess_m1` 返回 passed。P2 的 B4 分层、B5 计分归因、B6 预算和 B7 首次真实基线均已形成终态。
+  v22 复用 25 条首个非 infra 历史结果，只补齐缺失链；fresh wire 与 202 个 upstream attempt 全部结算。
+  九项共同有效任务上 RONDO A/A 均为 `5/9`，RONDO A/B `5/9`，frozen Codex A/B `4/9`；`sigma=0`、
+  `delta=3`，因此 B7 以 `ab_delta_exceeds_aa_sigma` 真实 failed，而不是 infra blocked。Plan 015 累计本地估算
+  `1466.074133 < 1600 USD`、reservation 0、`actual_usd=null`。`vulnerable-secret` 被供应商以 HTTP 200 SSE
+  `error/cyber_policy` 拒绝并按含糊计费保守结算，未进入共同分母。v1—v22 全部只读，paid active pointer 已关闭。**
   Plan 010 v6、Plan 011 v7 和 Plan 012 v8 的 paid RONDO 首槽均已失败。三次早期诊断均在
   付费 API 请求前停止，已一次性迁移为 `infra_failed` 永久记录并保留不可复用预算槽；实际 API 调用
   0 次、费用 0 USD。v6 固定 `fix-git`、RONDO→Codex 各一轮、零重试；RONDO 发起的一个 main 请求未收到
@@ -108,8 +100,8 @@
 
 | 编号 | 方向 | 状态 |
 |---|---|---|
-| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1/M1 完成；B4/B5/B6 与 B7 设施冻结，执行首次 B7 基线 |
-| 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 前置研究可并行，实施被方向 0 阻塞 |
+| 0 | 量化测评基准（离线回放 + 真实 Terminal-Bench 2.1） | P1/M1、B4/B5/B6/B7 完成；首次 B7 基线真实 failed |
+| 1 | Harness 优化（Terminal-Bench 2.1 成功率） | 可从 v22 三项 A/B 差异开始首轮性能诊断 |
 | 2 | 本地审批模型接入与横评 | L1 与 L2 CPU x64 前置完成；已有真实 E_final，GPU/model-backed、L2a/L3/L4 待 P2 |
 | 3 | 共享可信证据链的多智能体协作 | 未启动，排在方向 1 之后 |
 
@@ -136,7 +128,7 @@ P0 共享地基 ────────┤                          ├─→ �
 |---|---|---|---|---|---|
 | P0 | 共享地基：审批模型显式覆盖（S1）、审批证据包快照（S2） | 单线，一次做完 | 无 | 无 | 已合并，定向验收完成；全量失败另列维护 |
 | P1 | 方向 0：Terminal-Bench 2.1 最小真实链路跑通（E-B1~B3） | 与 L1、L2（仅搭建）、T 轨并行 | P0 | Docker 使用；小额真实 API | 已完成：B1/B2/B3、L1、L2 前置与 M1 均闭合 |
-| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | B4/B5/B6 完成；v1—v17 只读，v18 冻结待执行 |
+| P2 | 方向 0：离线冻结回放（E-A）+ TB 分层任务集与首次基线（E-B4~B7） | 与 L2（验收）、L2a、L3、L4 并行 | P1 | canary 批量跑批预算 | 已完成；v22 形成 `sigma=0`、`delta=3` 的 failed 基线 |
 | P3 | 方向 2：合成数据（L5）→ 云 GPU 微调（L6）→ 一键切换（L7） | 与 P2 尾段并行 | L2a、L4、少量真实 `E_final` | GPT 批量合成费用；云 GPU 训练 | 未开始 |
 | P4 | 方向 1：按测评基线驱动 harness 优化迭代 | 串行 | P2 完成 | 每轮跑批预算 | 未开始 |
 
@@ -192,12 +184,10 @@ Guardian evidence digest；v8—v19 统一为只读历史 registry，v19 不再�
 估价并停止，Docker lease/cleanup 与 proxy deadline/claim 生命周期缺口也已闭合。完整 eval 349/349、lock 85 packages
 通过；本批未调用 API、Docker 或 Cargo。
 L2 的 CPU x64 前端/运行闭包前置与首批真实 E_final 输入现已具备；GPU/model-backed 实模验收、L2a/L3/L4 留在 P2。
-Plan 015 已冻结 10/61/18 taskset、10-task exact image catalog与机械计分。v10 按原 161-slot/600 USD 合同
-在全局 provider-integrity 熔断后只读退役，累计 debit 为 `343.896195 USD`。后继合同使用 321 个机械派生 slot、
-1600 USD 累计硬上限；非 provider 类别仍在同题同类第二次 infra 后暂停做结构化 RCA，只有外部瞬态才可继续，
-第三次同类停止该题。provider-integrity 由 fresh wire 作为恢复门禁并跨 identity 只补缺失逻辑 slot，不重新执行已有效
-的 pass/reward 0。campaign-independent Oracle、单 slot heavy lock、轻量 lease、安全恢复和 identity 生成入口保持复用。
-执行细节见 Plan 015。
+Plan 015 的 10/61/18 taskset、10-task exact image catalog、机械计分和增量执行设施已完成首次真实 B7。
+v22 在九项共同有效任务上得到 `sigma=0`、`delta=3`，技术门 failed；四轮有效结果和条件加跑、全部 infra
+attempt、202 个请求及 `1466.074133 USD` 累计费用均保留。active paid identity 已关闭，下一轮不得续跑或复用
+v22 IDs。方向 1 应把三项 A/B 差异作为首个性能诊断输入；执行细节见 Plan 015。
 
 P0 遗留的能力边界，进入后续阶段前必须记住：**S1 只覆盖审批模型名与 effort，不覆盖 provider**。
 Guardian 仍克隆父会话的 provider 与 base_url，因此切换到本地审批模型需要独立的 provider 覆盖，

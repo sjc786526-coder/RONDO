@@ -291,7 +291,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len({item.run_id for item in successor.slots}), 321)
         self.assertEqual(len({item.slot_id for item in successor.slots}), 321)
 
-    def test_registry_keeps_history_read_only_and_only_latest_active(self) -> None:
+    def test_registry_keeps_completed_history_read_only_with_no_active_identity(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
         registry = campaign_lock_registry(paths)
         self.assertEqual(
@@ -303,37 +303,41 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             registry[-1].campaign_id,
             f"p2-b7-canary-baseline-v{registry[-1].version}",
         )
-        active = load_campaign_identity(paths)
-        self.assertEqual(active.campaign_id, registry[-1].campaign_id)
-        self.assertEqual(active.lock_sha256, registry[-1].lock_sha256)
-        self.assertEqual(active.schema_version, 6)
-        self.assertEqual(active.max_attempts, 4)
-        self.assertEqual(active.upstream_timeout_seconds, 180.0)
-        self.assertEqual(len(active.continuation), 25)
+        with self.assertRaisesRegex(
+            BaselineError, "no paid B7 campaign identity is active"
+        ):
+            load_campaign_identity(paths)
+        latest = load_historical_campaign_identity(paths, registry[-1].version)
+        self.assertEqual(latest.campaign_id, registry[-1].campaign_id)
+        self.assertEqual(latest.lock_sha256, registry[-1].lock_sha256)
+        self.assertEqual(latest.schema_version, 6)
+        self.assertEqual(latest.max_attempts, 4)
+        self.assertEqual(latest.upstream_timeout_seconds, 180.0)
+        self.assertEqual(len(latest.continuation), 25)
         self.assertEqual(
-            {item.source_campaign_id for item in active.continuation},
+            {item.source_campaign_id for item in latest.continuation},
             {
                 "p2-b7-canary-baseline-v18",
                 "p2-b7-canary-baseline-v19",
                 "p2-b7-canary-baseline-v20",
             },
         )
-        self.assertEqual(len(active.slots), 321)
+        self.assertEqual(len(latest.slots), 321)
         self.assertIn(
-            active.budget["campaign_cap_usd"],
+            latest.budget["campaign_cap_usd"],
             {"700.000000", "1000.000000", "1300.000000", "1600.000000"},
         )
         self.assertEqual(
-            Decimal(active.budget["prior_estimated_usd"]),
+            Decimal(latest.budget["prior_estimated_usd"]),
             required_successor_prior(paths, version=registry[-2].version),
         )
-        active_pids = {item.task_id: item.pids_limit for item in active.catalog.tasks}
-        self.assertEqual(active_pids["terminal-bench/filter-js-from-html"], 4096)
-        self.assertEqual(set(active_pids.values()), {256, 4096})
+        latest_pids = {item.task_id: item.pids_limit for item in latest.catalog.tasks}
+        self.assertEqual(latest_pids["terminal-bench/filter-js-from-html"], 4096)
+        self.assertEqual(set(latest_pids.values()), {256, 4096})
         pointer = json.loads(
             (paths.worktree_root / CAMPAIGN_ACTIVE_POINTER_PATH).read_text()
         )
-        self.assertEqual(pointer["active_lock"], registry[-1].path.as_posix())
+        self.assertIsNone(pointer["active_lock"])
         retired = load_historical_campaign_identity(paths, 10)
         self.assertEqual(retired.campaign_id, "p2-b7-canary-baseline-v10")
         self.assertEqual(retired.schema_version, 1)

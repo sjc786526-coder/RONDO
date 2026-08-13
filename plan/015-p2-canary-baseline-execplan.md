@@ -304,29 +304,30 @@ RONDO A/A 两轮及 frozen Codex/RONDO A/B 各一轮，按机械规则形成 B7 
 
 ### 后续计划
 
-1. 用 schema-v5 的结构化 Guardian task-input 扫描与 bounded provider terminal diagnostics 闭合 v20 RCA，并用
-   schema-v6 绑定已授权 campaign ledger capacity；focused、
-   `eval-lock` 与阶段末全量测试通过并形成干净提交。
-2. 由生成器冻结唯一 schema-v6 后继 identity，精确带入 `1136.113528 USD` prior。新 identity 引用 v18/v19/v20
-   的 25 个首个非 infra 有效结果，只为 infra/未启动逻辑 slot 分配并 claim 新 run ID；fresh wire 成功后逐项补齐。
-3. 基础四轮与必要条件加跑完整后机械聚合 `sigma`、`delta`、共同分母、归因、usage 和费用；若下一请求的
-   main+Guardian 的 `37.770000 USD` admission 容量无法装入剩余预算时，在发送 main 前 blocked。
+1. 以 v22 的九项共同有效结果和三项 A/B 差异作为方向 1 的首个性能诊断输入；不为改变本次分数重跑 v22，
+   `vulnerable-secret` 的 provider `cyber_policy` 事实单独保留为供应商能力边界。
+2. 后续若启动新的付费 campaign，必须重新估算并取得独立授权，生成新 identity/IDs，且不得把 v22 的 failed
+   终态或剩余额度视为可续跑状态。
 
-当前后继已冻结为 campaign/batch `p2-b7-canary-baseline-v22`/`p2-b7-canary-sol-sol-v22`，run base
-`20260812-420000000`，lock SHA
-`740862459fc3a263ee6ceab893db3b79a236eb04d39c0df286a6941f6814ffb0`。321 个新 run ID 唯一，25 条
-v18/v19/v20 有效逻辑结果引用已冻结；正式执行前仍须
-fresh wire canary。
+schema-v6 v22 使用 campaign/batch `p2-b7-canary-baseline-v22`/`p2-b7-canary-sol-sol-v22`、run base
+`20260812-420000000` 与 lock SHA
+`740862459fc3a263ee6ceab893db3b79a236eb04d39c0df286a6941f6814ffb0`。它引用 25 条历史首个非 infra 结果，
+fresh wire 4/4 usage-valid，随后只补齐缺失链并执行机械条件加跑。v22 已形成不可复用的 failed 终态，active paid
+pointer 已关闭，lock/result/ledger/artifact 仅供历史重放。
 
 ### 阻塞项
 
-- 无离线阻塞；v22 真实执行仍可能因 fresh wire 失败、非 provider 的本地机械熔断或剩余预算不足而 blocked。
-  provider-integrity 失败不隐藏、不减记，但不再作为本地实现熔断证据。
+- B7 执行设施无未结算状态；技术门未通过：九项共同有效任务上 `sigma=0`、`delta=3`，原因精确为
+  `ab_delta_exceeds_aa_sigma`。这是真实 failed 基线，不是 infra/预算 blocked。
 
 ### 当前验收状态
 
-- v1 是 API 前失败终态；v2—v21 是保留全部费用事实的 blocked 终态。累计 debit `1136.113528 USD`、
-  reservation 0；v22 已冻结但尚未执行，B7 尚未形成四轮完整共同集合，M2 尚未验收。
+- v1 是 API 前失败终态，v2—v21 为保留全部费用事实的 blocked 终态；v22 完成四轮共同集合与条件加跑，
+  `sigma=0`、`delta=3`、共同分母 9，最终 `failed`。四轮成功率依次为 RONDO A/A `5/9`、`5/9`，
+  RONDO A/B `5/9`，frozen Codex A/B `4/9`；唯一条件任务 `db-wal-recovery` 未形成 RONDO 三败/Codex 三过。
+  v22 wire `0.192860 USD`、paid `329.767745 USD`，Plan 015 累计 `1466.074133 < 1600 USD`；202/202 upstream
+  attempts 均已结算，reservation 0，`actual_usd=null`。`vulnerable-secret` 四条逻辑链的 HTTP 200 SSE 均以
+  `error/cyber_policy` 终止且无 usage，按合同保守结算并排除共同分母。B4/B5/B6/B7 执行前置已整体完成。
 
 ## 6. 关键决策记录
 
@@ -370,3 +371,4 @@ fresh wire canary。
 | 036 | 生成 schema-v5 v21，冻结 25 条首个非 infra 结果、321 个新 run ID 与精确 `1135.915188 USD` prior；v1—v20 继续只读 | 只补 sanitize、vulnerable 及未启动逻辑链，避免重跑有效 pass/reward 0 | B6/B7 | 已采纳 |
 | 037 | v21 wire 成功后在首个 TB 请求前命中实现级 400 USD ledger 上限；计入 `0.198340 USD` wire 后退役，schema-v6 将 ledger 支持范围绑定到已授权 1600 USD | 剩余额度大于旧实现上限不是预算超限，且不能复用已产生 wire 费用的 identity | B6/B7 | 已采纳 |
 | 038 | 生成 schema-v6 v22，冻结 25 条有效引用、321 个新 ID 与精确 `1136.113528 USD` prior；v1—v21 继续只读 | 新 identity 才能在修复后的执行合同下启动 TB | B6/B7 | 已采纳 |
+| 039 | v22 完成九项共同集合与必要条件加跑后以 `sigma=0`、`delta=3` 形成 failed 基线；关闭 active pointer，不为改变分数重跑 | B7 的验收目标是可复算的真实终态，性能门失败必须保留为后续优化输入 | B7 | 已采纳 |

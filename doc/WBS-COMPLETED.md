@@ -392,3 +392,16 @@ standard/Lite 形态均补回归。
   19/28 个 Selenium driver 创建失败，4096 PIDs 才完成 28/28；同时闭合 stopped-container inspect/remove 竞态。
   v15 blocked 后累计 debit `408.561823 USD`、reservation 0；v16 以 run base `20260812-360000000`、全新
   lock/IDs、filter 4096 PIDs 和精确 prior 冻结，v1—v15 保持只读。
+
+### 2026-08-12 Plan 015 首次 B7 真实基线终态
+
+- v22 fresh wire 4/4 usage-valid；25 条历史首个非 infra 结果经冻结 SHA 重验后复用，只为缺失/infra 逻辑链
+  使用新 IDs。四轮在同一九项共同集合上形成 RONDO A/A `5/9`、`5/9`，RONDO A/B `5/9` 和 frozen Codex
+  A/B `4/9`。
+- `sigma=0`、`delta=3`，因此冻结的 `delta <= sigma` 门以 `ab_delta_exceeds_aa_sigma` 判 failed。唯一条件任务
+  `db-wal-recovery` 的两侧各两次加跑未形成 RONDO 三败/Codex 三过；该结果是性能事实，不是设施 blocked。
+- `vulnerable-secret` 的四条逻辑链均收到 HTTP 200 SSE `error/cyber_policy` 且无 usage，按合同各保守结算并
+  排除共同分母；其余任务使用首个非 infra 终态，未通过选择性重跑改变成绩。
+- v22 paid `329.767745 USD`、wire `0.192860 USD`，Plan 015 累计 `1466.074133 < 1600 USD`；202/202 upstream
+  attempts settled、reservation 0、`actual_usd=null`。结果与 aggregate 已进入独立 results 分支；v1—v22
+  只读保留，active paid pointer 关闭。

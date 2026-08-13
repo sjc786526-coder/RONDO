@@ -118,3 +118,10 @@
 - 将 ledger 支持上限提高到已授权 `$1600` 并保留 lock/逐请求硬门禁，proxy 56/56、baseline 50/50 通过。
   生成 schema-v6 v22：run base `20260812-420000000`、25 条 continuation、prior `$1136.113528`、lock SHA
   `740862459fc3a263ee6ceab893db3b79a236eb04d39c0df286a6941f6814ffb0`；v1—v21 只读保留。
+- v22 fresh wire 结算 `$0.192860`；补齐缺失链后，四轮共同有效集合为 9 项。RONDO A/A 均 `5/9`，RONDO
+  A/B `5/9`，frozen Codex A/B `4/9`，机械聚合 `sigma=0`、`delta=3`，最终
+  `failed:ab_delta_exceeds_aa_sigma`。`db-wal-recovery` 条件加跑未命中稳定方向失败。
+- `vulnerable-secret` 的四条逻辑链均为 HTTP 200 SSE `error/cyber_policy`、无 usage；proxy 保留 bounded
+  terminal code 并按每次 `$18.885000` 保守结算。该事实解释了中转面板的“HTTP 成功”，不是本地 180 秒超时。
+- v22 paid `$329.767745`，Plan 015 总计 `$1466.074133 < $1600`；202/202 attempts settled、reservation 0、
+  `actual_usd=null`，Docker/VHDX 净增长 0。v22 active pointer 关闭，全部历史 lock/result/ledger/artifact 不改写。
