@@ -21,7 +21,14 @@ from ..config import (
     load_provider_secret,
     load_runtime_config,
 )
-from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
+from ..contracts import (
+    BinaryManifest,
+    ContractError,
+    ProviderProjection,
+    RunOutcome,
+    Side,
+    parse_product,
+)
 from ..docker_supervisor import DockerSupervisionError
 from ..exit_codes import BUDGET_STOPPED, CONFIG_ERROR, EVIDENCE_ERROR, INFRA_ERROR
 from ..runtime_bridge import (
@@ -542,8 +549,19 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         "bwrap_source_tree_sha256",
         "workspace_lock_normalization",
     }
-    if not isinstance(value, dict) or set(value) != expected:
+    if not isinstance(value, dict) or set(value) not in {
+        frozenset(expected),
+        frozenset(expected | {"product"}),
+    }:
         raise TerminalBenchRunError("binary manifest schema differs from v1")
+    product = None
+    if "product" in value:
+        try:
+            product = parse_product(value["product"]).value
+        except ContractError as exc:
+            raise TerminalBenchRunError(
+                "binary manifest product identity is invalid"
+            ) from exc
     build_command = value["build_command"]
     code_mode_host_build_command = value["code_mode_host_build_command"]
     if any(
@@ -572,6 +590,7 @@ def _load_manifest(path: Path, common_root: Path) -> BinaryManifest:
         build_command=tuple(build_command),
         code_mode_host_build_command=tuple(code_mode_host_build_command),
         workspace_lock_normalization=value["workspace_lock_normalization"],
+        product=product,
     )
     manifest.validate()
     declared_paths = tuple(

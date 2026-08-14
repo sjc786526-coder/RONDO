@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .config import RepoPaths
-from .contracts import RunOutcome
+from .contracts import (
+    AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+    AUTO_REVIEW_EVIDENCE_DIR,
+    ContractError,
+    Product,
+    RunOutcome,
+    parse_product,
+)
 
 
 _RUN_ID = re.compile(
@@ -28,6 +35,9 @@ _TIMESTAMP = re.compile(
     r"(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})\Z"
 )
 _MAX_SCAN_BYTES = 128 * 1024 * 1024
+_MAX_PRIVATE_SUMMARY_BYTES = 1024 * 1024
+_PRIVATE_SUMMARY_SCHEMA_VERSION = 1
+_CAMPAIGN_PRODUCT_SCHEMA_VERSION = 7
 _SENSITIVE_ASSIGNMENT = re.compile(
     rb"(?:^|[,{\s])[\"']?"
     rb"(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|bearer[-_]?token|"
@@ -46,7 +56,7 @@ _URL_CREDENTIAL = re.compile(
 _SIDES = {
     "tb": {"codex", "rondo"},
     "replay": {"codex", "rondo"},
-    "shadow": {"luna-static", "sol-static", "local-static"},
+    "shadow": {"luna-static", "sol-static", "local-static", "local-ft-static"},
 }
 _RECORD_FIELDS = {
     "schema_version",
@@ -67,6 +77,9 @@ _RECORD_FIELDS = {
     "artifacts",
     "notes",
 }
+# Written only when the subject is a RONDO product, so historical rows and the
+# frozen-upstream side keep exactly the schema v1 field set they already have.
+_OPTIONAL_RECORD_FIELDS = {"product"}
 _UPSTREAM_CODEX_IDENTITY = {
     "tag": "rust-v0.147.0",
     "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
@@ -76,6 +89,23 @@ _UPSTREAM_CODEX_IDENTITY = {
 
 class ArtifactError(ValueError):
     """Raised when artifact publication cannot be completed safely."""
+
+
+def strict_json_equal(left: object, right: object) -> bool:
+    """Compare decoded JSON without letting bool impersonate a number."""
+
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict) and isinstance(right, dict):
+        return set(left) == set(right) and all(
+            strict_json_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            strict_json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return left == right
 
 
 def validate_private_artifact_bytes(contents: bytes, relative_path: str) -> None:
@@ -178,6 +208,7 @@ class ArtifactWriter:
         self._validate_roots()
         self._assert_staging_tree()
         _validate_record(record, self.run_id, self.paths.common_root)
+        _validate_private_run_summary(self.staging, record)
         secret_bytes = _normalize_secrets(secrets)
         record_bytes = _encode_record(record)
         tree_identity = _artifact_tree_identity(self.staging, secret_bytes)
@@ -190,7 +221,9 @@ class ArtifactWriter:
             try:
                 self._recover_pending_publications_locked()
                 self._assert_publication_paths()
-                index_before, rows = _read_index(self.results)
+                index_before, rows = _read_index(
+                    self.results, common_root=self.paths.common_root
+                )
                 if any(row["run_id"] == self.run_id for row in rows):
                     raise ArtifactError("run id is already present in the tracked index")
                 index_after = index_before + record_bytes + b"\n"
@@ -266,7 +299,9 @@ class ArtifactWriter:
         with _open_lock_file(lock_path) as lock_handle:
             _lock(lock_handle)
             try:
-                if _run_id_exists(self.results, self.run_id):
+                if _run_id_exists(
+                    self.results, self.run_id, common_root=self.paths.common_root
+                ):
                     raise ArtifactError("run id is already present in the tracked index")
             finally:
                 _unlock(lock_handle)
@@ -369,7 +404,9 @@ class ArtifactWriter:
         _scan_bytes(record_bytes, (), "tracked run record")
         if value["record_identity"] != _bytes_identity(record_bytes):
             raise ArtifactError("artifact publication journal record identity differs")
-        index_bytes, _rows = _read_index(self.results)
+        index_bytes, _rows = _read_index(
+            self.results, common_root=self.paths.common_root
+        )
         index_identity = _bytes_identity(index_bytes)
         index_before = value["index_before"]
         index_after = value["index_after"]
@@ -380,6 +417,7 @@ class ArtifactWriter:
             if not target_present or staged_present:
                 raise ArtifactError("published run has inconsistent recovery state")
             _assert_artifact_tree_identity(target, tree_identity)
+            _validate_private_run_summary(target, record)
             _discard_index_temporary(self.results.parent / value["index_temporary_name"])
             journal.unlink()
             _fsync_directory(self.runs_root)
@@ -395,6 +433,7 @@ class ArtifactWriter:
         if not _path_present(artifact_tree):
             raise ArtifactError("pending artifact staging directory is unavailable")
         _assert_artifact_tree_identity(artifact_tree, tree_identity)
+        _validate_private_run_summary(artifact_tree, record)
         if not target_present:
             os.replace(staged, target)
             _fsync_directory(self.runs_root)
@@ -407,13 +446,205 @@ class ArtifactWriter:
         _fsync_directory(self.runs_root)
 
 
+def _validate_private_run_summary(
+    artifact_root: Path, record: Mapping[str, Any]
+) -> None:
+    config = record.get("config")
+    if not isinstance(config, Mapping):
+        return
+    private_summary_version = config.get("private_summary_schema_version")
+    if private_summary_version is None:
+        return
+    if (
+        isinstance(private_summary_version, bool)
+        or not isinstance(private_summary_version, int)
+        or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+    ):
+        raise ArtifactError("private run summary schema version is invalid")
+    path = artifact_root / "run-summary.json"
+    try:
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size <= 0
+            or metadata.st_size > _MAX_PRIVATE_SUMMARY_BYTES
+        ):
+            raise ArtifactError("private run summary is unsafe")
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except ArtifactError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ArtifactError("private run summary is unavailable or invalid") from exc
+    expected_keys = {
+        "schema_version",
+        "run_id",
+        "side",
+        "git_commit",
+        "outcome",
+        "config",
+        "summary",
+        "tasks",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected_keys
+        or isinstance(value.get("schema_version"), bool)
+        or not isinstance(value.get("schema_version"), int)
+        or value.get("schema_version") != _PRIVATE_SUMMARY_SCHEMA_VERSION
+        or any(
+            not strict_json_equal(value.get(key), record.get(key))
+            for key in expected_keys - {"schema_version"}
+        )
+    ):
+        raise ArtifactError("private run summary differs from its tracked record")
+
+
+def validate_record_product_contract(record: Mapping[str, Any]) -> None:
+    """Enforce doc/eval-data-layout.md 3.1 on the optional product field.
+
+    Absent stays legal forever: historical RONDO rows are read as
+    ``rondo-local`` and are never backfilled.  Once a row names a product, its
+    top-level, config, binary and versioned auto-review projections become one
+    fail-closed identity.
+    """
+
+    track = record.get("track")
+    side = record.get("side")
+    config = record.get("config")
+    if not isinstance(config, Mapping):
+        raise ArtifactError("run record product config is invalid")
+    private_summary_version = config.get("private_summary_schema_version")
+    if private_summary_version is not None and (
+        isinstance(private_summary_version, bool)
+        or not isinstance(private_summary_version, int)
+        or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+        or track != "tb"
+    ):
+        raise ArtifactError("run record private summary version is invalid")
+    campaign_schema_version = config.get("campaign_schema_version")
+    campaign_product_present = "campaign_product" in config
+    if campaign_schema_version is not None:
+        if (
+            isinstance(campaign_schema_version, bool)
+            or not isinstance(campaign_schema_version, int)
+            or not 1 <= campaign_schema_version <= _CAMPAIGN_PRODUCT_SCHEMA_VERSION
+            or track != "tb"
+            or not isinstance(config.get("campaign_id"), str)
+            or not config.get("campaign_id")
+        ):
+            raise ArtifactError("campaign schema identity is invalid")
+    elif campaign_product_present:
+        raise ArtifactError("campaign product lacks its schema identity")
+    if "product" not in record:
+        if any(key in config for key in ("product", "binary_product", "auto_review_config")):
+            raise ArtifactError("productless run record carries product configuration")
+        if campaign_schema_version == _CAMPAIGN_PRODUCT_SCHEMA_VERSION:
+            if (
+                side != "codex"
+                or not campaign_product_present
+                or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+            ):
+                raise ArtifactError("v7 campaign product binding is incomplete")
+            try:
+                parse_product(config["campaign_product"])
+            except ContractError as exc:
+                raise ArtifactError("campaign product identity is invalid") from exc
+        elif campaign_product_present:
+            raise ArtifactError("historical campaign carries a product binding")
+        return
+    eligible = (
+        (track in {"tb", "replay"} and side == "rondo")
+        or (track == "shadow" and side in {"local-static", "local-ft-static"})
+    )
+    if not eligible:
+        raise ArtifactError("run record side cannot carry a product identity")
+    try:
+        product = parse_product(record["product"])
+    except ContractError as exc:
+        raise ArtifactError("run record product identity is invalid") from exc
+    if config.get("product") != product.value:
+        raise ArtifactError("run record product differs from its config")
+    if campaign_schema_version == _CAMPAIGN_PRODUCT_SCHEMA_VERSION:
+        if (
+            not campaign_product_present
+            or config.get("campaign_product") != product.value
+            or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+        ):
+            raise ArtifactError("run record product differs from its campaign")
+    elif campaign_product_present:
+        raise ArtifactError("historical campaign carries a product binding")
+    elif campaign_schema_version is not None and product is not Product.RONDO_LOCAL:
+        raise ArtifactError("historical campaign product is not Local")
+    if track == "replay":
+        if config.get("binary_product") != product.value:
+            raise ArtifactError("replay product differs from its binary")
+        if "auto_review_config" in config:
+            raise ArtifactError("replay record carries Terminal-Bench auto-review config")
+        return
+    if track == "shadow":
+        if (
+            product is not Product.RONDO_LOCAL
+            or config.get("binary_product") != Product.RONDO_LOCAL.value
+        ):
+            raise ArtifactError("shadow side differs from its Local product")
+        if "auto_review_config" in config:
+            raise ArtifactError("shadow record carries Terminal-Bench auto-review config")
+        return
+    if private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION:
+        raise ArtifactError("product run record lacks its private summary contract")
+    if config.get("binary_product") != product.value:
+        raise ArtifactError("run record product differs from its binary")
+    auto_review = config.get("auto_review_config")
+    expected_keys = {
+        "schema_version",
+        "model",
+        "model_provider",
+        "reasoning_effort",
+        "evidence_dir",
+    }
+    if not isinstance(auto_review, Mapping) or set(auto_review) != expected_keys:
+        raise ArtifactError("run record auto-review config is invalid")
+    auto_review_schema_version = auto_review.get("schema_version")
+    if (
+        isinstance(auto_review_schema_version, bool)
+        or not isinstance(auto_review_schema_version, int)
+        or auto_review_schema_version != AUTO_REVIEW_CONFIG_SCHEMA_VERSION
+    ):
+        raise ArtifactError("run record auto-review config version is invalid")
+    if product is Product.RONDO_MULTI:
+        expected_state = {
+            "model": None,
+            "model_provider": None,
+            "reasoning_effort": None,
+            "evidence_dir": None,
+        }
+    else:
+        guardian_model = config.get("guardian_model")
+        guardian_effort = config.get("guardian_effort")
+        if not isinstance(guardian_model, str) or not isinstance(guardian_effort, str):
+            raise ArtifactError("run record Guardian config is invalid")
+        expected_state = {
+            "model": guardian_model,
+            "model_provider": None,
+            "reasoning_effort": guardian_effort,
+            "evidence_dir": AUTO_REVIEW_EVIDENCE_DIR,
+        }
+    if {key: auto_review[key] for key in expected_state} != expected_state:
+        raise ArtifactError("run record auto-review config differs from its product")
+
+
 def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) -> None:
     if not isinstance(record, Mapping):
         raise ArtifactError("run record must be an object")
     match = _match_run_id(run_id)
+    fields = set(record)
     if (
         match is None
-        or set(record) != _RECORD_FIELDS
+        or not _RECORD_FIELDS <= fields
+        or fields - _RECORD_FIELDS - _OPTIONAL_RECORD_FIELDS
+        or isinstance(record.get("schema_version"), bool)
+        or not isinstance(record.get("schema_version"), int)
         or record.get("schema_version") != 1
         or record.get("run_id") != run_id
     ):
@@ -422,6 +653,7 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
     side = record.get("side")
     if track != match.group("track") or side != match.group("side") or side not in _SIDES[track]:
         raise ArtifactError("run record track or side is invalid")
+    validate_record_product_contract(record)
     created_at = record.get("created_at")
     if not isinstance(created_at, str) or not _TIMESTAMP.fullmatch(created_at):
         raise ArtifactError("run record timestamp is invalid")
@@ -668,7 +900,9 @@ def _assert_artifact_tree_identity(root: Path, expected: object) -> None:
         raise ArtifactError("artifact tree differs from its publication journal")
 
 
-def _read_index(path: Path) -> tuple[bytes, list[dict[str, Any]]]:
+def _read_index(
+    path: Path, *, common_root: Path
+) -> tuple[bytes, list[dict[str, Any]]]:
     if not _path_present(path):
         return b"", []
     if path.is_symlink() or not path.is_file():
@@ -694,9 +928,23 @@ def _read_index(path: Path) -> tuple[bytes, list[dict[str, Any]]]:
             raise ArtifactError("tracked run index contains an invalid row")
         if run_id in run_ids:
             raise ArtifactError("tracked run index contains a duplicate run id")
+        _validate_record(row, run_id, common_root)
+        _validate_private_run_summary(common_root / row["artifacts"], row)
         run_ids.add(run_id)
         rows.append(row)
     return contents, rows
+
+
+def read_validated_run_records(
+    path: Path, *, common_root: Path
+) -> tuple[tuple[dict[str, Any], bytes], ...]:
+    """Read the durable index through its full record and private-tree checks."""
+
+    contents, rows = _read_index(path, common_root=common_root)
+    lines = contents.splitlines()
+    if len(lines) != len(rows):
+        raise ArtifactError("tracked run index row count is inconsistent")
+    return tuple(zip(rows, lines))
 
 
 def _index_temporary_name(run_id: str) -> str:
@@ -747,8 +995,8 @@ def _atomic_replace_index(path: Path, contents: bytes, temporary_name: str) -> N
         raise
 
 
-def _run_id_exists(path: Path, run_id: str) -> bool:
-    _contents, rows = _read_index(path)
+def _run_id_exists(path: Path, run_id: str, *, common_root: Path) -> bool:
+    _contents, rows = _read_index(path, common_root=common_root)
     return any(row["run_id"] == run_id for row in rows)
 
 

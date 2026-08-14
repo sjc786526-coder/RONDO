@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-13
+最后更新：2026-08-14
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -12,8 +12,8 @@
 `be6e8eac029b183056b7e4402879f15d2c85f61b`）；机器事实源为
 `mydev/codex-rs/core/upstream-source-baseline.toml`。
 
-项目由两条并列产品线组成：**RONDO Local**（`mydev/`，已存在，承载方向 1、2）与
-**RONDO Multi**（`multidev/`，尚未建立，承载方向 3）。两者地位相同，结构见 §4。
+项目由两条并列产品线组成：**RONDO Local**（`mydev/`，承载方向 1、2）与
+**RONDO Multi**（`multidev/`，产品基线实现已通过独立验收、待合并，承载方向 3）。两者地位相同，结构见 §4。
 
 | 范围 | 当前结论 |
 |---|---|
@@ -25,35 +25,26 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。当前 CUDA 能力为 `linux_cuda_built_model_unvalidated`；真实配置仍是旧合同，4k/8k model-backed、真实结构化推理、L3/L4 与 Local M3 均未完成。 |
-| 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 尚未建立，首个可交付增量待定（D1，见 §8）。 |
+| 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线实现已通过独立验收、待合并；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
 
 ## 2. 下一工作包与顺序
 
-推进顺序为 **工作包 2 → 3**。工作包 1 已完成并归档到 `doc/WBS-COMPLETED.md`，不再属于“下一工作包”，
-也不再作为任何方向的待解除前置。工作包 2 完成 Multi 产品基线后进入工作包 3，届时三条线按下述范围并行。
+工作包 1 已完成。工作包 2（Plan 022）已通过独立验收、当前待合并，因此**工作包 3 尚未正式启动**。合并后，三条线
+才按下述范围并行。
 
-### 工作包 2（当前）：RONDO Multi 产品基线建立（`multidev/` bootstrap）
-
-范围严格限定为：共享看门狗脚本迁移（§4.4）、从当前 `mydev/` 复制 git 跟踪文件、通过三条行为验收门、
-建立贯通 binary freeze / manifest / 归档的独立产品身份、能构建并通过本次变化相关的无 API 验证。
-**不夹带任何 Multi 功能开发，也不运行付费 TB。** 任务分解与验收门见
-`doc/WBS/multi-agent-trusted-evidence.md`。
-
-这是正式产品基线而非空架子：共享设施适配、独立产品身份、构建与定向基线测试都算在内。
-测试范围不重跑全 workspace —— `multidev/` 直接继承 `mydev/` 的源码与已有测试基线，本工作包只验证复制完整性、
-路径与构建入口变化、看门狗迁移、Local 审批开关默认关闭以及 eval 产品身份接入；不把继承的历史测试快照表述为
-当前全绿，也不把全 workspace 基线自动推迟到首个 Multi 功能阶段，后续是否跑全量由实际重大阶段另行决定。
-
-### 工作包 3：三条线并行
+### 工作包 3（待工作包 2 合并）：三条线并行
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
 - **3b RONDO Local**：先以 4k model-backed + 配置切换收口 Local M3，再由 L5a 生成冻结教师标签，
   然后 L3/L4 出未微调 baseline 与指标口径，之后 L5b/L6，最后 Local M4。
-- **3c RONDO Multi**：推进方向 3 的功能路线。付费同题退化验收所需的公平比较设施前置已经具备；
-  实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得真实 API 授权，不得用未运行或无效比较表述“未见退化”。
+- **3c RONDO Multi**：`multidev/` 产品基线已通过独立验收、待合并；D1 未定前只有环境就绪工作，没有功能内容。
+  付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
+  真实 API 授权，不得用未运行或无效比较表述“未见退化”。
+  Multi 尚无冻结 runtime bundle，`eval-data/bin/rondo-multi/` 仍为空；首次真实或 Docker 验收前必须先按
+  §4.5 的产品身份冻结一套 Multi bundle。
 
 三条线的代码与文档工作真正并行；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源门禁全局串行。
 
@@ -74,7 +65,7 @@
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | model-free/静态前置完成 | 无外部阻塞；4k model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
-| 3 | 共享可信证据链的多智能体协作 | Multi | 研究完成，产品基线未建立 | 无外部阻塞；D1 决定首个增量，真实 API/付费测评单独授权 |
+| 3 | 共享可信证据链的多智能体协作 | Multi | 研究完成；产品基线已通过独立验收、待合并 | Plan 022 合并后由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），
   而 Multi 的首个增量还待定（D1），不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
@@ -90,9 +81,9 @@
 ```text
 RONDO/
 ├── mydev/        # RONDO Local（沿用现名，不改名）
-├── multidev/     # RONDO Multi（工作包 2 建立）
+├── multidev/     # RONDO Multi（工作包 2 已通过独立验收、待合并）
 ├── eval/         # 两条产品线共享的通用测评设施
-├── scripts/      # 共享构建锁与看门狗入口（由 mydev/scripts/ 迁出，见 §4.4）
+├── scripts/      # 共享构建锁与看门狗入口（已由 mydev/scripts/ 迁出，见 §4.4）
 ├── eval-data/    # 内部按产品分命名空间，不顶层并列
 ├── test-data/    # 内部按产品分子目录
 ├── doc/
@@ -121,14 +112,9 @@ RONDO/
 API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doctor/runtime、fake/loopback/replay 无 API 测试，
 以及能接收不同二进制与产品 variant 的通用测试与测评入口。
 
-**看门狗迁移（工作包 2 内必做）**：`with-build-lock.sh` 与 `build-watchdog-lib.sh` 迁到仓库根 `scripts/`，
-逻辑与阈值不动，**直接改所有引用点，不留 shim**。约束：
-
-- `eval/` 侧有硬编码的 canonical wrapper 路径校验，**必须一并改成根路径**，否则带锁构建会 fail-closed。
-- `CLAUDE.md` / `AGENTS.md` 安全边界条款与 `doc/development-environment.md` 的路径必须在**同一任务内**
-  同步改写；脚本真正移动前不得提前改。
-- `eval/locks/*.json` 中作为冻结 provenance 记录的路径**不得修改**；`agent_log/` 与 `doc/audit-snapshots/` 同理。
-- 先改 `mydev/justfile`，再复制生成 `multidev/`，使其天生带正确路径。
+**看门狗**：`with-build-lock.sh` 与 `build-watchdog-lib.sh` 位于仓库根 `scripts/`，逻辑、阈值与退出语义
+与迁移前一致，两条产品线共用，**没有 shim 或兼容软链**。现行引用点全部使用根路径；
+`eval/locks/*.json`、`agent_log/` 与 `doc/audit-snapshots/` 里的旧路径是冻结 provenance，不改写。
 
 ### 4.5 产品身份
 
@@ -138,6 +124,10 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
   是上游侧、不适用产品身份；一律不改名、不回填。
 - Multi 必须显式带 `multi` 字样（`eval-data/bin/rondo-multi/`），产品身份贯通 binary freeze、
   源码/构建路径、manifest 与结果归档，不能只参数化一个 `bin/rondo/` 路径。
+  唯一映射是 `eval/rondo_eval/contracts.py` 的 `product_layout()`；任一层缺失或矛盾都 fail-closed。
+- **Multi 的产品基线是行为定义的**：`[auto_review]` 的 `model`、`model_provider`、`reasoning_effort`、
+  `evidence_dir` 四项默认未配置，eval 也不为 Multi 注入它们，结果工件用版本化 `auto_review_config`
+  记录该状态。Local 的既有公平运行合同不变。
 - crate 名与二进制名沿用上游（`codex-cli` / `codex`），**不重命名**，保持与 `codex-source-code/` 可直接 diff。
 - 数据目录不顶层并列，只在产品特定层级加命名空间；具体规则见 `doc/eval-data-layout.md`。
 
@@ -150,7 +140,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合（已完成）；B4—B7；L2a/L7 + 4k model-backed 收口为 Local M3；随后 L5a 教师标签与 L3/L4 未微调 baseline | 进行中 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 未开始 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | 未开始（工作包 2 为其基线） |
+| P5 | RONDO Multi 产品线 | 产品基线已通过独立验收、待合并（工作包 2）；功能开发待 D1 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -219,12 +209,12 @@ v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两�
 ## 8. 待定决策
 
 - **D1 Multi 首个可交付增量** —— 待细读 `doc/research/multi-agent-trusted-evidence-research.md` 后决定选哪个
-  工作流、是否先做证据层地基。**这是当前最大的未定项**：在它定下来之前，工作包 3c 没有实质内容，
-  Multi 只能停在环境就绪。
+  工作流、是否先做证据层地基。**这是当前最大的未定项**：产品基线已通过独立验收、待合并，且在 D1 定下来之前
+  工作包 3c 没有实质内容。
 - **D2 Multi 价值命题的最终措辞** —— 现有版本（见 `doc/WBS/multi-agent-trusted-evidence.md`）是初步框架，
   需在读完调研报告后确认或修正，特别是“朴素自然语言基线作对照组”是否采纳为设计约束。
 
-两项都不阻塞工作包 2 与 3a/3b；它们只使 3c 暂时停在环境就绪。
+两项都不阻塞 3a/3b；它们只使 3c 暂时停在环境就绪。
 
 ## 9. 子规划索引
 

@@ -11,7 +11,15 @@ from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
-from ..contracts import BinaryManifest, ContractError, Side
+from ..contracts import (
+    AUTO_REVIEW_EVIDENCE_DIR,
+    BinaryManifest,
+    ContractError,
+    Product,
+    Side,
+    auto_review_overrides,
+    product_for_manifest,
+)
 from .compat import (
     EnvironmentLike,
     EnvironmentPaths,
@@ -102,6 +110,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         binary_build_command: list[str] | tuple[str, ...],
         binary_code_mode_host_build_command: list[str] | tuple[str, ...],
         binary_workspace_lock_normalization: str | None,
+        binary_product: str | None = None,
         provider_base_url: str,
         provider_api_key_env: str,
         main_effort: str,
@@ -140,9 +149,13 @@ class UploadBinaryAdapter(HarborCodexAgent):
             build_command=tuple(binary_build_command),
             code_mode_host_build_command=tuple(binary_code_mode_host_build_command),
             workspace_lock_normalization=binary_workspace_lock_normalization,
+            product=binary_product,
         )
         try:
             manifest.validate()
+            # The adapter class fixes the side, so resolving here is what keeps
+            # a Local bundle from being run by the Multi adapter and vice versa.
+            self._product = product_for_manifest(self.side, manifest)
         except ContractError as exc:
             raise AdapterError("binary manifest is invalid") from exc
         if not isinstance(model_name, str) or not _MODEL_NAME.fullmatch(
@@ -641,22 +654,24 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 if self._frozen_model_catalog_path is not None
                 else ()
             )
-            if self.side is Side.RONDO:
-                overrides = (
-                    *common_overrides,
-                    *catalog_overrides,
-                    f'auto_review.model={json.dumps(self._guardian_model)}',
-                    f'auto_review.reasoning_effort={json.dumps(self._guardian_effort)}',
-                    "auto_review.evidence_dir=\"/logs/agent/guardian-evidence\"",
-                )
-            else:
-                # Frozen Codex v0.147 does not deserialize RONDO's three new
-                # auto_review fields.  Its effective Guardian model/effort are
-                # verified from the outbound request by the budget proxy.
-                overrides = (
-                    *common_overrides,
-                    *catalog_overrides,
-                )
+            # Which `[auto_review]` fields this product configures is decided
+            # once, in `auto_review_overrides`, and the same decision is what
+            # the result record reports.  RONDO Multi's baseline is the closed
+            # state, so it passes none of them; frozen Codex v0.147 cannot
+            # deserialize them at all and its effective Guardian model/effort
+            # are verified from the outbound request by the budget proxy.
+            overrides = (
+                *common_overrides,
+                *catalog_overrides,
+                *(
+                    f"auto_review.{name}={json.dumps(value)}"
+                    for name, value in _guardian_override_items(
+                        self._product,
+                        guardian_model=self._guardian_model,
+                        guardian_effort=self._guardian_effort,
+                    )
+                ),
+            )
             override_args = " ".join(f"-c {shlex.quote(value)}" for value in overrides)
             command = (
                 f"set -o pipefail; {shlex.quote(self.remote_path)} exec "
@@ -669,6 +684,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
             _validate_safe_codex_command(
                 command,
                 side=self.side,
+                product=self._product,
                 main_effort=self._main_effort,
                 guardian_model=self._guardian_model,
                 guardian_effort=self._guardian_effort,
@@ -758,6 +774,7 @@ def adapter_for(
         binary_build_command=list(manifest.build_command),
         binary_code_mode_host_build_command=list(manifest.code_mode_host_build_command),
         binary_workspace_lock_normalization=manifest.workspace_lock_normalization,
+        binary_product=manifest.product,
         provider_base_url=provider_base_url,
         provider_api_key_env=provider_api_key_env,
         main_effort=main_effort,
@@ -794,6 +811,13 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         ),
         ("binary_source_commit", manifest.source_commit),
         ("binary_source_dirty", json.dumps(manifest.source_dirty)),
+        # Omitted for bundles frozen before the product dimension and for the
+        # frozen upstream, so their agent-kwarg projection is unchanged.
+        *(
+            (("binary_product", manifest.product),)
+            if manifest.product is not None
+            else ()
+        ),
         # The frozen toolchain evidence intentionally contains the complete
         # multi-line rustc/cargo verbose output.  Encode it as JSON so Harbor's
         # parse_kwargs reconstructs the exact string without putting literal
@@ -861,10 +885,32 @@ def _validate_provider_inputs(base_url: str, api_key_env: str) -> None:
         raise AdapterError("provider_api_key_env is invalid")
 
 
+def _guardian_override_items(
+    product: Product | None,
+    *,
+    guardian_model: str,
+    guardian_effort: str,
+) -> tuple[tuple[str, str], ...]:
+    """Return the ``auto_review.<field>=<value>`` pairs this run configures."""
+
+    if product is None:
+        return ()
+    return tuple(
+        (name, value)
+        for name, value in auto_review_overrides(
+            product,
+            guardian_model=guardian_model,
+            guardian_effort=guardian_effort,
+        ).items()
+        if value is not None
+    )
+
+
 def _validate_safe_codex_command(
     command: str,
     *,
     side: Side,
+    product: Product | None = None,
     main_effort: str,
     guardian_model: str,
     guardian_effort: str,
@@ -908,15 +954,20 @@ def _validate_safe_codex_command(
         raise AdapterError("workspace-write network policy override is ambiguous")
     if "model_providers.openai." in command:
         raise AdapterError("built-in OpenAI provider may not be overridden")
-    rondo_only = (
+    local_only = (
         f"auto_review.model={json.dumps(guardian_model)}",
         f"auto_review.reasoning_effort={json.dumps(guardian_effort)}",
-        'auto_review.evidence_dir="/logs/agent/guardian-evidence"',
+        f"auto_review.evidence_dir={json.dumps(AUTO_REVIEW_EVIDENCE_DIR)}",
     )
-    if side is Side.RONDO and any(value not in command for value in rondo_only):
+    if product is Product.RONDO_LOCAL and any(
+        value not in command for value in local_only
+    ):
         raise AdapterError("RONDO Guardian overrides are incomplete")
-    if side is Side.CODEX and any(value in command for value in rondo_only):
-        raise AdapterError("frozen Codex received unsupported RONDO config fields")
+    # The frozen upstream cannot deserialize these fields, and the Multi
+    # product baseline is defined by not configuring them, so for both the
+    # closed state has to be observable in the command itself.
+    if product is not Product.RONDO_LOCAL and "auto_review." in command:
+        raise AdapterError("agent received unexpected auto_review configuration")
     catalog_override = (
         f"model_catalog_json={json.dumps(frozen_model_catalog_path)}"
         if frozen_model_catalog_path is not None

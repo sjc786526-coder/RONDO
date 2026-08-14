@@ -13,6 +13,7 @@ from pathlib import Path
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
+from rondo_eval import artifacts  # noqa: E402
 from rondo_eval.artifacts import ArtifactError, ArtifactWriter  # noqa: E402
 from rondo_eval.config import (  # noqa: E402
     ConfigError,
@@ -186,6 +187,65 @@ class ArtifactTests(unittest.TestCase):
             "notes": "",
         }
 
+    @staticmethod
+    def _write_private_summary(writer: ArtifactWriter, record: dict) -> None:
+        writer.write_json(
+            "run-summary.json",
+            {
+                "schema_version": 1,
+                "run_id": record["run_id"],
+                "side": record["side"],
+                "git_commit": record["git_commit"],
+                "outcome": record["outcome"],
+                "config": record["config"],
+                "summary": record["summary"],
+                "tasks": record["tasks"],
+            },
+        )
+
+    @staticmethod
+    def _set_tb_product(
+        record: dict,
+        product: str,
+        *,
+        campaign_schema_version: int | None = None,
+    ) -> None:
+        record["product"] = product
+        auto_review = (
+            {
+                "schema_version": 1,
+                "model": None,
+                "model_provider": None,
+                "reasoning_effort": None,
+                "evidence_dir": None,
+            }
+            if product == "rondo-multi"
+            else {
+                "schema_version": 1,
+                "model": "guardian",
+                "model_provider": None,
+                "reasoning_effort": "low",
+                "evidence_dir": "guardian-evidence",
+            }
+        )
+        record["config"] = {
+            "private_summary_schema_version": 1,
+            "guardian_model": "guardian",
+            "guardian_effort": "low",
+            "product": product,
+            "binary_product": product,
+            "auto_review_config": auto_review,
+        }
+        if campaign_schema_version is not None:
+            record["config"].update(
+                {
+                    "campaign_id": "campaign-product-contract",
+                    "campaign_schema_version": campaign_schema_version,
+                }
+            )
+            if campaign_schema_version == 7:
+                record["config"]["campaign_product"] = product
+
     def test_finalize_publishes_private_artifacts_and_appends_index(self) -> None:
         cases = (
             ("20260809-000000000-tb-rondo-r1", "rondo"),
@@ -230,6 +290,286 @@ class ArtifactTests(unittest.TestCase):
                 for row in rows
             )
         )
+
+    def test_durable_index_rejects_product_config_and_auto_review_tampering(self) -> None:
+        mutations = (
+            lambda row: row["config"].__setitem__("product", "rondo-local"),
+            lambda row: row["config"].__setitem__("binary_product", "rondo-local"),
+            lambda row: row["config"]["auto_review_config"].__setitem__(
+                "schema_version", 2
+            ),
+            lambda row: row["config"]["auto_review_config"].__setitem__(
+                "model", "forged-model"
+            ),
+            lambda row: row["config"]["auto_review_config"].__setitem__(
+                "unexpected", None
+            ),
+        )
+        for index, mutate in enumerate(mutations, start=1):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0100000{index:02d}-tb-rondo-r1"
+                record = self._record(run_id)
+                record["product"] = "rondo-multi"
+                record["config"] = {
+                    "private_summary_schema_version": 1,
+                    "guardian_model": "guardian",
+                    "guardian_effort": "low",
+                    "product": "rondo-multi",
+                    "binary_product": "rondo-multi",
+                    "auto_review_config": {
+                        "schema_version": 1,
+                        "model": None,
+                        "model_provider": None,
+                        "reasoning_effort": None,
+                        "evidence_dir": None,
+                    },
+                }
+                writer = ArtifactWriter(paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                self._write_private_summary(writer, record)
+                writer.finalize(record, secrets=())
+                index_path = root / "eval/results/runs.jsonl"
+                tampered = json.loads(index_path.read_text(encoding="utf-8"))
+                mutate(tampered)
+                index_path.write_text(
+                    json.dumps(tampered, sort_keys=True, separators=(",", ":")) + "\n",
+                    encoding="utf-8",
+                )
+                next_id = f"20260809-0200000{index:02d}-tb-rondo-r1"
+                with self.assertRaisesRegex(ArtifactError, "product|auto-review"):
+                    ArtifactWriter(paths, next_id).start()
+
+    def test_boolean_values_cannot_impersonate_numeric_schema_versions(self) -> None:
+        mutations = (
+            lambda record: record.__setitem__("schema_version", True),
+            lambda record: record["config"].__setitem__(
+                "private_summary_schema_version", True
+            ),
+            lambda record: record["config"]["auto_review_config"].__setitem__(
+                "schema_version", True
+            ),
+        )
+        for number, mutate in enumerate(mutations, start=90):
+            with self.subTest(number=number), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0000000{number}-tb-rondo-r1"
+                record = self._record(run_id)
+                self._set_tb_product(record, "rondo-multi")
+                mutate(record)
+                writer = ArtifactWriter(paths, run_id).start()
+                self._write_private_summary(writer, record)
+                with self.assertRaisesRegex(ArtifactError, "schema|version"):
+                    writer.finalize(record, secrets=())
+                self.assertFalse(writer.journal.exists())
+                self.assertFalse(writer.target.exists())
+
+        run_id = "20260809-000000093-tb-rondo-r1"
+        record = self._record(run_id)
+        self._set_tb_product(record, "rondo-multi")
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json(
+            "run-summary.json",
+            {
+                "schema_version": True,
+                "run_id": run_id,
+                "side": "rondo",
+                "git_commit": record["git_commit"],
+                "outcome": record["outcome"],
+                "config": record["config"],
+                "summary": record["summary"],
+                "tasks": record["tasks"],
+            },
+        )
+        with self.assertRaisesRegex(ArtifactError, "private run summary"):
+            writer.finalize(record, secrets=())
+        self.assertFalse(writer.journal.exists())
+        self.assertFalse(writer.target.exists())
+
+    def test_v7_campaign_product_binding_is_required_before_publication(self) -> None:
+        for number, side in enumerate(("rondo", "codex"), start=70):
+            with self.subTest(side=side), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0000000{number}-tb-{side}-r1"
+                record = self._record(run_id, side=side)
+                record["config"] = {
+                    "private_summary_schema_version": 1,
+                    "campaign_id": "campaign-product-contract",
+                    "campaign_schema_version": 7,
+                    "campaign_product": "rondo-multi",
+                }
+                if side == "rondo":
+                    self._set_tb_product(
+                        record, "rondo-multi", campaign_schema_version=7
+                    )
+                writer = ArtifactWriter(paths, run_id).start()
+                self._write_private_summary(writer, record)
+                writer.finalize(record, secrets=())
+
+                row = json.loads(
+                    (root / "eval/results/runs.jsonl").read_text(encoding="utf-8")
+                )
+                self.assertEqual(row["config"]["campaign_product"], "rondo-multi")
+                self.assertEqual("product" in row, side == "rondo")
+
+        for number, side in enumerate(("rondo", "codex"), start=72):
+            with self.subTest(missing_side=side), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0000000{number}-tb-{side}-r1"
+                record = self._record(run_id, side=side)
+                if side == "rondo":
+                    self._set_tb_product(
+                        record, "rondo-multi", campaign_schema_version=7
+                    )
+                else:
+                    record["config"] = {
+                        "private_summary_schema_version": 1,
+                        "campaign_id": "campaign-product-contract",
+                        "campaign_schema_version": 7,
+                    }
+                record["config"].pop("campaign_product", None)
+                writer = ArtifactWriter(paths, run_id).start()
+                self._write_private_summary(writer, record)
+                with self.assertRaisesRegex(ArtifactError, "v7 campaign|campaign"):
+                    writer.finalize(record, secrets=())
+                self.assertFalse(writer.journal.exists())
+                self.assertFalse(writer.target.exists())
+                self.assertFalse(writer.results.exists())
+
+    def test_private_summary_is_required_and_revalidated_during_recovery(self) -> None:
+        from unittest import mock
+
+        run_id = "20260809-000000074-tb-rondo-r1"
+        record = self._record(run_id)
+        self._set_tb_product(record, "rondo-multi", campaign_schema_version=7)
+        missing = ArtifactWriter(self.paths, run_id).start()
+        with self.assertRaisesRegex(ArtifactError, "private run summary"):
+            missing.finalize(record, secrets=())
+        self.assertFalse(missing.journal.exists())
+        self.assertFalse(missing.target.exists())
+        missing.abort()
+
+        writer = ArtifactWriter(self.paths, run_id).start()
+        self._write_private_summary(writer, record)
+        with mock.patch(
+            "rondo_eval.artifacts._atomic_replace_index", side_effect=KeyboardInterrupt
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                writer.finalize(record, secrets=())
+        summary_path = writer.target / "run-summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        summary["config"]["campaign_product"] = "rondo-local"
+        summary_path.write_text(
+            json.dumps(summary, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        journal = json.loads(writer.journal.read_text(encoding="utf-8"))
+        journal["tree_identity"] = artifacts._artifact_tree_identity(writer.target, ())
+        writer.journal.write_text(
+            json.dumps(journal, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        next_id = "20260809-000000075-tb-rondo-r1"
+        with self.assertRaisesRegex(ArtifactError, "private run summary differs"):
+            ArtifactWriter(self.paths, next_id).start()
+        self.assertTrue(writer.journal.exists())
+        self.assertFalse(writer.results.exists())
+
+    def test_replay_product_and_binary_contract_is_durable(self) -> None:
+        for number, product in enumerate(("rondo-local", "rondo-multi"), start=76):
+            with self.subTest(product=product), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0000000{number}-replay-rondo-r1"
+                record = self._record(run_id, track="replay")
+                record["tasks"] = None
+                record["metrics"] = {"drift": 0.0}
+                record["product"] = product
+                record["config"] = {
+                    "product": product,
+                    "binary_product": product,
+                }
+                writer = ArtifactWriter(paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                writer.finalize(record, secrets=())
+
+                index_path = root / "eval/results/runs.jsonl"
+                row = json.loads(index_path.read_text(encoding="utf-8"))
+                row["config"]["binary_product"] = (
+                    "rondo-local" if product == "rondo-multi" else "rondo-multi"
+                )
+                index_path.write_text(
+                    json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n",
+                    encoding="utf-8",
+                )
+                next_id = f"20260809-0000000{number + 2}-replay-rondo-r1"
+                with self.assertRaisesRegex(ArtifactError, "replay product"):
+                    ArtifactWriter(paths, next_id).start()
+
+        run_id = "20260809-000000080-replay-rondo-r1"
+        record = self._record(run_id, track="replay")
+        record["tasks"] = None
+        record["metrics"] = {"drift": 0.0}
+        record["product"] = "rondo-local"
+        record["config"] = {
+            "product": "rondo-local",
+            "binary_product": "rondo-local",
+            "auto_review_config": {"schema_version": 999},
+        }
+        writer = ArtifactWriter(self.paths, run_id).start()
+        with self.assertRaisesRegex(ArtifactError, "replay record"):
+            writer.finalize(record, secrets=())
+        self.assertFalse(writer.journal.exists())
+
+    def test_shadow_local_sides_are_exactly_local(self) -> None:
+        for number, side in enumerate(("local-static", "local-ft-static"), start=81):
+            with self.subTest(side=side), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0000000{number}-shadow-{side}-r1"
+                record = self._record(run_id, track="shadow", side=side)
+                record["tasks"] = None
+                record["metrics"] = {"agreement": 1.0}
+                record["product"] = "rondo-local"
+                record["config"] = {
+                    "product": "rondo-local",
+                    "binary_product": "rondo-local",
+                }
+                writer = ArtifactWriter(paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                writer.finalize(record, secrets=())
+
+                index_path = root / "eval/results/runs.jsonl"
+                row = json.loads(index_path.read_text(encoding="utf-8"))
+                row["product"] = "rondo-multi"
+                row["config"]["product"] = "rondo-multi"
+                row["config"]["binary_product"] = "rondo-multi"
+                index_path.write_text(
+                    json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n",
+                    encoding="utf-8",
+                )
+                next_id = f"20260809-0000000{number + 2}-shadow-{side}-r1"
+                with self.assertRaisesRegex(ArtifactError, "shadow side"):
+                    ArtifactWriter(paths, next_id).start()
+
+        for number, side in enumerate(("luna-static", "sol-static"), start=85):
+            with self.subTest(non_product_side=side):
+                run_id = f"20260809-0000000{number}-shadow-{side}-r1"
+                record = self._record(run_id, track="shadow", side=side)
+                record["tasks"] = None
+                record["metrics"] = {"agreement": 1.0}
+                record["product"] = "rondo-local"
+                record["config"] = {
+                    "product": "rondo-local",
+                    "binary_product": "rondo-local",
+                }
+                writer = ArtifactWriter(self.paths, run_id).start()
+                with self.assertRaisesRegex(ArtifactError, "cannot carry a product"):
+                    writer.finalize(record, secrets=())
 
     def test_upstream_codex_identity_is_exact(self) -> None:
         invalid_values = (

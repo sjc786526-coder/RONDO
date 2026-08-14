@@ -11,20 +11,23 @@ import re
 import stat
 import sys
 import tempfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 
 from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
+from ..artifacts import ArtifactError, validate_record_product_contract
 from ..contracts import (
     BinaryManifest,
     ModelPricing,
+    Product,
     ProviderProjection,
     RunOutcome,
     RunSpec,
     Side,
-    assert_fair_pair,
+    product_for_manifest,
+    product_layout,
 )
 from ..exit_codes import EVIDENCE_ERROR, INFRA_ERROR
 from .freeze import (
@@ -73,6 +76,7 @@ _HISTORICAL_CAP_BY_ID = {
 }
 LATEST_HISTORICAL_PAIR_NAME = "v19"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
+_CAMPAIGN_PRODUCT_SCHEMA_VERSION = 7
 _PAIR_LOCK_V1_KEYS = {
     "schema_version",
     "pair_id",
@@ -428,6 +432,15 @@ class PairSequenceLedger:
         if (
             record.get("outcome") != RunOutcome.COMPLETED.value
             or record.get("side") != run["side"]
+            or (
+                "product" in record
+                and (
+                    run["side"] != Side.RONDO.value
+                    or record.get("product") != Product.RONDO_LOCAL.value
+                )
+            )
+            or record.get("binary_sha256")
+            != self.identity.bundles[Side(str(run["side"]))].cli_sha256
             or not isinstance(config, Mapping)
             or config.get("pair_id") != self.identity.pair_id
             or config.get("pair_lock_sha256") != self.identity.lock_sha256
@@ -691,7 +704,72 @@ class PairIdentity:
         ):
             _validate_bundle_file(bundle_root / relative, digest=digest, size=size)
 
+    def validate_no_api_manifest(
+        self,
+        *,
+        common_root: Path,
+        side: Side,
+        selected_product: Product,
+        manifest_path: Path,
+        manifest: BinaryManifest,
+    ) -> str:
+        """Bind a no-API run to its selected product and actual bundle bytes.
+
+        The historical Local and Codex bundles keep their exact tracked pair
+        identity.  Multi has no historical paid-pair slot to inherit, so its
+        no-API identity is the canonical product namespace plus the strict
+        production manifest and the three files that manifest hashes.  The
+        returned manifest digest is persisted in the no-API receipt.
+        """
+
+        try:
+            manifest.validate()
+        except ValueError as exc:
+            raise PairIdentityError("no-API bundle manifest is invalid") from exc
+        expected_product = selected_product if side is Side.RONDO else None
+        try:
+            actual_product = product_for_manifest(side, manifest)
+        except ValueError as exc:
+            raise PairIdentityError("no-API bundle product identity is invalid") from exc
+        if actual_product is not expected_product:
+            raise PairIdentityError("no-API bundle product differs from the selection")
+        if side is Side.CODEX or selected_product is Product.RONDO_LOCAL:
+            self.validate_manifest(
+                common_root=common_root,
+                side=side,
+                manifest_path=manifest_path,
+                manifest=manifest,
+            )
+            return _file_sha256(manifest_path.resolve(strict=True))
+
+        try:
+            root = common_root.resolve(strict=True)
+            actual_path = manifest_path.resolve(strict=True)
+            namespace = (
+                root / "eval-data" / "bin" / product_layout(selected_product).artifact_dir
+            ).resolve(strict=True)
+        except (OSError, ValueError) as exc:
+            raise PairIdentityError("no-API product bundle is unavailable") from exc
+        if (
+            actual_path.name != "manifest.json"
+            or actual_path.parent.parent != namespace
+            or manifest_path.is_symlink()
+        ):
+            raise PairIdentityError("no-API bundle path differs from the product namespace")
+        bundle_root = actual_path.parent
+        for path, digest in (
+            (bundle_root / "codex", manifest.sha256),
+            (bundle_root / "codex-code-mode-host", manifest.code_mode_host_sha256),
+            (bundle_root / "codex-resources" / "bwrap", manifest.bwrap_sha256),
+        ):
+            _validate_no_api_bundle_file(path, digest=digest)
+        return _file_sha256(actual_path)
+
     def validate_spec(self, spec: RunSpec, *, mode: str) -> PairSlot:
+        try:
+            spec.validate()
+        except ValueError as exc:
+            raise PairIdentityError("RunSpec contract is invalid") from exc
         if mode == "paid":
             batch_id = self.mode("paid").batch_id
         elif mode == "no_api":
@@ -738,14 +816,6 @@ class PairIdentity:
                 or paid_budget.pair_usd != paid_budget.per_side_usd * 2
             ):
                 raise PairIdentityError("paid run budget differs from the tracked pair")
-        counterpart = replace(
-            spec,
-            side=Side.RONDO if spec.side is Side.CODEX else Side.CODEX,
-        )
-        try:
-            assert_fair_pair(spec, counterpart)
-        except ValueError as exc:
-            raise PairIdentityError("RunSpec fails the shared fair-pair contract") from exc
         if mode == "paid" and slot.paid_run_id is None:
             raise PairIdentityError("enabled paid pair lacks exact run ids")
         return slot
@@ -837,11 +907,13 @@ class CampaignPublicationContext:
     campaign_slot_id: str
     campaign_round_id: str
     campaign_attempt: int
+    campaign_schema_version: int
     taskset_sha256: str
     canary_catalog_sha256: str
     side: Side
     metrics: Mapping[str, object]
     selected_profile: Mapping[str, object]
+    campaign_product: Product | None = None
     provider_upstream_timeout_seconds: float = 90.0
 
     def validate(self) -> None:
@@ -861,12 +933,25 @@ class CampaignPublicationContext:
             or len(self.campaign_round_id) > 64
             or isinstance(self.campaign_attempt, bool)
             or self.campaign_attempt not in {1, 2, 3, 4}
+            or isinstance(self.campaign_schema_version, bool)
+            or not isinstance(self.campaign_schema_version, int)
+            or not (
+                0 < self.campaign_schema_version <= _CAMPAIGN_PRODUCT_SCHEMA_VERSION
+            )
             or not isinstance(self.side, Side)
+            or (
+                self.campaign_product is not None
+                and not isinstance(self.campaign_product, Product)
+            )
             or isinstance(self.provider_upstream_timeout_seconds, bool)
             or not isinstance(self.provider_upstream_timeout_seconds, (int, float))
             or float(self.provider_upstream_timeout_seconds) not in {90.0, 180.0}
         ):
             raise PairIdentityError("publication campaign topology is invalid")
+        if (
+            self.campaign_schema_version >= _CAMPAIGN_PRODUCT_SCHEMA_VERSION
+        ) is not (self.campaign_product is not None):
+            raise PairIdentityError("publication campaign product binding is invalid")
         try:
             metrics_from_dict(self.metrics)
         except RunMetricsError as exc:
@@ -1057,6 +1142,17 @@ def assess_m1(
     }
     if len(candidates) != 2:
         result["reasons"] = ["pair_requires_exactly_two_records"]
+        return result
+    try:
+        for record in candidates:
+            validate_record_product_contract(record)
+            if "product" in record and (
+                record.get("side") != Side.RONDO.value
+                or record.get("product") != Product.RONDO_LOCAL.value
+            ):
+                raise ArtifactError("paid pair product differs from its Local bundle")
+    except ArtifactError:
+        result["reasons"] = ["pair_product_identity_invalid"]
         return result
     ordered = sorted(
         candidates,
@@ -1386,7 +1482,27 @@ def _published_terminal_record(index_path: Path, *, run_id: str) -> dict[str, An
     ]
     if len(matches) != 1:
         raise PairIdentityError("Terminal-Bench publication is not uniquely durable")
+    try:
+        validate_record_product_contract(matches[0])
+    except ArtifactError as exc:
+        raise PairIdentityError(
+            "Terminal-Bench publication product identity is invalid"
+        ) from exc
     return matches[0]
+
+
+def _validate_no_api_bundle_file(path: Path, *, digest: str) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise PairIdentityError("no-API bundle file is unavailable") from exc
+    if (
+        path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o555
+        or _file_sha256(path) != digest
+    ):
+        raise PairIdentityError("no-API bundle file differs from its manifest")
 
 
 def _parse_modes(value: object) -> dict[str, PairMode]:

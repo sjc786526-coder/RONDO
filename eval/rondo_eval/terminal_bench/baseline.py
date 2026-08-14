@@ -15,8 +15,17 @@ from enum import Enum
 from pathlib import Path
 from typing import Iterable
 
+from ..artifacts import strict_json_equal
 from ..config import RepoPaths
-from ..contracts import BinaryManifest, Product, ProviderProjection, RunSpec, Side
+from ..contracts import (
+    BinaryManifest,
+    ContractError,
+    Product,
+    ProviderProjection,
+    RunSpec,
+    Side,
+    product_for_manifest,
+)
 from ..fair_comparison import (
     AGGREGATION_STRICT_MAJORITY,
     CATALOG_PROJECTION_VERSION,
@@ -27,8 +36,8 @@ from ..fair_comparison import (
 )
 from ..frozen_model_catalog import (
     CATALOG_PROJECTION_ALGORITHM,
-    RONDO_CATALOG_PATH,
     UPSTREAM_CATALOG_PATH,
+    rondo_catalog_path,
 )
 from .runner import PreparedTerminalBenchRun
 from .scoring import TaskOutcome
@@ -487,6 +496,43 @@ class CampaignIdentity:
         if conditions.catalog_artifact_sha256 != frozen["sha256"]:
             raise BaselineError("shared model catalog digest differs from run conditions")
 
+    def validate_publication_context(self, context: object, *, run_id: str) -> None:
+        """Bind a prospective result publication to this frozen campaign."""
+
+        from .pair import CampaignPublicationContext
+
+        if not isinstance(context, CampaignPublicationContext):
+            raise BaselineError("campaign publication context type is invalid")
+        try:
+            context.validate()
+        except ValueError as exc:
+            raise BaselineError("campaign publication context is invalid") from exc
+        try:
+            slot = self.slot(context.campaign_slot_id)
+        except BaselineError as exc:
+            raise BaselineError("campaign publication slot is invalid") from exc
+        expected_product = self.product if self.enforces_fair_comparison else None
+        if (
+            context.campaign_id != self.campaign_id
+            or context.campaign_lock_sha256 != self.lock_sha256
+            or context.campaign_schema_version != self.schema_version
+            or context.taskset_sha256 != self.taskset_sha256
+            or context.canary_catalog_sha256 != self.canary_catalog_sha256
+            or not strict_json_equal(
+                dict(context.selected_profile), self.selected_profile
+            )
+            or context.campaign_product is not expected_product
+            or context.provider_upstream_timeout_seconds
+            != self.upstream_timeout_seconds
+            or slot.run_id != run_id
+            or slot.side is not context.side
+            or (slot.round_id or slot.kind) != context.campaign_round_id
+            or slot.attempt != context.campaign_attempt
+        ):
+            raise BaselineError(
+                "campaign publication context differs from the frozen campaign"
+            )
+
     def validate_manifest(
         self,
         *,
@@ -496,6 +542,14 @@ class CampaignIdentity:
         manifest: BinaryManifest,
     ) -> None:
         manifest.validate()
+        if self.enforces_fair_comparison:
+            expected_product = self.product if side is Side.RONDO else None
+            try:
+                actual_product = product_for_manifest(side, manifest)
+            except ContractError as exc:
+                raise BaselineError("campaign bundle product identity is invalid") from exc
+            if actual_product is not expected_product:
+                raise BaselineError("campaign bundle product differs from the lock")
         expected = self.bundles.get(side.value)
         if not isinstance(expected, dict) or set(expected) != {
             "manifest_path",
@@ -521,6 +575,10 @@ class CampaignIdentity:
         task: "FrozenTask",
     ) -> None:
         spec.validate()
+        if self.enforces_fair_comparison:
+            expected_product = self.product if spec.side is Side.RONDO else None
+            if spec.effective_product() is not expected_product:
+                raise BaselineError("campaign RunSpec product differs from the lock")
         self.validate_provider(spec.provider)
         if (
             slot.task_id != task.task_id
@@ -1579,6 +1637,10 @@ def _parse_comparison_block(
         "sources",
     }:
         raise BaselineError("campaign catalog identity is not frozen")
+    try:
+        product = Product(str(block["product"]))
+    except ValueError as exc:
+        raise BaselineError("campaign product identity is invalid") from exc
     sources = identity["sources"]
     if (
         not isinstance(sources, list)
@@ -1599,7 +1661,9 @@ def _parse_comparison_block(
     by_side = {str(item["side"]): item for item in sources}
     for side, expected_path in (
         ("upstream", UPSTREAM_CATALOG_PATH),
-        ("rondo", RONDO_CATALOG_PATH),
+        # The catalog must come from the tree of the product the campaign
+        # declares, otherwise a Multi campaign could freeze Local's catalog.
+        ("rondo", rondo_catalog_path(product)),
     ):
         item = by_side[side]
         if (
@@ -1629,10 +1693,6 @@ def _parse_comparison_block(
         or identity["guardian_model"] not in slugs
     ):
         raise BaselineError("campaign catalog override target is invalid")
-    try:
-        Product(str(block["product"]))
-    except ValueError as exc:
-        raise BaselineError("campaign product identity is invalid") from exc
     return dict(block)
 
 

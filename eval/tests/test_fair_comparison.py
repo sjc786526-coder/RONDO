@@ -25,7 +25,15 @@ from rondo_eval.api_budget_proxy import (
 )
 from rondo_eval import preflight_cli
 from rondo_eval.config import RepoPaths
-from rondo_eval.contracts import ContractError, Product, RunSpec, Side, product_for_side
+from rondo_eval.contracts import (
+    AUTO_REVIEW_EVIDENCE_DIR,
+    ContractError,
+    Product,
+    ProviderProjection,
+    RunSpec,
+    Side,
+    product_for_side,
+)
 from rondo_eval.terminal_bench.baseline import (
     BASE_ROUNDS,
     CampaignLockRegistration,
@@ -74,6 +82,9 @@ from rondo_eval.terminal_bench.baseline_identity import (
 )
 from rondo_eval.terminal_bench.results import HarborResultError
 from rondo_eval.terminal_bench.runner import PreparedTerminalBenchRun
+from rondo_eval.terminal_bench.__main__ import _load_manifest
+from rondo_eval.terminal_bench.freeze import TERMINAL_BENCH_VERSION
+from rondo_eval.terminal_bench.live import campaign_terminal_bench_request
 
 
 MAIN_PRICING = ModelPricing(
@@ -874,6 +885,221 @@ class CampaignExecutionOrderTests(unittest.TestCase):
 
 
 class CampaignFairComparisonContractTests(unittest.TestCase):
+    def test_campaign_durable_record_and_aggregate_reject_product_tampering(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        identity = _CampaignFixture.v7()
+        slot = next(item for item in identity.slots if item.side is Side.RONDO)
+        manifest_path = paths.common_root / identity.bundles["rondo"]["manifest_path"]
+        manifest = _load_manifest(manifest_path, paths.common_root)
+        record = {
+            "run_id": slot.run_id,
+            "track": "tb",
+            "side": Side.RONDO.value,
+            "product": Product.RONDO_LOCAL.value,
+            "binary_sha256": manifest.sha256,
+            "config": {
+                **identity.selected_profile,
+                "private_summary_schema_version": 1,
+                "product": Product.RONDO_LOCAL.value,
+                "binary_product": Product.RONDO_LOCAL.value,
+                "campaign_schema_version": identity.schema_version,
+                "campaign_product": Product.RONDO_LOCAL.value,
+                "campaign_id": identity.campaign_id,
+                "campaign_lock_sha256": identity.lock_sha256,
+                "campaign_slot_id": slot.slot_id,
+                "binary_source_commit": manifest.source_commit,
+                "binary_workspace_lock_normalization": (
+                    manifest.workspace_lock_normalization
+                ),
+                "auto_review_config": {
+                    "schema_version": 1,
+                    "model": "gpt-5.6-sol",
+                    "model_provider": None,
+                    "reasoning_effort": "low",
+                    "evidence_dir": AUTO_REVIEW_EVIDENCE_DIR,
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            results_root = Path(directory) / "results"
+            baseline_cli._validate_campaign_record_product(
+                identity, record, common_root=paths.common_root
+            )
+            float_key = next(
+                key
+                for key, value in identity.selected_profile.items()
+                if isinstance(value, float)
+            )
+            record["config"][float_key] = True
+            with self.assertRaisesRegex(CampaignExecutionError, "selected profile"):
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
+                )
+            record["config"][float_key] = identity.selected_profile[float_key]
+            record["config"]["guardian_model"] = "forged-guardian"
+            record["config"]["guardian_effort"] = "high"
+            record["config"]["auto_review_config"]["model"] = "forged-guardian"
+            record["config"]["auto_review_config"]["reasoning_effort"] = "high"
+            with self.assertRaisesRegex(CampaignExecutionError, "selected profile"):
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
+                )
+            record["config"].update(identity.selected_profile)
+            record["config"]["auto_review_config"]["model"] = "gpt-5.6-sol"
+            record["config"]["auto_review_config"]["reasoning_effort"] = "low"
+            record["config"]["product"] = Product.RONDO_MULTI.value
+            with self.assertRaisesRegex(CampaignExecutionError, "product identity"):
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
+                )
+            record["config"]["product"] = Product.RONDO_LOCAL.value
+            record["binary_sha256"] = "f" * 64
+            with self.assertRaisesRegex(CampaignExecutionError, "binary differs"):
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
+                )
+
+            campaign_root = Path(directory) / "campaign"
+            campaign_root.mkdir()
+            aggregate = {
+                "campaign_id": identity.campaign_id,
+                "campaign_lock_sha256": identity.lock_sha256,
+                "status": "completed",
+                "product": Product.RONDO_MULTI.value,
+            }
+            (campaign_root / "aggregate.json").write_text(
+                json.dumps(aggregate), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(CampaignExecutionError, "identity drifted"):
+                baseline_cli._restore_tracked_aggregate_from_local(
+                    campaign_root=campaign_root,
+                    identity=identity,
+                    results_root=results_root,
+                    expected_status="completed",
+                )
+
+    def test_real_campaign_request_binds_manifest_runspec_and_product(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        local = _CampaignFixture.v7()
+        provider = ProviderProjection(
+            provider_id="test",
+            display_name="Test provider",
+            api="responses",
+            base_url="https://provider.example/v1",
+            api_key_env="TEST_API_KEY",
+            main_model=MAIN_PRICING.model_id,
+            main_effort="medium",
+            guardian_model=GUARDIAN_PRICING.model_id,
+            guardian_effort="low",
+            main_pricing=MAIN_PRICING,
+            guardian_pricing=GUARDIAN_PRICING,
+            max_attempts=5,
+            retry_backoff_seconds=1.0,
+            unbilled_retry_statuses=(429, 500, 502, 503, 504),
+            profile_sha256="d" * 64,
+            config_sha256="e" * 64,
+        )
+        local = replace(
+            local,
+            selected_profile={
+                **provider.to_public_dict(),
+                "max_guardian_logical_requests": 3,
+            },
+        )
+        task = local.catalog.tasks[0]
+        manifests = {}
+        for side in Side:
+            manifest_path = paths.common_root / local.bundles[side.value]["manifest_path"]
+            manifest = _load_manifest(manifest_path, paths.common_root)
+            local.validate_manifest(
+                common_root=paths.common_root,
+                side=side,
+                manifest_path=manifest_path,
+                manifest=manifest,
+            )
+            manifests[side] = manifest
+            request = campaign_terminal_bench_request(
+                identity=local,
+                side=side,
+                task=task,
+                binary=manifest,
+                common_root=paths.common_root,
+                work_root=paths.common_root / "eval-data/work/product-contract",
+                docker_task_id=f"product-contract-{side.value}",
+                seccomp_profile=paths.worktree_root / local.no_api_seccomp["profile_path"],
+                budget_usd=40.0,
+            )
+            self.assertIs(
+                request.product,
+                Product.RONDO_LOCAL if side is Side.RONDO else None,
+            )
+            spec = RunSpec(
+                side=side,
+                batch_id=request.batch_id,
+                task_id=task.task_id,
+                task_image_digest=task.image_digest,
+                binary=manifest,
+                terminal_bench_version=TERMINAL_BENCH_VERSION,
+                provider=provider,
+                product=request.product,
+                timeout_seconds=task.timeout_seconds,
+                max_retries=0,
+                budget_usd=40.0,
+            )
+            slot = next(
+                item
+                for item in local.slots
+                if item.task_id == task.task_id and item.side is side and item.attempt == 1
+            )
+            local.validate_spec(spec, slot=slot, task=task)
+
+        multi = _CampaignFixture.v7(
+            comparison_overrides={"product": Product.RONDO_MULTI.value}
+        )
+        multi = replace(multi, selected_profile=local.selected_profile)
+        local_manifest_path = paths.common_root / multi.bundles["rondo"]["manifest_path"]
+        with self.assertRaisesRegex(BaselineError, "product differs"):
+            multi.validate_manifest(
+                common_root=paths.common_root,
+                side=Side.RONDO,
+                manifest_path=local_manifest_path,
+                manifest=manifests[Side.RONDO],
+            )
+        multi_manifest = replace(
+            manifests[Side.RONDO], product=Product.RONDO_MULTI.value
+        )
+        multi_request = campaign_terminal_bench_request(
+            identity=multi,
+            side=Side.RONDO,
+            task=task,
+            binary=multi_manifest,
+            common_root=paths.common_root,
+            work_root=paths.common_root / "eval-data/work/product-contract-multi",
+            docker_task_id="product-contract-rondo-multi",
+            seccomp_profile=paths.worktree_root / multi.no_api_seccomp["profile_path"],
+            budget_usd=40.0,
+        )
+        self.assertIs(multi_request.product, Product.RONDO_MULTI)
+        multi_spec = RunSpec(
+            side=Side.RONDO,
+            batch_id=multi_request.batch_id,
+            task_id=task.task_id,
+            task_image_digest=task.image_digest,
+            binary=multi_manifest,
+            terminal_bench_version=TERMINAL_BENCH_VERSION,
+            provider=provider,
+            product=multi_request.product,
+            timeout_seconds=task.timeout_seconds,
+            max_retries=0,
+            budget_usd=40.0,
+        )
+        multi_slot = next(
+            item
+            for item in multi.slots
+            if item.task_id == task.task_id and item.side is Side.RONDO and item.attempt == 1
+        )
+        multi.validate_spec(multi_spec, slot=multi_slot, task=task)
+
     def test_a_v7_campaign_without_a_frozen_repeat_contract_is_refused(self) -> None:
         for block in (
             None,
@@ -1357,6 +1583,29 @@ class SuccessorIdentityTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             baseline_identity.main(
                 ["--run-id-date", "20260901", "--run-id-sequence-base", "500000001"]
+            )
+
+    def test_multi_successor_cannot_inherit_local_bundles(self) -> None:
+        catalog = json.loads(
+            json.dumps(_CampaignFixture.v7().comparison["catalog_identity"])
+        )
+        catalog["sources"][1]["path"] = (
+            "multidev/codex-rs/models-manager/models.json"
+        )
+        comparison = {
+            **_CampaignFixture.v7().comparison,
+            "catalog_identity": catalog,
+            "product": Product.RONDO_MULTI.value,
+        }
+        with self.assertRaisesRegex(
+            CampaignIdentityGenerationError, "inherited Local bundles"
+        ):
+            generate_successor_lock(
+                RepoPaths.discover(Path.cwd()),
+                run_id_date="20260901",
+                run_id_sequence_base=500000001,
+                comparison=comparison,
+                campaign_cap_usd=Decimal("100.000000"),
             )
 
     def test_an_unreadable_contract_file_fails_before_any_work(self) -> None:

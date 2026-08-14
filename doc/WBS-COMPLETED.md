@@ -554,3 +554,62 @@ standard/Lite 形态均补回归。
   结论为设施实现通过，相关实现与验收提交已合入 `main@ce316a6`。
 - **边界**：没有创建正式 v7 identity，未执行正式 identity → producer CLI → worker CLI、Oracle、wire canary、
   paid task、pilot/repeats 或能力比较；这些仍需各自冻结合同与单独授权。设施闭合不产生任何可归因的能力比较结论。
+
+### 2026-08-14 Plan 022 RONDO Multi 产品基线实现批次（独立验收未通过，不计为已完成）
+
+> 该实现提交 `d2c16073` 的独立验收结论为拒绝合并；本节只保留当时实施事实，不代表工作包完成。
+> B1/B2/B3/M1 修复已在同一任务分支继续落地，须经独立复审后才可转为完成记录。
+
+- **共享看门狗迁根**：`with-build-lock.sh`（`100755`）与 `build-watchdog-lib.sh`（`100644`）经 `git mv` 移到仓库根
+  `scripts/`，字节内容、阈值、退出码与安全语义不变；`script_dir` 仍按 `BASH_SOURCE` 解析同目录 helper，
+  `project_root` 仍走 git common dir。全部现行引用点改为根路径：根 `justfile`（3 处）、`mydev/justfile`
+  （新增 `watchdog` 变量，8 处）、`runtime_bridge` 的 canonical wrapper 校验、`binary_freeze` 的 build-command
+  合同、`baseline_cli`、`results` 的 `_EVAL_HARNESS_PATHS`、三个测试文件与 `AGENTS.md` / `CLAUDE.md` /
+  `doc/development-environment.md`。**不留 shim、软链或兼容分支**；`eval/locks/*.json`、`agent_log/` 与
+  `doc/audit-snapshots/` 里的旧路径作为冻结 provenance 保持原样。共享 helper 的 9 项回归改由两条产品线的
+  `just test-github-scripts` 各自显式指向根 helper（`parents[3]/scripts`）。
+- **`multidev/` 精确复制**：由 `git ls-files --stage -z -- mydev/` 清单驱动、按工作树内容复制，保留 mode 与
+  symlink。6,011 个条目（5,951 个 `100644`、59 个 `100755`、1 个 `120000`），与 `mydev/` 的 blob 与 mode
+  **逐条相同**，工作树 sha256 与文件类型也逐条相同，且 `multidev/` 内没有清单以外的文件。WBS 点名的六个
+  `mydev/codex-rs/core/` 未跟踪残留目录（`.git`、`.agents`、`.codex`、`project`、`absolute-turn`、
+  `request-permissions-environment`）全部未进入 Multi。
+- **默认关闭行为门**：`codex-rs/core/src/config/config_loader_tests.rs`（两棵树同源）新增两项回归，经
+  `ConfigBuilder` 真实配置加载路径断言空 `config.toml` 下 `[auto_review]` 的 `model`、`model_provider`、
+  `reasoning_effort`、`evidence_dir` 全为 `None`，同时断言 `approvals_reviewer` 保持上游默认 `User`
+  （不靠改 reviewer 伪造关闭态）；配套的正向用例证明四项确实仍被接线，避免断言空转。
+- **产品身份贯通**：`Product` / `product_layout()` 成为唯一映射（`mydev|multidev`、Cargo target 前缀、
+  `bin/{rondo,rondo-multi}`、`models-manager/models.json` 路径）。身份现在贯通 binary freeze 的源码根 /
+  target / legacy artifact / code-mode bundle / runtime bundle、三种 manifest、共享 model catalog 来源、
+  campaign lock 的 catalog provenance、adapter 与 agent kwargs、`RunSpec`、结果记录与归档 `run-summary.json`。
+  `RunSpec.validate()` 交叉校验运行声明的产品与其冻结二进制的产品，任一层缺失或矛盾 fail-closed。
+- **只加不改的历史兼容**：缺 `product` 的 manifest 与结果行按 `rondo-local` 读取，不回填；`side=codex`
+  既不携带也不推定产品身份。Local 的 build-command 合同保持逐字不变（`--product` 仅在非 Local 时出现），
+  因此历史 seven-key 工件的合同形状未被改写。
+- **默认关闭的结果合同**：新增版本化 `auto_review_config` 块，记录该次运行**配置了什么**（未配置写 `null`），
+  由结果顶层与归档 `run-summary.json` 共用同一投影，成功与失败发布路径不分叉。Multi 四项全 `null`；
+  Local 沿用既有公平合同；冻结上游不写该块。adapter 的 `-c` 覆盖与该块出自同一个 `auto_review_overrides()`，
+  运行命令与记录状态无法互相矛盾。
+- **eval 入口**：`binary_freeze` 与 `docker_smoke` CLI 新增显式 `--product`；根 `justfile` 的 `eval-b2-no-api`
+  改为按产品选择命名空间与 bundle，并新增 `product-build`、`product-default-off-test` 两个带锁入口。
+- **验收（全部本地、无真实 API、无 Docker、无本地模型）**：`just eval-lock` 通过；完整 `just eval-test`
+  592/592 通过（0 fail、0 skip），其中新增 7 项 Multi 冻结布局回归与 6 项产品/`auto_review_config` 结果合同回归；
+  共享 helper 9/9；经迁移后根看门狗的 Multi `codex-core` 默认关闭回归 80/80（含两项新门），
+  以及一次 Multi `cargo build --locked -p codex-cli --bin codex`。看门狗两次均 `stop_reason=none`、
+  `cleanup_reason=none`。不重跑全 workspace。
+- **边界**：`eval-data/bin/rondo-multi/` 仍为空，Multi 没有冻结 runtime bundle，因此本工作包没有做任何
+  Docker、no-API 双侧、真实 API 或能力验收，也没有产生正式 campaign identity、run ID 或结果行。
+  看门狗改根后，历史 Local/Codex bundle 的 `binary_freeze verify*` 会因 build-command 里记录的旧 wrapper 路径
+  而不再通过（按 WBS §4.4「拒绝旧路径」的要求，属预期）；冻结 bundle 字节与 `eval/locks/*.json` 均未改动。
+
+### 2026-08-14 Plan 022 RONDO Multi 产品基线最终独立验收
+
+- **结论**：第四次独立验收确认上一轮技术问题全部闭环，未发现新的实现级阻断；Plan 022 的实现与测试合同通过，
+  文档收口后具备合并条件。前一节保留首次未通过批次的形成时点事实，不改写其历史结论。
+- **最终闭环**：campaign publication 在落盘前绑定真实冻结 identity；campaign、continuation、result digest 与
+  aggregate 共用完整 durable record/private-summary reader；缺失或篡改私有摘要与 bool 冒充数字均 fail-closed。
+- **验收证据**：执行者完整无 API eval 610/610、`eval-lock` 85 packages、两侧 watchdog helper 各 9/9；独立验收
+  复跑直接相关模块 234/234，并确认历史 durable index 244/244 可读。未运行 Cargo、Docker、真实 no-API、API、
+  模型或付费测评；Multi 仍无冻结 runtime bundle，不据此主张功能或能力结论。
+- **复制合同**：用户已采纳决策 011。非 `multidev/**` 差异通过 `git diff --check`；`multidev/` 的 6,011 个
+  tracked 条目在相对路径、Git type/mode/blob 与工作树字节上逐项等同 `mydev/`，只对这份精确复制内容保留
+  上游尾空格窄例外。

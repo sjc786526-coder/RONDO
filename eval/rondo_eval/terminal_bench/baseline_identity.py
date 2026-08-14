@@ -12,6 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from ..config import RepoPaths, load_runtime_config
+from ..contracts import Product
 from ..frozen_model_catalog import (
     load_frozen_model_catalog,
     load_shared_model_catalog,
@@ -188,6 +189,14 @@ def generate_successor_lock(
         raise CampaignIdentityGenerationError(
             f"successor comparison contract is not frozen: {exc}"
         ) from exc
+    # This generator deliberately inherits the predecessor's frozen Local
+    # bundles.  A Multi successor needs a separately selected and frozen Multi
+    # bundle contract; silently retaining these Local paths would mint a false
+    # identity before any paid work starts.
+    if Product(str(parsed_comparison["product"])) is not Product.RONDO_LOCAL:
+        raise CampaignIdentityGenerationError(
+            "successor product differs from the inherited Local bundles"
+        )
     if (
         not isinstance(campaign_cap_usd, Decimal)
         or not campaign_cap_usd.is_finite()
@@ -339,6 +348,7 @@ def _validate_successor_comparison_facts(
             rondo_source_commit=str(sources["rondo"]["commit"]),
             main_model=str(selected_profile["effective_main_model"]),
             guardian_model=str(selected_profile["effective_guardian_model"]),
+            product=Product(str(comparison["product"])),
         )
     except (OSError, ValueError) as exc:
         raise CampaignIdentityGenerationError(
@@ -426,6 +436,7 @@ def _validate_frozen_inputs(paths: RepoPaths, identity: CampaignIdentity) -> Non
             rondo_source_commit=str(sources["rondo"]["commit"]),
             main_model=str(selected["effective_main_model"]),
             guardian_model=str(selected["effective_guardian_model"]),
+            product=identity.product,
         )
         try:
             identity.validate_shared_model_catalog(shared.identity())

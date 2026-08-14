@@ -2,7 +2,8 @@
 
 最后状态同步：2026-08-13（环境版本未在本次文档整理中全量重探测）
 
-适用工作区：`/home/sjc/desktop/RONDO`，主要源码位于 `mydev/`。
+适用工作区：`/home/sjc/desktop/RONDO`。产品源码有两棵并列的树：RONDO Local 在 `mydev/`、
+RONDO Multi 在 `multidev/`；构建锁与资源看门狗在仓库根 `scripts/` 内由两者共用。
 
 本文记录当前 WSL 开发机的实际环境、版本固定方式、安装位置、验证结果和已知边界。文中不记录代理凭据、API Key 或其他密钥。
 
@@ -107,7 +108,7 @@ command -v git-stats >/dev/null 2>&1 || exit 0
 
 ### 3.1 Rustup 与固定工具链
 
-仓库的 `mydev/codex-rs/rust-toolchain.toml` 固定 Rust `1.95.0`。当前安装为：
+两条产品线的 `codex-rs/rust-toolchain.toml` 都固定 Rust `1.95.0`。当前安装为：
 
 | 组件            | 版本或状态                      |
 | --------------- | ------------------------------- |
@@ -190,9 +191,9 @@ SHA-256 清单；默认 denoland 资产地址在本轮返回 404，不能作为�
 | 闸门 | 位置 | 作用维度 |
 | ---- | ---- | -------- |
 | `[build] jobs = 6` | 仓库根 `.cargo/config.toml` | 编译/链接阶段并发的 `rustc`、`rust-lld` 数量 |
-| `test-threads = 10` | `mydev/codex-rs/.config/nextest.toml` 的 `[profile.default]` | 测试执行阶段并发的测试进程数量 |
+| `test-threads = 10` | 各产品 `codex-rs/.config/nextest.toml` 的 `[profile.default]` | 测试执行阶段并发的测试进程数量 |
 | rustc 总并发槽 = 6 | 仓库根 `.cargo/rustc-throttle.sh` | 所有 Cargo 入口、agent 与 worktree 共用同一组 rustc 槽 |
-| 全局互斥锁 | `mydev/scripts/with-build-lock.sh` | 同一时刻只允许一个重量级构建 |
+| 全局互斥锁 | `scripts/with-build-lock.sh`（仓库根共享） | 同一时刻只允许一个重量级构建 |
 | cgroup 内存边界 | 同上脚本 | `MemoryHigh=19G`、`MemoryMax=21G`、`MemorySwapMax=5G` |
 | 实时资源看门狗 | 同上脚本 | 磁盘、匿名/文件/内核内存、swap、PSI、宿主可用内存每秒采样 |
 | scope 残留清理 | 同上脚本 | 主命令退出后仍存活的测试子进程会在 5 秒宽限后被精确终止 |
@@ -251,10 +252,11 @@ cgroup 报告 OOM kill。短时 1–3GiB swap 只削峰，不会被当作故障�
 
 #### 使用边界
 
-- Unix 的 `just test` / `just clippy` / `just fix` / `just bench` 与三个 schema generator 已接入脚本；
-  其他重型 Cargo 命令必须显式用
-  `mydev/scripts/with-build-lock.sh <command>` 包裹。主工作区与任一 worktree、两个 worktree 之间均不得
-  同时构建。
+- 两条产品线共用仓库根的 `scripts/with-build-lock.sh`。`mydev/justfile` 与 `multidev/justfile` 的
+  Unix `just test` / `just clippy` / `just fix` / `just bench` 与三个 schema generator 已接入它，
+  仓库根的 `just product-build` / `just product-default-off-test` 也一样；其他重型 Cargo 命令必须
+  显式用 `scripts/with-build-lock.sh <command>` 包裹。主工作区与任一 worktree、两个 worktree、
+  两条产品线之间均不得同时构建。
 - 脚本启动前拒绝已有 `cargo` / `rustc` / `rust-lld` / `nextest`；运行中若发现 scope 外第二个构建，
   会停止受控构建。rustc wrapper 只保证跨入口最多 6 个 rustc，不等于 Cargo 互斥锁。
 - 直接 Cargo、Windows just 分支和 Bazel 不自动进入该 scope；这是明确未覆盖面。本机尚未安装 Bazel。

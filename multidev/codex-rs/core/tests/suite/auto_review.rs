@@ -1,0 +1,569 @@
+use std::time::Duration;
+
+use anyhow::Result;
+use codex_core::sandboxing::SandboxPermissions;
+use codex_features::Feature;
+use codex_login::CodexAuth;
+use codex_models_manager::manager::RefreshStrategy;
+use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::ApplyPatchToolType;
+use codex_protocol::openai_models::ConfigShellToolType;
+use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::ModelsResponse;
+use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::openai_models::ReasoningEffortPreset;
+use codex_protocol::openai_models::TruncationPolicyConfig;
+use codex_protocol::openai_models::default_input_modalities;
+use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::Op;
+use codex_protocol::request_permissions::PermissionGrantScope;
+use codex_protocol::request_permissions::RequestPermissionsResponse;
+use codex_protocol::user_input::UserInput;
+use core_test_support::TempDirExt;
+use core_test_support::responses::ev_apply_patch_custom_tool_call;
+use core_test_support::responses::ev_assistant_message;
+use core_test_support::responses::ev_completed;
+use core_test_support::responses::ev_function_call;
+use core_test_support::responses::ev_response_created;
+use core_test_support::responses::mount_sse_sequence;
+use core_test_support::responses::mount_sse_sequence_without_request_count_expectation;
+use core_test_support::responses::received_responses_request_count;
+use core_test_support::responses::sse;
+use core_test_support::skip_if_no_network;
+use core_test_support::skip_if_sandbox;
+use core_test_support::test_codex::TestCodex;
+use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::test_codex;
+use core_test_support::test_codex::turn_permission_fields;
+use core_test_support::wait_for_event;
+use core_test_support::wait_for_event_with_timeout;
+use pretty_assertions::assert_eq;
+use serde_json::json;
+use tokio::time::timeout;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn remote_model_override_uses_catalog_model_for_strict_auto_review() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = MockServer::start().await;
+    let model = "remote-auto-review-parent";
+    let review_model = "remote-auto-review-reviewer";
+    Mock::given(method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ModelsResponse {
+            models: vec![remote_model_with_auto_review_override(model, review_model)],
+        }))
+        .expect(1..)
+        .mount(&server)
+        .await;
+
+    let permissions_call_id = "auto-review-permissions-call";
+    let permissions_args = json!({
+        "reason": "exercise strict Guardian model selection",
+        "permissions": {
+            "network": {
+                "enabled": true,
+            },
+        },
+    });
+    let patch_call_id = "auto-review-patch-call";
+    let patch = "*** Begin Patch\n*** Add File: auto-review-model-override.txt\n+exercise Guardian model selection\n*** End Patch\n";
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-parent-1"),
+                ev_function_call(
+                    permissions_call_id,
+                    "request_permissions",
+                    &serde_json::to_string(&permissions_args)?,
+                ),
+                ev_completed("resp-parent-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-parent-2"),
+                ev_apply_patch_custom_tool_call(patch_call_id, patch),
+                ev_completed("resp-parent-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-guardian"),
+                ev_assistant_message(
+                    "msg-guardian",
+                    &json!({
+                        "risk_level": "low",
+                        "user_authorization": "high",
+                        "outcome": "allow",
+                        "rationale": "The patch only exercises Guardian model selection.",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-guardian"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-parent-3"),
+                ev_assistant_message("msg-parent", "done"),
+                ev_completed("resp-parent-3"),
+            ]),
+        ],
+    )
+    .await;
+
+    let mut builder = test_codex()
+        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_config(|config| {
+            config.model = Some("gpt-5.4".to_string());
+            config.approvals_reviewer = ApprovalsReviewer::User;
+            config
+                .features
+                .enable(Feature::ExecPermissionApprovals)
+                .expect("test config should allow feature update");
+            config
+                .features
+                .enable(Feature::RequestPermissionsTool)
+                .expect("test config should allow feature update");
+        });
+    let TestCodex {
+        codex,
+        cwd,
+        config,
+        thread_manager,
+        ..
+    } = builder.build(&server).await?;
+
+    let models_manager = thread_manager.get_models_manager();
+    timeout(
+        Duration::from_secs(10),
+        models_manager.list_models(
+            RefreshStrategy::Online,
+            codex_core::test_support::default_http_client_factory(),
+        ),
+    )
+    .await?;
+    assert!(
+        server
+            .received_requests()
+            .await
+            .expect("mock server should retain received requests")
+            .iter()
+            .any(|request| request.method == "GET" && request.url.path() == "/v1/models"),
+        "expected the model catalog to be fetched remotely"
+    );
+    let model_info = models_manager
+        .get_model_info(model, &config.to_models_manager_config())
+        .await;
+    assert_eq!(
+        model_info.auto_review_model_override,
+        Some(review_model.to_string())
+    );
+
+    core_test_support::submit_thread_settings(
+        &codex,
+        codex_protocol::protocol::ThreadSettingsOverrides {
+            model: Some(model.to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+    let cwd_path = cwd.abs();
+    let (sandbox_policy, permission_profile) =
+        turn_permission_fields(PermissionProfile::read_only(), cwd_path.as_path());
+    codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run the Guardian model override check".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(cwd_path)),
+                approval_policy: Some(AskForApproval::OnRequest),
+                sandbox_policy: Some(sandbox_policy),
+                permission_profile,
+                ..Default::default()
+            },
+        })
+        .await?;
+
+    let permissions_request = wait_for_event(&codex, |event| {
+        matches!(
+            event,
+            EventMsg::RequestPermissions(_) | EventMsg::TurnComplete(_)
+        )
+    })
+    .await;
+    let EventMsg::RequestPermissions(permissions_request) = permissions_request else {
+        panic!("expected request_permissions before completion");
+    };
+    assert_eq!(permissions_request.call_id, permissions_call_id);
+    codex
+        .submit(Op::RequestPermissionsResponse {
+            id: permissions_request.call_id,
+            response: RequestPermissionsResponse {
+                permissions: permissions_request.permissions,
+                scope: PermissionGrantScope::Turn,
+                strict_auto_review: true,
+            },
+        })
+        .await?;
+
+    wait_for_event_with_timeout(
+        &codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(15),
+    )
+    .await;
+
+    let guardian_request = responses
+        .requests()
+        .into_iter()
+        .find(|request| {
+            request.body_contains_text("auto-review-model-override.txt")
+                && request
+                    .instructions_text()
+                    .starts_with("You are judging one planned coding-agent action.")
+        })
+        .expect("expected Guardian request for apply_patch");
+    assert_eq!(
+        guardian_request.body_json()["model"].as_str(),
+        Some(review_model)
+    );
+
+    timeout(Duration::from_secs(10), codex.shutdown_and_wait()).await??;
+
+    Ok(())
+}
+
+fn remote_model_with_auto_review_override(slug: &str, review_model: &str) -> ModelInfo {
+    ModelInfo {
+        slug: slug.to_string(),
+        display_name: format!("{slug} display"),
+        description: Some(format!("{slug} description")),
+        default_reasoning_level: Some(ReasoningEffort::Medium),
+        supported_reasoning_levels: vec![ReasoningEffortPreset {
+            effort: ReasoningEffort::Medium,
+            description: ReasoningEffort::Medium.to_string(),
+        }],
+        shell_type: ConfigShellToolType::ShellCommand,
+        visibility: ModelVisibility::List,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+        used_fallback_model_metadata: false,
+        supports_search_tool: false,
+        use_responses_lite: false,
+        auto_review_model_override: Some(review_model.to_string()),
+        model_specialty: None,
+        tool_mode: None,
+        multi_agent_version: None,
+        priority: 1,
+        additional_speed_tiers: Vec::new(),
+        service_tiers: Vec::new(),
+        default_service_tier: None,
+        upgrade: None,
+        model_messages: None,
+        include_skills_usage_instructions: false,
+        include_plugin_usage_instructions: false,
+        include_apps_usage_instructions: false,
+        supports_reasoning_summary_parameter: true,
+        default_reasoning_summary: ReasoningSummary::Auto,
+        support_verbosity: false,
+        default_verbosity: None,
+        availability_nux: None,
+        apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+        web_search_tool_type: Default::default(),
+        truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
+        supports_parallel_tool_calls: false,
+        supports_image_detail_original: false,
+        context_window: Some(272_000),
+        max_context_window: None,
+        auto_compact_token_limit: None,
+        comp_hash: None,
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+    }
+}
+
+/// `[auto_review].model` / `.reasoning_effort` must reach the wire, not just an
+/// intermediate variable.
+///
+/// The effort is configured as `high` on purpose: the stock precedence prefers
+/// `low` whenever the review model supports it, so asserting `low` here would pass
+/// even if the override did nothing. The model is also deliberately different from
+/// the API-key provider default (`gpt-5.6-luna`) so the assertion proves the
+/// configured override reached the wire.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_review_config_overrides_guardian_model_and_reasoning_effort() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = MockServer::start().await;
+    let approval_policy = AskForApproval::OnRequest;
+    let mut builder = test_codex().with_pre_build_hook(|home| {
+        std::fs::write(
+            home.join("config.toml"),
+            "[auto_review]\nmodel = \"gpt-5.5\"\nreasoning_effort = \"high\"\n",
+        )
+        .expect("seed config.toml");
+    });
+    let test = builder.build(&server).await?;
+
+    let tool_args = json!({
+        "cmd": "true",
+        "sandbox_permissions": SandboxPermissions::RequireEscalated,
+        "justification": "Exercise the configured Guardian model.",
+    });
+    let responses = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-parent-model-override"),
+                ev_function_call(
+                    "exec-call-model-override",
+                    "exec_command",
+                    &serde_json::to_string(&tool_args)?,
+                ),
+                ev_completed("resp-parent-model-override"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-guardian-model-override"),
+                ev_assistant_message(
+                    "msg-guardian-model-override",
+                    &json!({
+                        "risk_level": "low",
+                        "user_authorization": "high",
+                        "outcome": "allow",
+                        "rationale": "The command is inert.",
+                    })
+                    .to_string(),
+                ),
+                ev_completed("resp-guardian-model-override"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-parent-model-override-done"),
+                ev_assistant_message("msg-parent-model-override-done", "done"),
+                ev_completed("resp-parent-model-override-done"),
+            ]),
+        ],
+    )
+    .await;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run a command that requires Guardian review".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(test.config.cwd.clone())),
+                approval_policy: Some(approval_policy),
+                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            },
+        })
+        .await?;
+    let turn_complete = wait_for_event_with_timeout(
+        &test.codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(15),
+    )
+    .await;
+    let EventMsg::TurnComplete(turn_complete) = turn_complete else {
+        unreachable!("terminal predicate only accepts TurnComplete")
+    };
+    if let Some(error) = turn_complete.error {
+        anyhow::bail!(
+            "parent turn failed before Guardian request: {}",
+            error.message
+        );
+    }
+
+    assert_eq!(received_responses_request_count(&server).await?, 3);
+    let guardian_request = responses
+        .requests()
+        .into_iter()
+        .find(|request| request.body_contains_text("Exercise the configured Guardian model."))
+        .expect("expected Guardian review request");
+    let body = guardian_request.body_json();
+    assert_eq!(
+        (body["model"].clone(), body["reasoning"]["effort"].clone()),
+        (json!("gpt-5.5"), json!("high"))
+    );
+
+    Ok(())
+}
+
+/// The main Agent and Guardian must use independently configured provider
+/// transports. Provider-specific headers and query parameters prove that the
+/// Guardian receives the complete registry entry rather than only a base URL.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_review_model_provider_routes_main_and_guardian_to_distinct_endpoints() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let main_server = MockServer::start().await;
+    let guardian_server = MockServer::start().await;
+    let guardian_base_url = format!("{}/v1", guardian_server.uri());
+    let mut builder = test_codex().with_pre_build_hook({
+        let guardian_base_url = guardian_base_url.clone();
+        move |home| {
+            std::fs::write(
+                home.join("config.toml"),
+                format!(
+                    r#"
+[auto_review]
+model = "gpt-5.5"
+model_provider = "guardian-local"
+reasoning_effort = "high"
+
+[model_providers.guardian-local]
+name = "Guardian local"
+base_url = "{guardian_base_url}"
+wire_api = "responses"
+http_headers = {{ "x-guardian-provider" = "isolated" }}
+query_params = {{ "route" = "guardian" }}
+request_max_retries = 7
+stream_max_retries = 9
+supports_websockets = false
+"#,
+                ),
+            )
+            .expect("seed config.toml");
+        }
+    });
+    let test = builder.build(&main_server).await?;
+    let main_base_url = format!("{}/v1", main_server.uri());
+    assert_eq!(
+        (
+            test.config.model_provider_id.as_str(),
+            test.config.model_provider.base_url.as_deref(),
+            test.config.guardian_model_provider_config.as_deref(),
+        ),
+        (
+            "openai",
+            Some(main_base_url.as_str()),
+            Some("guardian-local")
+        )
+    );
+
+    let tool_args = json!({
+        "cmd": "true",
+        "sandbox_permissions": SandboxPermissions::RequireEscalated,
+        "justification": "Exercise the isolated Guardian provider.",
+    });
+    let main_responses = mount_sse_sequence_without_request_count_expectation(
+        &main_server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-main-provider-route"),
+                ev_function_call(
+                    "exec-call-provider-route",
+                    "exec_command",
+                    &serde_json::to_string(&tool_args)?,
+                ),
+                ev_completed("resp-main-provider-route"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-main-provider-route-done"),
+                ev_assistant_message("msg-main-provider-route-done", "done"),
+                ev_completed("resp-main-provider-route-done"),
+            ]),
+        ],
+    )
+    .await;
+    let guardian_responses = mount_sse_sequence_without_request_count_expectation(
+        &guardian_server,
+        vec![sse(vec![
+            ev_response_created("resp-guardian-provider-route"),
+            ev_assistant_message(
+                "msg-guardian-provider-route",
+                &json!({
+                    "risk_level": "low",
+                    "user_authorization": "high",
+                    "outcome": "allow",
+                    "rationale": "The command is inert.",
+                })
+                .to_string(),
+            ),
+            ev_completed("resp-guardian-provider-route"),
+        ])],
+    )
+    .await;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: "run a command that requires the isolated Guardian provider".into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: codex_protocol::protocol::ThreadSettingsOverrides {
+                environments: Some(local_selections(test.config.cwd.clone())),
+                approval_policy: Some(AskForApproval::OnRequest),
+                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            },
+        })
+        .await?;
+    let turn_complete = wait_for_event_with_timeout(
+        &test.codex,
+        |event| matches!(event, EventMsg::TurnComplete(_)),
+        Duration::from_secs(15),
+    )
+    .await;
+    let EventMsg::TurnComplete(turn_complete) = turn_complete else {
+        unreachable!("terminal predicate only accepts TurnComplete")
+    };
+    if let Some(error) = turn_complete.error {
+        anyhow::bail!(
+            "parent turn failed before endpoint assertions: {}",
+            error.message
+        );
+    }
+
+    assert_eq!(received_responses_request_count(&main_server).await?, 2);
+    assert_eq!(received_responses_request_count(&guardian_server).await?, 1);
+    let main_requests = main_responses.requests();
+    assert_eq!(main_requests.len(), 2);
+    assert!(main_requests.iter().all(|request| {
+        request.header("x-guardian-provider").is_none()
+            && request.query_param("route").is_none()
+            && request.header("authorization").as_deref() == Some("Bearer dummy")
+    }));
+
+    let guardian_request = guardian_responses.single_request();
+    let body = guardian_request.body_json();
+    assert_eq!(
+        (body["model"].clone(), body["reasoning"]["effort"].clone()),
+        (json!("gpt-5.5"), json!("high"))
+    );
+    assert!(guardian_request.body_contains_text("Exercise the isolated Guardian provider."));
+    assert_eq!(
+        guardian_request.header("x-guardian-provider").as_deref(),
+        Some("isolated")
+    );
+    assert_eq!(guardian_request.header("authorization"), None);
+    assert_eq!(guardian_request.header("chatgpt-account-id"), None);
+    assert_eq!(
+        guardian_request.query_param("route").as_deref(),
+        Some("guardian")
+    );
+
+    Ok(())
+}

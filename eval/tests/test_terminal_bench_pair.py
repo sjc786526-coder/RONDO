@@ -459,6 +459,36 @@ class PairIdentityTests(unittest.TestCase):
             with PairSequenceLedger(
                 ledger_path, identity=paid_identity, mode="paid"
             ) as sequence:
+                tampered = json.loads(json.dumps(record))
+                tampered["track"] = "tb"
+                tampered["product"] = "rondo-multi"
+                tampered["config"].update(
+                    product="rondo-multi",
+                    binary_product="rondo-multi",
+                    auto_review_config={
+                        "schema_version": 1,
+                        "model": None,
+                        "model_provider": None,
+                        "reasoning_effort": None,
+                        "evidence_dir": None,
+                    },
+                )
+                index_path.write_text(
+                    json.dumps(tampered, sort_keys=True, separators=(",", ":"))
+                    + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(PairIdentityError, "publication"):
+                    sequence.reconcile_paid_publication(
+                        run_id=record["run_id"],
+                        eval_harness_commit=self.HARNESS_COMMIT,
+                        index_path=index_path,
+                        provider=self.provider,
+                    )
+                index_path.write_text(
+                    json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n",
+                    encoding="utf-8",
+                )
                 digest = sequence.reconcile_paid_publication(
                     run_id=record["run_id"],
                     eval_harness_commit=self.HARNESS_COMMIT,

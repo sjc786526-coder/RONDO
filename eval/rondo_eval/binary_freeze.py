@@ -31,7 +31,16 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urlsplit
 
-from .contracts import BinaryManifest, ContractError, Side
+from .contracts import (
+    BinaryManifest,
+    ContractError,
+    Product,
+    ProductLayout,
+    Side,
+    parse_product,
+    product_for_side,
+    product_layout,
+)
 from .runtime_bridge import WatchdogProof, lease_from_watchdog
 
 
@@ -90,6 +99,10 @@ _LEGACY_MANIFEST_KEYS = _COMPANION_MANIFEST_KEYS - {
     "code_mode_host_sha256",
     "code_mode_host_build_command",
 }
+# Bundles frozen before the product dimension existed have no ``product`` key
+# and every frozen-upstream bundle omits it, so it is optional on read and
+# resolved through ``product_for_side``.
+_OPTIONAL_MANIFEST_KEYS = {"product"}
 _BWRAP_LOCK_KEYS = {
     "schema_version",
     "name",
@@ -139,6 +152,9 @@ class FreezeRequest:
     artifact_dir: Path
     gate_root: Path
     baseline_reference_root: Path | None = None
+    # Unset means the frozen upstream side or the historical Local layout; a
+    # Multi freeze must name itself.
+    product: Product | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +168,7 @@ class CompanionFreezeRequest:
     bundle_dir: Path
     gate_root: Path
     baseline_reference_root: Path | None = None
+    product: Product | None = None
 
 
 @dataclass(frozen=True)
@@ -166,11 +183,13 @@ class RuntimeFreezeRequest:
     runtime_bundle_dir: Path
     gate_root: Path
     baseline_reference_root: Path | None = None
+    product: Product | None = None
 
 
 @dataclass(frozen=True)
 class FreezeResult:
     side: str
+    product: str | None
     manifest_path: str
     binary_path: str
     binary_sha256: str
@@ -232,6 +251,7 @@ class _LegacyBinaryManifest:
     rust_toolchain: str
     build_command: tuple[str, ...]
     workspace_lock_normalization: str | None = None
+    product: str | None = None
 
 
 @dataclass(frozen=True)
@@ -246,6 +266,7 @@ class _CompanionBinaryManifest:
     build_command: tuple[str, ...]
     code_mode_host_build_command: tuple[str, ...]
     workspace_lock_normalization: str | None = None
+    product: str | None = None
 
 
 @dataclass(frozen=True)
@@ -322,6 +343,7 @@ def exec_v8_build(
     source_root: Path,
     source_commit: str,
     baseline_reference_root: Path | None = None,
+    product: Product | None = None,
     lease_factory: LeaseFactory = lease_from_watchdog,
     exec_function: V8ExecFunction = os.execvpe,
     environ: Mapping[str, str] | None = None,
@@ -331,12 +353,14 @@ def exec_v8_build(
     proof = _proof(lease_factory)
     source = _regular_directory(source_root)
     _validate_commit(source_commit)
+    resolved_product = _resolve_product(side, product)
     if side is Side.RONDO:
         if baseline_reference_root is not None:
             raise BinaryFreezeError("RONDO V8 build cannot declare a baseline reference")
-        _validate_rondo_source(source, source_commit)
-        scripts = source / "mydev" / "scripts"
-        workspace = source / "mydev" / "codex-rs"
+        layout = product_layout(resolved_product)
+        _validate_rondo_source(source, source_commit, layout)
+        scripts = source / layout.source_dir / "scripts"
+        workspace = source / layout.source_dir / "codex-rs"
     elif side is Side.CODEX:
         if source_commit != BASELINE_COMMIT or baseline_reference_root is None:
             raise BinaryFreezeError("Codex V8 build requires the frozen baseline identity")
@@ -427,6 +451,7 @@ def prepare(
         rust_toolchain=toolchain,
         build_command=command,
         workspace_lock_normalization=normalization,
+        product=_manifest_product(paths.product),
     )
     _validate_legacy_manifest_contract(manifest)
     _publish_legacy(paths.artifact_dir, source_binary, manifest)
@@ -449,6 +474,7 @@ def verify(
     manifest = _read_legacy_manifest(paths.artifact_dir / "manifest.json")
     _validate_build_command(request, paths, manifest.build_command)
     _validate_source(request, paths)
+    _require_manifest_product(manifest, request.side, paths.product)
     if manifest.source_commit != request.source_commit or manifest.source_dirty:
         raise BinaryFreezeError("manifest source identity differs from the clean source")
     expected_normalization = LOCK_NORMALIZATION if request.side is Side.CODEX else None
@@ -518,6 +544,7 @@ def prepare_companion(
         build_command=legacy.build_command,
         code_mode_host_build_command=command,
         workspace_lock_normalization=legacy.workspace_lock_normalization,
+        product=_manifest_product(paths.freeze.product),
     )
     _validate_companion_manifest_contract(manifest)
     _publish_companion_bundle(
@@ -554,6 +581,7 @@ def verify_companion(
         manifest.code_mode_host_build_command,
         companion=True,
     )
+    _require_manifest_product(manifest, request.side, paths.freeze.product)
     expected_normalization = LOCK_NORMALIZATION if request.side is Side.CODEX else None
     if (
         manifest.source_commit != request.source_commit
@@ -735,6 +763,7 @@ def prepare_runtime(
         bwrap_archive_sha256=asset.archive_sha256,
         bwrap_source_tree_sha256=asset.source_tree_sha256,
         workspace_lock_normalization=companion.workspace_lock_normalization,
+        product=_manifest_product(paths.freeze.product),
     )
     try:
         manifest.validate()
@@ -774,6 +803,7 @@ def verify_runtime(
     _validate_bwrap_source_identity(request, paths)
     companion = _validate_companion_artifact(request, paths, toolchain)
     manifest = _read_manifest(paths.runtime_bundle_dir / "manifest.json")
+    _require_manifest_product(manifest, request.side, paths.freeze.product)
     _validate_build_command(freeze_request, paths.freeze, manifest.build_command)
     _validate_build_command(
         freeze_request,
@@ -837,6 +867,7 @@ def cleanup(
     source_commit: str,
     target_dir: Path,
     scratch_dir: Path | None = None,
+    product: Product | None = None,
     lease_factory: LeaseFactory = lease_from_watchdog,
     exec_function: ExecFunction = os.execv,
     rm_executable: Path = Path("/usr/bin/rm"),
@@ -846,9 +877,10 @@ def cleanup(
     proof = _proof(lease_factory)
     root = _regular_directory(common_root)
     _validate_commit(source_commit)
+    resolved_product = _resolve_product(side, product)
     if side is Side.CODEX and source_commit != BASELINE_COMMIT:
         raise BinaryFreezeError("Codex cleanup requires the frozen baseline commit")
-    expected_target = _expected_target(root, side, source_commit)
+    expected_target = _expected_target(root, side, source_commit, resolved_product)
     target = _exact_existing_directory(target_dir, expected_target, "Cargo target")
     paths = [target]
     if side is Side.RONDO:
@@ -873,6 +905,19 @@ class _ResolvedPaths:
     artifact_dir: Path
     gate_root: Path
     baseline_reference_root: Path | None
+    product: Product | None = None
+
+    @property
+    def layout(self) -> ProductLayout:
+        """Layout of the RONDO product being frozen.
+
+        Only meaningful on the RONDO side; the frozen upstream has its own
+        fixed source shape and is never routed through here.
+        """
+
+        if self.product is None:
+            raise BinaryFreezeError("frozen upstream side has no product layout")
+        return product_layout(self.product)
 
 
 @dataclass(frozen=True)
@@ -900,6 +945,7 @@ def _freeze_request_from_companion(request: CompanionFreezeRequest) -> FreezeReq
         artifact_dir=request.bundle_dir,
         gate_root=request.gate_root,
         baseline_reference_root=request.baseline_reference_root,
+        product=request.product,
     )
 
 
@@ -913,6 +959,7 @@ def _freeze_request_from_runtime(request: RuntimeFreezeRequest) -> FreezeRequest
         artifact_dir=request.runtime_bundle_dir,
         gate_root=request.gate_root,
         baseline_reference_root=request.baseline_reference_root,
+        product=request.product,
     )
 
 
@@ -922,20 +969,23 @@ def _validate_companion_request(
     if not isinstance(request.side, Side):
         raise BinaryFreezeError("binary side is invalid")
     _validate_commit(request.source_commit)
+    product = _resolve_product(request.side, request.product)
     root = _regular_directory(request.common_root)
     source = _regular_directory(request.source_root)
     gate = _regular_directory(request.gate_root)
     target = _exact_existing_directory(
         request.target_dir,
-        _expected_target(root, request.side, request.source_commit),
+        _expected_target(root, request.side, request.source_commit, product),
         "Cargo target",
     )
     legacy = _exact_existing_directory(
         request.legacy_artifact_dir,
-        _expected_artifact(root, request.side, request.source_commit),
+        _expected_artifact(root, request.side, request.source_commit, product),
         "legacy artifact",
     )
-    expected_bundle = _expected_bundle(root, request.side, request.source_commit)
+    expected_bundle = _expected_bundle(
+        root, request.side, request.source_commit, product
+    )
     bundle = (
         _exact_existing_directory(request.bundle_dir, expected_bundle, "binary bundle")
         if bundle_must_exist
@@ -948,7 +998,7 @@ def _validate_companion_request(
         reference = _regular_directory(request.baseline_reference_root)
     elif request.baseline_reference_root is not None:
         raise BinaryFreezeError("RONDO bundle cannot declare a baseline reference")
-    freeze = _ResolvedPaths(root, source, target, bundle, gate, reference)
+    freeze = _ResolvedPaths(root, source, target, bundle, gate, reference, product)
     return _ResolvedCompanionPaths(freeze, legacy, bundle)
 
 
@@ -958,17 +1008,18 @@ def _validate_runtime_request(
     if not isinstance(request.side, Side):
         raise BinaryFreezeError("binary side is invalid")
     _validate_commit(request.source_commit)
+    product = _resolve_product(request.side, request.product)
     root = _regular_directory(request.common_root)
     source = _regular_directory(request.source_root)
     gate = _regular_directory(request.gate_root)
     target = _exact_layout_path(
         request.target_dir,
-        _expected_target(root, request.side, request.source_commit),
+        _expected_target(root, request.side, request.source_commit, product),
         "Cargo target",
     )
     companion = _exact_existing_directory(
         request.companion_bundle_dir,
-        _expected_bundle(root, request.side, request.source_commit),
+        _expected_bundle(root, request.side, request.source_commit, product),
         "companion bundle",
     )
     bwrap_asset = _exact_existing_directory(
@@ -976,7 +1027,9 @@ def _validate_runtime_request(
         _expected_bwrap_asset(root),
         "bwrap asset",
     )
-    expected_runtime = _expected_runtime_bundle(root, request.side, request.source_commit)
+    expected_runtime = _expected_runtime_bundle(
+        root, request.side, request.source_commit, product
+    )
     runtime = (
         _exact_existing_directory(request.runtime_bundle_dir, expected_runtime, "runtime bundle")
         if runtime_must_exist
@@ -989,23 +1042,33 @@ def _validate_runtime_request(
         reference = _regular_directory(request.baseline_reference_root)
     elif request.baseline_reference_root is not None:
         raise BinaryFreezeError("RONDO runtime bundle cannot declare a baseline reference")
-    freeze = _ResolvedPaths(root, source, target, runtime, gate, reference)
+    freeze = _ResolvedPaths(root, source, target, runtime, gate, reference, product)
     return _ResolvedRuntimePaths(freeze, companion, bwrap_asset, runtime)
+
+
+def _resolve_product(side: Side, product: Product | None) -> Product | None:
+    try:
+        return product_for_side(side, product)
+    except ContractError as exc:
+        raise BinaryFreezeError("binary product identity is invalid") from exc
 
 
 def _validate_request(request: FreezeRequest, *, artifact_must_exist: bool) -> _ResolvedPaths:
     if not isinstance(request.side, Side):
         raise BinaryFreezeError("binary side is invalid")
     _validate_commit(request.source_commit)
+    product = _resolve_product(request.side, request.product)
     root = _regular_directory(request.common_root)
     source = _regular_directory(request.source_root)
     gate = _regular_directory(request.gate_root)
     target = _exact_existing_directory(
         request.target_dir,
-        _expected_target(root, request.side, request.source_commit),
+        _expected_target(root, request.side, request.source_commit, product),
         "Cargo target",
     )
-    expected_artifact = _expected_artifact(root, request.side, request.source_commit)
+    expected_artifact = _expected_artifact(
+        root, request.side, request.source_commit, product
+    )
     if artifact_must_exist:
         artifact = _exact_existing_directory(request.artifact_dir, expected_artifact, "artifact")
     else:
@@ -1017,13 +1080,14 @@ def _validate_request(request: FreezeRequest, *, artifact_must_exist: bool) -> _
         reference = _regular_directory(request.baseline_reference_root)
     elif request.baseline_reference_root is not None:
         raise BinaryFreezeError("RONDO side cannot declare a baseline reference")
-    return _ResolvedPaths(root, source, target, artifact, gate, reference)
+    return _ResolvedPaths(root, source, target, artifact, gate, reference, product)
 
 
 def _validate_source(request: FreezeRequest, paths: _ResolvedPaths) -> None:
     if request.side is Side.RONDO:
-        _validate_rondo_source(paths.source_root, request.source_commit)
-        workspace = paths.source_root / "mydev" / "codex-rs"
+        layout = paths.layout
+        _validate_rondo_source(paths.source_root, request.source_commit, layout)
+        workspace = paths.source_root / layout.source_dir / "codex-rs"
     else:
         assert paths.baseline_reference_root is not None
         _validate_baseline_reference(paths.baseline_reference_root)
@@ -1036,8 +1100,9 @@ def _validate_bwrap_source_identity(
     request: RuntimeFreezeRequest, paths: _ResolvedRuntimePaths
 ) -> None:
     if request.side is Side.RONDO:
-        package_spec = "HEAD:mydev/codex-rs/bwrap"
-        vendor_spec = "HEAD:mydev/codex-rs/vendor/bubblewrap"
+        source_dir = paths.freeze.layout.source_dir
+        package_spec = f"HEAD:{source_dir}/codex-rs/bwrap"
+        vendor_spec = f"HEAD:{source_dir}/codex-rs/vendor/bubblewrap"
         repository = paths.freeze.source_root
     else:
         assert paths.freeze.baseline_reference_root is not None
@@ -1064,6 +1129,7 @@ def _validate_legacy_artifact(
     toolchain: str,
 ) -> _LegacyBinaryManifest:
     manifest = _read_legacy_manifest(paths.legacy_artifact_dir / "manifest.json")
+    _require_manifest_product(manifest, request.side, paths.freeze.product)
     freeze_request = _freeze_request_from_companion(request)
     _validate_build_command(freeze_request, paths.freeze, manifest.build_command)
     expected_normalization = LOCK_NORMALIZATION if request.side is Side.CODEX else None
@@ -1094,6 +1160,7 @@ def _validate_companion_artifact(
     toolchain: str,
 ) -> _CompanionBinaryManifest:
     manifest = _read_companion_manifest(paths.companion_bundle_dir / "manifest.json")
+    _require_manifest_product(manifest, request.side, paths.freeze.product)
     freeze_request = _freeze_request_from_runtime(request)
     _validate_build_command(freeze_request, paths.freeze, manifest.build_command)
     _validate_build_command(
@@ -1133,7 +1200,7 @@ def _validate_companion_artifact(
     return manifest
 
 
-def _validate_rondo_source(source: Path, commit: str) -> None:
+def _validate_rondo_source(source: Path, commit: str, layout: ProductLayout) -> None:
     if _git(source, "rev-parse", "--show-toplevel") != str(source):
         raise BinaryFreezeError("RONDO source is not a worktree root")
     if _git(source, "rev-parse", "HEAD") != commit:
@@ -1145,7 +1212,7 @@ def _validate_rondo_source(source: Path, commit: str) -> None:
         raise BinaryFreezeError("RONDO detached state is unavailable")
     if _git(source, "status", "--porcelain=v1", "--untracked-files=all"):
         raise BinaryFreezeError("RONDO measurement source is dirty")
-    lock = _regular_file(source / "mydev" / "codex-rs" / "Cargo.lock")
+    lock = _regular_file(source / layout.source_dir / "codex-rs" / "Cargo.lock")
     if _sha256_file(lock) != NORMALIZED_LOCK_SHA256:
         raise BinaryFreezeError("RONDO Cargo lock differs from the frozen 0.147.0 lock")
 
@@ -1468,7 +1535,7 @@ def _validate_build_command(
     argv = tuple(command)
     if not argv or any(not isinstance(item, str) or not item or "\x00" in item for item in argv):
         raise BinaryFreezeError("build command argv is invalid")
-    watchdog = paths.gate_root / "mydev" / "scripts" / "with-build-lock.sh"
+    watchdog = paths.gate_root / "scripts" / "with-build-lock.sh"
     _regular_file(watchdog, executable=True)
     try:
         watchdog_index = argv.index(str(watchdog), 3)
@@ -1508,6 +1575,11 @@ def _validate_build_command(
                 "--baseline-reference-root",
                 str(paths.baseline_reference_root),
             )
+        elif paths.product is not Product.RONDO_LOCAL:
+            # Local is the implicit default so the seven-key bundles frozen
+            # before the product dimension keep verifying byte for byte; any
+            # other product has to name itself on the supervised command line.
+            gate_arguments += ("--product", str(paths.product.value))
         expected_suffix = (
             str(watchdog),
             "rustup",
@@ -1516,12 +1588,17 @@ def _validate_build_command(
             *gate_arguments,
         )
     else:
+        # The frozen upstream keeps using the Local gate copy: it is not a
+        # product, and the historical seven-key artifact recorded that path.
+        gate_source_dir = (
+            paths.layout.source_dir if request.side is Side.RONDO else "mydev"
+        )
         manifest = (
-            paths.source_root / "mydev" / "codex-rs" / "Cargo.toml"
+            paths.source_root / gate_source_dir / "codex-rs" / "Cargo.toml"
             if request.side is Side.RONDO
             else paths.source_root / "codex-rs" / "Cargo.toml"
         )
-        v8_gate = paths.gate_root / "mydev" / "scripts" / "with_codex_v8_artifacts.py"
+        v8_gate = paths.gate_root / gate_source_dir / "scripts" / "with_codex_v8_artifacts.py"
         # The historical seven-key artifact used this tracked GNU-host gate.
         _regular_file(v8_gate)
         expected_suffix = (
@@ -1754,7 +1831,7 @@ def _publish_legacy(
     staging = Path(tempfile.mkdtemp(prefix=f".{artifact.name}.staging-", dir=parent))
     try:
         _copy_regular(source_binary, staging / "codex", mode=0o555)
-        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        payload = _manifest_payload(manifest)
         _write_exclusive(staging / "manifest.json", payload, mode=0o600)
         _fsync_directory(staging)
         if artifact.exists() or artifact.is_symlink():
@@ -1785,7 +1862,7 @@ def _publish_companion_bundle(
     try:
         _copy_regular(source_binary, staging / "codex", mode=0o555)
         _copy_regular(source_host, staging / "codex-code-mode-host", mode=0o555)
-        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        payload = _manifest_payload(manifest)
         _write_exclusive(staging / "manifest.json", payload, mode=0o600)
         if (
             _sha256_file(staging / "codex") != manifest.sha256
@@ -1834,7 +1911,7 @@ def _publish_runtime_bundle(
         _copy_regular(source_binary, staging / "codex", mode=0o555)
         _copy_regular(source_host, staging / "codex-code-mode-host", mode=0o555)
         _copy_regular(source_bwrap, resources / "bwrap", mode=0o555)
-        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        payload = _manifest_payload(manifest)
         _write_exclusive(staging / "manifest.json", payload, mode=0o600)
         if (
             _sha256_file(staging / "codex") != manifest.sha256
@@ -1899,13 +1976,29 @@ def _write_exclusive(path: Path, payload: bytes, *, mode: int) -> None:
         os.close(descriptor)
 
 
+def _manifest_payload(
+    manifest: _LegacyBinaryManifest | _CompanionBinaryManifest | BinaryManifest,
+) -> bytes:
+    """Encode the versioned manifest shape without inventing a Codex product.
+
+    Historical manifests and the frozen-upstream side omit ``product``.  New
+    RONDO manifests name Local or Multi explicitly, so ``null`` is never a
+    legal on-disk substitute for either shape.
+    """
+
+    value = asdict(manifest)
+    if manifest.product is None:
+        value.pop("product")
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+
 def _read_manifest(path: Path) -> BinaryManifest:
     manifest_path = _regular_file(path, exact_mode=0o600)
     try:
         value = json.loads(manifest_path.read_text("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise BinaryFreezeError("binary manifest is unreadable") from exc
-    if not isinstance(value, dict) or set(value) != _MANIFEST_KEYS:
+    if not isinstance(value, dict) or not _known_manifest_keys(value, _MANIFEST_KEYS):
         raise BinaryFreezeError("binary manifest schema differs")
     command = value.get("build_command")
     host_command = value.get("code_mode_host_build_command")
@@ -1928,6 +2021,7 @@ def _read_manifest(path: Path) -> BinaryManifest:
             bwrap_archive_sha256=value["bwrap_archive_sha256"],
             bwrap_source_tree_sha256=value["bwrap_source_tree_sha256"],
             workspace_lock_normalization=value["workspace_lock_normalization"],
+            product=value.get("product"),
         )
         manifest.validate()
     except (ContractError, TypeError) as exc:
@@ -1941,7 +2035,9 @@ def _read_companion_manifest(path: Path) -> _CompanionBinaryManifest:
         value = json.loads(manifest_path.read_text("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise BinaryFreezeError("companion bundle manifest is unreadable") from exc
-    if not isinstance(value, dict) or set(value) != _COMPANION_MANIFEST_KEYS:
+    if not isinstance(value, dict) or not _known_manifest_keys(
+        value, _COMPANION_MANIFEST_KEYS
+    ):
         raise BinaryFreezeError("companion bundle manifest schema differs")
     command = value.get("build_command")
     host_command = value.get("code_mode_host_build_command")
@@ -1959,6 +2055,7 @@ def _read_companion_manifest(path: Path) -> _CompanionBinaryManifest:
             build_command=tuple(command),
             code_mode_host_build_command=tuple(host_command),
             workspace_lock_normalization=value["workspace_lock_normalization"],
+            product=value.get("product"),
         )
         _validate_companion_manifest_contract(manifest)
     except (TypeError, ValueError) as exc:
@@ -1972,7 +2069,9 @@ def _read_legacy_manifest(path: Path) -> _LegacyBinaryManifest:
         value = json.loads(manifest_path.read_text("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise BinaryFreezeError("legacy binary manifest is unreadable") from exc
-    if not isinstance(value, dict) or set(value) != _LEGACY_MANIFEST_KEYS:
+    if not isinstance(value, dict) or not _known_manifest_keys(
+        value, _LEGACY_MANIFEST_KEYS
+    ):
         raise BinaryFreezeError("legacy binary manifest schema differs")
     command = value.get("build_command")
     if not isinstance(command, list):
@@ -1986,6 +2085,7 @@ def _read_legacy_manifest(path: Path) -> _LegacyBinaryManifest:
             rust_toolchain=value["rust_toolchain"],
             build_command=tuple(command),
             workspace_lock_normalization=value["workspace_lock_normalization"],
+            product=value.get("product"),
         )
         _validate_legacy_manifest_contract(manifest)
     except (TypeError, ValueError) as exc:
@@ -2014,6 +2114,26 @@ def _validate_legacy_manifest_contract(manifest: _LegacyBinaryManifest) -> None:
         or not manifest.workspace_lock_normalization
     ):
         raise BinaryFreezeError("legacy lock normalization is invalid")
+    if manifest.product is not None:
+        try:
+            parse_product(manifest.product)
+        except ContractError as exc:
+            raise BinaryFreezeError("binary manifest product identity is invalid") from exc
+
+
+def _known_manifest_keys(value: dict[str, object], required: set[str]) -> bool:
+    """Accept the strict key set plus the optional product identity only."""
+
+    keys = set(value)
+    if keys == required:
+        return True
+    if keys != required | _OPTIONAL_MANIFEST_KEYS:
+        return False
+    try:
+        parse_product(value["product"])
+    except ContractError:
+        return False
+    return True
 
 
 def _validate_companion_manifest_contract(manifest: _CompanionBinaryManifest) -> None:
@@ -2025,6 +2145,7 @@ def _validate_companion_manifest_contract(manifest: _CompanionBinaryManifest) ->
         rust_toolchain=manifest.rust_toolchain,
         build_command=manifest.build_command,
         workspace_lock_normalization=manifest.workspace_lock_normalization,
+        product=manifest.product,
     )
     _validate_legacy_manifest_contract(legacy)
     if (
@@ -2145,18 +2266,22 @@ def _git_result(directory: Path, *args: str) -> subprocess.CompletedProcess[str]
         raise BinaryFreezeError("Git source identity check failed") from exc
 
 
-def _expected_target(root: Path, side: Side, commit: str) -> Path:
-    name = (
-        f"rondo-{commit}-{RUST_TARGET}"
-        if side is Side.RONDO
-        else f"codex-rust-v0.147.0-{commit}-{RUST_TARGET}"
-    )
+def _expected_target(
+    root: Path, side: Side, commit: str, product: Product | None = None
+) -> Path:
+    if side is Side.RONDO:
+        name = f"{product_layout(product).target_prefix}-{commit}-{RUST_TARGET}"
+    else:
+        name = f"codex-rust-v0.147.0-{commit}-{RUST_TARGET}"
     return root / "eval-data" / "build" / name
 
 
-def _expected_artifact(root: Path, side: Side, commit: str) -> Path:
+def _expected_artifact(
+    root: Path, side: Side, commit: str, product: Product | None = None
+) -> Path:
     if side is Side.RONDO:
-        return root / "eval-data" / "bin" / "rondo" / f"{commit}-{RUST_TARGET}"
+        namespace = product_layout(product).artifact_dir
+        return root / "eval-data" / "bin" / namespace / f"{commit}-{RUST_TARGET}"
     return (
         root
         / "eval-data"
@@ -2166,13 +2291,17 @@ def _expected_artifact(root: Path, side: Side, commit: str) -> Path:
     )
 
 
-def _expected_bundle(root: Path, side: Side, commit: str) -> Path:
-    artifact = _expected_artifact(root, side, commit)
+def _expected_bundle(
+    root: Path, side: Side, commit: str, product: Product | None = None
+) -> Path:
+    artifact = _expected_artifact(root, side, commit, product)
     return artifact.with_name(f"{artifact.name}-code-mode-bundle")
 
 
-def _expected_runtime_bundle(root: Path, side: Side, commit: str) -> Path:
-    artifact = _expected_artifact(root, side, commit)
+def _expected_runtime_bundle(
+    root: Path, side: Side, commit: str, product: Product | None = None
+) -> Path:
+    artifact = _expected_artifact(root, side, commit, product)
     return artifact.with_name(f"{artifact.name}-runtime-bundle")
 
 
@@ -2274,6 +2403,33 @@ def _held(proof: WatchdogProof) -> None:
         raise BinaryFreezeError("RONDO watchdog lease is no longer held")
 
 
+def _require_manifest_product(
+    manifest: BinaryManifest | _CompanionBinaryManifest | _LegacyBinaryManifest,
+    side: Side,
+    expected: Product | None,
+) -> None:
+    """Fail closed unless a frozen manifest agrees with the requested product.
+
+    A manifest without the field predates the dimension, so it is Local; that
+    keeps historical bundles readable while making a Multi bundle that claims
+    Local -- or the reverse -- impossible to verify.
+    """
+
+    declared = None if manifest.product is None else parse_product(manifest.product)
+    try:
+        resolved = product_for_side(side, declared)
+    except ContractError as exc:
+        raise BinaryFreezeError("binary manifest product identity is invalid") from exc
+    if resolved != expected:
+        raise BinaryFreezeError("binary manifest product differs from the request")
+
+
+def _manifest_product(product: Product | None) -> str | None:
+    """Serialize the product identity a newly published manifest records."""
+
+    return None if product is None else product.value
+
+
 def _result(
     side: Side,
     artifact: Path,
@@ -2281,6 +2437,7 @@ def _result(
 ) -> FreezeResult:
     return FreezeResult(
         side=side.value,
+        product=manifest.product,
         manifest_path=str(artifact / "manifest.json"),
         binary_path=manifest.path,
         binary_sha256=manifest.sha256,
@@ -2364,6 +2521,15 @@ def _parse_side(value: str) -> Side:
         raise argparse.ArgumentTypeError("side must be codex or rondo") from exc
 
 
+def _parse_product_argument(value: str) -> Product:
+    try:
+        return Product(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "product must be rondo-local or rondo-multi"
+        ) from exc
+
+
 def _request_from_args(args: argparse.Namespace) -> FreezeRequest:
     return FreezeRequest(
         side=args.side,
@@ -2374,6 +2540,7 @@ def _request_from_args(args: argparse.Namespace) -> FreezeRequest:
         artifact_dir=args.artifact_dir,
         gate_root=args.gate_root,
         baseline_reference_root=args.baseline_reference_root,
+        product=args.product,
     )
 
 
@@ -2388,6 +2555,7 @@ def _companion_request_from_args(args: argparse.Namespace) -> CompanionFreezeReq
         bundle_dir=args.bundle_dir,
         gate_root=args.gate_root,
         baseline_reference_root=args.baseline_reference_root,
+        product=args.product,
     )
 
 
@@ -2403,7 +2571,14 @@ def _runtime_request_from_args(args: argparse.Namespace) -> RuntimeFreezeRequest
         runtime_bundle_dir=args.runtime_bundle_dir,
         gate_root=args.gate_root,
         baseline_reference_root=args.baseline_reference_root,
+        product=args.product,
     )
+
+
+def _add_product_argument(command: argparse.ArgumentParser) -> None:
+    # No default: the historical Local layout is reached by omitting the flag,
+    # and any other product has to select itself explicitly.
+    command.add_argument("--product", type=_parse_product_argument)
 
 
 def _add_source_arguments(command: argparse.ArgumentParser) -> None:
@@ -2414,6 +2589,7 @@ def _add_source_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--target-dir", type=Path, required=True)
     command.add_argument("--gate-root", type=Path, required=True)
     command.add_argument("--baseline-reference-root", type=Path)
+    _add_product_argument(command)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -2429,6 +2605,7 @@ def _parser() -> argparse.ArgumentParser:
     v8_parser.add_argument("--source-root", type=Path, required=True)
     v8_parser.add_argument("--source-commit", required=True)
     v8_parser.add_argument("--baseline-reference-root", type=Path)
+    _add_product_argument(v8_parser)
     for operation in ("prepare-bwrap-asset", "verify-bwrap-asset"):
         command = subparsers.add_parser(operation)
         command.add_argument("--common-root", type=Path, required=True)
@@ -2457,6 +2634,7 @@ def _parser() -> argparse.ArgumentParser:
     cleanup_parser.add_argument("--source-commit", required=True)
     cleanup_parser.add_argument("--target-dir", type=Path, required=True)
     cleanup_parser.add_argument("--scratch-dir", type=Path)
+    _add_product_argument(cleanup_parser)
     return parser
 
 
@@ -2476,6 +2654,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_root=args.source_root,
                 source_commit=args.source_commit,
                 baseline_reference_root=args.baseline_reference_root,
+                product=args.product,
             )
         elif args.operation == "prepare-bwrap-asset":
             result = prepare_bwrap_asset(common_root=args.common_root)
@@ -2506,6 +2685,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_commit=args.source_commit,
                 target_dir=args.target_dir,
                 scratch_dir=args.scratch_dir,
+                product=args.product,
             )
         print(json.dumps(asdict(result), sort_keys=True, separators=(",", ":")))
         return 0

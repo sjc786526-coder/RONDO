@@ -110,7 +110,7 @@ def _write_counter_tree(
         + "\n",
         encoding="ascii",
     )
-    watchdog_script = EVAL_ROOT.parent / "mydev" / "scripts" / "with-build-lock.sh"
+    watchdog_script = EVAL_ROOT.parent / "scripts" / "with-build-lock.sh"
     watcher_process.joinpath("cmdline").write_bytes(
         b"bash\0" + os.fsencode(watchdog_script) + b"\0"
     )

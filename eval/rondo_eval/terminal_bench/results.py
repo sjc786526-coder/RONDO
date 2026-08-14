@@ -16,15 +16,31 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
-from ..artifacts import ArtifactError, ArtifactWriter, validate_private_artifact_bytes
+from ..artifacts import (
+    ArtifactError,
+    ArtifactWriter,
+    validate_private_artifact_bytes,
+    validate_record_product_contract,
+)
 from ..config import RepoPaths
-from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
+from ..contracts import (
+    AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+    BinaryManifest,
+    Product,
+    ProviderProjection,
+    RunOutcome,
+    auto_review_config_projection,
+    parse_product,
+    product_for_manifest,
+)
+from ..contracts import Side
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
     FIX_GIT_TASK_ID,
     TERMINAL_BENCH_COMMIT,
     TERMINAL_BENCH_VERSION,
 )
+from .baseline import BaselineError, CampaignIdentity
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 from .metrics import RunMetricsError, metrics_from_dict
 from .pair import (
@@ -67,8 +83,8 @@ _EVAL_HARNESS_PATHS = (
     "eval/templates",
     "eval/uv.lock",
     "justfile",
-    "mydev/scripts/build-watchdog-lib.sh",
-    "mydev/scripts/with-build-lock.sh",
+    "scripts/build-watchdog-lib.sh",
+    "scripts/with-build-lock.sh",
     "rondo.secrets.example.env",
 )
 _ACTIVE_CAMPAIGN_POINTER = "eval/locks/p2-b7-active.json"
@@ -388,6 +404,7 @@ def publish_terminal_bench_result(
     parsed: ParsedHarborResult,
     metadata_path: Path,
     publication: PublicationContext,
+    campaign_identity: CampaignIdentity | None = None,
     writer: ArtifactWriter | None = None,
 ) -> Path:
     """Archive private raw evidence and append one strict tracked record."""
@@ -397,7 +414,13 @@ def publish_terminal_bench_result(
         raise HarborResultError("eval harness commit is invalid")
     if live_result.prepared.spec.side is not side:
         raise HarborResultError("prepared side differs from publication side")
-    _validate_publication_context(publication, side=side)
+    _validate_publication_context(
+        publication,
+        run_id=run_id,
+        side=side,
+        product=live_result.prepared.spec.effective_product(),
+        campaign_identity=campaign_identity,
+    )
     request_roles = _validate_publication_evidence(
         live_result,
         parsed,
@@ -488,6 +511,7 @@ def publish_terminal_bench_result(
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "track": "tb",
         "side": side.value,
+        **_product_record_field(live_result.prepared.spec.effective_product()),
         "git_commit": git_commit,
         "git_dirty": False,
         "binary_sha256": live_result.prepared.spec.binary.sha256,
@@ -568,6 +592,7 @@ def publish_terminal_bench_failure(
     failure_stage: str,
     publication: PublicationContext,
     secrets: tuple[str, ...],
+    campaign_identity: CampaignIdentity | None = None,
     task_id: str = FIX_GIT_TASK_ID,
     task_image_digest: str = FIX_GIT_IMAGE_DIGEST,
     infra_diagnostic: Mapping[str, object] | None = None,
@@ -598,7 +623,13 @@ def publish_terminal_bench_failure(
         provider_public = provider.to_public_dict()
     except ValueError as exc:
         raise HarborResultError("exceptional publication provider is invalid") from exc
-    _validate_publication_context(publication, side=side)
+    _validate_publication_context(
+        publication,
+        run_id=run_id,
+        side=side,
+        product=product_for_manifest(side, manifest),
+        campaign_identity=campaign_identity,
+    )
     selected_profile = dict(publication.selected_profile)
     if any(selected_profile.get(key) != value for key, value in provider_public.items()):
         raise HarborResultError("exceptional publication provider differs from the pair lock")
@@ -608,6 +639,7 @@ def publish_terminal_bench_failure(
     )
     config = {
         **selected_profile,
+        "private_summary_schema_version": 1,
         "batch_id": budget_snapshot.get("batch_id"),
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
         "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
@@ -616,6 +648,12 @@ def publish_terminal_bench_failure(
         "eval_harness_commit": eval_harness_commit,
         "binary_workspace_lock_normalization": manifest.workspace_lock_normalization,
         "failure_stage": failure_stage,
+        **_product_config(
+            side,
+            product_for_manifest(side, manifest),
+            guardian_model=provider.guardian_model,
+            guardian_effort=provider.guardian_effort,
+        ),
         **_publication_identity_config(publication),
     }
     metadata: dict[str, Any] | None = None
@@ -662,6 +700,19 @@ def publish_terminal_bench_failure(
         }
     ]
     writer.write_json(
+        "run-summary.json",
+        {
+            "schema_version": 1,
+            "run_id": run_id,
+            "side": side.value,
+            "git_commit": git_commit,
+            "outcome": outcome.value,
+            "config": config,
+            "summary": summary,
+            "tasks": tasks,
+        },
+    )
+    writer.write_json(
         "run-failure.json",
         {
             "schema_version": 1,
@@ -686,6 +737,7 @@ def publish_terminal_bench_failure(
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "track": "tb",
         "side": side.value,
+        **_product_record_field(product_for_manifest(side, manifest)),
         "git_commit": git_commit,
         "git_dirty": False,
         "binary_sha256": manifest.sha256,
@@ -764,6 +816,7 @@ def _safe_summary(
         "outcome": parsed.outcome.value,
         "config": {
             **selected_profile,
+            "private_summary_schema_version": 1,
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,
@@ -784,6 +837,12 @@ def _safe_summary(
             "timeout_seconds": spec.timeout_seconds,
             "max_retries": spec.max_retries,
             "budget_usd": spec.budget_usd,
+            **_product_config(
+                side,
+                spec.effective_product(),
+                guardian_model=spec.provider.guardian_model,
+                guardian_effort=spec.provider.guardian_effort,
+            ),
             **_publication_identity_config(publication),
         },
         "summary": {
@@ -1031,18 +1090,89 @@ def _validate_publication_evidence(
 
 
 def _validate_publication_context(
-    publication: PublicationContext, *, side: Side
+    publication: PublicationContext,
+    *,
+    run_id: str,
+    side: Side,
+    product: Product | None,
+    campaign_identity: CampaignIdentity | None,
 ) -> None:
     try:
         publication.validate()
     except ValueError as exc:
         raise HarborResultError("Terminal-Bench publication context is invalid") from exc
     if isinstance(publication, RunPublicationContext):
+        if campaign_identity is not None:
+            raise HarborResultError("pair publication cannot carry a campaign identity")
         expected_slot = 1 if side is Side.RONDO else 2
         if publication.pair_slot != expected_slot:
             raise HarborResultError("publication side differs from the pair topology")
-    elif publication.side is not side:
-        raise HarborResultError("publication side differs from the campaign slot")
+    else:
+        if not isinstance(campaign_identity, CampaignIdentity):
+            raise HarborResultError(
+                "campaign publication lacks its frozen campaign identity"
+            )
+        try:
+            campaign_identity.validate_publication_context(
+                publication, run_id=run_id
+            )
+        except BaselineError as exc:
+            raise HarborResultError(
+                "campaign publication differs from the frozen campaign identity"
+            ) from exc
+        if publication.side is not side:
+            raise HarborResultError("publication side differs from the campaign slot")
+        if publication.campaign_schema_version >= 7:
+            expected = publication.campaign_product if side is Side.RONDO else None
+            if product is not expected:
+                raise HarborResultError(
+                    "publication product differs from the campaign identity"
+                )
+        else:
+            expected = Product.RONDO_LOCAL if side is Side.RONDO else None
+            if product is not expected:
+                raise HarborResultError(
+                    "historical campaign product differs from Local"
+                )
+
+
+def _product_record_field(product: Product | None) -> dict[str, object]:
+    """Only rows whose subject is a RONDO product carry ``product``.
+
+    Per ``doc/eval-data-layout.md`` 3.1 the frozen upstream never gets one, and
+    a historical row without the field is read as ``rondo-local`` -- which is
+    why the field is omitted rather than written as null.
+    """
+
+    return {} if product is None else {"product": product.value}
+
+
+def _product_config(
+    side: Side,
+    product: Product | None,
+    *,
+    guardian_model: str,
+    guardian_effort: str,
+) -> dict[str, object]:
+    """Project the product identity and its recorded ``[auto_review]`` state.
+
+    Both the tracked record and the archived ``run-summary.json`` go through
+    here so a successful and a failed publication can never disagree, and so
+    the frozen upstream keeps carrying neither field.
+    """
+
+    if product is None:
+        return {}
+    return {
+        "product": product.value,
+        "binary_product": product.value,
+        "auto_review_config": auto_review_config_projection(
+            side,
+            product,
+            guardian_model=guardian_model,
+            guardian_effort=guardian_effort,
+        ),
+    }
 
 
 def _publication_identity_config(
@@ -1055,7 +1185,8 @@ def _publication_identity_config(
             "pair_slot": publication.pair_slot,
             "pair_round": publication.pair_round,
         }
-    return {
+    value = {
+        "campaign_schema_version": publication.campaign_schema_version,
         "campaign_id": publication.campaign_id,
         "campaign_lock_sha256": publication.campaign_lock_sha256,
         "campaign_slot_id": publication.campaign_slot_id,
@@ -1067,6 +1198,9 @@ def _publication_identity_config(
             publication.provider_upstream_timeout_seconds
         ),
     }
+    if publication.campaign_schema_version >= 7:
+        value["campaign_product"] = publication.campaign_product.value
+    return value
 
 
 def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
@@ -1087,6 +1221,10 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or not isinstance(config, dict)
     ):
         raise HarborResultError("Terminal-Bench record sections are invalid")
+    try:
+        validate_record_product_contract(record)
+    except ArtifactError as exc:
+        raise HarborResultError("Terminal-Bench product identity is invalid") from exc
     task = tasks[0]
     if (
         not isinstance(task.get("task_id"), str)

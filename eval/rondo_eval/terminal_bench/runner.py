@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from .. import config as config_module
 from ..config import RuntimeConfig
-from ..contracts import BinaryManifest, RunSpec, Side
+from ..contracts import BinaryManifest, Product, RunSpec, Side
 from ..docker_supervisor import (
     ComposeRunContract,
     DockerCounter,
@@ -71,6 +71,9 @@ class TerminalBenchRequest:
     memory_swap_bytes: int
     pids_limit: int
     provider_transport_base_url: str
+    # Which RONDO product this run evaluates.  Unset means the frozen upstream
+    # side or the historical Local layout; Multi always states it.
+    product: Product | None = None
     provider_name: str | None = None
     timeout_seconds: int = 1800
     max_retries: int = 0
@@ -481,6 +484,7 @@ def prepare_terminal_bench_run(
         task_image_digest=image_digest,
         binary=request.binary,
         terminal_bench_version=TERMINAL_BENCH_VERSION,
+        product=request.product,
         provider_name=request.provider_name,
         timeout_seconds=request.timeout_seconds,
         max_retries=request.max_retries,

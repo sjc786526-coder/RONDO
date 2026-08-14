@@ -18,7 +18,7 @@ EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.config import RuntimeConfig  # noqa: E402
-from rondo_eval.contracts import BinaryManifest, RunOutcome, Side  # noqa: E402
+from rondo_eval.contracts import BinaryManifest, Product, RunOutcome, Side  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
     HeavyLockLease,
 )
@@ -47,6 +47,8 @@ from rondo_eval.terminal_bench.freeze import (  # noqa: E402
 from rondo_eval.terminal_bench.materialize import MaterializedTask  # noqa: E402
 from rondo_eval.terminal_bench.pair import (  # noqa: E402
     B2_NO_API_BATCH_ID,
+    BundleIdentity,
+    PairIdentityError,
     load_no_api_pair_identity,
 )
 from rondo_eval.terminal_bench.results import ParsedHarborResult  # noqa: E402
@@ -414,6 +416,8 @@ class DockerNoApiSmokeTests(unittest.TestCase):
             ),
         ).safe_summary()
         self.assertEqual(durable["docker"], docker_receipt)
+        self.assertNotIn("product", durable)
+        self.assertNotIn("auto_review_config", durable)
         self.assertIn(
             '      - "seccomp=',
             result.prepared.materialized_task.overlay_path.read_text(encoding="utf-8"),
@@ -721,6 +725,26 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         self.assertEqual(loaded.bwrap_archive_sha256, "1" * 64)
         self.assertEqual(loaded.bwrap_source_tree_sha256, "2" * 64)
 
+        for product in (Product.RONDO_LOCAL, Product.RONDO_MULTI):
+            value["product"] = product.value
+            manifest_path.write_text(json.dumps(value), encoding="utf-8")
+            self.assertEqual(
+                _load_manifest(manifest_path, self.root).product,
+                product.value,
+            )
+        for invalid in (None, "codex", "unknown"):
+            value["product"] = invalid
+            manifest_path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(TerminalBenchRunError, "product identity"):
+                _load_manifest(manifest_path, self.root)
+        value["product"] = Product.RONDO_LOCAL.value
+        value["unexpected"] = True
+        manifest_path.write_text(json.dumps(value), encoding="utf-8")
+        with self.assertRaisesRegex(TerminalBenchRunError, "schema differs"):
+            _load_manifest(manifest_path, self.root)
+        value.pop("unexpected")
+        value.pop("product")
+
         for key in (
             "bwrap_asset_url",
             "bwrap_archive_sha256",
@@ -738,6 +762,219 @@ class DockerNoApiSmokeTests(unittest.TestCase):
         manifest_path.write_text(json.dumps(value), encoding="utf-8")
         with self.assertRaisesRegex(TerminalBenchRunError, "schema differs"):
             _load_manifest(manifest_path, self.root)
+
+    def test_multi_no_api_identity_binds_namespace_manifest_and_files(self) -> None:
+        bundle = self.root / "eval-data/bin/rondo-multi/runtime-bundle"
+        resources = bundle / "codex-resources"
+        resources.mkdir(parents=True)
+        codex = bundle / "codex"
+        host = bundle / "codex-code-mode-host"
+        bwrap = resources / "bwrap"
+        for path, payload in (
+            (codex, b"multi-codex"),
+            (host, b"multi-host"),
+            (bwrap, b"multi-bwrap"),
+        ):
+            path.write_bytes(payload)
+            path.chmod(0o555)
+        value = {
+            "path": str(codex),
+            "sha256": hashlib.sha256(codex.read_bytes()).hexdigest(),
+            "code_mode_host_path": str(host),
+            "code_mode_host_sha256": hashlib.sha256(host.read_bytes()).hexdigest(),
+            "bwrap_path": str(bwrap),
+            "bwrap_sha256": hashlib.sha256(bwrap.read_bytes()).hexdigest(),
+            "bwrap_asset_url": (
+                "https://github.com/openai/codex/releases/download/rust-v0.147.0/"
+                "bwrap-x86_64-unknown-linux-musl.tar.gz"
+            ),
+            "bwrap_archive_sha256": "1" * 64,
+            "bwrap_source_tree_sha256": "2" * 64,
+            "source_commit": "a" * 40,
+            "source_dirty": False,
+            "rust_toolchain": "rustc 1.95.0",
+            "build_command": ["guarded-build"],
+            "code_mode_host_build_command": ["guarded-build-host"],
+            "workspace_lock_normalization": None,
+            "product": Product.RONDO_MULTI.value,
+        }
+        manifest_path = bundle / "manifest.json"
+        manifest_path.write_text(json.dumps(value), encoding="utf-8")
+        manifest_path.chmod(0o600)
+        manifest = _load_manifest(manifest_path, self.root)
+        identity = load_no_api_pair_identity()
+
+        digest = identity.validate_no_api_manifest(
+            common_root=self.root,
+            side=Side.RONDO,
+            selected_product=Product.RONDO_MULTI,
+            manifest_path=manifest_path,
+            manifest=manifest,
+        )
+
+        self.assertEqual(digest, hashlib.sha256(manifest_path.read_bytes()).hexdigest())
+        with self.assertRaisesRegex(PairIdentityError, "differs from the selection"):
+            identity.validate_no_api_manifest(
+                common_root=self.root,
+                side=Side.RONDO,
+                selected_product=Product.RONDO_LOCAL,
+                manifest_path=manifest_path,
+                manifest=manifest,
+            )
+        codex.chmod(0o755)
+        codex.write_bytes(b"tampered")
+        codex.chmod(0o555)
+        with self.assertRaisesRegex(PairIdentityError, "differs from its manifest"):
+            identity.validate_no_api_manifest(
+                common_root=self.root,
+                side=Side.RONDO,
+                selected_product=Product.RONDO_MULTI,
+                manifest_path=manifest_path,
+                manifest=manifest,
+            )
+
+    def test_cli_main_projects_multi_through_real_loader_and_identity(self) -> None:
+        def write_bundle(
+            namespace: str, *, product: Product | None
+        ) -> tuple[Path, BundleIdentity]:
+            bundle = self.root / "eval-data/bin" / namespace / "runtime-bundle"
+            resources = bundle / "codex-resources"
+            resources.mkdir(parents=True)
+            codex = bundle / "codex"
+            host = bundle / "codex-code-mode-host"
+            bwrap = resources / "bwrap"
+            for path, payload in (
+                (codex, f"{namespace}-codex".encode()),
+                (host, f"{namespace}-host".encode()),
+                (bwrap, f"{namespace}-bwrap".encode()),
+            ):
+                path.write_bytes(payload)
+                path.chmod(0o555)
+            value = {
+                "path": str(codex),
+                "sha256": hashlib.sha256(codex.read_bytes()).hexdigest(),
+                "code_mode_host_path": str(host),
+                "code_mode_host_sha256": hashlib.sha256(host.read_bytes()).hexdigest(),
+                "bwrap_path": str(bwrap),
+                "bwrap_sha256": hashlib.sha256(bwrap.read_bytes()).hexdigest(),
+                "bwrap_asset_url": (
+                    "https://github.com/openai/codex/releases/download/rust-v0.147.0/"
+                    "bwrap-x86_64-unknown-linux-musl.tar.gz"
+                ),
+                "bwrap_archive_sha256": "1" * 64,
+                "bwrap_source_tree_sha256": "2" * 64,
+                "source_commit": "a" * 40,
+                "source_dirty": False,
+                "rust_toolchain": "rustc 1.95.0",
+                "build_command": ["guarded-build"],
+                "code_mode_host_build_command": ["guarded-build-host"],
+                "workspace_lock_normalization": None,
+            }
+            if product is not None:
+                value["product"] = product.value
+            manifest_path = bundle / "manifest.json"
+            encoded = (
+                json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode()
+            manifest_path.write_bytes(encoded)
+            manifest_path.chmod(0o600)
+            return manifest_path, BundleIdentity(
+                manifest_path=manifest_path.relative_to(self.root).as_posix(),
+                manifest_sha256=hashlib.sha256(encoded).hexdigest(),
+                cli_sha256=value["sha256"],
+                cli_size=codex.stat().st_size,
+                code_mode_host_sha256=value["code_mode_host_sha256"],
+                code_mode_host_size=host.stat().st_size,
+                bwrap_sha256=value["bwrap_sha256"],
+                bwrap_size=bwrap.stat().st_size,
+                source_commit=value["source_commit"],
+                workspace_lock_normalization=None,
+            )
+
+        multi_path, _multi_bundle = write_bundle(
+            "rondo-multi", product=Product.RONDO_MULTI
+        )
+        codex_path, codex_bundle = write_bundle("codex", product=None)
+        identity = load_no_api_pair_identity()
+        identity = replace(
+            identity,
+            bundles={**identity.bundles, Side.CODEX: codex_bundle},
+        )
+        proof = SimpleNamespace(
+            guard=mock.Mock(),
+            lease=HeavyLockLease(token="x" * 16, held=True),
+        )
+
+        def completed(_config, request, **_kwargs):
+            return SimpleNamespace(
+                passed=True,
+                safe_summary=lambda: {"side": request.side.value, "status": "completed"},
+            )
+
+        with (
+            mock.patch.object(
+                docker_smoke_module.RepoPaths,
+                "discover",
+                return_value=SimpleNamespace(
+                    common_root=self.root,
+                    worktree_root=EVAL_ROOT.parent,
+                ),
+            ),
+            mock.patch.object(
+                docker_smoke_module,
+                "load_no_api_pair_identity",
+                return_value=identity,
+            ),
+            mock.patch.object(
+                docker_smoke_module, "load_runtime_config", return_value=self.config()
+            ),
+            mock.patch.object(
+                docker_smoke_module,
+                "validate_eval_harness_checkout",
+                return_value="a" * 40,
+            ),
+            mock.patch.object(docker_smoke_module, "validate_harbor_installation"),
+            mock.patch.object(
+                docker_smoke_module, "lease_from_watchdog", return_value=proof
+            ),
+            mock.patch.object(
+                docker_smoke_module, "DockerCliCounter", return_value=mock.Mock()
+            ),
+            mock.patch.object(
+                docker_smoke_module,
+                "run_docker_no_api_smoke",
+                new=mock.AsyncMock(side_effect=completed),
+            ) as run,
+            mock.patch("builtins.print"),
+        ):
+            argv = [
+                "--rondo-binary-manifest",
+                str(multi_path),
+                "--codex-binary-manifest",
+                str(codex_path),
+                "--product",
+                Product.RONDO_MULTI.value,
+                "--docker-host-volume",
+                "/mnt/docker-data",
+            ]
+            self.assertEqual(docker_smoke_module.main(argv), 0)
+            requests = [call.args[1] for call in run.await_args_list]
+            self.assertEqual(
+                [request.side for request in requests], [Side.RONDO, Side.CODEX]
+            )
+            self.assertIs(requests[0].product, Product.RONDO_MULTI)
+            self.assertIsNone(requests[1].product)
+            receipt = json.loads(
+                (self.root / "eval-data/b2/current.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(receipt["product"], Product.RONDO_MULTI.value)
+            self.assertEqual(set(receipt["bundle_manifest_sha256"]), {"rondo", "codex"})
+
+            argv[argv.index(Product.RONDO_MULTI.value)] = Product.RONDO_LOCAL.value
+            self.assertEqual(
+                docker_smoke_module.main(argv), docker_smoke_module.EVIDENCE_ERROR
+            )
+            self.assertEqual(run.await_count, 2)
 
 
 if __name__ == "__main__":
