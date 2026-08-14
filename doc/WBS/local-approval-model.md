@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-13 ｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-14 ｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 

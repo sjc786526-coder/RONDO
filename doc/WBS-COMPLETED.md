@@ -615,3 +615,19 @@ standard/Lite 形态均补回归。
   上游尾空格窄例外。
 - **交付**：验收通过的任务分支以 merge commit `c7b7bd4` 合入 `main`；其后 `main` 前进到 `e4e0b47` 并已推送，
   最终核对 `main == origin/main == e4e0b47`。工作包 2 至此完成，后续路线转入 `doc/WBS.md` 的工作包 3。
+
+### 2026-08-14 Plan 023 RONDO Local 4k model-backed qualification 失败收口
+
+- **设施进展**：真实 ignored 配置迁移到 exact b10333 CUDA runtime、唯一 GGUF 与 4k `auto`/fit-on 合同；新增受限
+  qualification、严格 model-backed evidence/capability 投影和按 backend 精确 `/props.build_info` 身份校验。
+  正式 launcher 对未晋级 runtime 仍在 Popen 前拒绝，不存在通用 bypass。
+- **真实结果**：第 4 次、也是授权上限内最后一次生命周期成功加载 exact GGUF，实证 CUDA、正数 GPU offload、
+  `build_info=b1-0865990`、context 4096、单 slot 与模型身份。所选冻结真实 `E_final` 经服务端计数为
+  5,313 input tokens，超过 4096 并被拒绝，未产生结构化判定；该事实不能外推到其余 46 条归档。
+- **失败语义**：未写成功 evidence，显存峰值/TTFT/总耗时不冒充有效资格指标，capability 保持
+  `linux_cuda_built_model_unvalidated`；正式 doctor 报 `model_backed_validation=not_run`。Turn A 因而是
+  completed-with-failure，不是 4k 服务成功，未进入 Turn B、L7 或 Local M3。
+- **复审与交付**：独立审查发现并闭合 evidence selector/TOCTOU、结论外推和 VRAM 全窗口采样三类问题；focused
+  tests 115/115 与 `just eval-lock` 通过，模型进程、8080、receipt、private objects 和 GPU compute process 均无残留。
+  任务分支以 `3edf08a` 合入并推送 `main`，worktree 已移除，分支保留为
+  `zz-done/023-local-4k-qualification`。后续上下文预算与真实证据可服务口径只由当前 WBS 承接。

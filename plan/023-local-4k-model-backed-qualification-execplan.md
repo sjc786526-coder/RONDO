@@ -265,14 +265,17 @@ extra/missing field 和 identity mismatch 必须由上述 focused unit tests 单
   与受跟踪 `eval/results/runs.jsonl` 交叉核对，payload 直接由冻结 bytes 构造（消除二次读取 TOCTOU）；
   VRAM 采样改为全窗口 fail-closed（首个采样异常、线程未退出、请求窗口内出现 foreign compute process 或零样本
   都不得晋级）；权威文档收敛为“已测这一条 5,313 tokens 不可服务”，删除未证实的全体结论。focused tests 115 项全绿。
+- 2026-08-14：独立复审确认 F1—F3 完整闭环，focused tests 115/115、`just eval-lock`、无模型 doctor 与现场清理
+  均通过相应门禁；复审报告提交为 `b40f006`。任务分支随后以 merge commit `3edf08a` 合入 `main` 并推送，
+  worktree 已移除，完成分支保留为 `zz-done/023-local-4k-qualification`。
 
 ### 当前工作
 
-- Turn A 在 §5 D 的结构化判定步骤按合同失败收口，并已完成一次 review remediation；不进入 Turn B。
+- 无。Turn A 在 §5 D 的结构化判定步骤按合同失败收口，修复复审与交付均已完成；未进入 Turn B。
 
 ### 本任务剩余步骤
 
-- 无。文档收口与任务分支提交已完成，等待独立复审。
+- 无。本计划以 completed-with-failure 终态冻结；后续只由两份 WBS 承接。
 
 ### 阻塞项
 
@@ -291,8 +294,8 @@ extra/missing field 和 identity mismatch 必须由上述 focused unit tests 单
 
 ### 交接边界
 
-- 本任务成功后冻结此计划；下一步只链接 `doc/WBS.md` / `doc/WBS/local-approval-model.md` 的 L7/Local M3 条目，
-  不在本计划继续维护 Turn B、8k 或训练路线。
+- 本任务以失败终态冻结；后续只链接 `doc/WBS.md` / `doc/WBS/local-approval-model.md` 的上下文预算与
+  Local M3 条目，不在本计划继续维护 Turn B、8k 或训练路线。
 
 ## 7. 关键决策记录
 
