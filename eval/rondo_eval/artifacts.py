@@ -91,6 +91,23 @@ class ArtifactError(ValueError):
     """Raised when artifact publication cannot be completed safely."""
 
 
+def strict_json_equal(left: object, right: object) -> bool:
+    """Compare decoded JSON without letting bool impersonate a number."""
+
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict) and isinstance(right, dict):
+        return set(left) == set(right) and all(
+            strict_json_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            strict_json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return left == right
+
+
 def validate_private_artifact_bytes(contents: bytes, relative_path: str) -> None:
     """Check one prospective private artifact without weakening final scanning."""
 
@@ -433,11 +450,17 @@ def _validate_private_run_summary(
     artifact_root: Path, record: Mapping[str, Any]
 ) -> None:
     config = record.get("config")
-    if not isinstance(config, Mapping) or (
-        config.get("private_summary_schema_version")
-        != _PRIVATE_SUMMARY_SCHEMA_VERSION
-    ):
+    if not isinstance(config, Mapping):
         return
+    private_summary_version = config.get("private_summary_schema_version")
+    if private_summary_version is None:
+        return
+    if (
+        isinstance(private_summary_version, bool)
+        or not isinstance(private_summary_version, int)
+        or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+    ):
+        raise ArtifactError("private run summary schema version is invalid")
     path = artifact_root / "run-summary.json"
     try:
         metadata = path.lstat()
@@ -466,9 +489,11 @@ def _validate_private_run_summary(
     if (
         not isinstance(value, dict)
         or set(value) != expected_keys
+        or isinstance(value.get("schema_version"), bool)
+        or not isinstance(value.get("schema_version"), int)
         or value.get("schema_version") != _PRIVATE_SUMMARY_SCHEMA_VERSION
         or any(
-            value.get(key) != record.get(key)
+            not strict_json_equal(value.get(key), record.get(key))
             for key in expected_keys - {"schema_version"}
         )
     ):
@@ -491,7 +516,10 @@ def validate_record_product_contract(record: Mapping[str, Any]) -> None:
         raise ArtifactError("run record product config is invalid")
     private_summary_version = config.get("private_summary_schema_version")
     if private_summary_version is not None and (
-        private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION or track != "tb"
+        isinstance(private_summary_version, bool)
+        or not isinstance(private_summary_version, int)
+        or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+        or track != "tb"
     ):
         raise ArtifactError("run record private summary version is invalid")
     campaign_schema_version = config.get("campaign_schema_version")
@@ -577,7 +605,12 @@ def validate_record_product_contract(record: Mapping[str, Any]) -> None:
     }
     if not isinstance(auto_review, Mapping) or set(auto_review) != expected_keys:
         raise ArtifactError("run record auto-review config is invalid")
-    if auto_review.get("schema_version") != AUTO_REVIEW_CONFIG_SCHEMA_VERSION:
+    auto_review_schema_version = auto_review.get("schema_version")
+    if (
+        isinstance(auto_review_schema_version, bool)
+        or not isinstance(auto_review_schema_version, int)
+        or auto_review_schema_version != AUTO_REVIEW_CONFIG_SCHEMA_VERSION
+    ):
         raise ArtifactError("run record auto-review config version is invalid")
     if product is Product.RONDO_MULTI:
         expected_state = {
@@ -610,6 +643,8 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
         match is None
         or not _RECORD_FIELDS <= fields
         or fields - _RECORD_FIELDS - _OPTIONAL_RECORD_FIELDS
+        or isinstance(record.get("schema_version"), bool)
+        or not isinstance(record.get("schema_version"), int)
         or record.get("schema_version") != 1
         or record.get("run_id") != run_id
     ):
@@ -898,6 +933,18 @@ def _read_index(
         run_ids.add(run_id)
         rows.append(row)
     return contents, rows
+
+
+def read_validated_run_records(
+    path: Path, *, common_root: Path
+) -> tuple[tuple[dict[str, Any], bytes], ...]:
+    """Read the durable index through its full record and private-tree checks."""
+
+    contents, rows = _read_index(path, common_root=common_root)
+    lines = contents.splitlines()
+    if len(lines) != len(rows):
+        raise ArtifactError("tracked run index row count is inconsistent")
+    return tuple(zip(rows, lines))
 
 
 def _index_temporary_name(run_id: str) -> str:

@@ -40,6 +40,7 @@ from .freeze import (
     TERMINAL_BENCH_COMMIT,
     TERMINAL_BENCH_VERSION,
 )
+from .baseline import BaselineError, CampaignIdentity
 from .live import BudgetedTerminalBenchResult, load_guardian_evidence_bundle
 from .metrics import RunMetricsError, metrics_from_dict
 from .pair import (
@@ -403,6 +404,7 @@ def publish_terminal_bench_result(
     parsed: ParsedHarborResult,
     metadata_path: Path,
     publication: PublicationContext,
+    campaign_identity: CampaignIdentity | None = None,
     writer: ArtifactWriter | None = None,
 ) -> Path:
     """Archive private raw evidence and append one strict tracked record."""
@@ -414,8 +416,10 @@ def publish_terminal_bench_result(
         raise HarborResultError("prepared side differs from publication side")
     _validate_publication_context(
         publication,
+        run_id=run_id,
         side=side,
         product=live_result.prepared.spec.effective_product(),
+        campaign_identity=campaign_identity,
     )
     request_roles = _validate_publication_evidence(
         live_result,
@@ -588,6 +592,7 @@ def publish_terminal_bench_failure(
     failure_stage: str,
     publication: PublicationContext,
     secrets: tuple[str, ...],
+    campaign_identity: CampaignIdentity | None = None,
     task_id: str = FIX_GIT_TASK_ID,
     task_image_digest: str = FIX_GIT_IMAGE_DIGEST,
     infra_diagnostic: Mapping[str, object] | None = None,
@@ -620,8 +625,10 @@ def publish_terminal_bench_failure(
         raise HarborResultError("exceptional publication provider is invalid") from exc
     _validate_publication_context(
         publication,
+        run_id=run_id,
         side=side,
         product=product_for_manifest(side, manifest),
+        campaign_identity=campaign_identity,
     )
     selected_profile = dict(publication.selected_profile)
     if any(selected_profile.get(key) != value for key, value in provider_public.items()):
@@ -1083,17 +1090,36 @@ def _validate_publication_evidence(
 
 
 def _validate_publication_context(
-    publication: PublicationContext, *, side: Side, product: Product | None
+    publication: PublicationContext,
+    *,
+    run_id: str,
+    side: Side,
+    product: Product | None,
+    campaign_identity: CampaignIdentity | None,
 ) -> None:
     try:
         publication.validate()
     except ValueError as exc:
         raise HarborResultError("Terminal-Bench publication context is invalid") from exc
     if isinstance(publication, RunPublicationContext):
+        if campaign_identity is not None:
+            raise HarborResultError("pair publication cannot carry a campaign identity")
         expected_slot = 1 if side is Side.RONDO else 2
         if publication.pair_slot != expected_slot:
             raise HarborResultError("publication side differs from the pair topology")
     else:
+        if not isinstance(campaign_identity, CampaignIdentity):
+            raise HarborResultError(
+                "campaign publication lacks its frozen campaign identity"
+            )
+        try:
+            campaign_identity.validate_publication_context(
+                publication, run_id=run_id
+            )
+        except BaselineError as exc:
+            raise HarborResultError(
+                "campaign publication differs from the frozen campaign identity"
+            ) from exc
         if publication.side is not side:
             raise HarborResultError("publication side differs from the campaign slot")
         if publication.campaign_schema_version >= 7:

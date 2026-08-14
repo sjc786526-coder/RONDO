@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import argparse
+import shutil
 import sys
 import tempfile
 import unittest
@@ -1169,7 +1170,11 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 allow_interrupted_recovery=True,
             ) as state:
                 state.claim(slot.slot_id)
-                with mock.patch.object(baseline_cli, "_sample_storage"):
+                with mock.patch.object(
+                    baseline_cli,
+                    "read_validated_run_records",
+                    return_value=((record, line),),
+                ), mock.patch.object(baseline_cli, "_sample_storage"):
                     reconciled = baseline_cli._reconcile_running_paid_slot(
                         paths=RepoPaths.discover(Path.cwd()),
                         identity=identity,
@@ -1187,6 +1192,129 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                 self.assertEqual(row["status"], "completed")
                 self.assertEqual(row["estimated_usd"], "0.100000")
                 self.assertEqual(row["result_record_sha256"], hashlib.sha256(line).hexdigest())
+
+    def test_campaign_aggregate_reader_requires_the_private_summary_tree(self) -> None:
+        identity = self._identity()
+        run_id = "20260814-390000001-tb-rondo-r1"
+
+        def fixture(root: Path) -> tuple[Path, Path]:
+            results_root = root / "results"
+            index = results_root / "eval/results/runs.jsonl"
+            index.parent.mkdir(parents=True)
+            artifact = root / "eval-data/runs" / run_id
+            artifact.mkdir(parents=True)
+            config = {
+                "private_summary_schema_version": 1,
+                "campaign_schema_version": 7,
+                "campaign_product": "rondo-local",
+                "campaign_id": identity.campaign_id,
+                "product": "rondo-local",
+                "binary_product": "rondo-local",
+                "guardian_model": "gpt-5.6-sol",
+                "guardian_effort": "low",
+                "auto_review_config": {
+                    "schema_version": 1,
+                    "model": "gpt-5.6-sol",
+                    "model_provider": None,
+                    "reasoning_effort": "low",
+                    "evidence_dir": "/logs/agent/guardian-evidence",
+                },
+            }
+            record = {
+                "schema_version": 1,
+                "run_id": run_id,
+                "created_at": "2026-08-14T00:00:00-07:00",
+                "track": "tb",
+                "side": "rondo",
+                "product": "rondo-local",
+                "git_commit": "a" * 40,
+                "git_dirty": False,
+                "binary_sha256": "b" * 64,
+                "upstream_codex": {
+                    "tag": "rust-v0.147.0",
+                    "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                    "workspace_lock_normalization": (
+                        "135 workspace packages: 0.0.0 -> 0.147.0"
+                    ),
+                },
+                "config": config,
+                "outcome": "infra_failed",
+                "summary": {"metadata_ready": False},
+                "tasks": [{"task_id": "terminal-bench/fix-git", "outcome": "fail"}],
+                "metrics": {
+                    "wall_seconds": 1.0,
+                    "cpu_user_seconds": 0.1,
+                    "cpu_system_seconds": 0.1,
+                    "peak_rss_bytes": 1024,
+                    "exit_code": 70,
+                },
+                "cost": {"estimated_usd": 0.0, "actual_usd": None},
+                "artifacts": f"eval-data/runs/{run_id}",
+                "notes": "",
+            }
+            index.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            (artifact / "run-summary.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "run_id": run_id,
+                        "side": "rondo",
+                        "git_commit": "a" * 40,
+                        "outcome": "infra_failed",
+                        "config": config,
+                        "summary": record["summary"],
+                        "tasks": record["tasks"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return results_root, artifact
+
+        mutations = {
+            "missing summary": lambda artifact: (artifact / "run-summary.json").unlink(),
+            "tampered summary": lambda artifact: (artifact / "run-summary.json").write_text(
+                '{"schema_version":1}', encoding="utf-8"
+            ),
+            "missing tree": lambda artifact: shutil.rmtree(artifact),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results_root, _artifact = fixture(root)
+            with mock.patch.object(
+                baseline_cli, "_validate_campaign_record_product"
+            ) as product_validator:
+                records, _digests = baseline_cli._campaign_records(
+                    results_root, identity, common_root=root
+                )
+            self.assertEqual(set(records), {run_id})
+            product_validator.assert_called_once()
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                results_root, artifact = fixture(root)
+                mutate(artifact)
+                campaign_root = (
+                    root / "eval-data/campaigns" / identity.campaign_id
+                )
+                campaign_root.mkdir(parents=True)
+                with mock.patch.object(
+                    baseline_cli, "_validate_campaign_record_product"
+                ) as product_validator, self.assertRaisesRegex(
+                    baseline_cli.CampaignExecutionError,
+                    "campaign result index is invalid",
+                ):
+                    baseline_cli._write_aggregate(
+                        campaign_root,
+                        identity,
+                        mock.Mock(),
+                        {"spent_usd": "0.000000", "runs": {}},
+                        Decimal("0.000000"),
+                        assessment=None,
+                        results_root=results_root,
+                        storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                        final_storage=None,
+                    )
+                product_validator.assert_not_called()
 
     def test_recovery_replay_stops_before_any_unclaimed_attempt(self) -> None:
         identity = self._identity_v2()

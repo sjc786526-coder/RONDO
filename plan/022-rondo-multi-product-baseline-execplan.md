@@ -37,7 +37,9 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
       一次 Multi `codex-cli` 轻量带锁构建通过；不重跑 Rust 全 workspace。
 - [ ] `doc/WBS.md`、`doc/WBS/multi-agent-trusted-evidence.md`、`doc/WBS-COMPLETED.md`、
       `doc/development-environment.md` 与精炼 `agent_log/` 只在各自职责内同步最终事实；`README.md` 无需重复历史。
-- [ ] `git diff --check` 通过；没有密钥、ignored 本机资产、意外生成物或历史结果改动。
+- [ ] 所有非 `multidev/**` 手写差异通过 `git diff --check`；`multidev/` 仅在相对路径、Git type/mode、
+      blob ID 与工作树字节逐项等同 `mydev/` 时豁免尾空格诊断。不得修改复制内容或用 `.gitattributes`
+      掩盖诊断；没有密钥、ignored 本机资产、意外生成物或历史结果改动。
 
 ## 2. 范围
 
@@ -141,9 +143,9 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 ### 已完成
 
-首个实现提交 `d2c16073` 与首轮修复提交 `c5eb380` 均被独立验收拒绝合并。基础实施事实仍见
-`agent_log/2026-08-14-004500-plan022-rondo-multi-product-baseline.md`；第二轮复验报告
-`agent_log/2026-08-14-011251-plan022-fix-independent-reacceptance.md` 指出的 B1—B3、M1—M3 与文档问题已逐项修复：
+首个实现提交 `d2c16073`、首轮修复提交 `c5eb380` 与第二轮修复提交 `20b8e787` 均被独立验收拒绝合并。
+基础实施事实仍见 `agent_log/2026-08-14-004500-plan022-rondo-multi-product-baseline.md`；第三次独立复验报告
+`agent_log/2026-08-14-023312-plan022-third-independent-reacceptance.md` 指出的 B1、B2、M1 与文档问题已逐项修复：
 
 1. 共享看门狗已 `git mv` 到根 `scripts/`（mode 与字节不变），现行引用点全部改为根路径且不留 shim；
    共享 helper 回归改由两条产品线的 `test-github-scripts` 入口显式调用根 helper。
@@ -152,34 +154,34 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 3. 默认关闭行为门落在两棵树同源的 `config_loader_tests.rs`，经 `ConfigBuilder` 真实加载路径断言。
 4. 新 RONDO/Codex freeze 产物已与生产 loader 收口；campaign request/manifest/RunSpec、successor、no-API
    bundle、publication/replay/aggregate 均交叉绑定产品，历史缺字段工件保持只读兼容。
-5. v7 campaign publication 在落盘前强制两侧绑定 campaign product；正常与失败 publication 都生成与 tracked
-   row 等值的版本化私有摘要，journal recovery 与 durable index reader 重新核对摘要。
-6. terminal aggregate 不再因两份 aggregate 自洽而早退，终态恢复会从 state、budget、runs index、record digest
-   和冻结 identity 重建并逐字节核对；campaign consumer 另与冻结 selected profile 比较。
+5. v7 campaign publication 在落盘前接收真实冻结 `CampaignIdentity`，两侧都交叉核对 lock、schema、product、
+   side、slot 与 run；正常与失败 publication 都生成与 tracked row 等值的版本化私有摘要。
+6. terminal aggregate 不再因两份 aggregate 自洽而早退；campaign、continuation 与 result digest reader 统一复用
+   完整 durable index/private-summary 校验，再从 state、budget、record digest 和冻结 identity 重建终态。
 7. replay 的 product/binary 合同与当前 shadow Local side 映射已收紧，历史无产品记录保持只读兼容。
 
 ### 当前工作
 
-第二轮复验修复与复审准入门禁已完成；提交当前任务分支后停止，等待再次独立复审。
+第三次独立复验修复与复审准入门禁已完成；提交当前任务分支后停止，等待再次独立复审。
 
 ### 本任务剩余步骤
 
-无实施步骤；只剩再次独立复审及用户对 §6 决策 011 窄例外的确认，不在本轮执行者权限内。
+无实施步骤；只剩提交当前修复并等待再次独立复审，不在本轮执行者权限内。
 
 ### 阻塞项
 
-完整 `git diff --check` 与 `multidev/` 精确复制之间的既有冲突仍按用户要求保留为窄例外，等待用户明确接受；
-手写文件必须保持 `diff --check` 干净。
+无。决策 011 的严格窄例外已由用户明确采纳；非 `multidev/**` 差异仍必须保持 `diff --check` 干净，
+复制目录仍必须通过逐项等同门禁。
 
 ### 当前验收状态
 
 对照 §1 完成/验收标准：
 
-- 第二轮复验的 B1/B2/B3、M1/M2/M3 与对应文档修复已落地；focused 受影响集合 319/319，完整 eval 无 API
-  套件 607/607（0 fail、0 skip），`just eval-lock` 解析 85 packages，两侧 watchdog helper 各 9/9。
+- 第三次独立复验的 B1/B2、M1 与文档修复已落地；四个直接受影响模块 234/234，完整 eval 无 API
+  套件 610/610（0 fail、0 skip），`just eval-lock` 解析 85 packages，两侧 watchdog helper 各 9/9。
 - 本轮未修改 Rust 产品源码，按复审条件未重复 Cargo 构建。首个实现批次已有的根看门狗 Multi
   `codex-core` 80/80 与 `codex-cli 0.147.0` 轻量构建证据保留，但不冒充本轮新运行。
-- `git diff --check`：手写改动部分干净。`multidev/` 例外 —— 6,011 个文件全为新增行，其中 419 个上游
+- `git diff --check`：非 `multidev/**` 差异干净。决策 011 已采纳的 `multidev/` 例外 —— 6,011 个文件全为新增行，其中 419 个上游
   文件自带行尾空白（TUI 动画帧、prompt markdown、apply-patch 空白 fixture），已逐一 `cmp` 确认与
   `mydev/` 原件字节相同；修改它们会违反更强的「精确复制」硬约束，因此保留原样。
 - 未运行/不适用：Docker、no-API 双侧真实执行、真实 API、真实本地模型、全 workspace Rust 测试。
@@ -208,5 +210,5 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 | 008 | 接受「看门狗改根后历史 bundle 不再可 re-verify」这一代价，不做双路径兼容 | 硬约束 5 要求精确接受根脚本并拒绝旧路径；冻结 bundle 字节与 `eval/locks/*.json` 未改，影响面止于 `binary_freeze verify*` | binary freeze | 已采纳 |
 | 009 | 仅 build-command 的 `--product` 在非 Local 时出现；新 RONDO manifest（Local/Multi）始终显式写 `product`，Codex 与历史 manifest 省略该键 | Local build-command 保持 seven-key 历史形状；权威数据布局同时要求新 RONDO manifest 显式身份 | binary freeze / manifest | 已采纳 |
 | 010 | eval 为 Multi 不注入 `[auto_review]` 三项覆盖，Local 的既有公平合同不变 | M-0 要求基线在关闭态取得；改 Local 会动既有公平运行合同（硬约束 9） | adapter / result | 已采纳 |
-| 011 | 完整 `git diff --check` 的唯一例外限定为与 `mydev/` 字节相同的 `multidev/` 复制内容，手写差异必须通过；例外仍待用户明确接受 | 清理上游尾空格会破坏更强的精确复制合同，不能为绿灯改写复制内容 | 复制验收 | 待用户确认 |
+| 011 | 非 `multidev/**` 差异必须通过 `git diff --check`；`multidev/` 仅在相对路径、Git type/mode、blob ID 与工作树字节逐项等同 `mydev/` 时豁免尾空格诊断，且不得改写复制内容或用 `.gitattributes` 掩盖 | 清理上游尾空格会破坏更强的精确复制合同；用户已明确接受这一严格窄例外 | 复制验收 | 已采纳 |
 | 012 | 新 TB publication 用显式 schema 绑定 campaign 产品与私有摘要；终态 aggregate 每次从 durable sources 重建 | 可选字段和成对 aggregate 自洽均不足以证明产品与结果来源，必须在落盘/恢复边界 fail-closed | result / campaign recovery | 已采纳 |

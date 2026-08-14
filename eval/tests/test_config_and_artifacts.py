@@ -341,6 +341,53 @@ class ArtifactTests(unittest.TestCase):
                 with self.assertRaisesRegex(ArtifactError, "product|auto-review"):
                     ArtifactWriter(paths, next_id).start()
 
+    def test_boolean_values_cannot_impersonate_numeric_schema_versions(self) -> None:
+        mutations = (
+            lambda record: record.__setitem__("schema_version", True),
+            lambda record: record["config"].__setitem__(
+                "private_summary_schema_version", True
+            ),
+            lambda record: record["config"]["auto_review_config"].__setitem__(
+                "schema_version", True
+            ),
+        )
+        for number, mutate in enumerate(mutations, start=90):
+            with self.subTest(number=number), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0000000{number}-tb-rondo-r1"
+                record = self._record(run_id)
+                self._set_tb_product(record, "rondo-multi")
+                mutate(record)
+                writer = ArtifactWriter(paths, run_id).start()
+                self._write_private_summary(writer, record)
+                with self.assertRaisesRegex(ArtifactError, "schema|version"):
+                    writer.finalize(record, secrets=())
+                self.assertFalse(writer.journal.exists())
+                self.assertFalse(writer.target.exists())
+
+        run_id = "20260809-000000093-tb-rondo-r1"
+        record = self._record(run_id)
+        self._set_tb_product(record, "rondo-multi")
+        writer = ArtifactWriter(self.paths, run_id).start()
+        writer.write_json(
+            "run-summary.json",
+            {
+                "schema_version": True,
+                "run_id": run_id,
+                "side": "rondo",
+                "git_commit": record["git_commit"],
+                "outcome": record["outcome"],
+                "config": record["config"],
+                "summary": record["summary"],
+                "tasks": record["tasks"],
+            },
+        )
+        with self.assertRaisesRegex(ArtifactError, "private run summary"):
+            writer.finalize(record, secrets=())
+        self.assertFalse(writer.journal.exists())
+        self.assertFalse(writer.target.exists())
+
     def test_v7_campaign_product_binding_is_required_before_publication(self) -> None:
         for number, side in enumerate(("rondo", "codex"), start=70):
             with self.subTest(side=side), tempfile.TemporaryDirectory() as directory:

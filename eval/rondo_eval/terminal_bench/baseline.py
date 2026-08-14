@@ -15,6 +15,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Iterable
 
+from ..artifacts import strict_json_equal
 from ..config import RepoPaths
 from ..contracts import (
     BinaryManifest,
@@ -494,6 +495,43 @@ class CampaignIdentity:
         conditions = self.comparison_conditions
         if conditions.catalog_artifact_sha256 != frozen["sha256"]:
             raise BaselineError("shared model catalog digest differs from run conditions")
+
+    def validate_publication_context(self, context: object, *, run_id: str) -> None:
+        """Bind a prospective result publication to this frozen campaign."""
+
+        from .pair import CampaignPublicationContext
+
+        if not isinstance(context, CampaignPublicationContext):
+            raise BaselineError("campaign publication context type is invalid")
+        try:
+            context.validate()
+        except ValueError as exc:
+            raise BaselineError("campaign publication context is invalid") from exc
+        try:
+            slot = self.slot(context.campaign_slot_id)
+        except BaselineError as exc:
+            raise BaselineError("campaign publication slot is invalid") from exc
+        expected_product = self.product if self.enforces_fair_comparison else None
+        if (
+            context.campaign_id != self.campaign_id
+            or context.campaign_lock_sha256 != self.lock_sha256
+            or context.campaign_schema_version != self.schema_version
+            or context.taskset_sha256 != self.taskset_sha256
+            or context.canary_catalog_sha256 != self.canary_catalog_sha256
+            or not strict_json_equal(
+                dict(context.selected_profile), self.selected_profile
+            )
+            or context.campaign_product is not expected_product
+            or context.provider_upstream_timeout_seconds
+            != self.upstream_timeout_seconds
+            or slot.run_id != run_id
+            or slot.side is not context.side
+            or (slot.round_id or slot.kind) != context.campaign_round_id
+            or slot.attempt != context.campaign_attempt
+        ):
+            raise BaselineError(
+                "campaign publication context differs from the frozen campaign"
+            )
 
     def validate_manifest(
         self,

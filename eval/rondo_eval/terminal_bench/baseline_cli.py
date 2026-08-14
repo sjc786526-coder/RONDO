@@ -20,6 +20,8 @@ from ..api_budget_proxy import PersistentBudgetLedger, completed_run_accounting
 from ..artifacts import (
     ArtifactError,
     ArtifactWriter,
+    read_validated_run_records,
+    strict_json_equal,
     validate_record_product_contract,
 )
 from ..config import RepoPaths, load_provider_secret, load_runtime_config
@@ -2416,6 +2418,7 @@ def _execute_task_slot(
             parsed=parsed,
             metadata_path=metadata_path,
             publication=publication(_outcome_exit_code(parsed.outcome)),
+            campaign_identity=identity,
             writer=writer,
         )
         outcome = parsed.outcome
@@ -2451,6 +2454,7 @@ def _execute_task_slot(
             infra_diagnostic=_docker_failure_diagnostic(exc),
             publication=publication(exit_code),
             secrets=(provider_key,),
+            campaign_identity=identity,
             task_id=task.task_id,
             task_image_digest=task.image_digest,
         )
@@ -2559,18 +2563,26 @@ def _result_record_sha256(
     slot: CampaignSlotPlan,
     common_root: Path,
 ) -> str:
-    rows = [
-        line
-        for line in (results_root / "eval/results/runs.jsonl").read_bytes().splitlines()
-        if json.loads(line).get("run_id") == run_id
-    ]
+    path = results_root / "eval/results/runs.jsonl"
+    if path.is_symlink() or not path.is_file():
+        raise CampaignExecutionError("campaign result index is unavailable")
+    try:
+        rows = [
+            (record, line)
+            for record, line in read_validated_run_records(
+                path, common_root=common_root
+            )
+            if record.get("run_id") == run_id
+        ]
+    except ArtifactError as exc:
+        raise CampaignExecutionError("campaign result index is invalid") from exc
     if len(rows) != 1:
         raise CampaignExecutionError("published campaign result is not unique")
-    record = json.loads(rows[0])
+    record, line = rows[0]
     _validate_campaign_record_product(
         identity, record, common_root=common_root, expected_slot=slot
     )
-    return hashlib.sha256(rows[0]).hexdigest()
+    return hashlib.sha256(line).hexdigest()
 
 
 def _skip_planned(
@@ -2920,14 +2932,10 @@ def _campaign_records(
     records: dict[str, dict[str, object]] = {}
     digests: dict[str, str] = {}
     try:
-        lines = path.read_bytes().splitlines()
-    except OSError as exc:
-        raise CampaignExecutionError("campaign result index is unreadable") from exc
-    for line in lines:
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise CampaignExecutionError("campaign result index is invalid") from exc
+        indexed = read_validated_run_records(path, common_root=common_root)
+    except ArtifactError as exc:
+        raise CampaignExecutionError("campaign result index is invalid") from exc
+    for record, line in indexed:
         config = record.get("config") if isinstance(record, dict) else None
         if not isinstance(config, dict) or config.get("campaign_id") != identity.campaign_id:
             continue
@@ -2978,7 +2986,8 @@ def _validate_campaign_record_product(
     ):
         raise CampaignExecutionError("campaign result product differs from the lock")
     if any(
-        config.get(key) != value for key, value in identity.selected_profile.items()
+        not strict_json_equal(config.get(key), value)
+        for key, value in identity.selected_profile.items()
     ):
         raise CampaignExecutionError(
             "campaign result selected profile differs from the lock"
@@ -3038,8 +3047,13 @@ def _continuation_records(
     indexed: dict[str, tuple[dict[str, object], str]] = {}
     expected_runs = {item.source_run_id for item in identity.continuation}
     path = results_root / "eval/results/runs.jsonl"
-    for line in path.read_bytes().splitlines():
-        record = json.loads(line)
+    if path.is_symlink() or not path.is_file():
+        raise CampaignExecutionError("continued result index is unavailable")
+    try:
+        source_records = read_validated_run_records(path, common_root=common_root)
+    except ArtifactError as exc:
+        raise CampaignExecutionError("continued result index is invalid") from exc
+    for record, line in source_records:
         run_id = record.get("run_id") if isinstance(record, dict) else None
         if run_id not in expected_runs:
             continue
@@ -3138,7 +3152,10 @@ def _continuation_records(
             != Decimal(str(source.upstream_timeout_seconds))
             or config.get("taskset_sha256") != source.taskset_sha256
             or config.get("canary_catalog_sha256") != source.canary_catalog_sha256
-            or any(config.get(key) != value for key, value in source.selected_profile.items())
+            or any(
+                not strict_json_equal(config.get(key), value)
+                for key, value in source.selected_profile.items()
+            )
             or not isinstance(tasks, list)
             or len(tasks) != 1
             or not isinstance(tasks[0], dict)

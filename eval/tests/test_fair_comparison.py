@@ -922,37 +922,41 @@ class CampaignFairComparisonContractTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             results_root = Path(directory) / "results"
-            index = results_root / "eval/results/runs.jsonl"
-            index.parent.mkdir(parents=True)
-            index.write_text(json.dumps(record) + "\n", encoding="utf-8")
-            records, _digests = baseline_cli._campaign_records(
-                results_root, identity, common_root=paths.common_root
+            baseline_cli._validate_campaign_record_product(
+                identity, record, common_root=paths.common_root
             )
-            self.assertEqual(set(records), {slot.run_id})
+            float_key = next(
+                key
+                for key, value in identity.selected_profile.items()
+                if isinstance(value, float)
+            )
+            record["config"][float_key] = True
+            with self.assertRaisesRegex(CampaignExecutionError, "selected profile"):
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
+                )
+            record["config"][float_key] = identity.selected_profile[float_key]
             record["config"]["guardian_model"] = "forged-guardian"
             record["config"]["guardian_effort"] = "high"
             record["config"]["auto_review_config"]["model"] = "forged-guardian"
             record["config"]["auto_review_config"]["reasoning_effort"] = "high"
-            index.write_text(json.dumps(record) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(CampaignExecutionError, "selected profile"):
-                baseline_cli._campaign_records(
-                    results_root, identity, common_root=paths.common_root
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
                 )
             record["config"].update(identity.selected_profile)
             record["config"]["auto_review_config"]["model"] = "gpt-5.6-sol"
             record["config"]["auto_review_config"]["reasoning_effort"] = "low"
             record["config"]["product"] = Product.RONDO_MULTI.value
-            index.write_text(json.dumps(record) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(CampaignExecutionError, "product identity"):
-                baseline_cli._campaign_records(
-                    results_root, identity, common_root=paths.common_root
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
                 )
             record["config"]["product"] = Product.RONDO_LOCAL.value
             record["binary_sha256"] = "f" * 64
-            index.write_text(json.dumps(record) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(CampaignExecutionError, "binary differs"):
-                baseline_cli._campaign_records(
-                    results_root, identity, common_root=paths.common_root
+                baseline_cli._validate_campaign_record_product(
+                    identity, record, common_root=paths.common_root
                 )
 
             campaign_root = Path(directory) / "campaign"

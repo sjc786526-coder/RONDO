@@ -40,6 +40,10 @@ from rondo_eval.terminal_bench.live import (  # noqa: E402
     BudgetedTerminalBenchResult,
     load_guardian_evidence_bundle,
 )
+from rondo_eval.terminal_bench.baseline import (  # noqa: E402
+    CampaignIdentity,
+    CampaignSlotPlan,
+)
 from rondo_eval.terminal_bench import __main__ as terminal_bench_main  # noqa: E402
 from rondo_eval.terminal_bench.pair import (  # noqa: E402
     CampaignPublicationContext,
@@ -178,6 +182,79 @@ class _ResultFixture:
                 "max_guardian_logical_requests": 3,
             },
             campaign_product=campaign_product,
+        )
+
+    def _frozen_campaign_identity(
+        self,
+        *,
+        product: Product = Product.RONDO_LOCAL,
+        historical: bool = False,
+    ) -> CampaignIdentity:
+        # Reuse the registered campaign-derived fixture so publisher tests bind
+        # a real slot plan rather than trusting a stand-alone context object.
+        from tests.test_fair_comparison import _CampaignFixture
+
+        identity = _CampaignFixture.v6() if historical else _CampaignFixture.v7(
+            comparison_overrides={"product": product.value}
+        )
+        provider = self._live_result("campaign-identity-fixture").prepared.spec.provider
+        return replace(
+            identity,
+            selected_profile={
+                **provider.to_public_dict(),
+                "frozen_codex_model_catalog_source_commit": "a" * 40,
+                "frozen_codex_model_catalog_sha256": "b" * 64,
+                "max_guardian_logical_requests": 3,
+            },
+        )
+
+    @staticmethod
+    def _frozen_campaign_slot(
+        identity: CampaignIdentity,
+        *,
+        side: Side,
+        attempt: int = 1,
+        offset: int = 0,
+    ) -> CampaignSlotPlan:
+        matches = tuple(
+            slot
+            for slot in identity.slots
+            if slot.side is side and slot.attempt == attempt
+        )
+        return matches[offset]
+
+    @staticmethod
+    def _frozen_campaign_publication(
+        identity: CampaignIdentity,
+        slot: CampaignSlotPlan,
+        *,
+        exit_code: int = 0,
+        campaign_product: Product | None = None,
+    ) -> CampaignPublicationContext:
+        return CampaignPublicationContext(
+            campaign_id=identity.campaign_id,
+            campaign_lock_sha256=identity.lock_sha256,
+            campaign_slot_id=slot.slot_id,
+            campaign_round_id=slot.round_id or slot.kind,
+            campaign_attempt=slot.attempt,
+            campaign_schema_version=identity.schema_version,
+            taskset_sha256=identity.taskset_sha256,
+            canary_catalog_sha256=identity.canary_catalog_sha256,
+            side=slot.side,
+            metrics={
+                "wall_seconds": 1.0,
+                "cpu_user_seconds": 0.1,
+                "cpu_system_seconds": 0.1,
+                "peak_rss_bytes": 1024,
+                "exit_code": exit_code,
+            },
+            selected_profile=identity.selected_profile,
+            campaign_product=(
+                campaign_product
+                if identity.enforces_fair_comparison
+                else None
+            ),
+            provider_upstream_timeout_seconds=identity.upstream_timeout_seconds,
         )
 
     @staticmethod
@@ -747,7 +824,9 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
         self.assertEqual(summary["config"]["bwrap_source_tree_sha256"], "2" * 64)
 
     def test_campaign_publication_uses_campaign_identity_not_pair_fields(self) -> None:
-        run_id = "20260811-210000001-tb-codex-r1"
+        identity = self._frozen_campaign_identity(historical=True)
+        slot = self._frozen_campaign_slot(identity, side=Side.CODEX)
+        run_id = slot.run_id
         metadata = self.root / "work" / "campaign-api-metadata.json"
         self._write_metadata(metadata, "main", "guardian", "main")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
@@ -768,33 +847,11 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
             live_result=live_result,
             parsed=parsed,
             metadata_path=metadata,
-            publication=CampaignPublicationContext(
-                campaign_id="p2-b7-canary-baseline-v1",
-                campaign_lock_sha256="7" * 64,
-                campaign_slot_id="base:ab-codex-1:terminal-bench/fix-git:a1",
-                campaign_round_id="ab-codex-1",
-                campaign_attempt=1,
-                campaign_schema_version=1,
-                taskset_sha256="8" * 64,
-                canary_catalog_sha256="9" * 64,
-                side=Side.CODEX,
-                metrics={
-                    "wall_seconds": 1.0,
-                    "cpu_user_seconds": 0.1,
-                    "cpu_system_seconds": 0.1,
-                    "peak_rss_bytes": 1024,
-                    "exit_code": 0,
-                },
-                selected_profile={
-                    **provider.to_public_dict(),
-                    "frozen_codex_model_catalog_source_commit": "a" * 40,
-                    "frozen_codex_model_catalog_sha256": "b" * 64,
-                    "max_guardian_logical_requests": 3,
-                },
-            ),
+            publication=self._frozen_campaign_publication(identity, slot),
+            campaign_identity=identity,
         )
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
-        self.assertEqual(record["config"]["campaign_id"], "p2-b7-canary-baseline-v1")
+        self.assertEqual(record["config"]["campaign_id"], identity.campaign_id)
         self.assertEqual(record["config"]["campaign_attempt"], 1)
         self.assertNotIn("pair_id", record["config"])
         self.assertTrue(target.is_dir())
@@ -1136,10 +1193,14 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
         )
 
     def test_campaign_failure_publication_accepts_attempt_three_and_four(self) -> None:
+        identity = self._frozen_campaign_identity(historical=True)
         for attempt in (3, 4):
             with self.subTest(attempt=attempt), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                run_id = f"20260812-32000008{attempt}-tb-rondo-r{attempt}"
+                slot = self._frozen_campaign_slot(
+                    identity, side=Side.RONDO, attempt=attempt
+                )
+                run_id = slot.run_id
                 paths = RepoPaths(root, root)
                 writer = ArtifactWriter(paths, run_id, results_worktree_root=root).start()
                 live_result = self._live_result(run_id)
@@ -1156,12 +1217,13 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
                     metadata_path=root / "missing-api-metadata.json",
                     outcome=RunOutcome.INFRA_FAILED,
                     failure_stage="docker",
-                    publication=self._campaign_publication(
-                        side=Side.RONDO,
+                    publication=self._frozen_campaign_publication(
+                        identity,
+                        slot,
                         exit_code=70,
-                        attempt=attempt,
                     ),
                     secrets=("never-persist",),
+                    campaign_identity=identity,
                 )
                 record = json.loads((root / "eval/results/runs.jsonl").read_text())
                 self.assertEqual(record["config"]["campaign_attempt"], attempt)
@@ -1446,7 +1508,9 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
             )
 
     def test_completed_campaign_rondo_without_guardian_is_published(self) -> None:
-        run_id = "20260811-230000001-tb-rondo-r1"
+        identity = self._frozen_campaign_identity(historical=True)
+        slot = self._frozen_campaign_slot(identity, side=Side.RONDO)
+        run_id = slot.run_id
         live_result = self._live_result(run_id)
         object.__setattr__(live_result.prepared.spec, "side", Side.RONDO)
         object.__setattr__(
@@ -1472,30 +1536,8 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
             live_result=live_result,
             parsed=parsed,
             metadata_path=metadata,
-            publication=CampaignPublicationContext(
-                campaign_id="p2-b7-canary-baseline-v3",
-                campaign_lock_sha256="7" * 64,
-                campaign_slot_id="base:aa-rondo-1:terminal-bench/fix-git:a1",
-                campaign_round_id="aa-rondo-1",
-                campaign_attempt=1,
-                campaign_schema_version=3,
-                taskset_sha256="8" * 64,
-                canary_catalog_sha256="9" * 64,
-                side=Side.RONDO,
-                metrics={
-                    "wall_seconds": 1.0,
-                    "cpu_user_seconds": 0.1,
-                    "cpu_system_seconds": 0.1,
-                    "peak_rss_bytes": 1024,
-                    "exit_code": 0,
-                },
-                selected_profile={
-                    **provider.to_public_dict(),
-                    "frozen_codex_model_catalog_source_commit": "a" * 40,
-                    "frozen_codex_model_catalog_sha256": "b" * 64,
-                    "max_guardian_logical_requests": 3,
-                },
-            ),
+            publication=self._frozen_campaign_publication(identity, slot),
+            campaign_identity=identity,
         )
 
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
@@ -2470,7 +2512,11 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
     def _publish(
         self, *, side: Side, product: Product | None
     ) -> tuple[dict, dict]:
-        run_id = f"20260814-010000001-tb-{side.value}-r1"
+        identity = self._frozen_campaign_identity(
+            product=product if product is not None else Product.RONDO_LOCAL
+        )
+        slot = self._frozen_campaign_slot(identity, side=side)
+        run_id = slot.run_id
         metadata = self.root / "work" / f"{side.value}-api-metadata.json"
         self._write_metadata(metadata, "main", "main", "main")
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
@@ -2484,12 +2530,12 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             live_result=self._product_live_result(run_id, side=side, product=product),
             parsed=parsed,
             metadata_path=metadata,
-            publication=self._campaign_publication(
-                side=side,
-                campaign_product=(
-                    product if product is not None else Product.RONDO_LOCAL
-                ),
+            publication=self._frozen_campaign_publication(
+                identity,
+                slot,
+                campaign_product=identity.product,
             ),
+            campaign_identity=identity,
         )
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         summary = json.loads(
@@ -2553,12 +2599,21 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             ((Side.RONDO, Product.RONDO_MULTI), (Side.CODEX, None)), start=7
         ):
             with self.subTest(side=side.value):
-                run_id = f"20260814-01000000{number}-tb-{side.value}-r1"
+                identity = self._frozen_campaign_identity(
+                    product=(
+                        product if product is not None else Product.RONDO_LOCAL
+                    )
+                )
+                slot = self._frozen_campaign_slot(identity, side=side)
+                run_id = slot.run_id
                 metadata = self.root / "work" / f"missing-{side.value}.json"
                 self._write_metadata(metadata, "main", "main", "main")
-                publication = self._campaign_publication(
-                    side=side,
-                    campaign_schema_version=7,
+                publication = replace(
+                    self._frozen_campaign_publication(
+                        identity,
+                        slot,
+                        campaign_product=identity.product,
+                    ),
                     campaign_product=None,
                 )
                 with (
@@ -2578,6 +2633,56 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
                         parsed=parsed,
                         metadata_path=metadata,
                         publication=publication,
+                        campaign_identity=identity,
+                    )
+                finalize.assert_not_called()
+                self.assertFalse(
+                    (self.root / "eval-data/runs" / run_id).exists()
+                )
+                self.assertFalse(
+                    (self.root / "eval/results/runs.jsonl").exists()
+                )
+
+    def test_publication_binds_both_sides_to_the_frozen_campaign_product(
+        self,
+    ) -> None:
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        identity = self._frozen_campaign_identity(product=Product.RONDO_LOCAL)
+        cases = (
+            (Side.RONDO, Product.RONDO_MULTI),
+            (Side.CODEX, None),
+        )
+        for side, run_product in cases:
+            with self.subTest(side=side.value):
+                slot = self._frozen_campaign_slot(identity, side=side)
+                run_id = slot.run_id
+                metadata = self.root / "work" / f"wrong-lock-{side.value}.json"
+                self._write_metadata(metadata, "main", "main", "main")
+                publication = self._frozen_campaign_publication(
+                    identity,
+                    slot,
+                    campaign_product=Product.RONDO_MULTI,
+                )
+                with (
+                    patch.object(ArtifactWriter, "finalize") as finalize,
+                    self.assertRaisesRegex(
+                        HarborResultError, "frozen campaign identity"
+                    ),
+                ):
+                    publish_terminal_bench_result(
+                        RepoPaths(self.root, self.root),
+                        results_worktree_root=self.root,
+                        run_id=run_id,
+                        side=side,
+                        git_commit="e" * 40,
+                        eval_harness_commit="f" * 40,
+                        live_result=self._product_live_result(
+                            run_id, side=side, product=run_product
+                        ),
+                        parsed=parsed,
+                        metadata_path=metadata,
+                        publication=publication,
+                        campaign_identity=identity,
                     )
                 finalize.assert_not_called()
                 self.assertFalse(
@@ -2618,8 +2723,14 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             (6, Side.CODEX, None),
         )
         summaries: dict[str, dict] = {}
-        for number, side, product in cases:
-            run_id = f"20260814-01000000{number}-tb-{side.value}-r1"
+        for offset, (_number, side, product) in enumerate(cases):
+            identity = self._frozen_campaign_identity(
+                product=product if product is not None else Product.RONDO_LOCAL
+            )
+            slot = self._frozen_campaign_slot(
+                identity, side=side, offset=offset
+            )
+            run_id = slot.run_id
             live_result = self._product_live_result(
                 run_id, side=side, product=product
             )
@@ -2642,14 +2753,14 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
                 metadata_path=self.root / "missing-api-metadata.json",
                 outcome=RunOutcome.INFRA_FAILED,
                 failure_stage="runtime",
-                publication=self._campaign_publication(
-                    side=side,
+                publication=self._frozen_campaign_publication(
+                    identity,
+                    slot,
                     exit_code=70,
-                    campaign_product=(
-                        product if product is not None else Product.RONDO_LOCAL
-                    ),
+                    campaign_product=identity.product,
                 ),
                 secrets=(),
+                campaign_identity=identity,
             )
             summaries[run_id] = json.loads(
                 (
@@ -2679,13 +2790,13 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
                 record["config"]["campaign_product"],
                 "rondo-local" if record["side"] == "codex" else record["product"],
             )
-        multi = records["20260814-010000005-tb-rondo-r1"]
+        multi = next(record for record in records.values() if record.get("product") == "rondo-multi")
         self.assertEqual(multi["product"], "rondo-multi")
         self.assertIsNone(multi["config"]["auto_review_config"]["model"])
         self.assertIsNone(
             multi["config"]["auto_review_config"]["evidence_dir"]
         )
-        codex = records["20260814-010000006-tb-codex-r1"]
+        codex = next(record for record in records.values() if record["side"] == "codex")
         self.assertNotIn("product", codex)
         self.assertNotIn("auto_review_config", codex["config"])
 
@@ -2698,8 +2809,14 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             (12, Side.CODEX, None),
         )
         paths = RepoPaths(self.root, self.root)
-        for number, side, product in cases:
-            run_id = f"20260814-0100000{number}-tb-{side.value}-r1"
+        for offset, (number, side, product) in enumerate(cases):
+            identity = self._frozen_campaign_identity(
+                product=product if product is not None else Product.RONDO_LOCAL
+            )
+            slot = self._frozen_campaign_slot(
+                identity, side=side, offset=offset
+            )
+            run_id = slot.run_id
             live_result = self._product_live_result(
                 run_id, side=side, product=product
             )
@@ -2727,14 +2844,14 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
                     metadata_path=self.root / "missing-api-metadata.json",
                     outcome=RunOutcome.INFRA_FAILED,
                     failure_stage="runtime",
-                    publication=self._campaign_publication(
-                        side=side,
+                    publication=self._frozen_campaign_publication(
+                        identity,
+                        slot,
                         exit_code=70,
-                        campaign_product=(
-                            product if product is not None else Product.RONDO_LOCAL
-                        ),
+                        campaign_product=identity.product,
                     ),
                     secrets=(),
+                    campaign_identity=identity,
                 )
             self.assertTrue(writer.journal.is_file())
             self.assertTrue((writer.target / "run-summary.json").is_file())
