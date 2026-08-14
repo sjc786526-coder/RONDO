@@ -20,7 +20,7 @@
 | P0 共享地基 | S1 审批模型覆盖与 S2 `E_final` 证据捕获已完成，开关默认关闭。S1 只覆盖模型与 effort，不覆盖 provider。 |
 | 测试基线 | Plan 004 完成对旧 81 项失败的分批整改后，最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行 14,092 项：14,060 通过、31 失败、1 超时，Nextest 另列 23 项 ignored；P0 仍以定向验收收口。此后未重跑全 workspace，不能把该历史快照表述为当前全绿或当前失败复现。 |
 | P1 / M1 | B1、B2、B3 与 M1 已完成；冻结 Codex 与 RONDO 已在同一 TB 2.1 任务上完成真实端到端并归档。 |
-| P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。E-B8 公平比较设施已闭合（campaign schema v7），只做了离线验收，未跑新 campaign；E-A（A1—A7）随方向 1 一并挂起，不再作为交付项。 |
+| P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。E-B8 公平比较设施已闭合（campaign schema v7），已通过 pure/fake/loopback 与无 API synthetic Docker 全 catalog 验收；尚无正式 v7 identity，也未跑新 campaign。E-A（A1—A7）随方向 1 一并挂起，不再作为交付项。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
@@ -32,22 +32,8 @@
 
 ## 2. 下一工作包与顺序
 
-推进顺序为 **工作包 1 → 2 → 3**。其中只有一条是**硬依赖**：3c 的付费同题验收不得早于工作包 1 闭合。
-其余为建议顺序 —— 工作包 1 与 2 都会改共享 eval 合同，串行是为了避免两套 schema 同期漂移。
-
-### 工作包 1（已完成）：公平比较设施闭合（无真实 API）
-
-六项设施合同已全部落地为 campaign schema **v7** 的机械约束（catalog 对称与双来源 provenance、
-由 stub receipt 预冻结并对第一侧同样生效的请求硬门、与 campaign 事实互相绑定的运行条件、按任务交错调度、
-三层 assessment 与双向条件加跑入聚合、pilot 预冻结的奇数重复合同、产品身份窄入口）。
-receipt 由 `just eval-b7-preflight-receipts` 驱动两侧冻结二进制在本地 stub 上产出，付费 worker 启动时
-一次性校验全部任务的 receipt，因此硬门在 wire canary 之前生效。唯一的 successor 生成入口只能产出 v7，
-且不继承任何 v1—v22 continuation 与历史 prior，cap 必须单独授权传入；v1—v6 为冻结历史、行为不变。
-完成证据见 `doc/WBS-COMPLETED.md`，实现细节见 `doc/WBS/eval-benchmark.md`。
-
-**闭合的是设施，不是结论**：本工作包未跑新 campaign，也未产生任何可归因的能力比较结果。
-新的 B7 campaign 合同仍需单独冻结与授权，不得复用 v1—v22 的任何 ID。
-它是**设施交付物，不是里程碑**：旧 M2 已按 §5 拆解，公平比较设施不再充当解锁其他方向的总闸门。
+推进顺序为 **工作包 2 → 3**。工作包 1 已完成并归档到 `doc/WBS-COMPLETED.md`，不再属于“下一工作包”，
+也不再作为任何方向的待解除前置。工作包 2 完成 Multi 产品基线后进入工作包 3，届时三条线按下述范围并行。
 
 ### 工作包 2（当前）：RONDO Multi 产品基线建立（`multidev/` bootstrap）
 
@@ -66,8 +52,8 @@ receipt 由 `just eval-b7-preflight-receipts` 驱动两侧冻结二进制在本�
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
 - **3b RONDO Local**：先以 4k model-backed + 配置切换收口 Local M3，再由 L5a 生成冻结教师标签，
   然后 L3/L4 出未微调 baseline 与指标口径，之后 L5b/L6，最后 Local M4。
-- **3c RONDO Multi**：推进方向 3 的功能路线。其**付费同题退化验收**以工作包 1 闭合为硬前置；
-  在那之前 Multi 只做离线验证与功能正确性，不跑付费对比，也不得对外表述“未见退化”。
+- **3c RONDO Multi**：推进方向 3 的功能路线。付费同题退化验收所需的公平比较设施前置已经具备；
+  实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得真实 API 授权，不得用未运行或无效比较表述“未见退化”。
 
 三条线的代码与文档工作真正并行；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源门禁全局串行。
 
@@ -88,7 +74,7 @@ receipt 由 `just eval-b7-preflight-receipts` 驱动两侧冻结二进制在本�
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | model-free/静态前置完成 | 无外部阻塞；4k model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
-| 3 | 共享可信证据链的多智能体协作 | Multi | 研究完成，产品基线未建立 | 无外部阻塞；付费同题验收不早于工作包 1 闭合 |
+| 3 | 共享可信证据链的多智能体协作 | Multi | 研究完成，产品基线未建立 | 无外部阻塞；D1 决定首个增量，真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），
   而 Multi 的首个增量还待定（D1），不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
@@ -176,7 +162,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
 （设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。
-唯一必须保留的依赖是：Multi 的付费退化验收仍然依赖工作包 1 闭合（§2 工作包 3c）。
+工作包 1 已闭合，Multi 的付费退化验收不再有跨工作包前置，只保留具体运行时的合同冻结与真实 API 授权门。
 
 ### 公平比较设施保留的机械判据
 
@@ -238,7 +224,7 @@ v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两�
 - **D2 Multi 价值命题的最终措辞** —— 现有版本（见 `doc/WBS/multi-agent-trusted-evidence.md`）是初步框架，
   需在读完调研报告后确认或修正，特别是“朴素自然语言基线作对照组”是否采纳为设计约束。
 
-两项都不阻塞工作包 1、工作包 2 与 3a/3b；它们只使 3c 暂时停在环境就绪。
+两项都不阻塞工作包 2 与 3a/3b；它们只使 3c 暂时停在环境就绪。
 
 ## 9. 子规划索引
 

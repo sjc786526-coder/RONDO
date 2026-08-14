@@ -542,6 +542,15 @@ standard/Lite 形态均补回归。
      `FairComparisonError.reasons` 改为最具体在前，409 现在直接返回 `task_independent_<partition>_differs`。
   同时修正两处措辞不实：`stub_preflight()` 声称"carries a transport"（`SymmetryPreflight` 无 transport 字段），
   以及 `preflight_cli` 输出里名义上的 `upstream_transport` 字段。
-- **验收**：`just eval-lock` 通过；`just eval-test` 565 项全通过（`test_fair_comparison` 共 77 项，
-  含两轮修正的入口级回归与全部审查复现用例）。全程无真实 API、无 Docker、无真实模型，未创建新 campaign identity。
-  设施闭合不产生任何可归因的能力比较结论。
+- **后续独立审查闭合**：harness commit 改为排除 identity-only commit 的已提交代码投影，并在 producer/worker 的
+  Docker、Oracle 与 wire 之前校验；stub 强制真实 main → Guardian → main，receipt 必须覆盖两类角色；receipt
+  批次先全量验证再发布，同字节幂等重试、异字节冲突拒绝。真实 Responses Lite `additional_tools` 与随后
+  developer/system 前缀进入投影 v2，任务正文仍被排除；identity lock 使用完整 Git 路径历史拒绝 addition 后改写、
+  恢复及 TREESAME merge 隐藏；receipt schema v2 保存双侧六段完整请求 digest，不保存正文、不要求跨侧相同。
+- **最终验收**：`just eval-lock` 通过；focused `test_fair_comparison` 87/87、完整 `just eval-test` 578/578，均
+  0 fail、0 skip。synthetic v7 identity 下，冻结双侧的 fix-git 2/2 side runs 与完整 catalog 10/10 tasks、
+  20/20 side runs 全部通过；60/60 请求形成非空 Lite 稳定投影、六段 provenance 与 gate registration。
+  全程真实 API 请求 0、费用 0，未 pull/build 镜像，最终 Docker 占用与基线一致、临时对象已清理。第五次独立验收
+  结论为设施实现通过，相关实现与验收提交已合入 `main@ce316a6`。
+- **边界**：没有创建正式 v7 identity，未执行正式 identity → producer CLI → worker CLI、Oracle、wire canary、
+  paid task、pilot/repeats 或能力比较；这些仍需各自冻结合同与单独授权。设施闭合不产生任何可归因的能力比较结论。
