@@ -600,3 +600,16 @@ standard/Lite 形态均补回归。
   Docker、no-API 双侧、真实 API 或能力验收，也没有产生正式 campaign identity、run ID 或结果行。
   看门狗改根后，历史 Local/Codex bundle 的 `binary_freeze verify*` 会因 build-command 里记录的旧 wrapper 路径
   而不再通过（按 WBS §4.4「拒绝旧路径」的要求，属预期）；冻结 bundle 字节与 `eval/locks/*.json` 均未改动。
+
+### 2026-08-14 Plan 022 RONDO Multi 产品基线最终独立验收
+
+- **结论**：第四次独立验收确认上一轮技术问题全部闭环，未发现新的实现级阻断；Plan 022 的实现与测试合同通过，
+  文档收口后具备合并条件。前一节保留首次未通过批次的形成时点事实，不改写其历史结论。
+- **最终闭环**：campaign publication 在落盘前绑定真实冻结 identity；campaign、continuation、result digest 与
+  aggregate 共用完整 durable record/private-summary reader；缺失或篡改私有摘要与 bool 冒充数字均 fail-closed。
+- **验收证据**：执行者完整无 API eval 610/610、`eval-lock` 85 packages、两侧 watchdog helper 各 9/9；独立验收
+  复跑直接相关模块 234/234，并确认历史 durable index 244/244 可读。未运行 Cargo、Docker、真实 no-API、API、
+  模型或付费测评；Multi 仍无冻结 runtime bundle，不据此主张功能或能力结论。
+- **复制合同**：用户已采纳决策 011。非 `multidev/**` 差异通过 `git diff --check`；`multidev/` 的 6,011 个
+  tracked 条目在相对路径、Git type/mode/blob 与工作树字节上逐项等同 `mydev/`，只对这份精确复制内容保留
+  上游尾空格窄例外。

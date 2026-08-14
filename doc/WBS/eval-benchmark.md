@@ -76,7 +76,7 @@ assessment 语义一律不变，新规则只在 v7 生效。
    该判据**只适用于本设施自身的等条件 A/A、A/B 比较**，Local M3/M4 与 Multi 退化验收都不继承。
 7. **产品无关**：`Product`（`rondo-local` / `rondo-multi`）与比较侧 `side` 正交，v7 lock 显式记录产品身份；
    `codex` 不是产品取值。Plan 022 任务分支已创建 `multidev/`，并补齐 manifest、campaign、no-API、durable
-   result 与终态恢复的产品/来源交叉校验；第三次独立复验修复已落地，当前待再次独立复审；尚无 Multi runtime bundle，也未执行真实
+   result 与终态恢复的产品/来源交叉校验；产品基线已通过独立验收、当前待合并；尚无 Multi runtime bundle，也未执行真实
    no-API 或付费比较。
 
 闭合的是设施，不是结论：本工作包只跑 pure/fake/loopback/stub 定向门禁，未调用真实 API、未跑 Docker、

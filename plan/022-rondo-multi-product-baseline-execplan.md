@@ -37,7 +37,7 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
       一次 Multi `codex-cli` 轻量带锁构建通过；不重跑 Rust 全 workspace。
 - [ ] `doc/WBS.md`、`doc/WBS/multi-agent-trusted-evidence.md`、`doc/WBS-COMPLETED.md`、
       `doc/development-environment.md` 与精炼 `agent_log/` 只在各自职责内同步最终事实；`README.md` 无需重复历史。
-- [ ] 所有非 `multidev/**` 手写差异通过 `git diff --check`；`multidev/` 仅在相对路径、Git type/mode、
+- [ ] 所有非 `multidev/**` 差异通过 `git diff --check`；`multidev/` 仅在相对路径、Git type/mode、
       blob ID 与工作树字节逐项等同 `mydev/` 时豁免尾空格诊断。不得修改复制内容或用 `.gitattributes`
       掩盖诊断；没有密钥、ignored 本机资产、意外生成物或历史结果改动。
 
@@ -162,11 +162,11 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 ### 当前工作
 
-第三次独立复验修复与复审准入门禁已完成；提交当前任务分支后停止，等待再次独立复审。
+第四次独立验收已确认实现与测试合同通过；当前等待合并交付，不再修改实现或重跑重型测试。
 
 ### 本任务剩余步骤
 
-无实施步骤；只剩提交当前修复并等待再次独立复审，不在本轮执行者权限内。
+无实施或复审步骤；只剩把验收通过的任务分支合并交付。
 
 ### 阻塞项
 
@@ -179,6 +179,8 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 - 第三次独立复验的 B1/B2、M1 与文档修复已落地；四个直接受影响模块 234/234，完整 eval 无 API
   套件 610/610（0 fail、0 skip），`just eval-lock` 解析 85 packages，两侧 watchdog helper 各 9/9。
+- 第四次独立验收对同四个模块复跑 234/234，并以额外 producer/durable 变异探针确认上一轮技术问题全部闭环；
+  结论为实现与测试合同通过、文档收口后可合并。
 - 本轮未修改 Rust 产品源码，按复审条件未重复 Cargo 构建。首个实现批次已有的根看门狗 Multi
   `codex-core` 80/80 与 `codex-cli 0.147.0` 轻量构建证据保留，但不冒充本轮新运行。
 - `git diff --check`：非 `multidev/**` 差异干净。决策 011 已采纳的 `multidev/` 例外 —— 6,011 个文件全为新增行，其中 419 个上游
