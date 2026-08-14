@@ -366,6 +366,8 @@ def _parse_evidence_source(value: Any) -> None:
     if not isinstance(value, dict) or set(value) != {
         "relative_path",
         "sha256",
+        "meta_sha256",
+        "review_id",
         "request_shape",
         "guardian_source_baseline",
         "guardian_source_commit",
@@ -378,6 +380,8 @@ def _parse_evidence_source(value: Any) -> None:
         or not relative.endswith("/E_final.json")
         or ".." in Path(relative).parts
         or value["request_shape"] not in {"standard", "responses_lite"}
+        or not isinstance(value["review_id"], str)
+        or not value["review_id"]
         or not isinstance(value["guardian_source_baseline"], str)
         or not value["guardian_source_baseline"]
         or not isinstance(value["guardian_source_commit"], str)
@@ -385,6 +389,7 @@ def _parse_evidence_source(value: Any) -> None:
     ):
         raise EvidenceLockError("model-backed evidence source is invalid")
     _require_sha256(value["sha256"], "E_final digest")
+    _require_sha256(value["meta_sha256"], "E_final meta digest")
 
 
 def _parse_cleanup(value: Any) -> dict[str, bool]:

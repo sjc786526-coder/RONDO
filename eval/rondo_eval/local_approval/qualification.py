@@ -51,14 +51,22 @@ from .launcher import (
     serve_config_sha256,
     serve_environment,
 )
+from ..terminal_bench.live import (
+    TerminalBenchRunError,
+    _read_safe_evidence_file as read_production_evidence_file,
+    _validate_guardian_meta as validate_production_guardian_meta,
+)
 
 
 _PRIVATE_ROOT = "eval-data/local-approval"
+SELECTOR_RELATIVE_PATH = "eval/locks/local-approval-qualification-evidence-v1.json"
+_RUN_LEDGER_RELATIVE_PATH = "eval/results/runs.jsonl"
 _READY_TIMEOUT_SECONDS = 420.0
 _READY_POLL_SECONDS = 0.25
 _STOP_TIMEOUT_SECONDS = 20.0
 _PORT_RELEASE_TIMEOUT_SECONDS = 20.0
 _VRAM_POLL_SECONDS = 0.2
+_SAMPLER_JOIN_SECONDS = 5.0
 _SLOT_POLL_SECONDS = 0.015
 _MAX_EVIDENCE_INPUT_BYTES = 4_194_304
 _NVIDIA_SMI_CANDIDATES = (
@@ -101,6 +109,8 @@ class EvidenceSource:
     path: Path
     relative_path: str
     sha256: str
+    meta_sha256: str
+    review_id: str
     guardian_source_baseline: str
     guardian_source_commit: str
 
@@ -167,8 +177,7 @@ def run_qualification(
     model_backed.require_qualification_contract(config, settings)
     if model_backed.evidence_exists(config):
         raise QualificationError("evidence_already_exists")
-    source = _select_evidence_source(config, evidence_relative_path)
-    payload = _static_payload(source)
+    source, payload = _select_evidence_source(config, evidence_relative_path)
     model = resolve_model(config, settings)
 
     watchdog = _lease(watchdog_factory)
@@ -191,10 +200,9 @@ def run_qualification(
     process: subprocess.Popen[Any] | None = None
     identity = None
     decision_error: LocalApprovalError | None = None
-    peak = _PeakSampler(sampler, baseline_vram)
+    peak: _PeakSampler | None = None
     try:
         _require_watchdog(watchdog)
-        peak.start()
         descriptor = os.open(
             log_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
         )
@@ -207,6 +215,9 @@ def run_qualification(
             )
         finally:
             os.close(descriptor)
+        # Sampling covers the whole window from load to the end of the decision.
+        peak = _PeakSampler(sampler, baseline_vram, process.pid)
+        peak.start()
         identity = identity_publisher(
             config,
             pid=process.pid,
@@ -239,11 +250,12 @@ def run_qualification(
         except LocalApprovalError as exc:
             decision_error = exc
         _require_watchdog(watchdog)
+        # Closes the exclusivity window on the far side of the real request.
         peak.observe()
-        peak.stop()
-        peak_vram = peak.peak_bytes
+        peak_vram = peak.finalize()
     finally:
-        peak.stop()
+        if peak is not None:
+            peak.stop()
         # llama.cpp b10333 writes its load log through a fully buffered stdout,
         # so the offload facts are only complete once the process has exited.
         cleanup, log_text = _teardown(
@@ -283,6 +295,8 @@ def run_qualification(
         "evidence_source": {
             "relative_path": source.relative_path,
             "sha256": source.sha256,
+            "meta_sha256": source.meta_sha256,
+            "review_id": source.review_id,
             "request_shape": payload.policy_identity.request_shape,
             "guardian_source_baseline": source.guardian_source_baseline,
             "guardian_source_commit": source.guardian_source_commit,
@@ -314,11 +328,21 @@ def run_qualification(
 
 
 class _PeakSampler:
-    """Sample device VRAM in the background and keep only the peak value."""
+    """Sample device VRAM and GPU exclusivity across the whole model window.
 
-    def __init__(self, sampler: Any, baseline: int) -> None:
+    Device-level attribution is only meaningful if every sample succeeded and
+    nothing else used the GPU for the entire window, so the first sampling
+    error, the first foreign compute process and a thread that will not stop are
+    all recorded and re-raised at `finalize()`.  A peak that happens to look
+    plausible never compensates for a gap in the window.
+    """
+
+    def __init__(self, sampler: Any, baseline: int, server_pid: int) -> None:
         self._sampler = sampler
+        self._server_pid = server_pid
         self.peak_bytes = baseline
+        self.samples = 0
+        self.error: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -327,12 +351,25 @@ class _PeakSampler:
         self._thread.start()
 
     def observe(self) -> None:
+        """Take one sample; record the first failure instead of ignoring it."""
+
         try:
             used = self._sampler.used_bytes()
+            foreign = _foreign_compute_pids(self._sampler, self._server_pid)
         except Exception:
+            self._fail("gpu_sampling_failed")
             return
+        if foreign:
+            self._fail("gpu_not_exclusive")
+            return
+        self.samples += 1
         if used > self.peak_bytes:
             self.peak_bytes = used
+
+    def _fail(self, code: str) -> None:
+        if self.error is None:
+            self.error = code
+        self._stop.set()
 
     def _run(self) -> None:
         while True:
@@ -342,9 +379,23 @@ class _PeakSampler:
 
     def stop(self) -> None:
         self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=5)
-            self._thread = None
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=_SAMPLER_JOIN_SECONDS)
+            if thread.is_alive():
+                self._fail("gpu_sampling_thread_stuck")
+            else:
+                self._thread = None
+
+    def finalize(self) -> int:
+        """Return the peak only when the whole window is provably intact."""
+
+        self.stop()
+        if self.error is not None:
+            raise QualificationError(self.error)
+        if self.samples <= 0:
+            raise QualificationError("gpu_sampling_failed")
+        return self.peak_bytes
 
 
 def _lease(
@@ -419,61 +470,185 @@ def _prepare_private_directory(config: RuntimeConfig) -> Path:
     return private_root
 
 
-def _select_evidence_source(config: RuntimeConfig, relative_path: str) -> EvidenceSource:
-    """Bind one frozen archived `E_final` with verified production metadata."""
+def _load_selector(config: RuntimeConfig) -> dict[str, Any]:
+    """Load the tracked lock that pre-binds the single qualification `E_final`."""
 
-    candidate = Path(relative_path)
-    if (
-        candidate.is_absolute()
-        or ".." in candidate.parts
-        or not relative_path.startswith("eval-data/runs/")
-        or not relative_path.endswith("/E_final.json")
-    ):
-        raise QualificationError("evidence_source_path_invalid")
-    path = config.paths.common_root / candidate
+    path = config.paths.worktree_root / SELECTOR_RELATIVE_PATH
     if path.is_symlink() or not path.is_file():
-        raise QualificationError("evidence_source_missing")
-    if path.stat().st_size > _MAX_EVIDENCE_INPUT_BYTES:
-        raise QualificationError("evidence_source_too_large")
-    raw = path.read_bytes()
-    meta_path = path.parent / "meta.json"
-    if meta_path.is_symlink() or not meta_path.is_file():
-        raise QualificationError("evidence_meta_missing")
+        raise QualificationError("evidence_selector_missing")
     try:
-        meta = json.loads(meta_path.read_bytes())
+        value = json.loads(path.read_bytes())
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise QualificationError("evidence_meta_invalid") from exc
-    baseline = meta.get("guardian_source_baseline") if isinstance(meta, dict) else None
-    commit = meta.get("guardian_source_commit") if isinstance(meta, dict) else None
-    # A real archived Guardian evidence carries its production provenance; an
-    # arbitrary JSON file dropped into the runs namespace does not.
+        raise QualificationError("evidence_selector_invalid") from exc
+    expected = {
+        "schema_version",
+        "purpose",
+        "run_id",
+        "run_artifacts_relative_path",
+        "relative_path",
+        "review_id",
+        "e_final_sha256",
+        "e_final_size_bytes",
+        "meta_sha256",
+        "meta_size_bytes",
+        "guardian_source_baseline",
+        "guardian_source_commit",
+        "expected_guardian_model",
+        "expected_guardian_effort",
+        "request_shape",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise QualificationError("evidence_selector_invalid")
+    relative = value["relative_path"]
+    artifacts = value["run_artifacts_relative_path"]
+    parts = Path(relative).parts if isinstance(relative, str) else ()
     if (
-        not isinstance(meta, dict)
-        or meta.get("evidence") != "e_final"
-        or not isinstance(baseline, str)
-        or not baseline
-        or not isinstance(commit, str)
-        or re.fullmatch(r"[0-9a-f]{40}", commit) is None
-        or not isinstance(meta.get("review_id"), str)
-        or not isinstance(meta.get("terminal_status"), str)
-        or not meta.get("terminal_status")
-        or not isinstance(meta.get("token_usage"), dict)
+        value["schema_version"] != 1
+        or not isinstance(relative, str)
+        or not isinstance(artifacts, str)
+        or artifacts != f"eval-data/runs/{value['run_id']}"
+        or not relative.startswith(f"{artifacts}/guardian-evidence/")
+        or len(parts) < 3
+        or parts[-3] != "guardian-evidence"
+        or parts[-1] != "E_final.json"
+        or ".." in parts
+        or value["request_shape"] not in {"standard", "responses_lite"}
+        or not _is_hex64(value["e_final_sha256"])
+        or not _is_hex64(value["meta_sha256"])
+        or not _positive_int(value["e_final_size_bytes"])
+        or not _positive_int(value["meta_size_bytes"])
+        or value["e_final_size_bytes"] > _MAX_EVIDENCE_INPUT_BYTES
+        or not isinstance(value["review_id"], str)
+        or not value["review_id"]
+        or not isinstance(value["expected_guardian_model"], str)
+        or not value["expected_guardian_model"]
+        or not isinstance(value["expected_guardian_effort"], str)
+        or not value["expected_guardian_effort"]
     ):
-        raise QualificationError("evidence_meta_invalid")
-    return EvidenceSource(
-        path=path,
-        relative_path=relative_path,
-        sha256=hashlib.sha256(raw).hexdigest(),
-        guardian_source_baseline=baseline,
-        guardian_source_commit=commit,
+        raise QualificationError("evidence_selector_invalid")
+    return value
+
+
+def _positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _is_hex64(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _require_tracked_run_record(config: RuntimeConfig, selector: dict[str, Any]) -> None:
+    """Cross-check the expected Guardian identity against the tracked ledger.
+
+    The selector alone could be edited in one place; the public run ledger is an
+    independent tracked record of what that archived run actually used.
+    """
+
+    path = config.paths.worktree_root / _RUN_LEDGER_RELATIVE_PATH
+    if path.is_symlink() or not path.is_file():
+        raise QualificationError("evidence_run_record_missing")
+    record: dict[str, Any] | None = None
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            for line in stream:
+                if selector["run_id"] not in line:
+                    continue
+                candidate = json.loads(line)
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("run_id") == selector["run_id"]
+                ):
+                    record = candidate
+                    break
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("evidence_run_record_invalid") from exc
+    configuration = record.get("config") if isinstance(record, dict) else None
+    if (
+        record is None
+        or record.get("artifacts") != selector["run_artifacts_relative_path"]
+        or not isinstance(configuration, dict)
+        or configuration.get("effective_guardian_model")
+        != selector["expected_guardian_model"]
+        or configuration.get("guardian_effort") != selector["expected_guardian_effort"]
+        or record.get("outcome") != "completed"
+    ):
+        raise QualificationError("evidence_run_record_mismatch")
+
+
+def _select_evidence_source(
+    config: RuntimeConfig, relative_path: str
+) -> tuple[EvidenceSource, Any]:
+    """Bind the frozen archived `E_final` and build its payload from those bytes.
+
+    The path, both digests, the review id and the expected Guardian model/effort
+    all come from tracked records, and the production evidence reader and meta
+    validator do the file-level and provenance checks.  The payload is built from
+    the same bytes that were hashed, so nothing can change between the two.
+    """
+
+    selector = _load_selector(config)
+    if relative_path != selector["relative_path"]:
+        raise QualificationError("evidence_source_not_selected")
+    _require_tracked_run_record(config, selector)
+    root = config.paths.common_root
+    path = root / relative_path
+    meta_path = path.with_name("meta.json")
+    try:
+        before = os.lstat(path)
+        meta_before = os.lstat(meta_path)
+        e_final_bytes = read_production_evidence_file(root, path)
+        meta_bytes = read_production_evidence_file(root, meta_path)
+        after = os.lstat(path)
+        meta_after = os.lstat(meta_path)
+    except TerminalBenchRunError as exc:
+        raise QualificationError("evidence_source_unsafe") from exc
+    except OSError as exc:
+        raise QualificationError("evidence_source_missing") from exc
+    if _identity(before) != _identity(after) or _identity(meta_before) != _identity(meta_after):
+        raise QualificationError("evidence_source_changed_while_reading")
+    if (
+        len(e_final_bytes) != selector["e_final_size_bytes"]
+        or len(meta_bytes) != selector["meta_size_bytes"]
+        or hashlib.sha256(e_final_bytes).hexdigest() != selector["e_final_sha256"]
+        or hashlib.sha256(meta_bytes).hexdigest() != selector["meta_sha256"]
+    ):
+        raise QualificationError("evidence_source_digest_mismatch")
+    try:
+        meta = json.loads(meta_bytes.decode("utf-8"))
+        e_final = json.loads(e_final_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise QualificationError("evidence_source_unparsable") from exc
+    try:
+        validate_production_guardian_meta(
+            meta,
+            review_id=selector["review_id"],
+            expected_model=selector["expected_guardian_model"],
+            expected_effort=selector["expected_guardian_effort"],
+        )
+    except TerminalBenchRunError as exc:
+        raise QualificationError("evidence_meta_invalid") from exc
+    try:
+        payload = build_static_payload(e_final)
+    except Exception as exc:
+        raise QualificationError("evidence_source_unparsable") from exc
+    if payload.policy_identity.request_shape != selector["request_shape"]:
+        raise QualificationError("evidence_source_shape_mismatch")
+    return (
+        EvidenceSource(
+            path=path,
+            relative_path=relative_path,
+            sha256=hashlib.sha256(e_final_bytes).hexdigest(),
+            meta_sha256=hashlib.sha256(meta_bytes).hexdigest(),
+            review_id=selector["review_id"],
+            guardian_source_baseline=meta["guardian_source_baseline"],
+            guardian_source_commit=meta["guardian_source_commit"],
+        ),
+        payload,
     )
 
 
-def _static_payload(source: EvidenceSource) -> Any:
-    try:
-        return build_static_payload(json.loads(source.path.read_bytes()))
-    except Exception as exc:
-        raise QualificationError("evidence_source_unparsable") from exc
+def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
 
 
 def _await_ready(

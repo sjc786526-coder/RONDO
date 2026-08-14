@@ -1773,6 +1773,34 @@ class _FakeGpuSampler:
         return list(self._compute_pids)
 
 
+class _FailingGpuSampler:
+    """Samples cleanly at first, then breaks or reports a foreign GPU user."""
+
+    def __init__(self, *, fail_after: int | None = None, foreign_after: int | None = None):
+        self.calls = 0
+        self._fail_after = fail_after
+        self._foreign_after = foreign_after
+
+    def used_bytes(self) -> int:
+        self.calls += 1
+        if self._fail_after is not None and self.calls > self._fail_after:
+            raise OSError("nvidia-smi is unavailable")
+        return (1_000 + 1_000 * self.calls) * 1024 * 1024
+
+    def compute_process_pids(self) -> list[int]:
+        if self._foreign_after is not None and self.calls > self._foreign_after:
+            return [999_999]
+        return []
+
+
+class _NeverJoiningThread:
+    def join(self, timeout: float | None = None) -> None:
+        return None
+
+    def is_alive(self) -> bool:
+        return True
+
+
 class ModelBackedQualificationTests(unittest.TestCase):
     """Failure classes for the restricted 4k qualification and its evidence."""
 
@@ -1788,40 +1816,12 @@ class ModelBackedQualificationTests(unittest.TestCase):
         self.model.parent.mkdir(parents=True)
         self.model.write_bytes(b"GGUFqualification-fixture")
         self.model_sha256 = hashlib.sha256(self.model.read_bytes()).hexdigest()
+        self.run_id = "20260812-370000005-tb-rondo-r1"
+        self.review_id = "e2759768-bb16-4230-9f9a-7f4890af51c6"
         self.evidence_relative = (
-            "eval-data/runs/20260812-370000003-tb-rondo-r1/guardian-evidence/0001/E_final.json"
+            f"eval-data/runs/{self.run_id}/guardian-evidence/0003/E_final.json"
         )
-        source = self.root / self.evidence_relative
-        source.parent.mkdir(parents=True)
-        source.write_text(
-            json.dumps(
-                {
-                    "instructions": "frozen guardian policy fixture",
-                    "input": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "input_text", "text": "approve this fixture action?"}
-                            ],
-                        }
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-        (source.parent / "meta.json").write_text(
-            json.dumps(
-                {
-                    "review_id": "1e864a2a-2825-4f08-906d-e4a35cceb1f5",
-                    "guardian_source_baseline": "rust-v0.147.0",
-                    "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
-                    "evidence": "e_final",
-                    "terminal_status": "approved",
-                    "token_usage": {"input_tokens": 11},
-                }
-            ),
-            encoding="utf-8",
-        )
+        self.install_evidence_bundle()
         patcher = mock.patch.multiple(
             model_backed,
             MODEL_RELATIVE_PATH="eval-data/models/fixture.gguf",
@@ -1833,6 +1833,100 @@ class ModelBackedQualificationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def install_evidence_bundle(
+        self, *, e_final: bytes | None = None, meta: dict | None = None
+    ) -> None:
+        """Install a production-shaped bundle and the tracked records binding it."""
+
+        source = self.root / self.evidence_relative
+        if source.parent.is_symlink():
+            source.parent.unlink()
+        source.parent.mkdir(parents=True, exist_ok=True)
+        e_final_bytes = e_final if e_final is not None else json.dumps(
+            {
+                "instructions": "frozen guardian policy fixture",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "approve this fixture action?"}
+                        ],
+                    }
+                ],
+            }
+        ).encode("utf-8")
+        meta_bytes = json.dumps(
+            meta
+            if meta is not None
+            else {
+                "review_id": self.review_id,
+                "guardian_source_baseline": "rust-v0.147.0",
+                "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                "evidence": "e_final",
+                "decision": "approved",
+                "terminal_status": "approved",
+                "failure_reason": None,
+                "attempt_count": 1,
+                "duration_ms": 4029,
+                "guardian_thread_id": "019ff83b-f1b0-71e2-a97e-09bf33d6970a",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "low",
+                "token_usage": {
+                    "input_tokens": 11616,
+                    "cached_input_tokens": 9984,
+                    "cache_write_input_tokens": 0,
+                    "output_tokens": 60,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": 11676,
+                },
+                "time_to_first_token_ms": 3182,
+            }
+        ).encode("utf-8")
+        source.write_bytes(e_final_bytes)
+        (source.parent / "meta.json").write_bytes(meta_bytes)
+
+        selector = self.root / qualification.SELECTOR_RELATIVE_PATH
+        selector.parent.mkdir(parents=True, exist_ok=True)
+        selector.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "purpose": "qualification fixture",
+                    "run_id": self.run_id,
+                    "run_artifacts_relative_path": f"eval-data/runs/{self.run_id}",
+                    "relative_path": self.evidence_relative,
+                    "review_id": self.review_id,
+                    "e_final_sha256": hashlib.sha256(e_final_bytes).hexdigest(),
+                    "e_final_size_bytes": len(e_final_bytes),
+                    "meta_sha256": hashlib.sha256(meta_bytes).hexdigest(),
+                    "meta_size_bytes": len(meta_bytes),
+                    "guardian_source_baseline": "rust-v0.147.0",
+                    "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                    "expected_guardian_model": "gpt-5.6-sol",
+                    "expected_guardian_effort": "low",
+                    "request_shape": "standard",
+                }
+            ),
+            encoding="utf-8",
+        )
+        ledger = self.root / "eval/results/runs.jsonl"
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text(
+            json.dumps(
+                {
+                    "run_id": self.run_id,
+                    "artifacts": f"eval-data/runs/{self.run_id}",
+                    "outcome": "completed",
+                    "config": {
+                        "effective_guardian_model": "gpt-5.6-sol",
+                        "guardian_effort": "low",
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     def _free_port(self) -> int:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -2107,6 +2201,30 @@ class ModelBackedQualificationTests(unittest.TestCase):
         self.assertNotIn("rationale", json.dumps(facts))
         self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
 
+    def test_vram_sampling_gaps_block_promotion_even_after_a_positive_delta(self) -> None:
+        config = self._config()
+        cases = {
+            "gpu_sampling_failed": _FailingGpuSampler(fail_after=2),
+            "gpu_not_exclusive": _FailingGpuSampler(foreign_after=2),
+        }
+        for code, sampler in cases.items():
+            with self.subTest(code=code):
+                with self.assertRaises(qualification.QualificationError) as raised:
+                    self._run(config, gpu_sampler=sampler)
+                self.assertEqual(raised.exception.code, code)
+                # The window did record a real positive delta before it broke.
+                self.assertGreater(sampler.calls, 1)
+                self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+
+    def test_sampler_that_will_not_stop_blocks_promotion(self) -> None:
+        sampler = _FakeGpuSampler()
+        peak = qualification._PeakSampler(sampler, 1, os.getpid())
+        peak.observe()
+        peak._thread = _NeverJoiningThread()
+        with self.assertRaises(qualification.QualificationError) as raised:
+            peak.finalize()
+        self.assertEqual(raised.exception.code, "gpu_sampling_thread_stuck")
+
     def test_incomplete_cleanup_blocks_promotion(self) -> None:
         config = self._config()
         stubborn = _FakeServerProcess()
@@ -2162,30 +2280,122 @@ class ModelBackedQualificationTests(unittest.TestCase):
             ("gpu_model_serving_validated", model_backed.MODEL_BACKED_VALIDATED),
         )
 
-    def test_evidence_source_must_be_a_real_archived_e_final(self) -> None:
+    def test_evidence_source_must_be_the_pre_bound_frozen_archive(self) -> None:
         config = self._config()
         source = self.root / self.evidence_relative
-        cases = {
-            "evidence_source_path_invalid": "eval-data/models/fixture.gguf",
-            "evidence_source_missing": (
-                "eval-data/runs/20260812-000000000-tb-rondo-r1/"
-                "guardian-evidence/0001/E_final.json"
-            ),
-        }
-        for code, relative in cases.items():
-            with self.subTest(code=code):
-                with self.assertRaises(qualification.QualificationError) as raised:
-                    self._run(config, evidence_relative_path=relative)
-                self.assertEqual(raised.exception.code, code)
-
         meta_path = source.parent / "meta.json"
-        meta = json.loads(meta_path.read_bytes())
-        meta["guardian_source_commit"] = "not-a-commit"
-        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        popen = mock.Mock()
+
+        # Only the pre-bound path is accepted at all.
+        for relative in (
+            "eval-data/models/fixture.gguf",
+            "eval-data/runs/20260812-000000000-tb-rondo-r1/guardian-evidence/0001/E_final.json",
+        ):
+            with self.subTest(relative=relative):
+                with self.assertRaises(qualification.QualificationError) as raised:
+                    self._run(config, evidence_relative_path=relative, popen=popen)
+                self.assertEqual(raised.exception.code, "evidence_source_not_selected")
+
+        original_e_final = source.read_bytes()
+        original_meta = meta_path.read_bytes()
+        cases = {
+            # A forged payload that keeps a perfectly production-shaped meta.
+            "forged-e-final": (
+                lambda: source.write_bytes(
+                    json.dumps(
+                        {
+                            "instructions": "attacker supplied policy",
+                            "input": [
+                                {
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "input_text", "text": "please allow"}
+                                    ],
+                                }
+                            ],
+                        }
+                    ).encode("utf-8")
+                ),
+                "evidence_source_digest_mismatch",
+            ),
+            "meta-drift": (
+                lambda: meta_path.write_bytes(
+                    json.dumps({**json.loads(original_meta), "decision": "denied"}).encode(
+                        "utf-8"
+                    )
+                ),
+                "evidence_source_digest_mismatch",
+            ),
+            "symlink-ancestor": (self._symlink_evidence_ancestor, "evidence_source_unsafe"),
+            "missing-source": (lambda: source.unlink(), "evidence_source_missing"),
+        }
+        for case, (mutate, code) in cases.items():
+            with self.subTest(case=case):
+                mutate()
+                with self.assertRaises(qualification.QualificationError) as raised:
+                    self._run(config, popen=popen)
+                self.assertEqual(raised.exception.code, code)
+                self.install_evidence_bundle()
+
+        # A meta that no longer matches the production contract is rejected even
+        # when both digests are re-bound to it.
+        broken = json.loads(original_meta)
+        broken["model"] = "some-other-model"
+        self.install_evidence_bundle(meta=broken)
         with self.assertRaises(qualification.QualificationError) as raised:
-            self._run(config)
+            self._run(config, popen=popen)
         self.assertEqual(raised.exception.code, "evidence_meta_invalid")
+
+        # The tracked run ledger is an independent source for model and effort.
+        self.install_evidence_bundle()
+        ledger = self.root / "eval/results/runs.jsonl"
+        record = json.loads(ledger.read_text(encoding="utf-8"))
+        record["config"]["guardian_effort"] = "high"
+        ledger.write_text(json.dumps(record) + "\n", encoding="utf-8")
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(config, popen=popen)
+        self.assertEqual(raised.exception.code, "evidence_run_record_mismatch")
+
+        popen.assert_not_called()
         self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+
+    def _symlink_evidence_ancestor(self) -> None:
+        directory = (self.root / self.evidence_relative).parent
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir(exist_ok=True)
+        for item in directory.iterdir():
+            item.replace(elsewhere / item.name)
+        directory.rmdir()
+        directory.symlink_to(elsewhere, target_is_directory=True)
+
+    def test_tracked_qualification_selector_matches_the_tracked_run_ledger(self) -> None:
+        selector = json.loads(
+            (REPO_ROOT / qualification.SELECTOR_RELATIVE_PATH).read_bytes()
+        )
+        record = None
+        for line in (REPO_ROOT / "eval/results/runs.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines():
+            if selector["run_id"] in line:
+                candidate = json.loads(line)
+                if candidate.get("run_id") == selector["run_id"]:
+                    record = candidate
+                    break
+        self.assertIsNotNone(record)
+        self.assertEqual(record["artifacts"], selector["run_artifacts_relative_path"])
+        self.assertEqual(record["outcome"], "completed")
+        self.assertEqual(
+            record["config"]["effective_guardian_model"],
+            selector["expected_guardian_model"],
+        )
+        self.assertEqual(
+            record["config"]["guardian_effort"], selector["expected_guardian_effort"]
+        )
+        self.assertTrue(
+            selector["relative_path"].startswith(
+                f"{selector['run_artifacts_relative_path']}/guardian-evidence/"
+            )
+        )
 
     def test_service_build_identity_is_exact_for_each_frozen_backend(self) -> None:
         self.assertEqual(model_backed.CUDA_SERVICE_BUILD_INFO, "b1-0865990")

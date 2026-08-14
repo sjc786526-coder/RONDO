@@ -58,18 +58,21 @@
   launcher 实例；redirect、receipt 替换、进程/监听者变化都 fail-closed。这是轻量实例身份
   约束，不是签名或权限系统，也不证明 server 实际加载了 receipt 所声明的全部字节，或 launcher 退出后
   server 必然随之退出。
-- **model-backed 资格设施已就绪，但 4k 合同被实测证伪**。受限 qualification 入口、版本化 model-backed evidence
-  与单向 capability 投影已落地：正式 launcher 在证据缺失、无效或身份不匹配时一律在进程启动前拒绝，
-  CUDA source build 与 CPU release 的服务身份分别精确绑定 `b1-0865990` 与 `b10333-08659901c`。
-  2026-08-14 真实模型已首次成功加载：exact GGUF 装载、服务身份与 `/props` 上下文 4096 均通过核验。
-  但**现存最小真实 `E_final` 的 static payload 经本模型 tokenizer 实测为 5,313 token**，超过 4096 上下文，
-  llama.cpp 按合同返回 exceed-context 错误，因此没有产生结构化判定，未写入任何证据，
+- **model-backed 资格设施已就绪，一条真实证据在 4k 合同下被拒**。受限 qualification 入口、版本化 model-backed
+  evidence 与单向 capability 投影已落地：正式 launcher 在证据缺失、无效或身份不匹配时一律在进程启动前拒绝，
+  CUDA source build 与 CPU release 的服务身份分别精确绑定 `b1-0865990` 与 `b10333-08659901c`；
+  qualification 的输入由受跟踪 selector 预先绑定唯一 path、`E_final`/meta SHA 与期望 Guardian 模型/effort，
+  并复用生产 evidence reader 与 meta 校验。2026-08-14 真实模型已首次成功加载：exact GGUF 装载、服务身份与
+  `/props` 上下文 4096 均通过核验。但该冻结样本的 static payload 经服务端 tokenizer 实测为 **5,313 input tokens**，
+  超过 4096 上下文，llama.cpp 按合同返回 exceed-context 错误，因此没有产生结构化判定，未写入任何证据，
   能力保持 `linux_cuda_built_model_unvalidated`、CUDA lock 的 `model_backed_structured_output` 保持 `not_run`。
   显存峰值、首 token 与总耗时随该失败一并作废，尚无 model-backed 指标。
-- **上下文预算是当前唯一阻塞点，需先定案再继续**。47 条真实 `E_final` 的 static payload 全部由同一条 18,446 字符
-  Guardian policy 加任务证据组成，最小约 25.5k 字符（5,313 token），最大约 75k 字符。8k baseline 只能容纳分布的低端，
-  不足以覆盖全部真实证据。可选方向（未决，由人选择）：提高服务上下文、对证据做可复核的压缩/裁剪口径，
-  或把真实 `E_final` 锚点降级为合成短证据为主。该决定同时影响 L3/L4 的可回放范围。
+- **上下文预算需先定案再继续**。已确证的只有“该条真实证据 5,313 tokens > 4096”这一点；
+  47 条真实归档整体是否适配 4k **尚未做 exact-token 验证**，不得由字符长度推断。
+  所有真实 `E_final` 共用同一条 Guardian policy，因此长度分布可能整体偏大，但这需要用冻结 GGUF 的 exact tokenizer
+  对 canonical static payload 做只计数普查才能定论；该普查需单独授权，且只持久化 path digest 与计数。
+  可选方向（未决，由人选择）：提高服务上下文、对证据做可复核的压缩/裁剪口径，或把真实 `E_final` 锚点
+  降级为合成短证据为主。该决定同时影响 L3/L4 的可回放范围。
 - **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
   单文件下载/校验和 8GB 两阶段上下文方案。2026-08-13 唯一 GGUF 已通过普通文件、精确
@@ -81,7 +84,8 @@
 
 ### 当前推进顺序
 
-1. 定案本地审批的上下文预算与真实 `E_final` 的可服务口径（当前唯一阻塞点，见上文）。
+1. 定案本地审批的上下文预算与真实 `E_final` 的可服务口径（当前阻塞点，见上文）；
+   若需要全体分布事实，先单独授权 exact-token 普查。
 2. 按定案后的合同完成 model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出；
    资格设施、证据 schema 与 capability 投影已就绪，只需按新合同重跑并生成版本化证据。
 3. 通过后，连同 L7 的“仅改配置切换”一起形成 **Local M3**；不同上下文档位互相独立验收，
@@ -151,8 +155,8 @@
   忽略且权限收紧的 `.env.local` 按变量名加载，不进入 TOML、命令行、日志或工件。linked worktree 的加载器
   必须通过 Git common dir 定位主仓库根，复用同一份本机配置，不在各 worktree 复制密钥。
 - 硬件约束（RTX 4060 Laptop 8GB VRAM）：8B 级模型 Q4 权重约 4.8GB，剩余显存要留给 KV cache；
-  **上下文预算必须实测**。已实测：4k 装不下任何现存真实 `E_final`（最小 5,313 token），
-  上下文档位需求由证据长度而非显存先决定，再与显存预算求交。
+  **上下文预算必须实测**。已实测：一条真实 `E_final` 为 5,313 tokens，4k 装不下；
+  上下文档位需求先由证据长度决定，再与显存预算求交，全体分布待 exact-token 普查。
 - 验收：本地服务能对一条**真实** `E_final` 返回合规结构化判定，并记录显存峰值、首 token 延迟、总耗时。
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）

@@ -4,13 +4,15 @@
 
 ## 结论
 
-真实模型首次成功加载并通过身份核验，但 **4k 上下文装不下任何现存真实 `E_final`**，
+真实模型首次成功加载并通过身份核验，但**所选真实 `E_final` 在 4k 上下文下不可服务**，
 结构化判定未产生，按合同不晋级。能力保持 `linux_cuda_built_model_unvalidated`，
 `model_backed_structured_output` 保持 `not_run`，未写入任何 model-backed 证据。
 
-决定性数字来自服务端自身的 token 计数：所选真实 `E_final` 的 static payload = **5,313 token**，
-上下文 = 4096，llama.cpp 返回 exceed-context 错误。47 条真实 `E_final` 共用同一条 18,446 字符
-Guardian policy，最小 static payload 约 25.5k 字符，最大约 75k 字符，因此这不是选样问题。
+决定性数字来自服务端自身的 token 计数：所选真实 `E_final` 的 static payload = **5,313 input tokens**，
+上下文 = 4096，llama.cpp 返回 exceed-context 错误。
+
+**范围限定**：这一条只证明该样本不可服务。47 条真实归档整体是否都超出 4k **未做 exact-token 验证**，
+字符长度与该 tokenizer 的 token 数不严格单调，不能据此推断；普查需单独授权。
 
 ## 实质性改动
 
@@ -51,6 +53,8 @@ Guardian policy，最小 static payload 约 25.5k 字符，最大约 75k 字符�
   未跑 Rust、Docker、全 workspace、全量 eval；lock schema 未变，未跑 `just eval-lock`。
 - 真实运行：模型加载成功、CUDA 启用、服务身份与 4096 上下文核验通过；结构化判定失败于上下文上限。
   显存峰值、首 token、总耗时随该失败作废，未记录为有效指标。
+- 本轮结论与设施随后经独立审查判定不通过（F1—F3），修复见
+  `2026-08-14-062500-plan023-review-remediation.md`。
 - 现场清理：进程、端口、launcher receipt、私有临时对象四项全部成功；证据文件未生成；
   主工作区除 ignored 配置外无改动。
 - 未做：Turn B、L7、Local M3、8k、Rust、Docker、云 API、训练。

@@ -256,23 +256,29 @@ extra/missing field 和 identity mismatch 必须由上述 focused unit tests 单
   （wrapper 必须用绝对路径调用、b10333 缓冲 stdout 需在进程退出后再读 load 日志、GPU 独占检查误把自身服务当外来进程），
   每次失败均先修复并重跑 focused tests，未用重试掩盖。第 4 次真实加载成功：exact GGUF 装载、CUDA 启用、
   服务 `build_info` 为 `b1-0865990`、`/props` 上下文 4096、`total_slots` 1、model_path 与冻结 GGUF 一致。
-- 2026-08-14：**4k 合同被实证证伪**。所选真实 `E_final` 的 static payload 经本模型 tokenizer 实测 5,313 token，
+- 2026-08-14：**所选真实 `E_final` 在 4k 合同下不可服务**。其 static payload 经服务端 tokenizer 实测 5,313 input tokens，
   超过 4096 上下文，llama.cpp 返回 exceed-context 错误，没有产生结构化判定。按 §3.4 未写入任何证据，
   能力保持 `linux_cuda_built_model_unvalidated`。本次现场四项清理全部成功（进程、端口、receipt、私有临时对象）。
+- 2026-08-14：独立审查（`agent_log/2026-08-14-061059-plan023-independent-review.md`）判定不通过，提出 F1—F3。
+  已完成 remediation：qualification 输入改由受跟踪 selector 预绑定唯一 path、`E_final`/meta SHA、review id
+  与期望 Guardian 模型/effort，并复用生产 `_read_safe_evidence_file` 与 `_validate_guardian_meta`、
+  与受跟踪 `eval/results/runs.jsonl` 交叉核对，payload 直接由冻结 bytes 构造（消除二次读取 TOCTOU）；
+  VRAM 采样改为全窗口 fail-closed（首个采样异常、线程未退出、请求窗口内出现 foreign compute process 或零样本
+  都不得晋级）；权威文档收敛为“已测这一条 5,313 tokens 不可服务”，删除未证实的全体结论。focused tests 115 项全绿。
 
 ### 当前工作
 
-- Turn A 在 §5 D 的结构化判定步骤按合同失败收口；不进入 Turn B。
+- Turn A 在 §5 D 的结构化判定步骤按合同失败收口，并已完成一次 review remediation；不进入 Turn B。
 
 ### 本任务剩余步骤
 
-- 无。文档收口与任务分支提交已完成，等待独立审查。
+- 无。文档收口与任务分支提交已完成，等待独立复审。
 
 ### 阻塞项
 
-- **4k 合同与“真实 `E_final` 结构化判定”不可同时满足**（§3.2 与 §3.5 冲突）。全部 47 条真实 `E_final` 共用同一条
-  18,446 字符 Guardian policy，static payload 最小约 25.5k 字符 / 5,313 token，最大约 75k 字符；4096 上下文装不下其中任何一条。
-  该结论由服务端自身的 token 计数得出，不是估算。
+- **所选真实 `E_final` 与 4k 合同不可同时满足**（§3.2 与 §3.5 在该样本上冲突）：实测 5,313 input tokens > 4096，
+  结论来自服务端自身的 token 计数，不是估算。**全部 47 条真实归档是否都超出 4k 尚未验证**；
+  字符长度与该 tokenizer 的 token 数不严格单调，不能据此推断，普查需单独授权且只做 tokenizer-only 计数。
 - 模型生命周期已用满授权上限 4 次，本任务不再执行真实运行；上下文预算属于跨任务决定，按 §5.E 只记录事实，
   路线由 `doc/WBS.md` 与 `doc/WBS/local-approval-model.md` 承接。
 
@@ -300,7 +306,7 @@ extra/missing field 和 identity mismatch 必须由上述 focused unit tests 单
 | 006 | ignored 配置只直接修改主工作区一份，不在 linked worktree 复制 | loader 通过 Git common dir 设计为所有 worktree 共用本机配置；复制会制造不生效的假配置 | config、执行交接 | 已采纳 |
 | 007 | tracked evidence 只保存 identity、数值和 response digest，不保存 E_final/rationale/tag 原文 | 能证明合同与 schema，又不把 evidence/潜在敏感信息写入 Git 或普通日志 | evidence、日志 | 已采纳 |
 | 008 | 工作包 2 四处文档当前一致时保持零修改 | 当前 local main 已完成 Plan 022 最终状态同步，重复改写会堆叠历史并制造噪声 | WBS、Plan 022 | 已采纳 |
-| 009 | 真机阶段等待用户补充至多两次模型生命周期授权 | qualification 与正式 launcher 复验按字面需要两个独立启动，不能自行扩大“一次”授权 | 真实执行 | 待用户确认 |
+| 009 | 真机阶段等待用户补充至多两次模型生命周期授权 | qualification 与正式 launcher 复验按字面需要两个独立启动，不能自行扩大“一次”授权 | 真实执行 | 已确认：用户授权默认两次、上限 4 次，实际已用满 4 次 |
 | 010 | 硬约束收敛为 9 条结果/安全门，内部模块、schema 布局、采样与关停编排移入软建议 | 避免资格框架压过首次 4k 验证本身，同时保留 capability 晋级与 fail-closed 的不可妥协条件 | 整体实现合同 | 已采纳 |
 | 011 | 合同常量、证据 schema 与 capability 投影集中在新的 `model_backed.py`，qualification 生命周期单独放 `qualification.py` | 投影需要被 launcher/doctor 复用，生命周期不需要；拆开可避免 launcher 与 qualification 的循环导入，并让 §5.B.1 的“单一漂移源”落在一个不依赖 launcher 的模块上 | 实现结构 | 偏离 §4 推荐的单 CLI 布局，等价性由 focused tests 覆盖 |
 | 012 | 服务身份改为精确比较 `/props.build_info`（CUDA `b1-0865990`、CPU `b10333-08659901c`），不再用 build 号/commit 子串 | b10333 的 `build_info` 就是 `b<number>-<commit>`，精确串比子串更强，且一次修好 CUDA source build 被 CPU 口径误拒的阻断 | client、doctor、router probe、fake server | 已采纳 |
@@ -309,3 +315,6 @@ extra/missing field 和 identity mismatch 必须由上述 focused unit tests 单
 | 015 | GPU 独占检查在服务启动后排除本任务自身进程树 | WSL 的 `--query-compute-apps` 会列出本任务刚启动的 llama-server，原判据会把自己判成外来占用 | qualification 前置 | 修复第 3 次生命周期失败 |
 | 016 | request-contract digest 覆盖采样与结构化 schema，但不含 `timeout_seconds` | 该值只是客户端等待时长，不改变模型、采样或被校验的 schema；纳入会让无关的超时调整静默作废 capability | evidence identity | 偏离 §4“覆盖整张 request 表”的推荐 |
 | 017 | 结构化判定失败时，从私有日志抽取服务端自身的 token 计数作为非敏感 blocker facts | 让“装不下”这类合同冲突给出可行动的确切数字，且不新增第二条 evidence 请求、不落任何证据内容 | 失败语义 | 已采纳 |
+| 018 | 新增受跟踪 selector `eval/locks/local-approval-qualification-evidence-v1.json` 预绑定唯一 `E_final`，而不是直接复用 `load_guardian_evidence_bundle()` | 该生产 loader 要求目录名等于 review id，`eval-data/runs/` 的归档用序号目录，直接调用会拒绝全部真实 bundle；窄 selector 仍复用其 `_read_safe_evidence_file` 与 `_validate_guardian_meta`，并新增 path/双 SHA/review id 预绑定与受跟踪 run ledger 交叉核对 | evidence source gate | 修复审查 F1 |
+| 019 | 期望 Guardian 模型/effort 取自受跟踪 `eval/results/runs.jsonl` 的该 run 记录 | 提供独立于被验文件的第二来源；伪造归档需要同时改动受 Git 跟踪的账本才能通过 | evidence source gate | 修复审查 F1 |
+| 020 | VRAM 采样窗口整体 fail-closed，并在采样线程内持续监控 foreign compute process | 设备级归因只有在“每次采样都成功且全窗口独占”时才成立；已经采到正 delta 不能补偿后续缺口 | 指标与晋级 | 修复审查 F3 |
