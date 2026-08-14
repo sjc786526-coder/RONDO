@@ -18,8 +18,8 @@ from unittest import mock
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
-from rondo_eval.config import RuntimeConfig  # noqa: E402
-from rondo_eval.contracts import BinaryManifest, Side  # noqa: E402
+from rondo_eval.config import ConfigError, RuntimeConfig  # noqa: E402
+from rondo_eval.contracts import BinaryManifest, Product, Side  # noqa: E402
 from rondo_eval.api_budget_proxy import PersistentBudgetLedger  # noqa: E402
 from rondo_eval.terminal_bench import (  # noqa: E402
     AdapterError,
@@ -469,6 +469,37 @@ class TerminalBenchTests(unittest.TestCase):
         return prepare_terminal_bench_run(
             self.runtime_config(), self.request(side), materializer=materializer
         )
+
+    def test_product_request_prepares_the_real_multi_adapter_fail_closed(self) -> None:
+        multi_manifest = replace(
+            self.manifest(), product=Product.RONDO_MULTI.value
+        )
+        request = replace(
+            self.request(Side.RONDO),
+            binary=multi_manifest,
+            product=Product.RONDO_MULTI,
+        )
+        materializer = FakeMaterializer(self.root / "fake-rondo-multi")
+        materializer.root.mkdir()
+
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+
+        self.assertIs(prepared.spec.effective_product(), Product.RONDO_MULTI)
+        self.assertIsInstance(prepared.adapter, RondoUploadAdapter)
+        self.assertEqual(
+            prepared.adapter.manifest.product, Product.RONDO_MULTI.value
+        )
+        mismatched = replace(request, binary=self.manifest())
+        rejected_materializer = FakeMaterializer(self.root / "fake-rondo-mismatch")
+        rejected_materializer.root.mkdir()
+        with self.assertRaisesRegex(ConfigError, "RunSpec"):
+            prepare_terminal_bench_run(
+                self.runtime_config(),
+                mismatched,
+                materializer=rejected_materializer,
+            )
 
     def test_freeze_and_lock_are_exact(self) -> None:
         self.assertEqual(HARBOR_REQUIREMENT, "harbor==0.20.0")
@@ -1081,6 +1112,19 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn('auto_review.model="gpt-5.6-luna"', rondo_commands)
         self.assertIn('auto_review.reasoning_effort="low"', rondo_commands)
         self.assertIn('auto_review.evidence_dir="/logs/agent/guardian-evidence"', rondo_commands)
+
+        multi = self.adapter(
+            RondoUploadAdapter,
+            extra_env={"OPENAI_API_KEY": secret},
+            binary_product=Product.RONDO_MULTI.value,
+        )
+        multi_environment = FakeEnvironment()
+        asyncio.run(multi.run("repair the repository", multi_environment, mock.Mock()))
+        multi_commands = "\n".join(call[0] for call in multi_environment.calls)
+        self.assertNotIn("auto_review.model", multi_commands)
+        self.assertNotIn("auto_review.model_provider", multi_commands)
+        self.assertNotIn("auto_review.reasoning_effort", multi_commands)
+        self.assertNotIn("auto_review.evidence_dir", multi_commands)
 
     def test_adapter_non_git_task_uses_frozen_workdir_without_repo_precondition(self) -> None:
         adapter = self.adapter(

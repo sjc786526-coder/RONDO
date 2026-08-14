@@ -23,7 +23,6 @@ from ..contracts import (
     RunOutcome,
     Side,
     auto_review_config_projection,
-    product_for_manifest,
 )
 from ..docker_supervisor import (
     DockerCounter,
@@ -143,11 +142,17 @@ class DockerNoApiSmokeResult:
             # The frozen upstream is a comparison side, not a product, so it
             # records neither the identity nor the auto_review state.
             **({} if product is None else {"product": product.value}),
-            "auto_review_config": auto_review_config_projection(
-                spec.side,
-                product,
-                guardian_model=spec.provider.guardian_model,
-                guardian_effort=spec.provider.guardian_effort,
+            **(
+                {}
+                if product is None
+                else {
+                    "auto_review_config": auto_review_config_projection(
+                        spec.side,
+                        product,
+                        guardian_model=spec.provider.guardian_model,
+                        guardian_effort=spec.provider.guardian_effort,
+                    )
+                }
             ),
             "status": "completed" if self.passed else "failed",
             "outcome": self.parsed.outcome.value,
@@ -651,17 +656,15 @@ def main(argv: list[str] | None = None) -> int:
             side: _load_manifest(path, paths.common_root)
             for side, path in manifest_paths.items()
         }
+        selected_product = args.product
+        bundle_manifest_sha256 = {}
         for side in Side:
-            pair_identity.validate_manifest(
+            bundle_manifest_sha256[side.value] = pair_identity.validate_no_api_manifest(
                 common_root=paths.common_root,
                 side=side,
+                selected_product=selected_product,
                 manifest_path=manifest_paths[side],
                 manifest=manifests[side],
-            )
-        selected_product = args.product
-        if product_for_manifest(Side.RONDO, manifests[Side.RONDO]) != selected_product:
-            raise DockerNoApiSmokeError(
-                "selected product differs from the frozen RONDO bundle"
             )
         proof = lease_from_watchdog()
         counter = DockerCliCounter(
@@ -721,6 +724,7 @@ def main(argv: list[str] | None = None) -> int:
             "pair_id": pair_identity.pair_id,
             "pair_lock_sha256": pair_identity.lock_sha256,
             "product": selected_product.value,
+            "bundle_manifest_sha256": bundle_manifest_sha256,
             "eval_harness_commit": eval_harness_commit,
             "order": [Side.RONDO.value, Side.CODEX.value],
             "official_api_requests": 0,

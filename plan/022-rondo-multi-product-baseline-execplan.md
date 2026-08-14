@@ -141,39 +141,40 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 ### 已完成
 
-本计划范围内的实施已全部完成并提交到 `worktree-023-rondo-multi-bootstrap`。执行细节、疑难判断与
-门禁数字见 `agent_log/2026-08-14-004500-plan022-rondo-multi-product-baseline.md`；成果摘要见
-`doc/WBS-COMPLETED.md`。要点：
+首个实现提交 `d2c16073` 已完成，但独立验收拒绝合并。其基础实施事实仍见
+`agent_log/2026-08-14-004500-plan022-rondo-multi-product-baseline.md`；本轮已逐项落地 B1、B2、B3、M1：
 
 1. 共享看门狗已 `git mv` 到根 `scripts/`（mode 与字节不变），现行引用点全部改为根路径且不留 shim；
    共享 helper 回归改由两条产品线的 `test-github-scripts` 入口显式调用根 helper。
 2. `multidev/` 由 Git 清单驱动复制，6,011 条与 `mydev/` 的 blob、mode、工作树 sha256 逐条相同，
    无清单外文件，六个未跟踪残留目录均未进入。
 3. 默认关闭行为门落在两棵树同源的 `config_loader_tests.rs`，经 `ConfigBuilder` 真实加载路径断言。
-4. 产品身份通过 `product_layout()` 单一映射贯通 source/target/bundle/manifest/catalog/adapter/
-   RunSpec/campaign/result；旧无 `product` 工件按 `rondo-local` 只读兼容，`side=codex` 不携带身份。
-5. 结果合同新增版本化 `auto_review_config`，与 adapter 的实际 `-c` 覆盖同源，成功/失败路径共用投影。
+4. 新 RONDO/Codex freeze 产物已与生产 loader 收口；campaign request/manifest/RunSpec、successor、no-API
+   bundle、publication/replay/aggregate 均交叉绑定产品，历史缺字段工件保持只读兼容。
+5. durable index 与 campaign/pair consumer 已严格校验顶层/config/binary/campaign/版本化
+   `auto_review_config` 的一致性，正常与失败 publication 共用投影。
 
 ### 当前工作
 
-无。等待独立审查者验收后决定是否合并。
+本轮修复与复审准入门禁已完成；提交当前任务分支后停止，等待独立复审。
 
 ### 本任务剩余步骤
 
-无。执行者已按硬约束 15 停在本 worktree 分支：未合并 `main`、未推送远端、未删除 worktree。
+无实施步骤；只剩独立复审及用户对 §6 决策 011 窄例外的确认，不在本轮执行者权限内。
 
 ### 阻塞项
 
-无。
+完整 `git diff --check` 与 `multidev/` 精确复制之间的既有冲突仍按用户要求保留为窄例外，等待用户明确接受；
+手写文件必须保持 `diff --check` 干净。
 
 ### 当前验收状态
 
 对照 §1 完成/验收标准：
 
-- 复制完整性、看门狗迁移、默认关闭行为门、结果合同、eval 产品身份接入、无本地模型依赖：均已满足。
-- 门禁：`just eval-lock` 通过；完整 eval 无 API 套件 592/592（0 fail、0 skip）；共享 helper 9/9；
-  经迁移后根看门狗的 Multi `codex-core` 默认关闭回归 80/80；一次 Multi `codex-cli` 轻量带锁构建成功
-  （`codex-cli 0.147.0`）。两次带锁运行 `stop_reason=none`、`cleanup_reason=none`。未跑全 workspace。
+- B1/B2/B3/M1 与对应文档修复已落地；focused 受影响集合 312/312，完整 eval 无 API 套件
+  600/600（0 fail、0 skip），`just eval-lock` 解析 85 packages，两侧 watchdog helper 各 9/9。
+- 本轮未修改 Rust 产品源码，按复审条件未重复 Cargo 构建。首个实现批次已有的根看门狗 Multi
+  `codex-core` 80/80 与 `codex-cli 0.147.0` 轻量构建证据保留，但不冒充本轮新运行。
 - `git diff --check`：手写改动部分干净。`multidev/` 例外 —— 6,011 个文件全为新增行，其中 419 个上游
   文件自带行尾空白（TUI 动画帧、prompt markdown、apply-patch 空白 fixture），已逐一 `cmp` 确认与
   `mydev/` 原件字节相同；修改它们会违反更强的「精确复制」硬约束，因此保留原样。
@@ -201,5 +202,6 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 | 006 | 本工作包只做无 API/fake 与轻量构建验收，不产正式 campaign 或能力结论 | M-0 是产品基线；真实退化验收属于后续重大增量并需单独授权 | 测试与交付 | 已采纳 |
 | 007 | 执行者只提交 worktree 分支，独立审查前不合并/推送 | 用户指定由独立审查者验收，保留清晰审查边界 | Git 交付 | 已采纳 |
 | 008 | 接受「看门狗改根后历史 bundle 不再可 re-verify」这一代价，不做双路径兼容 | 硬约束 5 要求精确接受根脚本并拒绝旧路径；冻结 bundle 字节与 `eval/locks/*.json` 未改，影响面止于 `binary_freeze verify*` | binary freeze | 已采纳 |
-| 009 | `--product` 与 manifest `product` 键只在非 Local 时出现于 build-command，Local 保持逐字历史形状 | 冻结的 seven-key 工件把完整 argv 写进 manifest，无条件追加会改写历史合同形状 | binary freeze / manifest | 已采纳 |
+| 009 | 仅 build-command 的 `--product` 在非 Local 时出现；新 RONDO manifest（Local/Multi）始终显式写 `product`，Codex 与历史 manifest 省略该键 | Local build-command 保持 seven-key 历史形状；权威数据布局同时要求新 RONDO manifest 显式身份 | binary freeze / manifest | 已采纳 |
 | 010 | eval 为 Multi 不注入 `[auto_review]` 三项覆盖，Local 的既有公平合同不变 | M-0 要求基线在关闭态取得；改 Local 会动既有公平运行合同（硬约束 9） | adapter / result | 已采纳 |
+| 011 | 完整 `git diff --check` 的唯一例外限定为与 `mydev/` 字节相同的 `multidev/` 复制内容，手写差异必须通过；例外仍待用户明确接受 | 清理上游尾空格会破坏更强的精确复制合同，不能为绿灯改写复制内容 | 复制验收 | 待用户确认 |

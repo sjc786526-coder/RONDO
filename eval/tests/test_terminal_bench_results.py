@@ -144,6 +144,7 @@ class _ResultFixture:
         side: Side = Side.CODEX,
         exit_code: int = 0,
         attempt: int = 1,
+        campaign_product: Product | None = None,
     ) -> CampaignPublicationContext:
         provider = self._live_result("campaign-publication-fixture").prepared.spec.provider
         return CampaignPublicationContext(
@@ -170,6 +171,7 @@ class _ResultFixture:
                 "frozen_codex_model_catalog_sha256": "b" * 64,
                 "max_guardian_logical_requests": 3,
             },
+            campaign_product=campaign_product,
         )
 
     @staticmethod
@@ -1776,7 +1778,7 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
             "side": Side.CODEX.value if drift_side else Side.RONDO.value,
             "git_commit": "a" * 40,
             "git_dirty": False,
-            "binary_sha256": "b" * 64,
+            "binary_sha256": identity.bundles[Side.RONDO].cli_sha256,
             "upstream_codex": dict(UPSTREAM_CODEX),
             "config": {
                 **identity.require_selected_profile().to_dict(),
@@ -2474,7 +2476,12 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             live_result=self._product_live_result(run_id, side=side, product=product),
             parsed=parsed,
             metadata_path=metadata,
-            publication=self._campaign_publication(side=side),
+            publication=self._campaign_publication(
+                side=side,
+                campaign_product=(
+                    product if product is not None else Product.RONDO_LOCAL
+                ),
+            ),
         )
         record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
         summary = json.loads(
@@ -2500,6 +2507,8 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
         # they can never describe different configuration states.
         self.assertEqual(summary["config"]["auto_review_config"], closed)
         self.assertEqual(summary["config"]["product"], "rondo-multi")
+        self.assertEqual(record["config"]["binary_product"], "rondo-multi")
+        self.assertEqual(record["config"]["campaign_product"], "rondo-multi")
 
     def test_local_keeps_recording_its_configured_guardian_overrides(self) -> None:
         record, _ = self._publish(
@@ -2574,7 +2583,11 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             metadata_path=self.root / "missing-api-metadata.json",
             outcome=RunOutcome.INFRA_FAILED,
             failure_stage="runtime",
-            publication=self._campaign_publication(side=Side.RONDO, exit_code=70),
+            publication=self._campaign_publication(
+                side=Side.RONDO,
+                exit_code=70,
+                campaign_product=Product.RONDO_MULTI,
+            ),
             secrets=(),
         )
 

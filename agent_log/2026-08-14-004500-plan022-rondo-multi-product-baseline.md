@@ -57,8 +57,9 @@ adapter 的 `-c` 覆盖与该块出自同一个 `auto_review_overrides()`，运�
 ## 疑难与判断
 
 - **历史 build-command 兼容**。冻结的 seven-key 工件把完整 argv 写进了 manifest。若无条件给 Multi 与
-  Local 都追加 `--product`，历史 Local 工件的合同形状就会被改写。因此 `--product` 只在非 Local 时出现，
-  Local 保持逐字不变；manifest 侧同理，缺 `product` 键按 `rondo-local` 读，不回填。
+  Local 都追加 `--product`，历史 Local build-command 的合同形状就会被改写。因此 build-command 中的
+  `--product` 只在非 Local 时出现，Local argv 保持逐字不变；新 RONDO manifest（Local/Multi）显式写
+  `product`，Codex 与历史 manifest 省略该键，历史缺键按 `rondo-local` 只读解释且不回填。
 - **看门狗改根的已知代价**。`binary_freeze verify*` 会精确比对 build-command 里的 wrapper 路径。
   改根后，历史 Local/Codex bundle 的 `verify-runtime` 会因记录的是旧 `mydev/scripts/` 路径而不再通过。
   WBS §4.4 与 Plan 022 硬约束 5 明确要求「精确接受根脚本并拒绝旧路径」，所以这是预期结果而非回归。

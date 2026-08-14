@@ -231,6 +231,54 @@ class ArtifactTests(unittest.TestCase):
             )
         )
 
+    def test_durable_index_rejects_product_config_and_auto_review_tampering(self) -> None:
+        mutations = (
+            lambda row: row["config"].__setitem__("product", "rondo-local"),
+            lambda row: row["config"].__setitem__("binary_product", "rondo-local"),
+            lambda row: row["config"]["auto_review_config"].__setitem__(
+                "schema_version", 2
+            ),
+            lambda row: row["config"]["auto_review_config"].__setitem__(
+                "model", "forged-model"
+            ),
+            lambda row: row["config"]["auto_review_config"].__setitem__(
+                "unexpected", None
+            ),
+        )
+        for index, mutate in enumerate(mutations, start=1):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                paths = RepoPaths(root, root)
+                run_id = f"20260809-0100000{index:02d}-tb-rondo-r1"
+                record = self._record(run_id)
+                record["product"] = "rondo-multi"
+                record["config"] = {
+                    "guardian_model": "guardian",
+                    "guardian_effort": "low",
+                    "product": "rondo-multi",
+                    "binary_product": "rondo-multi",
+                    "auto_review_config": {
+                        "schema_version": 1,
+                        "model": None,
+                        "model_provider": None,
+                        "reasoning_effort": None,
+                        "evidence_dir": None,
+                    },
+                }
+                writer = ArtifactWriter(paths, run_id).start()
+                writer.write_json("result.json", {"ok": True})
+                writer.finalize(record, secrets=())
+                index_path = root / "eval/results/runs.jsonl"
+                tampered = json.loads(index_path.read_text(encoding="utf-8"))
+                mutate(tampered)
+                index_path.write_text(
+                    json.dumps(tampered, sort_keys=True, separators=(",", ":")) + "\n",
+                    encoding="utf-8",
+                )
+                next_id = f"20260809-0200000{index:02d}-tb-rondo-r1"
+                with self.assertRaisesRegex(ArtifactError, "product|auto-review"):
+                    ArtifactWriter(paths, next_id).start()
+
     def test_upstream_codex_identity_is_exact(self) -> None:
         invalid_values = (
             None,

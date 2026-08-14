@@ -17,7 +17,11 @@ from decimal import Decimal
 from pathlib import Path
 
 from ..api_budget_proxy import PersistentBudgetLedger, completed_run_accounting
-from ..artifacts import ArtifactWriter
+from ..artifacts import (
+    ArtifactError,
+    ArtifactWriter,
+    validate_record_product_contract,
+)
 from ..config import RepoPaths, load_provider_secret, load_runtime_config
 from ..contracts import BinaryManifest, RunOutcome, Side
 from ..docker_supervisor import DockerOperation, DockerTaskIdentity
@@ -41,6 +45,7 @@ from .baseline import (
     SOL_MAX_LEGAL_REQUEST_RESERVATION_USD,
     BaselineRun,
     BaselineAssessment,
+    BaselineError,
     BaselineStatus,
     CampaignIdentity,
     CampaignSlotPlan,
@@ -76,7 +81,7 @@ from .results import (
     validate_measurement_checkout,
     validate_results_worktree,
 )
-from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest
+from .runner import HARBOR_EXECUTABLE, TerminalBenchRequest, TerminalBenchRunError
 from .runner import DockerSupervisedHostHarborExecutor
 from .materialize import PinnedTaskMaterializer
 from .scoring import (
@@ -787,7 +792,9 @@ def _replay_terminal_assessment(
     state: CampaignStateLedger,
     results_root: Path,
 ) -> BaselineAssessment:
-    records, digests = _campaign_records(results_root, identity)
+    records, digests = _campaign_records(
+        results_root, identity, common_root=paths.common_root
+    )
     continued, continued_records, continued_digests = _continuation_records(
         paths,
         results_root,
@@ -1138,12 +1145,16 @@ def _reconcile_running_paid_slot(
         raise CampaignExecutionError("campaign running slot recovery is ambiguous")
     row = running[0]
     slot = identity.slot(row["slot_id"])
-    records, digests = _campaign_records(results_root, identity)
+    records, digests = _campaign_records(
+        results_root, identity, common_root=paths.common_root
+    )
     budget_snapshot = budget.snapshot()
     run = budget_snapshot["runs"].get(slot.run_id)
     record = records.get(slot.run_id)
     if record is not None and isinstance(run, dict):
-        _validate_recoverable_publication(identity, slot, record, run)
+        _validate_recoverable_publication(
+            identity, slot, record, run, common_root=paths.common_root
+        )
         _sample_storage(counter, slot.run_id, baseline=storage_baseline)
         task_outcome = _task_outcome_from_record(record)
         category = _record_failure_category(record, task_outcome, run)
@@ -1189,7 +1200,9 @@ def _replay_recovered_attempt_chain(
     )
     if task is None:
         raise CampaignExecutionError("recovered campaign task is not frozen")
-    records, digests = _campaign_records(results_root, identity)
+    records, digests = _campaign_records(
+        results_root, identity, common_root=paths.common_root
+    )
     continued, continued_records, continued_digests = _continuation_records(
         paths,
         results_root,
@@ -1234,7 +1247,12 @@ def _validate_recoverable_publication(
     slot: CampaignSlotPlan,
     record: dict[str, object],
     run: dict[str, object],
+    *,
+    common_root: Path,
 ) -> None:
+    _validate_campaign_record_product(
+        identity, record, common_root=common_root, expected_slot=slot
+    )
     config = record.get("config")
     cost = record.get("cost")
     requests = run.get("requests")
@@ -1670,7 +1688,9 @@ def _advance_one_paid_step(
 ) -> int:
     """Advance at most one paid task while applying every frozen gate in order."""
 
-    records, digests = _campaign_records(results_root, identity)
+    records, digests = _campaign_records(
+        results_root, identity, common_root=paths.common_root
+    )
     continued, continued_records, continued_digests = _continuation_records(
         paths,
         results_root,
@@ -2351,6 +2371,7 @@ def _execute_task_slot(
         side=slot.side,
         metrics=timer.snapshot(exit_code=exit_code).to_dict(),
         selected_profile=identity.selected_profile,
+        campaign_product=(identity.product if identity.enforces_fair_comparison else None),
         provider_upstream_timeout_seconds=identity.upstream_timeout_seconds,
     )
     failure_stage: str | None = None
@@ -2443,7 +2464,13 @@ def _execute_task_slot(
         guardian_technical_failure=guardian_technical_failure,
         budget_run=run,
     )
-    record_digest = _result_record_sha256(results_root, slot.run_id)
+    record_digest = _result_record_sha256(
+        results_root,
+        slot.run_id,
+        identity=identity,
+        slot=slot,
+        common_root=paths.common_root,
+    )
     _sample_storage(counter, slot.run_id, baseline=storage_baseline)
     state.finish(
         slot.slot_id,
@@ -2523,7 +2550,14 @@ def _mechanical_failure_category(
     return MechanicalFailureCategory.HARNESS_RUNTIME
 
 
-def _result_record_sha256(results_root: Path, run_id: str) -> str:
+def _result_record_sha256(
+    results_root: Path,
+    run_id: str,
+    *,
+    identity: CampaignIdentity,
+    slot: CampaignSlotPlan,
+    common_root: Path,
+) -> str:
     rows = [
         line
         for line in (results_root / "eval/results/runs.jsonl").read_bytes().splitlines()
@@ -2531,6 +2565,10 @@ def _result_record_sha256(results_root: Path, run_id: str) -> str:
     ]
     if len(rows) != 1:
         raise CampaignExecutionError("published campaign result is not unique")
+    record = json.loads(rows[0])
+    _validate_campaign_record_product(
+        identity, record, common_root=common_root, expected_slot=slot
+    )
     return hashlib.sha256(rows[0]).hexdigest()
 
 
@@ -2558,9 +2596,12 @@ def _write_aggregate(
 ) -> None:
     prior_cost = Decimal(identity.budget["prior_estimated_usd"])
     spent = prior_cost + canary_cost + Decimal(budget["spent_usd"])
-    records, record_digests = _campaign_records(results_root, identity)
+    common_root = campaign_root.parents[2]
+    records, record_digests = _campaign_records(
+        results_root, identity, common_root=common_root
+    )
     _continued, continued_records, continued_digests = _continuation_records(
-        campaign_root.parents[2],
+        common_root,
         results_root,
         identity,
     )
@@ -2602,6 +2643,8 @@ def _write_aggregate(
     }
     if identity.schema_version >= 2:
         value["diagnoses"] = state_snapshot["diagnoses"]
+    if identity.enforces_fair_comparison:
+        value["product"] = identity.product.value
     path = campaign_root / "aggregate.json"
     _write_or_validate_aggregate(path, value)
     public = _public_aggregate(value, identity=identity)
@@ -2646,6 +2689,8 @@ def _public_aggregate(
     public["run_slots_used"] = budget["run_slots_used"]
     if identity.schema_version >= 2:
         public["diagnoses"] = value["diagnoses"]
+    if identity.enforces_fair_comparison:
+        public["product"] = value["product"]
     return public
 
 
@@ -2695,6 +2740,10 @@ def _restore_tracked_aggregate_from_local(
         or value.get("campaign_id") != identity.campaign_id
         or value.get("campaign_lock_sha256") != identity.lock_sha256
         or value.get("status") != expected_status
+        or (
+            identity.enforces_fair_comparison
+            and value.get("product") != identity.product.value
+        )
     ):
         raise CampaignExecutionError("private campaign aggregate identity drifted")
     if not tracked.exists() and not tracked.is_symlink():
@@ -2782,7 +2831,10 @@ def _storage_projection(
 
 
 def _campaign_records(
-    results_root: Path, identity: CampaignIdentity
+    results_root: Path,
+    identity: CampaignIdentity,
+    *,
+    common_root: Path,
 ) -> tuple[dict[str, dict[str, object]], dict[str, str]]:
     path = results_root / "eval/results/runs.jsonl"
     records: dict[str, dict[str, object]] = {}
@@ -2792,12 +2844,76 @@ def _campaign_records(
         config = record.get("config") if isinstance(record, dict) else None
         if not isinstance(config, dict) or config.get("campaign_id") != identity.campaign_id:
             continue
+        _validate_campaign_record_product(
+            identity, record, common_root=common_root
+        )
         run_id = record.get("run_id")
         if not isinstance(run_id, str) or run_id in records:
             raise CampaignExecutionError("campaign result index is ambiguous")
         records[run_id] = record
         digests[run_id] = hashlib.sha256(line).hexdigest()
     return records, dict(sorted(digests.items()))
+
+
+def _validate_campaign_record_product(
+    identity: CampaignIdentity,
+    record: dict[str, object],
+    *,
+    common_root: Path,
+    expected_slot: CampaignSlotPlan | None = None,
+) -> None:
+    try:
+        validate_record_product_contract(record)
+    except ArtifactError as exc:
+        raise CampaignExecutionError("campaign result product identity is invalid") from exc
+    if not identity.enforces_fair_comparison:
+        return
+    config = record.get("config")
+    side_value = record.get("side")
+    try:
+        side = Side(str(side_value))
+    except ValueError as exc:
+        raise CampaignExecutionError("campaign result side is invalid") from exc
+    expected_product = identity.product.value if side is Side.RONDO else None
+    if (
+        record.get("product") != expected_product
+        or not isinstance(config, dict)
+        or config.get("campaign_product") != identity.product.value
+        or config.get("product") != expected_product
+        or config.get("binary_product") != expected_product
+    ):
+        raise CampaignExecutionError("campaign result product differs from the lock")
+    try:
+        slot = expected_slot or identity.slot(str(config.get("campaign_slot_id")))
+    except ValueError as exc:
+        raise CampaignExecutionError("campaign result slot is invalid") from exc
+    if (
+        slot.side is not side
+        or record.get("run_id") != slot.run_id
+        or config.get("campaign_id") != identity.campaign_id
+        or config.get("campaign_lock_sha256") != identity.lock_sha256
+    ):
+        raise CampaignExecutionError("campaign result identity differs from the lock")
+    manifest_path = common_root / identity.bundles[side.value]["manifest_path"]
+    try:
+        manifest = _load_manifest(manifest_path, common_root)
+        identity.validate_manifest(
+            common_root=common_root,
+            side=side,
+            manifest_path=manifest_path,
+            manifest=manifest,
+        )
+    except (BaselineError, TerminalBenchRunError) as exc:
+        raise CampaignExecutionError(
+            "campaign result bundle identity is invalid"
+        ) from exc
+    if (
+        record.get("binary_sha256") != manifest.sha256
+        or config.get("binary_source_commit") != manifest.source_commit
+        or config.get("binary_workspace_lock_normalization")
+        != manifest.workspace_lock_normalization
+    ):
+        raise CampaignExecutionError("campaign result binary differs from the lock")
 
 
 def _continuation_records(
@@ -2859,6 +2975,12 @@ def _continuation_records(
         ):
             raise CampaignExecutionError("continued execution contract drifted")
         source_slot = source.slot(reference.source_slot_id)
+        _validate_campaign_record_product(
+            source,
+            record,
+            common_root=common_root,
+            expected_slot=source_slot,
+        )
         successor_task = identity.catalog.task(str(source_slot.task_id))
         if (
             source_slot.run_id != reference.source_run_id

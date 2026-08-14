@@ -428,6 +428,11 @@ def _validate_stub_projection(
     if (
         spec.task_id != task.task_id
         or spec.task_image_digest != task.image_digest
+        or (
+            identity.enforces_fair_comparison
+            and spec.effective_product()
+            is not (identity.product if spec.side is Side.RONDO else None)
+        )
         or spec.provider.main_model != provider.main_model
         or spec.provider.guardian_model != provider.guardian_model
         or spec.provider.main_effort != provider.main_effort

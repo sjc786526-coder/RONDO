@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .config import RepoPaths
-from .contracts import ContractError, RunOutcome, parse_product
+from .contracts import (
+    AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+    AUTO_REVIEW_EVIDENCE_DIR,
+    ContractError,
+    Product,
+    RunOutcome,
+    parse_product,
+)
 
 
 _RUN_ID = re.compile(
@@ -46,7 +53,7 @@ _URL_CREDENTIAL = re.compile(
 _SIDES = {
     "tb": {"codex", "rondo"},
     "replay": {"codex", "rondo"},
-    "shadow": {"luna-static", "sol-static", "local-static"},
+    "shadow": {"luna-static", "sol-static", "local-static", "local-ft-static"},
 }
 _RECORD_FIELDS = {
     "schema_version",
@@ -193,7 +200,9 @@ class ArtifactWriter:
             try:
                 self._recover_pending_publications_locked()
                 self._assert_publication_paths()
-                index_before, rows = _read_index(self.results)
+                index_before, rows = _read_index(
+                    self.results, common_root=self.paths.common_root
+                )
                 if any(row["run_id"] == self.run_id for row in rows):
                     raise ArtifactError("run id is already present in the tracked index")
                 index_after = index_before + record_bytes + b"\n"
@@ -269,7 +278,9 @@ class ArtifactWriter:
         with _open_lock_file(lock_path) as lock_handle:
             _lock(lock_handle)
             try:
-                if _run_id_exists(self.results, self.run_id):
+                if _run_id_exists(
+                    self.results, self.run_id, common_root=self.paths.common_root
+                ):
                     raise ArtifactError("run id is already present in the tracked index")
             finally:
                 _unlock(lock_handle)
@@ -372,7 +383,9 @@ class ArtifactWriter:
         _scan_bytes(record_bytes, (), "tracked run record")
         if value["record_identity"] != _bytes_identity(record_bytes):
             raise ArtifactError("artifact publication journal record identity differs")
-        index_bytes, _rows = _read_index(self.results)
+        index_bytes, _rows = _read_index(
+            self.results, common_root=self.paths.common_root
+        )
         index_identity = _bytes_identity(index_bytes)
         index_before = value["index_before"]
         index_after = value["index_after"]
@@ -410,25 +423,81 @@ class ArtifactWriter:
         _fsync_directory(self.runs_root)
 
 
-_NON_PRODUCT_SIDES = {"codex", "sol-static"}
-
-
-def _validate_record_product(record: Mapping[str, Any], *, side: object) -> None:
+def validate_record_product_contract(record: Mapping[str, Any]) -> None:
     """Enforce doc/eval-data-layout.md 3.1 on the optional product field.
 
     Absent stays legal forever: historical RONDO rows are read as
-    ``rondo-local`` and are never backfilled.  What must not happen is a row
-    claiming a product for a subject that is not a RONDO product.
+    ``rondo-local`` and are never backfilled.  Once a row names a product, its
+    top-level, config, binary and versioned auto-review projections become one
+    fail-closed identity.
     """
 
+    track = record.get("track")
+    side = record.get("side")
+    config = record.get("config")
+    if not isinstance(config, Mapping):
+        raise ArtifactError("run record product config is invalid")
     if "product" not in record:
+        if any(key in config for key in ("product", "binary_product", "auto_review_config")):
+            raise ArtifactError("productless run record carries product configuration")
+        campaign_product = config.get("campaign_product")
+        if campaign_product is not None:
+            try:
+                parse_product(campaign_product)
+            except ContractError as exc:
+                raise ArtifactError("campaign product identity is invalid") from exc
         return
-    if side in _NON_PRODUCT_SIDES:
+    eligible = (
+        (track in {"tb", "replay"} and side == "rondo")
+        or (track == "shadow" and side in {"local-static", "local-ft-static"})
+    )
+    if not eligible:
         raise ArtifactError("run record side cannot carry a product identity")
     try:
-        parse_product(record["product"])
+        product = parse_product(record["product"])
     except ContractError as exc:
         raise ArtifactError("run record product identity is invalid") from exc
+    if config.get("product") != product.value:
+        raise ArtifactError("run record product differs from its config")
+    campaign_product = config.get("campaign_product")
+    if campaign_product is not None and campaign_product != product.value:
+        raise ArtifactError("run record product differs from its campaign")
+    if track != "tb":
+        return
+    if config.get("binary_product") != product.value:
+        raise ArtifactError("run record product differs from its binary")
+    auto_review = config.get("auto_review_config")
+    expected_keys = {
+        "schema_version",
+        "model",
+        "model_provider",
+        "reasoning_effort",
+        "evidence_dir",
+    }
+    if not isinstance(auto_review, Mapping) or set(auto_review) != expected_keys:
+        raise ArtifactError("run record auto-review config is invalid")
+    if auto_review.get("schema_version") != AUTO_REVIEW_CONFIG_SCHEMA_VERSION:
+        raise ArtifactError("run record auto-review config version is invalid")
+    if product is Product.RONDO_MULTI:
+        expected_state = {
+            "model": None,
+            "model_provider": None,
+            "reasoning_effort": None,
+            "evidence_dir": None,
+        }
+    else:
+        guardian_model = config.get("guardian_model")
+        guardian_effort = config.get("guardian_effort")
+        if not isinstance(guardian_model, str) or not isinstance(guardian_effort, str):
+            raise ArtifactError("run record Guardian config is invalid")
+        expected_state = {
+            "model": guardian_model,
+            "model_provider": None,
+            "reasoning_effort": guardian_effort,
+            "evidence_dir": AUTO_REVIEW_EVIDENCE_DIR,
+        }
+    if {key: auto_review[key] for key in expected_state} != expected_state:
+        raise ArtifactError("run record auto-review config differs from its product")
 
 
 def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) -> None:
@@ -448,7 +517,7 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
     side = record.get("side")
     if track != match.group("track") or side != match.group("side") or side not in _SIDES[track]:
         raise ArtifactError("run record track or side is invalid")
-    _validate_record_product(record, side=side)
+    validate_record_product_contract(record)
     created_at = record.get("created_at")
     if not isinstance(created_at, str) or not _TIMESTAMP.fullmatch(created_at):
         raise ArtifactError("run record timestamp is invalid")
@@ -695,7 +764,9 @@ def _assert_artifact_tree_identity(root: Path, expected: object) -> None:
         raise ArtifactError("artifact tree differs from its publication journal")
 
 
-def _read_index(path: Path) -> tuple[bytes, list[dict[str, Any]]]:
+def _read_index(
+    path: Path, *, common_root: Path
+) -> tuple[bytes, list[dict[str, Any]]]:
     if not _path_present(path):
         return b"", []
     if path.is_symlink() or not path.is_file():
@@ -721,6 +792,7 @@ def _read_index(path: Path) -> tuple[bytes, list[dict[str, Any]]]:
             raise ArtifactError("tracked run index contains an invalid row")
         if run_id in run_ids:
             raise ArtifactError("tracked run index contains a duplicate run id")
+        _validate_record(row, run_id, common_root)
         run_ids.add(run_id)
         rows.append(row)
     return contents, rows
@@ -774,8 +846,8 @@ def _atomic_replace_index(path: Path, contents: bytes, temporary_name: str) -> N
         raise
 
 
-def _run_id_exists(path: Path, run_id: str) -> bool:
-    _contents, rows = _read_index(path)
+def _run_id_exists(path: Path, run_id: str, *, common_root: Path) -> bool:
+    _contents, rows = _read_index(path, common_root=common_root)
     return any(row["run_id"] == run_id for row in rows)
 
 

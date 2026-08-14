@@ -1,6 +1,6 @@
 # 方向 0：量化测评基准
 
-最后更新：2026-08-13 ｜ 依赖：P0（S1/S2）｜ 服务对象：RONDO Local 与 RONDO Multi ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-14 ｜ 依赖：P0（S1/S2）｜ 服务对象：RONDO Local 与 RONDO Multi ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标
 
@@ -75,7 +75,8 @@ assessment 语义一律不变，新规则只在 v7 生效。
    不使用 pairwise-max `σ` 等事后放宽办法。比较合同不成立时直接 blocked，不计算能力归因。
    该判据**只适用于本设施自身的等条件 A/A、A/B 比较**，Local M3/M4 与 Multi 退化验收都不继承。
 7. **产品无关**：`Product`（`rondo-local` / `rondo-multi`）与比较侧 `side` 正交，v7 lock 显式记录产品身份；
-   `codex` 不是产品取值。**未创建 `multidev/`**，产品身份的实际接入仍在 Multi 基线任务中完成。
+   `codex` 不是产品取值。Plan 022 任务分支已创建 `multidev/` 并补齐 manifest、campaign、no-API 与 durable
+   result 的产品交叉校验，当前待独立复审；尚无 Multi runtime bundle，也未执行真实 no-API 或付费比较。
 
 闭合的是设施，不是结论：本工作包只跑 pure/fake/loopback/stub 定向门禁，未调用真实 API、未跑 Docker、
 未产生任何新的比较结果。新的 B7 campaign 仍须使用新 IDs、独立 cap 和单独授权。

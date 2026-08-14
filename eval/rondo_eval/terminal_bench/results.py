@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
-from ..artifacts import ArtifactError, ArtifactWriter, validate_private_artifact_bytes
+from ..artifacts import (
+    ArtifactError,
+    ArtifactWriter,
+    validate_private_artifact_bytes,
+    validate_record_product_contract,
+)
 from ..config import RepoPaths
 from ..contracts import (
     AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
@@ -407,7 +412,11 @@ def publish_terminal_bench_result(
         raise HarborResultError("eval harness commit is invalid")
     if live_result.prepared.spec.side is not side:
         raise HarborResultError("prepared side differs from publication side")
-    _validate_publication_context(publication, side=side)
+    _validate_publication_context(
+        publication,
+        side=side,
+        product=live_result.prepared.spec.effective_product(),
+    )
     request_roles = _validate_publication_evidence(
         live_result,
         parsed,
@@ -609,7 +618,11 @@ def publish_terminal_bench_failure(
         provider_public = provider.to_public_dict()
     except ValueError as exc:
         raise HarborResultError("exceptional publication provider is invalid") from exc
-    _validate_publication_context(publication, side=side)
+    _validate_publication_context(
+        publication,
+        side=side,
+        product=product_for_manifest(side, manifest),
+    )
     selected_profile = dict(publication.selected_profile)
     if any(selected_profile.get(key) != value for key, value in provider_public.items()):
         raise HarborResultError("exceptional publication provider differs from the pair lock")
@@ -1055,7 +1068,7 @@ def _validate_publication_evidence(
 
 
 def _validate_publication_context(
-    publication: PublicationContext, *, side: Side
+    publication: PublicationContext, *, side: Side, product: Product | None
 ) -> None:
     try:
         publication.validate()
@@ -1065,8 +1078,15 @@ def _validate_publication_context(
         expected_slot = 1 if side is Side.RONDO else 2
         if publication.pair_slot != expected_slot:
             raise HarborResultError("publication side differs from the pair topology")
-    elif publication.side is not side:
-        raise HarborResultError("publication side differs from the campaign slot")
+    else:
+        if publication.side is not side:
+            raise HarborResultError("publication side differs from the campaign slot")
+        if publication.campaign_product is not None:
+            expected = publication.campaign_product if side is Side.RONDO else None
+            if product is not expected:
+                raise HarborResultError(
+                    "publication product differs from the campaign identity"
+                )
 
 
 def _product_record_field(product: Product | None) -> dict[str, object]:
@@ -1098,6 +1118,7 @@ def _product_config(
         return {}
     return {
         "product": product.value,
+        "binary_product": product.value,
         "auto_review_config": auto_review_config_projection(
             side,
             product,
@@ -1117,7 +1138,7 @@ def _publication_identity_config(
             "pair_slot": publication.pair_slot,
             "pair_round": publication.pair_round,
         }
-    return {
+    value = {
         "campaign_id": publication.campaign_id,
         "campaign_lock_sha256": publication.campaign_lock_sha256,
         "campaign_slot_id": publication.campaign_slot_id,
@@ -1129,6 +1150,9 @@ def _publication_identity_config(
             publication.provider_upstream_timeout_seconds
         ),
     }
+    if publication.campaign_product is not None:
+        value["campaign_product"] = publication.campaign_product.value
+    return value
 
 
 def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
@@ -1149,6 +1173,10 @@ def _validate_terminal_bench_record(record: Mapping[str, Any]) -> None:
         or not isinstance(config, dict)
     ):
         raise HarborResultError("Terminal-Bench record sections are invalid")
+    try:
+        validate_record_product_contract(record)
+    except ArtifactError as exc:
+        raise HarborResultError("Terminal-Bench product identity is invalid") from exc
     task = tasks[0]
     if (
         not isinstance(task.get("task_id"), str)

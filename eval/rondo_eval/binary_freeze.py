@@ -1831,7 +1831,7 @@ def _publish_legacy(
     staging = Path(tempfile.mkdtemp(prefix=f".{artifact.name}.staging-", dir=parent))
     try:
         _copy_regular(source_binary, staging / "codex", mode=0o555)
-        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        payload = _manifest_payload(manifest)
         _write_exclusive(staging / "manifest.json", payload, mode=0o600)
         _fsync_directory(staging)
         if artifact.exists() or artifact.is_symlink():
@@ -1862,7 +1862,7 @@ def _publish_companion_bundle(
     try:
         _copy_regular(source_binary, staging / "codex", mode=0o555)
         _copy_regular(source_host, staging / "codex-code-mode-host", mode=0o555)
-        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        payload = _manifest_payload(manifest)
         _write_exclusive(staging / "manifest.json", payload, mode=0o600)
         if (
             _sha256_file(staging / "codex") != manifest.sha256
@@ -1911,7 +1911,7 @@ def _publish_runtime_bundle(
         _copy_regular(source_binary, staging / "codex", mode=0o555)
         _copy_regular(source_host, staging / "codex-code-mode-host", mode=0o555)
         _copy_regular(source_bwrap, resources / "bwrap", mode=0o555)
-        payload = json.dumps(asdict(manifest), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        payload = _manifest_payload(manifest)
         _write_exclusive(staging / "manifest.json", payload, mode=0o600)
         if (
             _sha256_file(staging / "codex") != manifest.sha256
@@ -1974,6 +1974,22 @@ def _write_exclusive(path: Path, payload: bytes, *, mode: int) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _manifest_payload(
+    manifest: _LegacyBinaryManifest | _CompanionBinaryManifest | BinaryManifest,
+) -> bytes:
+    """Encode the versioned manifest shape without inventing a Codex product.
+
+    Historical manifests and the frozen-upstream side omit ``product``.  New
+    RONDO manifests name Local or Multi explicitly, so ``null`` is never a
+    legal on-disk substitute for either shape.
+    """
+
+    value = asdict(manifest)
+    if manifest.product is None:
+        value.pop("product")
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
 
 
 def _read_manifest(path: Path) -> BinaryManifest:
@@ -2109,7 +2125,15 @@ def _known_manifest_keys(value: dict[str, object], required: set[str]) -> bool:
     """Accept the strict key set plus the optional product identity only."""
 
     keys = set(value)
-    return required <= keys and not keys - required - _OPTIONAL_MANIFEST_KEYS
+    if keys == required:
+        return True
+    if keys != required | _OPTIONAL_MANIFEST_KEYS:
+        return False
+    try:
+        parse_product(value["product"])
+    except ContractError:
+        return False
+    return True
 
 
 def _validate_companion_manifest_contract(manifest: _CompanionBinaryManifest) -> None:

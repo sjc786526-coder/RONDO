@@ -189,6 +189,14 @@ def generate_successor_lock(
         raise CampaignIdentityGenerationError(
             f"successor comparison contract is not frozen: {exc}"
         ) from exc
+    # This generator deliberately inherits the predecessor's frozen Local
+    # bundles.  A Multi successor needs a separately selected and frozen Multi
+    # bundle contract; silently retaining these Local paths would mint a false
+    # identity before any paid work starts.
+    if Product(str(parsed_comparison["product"])) is not Product.RONDO_LOCAL:
+        raise CampaignIdentityGenerationError(
+            "successor product differs from the inherited Local bundles"
+        )
     if (
         not isinstance(campaign_cap_usd, Decimal)
         or not campaign_cap_usd.is_finite()

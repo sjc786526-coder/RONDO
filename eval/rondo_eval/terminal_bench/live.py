@@ -123,6 +123,11 @@ def campaign_terminal_bench_request(
         side=side,
         batch_id=identity.batch_id,
         binary=binary,
+        product=(
+            identity.product
+            if identity.enforces_fair_comparison and side is Side.RONDO
+            else None
+        ),
         image_digest=task.image_digest,
         source_checkout=str(common_root / "eval-data/sources/terminal-bench-2-1-ffccbe05"),
         staging_root=str(work_root / "staging"),

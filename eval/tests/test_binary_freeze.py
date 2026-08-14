@@ -39,6 +39,7 @@ from rondo_eval.binary_freeze import (  # noqa: E402
     verify_runtime,
 )
 from rondo_eval.contracts import Product, Side, product_layout  # noqa: E402
+from rondo_eval.terminal_bench.__main__ import _load_manifest  # noqa: E402
 
 
 TOOLCHAIN = """\
@@ -969,6 +970,10 @@ class RondoFreezeTests(unittest.TestCase):
             set(manifest), binary_freeze._MANIFEST_KEYS | {"product"}
         )
         self.assertEqual(manifest["product"], Product.RONDO_LOCAL.value)
+        self.assertEqual(
+            _load_manifest(runtime / "manifest.json", self.common).product,
+            Product.RONDO_LOCAL.value,
+        )
         self.assertEqual(manifest["bwrap_path"], str(runtime / "codex-resources/bwrap"))
         self.assertEqual(manifest["bwrap_asset_url"], binary_freeze.BWRAP_ASSET_URL)
         self.assertEqual(manifest["bwrap_archive_sha256"], binary_freeze.BWRAP_ARCHIVE_SHA256)
@@ -981,6 +986,15 @@ class RondoFreezeTests(unittest.TestCase):
         self.assertEqual(manifest["sha256"], companion_manifest["sha256"])
         self.assertEqual(
             manifest["code_mode_host_sha256"], companion_manifest["code_mode_host_sha256"]
+        )
+        historical = dict(manifest)
+        del historical["product"]
+        (runtime / "manifest.json").write_text(
+            json.dumps(historical, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        self.assertIsNone(
+            _load_manifest(runtime / "manifest.json", self.common).product
         )
         with self.assertRaises(BinaryFreezeError):
             prepare_runtime(
@@ -1235,6 +1249,7 @@ class BaselineFreezeTests(unittest.TestCase):
 
         manifest = json.loads(Path(verified.manifest_path).read_text(encoding="utf-8"))
         self.assertEqual(manifest["workspace_lock_normalization"], binary_freeze.LOCK_NORMALIZATION)
+        self.assertNotIn("product", manifest)
         bwrap_asset = _write_bwrap_asset(self.common)
         runtime = self.artifact.with_name(f"{self.artifact.name}-runtime-bundle")
         runtime_request = RuntimeFreezeRequest(
@@ -1261,6 +1276,13 @@ class BaselineFreezeTests(unittest.TestCase):
         )
         runtime_manifest = json.loads(
             Path(runtime_verified.manifest_path).read_text(encoding="utf-8")
+        )
+        self.assertNotIn("product", runtime_manifest)
+        self.assertNotIn(
+            "product", json.loads((self.artifact / "manifest.json").read_text("utf-8"))
+        )
+        self.assertIsNone(
+            _load_manifest(Path(runtime_verified.manifest_path), self.common).product
         )
         self.assertEqual(
             runtime_manifest["workspace_lock_normalization"], binary_freeze.LOCK_NORMALIZATION
@@ -1324,8 +1346,13 @@ class MultiProductFreezeTests(unittest.TestCase):
         self.constants.start()
         self.portable = mock.patch.object(binary_freeze, "_validate_static_musl_binary")
         self.portable.start()
+        self.source_identity = mock.patch.object(
+            binary_freeze, "_validate_bwrap_source_identity"
+        )
+        self.source_identity.start()
 
     def tearDown(self) -> None:
+        self.source_identity.stop()
         self.portable.stop()
         self.constants.stop()
         self.temporary.cleanup()
@@ -1357,6 +1384,79 @@ class MultiProductFreezeTests(unittest.TestCase):
             self.request,
             lease_factory=_lease_factory,
             toolchain_probe=lambda: TOOLCHAIN,
+        )
+
+    def test_multi_runtime_manifest_enters_the_production_loader(self) -> None:
+        self._prepare()
+        host_release = (
+            self.target / binary_freeze.RUST_TARGET / "release/codex-code-mode-host"
+        )
+        host_release.write_bytes(b"frozen-rondo-multi-code-mode-host")
+        host_release.chmod(0o755)
+        companion_bundle = self.artifact.with_name(
+            f"{self.artifact.name}-code-mode-bundle"
+        )
+        companion = CompanionFreezeRequest(
+            side=Side.RONDO,
+            common_root=self.common,
+            source_root=self.source,
+            source_commit=self.commit,
+            target_dir=self.target,
+            legacy_artifact_dir=self.artifact,
+            bundle_dir=companion_bundle,
+            gate_root=self.source,
+            product=Product.RONDO_MULTI,
+        )
+        host_command = _build_command(
+            common=self.common,
+            source=self.source,
+            target=self.target,
+            gate=self.source,
+            side=Side.RONDO,
+            source_commit=self.commit,
+            package="codex-code-mode-host",
+            binary="codex-code-mode-host",
+            product=Product.RONDO_MULTI,
+        )
+        prepare_companion(
+            companion,
+            host_command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        asset = _write_bwrap_asset(self.common)
+        runtime = self.artifact.with_name(f"{self.artifact.name}-runtime-bundle")
+        runtime_request = RuntimeFreezeRequest(
+            side=Side.RONDO,
+            common_root=self.common,
+            source_root=self.source,
+            source_commit=self.commit,
+            target_dir=self.target,
+            companion_bundle_dir=companion_bundle,
+            bwrap_asset_dir=asset,
+            runtime_bundle_dir=runtime,
+            gate_root=self.source,
+            product=Product.RONDO_MULTI,
+        )
+
+        prepare_runtime(
+            runtime_request,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+
+        for path in (
+            self.artifact / "manifest.json",
+            companion_bundle / "manifest.json",
+            runtime / "manifest.json",
+        ):
+            self.assertEqual(
+                json.loads(path.read_text("utf-8"))["product"],
+                Product.RONDO_MULTI.value,
+            )
+        self.assertEqual(
+            _load_manifest(runtime / "manifest.json", self.common).product,
+            Product.RONDO_MULTI.value,
         )
 
     def test_multi_cannot_publish_into_the_historical_local_namespace(self) -> None:

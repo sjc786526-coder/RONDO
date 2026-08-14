@@ -16,7 +16,15 @@ from pathlib import Path
 from typing import Iterable
 
 from ..config import RepoPaths
-from ..contracts import BinaryManifest, Product, ProviderProjection, RunSpec, Side
+from ..contracts import (
+    BinaryManifest,
+    ContractError,
+    Product,
+    ProviderProjection,
+    RunSpec,
+    Side,
+    product_for_manifest,
+)
 from ..fair_comparison import (
     AGGREGATION_STRICT_MAJORITY,
     CATALOG_PROJECTION_VERSION,
@@ -496,6 +504,14 @@ class CampaignIdentity:
         manifest: BinaryManifest,
     ) -> None:
         manifest.validate()
+        if self.enforces_fair_comparison:
+            expected_product = self.product if side is Side.RONDO else None
+            try:
+                actual_product = product_for_manifest(side, manifest)
+            except ContractError as exc:
+                raise BaselineError("campaign bundle product identity is invalid") from exc
+            if actual_product is not expected_product:
+                raise BaselineError("campaign bundle product differs from the lock")
         expected = self.bundles.get(side.value)
         if not isinstance(expected, dict) or set(expected) != {
             "manifest_path",
@@ -521,6 +537,10 @@ class CampaignIdentity:
         task: "FrozenTask",
     ) -> None:
         spec.validate()
+        if self.enforces_fair_comparison:
+            expected_product = self.product if spec.side is Side.RONDO else None
+            if spec.effective_product() is not expected_product:
+                raise BaselineError("campaign RunSpec product differs from the lock")
         self.validate_provider(spec.provider)
         if (
             slot.task_id != task.task_id

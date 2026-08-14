@@ -555,7 +555,10 @@ standard/Lite 形态均补回归。
 - **边界**：没有创建正式 v7 identity，未执行正式 identity → producer CLI → worker CLI、Oracle、wire canary、
   paid task、pilot/repeats 或能力比较；这些仍需各自冻结合同与单独授权。设施闭合不产生任何可归因的能力比较结论。
 
-### 2026-08-14 Plan 022 RONDO Multi 产品基线建立（工作包 2，无真实 API / 无 Docker）
+### 2026-08-14 Plan 022 RONDO Multi 产品基线实现批次（独立验收未通过，不计为已完成）
+
+> 该实现提交 `d2c16073` 的独立验收结论为拒绝合并；本节只保留当时实施事实，不代表工作包完成。
+> B1/B2/B3/M1 修复已在同一任务分支继续落地，须经独立复审后才可转为完成记录。
 
 - **共享看门狗迁根**：`with-build-lock.sh`（`100755`）与 `build-watchdog-lib.sh`（`100644`）经 `git mv` 移到仓库根
   `scripts/`，字节内容、阈值、退出码与安全语义不变；`script_dir` 仍按 `BASH_SOURCE` 解析同目录 helper，
