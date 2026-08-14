@@ -19,25 +19,25 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 ### 完成/验收标准
 
-- [ ] `multidev/` 来自本任务基线 `mydev/` 的 Git 跟踪文件；普通文件、可执行位和符号链接完整，且没有复制
+- [x] `multidev/` 来自本任务基线 `mydev/` 的 Git 跟踪文件；普通文件、可执行位和符号链接完整，且没有复制
       `mydev/codex-rs/core/` 下的 `.git`、`.agents`、`.codex`、`project`、`absolute-turn`、
       `request-permissions-environment` 等未跟踪残留。
-- [ ] `with-build-lock.sh` 与 `build-watchdog-lib.sh` 位于根 `scripts/`；现行代码、测试、just 入口和安全文档
+- [x] `with-build-lock.sh` 与 `build-watchdog-lib.sh` 位于根 `scripts/`；现行代码、测试、just 入口和安全文档
       全部使用新路径，共享 helper 回归仍由 Local/Multi 测试入口覆盖，旧脚本路径不存在且不留 shim；脚本逻辑、
       阈值、退出语义和权限不变。
-- [ ] Multi 的空配置行为测试证明 `[auto_review]` 的 `model`、`model_provider`、`reasoning_effort`、
+- [x] Multi 的空配置行为测试证明 `[auto_review]` 的 `model`、`model_provider`、`reasoning_effort`、
       `evidence_dir` 均为 `None`；测试经过真实配置加载路径，而不是只断言手写常量。
-- [ ] Multi 的基线/无 API 结果合同显式记录 `product = "rondo-multi"` 和上述四项未配置状态；缺字段的历史
+- [x] Multi 的基线/无 API 结果合同显式记录 `product = "rondo-multi"` 和上述四项未配置状态；缺字段的历史
       `side=rondo` 仍按 `rondo-local` 解释，`side=codex` 不携带或推断产品身份。
-- [ ] eval 入口能显式选择 `rondo-local` 或 `rondo-multi`；Multi 使用 `multidev/codex-rs`、独立 Cargo target、
+- [x] eval 入口能显式选择 `rondo-local` 或 `rondo-multi`；Multi 使用 `multidev/codex-rs`、独立 Cargo target、
       `eval-data/bin/rondo-multi/` 与带产品身份的 manifest/归档，不能回落到 `mydev/` 或历史 `bin/rondo/`。
-- [ ] `multidev/` 的配置和本任务新增测试不引用 GGUF 路径、本地审批模型 launcher/runtime 或真实模型资产；
+- [x] `multidev/` 的配置和本任务新增测试不引用 GGUF 路径、本地审批模型 launcher/runtime 或真实模型资产；
       继承的 Local 审批接口保持默认关闭，不删除、不回退，也不计入 Multi 基线能力。
-- [ ] 复制/路径/产品身份的 focused Python/Rust/shell 回归、迁移后的 `just eval-test`、`just eval-lock` 和
+- [x] 复制/路径/产品身份的 focused Python/Rust/shell 回归、迁移后的 `just eval-test`、`just eval-lock` 和
       一次 Multi `codex-cli` 轻量带锁构建通过；不重跑 Rust 全 workspace。
-- [ ] `doc/WBS.md`、`doc/WBS/multi-agent-trusted-evidence.md`、`doc/WBS-COMPLETED.md`、
+- [x] `doc/WBS.md`、`doc/WBS/multi-agent-trusted-evidence.md`、`doc/WBS-COMPLETED.md`、
       `doc/development-environment.md` 与精炼 `agent_log/` 只在各自职责内同步最终事实；`README.md` 无需重复历史。
-- [ ] 所有非 `multidev/**` 差异通过 `git diff --check`；`multidev/` 仅在相对路径、Git type/mode、
+- [x] 所有非 `multidev/**` 差异通过 `git diff --check`；`multidev/` 仅在相对路径、Git type/mode、
       blob ID 与工作树字节逐项等同 `mydev/` 时豁免尾空格诊断。不得修改复制内容或用 `.gitattributes`
       掩盖诊断；没有密钥、ignored 本机资产、意外生成物或历史结果改动。
 
@@ -162,11 +162,12 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 ### 当前工作
 
-第四次独立验收已确认实现与测试合同通过；当前等待合并交付，不再修改实现或重跑重型测试。
+本任务已完成并交付：第四次独立验收确认实现与测试合同通过，任务分支经 `c7b7bd4` 合入 `main`。
+本计划冻结为任务合同与历史记录。
 
 ### 本任务剩余步骤
 
-无实施或复审步骤；只剩把验收通过的任务分支合并交付。
+无。本任务后续路线只见 `doc/WBS.md` 与 `doc/WBS/multi-agent-trusted-evidence.md`。
 
 ### 阻塞项
 
@@ -180,7 +181,7 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 - 第三次独立复验的 B1/B2、M1 与文档修复已落地；四个直接受影响模块 234/234，完整 eval 无 API
   套件 610/610（0 fail、0 skip），`just eval-lock` 解析 85 packages，两侧 watchdog helper 各 9/9。
 - 第四次独立验收对同四个模块复跑 234/234，并以额外 producer/durable 变异探针确认上一轮技术问题全部闭环；
-  结论为实现与测试合同通过、文档收口后可合并。
+  结论为实现与测试合同通过，任务分支随后已合入 `main`。
 - 本轮未修改 Rust 产品源码，按复审条件未重复 Cargo 构建。首个实现批次已有的根看门狗 Multi
   `codex-core` 80/80 与 `codex-cli 0.147.0` 轻量构建证据保留，但不冒充本轮新运行。
 - `git diff --check`：非 `multidev/**` 差异干净。决策 011 已采纳的 `multidev/` 例外 —— 6,011 个文件全为新增行，其中 419 个上游

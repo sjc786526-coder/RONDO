@@ -601,10 +601,10 @@ standard/Lite 形态均补回归。
   看门狗改根后，历史 Local/Codex bundle 的 `binary_freeze verify*` 会因 build-command 里记录的旧 wrapper 路径
   而不再通过（按 WBS §4.4「拒绝旧路径」的要求，属预期）；冻结 bundle 字节与 `eval/locks/*.json` 均未改动。
 
-### 2026-08-14 Plan 022 RONDO Multi 产品基线最终独立验收
+### 2026-08-14 Plan 022 RONDO Multi 产品基线最终独立验收与交付
 
 - **结论**：第四次独立验收确认上一轮技术问题全部闭环，未发现新的实现级阻断；Plan 022 的实现与测试合同通过，
-  文档收口后具备合并条件。前一节保留首次未通过批次的形成时点事实，不改写其历史结论。
+  随后完成文档收口与合并交付。前一节保留首次未通过批次的形成时点事实，不改写其历史结论。
 - **最终闭环**：campaign publication 在落盘前绑定真实冻结 identity；campaign、continuation、result digest 与
   aggregate 共用完整 durable record/private-summary reader；缺失或篡改私有摘要与 bool 冒充数字均 fail-closed。
 - **验收证据**：执行者完整无 API eval 610/610、`eval-lock` 85 packages、两侧 watchdog helper 各 9/9；独立验收
@@ -613,3 +613,5 @@ standard/Lite 形态均补回归。
 - **复制合同**：用户已采纳决策 011。非 `multidev/**` 差异通过 `git diff --check`；`multidev/` 的 6,011 个
   tracked 条目在相对路径、Git type/mode/blob 与工作树字节上逐项等同 `mydev/`，只对这份精确复制内容保留
   上游尾空格窄例外。
+- **交付**：验收通过的任务分支以 merge commit `c7b7bd4` 合入 `main`；其后 `main` 前进到 `e4e0b47` 并已推送，
+  最终核对 `main == origin/main == e4e0b47`。工作包 2 至此完成，后续路线转入 `doc/WBS.md` 的工作包 3。
