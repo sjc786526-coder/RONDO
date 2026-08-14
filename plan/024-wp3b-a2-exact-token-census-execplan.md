@@ -87,12 +87,18 @@
 - 2026-08-14：确认 b10333 input-token endpoint 可复用真实 tokenizer/template 路径，并记录历史 path 与 secret loader
   两个实现提示；它们不构成指定实现。
 - 2026-08-14：按用户反馈两次瘦身，明确本任务不得演变为审计、provenance、attestation 或可信发布工程。
+- 2026-08-14：实现 `eval/rondo_eval/local_approval/token_census.py`（复用现有 reader、meta 校验、受跟踪账本身份、
+  真实 request builder、watchdog/build lock 与冻结服务合同），补 9 项 focused tests，`just eval-lock` 通过。
+- 2026-08-14：同一入口真实运行两次，结果文件逐字节相同（sha256 `c6c848b1…`，文档内 digest `5aa508af…`）。
+  锚点精确复现 **5,313**；47 条全部纳入，其中 **24 条计数成功、23 条被冻结运行时拒绝**
+  （21 条 adapter 400 `item['content'] is not an array`，2 条模板 500）。
+  计数子集：min 5,313、p50 7,886、p90 11,105、p95 12,354、max 18,921；`input+512` 下 4k 覆盖 0/24、8k 覆盖 9/24。
+- 2026-08-14：收尾确认能力仍为 `linux_cuda_built_model_unvalidated`、`model_backed_structured_output` 仍为 `not_run`、
+  未新增任何资格证据；两次运行的 server/端口/私有临时对象全部清理。
 
 ### 剩余与交接
 
-- 尚未实现、运行测试、启动模型或计算 47 条 token；执行者按 §5 完成后由 Codex 独立审查。
-- 锚点不为 5,313、全集不为 47、现有身份校验失败、资源不可用、GPU 非独占或本任务对象清理失败时停止且不发布结论。
-- ignored 模型、runtime、配置和私有归档经 Git common root 共享；不要求在主工作区持久修改。任务结束后由 WBS 承接档位决策。
+- 无。本计划以完成态冻结，档位决策由 `doc/WBS.md` 与 `doc/WBS/local-approval-model.md` 承接。
 
 ## 7. 关键决策
 
@@ -102,3 +108,7 @@
 | 只复用现有保障 | 不新增审计、provenance、attestation、可信发布、资格证据或通用安全框架 |
 | 重跑是验收动作 | 同一入口运行两次并比较即可，不建设专用双 pass 系统 |
 | 只报告覆盖事实 | 产品覆盖阈值和后续资格档位留给普查后的用户决策 |
+| 逐条 status 而不是整批 fail-closed | 23 条被冻结运行时拒绝是该证据自身的事实（真实 `/v1/responses` 同样会被拒），整批停止会把其余 24 条的分布一起埋掉；47 条全部登记，统计口径显式标注只覆盖 counted |
+| 拒绝后立即重跑合成探针 | 400/500 被记为逐条拒绝，需要证明服务本身仍健康；探针体为合成短证据，失败信息可全文报告 |
+| 服务错误文本带回显守则 | 只有当消息中任何 12 字符片段都不出现在请求体内时才报告原文，否则整条替换为 `<redacted>`，保证报告不含证据正文 |
+| 结果文档不含时间戳 | 去掉日期后同一输入两次运行逐字节相同，重跑一致性直接用文件 sha256 判定 |

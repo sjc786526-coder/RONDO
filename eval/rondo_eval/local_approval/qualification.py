@@ -457,12 +457,12 @@ def _require_free_port(host: str, port: int) -> None:
             raise QualificationError("port_already_in_use")
 
 
-def _prepare_private_directory(config: RuntimeConfig) -> Path:
+def _prepare_private_directory(config: RuntimeConfig, *, prefix: str = "qualification") -> Path:
     root = config.paths.common_root / _PRIVATE_ROOT
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     if root.is_symlink() or not root.is_dir():
         raise QualificationError("private_directory_invalid")
-    private_root = root / f"qualification-{secrets.token_hex(8)}"
+    private_root = root / f"{prefix}-{secrets.token_hex(8)}"
     private_root.mkdir(mode=0o700)
     info = os.lstat(private_root)
     if stat.S_ISLNK(info.st_mode) or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):

@@ -1,0 +1,574 @@
+{
+  "anchor": {
+    "e_final_sha256": "eaa2dfb178159b79f5e2e3fdb60179c5e9d729dfcff02c97b5a6acb5d09ebaca",
+    "expected_input_tokens": 5313,
+    "input_tokens": 5313
+  },
+  "digest": "5aa508af4acb920c0cdb8bc8e1378427db3ba9ee564bd6ddeebcfeef87e4f4ad",
+  "identity": {
+    "chat_template_sha256": "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56",
+    "count_endpoint": "/v1/responses/input_tokens",
+    "generated_tokens": 0,
+    "model_relative_path": "eval-data/models/mistralai_Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
+    "model_sha256": "7deb50ecb3afca928f0aa6dccdb87ed4ce4ab3991797e5fc0e0dedb92754802a",
+    "request_contract_sha256": "69279c8432dc4147b60db46f8b2c1a092f3e07a0846c2cb18dd24803eec8114f",
+    "runtime_identity_sha256": "abe7f763a18e7c801ca8d024a5d4d2a9036847c80eb32e1661baab6c1e2c03da",
+    "runtime_relative_path": "eval-data/tools/llama-b10333-cuda-linux-x64",
+    "serve_config_sha256": "b3a2d7d4d90d4fbd7118a011e295e21808357940137c9b2734440db0cdaaa5d5",
+    "service_build_info": "b1-0865990"
+  },
+  "purpose": "exact input-token census of the complete archived real Guardian E_final set, counted with the frozen GGUF tokenizer and template",
+  "records": [
+    {
+      "e_final_sha256": "0460258a243387a366d3893e2577a9114445c40bd2db6003f2e8917b97d509d9",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "05dc919f31d1fa9a6a49e0dc2c811b29d930878594f2e85a548f132d37fda3ea",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 7886,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "0ba0a80edcf9e3404e05b05acf5ad6e23dedc02c6661d394eab41340cbdc70f6",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "0bf9f77c3f87dac2e284d89297148a0cf3eda6c51112d1010670c01672a166ef",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 10348,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "10a980fe3e289b184d23420932a1ef87faf3467b1298ac7c294ae002d2cade6a",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 8955,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "16e053180bba2052d6e6e915055b1a2675b1e953074bea0f9489523acd67de9a",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "1a26fd21f31ccc247c89b8c5d617b8deaf9f36245156b7aae2c227cb8c464882",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 8174,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "2040a5fdbd40672217b9bbb6ff6f8b96f982f22bee7132e4d5c37b97302d03a1",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 8512,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "224770687e1ae309fd980a547486e91ebe68e39b14841692ca4392920ba0e3ba",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "297a3d4deb40322f08693601b0170b523c5356b60bee374c395a155779a48674",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "2f84ce288914178e7e82320d0915005e6b8ad86b7a942b77fe32c5d1dd0cca8c",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 6036,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "3aa07e1e2bc63287eacf0fd049bb1e8d63d5336af5c33046c16e22275a5f2860",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "3b7555961c5dceb7da85ad210e658742d59bffa6e2f5af8df0418de772b37303",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 7469,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "43509e53a3f40d05a904560103ba4404d498a616f26301e3de2916010dfeddcd",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "4627d38e9c34e8c9fc3be18c367d74c76cedc2032ab0a1e43de621ab43f9d79c",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 7044,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "477571e7b99d37233cb2e0be5d5da6914c89cce2372bc3f5e16ca7da990b5845",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "49f2788efb5a7eef502a440a58ea483de0184ad9c655c992627ef1e48af0d723",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 10136,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "4a912236577a3ef1ee5a6ad69be276fe32bf0a949372b1c2dedbc8e5c2fb9a04",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "5423fe75eed2a8b537ed3c160d3c8adc2126f21c800a6eb0adfc1c1f21fcc39b",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "56a4882acc4d92516094b081356165f49744d5a72e3ffcbd47b12ede8a9180d1",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "5c9a24117260bacd3142091004b6135be2f9b229a3e366ee0076d9aadc18f671",
+      "rejected_by": {
+        "error_code": 500,
+        "error_type": "server_error",
+        "http_status": 500,
+        "message": "<redacted: echoes request content>",
+        "message_bytes": 284
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "6464f375b7d93425d2859be9e81502e6e070d218a1b7411df16b02fb1cc4f203",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "6529c16a0ce114fb4dd61f9004cfd6ff3d72d805bf2b09135c00d5ab5d8d58df",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "67089ecf428efb9d872ed13246ee789034566670b0921d3384c711e05e6bc361",
+      "rejected_by": {
+        "error_code": 500,
+        "error_type": "server_error",
+        "http_status": 500,
+        "message": "<redacted: echoes request content>",
+        "message_bytes": 284
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "68b37e5252c85acabb706726512280d5f249cb36726471ec4cce202d271ca316",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 5683,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "6ac496a98f9ce150300d5428e2d66fac54bb7377d5cafe771e2c4fd20e5eeff4",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 8541,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "7a4567453fdd96b9946c00bbf0b161971e83859b5de71e18c3a860592065472c",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 6617,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "7b4c2ecdf5ff127731948ac4b939ef741deafc8697e3b9a0a7b84f74cf6caddd",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 10481,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "7b8179e5350093fe691540345a1e25f55a9a082f2cda17df167487b2d59b6838",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "95425d5d981e0d6def98a8ea3fb986f115f828a4ed48a84826f2feb6f2b867c6",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "965da8975eb3d83e176484dc53cbf6e34941f6e794012ec1fe789e5c88619e58",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 11105,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "9882732a70149206a534ddf93c1e603c1397edf80e4a1bdc1af0cdbc70bb5664",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 18921,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "991471dd71e244bd36186deb619cd8fd0521f1c923fa432a285c79e710835d38",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 7748,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "9c3597485de3f29e5f0eea0d4cefd1d32fdf86b8ddceb64587cffca2b6453507",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "ae0747f2905191e1efc20d7ad5b50e9faa19e67fd82d447e6733aab68a69c552",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 7036,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "b899e8293a7a7d630c888ad76467d792a15c997818e9098cde392cf74a03da47",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 7764,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "ce410eead6d52f7899e236804476942073ff004f6d2bbbe8c357fc22b553e775",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "cf97cd651314b6e6f4a3053e67b825e8f726e7eb30c04afa259fe82a870327ee",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "d23444058d3d26c1c03066aeac8fc7dc5c92a0c04851a6a43efa6144f357fc4f",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 8401,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "d2e1c2b56ccb877f5b403d8dc24e3555b5372d94109534ce91c33b8392991e37",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "d9c3759331208b94829cbcd1ff1cc0e6b5a0ddc6c10a248fe0afd5d871ffbf9a",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 7189,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "de6f42ec562e052b70c1d24c4fe5a99822d59ed8e44b24cb4d489ed0aad384be",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 7509,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "e23e9303cd45ae14b89b3ff295d2025e08ea5c1c37036aac533313bc685043bc",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "e86bc46be3da52ece5d4f8d780c137f3e69919969d89dd0c0160eec7c54e0376",
+      "rejected_by": {
+        "error_code": 400,
+        "error_type": "invalid_request_error",
+        "http_status": 400,
+        "message": "item['content'] is not an array",
+        "message_bytes": 31
+      },
+      "request_shape": "responses_lite",
+      "status": "rejected"
+    },
+    {
+      "e_final_sha256": "e8f7ee842e0d27d74df66f9727c7ce8df7fef2473c9cfb4cae2bb2e715742596",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 12354,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "eaa2dfb178159b79f5e2e3fdb60179c5e9d729dfcff02c97b5a6acb5d09ebaca",
+      "fits": {
+        "4k": false,
+        "8k": true
+      },
+      "input_tokens": 5313,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    },
+    {
+      "e_final_sha256": "fe1269dff33c20b534215b1cf7fd73b2cffa511d65bbd720f8e7127603d30d1a",
+      "fits": {
+        "4k": false,
+        "8k": false
+      },
+      "input_tokens": 8327,
+      "request_shape": "responses_lite",
+      "status": "counted"
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "context_windows": {
+      "4k": {
+        "context_size": 4096,
+        "does_not_fit": 24,
+        "fits": 0
+      },
+      "8k": {
+        "context_size": 8192,
+        "does_not_fit": 15,
+        "fits": 9
+      }
+    },
+    "counted": 24,
+    "evidence_count": 47,
+    "input_tokens": {
+      "max": 18921,
+      "min": 5313,
+      "p50": 7886,
+      "p90": 11105,
+      "p95": 12354
+    },
+    "max_output_tokens": 512,
+    "percentile_method": "nearest-rank on ascending input_tokens: index = ceil(p / 100 * n), 1-based",
+    "rejected": 23,
+    "rejection_reasons": {
+      "400 invalid_request_error: item['content'] is not an array": 21,
+      "500 server_error: <redacted: echoes request content>": 2
+    },
+    "request_shapes": {
+      "responses_lite": 47
+    },
+    "statistics_scope": "counted inputs only"
+  }
+}

@@ -631,3 +631,25 @@ standard/Lite 形态均补回归。
   tests 115/115 与 `just eval-lock` 通过，模型进程、8080、receipt、private objects 和 GPU compute process 均无残留。
   任务分支以 `3edf08a` 合入并推送 `main`，worktree 已移除，分支保留为
   `zz-done/023-local-4k-qualification`。后续上下文预算与真实证据可服务口径只由当前 WBS 承接。
+
+### 2026-08-14 Plan 024 WP3b-A2 真实 `E_final` exact-token 普查
+
+- **范围**：对项目内既有全部 47 条真实 Guardian `E_final` 做一次可重复、无生成的 exact-token 普查，
+  为上下文档位决策提供事实。新增 `eval/rondo_eval/local_approval/token_census.py`，复用现有生产 evidence reader、
+  Guardian meta 校验、受跟踪 run 账本身份、真实 `LocalApprovalClient.build_request` 与冻结服务合同；
+  未新增 provenance、attestation、资格证据或安全框架，未生成任何 token，未读取 `.env.local`。
+- **计数口径**：冻结 b10333 CUDA runtime + 唯一 GGUF + 冻结 Ministral 模板，走 count-only
+  `POST /v1/responses/input_tokens`；该 endpoint 与真实 `/v1/responses` 共用同一 Responses 转换、模板与
+  tokenizer（字符串 prompt 下 `tokenize_input_prompts(...,true,true)[0]` 即 `tokenize_mixed(...,true,true)`）。
+  Plan 023 锚点精确复现 **5,313 input tokens**。
+- **结果**：47 条全部登记。**24 条计数成功**：min 5,313、p50 7,886、p90 11,105、p95 12,354、max 18,921
+  （nearest-rank）。按 `input_tokens + 512` 判断 **4k 覆盖 0/24、8k 覆盖 9/24**（12k 22/24、16k 23/24、24k 24/24）。
+  **23 条被冻结运行时按形状拒绝**，与上下文无关：21 条 adapter 400 `item['content'] is not an array`
+  （`reasoning` item 无数组 `content`），2 条冻结模板 500。真实判定路径会被同样拒绝。
+- **验收**：同一入口真实运行两次，结果文件逐字节相同（sha256 `c6c848b1…`、文档内 digest `5aa508af…`）；
+  focused tests 123/123、`just eval-lock` 85 packages 通过。共消耗 7 次模型生命周期，其中 5 次用于定位
+  两类拒绝（前几次只报告 endpoint 不可用，无法区分“服务坏了”与“这条证据不可服务”）。
+  收尾确认 capability 仍为 `linux_cuda_built_model_unvalidated`、`model_backed_structured_output` 仍为 `not_run`、
+  未新增资格证据；server、8080、私有临时对象与 GPU compute process 均无残留。
+- **交付**：结果冻结为 `eval/results/baselines/local-approval-exact-token-census-v1.json`。
+  档位与被拒证据处置由 `doc/WBS.md` 与 `doc/WBS/local-approval-model.md` 承接，本计划不规划下游。
