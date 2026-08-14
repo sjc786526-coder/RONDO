@@ -18,7 +18,17 @@ from typing import Any, Mapping
 from ..api_budget_proxy import ApiBudgetProxyError, completed_run_accounting
 from ..artifacts import ArtifactError, ArtifactWriter, validate_private_artifact_bytes
 from ..config import RepoPaths
-from ..contracts import BinaryManifest, ProviderProjection, RunOutcome, Side
+from ..contracts import (
+    AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+    BinaryManifest,
+    Product,
+    ProviderProjection,
+    RunOutcome,
+    auto_review_config_projection,
+    parse_product,
+    product_for_manifest,
+)
+from ..contracts import Side
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
     FIX_GIT_TASK_ID,
@@ -67,8 +77,8 @@ _EVAL_HARNESS_PATHS = (
     "eval/templates",
     "eval/uv.lock",
     "justfile",
-    "mydev/scripts/build-watchdog-lib.sh",
-    "mydev/scripts/with-build-lock.sh",
+    "scripts/build-watchdog-lib.sh",
+    "scripts/with-build-lock.sh",
     "rondo.secrets.example.env",
 )
 _ACTIVE_CAMPAIGN_POINTER = "eval/locks/p2-b7-active.json"
@@ -488,6 +498,7 @@ def publish_terminal_bench_result(
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "track": "tb",
         "side": side.value,
+        **_product_record_field(live_result.prepared.spec.effective_product()),
         "git_commit": git_commit,
         "git_dirty": False,
         "binary_sha256": live_result.prepared.spec.binary.sha256,
@@ -616,6 +627,12 @@ def publish_terminal_bench_failure(
         "eval_harness_commit": eval_harness_commit,
         "binary_workspace_lock_normalization": manifest.workspace_lock_normalization,
         "failure_stage": failure_stage,
+        **_product_config(
+            side,
+            product_for_manifest(side, manifest),
+            guardian_model=provider.guardian_model,
+            guardian_effort=provider.guardian_effort,
+        ),
         **_publication_identity_config(publication),
     }
     metadata: dict[str, Any] | None = None
@@ -686,6 +703,7 @@ def publish_terminal_bench_failure(
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "track": "tb",
         "side": side.value,
+        **_product_record_field(product_for_manifest(side, manifest)),
         "git_commit": git_commit,
         "git_dirty": False,
         "binary_sha256": manifest.sha256,
@@ -784,6 +802,12 @@ def _safe_summary(
             "timeout_seconds": spec.timeout_seconds,
             "max_retries": spec.max_retries,
             "budget_usd": spec.budget_usd,
+            **_product_config(
+                side,
+                spec.effective_product(),
+                guardian_model=spec.provider.guardian_model,
+                guardian_effort=spec.provider.guardian_effort,
+            ),
             **_publication_identity_config(publication),
         },
         "summary": {
@@ -1043,6 +1067,44 @@ def _validate_publication_context(
             raise HarborResultError("publication side differs from the pair topology")
     elif publication.side is not side:
         raise HarborResultError("publication side differs from the campaign slot")
+
+
+def _product_record_field(product: Product | None) -> dict[str, object]:
+    """Only rows whose subject is a RONDO product carry ``product``.
+
+    Per ``doc/eval-data-layout.md`` 3.1 the frozen upstream never gets one, and
+    a historical row without the field is read as ``rondo-local`` -- which is
+    why the field is omitted rather than written as null.
+    """
+
+    return {} if product is None else {"product": product.value}
+
+
+def _product_config(
+    side: Side,
+    product: Product | None,
+    *,
+    guardian_model: str,
+    guardian_effort: str,
+) -> dict[str, object]:
+    """Project the product identity and its recorded ``[auto_review]`` state.
+
+    Both the tracked record and the archived ``run-summary.json`` go through
+    here so a successful and a failed publication can never disagree, and so
+    the frozen upstream keeps carrying neither field.
+    """
+
+    if product is None:
+        return {}
+    return {
+        "product": product.value,
+        "auto_review_config": auto_review_config_projection(
+            side,
+            product,
+            guardian_model=guardian_model,
+            guardian_effort=guardian_effort,
+        ),
+    }
 
 
 def _publication_identity_config(

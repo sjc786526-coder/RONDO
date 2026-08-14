@@ -22,12 +22,17 @@ from rondo_eval.config import RepoPaths  # noqa: E402
 from rondo_eval.artifacts import ArtifactError, ArtifactWriter  # noqa: E402
 from rondo_eval import artifacts as artifacts_module  # noqa: E402
 from rondo_eval.contracts import (  # noqa: E402
+    AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+    AUTO_REVIEW_EVIDENCE_DIR,
     BinaryManifest,
+    ContractError,
     ModelPricing,
+    Product,
     ProviderProjection,
     RunOutcome,
     RunSpec,
     Side,
+    product_for_manifest,
 )
 from rondo_eval.docker_supervisor import DockerSupervisionError  # noqa: E402
 from rondo_eval.runtime_bridge import RuntimeBridgeError  # noqa: E402
@@ -60,7 +65,9 @@ from rondo_eval.terminal_bench.runner import (  # noqa: E402
 )
 
 
-class TerminalBenchResultTests(unittest.TestCase):
+class _ResultFixture:
+    """Shared synthetic Terminal-Bench producer for the result-contract suites."""
+
     PAID_BATCH_ID = "test-active-paid-batch"
 
     def setUp(self) -> None:
@@ -377,6 +384,8 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
         return (bundle / "E_final.json").relative_to(self.jobs).as_posix()
 
+
+class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
     def test_completed_requires_job_trial_and_reward_not_just_host_zero(self) -> None:
         parsed = parse_single_task_result(self.jobs, host_returncode=0)
         self.assertEqual(parsed.outcome, RunOutcome.COMPLETED)
@@ -2421,6 +2430,162 @@ class TerminalBenchResultTests(unittest.TestCase):
         )
         runs_root = self.root / "eval-data" / "runs"
         self.assertFalse((runs_root / f".{run_id}.publish.json").exists())
+
+
+class ProductResultContractTests(_ResultFixture, unittest.TestCase):
+    """Product identity and the recorded `[auto_review]` state in results.
+
+    These run through the real publication path with a synthetic in-memory
+    producer: no Docker, no provider and no campaign identity are created.
+    """
+
+    def _product_live_result(
+        self, run_id: str, *, side: Side, product: Product | None
+    ) -> BudgetedTerminalBenchResult:
+        live_result = self._live_result(run_id)
+        spec = live_result.prepared.spec
+        binary = replace(
+            spec.binary,
+            product=None if product is None else product.value,
+        )
+        object.__setattr__(
+            live_result,
+            "prepared",
+            SimpleNamespace(
+                spec=replace(spec, side=side, product=product, binary=binary)
+            ),
+        )
+        return live_result
+
+    def _publish(
+        self, *, side: Side, product: Product | None
+    ) -> tuple[dict, dict]:
+        run_id = f"20260814-010000001-tb-{side.value}-r1"
+        metadata = self.root / "work" / f"{side.value}-api-metadata.json"
+        self._write_metadata(metadata, "main", "main", "main")
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        publish_terminal_bench_result(
+            RepoPaths(self.root, self.root),
+            results_worktree_root=self.root,
+            run_id=run_id,
+            side=side,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            live_result=self._product_live_result(run_id, side=side, product=product),
+            parsed=parsed,
+            metadata_path=metadata,
+            publication=self._campaign_publication(side=side),
+        )
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        summary = json.loads(
+            (self.root / "eval-data/runs" / run_id / "run-summary.json").read_text()
+        )
+        return record, summary
+
+    def test_multi_records_its_product_and_the_closed_auto_review_state(self) -> None:
+        record, summary = self._publish(
+            side=Side.RONDO, product=Product.RONDO_MULTI
+        )
+
+        self.assertEqual(record["product"], "rondo-multi")
+        closed = {
+            "schema_version": AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+            "model": None,
+            "model_provider": None,
+            "reasoning_effort": None,
+            "evidence_dir": None,
+        }
+        self.assertEqual(record["config"]["auto_review_config"], closed)
+        # The archived summary and the tracked row come from one projection, so
+        # they can never describe different configuration states.
+        self.assertEqual(summary["config"]["auto_review_config"], closed)
+        self.assertEqual(summary["config"]["product"], "rondo-multi")
+
+    def test_local_keeps_recording_its_configured_guardian_overrides(self) -> None:
+        record, _ = self._publish(
+            side=Side.RONDO, product=Product.RONDO_LOCAL
+        )
+
+        self.assertEqual(record["product"], "rondo-local")
+        self.assertEqual(
+            record["config"]["auto_review_config"],
+            {
+                "schema_version": AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+                "model": "gpt-5.6-luna",
+                "model_provider": None,
+                "reasoning_effort": "low",
+                "evidence_dir": AUTO_REVIEW_EVIDENCE_DIR,
+            },
+        )
+
+    def test_the_frozen_upstream_row_carries_no_product_identity(self) -> None:
+        record, summary = self._publish(side=Side.CODEX, product=None)
+
+        self.assertNotIn("product", record)
+        self.assertNotIn("auto_review_config", record["config"])
+        self.assertNotIn("product", summary["config"])
+
+    def test_a_rondo_row_without_a_declared_product_is_read_as_local(self) -> None:
+        # This is how every one of the 224 historical `side=rondo` rows and
+        # every bundle frozen before the dimension must keep being interpreted.
+        live_result = self._live_result("20260814-010000002-tb-rondo-r1")
+        legacy = replace(live_result.prepared.spec.binary, product=None)
+
+        self.assertEqual(
+            product_for_manifest(Side.RONDO, legacy), Product.RONDO_LOCAL
+        )
+        self.assertIsNone(product_for_manifest(Side.CODEX, legacy))
+
+    def test_a_run_cannot_claim_a_product_its_binary_denies(self) -> None:
+        live_result = self._live_result("20260814-010000003-tb-rondo-r1")
+        spec = live_result.prepared.spec
+        local_binary = replace(spec.binary, product=Product.RONDO_LOCAL.value)
+
+        with self.assertRaises(ContractError):
+            replace(
+                spec,
+                side=Side.RONDO,
+                product=Product.RONDO_MULTI,
+                binary=local_binary,
+            ).validate()
+
+    def test_the_failure_path_records_the_same_product_projection(self) -> None:
+        run_id = "20260814-010000004-tb-rondo-r1"
+        live_result = self._product_live_result(
+            run_id, side=Side.RONDO, product=Product.RONDO_MULTI
+        )
+        spec = live_result.prepared.spec
+        writer = ArtifactWriter(
+            RepoPaths(self.root, self.root),
+            run_id,
+            results_worktree_root=self.root,
+        ).start()
+
+        publish_terminal_bench_failure(
+            RepoPaths(self.root, self.root),
+            writer=writer,
+            run_id=run_id,
+            side=Side.RONDO,
+            git_commit="e" * 40,
+            eval_harness_commit="f" * 40,
+            manifest=spec.binary,
+            provider=spec.provider,
+            budget_snapshot=live_result.budget_snapshot,
+            metadata_path=self.root / "missing-api-metadata.json",
+            outcome=RunOutcome.INFRA_FAILED,
+            failure_stage="runtime",
+            publication=self._campaign_publication(side=Side.RONDO, exit_code=70),
+            secrets=(),
+        )
+
+        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
+        self.assertEqual(record["product"], "rondo-multi")
+        self.assertEqual(
+            record["config"]["auto_review_config"]["model"], None
+        )
+        self.assertEqual(
+            record["config"]["auto_review_config"]["evidence_dir"], None
+        )
 
 
 if __name__ == "__main__":

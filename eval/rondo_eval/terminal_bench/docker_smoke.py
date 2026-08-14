@@ -18,7 +18,13 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from ..config import ConfigError, RepoPaths, RuntimeConfig, load_runtime_config
-from ..contracts import RunOutcome, Side
+from ..contracts import (
+    Product,
+    RunOutcome,
+    Side,
+    auto_review_config_projection,
+    product_for_manifest,
+)
 from ..docker_supervisor import (
     DockerCounter,
     DockerSupervisionError,
@@ -129,9 +135,20 @@ class DockerNoApiSmokeResult:
     def safe_summary(self) -> dict[str, object]:
         if self.harbor.docker_evidence is None:
             raise DockerNoApiSmokeError("completed smoke lacks Docker evidence")
+        spec = self.prepared.spec
+        product = spec.effective_product()
         return {
             "schema_version": 1,
-            "side": self.prepared.spec.side.value,
+            "side": spec.side.value,
+            # The frozen upstream is a comparison side, not a product, so it
+            # records neither the identity nor the auto_review state.
+            **({} if product is None else {"product": product.value}),
+            "auto_review_config": auto_review_config_projection(
+                spec.side,
+                product,
+                guardian_model=spec.provider.guardian_model,
+                guardian_effort=spec.provider.guardian_effort,
+            ),
             "status": "completed" if self.passed else "failed",
             "outcome": self.parsed.outcome.value,
             "task_outcome": self.parsed.task_outcome,
@@ -601,6 +618,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--rondo-binary-manifest", required=True, type=Path)
     parser.add_argument("--codex-binary-manifest", required=True, type=Path)
+    # Omitting this selects the historical Local product; a Multi acceptance
+    # run has to name itself, and the choice is cross-checked against the
+    # bundle manifest before anything is executed.
+    parser.add_argument(
+        "--product",
+        type=Product,
+        choices=list(Product),
+        default=Product.RONDO_LOCAL,
+    )
     parser.add_argument("--docker-host-volume", required=True, type=Path)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     return parser
@@ -632,6 +658,11 @@ def main(argv: list[str] | None = None) -> int:
                 manifest_path=manifest_paths[side],
                 manifest=manifests[side],
             )
+        selected_product = args.product
+        if product_for_manifest(Side.RONDO, manifests[Side.RONDO]) != selected_product:
+            raise DockerNoApiSmokeError(
+                "selected product differs from the frozen RONDO bundle"
+            )
         proof = lease_from_watchdog()
         counter = DockerCliCounter(
             host_data_root=args.docker_host_volume,
@@ -648,6 +679,7 @@ def main(argv: list[str] | None = None) -> int:
                 side=side,
                 batch_id=B2_NO_API_BATCH_ID,
                 binary=manifests[side],
+                product=selected_product if side is Side.RONDO else None,
                 image_digest=FIX_GIT_IMAGE_DIGEST,
                 source_checkout=str(
                     paths.common_root
@@ -688,6 +720,7 @@ def main(argv: list[str] | None = None) -> int:
             "schema_version": 1,
             "pair_id": pair_identity.pair_id,
             "pair_lock_sha256": pair_identity.lock_sha256,
+            "product": selected_product.value,
             "eval_harness_commit": eval_harness_commit,
             "order": [Side.RONDO.value, Side.CODEX.value],
             "official_api_requests": 0,

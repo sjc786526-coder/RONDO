@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .api_budget_proxy import _atomic_private_json
+from .contracts import Product, product_layout
 from .fair_comparison import CATALOG_PROJECTION_VERSION
 
 
@@ -34,7 +35,15 @@ _MAX_SOURCE_CATALOG_BYTES = 4 * 1024 * 1024
 
 CATALOG_PROJECTION_ALGORITHM = "full_catalog_with_auto_review_override"
 UPSTREAM_CATALOG_PATH = "codex-rs/models-manager/models.json"
-RONDO_CATALOG_PATH = "mydev/codex-rs/models-manager/models.json"
+# RONDO Local's path, kept as a module constant because every campaign frozen
+# so far records it.  Use ``rondo_catalog_path`` for anything product-aware.
+RONDO_CATALOG_PATH = product_layout(Product.RONDO_LOCAL).catalog_path
+
+
+def rondo_catalog_path(product: Product | None) -> str:
+    """Repository-relative built-in catalog blob for one RONDO product."""
+
+    return product_layout(product).catalog_path
 
 
 class FrozenModelCatalogError(ValueError):
@@ -368,6 +377,7 @@ def load_shared_model_catalog(
     rondo_source_commit: str,
     main_model: str,
     guardian_model: str,
+    product: Product | None = None,
     _run: Callable[..., Any] = subprocess.run,
 ) -> FrozenModelCatalogProjection:
     """Project one catalog artifact that both sides load byte for byte.
@@ -389,7 +399,7 @@ def load_shared_model_catalog(
         common_root,
         side="rondo",
         commit=rondo_source_commit,
-        path=RONDO_CATALOG_PATH,
+        path=rondo_catalog_path(product),
         _run=_run,
     )
     if upstream_source.blob_id != rondo_source.blob_id or upstream_raw != rondo_raw:

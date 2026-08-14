@@ -44,7 +44,7 @@ eval-b3-oracle-no-api docker_host_volume metrics_dir:
     @env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
         RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
-        "$PWD/mydev/scripts/with-build-lock.sh" \
+        "$PWD/scripts/with-build-lock.sh" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.oracle_smoke \
         --docker-host-volume "{{docker_host_volume}}"
 
@@ -57,19 +57,61 @@ eval-plan013-provider-probes:
         UV_CACHE_DIR="$PWD/eval-data/uv-cache" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.provider_probe
 
-# One supervised B2 attempt: RONDO first, Codex second, stop on the first failure.
-# The caller supplies the Docker Desktop host-volume path and a fresh metrics dir.
-eval-b2-no-api docker_host_volume metrics_dir:
+# One supervised B2 attempt for one RONDO product: RONDO first, Codex second,
+# stop on the first failure. `product` is `rondo-local` or `rondo-multi` and
+# selects both the frozen bundle namespace and the recorded product identity;
+# `rondo_bundle` is the runtime-bundle directory name inside that namespace.
+# The frozen Local bundle is
+# `cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle`.
+eval-b2-no-api product rondo_bundle docker_host_volume metrics_dir:
     @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
-    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+    @case "{{product}}" in \
+        rondo-local) namespace=rondo ;; \
+        rondo-multi) namespace=rondo-multi ;; \
+        *) echo "product must be rondo-local or rondo-multi" >&2; exit 2 ;; \
+        esac; \
+        common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
         env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
         RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
-        "$PWD/mydev/scripts/with-build-lock.sh" \
+        "$PWD/scripts/with-build-lock.sh" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.docker_smoke \
-        --rondo-binary-manifest "$common_root/eval-data/bin/rondo/cb652e1418e06d53171755963ad9eb8075259ffc-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
+        --product "{{product}}" \
+        --rondo-binary-manifest "$common_root/eval-data/bin/$namespace/{{rondo_bundle}}/manifest.json" \
         --codex-binary-manifest "$common_root/eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json" \
         --docker-host-volume "{{docker_host_volume}}"
+
+# One supervised lightweight `codex` build for one RONDO product line. Only one
+# product target may be hot at a time (see doc/WBS.md 4.3), so clean the other
+# side before switching. The Cargo target stays inside the monitored project
+# root and the whole build runs under the shared root watchdog.
+product-build product metrics_dir:
+    @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
+    @case "{{product}}" in \
+        rondo-local) source_dir=mydev ;; \
+        rondo-multi) source_dir=multidev ;; \
+        *) echo "product must be rondo-local or rondo-multi" >&2; exit 2 ;; \
+        esac; \
+        RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
+        CARGO_TARGET_DIR="$PWD/$source_dir/codex-rs/target" \
+        "$PWD/scripts/with-build-lock.sh" \
+        cargo build --locked --manifest-path "$PWD/$source_dir/codex-rs/Cargo.toml" \
+        -p codex-cli --bin codex
+
+# The default-off product baseline gate: an unconfigured `[auto_review]` must
+# leave every guardian override unset after a real config load.
+product-default-off-test product metrics_dir:
+    @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
+    @case "{{product}}" in \
+        rondo-local) source_dir=mydev ;; \
+        rondo-multi) source_dir=multidev ;; \
+        *) echo "product must be rondo-local or rondo-multi" >&2; exit 2 ;; \
+        esac; \
+        RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
+        CARGO_TARGET_DIR="$PWD/$source_dir/codex-rs/target" \
+        "$PWD/scripts/with-build-lock.sh" \
+        cargo test --locked --manifest-path "$PWD/$source_dir/codex-rs/Cargo.toml" \
+        -p codex-core --lib -- config::config_loader_tests::
 
 # One frozen P2/B7 campaign. The coordinator owns only a lightweight campaign
 # lease; each Oracle/paid step obtains a fresh heavy lock and watchdog lease.
@@ -114,7 +156,7 @@ eval-b7-preflight-receipts docker_host_volume metrics_dir:
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
         UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
         RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
-        "$PWD/mydev/scripts/with-build-lock.sh" \
+        "$PWD/scripts/with-build-lock.sh" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.preflight_producer \
         --docker-host-volume "{{docker_host_volume}}"
 

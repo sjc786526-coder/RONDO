@@ -141,43 +141,51 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 ### 已完成
 
-- 规划基线核对：主工作区 `main@d84632fb74dbaad0b4b43c047d292dc46450bc77` 干净并与 `origin/main` 对齐；
-  进入时没有其他 linked worktree。
-- 已创建专用 worktree `.claude/worktrees/023-rondo-multi-bootstrap` 和分支
-  `worktree-023-rondo-multi-bootstrap`。
-- 已阅读顶层/方向 WBS、计划模板、数据布局、开发环境、相关历史日志与实际路径引用；本计划已形成，尚未实施。
-- 现场只读检查：`mydev/` 有 6,013 个 Git 跟踪条目（含 60 个可执行文件、1 个 symlink）；WBS 点名的六个
-  `mydev/codex-rs/core/` 未跟踪残留目录存在于主工作区，在本 worktree 中未物化。复制仍必须以 Git 清单为准，
-  不能从主工作区递归复制。
+本计划范围内的实施已全部完成并提交到 `worktree-023-rondo-multi-bootstrap`。执行细节、疑难判断与
+门禁数字见 `agent_log/2026-08-14-004500-plan022-rondo-multi-product-baseline.md`；成果摘要见
+`doc/WBS-COMPLETED.md`。要点：
+
+1. 共享看门狗已 `git mv` 到根 `scripts/`（mode 与字节不变），现行引用点全部改为根路径且不留 shim；
+   共享 helper 回归改由两条产品线的 `test-github-scripts` 入口显式调用根 helper。
+2. `multidev/` 由 Git 清单驱动复制，6,011 条与 `mydev/` 的 blob、mode、工作树 sha256 逐条相同，
+   无清单外文件，六个未跟踪残留目录均未进入。
+3. 默认关闭行为门落在两棵树同源的 `config_loader_tests.rs`，经 `ConfigBuilder` 真实加载路径断言。
+4. 产品身份通过 `product_layout()` 单一映射贯通 source/target/bundle/manifest/catalog/adapter/
+   RunSpec/campaign/result；旧无 `product` 工件按 `rondo-local` 只读兼容，`side=codex` 不携带身份。
+5. 结果合同新增版本化 `auto_review_config`，与 adapter 的实际 `-c` 覆盖同源，成功/失败路径共用投影。
 
 ### 当前工作
 
-等待执行者在取得一次执行授权后按本计划实施。
+无。等待独立审查者验收后决定是否合并。
 
 ### 本任务剩余步骤
 
-1. 复核 worktree/主工作区状态和本计划，向用户一次性说明实施范围、普通依赖下载、受控 Cargo 构建与资源影响，
-   取得执行授权。
-2. 迁移共享看门狗及全部现行引用，补路径回归；先改 `mydev/justfile`。
-3. 从 Git 跟踪清单复制 `mydev/` 到 `multidev/`，机械验证复制完整性和排除项。
-4. 落地默认关闭行为门与双产品 binary/manifest/archive 身份，补新旧兼容和 fail-closed 回归。
-5. 运行 focused 门禁、完整 eval 无 API 测试和一次 Multi 轻量带锁构建，检查资源摘要与意外生成物。
-6. 精炼同步 WBS/WBS-COMPLETED/开发环境/日志，审查 diff 后提交 worktree 分支并交给独立审查者。
+无。执行者已按硬约束 15 停在本 worktree 分支：未合并 `main`、未推送远端、未删除 worktree。
 
 ### 阻塞项
 
-无。若执行时主工作区或本 worktree 出现来源不明修改、另一重型任务在运行、宿主资源计数不可用或必须清理
-来源不明 target，停止并报告，不自行覆盖或清理。
+无。
 
 ### 当前验收状态
 
-- 仅完成文档与现场只读规划；未修改产品/测评代码。
-- 未运行 Cargo、Docker、真实 API、真实模型或测试门禁。
+对照 §1 完成/验收标准：
+
+- 复制完整性、看门狗迁移、默认关闭行为门、结果合同、eval 产品身份接入、无本地模型依赖：均已满足。
+- 门禁：`just eval-lock` 通过；完整 eval 无 API 套件 592/592（0 fail、0 skip）；共享 helper 9/9；
+  经迁移后根看门狗的 Multi `codex-core` 默认关闭回归 80/80；一次 Multi `codex-cli` 轻量带锁构建成功
+  （`codex-cli 0.147.0`）。两次带锁运行 `stop_reason=none`、`cleanup_reason=none`。未跑全 workspace。
+- `git diff --check`：手写改动部分干净。`multidev/` 例外 —— 6,011 个文件全为新增行，其中 419 个上游
+  文件自带行尾空白（TUI 动画帧、prompt markdown、apply-patch 空白 fixture），已逐一 `cmp` 确认与
+  `mydev/` 原件字节相同；修改它们会违反更强的「精确复制」硬约束，因此保留原样。
+- 未运行/不适用：Docker、no-API 双侧真实执行、真实 API、真实本地模型、全 workspace Rust 测试。
+  `eval-data/bin/rondo-multi/` 仍为空，Multi 尚无冻结 runtime bundle。
+- 已知代价（决策 008）：看门狗改根后，历史 Local/Codex bundle 的 `binary_freeze verify*` 因其
+  build-command 记录的是旧 wrapper 路径而不再通过。
 
 ### 交接边界
 
-- 本任务完成后冻结本计划；工作包 3 的三线并行、Multi D1/D2 和首个功能增量只链接 `doc/WBS.md` 与
-  `doc/WBS/multi-agent-trusted-evidence.md`，不在本计划续写。
+本计划到此冻结为任务合同与历史记录。工作包 3 的三线并行、Multi D1/D2 和首个功能增量只链接
+`doc/WBS.md` 与 `doc/WBS/multi-agent-trusted-evidence.md`，不在本计划续写。
 
 ## 6. 关键决策记录
 
@@ -192,3 +200,6 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 | 005 | 旧无 product 工件只读兼容，新 Multi 工件显式身份并严格拒绝矛盾 | 历史只加不改，同时让 Multi 不会落入 Local 路径 | manifest/result parser | 已采纳 |
 | 006 | 本工作包只做无 API/fake 与轻量构建验收，不产正式 campaign 或能力结论 | M-0 是产品基线；真实退化验收属于后续重大增量并需单独授权 | 测试与交付 | 已采纳 |
 | 007 | 执行者只提交 worktree 分支，独立审查前不合并/推送 | 用户指定由独立审查者验收，保留清晰审查边界 | Git 交付 | 已采纳 |
+| 008 | 接受「看门狗改根后历史 bundle 不再可 re-verify」这一代价，不做双路径兼容 | 硬约束 5 要求精确接受根脚本并拒绝旧路径；冻结 bundle 字节与 `eval/locks/*.json` 未改，影响面止于 `binary_freeze verify*` | binary freeze | 已采纳 |
+| 009 | `--product` 与 manifest `product` 键只在非 Local 时出现于 build-command，Local 保持逐字历史形状 | 冻结的 seven-key 工件把完整 argv 写进 manifest，无条件追加会改写历史合同形状 | binary freeze / manifest | 已采纳 |
+| 010 | eval 为 Multi 不注入 `[auto_review]` 三项覆盖，Local 的既有公平合同不变 | M-0 要求基线在关闭态取得；改 Local 会动既有公平运行合同（硬约束 9） | adapter / result | 已采纳 |

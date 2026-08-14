@@ -51,8 +51,10 @@ def product_for_side(side: Side, product: Product | None) -> Product | None:
     """Return the product identity that may be recorded for ``side``.
 
     The frozen upstream side never carries a product identity.  The RONDO side
-    always does; callers that have not selected one yet get the only product
-    that currently exists.
+    always does; an unset product means an artifact or request predates the
+    product dimension, and those are Local by definition (see
+    ``doc/eval-data-layout.md`` 3.1).  A Multi request therefore never arrives
+    here as ``None`` -- it has to name itself.
     """
 
     if side is Side.CODEX:
@@ -66,6 +68,129 @@ def product_for_side(side: Side, product: Product | None) -> Product | None:
     if not isinstance(product, Product):
         raise ContractError("product identity is invalid")
     return product
+
+
+@dataclass(frozen=True)
+class ProductLayout:
+    """Where one RONDO product keeps its source, build tree and artifacts.
+
+    Every product-dependent path in the facility is derived from here so a new
+    product cannot be half-wired: one entry decides the source directory, the
+    Cargo target name, the frozen bundle namespace and the model catalog blob.
+    """
+
+    product: Product
+    source_dir: str
+    artifact_dir: str
+    target_prefix: str
+
+    @property
+    def catalog_path(self) -> str:
+        """Repository-relative path of this product's built-in model catalog."""
+
+        return f"{self.source_dir}/codex-rs/models-manager/models.json"
+
+
+_PRODUCT_LAYOUTS = {
+    # `bin/rondo/` predates the product dimension and stays under its original
+    # name; Multi must carry `multi` explicitly so the two can never collide.
+    Product.RONDO_LOCAL: ProductLayout(
+        product=Product.RONDO_LOCAL,
+        source_dir="mydev",
+        artifact_dir="rondo",
+        target_prefix="rondo",
+    ),
+    Product.RONDO_MULTI: ProductLayout(
+        product=Product.RONDO_MULTI,
+        source_dir="multidev",
+        artifact_dir="rondo-multi",
+        target_prefix="rondo-multi",
+    ),
+}
+
+
+def product_layout(product: Product | None) -> ProductLayout:
+    """Return the layout for ``product``; ``None`` means the historical Local one."""
+
+    resolved = Product.RONDO_LOCAL if product is None else product
+    layout = _PRODUCT_LAYOUTS.get(resolved)
+    if layout is None:
+        raise ContractError("product identity is invalid")
+    return layout
+
+
+def parse_product(value: object) -> Product:
+    try:
+        return Product(str(value))
+    except ValueError as exc:
+        raise ContractError("product identity is invalid") from exc
+
+
+AUTO_REVIEW_CONFIG_SCHEMA_VERSION = 1
+AUTO_REVIEW_EVIDENCE_DIR = "/logs/agent/guardian-evidence"
+
+
+def auto_review_overrides(
+    product: Product | None,
+    *,
+    guardian_model: str,
+    guardian_effort: str,
+) -> dict[str, str | None]:
+    """Return the ``[auto_review]`` fields the harness configures for a product.
+
+    This is the single source of truth behind both the agent's ``-c`` overrides
+    and the ``auto_review_config`` block recorded in results, so a run can never
+    claim a configuration state its command line contradicts.
+
+    RONDO Local keeps the frozen P1/P2 fairness contract: the Guardian model,
+    effort and evidence directory are configured explicitly.  RONDO Multi's
+    product baseline is defined as the closed state, so it configures none of
+    them.  ``model_provider`` is never configured by the harness on either
+    product -- the Guardian inherits the session provider.
+    """
+
+    if product is Product.RONDO_MULTI:
+        return {
+            "model": None,
+            "model_provider": None,
+            "reasoning_effort": None,
+            "evidence_dir": None,
+        }
+    if product is Product.RONDO_LOCAL:
+        return {
+            "model": guardian_model,
+            "model_provider": None,
+            "reasoning_effort": guardian_effort,
+            "evidence_dir": AUTO_REVIEW_EVIDENCE_DIR,
+        }
+    raise ContractError("product identity is invalid")
+
+
+def auto_review_config_projection(
+    side: Side,
+    product: Product | None,
+    *,
+    guardian_model: str,
+    guardian_effort: str,
+) -> dict[str, object] | None:
+    """Project the recorded ``[auto_review]`` state for one run.
+
+    ``None`` values mean the field was left unset -- that is a statement about
+    configuration, never about the model a provider or catalog ends up deriving.
+    Returns ``None`` for the frozen upstream, which has no such configuration.
+    """
+
+    resolved = product_for_side(side, product)
+    if resolved is None:
+        return None
+    return {
+        "schema_version": AUTO_REVIEW_CONFIG_SCHEMA_VERSION,
+        **auto_review_overrides(
+            resolved,
+            guardian_model=guardian_model,
+            guardian_effort=guardian_effort,
+        ),
+    }
 
 
 class RunOutcome(StrEnum):
@@ -93,6 +218,9 @@ class BinaryManifest:
     bwrap_archive_sha256: str
     bwrap_source_tree_sha256: str
     workspace_lock_normalization: str | None = None
+    # Absent on every bundle frozen before the product dimension existed and on
+    # every frozen-upstream bundle.  ``product_for_manifest`` resolves it.
+    product: str | None = None
 
     def validate(self) -> None:
         if not isinstance(self.path, str) or not self.path:
@@ -141,6 +269,8 @@ class BinaryManifest:
             or not self.workspace_lock_normalization
         ):
             raise ContractError("workspace lock normalization must be non-empty or null")
+        if self.product is not None:
+            parse_product(self.product)
 
 
 @dataclass(frozen=True)
@@ -416,6 +546,18 @@ class ProviderProjection:
         }
 
 
+def product_for_manifest(side: Side, manifest: BinaryManifest) -> Product | None:
+    """Resolve which product a frozen bundle belongs to.
+
+    A bundle that names its product is authoritative.  One that does not is
+    either the frozen upstream (never a product) or a RONDO bundle frozen
+    before the dimension existed, which is Local.
+    """
+
+    declared = None if manifest.product is None else parse_product(manifest.product)
+    return product_for_side(side, declared)
+
+
 @dataclass(frozen=True)
 class RunSpec:
     side: Side
@@ -425,6 +567,9 @@ class RunSpec:
     binary: BinaryManifest
     terminal_bench_version: str
     provider: ProviderProjection
+    # Which RONDO product is under test.  Orthogonal to ``side``; `None` means
+    # the frozen upstream side or a caller that predates the dimension.
+    product: Product | None = None
     approvals_reviewer: str = "auto_review"
     approval_policy: str = "on-request"
     sandbox_mode: str = "workspace-write"
@@ -446,6 +591,10 @@ class RunSpec:
         _require_sha256(self.task_image_digest.removeprefix("sha256:"), "task image digest")
         self.binary.validate()
         self.provider.validate()
+        # The run and the binary it runs must name the same product, otherwise
+        # a Multi request could execute a Local bundle and still look coherent.
+        if self.effective_product() != product_for_manifest(self.side, self.binary):
+            raise ContractError("run product differs from its frozen binary product")
         if not self.terminal_bench_version:
             raise ContractError("Terminal-Bench version is required")
         expected = (
@@ -478,7 +627,13 @@ class RunSpec:
         ):
             raise ContractError("run budget must be within the supported 40 USD cap")
 
+    def effective_product(self) -> Product | None:
+        return product_for_side(self.side, self.product)
+
     def fairness_fingerprint(self) -> dict[str, Any]:
+        # Deliberately excludes ``product``: the two sides of a fair pair are
+        # the RONDO product and the frozen upstream, so they can never share a
+        # product value.  Product is an identity dimension, not a run condition.
         self.validate()
         return {
             "schema_version": self.schema_version,
@@ -502,6 +657,8 @@ class RunSpec:
         self.validate()
         value = asdict(self)
         value["side"] = self.side.value
+        effective = self.effective_product()
+        value["product"] = None if effective is None else effective.value
         value["provider"] = self.provider.to_dict()
         value["binary"]["build_command"] = list(self.binary.build_command)
         value["binary"]["code_mode_host_build_command"] = list(

@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .contracts import BinaryManifest, ModelPricing, ProviderProjection, RunSpec, Side
+from .contracts import (
+    BinaryManifest,
+    ModelPricing,
+    Product,
+    ProviderProjection,
+    RunSpec,
+    Side,
+)
 
 
 _ENV_NAME = re.compile(r"[A-Z][A-Z0-9_]*\Z")
@@ -184,6 +191,7 @@ def make_run_spec(
     task_image_digest: str,
     binary: BinaryManifest,
     terminal_bench_version: str,
+    product: Product | None = None,
     provider_name: str | None = None,
     timeout_seconds: int = 1800,
     max_retries: int = 0,
@@ -200,6 +208,7 @@ def make_run_spec(
         binary=binary,
         terminal_bench_version=terminal_bench_version,
         provider=projection,
+        product=product,
         sandbox_network_access=True,
         code_mode_host=True,
         timeout_seconds=timeout_seconds,

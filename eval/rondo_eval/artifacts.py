@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .config import RepoPaths
-from .contracts import RunOutcome
+from .contracts import ContractError, RunOutcome, parse_product
 
 
 _RUN_ID = re.compile(
@@ -67,6 +67,9 @@ _RECORD_FIELDS = {
     "artifacts",
     "notes",
 }
+# Written only when the subject is a RONDO product, so historical rows and the
+# frozen-upstream side keep exactly the schema v1 field set they already have.
+_OPTIONAL_RECORD_FIELDS = {"product"}
 _UPSTREAM_CODEX_IDENTITY = {
     "tag": "rust-v0.147.0",
     "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
@@ -407,13 +410,36 @@ class ArtifactWriter:
         _fsync_directory(self.runs_root)
 
 
+_NON_PRODUCT_SIDES = {"codex", "sol-static"}
+
+
+def _validate_record_product(record: Mapping[str, Any], *, side: object) -> None:
+    """Enforce doc/eval-data-layout.md 3.1 on the optional product field.
+
+    Absent stays legal forever: historical RONDO rows are read as
+    ``rondo-local`` and are never backfilled.  What must not happen is a row
+    claiming a product for a subject that is not a RONDO product.
+    """
+
+    if "product" not in record:
+        return
+    if side in _NON_PRODUCT_SIDES:
+        raise ArtifactError("run record side cannot carry a product identity")
+    try:
+        parse_product(record["product"])
+    except ContractError as exc:
+        raise ArtifactError("run record product identity is invalid") from exc
+
+
 def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) -> None:
     if not isinstance(record, Mapping):
         raise ArtifactError("run record must be an object")
     match = _match_run_id(run_id)
+    fields = set(record)
     if (
         match is None
-        or set(record) != _RECORD_FIELDS
+        or not _RECORD_FIELDS <= fields
+        or fields - _RECORD_FIELDS - _OPTIONAL_RECORD_FIELDS
         or record.get("schema_version") != 1
         or record.get("run_id") != run_id
     ):
@@ -422,6 +448,7 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
     side = record.get("side")
     if track != match.group("track") or side != match.group("side") or side not in _SIDES[track]:
         raise ArtifactError("run record track or side is invalid")
+    _validate_record_product(record, side=side)
     created_at = record.get("created_at")
     if not isinstance(created_at, str) or not _TIMESTAMP.fullmatch(created_at):
         raise ArtifactError("run record timestamp is invalid")

@@ -1,10 +1,10 @@
 # 方向 3：RONDO Multi（可信证据型多智能体产品线）
 
-最后更新：2026-08-13 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-14 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 定位与状态
 
-只读研究已完成，产品基线尚未建立。研究证据、开源系统比较、候选对象语义和风险分析见
+只读研究与产品基线（M-0）均已完成，功能开发未开始。研究证据、开源系统比较、候选对象语义和风险分析见
 `doc/research/multi-agent-trusted-evidence-research.md`；本页是是否实施、阶段顺序和验收边界的唯一规划来源。
 
 **方向 3 现在是独立产品源码，不是 RONDO Local 内的可插拔模式。** `multidev/` 与 `mydev/` 并列，
@@ -40,44 +40,34 @@
   压缩、证据身份与来源、冲突处理、持久化与恢复、root/worker/writer 权限、调度和 TUI。此处仅举例，
   不约束具体实现。
 
-## M-0 产品基线建立（`doc/WBS.md` 工作包 2）
+## M-0 产品基线（已完成）
 
-唯一现在可立项的工作包。范围严格限定，**不夹带任何 Multi 功能开发，也不运行付费 TB**。
+`multidev/` 由本任务基线 `mydev/` 的 Git 跟踪文件精确复制而成，未回退 Local 审批代码，也未从纯净
+v0.147.0 或历史 commit 起步。落地证据见 `doc/WBS-COMPLETED.md`；取舍论证见
+`agent_log/2026-08-13-strategy-consensus-landing.md`。
 
-### 落地方式：直接复制，不回退
+### “干净基线”的定义（持续约束）
 
-从当前 `mydev/` 复制 git 跟踪的文件，**不删除、不回退 Local 审批代码**，也不从纯净 v0.147.0 或历史 commit 起步。
+> `multidev/` **尚未加入任何 Multi 产品行为**；Local 审批接口存在，但**默认关闭、不依赖本地模型、
+> 不计入 Multi 基线能力**。基线继承公共测试与构建设施，并持有独立产品身份。
 
-- 源码纯度门（“diff 里不许出现 `guardian/`”）**不可执行**：Guardian 审批子系统是上游自带的，
-  任何 v0.147.0 基线都带着它。因此改用下文的行为验收门。
-- 复制前必须排除 `mydev/codex-rs/core/` 下未被 git 跟踪的测试残留空目录（`.git`、`.agents`、`.codex`、
-  `project`、`absolute-turn`、`request-permissions-environment`）。
+源码纯度门（“diff 里不许出现 `guardian/`”）**不可执行** —— Guardian 审批子系统是上游自带的，任何
+v0.147.0 基线都带着它。因此基线由下面三条行为门定义，它们对后续每个 Multi 阶段继续生效：
 
-（完整取舍论证见 `agent_log/2026-08-13-strategy-consensus-landing.md`。）
+1. **默认关闭可断言**：`[auto_review]` 的 `model`、`model_provider`、`reasoning_effort`、`evidence_dir`
+   在空配置下经真实配置加载后全为 `None`。
+2. **基线在关闭态取得**：Multi 的基线测试与退化验收在该关闭态下运行；eval 不为 Multi 注入这四项，
+   结果工件用版本化 `auto_review_config` 记录该状态。
+3. **不携带本地模型依赖**：`multidev/` 的配置与测试不引用任何 GGUF 路径或本地推理 runtime。
 
-### “干净基线”的定义
+### 产品身份（持续约束）
 
-> `multidev/` 建立时**尚未加入任何 Multi 产品行为**；Local 审批接口可以存在，但**默认关闭、不依赖本地模型、
-> 不计入 Multi 基线能力**。基线继承当前公共测试与构建设施，并获得独立产品身份。
+产品身份贯通源码/构建路径、Cargo target、binary freeze、manifest、共享 catalog、adapter/RunSpec、
+campaign 与结果归档，唯一映射是 `eval/rondo_eval/contracts.py` 的 `product_layout()`；
+Multi 的工件命名空间是 `eval-data/bin/rondo-multi/`。规则见 `doc/eval-data-layout.md`。
 
-### 行为验收门（取代不可执行的源码机械门）
-
-1. **默认关闭可断言**：multidev 的 `[auto_review]` 中 `model`、`model_provider`、`reasoning_effort`、
-   `evidence_dir` 默认全为 `None`，用单测锁死默认值。
-2. **基线在关闭态取得**：Multi 的基线测试与退化验收必须在上述开关关闭状态下运行，并在结果工件中记录该状态。
-3. **不携带本地模型依赖**：multidev 的配置与测试不得引用任何 GGUF 路径或本地推理 runtime，
-   否则“不依赖本地模型”这句话没有执行力。
-
-### 同任务内必做的其余项
-
-- **看门狗迁移**：`with-build-lock.sh` 与 `build-watchdog-lib.sh` 迁到仓库根 `scripts/`，直接改所有引用点，
-  不留 shim；同步改写 `CLAUDE.md` / `AGENTS.md` / `doc/development-environment.md` 中的路径，
-  冻结 provenance（`eval/locks/*.json`）与历史证据不改。细则与理由见 `doc/WBS.md` §4.4。
-- **独立产品身份**：新增 `eval-data/bin/rondo-multi/` 命名空间，产品身份贯通 binary freeze、源码/构建路径、
-  manifest 与结果归档；规则见 `doc/eval-data-layout.md`。
-- **验证范围**：复制完整性、路径与构建入口变化、看门狗迁移、默认关闭断言、eval 产品身份接入，
-  外加迁移后一次 `just eval-test` 与一次轻量带锁构建，确认脚本 `script_dir`、`project_root` 与 eval 侧
-  canonical wrapper 校验三处路径推导仍正确。不重跑全 workspace。
+Multi 目前**没有冻结的 runtime bundle**，因此还不能跑 Docker、no-API 双侧或付费验收；
+首次这类验收前必须先按上述身份冻结一套 Multi bundle。
 
 ### 继承代码的处置约定
 

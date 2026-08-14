@@ -362,7 +362,7 @@ def _machine_watchdog_identity(
     watcher = _watcher_process_identity(
         common_root=module_root,
         expected_script=(
-            module_checkout / "mydev" / "scripts" / "with-build-lock.sh"
+            module_checkout / "scripts" / "with-build-lock.sh"
         ),
         proc_root=watcher_proc_root,
         environment=(os.environ if watchdog_environment is None else watchdog_environment),

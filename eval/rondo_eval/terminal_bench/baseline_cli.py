@@ -331,7 +331,7 @@ def _locked_worker_argv(
     lease_token: str,
 ) -> tuple[str, ...]:
     return (
-        str(paths.worktree_root / "mydev/scripts/with-build-lock.sh"),
+        str(paths.worktree_root / "scripts/with-build-lock.sh"),
         sys.executable,
         "-B",
         "-m",

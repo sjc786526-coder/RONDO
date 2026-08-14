@@ -175,6 +175,7 @@ def project_shared_model_catalog(
         rondo_source_commit=str(sources["rondo"]["commit"]),
         main_model=main_model,
         guardian_model=guardian_model,
+        product=campaign_identity.product,
     )
     campaign_identity.validate_shared_model_catalog(shared.identity())
     shared.write_private(catalog_path)

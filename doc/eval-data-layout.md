@@ -84,6 +84,8 @@ eval-data/                             # git-ignored
 | 历史解释 | 缺字段且 `side = "rondo"` 的历史行按 `rondo-local` 解释；缺字段且 `side = "codex"` 的行视为不适用。当前 `runs.jsonl` 的 244 条中，224 条 `side=rondo`（即 RONDO Local）、20 条 `side=codex`（冻结上游侧） |
 | 只加不改 | 历史结果**不改名、不回填新 schema**；新字段从后续 campaign 开始使用 |
 | 目录 | 历史 `bin/rondo/` 保持原名不动，等价于 `rondo-local`；Multi 新增 `bin/rondo-multi/`，必须显式带 `multi` 字样。`bin/codex/` 是冻结上游侧的 bundle，不参与产品身份维度 |
+| 落地位置 | `eval/rondo_eval/contracts.py` 的 `product_layout()` 是唯一映射：源码目录（`mydev` / `multidev`）、Cargo target 前缀、`bin/` 命名空间与 `models-manager/models.json` 催化路径都从它派生 |
+| 工件字段 | 新冻结的 RONDO manifest 写 `product`；缺该键的历史工件按 `rondo-local` 读取，冻结上游的 manifest 不写也不推定 |
 | 与比较侧的区别 | `run_id` 里的 `side`（`rondo` / `codex`）是**比较侧**语义，与产品身份是**正交的两个维度**，不得互相覆盖。跨产品对比时用 `product` 区分是哪个 RONDO，用 `side` 区分是 RONDO 侧还是上游侧 |
 | 数据目录切分 | **不顶层并列**（不新开 `eval-data-multi/`），只在产品特定的层级加命名空间。`toolkits/`、`models/`、`tools/`、`sources/` 等共享资产保持单份 |
 | crate / 二进制名 | 沿用上游 `codex-cli` / `codex`，**不重命名**；产品身份由本规范的路径与字段承担 |
@@ -157,6 +159,11 @@ eval-data/                             # git-ignored
 - `product` 按 §3.1 取值，只在被评对象是 RONDO 产品时出现；`side = "codex"` 与 `side = "sol-static"`
   的行不写该字段。历史行没有该字段时，`side = "rondo"` 按 `rondo-local` 解释，`side = "codex"` 视为不适用。
   **不回填历史行**。
+- 带 `product` 的 Terminal-Bench 行还在 `config` 里写版本化的 `auto_review_config`，记录该次运行
+  **配置了什么**：`model`、`model_provider`、`reasoning_effort`、`evidence_dir` 四项，未配置写 `null`。
+  它记录配置状态，不是 provider 或 catalog 派生出的有效 Guardian 模型。RONDO Local 沿用既有公平合同
+  （配置 model / effort / evidence_dir），RONDO Multi 的产品基线定义为四项全未配置。结果顶层与归档内
+  `run-summary.json` 使用同一个投影，成功与失败发布路径不会分叉。
 - 当前 record schema v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的

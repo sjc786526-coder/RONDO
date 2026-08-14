@@ -263,7 +263,7 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         argv = baseline_cli._locked_worker_argv(paths, args, lease_token="a" * 64)
         self.assertEqual(
             argv[0],
-            str(paths.worktree_root / "mydev/scripts/with-build-lock.sh"),
+            str(paths.worktree_root / "scripts/with-build-lock.sh"),
         )
         self.assertIn("--worker-step", argv)
         self.assertEqual(argv.count("--worker-step"), 1)

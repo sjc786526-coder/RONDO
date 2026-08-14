@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 import unittest
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -37,7 +38,7 @@ from rondo_eval.binary_freeze import (  # noqa: E402
     verify_bwrap_asset,
     verify_runtime,
 )
-from rondo_eval.contracts import Side  # noqa: E402
+from rondo_eval.contracts import Product, Side, product_layout  # noqa: E402
 
 
 TOOLCHAIN = """\
@@ -98,8 +99,15 @@ def _run(*argv: str, cwd: Path) -> str:
     return result.stdout.strip()
 
 
-def _write_workspace(root: Path, lock: bytes, *, gate: bool) -> None:
-    workspace = root / "mydev" / "codex-rs" if gate else root / "codex-rs"
+def _write_workspace(
+    root: Path,
+    lock: bytes,
+    *,
+    gate: bool,
+    product: Product = Product.RONDO_LOCAL,
+) -> None:
+    source_dir = product_layout(product).source_dir
+    workspace = root / source_dir / "codex-rs" if gate else root / "codex-rs"
     (workspace / "cli" / "src").mkdir(parents=True)
     (workspace / "Cargo.lock").write_bytes(lock)
     (workspace / "rust-toolchain.toml").write_text(
@@ -134,11 +142,15 @@ def _write_workspace(root: Path, lock: bytes, *, gate: bool) -> None:
         "fn main() {}\n", encoding="utf-8"
     )
     if gate:
-        scripts = root / "mydev" / "scripts"
-        scripts.mkdir(parents=True)
-        watchdog = scripts / "with-build-lock.sh"
+        # The build lock is shared by every product line and lives at the
+        # repository root; the V8 artifact gate stays inside the product tree.
+        shared_scripts = root / "scripts"
+        shared_scripts.mkdir(parents=True, exist_ok=True)
+        watchdog = shared_scripts / "with-build-lock.sh"
         watchdog.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         watchdog.chmod(0o755)
+        scripts = root / source_dir / "scripts"
+        scripts.mkdir(parents=True)
         v8_gate = scripts / "with_codex_v8_artifacts.py"
         v8_gate.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         v8_gate.chmod(0o644)
@@ -168,8 +180,12 @@ def _build_command(
     package: str = "codex-cli",
     binary: str = "codex",
     baseline_reference: Path | None = None,
+    product: Product = Product.RONDO_LOCAL,
 ) -> tuple[str, ...]:
-    manifest = source / ("mydev/codex-rs/Cargo.toml" if side is Side.RONDO else "codex-rs/Cargo.toml")
+    source_dir = product_layout(product).source_dir
+    manifest = source / (
+        f"{source_dir}/codex-rs/Cargo.toml" if side is Side.RONDO else "codex-rs/Cargo.toml"
+    )
     companion = package == "codex-code-mode-host" and binary == "codex-code-mode-host"
     argv = [
         f"cwd={gate}",
@@ -188,7 +204,7 @@ def _build_command(
         f"RONDO_PROJECT_ROOT={common}",
         f"CARGO_TARGET_DIR={target}",
         f"RONDO_BUILD_METRICS_DIR={common}/eval-data/build-metrics/test",
-        str(gate / "mydev/scripts/with-build-lock.sh"),
+        str(gate / "scripts/with-build-lock.sh"),
         "rustup",
         "run",
         "1.95.0",
@@ -212,11 +228,13 @@ def _build_command(
         if side is Side.CODEX:
             assert baseline_reference is not None
             argv.extend(("--baseline-reference-root", str(baseline_reference)))
+        elif product is not Product.RONDO_LOCAL:
+            argv.extend(("--product", product.value))
         return tuple(argv)
     argv.extend(
         (
         "python3",
-        str(gate / "mydev/scripts/with_codex_v8_artifacts.py"),
+        str(gate / f"{source_dir}/scripts/with_codex_v8_artifacts.py"),
         "--",
         "cargo",
         "build",
@@ -409,6 +427,7 @@ class BwrapSourceIdentityTests(unittest.TestCase):
             freeze=SimpleNamespace(
                 source_root=Path("/fixture/rondo"),
                 baseline_reference_root=Path("/fixture/upstream"),
+                layout=product_layout(Product.RONDO_LOCAL),
             )
         )
         for side in (Side.RONDO, Side.CODEX):
@@ -428,11 +447,46 @@ class BwrapSourceIdentityTests(unittest.TestCase):
                     SimpleNamespace(side=side), paths
                 )
 
+    def test_each_product_reads_its_own_bwrap_source_trees(self) -> None:
+        for product, source_dir in (
+            (Product.RONDO_LOCAL, "mydev"),
+            (Product.RONDO_MULTI, "multidev"),
+        ):
+            paths = SimpleNamespace(
+                freeze=SimpleNamespace(
+                    source_root=Path("/fixture/rondo"),
+                    baseline_reference_root=None,
+                    layout=product_layout(product),
+                )
+            )
+            with (
+                self.subTest(product=product.value),
+                mock.patch.object(
+                    binary_freeze,
+                    "_git",
+                    side_effect=(
+                        binary_freeze.BWRAP_PACKAGE_TREE_ID,
+                        binary_freeze.BWRAP_VENDOR_TREE_ID,
+                    ),
+                ) as git,
+            ):
+                binary_freeze._validate_bwrap_source_identity(
+                    SimpleNamespace(side=Side.RONDO), paths
+                )
+            self.assertEqual(
+                [call.args[2] for call in git.call_args_list],
+                [
+                    f"HEAD:{source_dir}/codex-rs/bwrap",
+                    f"HEAD:{source_dir}/codex-rs/vendor/bubblewrap",
+                ],
+            )
+
     def test_rejects_either_source_tree_mismatch(self) -> None:
         paths = SimpleNamespace(
             freeze=SimpleNamespace(
                 source_root=Path("/fixture/rondo"),
                 baseline_reference_root=None,
+                layout=product_layout(Product.RONDO_LOCAL),
             )
         )
         with (
@@ -618,7 +672,7 @@ class RondoFreezeTests(unittest.TestCase):
                 toolchain_probe=lambda: TOOLCHAIN,
             )
         command = list(self.command)
-        watchdog_index = command.index(str(self.source / "mydev/scripts/with-build-lock.sh"))
+        watchdog_index = command.index(str(self.source / "scripts/with-build-lock.sh"))
         command.insert(watchdog_index, "OPENAI_API_KEY=must-not-cross")
         with self.assertRaises(BinaryFreezeError) as caught:
             prepare(
@@ -703,7 +757,11 @@ class RondoFreezeTests(unittest.TestCase):
         manifest_path = bundle / "manifest.json"
         self.assertEqual(manifest_path.stat().st_mode & 0o777, 0o600)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        self.assertEqual(set(manifest), binary_freeze._COMPANION_MANIFEST_KEYS)
+        self.assertEqual(
+            set(manifest),
+            binary_freeze._COMPANION_MANIFEST_KEYS | {"product"},
+        )
+        self.assertEqual(manifest["product"], Product.RONDO_LOCAL.value)
         self.assertEqual(manifest["path"], str(bundle / "codex"))
         self.assertEqual(
             manifest["code_mode_host_path"], str(bundle / "codex-code-mode-host")
@@ -907,7 +965,10 @@ class RondoFreezeTests(unittest.TestCase):
         self.assertEqual((runtime / "codex-resources/bwrap").stat().st_mode & 0o777, 0o555)
         self.assertEqual((runtime / "codex-resources").stat().st_mode & 0o777, 0o700)
         manifest = json.loads((runtime / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(manifest), binary_freeze._MANIFEST_KEYS)
+        self.assertEqual(
+            set(manifest), binary_freeze._MANIFEST_KEYS | {"product"}
+        )
+        self.assertEqual(manifest["product"], Product.RONDO_LOCAL.value)
         self.assertEqual(manifest["bwrap_path"], str(runtime / "codex-resources/bwrap"))
         self.assertEqual(manifest["bwrap_asset_url"], binary_freeze.BWRAP_ASSET_URL)
         self.assertEqual(manifest["bwrap_archive_sha256"], binary_freeze.BWRAP_ARCHIVE_SHA256)
@@ -1204,6 +1265,215 @@ class BaselineFreezeTests(unittest.TestCase):
         self.assertEqual(
             runtime_manifest["workspace_lock_normalization"], binary_freeze.LOCK_NORMALIZATION
         )
+
+
+class MultiProductFreezeTests(unittest.TestCase):
+    """RONDO Multi must freeze from its own tree into its own namespace.
+
+    The Local flow is already covered by ``RondoFreezeTests``; these cases pin
+    the parts that are only observable once a second product exists.
+    """
+
+    def setUp(self) -> None:
+        GUARD.held = True
+        self.temporary = tempfile.TemporaryDirectory()
+        self.common = Path(self.temporary.name).resolve()
+        self.source = self.common / "measurement"
+        self.source.mkdir()
+        self.lock = b'version = 4\n\n[[package]]\nname = "codex-cli"\nversion = "0.147.0"\n'
+        _write_workspace(self.source, self.lock, gate=True, product=Product.RONDO_MULTI)
+        self.commit = _init_detached_repository(self.source)
+        self.target = (
+            self.common
+            / "eval-data/build"
+            / f"rondo-multi-{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
+        (self.target / binary_freeze.RUST_TARGET / "release").mkdir(parents=True)
+        release = self.target / binary_freeze.RUST_TARGET / "release/codex"
+        release.write_bytes(b"frozen-rondo-multi-binary")
+        release.chmod(0o755)
+        self.artifact = (
+            self.common
+            / "eval-data/bin/rondo-multi"
+            / f"{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
+        self.request = FreezeRequest(
+            side=Side.RONDO,
+            common_root=self.common,
+            source_root=self.source,
+            source_commit=self.commit,
+            target_dir=self.target,
+            artifact_dir=self.artifact,
+            gate_root=self.source,
+            product=Product.RONDO_MULTI,
+        )
+        self.command = _build_command(
+            common=self.common,
+            source=self.source,
+            target=self.target,
+            gate=self.source,
+            side=Side.RONDO,
+            source_commit=self.commit,
+            product=Product.RONDO_MULTI,
+        )
+        _write_watchdog_summary(self.common)
+        self.lock_sha = hashlib.sha256(self.lock).hexdigest()
+        self.constants = mock.patch.object(
+            binary_freeze, "NORMALIZED_LOCK_SHA256", self.lock_sha
+        )
+        self.constants.start()
+        self.portable = mock.patch.object(binary_freeze, "_validate_static_musl_binary")
+        self.portable.start()
+
+    def tearDown(self) -> None:
+        self.portable.stop()
+        self.constants.stop()
+        self.temporary.cleanup()
+
+    def _prepare(self) -> object:
+        return prepare(
+            self.request,
+            self.command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+
+    def test_freezes_from_multidev_into_the_multi_namespace(self) -> None:
+        result = self._prepare()
+
+        self.assertEqual(result.product, Product.RONDO_MULTI.value)
+        self.assertTrue(
+            self.artifact.is_relative_to(self.common / "eval-data/bin/rondo-multi")
+        )
+        manifest = json.loads((self.artifact / "manifest.json").read_text("utf-8"))
+        self.assertEqual(manifest["product"], Product.RONDO_MULTI.value)
+        self.assertIn(
+            str(self.source / "multidev/codex-rs/Cargo.toml"), manifest["build_command"]
+        )
+        self.assertNotIn(
+            str(self.source / "mydev/codex-rs/Cargo.toml"), manifest["build_command"]
+        )
+        verify(
+            self.request,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+
+    def test_multi_cannot_publish_into_the_historical_local_namespace(self) -> None:
+        local_artifact = (
+            self.common
+            / "eval-data/bin/rondo"
+            / f"{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
+        request = replace(self.request, artifact_dir=local_artifact)
+        with self.assertRaises(BinaryFreezeError):
+            prepare(
+                request,
+                self.command,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_multi_cannot_reuse_the_local_cargo_target(self) -> None:
+        local_target = (
+            self.common
+            / "eval-data/build"
+            / f"rondo-{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
+        (local_target / binary_freeze.RUST_TARGET / "release").mkdir(parents=True)
+        request = replace(self.request, target_dir=local_target)
+        with self.assertRaises(BinaryFreezeError):
+            prepare(
+                request,
+                self.command,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_verifying_a_multi_bundle_as_local_fails_closed(self) -> None:
+        self._prepare()
+        # Same bytes on disk, a Local request: the recorded product must stop it
+        # before any path coincidence can make the two products interchangeable.
+        with self.assertRaises(BinaryFreezeError):
+            verify(
+                replace(self.request, product=Product.RONDO_LOCAL),
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_a_manifest_without_a_product_still_verifies_as_local(self) -> None:
+        self._prepare()
+        manifest_path = self.artifact / "manifest.json"
+        value = json.loads(manifest_path.read_text("utf-8"))
+        del value["product"]
+        manifest_path.chmod(0o600)
+        manifest_path.write_text(
+            json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+
+        # The bundle now looks exactly like one frozen before the product
+        # dimension existed, so it must read back as Local -- and therefore no
+        # longer satisfy the Multi request that produced it.
+        with self.assertRaises(BinaryFreezeError):
+            verify(
+                self.request,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_the_frozen_upstream_side_refuses_a_product(self) -> None:
+        with self.assertRaises(BinaryFreezeError):
+            prepare(
+                replace(self.request, side=Side.CODEX),
+                self.command,
+                lease_factory=_lease_factory,
+                toolchain_probe=lambda: TOOLCHAIN,
+            )
+
+    def test_cleanup_targets_only_the_selected_product_tree(self) -> None:
+        local_target = (
+            self.common
+            / "eval-data/build"
+            / f"rondo-{self.commit}-{binary_freeze.RUST_TARGET}"
+        )
+        local_target.mkdir(parents=True)
+        executable = self.common / "rm"
+        executable.write_text("fixture", encoding="utf-8")
+        executable.chmod(0o755)
+
+        class ExecCalled(Exception):
+            pass
+
+        calls: list[list[str]] = []
+
+        def fake_exec(path: str, argv: list[str]) -> None:
+            calls.append(argv)
+            raise ExecCalled
+
+        with self.assertRaises(ExecCalled):
+            cleanup(
+                side=Side.RONDO,
+                common_root=self.common,
+                source_commit=self.commit,
+                target_dir=self.target,
+                product=Product.RONDO_MULTI,
+                lease_factory=_lease_factory,
+                exec_function=fake_exec,
+                rm_executable=executable,
+            )
+        self.assertEqual(calls[0][-1], str(self.target))
+        with self.assertRaises(BinaryFreezeError):
+            cleanup(
+                side=Side.RONDO,
+                common_root=self.common,
+                source_commit=self.commit,
+                target_dir=local_target,
+                product=Product.RONDO_MULTI,
+                lease_factory=_lease_factory,
+                exec_function=fake_exec,
+                rm_executable=executable,
+            )
 
 
 class CleanupTests(unittest.TestCase):

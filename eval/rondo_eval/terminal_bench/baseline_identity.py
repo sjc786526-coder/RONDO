@@ -12,6 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from ..config import RepoPaths, load_runtime_config
+from ..contracts import Product
 from ..frozen_model_catalog import (
     load_frozen_model_catalog,
     load_shared_model_catalog,
@@ -339,6 +340,7 @@ def _validate_successor_comparison_facts(
             rondo_source_commit=str(sources["rondo"]["commit"]),
             main_model=str(selected_profile["effective_main_model"]),
             guardian_model=str(selected_profile["effective_guardian_model"]),
+            product=Product(str(comparison["product"])),
         )
     except (OSError, ValueError) as exc:
         raise CampaignIdentityGenerationError(
@@ -426,6 +428,7 @@ def _validate_frozen_inputs(paths: RepoPaths, identity: CampaignIdentity) -> Non
             rondo_source_commit=str(sources["rondo"]["commit"]),
             main_model=str(selected["effective_main_model"]),
             guardian_model=str(selected["effective_guardian_model"]),
+            product=identity.product,
         )
         try:
             identity.validate_shared_model_catalog(shared.identity())

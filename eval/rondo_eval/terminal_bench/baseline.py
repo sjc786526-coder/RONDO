@@ -27,8 +27,8 @@ from ..fair_comparison import (
 )
 from ..frozen_model_catalog import (
     CATALOG_PROJECTION_ALGORITHM,
-    RONDO_CATALOG_PATH,
     UPSTREAM_CATALOG_PATH,
+    rondo_catalog_path,
 )
 from .runner import PreparedTerminalBenchRun
 from .scoring import TaskOutcome
@@ -1579,6 +1579,10 @@ def _parse_comparison_block(
         "sources",
     }:
         raise BaselineError("campaign catalog identity is not frozen")
+    try:
+        product = Product(str(block["product"]))
+    except ValueError as exc:
+        raise BaselineError("campaign product identity is invalid") from exc
     sources = identity["sources"]
     if (
         not isinstance(sources, list)
@@ -1599,7 +1603,9 @@ def _parse_comparison_block(
     by_side = {str(item["side"]): item for item in sources}
     for side, expected_path in (
         ("upstream", UPSTREAM_CATALOG_PATH),
-        ("rondo", RONDO_CATALOG_PATH),
+        # The catalog must come from the tree of the product the campaign
+        # declares, otherwise a Multi campaign could freeze Local's catalog.
+        ("rondo", rondo_catalog_path(product)),
     ):
         item = by_side[side]
         if (
@@ -1629,10 +1635,6 @@ def _parse_comparison_block(
         or identity["guardian_model"] not in slugs
     ):
         raise BaselineError("campaign catalog override target is invalid")
-    try:
-        Product(str(block["product"]))
-    except ValueError as exc:
-        raise BaselineError("campaign product identity is invalid") from exc
     return dict(block)
 
 
