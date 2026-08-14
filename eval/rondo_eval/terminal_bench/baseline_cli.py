@@ -2366,6 +2366,7 @@ def _execute_task_slot(
         campaign_slot_id=slot.slot_id,
         campaign_round_id=slot.round_id or slot.kind,
         campaign_attempt=slot.attempt,
+        campaign_schema_version=identity.schema_version,
         taskset_sha256=identity.taskset_sha256,
         canary_catalog_sha256=identity.canary_catalog_sha256,
         side=slot.side,
@@ -2605,6 +2606,15 @@ def _write_aggregate(
         results_root,
         identity,
     )
+    state_snapshot = state.snapshot()
+    _validate_terminal_result_sources(
+        identity=identity,
+        state_snapshot=state_snapshot,
+        records=records,
+        record_digests=record_digests,
+        budget=budget,
+        common_root=common_root,
+    )
     assessment_records = {**continued_records, **records}
     usage = _campaign_usage(campaign_root.parents[2], records)
     request_count = sum(
@@ -2617,7 +2627,6 @@ def _write_aggregate(
         for request in run["requests"].values()
     )
     public_assessment = _public_assessment(assessment, assessment_records)
-    state_snapshot = state.snapshot()
     value = {
         "schema_version": identity.schema_version,
         "campaign_id": identity.campaign_id,
@@ -2654,6 +2663,72 @@ def _write_aggregate(
         / f"{identity.campaign_id}.json"
     )
     _write_or_validate_aggregate(destination, public)
+
+
+def _validate_terminal_result_sources(
+    *,
+    identity: CampaignIdentity,
+    state_snapshot: dict[str, object],
+    records: dict[str, dict[str, object]],
+    record_digests: dict[str, str],
+    budget: dict[str, object],
+    common_root: Path,
+) -> None:
+    rows = state_snapshot.get("slots")
+    budget_runs = budget.get("runs")
+    if not isinstance(rows, list) or not isinstance(budget_runs, dict):
+        raise CampaignExecutionError("terminal campaign sources are invalid")
+    by_run_id = {
+        row.get("run_id"): row
+        for row in rows
+        if isinstance(row, dict) and isinstance(row.get("run_id"), str)
+    }
+    if len(by_run_id) != len(
+        [
+            row
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("run_id"), str)
+        ]
+    ):
+        raise CampaignExecutionError("terminal campaign state has duplicate run ids")
+    if any(run_id not in by_run_id for run_id in budget_runs):
+        raise CampaignExecutionError("terminal campaign budget run is not in state")
+    for run_id, row in by_run_id.items():
+        if row.get("slot_id") == "wire-canary":
+            continue
+        status = row.get("status")
+        if status == CampaignSlotStatus.COMPLETED.value and run_id not in records:
+            raise CampaignExecutionError("terminal campaign state result is missing")
+        if status in {
+            CampaignSlotStatus.PLANNED.value,
+            CampaignSlotStatus.SKIPPED.value,
+        } and run_id in budget_runs:
+            raise CampaignExecutionError(
+                "terminal campaign budget run belongs to an unexecuted slot"
+            )
+    for run_id, record in records.items():
+        row = by_run_id.get(run_id)
+        run = budget_runs.get(run_id)
+        if (
+            not isinstance(row, dict)
+            or row.get("status") != CampaignSlotStatus.COMPLETED.value
+            or row.get("result_record_sha256") != record_digests.get(run_id)
+            or not isinstance(run, dict)
+        ):
+            raise CampaignExecutionError(
+                "terminal campaign result differs from state or budget"
+            )
+        try:
+            slot = identity.slot(str(row.get("slot_id")))
+        except ValueError as exc:
+            raise CampaignExecutionError("terminal campaign result slot is invalid") from exc
+        _validate_recoverable_publication(
+            identity,
+            slot,
+            record,
+            run,
+            common_root=common_root,
+        )
 
 
 def _public_aggregate(
@@ -2755,7 +2830,10 @@ def _restore_tracked_aggregate_from_local(
         tracked,
         _public_aggregate(value, identity=identity),
     )
-    return True, value
+    # Matching private/tracked bytes prove only that the projection was copied.
+    # The caller must still replay state, budget and durable result sources and
+    # let _write_aggregate compare the reconstructed bytes with both files.
+    return False, value
 
 
 def _validated_persisted_final_storage(
@@ -2837,10 +2915,19 @@ def _campaign_records(
     common_root: Path,
 ) -> tuple[dict[str, dict[str, object]], dict[str, str]]:
     path = results_root / "eval/results/runs.jsonl"
+    if path.is_symlink() or not path.is_file():
+        raise CampaignExecutionError("campaign result index is unavailable")
     records: dict[str, dict[str, object]] = {}
     digests: dict[str, str] = {}
-    for line in path.read_bytes().splitlines():
-        record = json.loads(line)
+    try:
+        lines = path.read_bytes().splitlines()
+    except OSError as exc:
+        raise CampaignExecutionError("campaign result index is unreadable") from exc
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise CampaignExecutionError("campaign result index is invalid") from exc
         config = record.get("config") if isinstance(record, dict) else None
         if not isinstance(config, dict) or config.get("campaign_id") != identity.campaign_id:
             continue
@@ -2867,6 +2954,12 @@ def _validate_campaign_record_product(
     except ArtifactError as exc:
         raise CampaignExecutionError("campaign result product identity is invalid") from exc
     if not identity.enforces_fair_comparison:
+        config = record.get("config")
+        if isinstance(config, dict) and config.get("campaign_schema_version") not in {
+            None,
+            identity.schema_version,
+        }:
+            raise CampaignExecutionError("campaign result schema differs from the lock")
         return
     config = record.get("config")
     side_value = record.get("side")
@@ -2878,11 +2971,18 @@ def _validate_campaign_record_product(
     if (
         record.get("product") != expected_product
         or not isinstance(config, dict)
+        or config.get("campaign_schema_version") != identity.schema_version
         or config.get("campaign_product") != identity.product.value
         or config.get("product") != expected_product
         or config.get("binary_product") != expected_product
     ):
         raise CampaignExecutionError("campaign result product differs from the lock")
+    if any(
+        config.get(key) != value for key, value in identity.selected_profile.items()
+    ):
+        raise CampaignExecutionError(
+            "campaign result selected profile differs from the lock"
+        )
     try:
         slot = expected_slot or identity.slot(str(config.get("campaign_slot_id")))
     except ValueError as exc:

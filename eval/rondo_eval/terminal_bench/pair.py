@@ -76,6 +76,7 @@ _HISTORICAL_CAP_BY_ID = {
 }
 LATEST_HISTORICAL_PAIR_NAME = "v19"
 B2_NO_API_BATCH_ID = "p1-no-api-smoke"
+_CAMPAIGN_PRODUCT_SCHEMA_VERSION = 7
 _PAIR_LOCK_V1_KEYS = {
     "schema_version",
     "pair_id",
@@ -906,6 +907,7 @@ class CampaignPublicationContext:
     campaign_slot_id: str
     campaign_round_id: str
     campaign_attempt: int
+    campaign_schema_version: int
     taskset_sha256: str
     canary_catalog_sha256: str
     side: Side
@@ -931,6 +933,11 @@ class CampaignPublicationContext:
             or len(self.campaign_round_id) > 64
             or isinstance(self.campaign_attempt, bool)
             or self.campaign_attempt not in {1, 2, 3, 4}
+            or isinstance(self.campaign_schema_version, bool)
+            or not isinstance(self.campaign_schema_version, int)
+            or not (
+                0 < self.campaign_schema_version <= _CAMPAIGN_PRODUCT_SCHEMA_VERSION
+            )
             or not isinstance(self.side, Side)
             or (
                 self.campaign_product is not None
@@ -941,6 +948,10 @@ class CampaignPublicationContext:
             or float(self.provider_upstream_timeout_seconds) not in {90.0, 180.0}
         ):
             raise PairIdentityError("publication campaign topology is invalid")
+        if (
+            self.campaign_schema_version >= _CAMPAIGN_PRODUCT_SCHEMA_VERSION
+        ) is not (self.campaign_product is not None):
+            raise PairIdentityError("publication campaign product binding is invalid")
         try:
             metrics_from_dict(self.metrics)
         except RunMetricsError as exc:

@@ -35,6 +35,9 @@ _TIMESTAMP = re.compile(
     r"(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})\Z"
 )
 _MAX_SCAN_BYTES = 128 * 1024 * 1024
+_MAX_PRIVATE_SUMMARY_BYTES = 1024 * 1024
+_PRIVATE_SUMMARY_SCHEMA_VERSION = 1
+_CAMPAIGN_PRODUCT_SCHEMA_VERSION = 7
 _SENSITIVE_ASSIGNMENT = re.compile(
     rb"(?:^|[,{\s])[\"']?"
     rb"(?:[a-z0-9]+[-_])*(?:api[-_]?key|access[-_]?token|bearer[-_]?token|"
@@ -188,6 +191,7 @@ class ArtifactWriter:
         self._validate_roots()
         self._assert_staging_tree()
         _validate_record(record, self.run_id, self.paths.common_root)
+        _validate_private_run_summary(self.staging, record)
         secret_bytes = _normalize_secrets(secrets)
         record_bytes = _encode_record(record)
         tree_identity = _artifact_tree_identity(self.staging, secret_bytes)
@@ -396,6 +400,7 @@ class ArtifactWriter:
             if not target_present or staged_present:
                 raise ArtifactError("published run has inconsistent recovery state")
             _assert_artifact_tree_identity(target, tree_identity)
+            _validate_private_run_summary(target, record)
             _discard_index_temporary(self.results.parent / value["index_temporary_name"])
             journal.unlink()
             _fsync_directory(self.runs_root)
@@ -411,6 +416,7 @@ class ArtifactWriter:
         if not _path_present(artifact_tree):
             raise ArtifactError("pending artifact staging directory is unavailable")
         _assert_artifact_tree_identity(artifact_tree, tree_identity)
+        _validate_private_run_summary(artifact_tree, record)
         if not target_present:
             os.replace(staged, target)
             _fsync_directory(self.runs_root)
@@ -421,6 +427,52 @@ class ArtifactWriter:
         )
         journal.unlink()
         _fsync_directory(self.runs_root)
+
+
+def _validate_private_run_summary(
+    artifact_root: Path, record: Mapping[str, Any]
+) -> None:
+    config = record.get("config")
+    if not isinstance(config, Mapping) or (
+        config.get("private_summary_schema_version")
+        != _PRIVATE_SUMMARY_SCHEMA_VERSION
+    ):
+        return
+    path = artifact_root / "run-summary.json"
+    try:
+        metadata = path.lstat()
+        if (
+            path.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size <= 0
+            or metadata.st_size > _MAX_PRIVATE_SUMMARY_BYTES
+        ):
+            raise ArtifactError("private run summary is unsafe")
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except ArtifactError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ArtifactError("private run summary is unavailable or invalid") from exc
+    expected_keys = {
+        "schema_version",
+        "run_id",
+        "side",
+        "git_commit",
+        "outcome",
+        "config",
+        "summary",
+        "tasks",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected_keys
+        or value.get("schema_version") != _PRIVATE_SUMMARY_SCHEMA_VERSION
+        or any(
+            value.get(key) != record.get(key)
+            for key in expected_keys - {"schema_version"}
+        )
+    ):
+        raise ArtifactError("private run summary differs from its tracked record")
 
 
 def validate_record_product_contract(record: Mapping[str, Any]) -> None:
@@ -437,15 +489,41 @@ def validate_record_product_contract(record: Mapping[str, Any]) -> None:
     config = record.get("config")
     if not isinstance(config, Mapping):
         raise ArtifactError("run record product config is invalid")
+    private_summary_version = config.get("private_summary_schema_version")
+    if private_summary_version is not None and (
+        private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION or track != "tb"
+    ):
+        raise ArtifactError("run record private summary version is invalid")
+    campaign_schema_version = config.get("campaign_schema_version")
+    campaign_product_present = "campaign_product" in config
+    if campaign_schema_version is not None:
+        if (
+            isinstance(campaign_schema_version, bool)
+            or not isinstance(campaign_schema_version, int)
+            or not 1 <= campaign_schema_version <= _CAMPAIGN_PRODUCT_SCHEMA_VERSION
+            or track != "tb"
+            or not isinstance(config.get("campaign_id"), str)
+            or not config.get("campaign_id")
+        ):
+            raise ArtifactError("campaign schema identity is invalid")
+    elif campaign_product_present:
+        raise ArtifactError("campaign product lacks its schema identity")
     if "product" not in record:
         if any(key in config for key in ("product", "binary_product", "auto_review_config")):
             raise ArtifactError("productless run record carries product configuration")
-        campaign_product = config.get("campaign_product")
-        if campaign_product is not None:
+        if campaign_schema_version == _CAMPAIGN_PRODUCT_SCHEMA_VERSION:
+            if (
+                side != "codex"
+                or not campaign_product_present
+                or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+            ):
+                raise ArtifactError("v7 campaign product binding is incomplete")
             try:
-                parse_product(campaign_product)
+                parse_product(config["campaign_product"])
             except ContractError as exc:
                 raise ArtifactError("campaign product identity is invalid") from exc
+        elif campaign_product_present:
+            raise ArtifactError("historical campaign carries a product binding")
         return
     eligible = (
         (track in {"tb", "replay"} and side == "rondo")
@@ -459,11 +537,34 @@ def validate_record_product_contract(record: Mapping[str, Any]) -> None:
         raise ArtifactError("run record product identity is invalid") from exc
     if config.get("product") != product.value:
         raise ArtifactError("run record product differs from its config")
-    campaign_product = config.get("campaign_product")
-    if campaign_product is not None and campaign_product != product.value:
-        raise ArtifactError("run record product differs from its campaign")
-    if track != "tb":
+    if campaign_schema_version == _CAMPAIGN_PRODUCT_SCHEMA_VERSION:
+        if (
+            not campaign_product_present
+            or config.get("campaign_product") != product.value
+            or private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION
+        ):
+            raise ArtifactError("run record product differs from its campaign")
+    elif campaign_product_present:
+        raise ArtifactError("historical campaign carries a product binding")
+    elif campaign_schema_version is not None and product is not Product.RONDO_LOCAL:
+        raise ArtifactError("historical campaign product is not Local")
+    if track == "replay":
+        if config.get("binary_product") != product.value:
+            raise ArtifactError("replay product differs from its binary")
+        if "auto_review_config" in config:
+            raise ArtifactError("replay record carries Terminal-Bench auto-review config")
         return
+    if track == "shadow":
+        if (
+            product is not Product.RONDO_LOCAL
+            or config.get("binary_product") != Product.RONDO_LOCAL.value
+        ):
+            raise ArtifactError("shadow side differs from its Local product")
+        if "auto_review_config" in config:
+            raise ArtifactError("shadow record carries Terminal-Bench auto-review config")
+        return
+    if private_summary_version != _PRIVATE_SUMMARY_SCHEMA_VERSION:
+        raise ArtifactError("product run record lacks its private summary contract")
     if config.get("binary_product") != product.value:
         raise ArtifactError("run record product differs from its binary")
     auto_review = config.get("auto_review_config")
@@ -793,6 +894,7 @@ def _read_index(
         if run_id in run_ids:
             raise ArtifactError("tracked run index contains a duplicate run id")
         _validate_record(row, run_id, common_root)
+        _validate_private_run_summary(common_root / row["artifacts"], row)
         run_ids.add(run_id)
         rows.append(row)
     return contents, rows

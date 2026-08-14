@@ -632,6 +632,7 @@ def publish_terminal_bench_failure(
     )
     config = {
         **selected_profile,
+        "private_summary_schema_version": 1,
         "batch_id": budget_snapshot.get("batch_id"),
         "terminal_bench_version": TERMINAL_BENCH_VERSION,
         "terminal_bench_commit": TERMINAL_BENCH_COMMIT,
@@ -691,6 +692,19 @@ def publish_terminal_bench_failure(
             "tokens_out": 0,
         }
     ]
+    writer.write_json(
+        "run-summary.json",
+        {
+            "schema_version": 1,
+            "run_id": run_id,
+            "side": side.value,
+            "git_commit": git_commit,
+            "outcome": outcome.value,
+            "config": config,
+            "summary": summary,
+            "tasks": tasks,
+        },
+    )
     writer.write_json(
         "run-failure.json",
         {
@@ -795,6 +809,7 @@ def _safe_summary(
         "outcome": parsed.outcome.value,
         "config": {
             **selected_profile,
+            "private_summary_schema_version": 1,
             "approvals_reviewer": spec.approvals_reviewer,
             "approval_policy": spec.approval_policy,
             "sandbox_mode": spec.sandbox_mode,
@@ -1081,11 +1096,17 @@ def _validate_publication_context(
     else:
         if publication.side is not side:
             raise HarborResultError("publication side differs from the campaign slot")
-        if publication.campaign_product is not None:
+        if publication.campaign_schema_version >= 7:
             expected = publication.campaign_product if side is Side.RONDO else None
             if product is not expected:
                 raise HarborResultError(
                     "publication product differs from the campaign identity"
+                )
+        else:
+            expected = Product.RONDO_LOCAL if side is Side.RONDO else None
+            if product is not expected:
+                raise HarborResultError(
+                    "historical campaign product differs from Local"
                 )
 
 
@@ -1139,6 +1160,7 @@ def _publication_identity_config(
             "pair_round": publication.pair_round,
         }
     value = {
+        "campaign_schema_version": publication.campaign_schema_version,
         "campaign_id": publication.campaign_id,
         "campaign_lock_sha256": publication.campaign_lock_sha256,
         "campaign_slot_id": publication.campaign_slot_id,
@@ -1150,7 +1172,7 @@ def _publication_identity_config(
             publication.provider_upstream_timeout_seconds
         ),
     }
-    if publication.campaign_product is not None:
+    if publication.campaign_schema_version >= 7:
         value["campaign_product"] = publication.campaign_product.value
     return value
 

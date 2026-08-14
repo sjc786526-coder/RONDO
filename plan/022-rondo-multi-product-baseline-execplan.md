@@ -141,8 +141,9 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 ### 已完成
 
-首个实现提交 `d2c16073` 已完成，但独立验收拒绝合并。其基础实施事实仍见
-`agent_log/2026-08-14-004500-plan022-rondo-multi-product-baseline.md`；本轮已逐项落地 B1、B2、B3、M1：
+首个实现提交 `d2c16073` 与首轮修复提交 `c5eb380` 均被独立验收拒绝合并。基础实施事实仍见
+`agent_log/2026-08-14-004500-plan022-rondo-multi-product-baseline.md`；第二轮复验报告
+`agent_log/2026-08-14-011251-plan022-fix-independent-reacceptance.md` 指出的 B1—B3、M1—M3 与文档问题已逐项修复：
 
 1. 共享看门狗已 `git mv` 到根 `scripts/`（mode 与字节不变），现行引用点全部改为根路径且不留 shim；
    共享 helper 回归改由两条产品线的 `test-github-scripts` 入口显式调用根 helper。
@@ -151,16 +152,19 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 3. 默认关闭行为门落在两棵树同源的 `config_loader_tests.rs`，经 `ConfigBuilder` 真实加载路径断言。
 4. 新 RONDO/Codex freeze 产物已与生产 loader 收口；campaign request/manifest/RunSpec、successor、no-API
    bundle、publication/replay/aggregate 均交叉绑定产品，历史缺字段工件保持只读兼容。
-5. durable index 与 campaign/pair consumer 已严格校验顶层/config/binary/campaign/版本化
-   `auto_review_config` 的一致性，正常与失败 publication 共用投影。
+5. v7 campaign publication 在落盘前强制两侧绑定 campaign product；正常与失败 publication 都生成与 tracked
+   row 等值的版本化私有摘要，journal recovery 与 durable index reader 重新核对摘要。
+6. terminal aggregate 不再因两份 aggregate 自洽而早退，终态恢复会从 state、budget、runs index、record digest
+   和冻结 identity 重建并逐字节核对；campaign consumer 另与冻结 selected profile 比较。
+7. replay 的 product/binary 合同与当前 shadow Local side 映射已收紧，历史无产品记录保持只读兼容。
 
 ### 当前工作
 
-本轮修复与复审准入门禁已完成；提交当前任务分支后停止，等待独立复审。
+第二轮复验修复与复审准入门禁已完成；提交当前任务分支后停止，等待再次独立复审。
 
 ### 本任务剩余步骤
 
-无实施步骤；只剩独立复审及用户对 §6 决策 011 窄例外的确认，不在本轮执行者权限内。
+无实施步骤；只剩再次独立复审及用户对 §6 决策 011 窄例外的确认，不在本轮执行者权限内。
 
 ### 阻塞项
 
@@ -171,8 +175,8 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 
 对照 §1 完成/验收标准：
 
-- B1/B2/B3/M1 与对应文档修复已落地；focused 受影响集合 312/312，完整 eval 无 API 套件
-  600/600（0 fail、0 skip），`just eval-lock` 解析 85 packages，两侧 watchdog helper 各 9/9。
+- 第二轮复验的 B1/B2/B3、M1/M2/M3 与对应文档修复已落地；focused 受影响集合 319/319，完整 eval 无 API
+  套件 607/607（0 fail、0 skip），`just eval-lock` 解析 85 packages，两侧 watchdog helper 各 9/9。
 - 本轮未修改 Rust 产品源码，按复审条件未重复 Cargo 构建。首个实现批次已有的根看门狗 Multi
   `codex-core` 80/80 与 `codex-cli 0.147.0` 轻量构建证据保留，但不冒充本轮新运行。
 - `git diff --check`：手写改动部分干净。`multidev/` 例外 —— 6,011 个文件全为新增行，其中 419 个上游
@@ -205,3 +209,4 @@ RONDO Local 基线上建立可独立构建、可独立识别的 RONDO Multi 产�
 | 009 | 仅 build-command 的 `--product` 在非 Local 时出现；新 RONDO manifest（Local/Multi）始终显式写 `product`，Codex 与历史 manifest 省略该键 | Local build-command 保持 seven-key 历史形状；权威数据布局同时要求新 RONDO manifest 显式身份 | binary freeze / manifest | 已采纳 |
 | 010 | eval 为 Multi 不注入 `[auto_review]` 三项覆盖，Local 的既有公平合同不变 | M-0 要求基线在关闭态取得；改 Local 会动既有公平运行合同（硬约束 9） | adapter / result | 已采纳 |
 | 011 | 完整 `git diff --check` 的唯一例外限定为与 `mydev/` 字节相同的 `multidev/` 复制内容，手写差异必须通过；例外仍待用户明确接受 | 清理上游尾空格会破坏更强的精确复制合同，不能为绿灯改写复制内容 | 复制验收 | 待用户确认 |
+| 012 | 新 TB publication 用显式 schema 绑定 campaign 产品与私有摘要；终态 aggregate 每次从 durable sources 重建 | 可选字段和成对 aggregate 自洽均不足以证明产品与结果来源，必须在落盘/恢复边界 fail-closed | result / campaign recovery | 已采纳 |

@@ -898,10 +898,11 @@ class CampaignFairComparisonContractTests(unittest.TestCase):
             "product": Product.RONDO_LOCAL.value,
             "binary_sha256": manifest.sha256,
             "config": {
-                "guardian_model": "gpt-5.6-sol",
-                "guardian_effort": "high",
+                **identity.selected_profile,
+                "private_summary_schema_version": 1,
                 "product": Product.RONDO_LOCAL.value,
                 "binary_product": Product.RONDO_LOCAL.value,
+                "campaign_schema_version": identity.schema_version,
                 "campaign_product": Product.RONDO_LOCAL.value,
                 "campaign_id": identity.campaign_id,
                 "campaign_lock_sha256": identity.lock_sha256,
@@ -914,7 +915,7 @@ class CampaignFairComparisonContractTests(unittest.TestCase):
                     "schema_version": 1,
                     "model": "gpt-5.6-sol",
                     "model_provider": None,
-                    "reasoning_effort": "high",
+                    "reasoning_effort": "low",
                     "evidence_dir": AUTO_REVIEW_EVIDENCE_DIR,
                 },
             },
@@ -928,6 +929,18 @@ class CampaignFairComparisonContractTests(unittest.TestCase):
                 results_root, identity, common_root=paths.common_root
             )
             self.assertEqual(set(records), {slot.run_id})
+            record["config"]["guardian_model"] = "forged-guardian"
+            record["config"]["guardian_effort"] = "high"
+            record["config"]["auto_review_config"]["model"] = "forged-guardian"
+            record["config"]["auto_review_config"]["reasoning_effort"] = "high"
+            index.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(CampaignExecutionError, "selected profile"):
+                baseline_cli._campaign_records(
+                    results_root, identity, common_root=paths.common_root
+                )
+            record["config"].update(identity.selected_profile)
+            record["config"]["auto_review_config"]["model"] = "gpt-5.6-sol"
+            record["config"]["auto_review_config"]["reasoning_effort"] = "low"
             record["config"]["product"] = Product.RONDO_MULTI.value
             index.write_text(json.dumps(record) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(CampaignExecutionError, "product identity"):

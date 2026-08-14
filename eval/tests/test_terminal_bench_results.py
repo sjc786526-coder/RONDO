@@ -145,6 +145,7 @@ class _ResultFixture:
         exit_code: int = 0,
         attempt: int = 1,
         campaign_product: Product | None = None,
+        campaign_schema_version: int | None = None,
     ) -> CampaignPublicationContext:
         provider = self._live_result("campaign-publication-fixture").prepared.spec.provider
         return CampaignPublicationContext(
@@ -155,6 +156,11 @@ class _ResultFixture:
             ),
             campaign_round_id="aa-rondo-1",
             campaign_attempt=attempt,
+            campaign_schema_version=(
+                campaign_schema_version
+                if campaign_schema_version is not None
+                else (7 if campaign_product is not None else 1)
+            ),
             taskset_sha256="8" * 64,
             canary_catalog_sha256="9" * 64,
             side=side,
@@ -768,6 +774,7 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
                 campaign_slot_id="base:ab-codex-1:terminal-bench/fix-git:a1",
                 campaign_round_id="ab-codex-1",
                 campaign_attempt=1,
+                campaign_schema_version=1,
                 taskset_sha256="8" * 64,
                 canary_catalog_sha256="9" * 64,
                 side=Side.CODEX,
@@ -1471,6 +1478,7 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
                 campaign_slot_id="base:aa-rondo-1:terminal-bench/fix-git:a1",
                 campaign_round_id="aa-rondo-1",
                 campaign_attempt=1,
+                campaign_schema_version=3,
                 taskset_sha256="8" * 64,
                 canary_catalog_sha256="9" * 64,
                 side=Side.RONDO,
@@ -2533,6 +2541,51 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
         self.assertNotIn("product", record)
         self.assertNotIn("auto_review_config", record["config"])
         self.assertNotIn("product", summary["config"])
+        self.assertEqual(record["config"]["campaign_schema_version"], 7)
+        self.assertEqual(record["config"]["campaign_product"], "rondo-local")
+        self.assertEqual(summary["config"], record["config"])
+
+    def test_v7_publication_rejects_a_missing_campaign_product_before_finalize(
+        self,
+    ) -> None:
+        parsed = parse_single_task_result(self.jobs, host_returncode=0)
+        for number, (side, product) in enumerate(
+            ((Side.RONDO, Product.RONDO_MULTI), (Side.CODEX, None)), start=7
+        ):
+            with self.subTest(side=side.value):
+                run_id = f"20260814-01000000{number}-tb-{side.value}-r1"
+                metadata = self.root / "work" / f"missing-{side.value}.json"
+                self._write_metadata(metadata, "main", "main", "main")
+                publication = self._campaign_publication(
+                    side=side,
+                    campaign_schema_version=7,
+                    campaign_product=None,
+                )
+                with (
+                    patch.object(ArtifactWriter, "finalize") as finalize,
+                    self.assertRaisesRegex(HarborResultError, "context is invalid"),
+                ):
+                    publish_terminal_bench_result(
+                        RepoPaths(self.root, self.root),
+                        results_worktree_root=self.root,
+                        run_id=run_id,
+                        side=side,
+                        git_commit="e" * 40,
+                        eval_harness_commit="f" * 40,
+                        live_result=self._product_live_result(
+                            run_id, side=side, product=product
+                        ),
+                        parsed=parsed,
+                        metadata_path=metadata,
+                        publication=publication,
+                    )
+                finalize.assert_not_called()
+                self.assertFalse(
+                    (self.root / "eval-data/runs" / run_id).exists()
+                )
+                self.assertFalse(
+                    (self.root / "eval/results/runs.jsonl").exists()
+                )
 
     def test_a_rondo_row_without_a_declared_product_is_read_as_local(self) -> None:
         # This is how every one of the 224 historical `side=rondo` rows and
@@ -2559,46 +2612,154 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             ).validate()
 
     def test_the_failure_path_records_the_same_product_projection(self) -> None:
-        run_id = "20260814-010000004-tb-rondo-r1"
-        live_result = self._product_live_result(
-            run_id, side=Side.RONDO, product=Product.RONDO_MULTI
+        cases = (
+            (4, Side.RONDO, Product.RONDO_LOCAL),
+            (5, Side.RONDO, Product.RONDO_MULTI),
+            (6, Side.CODEX, None),
         )
-        spec = live_result.prepared.spec
-        writer = ArtifactWriter(
-            RepoPaths(self.root, self.root),
-            run_id,
-            results_worktree_root=self.root,
-        ).start()
+        summaries: dict[str, dict] = {}
+        for number, side, product in cases:
+            run_id = f"20260814-01000000{number}-tb-{side.value}-r1"
+            live_result = self._product_live_result(
+                run_id, side=side, product=product
+            )
+            spec = live_result.prepared.spec
+            writer = ArtifactWriter(
+                RepoPaths(self.root, self.root),
+                run_id,
+                results_worktree_root=self.root,
+            ).start()
+            publish_terminal_bench_failure(
+                RepoPaths(self.root, self.root),
+                writer=writer,
+                run_id=run_id,
+                side=side,
+                git_commit="e" * 40,
+                eval_harness_commit="f" * 40,
+                manifest=spec.binary,
+                provider=spec.provider,
+                budget_snapshot=live_result.budget_snapshot,
+                metadata_path=self.root / "missing-api-metadata.json",
+                outcome=RunOutcome.INFRA_FAILED,
+                failure_stage="runtime",
+                publication=self._campaign_publication(
+                    side=side,
+                    exit_code=70,
+                    campaign_product=(
+                        product if product is not None else Product.RONDO_LOCAL
+                    ),
+                ),
+                secrets=(),
+            )
+            summaries[run_id] = json.loads(
+                (
+                    self.root
+                    / "eval-data/runs"
+                    / run_id
+                    / "run-summary.json"
+                ).read_text(encoding="utf-8")
+            )
 
-        publish_terminal_bench_failure(
-            RepoPaths(self.root, self.root),
-            writer=writer,
-            run_id=run_id,
-            side=Side.RONDO,
-            git_commit="e" * 40,
-            eval_harness_commit="f" * 40,
-            manifest=spec.binary,
-            provider=spec.provider,
-            budget_snapshot=live_result.budget_snapshot,
-            metadata_path=self.root / "missing-api-metadata.json",
-            outcome=RunOutcome.INFRA_FAILED,
-            failure_stage="runtime",
-            publication=self._campaign_publication(
-                side=Side.RONDO,
-                exit_code=70,
-                campaign_product=Product.RONDO_MULTI,
-            ),
-            secrets=(),
+        records = {
+            row["run_id"]: row
+            for row in (
+                json.loads(line)
+                for line in (
+                    self.root / "eval/results/runs.jsonl"
+                ).read_text(encoding="utf-8").splitlines()
+            )
+        }
+        for run_id, record in records.items():
+            summary = summaries[run_id]
+            self.assertEqual(summary["config"], record["config"])
+            self.assertEqual(summary["summary"], record["summary"])
+            self.assertEqual(summary["tasks"], record["tasks"])
+            self.assertEqual(record["config"]["campaign_schema_version"], 7)
+            self.assertEqual(
+                record["config"]["campaign_product"],
+                "rondo-local" if record["side"] == "codex" else record["product"],
+            )
+        multi = records["20260814-010000005-tb-rondo-r1"]
+        self.assertEqual(multi["product"], "rondo-multi")
+        self.assertIsNone(multi["config"]["auto_review_config"]["model"])
+        self.assertIsNone(
+            multi["config"]["auto_review_config"]["evidence_dir"]
         )
+        codex = records["20260814-010000006-tb-codex-r1"]
+        self.assertNotIn("product", codex)
+        self.assertNotIn("auto_review_config", codex["config"])
 
-        record = json.loads((self.root / "eval/results/runs.jsonl").read_text())
-        self.assertEqual(record["product"], "rondo-multi")
-        self.assertEqual(
-            record["config"]["auto_review_config"]["model"], None
+    def test_failure_private_summaries_survive_journal_recovery_for_all_products(
+        self,
+    ) -> None:
+        cases = (
+            (10, Side.RONDO, Product.RONDO_LOCAL),
+            (11, Side.RONDO, Product.RONDO_MULTI),
+            (12, Side.CODEX, None),
         )
-        self.assertEqual(
-            record["config"]["auto_review_config"]["evidence_dir"], None
-        )
+        paths = RepoPaths(self.root, self.root)
+        for number, side, product in cases:
+            run_id = f"20260814-0100000{number}-tb-{side.value}-r1"
+            live_result = self._product_live_result(
+                run_id, side=side, product=product
+            )
+            spec = live_result.prepared.spec
+            writer = ArtifactWriter(
+                paths,
+                run_id,
+                results_worktree_root=self.root,
+            ).start()
+            with mock.patch.object(
+                artifacts_module,
+                "_atomic_replace_index",
+                side_effect=KeyboardInterrupt,
+            ), self.assertRaises(KeyboardInterrupt):
+                publish_terminal_bench_failure(
+                    paths,
+                    writer=writer,
+                    run_id=run_id,
+                    side=side,
+                    git_commit="e" * 40,
+                    eval_harness_commit="f" * 40,
+                    manifest=spec.binary,
+                    provider=spec.provider,
+                    budget_snapshot=live_result.budget_snapshot,
+                    metadata_path=self.root / "missing-api-metadata.json",
+                    outcome=RunOutcome.INFRA_FAILED,
+                    failure_stage="runtime",
+                    publication=self._campaign_publication(
+                        side=side,
+                        exit_code=70,
+                        campaign_product=(
+                            product if product is not None else Product.RONDO_LOCAL
+                        ),
+                    ),
+                    secrets=(),
+                )
+            self.assertTrue(writer.journal.is_file())
+            self.assertTrue((writer.target / "run-summary.json").is_file())
+
+            recovery_id = f"20260814-0100000{number + 20}-tb-{side.value}-r1"
+            recovery = ArtifactWriter(
+                paths,
+                recovery_id,
+                results_worktree_root=self.root,
+            ).start()
+            recovery.abort()
+            self.assertFalse(writer.journal.exists())
+            rows = [
+                json.loads(line)
+                for line in (
+                    self.root / "eval/results/runs.jsonl"
+                ).read_text(encoding="utf-8").splitlines()
+            ]
+            record = next(row for row in rows if row["run_id"] == run_id)
+            summary = json.loads(
+                (writer.target / "run-summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["config"], record["config"])
+            self.assertEqual(summary["summary"], record["summary"])
+            self.assertEqual(summary["tasks"], record["tasks"])
 
 
 if __name__ == "__main__":

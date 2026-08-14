@@ -775,6 +775,44 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             self.assertEqual(public["campaign_id"], local["campaign_id"])
             self.assertNotIn("budget", public)
 
+            # A matching private/tracked pair is not proof of its sources.
+            # Terminal recovery must still open the durable index before it
+            # accepts the aggregate bytes.
+            index_path = results_root / "eval/results/runs.jsonl"
+            index_path.unlink()
+            with CampaignStateLedger(
+                state_path, identity=identity
+            ) as state, mock.patch.object(
+                baseline_cli, "_replay_terminal_assessment", return_value=assessment
+            ), mock.patch.object(
+                baseline_cli,
+                "_sample_storage",
+                return_value=baseline_cli.StorageBaseline(1, 1, 1),
+            ), mock.patch.object(
+                baseline_cli, "_public_assessment", return_value={"status": "passed"}
+            ), self.assertRaisesRegex(
+                baseline_cli.CampaignExecutionError,
+                "result index is unavailable",
+            ):
+                baseline_cli._advance_post_oracle_step(
+                    paths=paths,
+                    identity=identity,
+                    campaign_root=campaign_root,
+                    budget_path=budget_path,
+                    config=mock.Mock(),
+                    counter=mock.Mock(),
+                    proof=mock.Mock(),
+                    storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                    results_root=results_root,
+                    manifests={},
+                    measurement_roots={},
+                    measurement_commits={},
+                    eval_harness_commit="a" * 40,
+                    seccomp_profile=root / "seccomp.json",
+                    state=state,
+                )
+            index_path.write_text("", encoding="utf-8")
+
             # Simulate a crash after the private aggregate was durable but
             # before its tracked projection was published. A later host sample
             # may legitimately differ and must not invalidate terminal replay.
@@ -812,6 +850,103 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(tracked.read_text())["storage"],
                 local["storage"],
+            )
+
+    def test_terminal_aggregate_sources_bind_state_record_digest_and_budget(self) -> None:
+        identity = self._identity()
+        slot = identity.slots[1]
+        record = {
+            "run_id": slot.run_id,
+            "outcome": RunOutcome.COMPLETED.value,
+            "artifacts": f"eval-data/runs/{slot.run_id}",
+            "config": {
+                "campaign_id": identity.campaign_id,
+                "campaign_lock_sha256": identity.lock_sha256,
+                "campaign_slot_id": slot.slot_id,
+            },
+            "cost": {"estimated_usd": 0.1, "actual_usd": None},
+            "summary": {"evidence": []},
+            "tasks": [{"task_id": slot.task_id, "outcome": "pass"}],
+        }
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+        digest = hashlib.sha256(line).hexdigest()
+        state = {
+            "slots": [
+                {
+                    "slot_id": slot.slot_id,
+                    "run_id": slot.run_id,
+                    "status": CampaignSlotStatus.COMPLETED.value,
+                    "artifact_path": record["artifacts"],
+                    "result_record_sha256": digest,
+                }
+            ]
+        }
+        budget = {
+            "runs": {
+                slot.run_id: {
+                    "spent_usd": "0.100000",
+                    "requests": {
+                        "request": {
+                            "status": "settled",
+                            "charged_usd": "0.100000",
+                        }
+                    },
+                }
+            }
+        }
+        baseline_cli._validate_terminal_result_sources(
+            identity=identity,
+            state_snapshot=state,
+            records={slot.run_id: record},
+            record_digests={slot.run_id: digest},
+            budget=budget,
+            common_root=RepoPaths.discover(Path.cwd()).common_root,
+        )
+
+        state["slots"][0]["result_record_sha256"] = "f" * 64
+        with self.assertRaisesRegex(
+            baseline_cli.CampaignExecutionError,
+            "differs from state or budget",
+        ):
+            baseline_cli._validate_terminal_result_sources(
+                identity=identity,
+                state_snapshot=state,
+                records={slot.run_id: record},
+                record_digests={slot.run_id: digest},
+                budget=budget,
+                common_root=RepoPaths.discover(Path.cwd()).common_root,
+            )
+
+        state["slots"][0]["result_record_sha256"] = digest
+        with self.assertRaisesRegex(
+            baseline_cli.CampaignExecutionError,
+            "state result is missing",
+        ):
+            baseline_cli._validate_terminal_result_sources(
+                identity=identity,
+                state_snapshot=state,
+                records={},
+                record_digests={},
+                budget=budget,
+                common_root=RepoPaths.discover(Path.cwd()).common_root,
+            )
+
+        state["slots"][0].update(
+            status=CampaignSlotStatus.PLANNED.value,
+            result_record_sha256=None,
+            artifact_path=None,
+        )
+        with self.assertRaisesRegex(
+            baseline_cli.CampaignExecutionError,
+            "budget run belongs to an unexecuted slot",
+        ):
+            baseline_cli._validate_terminal_result_sources(
+                identity=identity,
+                state_snapshot=state,
+                records={},
+                record_digests={},
+                budget=budget,
+                common_root=RepoPaths.discover(Path.cwd()).common_root,
             )
 
     def test_terminal_chain_replay_reads_public_result_without_execution(self) -> None:

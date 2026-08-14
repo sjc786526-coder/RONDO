@@ -164,6 +164,13 @@ eval-data/                             # git-ignored
   它记录配置状态，不是 provider 或 catalog 派生出的有效 Guardian 模型。RONDO Local 沿用既有公平合同
   （配置 model / effort / evidence_dir），RONDO Multi 的产品基线定义为四项全未配置。结果顶层与归档内
   `run-summary.json` 使用同一个投影，成功与失败发布路径不会分叉。
+- 新写的 Terminal-Bench 行用 `config.private_summary_schema_version = 1` 声明私有摘要合同；publisher、journal
+  recovery 与 durable index reader 都要求 `run-summary.json` 的 run/side/commit/outcome/config/summary/tasks
+  与 tracked row 逐项相同。没有该版本标记的既有历史行继续只读兼容，不据文件是否碰巧存在来猜合同版本。
+- campaign 新写结果同时记录 `config.campaign_schema_version`。schema v7 的 RONDO 与 Codex 两侧都必须写
+  `config.campaign_product` 并等于冻结 lock 的产品；只有 RONDO 侧写顶层 `product`、`config.product`、
+  `config.binary_product` 与 `auto_review_config`，Codex 侧不得携带这些 RONDO 字段。v1—v6 和未标版本的
+  历史 campaign 结果不回填产品绑定。
 - 当前 record schema v1 的终态为 `completed|agent_failed|infra_failed|budget_stopped|cancelled`；
   `completed` Terminal-Bench 行必须有非空 config/summary/tasks，失败行也不得伪造正常 evidence。
 - Terminal-Bench 在任何外部执行前先 claim 唯一 run-id 的私有 staging 与持久预算槽；已 claim 后的
@@ -197,7 +204,9 @@ eval-data/                             # git-ignored
 - Harbor 私有归档只保留主动 allowlist；RONDO `E_final/meta` 在复核完整生产 meta、Guardian source
   tag/commit 与 effective policy hash 后单独归档，不复制 config、lock、raw log 或 exception trace。
 - `track = replay` 时 `tasks` 为 `null`，改填 `metrics`：`{ wall_ms, cpu_ms, peak_rss_kb, turns, tool_calls, drift }`。
-  该 track 随 E-A 挂起，schema 保留但当前不产生新行。
+  该 track 随 E-A 挂起，schema 保留但当前不产生新行；若 RONDO replay 行带 `product`，
+  `config.product` 与 `config.binary_product` 必须三者相同，且不得携带 Terminal-Bench 的
+  `auto_review_config` 或 campaign 产品字段。历史无产品行继续只读兼容。
 - `track = shadow` 且 `source = "auto"` 时 `metrics` 填**教师一致率**（相对 Sol 教师标签）、
   结构化输出解析失败率、超时与 fail-closed 次数、P50/P95 延迟、显存峰值。
   **漏放 / 误拦只有在有独立裁判结果时才可填**（见 `doc/WBS/local-approval-model.md` L4）；
@@ -229,7 +238,9 @@ eval-data/                             # git-ignored
 - `git_commit` 对导入行记录**执行导入时**的 eval harness commit（谁做的导入），不是被测二进制的 commit；
   `git_dirty` 规则不变。
 - `artifacts` 对导入行指向冻结标签文件所在目录。
-- `local-*` 两类必须写 `product = "rondo-local"`；将来若 Multi 也做影子横评，按 §3.1 写 `rondo-multi`。
+- `local-*` 两类当前只允许 `product = "rondo-local"`，且 `config.product` / `config.binary_product` 必须同值；
+  不得携带 Terminal-Bench 的 `auto_review_config` 或 campaign 产品字段。将来若 Multi 也做影子横评，必须先在
+  本节定义独立 side/产品映射和写入合同，不能让现有 Local side 直接声明 `rondo-multi`。
 
 ### 隐藏集的特殊规则
 
