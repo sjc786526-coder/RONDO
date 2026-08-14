@@ -44,18 +44,26 @@ assessment 语义一律不变，新规则只在 v7 生效。
    投影算法与版本、main/Guardian model 与 override 目标 entry。两个来源 blob 不一致时判定无共享工件、直接拒绝。
 2. **请求前置硬门**：`rondo_eval.fair_comparison` 投影每个请求中与任务无关的分区
    （tool specs、instructions、输出 schema、采样合同，以及 `input` 中首个 user 之前的 developer/system 前缀 ——
-   Responses Lite 的 catalog 派生工具描述就在那里）。首次注册冻结该合同，之后任一侧不符即在请求体解析后、
-   预算预留与上游转发之前 fail-closed，并给出分区级原因码。完整请求 digest 各侧分别记录，只作 provenance/drift，
-   不要求轨迹分叉后逐字节相等。离线入口 `just eval-preflight-symmetry`，其 transport 结构上无法连上游。
+   Responses Lite 的 catalog 派生工具描述就在那里）。**合同必须先由 stub 运行冻结成 preflight receipt**：
+   两侧二进制在本地 stub 上零成本产生请求，比对通过后写出绑定 campaign_id / lock SHA / task / 两侧 bundle manifest
+   的 receipt。付费 slot 缺少或无法匹配 receipt 时直接拒绝执行；运行期代理以该 receipt 预置期望，
+   因此**第一侧也受检**，不存在"先放行首侧、只拦第二侧"的窗口。任一侧不符即在请求体解析后、预算预留与上游转发之前
+   fail-closed，并给出分区级原因码。完整请求 digest 各侧分别记录，只作 provenance/drift，不要求轨迹分叉后逐字节相等。
+   离线比对入口 `just eval-preflight-symmetry`，其 transport 结构上无法连上游。
 3. **执行条件统一**：lock 冻结 harness commit、upstream deadline、task/image digest、provider profile 与
-   投影版本，任一项漂移给出可归因原因码并拒绝比较。基础轮调度改为**按任务交错**（task-major），
+   投影版本。声明值不是自说自话 —— 加载时与 campaign 自身的权威字段（baseline deadline、selected profile 哈希、
+   catalog artifact SHA、冻结 canary 的 task/image）逐项等值校验，harness commit 在执行时与实际 checkout 校验，
+   任一项漂移给出可归因原因码并拒绝比较。基础轮调度改为**按任务交错**（task-major），
    不再整轮时间分块；某轮最后一题落地即刻做 infra 阈值检查，保留原有的提前停机。
 4. **判据分层**：assessment 分别输出 `aa_consistency`、`cross_side`、`directional` 三个子门的状态、原因与指标，
    不再用一个含糊的“性能门”概括。条件加跑进入**最终聚合** —— 触发题每侧的 outcome 是冻结重复的严格多数，
    `delta` 用聚合后的 outcome 计算（同时保留 `base_delta` 供对照）。
+   触发条件是**任一方向的跨侧差异**；方向性兜底仍只检测 RONDO 全败/上游全过这一种回退模式。
 5. **重复规则预冻结**：lock 必须冻结每题每侧总观测数与聚合公式，否则拒绝建立 campaign。
    总观测数为奇数且不少于 3（基础 A/B 轮算其中一次，因此条件加跑为 `n-1` 次），聚合固定为严格多数，
    样本数与冻结值不符即拒绝，不允许事后删题或改分母。
+   唯一的 successor 生成入口 `just eval-b7-next-identity` 只能生成 schema v7，且必须传入 pilot 后冻结的
+   comparison 合同文件；合同不合法时在读写任何文件之前失败，因此无法再生成绕过这些门禁的历史 schema campaign。
 6. **保留机械判据**：`σ` / `delta` / 方向性兜底 / infra 上限按 `doc/WBS.md` §5 执行，
    不使用 pairwise-max `σ` 等事后放宽办法。比较合同不成立时直接 blocked，不计算能力归因。
    该判据**只适用于本设施自身的等条件 A/A、A/B 比较**，Local M3/M4 与 Multi 退化验收都不继承。
@@ -122,8 +130,10 @@ assessment 语义一律不变，新规则只在 v7 生效。
 新的真实 canary 只有在以下条件同时满足后才能申请授权：
 
 - 新 campaign 使用 schema v7，其 `comparison` 块（重复合同、运行条件、catalog 身份、产品身份）已冻结；
-  设施在该块缺失或不合法时拒绝建立 campaign。**不再要求 E-A 完成**：E-A 已挂起，不作为前置条件。
-- 两侧同题的无上游 preflight 通过（`just eval-preflight-symmetry`，或运行期由代理内嵌执行）。
+  设施在该块缺失、不合法或与 campaign 自身事实矛盾时拒绝建立 campaign。
+  **不再要求 E-A 完成**：E-A 已挂起，不作为前置条件。
+- 每道题都已有 stub 冻结的 preflight receipt，且与本 campaign 的 lock SHA、task 与两侧 bundle manifest 绑定；
+  没有 receipt 的 slot 不会启动。生成 receipt 需要一次无 API 的 stub 双侧运行（Docker），单独授权。
 - 新 identity 不复用任何 v1—v22 ID。
 - 任务、轮数、交错顺序、重复规则、模型、价格快照、预算 cap 和停止条件全部预冻结。
 - 按 `doc/WBS.md` §5 的机械判据执行，比较合同任一项漂移都先 blocked。

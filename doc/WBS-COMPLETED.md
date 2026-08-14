@@ -511,6 +511,17 @@ standard/Lite 形态均补回归。
   `codex` 不是产品取值；v7 lock 显式记录产品身份。未创建 `multidev/`，未提前实施工作包 2。
 - **历史保护**：全部新行为绑定 campaign schema v7；v1—v6 的 slot 顺序、run_id 分配、assessment 输出与
   catalog 投影逐字节不变，v1—v22 的 lock/result/ledger/aggregate 未改动。
-- **验收**：`just eval-lock` 通过；`just eval-test` 532 项全通过（新增 42 项 `test_fair_comparison`、
-  12 项 catalog 测试及 adapter/runner 定向用例）。全程无真实 API、无 Docker、无真实模型，未创建新 campaign identity。
+- **独立验收后的四项修正**（GPT 审查 blocked，四项均已复现属实并修复）：
+  1. 付费 runner 原先根本没接 preflight，且注册表会放行首个到达的一侧。新增 `PreflightReceipt`：
+     两侧在 stub 上零成本产生请求并冻结合同，receipt 绑定 campaign_id / lock SHA / task / 两侧 bundle manifest；
+     付费 slot 缺 receipt 直接拒绝，代理以 receipt 预置期望，第一侧同样受检。
+  2. `eval-b7-next-identity` 原先硬编码生成 schema v6，可绕过全部 v7 门禁。生成器改为只产 v7，
+     必须传入 pilot 后冻结的 comparison 合同，且在任何读写之前完成纯校验。
+  3. `ComparisonConditions` 原先无生产调用，且非法/矛盾的 comparison 块可被接受。现在加载时与 campaign
+     自身权威事实逐项等值校验（deadline、provider profile、catalog artifact、task/image），
+     harness commit 在执行时校验；catalog provenance 的 commit/blob/path/投影/override 目标全部格式与一致性校验。
+  4. 条件重复原先只覆盖 RONDO fail / Codex pass，反方向差异会绕过重复合同。v7 起触发条件改为任一方向的
+     跨侧差异；方向性兜底仍只检测 RONDO 全败/上游全过。
+- **验收**：`just eval-lock` 通过；`just eval-test` 552 项全通过（`test_fair_comparison` 共 62 项，
+  含四项修正的入口级回归与两条审查复现用例）。全程无真实 API、无 Docker、无真实模型，未创建新 campaign identity。
   设施闭合不产生任何可归因的能力比较结论。

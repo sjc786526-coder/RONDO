@@ -53,3 +53,32 @@
 
 设施闭合不等于产生了结论。本批没有跑 pilot、没有冻结具体重复数、没有建立任何 v7 campaign identity，
 因此仍不存在可归因的 RONDO/Codex 能力比较。新 campaign 的任务范围、轮数、预算与授权见 `doc/WBS.md`。
+
+## 独立验收后的修正（GPT 审查 `e55a4ac` → blocked）
+
+四项问题全部自行复现属实，已修复。审查日志见
+`agent_log/2026-08-13-acceptance-review-e55a4ac-eb8.md`（不改写，作为形成时点证据）。
+
+1. **付费 runner 没接 preflight，且首侧被放行**（BLOCKER）。原实现只把 `symmetry_preflight` 做成代理参数，
+   生产路径从未传入；即便传入，注册表也是"首次出现即冻结并放行"，只能拦第二侧 —— 而归因报告 §8.2 明确指出
+   那时第一侧已经产生费用。修正：新增 `PreflightReceipt`，由两侧在 stub 上零成本产生的请求冻结而成，
+   绑定 campaign_id / lock SHA / task / 两侧 bundle manifest。`live.py` 对 v7 强制要求 receipt，
+   缺失或绑定不符即在启动代理前拒绝；代理用 `SymmetryPreflight(require_expectation=True)` 预置期望，
+   因此第一侧也要对照预冻结合同，未被 receipt 覆盖的请求直接拒绝。
+   *边界*：真正生成 receipt 需要一次无 API 的双侧 stub 运行（Docker），不在本任务授权内，故未执行；
+   已实现并测试其纯函数产出路径 `preflight_receipt_from_stub_run()`。
+2. **successor 生成器硬编码 v6**（BLOCKER）。`just eval-b7-next-identity` 会造出可加载、可激活的 v6 campaign，
+   完全绕过 v7 门禁，直接违反"重复数与聚合公式未冻结前不得建立正式 campaign"。修正：生成器只产 v7，
+   新增必填 `--comparison-contract`，且把纯校验提到函数最前 —— 合同不合法时在读 registry、写 lock 之前就失败。
+3. **运行条件与 catalog identity 只是声明**（HIGH）。`require_match()` 无生产调用；`_parse_comparison_block()`
+   只查 key 集合，导致 `commit: "zzz"`、`projection_algorithm: "totally-made-up"`、
+   `task_image_digests: {"unrelated-task": "not-a-digest"}` 这样的块能干净加载（已复现）。修正：
+   新增 `actual_conditions()` 从 campaign 自身权威字段重建条件，`require_declared_conditions()` 在加载时等值校验，
+   harness commit 因是运行期事实改在 `_execute_task_slot` 校验；catalog provenance 补齐 commit/blob/path 格式、
+   两侧 blob 一致、投影算法与版本、override 目标必须等于 main model 且在 slug 列表内。
+4. **条件重复只覆盖一个方向**（HIGH）。触发条件写死 RONDO fail / Codex pass，于是 RONDO pass / Codex fail
+   的题在 `sigma` 吸收后完全不跑重复（已复现：`status=passed`、`delta=1`、`conditional_tasks=[]`），
+   `delta` 因此混合了三次多数结果与单次结果。修正：v7 起触发条件改为**任一方向**的跨侧差异；
+   方向性兜底保持单向（它检测的是回退，不是差异）。`baseline_cli` 的执行侧同步改为同一规则。
+
+修正后 `just eval-lock` 通过、`just eval-test` 552 项全通过；两条审查复现用例现在都被拒绝，并已固化为回归。

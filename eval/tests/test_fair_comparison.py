@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import io
 import json
 import tempfile
@@ -41,13 +42,21 @@ from rondo_eval.fair_comparison import (
     ComparisonConditions,
     FairComparisonError,
     NoUpstreamTransport,
+    PreflightReceipt,
     RepeatContract,
     SymmetryPreflight,
     aggregate_repeat_outcomes,
     compare_task_independent,
+    preflight_receipt_from_stub_run,
     project_task_independent,
     stub_preflight,
     task_independent_contract,
+)
+from rondo_eval.terminal_bench import baseline_cli, baseline_identity
+from rondo_eval.terminal_bench.baseline_cli import CampaignExecutionError
+from rondo_eval.terminal_bench.baseline_identity import (
+    CampaignIdentityGenerationError,
+    generate_successor_lock,
 )
 
 
@@ -459,7 +468,10 @@ class ComparisonConditionsTests(unittest.TestCase):
             "upstream_timeout_seconds": "180.000",
             "provider_profile_sha256": "b" * 64,
             "catalog_artifact_sha256": "c" * 64,
-            "task_image_digests": (("task-1", "sha256:1"), ("task-2", "sha256:2")),
+            "task_image_digests": (
+                ("task-1", "sha256:" + "1" * 64),
+                ("task-2", "sha256:" + "2" * 64),
+            ),
         }
         values.update(overrides)
         return ComparisonConditions(**values)  # type: ignore[arg-type]
@@ -474,7 +486,10 @@ class ComparisonConditionsTests(unittest.TestCase):
             "provider_profile_differs": {"provider_profile_sha256": "e" * 64},
             "catalog_artifact_differs": {"catalog_artifact_sha256": "f" * 64},
             "task_image_differs": {
-                "task_image_digests": (("task-1", "sha256:1"), ("task-2", "sha256:9"))
+                "task_image_digests": (
+                    ("task-1", "sha256:" + "1" * 64),
+                    ("task-2", "sha256:" + "9" * 64),
+                )
             },
         }
         for reason, overrides in cases.items():
@@ -597,17 +612,16 @@ class _CampaignFixture:
             baseline=campaign_baseline_contract(6),
         )
 
-    @classmethod
-    def v7(cls, *, repeats: int = 3, comparison_overrides: dict | None = None):
-        base = cls.v6()
-        catalog_identity = {
+    @staticmethod
+    def catalog_identity(**overrides: object) -> dict:
+        value = {
             "sha256": "c" * 64,
             "projection_algorithm": "full_catalog_with_auto_review_override",
             "projection_version": 2,
             "main_model": "gpt-5.6-sol",
             "guardian_model": "gpt-5.6-sol",
             "override_target_slug": "gpt-5.6-sol",
-            "model_slugs": [f"model-{index}" for index in range(8)],
+            "model_slugs": ["gpt-5.6-sol", *(f"model-{index}" for index in range(7))],
             "sources": [
                 {
                     "side": "upstream",
@@ -623,18 +637,31 @@ class _CampaignFixture:
                 },
             ],
         }
+        value.update(overrides)
+        return value
+
+    @classmethod
+    def v7(cls, *, repeats: int = 3, comparison_overrides: dict | None = None):
+        base = cls.v6()
+        catalog_identity = cls.catalog_identity()
+        # Bind the declared conditions to the campaign's own authoritative
+        # facts so the fixture exercises the real cross-check rather than a
+        # self-consistent fiction.
         comparison = {
             "repeat_contract": RepeatContract(
                 repeats, AGGREGATION_STRICT_MAJORITY, "pilot"
             ).to_dict(),
             "comparison_conditions": ComparisonConditions(
                 eval_harness_commit="d" * 40,
-                upstream_timeout_seconds="180.000",
-                provider_profile_sha256="e" * 64,
-                catalog_artifact_sha256="c" * 64,
+                upstream_timeout_seconds=str(
+                    base.baseline["upstream_timeout_seconds"]
+                ),
+                provider_profile_sha256=str(
+                    base.selected_profile["provider_profile_sha256"]
+                ),
+                catalog_artifact_sha256=str(catalog_identity["sha256"]),
                 task_image_digests=tuple(
-                    (task_id, f"sha256:{index}")
-                    for index, task_id in enumerate(sorted(cls.tasks))
+                    sorted((item.task_id, item.image_digest) for item in base.catalog.tasks)
                 ),
             ).to_dict(),
             "catalog_identity": catalog_identity,
@@ -943,6 +970,410 @@ class LayeredAssessmentTests(unittest.TestCase):
         self.assertEqual(result.status, BaselineStatus.BLOCKED)
         self.assertEqual(result.layers, ())
         self.assertIsNone(result.delta)
+
+
+class PreflightReceiptTests(unittest.TestCase):
+    """A receipt frozen on a stub must gate the first paid side, not just the second."""
+
+    bundles = {"rondo": "1" * 64, "codex": "2" * 64}
+
+    def _receipt(self, **overrides: object) -> PreflightReceipt:
+        values: dict[str, object] = {
+            "campaign_id": "p2-b7-canary-baseline-v23",
+            "campaign_lock_sha256": "a" * 64,
+            "task_id": "terminal-bench-fix-git",
+            "bundle_manifest_sha256": dict(self.bundles),
+            "requests_by_side": {
+                Side.RONDO: {"main": _request(prompt="rondo")},
+                Side.CODEX: {"main": _request(prompt="codex")},
+            },
+        }
+        values.update(overrides)
+        return preflight_receipt_from_stub_run(**values)  # type: ignore[arg-type]
+
+    def test_a_stub_run_freezes_the_contract_for_both_sides(self) -> None:
+        receipt = self._receipt()
+        self.assertEqual([role for role, _c in receipt.contracts], ["main"])
+        self.assertEqual(dict(receipt.bundle_manifest_sha256), self.bundles)
+
+    def test_an_asymmetric_stub_run_produces_no_receipt(self) -> None:
+        with self.assertRaises(FairComparisonError) as caught:
+            self._receipt(
+                requests_by_side={
+                    Side.RONDO: {"main": _request()},
+                    Side.CODEX: {
+                        "main": _request(
+                            developer_text="# Policy\nfrozen policy text\n"
+                            "# AdditionalTools\nspawn_agent: models are alpha"
+                        )
+                    },
+                }
+            )
+        self.assertIn(
+            "task_independent_stable_input_prefix_differs", caught.exception.reasons
+        )
+
+    def test_a_seeded_preflight_checks_the_very_first_side(self) -> None:
+        receipt = self._receipt()
+        preflight = SymmetryPreflight(require_expectation=True)
+        receipt.seed(preflight)
+        self.assertEqual(preflight.seeded_keys, (("terminal-bench-fix-git", "main"),))
+        # The first arrival is no longer free: it must match the frozen contract.
+        with self.assertRaises(FairComparisonError) as caught:
+            preflight.register(
+                task_id="terminal-bench-fix-git",
+                role="main",
+                side=Side.RONDO,
+                request=_request(instructions="drifted base instructions"),
+            )
+        self.assertEqual(
+            caught.exception.reasons,
+            ("frozen_contract_asymmetry", "task_independent_instructions_differs"),
+        )
+        preflight.register(
+            task_id="terminal-bench-fix-git",
+            role="main",
+            side=Side.RONDO,
+            request=_request(prompt="any task body"),
+        )
+
+    def test_an_uncovered_request_is_refused_under_require_expectation(self) -> None:
+        preflight = SymmetryPreflight(require_expectation=True)
+        with self.assertRaises(FairComparisonError) as caught:
+            preflight.register(
+                task_id="terminal-bench-fix-git",
+                role="guardian",
+                side=Side.RONDO,
+                request=_request(guardian=True),
+            )
+        self.assertEqual(
+            caught.exception.reasons, ("preflight_expectation_missing",)
+        )
+
+    def test_binding_rejects_reuse_across_campaign_task_or_binary(self) -> None:
+        receipt = self._receipt()
+        binding: dict[str, object] = {
+            "campaign_id": "p2-b7-canary-baseline-v23",
+            "campaign_lock_sha256": "a" * 64,
+            "task_id": "terminal-bench-fix-git",
+            "bundle_manifest_sha256": dict(self.bundles),
+        }
+        receipt.require_binding(**binding)  # type: ignore[arg-type]
+        cases = {
+            "preflight_receipt_campaign_differs": {
+                "campaign_id": "p2-b7-canary-baseline-v24"
+            },
+            "preflight_receipt_lock_differs": {"campaign_lock_sha256": "b" * 64},
+            "preflight_receipt_task_differs": {"task_id": "terminal-bench-other"},
+            "preflight_receipt_bundle_differs": {
+                "bundle_manifest_sha256": {"rondo": "9" * 64, "codex": "2" * 64}
+            },
+        }
+        for reason, override in cases.items():
+            with self.subTest(reason=reason), self.assertRaises(
+                FairComparisonError
+            ) as caught:
+                receipt.require_binding(**{**binding, **override})  # type: ignore[arg-type]
+            self.assertEqual(caught.exception.reasons, (reason,))
+
+    def test_receipt_round_trips_and_rejects_a_malformed_file(self) -> None:
+        receipt = self._receipt()
+        self.assertEqual(PreflightReceipt.from_dict(receipt.to_dict()), receipt)
+        with self.assertRaises(FairComparisonError) as caught:
+            PreflightReceipt.from_dict({"campaign_id": "x"})
+        self.assertEqual(
+            caught.exception.reasons, ("preflight_receipt_not_frozen",)
+        )
+
+
+class PaidRunnerPreflightGateTests(unittest.TestCase):
+    """The paid entry point must refuse to start without a usable receipt."""
+
+    def test_a_fair_comparison_slot_without_a_receipt_is_refused(self) -> None:
+        identity = _CampaignFixture.v7()
+        task = identity.catalog.tasks[0]
+        with self.assertRaisesRegex(
+            CampaignExecutionError, "stub preflight receipt is missing"
+        ):
+            baseline_cli._load_preflight_receipt(
+                RepoPaths.discover(Path.cwd()), identity, task
+            )
+
+    def test_historical_campaigns_do_not_consume_receipts(self) -> None:
+        identity = _CampaignFixture.v6()
+        self.assertIsNone(
+            baseline_cli._load_preflight_receipt(
+                RepoPaths.discover(Path.cwd()), identity, identity.catalog.tasks[0]
+            )
+        )
+
+    def test_the_receipt_path_is_campaign_and_task_scoped(self) -> None:
+        identity = _CampaignFixture.v7()
+        task = identity.catalog.tasks[0]
+        path = baseline_cli.preflight_receipt_path(
+            RepoPaths.discover(Path.cwd()), identity, task.task_id
+        )
+        self.assertEqual(path.parent.name, "preflight")
+        self.assertEqual(path.parent.parent.name, identity.campaign_id)
+        self.assertEqual(path.name, f"{task.task_id.split('/')[-1]}.json")
+
+
+class SuccessorIdentityTests(unittest.TestCase):
+    """`eval-b7-next-identity` may only mint frozen fair-comparison campaigns."""
+
+    def test_a_successor_cannot_be_minted_without_a_frozen_contract(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        for block in (
+            {},
+            {"repeat_contract": {"repeats_per_task": 2, "aggregation": "strict_majority", "frozen_after": "pilot"}},
+            {
+                "repeat_contract": RepeatContract(
+                    3, AGGREGATION_STRICT_MAJORITY, "pilot"
+                ).to_dict(),
+                "comparison_conditions": {},
+                "catalog_identity": {},
+                "product": "rondo-local",
+            },
+        ):
+            with self.subTest(block=sorted(block)), self.assertRaisesRegex(
+                CampaignIdentityGenerationError, "not frozen"
+            ):
+                generate_successor_lock(
+                    paths,
+                    run_id_date="20260901",
+                    run_id_sequence_base=500000001,
+                    comparison=block,
+                )
+
+    def test_the_generator_requires_the_comparison_contract(self) -> None:
+        signature = inspect.signature(generate_successor_lock)
+        parameter = signature.parameters["comparison"]
+        self.assertEqual(parameter.default, inspect.Parameter.empty)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            baseline_identity.main(
+                ["--run-id-date", "20260901", "--run-id-sequence-base", "500000001"]
+            )
+
+    def test_an_unreadable_contract_file_fails_before_any_work(self) -> None:
+        with self.assertRaisesRegex(
+            CampaignIdentityGenerationError, "comparison contract file is unavailable"
+        ):
+            baseline_identity.main(
+                [
+                    "--run-id-date",
+                    "20260901",
+                    "--run-id-sequence-base",
+                    "500000001",
+                    "--comparison-contract",
+                    "/nonexistent/comparison.json",
+                ]
+            )
+
+
+class DeclaredConditionsBindingTests(unittest.TestCase):
+    """A frozen comparison block may not contradict the campaign it belongs to."""
+
+    def test_a_faithful_block_matches_the_campaigns_own_facts(self) -> None:
+        identity = _CampaignFixture.v7()
+        declared = identity.require_declared_conditions()
+        self.assertEqual(
+            declared.catalog_artifact_sha256, identity.catalog_identity["sha256"]
+        )
+
+    def test_contradictory_declarations_are_rejected_with_a_reason(self) -> None:
+        identity = _CampaignFixture.v7()
+        cases = {
+            "upstream_timeout_differs": {"upstream_timeout_seconds": "90.000"},
+            "provider_profile_differs": {"provider_profile_sha256": "9" * 64},
+            "catalog_artifact_differs": {"catalog_artifact_sha256": "8" * 64},
+            "task_image_differs": {
+                "task_image_digests": {"terminal-bench/other": "sha256:" + "7" * 64}
+            },
+        }
+        for reason, override in cases.items():
+            conditions = {
+                **identity.comparison["comparison_conditions"],
+                **override,
+            }
+            drifted = replace(
+                identity,
+                comparison={
+                    **identity.comparison,
+                    "comparison_conditions": conditions,
+                },
+            )
+            with self.subTest(reason=reason), self.assertRaisesRegex(
+                BaselineError, reason
+            ):
+                drifted.require_declared_conditions()
+
+    def test_a_drifted_harness_commit_is_rejected_at_runtime(self) -> None:
+        identity = _CampaignFixture.v7()
+        identity.require_declared_conditions(eval_harness_commit="d" * 40)
+        with self.assertRaisesRegex(BaselineError, "eval_harness_commit_differs"):
+            identity.require_declared_conditions(eval_harness_commit="9" * 40)
+
+    def test_malformed_catalog_provenance_is_rejected(self) -> None:
+        cases = [
+            ("provenance is invalid", {
+                "sources": [
+                    {
+                        "side": "upstream",
+                        "commit": "zzz",
+                        "path": "codex-rs/models-manager/models.json",
+                        "blob_id": "f" * 40,
+                    },
+                    {
+                        "side": "rondo",
+                        "commit": "b" * 40,
+                        "path": "mydev/codex-rs/models-manager/models.json",
+                        "blob_id": "f" * 40,
+                    },
+                ]
+            }),
+            ("record different blobs", {
+                "sources": [
+                    {
+                        "side": "upstream",
+                        "commit": "a" * 40,
+                        "path": "codex-rs/models-manager/models.json",
+                        "blob_id": "f" * 40,
+                    },
+                    {
+                        "side": "rondo",
+                        "commit": "b" * 40,
+                        "path": "mydev/codex-rs/models-manager/models.json",
+                        "blob_id": "e" * 40,
+                    },
+                ]
+            }),
+            ("projection is invalid", {"projection_algorithm": "totally-made-up"}),
+            ("projection is invalid", {"projection_version": 999}),
+            ("projection is invalid", {"model_slugs": []}),
+            ("override target is invalid", {"override_target_slug": "not-in-catalog"}),
+        ]
+        for message, override in cases:
+            block = {
+                **_CampaignFixture.v7().comparison,
+                "catalog_identity": _CampaignFixture.catalog_identity(**override),
+            }
+            with self.subTest(message=message), self.assertRaisesRegex(
+                BaselineError, message
+            ):
+                _parse_comparison_block(
+                    {"comparison": block},
+                    schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+                )
+
+    def test_the_reviewed_malformed_block_is_now_refused(self) -> None:
+        """Regression for the exact block that used to load cleanly."""
+
+        block = {
+            "repeat_contract": RepeatContract(
+                3, AGGREGATION_STRICT_MAJORITY, "pilot"
+            ).to_dict(),
+            "comparison_conditions": {
+                "eval_harness_commit": "9" * 40,
+                "upstream_timeout_seconds": "180.000",
+                "provider_profile_sha256": "b" * 64,
+                "catalog_artifact_sha256": "c" * 64,
+                "task_image_digests": {"unrelated-task": "not-a-digest"},
+                "projection_version": 1,
+            },
+            "catalog_identity": _CampaignFixture.catalog_identity(
+                projection_algorithm="totally-made-up",
+                projection_version=999,
+                override_target_slug="not-even-in-the-catalog",
+                model_slugs=[],
+            ),
+            "product": "rondo-local",
+        }
+        with self.assertRaises(BaselineError):
+            _parse_comparison_block(
+                {"comparison": block},
+                schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+            )
+
+
+class BidirectionalRepeatTests(unittest.TestCase):
+    """Every cross-side disagreement is repeated, in both directions."""
+
+    tasks = _CampaignFixture.tasks
+    contract = RepeatContract(3, AGGREGATION_STRICT_MAJORITY, "pilot")
+
+    def _base(self, outcomes: dict) -> tuple[BaselineRun, ...]:
+        values: list[BaselineRun] = []
+        for round_id in BASE_ROUNDS:
+            side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
+            for index, task_id in enumerate(self.tasks):
+                values.append(
+                    BaselineRun(
+                        task_id,
+                        round_id,
+                        side,
+                        1,
+                        outcomes.get((round_id, task_id), TaskOutcome.PASS),
+                        f"{round_id}-{index}-a1",
+                    )
+                )
+        return tuple(values)
+
+    def _conditional(self, task_id: str, rondo: tuple, codex: tuple):
+        values = []
+        for side, outcomes in ((Side.RONDO, rondo), (Side.CODEX, codex)):
+            for repeat, outcome in enumerate(outcomes, start=1):
+                values.append(
+                    ConditionalRun(
+                        task_id,
+                        side,
+                        repeat,
+                        1,
+                        outcome,
+                        f"c-{task_id}-{side.value}-{repeat}",
+                    )
+                )
+        return tuple(values)
+
+    def test_a_rondo_pass_codex_fail_task_is_repeated(self) -> None:
+        task_id = self.tasks[0]
+        base = self._base({("ab-codex-1", task_id): TaskOutcome.FAIL})
+        result = assess_baseline(
+            self.tasks,
+            base,
+            self._conditional(
+                task_id,
+                rondo=(TaskOutcome.PASS, TaskOutcome.PASS),
+                codex=(TaskOutcome.FAIL, TaskOutcome.FAIL),
+            ),
+            repeat_contract=self.contract,
+        )
+        self.assertEqual(result.conditional_tasks, (task_id,))
+        self.assertEqual(result.delta, 1)
+        self.assertEqual(result.layer("cross_side").status, BaselineStatus.FAILED)
+        # The backstop stays one-way: RONDO winning is not a regression.
+        self.assertEqual(result.layer("directional").status, BaselineStatus.PASSED)
+
+    def test_the_reverse_direction_no_longer_bypasses_the_repeat_contract(self) -> None:
+        """Regression: this used to pass with zero repeats when sigma absorbed it."""
+
+        task_id = self.tasks[0]
+        base = self._base(
+            {
+                ("ab-codex-1", task_id): TaskOutcome.FAIL,
+                ("aa-rondo-2", self.tasks[1]): TaskOutcome.FAIL,
+            }
+        )
+        with self.assertRaises(BaselineError):
+            # No conditional runs were supplied, so the frozen repeats for the
+            # now-triggered task are missing and the assessment cannot proceed.
+            assess_baseline(self.tasks, base, (), repeat_contract=self.contract)
+
+    def test_historical_assessments_keep_the_one_way_trigger(self) -> None:
+        task_id = self.tasks[0]
+        base = self._base({("ab-codex-1", task_id): TaskOutcome.FAIL})
+        legacy = assess_baseline(self.tasks, base, ())
+        self.assertEqual(legacy.conditional_tasks, ())
+        self.assertEqual(legacy.delta, 1)
 
 
 if __name__ == "__main__":

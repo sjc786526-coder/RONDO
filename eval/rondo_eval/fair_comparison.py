@@ -29,6 +29,7 @@ from .contracts import Side
 
 TASK_INDEPENDENT_PROJECTION_VERSION = 1
 CATALOG_PROJECTION_VERSION = 2
+PREFLIGHT_RECEIPT_SCHEMA_VERSION = 1
 
 _TASK_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
 _ROLES = {"main", "guardian"}
@@ -38,6 +39,7 @@ _TRANSPORT_ONLY_ITEM_FIELDS = ("id", "encrypted_function_args")
 _MAX_REPEATS_PER_TASK = 9
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+_IMAGE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 AGGREGATION_STRICT_MAJORITY = "strict_majority"
 _AGGREGATIONS = {AGGREGATION_STRICT_MAJORITY}
@@ -239,9 +241,20 @@ class SymmetryPreflight:
     legitimately differ.
     """
 
-    def __init__(self, *, allow_upstream: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        allow_upstream: bool = False,
+        require_expectation: bool = False,
+    ) -> None:
         self._allow_upstream = bool(allow_upstream)
-        self._expected: dict[tuple[str, str], tuple[Side, TaskIndependentContract]] = {}
+        # When set, a request with no pre-seeded contract is refused instead of
+        # being allowed to define one.  Paid runs use this so nothing can be
+        # forwarded that a stub run did not already prove symmetric.
+        self._require_expectation = bool(require_expectation)
+        self._expected: dict[
+            tuple[str, str], tuple[Side | None, TaskIndependentContract]
+        ] = {}
         self._observed: list[ObservedRequest] = []
 
     @property
@@ -255,6 +268,49 @@ class SymmetryPreflight:
     def frozen_contract(self, task_id: str, role: str) -> TaskIndependentContract | None:
         entry = self._expected.get((task_id, role))
         return None if entry is None else entry[1]
+
+    def expect(
+        self,
+        *,
+        task_id: str,
+        role: str,
+        contract: TaskIndependentContract,
+    ) -> None:
+        """Pre-seed the expected contract from a receipt proved on a stub.
+
+        Without this, the first side to arrive would define the contract and be
+        forwarded unchecked -- only the second side could ever be stopped, and
+        by then the first has already been charged.  Seeding makes both sides
+        answer to a contract frozen before any paid run started.
+        """
+
+        if not isinstance(task_id, str) or not _TASK_ID.fullmatch(task_id):
+            raise FairComparisonError(
+                "preflight task id is invalid",
+                reasons=("preflight_task_id_invalid",),
+            )
+        if role not in _ROLES:
+            raise FairComparisonError(
+                "preflight request role is invalid",
+                reasons=("preflight_role_invalid",),
+            )
+        if not isinstance(contract, TaskIndependentContract):
+            raise FairComparisonError(
+                "preflight expectation is invalid",
+                reasons=("preflight_expectation_invalid",),
+            )
+        if (task_id, role) in self._expected:
+            raise FairComparisonError(
+                "preflight expectation is already frozen",
+                reasons=("preflight_expectation_duplicated",),
+            )
+        self._expected[(task_id, role)] = (None, contract)
+
+    @property
+    def seeded_keys(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            key for key, (side, _contract) in sorted(self._expected.items()) if side is None
+        )
 
     def register(
         self,
@@ -285,14 +341,22 @@ class SymmetryPreflight:
         key = (task_id, role)
         entry = self._expected.get(key)
         if entry is None:
+            if self._require_expectation:
+                raise FairComparisonError(
+                    "no frozen task-independent contract covers this request",
+                    reasons=("preflight_expectation_missing",),
+                )
             self._expected[key] = (side, contract)
         else:
             expected_side, expected = entry
             reasons = compare_task_independent(expected, contract)
             if reasons:
-                scope = (
-                    "cross_side" if expected_side is not side else "same_side"
-                )
+                if expected_side is None:
+                    scope = "frozen_contract"
+                elif expected_side is not side:
+                    scope = "cross_side"
+                else:
+                    scope = "same_side"
                 raise FairComparisonError(
                     "task-independent request contract is asymmetric",
                     reasons=(f"{scope}_asymmetry", *reasons),
@@ -318,7 +382,7 @@ class SymmetryPreflight:
                 {
                     "task_id": task_id,
                     "role": role,
-                    "first_side": first_side.value,
+                    "first_side": None if first_side is None else first_side.value,
                     **contract.to_dict(),
                 }
                 for (task_id, role), (first_side, contract) in sorted(
@@ -337,6 +401,237 @@ class SymmetryPreflight:
                 for item in self._observed
             ],
         }
+
+
+@dataclass(frozen=True)
+class PreflightReceipt:
+    """Proof that both sides were symmetric on a stub before any paid request.
+
+    The receipt is what makes the runtime gate meaningful: it is produced by
+    driving both frozen binaries against a local stub endpoint at zero cost,
+    and the paid runner refuses to start a slot without one.  It is bound to
+    the campaign lock, the task and both bundle manifests so a receipt cannot
+    be reused across campaigns, tasks or binaries.
+    """
+
+    schema_version: int
+    campaign_id: str
+    campaign_lock_sha256: str
+    task_id: str
+    projection_version: int
+    bundle_manifest_sha256: tuple[tuple[str, str], ...]
+    contracts: tuple[tuple[str, TaskIndependentContract], ...]
+
+    def validate(self) -> None:
+        if self.schema_version != PREFLIGHT_RECEIPT_SCHEMA_VERSION:
+            raise FairComparisonError(
+                "preflight receipt schema is unsupported",
+                reasons=("preflight_receipt_schema_unsupported",),
+            )
+        if not _TASK_ID.fullmatch(self.task_id or ""):
+            raise FairComparisonError(
+                "preflight receipt task id is invalid",
+                reasons=("preflight_receipt_task_invalid",),
+            )
+        if not _SHA256.fullmatch(self.campaign_lock_sha256 or ""):
+            raise FairComparisonError(
+                "preflight receipt lock digest is invalid",
+                reasons=("preflight_receipt_lock_invalid",),
+            )
+        if self.projection_version != TASK_INDEPENDENT_PROJECTION_VERSION:
+            raise FairComparisonError(
+                "preflight receipt projection version is unsupported",
+                reasons=("preflight_receipt_projection_unsupported",),
+            )
+        sides = [side for side, _digest in self.bundle_manifest_sha256]
+        if sorted(sides) != [Side.CODEX.value, Side.RONDO.value] or any(
+            not _SHA256.fullmatch(digest or "")
+            for _side, digest in self.bundle_manifest_sha256
+        ):
+            raise FairComparisonError(
+                "preflight receipt must bind both frozen bundles",
+                reasons=("preflight_receipt_bundles_invalid",),
+            )
+        roles = [role for role, _contract in self.contracts]
+        if not roles or len(set(roles)) != len(roles) or any(
+            role not in _ROLES for role in roles
+        ):
+            raise FairComparisonError(
+                "preflight receipt roles are invalid",
+                reasons=("preflight_receipt_roles_invalid",),
+            )
+
+    def require_binding(
+        self,
+        *,
+        campaign_id: str,
+        campaign_lock_sha256: str,
+        task_id: str,
+        bundle_manifest_sha256: dict[str, str],
+    ) -> None:
+        """Fail closed unless the receipt was produced for exactly this run."""
+
+        self.validate()
+        reasons = tuple(
+            reason
+            for reason, matched in (
+                ("preflight_receipt_campaign_differs", self.campaign_id == campaign_id),
+                (
+                    "preflight_receipt_lock_differs",
+                    self.campaign_lock_sha256 == campaign_lock_sha256,
+                ),
+                ("preflight_receipt_task_differs", self.task_id == task_id),
+                (
+                    "preflight_receipt_bundle_differs",
+                    dict(self.bundle_manifest_sha256) == dict(bundle_manifest_sha256),
+                ),
+            )
+            if not matched
+        )
+        if reasons:
+            raise FairComparisonError(
+                "preflight receipt does not cover this run", reasons=reasons
+            )
+
+    def seed(self, preflight: "SymmetryPreflight") -> None:
+        self.validate()
+        for role, contract in self.contracts:
+            preflight.expect(task_id=self.task_id, role=role, contract=contract)
+
+    def to_dict(self) -> dict[str, object]:
+        self.validate()
+        return {
+            "schema_version": self.schema_version,
+            "campaign_id": self.campaign_id,
+            "campaign_lock_sha256": self.campaign_lock_sha256,
+            "task_id": self.task_id,
+            "projection_version": self.projection_version,
+            "bundle_manifest_sha256": dict(self.bundle_manifest_sha256),
+            "contracts": {
+                role: contract.to_dict() for role, contract in self.contracts
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "PreflightReceipt":
+        if not isinstance(value, dict) or set(value) != {
+            "schema_version",
+            "campaign_id",
+            "campaign_lock_sha256",
+            "task_id",
+            "projection_version",
+            "bundle_manifest_sha256",
+            "contracts",
+        }:
+            raise FairComparisonError(
+                "preflight receipt is not frozen",
+                reasons=("preflight_receipt_not_frozen",),
+            )
+        bundles = value["bundle_manifest_sha256"]
+        contracts = value["contracts"]
+        if not isinstance(bundles, dict) or not isinstance(contracts, dict):
+            raise FairComparisonError(
+                "preflight receipt is not frozen",
+                reasons=("preflight_receipt_not_frozen",),
+            )
+        parsed: list[tuple[str, TaskIndependentContract]] = []
+        for role, item in sorted(contracts.items()):
+            if not isinstance(item, dict) or set(item) != {
+                "projection_version",
+                "digest",
+                "partition_digests",
+            }:
+                raise FairComparisonError(
+                    "preflight receipt contract is invalid",
+                    reasons=("preflight_receipt_contract_invalid",),
+                )
+            digests = item["partition_digests"]
+            if not isinstance(digests, dict) or set(digests) != set(
+                TASK_INDEPENDENT_PARTITIONS
+            ) or any(
+                not isinstance(digest, str) or not _SHA256.fullmatch(digest)
+                for digest in digests.values()
+            ):
+                raise FairComparisonError(
+                    "preflight receipt contract is invalid",
+                    reasons=("preflight_receipt_contract_invalid",),
+                )
+            parsed.append(
+                (
+                    str(role),
+                    TaskIndependentContract(
+                        projection_version=item["projection_version"],
+                        digest=str(item["digest"]),
+                        partition_digests=tuple(
+                            (name, digests[name]) for name in TASK_INDEPENDENT_PARTITIONS
+                        ),
+                    ),
+                )
+            )
+        receipt = cls(
+            schema_version=value["schema_version"],
+            campaign_id=str(value["campaign_id"]),
+            campaign_lock_sha256=str(value["campaign_lock_sha256"]),
+            task_id=str(value["task_id"]),
+            projection_version=value["projection_version"],
+            bundle_manifest_sha256=tuple(
+                (str(side), str(digest)) for side, digest in sorted(bundles.items())
+            ),
+            contracts=tuple(parsed),
+        )
+        receipt.validate()
+        return receipt
+
+
+def preflight_receipt_from_stub_run(
+    *,
+    campaign_id: str,
+    campaign_lock_sha256: str,
+    task_id: str,
+    bundle_manifest_sha256: dict[str, str],
+    requests_by_side: Mapping[Side, Mapping[str, Mapping[str, Any]]],
+) -> PreflightReceipt:
+    """Freeze a receipt from the requests both sides produced against a stub.
+
+    ``requests_by_side`` maps each side to ``{role: request}``.  Both sides must
+    cover exactly the same roles and agree on every task-independent partition;
+    anything else raises instead of producing a receipt.
+    """
+
+    if set(requests_by_side) != {Side.RONDO, Side.CODEX}:
+        raise FairComparisonError(
+            "a stub preflight must cover both sides",
+            reasons=("preflight_stub_sides_incomplete",),
+        )
+    roles = {side: set(values) for side, values in requests_by_side.items()}
+    if roles[Side.RONDO] != roles[Side.CODEX] or not roles[Side.RONDO]:
+        raise FairComparisonError(
+            "both sides must produce the same request roles",
+            reasons=("preflight_stub_roles_differ",),
+        )
+    preflight = SymmetryPreflight(allow_upstream=False)
+    for side in (Side.RONDO, Side.CODEX):
+        for role in sorted(roles[side]):
+            preflight.register(
+                task_id=task_id,
+                role=role,
+                side=side,
+                request=requests_by_side[side][role],
+            )
+    receipt = PreflightReceipt(
+        schema_version=PREFLIGHT_RECEIPT_SCHEMA_VERSION,
+        campaign_id=campaign_id,
+        campaign_lock_sha256=campaign_lock_sha256,
+        task_id=task_id,
+        projection_version=TASK_INDEPENDENT_PROJECTION_VERSION,
+        bundle_manifest_sha256=tuple(sorted(bundle_manifest_sha256.items())),
+        contracts=tuple(
+            (role, preflight.frozen_contract(task_id, role))
+            for role in sorted(roles[Side.RONDO])
+        ),
+    )
+    receipt.validate()
+    return receipt
 
 
 def stub_preflight(
@@ -503,6 +798,14 @@ class ComparisonConditions:
             raise FairComparisonError(
                 "task image freeze is not a sorted unique mapping",
                 reasons=("task_image_freeze_invalid",),
+            )
+        if any(
+            not _IMAGE_DIGEST.fullmatch(digest or "")
+            for _task_id, digest in self.task_image_digests
+        ):
+            raise FairComparisonError(
+                "task image digest is not a content address",
+                reasons=("task_image_digest_invalid",),
             )
         if self.projection_version != TASK_INDEPENDENT_PROJECTION_VERSION:
             raise FairComparisonError(

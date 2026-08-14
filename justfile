@@ -89,13 +89,17 @@ eval-b7-baseline docker_host_volume results_worktree_root rondo_measurement code
         --codex-measurement-worktree-root "{{codex_measurement}}"
 
 # Generate and activate one successor identity after its predecessor is terminal.
-eval-b7-next-identity run_id_date run_id_sequence_base:
+# Only fair-comparison (schema v7) successors can be minted: the comparison
+# contract file must carry the post-pilot frozen repeat contract, run
+# conditions, shared catalog identity and product.
+eval-b7-next-identity run_id_date run_id_sequence_base comparison_contract:
     @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
         UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_identity \
         --run-id-date "{{run_id_date}}" \
-        --run-id-sequence-base "{{run_id_sequence_base}}"
+        --run-id-sequence-base "{{run_id_sequence_base}}" \
+        --comparison-contract "{{comparison_contract}}"
 
 # Resolve one durable schema-v2 RCA hold. This performs no Docker or API work.
 eval-b7-resolve-diagnosis chain_id category disposition evidence_code:

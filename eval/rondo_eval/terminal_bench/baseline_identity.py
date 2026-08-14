@@ -16,17 +16,21 @@ from ..frozen_model_catalog import (
     load_frozen_model_catalog,
     load_shared_model_catalog,
 )
+from ..fair_comparison import FairComparisonError, RepeatContract
 from .baseline import (
     CAMPAIGN_ACTIVE_POINTER_PATH,
     CAMPAIGN_CAP_USD,
     CAMPAIGN_MAX_RUNS,
+    FAIR_COMPARISON_SCHEMA_VERSION,
     CampaignIdentity,
     CampaignLockRegistration,
     ContinuationReference,
     LEGACY_UPSTREAM_TIMEOUT_SECONDS,
+    _parse_comparison_block,
     campaign_slot_chain_id,
     campaign_baseline_contract,
     campaign_lock_registry,
+    campaign_slot_total,
     load_campaign_identity_path,
     load_historical_campaign_identity,
 )
@@ -155,7 +159,29 @@ def generate_successor_lock(
     *,
     run_id_date: str,
     run_id_sequence_base: int,
+    comparison: dict[str, object],
 ) -> tuple[Path, Decimal]:
+    """Mint the next campaign lock.
+
+    Only fair-comparison (schema v7) successors may be generated.  The caller
+    must supply the comparison block frozen after the pilot -- repeat contract,
+    run conditions, shared catalog identity and product -- because a campaign
+    whose repeat count and aggregation formula are not yet frozen must not
+    exist at all.
+    """
+
+    # Pure validation first: a campaign whose repeat count and aggregation
+    # formula are not frozen must fail before anything is read or written.
+    try:
+        parsed_comparison = _parse_comparison_block(
+            {"comparison": comparison},
+            schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+        )
+        repeats = RepeatContract.from_dict(parsed_comparison["repeat_contract"])
+    except (ValueError, FairComparisonError) as exc:
+        raise CampaignIdentityGenerationError(
+            f"successor comparison contract is not frozen: {exc}"
+        ) from exc
     _require_clean_worktree(paths.worktree_root)
     if re.fullmatch(r"[0-9]{8}", run_id_date) is None:
         raise CampaignIdentityGenerationError("run ID date must contain eight digits")
@@ -197,24 +223,45 @@ def generate_successor_lock(
             "successor catalog changes the frozen taskset identity"
         )
     continuation = _successor_continuation(paths, predecessor)
+    parsed = parsed_comparison
+    conditional_repeats = repeats.repeats_per_task - 1
     lock.update(
         {
-            "schema_version": 6,
+            "schema_version": FAIR_COMPARISON_SCHEMA_VERSION,
             "campaign_id": f"p2-b7-canary-baseline-v{next_version}",
             "batch_id": f"p2-b7-canary-sol-sol-v{next_version}",
             "run_id_date": run_id_date,
             "run_id_sequence_base": run_id_sequence_base,
             "canary_catalog_sha256": successor_catalog.catalog_sha256,
             "continuation": continuation,
+            "comparison": parsed,
         }
     )
+    # The Codex-only catalog digest is superseded by the shared artifact
+    # identity inside the comparison block.
+    lock["selected_profile"] = {
+        key: value
+        for key, value in lock["selected_profile"].items()
+        if key
+        not in {
+            "frozen_codex_model_catalog_sha256",
+            "frozen_codex_model_catalog_source_commit",
+        }
+    }
     lock["budget"] = {
         **lock["budget"],
         "campaign_cap_usd": f"{CAMPAIGN_CAP_USD:.6f}",
         "prior_estimated_usd": f"{prior:.6f}",
-        "max_run_slots": CAMPAIGN_MAX_RUNS,
+        "max_run_slots": campaign_slot_total(
+            task_count=len(successor_catalog.tasks),
+            max_attempts=4,
+            conditional_repeats_per_side=conditional_repeats,
+        ),
     }
-    lock["baseline"] = campaign_baseline_contract(6)
+    lock["baseline"] = campaign_baseline_contract(
+        FAIR_COMPARISON_SCHEMA_VERSION,
+        conditional_repeats_per_side=conditional_repeats,
+    )
     relative = Path(f"eval/locks/p2-b7-canary-baseline-v{next_version}.json")
     destination = paths.worktree_root / relative
     if destination.exists() or destination.is_symlink():
@@ -590,12 +637,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m rondo_eval.terminal_bench.baseline_identity")
     parser.add_argument("--run-id-date", required=True)
     parser.add_argument("--run-id-sequence-base", required=True, type=int)
+    parser.add_argument(
+        "--comparison-contract",
+        required=True,
+        type=Path,
+        help=(
+            "JSON file holding the post-pilot frozen comparison block: "
+            "repeat_contract, comparison_conditions, catalog_identity, product"
+        ),
+    )
     args = parser.parse_args(argv)
     paths = RepoPaths.discover(Path.cwd())
+    contract_path = args.comparison_contract
+    if contract_path.is_symlink() or not contract_path.is_file():
+        raise CampaignIdentityGenerationError("comparison contract file is unavailable")
+    try:
+        comparison = json.loads(contract_path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise CampaignIdentityGenerationError(
+            "comparison contract file is unreadable"
+        ) from exc
     path, prior = generate_successor_lock(
         paths,
         run_id_date=args.run_id_date,
         run_id_sequence_base=args.run_id_sequence_base,
+        comparison=comparison,
     )
     print(json.dumps({"lock_path": path.as_posix(), "prior_estimated_usd": f"{prior:.6f}"}))
     return 0

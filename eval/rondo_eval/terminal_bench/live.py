@@ -21,6 +21,11 @@ from ..config import RuntimeConfig
 from ..contracts import Side
 from ..docker_supervisor import DockerCounter, HeavyLockGuard, HeavyLockLease
 from ..evidence import PolicyIdentity, policy_identity
+from ..fair_comparison import (
+    FairComparisonError,
+    PreflightReceipt,
+    SymmetryPreflight,
+)
 from ..frozen_model_catalog import (
     load_frozen_model_catalog,
     load_shared_model_catalog,
@@ -112,6 +117,7 @@ async def run_budgeted_terminal_bench(
     campaign_task: FrozenTask | None = None,
     campaign_seccomp_profile: Path | None = None,
     materializer: TaskMaterializer | None = None,
+    preflight_receipt: PreflightReceipt | None = None,
 ) -> BudgetedTerminalBenchResult:
     """Run one side through the only paid path: the local budget proxy.
 
@@ -142,6 +148,37 @@ async def run_budgeted_terminal_bench(
         max_guardian_logical_requests = (
             campaign_identity.max_guardian_logical_requests
         )
+    # A fair-comparison campaign may not send a single paid request that a
+    # stub run did not already prove symmetric.  The receipt is seeded into the
+    # proxy so the first side is checked against a contract frozen before any
+    # money could be spent, rather than being allowed to define it.
+    symmetry_preflight = None
+    if campaign_identity is not None and campaign_identity.enforces_fair_comparison:
+        if preflight_receipt is None:
+            raise TerminalBenchRunError(
+                "fair-comparison campaigns require a stub preflight receipt"
+            )
+        assert campaign_task is not None
+        try:
+            preflight_receipt.require_binding(
+                campaign_id=campaign_identity.campaign_id,
+                campaign_lock_sha256=campaign_identity.lock_sha256,
+                task_id=campaign_task.task_id,
+                bundle_manifest_sha256={
+                    side: str(bundle["manifest_sha256"])
+                    for side, bundle in campaign_identity.bundles.items()
+                },
+            )
+            symmetry_preflight = SymmetryPreflight(require_expectation=True)
+            preflight_receipt.seed(symmetry_preflight)
+        except FairComparisonError as exc:
+            raise TerminalBenchRunError(
+                f"stub preflight receipt is unusable: {';'.join(exc.reasons)}"
+            ) from exc
+    elif preflight_receipt is not None:
+        raise TerminalBenchRunError(
+            "only fair-comparison campaigns consume a preflight receipt"
+        )
     proxy = LoopbackResponsesProxy(
         upstream_base_url=provider.base_url,
         api_key=api_key,
@@ -162,6 +199,11 @@ async def run_budgeted_terminal_bench(
             campaign_identity.upstream_timeout_seconds
             if campaign_identity is not None
             else UPSTREAM_TIMEOUT_SECONDS
+        ),
+        symmetry_preflight=symmetry_preflight,
+        preflight_side=request.side if symmetry_preflight is not None else None,
+        preflight_task_id=(
+            campaign_task.task_id if symmetry_preflight is not None else None
         ),
     )
     with proxy:

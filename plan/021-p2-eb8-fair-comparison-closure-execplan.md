@@ -85,6 +85,9 @@
 
 - 现状调研：确认 6 处缺陷的源码位置。
 - 设施实现与定向回归全部落地，见"当前验收状态"。
+- 独立验收（GPT，审查提交 `c970cbb`）提出 4 项问题，全部自行复现属实并修复：
+  付费 runner 接入 stub preflight receipt 且第一侧同样受检、successor 生成器只产 v7、
+  运行条件与 catalog provenance 绑定真实事实、条件重复改为双向触发。
 
 ### 当前工作
 
@@ -101,7 +104,7 @@
 ### 当前验收状态
 
 - `just eval-lock`：通过。
-- `just eval-test`：通过（`Ran 532 tests ... OK`）。
+- `just eval-test`：通过（`Ran 552 tests ... OK`）。
 - 全程未调用真实 API、未运行 Docker、未加载真实模型，未创建新 campaign identity。
 
 ### 交接边界
@@ -119,3 +122,7 @@
 | 005 | 多轮 outcome 聚合采用奇数重复的严格多数，不引入统计框架 | 奇数保证无平局，多数规则可机械执行、可测试；符合"不扩大为显著性框架"的边界 | `baseline.py` | 已采纳 |
 | 006 | 产品身份只加窄入口（`Product` 取值 + 比较合同上的 `product` 字段），不接管归档/路径 | 本工作包不建 Multi，避免提前实现工作包 2 | `contracts.py`、`baseline.py` | 已采纳 |
 | 007 | preflight 用注册表 + 禁网 transport 实现，挂在 proxy 的 `_inspect_request` 之后、`_transport.open` 之前 | 该位置是请求体已解析、任何字节尚未出站的唯一窄点 | `api_budget_proxy.py`、`fair_comparison.py` | 已采纳 |
+| 008 | 合同必须先由 stub 运行冻结为 `PreflightReceipt`，付费 slot 缺 receipt 即拒绝 | 只在代理内比较会放行第一侧，那时费用已产生；归因报告 §8.2 要求两侧先在本地 stub 零成本生成请求 | `fair_comparison.py`、`live.py`、`baseline_cli.py` | 已采纳 |
+| 009 | successor 生成器只产 schema v7 并强制传入冻结的 comparison 合同 | 原入口硬编码 v6，可造出绕过全部 v7 门禁的合法 campaign | `baseline_identity.py`、`justfile` | 已采纳 |
+| 010 | 声明的运行条件必须与 campaign 自身权威字段等值，catalog provenance 全字段格式校验 | 否则 lock 里可以冻结一份与自身矛盾、实际未生效的比较合同 | `baseline.py`、`fair_comparison.py` | 已采纳 |
+| 011 | v7 的条件重复触发改为任一方向的跨侧差异，方向性兜底仍单向 | 单向触发会让反方向差异绕过重复合同，`delta` 混合多数结果与单次结果 | `baseline.py`、`baseline_cli.py` | 已采纳 |

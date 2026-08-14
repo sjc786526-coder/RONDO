@@ -34,6 +34,7 @@ from .__main__ import (
     _load_manifest,
     _outcome_exit_code,
 )
+from ..fair_comparison import FairComparisonError, PreflightReceipt
 from .baseline import (
     BASE_ROUNDS,
     RUN_CAP_USD,
@@ -1778,6 +1779,59 @@ def _state_row(snapshot: dict[str, object], slot_id: str) -> dict[str, object]:
     return rows[0]
 
 
+def preflight_receipt_path(paths: RepoPaths, identity: CampaignIdentity, task_id: str) -> Path:
+    """Return the private receipt location for one campaign task."""
+
+    slug = task_id.split("/", maxsplit=1)[-1]
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", slug):
+        raise CampaignExecutionError("campaign task slug is unsafe")
+    return (
+        paths.common_root
+        / "eval-data/campaigns"
+        / identity.campaign_id
+        / "preflight"
+        / f"{slug}.json"
+    )
+
+
+def _load_preflight_receipt(
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    task: object,
+) -> PreflightReceipt | None:
+    """Load the stub-proved receipt a fair-comparison slot may not run without."""
+
+    if not identity.enforces_fair_comparison:
+        return None
+    task_id = getattr(task, "task_id", None)
+    if not isinstance(task_id, str):
+        raise CampaignExecutionError("campaign task projection is invalid")
+    path = preflight_receipt_path(paths, identity, task_id)
+    if path.is_symlink() or not path.is_file():
+        raise CampaignExecutionError(
+            f"stub preflight receipt is missing for {task_id}"
+        )
+    try:
+        receipt = PreflightReceipt.from_dict(json.loads(path.read_bytes()))
+    except (OSError, ValueError) as exc:
+        raise CampaignExecutionError("stub preflight receipt is unreadable") from exc
+    try:
+        receipt.require_binding(
+            campaign_id=identity.campaign_id,
+            campaign_lock_sha256=identity.lock_sha256,
+            task_id=task_id,
+            bundle_manifest_sha256={
+                side: str(bundle["manifest_sha256"])
+                for side, bundle in identity.bundles.items()
+            },
+        )
+    except FairComparisonError as exc:
+        raise CampaignExecutionError(
+            f"stub preflight receipt does not cover this run: {';'.join(exc.reasons)}"
+        ) from exc
+    return receipt
+
+
 def _campaign_repeat_contract(identity: CampaignIdentity):
     """Return the frozen repeat contract, or ``None`` for v1--v6 replay."""
 
@@ -2066,12 +2120,21 @@ def _execute_conditionals(
             for round_id in BASE_ROUNDS
         )
     }
-    triggers = {
-        task_id
-        for task_id in common_valid_tasks
-        if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
-        and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
-    }
+    # Must match assess_baseline: fair-comparison campaigns repeat every
+    # cross-side disagreement, historical ones only the RONDO-fail direction.
+    if identity.enforces_fair_comparison:
+        triggers = {
+            task_id
+            for task_id in common_valid_tasks
+            if by_round["ab-rondo-1"][task_id] is not by_round["ab-codex-1"][task_id]
+        }
+    else:
+        triggers = {
+            task_id
+            for task_id in common_valid_tasks
+            if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
+            and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
+        }
     values: list[ConditionalRun] = []
     for task in identity.catalog.tasks:
         for side in (Side.RONDO, Side.CODEX):
@@ -2146,6 +2209,17 @@ def _execute_task_slot(
 
     if not isinstance(task, FrozenTask):
         raise CampaignExecutionError("campaign task projection is invalid")
+    if identity.enforces_fair_comparison:
+        # The harness commit is the one comparison condition that is a runtime
+        # fact, so it is checked here rather than at lock load.
+        try:
+            identity.require_declared_conditions(
+                eval_harness_commit=eval_harness_commit
+            )
+        except ValueError as exc:
+            raise CampaignExecutionError(
+                f"campaign comparison conditions drifted: {exc}"
+            ) from exc
     if resumable:
         if records is None or digests is None:
             raise CampaignExecutionError("resumable execution lacks public records")
@@ -2260,6 +2334,7 @@ def _execute_task_slot(
                 campaign_slot=slot,
                 campaign_task=task,
                 campaign_seccomp_profile=seccomp_profile,
+                preflight_receipt=_load_preflight_receipt(paths, identity, task),
             )
         )
         parsed = parse_single_task_result(

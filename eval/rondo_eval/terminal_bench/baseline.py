@@ -19,10 +19,16 @@ from ..config import RepoPaths
 from ..contracts import BinaryManifest, Product, ProviderProjection, RunSpec, Side
 from ..fair_comparison import (
     AGGREGATION_STRICT_MAJORITY,
+    CATALOG_PROJECTION_VERSION,
     ComparisonConditions,
     FairComparisonError,
     RepeatContract,
     aggregate_repeat_outcomes,
+)
+from ..frozen_model_catalog import (
+    CATALOG_PROJECTION_ALGORITHM,
+    RONDO_CATALOG_PATH,
+    UPSTREAM_CATALOG_PATH,
 )
 from .runner import PreparedTerminalBenchRun
 from .scoring import TaskOutcome
@@ -69,6 +75,8 @@ _CAMPAIGN_LOCK_NAME = re.compile(r"p2-b7-canary-baseline-v([1-9][0-9]*)\.json")
 _CAMPAIGN_ID = re.compile(r"p2-b7-canary-baseline-v([1-9][0-9]*)")
 _CAMPAIGN_BATCH_ID = re.compile(r"p2-b7-canary-sol-sol-v([1-9][0-9]*)")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_GIT_OBJECT = re.compile(r"[0-9a-f]{40}")
+_MODEL_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 _RUN_ID = re.compile(
     r"[0-9]{8}-[0-9]{9}-tb-(?:rondo|codex)-r[1-9][0-9]*"
 )
@@ -328,6 +336,58 @@ class CampaignIdentity:
             return Product(str(value))
         except ValueError as exc:
             raise BaselineError("campaign product identity is invalid") from exc
+
+    def actual_conditions(self, *, eval_harness_commit: str | None = None) -> ComparisonConditions:
+        """Rebuild the run conditions from the lock's own authoritative fields.
+
+        ``eval_harness_commit`` is the only one that is a runtime fact; when it
+        is not supplied the declared value is carried through so this stays
+        usable at load time, and the runtime check happens where the real
+        commit is known.
+        """
+
+        declared = self._comparison_block().get("comparison_conditions")
+        if not isinstance(declared, dict):
+            raise BaselineError("campaign run conditions are not frozen")
+        try:
+            return ComparisonConditions(
+                eval_harness_commit=str(
+                    eval_harness_commit
+                    if eval_harness_commit is not None
+                    else declared.get("eval_harness_commit")
+                ),
+                upstream_timeout_seconds=str(
+                    self.baseline.get("upstream_timeout_seconds")
+                ),
+                provider_profile_sha256=str(
+                    self.selected_profile.get("provider_profile_sha256")
+                ),
+                catalog_artifact_sha256=str(self.catalog_identity["sha256"]),
+                task_image_digests=tuple(
+                    sorted(
+                        (item.task_id, item.image_digest) for item in self.catalog.tasks
+                    )
+                ),
+            )
+        except FairComparisonError as exc:
+            raise BaselineError(f"campaign run conditions are invalid: {exc}") from exc
+
+    def require_declared_conditions(
+        self, *, eval_harness_commit: str | None = None
+    ) -> ComparisonConditions:
+        """Fail closed unless the declared conditions match the real ones."""
+
+        declared = self.comparison_conditions
+        try:
+            declared.require_match(
+                self.actual_conditions(eval_harness_commit=eval_harness_commit)
+            )
+        except FairComparisonError as exc:
+            raise BaselineError(
+                "campaign run conditions differ from the frozen campaign: "
+                + ";".join(exc.reasons)
+            ) from exc
+        return declared
 
     @property
     def conditional_repeats_per_side(self) -> int:
@@ -1456,13 +1516,16 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     )
     if comparison is not None:
         # Touch every frozen accessor so a malformed block fails at load time
-        # rather than in the middle of a campaign.
+        # rather than in the middle of a campaign, then require the declared
+        # conditions to equal the ones the rest of the lock already implies.
+        # Otherwise the block could freeze a comparison contract that
+        # contradicts the campaign it belongs to.
         _ = (
             identity.repeat_contract,
-            identity.comparison_conditions,
             identity.catalog_identity,
             identity.product,
         )
+        identity.require_declared_conditions()
     _validate_continuation_topology(identity)
     _ = identity.slots
     if not any(
@@ -1531,6 +1594,41 @@ def _parse_comparison_block(
         raise BaselineError("campaign catalog provenance is incomplete")
     if _SHA256.fullmatch(str(identity["sha256"])) is None:
         raise BaselineError("campaign catalog artifact digest is invalid")
+    # Every provenance field must be well formed, not merely present: a lock
+    # that records "commit: zzz" proves nothing about where the bytes came from.
+    by_side = {str(item["side"]): item for item in sources}
+    for side, expected_path in (
+        ("upstream", UPSTREAM_CATALOG_PATH),
+        ("rondo", RONDO_CATALOG_PATH),
+    ):
+        item = by_side[side]
+        if (
+            _GIT_OBJECT.fullmatch(str(item["commit"])) is None
+            or _GIT_OBJECT.fullmatch(str(item["blob_id"])) is None
+            or str(item["path"]) != expected_path
+        ):
+            raise BaselineError("campaign catalog provenance is invalid")
+    if by_side["upstream"]["blob_id"] != by_side["rondo"]["blob_id"]:
+        raise BaselineError("campaign catalog sources record different blobs")
+    slugs = identity["model_slugs"]
+    if (
+        identity["projection_algorithm"] != CATALOG_PROJECTION_ALGORITHM
+        or identity["projection_version"] != CATALOG_PROJECTION_VERSION
+        or not isinstance(slugs, list)
+        or not slugs
+        or len(set(slugs)) != len(slugs)
+        or any(_MODEL_SLUG.fullmatch(str(slug)) is None for slug in slugs)
+    ):
+        raise BaselineError("campaign catalog projection is invalid")
+    for key in ("main_model", "guardian_model", "override_target_slug"):
+        if _MODEL_SLUG.fullmatch(str(identity[key])) is None:
+            raise BaselineError("campaign catalog model identity is invalid")
+    if (
+        identity["override_target_slug"] != identity["main_model"]
+        or identity["override_target_slug"] not in slugs
+        or identity["guardian_model"] not in slugs
+    ):
+        raise BaselineError("campaign catalog override target is invalid")
     try:
         Product(str(block["product"]))
     except ValueError as exc:
@@ -1945,12 +2043,24 @@ def assess_baseline(
         is not by_round["ab-codex-1"][task_id]
         for task_id in common_valid_tasks
     )
-    triggers = tuple(
-        task_id
-        for task_id in common_valid_tasks
-        if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
-        and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
-    )
+    # Under a frozen repeat contract every cross-side disagreement is repeated,
+    # in both directions.  The historical one-way trigger meant a
+    # RONDO-pass/Codex-fail task silently stayed a single observation while its
+    # mirror image got three, so `delta` mixed the two.  The directional
+    # backstop below stays one-way -- it detects regressions, not differences.
+    if repeat_contract is not None:
+        triggers = tuple(
+            task_id
+            for task_id in common_valid_tasks
+            if by_round["ab-rondo-1"][task_id] is not by_round["ab-codex-1"][task_id]
+        )
+    else:
+        triggers = tuple(
+            task_id
+            for task_id in common_valid_tasks
+            if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
+            and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
+        )
     effective_conditional: list[ConditionalRun] = []
     for task_id in triggers:
         for side in (Side.RONDO, Side.CODEX):
@@ -2000,6 +2110,8 @@ def assess_baseline(
     for task_id in triggers:
         rondo = _side_observations(task_id, Side.RONDO)
         codex = _side_observations(task_id, Side.CODEX)
+        # Regression detection stays deliberately one-way: RONDO failing every
+        # frozen repeat while the frozen upstream passes every one.
         if all(item is TaskOutcome.FAIL for item in rondo) and all(
             item is TaskOutcome.PASS for item in codex
         ):
