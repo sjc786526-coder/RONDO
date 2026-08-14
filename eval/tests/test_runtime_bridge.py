@@ -35,9 +35,34 @@ from rondo_eval.runtime_bridge import (  # noqa: E402
     SubprocessDockerCommandRunner,
     SubprocessHostCommandRunner,
     _repository_common_root,
+    _unescape_mountinfo,
     _validate_inspected_containers,
     lease_from_watchdog,
 )
+
+
+
+class MountinfoEscapeTests(unittest.TestCase):
+    """`proc(5)` escapes are validated on the raw field, not on the result."""
+
+    def test_a_windows_9p_source_decodes_instead_of_being_rejected(self) -> None:
+        # Docker Desktop mounts its resources dir from a Windows path, so the
+        # decoded value legitimately contains backslashes.
+        self.assertEqual(
+            _unescape_mountinfo(
+                "C:\\134Program\\040Files\\134Docker\\134Docker\\134resources"
+            ),
+            "C:\\Program Files\\Docker\\Docker\\resources",
+        )
+
+    def test_the_ordinary_escapes_still_decode(self) -> None:
+        self.assertEqual(_unescape_mountinfo("a\\040b\\011c\\012d"), "a b\tc\nd")
+        self.assertEqual(_unescape_mountinfo("/mnt/wsl/docker-desktop"), "/mnt/wsl/docker-desktop")
+
+    def test_anything_that_is_not_a_real_escape_still_fails_closed(self) -> None:
+        for value in ("a\\b", "a\\9", "a\\04", "a\\", "a\\000", "a\\800", "a\x00b"):
+            with self.subTest(value=value), self.assertRaises(RuntimeBridgeError):
+                _unescape_mountinfo(value)
 
 
 TASK_ID = "20260810-runtime-bridge-r1"
