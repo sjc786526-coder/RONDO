@@ -20,6 +20,7 @@ from typing import Any, Callable, Mapping, Sequence
 from .. import runtime_bridge
 from ..config import ConfigError, RepoPaths, RuntimeConfig, load_local_model_secret, load_runtime_config
 from ..exit_codes import CONFIG_ERROR, INFRA_ERROR, MODEL_MISSING, SUCCESS
+from . import model_backed
 from .client import LocalApprovalSettings, resolve_config_path, settings_from_config
 from .identity import (
     LauncherIdentity,
@@ -35,10 +36,10 @@ LLAMA_CPP_BINARY_SHA256 = "1d374fdb717832ec01d4829eff9feb46dfc83b7ccbb9d867c1531
 LLAMA_CPP_CUDA_BINARY_SHA256 = "97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd"
 LLAMA_CPP_CUDA_CAPABILITY = "linux_cuda_built_model_unvalidated"
 _CPU_RUNTIME_RELATIVE_PATH = "eval-data/tools/llama-b10333"
-_CUDA_RUNTIME_RELATIVE_PATH = "eval-data/tools/llama-b10333-cuda-linux-x64"
+_CUDA_RUNTIME_RELATIVE_PATH = model_backed.CUDA_RUNTIME_RELATIVE_PATH
 _CPU_RUNTIME_LOCK = "eval/locks/llama-cpp-b10333.json"
 _CUDA_RUNTIME_LOCK = "eval/locks/llama-cpp-b10333-cuda-linux-x64.json"
-GPU_MODEL_SERVING_CAPABILITY = "gpu_model_serving_validated"
+GPU_MODEL_SERVING_CAPABILITY = model_backed.GPU_MODEL_SERVING_CAPABILITY
 CHAT_TEMPLATE_REPO = "mistralai/Ministral-3-8B-Instruct-2512"
 CHAT_TEMPLATE_REVISION = "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d"
 CHAT_TEMPLATE_SOURCE_FILE = "chat_template.jinja"
@@ -273,18 +274,57 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
                 binary,
                 "the frozen CUDA runtime cannot enumerate the RTX 4060 Laptop GPU",
             )
+    if not is_cuda:
+        return RuntimeInspection(
+            "runtime_ready",
+            binary,
+            "llama.cpp b10333 CPU x64 runtime is available; model/GPU serving is not validated",
+            runtime_identity,
+            "cpu_only_x64",
+            model_backed.MODEL_BACKED_NOT_RUN,
+        )
+    capability, validation = _model_backed_capability(config, settings, runtime_identity)
     return RuntimeInspection(
         "runtime_ready",
         binary,
         (
-            "llama.cpp b10333 Linux CUDA runtime is available; model-backed serving is not validated"
-            if is_cuda
-            else "llama.cpp b10333 CPU x64 runtime is available; model/GPU serving is not validated"
+            "llama.cpp b10333 Linux CUDA runtime serves the qualified 4k model contract"
+            if capability == GPU_MODEL_SERVING_CAPABILITY
+            else "llama.cpp b10333 Linux CUDA runtime is available; model-backed serving is not validated"
         ),
         runtime_identity,
-        LLAMA_CPP_CUDA_CAPABILITY if is_cuda else "cpu_only_x64",
-        "not_run",
+        capability,
+        validation,
     )
+
+
+def _model_backed_capability(
+    config: RuntimeConfig, settings: LocalApprovalSettings, runtime_identity: str
+) -> tuple[str, str]:
+    """Promote the CUDA runtime only from strict, matching model-backed evidence.
+
+    Every failure keeps the intermediate capability, so a missing, malformed or
+    stale evidence file can never let the formal launcher start a model.
+    """
+
+    try:
+        evidence = model_backed.load_model_backed_evidence(config)
+    except model_backed.EvidenceLockError:
+        return LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_EVIDENCE_INVALID
+    if evidence is None:
+        return LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_NOT_RUN
+    try:
+        model_backed.require_qualification_contract(config, settings)
+        identity = model_backed.build_identity(
+            settings,
+            runtime_identity_sha256=runtime_identity,
+            serve_config_sha256=serve_config_sha256(config, settings),
+        )
+    except (ConfigError, OSError, ValueError):
+        return LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_IDENTITY_MISMATCH
+    if not evidence.matches(identity):
+        return LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_IDENTITY_MISMATCH
+    return GPU_MODEL_SERVING_CAPABILITY, model_backed.MODEL_BACKED_VALIDATED
 
 
 def _binary_sha256(path: Path) -> str:
@@ -1263,21 +1303,12 @@ def probe_router_runtime(
             props = _get_json(f"http://127.0.0.1:{port}/props", timeout=1.0)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError):
             return RouterProbe("router_props_unavailable", "model-free router props are unavailable")
-        build_info = props.get("build_info") if isinstance(props, dict) else None
+        # The exact expectation follows the configured backend: the source build
+        # and the upstream release bundle report different build numbers.
         if (
             not isinstance(props, dict)
             or props.get("role") != "router"
-            or not isinstance(build_info, str)
-            or (
-                runtime.capability != LLAMA_CPP_CUDA_CAPABILITY
-                and str(LLAMA_CPP_BUILD) not in build_info
-            )
-            or (
-                LLAMA_CPP_COMMIT[:7]
-                if runtime.capability == LLAMA_CPP_CUDA_CAPABILITY
-                else LLAMA_CPP_COMMIT[:8]
-            )
-            not in build_info
+            or props.get("build_info") != model_backed.service_build_info(settings)
         ):
             return RouterProbe("router_schema_invalid", "model-free router props do not match b10333")
         return RouterProbe("router_ready", "model-free b10333 router probe passed")

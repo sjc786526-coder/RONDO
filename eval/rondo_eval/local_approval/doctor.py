@@ -27,8 +27,6 @@ from .client import (
 )
 from .launcher import (
     GPU_MODEL_SERVING_CAPABILITY,
-    LLAMA_CPP_BUILD,
-    LLAMA_CPP_COMMIT,
     LLAMA_CPP_CUDA_CAPABILITY,
     ModelMissingError,
     RouterProbe,
@@ -37,6 +35,7 @@ from .launcher import (
     model_path,
     probe_router_runtime,
 )
+from .model_backed import service_build_info
 
 
 @dataclass(frozen=True)
@@ -252,10 +251,10 @@ def _probe_decision(config: RuntimeConfig) -> dict[str, object]:
 
 
 def _probe_identity(config: RuntimeConfig, expected_model_path: Path) -> None:
-    LocalApprovalClient(config).verify_service_identity(
+    client = LocalApprovalClient(config)
+    client.verify_service_identity(
         expected_model_path,
-        expected_build=LLAMA_CPP_BUILD,
-        expected_commit=LLAMA_CPP_COMMIT,
+        expected_build_info=service_build_info(client.settings),
     )
 
 
