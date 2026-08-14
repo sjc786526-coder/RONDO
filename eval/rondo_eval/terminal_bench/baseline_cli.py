@@ -803,7 +803,7 @@ def _replay_terminal_assessment(
     conditional_runs: list[ConditionalRun] = []
     for task in identity.catalog.tasks:
         for side in (Side.RONDO, Side.CODEX):
-            for repeat in (1, 2):
+            for repeat in identity.conditional_repeat_range:
                 chain_id = f"conditional:{task.task_id}:{side.value}:repeat{repeat}"
                 attempts = _replay_terminal_chain(
                     identity=identity,
@@ -831,6 +831,7 @@ def _replay_terminal_assessment(
         tuple(base_runs),
         tuple(conditional_runs),
         max_attempts=identity.max_attempts,
+        repeat_contract=_campaign_repeat_contract(identity),
     )
     snapshot = state.snapshot()
     reason = ";".join(assessment.reasons) or None
@@ -1690,6 +1691,7 @@ def _advance_one_paid_step(
         tuple(base_runs),
         tuple(conditional_runs),
         max_attempts=identity.max_attempts,
+        repeat_contract=_campaign_repeat_contract(identity),
     )
     _skip_planned(state, identity, reason="not_activated")
     final_storage = _sample_storage(
@@ -1776,6 +1778,12 @@ def _state_row(snapshot: dict[str, object], slot_id: str) -> dict[str, object]:
     return rows[0]
 
 
+def _campaign_repeat_contract(identity: CampaignIdentity):
+    """Return the frozen repeat contract, or ``None`` for v1--v6 replay."""
+
+    return identity.repeat_contract if identity.enforces_fair_comparison else None
+
+
 def _execute_base_rounds(
     *,
     failure_tracker: MechanicalFailureTracker | None = None,
@@ -1787,32 +1795,40 @@ def _execute_base_rounds(
         ignore_provider_integrity=identity.schema_version >= 3
     )
     values: list[BaselineRun] = []
-    for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
+    tasks_by_id = {task.task_id: task for task in identity.catalog.tasks}
+    effective: dict[str, dict[str, ExecutedSlot]] = {
+        round_id: {} for round_id in BASE_ROUNDS
+    }
+    # The order itself is part of the frozen contract: from v7 it is task-major
+    # so both sides run each task inside the same window instead of hours
+    # apart.  ``base_round_order`` owns that choice for every schema version.
+    for task_id, round_id in identity.base_round_order:
+        task = tasks_by_id[task_id]
         side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
-        effective: dict[str, ExecutedSlot] = {}
-        for task in identity.catalog.tasks:
-            attempts = _execute_attempt_chain(
-                tracker=tracker,
-                task=task,
-                chain_id=f"base:{round_id}:{task.task_id}",
-                **kwargs,
-            )
-            for executed in attempts:
-                values.append(
-                    BaselineRun(
-                        task.task_id,
-                        round_id,
-                        side,
-                        executed.slot.attempt,
-                        executed.task_outcome,
-                        executed.slot.run_id,
-                        executed.failure_category,
-                    )
+        attempts = _execute_attempt_chain(
+            tracker=tracker,
+            task=task,
+            chain_id=f"base:{round_id}:{task_id}",
+            **kwargs,
+        )
+        for executed in attempts:
+            values.append(
+                BaselineRun(
+                    task_id,
+                    round_id,
+                    side,
+                    executed.slot.attempt,
+                    executed.task_outcome,
+                    executed.slot.run_id,
+                    executed.failure_category,
                 )
-            effective[task.task_id] = attempts[-1]
-        if sum(
+            )
+        effective[round_id][task_id] = attempts[-1]
+        # Check a round the moment its last task lands so an infra-saturated
+        # round still stops the campaign as early as it always did.
+        if len(effective[round_id]) == len(tasks_by_id) and sum(
             item.task_outcome is TaskOutcome.INFRA
-            for item in effective.values()
+            for item in effective[round_id].values()
         ) > MAX_REMAINING_INFRA_PER_ROUND:
             raise CampaignExecutionError(
                 f"base_round_infra_threshold_exceeded:{round_id}"
@@ -2059,7 +2075,7 @@ def _execute_conditionals(
     values: list[ConditionalRun] = []
     for task in identity.catalog.tasks:
         for side in (Side.RONDO, Side.CODEX):
-            for repeat in (1, 2):
+            for repeat in identity.conditional_repeat_range:
                 chain_id = f"conditional:{task.task_id}:{side.value}:repeat{repeat}"
                 slots = tuple(
                     identity.slot(f"{chain_id}:a{attempt}")
@@ -2906,7 +2922,7 @@ def _public_assessment(
         }
         for item in assessment.effective_conditional_runs
     ]
-    return {
+    public: dict[str, object] = {
         "status": assessment.status.value,
         "reasons": list(assessment.reasons),
         "sigma": assessment.sigma,
@@ -2918,6 +2934,15 @@ def _public_assessment(
         "conditional_runs": conditionals,
         "infra_failure_categories": _infra_failure_categories(assessment),
     }
+    if assessment.layers:
+        # Only fair-comparison campaigns report layers; historical aggregates
+        # keep the exact shape they were published with.
+        public["layers"] = [layer.to_dict() for layer in assessment.layers]
+        public["aggregated_outcomes"] = [
+            {"task_id": task_id, "side": side, "outcome": outcome.value}
+            for task_id, side, outcome in assessment.aggregated_outcomes
+        ]
+    return public
 
 
 def _infra_failure_categories(

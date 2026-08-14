@@ -33,7 +33,7 @@ from .api_budget_proxy import (
 )
 from .config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
 from .frozen_model_catalog import (
-    _catalog_with_auto_review_override,
+    _legacy_catalog_with_auto_review_override as _catalog_with_auto_review_override,
     load_frozen_model_catalog,
 )
 

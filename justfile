@@ -22,6 +22,21 @@ eval-lock:
 
 eval-check: eval-lock eval-test
 
+# Compare the task-independent partitions of two captured requests. The
+# transport used here refuses to open any upstream connection, so this never
+# reaches a provider and never spends budget. Exit 3 means the pair is not
+# comparable; the printed reason codes say which partition drifted.
+eval-preflight-symmetry task_id rondo_request codex_request:
+    @env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$PWD/eval-data/uv-cache" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.preflight_cli \
+        --task-id "{{task_id}}" \
+        --rondo-request "{{rondo_request}}" \
+        --codex-request "{{codex_request}}"
+
 # One supervised no-key oracle run. It must prove the frozen solution and
 # verifier can produce reward=1 before any paid provider probe is allowed.
 eval-b3-oracle-no-api docker_host_volume metrics_dir:

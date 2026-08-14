@@ -82,6 +82,7 @@ class TerminalBenchRequest:
     frozen_model_catalog_path: str | None = None
     frozen_model_catalog_sha256: str | None = None
     frozen_model_catalog_source_commit: str | None = None
+    frozen_model_catalog_provenance_sha256: str | None = None
     frozen_task: FrozenTask | None = None
 
 
@@ -533,6 +534,9 @@ def prepare_terminal_bench_run(
         frozen_model_catalog_path=request.frozen_model_catalog_path,
         frozen_model_catalog_sha256=request.frozen_model_catalog_sha256,
         frozen_model_catalog_source_commit=request.frozen_model_catalog_source_commit,
+        frozen_model_catalog_provenance_sha256=(
+            request.frozen_model_catalog_provenance_sha256
+        ),
     )
     trial_name = _trial_name(materialized.task_label, spec.side)
     trials_dir = materialized.task_path.parent / "trials"
@@ -576,19 +580,26 @@ def _validate_frozen_model_catalog_request(
     config: RuntimeConfig,
     request: TerminalBenchRequest,
 ) -> None:
-    values = (
-        request.frozen_model_catalog_path,
-        request.frozen_model_catalog_sha256,
-        request.frozen_model_catalog_source_commit,
-    )
-    if request.side is Side.RONDO:
-        if any(value is not None for value in values):
-            raise TerminalBenchRunError("RONDO cannot receive a frozen model catalog")
+    legacy_identity = request.frozen_model_catalog_source_commit
+    shared_identity = request.frozen_model_catalog_provenance_sha256
+    if request.frozen_model_catalog_path is None:
+        if (
+            request.frozen_model_catalog_sha256 is not None
+            or legacy_identity is not None
+            or shared_identity is not None
+        ):
+            raise TerminalBenchRunError("frozen model catalog identity is incomplete")
         return
-    if all(value is None for value in values):
-        return
-    if not all(isinstance(value, str) and value for value in values):
+    if not isinstance(request.frozen_model_catalog_sha256, str) or not (
+        request.frozen_model_catalog_sha256
+    ):
         raise TerminalBenchRunError("frozen model catalog identity is incomplete")
+    # Exactly one identity mode: the shared E-B8 artifact, or the frozen
+    # Codex-only projection that v1--v6 campaigns replay.
+    if (legacy_identity is None) == (shared_identity is None):
+        raise TerminalBenchRunError("frozen model catalog identity is ambiguous")
+    if legacy_identity is not None and request.side is Side.RONDO:
+        raise TerminalBenchRunError("RONDO cannot receive a Codex-only model catalog")
     path = Path(request.frozen_model_catalog_path or "")
     try:
         common_root = config.paths.common_root.resolve(strict=True)
@@ -612,9 +623,15 @@ def _validate_frozen_model_catalog_request(
         len(expected_sha256) != 64
         or any(character not in "0123456789abcdef" for character in expected_sha256)
         or hashlib.sha256(raw).hexdigest() != expected_sha256
-        or request.frozen_model_catalog_source_commit != request.binary.source_commit
     ):
         raise TerminalBenchRunError("frozen model catalog identity differs")
+    if legacy_identity is not None:
+        if legacy_identity != request.binary.source_commit:
+            raise TerminalBenchRunError("frozen model catalog identity differs")
+    elif len(shared_identity or "") != 64 or any(
+        character not in "0123456789abcdef" for character in shared_identity or ""
+    ):
+        raise TerminalBenchRunError("shared model catalog provenance is invalid")
 
 
 def _harbor_argv(

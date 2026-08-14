@@ -488,3 +488,29 @@ standard/Lite 形态均补回归。
   `run_id`，其中 v22 为 32 条。全部 JSON/JSONL 解析通过，冻结历史标签“Plan 015”保持不改写。
 - 原 `0811-p2-b7-results@564a602` 提交链完整并入交付历史，完成分支改名为
   `zz-done/0811-p2-b7-results`；该操作只交付公共结果，不重跑测评或改变 B7 归因。
+
+### 2026-08-13 E-B8 公平比较设施闭合（工作包 1，无真实 API）
+
+- **catalog 对称**：`frozen_model_catalog.load_shared_model_catalog()` 保留完整 8 模型，只在 main entry 上写
+  `auto_review_model_override`，两侧加载同一份 artifact。artifact 身份改为自身 SHA-256，另绑上游/RONDO 双来源
+  commit/path/blob ID、投影算法与版本、main/Guardian model 和 override 目标 entry；两来源 blob 不一致即判定
+  无共享工件。adapter/runner 不再禁止 RONDO 接收 catalog，也不再把 catalog 身份绑到某侧二进制 source commit。
+  旧 Codex-only 投影保留为 `load_frozen_model_catalog()`，仅供 v1—v6 复算。
+- **请求前置硬门**：新增 `rondo_eval/fair_comparison.py`，投影 tool specs、instructions、输出 schema、采样合同
+  与 `input` 中首个 user 之前的 developer/system 前缀（Responses Lite 的 catalog 派生工具描述所在处）。
+  `SymmetryPreflight` 挂在 `api_budget_proxy` 请求体解析之后、预算预留与 `_transport.open` 之前，
+  不对称时以分区级原因码 409 拒绝。完整请求 digest 各侧分别记录，只作 provenance/drift。
+  离线入口 `just eval-preflight-symmetry`，`NoUpstreamTransport` 使其结构上无法连上游。
+- **运行条件与顺序**：`ComparisonConditions` 冻结 harness commit、deadline、task/image digest、provider profile
+  与投影版本，漂移给出可归因原因码。基础轮调度由整轮分块改为按任务交错（v7 起），并保留轮末 infra 阈值提前停机。
+- **判据分层与聚合**：assessment 分别输出 `aa_consistency` / `cross_side` / `directional` 三层状态、原因与指标；
+  条件加跑进入最终聚合，触发题按冻结重复的严格多数得出每题 outcome，`delta` 用聚合结果计算并保留 `base_delta`。
+- **重复合同**：`RepeatContract` 要求奇数且不少于 3（基础 A/B 轮计其中一次）、聚合固定严格多数、冻结点为 pilot；
+  未冻结、偶数、样本数不符或事后改公式均拒绝，因而在冻结前无法建立 v7 campaign。不采用 pairwise-max `σ`。
+- **产品身份**：新增 `contracts.Product`（`rondo-local` / `rondo-multi`）与 `product_for_side()`，与比较侧正交，
+  `codex` 不是产品取值；v7 lock 显式记录产品身份。未创建 `multidev/`，未提前实施工作包 2。
+- **历史保护**：全部新行为绑定 campaign schema v7；v1—v6 的 slot 顺序、run_id 分配、assessment 输出与
+  catalog 投影逐字节不变，v1—v22 的 lock/result/ledger/aggregate 未改动。
+- **验收**：`just eval-lock` 通过；`just eval-test` 532 项全通过（新增 42 项 `test_fair_comparison`、
+  12 项 catalog 测试及 adapter/runner 定向用例）。全程无真实 API、无 Docker、无真实模型，未创建新 campaign identity。
+  设施闭合不产生任何可归因的能力比较结论。

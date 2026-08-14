@@ -14,13 +14,17 @@ from ..api_budget_proxy import (
     PersistentBudgetLedger,
     UPSTREAM_TIMEOUT_SECONDS,
     canonical_guardian_request_sha256,
+    canonical_request_sha256,
     milestone_metadata_ready,
 )
 from ..config import RuntimeConfig
 from ..contracts import Side
 from ..docker_supervisor import DockerCounter, HeavyLockGuard, HeavyLockLease
 from ..evidence import PolicyIdentity, policy_identity
-from ..frozen_model_catalog import load_frozen_model_catalog
+from ..frozen_model_catalog import (
+    load_frozen_model_catalog,
+    load_shared_model_catalog,
+)
 from .runner import (
     DockerSupervisedHostHarborExecutor,
     HostHarborResult,
@@ -165,7 +169,40 @@ async def run_budgeted_terminal_bench(
             request,
             provider_transport_base_url=proxy.docker_base_url,
         )
-        if request.side is Side.CODEX:
+        if campaign_identity is not None and campaign_identity.enforces_fair_comparison:
+            # One artifact, both sides.  The lock pins the two source commits,
+            # so the side actually running is cross-checked against the commit
+            # recorded for it rather than trusted to supply its own.
+            frozen_identity = campaign_identity.catalog_identity
+            sources = {
+                str(item["side"]): item for item in frozen_identity["sources"]
+            }
+            expected_commit = str(
+                sources["rondo" if request.side is Side.RONDO else "upstream"]["commit"]
+            )
+            if expected_commit != request.binary.source_commit:
+                raise TerminalBenchRunError(
+                    "binary source commit differs from the frozen catalog provenance"
+                )
+            shared = load_shared_model_catalog(
+                config.paths.common_root,
+                upstream_source_commit=str(sources["upstream"]["commit"]),
+                rondo_source_commit=str(sources["rondo"]["commit"]),
+                main_model=provider.main_model,
+                guardian_model=provider.guardian_model,
+            )
+            campaign_identity.validate_shared_model_catalog(shared.identity())
+            catalog_path = metadata_path.with_name("shared-model-catalog.json")
+            shared.write_private(catalog_path)
+            projected_request = replace(
+                projected_request,
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=shared.sha256,
+                frozen_model_catalog_provenance_sha256=canonical_request_sha256(
+                    shared.identity()
+                ),
+            )
+        elif request.side is Side.CODEX:
             catalog = load_frozen_model_catalog(
                 config.paths.common_root,
                 source_commit=request.binary.source_commit,

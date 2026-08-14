@@ -112,6 +112,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         frozen_model_catalog_path: str | None = None,
         frozen_model_catalog_sha256: str | None = None,
         frozen_model_catalog_source_commit: str | None = None,
+        frozen_model_catalog_provenance_sha256: str | None = None,
         extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -165,27 +166,39 @@ class UploadBinaryAdapter(HarborCodexAgent):
             raise AdapterError("task workdir is invalid")
         if not isinstance(task_requires_existing_git_repo, bool):
             raise AdapterError("task Git policy is invalid")
-        catalog_values = (
-            frozen_model_catalog_path,
-            frozen_model_catalog_sha256,
-            frozen_model_catalog_source_commit,
-        )
-        if self.side is Side.RONDO and any(value is not None for value in catalog_values):
-            raise AdapterError("RONDO cannot receive a frozen model catalog")
-        if any(value is not None for value in catalog_values) and not all(
-            isinstance(value, str) and value for value in catalog_values
-        ):
-            raise AdapterError("frozen model catalog identity is incomplete")
-        if frozen_model_catalog_path is not None:
+        # Two catalog modes exist.  The shared mode is the E-B8 contract: one
+        # artifact, identified by its own digest and provenance, loaded by both
+        # sides.  The legacy mode is the Codex-only projection bound to the
+        # frozen binary's source commit; it survives only so v1--v6 campaigns
+        # replay unchanged and must never be handed to RONDO.
+        legacy_identity = frozen_model_catalog_source_commit
+        shared_identity = frozen_model_catalog_provenance_sha256
+        if frozen_model_catalog_path is None:
+            if (
+                frozen_model_catalog_sha256 is not None
+                or legacy_identity is not None
+                or shared_identity is not None
+            ):
+                raise AdapterError("frozen model catalog identity is incomplete")
+        else:
+            if (legacy_identity is None) == (shared_identity is None):
+                raise AdapterError("frozen model catalog identity is ambiguous")
             catalog_path = Path(frozen_model_catalog_path)
             if (
-                self.side is not Side.CODEX
-                or not catalog_path.is_absolute()
-                or frozen_model_catalog_source_commit != manifest.source_commit
+                not catalog_path.is_absolute()
                 or not isinstance(frozen_model_catalog_sha256, str)
                 or not re.fullmatch(r"[0-9a-f]{64}", frozen_model_catalog_sha256)
             ):
                 raise AdapterError("frozen model catalog identity is invalid")
+            if legacy_identity is not None:
+                if self.side is not Side.CODEX:
+                    raise AdapterError("RONDO cannot receive a Codex-only model catalog")
+                if legacy_identity != manifest.source_commit:
+                    raise AdapterError("frozen model catalog identity is invalid")
+            elif not isinstance(shared_identity, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", shared_identity
+            ):
+                raise AdapterError("shared model catalog provenance is invalid")
 
         # Harbor supplies logger/mcp_servers/skills_dir through kwargs.  Its base
         # constructor owns these fields and its post-run parser depends on them.
@@ -207,6 +220,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._frozen_model_catalog_path = frozen_model_catalog_path
         self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
         self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
+        self._frozen_model_catalog_provenance_sha256 = (
+            frozen_model_catalog_provenance_sha256
+        )
 
     @property
     def manifest(self) -> BinaryManifest:
@@ -614,9 +630,21 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 f"model_providers.{_EVAL_PROVIDER_ID}.stream_max_retries=0",
                 f'model_reasoning_effort={json.dumps(self._main_effort)}',
             )
+            # The catalog override is side-independent: both binaries must load
+            # the same artifact, otherwise their picker-visible model lists --
+            # and therefore their tool descriptions -- diverge.
+            catalog_overrides = (
+                (
+                    "model_catalog_json="
+                    f"{json.dumps(self.remote_frozen_model_catalog_path)}",
+                )
+                if self._frozen_model_catalog_path is not None
+                else ()
+            )
             if self.side is Side.RONDO:
                 overrides = (
                     *common_overrides,
+                    *catalog_overrides,
                     f'auto_review.model={json.dumps(self._guardian_model)}',
                     f'auto_review.reasoning_effort={json.dumps(self._guardian_effort)}',
                     "auto_review.evidence_dir=\"/logs/agent/guardian-evidence\"",
@@ -627,14 +655,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 # verified from the outbound request by the budget proxy.
                 overrides = (
                     *common_overrides,
-                    *(
-                        (
-                            "model_catalog_json="
-                            f"{json.dumps(self.remote_frozen_model_catalog_path)}",
-                        )
-                        if self._frozen_model_catalog_path is not None
-                        else ()
-                    ),
+                    *catalog_overrides,
                 )
             override_args = " ".join(f"-c {shlex.quote(value)}" for value in overrides)
             command = (
@@ -710,6 +731,7 @@ def adapter_for(
     frozen_model_catalog_path: str | None = None,
     frozen_model_catalog_sha256: str | None = None,
     frozen_model_catalog_source_commit: str | None = None,
+    frozen_model_catalog_provenance_sha256: str | None = None,
 ) -> UploadBinaryAdapter:
     adapter_type: type[UploadBinaryAdapter]
     if side is Side.CODEX:
@@ -746,6 +768,7 @@ def adapter_for(
         frozen_model_catalog_path=frozen_model_catalog_path,
         frozen_model_catalog_sha256=frozen_model_catalog_sha256,
         frozen_model_catalog_source_commit=frozen_model_catalog_source_commit,
+        frozen_model_catalog_provenance_sha256=frozen_model_catalog_provenance_sha256,
     )
 
 
@@ -804,12 +827,22 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
                     "frozen_model_catalog_sha256",
                     adapter._frozen_model_catalog_sha256 or "",
                 ),
-                (
-                    "frozen_model_catalog_source_commit",
-                    adapter._frozen_model_catalog_source_commit or "",
-                ),
             )
         )
+        if adapter._frozen_model_catalog_source_commit is not None:
+            values.append(
+                (
+                    "frozen_model_catalog_source_commit",
+                    adapter._frozen_model_catalog_source_commit,
+                )
+            )
+        else:
+            values.append(
+                (
+                    "frozen_model_catalog_provenance_sha256",
+                    adapter._frozen_model_catalog_provenance_sha256 or "",
+                )
+            )
     return tuple(values)
 
 
@@ -889,12 +922,14 @@ def _validate_safe_codex_command(
         if frozen_model_catalog_path is not None
         else None
     )
-    if side is Side.RONDO and "model_catalog_json=" in command:
-        raise AdapterError("RONDO received a frozen model catalog")
-    if side is Side.CODEX and catalog_override is not None and catalog_override not in command:
-        raise AdapterError("frozen Codex model catalog override is incomplete")
-    if side is Side.CODEX and catalog_override is None and "model_catalog_json=" in command:
-        raise AdapterError("frozen Codex received an undeclared model catalog")
+    if catalog_override is None:
+        if "model_catalog_json=" in command:
+            raise AdapterError("agent received an undeclared model catalog")
+    else:
+        if catalog_override not in command:
+            raise AdapterError("model catalog override is incomplete")
+        if command.count("model_catalog_json=") != 1:
+            raise AdapterError("model catalog override is ambiguous")
 
 
 def _verify_local_binary(path: Path, expected: str) -> None:

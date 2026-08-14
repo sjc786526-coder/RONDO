@@ -34,6 +34,40 @@ class Side(StrEnum):
     RONDO = "rondo"
 
 
+class Product(StrEnum):
+    """Which RONDO product is under test.
+
+    Orthogonal to ``Side``: ``side`` says whether a row is the RONDO side or
+    the frozen upstream side, ``product`` says which RONDO product it is.
+    ``codex`` is deliberately absent -- the frozen upstream is a comparison
+    side, not a product line of this project.
+    """
+
+    RONDO_LOCAL = "rondo-local"
+    RONDO_MULTI = "rondo-multi"
+
+
+def product_for_side(side: Side, product: Product | None) -> Product | None:
+    """Return the product identity that may be recorded for ``side``.
+
+    The frozen upstream side never carries a product identity.  The RONDO side
+    always does; callers that have not selected one yet get the only product
+    that currently exists.
+    """
+
+    if side is Side.CODEX:
+        if product is not None:
+            raise ContractError("the frozen upstream side has no product identity")
+        return None
+    if side is not Side.RONDO:
+        raise ContractError("unsupported evaluation side")
+    if product is None:
+        return Product.RONDO_LOCAL
+    if not isinstance(product, Product):
+        raise ContractError("product identity is invalid")
+    return product
+
+
 class RunOutcome(StrEnum):
     COMPLETED = "completed"
     AGENT_FAILED = "agent_failed"

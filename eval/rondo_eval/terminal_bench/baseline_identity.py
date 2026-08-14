@@ -12,7 +12,10 @@ from decimal import Decimal
 from pathlib import Path
 
 from ..config import RepoPaths, load_runtime_config
-from ..frozen_model_catalog import load_frozen_model_catalog
+from ..frozen_model_catalog import (
+    load_frozen_model_catalog,
+    load_shared_model_catalog,
+)
 from .baseline import (
     CAMPAIGN_ACTIVE_POINTER_PATH,
     CAMPAIGN_CAP_USD,
@@ -490,6 +493,26 @@ def _validate_frozen_inputs(paths: RepoPaths, identity: CampaignIdentity) -> Non
     ):
         raise CampaignIdentityGenerationError("frozen seccomp profile drifted")
     selected = identity.selected_profile
+    if identity.enforces_fair_comparison:
+        # A successor may only be minted once the shared artifact still
+        # reproduces from both recorded sources.
+        sources = {
+            str(item["side"]): item for item in identity.catalog_identity["sources"]
+        }
+        shared = load_shared_model_catalog(
+            paths.common_root,
+            upstream_source_commit=str(sources["upstream"]["commit"]),
+            rondo_source_commit=str(sources["rondo"]["commit"]),
+            main_model=str(selected["effective_main_model"]),
+            guardian_model=str(selected["effective_guardian_model"]),
+        )
+        try:
+            identity.validate_shared_model_catalog(shared.identity())
+        except ValueError as exc:
+            raise CampaignIdentityGenerationError(
+                "shared model catalog drifted"
+            ) from exc
+        return
     projection = load_frozen_model_catalog(
         paths.common_root,
         source_commit=selected["frozen_codex_model_catalog_source_commit"],

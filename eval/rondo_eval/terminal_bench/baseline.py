@@ -16,7 +16,14 @@ from pathlib import Path
 from typing import Iterable
 
 from ..config import RepoPaths
-from ..contracts import BinaryManifest, ProviderProjection, RunSpec, Side
+from ..contracts import BinaryManifest, Product, ProviderProjection, RunSpec, Side
+from ..fair_comparison import (
+    AGGREGATION_STRICT_MAJORITY,
+    ComparisonConditions,
+    FairComparisonError,
+    RepeatContract,
+    aggregate_repeat_outcomes,
+)
 from .runner import PreparedTerminalBenchRun
 from .scoring import TaskOutcome
 from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalog
@@ -42,6 +49,19 @@ BASE_ROUNDS = (
 )
 MAX_SIGMA = 2
 MAX_REMAINING_INFRA_PER_ROUND = 2
+# Campaign schema versions 1--6 are frozen history.  Every E-B8 fair-comparison
+# rule -- shared catalog identity, frozen run conditions, task-interleaved
+# order, layered assessment and pre-frozen repeats -- is introduced at v7 so
+# the historical locks keep replaying byte for byte.
+FAIR_COMPARISON_SCHEMA_VERSION = 7
+HISTORICAL_SCHEMA_VERSIONS = (1, 2, 3, 4, 5, 6)
+SUPPORTED_SCHEMA_VERSIONS = (
+    *HISTORICAL_SCHEMA_VERSIONS,
+    FAIR_COMPARISON_SCHEMA_VERSION,
+)
+EXECUTION_ORDER_TASK_INTERLEAVED = "task_interleaved"
+EXECUTION_ORDER_ROUND_BLOCKED = "round_time_blocked"
+ASSESSMENT_LAYERS = ("aa_consistency", "cross_side", "directional")
 MECHANICAL_CIRCUIT_BREAKER_TASKS = 3
 MIN_COMMON_VALID_TASKS = 8
 CAMPAIGN_ACTIVE_POINTER_PATH = Path("eval/locks/p2-b7-active.json")
@@ -152,6 +172,29 @@ class ConditionalRun:
 
 
 @dataclass(frozen=True)
+class AssessmentLayer:
+    """One independently reported sub-gate.
+
+    The three layers answer different questions and are never collapsed into a
+    single "performance gate": A/A behavioural consistency, cross-side
+    difference, and the directional-regression backstop.
+    """
+
+    name: str
+    status: BaselineStatus
+    reasons: tuple[str, ...] = ()
+    metrics: tuple[tuple[str, object], ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "status": self.status.value,
+            "reasons": list(self.reasons),
+            "metrics": {key: value for key, value in self.metrics},
+        }
+
+
+@dataclass(frozen=True)
 class BaselineAssessment:
     status: BaselineStatus
     reasons: tuple[str, ...]
@@ -161,6 +204,16 @@ class BaselineAssessment:
     conditional_tasks: tuple[str, ...]
     effective_base_runs: tuple[BaselineRun, ...]
     effective_conditional_runs: tuple[ConditionalRun, ...]
+    # Populated only under the E-B8 repeat contract; historical campaigns keep
+    # the single ``reasons`` tuple they were assessed with.
+    layers: tuple[AssessmentLayer, ...] = ()
+    aggregated_outcomes: tuple[tuple[str, str, TaskOutcome], ...] = ()
+
+    def layer(self, name: str) -> AssessmentLayer:
+        matches = tuple(item for item in self.layers if item.name == name)
+        if len(matches) != 1:
+            raise BaselineError("assessment layer is not uniquely reported")
+        return matches[0]
 
 
 @dataclass(frozen=True)
@@ -217,14 +270,74 @@ class CampaignIdentity:
     lock_sha256: str
     catalog: FrozenCanaryCatalog
     continuation: tuple[ContinuationReference, ...] = ()
+    # The frozen fair-comparison block; present from schema v7 only.
+    comparison: dict[str, object] | None = None
 
     @property
     def max_attempts(self) -> int:
         if self.schema_version == 1:
             return 2
-        if self.schema_version in {2, 3, 4, 5, 6}:
+        if self.schema_version in {2, 3, 4, 5, 6, FAIR_COMPARISON_SCHEMA_VERSION}:
             return 4
         raise BaselineError("campaign identity version is unsupported")
+
+    @property
+    def enforces_fair_comparison(self) -> bool:
+        return self.schema_version >= FAIR_COMPARISON_SCHEMA_VERSION
+
+    def _comparison_block(self) -> dict[str, object]:
+        if not self.enforces_fair_comparison or not isinstance(self.comparison, dict):
+            raise BaselineError("campaign fair-comparison contract is not frozen")
+        return self.comparison
+
+    @property
+    def repeat_contract(self) -> RepeatContract:
+        """Return the repeat rules frozen before any paid data was produced."""
+
+        try:
+            return RepeatContract.from_dict(self._comparison_block().get("repeat_contract"))
+        except FairComparisonError as exc:
+            raise BaselineError(f"campaign repeat contract is invalid: {exc}") from exc
+
+    @property
+    def comparison_conditions(self) -> ComparisonConditions:
+        try:
+            return ComparisonConditions.from_dict(
+                self._comparison_block().get("comparison_conditions")
+            )
+        except FairComparisonError as exc:
+            raise BaselineError(f"campaign run conditions are invalid: {exc}") from exc
+
+    @property
+    def catalog_identity(self) -> dict[str, object]:
+        value = self._comparison_block().get("catalog_identity")
+        if not isinstance(value, dict) or not value:
+            raise BaselineError("campaign catalog identity is not frozen")
+        return value
+
+    @property
+    def product(self) -> Product:
+        """Which RONDO product this campaign evaluates.
+
+        The field exists so the facility stops assuming a single product; the
+        actual Multi wiring belongs to the Multi baseline work package.
+        """
+
+        value = self._comparison_block().get("product")
+        try:
+            return Product(str(value))
+        except ValueError as exc:
+            raise BaselineError("campaign product identity is invalid") from exc
+
+    @property
+    def conditional_repeats_per_side(self) -> int:
+        """Repeats executed *in addition to* the base A/B observation.
+
+        The frozen contract counts total observations per side, and the base
+        A/B run is one of them, so the conditional slots carry the remainder.
+        """
+
+        return self.repeat_contract.repeats_per_task - 1
 
     @property
     def upstream_timeout_seconds(self) -> float:
@@ -281,6 +394,12 @@ class CampaignIdentity:
         main_model: str,
         guardian_model: str,
     ) -> None:
+        """Validate the Codex-only projection replayed by v1--v6 campaigns."""
+
+        if self.enforces_fair_comparison:
+            raise BaselineError(
+                "a fair-comparison campaign uses the shared catalog artifact"
+            )
         selected = self.selected_profile
         if (
             source_commit
@@ -290,6 +409,23 @@ class CampaignIdentity:
             or guardian_model != selected.get("effective_guardian_model")
         ):
             raise BaselineError("frozen model catalog drifted from the campaign lock")
+
+    def validate_shared_model_catalog(self, identity: object) -> None:
+        """Fail closed unless the artifact matches every frozen identity field.
+
+        The artifact digest alone would only prove that nothing drifted; the
+        recorded source commits, paths and blob IDs are what prove the bytes
+        came from the right two places.
+        """
+
+        frozen = self.catalog_identity
+        if not isinstance(identity, dict):
+            raise BaselineError("shared model catalog identity is invalid")
+        if identity != frozen:
+            raise BaselineError("shared model catalog drifted from the campaign lock")
+        conditions = self.comparison_conditions
+        if conditions.catalog_artifact_sha256 != frozen["sha256"]:
+            raise BaselineError("shared model catalog digest differs from run conditions")
 
     def validate_manifest(
         self,
@@ -396,6 +532,31 @@ class CampaignIdentity:
         return path
 
     @property
+    def base_round_order(self) -> tuple[tuple[str, str], ...]:
+        """Return the frozen (task_id, round_id) execution order.
+
+        Historical campaigns ran one whole round at a time, which put the two
+        sides in different hours and left provider-side drift inseparable from
+        model noise.  From v7 the order is task-major, so both sides see each
+        task within the same window.
+        """
+
+        tasks = tuple(item.task_id for item in self.catalog.tasks)
+        if self.enforces_fair_comparison:
+            return tuple(
+                (task_id, round_id) for task_id in tasks for round_id in BASE_ROUNDS
+            )
+        return tuple(
+            (task_id, round_id) for round_id in BASE_ROUNDS for task_id in tasks
+        )
+
+    @property
+    def conditional_repeat_range(self) -> tuple[int, ...]:
+        if self.enforces_fair_comparison:
+            return tuple(range(1, self.conditional_repeats_per_side + 1))
+        return (1, 2)
+
+    @property
     def slots(self) -> tuple[CampaignSlotPlan, ...]:
         tasks = tuple(item.task_id for item in self.catalog.tasks)
         values: list[CampaignSlotPlan] = [
@@ -417,29 +578,29 @@ class CampaignIdentity:
             "ab-rondo-1": Side.RONDO,
             "ab-codex-1": Side.CODEX,
         }
+        repeats = self.conditional_repeat_range
         for attempt in range(1, self.max_attempts + 1):
             kind = "base" if attempt == 1 else "base_replacement"
-            for round_id in BASE_ROUNDS:
+            for task_id, round_id in self.base_round_order:
                 side = round_sides[round_id]
-                for task_id in tasks:
-                    values.append(
-                        self._slot(
-                            index=index,
-                            slot_id=f"base:{round_id}:{task_id}:a{attempt}",
-                            kind=kind,
-                            task_id=task_id,
-                            side=side,
-                            round_id=round_id,
-                            repeat=None,
-                            attempt=attempt,
-                        )
+                values.append(
+                    self._slot(
+                        index=index,
+                        slot_id=f"base:{round_id}:{task_id}:a{attempt}",
+                        kind=kind,
+                        task_id=task_id,
+                        side=side,
+                        round_id=round_id,
+                        repeat=None,
+                        attempt=attempt,
                     )
-                    index += 1
+                )
+                index += 1
         for attempt in range(1, self.max_attempts + 1):
             kind = "conditional" if attempt == 1 else "conditional_replacement"
             for task_id in tasks:
                 for side in (Side.RONDO, Side.CODEX):
-                    for repeat in (1, 2):
+                    for repeat in repeats:
                         values.append(
                             self._slot(
                                 index=index,
@@ -1185,8 +1346,19 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         "budget",
         "baseline",
     }
-    if isinstance(value, dict) and value.get("schema_version") in {3, 4, 5, 6}:
+    if isinstance(value, dict) and value.get("schema_version") in {
+        3,
+        4,
+        5,
+        6,
+        FAIR_COMPARISON_SCHEMA_VERSION,
+    }:
         expected_keys.add("continuation")
+    if (
+        isinstance(value, dict)
+        and value.get("schema_version") == FAIR_COMPARISON_SCHEMA_VERSION
+    ):
+        expected_keys.add("comparison")
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise BaselineError("campaign lock schema is invalid")
     schema_version = value["schema_version"]
@@ -1200,10 +1372,25 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         )
     except ValueError as exc:
         raise BaselineError("campaign catalog identity is invalid") from exc
+    comparison = _parse_comparison_block(value, schema_version=schema_version)
+    if comparison is None:
+        expected_baseline = campaign_baseline_contract(schema_version)
+        expected_max_run_slots = None
+    else:
+        repeats = RepeatContract.from_dict(comparison["repeat_contract"])
+        expected_baseline = campaign_baseline_contract(
+            schema_version,
+            conditional_repeats_per_side=repeats.repeats_per_task - 1,
+        )
+        expected_max_run_slots = campaign_slot_total(
+            task_count=len(catalog.tasks),
+            max_attempts=4,
+            conditional_repeats_per_side=repeats.repeats_per_task - 1,
+        )
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version not in {1, 2, 3, 4, 5, 6}
+        or schema_version not in SUPPORTED_SCHEMA_VERSIONS
         or _CAMPAIGN_ID.fullmatch(str(value["campaign_id"])) is None
         or _CAMPAIGN_BATCH_ID.fullmatch(str(value["batch_id"])) is None
         or _CAMPAIGN_ID.fullmatch(value["campaign_id"]).group(1)
@@ -1217,8 +1404,12 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         or not isinstance(value["selected_profile"], dict)
         or not isinstance(value["bundles"], dict)
         or not isinstance(value["no_api_seccomp"], dict)
-        or not _valid_campaign_budget(value["budget"], schema_version=schema_version)
-        or value["baseline"] != campaign_baseline_contract(schema_version)
+        or not _valid_campaign_budget(
+            value["budget"],
+            schema_version=schema_version,
+            expected_max_run_slots=expected_max_run_slots,
+        )
+        or value["baseline"] != expected_baseline
     ):
         raise BaselineError("campaign lock differs from the frozen B7 contract")
     selected = value["selected_profile"]
@@ -1227,6 +1418,10 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         "provider_endpoint_sha256",
         "frozen_codex_model_catalog_sha256",
     }
+    if comparison is not None:
+        # From v7 the catalog artifact is no longer a Codex-only projection, so
+        # its identity lives in the comparison block instead.
+        required_selected.discard("frozen_codex_model_catalog_sha256")
     if any(
         not isinstance(selected.get(key), str)
         or _SHA256.fullmatch(selected[key]) is None
@@ -1257,7 +1452,17 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         lock_sha256=hashlib.sha256(raw).hexdigest(),
         catalog=catalog,
         continuation=continuation,
+        comparison=comparison,
     )
+    if comparison is not None:
+        # Touch every frozen accessor so a malformed block fails at load time
+        # rather than in the middle of a campaign.
+        _ = (
+            identity.repeat_contract,
+            identity.comparison_conditions,
+            identity.catalog_identity,
+            identity.product,
+        )
     _validate_continuation_topology(identity)
     _ = identity.slots
     if not any(
@@ -1268,7 +1473,91 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     return identity
 
 
-def campaign_baseline_contract(schema_version: int) -> dict[str, object]:
+def _parse_comparison_block(
+    value: dict[str, object],
+    *,
+    schema_version: object,
+) -> dict[str, object] | None:
+    """Return the frozen fair-comparison block, or ``None`` before v7.
+
+    A v7 campaign may not be created until the repeat count, the aggregation
+    formula, the run conditions and the shared catalog identity are all frozen
+    in the lock, so every one of them is required here.
+    """
+
+    if schema_version != FAIR_COMPARISON_SCHEMA_VERSION:
+        if "comparison" in value:
+            raise BaselineError(
+                "historical campaign locks cannot carry a fair-comparison block"
+            )
+        return None
+    block = value.get("comparison")
+    if not isinstance(block, dict) or set(block) != {
+        "repeat_contract",
+        "comparison_conditions",
+        "catalog_identity",
+        "product",
+    }:
+        raise BaselineError("campaign fair-comparison contract is not frozen")
+    try:
+        RepeatContract.from_dict(block["repeat_contract"])
+        ComparisonConditions.from_dict(block["comparison_conditions"])
+    except FairComparisonError as exc:
+        raise BaselineError(f"campaign fair-comparison contract is invalid: {exc}") from exc
+    identity = block["catalog_identity"]
+    if not isinstance(identity, dict) or set(identity) != {
+        "sha256",
+        "projection_algorithm",
+        "projection_version",
+        "main_model",
+        "guardian_model",
+        "override_target_slug",
+        "model_slugs",
+        "sources",
+    }:
+        raise BaselineError("campaign catalog identity is not frozen")
+    sources = identity["sources"]
+    if (
+        not isinstance(sources, list)
+        or len(sources) != 2
+        or {item.get("side") for item in sources if isinstance(item, dict)}
+        != {"upstream", "rondo"}
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"side", "commit", "path", "blob_id"}
+            for item in sources
+        )
+    ):
+        raise BaselineError("campaign catalog provenance is incomplete")
+    if _SHA256.fullmatch(str(identity["sha256"])) is None:
+        raise BaselineError("campaign catalog artifact digest is invalid")
+    try:
+        Product(str(block["product"]))
+    except ValueError as exc:
+        raise BaselineError("campaign product identity is invalid") from exc
+    return dict(block)
+
+
+def campaign_slot_total(
+    *,
+    task_count: int,
+    max_attempts: int,
+    conditional_repeats_per_side: int,
+) -> int:
+    """Return the exact slot count a campaign plan must produce."""
+
+    if task_count <= 0 or max_attempts <= 0 or conditional_repeats_per_side <= 0:
+        raise BaselineError("campaign slot geometry is invalid")
+    base = len(BASE_ROUNDS) * task_count * max_attempts
+    conditional = task_count * 2 * conditional_repeats_per_side * max_attempts
+    return 1 + base + conditional
+
+
+def campaign_baseline_contract(
+    schema_version: int,
+    *,
+    conditional_repeats_per_side: int = 2,
+) -> dict[str, object]:
     common: dict[str, object] = {
         "base_rounds": list(BASE_ROUNDS),
         "max_sigma": MAX_SIGMA,
@@ -1278,7 +1567,11 @@ def campaign_baseline_contract(schema_version: int) -> dict[str, object]:
             item.value for item in MechanicalFailureCategory
         ],
         "minimum_common_valid_tasks": MIN_COMMON_VALID_TASKS,
-        "conditional_repeats_per_side": 2,
+        "conditional_repeats_per_side": (
+            conditional_repeats_per_side
+            if schema_version >= FAIR_COMPARISON_SCHEMA_VERSION
+            else 2
+        ),
         "docker_concurrency": 1,
         "api_max_retries": 0,
     }
@@ -1335,10 +1628,26 @@ def campaign_baseline_contract(schema_version: int) -> dict[str, object]:
             "campaign_ledger_capacity": "authorized_remaining_cap_up_to_1600_usd",
             "continuation_compatibility": "monotonic_campaign_ledger_capacity_fix",
         }
+    if schema_version == FAIR_COMPARISON_SCHEMA_VERSION:
+        return {
+            **campaign_baseline_contract(6),
+            "conditional_repeats_per_side": conditional_repeats_per_side,
+            "execution_order": EXECUTION_ORDER_TASK_INTERLEAVED,
+            "assessment_layers": list(ASSESSMENT_LAYERS),
+            "conditional_aggregation": AGGREGATION_STRICT_MAJORITY,
+            "shared_model_catalog": "both_sides_load_one_artifact",
+            "task_independent_request_preflight": "required_before_upstream",
+            "continuation_compatibility": "fair_comparison_contract_v1",
+        }
     raise BaselineError("campaign baseline contract version is unsupported")
 
 
-def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
+def _valid_campaign_budget(
+    value: object,
+    *,
+    schema_version: int,
+    expected_max_run_slots: int | None = None,
+) -> bool:
     if not isinstance(value, dict) or set(value) != {
         "campaign_cap_usd",
         "prior_estimated_usd",
@@ -1353,7 +1662,12 @@ def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
         prior = Decimal(value["prior_estimated_usd"])
     except (ArithmeticError, TypeError):
         return False
-    expected_slots = LEGACY_CAMPAIGN_MAX_RUNS if schema_version == 1 else CAMPAIGN_MAX_RUNS
+    if expected_max_run_slots is not None:
+        expected_slots = expected_max_run_slots
+    else:
+        expected_slots = (
+            LEGACY_CAMPAIGN_MAX_RUNS if schema_version == 1 else CAMPAIGN_MAX_RUNS
+        )
     valid_caps = {
         1: {LEGACY_CAMPAIGN_CAP_USD},
         2: {
@@ -1364,6 +1678,7 @@ def _valid_campaign_budget(value: object, *, schema_version: int) -> bool:
         4: {HISTORICAL_SCHEMA_V4_CAMPAIGN_CAP_USD},
         5: {CAMPAIGN_CAP_USD},
         6: {CAMPAIGN_CAP_USD},
+        FAIR_COMPARISON_SCHEMA_VERSION: {CAMPAIGN_CAP_USD},
     }[schema_version]
     return (
         cap in valid_caps
@@ -1552,9 +1867,23 @@ def assess_baseline(
     conditional_runs: tuple[ConditionalRun, ...],
     *,
     max_attempts: int = 2,
+    repeat_contract: RepeatContract | None = None,
 ) -> BaselineAssessment:
-    """Select bounded infra replacements and apply the frozen B7 gates."""
+    """Select bounded infra replacements and apply the frozen B7 gates.
 
+    Without ``repeat_contract`` this replays the historical single-``reasons``
+    assessment exactly.  With one, the three sub-gates are reported separately
+    and the frozen repeats are aggregated into the per-task outcome that the
+    cross-side comparison actually uses.
+    """
+
+    if repeat_contract is not None:
+        repeat_contract.validate()
+    repeats = (
+        tuple(range(1, repeat_contract.repeats_per_task))
+        if repeat_contract is not None
+        else (1, 2)
+    )
     if len(task_ids) != 10 or len(set(task_ids)) != 10:
         raise BaselineError("B7 requires ten unique canary tasks")
     expected_sides = {
@@ -1625,7 +1954,7 @@ def assess_baseline(
     effective_conditional: list[ConditionalRun] = []
     for task_id in triggers:
         for side in (Side.RONDO, Side.CODEX):
-            for repeat in (1, 2):
+            for repeat in repeats:
                 selected = _select_conditional(
                     task_id,
                     side,
@@ -1651,42 +1980,133 @@ def assess_baseline(
             tuple(effective_conditional),
         )
 
+    def _side_observations(task_id: str, side: Side) -> list[TaskOutcome]:
+        base_round = "ab-rondo-1" if side is Side.RONDO else "ab-codex-1"
+        return [
+            by_round[base_round][task_id],
+            *(
+                item.outcome
+                for item in effective_conditional
+                if item.task_id == task_id and item.side is side
+            ),
+        ]
+
     reasons: list[str] = []
     if sigma > MAX_SIGMA:
         reasons.append("aa_sigma_exceeds_frozen_stability_limit")
     if delta > sigma:
         reasons.append("ab_delta_exceeds_aa_sigma")
+    directional: list[str] = []
     for task_id in triggers:
-        rondo = [
-            by_round["ab-rondo-1"][task_id],
-            *(
-                item.outcome
-                for item in effective_conditional
-                if item.task_id == task_id and item.side is Side.RONDO
-            ),
-        ]
-        codex = [
-            by_round["ab-codex-1"][task_id],
-            *(
-                item.outcome
-                for item in effective_conditional
-                if item.task_id == task_id and item.side is Side.CODEX
-            ),
-        ]
+        rondo = _side_observations(task_id, Side.RONDO)
+        codex = _side_observations(task_id, Side.CODEX)
         if all(item is TaskOutcome.FAIL for item in rondo) and all(
             item is TaskOutcome.PASS for item in codex
         ):
-            reasons.append(f"stable_directional_regression:{task_id}")
-    status = BaselineStatus.FAILED if reasons else BaselineStatus.PASSED
+            directional.append(f"stable_directional_regression:{task_id}")
+    reasons.extend(directional)
+    if repeat_contract is None:
+        status = BaselineStatus.FAILED if reasons else BaselineStatus.PASSED
+        return BaselineAssessment(
+            status,
+            tuple(reasons),
+            sigma,
+            delta,
+            common_valid_tasks,
+            triggers,
+            tuple(effective_base),
+            tuple(effective_conditional),
+        )
+
+    # The frozen repeats are part of the result, not a side channel: every
+    # triggered task's per-side outcome is the strict majority over its frozen
+    # observations, and that aggregate is what the cross-side gate compares.
+    aggregated: list[tuple[str, str, TaskOutcome]] = []
+    aggregation_reasons: list[str] = []
+    effective_delta = 0
+    for task_id in common_valid_tasks:
+        per_side: dict[Side, TaskOutcome] = {}
+        for side in (Side.RONDO, Side.CODEX):
+            observations = tuple(_side_observations(task_id, side))
+            if task_id in triggers:
+                try:
+                    outcome = aggregate_repeat_outcomes(
+                        observations,
+                        contract=repeat_contract,
+                        pass_value=TaskOutcome.PASS,
+                        fail_value=TaskOutcome.FAIL,
+                    )
+                except FairComparisonError as exc:
+                    aggregation_reasons.extend(
+                        f"{reason}:{task_id}:{side.value}" for reason in exc.reasons
+                    )
+                    outcome = observations[0]
+            else:
+                outcome = observations[0]
+            per_side[side] = outcome
+            aggregated.append((task_id, side.value, outcome))
+        if per_side[Side.RONDO] is not per_side[Side.CODEX]:
+            effective_delta += 1
+
+    if aggregation_reasons:
+        return BaselineAssessment(
+            BaselineStatus.BLOCKED,
+            tuple(aggregation_reasons),
+            sigma,
+            effective_delta,
+            common_valid_tasks,
+            triggers,
+            tuple(effective_base),
+            tuple(effective_conditional),
+            (),
+            tuple(aggregated),
+        )
+
+    aa_reasons = (
+        ("aa_sigma_exceeds_frozen_stability_limit",) if sigma > MAX_SIGMA else ()
+    )
+    cross_reasons = ("ab_delta_exceeds_aa_sigma",) if effective_delta > sigma else ()
+    layers = (
+        AssessmentLayer(
+            "aa_consistency",
+            BaselineStatus.FAILED if aa_reasons else BaselineStatus.PASSED,
+            aa_reasons,
+            (("sigma", sigma), ("max_sigma", MAX_SIGMA)),
+        ),
+        AssessmentLayer(
+            "cross_side",
+            BaselineStatus.FAILED if cross_reasons else BaselineStatus.PASSED,
+            cross_reasons,
+            (
+                ("delta", effective_delta),
+                ("base_delta", delta),
+                ("sigma", sigma),
+                ("repeats_per_task", repeat_contract.repeats_per_task),
+                ("aggregation", repeat_contract.aggregation),
+            ),
+        ),
+        AssessmentLayer(
+            "directional",
+            BaselineStatus.FAILED if directional else BaselineStatus.PASSED,
+            tuple(directional),
+            (("repeated_tasks", len(triggers)),),
+        ),
+    )
+    layer_reasons = tuple(
+        reason for layer in layers for reason in layer.reasons
+    )
+    status = BaselineStatus.FAILED if layer_reasons else BaselineStatus.PASSED
     return BaselineAssessment(
         status,
-        tuple(reasons),
+        layer_reasons,
         sigma,
-        delta,
+        effective_delta,
         common_valid_tasks,
         triggers,
         tuple(effective_base),
         tuple(effective_conditional),
+        layers,
+        tuple(aggregated),
     )
 
 
