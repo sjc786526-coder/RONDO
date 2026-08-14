@@ -122,3 +122,36 @@
 
 **遗留边界**：真正跑一次 receipt 产出需要无 API 的双侧 stub Docker 运行，不在本任务授权内，故**未执行**；
 产出入口与其编排已按可注入 executor/server 的形式实现并单测覆盖，但从未对真实二进制运行过。
+
+## Docker 授权后的实机验证（2026-08-13）
+
+用户批准 Docker 授权后,补跑了此前"未执行"的那一步。**受限于当前没有 v7 campaign**
+(最高 schema 是 v22 的 v6,active 指针为 `null`),无法产出正式 receipt;因此改为用一次性合成 v7 身份
+(全部字段取自真实事实:真实共享 catalog、真实 v22 profile、真实 `terminal-bench/fix-git` 镜像)
+对 `capture_side_requests` 做双侧实机冒烟。未创建 lock、registry、ledger、run ID,也未写入任何 campaign 目录。
+
+### 结果
+
+- **两侧五个分区全部对称**,含 `stable_input_prefix` —— 历史 161-token 不对称正在该分区。
+  这是共享 catalog 方案第一次拿到实机证据,此前只是设计论证。
+  main 合同 digest `f627b2de…`;两侧 bundle manifest 分别为 `3a742072…`(RONDO)/`e13a9d0f…`(Codex)。
+- **共享 catalog 地基成立**:`codex-source-code` 的 `be6e8eac:codex-rs/models-manager/models.json` 与
+  RONDO 的 `cb652e14:mydev/codex-rs/models-manager/models.json` blob 均为 `fef0db08…`,字节相同。
+
+### 实机暴露的两个真问题
+
+1. **`_validate_stub_projection()` 引用了不存在的字段**(我方 bug)。`RunSpec` 是 `task_image_digest` 而非
+   `image_digest`,且 seccomp 与 catalog 绑定在请求上而不在 spec 上。单测用假 `prepared` 对象,
+   结构上抓不到;任何真实运行都会崩。已按真实字段修正。
+2. **`_unescape_mountinfo()` 无法解析 Windows 来源**(既有 bug,非本任务引入)。它先把 `\134` 还原为 `\`,
+   再拒绝任何残留反斜杠,而 Docker Desktop 的 9p 挂载源是 `C:\Program Files\Docker\Docker\resources`。
+   改为按 `proc(5)` 在原始文本上校验转义(比原来更严:短转义、非八进制、NUL 仍拒)。
+   影响面澄清:仅原生 Docker 分支解析 mountinfo,现有 recipe 都传 PowerShell probe 走另一分支,**并未被此 bug 阻塞**。
+
+### 资源结算
+
+- 基线 → 结束:镜像 26 个/11.5GB → 26 个/11.5GB,构建缓存 13.22GB → 13.22GB,容器 0 → 0(**Docker 增量为 0**,
+  `fix-git` 镜像本地已有)。Windows `C:` 剩余 196.2 GiB → 196.1 GiB(减少约 72 MiB),远高于 80 GiB 门槛。
+- 本次创建并已清理:3 个 `eval-data/work/tb-preflight-*` 与 1 个 build-metrics 目录;
+  `eval-data/work` 条目数 261 → 258,未触碰任何其他对象。
+- 全程无真实 API 请求、无付费、无真实模型;唯一可达端点是本地捕获 stub。
