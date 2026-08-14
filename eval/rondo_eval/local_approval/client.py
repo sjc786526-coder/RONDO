@@ -27,6 +27,7 @@ from ..evidence import (
     validate_static_payload,
 )
 from ..exit_codes import SERVICE_UNAVAILABLE, STRUCTURED_OUTPUT_ERROR
+from .model_backed import service_build_info as expected_service_build_info
 from .identity import (
     LauncherIdentity,
     require_launcher_identity,
@@ -292,8 +293,7 @@ class LocalApprovalClient:
         if launcher_identity is not None:
             self.verify_service_identity(
                 Path(launcher_identity.model_path),
-                expected_build=10333,
-                expected_commit="08659901c43b51de735740f1cf61bb82fbe0c4e4",
+                expected_build_info=expected_service_build_info(self.settings),
             )
             self._revalidate_launcher_identity(launcher_identity)
         body = json.dumps(
@@ -384,17 +384,20 @@ class LocalApprovalClient:
         self,
         expected_model_path: Path,
         *,
-        expected_build: int,
-        expected_commit: str,
+        expected_build_info: str,
     ) -> None:
-        """Bind a configured endpoint to the pinned build, model path, and alias."""
+        """Bind a configured endpoint to the pinned build, model path, and alias.
+
+        The source-built CUDA runtime and the upstream CPU release bundle report
+        different `build_info` strings, so the exact expectation comes from the
+        configured backend instead of one hard-coded release number.
+        """
 
         parsed = urllib.parse.urlsplit(self.settings.base_url)
         props_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/props", "", ""))
         props = self._get_json(props_url)
         if not isinstance(props, Mapping):
             raise StructuredOutputError("local approval service props are invalid")
-        build_info = props.get("build_info")
         reported_path = props.get("model_path")
         try:
             path_matches = (
@@ -405,12 +408,7 @@ class LocalApprovalClient:
             )
         except OSError:
             path_matches = False
-        if (
-            not isinstance(build_info, str)
-            or re.search(rf"(?<!\d){expected_build}(?!\d)", build_info) is None
-            or expected_commit[:8] not in build_info
-            or not path_matches
-        ):
+        if props.get("build_info") != expected_build_info or not path_matches:
             raise StructuredOutputError("local approval service identity differs")
 
         models = self._get_json(f"{self.settings.base_url}/models")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,7 @@ from rondo_eval.local_approval.identity import (  # noqa: E402
     clear_launcher_identity,
     publish_launcher_identity,
 )
+from rondo_eval.local_approval import model_backed, qualification  # noqa: E402
 from rondo_eval.local_approval.launcher import (  # noqa: E402
     CHAT_TEMPLATE_RELATIVE_PATH,
     CHAT_TEMPLATE_REPO,
@@ -60,6 +62,7 @@ from rondo_eval.local_approval.launcher import (  # noqa: E402
     RuntimeLock,
     _get_json,
     _load_runtime_lock,
+    _model_backed_capability,
     _verify_elf_metadata,
     _verify_host_dependency_closure,
     _verify_runtime_closure,
@@ -189,6 +192,19 @@ def _canonical_payload(
         sort_keys=True,
     ).encode("utf-8")
     return StaticApprovalPayload(payload.policy_identity, canonical, logical_payload)
+
+
+# Shortened but format-exact llama.cpp b10333 CUDA load output.
+_CUDA_LOAD_LOG = (
+    "ggml_cuda_init: found 1 CUDA devices (Total VRAM: 8187 MiB):\n"
+    "  Device 0: NVIDIA GeForce RTX 4060 Laptop GPU, compute capability 8.9, "
+    "VMM: yes, VRAM: 8187 MiB\n"
+    "load_tensors: offloading 32 repeating layers to GPU\n"
+    "load_tensors: offloading output layer to GPU\n"
+    "load_tensors: offloaded 33/33 layers to GPU\n"
+    "llama_context: n_ctx         = 4096\n"
+    "main: server is listening on http://127.0.0.1:8080 - starting the main loop\n"
+)
 
 
 def _current_process_command() -> list[str]:
@@ -1702,6 +1718,511 @@ class LauncherAndDoctorTests(unittest.TestCase):
         dependency.write_bytes(b"changed")
         with self.assertRaises(ValueError):
             _verify_host_dependency_closure(lock, runtime)
+
+
+class _FakeServerProcess:
+    """Minimal Popen stand-in that records how the qualification stops it."""
+
+    def __init__(self, *, log_text: str = _CUDA_LOAD_LOG, exited: bool = False):
+        self.pid = 4242
+        self.log_text = log_text
+        self.terminated = False
+        self.killed = False
+        self.stubborn = False
+        self.unkillable = False
+        self._exited = exited
+
+    def __call__(self, command, **kwargs):
+        descriptor = kwargs.get("stdout")
+        if isinstance(descriptor, int):
+            os.write(descriptor, self.log_text.encode("utf-8"))
+        self.command = list(command)
+        return self
+
+    def poll(self):
+        return 0 if self._exited else None
+
+    def terminate(self):
+        self.terminated = True
+        if not self.stubborn:
+            self._exited = True
+
+    def kill(self):
+        self.killed = True
+        if not self.unkillable:
+            self._exited = True
+
+    def wait(self, timeout=None):
+        if not self._exited:
+            raise subprocess.TimeoutExpired(cmd="llama-server", timeout=timeout or 0)
+        return 0
+
+
+class _FakeGpuSampler:
+    def __init__(self, *, used: list[int] | None = None, compute_pids: list[int] | None = None):
+        self._used = used or [1_000 * 1024 * 1024, 6_000 * 1024 * 1024]
+        self._index = 0
+        self._compute_pids = compute_pids or []
+
+    def used_bytes(self) -> int:
+        value = self._used[min(self._index, len(self._used) - 1)]
+        self._index += 1
+        return value
+
+    def compute_process_pids(self) -> list[int]:
+        return list(self._compute_pids)
+
+
+class ModelBackedQualificationTests(unittest.TestCase):
+    """Failure classes for the restricted 4k qualification and its evidence."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.paths = RepoPaths(self.root, self.root)
+        _install_template_fixture(self.root)
+        (self.root / "rondo.secrets.example.env").write_text(
+            "RONDO_LOCAL_MODEL_API_KEY=\n", encoding="utf-8"
+        )
+        self.model = self.root / "eval-data/models/fixture.gguf"
+        self.model.parent.mkdir(parents=True)
+        self.model.write_bytes(b"GGUFqualification-fixture")
+        self.model_sha256 = hashlib.sha256(self.model.read_bytes()).hexdigest()
+        self.evidence_relative = (
+            "eval-data/runs/20260812-370000003-tb-rondo-r1/guardian-evidence/0001/E_final.json"
+        )
+        source = self.root / self.evidence_relative
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            json.dumps(
+                {
+                    "instructions": "frozen guardian policy fixture",
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "approve this fixture action?"}
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (source.parent / "meta.json").write_text(
+            json.dumps(
+                {
+                    "review_id": "1e864a2a-2825-4f08-906d-e4a35cceb1f5",
+                    "guardian_source_baseline": "rust-v0.147.0",
+                    "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                    "evidence": "e_final",
+                    "terminal_status": "approved",
+                    "token_usage": {"input_tokens": 11},
+                }
+            ),
+            encoding="utf-8",
+        )
+        patcher = mock.patch.multiple(
+            model_backed,
+            MODEL_RELATIVE_PATH="eval-data/models/fixture.gguf",
+            MODEL_SIZE_BYTES=self.model.stat().st_size,
+            MODEL_SHA256=self.model_sha256,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _free_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            return int(listener.getsockname()[1])
+
+    def _config(self, *, server_overrides: dict | None = None) -> RuntimeConfig:
+        overrides = {"binary": model_backed.CUDA_SERVER_RELATIVE_PATH}
+        overrides.update(server_overrides or {})
+        return RuntimeConfig(
+            self.paths,
+            _local_data(
+                f"http://127.0.0.1:{self._free_port()}/v1",
+                model_path_value="eval-data/models/fixture.gguf",
+                model_sha256_value=self.model_sha256,
+                server_overrides=overrides,
+            ),
+            "0" * 64,
+        )
+
+    @staticmethod
+    def _cuda_runtime(_config: RuntimeConfig, _settings: object) -> RuntimeInspection:
+        return RuntimeInspection(
+            "runtime_ready",
+            Path("/fake/llama-server"),
+            "fixture CUDA runtime",
+            "b" * 64,
+            LLAMA_CPP_CUDA_CAPABILITY,
+            model_backed.MODEL_BACKED_NOT_RUN,
+        )
+
+    @staticmethod
+    def _http(props: dict | None = None, slots: object = None):
+        default_props = {
+            "build_info": model_backed.CUDA_SERVICE_BUILD_INFO,
+            "default_generation_settings": {"n_ctx": 4096},
+            "total_slots": 1,
+        }
+        default_slots = [{"is_processing": True, "next_token": [{"n_decoded": 3}]}]
+
+        def get(url: str, *, timeout: float):
+            if url.endswith("/health"):
+                return {"status": "ok"}
+            if url.endswith("/props"):
+                return default_props if props is None else props
+            if url.endswith("/slots"):
+                return default_slots if slots is None else slots
+            raise AssertionError(f"unexpected qualification probe: {url}")
+
+        return get
+
+    def _run(self, config: RuntimeConfig, **overrides):
+        lease = runtime_bridge.WatchdogLease(token="e" * 48)
+        guard = mock.Mock()
+        guard.is_held.return_value = True
+        arguments = {
+            "evidence_relative_path": self.evidence_relative,
+            "popen": _FakeServerProcess(),
+            "watchdog_factory": lambda: runtime_bridge.WatchdogProof(lease=lease, guard=guard),
+            "gpu_sampler": _FakeGpuSampler(),
+            "identity_publisher": mock.Mock(return_value=mock.sentinel.identity),
+            "identity_clearer": mock.Mock(),
+            "verify_identity": mock.Mock(),
+            "decide": lambda _config, _payload: {
+                "outcome": "deny",
+                "rationale": "fixture rationale",
+                "risk_tags": ["fixture"],
+            },
+            "http_get": self._http(),
+            "today": lambda: "2026-08-14",
+        }
+        arguments.update(overrides)
+        with mock.patch(
+            "rondo_eval.local_approval.qualification.inspect_runtime",
+            side_effect=self._cuda_runtime,
+        ):
+            return qualification.run_qualification(config, **arguments)
+
+    def _promoted_capability(self, config: RuntimeConfig) -> tuple[str, str]:
+        return _model_backed_capability(
+            config, settings_from_config(config), "b" * 64
+        )
+
+    def test_successful_qualification_publishes_evidence_and_promotes_capability(self) -> None:
+        config = self._config()
+        process = _FakeServerProcess()
+        summary = self._run(config, popen=process)
+
+        self.assertEqual(summary["status"], "qualified")
+        self.assertEqual(summary["gpu_offloaded_layers"], 33)
+        self.assertEqual(summary["effective_context_size"], 4096)
+        self.assertGreater(summary["time_to_first_token_ms"], 0)
+        self.assertLessEqual(summary["time_to_first_token_ms"], summary["total_decision_ms"])
+        self.assertTrue(all(summary["cleanup"].values()))
+        self.assertTrue(process.terminated)
+        self.assertFalse(process.killed)
+
+        evidence_path = self.root / model_backed.EVIDENCE_RELATIVE_PATH
+        raw = evidence_path.read_text(encoding="utf-8")
+        self.assertNotIn("rationale", raw.replace('"rationale_non_empty"', ""))
+        self.assertNotIn("fixture rationale", raw)
+        self.assertNotIn("guardian policy", raw)
+        document = json.loads(raw)
+        self.assertEqual(document["capability"], "gpu_model_serving_validated")
+        self.assertEqual(document["identity"]["context_size"], 4096)
+        self.assertEqual(
+            document["observed"]["evidence_source"]["relative_path"], self.evidence_relative
+        )
+        self.assertEqual(
+            self._promoted_capability(config),
+            ("gpu_model_serving_validated", model_backed.MODEL_BACKED_VALIDATED),
+        )
+        self.assertEqual(
+            list((self.root / "eval-data/local-approval").glob("qualification-*")), []
+        )
+
+    def test_second_qualification_is_refused_once_evidence_exists(self) -> None:
+        config = self._config()
+        self._run(config)
+        popen = mock.Mock()
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(config, popen=popen)
+        self.assertEqual(raised.exception.code, "evidence_already_exists")
+        popen.assert_not_called()
+
+    def test_contract_violations_are_rejected_before_the_model_starts(self) -> None:
+        cases = (
+            {"binary": "eval-data/tools/llama-b10333/llama-server"},
+            {"context_size": 8192},
+            {"gpu_layers": "all"},
+            {"fit": "off"},
+        )
+        for overrides in cases:
+            with self.subTest(overrides=overrides):
+                config = self._config(server_overrides=overrides)
+                popen = mock.Mock()
+                with self.assertRaises(model_backed.QualificationContractError):
+                    self._run(config, popen=popen)
+                popen.assert_not_called()
+
+        config = self._config()
+        config.data["local_model"]["model_sha256"] = "0" * 64
+        popen = mock.Mock()
+        with self.assertRaises(model_backed.QualificationContractError):
+            self._run(config, popen=popen)
+        popen.assert_not_called()
+        self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+
+    def test_site_preconditions_block_the_model_before_popen(self) -> None:
+        config = self._config()
+        popen = mock.Mock()
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(
+                config,
+                popen=popen,
+                watchdog_factory=mock.Mock(
+                    side_effect=runtime_bridge.RuntimeBridgeError("unsupervised")
+                ),
+            )
+        self.assertEqual(raised.exception.code, "watchdog_unavailable")
+
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(
+                config,
+                popen=popen,
+                gpu_sampler=_FakeGpuSampler(compute_pids=[999]),
+            )
+        self.assertEqual(raised.exception.code, "gpu_not_exclusive")
+
+        # The qualified server itself is not a foreign GPU user.
+        own = _FakeServerProcess()
+        own.pid = os.getpid()
+        self.assertEqual(
+            qualification._foreign_compute_pids(
+                _FakeGpuSampler(compute_pids=[os.getpid()]), os.getpid()
+            ),
+            [],
+        )
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            occupied = RuntimeConfig(
+                self.paths,
+                _local_data(
+                    f"http://127.0.0.1:{listener.getsockname()[1]}/v1",
+                    model_path_value="eval-data/models/fixture.gguf",
+                    model_sha256_value=self.model_sha256,
+                    server_overrides={"binary": model_backed.CUDA_SERVER_RELATIVE_PATH},
+                ),
+                "0" * 64,
+            )
+            with self.assertRaises(qualification.QualificationError) as raised:
+                self._run(occupied, popen=popen)
+        self.assertEqual(raised.exception.code, "port_already_in_use")
+        popen.assert_not_called()
+        self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+
+    def test_service_gpu_and_response_failures_never_publish_evidence(self) -> None:
+        cases = {
+            "server_exited_before_ready": {
+                "popen": _FakeServerProcess(exited=True),
+            },
+            "service_context_differs": {
+                "http_get": self._http(
+                    props={
+                        "build_info": model_backed.CUDA_SERVICE_BUILD_INFO,
+                        "default_generation_settings": {"n_ctx": 8192},
+                        "total_slots": 1,
+                    }
+                ),
+            },
+            "gpu_offload_not_positive": {
+                "popen": _FakeServerProcess(
+                    log_text=_CUDA_LOAD_LOG.replace(
+                        "offloaded 33/33 layers", "offloaded 0/33 layers"
+                    )
+                ),
+            },
+            "gpu_offload_not_reported": {
+                "popen": _FakeServerProcess(log_text="starting llama-server\n"),
+            },
+            "first_token_not_observed": {
+                "http_get": self._http(
+                    slots=[{"is_processing": True, "next_token": [{"n_decoded": 0}]}]
+                ),
+            },
+            "structured_response_invalid": {
+                "decide": lambda _config, _payload: {
+                    "outcome": "maybe",
+                    "rationale": "",
+                    "risk_tags": [],
+                },
+            },
+        }
+        for code, overrides in cases.items():
+            with self.subTest(code=code):
+                config = self._config()
+                process = overrides.get("popen") or _FakeServerProcess()
+                overrides["popen"] = process
+                with self.assertRaises(qualification.QualificationError) as raised:
+                    self._run(config, **overrides)
+                self.assertEqual(raised.exception.code, code)
+                self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+                self.assertEqual(
+                    list((self.root / "eval-data/local-approval").glob("qualification-*")),
+                    [],
+                )
+                self.assertEqual(
+                    self._promoted_capability(config),
+                    (LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_NOT_RUN),
+                )
+
+    def test_rejected_decision_reports_only_non_sensitive_server_counters(self) -> None:
+        config = self._config()
+        log = _CUDA_LOAD_LOG + (
+            "srv  send_error: task id = 0, error: request (7812 tokens) exceeds "
+            "the available context size (4096 tokens), try increasing it\n"
+        )
+
+        def refuse(_config: RuntimeConfig, _payload: object) -> dict[str, object]:
+            raise ServiceUnavailableError("rejected")
+
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(config, popen=_FakeServerProcess(log_text=log), decide=refuse)
+        self.assertEqual(raised.exception.code, "structured_decision_failed")
+        facts = raised.exception.facts
+        self.assertEqual(facts["prompt_tokens"], 7812)
+        self.assertEqual(facts["context_size"], 4096)
+        self.assertEqual(facts["server_error_class"], "exceeds the available context size")
+        self.assertTrue(all(facts["cleanup"].values()))
+        self.assertNotIn("rationale", json.dumps(facts))
+        self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+
+    def test_incomplete_cleanup_blocks_promotion(self) -> None:
+        config = self._config()
+        stubborn = _FakeServerProcess()
+        stubborn.stubborn = True
+        stubborn.unkillable = True
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(config, popen=stubborn)
+        self.assertEqual(raised.exception.code, "cleanup_incomplete")
+        self.assertTrue(stubborn.terminated)
+        self.assertTrue(stubborn.killed)
+        self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+
+    def test_missing_invalid_and_mismatched_evidence_stay_unvalidated(self) -> None:
+        config = self._config()
+        self.assertEqual(
+            self._promoted_capability(config),
+            (LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_NOT_RUN),
+        )
+        self._run(config)
+        evidence_path = self.root / model_backed.EVIDENCE_RELATIVE_PATH
+        valid = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+        mutations = {
+            "not-json": lambda value: None,
+            "missing-group": lambda value: value.pop("cleanup"),
+            "extra-field": lambda value: value["observed"].update({"unexpected": 1}),
+            "zero-offload": lambda value: value["observed"].update({"gpu_offloaded_layers": 0}),
+            "incomplete-cleanup": lambda value: value["cleanup"].update({"port_released": False}),
+            "foreign-context": lambda value: value["identity"].update({"context_size": 8192}),
+            "wrong-capability": lambda value: value.update({"capability": "cpu_only_x64"}),
+        }
+        for case, mutate in mutations.items():
+            with self.subTest(case=case):
+                if case == "not-json":
+                    evidence_path.write_text("{", encoding="utf-8")
+                else:
+                    value = json.loads(json.dumps(valid))
+                    mutate(value)
+                    evidence_path.write_text(json.dumps(value), encoding="utf-8")
+                self.assertEqual(
+                    self._promoted_capability(config),
+                    (LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_EVIDENCE_INVALID),
+                )
+
+        evidence_path.write_text(json.dumps(valid), encoding="utf-8")
+        drifted = self._config(server_overrides={"batch_size": 1024})
+        self.assertEqual(
+            self._promoted_capability(drifted),
+            (LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_IDENTITY_MISMATCH),
+        )
+        self.assertEqual(
+            self._promoted_capability(config),
+            ("gpu_model_serving_validated", model_backed.MODEL_BACKED_VALIDATED),
+        )
+
+    def test_evidence_source_must_be_a_real_archived_e_final(self) -> None:
+        config = self._config()
+        source = self.root / self.evidence_relative
+        cases = {
+            "evidence_source_path_invalid": "eval-data/models/fixture.gguf",
+            "evidence_source_missing": (
+                "eval-data/runs/20260812-000000000-tb-rondo-r1/"
+                "guardian-evidence/0001/E_final.json"
+            ),
+        }
+        for code, relative in cases.items():
+            with self.subTest(code=code):
+                with self.assertRaises(qualification.QualificationError) as raised:
+                    self._run(config, evidence_relative_path=relative)
+                self.assertEqual(raised.exception.code, code)
+
+        meta_path = source.parent / "meta.json"
+        meta = json.loads(meta_path.read_bytes())
+        meta["guardian_source_commit"] = "not-a-commit"
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(config)
+        self.assertEqual(raised.exception.code, "evidence_meta_invalid")
+        self.assertFalse((self.root / model_backed.EVIDENCE_RELATIVE_PATH).exists())
+
+    def test_service_build_identity_is_exact_for_each_frozen_backend(self) -> None:
+        self.assertEqual(model_backed.CUDA_SERVICE_BUILD_INFO, "b1-0865990")
+        self.assertEqual(model_backed.CPU_SERVICE_BUILD_INFO, "b10333-08659901c")
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        for binary, served, accepted in (
+            (model_backed.CUDA_SERVER_RELATIVE_PATH, "b1-0865990", True),
+            (model_backed.CUDA_SERVER_RELATIVE_PATH, "b10333-08659901c", False),
+            ("eval-data/tools/llama-b10333/llama-server", "b10333-08659901c", True),
+            ("eval-data/tools/llama-b10333/llama-server", "b1-0865990", False),
+        ):
+            with self.subTest(binary=binary, served=served):
+                with FakeApprovalServer(
+                    model_path=os.fspath(model), build_info=served
+                ) as fake:
+                    config = RuntimeConfig(
+                        self.paths,
+                        _local_data(
+                            fake.base_url,
+                            model_path_value=os.fspath(model),
+                            model_sha256_value=digest,
+                            server_overrides={"binary": binary},
+                        ),
+                        "0" * 64,
+                    )
+                    client = LocalApprovalClient(config)
+                    verify = lambda: client.verify_service_identity(  # noqa: E731
+                        model,
+                        expected_build_info=model_backed.service_build_info(client.settings),
+                    )
+                    if accepted:
+                        verify()
+                    else:
+                        with self.assertRaises(StructuredOutputError):
+                            verify()
 
 
 if __name__ == "__main__":

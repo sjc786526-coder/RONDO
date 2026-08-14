@@ -58,24 +58,34 @@
   launcher 实例；redirect、receipt 替换、进程/监听者变化都 fail-closed。这是轻量实例身份
   约束，不是签名或权限系统，也不证明 server 实际加载了 receipt 所声明的全部字节，或 launcher 退出后
   server 必然随之退出。
-- CUDA lock 的 model-backed structured output 仍为 `not_run`；正式 launcher 对
-  `linux_cuda_built_model_unvalidated` 继续在进程启动前拒绝。模型未加载、未推理、未量 model-backed 显存/
-  上下文/首 token/总耗时，4k/8k 与 L3/L4 保持待后续阶段。
+- **model-backed 资格设施已就绪，但 4k 合同被实测证伪**。受限 qualification 入口、版本化 model-backed evidence
+  与单向 capability 投影已落地：正式 launcher 在证据缺失、无效或身份不匹配时一律在进程启动前拒绝，
+  CUDA source build 与 CPU release 的服务身份分别精确绑定 `b1-0865990` 与 `b10333-08659901c`。
+  2026-08-14 真实模型已首次成功加载：exact GGUF 装载、服务身份与 `/props` 上下文 4096 均通过核验。
+  但**现存最小真实 `E_final` 的 static payload 经本模型 tokenizer 实测为 5,313 token**，超过 4096 上下文，
+  llama.cpp 按合同返回 exceed-context 错误，因此没有产生结构化判定，未写入任何证据，
+  能力保持 `linux_cuda_built_model_unvalidated`、CUDA lock 的 `model_backed_structured_output` 保持 `not_run`。
+  显存峰值、首 token 与总耗时随该失败一并作废，尚无 model-backed 指标。
+- **上下文预算是当前唯一阻塞点，需先定案再继续**。47 条真实 `E_final` 的 static payload 全部由同一条 18,446 字符
+  Guardian policy 加任务证据组成，最小约 25.5k 字符（5,313 token），最大约 75k 字符。8k baseline 只能容纳分布的低端，
+  不足以覆盖全部真实证据。可选方向（未决，由人选择）：提高服务上下文、对证据做可复核的压缩/裁剪口径，
+  或把真实 `E_final` 锚点降级为合成短证据为主。该决定同时影响 L3/L4 的可回放范围。
 - **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
   单文件下载/校验和 8GB 两阶段上下文方案。2026-08-13 唯一 GGUF 已通过普通文件、精确
   `5,198,387,456` bytes 与 SHA-256 `7deb50ec…54802a` 校验；Git 未跟踪，真实 ignored 配置未写入，模型从未加载。
-  当前真实 ignored `rondo.local.toml` 仍是旧合同，直接运行 doctor 会因 `local_model context_size is outside its allowed
-  range` 返回 `configuration_error`；已验的 `linux_cuda_built_model_unvalidated` 来自受跟踪示例配置的 model-free
-  复现，不表示机器配置或模型服务就绪。冻结选择见 2026-08-12 快照，本次下载/CUDA 证据见 2026-08-13 快照。
-  exact-GGUF model-backed 4k smoke 仍是 `gpu_model_serving_validated` 的硬前置，8k baseline 随后单独验收。
+  真实 ignored `rondo.local.toml` 已于 2026-08-14 迁移到 exact GGUF 与 4k `auto`/`fit=on` 合同，
+  `providers`、`paid_eval` 与价格配置未变、权限仍为 0600；doctor 现返回 `configuration: valid` 与
+  `linux_cuda_built_model_unvalidated`。冻结选择见 2026-08-12 快照，下载/CUDA 证据见 2026-08-13 快照。
+  真实 model-backed 结构化输出仍是 `gpu_model_serving_validated` 的硬前置。
 
 ### 当前推进顺序
 
-1. 把真实 ignored 配置迁移到当前合同并只做配置/doctor 核验。
-2. 使用唯一已静态验收的 GGUF 完成 4k model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出。
-3. 4k 通过后，连同 L7 的“仅改配置切换”一起形成 **Local M3**；8k 是后续**独立**验证项，
-   失败不否定 4k 可用结论，也不得靠弱化 identity 或输出校验凑绿。
+1. 定案本地审批的上下文预算与真实 `E_final` 的可服务口径（当前唯一阻塞点，见上文）。
+2. 按定案后的合同完成 model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出；
+   资格设施、证据 schema 与 capability 投影已就绪，只需按新合同重跑并生成版本化证据。
+3. 通过后，连同 L7 的“仅改配置切换”一起形成 **Local M3**；不同上下文档位互相独立验收，
+   任一档位失败不得靠弱化 identity 或输出校验凑绿。
 4. **L5a**：用冻结 prompt、人在场经开发用 Codex 生成第一批 Sol 教师标签。
 5. 跑 L3/L4：程序化批量运行 `Local-static`，对照导入的教师标签，固化指标口径，得到未微调 baseline。
 6. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
@@ -141,7 +151,8 @@
   忽略且权限收紧的 `.env.local` 按变量名加载，不进入 TOML、命令行、日志或工件。linked worktree 的加载器
   必须通过 Git common dir 定位主仓库根，复用同一份本机配置，不在各 worktree 复制密钥。
 - 硬件约束（RTX 4060 Laptop 8GB VRAM）：8B 级模型 Q4 权重约 4.8GB，剩余显存要留给 KV cache；
-  **上下文预算必须实测**。当前合同是 4k 原生 auto+fit smoke 先行，8k all+fit-off baseline 随后单独验收。
+  **上下文预算必须实测**。已实测：4k 装不下任何现存真实 `E_final`（最小 5,313 token），
+  上下文档位需求由证据长度而非显存先决定，再与显存预算求交。
 - 验收：本地服务能对一条**真实** `E_final` 返回合规结构化判定，并记录显存峰值、首 token 延迟、总耗时。
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）

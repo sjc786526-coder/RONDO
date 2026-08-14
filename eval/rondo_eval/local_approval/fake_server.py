@@ -8,7 +8,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Mapping, Sequence
 
-from .launcher import LLAMA_CPP_BUILD, LLAMA_CPP_COMMIT
+from .model_backed import CPU_SERVICE_BUILD_INFO
 
 
 _MAX_REQUEST_BYTES = 1_048_576
@@ -27,6 +27,7 @@ class FakeApprovalServer:
         get_redirect_to: str | None = None,
         model_id: str = "rondo-local-approval",
         model_path: str = "/fake/model.gguf",
+        build_info: str = CPU_SERVICE_BUILD_INFO,
         on_decision: Callable[[], None] | None = None,
     ):
         self.decision = dict(
@@ -39,6 +40,7 @@ class FakeApprovalServer:
         self.get_redirect_to = get_redirect_to
         self.model_id = model_id
         self.model_path = model_path
+        self.build_info = build_info
         self.on_decision = on_decision
         self.requests: list[dict[str, Any]] = []
         self.authorization_seen: list[bool] = []
@@ -96,7 +98,7 @@ def _handler_type(fake: FakeApprovalServer):
                     200,
                     {
                         "role": "router",
-                        "build_info": f"build {LLAMA_CPP_BUILD} ({LLAMA_CPP_COMMIT[:8]})",
+                        "build_info": fake.build_info,
                         "model_path": fake.model_path,
                     },
                 )
