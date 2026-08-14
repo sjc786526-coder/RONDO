@@ -473,12 +473,10 @@ class PreflightReceipt:
                 reasons=("preflight_receipt_bundles_invalid",),
             )
         roles = [role for role, _contract in self.contracts]
-        if not roles or len(set(roles)) != len(roles) or any(
-            role not in _ROLES for role in roles
-        ):
+        if set(roles) != _ROLES or len(roles) != len(_ROLES):
             raise FairComparisonError(
-                "preflight receipt roles are invalid",
-                reasons=("preflight_receipt_roles_invalid",),
+                "preflight receipt does not cover every paid request role",
+                reasons=("preflight_receipt_roles_incomplete",),
             )
 
     def require_binding(
@@ -624,10 +622,10 @@ def preflight_receipt_from_stub_run(
             reasons=("preflight_stub_sides_incomplete",),
         )
     roles = {side: set(values) for side, values in requests_by_side.items()}
-    if roles[Side.RONDO] != roles[Side.CODEX] or not roles[Side.RONDO]:
+    if roles[Side.RONDO] != _ROLES or roles[Side.CODEX] != _ROLES:
         raise FairComparisonError(
-            "both sides must produce the same request roles",
-            reasons=("preflight_stub_roles_differ",),
+            "both sides must produce every paid request role",
+            reasons=("preflight_stub_roles_incomplete",),
         )
     preflight = SymmetryPreflight(allow_upstream=False)
     for side in (Side.RONDO, Side.CODEX):

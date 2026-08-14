@@ -410,7 +410,24 @@ def _worker_step_main(args: argparse.Namespace) -> int:
     config = load_runtime_config(paths)
     provider = config.paid_provider_projection()
     identity.validate_provider(provider)
-    eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
+    expected_harness_commit = (
+        identity.comparison_conditions.eval_harness_commit
+        if identity.enforces_fair_comparison
+        else None
+    )
+    eval_harness_commit = validate_eval_harness_checkout(
+        common_root=paths.common_root,
+        expected_commit=expected_harness_commit,
+    )
+    if identity.enforces_fair_comparison:
+        try:
+            identity.require_declared_conditions(
+                eval_harness_commit=eval_harness_commit
+            )
+        except ValueError as exc:
+            raise CampaignExecutionError(
+                f"campaign comparison conditions drifted: {exc}"
+            ) from exc
     results_root = validate_results_worktree(
         args.results_worktree_root,
         common_root=paths.common_root,
@@ -2269,7 +2286,13 @@ def _execute_task_slot(
         raise CampaignExecutionError("remaining campaign budget cannot fit the next request")
     _sample_storage(counter, slot.run_id, baseline=storage_baseline)
     identity.validate_provider(config.paid_provider_projection())
-    if validate_eval_harness_checkout(common_root=paths.common_root) != eval_harness_commit:
+    if (
+        validate_eval_harness_checkout(
+            common_root=paths.common_root,
+            expected_commit=eval_harness_commit,
+        )
+        != eval_harness_commit
+    ):
         raise CampaignExecutionError("eval harness drifted during the campaign")
     if (
         validate_measurement_checkout(

@@ -59,6 +59,22 @@ _PRIVATE_EVIDENCE_FILES = (
     "verifier/reward.txt",
     "verifier/test-stdout.txt",
 )
+_EVAL_HARNESS_PATHS = (
+    "eval/rondo_eval",
+    "eval/pyproject.toml",
+    "eval/seccomp",
+    "eval/tasksets",
+    "eval/templates",
+    "eval/uv.lock",
+    "justfile",
+    "mydev/scripts/build-watchdog-lib.sh",
+    "mydev/scripts/with-build-lock.sh",
+    "rondo.secrets.example.env",
+)
+_ACTIVE_CAMPAIGN_POINTER = "eval/locks/p2-b7-active.json"
+_CAMPAIGN_IDENTITY_LOCK = re.compile(
+    r"eval/locks/p2-b7-canary-baseline-v[1-9][0-9]*\.json\Z"
+)
 
 
 class HarborResultError(ValueError):
@@ -121,8 +137,17 @@ def validate_results_worktree(path: Path, *, common_root: Path) -> Path:
     return resolved
 
 
-def validate_eval_harness_checkout(*, common_root: Path) -> str:
-    """Bind the externally loaded eval harness to one clean repository commit."""
+def validate_eval_harness_checkout(
+    *, common_root: Path, expected_commit: str | None = None
+) -> str:
+    """Bind the loaded harness code to a clean committed projection.
+
+    A newly generated campaign lock and its active pointer are tracked files, so
+    committing them necessarily advances ``HEAD`` beyond the commit named by the
+    lock.  For a fair-comparison campaign, accept that descendant only when the
+    executable harness projection is unchanged and clean.  Callers without an
+    expected commit retain the historical whole-worktree clean check.
+    """
 
     root = Path(__file__).resolve().parents[3]
     try:
@@ -131,12 +156,77 @@ def validate_eval_harness_checkout(*, common_root: Path) -> str:
         raise HarborResultError("eval harness checkout is unavailable") from exc
     if harness_paths.worktree_root != root or harness_paths.common_root != common_root:
         raise HarborResultError("eval harness checkout is outside this RONDO repository")
-    if _git(root, "status", "--porcelain=v1", "--untracked-files=all"):
-        raise HarborResultError("eval harness checkout is dirty")
     relative_source = Path(__file__).resolve().relative_to(root).as_posix()
     if _git_result(root, "ls-files", "--error-unmatch", relative_source).returncode != 0:
         raise HarborResultError("eval harness source is not tracked")
-    return _git(root, "rev-parse", "HEAD")
+    head = _git(root, "rev-parse", "HEAD")
+    if expected_commit is None:
+        if _git(root, "status", "--porcelain=v1", "--untracked-files=all"):
+            raise HarborResultError("eval harness checkout is dirty")
+        return head
+    return _validate_eval_harness_projection(
+        root, expected_commit=expected_commit, head=head
+    )
+
+
+def _validate_eval_harness_projection(
+    root: Path, *, expected_commit: str, head: str
+) -> str:
+    """Validate the committed harness slice while ignoring identity-only commits."""
+
+    if not _is_commit(expected_commit):
+        raise HarborResultError("expected eval harness commit is invalid")
+    ancestor = _git_result(root, "merge-base", "--is-ancestor", expected_commit, head)
+    if ancestor.returncode != 0:
+        raise HarborResultError("expected eval harness commit is not an ancestor")
+    if _git(root, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise HarborResultError("eval harness checkout is dirty")
+    _validate_identity_only_lock_changes(
+        root, expected_commit=expected_commit, head=head
+    )
+    projection = _git_result(
+        root,
+        "diff",
+        "--quiet",
+        expected_commit,
+        head,
+        "--",
+        *_EVAL_HARNESS_PATHS,
+    )
+    if projection.returncode == 1:
+        raise HarborResultError("eval harness projection differs from the campaign")
+    if projection.returncode != 0:
+        raise HarborResultError("eval harness projection is unavailable")
+    return expected_commit
+
+
+def _validate_identity_only_lock_changes(
+    root: Path, *, expected_commit: str, head: str
+) -> None:
+    """Allow only a newly added campaign identity and its active pointer."""
+
+    result = _git_result(
+        root,
+        "diff",
+        "--name-status",
+        "--no-renames",
+        expected_commit,
+        head,
+        "--",
+        "eval/locks",
+    )
+    if result.returncode != 0:
+        raise HarborResultError("eval lock projection is unavailable")
+    for line in result.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 2:
+            raise HarborResultError("eval lock projection is unavailable")
+        status, path = fields
+        if path == _ACTIVE_CAMPAIGN_POINTER and status in {"A", "M"}:
+            continue
+        if status == "A" and _CAMPAIGN_IDENTITY_LOCK.fullmatch(path):
+            continue
+        raise HarborResultError("historical eval lock projection differs")
 
 
 def parse_single_task_result(

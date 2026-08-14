@@ -6,22 +6,25 @@ import contextlib
 import inspect
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from rondo_eval.api_budget_proxy import (
+    GUARDIAN_OUTPUT_SCHEMA,
     LoopbackResponsesProxy,
     ModelPricing,
     PersistentBudgetLedger,
 )
 from rondo_eval import preflight_cli
 from rondo_eval.config import RepoPaths
-from rondo_eval.contracts import ContractError, Product, Side, product_for_side
+from rondo_eval.contracts import ContractError, Product, RunSpec, Side, product_for_side
 from rondo_eval.terminal_bench.baseline import (
     BASE_ROUNDS,
     CampaignLockRegistration,
@@ -56,13 +59,20 @@ from rondo_eval.fair_comparison import (
     task_independent_contract,
     valid_task_id,
 )
-from rondo_eval.terminal_bench import baseline_cli, baseline_identity, preflight_producer
+from rondo_eval.terminal_bench import (
+    baseline_cli,
+    baseline_identity,
+    preflight_producer,
+    results as results_module,
+)
 from rondo_eval.terminal_bench.baseline_cli import CampaignExecutionError
 from rondo_eval.terminal_bench.baseline_identity import (
     CampaignIdentityGenerationError,
     generate_successor_lock,
     validate_successor_run_range,
 )
+from rondo_eval.terminal_bench.results import HarborResultError
+from rondo_eval.terminal_bench.runner import PreparedTerminalBenchRun
 
 
 MAIN_PRICING = ModelPricing(
@@ -148,6 +158,14 @@ def _request(
     }
     if guardian:
         body["model"] = GUARDIAN_PRICING.model_id
+        body["text"] = {
+            "format": {
+                "type": "json_schema",
+                "name": "codex_output_schema",
+                "strict": True,
+                "schema": GUARDIAN_OUTPUT_SCHEMA,
+            }
+        }
     return body
 
 
@@ -1000,8 +1018,14 @@ class PreflightReceiptTests(unittest.TestCase):
             "task_id": "terminal-bench/fix-git",
             "bundle_manifest_sha256": dict(self.bundles),
             "requests_by_side": {
-                Side.RONDO: {"main": _request(prompt="rondo")},
-                Side.CODEX: {"main": _request(prompt="codex")},
+                Side.RONDO: {
+                    "main": _request(prompt="rondo"),
+                    "guardian": _request(prompt="rondo guardian", guardian=True),
+                },
+                Side.CODEX: {
+                    "main": _request(prompt="codex"),
+                    "guardian": _request(prompt="codex guardian", guardian=True),
+                },
             },
         }
         values.update(overrides)
@@ -1009,19 +1033,25 @@ class PreflightReceiptTests(unittest.TestCase):
 
     def test_a_stub_run_freezes_the_contract_for_both_sides(self) -> None:
         receipt = self._receipt()
-        self.assertEqual([role for role, _c in receipt.contracts], ["main"])
+        self.assertEqual(
+            [role for role, _c in receipt.contracts], ["guardian", "main"]
+        )
         self.assertEqual(dict(receipt.bundle_manifest_sha256), self.bundles)
 
     def test_an_asymmetric_stub_run_produces_no_receipt(self) -> None:
         with self.assertRaises(FairComparisonError) as caught:
             self._receipt(
                 requests_by_side={
-                    Side.RONDO: {"main": _request()},
+                    Side.RONDO: {
+                        "main": _request(),
+                        "guardian": _request(guardian=True),
+                    },
                     Side.CODEX: {
                         "main": _request(
                             developer_text="# Policy\nfrozen policy text\n"
                             "# AdditionalTools\nspawn_agent: models are alpha"
-                        )
+                        ),
+                        "guardian": _request(guardian=True),
                     },
                 }
             )
@@ -1033,7 +1063,13 @@ class PreflightReceiptTests(unittest.TestCase):
         receipt = self._receipt()
         preflight = SymmetryPreflight(require_expectation=True)
         receipt.seed(preflight)
-        self.assertEqual(preflight.seeded_keys, (("terminal-bench/fix-git", "main"),))
+        self.assertEqual(
+            preflight.seeded_keys,
+            (
+                ("terminal-bench/fix-git", "guardian"),
+                ("terminal-bench/fix-git", "main"),
+            ),
+        )
         # The first arrival is no longer free: it must match the frozen contract.
         with self.assertRaises(FairComparisonError) as caught:
             preflight.register(
@@ -1064,6 +1100,18 @@ class PreflightReceiptTests(unittest.TestCase):
             )
         self.assertEqual(
             caught.exception.reasons, ("preflight_expectation_missing",)
+        )
+
+    def test_a_main_only_stub_run_cannot_freeze_a_paid_receipt(self) -> None:
+        with self.assertRaises(FairComparisonError) as caught:
+            self._receipt(
+                requests_by_side={
+                    Side.RONDO: {"main": _request()},
+                    Side.CODEX: {"main": _request()},
+                }
+            )
+        self.assertEqual(
+            caught.exception.reasons, ("preflight_stub_roles_incomplete",)
         )
 
     def test_binding_rejects_reuse_across_campaign_task_or_binary(self) -> None:
@@ -1417,8 +1465,14 @@ class NamespacedTaskIdTests(unittest.TestCase):
             task_id=task_id,
             bundle_manifest_sha256={"rondo": "1" * 64, "codex": "2" * 64},
             requests_by_side={
-                Side.RONDO: {"main": _request(prompt="rondo body")},
-                Side.CODEX: {"main": _request(prompt="codex body")},
+                Side.RONDO: {
+                    "main": _request(prompt="rondo body"),
+                    "guardian": _request(prompt="rondo guardian", guardian=True),
+                },
+                Side.CODEX: {
+                    "main": _request(prompt="codex body"),
+                    "guardian": _request(prompt="codex guardian", guardian=True),
+                },
             },
         )
         restored = PreflightReceipt.from_dict(receipt.to_dict())
@@ -1465,6 +1519,13 @@ class PreflightProducerTests(unittest.TestCase):
     def _paths(self, root: Path) -> RepoPaths:
         return replace(RepoPaths.discover(Path.cwd()), common_root=root)
 
+    @staticmethod
+    def _captured_requests(side: Side) -> dict[str, dict[str, object]]:
+        return {
+            "main": _request(prompt=side.value),
+            "guardian": _request(prompt=f"{side.value} guardian", guardian=True),
+        }
+
     def test_the_stub_server_captures_bodies_and_refuses_unauthorized_calls(self) -> None:
         with preflight_producer.PreflightCaptureServer() as server:
             base = server.docker_base_url.replace(
@@ -1492,8 +1553,37 @@ class PreflightProducerTests(unittest.TestCase):
                 timeout=10,
             )
             self.assertEqual(response.status, 200)
-            self.assertIn(b"response.completed", response.read())
-            self.assertEqual(server.bodies, (body,))
+            first = response.read()
+            self.assertIn(b'"name":"exec_command"', first)
+            second = urlopen(
+                Request(
+                    f"{base}/responses",
+                    data=body,
+                    method="POST",
+                    headers={
+                        "Authorization": (
+                            f"Bearer {preflight_producer.PREFLIGHT_STUB_BEARER}"
+                        )
+                    },
+                ),
+                timeout=10,
+            ).read()
+            self.assertIn(b'\\"outcome\\":\\"allow\\"', second)
+            third = urlopen(
+                Request(
+                    f"{base}/responses",
+                    data=body,
+                    method="POST",
+                    headers={
+                        "Authorization": (
+                            f"Bearer {preflight_producer.PREFLIGHT_STUB_BEARER}"
+                        )
+                    },
+                ),
+                timeout=10,
+            ).read()
+            self.assertIn(b"preflight", third)
+            self.assertEqual(server.bodies, (body, body, body))
             self.assertEqual(server.rejections, ("unauthorized",))
 
     def test_it_writes_one_bound_receipt_per_task(self) -> None:
@@ -1509,7 +1599,7 @@ class PreflightProducerTests(unittest.TestCase):
                 lock_guard=None,
                 lease=None,
                 config=None,
-                capture=lambda **kwargs: {"main": _request(prompt=kwargs["side"].value)},
+                capture=lambda **kwargs: self._captured_requests(kwargs["side"]),
             )
             self.assertEqual(len(written), 2)
             for path, task_id in zip(written, self.tasks):
@@ -1547,14 +1637,15 @@ class PreflightProducerTests(unittest.TestCase):
                                 if kwargs["side"] is Side.RONDO
                                 else "drifted"
                             )
-                        )
+                        ),
+                        "guardian": _request(guardian=True),
                     },
                 )
             self.assertEqual(
                 list((paths.common_root / "eval-data/campaigns").rglob("*.json")), []
             )
 
-    def test_a_receipt_is_never_silently_overwritten(self) -> None:
+    def test_an_identical_existing_receipt_makes_a_retry_idempotent(self) -> None:
         identity = self._Identity(self.tasks[:1])
         with tempfile.TemporaryDirectory() as directory:
             paths = self._paths(Path(directory))
@@ -1566,13 +1657,140 @@ class PreflightProducerTests(unittest.TestCase):
                 "lock_guard": None,
                 "lease": None,
                 "config": None,
-                "capture": lambda **kwargs: {"main": _request()},
+                "capture": lambda **kwargs: self._captured_requests(kwargs["side"]),
             }
-            preflight_producer.produce_preflight_receipts(paths, **arguments)
+            first = preflight_producer.produce_preflight_receipts(paths, **arguments)
+            second = preflight_producer.produce_preflight_receipts(paths, **arguments)
+            self.assertEqual(first, second)
+
+    def test_a_conflicting_existing_receipt_is_never_overwritten(self) -> None:
+        identity = self._Identity(self.tasks)
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._paths(Path(directory))
+            arguments = {
+                "identity": identity,
+                "seccomp_profile": Path("/dev/null"),
+                "manifests": {Side.RONDO: object(), Side.CODEX: object()},
+                "counter": None,
+                "lock_guard": None,
+                "lease": None,
+                "config": None,
+                "capture": lambda **kwargs: self._captured_requests(kwargs["side"]),
+            }
+            written = preflight_producer.produce_preflight_receipts(paths, **arguments)
+            written[0].unlink()
+            written[1].write_text("{}\n", encoding="utf-8")
             with self.assertRaisesRegex(
-                preflight_producer.PreflightProductionError, "already exists"
+                preflight_producer.PreflightProductionError, "different bytes"
             ):
                 preflight_producer.produce_preflight_receipts(paths, **arguments)
+            self.assertFalse(written[0].exists())
+            self.assertEqual(written[1].read_text(encoding="utf-8"), "{}\n")
+
+    def test_a_later_task_failure_publishes_no_half_batch(self) -> None:
+        identity = self._Identity(self.tasks)
+
+        def capture(**kwargs: object) -> dict[str, dict[str, object]]:
+            side = kwargs["side"]
+            assert isinstance(side, Side)
+            captured = self._captured_requests(side)
+            task = kwargs["task"]
+            if getattr(task, "task_id") == self.tasks[1] and side is Side.CODEX:
+                captured["main"] = _request(instructions="drifted")
+            return captured
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._paths(Path(directory))
+            with self.assertRaisesRegex(
+                preflight_producer.PreflightProductionError, "asymmetric on the stub"
+            ):
+                preflight_producer.produce_preflight_receipts(
+                    paths,
+                    identity=identity,
+                    seccomp_profile=Path("/dev/null"),
+                    manifests={Side.RONDO: object(), Side.CODEX: object()},
+                    counter=None,
+                    lock_guard=None,
+                    lease=None,
+                    config=None,
+                    capture=capture,
+                )
+            self.assertEqual(
+                list((paths.common_root / "eval-data/campaigns").rglob("*.json")), []
+            )
+
+    def test_stub_projection_uses_the_real_prepared_run_shape(self) -> None:
+        identity = _CampaignFixture.v7()
+        task = identity.catalog.tasks[0]
+        provider = SimpleNamespace(
+            main_model="main-model",
+            guardian_model="guardian-model",
+            main_effort="medium",
+            guardian_effort="low",
+        )
+        spec = RunSpec(
+            side=Side.RONDO,
+            batch_id=identity.batch_id,
+            task_id=task.task_id,
+            task_image_digest=task.image_digest,
+            binary=object(),  # type: ignore[arg-type]
+            terminal_bench_version="0.20.0",
+            provider=provider,  # type: ignore[arg-type]
+        )
+        prepared = PreparedTerminalBenchRun(
+            spec=spec,
+            command=object(),  # type: ignore[arg-type]
+            adapter=object(),  # type: ignore[arg-type]
+            materialized_task=object(),  # type: ignore[arg-type]
+        )
+        request = SimpleNamespace(
+            seccomp_profile_source_sha256=identity.no_api_seccomp["source_sha256"],
+            seccomp_profile_effective_sha256=identity.no_api_seccomp[
+                "effective_sha256"
+            ],
+            frozen_model_catalog_sha256=identity.catalog_identity["sha256"],
+        )
+        preflight_producer._validate_stub_projection(
+            prepared,
+            request=request,
+            identity=identity,
+            task=task,
+            provider=provider,
+        )
+
+    def test_role_capture_requires_the_complete_stable_approval_trajectory(self) -> None:
+        provider = SimpleNamespace(
+            main_model=MAIN_PRICING.model_id,
+            main_effort="low",
+            guardian_model=GUARDIAN_PRICING.model_id,
+            guardian_effort="low",
+        )
+        main = _request()
+        guardian = _request(guardian=True)
+        bodies = tuple(
+            json.dumps(request).encode("utf-8")
+            for request in (main, guardian, _request(prompt="after approval"))
+        )
+        self.assertEqual(
+            set(preflight_producer._requests_by_role(bodies, provider=provider)),
+            {"main", "guardian"},
+        )
+        with self.assertRaisesRegex(
+            preflight_producer.PreflightProductionError, "main-Guardian-main"
+        ):
+            preflight_producer._requests_by_role(bodies[:2], provider=provider)
+        drifted = (
+            bodies[0],
+            bodies[1],
+            json.dumps(_request(instructions="drifted after approval")).encode(
+                "utf-8"
+            ),
+        )
+        with self.assertRaisesRegex(
+            preflight_producer.PreflightProductionError,
+            "contract drifted after Guardian",
+        ):
+            preflight_producer._requests_by_role(drifted, provider=provider)
 
     def test_historical_campaigns_cannot_produce_receipts(self) -> None:
         identity = _CampaignFixture.v6()
@@ -1613,6 +1831,107 @@ class CampaignStartupReceiptGateTests(unittest.TestCase):
         source = inspect.getsource(baseline_cli._worker_step_main)
         self.assertIn("_require_all_preflight_receipts", source)
         self.assertNotIn("_execute_wire_canary", source)
+        self.assertLess(
+            source.index("identity.require_declared_conditions"),
+            source.index("_require_all_preflight_receipts"),
+        )
+
+
+class EvalHarnessLifecycleTests(unittest.TestCase):
+    """An identity-only commit may advance HEAD without changing harness code."""
+
+    @staticmethod
+    def _git(root: Path, *args: str) -> str:
+        completed = subprocess.run(
+            ("git", *args),
+            cwd=root,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return completed.stdout.strip()
+
+    def test_generated_identity_can_be_committed_and_consumed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.name", "RONDO test")
+            self._git(root, "config", "user.email", "rondo-test@example.invalid")
+            (root / "eval/rondo_eval").mkdir(parents=True)
+            (root / "eval/locks").mkdir(parents=True)
+            (root / "eval/rondo_eval/harness.py").write_text("VALUE = 1\n")
+            (root / "eval/locks/p2-b7-canary-baseline-v22.json").write_text(
+                "{}\n"
+            )
+            (root / "eval/pyproject.toml").write_text("[project]\nname='test'\n")
+            (root / "eval/uv.lock").write_text("version = 1\n")
+            (root / "justfile").write_text("test:\n    true\n")
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-qm", "harness")
+            harness_commit = self._git(root, "rev-parse", "HEAD")
+
+            (root / "eval/locks/p2-b7-canary-baseline-v23.json").write_text("{}\n")
+            (root / "eval/locks/p2-b7-active.json").write_text("{}\n")
+            with self.assertRaisesRegex(HarborResultError, "checkout is dirty"):
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=harness_commit,
+                )
+            self._git(root, "add", "eval/locks")
+            self._git(root, "commit", "-qm", "identity")
+            identity_commit = self._git(root, "rev-parse", "HEAD")
+
+            self.assertEqual(
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=identity_commit,
+                ),
+                harness_commit,
+            )
+            historical = root / "eval/locks/p2-b7-canary-baseline-v22.json"
+            historical.write_text('{"drifted":true}\n')
+            self._git(root, "add", historical.relative_to(root).as_posix())
+            self._git(root, "commit", "-qm", "change historical lock")
+            with self.assertRaisesRegex(
+                HarborResultError, "historical eval lock projection differs"
+            ):
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=self._git(root, "rev-parse", "HEAD"),
+                )
+            historical.write_text("{}\n")
+            self._git(root, "add", historical.relative_to(root).as_posix())
+            self._git(root, "commit", "-qm", "restore historical lock")
+            restored_commit = self._git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=restored_commit,
+                ),
+                harness_commit,
+            )
+            (root / "eval/rondo_eval/harness.py").write_text("VALUE = 2\n")
+            with self.assertRaisesRegex(HarborResultError, "checkout is dirty"):
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=restored_commit,
+                )
+            self._git(root, "add", "eval/rondo_eval/harness.py")
+            self._git(root, "commit", "-qm", "change harness")
+            drifted_commit = self._git(root, "rev-parse", "HEAD")
+            with self.assertRaisesRegex(HarborResultError, "differs from the campaign"):
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=drifted_commit,
+                )
 
 
 class SuccessorRunRangeTests(unittest.TestCase):

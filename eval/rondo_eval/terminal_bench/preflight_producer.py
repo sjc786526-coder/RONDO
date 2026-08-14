@@ -41,7 +41,9 @@ from ..runtime_bridge import (
 from ..fair_comparison import (
     FairComparisonError,
     PreflightReceipt,
+    compare_task_independent,
     preflight_receipt_from_stub_run,
+    task_independent_contract,
 )
 from .baseline import CampaignIdentity, RUN_CAP_USD, load_campaign_identity
 from .baseline_cli import (
@@ -244,19 +246,57 @@ class PreflightCaptureServer:
 
 
 def _terminal_sse(number: int) -> bytes:
-    """Return an SSE stream that finishes the turn with no tool call."""
+    """Drive one bounded main -> Guardian -> main approval trajectory."""
 
     response_id = f"resp-rondo-preflight-{number}"
+    if number == 1:
+        output = {
+            "type": "function_call",
+            "name": "exec_command",
+            "call_id": "call-rondo-preflight-approval",
+            "arguments": json.dumps(
+                {
+                    "cmd": "true",
+                    "sandbox_permissions": "require_escalated",
+                    "justification": "Freeze the Guardian preflight contract.",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+    elif number == 2:
+        output = {
+            "type": "message",
+            "role": "assistant",
+            "id": "msg-rondo-preflight-guardian",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": json.dumps(
+                        {
+                            "risk_level": "low",
+                            "user_authorization": "high",
+                            "outcome": "allow",
+                            "rationale": "The preflight command is inert.",
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                }
+            ],
+        }
+    else:
+        output = {
+            "type": "message",
+            "role": "assistant",
+            "id": f"msg-rondo-preflight-{number}",
+            "content": [{"type": "output_text", "text": "preflight"}],
+        }
     events = (
         {"type": "response.created", "response": {"id": response_id}},
         {
             "type": "response.output_item.done",
-            "item": {
-                "type": "message",
-                "role": "assistant",
-                "id": f"msg-rondo-preflight-{number}",
-                "content": [{"type": "output_text", "text": "preflight"}],
-            },
+            "item": output,
         },
         {
             "type": "response.completed",
@@ -416,9 +456,9 @@ def _requests_by_role(
     *,
     provider: object,
 ) -> dict[str, dict[str, Any]]:
-    """Keep the first request of each role, classified the way the proxy does."""
+    """Require the exact approval trajectory and return its receipt roles."""
 
-    captured: dict[str, dict[str, Any]] = {}
+    observed: list[tuple[str, dict[str, Any]]] = []
     for body in bodies:
         metadata = _inspect_request(
             body,
@@ -429,11 +469,24 @@ def _requests_by_role(
             guardian_effort=provider.guardian_effort,
         )
         role = str(metadata["role"])
-        if role not in captured:
-            captured[role] = json.loads(body)
-    if "main" not in captured:
-        raise PreflightProductionError("preflight run produced no main request")
-    return captured
+        observed.append((role, json.loads(body)))
+    roles = tuple(role for role, _request in observed)
+    if roles != ("main", "guardian", "main"):
+        raise PreflightProductionError(
+            "preflight run did not complete the controlled main-Guardian-main trajectory"
+        )
+    first_main = observed[0][1]
+    final_main = observed[2][1]
+    reasons = compare_task_independent(
+        task_independent_contract(first_main),
+        task_independent_contract(final_main),
+    )
+    if reasons:
+        raise PreflightProductionError(
+            "preflight main request contract drifted after Guardian: "
+            + ";".join(reasons)
+        )
+    return {"main": first_main, "guardian": observed[1][1]}
 
 
 def produce_preflight_receipts(
@@ -457,7 +510,7 @@ def produce_preflight_receipts(
     run_capture = capture or (
         lambda **kwargs: asyncio.run(capture_side_requests(config, **kwargs))
     )
-    written: list[Path] = []
+    pending: list[tuple[Path, PreflightReceipt]] = []
     for task in identity.catalog.tasks:
         requests_by_side = {
             side: run_capture(
@@ -489,17 +542,21 @@ def produce_preflight_receipts(
                 f"{task.task_id} is asymmetric on the stub: {';'.join(exc.reasons)}"
             ) from exc
         destination = preflight_receipt_path(paths, identity, task.task_id)
+        pending.append((destination, receipt))
+    for destination, receipt in pending:
+        _require_receipt_publishable(destination, _receipt_bytes(receipt))
+    for destination, receipt in pending:
         _atomic_receipt(destination, receipt)
-        written.append(destination)
-    return written
+    return [destination for destination, _receipt in pending]
 
 
 def _atomic_receipt(path: Path, receipt: PreflightReceipt) -> None:
     """Write one receipt without ever leaving a partial file in place."""
 
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if path.exists() or path.is_symlink():
-        raise PreflightProductionError("preflight receipt already exists")
+    encoded = _receipt_bytes(receipt)
+    if _require_receipt_publishable(path, encoded):
+        return
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     descriptor = os.open(
         temporary,
@@ -507,9 +564,8 @@ def _atomic_receipt(path: Path, receipt: PreflightReceipt) -> None:
         0o600,
     )
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(receipt.to_dict(), handle, sort_keys=True, indent=2)
-            handle.write("\n")
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
@@ -522,6 +578,32 @@ def _atomic_receipt(path: Path, receipt: PreflightReceipt) -> None:
         if temporary.exists() and not temporary.is_symlink():
             temporary.unlink()
         raise
+
+
+def _receipt_bytes(receipt: PreflightReceipt) -> bytes:
+    return (json.dumps(receipt.to_dict(), sort_keys=True, indent=2) + "\n").encode(
+        "utf-8"
+    )
+
+
+def _require_receipt_publishable(path: Path, encoded: bytes) -> bool:
+    """Return whether an identical receipt exists; reject every conflict."""
+
+    if path.is_symlink():
+        raise PreflightProductionError("preflight receipt path is a symlink")
+    if path.exists():
+        try:
+            existing = path.read_bytes()
+        except OSError as exc:
+            raise PreflightProductionError(
+                "preflight receipt already exists but cannot be verified"
+            ) from exc
+        if existing == encoded:
+            return True
+        raise PreflightProductionError(
+            "preflight receipt already exists with different bytes"
+        )
+    return False
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -538,7 +620,14 @@ def main(argv: list[str] | None = None) -> int:
         paths = RepoPaths.discover(Path.cwd())
         identity = load_campaign_identity(paths)
         config = load_runtime_config(paths)
-        validate_eval_harness_checkout(common_root=paths.common_root)
+        expected_harness_commit = identity.comparison_conditions.eval_harness_commit
+        eval_harness_commit = validate_eval_harness_checkout(
+            common_root=paths.common_root,
+            expected_commit=expected_harness_commit,
+        )
+        identity.require_declared_conditions(
+            eval_harness_commit=eval_harness_commit
+        )
         validate_harbor_installation(
             load_historical_pair_identity(), executable=HARBOR_EXECUTABLE
         )
