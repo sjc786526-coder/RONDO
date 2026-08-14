@@ -336,8 +336,8 @@ async def capture_side_requests(
         DockerSupervisedHostHarborExecutor
     ),
     server_factory: Callable[[], PreflightCaptureServer] = PreflightCaptureServer,
-) -> dict[str, dict[str, Any]]:
-    """Run one side against the stub and return its ``{role: request}`` map."""
+) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Run one side and return its exact approval request trajectory."""
 
     provider = config.paid_provider_projection()
     identity.validate_provider(provider)
@@ -403,7 +403,7 @@ async def capture_side_requests(
         raise PreflightProductionError(
             f"preflight stub rejected a request: {rejections[0]}"
         )
-    return _requests_by_role(bodies, provider=provider)
+    return _request_trace(bodies, provider=provider)
 
 
 def _validate_stub_projection(
@@ -451,12 +451,12 @@ def _validate_stub_projection(
         )
 
 
-def _requests_by_role(
+def _request_trace(
     bodies: tuple[bytes, ...],
     *,
     provider: object,
-) -> dict[str, dict[str, Any]]:
-    """Require the exact approval trajectory and return its receipt roles."""
+) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Require and return the exact approval request trajectory."""
 
     observed: list[tuple[str, dict[str, Any]]] = []
     for body in bodies:
@@ -486,7 +486,7 @@ def _requests_by_role(
             "preflight main request contract drifted after Guardian: "
             + ";".join(reasons)
         )
-    return {"main": first_main, "guardian": observed[1][1]}
+    return tuple(observed)
 
 
 def produce_preflight_receipts(

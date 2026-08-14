@@ -21,15 +21,15 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from .api_budget_proxy import canonical_request_sha256
 from .contracts import Side
 
 
-TASK_INDEPENDENT_PROJECTION_VERSION = 1
+TASK_INDEPENDENT_PROJECTION_VERSION = 2
 CATALOG_PROJECTION_VERSION = 2
-PREFLIGHT_RECEIPT_SCHEMA_VERSION = 1
+PREFLIGHT_RECEIPT_SCHEMA_VERSION = 2
 
 # Terminal-Bench task IDs are namespaced -- ``terminal-bench/fix-git`` -- so the
 # separator has to be accepted or no real task could ever hold a receipt.  Each
@@ -98,31 +98,70 @@ def _plain_json(value: object) -> Any:
 def _stable_input_prefix(request: Mapping[str, Any]) -> list[Any]:
     """Return the leading developer/system items of ``input``.
 
-    Responses Lite carries the effective policy and the catalog-derived tool
-    descriptions in a developer message at the head of ``input`` rather than in
-    top-level ``instructions``.  Projecting only the top-level field would miss
-    exactly the class of asymmetry this gate exists to catch, so the leading
-    developer/system run is projected too.  The scan stops at the first item
-    that is not one -- the task body is a user message, so it is never
-    included.
+    Responses Lite carries the catalog-derived tools in ``additional_tools``
+    and the effective policy in a following developer message rather than in
+    the two top-level fields. Projecting only those fields would miss exactly
+    the class of asymmetry this gate exists to catch, so the leading stable run
+    is projected too. The scan stops at the first non-stable item -- the task
+    body is a user message, so it is never included.
     """
 
     items = request.get("input")
     if not isinstance(items, list):
         return []
+    additional_tools_positions = tuple(
+        index
+        for index, item in enumerate(items)
+        if isinstance(item, dict) and item.get("type") == "additional_tools"
+    )
+    if additional_tools_positions not in ((), (0,)):
+        raise FairComparisonError(
+            "Responses Lite additional_tools must appear exactly at input[0]",
+            reasons=("task_independent_stable_input_prefix_invalid",),
+        )
     prefix: list[Any] = []
-    for item in items:
+    for index, item in enumerate(items):
         if not isinstance(item, dict):
             break
-        if item.get("type") not in _STABLE_PREFIX_TYPES:
-            break
-        if item.get("role") not in _STABLE_PREFIX_ROLES:
+        item_type = item.get("type")
+        role = item.get("role")
+        if item_type == "additional_tools":
+            if (
+                index != 0
+                or role != "developer"
+                or not isinstance(item.get("tools"), list)
+            ):
+                raise FairComparisonError(
+                    "Responses Lite additional_tools prefix is invalid",
+                    reasons=("task_independent_stable_input_prefix_invalid",),
+                )
+        elif item_type in _STABLE_PREFIX_TYPES and role in _STABLE_PREFIX_ROLES:
+            pass
+        elif role in _STABLE_PREFIX_ROLES:
+            raise FairComparisonError(
+                "stable input prefix item type is invalid",
+                reasons=("task_independent_stable_input_prefix_invalid",),
+            )
+        else:
             break
         projected = _plain_json(item)
         for field in _TRANSPORT_ONLY_ITEM_FIELDS:
             projected.pop(field, None)
         prefix.append(projected)
     return prefix
+
+
+def _tool_specs(request: Mapping[str, Any], prefix: list[Any]) -> Any:
+    """Project tools from the standard or Responses Lite wire location."""
+
+    if prefix and prefix[0].get("type") == "additional_tools":
+        if "tools" in request or "instructions" in request:
+            raise FairComparisonError(
+                "Responses Lite request mixes top-level and input contracts",
+                reasons=("task_independent_stable_input_prefix_invalid",),
+            )
+        return _plain_json(prefix[0]["tools"])
+    return _plain_json(request.get("tools", []))
 
 
 def _sampling_contract(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -148,12 +187,13 @@ def project_task_independent(request: Mapping[str, Any]) -> dict[str, Any]:
         raise FairComparisonError("request must be a JSON object")
     text = request.get("text")
     output_schema = text.get("format") if isinstance(text, dict) else None
+    stable_input_prefix = _stable_input_prefix(request)
     partitions = {
         "sampling_contract": _sampling_contract(request),
-        "tool_specs": _plain_json(request.get("tools", [])),
+        "tool_specs": _tool_specs(request, stable_input_prefix),
         "instructions": _plain_json(request.get("instructions")),
         "output_schema": _plain_json(output_schema),
-        "stable_input_prefix": _stable_input_prefix(request),
+        "stable_input_prefix": stable_input_prefix,
     }
     if set(partitions) != set(TASK_INDEPENDENT_PARTITIONS):  # pragma: no cover
         raise FairComparisonError("task-independent partition set drifted")
@@ -238,6 +278,24 @@ class ObservedRequest:
     sequence: int
     full_request_sha256: str
     task_independent_digest: str
+
+
+@dataclass(frozen=True)
+class PreflightRequestDigest:
+    """One bounded full-request digest from the stub approval trajectory."""
+
+    side: Side
+    role: str
+    sequence: int
+    full_request_sha256: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "side": self.side.value,
+            "role": self.role,
+            "sequence": self.sequence,
+            "full_request_sha256": self.full_request_sha256,
+        }
 
 
 class NoUpstreamTransport:
@@ -441,6 +499,7 @@ class PreflightReceipt:
     projection_version: int
     bundle_manifest_sha256: tuple[tuple[str, str], ...]
     contracts: tuple[tuple[str, TaskIndependentContract], ...]
+    request_provenance: tuple[PreflightRequestDigest, ...]
 
     def validate(self) -> None:
         if self.schema_version != PREFLIGHT_RECEIPT_SCHEMA_VERSION:
@@ -477,6 +536,24 @@ class PreflightReceipt:
             raise FairComparisonError(
                 "preflight receipt does not cover every paid request role",
                 reasons=("preflight_receipt_roles_incomplete",),
+            )
+        expected_trace = tuple(
+            (side, role, sequence)
+            for side in (Side.RONDO, Side.CODEX)
+            for sequence, role in enumerate(("main", "guardian", "main"), start=1)
+        )
+        actual_trace = tuple(
+            (item.side, item.role, item.sequence) for item in self.request_provenance
+        )
+        if actual_trace != expected_trace or any(
+            isinstance(item.sequence, bool)
+            or not isinstance(item.sequence, int)
+            or not _SHA256.fullmatch(item.full_request_sha256 or "")
+            for item in self.request_provenance
+        ):
+            raise FairComparisonError(
+                "preflight receipt request provenance is invalid",
+                reasons=("preflight_receipt_provenance_invalid",),
             )
 
     def require_binding(
@@ -528,6 +605,9 @@ class PreflightReceipt:
             "contracts": {
                 role: contract.to_dict() for role, contract in self.contracts
             },
+            "request_provenance": [
+                item.to_dict() for item in self.request_provenance
+            ],
         }
 
     @classmethod
@@ -540,6 +620,7 @@ class PreflightReceipt:
             "projection_version",
             "bundle_manifest_sha256",
             "contracts",
+            "request_provenance",
         }:
             raise FairComparisonError(
                 "preflight receipt is not frozen",
@@ -547,7 +628,12 @@ class PreflightReceipt:
             )
         bundles = value["bundle_manifest_sha256"]
         contracts = value["contracts"]
-        if not isinstance(bundles, dict) or not isinstance(contracts, dict):
+        provenance = value["request_provenance"]
+        if (
+            not isinstance(bundles, dict)
+            or not isinstance(contracts, dict)
+            or not isinstance(provenance, list)
+        ):
             raise FairComparisonError(
                 "preflight receipt is not frozen",
                 reasons=("preflight_receipt_not_frozen",),
@@ -586,6 +672,33 @@ class PreflightReceipt:
                     ),
                 )
             )
+        parsed_provenance: list[PreflightRequestDigest] = []
+        for item in provenance:
+            if not isinstance(item, dict) or set(item) != {
+                "side",
+                "role",
+                "sequence",
+                "full_request_sha256",
+            }:
+                raise FairComparisonError(
+                    "preflight receipt request provenance is invalid",
+                    reasons=("preflight_receipt_provenance_invalid",),
+                )
+            try:
+                side = Side(str(item["side"]))
+            except ValueError as exc:
+                raise FairComparisonError(
+                    "preflight receipt request provenance is invalid",
+                    reasons=("preflight_receipt_provenance_invalid",),
+                ) from exc
+            parsed_provenance.append(
+                PreflightRequestDigest(
+                    side=side,
+                    role=str(item["role"]),
+                    sequence=item["sequence"],
+                    full_request_sha256=str(item["full_request_sha256"]),
+                )
+            )
         receipt = cls(
             schema_version=value["schema_version"],
             campaign_id=str(value["campaign_id"]),
@@ -596,6 +709,7 @@ class PreflightReceipt:
                 (str(side), str(digest)) for side, digest in sorted(bundles.items())
             ),
             contracts=tuple(parsed),
+            request_provenance=tuple(parsed_provenance),
         )
         receipt.validate()
         return receipt
@@ -607,13 +721,14 @@ def preflight_receipt_from_stub_run(
     campaign_lock_sha256: str,
     task_id: str,
     bundle_manifest_sha256: dict[str, str],
-    requests_by_side: Mapping[Side, Mapping[str, Mapping[str, Any]]],
+    requests_by_side: Mapping[Side, Sequence[tuple[str, Mapping[str, Any]]]],
 ) -> PreflightReceipt:
     """Freeze a receipt from the requests both sides produced against a stub.
 
-    ``requests_by_side`` maps each side to ``{role: request}``.  Both sides must
-    cover exactly the same roles and agree on every task-independent partition;
-    anything else raises instead of producing a receipt.
+    ``requests_by_side`` maps each side to its exact
+    ``main -> Guardian -> main`` sequence. Both sides must agree on every
+    task-independent partition; anything else raises instead of producing a
+    receipt. Full request digests are retained only as bounded provenance.
     """
 
     if set(requests_by_side) != {Side.RONDO, Side.CODEX}:
@@ -621,20 +736,47 @@ def preflight_receipt_from_stub_run(
             "a stub preflight must cover both sides",
             reasons=("preflight_stub_sides_incomplete",),
         )
-    roles = {side: set(values) for side, values in requests_by_side.items()}
-    if roles[Side.RONDO] != _ROLES or roles[Side.CODEX] != _ROLES:
+    expected_roles = ("main", "guardian", "main")
+    normalized: dict[Side, tuple[tuple[str, Mapping[str, Any]], ...]] = {}
+    for side in (Side.RONDO, Side.CODEX):
+        values = requests_by_side[side]
+        if not isinstance(values, Sequence) or any(
+            not isinstance(item, (list, tuple))
+            or len(item) != 2
+            or not isinstance(item[0], str)
+            or not isinstance(item[1], Mapping)
+            for item in values
+        ):
+            raise FairComparisonError(
+                "stub preflight request trajectory is invalid",
+                reasons=("preflight_stub_trajectory_incomplete",),
+            )
+        normalized[side] = tuple((item[0], item[1]) for item in values)
+    if any(
+        tuple(role for role, _request in normalized[side]) != expected_roles
+        for side in (Side.RONDO, Side.CODEX)
+    ):
         raise FairComparisonError(
-            "both sides must produce every paid request role",
-            reasons=("preflight_stub_roles_incomplete",),
+            "both sides must complete main-Guardian-main",
+            reasons=("preflight_stub_trajectory_incomplete",),
         )
     preflight = SymmetryPreflight(allow_upstream=False)
+    provenance: list[PreflightRequestDigest] = []
     for side in (Side.RONDO, Side.CODEX):
-        for role in sorted(roles[side]):
+        for sequence, (role, request) in enumerate(normalized[side], start=1):
             preflight.register(
                 task_id=task_id,
                 role=role,
                 side=side,
-                request=requests_by_side[side][role],
+                request=request,
+            )
+            provenance.append(
+                PreflightRequestDigest(
+                    side=side,
+                    role=role,
+                    sequence=sequence,
+                    full_request_sha256=preflight.observed[-1].full_request_sha256,
+                )
             )
     receipt = PreflightReceipt(
         schema_version=PREFLIGHT_RECEIPT_SCHEMA_VERSION,
@@ -645,8 +787,9 @@ def preflight_receipt_from_stub_run(
         bundle_manifest_sha256=tuple(sorted(bundle_manifest_sha256.items())),
         contracts=tuple(
             (role, preflight.frozen_contract(task_id, role))
-            for role in sorted(roles[Side.RONDO])
+            for role in sorted(_ROLES)
         ),
+        request_provenance=tuple(provenance),
     )
     receipt.validate()
     return receipt

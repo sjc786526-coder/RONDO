@@ -21,6 +21,7 @@ from rondo_eval.api_budget_proxy import (
     LoopbackResponsesProxy,
     ModelPricing,
     PersistentBudgetLedger,
+    canonical_request_sha256,
 )
 from rondo_eval import preflight_cli
 from rondo_eval.config import RepoPaths
@@ -169,6 +170,77 @@ def _request(
     return body
 
 
+def _lite_request(
+    *,
+    prompt: str = "solve the frozen task",
+    model_names: tuple[str, ...] = (
+        "alpha",
+        "beta",
+        "gamma",
+        "delta",
+        "epsilon",
+        "zeta",
+        "eta",
+        "theta",
+    ),
+    developer_text: str = "frozen Responses Lite developer instructions",
+) -> dict[str, object]:
+    """Match the frozen Responses Lite wire shape, including AdditionalTools."""
+
+    body = _request(prompt=prompt)
+    body.pop("instructions")
+    body.pop("tools")
+    body["input"] = [
+        {
+            "type": "additional_tools",
+            "role": "developer",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "spawn_agent",
+                    "description": "available models: " + ", ".join(model_names),
+                }
+            ],
+        },
+        {
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": developer_text}],
+        },
+        {"type": "message", "role": "user", "content": prompt},
+    ]
+    return body
+
+
+def _stub_trace(
+    label: str,
+    *,
+    main_instructions: str | None = "frozen base instructions",
+    main_developer_text: str | None = None,
+) -> tuple[tuple[str, dict[str, object]], ...]:
+    """Build the exact approval trajectory captured by the no-API stub."""
+
+    return (
+        (
+            "main",
+            _request(
+                prompt=f"{label} main",
+                instructions=main_instructions,
+                developer_text=main_developer_text,
+            ),
+        ),
+        ("guardian", _request(prompt=f"{label} guardian", guardian=True)),
+        (
+            "main",
+            _request(
+                prompt=f"{label} after approval",
+                instructions=main_instructions,
+                developer_text=main_developer_text,
+            ),
+        ),
+    )
+
+
 class TaskIndependentProjectionTests(unittest.TestCase):
     def test_projection_excludes_the_task_body(self) -> None:
         projected = project_task_independent(_request(prompt="task A"))
@@ -223,15 +295,25 @@ class TaskIndependentProjectionTests(unittest.TestCase):
         )
 
     def test_trimmed_catalog_asymmetry_is_detected(self) -> None:
-        """The historical failure mode: one side sees fewer picker models."""
+        """The historical Lite failure mode: one side sees fewer picker models."""
 
-        codex = _request(
-            developer_text=(
-                "# Policy\nfrozen policy text\n"
-                "# AdditionalTools\nspawn_agent: models are alpha"
-            )
+        rondo = _lite_request(prompt="rondo task body")
+        codex = _lite_request(
+            prompt="different codex task body", model_names=("alpha",)
         )
-        rondo = _request()
+        prefix = project_task_independent(rondo)["partitions"][
+            "stable_input_prefix"
+        ]
+        self.assertEqual(
+            [item["type"] for item in prefix], ["additional_tools", "message"]
+        )
+        self.assertIn(
+            "task_independent_tool_specs_differs",
+            compare_task_independent(
+                task_independent_contract(rondo),
+                task_independent_contract(codex),
+            ),
+        )
         self.assertIn(
             "task_independent_stable_input_prefix_differs",
             compare_task_independent(
@@ -239,6 +321,35 @@ class TaskIndependentProjectionTests(unittest.TestCase):
                 task_independent_contract(codex),
             ),
         )
+
+    def test_lite_task_body_is_still_excluded(self) -> None:
+        first = task_independent_contract(_lite_request(prompt="task A"))
+        second = task_independent_contract(_lite_request(prompt="task B"))
+        self.assertEqual(compare_task_independent(first, second), ())
+
+    def test_malformed_lite_prefix_fails_closed(self) -> None:
+        malformed = _lite_request()
+        malformed["input"][0]["tools"] = "not-a-catalog"  # type: ignore[index]
+        duplicate = _lite_request()
+        duplicate["input"].insert(  # type: ignore[union-attr]
+            1, duplicate["input"][0]  # type: ignore[index]
+        )
+        misplaced = _lite_request()
+        misplaced["input"][0], misplaced["input"][1] = (  # type: ignore[index]
+            misplaced["input"][1],  # type: ignore[index]
+            misplaced["input"][0],  # type: ignore[index]
+        )
+        mixed = _lite_request()
+        mixed["tools"] = []
+        for request in (malformed, duplicate, misplaced, mixed):
+            with self.subTest(request=request), self.assertRaises(
+                FairComparisonError
+            ) as caught:
+                task_independent_contract(request)
+            self.assertEqual(
+                caught.exception.reasons,
+                ("task_independent_stable_input_prefix_invalid",),
+            )
 
 
 class SymmetryPreflightTests(unittest.TestCase):
@@ -1018,14 +1129,8 @@ class PreflightReceiptTests(unittest.TestCase):
             "task_id": "terminal-bench/fix-git",
             "bundle_manifest_sha256": dict(self.bundles),
             "requests_by_side": {
-                Side.RONDO: {
-                    "main": _request(prompt="rondo"),
-                    "guardian": _request(prompt="rondo guardian", guardian=True),
-                },
-                Side.CODEX: {
-                    "main": _request(prompt="codex"),
-                    "guardian": _request(prompt="codex guardian", guardian=True),
-                },
+                Side.RONDO: _stub_trace("rondo"),
+                Side.CODEX: _stub_trace("codex"),
             },
         }
         values.update(overrides)
@@ -1037,22 +1142,32 @@ class PreflightReceiptTests(unittest.TestCase):
             [role for role, _c in receipt.contracts], ["guardian", "main"]
         )
         self.assertEqual(dict(receipt.bundle_manifest_sha256), self.bundles)
+        expected = [
+            (side, role, sequence, canonical_request_sha256(request))
+            for side, label in ((Side.RONDO, "rondo"), (Side.CODEX, "codex"))
+            for sequence, (role, request) in enumerate(
+                _stub_trace(label), start=1
+            )
+        ]
+        self.assertEqual(
+            [
+                (item.side, item.role, item.sequence, item.full_request_sha256)
+                for item in receipt.request_provenance
+            ],
+            expected,
+        )
+        self.assertNotEqual(expected[0][3], expected[2][3])
 
     def test_an_asymmetric_stub_run_produces_no_receipt(self) -> None:
         with self.assertRaises(FairComparisonError) as caught:
             self._receipt(
                 requests_by_side={
-                    Side.RONDO: {
-                        "main": _request(),
-                        "guardian": _request(guardian=True),
-                    },
-                    Side.CODEX: {
-                        "main": _request(
-                            developer_text="# Policy\nfrozen policy text\n"
-                            "# AdditionalTools\nspawn_agent: models are alpha"
-                        ),
-                        "guardian": _request(guardian=True),
-                    },
+                    Side.RONDO: _stub_trace("rondo"),
+                    Side.CODEX: _stub_trace(
+                        "codex",
+                        main_developer_text="# Policy\nfrozen policy text\n"
+                        "# AdditionalTools\nspawn_agent: models are alpha",
+                    ),
                 }
             )
         self.assertIn(
@@ -1106,12 +1221,12 @@ class PreflightReceiptTests(unittest.TestCase):
         with self.assertRaises(FairComparisonError) as caught:
             self._receipt(
                 requests_by_side={
-                    Side.RONDO: {"main": _request()},
-                    Side.CODEX: {"main": _request()},
+                    Side.RONDO: (("main", _request()),),
+                    Side.CODEX: (("main", _request()),),
                 }
             )
         self.assertEqual(
-            caught.exception.reasons, ("preflight_stub_roles_incomplete",)
+            caught.exception.reasons, ("preflight_stub_trajectory_incomplete",)
         )
 
     def test_binding_rejects_reuse_across_campaign_task_or_binary(self) -> None:
@@ -1148,6 +1263,25 @@ class PreflightReceiptTests(unittest.TestCase):
         self.assertEqual(
             caught.exception.reasons, ("preflight_receipt_not_frozen",)
         )
+        for mutate in (
+            lambda value: value["request_provenance"].pop(),
+            lambda value: value["request_provenance"][0].__setitem__(
+                "sequence", True
+            ),
+            lambda value: value["request_provenance"][0].__setitem__(
+                "full_request_sha256", "invalid"
+            ),
+        ):
+            malformed = receipt.to_dict()
+            mutate(malformed)
+            with self.subTest(malformed=malformed), self.assertRaises(
+                FairComparisonError
+            ) as caught:
+                PreflightReceipt.from_dict(malformed)
+            self.assertEqual(
+                caught.exception.reasons,
+                ("preflight_receipt_provenance_invalid",),
+            )
 
 
 class PaidRunnerPreflightGateTests(unittest.TestCase):
@@ -1465,14 +1599,8 @@ class NamespacedTaskIdTests(unittest.TestCase):
             task_id=task_id,
             bundle_manifest_sha256={"rondo": "1" * 64, "codex": "2" * 64},
             requests_by_side={
-                Side.RONDO: {
-                    "main": _request(prompt="rondo body"),
-                    "guardian": _request(prompt="rondo guardian", guardian=True),
-                },
-                Side.CODEX: {
-                    "main": _request(prompt="codex body"),
-                    "guardian": _request(prompt="codex guardian", guardian=True),
-                },
+                Side.RONDO: _stub_trace("rondo body"),
+                Side.CODEX: _stub_trace("codex body"),
             },
         )
         restored = PreflightReceipt.from_dict(receipt.to_dict())
@@ -1520,11 +1648,10 @@ class PreflightProducerTests(unittest.TestCase):
         return replace(RepoPaths.discover(Path.cwd()), common_root=root)
 
     @staticmethod
-    def _captured_requests(side: Side) -> dict[str, dict[str, object]]:
-        return {
-            "main": _request(prompt=side.value),
-            "guardian": _request(prompt=f"{side.value} guardian", guardian=True),
-        }
+    def _captured_requests(
+        side: Side,
+    ) -> tuple[tuple[str, dict[str, object]], ...]:
+        return _stub_trace(side.value)
 
     def test_the_stub_server_captures_bodies_and_refuses_unauthorized_calls(self) -> None:
         with preflight_producer.PreflightCaptureServer() as server:
@@ -1630,16 +1757,14 @@ class PreflightProducerTests(unittest.TestCase):
                     lock_guard=None,
                     lease=None,
                     config=None,
-                    capture=lambda **kwargs: {
-                        "main": _request(
-                            instructions=(
-                                "base"
-                                if kwargs["side"] is Side.RONDO
-                                else "drifted"
-                            )
+                    capture=lambda **kwargs: _stub_trace(
+                        kwargs["side"].value,
+                        main_instructions=(
+                            "base"
+                            if kwargs["side"] is Side.RONDO
+                            else "drifted"
                         ),
-                        "guardian": _request(guardian=True),
-                    },
+                    ),
                 )
             self.assertEqual(
                 list((paths.common_root / "eval-data/campaigns").rglob("*.json")), []
@@ -1690,14 +1815,20 @@ class PreflightProducerTests(unittest.TestCase):
     def test_a_later_task_failure_publishes_no_half_batch(self) -> None:
         identity = self._Identity(self.tasks)
 
-        def capture(**kwargs: object) -> dict[str, dict[str, object]]:
+        def capture(
+            **kwargs: object,
+        ) -> tuple[tuple[str, dict[str, object]], ...]:
             side = kwargs["side"]
             assert isinstance(side, Side)
-            captured = self._captured_requests(side)
+            captured = list(self._captured_requests(side))
             task = kwargs["task"]
             if getattr(task, "task_id") == self.tasks[1] and side is Side.CODEX:
-                captured["main"] = _request(instructions="drifted")
-            return captured
+                captured[0] = ("main", _request(instructions="drifted"))
+                captured[2] = (
+                    "main",
+                    _request(prompt="after approval", instructions="drifted"),
+                )
+            return tuple(captured)
 
         with tempfile.TemporaryDirectory() as directory:
             paths = self._paths(Path(directory))
@@ -1772,13 +1903,18 @@ class PreflightProducerTests(unittest.TestCase):
             for request in (main, guardian, _request(prompt="after approval"))
         )
         self.assertEqual(
-            set(preflight_producer._requests_by_role(bodies, provider=provider)),
-            {"main", "guardian"},
+            tuple(
+                role
+                for role, _request_body in preflight_producer._request_trace(
+                    bodies, provider=provider
+                )
+            ),
+            ("main", "guardian", "main"),
         )
         with self.assertRaisesRegex(
             preflight_producer.PreflightProductionError, "main-Guardian-main"
         ):
-            preflight_producer._requests_by_role(bodies[:2], provider=provider)
+            preflight_producer._request_trace(bodies[:2], provider=provider)
         drifted = (
             bodies[0],
             bodies[1],
@@ -1790,7 +1926,7 @@ class PreflightProducerTests(unittest.TestCase):
             preflight_producer.PreflightProductionError,
             "contract drifted after Guardian",
         ):
-            preflight_producer._requests_by_role(drifted, provider=provider)
+            preflight_producer._request_trace(drifted, provider=provider)
 
     def test_historical_campaigns_cannot_produce_receipts(self) -> None:
         identity = _CampaignFixture.v6()
@@ -1931,6 +2067,141 @@ class EvalHarnessLifecycleTests(unittest.TestCase):
                     root,
                     expected_commit=harness_commit,
                     head=drifted_commit,
+                )
+
+    def test_new_identity_cannot_change_after_its_addition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.name", "RONDO test")
+            self._git(root, "config", "user.email", "rondo-test@example.invalid")
+            (root / "eval/rondo_eval").mkdir(parents=True)
+            (root / "eval/locks").mkdir(parents=True)
+            (root / "eval/rondo_eval/harness.py").write_text("VALUE = 1\n")
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-qm", "harness")
+            harness_commit = self._git(root, "rev-parse", "HEAD")
+            trunk = self._git(root, "branch", "--show-current")
+            self._git(root, "checkout", "-qb", "identity-work")
+
+            identity = root / "eval/locks/p2-b7-canary-baseline-v23.json"
+            identity.write_text('{"repeat":3}\n')
+            (root / "eval/locks/p2-b7-active.json").write_text("{}\n")
+            self._git(root, "add", "eval/locks")
+            self._git(root, "commit", "-qm", "identity")
+            self._git(root, "checkout", "-q", trunk)
+            self._git(
+                root,
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                "merge identity",
+                "identity-work",
+            )
+            addition_commit = self._git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=addition_commit,
+                ),
+                harness_commit,
+            )
+
+            (root / "README.md").write_text("unrelated\n")
+            self._git(root, "add", "README.md")
+            self._git(root, "commit", "-qm", "unrelated")
+            unrelated_commit = self._git(root, "rev-parse", "HEAD")
+            self.assertEqual(
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=unrelated_commit,
+                ),
+                harness_commit,
+            )
+
+            identity.write_text('{"repeat":5}\n')
+            self._git(root, "add", identity.relative_to(root).as_posix())
+            self._git(root, "commit", "-qm", "mutate identity")
+            with self.assertRaisesRegex(
+                HarborResultError, "new eval identity changed after addition"
+            ):
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=self._git(root, "rev-parse", "HEAD"),
+                )
+
+            identity.write_text('{"repeat":3}\n')
+            self._git(root, "add", identity.relative_to(root).as_posix())
+            self._git(root, "commit", "-qm", "restore identity")
+            with self.assertRaisesRegex(
+                HarborResultError, "new eval identity changed after addition"
+            ):
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=self._git(root, "rev-parse", "HEAD"),
+                )
+
+    def test_merged_identity_mutation_cannot_hide_behind_original_blob(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._git(root, "init", "-q")
+            self._git(root, "config", "user.name", "RONDO test")
+            self._git(root, "config", "user.email", "rondo-test@example.invalid")
+            (root / "eval/rondo_eval").mkdir(parents=True)
+            (root / "eval/locks").mkdir(parents=True)
+            (root / "eval/rondo_eval/harness.py").write_text("VALUE = 1\n")
+            self._git(root, "add", ".")
+            self._git(root, "commit", "-qm", "harness")
+            harness_commit = self._git(root, "rev-parse", "HEAD")
+            trunk = self._git(root, "branch", "--show-current")
+
+            identity = root / "eval/locks/p2-b7-canary-baseline-v23.json"
+            identity.write_text('{"repeat":3}\n')
+            (root / "eval/locks/p2-b7-active.json").write_text("{}\n")
+            self._git(root, "add", "eval/locks")
+            self._git(root, "commit", "-qm", "identity")
+            identity_commit = self._git(root, "rev-parse", "HEAD")
+            self._git(root, "checkout", "-qb", "mutate-identity")
+            identity.write_text('{"repeat":5}\n')
+            self._git(root, "add", identity.relative_to(root).as_posix())
+            self._git(root, "commit", "-qm", "mutate identity on side branch")
+
+            self._git(root, "checkout", "-q", trunk)
+            self._git(
+                root,
+                "merge",
+                "-q",
+                "--no-ff",
+                "--no-commit",
+                "mutate-identity",
+            )
+            identity.write_text('{"repeat":3}\n')
+            self._git(root, "add", identity.relative_to(root).as_posix())
+            self._git(root, "commit", "-qm", "merge with original identity blob")
+            self.assertEqual(
+                self._git(
+                    root,
+                    "rev-parse",
+                    "HEAD:" + identity.relative_to(root).as_posix(),
+                ),
+                self._git(
+                    root,
+                    "rev-parse",
+                    identity_commit + ":" + identity.relative_to(root).as_posix(),
+                ),
+            )
+            with self.assertRaisesRegex(
+                HarborResultError, "new eval identity changed after addition"
+            ):
+                results_module._validate_eval_harness_projection(
+                    root,
+                    expected_commit=harness_commit,
+                    head=self._git(root, "rev-parse", "HEAD"),
                 )
 
 

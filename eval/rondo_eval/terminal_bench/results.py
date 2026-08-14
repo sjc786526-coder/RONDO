@@ -225,8 +225,80 @@ def _validate_identity_only_lock_changes(
         if path == _ACTIVE_CAMPAIGN_POINTER and status in {"A", "M"}:
             continue
         if status == "A" and _CAMPAIGN_IDENTITY_LOCK.fullmatch(path):
+            _require_single_identity_addition(
+                root,
+                expected_commit=expected_commit,
+                head=head,
+                path=path,
+            )
             continue
         raise HarborResultError("historical eval lock projection differs")
+
+
+def _require_single_identity_addition(
+    root: Path, *, expected_commit: str, head: str, path: str
+) -> None:
+    """Reject a new identity whose blob was changed after its addition."""
+
+    history = _git_result(
+        root,
+        "log",
+        "--full-history",
+        "--no-renames",
+        "--format=%H",
+        f"{expected_commit}..{head}",
+        "--",
+        path,
+    )
+    if history.returncode != 0:
+        raise HarborResultError("new eval identity history is unavailable")
+    commits = tuple(line for line in history.stdout.splitlines() if line)
+    changes = tuple(
+        commit
+        for commit in commits
+        if _commit_introduces_identity_blob(root, commit=commit, path=path)
+    )
+    if len(changes) != 1:
+        raise HarborResultError("new eval identity changed after addition")
+    addition = _git_result(
+        root,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-status",
+        "--no-renames",
+        "-r",
+        changes[0],
+        "--",
+        path,
+    )
+    if addition.returncode != 0 or addition.stdout.strip() != f"A\t{path}":
+        raise HarborResultError("new eval identity addition is unavailable")
+
+
+def _commit_introduces_identity_blob(root: Path, *, commit: str, path: str) -> bool:
+    """Return whether a commit's path differs from each of its parents."""
+
+    parent_result = _git_result(root, "show", "-s", "--format=%P", commit)
+    if parent_result.returncode != 0:
+        raise HarborResultError("new eval identity history is unavailable")
+    parents = tuple(parent_result.stdout.split())
+    if any(not _is_commit(parent) for parent in parents):
+        raise HarborResultError("new eval identity history is unavailable")
+    for parent in parents:
+        comparison = _git_result(
+            root,
+            "diff",
+            "--quiet",
+            parent,
+            commit,
+            "--",
+            path,
+        )
+        if comparison.returncode == 0:
+            return False
+        if comparison.returncode != 1:
+            raise HarborResultError("new eval identity history is unavailable")
+    return True
 
 
 def parse_single_task_result(
