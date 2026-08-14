@@ -29,6 +29,7 @@ class FakeApprovalServer:
         model_path: str = "/fake/model.gguf",
         build_info: str = CPU_SERVICE_BUILD_INFO,
         on_decision: Callable[[], None] | None = None,
+        count_handler: Callable[[Mapping[str, Any]], tuple[int, Any]] | None = None,
     ):
         self.decision = dict(
             decision
@@ -42,6 +43,10 @@ class FakeApprovalServer:
         self.model_path = model_path
         self.build_info = build_info
         self.on_decision = on_decision
+        # Answers `/v1/responses/input_tokens` the way the pinned server does:
+        # a count, or one of its structured error envelopes.
+        self.count_handler = count_handler
+        self.count_requests: list[dict[str, Any]] = []
         self.requests: list[dict[str, Any]] = []
         self.authorization_seen: list[bool] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_type(self))
@@ -121,6 +126,9 @@ def _handler_type(fake: FakeApprovalServer):
             self._json(404, {"error": {"message": "not found"}})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+            if self.path == "/v1/responses/input_tokens":
+                self._count_tokens()
+                return
             if self.path != "/v1/responses":
                 self._json(404, {"error": {"message": "not found"}})
                 return
@@ -191,6 +199,34 @@ def _handler_type(fake: FakeApprovalServer):
                     ],
                 }
             self._json(200, envelope)
+
+        def _count_tokens(self) -> None:
+            length_text = self.headers.get("Content-Length")
+            try:
+                length = int(length_text) if length_text is not None else -1
+            except ValueError:
+                length = -1
+            if not 0 <= length <= _MAX_REQUEST_BYTES:
+                self._json(400, {"error": {"message": "invalid request size"}})
+                return
+            raw = self.rfile.read(length)
+            try:
+                body = json.loads(raw)
+            except (UnicodeError, json.JSONDecodeError):
+                self._json(400, {"error": {"message": "invalid JSON"}})
+                return
+            if not isinstance(body, dict):
+                self._json(400, {"error": {"message": "invalid request"}})
+                return
+            fake.count_requests.append(body)
+            if fake.count_handler is not None:
+                status, payload = fake.count_handler(body)
+                self._json(status, payload)
+                return
+            self._json(
+                200,
+                {"input_tokens": max(1, len(raw) // 4), "object": "response.input_tokens"},
+            )
 
         def _json(self, status: int, value: Any) -> None:
             body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

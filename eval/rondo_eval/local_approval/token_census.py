@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .. import runtime_bridge
 from ..config import ConfigError, RepoPaths, RuntimeConfig, load_runtime_config
@@ -100,10 +100,12 @@ _RUN_LEDGER_RELATIVE_PATH = "eval/results/runs.jsonl"
 _COUNT_ENDPOINT_SUFFIX = "/responses/input_tokens"
 _MAX_COUNT_RESPONSE_BYTES = 65_536
 _WATCHDOG_RECHECK_EVERY = 10
-# b10333 refuses an unsupported Responses item shape through its adapter (400)
-# and an unsupported role order through the frozen chat template (500).  Both
-# are deterministic properties of one request, not of the service.
-_REFUSAL_CLASSES = {(400, "invalid_request_error"), (500, "server_error")}
+# The only refusal this census attributes to the request itself.  b10333 raises
+# `invalid_argument` from its Responses adapter for an item shape it cannot map,
+# which `/v1/responses` refuses identically.  Every other status - including the
+# catch-all `500 server_error`, which any internal fault also produces - fails
+# the whole census instead of being recorded as a property of one sample.
+_STRUCTURAL_REFUSAL = (400, "invalid_request_error")
 
 
 class CensusError(RuntimeError):
@@ -118,15 +120,14 @@ class CensusError(RuntimeError):
 
 
 class RequestRejected(RuntimeError):
-    """The frozen runtime refused this request; the server itself is healthy.
+    """b10333's Responses adapter cannot map this request's item shapes.
 
-    b10333's Responses adapter and the frozen chat template reject some archived
-    shapes outright, which is a fact about that evidence rather than a census
-    failure: the same request would be refused on the real `/v1/responses`
-    decision path.  Such an input is recorded as rejected and the census
-    continues, so one unservable archive cannot hide the rest of the
-    distribution.  Every rejection is followed by a fresh synthetic probe, so a
-    genuinely broken service can never be recorded as a set of bad inputs.
+    This is a property of the archived evidence rather than of the service: the
+    real `/v1/responses` decision path shares the same adapter and refuses the
+    same request.  Such an input is recorded and the census keeps going, but it
+    has no exact token count, so the census as a whole ends incomplete and
+    publishes no baseline.  Every refusal is followed by a fresh synthetic probe
+    so a failing service can never be recorded as a set of bad inputs.
     """
 
     def __init__(self, facts: dict[str, Any]) -> None:
@@ -292,10 +293,11 @@ def count_input_tokens(
 ) -> int:
     """Ask the running frozen server for the exact input-token count.
 
-    llama.cpp answers a rejected request with its own structured error object.
-    Its `type`/`code` are stable non-sensitive enums and are always reported.
-    The free-text message is reported only when no fragment of it appears in the
-    request body, so a reported message provably carries no evidence content.
+    llama.cpp answers a refused request with its own structured error object.
+    Only its stable parts leave this function - HTTP status, error type and a
+    digest of the message.  The free-text message itself is never reported or
+    persisted: no filter can prove that a server-composed string does not quote
+    the evidence that produced it.
     """
 
     url = f"{settings.base_url}{_COUNT_ENDPOINT_SUFFIX}"
@@ -313,8 +315,8 @@ def count_input_tokens(
     except CensusError:
         raise
     except urllib.error.HTTPError as exc:
-        facts = _http_error_facts(exc, body)
-        if (facts.get("http_status"), facts.get("error_type")) in _REFUSAL_CLASSES:
+        facts = _http_error_facts(exc)
+        if (facts.get("http_status"), facts.get("error_type")) == _STRUCTURAL_REFUSAL:
             raise RequestRejected(facts) from exc
         raise CensusError(code, facts) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -331,7 +333,14 @@ def count_input_tokens(
     return tokens
 
 
-def _http_error_facts(error: urllib.error.HTTPError, body: bytes) -> dict[str, Any]:
+def _http_error_facts(error: urllib.error.HTTPError) -> dict[str, Any]:
+    """Keep only the stable, request-independent parts of a server error.
+
+    The message digest still separates one refusal class from another across
+    runs, which is all the census needs, without letting server-composed text
+    reach the console or a tracked file.
+    """
+
     facts: dict[str, Any] = {"http_status": error.code}
     try:
         payload = json.loads(error.read(_MAX_COUNT_RESPONSE_BYTES + 1))
@@ -346,33 +355,23 @@ def _http_error_facts(error: urllib.error.HTTPError, body: bytes) -> dict[str, A
             facts[f"error_{key}"] = value
     message = detail.get("message")
     if isinstance(message, str):
-        facts["message_bytes"] = len(message.encode("utf-8"))
-        facts["message"] = _message_without_request_content(message[:400], body)
+        facts["message_sha256"] = hashlib.sha256(message.encode("utf-8")).hexdigest()
     return facts
 
 
-def _message_without_request_content(message: str, body: bytes) -> str:
-    """Report a server message only when it echoes nothing from the request.
-
-    llama.cpp's own diagnostics are what makes a rejection actionable, but an
-    error may quote the offending input.  A message is withheld whenever any
-    fragment of it also occurs in the request that produced it.
-    """
-
-    window = 12
-    text = body.decode("utf-8", "replace")
-    for start in range(0, max(0, len(message) - window) + 1):
-        if message[start : start + window] in text:
-            return "<redacted: echoes request content>"
-    return message
-
-
-def _probe_count_endpoint(settings: LocalApprovalSettings, builder: LocalApprovalClient) -> None:
-    """Prove the count endpoint answers this request shape before sending evidence.
+def _probe_count_endpoint(
+    settings: LocalApprovalSettings,
+    builder: LocalApprovalClient,
+    *,
+    count: Callable[[LocalApprovalSettings, bytes], int] | None = None,
+) -> None:
+    """Prove the count endpoint still answers this request shape.
 
     The probe body is built by the same request builder from a synthetic
-    `E_final`, so an endpoint-level failure is diagnosable in full without any
-    archived evidence ever reaching an error report.
+    `E_final`, so an endpoint-level failure is diagnosable without any archived
+    evidence reaching an error report.  It runs before the first evidence
+    request and again after every refusal, so a service that stopped working
+    cannot be recorded as a run of unservable inputs.
     """
 
     payload = build_static_payload(
@@ -389,7 +388,15 @@ def _probe_count_endpoint(settings: LocalApprovalSettings, builder: LocalApprova
         allow_nan=False,
         separators=(",", ":"),
     ).encode("utf-8")
-    count_input_tokens(settings, body, code="count_endpoint_probe_failed")
+    if count is None:
+        count_input_tokens(settings, body, code="count_endpoint_probe_failed")
+        return
+    try:
+        count(settings, body)
+    except (CensusError, RequestRejected) as exc:
+        raise CensusError(
+            "count_endpoint_probe_failed", getattr(exc, "facts", {})
+        ) from exc
 
 
 def percentile(sorted_counts: Sequence[int], percent: int) -> int:
@@ -408,30 +415,30 @@ def fit_results(input_tokens: int) -> dict[str, bool]:
     return {name: required <= size for name, size in CONTEXT_WINDOWS}
 
 
-def summarize(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Summarise the whole set, keeping counted and rejected inputs apart.
+def summarize(
+    records: Sequence[dict[str, Any]], *, request_shapes: Mapping[str, int]
+) -> dict[str, Any]:
+    """Summarise the whole set, keeping counted and refused inputs apart.
 
     Every archived input appears in `evidence_count`.  Token statistics and
     context coverage can only describe the inputs the frozen runtime accepted,
-    so they are reported over `counted` and labelled as such.
+    so they are reported over `counted` and labelled as such.  A census with any
+    refusal is incomplete: these statistics never stand for the whole set.
     """
 
     counted = [record for record in records if record["status"] == "counted"]
     if not counted:
         raise CensusError("no_input_was_counted")
     counts = sorted(int(record["input_tokens"]) for record in counted)
-    shapes: dict[str, int] = {}
-    reasons: dict[str, int] = {}
+    refusals: dict[str, int] = {}
     for record in records:
-        shape = str(record["request_shape"])
-        shapes[shape] = shapes.get(shape, 0) + 1
-        if record["status"] == "rejected":
-            detail = record["rejected_by"]
+        if record["status"] == "refused":
+            detail = record["refusal"]
             reason = (
-                f"{detail.get('http_status')} {detail.get('error_type')}: "
-                f"{detail.get('message')}"
+                f"{detail.get('http_status')} {detail.get('error_type')} "
+                f"{detail.get('message_sha256')}"
             )
-            reasons[reason] = reasons.get(reason, 0) + 1
+            refusals[reason] = refusals.get(reason, 0) + 1
     windows: dict[str, Any] = {}
     for name, size in CONTEXT_WINDOWS:
         fits = sum(1 for record in counted if record["fits"][name])
@@ -443,8 +450,8 @@ def summarize(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {
         "evidence_count": len(records),
         "counted": len(counted),
-        "rejected": len(records) - len(counted),
-        "rejection_reasons": dict(sorted(reasons.items())),
+        "refused": len(records) - len(counted),
+        "refusal_classes": dict(sorted(refusals.items())),
         "max_output_tokens": CENSUS_MAX_OUTPUT_TOKENS,
         "percentile_method": PERCENTILE_METHOD,
         "statistics_scope": "counted inputs only",
@@ -455,7 +462,7 @@ def summarize(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
             "p95": percentile(counts, 95),
             "max": counts[-1],
         },
-        "request_shapes": dict(sorted(shapes.items())),
+        "request_shapes": dict(sorted(request_shapes.items())),
         "context_windows": windows,
     }
 
@@ -472,33 +479,42 @@ def build_document(
     identity: dict[str, Any],
     anchor: dict[str, Any],
     records: Iterable[dict[str, Any]],
+    request_shapes: Mapping[str, int],
 ) -> dict[str, Any]:
     """Build the stable machine-readable result, ordered by content digest.
 
     Ordering by `e_final_sha256` instead of filesystem order keeps two runs over
     the same input set byte-identical, which is what makes the repeat run a
-    check on the measurement rather than on the traversal order.
+    check on the measurement rather than on the traversal order.  The top-level
+    `status` is `complete` only when every input has an exact count.
     """
 
     ordered = sorted(records, key=lambda record: record["e_final_sha256"])
     if len({record["e_final_sha256"] for record in ordered}) != len(ordered):
         raise CensusError("record_digest_collision")
+    missing = [record for record in ordered if record["status"] != "counted"]
     document = {
         "schema_version": CENSUS_SCHEMA_VERSION,
         "purpose": (
             "exact input-token census of the complete archived real Guardian "
             "E_final set, counted with the frozen GGUF tokenizer and template"
         ),
+        "status": "incomplete" if missing else "complete",
+        "missing_counts": len(missing),
         "identity": identity,
         "anchor": anchor,
         "records": ordered,
-        "summary": summarize(ordered),
+        "summary": summarize(ordered, request_shapes=request_shapes),
     }
     document["digest"] = _canonical_digest(document)
     return document
 
 
 def write_document(path: Path, document: dict[str, Any]) -> Path:
+    """Write the result, refusing to publish an incomplete run as the baseline."""
+
+    if document.get("status") != "complete" and path.name == Path(RESULT_RELATIVE_PATH).name:
+        raise CensusError("incomplete_census_must_not_be_published")
     raw = json.dumps(document, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
     raw += b"\n"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -631,9 +647,11 @@ def run_census(
     _require_free_port(settings.host, settings.port)
 
     counter = count or count_input_tokens
-    private_root = _prepare_private_directory(config, prefix="census")
+    # Everything that can still fail happens before the private directory
+    # exists, so no failure path can leave one behind.
     command = build_serve_command(config, settings, runtime.binary)
     serving_config = serve_config_sha256(config, settings)
+    private_root = _prepare_private_directory(config, prefix="census")
     log_path = private_root / "server.log"
     process: subprocess.Popen[Any] | None = None
     failure: CensusError | QualificationError | None = None
@@ -659,8 +677,7 @@ def run_census(
         if foreign:
             raise CensusError("gpu_not_exclusive", {"foreign_compute_pids": foreign})
 
-        if count is None:
-            _probe_count_endpoint(settings, builder)
+        _probe_count_endpoint(settings, builder, count=count)
         # The anchor is counted first: if it does not reproduce the already
         # measured 5,313 tokens, this census is not measuring the real request
         # path and the other 46 counts would mean nothing.
@@ -674,10 +691,7 @@ def run_census(
                 {"expected": ANCHOR_INPUT_TOKENS, "observed": anchor_tokens},
             )
         for index, item in enumerate(inputs, start=1):
-            record: dict[str, Any] = {
-                "e_final_sha256": item.e_final_sha256,
-                "request_shape": item.request_shape,
-            }
+            record: dict[str, Any] = {"e_final_sha256": item.e_final_sha256}
             try:
                 tokens = (
                     anchor_tokens
@@ -685,11 +699,10 @@ def run_census(
                     else counter(settings, bodies[item.e_final_sha256])
                 )
             except RequestRejected as rejected:
-                record["status"] = "rejected"
-                record["rejected_by"] = rejected.facts
+                record["status"] = "refused"
+                record["refusal"] = rejected.facts
                 # Prove the refusal was about this request, not the service.
-                if count is None:
-                    _probe_count_endpoint(settings, builder)
+                _probe_count_endpoint(settings, builder, count=count)
             else:
                 record["status"] = "counted"
                 record["input_tokens"] = tokens
@@ -727,6 +740,9 @@ def run_census(
         "count_endpoint": f"/v1{_COUNT_ENDPOINT_SUFFIX}",
         "generated_tokens": 0,
     }
+    shapes: dict[str, int] = {}
+    for item in inputs:
+        shapes[item.request_shape] = shapes.get(item.request_shape, 0) + 1
     document = build_document(
         identity=identity,
         anchor={
@@ -735,10 +751,12 @@ def run_census(
             "expected_input_tokens": ANCHOR_INPUT_TOKENS,
         },
         records=records,
+        request_shapes=shapes,
     )
     written = write_document(output_path, document)
     return {
-        "status": "complete",
+        "status": document["status"],
+        "missing_counts": document["missing_counts"],
         "digest": document["digest"],
         "anchor_input_tokens": anchor_tokens,
         "summary": document["summary"],
@@ -780,7 +798,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"status": "not_counted", "blocker": "configuration"}, sort_keys=True))
         return CONFIG_ERROR
     print(json.dumps(summary, sort_keys=True))
-    return SUCCESS
+    # A run that could not count every input is not a census result, however
+    # many inputs it did count.
+    return SUCCESS if summary["status"] == "complete" else INFRA_ERROR
 
 
 if __name__ == "__main__":

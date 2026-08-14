@@ -88,17 +88,30 @@
   两个实现提示；它们不构成指定实现。
 - 2026-08-14：按用户反馈两次瘦身，明确本任务不得演变为审计、provenance、attestation 或可信发布工程。
 - 2026-08-14：实现 `eval/rondo_eval/local_approval/token_census.py`（复用现有 reader、meta 校验、受跟踪账本身份、
-  真实 request builder、watchdog/build lock 与冻结服务合同），补 9 项 focused tests，`just eval-lock` 通过。
-- 2026-08-14：同一入口真实运行两次，结果文件逐字节相同（sha256 `c6c848b1…`，文档内 digest `5aa508af…`）。
-  锚点精确复现 **5,313**；47 条全部纳入，其中 **24 条计数成功、23 条被冻结运行时拒绝**
-  （21 条 adapter 400 `item['content'] is not an array`，2 条模板 500）。
-  计数子集：min 5,313、p50 7,886、p90 11,105、p95 12,354、max 18,921；`input+512` 下 4k 覆盖 0/24、8k 覆盖 9/24。
+  真实 request builder、watchdog/build lock 与冻结服务合同），补 focused tests，`just eval-lock` 通过。
+- 2026-08-14：同一入口真实运行两次，两次结果一致，锚点精确复现 **5,313**。但 **47 条只有 24 条取得
+  exact token count**，另 23 条被冻结运行时在计数前拒绝（21 条 adapter 400、2 条通用 500），
+  因此 §3.1 的“恰好 47 条全部完成”**未满足**。
 - 2026-08-14：收尾确认能力仍为 `linux_cuda_built_model_unvalidated`、`model_backed_structured_output` 仍为 `not_run`、
   未新增任何资格证据；两次运行的 server/端口/私有临时对象全部清理。
+- 2026-08-14：独立审查（`agent_log/2026-08-14-092926-plan024-independent-acceptance-review.md`）判定不通过。
+  已按其整改项完成不加载模型的窄修复：incomplete 不再返回 `complete`、不写 baseline 并以非零退出；
+  通用 500 恢复为整次 census failure（只有 adapter 的 400 记为该条证据自身的拒绝）；服务端 free text
+  不再进入结果或控制台，只保留 HTTP 状态、error type 与 message digest；私有目录创建移到所有可失败前置之后；
+  补 HTTP 分类、探针失败、incomplete 不发布、CLI 退出码与私有目录残留 5 项回归；
+  撤回上一轮 baseline 工件（不完整且不符合当前 schema，历史保留在 `098e8c1`）。
 
-### 剩余与交接
+### 当前状态：blocked / incomplete
 
-- 无。本计划以完成态冻结，档位决策由 `doc/WBS.md` 与 `doc/WBS/local-approval-model.md` 承接。
+- **WP3b-A2 未完成**：47 条的服务性尝试完整，但 exact-token 分布只拿到 24/47，不构成本计划要求的普查。
+- 已确证的有限事实：24 条 counted 为 min 5,313、p50 7,886、p90 11,105、p95 12,354、max 18,921；
+  按 `input+512`，4k 覆盖 0/24、8k 覆盖 9/24。这些数只描述这 24 条，不代表全集。
+  全集当前可服务性上限为：4k 0/47、8k 9/47。
+- 阻塞原因是**请求形状**而不是长度：21 条的 `reasoning` item 没有数组 `content`，被 b10333 的
+  Responses adapter 拒绝；2 条为通用 500，未定性。加大上下文不解决这两类。
+- 交接：先另开独立任务做 provider-neutral static-payload 兼容（版本化、所有 static consumer 一致，
+  同步更新 L1 等价合同与测试），通过无模型门禁后再重新申请一次真实模型授权、重跑 47/47 普查。
+  该兼容工作不在本计划内实施。跨任务路线以 `doc/WBS.md` 与 `doc/WBS/local-approval-model.md` 为准。
 
 ## 7. 关键决策
 
@@ -108,7 +121,7 @@
 | 只复用现有保障 | 不新增审计、provenance、attestation、可信发布、资格证据或通用安全框架 |
 | 重跑是验收动作 | 同一入口运行两次并比较即可，不建设专用双 pass 系统 |
 | 只报告覆盖事实 | 产品覆盖阈值和后续资格档位留给普查后的用户决策 |
-| 逐条 status 而不是整批 fail-closed | 23 条被冻结运行时拒绝是该证据自身的事实（真实 `/v1/responses` 同样会被拒），整批停止会把其余 24 条的分布一起埋掉；47 条全部登记，统计口径显式标注只覆盖 counted |
-| 拒绝后立即重跑合成探针 | 400/500 被记为逐条拒绝，需要证明服务本身仍健康；探针体为合成短证据，失败信息可全文报告 |
-| 服务错误文本带回显守则 | 只有当消息中任何 12 字符片段都不出现在请求体内时才报告原文，否则整条替换为 `<redacted>`，保证报告不含证据正文 |
 | 结果文档不含时间戳 | 去掉日期后同一输入两次运行逐字节相同，重跑一致性直接用文件 sha256 判定 |
+| 逐条登记拒绝，但整次 census 判为 incomplete | 拒绝信息对下一步有用，所以 47 条都登记；但任何一条没有 token 数就不满足完成合同，入口非零退出、不写 baseline。**上一轮把这种情况报成 `complete` 是错的，已撤回** |
+| 只有 adapter 的 400 算该条证据自身的拒绝 | `400 invalid_request_error` 来自 Responses adapter 无法映射的 item 形状，真实 `/v1/responses` 同样会拒；通用 `500 server_error` 任何内部故障都会产生，短探针成功不能证明它源于该样本，因此恢复为整次 census failure |
+| 服务端 free text 一律不落盘、不打印 | 没有任何过滤能证明服务端拼装的字符串不含证据片段；只保留 HTTP 状态、error type 与 message 的 SHA-256，足以区分拒绝类别 |

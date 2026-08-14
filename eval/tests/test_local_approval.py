@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import socket
@@ -2604,32 +2606,45 @@ class TokenCensusTests(unittest.TestCase):
 
         return get
 
-    def _run(self, config: RuntimeConfig, *, output: Path, counter):
+    def _run(self, config: RuntimeConfig, *, output: Path, counter=None, free_port=True):
         lease = runtime_bridge.WatchdogLease(token="e" * 48)
         guard = mock.Mock()
         guard.is_held.return_value = True
-        with mock.patch(
-            "rondo_eval.local_approval.token_census.inspect_runtime",
-            side_effect=lambda _config, _settings: RuntimeInspection(
-                "runtime_ready",
-                Path("/fake/llama-server"),
-                "fixture CUDA runtime",
-                "b" * 64,
-                LLAMA_CPP_CUDA_CAPABILITY,
-                model_backed.MODEL_BACKED_NOT_RUN,
+        arguments = {
+            "output_path": output,
+            "popen": _FakeServerProcess(),
+            "watchdog_factory": lambda: runtime_bridge.WatchdogProof(
+                lease=lease, guard=guard
             ),
-        ):
-            return token_census.run_census(
-                config,
-                output_path=output,
-                popen=_FakeServerProcess(),
-                watchdog_factory=lambda: runtime_bridge.WatchdogProof(
-                    lease=lease, guard=guard
-                ),
-                gpu_sampler=_FakeGpuSampler(),
-                http_get=self._http(),
-                count=counter,
+            "gpu_sampler": _FakeGpuSampler(),
+            "http_get": self._http(),
+        }
+        if counter is not None:
+            arguments["count"] = counter
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "rondo_eval.local_approval.token_census.inspect_runtime",
+                    side_effect=lambda _config, _settings: RuntimeInspection(
+                        "runtime_ready",
+                        Path("/fake/llama-server"),
+                        "fixture CUDA runtime",
+                        "b" * 64,
+                        LLAMA_CPP_CUDA_CAPABILITY,
+                        model_backed.MODEL_BACKED_NOT_RUN,
+                    ),
+                )
             )
+            if not free_port:
+                # The test's own fake server holds the configured port, so the
+                # port checks would describe the harness rather than the run.
+                stack.enter_context(
+                    mock.patch.object(token_census, "_require_free_port", lambda *_: None)
+                )
+                stack.enter_context(
+                    mock.patch.object(token_census, "_port_released", lambda *_: True)
+                )
+            return token_census.run_census(config, **arguments)
 
     def test_complete_set_is_required_and_deduplicated(self) -> None:
         config = self._config()
@@ -2656,6 +2671,10 @@ class TokenCensusTests(unittest.TestCase):
             token_census.collect_evidence_inputs(config, expected_count=3)
         self.assertEqual(error.exception.code, "evidence_run_record_missing")
 
+    @staticmethod
+    def _is_probe(body: bytes) -> bool:
+        return "census endpoint probe policy" in body.decode("utf-8")
+
     def test_fit_boundaries_and_declared_percentiles(self) -> None:
         self.assertEqual(token_census.CENSUS_MAX_OUTPUT_TOKENS, 512)
         self.assertEqual(token_census.fit_results(3584), {"4k": True, "8k": True})
@@ -2669,30 +2688,30 @@ class TokenCensusTests(unittest.TestCase):
         self.assertEqual(token_census.percentile(counts, 100), 400)
 
         records = [
-            {"e_final_sha256": f"{index:064x}", "request_shape": "standard",
-             "status": "counted", "input_tokens": tokens,
-             "fits": token_census.fit_results(tokens)}
+            {"e_final_sha256": f"{index:064x}", "status": "counted",
+             "input_tokens": tokens, "fits": token_census.fit_results(tokens)}
             for index, tokens in enumerate([3584, 3585, 7681])
         ]
-        rejected = {
+        refused = {
             "e_final_sha256": f"{9:064x}",
-            "request_shape": "responses_lite",
-            "status": "rejected",
-            "rejected_by": {
+            "status": "refused",
+            "refusal": {
                 "http_status": 400,
                 "error_type": "invalid_request_error",
-                "message": "item['content'] is not an array",
+                "message_sha256": "c" * 64,
             },
         }
-        summary = token_census.summarize(records + [rejected])
+        shapes = {"responses_lite": 4}
+        summary = token_census.summarize(records + [refused], request_shapes=shapes)
         # Every archived input is reported; statistics cover the counted ones.
         self.assertEqual(summary["evidence_count"], 4)
         self.assertEqual(summary["counted"], 3)
-        self.assertEqual(summary["rejected"], 1)
+        self.assertEqual(summary["refused"], 1)
         self.assertEqual(
-            summary["rejection_reasons"],
-            {"400 invalid_request_error: item['content'] is not an array": 1},
+            summary["refusal_classes"],
+            {f"400 invalid_request_error {'c' * 64}": 1},
         )
+        self.assertEqual(summary["statistics_scope"], "counted inputs only")
         self.assertEqual(summary["input_tokens"]["min"], 3584)
         self.assertEqual(summary["input_tokens"]["max"], 7681)
         self.assertEqual(summary["context_windows"]["4k"], {
@@ -2702,31 +2721,39 @@ class TokenCensusTests(unittest.TestCase):
             "context_size": 8192, "fits": 2, "does_not_fit": 1
         })
         with self.assertRaises(token_census.CensusError) as empty:
-            token_census.summarize([rejected])
+            token_census.summarize([refused], request_shapes=shapes)
         self.assertEqual(empty.exception.code, "no_input_was_counted")
 
     def test_document_is_stable_and_rejects_colliding_records(self) -> None:
         records = [
-            {"e_final_sha256": f"{index:064x}", "request_shape": "responses_lite",
-             "status": "counted", "input_tokens": tokens,
-             "fits": token_census.fit_results(tokens)}
+            {"e_final_sha256": f"{index:064x}", "status": "counted",
+             "input_tokens": tokens, "fits": token_census.fit_results(tokens)}
             for index, tokens in enumerate([9000, 4000, 5313])
         ]
+        shapes = {"responses_lite": 3}
         identity = {"serve_config_sha256": "a" * 64}
         anchor = {"e_final_sha256": records[2]["e_final_sha256"], "input_tokens": 5313}
         first = token_census.build_document(
-            identity=identity, anchor=anchor, records=records
+            identity=identity, anchor=anchor, records=records, request_shapes=shapes
         )
         second = token_census.build_document(
-            identity=identity, anchor=anchor, records=list(reversed(records))
+            identity=identity,
+            anchor=anchor,
+            records=list(reversed(records)),
+            request_shapes=shapes,
         )
         self.assertEqual(json.dumps(first, sort_keys=True), json.dumps(second, sort_keys=True))
+        self.assertEqual(first["status"], "complete")
+        self.assertEqual(first["missing_counts"], 0)
         without_digest = {key: value for key, value in first.items() if key != "digest"}
         self.assertEqual(first["digest"], token_census._canonical_digest(without_digest))
 
         with self.assertRaises(token_census.CensusError) as collision:
             token_census.build_document(
-                identity=identity, anchor=anchor, records=records + [records[0]]
+                identity=identity,
+                anchor=anchor,
+                records=records + [records[0]],
+                request_shapes=shapes,
             )
         self.assertEqual(collision.exception.code, "record_digest_collision")
 
@@ -2736,6 +2763,8 @@ class TokenCensusTests(unittest.TestCase):
         calls: list[bytes] = []
 
         def counter(_settings, body: bytes) -> int:
+            if self._is_probe(body):
+                return 43
             calls.append(body)
             return token_census.ANCHOR_INPUT_TOKENS - 1
 
@@ -2760,6 +2789,8 @@ class TokenCensusTests(unittest.TestCase):
             payload = json.loads(body)
             self.assertEqual(payload["max_output_tokens"], 512)
             self.assertNotIn("tools", payload)
+            if self._is_probe(body):
+                return 43
             bodies.append(body)
             return values[len(bodies) - 1]
 
@@ -2767,6 +2798,7 @@ class TokenCensusTests(unittest.TestCase):
             summary = self._run(config, output=output, counter=counter)
         self.assertEqual(len(bodies), 3)
         self.assertEqual(summary["status"], "complete")
+        self.assertEqual(summary["missing_counts"], 0)
         self.assertEqual(summary["anchor_input_tokens"], token_census.ANCHOR_INPUT_TOKENS)
         self.assertTrue(all(summary["cleanup"].values()))
 
@@ -2782,50 +2814,19 @@ class TokenCensusTests(unittest.TestCase):
         )
         for record in document["records"]:
             self.assertEqual(
-                set(record),
-                {"e_final_sha256", "request_shape", "status", "input_tokens", "fits"},
+                set(record), {"e_final_sha256", "status", "input_tokens", "fits"}
             )
         self.assertEqual(document["summary"]["context_windows"]["4k"]["fits"], 0)
         self.assertEqual(document["summary"]["context_windows"]["8k"]["fits"], 2)
         self.assertEqual(document["identity"]["generated_tokens"], 0)
 
-    def test_a_refused_input_is_recorded_without_stopping_the_census(self) -> None:
-        config = self._config()
-        output = self.root / "eval/results/baselines/census.json"
-        calls: list[bytes] = []
-
-        def counter(_settings, body: bytes) -> int:
-            calls.append(body)
-            if len(calls) == 1:
-                return token_census.ANCHOR_INPUT_TOKENS
-            if len(calls) == 2:
-                raise token_census.RequestRejected(
-                    {
-                        "http_status": 400,
-                        "error_type": "invalid_request_error",
-                        "message": "item['content'] is not an array",
-                    }
-                )
-            return 4001
-
-        with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
-            summary = self._run(config, output=output, counter=counter)
-        self.assertEqual(summary["summary"]["evidence_count"], 3)
-        self.assertEqual(summary["summary"]["counted"], 2)
-        self.assertEqual(summary["summary"]["rejected"], 1)
-
-        document = json.loads(output.read_text(encoding="utf-8"))
-        statuses = sorted(record["status"] for record in document["records"])
-        self.assertEqual(statuses, ["counted", "counted", "rejected"])
-        refused = next(r for r in document["records"] if r["status"] == "rejected")
-        self.assertNotIn("input_tokens", refused)
-        self.assertEqual(refused["rejected_by"]["http_status"], 400)
-
     def test_a_refused_anchor_stops_the_census(self) -> None:
         config = self._config()
         output = self.root / "eval/results/baselines/census.json"
 
-        def counter(_settings, _body: bytes) -> int:
+        def counter(_settings, body: bytes) -> int:
+            if self._is_probe(body):
+                return 43
             raise token_census.RequestRejected({"http_status": 400})
 
         with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
@@ -2833,6 +2834,146 @@ class TokenCensusTests(unittest.TestCase):
                 self._run(config, output=output, counter=counter)
         self.assertEqual(error.exception.code, "anchor_request_rejected")
         self.assertFalse(output.exists())
+
+    def _server_config(self, fake: FakeApprovalServer) -> RuntimeConfig:
+        return RuntimeConfig(
+            self.paths,
+            _local_data(
+                fake.base_url,
+                model_path_value="eval-data/models/fixture.gguf",
+                model_sha256_value=self.model_sha256,
+                server_overrides={"binary": model_backed.CUDA_SERVER_RELATIVE_PATH},
+            ),
+            "0" * 64,
+        )
+
+    @staticmethod
+    def _error(status: int, error_type: str, message: str) -> tuple[int, dict]:
+        return status, {"error": {"message": message, "type": error_type, "code": status}}
+
+    def test_only_the_adapter_refusal_is_charged_to_the_sample(self) -> None:
+        """A generic 500 is a census failure, not a property of one input."""
+
+        queue: list[tuple[int, object]] = []
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            settings = settings_from_config(self._server_config(fake))
+            body = json.dumps({"input": ["fixture"]}).encode("utf-8")
+
+            queue.append((200, {"input_tokens": 77}))
+            self.assertEqual(token_census.count_input_tokens(settings, body), 77)
+
+            queue.append(
+                self._error(400, "invalid_request_error", "item['content'] is not an array")
+            )
+            with self.assertRaises(token_census.RequestRejected) as refused:
+                token_census.count_input_tokens(settings, body)
+            facts = refused.exception.facts
+            self.assertEqual(facts["http_status"], 400)
+            self.assertEqual(facts["error_type"], "invalid_request_error")
+            # Only a digest of the server text survives, never the text itself.
+            self.assertNotIn("message", facts)
+            self.assertEqual(
+                facts["message_sha256"],
+                hashlib.sha256(b"item['content'] is not an array").hexdigest(),
+            )
+
+            for status, error_type in ((500, "server_error"), (503, "unavailable_error")):
+                queue.append(self._error(status, error_type, "internal failure"))
+                with self.assertRaises(token_census.CensusError) as failure:
+                    token_census.count_input_tokens(settings, body)
+                self.assertEqual(failure.exception.code, "count_endpoint_unavailable")
+                self.assertEqual(failure.exception.facts["http_status"], status)
+                self.assertNotIn("message", failure.exception.facts)
+
+    def test_incomplete_census_is_reported_and_never_published(self) -> None:
+        """One refused input keeps the run from claiming a census result."""
+
+        output = self.root / "eval-data/local-approval/census-incomplete.json"
+        queue = [
+            (200, {"input_tokens": 43}),                       # opening probe
+            (200, {"input_tokens": token_census.ANCHOR_INPUT_TOKENS}),
+            self._error(400, "invalid_request_error", "item['content'] is not an array"),
+            (200, {"input_tokens": 43}),                       # probe after the refusal
+            (200, {"input_tokens": 9000}),
+        ]
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            config = self._server_config(fake)
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                summary = self._run(config, output=output, free_port=False)
+        self.assertEqual(summary["status"], "incomplete")
+        self.assertEqual(summary["missing_counts"], 1)
+        self.assertEqual(summary["summary"]["counted"], 2)
+        self.assertEqual(summary["summary"]["refused"], 1)
+
+        document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(document["status"], "incomplete")
+        refused = next(r for r in document["records"] if r["status"] == "refused")
+        self.assertNotIn("input_tokens", refused)
+        self.assertNotIn("fits", refused)
+        self.assertNotIn("message", refused["refusal"])
+        self.assertNotIn(
+            "item['content']", output.read_text(encoding="utf-8")
+        )
+
+        # The tracked baseline name is reserved for a complete census.
+        with self.assertRaises(token_census.CensusError) as published:
+            token_census.write_document(
+                self.root / token_census.RESULT_RELATIVE_PATH, document
+            )
+        self.assertEqual(
+            published.exception.code, "incomplete_census_must_not_be_published"
+        )
+
+    def test_cli_exit_code_separates_complete_from_incomplete(self) -> None:
+        with contextlib.ExitStack() as stack:
+            paths = stack.enter_context(mock.patch.object(token_census, "RepoPaths"))
+            load = stack.enter_context(
+                mock.patch.object(token_census, "load_runtime_config")
+            )
+            run = stack.enter_context(mock.patch.object(token_census, "run_census"))
+            paths.discover.return_value = self.paths
+            load.return_value = mock.Mock(paths=self.paths)
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            run.return_value = {"status": "incomplete", "missing_counts": 1}
+            self.assertEqual(token_census.main(["--repo", str(self.root)]), INFRA_ERROR)
+            run.return_value = {"status": "complete", "missing_counts": 0}
+            self.assertEqual(token_census.main(["--repo", str(self.root)]), SUCCESS)
+
+    def test_probe_failure_after_a_refusal_fails_the_census(self) -> None:
+        """A service that stops answering is not a run of unservable inputs."""
+
+        output = self.root / "eval-data/local-approval/census-probe.json"
+        queue = [
+            (200, {"input_tokens": 43}),
+            (200, {"input_tokens": token_census.ANCHOR_INPUT_TOKENS}),
+            self._error(400, "invalid_request_error", "item['content'] is not an array"),
+            self._error(500, "server_error", "internal failure"),
+        ]
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            config = self._server_config(fake)
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                with self.assertRaises(token_census.CensusError) as error:
+                    self._run(config, output=output, free_port=False)
+        self.assertEqual(error.exception.code, "count_endpoint_probe_failed")
+        self.assertFalse(output.exists())
+
+    def test_no_private_directory_survives_a_failing_precondition(self) -> None:
+        config = self._config()
+        private_root = self.root / "eval-data/local-approval"
+        with mock.patch.object(
+            token_census,
+            "build_serve_command",
+            side_effect=ConfigError("frozen chat template is unavailable"),
+        ):
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                with self.assertRaises(ConfigError):
+                    self._run(
+                        config,
+                        output=self.root / "eval/results/baselines/census.json",
+                        counter=lambda _settings, _body: 1,
+                    )
+        leftovers = list(private_root.glob("census-*")) if private_root.exists() else []
+        self.assertEqual(leftovers, [])
 
 
 if __name__ == "__main__":
