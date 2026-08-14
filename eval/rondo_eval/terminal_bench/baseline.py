@@ -1776,11 +1776,20 @@ def _valid_campaign_budget(
         4: {HISTORICAL_SCHEMA_V4_CAMPAIGN_CAP_USD},
         5: {CAMPAIGN_CAP_USD},
         6: {CAMPAIGN_CAP_USD},
-        FAIR_COMPARISON_SCHEMA_VERSION: {CAMPAIGN_CAP_USD},
-    }[schema_version]
+    }.get(schema_version, set())
+    if schema_version == FAIR_COMPARISON_SCHEMA_VERSION:
+        # A fair-comparison campaign carries no continuation, so it starts with
+        # no inherited spend and its own separately authorized cap.  The
+        # historical envelope stays the ceiling so a typo cannot widen it.
+        cap_valid = (
+            Decimal(0) < cap <= CAMPAIGN_CAP_USD
+            and value["campaign_cap_usd"] == _money(cap)
+            and prior == Decimal(0)
+        )
+    else:
+        cap_valid = cap in valid_caps and Decimal(0) <= prior < cap
     return (
-        cap in valid_caps
-        and Decimal(0) <= prior < cap
+        cap_valid
         and value["run_cap_usd"] == _money(RUN_CAP_USD)
         and value["max_run_slots"] == expected_slots
         and value["maximum_legal_request_reservation_usd"]
@@ -1798,6 +1807,14 @@ def _parse_continuation_references(
     if schema_version < 3:
         if value != []:
             raise BaselineError("historical campaign unexpectedly has continuation data")
+        return ()
+    if schema_version == FAIR_COMPARISON_SCHEMA_VERSION:
+        # No v1--v22 result was produced under the fair-comparison conditions,
+        # so none of them may enter a v7 aggregate.
+        if value != []:
+            raise BaselineError(
+                "fair-comparison campaigns cannot inherit historical continuation"
+            )
         return ()
     if not isinstance(value, list) or len(value) > 80:
         raise BaselineError("campaign continuation list is invalid")

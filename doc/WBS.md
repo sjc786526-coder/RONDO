@@ -40,8 +40,10 @@
 六项设施合同已全部落地为 campaign schema **v7** 的机械约束（catalog 对称与双来源 provenance、
 由 stub receipt 预冻结并对第一侧同样生效的请求硬门、与 campaign 事实互相绑定的运行条件、按任务交错调度、
 三层 assessment 与双向条件加跑入聚合、pilot 预冻结的奇数重复合同、产品身份窄入口）。
-唯一的 successor 生成入口只能产出 v7，v1—v6 为冻结历史、行为不变。完成证据见
-`doc/WBS-COMPLETED.md`，实现细节见 `doc/WBS/eval-benchmark.md`。
+receipt 由 `just eval-b7-preflight-receipts` 驱动两侧冻结二进制在本地 stub 上产出，付费 worker 启动时
+一次性校验全部任务的 receipt，因此硬门在 wire canary 之前生效。唯一的 successor 生成入口只能产出 v7，
+且不继承任何 v1—v22 continuation 与历史 prior，cap 必须单独授权传入；v1—v6 为冻结历史、行为不变。
+完成证据见 `doc/WBS-COMPLETED.md`，实现细节见 `doc/WBS/eval-benchmark.md`。
 
 **闭合的是设施，不是结论**：本工作包未跑新 campaign，也未产生任何可归因的能力比较结果。
 新的 B7 campaign 合同仍需单独冻结与授权，不得复用 v1—v22 的任何 ID。

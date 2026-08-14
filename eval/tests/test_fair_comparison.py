@@ -24,12 +24,15 @@ from rondo_eval.config import RepoPaths
 from rondo_eval.contracts import ContractError, Product, Side, product_for_side
 from rondo_eval.terminal_bench.baseline import (
     BASE_ROUNDS,
+    CampaignLockRegistration,
     FAIR_COMPARISON_SCHEMA_VERSION,
     BaselineError,
     BaselineRun,
     BaselineStatus,
     ConditionalRun,
     _parse_comparison_block,
+    _parse_continuation_references,
+    _valid_campaign_budget,
     assess_baseline,
     campaign_baseline_contract,
     campaign_slot_total,
@@ -51,12 +54,14 @@ from rondo_eval.fair_comparison import (
     project_task_independent,
     stub_preflight,
     task_independent_contract,
+    valid_task_id,
 )
-from rondo_eval.terminal_bench import baseline_cli, baseline_identity
+from rondo_eval.terminal_bench import baseline_cli, baseline_identity, preflight_producer
 from rondo_eval.terminal_bench.baseline_cli import CampaignExecutionError
 from rondo_eval.terminal_bench.baseline_identity import (
     CampaignIdentityGenerationError,
     generate_successor_lock,
+    validate_successor_run_range,
 )
 
 
@@ -102,6 +107,14 @@ _DEVELOPER_PREFIX = {
         }
     ],
 }
+
+
+class _StubTask:
+    """The task fields the preflight producer reads."""
+
+    def __init__(self, task_id: str) -> None:
+        self.task_id = task_id
+        self.image_digest = "sha256:" + "1" * 64
 
 
 def _request(
@@ -240,7 +253,7 @@ class SymmetryPreflightTests(unittest.TestCase):
             )
         self.assertEqual(
             caught.exception.reasons,
-            ("cross_side_asymmetry", "task_independent_stable_input_prefix_differs"),
+            ("task_independent_stable_input_prefix_differs", "cross_side_asymmetry"),
         )
 
     def test_full_request_digests_are_recorded_but_never_asserted_equal(self) -> None:
@@ -366,7 +379,7 @@ class ProxyPreflightGateTests(unittest.TestCase):
         )
         self.assertEqual(status, 409)
         self.assertEqual(
-            payload["error"]["code"], "cross_side_asymmetry"
+            payload["error"]["code"], "task_independent_stable_input_prefix_differs"
         )
         self.assertEqual(self.transport.opens, 0)
         self.assertEqual(self.ledger.snapshot()["runs"]["preflight-r1"]["requests"], {})
@@ -673,6 +686,9 @@ class _CampaignFixture:
             schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
             budget={
                 **base.budget,
+                # A v7 campaign starts fresh: its own cap, no inherited spend.
+                "campaign_cap_usd": "200.000000",
+                "prior_estimated_usd": "0.000000",
                 "max_run_slots": campaign_slot_total(
                     task_count=10,
                     max_attempts=4,
@@ -981,7 +997,7 @@ class PreflightReceiptTests(unittest.TestCase):
         values: dict[str, object] = {
             "campaign_id": "p2-b7-canary-baseline-v23",
             "campaign_lock_sha256": "a" * 64,
-            "task_id": "terminal-bench-fix-git",
+            "task_id": "terminal-bench/fix-git",
             "bundle_manifest_sha256": dict(self.bundles),
             "requests_by_side": {
                 Side.RONDO: {"main": _request(prompt="rondo")},
@@ -1017,21 +1033,21 @@ class PreflightReceiptTests(unittest.TestCase):
         receipt = self._receipt()
         preflight = SymmetryPreflight(require_expectation=True)
         receipt.seed(preflight)
-        self.assertEqual(preflight.seeded_keys, (("terminal-bench-fix-git", "main"),))
+        self.assertEqual(preflight.seeded_keys, (("terminal-bench/fix-git", "main"),))
         # The first arrival is no longer free: it must match the frozen contract.
         with self.assertRaises(FairComparisonError) as caught:
             preflight.register(
-                task_id="terminal-bench-fix-git",
+                task_id="terminal-bench/fix-git",
                 role="main",
                 side=Side.RONDO,
                 request=_request(instructions="drifted base instructions"),
             )
         self.assertEqual(
             caught.exception.reasons,
-            ("frozen_contract_asymmetry", "task_independent_instructions_differs"),
+            ("task_independent_instructions_differs", "frozen_contract_asymmetry"),
         )
         preflight.register(
-            task_id="terminal-bench-fix-git",
+            task_id="terminal-bench/fix-git",
             role="main",
             side=Side.RONDO,
             request=_request(prompt="any task body"),
@@ -1041,7 +1057,7 @@ class PreflightReceiptTests(unittest.TestCase):
         preflight = SymmetryPreflight(require_expectation=True)
         with self.assertRaises(FairComparisonError) as caught:
             preflight.register(
-                task_id="terminal-bench-fix-git",
+                task_id="terminal-bench/fix-git",
                 role="guardian",
                 side=Side.RONDO,
                 request=_request(guardian=True),
@@ -1055,7 +1071,7 @@ class PreflightReceiptTests(unittest.TestCase):
         binding: dict[str, object] = {
             "campaign_id": "p2-b7-canary-baseline-v23",
             "campaign_lock_sha256": "a" * 64,
-            "task_id": "terminal-bench-fix-git",
+            "task_id": "terminal-bench/fix-git",
             "bundle_manifest_sha256": dict(self.bundles),
         }
         receipt.require_binding(**binding)  # type: ignore[arg-type]
@@ -1115,7 +1131,13 @@ class PaidRunnerPreflightGateTests(unittest.TestCase):
         )
         self.assertEqual(path.parent.name, "preflight")
         self.assertEqual(path.parent.parent.name, identity.campaign_id)
-        self.assertEqual(path.name, f"{task.task_id.split('/')[-1]}.json")
+        self.assertTrue(path.name.startswith(f"{task.task_id.split('/')[-1]}-"))
+        self.assertTrue(path.name.endswith(".json"))
+        # Namespaced IDs sharing a leaf must not share a receipt file.
+        other = baseline_cli.preflight_receipt_path(
+            RepoPaths.discover(Path.cwd()), identity, "other-suite/" + task.task_id.split("/")[-1]
+        )
+        self.assertNotEqual(path.name, other.name)
 
 
 class SuccessorIdentityTests(unittest.TestCase):
@@ -1143,6 +1165,7 @@ class SuccessorIdentityTests(unittest.TestCase):
                     run_id_date="20260901",
                     run_id_sequence_base=500000001,
                     comparison=block,
+                    campaign_cap_usd=Decimal("100.000000"),
                 )
 
     def test_the_generator_requires_the_comparison_contract(self) -> None:
@@ -1166,6 +1189,8 @@ class SuccessorIdentityTests(unittest.TestCase):
                     "500000001",
                     "--comparison-contract",
                     "/nonexistent/comparison.json",
+                    "--campaign-cap-usd",
+                    "100.000000",
                 ]
             )
 
@@ -1374,6 +1399,338 @@ class BidirectionalRepeatTests(unittest.TestCase):
         legacy = assess_baseline(self.tasks, base, ())
         self.assertEqual(legacy.conditional_tasks, ())
         self.assertEqual(legacy.delta, 1)
+
+
+class NamespacedTaskIdTests(unittest.TestCase):
+    """Regression: real TB task IDs are namespaced and must hold receipts.
+
+    The first fix round only exercised ``terminal-bench-fix-git``, which is not
+    a task any campaign actually runs, so a validator that rejected ``/`` made
+    the whole facility unusable while every test still passed.
+    """
+
+    def test_the_frozen_canary_task_id_survives_the_whole_receipt_path(self) -> None:
+        task_id = "terminal-bench/fix-git"
+        receipt = preflight_receipt_from_stub_run(
+            campaign_id="p2-b7-canary-baseline-v23",
+            campaign_lock_sha256="a" * 64,
+            task_id=task_id,
+            bundle_manifest_sha256={"rondo": "1" * 64, "codex": "2" * 64},
+            requests_by_side={
+                Side.RONDO: {"main": _request(prompt="rondo body")},
+                Side.CODEX: {"main": _request(prompt="codex body")},
+            },
+        )
+        restored = PreflightReceipt.from_dict(receipt.to_dict())
+        self.assertEqual(restored.task_id, task_id)
+        preflight = SymmetryPreflight(require_expectation=True)
+        restored.seed(preflight)
+        preflight.register(
+            task_id=task_id, role="main", side=Side.RONDO, request=_request()
+        )
+
+    def test_path_traversal_shapes_are_still_refused(self) -> None:
+        for task_id in (
+            "terminal-bench/../etc",
+            "/terminal-bench/fix-git",
+            "terminal-bench/fix-git/extra",
+            "terminal-bench//fix-git",
+            "Terminal-Bench/Fix-Git",
+            "terminal-bench/" + "x" * 200,
+        ):
+            with self.subTest(task_id=task_id):
+                self.assertFalse(valid_task_id(task_id))
+
+
+class PreflightProducerTests(unittest.TestCase):
+    """The receipt must come from an entry point that really drives both sides."""
+
+    tasks = ("terminal-bench/fix-git", "terminal-bench/db-wal-recovery")
+
+    class _Identity:
+        """The narrow slice of a campaign the producer reads."""
+
+        enforces_fair_comparison = True
+        campaign_id = "p2-b7-canary-baseline-v23"
+        lock_sha256 = "a" * 64
+        bundles = {"rondo": {"manifest_sha256": "1" * 64}, "codex": {"manifest_sha256": "2" * 64}}
+
+        def __init__(self, tasks: tuple[str, ...]) -> None:
+            self.catalog = type(
+                "Catalog",
+                (),
+                {"tasks": tuple(_StubTask(task_id) for task_id in tasks)},
+            )()
+
+    def _paths(self, root: Path) -> RepoPaths:
+        return replace(RepoPaths.discover(Path.cwd()), common_root=root)
+
+    def test_the_stub_server_captures_bodies_and_refuses_unauthorized_calls(self) -> None:
+        with preflight_producer.PreflightCaptureServer() as server:
+            base = server.docker_base_url.replace(
+                "host.docker.internal", "127.0.0.1"
+            )
+            body = json.dumps({"model": "gpt-5.6-sol", "stream": True}).encode()
+            with self.assertRaises(HTTPError) as caught:
+                urlopen(
+                    Request(f"{base}/responses", data=body, method="POST"),
+                    timeout=10,
+                )
+            self.assertEqual(caught.exception.code, 401)
+            self.assertEqual(server.bodies, ())
+            response = urlopen(
+                Request(
+                    f"{base}/responses",
+                    data=body,
+                    method="POST",
+                    headers={
+                        "Authorization": (
+                            f"Bearer {preflight_producer.PREFLIGHT_STUB_BEARER}"
+                        )
+                    },
+                ),
+                timeout=10,
+            )
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"response.completed", response.read())
+            self.assertEqual(server.bodies, (body,))
+            self.assertEqual(server.rejections, ("unauthorized",))
+
+    def test_it_writes_one_bound_receipt_per_task(self) -> None:
+        identity = self._Identity(self.tasks)
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._paths(Path(directory))
+            written = preflight_producer.produce_preflight_receipts(
+                paths,
+                identity=identity,
+                seccomp_profile=Path("/dev/null"),
+                manifests={Side.RONDO: object(), Side.CODEX: object()},
+                counter=None,
+                lock_guard=None,
+                lease=None,
+                config=None,
+                capture=lambda **kwargs: {"main": _request(prompt=kwargs["side"].value)},
+            )
+            self.assertEqual(len(written), 2)
+            for path, task_id in zip(written, self.tasks):
+                receipt = PreflightReceipt.from_dict(json.loads(path.read_bytes()))
+                receipt.require_binding(
+                    campaign_id=identity.campaign_id,
+                    campaign_lock_sha256=identity.lock_sha256,
+                    task_id=task_id,
+                    bundle_manifest_sha256={
+                        side: str(bundle["manifest_sha256"])
+                        for side, bundle in identity.bundles.items()
+                    },
+                )
+
+    def test_an_asymmetric_pair_writes_nothing(self) -> None:
+        identity = self._Identity(self.tasks[:1])
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._paths(Path(directory))
+            with self.assertRaisesRegex(
+                preflight_producer.PreflightProductionError, "asymmetric on the stub"
+            ):
+                preflight_producer.produce_preflight_receipts(
+                    paths,
+                    identity=identity,
+                    seccomp_profile=Path("/dev/null"),
+                    manifests={Side.RONDO: object(), Side.CODEX: object()},
+                    counter=None,
+                    lock_guard=None,
+                    lease=None,
+                    config=None,
+                    capture=lambda **kwargs: {
+                        "main": _request(
+                            instructions=(
+                                "base"
+                                if kwargs["side"] is Side.RONDO
+                                else "drifted"
+                            )
+                        )
+                    },
+                )
+            self.assertEqual(
+                list((paths.common_root / "eval-data/campaigns").rglob("*.json")), []
+            )
+
+    def test_a_receipt_is_never_silently_overwritten(self) -> None:
+        identity = self._Identity(self.tasks[:1])
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._paths(Path(directory))
+            arguments = {
+                "identity": identity,
+                "seccomp_profile": Path("/dev/null"),
+                "manifests": {Side.RONDO: object(), Side.CODEX: object()},
+                "counter": None,
+                "lock_guard": None,
+                "lease": None,
+                "config": None,
+                "capture": lambda **kwargs: {"main": _request()},
+            }
+            preflight_producer.produce_preflight_receipts(paths, **arguments)
+            with self.assertRaisesRegex(
+                preflight_producer.PreflightProductionError, "already exists"
+            ):
+                preflight_producer.produce_preflight_receipts(paths, **arguments)
+
+    def test_historical_campaigns_cannot_produce_receipts(self) -> None:
+        identity = _CampaignFixture.v6()
+        with self.assertRaisesRegex(
+            preflight_producer.PreflightProductionError, "only fair-comparison"
+        ):
+            preflight_producer.produce_preflight_receipts(
+                RepoPaths.discover(Path.cwd()),
+                identity=identity,
+                seccomp_profile=Path("/dev/null"),
+                manifests={},
+                counter=None,
+                lock_guard=None,
+                lease=None,
+                config=None,
+                capture=lambda **kwargs: {},
+            )
+
+
+class CampaignStartupReceiptGateTests(unittest.TestCase):
+    """Receipts are checked once at startup, ahead of the paid wire canary."""
+
+    def test_a_missing_receipt_blocks_the_whole_campaign(self) -> None:
+        identity = _CampaignFixture.v7()
+        with self.assertRaisesRegex(
+            CampaignExecutionError, "stub preflight receipt is missing"
+        ):
+            baseline_cli._require_all_preflight_receipts(
+                RepoPaths.discover(Path.cwd()), identity
+            )
+
+    def test_historical_campaigns_are_unaffected(self) -> None:
+        baseline_cli._require_all_preflight_receipts(
+            RepoPaths.discover(Path.cwd()), _CampaignFixture.v6()
+        )
+
+    def test_the_gate_runs_before_the_wire_canary(self) -> None:
+        source = inspect.getsource(baseline_cli._worker_step_main)
+        self.assertIn("_require_all_preflight_receipts", source)
+        self.assertNotIn("_execute_wire_canary", source)
+
+
+class SuccessorRunRangeTests(unittest.TestCase):
+    """A widened repeat contract widens the run-ID range that must be checked."""
+
+    def _registry(self) -> tuple:
+        return (
+            CampaignLockRegistration(
+                version=22,
+                path=Path("eval/locks/p2-b7-canary-baseline-v22.json"),
+                campaign_id="p2-b7-canary-baseline-v22",
+                batch_id="p2-b7-canary-sol-sol-v22",
+                run_id_date="20260901",
+                run_id_sequence_base=500000400,
+                max_run_slots=321,
+                lock_sha256="a" * 64,
+            ),
+        )
+
+    def test_five_repeats_catch_a_tail_collision_that_321_slots_missed(self) -> None:
+        registry = self._registry()
+        # 481 slots from 500000001 run into the historical block at 500000400.
+        slot_total = campaign_slot_total(
+            task_count=10, max_attempts=4, conditional_repeats_per_side=4
+        )
+        self.assertEqual(slot_total, 481)
+        validate_successor_run_range(
+            registry, run_id_date="20260901", run_id_sequence_base=500000001
+        )
+        with self.assertRaisesRegex(CampaignIdentityGenerationError, "collides"):
+            validate_successor_run_range(
+                registry,
+                run_id_date="20260901",
+                run_id_sequence_base=500000001,
+                slot_total=slot_total,
+            )
+
+    def test_an_invalid_slot_total_is_refused(self) -> None:
+        with self.assertRaisesRegex(
+            CampaignIdentityGenerationError, "slot total is invalid"
+        ):
+            validate_successor_run_range(
+                self._registry(),
+                run_id_date="20260901",
+                run_id_sequence_base=1,
+                slot_total=0,
+            )
+
+
+class SuccessorBudgetTests(unittest.TestCase):
+    """A v7 campaign gets its own authorized cap and inherits no spend."""
+
+    def test_the_generator_requires_an_authorized_cap(self) -> None:
+        parameter = inspect.signature(generate_successor_lock).parameters[
+            "campaign_cap_usd"
+        ]
+        self.assertEqual(parameter.default, inspect.Parameter.empty)
+        paths = RepoPaths.discover(Path.cwd())
+        frozen = {
+            "repeat_contract": RepeatContract(
+                3, AGGREGATION_STRICT_MAJORITY, "pilot"
+            ).to_dict(),
+            "comparison_conditions": ComparisonConditions(
+                eval_harness_commit="d" * 40,
+                upstream_timeout_seconds="120.000",
+                provider_profile_sha256="e" * 64,
+                catalog_artifact_sha256="c" * 64,
+                task_image_digests=(("terminal-bench/fix-git", "sha256:" + "1" * 64),),
+            ).to_dict(),
+            "catalog_identity": _CampaignFixture.catalog_identity(),
+            "product": Product.RONDO_LOCAL.value,
+        }
+        for cap in (Decimal("0"), Decimal("-1"), Decimal("1600.000001")):
+            with self.subTest(cap=cap), self.assertRaisesRegex(
+                CampaignIdentityGenerationError, "cap is not authorized"
+            ):
+                generate_successor_lock(
+                    paths,
+                    run_id_date="20260901",
+                    run_id_sequence_base=500000001,
+                    comparison=frozen,
+                    campaign_cap_usd=cap,
+                )
+
+    def test_a_v7_budget_may_not_carry_inherited_prior_spend(self) -> None:
+        identity = _CampaignFixture.v7()
+        self.assertTrue(
+            _valid_campaign_budget(
+                {**identity.budget, "campaign_cap_usd": "200.000000",
+                 "prior_estimated_usd": "0.000000"},
+                schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+                expected_max_run_slots=identity.budget["max_run_slots"],
+            )
+        )
+        self.assertFalse(
+            _valid_campaign_budget(
+                {**identity.budget, "campaign_cap_usd": "1600.000000",
+                 "prior_estimated_usd": "1136.113528"},
+                schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+                expected_max_run_slots=identity.budget["max_run_slots"],
+            )
+        )
+
+    def test_a_v7_lock_may_not_inherit_historical_continuation(self) -> None:
+        with self.assertRaisesRegex(BaselineError, "cannot inherit historical"):
+            _parse_continuation_references(
+                [{"chain_id": "base:ab-rondo-1:terminal-bench/fix-git"}],
+                schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+                successor_timeout=Decimal("120.000"),
+            )
+        self.assertEqual(
+            _parse_continuation_references(
+                [],
+                schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+                successor_timeout=Decimal("120.000"),
+            ),
+            (),
+        )
 
 
 if __name__ == "__main__":

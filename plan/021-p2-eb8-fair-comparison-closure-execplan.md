@@ -104,7 +104,7 @@
 ### 当前验收状态
 
 - `just eval-lock`：通过。
-- `just eval-test`：通过（`Ran 552 tests ... OK`）。
+- `just eval-test`：通过（`Ran 565 tests ... OK`）。
 - 全程未调用真实 API、未运行 Docker、未加载真实模型，未创建新 campaign identity。
 
 ### 交接边界
@@ -126,3 +126,9 @@
 | 009 | successor 生成器只产 schema v7 并强制传入冻结的 comparison 合同 | 原入口硬编码 v6，可造出绕过全部 v7 门禁的合法 campaign | `baseline_identity.py`、`justfile` | 已采纳 |
 | 010 | 声明的运行条件必须与 campaign 自身权威字段等值，catalog provenance 全字段格式校验 | 否则 lock 里可以冻结一份与自身矛盾、实际未生效的比较合同 | `baseline.py`、`fair_comparison.py` | 已采纳 |
 | 011 | v7 的条件重复触发改为任一方向的跨侧差异，方向性兜底仍单向 | 单向触发会让反方向差异绕过重复合同，`delta` 混合多数结果与单次结果 | `baseline.py`、`baseline_cli.py` | 已采纳 |
+| 012 | 任务 ID 允许一层命名空间分隔符，receipt 文件名带 task ID 摘要 | 正式 TB 任务 ID 形如 `terminal-bench/fix-git`，原正则使任何正式任务都无法持有 receipt；只取 leaf 又会让不同命名空间的同名任务共享文件 | `fair_comparison.py`、`baseline_cli.py` | 已采纳 |
+| 013 | receipt 产出做成独立入口，与付费路径共用 RunSpec 与 catalog 投影函数 | 只有共用同一构造代码，stub 冻结的请求才不会与被付费的请求分叉；否则 receipt 会认证一份付费运行并不具备的对称性 | `preflight_producer.py`、`live.py`、`justfile` | 已采纳 |
+| 014 | 全部任务的 receipt 在 worker 启动时一次性校验，而不是逐 slot 校验 | 逐 slot 校验发生在付费 wire canary 之后，届时已经产生真实费用 | `baseline_cli.py` | 已采纳 |
+| 015 | v7 不继承 continuation 与 prior，cap 由 `--campaign-cap-usd` 单独授权 | v1—v22 的结果没有共享 catalog、stub receipt、冻结 harness commit 与交错顺序，纳入 v7 聚合会直接破坏公平合同；沿用旧 prior/cap 也与"独立 cap、单独授权"矛盾 | `baseline_identity.py`、`baseline.py`、`justfile` | 已采纳 |
+| 016 | run ID 区间按冻结重复数算出的真实 slot 数校验 | 重复数 5/7/9 会把 slot 扩到 481/641/801，固定查 321 个 ID 会放行尾部与历史的重叠 | `baseline_identity.py` | 已采纳 |
+| 017 | `FairComparisonError.reasons` 改为最具体在前 | 代理 409 只能返回一个码，取首元素时原顺序给出的是 scope 而非合同要求的分区级原因 | `fair_comparison.py` | 已采纳 |

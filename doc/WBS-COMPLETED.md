@@ -522,6 +522,26 @@ standard/Lite 形态均补回归。
      harness commit 在执行时校验；catalog provenance 的 commit/blob/path/投影/override 目标全部格式与一致性校验。
   4. 条件重复原先只覆盖 RONDO fail / Codex pass，反方向差异会绕过重复合同。v7 起触发条件改为任一方向的
      跨侧差异；方向性兜底仍只检测 RONDO 全败/上游全过。
-- **验收**：`just eval-lock` 通过；`just eval-test` 552 项全通过（`test_fair_comparison` 共 62 项，
-  含四项修正的入口级回归与两条审查复现用例）。全程无真实 API、无 Docker、无真实模型，未创建新 campaign identity。
+- **二次验收后的五项修正**（GPT 复审仍 blocked，五项均已复现属实并修复）：
+  1. `_TASK_ID` 不允许 `/`，而正式 TB 任务 ID 形如 `terminal-bench/fix-git`，导致任何正式任务都无法生成或消费
+     receipt（设施不可用，非 fail-open）。放开命名空间分隔符，每段仍须以字母数字开头；receipt 文件名改为
+     `<leaf>-<task_id 摘要>` 以保持不同命名空间的任务不共享文件。receipt 测试全部改用正式带 `/` 的 ID。
+  2. 没有真正驱动双侧冻结二进制的 receipt 产出入口，且付费 wire canary 早于 receipt 校验。新增
+     `terminal_bench/preflight_producer.py` 与 `just eval-b7-preflight-receipts`：两侧走真实 Harbor/Docker 链路，
+     唯一可达端点是本地捕获 stub，原子写出 receipt；付费 worker 启动时一次性校验全部任务 receipt，位置在
+     wire canary 之前。stub 与付费路径共用 `campaign_terminal_bench_request()` 与 `project_shared_model_catalog()`，
+     receipt 冻结的请求不会与被付费的请求分叉。
+  3. successor 无条件继承 v22 的 25 条 continuation（既违反 v7 公平条件，又因 profile 已被剥离两个旧 catalog 字段
+     而必然以 `continued execution contract drifted` blocked），且仍继承旧 prior 与固定 1600 cap。v7 改为
+     continuation 恒为空（加载时强制）、prior 为 0、cap 由 `--campaign-cap-usd` 单独授权传入且不超过历史封顶；
+     写 lock 前用真实事实核对新 comparison（共享 catalog 复现、harness commit、task/image、provider profile）。
+     生成器侧的 continuation 继承代码已整体删除。
+  4. `validate_successor_run_range()` 固定只查 321 个 run ID，而 5/7/9 次重复会把 slot 扩到 481/641/801，
+     尾部与历史区间的重叠被放行。改为接收由冻结重复数算出的真实 slot 数并校验完整区间。
+  5. 代理 409 只返回 `frozen_contract_asymmetry` 等 scope 码而非合同要求的分区级原因。
+     `FairComparisonError.reasons` 改为最具体在前，409 现在直接返回 `task_independent_<partition>_differs`。
+  同时修正两处措辞不实：`stub_preflight()` 声称"carries a transport"（`SymmetryPreflight` 无 transport 字段），
+  以及 `preflight_cli` 输出里名义上的 `upstream_transport` 字段。
+- **验收**：`just eval-lock` 通过；`just eval-test` 565 项全通过（`test_fair_comparison` 共 77 项，
+  含两轮修正的入口级回归与全部审查复现用例）。全程无真实 API、无 Docker、无真实模型，未创建新 campaign identity。
   设施闭合不产生任何可归因的能力比较结论。

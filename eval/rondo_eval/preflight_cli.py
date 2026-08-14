@@ -16,7 +16,6 @@ from pathlib import Path
 from .contracts import Side
 from .fair_comparison import (
     FairComparisonError,
-    NoUpstreamTransport,
     SymmetryPreflight,
 )
 
@@ -80,7 +79,10 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "status": "symmetric",
-                "upstream_transport": type(NoUpstreamTransport()).__name__,
+                # This entry point only reads two JSON files; it has no
+                # transport at all, which is a stronger statement than naming
+                # one.  Receipts come from the stub producer, not from here.
+                "upstream_requests": 0,
                 **preflight.provenance(),
             },
             sort_keys=True,

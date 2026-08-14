@@ -82,3 +82,43 @@
    方向性兜底保持单向（它检测的是回退，不是差异）。`baseline_cli` 的执行侧同步改为同一规则。
 
 修正后 `just eval-lock` 通过、`just eval-test` 552 项全通过；两条审查复现用例现在都被拒绝，并已固化为回归。
+
+## 二次验收后的修正（GPT 复审 `429acfb` → 仍 blocked）
+
+五项问题全部自行复现属实，已修复。审查日志见
+`agent_log/2026-08-13-174616-eb8-fix-followup-acceptance-review.md`（不改写，作为形成时点证据）。
+第一轮四项修复本身经复核确实落地，本轮问题都在它们之外的生产路径上。
+
+1. **正式 task ID 使 receipt 产出与消费必然失败**（BLOCKER）。`_TASK_ID` 不允许 `/`，而正式 canary 是
+   `terminal-bench/fix-git`；上一轮的 receipt 测试用的是不存在于正式 catalog 的 `terminal-bench-fix-git`，
+   于是全绿却完全没覆盖生产形状。这不是 fail-open 而是设施不可用。修正：允许一层命名空间分隔符，
+   每段仍须以字母数字开头（`..`、前导 `/`、多级路径仍被拒）；receipt 文件名从只取 leaf 改为
+   `<leaf>-<task_id 摘要>`，否则不同命名空间的同名任务会共享同一份 receipt。receipt 相关测试全部改用带 `/` 的正式 ID。
+2. **没有真正的 stub 产出链，且付费 wire canary 早于 receipt 门禁**（BLOCKER）。
+   `preflight_receipt_from_stub_run()` 只是纯函数、无生产调用；`eval-preflight-symmetry` 只比较两份现成 JSON。
+   修正：新增 `terminal_bench/preflight_producer.py` 与 `just eval-b7-preflight-receipts`，两侧冻结二进制走真实
+   Harbor/Docker 链路，唯一可达端点是本地捕获 stub（记录请求体、返回立即终止的 SSE、不做任何出站连接），
+   角色分类复用代理的 `_inspect_request`，比对通过后原子写 receipt。
+   **关键点**：stub 与付费路径共用新抽出的 `campaign_terminal_bench_request()` 与 `project_shared_model_catalog()` ——
+   如果 stub 自行构造请求，receipt 就可能认证一份付费运行并不具备的对称性。
+   门禁位置也前移：`_require_all_preflight_receipts()` 在 worker 启动时校验全部任务，早于 wire canary 与全部 Docker 工作。
+3. **successor 会生成带旧结果、实际不可执行的 v7**（BLOCKER）。无条件继承 v22 的 25 条 continuation，
+   而同一函数又从 profile 剥掉两个旧 catalog 字段，于是执行期 `source.selected_profile != identity.selected_profile`
+   必然 blocked；即便放宽也不该复用——那些结果没有共享 catalog、stub receipt、冻结 harness commit 与交错顺序。
+   修正：v7 continuation 恒为空（加载时强制）、prior 为 0、cap 由 `--campaign-cap-usd` 单独授权且不超过历史封顶；
+   写 lock 前用真实事实核对新 comparison（共享 catalog 能否从两个记录 commit 复现出声明 SHA、harness commit 是否等于
+   当前 checkout、task/image 与 provider profile 是否等于 campaign 自身字段）。生成器侧的 continuation 继承代码整体删除。
+4. **run-ID 碰撞校验固定 321 slots**（HIGH）。重复数 5/7/9 会把 slot 扩到 481/641/801，
+   尾部与历史区间的重叠被放行（已复现：481 slots 从 `500000001` 起与 `500000400` 的历史块重叠而校验通过）。
+   修正：`validate_successor_run_range()` 接收由冻结重复数算出的真实 slot 数并校验完整区间。
+5. **代理返回的不是分区级原因码**（MEDIUM）。`reasons` 原本 scope 在前，而 409 只能取一个码。
+   修正：`FairComparisonError.reasons` 约定为最具体在前，409 现在返回 `task_independent_<partition>_differs`。
+
+顺带修正两处措辞不实：`stub_preflight()` 的 docstring 声称返回对象"carries a transport"（`SymmetryPreflight`
+没有 transport 字段），以及 `preflight_cli` 输出里名义上的 `upstream_transport` 字段。
+
+修正后 `just eval-lock` 通过、`just eval-test` 565 项全通过（`test_fair_comparison` 77 项）。
+五条审查复现全部固化为回归，其中 receipt 相关用例已改用正式带 `/` 的 task ID。
+
+**遗留边界**：真正跑一次 receipt 产出需要无 API 的双侧 stub Docker 运行，不在本任务授权内，故**未执行**；
+产出入口与其编排已按可注入 executor/server 的形式实现并单测覆盖，但从未对真实二进制运行过。

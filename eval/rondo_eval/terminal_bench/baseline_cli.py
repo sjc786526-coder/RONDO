@@ -34,7 +34,7 @@ from .__main__ import (
     _load_manifest,
     _outcome_exit_code,
 )
-from ..fair_comparison import FairComparisonError, PreflightReceipt
+from ..fair_comparison import FairComparisonError, PreflightReceipt, valid_task_id
 from .baseline import (
     BASE_ROUNDS,
     RUN_CAP_USD,
@@ -58,7 +58,7 @@ from .baseline import (
     load_campaign_identity,
     load_historical_campaign_identity,
 )
-from .live import run_budgeted_terminal_bench
+from .live import campaign_terminal_bench_request, run_budgeted_terminal_bench
 from .materialize import validate_frozen_task_source
 from .oracle_proof import OracleProofStore, build_oracle_contract
 from .metrics import RunnerMetricsTimer
@@ -433,6 +433,11 @@ def _worker_step_main(args: argparse.Namespace) -> int:
     seccomp_profile = identity.validate_runtime_seccomp(
         project_root=paths.worktree_root
     )
+    # Every task's stub receipt is checked here, before the paid wire canary and
+    # before any Docker work.  Discovering a missing or mismatched receipt at the
+    # first task slot would be too late: the wire canary has already spent real
+    # money by then.
+    _require_all_preflight_receipts(paths, identity)
     proof = lease_from_watchdog()
     counter = DockerCliCounter(
         host_data_root=args.docker_host_volume,
@@ -1782,15 +1787,19 @@ def _state_row(snapshot: dict[str, object], slot_id: str) -> dict[str, object]:
 def preflight_receipt_path(paths: RepoPaths, identity: CampaignIdentity, task_id: str) -> Path:
     """Return the private receipt location for one campaign task."""
 
-    slug = task_id.split("/", maxsplit=1)[-1]
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", slug):
+    if not valid_task_id(task_id):
         raise CampaignExecutionError("campaign task slug is unsafe")
+    # Task IDs are namespaced (``terminal-bench/fix-git``).  Dropping the
+    # namespace would let two tasks share one receipt file, so the name keeps a
+    # readable slug and a digest of the full ID to stay injective.
+    slug = task_id.rsplit("/", maxsplit=1)[-1]
+    fingerprint = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:12]
     return (
         paths.common_root
         / "eval-data/campaigns"
         / identity.campaign_id
         / "preflight"
-        / f"{slug}.json"
+        / f"{slug}-{fingerprint}.json"
     )
 
 
@@ -1830,6 +1839,23 @@ def _load_preflight_receipt(
             f"stub preflight receipt does not cover this run: {';'.join(exc.reasons)}"
         ) from exc
     return receipt
+
+
+def _require_all_preflight_receipts(
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+) -> None:
+    """Refuse to start a fair-comparison campaign with any receipt missing.
+
+    The receipts are per task, but the check is campaign-wide and runs once at
+    startup so the gate sits ahead of the first real upstream request rather
+    than ahead of the first task.
+    """
+
+    if not identity.enforces_fair_comparison:
+        return
+    for task in identity.catalog.tasks:
+        _load_preflight_receipt(paths, identity, task)
 
 
 def _campaign_repeat_contract(identity: CampaignIdentity):
@@ -2274,29 +2300,16 @@ def _execute_task_slot(
         )
         raise CampaignExecutionError("campaign budget run cannot be claimed") from exc
     metadata_path = work_root / "api-metadata.json"
-    request = TerminalBenchRequest(
+    request = campaign_terminal_bench_request(
+        identity=identity,
         side=slot.side,
-        batch_id=identity.batch_id,
+        task=task,
         binary=manifests[slot.side],
-        image_digest=task.image_digest,
-        source_checkout=str(
-            paths.common_root
-            / "eval-data/sources/terminal-bench-2-1-ffccbe05"
-        ),
-        staging_root=str(work_root / "staging"),
+        common_root=paths.common_root,
+        work_root=work_root,
         docker_task_id=slot.run_id,
-        memory_bytes=task.memory_mb * 1024**2,
-        memory_swap_bytes=(task.memory_mb + 1024) * 1024**2,
-        pids_limit=task.pids_limit,
-        provider_transport_base_url=None,
-        timeout_seconds=task.timeout_seconds,
-        max_retries=0,
+        seccomp_profile=seccomp_profile,
         budget_usd=float(RUN_CAP_USD),
-        seccomp_profile_path=str(seccomp_profile),
-        seccomp_profile_source_sha256=identity.no_api_seccomp["source_sha256"],
-        seccomp_profile_effective_sha256=identity.no_api_seccomp["effective_sha256"],
-        require_container_metrics=True,
-        frozen_task=task,
     )
     writer = ArtifactWriter(
         paths,

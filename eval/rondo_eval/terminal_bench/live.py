@@ -101,6 +101,93 @@ class BudgetedTerminalBenchResult:
     redaction_secrets: tuple[str, ...] = field(repr=False)
 
 
+def campaign_terminal_bench_request(
+    *,
+    identity: CampaignIdentity,
+    side: Side,
+    task: FrozenTask,
+    binary: Any,
+    common_root: Path,
+    work_root: Path,
+    docker_task_id: str,
+    seccomp_profile: Path,
+    budget_usd: float,
+) -> TerminalBenchRequest:
+    """Build the RunSpec projection one campaign side runs for one task.
+
+    Both the paid slot and the stub preflight producer call this, so the
+    request a receipt freezes cannot drift from the request that gets paid for.
+    """
+
+    return TerminalBenchRequest(
+        side=side,
+        batch_id=identity.batch_id,
+        binary=binary,
+        image_digest=task.image_digest,
+        source_checkout=str(common_root / "eval-data/sources/terminal-bench-2-1-ffccbe05"),
+        staging_root=str(work_root / "staging"),
+        docker_task_id=docker_task_id,
+        memory_bytes=task.memory_mb * 1024**2,
+        memory_swap_bytes=(task.memory_mb + 1024) * 1024**2,
+        pids_limit=task.pids_limit,
+        provider_transport_base_url=None,
+        timeout_seconds=task.timeout_seconds,
+        max_retries=0,
+        budget_usd=budget_usd,
+        seccomp_profile_path=str(seccomp_profile),
+        seccomp_profile_source_sha256=identity.no_api_seccomp["source_sha256"],
+        seccomp_profile_effective_sha256=identity.no_api_seccomp["effective_sha256"],
+        require_container_metrics=True,
+        frozen_task=task,
+    )
+
+
+def project_shared_model_catalog(
+    config: RuntimeConfig,
+    request: TerminalBenchRequest,
+    *,
+    campaign_identity: CampaignIdentity,
+    main_model: str,
+    guardian_model: str,
+    catalog_path: Path,
+) -> TerminalBenchRequest:
+    """Attach the one shared catalog artifact both sides of a v7 campaign load.
+
+    The lock pins the two source commits, so the side actually running is
+    cross-checked against the commit recorded for it rather than trusted to
+    supply its own.  The stub preflight producer and the paid runner share this
+    function: a receipt is only meaningful if the request it froze was built
+    exactly the way the paid request will be.
+    """
+
+    frozen_identity = campaign_identity.catalog_identity
+    sources = {str(item["side"]): item for item in frozen_identity["sources"]}
+    expected_commit = str(
+        sources["rondo" if request.side is Side.RONDO else "upstream"]["commit"]
+    )
+    if expected_commit != request.binary.source_commit:
+        raise TerminalBenchRunError(
+            "binary source commit differs from the frozen catalog provenance"
+        )
+    shared = load_shared_model_catalog(
+        config.paths.common_root,
+        upstream_source_commit=str(sources["upstream"]["commit"]),
+        rondo_source_commit=str(sources["rondo"]["commit"]),
+        main_model=main_model,
+        guardian_model=guardian_model,
+    )
+    campaign_identity.validate_shared_model_catalog(shared.identity())
+    shared.write_private(catalog_path)
+    return replace(
+        request,
+        frozen_model_catalog_path=str(catalog_path),
+        frozen_model_catalog_sha256=shared.sha256,
+        frozen_model_catalog_provenance_sha256=canonical_request_sha256(
+            shared.identity()
+        ),
+    )
+
+
 async def run_budgeted_terminal_bench(
     config: RuntimeConfig,
     request: TerminalBenchRequest,
@@ -212,37 +299,13 @@ async def run_budgeted_terminal_bench(
             provider_transport_base_url=proxy.docker_base_url,
         )
         if campaign_identity is not None and campaign_identity.enforces_fair_comparison:
-            # One artifact, both sides.  The lock pins the two source commits,
-            # so the side actually running is cross-checked against the commit
-            # recorded for it rather than trusted to supply its own.
-            frozen_identity = campaign_identity.catalog_identity
-            sources = {
-                str(item["side"]): item for item in frozen_identity["sources"]
-            }
-            expected_commit = str(
-                sources["rondo" if request.side is Side.RONDO else "upstream"]["commit"]
-            )
-            if expected_commit != request.binary.source_commit:
-                raise TerminalBenchRunError(
-                    "binary source commit differs from the frozen catalog provenance"
-                )
-            shared = load_shared_model_catalog(
-                config.paths.common_root,
-                upstream_source_commit=str(sources["upstream"]["commit"]),
-                rondo_source_commit=str(sources["rondo"]["commit"]),
+            projected_request = project_shared_model_catalog(
+                config,
+                projected_request,
+                campaign_identity=campaign_identity,
                 main_model=provider.main_model,
                 guardian_model=provider.guardian_model,
-            )
-            campaign_identity.validate_shared_model_catalog(shared.identity())
-            catalog_path = metadata_path.with_name("shared-model-catalog.json")
-            shared.write_private(catalog_path)
-            projected_request = replace(
-                projected_request,
-                frozen_model_catalog_path=str(catalog_path),
-                frozen_model_catalog_sha256=shared.sha256,
-                frozen_model_catalog_provenance_sha256=canonical_request_sha256(
-                    shared.identity()
-                ),
+                catalog_path=metadata_path.with_name("shared-model-catalog.json"),
             )
         elif request.side is Side.CODEX:
             catalog = load_frozen_model_catalog(

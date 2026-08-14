@@ -43,7 +43,6 @@ from rondo_eval.terminal_bench.scoring import TaskOutcome  # noqa: E402
 from rondo_eval.terminal_bench import baseline_cli  # noqa: E402
 from rondo_eval.terminal_bench.baseline_identity import (  # noqa: E402
     CampaignIdentityGenerationError,
-    _successor_continuation,
     required_successor_prior,
     validate_successor_run_range,
 )
@@ -455,55 +454,6 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(
             required_successor_prior(paths, version=15),
             Decimal("408.561823"),
-        )
-
-    def test_v18_continuation_reuses_first_noninfra_including_reward_zero(self) -> None:
-        paths = RepoPaths.discover(Path.cwd())
-        source = load_historical_campaign_identity(paths, 18)
-        self.assertEqual(required_successor_prior(paths, version=18), Decimal("826.674430"))
-        rows = _successor_continuation(paths, source)
-        by_chain = {row["chain_id"]: row for row in rows}
-        self.assertEqual(len(by_chain), 20)
-        self.assertEqual(
-            by_chain["base:aa-rondo-1:terminal-bench/sanitize-git-repo"]["source_run_id"],
-            "20260812-380000048-tb-rondo-r2",
-        )
-        self.assertEqual(
-            by_chain["base:ab-rondo-1:terminal-bench/db-wal-recovery"]["source_run_id"],
-            "20260812-380000021-tb-rondo-r1",
-        )
-        self.assertNotIn(
-            "base:aa-rondo-1:terminal-bench/vulnerable-secret",
-            by_chain,
-        )
-        self.assertEqual(
-            {row["source_upstream_timeout_seconds"] for row in rows},
-            {"90.000"},
-        )
-
-    def test_v19_prior_and_continuation_preserve_valid_results_only(self) -> None:
-        paths = RepoPaths.discover(Path.cwd())
-        source = load_historical_campaign_identity(paths, 19)
-        self.assertEqual(
-            required_successor_prior(paths, version=19),
-            Decimal("980.271525"),
-        )
-        rows = _successor_continuation(paths, source)
-        by_chain = {row["chain_id"]: row for row in rows}
-        self.assertEqual(len(by_chain), 21)
-        self.assertEqual(
-            by_chain[
-                "base:ab-rondo-1:terminal-bench/filter-js-from-html"
-            ]["source_run_id"],
-            "20260812-390000103-tb-rondo-r3",
-        )
-        self.assertNotIn(
-            "base:ab-rondo-1:terminal-bench/fix-git",
-            by_chain,
-        )
-        self.assertNotIn(
-            "base:aa-rondo-1:terminal-bench/vulnerable-secret",
-            by_chain,
         )
 
     def test_successor_run_range_rejects_history_and_accepts_fresh_ids(self) -> None:

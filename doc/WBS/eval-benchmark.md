@@ -45,11 +45,14 @@ assessment 语义一律不变，新规则只在 v7 生效。
 2. **请求前置硬门**：`rondo_eval.fair_comparison` 投影每个请求中与任务无关的分区
    （tool specs、instructions、输出 schema、采样合同，以及 `input` 中首个 user 之前的 developer/system 前缀 ——
    Responses Lite 的 catalog 派生工具描述就在那里）。**合同必须先由 stub 运行冻结成 preflight receipt**：
-   两侧二进制在本地 stub 上零成本产生请求，比对通过后写出绑定 campaign_id / lock SHA / task / 两侧 bundle manifest
-   的 receipt。付费 slot 缺少或无法匹配 receipt 时直接拒绝执行；运行期代理以该 receipt 预置期望，
-   因此**第一侧也受检**，不存在"先放行首侧、只拦第二侧"的窗口。任一侧不符即在请求体解析后、预算预留与上游转发之前
-   fail-closed，并给出分区级原因码。完整请求 digest 各侧分别记录，只作 provenance/drift，不要求轨迹分叉后逐字节相等。
-   离线比对入口 `just eval-preflight-symmetry`，其 transport 结构上无法连上游。
+   `just eval-b7-preflight-receipts` 驱动两侧冻结二进制走真实 Harbor/Docker 链路，但唯一可达端点是本地 stub，
+   零请求零费用；比对通过后写出绑定 campaign_id / lock SHA / task / 两侧 bundle manifest 的 receipt。
+   stub 与付费路径共用同一套 RunSpec 与 catalog 投影函数，因此 receipt 冻结的请求不会与被付费的请求分叉。
+   付费 worker **启动时一次性校验全部任务的 receipt**，位置在 wire canary 之前，缺失或绑定不符即拒绝整个 campaign；
+   运行期代理再以该 receipt 预置期望，因此**第一侧也受检**，不存在"先放行首侧、只拦第二侧"的窗口。
+   任一侧不符即在请求体解析后、预算预留与上游转发之前 fail-closed，HTTP 409 直接返回**具体分区**原因码。
+   完整请求 digest 各侧分别记录，只作 provenance/drift，不要求轨迹分叉后逐字节相等。
+   `just eval-preflight-symmetry` 是纯离线的两份已捕获请求比对入口，不产出 receipt。
 3. **执行条件统一**：lock 冻结 harness commit、upstream deadline、task/image digest、provider profile 与
    投影版本。声明值不是自说自话 —— 加载时与 campaign 自身的权威字段（baseline deadline、selected profile 哈希、
    catalog artifact SHA、冻结 canary 的 task/image）逐项等值校验，harness commit 在执行时与实际 checkout 校验，
@@ -62,8 +65,12 @@ assessment 语义一律不变，新规则只在 v7 生效。
 5. **重复规则预冻结**：lock 必须冻结每题每侧总观测数与聚合公式，否则拒绝建立 campaign。
    总观测数为奇数且不少于 3（基础 A/B 轮算其中一次，因此条件加跑为 `n-1` 次），聚合固定为严格多数，
    样本数与冻结值不符即拒绝，不允许事后删题或改分母。
-   唯一的 successor 生成入口 `just eval-b7-next-identity` 只能生成 schema v7，且必须传入 pilot 后冻结的
-   comparison 合同文件；合同不合法时在读写任何文件之前失败，因此无法再生成绕过这些门禁的历史 schema campaign。
+   唯一的 successor 生成入口 `just eval-b7-next-identity` 只能生成 schema v7，必须传入 pilot 后冻结的
+   comparison 合同文件与单独授权的 cap；合同不合法时在读写任何文件之前失败，因此无法再生成绕过这些门禁的历史 schema campaign。
+   v7 从公平合同上 fresh 开始：**不继承任何 v1—v22 continuation**（加载时强制为空）、prior 为 0、cap 独立且不超过历史封顶。
+   run ID 区间按冻结重复数算出的真实 slot 数校验，5/7/9 次重复不会让尾部区间与历史碰撞。
+   写 lock 前还会用真实事实核对新 comparison：共享 catalog 必须能从两个记录 commit 复现出声明的 artifact SHA，
+   harness commit 必须等于当前 checkout，task/image 与 provider profile 必须等于 campaign 自身字段。
 6. **保留机械判据**：`σ` / `delta` / 方向性兜底 / infra 上限按 `doc/WBS.md` §5 执行，
    不使用 pairwise-max `σ` 等事后放宽办法。比较合同不成立时直接 blocked，不计算能力归因。
    该判据**只适用于本设施自身的等条件 A/A、A/B 比较**，Local M3/M4 与 Multi 退化验收都不继承。
@@ -133,8 +140,9 @@ assessment 语义一律不变，新规则只在 v7 生效。
   设施在该块缺失、不合法或与 campaign 自身事实矛盾时拒绝建立 campaign。
   **不再要求 E-A 完成**：E-A 已挂起，不作为前置条件。
 - 每道题都已有 stub 冻结的 preflight receipt，且与本 campaign 的 lock SHA、task 与两侧 bundle manifest 绑定；
-  没有 receipt 的 slot 不会启动。生成 receipt 需要一次无 API 的 stub 双侧运行（Docker），单独授权。
-- 新 identity 不复用任何 v1—v22 ID。
+  任一 receipt 缺失时 campaign 在 wire canary 之前就拒绝启动。生成 receipt 走 `just eval-b7-preflight-receipts`，
+  需要一次无 API 的 stub 双侧 Docker 运行，单独授权。
+- 新 identity 不复用任何 v1—v22 ID，不继承其 continuation 与预算 prior，cap 单独授权。
 - 任务、轮数、交错顺序、重复规则、模型、价格快照、预算 cap 和停止条件全部预冻结。
 - 按 `doc/WBS.md` §5 的机械判据执行，比较合同任一项漂移都先 blocked。
 

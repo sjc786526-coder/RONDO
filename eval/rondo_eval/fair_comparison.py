@@ -31,7 +31,13 @@ TASK_INDEPENDENT_PROJECTION_VERSION = 1
 CATALOG_PROJECTION_VERSION = 2
 PREFLIGHT_RECEIPT_SCHEMA_VERSION = 1
 
-_TASK_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
+# Terminal-Bench task IDs are namespaced -- ``terminal-bench/fix-git`` -- so the
+# separator has to be accepted or no real task could ever hold a receipt.  Each
+# segment must still start with an alphanumeric, which keeps ``.``/``..`` out of
+# any path a receipt name is derived from.
+_TASK_ID_SEGMENT = r"[a-z0-9][a-z0-9._-]*"
+_TASK_ID = re.compile(rf"{_TASK_ID_SEGMENT}(?:/{_TASK_ID_SEGMENT})?\Z")
+_MAX_TASK_ID_LENGTH = 128
 _ROLES = {"main", "guardian"}
 _STABLE_PREFIX_ROLES = {"developer", "system"}
 _STABLE_PREFIX_TYPES = {"message", None}
@@ -55,11 +61,24 @@ TASK_INDEPENDENT_PARTITIONS = (
 
 
 class FairComparisonError(ValueError):
-    """Raised before any upstream byte when a comparison contract is unsafe."""
+    """Raised before any upstream byte when a comparison contract is unsafe.
+
+    ``reasons`` is ordered most specific first, so a caller that can surface
+    only one code -- the proxy answers a blocked request with exactly one --
+    reports the differing partition rather than the enclosing scope.
+    """
 
     def __init__(self, message: str, *, reasons: tuple[str, ...] = ()) -> None:
         super().__init__(message)
         self.reasons = reasons
+
+
+def valid_task_id(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) <= _MAX_TASK_ID_LENGTH
+        and _TASK_ID.fullmatch(value) is not None
+    )
 
 
 # --------------------------------------------------------------------------
@@ -284,7 +303,7 @@ class SymmetryPreflight:
         answer to a contract frozen before any paid run started.
         """
 
-        if not isinstance(task_id, str) or not _TASK_ID.fullmatch(task_id):
+        if not valid_task_id(task_id):
             raise FairComparisonError(
                 "preflight task id is invalid",
                 reasons=("preflight_task_id_invalid",),
@@ -322,7 +341,7 @@ class SymmetryPreflight:
     ) -> TaskIndependentContract:
         """Freeze or verify one request; raise before it may be forwarded."""
 
-        if not isinstance(task_id, str) or not _TASK_ID.fullmatch(task_id):
+        if not valid_task_id(task_id):
             raise FairComparisonError(
                 "preflight task id is invalid",
                 reasons=("preflight_task_id_invalid",),
@@ -359,7 +378,8 @@ class SymmetryPreflight:
                     scope = "same_side"
                 raise FairComparisonError(
                     "task-independent request contract is asymmetric",
-                    reasons=(f"{scope}_asymmetry", *reasons),
+                    # Most specific first: the proxy surfaces reasons[0].
+                    reasons=(*reasons, f"{scope}_asymmetry"),
                 )
         self._observed.append(
             ObservedRequest(
@@ -428,7 +448,7 @@ class PreflightReceipt:
                 "preflight receipt schema is unsupported",
                 reasons=("preflight_receipt_schema_unsupported",),
             )
-        if not _TASK_ID.fullmatch(self.task_id or ""):
+        if not valid_task_id(self.task_id):
             raise FairComparisonError(
                 "preflight receipt task id is invalid",
                 reasons=("preflight_receipt_task_invalid",),
@@ -637,12 +657,14 @@ def preflight_receipt_from_stub_run(
 def stub_preflight(
     pairs: Iterable[tuple[str, str, Side, Mapping[str, Any]]],
 ) -> SymmetryPreflight:
-    """Run one preflight with upstream access structurally unavailable.
+    """Compare already-captured requests offline.
 
-    ``pairs`` yields ``(task_id, role, side, request)``.  The returned
-    preflight carries a transport that raises on any ``open`` attempt, so a
-    caller that tries to forward after a clean preflight still cannot reach a
-    provider.
+    ``pairs`` yields ``(task_id, role, side, request)``.  This is a pure
+    comparison over request bodies -- it opens nothing and has no transport of
+    its own; ``allow_upstream`` is false so any caller that inspects the
+    preflight sees that forwarding is not permitted from here.  The structural
+    guarantee that a request cannot reach a provider belongs to
+    ``NoUpstreamTransport`` and to the stub producer, not to this helper.
     """
 
     preflight = SymmetryPreflight(allow_upstream=False)
