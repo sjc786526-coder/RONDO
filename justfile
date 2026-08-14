@@ -22,6 +22,21 @@ eval-lock:
 
 eval-check: eval-lock eval-test
 
+# Compare the task-independent partitions of two captured requests. The
+# transport used here refuses to open any upstream connection, so this never
+# reaches a provider and never spends budget. Exit 3 means the pair is not
+# comparable; the printed reason codes say which partition drifted.
+eval-preflight-symmetry task_id rondo_request codex_request:
+    @env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$PWD/eval-data/uv-cache" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.preflight_cli \
+        --task-id "{{task_id}}" \
+        --rondo-request "{{rondo_request}}" \
+        --codex-request "{{codex_request}}"
+
 # One supervised no-key oracle run. It must prove the frozen solution and
 # verifier can produce reward=1 before any paid provider probe is allowed.
 eval-b3-oracle-no-api docker_host_volume metrics_dir:
@@ -74,13 +89,34 @@ eval-b7-baseline docker_host_volume results_worktree_root rondo_measurement code
         --codex-measurement-worktree-root "{{codex_measurement}}"
 
 # Generate and activate one successor identity after its predecessor is terminal.
-eval-b7-next-identity run_id_date run_id_sequence_base:
+# Only fair-comparison (schema v7) successors can be minted: the comparison
+# contract file must carry the post-pilot frozen repeat contract, run
+# conditions, shared catalog identity and product.
+eval-b7-next-identity run_id_date run_id_sequence_base comparison_contract campaign_cap_usd:
     @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
         UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_identity \
         --run-id-date "{{run_id_date}}" \
-        --run-id-sequence-base "{{run_id_sequence_base}}"
+        --run-id-sequence-base "{{run_id_sequence_base}}" \
+        --comparison-contract "{{comparison_contract}}" \
+        --campaign-cap-usd "{{campaign_cap_usd}}"
+
+# Freeze one stub preflight receipt per task of the active v7 campaign. Both
+# frozen binaries run the real Harbor/Docker chain against a loopback stub that
+# answers every model call locally, so this makes zero API requests and costs
+# nothing. The paid campaign refuses to start until every receipt exists.
+eval-b7-preflight-receipts docker_host_volume metrics_dir:
+    @test ! -e "{{metrics_dir}}" || { echo "metrics dir already exists" >&2; exit 2; }
+    @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
+        env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        RONDO_BUILD_METRICS_DIR="{{metrics_dir}}" \
+        "$PWD/mydev/scripts/with-build-lock.sh" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.preflight_producer \
+        --docker-host-volume "{{docker_host_volume}}"
 
 # Resolve one durable schema-v2 RCA hold. This performs no Docker or API work.
 eval-b7-resolve-diagnosis chain_id category disposition evidence_code:

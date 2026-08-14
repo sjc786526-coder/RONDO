@@ -134,6 +134,29 @@ class _GuardianLogicalRequestLimitExceeded(ApiBudgetProxyError):
     """Raised before reserve/forward when a run exceeds its declared approvals."""
 
 
+_PREFLIGHT_REASON = re.compile(r"[a-z][a-z0-9_:.-]{0,127}\Z")
+_PREFLIGHT_DEFAULT_REASON = "task_independent_contract_drift"
+
+
+class _SymmetryPreflightRejected(RuntimeError):
+    """Raised before reserve/forward when the two sides are not symmetric."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _preflight_reason(exc: BaseException) -> str:
+    """Return one bounded, attributable rejection code for a preflight failure."""
+
+    reasons = getattr(exc, "reasons", ())
+    if isinstance(reasons, tuple):
+        for reason in reasons:
+            if isinstance(reason, str) and _PREFLIGHT_REASON.fullmatch(reason):
+                return reason
+    return _PREFLIGHT_DEFAULT_REASON
+
+
 class _GuardianDuplicateLogicalRequest(ApiBudgetProxyError):
     """Raised before reserve/forward for a charged review body replay."""
 
@@ -865,6 +888,9 @@ class LoopbackResponsesProxy:
         max_guardian_logical_requests: int | None = None,
         max_logical_requests: int | None = None,
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
+        symmetry_preflight: Any | None = None,
+        preflight_side: Any | None = None,
+        preflight_task_id: str | None = None,
         _transport: _UrllibTransport | None = None,
         _monotonic: Any = time.monotonic,
         _sleep: Any = time.sleep,
@@ -945,7 +971,16 @@ class LoopbackResponsesProxy:
             )
         if not callable(_monotonic) or not callable(_sleep):
             raise ApiBudgetProxyError("proxy clock is invalid")
+        if symmetry_preflight is not None and (
+            preflight_side is None
+            or not isinstance(preflight_task_id, str)
+            or not preflight_task_id
+        ):
+            raise ApiBudgetProxyError("symmetry preflight identity is incomplete")
         ledger.ensure_run(run_id)
+        self._symmetry_preflight = symmetry_preflight
+        self._preflight_side = preflight_side
+        self._preflight_task_id = preflight_task_id
         self._api_key = api_key
         self._downstream_api_key = "rondo-eval-" + secrets.token_urlsafe(32)
         self._ledger = ledger
@@ -1146,6 +1181,19 @@ class LoopbackResponsesProxy:
                 declared_role = request_metadata["role"]
                 request_metadata["role_provenance"] = "declared"
                 request_metadata["declared_role"] = declared_role
+            # The body is parsed but nothing has been reserved or forwarded
+            # yet.  This is the only point where an asymmetric pair can be
+            # stopped without either side paying for it.
+            if self._symmetry_preflight is not None:
+                try:
+                    self._symmetry_preflight.register(
+                        task_id=self._preflight_task_id,
+                        role=request_metadata["role"],
+                        side=self._preflight_side,
+                        request=json.loads(body),
+                    )
+                except Exception as exc:  # fail closed on any preflight failure
+                    raise _SymmetryPreflightRejected(_preflight_reason(exc)) from None
             with self._lifecycle_lock:
                 if self._closing.is_set():
                     self._reject(handler, 503, "proxy_closing")
@@ -1155,6 +1203,9 @@ class LoopbackResponsesProxy:
                     request_metadata["body_sha256"],
                     request_id,
                 )
+        except _SymmetryPreflightRejected as exc:
+            self._reject(handler, 409, exc.reason)
+            return
         except _GuardianDuplicateLogicalRequest:
             self._reject(handler, 409, "guardian_duplicate_logical_request_rejected")
             return

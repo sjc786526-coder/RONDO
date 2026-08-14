@@ -34,6 +34,7 @@ from .__main__ import (
     _load_manifest,
     _outcome_exit_code,
 )
+from ..fair_comparison import FairComparisonError, PreflightReceipt, valid_task_id
 from .baseline import (
     BASE_ROUNDS,
     RUN_CAP_USD,
@@ -57,7 +58,7 @@ from .baseline import (
     load_campaign_identity,
     load_historical_campaign_identity,
 )
-from .live import run_budgeted_terminal_bench
+from .live import campaign_terminal_bench_request, run_budgeted_terminal_bench
 from .materialize import validate_frozen_task_source
 from .oracle_proof import OracleProofStore, build_oracle_contract
 from .metrics import RunnerMetricsTimer
@@ -409,7 +410,24 @@ def _worker_step_main(args: argparse.Namespace) -> int:
     config = load_runtime_config(paths)
     provider = config.paid_provider_projection()
     identity.validate_provider(provider)
-    eval_harness_commit = validate_eval_harness_checkout(common_root=paths.common_root)
+    expected_harness_commit = (
+        identity.comparison_conditions.eval_harness_commit
+        if identity.enforces_fair_comparison
+        else None
+    )
+    eval_harness_commit = validate_eval_harness_checkout(
+        common_root=paths.common_root,
+        expected_commit=expected_harness_commit,
+    )
+    if identity.enforces_fair_comparison:
+        try:
+            identity.require_declared_conditions(
+                eval_harness_commit=eval_harness_commit
+            )
+        except ValueError as exc:
+            raise CampaignExecutionError(
+                f"campaign comparison conditions drifted: {exc}"
+            ) from exc
     results_root = validate_results_worktree(
         args.results_worktree_root,
         common_root=paths.common_root,
@@ -432,6 +450,11 @@ def _worker_step_main(args: argparse.Namespace) -> int:
     seccomp_profile = identity.validate_runtime_seccomp(
         project_root=paths.worktree_root
     )
+    # Every task's stub receipt is checked here, before the paid wire canary and
+    # before any Docker work.  Discovering a missing or mismatched receipt at the
+    # first task slot would be too late: the wire canary has already spent real
+    # money by then.
+    _require_all_preflight_receipts(paths, identity)
     proof = lease_from_watchdog()
     counter = DockerCliCounter(
         host_data_root=args.docker_host_volume,
@@ -803,7 +826,7 @@ def _replay_terminal_assessment(
     conditional_runs: list[ConditionalRun] = []
     for task in identity.catalog.tasks:
         for side in (Side.RONDO, Side.CODEX):
-            for repeat in (1, 2):
+            for repeat in identity.conditional_repeat_range:
                 chain_id = f"conditional:{task.task_id}:{side.value}:repeat{repeat}"
                 attempts = _replay_terminal_chain(
                     identity=identity,
@@ -831,6 +854,7 @@ def _replay_terminal_assessment(
         tuple(base_runs),
         tuple(conditional_runs),
         max_attempts=identity.max_attempts,
+        repeat_contract=_campaign_repeat_contract(identity),
     )
     snapshot = state.snapshot()
     reason = ";".join(assessment.reasons) or None
@@ -1690,6 +1714,7 @@ def _advance_one_paid_step(
         tuple(base_runs),
         tuple(conditional_runs),
         max_attempts=identity.max_attempts,
+        repeat_contract=_campaign_repeat_contract(identity),
     )
     _skip_planned(state, identity, reason="not_activated")
     final_storage = _sample_storage(
@@ -1776,6 +1801,86 @@ def _state_row(snapshot: dict[str, object], slot_id: str) -> dict[str, object]:
     return rows[0]
 
 
+def preflight_receipt_path(paths: RepoPaths, identity: CampaignIdentity, task_id: str) -> Path:
+    """Return the private receipt location for one campaign task."""
+
+    if not valid_task_id(task_id):
+        raise CampaignExecutionError("campaign task slug is unsafe")
+    # Task IDs are namespaced (``terminal-bench/fix-git``).  Dropping the
+    # namespace would let two tasks share one receipt file, so the name keeps a
+    # readable slug and a digest of the full ID to stay injective.
+    slug = task_id.rsplit("/", maxsplit=1)[-1]
+    fingerprint = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:12]
+    return (
+        paths.common_root
+        / "eval-data/campaigns"
+        / identity.campaign_id
+        / "preflight"
+        / f"{slug}-{fingerprint}.json"
+    )
+
+
+def _load_preflight_receipt(
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+    task: object,
+) -> PreflightReceipt | None:
+    """Load the stub-proved receipt a fair-comparison slot may not run without."""
+
+    if not identity.enforces_fair_comparison:
+        return None
+    task_id = getattr(task, "task_id", None)
+    if not isinstance(task_id, str):
+        raise CampaignExecutionError("campaign task projection is invalid")
+    path = preflight_receipt_path(paths, identity, task_id)
+    if path.is_symlink() or not path.is_file():
+        raise CampaignExecutionError(
+            f"stub preflight receipt is missing for {task_id}"
+        )
+    try:
+        receipt = PreflightReceipt.from_dict(json.loads(path.read_bytes()))
+    except (OSError, ValueError) as exc:
+        raise CampaignExecutionError("stub preflight receipt is unreadable") from exc
+    try:
+        receipt.require_binding(
+            campaign_id=identity.campaign_id,
+            campaign_lock_sha256=identity.lock_sha256,
+            task_id=task_id,
+            bundle_manifest_sha256={
+                side: str(bundle["manifest_sha256"])
+                for side, bundle in identity.bundles.items()
+            },
+        )
+    except FairComparisonError as exc:
+        raise CampaignExecutionError(
+            f"stub preflight receipt does not cover this run: {';'.join(exc.reasons)}"
+        ) from exc
+    return receipt
+
+
+def _require_all_preflight_receipts(
+    paths: RepoPaths,
+    identity: CampaignIdentity,
+) -> None:
+    """Refuse to start a fair-comparison campaign with any receipt missing.
+
+    The receipts are per task, but the check is campaign-wide and runs once at
+    startup so the gate sits ahead of the first real upstream request rather
+    than ahead of the first task.
+    """
+
+    if not identity.enforces_fair_comparison:
+        return
+    for task in identity.catalog.tasks:
+        _load_preflight_receipt(paths, identity, task)
+
+
+def _campaign_repeat_contract(identity: CampaignIdentity):
+    """Return the frozen repeat contract, or ``None`` for v1--v6 replay."""
+
+    return identity.repeat_contract if identity.enforces_fair_comparison else None
+
+
 def _execute_base_rounds(
     *,
     failure_tracker: MechanicalFailureTracker | None = None,
@@ -1787,32 +1892,40 @@ def _execute_base_rounds(
         ignore_provider_integrity=identity.schema_version >= 3
     )
     values: list[BaselineRun] = []
-    for round_id in ("aa-rondo-1", "aa-rondo-2", "ab-rondo-1", "ab-codex-1"):
+    tasks_by_id = {task.task_id: task for task in identity.catalog.tasks}
+    effective: dict[str, dict[str, ExecutedSlot]] = {
+        round_id: {} for round_id in BASE_ROUNDS
+    }
+    # The order itself is part of the frozen contract: from v7 it is task-major
+    # so both sides run each task inside the same window instead of hours
+    # apart.  ``base_round_order`` owns that choice for every schema version.
+    for task_id, round_id in identity.base_round_order:
+        task = tasks_by_id[task_id]
         side = Side.CODEX if round_id == "ab-codex-1" else Side.RONDO
-        effective: dict[str, ExecutedSlot] = {}
-        for task in identity.catalog.tasks:
-            attempts = _execute_attempt_chain(
-                tracker=tracker,
-                task=task,
-                chain_id=f"base:{round_id}:{task.task_id}",
-                **kwargs,
-            )
-            for executed in attempts:
-                values.append(
-                    BaselineRun(
-                        task.task_id,
-                        round_id,
-                        side,
-                        executed.slot.attempt,
-                        executed.task_outcome,
-                        executed.slot.run_id,
-                        executed.failure_category,
-                    )
+        attempts = _execute_attempt_chain(
+            tracker=tracker,
+            task=task,
+            chain_id=f"base:{round_id}:{task_id}",
+            **kwargs,
+        )
+        for executed in attempts:
+            values.append(
+                BaselineRun(
+                    task_id,
+                    round_id,
+                    side,
+                    executed.slot.attempt,
+                    executed.task_outcome,
+                    executed.slot.run_id,
+                    executed.failure_category,
                 )
-            effective[task.task_id] = attempts[-1]
-        if sum(
+            )
+        effective[round_id][task_id] = attempts[-1]
+        # Check a round the moment its last task lands so an infra-saturated
+        # round still stops the campaign as early as it always did.
+        if len(effective[round_id]) == len(tasks_by_id) and sum(
             item.task_outcome is TaskOutcome.INFRA
-            for item in effective.values()
+            for item in effective[round_id].values()
         ) > MAX_REMAINING_INFRA_PER_ROUND:
             raise CampaignExecutionError(
                 f"base_round_infra_threshold_exceeded:{round_id}"
@@ -2050,16 +2163,25 @@ def _execute_conditionals(
             for round_id in BASE_ROUNDS
         )
     }
-    triggers = {
-        task_id
-        for task_id in common_valid_tasks
-        if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
-        and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
-    }
+    # Must match assess_baseline: fair-comparison campaigns repeat every
+    # cross-side disagreement, historical ones only the RONDO-fail direction.
+    if identity.enforces_fair_comparison:
+        triggers = {
+            task_id
+            for task_id in common_valid_tasks
+            if by_round["ab-rondo-1"][task_id] is not by_round["ab-codex-1"][task_id]
+        }
+    else:
+        triggers = {
+            task_id
+            for task_id in common_valid_tasks
+            if by_round["ab-rondo-1"][task_id] is TaskOutcome.FAIL
+            and by_round["ab-codex-1"][task_id] is TaskOutcome.PASS
+        }
     values: list[ConditionalRun] = []
     for task in identity.catalog.tasks:
         for side in (Side.RONDO, Side.CODEX):
-            for repeat in (1, 2):
+            for repeat in identity.conditional_repeat_range:
                 chain_id = f"conditional:{task.task_id}:{side.value}:repeat{repeat}"
                 slots = tuple(
                     identity.slot(f"{chain_id}:a{attempt}")
@@ -2130,6 +2252,17 @@ def _execute_task_slot(
 
     if not isinstance(task, FrozenTask):
         raise CampaignExecutionError("campaign task projection is invalid")
+    if identity.enforces_fair_comparison:
+        # The harness commit is the one comparison condition that is a runtime
+        # fact, so it is checked here rather than at lock load.
+        try:
+            identity.require_declared_conditions(
+                eval_harness_commit=eval_harness_commit
+            )
+        except ValueError as exc:
+            raise CampaignExecutionError(
+                f"campaign comparison conditions drifted: {exc}"
+            ) from exc
     if resumable:
         if records is None or digests is None:
             raise CampaignExecutionError("resumable execution lacks public records")
@@ -2153,7 +2286,13 @@ def _execute_task_slot(
         raise CampaignExecutionError("remaining campaign budget cannot fit the next request")
     _sample_storage(counter, slot.run_id, baseline=storage_baseline)
     identity.validate_provider(config.paid_provider_projection())
-    if validate_eval_harness_checkout(common_root=paths.common_root) != eval_harness_commit:
+    if (
+        validate_eval_harness_checkout(
+            common_root=paths.common_root,
+            expected_commit=eval_harness_commit,
+        )
+        != eval_harness_commit
+    ):
         raise CampaignExecutionError("eval harness drifted during the campaign")
     if (
         validate_measurement_checkout(
@@ -2184,29 +2323,16 @@ def _execute_task_slot(
         )
         raise CampaignExecutionError("campaign budget run cannot be claimed") from exc
     metadata_path = work_root / "api-metadata.json"
-    request = TerminalBenchRequest(
+    request = campaign_terminal_bench_request(
+        identity=identity,
         side=slot.side,
-        batch_id=identity.batch_id,
+        task=task,
         binary=manifests[slot.side],
-        image_digest=task.image_digest,
-        source_checkout=str(
-            paths.common_root
-            / "eval-data/sources/terminal-bench-2-1-ffccbe05"
-        ),
-        staging_root=str(work_root / "staging"),
+        common_root=paths.common_root,
+        work_root=work_root,
         docker_task_id=slot.run_id,
-        memory_bytes=task.memory_mb * 1024**2,
-        memory_swap_bytes=(task.memory_mb + 1024) * 1024**2,
-        pids_limit=task.pids_limit,
-        provider_transport_base_url=None,
-        timeout_seconds=task.timeout_seconds,
-        max_retries=0,
+        seccomp_profile=seccomp_profile,
         budget_usd=float(RUN_CAP_USD),
-        seccomp_profile_path=str(seccomp_profile),
-        seccomp_profile_source_sha256=identity.no_api_seccomp["source_sha256"],
-        seccomp_profile_effective_sha256=identity.no_api_seccomp["effective_sha256"],
-        require_container_metrics=True,
-        frozen_task=task,
     )
     writer = ArtifactWriter(
         paths,
@@ -2244,6 +2370,7 @@ def _execute_task_slot(
                 campaign_slot=slot,
                 campaign_task=task,
                 campaign_seccomp_profile=seccomp_profile,
+                preflight_receipt=_load_preflight_receipt(paths, identity, task),
             )
         )
         parsed = parse_single_task_result(
@@ -2906,7 +3033,7 @@ def _public_assessment(
         }
         for item in assessment.effective_conditional_runs
     ]
-    return {
+    public: dict[str, object] = {
         "status": assessment.status.value,
         "reasons": list(assessment.reasons),
         "sigma": assessment.sigma,
@@ -2918,6 +3045,15 @@ def _public_assessment(
         "conditional_runs": conditionals,
         "infra_failure_categories": _infra_failure_categories(assessment),
     }
+    if assessment.layers:
+        # Only fair-comparison campaigns report layers; historical aggregates
+        # keep the exact shape they were published with.
+        public["layers"] = [layer.to_dict() for layer in assessment.layers]
+        public["aggregated_outcomes"] = [
+            {"task_id": task_id, "side": side, "outcome": outcome.value}
+            for task_id, side, outcome in assessment.aggregated_outcomes
+        ]
+    return public
 
 
 def _infra_failure_categories(

@@ -20,7 +20,7 @@
 | P0 共享地基 | S1 审批模型覆盖与 S2 `E_final` 证据捕获已完成，开关默认关闭。S1 只覆盖模型与 effort，不覆盖 provider。 |
 | 测试基线 | Plan 004 完成对旧 81 项失败的分批整改后，最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行 14,092 项：14,060 通过、31 失败、1 超时，Nextest 另列 23 项 ignored；P0 仍以定向验收收口。此后未重跑全 workspace，不能把该历史快照表述为当前全绿或当前失败复现。 |
 | P1 / M1 | B1、B2、B3 与 M1 已完成；冻结 Codex 与 RONDO 已在同一 TB 2.1 任务上完成真实端到端并归档。 |
-| P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。当前工作包是公平比较设施闭合；E-A（A1—A7）随方向 1 一并挂起，不再作为交付项。 |
+| P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。E-B8 公平比较设施已闭合（campaign schema v7），只做了离线验收，未跑新 campaign；E-A（A1—A7）随方向 1 一并挂起，不再作为交付项。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
@@ -35,24 +35,21 @@
 推进顺序为 **工作包 1 → 2 → 3**。其中只有一条是**硬依赖**：3c 的付费同题验收不得早于工作包 1 闭合。
 其余为建议顺序 —— 工作包 1 与 2 都会改共享 eval 合同，串行是为了避免两套 schema 同期漂移。
 
-### 工作包 1（当前）：公平比较设施闭合（无真实 API）
+### 工作包 1（已完成）：公平比较设施闭合（无真实 API）
 
-依据 B7 归因报告已经关闭的证据，本 WBS 冻结以下设施修正合同：
+六项设施合同已全部落地为 campaign schema **v7** 的机械约束（catalog 对称与双来源 provenance、
+由 stub receipt 预冻结并对第一侧同样生效的请求硬门、与 campaign 事实互相绑定的运行条件、按任务交错调度、
+三层 assessment 与双向条件加跑入聚合、pilot 预冻结的奇数重复合同、产品身份窄入口）。
+receipt 由 `just eval-b7-preflight-receipts` 驱动两侧冻结二进制在本地 stub 上产出，付费 worker 启动时
+一次性校验全部任务的 receipt，因此硬门在 wire canary 之前生效。唯一的 successor 生成入口只能产出 v7，
+且不继承任何 v1—v22 continuation 与历史 prior，cap 必须单独授权传入；v1—v6 为冻结历史、行为不变。
+完成证据见 `doc/WBS-COMPLETED.md`，实现细节见 `doc/WBS/eval-benchmark.md`。
 
-1. 两侧使用同一份完整 8-model catalog bytes，并在工件中绑定 SHA 与来源字段。
-2. 上游调用前比较剔除任务内容后的 task-independent tool specs、instructions、schema 等冻结分区；完整请求 digest
-   各侧分别记录用于 provenance/drift，不要求轨迹分叉后的动态请求逐字节相等；增加无上游 stub preflight。
-3. 固定相同 harness commit、deadline 与运行条件；正式顺序按任务交错，不再按整轮时间分块。
-4. assessment 分开输出“方向性结果”和“A/A 行为一致性”；条件加跑进入最终聚合。
-5. 重复数在 pilot 后、正式执行前冻结；波动任务使用奇数且不少于 3 次，不事后删样本。必须同时冻结
-   多轮结果如何聚合为每题 outcome、`σ` 与 `delta`，在公式未机械化前不得建立新 campaign。
-6. 实现保持**产品无关**，不再假设“只有一个 RONDO 产品”；为后续产品身份（`rondo-local` / `rondo-multi`）
-   留下明确入口，但本工作包不创建 `multidev/`。
-
-该工作包只修比较设施和离线验收，不产生付费调用。完成后再冻结新的 B7 campaign 合同；不得复用 v22 ID。
+**闭合的是设施，不是结论**：本工作包未跑新 campaign，也未产生任何可归因的能力比较结果。
+新的 B7 campaign 合同仍需单独冻结与授权，不得复用 v1—v22 的任何 ID。
 它是**设施交付物，不是里程碑**：旧 M2 已按 §5 拆解，公平比较设施不再充当解锁其他方向的总闸门。
 
-### 工作包 2：RONDO Multi 产品基线建立（`multidev/` bootstrap）
+### 工作包 2（当前）：RONDO Multi 产品基线建立（`multidev/` bootstrap）
 
 范围严格限定为：共享看门狗脚本迁移（§4.4）、从当前 `mydev/` 复制 git 跟踪文件、通过三条行为验收门、
 建立贯通 binary freeze / manifest / 归档的独立产品身份、能构建并通过本次变化相关的无 API 验证。
@@ -88,7 +85,7 @@
 
 | 编号 | 方向 | 产品线 | 状态 | 解锁条件 |
 |---|---|---|---|---|
-| 0 | 量化测评基准 | 共享 | 公平比较设施收口中 | 无外部阻塞；E-A 挂起 |
+| 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | model-free/静态前置完成 | 无外部阻塞；4k model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究完成，产品基线未建立 | 无外部阻塞；付费同题验收不早于工作包 1 闭合 |
@@ -164,7 +161,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 |---|---|---|
 | P0 | S1 审批模型显式覆盖、S2 审批证据快照 | 已完成 |
 | P1 | B1—B3 最小真实链路；L1/L2 model-free 前置 | 已完成，M1 通过 |
-| P2 | 公平比较设施闭合；B4—B7；L2a/L7 + 4k model-backed 收口为 Local M3；随后 L5a 教师标签与 L3/L4 未微调 baseline | 进行中 |
+| P2 | 公平比较设施闭合（已完成）；B4—B7；L2a/L7 + 4k model-backed 收口为 Local M3；随后 L5a 教师标签与 L3/L4 未微调 baseline | 进行中 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 未开始 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
 | P5 | RONDO Multi 产品线 | 未开始（工作包 2 为其基线） |
@@ -183,11 +180,14 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 
 ### 公平比较设施保留的机械判据
 
-公平比较设施在自身范围内保留两个机械子门，不引入统计显著性框架，也不使用 pairwise-max `σ` 等事后放宽办法：
+公平比较设施在自身范围内保留三个**分别报告**的机械子门，不引入统计显著性框架，也不使用
+pairwise-max `σ` 等事后放宽办法：
 
 1. **A/A 行为一致性**：用同一二进制的预冻结重复观测形成不一致预算 `σ`；`σ` 是经验观测，不是统计估计。
-2. **A/B 对称比较**：两侧在完全相同的 task-independent 合同下运行，跨侧差异 `delta ≤ σ`。
-3. **方向性兜底**：对一侧 pass、另一侧 fail 的任务使用预冻结重复；若仍形成稳定单向失败，则判为不通过。
+2. **A/B 对称比较**：两侧在完全相同的 task-independent 合同下运行，跨侧差异 `delta ≤ σ`；
+   `delta` 使用条件加跑聚合后的每题 outcome，不是基础轮的原始差异。
+3. **重复与方向性兜底**：对一侧 pass、另一侧 fail 的任务（**两个方向都算**）使用预冻结重复并计入聚合；
+   其中若 RONDO 全败而上游全过，则另由方向性子门判为不通过。
 4. **infra**：基础设施失败不计能力分，只按同题运行链定点补跑；每轮后最终 infra 超过 2 项即 blocked；
    共同有效集合至少 8 项。
 5. **预算**：基础运行、预冻结重复、infra attempts 与 wire canary 全部计入 campaign cap，并单独授权。
@@ -197,8 +197,10 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 `doc/WBS/multi-agent-trusted-evidence.md`）。
 
 v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两轮”的历史公式；它的机械结果保持不改写，
-但不作为新 campaign 的默认重复合同。若 catalog、请求冻结分区、harness、deadline、顺序、重复或聚合规则不对称，
-不得形成能力归因；若 `σ` 接近任务总数，应回到 B4 重选 canary，而不是放宽判据。
+但不作为新 campaign 的默认重复合同。新 campaign（schema v7）必须在 lock 中预冻结重复数与聚合公式：
+每题每侧总观测数为奇数且不少于 3（基础 A/B 轮算其中一次），聚合固定为严格多数。
+若 catalog、请求冻结分区、harness、deadline、顺序、重复或聚合规则不对称，设施直接 blocked、不计算能力归因；
+若 `σ` 接近任务总数，应回到 B4 重选 canary，而不是放宽判据。
 
 ## 6. 授权门
 

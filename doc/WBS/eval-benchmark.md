@@ -24,6 +24,7 @@
 | B5 计分归因 | 完成首版 | agent、Guardian 与 infra 可分离；后续 assessment 需再拆方向性与行为一致性。 |
 | B6 预算 | 完成首版 | v1—v22 只读，active paid identity 已关闭。 |
 | B7 首次执行 | 执行完成、结论不可归因 | v22 机械一致性子门 failed，但比较条件不对称，不能解释为 RONDO/Codex 能力或性能差异。 |
+| E-B8 公平比较设施 | 完成 | 六项合同已成为 campaign schema v7 的机械约束；只做离线验收，未跑新 campaign。 |
 | E-A A1—A7 | **挂起** | 随方向 1 一并挂起，不排期；保留为历史设计，见下文。 |
 
 v22 的 `sigma=0`、`delta=3` 与 `ab_delta_exceeds_aa_sigma` 是对既有冻结输入的机械结果。固定归因报告确认
@@ -33,30 +34,53 @@ catalog prompt 相差 161 tokens，同时混有 harness/deadline 和时间分块
 P2 v2—v22 公共账本已合入当前交付历史：`runs.jsonl` 共 244 条唯一 run，其中 v22 为 32 条；v6—v22
 共 11 份聚合 JSON。历史标签中的“Plan 015”保留原样，当前权威编号仍为 Plan 020。
 
-## 当前工作包
+## E-B8 公平比较设施（已闭合）
 
-### E-B8 公平比较设施闭合（无真实 API）—— 对应 `doc/WBS.md` 工作包 1
+六项合同已实现为 campaign schema **v7** 的机械约束。v1—v6 是冻结历史，slot 顺序、run_id 分配与
+assessment 语义一律不变，新规则只在 v7 生效。
 
-1. **catalog 对称**：两侧使用同一份完整 8-model catalog bytes；lock 记录最终 artifact SHA，上游/RONDO 两个
-   来源各自的 commit/path/blob ID，投影算法/schema，main/Guardian model 与 override 目标 entry。
-2. **请求前置硬门**：规范化并比较剔除任务内容后的 task-independent tool specs、instructions、输出 schema 等
-   冻结分区；完整请求 digest 各侧分别记录用于 provenance/drift，不要求轨迹分叉后的动态请求逐字节相等。
-   先用禁止上游调用的 stub preflight 证明冻结分区不对称会 fail-closed。
-3. **执行条件统一**：冻结同一 harness commit、timeout/deadline、task/image 与 provider profile；按任务交错 A/A、A/B，
-   不按整轮时间块串行。
-4. **判据分层**：assessment 分别报告方向性分数、跨侧差异与 A/A 行为一致性，不再用“性能门”概括全部结论；
-   条件加跑必须进入聚合。
-5. **重复规则预冻结**：pilot 后、正式执行前冻结次数；波动任务使用奇数且至少 3 次；不得看结果后删样本或改轮数。
-6. **保留机械判据**：`σ` / `delta` / 方向性兜底 / infra 上限按 `doc/WBS.md` §5「公平比较设施保留的机械判据」执行，
+1. **catalog 对称**：两侧加载同一份完整 8-model catalog artifact。artifact 身份是它自己的 SHA-256，
+   不再绑定任一侧二进制的 source commit；lock 另记上游/RONDO 两个来源的 commit/path/blob ID、
+   投影算法与版本、main/Guardian model 与 override 目标 entry。两个来源 blob 不一致时判定无共享工件、直接拒绝。
+2. **请求前置硬门**：`rondo_eval.fair_comparison` 投影每个请求中与任务无关的分区
+   （tool specs、instructions、输出 schema、采样合同，以及 `input` 中首个 user 之前的 developer/system 前缀 ——
+   Responses Lite 的 catalog 派生工具描述就在那里）。**合同必须先由 stub 运行冻结成 preflight receipt**：
+   `just eval-b7-preflight-receipts` 驱动两侧冻结二进制走真实 Harbor/Docker 链路，但唯一可达端点是本地 stub，
+   零请求零费用；比对通过后写出绑定 campaign_id / lock SHA / task / 两侧 bundle manifest 的 receipt。
+   stub 与付费路径共用同一套 RunSpec 与 catalog 投影函数，因此 receipt 冻结的请求不会与被付费的请求分叉。
+   付费 worker **启动时一次性校验全部任务的 receipt**，位置在 wire canary 之前，缺失或绑定不符即拒绝整个 campaign；
+   运行期代理再以该 receipt 预置期望，因此**第一侧也受检**，不存在"先放行首侧、只拦第二侧"的窗口。
+   任一侧不符即在请求体解析后、预算预留与上游转发之前 fail-closed，HTTP 409 直接返回**具体分区**原因码。
+   完整请求 digest 各侧分别记录，只作 provenance/drift，不要求轨迹分叉后逐字节相等。
+   `just eval-preflight-symmetry` 是纯离线的两份已捕获请求比对入口，不产出 receipt。
+3. **执行条件统一**：lock 冻结 harness commit、upstream deadline、task/image digest、provider profile 与
+   投影版本。声明值不是自说自话 —— 加载时与 campaign 自身的权威字段（baseline deadline、selected profile 哈希、
+   catalog artifact SHA、冻结 canary 的 task/image）逐项等值校验，harness commit 在执行时与实际 checkout 校验，
+   任一项漂移给出可归因原因码并拒绝比较。基础轮调度改为**按任务交错**（task-major），
+   不再整轮时间分块；某轮最后一题落地即刻做 infra 阈值检查，保留原有的提前停机。
+4. **判据分层**：assessment 分别输出 `aa_consistency`、`cross_side`、`directional` 三个子门的状态、原因与指标，
+   不再用一个含糊的“性能门”概括。条件加跑进入**最终聚合** —— 触发题每侧的 outcome 是冻结重复的严格多数，
+   `delta` 用聚合后的 outcome 计算（同时保留 `base_delta` 供对照）。
+   触发条件是**任一方向的跨侧差异**；方向性兜底仍只检测 RONDO 全败/上游全过这一种回退模式。
+5. **重复规则预冻结**：lock 必须冻结每题每侧总观测数与聚合公式，否则拒绝建立 campaign。
+   总观测数为奇数且不少于 3（基础 A/B 轮算其中一次，因此条件加跑为 `n-1` 次），聚合固定为严格多数，
+   样本数与冻结值不符即拒绝，不允许事后删题或改分母。
+   唯一的 successor 生成入口 `just eval-b7-next-identity` 只能生成 schema v7，必须传入 pilot 后冻结的
+   comparison 合同文件与单独授权的 cap；合同不合法时在读写任何文件之前失败，因此无法再生成绕过这些门禁的历史 schema campaign。
+   v7 从公平合同上 fresh 开始：**不继承任何 v1—v22 continuation**（加载时强制为空）、prior 为 0、cap 独立且不超过历史封顶。
+   run ID 区间按冻结重复数算出的真实 slot 数校验，5/7/9 次重复不会让尾部区间与历史碰撞。
+   写 lock 前还会用真实事实核对新 comparison：共享 catalog 必须能从两个记录 commit 复现出声明的 artifact SHA，
+   harness commit 必须等于当前 checkout，task/image 与 provider profile 必须等于 campaign 自身字段。
+6. **保留机械判据**：`σ` / `delta` / 方向性兜底 / infra 上限按 `doc/WBS.md` §5 执行，
    不使用 pairwise-max `σ` 等事后放宽办法。比较合同不成立时直接 blocked，不计算能力归因。
    该判据**只适用于本设施自身的等条件 A/A、A/B 比较**，Local M3/M4 与 Multi 退化验收都不继承。
-7. **产品无关**：实现不再假设“只有一个 RONDO 产品”，为产品身份（`rondo-local` / `rondo-multi`）留下明确入口；
-   本工作包不创建 `multidev/`，产品身份的实际接入在 Multi 基线任务中完成。
+7. **产品无关**：`Product`（`rondo-local` / `rondo-multi`）与比较侧 `side` 正交，v7 lock 显式记录产品身份；
+   `codex` 不是产品取值。**未创建 `multidev/`**，产品身份的实际接入仍在 Multi 基线任务中完成。
 
-验收只运行 pure/fake/loopback/stub 定向门禁，不调用真实 API。完成后才可制定新的 B7 campaign；新 campaign
-必须使用新 IDs、独立 cap 和单独授权。
+闭合的是设施，不是结论：本工作包只跑 pure/fake/loopback/stub 定向门禁，未调用真实 API、未跑 Docker、
+未产生任何新的比较结果。新的 B7 campaign 仍须使用新 IDs、独立 cap 和单独授权。
 
-本工作包是**设施交付物，不是里程碑**：旧 M2 已拆解退役，它不再充当解锁其他方向的总闸门。
+它是**设施交付物，不是里程碑**：旧 M2 已拆解退役，它不再充当解锁其他方向的总闸门。
 但有一条依赖不变 —— RONDO Multi 的付费同题退化验收不得早于本工作包闭合
 （见 `doc/WBS/multi-agent-trusted-evidence.md`）。
 
@@ -112,8 +136,13 @@ P2 v2—v22 公共账本已合入当前交付历史：`runs.jsonl` 共 244 条�
 
 新的真实 canary 只有在以下条件同时满足后才能申请授权：
 
-- E-B8 无上游 preflight 通过。**不再要求 E-A 完成**：E-A 已挂起，不作为前置条件。
-- 新 identity 不复用任何 v1—v22 ID。
+- 新 campaign 使用 schema v7，其 `comparison` 块（重复合同、运行条件、catalog 身份、产品身份）已冻结；
+  设施在该块缺失、不合法或与 campaign 自身事实矛盾时拒绝建立 campaign。
+  **不再要求 E-A 完成**：E-A 已挂起，不作为前置条件。
+- 每道题都已有 stub 冻结的 preflight receipt，且与本 campaign 的 lock SHA、task 与两侧 bundle manifest 绑定；
+  任一 receipt 缺失时 campaign 在 wire canary 之前就拒绝启动。生成 receipt 走 `just eval-b7-preflight-receipts`，
+  需要一次无 API 的 stub 双侧 Docker 运行，单独授权。
+- 新 identity 不复用任何 v1—v22 ID，不继承其 continuation 与预算 prior，cap 单独授权。
 - 任务、轮数、交错顺序、重复规则、模型、价格快照、预算 cap 和停止条件全部预冻结。
 - 按 `doc/WBS.md` §5 的机械判据执行，比较合同任一项漂移都先 blocked。
 

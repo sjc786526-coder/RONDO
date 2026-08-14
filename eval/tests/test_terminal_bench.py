@@ -762,6 +762,57 @@ class TerminalBenchTests(unittest.TestCase):
                 frozen_model_catalog_source_commit=self.manifest().source_commit,
             )
 
+    def test_shared_catalog_reaches_both_sides_with_the_same_override(self) -> None:
+        catalog_path, catalog_sha256 = self.frozen_catalog()
+        commands: dict[str, str] = {}
+        for adapter_type in (CodexUploadAdapter, RondoUploadAdapter):
+            adapter = self.adapter(
+                adapter_type,
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=catalog_sha256,
+                frozen_model_catalog_provenance_sha256="c" * 64,
+            )
+            environment = FakeEnvironment()
+            asyncio.run(adapter.install(environment))
+            environment.calls.clear()
+            asyncio.run(adapter.run("repair the repository", environment, mock.Mock()))
+            commands[adapter_type.__name__] = "\n".join(
+                call[0] for call in environment.calls
+            )
+            self.assertIn(
+                f'model_catalog_json="{adapter.remote_frozen_model_catalog_path}"',
+                commands[adapter_type.__name__],
+            )
+            kwargs = dict(adapters_module.manifest_agent_kwargs(adapter))
+            self.assertEqual(kwargs["frozen_model_catalog_sha256"], catalog_sha256)
+            self.assertEqual(
+                kwargs["frozen_model_catalog_provenance_sha256"], "c" * 64
+            )
+            self.assertNotIn("frozen_model_catalog_source_commit", kwargs)
+        self.assertEqual(len(commands), 2)
+
+    def test_shared_catalog_identity_must_be_unambiguous(self) -> None:
+        catalog_path, catalog_sha256 = self.frozen_catalog()
+        with self.assertRaisesRegex(AdapterError, "ambiguous"):
+            self.adapter(
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=catalog_sha256,
+                frozen_model_catalog_source_commit=self.manifest().source_commit,
+                frozen_model_catalog_provenance_sha256="c" * 64,
+            )
+        with self.assertRaisesRegex(AdapterError, "ambiguous"):
+            self.adapter(
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=catalog_sha256,
+            )
+        with self.assertRaisesRegex(AdapterError, "provenance is invalid"):
+            self.adapter(
+                RondoUploadAdapter,
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=catalog_sha256,
+                frozen_model_catalog_provenance_sha256="not-a-digest",
+            )
+
     def test_prepare_projects_frozen_catalog_and_rejects_identity_drift(self) -> None:
         catalog_path, catalog_sha256 = self.frozen_catalog()
         config = self.runtime_config()
@@ -795,6 +846,56 @@ class TerminalBenchTests(unittest.TestCase):
                     drifted,
                     materializer=mock.Mock(),
                 )
+
+    def test_prepare_accepts_the_shared_catalog_on_both_sides(self) -> None:
+        catalog_path, catalog_sha256 = self.frozen_catalog()
+        config = self.runtime_config()
+        config.paths.common_root = self.root
+        for side in (Side.CODEX, Side.RONDO):
+            request = replace(
+                self.request(side=side),
+                frozen_model_catalog_path=str(catalog_path),
+                frozen_model_catalog_sha256=catalog_sha256,
+                frozen_model_catalog_provenance_sha256="c" * 64,
+            )
+            materializer = FakeMaterializer(self.root / f"shared-catalog-{side.value}")
+            materializer.root.mkdir()
+            with self.subTest(side=side):
+                prepared = prepare_terminal_bench_run(
+                    config,
+                    request,
+                    materializer=materializer,
+                )
+                joined = "\0".join(prepared.command.argv)
+                self.assertIn(
+                    f"frozen_model_catalog_provenance_sha256={'c' * 64}", joined
+                )
+                self.assertNotIn("frozen_model_catalog_source_commit=", joined)
+
+    def test_prepare_rejects_an_ambiguous_or_invalid_shared_identity(self) -> None:
+        catalog_path, catalog_sha256 = self.frozen_catalog()
+        config = self.runtime_config()
+        config.paths.common_root = self.root
+        base = replace(
+            self.request(),
+            frozen_model_catalog_path=str(catalog_path),
+            frozen_model_catalog_sha256=catalog_sha256,
+        )
+        for label, request in (
+            ("both", replace(
+                base,
+                frozen_model_catalog_source_commit=self.manifest().source_commit,
+                frozen_model_catalog_provenance_sha256="c" * 64,
+            )),
+            ("neither", base),
+            ("bad_provenance", replace(
+                base, frozen_model_catalog_provenance_sha256="not-a-digest"
+            )),
+        ):
+            with self.subTest(label=label), self.assertRaises(
+                runner_module.TerminalBenchRunError
+            ):
+                prepare_terminal_bench_run(config, request, materializer=mock.Mock())
 
     def test_adapter_install_rejects_uploaded_file_owner_drift(self) -> None:
         adapter = self.adapter()

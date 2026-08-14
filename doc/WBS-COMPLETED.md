@@ -488,3 +488,60 @@ standard/Lite 形态均补回归。
   `run_id`，其中 v22 为 32 条。全部 JSON/JSONL 解析通过，冻结历史标签“Plan 015”保持不改写。
 - 原 `0811-p2-b7-results@564a602` 提交链完整并入交付历史，完成分支改名为
   `zz-done/0811-p2-b7-results`；该操作只交付公共结果，不重跑测评或改变 B7 归因。
+
+### 2026-08-13 E-B8 公平比较设施闭合（工作包 1，无真实 API）
+
+- **catalog 对称**：`frozen_model_catalog.load_shared_model_catalog()` 保留完整 8 模型，只在 main entry 上写
+  `auto_review_model_override`，两侧加载同一份 artifact。artifact 身份改为自身 SHA-256，另绑上游/RONDO 双来源
+  commit/path/blob ID、投影算法与版本、main/Guardian model 和 override 目标 entry；两来源 blob 不一致即判定
+  无共享工件。adapter/runner 不再禁止 RONDO 接收 catalog，也不再把 catalog 身份绑到某侧二进制 source commit。
+  旧 Codex-only 投影保留为 `load_frozen_model_catalog()`，仅供 v1—v6 复算。
+- **请求前置硬门**：新增 `rondo_eval/fair_comparison.py`，投影 tool specs、instructions、输出 schema、采样合同
+  与 `input` 中首个 user 之前的 developer/system 前缀（Responses Lite 的 catalog 派生工具描述所在处）。
+  `SymmetryPreflight` 挂在 `api_budget_proxy` 请求体解析之后、预算预留与 `_transport.open` 之前，
+  不对称时以分区级原因码 409 拒绝。完整请求 digest 各侧分别记录，只作 provenance/drift。
+  离线入口 `just eval-preflight-symmetry`，`NoUpstreamTransport` 使其结构上无法连上游。
+- **运行条件与顺序**：`ComparisonConditions` 冻结 harness commit、deadline、task/image digest、provider profile
+  与投影版本，漂移给出可归因原因码。基础轮调度由整轮分块改为按任务交错（v7 起），并保留轮末 infra 阈值提前停机。
+- **判据分层与聚合**：assessment 分别输出 `aa_consistency` / `cross_side` / `directional` 三层状态、原因与指标；
+  条件加跑进入最终聚合，触发题按冻结重复的严格多数得出每题 outcome，`delta` 用聚合结果计算并保留 `base_delta`。
+- **重复合同**：`RepeatContract` 要求奇数且不少于 3（基础 A/B 轮计其中一次）、聚合固定严格多数、冻结点为 pilot；
+  未冻结、偶数、样本数不符或事后改公式均拒绝，因而在冻结前无法建立 v7 campaign。不采用 pairwise-max `σ`。
+- **产品身份**：新增 `contracts.Product`（`rondo-local` / `rondo-multi`）与 `product_for_side()`，与比较侧正交，
+  `codex` 不是产品取值；v7 lock 显式记录产品身份。未创建 `multidev/`，未提前实施工作包 2。
+- **历史保护**：全部新行为绑定 campaign schema v7；v1—v6 的 slot 顺序、run_id 分配、assessment 输出与
+  catalog 投影逐字节不变，v1—v22 的 lock/result/ledger/aggregate 未改动。
+- **独立验收后的四项修正**（GPT 审查 blocked，四项均已复现属实并修复）：
+  1. 付费 runner 原先根本没接 preflight，且注册表会放行首个到达的一侧。新增 `PreflightReceipt`：
+     两侧在 stub 上零成本产生请求并冻结合同，receipt 绑定 campaign_id / lock SHA / task / 两侧 bundle manifest；
+     付费 slot 缺 receipt 直接拒绝，代理以 receipt 预置期望，第一侧同样受检。
+  2. `eval-b7-next-identity` 原先硬编码生成 schema v6，可绕过全部 v7 门禁。生成器改为只产 v7，
+     必须传入 pilot 后冻结的 comparison 合同，且在任何读写之前完成纯校验。
+  3. `ComparisonConditions` 原先无生产调用，且非法/矛盾的 comparison 块可被接受。现在加载时与 campaign
+     自身权威事实逐项等值校验（deadline、provider profile、catalog artifact、task/image），
+     harness commit 在执行时校验；catalog provenance 的 commit/blob/path/投影/override 目标全部格式与一致性校验。
+  4. 条件重复原先只覆盖 RONDO fail / Codex pass，反方向差异会绕过重复合同。v7 起触发条件改为任一方向的
+     跨侧差异；方向性兜底仍只检测 RONDO 全败/上游全过。
+- **二次验收后的五项修正**（GPT 复审仍 blocked，五项均已复现属实并修复）：
+  1. `_TASK_ID` 不允许 `/`，而正式 TB 任务 ID 形如 `terminal-bench/fix-git`，导致任何正式任务都无法生成或消费
+     receipt（设施不可用，非 fail-open）。放开命名空间分隔符，每段仍须以字母数字开头；receipt 文件名改为
+     `<leaf>-<task_id 摘要>` 以保持不同命名空间的任务不共享文件。receipt 测试全部改用正式带 `/` 的 ID。
+  2. 没有真正驱动双侧冻结二进制的 receipt 产出入口，且付费 wire canary 早于 receipt 校验。新增
+     `terminal_bench/preflight_producer.py` 与 `just eval-b7-preflight-receipts`：两侧走真实 Harbor/Docker 链路，
+     唯一可达端点是本地捕获 stub，原子写出 receipt；付费 worker 启动时一次性校验全部任务 receipt，位置在
+     wire canary 之前。stub 与付费路径共用 `campaign_terminal_bench_request()` 与 `project_shared_model_catalog()`，
+     receipt 冻结的请求不会与被付费的请求分叉。
+  3. successor 无条件继承 v22 的 25 条 continuation（既违反 v7 公平条件，又因 profile 已被剥离两个旧 catalog 字段
+     而必然以 `continued execution contract drifted` blocked），且仍继承旧 prior 与固定 1600 cap。v7 改为
+     continuation 恒为空（加载时强制）、prior 为 0、cap 由 `--campaign-cap-usd` 单独授权传入且不超过历史封顶；
+     写 lock 前用真实事实核对新 comparison（共享 catalog 复现、harness commit、task/image、provider profile）。
+     生成器侧的 continuation 继承代码已整体删除。
+  4. `validate_successor_run_range()` 固定只查 321 个 run ID，而 5/7/9 次重复会把 slot 扩到 481/641/801，
+     尾部与历史区间的重叠被放行。改为接收由冻结重复数算出的真实 slot 数并校验完整区间。
+  5. 代理 409 只返回 `frozen_contract_asymmetry` 等 scope 码而非合同要求的分区级原因。
+     `FairComparisonError.reasons` 改为最具体在前，409 现在直接返回 `task_independent_<partition>_differs`。
+  同时修正两处措辞不实：`stub_preflight()` 声称"carries a transport"（`SymmetryPreflight` 无 transport 字段），
+  以及 `preflight_cli` 输出里名义上的 `upstream_transport` 字段。
+- **验收**：`just eval-lock` 通过；`just eval-test` 565 项全通过（`test_fair_comparison` 共 77 项，
+  含两轮修正的入口级回归与全部审查复现用例）。全程无真实 API、无 Docker、无真实模型，未创建新 campaign identity。
+  设施闭合不产生任何可归因的能力比较结论。

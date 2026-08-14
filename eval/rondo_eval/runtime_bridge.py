@@ -2221,6 +2221,9 @@ def _validate_host_data_root(
     return host_root
 
 
+_MOUNTINFO_OCTAL_ESCAPE = re.compile(r"\\([0-7]{3})")
+
+
 @dataclass(frozen=True)
 class _MountFact:
     root: str
@@ -2249,11 +2252,34 @@ def _mount_for_path(path: Path, mountinfo: str) -> _MountFact | None:
 
 
 def _unescape_mountinfo(value: str) -> str:
-    for escaped, plain in (("\\040", " "), ("\\011", "\t"), ("\\012", "\n"), ("\\134", "\\")):
-        value = value.replace(escaped, plain)
-    if "\\" in value or "\x00" in value:
+    """Decode one mountinfo field, rejecting anything that is not a real escape.
+
+    ``proc(5)`` escapes a byte as a backslash followed by exactly three octal
+    digits.  The unknown-escape check therefore has to run on the raw text:
+    ``\\134`` legitimately decodes to a backslash, so a Docker Desktop 9p source
+    such as ``C:\\Program Files\\Docker`` contains backslashes *after* decoding
+    and would be rejected by a check on the result.
+    """
+
+    if "\x00" in value:
         raise RuntimeBridgeError("mountinfo escape is invalid")
-    return value
+    decoded: list[str] = []
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if character != "\\":
+            decoded.append(character)
+            index += 1
+            continue
+        match = _MOUNTINFO_OCTAL_ESCAPE.match(value, index)
+        if match is None:
+            raise RuntimeBridgeError("mountinfo escape is invalid")
+        code = int(match.group(1), 8)
+        if code == 0:
+            raise RuntimeBridgeError("mountinfo escape is invalid")
+        decoded.append(chr(code))
+        index = match.end()
+    return "".join(decoded)
 
 
 def _has_docker_desktop_marker(mount: _MountFact) -> bool:

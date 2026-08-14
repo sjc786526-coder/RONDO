@@ -12,21 +12,26 @@ from decimal import Decimal
 from pathlib import Path
 
 from ..config import RepoPaths, load_runtime_config
-from ..frozen_model_catalog import load_frozen_model_catalog
+from ..frozen_model_catalog import (
+    load_frozen_model_catalog,
+    load_shared_model_catalog,
+)
+from ..fair_comparison import FairComparisonError, RepeatContract
 from .baseline import (
     CAMPAIGN_ACTIVE_POINTER_PATH,
     CAMPAIGN_CAP_USD,
     CAMPAIGN_MAX_RUNS,
+    FAIR_COMPARISON_SCHEMA_VERSION,
     CampaignIdentity,
     CampaignLockRegistration,
-    ContinuationReference,
-    LEGACY_UPSTREAM_TIMEOUT_SECONDS,
-    campaign_slot_chain_id,
+    _parse_comparison_block,
     campaign_baseline_contract,
     campaign_lock_registry,
+    campaign_slot_total,
     load_campaign_identity_path,
     load_historical_campaign_identity,
 )
+from .results import validate_eval_harness_checkout
 from .tasksets import load_successor_canary_catalog
 
 
@@ -152,7 +157,45 @@ def generate_successor_lock(
     *,
     run_id_date: str,
     run_id_sequence_base: int,
+    comparison: dict[str, object],
+    campaign_cap_usd: Decimal,
 ) -> tuple[Path, Decimal]:
+    """Mint the next campaign lock.
+
+    Only fair-comparison (schema v7) successors may be generated.  The caller
+    must supply the comparison block frozen after the pilot -- repeat contract,
+    run conditions, shared catalog identity and product -- because a campaign
+    whose repeat count and aggregation formula are not yet frozen must not
+    exist at all.
+
+    A v7 campaign starts fresh: it inherits no continuation and no prior spend
+    from v1--v22, because those results were produced without the shared
+    catalog, the stub receipts, the frozen harness commit and the interleaved
+    order that the fair-comparison contract requires.  Its cap is therefore a
+    separately authorized amount rather than the remainder of the historical
+    envelope.
+    """
+
+    # Pure validation first: a campaign whose repeat count and aggregation
+    # formula are not frozen must fail before anything is read or written.
+    try:
+        parsed_comparison = _parse_comparison_block(
+            {"comparison": comparison},
+            schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+        )
+        repeats = RepeatContract.from_dict(parsed_comparison["repeat_contract"])
+    except (ValueError, FairComparisonError) as exc:
+        raise CampaignIdentityGenerationError(
+            f"successor comparison contract is not frozen: {exc}"
+        ) from exc
+    if (
+        not isinstance(campaign_cap_usd, Decimal)
+        or not campaign_cap_usd.is_finite()
+        or campaign_cap_usd <= 0
+        or campaign_cap_usd > CAMPAIGN_CAP_USD
+        or campaign_cap_usd != campaign_cap_usd.quantize(Decimal("0.000001"))
+    ):
+        raise CampaignIdentityGenerationError("successor campaign cap is not authorized")
     _require_clean_worktree(paths.worktree_root)
     if re.fullmatch(r"[0-9]{8}", run_id_date) is None:
         raise CampaignIdentityGenerationError("run ID date must contain eight digits")
@@ -176,14 +219,10 @@ def generate_successor_lock(
     predecessor.validate_provider(load_runtime_config(paths).paid_provider_projection())
     _validate_frozen_inputs(paths, predecessor)
     next_version = latest.version + 1
-    validate_successor_run_range(
-        registry,
-        run_id_date=run_id_date,
-        run_id_sequence_base=run_id_sequence_base,
-    )
-    prior = required_successor_prior(paths, version=latest.version)
-    if prior >= CAMPAIGN_CAP_USD:
-        raise CampaignIdentityGenerationError("campaign cap has no remaining capacity")
+    # Calling this proves the predecessor's accounting is closed and settled;
+    # its value is deliberately not carried into the successor's prior.
+    required_successor_prior(paths, version=latest.version)
+    prior = Decimal(0)
     lock = _read_json(paths.worktree_root / latest.path)
     successor_catalog = load_successor_canary_catalog(paths)
     if (
@@ -193,25 +232,62 @@ def generate_successor_lock(
         raise CampaignIdentityGenerationError(
             "successor catalog changes the frozen taskset identity"
         )
-    continuation = _successor_continuation(paths, predecessor)
+    parsed = parsed_comparison
+    conditional_repeats = repeats.repeats_per_task - 1
+    slot_total = campaign_slot_total(
+        task_count=len(successor_catalog.tasks),
+        max_attempts=4,
+        conditional_repeats_per_side=conditional_repeats,
+    )
+    # The frozen repeat count decides how many run IDs this campaign consumes,
+    # so the collision check has to cover that range and not a fixed 321.
+    validate_successor_run_range(
+        registry,
+        run_id_date=run_id_date,
+        run_id_sequence_base=run_id_sequence_base,
+        slot_total=slot_total,
+    )
+    _validate_successor_comparison_facts(
+        paths,
+        comparison=parsed,
+        selected_profile=lock["selected_profile"],
+        catalog=successor_catalog,
+    )
     lock.update(
         {
-            "schema_version": 6,
+            "schema_version": FAIR_COMPARISON_SCHEMA_VERSION,
             "campaign_id": f"p2-b7-canary-baseline-v{next_version}",
             "batch_id": f"p2-b7-canary-sol-sol-v{next_version}",
             "run_id_date": run_id_date,
             "run_id_sequence_base": run_id_sequence_base,
             "canary_catalog_sha256": successor_catalog.catalog_sha256,
-            "continuation": continuation,
+            # No v1--v22 result satisfies the v7 fair-comparison conditions, so
+            # none may be carried forward into its aggregate.
+            "continuation": [],
+            "comparison": parsed,
         }
     )
+    # The Codex-only catalog digest is superseded by the shared artifact
+    # identity inside the comparison block.
+    lock["selected_profile"] = {
+        key: value
+        for key, value in lock["selected_profile"].items()
+        if key
+        not in {
+            "frozen_codex_model_catalog_sha256",
+            "frozen_codex_model_catalog_source_commit",
+        }
+    }
     lock["budget"] = {
         **lock["budget"],
-        "campaign_cap_usd": f"{CAMPAIGN_CAP_USD:.6f}",
+        "campaign_cap_usd": f"{campaign_cap_usd:.6f}",
         "prior_estimated_usd": f"{prior:.6f}",
-        "max_run_slots": CAMPAIGN_MAX_RUNS,
+        "max_run_slots": slot_total,
     }
-    lock["baseline"] = campaign_baseline_contract(6)
+    lock["baseline"] = campaign_baseline_contract(
+        FAIR_COMPARISON_SCHEMA_VERSION,
+        conditional_repeats_per_side=conditional_repeats,
+    )
     relative = Path(f"eval/locks/p2-b7-canary-baseline-v{next_version}.json")
     destination = paths.worktree_root / relative
     if destination.exists() or destination.is_symlink():
@@ -236,218 +312,66 @@ def generate_successor_lock(
     return destination, prior
 
 
-def _successor_continuation(
-    paths: RepoPaths,
-    predecessor: CampaignIdentity,
-) -> list[dict[str, object]]:
-    """Carry immutable valid logical results forward without selecting by reward."""
-
-    references: dict[str, dict[str, object]] = {}
-    for item in predecessor.continuation:
-        _validate_inherited_continuation(paths, predecessor=predecessor, reference=item)
-        references[item.chain_id] = {
-            "chain_id": item.chain_id,
-            "source_campaign_id": item.source_campaign_id,
-            "source_campaign_lock_sha256": item.source_campaign_lock_sha256,
-            "source_slot_id": item.source_slot_id,
-            "source_run_id": item.source_run_id,
-            "source_result_record_sha256": item.source_result_record_sha256,
-            "source_upstream_timeout_seconds": (
-                f"{item.source_upstream_timeout_seconds:.3f}"
-            ),
-        }
-    state_path = (
-        paths.common_root
-        / "eval-data/campaigns"
-        / predecessor.campaign_id
-        / "state.json"
-    )
-    state = _read_json(state_path)
-    slots = state.get("slots")
-    if (
-        state.get("campaign_id") != predecessor.campaign_id
-        or state.get("campaign_lock_sha256") != predecessor.lock_sha256
-        or state.get("status") not in {"passed", "failed", "blocked"}
-        or not isinstance(slots, list)
-        or any(not isinstance(row, dict) for row in slots)
-    ):
-        raise CampaignIdentityGenerationError(
-            "predecessor continuation state is invalid"
-        )
-    rows = {row.get("slot_id"): row for row in slots}
-    if None in rows or len(rows) != len(slots):
-        raise CampaignIdentityGenerationError(
-            "predecessor continuation slots are ambiguous"
-        )
-    for slot in predecessor.slots:
-        if slot.kind == "wire_canary":
-            continue
-        row = rows.get(slot.slot_id)
-        if (
-            not isinstance(row, dict)
-            or row.get("run_id") != slot.run_id
-            or row.get("status") != "completed"
-            or row.get("outcome") not in {"completed", "agent_failed"}
-            or row.get("reason") is not None
-        ):
-            continue
-        chain_id = campaign_slot_chain_id(slot)
-        if chain_id in references:
-            continue
-        digest = row.get("result_record_sha256")
-        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-            raise CampaignIdentityGenerationError(
-                "valid predecessor result lacks a public digest"
-            )
-        _validate_continuation_source_artifact(
-            paths,
-            predecessor=predecessor,
-            slot=slot,
-            row=row,
-        )
-        references[chain_id] = {
-            "chain_id": chain_id,
-            "source_campaign_id": predecessor.campaign_id,
-            "source_campaign_lock_sha256": predecessor.lock_sha256,
-            "source_slot_id": slot.slot_id,
-            "source_run_id": slot.run_id,
-            "source_result_record_sha256": digest,
-            "source_upstream_timeout_seconds": (
-                f"{Decimal(str(predecessor.upstream_timeout_seconds)):.3f}"
-                if predecessor.schema_version >= 3
-                else f"{LEGACY_UPSTREAM_TIMEOUT_SECONDS:.3f}"
-            ),
-        }
-    return [references[key] for key in sorted(references)]
-
-
-def _validate_inherited_continuation(
+def _validate_successor_comparison_facts(
     paths: RepoPaths,
     *,
-    predecessor: CampaignIdentity,
-    reference: ContinuationReference,
+    comparison: dict[str, object],
+    selected_profile: dict[str, object],
+    catalog: object,
 ) -> None:
-    match = re.fullmatch(
-        r"p2-b7-canary-baseline-v([1-9][0-9]*)",
-        reference.source_campaign_id,
-    )
-    if match is None:
-        raise CampaignIdentityGenerationError("inherited continuation source is invalid")
-    source = load_historical_campaign_identity(paths, int(match.group(1)))
-    source_slot = source.slot(reference.source_slot_id)
-    if (
-        source.campaign_id != reference.source_campaign_id
-        or source.lock_sha256 != reference.source_campaign_lock_sha256
-        or source_slot.run_id != reference.source_run_id
-        or campaign_slot_chain_id(source_slot) != reference.chain_id
-        or source.taskset_sha256 != predecessor.taskset_sha256
-        or source.terminal_bench_commit != predecessor.terminal_bench_commit
-        or source.selected_profile != predecessor.selected_profile
-        or source.bundles != predecessor.bundles
-        or source.no_api_seccomp != predecessor.no_api_seccomp
-        or source.catalog.task(str(source_slot.task_id))
-        != predecessor.catalog.task(str(source_slot.task_id))
-        or source.upstream_timeout_seconds
-        != float(reference.source_upstream_timeout_seconds)
-        or source.upstream_timeout_seconds > predecessor.upstream_timeout_seconds
-    ):
-        raise CampaignIdentityGenerationError("inherited continuation contract drifted")
-    state = _read_json(
-        paths.common_root
-        / "eval-data/campaigns"
-        / source.campaign_id
-        / "state.json"
-    )
-    rows = [
-        row
-        for row in state.get("slots", [])
-        if isinstance(row, dict) and row.get("slot_id") == source_slot.slot_id
-    ]
-    if (
-        state.get("campaign_id") != source.campaign_id
-        or state.get("campaign_lock_sha256") != source.lock_sha256
-        or state.get("status") not in {"passed", "failed", "blocked"}
-        or len(rows) != 1
-        or rows[0].get("run_id") != source_slot.run_id
-        or rows[0].get("status") != "completed"
-        or rows[0].get("outcome") not in {"completed", "agent_failed"}
-        or rows[0].get("reason") is not None
-        or rows[0].get("result_record_sha256")
-        != reference.source_result_record_sha256
-    ):
-        raise CampaignIdentityGenerationError("inherited continuation state drifted")
-    _validate_continuation_source_artifact(
-        paths,
-        predecessor=source,
-        slot=source_slot,
-        row=rows[0],
-    )
+    """Check the new comparison against reality before any lock is written.
 
+    Loading the generated lock re-checks the declared conditions against the
+    lock's own fields, but two of them are facts about this checkout rather
+    than about the lock: whether the shared catalog really reproduces from the
+    two recorded commits, and which eval-harness commit is actually present.
+    A well-formed lock naming a catalog or harness that does not exist would
+    otherwise stay active until execution -- possibly past the paid wire canary.
+    """
 
-def _validate_continuation_source_artifact(
-    paths: RepoPaths,
-    *,
-    predecessor: CampaignIdentity,
-    slot: object,
-    row: dict[str, object],
-) -> None:
-    artifact = row.get("artifact_path")
-    if not isinstance(artifact, str):
-        raise CampaignIdentityGenerationError(
-            "valid predecessor result lacks an artifact"
-        )
-    path = paths.common_root / artifact / "run-summary.json"
-    value = _read_json(path)
-    config = value.get("config") if isinstance(value, dict) else None
-    tasks = value.get("tasks") if isinstance(value, dict) else None
-    summary = value.get("summary") if isinstance(value, dict) else None
-    budget = summary.get("budget_accounting") if isinstance(summary, dict) else None
-    expected_profile = predecessor.selected_profile
-    if (
-        value.get("run_id") != slot.run_id
-        or value.get("outcome") not in {"completed", "agent_failed"}
-        or not isinstance(config, dict)
-        or config.get("campaign_id") != predecessor.campaign_id
-        or config.get("campaign_lock_sha256") != predecessor.lock_sha256
-        or config.get("campaign_slot_id") != slot.slot_id
-        or config.get("campaign_round_id") != slot.round_id
-        or config.get("campaign_attempt") != slot.attempt
-        or _source_timeout(config)
-        != Decimal(str(predecessor.upstream_timeout_seconds))
-        or config.get("taskset_sha256") != predecessor.taskset_sha256
-        or config.get("canary_catalog_sha256") != predecessor.canary_catalog_sha256
-        or any(config.get(key) != expected_profile.get(key) for key in expected_profile)
-        or not isinstance(tasks, list)
-        or len(tasks) != 1
-        or not isinstance(tasks[0], dict)
-        or tasks[0].get("task_id") != slot.task_id
-        or tasks[0].get("outcome") not in {"pass", "fail"}
-        or tasks[0].get("reward") not in {0.0, 1.0}
-        or not isinstance(budget, dict)
-        or budget.get("stopped") is not False
-        or budget.get("stop_reason") is not None
-        or budget.get("reserved_usd") != "0.000000"
-        or budget.get("request_count") != budget.get("settled_request_count")
-        or budget.get("request_count") != budget.get("usage_valid_request_count")
-        or not isinstance(budget.get("request_count"), int)
-        or budget["request_count"] < 1
-    ):
-        raise CampaignIdentityGenerationError(
-            "predecessor result is not a reusable valid terminal result"
-        )
-
-
-def _source_timeout(config: dict[str, object]) -> Decimal:
-    value = config.get("provider_upstream_timeout_seconds", 90.0)
-    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        raise CampaignIdentityGenerationError("predecessor timeout is invalid")
+    identity = comparison["catalog_identity"]
+    assert isinstance(identity, dict)
+    sources = {str(item["side"]): item for item in identity["sources"]}
     try:
-        timeout = Decimal(str(value))
-    except ArithmeticError as exc:
-        raise CampaignIdentityGenerationError("predecessor timeout is invalid") from exc
-    if timeout not in {LEGACY_UPSTREAM_TIMEOUT_SECONDS, Decimal("180.000")}:
-        raise CampaignIdentityGenerationError("predecessor timeout is invalid")
-    return timeout
+        shared = load_shared_model_catalog(
+            paths.common_root,
+            upstream_source_commit=str(sources["upstream"]["commit"]),
+            rondo_source_commit=str(sources["rondo"]["commit"]),
+            main_model=str(selected_profile["effective_main_model"]),
+            guardian_model=str(selected_profile["effective_guardian_model"]),
+        )
+    except (OSError, ValueError) as exc:
+        raise CampaignIdentityGenerationError(
+            "successor shared model catalog does not reproduce"
+        ) from exc
+    if shared.identity() != identity:
+        raise CampaignIdentityGenerationError(
+            "successor catalog identity differs from the reproduced artifact"
+        )
+    conditions = comparison["comparison_conditions"]
+    assert isinstance(conditions, dict)
+    actual_harness = validate_eval_harness_checkout(common_root=paths.common_root)
+    if str(conditions["eval_harness_commit"]) != actual_harness:
+        raise CampaignIdentityGenerationError(
+            "successor harness commit differs from the checked-out eval harness"
+        )
+    declared_images = {
+        str(task_id): str(digest)
+        for task_id, digest in dict(conditions["task_image_digests"]).items()
+    }
+    actual_images = {
+        item.task_id: item.image_digest for item in getattr(catalog, "tasks", ())
+    }
+    if declared_images != actual_images:
+        raise CampaignIdentityGenerationError(
+            "successor task image freeze differs from the successor catalog"
+        )
+    if str(conditions["provider_profile_sha256"]) != str(
+        selected_profile["provider_profile_sha256"]
+    ):
+        raise CampaignIdentityGenerationError(
+            "successor provider profile digest differs from the selected profile"
+        )
 
 
 def _require_clean_worktree(root: Path) -> None:
@@ -490,6 +414,26 @@ def _validate_frozen_inputs(paths: RepoPaths, identity: CampaignIdentity) -> Non
     ):
         raise CampaignIdentityGenerationError("frozen seccomp profile drifted")
     selected = identity.selected_profile
+    if identity.enforces_fair_comparison:
+        # A successor may only be minted once the shared artifact still
+        # reproduces from both recorded sources.
+        sources = {
+            str(item["side"]): item for item in identity.catalog_identity["sources"]
+        }
+        shared = load_shared_model_catalog(
+            paths.common_root,
+            upstream_source_commit=str(sources["upstream"]["commit"]),
+            rondo_source_commit=str(sources["rondo"]["commit"]),
+            main_model=str(selected["effective_main_model"]),
+            guardian_model=str(selected["effective_guardian_model"]),
+        )
+        try:
+            identity.validate_shared_model_catalog(shared.identity())
+        except ValueError as exc:
+            raise CampaignIdentityGenerationError(
+                "shared model catalog drifted"
+            ) from exc
+        return
     projection = load_frozen_model_catalog(
         paths.common_root,
         source_commit=selected["frozen_codex_model_catalog_source_commit"],
@@ -509,10 +453,20 @@ def validate_successor_run_range(
     *,
     run_id_date: str,
     run_id_sequence_base: int,
+    slot_total: int = CAMPAIGN_MAX_RUNS,
 ) -> None:
+    """Reject a run-ID base whose whole slot range overlaps history.
+
+    ``slot_total`` must be the count this campaign will actually mint: a
+    repeat contract above three widens the range well past ``CAMPAIGN_MAX_RUNS``
+    and the tail is exactly where a collision would land.
+    """
+
+    if isinstance(slot_total, bool) or not isinstance(slot_total, int) or slot_total < 1:
+        raise CampaignIdentityGenerationError("successor slot total is invalid")
     requested = {
         (run_id_date, run_id_sequence_base + index)
-        for index in range(CAMPAIGN_MAX_RUNS)
+        for index in range(slot_total)
     }
     historical = {
         (item.run_id_date, item.run_id_sequence_base + index)
@@ -567,12 +521,46 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m rondo_eval.terminal_bench.baseline_identity")
     parser.add_argument("--run-id-date", required=True)
     parser.add_argument("--run-id-sequence-base", required=True, type=int)
+    parser.add_argument(
+        "--comparison-contract",
+        required=True,
+        type=Path,
+        help=(
+            "JSON file holding the post-pilot frozen comparison block: "
+            "repeat_contract, comparison_conditions, catalog_identity, product"
+        ),
+    )
+    parser.add_argument(
+        "--campaign-cap-usd",
+        required=True,
+        help=(
+            "the separately authorized cap for this campaign; a v7 campaign "
+            "does not inherit the historical shared envelope"
+        ),
+    )
     args = parser.parse_args(argv)
+    try:
+        campaign_cap_usd = Decimal(args.campaign_cap_usd)
+    except ArithmeticError as exc:
+        raise CampaignIdentityGenerationError(
+            "successor campaign cap is not a decimal amount"
+        ) from exc
     paths = RepoPaths.discover(Path.cwd())
+    contract_path = args.comparison_contract
+    if contract_path.is_symlink() or not contract_path.is_file():
+        raise CampaignIdentityGenerationError("comparison contract file is unavailable")
+    try:
+        comparison = json.loads(contract_path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise CampaignIdentityGenerationError(
+            "comparison contract file is unreadable"
+        ) from exc
     path, prior = generate_successor_lock(
         paths,
         run_id_date=args.run_id_date,
         run_id_sequence_base=args.run_id_sequence_base,
+        comparison=comparison,
+        campaign_cap_usd=campaign_cap_usd,
     )
     print(json.dumps({"lock_path": path.as_posix(), "prior_estimated_usd": f"{prior:.6f}"}))
     return 0
