@@ -338,6 +338,7 @@ async def capture_side_requests(
         )
         _validate_stub_projection(
             prepared,
+            request=projected,
             identity=identity,
             task=task,
             provider=provider,
@@ -368,6 +369,7 @@ async def capture_side_requests(
 def _validate_stub_projection(
     prepared: object,
     *,
+    request: Any,
     identity: CampaignIdentity,
     task: FrozenTask,
     provider: object,
@@ -375,30 +377,35 @@ def _validate_stub_projection(
     """Fail unless the stub run carries the same frozen facts as a paid slot.
 
     A receipt frozen from a differently projected request would certify a
-    symmetry the paid run never has, so every field the projection depends on
-    is checked here rather than assumed.
+    symmetry the paid run never has, so every fact the projection depends on is
+    checked here rather than assumed.  The image and provider land on the
+    prepared RunSpec; the seccomp and catalog bindings stay on the request.
     """
 
     spec = getattr(prepared, "spec", None)
     if spec is None:
         raise PreflightProductionError("preflight projection is incomplete")
     if (
-        spec.image_digest != task.image_digest
+        spec.task_id != task.task_id
+        or spec.task_image_digest != task.image_digest
         or spec.provider.main_model != provider.main_model
         or spec.provider.guardian_model != provider.guardian_model
         or spec.provider.main_effort != provider.main_effort
         or spec.provider.guardian_effort != provider.guardian_effort
-        or spec.seccomp_profile_source_sha256
-        != identity.no_api_seccomp["source_sha256"]
-        or spec.seccomp_profile_effective_sha256
-        != identity.no_api_seccomp["effective_sha256"]
     ):
         raise PreflightProductionError(
             "preflight projection differs from the frozen campaign facts"
         )
-    if getattr(spec, "frozen_model_catalog_sha256", None) != str(
-        identity.catalog_identity["sha256"]
+    if (
+        request.seccomp_profile_source_sha256
+        != identity.no_api_seccomp["source_sha256"]
+        or request.seccomp_profile_effective_sha256
+        != identity.no_api_seccomp["effective_sha256"]
     ):
+        raise PreflightProductionError(
+            "preflight run does not carry the frozen seccomp profile"
+        )
+    if request.frozen_model_catalog_sha256 != str(identity.catalog_identity["sha256"]):
         raise PreflightProductionError(
             "preflight run does not carry the shared model catalog"
         )
