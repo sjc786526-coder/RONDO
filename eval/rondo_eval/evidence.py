@@ -1,13 +1,24 @@
 """Fail-closed Standard/Lite E_final parsing for static approval consumers.
 
 The static payload built here is the one logical request every static consumer
-sends, so it may only contain content each of them can consume.  Schema v2 adds
-the `reasoning` projection: an OpenAI Responses `reasoning` item is transport
-for the provider that produced it, not evidence, and other providers refuse it
-outright.  Only its public summary text survives the projection - encrypted
-transport, provider session ids and raw reasoning content do not.
-`build_static_payload()` is therefore the single place where those items are
-normalized, and no consumer may repeat or relax that work.
+sends, so it may only contain content each of them can consume.  Two archived
+shapes need normalizing before that is true, and both are normalized here:
+
+Schema v2 added the `reasoning` projection: an OpenAI Responses `reasoning`
+item is transport for the provider that produced it, not evidence, and other
+providers refuse it outright.  Only its public summary text survives -
+encrypted transport, provider session ids and raw reasoning content do not.
+
+Schema v3 adds the evidence *role* normalization.  `developer` is an
+OpenAI-Responses role with no provider-neutral equivalent: each consumer maps
+it to something of its own, and a mapped `developer` turn is refused outright
+wherever it follows an assistant or tool turn.  So an archived developer turn
+is carried as an ordinary evidence turn instead - same text, same position,
+same message boundary - and the roles that leave this module are the ones every
+static consumer accepts in every position.
+
+`build_static_payload()` is therefore the single place where either shape is
+normalized, and no consumer may repeat, relax or vary that work.
 """
 
 from __future__ import annotations
@@ -20,10 +31,10 @@ from typing import Any, Literal, Mapping
 
 
 # Version of the provider-neutral static *input* payload built by this module.
-STATIC_PAYLOAD_SCHEMA_VERSION = 2
+STATIC_PAYLOAD_SCHEMA_VERSION = 3
 # Name of the structured *decision output* schema.  It is a different contract
 # from the input payload above and is already recorded in published
-# qualification evidence, so it stays at v1 while the input payload moves to v2.
+# qualification evidence, so it stays at v1 while the input payload moves on.
 STATIC_DECISION_SCHEMA_NAME = "rondo_static_approval_v1"
 StaticApprovalConsumer = Literal["luna-static", "sol-static", "local-static"]
 STATIC_APPROVAL_CONSUMERS: tuple[StaticApprovalConsumer, ...] = (
@@ -71,6 +82,20 @@ _REASONING_SUMMARY_TYPES = frozenset({"summary_text"})
 _REASONING_RAW_CONTENT_TYPES = frozenset({"reasoning_text", "text"})
 # Fields of the frozen `InternalChatMessageMetadataPassthrough` struct.
 _PASSTHROUGH_FIELDS = frozenset({"turn_id", "executed_tool_calls"})
+
+# The message roles the frozen Guardian producer can archive, and the neutral
+# role each one is carried as.  `user` and `assistant` are the two roles every
+# static consumer accepts after every other role, so normalizing onto them is
+# what makes one payload servable everywhere.  Any other role - `system`,
+# `tool`, or something added later - is refused rather than guessed at.
+_EVIDENCE_ROLE_NORMALIZATION = {
+    "user": "user",
+    "developer": "user",
+    "assistant": "assistant",
+}
+NEUTRAL_EVIDENCE_ROLES = frozenset(_EVIDENCE_ROLE_NORMALIZATION.values())
+# The frozen `ContentItem` subtype each neutral role carries on the wire.
+_NEUTRAL_ROLE_TEXT_TYPE = {"user": "input_text", "assistant": "output_text"}
 
 
 class EvidenceError(ValueError):
@@ -152,13 +177,13 @@ def validate_static_payload(payload: StaticApprovalPayload) -> None:
         "input",
         "output_schema",
     }:
-        raise EvidenceError("static approval payload fields do not match schema v2")
+        raise EvidenceError("static approval payload fields do not match schema v3")
     if logical["schema_version"] != STATIC_PAYLOAD_SCHEMA_VERSION or isinstance(
         logical["schema_version"], bool
     ):
-        raise EvidenceError("static approval payload schema version is not v2")
+        raise EvidenceError("static approval payload schema version is not v3")
     if logical["instructions"] != STATIC_INSTRUCTIONS:
-        raise EvidenceError("static approval instructions differ from schema v2")
+        raise EvidenceError("static approval instructions differ from schema v3")
     policy = logical["guardian_policy"]
     if not isinstance(policy, str) or not policy:
         raise EvidenceError("static approval guardian policy is invalid")
@@ -167,6 +192,7 @@ def validate_static_payload(payload: StaticApprovalPayload) -> None:
     if logical["output_schema"] != STATIC_DECISION_SCHEMA:
         raise EvidenceError("static approval output schema differs from the decision contract")
     _reject_private_transport(logical)
+    _reject_unnormalized_roles(logical["input"])
 
     identity = payload.policy_identity
     expected_sha256 = hashlib.sha256(policy.encode("utf-8")).hexdigest()
@@ -288,11 +314,13 @@ def _developer_text(value: Any) -> str | None:
 
 
 def _neutral_items(items: list[Any]) -> list[Any]:
-    """Normalize the task input; `reasoning` is the only projected item shape.
+    """Normalize the task input; `reasoning` and message roles are projected.
 
-    Every other item keeps its existing v1 semantics, order and text.  This is
-    the only place a `reasoning` item is normalized: consumers receive the
-    result and must not re-derive it.
+    Nothing is reordered, dropped for position, or moved across a tool call or
+    its output: each item is normalized where it stands.  Items that carry no
+    role - function calls, their outputs, tool search evidence - keep their
+    existing semantics, order and text.  This is the only place either
+    projection happens; consumers receive the result and must not re-derive it.
     """
 
     neutral: list[Any] = []
@@ -302,8 +330,56 @@ def _neutral_items(items: list[Any]) -> list[Any]:
             if projected is not None:
                 neutral.append(projected)
             continue
+        if isinstance(item, Mapping) and ("role" in item or item.get("type") == "message"):
+            neutral.append(_normalize_evidence_role(item))
+            continue
         neutral.append(_strip_transport_metadata(item))
     return neutral
+
+
+def _normalize_evidence_role(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Carry one archived evidence message under a universally accepted role.
+
+    `developer` is the shape that forces this: every consumer re-maps that role
+    on its way in, and the mapped turn is refused wherever it follows an
+    assistant or tool turn.  `user` is accepted after every other role, so the
+    developer channel of the archived session is carried as an ordinary
+    evidence turn.  The text, the order and the message boundary are exactly
+    the archived ones, and the content stays in `input` as session evidence -
+    it is never folded into the Guardian policy or the instructions.
+
+    The relabelling is unconditional.  Making it depend on what precedes a
+    message would give identical evidence different roles by position and would
+    quietly encode one template's ordering rules into a payload that is
+    supposed to be provider-neutral.
+
+    Only the role changes; the rest of the message keeps the handling it
+    already had.  A role or content shape this boundary cannot account for is
+    refused, because a shape that is merely passed through is not a shape whose
+    normalization can be shown to be lossless.
+    """
+
+    role = item.get("role")
+    if not isinstance(role, str) or role not in _EVIDENCE_ROLE_NORMALIZATION:
+        raise EvidenceError("evidence message role is missing or not a known role")
+    if item.get("type") not in (None, "message"):
+        raise EvidenceError("evidence message carries a conflicting item type")
+    neutral_role = _EVIDENCE_ROLE_NORMALIZATION[role]
+    content = item.get("content")
+    if not isinstance(content, list) or not content:
+        raise EvidenceError("evidence message content must be a non-empty array")
+    expected_type = _NEUTRAL_ROLE_TEXT_TYPE[neutral_role]
+    for part in content:
+        if (
+            not isinstance(part, Mapping)
+            or set(part) != {"type", "text"}
+            or part["type"] != expected_type
+            or not isinstance(part["text"], str)
+        ):
+            raise EvidenceError("evidence message content is not known text for its role")
+    normalized = _strip_transport_metadata(item)
+    normalized["role"] = neutral_role
+    return normalized
 
 
 def _project_reasoning_item(item: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -424,6 +500,21 @@ def _strip_transport_metadata(value: Any) -> Any:
             }
         result[key] = _strip_transport_metadata(item)
     return result
+
+
+def _reject_unnormalized_roles(items: Any) -> None:
+    """Refuse a payload whose evidence still carries an un-normalized role.
+
+    Roles belong to the evidence items themselves, so this looks exactly
+    there: a `role` key nested deeper inside an item is evidence content, not a
+    message of this conversation.  A schema v2 payload relabelled v3 by hand
+    therefore still cannot reach a sink with its `developer` turns intact.
+    """
+
+    for item in items:
+        if isinstance(item, Mapping) and "role" in item:
+            if item.get("role") not in NEUTRAL_EVIDENCE_ROLES:
+                raise EvidenceError("static approval payload contains an un-normalized role")
 
 
 def _reject_private_transport(value: Any) -> None:

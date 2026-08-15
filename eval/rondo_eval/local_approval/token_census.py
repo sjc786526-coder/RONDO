@@ -106,6 +106,12 @@ _WATCHDOG_RECHECK_EVERY = 10
 # catch-all `500 server_error`, which any internal fault also produces - fails
 # the whole census instead of being recorded as a property of one sample.
 _STRUCTURAL_REFUSAL = (400, "invalid_request_error")
+# The two bounded points at which this census asks the server for a count.  A
+# generic failure at either one stops the whole run; naming which one it was,
+# which archive was in flight and how many archives already had an exact count
+# is the whole of the diagnostic, and none of it is derived from evidence text.
+_STAGE_ANCHOR_COUNT = "anchor_count"
+_STAGE_ARCHIVE_COUNT = "archive_count"
 
 
 class CensusError(RuntimeError):
@@ -357,6 +363,26 @@ def _http_error_facts(error: urllib.error.HTTPError) -> dict[str, Any]:
     if isinstance(message, str):
         facts["message_sha256"] = hashlib.sha256(message.encode("utf-8")).hexdigest()
     return facts
+
+
+def _counting_stage_facts(
+    stage: str, e_final_sha256: str, counted_before_failure: int
+) -> dict[str, Any]:
+    """Locate one counting failure without describing what was being counted.
+
+    All three values are already published parts of a census result - the stage
+    is one of two fixed names, the digest identifies the archive the way every
+    record does, and the count is how many distinct archives had an exact count
+    when the failure happened.  No path, request, evidence text or free-form
+    trace is added, and naming the stage does not make an endpoint failure a
+    property of the archive that happened to be in flight.
+    """
+
+    return {
+        "stage": stage,
+        "e_final_sha256": e_final_sha256,
+        "counted_before_failure": counted_before_failure,
+    }
 
 
 def _probe_count_endpoint(
@@ -681,15 +707,26 @@ def run_census(
         # The anchor is counted first: if it does not reproduce the already
         # measured 5,313 tokens, this census is not measuring the real request
         # path and the other 46 counts would mean nothing.
+        anchor_facts = _counting_stage_facts(
+            _STAGE_ANCHOR_COUNT, anchor.e_final_sha256, 0
+        )
         try:
             anchor_tokens = counter(settings, bodies[anchor.e_final_sha256])
         except RequestRejected as rejected:
-            raise CensusError("anchor_request_rejected", rejected.facts) from rejected
+            raise CensusError(
+                "anchor_request_rejected", {**rejected.facts, **anchor_facts}
+            ) from rejected
+        except CensusError as error:
+            raise CensusError(error.code, {**error.facts, **anchor_facts}) from error
         if anchor_tokens != ANCHOR_INPUT_TOKENS:
             raise CensusError(
                 "anchor_token_count_mismatch",
                 {"expected": ANCHOR_INPUT_TOKENS, "observed": anchor_tokens},
             )
+        # Archives that already have an exact count, so a later failure can say
+        # how far the run got.  The anchor is counted above and reused below,
+        # so it belongs here rather than being counted twice.
+        counted: set[str] = {anchor.e_final_sha256}
         for index, item in enumerate(inputs, start=1):
             record: dict[str, Any] = {"e_final_sha256": item.e_final_sha256}
             try:
@@ -703,7 +740,20 @@ def run_census(
                 record["refusal"] = rejected.facts
                 # Prove the refusal was about this request, not the service.
                 _probe_count_endpoint(settings, builder, count=count)
+            except CensusError as error:
+                # Still fail-closed: a generic failure stops the census instead
+                # of being recorded against this archive as a refusal.
+                raise CensusError(
+                    error.code,
+                    {
+                        **error.facts,
+                        **_counting_stage_facts(
+                            _STAGE_ARCHIVE_COUNT, item.e_final_sha256, len(counted)
+                        ),
+                    },
+                ) from error
             else:
+                counted.add(item.e_final_sha256)
                 record["status"] = "counted"
                 record["input_tokens"] = tokens
                 record["fits"] = fit_results(tokens)

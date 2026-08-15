@@ -648,3 +648,29 @@ standard/Lite 形态均补回归。
 - **边界**：未运行真实模型、GPU、census、Cargo、Docker、云 API 或全量 eval；不据此宣称那 21 条已在
   b10333 上可服务，也未触及 2 条通用 500。capability 保持 `linux_cuda_built_model_unvalidated`，
   exact-token census baseline 仍不存在；后续重跑与档位选择只按当前 WBS 推进。
+
+### 2026-08-14 Plan 027 WP3b-A2c provider-neutral 角色顺序兼容与 census 最小失败定位
+
+- **成果**：static input payload 从 v2 显式升为 v3，结构化决策输出 schema 仍是 `rondo_static_approval_v1`。
+  公共 `build_static_payload()` 内把证据消息的 `developer` 角色原地改写为 `user`：只改 role，文本、顺序、
+  消息边界和其余字段不变，内容仍留在 `input` 里作会话证据，不并入 Guardian policy/instructions，
+  也不跨越 tool call/output 重排。改写无条件执行，不按前驱角色分情况，三个 static consumer 与 token census
+  继续消费同一份 canonical bytes，没有 Local/llama.cpp 私有旁路。
+- **选择理由**：47 条归档只含 `user`/`developer`/`assistant` 三种消息角色，而冻结 Ministral 模板中 `user`
+  是唯一在 system/user/assistant/tool 之后都被接受的角色，因此这是保文本、保序的最窄改法，
+  不需要新增中立结构标记或对话重写器。
+- **fail-closed**：未知/缺失 role、非消息 item 携带 role、空或畸形 content、与角色不匹配的文本 subtype
+  一律 `EvidenceError`；终端 validator 另外拒绝 v1/v2 payload 与被手工回填的 `developer`/`system` 角色。
+  Plan 025 的 reasoning/raw/encrypted/passthrough 出站边界原样保留。
+- **census 诊断**：通用计数失败新增有界 `stage`（`anchor_count` / `archive_count`）、当前 `e_final_sha256`
+  与 `counted_before_failure`。通用 500/transport 在两处仍立即停止、不发布结果，未降级成样本拒绝；
+  per-record `refusal` 字段未被污染，也没有新建事件/追踪设施。
+- **验收**：focused tests 116/116、`test_terminal_bench` 中唯一 `policy_identity` 消费用例 1/1、
+  `uv lock --directory eval --check` 85 packages 通过。47 条只读聚合检查（无模型、无网络、不输出正文）：
+  47/47 构造 v3 payload 与 Local 请求，三 consumer 逐字节一致 47/47，无残留 `developer`/`system` 角色与
+  reasoning/encrypted；从冻结模板资产解析规则的角色顺序门下 v3 为 47/47 通过、规范化前 24/47，
+  与 Plan 026 的离线结论一致。该门禁只在测试中，不进入生产 consumer。
+- **边界**：未运行真实模型、GPU、count endpoint、census 重跑、任何 generation、Cargo、Docker、云 API 或
+  全量 eval。本次只证明构造层与模板角色顺序兼容，**不证明** 47 条在真实 b10333 上可完成计数，
+  也不解释 Plan 026 的具体通用 500。WP3b-A2 仍 blocked/incomplete，正式 exact-token baseline 仍不存在，
+  未选上下文档位，capability 保持 `linux_cuda_built_model_unvalidated`，qualification 状态不变。

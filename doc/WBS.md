@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**exact-token 普查（WP3b-A2）仍未完成**：只有 24 条取得 token 数（min 5,313、max 18,921；按 `input+512` 这 24 条里 4k 适配 0 条、8k 适配 9 条），全集分布至今没有。provider-neutral static payload v2 已完成并通过独立复审；WP3b-A2b 的第一次真实重跑在归档计数阶段以通用 500 fail closed，当前输出无法定位到锚点或后续样本，未发布 baseline。独立离线检查另确认 23 条 v2 请求存在 `assistant → developer` 角色顺序兼容问题。能力保持 `linux_cuda_built_model_unvalidated`。下一步先做版本化、provider-neutral 的角色兼容并补最小失败阶段标识，通过无模型门禁后再重新授权普查，而不是选档位（见 `doc/WBS/local-approval-model.md`）。 |
+| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**exact-token 普查（WP3b-A2）仍未完成**：只有 24 条取得 token 数（min 5,313、max 18,921；按 `input+512` 这 24 条里 4k 适配 0 条、8k 适配 9 条），全集分布至今没有。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，47/47 在无模型只读检查下通过冻结模板的角色顺序门，三 consumer 逐字节一致。census 的通用计数失败现在报告有界 stage、当前 `e_final_sha256` 与失败前成功计数条数。Plan 026 那次通用 500 仍未定位，未发布 baseline。能力保持 `linux_cuda_built_model_unvalidated`。下一步是重新申请真实模型授权、重跑 47/47 普查，而不是选档位（见 `doc/WBS/local-approval-model.md`）。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -38,16 +38,15 @@
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
 - **3b RONDO Local**：exact-token 普查（WP3b-A2）**仍未完成**，至今只有 24 条拿到 token 数。
-  **provider-neutral static-payload 兼容（WP3b-A2a）已完成并通过独立复审**：static input payload
-  升为 v2，reasoning 投影统一落在公共 builder，只有公开 summary 文本进入中立证据，raw content、
-  encrypted 内容与 provider session id 一律不出站；47/47 通过只读静态构造检查。
+  **provider-neutral static-payload 兼容（WP3b-A2a/A2c）已完成**：static input payload 现为 v3，
+  reasoning 投影与证据角色规范化统一落在公共 builder，raw content、encrypted 内容与 provider session id
+  一律不出站，证据消息只以 `user`/`assistant` 出站且文本、顺序与消息边界不变；结构化决策输出 schema
+  仍是 `rondo_static_approval_v1`。47/47 通过只读静态构造检查与冻结模板角色顺序门（规范化前为 24/47）。
   **47/47 重跑（WP3b-A2b）未通过**：Plan 026 的第一次真实运行在归档计数阶段返回通用 500，
-  当前输出无法区分锚点或后续样本；按合同 fail closed、未发布 baseline，也未执行第二次运行。
-  独立聚合式离线检查确认 23 条 v2 请求含 `… assistant → developer → user`，经 llama.cpp 的
-  developer→system 映射后违反冻结模板的角色顺序。该兼容结论不能反向解释 Plan 026 的具体 500，
-  也不追认 Plan 024 两条旧 500 的现场原因。
-  下一步先在公共 builder 做版本化、provider-neutral 的角色顺序兼容，并给 census 增加最小失败阶段标识；
-  通过无模型门禁后再重新申请真实模型授权重跑 47/47。拿到全集分布再定档位，
+  当时输出无法区分锚点或后续样本；按合同 fail closed、未发布 baseline，也未执行第二次运行。
+  census 现在会给出有界 stage、当前 `e_final_sha256` 与失败前成功计数条数，但这**不解释** Plan 026 的
+  具体 500，也不追认 Plan 024 两条旧 500 的现场原因。
+  **下一个授权门：重新申请真实模型授权，重跑 47/47 普查。** 拿到全集分布再定档位，
   然后以 model-backed + 配置切换收口 Local M3，之后 L5a、L3/L4、L5b/L6，最后 Local M4。
 - **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
   付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
@@ -73,7 +72,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | 真实模型已首次加载；static payload v2 兼容已完成；exact-token 普查仍只完成 24/47；Plan 026 在归档计数阶段以未定位的通用 500 fail closed，另有 23 条角色顺序兼容问题经离线确认 | 版本化角色兼容 + 最小失败阶段标识 → 重新授权并重跑 47/47 普查 → 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | 真实模型已首次加载；static payload v3 角色兼容与 census 最小失败定位已完成（47/47 通过无模型门禁）；exact-token 普查仍只完成 24/47，Plan 026 那次通用 500 仍未定位 | 重新授权并重跑 47/47 普查 → 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），
