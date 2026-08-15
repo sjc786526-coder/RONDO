@@ -223,8 +223,9 @@ Ministral 12k 本地服务上，对完全对应的 canonical static payload v3 �
 
 ### 当前工作
 
-- 已完成。实现、focused tests、真实 40 条回放、结果发布与文档收口均已落地并提交在本 worktree 分支；
-  等待审查者独立验收。
+- 已完成并通过最终独立验收。实现、focused tests、真实 40 条回放、结果发布、验收整改与文档收口均已落地并
+  提交在本 worktree 分支；最终报告见
+  `agent_log/2026-08-15-085839-plan033-remediation-independent-acceptance.md`。
 
 ### 本任务剩余步骤
 
@@ -255,6 +256,8 @@ Ministral 12k 本地服务上，对完全对应的 canonical static payload v3 �
   并指出两处窄缺口：统一结果校验未强制 shadow 的 source/side 映射与 `holdout ⇒ tasks=null`；
   发布对 harness commit 采用等值绑定，导致最终 HEAD 无法完成所称的幂等重算。两项均已在本分支窄修并补回归，
   未改动模型结果、指标口径或冻结输入。
+- 最终独立复验（`agent_log/2026-08-15-085839-plan033-remediation-independent-acceptance.md`）确认上述整改正确，
+  326 项 focused tests、85-package lock 与最终 HEAD 幂等 publish 均通过，结论为**验收通过、任务目标完成**。
 - 一次运行前失败：首次用相对路径调用 `with-build-lock.sh`，lease 校验要求 wrapper cmdline 含解析后的
   绝对脚本路径，故被拒（`watchdog_unavailable`）；该次未启动模型、未创建私有目录、未动 GPU。
 - 现场限制（如实记录，未改动）：本机 WSL 的 `nvidia-smi --query-compute-apps` 始终返回空行，

@@ -882,6 +882,9 @@ standard/Lite 形态均补回归。
   合计 **326 项通过、0 skip**；`uv lock --check` 85 packages 通过。在最终交付 HEAD 上重跑 publish
   为幂等空操作（exit 0、0 条新记录、baseline SHA 不变、账本仍 248 条）。真实模型生命周期 1 次；
   一次运行前的失败是 wrapper 相对路径调用导致的 lease 拒绝，未启动模型。
+- **最终独立验收**：整改后复验确认统一 shadow 门禁、holdout 公共投影、最终 HEAD 幂等发布及权威文档状态
+  均正确，未发现新的功能性阻断；结论为**验收通过、任务目标完成**。报告见
+  `agent_log/2026-08-15-085839-plan033-remediation-independent-acceptance.md`。
 - **现场清理**：`server_stopped` / `port_released` / `receipt_cleared` / `gpu_released` 四项全 true，
   8080 空闲，无 llama-server 残留，显存回落到 1,498 MiB。
 - **数据边界**：逐条正文、模型原始 envelope、attempt 与全部 holdout 明细只在 ignored
