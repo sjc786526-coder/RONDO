@@ -172,7 +172,7 @@
 
 ### 当前工作
 
-- 已完成实现与验收，等待独立审查。
+- 独立验收已通过；本任务冻结，后续路线交回 WBS。
 
 ### 本任务剩余步骤
 
@@ -184,7 +184,9 @@
 
 ### 当前验收状态
 
-- **L7 与 Local M3 的完成标准均有实证支持**（证据见 `agent_log/2026-08-15-043608-plan031-local-guardian-config-switch.md`）。
+- **L7 与 Local M3 的完成标准均有实证支持并已通过独立验收**（执行证据见
+  `agent_log/2026-08-15-043608-plan031-local-guardian-config-switch.md`，验收报告见
+  `agent_log/2026-08-15-050341-plan031-independent-acceptance-review.md`）。
 - 两处覆盖边界如实记录，不冒充正式链证据：
   1. “结构化输出不合规”与“响应读回后的身份后验”只做到定向回归端到端；正式链上覆盖的是 bridge
      错误通道（400/503）到 RONDO fail-closed 这一段。要在真实 12k 上复现不合规输出必须改 prompt

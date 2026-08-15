@@ -347,7 +347,7 @@ L5 分两部分，**执行时点不同**：
 
 ### L7 一键切换与端到端可用性（规模 S，依赖 L2a）
 
-状态：**已验收**（2026-08-15）。实现与证据见 `plan/031-local-guardian-config-switch-execplan.md`。
+状态：**已独立验收**（2026-08-15）。实现与证据见 `plan/031-local-guardian-config-switch-execplan.md`。
 
 - 通过 **S1（模型/effort）+ L2a（provider）** 三个配置项把 Guardian 审批切到本地模型。
   **仅有 S1 做不到这件事**：实跑确认未设 `model_provider` 时 Guardian 请求落到主 Agent provider。
@@ -369,7 +369,7 @@ L5 分两部分，**执行时点不同**：
 
 ### Local M3 —— 工程闭环（工程验收）
 
-状态：**已完成**（2026-08-15）。
+状态：**已完成并通过独立验收**（2026-08-15）。
 
 12k model-backed、结构化输出、真实 `E_final`、错误 fail-closed，以及**仅通过配置**在 cloud/local Guardian
 之间切换，共同形成真实本地审批闭环。用功能与失败语义验收，**不继承公平比较设施的 `σ`/`delta` 判据**。

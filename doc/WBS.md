@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-15（L7 / Local M3 收口）
+最后更新：2026-08-15（L7 / Local M3 独立验收收口）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置与资格合同均已迁到 12k，qualification 设施与 model-backed 证据投影已落地。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，三 consumer 逐字节一致。**exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为 5,311 后，同一正式入口两遍完整 count-only 普查全部成功且逐字节一致，47/47 取得 exact input-token 数、0 拒绝、`generated_tokens=0`，唯一正式 baseline `eval/results/baselines/local-approval-exact-token-census-v1.json` 已发布（digest `22b84527…`）。全集分布：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499；按 `input+512`，4k 适配 0/47、8k 适配 11/47、12k（12,288）适配 42/47。4k 因而从前向路线退役。**12k model-backed qualification 已通过**：真实 `E_final` 在 `n_ctx=12288`、GPU offload 33/35 层下返回合规结构化判定，峰值显存 7,855,931,392 B、TTFT 3,183 ms、总耗时 7,049 ms，能力已晋级 `gpu_model_serving_validated` 并由正式 launcher + doctor 复验；启动指纹在 linked worktree 与 main 间稳定。Plan 026 那次通用 500 未再复现，也未被单独定位。**L7 与 Local M3 已完成**：Plan 031 以 eval-side 身份门控适配器接通正式 Guardian 与冻结 b10333，真实 `--approve-for-me` 链在本地 12k 上取得合规 allow 并执行待审批动作，服务异常、身份漂移与请求契约不符三类均 fail-closed，cloud/local 切换只动 `[auto_review]` 的 model/effort/provider 三轴（见 `doc/WBS/local-approval-model.md`）。 |
+| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置与资格合同均已迁到 12k，qualification 设施与 model-backed 证据投影已落地。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，三 consumer 逐字节一致。**exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为 5,311 后，同一正式入口两遍完整 count-only 普查全部成功且逐字节一致，47/47 取得 exact input-token 数、0 拒绝、`generated_tokens=0`，唯一正式 baseline `eval/results/baselines/local-approval-exact-token-census-v1.json` 已发布（digest `22b84527…`）。全集分布：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499；按 `input+512`，4k 适配 0/47、8k 适配 11/47、12k（12,288）适配 42/47。4k 因而从前向路线退役。**12k model-backed qualification 已通过**：真实 `E_final` 在 `n_ctx=12288`、GPU offload 33/35 层下返回合规结构化判定，峰值显存 7,855,931,392 B、TTFT 3,183 ms、总耗时 7,049 ms，能力已晋级 `gpu_model_serving_validated` 并由正式 launcher + doctor 复验；启动指纹在 linked worktree 与 main 间稳定。Plan 026 那次通用 500 未再复现，也未被单独定位。**L7 与 Local M3 已完成并通过独立验收**：Plan 031 以 eval-side 身份门控适配器接通正式 Guardian 与冻结 b10333，真实 `--approve-for-me` 链在本地 12k 上取得合规 allow 并执行待审批动作，服务异常、身份漂移与请求契约不符三类均 fail-closed，cloud/local 切换只动 `[auto_review]` 的 model/effort/provider 三轴（见 `doc/WBS/local-approval-model.md`）。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -53,7 +53,7 @@
   总耗时 7,049 ms，现场四项清理全 true。capability 已晋级为 `gpu_model_serving_validated`，
   并由无资格特权的正式 launcher + 存活期 doctor 独立复验（`ready` / `model_schema_probe_passed`）。
   这只证明 12k 档位内的真实服务可用，**不代表剩余 5 条超窗证据可服务**。
-  **L7 已通过（WP3b-A4），Local M3 随之收口**：正式 Guardian 直连冻结 b10333 存在三处不匹配
+  **L7 已通过独立验收（WP3b-A4），Local M3 随之收口**：正式 Guardian 直连冻结 b10333 存在三处不匹配
   （不映射 `text.format`、tools 与 grammar 并存即抛错、`developer` 角色经 `map_developer_role_to_system`
   触碰模板顺序限制），且通用 provider 路径不消费 launcher receipt。Plan 031 采用 eval-side
   身份门控适配器一次性关闭四点：`mydev/` Rust 源码未改，入站请求由公共 `build_static_payload()`

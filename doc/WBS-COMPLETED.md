@@ -807,6 +807,12 @@ standard/Lite 形态均补回归。
   （bridge 已调用 upstream 却仍返回 502/503 且不写出任何 `data:` 字节）；正式链上覆盖的是适配器错误通道
   到 RONDO fail-closed 这一段。要在真实 12k 上复现不合规输出必须改 prompt 或放宽 parser，两者都被禁止。
   云端侧只做离线无残留证明，未发出任何云端请求。
+- **最终独立验收**：审查者复跑 focused unittest **159/159、0 skip** 与 85-package lock，
+  并用当前 binary 复跑未配 provider、本地服务缺失、本地模型配置漂移三项无模型正式链；
+  provider 分流、动作阻断、`failed_closed` 与无主 provider 回退均与执行证据一致。宿主无相关进程、
+  8080、GPU compute、receipt 或私有 evidence 残留。不额外启动第 5 个真实模型生命周期；
+  结论为 **验收通过、任务目标完成**。报告见
+  `agent_log/2026-08-15-050341-plan031-independent-acceptance-review.md`。
 - **边界**：只证明 12k 档位内这条正式链可用。未验证 16k、剩余 5 条超窗证据、其余 41 条 12k 证据、
   47 条批量 generation、教师标签、横评、训练或模型优化；未跑 Docker、云 API、全量测试或全量 eval；
   未读 `.env.local`；未改 Plan 030 资格证据、runtime/model/template lock、census baseline 或历史结果。
