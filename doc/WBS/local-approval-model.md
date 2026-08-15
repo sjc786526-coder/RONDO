@@ -152,9 +152,11 @@
 
 ### 当前推进顺序
 
-1. **下一工作是 L7 的“仅改配置切换”。** 12k model-backed 已通过，L7 与它一起形成 **Local M3**；
-   不同上下文档位互相独立验收，任一档位失败不得靠弱化 identity 或输出校验凑绿。
-   不顺带验证 16k、压缩或剩余 5 条超窗证据。
+1. **下一工作是 Plan 031/L7。** 规划确认正式 Guardian 的通用 provider 路径不消费 launcher receipt，
+   冻结 b10333 也不映射原生 `text.format`，现有 RONDO bundle 早于 L2a。用户已允许 Plan 031 适当扩展：
+   先补最小 loopback 身份/wire bridge、focused tests 与 current binary，再完成配置-only 的真实本地审批。
+   12k model-backed 已通过，L7 与它一起形成 **Local M3**；不得靠外部 doctor、旧 bundle、弱化 identity
+   或输出校验凑绿，也不顺带验证 16k、压缩或剩余 5 条超窗证据。
 2. **L5a**：用冻结 prompt、人在场经开发用 Codex 生成第一批 Sol 教师标签。
 3. 跑 L3/L4：程序化批量运行 `Local-static`，对照导入的教师标签，固化指标口径，得到未微调 baseline。
 4. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
@@ -345,6 +347,8 @@ L5 分两部分，**执行时点不同**：
 
 - 通过 **S1（模型/effort）+ L2a（provider）** 两个配置项把 Guardian 审批切到本地模型，验证端到端可正常审批。
   **仅有 S1 做不到这件事**。
+- 当前正式 Guardian 直连 raw llama endpoint 不能满足请求窗口内 launcher 身份漂移 fail-closed，冻结 b10333
+  也不映射原生 `text.format`。Plan 031 先补最小受限 bridge 与 current binary；支持落地后的实际切换仍只改配置。
 - 仅在非严格耗时场景验证；正式耗时测评仍按核心设计走云端 `Guardian-live`。
 - 验收：切换只改配置，不改代码；切回云端模型行为与性能无残留影响。
 - **L7 不单独构成里程碑**：它的配置切换验收并入 Local M3，因此归在 P2 而非 P3。
