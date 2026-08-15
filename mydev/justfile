@@ -89,6 +89,18 @@ install:
     cargo fetch
     exit $LASTEXITCODE
 
+# Build the RONDO Local CLI binary through the shared build lock and watchdog.
+# `just codex` runs cargo directly and is fine for a quick local iteration, but
+# producing a binary for a formal run is a heavy build and has to go through the
+# same single-build lock and fail-closed resource gate as `just test`.
+[unix]
+build-codex-cli *args:
+    RUST_MIN_STACK={{ rust_min_stack }} {{ watchdog }} cargo build -p codex-cli --bin codex "$@"
+
+[windows]
+build-codex-cli *args:
+    $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; cargo build -p codex-cli --bin codex @($args | Select-Object -Skip 1)
+
 # Run nextest with --no-fail-fast so all tests are run.
 #
 # Run `cargo install --locked cargo-nextest` if you don't have it installed.

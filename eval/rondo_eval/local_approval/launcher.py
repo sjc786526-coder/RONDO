@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 import re
+import signal
 import socket
 import stat
 import subprocess
@@ -15,7 +17,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .. import runtime_bridge
 from ..config import ConfigError, RepoPaths, RuntimeConfig, load_local_model_secret, load_runtime_config
@@ -1250,18 +1252,53 @@ def run_server(
         _stop_server_process(process)
         raise LauncherError("local approval launcher identity could not be published") from exc
     try:
-        while True:
-            try:
-                return process.wait(timeout=watchdog_interval_seconds)
-            except subprocess.TimeoutExpired:
-                if not _watchdog_held(watchdog):
-                    _stop_server_process(process)
-                    raise LauncherError("shared watchdog lease was lost during server execution")
+        with _graceful_termination():
+            while True:
+                try:
+                    return process.wait(timeout=watchdog_interval_seconds)
+                except subprocess.TimeoutExpired:
+                    if not _watchdog_held(watchdog):
+                        _stop_server_process(process)
+                        raise LauncherError(
+                            "shared watchdog lease was lost during server execution"
+                        )
     except KeyboardInterrupt:
         _stop_server_process(process)
         return 130
     finally:
         identity_clearer(config, identity)
+
+
+@contextlib.contextmanager
+def _graceful_termination() -> Iterator[None]:
+    """Give `SIGTERM` the same stop path `SIGINT` already takes.
+
+    The launcher owns a server process, a port, GPU memory and a receipt that
+    is only meaningful while it is alive.  Python ends a process on a default
+    `SIGTERM` before any of that can be released, so an ordinary `kill` used to
+    leave the model process running and the receipt describing a launcher that
+    no longer existed; only the shared build wrapper's residual-process sweep
+    caught it.  Routing the signal into the existing interrupt path makes an
+    ordinary stop release everything the launcher acquired.
+    """
+
+    def stop(_signum: int, _frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    try:
+        previous = signal.signal(signal.SIGTERM, stop)
+    except ValueError:
+        # Not the main thread: the caller keeps whatever handling it had.
+        yield
+        return
+    try:
+        yield
+    finally:
+        # `previous` is None only when the handler was installed from C, which
+        # `signal.signal` cannot restore; leaving ours in place beats raising
+        # during cleanup.
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
 
 
 def _watchdog_held(watchdog: runtime_bridge.WatchdogProof) -> bool:

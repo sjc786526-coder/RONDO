@@ -764,3 +764,56 @@ standard/Lite 形态均补回归。
   全量 eval 或全量测试；未改模型/runtime/tokenizer/template/static payload v3 核心语义、
   输出预算、selector、census baseline、run ledger 或历史 CUDA base lock；
   未新增 provenance、签名、attestation 或通用审计设施。
+
+## WP3b-A4：L7 正式 Guardian 路由与配置切换（Plan 031，2026-08-15，Local M3 收口）
+
+- **结论**：RONDO Local 现在可以只靠运行配置把 Guardian 审批在云端模型与已资格化的本地 12k 模型之间切换。
+  真实 `--approve-for-me` 链在本地 12k 上取得生产 parser 可接受的 allow 并执行了待审批动作，
+  三类关键失败全部 fail-closed。**L7 与 Local M3 同时完成**。
+- **为什么需要一个适配器**：正式 Guardian 直连冻结 b10333 有四点过不去——(1) 该 pin 不映射
+  OpenAI `text.format`，输出合同会被静默丢弃；(2) `common/chat.cpp` 在 `tools` 与 grammar 并存时抛
+  `Cannot specify grammar with tools`，而 Guardian 请求必带 `exec_command`/`write_stdin`/`view_image`；
+  (3) 请求 `input[0]` 是 `developer` 消息，经 `map_developer_role_to_system` 会撞上冻结 Ministral 模板的
+  角色顺序限制（正是 static payload v3 已解决的形状）；(4) 通用 provider 路径不消费 launcher receipt，
+  无法在请求窗口内判定身份漂移。
+- **落地形态**：`eval/rondo_eval/local_approval/guardian_bridge.py`，**`mydev/` Rust 源码零改动**
+  （只在 `mydev/justfile` 增加受锁构建配方 `build-codex-cli`）。适配器把入站 Guardian 请求交给公共
+  `build_static_payload()` 归一化——与 token census、12k qualification 同一条边界，不存在第二套角色/
+  reasoning 处理——再按冻结服务合同重建请求；响应完整缓冲，**身份后验通过前不写出任何字节**；
+  判定按 Guardian 自己送来的 schema（`codex_output_schema`）校验；一切失败都是 HTTP 失败，永不渲染成判定。
+  配套 `formal_switch.py` 驱动真实 CLI 五场景（主 Agent 由 loopback 脚本化端点应答，本任务无云端授权）。
+- **验收数据**：`just build-codex-cli` 经 build lock 4m02s 产出含 L2a 的当前 binary；
+  focused `tests.test_local_approval` + `tests.test_config_hardening` + `tests.test_config_and_artifacts`
+  **159/159、0 skip**；`just eval-lock` 85 packages。正式链五场景：
+  未设 provider 时 Guardian 落到主 provider（证明 provider 轴真实存在）；
+  真实 12k 正例 `decision=approved` / `terminal_status=approved` / `token_usage` 非空、动作 `completed`、
+  marker 生成、整轮 5.02s 与 7.03s；服务异常（bridge 503）、请求契约不符（bridge 400）、
+  身份漂移（bridge 4×503 且 upstream 一次未调）三场景均 `terminal_status=failed_closed` +
+  `failure_reason=session_error`、动作 `declined`、`main_endpoint_guardian_requests=0`。
+  cloud/local 差异只落在 `[auto_review]` 的 model/effort/provider 三轴及其 provider registry 条目；
+  主 Agent 侧不受影响由两处佐证——所有本地场景 `main_endpoint_guardian_requests=0`（脚本化端点的真实计数），
+  以及两份 profile 组装出的完整调用里主 provider 那几行逐字相同（`main_provider_identical`）。
+- **独立审查发现并整改**：适配器原先在配置无 `model_path` 时会跳过全部身份校验仍返回判定
+  （真实配置有 `model_path`，实跑证据不受影响，但该路径本身违反“身份判定覆盖真实请求窗口”），
+  且新增 bridge 测试多数跑在身份门关闭状态；已改为无绑定实例即拒绝服务，测试改为发布真实 receipt。
+  同轮还纠正了一个恒真的主 provider 指标（改为对完整调用逐字比较并补反例测试）和一处过头的
+  docstring 断言（这条路线不等于已资格化的 static 请求，census 长度分布不用来给它定界）。
+  整改后在最终代码上重跑了真实 12k 正例与身份漂移。
+- **顺带修复的既有缺陷**：`launcher.py` 的 `run_server()` 只处理 `KeyboardInterrupt`，
+  收到 SIGTERM 时会被直接结束，留下仍在跑的 llama-server（占 8080 与显存）和陈旧 receipt，
+  只有 with-build-lock 的 `residual_processes_after_command` 兜底。修复后同样的 `kill -TERM` 得到
+  `exit_code 130`、server 退出、receipt 自清、wrapper 记 `cleanup: none`；两份 wrapper summary 构成前后对照。
+- **覆盖边界（不冒充正式链证据）**：“结构化输出不合规”与“响应读回后的身份后验”只做到定向回归端到端
+  （bridge 已调用 upstream 却仍返回 502/503 且不写出任何 `data:` 字节）；正式链上覆盖的是适配器错误通道
+  到 RONDO fail-closed 这一段。要在真实 12k 上复现不合规输出必须改 prompt 或放宽 parser，两者都被禁止。
+  云端侧只做离线无残留证明，未发出任何云端请求。
+- **最终独立验收**：审查者复跑 focused unittest **159/159、0 skip** 与 85-package lock，
+  并用当前 binary 复跑未配 provider、本地服务缺失、本地模型配置漂移三项无模型正式链；
+  provider 分流、动作阻断、`failed_closed` 与无主 provider 回退均与执行证据一致。宿主无相关进程、
+  8080、GPU compute、receipt 或私有 evidence 残留。不额外启动第 5 个真实模型生命周期；
+  结论为 **验收通过、任务目标完成**。报告见
+  `agent_log/2026-08-15-050341-plan031-independent-acceptance-review.md`。
+- **边界**：只证明 12k 档位内这条正式链可用。未验证 16k、剩余 5 条超窗证据、其余 41 条 12k 证据、
+  47 条批量 generation、教师标签、横评、训练或模型优化；未跑 Docker、云 API、全量测试或全量 eval；
+  未读 `.env.local`；未改 Plan 030 资格证据、runtime/model/template lock、census baseline 或历史结果。
+  共使用 4 个模型生命周期（每次改动适配器后重跑，确保交付物与证据同一份代码）。

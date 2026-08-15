@@ -7,13 +7,16 @@ import io
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -41,6 +44,11 @@ from rondo_eval.local_approval.client import (  # noqa: E402
 )
 from rondo_eval.local_approval.doctor import run_doctor  # noqa: E402
 from rondo_eval.local_approval.fake_server import FakeApprovalServer  # noqa: E402
+from rondo_eval.local_approval import formal_switch  # noqa: E402
+from rondo_eval.local_approval.guardian_bridge import (  # noqa: E402
+    GuardianBridge,
+    GuardianBridgeServer,
+)
 from rondo_eval.local_approval.identity import (  # noqa: E402
     clear_launcher_identity,
     publish_launcher_identity,
@@ -1150,6 +1158,59 @@ class LauncherAndDoctorTests(unittest.TestCase):
         (self.root / "eval-data").symlink_to("outside", target_is_directory=True)
         with self.assertRaises(ConfigError):
             self._publish_identity(config, model)
+
+    def test_run_server_stops_the_server_and_receipt_on_sigterm(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        lease = runtime_bridge.WatchdogLease(token="c" * 48)
+        guard = mock.Mock()
+        guard.is_held.return_value = True
+        watchdog = runtime_bridge.WatchdogProof(lease=lease, guard=guard)
+        original = signal.getsignal(signal.SIGTERM)
+        observed: list[object] = []
+
+        def wait(timeout=None):
+            # Stand in for the signal arriving once, while the launcher waits.
+            # Later calls are the shutdown path reaping the stopped server.
+            if observed:
+                return 0
+            observed.append(signal.getsignal(signal.SIGTERM))
+            os.kill(os.getpid(), signal.SIGTERM)
+            for _ in range(200):
+                # `sleep` is a signal check point, so the installed handler runs
+                # here rather than after this frame has already unwound.
+                time.sleep(0.01)
+            raise AssertionError("SIGTERM did not interrupt the launcher wait")
+
+        process = mock.Mock()
+        process.wait.side_effect = wait
+        runtime = RuntimeInspection(
+            "runtime_ready",
+            self.root / "llama-server",
+            "ready",
+            "c" * 64,
+            "gpu_model_serving_validated",
+        )
+        identity_clearer = mock.Mock()
+        with mock.patch(
+            "rondo_eval.local_approval.launcher.inspect_runtime",
+            return_value=runtime,
+        ):
+            result = run_server(
+                self._config(model=os.fspath(model)),
+                watchdog_factory=lambda: watchdog,
+                popen=mock.Mock(return_value=process),
+                identity_publisher=mock.Mock(return_value=mock.sentinel.identity),
+                identity_clearer=identity_clearer,
+                watchdog_interval_seconds=0.01,
+            )
+        self.assertEqual(result, 130)
+        # The handler was installed while waiting and restored on the way out.
+        self.assertEqual(len(observed), 1)
+        self.assertNotIn(observed[0], (signal.SIG_DFL, signal.SIG_IGN, original))
+        self.assertEqual(signal.getsignal(signal.SIGTERM), original)
+        process.terminate.assert_called_once_with()
+        identity_clearer.assert_called_once_with(mock.ANY, mock.sentinel.identity)
 
     def test_run_server_terminates_then_kills_on_watchdog_loss(self) -> None:
         model = self.root / "model.gguf"
@@ -3669,6 +3730,564 @@ class TokenCensusTests(unittest.TestCase):
                     )
         leftovers = list(private_root.glob("census-*")) if private_root.exists() else []
         self.assertEqual(leftovers, [])
+
+
+# The output contract the live Guardian actually sends, copied from
+# `core/src/guardian/prompt.rs::guardian_output_schema`.
+_GUARDIAN_OUTPUT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "risk_level": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+        "user_authorization": {
+            "type": "string",
+            "enum": ["unknown", "low", "medium", "high"],
+        },
+        "outcome": {"type": "string", "enum": ["allow", "deny"]},
+        "rationale": {"type": "string"},
+    },
+    "required": ["outcome"],
+}
+
+
+def _guardian_request(
+    *,
+    model: str = "rondo-local-approval",
+    schema: dict | None = _GUARDIAN_OUTPUT_SCHEMA,
+) -> dict:
+    """One live Guardian Responses request, in the shape the CLI really sends."""
+
+    request: dict = {
+        "model": model,
+        "instructions": "exact guardian policy\n",
+        "input": [
+            {
+                "type": "message",
+                "id": "msg_env",
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "environment context"}],
+            },
+            {
+                "type": "message",
+                "id": "msg_task",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "approve deleting build cache?"}],
+            },
+        ],
+        "tools": [
+            {"type": "function", "name": "exec_command"},
+            {"type": "function", "name": "write_stdin"},
+            {"type": "function", "name": "view_image"},
+        ],
+        "tool_choice": "auto",
+        "parallel_tool_calls": False,
+        "reasoning": {"effort": "low", "summary": "auto"},
+        "store": False,
+        "stream": True,
+        "include": ["reasoning.encrypted_content"],
+    }
+    if schema is not None:
+        request["text"] = {
+            "format": {
+                "type": "json_schema",
+                "strict": False,
+                "schema": copy.deepcopy(schema),
+                "name": "codex_output_schema",
+            }
+        }
+    return request
+
+
+def _post_to_bridge(base_url: str, body: dict, token: str | None) -> tuple[int, bytes]:
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(
+        f"{base_url}/responses",
+        data=json.dumps(body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
+class GuardianBridgeTests(unittest.TestCase):
+    """The adapter that lets the live Guardian reach the pinned local server."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.paths = RepoPaths(self.root, self.root)
+        _install_template_fixture(self.root)
+        (self.root / "rondo.secrets.example.env").write_text(
+            "RONDO_LOCAL_MODEL_API_KEY=\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _config(self, base_url: str, **kwargs: object) -> RuntimeConfig:
+        return RuntimeConfig(self.paths, _local_data(base_url, **kwargs), "0" * 64)
+
+    def _model(self) -> Path:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        return model
+
+    @contextlib.contextmanager
+    def _bound_bridge(self, fake: FakeApprovalServer, model: Path):
+        """A bridge bound to a live launcher receipt, as production requires.
+
+        Without this the client reports no launcher instance and the bridge
+        refuses outright, so every test that expects to reach the server has to
+        stand up a real receipt for the process that owns the listener.
+        """
+
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        config = self._config(
+            fake.base_url,
+            model_path_value=os.fspath(model),
+            model_sha256_value=digest,
+        )
+        settings = settings_from_config(config)
+        publish_launcher_identity(
+            config,
+            pid=os.getpid(),
+            command=_current_process_command(),
+            runtime_sha256="a" * 64,
+            model_sha256=digest,
+            model_path=model,
+            model_id=settings.model_id,
+            base_url=settings.base_url,
+            host=settings.host,
+            port=settings.port,
+            serve_config_sha256=serve_config_sha256(config, settings),
+        )
+        with mock.patch(
+            "rondo_eval.local_approval.launcher.resolve_binary",
+            return_value=self.root / "llama-server",
+        ), mock.patch(
+            "rondo_eval.local_approval.launcher._load_runtime_lock",
+            return_value=mock.Mock(identity_sha256="a" * 64),
+        ):
+            yield GuardianBridge(config)
+
+    def test_bridge_sends_the_qualified_request_shape_and_streams_one_decision(self) -> None:
+        decision = {"outcome": "allow", "risk_level": "low", "rationale": "harmless"}
+        model = self._model()
+        with FakeApprovalServer(decision=decision, model_path=os.fspath(model)) as fake:
+            with self._bound_bridge(fake, model) as bridge:
+                with GuardianBridgeServer(bridge) as front:
+                    status, body = _post_to_bridge(
+                        front.base_url, _guardian_request(), bridge.secret
+                    )
+
+        self.assertEqual(status, 200)
+        events = [
+            json.loads(line[len("data: ") :])
+            for line in body.decode("utf-8").split("\n\n")
+            if line.startswith("data: ")
+        ]
+        self.assertEqual(
+            [event["type"] for event in events],
+            ["response.created", "response.output_item.done", "response.completed"],
+        )
+        item = events[1]["item"]
+        self.assertEqual(item["type"], "message")
+        self.assertEqual(item["role"], "assistant")
+        self.assertEqual([part["type"] for part in item["content"]], ["output_text"])
+        self.assertEqual(json.loads(item["content"][0]["text"]), decision)
+
+        self.assertEqual(len(fake.requests), 1)
+        upstream = fake.requests[0]
+        # Nothing the pinned server cannot take, and the qualified sampling and
+        # output budget rather than whatever the Guardian turn carried.
+        self.assertNotIn("tools", upstream)
+        self.assertNotIn("text", upstream)
+        self.assertNotIn("reasoning", upstream)
+        self.assertEqual(upstream["model"], "rondo-local-approval")
+        self.assertEqual(upstream["instructions"], "exact guardian policy\n")
+        self.assertIs(upstream["stream"], False)
+        self.assertEqual(upstream["max_output_tokens"], 512)
+        self.assertEqual(upstream["seed"], 42)
+        # The Guardian's own contract is carried through verbatim.
+        self.assertEqual(
+            upstream["response_format"]["json_schema"]["schema"], _GUARDIAN_OUTPUT_SCHEMA
+        )
+        self.assertEqual(
+            upstream["response_format"]["json_schema"]["name"], "codex_output_schema"
+        )
+        # v3 evidence role normalization, applied by the one shared builder.
+        self.assertEqual(
+            [item["role"] for item in upstream["input"]], ["user", "user"]
+        )
+
+    def test_bridge_refuses_a_request_without_the_pinned_credential(self) -> None:
+        with FakeApprovalServer() as fake:
+            bridge = GuardianBridge(self._config(fake.base_url))
+            with GuardianBridgeServer(bridge) as front:
+                missing, _ = _post_to_bridge(front.base_url, _guardian_request(), None)
+                wrong, _ = _post_to_bridge(
+                    front.base_url, _guardian_request(), "not-the-bridge-token"
+                )
+        self.assertEqual([missing, wrong], [401, 401])
+        self.assertEqual(fake.requests, [])
+
+    def test_bridge_refuses_a_guardian_turn_for_a_different_model(self) -> None:
+        with FakeApprovalServer() as fake:
+            bridge = GuardianBridge(self._config(fake.base_url))
+            with GuardianBridgeServer(bridge) as front:
+                status, _ = _post_to_bridge(
+                    front.base_url,
+                    _guardian_request(model="some-cloud-guardian"),
+                    bridge.secret,
+                )
+        self.assertEqual(status, 400)
+        self.assertEqual(fake.requests, [])
+
+    def test_bridge_refuses_a_guardian_turn_without_an_output_contract(self) -> None:
+        with FakeApprovalServer() as fake:
+            bridge = GuardianBridge(self._config(fake.base_url))
+            with GuardianBridgeServer(bridge) as front:
+                status, _ = _post_to_bridge(
+                    front.base_url, _guardian_request(schema=None), bridge.secret
+                )
+        self.assertEqual(status, 400)
+        self.assertEqual(fake.requests, [])
+
+    def test_bridge_refuses_an_output_schema_it_cannot_evaluate(self) -> None:
+        with FakeApprovalServer() as fake:
+            bridge = GuardianBridge(self._config(fake.base_url))
+            with GuardianBridgeServer(bridge) as front:
+                status, _ = _post_to_bridge(
+                    front.base_url,
+                    _guardian_request(
+                        schema={
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {"outcome": {"type": "string"}},
+                            "required": ["outcome"],
+                            "minProperties": 1,
+                        }
+                    ),
+                    bridge.secret,
+                )
+        self.assertEqual(status, 400)
+        self.assertEqual(fake.requests, [])
+
+    def test_bridge_refuses_to_serve_without_a_bound_launcher_instance(self) -> None:
+        # No pinned model means no receipt, so nothing can say which instance
+        # answered; an unbound relay must not produce an approval at all.
+        with FakeApprovalServer(decision={"outcome": "allow"}) as fake:
+            bridge = GuardianBridge(self._config(fake.base_url))
+            with GuardianBridgeServer(bridge) as front:
+                status, body = _post_to_bridge(
+                    front.base_url, _guardian_request(), bridge.secret
+                )
+        self.assertEqual(status, 503)
+        self.assertEqual(fake.requests, [])
+        self.assertNotIn(b"data:", body)
+
+    def test_bridge_fails_closed_when_the_local_service_is_unreachable(self) -> None:
+        bridge = GuardianBridge(self._config("http://127.0.0.1:1/v1"))
+        with GuardianBridgeServer(bridge) as front:
+            status, body = _post_to_bridge(front.base_url, _guardian_request(), bridge.secret)
+        self.assertEqual(status, 503)
+        self.assertNotIn(b"data:", body)
+
+    def test_bridge_fails_closed_on_a_decision_outside_the_requested_schema(self) -> None:
+        # The pinned static decision shape is not the Guardian's shape; a server
+        # answering with the wrong contract is a failure, never a deny.
+        outside = {"outcome": "deny", "rationale": "r", "risk_tags": ["fake"]}
+        model = self._model()
+        with FakeApprovalServer(decision=outside, model_path=os.fspath(model)) as fake:
+            with self._bound_bridge(fake, model) as bridge:
+                with GuardianBridgeServer(bridge) as front:
+                    status, body = _post_to_bridge(
+                        front.base_url, _guardian_request(), bridge.secret
+                    )
+        self.assertEqual(len(fake.requests), 1)
+        self.assertEqual(status, 502)
+        self.assertNotIn(b"data:", body)
+        self.assertNotIn(b"deny", body)
+
+    def test_bridge_fails_closed_on_an_upstream_error_status(self) -> None:
+        model = self._model()
+        with FakeApprovalServer(
+            response_override={"status": "failed"}, model_path=os.fspath(model)
+        ) as fake:
+            with self._bound_bridge(fake, model) as bridge:
+                with GuardianBridgeServer(bridge) as front:
+                    status, body = _post_to_bridge(
+                        front.base_url, _guardian_request(), bridge.secret
+                    )
+        self.assertEqual(status, 502)
+        self.assertNotIn(b"data:", body)
+
+    def test_bridge_withholds_a_decision_when_the_receipt_changes_in_the_window(self) -> None:
+        model = self.root / "model.gguf"
+        model.write_bytes(b"GGUFfake-model-fixture")
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        receipt = self.root / "eval-data/local-approval/launcher-identity.json"
+
+        def drift() -> None:
+            value = json.loads(receipt.read_bytes())
+            value["serve_config_sha256"] = "d" * 64
+            receipt.write_text(json.dumps(value, separators=(",", ":"), sort_keys=True))
+            os.chmod(receipt, 0o600)
+
+        with FakeApprovalServer(
+            model_path=os.fspath(model),
+            decision={"outcome": "allow"},
+            on_decision=drift,
+        ) as fake:
+            config = self._config(
+                fake.base_url,
+                model_path_value=os.fspath(model),
+                model_sha256_value=digest,
+            )
+            settings = settings_from_config(config)
+            publish_launcher_identity(
+                config,
+                pid=os.getpid(),
+                command=_current_process_command(),
+                runtime_sha256="a" * 64,
+                model_sha256=digest,
+                model_path=model,
+                model_id=settings.model_id,
+                base_url=settings.base_url,
+                host=settings.host,
+                port=settings.port,
+                serve_config_sha256=serve_config_sha256(config, settings),
+            )
+            with mock.patch(
+                "rondo_eval.local_approval.launcher.resolve_binary",
+                return_value=self.root / "llama-server",
+            ), mock.patch(
+                "rondo_eval.local_approval.launcher._load_runtime_lock",
+                return_value=mock.Mock(identity_sha256="a" * 64),
+            ):
+                bridge = GuardianBridge(config)
+                with GuardianBridgeServer(bridge) as front:
+                    status, body = _post_to_bridge(
+                        front.base_url, _guardian_request(), bridge.secret
+                    )
+
+        # The model did answer, and that answer was still withheld.
+        self.assertEqual(len(fake.requests), 1)
+        self.assertEqual(status, 503)
+        self.assertNotIn(b"data:", body)
+        self.assertNotIn(b"allow", body)
+
+    def test_bridge_reuses_a_configured_local_key_instead_of_minting_one(self) -> None:
+        secret = "local-test-secret"
+        (self.root / ".env.local").write_text(
+            f"RONDO_LOCAL_MODEL_API_KEY={secret}\n", encoding="utf-8"
+        )
+        os.chmod(self.root / ".env.local", 0o600)
+        model = self._model()
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        with FakeApprovalServer(
+            required_bearer=secret,
+            decision={"outcome": "allow"},
+            model_path=os.fspath(model),
+        ) as fake:
+            config = self._config(
+                fake.base_url,
+                model_path_value=os.fspath(model),
+                model_sha256_value=digest,
+                api_key_env=True,
+            )
+            settings = settings_from_config(config)
+            publish_launcher_identity(
+                config,
+                pid=os.getpid(),
+                command=_current_process_command(),
+                runtime_sha256="a" * 64,
+                model_sha256=digest,
+                model_path=model,
+                model_id=settings.model_id,
+                base_url=settings.base_url,
+                host=settings.host,
+                port=settings.port,
+                serve_config_sha256=serve_config_sha256(config, settings),
+            )
+            with mock.patch(
+                "rondo_eval.local_approval.launcher.resolve_binary",
+                return_value=self.root / "llama-server",
+            ), mock.patch(
+                "rondo_eval.local_approval.launcher._load_runtime_lock",
+                return_value=mock.Mock(identity_sha256="a" * 64),
+            ):
+                bridge = GuardianBridge(config)
+                self.assertFalse(bridge.secret_is_ephemeral)
+                self.assertEqual(bridge.secret_name, "RONDO_LOCAL_MODEL_API_KEY")
+                with GuardianBridgeServer(bridge) as front:
+                    status, _ = _post_to_bridge(
+                        front.base_url, _guardian_request(), bridge.secret
+                    )
+        self.assertEqual(status, 200)
+        # Identity probes and the decision request all carry the same key.
+        self.assertTrue(all(fake.authorization_seen))
+
+    def test_bridge_mints_a_process_local_credential_without_a_configured_key(self) -> None:
+        bridge = GuardianBridge(self._config("http://127.0.0.1:1/v1"))
+        self.assertTrue(bridge.secret_is_ephemeral)
+        self.assertEqual(bridge.secret_name, "RONDO_LOCAL_GUARDIAN_BRIDGE_TOKEN")
+        self.assertEqual(len(bridge.secret), 64)
+        self.assertNotEqual(GuardianBridge(self._config("http://127.0.0.1:1/v1")).secret,
+                            bridge.secret)
+
+
+class FormalSwitchConfigTests(unittest.TestCase):
+    """The cloud/local switch has to be three configuration axes and nothing else."""
+
+    def _cloud(self) -> formal_switch.GuardianProfile:
+        return formal_switch.GuardianProfile(
+            "cloud",
+            "cloud-guardian-model",
+            "low",
+            formal_switch.CLOUD_GUARDIAN_PROVIDER_ID,
+            "https://cloud.example.com/v1",
+            "OPENAI_API_KEY",
+        )
+
+    def test_switch_moves_only_the_guardian_axes(self) -> None:
+        local = formal_switch.local_profile(
+            "rondo-local-approval", "http://127.0.0.1:9/v1", "RONDO_LOCAL_MODEL_API_KEY"
+        )
+        diff = formal_switch.switch_diff(self._cloud(), local)
+        self.assertEqual(
+            diff["axes_explicit_in_both"],
+            [
+                "auto_review.model",
+                "auto_review.model_provider",
+                "auto_review.reasoning_effort",
+            ],
+        )
+        self.assertTrue(diff["main_provider_identical"])
+        self.assertTrue(
+            all(
+                key.startswith("auto_review.") or key.startswith("model_providers.")
+                for key in diff["changed_keys"]
+            )
+        )
+        self.assertIn("auto_review.model", diff["changed_keys"])
+        self.assertIn("auto_review.model_provider", diff["changed_keys"])
+
+    def test_main_provider_comparison_can_actually_fail(self) -> None:
+        # The indicator is only worth reporting if a profile that did move the
+        # main agent would be caught by it.
+        hostile = formal_switch.GuardianProfile(
+            "hostile", "m", "low", formal_switch.MAIN_PROVIDER_ID, "http://127.0.0.1:9/v1", None
+        )
+        self.assertFalse(
+            formal_switch.switch_diff(self._cloud(), hostile)["main_provider_identical"]
+        )
+
+    def test_evidence_projection_reports_no_prose_from_a_review_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "evidence"
+            review = evidence / "11111111-2222-3333-4444-555555555555"
+            review.mkdir(parents=True)
+            (review / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "evidence": "e_final",
+                        "decision": "approved",
+                        "terminal_status": "approved",
+                        "failure_reason": None,
+                        "model": "rondo-local-approval",
+                        "reasoning_effort": "low",
+                        "attempt_count": 1,
+                        "token_usage": {"input_tokens": 1},
+                        "review_id": "SENSITIVE-REVIEW-ID",
+                    }
+                )
+            )
+            (review / "E_final.json").write_text(
+                json.dumps(
+                    {
+                        "model": "rondo-local-approval",
+                        "reasoning": {"effort": "low"},
+                        "text": {"format": {"name": "codex_output_schema"}},
+                        "tools": [{"name": "exec_command"}],
+                        "instructions": "SENSITIVE-GUARDIAN-POLICY",
+                        "input": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "input_text", "text": "SENSITIVE-EVIDENCE"}
+                                ],
+                            }
+                        ],
+                    }
+                )
+            )
+            projection = formal_switch._evidence_projection(evidence)
+
+        serialized = json.dumps(projection)
+        for secret in (
+            "SENSITIVE-GUARDIAN-POLICY",
+            "SENSITIVE-EVIDENCE",
+            "SENSITIVE-REVIEW-ID",
+        ):
+            self.assertNotIn(secret, serialized)
+        self.assertEqual(projection["meta.terminal_status"], "approved")
+        self.assertEqual(projection["request.output_schema_name"], "codex_output_schema")
+        self.assertEqual(projection["request.tool_count"], 1)
+
+    def test_switch_diff_never_reports_the_configured_cloud_endpoint(self) -> None:
+        cloud = formal_switch.GuardianProfile(
+            "cloud",
+            "PRIVATE-CLOUD-MODEL",
+            "low",
+            formal_switch.CLOUD_GUARDIAN_PROVIDER_ID,
+            "https://private.example.invalid/v1",
+            "OPENAI_API_KEY",
+        )
+        local = formal_switch.local_profile(
+            "rondo-local-approval", "http://127.0.0.1:9/v1", "RONDO_LOCAL_MODEL_API_KEY"
+        )
+        serialized = json.dumps(formal_switch.switch_diff(cloud, local))
+        self.assertNotIn("PRIVATE-CLOUD-MODEL", serialized)
+        self.assertNotIn("private.example.invalid", serialized)
+
+    def test_local_profile_never_redirects_the_main_agent_provider(self) -> None:
+        local = formal_switch.local_profile(
+            "rondo-local-approval", "http://127.0.0.1:9/v1", "RONDO_LOCAL_MODEL_API_KEY"
+        )
+        self.assertTrue(
+            all(
+                not value.startswith("model_provider=")
+                and not value.startswith(f"model_providers.{formal_switch.MAIN_PROVIDER_ID}")
+                for value in local.overrides()
+            )
+        )
+
+    def test_cli_command_uses_the_real_approve_for_me_expansion(self) -> None:
+        command = formal_switch.cli_command(
+            Path("/fake/codex"),
+            main_base_url="http://127.0.0.1:9/v1",
+            guardian=formal_switch.local_profile(
+                "rondo-local-approval", "http://127.0.0.1:8/v1", "RONDO_LOCAL_MODEL_API_KEY"
+            ),
+            evidence_dir=Path("/fake/evidence"),
+        )
+        self.assertIn("--approve-for-me", command)
+        self.assertIn("--strict-config", command)
+        self.assertIn("--ignore-user-config", command)
+        # The three expanded settings are the CLI's own; they are never spelled
+        # out here, so a change in that expansion cannot be masked.
+        self.assertNotIn('approvals_reviewer="auto_review"', command)
+        self.assertIn('auto_review.model="rondo-local-approval"', command)
+        self.assertIn('auto_review.model_provider="rondo_local_guardian"', command)
+        self.assertIn('auto_review.reasoning_effort="low"', command)
 
 
 if __name__ == "__main__":
