@@ -1,6 +1,6 @@
 """Count-only exact input-token census over the archived real `E_final` set.
 
-Plan 023 measured one real `E_final` at 5,313 input tokens against the frozen
+Plan 028 measured one real `E_final` at 5,311 input tokens against the frozen
 4k contract.  This module answers the same question for the whole archived set
 **without generating a single token**: it rebuilds the real Local request for
 every archived `E_final` and asks the frozen b10333 server for the exact
@@ -84,10 +84,13 @@ CENSUS_SCHEMA_VERSION = 1
 # The archived real set is closed and known; a different size means the input is
 # no longer the complete set this census claims to describe.
 EXPECTED_EVIDENCE_COUNT = 47
-# Plan 023 measured this exact count for the selector-bound `E_final` through
-# the real request path.  A different value means this census is not measuring
-# the same thing and must not publish an overall conclusion.
-ANCHOR_INPUT_TOKENS = 5_313
+# Plan 028 measured this exact count for the selector-bound `E_final` through
+# the real request path, with the static payload at v3.  A different value means
+# this census is not measuring the same thing and must not publish an overall
+# conclusion.  The pre-v3 payload counted 5,313 for the same archive because its
+# one archived `developer` evidence message still reached the frozen template as
+# `system`; that number describes a request this census no longer sends.
+ANCHOR_INPUT_TOKENS = 5_311
 CENSUS_MAX_OUTPUT_TOKENS = 512
 CONTEXT_WINDOWS: tuple[tuple[str, int], ...] = (("4k", 4096), ("8k", 8192))
 RESULT_RELATIVE_PATH = "eval/results/baselines/local-approval-exact-token-census-v1.json"
@@ -706,7 +709,7 @@ def run_census(
 
         _probe_count_endpoint(settings, builder, count=count)
         # The anchor is counted first: if it does not reproduce the already
-        # measured 5,313 tokens, this census is not measuring the real request
+        # measured 5,311 tokens, this census is not measuring the real request
         # path and the other 46 counts would mean nothing.
         anchor_facts = _counting_stage_facts(
             _STAGE_ANCHOR_COUNT, anchor.e_final_sha256, 0
