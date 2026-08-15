@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**exact-token 普查（WP3b-A2）仍未完成**：只有 24 条取得 token 数（min 5,313、max 18,921；按 `input+512` 这 24 条里 4k 适配 0 条、8k 适配 9 条），全集分布至今没有。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，47/47 在无模型只读检查下通过冻结模板的角色顺序门，三 consumer 逐字节一致。census 的通用计数失败现在报告有界 stage、当前 `e_final_sha256` 与失败前成功计数条数。Plan 026 那次通用 500 仍未定位，未发布 baseline。能力保持 `linux_cuda_built_model_unvalidated`。下一步是重新申请真实模型授权、重跑 47/47 普查，而不是选档位（见 `doc/WBS/local-approval-model.md`）。 |
+| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**exact-token 普查（WP3b-A2）仍未完成**：只有 24 条取得 token 数（min 5,313、max 18,921；按 `input+512` 这 24 条里 4k 适配 0 条、8k 适配 9 条），全集分布至今没有。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，47/47 在无模型只读检查下通过冻结模板的角色顺序门，三 consumer 逐字节一致。census 的通用计数失败现在报告有界 stage、当前 `e_final_sha256` 与失败前成功计数条数。Plan 026 那次通用 500 仍未定位。Plan 028 用 v3 重跑：模型加载、身份、上下文与探针全通过，锚点被成功计数但得到 5,311 而非常量要求的 5,313，按合同 fail-closed 于锚点，未执行第二遍、未发布 baseline。能力保持 `linux_cuda_built_model_unvalidated`。下一步是先重新确立 v3 下的锚点常量，再重新申请真实模型授权重跑 47/47，而不是选档位（见 `doc/WBS/local-approval-model.md`）。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -42,11 +42,15 @@
   reasoning 投影与证据角色规范化统一落在公共 builder，raw content、encrypted 内容与 provider session id
   一律不出站，证据消息只以 `user`/`assistant` 出站且文本、顺序与消息边界不变；结构化决策输出 schema
   仍是 `rondo_static_approval_v1`。47/47 通过只读静态构造检查与冻结模板角色顺序门（规范化前为 24/47）。
-  **47/47 重跑（WP3b-A2b）未通过**：Plan 026 的第一次真实运行在归档计数阶段返回通用 500，
-  当时输出无法区分锚点或后续样本；按合同 fail closed、未发布 baseline，也未执行第二次运行。
-  census 现在会给出有界 stage、当前 `e_final_sha256` 与失败前成功计数条数，但这**不解释** Plan 026 的
-  具体 500，也不追认 Plan 024 两条旧 500 的现场原因。
-  **下一个授权门：重新申请真实模型授权，重跑 47/47 普查。** 拿到全集分布再定档位，
+  **47/47 重跑（WP3b-A2b/A2d）两次都未通过，但失败点已从服务侧前移到合同侧**：Plan 026 在归档计数阶段
+  返回通用 500；Plan 028 用 v3 payload 重跑，模型加载、服务身份、`/props` 上下文与合成探针全部通过，
+  锚点请求**被成功计数**（无 400、无通用 500、无 transport failure），但得到 **5,311** 而非 census 常量
+  要求的 5,313，按合同 fail-closed 于锚点，未执行第二遍、未发布 baseline。
+  只读结构核对显示该锚点的 1 条证据 `developer` 消息在 v3 被原位改写为 `user`，而 5,313 是 Plan 023/024
+  在 **v3 之前**测得（当时该消息经 `map_developer_role_to_system` 以 `system` 进入模板），
+  因此 2 token 差与 v3 角色改写方向一致；本次只跑一遍，该解释**未经独立复证**。
+  **下一个授权门：先决定并重新确立 v3 下的锚点常量，再重新申请真实模型授权重跑 47/47 普查。**
+  在锚点重新确立前，47/47 普查在现有 census 常量下不可能通过。拿到全集分布再定档位，
   然后以 model-backed + 配置切换收口 Local M3，之后 L5a、L3/L4、L5b/L6，最后 Local M4。
 - **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
   付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
@@ -72,7 +76,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | 真实模型已首次加载；static payload v3 角色兼容与 census 最小失败定位已完成（47/47 通过无模型门禁）；exact-token 普查仍只完成 24/47，Plan 026 那次通用 500 仍未定位 | 重新授权并重跑 47/47 普查 → 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | static payload v3 角色兼容与 census 最小失败定位已完成；exact-token 普查仍只完成 24/47。Plan 028 的 v3 真实重跑 fail-closed 于锚点：锚点被成功计数但为 5,311，与 census 常量 5,313 不符 | 重新确立 v3 下的锚点常量 → 重新授权并重跑 47/47 普查 → 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），

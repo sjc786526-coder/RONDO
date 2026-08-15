@@ -88,29 +88,42 @@
 - 2026-08-14：从 `main@dc1de71` 创建本任务专用分支和 worktree，完成本执行计划。
 - 规划阶段未读取真实证据正文或 `.env.local`，未启动模型/GPU/服务，未运行测试，未修改 WBS 或主工作区。
 
+- 2026-08-14：运行前门禁全部通过——正式 baseline 不存在、8080 空闲、无 GPU 计算进程、共享锁可用、
+  `eval-data/local-approval/` 无残留；doctor 报 `configuration: valid`、`model: present`、
+  `linux_cuda_built_model_unvalidated`、`model_backed_validation: not_run`。
+- 2026-08-14：focused tests `test_local_approval` + `test_contracts_and_evidence` **116/116 通过**；
+  `uv lock --directory eval --check` 通过（85 packages，指向共享 cache 的等价命令）。
+- 2026-08-14：第一遍真实 count-only 运行 **fail-closed 于锚点**，详见下方验收状态。按硬约束 3/4
+  未执行第二遍、未发布任何 baseline。
+
 ### 当前工作
 
-- 等待执行者按本计划进行真实运行。
+- 已收口为失败执行。本计划冻结，不在本任务内继续尝试。
 
 ### 本任务剩余步骤
 
-1. 核对运行前门禁、正式 baseline 不存在且 GPU/共享锁可用。
-2. 执行第一遍 47/47 census；失败则清理、记录并停止。
-3. 第一遍成功后独立执行第二遍，比较结果；一致后发布正式 baseline。
-4. 运行必要 focused tests/eval lock，检查清理、capability 和差异。
-5. 按成功或失败口径精炼更新文档与日志，提交任务分支后停止。
+- 无。第一遍未满足锚点合同，硬约束 3 禁止第二遍，硬约束 4 禁止现场改 payload/模板/档位。
 
 ### 阻塞项
 
-- 无。用户已授权真实本地模型加载、GPU 独占和 47 条本地归档的 count-only 处理。
+- **本计划的完成标准在当前代码下不可达**：合同要求锚点精确为 5,313，而 v3 payload 的锚点实测为 5,311。
+  继续推进必须改动生产常量 `ANCHOR_INPUT_TOKENS` 或改写本计划的完成标准，两者都超出本任务范围
+  （§2 不允许修改、决策 002）。按交接边界停止并上交 WBS。
 
 ### 当前验收状态
 
-- 尚未执行真实 census；WP3b-A2 仍 incomplete，正式 baseline 不存在，未选上下文档位，capability 未晋级。
+- **未通过**。第一遍在锚点阶段 fail-closed：模型加载、服务身份、`/props` 上下文与合成探针均通过，
+  锚点请求被**成功计数**（无 400、无通用 500、无 transport failure），但得到 **5,311** 而非合同要求的
+  5,313，触发 `anchor_token_count_mismatch`，退出码 70。
+- 47/47 未达成；本次没有新增可发布计数，因此没有全集分布，也无法给出全集 4k/8k fit 数。
+- 两次一致性：**不适用**（按合同只运行一遍）。
+- 清理三项 `server_stopped` / `port_released` / `private_artifacts_removed` 全为 true；
+  正式 baseline 不存在，capability 仍为 `linux_cuda_built_model_unvalidated`，无资格成功 evidence。
 
 ### 交接边界
 
-- 完成后冻结本计划；后续档位选择、残留失败诊断或 qualification 只按 WBS 另立任务。
+- 本计划冻结。锚点常量在 v3 下如何重新确立、以及随后的 47/47 重跑，属于新任务，只按 WBS 另立并重新取得
+  真实模型授权；不在本计划内继续维护。
 
 ## 6. 关键决策记录
 
@@ -119,3 +132,4 @@
 | 001 | 第一、第二遍都先写临时结果，一致后才发布 baseline | 避免第二遍失败时留下冒充正式结果的第一遍工件 | census 发布顺序 | 已采纳 |
 | 002 | 本任务不允许生产代码或兼容逻辑变更 | Plan 027 已关闭前置兼容；本任务只验证真实运行 | 任务范围 | 已采纳 |
 | 003 | ignored 资产从 Git common root 复用 | 现有路径设施已支持，无需复制数据或在 main 开发 | 运行环境 | 已采纳 |
+| 004 | 锚点实测 5,311 后立即停止，不改常量也不改完成标准 | 两者都属本计划禁止修改项；锚点是否重新确立要由用户按 WBS 决定 | 本任务收口方式 | 已采纳 |
