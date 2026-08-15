@@ -277,6 +277,41 @@ class EvidenceTests(unittest.TestCase):
                 )
                 self.assertNotIn("hidden raw text", payload.canonical_bytes.decode())
 
+    def test_known_passthrough_metadata_is_checked_then_dropped(self) -> None:
+        # `arguments` is an untagged JSON value upstream, so any value is known.
+        for arguments in (
+            {"cmd": ["ls"]},
+            "raw string",
+            None,
+            {"_codex_executed_tool_call_truncated": {"original_bytes": 9, "max_bytes": 4}},
+        ):
+            with self.subTest(arguments=arguments):
+                item = {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "public summary"}],
+                    "internal_chat_message_metadata_passthrough": {
+                        "turn_id": "turn_reasoning",
+                        "executed_tool_calls": [{"name": "shell", "arguments": arguments}],
+                    },
+                }
+                payload = build_static_payload(standard_request([item]))
+
+                self.assertEqual(
+                    payload.logical_payload["input"],
+                    [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "public summary"}
+                            ],
+                        }
+                    ],
+                )
+                decoded = payload.canonical_bytes.decode()
+                for absent in ("executed_tool_calls", "turn_reasoning", "shell"):
+                    self.assertNotIn(absent, decoded)
+
     def test_unknown_or_malformed_reasoning_shapes_are_fail_closed(self) -> None:
         invalid_items = (
             {"type": "reasoning", "summary": [], "encrypted_content": 7},
@@ -318,6 +353,39 @@ class EvidenceTests(unittest.TestCase):
                 "type": "reasoning",
                 "summary": [],
                 "internal_chat_message_metadata_passthrough": {"unmapped_key": "x"},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"executed_tool_calls": 7},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"executed_tool_calls": [7]},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {
+                    "executed_tool_calls": [{"name": "shell"}]
+                },
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {
+                    "executed_tool_calls": [{"name": 7, "arguments": {}}]
+                },
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {
+                    "executed_tool_calls": [
+                        {"name": "shell", "arguments": {}, "unmapped_key": "x"}
+                    ]
+                },
             },
         )
         for item in invalid_items:

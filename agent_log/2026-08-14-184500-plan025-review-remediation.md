@@ -1,7 +1,7 @@
 # 2026-08-14 Plan 025：首轮独立审查整改
 
 针对 `2026-08-14-182719-plan025-independent-acceptance-review.md` 的 F1/F2。两条都独立复核成立并已整改。
-同批次的前一份日志（`…-181620` 之后的 `…-plan025-static-payload-v2.md`）记录的是整改**前**的实现，
+前一份日志 `2026-08-14-181740-plan025-static-payload-v2.md` 记录的是整改**前**的实现，
 其中把 `reasoning_text`/`text` 称为"公开内容"这一判断是错的，以本篇为准。
 
 ## F1（Blocker）：raw reasoning 曾被投影为普通证据
@@ -42,3 +42,21 @@
   24 个 reasoning item 全部因无公开 summary 被删除，0 条走投影分支；出站 `type=reasoning` 与
   `encrypted_content` 残留均为 0。只输出计数与布尔，未输出正文或完整请求体，未读取 `.env.local`。
 - 未运行：真实模型、GPU、census 重跑、Cargo、Docker、云 API、全量 eval。结论仍限于构造层与合同层。
+
+## 复审补充整改（同批次）
+
+复审报告 `2026-08-14-184600-plan025-remediation-recheck.md` 判定 F1 已闭环、F2 只闭合到 metadata 外层：
+`executed_tool_calls` 只验证为数组，元素不验，`[7]`、空对象、缺字段或带未知键的对象都会以"数组合法"
+通过并被删除。复核成立 —— 冻结 `ExecutedToolCall`（`protocol/src/models/executed_tool_calls.rs`）是
+`name: String` + `arguments: ExecutedToolCallArguments`（untagged `serde_json::Value`），两个字段都不可选，
+所以线上形态就是恰好两个键。
+
+- **整改**：`_require_known_executed_call()` 要求每个元素是对象、键恰为 `{name, arguments}`、
+  `name` 为字符串；`arguments` 保持任意 JSON（含 null 与 truncated 变体的对象形态），不扩大验证体系。
+  校验通过后 metadata 仍整体删除，warehouse-only calls 不进入 static payload。
+  该校验只作用于 reasoning 边界，其他 item 类型维持既有 v1 处理，不在本任务范围内改动。
+- **回归**：新增 1 项正向用例（4 种 `arguments` 形态都通过且 metadata 被整体删除），
+  畸形用例扩充 5 条（非数组、`[7]`、缺 `arguments`、`name` 非字符串、未知键）。
+- **文档勘误**：方向 2 WBS 第 335 行的"兼容已完成"改为"待复审"；本日志开头的错误时间占位改为真实前序日志名。
+- **复跑**：focused tests 109/109、`just eval-lock` 85 packages、47/47 只读静态构造均通过，
+  47 条结果与上一轮完全一致（24 个 item 全删、0 条投影、私有运输残留 0）。

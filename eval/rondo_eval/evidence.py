@@ -382,8 +382,29 @@ def _require_known_passthrough(value: Any) -> None:
     if not isinstance(value.get("turn_id"), (str, type(None))):
         raise EvidenceError("reasoning item passthrough turn_id must be a string or absent")
     calls = value.get("executed_tool_calls")
-    if calls is not None and not isinstance(calls, list):
-        raise EvidenceError("reasoning item passthrough executed_tool_calls is invalid")
+    if calls is not None:
+        if not isinstance(calls, list):
+            raise EvidenceError("reasoning item passthrough executed_tool_calls is invalid")
+        for call in calls:
+            _require_known_executed_call(call)
+
+
+def _require_known_executed_call(call: Any) -> None:
+    """Check one warehouse-only executed call against the frozen struct.
+
+    The frozen `ExecutedToolCall` is exactly a string `name` plus `arguments`,
+    which is an untagged `serde_json::Value` and so stays any JSON value.  The
+    call is dropped with the rest of the metadata; checking it keeps an
+    unrecognized element from passing as a well-formed array.  This is scoped to
+    the reasoning boundary; other item types keep their existing v1 handling.
+    """
+
+    if (
+        not isinstance(call, Mapping)
+        or set(call) != {"name", "arguments"}
+        or not isinstance(call["name"], str)
+    ):
+        raise EvidenceError("reasoning item passthrough executed call is not the known struct")
 
 
 def _strip_transport_metadata(value: Any) -> Any:

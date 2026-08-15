@@ -149,10 +149,15 @@ fail-closed。
   修正代码注释、测试命名与文档中的完成声明。
 - 2026-08-14：整改后 focused tests 108/108、`just eval-lock` 通过；47/47 只读静态构造检查复跑仍为
   47/47 通过、24 个 item 全部删除、0 条走投影分支、私有运输残留 0。
+- 2026-08-14：复审判定 F1 已闭环、F2 只闭到 metadata 外层（`executed_tool_calls` 元素未校验）。
+  复核冻结 `ExecutedToolCall` 为 `name: String` + untagged JSON `arguments` 两个必备字段后完成补充整改：
+  每个 call 必须是键恰为 `{name, arguments}`、`name` 为字符串的对象，`arguments` 保持任意 JSON，
+  校验后 metadata 仍整体删除；补 1 项正向与 5 项畸形回归，并修正两处文档勘误。
+- 2026-08-14：补充整改后 focused tests 109/109、`just eval-lock` 通过；47/47 只读静态构造检查结果不变。
 
 ### 当前工作
 
-- 窄整改、回归与文档修正已完成，等待独立复审。
+- 窄整改、补充整改、回归与文档修正已完成，等待独立复审。
 
 ### 本任务剩余步骤
 
@@ -165,7 +170,7 @@ fail-closed。
 ### 当前验收状态
 
 - 首轮独立审查不通过；窄整改后待复审，因此本任务尚未收口，`doc/WBS-COMPLETED.md` 暂不写完成记录。
-- 已运行（整改后）：`tests/test_contracts_and_evidence.py` 与 `tests/test_local_approval.py` 共 108/108 通过；
+- 已运行（补充整改后）：`tests/test_contracts_and_evidence.py` 与 `tests/test_local_approval.py` 共 109/109 通过；
   `just eval-lock`（85 packages）通过；`tests.test_terminal_bench` 中唯一消费 `policy_identity` 的用例 1/1 通过；
   47/47 只读静态构造检查通过（47 份 payload v2、三 consumer 逐字节一致、47 条 Local 请求构造成功，
   21 份归档的 24 个 encrypted-only reasoning item 全部移除，出站请求无 `reasoning`、无 `encrypted_content`）。
