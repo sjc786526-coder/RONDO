@@ -94,17 +94,20 @@ exact-token 普查。通过一致性复跑后发布唯一正式 baseline 和全�
   明确不使用网络/API、不外发数据、不下载权重且不读取 `.env.local`。
 - 2026-08-14：从 clean `main@31e0157` 创建本任务专用 worktree 与分支，并完成本执行计划。
 - 2026-08-14：模型启动前完成只读现场核对与无模型门禁，未发现 census 自身的直接窄缺陷，因此未改任何生产代码。
-- 2026-08-14：执行第一次正式 census（共享锁 + GPU 独占 + count-only）。合成探针通过，说明服务与
-  count endpoint 本身正常；随后在遍历的第一条真实归档收到通用 **HTTP 500 `server_error`**，
-  blocker `count_endpoint_unavailable`，`message_sha256 bfd4dade…`，退出码 70。
-  按 §3.7 整次 incomplete、未发布 baseline，服务、端口与私有目录均已清理（三项 cleanup 全为 true）。
+- 2026-08-14：执行第一次正式 census（共享锁 + GPU 独占 + count-only）。合成探针通过，随后在真实归档
+  计数阶段收到通用 **HTTP 500 `server_error`**，blocker `count_endpoint_unavailable`、
+  `message_sha256 bfd4dade…`，退出码 70。当前失败输出无法区分锚点请求还是后续集合请求；本次没有留下
+  5,313 锚点的新测量记录。按 §3.7 整次 incomplete、未发布 baseline，服务、端口与私有目录均已清理
+  （三项 cleanup 全为 true）。
 - 2026-08-14：按用户「首次正式运行已触发合同失败即不再增加模型生命周期」的指示，**未执行第二次运行**，
-  因此不存在两次一致性结论，也没有产生任何新的 token 数。
-- 2026-08-14：只读离线定位根因（不占用模型）：`developer` 消息在套用模板前被 `map_developer_role_to_system`
+  因此不存在两次一致性结论，也没有新增可发布 token 记录。
+- 2026-08-14：只读离线确认一项独立兼容阻断（不占用模型）：`developer` 消息在套用模板前被
+  `map_developer_role_to_system`
   统一改成 `system`，而冻结 Ministral 模板规定 `assistant` 之后只能接 `assistant`/`user`/`tool`，
   遇到 `system` 直接 `raise_exception`；minja 抛 `std::runtime_error`，服务端兜底为 500
-  （只有 `std::invalid_argument` 才是 400）。离线渲染 47 条真实 v2 请求得到 24 渲染 / 23 raise，
-  与 Plan 024 真实运行的 24 计数 / 21 形状拒绝 / 2 条 500 完全对应，说明 v2 只消除了先触发的 400。
+  （只有 `std::invalid_argument` 才是 400）。聚合式离线检查 47 条真实 v2 请求得到 24 条可渲染、
+  23 条因 `assistant → developer` 映射后违反模板顺序而失败。该结论证明这 23 条当前存在模板兼容问题，
+  但不证明 Plan 026 的具体 500 发生于其中某条，也不追认 Plan 024 两条旧 500 的实际原因。
 - 2026-08-14：收尾核验 —— focused tests 109/109 通过；`uv lock --check` 85 packages 通过；
   8080 端口空闲、无 GPU 计算进程、`eval-data/local-approval/` 无本任务残留、`git status` 干净；
   doctor 返回 `model_backed_validation: not_run` 与 `runtime_capability:
@@ -120,26 +123,27 @@ exact-token 普查。通过一致性复跑后发布唯一正式 baseline 和全�
 
 ### 阻塞项
 
-- **会话角色顺序与冻结模板不兼容**：23 条真实归档的形状是 `… assistant → developer → user`，
-  经 developer→system 映射后必然触发模板的顺序校验并返回通用 500。这不是长度问题，也不是 reasoning 问题，
-  在公共 builder 做一次 provider-neutral 的角色顺序窄兼容之前，47/47 普查不可能通过。
+- **聚合式离线确认会话角色顺序与冻结模板不兼容**：23 条真实 v2 请求含
+  `… assistant → developer → user`，经 developer→system 映射后会触发模板顺序校验。
+  这 23 条在当前形态下无法完成计数；该独立结论不等于已经定位 Plan 026 通用 500 的具体请求或原因。
+  后续需在公共 builder 做版本化、provider-neutral 的角色顺序兼容，不能静默改写已冻结的 v2。
 - **census 失败报告的诊断精度不足**（已记录，未在本任务修改）：`count_input_tokens` 的默认 code 让
   「锚点 500」与「循环中某条 500」都表现为 `count_endpoint_unavailable`，也不报已计数条数。
-  本次可排除 `anchor_token_count_mismatch`，但锚点 5,313 未被本次运行直接复证；
-  按探针通过 + 锚点离线可渲染 + 遍历首条离线 raise 推断，实际中断点是循环第一条。
-  用户只允许在模型运行前做窄修，该缺陷是运行后才暴露，故留给后续任务。
+  因而本次只能确认失败发生在真实归档计数阶段，不能确认锚点是否已经成功计数；锚点 5,313 未被本次运行
+  直接复证。该缺陷留给后续无模型任务增加最小阶段、样本哈希和失败前 counted 数。
 
 ### 当前验收状态
 
-- **不通过**。47/47 未达成（本次 0 条新计数）、只运行一次、未发布 baseline、未写 `doc/WBS-COMPLETED.md`。
+- **不通过**。47/47 未达成（本次没有新增可发布计数）、只运行一次、未发布 baseline、
+  未写 `doc/WBS-COMPLETED.md`。
 - 未运行：第二次 census、双跑一致性比较、`just eval-lock` 原样配方（该配方硬编码 `$PWD/eval-data/uv-cache`，
   本 worktree 无 `eval-data/`，改用等价的 `uv lock --directory eval --check` + 主仓 cache）、
   Cargo、Docker、云 API、全量 eval、任何 generation。
 
 ### 交接边界
 
-- 本计划就此冻结。角色顺序窄兼容、重新申请模型授权、重跑 47/47 与档位选择只按两份 WBS 推进，
-  不在本计划中追加。
+- 本计划就此冻结。版本化角色顺序兼容与最小 census 失败阶段标识先由后续无模型任务处理；通过后再重新
+  申请模型授权、重跑 47/47，最后才选择档位。后续路线只按两份 WBS 推进，不在本计划中追加。
 
 ## 6. 关键决策记录
 
