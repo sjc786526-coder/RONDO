@@ -106,10 +106,11 @@ _WATCHDOG_RECHECK_EVERY = 10
 # catch-all `500 server_error`, which any internal fault also produces - fails
 # the whole census instead of being recorded as a property of one sample.
 _STRUCTURAL_REFUSAL = (400, "invalid_request_error")
-# The two bounded points at which this census asks the server for a count.  A
-# generic failure at either one stops the whole run; naming which one it was,
-# which archive was in flight and how many archives already had an exact count
-# is the whole of the diagnostic, and none of it is derived from evidence text.
+# The two bounded points at which this census works through the archived set.
+# A generic failure in either - counting, or the health probe that follows a
+# refusal - stops the whole run; naming which stage it was, which archive was
+# in flight and how many archives already had an exact count is the whole of
+# the diagnostic, and none of it is derived from evidence text.
 _STAGE_ANCHOR_COUNT = "anchor_count"
 _STAGE_ARCHIVE_COUNT = "archive_count"
 
@@ -739,7 +740,20 @@ def run_census(
                 record["status"] = "refused"
                 record["refusal"] = rejected.facts
                 # Prove the refusal was about this request, not the service.
-                _probe_count_endpoint(settings, builder, count=count)
+                # A probe that fails generically is still a run-level failure,
+                # and it is located the same way a failed count would be.
+                try:
+                    _probe_count_endpoint(settings, builder, count=count)
+                except CensusError as error:
+                    raise CensusError(
+                        error.code,
+                        {
+                            **error.facts,
+                            **_counting_stage_facts(
+                                _STAGE_ARCHIVE_COUNT, item.e_final_sha256, len(counted)
+                            ),
+                        },
+                    ) from error
             except CensusError as error:
                 # Still fail-closed: a generic failure stops the census instead
                 # of being recorded against this archive as a refusal.

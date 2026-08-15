@@ -86,7 +86,8 @@ _PASSTHROUGH_FIELDS = frozenset({"turn_id", "executed_tool_calls"})
 # The message roles the frozen Guardian producer can archive, and the neutral
 # role each one is carried as.  `user` and `assistant` are the two roles every
 # static consumer accepts after every other role, so normalizing onto them is
-# what makes one payload servable everywhere.  Any other role - `system`,
+# what makes one payload servable everywhere; which of the two a role maps to
+# follows the speaker, not the ordering rules.  Any other role - `system`,
 # `tool`, or something added later - is refused rather than guessed at.
 _EVIDENCE_ROLE_NORMALIZATION = {
     "user": "user",
@@ -192,7 +193,7 @@ def validate_static_payload(payload: StaticApprovalPayload) -> None:
     if logical["output_schema"] != STATIC_DECISION_SCHEMA:
         raise EvidenceError("static approval output schema differs from the decision contract")
     _reject_private_transport(logical)
-    _reject_unnormalized_roles(logical["input"])
+    _reject_unneutral_messages(logical["input"])
 
     identity = payload.policy_identity
     expected_sha256 = hashlib.sha256(policy.encode("utf-8")).hexdigest()
@@ -338,15 +339,18 @@ def _neutral_items(items: list[Any]) -> list[Any]:
 
 
 def _normalize_evidence_role(item: Mapping[str, Any]) -> dict[str, Any]:
-    """Carry one archived evidence message under a universally accepted role.
+    """Carry one archived evidence message under a neutral role.
 
     `developer` is the shape that forces this: every consumer re-maps that role
     on its way in, and the mapped turn is refused wherever it follows an
-    assistant or tool turn.  `user` is accepted after every other role, so the
-    developer channel of the archived session is carried as an ordinary
-    evidence turn.  The text, the order and the message boundary are exactly
-    the archived ones, and the content stays in `input` as session evidence -
-    it is never folded into the Guardian policy or the instructions.
+    assistant or tool turn.  `user` and `assistant` are both accepted after
+    every other role, and `user` is the one that fits: an archived developer
+    message is input-side evidence carrying `input_text`, so carrying it as an
+    ordinary input turn changes only the role label, while calling it
+    `assistant` would change who is speaking and force the text subtype to be
+    rewritten as well.  The text, the order and the message boundary are
+    exactly the archived ones, and the content stays in `input` as session
+    evidence - it is never folded into the Guardian policy or the instructions.
 
     The relabelling is unconditional.  Making it depend on what precedes a
     message would give identical evidence different roles by position and would
@@ -362,13 +366,34 @@ def _normalize_evidence_role(item: Mapping[str, Any]) -> dict[str, Any]:
     role = item.get("role")
     if not isinstance(role, str) or role not in _EVIDENCE_ROLE_NORMALIZATION:
         raise EvidenceError("evidence message role is missing or not a known role")
+    neutral_role = _EVIDENCE_ROLE_NORMALIZATION[role]
+    # Check what is about to be emitted against the same contract the terminal
+    # validator re-applies, on the archived content rather than a stripped copy.
+    _require_neutral_message({**item, "role": neutral_role})
+    normalized = _strip_transport_metadata(item)
+    normalized["role"] = neutral_role
+    return normalized
+
+
+def _require_neutral_message(item: Mapping[str, Any]) -> None:
+    """Check one evidence message against the v3 neutral message contract.
+
+    The builder applies this to what it produces and the terminal validator
+    applies it again to whatever reaches a sink, so a payload assembled by hand
+    cannot present a message shape the builder would never have emitted.  It
+    describes the role, the item discriminator and the visible text only:
+    fields the v2 handling already accounted for are not re-litigated here.
+    """
+
     if item.get("type") not in (None, "message"):
         raise EvidenceError("evidence message carries a conflicting item type")
-    neutral_role = _EVIDENCE_ROLE_NORMALIZATION[role]
+    role = item.get("role")
+    if role not in NEUTRAL_EVIDENCE_ROLES:
+        raise EvidenceError("evidence message role is not a neutral evidence role")
     content = item.get("content")
     if not isinstance(content, list) or not content:
         raise EvidenceError("evidence message content must be a non-empty array")
-    expected_type = _NEUTRAL_ROLE_TEXT_TYPE[neutral_role]
+    expected_type = _NEUTRAL_ROLE_TEXT_TYPE[role]
     for part in content:
         if (
             not isinstance(part, Mapping)
@@ -377,9 +402,6 @@ def _normalize_evidence_role(item: Mapping[str, Any]) -> dict[str, Any]:
             or not isinstance(part["text"], str)
         ):
             raise EvidenceError("evidence message content is not known text for its role")
-    normalized = _strip_transport_metadata(item)
-    normalized["role"] = neutral_role
-    return normalized
 
 
 def _project_reasoning_item(item: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -502,19 +524,19 @@ def _strip_transport_metadata(value: Any) -> Any:
     return result
 
 
-def _reject_unnormalized_roles(items: Any) -> None:
-    """Refuse a payload whose evidence still carries an un-normalized role.
+def _reject_unneutral_messages(items: Any) -> None:
+    """Refuse a payload carrying a message this builder would never emit.
 
-    Roles belong to the evidence items themselves, so this looks exactly
-    there: a `role` key nested deeper inside an item is evidence content, not a
-    message of this conversation.  A schema v2 payload relabelled v3 by hand
-    therefore still cannot reach a sink with its `developer` turns intact.
+    Messages are the top-level evidence items, so this looks exactly there: a
+    `role` key nested deeper inside an item is evidence content, not a message
+    of this conversation.  A schema v2 payload relabelled v3 by hand therefore
+    cannot reach a sink with its `developer` turns intact, and neither can a
+    hand-assembled message whose content the builder would have refused.
     """
 
     for item in items:
-        if isinstance(item, Mapping) and "role" in item:
-            if item.get("role") not in NEUTRAL_EVIDENCE_ROLES:
-                raise EvidenceError("static approval payload contains an un-normalized role")
+        if isinstance(item, Mapping) and ("role" in item or item.get("type") == "message"):
+            _require_neutral_message(item)
 
 
 def _reject_private_transport(value: Any) -> None:

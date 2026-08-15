@@ -28,8 +28,10 @@
 
 - **为什么是 `developer` → `user`**：只读聚合扫描确认 47 条归档只有 `user`/`developer`/`assistant`
   三种消息角色、6 种 role 序列，content 全部是单一 `input_text`/`output_text`。冻结 Ministral 模板里
-  `user` 是唯一在 system/user/assistant/tool 之后都被接受的角色，所以原地换 role 是保留文本、顺序与
-  消息边界的最窄办法，不必新增中立结构标记，也不必建对话重写器。
+  在 system/user/assistant/tool 之后都合法的是 `user` 与 `assistant` 两种角色；归档 developer 消息是
+  输入侧 `input_text`，映射为 `user` 只换 role 标签，映射为 `assistant` 会改变说话者并被迫把文本
+  subtype 一起重写。所以原地换成 `user` 是保留文本、顺序与消息边界的最窄办法，不必新增中立结构标记，
+  也不必建对话重写器。
 - **为什么无条件改写**：只在「跟在 assistant/tool 之后」时改写会让同样的证据因位置得到不同角色，
   并把某个模板的顺序规则暗中写进本应 provider-neutral 的 payload。
 - **模板角色顺序门只放在测试里**，而且规则是用正则从冻结模板资产里解析出来的，不是手抄的常量，

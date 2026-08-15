@@ -3355,9 +3355,18 @@ class TokenCensusTests(unittest.TestCase):
         with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
             config = self._server_config(fake)
             with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                inputs = token_census.collect_evidence_inputs(config, expected_count=3)
                 with self.assertRaises(token_census.CensusError) as error:
                     self._run(config, output=output, free_port=False)
+
+        facts = error.exception.facts
         self.assertEqual(error.exception.code, "count_endpoint_probe_failed")
+        # The probe failure is located exactly like a failed count would be:
+        # the anchor was counted, and the refused archive was in flight.
+        self.assertEqual(facts["stage"], "archive_count")
+        self.assertEqual(facts["e_final_sha256"], inputs[1].e_final_sha256)
+        self.assertEqual(facts["counted_before_failure"], 1)
+        self.assertNotIn("message", facts)
         self.assertFalse(output.exists())
 
     def test_no_private_directory_survives_a_failing_precondition(self) -> None:

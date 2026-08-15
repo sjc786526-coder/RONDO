@@ -135,7 +135,8 @@ Local-static 继续消费同一份 provider-neutral static payload，并让现�
   `user`/`developer`/`assistant`，content 全部是单一 `input_text`/`output_text`；据此确定唯一需要处理的
   不兼容形状是 `assistant`（及 `tool`）之后的 `developer`。
 - 2026-08-14：只读核对冻结 llama.cpp b10333 的 `server_chat_convert_responses_to_chatcmpl`、
-  `map_developer_role_to_system` 与冻结模板的顺序规则，确认 `user` 是唯一在所有前驱角色之后都被接受的角色。
+  `map_developer_role_to_system` 与冻结模板的顺序规则，确认在所有前驱角色之后都被接受的是 `user` 与
+  `assistant` 两种角色；归档 developer 消息是输入侧 `input_text`，因此 `user` 是语义正确的那一个。
 - 2026-08-14：落地 static input payload v3：公共 `build_static_payload()` 内把证据消息的 `developer` 原地
   改写为 `user`，只改 role，不动文本、顺序、消息边界与其余字段；未知/缺失 role、非消息 item 带 role、
   空或畸形 content、与 role 不匹配的文本 subtype 一律 `EvidenceError`。终端 validator 增加
@@ -153,9 +154,26 @@ Local-static 继续消费同一份 provider-neutral static payload，并让现�
   角色顺序门下 v3 为 47/47 通过，规范化前为 24/47 通过、23 条 `Unexpected role 'system' after role 'assistant'`，
   与 Plan 026 的离线结论一致。
 
+- 2026-08-14：首轮独立审查（`0603008`）不通过，提出两处阻断与两处事实表述错误，已全部复核成立并完成窄整改：
+  1. **拒绝后的健康探针失败缺定位**：`_probe_count_endpoint()` 在 `except RequestRejected` 分支内抛出的
+     `CensusError` 不会被同级 `except CensusError` 捕获，因此没有 stage/digest/counted。已就地包一层，
+     用当前归档与 `archive_count` 补齐同样三项，并把回归从「只断错误码」加强到断言三个字段。
+  2. **终端 sink 只校验角色集合**：`role=user` 配 `output_text`、`content=[]`、`type=custom_tool_call`
+     配 `role=user` 这类伪造 v3 payload 仍能通过 `validate_static_payload()` 抵达
+     `LocalApprovalClient.build_request()`。已抽出共享的 `_require_neutral_message()`，由 builder 与
+     final sink 复用同一份中立消息合同；未新增字段 allowlist、schema registry 或审计设施。
+  3. 修正「`user` 是唯一合法后继」的事实错误：模板允许后继的交集是 `{user, assistant}`，
+     选择 `user` 的真实理由是归档 developer 为输入侧 `input_text`，映射为 `user` 只换 role 标签。
+  4. 修正 `build_request()` docstring 中「三 consumer 收到与 census 相同字节」的表述：
+     三 consumer 共享的是 canonical logical payload，census 计数的是由它构造的 Local provider request。
+- 2026-08-14：整改后复跑 focused tests 116/116、下游 `policy_identity` 用例 1/1、
+  `uv lock --directory eval --check` 85 packages、47 条只读聚合检查（47/47 与 24/47 均不变）；
+  另以审查者的伪造构造直接复现，三种畸形形状现在在 `validate_static_payload()` 与
+  `build_request()` 两处都被拒绝。
+
 ### 当前工作
 
-- 实现、验证与文档收口已完成，等待 Codex 独立审查。
+- 窄整改完成，等待 Codex 复验。
 
 ### 本任务剩余步骤
 
@@ -187,7 +205,9 @@ Local-static 继续消费同一份 provider-neutral static payload，并让现�
 | 003 | 不预先固定具体角色转换算法 | 无损、保序、provider-neutral 和模板兼容是硬结果，实现可结合现有形状选择最窄方案 | builder 实现 | 已采纳 |
 | 004 | 诊断只增加阶段、归档 digest 与失败前计数 | 足以区分 Plan 026 当前盲区，无需通用追踪/审计设施 | token census | 已采纳 |
 | 005 | ignored 归档和共享 cache 只从 common root 复用 | worktree 已能安全解析主仓公共根，不需要在 main 直接开发或复制数据 | 验收环境 | 已采纳 |
-| 006 | 角色转换选择「`developer` 原地改写为 `user`」 | 现有归档只有 user/developer/assistant 三种消息角色，且 `user` 是冻结模板中唯一在 system/user/assistant/tool 之后都被接受的角色；这是保留文本、顺序与消息边界的最窄改法，也不需要新增中立结构标记 | 公共 builder 与三 consumer 的 canonical bytes | 已采纳 |
+| 006 | 角色转换选择「`developer` 原地改写为 `user`」 | 现有归档只有 user/developer/assistant 三种消息角色；冻结模板中在所有前驱角色之后都合法的是 `user` 与 `assistant`，而归档 developer 消息是输入侧 `input_text`，改成 `user` 只换 role 标签，改成 `assistant` 则会改变说话者并被迫重写文本 subtype。这是保留文本、顺序与消息边界的最窄改法，也不需要新增中立结构标记 | 公共 builder 与三 consumer 的 canonical bytes | 已采纳 |
 | 007 | 改写无条件执行，不按前驱角色决定 | 按位置改写会让同样的证据因所处位置得到不同角色，并把某个模板的顺序规则暗中写进本应 provider-neutral 的 payload | 角色规范化语义 | 已采纳 |
 | 008 | 只改 role，其余消息字段沿用 v2 处理 | `phase`、`id`、passthrough metadata 的处理属于 Plan 025 已定的合同，本任务不顺带改动；扩大到消息级 metadata 会超出角色兼容范围 | 规范化边界与既有回归 | 已采纳 |
 | 009 | 冻结模板的角色顺序门只存在于测试，并从模板资产解析规则 | 硬约束 7 禁止把 provider 特判写进生产 consumer；从资产解析而非手抄规则可避免门禁与真实模板漂移 | `eval/tests/test_local_approval.py` | 已采纳 |
+| 010 | builder 与 final sink 复用同一份 `_require_neutral_message()` | 硬约束 5 要求终端 validator 拒绝伪造回流，而 `build_request()` 把它当唯一 gate；只校验角色集合会放行 builder 绝不会产出的消息形状 | 规范化边界与终端校验 | 独立审查要求，已采纳 |
+| 011 | 拒绝后的健康探针失败沿用同一组定位 facts | 它同样是遍历阶段的通用失败，Plan 026 的盲区正是「不知道停在哪」；stage 仍只有两个有界取值 | token census | 独立审查要求，已采纳 |

@@ -653,6 +653,22 @@ class EvidenceTests(unittest.TestCase):
             # A v2-era role cannot be smuggled back past the sink.
             lambda logical: logical["input"][0].update({"role": "developer"}),
             lambda logical: logical["input"][0].update({"role": "system"}),
+            # Neither can a message the builder would never have emitted: the
+            # sink re-applies the whole neutral message contract, not just the
+            # role set, because it is the only gate a consumer relies on.
+            lambda logical: logical["input"][0].update({"content": []}),
+            lambda logical: logical["input"][0].update(
+                {"content": [{"type": "output_text", "text": "wrong subtype for user"}]}
+            ),
+            lambda logical: logical["input"][0].update({"content": "plain string"}),
+            lambda logical: logical["input"][0].update(
+                {"content": [{"type": "input_text", "text": "x", "extra": 1}]}
+            ),
+            lambda logical: logical["input"][0].update({"type": "custom_tool_call"}),
+            lambda logical: logical["input"][0].pop("role"),
+            lambda logical: logical["input"].append(
+                {"type": "message", "role": "assistant", "content": []}
+            ),
         )
         for mutate in mutations:
             with self.subTest(mutate=mutate):

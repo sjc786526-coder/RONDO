@@ -49,7 +49,9 @@
   2. **证据角色规范化（v3）**：证据消息的 `developer` 角色在原位改写为 `user`，文本、顺序、消息边界和
      其余字段都不变，内容仍留在 `input` 里作会话证据，不并入 Guardian policy/instructions。改写无条件执行，
      不按前驱角色分情况，也不含任何 provider 分支；出站证据只有 `user`/`assistant` 两种角色。
-     理由是 `developer` 没有 provider-neutral 等价物，而 `user` 是冻结模板中唯一在所有前驱角色之后都被接受的角色。
+     理由是 `developer` 没有 provider-neutral 等价物；冻结模板中在所有前驱角色之后都合法的是 `user` 与
+     `assistant`，而归档 developer 消息是输入侧 `input_text`，映射为 `user` 只换 role 标签，
+     映射为 `assistant` 会改变说话者并被迫重写文本 subtype。
 
   未知/缺失 role、非消息 item 携带 role、空或畸形 content、与角色不匹配的文本 subtype 一律 fail-closed；
   终端 validator 拒绝 v1/v2 payload 和被手工回填的 `developer`/`system` 角色。输入 payload 版本与结构化

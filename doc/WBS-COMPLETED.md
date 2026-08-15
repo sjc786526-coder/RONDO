@@ -656,9 +656,10 @@ standard/Lite 形态均补回归。
   消息边界和其余字段不变，内容仍留在 `input` 里作会话证据，不并入 Guardian policy/instructions，
   也不跨越 tool call/output 重排。改写无条件执行，不按前驱角色分情况，三个 static consumer 与 token census
   继续消费同一份 canonical bytes，没有 Local/llama.cpp 私有旁路。
-- **选择理由**：47 条归档只含 `user`/`developer`/`assistant` 三种消息角色，而冻结 Ministral 模板中 `user`
-  是唯一在 system/user/assistant/tool 之后都被接受的角色，因此这是保文本、保序的最窄改法，
-  不需要新增中立结构标记或对话重写器。
+- **选择理由**：47 条归档只含 `user`/`developer`/`assistant` 三种消息角色；冻结 Ministral 模板中在
+  system/user/assistant/tool 之后都合法的是 `user` 与 `assistant` 两种，而归档 developer 消息是输入侧
+  `input_text`，映射为 `user` 只换 role 标签，映射为 `assistant` 则会改变说话者并被迫重写文本 subtype。
+  因此这是保文本、保序的最窄改法，不需要新增中立结构标记或对话重写器。
 - **fail-closed**：未知/缺失 role、非消息 item 携带 role、空或畸形 content、与角色不匹配的文本 subtype
   一律 `EvidenceError`；终端 validator 另外拒绝 v1/v2 payload 与被手工回填的 `developer`/`system` 角色。
   Plan 025 的 reasoning/raw/encrypted/passthrough 出站边界原样保留。

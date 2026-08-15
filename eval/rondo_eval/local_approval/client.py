@@ -254,8 +254,9 @@ class LocalApprovalClient:
 
         The static payload validator is the only gate: this builder never edits
         item shapes or roles itself, so the exact bytes the token census counts
-        are the bytes the decision path would send, and they are the same bytes
-        the other static consumers receive.
+        are the bytes the decision path would send.  Those are Local's own
+        provider request bytes; what the three static consumers share is the
+        canonical payload this request is built from.
         """
 
         try:
