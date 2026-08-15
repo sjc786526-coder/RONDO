@@ -126,9 +126,9 @@
 2. 私有全量 manifest 至少逐实例记录：schema/version、source instance identity、`e_final_sha256`、
    `static_payload_sha256`、task/动作/semantic identity、partition、代表/重复关系、input tokens、12k fit、
    selection 与明确 exclusion reason。正文/路径只留私有区；tracked 摘要只写聚合计数与文件哈希。
-3. 建议私有落点为 `eval-data/teacher-labels/<batch_id>/`，至少区分 manifest、outbound、raw-return、labels
-   与 import-metadata。允许更少文件，但不能混淆“Sol 原始返回”与“已验证标签”；不得占用 launcher receipt
-   使用的 `eval-data/local-approval/`。
+3. 私有产物必须放在主工作区 `eval-data/` 下一个本任务专用、可持久交给 L3 的命名空间，且不得占用 launcher
+   receipt 使用的 `eval-data/local-approval/`。具体目录名、文件拆分和中间形态由执行者决定，但必须能区分
+   Sol 原始返回与已验证标签，并在 tracked 摘要中留下稳定引用和哈希。
 4. tracked 摘要必须绑定：batch/schema 版本、static payload 版本、census digest、prompt/schema SHA、
    私有 manifest SHA、最终标签 SHA、教师模型标识/日期、源实例/语义唯一/重复/12k fit/最终标签/分区计数、
    exclusion/retry 计数和 `ready_for_l3`。不得包含正文、source path、逐条语义 id 或逐条 holdout 归属。
@@ -151,9 +151,9 @@
 
 ### 3.5 标签与导入校验
 
-1. 决策对象直接复用 `validate_static_decision()`：`outcome = allow|deny`、非空 `rationale`、最多 16 个唯一且
-   各自非空的字符串 `risk_tags`，且无额外字段。本地外层绑定可以携带 identity/provenance，但不得混进
-   decision 对象或改写 Sol 原始判定文本。
+1. 决策对象必须与 live static decision validator 等强：`outcome = allow|deny`、非空 `rationale`、最多 16 个
+   唯一且各自非空的字符串 `risk_tags`，且无额外字段。本地外层绑定可以携带 identity/provenance，但不得
+   混进 decision 对象或改写 Sol 原始判定文本。
 2. 最终标签集合必须与冻结 selected semantic-id 集合完全相等，并逐条核对代表 `E_final`、payload、partition、
    prompt、model、date 与 batch identity；文件级 SHA 也必须匹配。集合相等是整批条件，不接受按行 best-effort。
 3. L3 import metadata 只声明标签批次已通过格式/身份检查和用途边界；本轮不把教师标签写成 shadow run，
@@ -162,9 +162,9 @@
 ### 3.6 现场、Git 与证据纪律
 
 1. tracked 实现和文档只在本 worktree 编辑、测试和提交。由于 worktree 不共享 ignored 文件，当前 47 条源归档
-   从主工作区 `/home/sjc/desktop/RONDO/eval-data/runs/` 读取，新生成的私有 manifest/export/标签写入
-   `/home/sjc/desktop/RONDO/eval-data/teacher-labels/` 的本任务专用目录；这不是修改主工作区 tracked 文件。
-   所有命令都应使用解析后的显式根路径，不能依赖当前目录碰巧指向哪棵 worktree。
+   从主工作区 `/home/sjc/desktop/RONDO/eval-data/runs/` 读取，新生成的私有产物写入主工作区 `eval-data/`
+   下本任务专用且不与既有设施冲突的目录；这不是修改主工作区 tracked 文件。所有命令都应使用解析后的显式
+   根路径，不能依赖当前目录碰巧指向哪棵 worktree。
 2. 写私有文件采用窄权限、临时文件后原子替换；不覆盖未知既有批次。不得创建 symlink 把私有数据引入 worktree，
    也不得复制真实正文到 tracked fixture。
 3. 提交前检查 worktree 与主工作区状态、tracked diff、ignored 产物落点和敏感正文扫描。只提交本任务 tracked
@@ -174,6 +174,8 @@
 
 - 优先在现有 `local_approval` Python 包内做一个小模块，并复用 production evidence reader、
   `build_static_payload()` 和 census baseline；不新增第三方依赖、数据库、签名、访问控制或审计系统。
+- 私有目录可优先采用 `eval-data/teacher-labels/<batch_id>/`，决策校验可优先直接复用
+  `validate_static_decision()`；如果 live code 表明有更干净的等强实现，执行者可以调整并在关键决策记录中说明。
 - CLI 可保持为少量阶段：`prepare`（冻结私有 manifest/outbound）、`verify-labels`（严格导入与最终私有文件）、
   `summarize`（最后生成 tracked 摘要）。具体命名和类结构由执行者依据 live code 决定。
 - 对 Sol 的批次载荷可把 routing identity 放在外层，把 `canonical_payload` 原样嵌入；回收后把原始 decision 与
