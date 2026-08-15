@@ -134,31 +134,50 @@
 - ignored 资产无需复制或在主工作区开发：worktree 已由 common-root 机制复用主仓的真实归档、
   `rondo.local.toml`、冻结模型/runtime、eval venv/cache。真实运行会在 common root 的 ignored
   `eval-data/local-approval/` 创建并清理任务私有对象；这不构成 tracked 主工作区修改。
+- 2026-08-14：锚点已窄改为 `ANCHOR_INPUT_TOKENS = 5_311`，同步收敛模块说明与两处行内说明，
+  并更新 `eval/tests/test_local_approval.py` 中直接代表锚点或 `锚点 - 1` 的 4 处断言/fixture。
+  未新增 schema、版本注册表、容差或第二套锚点机制；历史 pre-v3 5,313 未被批量替换。
+- 2026-08-14：无模型门禁通过——focused `tests.test_local_approval` + `tests.test_contracts_and_evidence`
+  116/116（14.274s），`uv lock --directory eval --check` 85 packages。运行前现场核对通过：正式 baseline
+  不存在、8080 空闲、无 llama-server、GPU 无 compute process、`eval-data/local-approval/` 无残留、
+  doctor 为 `configuration: valid` / `model: present` / `linux_cuda_built_model_unvalidated` /
+  `model_backed_validation: not_run`。
+- 2026-08-14：两遍完整 census 均成功且**逐字节一致**，无整改循环。两遍都 `status=complete`、
+  `missing_counts=0`、47/47 counted、0 refused、锚点精确 5,311、`generated_tokens=0`、exit 0、
+  三项 cleanup 全 true，digest 同为 `22b8452717f1bcfa692cffa69389ebb4a21a0aef1a9187cd066879a6b0831144`。
+  分布：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499；按 `input+512` 4k 适配 0/47、8k 适配 11/47；
+  47 条全部为 `responses_lite`。
+- 2026-08-14：两遍比较一致后，把字节一致结果发布为唯一正式
+  `eval/results/baselines/local-approval-exact-token-census-v1.json`；两份临时结果已删除，
+  任务私有目录已移除。
 
 ### 当前工作
 
-- 计划已起草，等待执行者按本合同实施。
+- 已完成。等待 Codex 独立验收。
 
 ### 本任务剩余步骤
 
-1. 窄改 v3 锚点为 5,311，同步必要说明和直接测试。
-2. 通过 focused 无模型门禁与 eval lock，完成运行前资源/状态检查。
-3. 执行第一遍完整 census；仅在满足 §3.6 时进行局部整改并从头重跑。
-4. 第一遍 47/47 成功后执行第二遍，验证逐条记录、摘要和 digest 一致，再发布唯一正式 baseline。
-5. 完成清理、相关文档/日志同步、diff 自审和 worktree 提交，交给 Codex 独立验收。
+1. ~~窄改 v3 锚点为 5,311，同步必要说明和直接测试。~~ 已完成。
+2. ~~通过 focused 无模型门禁与 eval lock，完成运行前资源/状态检查。~~ 已完成。
+3. ~~执行第一遍完整 census。~~ 已完成，47/47 一次通过，未触发 §3.6 整改。
+4. ~~执行第二遍并验证一致后发布唯一正式 baseline。~~ 已完成，两遍逐字节一致。
+5. ~~完成清理、文档/日志同步、diff 自审和 worktree 提交。~~ 已完成。
 
 ### 阻塞项
 
-- 无已知阻塞。其余 46 条在 v3 下的真实可计数性尚未验证，必须由本任务第一遍完整运行给出事实。
+- 无。
 
 ### 当前验收状态
 
-- 待执行。当前只有 Plan 028 的一次锚点 5,311 观测；47/47、第二遍一致性和正式 baseline 均尚未完成。
+- 本任务完成标准全部达成：锚点 5,311 已由两遍真实运行独立复证，47/47 exact count 已取得，
+  两遍一致，唯一正式 baseline 已发布，WP3b-A2 闭合。capability 仍为
+  `linux_cuda_built_model_unvalidated`，qualification 未晋级，上下文档位未选择。
 
 ### 交接边界
 
-- 本任务成功后冻结此计划并以 WBS 作为后续唯一交接；不在本计划安排上下文档位、qualification、L7 或 Local M3。
-- 若触发 §3.8，记录停止事实并把新的决策门交回 WBS，不在 Plan 029 内改写任务合同。
+- 本计划已冻结为任务合同与历史记录；后续路线（上下文档位、qualification、L7、Local M3）
+  以 `doc/WBS.md` 与 `doc/WBS/local-approval-model.md` 为唯一来源，不在本计划维护。
+- §3.8 未被触发。
 
 ## 6. 关键决策记录
 

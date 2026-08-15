@@ -77,51 +77,46 @@
   CUDA source build 与 CPU release 的服务身份分别精确绑定 `b1-0865990` 与 `b10333-08659901c`；
   qualification 的输入由受跟踪 selector 预先绑定唯一 path、`E_final`/meta SHA 与期望 Guardian 模型/effort，
   并复用生产 evidence reader 与 meta 校验。2026-08-14 真实模型已首次成功加载：exact GGUF 装载、服务身份与
-  `/props` 上下文 4096 均通过核验。但该冻结样本的 static payload 经服务端 tokenizer 实测为 **5,313 input tokens**，
-  超过 4096 上下文，llama.cpp 按合同返回 exceed-context 错误，因此没有产生结构化判定，未写入任何证据，
-  能力保持 `linux_cuda_built_model_unvalidated`、CUDA lock 的 `model_backed_structured_output` 保持 `not_run`。
+  `/props` 上下文 4096 均通过核验。但该冻结样本的 static payload 经服务端 tokenizer 实测超过 4096 上下文
+  （v3 之前为 5,313 input tokens，v3 下为 5,311），llama.cpp 按合同返回 exceed-context 错误，因此没有
+  产生结构化判定，未写入任何证据，能力保持 `linux_cuda_built_model_unvalidated`、CUDA lock 的
+  `model_backed_structured_output` 保持 `not_run`。
   显存峰值、首 token 与总耗时随该失败一并作废，尚无 model-backed 指标。
-- **exact-token 普查（WP3b-A2）尝试过两轮，仍未完成**：唯一取得过 token 数的真实运行只覆盖
-  **24 条**，其余 23 条从未被冻结 b10333 计数，**没有得到全集分布**，不得当作普查完成。
-  1. **长度（只覆盖那 24 条）**：min 5,313、p50 7,886、p95 12,354、max 18,921。按 `input+512`，
-     4k 适配 0/24、8k 适配 9/24、12k 22/24、16k 23/24、24k 24/24。**这些比例只描述这 24 条**；
-     其余 23 条的 token 数未知，因此全集的 fit 数量无法给出，也不存在已证明的全集上限。
-  2. **那 24 条的共同特征是会话里没有 assistant 轮**；另外 23 条在 v2 下均含
-     `assistant → developer` 相邻关系。至今没有任何一条带 assistant 轮的真实请求被成功计数过。
-- **角色顺序兼容已在 v3 关闭（仍是无模型结论）**：`developer` 消息在套用模板前被
+- **exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为实测 5,311 后，同一正式 census 入口从头
+  独立运行两遍，两遍都 `status=complete`、47/47 取得 exact input-token 数、0 拒绝、0 缺失计数、
+  锚点精确 5,311、`generated_tokens=0`，逐条记录、摘要与 digest 逐字节一致
+  （`22b8452717f1bcfa692cffa69389ebb4a21a0aef1a9187cd066879a6b0831144`）。唯一正式结果见
+  `eval/results/baselines/local-approval-exact-token-census-v1.json`。
+  1. **全集长度分布（47/47）**：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499。
+     按 `input+512`：4k 适配 **0/47**、8k 适配 **11/47**。即 4k 合同装不下任何一条真实证据，
+     这是本方向第一次拥有全集事实而非子集推断。
+  2. **v3 关闭了服务侧差异**：47 条全部为 `responses_lite` 形态，全部被冻结 b10333 精确计数，
+     包括此前从未被计过数、含 `assistant → developer` 相邻关系的 23 条。Plan 026 的通用 500
+     未再复现；本次没有单独定位那一次失败，只能说它在 v3 下不再发生。
+- **角色顺序兼容已在 v3 关闭，并已由真实运行确认**：`developer` 消息在套用模板前被
   `map_developer_role_to_system` 统一改成 `system`；冻结 Ministral 模板规定 `assistant` 之后只能接
   `assistant`/`user`/`tool`、`tool` 之后只能接 `assistant`/`tool`/`user`，遇到 `system` 直接
   `raise_exception`，minja 抛 `std::runtime_error`，服务端兜底为 **HTTP 500 `server_error`**
   （`std::invalid_argument` 才是 400）。v2 下 23 条请求含 `… assistant → developer → user`，会触发该限制。
   v3 的角色规范化消除了这一形状：同一份从冻结模板资产解析规则的只读角色顺序门下，47/47 通过，
   规范化前为 24/47（23 条报 `Unexpected role 'system' after role 'assistant'`）。
-  该门禁只存在于测试，不进入生产 consumer；它证明请求可渲染，**不证明**真实 b10333 能完成计数，
-  也不解释 Plan 026 的具体 500 或追认 Plan 024 两条旧通用 500 的现场原因。
-- **三轮真实证据的边界**：24 条的 token 数来自 Plan 024（`6b36d05` 之前的实现）的两次一致运行，
-  锚点 5,313。Plan 026 的 WP3b-A2b 重跑只跑了一次：合成探针通过，真实归档计数阶段收到
-  通用 500，当时输出无法区分锚点或后续样本；按合同 fail closed、未发布 baseline，也没有新增可发布
-  token 数或 5,313 锚点复证。
-- **Plan 028（WP3b-A2d）的 v3 重跑 fail-closed 于锚点，且失败点已离开服务侧**：模型加载、服务身份、
-  `/props` 4096 与合成探针全部通过，锚点请求**被成功计数**——没有 400、没有通用 500、没有 transport
-  failure——但得到 **5,311**，与 census 常量要求的 5,313 不符，触发 `anchor_token_count_mismatch`。
-  按合同未执行第二遍、未发布 baseline，清理三项全部为 true。这是本方向第一次证明**真实 b10333 能对一条
-  v3 真实归档请求完成精确计数**；但它同时说明 5,313 这个常量描述的是 v3 之前的 payload。
-  只读结构核对：该锚点为 `responses_lite`，原始 `input` 含 1 条 `additional_tools`（按合同移除）、
-  2 条 `developer` 消息（1 条是 policy，另 1 条是证据）和 2 条 `user` 消息；v3 出站为 3 条 `user`，
-  即恰好 1 条证据消息的角色由 `developer` 改写为 `user`。v3 之前该消息经
-  `map_developer_role_to_system` 以 `system` 进入冻结模板，角色标签不同足以解释 2 个 token 的差异。
-  该解释与观测方向一致，但本次只运行一遍，**未经独立复证**，也没有对其余 46 条做过任何计数。
+  该门禁只存在于测试，不进入生产 consumer；它只证明请求可渲染，真实可计数由上面的 47/47 普查给出。
+  它仍然不解释 Plan 026 的具体 500，也不追认 Plan 024 两条旧通用 500 的现场原因。
+- **锚点口径已迁移到 v3**：census 的 `ANCHOR_INPUT_TOKENS` 现为 **5,311**，即冻结 tokenizer 对 v3 锚点
+  请求的实测值，并已由两遍完整普查各自独立复证。历史 5,313 是 Plan 023/024 在 **v3 之前**测得的事实：
+  当时该锚点的那条证据 `developer` 消息经 `map_developer_role_to_system` 以 `system` 进入冻结模板，
+  v3 改为原位 `user` 后角色标签变化正好对应 2 个 token 的差。迁移只改常量与说明，
+  没有引入容差、版本注册表或第二套锚点机制。
 - **census 失败定位已补到最小可用**：通用计数失败现在附带有界 `stage`（`anchor_count` / `archive_count`）、
   当前 `e_final_sha256` 与 `counted_before_failure`（失败前已取得 exact count 的唯一归档数）。
   通用 500/transport 失败在两处仍然立即停止、不发布结果，也不会被降级成某条样本的拒绝属性；
   只有明确的 400 结构性拒绝沿用原 incomplete 语义。这些字段只用于定位下一次失败，
   **不能**回溯解释 Plan 026 已发生的那次 500。
-- **static-payload 兼容已完成，但只是构造层结论**：reasoning 投影与角色规范化都只做在公共 builder，
+- **static-payload 兼容已由真实运行确认**：reasoning 投影与角色规范化都只做在公共 builder，
   没有为 llama.cpp 做隐蔽的 provider-specific 删减或旁路；Local client 与 token census 共用同一
-  v3 request builder（逐字节相等已回归）。47 条归档在无模型只读检查下 47/47 构造出 v3 payload 与
-  Local 请求，三 consumer 逐字节一致。Plan 028 已把这层结论向前推进一步：v3 真实请求确实能被冻结
-  b10333 精确计数（见下），但全集分布仍然没有。
-  在拿到全集分布前不冻结 8k/12k/16k/24k 任何档位，也不把“只用合成证据、真实证据只取可服务子集”设为默认路线。
+  v3 request builder（逐字节相等已回归）。47 条归档 47/47 构造出 v3 payload 与 Local 请求，
+  三 consumer 逐字节一致，且这 47 条真实请求全部被冻结 b10333 精确计数。
+  全集分布已有，档位可以定案；不把“只用合成证据、真实证据只取可服务子集”设为默认路线。
 - **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
   单文件下载/校验和 8GB 两阶段上下文方案。2026-08-13 唯一 GGUF 已通过普通文件、精确
@@ -133,11 +128,9 @@
 
 ### 当前推进顺序
 
-1. **当前阻塞点是锚点常量，不是服务兼容性。** Plan 028 已证明 v3 真实请求可被冻结 b10333 精确计数，
-   但 census 的 `ANCHOR_INPUT_TOKENS = 5_313` 来自 v3 之前的 payload，v3 下同一条证据实测 5,311，
-   因此在锚点常量重新确立之前，47/47 普查在现有合同下不可能通过。
-   **下一步先决定锚点口径**（重新测定并冻结 v3 锚点、或改用与 payload 版本绑定的锚点），
-   再重新申请真实模型授权重跑 47/47；Plan 026 那次通用 500 仍未定位。拿到全集分布后才定上下文档位。
+1. **当前决策点是上下文档位。** 全集 exact-token 分布已完整取得（47/47，两遍一致），
+   4k 装不下任何一条真实证据、8k 装得下 11 条，因此档位选择必须在 8k 与更大档位之间与 8GB 显存的
+   KV 预算求交，并明确该档位下真实证据的可覆盖比例。档位定案本身不需要再加载模型。
 2. 按定案后的合同完成 model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出；
    资格设施、证据 schema 与 capability 投影已就绪，只需按新合同重跑并生成版本化证据。
 3. 通过后，连同 L7 的“仅改配置切换”一起形成 **Local M3**；不同上下文档位互相独立验收，
@@ -208,11 +201,8 @@
   忽略且权限收紧的 `.env.local` 按变量名加载，不进入 TOML、命令行、日志或工件。linked worktree 的加载器
   必须通过 Git common dir 定位主仓库根，复用同一份本机配置，不在各 worktree 复制密钥。
 - 硬件约束（RTX 4060 Laptop 8GB VRAM）：8B 级模型 Q4 权重约 4.8GB，剩余显存要留给 KV cache；
-  **上下文预算必须实测**。已实测的 24 条真实 `E_final` 为 5,313—18,921 tokens，4k 一条都装不下，8k 装得下 9 条；
-  这些数字来自 v3 之前的 payload，v3 下同一条锚点证据实测为 5,311，因此旧区间不能直接当作 v3 的事实。
-  其余 23 条尚无 token 数，其模板角色顺序兼容问题已由 v3 关闭，但仍未被真实运行时计数过；
-  Plan 026 的单个通用 500 具体发生于锚点或后续样本仍未知。
-  档位要等全集分布出来后再与 8GB 显存的 KV 预算求交。
+  **上下文预算已实测**。47 条真实 `E_final` 在 v3 下全部取得 exact input-token 数：5,311—22,499 tokens。
+  按 `input+512`，4k 一条都装不下，8k 装得下 11 条。档位由该全集分布与 8GB 显存的 KV 预算求交决定。
 - 验收：本地服务能对一条**真实** `E_final` 返回合规结构化判定，并记录显存峰值、首 token 延迟、总耗时。
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）
@@ -368,9 +358,9 @@ prompt 是少数能被完全冻结的部分，必须冻死。
 
 **证据来源：合成证据做主体，真实 `E_final` 做锚点，两组分开记录、不混算。**
 
-- 现实约束：全项目目前只有 **47 条真实 `E_final`**（分布在 24 个 run 目录，内容互异），
-  其中目前只有 **24 条被冻结本地运行时接受过计数请求**（见上文；剩下 23 条的模板角色顺序兼容问题已由
-  v3 关闭，但实际可服务条数仍以重跑普查为准），锚点规模按实际可用条数计而不是 47；
+- 现实约束：全项目目前只有 **47 条真实 `E_final`**（分布在 24 个 run 目录，内容互异）。
+  47 条在 v3 下都已被冻结本地运行时精确计数，但**能被计数不等于能在选定档位内被推理**：
+  锚点规模按定档后实际装得下的条数计，而不是默认 47；
   按稳定语义哈希规则预估切分后 holdout 约 20 条；**实际数量必须以尚待生成的冻结 manifest 为准**。
   无论最终数量多少，它都撑不起 200—300 条的判定规模，且这 47 条全部来自 TB 2.1 任务运行，审批情境单一。
 - 因此主体横评用 Sol 批量生成的**合成审批场景**，覆盖面由构造决定，规模可控。

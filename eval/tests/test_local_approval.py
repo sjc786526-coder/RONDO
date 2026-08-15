@@ -2994,11 +2994,11 @@ class TokenCensusTests(unittest.TestCase):
         records = [
             {"e_final_sha256": f"{index:064x}", "status": "counted",
              "input_tokens": tokens, "fits": token_census.fit_results(tokens)}
-            for index, tokens in enumerate([9000, 4000, 5313])
+            for index, tokens in enumerate([9000, 4000, 5311])
         ]
         shapes = {"responses_lite": 3}
         identity = {"serve_config_sha256": "a" * 64}
-        anchor = {"e_final_sha256": records[2]["e_final_sha256"], "input_tokens": 5313}
+        anchor = {"e_final_sha256": records[2]["e_final_sha256"], "input_tokens": 5311}
         first = token_census.build_document(
             identity=identity, anchor=anchor, records=records, request_shapes=shapes
         )
@@ -3038,7 +3038,7 @@ class TokenCensusTests(unittest.TestCase):
             with self.assertRaises(token_census.CensusError) as error:
                 self._run(config, output=output, counter=counter)
         self.assertEqual(error.exception.code, "anchor_token_count_mismatch")
-        self.assertEqual(error.exception.facts["observed"], 5312)
+        self.assertEqual(error.exception.facts["observed"], 5310)
         self.assertEqual(len(calls), 1)
         self.assertFalse(output.exists())
         self.assertTrue(all(error.exception.facts["cleanup"].values()))
@@ -3076,7 +3076,7 @@ class TokenCensusTests(unittest.TestCase):
         )
         self.assertEqual(
             sorted(record["input_tokens"] for record in document["records"]),
-            [4001, 5313, 9000],
+            [4001, 5311, 9000],
         )
         for record in document["records"]:
             self.assertEqual(
@@ -3138,7 +3138,7 @@ class TokenCensusTests(unittest.TestCase):
             if self._is_probe(body):
                 return 43
             bodies.append(body)
-            # The anchor is counted first and must reproduce Plan 023's count.
+            # The anchor is counted first and must reproduce the v3 count.
             return (
                 token_census.ANCHOR_INPUT_TOKENS if len(bodies) == 1 else 4000 + len(bodies)
             )

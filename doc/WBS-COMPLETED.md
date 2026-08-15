@@ -677,3 +677,35 @@ standard/Lite 形态均补回归。
   全量 eval。本次只证明构造层与模板角色顺序兼容，**不证明** 47 条在真实 b10333 上可完成计数，
   也不解释 Plan 026 的具体通用 500。WP3b-A2 仍 blocked/incomplete，正式 exact-token baseline 仍不存在，
   未选上下文档位，capability 保持 `linux_cuda_built_model_unvalidated`，qualification 状态不变。
+
+### 2026-08-14 Plan 029 WP3b-A2e static payload v3 的 47/47 exact-token 普查闭合
+
+- **成果**：**WP3b-A2 闭合**。v3 锚点常量从 pre-v3 的 5,313 窄改为实测 **5,311** 后，
+  用现有正式 census 入口、static payload v3、公共 Local request builder 和冻结
+  b10333/GGUF/tokenizer/template，从头独立运行两遍完整 count-only 普查，两遍全部成功。
+  唯一正式结果发布为 `eval/results/baselines/local-approval-exact-token-census-v1.json`。
+- **锚点迁移**：只改 `ANCHOR_INPUT_TOKENS`、模块说明与两处行内说明，以及
+  `eval/tests/test_local_approval.py` 中直接代表锚点或 `锚点 - 1` 的 4 处断言/fixture。
+  没有新增 schema、版本注册表、容差或第二套锚点机制；历史文档中的 pre-v3 5,313 保留为形成时点事实。
+- **两遍一致性**：两遍均 `status=complete`、`missing_counts=0`、47/47 counted、0 refused、
+  锚点精确 5,311、`generated_tokens=0`、exit 0、`server_stopped`/`port_released`/
+  `private_artifacts_removed` 三项全 true；两份结果文档**逐字节一致**，digest 同为
+  `22b8452717f1bcfa692cffa69389ebb4a21a0aef1a9187cd066879a6b0831144`，
+  文件 SHA-256 同为 `0c49ca78d8ca53ff2331fec7734e67f0d2302223d6e5f7a5d64554d5be882606`。
+  比较通过后才发布正式 baseline，两份临时结果随即删除。
+- **全集事实**：47 条真实 `E_final` 全部为 `responses_lite`；input tokens min 5,311、p50 8,989、
+  p90 12,352、p95 13,754、max 22,499。按 `input+512`：**4k 适配 0/47、8k 适配 11/47**。
+  这是本方向第一次拥有全集分布而非 24 条子集；此前从未被计过数、含 `assistant → developer`
+  相邻关系的 23 条这次全部被精确计数，Plan 026 的通用 500 未再复现（但本次没有单独定位那一次失败）。
+- **服务身份**：两遍都绑定同一冻结资产——`service_build_info=b1-0865990`、
+  runtime `eval-data/tools/llama-b10333-cuda-linux-x64`、GGUF SHA `7deb50ec…54802a`、
+  chat template SHA `74eeb55f…a1ea56`、count endpoint `/v1/responses/input_tokens`。
+- **验收**：focused `tests.test_local_approval` + `tests.test_contracts_and_evidence` **116/116**（14.274s）、
+  `uv lock --directory eval --check` **85 packages** 均在首次模型加载前通过。
+  收尾现场：8080 空闲、无 llama-server、GPU 无 compute process、`eval-data/local-approval/` 为空、
+  共享构建锁已释放、主工作区干净。
+- **边界**：未运行 generation、qualification、L7、Cargo、Docker、云 API、全量 eval 或全量测试；
+  未改模型/tokenizer/template/样本集合/payload schema/输出预算/fail-closed 规则，未新增审计或
+  provenance 设施。census 成功只闭合 WP3b-A2，**不等于** model-backed qualification 或 Local M3 成功：
+  capability 仍为 `linux_cuda_built_model_unvalidated`、`model_backed_validation: not_run`、
+  CUDA lock 的 `model_backed_structured_output` 仍为 `not_run`，上下文档位尚未选择。
