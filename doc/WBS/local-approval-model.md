@@ -72,24 +72,31 @@
   超过 4096 上下文，llama.cpp 按合同返回 exceed-context 错误，因此没有产生结构化判定，未写入任何证据，
   能力保持 `linux_cuda_built_model_unvalidated`、CUDA lock 的 `model_backed_structured_output` 保持 `not_run`。
   显存峰值、首 token 与总耗时随该失败一并作废，尚无 model-backed 指标。
-- **exact-token 普查（WP3b-A2）尝试过但未完成**：47 条真实归档只有 **24 条取得 exact token 数**，
-  另 23 条在计数前就被冻结 b10333 拒绝，**没有得到全集分布**，不得当作普查完成。
-  已确证的有限事实：
+- **exact-token 普查（WP3b-A2）尝试过两轮，仍未完成**：唯一取得过 token 数的真实运行只覆盖
+  **24 条**，其余 23 条从未被冻结 b10333 计数，**没有得到全集分布**，不得当作普查完成。
   1. **长度（只覆盖那 24 条）**：min 5,313、p50 7,886、p95 12,354、max 18,921。按 `input+512`，
      4k 适配 0/24、8k 适配 9/24、12k 22/24、16k 23/24、24k 24/24。**这些比例只描述这 24 条**；
      其余 23 条的 token 数未知，因此全集的 fit 数量无法给出，也不存在已证明的全集上限。
-  2. **21 条已定性并已做兼容**：其 `reasoning` item 没有数组 `content`，被 Responses adapter 以 400 拒绝
-     （b10333 要求 `reasoning.content` 是非空数组），加大上下文救不回这 21 条。static payload v2 已在公共
-     builder 内移除这 24 个 encrypted-only item，47/47 现可完成只读静态构造；
-     **这是构造层结论，真实可服务性要等重跑普查才成立**。
-  3. **2 条未定性**：旧运行中返回通用 500。该状态是服务端对任意内部异常的兜底，
-     现有证据不能判定它与长度、形状、模板还是其他故障有关；这 2 条既没有 token 数，也没有原因结论。
-- **设施与运行的版本边界**：两次真实运行（结果一致、锚点 5,313）属于 `6b36d05` **之前**的实现。
-  整改后的当前代码只通过无模型回归，尚未真实运行过。
-- **static-payload 兼容已完成，下一步仍不是选档位**：投影只做在公共 builder，没有为 llama.cpp
+  2. **那 24 条的共同特征是会话里没有 assistant 轮**；另外 23 条 v2 请求均含
+     `assistant → developer` 相邻关系。至今没有任何一条带 assistant 轮的真实请求被成功计数过。
+- **聚合式离线检查确认一项角色顺序兼容阻断**：`developer` 消息在套用模板前被
+  `map_developer_role_to_system` 统一改成 `system`；冻结 Ministral 模板规定 `assistant` 之后只能接
+  `assistant`/`user`/`tool`，遇到 `system` 直接 `raise_exception`，minja 抛 `std::runtime_error`，
+  服务端兜底为 **HTTP 500 `server_error`**（`std::invalid_argument` 才是 400）。
+  23 条 v2 请求均含 `… assistant → developer → user`，若到达模板阶段会触发该限制。
+  static payload v2 移除 encrypted-only reasoning item，消除了 Plan 024 中 21 条先触发的 reasoning 400；
+  这些请求随后又暴露出共同的角色顺序问题。该离线结论不解释 Plan 026 的具体 500，也不追认 Plan 024
+  两条旧通用 500 的现场原因。
+- **两轮真实证据的边界**：24 条的 token 数来自 Plan 024（`6b36d05` 之前的实现）的两次一致运行，
+  锚点 5,313。Plan 026 的 WP3b-A2b 重跑用当前实现只跑了一次：合成探针通过，真实归档计数阶段收到
+  通用 500，但当前输出无法区分锚点或后续样本；按合同 fail closed、未发布 baseline，也没有新增可发布
+  token 数或 5,313 锚点复证。
+- **static-payload 兼容已完成，但只是构造层结论**：投影只做在公共 builder，没有为 llama.cpp
   做隐蔽的 provider-specific 删减；Local client 与 token census 共用同一 v2 request builder（逐字节相等已回归）。
-  下一步重新申请一次真实模型授权、重跑 47/47 普查；重跑若仍出现通用 500，继续 fail closed 并单独诊断，
-  不预先承诺兼容能解决那 2 条。拿到全集分布后才定上下文档位。
+  下一步先做版本化的**角色顺序兼容**（同样落在公共 builder，保持 provider-neutral，不新增旁路），
+  同时给 census 增加最小失败阶段、样本哈希与失败前 counted 数；通过无模型门禁后再重新申请一次真实模型授权、
+  重跑 47/47 普查。若 canonical payload 或角色语义改变，static input schema 必须升级，不能静默改写 v2。
+  拿到全集分布后才定上下文档位。
   在此之前不冻结 8k/12k/16k/24k 任何档位，也不把“只用合成证据、真实证据只取可服务子集”设为默认路线。
 - **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
@@ -102,7 +109,9 @@
 
 ### 当前推进顺序
 
-1. provider-neutral static-payload 兼容已完成；随后重跑 47/47 exact-token 普查（需真实模型授权），
+1. provider-neutral static-payload v2 兼容已完成，但 47/47 重跑在归档计数阶段以未定位的通用 500 fail closed；
+   23 条角色顺序兼容问题另经离线确认。先做版本化角色兼容与最小失败阶段标识并通过无模型门禁，
+   再重跑 47/47 exact-token 普查（需真实模型授权），
    然后才定上下文档位（当前阻塞点，见上文）。
 2. 按定案后的合同完成 model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出；
    资格设施、证据 schema 与 capability 投影已就绪，只需按新合同重跑并生成版本化证据。
@@ -175,7 +184,9 @@
   必须通过 Git common dir 定位主仓库根，复用同一份本机配置，不在各 worktree 复制密钥。
 - 硬件约束（RTX 4060 Laptop 8GB VRAM）：8B 级模型 Q4 权重约 4.8GB，剩余显存要留给 KV cache；
   **上下文预算必须实测**。已实测的 24 条真实 `E_final` 为 5,313—18,921 tokens，4k 一条都装不下，8k 装得下 9 条；
-  其余 23 条尚无 token 数（21 条形状被拒、2 条 500 未定性）。档位要等全集分布出来后再与 8GB 显存的 KV 预算求交。
+  其余 23 条尚无 token 数，且离线确认当前 v2 请求均有模板角色顺序兼容问题（见上文）；
+  Plan 026 的单个通用 500 具体发生于锚点或后续样本仍未知。
+  档位要等全集分布出来后再与 8GB 显存的 KV 预算求交。
 - 验收：本地服务能对一条**真实** `E_final` 返回合规结构化判定，并记录显存峰值、首 token 延迟、总耗时。
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）
@@ -332,8 +343,8 @@ prompt 是少数能被完全冻结的部分，必须冻死。
 **证据来源：合成证据做主体，真实 `E_final` 做锚点，两组分开记录、不混算。**
 
 - 现实约束：全项目目前只有 **47 条真实 `E_final`**（分布在 24 个 run 目录，内容互异），
-  其中目前只有 **24 条被冻结本地运行时接受过计数请求**（见上文；static payload v2 兼容已完成，
-  实际可服务条数以重跑普查为准），锚点规模按实际可用条数计而不是 47；
+  其中目前只有 **24 条被冻结本地运行时接受过计数请求**（见上文；剩下 23 条有离线确认的模板角色顺序
+  兼容问题，实际可服务条数以版本化兼容后的重跑普查为准），锚点规模按实际可用条数计而不是 47；
   按稳定语义哈希规则预估切分后 holdout 约 20 条；**实际数量必须以尚待生成的冻结 manifest 为准**。
   无论最终数量多少，它都撑不起 200—300 条的判定规模，且这 47 条全部来自 TB 2.1 任务运行，审批情境单一。
 - 因此主体横评用 Sol 批量生成的**合成审批场景**，覆盖面由构造决定，规模可控。
