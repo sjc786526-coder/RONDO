@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**exact-token 普查（WP3b-A2）未完成**：47 条中只有 24 条取得 token 数（min 5,313、max 18,921；按 `input+512` 这 24 条里 4k 适配 0 条、8k 适配 9 条），另 21 条已证实是 `reasoning` item 形状被 Responses adapter 拒绝、2 条为原因未定性的通用 500，因此没有全集分布。provider-neutral static payload v2 已完成并通过独立复审，47/47 归档通过只读静态构造检查；这仍只是构造层结论，尚无真实模型证据。能力保持 `linux_cuda_built_model_unvalidated`。真实结构化推理、L3/L4 与 Local M3 均未完成；下一步是重新授权并重跑 47/47 普查，而不是选档位（见 `doc/WBS/local-approval-model.md`）。 |
+| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**exact-token 普查（WP3b-A2）仍未完成**：唯一一次取得 token 数的真实运行只覆盖 24 条（min 5,313、max 18,921；按 `input+512` 这 24 条里 4k 适配 0 条、8k 适配 9 条），全集分布至今没有。provider-neutral static payload v2 已完成并通过独立复审，但 WP3b-A2b 的真实重跑（Plan 026）在第一条归档就以通用 500 fail closed，未发布 baseline，证明 v2 的静态构造结论不等于真实可服务性。阻断已定位：冻结 Ministral 模板禁止 `assistant` 之后出现 `system`，而 `developer` 在模板前被统一映射为 `system`，23 条归档的会话形状正好命中这一条。能力保持 `linux_cuda_built_model_unvalidated`。真实结构化推理、L3/L4 与 Local M3 均未完成；下一步是先解决该角色顺序不兼容，再重新授权普查，而不是选档位（见 `doc/WBS/local-approval-model.md`）。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -37,14 +37,19 @@
 ### 工作包 3（当前）：三条线并行
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
-- **3b RONDO Local**：exact-token 普查（WP3b-A2）**仍未完成**，47 条只拿到 24 条 token 数；
-  已证实的阻断是 21 条 `reasoning` item 形状被 adapter 拒绝，另 2 条通用 500 原因未定性。
+- **3b RONDO Local**：exact-token 普查（WP3b-A2）**仍未完成**，至今只有 24 条拿到 token 数。
   **provider-neutral static-payload 兼容（WP3b-A2a）已完成并通过独立复审**：static input payload
   升为 v2，reasoning 投影统一落在公共 builder，只有公开 summary 文本进入中立证据，raw content、
-  encrypted 内容与 provider session id 一律不出站；47/47 通过只读静态构造检查，但没有真实模型证据。
-  下一步重新申请真实模型授权并重跑 47/47 普查；重跑若仍出现通用 500，继续 fail closed 并单独诊断，
-  不预设兼容能解决那 2 条。拿到全集分布再定档位，然后以 model-backed + 配置切换收口 Local M3，
-  之后 L5a、L3/L4、L5b/L6，最后 Local M4。
+  encrypted 内容与 provider session id 一律不出站；47/47 通过只读静态构造检查。
+  **47/47 重跑（WP3b-A2b）未通过**：Plan 026 的第一次真实运行在第一条归档就返回通用 500，
+  按合同 fail closed、未发布 baseline，也未执行第二次运行；v2 只消除了 reasoning 的 400，
+  把那 21 条推进到了下一处同样的拒绝。
+  阻断已定位在会话角色顺序：`developer` 在模板前被统一映射为 `system`，而冻结 Ministral 模板
+  规定 `assistant` 之后只能是 `assistant`/`user`/`tool`，23 条归档恰好是
+  `… assistant → developer → user` 的形状。
+  下一步先做一次窄的角色顺序兼容（provider-neutral，落在公共 builder，不为 llama.cpp 开旁路），
+  通过无模型门禁后再重新申请真实模型授权重跑 47/47。拿到全集分布再定档位，
+  然后以 model-backed + 配置切换收口 Local M3，之后 L5a、L3/L4、L5b/L6，最后 Local M4。
 - **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
   付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
   真实 API 授权，不得用未运行或无效比较表述“未见退化”。
@@ -69,7 +74,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | 真实模型已首次加载；static payload v2 兼容已完成；exact-token 普查仍只完成 24/47（21 条形状拒绝已证实，2 条 500 未定性） | 需真实模型授权；重跑 47/47 普查 → 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | 真实模型已首次加载；static payload v2 兼容已完成；exact-token 普查仍只完成 24/47，47/47 重跑因模板角色顺序不兼容 fail closed | 先做角色顺序窄兼容 → 重新授权并重跑 47/47 普查 → 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），

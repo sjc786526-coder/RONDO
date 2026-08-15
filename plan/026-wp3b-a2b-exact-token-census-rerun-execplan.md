@@ -93,30 +93,53 @@ exact-token 普查。通过一致性复跑后发布唯一正式 baseline 和全�
 - 2026-08-14：用户已授权两次 count-only 真实本地模型运行、GPU 独占和只读处理 47 条真实归档；
   明确不使用网络/API、不外发数据、不下载权重且不读取 `.env.local`。
 - 2026-08-14：从 clean `main@31e0157` 创建本任务专用 worktree 与分支，并完成本执行计划。
+- 2026-08-14：模型启动前完成只读现场核对与无模型门禁，未发现 census 自身的直接窄缺陷，因此未改任何生产代码。
+- 2026-08-14：执行第一次正式 census（共享锁 + GPU 独占 + count-only）。合成探针通过，说明服务与
+  count endpoint 本身正常；随后在遍历的第一条真实归档收到通用 **HTTP 500 `server_error`**，
+  blocker `count_endpoint_unavailable`，`message_sha256 bfd4dade…`，退出码 70。
+  按 §3.7 整次 incomplete、未发布 baseline，服务、端口与私有目录均已清理（三项 cleanup 全为 true）。
+- 2026-08-14：按用户「首次正式运行已触发合同失败即不再增加模型生命周期」的指示，**未执行第二次运行**，
+  因此不存在两次一致性结论，也没有产生任何新的 token 数。
+- 2026-08-14：只读离线定位根因（不占用模型）：`developer` 消息在套用模板前被 `map_developer_role_to_system`
+  统一改成 `system`，而冻结 Ministral 模板规定 `assistant` 之后只能接 `assistant`/`user`/`tool`，
+  遇到 `system` 直接 `raise_exception`；minja 抛 `std::runtime_error`，服务端兜底为 500
+  （只有 `std::invalid_argument` 才是 400）。离线渲染 47 条真实 v2 请求得到 24 渲染 / 23 raise，
+  与 Plan 024 真实运行的 24 计数 / 21 形状拒绝 / 2 条 500 完全对应，说明 v2 只消除了先触发的 400。
+- 2026-08-14：收尾核验 —— focused tests 109/109 通过；`uv lock --check` 85 packages 通过；
+  8080 端口空闲、无 GPU 计算进程、`eval-data/local-approval/` 无本任务残留、`git status` 干净；
+  doctor 返回 `model_backed_validation: not_run` 与 `runtime_capability:
+  linux_cuda_built_model_unvalidated`，无新增资格成功 evidence，正式 census baseline 仍不存在。
 
 ### 当前工作
 
-- 计划已就绪，等待执行者按本计划完成两次真实 census 与验收收口。
+- 本任务按合同失败收口，只落文档与日志，不在现场做兼容修复。
 
 ### 本任务剩余步骤
 
-1. 核对现场与现有无模型 focused 门禁；只有直接缺陷才做窄修。
-2. 在共享锁与 GPU 独占下执行第一次 47/47 census，确认 5,313 锚点并清理现场。
-3. 执行第二次相同 census，再次清理；比较逐条记录、摘要、digest 和最终 baseline。
-4. 通过 focused tests、`just eval-lock` 与 capability/资格证据收尾检查。
-5. 按成功或失败语义精炼更新权威文档和日志，在任务分支提交并交给 Codex 审查。
+- 无。修复方向已交回两份 WBS。
 
 ### 阻塞项
 
-- 无。所需真实模型、GPU 独占和 47 条本地归档只读授权已由用户在本任务开始时给出。
+- **会话角色顺序与冻结模板不兼容**：23 条真实归档的形状是 `… assistant → developer → user`，
+  经 developer→system 映射后必然触发模板的顺序校验并返回通用 500。这不是长度问题，也不是 reasoning 问题，
+  在公共 builder 做一次 provider-neutral 的角色顺序窄兼容之前，47/47 普查不可能通过。
+- **census 失败报告的诊断精度不足**（已记录，未在本任务修改）：`count_input_tokens` 的默认 code 让
+  「锚点 500」与「循环中某条 500」都表现为 `count_endpoint_unavailable`，也不报已计数条数。
+  本次可排除 `anchor_token_count_mismatch`，但锚点 5,313 未被本次运行直接复证；
+  按探针通过 + 锚点离线可渲染 + 遍历首条离线 raise 推断，实际中断点是循环第一条。
+  用户只允许在模型运行前做窄修，该缺陷是运行后才暴露，故留给后续任务。
 
 ### 当前验收状态
 
-- 待执行；尚未启动模型、运行 census 或生成 baseline。
+- **不通过**。47/47 未达成（本次 0 条新计数）、只运行一次、未发布 baseline、未写 `doc/WBS-COMPLETED.md`。
+- 未运行：第二次 census、双跑一致性比较、`just eval-lock` 原样配方（该配方硬编码 `$PWD/eval-data/uv-cache`，
+  本 worktree 无 `eval-data/`，改用等价的 `uv lock --directory eval --check` + 主仓 cache）、
+  Cargo、Docker、云 API、全量 eval、任何 generation。
 
 ### 交接边界
 
-- 成功后冻结本计划，档位选择只交回 WBS；失败则按 §3.7 记录唯一阻塞方向，不在本任务现场扩展修复。
+- 本计划就此冻结。角色顺序窄兼容、重新申请模型授权、重跑 47/47 与档位选择只按两份 WBS 推进，
+  不在本计划中追加。
 
 ## 6. 关键决策记录
 
