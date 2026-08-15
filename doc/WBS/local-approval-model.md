@@ -37,17 +37,26 @@
 
 ## 当前状态
 
-- **L1 完成，static input payload 现为 v2**：已落地 Standard/Responses Lite 双形态 `E_final` 解析、
+- **L1 完成，static input payload 现为 v3**：已落地 Standard/Responses Lite 双形态 `E_final` 解析、
   exact policy bytes 身份哈希、provider-neutral canonical payload 与结构化决策校验。出站静态 payload 同时排除
   顶层 `tools`、Lite `additional_tools`、warehouse-only metadata 和 provider-private 运输字段，
   malformed/歧义证据 fail-closed；合法 `ToolSearchOutput.tools` 作为既有证据保留，Luna/Sol/Local
   三组 consumer 协议投影对同一 Standard/Lite fixture 产生完全相同的 canonical bytes；这项验收不等同于
-  三套生产调用端均已实现。v2 只增加一件事：`reasoning` item 在公共 `build_static_payload()` 内统一投影 ——
-  只有公开的 `summary[].summary_text` 按原序原样转成普通 assistant 证据消息；`content[]` 的
-  `reasoning_text` / `text` 按冻结 Codex 语义属于默认隐藏的 raw reasoning，只校验形状后丢弃，
-  没有公开 summary 的 item 整项删除；未知或歧义形状继续 fail-closed，`encrypted_content` 与
-  provider session id 一律不出站。输入 payload 版本与结构化**决策输出** schema
-  （仍为 `rondo_static_approval_v1`）是两份合同，不随动。该 v2 实现已通过独立复审。
+  三套生产调用端均已实现。公共 `build_static_payload()` 是唯一规范化边界，做且只做两件事：
+  1. **reasoning 投影**：只有公开的 `summary[].summary_text` 按原序原样转成普通 assistant 证据消息；
+     `content[]` 的 `reasoning_text` / `text` 按冻结 Codex 语义属于默认隐藏的 raw reasoning，只校验形状后丢弃，
+     没有公开 summary 的 item 整项删除；`encrypted_content` 与 provider session id 一律不出站。
+  2. **证据角色规范化（v3）**：证据消息的 `developer` 角色在原位改写为 `user`，文本、顺序、消息边界和
+     其余字段都不变，内容仍留在 `input` 里作会话证据，不并入 Guardian policy/instructions。改写无条件执行，
+     不按前驱角色分情况，也不含任何 provider 分支；出站证据只有 `user`/`assistant` 两种角色。
+     理由是 `developer` 没有 provider-neutral 等价物；冻结模板中在所有前驱角色之后都合法的是 `user` 与
+     `assistant`，而归档 developer 消息是输入侧 `input_text`，映射为 `user` 只换 role 标签，
+     映射为 `assistant` 会改变说话者并被迫重写文本 subtype。
+
+  未知/缺失 role、非消息 item 携带 role、空或畸形 content、与角色不匹配的文本 subtype 一律 fail-closed；
+  终端 validator 拒绝 v1/v2 payload 和被手工回填的 `developer`/`system` 角色。输入 payload 版本与结构化
+  **决策输出** schema（仍为 `rondo_static_approval_v1`）是两份合同，不随动。v2 实现已通过独立复审，
+  v3 的角色兼容与终端消息形状校验已通过独立复验。
 - **L2 的 CPU 与 Linux CUDA model-free 运行闭包均已就绪**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 runtime closure、Responses client、
   doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
@@ -77,26 +86,31 @@
   1. **长度（只覆盖那 24 条）**：min 5,313、p50 7,886、p95 12,354、max 18,921。按 `input+512`，
      4k 适配 0/24、8k 适配 9/24、12k 22/24、16k 23/24、24k 24/24。**这些比例只描述这 24 条**；
      其余 23 条的 token 数未知，因此全集的 fit 数量无法给出，也不存在已证明的全集上限。
-  2. **那 24 条的共同特征是会话里没有 assistant 轮**；另外 23 条 v2 请求均含
+  2. **那 24 条的共同特征是会话里没有 assistant 轮**；另外 23 条在 v2 下均含
      `assistant → developer` 相邻关系。至今没有任何一条带 assistant 轮的真实请求被成功计数过。
-- **聚合式离线检查确认一项角色顺序兼容阻断**：`developer` 消息在套用模板前被
+- **角色顺序兼容已在 v3 关闭（仍是无模型结论）**：`developer` 消息在套用模板前被
   `map_developer_role_to_system` 统一改成 `system`；冻结 Ministral 模板规定 `assistant` 之后只能接
-  `assistant`/`user`/`tool`，遇到 `system` 直接 `raise_exception`，minja 抛 `std::runtime_error`，
-  服务端兜底为 **HTTP 500 `server_error`**（`std::invalid_argument` 才是 400）。
-  23 条 v2 请求均含 `… assistant → developer → user`，若到达模板阶段会触发该限制。
-  static payload v2 移除 encrypted-only reasoning item，消除了 Plan 024 中 21 条先触发的 reasoning 400；
-  这些请求随后又暴露出共同的角色顺序问题。该离线结论不解释 Plan 026 的具体 500，也不追认 Plan 024
-  两条旧通用 500 的现场原因。
+  `assistant`/`user`/`tool`、`tool` 之后只能接 `assistant`/`tool`/`user`，遇到 `system` 直接
+  `raise_exception`，minja 抛 `std::runtime_error`，服务端兜底为 **HTTP 500 `server_error`**
+  （`std::invalid_argument` 才是 400）。v2 下 23 条请求含 `… assistant → developer → user`，会触发该限制。
+  v3 的角色规范化消除了这一形状：同一份从冻结模板资产解析规则的只读角色顺序门下，47/47 通过，
+  规范化前为 24/47（23 条报 `Unexpected role 'system' after role 'assistant'`）。
+  该门禁只存在于测试，不进入生产 consumer；它证明请求可渲染，**不证明**真实 b10333 能完成计数，
+  也不解释 Plan 026 的具体 500 或追认 Plan 024 两条旧通用 500 的现场原因。
 - **两轮真实证据的边界**：24 条的 token 数来自 Plan 024（`6b36d05` 之前的实现）的两次一致运行，
-  锚点 5,313。Plan 026 的 WP3b-A2b 重跑用当前实现只跑了一次：合成探针通过，真实归档计数阶段收到
-  通用 500，但当前输出无法区分锚点或后续样本；按合同 fail closed、未发布 baseline，也没有新增可发布
+  锚点 5,313。Plan 026 的 WP3b-A2b 重跑只跑了一次：合成探针通过，真实归档计数阶段收到
+  通用 500，当时输出无法区分锚点或后续样本；按合同 fail closed、未发布 baseline，也没有新增可发布
   token 数或 5,313 锚点复证。
-- **static-payload 兼容已完成，但只是构造层结论**：投影只做在公共 builder，没有为 llama.cpp
-  做隐蔽的 provider-specific 删减；Local client 与 token census 共用同一 v2 request builder（逐字节相等已回归）。
-  下一步先做版本化的**角色顺序兼容**（同样落在公共 builder，保持 provider-neutral，不新增旁路），
-  同时给 census 增加最小失败阶段、样本哈希与失败前 counted 数；通过无模型门禁后再重新申请一次真实模型授权、
-  重跑 47/47 普查。若 canonical payload 或角色语义改变，static input schema 必须升级，不能静默改写 v2。
-  拿到全集分布后才定上下文档位。
+- **census 失败定位已补到最小可用**：通用计数失败现在附带有界 `stage`（`anchor_count` / `archive_count`）、
+  当前 `e_final_sha256` 与 `counted_before_failure`（失败前已取得 exact count 的唯一归档数）。
+  通用 500/transport 失败在两处仍然立即停止、不发布结果，也不会被降级成某条样本的拒绝属性；
+  只有明确的 400 结构性拒绝沿用原 incomplete 语义。这些字段只用于定位下一次失败，
+  **不能**回溯解释 Plan 026 已发生的那次 500。
+- **static-payload 兼容已完成，但只是构造层结论**：reasoning 投影与角色规范化都只做在公共 builder，
+  没有为 llama.cpp 做隐蔽的 provider-specific 删减或旁路；Local client 与 token census 共用同一
+  v3 request builder（逐字节相等已回归）。47 条归档在无模型只读检查下 47/47 构造出 v3 payload 与
+  Local 请求，三 consumer 逐字节一致。
+  下一步是重新申请一次真实模型授权、重跑 47/47 普查；拿到全集分布后才定上下文档位。
   在此之前不冻结 8k/12k/16k/24k 任何档位，也不把“只用合成证据、真实证据只取可服务子集”设为默认路线。
 - **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
@@ -109,10 +123,10 @@
 
 ### 当前推进顺序
 
-1. provider-neutral static-payload v2 兼容已完成，但 47/47 重跑在归档计数阶段以未定位的通用 500 fail closed；
-   23 条角色顺序兼容问题另经离线确认。先做版本化角色兼容与最小失败阶段标识并通过无模型门禁，
-   再重跑 47/47 exact-token 普查（需真实模型授权），
-   然后才定上下文档位（当前阻塞点，见上文）。
+1. provider-neutral static-payload v3 角色兼容与 census 最小失败定位已完成并通过无模型门禁。
+   **下一步需要真实模型授权**：重跑 47/47 exact-token 普查；Plan 026 那次通用 500 仍未定位，
+   新增的 stage/digest/counted 字段只用于定位下一次失败。拿到全集分布后才定上下文档位
+   （当前阻塞点，见上文）。
 2. 按定案后的合同完成 model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出；
    资格设施、证据 schema 与 capability 投影已就绪，只需按新合同重跑并生成版本化证据。
 3. 通过后，连同 L7 的“仅改配置切换”一起形成 **Local M3**；不同上下文档位互相独立验收，
@@ -184,7 +198,7 @@
   必须通过 Git common dir 定位主仓库根，复用同一份本机配置，不在各 worktree 复制密钥。
 - 硬件约束（RTX 4060 Laptop 8GB VRAM）：8B 级模型 Q4 权重约 4.8GB，剩余显存要留给 KV cache；
   **上下文预算必须实测**。已实测的 24 条真实 `E_final` 为 5,313—18,921 tokens，4k 一条都装不下，8k 装得下 9 条；
-  其余 23 条尚无 token 数，且离线确认当前 v2 请求均有模板角色顺序兼容问题（见上文）；
+  其余 23 条尚无 token 数，其模板角色顺序兼容问题已由 v3 关闭，但仍未被真实运行时计数过；
   Plan 026 的单个通用 500 具体发生于锚点或后续样本仍未知。
   档位要等全集分布出来后再与 8GB 显存的 KV 预算求交。
 - 验收：本地服务能对一条**真实** `E_final` 返回合规结构化判定，并记录显存峰值、首 token 延迟、总耗时。
@@ -343,8 +357,8 @@ prompt 是少数能被完全冻结的部分，必须冻死。
 **证据来源：合成证据做主体，真实 `E_final` 做锚点，两组分开记录、不混算。**
 
 - 现实约束：全项目目前只有 **47 条真实 `E_final`**（分布在 24 个 run 目录，内容互异），
-  其中目前只有 **24 条被冻结本地运行时接受过计数请求**（见上文；剩下 23 条有离线确认的模板角色顺序
-  兼容问题，实际可服务条数以版本化兼容后的重跑普查为准），锚点规模按实际可用条数计而不是 47；
+  其中目前只有 **24 条被冻结本地运行时接受过计数请求**（见上文；剩下 23 条的模板角色顺序兼容问题已由
+  v3 关闭，但实际可服务条数仍以重跑普查为准），锚点规模按实际可用条数计而不是 47；
   按稳定语义哈希规则预估切分后 holdout 约 20 条；**实际数量必须以尚待生成的冻结 manifest 为准**。
   无论最终数量多少，它都撑不起 200—300 条的判定规模，且这 47 条全部来自 TB 2.1 任务运行，审批情境单一。
 - 因此主体横评用 Sol 批量生成的**合成审批场景**，覆盖面由构造决定，规模可控。

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -108,6 +110,80 @@ def _install_template_fixture(root: Path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _frozen_template_role_rules() -> tuple[frozenset, dict]:
+    """Read the pinned chat template's own message-ordering rules.
+
+    The rules are taken from the frozen asset rather than restated here, so
+    this gate cannot drift away from the file the server actually renders.
+    Nothing about the template reaches production code: the static payload
+    builder stays provider-neutral and knows none of this.
+    """
+
+    text = FROZEN_TEMPLATE.read_text(encoding="utf-8")
+    opening = re.search(r"loop_messages\[0\]\['role'\] not in \[([^\]]*)\]", text)
+    transitions = re.findall(
+        r"ns_order\.previous_role == '(\w+)' %\}\s*\{%- if current_role not in \[([^\]]*)\]",
+        text,
+    )
+    if opening is None or len(transitions) != 4:
+        raise AssertionError("frozen chat template no longer states its ordering rules")
+    allowed = {
+        previous: frozenset(re.findall(r"'([^']*)'", roles))
+        for previous, roles in transitions
+    }
+    return frozenset(re.findall(r"'([^']*)'", opening.group(1))), allowed
+
+
+def _frozen_template_chat_roles(request: dict) -> list:
+    """The chat roles b10333 derives from one `/v1/responses` request.
+
+    Mirrors `server_chat_convert_responses_to_chatcmpl` and the
+    `map_developer_role_to_system` workaround for roles only: `instructions`
+    becomes a leading system message, an input message keeps its own role, a
+    function call is an assistant turn and its output is a tool turn, and an
+    assistant turn merges into an assistant turn immediately before it.
+    """
+
+    roles: list = []
+    if "instructions" in request:
+        roles.append("system")
+    for item in request["input"]:
+        merge_previous = bool(roles) and roles[-1] == "assistant"
+        if item.get("type") == "function_call":
+            if not merge_previous:
+                roles.append("assistant")
+        elif item.get("type") == "function_call_output":
+            roles.append("tool")
+        elif item.get("role") == "assistant":
+            if not merge_previous:
+                roles.append("assistant")
+        elif "role" in item:
+            # The workaround rewrites `developer` before the template runs.
+            roles.append("system" if item["role"] == "developer" else item["role"])
+        else:
+            raise AssertionError(f"unmapped item type {item.get('type')!r}")
+    return roles
+
+
+def _frozen_template_order_error(request: dict) -> str | None:
+    """Return the template's ordering complaint about a request, or None."""
+
+    opening, allowed = _frozen_template_role_rules()
+    roles = _frozen_template_chat_roles(request)
+    # Consecutive same-role messages are aggregated, except system and tool.
+    aggregated: list = []
+    for role in roles:
+        if aggregated and aggregated[-1] == role and role not in {"system", "tool"}:
+            continue
+        aggregated.append(role)
+    if aggregated and aggregated[0] not in opening:
+        return f"Conversation must start with a user or system message, got {aggregated[0]}."
+    for previous, current in zip(aggregated, aggregated[1:]):
+        if current not in allowed[previous]:
+            return f"Unexpected role '{current}' after role '{previous}'"
+    return None
 
 
 def _local_data(
@@ -250,7 +326,7 @@ class LocalApprovalClientTests(unittest.TestCase):
         )
         self.assertTrue(request["response_format"]["json_schema"]["strict"])
 
-    def test_client_sends_the_projected_v2_input_without_reasoning_transport(self) -> None:
+    def test_client_sends_the_projected_v3_input_without_reasoning_transport(self) -> None:
         payload = build_static_payload(
             {
                 "instructions": "exact guardian policy\n",
@@ -588,6 +664,140 @@ class LocalApprovalClientTests(unittest.TestCase):
             "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server",
         )
         self.assertEqual(chat_template(config, settings).sha256, CHAT_TEMPLATE_SHA256)
+
+
+class FrozenTemplateRoleOrderTests(unittest.TestCase):
+    """The archived role arrangement has to reach the frozen template at all.
+
+    No model, service or count endpoint is involved here: the gate is the
+    pinned template's own ordering rule applied to the request the shared
+    builder produces.  Passing it means the request is renderable, not that
+    anything has been counted.
+    """
+
+    # The archived arrangement, with synthetic text: a developer turn after an
+    # assistant turn, and another after a tool result.  Both are positions the
+    # frozen template refuses for the role `developer` is mapped to.
+    ARCHIVED_ARRANGEMENT = [
+        {
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "developer turn one"}],
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "user turn one"}],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "assistant turn"}],
+        },
+        {
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "developer turn two"}],
+        },
+        {"type": "function_call", "name": "shell", "call_id": "call_0", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "call_0", "output": "ok"},
+        {
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "developer turn three"}],
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "user turn two"}],
+        },
+    ]
+    # Positions of the developer turns in the normalized request input.
+    DEVELOPER_POSITIONS = (0, 3, 6)
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        _install_template_fixture(self.root)
+        (self.root / "rondo.secrets.example.env").write_text(
+            "RONDO_LOCAL_MODEL_API_KEY=\n", encoding="utf-8"
+        )
+        self.client = LocalApprovalClient(
+            RuntimeConfig(
+                RepoPaths(self.root, self.root),
+                _local_data("http://127.0.0.1:8080/v1"),
+                "0" * 64,
+            )
+        )
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _request(self) -> dict:
+        return self.client.build_request(
+            build_static_payload(
+                {
+                    "instructions": "frozen guardian policy fixture\n",
+                    "input": self.ARCHIVED_ARRANGEMENT,
+                }
+            )
+        )
+
+    def test_frozen_template_still_refuses_a_mapped_developer_turn(self) -> None:
+        """Why the normalization exists, stated by the pinned asset itself."""
+
+        opening, allowed = _frozen_template_role_rules()
+        self.assertEqual(opening, {"user", "system"})
+        self.assertEqual(allowed["assistant"], {"assistant", "user", "tool"})
+        self.assertEqual(allowed["tool"], {"assistant", "tool", "user"})
+        # `developer` is mapped to `system` before the template runs, and
+        # `system` is exactly what these two positions do not accept.
+        self.assertNotIn("system", allowed["assistant"])
+        self.assertNotIn("system", allowed["tool"])
+
+    def test_normalized_archive_arrangement_passes_the_frozen_order_rules(self) -> None:
+        request = self._request()
+
+        self.assertEqual(
+            [item.get("role") for item in request["input"]],
+            ["user", "user", "assistant", "user", None, None, "user", "user"],
+        )
+        self.assertIsNone(_frozen_template_order_error(request))
+        # Every archived turn still contributes its own text, in wire order.
+        self.assertEqual(
+            [
+                part["text"]
+                for item in request["input"]
+                for part in item.get("content", [])
+            ],
+            [
+                "developer turn one",
+                "user turn one",
+                "assistant turn",
+                "developer turn two",
+                "developer turn three",
+                "user turn two",
+            ],
+        )
+
+    def test_the_same_gate_refuses_the_un_normalized_arrangement(self) -> None:
+        """The gate is not vacuous: the pre-v3 roles still fail it."""
+
+        request = copy.deepcopy(self._request())
+        for position in self.DEVELOPER_POSITIONS:
+            request["input"][position]["role"] = "developer"
+
+        self.assertEqual(
+            _frozen_template_order_error(request),
+            "Unexpected role 'system' after role 'assistant'",
+        )
+        # And the same is true for the developer turn that follows a tool
+        # result, once the assistant one is out of the way.
+        request["input"][3]["role"] = "user"
+        self.assertEqual(
+            _frozen_template_order_error(request),
+            "Unexpected role 'system' after role 'tool'",
+        )
 
 
 class LauncherAndDoctorTests(unittest.TestCase):
@@ -2876,12 +3086,13 @@ class TokenCensusTests(unittest.TestCase):
         self.assertEqual(document["summary"]["context_windows"]["8k"]["fits"], 2)
         self.assertEqual(document["identity"]["generated_tokens"], 0)
 
-    def test_census_counts_the_local_client_v2_request_bytes(self) -> None:
+    def test_census_counts_the_local_client_v3_request_bytes(self) -> None:
         """One builder, one set of bytes: the census measures the real request.
 
-        The fourth archive carries the encrypted-only `reasoning` shape the
-        frozen adapter used to refuse, so this also proves the v2 projection
-        reaches the census through the shared builder rather than a copy.
+        The fourth archive carries the encrypted-only `reasoning` shape and the
+        `assistant -> developer` run the frozen runtime used to refuse, so this
+        also proves both projections reach the census through the shared
+        builder rather than through a copy of them.
         """
 
         self._install_bundle(
@@ -2894,6 +3105,20 @@ class TokenCensusTests(unittest.TestCase):
                             "type": "reasoning",
                             "summary": [],
                             "encrypted_content": "opaque-provider-transport",
+                        },
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "fixture assistant turn"}
+                            ],
+                        },
+                        {
+                            "type": "message",
+                            "role": "developer",
+                            "content": [
+                                {"type": "input_text", "text": "fixture developer turn"}
+                            ],
                         },
                         {
                             "role": "user",
@@ -2938,6 +3163,9 @@ class TokenCensusTests(unittest.TestCase):
             self.assertNotIn("reasoning", decoded)
             self.assertNotIn("encrypted_content", decoded)
             self.assertNotIn("opaque-provider-transport", decoded)
+            self.assertNotIn('"role":"developer"', decoded)
+        counted = "".join(body.decode("utf-8") for body in bodies)
+        self.assertIn("fixture developer turn", counted)
 
     def test_a_refused_anchor_stops_the_census(self) -> None:
         config = self._config()
@@ -3003,6 +3231,62 @@ class TokenCensusTests(unittest.TestCase):
                 self.assertEqual(failure.exception.code, "count_endpoint_unavailable")
                 self.assertEqual(failure.exception.facts["http_status"], status)
                 self.assertNotIn("message", failure.exception.facts)
+
+    def test_a_generic_anchor_failure_names_the_stage_and_position(self) -> None:
+        """Plan 026 could not tell an anchor failure from a set failure."""
+
+        output = self.root / "eval/results/baselines/census.json"
+        queue = [
+            (200, {"input_tokens": 43}),                       # opening probe
+            self._error(500, "server_error", "internal failure"),
+        ]
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            config = self._server_config(fake)
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                with self.assertRaises(token_census.CensusError) as error:
+                    self._run(config, output=output, free_port=False)
+
+        facts = error.exception.facts
+        # A generic failure still stops the whole run rather than becoming a
+        # property of the archive that happened to be in flight.
+        self.assertEqual(error.exception.code, "count_endpoint_unavailable")
+        self.assertEqual(facts["http_status"], 500)
+        self.assertEqual(facts["stage"], "anchor_count")
+        self.assertEqual(facts["e_final_sha256"], self.bundles[0][1])
+        self.assertEqual(facts["counted_before_failure"], 0)
+        self.assertNotIn("message", facts)
+        self.assertFalse(output.exists())
+
+    def test_a_generic_archive_failure_reports_how_far_the_run_got(self) -> None:
+        """The anchor succeeded, so the failure is located in the set instead."""
+
+        output = self.root / "eval/results/baselines/census.json"
+        queue = [
+            (200, {"input_tokens": 43}),                       # opening probe
+            (200, {"input_tokens": token_census.ANCHOR_INPUT_TOKENS}),
+            self._error(500, "server_error", "internal failure"),
+        ]
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            config = self._server_config(fake)
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                inputs = token_census.collect_evidence_inputs(config, expected_count=3)
+                with self.assertRaises(token_census.CensusError) as error:
+                    self._run(config, output=output, free_port=False)
+
+        # The anchor is the first archive, counted up front and reused, so the
+        # first request the loop makes is for the second archive.
+        anchor, following = inputs[0].e_final_sha256, inputs[1].e_final_sha256
+        self.assertEqual(anchor, self.bundles[0][1])
+        facts = error.exception.facts
+        self.assertEqual(error.exception.code, "count_endpoint_unavailable")
+        self.assertEqual(facts["http_status"], 500)
+        self.assertEqual(facts["stage"], "archive_count")
+        self.assertEqual(facts["e_final_sha256"], following)
+        self.assertEqual(facts["counted_before_failure"], 1)
+        self.assertNotIn("message", facts)
+        # A partial run publishes nothing, under any name.
+        self.assertFalse(output.exists())
+        self.assertFalse((self.root / token_census.RESULT_RELATIVE_PATH).exists())
 
     def test_incomplete_census_is_reported_and_never_published(self) -> None:
         """One refused input keeps the run from claiming a census result."""
@@ -3071,9 +3355,18 @@ class TokenCensusTests(unittest.TestCase):
         with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
             config = self._server_config(fake)
             with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                inputs = token_census.collect_evidence_inputs(config, expected_count=3)
                 with self.assertRaises(token_census.CensusError) as error:
                     self._run(config, output=output, free_port=False)
+
+        facts = error.exception.facts
         self.assertEqual(error.exception.code, "count_endpoint_probe_failed")
+        # The probe failure is located exactly like a failed count would be:
+        # the anchor was counted, and the refused archive was in flight.
+        self.assertEqual(facts["stage"], "archive_count")
+        self.assertEqual(facts["e_final_sha256"], inputs[1].e_final_sha256)
+        self.assertEqual(facts["counted_before_failure"], 1)
+        self.assertNotIn("message", facts)
         self.assertFalse(output.exists())
 
     def test_no_private_directory_survives_a_failing_precondition(self) -> None:

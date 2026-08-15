@@ -250,11 +250,13 @@ class LocalApprovalClient:
         self.settings = settings_from_config(config)
 
     def build_request(self, payload: StaticApprovalPayload) -> dict[str, Any]:
-        """Build the one real Local request from an accepted static payload v2.
+        """Build the one real Local request from an accepted static payload v3.
 
         The static payload validator is the only gate: this builder never edits
-        item shapes itself, so the exact bytes the token census counts are the
-        bytes the decision path would send.
+        item shapes or roles itself, so the exact bytes the token census counts
+        are the bytes the decision path would send.  Those are Local's own
+        provider request bytes; what the three static consumers share is the
+        canonical payload this request is built from.
         """
 
         try:
@@ -274,7 +276,7 @@ class LocalApprovalClient:
             or not isinstance(task_input, list)
             or not isinstance(schema, dict)
         ):
-            raise ConfigError("static approval payload does not match schema v2")
+            raise ConfigError("static approval payload does not match schema v3")
         request: dict[str, Any] = {
             "model": self.settings.model_id,
             "instructions": f"{instructions}\n\nGuardian policy follows exactly:\n{policy}",

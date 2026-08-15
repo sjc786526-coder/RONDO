@@ -21,6 +21,7 @@ from rondo_eval.contracts import (  # noqa: E402
     assert_fair_pair,
 )
 from rondo_eval.evidence import (  # noqa: E402
+    NEUTRAL_EVIDENCE_ROLES,
     STATIC_APPROVAL_CONSUMERS,
     STATIC_DECISION_SCHEMA_NAME,
     STATIC_PAYLOAD_SCHEMA_VERSION,
@@ -154,33 +155,155 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn("turn_id", standard.canonical_bytes.decode())
         self.assertEqual(serialized["input"][1]["type"], "function_call")
 
-    def test_static_input_payload_declares_v2_and_v1_cannot_pass_the_sink(self) -> None:
+    def test_static_input_payload_declares_v3_and_older_cannot_pass_the_sink(self) -> None:
         payload = build_static_payload(standard_request())
 
-        self.assertEqual(STATIC_PAYLOAD_SCHEMA_VERSION, 2)
-        self.assertEqual(payload.logical_payload["schema_version"], 2)
-        self.assertEqual(payload.policy_identity.schema_version, 2)
+        self.assertEqual(STATIC_PAYLOAD_SCHEMA_VERSION, 3)
+        self.assertEqual(payload.logical_payload["schema_version"], 3)
+        self.assertEqual(payload.policy_identity.schema_version, 3)
+        # v3 evidence carries exactly these two roles and no others.
+        self.assertEqual(NEUTRAL_EVIDENCE_ROLES, {"user", "assistant"})
         # The structured decision output is a different contract and stays v1.
         self.assertEqual(STATIC_DECISION_SCHEMA_NAME, "rondo_static_approval_v1")
 
-        stale_body = forged_payload(
-            payload, {**payload.logical_payload, "schema_version": 1}
-        )
-        with self.assertRaises(EvidenceError):
-            validate_static_payload(stale_body)
+        for stale_version in (1, 2):
+            with self.subTest(schema_version=stale_version):
+                stale_body = forged_payload(
+                    payload,
+                    {**payload.logical_payload, "schema_version": stale_version},
+                )
+                with self.assertRaises(EvidenceError):
+                    validate_static_payload(stale_body)
 
-        stale_identity = StaticApprovalPayload(
-            PolicyIdentity(
-                1,
-                payload.policy_identity.request_shape,
-                payload.policy_identity.sha256,
-                "known",
-            ),
-            payload.canonical_bytes,
-            payload.logical_payload,
+                stale_identity = StaticApprovalPayload(
+                    PolicyIdentity(
+                        stale_version,
+                        payload.policy_identity.request_shape,
+                        payload.policy_identity.sha256,
+                        "known",
+                    ),
+                    payload.canonical_bytes,
+                    payload.logical_payload,
+                )
+                with self.assertRaises(EvidenceError):
+                    validate_static_payload(stale_identity)
+
+    def test_developer_evidence_is_carried_as_a_neutral_turn_in_place(self) -> None:
+        """The archived `assistant -> developer -> user` run, relabelled only.
+
+        Synthetic text in the archived arrangement; no archived body is copied.
+        """
+
+        conversation = [
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "developer turn one"}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "user turn one"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "phase": "commentary",
+                "content": [{"type": "output_text", "text": "assistant turn"}],
+            },
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "developer turn two"}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "user turn two"}],
+            },
+        ]
+        standard = build_static_payload(standard_request(conversation))
+        lite = build_static_payload(lite_request(conversation))
+
+        self.assertEqual(standard.canonical_bytes, lite.canonical_bytes)
+        consumer_bytes = {
+            consumer: static_payload_bytes_for_consumer(standard, consumer)
+            for consumer in STATIC_APPROVAL_CONSUMERS
+        }
+        self.assertEqual(len(set(consumer_bytes.values())), 1)
+
+        items = standard.logical_payload["input"]
+        # One item per archived turn, in the archived order, with the developer
+        # channel carried as an ordinary evidence turn.
+        self.assertEqual(
+            [item["role"] for item in items],
+            ["user", "user", "assistant", "user", "user"],
         )
-        with self.assertRaises(EvidenceError):
-            validate_static_payload(stale_identity)
+        self.assertEqual(
+            [part["text"] for item in items for part in item["content"]],
+            [
+                "developer turn one",
+                "user turn one",
+                "assistant turn",
+                "developer turn two",
+                "user turn two",
+            ],
+        )
+        # Only the role changes: text, boundaries and the rest of the message
+        # are the archived ones, and nothing moves into the Guardian policy.
+        self.assertEqual(items[2]["phase"], "commentary")
+        self.assertEqual(items[0], {**conversation[0], "role": "user"})
+        self.assertEqual(standard.logical_payload["guardian_policy"], POLICY)
+        self.assertNotIn("developer turn", standard.logical_payload["guardian_policy"])
+        self.assertNotIn("developer turn", standard.logical_payload["instructions"])
+        self.assertNotIn('"role":"developer"', standard.canonical_bytes.decode())
+
+    def test_unknown_or_malformed_evidence_message_shapes_are_fail_closed(self) -> None:
+        text = [{"type": "input_text", "text": "evidence"}]
+        invalid_items = (
+            # Roles this boundary cannot account for are refused, not guessed.
+            {"type": "message", "role": "system", "content": text},
+            {"type": "message", "role": "tool", "content": text},
+            {"type": "message", "role": "future_channel", "content": text},
+            {"type": "message", "role": None, "content": text},
+            {"type": "message", "content": text},
+            # A role on something that is not a message is ambiguous.
+            {"type": "custom_tool_call", "role": "user", "content": text},
+            # Malformed or unaccountable content.
+            {"type": "message", "role": "user", "content": []},
+            {"type": "message", "role": "user", "content": "plain string"},
+            {"type": "message", "role": "user", "content": [text[0], "plain string"]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": 7}]},
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "x", "extra": 1}],
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_image", "image_url": "https://example.invalid"}],
+            },
+            # Wire text subtypes are bound to the role that carries them.
+            {"type": "message", "role": "user", "content": [{"type": "output_text", "text": "x"}]},
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [{"type": "output_text", "text": "x"}],
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "input_text", "text": "x"}],
+            },
+        )
+        for item in invalid_items:
+            with self.subTest(item=item):
+                with self.assertRaises(EvidenceError):
+                    build_static_payload(standard_request([item, *TASK_INPUT]))
+                with self.assertRaises(EvidenceError):
+                    build_static_payload(lite_request([item, *TASK_INPUT]))
 
     def test_encrypted_only_reasoning_is_dropped_for_all_three_consumers(self) -> None:
         with_reasoning = [TASK_INPUT[0], ENCRYPTED_ONLY_REASONING, *TASK_INPUT[1:]]
@@ -526,6 +649,25 @@ class EvidenceTests(unittest.TestCase):
             ),
             lambda logical: logical["input"][0].update(
                 {"encrypted_content": "opaque-provider-transport"}
+            ),
+            # A v2-era role cannot be smuggled back past the sink.
+            lambda logical: logical["input"][0].update({"role": "developer"}),
+            lambda logical: logical["input"][0].update({"role": "system"}),
+            # Neither can a message the builder would never have emitted: the
+            # sink re-applies the whole neutral message contract, not just the
+            # role set, because it is the only gate a consumer relies on.
+            lambda logical: logical["input"][0].update({"content": []}),
+            lambda logical: logical["input"][0].update(
+                {"content": [{"type": "output_text", "text": "wrong subtype for user"}]}
+            ),
+            lambda logical: logical["input"][0].update({"content": "plain string"}),
+            lambda logical: logical["input"][0].update(
+                {"content": [{"type": "input_text", "text": "x", "extra": 1}]}
+            ),
+            lambda logical: logical["input"][0].update({"type": "custom_tool_call"}),
+            lambda logical: logical["input"][0].pop("role"),
+            lambda logical: logical["input"].append(
+                {"type": "message", "role": "assistant", "content": []}
             ),
         )
         for mutate in mutations:
