@@ -6,8 +6,13 @@ never maps the OpenAI `text.format` control, so the output contract is silently
 dropped, and nothing on that wire consumes the launcher receipt that says which
 model instance is answering.  This adapter closes both gaps in the one place
 that is allowed to know about them.  RONDO keeps speaking its own Responses
-wire and keeps its own Guardian semantics; the pinned server keeps receiving
-exactly the request shape its 12k qualification covered.
+wire and keeps its own Guardian semantics; what reaches the pinned server
+keeps the two boundaries its 12k qualification did establish - the shared
+`build_static_payload()` input normalization and the qualified serving
+contract, sampling and output budget - while carrying the Guardian's own
+instructions and output schema.  It is therefore not that qualification's
+static request, and the length conclusions drawn from the qualification and
+the token census do not bound this route.
 
 Three properties are load bearing:
 

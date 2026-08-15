@@ -9,9 +9,11 @@ import os
 import re
 import signal
 import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 import unittest
@@ -48,6 +50,7 @@ from rondo_eval.local_approval import formal_switch  # noqa: E402
 from rondo_eval.local_approval.guardian_bridge import (  # noqa: E402
     GuardianBridge,
     GuardianBridgeServer,
+    UpstreamUnavailableError,
 )
 from rondo_eval.local_approval.identity import (  # noqa: E402
     clear_launcher_identity,
@@ -3798,6 +3801,14 @@ def _guardian_request(
     return request
 
 
+# The Guardian provider reaches the bridge over loopback and must not consult
+# an ambient proxy to do it, exactly as the production openers in `client.py`
+# and `launcher.py` do not.  A `no_proxy` list that happens to cover `localhost`
+# but not `127.0.0.1` would otherwise answer these requests from a proxy
+# instead of from the bridge under test.
+_LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def _post_to_bridge(base_url: str, body: dict, token: str | None) -> tuple[int, bytes]:
     headers = {"Content-Type": "application/json"}
     if token is not None:
@@ -3809,10 +3820,54 @@ def _post_to_bridge(base_url: str, body: dict, token: str | None) -> tuple[int, 
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with _LOOPBACK_OPENER.open(request, timeout=10) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
+
+
+class _UnreachableLocalService:
+    """The configured endpoint, held open by the receipted process, answering nothing.
+
+    A launcher receipt only validates against a process that still owns a
+    *listening* socket on the configured port, so pointing the configuration at
+    a closed port cannot reach the service at all: the identity gate refuses
+    first, which is a different failure.  The reachable form of "the local
+    service is gone" is therefore a socket that still completes `connect()` and
+    then disappears without a reply - what a wedged or half-exited llama-server
+    leaves behind - and it is produced here without a timeout wait.
+    """
+
+    def __init__(self) -> None:
+        self.connections = 0
+        self._server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _dropping_handler(self))
+        self._server.daemon_threads = True
+        self._thread: threading.Thread | None = None
+
+    @property
+    def base_url(self) -> str:
+        return f"http://127.0.0.1:{int(self._server.server_address[1])}/v1"
+
+    def __enter__(self) -> "_UnreachableLocalService":
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._server.shutdown()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        self._server.server_close()
+
+
+def _dropping_handler(service: _UnreachableLocalService):
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            # Counted before the socket is closed, so a caller that has already
+            # seen its own request fail knows the connection was made here.
+            service.connections += 1
+
+    return Handler
 
 
 class GuardianBridgeTests(unittest.TestCase):
@@ -3840,17 +3895,17 @@ class GuardianBridgeTests(unittest.TestCase):
         return model
 
     @contextlib.contextmanager
-    def _bound_bridge(self, fake: FakeApprovalServer, model: Path):
+    def _bound_bridge(self, base_url: str, model: Path):
         """A bridge bound to a live launcher receipt, as production requires.
 
         Without this the client reports no launcher instance and the bridge
-        refuses outright, so every test that expects to reach the server has to
-        stand up a real receipt for the process that owns the listener.
+        refuses outright, so every test that expects to reach the endpoint has
+        to stand up a real receipt for the process that owns the listener.
         """
 
         digest = hashlib.sha256(model.read_bytes()).hexdigest()
         config = self._config(
-            fake.base_url,
+            base_url,
             model_path_value=os.fspath(model),
             model_sha256_value=digest,
         )
@@ -3881,7 +3936,7 @@ class GuardianBridgeTests(unittest.TestCase):
         decision = {"outcome": "allow", "risk_level": "low", "rationale": "harmless"}
         model = self._model()
         with FakeApprovalServer(decision=decision, model_path=os.fspath(model)) as fake:
-            with self._bound_bridge(fake, model) as bridge:
+            with self._bound_bridge(fake.base_url, model) as bridge:
                 with GuardianBridgeServer(bridge) as front:
                     status, body = _post_to_bridge(
                         front.base_url, _guardian_request(), bridge.secret
@@ -3982,23 +4037,53 @@ class GuardianBridgeTests(unittest.TestCase):
 
     def test_bridge_refuses_to_serve_without_a_bound_launcher_instance(self) -> None:
         # No pinned model means no receipt, so nothing can say which instance
-        # answered; an unbound relay must not produce an approval at all.
+        # answered; an unbound relay must not produce an approval at all, even
+        # though the endpoint below is live and would have answered.
         with FakeApprovalServer(decision={"outcome": "allow"}) as fake:
             bridge = GuardianBridge(self._config(fake.base_url))
             with GuardianBridgeServer(bridge) as front:
                 status, body = _post_to_bridge(
                     front.base_url, _guardian_request(), bridge.secret
                 )
+            with self.assertRaises(UpstreamUnavailableError) as raised:
+                bridge.decide(json.dumps(_guardian_request()).encode("utf-8"))
         self.assertEqual(status, 503)
         self.assertEqual(fake.requests, [])
         self.assertNotIn(b"data:", body)
+        # The refusal is the identity gate itself, with no transport fault
+        # under it: that is what separates this from the unreachable-service
+        # test, which returns the same 503 for a different reason.
+        unbound = raised.exception.__cause__
+        self.assertIsInstance(unbound, ServiceUnavailableError)
+        self.assertIsNone(unbound.__cause__)
 
     def test_bridge_fails_closed_when_the_local_service_is_unreachable(self) -> None:
-        bridge = GuardianBridge(self._config("http://127.0.0.1:1/v1"))
-        with GuardianBridgeServer(bridge) as front:
-            status, body = _post_to_bridge(front.base_url, _guardian_request(), bridge.secret)
+        # Identity is satisfied first - pinned model, published receipt, and a
+        # listener the receipted process really owns - so the only thing left
+        # to fail is reaching the service on that endpoint.
+        model = self._model()
+        with _UnreachableLocalService() as dead:
+            with self._bound_bridge(dead.base_url, model) as bridge:
+                with GuardianBridgeServer(bridge) as front:
+                    status, body = _post_to_bridge(
+                        front.base_url, _guardian_request(), bridge.secret
+                    )
+                with self.assertRaises(UpstreamUnavailableError) as raised:
+                    bridge.decide(json.dumps(_guardian_request()).encode("utf-8"))
+
         self.assertEqual(status, 503)
+        self.assertEqual(front.failures, ["service_unavailable"])
         self.assertNotIn(b"data:", body)
+        self.assertNotIn(b"allow", body)
+        self.assertNotIn(b"deny", body)
+        # Both attempts dialed the configured endpoint, so neither stopped at a
+        # gate in front of it.
+        self.assertGreaterEqual(dead.connections, 2)
+        # And what stopped them there is a transport fault the client converted
+        # into a service failure, not the unbound-instance refusal above.
+        unavailable = raised.exception.__cause__
+        self.assertIsInstance(unavailable, ServiceUnavailableError)
+        self.assertIsInstance(unavailable.__cause__, OSError)
 
     def test_bridge_fails_closed_on_a_decision_outside_the_requested_schema(self) -> None:
         # The pinned static decision shape is not the Guardian's shape; a server
@@ -4006,7 +4091,7 @@ class GuardianBridgeTests(unittest.TestCase):
         outside = {"outcome": "deny", "rationale": "r", "risk_tags": ["fake"]}
         model = self._model()
         with FakeApprovalServer(decision=outside, model_path=os.fspath(model)) as fake:
-            with self._bound_bridge(fake, model) as bridge:
+            with self._bound_bridge(fake.base_url, model) as bridge:
                 with GuardianBridgeServer(bridge) as front:
                     status, body = _post_to_bridge(
                         front.base_url, _guardian_request(), bridge.secret
@@ -4021,7 +4106,7 @@ class GuardianBridgeTests(unittest.TestCase):
         with FakeApprovalServer(
             response_override={"status": "failed"}, model_path=os.fspath(model)
         ) as fake:
-            with self._bound_bridge(fake, model) as bridge:
+            with self._bound_bridge(fake.base_url, model) as bridge:
                 with GuardianBridgeServer(bridge) as front:
                     status, body = _post_to_bridge(
                         front.base_url, _guardian_request(), bridge.secret
