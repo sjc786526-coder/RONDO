@@ -1230,7 +1230,7 @@ class LauncherAndDoctorTests(unittest.TestCase):
             "--parallel",
             "1",
             "--verbosity",
-            "4",
+            "3",
             "--flash-attn",
             "on",
             "--cache-type-k",
@@ -1303,6 +1303,39 @@ class LauncherAndDoctorTests(unittest.TestCase):
                 self.assertNotIn("99", command)
                 self.assertNotIn("LLAMA_API_KEY", command)
         self.assertLess(expected.index("--jinja"), expected.index("--chat-template-file"))
+
+    def test_serve_fingerprint_is_stable_across_linked_worktree_paths(self) -> None:
+        common_root = self.root / "common"
+        first_worktree = self.root / "worktree-a"
+        second_worktree = self.root / "worktree-b"
+        for worktree in (first_worktree, second_worktree):
+            _install_template_fixture(worktree)
+        model = common_root / "eval-data/models/model.gguf"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"GGUFstable-path-fixture")
+        data = _local_data(
+            "http://127.0.0.1:8080/v1",
+            model_path_value="eval-data/models/model.gguf",
+            model_sha256_value=hashlib.sha256(model.read_bytes()).hexdigest(),
+        )
+        first = RuntimeConfig(
+            RepoPaths(common_root, first_worktree), copy.deepcopy(data), "0" * 64
+        )
+        second = RuntimeConfig(
+            RepoPaths(common_root, second_worktree), copy.deepcopy(data), "0" * 64
+        )
+
+        first_hash = serve_config_sha256(first, settings_from_config(first))
+        self.assertEqual(
+            first_hash,
+            serve_config_sha256(second, settings_from_config(second)),
+        )
+
+        second.data["local_model"]["server"]["context_size"] = 8192
+        self.assertNotEqual(
+            first_hash,
+            serve_config_sha256(second, settings_from_config(second)),
+        )
 
     def test_integer_gpu_layers_are_passed_as_exact_decimal(self) -> None:
         model = self.root / "model.gguf"
@@ -2338,6 +2371,7 @@ class ModelBackedQualificationTests(unittest.TestCase):
         self.assertTrue(all(summary["cleanup"].values()))
         self.assertTrue(process.terminated)
         self.assertFalse(process.killed)
+        self.assertEqual(process.command[process.command.index("--verbosity") + 1], "4")
 
         evidence_path = self.root / model_backed.EVIDENCE_RELATIVE_PATH
         raw = evidence_path.read_text(encoding="utf-8")
@@ -2516,6 +2550,9 @@ class ModelBackedQualificationTests(unittest.TestCase):
             # the payload guard keeps the evidence text out of the report.
             "0.03.100.000 I srv  params_from_: device prompt \"secret evidence text\"\n"
             "0.03.100.001 I {\"input\":\"approve deleting the production database\"}\n"
+            "0.03.100.002 I private evidence text\n"
+            "0.03.100.003 I user secret: hidden\n"
+            "0.03.100.004 I srv  params_from_: device private evidence text\n"
         )
         with self.assertRaises(qualification.QualificationError) as raised:
             self._run(config, popen=_FakeServerProcess(log_text=log))
@@ -2523,11 +2560,26 @@ class ModelBackedQualificationTests(unittest.TestCase):
         shapes = raised.exception.facts["line_shapes"]
         self.assertEqual(
             sorted(shapes),
-            sorted(["build x1", "main x1", "srv  params_from_ x1", "<blank> x1", "<unlabelled> x1"]),
+            sorted(
+                [
+                    "build x1",
+                    "main x1",
+                    "srv x1",
+                    "<blank> x1",
+                    "<other> x2",
+                    "<payload-like> x2",
+                ]
+            ),
         )
-        self.assertEqual(raised.exception.facts["infrastructure_lines"], [])
+        self.assertEqual(raised.exception.facts["infrastructure_lines"], ["srv"])
         rendered = json.dumps(raised.exception.facts)
-        for secret in ("production database", "secret evidence text", "approve deleting"):
+        for secret in (
+            "production database",
+            "secret evidence text",
+            "approve deleting",
+            "private evidence text",
+            "user secret",
+        ):
             self.assertNotIn(secret, rendered)
 
     def test_rejected_decision_reports_only_non_sensitive_server_counters(self) -> None:
@@ -2744,6 +2796,7 @@ class ModelBackedQualificationTests(unittest.TestCase):
             )
             self.assertIn("--ctx-size", popen.command)
             self.assertEqual(popen.command[popen.command.index("--ctx-size") + 1], "12288")
+            self.assertEqual(popen.command[popen.command.index("--verbosity") + 1], "3")
 
             identity_probe = mock.Mock()
             decision_probe = mock.Mock()

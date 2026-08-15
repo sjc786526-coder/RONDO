@@ -79,10 +79,10 @@
   Guardian 模型/effort，并复用生产 evidence reader 与 meta 校验。
   2026-08-15 该 selector 绑定的真实 `E_final`（5,311 tokens，与 v3 census 锚点同一 SHA）在 12,288 / 512 合同下
   返回合规 `rondo_static_approval_v1` 判定：服务实际 `n_ctx=12288`、单 slot、`build_info=b1-0865990`，
-  GPU offload **33/35 层**，设备级显存 baseline 336,592,896 B、峰值 6,800,015,360 B、delta 6,463,422,464 B，
-  TTFT 3,516 ms、结构化判定总耗时 7,794 ms，进程/端口/receipt/私有对象四项清理全 true。
+  GPU offload **33/35 层**，设备级显存 baseline 1,386,217,472 B、峰值 7,855,931,392 B、delta 6,469,713,920 B，
+  TTFT 3,183 ms、结构化判定总耗时 7,049 ms，进程/端口/receipt/私有对象四项清理全 true。
   唯一正式证据是 `eval/locks/local-approval-b10333-ministral-12k-v1.json`（schema v2）。
-  这只证明 12k 档位内这条真实证据可服务，**不代表其余 42 条已逐条验证，也不代表剩余 5 条超窗证据可服务**。
+  这只证明 12k 档位内这条真实证据可服务，**不代表其余 41 条已逐条验证，也不代表剩余 5 条超窗证据可服务**。
 - **最终 12k 服务参数已冻结并三处对齐**：12,288 / `gpu_layers="auto"` / `fit="on"` / batch 512 / ubatch 256 /
   flash attention `on` / K,V 均 f16，输出预算 512。8GB 现场实测可用显存 7,096 MiB，`--fit` 自动收敛到 33 层
   offload、6,049 MiB used、1,046 MiB free，因此**未动用授权范围内的低精度 KV**。冻结 b10333 的 `--fit` 只调整
@@ -99,7 +99,9 @@
   doctor 的 synthetic probe 只证明生产入口能消费该资格，**不替代**上面那条真实 `E_final` 判定。
 - **一处工程事实值得记住**：冻结 b10333 把 libllama 自身的 `GGML_LOG_LEVEL_INFO` 映射为 verbosity TRACE(4)，
   而默认阈值是 INFO(3)，因此 GPU offload 计数在默认级别下根本不输出，且该事实没有任何 endpoint 可取。
-  服务参数因而固定带 `--verbosity 4`（与 `--offline`、`--split-mode none` 同级的不可调项，已进入启动指纹）。
+  qualification 私有采集因而固定使用 verbosity 4；正式 launcher 使用 verbosity 3，避免 trace-only 信息进入终端。
+  启动指纹 schema v2 同时绑定两条固定日志策略，但用仓库相对资源身份替代 checkout 绝对路径，故 linked worktree 与 main
+  对同一合同计算相同 identity，功能参数漂移仍 fail-closed。
 - **exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为实测 5,311 后，同一正式 census 入口从头
   独立运行两遍，两遍都 `status=complete`、47/47 取得 exact input-token 数、0 拒绝、0 缺失计数、
   锚点精确 5,311、`generated_tokens=0`，逐条记录、摘要与 digest 逐字节一致
@@ -222,9 +224,9 @@
   **上下文预算已实测**。47 条真实 `E_final` 在 v3 下全部取得 exact input-token 数：5,311—22,499 tokens。
   按 `input+512`，4k/8k/12k/16k 分别覆盖 0/11/42/45 条；首个资格目标已在覆盖率与 8GB 显存压力之间
   选择 12k。能被计数或长度适配不等于能在该档位内完成真实推理，仍以 model-backed qualification 为准。
-  12k 实测：可用显存 7,096 MiB，`--fit` 自动收敛到 33/35 层 offload，峰值 6,800,015,360 B，f16 K/V 够用。
+  12k 实测：`--fit` 自动收敛到 33/35 层 offload，资格运行峰值 7,855,931,392 B，f16 K/V 够用。
 - 验收：**已通过**（2026-08-15）。本地服务对一条真实 `E_final` 返回合规结构化判定，并记录了显存峰值
-  6,800,015,360 B、首 token 3,516 ms 与总耗时 7,794 ms。
+  7,855,931,392 B、首 token 3,183 ms 与总耗时 7,049 ms。
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）
 

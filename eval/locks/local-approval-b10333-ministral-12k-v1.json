@@ -21,7 +21,7 @@
     "request_contract_sha256": "eab877b2220dd93342de63313f4dcfc5d9bca1f23f5fa5bbd9530a619d037738",
     "runtime_identity_sha256": "abe7f763a18e7c801ca8d024a5d4d2a9036847c80eb32e1661baab6c1e2c03da",
     "runtime_relative_path": "eval-data/tools/llama-b10333-cuda-linux-x64",
-    "serve_config_sha256": "be95ab3e5d03a59e44bf22fd92acee6872fb75dd988fbe1e1cbcbe9497ae3f1a",
+    "serve_config_sha256": "7cb5a45a7d7aa1810cc14da28ea7f09d0a3356765264c7a419b4b4ca038a477d",
     "static_payload_schema_version": 3,
     "ubatch_size": 256
   },
@@ -50,14 +50,14 @@
       "schema_name": "rondo_static_approval_v1",
       "valid": true
     },
-    "time_to_first_token_ms": 3516.4220379665494,
-    "total_decision_ms": 7794.466418970842,
+    "time_to_first_token_ms": 3183.4789399999863,
+    "total_decision_ms": 7048.562667000169,
     "ttft_method": "non-streaming request with /slots next_token.n_decoded polled every 15ms; first positive value is the first token",
     "vram": {
-      "baseline_bytes": 336592896,
-      "delta_bytes": 6463422464,
+      "baseline_bytes": 1386217472,
+      "delta_bytes": 6469713920,
       "method": "nvidia-smi device-level memory.used sampled every 200ms with no other CUDA compute process",
-      "peak_bytes": 6800015360
+      "peak_bytes": 7855931392
     }
   },
   "qualified_on": "2026-08-15",

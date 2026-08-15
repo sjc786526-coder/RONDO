@@ -95,9 +95,20 @@ _DIAGNOSTIC_KEYWORD = re.compile(r"GPU|CUDA|layer|n_ctx|device", re.IGNORECASE)
 _LOG_PREFIX = re.compile(r"^\d+(?:\.\d+)+\s+[A-Z]\s+")
 # The leading label llama.cpp puts in front of its own log lines, e.g.
 # `load_tensors:` or `srv  log_server_r:`. Anything after it is dropped.
-_LINE_LABEL = re.compile(r"[A-Za-z_][A-Za-z0-9_. -]{0,39}?(?=:| = |\Z)")
 _PAYLOAD_MARKER = re.compile(r"[{}\[\]\"]")
 _MAX_DIAGNOSTIC_LINES = 25
+_FIXED_LINE_SHAPES = (
+    ("ggml", re.compile(r"^ggml_")),
+    ("load_tensors", re.compile(r"^load_tensors")),
+    ("llama", re.compile(r"^llama_")),
+    ("print_info", re.compile(r"^print_info")),
+    ("init", re.compile(r"^init:")),
+    ("main", re.compile(r"^main:")),
+    ("srv", re.compile(r"^srv ")),
+    ("slot", re.compile(r"^slot ")),
+    ("build", re.compile(r"^build:")),
+    ("system_info", re.compile(r"^system_info")),
+)
 
 
 class QualificationError(RuntimeError):
@@ -201,7 +212,9 @@ def run_qualification(
     _require_free_port(settings.host, settings.port)
 
     private_root = _prepare_private_directory(config)
-    command = build_serve_command(config, settings, runtime.binary)
+    command = build_serve_command(
+        config, settings, runtime.binary, for_qualification=True
+    )
     serving_config = serve_config_sha256(config, settings)
     log_path = private_root / "server.log"
     process: subprocess.Popen[Any] | None = None
@@ -726,7 +739,7 @@ def _log_diagnostics(text: str) -> dict[str, Any]:
 
     lines = text.splitlines()
     selected = [
-        body[:160]
+        _fixed_line_shape(body)
         for body in (_log_line_body(line) for line in lines)
         if _DIAGNOSTIC_LINE.match(body)
         and _DIAGNOSTIC_KEYWORD.search(body)
@@ -749,26 +762,30 @@ def _log_line_body(line: str) -> str:
 
 
 def _log_line_shapes(lines: Sequence[str]) -> list[str]:
-    """Count how the log's lines are shaped, carrying none of their content.
-
-    When the allow-list above matches nothing there is otherwise no way to tell
-    an empty log from an unexpected one.  Only the leading label of each line
-    is kept -- the part before the first `:` or ` = `, which llama.cpp uses for
-    its own function and field names -- so a request, a prompt or a decision can
-    never reach a blocker report through here.
-    """
+    """Count fixed log categories without carrying any line content."""
 
     counts: dict[str, int] = {}
     for line in lines:
         body = _log_line_body(line)
-        if not body:
-            label = "<blank>"
-        else:
-            match = _LINE_LABEL.match(body)
-            label = match.group(0).strip() if match is not None else "<unlabelled>"
+        label = _fixed_line_shape(body)
         counts[label] = counts.get(label, 0) + 1
     ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     return [f"{label} x{count}" for label, count in ranked[:_MAX_DIAGNOSTIC_LINES]]
+
+
+def _fixed_line_shape(body: str) -> str:
+    if not body:
+        return "<blank>"
+    if _PAYLOAD_MARKER.search(body):
+        return "<payload-like>"
+    return next(
+        (
+            fixed_label
+            for fixed_label, pattern in _FIXED_LINE_SHAPES
+            if pattern.match(body)
+        ),
+        "<other>",
+    )
 
 
 def _decision_failure_facts(text: str | None) -> dict[str, Any]:

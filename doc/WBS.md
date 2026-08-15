@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置与资格合同均已迁到 12k，qualification 设施与 model-backed 证据投影已落地。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，三 consumer 逐字节一致。**exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为 5,311 后，同一正式入口两遍完整 count-only 普查全部成功且逐字节一致，47/47 取得 exact input-token 数、0 拒绝、`generated_tokens=0`，唯一正式 baseline `eval/results/baselines/local-approval-exact-token-census-v1.json` 已发布（digest `22b84527…`）。全集分布：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499；按 `input+512`，4k 适配 0/47、8k 适配 11/47、12k（12,288）适配 42/47。4k 因而从前向路线退役。**12k model-backed qualification 已通过**：真实 `E_final` 在 `n_ctx=12288`、GPU offload 33/35 层下返回合规结构化判定，峰值显存 6,800,015,360 B、TTFT 3,516 ms、总耗时 7,794 ms，能力已晋级 `gpu_model_serving_validated` 并由正式 launcher + doctor 复验。Plan 026 那次通用 500 未再复现，也未被单独定位。下一步是 L7 配置切换，与本次一起收口 Local M3（见 `doc/WBS/local-approval-model.md`）。 |
+| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置与资格合同均已迁到 12k，qualification 设施与 model-backed 证据投影已落地。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，三 consumer 逐字节一致。**exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为 5,311 后，同一正式入口两遍完整 count-only 普查全部成功且逐字节一致，47/47 取得 exact input-token 数、0 拒绝、`generated_tokens=0`，唯一正式 baseline `eval/results/baselines/local-approval-exact-token-census-v1.json` 已发布（digest `22b84527…`）。全集分布：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499；按 `input+512`，4k 适配 0/47、8k 适配 11/47、12k（12,288）适配 42/47。4k 因而从前向路线退役。**12k model-backed qualification 已通过**：真实 `E_final` 在 `n_ctx=12288`、GPU offload 33/35 层下返回合规结构化判定，峰值显存 7,855,931,392 B、TTFT 3,183 ms、总耗时 7,049 ms，能力已晋级 `gpu_model_serving_validated` 并由正式 launcher + doctor 复验；启动指纹在 linked worktree 与 main 间稳定。Plan 026 那次通用 500 未再复现，也未被单独定位。下一步是 L7 配置切换，与本次一起收口 Local M3（见 `doc/WBS/local-approval-model.md`）。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -49,8 +49,8 @@
   按 `input+512`，4k 适配 0/47、8k 适配 11/47、12k（12,288）适配 42/47。
   **12k model-backed qualification 已通过（WP3b-A3）**：真实 `E_final`（5,311 tokens）在冻结 b10333 CUDA
   runtime、唯一 GGUF 与 12,288 / 512 合同下返回合规 `rondo_static_approval_v1` 判定，
-  实际 `n_ctx=12288`、单 slot、GPU offload 33/35 层、峰值显存 6,800,015,360 B、TTFT 3,516 ms、
-  总耗时 7,794 ms，现场四项清理全 true。capability 已晋级为 `gpu_model_serving_validated`，
+  实际 `n_ctx=12288`、单 slot、GPU offload 33/35 层、峰值显存 7,855,931,392 B、TTFT 3,183 ms、
+  总耗时 7,049 ms，现场四项清理全 true。capability 已晋级为 `gpu_model_serving_validated`，
   并由无资格特权的正式 launcher + 存活期 doctor 独立复验（`ready` / `model_schema_probe_passed`）。
   这只证明 12k 档位内的真实服务可用，**不代表剩余 5 条超窗证据可服务，也不等于 Local M3 已完成**。
   下一工作是 L7 的“仅改配置切换”，与本次 model-backed 一起收口 Local M3；之后依次推进

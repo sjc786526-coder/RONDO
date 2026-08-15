@@ -184,7 +184,7 @@ launcher 与 doctor 复验生产入口。
 ### 模型生命周期记录
 
 全部候选参数在各轮均为 12288 / `gpu_layers=auto` / `fit=on` / batch 512 / ubatch 256 / flash `on` / K,V f16；
-唯一变化是第 4 轮起把日志 verbosity 显式提到 trace。现场每轮都完全清理。
+第 4—7 轮的诊断/qualification 私有采集使用 trace；第 8 轮正式 launcher 使用 info。现场每轮都完全清理。
 
 | # | 类型 | 结果 |
 |---|---|---|
@@ -192,13 +192,15 @@ launcher 与 doctor 复验生产入口。
 | 2 | 完整 qualification（诊断） | 同上。新增的行形状直方图显示 25 行全部 `<unlabelled>`，确认日志格式与解析器假设不符，而不是日志缺失。 |
 | 3 | 只加载、不发请求 | **12,288 加载成功**：`n_ctx_slot=12288`、`total_slots=1`、`build_info=b1-0865990`、SIGTERM 干净退出 rc=0。日志每行带 `common_init` 无条件开启的时间戳+级别前缀，且完全没有 libllama 的 load 段。 |
 | 4 | 只加载、不发请求（`-lv 4`） | 确认根因与可行性：`common_get_verbosity()` 把 libllama 的 `GGML_LOG_LEVEL_INFO` 映射为 **TRACE(4)**，默认阈值是 INFO(3)，因此 offload 事实在默认级别下不输出。trace 下 `--fit` 明确打印 `context size set by user to 12288 -> no change`，并 fit 到 **33 层 offload、6,049 MiB used、1,046 MiB free**（可用 7,096 MiB，模型 34 blocks + output = 35 层）。 |
-| 5 | 完整 qualification | **成功**。`status=qualified`、`effective_context_size=12288`、offload 33/35、峰值显存 6,800,015,360 B、delta 6,463,422,464 B、TTFT 3,516.42 ms、总耗时 7,794.47 ms、结构化判定合规、四项清理全 true。证据由正式代码原子生成。 |
-| 6 | 正式 launcher + doctor 复验 | **成功**。无资格特权的 launcher 独立加载同一合同，receipt schema v2 的 `serve_config_sha256=be95ab3e…` 与证据 identity 一致，live `/props` 为 12288 / 单 slot / `b1-0865990`；存活期 doctor `status=ready`、exit 0、`gpu_model_serving_validated`、`model_schema_probe_passed`。定点 SIGTERM 后 launcher rc=0、receipt 自清、进程退出。 |
+| 5 | 完整 qualification | 成功生成首版证据；后续独立审查发现其 serve hash 绑定 worktree 绝对路径，已由生命周期 7 的稳定身份版本替代。 |
+| 6 | 正式 launcher + doctor 复验 | worktree 内成功，但原 `serve_config_sha256=be95ab3e…` 合并到 main 后会失配，不能作为最终生产入口证据。 |
+| 7 | 审查整改后完整 qualification | **成功**。稳定 `serve_config_sha256=7cb5a45a…` 在 worktree/main 两种 checkout 路径下一致；`effective_context_size=12288`、offload 33/35、峰值显存 7,855,931,392 B、delta 6,469,713,920 B、TTFT 3,183.48 ms、总耗时 7,048.56 ms、结构化判定合规、四项清理全 true。 |
+| 8 | 审查整改后正式 launcher + doctor | **成功**。正式 launcher 使用 verbosity 3，receipt 的稳定 serve hash 与新 evidence 一致；存活期 doctor `status=ready`、exit 0、`gpu_model_serving_validated`、`model_schema_probe_passed`。按 PID/start ticks/cmdline 定点 SIGTERM 后 launcher rc=0，receipt、8080、GPU compute 与私有对象全部清理。 |
 
-**关键修复（非重试掩盖）**：`--verbosity 4` 固化进 serve 参数（与 `--offline`、`--split-mode none` 同级的不可调项，
-已被 `serve_config_sha256` 绑定）；失败诊断增加不含任何行内容的行形状直方图，并识别时间戳+级别前缀；
-trace 级会带出请求形状的行，因此回显再加一道 payload 护栏（含 `{}[]"` 的行一律不回显）。
-测试夹具 `_CUDA_LOAD_LOG` 同步改为真实的带前缀格式与真实的 33/35 层数。
+**关键修复（非重试掩盖）**：b10333 的 offload 事实仍由 qualification 的 verbosity 4 私有日志取得；正式 launcher
+改用 verbosity 3，避免 trace-only 凭据片段进入终端。serve fingerprint schema v2 使用仓库相对模型/模板身份和内容 digest，
+不再绑定 checkout 绝对路径，同时仍严格绑定固定功能参数和 qualification/formal 日志策略。失败诊断仅保留固定类别，
+不再从任意日志正文派生 label。新增 linked-worktree/main、日志级别分离与纯文本失败行回归。
 
 > 依据：冻结 b10333 `common/fit.h` 明确 `--fit` 只调整仍为默认值的参数，且上下文**仅在等于 0 时**才被改写，
 > 因此显式 `--ctx-size 12288` 不会被 fit 缩小；`--gpu-layers auto`（-1，即默认值）才是 fit 可下调的那一项。
@@ -220,9 +222,9 @@ trace 级会带出请求形状的行，因此回显再加一道 payload 护栏�
 
 - **已晋级**。capability 为 `gpu_model_serving_validated`，唯一正式证据
   `eval/locks/local-approval-b10333-ministral-12k-v1.json`（schema v2）。
-  交付前复跑 focused tests **139/139**、`just eval-lock` 通过；现场 8080 空闲、无 llama-server、
-  GPU 无 compute process、`eval-data/local-approval/` 为空。共使用 **6** 个模型生命周期。
-- 未做：其余 42 条适配证据逐条验证、剩余 5 条超窗证据、16k、47 条批量 generation、L7、Local M3、
+  审查整改后复跑 focused tests **140/140**、`just eval-lock` 通过；现场 8080 空闲、无 llama-server、
+  GPU 无 compute process、`eval-data/local-approval/` 为空。共使用 **8** 个模型生命周期。
+- 未做：其余 41 条适配证据逐条验证、剩余 5 条超窗证据、16k、47 条批量 generation、L7、Local M3、
   Cargo、Docker、云 API、训练、全量 eval、全量测试。
 
 ### 交接边界
@@ -240,13 +242,16 @@ trace 级会带出请求形状的行，因此回显再加一道 payload 护栏�
 | 002 | 继续使用既有 selector 的 5,311-token 真实样本 | 它已被事前绑定且由 v3 census 精确确认适配 12k，避免事后换简单样本 | qualification 输入 | 已采纳 |
 | 003 | 最终服务参数由 8GB 现场探索冻结，不在计划预设 | 用户要求给执行者合理调参空间；真正不可妥协的是 12k、资产/语义身份和 fail-closed | launcher、identity、evidence | 已采纳 |
 | 004 | evidence 必须显式区分并严格绑定 12k，内部 schema 版本不预设 | 防止旧 4k/漂移证据晋级，同时避免无实际字段变化的版本体系膨胀 | model-backed evidence | 已采纳 |
-| 005 | 上限按每个真实模型服务进程启动计 6 个生命周期 | 让诊断、最终资格和正式复验共享清楚的资源预算；次数不是技术失败阈值 | 真实执行 | 用户授权时取消了次数上限；实际仍只用了 6 个 |
+| 005 | 上限按每个真实模型服务进程启动计 6 个生命周期 | 让诊断、最终资格和正式复验共享清楚的资源预算；次数不是技术失败阈值 | 真实执行 | 用户授权时取消了次数上限；含独立审查整改复证实际用了 8 个 |
 | 008 | 服务参数集中为 `serving_contract()`，identity 显式记录全部可调项 | 原来只有 context/gpu_layers/fit 三项被硬校验，batch/ubatch/flash/K/V 只藏在 `serve_config_sha256` 里；显式化后证据自描述，且 launcher/qualification/loader/测试共用一个漂移源 | model_backed、evidence、tests | 已采纳 |
 | 009 | v3 绑定同时用 request-contract digest 和显式 identity 字段 | 两者都由同一个 `STATIC_PAYLOAD_SCHEMA_VERSION` 投影，不会互相矛盾；digest 让漂移自动失配，显式字段让冻结记录可读 | 资格身份 | 已采纳 |
 | 010 | K/V cache 校验放宽为冻结 b10333 的 `kv_cache_types` 白名单 | 用户授权在 f16 装不下时可换低精度 KV；把合法集合对齐 runtime 自身，而不是再写死另一个值。实际现场未用上，冻结值仍是 f16/f16 | 配置合同 | 已采纳 |
-| 011 | `--verbosity 4` 作为不可调的 serve 参数固化 | 冻结 b10333 把 libllama 的 INFO 映射为 TRACE，默认阈值 INFO，导致 GPU offload 计数在默认级别下完全不输出，而该事实没有任何 endpoint 可取。它与 `--offline`、`--split-mode none` 同级，且已进入启动指纹 | launcher、identity | 修复生命周期 1—2 的失败 |
-| 012 | 失败诊断增加不含内容的行形状直方图 | 原白名单摘要在日志形状意外时为空，等于没有诊断；直方图只保留 `:` 或 ` = ` 前的标签，泄漏不了请求或判定内容 | 失败语义 | 已采纳 |
+| 011 | `--verbosity 4` 作为不可调的 serve 参数固化 | 首轮用它解决 b10333 offload 事实不可见；独立审查发现正式 launcher 不应暴露 trace，已由决策 015 取代 | launcher、identity | 已取代 |
+| 012 | 失败诊断增加不含内容的行形状直方图 | 原动态 label 仍可携带任意短文本，已由决策 017 的固定类别取代 | 失败语义 | 已取代 |
 | 013 | trace 级回显再加 payload 护栏 | 提高 verbosity 后 `srv ` 前缀下会出现请求形状的行，含 `{}[]"` 的行一律不回显 | 失败语义 | 已采纳 |
 | 014 | 测试夹具 `_CUDA_LOAD_LOG` 改为真实格式 | 它自称 format-exact 但缺少 `common_init` 无条件开启的时间戳+级别前缀，正是这一点掩盖了解析器与真实日志的差距 | tests | 已采纳 |
+| 015 | qualification verbosity 4、正式 launcher verbosity 3 | offload 事实只能从 trace 取得，但冻结 server 会在 trace 输出 API key 后四位；私有采集与正式终端分离即可同时满足可观测性和日志边界 | launcher、qualification、identity | 独立审查整改 |
+| 016 | serve fingerprint schema v2 使用稳定资源身份 | resolved 模板绝对路径会让 worktree evidence 合并到 main 后立即失配；实际 argv 继续使用安全 resolved path，hash 改绑仓库相对身份、digest 与完整功能参数 | launcher、evidence、tests | 独立审查整改 |
+| 017 | 失败日志形状只使用固定类别 | 动态 label 可回显任意短文本；固定类别仍能区分空日志、payload-like、已知 llama.cpp 前缀和其他行，不需要通用日志审计 | qualification、tests | 独立审查整改 |
 | 006 | ignored `rondo.local.toml` 只在主仓原位字段级修改 | loader 通过 Git common root 让全部 worktree 共用该文件；复制到 worktree 不生效 | 本机配置、交接 | 已采纳 |
 | 007 | 成功后的正式 launcher + doctor 复验属于本任务，L7 不属于 | 本任务要证明生产入口能消费资格；cloud/local Guardian 配置切换仍是独立工作包 | 验收、非目标 | 已采纳 |
