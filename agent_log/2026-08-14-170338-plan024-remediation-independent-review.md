@@ -112,3 +112,28 @@ adapter 拒绝；2 条 500 的 token 数与原因均未知。`0/47`、`9/47` 最
 
 执行者只需在同一分支提交 R1—R3 的文档修正，运行 `git diff --check`，并交回 Codex 复审。
 这是纯文档收口，不需要重跑 127 项测试或 `eval-lock`，也不得借机改代码、选上下文档位、启动模型或新增 baseline。
+
+### 逐文档收口清单
+
+- `doc/WBS.md`
+  - 当前事实改为：24 条取得 token 数，21 条已证实为 adapter shape rejection，另 2 条旧运行中的通用 500 未定性。
+  - 下一步写成先解决已证实的 21 条 provider-neutral static-payload 兼容；重跑时如再遇 500，fail closed 并单独诊断。
+  - 删除“23 条均被请求形状阻断”“加大上下文均无效”等全集归因；仍保持 WP3b-A2 blocked/incomplete、全集后再定档位。
+- `doc/WBS/local-approval-model.md`
+  - 保留 24 条的 min/max/分位数与 `0/24`、`9/24`；删除“全集可服务性上限 0/47、9/47”。
+  - 把“两次运行一致、锚点 5,313”明确限定为 `6b36d05` 之前的实现；当前整改代码只通过无模型回归，尚未真实运行。
+  - 将 21 条 adapter 400 与 2 条未定性 500 分列，不承诺 static-payload 兼容能解决后两条。
+- `plan/024-wp3b-a2-exact-token-census-execplan.md`
+  - Plan 作为任务历史仍保持 blocked/incomplete，不改原始 47/47 完成合同，也不追加新的事后 success 条件。
+  - 在执行记录和当前状态中限定旧真实运行/新整改代码的版本边界，删除全集“上限”和两条 500 的形状归因。
+  - 交接仍指向 WBS；只描述本任务内失败事实，不在 Plan 冻结下游实现或上下文策略。
+- `agent_log/2026-08-14-091500-plan024-exact-token-census.md`
+  - 作为本次执行日志，如实保留错误、整改和 7 次历史模型生命周期；修正结论段中的两处过度推断。
+  - 只说 21 条 400 已证实共用 converter，2 条 500 原因未知；删除全集“可服务性上限”。
+  - 保留“整改后的实现未真实运行”和当前 127/127、eval-lock 结果。
+- `doc/WBS-COMPLETED.md`
+  - 当前删除 Plan 024 完成记录的状态正确；文档窄整改中不得恢复，直到未来真正完成 47/47 并通过独立验收。
+- `eval/results/baselines/local-approval-exact-token-census-v1.json`
+  - 当前不存在的状态正确；本轮文档整改不得恢复或另存同义 tracked baseline。
+
+`README.md`、`AGENTS.md`、其他 WBS 方向文档和历史独立审查报告没有需要同步的当前事实，不应为保持“多处一致”而扩大修改范围。
