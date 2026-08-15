@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rondo.local/schemas/sol-teacher-label-v1.schema.json",
+  "title": "RONDO Sol teacher label v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "batch_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "representative_e_final_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "static_payload_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "partition": {
+      "enum": [
+        "seed",
+        "holdout"
+      ]
+    },
+    "usage": {
+      "enum": [
+        "seed_evaluation_and_future_synthesis_reference",
+        "holdout_evaluation_only"
+      ]
+    },
+    "prompt_version": {
+      "const": "rondo_sol_teacher_prompt_v1"
+    },
+    "prompt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "teacher_model": {
+      "const": "gpt-5.6-sol"
+    },
+    "generated_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2
+    },
+    "retry_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        null,
+        "schema_invalid",
+        "transport_failed"
+      ]
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk_tags": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "outcome",
+        "rationale",
+        "risk_tags"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "batch_id",
+    "semantic_id",
+    "representative_e_final_sha256",
+    "static_payload_sha256",
+    "partition",
+    "usage",
+    "prompt_version",
+    "prompt_sha256",
+    "teacher_model",
+    "generated_date",
+    "attempt",
+    "retry_reason",
+    "decision"
+  ]
+}

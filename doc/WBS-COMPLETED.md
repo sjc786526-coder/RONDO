@@ -817,3 +817,29 @@ standard/Lite 形态均补回归。
   47 条批量 generation、教师标签、横评、训练或模型优化；未跑 Docker、云 API、全量测试或全量 eval；
   未读 `.env.local`；未改 Plan 030 资格证据、runtime/model/template lock、census baseline 或历史结果。
   共使用 4 个模型生命周期（每次改动适配器后重跑，确保交付物与证据同一份代码）。
+
+## WP3b-A5：L5a 首批 Sol 教师标签（Plan 032，2026-08-15）
+
+- **结论**：47 条真实生产 `E_final` 经 production meta、tracked ledger 与冻结 census 重新校验，得到 45 个
+  稳定语义身份与 2 个重复实例；42 个实例适配 12k，语义去重与代表冻结后生成 40 条标签
+  （seed 24 / holdout 16）。聚合排除原因为超窗 5、语义重复 2。教师标签是生成时点的 Sol 蒸馏目标，
+  不是人工 ground truth；holdout 可用于评测标签，仍禁止进入合成或训练。
+- **冻结合同**：prompt `rondo_sol_teacher_prompt_v1` SHA-256
+  `5425f3defeb900c691ed497919a65fca38d05a22460cd4bef503aa7612b9312c`；label schema v1 SHA-256
+  `62c4e8ecd8c122006680df1105c188b260d268e10953d042fbaef3c353f1aa18`；manifest v1 SHA-256
+  `c96b621a31d0983e47f5bcac22d90c5636d20a147138d5b1b335f1b4cbfdfeba`；labels v1 SHA-256
+  `7eaafa25aa99de804559ee77f034f4e69f8ff4227f5cf5d8d70c66f0a7b82a40`。教师为当前开发用 Codex
+  `gpt-5.6-sol`，生成日期 2026-08-15。
+- **生成与校验**：一个完整批次后，16 条仅因首次传输失败按完全相同 prompt 与输入定向重试一次；
+  `schema_invalid=0`，没有因判定内容重试。严格终检重新计算 semantic identity、代表关系、canonical
+  payload 与用途绑定，并绑定 prepare receipt 及当前 tracked prompt/schema/census；summary 会重跑完整 verify，
+  labels 与 metadata 同步篡改回归也 fail-closed。独立验收发现 prepare 曾把四位归档槽位误作 `review_id`；
+  已改为从通过 schema 检查的 production meta 取独立身份并补回归。focused unittest **13/13** 与
+  `py_compile` 通过，当前 47 条无写入 prepare 重算得到与冻结批次相同的 manifest / outbound / receipt 哈希，
+  真实批次 verify / summarize 继续幂等通过并得到 `ready_for_l3=true`。
+- **数据边界**：完整 manifest、canonical outbound、原始返回、attempt provenance、标签与导入元数据只在
+  ignored `eval-data/teacher-labels/20260815-sol-teacher-labels-v1/`（目录 0700、文件 0600）；tracked 仅保存
+  prompt、schema、轻量实现/测试、文档和不含正文、source path、逐条 semantic id、逐条 holdout 明细的
+  `eval/locks/local-approval-sol-teacher-labels-v1.json`。
+- **边界**：未运行 L3/L4、Local-static、本地模型、Docker、Cargo、API、训练、全量测试或 CI；未修改
+  Guardian bridge、launcher、`mydev/`、`multidev/` 或 `eval/results/runs.jsonl`，未发布 shadow 结果。

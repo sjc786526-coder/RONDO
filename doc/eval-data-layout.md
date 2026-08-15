@@ -1,6 +1,6 @@
 # 测评结果与数据资产保存规范
 
-最后更新：2026-08-13
+最后更新：2026-08-15
 
 适用于全部测评产出：真实 Terminal-Bench 2.1 端到端（E-B）、静态影子审批横评（L3）、会话内人判定横评
 （Local M4）。离线冻结回放（E-A）的 schema 保留在本文件中，但该轨已随方向 1 挂起（见 `doc/WBS.md`）。
@@ -58,6 +58,7 @@ eval-data/                             # git-ignored
 ├── campaigns/<campaign_id>/           # B7 状态、wire/Oracle-manifest 引用与私有聚合，0600
 ├── oracle-proofs/p2-b7-v1/             # campaign-independent 单题 Oracle proof + 十题 manifest，0600
 ├── cross-eval/<batch_id>/              # Local M4 会话内人判定的冻结 JSONL 与证据哈希，0600
+├── teacher-labels/<batch_id>/          # L5a Sol 教师 manifest / payload / 原始返回 / 验证标签，目录 0700、文件 0600
 ├── b2/current.json                    # 可替换的当前 no-API 双侧验收收据，0600
 ├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
 ├── work/                              # materialize 和 no-API 工作目录
@@ -241,6 +242,28 @@ eval-data/                             # git-ignored
 - `local-*` 两类当前只允许 `product = "rondo-local"`，且 `config.product` / `config.binary_product` 必须同值；
   不得携带 Terminal-Bench 的 `auto_review_config` 或 campaign 产品字段。将来若 Multi 也做影子横评，必须先在
   本节定义独立 side/产品映射和写入合同，不能让现有 Local side 直接声明 `rondo-multi`。
+
+### L5a 教师标签私有批次
+
+L5a 的完整教师输入与返回不写入 `runs.jsonl`，也不作为 baseline。每批落在
+`eval-data/teacher-labels/<batch_id>/`：目录权限 0700，文件权限 0600，且不得是 symlink。
+
+- `manifest.json`：47 条源实例的身份、语义组、seed/holdout、12k 适配、代表关系与排除原因；可含私有路径，
+  不入 Git。
+- `outbound.jsonl`：冻结选中项的 canonical static payload 与外层 routing 绑定。
+- `prepare-receipt.json`：绑定 prepare 时的 manifest、outbound、prompt、schema、census 与选中语义集合哈希；
+  verify / summarize 必须与其逐项一致。
+- `raw-responses.jsonl`：当前人在场 Sol 会话返回的原始逐行 decision，和验证后的标签分开保存。
+- `attempts.jsonl`：逐条记录最终采用的 attempt 与允许的 `transport_failed` / `schema_invalid` 定向重试原因；
+  不允许因标签内容重试。
+- `labels.jsonl`：完整集合校验后的最终标签，逐条绑定 batch、semantic id、代表 `E_final` / payload SHA、
+  partition / usage、prompt、教师模型、生成日期与 attempt provenance。
+- `import-metadata.json`：只在完整集合、身份、用途与文件哈希全部通过时声明 `ready_for_l3=true`；
+  这只表示可供后续 L3 严格导入，不是 shadow 结果发布。
+
+Git 只在 `eval/locks/` 保存一个不含正文、source path、逐条 semantic id 或逐条 holdout 归属的聚合锁，
+记录合同版本、计数、教师模型/日期与私有文件 SHA。首次批次为
+`eval/locks/local-approval-sol-teacher-labels-v1.json`；教师标签是时点 Sol 蒸馏目标，不是人工 ground truth。
 
 ### 隐藏集的特殊规则
 

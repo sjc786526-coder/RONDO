@@ -122,6 +122,14 @@
   2. **v3 关闭了服务侧差异**：47 条全部为 `responses_lite` 形态，全部被冻结 b10333 精确计数，
      包括此前从未被计过数、含 `assistant → developer` 相邻关系的 23 条。Plan 026 的通用 500
      未再复现；本次没有单独定位那一次失败，只能说它在 v3 下不再发生。
+- **L5a 首批 Sol 教师标签已完成**：Plan 032 用 canonical static payload v3 和
+  `rondo_static_approval_v1` 冻结 `rondo_sol_teacher_prompt_v1`。47 个真实实例重新通过 production meta、
+  tracked ledger 与 census 对齐，得到 45 个稳定语义身份、2 个重复实例；42 个 12k 适配实例语义去重后
+  形成 40 条标签（seed 24 / holdout 16），另有 5 个超窗实例与 2 个重复实例按聚合原因排除。
+  教师为生成时点的 `gpt-5.6-sol`（2026-08-15）；完整 manifest、outbound、原始返回、标签与 L3 导入元数据
+  只保存在 ignored `eval-data/teacher-labels/20260815-sol-teacher-labels-v1/`，tracked body-free 锁为
+  `eval/locks/local-approval-sol-teacher-labels-v1.json`。该批次已通过完整集合/身份/用途校验，
+  `ready_for_l3=true`；标签是 Sol 蒸馏目标，不是人工 ground truth，holdout 仍严禁用于合成或训练。
 - **角色顺序兼容已在 v3 关闭，并已由真实运行确认**：`developer` 消息在套用模板前被
   `map_developer_role_to_system` 统一改成 `system`；冻结 Ministral 模板规定 `assistant` 之后只能接
   `assistant`/`user`/`tool`、`tool` 之后只能接 `assistant`/`tool`/`user`，遇到 `system` 直接
@@ -159,9 +167,9 @@
 
 ### 当前推进顺序
 
-1. **下一工作是 L5a**：用冻结 prompt、人在场经开发用 Codex 生成第一批 Sol 教师标签。
-2. 跑 L3/L4：程序化批量运行 `Local-static`，对照导入的教师标签，固化指标口径，得到未微调 baseline。
-3. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
+1. **下一工作是 L3/L4**：程序化批量运行 `Local-static`，导入 L5a 教师标签，固化指标口径，
+   得到未微调 baseline。
+2. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
@@ -283,6 +291,9 @@ L5 分两部分，**执行时点不同**：
 |---|---|---|
 | L5a 教师标签生成 | 用冻结 prompt 人在场经开发用 Codex 生成 Sol 判定，落成冻结标签文件 | **先于 L3**（L3 的教师侧输入） |
 | L5b 合成训练数据 | 基于 `seed` 分区批量合成训练样本 | L3/L4 之后、L6 之前 |
+
+L5a 已于 2026-08-15 完成；当前只推进尚未完成的 L3/L4 与其后工作包。L5a 的冻结合同和哈希见
+`eval/locks/local-approval-sol-teacher-labels-v1.json`。
 
 - 两部分都用**订阅制 Sol 经开发用 Codex 生成**，人在场、发送预写 prompt，不依赖真实跑批规模，
   也不占 API 预算门；`eval/` 只导入冻结产物，不程序化调用。
