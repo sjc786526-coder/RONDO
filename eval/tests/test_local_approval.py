@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import socket
@@ -41,7 +43,7 @@ from rondo_eval.local_approval.identity import (  # noqa: E402
     clear_launcher_identity,
     publish_launcher_identity,
 )
-from rondo_eval.local_approval import model_backed, qualification  # noqa: E402
+from rondo_eval.local_approval import model_backed, qualification, token_census  # noqa: E402
 from rondo_eval.local_approval.launcher import (  # noqa: E402
     CHAT_TEMPLATE_RELATIVE_PATH,
     CHAT_TEMPLATE_REPO,
@@ -2433,6 +2435,545 @@ class ModelBackedQualificationTests(unittest.TestCase):
                     else:
                         with self.assertRaises(StructuredOutputError):
                             verify()
+
+
+class TokenCensusTests(unittest.TestCase):
+    """Input-set completeness, fit arithmetic, stable output and anchor gating.
+
+    The reader, meta validator and serving contract already have their own
+    coverage above; these cases only exercise what the census itself decides.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.paths = RepoPaths(self.root, self.root)
+        _install_template_fixture(self.root)
+        (self.root / "rondo.secrets.example.env").write_text(
+            "RONDO_LOCAL_MODEL_API_KEY=\n", encoding="utf-8"
+        )
+        self.model = self.root / "eval-data/models/fixture.gguf"
+        self.model.parent.mkdir(parents=True)
+        self.model.write_bytes(b"GGUFcensus-fixture")
+        self.model_sha256 = hashlib.sha256(self.model.read_bytes()).hexdigest()
+        patcher = mock.patch.multiple(
+            model_backed,
+            MODEL_RELATIVE_PATH="eval-data/models/fixture.gguf",
+            MODEL_SIZE_BYTES=self.model.stat().st_size,
+            MODEL_SHA256=self.model_sha256,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.ledger: list[dict] = []
+        self.bundles: list[tuple[str, str]] = []
+        for slot in range(1, 4):
+            self.bundles.append(self._install_bundle(slot))
+        # The anchor is the first bundle; the tracked selector binds it exactly
+        # the way Plan 023 bound the single measured E_final.
+        self._install_selector(*self.bundles[0])
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _install_bundle(self, slot: int, *, body: bytes | None = None) -> tuple[str, str]:
+        run_id = f"20260812-370000{slot:03d}-tb-rondo-r1"
+        review_id = f"e2759768-bb16-4230-9f9a-7f4890af5{slot:03d}"
+        e_final_bytes = body if body is not None else json.dumps(
+            {
+                "instructions": "frozen guardian policy fixture",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": f"approve fixture action {slot}?"}
+                        ],
+                    }
+                ],
+            }
+        ).encode("utf-8")
+        directory = self.root / f"eval-data/runs/{run_id}/guardian-evidence/{slot:04d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "E_final.json").write_bytes(e_final_bytes)
+        (directory / "meta.json").write_text(
+            json.dumps(
+                {
+                    "review_id": review_id,
+                    "guardian_source_baseline": "rust-v0.147.0",
+                    "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                    "evidence": "e_final",
+                    "decision": "approved",
+                    "terminal_status": "approved",
+                    "failure_reason": None,
+                    "attempt_count": 1,
+                    "duration_ms": 4029,
+                    "guardian_thread_id": None,
+                    "model": "gpt-5.6-sol",
+                    "reasoning_effort": "low",
+                    "token_usage": None,
+                    "time_to_first_token_ms": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.ledger.append(
+            {
+                "run_id": run_id,
+                "artifacts": f"eval-data/runs/{run_id}",
+                # An infra-failed run still archived valid evidence; the census
+                # must not drop it.
+                "outcome": "infra_failed" if slot == 2 else "completed",
+                "config": {
+                    "effective_guardian_model": "gpt-5.6-sol",
+                    "guardian_effort": "low",
+                },
+            }
+        )
+        self._write_ledger()
+        relative = f"eval-data/runs/{run_id}/guardian-evidence/{slot:04d}/E_final.json"
+        return relative, hashlib.sha256(e_final_bytes).hexdigest()
+
+    def _write_ledger(self, records: list[dict] | None = None) -> None:
+        ledger = self.root / "eval/results/runs.jsonl"
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text(
+            "".join(json.dumps(record) + "\n" for record in records or self.ledger),
+            encoding="utf-8",
+        )
+
+    def _install_selector(self, relative: str, digest: str) -> None:
+        run_id = Path(relative).parts[2]
+        raw = (self.root / relative).read_bytes()
+        meta_raw = (self.root / relative).with_name("meta.json").read_bytes()
+        selector = self.root / qualification.SELECTOR_RELATIVE_PATH
+        selector.parent.mkdir(parents=True, exist_ok=True)
+        selector.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "purpose": "census anchor fixture",
+                    "run_id": run_id,
+                    "run_artifacts_relative_path": f"eval-data/runs/{run_id}",
+                    "relative_path": relative,
+                    "review_id": json.loads(meta_raw)["review_id"],
+                    "e_final_sha256": digest,
+                    "e_final_size_bytes": len(raw),
+                    "meta_sha256": hashlib.sha256(meta_raw).hexdigest(),
+                    "meta_size_bytes": len(meta_raw),
+                    "guardian_source_baseline": "rust-v0.147.0",
+                    "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+                    "expected_guardian_model": "gpt-5.6-sol",
+                    "expected_guardian_effort": "low",
+                    "request_shape": "standard",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def _free_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            return int(listener.getsockname()[1])
+
+    def _config(self) -> RuntimeConfig:
+        return RuntimeConfig(
+            self.paths,
+            _local_data(
+                f"http://127.0.0.1:{self._free_port()}/v1",
+                model_path_value="eval-data/models/fixture.gguf",
+                model_sha256_value=self.model_sha256,
+                server_overrides={"binary": model_backed.CUDA_SERVER_RELATIVE_PATH},
+            ),
+            "0" * 64,
+        )
+
+    def _http(self):
+        model = self.model.resolve()
+        model_id = "rondo-local-approval"
+
+        def get(url: str, *, timeout: float):
+            if url.endswith("/health"):
+                return {"status": "ok"}
+            if url.endswith("/props"):
+                return {
+                    "build_info": model_backed.CUDA_SERVICE_BUILD_INFO,
+                    "model_path": os.fspath(model),
+                    "default_generation_settings": {"n_ctx": 4096},
+                    "total_slots": 1,
+                }
+            if url.endswith("/models"):
+                return {"data": [{"id": model_id}]}
+            raise AssertionError(f"unexpected census probe: {url}")
+
+        return get
+
+    def _run(self, config: RuntimeConfig, *, output: Path, counter=None, free_port=True):
+        lease = runtime_bridge.WatchdogLease(token="e" * 48)
+        guard = mock.Mock()
+        guard.is_held.return_value = True
+        arguments = {
+            "output_path": output,
+            "popen": _FakeServerProcess(),
+            "watchdog_factory": lambda: runtime_bridge.WatchdogProof(
+                lease=lease, guard=guard
+            ),
+            "gpu_sampler": _FakeGpuSampler(),
+            "http_get": self._http(),
+        }
+        if counter is not None:
+            arguments["count"] = counter
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "rondo_eval.local_approval.token_census.inspect_runtime",
+                    side_effect=lambda _config, _settings: RuntimeInspection(
+                        "runtime_ready",
+                        Path("/fake/llama-server"),
+                        "fixture CUDA runtime",
+                        "b" * 64,
+                        LLAMA_CPP_CUDA_CAPABILITY,
+                        model_backed.MODEL_BACKED_NOT_RUN,
+                    ),
+                )
+            )
+            if not free_port:
+                # The test's own fake server holds the configured port, so the
+                # port checks would describe the harness rather than the run.
+                stack.enter_context(
+                    mock.patch.object(token_census, "_require_free_port", lambda *_: None)
+                )
+                stack.enter_context(
+                    mock.patch.object(token_census, "_port_released", lambda *_: True)
+                )
+            return token_census.run_census(config, **arguments)
+
+    def test_complete_set_is_required_and_deduplicated(self) -> None:
+        config = self._config()
+        inputs = token_census.collect_evidence_inputs(config, expected_count=3)
+        self.assertEqual(len(inputs), 3)
+        self.assertEqual(len({item.e_final_sha256 for item in inputs}), 3)
+
+        with self.assertRaises(token_census.CensusError) as extra:
+            token_census.collect_evidence_inputs(config, expected_count=2)
+        self.assertEqual(extra.exception.code, "evidence_set_size_unexpected")
+        self.assertEqual(extra.exception.facts["found"], 3)
+
+        # Same bytes under a different run and review id: still a duplicate.
+        original = (self.root / self.bundles[0][0]).read_bytes()
+        self._install_bundle(9, body=original)
+        with self.assertRaises(token_census.CensusError) as duplicate:
+            token_census.collect_evidence_inputs(config, expected_count=4)
+        self.assertEqual(duplicate.exception.code, "evidence_duplicate_content")
+
+    def test_evidence_without_a_tracked_run_record_is_refused(self) -> None:
+        config = self._config()
+        self._write_ledger(self.ledger[:-1])
+        with self.assertRaises(token_census.CensusError) as error:
+            token_census.collect_evidence_inputs(config, expected_count=3)
+        self.assertEqual(error.exception.code, "evidence_run_record_missing")
+
+    @staticmethod
+    def _is_probe(body: bytes) -> bool:
+        return "census endpoint probe policy" in body.decode("utf-8")
+
+    def test_fit_boundaries_and_declared_percentiles(self) -> None:
+        self.assertEqual(token_census.CENSUS_MAX_OUTPUT_TOKENS, 512)
+        self.assertEqual(token_census.fit_results(3584), {"4k": True, "8k": True})
+        self.assertEqual(token_census.fit_results(3585), {"4k": False, "8k": True})
+        self.assertEqual(token_census.fit_results(7680), {"4k": False, "8k": True})
+        self.assertEqual(token_census.fit_results(7681), {"4k": False, "8k": False})
+
+        counts = [100, 200, 300, 400]
+        self.assertEqual(token_census.percentile(counts, 50), 200)
+        self.assertEqual(token_census.percentile(counts, 90), 400)
+        self.assertEqual(token_census.percentile(counts, 100), 400)
+
+        records = [
+            {"e_final_sha256": f"{index:064x}", "status": "counted",
+             "input_tokens": tokens, "fits": token_census.fit_results(tokens)}
+            for index, tokens in enumerate([3584, 3585, 7681])
+        ]
+        refused = {
+            "e_final_sha256": f"{9:064x}",
+            "status": "refused",
+            "refusal": {
+                "http_status": 400,
+                "error_type": "invalid_request_error",
+                "message_sha256": "c" * 64,
+            },
+        }
+        shapes = {"responses_lite": 4}
+        summary = token_census.summarize(records + [refused], request_shapes=shapes)
+        # Every archived input is reported; statistics cover the counted ones.
+        self.assertEqual(summary["evidence_count"], 4)
+        self.assertEqual(summary["counted"], 3)
+        self.assertEqual(summary["refused"], 1)
+        self.assertEqual(
+            summary["refusal_classes"],
+            {f"400 invalid_request_error {'c' * 64}": 1},
+        )
+        self.assertEqual(summary["statistics_scope"], "counted inputs only")
+        self.assertEqual(summary["input_tokens"]["min"], 3584)
+        self.assertEqual(summary["input_tokens"]["max"], 7681)
+        self.assertEqual(summary["context_windows"]["4k"], {
+            "context_size": 4096, "fits": 1, "does_not_fit": 2
+        })
+        self.assertEqual(summary["context_windows"]["8k"], {
+            "context_size": 8192, "fits": 2, "does_not_fit": 1
+        })
+        with self.assertRaises(token_census.CensusError) as empty:
+            token_census.summarize([refused], request_shapes=shapes)
+        self.assertEqual(empty.exception.code, "no_input_was_counted")
+
+    def test_document_is_stable_and_rejects_colliding_records(self) -> None:
+        records = [
+            {"e_final_sha256": f"{index:064x}", "status": "counted",
+             "input_tokens": tokens, "fits": token_census.fit_results(tokens)}
+            for index, tokens in enumerate([9000, 4000, 5313])
+        ]
+        shapes = {"responses_lite": 3}
+        identity = {"serve_config_sha256": "a" * 64}
+        anchor = {"e_final_sha256": records[2]["e_final_sha256"], "input_tokens": 5313}
+        first = token_census.build_document(
+            identity=identity, anchor=anchor, records=records, request_shapes=shapes
+        )
+        second = token_census.build_document(
+            identity=identity,
+            anchor=anchor,
+            records=list(reversed(records)),
+            request_shapes=shapes,
+        )
+        self.assertEqual(json.dumps(first, sort_keys=True), json.dumps(second, sort_keys=True))
+        self.assertEqual(first["status"], "complete")
+        self.assertEqual(first["missing_counts"], 0)
+        without_digest = {key: value for key, value in first.items() if key != "digest"}
+        self.assertEqual(first["digest"], token_census._canonical_digest(without_digest))
+
+        with self.assertRaises(token_census.CensusError) as collision:
+            token_census.build_document(
+                identity=identity,
+                anchor=anchor,
+                records=records + [records[0]],
+                request_shapes=shapes,
+            )
+        self.assertEqual(collision.exception.code, "record_digest_collision")
+
+    def test_anchor_mismatch_stops_before_counting_the_set(self) -> None:
+        config = self._config()
+        output = self.root / "eval/results/baselines/census.json"
+        calls: list[bytes] = []
+
+        def counter(_settings, body: bytes) -> int:
+            if self._is_probe(body):
+                return 43
+            calls.append(body)
+            return token_census.ANCHOR_INPUT_TOKENS - 1
+
+        with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+            with self.assertRaises(token_census.CensusError) as error:
+                self._run(config, output=output, counter=counter)
+        self.assertEqual(error.exception.code, "anchor_token_count_mismatch")
+        self.assertEqual(error.exception.facts["observed"], 5312)
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(output.exists())
+        self.assertTrue(all(error.exception.facts["cleanup"].values()))
+
+    def test_census_counts_the_whole_set_and_writes_a_stable_result(self) -> None:
+        config = self._config()
+        output = self.root / "eval/results/baselines/census.json"
+        # The anchor is counted once up front and reused, so the two remaining
+        # inputs receive the two remaining values.
+        values = [token_census.ANCHOR_INPUT_TOKENS, 4001, 9000]
+        bodies: list[bytes] = []
+
+        def counter(_settings, body: bytes) -> int:
+            payload = json.loads(body)
+            self.assertEqual(payload["max_output_tokens"], 512)
+            self.assertNotIn("tools", payload)
+            if self._is_probe(body):
+                return 43
+            bodies.append(body)
+            return values[len(bodies) - 1]
+
+        with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+            summary = self._run(config, output=output, counter=counter)
+        self.assertEqual(len(bodies), 3)
+        self.assertEqual(summary["status"], "complete")
+        self.assertEqual(summary["missing_counts"], 0)
+        self.assertEqual(summary["anchor_input_tokens"], token_census.ANCHOR_INPUT_TOKENS)
+        self.assertTrue(all(summary["cleanup"].values()))
+
+        document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(document["digest"], summary["digest"])
+        self.assertEqual(
+            [record["e_final_sha256"] for record in document["records"]],
+            sorted(digest for _path, digest in self.bundles),
+        )
+        self.assertEqual(
+            sorted(record["input_tokens"] for record in document["records"]),
+            [4001, 5313, 9000],
+        )
+        for record in document["records"]:
+            self.assertEqual(
+                set(record), {"e_final_sha256", "status", "input_tokens", "fits"}
+            )
+        self.assertEqual(document["summary"]["context_windows"]["4k"]["fits"], 0)
+        self.assertEqual(document["summary"]["context_windows"]["8k"]["fits"], 2)
+        self.assertEqual(document["identity"]["generated_tokens"], 0)
+
+    def test_a_refused_anchor_stops_the_census(self) -> None:
+        config = self._config()
+        output = self.root / "eval/results/baselines/census.json"
+
+        def counter(_settings, body: bytes) -> int:
+            if self._is_probe(body):
+                return 43
+            raise token_census.RequestRejected({"http_status": 400})
+
+        with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+            with self.assertRaises(token_census.CensusError) as error:
+                self._run(config, output=output, counter=counter)
+        self.assertEqual(error.exception.code, "anchor_request_rejected")
+        self.assertFalse(output.exists())
+
+    def _server_config(self, fake: FakeApprovalServer) -> RuntimeConfig:
+        return RuntimeConfig(
+            self.paths,
+            _local_data(
+                fake.base_url,
+                model_path_value="eval-data/models/fixture.gguf",
+                model_sha256_value=self.model_sha256,
+                server_overrides={"binary": model_backed.CUDA_SERVER_RELATIVE_PATH},
+            ),
+            "0" * 64,
+        )
+
+    @staticmethod
+    def _error(status: int, error_type: str, message: str) -> tuple[int, dict]:
+        return status, {"error": {"message": message, "type": error_type, "code": status}}
+
+    def test_only_the_adapter_refusal_is_charged_to_the_sample(self) -> None:
+        """A generic 500 is a census failure, not a property of one input."""
+
+        queue: list[tuple[int, object]] = []
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            settings = settings_from_config(self._server_config(fake))
+            body = json.dumps({"input": ["fixture"]}).encode("utf-8")
+
+            queue.append((200, {"input_tokens": 77}))
+            self.assertEqual(token_census.count_input_tokens(settings, body), 77)
+
+            queue.append(
+                self._error(400, "invalid_request_error", "item['content'] is not an array")
+            )
+            with self.assertRaises(token_census.RequestRejected) as refused:
+                token_census.count_input_tokens(settings, body)
+            facts = refused.exception.facts
+            self.assertEqual(facts["http_status"], 400)
+            self.assertEqual(facts["error_type"], "invalid_request_error")
+            # Only a digest of the server text survives, never the text itself.
+            self.assertNotIn("message", facts)
+            self.assertEqual(
+                facts["message_sha256"],
+                hashlib.sha256(b"item['content'] is not an array").hexdigest(),
+            )
+
+            for status, error_type in ((500, "server_error"), (503, "unavailable_error")):
+                queue.append(self._error(status, error_type, "internal failure"))
+                with self.assertRaises(token_census.CensusError) as failure:
+                    token_census.count_input_tokens(settings, body)
+                self.assertEqual(failure.exception.code, "count_endpoint_unavailable")
+                self.assertEqual(failure.exception.facts["http_status"], status)
+                self.assertNotIn("message", failure.exception.facts)
+
+    def test_incomplete_census_is_reported_and_never_published(self) -> None:
+        """One refused input keeps the run from claiming a census result."""
+
+        output = self.root / "eval-data/local-approval/census-incomplete.json"
+        queue = [
+            (200, {"input_tokens": 43}),                       # opening probe
+            (200, {"input_tokens": token_census.ANCHOR_INPUT_TOKENS}),
+            self._error(400, "invalid_request_error", "item['content'] is not an array"),
+            (200, {"input_tokens": 43}),                       # probe after the refusal
+            (200, {"input_tokens": 9000}),
+        ]
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            config = self._server_config(fake)
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                summary = self._run(config, output=output, free_port=False)
+        self.assertEqual(summary["status"], "incomplete")
+        self.assertEqual(summary["missing_counts"], 1)
+        self.assertEqual(summary["summary"]["counted"], 2)
+        self.assertEqual(summary["summary"]["refused"], 1)
+
+        document = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(document["status"], "incomplete")
+        refused = next(r for r in document["records"] if r["status"] == "refused")
+        self.assertNotIn("input_tokens", refused)
+        self.assertNotIn("fits", refused)
+        self.assertNotIn("message", refused["refusal"])
+        self.assertNotIn(
+            "item['content']", output.read_text(encoding="utf-8")
+        )
+
+        # The tracked baseline name is reserved for a complete census.
+        with self.assertRaises(token_census.CensusError) as published:
+            token_census.write_document(
+                self.root / token_census.RESULT_RELATIVE_PATH, document
+            )
+        self.assertEqual(
+            published.exception.code, "incomplete_census_must_not_be_published"
+        )
+
+    def test_cli_exit_code_separates_complete_from_incomplete(self) -> None:
+        with contextlib.ExitStack() as stack:
+            paths = stack.enter_context(mock.patch.object(token_census, "RepoPaths"))
+            load = stack.enter_context(
+                mock.patch.object(token_census, "load_runtime_config")
+            )
+            run = stack.enter_context(mock.patch.object(token_census, "run_census"))
+            paths.discover.return_value = self.paths
+            load.return_value = mock.Mock(paths=self.paths)
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            run.return_value = {"status": "incomplete", "missing_counts": 1}
+            self.assertEqual(token_census.main(["--repo", str(self.root)]), INFRA_ERROR)
+            run.return_value = {"status": "complete", "missing_counts": 0}
+            self.assertEqual(token_census.main(["--repo", str(self.root)]), SUCCESS)
+
+    def test_probe_failure_after_a_refusal_fails_the_census(self) -> None:
+        """A service that stops answering is not a run of unservable inputs."""
+
+        output = self.root / "eval-data/local-approval/census-probe.json"
+        queue = [
+            (200, {"input_tokens": 43}),
+            (200, {"input_tokens": token_census.ANCHOR_INPUT_TOKENS}),
+            self._error(400, "invalid_request_error", "item['content'] is not an array"),
+            self._error(500, "server_error", "internal failure"),
+        ]
+        with FakeApprovalServer(count_handler=lambda _body: queue.pop(0)) as fake:
+            config = self._server_config(fake)
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                with self.assertRaises(token_census.CensusError) as error:
+                    self._run(config, output=output, free_port=False)
+        self.assertEqual(error.exception.code, "count_endpoint_probe_failed")
+        self.assertFalse(output.exists())
+
+    def test_no_private_directory_survives_a_failing_precondition(self) -> None:
+        config = self._config()
+        private_root = self.root / "eval-data/local-approval"
+        with mock.patch.object(
+            token_census,
+            "build_serve_command",
+            side_effect=ConfigError("frozen chat template is unavailable"),
+        ):
+            with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 3):
+                with self.assertRaises(ConfigError):
+                    self._run(
+                        config,
+                        output=self.root / "eval/results/baselines/census.json",
+                        counter=lambda _settings, _body: 1,
+                    )
+        leftovers = list(private_root.glob("census-*")) if private_root.exists() else []
+        self.assertEqual(leftovers, [])
 
 
 if __name__ == "__main__":

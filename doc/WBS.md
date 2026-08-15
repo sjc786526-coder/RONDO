@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**一条冻结的真实 `E_final` 实测 5,313 input tokens，在 4096 合同下被服务拒绝**，未产生结构化判定，能力保持 `linux_cuda_built_model_unvalidated`；4k 对全部 47 条真实归档的可行性尚未做 exact-token 验证。真实结构化推理、L3/L4 与 Local M3 均未完成，上下文预算需先定案（见 `doc/WBS/local-approval-model.md`）。 |
+| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地，真实模型已首次成功加载并通过 CUDA/身份/上下文核验。**exact-token 普查（WP3b-A2）未完成**：47 条中只有 24 条取得 token 数（min 5,313、max 18,921；按 `input+512` 这 24 条里 4k 适配 0 条、8k 适配 9 条），另 21 条已证实是 `reasoning` item 形状被 Responses adapter 拒绝、2 条为原因未定性的通用 500，因此没有全集分布。能力保持 `linux_cuda_built_model_unvalidated`。真实结构化推理、L3/L4 与 Local M3 均未完成；下一步是 static-payload 兼容而不是选档位（见 `doc/WBS/local-approval-model.md`）。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -37,10 +37,13 @@
 ### 工作包 3（当前）：三条线并行
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
-- **3b RONDO Local**：已实测的那条真实 `E_final` 为 5,313 input tokens，4k 合同装不下，
-  因此下一步先定案本地审批的上下文预算与真实证据的可服务口径（必要时先做 exact-token 普查），
-  再以 model-backed + 配置切换收口 Local M3，然后由 L5a 生成冻结教师标签、L3/L4 出未微调 baseline
-  与指标口径，之后 L5b/L6，最后 Local M4。
+- **3b RONDO Local**：exact-token 普查（WP3b-A2）**未完成**，47 条只拿到 24 条 token 数；
+  已证实的阻断是 21 条 `reasoning` item 形状被 adapter 拒绝，加大上下文不解决这 21 条，
+  另 2 条通用 500 原因未定性。因此下一步不是选上下文档位，而是先做
+  **provider-neutral static-payload 兼容**（对这 21 条的 item 形状定义版本化、所有 static consumer 一致的
+  合法投影，同步更新 L1 等价合同与测试），通过无模型门禁后重新授权并重跑 47/47 普查；
+  重跑若仍出现通用 500，继续 fail closed 并单独诊断，不预设兼容能解决那 2 条。
+  拿到全集分布再定档位，然后以 model-backed + 配置切换收口 Local M3，之后 L5a、L3/L4、L5b/L6，最后 Local M4。
 - **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
   付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
   真实 API 授权，不得用未运行或无效比较表述“未见退化”。
@@ -65,7 +68,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | 真实模型已首次加载；已测那条真实证据超出 4k | 无外部阻塞；上下文预算定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | 真实模型已首次加载；exact-token 普查只完成 24/47（21 条形状拒绝已证实，2 条 500 未定性） | 无外部阻塞；static-payload 兼容 → 重跑 47/47 普查 → 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），
