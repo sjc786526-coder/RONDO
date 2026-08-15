@@ -14,12 +14,15 @@
 已确证的有限事实：
 
 1. **长度（只覆盖那 24 条）**：min 5,313、p50 7,886、p90 11,105、p95 12,354、max 18,921。
-   按 `input+512`，4k 覆盖 0/24、8k 覆盖 9/24、12k 22/24、16k 23/24、24k 24/24。这些比例不适用于完整 47 条。
-2. **形状（阻断原因）**：21 条的 `reasoning` item 没有数组 `content`，被 Responses adapter 以
-   400 `invalid_request_error` 拒绝；另 2 条是通用 500，未定性。`/v1/responses` 与
-   `/v1/responses/input_tokens` 共用同一 converter（冻结源码 `server-context.cpp:4834-4849,5385-5428`、
-   `server-chat.cpp:217-224`），所以真实判定路径同样会被拒——加大上下文救不回这些条目。
-3. 全集当前可服务性上限：**4k 0/47、8k 9/47**。
+   按 `input+512`，这 24 条里 4k 适配 0 条、8k 9 条、12k 22 条、16k 23 条、24k 24 条。
+   **其余 23 条没有 token 数**，所以全集的 fit 数量、上限都给不出来。
+2. **21 条已定性**：其 `reasoning` item 没有数组 `content`，被 Responses adapter 以
+   400 `invalid_request_error` 拒绝。`/v1/responses` 与 `/v1/responses/input_tokens` 共用同一 converter
+   （冻结源码 `server-context.cpp:4834-4849,5385-5428`、`server-chat.cpp:217-224`），
+   所以真实判定路径同样会拒绝这 21 条——加大上下文救不回它们。
+3. **2 条未定性**：返回通用 500，即服务端对任意内部异常的兜底状态。是长度、形状、模板还是其他故障，
+   现有证据不能判定；这 2 条既没有 token 数也没有原因结论。整改后的实现遇到 500 会整次 fail closed，
+   重跑时需要单独诊断。
 
 Plan 023 锚点两次运行都精确复现 **5,313**。能力保持 `linux_cuda_built_model_unvalidated`，未新增资格证据。
 
@@ -34,8 +37,9 @@ Plan 023 锚点两次运行都精确复现 **5,313**。能力保持 `linux_cuda_
   `write_document()` 拒绝写入 tracked baseline 文件名。只有 adapter 的
   `400 invalid_request_error` 记为该条证据自身的拒绝；通用 500 与其他状态一律整次 census failure。
   每次拒绝后立即重跑合成短证据探针，服务不再健康就整体失败。
-- **错误信息守则（整改后）**：服务端 free text 一律不落盘、不打印，只保留 HTTP 状态、error type
-  与 message 的 SHA-256——没有任何过滤能证明服务端拼装的字符串不含证据片段。
+- **错误信息守则（整改后）**：服务端 free text 一律不落盘、不打印，只保留服务端错误对象里的结构化字段
+  （HTTP 状态、`type`、数值 `code`）与 message 的 SHA-256——没有任何过滤能证明服务端拼装的字符串
+  不含证据片段。
 - **`qualification.py`**：`_prepare_private_directory` 增加 `prefix` 形参（默认值不变）。
 - **`fake_server.py`**：补 `/v1/responses/input_tokens` 与可编程 `count_handler`，使 HTTP 分类、
   探针与发布门禁能在无模型条件下端到端回归。
