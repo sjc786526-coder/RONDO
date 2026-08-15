@@ -21,6 +21,7 @@ from typing import Any, Mapping
 
 from ..config import ConfigError, RuntimeConfig, load_local_model_secret
 from ..evidence import (
+    STATIC_DECISION_SCHEMA_NAME,
     EvidenceError,
     StaticApprovalPayload,
     validate_static_decision,
@@ -249,6 +250,13 @@ class LocalApprovalClient:
         self.settings = settings_from_config(config)
 
     def build_request(self, payload: StaticApprovalPayload) -> dict[str, Any]:
+        """Build the one real Local request from an accepted static payload v2.
+
+        The static payload validator is the only gate: this builder never edits
+        item shapes itself, so the exact bytes the token census counts are the
+        bytes the decision path would send.
+        """
+
         try:
             validate_static_payload(payload)
         except EvidenceError as exc:
@@ -266,7 +274,7 @@ class LocalApprovalClient:
             or not isinstance(task_input, list)
             or not isinstance(schema, dict)
         ):
-            raise ConfigError("static approval payload does not match schema v1")
+            raise ConfigError("static approval payload does not match schema v2")
         request: dict[str, Any] = {
             "model": self.settings.model_id,
             "instructions": f"{instructions}\n\nGuardian policy follows exactly:\n{policy}",
@@ -280,7 +288,8 @@ class LocalApprovalClient:
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "rondo_static_approval_v1",
+                    # Decision output schema; unrelated to the input payload version.
+                    "name": STATIC_DECISION_SCHEMA_NAME,
                     "strict": True,
                     "schema": schema,
                 },

@@ -131,17 +131,22 @@ fail-closed。
   已共享请求 builder；确认 linked worktree 的 `RepoPaths.common_root` 可直接只读访问主仓 ignored 归档。
 - 2026-08-14：按用户反馈精简执行合同；保留文档及时同步和关键结果边界，把具体中立消息形态、测试技巧、
   验证顺序及不必要的标识输出限制改为软建议或删除。
+- 2026-08-14：只读核对冻结 b10333 的 Responses adapter，确认拒绝原因是它要求 `reasoning.content` 为非空数组，
+  而 `message(role=assistant, content=[output_text])` 是它接受的形态，据此选定中立消息形态。
+- 2026-08-14：落地 static input payload v2：拆出 `STATIC_PAYLOAD_SCHEMA_VERSION=2` 与
+  `STATIC_DECISION_SCHEMA_NAME`（决策输出仍为 v1），reasoning 投影只发生在公共 `build_static_payload()`，
+  终端 validator 拒绝 v1 payload、残留 `type=reasoning` 与任何 `encrypted_content`。
+- 2026-08-14：补 focused regressions（evidence 5 项、client 1 项、census 1 项），并以逐字节相等证明
+  token census 的请求就是 Local client v2 builder 的产物。
+- 2026-08-14：focused tests 106/106、`just eval-lock` 通过；47/47 归档完成无网络无模型的只读静态构造检查。
 
 ### 当前工作
 
-- Execplan 已就绪，等待 Claude 在本 worktree 按合同实现并提交。
+- 实现、测试、文档与日志已完成，等待 Codex 独立审查。
 
 ### 本任务剩余步骤
 
-- 落地 static payload v2 与 reasoning 白名单投影。
-- 更新必要 consumer/census 调用点并补 focused regressions。
-- 通过 focused tests、`just eval-lock` 和 47/47 只读静态构造检查。
-- 完成精炼文档/日志、范围检查和任务分支提交，交由 Codex 独立验收。
+- 无。交由 Codex 独立验收；合并与推送由用户决定。
 
 ### 阻塞项
 
@@ -149,7 +154,12 @@ fail-closed。
 
 ### 当前验收状态
 
-- 未开始实现；没有运行测试、模型、Cargo、Docker、API 或全量 eval。
+- 已运行：`tests/test_contracts_and_evidence.py` 与 `tests/test_local_approval.py` 共 106/106 通过；
+  `just eval-lock`（85 packages）通过；`tests.test_terminal_bench` 中唯一消费 `policy_identity` 的用例 1/1 通过；
+  47/47 只读静态构造检查通过（47 份 payload v2、三 consumer 逐字节一致、47 条 Local 请求构造成功，
+  21 份归档的 24 个 encrypted-only reasoning item 全部移除，出站请求无 `reasoning`、无 `encrypted_content`）。
+- 未运行：真实模型、GPU、census 重跑、Cargo、Docker、云 API、全量 eval tests。
+  因此本次只证明静态构造与合同等价，**不证明**那 21 份在真实 b10333 上可服务，也不涉及那 2 条通用 500。
 
 ### 交接边界
 

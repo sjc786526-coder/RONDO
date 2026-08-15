@@ -631,3 +631,25 @@ standard/Lite 形态均补回归。
   tests 115/115 与 `just eval-lock` 通过，模型进程、8080、receipt、private objects 和 GPU compute process 均无残留。
   任务分支以 `3edf08a` 合入并推送 `main`，worktree 已移除，分支保留为
   `zz-done/023-local-4k-qualification`。后续上下文预算与真实证据可服务口径只由当前 WBS 承接。
+
+### 2026-08-14 Plan 025 WP3b-A2a provider-neutral static payload v2
+
+- **成果**：static input payload 显式升为 v2（`STATIC_PAYLOAD_SCHEMA_VERSION=2`），与结构化决策输出 schema
+  （仍为 `rondo_static_approval_v1`）拆成两份语义清楚的合同；v1 payload 与 v1 policy identity 都不能通过 v2 sink。
+- **投影边界**：`reasoning` 规范化只发生在公共 `build_static_payload()`。明确公开的 `summary_text` /
+  `reasoning_text` / `text` 按原序原样转成一条普通 `message(role=assistant, content=[output_text…])`；
+  没有公开内容、只承载原 provider 连续性的 encrypted-only item 直接移除；未知字段、非法子类型、
+  非字符串文本等形状继续 fail-closed。`encrypted_content` 与 provider session `id` 不出站，
+  终端 validator 另行拒绝任何残留 `type=reasoning` 与 `encrypted_content` 回流。
+- **形态依据**：只读核对冻结 b10333 源码，确认其 Responses adapter 要求 `reasoning.content` 为非空数组
+  （因此拒绝这 24 个 item），而 assistant + `output_text` 是它接受的形态，同时对云端 provider 也是中立形态。
+- **共用请求构造**：Local client 与 token census 共用同一 v2 request builder，回归以逐字节相等证明
+  census 计数的就是真实判定路径会发送的请求。
+- **验收（全部本地、无真实 API、无 Docker、无模型、无 GPU）**：`tests/test_contracts_and_evidence.py` 与
+  `tests/test_local_approval.py` 共 106/106 通过；`just eval-lock` 85 packages 通过；47/47 真实归档完成
+  只读静态构造检查 —— 47 份 payload v2、三 consumer 逐字节一致、47 条 Local 请求构造成功，
+  21 份归档的 24 个 encrypted-only item 全部移除，出站请求无 `reasoning`、无 `encrypted_content`。
+  检查未输出正文、正文派生内容或完整请求体。
+- **边界**：这只是构造层与合同层结论。没有重跑 exact-token 普查，没有真实模型证据，
+  因此不主张那 21 条在真实 b10333 上可服务，也不涉及那 2 条通用 500；capability 仍为
+  `linux_cuda_built_model_unvalidated`，census baseline 仍不存在。

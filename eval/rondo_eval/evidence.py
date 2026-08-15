@@ -1,4 +1,12 @@
-"""Fail-closed Standard/Lite E_final parsing for static approval consumers."""
+"""Fail-closed Standard/Lite E_final parsing for static approval consumers.
+
+The static payload built here is the one logical request every static consumer
+sends, so it may only contain content each of them can consume.  Schema v2 adds
+the `reasoning` projection: an OpenAI Responses `reasoning` item is transport
+for the provider that produced it, not evidence, and other providers refuse it
+outright.  `build_static_payload()` is therefore the single place where those
+items are normalized, and no consumer may repeat or relax that work.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +17,12 @@ from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
 
-STATIC_SCHEMA_VERSION = 1
+# Version of the provider-neutral static *input* payload built by this module.
+STATIC_PAYLOAD_SCHEMA_VERSION = 2
+# Name of the structured *decision output* schema.  It is a different contract
+# from the input payload above and is already recorded in published
+# qualification evidence, so it stays at v1 while the input payload moves to v2.
+STATIC_DECISION_SCHEMA_NAME = "rondo_static_approval_v1"
 StaticApprovalConsumer = Literal["luna-static", "sol-static", "local-static"]
 STATIC_APPROVAL_CONSUMERS: tuple[StaticApprovalConsumer, ...] = (
     "luna-static",
@@ -34,6 +47,25 @@ STATIC_DECISION_SCHEMA: dict[str, Any] = {
         },
     },
     "required": ["outcome", "rationale", "risk_tags"],
+}
+
+
+# Wire fields the frozen `ResponseItem::Reasoning` variant can carry.
+_REASONING_FIELDS = frozenset(
+    {
+        "type",
+        "id",
+        "summary",
+        "content",
+        "encrypted_content",
+        "internal_chat_message_metadata_passthrough",
+    }
+)
+# Reasoning fragments whose text is public model output rather than opaque
+# provider transport.
+_REASONING_PUBLIC_TEXT_TYPES: dict[str, frozenset[str]] = {
+    "summary": frozenset({"summary_text"}),
+    "content": frozenset({"reasoning_text", "text"}),
 }
 
 
@@ -65,22 +97,24 @@ def policy_identity(e_final: Mapping[str, Any]) -> PolicyIdentity:
     try:
         shape, policy, _ = _extract(e_final)
     except EvidenceError as exc:
-        return PolicyIdentity(STATIC_SCHEMA_VERSION, "unknown", None, "unknown", str(exc))
+        return PolicyIdentity(
+            STATIC_PAYLOAD_SCHEMA_VERSION, "unknown", None, "unknown", str(exc)
+        )
     digest = hashlib.sha256(policy.encode("utf-8")).hexdigest()
-    return PolicyIdentity(STATIC_SCHEMA_VERSION, shape, digest, "known")
+    return PolicyIdentity(STATIC_PAYLOAD_SCHEMA_VERSION, shape, digest, "known")
 
 
 def build_static_payload(e_final: Mapping[str, Any]) -> StaticApprovalPayload:
     shape, policy, task_input = _extract(e_final)
     identity = PolicyIdentity(
-        STATIC_SCHEMA_VERSION,
+        STATIC_PAYLOAD_SCHEMA_VERSION,
         shape,
         hashlib.sha256(policy.encode("utf-8")).hexdigest(),
         "known",
     )
-    cleaned_input = [_strip_transport_metadata(item) for item in task_input]
+    cleaned_input = _neutral_items(task_input)
     logical = {
-        "schema_version": STATIC_SCHEMA_VERSION,
+        "schema_version": STATIC_PAYLOAD_SCHEMA_VERSION,
         "instructions": STATIC_INSTRUCTIONS,
         "guardian_policy": policy,
         "input": cleaned_input,
@@ -114,27 +148,27 @@ def validate_static_payload(payload: StaticApprovalPayload) -> None:
         "input",
         "output_schema",
     }:
-        raise EvidenceError("static approval payload fields do not match schema v1")
-    if logical["schema_version"] != STATIC_SCHEMA_VERSION or isinstance(
+        raise EvidenceError("static approval payload fields do not match schema v2")
+    if logical["schema_version"] != STATIC_PAYLOAD_SCHEMA_VERSION or isinstance(
         logical["schema_version"], bool
     ):
-        raise EvidenceError("static approval payload schema version is invalid")
+        raise EvidenceError("static approval payload schema version is not v2")
     if logical["instructions"] != STATIC_INSTRUCTIONS:
-        raise EvidenceError("static approval instructions differ from schema v1")
+        raise EvidenceError("static approval instructions differ from schema v2")
     policy = logical["guardian_policy"]
     if not isinstance(policy, str) or not policy:
         raise EvidenceError("static approval guardian policy is invalid")
     if not isinstance(logical["input"], list):
         raise EvidenceError("static approval input must be an array")
     if logical["output_schema"] != STATIC_DECISION_SCHEMA:
-        raise EvidenceError("static approval output schema differs from schema v1")
+        raise EvidenceError("static approval output schema differs from the decision contract")
     _reject_private_transport(logical)
 
     identity = payload.policy_identity
     expected_sha256 = hashlib.sha256(policy.encode("utf-8")).hexdigest()
     if (
         not isinstance(identity, PolicyIdentity)
-        or identity.schema_version != STATIC_SCHEMA_VERSION
+        or identity.schema_version != STATIC_PAYLOAD_SCHEMA_VERSION
         or identity.request_shape not in {"standard", "responses_lite"}
         or identity.status != "known"
         or identity.reason is not None
@@ -249,6 +283,74 @@ def _developer_text(value: Any) -> str | None:
     return text if isinstance(text, str) else None
 
 
+def _neutral_items(items: list[Any]) -> list[Any]:
+    """Normalize the task input; `reasoning` is the only projected item shape.
+
+    Every other item keeps its existing v1 semantics, order and text.  This is
+    the only place a `reasoning` item is normalized: consumers receive the
+    result and must not re-derive it.
+    """
+
+    neutral: list[Any] = []
+    for item in items:
+        if isinstance(item, Mapping) and item.get("type") == "reasoning":
+            projected = _project_reasoning_item(item)
+            if projected is not None:
+                neutral.append(projected)
+            continue
+        neutral.append(_strip_transport_metadata(item))
+    return neutral
+
+
+def _project_reasoning_item(item: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Project one `reasoning` item onto the neutral evidence form, or drop it.
+
+    `encrypted_content` is opaque transport only the originating provider can
+    read, and `id` identifies that provider's session; neither is evidence, so
+    neither leaves this boundary.  Public `summary`/`content` text is model
+    output the archive already holds in the clear, so it is carried over
+    verbatim and in wire order as one ordinary assistant message.  An item with
+    no public text carries no evidence and is dropped.  Every other shape is
+    refused: an item that might have been dropped anyway is still an item this
+    boundary does not understand.
+    """
+
+    if set(item) - _REASONING_FIELDS:
+        raise EvidenceError("reasoning item has unknown fields")
+    summary = item.get("summary")
+    content = item.get("content")
+    if not isinstance(summary, list):
+        raise EvidenceError("reasoning item summary must be an array")
+    if content is not None and not isinstance(content, list):
+        raise EvidenceError("reasoning item content must be an array, null, or absent")
+    if not isinstance(item.get("encrypted_content"), (str, type(None))):
+        raise EvidenceError("reasoning item encrypted_content must be a string or null")
+    if not isinstance(item.get("id"), (str, type(None))):
+        raise EvidenceError("reasoning item id must be a string or absent")
+    texts = [
+        *(_reasoning_public_text(part, "summary") for part in summary),
+        *(_reasoning_public_text(part, "content") for part in content or ()),
+    ]
+    if not texts:
+        return None
+    return {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": text} for text in texts],
+    }
+
+
+def _reasoning_public_text(part: Any, field: str) -> str:
+    if (
+        not isinstance(part, Mapping)
+        or set(part) != {"type", "text"}
+        or part["type"] not in _REASONING_PUBLIC_TEXT_TYPES[field]
+        or not isinstance(part["text"], str)
+    ):
+        raise EvidenceError(f"reasoning item {field} entry is not public text")
+    return part["text"]
+
+
 def _strip_transport_metadata(value: Any) -> Any:
     if isinstance(value, list):
         return [_strip_transport_metadata(item) for item in value]
@@ -277,6 +379,10 @@ def _reject_private_transport(value: Any) -> None:
         return
     if value.get("type") == "additional_tools":
         raise EvidenceError("static approval payload contains additional_tools")
+    if value.get("type") == "reasoning":
+        raise EvidenceError("static approval payload contains an unprojected reasoning item")
+    if "encrypted_content" in value:
+        raise EvidenceError("static approval payload contains encrypted_content")
     if "tools" in value and (
         value.get("type") != "tool_search_output" or not isinstance(value["tools"], list)
     ):

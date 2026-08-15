@@ -22,7 +22,10 @@ from rondo_eval.contracts import (  # noqa: E402
 )
 from rondo_eval.evidence import (  # noqa: E402
     STATIC_APPROVAL_CONSUMERS,
+    STATIC_DECISION_SCHEMA_NAME,
+    STATIC_PAYLOAD_SCHEMA_VERSION,
     EvidenceError,
+    PolicyIdentity,
     StaticApprovalPayload,
     build_static_payload,
     policy_identity,
@@ -62,16 +65,38 @@ TASK_INPUT = [
 ]
 
 
-def standard_request() -> dict:
+# The archived encrypted-only shape: no `content`, empty `summary`, one opaque
+# provider transport string.  Synthetic bytes; no archived body is copied here.
+ENCRYPTED_ONLY_REASONING = {
+    "type": "reasoning",
+    "summary": [],
+    "encrypted_content": "opaque-provider-transport",
+}
+PUBLIC_REASONING = {
+    "type": "reasoning",
+    "id": "rs_provider_session",
+    "summary": [
+        {"type": "summary_text", "text": "first public summary"},
+        {"type": "summary_text", "text": "second public summary"},
+    ],
+    "content": [
+        {"type": "reasoning_text", "text": "public reasoning text"},
+        {"type": "text", "text": "public plain text"},
+    ],
+    "encrypted_content": "opaque-provider-transport",
+}
+
+
+def standard_request(task_input: list | None = None) -> dict:
     return {
         "model": "gpt-5.6-luna",
         "instructions": POLICY,
         "tools": [{"type": "function", "name": "shell"}],
-        "input": TASK_INPUT,
+        "input": [*(TASK_INPUT if task_input is None else task_input)],
     }
 
 
-def lite_request() -> dict:
+def lite_request(task_input: list | None = None) -> dict:
     return {
         "model": "gpt-5.6-luna",
         "input": [
@@ -85,9 +110,22 @@ def lite_request() -> dict:
                 "role": "developer",
                 "content": [{"type": "input_text", "text": POLICY}],
             },
-            *TASK_INPUT,
+            *(TASK_INPUT if task_input is None else task_input),
         ],
     }
+
+
+def forged_payload(payload: StaticApprovalPayload, logical: dict) -> StaticApprovalPayload:
+    """Re-canonicalize an edited logical payload so only the edit is under test."""
+
+    canonical = json.dumps(
+        logical,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return StaticApprovalPayload(payload.policy_identity, canonical, logical)
 
 
 class EvidenceTests(unittest.TestCase):
@@ -105,6 +143,113 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn("approval reason: retry was denied", standard.canonical_bytes.decode())
         self.assertIn("turn_id", standard.canonical_bytes.decode())
         self.assertEqual(serialized["input"][1]["type"], "function_call")
+
+    def test_static_input_payload_declares_v2_and_v1_cannot_pass_the_sink(self) -> None:
+        payload = build_static_payload(standard_request())
+
+        self.assertEqual(STATIC_PAYLOAD_SCHEMA_VERSION, 2)
+        self.assertEqual(payload.logical_payload["schema_version"], 2)
+        self.assertEqual(payload.policy_identity.schema_version, 2)
+        # The structured decision output is a different contract and stays v1.
+        self.assertEqual(STATIC_DECISION_SCHEMA_NAME, "rondo_static_approval_v1")
+
+        stale_body = forged_payload(
+            payload, {**payload.logical_payload, "schema_version": 1}
+        )
+        with self.assertRaises(EvidenceError):
+            validate_static_payload(stale_body)
+
+        stale_identity = StaticApprovalPayload(
+            PolicyIdentity(
+                1,
+                payload.policy_identity.request_shape,
+                payload.policy_identity.sha256,
+                "known",
+            ),
+            payload.canonical_bytes,
+            payload.logical_payload,
+        )
+        with self.assertRaises(EvidenceError):
+            validate_static_payload(stale_identity)
+
+    def test_encrypted_only_reasoning_is_dropped_for_all_three_consumers(self) -> None:
+        with_reasoning = [TASK_INPUT[0], ENCRYPTED_ONLY_REASONING, *TASK_INPUT[1:]]
+        standard = build_static_payload(standard_request(with_reasoning))
+        lite = build_static_payload(lite_request(with_reasoning))
+        without_reasoning = build_static_payload(standard_request())
+
+        # Dropping the item is exactly equivalent to it never being there.
+        self.assertEqual(standard.canonical_bytes, without_reasoning.canonical_bytes)
+        self.assertEqual(standard.canonical_bytes, lite.canonical_bytes)
+        consumer_bytes = {
+            consumer: static_payload_bytes_for_consumer(standard, consumer)
+            for consumer in STATIC_APPROVAL_CONSUMERS
+        }
+        self.assertEqual(
+            set(consumer_bytes), {"luna-static", "sol-static", "local-static"}
+        )
+        self.assertEqual(len(set(consumer_bytes.values())), 1)
+        decoded = consumer_bytes["local-static"].decode()
+        self.assertNotIn("reasoning", decoded)
+        self.assertNotIn("encrypted_content", decoded)
+        self.assertNotIn("opaque-provider-transport", decoded)
+
+    def test_public_reasoning_text_becomes_one_neutral_message_in_order(self) -> None:
+        with_reasoning = [PUBLIC_REASONING, *TASK_INPUT]
+        standard = build_static_payload(standard_request(with_reasoning))
+        lite = build_static_payload(lite_request(with_reasoning))
+
+        self.assertEqual(standard.canonical_bytes, lite.canonical_bytes)
+        items = standard.logical_payload["input"]
+        self.assertEqual(
+            items[0],
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "first public summary"},
+                    {"type": "output_text", "text": "second public summary"},
+                    {"type": "output_text", "text": "public reasoning text"},
+                    {"type": "output_text", "text": "public plain text"},
+                ],
+            },
+        )
+        # The remaining evidence keeps its order and its existing semantics.
+        self.assertEqual(
+            items[1:], build_static_payload(standard_request()).logical_payload["input"]
+        )
+        decoded = standard.canonical_bytes.decode()
+        self.assertNotIn("opaque-provider-transport", decoded)
+        self.assertNotIn("encrypted_content", decoded)
+        self.assertNotIn("rs_provider_session", decoded)
+
+    def test_unknown_or_malformed_reasoning_shapes_are_fail_closed(self) -> None:
+        invalid_items = (
+            {"type": "reasoning", "summary": [], "encrypted_content": 7},
+            {"type": "reasoning", "summary": {}, "encrypted_content": "opaque"},
+            {"type": "reasoning", "summary": [], "content": "not-an-array"},
+            {"type": "reasoning", "summary": [], "id": 7},
+            {"type": "reasoning", "summary": [], "unmapped_future_field": "x"},
+            {"type": "reasoning", "summary": [{"type": "summary_text"}]},
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": 7}]},
+            {"type": "reasoning", "summary": [{"type": "encrypted_summary", "text": "x"}]},
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "x", "extra": 1}],
+            },
+            {"type": "reasoning", "summary": ["plain string"]},
+            {
+                "type": "reasoning",
+                "summary": [],
+                "content": [{"type": "summary_text", "text": "wrong subtype"}],
+            },
+        )
+        for item in invalid_items:
+            with self.subTest(item=item):
+                with self.assertRaises(EvidenceError):
+                    build_static_payload(standard_request([item, *TASK_INPUT]))
+                with self.assertRaises(EvidenceError):
+                    build_static_payload(lite_request([item, *TASK_INPUT]))
 
     def test_policy_hash_uses_exact_utf8_bytes(self) -> None:
         first = policy_identity(standard_request())
@@ -231,21 +376,18 @@ class EvidenceTests(unittest.TestCase):
                     }
                 }
             ),
+            lambda logical: logical["input"].append(copy.deepcopy(ENCRYPTED_ONLY_REASONING)),
+            lambda logical: logical["input"].append(copy.deepcopy(PUBLIC_REASONING)),
+            lambda logical: logical["input"][0].update(
+                {"encrypted_content": "opaque-provider-transport"}
+            ),
         )
         for mutate in mutations:
             with self.subTest(mutate=mutate):
                 logical = copy.deepcopy(payload.logical_payload)
                 mutate(logical)
-                canonical = json.dumps(
-                    logical,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                ).encode("utf-8")
-                forged = StaticApprovalPayload(payload.policy_identity, canonical, logical)
                 with self.assertRaises(EvidenceError):
-                    validate_static_payload(forged)
+                    validate_static_payload(forged_payload(payload, logical))
 
 
 class ContractTests(unittest.TestCase):
