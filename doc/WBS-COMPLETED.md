@@ -836,7 +836,9 @@ standard/Lite 形态均补回归。
   labels 与 metadata 同步篡改回归也 fail-closed。独立验收发现 prepare 曾把四位归档槽位误作 `review_id`；
   已改为从通过 schema 检查的 production meta 取独立身份并补回归。focused unittest **13/13** 与
   `py_compile` 通过，当前 47 条无写入 prepare 重算得到与冻结批次相同的 manifest / outbound / receipt 哈希，
-  真实批次 verify / summarize 继续幂等通过并得到 `ready_for_l3=true`。
+  真实批次 verify / summarize 继续幂等通过并得到 `ready_for_l3=true`。最终独立验收结论为
+  **验收通过、任务目标完成**，报告见
+  `agent_log/2026-08-15-071427-plan032-final-independent-acceptance.md`。
 - **数据边界**：完整 manifest、canonical outbound、原始返回、attempt provenance、标签与导入元数据只在
   ignored `eval-data/teacher-labels/20260815-sol-teacher-labels-v1/`（目录 0700、文件 0600）；tracked 仅保存
   prompt、schema、轻量实现/测试、文档和不含正文、source path、逐条 semantic id、逐条 holdout 明细的

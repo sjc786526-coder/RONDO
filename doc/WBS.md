@@ -88,7 +88,7 @@
 | 2 | 本地审批模型接入与横评 | Local | static payload v3、47/47 exact-token、12k model-backed、L7 / Local M3 与 L5a 首批 40 条 Sol 教师标签均已完成 | L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
-- **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（12k model-backed → LoRA → 横评已成链），
+- **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L3/L4 → L5b/L6 → Local M4 已成链），
   而 Multi 的首个增量还待定（D1），不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
