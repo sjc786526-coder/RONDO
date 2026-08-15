@@ -631,3 +631,20 @@ standard/Lite 形态均补回归。
   tests 115/115 与 `just eval-lock` 通过，模型进程、8080、receipt、private objects 和 GPU compute process 均无残留。
   任务分支以 `3edf08a` 合入并推送 `main`，worktree 已移除，分支保留为
   `zz-done/023-local-4k-qualification`。后续上下文预算与真实证据可服务口径只由当前 WBS 承接。
+
+### 2026-08-14 Plan 025 WP3b-A2a provider-neutral static payload v2
+
+- **成果**：static input payload 显式升为 v2，结构化决策输出 schema 保持 v1；reasoning 规范化只发生在
+  公共 `build_static_payload()`，Luna/Sol/Local 三个 static consumer 获得相同 canonical bytes，Local client
+  与 token census 共用同一 v2 request builder。
+- **公开与私有边界**：只有 `summary[].summary_text` 按原文与顺序转成中立 assistant 证据；
+  `content[].reasoning_text`/`text` 按冻结 Codex 语义作为 raw reasoning 校验后丢弃。encrypted/provider id、
+  warehouse-only metadata 与 tool authorization 字段不出站；未知或 malformed reasoning 形状 fail-closed。
+- **审查闭环**：独立审查先后发现 raw content 误投影、passthrough metadata 外层及 executed-call 元素校验缺口，
+  均以窄整改和直接回归闭合；没有增加 provider-specific fallback、长期审计设施或新 schema registry。
+- **验收**：最终独立复跑 focused tests 109/109、eval lock 85 packages 与 47/47 真实归档聚合式只读构造通过；
+  47 个 v2 payload、三 consumer bytes 和 47 条 Local request 均构造成功，24 个无公开 summary 的 reasoning item
+  全部删除，出站无 `type=reasoning` 或 `encrypted_content`。检查未输出正文或完整请求体。
+- **边界**：未运行真实模型、GPU、census、Cargo、Docker、云 API 或全量 eval；不据此宣称那 21 条已在
+  b10333 上可服务，也未触及 2 条通用 500。capability 保持 `linux_cuda_built_model_unvalidated`，
+  exact-token census baseline 仍不存在；后续重跑与档位选择只按当前 WBS 推进。

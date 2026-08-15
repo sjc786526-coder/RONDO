@@ -47,7 +47,7 @@
   `reasoning_text` / `text` 按冻结 Codex 语义属于默认隐藏的 raw reasoning，只校验形状后丢弃，
   没有公开 summary 的 item 整项删除；未知或歧义形状继续 fail-closed，`encrypted_content` 与
   provider session id 一律不出站。输入 payload 版本与结构化**决策输出** schema
-  （仍为 `rondo_static_approval_v1`）是两份合同，不随动。**该 v2 实现仍待独立复审通过**。
+  （仍为 `rondo_static_approval_v1`）是两份合同，不随动。该 v2 实现已通过独立复审。
 - **L2 的 CPU 与 Linux CUDA model-free 运行闭包均已就绪**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 runtime closure、Responses client、
   doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
@@ -80,15 +80,15 @@
      其余 23 条的 token 数未知，因此全集的 fit 数量无法给出，也不存在已证明的全集上限。
   2. **21 条已定性并已做兼容**：其 `reasoning` item 没有数组 `content`，被 Responses adapter 以 400 拒绝
      （b10333 要求 `reasoning.content` 是非空数组），加大上下文救不回这 21 条。static payload v2 已在公共
-     builder 内移除这 24 个 encrypted-only item（实现待复审），47/47 现可完成只读静态构造；
+     builder 内移除这 24 个 encrypted-only item，47/47 现可完成只读静态构造；
      **这是构造层结论，真实可服务性要等重跑普查才成立**。
   3. **2 条未定性**：旧运行中返回通用 500。该状态是服务端对任意内部异常的兜底，
      现有证据不能判定它与长度、形状、模板还是其他故障有关；这 2 条既没有 token 数，也没有原因结论。
 - **设施与运行的版本边界**：两次真实运行（结果一致、锚点 5,313）属于 `6b36d05` **之前**的实现。
   整改后的当前代码只通过无模型回归，尚未真实运行过。
-- **static-payload 兼容实现已落地、待复审，下一步仍不是选档位**：投影只做在公共 builder，没有为 llama.cpp
+- **static-payload 兼容已完成，下一步仍不是选档位**：投影只做在公共 builder，没有为 llama.cpp
   做隐蔽的 provider-specific 删减；Local client 与 token census 共用同一 v2 request builder（逐字节相等已回归）。
-  复审通过后重新申请一次真实模型授权、重跑 47/47 普查；重跑若仍出现通用 500，继续 fail closed 并单独诊断，
+  下一步重新申请一次真实模型授权、重跑 47/47 普查；重跑若仍出现通用 500，继续 fail closed 并单独诊断，
   不预先承诺兼容能解决那 2 条。拿到全集分布后才定上下文档位。
   在此之前不冻结 8k/12k/16k/24k 任何档位，也不把“只用合成证据、真实证据只取可服务子集”设为默认路线。
 - **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
@@ -102,7 +102,7 @@
 
 ### 当前推进顺序
 
-1. provider-neutral static-payload 兼容待复审通过；随后重跑 47/47 exact-token 普查（需真实模型授权），
+1. provider-neutral static-payload 兼容已完成；随后重跑 47/47 exact-token 普查（需真实模型授权），
    然后才定上下文档位（当前阻塞点，见上文）。
 2. 按定案后的合同完成 model-backed smoke，记录加载身份、显存峰值、首 token 与结构化输出；
    资格设施、证据 schema 与 capability 投影已就绪，只需按新合同重跑并生成版本化证据。
@@ -332,7 +332,7 @@ prompt 是少数能被完全冻结的部分，必须冻死。
 **证据来源：合成证据做主体，真实 `E_final` 做锚点，两组分开记录、不混算。**
 
 - 现实约束：全项目目前只有 **47 条真实 `E_final`**（分布在 24 个 run 目录，内容互异），
-  其中目前只有 **24 条被冻结本地运行时接受过计数请求**（见上文；static payload v2 兼容待复审，
+  其中目前只有 **24 条被冻结本地运行时接受过计数请求**（见上文；static payload v2 兼容已完成，
   实际可服务条数以重跑普查为准），锚点规模按实际可用条数计而不是 47；
   按稳定语义哈希规则预估切分后 holdout 约 20 条；**实际数量必须以尚待生成的冻结 manifest 为准**。
   无论最终数量多少，它都撑不起 200—300 条的判定规模，且这 47 条全部来自 TB 2.1 任务运行，审批情境单一。

@@ -154,14 +154,16 @@ fail-closed。
   每个 call 必须是键恰为 `{name, arguments}`、`name` 为字符串的对象，`arguments` 保持任意 JSON，
   校验后 metadata 仍整体删除；补 1 项正向与 5 项畸形回归，并修正两处文档勘误。
 - 2026-08-14：补充整改后 focused tests 109/109、`just eval-lock` 通过；47/47 只读静态构造检查结果不变。
+- 2026-08-14：最终独立复审确认 F1/F2 及补充整改全部闭环，未发现新的任务内阻断；独立复跑
+  focused tests 109/109、eval lock 与 47/47 聚合式只读构造均通过，任务验收通过。
 
 ### 当前工作
 
-- 窄整改、补充整改、回归与文档修正已完成，等待独立复审。
+- 任务已通过独立复审并完成；本计划冻结，后续路线只由两份 WBS 承接。
 
 ### 本任务剩余步骤
 
-- 交由 Codex 独立复审；复审通过后才写 `doc/WBS-COMPLETED.md` 完成记录，合并与推送由用户决定。
+- 无。完成记录已写入 `doc/WBS-COMPLETED.md`；合并与推送由用户决定。
 
 ### 阻塞项
 
@@ -169,11 +171,12 @@ fail-closed。
 
 ### 当前验收状态
 
-- 首轮独立审查不通过；窄整改后待复审，因此本任务尚未收口，`doc/WBS-COMPLETED.md` 暂不写完成记录。
-- 已运行（补充整改后）：`tests/test_contracts_and_evidence.py` 与 `tests/test_local_approval.py` 共 109/109 通过；
-  `just eval-lock`（85 packages）通过；`tests.test_terminal_bench` 中唯一消费 `policy_identity` 的用例 1/1 通过；
-  47/47 只读静态构造检查通过（47 份 payload v2、三 consumer 逐字节一致、47 条 Local 请求构造成功，
+- 最终独立复审通过；F1（raw reasoning 误投影）与 F2（passthrough metadata 形状校验）均已闭环。
+- 最终独立复审复跑：`tests/test_contracts_and_evidence.py` 与 `tests/test_local_approval.py` 共 109/109 通过；
+  `just eval-lock`（85 packages）与 47/47 只读静态构造检查通过（47 份 payload v2、三 consumer 逐字节一致、
+  47 条 Local 请求构造成功，
   21 份归档的 24 个 encrypted-only reasoning item 全部移除，出站请求无 `reasoning`、无 `encrypted_content`）。
+- 执行者另行运行了 `tests.test_terminal_bench` 中唯一消费 `policy_identity` 的用例，1/1 通过。
 - 未运行：真实模型、GPU、census 重跑、Cargo、Docker、云 API、全量 eval tests。
   因此本次只证明静态构造与合同等价，**不证明**那 21 份在真实 b10333 上可服务，也不涉及那 2 条通用 500。
 
