@@ -833,8 +833,10 @@ standard/Lite 形态均补回归。
 - **生成与校验**：一个完整批次后，16 条仅因首次传输失败按完全相同 prompt 与输入定向重试一次；
   `schema_invalid=0`，没有因判定内容重试。严格终检重新计算 semantic identity、代表关系、canonical
   payload 与用途绑定，并绑定 prepare receipt 及当前 tracked prompt/schema/census；summary 会重跑完整 verify，
-  labels 与 metadata 同步篡改回归也 fail-closed。focused unittest **12/12** 与 `py_compile` 通过，真实批次
-  verify / summarize 两次幂等通过并得到 `ready_for_l3=true`。
+  labels 与 metadata 同步篡改回归也 fail-closed。独立验收发现 prepare 曾把四位归档槽位误作 `review_id`；
+  已改为从通过 schema 检查的 production meta 取独立身份并补回归。focused unittest **13/13** 与
+  `py_compile` 通过，当前 47 条无写入 prepare 重算得到与冻结批次相同的 manifest / outbound / receipt 哈希，
+  真实批次 verify / summarize 继续幂等通过并得到 `ready_for_l3=true`。
 - **数据边界**：完整 manifest、canonical outbound、原始返回、attempt provenance、标签与导入元数据只在
   ignored `eval-data/teacher-labels/20260815-sol-teacher-labels-v1/`（目录 0700、文件 0600）；tracked 仅保存
   prompt、schema、轻量实现/测试、文档和不含正文、source path、逐条 semantic id、逐条 holdout 明细的

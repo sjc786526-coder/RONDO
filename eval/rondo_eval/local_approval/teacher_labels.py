@@ -508,8 +508,10 @@ def _read_meta(
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise TeacherLabelsError("evidence_meta_invalid") from exc
-    review_id = Path(relative_path).parts[-2]
     if not isinstance(value, dict):
+        raise TeacherLabelsError("evidence_meta_invalid")
+    review_id = value.get("review_id")
+    if not isinstance(review_id, str) or not review_id:
         raise TeacherLabelsError("evidence_meta_invalid")
     try:
         validate_production_guardian_meta(

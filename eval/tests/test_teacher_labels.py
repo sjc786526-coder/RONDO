@@ -15,6 +15,7 @@ sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.evidence import build_static_payload  # noqa: E402
 from rondo_eval.local_approval import teacher_labels  # noqa: E402
+from rondo_eval.terminal_bench import live as terminal_bench_live  # noqa: E402
 
 
 def approval_text(action: dict, *, prefix: str = "") -> str:
@@ -198,6 +199,49 @@ class TeacherSelectionTests(unittest.TestCase):
             by_digest[newcomer.e_final_sha256]["exclusion_reason"],
             "semantic_duplicate",
         )
+
+
+class TeacherMetaTests(unittest.TestCase):
+    def test_review_id_comes_from_meta_not_archive_slot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source_root = Path(temporary)
+            relative_path = (
+                "eval-data/runs/run-1/guardian-evidence/0001/E_final.json"
+            )
+            meta_path = (source_root / relative_path).with_name("meta.json")
+            meta_path.parent.mkdir(parents=True)
+            meta = {
+                "review_id": "review-1",
+                "guardian_source_baseline": (
+                    terminal_bench_live.GUARDIAN_SOURCE_BASELINE
+                ),
+                "guardian_source_commit": terminal_bench_live.GUARDIAN_SOURCE_COMMIT,
+                "evidence": "e_final",
+                "decision": "approved",
+                "terminal_status": "approved",
+                "failure_reason": None,
+                "attempt_count": 1,
+                "duration_ms": 1,
+                "guardian_thread_id": None,
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "low",
+                "token_usage": None,
+                "time_to_first_token_ms": None,
+            }
+            meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+            loaded, digest = teacher_labels._read_meta(
+                source_root,
+                relative_path,
+                expected_model="gpt-5.6-sol",
+                expected_effort="low",
+            )
+
+            self.assertEqual(loaded, meta)
+            self.assertEqual(
+                digest,
+                hashlib.sha256(meta_path.read_bytes()).hexdigest(),
+            )
 
 
 class TeacherCensusTests(unittest.TestCase):
