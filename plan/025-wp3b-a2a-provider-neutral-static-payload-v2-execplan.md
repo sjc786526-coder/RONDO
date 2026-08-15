@@ -139,14 +139,24 @@ fail-closed。
 - 2026-08-14：补 focused regressions（evidence 5 项、client 1 项、census 1 项），并以逐字节相等证明
   token census 的请求就是 Local client v2 builder 的产物。
 - 2026-08-14：focused tests 106/106、`just eval-lock` 通过；47/47 归档完成无网络无模型的只读静态构造检查。
+- 2026-08-14：首轮独立审查（`41bc1f3`）不通过，提出 F1（把 raw reasoning `content` 当公开内容投影）与
+  F2（reasoning 的 passthrough metadata 任意值被静默丢弃）。已独立复核冻结上游确认两项成立：
+  `event_mapping.rs` 把两个 content subtype 一并映射为 `raw_content`，`reasoning_text()` 只在
+  `show_raw_agent_reasoning` 打开时才展示它们；`InternalChatMessageMetadataPassthrough` 是强类型可选对象。
+- 2026-08-14：完成窄整改 —— 只有 `summary[].summary_text` 进入中立证据消息；`content[]` 的
+  `reasoning_text`/`text` 先按已知 raw 形状校验再丢弃，没有公开 summary 的 item 整项删除；
+  passthrough metadata 按冻结结构校验后丢弃。补 2 项新回归并扩充畸形形状用例，
+  修正代码注释、测试命名与文档中的完成声明。
+- 2026-08-14：整改后 focused tests 108/108、`just eval-lock` 通过；47/47 只读静态构造检查复跑仍为
+  47/47 通过、24 个 item 全部删除、0 条走投影分支、私有运输残留 0。
 
 ### 当前工作
 
-- 实现、测试、文档与日志已完成，等待 Codex 独立审查。
+- 窄整改、回归与文档修正已完成，等待独立复审。
 
 ### 本任务剩余步骤
 
-- 无。交由 Codex 独立验收；合并与推送由用户决定。
+- 交由 Codex 独立复审；复审通过后才写 `doc/WBS-COMPLETED.md` 完成记录，合并与推送由用户决定。
 
 ### 阻塞项
 
@@ -154,7 +164,8 @@ fail-closed。
 
 ### 当前验收状态
 
-- 已运行：`tests/test_contracts_and_evidence.py` 与 `tests/test_local_approval.py` 共 106/106 通过；
+- 首轮独立审查不通过；窄整改后待复审，因此本任务尚未收口，`doc/WBS-COMPLETED.md` 暂不写完成记录。
+- 已运行（整改后）：`tests/test_contracts_and_evidence.py` 与 `tests/test_local_approval.py` 共 108/108 通过；
   `just eval-lock`（85 packages）通过；`tests.test_terminal_bench` 中唯一消费 `policy_identity` 的用例 1/1 通过；
   47/47 只读静态构造检查通过（47 份 payload v2、三 consumer 逐字节一致、47 条 Local 请求构造成功，
   21 份归档的 24 个 encrypted-only reasoning item 全部移除，出站请求无 `reasoning`、无 `encrypted_content`）。
@@ -175,3 +186,4 @@ fail-closed。
 | 003 | 公开内容转为统一的 provider-neutral 证据形态，raw/encrypted 不出站 | 保留明确公开内容与顺序，不生成文本，也不泄露隐藏推理；具体合法消息形态由实现验证决定 | v2 input 规范化 | 已采纳 |
 | 004 | static input 升 v2，decision/qualification schema v1 不随动 | 两者版本含义不同，任务明确禁止修改 qualification success evidence | 版本命名、validator、Local client | 已采纳 |
 | 005 | 47 条只做一次聚合式只读检查，不建新审计设施 | 真实归档是本机 ignored 数据；一次结构兼容验收已足够且不应派生正文工件 | 验收与日志 | 已采纳 |
+| 006 | 只有 `summary[].summary_text` 算公开内容；`content[]` 的 `reasoning_text`/`text` 校验后丢弃 | 冻结 Codex 把两个 content subtype 映射为 `raw_content` 并默认隐藏，属决策 003 所说的 raw reasoning | v2 投影与回归 | 独立审查要求，已采纳 |

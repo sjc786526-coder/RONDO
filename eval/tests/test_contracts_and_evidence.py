@@ -72,7 +72,10 @@ ENCRYPTED_ONLY_REASONING = {
     "summary": [],
     "encrypted_content": "opaque-provider-transport",
 }
-PUBLIC_REASONING = {
+# Public summary plus both raw content subtypes.  The frozen upstream hides raw
+# content unless raw agent reasoning is explicitly enabled, so only the summary
+# may be projected.
+SUMMARY_AND_RAW_REASONING = {
     "type": "reasoning",
     "id": "rs_provider_session",
     "summary": [
@@ -80,9 +83,16 @@ PUBLIC_REASONING = {
         {"type": "summary_text", "text": "second public summary"},
     ],
     "content": [
-        {"type": "reasoning_text", "text": "public reasoning text"},
-        {"type": "text", "text": "public plain text"},
+        {"type": "reasoning_text", "text": "hidden raw reasoning text"},
+        {"type": "text", "text": "hidden raw plain text"},
     ],
+    "encrypted_content": "opaque-provider-transport",
+    "internal_chat_message_metadata_passthrough": {"turn_id": "turn_reasoning"},
+}
+RAW_ONLY_REASONING = {
+    "type": "reasoning",
+    "summary": [],
+    "content": [{"type": "reasoning_text", "text": "hidden raw reasoning text"}],
     "encrypted_content": "opaque-provider-transport",
 }
 
@@ -194,8 +204,8 @@ class EvidenceTests(unittest.TestCase):
         self.assertNotIn("encrypted_content", decoded)
         self.assertNotIn("opaque-provider-transport", decoded)
 
-    def test_public_reasoning_text_becomes_one_neutral_message_in_order(self) -> None:
-        with_reasoning = [PUBLIC_REASONING, *TASK_INPUT]
+    def test_only_summary_text_is_projected_and_raw_content_is_dropped(self) -> None:
+        with_reasoning = [SUMMARY_AND_RAW_REASONING, *TASK_INPUT]
         standard = build_static_payload(standard_request(with_reasoning))
         lite = build_static_payload(lite_request(with_reasoning))
 
@@ -209,8 +219,6 @@ class EvidenceTests(unittest.TestCase):
                 "content": [
                     {"type": "output_text", "text": "first public summary"},
                     {"type": "output_text", "text": "second public summary"},
-                    {"type": "output_text", "text": "public reasoning text"},
-                    {"type": "output_text", "text": "public plain text"},
                 ],
             },
         )
@@ -219,9 +227,55 @@ class EvidenceTests(unittest.TestCase):
             items[1:], build_static_payload(standard_request()).logical_payload["input"]
         )
         decoded = standard.canonical_bytes.decode()
-        self.assertNotIn("opaque-provider-transport", decoded)
-        self.assertNotIn("encrypted_content", decoded)
-        self.assertNotIn("rs_provider_session", decoded)
+        for hidden in (
+            "hidden raw reasoning text",
+            "hidden raw plain text",
+            "opaque-provider-transport",
+            "encrypted_content",
+            "rs_provider_session",
+            "turn_reasoning",
+        ):
+            self.assertNotIn(hidden, decoded)
+
+    def test_reasoning_without_public_summary_is_dropped_whole(self) -> None:
+        for item in (ENCRYPTED_ONLY_REASONING, RAW_ONLY_REASONING):
+            with self.subTest(item=item):
+                with_reasoning = [TASK_INPUT[0], item, *TASK_INPUT[1:]]
+                projected = build_static_payload(standard_request(with_reasoning))
+
+                # Dropping the item is exactly equivalent to it never existing.
+                self.assertEqual(
+                    projected.canonical_bytes,
+                    build_static_payload(standard_request()).canonical_bytes,
+                )
+                self.assertEqual(
+                    projected.canonical_bytes,
+                    build_static_payload(lite_request(with_reasoning)).canonical_bytes,
+                )
+
+    def test_known_raw_content_is_checked_before_it_is_dropped(self) -> None:
+        # Both known raw subtypes are dropped, never forwarded as evidence.
+        for subtype in ("reasoning_text", "text"):
+            with self.subTest(subtype=subtype):
+                item = {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "public summary"}],
+                    "content": [{"type": subtype, "text": "hidden raw text"}],
+                }
+                payload = build_static_payload(standard_request([item]))
+                self.assertEqual(
+                    payload.logical_payload["input"],
+                    [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "public summary"}
+                            ],
+                        }
+                    ],
+                )
+                self.assertNotIn("hidden raw text", payload.canonical_bytes.decode())
 
     def test_unknown_or_malformed_reasoning_shapes_are_fail_closed(self) -> None:
         invalid_items = (
@@ -242,6 +296,28 @@ class EvidenceTests(unittest.TestCase):
                 "type": "reasoning",
                 "summary": [],
                 "content": [{"type": "summary_text", "text": "wrong subtype"}],
+            },
+            {"type": "reasoning", "summary": [], "content": [{"type": "reasoning_text"}]},
+            {
+                "type": "reasoning",
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": 7}],
+            },
+            {"type": "reasoning", "summary": [], "content": ["plain string"]},
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": 7,
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"turn_id": 7},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"unmapped_key": "x"},
             },
         )
         for item in invalid_items:
@@ -377,7 +453,9 @@ class EvidenceTests(unittest.TestCase):
                 }
             ),
             lambda logical: logical["input"].append(copy.deepcopy(ENCRYPTED_ONLY_REASONING)),
-            lambda logical: logical["input"].append(copy.deepcopy(PUBLIC_REASONING)),
+            lambda logical: logical["input"].append(
+                copy.deepcopy(SUMMARY_AND_RAW_REASONING)
+            ),
             lambda logical: logical["input"][0].update(
                 {"encrypted_content": "opaque-provider-transport"}
             ),

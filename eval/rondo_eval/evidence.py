@@ -4,8 +4,10 @@ The static payload built here is the one logical request every static consumer
 sends, so it may only contain content each of them can consume.  Schema v2 adds
 the `reasoning` projection: an OpenAI Responses `reasoning` item is transport
 for the provider that produced it, not evidence, and other providers refuse it
-outright.  `build_static_payload()` is therefore the single place where those
-items are normalized, and no consumer may repeat or relax that work.
+outright.  Only its public summary text survives the projection - encrypted
+transport, provider session ids and raw reasoning content do not.
+`build_static_payload()` is therefore the single place where those items are
+normalized, and no consumer may repeat or relax that work.
 """
 
 from __future__ import annotations
@@ -61,12 +63,14 @@ _REASONING_FIELDS = frozenset(
         "internal_chat_message_metadata_passthrough",
     }
 )
-# Reasoning fragments whose text is public model output rather than opaque
-# provider transport.
-_REASONING_PUBLIC_TEXT_TYPES: dict[str, frozenset[str]] = {
-    "summary": frozenset({"summary_text"}),
-    "content": frozenset({"reasoning_text", "text"}),
-}
+# The frozen upstream maps `summary` to displayed summary text but maps both
+# `content` subtypes to `raw_content`, which Codex hides unless
+# `show_raw_agent_reasoning` is enabled.  Only the summary is public evidence;
+# the content subtypes are known raw reasoning and are checked, then dropped.
+_REASONING_SUMMARY_TYPES = frozenset({"summary_text"})
+_REASONING_RAW_CONTENT_TYPES = frozenset({"reasoning_text", "text"})
+# Fields of the frozen `InternalChatMessageMetadataPassthrough` struct.
+_PASSTHROUGH_FIELDS = frozenset({"turn_id", "executed_tool_calls"})
 
 
 class EvidenceError(ValueError):
@@ -305,14 +309,15 @@ def _neutral_items(items: list[Any]) -> list[Any]:
 def _project_reasoning_item(item: Mapping[str, Any]) -> dict[str, Any] | None:
     """Project one `reasoning` item onto the neutral evidence form, or drop it.
 
-    `encrypted_content` is opaque transport only the originating provider can
-    read, and `id` identifies that provider's session; neither is evidence, so
-    neither leaves this boundary.  Public `summary`/`content` text is model
-    output the archive already holds in the clear, so it is carried over
-    verbatim and in wire order as one ordinary assistant message.  An item with
-    no public text carries no evidence and is dropped.  Every other shape is
-    refused: an item that might have been dropped anyway is still an item this
-    boundary does not understand.
+    Only `summary` text is public evidence: the frozen upstream displays it,
+    while it treats both `content` subtypes as raw reasoning that stays hidden
+    unless raw agent reasoning is explicitly enabled.  So raw content is
+    understood and then dropped, never forwarded, alongside the opaque
+    `encrypted_content` and the provider session `id`.  Public summary text is
+    carried over verbatim and in wire order as one ordinary assistant message;
+    an item with no public summary carries no evidence and is dropped whole.
+    Every other shape is refused: an item that might have been dropped anyway is
+    still an item this boundary does not understand.
     """
 
     if set(item) - _REASONING_FIELDS:
@@ -327,10 +332,10 @@ def _project_reasoning_item(item: Mapping[str, Any]) -> dict[str, Any] | None:
         raise EvidenceError("reasoning item encrypted_content must be a string or null")
     if not isinstance(item.get("id"), (str, type(None))):
         raise EvidenceError("reasoning item id must be a string or absent")
-    texts = [
-        *(_reasoning_public_text(part, "summary") for part in summary),
-        *(_reasoning_public_text(part, "content") for part in content or ()),
-    ]
+    _require_known_passthrough(item.get("internal_chat_message_metadata_passthrough"))
+    for part in content or ():
+        _require_known_raw_content(part)
+    texts = [_reasoning_summary_text(part) for part in summary]
     if not texts:
         return None
     return {
@@ -340,15 +345,45 @@ def _project_reasoning_item(item: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _reasoning_public_text(part: Any, field: str) -> str:
+def _reasoning_summary_text(part: Any) -> str:
     if (
         not isinstance(part, Mapping)
         or set(part) != {"type", "text"}
-        or part["type"] not in _REASONING_PUBLIC_TEXT_TYPES[field]
+        or part["type"] not in _REASONING_SUMMARY_TYPES
         or not isinstance(part["text"], str)
     ):
-        raise EvidenceError(f"reasoning item {field} entry is not public text")
+        raise EvidenceError("reasoning item summary entry is not public summary text")
     return part["text"]
+
+
+def _require_known_raw_content(part: Any) -> None:
+    """Understand a raw reasoning fragment well enough to refuse an unknown one.
+
+    The fragment is dropped either way; checking it keeps an unrecognized shape
+    from passing as "raw content we meant to discard".
+    """
+
+    if (
+        not isinstance(part, Mapping)
+        or set(part) != {"type", "text"}
+        or part["type"] not in _REASONING_RAW_CONTENT_TYPES
+        or not isinstance(part["text"], str)
+    ):
+        raise EvidenceError("reasoning item content entry is not a known raw fragment")
+
+
+def _require_known_passthrough(value: Any) -> None:
+    """Check the optional passthrough metadata against the frozen struct."""
+
+    if value is None:
+        return
+    if not isinstance(value, Mapping) or set(value) - _PASSTHROUGH_FIELDS:
+        raise EvidenceError("reasoning item passthrough metadata is not the known struct")
+    if not isinstance(value.get("turn_id"), (str, type(None))):
+        raise EvidenceError("reasoning item passthrough turn_id must be a string or absent")
+    calls = value.get("executed_tool_calls")
+    if calls is not None and not isinstance(calls, list):
+        raise EvidenceError("reasoning item passthrough executed_tool_calls is invalid")
 
 
 def _strip_transport_metadata(value: Any) -> Any:

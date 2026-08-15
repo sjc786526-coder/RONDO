@@ -264,6 +264,10 @@ class LocalApprovalClientTests(unittest.TestCase):
                     {
                         "type": "reasoning",
                         "summary": [{"type": "summary_text", "text": "public summary"}],
+                        # Raw reasoning: understood, then dropped, never sent.
+                        "content": [
+                            {"type": "reasoning_text", "text": "hidden raw reasoning"}
+                        ],
                         "encrypted_content": "opaque-provider-transport",
                     },
                     {
@@ -296,6 +300,7 @@ class LocalApprovalClientTests(unittest.TestCase):
         serialized = json.dumps(request)
         self.assertNotIn("encrypted_content", serialized)
         self.assertNotIn("opaque-provider-transport", serialized)
+        self.assertNotIn("hidden raw reasoning", serialized)
         # The decision output schema is a separate contract and stays v1.
         self.assertEqual(
             request["response_format"]["json_schema"]["name"], "rondo_static_approval_v1"
