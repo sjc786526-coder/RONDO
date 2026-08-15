@@ -309,6 +309,18 @@ class LocalApprovalClient:
         return request
 
     def decide(self, payload: StaticApprovalPayload) -> dict[str, Any]:
+        identity = self.require_service_identity()
+        envelope = self.post_decision_request(self.build_request(payload), identity)
+        return _parse_response(envelope, expected_model=self.settings.model_id)
+
+    def require_service_identity(self) -> LauncherIdentity | None:
+        """Bind the live launcher and service before any decision request.
+
+        Returns the receipt the caller has to re-check once the response has
+        been read, or `None` when the configuration has no pinned model and
+        therefore no launcher instance to bind.
+        """
+
         launcher_identity = self._model_backed_launcher_identity()
         if launcher_identity is not None:
             self.verify_service_identity(
@@ -316,22 +328,35 @@ class LocalApprovalClient:
                 expected_build_info=expected_service_build_info(self.settings),
             )
             self._revalidate_launcher_identity(launcher_identity)
+        return launcher_identity
+
+    def post_decision_request(
+        self,
+        request: Mapping[str, Any],
+        identity: LauncherIdentity | None,
+    ) -> Any:
+        """Send one non-retried request and re-check the launcher before decoding.
+
+        The receipt is revalidated while the response body is still an opaque
+        buffer, so a caller can never hand out a result produced by an instance
+        that changed inside the request window.
+        """
+
         body = json.dumps(
-            self.build_request(payload),
+            request,
             ensure_ascii=False,
             allow_nan=False,
             separators=(",", ":"),
         ).encode("utf-8")
-        headers = self._headers(content_type=True)
-        request = urllib.request.Request(
+        http_request = urllib.request.Request(
             self.settings.responses_url,
             data=body,
-            headers=headers,
+            headers=self._headers(content_type=True),
             method="POST",
         )
         try:
             with _NO_REDIRECT_OPENER.open(
-                request, timeout=self.settings.timeout_seconds
+                http_request, timeout=self.settings.timeout_seconds
             ) as response:
                 if response.geturl() != self.settings.responses_url:
                     raise ServiceUnavailableError(
@@ -344,13 +369,12 @@ class LocalApprovalClient:
             raise ServiceUnavailableError("local approval service is unavailable") from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise StructuredOutputError("local approval response exceeds the size limit")
-        if launcher_identity is not None:
-            self._revalidate_launcher_identity(launcher_identity)
+        if identity is not None:
+            self._revalidate_launcher_identity(identity)
         try:
-            envelope = json.loads(raw)
+            return json.loads(raw)
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise StructuredOutputError("local approval response is not valid JSON") from exc
-        return _parse_response(envelope, expected_model=self.settings.model_id)
 
     def _model_backed_launcher_identity(self) -> LauncherIdentity | None:
         if not self.settings.model_path:
@@ -476,6 +500,27 @@ class LocalApprovalClient:
 
 
 def _parse_response(envelope: Any, *, expected_model: str) -> dict[str, Any]:
+    text = response_output_text(envelope, expected_model=expected_model)
+    try:
+        decision = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise StructuredOutputError("local approval output_text is not JSON") from exc
+    if not isinstance(decision, Mapping):
+        raise StructuredOutputError("local approval decision must be an object")
+    try:
+        return validate_static_decision(decision)
+    except EvidenceError as exc:
+        raise StructuredOutputError("local approval decision does not match schema v1") from exc
+
+
+def response_output_text(envelope: Any, *, expected_model: str) -> str:
+    """Return the single assistant `output_text` of a completed response.
+
+    Any other envelope, output item, content part or count is refused rather
+    than reduced to the part this caller wanted, because a response shape the
+    pinned server is not known to produce is not a response we can attribute.
+    """
+
     if not isinstance(envelope, Mapping) or envelope.get("status") != "completed":
         raise StructuredOutputError("local approval response is not completed")
     if envelope.get("model") != expected_model:
@@ -501,16 +546,7 @@ def _parse_response(envelope: Any, *, expected_model: str) -> dict[str, Any]:
             texts.append(text)
     if len(texts) != 1:
         raise StructuredOutputError("local approval response must contain exactly one output_text")
-    try:
-        decision = json.loads(texts[0])
-    except json.JSONDecodeError as exc:
-        raise StructuredOutputError("local approval output_text is not JSON") from exc
-    if not isinstance(decision, Mapping):
-        raise StructuredOutputError("local approval decision must be an object")
-    try:
-        return validate_static_decision(decision)
-    except EvidenceError as exc:
-        raise StructuredOutputError("local approval decision does not match schema v1") from exc
+    return texts[0]
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):

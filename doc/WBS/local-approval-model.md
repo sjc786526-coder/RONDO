@@ -97,6 +97,13 @@
   `serve_config_sha256` 与证据 identity 逐字节一致；服务存活期间正式 doctor 报告 `status=ready`、
   `runtime_capability=gpu_model_serving_validated`、`model_backed_validation=model_schema_probe_passed`。
   doctor 的 synthetic probe 只证明生产入口能消费该资格，**不替代**上面那条真实 `E_final` 判定。
+- **正式 Guardian 路由已接通，L7 与 Local M3 已收口**：接通点是 eval-side 身份门控适配器，产品代码未改。
+  冻结 b10333 与正式 Guardian wire 有三处不匹配——不映射 `text.format`、`tools` 与 grammar 并存即抛
+  `Cannot specify grammar with tools`、`developer` 角色经 `map_developer_role_to_system` 撞上模板顺序限制；
+  通用 provider 路径又不消费 launcher receipt。适配器复用公共 `build_static_payload()` 归一化入站请求
+  （因此与 token census、qualification 共用同一条已被真实运行证明的边界），按冻结服务合同重建请求，
+  完整缓冲响应并在身份后验通过前不交付，最后按 Guardian 自己送来的 schema 校验判定。
+  一次 SIGTERM 缺陷同时修复：launcher 此前收到 SIGTERM 会留下活着的 llama-server 与陈旧 receipt。
 - **一处工程事实值得记住**：冻结 b10333 把 libllama 自身的 `GGML_LOG_LEVEL_INFO` 映射为 verbosity TRACE(4)，
   而默认阈值是 INFO(3)，因此 GPU offload 计数在默认级别下根本不输出，且该事实没有任何 endpoint 可取。
   qualification 私有采集因而固定使用 verbosity 4；正式 launcher 使用 verbosity 3，并把 server stdout/stderr 定向到
@@ -152,15 +159,9 @@
 
 ### 当前推进顺序
 
-1. **下一工作是 Plan 031/L7。** 规划确认正式 Guardian 的通用 provider 路径不消费 launcher receipt，
-   冻结 b10333 也不映射原生 `text.format`，现有 RONDO bundle 早于 L2a。Plan 031 不固定实现路线：
-   优先 eval-side 最小兼容层；若 live code 证明非常窄的产品改动更简单可靠且不改变通用 Guardian 语义，
-   也可采用。支持落地后完成配置-only 的真实本地审批。
-   12k model-backed 已通过，L7 与它一起形成 **Local M3**；不得靠外部 doctor、旧 bundle、弱化 identity
-   或输出校验凑绿，也不顺带验证 16k、压缩或剩余 5 条超窗证据。
-2. **L5a**：用冻结 prompt、人在场经开发用 Codex 生成第一批 Sol 教师标签。
-3. 跑 L3/L4：程序化批量运行 `Local-static`，对照导入的教师标签，固化指标口径，得到未微调 baseline。
-4. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
+1. **下一工作是 L5a**：用冻结 prompt、人在场经开发用 Codex 生成第一批 Sol 教师标签。
+2. 跑 L3/L4：程序化批量运行 `Local-static`，对照导入的教师标签，固化指标口径，得到未微调 baseline。
+3. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
@@ -346,21 +347,37 @@ L5 分两部分，**执行时点不同**：
 
 ### L7 一键切换与端到端可用性（规模 S，依赖 L2a）
 
-- 通过 **S1（模型/effort）+ L2a（provider）** 两个配置项把 Guardian 审批切到本地模型，验证端到端可正常审批。
-  **仅有 S1 做不到这件事**。
-- 当前正式 Guardian 直连 raw llama endpoint 不能满足请求窗口内 launcher 身份漂移 fail-closed，冻结 b10333
-  也不映射原生 `text.format`。Plan 031 依据 live code 选择最小等强修复；支持落地后的实际切换仍只改配置。
+状态：**已验收**（2026-08-15）。实现与证据见 `plan/031-local-guardian-config-switch-execplan.md`。
+
+- 通过 **S1（模型/effort）+ L2a（provider）** 三个配置项把 Guardian 审批切到本地模型。
+  **仅有 S1 做不到这件事**：实跑确认未设 `model_provider` 时 Guardian 请求落到主 Agent provider。
+- 正式 Guardian 不能直连 raw llama endpoint。冻结 b10333 不映射 `text.format`、在 `tools` 与 grammar
+  并存时抛错、并把 `developer` 角色映射成模板拒绝的 `system`；通用 provider 路径也不消费 launcher
+  receipt，无法在请求窗口内判定身份漂移。接通方式是 eval-side 身份门控适配器
+  （`eval/rondo_eval/local_approval/guardian_bridge.py`）：入站请求交给公共 `build_static_payload()`
+  归一化后按冻结服务合同重建，响应完整缓冲且在身份后验通过前不交付，判定按 Guardian 自己送来的
+  schema 校验。**产品代码未改**，通用 allow/deny、provider 选择与 fail-closed 语义不变。
 - 仅在非严格耗时场景验证；正式耗时测评仍按核心设计走云端 `Guardian-live`。
-- 验收：切换只改配置，不改代码；切回云端模型行为与性能无残留影响。
+- 验收（`eval/rondo_eval/local_approval/formal_switch.py` 五场景）：真实 `--approve-for-me` 链在本地
+  12k 上返回生产 parser 可接受的 allow，待审批动作执行；服务异常、身份漂移与请求契约不符三类都不执行
+  动作、记 `terminal_status=failed_closed`（与业务 deny 可区分）、不回退主 provider。
+  cloud/local 差异只在 `[auto_review]` 的 model/effort/provider 三轴及其 provider registry 条目，
+  主 Agent provider 不受影响。云端侧只做离线无残留证明，未发出云端请求。
 - **L7 不单独构成里程碑**：它的配置切换验收并入 Local M3，因此归在 P2 而非 P3。
 
 ## 里程碑口径
 
 ### Local M3 —— 工程闭环（工程验收）
 
+状态：**已完成**（2026-08-15）。
+
 12k model-backed、结构化输出、真实 `E_final`、错误 fail-closed，以及**仅通过配置**在 cloud/local Guardian
 之间切换，共同形成真实本地审批闭环。用功能与失败语义验收，**不继承公平比较设施的 `σ`/`delta` 判据**。
 该里程碑只证明 12k 档位内的真实闭环，不宣称剩余 5 条超窗证据已可服务。
+
+两处覆盖边界如实保留：真实链上验证的失败通道是适配器的 HTTP 错误通道到 RONDO fail-closed 这一段；
+“结构化输出不合规”与“响应读回后的身份后验”由定向回归端到端覆盖，因为要让已资格化的模型吐出不合规
+判定只能改 prompt 或放宽 parser，两者都被硬约束禁止。
 
 ### L5/L6 前置 dry-run —— 不是里程碑
 

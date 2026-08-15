@@ -157,24 +157,39 @@
   受锁 build、loopback 和受控本地模型生命周期均可直接实施。
 - 规划阶段未启动模型/GPU、loopback server、网络、API、Cargo、Docker 或测试，未修改 ignored 配置。
 
+- 2026-08-15：选定 **eval-side 最小兼容层**路线并实现完毕（决策 010—015）。`mydev/` Rust 源码未改，
+  只在 `mydev/justfile` 增加一条受锁构建配方。
+- 已用 `just build-codex-cli` 经 build lock/看门狗构建当前 worktree 的 RONDO Local binary（4m02s）；
+  正式链实跑确认 S1 的 model/effort 与 L2a 的 provider 三轴都真实生效。
+- focused tests 159/159、0 skip；`just eval-lock` 85 packages 通过。
+- 正式 `--approve-for-me` 链五个场景全部完成：真实 12k 正例 allow 并执行动作，
+  服务异常/身份漂移/请求契约不符三类均 fail-closed 且不伪装成业务 deny，主 provider 全程未被 Guardian 触及。
+- 现场已清理：无残留进程、端口、receipt 或私有 evidence；显存回基线。
+- 执行中修复了一处既有缺陷：launcher 收到 SIGTERM 不走清理路径（决策 015）。
+- 独立审查发现并已整改：适配器原先在配置无 `model_path` 时会跳过全部身份校验照常返回判定，
+  且新增 bridge 测试多数跑在身份门关闭状态（决策 017）；`switch_diff` 的主 provider 指标
+  原为恒真，已改为对完整调用逐字比较并补反例测试。整改后在最终代码上重跑了真实 12k 正例与身份漂移。
+
 ### 当前工作
 
-- ExecPlan 已按“合同与证据验收、实现路线不固定”修订，待提交后交给执行者。
+- 已完成实现与验收，等待独立审查。
 
 ### 本任务剩余步骤
 
-1. 复核 live code，选择最小可靠路线并在决策记录中说明关键取舍。
-2. 实现所选路线和直接相关回归，取得相容的当前 RONDO Local binary。
-3. 完成正式链的三类 fail-closed 证据和真实 12k `--approve-for-me` 闭环。
-4. 恢复配置、清理任务对象，按真实结果更新文档/日志，自审并提交工作树。
+- 无。四步（选路线、实现与回归、正式链证据、清理与记录）均已完成并提交。
 
 ### 阻塞项
 
-- 无已知外部阻塞。若必须降低 fail-closed、明显扩大通用产品接口或触及本计划禁区才能完成，停止并请求新授权。
+- 无。
 
 ### 当前验收状态
 
-- 仅完成规划；实现、定向测试、current binary、正式负例/正例均未落地，L7 与 Local M3 未完成。
+- **L7 与 Local M3 的完成标准均有实证支持**（证据见 `agent_log/2026-08-15-043608-plan031-local-guardian-config-switch.md`）。
+- 两处覆盖边界如实记录，不冒充正式链证据：
+  1. “结构化输出不合规”与“响应读回后的身份后验”只做到定向回归端到端；正式链上覆盖的是 bridge
+     错误通道（400/503）到 RONDO fail-closed 这一段。要在真实 12k 上复现不合规输出必须改 prompt
+     或放宽 parser，两者都被硬约束禁止。
+  2. 云端侧只做离线无残留证明，未发出任何云端请求（决策 008）。
 
 ### 交接边界
 
@@ -197,3 +212,11 @@
 | 007 | 审查按合同与证据，不按预设步骤或文件布局 | 计划固定结果而非实现路线 | 验收 | 已采纳 |
 | 008 | 云端恢复只做离线无残留证明 | 真实云端复跑涉及数据外发/费用，本任务未授权 | 恢复 | 已采纳 |
 | 009 | 最终 Claude 提示词构成一次实施授权，范围内纠错无需重复请示 | 根 AGENTS 要求执行前明确授权入口 | 授权 | 已采纳 |
+| 010 | 采用 eval-side loopback 适配器，不改 `mydev/` 产品代码 | 身份门控只有 eval 侧有 receipt 语义，放进产品会把测评专属身份塞进通用 Guardian；wire 适配同理。窄产品改动并不更简单 | 实现路线 | 已采纳 |
+| 011 | 适配器用公共 `build_static_payload()` 归一化入站请求，不另写 builder | 正式链因此与 token census、12k qualification 共用同一条已被真实运行证明过的归一化边界，`developer→user` 与 reasoning 投影不存在第二套实现 | wire | 已采纳 |
+| 012 | 不向冻结 b10333 转发 `tools` | 冻结源码在 tools 与 grammar 并存时直接抛错，且方向 2 硬约束本就规定 static 组不给模型工具与自主取证 | wire | 已采纳 |
+| 013 | 判定按 Guardian 自己送来的 schema 校验，不改用 `rondo_static_approval_v1` | 本地模型应当回答 RONDO 的真实问题、满足生产 parser 的真实契约，无需再做一次结果翻译 | 输出契约 | 已采纳 |
+| 014 | 主 Agent 用 loopback 脚本化端点，Guardian 侧走真链 | 本任务无云端授权；L7 验的是 Guardian 路由，主模型不是变量。RONDO 仍自行判定需要审批、自行发起 Guardian 复核并应用真实判定 | 验收 | 已采纳 |
+| 015 | 顺带修复 launcher 的 SIGTERM 不清理现场 | 实跑中 `kill -TERM` 留下了活着的 llama-server 与陈旧 receipt，只有 build wrapper 兜底扫掉；这直接违反本计划的清理判据 | 清理 | 已采纳 |
+| 016 | 适配器转发 Guardian 自己的 instructions，不套 `STATIC_INSTRUCTIONS` | 给一次真实审批 turn 前置测评侧指令会改变 Guardian 问的问题；因此这条路线不等于已资格化的 static 请求，census 长度分布也不用来给它定界 | 输出契约 | 已采纳 |
+| 017 | `identity is None`（配置无 `model_path`）时适配器直接拒绝服务 | 独立审查发现原实现会在无 receipt 时跳过全部身份校验仍返回判定；无法说明是哪个实例作答的中继不得产出审批 | 身份语义 | 已采纳 |
