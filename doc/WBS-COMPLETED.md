@@ -661,13 +661,15 @@ standard/Lite 形态均补回归。
   `input_text`，映射为 `user` 只换 role 标签，映射为 `assistant` 则会改变说话者并被迫重写文本 subtype。
   因此这是保文本、保序的最窄改法，不需要新增中立结构标记或对话重写器。
 - **fail-closed**：未知/缺失 role、非消息 item 携带 role、空或畸形 content、与角色不匹配的文本 subtype
-  一律 `EvidenceError`；终端 validator 另外拒绝 v1/v2 payload 与被手工回填的 `developer`/`system` 角色。
-  Plan 025 的 reasoning/raw/encrypted/passthrough 出站边界原样保留。
+  一律 `EvidenceError`；公共 builder 与终端 validator 复用同一份中立消息形状合同，终端另拒绝 v1/v2
+  payload 与被手工回填的 `developer`/`system` 角色。Plan 025 的 reasoning/raw/encrypted/passthrough
+  出站边界原样保留。
 - **census 诊断**：通用计数失败新增有界 `stage`（`anchor_count` / `archive_count`）、当前 `e_final_sha256`
-  与 `counted_before_failure`。通用 500/transport 在两处仍立即停止、不发布结果，未降级成样本拒绝；
-  per-record `refusal` 字段未被污染，也没有新建事件/追踪设施。
-- **验收**：focused tests 116/116、`test_terminal_bench` 中唯一 `policy_identity` 消费用例 1/1、
-  `uv lock --directory eval --check` 85 packages 通过。47 条只读聚合检查（无模型、无网络、不输出正文）：
+  与 `counted_before_failure`；归档计数以及样本拒绝后的健康探针遇到通用 500/transport 都立即停止并带同一组
+  定位字段，不发布结果、也不降级成样本拒绝；per-record `refusal` 未被污染，没有新建事件/追踪设施。
+- **验收**：首轮独立审查发现终端 sink 消息形状复核与拒绝后探针定位两处缺口，均由 `cb66816` 以窄整改
+  和直接回归闭合。最终独立复跑 focused tests 116/116、`test_terminal_bench` 中唯一 `policy_identity`
+  消费用例 1/1、`uv lock --directory eval --check` 85 packages 通过。47 条只读聚合检查（无模型、无网络、不输出正文）：
   47/47 构造 v3 payload 与 Local 请求，三 consumer 逐字节一致 47/47，无残留 `developer`/`system` 角色与
   reasoning/encrypted；从冻结模板资产解析规则的角色顺序门下 v3 为 47/47 通过、规范化前 24/47，
   与 Plan 026 的离线结论一致。该门禁只在测试中，不进入生产 consumer。

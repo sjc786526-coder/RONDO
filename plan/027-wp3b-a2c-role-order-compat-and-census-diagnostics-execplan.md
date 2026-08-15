@@ -170,10 +170,12 @@ Local-static 继续消费同一份 provider-neutral static payload，并让现�
   `uv lock --directory eval --check` 85 packages、47 条只读聚合检查（47/47 与 24/47 均不变）；
   另以审查者的伪造构造直接复现，三种畸形形状现在在 `validate_static_payload()` 与
   `build_request()` 两处都被拒绝。
+- 2026-08-14：最终独立复验确认两处阻断均已闭环，未发现新的任务内阻断；独立复跑 focused tests
+  116/116、下游用例 1/1、eval lock 与 47/47 聚合检查均通过，Plan 027 验收通过。
 
 ### 当前工作
 
-- 窄整改完成，等待 Codex 复验。
+- 任务已通过最终独立复验并完成；本计划冻结，后续路线只由两份 WBS 承接。
 
 ### 本任务剩余步骤
 
@@ -185,7 +187,8 @@ Local-static 继续消费同一份 provider-neutral static payload，并让现�
 
 ### 当前验收状态
 
-- 本任务范围内已验收：v3 角色兼容、census 最小失败定位、focused tests、47 条只读检查与 eval lock 均通过。
+- 最终独立复验通过：v3 角色兼容、终端消息形状 fail-closed、census 最小失败定位、focused tests、
+  47 条只读检查与 eval lock 均已闭环。
 - 未运行：真实模型、GPU、count endpoint、census 重跑、任何 generation、Cargo、Docker、云 API、全量 eval。
   因此本次只证明构造层与冻结模板角色顺序兼容，**不证明** 47 条在真实 b10333 上可完成计数。
 - WP3b-A2 仍 blocked/incomplete；Plan 026 的具体通用 500 仍未定位，正式 exact-token baseline 仍不存在，

@@ -56,7 +56,7 @@
   未知/缺失 role、非消息 item 携带 role、空或畸形 content、与角色不匹配的文本 subtype 一律 fail-closed；
   终端 validator 拒绝 v1/v2 payload 和被手工回填的 `developer`/`system` 角色。输入 payload 版本与结构化
   **决策输出** schema（仍为 `rondo_static_approval_v1`）是两份合同，不随动。v2 实现已通过独立复审，
-  v3 的角色兼容待 Codex 独立审查。
+  v3 的角色兼容与终端消息形状校验已通过独立复验。
 - **L2 的 CPU 与 Linux CUDA model-free 运行闭包均已就绪**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 runtime closure、Responses client、
   doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
