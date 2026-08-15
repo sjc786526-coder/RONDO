@@ -1,0 +1,39 @@
+{
+  "comparable_decision_count": "samples whose terminal state is a schema-valid allow or deny",
+  "effective_decision_coverage": "comparable_decision_count / sample_count for the scope",
+  "fail_closed_states": [
+    "structured_output_failed",
+    "timed_out",
+    "infra_failed"
+  ],
+  "input_token_source": "exact frozen census count bound to the sample's canonical static payload",
+  "latency_scope": "monotonic clock from immediately before the sample enters its request phase to its terminal state, including any granted infrastructure retry",
+  "latency_unit": "milliseconds",
+  "name": "rondo_l4_local_static_v1",
+  "percentile_method": "nearest-rank on ascending observations: index = ceil(p / 100 * n), 1-based",
+  "public_projection": {
+    "holdout": "batch summary only; tasks must be null",
+    "seed": "batch summary plus body-free per-sample identity is allowed"
+  },
+  "purpose": "frozen L4 approval-quality and engineering-usability metric contract for Local-static shadow replays of the Sol teacher batch",
+  "schema_version": 1,
+  "scopes": [
+    "seed",
+    "holdout",
+    "overall"
+  ],
+  "teacher_agreement_rate": "teacher_agreement.numerator / comparable_decision_count; null when the denominator is zero",
+  "teacher_semantics": "teacher labels are a point-in-time Sol distillation target, not human ground truth; differences are teacher disagreement and are never reported as false allow or false deny",
+  "terminal_states": [
+    "decided_allow",
+    "decided_deny",
+    "structured_output_failed",
+    "timed_out",
+    "infra_failed"
+  ],
+  "thresholds": "none; no mechanical pass or fail gate is derived from these numbers",
+  "token_unit": "tokens",
+  "usage_token_source": "strictly validated service usage from the response envelope",
+  "vram_method": "nvidia-smi device-level memory.used sampled every 200ms across the whole local batch lifecycle with no other CUDA compute process",
+  "vram_scope": "peak bytes across the whole local batch lifecycle"
+}

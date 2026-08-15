@@ -1,0 +1,333 @@
+{
+  "boundaries": {
+    "false_allow_or_false_deny_reported": false,
+    "holdout_summary_only": true,
+    "mechanical_threshold_applied": false,
+    "teacher_labels_are_not_human_ground_truth": true
+  },
+  "harness": {
+    "eval_harness_commit": "bbb572db0fefe509825f37949be43d1aec9ca253",
+    "git_dirty": false
+  },
+  "metric_contract": "rondo_l4_local_static_v1",
+  "metric_contract_version": 1,
+  "metrics": {
+    "holdout": {
+      "comparable_decision_count": 14,
+      "effective_decision_coverage": {
+        "denominator": 16,
+        "numerator": 14,
+        "ratio": 0.875
+      },
+      "fail_closed": {
+        "infra_failed": 0,
+        "structured_output_failed": 2,
+        "timed_out": 0,
+        "total": 2
+      },
+      "latency_ms": {
+        "missing": 0,
+        "observed": 16,
+        "p50": 8736.1809920003,
+        "p95": 25758.68348700169,
+        "percentile_method": "nearest-rank on ascending observations: index = ceil(p / 100 * n), 1-based",
+        "source": "monotonic clock from immediately before the sample enters its request phase to its terminal state, including any granted infrastructure retry",
+        "unit": "milliseconds"
+      },
+      "local_decisions": {
+        "allow": 7,
+        "deny": 7
+      },
+      "metric_contract": "rondo_l4_local_static_v1",
+      "metric_contract_version": 1,
+      "sample_count": 16,
+      "scope": "holdout",
+      "teacher_agreement": {
+        "denominator": 14,
+        "numerator": 7,
+        "rate": 0.5
+      },
+      "teacher_decisions": {
+        "allow": 16,
+        "deny": 0
+      },
+      "teacher_disagreement_count": 7,
+      "terminal_states": {
+        "decided_allow": 7,
+        "decided_deny": 7,
+        "infra_failed": 0,
+        "structured_output_failed": 2,
+        "timed_out": 0
+      },
+      "tokens": {
+        "input": {
+          "missing": 0,
+          "observed": 16,
+          "p50": 8989.0,
+          "p95": 11103.0,
+          "source": "exact frozen census count bound to the sample's canonical static payload"
+        },
+        "input_usage_check": {
+          "differing": 0,
+          "matching": 16,
+          "missing": 0
+        },
+        "output": {
+          "missing": 0,
+          "observed": 16,
+          "p50": 92.0,
+          "p95": 512.0,
+          "source": "strictly validated service usage from the response envelope"
+        },
+        "percentile_method": "nearest-rank on ascending observations: index = ceil(p / 100 * n), 1-based",
+        "total": {
+          "missing": 0,
+          "observed": 16,
+          "p50": 9087.0,
+          "p95": 11173.0,
+          "source": "strictly validated service usage from the response envelope"
+        },
+        "unit": "tokens"
+      }
+    },
+    "overall": {
+      "comparable_decision_count": 35,
+      "effective_decision_coverage": {
+        "denominator": 40,
+        "numerator": 35,
+        "ratio": 0.875
+      },
+      "fail_closed": {
+        "infra_failed": 0,
+        "structured_output_failed": 5,
+        "timed_out": 0,
+        "total": 5
+      },
+      "latency_ms": {
+        "missing": 0,
+        "observed": 40,
+        "p50": 8335.007590001624,
+        "p95": 25758.68348700169,
+        "percentile_method": "nearest-rank on ascending observations: index = ceil(p / 100 * n), 1-based",
+        "source": "monotonic clock from immediately before the sample enters its request phase to its terminal state, including any granted infrastructure retry",
+        "unit": "milliseconds"
+      },
+      "local_decisions": {
+        "allow": 16,
+        "deny": 19
+      },
+      "metric_contract": "rondo_l4_local_static_v1",
+      "metric_contract_version": 1,
+      "sample_count": 40,
+      "scope": "overall",
+      "teacher_agreement": {
+        "denominator": 35,
+        "numerator": 16,
+        "rate": 0.45714285714285713
+      },
+      "teacher_decisions": {
+        "allow": 40,
+        "deny": 0
+      },
+      "teacher_disagreement_count": 19,
+      "terminal_states": {
+        "decided_allow": 16,
+        "decided_deny": 19,
+        "infra_failed": 0,
+        "structured_output_failed": 5,
+        "timed_out": 0
+      },
+      "tokens": {
+        "input": {
+          "missing": 0,
+          "observed": 40,
+          "p50": 8827.0,
+          "p95": 11103.0,
+          "source": "exact frozen census count bound to the sample's canonical static payload"
+        },
+        "input_usage_check": {
+          "differing": 0,
+          "matching": 40,
+          "missing": 0
+        },
+        "output": {
+          "missing": 0,
+          "observed": 40,
+          "p50": 92.0,
+          "p95": 512.0,
+          "source": "strictly validated service usage from the response envelope"
+        },
+        "percentile_method": "nearest-rank on ascending observations: index = ceil(p / 100 * n), 1-based",
+        "total": {
+          "missing": 0,
+          "observed": 40,
+          "p50": 8917.0,
+          "p95": 11372.0,
+          "source": "strictly validated service usage from the response envelope"
+        },
+        "unit": "tokens"
+      }
+    },
+    "seed": {
+      "comparable_decision_count": 21,
+      "effective_decision_coverage": {
+        "denominator": 24,
+        "numerator": 21,
+        "ratio": 0.875
+      },
+      "fail_closed": {
+        "infra_failed": 0,
+        "structured_output_failed": 3,
+        "timed_out": 0,
+        "total": 3
+      },
+      "latency_ms": {
+        "missing": 0,
+        "observed": 24,
+        "p50": 8050.185070002044,
+        "p95": 27731.01602799943,
+        "percentile_method": "nearest-rank on ascending observations: index = ceil(p / 100 * n), 1-based",
+        "source": "monotonic clock from immediately before the sample enters its request phase to its terminal state, including any granted infrastructure retry",
+        "unit": "milliseconds"
+      },
+      "local_decisions": {
+        "allow": 9,
+        "deny": 12
+      },
+      "metric_contract": "rondo_l4_local_static_v1",
+      "metric_contract_version": 1,
+      "sample_count": 24,
+      "scope": "seed",
+      "teacher_agreement": {
+        "denominator": 21,
+        "numerator": 9,
+        "rate": 0.42857142857142855
+      },
+      "teacher_decisions": {
+        "allow": 24,
+        "deny": 0
+      },
+      "teacher_disagreement_count": 12,
+      "terminal_states": {
+        "decided_allow": 9,
+        "decided_deny": 12,
+        "infra_failed": 0,
+        "structured_output_failed": 3,
+        "timed_out": 0
+      },
+      "tokens": {
+        "input": {
+          "missing": 0,
+          "observed": 24,
+          "p50": 8325.0,
+          "p95": 11256.0,
+          "source": "exact frozen census count bound to the sample's canonical static payload"
+        },
+        "input_usage_check": {
+          "differing": 0,
+          "matching": 24,
+          "missing": 0
+        },
+        "output": {
+          "missing": 0,
+          "observed": 24,
+          "p50": 95.0,
+          "p95": 512.0,
+          "source": "strictly validated service usage from the response envelope"
+        },
+        "percentile_method": "nearest-rank on ascending observations: index = ceil(p / 100 * n), 1-based",
+        "total": {
+          "missing": 0,
+          "observed": 24,
+          "p50": 8462.0,
+          "p95": 11471.0,
+          "source": "strictly validated service usage from the response envelope"
+        },
+        "unit": "tokens"
+      }
+    }
+  },
+  "purpose": "unfinetuned RONDO Local static approval baseline against the frozen point-in-time Sol teacher batch",
+  "runs": [
+    {
+      "partition": "seed",
+      "run_id": "20260815-082704844-shadow-sol-static-r1",
+      "side": "sol-static",
+      "source": "imported"
+    },
+    {
+      "partition": "seed",
+      "run_id": "20260815-082704845-shadow-local-static-r1",
+      "side": "local-static",
+      "source": "auto"
+    },
+    {
+      "partition": "holdout",
+      "run_id": "20260815-082704846-shadow-sol-static-r1",
+      "side": "sol-static",
+      "source": "imported"
+    },
+    {
+      "partition": "holdout",
+      "run_id": "20260815-082704847-shadow-local-static-r1",
+      "side": "local-static",
+      "source": "auto"
+    }
+  ],
+  "schema_version": 1,
+  "service": {
+    "chat_template_sha256": "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56",
+    "context_size": 12288,
+    "fine_tuned": false,
+    "max_output_tokens": 512,
+    "model_id": "rondo-local-approval",
+    "model_relative_path": "eval-data/models/mistralai_Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
+    "model_sha256": "7deb50ecb3afca928f0aa6dccdb87ed4ce4ab3991797e5fc0e0dedb92754802a",
+    "qualification_capability": "gpu_model_serving_validated",
+    "qualification_evidence_relative_path": "eval/locks/local-approval-b10333-ministral-12k-v1.json",
+    "quantization": "Q4_K_M",
+    "request_contract_sha256": "eab877b2220dd93342de63313f4dcfc5d9bca1f23f5fa5bbd9530a619d037738",
+    "runtime_identity_sha256": "abe7f763a18e7c801ca8d024a5d4d2a9036847c80eb32e1661baab6c1e2c03da",
+    "runtime_relative_path": "eval-data/tools/llama-b10333-cuda-linux-x64",
+    "seed": 42,
+    "serve_config_sha256": "7cb5a45a7d7aa1810cc14da28ea7f09d0a3356765264c7a419b4b4ca038a477d",
+    "service_build_info": "b1-0865990",
+    "static_decision_schema_name": "rondo_static_approval_v1",
+    "static_payload_schema_version": 3,
+    "temperature": 0.0,
+    "top_p": 1.0
+  },
+  "status": "complete",
+  "teacher": {
+    "artifacts": "eval-data/teacher-labels/20260815-sol-teacher-labels-v1",
+    "batch_id": "20260815-sol-teacher-labels-v1",
+    "holdout_sample_count": 16,
+    "holdout_sample_set_sha256": "ce79c28c23305071ada22a0f6d38d6d0ba9e9909874021cc74f267a98dc1d837",
+    "identity_rule_version": "rondo_guardian_semantic_v1",
+    "import_metadata_sha256": "d7bc048563309eafa0789be353ea56cab11c62052bd9c6625f3c4793779530da",
+    "label_schema_sha256": "62c4e8ecd8c122006680df1105c188b260d268e10953d042fbaef3c353f1aa18",
+    "label_schema_version": 1,
+    "labels_sha256": "7eaafa25aa99de804559ee77f034f4e69f8ff4227f5cf5d8d70c66f0a7b82a40",
+    "prompt_sha256": "5425f3defeb900c691ed497919a65fca38d05a22460cd4bef503aa7612b9312c",
+    "prompt_version": "rondo_sol_teacher_prompt_v1",
+    "representative_rule_version": "frozen_e_final_sha256_lexicographic_v1",
+    "sample_count": 40,
+    "sample_set_sha256": "96d877b01774e30aa238aaa75dda7bea9e51d9f8db03f1105789d3ae18426c0a",
+    "seed_sample_count": 24,
+    "seed_sample_set_sha256": "334d0821da8ab87f7a954804e9576943c45749c9cb4ac3ebfce4fe7e8bcc8b3c",
+    "static_decision_schema_name": "rondo_static_approval_v1",
+    "static_payload_schema_version": 3,
+    "teacher_generated_at": "2026-08-15",
+    "teacher_model": "gpt-5.6-sol",
+    "teacher_nature": "point_in_time_sol_distillation_target_not_human_ground_truth"
+  },
+  "vram": {
+    "baseline_bytes": 1629487104,
+    "complete": true,
+    "delta_bytes": 6419382272,
+    "method": "nvidia-smi device-level memory.used sampled every 200ms across the whole local batch lifecycle with no other CUDA compute process",
+    "peak_bytes": 8048869376,
+    "samples": 1351,
+    "scope": "peak bytes across the whole local batch lifecycle"
+  }
+}

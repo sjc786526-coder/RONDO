@@ -82,7 +82,7 @@ eval-data/                             # git-ignored
 |---|---|
 | 取值 | `rondo-local` ｜ `rondo-multi`。**`codex` 不是产品取值** —— 冻结上游是比较侧，不是本项目的产品线 |
 | 适用范围 | 只在被评对象是本项目的 RONDO 产品时写。`side = "codex"`（冻结上游）与 `side = "sol-static"`（云端教师）等非本项目产品的行**不写 `product`**，读取方也不得为其推定产品身份 |
-| 历史解释 | 缺字段且 `side = "rondo"` 的历史行按 `rondo-local` 解释；缺字段且 `side = "codex"` 的行视为不适用。当前 `runs.jsonl` 的 244 条中，224 条 `side=rondo`（即 RONDO Local）、20 条 `side=codex`（冻结上游侧） |
+| 历史解释 | 缺字段且 `side = "rondo"` 的历史行按 `rondo-local` 解释；缺字段且 `side = "codex"` 的行视为不适用。当前 `runs.jsonl` 共 248 条：`track=tb` 的 244 条中 224 条 `side=rondo`（即 RONDO Local）、20 条 `side=codex`（冻结上游侧），另有 4 条 `track=shadow`（2 条 `sol-static`、2 条 `local-static`） |
 | 只加不改 | 历史结果**不改名、不回填新 schema**；新字段从后续 campaign 开始使用 |
 | 目录 | 历史 `bin/rondo/` 保持原名不动，等价于 `rondo-local`；Multi 新增 `bin/rondo-multi/`，必须显式带 `multi` 字样。`bin/codex/` 是冻结上游侧的 bundle，不参与产品身份维度 |
 | 落地位置 | `eval/rondo_eval/contracts.py` 的 `product_layout()` 是唯一映射：源码目录（`mydev` / `multidev`）、Cargo target 前缀、`bin/` 命名空间与 `models-manager/models.json` catalog 路径都从它派生 |
@@ -231,17 +231,31 @@ eval-data/                             # git-ignored
 | 程序化运行的本地被评方 | `local-static` / `local-ft-static` | `rondo-local` | `auto` |
 | 导入的教师标签 | `sol-static` | **不写**（教师不是本项目产品） | `imported` |
 
-- `source` ∈ `auto` ｜ `imported`，**shadow 行必填**。历史行没有该字段时按 `auto` 解释（历史上不存在导入行）。
+- `source` ∈ `auto` ｜ `imported`，**shadow 行必填**，非 shadow 行不得携带。历史上不存在 shadow 行，
+  所以校验直接要求该字段，不做默认推定。
+- 上表的 `side` → `source` 映射由统一结果校验强制：`sol-static` 只能是 `imported`，
+  `local-static` / `local-ft-static` 只能是 `auto`。**未在本表声明映射的 shadow side（含已退役的
+  `luna-static`）一律拒绝发布**，必须先在本节写清它的 source 与产品合同，不靠读取方推定。
+- `taskset = "holdout"`（shadow 行另按 `config.partition`）的行由统一校验强制 `tasks = null`，
+  见下文"隐藏集的特殊规则"；这条不依赖具体写入方自觉。
 - `source = "imported"` 时**必填**：`config.teacher_model`（生成时点的模型标识）、`config.generated_at`
   （生成日期）、`config.prompt_version` 与 `config.prompt_sha256`（所用冻结 prompt 的版本标识与内容哈希）。
 - `source = "imported"` 时下列运行字段无意义，**必须显式为 `null`，不得伪造**：`binary_sha256`、`metrics`、
   `cost.actual_usd`。`cost.estimated_usd` 记 `0.0`（订阅制入口不额外计费）。
 - `git_commit` 对导入行记录**执行导入时**的 eval harness commit（谁做的导入），不是被测二进制的 commit；
   `git_dirty` 规则不变。
-- `artifacts` 对导入行指向冻结标签文件所在目录。
+- `artifacts` 对导入行指向冻结标签文件所在目录（`eval-data/teacher-labels/<batch_id>`）。导入行**不占用
+  `eval-data/runs/<run_id>` 工件树**：发布只写 record 本身，仍走同一把锁、同一份 journal 与同一套恢复语义。
 - `local-*` 两类当前只允许 `product = "rondo-local"`，且 `config.product` / `config.binary_product` 必须同值；
   不得携带 Terminal-Bench 的 `auto_review_config` 或 campaign 产品字段。将来若 Multi 也做影子横评，必须先在
   本节定义独立 side/产品映射和写入合同，不能让现有 Local side 直接声明 `rondo-multi`。
+- `local-*` 行的 `binary_sha256` 记录**被评本地模型 GGUF 的 SHA-256**：这条轨只回放 canonical static 合同，
+  没有 RONDO 二进制参与，写产品二进制哈希会是假证据。runtime、serve 合同、chat template 与资格身份写在
+  `config`（`runtime_identity_sha256` / `serve_config_sha256` / `request_contract_sha256` /
+  `chat_template_sha256` / `qualification_evidence_relative_path`）。
+- `source = "auto"` 的 shadow 行在 `config.metric_contract` 与 `config.metric_contract_version` 声明所用的
+  冻结指标口径；口径本身是 tracked 模板（首个为
+  `eval/templates/local-approval/l4-metric-contract-v1.json`），必须先于真实运行冻结。
 
 ### L5a 教师标签私有批次
 

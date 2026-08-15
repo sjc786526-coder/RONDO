@@ -532,6 +532,7 @@ class ArtifactTests(unittest.TestCase):
                 paths = RepoPaths(root, root)
                 run_id = f"20260809-0000000{number}-shadow-{side}-r1"
                 record = self._record(run_id, track="shadow", side=side)
+                record["source"] = "auto"
                 record["tasks"] = None
                 record["metrics"] = {"agreement": 1.0}
                 record["product"] = "rondo-local"
@@ -556,20 +557,46 @@ class ArtifactTests(unittest.TestCase):
                 with self.assertRaisesRegex(ArtifactError, "shadow side"):
                     ArtifactWriter(paths, next_id).start()
 
-        for number, side in enumerate(("luna-static", "sol-static"), start=85):
-            with self.subTest(non_product_side=side):
-                run_id = f"20260809-0000000{number}-shadow-{side}-r1"
-                record = self._record(run_id, track="shadow", side=side)
-                record["tasks"] = None
-                record["metrics"] = {"agreement": 1.0}
-                record["product"] = "rondo-local"
-                record["config"] = {
-                    "product": "rondo-local",
-                    "binary_product": "rondo-local",
-                }
-                writer = ArtifactWriter(self.paths, run_id).start()
-                with self.assertRaisesRegex(ArtifactError, "cannot carry a product"):
-                    writer.finalize(record, secrets=())
+        # The imported teacher side is not a RONDO product, even though its
+        # source/side pairing is otherwise the declared one.
+        run_id = "20260809-000000085-shadow-sol-static-r1"
+        record = self._record(run_id, track="shadow", side="sol-static")
+        record["source"] = "imported"
+        record["tasks"] = None
+        record["metrics"] = None
+        record["binary_sha256"] = None
+        record["cost"] = {"estimated_usd": 0.0, "actual_usd": None}
+        record["artifacts"] = "eval-data/teacher-labels/20260815-sol-teacher-labels-v1"
+        record["product"] = "rondo-local"
+        record["config"] = {
+            "teacher_model": "gpt-5.6-sol",
+            "generated_at": "2026-08-15",
+            "prompt_version": "rondo_sol_teacher_prompt_v1",
+            "prompt_sha256": "2" * 64,
+            "product": "rondo-local",
+            "binary_product": "rondo-local",
+        }
+        writer = ArtifactWriter(
+            self.paths,
+            run_id,
+            artifacts_reference="eval-data/teacher-labels/20260815-sol-teacher-labels-v1",
+        ).start()
+        with self.assertRaisesRegex(ArtifactError, "cannot carry a product"):
+            writer.finalize(record, secrets=())
+        writer.abort()
+
+        # A retired shadow side has no declared source contract, so it cannot
+        # be published at all until the spec gives it one.
+        run_id = "20260809-000000086-shadow-luna-static-r1"
+        retired = self._record(run_id, track="shadow", side="luna-static")
+        retired["tasks"] = None
+        retired["metrics"] = {"agreement": 1.0}
+        for source in ("auto", "imported"):
+            with self.subTest(retired_source=source):
+                with self.assertRaisesRegex(ArtifactError, "no declared source mapping"):
+                    artifacts._validate_record(
+                        {**retired, "source": source}, run_id, self.paths.common_root
+                    )
 
     def test_upstream_codex_identity_is_exact(self) -> None:
         invalid_values = (
