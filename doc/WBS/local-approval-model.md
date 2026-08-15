@@ -99,7 +99,8 @@
   doctor 的 synthetic probe 只证明生产入口能消费该资格，**不替代**上面那条真实 `E_final` 判定。
 - **一处工程事实值得记住**：冻结 b10333 把 libllama 自身的 `GGML_LOG_LEVEL_INFO` 映射为 verbosity TRACE(4)，
   而默认阈值是 INFO(3)，因此 GPU offload 计数在默认级别下根本不输出，且该事实没有任何 endpoint 可取。
-  qualification 私有采集因而固定使用 verbosity 4；正式 launcher 使用 verbosity 3，避免 trace-only 信息进入终端。
+  qualification 私有采集因而固定使用 verbosity 4；正式 launcher 使用 verbosity 3，并把 server stdout/stderr 定向到
+  `DEVNULL`，避免 WARN/ERROR 错误路径的未解析模型正文进入普通终端。
   启动指纹 schema v2 同时绑定两条固定日志策略，但用仓库相对资源身份替代 checkout 绝对路径，故 linked worktree 与 main
   对同一合同计算相同 identity，功能参数漂移仍 fail-closed。
 - **exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为实测 5,311 后，同一正式 census 入口从头

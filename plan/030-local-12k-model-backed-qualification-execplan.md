@@ -200,7 +200,8 @@ launcher 与 doctor 复验生产入口。
 **关键修复（非重试掩盖）**：b10333 的 offload 事实仍由 qualification 的 verbosity 4 私有日志取得；正式 launcher
 改用 verbosity 3，避免 trace-only 凭据片段进入终端。serve fingerprint schema v2 使用仓库相对模型/模板身份和内容 digest，
 不再绑定 checkout 绝对路径，同时仍严格绑定固定功能参数和 qualification/formal 日志策略。失败诊断仅保留固定类别，
-不再从任意日志正文派生 label。新增 linked-worktree/main、日志级别分离与纯文本失败行回归。
+不再从任意日志正文派生 label。正式 launcher 的 server stdout/stderr 最终定向到 `DEVNULL`，封闭 WARN/ERROR 正文路径；
+qualification 的 0600 私有日志保持不变。新增 linked-worktree/main、日志级别分离、stdio 去向与纯文本失败行回归。
 
 > 依据：冻结 b10333 `common/fit.h` 明确 `--fit` 只调整仍为默认值的参数，且上下文**仅在等于 0 时**才被改写，
 > 因此显式 `--ctx-size 12288` 不会被 fit 缩小；`--gpu-layers auto`（-1，即默认值）才是 fit 可下调的那一项。
@@ -224,6 +225,7 @@ launcher 与 doctor 复验生产入口。
   `eval/locks/local-approval-b10333-ministral-12k-v1.json`（schema v2）。
   审查整改后复跑 focused tests **140/140**、`just eval-lock` 通过；现场 8080 空闲、无 llama-server、
   GPU 无 compute process、`eval-data/local-approval/` 为空。共使用 **8** 个模型生命周期。
+  第二次复审的 stdio sink 窄修不改变 argv、serve identity 或 evidence，已由同一 focused 门禁覆盖，无需新增生命周期。
 - 未做：其余 41 条适配证据逐条验证、剩余 5 条超窗证据、16k、47 条批量 generation、L7、Local M3、
   Cargo、Docker、云 API、训练、全量 eval、全量测试。
 
@@ -253,5 +255,6 @@ launcher 与 doctor 复验生产入口。
 | 015 | qualification verbosity 4、正式 launcher verbosity 3 | offload 事实只能从 trace 取得，但冻结 server 会在 trace 输出 API key 后四位；私有采集与正式终端分离即可同时满足可观测性和日志边界 | launcher、qualification、identity | 独立审查整改 |
 | 016 | serve fingerprint schema v2 使用稳定资源身份 | resolved 模板绝对路径会让 worktree evidence 合并到 main 后立即失配；实际 argv 继续使用安全 resolved path，hash 改绑仓库相对身份、digest 与完整功能参数 | launcher、evidence、tests | 独立审查整改 |
 | 017 | 失败日志形状只使用固定类别 | 动态 label 可回显任意短文本；固定类别仍能区分空日志、payload-like、已知 llama.cpp 前缀和其他行，不需要通用日志审计 | qualification、tests | 独立审查整改 |
+| 018 | 正式 launcher 的 server stdout/stderr 定向到 `DEVNULL` | verbosity 3 仍允许冻结 runtime 在 structured parse WARN/ERROR 路径输出未解析模型正文；正式入口无需消费这些自由文本，qualification 私有日志继续承担资格观测 | launcher、tests | 第二次独立复审整改 |
 | 006 | ignored `rondo.local.toml` 只在主仓原位字段级修改 | loader 通过 Git common root 让全部 worktree 共用该文件；复制到 worktree 不生效 | 本机配置、交接 | 已采纳 |
 | 007 | 成功后的正式 launcher + doctor 复验属于本任务，L7 不属于 | 本任务要证明生产入口能消费资格；cloud/local Guardian 配置切换仍是独立工作包 | 验收、非目标 | 已采纳 |

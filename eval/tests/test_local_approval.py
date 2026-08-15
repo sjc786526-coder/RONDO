@@ -2081,8 +2081,9 @@ class _FakeServerProcess:
         self._exited = exited
 
     def __call__(self, command, **kwargs):
+        self.popen_kwargs = dict(kwargs)
         descriptor = kwargs.get("stdout")
-        if isinstance(descriptor, int):
+        if isinstance(descriptor, int) and descriptor >= 0:
             os.write(descriptor, self.log_text.encode("utf-8"))
         self.command = list(command)
         return self
@@ -2372,6 +2373,9 @@ class ModelBackedQualificationTests(unittest.TestCase):
         self.assertTrue(process.terminated)
         self.assertFalse(process.killed)
         self.assertEqual(process.command[process.command.index("--verbosity") + 1], "4")
+        self.assertIsInstance(process.popen_kwargs["stdout"], int)
+        self.assertNotEqual(process.popen_kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(process.popen_kwargs["stderr"], subprocess.STDOUT)
 
         evidence_path = self.root / model_backed.EVIDENCE_RELATIVE_PATH
         raw = evidence_path.read_text(encoding="utf-8")
@@ -2797,6 +2801,8 @@ class ModelBackedQualificationTests(unittest.TestCase):
             self.assertIn("--ctx-size", popen.command)
             self.assertEqual(popen.command[popen.command.index("--ctx-size") + 1], "12288")
             self.assertEqual(popen.command[popen.command.index("--verbosity") + 1], "3")
+            self.assertEqual(popen.popen_kwargs["stdout"], subprocess.DEVNULL)
+            self.assertEqual(popen.popen_kwargs["stderr"], subprocess.DEVNULL)
 
             identity_probe = mock.Mock()
             decision_probe = mock.Mock()

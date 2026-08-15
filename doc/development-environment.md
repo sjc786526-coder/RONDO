@@ -438,7 +438,8 @@ linked worktree 不复制凭据。加载器已通过 `git rev-parse --git-common
   （ignored 路径，普通文件、精确 `5,198,387,456` bytes、SHA-256 已验）已在 12,288 上下文下真实加载并完成
   一次合规结构化审批，正式 launcher 因而允许启动模型服务。
 - 冻结的本机服务合同：`context_size=12288`、`gpu_layers="auto"`、`fit="on"`、batch 512、ubatch 256、
-  flash attention `on`、K/V 均 f16、单 slot、`max_output_tokens=512`。正式 launcher 使用 verbosity 3；
+  flash attention `on`、K/V 均 f16、单 slot、`max_output_tokens=512`。正式 launcher 使用 verbosity 3，
+  且把冻结 server 的 stdout/stderr 定向到 `DEVNULL`，避免错误路径的模型正文进入普通终端；
   只有 qualification 的 0600 私有临时日志使用 verbosity 4 读取 b10333 offload 事实。8GB 现场实测
   `--fit` 收敛到 33/35 层 GPU offload，资格运行峰值显存 7,855,931,392 B。
   这些值同时出现在受跟踪 `rondo.local.example.toml`、ignored `rondo.local.toml`、启动指纹和

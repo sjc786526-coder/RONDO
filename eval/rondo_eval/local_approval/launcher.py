@@ -1224,7 +1224,12 @@ def run_server(
     if not _watchdog_held(watchdog):
         raise LauncherError("shared watchdog lease was lost before server start")
     try:
-        process = popen(command, env=environment)
+        process = popen(
+            command,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except (OSError, ValueError) as exc:
         raise LauncherError("llama-server could not be started") from exc
     try:

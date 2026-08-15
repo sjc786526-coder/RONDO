@@ -714,7 +714,8 @@ standard/Lite 形态均补回归。
 
 方案：`plan/030-local-12k-model-backed-qualification-execplan.md`；
 日志：`agent_log/2026-08-15-011600-plan030-local-12k-model-backed-qualification.md`、
-`agent_log/2026-08-15-023616-plan030-acceptance-remediation.md`。
+`agent_log/2026-08-15-023616-plan030-acceptance-remediation.md`、
+`agent_log/2026-08-15-024713-plan030-stdio-remediation.md`。
 
 - **成果**：RONDO Local 首次取得 **model-backed** 能力。既有 selector 预绑定的真实 `E_final`
   （`eaa2dfb1…9ebaca`，5,311 tokens，与 v3 census 锚点同一 SHA）在冻结 b10333 CUDA runtime、
@@ -726,7 +727,8 @@ standard/Lite 形态均补回归。
   delta 6,469,713,920 B；TTFT **3,183 ms**；结构化判定总耗时 **7,049 ms**；
   进程/端口/receipt/私有对象四项清理全 true。
 - **最终冻结服务参数**：12,288 / `gpu_layers="auto"` / `fit="on"` / batch 512 / ubatch 256 /
-  flash attention `on` / K,V 均 f16 / 单 slot。正式 launcher 使用 verbosity 3；只有 qualification 的
+  flash attention `on` / K,V 均 f16 / 单 slot。正式 launcher 使用 verbosity 3，并把 server stdout/stderr 定向到
+  `DEVNULL`；只有 qualification 的
   0600 私有临时日志使用 verbosity 4 读取 offload 事实。8GB 现场可用显存 7,096 MiB，
   `--fit` 自动收敛到 33 层、6,049 MiB used、1,046 MiB free，**未动用已授权的低精度 KV 方案**。
   冻结 b10333 的 `--fit` 只调整仍为默认值的参数、上下文仅在等于 0 时才改写，服务端逐字打印
@@ -745,7 +747,8 @@ standard/Lite 形态均补回归。
   根本不输出，而该事实又没有任何 endpoint 可取。首次实现把 verbosity 4 同时带入正式 launcher；独立审查还发现
   启动指纹包含模板的 worktree 绝对路径。最终把 trace 限定在 qualification 私有采集，正式 launcher 保持 verbosity 3；
   启动指纹 schema v2 改用仓库相对资源身份，linked worktree 与 main 对同一合同得到相同 hash，参数漂移仍失配。
-  失败摘要也只输出固定类别，不再从任意日志正文派生 label。
+  失败摘要也只输出固定类别，不再从任意日志正文派生 label。后续复审确认冻结 runtime 的 WARN/ERROR 仍有模型正文路径，
+  因而正式 launcher 最终将子进程 stdout/stderr 直接定向到 `DEVNULL`；qualification 的私有日志保持不变。
 - **正式入口复验**：晋级后由无 qualification 特权的正式 launcher 用同一合同独立加载，
   receipt schema v2 的 `serve_config_sha256`（`7cb5a45a…`）与证据 identity 逐字节一致；
   服务存活期间正式 doctor 报告 `status=ready`、exit 0、
