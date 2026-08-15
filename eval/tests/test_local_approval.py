@@ -207,7 +207,7 @@ def _local_data(
             "binary": "llama-server",
             "host": "127.0.0.1",
             "port": int(base_url.rsplit(":", 1)[1].split("/", 1)[0]),
-            "context_size": 4096,
+            "context_size": 12288,
             "gpu_layers": "auto",
             "fit": "on",
             "batch_size": 512,
@@ -272,16 +272,20 @@ def _canonical_payload(
     return StaticApprovalPayload(payload.policy_identity, canonical, logical_payload)
 
 
-# Shortened but format-exact llama.cpp b10333 CUDA load output.
+# Shortened but format-exact llama.cpp b10333 CUDA load output at `-lv 4`.
+# `common_init` turns the timestamp and level prefix on unconditionally, so
+# every real line carries one; the parser has to see through that.
 _CUDA_LOAD_LOG = (
-    "ggml_cuda_init: found 1 CUDA devices (Total VRAM: 8187 MiB):\n"
-    "  Device 0: NVIDIA GeForce RTX 4060 Laptop GPU, compute capability 8.9, "
-    "VMM: yes, VRAM: 8187 MiB\n"
-    "load_tensors: offloading 32 repeating layers to GPU\n"
-    "load_tensors: offloading output layer to GPU\n"
-    "load_tensors: offloaded 33/33 layers to GPU\n"
-    "llama_context: n_ctx         = 4096\n"
-    "main: server is listening on http://127.0.0.1:8080 - starting the main loop\n"
+    "0.00.184.536 I ggml_cuda_init: found 1 CUDA devices (Total VRAM: 8187 MiB):\n"
+    "0.00.184.560 I   Device 0: NVIDIA GeForce RTX 4060 Laptop GPU, compute "
+    "capability 8.9, VMM: yes, VRAM: 8187 MiB\n"
+    "0.01.405.243 I common_params_fit_impl:   - CUDA0 (NVIDIA GeForce RTX 4060 "
+    "Laptop GPU): 33 layers, 6049 MiB used, 1046 MiB free\n"
+    "0.01.929.110 I load_tensors: offloading 33 repeating layers to GPU\n"
+    "0.01.929.120 I load_tensors: offloaded 33/35 layers to GPU\n"
+    "0.01.945.002 I load_tensors:        CUDA0 model buffer size =  4397.00 MiB\n"
+    "0.02.703.329 I llama_context: n_ctx         = 12288\n"
+    "0.02.707.909 I srv  llama_server: listening on http://127.0.0.1:8080\n"
 )
 
 
@@ -608,8 +612,10 @@ class LocalApprovalClientTests(unittest.TestCase):
             ("ubatch_size", True),
             ("ubatch_size", 0),
             ("ubatch_size", 513),
-            ("cache_type_k", "q8_0"),
-            ("cache_type_v", "q4_0"),
+            ("cache_type_k", "q3_K"),
+            ("cache_type_v", "F16"),
+            ("cache_type_k", ""),
+            ("cache_type_v", True),
             ("no_mmproj", False),
             ("no_mmproj", 1),
             ("jinja", False),
@@ -637,27 +643,48 @@ class LocalApprovalClientTests(unittest.TestCase):
                 )
                 self.assertEqual(settings_from_config(config).gpu_layers, value)
 
-    def test_tracked_example_is_the_exact_8k_baseline_contract(self) -> None:
+    def test_only_b10333_kv_cache_types_are_accepted(self) -> None:
+        """K and V may differ, but both must be types b10333 can parse.
+
+        The 8GB machine needs the option of a cheaper KV cache at 12k, so the
+        contract accepts the runtime's own list instead of pinning f16 here;
+        which pair is actually qualified stays frozen in `serving_contract()`.
+        """
+
+        for value in ("f32", "f16", "bf16", "q8_0", "q5_1", "q4_0", "iq4_nl"):
+            with self.subTest(value=value):
+                config = self._config(
+                    "http://127.0.0.1:8080/v1",
+                    server_overrides={"cache_type_k": "f16", "cache_type_v": value},
+                )
+                self.assertEqual(settings_from_config(config).cache_type_v, value)
+
+    def test_tracked_example_is_the_qualified_12k_contract(self) -> None:
+        """The tracked example must state exactly what qualification froze.
+
+        Comparing against `serving_contract()` rather than a second literal
+        keeps the example, the launch fingerprint and the evidence identity
+        from drifting apart when the frozen serving profile changes.
+        """
+
         data = tomllib.loads(
             (REPO_ROOT / "rondo.local.example.toml").read_text(encoding="utf-8")
         )
         config = RuntimeConfig(RepoPaths(REPO_ROOT, REPO_ROOT), data, "0" * 64)
         settings = settings_from_config(config)
+        contract = model_backed.serving_contract()
+        self.assertEqual(
+            {key: getattr(settings, key) for key in contract}, contract
+        )
         self.assertEqual(
             (
                 settings.context_size,
-                settings.gpu_layers,
-                settings.fit,
-                settings.batch_size,
-                settings.ubatch_size,
+                settings.max_output_tokens,
                 settings.parallel,
-                settings.flash_attention,
-                settings.cache_type_k,
-                settings.cache_type_v,
                 settings.no_mmproj,
                 settings.jinja,
             ),
-            (8192, "all", "off", 512, 256, 1, "on", "f16", "f16", True, True),
+            (12288, model_backed.QUALIFIED_MAX_OUTPUT_TOKENS, 1, True, True),
         )
         self.assertEqual(
             settings.binary,
@@ -1167,7 +1194,13 @@ class LauncherAndDoctorTests(unittest.TestCase):
             mock.ANY, mock.sentinel.identity
         )
 
-    def test_serve_commands_exactly_express_4k_smoke_and_8k_baseline(self) -> None:
+    def test_serve_command_exactly_expresses_the_qualified_12k_contract(self) -> None:
+        """The argv is the launch fingerprint, so it is compared literally.
+
+        The second case only proves the tunables reach argv verbatim; it is
+        not a second qualified profile.
+        """
+
         model = self.root / "model.gguf"
         model.write_bytes(b"GGUFfake-model-fixture")
         common = [
@@ -1196,6 +1229,8 @@ class LauncherAndDoctorTests(unittest.TestCase):
             "256",
             "--parallel",
             "1",
+            "--verbosity",
+            "3",
             "--flash-attn",
             "on",
             "--cache-type-k",
@@ -1222,12 +1257,12 @@ class LauncherAndDoctorTests(unittest.TestCase):
                     "--fit",
                     "on",
                     "--ctx-size",
-                    "4096",
+                    "12288",
                     *common_tail[4:],
                 ],
             ),
             (
-                {"context_size": 8192, "gpu_layers": "all", "fit": "off"},
+                {"gpu_layers": "all", "fit": "off", "cache_type_v": "q8_0"},
                 [
                     *common,
                     "--gpu-layers",
@@ -1239,8 +1274,18 @@ class LauncherAndDoctorTests(unittest.TestCase):
                     "--fit",
                     "off",
                     "--ctx-size",
-                    "8192",
-                    *common_tail[4:],
+                    "12288",
+                    # everything up to, but not including, "--cache-type-k"
+                    *common_tail[4:14],
+                    "--cache-type-k",
+                    "f16",
+                    "--cache-type-v",
+                    "q8_0",
+                    "--jinja",
+                    "--chat-template-file",
+                    os.fspath((self.root / CHAT_TEMPLATE_RELATIVE_PATH).resolve()),
+                    "--metrics",
+                    "--slots",
                 ],
             ),
         )
@@ -1258,6 +1303,39 @@ class LauncherAndDoctorTests(unittest.TestCase):
                 self.assertNotIn("99", command)
                 self.assertNotIn("LLAMA_API_KEY", command)
         self.assertLess(expected.index("--jinja"), expected.index("--chat-template-file"))
+
+    def test_serve_fingerprint_is_stable_across_linked_worktree_paths(self) -> None:
+        common_root = self.root / "common"
+        first_worktree = self.root / "worktree-a"
+        second_worktree = self.root / "worktree-b"
+        for worktree in (first_worktree, second_worktree):
+            _install_template_fixture(worktree)
+        model = common_root / "eval-data/models/model.gguf"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"GGUFstable-path-fixture")
+        data = _local_data(
+            "http://127.0.0.1:8080/v1",
+            model_path_value="eval-data/models/model.gguf",
+            model_sha256_value=hashlib.sha256(model.read_bytes()).hexdigest(),
+        )
+        first = RuntimeConfig(
+            RepoPaths(common_root, first_worktree), copy.deepcopy(data), "0" * 64
+        )
+        second = RuntimeConfig(
+            RepoPaths(common_root, second_worktree), copy.deepcopy(data), "0" * 64
+        )
+
+        first_hash = serve_config_sha256(first, settings_from_config(first))
+        self.assertEqual(
+            first_hash,
+            serve_config_sha256(second, settings_from_config(second)),
+        )
+
+        second.data["local_model"]["server"]["context_size"] = 8192
+        self.assertNotEqual(
+            first_hash,
+            serve_config_sha256(second, settings_from_config(second)),
+        )
 
     def test_integer_gpu_layers_are_passed_as_exact_decimal(self) -> None:
         model = self.root / "model.gguf"
@@ -1544,6 +1622,8 @@ class LauncherAndDoctorTests(unittest.TestCase):
                     {"batch_size": 1024},
                     {"ubatch_size": 128},
                     {"flash_attention": "off"},
+                    {"cache_type_k": "q8_0"},
+                    {"cache_type_v": "q8_0"},
                     {"metrics": False},
                     {"slots": False},
                     {"binary": "eval-data/tools/other/llama-server"},
@@ -1592,8 +1672,8 @@ class LauncherAndDoctorTests(unittest.TestCase):
                         LocalApprovalClient(changed_quantization).decide(_payload())
 
                 invalid_changes = (
-                    {"cache_type_k": "q8_0"},
-                    {"cache_type_v": "q8_0"},
+                    {"cache_type_k": "q3_K"},
+                    {"cache_type_v": "F16"},
                     {"no_mmproj": False},
                     {"jinja": False},
                     {"parallel": 2},
@@ -2001,8 +2081,9 @@ class _FakeServerProcess:
         self._exited = exited
 
     def __call__(self, command, **kwargs):
+        self.popen_kwargs = dict(kwargs)
         descriptor = kwargs.get("stdout")
-        if isinstance(descriptor, int):
+        if isinstance(descriptor, int) and descriptor >= 0:
             os.write(descriptor, self.log_text.encode("utf-8"))
         self.command = list(command)
         return self
@@ -2070,7 +2151,7 @@ class _NeverJoiningThread:
 
 
 class ModelBackedQualificationTests(unittest.TestCase):
-    """Failure classes for the restricted 4k qualification and its evidence."""
+    """Failure classes for the restricted 12k qualification and its evidence."""
 
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -2230,7 +2311,7 @@ class ModelBackedQualificationTests(unittest.TestCase):
     def _http(props: dict | None = None, slots: object = None):
         default_props = {
             "build_info": model_backed.CUDA_SERVICE_BUILD_INFO,
-            "default_generation_settings": {"n_ctx": 4096},
+            "default_generation_settings": {"n_ctx": 12288},
             "total_slots": 1,
         }
         default_slots = [{"is_processing": True, "next_token": [{"n_decoded": 3}]}]
@@ -2285,12 +2366,16 @@ class ModelBackedQualificationTests(unittest.TestCase):
 
         self.assertEqual(summary["status"], "qualified")
         self.assertEqual(summary["gpu_offloaded_layers"], 33)
-        self.assertEqual(summary["effective_context_size"], 4096)
+        self.assertEqual(summary["effective_context_size"], 12288)
         self.assertGreater(summary["time_to_first_token_ms"], 0)
         self.assertLessEqual(summary["time_to_first_token_ms"], summary["total_decision_ms"])
         self.assertTrue(all(summary["cleanup"].values()))
         self.assertTrue(process.terminated)
         self.assertFalse(process.killed)
+        self.assertEqual(process.command[process.command.index("--verbosity") + 1], "4")
+        self.assertIsInstance(process.popen_kwargs["stdout"], int)
+        self.assertNotEqual(process.popen_kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(process.popen_kwargs["stderr"], subprocess.STDOUT)
 
         evidence_path = self.root / model_backed.EVIDENCE_RELATIVE_PATH
         raw = evidence_path.read_text(encoding="utf-8")
@@ -2299,7 +2384,7 @@ class ModelBackedQualificationTests(unittest.TestCase):
         self.assertNotIn("guardian policy", raw)
         document = json.loads(raw)
         self.assertEqual(document["capability"], "gpu_model_serving_validated")
-        self.assertEqual(document["identity"]["context_size"], 4096)
+        self.assertEqual(document["identity"]["context_size"], 12288)
         self.assertEqual(
             document["observed"]["evidence_source"]["relative_path"], self.evidence_relative
         )
@@ -2323,9 +2408,16 @@ class ModelBackedQualificationTests(unittest.TestCase):
     def test_contract_violations_are_rejected_before_the_model_starts(self) -> None:
         cases = (
             {"binary": "eval-data/tools/llama-b10333/llama-server"},
+            {"context_size": 4096},
             {"context_size": 8192},
+            {"context_size": 16384},
             {"gpu_layers": "all"},
             {"fit": "off"},
+            {"batch_size": 1024},
+            {"ubatch_size": 128},
+            {"flash_attention": "off"},
+            {"cache_type_k": "q8_0"},
+            {"cache_type_v": "q8_0"},
         )
         for overrides in cases:
             with self.subTest(overrides=overrides):
@@ -2398,11 +2490,13 @@ class ModelBackedQualificationTests(unittest.TestCase):
             "server_exited_before_ready": {
                 "popen": _FakeServerProcess(exited=True),
             },
+            # The 8GB failure mode to guard against: the service comes up, but
+            # with a context the runtime shrank to make the model fit.
             "service_context_differs": {
                 "http_get": self._http(
                     props={
                         "build_info": model_backed.CUDA_SERVICE_BUILD_INFO,
-                        "default_generation_settings": {"n_ctx": 8192},
+                        "default_generation_settings": {"n_ctx": 4096},
                         "total_slots": 1,
                     }
                 ),
@@ -2410,7 +2504,7 @@ class ModelBackedQualificationTests(unittest.TestCase):
             "gpu_offload_not_positive": {
                 "popen": _FakeServerProcess(
                     log_text=_CUDA_LOAD_LOG.replace(
-                        "offloaded 33/33 layers", "offloaded 0/33 layers"
+                        "offloaded 33/35 layers", "offloaded 0/35 layers"
                     )
                 ),
             },
@@ -2448,11 +2542,55 @@ class ModelBackedQualificationTests(unittest.TestCase):
                     (LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_NOT_RUN),
                 )
 
+    def test_blocker_reports_log_shape_without_any_line_content(self) -> None:
+        """An unexpected log must still be describable, but only by shape."""
+
+        config = self._config()
+        log = (
+            "0.00.101.060 I build: 1 (0865990) with cc\n"
+            "0.00.216.038 I main: server is listening\n"
+            "\n"
+            # `srv ` is allow-listed and this line mentions a device, so only
+            # the payload guard keeps the evidence text out of the report.
+            "0.03.100.000 I srv  params_from_: device prompt \"secret evidence text\"\n"
+            "0.03.100.001 I {\"input\":\"approve deleting the production database\"}\n"
+            "0.03.100.002 I private evidence text\n"
+            "0.03.100.003 I user secret: hidden\n"
+            "0.03.100.004 I srv  params_from_: device private evidence text\n"
+        )
+        with self.assertRaises(qualification.QualificationError) as raised:
+            self._run(config, popen=_FakeServerProcess(log_text=log))
+        self.assertEqual(raised.exception.code, "gpu_offload_not_reported")
+        shapes = raised.exception.facts["line_shapes"]
+        self.assertEqual(
+            sorted(shapes),
+            sorted(
+                [
+                    "build x1",
+                    "main x1",
+                    "srv x1",
+                    "<blank> x1",
+                    "<other> x2",
+                    "<payload-like> x2",
+                ]
+            ),
+        )
+        self.assertEqual(raised.exception.facts["infrastructure_lines"], ["srv"])
+        rendered = json.dumps(raised.exception.facts)
+        for secret in (
+            "production database",
+            "secret evidence text",
+            "approve deleting",
+            "private evidence text",
+            "user secret",
+        ):
+            self.assertNotIn(secret, rendered)
+
     def test_rejected_decision_reports_only_non_sensitive_server_counters(self) -> None:
         config = self._config()
         log = _CUDA_LOAD_LOG + (
             "srv  send_error: task id = 0, error: request (7812 tokens) exceeds "
-            "the available context size (4096 tokens), try increasing it\n"
+            "the available context size (12288 tokens), try increasing it\n"
         )
 
         def refuse(_config: RuntimeConfig, _payload: object) -> dict[str, object]:
@@ -2463,7 +2601,7 @@ class ModelBackedQualificationTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "structured_decision_failed")
         facts = raised.exception.facts
         self.assertEqual(facts["prompt_tokens"], 7812)
-        self.assertEqual(facts["context_size"], 4096)
+        self.assertEqual(facts["context_size"], 12288)
         self.assertEqual(facts["server_error_class"], "exceeds the available context size")
         self.assertTrue(all(facts["cleanup"].values()))
         self.assertNotIn("rationale", json.dumps(facts))
@@ -2547,6 +2685,151 @@ class ModelBackedQualificationTests(unittest.TestCase):
             self._promoted_capability(config),
             ("gpu_model_serving_validated", model_backed.MODEL_BACKED_VALIDATED),
         )
+
+    def test_evidence_from_the_retired_4k_contract_cannot_promote(self) -> None:
+        """A 4k-shaped document at the 12k path stays unvalidated.
+
+        The evidence path is versioned, but the loader must not depend on the
+        filename: a hand-placed 4k record has to fail the identity contract on
+        its own contents.
+        """
+
+        config = self._config()
+        self._run(config)
+        evidence_path = self.root / model_backed.EVIDENCE_RELATIVE_PATH
+        valid = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+        retired = json.loads(json.dumps(valid))
+        retired["schema_version"] = 1
+        retired["identity"]["context_size"] = 4096
+        retired["observed"]["effective_context_size"] = 4096
+        evidence_path.write_text(json.dumps(retired), encoding="utf-8")
+        self.assertEqual(
+            self._promoted_capability(config),
+            (LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_EVIDENCE_INVALID),
+        )
+
+        # The 12k identity alone is not enough either: the service must have
+        # actually served 12k, so a shrunk effective context still fails.
+        shrunk = json.loads(json.dumps(valid))
+        shrunk["observed"]["effective_context_size"] = 4096
+        evidence_path.write_text(json.dumps(shrunk), encoding="utf-8")
+        self.assertEqual(
+            self._promoted_capability(config),
+            (LLAMA_CPP_CUDA_CAPABILITY, model_backed.MODEL_BACKED_EVIDENCE_INVALID),
+        )
+
+    def test_static_payload_version_drift_invalidates_the_qualification(self) -> None:
+        """A later input payload contract must not inherit this capability.
+
+        The qualification only proves the model answered *these* request bytes,
+        so the payload schema version is bound both explicitly and through the
+        request-contract digest.
+        """
+
+        config = self._config()
+        self._run(config)
+        document = json.loads(
+            (self.root / model_backed.EVIDENCE_RELATIVE_PATH).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            document["identity"]["static_payload_schema_version"],
+            model_backed.STATIC_PAYLOAD_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            self._promoted_capability(config),
+            ("gpu_model_serving_validated", model_backed.MODEL_BACKED_VALIDATED),
+        )
+
+        with mock.patch.object(model_backed, "STATIC_PAYLOAD_SCHEMA_VERSION", 4):
+            self.assertNotEqual(
+                model_backed.request_contract_sha256(settings_from_config(config)),
+                document["identity"]["request_contract_sha256"],
+            )
+            self.assertEqual(
+                self._promoted_capability(config),
+                (
+                    LLAMA_CPP_CUDA_CAPABILITY,
+                    model_backed.MODEL_BACKED_EVIDENCE_INVALID,
+                ),
+            )
+
+    def _promoted_runtime(self, config: RuntimeConfig) -> RuntimeInspection:
+        """`inspect_runtime`'s tail: the real projection over a fixture closure."""
+
+        capability, validation = _model_backed_capability(
+            config, settings_from_config(config), "b" * 64
+        )
+        return RuntimeInspection(
+            "runtime_ready",
+            Path("/fake/llama-server"),
+            "fixture CUDA runtime",
+            "b" * 64,
+            capability,
+            validation,
+        )
+
+    def test_formal_launcher_and_doctor_consume_the_promoted_qualification(self) -> None:
+        config = self._config()
+        lease = runtime_bridge.WatchdogLease(token="f" * 48)
+        guard = mock.Mock()
+        guard.is_held.return_value = True
+        watchdog = runtime_bridge.WatchdogProof(lease=lease, guard=guard)
+
+        with mock.patch(
+            "rondo_eval.local_approval.launcher.inspect_runtime",
+            side_effect=lambda cfg, _settings: self._promoted_runtime(cfg),
+        ):
+            refused = mock.Mock()
+            with self.assertRaises(LauncherError):
+                run_server(config, watchdog_factory=lambda: watchdog, popen=refused)
+            refused.assert_not_called()
+
+            self._run(config)
+
+            popen = _FakeServerProcess(exited=True)
+            self.assertEqual(
+                run_server(
+                    config,
+                    watchdog_factory=lambda: watchdog,
+                    popen=popen,
+                    identity_publisher=mock.Mock(return_value=mock.sentinel.identity),
+                    identity_clearer=mock.Mock(),
+                ),
+                0,
+            )
+            self.assertIn("--ctx-size", popen.command)
+            self.assertEqual(popen.command[popen.command.index("--ctx-size") + 1], "12288")
+            self.assertEqual(popen.command[popen.command.index("--verbosity") + 1], "3")
+            self.assertEqual(popen.popen_kwargs["stdout"], subprocess.DEVNULL)
+            self.assertEqual(popen.popen_kwargs["stderr"], subprocess.DEVNULL)
+
+            identity_probe = mock.Mock()
+            decision_probe = mock.Mock()
+            report = run_doctor(
+                config,
+                runtime_inspector=lambda cfg, _settings: self._promoted_runtime(cfg),
+                identity_probe=identity_probe,
+                decision_probe=decision_probe,
+            )
+        self.assertEqual(
+            (
+                report.status,
+                report.exit_code,
+                report.runtime_capability,
+                report.model_backed_validation,
+                report.schema,
+            ),
+            (
+                "ready",
+                SUCCESS,
+                "gpu_model_serving_validated",
+                "model_schema_probe_passed",
+                "valid",
+            ),
+        )
+        identity_probe.assert_called_once()
+        decision_probe.assert_called_once()
 
     def test_evidence_source_must_be_the_pre_bound_frozen_archive(self) -> None:
         config = self._config()
@@ -2863,7 +3146,7 @@ class TokenCensusTests(unittest.TestCase):
                 return {
                     "build_info": model_backed.CUDA_SERVICE_BUILD_INFO,
                     "model_path": os.fspath(model),
-                    "default_generation_settings": {"n_ctx": 4096},
+                    "default_generation_settings": {"n_ctx": 12288},
                     "total_slots": 1,
                 }
             if url.endswith("/models"):

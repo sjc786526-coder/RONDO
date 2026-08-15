@@ -60,8 +60,8 @@
 - **L2 的 CPU 与 Linux CUDA model-free 运行闭包均已就绪**：llama.cpp 固定为 `b10333`/commit
   `08659901c43b51de735740f1cf61bb82fbe0c4e4`，项目局部 CPU x64 runtime closure、Responses client、
   doctor、fake server、结构化输出本地校验和启动入口已实现。运行时 lock 覆盖项目目录
-  52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。配置/命令现可精确表达 4k
-  原生 auto+fit smoke 与 8k all+fit-off baseline，固定单卡 split/main GPU、F16 K/V、512/256 batch、no-mmproj、
+  52 个普通文件、10 个 symlink 和 8 个宿主动态依赖，启动环境移除 `LD_LIBRARY_PATH`。配置/命令现精确表达已冻结的
+  12k `auto`/`fit=on` 合同，固定单卡 split/main GPU、F16 K/V、512/256 batch、no-mmproj、trace verbosity、
   Jinja 和显式官方模板。2026-08-13 已以项目局部 CUDA Toolkit 12.6.2、Ada `89-real` strict link 构建 exact
   b10333 CUDA runtime；独立 lock 冻结 source/tree、工具链、configure/build、9 个 ELF 文件、14 个 symlink、
   RUNPATH、cudart/cuBLAS、WSL `libcuda.so.1` 与系统闭包。清除 `LD_LIBRARY_PATH` 后 version/help 成功，model-free
@@ -72,16 +72,37 @@
   launcher 实例；redirect、receipt 替换、进程/监听者变化都 fail-closed。这是轻量实例身份
   约束，不是签名或权限系统，也不证明 server 实际加载了 receipt 所声明的全部字节，或 launcher 退出后
   server 必然随之退出。
-- **model-backed 资格设施已就绪，一条真实证据在 4k 合同下被拒**。受限 qualification 入口、版本化 model-backed
-  evidence 与单向 capability 投影已落地：正式 launcher 在证据缺失、无效或身份不匹配时一律在进程启动前拒绝，
-  CUDA source build 与 CPU release 的服务身份分别精确绑定 `b1-0865990` 与 `b10333-08659901c`；
-  qualification 的输入由受跟踪 selector 预先绑定唯一 path、`E_final`/meta SHA 与期望 Guardian 模型/effort，
-  并复用生产 evidence reader 与 meta 校验。2026-08-14 真实模型已首次成功加载：exact GGUF 装载、服务身份与
-  `/props` 上下文 4096 均通过核验。但该冻结样本的 static payload 经服务端 tokenizer 实测超过 4096 上下文
-  （v3 之前为 5,313 input tokens，v3 下为 5,311），llama.cpp 按合同返回 exceed-context 错误，因此没有
-  产生结构化判定，未写入任何证据，能力保持 `linux_cuda_built_model_unvalidated`、CUDA lock 的
-  `model_backed_structured_output` 保持 `not_run`。
-  显存峰值、首 token 与总耗时随该失败一并作废，尚无 model-backed 指标。
+- **12k model-backed qualification 已通过，capability 为 `gpu_model_serving_validated`**。受限 qualification
+  入口、版本化 model-backed evidence 与单向 capability 投影已落地：正式 launcher 在证据缺失、无效或身份不匹配时
+  一律在进程启动前拒绝，CUDA source build 与 CPU release 的服务身份分别精确绑定 `b1-0865990` 与
+  `b10333-08659901c`；qualification 的输入由受跟踪 selector 预先绑定唯一 path、`E_final`/meta SHA 与期望
+  Guardian 模型/effort，并复用生产 evidence reader 与 meta 校验。
+  2026-08-15 该 selector 绑定的真实 `E_final`（5,311 tokens，与 v3 census 锚点同一 SHA）在 12,288 / 512 合同下
+  返回合规 `rondo_static_approval_v1` 判定：服务实际 `n_ctx=12288`、单 slot、`build_info=b1-0865990`，
+  GPU offload **33/35 层**，设备级显存 baseline 1,386,217,472 B、峰值 7,855,931,392 B、delta 6,469,713,920 B，
+  TTFT 3,183 ms、结构化判定总耗时 7,049 ms，进程/端口/receipt/私有对象四项清理全 true。
+  唯一正式证据是 `eval/locks/local-approval-b10333-ministral-12k-v1.json`（schema v2）。
+  这只证明 12k 档位内这条真实证据可服务，**不代表其余 41 条已逐条验证，也不代表剩余 5 条超窗证据可服务**。
+- **最终 12k 服务参数已冻结并三处对齐**：12,288 / `gpu_layers="auto"` / `fit="on"` / batch 512 / ubatch 256 /
+  flash attention `on` / K,V 均 f16，输出预算 512。8GB 现场实测可用显存 7,096 MiB，`--fit` 自动收敛到 33 层
+  offload、6,049 MiB used、1,046 MiB free，因此**未动用授权范围内的低精度 KV**。冻结 b10333 的 `--fit` 只调整
+  仍为默认值的参数，且上下文仅在等于 0 时才被改写，所以显式 `--ctx-size 12288` 不会被缩小（服务端日志逐字
+  打印 `context size set by user to 12288 -> no change`）。受跟踪 `rondo.local.example.toml`、主仓 ignored
+  `rondo.local.toml`、启动指纹与资格 identity 现在表达同一组参数；任一项漂移都会让 capability 退回
+  `linux_cuda_built_model_unvalidated`。
+- **资格身份已显式绑定 static payload v3**：`request_contract_sha256` 升为 v2 并纳入
+  `static_payload_schema_version`，identity 另存同名显式字段。以后输入 payload 合同变版时旧资格自动失配，
+  不能沿用本次 capability。
+- **正式入口已独立复验**：晋级后由无 qualification 特权的正式 launcher 用同一合同重新加载，receipt schema v2 的
+  `serve_config_sha256` 与证据 identity 逐字节一致；服务存活期间正式 doctor 报告 `status=ready`、
+  `runtime_capability=gpu_model_serving_validated`、`model_backed_validation=model_schema_probe_passed`。
+  doctor 的 synthetic probe 只证明生产入口能消费该资格，**不替代**上面那条真实 `E_final` 判定。
+- **一处工程事实值得记住**：冻结 b10333 把 libllama 自身的 `GGML_LOG_LEVEL_INFO` 映射为 verbosity TRACE(4)，
+  而默认阈值是 INFO(3)，因此 GPU offload 计数在默认级别下根本不输出，且该事实没有任何 endpoint 可取。
+  qualification 私有采集因而固定使用 verbosity 4；正式 launcher 使用 verbosity 3，并把 server stdout/stderr 定向到
+  `DEVNULL`，避免 WARN/ERROR 错误路径的未解析模型正文进入普通终端。
+  启动指纹 schema v2 同时绑定两条固定日志策略，但用仓库相对资源身份替代 checkout 绝对路径，故 linked worktree 与 main
+  对同一合同计算相同 identity，功能参数漂移仍 fail-closed。
 - **exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为实测 5,311 后，同一正式 census 入口从头
   独立运行两遍，两遍都 `status=complete`、47/47 取得 exact input-token 数、0 拒绝、0 缺失计数、
   锚点精确 5,311、`generated_tokens=0`，逐条记录、摘要与 digest 逐字节一致
@@ -119,30 +140,27 @@
   三 consumer 逐字节一致，且这 47 条真实请求全部被冻结 b10333 精确计数。
   全集分布已有，档位可以定案；不把“只用合成证据、真实证据只取可服务子集”设为默认路线。
 - **首个 model-backed 资格档位已定为 12k（12,288）**：它在现有全集上覆盖 42/47，明显高于 8k 的 11/47，
-  同时不直接承担 16k 的更高 KV/显存压力。这个决策只冻结下一资格目标；12k 的真实显存、offload、结构化输出
-  和时延均尚未验收，剩余 5 条超窗证据也不冒充可服务。
+  同时不直接承担 16k 的更高 KV/显存压力。12k 的真实显存、offload、结构化输出与时延均已在 2026-08-15 验收；
+  剩余 5 条超窗证据仍不冒充可服务。
 - **唯一权重已下载且仅静态验收**：2026-08-12 已将未微调纯文本基线冻结为 Bartowski 模型卡声明从官方
   Ministral 3 8B Instruct 2512 BF16 转换的 `Q4_K_M`，固定 repo revision、文件、大小、LFS SHA、
   单文件下载/校验和 8GB 两阶段上下文方案。2026-08-13 唯一 GGUF 已通过普通文件、精确
-  `5,198,387,456` bytes 与 SHA-256 `7deb50ec…54802a` 校验；Git 未跟踪，真实 ignored 配置未写入，模型从未加载。
-  真实 ignored `rondo.local.toml` 已于 2026-08-14 迁移到 exact GGUF 与 4k `auto`/`fit=on` 合同，
-  `providers`、`paid_eval` 与价格配置未变、权限仍为 0600；doctor 现返回 `configuration: valid` 与
-  `linux_cuda_built_model_unvalidated`。冻结选择见 2026-08-12 快照，下载/CUDA 证据见 2026-08-13 快照。
-  真实 model-backed 结构化输出仍是 `gpu_model_serving_validated` 的硬前置。
+  `5,198,387,456` bytes 与 SHA-256 `7deb50ec…54802a` 校验；Git 未跟踪。
+  真实 ignored `rondo.local.toml` 已于 2026-08-15 迁移到 exact GGUF 与 12k 合同，
+  `providers`、`paid_eval` 与价格配置未变、权限仍为 0600。冻结选择见 2026-08-12 快照，
+  下载/CUDA 证据见 2026-08-13 快照。
 
 ### 当前推进顺序
 
-1. **下一工作是 12k model-backed qualification。** 将仍绑定 4k 的资格、证据身份与当前本机配置迁移到
-   12k 合同，补直接相关测试，然后在新的真实模型授权下完成 model-backed smoke，记录加载身份、显存峰值、
-   首 token、总耗时与结构化输出。具体服务参数和代码组织由该任务结合现有 launcher/runtime 选择并冻结；
+1. **下一工作是 L7 的“仅改配置切换”。** 12k model-backed 已通过，L7 与它一起形成 **Local M3**；
+   不同上下文档位互相独立验收，任一档位失败不得靠弱化 identity 或输出校验凑绿。
    不顺带验证 16k、压缩或剩余 5 条超窗证据。
-2. 12k 通过后，连同 L7 的“仅改配置切换”一起形成 **Local M3**；不同上下文档位互相独立验收，
-   任一档位失败不得靠弱化 identity 或输出校验凑绿。
-3. **L5a**：用冻结 prompt、人在场经开发用 Codex 生成第一批 Sol 教师标签。
-4. 跑 L3/L4：程序化批量运行 `Local-static`，对照导入的教师标签，固化指标口径，得到未微调 baseline。
-5. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
+2. **L5a**：用冻结 prompt、人在场经开发用 Codex 生成第一批 Sol 教师标签。
+3. 跑 L3/L4：程序化批量运行 `Local-static`，对照导入的教师标签，固化指标口径，得到未微调 baseline。
+4. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
 
-真实模型加载/推理与重型 Cargo、Docker 互斥；未完成 12k qualification 前，能力只称
+真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
+`gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
 `linux_cuda_built_model_unvalidated`。
 
 ## 核心设计（已定，不再反复讨论）
@@ -207,7 +225,9 @@
   **上下文预算已实测**。47 条真实 `E_final` 在 v3 下全部取得 exact input-token 数：5,311—22,499 tokens。
   按 `input+512`，4k/8k/12k/16k 分别覆盖 0/11/42/45 条；首个资格目标已在覆盖率与 8GB 显存压力之间
   选择 12k。能被计数或长度适配不等于能在该档位内完成真实推理，仍以 model-backed qualification 为准。
-- 验收：本地服务能对一条**真实** `E_final` 返回合规结构化判定，并记录显存峰值、首 token 延迟、总耗时。
+  12k 实测：`--fit` 自动收敛到 33/35 层 offload，资格运行峰值 7,855,931,392 B，f16 K/V 够用。
+- 验收：**已通过**（2026-08-15）。本地服务对一条真实 `E_final` 返回合规结构化判定，并记录了显存峰值
+  7,855,931,392 B、首 token 3,183 ms 与总耗时 7,049 ms。
 
 ### L2a Guardian provider 覆盖（规模 M，L7 的前置）
 

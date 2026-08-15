@@ -55,6 +55,10 @@ _CHAT_TEMPLATE_LOCK_RELATIVE_PATH = Path(
     "eval/locks/ministral-3-8b-instruct-2512-chat-template.json"
 )
 _CHAT_TEMPLATE_ALLOWED_RELATIVE_ROOT = Path("eval/templates/local-approval")
+# Qualification needs trace to observe b10333's GPU offload report, but the
+# formal launcher must not expose trace-only server details to its terminal.
+FORMAL_SERVE_LOG_VERBOSITY = 3
+QUALIFICATION_LOG_VERBOSITY = 4
 _VERSION_TIMEOUT_SECONDS = 10
 _DEVICE_TIMEOUT_SECONDS = 10
 _ROUTER_TIMEOUT_SECONDS = 10.0
@@ -288,7 +292,7 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
         "runtime_ready",
         binary,
         (
-            "llama.cpp b10333 Linux CUDA runtime serves the qualified 4k model contract"
+            "llama.cpp b10333 Linux CUDA runtime serves the qualified 12k model contract"
             if capability == GPU_MODEL_SERVING_CAPABILITY
             else "llama.cpp b10333 Linux CUDA runtime is available; model-backed serving is not validated"
         ),
@@ -1040,6 +1044,8 @@ def _serve_arguments(
     settings: LocalApprovalSettings,
     model: Path,
     template: ChatTemplateInspection,
+    *,
+    log_verbosity: int,
 ) -> list[str]:
     gpu_layers = (
         settings.gpu_layers
@@ -1075,6 +1081,8 @@ def _serve_arguments(
         str(settings.ubatch_size),
         "--parallel",
         str(settings.parallel),
+        "--verbosity",
+        str(log_verbosity),
         "--flash-attn",
         settings.flash_attention,
         "--cache-type-k",
@@ -1095,11 +1103,21 @@ def _serve_arguments(
 
 def _serve_config_sha256(
     settings: LocalApprovalSettings,
-    arguments: Sequence[str],
     template: ChatTemplateInspection,
 ) -> str:
+    # Fingerprint the checked resource identities, not checkout-specific
+    # resolved paths.  The actual command still receives resolved paths after
+    # the same model/template safety checks.
+    stable_arguments = _serve_arguments(
+        settings,
+        Path(settings.model_path),
+        ChatTemplateInspection(
+            Path(settings.chat_template_file), template.size_bytes, template.sha256
+        ),
+        log_verbosity=FORMAL_SERVE_LOG_VERBOSITY,
+    )
     canonical = {
-        "schema_version": 1,
+        "schema_version": 2,
         "runtime": "llama_cpp",
         "api": "responses",
         "format": "gguf",
@@ -1107,7 +1125,8 @@ def _serve_config_sha256(
         "configured_binary": settings.binary,
         "tools": False,
         "web_ui": False,
-        "command_arguments": list(arguments),
+        "formal_command_arguments": stable_arguments,
+        "qualification_log_verbosity": QUALIFICATION_LOG_VERBOSITY,
         "chat_template_sha256": template.sha256,
     }
     raw = json.dumps(
@@ -1127,22 +1146,29 @@ def serve_config_sha256(
     if configured_model.is_symlink() or not configured_model.is_file():
         raise ModelMissingError("configured local model is missing")
     template = chat_template(config, settings)
-    arguments = _serve_arguments(
-        settings, configured_model.resolve(strict=True), template
-    )
-    return _serve_config_sha256(settings, arguments, template)
+    return _serve_config_sha256(settings, template)
 
 
 def build_serve_command(
     config: RuntimeConfig,
     settings: LocalApprovalSettings,
     binary: Path,
+    *,
+    for_qualification: bool = False,
 ) -> list[str]:
     """Build the formal b10333 command; never falls back to router mode."""
 
     model = model_path(config, settings)
     template = chat_template(config, settings)
-    return [os.fspath(binary), *_serve_arguments(settings, model, template)]
+    verbosity = (
+        QUALIFICATION_LOG_VERBOSITY
+        if for_qualification
+        else FORMAL_SERVE_LOG_VERBOSITY
+    )
+    return [
+        os.fspath(binary),
+        *_serve_arguments(settings, model, template, log_verbosity=verbosity),
+    ]
 
 
 def serve_environment(config: RuntimeConfig) -> dict[str, str]:
@@ -1186,14 +1212,24 @@ def run_server(
             "model-backed GPU serving remains unvalidated for the selected runtime"
         )
     template = chat_template(config, settings)
-    arguments = _serve_arguments(settings, model, template)
+    arguments = _serve_arguments(
+        settings,
+        model,
+        template,
+        log_verbosity=FORMAL_SERVE_LOG_VERBOSITY,
+    )
     command = [os.fspath(runtime.binary), *arguments]
-    serving_config = _serve_config_sha256(settings, arguments, template)
+    serving_config = _serve_config_sha256(settings, template)
     environment = serve_environment(config)
     if not _watchdog_held(watchdog):
         raise LauncherError("shared watchdog lease was lost before server start")
     try:
-        process = popen(command, env=environment)
+        process = popen(
+            command,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except (OSError, ValueError) as exc:
         raise LauncherError("llama-server could not be started") from exc
     try:

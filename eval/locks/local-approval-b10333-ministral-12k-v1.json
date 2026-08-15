@@ -1,0 +1,65 @@
+{
+  "capability": "gpu_model_serving_validated",
+  "cleanup": {
+    "port_released": true,
+    "private_artifacts_removed": true,
+    "receipt_cleared": true,
+    "server_stopped": true
+  },
+  "identity": {
+    "batch_size": 512,
+    "cache_type_k": "f16",
+    "cache_type_v": "f16",
+    "chat_template_sha256": "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56",
+    "context_size": 12288,
+    "fit": "on",
+    "flash_attention": "on",
+    "gpu_layers": "auto",
+    "model_relative_path": "eval-data/models/mistralai_Ministral-3-8B-Instruct-2512-Q4_K_M.gguf",
+    "model_sha256": "7deb50ecb3afca928f0aa6dccdb87ed4ce4ab3991797e5fc0e0dedb92754802a",
+    "model_size_bytes": 5198387456,
+    "request_contract_sha256": "eab877b2220dd93342de63313f4dcfc5d9bca1f23f5fa5bbd9530a619d037738",
+    "runtime_identity_sha256": "abe7f763a18e7c801ca8d024a5d4d2a9036847c80eb32e1661baab6c1e2c03da",
+    "runtime_relative_path": "eval-data/tools/llama-b10333-cuda-linux-x64",
+    "serve_config_sha256": "7cb5a45a7d7aa1810cc14da28ea7f09d0a3356765264c7a419b4b4ca038a477d",
+    "static_payload_schema_version": 3,
+    "ubatch_size": 256
+  },
+  "model_backed_structured_output": "structured_output_validated",
+  "observed": {
+    "cuda_device": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "effective_context_size": 12288,
+    "evidence_source": {
+      "guardian_source_baseline": "rust-v0.147.0",
+      "guardian_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+      "meta_sha256": "40917cec4d4efb01727755519983cc7db473949744a94660a10bd164f730d59f",
+      "relative_path": "eval-data/runs/20260812-370000005-tb-rondo-r1/guardian-evidence/0003/E_final.json",
+      "request_shape": "responses_lite",
+      "review_id": "e2759768-bb16-4230-9f9a-7f4890af51c6",
+      "sha256": "eaa2dfb178159b79f5e2e3fdb60179c5e9d729dfcff02c97b5a6acb5d09ebaca"
+    },
+    "gpu_offloaded_layers": 33,
+    "gpu_total_layers": 35,
+    "model_loaded": true,
+    "service_build_info": "b1-0865990",
+    "structured_response": {
+      "outcome_in_enum": true,
+      "rationale_non_empty": true,
+      "response_sha256": "3b940a469b23a2371f9fe46ea5d382262d5ace93b4020a7c54531d5ddeab9f29",
+      "risk_tag_count": 3,
+      "schema_name": "rondo_static_approval_v1",
+      "valid": true
+    },
+    "time_to_first_token_ms": 3183.4789399999863,
+    "total_decision_ms": 7048.562667000169,
+    "ttft_method": "non-streaming request with /slots next_token.n_decoded polled every 15ms; first positive value is the first token",
+    "vram": {
+      "baseline_bytes": 1386217472,
+      "delta_bytes": 6469713920,
+      "method": "nvidia-smi device-level memory.used sampled every 200ms with no other CUDA compute process",
+      "peak_bytes": 7855931392
+    }
+  },
+  "qualified_on": "2026-08-15",
+  "schema_version": 2
+}

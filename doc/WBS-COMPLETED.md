@@ -709,3 +709,58 @@ standard/Lite 形态均补回归。
   provenance 设施。census 成功只闭合 WP3b-A2，**不等于** model-backed qualification 或 Local M3 成功：
   capability 仍为 `linux_cuda_built_model_unvalidated`、`model_backed_validation: not_run`、
   CUDA lock 的 `model_backed_structured_output` 仍为 `not_run`，上下文档位尚未选择。
+
+## WP3b-A3 Local 12k model-backed qualification 与 capability 晋级（2026-08-15）
+
+方案：`plan/030-local-12k-model-backed-qualification-execplan.md`；
+日志：`agent_log/2026-08-15-011600-plan030-local-12k-model-backed-qualification.md`、
+`agent_log/2026-08-15-023616-plan030-acceptance-remediation.md`、
+`agent_log/2026-08-15-024713-plan030-stdio-remediation.md`。
+
+- **成果**：RONDO Local 首次取得 **model-backed** 能力。既有 selector 预绑定的真实 `E_final`
+  （`eaa2dfb1…9ebaca`，5,311 tokens，与 v3 census 锚点同一 SHA）在冻结 b10333 CUDA runtime、
+  唯一 GGUF、冻结 tokenizer/template、static payload v3 与 **12,288 / 512** 合同下，
+  返回了合规的 `rondo_static_approval_v1` 结构化判定。capability 由
+  `linux_cuda_built_model_unvalidated` 晋级为 `gpu_model_serving_validated`。
+- **实测指标**：服务 `n_ctx=12288`、`total_slots=1`、`build_info=b1-0865990`；
+  GPU offload **33/35 层**；设备级显存 baseline 1,386,217,472 B、峰值 **7,855,931,392 B**、
+  delta 6,469,713,920 B；TTFT **3,183 ms**；结构化判定总耗时 **7,049 ms**；
+  进程/端口/receipt/私有对象四项清理全 true。
+- **最终冻结服务参数**：12,288 / `gpu_layers="auto"` / `fit="on"` / batch 512 / ubatch 256 /
+  flash attention `on` / K,V 均 f16 / 单 slot。正式 launcher 使用 verbosity 3，并把 server stdout/stderr 定向到
+  `DEVNULL`；只有 qualification 的
+  0600 私有临时日志使用 verbosity 4 读取 offload 事实。8GB 现场可用显存 7,096 MiB，
+  `--fit` 自动收敛到 33 层、6,049 MiB used、1,046 MiB free，**未动用已授权的低精度 KV 方案**。
+  冻结 b10333 的 `--fit` 只调整仍为默认值的参数、上下文仅在等于 0 时才改写，服务端逐字打印
+  `context size set by user to 12288 -> no change`。
+- **合同迁移**：evidence 改为版本化的
+  `eval/locks/local-approval-b10333-ministral-12k-v1.json`（schema v2）；
+  `model_backed.serving_contract()` 成为服务参数的唯一漂移源，identity 显式记录
+  gpu_layers/fit/batch/ubatch/flash/K/V；`request_contract_sha256` 升为 v2 并纳入
+  `static_payload_schema_version`，identity 另存同名显式字段，**补齐了 static payload v3 绑定**；
+  KV cache 校验由“只允许 f16”放宽为冻结 b10333 `kv_cache_types` 白名单（实际冻结值仍是 f16/f16）。
+  主仓 ignored `rondo.local.toml` 只改 `context_size` 一个字段，`providers`/`paid_eval`
+  规范化 digest 与 0600 权限均未变。
+- **疑难问题**：前两次生命周期都以 `gpu_offload_not_reported` 失败，但决策与清理其实都成功。
+  根因是冻结 b10333 的 `common_get_verbosity()` 把 libllama 自身的 `GGML_LOG_LEVEL_INFO`
+  映射为 verbosity **TRACE(4)**，而默认阈值是 **INFO(3)**，因此 GPU offload 计数在默认级别下
+  根本不输出，而该事实又没有任何 endpoint 可取。首次实现把 verbosity 4 同时带入正式 launcher；独立审查还发现
+  启动指纹包含模板的 worktree 绝对路径。最终把 trace 限定在 qualification 私有采集，正式 launcher 保持 verbosity 3；
+  启动指纹 schema v2 改用仓库相对资源身份，linked worktree 与 main 对同一合同得到相同 hash，参数漂移仍失配。
+  失败摘要也只输出固定类别，不再从任意日志正文派生 label。后续复审确认冻结 runtime 的 WARN/ERROR 仍有模型正文路径，
+  因而正式 launcher 最终将子进程 stdout/stderr 直接定向到 `DEVNULL`；qualification 的私有日志保持不变。
+- **正式入口复验**：晋级后由无 qualification 特权的正式 launcher 用同一合同独立加载，
+  receipt schema v2 的 `serve_config_sha256`（`7cb5a45a…`）与证据 identity 逐字节一致；
+  服务存活期间正式 doctor 报告 `status=ready`、exit 0、
+  `runtime_capability=gpu_model_serving_validated`、`model_backed_validation=model_schema_probe_passed`。
+  随后定点 SIGTERM 该 exact PID，launcher rc=0、receipt 自清、进程退出。
+- **验收**：focused `tests.test_local_approval` + `tests.test_config_hardening` +
+  `tests.test_config_and_artifacts` 最终 **140/140**、`just eval-lock` **85 packages**。首次模型加载前实际为
+  138/138；首次诊断整改后为 139/139；独立审查整改后、重新加载模型前为 140/140。首次加载前另已证明：真实 12k 配置下
+  doctor 报 `linux_cuda_built_model_unvalidated`、正式 launcher 在 `Popen` 前以 exit 70 拒绝。
+  共使用 8 个模型生命周期：原 6 次完成参数探索与首轮资格/复验，审查整改后再用 1 次资格和 1 次正式复验。
+- **边界**：本次只证明 12k 档位内这条真实证据可服务。**未**验证其余 41 条适配证据、剩余 5 条超窗证据、
+  16k、47 条批量 generation、L7 配置切换或 Local M3；未运行 Cargo、Docker、云 API、训练、
+  全量 eval 或全量测试；未改模型/runtime/tokenizer/template/static payload v3 核心语义、
+  输出预算、selector、census baseline、run ledger 或历史 CUDA base lock；
+  未新增 provenance、签名、attestation 或通用审计设施。
