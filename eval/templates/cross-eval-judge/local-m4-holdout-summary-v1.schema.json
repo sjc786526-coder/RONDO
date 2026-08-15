@@ -1,0 +1,121 @@
+{
+  "$defs": {
+    "approvalCounts": {
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "supported": {"minimum": 0, "type": "integer"},
+        "uncertain": {"minimum": 0, "type": "integer"},
+        "unsupported": {"minimum": 0, "type": "integer"}
+      },
+      "type": "object"
+    },
+    "outcomeCounts": {
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "allow": {"minimum": 0, "type": "integer"},
+        "deny": {"minimum": 0, "type": "integer"}
+      },
+      "type": "object"
+    },
+    "qualityCounts": {
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "adequate": {"minimum": 0, "type": "integer"},
+        "strong": {"minimum": 0, "type": "integer"},
+        "weak": {"minimum": 0, "type": "integer"}
+      },
+      "type": "object"
+    },
+    "sideCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "all_candidates_inadequate": {"minimum": 0, "type": "integer"},
+        "approval_judgments": {"$ref": "#/$defs/approvalCounts"},
+        "candidate_outcomes": {"$ref": "#/$defs/outcomeCounts"},
+        "judge_allow_side_deny": {"minimum": 0, "type": "integer"},
+        "judge_deny_side_allow": {"minimum": 0, "type": "integer"},
+        "judge_outcome_agreement": {"minimum": 0, "type": "integer"},
+        "not_preferred": {"minimum": 0, "type": "integer"},
+        "reason_quality": {"$ref": "#/$defs/qualityCounts"},
+        "sole_preferred": {"minimum": 0, "type": "integer"},
+        "tied_preferred": {"minimum": 0, "type": "integer"}
+      },
+      "required": [
+        "candidate_outcomes",
+        "judge_outcome_agreement",
+        "judge_deny_side_allow",
+        "judge_allow_side_deny",
+        "sole_preferred",
+        "tied_preferred",
+        "not_preferred",
+        "all_candidates_inadequate",
+        "approval_judgments",
+        "reason_quality"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "body_batch_ids": {
+      "items": {"pattern": "^[a-z0-9][a-z0-9-]{0,95}$", "type": "string"},
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "cohort_manifest_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "contract_version": {"const": "rondo_m4_holdout_batch_summary_v1", "type": "string"},
+    "decision": {"type": "null"},
+    "judge_models": {
+      "items": {"minLength": 1, "type": "string"},
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "judge_outcomes": {"$ref": "#/$defs/outcomeCounts"},
+    "judged_dates": {
+      "items": {"format": "date", "type": "string"},
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "partition": {"const": "holdout", "type": "string"},
+    "sample_count": {"minimum": 1, "type": "integer"},
+    "schema_version": {"const": 1, "type": "integer"},
+    "sides": {
+      "additionalProperties": false,
+      "properties": {
+        "local-ft-static": {"$ref": "#/$defs/sideCounts"},
+        "local-static": {"$ref": "#/$defs/sideCounts"},
+        "sol-static": {"$ref": "#/$defs/sideCounts"}
+      },
+      "required": ["sol-static", "local-static", "local-ft-static"],
+      "type": "object"
+    },
+    "synthetic_holdout_combined": {"const": false, "type": "boolean"},
+    "tasks": {"type": "null"},
+    "thresholds": {"type": "null"}
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "partition",
+    "cohort_manifest_sha256",
+    "body_batch_ids",
+    "sample_count",
+    "judge_models",
+    "judged_dates",
+    "judge_outcomes",
+    "sides",
+    "tasks",
+    "decision",
+    "thresholds",
+    "synthetic_holdout_combined"
+  ],
+  "title": "RONDO M4 tracked holdout batch-only summary v1",
+  "type": "object"
+}

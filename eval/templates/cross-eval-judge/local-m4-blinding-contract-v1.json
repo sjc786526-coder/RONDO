@@ -1,0 +1,23 @@
+{
+  "algorithm_version": "sha256_ranked_balanced_latin_square_v1",
+  "candidate_ids": ["candidate-a", "candidate-b", "candidate-c"],
+  "canonical_serialization": "utf8 sorted-key JSON with identical decision field order and no NaN",
+  "identity_value_scan": "reject exact side identifiers and imported run-identity values in package keys or strings",
+  "mapping_visibility": "private ignored batch only; never included in the judge-visible package",
+  "package_candidate_fields": ["candidate_id", "decision"],
+  "package_forbidden_metadata": [
+    "side",
+    "model identity",
+    "artifact identity or path",
+    "runtime identity",
+    "training lineage",
+    "pair identity",
+    "seed",
+    "mapping",
+    "target presented as reference answer"
+  ],
+  "position_balance": "within every batch and for every hidden side, max(position count) - min(position count) <= 1",
+  "randomization": "private seed and SHA-256 labels deterministically rank samples and Latin-square base, direction and block order without language-runtime RNG dependence",
+  "schema_version": 1,
+  "seed_visibility": "private ignored batch only; never printed or tracked"
+}

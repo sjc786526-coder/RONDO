@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"properties": {"side": {"const": "sol-static"}}, "required": ["side"]},
+      "then": {
+        "properties": {
+          "run_contract": {
+            "properties": {"provenance": {"const": "frozen_validation_target"}},
+            "required": ["provenance"]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"side": {"const": "local-static"}}, "required": ["side"]},
+      "then": {
+        "properties": {
+          "run_contract": {
+            "properties": {
+              "provenance": {"const": "l6_paired_unfinetuned"},
+              "training_receipt_sha256": {"type": "null"}
+            },
+            "required": ["provenance", "training_receipt_sha256"]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"side": {"const": "local-ft-static"}}, "required": ["side"]},
+      "then": {
+        "properties": {
+          "run_contract": {
+            "properties": {
+              "provenance": {"const": "l6_paired_finetuned"},
+              "training_receipt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+            },
+            "required": ["provenance", "training_receipt_sha256"]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "approval_input": {"type": "object"},
+    "approval_prompt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "body_batch_id": {"pattern": "^[a-z0-9][a-z0-9-]{0,95}$", "type": "string"},
+    "cohort_id": {"pattern": "^[a-z0-9][a-z0-9-]{0,95}$", "type": "string"},
+    "cohort_manifest_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "contract_version": {"const": "rondo_m4_three_side_import_v1", "type": "string"},
+    "decision": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {"enum": ["allow", "deny"], "type": "string"},
+        "rationale": {"minLength": 1, "type": "string"},
+        "risk_tags": {
+          "items": {"minLength": 1, "type": "string"},
+          "maxItems": 16,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": ["outcome", "rationale", "risk_tags"],
+      "type": "object"
+    },
+    "message_sequence_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "output_schema_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "partition": {"enum": ["synthetic", "holdout"], "type": "string"},
+    "payload_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "run_contract": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "contract_version": {"const": "rondo_m4_three_side_import_v1", "type": "string"},
+            "provenance": {"const": "frozen_validation_target", "type": "string"},
+            "source_cohort_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "source_dataset_batch_id": {"minLength": 1, "type": "string"},
+            "source_generated_date": {"format": "date", "type": "string"},
+            "source_generation_model": {"minLength": 1, "type": "string"},
+            "source_generation_prompt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "source_generation_prompt_version": {"minLength": 1, "type": "string"}
+          },
+          "required": [
+            "contract_version",
+            "provenance",
+            "source_dataset_batch_id",
+            "source_generation_model",
+            "source_generated_date",
+            "source_generation_prompt_version",
+            "source_generation_prompt_sha256",
+            "source_cohort_sha256"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "base_model_identity_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "blind_identity_markers": {
+              "items": {"maxLength": 512, "minLength": 3, "type": "string"},
+              "maxItems": 32,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "chat_template_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "contract_version": {"const": "rondo_l6_paired_attribution_v1", "type": "string"},
+            "model_artifact_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "output_contract_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "pair_id": {"pattern": "^l6-[a-z0-9][a-z0-9-]{0,92}$", "type": "string"},
+            "pair_receipt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "provenance": {
+              "enum": ["l6_paired_unfinetuned", "l6_paired_finetuned"],
+              "type": "string"
+            },
+            "request_contract_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "runtime_identity_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "sampling_contract": {
+              "additionalProperties": false,
+              "properties": {
+                "context_size": {"minimum": 1, "type": "integer"},
+                "max_output_tokens": {"minimum": 1, "type": "integer"},
+                "seed": {"type": "integer"},
+                "temperature": {"type": "number"},
+                "top_p": {"type": "number"}
+              },
+              "required": ["context_size", "max_output_tokens", "temperature", "top_p", "seed"],
+              "type": "object"
+            },
+            "source_work_package": {"const": "L6", "type": "string"},
+            "training_receipt_sha256": {
+              "oneOf": [
+                {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+                {"type": "null"}
+              ]
+            }
+          },
+          "required": [
+            "contract_version",
+            "provenance",
+            "source_work_package",
+            "pair_id",
+            "pair_receipt_sha256",
+            "base_model_identity_sha256",
+            "blind_identity_markers",
+            "runtime_identity_sha256",
+            "chat_template_sha256",
+            "request_contract_sha256",
+            "sampling_contract",
+            "output_contract_sha256",
+            "model_artifact_sha256",
+            "training_receipt_sha256"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "sample_id": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": 1, "type": "integer"},
+    "side": {
+      "enum": ["sol-static", "local-static", "local-ft-static"],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "partition",
+    "cohort_id",
+    "cohort_manifest_sha256",
+    "body_batch_id",
+    "sample_id",
+    "side",
+    "approval_input",
+    "payload_sha256",
+    "approval_prompt_sha256",
+    "message_sequence_sha256",
+    "output_schema_sha256",
+    "decision",
+    "run_contract"
+  ],
+  "title": "RONDO M4 complete three-side import row v1",
+  "type": "object"
+}

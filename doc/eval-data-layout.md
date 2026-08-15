@@ -312,16 +312,30 @@ Git 只在 `eval/locks/` 保存一个不含正文、source path、逐条 semanti
 ### 会话内人判定横评（Local M4）的产物
 
 M4 由 Opus 5 在 Claude Code 会话内判定，**不满足“自动运行、自动记录、自动归档”**，因此不进 `runs.jsonl`，
-改用固定产物格式约束：
+改用 `rondo_eval.local_approval.cross_eval` 的固定合同：
 
-1. 每批输出一份**冻结 JSONL**，落到 `eval-data/cross-eval/<batch_id>/`，权限 0600。
-2. 每行至少含：证据哈希、所用裁判 prompt 文件的版本标识与内容哈希、各被评方输出、裁判结论与理由。
-3. 被评方在裁判侧**匿名化且顺序随机**；匿名标签到真实被评方的映射与结果同批保存，不在判定时可见。
-4. 必须记录**裁判模型标识与判定日期**，并把该批标注为“该时点判定”；订阅侧模型版本不由本项目冻结，
-   不假装可重跑复现。
-5. **合成证据主体与真实 `E_final` holdout 锚点分成两组记录，不混算**。真实 holdout 只作 sanity anchor。
-6. 需要公共可见时，只在 `eval/results/baselines/` 登记一行人工摘要（批次 id、样本数、prompt 版本哈希、
-   裁判模型与日期、结论），逐条判定留在 `eval-data/`。
+- tracked synthetic cohort 是 `eval/locks/local-approval-m4-synthetic-cohort-v1.json`：只保存 130 条
+  validation 的 sample/payload/target/group/batch 身份与必要合同哈希，不保存 input/target 正文。当前固定两批
+  65 / 65，状态为 `waiting_for_l6_outputs`。
+- 真实执行目录为 `eval-data/cross-eval/<execution_id>/`，目录 0700、普通文件 0600。三方完整导入为
+  `three-side-outputs.jsonl`，并同时导入 canonical `l6-pair-receipt.json`；每个 sample 必须恰有
+  `sol-static`、`local-static`、`local-ft-static` 一条。Sol 行只能复用冻结 validation target；receipt 必须声明
+  L6 成对的未微调/微调工件身份、训练 receipt、禁泄漏模型标识及共同 base lineage/runtime/template/request/
+  sampling/output contract，文件内容哈希再绑定两种 Local 行。不能用只有自报字段的输出或 Plan 033 部署 baseline
+  充当成对对照。
+- `blinding-seed.json` 与 `blind-map-<body_batch_id>.json` 只在上述 ignored 私有目录。裁判可见的
+  `judge-package-<body_batch_id>.json` 只含一次 canonical approval input 与三个统一序列化的匿名 decision；
+  不含 side、模型/工件/路径/runtime/lineage、seed、mapping 或单独的参考 target。每批都独立满足 side × position
+  计数差不超过 1。
+- `judge-request-<body_batch_id>.json` 冻结 package、裁判 prompt/schema、裁判模型标识和判定日期；人工返回
+  `judge-results-<body_batch_id>.jsonl` 后必须完整校验这些身份，才生成私有
+  `unblinded-<body_batch_id>.json` 和 `aggregate.json`。聚合只报判断一致/分歧、偏好/tie 与候选评价等事实，
+  不自动产生采用/保留/停止决定或机械阈值。
+- synthetic body 与 holdout sanity anchor 使用独立 private cohort 和 aggregate，聚合入口拒绝混合分区。
+  本任务不物化真实 holdout；将来若发布 holdout tracked 投影，只能符合
+  `local-m4-holdout-summary-v1.schema.json` 的批次级摘要，`tasks=null`，不得含逐条身份、正文、输出、裁判理由
+  或映射。
+- 裁判模型由订阅侧提供且不可冻结；每批结果必须记录实际模型标识与日期并标为时点判定，不假装可完全重跑。
 
 ## 5. 证据包分区
 

@@ -914,3 +914,24 @@ standard/Lite 形态均补回归。
   holdout 排除、确定性 group-safe split、私有权限及哈希绑定；真实 release verify 从私有候选和冻结教师批次重算
   tracked 数据与 manifest。未运行训练或 training dry-run、本地模型、Docker、Cargo、API、Hub、云资源、CI 或全量测试；
   未修改 Plan 032/033、static v3、L4 结果、`mydev/` 或 `multidev/`。
+
+## WP3b-A8：Local M4 本地离线三方盲评准备设施（Plan 036，2026-08-15）
+
+- **冻结主体**：body-free cohort 精确绑定 Plan 034 全部 130 条 validation、原 dataset/validation 哈希、逐条
+  sample/payload/target/source-group/split-group 身份及合同模板哈希；26 个 source group 与 26 个 near-duplicate
+  group 均不跨批，确定性两批各 65 条。cohort SHA-256 为
+  `9dd901fff3df072ed65ff3962d1e4524255a5a42a3f810903d191457cb494b95`。
+- **离线合同**：新增 stdlib-only `rondo_eval.local_approval.cross_eval`，严格接收完整 `sol-static` / `local-static` /
+  `local-ft-static`；canonical L6 pair receipt 的内容哈希绑定两种 Local 输出、不同工件身份、微调 receipt、共同底模
+  谱系及 runtime/template/request/sampling/output 合同。Plan 033 部署 baseline、缺 side、重复/未知 side 或任何
+  input/payload/prompt/message/schema 漂移均 fail-closed。
+- **盲评与结果**：版本化裁判 prompt、side/result/receipt/holdout schema 和 SHA-256 稳定 Latin-square 算法；真实
+  seed、mapping、三方正文、逐条裁判与解盲结果限定在 ignored `eval-data/cross-eval/<execution_id>/`（0700/0600）。
+  每批独立保证 side × position 差不超过 1；所有批次结果完整验证后才解盲，aggregate 只报事实，不给采用结论或
+  机械阈值。
+- **holdout 边界**：只建立独立私有导入与严格批次级 tracked 计数白名单；私有 source hash 绑定教师 provenance，
+  公共投影拒绝逐条身份/正文/输出/理由，synthetic / holdout 入口拒绝混算。本任务没有读取或物化真实 holdout。
+- **验证与状态**：6 条完全合成 fixture 完成 0600 文件级三方导入、打包、模拟裁判重载、解盲和聚合 round-trip；
+  focused unittest **27/27 通过、0 skip**，`py_compile` 与 `git diff --check` 通过。真实 no-model preflight 复算
+  130 条、65 / 65、26 + 26 组，终态 `waiting_for_l6_outputs`。未创建 fake Local 输出，未调用模型/网络，未运行
+  L6、正式 M4、Opus 裁判、训练、Cargo、Docker、CI 或全量测试；三选一人判定仍未完成。
