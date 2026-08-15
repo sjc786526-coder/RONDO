@@ -22,7 +22,10 @@ from rondo_eval.contracts import (  # noqa: E402
 )
 from rondo_eval.evidence import (  # noqa: E402
     STATIC_APPROVAL_CONSUMERS,
+    STATIC_DECISION_SCHEMA_NAME,
+    STATIC_PAYLOAD_SCHEMA_VERSION,
     EvidenceError,
+    PolicyIdentity,
     StaticApprovalPayload,
     build_static_payload,
     policy_identity,
@@ -62,16 +65,48 @@ TASK_INPUT = [
 ]
 
 
-def standard_request() -> dict:
+# The archived encrypted-only shape: no `content`, empty `summary`, one opaque
+# provider transport string.  Synthetic bytes; no archived body is copied here.
+ENCRYPTED_ONLY_REASONING = {
+    "type": "reasoning",
+    "summary": [],
+    "encrypted_content": "opaque-provider-transport",
+}
+# Public summary plus both raw content subtypes.  The frozen upstream hides raw
+# content unless raw agent reasoning is explicitly enabled, so only the summary
+# may be projected.
+SUMMARY_AND_RAW_REASONING = {
+    "type": "reasoning",
+    "id": "rs_provider_session",
+    "summary": [
+        {"type": "summary_text", "text": "first public summary"},
+        {"type": "summary_text", "text": "second public summary"},
+    ],
+    "content": [
+        {"type": "reasoning_text", "text": "hidden raw reasoning text"},
+        {"type": "text", "text": "hidden raw plain text"},
+    ],
+    "encrypted_content": "opaque-provider-transport",
+    "internal_chat_message_metadata_passthrough": {"turn_id": "turn_reasoning"},
+}
+RAW_ONLY_REASONING = {
+    "type": "reasoning",
+    "summary": [],
+    "content": [{"type": "reasoning_text", "text": "hidden raw reasoning text"}],
+    "encrypted_content": "opaque-provider-transport",
+}
+
+
+def standard_request(task_input: list | None = None) -> dict:
     return {
         "model": "gpt-5.6-luna",
         "instructions": POLICY,
         "tools": [{"type": "function", "name": "shell"}],
-        "input": TASK_INPUT,
+        "input": [*(TASK_INPUT if task_input is None else task_input)],
     }
 
 
-def lite_request() -> dict:
+def lite_request(task_input: list | None = None) -> dict:
     return {
         "model": "gpt-5.6-luna",
         "input": [
@@ -85,9 +120,22 @@ def lite_request() -> dict:
                 "role": "developer",
                 "content": [{"type": "input_text", "text": POLICY}],
             },
-            *TASK_INPUT,
+            *(TASK_INPUT if task_input is None else task_input),
         ],
     }
+
+
+def forged_payload(payload: StaticApprovalPayload, logical: dict) -> StaticApprovalPayload:
+    """Re-canonicalize an edited logical payload so only the edit is under test."""
+
+    canonical = json.dumps(
+        logical,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return StaticApprovalPayload(payload.policy_identity, canonical, logical)
 
 
 class EvidenceTests(unittest.TestCase):
@@ -105,6 +153,247 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn("approval reason: retry was denied", standard.canonical_bytes.decode())
         self.assertIn("turn_id", standard.canonical_bytes.decode())
         self.assertEqual(serialized["input"][1]["type"], "function_call")
+
+    def test_static_input_payload_declares_v2_and_v1_cannot_pass_the_sink(self) -> None:
+        payload = build_static_payload(standard_request())
+
+        self.assertEqual(STATIC_PAYLOAD_SCHEMA_VERSION, 2)
+        self.assertEqual(payload.logical_payload["schema_version"], 2)
+        self.assertEqual(payload.policy_identity.schema_version, 2)
+        # The structured decision output is a different contract and stays v1.
+        self.assertEqual(STATIC_DECISION_SCHEMA_NAME, "rondo_static_approval_v1")
+
+        stale_body = forged_payload(
+            payload, {**payload.logical_payload, "schema_version": 1}
+        )
+        with self.assertRaises(EvidenceError):
+            validate_static_payload(stale_body)
+
+        stale_identity = StaticApprovalPayload(
+            PolicyIdentity(
+                1,
+                payload.policy_identity.request_shape,
+                payload.policy_identity.sha256,
+                "known",
+            ),
+            payload.canonical_bytes,
+            payload.logical_payload,
+        )
+        with self.assertRaises(EvidenceError):
+            validate_static_payload(stale_identity)
+
+    def test_encrypted_only_reasoning_is_dropped_for_all_three_consumers(self) -> None:
+        with_reasoning = [TASK_INPUT[0], ENCRYPTED_ONLY_REASONING, *TASK_INPUT[1:]]
+        standard = build_static_payload(standard_request(with_reasoning))
+        lite = build_static_payload(lite_request(with_reasoning))
+        without_reasoning = build_static_payload(standard_request())
+
+        # Dropping the item is exactly equivalent to it never being there.
+        self.assertEqual(standard.canonical_bytes, without_reasoning.canonical_bytes)
+        self.assertEqual(standard.canonical_bytes, lite.canonical_bytes)
+        consumer_bytes = {
+            consumer: static_payload_bytes_for_consumer(standard, consumer)
+            for consumer in STATIC_APPROVAL_CONSUMERS
+        }
+        self.assertEqual(
+            set(consumer_bytes), {"luna-static", "sol-static", "local-static"}
+        )
+        self.assertEqual(len(set(consumer_bytes.values())), 1)
+        decoded = consumer_bytes["local-static"].decode()
+        self.assertNotIn("reasoning", decoded)
+        self.assertNotIn("encrypted_content", decoded)
+        self.assertNotIn("opaque-provider-transport", decoded)
+
+    def test_only_summary_text_is_projected_and_raw_content_is_dropped(self) -> None:
+        with_reasoning = [SUMMARY_AND_RAW_REASONING, *TASK_INPUT]
+        standard = build_static_payload(standard_request(with_reasoning))
+        lite = build_static_payload(lite_request(with_reasoning))
+
+        self.assertEqual(standard.canonical_bytes, lite.canonical_bytes)
+        items = standard.logical_payload["input"]
+        self.assertEqual(
+            items[0],
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "first public summary"},
+                    {"type": "output_text", "text": "second public summary"},
+                ],
+            },
+        )
+        # The remaining evidence keeps its order and its existing semantics.
+        self.assertEqual(
+            items[1:], build_static_payload(standard_request()).logical_payload["input"]
+        )
+        decoded = standard.canonical_bytes.decode()
+        for hidden in (
+            "hidden raw reasoning text",
+            "hidden raw plain text",
+            "opaque-provider-transport",
+            "encrypted_content",
+            "rs_provider_session",
+            "turn_reasoning",
+        ):
+            self.assertNotIn(hidden, decoded)
+
+    def test_reasoning_without_public_summary_is_dropped_whole(self) -> None:
+        for item in (ENCRYPTED_ONLY_REASONING, RAW_ONLY_REASONING):
+            with self.subTest(item=item):
+                with_reasoning = [TASK_INPUT[0], item, *TASK_INPUT[1:]]
+                projected = build_static_payload(standard_request(with_reasoning))
+
+                # Dropping the item is exactly equivalent to it never existing.
+                self.assertEqual(
+                    projected.canonical_bytes,
+                    build_static_payload(standard_request()).canonical_bytes,
+                )
+                self.assertEqual(
+                    projected.canonical_bytes,
+                    build_static_payload(lite_request(with_reasoning)).canonical_bytes,
+                )
+
+    def test_known_raw_content_is_checked_before_it_is_dropped(self) -> None:
+        # Both known raw subtypes are dropped, never forwarded as evidence.
+        for subtype in ("reasoning_text", "text"):
+            with self.subTest(subtype=subtype):
+                item = {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "public summary"}],
+                    "content": [{"type": subtype, "text": "hidden raw text"}],
+                }
+                payload = build_static_payload(standard_request([item]))
+                self.assertEqual(
+                    payload.logical_payload["input"],
+                    [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "public summary"}
+                            ],
+                        }
+                    ],
+                )
+                self.assertNotIn("hidden raw text", payload.canonical_bytes.decode())
+
+    def test_known_passthrough_metadata_is_checked_then_dropped(self) -> None:
+        # `arguments` is an untagged JSON value upstream, so any value is known.
+        for arguments in (
+            {"cmd": ["ls"]},
+            "raw string",
+            None,
+            {"_codex_executed_tool_call_truncated": {"original_bytes": 9, "max_bytes": 4}},
+        ):
+            with self.subTest(arguments=arguments):
+                item = {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "public summary"}],
+                    "internal_chat_message_metadata_passthrough": {
+                        "turn_id": "turn_reasoning",
+                        "executed_tool_calls": [{"name": "shell", "arguments": arguments}],
+                    },
+                }
+                payload = build_static_payload(standard_request([item]))
+
+                self.assertEqual(
+                    payload.logical_payload["input"],
+                    [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {"type": "output_text", "text": "public summary"}
+                            ],
+                        }
+                    ],
+                )
+                decoded = payload.canonical_bytes.decode()
+                for absent in ("executed_tool_calls", "turn_reasoning", "shell"):
+                    self.assertNotIn(absent, decoded)
+
+    def test_unknown_or_malformed_reasoning_shapes_are_fail_closed(self) -> None:
+        invalid_items = (
+            {"type": "reasoning", "summary": [], "encrypted_content": 7},
+            {"type": "reasoning", "summary": {}, "encrypted_content": "opaque"},
+            {"type": "reasoning", "summary": [], "content": "not-an-array"},
+            {"type": "reasoning", "summary": [], "id": 7},
+            {"type": "reasoning", "summary": [], "unmapped_future_field": "x"},
+            {"type": "reasoning", "summary": [{"type": "summary_text"}]},
+            {"type": "reasoning", "summary": [{"type": "summary_text", "text": 7}]},
+            {"type": "reasoning", "summary": [{"type": "encrypted_summary", "text": "x"}]},
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "x", "extra": 1}],
+            },
+            {"type": "reasoning", "summary": ["plain string"]},
+            {
+                "type": "reasoning",
+                "summary": [],
+                "content": [{"type": "summary_text", "text": "wrong subtype"}],
+            },
+            {"type": "reasoning", "summary": [], "content": [{"type": "reasoning_text"}]},
+            {
+                "type": "reasoning",
+                "summary": [],
+                "content": [{"type": "reasoning_text", "text": 7}],
+            },
+            {"type": "reasoning", "summary": [], "content": ["plain string"]},
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": 7,
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"turn_id": 7},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"unmapped_key": "x"},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"executed_tool_calls": 7},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {"executed_tool_calls": [7]},
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {
+                    "executed_tool_calls": [{"name": "shell"}]
+                },
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {
+                    "executed_tool_calls": [{"name": 7, "arguments": {}}]
+                },
+            },
+            {
+                "type": "reasoning",
+                "summary": [],
+                "internal_chat_message_metadata_passthrough": {
+                    "executed_tool_calls": [
+                        {"name": "shell", "arguments": {}, "unmapped_key": "x"}
+                    ]
+                },
+            },
+        )
+        for item in invalid_items:
+            with self.subTest(item=item):
+                with self.assertRaises(EvidenceError):
+                    build_static_payload(standard_request([item, *TASK_INPUT]))
+                with self.assertRaises(EvidenceError):
+                    build_static_payload(lite_request([item, *TASK_INPUT]))
 
     def test_policy_hash_uses_exact_utf8_bytes(self) -> None:
         first = policy_identity(standard_request())
@@ -231,21 +520,20 @@ class EvidenceTests(unittest.TestCase):
                     }
                 }
             ),
+            lambda logical: logical["input"].append(copy.deepcopy(ENCRYPTED_ONLY_REASONING)),
+            lambda logical: logical["input"].append(
+                copy.deepcopy(SUMMARY_AND_RAW_REASONING)
+            ),
+            lambda logical: logical["input"][0].update(
+                {"encrypted_content": "opaque-provider-transport"}
+            ),
         )
         for mutate in mutations:
             with self.subTest(mutate=mutate):
                 logical = copy.deepcopy(payload.logical_payload)
                 mutate(logical)
-                canonical = json.dumps(
-                    logical,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                ).encode("utf-8")
-                forged = StaticApprovalPayload(payload.policy_identity, canonical, logical)
                 with self.assertRaises(EvidenceError):
-                    validate_static_payload(forged)
+                    validate_static_payload(forged_payload(payload, logical))
 
 
 class ContractTests(unittest.TestCase):

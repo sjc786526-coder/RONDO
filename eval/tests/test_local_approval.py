@@ -250,6 +250,62 @@ class LocalApprovalClientTests(unittest.TestCase):
         )
         self.assertTrue(request["response_format"]["json_schema"]["strict"])
 
+    def test_client_sends_the_projected_v2_input_without_reasoning_transport(self) -> None:
+        payload = build_static_payload(
+            {
+                "instructions": "exact guardian policy\n",
+                "input": [
+                    # The archived encrypted-only shape b10333 refuses outright.
+                    {
+                        "type": "reasoning",
+                        "summary": [],
+                        "encrypted_content": "opaque-provider-transport",
+                    },
+                    {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text", "text": "public summary"}],
+                        # Raw reasoning: understood, then dropped, never sent.
+                        "content": [
+                            {"type": "reasoning_text", "text": "hidden raw reasoning"}
+                        ],
+                        "encrypted_content": "opaque-provider-transport",
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "approve this?"}],
+                    },
+                ],
+            }
+        )
+        with FakeApprovalServer() as fake:
+            LocalApprovalClient(self._config(fake.base_url)).decide(payload)
+
+        request = fake.requests[0]
+        self.assertEqual(
+            request["input"],
+            [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "public summary"}],
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "approve this?"}],
+                },
+            ],
+        )
+        serialized = json.dumps(request)
+        self.assertNotIn("encrypted_content", serialized)
+        self.assertNotIn("opaque-provider-transport", serialized)
+        self.assertNotIn("hidden raw reasoning", serialized)
+        # The decision output schema is a separate contract and stays v1.
+        self.assertEqual(
+            request["response_format"]["json_schema"]["name"], "rondo_static_approval_v1"
+        )
+
     def test_client_rejects_any_tool_transport_before_network(self) -> None:
         payload = _payload()
         invalid = _canonical_payload(
@@ -2819,6 +2875,69 @@ class TokenCensusTests(unittest.TestCase):
         self.assertEqual(document["summary"]["context_windows"]["4k"]["fits"], 0)
         self.assertEqual(document["summary"]["context_windows"]["8k"]["fits"], 2)
         self.assertEqual(document["identity"]["generated_tokens"], 0)
+
+    def test_census_counts_the_local_client_v2_request_bytes(self) -> None:
+        """One builder, one set of bytes: the census measures the real request.
+
+        The fourth archive carries the encrypted-only `reasoning` shape the
+        frozen adapter used to refuse, so this also proves the v2 projection
+        reaches the census through the shared builder rather than a copy.
+        """
+
+        self._install_bundle(
+            4,
+            body=json.dumps(
+                {
+                    "instructions": "frozen guardian policy fixture",
+                    "input": [
+                        {
+                            "type": "reasoning",
+                            "summary": [],
+                            "encrypted_content": "opaque-provider-transport",
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "approve fixture action 4?"}
+                            ],
+                        },
+                    ],
+                }
+            ).encode("utf-8"),
+        )
+        config = self._config()
+        output = self.root / "eval/results/baselines/census.json"
+        bodies: list[bytes] = []
+
+        def counter(_settings, body: bytes) -> int:
+            if self._is_probe(body):
+                return 43
+            bodies.append(body)
+            # The anchor is counted first and must reproduce Plan 023's count.
+            return (
+                token_census.ANCHOR_INPUT_TOKENS if len(bodies) == 1 else 4000 + len(bodies)
+            )
+
+        with mock.patch.object(token_census, "EXPECTED_EVIDENCE_COUNT", 4):
+            summary = self._run(config, output=output, counter=counter)
+
+        expected = [
+            json.dumps(
+                LocalApprovalClient(config).build_request(item.payload),
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            for item in token_census.collect_evidence_inputs(config, expected_count=4)
+        ]
+        self.assertEqual(sorted(bodies), sorted(expected))
+        self.assertEqual(summary["status"], "complete")
+        self.assertEqual(summary["missing_counts"], 0)
+        for body in bodies:
+            decoded = body.decode("utf-8")
+            self.assertNotIn("reasoning", decoded)
+            self.assertNotIn("encrypted_content", decoded)
+            self.assertNotIn("opaque-provider-transport", decoded)
 
     def test_a_refused_anchor_stops_the_census(self) -> None:
         config = self._config()
