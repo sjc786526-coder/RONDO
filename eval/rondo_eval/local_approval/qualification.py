@@ -1,9 +1,9 @@
-"""Restricted first-run qualification for the frozen 4k local approval contract.
+"""Restricted first-run qualification for the frozen 12k local approval contract.
 
 This is a deliberately narrow, single-purpose entrypoint.  The formal launcher
 keeps refusing to start a model until strict evidence exists, and nothing here
 adds a reusable bypass: the qualification path only accepts the exact frozen
-CUDA runtime, the single frozen GGUF and the 4k `auto`/`fit=on` contract, it
+CUDA runtime, the single frozen GGUF and the frozen 12k serving contract, it
 holds the same shared watchdog lease, and it writes evidence only after the
 real structured decision *and* the on-site cleanup have both succeeded.
 
@@ -90,6 +90,13 @@ _DIAGNOSTIC_LINE = re.compile(
     r"^(?:ggml_|load_tensors|llama_|print_info|init:|main:|srv |slot |build:|system_info)"
 )
 _DIAGNOSTIC_KEYWORD = re.compile(r"GPU|CUDA|layer|n_ctx|device", re.IGNORECASE)
+# `common_init` turns on b10333's timestamp and level prefix unconditionally,
+# so every line starts with e.g. `0.02.703.329 I `.
+_LOG_PREFIX = re.compile(r"^\d+(?:\.\d+)+\s+[A-Z]\s+")
+# The leading label llama.cpp puts in front of its own log lines, e.g.
+# `load_tensors:` or `srv  log_server_r:`. Anything after it is dropped.
+_LINE_LABEL = re.compile(r"[A-Za-z_][A-Za-z0-9_. -]{0,39}?(?=:| = |\Z)")
+_PAYLOAD_MARKER = re.compile(r"[{}\[\]\"]")
 _MAX_DIAGNOSTIC_LINES = 25
 
 
@@ -719,15 +726,49 @@ def _log_diagnostics(text: str) -> dict[str, Any]:
 
     lines = text.splitlines()
     selected = [
-        line.strip()[:160]
-        for line in lines
-        if _DIAGNOSTIC_LINE.match(line.strip()) and _DIAGNOSTIC_KEYWORD.search(line)
+        body[:160]
+        for body in (_log_line_body(line) for line in lines)
+        if _DIAGNOSTIC_LINE.match(body)
+        and _DIAGNOSTIC_KEYWORD.search(body)
+        # Trace verbosity also carries request-shaped lines behind the same
+        # `srv ` prefix, so never echo a line that could hold a payload.
+        and not _PAYLOAD_MARKER.search(body)
     ]
     return {
         "log_bytes": len(text),
         "log_lines": len(lines),
         "infrastructure_lines": selected[:_MAX_DIAGNOSTIC_LINES],
+        "line_shapes": _log_line_shapes(lines),
     }
+
+
+def _log_line_body(line: str) -> str:
+    """Drop b10333's timestamp and level prefix from one log line."""
+
+    return _LOG_PREFIX.sub("", line.strip()).strip()
+
+
+def _log_line_shapes(lines: Sequence[str]) -> list[str]:
+    """Count how the log's lines are shaped, carrying none of their content.
+
+    When the allow-list above matches nothing there is otherwise no way to tell
+    an empty log from an unexpected one.  Only the leading label of each line
+    is kept -- the part before the first `:` or ` = `, which llama.cpp uses for
+    its own function and field names -- so a request, a prompt or a decision can
+    never reach a blocker report through here.
+    """
+
+    counts: dict[str, int] = {}
+    for line in lines:
+        body = _log_line_body(line)
+        if not body:
+            label = "<blank>"
+        else:
+            match = _LINE_LABEL.match(body)
+            label = match.group(0).strip() if match is not None else "<unlabelled>"
+        counts[label] = counts.get(label, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return [f"{label} x{count}" for label, count in ranked[:_MAX_DIAGNOSTIC_LINES]]
 
 
 def _decision_failure_facts(text: str | None) -> dict[str, Any]:

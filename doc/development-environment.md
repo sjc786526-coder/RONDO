@@ -433,13 +433,20 @@ linked worktree 不复制凭据。加载器已通过 `git rev-parse --git-common
 
 - llama.cpp 固定为 `b10333`/commit `08659901c43b51de735740f1cf61bb82fbe0c4e4`。CPU x64 与 Linux CUDA
   两套项目局部 runtime/lock 并存；CUDA 使用项目局部 Toolkit 12.6.2、Ada `89-real` strict-link，
-  version/help/device/router 与动态依赖闭包已通过 model-free 验收。当前能力精确为
-  `linux_cuda_built_model_unvalidated`，正式 launcher 仍拒绝启动模型服务。
-- 唯一 Bartowski Ministral 3 8B Instruct 2512 `Q4_K_M` GGUF 已在 ignored 路径完成普通文件、精确
-  `5,198,387,456` bytes 与 SHA-256 静态验收；模型从未加载或推理，4k/8k、显存、延迟和结构化输出均未验。
-- 真实 ignored `rondo.local.toml` 仍是旧合同，直接 doctor 会在 runtime/device/model 检查前以
-  `configuration_error` 停止。因此已验 runtime 能力不表示当前机器配置或本地审批服务就绪；当前安排只见
-  `doc/WBS/local-approval-model.md`。
+  version/help/device/router 与动态依赖闭包已通过 model-free 验收。当前能力为
+  `gpu_model_serving_validated`：唯一 Bartowski Ministral 3 8B Instruct 2512 `Q4_K_M` GGUF
+  （ignored 路径，普通文件、精确 `5,198,387,456` bytes、SHA-256 已验）已在 12,288 上下文下真实加载并完成
+  一次合规结构化审批，正式 launcher 因而允许启动模型服务。
+- 冻结的本机服务合同：`context_size=12288`、`gpu_layers="auto"`、`fit="on"`、batch 512、ubatch 256、
+  flash attention `on`、K/V 均 f16、`--verbosity 4`、单 slot、`max_output_tokens=512`。8GB 现场实测
+  可用显存约 7,096 MiB，`--fit` 收敛到 33/35 层 GPU offload，峰值显存 6,800,015,360 B。
+  这些值同时出现在受跟踪 `rondo.local.example.toml`、ignored `rondo.local.toml`、启动指纹和
+  `eval/locks/local-approval-b10333-ministral-12k-v1.json`；任一项漂移都会让能力自动退回
+  `linux_cuda_built_model_unvalidated`。16k 与其余 5 条超窗真实证据仍未验收。
+- 真实 ignored `rondo.local.toml` 已与该合同对齐。服务未启动时 doctor 返回
+  `configuration: valid` / `runtime: ready` / `model: present` / `service: unavailable`（exit 69）——
+  这是正常的，它到 identity probe 才发现没有监听者；`gpu_model_serving_validated` 与结构化 probe 只在
+  launcher 起着服务时报告。当前安排只见 `doc/WBS/local-approval-model.md`。
 - Terminal-Bench 两侧静态 musl runtime bundle 位于 ignored `eval-data/bin/{rondo,codex}/`；
   内含 CLI、`codex-code-mode-host` 与同一官方 v0.147.0 musl bwrap，详细 SHA 在各 bundle
   `manifest.json` 和 `agent_log/` 的 P1 日志中。

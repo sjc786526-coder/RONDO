@@ -55,6 +55,8 @@ _CHAT_TEMPLATE_LOCK_RELATIVE_PATH = Path(
     "eval/locks/ministral-3-8b-instruct-2512-chat-template.json"
 )
 _CHAT_TEMPLATE_ALLOWED_RELATIVE_ROOT = Path("eval/templates/local-approval")
+# `-lv 4` (trace). See `_serve_arguments` for why this is not configurable.
+SERVE_LOG_VERBOSITY = 4
 _VERSION_TIMEOUT_SECONDS = 10
 _DEVICE_TIMEOUT_SECONDS = 10
 _ROUTER_TIMEOUT_SECONDS = 10.0
@@ -288,7 +290,7 @@ def inspect_runtime(config: RuntimeConfig, settings: LocalApprovalSettings) -> R
         "runtime_ready",
         binary,
         (
-            "llama.cpp b10333 Linux CUDA runtime serves the qualified 4k model contract"
+            "llama.cpp b10333 Linux CUDA runtime serves the qualified 12k model contract"
             if capability == GPU_MODEL_SERVING_CAPABILITY
             else "llama.cpp b10333 Linux CUDA runtime is available; model-backed serving is not validated"
         ),
@@ -1075,6 +1077,13 @@ def _serve_arguments(
         str(settings.ubatch_size),
         "--parallel",
         str(settings.parallel),
+        # b10333 maps libllama's own INFO logs to verbosity TRACE
+        # (`common_get_verbosity` in common/log.cpp), and the default threshold
+        # is INFO.  The GPU offload count is only ever reported there and is
+        # not exposed by any endpoint, so qualification cannot observe it at
+        # the default level.  This is fixed, not a tuning knob.
+        "--verbosity",
+        str(SERVE_LOG_VERBOSITY),
         "--flash-attn",
         settings.flash_attention,
         "--cache-type-k",

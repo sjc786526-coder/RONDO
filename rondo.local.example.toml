@@ -101,12 +101,15 @@ quantization = "Q4_K_M"
 binary = "eval-data/tools/llama-b10333-cuda-linux-x64/llama-server"
 host = "127.0.0.1"
 port = 8080
-# This is the fixed 8k baseline. For the first 4k smoke only, change exactly
-# context_size to 4096, gpu_layers to "auto", and fit to "on". Do not create
-# a second profile or silently retain the smoke settings as the baseline.
-context_size = 8192
-gpu_layers = "all"
-fit = "off"
+# The qualified 12k serving contract. These eight values are the ones the
+# model-backed qualification evidence binds, so changing any of them makes the
+# live capability fall back to linux_cuda_built_model_unvalidated until the
+# contract is qualified again. `--fit on` only adjusts arguments left at their
+# default, and b10333 rewrites the context size only when it is 0, so the
+# explicit 12288 below is never reduced to make the model fit.
+context_size = 12288
+gpu_layers = "auto"
+fit = "on"
 batch_size = 512
 ubatch_size = 256
 cache_type_k = "f16"

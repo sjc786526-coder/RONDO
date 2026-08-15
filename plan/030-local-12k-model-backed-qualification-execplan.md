@@ -164,25 +164,66 @@ launcher 与 doctor 复验生产入口。
   exact GGUF 与 CUDA server 文件存在。规划阶段未修改该文件。
 - 规划阶段未读取 `.env.local` 或真实证据正文，未启动模型/GPU 服务，未运行测试；模型生命周期用量 **0/6**。
 
+- 2026-08-15：用户一次性授权范围 1—4（工作树实现/测试/文档/提交、字段级修改主仓 ignored
+  `rondo.local.toml`、真实 model-backed 生命周期**不设次数上限**、`eval-data/local-approval/` 私有运行对象）。
+  额外授权：F16 KV 无法承载 12K 且有明确现场证据时，可探索 runtime 支持的低精度 KV，但必须作为最终参数
+  进入配置、identity、evidence 与 focused tests，且不改 12,288 / 512 / 模型 / runtime / tokenizer / template /
+  static payload v3。宿主显存基线 1547 MiB 记录在案，只要无其他 CUDA compute process 即可继续。
+- 2026-08-15：完成合同迁移与无模型门禁。`model_backed.py` 冻结 12k serving profile（单一
+  `serving_contract()` 漂移源，identity 显式记录 gpu_layers/fit/batch/ubatch/flash/K/V），evidence 路径改为
+  `eval/locks/local-approval-b10333-ministral-12k-v1.json`、schema v2；`request_contract_sha256` 升为 v2 并纳入
+  `static_payload_schema_version`，identity 另设同名显式字段，补齐 static payload v3 绑定。KV cache 校验由
+  “只允许 f16” 放宽为冻结 b10333 `kv_cache_types` 白名单（实际冻结值仍是 f16/f16）。
+  `rondo.local.example.toml` 改写为 12k 合同。focused tests 138/138 通过，`just eval-lock` 通过。
+- 2026-08-15：主仓 ignored `rondo.local.toml` 字段级迁移完成，**只改 `context_size` 4096→12288**；
+  `providers`/`paid_eval` 规范化 digest 与 `[local_model.request]` 均未变，权限仍为 0600。
+- 2026-08-15：真实配置下的无模型 fail-closed 复核通过：doctor 报
+  `configuration=valid` / `model=present` / `linux_cuda_built_model_unvalidated` / `not_run`；
+  正式 launcher 在真实 watchdog lease 下以 exit 70 在 `Popen` 前拒绝，无进程、无 8080 监听、无 receipt。
+
+### 模型生命周期记录
+
+全部候选参数在各轮均为 12288 / `gpu_layers=auto` / `fit=on` / batch 512 / ubatch 256 / flash `on` / K,V f16；
+唯一变化是第 4 轮起把日志 verbosity 显式提到 trace。现场每轮都完全清理。
+
+| # | 类型 | 结果 |
+|---|---|---|
+| 1 | 完整 qualification | `gpu_offload_not_reported`。决策与清理均成功，但退出后读到的私有日志只有 2,387 bytes/25 行，无任何 CUDA/offload 行；诊断摘要为空，无法定位。 |
+| 2 | 完整 qualification（诊断） | 同上。新增的行形状直方图显示 25 行全部 `<unlabelled>`，确认日志格式与解析器假设不符，而不是日志缺失。 |
+| 3 | 只加载、不发请求 | **12,288 加载成功**：`n_ctx_slot=12288`、`total_slots=1`、`build_info=b1-0865990`、SIGTERM 干净退出 rc=0。日志每行带 `common_init` 无条件开启的时间戳+级别前缀，且完全没有 libllama 的 load 段。 |
+| 4 | 只加载、不发请求（`-lv 4`） | 确认根因与可行性：`common_get_verbosity()` 把 libllama 的 `GGML_LOG_LEVEL_INFO` 映射为 **TRACE(4)**，默认阈值是 INFO(3)，因此 offload 事实在默认级别下不输出。trace 下 `--fit` 明确打印 `context size set by user to 12288 -> no change`，并 fit 到 **33 层 offload、6,049 MiB used、1,046 MiB free**（可用 7,096 MiB，模型 34 blocks + output = 35 层）。 |
+| 5 | 完整 qualification | **成功**。`status=qualified`、`effective_context_size=12288`、offload 33/35、峰值显存 6,800,015,360 B、delta 6,463,422,464 B、TTFT 3,516.42 ms、总耗时 7,794.47 ms、结构化判定合规、四项清理全 true。证据由正式代码原子生成。 |
+| 6 | 正式 launcher + doctor 复验 | **成功**。无资格特权的 launcher 独立加载同一合同，receipt schema v2 的 `serve_config_sha256=be95ab3e…` 与证据 identity 一致，live `/props` 为 12288 / 单 slot / `b1-0865990`；存活期 doctor `status=ready`、exit 0、`gpu_model_serving_validated`、`model_schema_probe_passed`。定点 SIGTERM 后 launcher rc=0、receipt 自清、进程退出。 |
+
+**关键修复（非重试掩盖）**：`--verbosity 4` 固化进 serve 参数（与 `--offline`、`--split-mode none` 同级的不可调项，
+已被 `serve_config_sha256` 绑定）；失败诊断增加不含任何行内容的行形状直方图，并识别时间戳+级别前缀；
+trace 级会带出请求形状的行，因此回显再加一道 payload 护栏（含 `{}[]"` 的行一律不回显）。
+测试夹具 `_CUDA_LOAD_LOG` 同步改为真实的带前缀格式与真实的 33/35 层数。
+
+> 依据：冻结 b10333 `common/fit.h` 明确 `--fit` 只调整仍为默认值的参数，且上下文**仅在等于 0 时**才被改写，
+> 因此显式 `--ctx-size 12288` 不会被 fit 缩小；`--gpu-layers auto`（-1，即默认值）才是 fit 可下调的那一项。
+> 首轮因此让 runtime 自行决定可放层数，而不是预设全层。
+
 ### 当前工作
 
-- execplan 已形成，等待执行者在取得一次执行授权后实施。
+- 无。全部完成标准已满足，本计划冻结为任务合同与历史记录。
 
 ### 本任务剩余步骤
 
-1. 取得一次执行授权并完成现场、ignored 配置和旧 4k 漂移基线核对。
-2. 迁移 12k 合同/evidence/capability 路径与直接测试，冻结首组候选配置并通过无模型门禁。
-3. 在最多 6 个受监管生命周期内完成有依据的资格运行、诊断/局部修复和最终真实 qualification。
-4. 晋级后用正式 launcher + doctor 独立复验并完成最终清理。
-5. 按真实结果同步文档/日志，检查 diff 与所有现场，提交工作树后等待 Codex 独立验收。
+- 无。等待 Codex 独立验收。
 
 ### 阻塞项
 
-- 实现本身无已知代码阻塞；首次真实模型加载前仍需用户明确授予本任务最多 6 个模型生命周期。
+- 无。
 
 ### 当前验收状态
 
-- 仅完成规划。12k 尚未真实加载或推理，无有效 model-backed evidence，capability 未晋级。
+- **已晋级**。capability 为 `gpu_model_serving_validated`，唯一正式证据
+  `eval/locks/local-approval-b10333-ministral-12k-v1.json`（schema v2）。
+  交付前复跑 focused tests **139/139**、`just eval-lock` 通过；现场 8080 空闲、无 llama-server、
+  GPU 无 compute process、`eval-data/local-approval/` 为空。共使用 **6** 个模型生命周期。
+- 未做：其余 42 条适配证据逐条验证、剩余 5 条超窗证据、16k、47 条批量 generation、L7、Local M3、
+  Cargo、Docker、云 API、训练、全量 eval、全量测试。
 
 ### 交接边界
 
@@ -199,6 +240,13 @@ launcher 与 doctor 复验生产入口。
 | 002 | 继续使用既有 selector 的 5,311-token 真实样本 | 它已被事前绑定且由 v3 census 精确确认适配 12k，避免事后换简单样本 | qualification 输入 | 已采纳 |
 | 003 | 最终服务参数由 8GB 现场探索冻结，不在计划预设 | 用户要求给执行者合理调参空间；真正不可妥协的是 12k、资产/语义身份和 fail-closed | launcher、identity、evidence | 已采纳 |
 | 004 | evidence 必须显式区分并严格绑定 12k，内部 schema 版本不预设 | 防止旧 4k/漂移证据晋级，同时避免无实际字段变化的版本体系膨胀 | model-backed evidence | 已采纳 |
-| 005 | 上限按每个真实模型服务进程启动计 6 个生命周期 | 让诊断、最终资格和正式复验共享清楚的资源预算；次数不是技术失败阈值 | 真实执行 | 提议，待执行授权 |
+| 005 | 上限按每个真实模型服务进程启动计 6 个生命周期 | 让诊断、最终资格和正式复验共享清楚的资源预算；次数不是技术失败阈值 | 真实执行 | 用户授权时取消了次数上限；实际仍只用了 6 个 |
+| 008 | 服务参数集中为 `serving_contract()`，identity 显式记录全部可调项 | 原来只有 context/gpu_layers/fit 三项被硬校验，batch/ubatch/flash/K/V 只藏在 `serve_config_sha256` 里；显式化后证据自描述，且 launcher/qualification/loader/测试共用一个漂移源 | model_backed、evidence、tests | 已采纳 |
+| 009 | v3 绑定同时用 request-contract digest 和显式 identity 字段 | 两者都由同一个 `STATIC_PAYLOAD_SCHEMA_VERSION` 投影，不会互相矛盾；digest 让漂移自动失配，显式字段让冻结记录可读 | 资格身份 | 已采纳 |
+| 010 | K/V cache 校验放宽为冻结 b10333 的 `kv_cache_types` 白名单 | 用户授权在 f16 装不下时可换低精度 KV；把合法集合对齐 runtime 自身，而不是再写死另一个值。实际现场未用上，冻结值仍是 f16/f16 | 配置合同 | 已采纳 |
+| 011 | `--verbosity 4` 作为不可调的 serve 参数固化 | 冻结 b10333 把 libllama 的 INFO 映射为 TRACE，默认阈值 INFO，导致 GPU offload 计数在默认级别下完全不输出，而该事实没有任何 endpoint 可取。它与 `--offline`、`--split-mode none` 同级，且已进入启动指纹 | launcher、identity | 修复生命周期 1—2 的失败 |
+| 012 | 失败诊断增加不含内容的行形状直方图 | 原白名单摘要在日志形状意外时为空，等于没有诊断；直方图只保留 `:` 或 ` = ` 前的标签，泄漏不了请求或判定内容 | 失败语义 | 已采纳 |
+| 013 | trace 级回显再加 payload 护栏 | 提高 verbosity 后 `srv ` 前缀下会出现请求形状的行，含 `{}[]"` 的行一律不回显 | 失败语义 | 已采纳 |
+| 014 | 测试夹具 `_CUDA_LOAD_LOG` 改为真实格式 | 它自称 format-exact 但缺少 `common_init` 无条件开启的时间戳+级别前缀，正是这一点掩盖了解析器与真实日志的差距 | tests | 已采纳 |
 | 006 | ignored `rondo.local.toml` 只在主仓原位字段级修改 | loader 通过 Git common root 让全部 worktree 共用该文件；复制到 worktree 不生效 | 本机配置、交接 | 已采纳 |
 | 007 | 成功后的正式 launcher + doctor 复验属于本任务，L7 不属于 | 本任务要证明生产入口能消费资格；cloud/local Guardian 配置切换仍是独立工作包 | 验收、非目标 | 已采纳 |

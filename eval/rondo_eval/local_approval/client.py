@@ -37,6 +37,12 @@ from .identity import (
 
 
 _MAX_RESPONSE_BYTES = 1_048_576
+# `kv_cache_types` in the frozen b10333 `common/arg.cpp`. The qualified
+# contract picks exactly one pair out of these and freezes it in
+# `model_backed.serving_contract()`; anything else is rejected before launch.
+_KV_CACHE_TYPES = frozenset(
+    {"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"}
+)
 
 
 class LocalApprovalError(RuntimeError):
@@ -168,8 +174,11 @@ def settings_from_config(config: RuntimeConfig) -> LocalApprovalSettings:
         raise ConfigError("local_model server ubatch_size must not exceed batch_size")
     cache_type_k = server.get("cache_type_k")
     cache_type_v = server.get("cache_type_v")
-    if cache_type_k != "f16" or cache_type_v != "f16":
-        raise ConfigError("local_model server K/V cache types must both be f16")
+    if (
+        cache_type_k not in _KV_CACHE_TYPES
+        or cache_type_v not in _KV_CACHE_TYPES
+    ):
+        raise ConfigError("local_model server K/V cache types are not supported by b10333")
     no_mmproj = _boolean(server, "no_mmproj")
     if no_mmproj is not True:
         raise ConfigError("local_model server no_mmproj must be enabled")

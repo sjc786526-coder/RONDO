@@ -1,10 +1,11 @@
 """Versioned model-backed qualification evidence and its capability projection.
 
-Plan 018 froze one CUDA runtime, one GGUF and one 4k serving contract.  This
-module is the single place that spells those values out, so the production
-launcher, the restricted qualification path, the evidence loader and the tests
-cannot drift apart.  The frozen CUDA base lock stays a model-free build record;
-model-backed capability comes only from the separate evidence written here.
+Plan 018 froze one CUDA runtime and one GGUF; Plan 030 froze the 12k serving
+contract that qualification now binds.  This module is the single place that
+spells those values out, so the production launcher, the restricted
+qualification path, the evidence loader and the tests cannot drift apart.  The
+frozen CUDA base lock stays a model-free build record; model-backed capability
+comes only from the separate evidence written here.
 """
 
 from __future__ import annotations
@@ -19,11 +20,15 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..config import ConfigError, RuntimeConfig
-from ..evidence import STATIC_DECISION_SCHEMA, STATIC_INSTRUCTIONS
+from ..evidence import (
+    STATIC_DECISION_SCHEMA,
+    STATIC_INSTRUCTIONS,
+    STATIC_PAYLOAD_SCHEMA_VERSION,
+)
 
 
-EVIDENCE_SCHEMA_VERSION = 1
-EVIDENCE_RELATIVE_PATH = "eval/locks/local-approval-b10333-ministral-4k-v1.json"
+EVIDENCE_SCHEMA_VERSION = 2
+EVIDENCE_RELATIVE_PATH = "eval/locks/local-approval-b10333-ministral-12k-v1.json"
 GPU_MODEL_SERVING_CAPABILITY = "gpu_model_serving_validated"
 MODEL_BACKED_VALIDATED = "structured_output_validated"
 MODEL_BACKED_NOT_RUN = "not_run"
@@ -43,16 +48,41 @@ MODEL_RELATIVE_PATH = (
 )
 MODEL_SIZE_BYTES = 5_198_387_456
 MODEL_SHA256 = "7deb50ecb3afca928f0aa6dccdb87ed4ce4ab3991797e5fc0e0dedb92754802a"
-QUALIFIED_CONTEXT_SIZE = 4096
-QUALIFIED_GPU_LAYERS = "auto"
+# The frozen 12k serving profile.  `context_size` and `max_output_tokens` are
+# route decisions and never move; the remaining values were explored on this
+# 8GB machine during qualification and then frozen here, so the configuration,
+# the launch fingerprint and the evidence identity must all agree exactly.
+QUALIFIED_CONTEXT_SIZE = 12288
+QUALIFIED_MAX_OUTPUT_TOKENS = 512
+QUALIFIED_GPU_LAYERS: int | str = "auto"
 QUALIFIED_FIT = "on"
+QUALIFIED_BATCH_SIZE = 512
+QUALIFIED_UBATCH_SIZE = 256
+QUALIFIED_FLASH_ATTENTION = "on"
+QUALIFIED_CACHE_TYPE_K = "f16"
+QUALIFIED_CACHE_TYPE_V = "f16"
 
 _HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_EVIDENCE_BYTES = 65_536
 
 
+def serving_contract() -> dict[str, Any]:
+    """The exact serving values every path has to agree on, in one place."""
+
+    return {
+        "context_size": QUALIFIED_CONTEXT_SIZE,
+        "gpu_layers": QUALIFIED_GPU_LAYERS,
+        "fit": QUALIFIED_FIT,
+        "batch_size": QUALIFIED_BATCH_SIZE,
+        "ubatch_size": QUALIFIED_UBATCH_SIZE,
+        "flash_attention": QUALIFIED_FLASH_ATTENTION,
+        "cache_type_k": QUALIFIED_CACHE_TYPE_K,
+        "cache_type_v": QUALIFIED_CACHE_TYPE_V,
+    }
+
+
 class QualificationContractError(ConfigError):
-    """Raised when the configured identity is not the frozen 4k combination."""
+    """Raised when the configured identity is not the frozen 12k combination."""
 
 
 class EvidenceLockError(ConfigError):
@@ -69,9 +99,15 @@ class QualificationIdentity:
     model_size_bytes: int
     model_sha256: str
     chat_template_sha256: str
+    static_payload_schema_version: int
     context_size: int
-    gpu_layers: str
+    gpu_layers: int | str
     fit: str
+    batch_size: int
+    ubatch_size: int
+    flash_attention: str
+    cache_type_k: str
+    cache_type_v: str
     serve_config_sha256: str
     request_contract_sha256: str
 
@@ -93,12 +129,18 @@ class ModelBackedEvidence:
 def request_contract_sha256(settings: Any) -> str:
     """Bind only what changes how a static decision is produced and checked.
 
+    This covers both halves of the request contract: the input payload version
+    that decides which bytes are sent, and the decision schema plus sampling
+    that decide how the answer is produced and validated.  A later static
+    payload version therefore invalidates this qualification automatically.
+
     `timeout_seconds` is deliberately excluded: it is client-side patience and
     does not change the model, the sampling or the validated schema.
     """
 
     canonical = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "static_payload_schema_version": STATIC_PAYLOAD_SCHEMA_VERSION,
         "static_instructions": STATIC_INSTRUCTIONS,
         "static_decision_schema": STATIC_DECISION_SCHEMA,
         "request": {
@@ -132,7 +174,7 @@ def qualified_model_path(config: RuntimeConfig) -> Path:
 def require_qualification_contract(
     config: RuntimeConfig, settings: Any
 ) -> None:
-    """Reject anything that is not the frozen runtime, GGUF and 4k contract.
+    """Reject anything that is not the frozen runtime, GGUF and 12k contract.
 
     This runs before any model process is started, in the restricted
     qualification path as well as in the evidence identity projection.
@@ -142,13 +184,14 @@ def require_qualification_contract(
         raise QualificationContractError(
             "qualification requires the frozen b10333 CUDA runtime"
         )
-    if (
-        settings.context_size != QUALIFIED_CONTEXT_SIZE
-        or settings.gpu_layers != QUALIFIED_GPU_LAYERS
-        or settings.fit != QUALIFIED_FIT
-    ):
+    contract = serving_contract()
+    if {key: getattr(settings, key) for key in contract} != contract:
         raise QualificationContractError(
-            "qualification requires the 4k auto/fit-on serving contract"
+            "qualification requires the frozen 12k serving contract"
+        )
+    if settings.max_output_tokens != QUALIFIED_MAX_OUTPUT_TOKENS:
+        raise QualificationContractError(
+            "qualification requires the frozen 512-token output budget"
         )
     if settings.model_sha256 != MODEL_SHA256:
         raise QualificationContractError("qualification requires the frozen GGUF digest")
@@ -189,9 +232,15 @@ def build_identity(
         model_size_bytes=MODEL_SIZE_BYTES,
         model_sha256=settings.model_sha256,
         chat_template_sha256=settings.chat_template_sha256,
+        static_payload_schema_version=STATIC_PAYLOAD_SCHEMA_VERSION,
         context_size=settings.context_size,
         gpu_layers=settings.gpu_layers,
         fit=settings.fit,
+        batch_size=settings.batch_size,
+        ubatch_size=settings.ubatch_size,
+        flash_attention=settings.flash_attention,
+        cache_type_k=settings.cache_type_k,
+        cache_type_v=settings.cache_type_v,
         serve_config_sha256=serve_config_sha256,
         request_contract_sha256=request_contract_sha256(settings),
     )
@@ -259,16 +308,21 @@ def _parse_identity(value: Any) -> QualificationIdentity:
     fields = set(QualificationIdentity.__dataclass_fields__)
     if not isinstance(value, dict) or set(value) != fields:
         raise EvidenceLockError("model-backed evidence identity schema differs")
+    contract = serving_contract()
+    if any(isinstance(value[key], bool) for key in contract):
+        # `True == 1` would otherwise satisfy an integer serving value.
+        raise EvidenceLockError("model-backed evidence identity has a boolean value")
     if (
         value["runtime_relative_path"] != CUDA_RUNTIME_RELATIVE_PATH
         or value["model_relative_path"] != MODEL_RELATIVE_PATH
         or value["model_size_bytes"] != MODEL_SIZE_BYTES
         or value["model_sha256"] != MODEL_SHA256
-        or value["context_size"] != QUALIFIED_CONTEXT_SIZE
-        or value["gpu_layers"] != QUALIFIED_GPU_LAYERS
-        or value["fit"] != QUALIFIED_FIT
+        or value["static_payload_schema_version"] != STATIC_PAYLOAD_SCHEMA_VERSION
+        or {key: value[key] for key in contract} != contract
     ):
-        raise EvidenceLockError("model-backed evidence identity is not the frozen 4k contract")
+        raise EvidenceLockError(
+            "model-backed evidence identity is not the frozen 12k contract"
+        )
     for key in (
         "runtime_identity_sha256",
         "chat_template_sha256",
