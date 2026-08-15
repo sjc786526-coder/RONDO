@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-14
+最后更新：2026-08-15
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置已迁移到 4k 合同，qualification 设施与 model-backed 证据投影已落地。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，三 consumer 逐字节一致。**exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为 5,311 后，同一正式入口两遍完整 count-only 普查全部成功且逐字节一致，47/47 取得 exact input-token 数、0 拒绝、`generated_tokens=0`，唯一正式 baseline `eval/results/baselines/local-approval-exact-token-census-v1.json` 已发布（digest `22b84527…`）。全集分布：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499；按 `input+512` 4k 适配 0/47、8k 适配 11/47；47 条均为 `responses_lite`。这同时说明 4k 合同装不下任何一条真实证据。Plan 026 那次通用 500 未再复现，也未被单独定位。能力保持 `linux_cuda_built_model_unvalidated`，qualification 未晋级。下一步是按全集分布定上下文档位（见 `doc/WBS/local-approval-model.md`）。 |
+| 方向 2 | L1、L2a、CPU/CUDA model-free runtime 与唯一 GGUF 静态完整性已完成。真实 ignored 配置仍是历史 4k 合同，qualification 设施与 model-backed 证据投影已落地。static payload 已升为 provider-neutral v3：v2 的 reasoning 投影之外，证据消息的 `developer` 角色在公共 builder 内原地改写为 `user`，三 consumer 逐字节一致。**exact-token 普查（WP3b-A2）已完成**：v3 锚点常量窄改为 5,311 后，同一正式入口两遍完整 count-only 普查全部成功且逐字节一致，47/47 取得 exact input-token 数、0 拒绝、`generated_tokens=0`，唯一正式 baseline `eval/results/baselines/local-approval-exact-token-census-v1.json` 已发布（digest `22b84527…`）。全集分布：min 5,311、p50 8,989、p90 12,352、p95 13,754、max 22,499；按 `input+512`，4k 适配 0/47、8k 适配 11/47、12k（12,288）适配 42/47。4k 因而从前向路线退役，**首个 model-backed 资格目标定为 12k**；12k 尚未经过真实加载、推理或显存验收。Plan 026 那次通用 500 未再复现，也未被单独定位。能力保持 `linux_cuda_built_model_unvalidated`，qualification 未晋级。下一步是迁移 12k 资格合同并做真实 model-backed smoke（见 `doc/WBS/local-approval-model.md`）。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -45,10 +45,12 @@
   **47/47 普查（WP3b-A2e）已通过**：v3 锚点常量从 pre-v3 的 5,313 窄改为实测 5,311 后，同一正式入口
   从头独立跑两遍完整 count-only 普查，两遍均 `complete`、47/47 counted、0 refused、锚点精确 5,311、
   `generated_tokens=0`、三项 cleanup 全 true，逐条记录/摘要/digest 逐字节一致，
-  唯一正式 baseline 已发布。全集分布 min 5,311 / p50 8,989 / p90 12,352 / p95 13,754 / max 22,499，
-  按 `input+512` 4k 适配 0/47、8k 适配 11/47。
-  **下一个决策与授权门：按该全集分布定上下文档位**，再按定案合同重新申请真实模型授权做 model-backed smoke，
-  然后以 model-backed + L7 配置切换收口 Local M3，之后 L5a、L3/L4、L5b/L6，最后 Local M4。
+  唯一正式 baseline 已发布。全集分布 min 5,311 / p50 8,989 / p90 12,352 / p95 13,754 / max 22,499；
+  按 `input+512`，4k 适配 0/47、8k 适配 11/47、12k（12,288）适配 42/47。
+  **首个 model-backed 资格档位定为 12k**：它相对 8k 显著提高真实证据覆盖，同时避免直接采用更高档位的
+  显存压力；这只是下一资格目标，不预先声称 12k 已在本机可用。下一工作先迁移 12k 资格合同并重新申请
+  真实模型授权做 model-backed smoke，再以通过后的 model-backed + L7 配置切换收口 Local M3；之后依次推进
+  L5a、L3/L4、L5b/L6 和 Local M4。
 - **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
   付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
   真实 API 授权，不得用未运行或无效比较表述“未见退化”。
@@ -73,10 +75,10 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | static payload v3 角色兼容已完成；exact-token 普查已在 v3 锚点 5,311 下完成 47/47，两遍一致，正式 baseline 已发布 | 档位定案 → model-backed + L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | static payload v3 角色兼容与 47/47 exact-token 普查已完成；12k 已定为首个资格目标，尚未真实验收 | 12k model-backed qualification → L7 → Local M3 → L5a → L3/L4 → L5b/L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
-- **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（4k model-backed → LoRA → 横评已成链），
+- **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（12k model-backed → LoRA → 横评已成链），
   而 Multi 的首个增量还待定（D1），不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
@@ -146,7 +148,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 |---|---|---|
 | P0 | S1 审批模型显式覆盖、S2 审批证据快照 | 已完成 |
 | P1 | B1—B3 最小真实链路；L1/L2 model-free 前置 | 已完成，M1 通过 |
-| P2 | 公平比较设施闭合（已完成）；B4—B7；L2a/L7 + 4k model-backed 收口为 Local M3；随后 L5a 教师标签与 L3/L4 未微调 baseline | 进行中 |
+| P2 | 公平比较设施闭合（已完成）；B4—B7；L2a/L7 + 12k model-backed 收口为 Local M3；随后 L5a 教师标签与 L3/L4 未微调 baseline | 进行中 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 未开始 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
 | P5 | RONDO Multi 产品线 | 产品基线已完成（工作包 2）；功能开发待 D1 |
@@ -155,7 +157,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 |---|---|---|---|
 | M0 | Guardian 模型/effort 显式生效并落盘规范化 `E_final` | 工程验收 | 已完成 |
 | M1 | 冻结 Codex 与 RONDO 同一 TB 2.1 任务端到端可归档 | 工程验收 | 已完成 |
-| Local M3 | 4k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 未完成 |
+| Local M3 | 12k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 未完成 |
 | Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 未完成 |
 | Multi 里程碑 | 由 Multi 自行定义，**不继承 `σ`/`delta` 总闸门** | 待定 | 待 D1 定下首个增量后确定 |
 
