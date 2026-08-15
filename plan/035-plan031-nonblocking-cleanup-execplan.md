@@ -104,8 +104,8 @@
 
 ### 当前验收状态
 
-- `GuardianBridgeTests`：13/13 通过，0 skip。
-- local-approval focused：`tests.test_local_approval` 全模块 155/155 通过，0 skip。
+- `GuardianBridgeTests`：12/12 通过，0 skip，8.68s。
+- local-approval focused：`tests.test_local_approval` 全模块 115/115 通过，0 skip，22.87s。
 - `git diff --check`：通过。
 
 ### 关键决策记录
