@@ -1,0 +1,79 @@
+{
+  "batch_id": "20260815-sol-teacher-labels-v1",
+  "boundaries": {
+    "api_backend_used": false,
+    "holdout_evaluation_only": true,
+    "holdout_forbidden_from_synthesis_and_training": true,
+    "local_model_run": false,
+    "runs_jsonl_modified": false,
+    "shadow_results_published": false
+  },
+  "census": {
+    "digest": "22b8452717f1bcfa692cffa69389ebb4a21a0aef1a9187cd066879a6b0831144",
+    "file_sha256": "0c49ca78d8ca53ff2331fec7734e67f0d2302223d6e5f7a5d64554d5be882606",
+    "schema_version": 1
+  },
+  "contracts": {
+    "attempt_schema_version": 1,
+    "identity_rule_version": "rondo_guardian_semantic_v1",
+    "import_metadata_schema_version": 1,
+    "label_schema_version": 1,
+    "manifest_schema_version": 1,
+    "outbound_schema_version": 1,
+    "prepare_receipt_schema_version": 1,
+    "raw_response_schema_version": 1,
+    "representative_rule_version": "frozen_e_final_sha256_lexicographic_v1",
+    "static_decision_schema_name": "rondo_static_approval_v1",
+    "static_payload_schema_version": 3
+  },
+  "counts": {
+    "duplicate_instances": 2,
+    "exclusions": {
+      "input_plus_output_exceeds_12288": 5,
+      "semantic_duplicate": 2
+    },
+    "fit_12k_instances": 42,
+    "selected_labels": 40,
+    "selected_partitions": {
+      "holdout": 16,
+      "seed": 24
+    },
+    "semantic_partitions": {
+      "holdout": 18,
+      "seed": 27
+    },
+    "semantic_unique": 45,
+    "source_instances": 47
+  },
+  "label_schema_sha256": "62c4e8ecd8c122006680df1105c188b260d268e10953d042fbaef3c353f1aa18",
+  "private_artifacts": {
+    "attempts_sha256": "1697ec1ad7d1fca3179a0a8e229242dc7030c779de94cb0f4ff9ee8113c1bd13",
+    "import_metadata_sha256": "d7bc048563309eafa0789be353ea56cab11c62052bd9c6625f3c4793779530da",
+    "labels_sha256": "7eaafa25aa99de804559ee77f034f4e69f8ff4227f5cf5d8d70c66f0a7b82a40",
+    "manifest_sha256": "c96b621a31d0983e47f5bcac22d90c5636d20a147138d5b1b335f1b4cbfdfeba",
+    "outbound_sha256": "42369460680f6aca51b27d427616e2277db5184671875ea112e29662f743c2a4",
+    "prepare_receipt_sha256": "2dc44af63523c8186a971c284d98b8ea6817c61a5261e638cabeccdfd850c5bd",
+    "raw_responses_sha256": "c011ac2ca482039c69dfa02e93367a741ea90019aa0083e61769d12f78d67d71",
+    "relative_directory": "eval-data/teacher-labels/20260815-sol-teacher-labels-v1"
+  },
+  "prompt": {
+    "sha256": "5425f3defeb900c691ed497919a65fca38d05a22460cd4bef503aa7612b9312c",
+    "version": "rondo_sol_teacher_prompt_v1"
+  },
+  "purpose": "body-free lock for the first point-in-time Sol teacher-label batch",
+  "ready_for_l3": true,
+  "retries": {
+    "schema_invalid": 0,
+    "total": 16,
+    "transport_failed": 16
+  },
+  "schema_version": 1,
+  "status": "ready_for_l3",
+  "teacher": {
+    "generated_dates": [
+      "2026-08-15"
+    ],
+    "model": "gpt-5.6-sol",
+    "nature": "point_in_time_sol_distillation_target_not_human_ground_truth"
+  }
+}

@@ -191,33 +191,35 @@
 
 ### 已完成
 
-- 已阅读根 `AGENTS.md`、README、两级 WBS、数据布局规范、plan 模板、Plan 030/031、Plan 031 日志与 live
-  canonical static/census 实现。
-- 已建立 worktree `.claude/worktrees/032-l5a-sol-teacher-labels` 与分支
-  `032-l5a-sol-teacher-labels`，基线为 `ca1fde0`。
-- 已做不输出正文的只读预检：当前生产归档为 47 条/24 个 run；tracked ledger 对这些 run 均给出唯一 task；
-  42 个实例满足 12k 长度，拟定 v1 语义规则得到 45 个语义身份和 40 个 12k 去重候选。
-- 已确认执行者改为人在场的开发用 Codex `gpt-5.6-sol`；不再设计 Claude→Sol 交接。
+- 已完成根规则、两级 WBS、数据布局、Plan 030/031 与 live canonical static/census/production meta 实现复核。
+- 已在 `032-l5a-sol-teacher-labels` worktree/分支落地 prompt、schema、identity/partition/manifest、
+  私有运输、原始返回保存、整批导入校验、body-free 摘要与 focused 回归。
+- 真实 prepare 重新验证 47 条生产归档：45 个语义身份、2 个重复实例、42 个 12k 适配实例，语义去重后
+  选中 40 条；seed / holdout 语义组为 27 / 18，最终标签为 24 / 16，排除原因为超窗 5、重复 2。
+- 当前人在场开发用 Codex `gpt-5.6-sol` 已于 2026-08-15 完成冻结完整批次；最终 40 条均得到合规判定。
+  其中 16 条仅因首次传输失败，使用完全相同的 prompt 与冻结输入定向重试一次；schema 重试为 0，未因标签
+  内容重试。教师标签是时点 Sol 蒸馏目标，不是人工 ground truth。
+- 私有批次已通过两次幂等 verify 并标记 `ready_for_l3=true`；tracked 摘要不含正文、路径、逐条 semantic id
+  或逐条 holdout 明细。prompt / label schema / manifest / labels SHA-256 分别为
+  `5425f3de…312c` / `62c4e8ec…aa18` / `c96b621a…feba` / `7eaafa25…2a40`。
 
 ### 当前工作
 
-- execplan 已完成独立复核和整改，等待提交并交给后续 Sol 执行者。
+- Plan 032 已完成，等待独立审查；后续工作只按 WBS 另开 L3/L4 工作包。
 
 ### 本任务剩余步骤
 
-1. 实现并测试轻量 identity/partition/manifest/export/label validator，冻结 tracked prompt/schema。
-2. 在主工作区 ignored 数据根上完成 47 条 prepare，核对实际去重、分区、12k 批次与排除原因。
-3. 由当前 `gpt-5.6-sol` 按冻结 prompt 直接完成一次教师标签批次；仅按合同做至多一次定向重试。
-4. 整批 verify，冻结私有标签/导入元数据与 tracked 无正文摘要，运行 focused 门禁。
-5. 精炼同步权威文档与日志，检查两个工作区状态后只提交本 worktree 分支。
+- 无。本计划冻结为已完成任务合同与历史记录。
 
 ### 阻塞项
 
-- 无。用户已明确授权最多 42 条冻结证据用于本批 Sol 标签，并进一步取消人工抽查，要求同一任务连续完成。
+- 无。
 
 ### 当前验收状态
 
-- 仅完成规划与只读预检；尚未生成 manifest、prompt/schema 实现、教师标签或 L3 导入数据，不能表述 L5a 已完成。
+- 完成判据已满足：真实 47 条 prepare、40 条冻结教师标签、完整集合 verify、focused pure/local 门禁、
+  私有/公开边界与现场一致性检查均通过，无 skip。未运行 L3/L4、Local-static、本地模型、Docker、Cargo、
+  API、训练、合并或推送。
 
 ### 交接边界
 
@@ -241,3 +243,4 @@
 | 007 | 只允许格式/传输失败项按原输入重试一次，不允许按标签内容重问 | 控制一次批次的判定漂移，又保留最低限度的格式恢复 | 生成 | 已采纳 |
 | 008 | 取消首次外发前人工抽查，由同一 Sol 执行者从 prepare 到提交连续完成 | 用户明确修正执行流程，不再要求查看预览或中途确认 | 授权与执行 | 已采纳 |
 | 009 | 无正文批次摘要固定放 `eval/locks/`，不放 baseline 目录 | L5a 冻结输入而不运行 L3/L4，不能制造结果语义 | 产物职责 | 已采纳 |
+| 010 | 实现集中在现有 `local_approval/teacher_labels.py`，复用 production reader、公共 static builder、census 与 live decision validator；私有入口在 TTY 下关闭回显后原样保存返回 | 以最小模块关闭 canonical bytes、身份、完整集合与正文不回显边界，不新增依赖或第二套 eval 工程 | 实现与私有运输 | 已采纳 |
