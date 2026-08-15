@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-15（L3/L4 未微调 Local-static baseline 完成，方向 2 的 P2 剩余项关闭）
+最后更新：2026-08-15（L5b 合成训练数据与资产冻结完成，方向 2 当前进入 L6）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L1、L2a、CPU/CUDA model-free runtime、唯一 GGUF 静态完整性、12k model-backed qualification、L7、Local M3、L5a 与 **L3/L4 均已完成**，方向 2 在 P2 的剩余项已全部关闭。static payload v3、47/47 exact-token 普查、40 条 `gpt-5.6-sol` 教师标签与正式 Guardian 本地切换合同保持不变。未微调 Local-static baseline 已按冻结指标口径 `rondo_l4_local_static_v1` 发布（40/40 终态、教师一致 16/35、有效判定覆盖 87.5%、峰值显存 8,048,869,376 B）。下一工作包为 P3 的 L5b/L6。 |
+| 方向 2 | P2 与 **L5b 均已完成**。static payload v3、47/47 exact-token、12k model-backed、L7 / Local M3、40 条 `gpt-5.6-sol` 教师标签及 L3/L4 未微调 baseline 保持不变。L5b 已冻结 600 条合成 static-v3 审批数据（train 470 / validation 130、allow 240 / deny 360、六类齐全、holdout 近重复命中 0），正文按体积门限入库。下一独立工作包为 L6；训练、数据外发、云 GPU 与权重仍需单独授权。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -66,7 +66,11 @@
   并随 tracked 模板提交；未微调 baseline 与四条 shadow 记录（seed/holdout × imported/auto）已发布。
   教师一致率只在 35 条合规判定间计算（16/35；seed 9/21、holdout 7/14），有效判定覆盖 87.5%，
   峰值显存 8,048,869,376 B。**该批教师标签全部为 `allow`**，因此本轮一致率暂不构成有区分度的质量信号，
-  只作为固定对照起点。**下一步依次为 L5b/L6 和 Local M4。**
+  只作为固定对照起点。
+  **L5b 已完成（WP3b-A7）**：当前人在场 `gpt-5.6-sol` 只参考 seed 24 条，生成并冻结 600 条合成样本；
+  六类与 allow/deny 均有覆盖，train/validation 按 120 个近重复组互斥，holdout 16 条只在本地内存中过滤且
+  聚合命中 0。正文约 1.67 MB，随 prompt/schema、manifest 和数据卡进入 `training/`；私有 seed 投影、候选与
+  逐条过滤明细留在 ignored `eval-data/`。**下一步为需独立授权的 L6，之后才是 Local M4。**
 - **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
   付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
   真实 API 授权，不得用未运行或无效比较表述“未见退化”。
@@ -91,10 +95,10 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | static payload v3、47/47 exact-token、12k model-backed、L7 / Local M3、L5a 教师标签与 L3/L4 未微调 baseline 均已完成 | L5b/L6 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | P2 与 L5b 均已完成；600 条合成训练资产已冻结 | L6 → Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
-- **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L5b/L6 → Local M4 已成链），
+- **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L6 → Local M4 已成链），
   而 Multi 的首个增量还待定（D1），不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
@@ -165,7 +169,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P0 | S1 审批模型显式覆盖、S2 审批证据快照 | 已完成 |
 | P1 | B1—B3 最小真实链路；L1/L2 model-free 前置 | 已完成，M1 通过 |
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
-| P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 未开始 |
+| P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 进行中：L5b 已完成，L6 未开始 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
 | P5 | RONDO Multi 产品线 | 产品基线已完成（工作包 2）；功能开发待 D1 |
 

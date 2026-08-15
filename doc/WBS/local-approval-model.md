@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-15（L3/L4 未微调 baseline 完成）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-15（L5b 合成训练资产冻结完成）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -181,8 +181,8 @@
 
 ### 当前推进顺序
 
-1. **下一工作是 L5b**：基于 `seed` 分区批量合成训练样本；holdout 仍禁止进入合成上下文、合成 prompt 与训练集。
-2. 之后按 **L6** 云 GPU LoRA 微调推进（三重授权门，必须单独申请），最后是 **Local M4**。
+1. **L5b 已完成**：600 条合成训练资产已冻结，holdout 未进入合成上下文、合成 prompt 或训练集。
+2. **下一工作是 L6**：按云 GPU LoRA 微调路线推进；训练、数据外发、云 GPU 与权重需独立申请，最后是 Local M4。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
@@ -305,8 +305,9 @@ L5 分两部分，**执行时点不同**：
 | L5a 教师标签生成 | 用冻结 prompt 人在场经开发用 Codex 生成 Sol 判定，落成冻结标签文件 | **先于 L3**（L3 的教师侧输入） |
 | L5b 合成训练数据 | 基于 `seed` 分区批量合成训练样本 | L3/L4 之后、L6 之前 |
 
-L5a 与 L3/L4 均已于 2026-08-15 完成；当前推进 L5b 及其后工作包。L5a 的冻结合同和哈希见
-`eval/locks/local-approval-sol-teacher-labels-v1.json`。
+L5a、L3/L4 与 L5b 均已于 2026-08-15 完成。L5a 的冻结合同和哈希见
+`eval/locks/local-approval-sol-teacher-labels-v1.json`；L5b 的合同、数据卡、机器摘要及 470/130 split 见
+`training/local-approval-synthetic-v1/`。
 
 - 两部分都用**订阅制 Sol 经开发用 Codex 生成**，人在场、发送预写 prompt，不依赖真实跑批规模，
   也不占 API 预算门；`eval/` 只导入冻结产物，不程序化调用。
@@ -334,6 +335,12 @@ L5a 与 L3/L4 均已于 2026-08-15 完成；当前推进 L5b 及其后工作包�
 - 合成要覆盖的分布：明确安全、明确危险、边界模糊、证据不足、伪装成安全的危险动作、工具结果与请求不一致。
 - 产出：训练集 JSONL + 数据卡（Sol 模型标识与生成日期、合成方法、seed 分区来源、分布、去重与近重复检查结果、
   SHA256）。
+
+L5b 冻结结果：当前人在场开发用 Codex `gpt-5.6-sol` 只使用 seed 24 条受控投影作为参考，生成 600 个唯一候选并
+全部通过 strict static-v3/decision-v1 校验；六类分布为 180 / 100 / 120 / 70 / 65 / 65，allow 240、deny 360。
+精确重复为 0；holdout 16 条只由本地程序在内存中按版本化 word 5-gram 规则比较，命中 0，未公开逐条映射。
+最终 120 个近重复组整体划分为 train 470 / validation 130。两份正文共 1,670,240 bytes，单文件均低于 40 MB，
+因此随 prompt/schema、manifest 和数据卡进入 `training/`；seed 投影、候选、authoring 与过滤明细留在 ignored 私有区。
 
 ### L6 微调回路（规模 L，三重授权门）
 
@@ -364,6 +371,9 @@ L5a 与 L3/L4 均已于 2026-08-15 完成；当前推进 L5b 及其后工作包�
 | 训练集总量 ≤ 100MB 且单文件 ≤ 40MB | 数据集与训练脚手架一起放仓库内独立板块 |
 | 超过上述阈值 | 仓库只留训练脚手架 + 数据卡 + SHA256，数据集放仓库外 |
 | 模型权重（GGUF / LoRA adapter） | **始终**在仓库外，无论大小 |
+
+首批 L5b 正文已确认符合入库门限并落在 `training/local-approval-synthetic-v1/`；该结论只适用于此冻结批次，
+后续新数据仍按同一门限重新判断。
 
 - 目录形态：新增顶层 `training/`（脚手架、数据卡、模型版本登记表），与 `mydev/`、`multidev/` 严格隔离，
   不参与 Rust 构建。落地时需同步更新 `AGENTS.md` 的仓库边界一节。

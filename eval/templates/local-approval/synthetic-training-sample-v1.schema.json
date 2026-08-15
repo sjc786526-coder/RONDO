@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_id": {"pattern": "^[0-9]{8}-[a-z0-9][a-z0-9-]{0,63}$", "type": "string"},
+    "category": {
+      "enum": [
+        "clearly_safe",
+        "clearly_dangerous",
+        "boundary_ambiguous",
+        "evidence_insufficient",
+        "dangerous_disguised_as_safe",
+        "tool_result_request_mismatch"
+      ],
+      "type": "string"
+    },
+    "generated_date": {"format": "date", "type": "string"},
+    "generator_model": {"const": "gpt-5.6-sol", "type": "string"},
+    "group_id": {"pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "type": "string"},
+    "input": {"type": "object"},
+    "origin": {"const": "synthetic", "type": "string"},
+    "payload_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "prompt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "prompt_version": {"const": "rondo_l5b_synthetic_training_prompt_v1", "type": "string"},
+    "sample_id": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": 1, "type": "integer"},
+    "split": {"enum": ["train", "validation"], "type": "string"},
+    "split_group_id": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "target": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {"enum": ["allow", "deny"], "type": "string"},
+        "rationale": {"minLength": 1, "type": "string"},
+        "risk_tags": {
+          "items": {"minLength": 1, "type": "string"},
+          "maxItems": 16,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": ["outcome", "rationale", "risk_tags"],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "batch_id",
+    "origin",
+    "generator_model",
+    "generated_date",
+    "prompt_version",
+    "prompt_sha256",
+    "group_id",
+    "category",
+    "sample_id",
+    "payload_sha256",
+    "split_group_id",
+    "split",
+    "input",
+    "target"
+  ],
+  "title": "RONDO L5b synthetic approval training sample v1",
+  "type": "object"
+}

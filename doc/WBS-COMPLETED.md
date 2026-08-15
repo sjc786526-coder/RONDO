@@ -892,3 +892,25 @@ standard/Lite 形态均补回归。
   无 holdout 逐条身份、无 rationale/risk_tags、无 payload 正文。未运行 Docker、Cargo、云 API、16k、
   L5b/L6 或全量 eval；未修改 `mydev/`、`multidev/`、runtime、GGUF、prompt、static 合同、资格 evidence
   或 `rondo.local.toml`。
+
+## WP3b-A7：L5b 合成训练数据与资产冻结（Plan 034，2026-08-15）
+
+- **成果**：当前人在场开发用 Codex `gpt-5.6-sol` 同时完成实现与合成 authoring，只使用 Plan 032 冻结批次的
+  24 条 seed 受控投影作为真实参考，生成 600 个唯一 synthetic static-v3 审批候选。六类分布为明确安全 180、
+  明确危险 100、边界模糊 120、证据不足 70、伪装成安全的危险动作 65、工具结果与请求不一致 65；
+  allow 240、deny 360。
+- **冻结资产**：版本化 prompt/schema、数据卡、机器 manifest、`train.jsonl` 470 条和
+  `validation.jsonl` 130 条位于 `training/local-approval-synthetic-v1/`。两份正文共 1,670,240 bytes，
+  符合总量 100 MB / 单文件 40 MB 入库门限；train / validation SHA-256 分别为
+  `1e66c06e…c110a` / `cbab8084…8dd2`，manifest SHA-256 为 `dbf5fffe…7190`。
+- **校验与隔离**：每条 input/target 均通过 static payload v3 与 `rondo_static_approval_v1` 强校验；精确重复 0。
+  120 个源/近重复连通组整体落入单一 split，无交叉。holdout 16 条未进入生成上下文，只由本地 finalizer 在内存中
+  以冻结 word 5-gram 规则排除近重复，命中 0、聚合最大分数 0.202128；逐条匹配与正文未进入 Git、日志或终端。
+- **私有数据**：seed 投影、Sol-authored authoring、候选、receipt 与逐条过滤明细保存在
+  `eval-data/synthetic-training/20260815-l5b-synthetic-training-v1/`，目录 0700、普通文件 0600。
+  两次候选落盘前的纯格式错误（unterminated string、brace formatting）均窄修后重新做内存校验；没有候选重试、
+  按 outcome 重问或正式批次重生成。
+- **验证边界**：新增 focused 合成 fixture 覆盖 seed-only 投影、严格 schema/identity、800 唯一候选上限、精确去重、
+  holdout 排除、确定性 group-safe split、私有权限及哈希绑定；真实 release verify 从私有候选和冻结教师批次重算
+  tracked 数据与 manifest。未运行训练或 training dry-run、本地模型、Docker、Cargo、API、Hub、云资源、CI 或全量测试；
+  未修改 Plan 032/033、static v3、L4 结果、`mydev/` 或 `multidev/`。

@@ -6,12 +6,13 @@
 （Local M4）。离线冻结回放（E-A）的 schema 保留在本文件中，但该轨已随方向 1 挂起（见 `doc/WBS.md`）。
 目标是**结构清楚、便于管理、可长期追溯**，同时保持轻量——不做数据资产审计、可信链或权限系统。
 
-## 1. 两个根目录，按"轻/重"分家
+## 1. 三个根目录，按职责分家
 
 | 根目录 | 是否入库 | 放什么 | 判据 |
 |---|---|---|---|
 | `eval/` | **入库** | 运行配置、任务分层清单、结果库、报表 | 文本、体积小、需要跟随代码版本演进 |
 | `eval-data/` | **git-ignored** | 录制包、证据包、单次运行原始产物、模型权重 | 体积大、可重生成或不可共享 |
+| `training/` | **按门限入库** | 训练合同、数据卡、manifest 与可控体积的最终合成数据 | 总量 ≤100 MB 且单文件 ≤40 MB；权重与训练输出永不入库 |
 
 分家的理由：结果库和清单必须跟着 commit 走才能回答"这个分数是哪版代码跑的"；而录制包和容器日志放进 git 会让仓库迅速不可用。
 
@@ -59,6 +60,7 @@ eval-data/                             # git-ignored
 ├── oracle-proofs/p2-b7-v1/             # campaign-independent 单题 Oracle proof + 十题 manifest，0600
 ├── cross-eval/<batch_id>/              # Local M4 会话内人判定的冻结 JSONL 与证据哈希，0600
 ├── teacher-labels/<batch_id>/          # L5a Sol 教师 manifest / payload / 原始返回 / 验证标签，目录 0700、文件 0600
+├── synthetic-training/<batch_id>/      # L5b seed 投影、候选、authoring 与逐条过滤明细，目录 0700、文件 0600
 ├── b2/current.json                    # 可替换的当前 no-API 双侧验收收据，0600
 ├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
 ├── work/                              # materialize 和 no-API 工作目录
@@ -69,6 +71,13 @@ eval-data/                             # git-ignored
 │   └── holdout/<review_id>/           # 只用于评测，禁止进入合成上下文
 ├── runs/<run_id>/                     # 已发布单次运行的原始日志、rollout、容器输出
 └── models/                            # 本地权重、GGUF、LoRA adapter（永不入库）
+
+training/                              # 按体积门限入库，不参与 Rust 构建
+└── local-approval-synthetic-v1/
+    ├── DATA_CARD.md
+    ├── manifest.json                  # 机器可读合同、统计、边界和文件哈希
+    ├── train.jsonl                    # 通过严格校验的 synthetic static-v3 样本
+    └── validation.jsonl               # 与 train 按近重复连通组互斥
 ```
 
 ## 3. 命名
@@ -279,6 +288,23 @@ Git 只在 `eval/locks/` 保存一个不含正文、source path、逐条 semanti
 记录合同版本、计数、教师模型/日期与私有文件 SHA。首次批次为
 `eval/locks/local-approval-sol-teacher-labels-v1.json`；教师标签是时点 Sol 蒸馏目标，不是人工 ground truth。
 
+### L5b 合成训练数据
+
+首批冻结资产为 `training/local-approval-synthetic-v1/`。每条最终 JSONL 记录都绑定 synthetic batch、
+当前人在场开发用 Codex `gpt-5.6-sol` 与生成日期、版本化 prompt/schema、static payload v3、
+`rondo_static_approval_v1` target、场景类别、源变体组、近重复 split 组和 train/validation 归属。
+`input` / `target` 是 L6 的确定性消费面，其他字段用于合同和分组。
+
+- 生成上下文只允许 Plan 032 的 seed 受控投影；真实 `E_final`、真实身份和 provider 私有字段不得进入最终样本。
+- 候选总数最多 800。最终有效集必须为 400—800 条，覆盖 WBS 的六类场景且同时含 allow/deny。
+- 精确去重按 canonical static payload SHA-256；源变体和检测出的近重复连通组整体落入同一 split。
+- holdout 只由本地 finalizer 在内存中读取做近重复排除；逐条匹配、分数和身份留在 ignored 私有批次，
+  tracked manifest / 数据卡和终端只发布聚合统计。
+- seed 投影、authoring、原始候选和过滤明细位于
+  `eval-data/synthetic-training/<batch_id>/`，目录 0700、普通文件 0600；不进入 Git。
+- 正文总量 ≤100 MB 且单文件 ≤40 MB 时随合同入库，否则正文留在 ignored 私有区，Git 只保留数据卡、
+  manifest、合同和 SHA-256。模型权重、adapter 与训练输出无论大小都不入库。
+
 ### 隐藏集的特殊规则
 
 `taskset = "holdout"` 的运行**只写 `summary`，`tasks` 必须为 `null`**。否则隐藏集会通过结果库逐次泄漏单任务结果，几轮之后就不再隐藏。
@@ -323,6 +349,7 @@ M4 由 Opus 5 在 Claude Code 会话内判定，**不满足“自动运行、自
 | `eval/reports/` | 可随时重生成，只保留最新一版 |
 | `eval-data/runs/<run_id>/` | 保留最近 20 次 + 所有里程碑标记的运行 |
 | `eval-data/cross-eval/<batch_id>/` | 永久。会话内判定不可重跑复现，删掉就没有第二份 |
+| `eval-data/synthetic-training/<batch_id>/` | 至少保留到对应 L6 与 Local M4 收口；包含不可入库的 seed 投影、候选和过滤明细 |
 | `eval-data/recordings/` | E-A 挂起期间不新增；已有录制按原规则保留 |
 | `eval-data/evidence/` | `seed` 与 `holdout` 永久（体量小）；`raw` 在完成划分后可清 |
 | `eval-data/models/` | 只保留当前在用与上一版权重，其余按需重新下载 |

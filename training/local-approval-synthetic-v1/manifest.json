@@ -1,0 +1,103 @@
+{
+  "batch_id": "20260815-l5b-synthetic-training-v1",
+  "boundaries": {
+    "all_examples_synthetic": true,
+    "provider_private_fields_in_training": false,
+    "real_e_final_in_training": false,
+    "real_identity_in_training": false,
+    "remote_resources_used": false,
+    "training_performed": false
+  },
+  "contracts": {
+    "dedup_rule_version": "canonical_static_payload_sha256_v1",
+    "near_duplicate_rule_version": "nfkc_word_5gram_max_jaccard_containment_v1",
+    "prompt_relative_path": "eval/templates/local-approval/sol-synthetic-training-prompt-v1.md",
+    "prompt_sha256": "a320badb7ec6788586e0d3393f7fcd30717141efc290be2552bdb79a4f658194",
+    "prompt_version": "rondo_l5b_synthetic_training_prompt_v1",
+    "sample_schema_relative_path": "eval/templates/local-approval/synthetic-training-sample-v1.schema.json",
+    "sample_schema_sha256": "c1873349470e2f0718ea085495d1965cfa6166e2cd23246544c6714524d4c124",
+    "sample_schema_version": 1,
+    "split_rule_version": "sha256_component_mod5_validation_v1",
+    "static_decision_schema_name": "rondo_static_approval_v1",
+    "static_payload_schema_version": 3
+  },
+  "files": {
+    "train.jsonl": {
+      "bytes": 1308360,
+      "sha256": "1e66c06e9357a3b6e14aedd193c5405ad2c18924e57da6a3a209f079b80c110a"
+    },
+    "validation.jsonl": {
+      "bytes": 361880,
+      "sha256": "cbab8084bfb78bc40f96ce9dfdb564f6fabea1d73c6d48f04ffee2c95aba8dd2"
+    }
+  },
+  "generator": {
+    "api_backend_used": false,
+    "generated_date": "2026-08-15",
+    "local_model_used": false,
+    "model": "gpt-5.6-sol"
+  },
+  "private_artifacts": {
+    "candidate_details_tracked": false,
+    "candidates_sha256": "dc17970ce4c9ea58f08c5a18e3730b23e3dbc9bacb9298a74a68c020e417e775",
+    "holdout_match_details_tracked": false,
+    "relative_directory": "eval-data/synthetic-training/20260815-l5b-synthetic-training-v1"
+  },
+  "purpose": "L5b synthetic static-approval training and validation data",
+  "schema_version": 1,
+  "size_policy": {
+    "body_location": "tracked",
+    "dataset_total_bytes": 1670240,
+    "tracked_single_file_limit_bytes": 41943040,
+    "tracked_total_limit_bytes": 104857600
+  },
+  "source": {
+    "holdout_in_memory_filter_only": true,
+    "holdout_references": 16,
+    "seed_only_generation_context": true,
+    "seed_references": 24,
+    "teacher_batch_id": "20260815-sol-teacher-labels-v1",
+    "teacher_labels_sha256": "7eaafa25aa99de804559ee77f034f4e69f8ff4227f5cf5d8d70c66f0a7b82a40",
+    "teacher_lock_sha256": "237a57b4378c6c0cc4ee5ce919246dca150ea7c8646b946f17e41acc6593a57e"
+  },
+  "statistics": {
+    "candidates": {
+      "exact_duplicates_removed": 0,
+      "raw": 600,
+      "unique": 600
+    },
+    "categories": {
+      "boundary_ambiguous": 120,
+      "clearly_dangerous": 100,
+      "clearly_safe": 180,
+      "dangerous_disguised_as_safe": 65,
+      "evidence_insufficient": 70,
+      "tool_result_request_mismatch": 65
+    },
+    "final_samples": 600,
+    "holdout_filter": {
+      "excluded": 0,
+      "matched_items_published": false,
+      "maximum_score": 0.202128,
+      "retained": 600,
+      "rule_version": "nfkc_word_5gram_max_jaccard_containment_v1",
+      "threshold": 0.72
+    },
+    "length_bytes": {
+      "max": 2914,
+      "min": 2653,
+      "p50": 2792,
+      "p95": 2878
+    },
+    "outcomes": {
+      "allow": 240,
+      "deny": 360
+    },
+    "split_groups": 120,
+    "splits": {
+      "train": 470,
+      "validation": 130
+    }
+  },
+  "status": "ready_for_l6"
+}
