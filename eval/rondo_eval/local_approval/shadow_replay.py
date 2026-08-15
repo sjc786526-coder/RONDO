@@ -692,8 +692,15 @@ def _require_private_run_directory(path: Path) -> None:
 
 
 def _git(root: Path, *args: str) -> str:
+    result = _git_result(root, *args)
+    if result.returncode != 0:
+        raise ShadowReplayError("harness_commit_unavailable")
+    return result.stdout.strip()
+
+
+def _git_result(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     try:
-        result = subprocess.run(
+        return subprocess.run(
             ("git", "-C", os.fspath(root), *args),
             shell=False,
             stdin=subprocess.DEVNULL,
@@ -708,9 +715,28 @@ def _git(root: Path, *args: str) -> str:
         )
     except (OSError, subprocess.SubprocessError, UnicodeError, ValueError) as exc:
         raise ShadowReplayError("harness_commit_unavailable") from exc
+
+
+def require_run_commit_in_history(worktree_root: Path, commit: str) -> None:
+    """Bind the publication to the harness the measurement actually came from.
+
+    Publication is offline and necessarily happens after the run, so `HEAD`
+    legitimately moves on: the results and the documentation are themselves
+    commits.  Requiring `HEAD` to still equal the run commit would make the
+    delivered state unable to recompute its own baseline.  What has to stay
+    true is that the exact harness is still reachable in this history and was
+    not rewritten away.  The run-time clean-tree rule is unchanged.
+    """
+
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ShadowReplayError("harness_commit_invalid")
+    result = _git_result(
+        worktree_root, "merge-base", "--is-ancestor", commit, "HEAD"
+    )
     if result.returncode != 0:
-        raise ShadowReplayError("harness_commit_unavailable")
-    return result.stdout.strip()
+        raise ShadowReplayError(
+            "harness_commit_not_in_history", {"commit": commit[:12]}
+        )
 
 
 def harness_state(worktree_root: Path) -> dict[str, Any]:
@@ -1451,9 +1477,9 @@ def publish(
         )
         if row["teacher_outcome"] != sample.teacher_outcome:
             raise ShadowReplayError("private_run_teacher_label_drift")
-    current = harness_state(config.paths.worktree_root)
-    if current["eval_harness_commit"] != document["harness"]["eval_harness_commit"]:
-        raise ShadowReplayError("harness_commit_moved_since_run")
+    require_run_commit_in_history(
+        config.paths.worktree_root, document["harness"]["eval_harness_commit"]
+    )
 
     metrics = summarize_all(document["outcomes"])
     plan_path = private_run_dir / "publication.json"

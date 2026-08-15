@@ -238,8 +238,8 @@ Ministral 12k 本地服务上，对完全对应的 canonical static payload v3 �
 
 ### 当前验收状态
 
-- 运行前：focused `test_shadow_replay` 41 项与直接受影响的既有 teacher-label / local-approval /
-  artifact-result 测试合计 **323 项通过、0 skip**；`uv lock --check` 85 packages 通过。
+- focused `test_shadow_replay` 44 项与直接受影响的既有 teacher-label / local-approval /
+  artifact-result 测试合计 **326 项通过、0 skip**；`uv lock --check` 85 packages 通过。
 - 真实运行：1 个模型生命周期，40/40 首次尝试进入唯一终态（allow 16、deny 19、结构化输出失败 5、
   超时 0、基础设施失败 0、重试 0）；峰值显存 8,048,869,376 B（基线 1,629,487,104 B、1,351 次采样、窗口完整）；
   服务 input token 与冻结 census 40/40 一致；四项现场清理全 true。
@@ -249,7 +249,12 @@ Ministral 12k 本地服务上，对完全对应的 canonical static payload v3 �
 - 发布：四条 shadow 记录 `20260815-082704844/845/846/847` 与
   `eval/results/baselines/local-approval-unfinetuned-static-baseline-v1.json`
   （SHA-256 `ca0bbc21a24b23b607a1308462fcac16447d4577d779819e6c8f683bb09d4dcd`）。
-  重跑 publish 为幂等空操作；公开 seed 逐条投影可独立重算出 9/21。
+  在最终交付 HEAD 上重跑 publish 为幂等空操作（exit 0、0 条新记录、baseline SHA 不变）；
+  公开 seed 逐条投影可独立重算出 9/21。
+- 独立验收（`agent_log/2026-08-15-084543-plan033-independent-acceptance.md`）确认 baseline 数据有效，
+  并指出两处窄缺口：统一结果校验未强制 shadow 的 source/side 映射与 `holdout ⇒ tasks=null`；
+  发布对 harness commit 采用等值绑定，导致最终 HEAD 无法完成所称的幂等重算。两项均已在本分支窄修并补回归，
+  未改动模型结果、指标口径或冻结输入。
 - 一次运行前失败：首次用相对路径调用 `with-build-lock.sh`，lease 校验要求 wrapper cmdline 含解析后的
   绝对脚本路径，故被拒（`watchdog_unavailable`）；该次未启动模型、未创建私有目录、未动 GPU。
 - 现场限制（如实记录，未改动）：本机 WSL 的 `nvidia-smi --query-compute-apps` 始终返回空行，

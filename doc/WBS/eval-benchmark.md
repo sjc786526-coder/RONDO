@@ -31,8 +31,8 @@ v22 的 `sigma=0`、`delta=3` 与 `ab_delta_exceeds_aa_sigma` 是对既有冻结
 catalog prompt 相差 161 tokens，同时混有 harness/deadline 和时间分块差异；因此该批次只证明执行、结算、归档和
 机械门运行到了终态。报告见 `doc/research/plan020-b7-canary-baseline-failure-attribution.md`。
 
-P2 v2—v22 公共账本已合入当前交付历史：`runs.jsonl` 共 244 条唯一 run，其中 v22 为 32 条；v6—v22
-共 11 份聚合 JSON。历史标签中的“Plan 015”保留原样，当前权威编号仍为 Plan 020。
+P2 v2—v22 公共账本已合入当前交付历史：`runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，其中 v22 为 32 条；
+v6—v22 共 11 份聚合 JSON。方向 2 的 L3/L4 另追加 4 条 `track=shadow`（当前账本共 248 条），不属于本方向。历史标签中的“Plan 015”保留原样，当前权威编号仍为 Plan 020。
 
 ## E-B8 公平比较设施（已闭合）
 

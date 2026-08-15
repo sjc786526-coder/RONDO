@@ -16,6 +16,7 @@ from unittest import mock
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
+from rondo_eval import artifacts  # noqa: E402
 from rondo_eval.artifacts import ArtifactError, ArtifactWriter  # noqa: E402
 from rondo_eval.config import RepoPaths, RuntimeConfig  # noqa: E402
 from rondo_eval.local_approval import shadow_replay, teacher_labels  # noqa: E402
@@ -1137,11 +1138,15 @@ class PublicationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def _publish(self):
+    def _publish(self, *, in_history: bool = True):
+        def ancestry(_root, commit):
+            if not in_history:
+                raise shadow_replay.ShadowReplayError("harness_commit_not_in_history")
+
         with mock.patch.object(
             shadow_replay, "load_teacher_batch", return_value=self.batch
         ), mock.patch.object(
-            shadow_replay, "harness_state", return_value=self.harness
+            shadow_replay, "require_run_commit_in_history", ancestry
         ):
             return shadow_replay.publish(
                 self.config,
@@ -1336,20 +1341,46 @@ class PublicationTests(unittest.TestCase):
             self._publish()
         self.assertFalse((self.root / "eval" / "results" / "runs.jsonl").exists())
 
-    def test_a_moved_harness_commit_refuses_publication(self) -> None:
-        with mock.patch.object(
-            shadow_replay, "load_teacher_batch", return_value=self.batch
-        ), mock.patch.object(
-            shadow_replay,
-            "harness_state",
-            return_value={"eval_harness_commit": "b" * 40, "git_dirty": False},
-        ):
-            with self.assertRaises(shadow_replay.ShadowReplayError):
-                shadow_replay.publish(
-                    self.config,
-                    private_run_dir=self.private_run,
-                    teacher_private_dir=self.root / TEACHER_DIRECTORY,
-                )
+    def test_a_rewritten_harness_history_refuses_publication(self) -> None:
+        with self.assertRaises(shadow_replay.ShadowReplayError):
+            self._publish(in_history=False)
+        self.assertFalse((self.root / "eval" / "results" / "runs.jsonl").exists())
+
+    def test_publication_stays_reproducible_after_later_commits(self) -> None:
+        """The delivered state must still recompute and republish as a no-op.
+
+        `HEAD` necessarily moves after the run (results and documentation are
+        commits of their own), so publication binds the recorded run commit by
+        ancestry instead of equality.
+        """
+
+        repo = self.root / "history"
+        repo.mkdir()
+        def git(*args):
+            return subprocess.run(
+                ("git", "-C", str(repo), *args),
+                check=True, capture_output=True, text=True,
+                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"},
+            ).stdout.strip()
+
+        git("init", "-q", "-b", "main")
+        (repo / "harness.txt").write_text("frozen", encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-q", "-m", "harness")
+        run_commit = git("rev-parse", "HEAD")
+        (repo / "results.txt").write_text("published", encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-q", "-m", "results")
+        moved = git("rev-parse", "HEAD")
+
+        self.assertNotEqual(run_commit, moved)
+        shadow_replay.require_run_commit_in_history(repo, run_commit)
+        with self.assertRaises(shadow_replay.ShadowReplayError):
+            shadow_replay.require_run_commit_in_history(repo, "b" * 40)
+        with self.assertRaises(shadow_replay.ShadowReplayError):
+            shadow_replay.require_run_commit_in_history(repo, "not-a-commit")
 
     def test_an_incomplete_vram_window_blocks_publication(self) -> None:
         broken = copy.deepcopy(self.document)
@@ -1441,6 +1472,49 @@ class ImportedRowContractTests(unittest.TestCase):
                 with self.assertRaises(ArtifactError):
                     writer.finalize(record, secrets=())
                 writer.abort()
+
+    def test_side_and_source_must_agree_in_the_unified_validator(self) -> None:
+        """The mapping is a contract, not a convention of one builder."""
+
+        cases = {
+            "imported_local": ("local-static", "imported"),
+            "auto_teacher": ("sol-static", "auto"),
+            "unmapped_side": ("luna-static", "imported"),
+            "unmapped_side_auto": ("luna-static", "auto"),
+        }
+        for index, (name, (side, source)) in enumerate(cases.items(), start=30):
+            with self.subTest(case=name):
+                run_id = f"20260815-1000000{index}-shadow-{side}-r1"
+                record = {
+                    **self._imported(run_id),
+                    "side": side,
+                    "source": source,
+                }
+                if source == "auto":
+                    record["binary_sha256"] = "b" * 64
+                    record["metrics"] = {"agreement": 1.0}
+                    record["artifacts"] = f"eval-data/runs/{run_id}"
+                with self.assertRaises(ArtifactError):
+                    artifacts._validate_record(record, run_id, self.root)
+
+    def test_a_holdout_row_can_never_publish_per_task_results(self) -> None:
+        holdout_task = [{"task_id": "hidden-sample", "outcome": "allow"}]
+        for index, key in enumerate(("taskset", "partition"), start=40):
+            with self.subTest(key=key):
+                run_id = f"20260815-1000000{index}-shadow-sol-static-r1"
+                record = self._imported(run_id)
+                record["config"] = {**record["config"], key: "holdout"}
+                record["tasks"] = holdout_task
+                with self.assertRaisesRegex(ArtifactError, "holdout"):
+                    artifacts._validate_record(record, run_id, self.root)
+                record["tasks"] = None
+                artifacts._validate_record(record, run_id, self.root)
+        # A seed row keeps its body-free per-sample projection.
+        run_id = "20260815-100000049-shadow-sol-static-r1"
+        seed = self._imported(run_id)
+        seed["config"] = {**seed["config"], "taskset": "seed", "partition": "seed"}
+        seed["tasks"] = [{"task_id": "seed-sample", "outcome": "allow"}]
+        artifacts._validate_record(seed, run_id, self.root)
 
     def test_shadow_rows_must_declare_their_source(self) -> None:
         run_id = "20260815-100000099-shadow-sol-static-r1"

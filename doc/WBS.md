@@ -22,7 +22,7 @@
 | P1 / M1 | B1、B2、B3 与 M1 已完成；冻结 Codex 与 RONDO 已在同一 TB 2.1 任务上完成真实端到端并归档。 |
 | P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。E-B8 公平比较设施已闭合（campaign schema v7），已通过 pure/fake/loopback 与无 API synthetic Docker 全 catalog 验收；尚无正式 v7 identity，也未跑新 campaign。E-A（A1—A7）随方向 1 一并挂起，不再作为交付项。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
-| 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。 |
+| 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | L1、L2a、CPU/CUDA model-free runtime、唯一 GGUF 静态完整性、12k model-backed qualification、L7、Local M3、L5a 与 **L3/L4 均已完成**，方向 2 在 P2 的剩余项已全部关闭。static payload v3、47/47 exact-token 普查、40 条 `gpt-5.6-sol` 教师标签与正式 Guardian 本地切换合同保持不变。未微调 Local-static baseline 已按冻结指标口径 `rondo_l4_local_static_v1` 发布（40/40 终态、教师一致 16/35、有效判定覆盖 87.5%、峰值显存 8,048,869,376 B）。下一工作包为 P3 的 L5b/L6。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |

@@ -82,7 +82,7 @@ eval-data/                             # git-ignored
 |---|---|
 | 取值 | `rondo-local` ｜ `rondo-multi`。**`codex` 不是产品取值** —— 冻结上游是比较侧，不是本项目的产品线 |
 | 适用范围 | 只在被评对象是本项目的 RONDO 产品时写。`side = "codex"`（冻结上游）与 `side = "sol-static"`（云端教师）等非本项目产品的行**不写 `product`**，读取方也不得为其推定产品身份 |
-| 历史解释 | 缺字段且 `side = "rondo"` 的历史行按 `rondo-local` 解释；缺字段且 `side = "codex"` 的行视为不适用。当前 `runs.jsonl` 的 244 条中，224 条 `side=rondo`（即 RONDO Local）、20 条 `side=codex`（冻结上游侧） |
+| 历史解释 | 缺字段且 `side = "rondo"` 的历史行按 `rondo-local` 解释；缺字段且 `side = "codex"` 的行视为不适用。当前 `runs.jsonl` 共 248 条：`track=tb` 的 244 条中 224 条 `side=rondo`（即 RONDO Local）、20 条 `side=codex`（冻结上游侧），另有 4 条 `track=shadow`（2 条 `sol-static`、2 条 `local-static`） |
 | 只加不改 | 历史结果**不改名、不回填新 schema**；新字段从后续 campaign 开始使用 |
 | 目录 | 历史 `bin/rondo/` 保持原名不动，等价于 `rondo-local`；Multi 新增 `bin/rondo-multi/`，必须显式带 `multi` 字样。`bin/codex/` 是冻结上游侧的 bundle，不参与产品身份维度 |
 | 落地位置 | `eval/rondo_eval/contracts.py` 的 `product_layout()` 是唯一映射：源码目录（`mydev` / `multidev`）、Cargo target 前缀、`bin/` 命名空间与 `models-manager/models.json` catalog 路径都从它派生 |
@@ -233,6 +233,11 @@ eval-data/                             # git-ignored
 
 - `source` ∈ `auto` ｜ `imported`，**shadow 行必填**，非 shadow 行不得携带。历史上不存在 shadow 行，
   所以校验直接要求该字段，不做默认推定。
+- 上表的 `side` → `source` 映射由统一结果校验强制：`sol-static` 只能是 `imported`，
+  `local-static` / `local-ft-static` 只能是 `auto`。**未在本表声明映射的 shadow side（含已退役的
+  `luna-static`）一律拒绝发布**，必须先在本节写清它的 source 与产品合同，不靠读取方推定。
+- `taskset = "holdout"`（shadow 行另按 `config.partition`）的行由统一校验强制 `tasks = null`，
+  见下文"隐藏集的特殊规则"；这条不依赖具体写入方自觉。
 - `source = "imported"` 时**必填**：`config.teacher_model`（生成时点的模型标识）、`config.generated_at`
   （生成日期）、`config.prompt_version` 与 `config.prompt_sha256`（所用冻结 prompt 的版本标识与内容哈希）。
 - `source = "imported"` 时下列运行字段无意义，**必须显式为 `null`，不得伪造**：`binary_sha256`、`metrics`、

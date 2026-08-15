@@ -59,6 +59,15 @@ _SIDES = {
     "shadow": {"luna-static", "sol-static", "local-static", "local-ft-static"},
 }
 _SHADOW_SOURCES = {"auto", "imported"}
+# doc/eval-data-layout.md section 4 fixes which side is a programmatic run and
+# which is an imported teacher batch.  A shadow side without a declared mapping
+# is refused rather than guessed: the retired `luna-static` has no rows, and a
+# future side has to be given a source and product contract in the spec first.
+_SHADOW_SOURCE_BY_SIDE = {
+    "sol-static": "imported",
+    "local-static": "auto",
+    "local-ft-static": "auto",
+}
 # An imported shadow row is a frozen teacher-label batch, not a run this
 # harness executed, so its evidence lives in the private teacher directory
 # instead of a run artifact tree.  See doc/eval-data-layout.md section 4.
@@ -717,6 +726,11 @@ def _validate_shadow_source(record: Mapping[str, Any]) -> None:
         return
     if source not in _SHADOW_SOURCES:
         raise ArtifactError("shadow run record source is invalid")
+    expected = _SHADOW_SOURCE_BY_SIDE.get(record.get("side"))
+    if expected is None:
+        raise ArtifactError("shadow side has no declared source mapping")
+    if source != expected:
+        raise ArtifactError("shadow run record source differs from its side")
     if source != "imported":
         return
     config = record.get("config")
@@ -730,6 +744,25 @@ def _validate_shadow_source(record: Mapping[str, Any]) -> None:
         raise ArtifactError("imported run record prompt hash is invalid")
     if record.get("binary_sha256") is not None or record.get("metrics") is not None:
         raise ArtifactError("imported run record fakes automated run fields")
+
+
+def _validate_hidden_set_projection(record: Mapping[str, Any]) -> None:
+    """Keep the hidden set hidden: a holdout row publishes summaries only.
+
+    Otherwise the holdout leaks one task at a time through the result index and
+    stops being hidden after a few rounds.  The rule is keyed on what the row
+    itself declares, so it holds for every track, not only the caller that
+    happens to build these rows today.
+    """
+
+    config = record.get("config")
+    if not isinstance(config, Mapping):
+        return
+    hidden = config.get("taskset") == "holdout" or (
+        record.get("track") == "shadow" and config.get("partition") == "holdout"
+    )
+    if hidden and record.get("tasks") is not None:
+        raise ArtifactError("holdout run record must not publish per-task results")
 
 
 def _validate_artifacts_reference(
@@ -805,6 +838,7 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
         not isinstance(tasks, list) or any(not isinstance(task, dict) or not task for task in tasks)
     ):
         raise ArtifactError("run record tasks must be a list of objects or null")
+    _validate_hidden_set_projection(record)
     if metrics is not None and not isinstance(metrics, dict):
         raise ArtifactError("run record metrics must be an object or null")
     if track == "tb" and metrics is not None:

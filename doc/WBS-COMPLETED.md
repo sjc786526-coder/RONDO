@@ -872,12 +872,16 @@ standard/Lite 形态均补回归。
   `binary_sha256`/`metrics`/`cost.actual_usd` 均为 `null`、不写 `product`、`artifacts` 指向冻结教师目录且
   不占用 run 工件树；`local-static` 行绑定未微调 GGUF、b10333 CUDA runtime、12,288/512 服务合同与资格身份。
   holdout 两条只有整批摘要、`tasks=null`；seed 两条保留不含正文的逐条投影，可独立重算公开结论。
-- **验证**：focused `test_shadow_replay` 41 项与直接受影响的既有
+- **统一门禁**：`artifacts.py` 强制 shadow 的 `side` → `source` 映射（`sol-static`=imported、
+  `local-static`/`local-ft-static`=auto，未声明映射的 side 一律拒绝）与 `holdout ⇒ tasks=null`，
+  两条都由负向 pure tests 覆盖，不依赖写入方自觉。发布对运行 harness commit 采用**祖先**绑定而非等值绑定：
+  运行时的 clean-tree 约束不变，但发布在结果与文档提交之后仍可离线重算，交付状态可复现同一 no-op。
+- **验证**：focused `test_shadow_replay` 44 项与直接受影响的既有
   `test_teacher_labels` / `test_local_approval` / `test_config_and_artifacts` /
   `test_terminal_bench_results` / `test_terminal_bench_pair` / `test_terminal_bench_baseline`
-  合计 **323 项通过、0 skip**；`uv lock --check` 85 packages 通过。重跑 publish 为幂等空操作
-  （0 条新记录、baseline SHA 不变）。真实模型生命周期 1 次；一次运行前的失败是 wrapper 相对路径调用
-  导致的 lease 拒绝，未启动模型。
+  合计 **326 项通过、0 skip**；`uv lock --check` 85 packages 通过。在最终交付 HEAD 上重跑 publish
+  为幂等空操作（exit 0、0 条新记录、baseline SHA 不变、账本仍 248 条）。真实模型生命周期 1 次；
+  一次运行前的失败是 wrapper 相对路径调用导致的 lease 拒绝，未启动模型。
 - **现场清理**：`server_stopped` / `port_released` / `receipt_cleared` / `gpu_released` 四项全 true，
   8080 空闲，无 llama-server 残留，显存回落到 1,498 MiB。
 - **数据边界**：逐条正文、模型原始 envelope、attempt 与全部 holdout 明细只在 ignored
