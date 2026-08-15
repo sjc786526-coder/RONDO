@@ -58,6 +58,19 @@ _SIDES = {
     "replay": {"codex", "rondo"},
     "shadow": {"luna-static", "sol-static", "local-static", "local-ft-static"},
 }
+_SHADOW_SOURCES = {"auto", "imported"}
+# An imported shadow row is a frozen teacher-label batch, not a run this
+# harness executed, so its evidence lives in the private teacher directory
+# instead of a run artifact tree.  See doc/eval-data-layout.md section 4.
+_IMPORTED_ARTIFACTS = re.compile(
+    r"eval-data/teacher-labels/[0-9]{8}-[a-z0-9][a-z0-9-]{0,63}\Z"
+)
+_IMPORTED_CONFIG_FIELDS = (
+    "teacher_model",
+    "generated_at",
+    "prompt_version",
+    "prompt_sha256",
+)
 _RECORD_FIELDS = {
     "schema_version",
     "run_id",
@@ -77,14 +90,21 @@ _RECORD_FIELDS = {
     "artifacts",
     "notes",
 }
-# Written only when the subject is a RONDO product, so historical rows and the
-# frozen-upstream side keep exactly the schema v1 field set they already have.
-_OPTIONAL_RECORD_FIELDS = {"product"}
+# `product` is written only when the subject is a RONDO product, and `source`
+# only on shadow rows, so historical rows and the frozen-upstream side keep
+# exactly the schema v1 field set they already have.
+_OPTIONAL_RECORD_FIELDS = {"product", "source"}
 _UPSTREAM_CODEX_IDENTITY = {
     "tag": "rust-v0.147.0",
     "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
     "workspace_lock_normalization": "135 workspace packages: 0.0.0 -> 0.147.0",
 }
+
+
+def upstream_codex_identity() -> dict[str, str]:
+    """Return the frozen upstream identity every tracked run record carries."""
+
+    return dict(_UPSTREAM_CODEX_IDENTITY)
 
 
 class ArtifactError(ValueError):
@@ -140,6 +160,7 @@ class ArtifactWriter:
         run_id: str,
         *,
         results_worktree_root: Path | None = None,
+        artifacts_reference: str | None = None,
     ):
         validate_run_id(run_id)
         self.paths = paths
@@ -150,7 +171,19 @@ class ArtifactWriter:
         self.journal = self.runs_root / f".{run_id}.publish.json"
         results_root = results_worktree_root or paths.worktree_root
         self.results = results_root / "eval" / "results" / "runs.jsonl"
+        # An imported row has no run artifacts of its own: it points at a
+        # frozen private batch this harness did not produce, so the publication
+        # is the record alone and no run tree is ever claimed for it.
+        if artifacts_reference is not None and not _IMPORTED_ARTIFACTS.fullmatch(
+            artifacts_reference
+        ):
+            raise ArtifactError("external artifact reference is invalid")
+        self.artifacts_reference = artifacts_reference
         self._started = False
+
+    @property
+    def external(self) -> bool:
+        return self.artifacts_reference is not None
 
     def start(self) -> "ArtifactWriter":
         self._validate_roots()
@@ -158,7 +191,8 @@ class ArtifactWriter:
         self._recover_pending_publications()
         self._assert_run_paths()
         self._assert_run_unclaimed()
-        self.staging.mkdir(mode=0o700)
+        if not self.external:
+            self.staging.mkdir(mode=0o700)
         self._started = True
         return self
 
@@ -180,6 +214,8 @@ class ArtifactWriter:
     def write_bytes(self, relative_path: str, contents: bytes) -> None:
         if not self._started:
             raise ArtifactError("artifact writer has not started")
+        if self.external:
+            raise ArtifactError("external artifact publications carry no run tree")
         if not isinstance(contents, bytes):
             raise ArtifactError("artifact contents must be bytes")
         self._assert_staging_tree()
@@ -206,12 +242,18 @@ class ArtifactWriter:
         if not self._started:
             raise ArtifactError("artifact writer has not started")
         self._validate_roots()
-        self._assert_staging_tree()
+        expected_reference = self.artifacts_reference or f"eval-data/runs/{self.run_id}"
+        if record.get("artifacts") != expected_reference:
+            raise ArtifactError("run record artifact reference is invalid")
         _validate_record(record, self.run_id, self.paths.common_root)
-        _validate_private_run_summary(self.staging, record)
         secret_bytes = _normalize_secrets(secrets)
         record_bytes = _encode_record(record)
-        tree_identity = _artifact_tree_identity(self.staging, secret_bytes)
+        if self.external:
+            tree_identity: dict[str, Any] | None = None
+        else:
+            self._assert_staging_tree()
+            _validate_private_run_summary(self.staging, record)
+            tree_identity = _artifact_tree_identity(self.staging, secret_bytes)
         _scan_bytes(record_bytes, secret_bytes, "tracked run record")
         _make_directories(self.results.parent, self.paths.common_root)
         lock_path = self.results.with_suffix(".jsonl.lock")
@@ -233,10 +275,11 @@ class ArtifactWriter:
                     index_before=index_before,
                     index_after=index_after,
                 )
-                _assert_artifact_tree_identity(self.staging, tree_identity)
-                os.replace(self.staging, self.target)
-                _fsync_directory(self.runs_root)
-                _assert_artifact_tree_identity(self.target, tree_identity)
+                if not self.external:
+                    _assert_artifact_tree_identity(self.staging, tree_identity)
+                    os.replace(self.staging, self.target)
+                    _fsync_directory(self.runs_root)
+                    _assert_artifact_tree_identity(self.target, tree_identity)
                 _atomic_replace_index(
                     self.results,
                     index_after,
@@ -247,6 +290,8 @@ class ArtifactWriter:
             finally:
                 _unlock(lock_handle)
         self._started = False
+        if self.external:
+            return self.paths.common_root / self.artifacts_reference
         return self.target
 
     def publication_started(self) -> bool:
@@ -261,11 +306,15 @@ class ArtifactWriter:
 
         if not self._started:
             return
-        self._assert_staging_tree()
+        if self.external:
+            self._assert_run_paths()
+        else:
+            self._assert_staging_tree()
         if _path_present(self.target) or _path_present(self.journal):
             raise ArtifactError("published artifact state cannot be aborted")
-        shutil.rmtree(self.staging)
-        _fsync_directory(self.runs_root)
+        if not self.external:
+            shutil.rmtree(self.staging)
+            _fsync_directory(self.runs_root)
         self._started = False
 
     def _validate_roots(self) -> None:
@@ -313,7 +362,10 @@ class ArtifactWriter:
         _assert_no_symlink_components(self.runs_root, self.staging)
 
     def _assert_publication_paths(self) -> None:
-        self._assert_staging_tree()
+        if self.external:
+            self._assert_run_paths()
+        else:
+            self._assert_staging_tree()
         if _path_present(self.target) or _path_present(self.journal):
             raise ArtifactError("artifact publication path appeared before publication")
         lock_path = self.results.with_suffix(".jsonl.lock")
@@ -339,7 +391,7 @@ class ArtifactWriter:
         self,
         record: Mapping[str, Any],
         *,
-        tree_identity: Mapping[str, Any],
+        tree_identity: Mapping[str, Any] | None,
         index_before: bytes,
         index_after: bytes,
     ) -> None:
@@ -350,13 +402,13 @@ class ArtifactWriter:
         value = {
             "schema_version": 2,
             "run_id": self.run_id,
-            "staging_name": self.staging.name,
+            "staging_name": None if self.external else self.staging.name,
             "results": results_relative,
             "index_temporary_name": _index_temporary_name(self.run_id),
             "index_before": _bytes_identity(index_before),
             "index_after": _bytes_identity(index_after),
             "record_identity": _bytes_identity(_encode_record(record)),
-            "tree_identity": dict(tree_identity),
+            "tree_identity": None if tree_identity is None else dict(tree_identity),
             "record": dict(record),
         }
         _write_private_json(self.journal, value)
@@ -397,7 +449,6 @@ class ArtifactWriter:
         if value["results"] != expected_results:
             raise ArtifactError("artifact publication journal targets another result index")
         staging_name = value.get("staging_name")
-        staged = self.runs_root / staging_name
         record = value["record"]
         _validate_record(record, run_id, self.paths.common_root)
         record_bytes = _encode_record(record)
@@ -411,13 +462,19 @@ class ArtifactWriter:
         index_before = value["index_before"]
         index_after = value["index_after"]
         target_present = _path_present(target)
-        staged_present = _path_present(staged)
         tree_identity = value["tree_identity"]
+        external = staging_name is None
+        staged = None if external else self.runs_root / staging_name
+        staged_present = staged is not None and _path_present(staged)
         if index_identity == index_after:
-            if not target_present or staged_present:
-                raise ArtifactError("published run has inconsistent recovery state")
-            _assert_artifact_tree_identity(target, tree_identity)
-            _validate_private_run_summary(target, record)
+            if external:
+                if target_present:
+                    raise ArtifactError("published run has inconsistent recovery state")
+            else:
+                if not target_present or staged_present:
+                    raise ArtifactError("published run has inconsistent recovery state")
+                _assert_artifact_tree_identity(target, tree_identity)
+                _validate_private_run_summary(target, record)
             _discard_index_temporary(self.results.parent / value["index_temporary_name"])
             journal.unlink()
             _fsync_directory(self.runs_root)
@@ -427,16 +484,20 @@ class ArtifactWriter:
         expected_after = index_bytes + record_bytes + b"\n"
         if _bytes_identity(expected_after) != index_after:
             raise ArtifactError("artifact publication journal index transition is invalid")
-        if target_present and staged_present:
-            raise ArtifactError("pending artifact publication has two artifact trees")
-        artifact_tree = target if target_present else staged
-        if not _path_present(artifact_tree):
-            raise ArtifactError("pending artifact staging directory is unavailable")
-        _assert_artifact_tree_identity(artifact_tree, tree_identity)
-        _validate_private_run_summary(artifact_tree, record)
-        if not target_present:
-            os.replace(staged, target)
-            _fsync_directory(self.runs_root)
+        if external:
+            if target_present:
+                raise ArtifactError("pending artifact publication has an unexpected run tree")
+        else:
+            if target_present and staged_present:
+                raise ArtifactError("pending artifact publication has two artifact trees")
+            artifact_tree = target if target_present else staged
+            if not _path_present(artifact_tree):
+                raise ArtifactError("pending artifact staging directory is unavailable")
+            _assert_artifact_tree_identity(artifact_tree, tree_identity)
+            _validate_private_run_summary(artifact_tree, record)
+            if not target_present:
+                os.replace(staged, target)
+                _fsync_directory(self.runs_root)
         _atomic_replace_index(
             self.results,
             expected_after,
@@ -634,6 +695,57 @@ def validate_record_product_contract(record: Mapping[str, Any]) -> None:
         raise ArtifactError("run record auto-review config differs from its product")
 
 
+def shadow_source(record: Mapping[str, Any]) -> str | None:
+    """Return the shadow provenance, or `None` for the other tracks."""
+
+    return record.get("source") if record.get("track") == "shadow" else None
+
+
+def _validate_shadow_source(record: Mapping[str, Any]) -> None:
+    """Split programmatic shadow runs from imported teacher labels by field.
+
+    `side` cannot carry this: the same teacher model could in principle also be
+    run programmatically, and an imported row must never be readable as an
+    automated result.  There is no historical shadow row, so the field is
+    required rather than defaulted.
+    """
+
+    source = record.get("source")
+    if record.get("track") != "shadow":
+        if source is not None:
+            raise ArtifactError("only shadow run records carry a source")
+        return
+    if source not in _SHADOW_SOURCES:
+        raise ArtifactError("shadow run record source is invalid")
+    if source != "imported":
+        return
+    config = record.get("config")
+    if not isinstance(config, Mapping):
+        raise ArtifactError("imported run record config is invalid")
+    for key in _IMPORTED_CONFIG_FIELDS:
+        value = config.get(key)
+        if not isinstance(value, str) or not value:
+            raise ArtifactError("imported run record teacher identity is incomplete")
+    if not re.fullmatch(r"[0-9a-f]{64}", config["prompt_sha256"]):
+        raise ArtifactError("imported run record prompt hash is invalid")
+    if record.get("binary_sha256") is not None or record.get("metrics") is not None:
+        raise ArtifactError("imported run record fakes automated run fields")
+
+
+def _validate_artifacts_reference(
+    record: Mapping[str, Any], run_id: str, common_root: Path
+) -> None:
+    reference = record.get("artifacts")
+    if shadow_source(record) == "imported":
+        if not isinstance(reference, str) or not _IMPORTED_ARTIFACTS.fullmatch(reference):
+            raise ArtifactError("run record artifact reference is invalid")
+    elif reference != f"eval-data/runs/{run_id}":
+        raise ArtifactError("run record artifact reference is invalid")
+    path = common_root / reference
+    if _path_present(path) and path.is_symlink():
+        raise ArtifactError("run record artifact reference is invalid")
+
+
 def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) -> None:
     if not isinstance(record, Mapping):
         raise ArtifactError("run record must be an object")
@@ -653,6 +765,7 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
     side = record.get("side")
     if track != match.group("track") or side != match.group("side") or side not in _SIDES[track]:
         raise ArtifactError("run record track or side is invalid")
+    _validate_shadow_source(record)
     validate_record_product_contract(record)
     created_at = record.get("created_at")
     if not isinstance(created_at, str) or not _TIMESTAMP.fullmatch(created_at):
@@ -671,15 +784,15 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
     digest = record.get("binary_sha256")
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ArtifactError("run record git commit is invalid")
-    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+    if digest is None:
+        if shadow_source(record) != "imported":
+            raise ArtifactError("run record binary sha256 is invalid")
+    elif not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise ArtifactError("run record binary sha256 is invalid")
     upstream_codex = record.get("upstream_codex")
     if not isinstance(upstream_codex, dict) or upstream_codex != _UPSTREAM_CODEX_IDENTITY:
         raise ArtifactError("run record upstream Codex identity is invalid")
-    expected = f"eval-data/runs/{run_id}"
-    artifact_path = common_root / expected
-    if record.get("artifacts") != expected or _path_present(artifact_path) and artifact_path.is_symlink():
-        raise ArtifactError("run record artifact reference is invalid")
+    _validate_artifacts_reference(record, run_id, common_root)
     if not isinstance(record.get("git_dirty"), bool):
         raise ArtifactError("run record git_dirty must be a boolean")
     config = record.get("config")
@@ -713,8 +826,16 @@ def _validate_record(record: Mapping[str, Any], run_id: str, common_root: Path) 
             raise ArtifactError("completed Terminal-Bench run requires tasks and external metrics")
         if track == "replay" and (tasks is not None or not metrics):
             raise ArtifactError("completed replay run requires metrics and null tasks")
-        if track == "shadow" and not metrics:
-            raise ArtifactError("completed shadow run requires metrics")
+        if track == "shadow":
+            if shadow_source(record) == "imported":
+                # Enforced as an identity above; repeated here so a completed
+                # imported row can never be read as an automated measurement.
+                if metrics is not None or cost["actual_usd"] is not None:
+                    raise ArtifactError("completed imported run fakes automated results")
+                if cost["estimated_usd"] != 0:
+                    raise ArtifactError("imported run record cannot carry a spend estimate")
+            elif not metrics:
+                raise ArtifactError("completed shadow run requires metrics")
 
 
 def _validate_terminal_bench_metrics(metrics: Mapping[str, Any]) -> None:
@@ -1028,7 +1149,7 @@ def _read_publication_journal(path: Path) -> dict[str, Any]:
     if path.name != f".{run_id}.publish.json":
         raise ArtifactError("artifact publication journal filename is invalid")
     staging_name = value.get("staging_name")
-    if (
+    if staging_name is not None and (
         not isinstance(staging_name, str)
         or Path(staging_name).name != staging_name
         or not staging_name.startswith(f".{run_id}.staging-")
@@ -1056,7 +1177,14 @@ def _read_publication_journal(path: Path) -> dict[str, Any]:
             or not re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])
         ):
             raise ArtifactError("artifact publication journal identity is invalid")
-    if not isinstance(value.get("tree_identity"), dict) or not isinstance(value.get("record"), dict):
+    tree_identity = value.get("tree_identity")
+    # A tree-free publication has neither a staging directory nor a tree
+    # identity; anything half-declared is a corrupted journal.
+    if (tree_identity is None) != (staging_name is None) or (
+        tree_identity is not None and not isinstance(tree_identity, dict)
+    ):
+        raise ArtifactError("artifact publication journal payload is invalid")
+    if not isinstance(value.get("record"), dict):
         raise ArtifactError("artifact publication journal payload is invalid")
     return value
 

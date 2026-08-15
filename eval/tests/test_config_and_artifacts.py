@@ -532,6 +532,7 @@ class ArtifactTests(unittest.TestCase):
                 paths = RepoPaths(root, root)
                 run_id = f"20260809-0000000{number}-shadow-{side}-r1"
                 record = self._record(run_id, track="shadow", side=side)
+                record["source"] = "auto"
                 record["tasks"] = None
                 record["metrics"] = {"agreement": 1.0}
                 record["product"] = "rondo-local"
@@ -560,6 +561,7 @@ class ArtifactTests(unittest.TestCase):
             with self.subTest(non_product_side=side):
                 run_id = f"20260809-0000000{number}-shadow-{side}-r1"
                 record = self._record(run_id, track="shadow", side=side)
+                record["source"] = "auto"
                 record["tasks"] = None
                 record["metrics"] = {"agreement": 1.0}
                 record["product"] = "rondo-local"

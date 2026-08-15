@@ -231,17 +231,26 @@ eval-data/                             # git-ignored
 | 程序化运行的本地被评方 | `local-static` / `local-ft-static` | `rondo-local` | `auto` |
 | 导入的教师标签 | `sol-static` | **不写**（教师不是本项目产品） | `imported` |
 
-- `source` ∈ `auto` ｜ `imported`，**shadow 行必填**。历史行没有该字段时按 `auto` 解释（历史上不存在导入行）。
+- `source` ∈ `auto` ｜ `imported`，**shadow 行必填**，非 shadow 行不得携带。历史上不存在 shadow 行，
+  所以校验直接要求该字段，不做默认推定。
 - `source = "imported"` 时**必填**：`config.teacher_model`（生成时点的模型标识）、`config.generated_at`
   （生成日期）、`config.prompt_version` 与 `config.prompt_sha256`（所用冻结 prompt 的版本标识与内容哈希）。
 - `source = "imported"` 时下列运行字段无意义，**必须显式为 `null`，不得伪造**：`binary_sha256`、`metrics`、
   `cost.actual_usd`。`cost.estimated_usd` 记 `0.0`（订阅制入口不额外计费）。
 - `git_commit` 对导入行记录**执行导入时**的 eval harness commit（谁做的导入），不是被测二进制的 commit；
   `git_dirty` 规则不变。
-- `artifacts` 对导入行指向冻结标签文件所在目录。
+- `artifacts` 对导入行指向冻结标签文件所在目录（`eval-data/teacher-labels/<batch_id>`）。导入行**不占用
+  `eval-data/runs/<run_id>` 工件树**：发布只写 record 本身，仍走同一把锁、同一份 journal 与同一套恢复语义。
 - `local-*` 两类当前只允许 `product = "rondo-local"`，且 `config.product` / `config.binary_product` 必须同值；
   不得携带 Terminal-Bench 的 `auto_review_config` 或 campaign 产品字段。将来若 Multi 也做影子横评，必须先在
   本节定义独立 side/产品映射和写入合同，不能让现有 Local side 直接声明 `rondo-multi`。
+- `local-*` 行的 `binary_sha256` 记录**被评本地模型 GGUF 的 SHA-256**：这条轨只回放 canonical static 合同，
+  没有 RONDO 二进制参与，写产品二进制哈希会是假证据。runtime、serve 合同、chat template 与资格身份写在
+  `config`（`runtime_identity_sha256` / `serve_config_sha256` / `request_contract_sha256` /
+  `chat_template_sha256` / `qualification_evidence_relative_path`）。
+- `source = "auto"` 的 shadow 行在 `config.metric_contract` 与 `config.metric_contract_version` 声明所用的
+  冻结指标口径；口径本身是 tracked 模板（首个为
+  `eval/templates/local-approval/l4-metric-contract-v1.json`），必须先于真实运行冻结。
 
 ### L5a 教师标签私有批次
 
