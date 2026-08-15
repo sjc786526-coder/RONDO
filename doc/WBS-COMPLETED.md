@@ -845,3 +845,43 @@ standard/Lite 形态均补回归。
   `eval/locks/local-approval-sol-teacher-labels-v1.json`。
 - **边界**：未运行 L3/L4、Local-static、本地模型、Docker、Cargo、API、训练、全量测试或 CI；未修改
   Guardian bridge、launcher、`mydev/`、`multidev/` 或 `eval/results/runs.jsonl`，未发布 shadow 结果。
+
+## WP3b-A6：L3/L4 未微调 Local-static baseline（Plan 033，2026-08-15）
+
+- **结论**：冻结的 40 条 `gpt-5.6-sol` 教师标签经严格导入后，在已资格化的 12k 本地服务上完成一次
+  Local-static 批量回放。40/40 样本首次尝试即进入唯一终态：`decided_allow` 16、`decided_deny` 19、
+  `structured_output_failed` 5、`timed_out` 0、`infra_failed` 0，定向重试 0 次。5 条结构化输出失败
+  全部撞上 512 输出上限并返回不合规 JSON，按 fail-closed 归档，不折算成模型 deny。
+- **指标口径先冻结再运行**：`rondo_l4_local_static_v1` 与 tracked 模板
+  `eval/templates/local-approval/l4-metric-contract-v1.json` 连同实现和 focused tests 先提交为
+  clean harness（`bbb572d`），真实回放从该 commit 启动，运行后只按同一口径填数。
+  主教师一致率固定为 `teacher_agreement / comparable_decision_count`，分母为 0 时写 `null`；
+  百分位固定为升序 nearest-rank `index = ceil(p/100*n)`。
+- **结果**：教师一致 16/35（seed 9/21、holdout 7/14），教师不一致 19；有效判定覆盖 35/40 = 87.5%；
+  fail-closed 5；本地判定分布 allow 16 / deny 19；P50/P95 延迟 8,335.01 / 25,758.68 ms；
+  input token P50/P95 8,827 / 11,103，output token P50/P95 92 / 512；峰值显存 8,048,869,376 B
+  （基线 1,629,487,104 B，delta 6,419,382,272 B，1,351 次设备级采样，窗口完整）。
+  服务返回的 input token 与冻结 census 40/40 逐条一致。
+- **重要口径边界**：该批教师标签**全部为 `allow`**（seed 24/0、holdout 16/0），因此本轮"教师一致率"
+  在数值上等于本地 allow 率，**不构成有区分度的审批质量信号**，只作为微调前的固定对照起点。
+  相对教师标签的差异一律称"教师不一致"，不称漏放/误拦；本轮不存在独立裁判结果。
+- **发布**：四条 shadow 记录 `20260815-082704844/845/846/847`（seed/holdout × `sol-static/imported`、
+  `local-static/auto`）与聚合 baseline
+  `eval/results/baselines/local-approval-unfinetuned-static-baseline-v1.json`（SHA-256
+  `ca0bbc21a24b23b607a1308462fcac16447d4577d779819e6c8f683bb09d4dcd`）。imported 行
+  `binary_sha256`/`metrics`/`cost.actual_usd` 均为 `null`、不写 `product`、`artifacts` 指向冻结教师目录且
+  不占用 run 工件树；`local-static` 行绑定未微调 GGUF、b10333 CUDA runtime、12,288/512 服务合同与资格身份。
+  holdout 两条只有整批摘要、`tasks=null`；seed 两条保留不含正文的逐条投影，可独立重算公开结论。
+- **验证**：focused `test_shadow_replay` 41 项与直接受影响的既有
+  `test_teacher_labels` / `test_local_approval` / `test_config_and_artifacts` /
+  `test_terminal_bench_results` / `test_terminal_bench_pair` / `test_terminal_bench_baseline`
+  合计 **323 项通过、0 skip**；`uv lock --check` 85 packages 通过。重跑 publish 为幂等空操作
+  （0 条新记录、baseline SHA 不变）。真实模型生命周期 1 次；一次运行前的失败是 wrapper 相对路径调用
+  导致的 lease 拒绝，未启动模型。
+- **现场清理**：`server_stopped` / `port_released` / `receipt_cleared` / `gpu_released` 四项全 true，
+  8080 空闲，无 llama-server 残留，显存回落到 1,498 MiB。
+- **数据边界**：逐条正文、模型原始 envelope、attempt 与全部 holdout 明细只在 ignored
+  `eval-data/local-approval/l3-replay-f747e9ed89e4694c/`（目录 0700、文件 0600）。tracked 结果与文档中
+  无 holdout 逐条身份、无 rationale/risk_tags、无 payload 正文。未运行 Docker、Cargo、云 API、16k、
+  L5b/L6 或全量 eval；未修改 `mydev/`、`multidev/`、runtime、GGUF、prompt、static 合同、资格 evidence
+  或 `rondo.local.toml`。

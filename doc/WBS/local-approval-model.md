@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-15 ｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-15（L3/L4 未微调 baseline 完成）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -130,6 +130,20 @@
   只保存在 ignored `eval-data/teacher-labels/20260815-sol-teacher-labels-v1/`，tracked body-free 锁为
   `eval/locks/local-approval-sol-teacher-labels-v1.json`。该批次已通过完整集合/身份/用途校验，
   `ready_for_l3=true`；标签是 Sol 蒸馏目标，不是人工 ground truth，holdout 仍严禁用于合成或训练。
+- **L3/L4 未微调 Local-static baseline 已完成**：Plan 033 严格导入上述冻结批次（复跑 Plan 032 verifier 并与
+  tracked 锁逐字节一致），在同一已资格化 12k 服务上用一次生命周期回放 40 条 canonical static payload v3。
+  40/40 首次尝试即进入唯一终态：allow 16、deny 19、结构化输出失败 5、超时 0、基础设施失败 0、重试 0；
+  5 条失败全部撞上 512 输出上限并返回不合规 JSON，按 fail-closed 归档，不伪装成模型 deny。
+  L4 指标口径在真实运行前冻结为 `rondo_l4_local_static_v1`（tracked 模板
+  `eval/templates/local-approval/l4-metric-contract-v1.json`）并先行提交。教师一致率只在合规判定间计算：
+  总体 16/35、seed 9/21、holdout 7/14，有效判定覆盖 35/40 = 87.5%，P50/P95 延迟 8,335 / 25,759 ms，
+  输出 token P50/P95 92 / 512，峰值显存 8,048,869,376 B（基线 1,629,487,104 B，1,351 次采样）。
+  服务返回的 input token 与冻结 census 40/40 完全一致。
+  **该批教师标签全部为 `allow`**，所以本轮"教师一致率"等价于本地 allow 率，尚不能区分"与教师一致"和
+  "倾向放行"；它只作为微调前的固定对照起点，不据此判断模型优劣。
+  四条 shadow 记录（seed/holdout × `sol-static/imported`、`local-static/auto`）与聚合 baseline
+  `eval/results/baselines/local-approval-unfinetuned-static-baseline-v1.json` 已发布；holdout 两条只有整批摘要、
+  `tasks=null`，逐条正文、模型原始输出与 holdout 明细只在 ignored 私有批次。
 - **角色顺序兼容已在 v3 关闭，并已由真实运行确认**：`developer` 消息在套用模板前被
   `map_developer_role_to_system` 统一改成 `system`；冻结 Ministral 模板规定 `assistant` 之后只能接
   `assistant`/`user`/`tool`、`tool` 之后只能接 `assistant`/`tool`/`user`，遇到 `system` 直接
@@ -167,9 +181,8 @@
 
 ### 当前推进顺序
 
-1. **下一工作是 L3/L4**：程序化批量运行 `Local-static`，导入 L5a 教师标签，固化指标口径，
-   得到未微调 baseline。
-2. 之后按 **L5b** 合成训练数据、L6 云 GPU LoRA 微调推进，最后是 **Local M4**。
+1. **下一工作是 L5b**：基于 `seed` 分区批量合成训练样本；holdout 仍禁止进入合成上下文、合成 prompt 与训练集。
+2. 之后按 **L6** 云 GPU LoRA 微调推进（三重授权门，必须单独申请），最后是 **Local M4**。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回

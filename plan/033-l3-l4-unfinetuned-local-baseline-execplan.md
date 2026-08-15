@@ -223,23 +223,37 @@ Ministral 12k 本地服务上，对完全对应的 canonical static payload v3 �
 
 ### 当前工作
 
-- Execplan 已制定；等待用户把执行提示词交给 Claude，按本计划在现有 Plan 033 worktree 实施。
+- 已完成。实现、focused tests、真实 40 条回放、结果发布与文档收口均已落地并提交在本 worktree 分支；
+  等待审查者独立验收。
 
 ### 本任务剩余步骤
 
-- 实现并测试严格 importer、Local-static runner、冻结指标合同与 shadow/publication 窄扩展。
-- 提交运行前 clean harness；在授权边界内完成真实 40 条模型回放、失败分类/允许重试、私有归档和现场清理。
-- 程序化生成四条 shadow 记录与聚合 baseline，复核 holdout 投影和幂等重算。
-- 更新本计划状态、WBS/WBS-COMPLETED、必要的数据布局与一份精炼日志，自审后只提交 worktree 分支。
-- 交给本计划审查者独立验收；不合并、不推送。
+- 无。已完成：严格 importer + Local-static runner + 冻结指标合同 + shadow/publication 窄扩展；
+  运行前 clean harness 提交（`bbb572d`）；真实 40 条回放；四条 shadow 记录与聚合 baseline 发布（`94492c5`）；
+  WBS / 子 WBS / WBS-COMPLETED / 数据布局与一份精炼日志更新。不合并、不推送。
 
 ### 阻塞项
 
-- 无。执行授权已由用户在 Plan 033 任务中明确给出。
+- 无。
 
 ### 当前验收状态
 
-- 仅完成规划与 worktree 准备；实现、focused tests、真实模型回放、结果发布和文档收口均未开始，不能表述为通过。
+- 运行前：focused `test_shadow_replay` 41 项与直接受影响的既有 teacher-label / local-approval /
+  artifact-result 测试合计 **323 项通过、0 skip**；`uv lock --check` 85 packages 通过。
+- 真实运行：1 个模型生命周期，40/40 首次尝试进入唯一终态（allow 16、deny 19、结构化输出失败 5、
+  超时 0、基础设施失败 0、重试 0）；峰值显存 8,048,869,376 B（基线 1,629,487,104 B、1,351 次采样、窗口完整）；
+  服务 input token 与冻结 census 40/40 一致；四项现场清理全 true。
+- 指标：教师一致 16/35（seed 9/21、holdout 7/14），教师不一致 19，有效判定覆盖 35/40 = 87.5%，
+  fail-closed 5，P50/P95 延迟 8,335.01 / 25,758.68 ms。**该批教师标签全部为 `allow`**，
+  故本轮一致率不构成有区分度的质量信号，只作固定对照起点。
+- 发布：四条 shadow 记录 `20260815-082704844/845/846/847` 与
+  `eval/results/baselines/local-approval-unfinetuned-static-baseline-v1.json`
+  （SHA-256 `ca0bbc21a24b23b607a1308462fcac16447d4577d779819e6c8f683bb09d4dcd`）。
+  重跑 publish 为幂等空操作；公开 seed 逐条投影可独立重算出 9/21。
+- 一次运行前失败：首次用相对路径调用 `with-build-lock.sh`，lease 校验要求 wrapper cmdline 含解析后的
+  绝对脚本路径，故被拒（`watchdog_unavailable`）；该次未启动模型、未创建私有目录、未动 GPU。
+- 现场限制（如实记录，未改动）：本机 WSL 的 `nvidia-smi --query-compute-apps` 始终返回空行，
+  因此"无外来 CUDA compute 进程"子检查实际空转；设备级 `memory.used` 采样正常。
 
 ### 交接边界
 
