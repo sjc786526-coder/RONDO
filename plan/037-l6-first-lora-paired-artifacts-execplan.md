@@ -26,11 +26,13 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 阶段二授权。
 
 - **阶段一：本地准备与审查。** 在不创建/启动/修改任何 RunPod 资源、不上传私有数据、不产生本任务云费用的前提下，
-  尽可能完成数据投影、token/template 检查、completion-only loss 测试、训练脚本与依赖冻结、启动/持久化/回收脚本、
-  本地可行的轻量 dry-run、RunPod body-free 容量/价格预案和 focused tests。完成后只提交任务 worktree，停止并交审。
+  尽可能完成数据投影、token/template 检查、completion-only loss 测试、候选 recipe/依赖锁/镜像方案、启动/持久化/
+  回收脚本、本地可行的轻量 dry-run、RunPod body-free 容量/价格预案和 focused tests。完成后只提交任务 worktree，
+  停止并交审。
 - **阶段二：RunPod smoke、正式训练与本地闭环。** 仅在新授权覆盖具体预算上限和远端动作后执行。允许真实 GPU/驱动、
   显存、镜像或 RunPod 环境暴露问题时做有原因的窄修和有界重跑；目标是减少可避免的云端调试，不是要求云端零试错。
-  若需要改变冻结 base、数据边界、核心路线、阶段二批准预算或启动第二个有效 recipe，必须停止并重新请求授权。
+  候选 recipe 可依据真实 optimizer smoke 做一次有证据的技术收敛，最终 recipe 在正式训练开始前冻结；若需要改变冻结
+  base、数据边界、训练目标、核心路线、阶段二批准预算或启动第二个质量 recipe，必须停止并重新请求授权。
 
 ### 最终完成/验收标准
 
@@ -42,10 +44,11 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
       token 计入 labels，非空 completion 不被全部 mask。
 - [ ] 真实 smoke 至少完成一个 optimizer step、保存 adapter 并在新进程或等强隔离后成功重载；本地不适合时可在
       阶段二 RunPod 完成。
-- [ ] 一个冻结 recipe 的正式 LoRA 训练有效完成；adapter、实际配置、依赖身份、聚合训练指标和训练 receipt 已在
-      RunPod 销毁前安全回收到 ignored 本地区域并复核哈希。
+- [ ] 一个冻结 recipe 的正式 LoRA 训练有效完成；adapter、必要 checkpoint、实际配置、依赖身份、聚合训练指标和
+      training receipt 已在 RunPod 销毁前保存并验真到本地 ignored 目录或阶段二明确批准的私有 HF repo，任务完成前
+      必须下载到本地 ignored 目录复核哈希。
 - [ ] RunPod 本任务累计实际费用不超过阶段二批准上限且绝不超过 25 USD、GPU Pod 并发始终为 1；任务结束时没有仍在
-      运行或持续计费的本任务计算/存储资源，所有 task-only 远端对象的最终状态均已确认。
+      运行的计算或未经授权持续计费的存储资源，所有 task-only 远端对象及获准保留资产的最终状态/费用均已确认。
 - [ ] 未微调与微调后两种本地工件来自同一官方 BF16 base lineage，且 b10333 能以同一 runtime、chat template、
       request、sampling、12,288 context、512 output 和 decision schema 合同串行加载。
 - [ ] 两侧对 frozen 130 条 synthetic validation 各形成 130 条且每样本唯一的最终记录；allow/deny、结构化失败、
@@ -62,13 +65,17 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 
 - [ ] train-only 投影、上传 allowlist/body-free manifest、470 条精确 token census、completion-only mask 和数据隔离
       focused tests 均已完成；validation/holdout 未进入训练准备输入。
-- [ ] 训练/转换/回收脚本、依赖与容器/镜像合同、冻结 recipe、输出目录和 receipt 结构已落地；无需真实 8B GPU 的部分
-      已用小 fixture、mock 或本机可承受的 dry-run 验证，未把它冒充真实 optimizer smoke。
+- [ ] 训练/转换/回收脚本、候选 recipe、候选依赖锁与容器/镜像方案、输出目录和 receipt 结构已落地；明确哪些参数/依赖
+      允许依据阶段二真实 smoke 做技术收敛。无需真实 8B GPU 的部分已用小 fixture、mock 或本机可承受的 dry-run 验证，
+      未把它冒充真实 optimizer smoke。
 - [ ] 已形成可执行的 RunPod 启动包与 train-only 上传包，记录精确文件清单/哈希；数据传输、模型定版下载、日志监控、
       adapter 回收和任务 Pod 终止路径均已说明并可在阶段二直接操作。
-- [ ] 基于阶段一结束时 RunPod 只读容量/价格/可用余额事实，给出候选单 GPU、容器/卷大小、强制最长运行时间、预计/
-      最坏费用、重试余量、止费点和建议的阶段二授权上限；控制面无法读取可用余额时明确记录，留待阶段二授权时由用户
-      确认。若无法把最坏费用控制在 25 USD 内，应在此处报告而非创建 Pod。
+- [ ] 基于阶段一结束时 RunPod 只读容量/价格/可用余额事实，汇报建议显卡、显存、选择理由、单价、容器/卷大小、smoke/
+      训练/转换/回收各段预计时长、总预计与最坏运行时长、最坏费用、重试余量、止费点和建议的阶段二授权上限；控制面
+      无法读取可用余额时明确记录，留待阶段二授权时由用户确认。若无法把最坏费用控制在 25 USD 内，应在此处报告而非
+      创建 Pod。
+- [ ] 若建议使用私有 HF 产物仓或 RunPod task-only template、registry credential、volume/network volume，阶段一报告
+      必须说明用途/收益、准确对象、生命周期、费用与风险；未列入阶段二授权的对象不得创建。
 - [ ] focused tests、preflight、敏感/大文件与 `git diff --check` 通过；工作树提交后停止，明确列出未运行的真实 smoke、
       正式训练与 130 条本地输出，等待用户阶段二授权。
 
@@ -92,8 +99,11 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 - 阶段二新授权后的任务专用 RunPod 单 GPU Pod 生命周期（任一时刻至多一个），以及授权中列明的 train-only 上传、
   短 smoke、一次有效正式训练、必要转换、产物回收和 task-only 资源终止；可在普通技术失败后做有原因的窄修重试，
   必要时可在先终止失败 Pod 后创建替代 Pod，但预算和单并发边界不变。
-- Hugging Face 仅可作为冻结官方 base/tokenizer 的只读下载来源；不得使用 HF repo/Jobs/Inference Endpoint 承载
-  本任务数据、产物、smoke、训练、转换或推理，也不得创建/修改 HF 远端资产。
+- 阶段二授权中逐项列明的 task-only RunPod template、私有 registry credential、volume/network volume；默认只建 Pod，
+  阶段一说明具体用途/收益并由用户批准后即可采用。
+- Hugging Face 可作为冻结官方 base/tokenizer 的只读来源；阶段二也可在当前 namespace 创建一个私有 model repo，
+  仅持久化本任务生成的模型/adapter/必要 checkpoint、转换工件、实际配置、聚合指标、manifest 和 receipt。HF 不得承担
+  smoke、训练、转换或推理，不得上传 train、validation、holdout、真实数据或本地逐样本输出。
 
 ### 不允许修改
 
@@ -102,7 +112,7 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 - `training/local-approval-synthetic-v1/train.jsonl`、`validation.jsonl`、manifest、schema/prompt/data card 等 L5b
   frozen 资产；Plan 032/033/034/036 历史 plan 的稳定正文。
 - Codex/llama.cpp 上游基线、宿主机或全局工具链、CI/PR、公开 Hub/RunPod 资产、长期在线服务、定时任务或
-  Inference Endpoint；不得创建 RunPod Serverless endpoint、cluster 或与本任务无关的 volume/template。
+  Inference Endpoint；不得创建 RunPod Serverless endpoint、cluster 或阶段二授权清单外的 volume/template/credential。
 - 主工作区已有 tracked 文件、两份未跟踪 `doc/research/RONDO Multi*.md`、其他 worktree 与来源不明的既有
   ignored 资产。
 
@@ -137,11 +147,13 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
    与 SHA-256 `74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56`，不得从远端 `main`
    静默解析任一资产。
 2. 所有训练输入必须用正式模板与 tokenizer 精确渲染/计数；若序列超出 recipe 上限，先调整合法 recipe 或定位数据，
-   不得静默 truncate。是否 packing、rank、target modules、学习率、batch、累积、epoch/max steps 由执行者根据真实显存
-   和 smoke 决定并在正式提交前冻结。
+   不得静默 truncate。阶段一形成 packing、rank、target modules、学习率、batch、累积、epoch/max steps、量化方式和
+   依赖组合的候选方案；阶段二真实 optimizer smoke 后可依据显存与兼容性做一次有证据的技术收敛，并在正式训练开始前
+   冻结最终 recipe/依赖。该收敛不得改变 base、训练数据、completion-only 目标或演变为第二套质量 recipe。
 3. 正式训练前必须以真实 optimizer step + adapter reload 证明数据映射、completion-only mask、模型/PEFT 组合和持久化
    路径成立。普通依赖、OOM、映射、target module、保存或基础设施问题先根因定位、窄修后合理重试，不因第一次失败
-   结束；不得无差别重放同一失败命令。
+   结束；不得无差别重放同一失败命令。成功 smoke 前为使同一候选路线跑通所需的普通窄修不按“第二 recipe”计数；
+   最终 recipe 一旦进入正式训练便不得再以质量为由改配重训。
 4. “一个有效正式训练”以 frozen recipe 对声明的 470 条 train universe 完成预定训练、产出可重载 adapter 且训练
    receipt/指标持久化为准。达到该状态后禁止因 loss、validation 或主观质量不满意再跑第二个 recipe；此前因明确技术
    失败产生的有界重试不视为第二个有效 recipe，但必须计入费用和记录根因。训练 receipt 至少绑定 base/tokenizer/
@@ -152,10 +164,11 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 
 1. **阶段一禁止云端变更。** 可只读查询 RunPod 文档、GPU catalog/capacity/价格和现有本任务相关状态以形成预案，但
    不得调用 create/start/stop/restart/delete，不得创建 Pod/volume/template/registry credential，不得上传 train 或其他
-   文件，也不得产生本任务费用。阶段一结束必须提交并停下，由用户/审查者先验收。
-2. **阶段二只使用 RunPod。** 用户另行批准阶段一结果和具体预算上限后，才可按需创建任务专用单 GPU Pod（任一时刻
-   至多一个），完成真实 smoke、一次有效正式训练、必要转换和产物回收。不得使用 HF Jobs 或切换其他计算供应商；
-   H100、多 GPU、第二个
+   文件，也不得创建/修改 HF repo 或产生本任务费用。阶段一结束必须提交并停下，由用户/审查者先验收。
+2. **阶段二计算只使用 RunPod。** 用户另行批准阶段一结果和具体预算上限后，才可按需创建任务专用单 GPU Pod（任一时刻
+   至多一个），完成真实 smoke、一次有效正式训练、必要转换和产物回收。默认远端对象只有 Pod；阶段一说明并由阶段二
+   授权逐项列明时，可创建 task-only template、私有 registry credential 或临时 volume/network volume，以及一个私有
+   HF model repo 作为非计算持久化目标。不得使用 HF Jobs/Endpoint/Space 计算或切换其他计算供应商；H100、多 GPU、第二个
    有效 recipe、公开资产或预算扩张均需新授权。普通依赖、镜像、驱动、OOM、脚本、保存或临时网络问题可先定位、窄修
    并在批准预算内合理重试，不要求云端零试错，也不得无差别重复同一失败操作。
 3. 阶段一必须用 live 价格和容量形成 body-free 预算表；阶段二创建 Pod 前再复核 GPU、实际单价、磁盘/卷费率、强制
@@ -164,13 +177,21 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
    批准额和当时确认的可用余额三者中最小值，并在其中保留完成回收/止费所需余量；任何时刻只允许一个本任务单 GPU Pod。
    若“已花费 + 当前运行保守上界 + 完成所需最坏费用”接近有效上限、余量不足以安全完成，应在越线前保存可恢复状态、
    止费并及时报告，不能靠余额耗尽自动停机。
-4. Pod 创建后立即报告一次 Pod ID、GPU/单价、强制最长运行时间和当时最坏费用。执行者必须在同一活动任务中持续主动
-   读取 container/system logs、Pod 状态和阶段性 billing，及时识别无进展、反复崩溃、OOM、错误数据/recipe 或费用偏离；
-   训练较长时以合理间隔继续监控，不得把“已创建/已提交”当作完成，也不得无人看守地长期计费。
-5. 远端数据和产物必须私有。训练数据外发仍限 470 train allowlist。终止 Pod 前先把 adapter、必要 checkpoint、实际
-   配置/依赖、聚合指标和训练 receipt 回收到主工作区 ignored 任务目录并验证哈希。`stop` 只作为临时止 GPU 费/保数据
-   手段，最终在回收验证后应终止/删除**仅本任务创建的**临时 Pod 与
-   不再需要的 task-only 临时存储，确认不再计费；不得删除用户既有 Pod/volume/资产或来源不明对象。
+4. **阶段二付费动作前先报告。** 阶段一交审报告必须列出拟选显卡/显存、选择理由、live 单价、smoke/正式训练/转换/
+   回收的预计分段时长、总预计与最坏运行时长、磁盘/volume 费用、最坏总费用和止费点，用户据此批准阶段二。真正创建
+   资源前再次复核；若显卡、价格、时长、附属对象或最坏费用相对批准内容有实质变化，先报告更新并等待确认。Pod 创建后
+   再报告 Pod ID 与实际单价，然后在同一活动任务中持续主动读取 container/system logs、Pod 状态和阶段性 billing，及时
+   识别无进展、反复崩溃、OOM、错误数据/recipe 或费用偏离；不得把“已创建/已提交”当作完成。
+5. **存储费用单列。** RunPod network volume 费用计入 25 USD RunPod 总上限，并按阶段一确认的容量、tier、费率和预计
+   保留时长单独列项；默认在产物另有验真副本后删除 task-only 临时 volume，若要长期保留必须再授权持续费用。HF 私有
+   repo 创建本身不等于已确认免费：阶段一须只读核对账号类型、现有私有存储用量、预计上传量和是否落在 included quota。
+   若会触发 HF 订阅、pay-as-you-go 或任何新增费用，实际创建/上传前必须单独说明金额和计费周期并取得新授权；未获该
+   授权时 HF 本任务新增实际费用必须为 0 USD，且不得用 RunPod 的 25 USD 余额概念掩盖 HF 的独立账单。
+6. 远端数据和产物必须私有。RunPod 训练输入仍限 470 train allowlist；HF repo 只接收阶段二批准的任务生成工件 allowlist，
+   不得接收 train/validation/holdout/真实数据或本地逐样本输出。终止 Pod 前，adapter、必要 checkpoint、实际配置/依赖、
+   聚合指标和 training receipt 必须至少在本地 ignored 目录或已批准的 HF 私有 repo 有一份哈希验真的持久副本；任务完成
+   前再下载到本地复核。`stop` 只作为临时止 GPU 费/保数据手段，最终应终止/删除**仅本任务创建的**临时 Pod、template、
+   credential 与不再需要的 volume，确认不再计费；获准保留的 HF 私有产物仓不删除，不得触碰用户既有远端资产。
 
 ### 3.4 成对本地工件与 130 条输出
 
@@ -194,9 +215,9 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 1. 下载/转换前重新读取 Windows `C:` 实际余量、项目占用和预计峰值；不得用 WSL 虚拟余量满足门禁。保持 Docker、
    重型 Cargo 与真实本地模型加载互斥；本任务无必要不运行 Docker/Cargo。容量不足或无法读取宿主实际余量时停止重型
    本地步骤，不靠删除来源不明资产腾空间。
-2. 不调用 Sol、Opus 或任何真实模型 API；RunPod 控制面只用于对应阶段已授权的操作。HF 控制面不得用于计算，且
-   `hf auth token`、token/secret 搜索或打印始终禁止；模型推理只在阶段二任务 Pod 的 smoke/训练辅助步骤或冻结
-   b10333 本地服务中进行。
+2. 不调用 Sol、Opus 或任何真实模型 API；RunPod 控制面只用于对应阶段已授权的操作。HF 控制面不得用于计算，私有 repo
+   也只能执行阶段二批准的 create/upload/readback；HF 凭据只经现有安全登录或 secret 注入传递，`hf auth token`、token/
+   secret 搜索或打印始终禁止。模型推理只在阶段二任务 Pod 的 smoke/训练辅助步骤或冻结 b10333 本地服务中进行。
 3. linked worktree 不共享 ignored 数据。tracked 代码与文档只在本 worktree 修改；真实模型、runtime、private output
    和 receipt 使用明确的主工作区任务目录，不建 symlink、不把 ignored 正文复制进 Git，也不修改主工作区 tracked 文件。
 4. 权重、adapter、checkpoint、原始输出、私有 receipt、密钥、机器配置和云端身份信息不得进入 Git。私有目录 0700、
@@ -215,13 +236,19 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 - 阶段一尽量用 5—10 条 train、同格式小模型或 mock 完成不会误导的 pipeline dry-run；当前机器为 RTX 4060 Laptop
   8GB，若完整 BF16/真实 adapter optimizer step 明显不适合本机，则把真实 smoke 留给阶段二 RunPod，不为本地绿色而
   换底模或改训练合同。
+- 阶段一只需把最可能成功的候选 recipe/依赖/镜像和备选技术参数准备清楚；阶段二 smoke 才是 target modules、batch、
+  量化方式和真实依赖兼容性的最终证据。允许据此做一次集中技术收敛，正式训练启动才是最终冻结点。
 - 优先让一个 RunPod Pod 顺序完成短 smoke、正式训练和必要转换，以减少反复拉模型/启动；若实际兼容性或持久化风险令
   拆分更稳妥，也可在同一阶段二预算内有理由地调整。GPU 型号、镜像、磁盘和最长运行时间以阶段一结束时的 live
   RunPod 事实为准，不在计划里预先锁死。
+- 默认保持远端对象最少；若 task-only template、registry credential 或 network volume 能减少重复启动/下载或保护
+  checkpoint，可采用阶段一说明、阶段二列名授权的方案。标准 network volume 优先，高性能 tier 只有在 I/O 证据与预算
+  支持时使用；任务结束默认删除临时 volume，不把 RunPod 当长期仓库。
 - 阶段一应把 train bundle 和脚本真正准备到可传输状态，并先验证传输/启动方案；但不要求为了“零云端调试”在本机
   下载不必要的完整 BF16 权重。HF 只读下载必须指定 revision 与文件范围，禁止静默使用远端 main。
-- 数据和产物传输可按实际网络与工具选择 RunPod 官方支持的 `runpodctl`、SCP/rsync 或等强私有路线；阶段一应固定命令
-  形态与目标路径，阶段二对传输前后文件做哈希核对，不需要为此建设通用对象存储层。
+- 数据和产物传输可按实际网络与工具选择 RunPod 官方支持的 `runpodctl`、SCP/rsync、network volume 的 S3-compatible
+  接口或已批准的私有 HF repo；阶段一应固定命令形态、allowlist 与目标路径，阶段二对传输前后文件做哈希核对，不需要
+  为此建设通用对象存储层。
 - TRL/Transformers/PEFT、量化训练、Trackio、checkpoint 频率和内部监控 split 均由执行者选择。Trackio 私有配置不顺时，
   使用 Pod 日志加私有聚合指标文件即可。
 - b10333 实际支持且最简时优先 adapter on/off；若 loader/转换兼容性不稳定，可从同一 BF16 谱系用完全相同的 converter、
@@ -249,17 +276,23 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
   Windows `C:` 实际余量和项目峰值。
 - RunPod MCP 已启用且凭据由 MCP 脱敏管理；已确认存在 Pod create/get/list/stop/delete、live logs、billing、capacity 等
   工具，runpod-docs 文档查询也可用。当前只完成工具能力只读核对，未读取/打印密钥，未创建、修改或删除任何云端资源。
-- Hugging Face 只保留冻结官方模型/tokenizer 的只读来源角色；本计划不允许 HF 数据/产物上传、远端资产变更或计算。
+- 用户已原则允许阶段二使用一个私有 HF model repo 保存权重/任务产物，并允许使用 RunPod network volume；具体 repo、
+  volume 容量/tier、上传 allowlist、生命周期和费用仍必须由阶段一汇报并纳入阶段二逐项授权。HF 始终不得承担计算。
+- 规划时官方公开费率显示：RunPod 标准 network volume 在 1 TB 内为 0.07 USD/GB/月且按小时计费；HF 按账号总私有存储
+  用量而非单仓收费，Free user/org 含 100 GB，PRO 含 1 TB，付费账号超 included quota 的基准价为 18 USD/TB/月。
+  参考 `https://docs.runpod.io/pods/pricing#storage-pricing` 与 `https://huggingface.co/docs/hub/storage-limits`。以上只作规划
+  快照，实际账号类型/已用 quota、高性能 volume 价格和资源创建时 live 费率仍须重查。
 
 ### 当前工作
 
-- execplan 已按 RunPod-only 与两阶段授权要求修订；等待执行者仅接管阶段一本地准备。
+- execplan 已按 RunPod-only 计算、两阶段授权和条件式持久化/附属资源要求修订；等待执行者仅接管阶段一本地准备。
 
 ### 本任务剩余步骤
 
-- **阶段一：**执行者接管 worktree，落地最小训练/输出设施与 focused tests，冻结 train-only 投影、token/template、
-  recipe、依赖、上传清单、RunPod 执行/回收方案和 body-free 预算预案；只提交任务分支后停止交审。
-- **授权门：**用户/审查者验收阶段一提交，并另行明确批准 RunPod 资源创建、train-only 上传、付费动作和具体预算上限。
+- **阶段一：**执行者接管 worktree，落地最小训练/输出设施与 focused tests，冻结 train-only 投影与 token/template，
+  准备候选 recipe/依赖/镜像、上传清单、RunPod 执行/回收方案和 body-free 预算预案；只提交任务分支后停止交审。
+- **授权门：**执行者先汇报拟选显卡、分段/总预计时长、最坏费用、network volume/HF repo 等拟建对象与费用；用户/审查者
+  验收阶段一提交后，再逐项批准 RunPod 资源创建、train-only 上传、HF 产物仓、付费动作和具体预算上限。
 - **阶段二：**完成真实 optimizer smoke、一次有效正式训练、产物回收；再形成同源本地 pair，完成两侧 130 条运行、
   pair receipt 和 Plan 036 正式导入。
 - 完成 focused/real preflight、清理、权威文档/日志同步、diff 审查和任务分支本地提交，交给独立审查者。
@@ -285,7 +318,7 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 | 编号 | 决策 | 原因 | 影响范围 | 状态 |
 |---|---|---|---|---|
 | 001 | Plan 037 从本地 `main@8250c4d` 建独立 worktree，只提交任务分支 | 保护主工作区未知修改并遵循仓库交付流程 | Git / worktree | 已采纳 |
-| 002 | RunPod 是唯一训练/转换云后端；HF 只可作冻结官方资产只读来源 | 用户指定 RunPod 余额承担本任务，并减少不必要的第二远端状态面 | 云端执行 | 已采纳 |
+| 002 | RunPod 是唯一训练/转换计算后端；HF 可作冻结官方资产来源及阶段二批准的私有产物仓 | 保持计算归因单一，同时允许先远端持久化降低 Pod 等待和产物丢失风险 | 云端执行 | 已采纳 |
 | 003 | 官方 BF16 revision、冻结 tokenizer 文件和现有官方 chat template lock 分别显式绑定 | 训练与 b10333 推理不能静默消费远端 main 或旧 GGUF 内嵌模板 | 模型身份 | 已采纳 |
 | 004 | adapter on/off 与成对 GGUF 均保留，由 b10333 实际兼容性决定 | 两条路线都能满足同源公平比较，预先写死会增加失败面 | 本地 pair | 已采纳 |
 | 005 | 用 train-only allowlist + body-free manifest + focused tests 证明隔离，不建设复杂审计系统 | 这是阻断 validation/holdout 外发和训练泄漏的最小充分设施 | 数据边界 | 已采纳 |
@@ -293,3 +326,5 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 | 007 | tracked 工作留在 worktree，模型/输出等 ignored 实物使用主工作区明确任务目录 | linked worktree 不共享 ignored 资产，现有 b10333 和 GGUF 也在主工作区 | 文件布局 | 已采纳 |
 | 008 | 任务以阶段一“本地准备并停下交审”和阶段二“另行授权后 RunPod 执行”分门 | 尽量在计费前消除可本地发现的问题，同时保留真实云环境下合理窄修空间 | 授权 / 成本 | 已采纳 |
 | 009 | Pod 运行期间由同一活动任务持续读取日志、状态和 billing，回收验真后终止 task-only Pod | 长训练不能以已提交代替完成，且 stop 后仍可能存在存储费 | 监控 / 止费 | 已采纳 |
+| 010 | 阶段一只形成候选 recipe/依赖/镜像；真实 smoke 后允许一次有证据的技术收敛，正式训练启动前冻结 | 本地无法证明真实 target modules、显存和云端依赖兼容性 | 训练 recipe | 已采纳 |
+| 011 | 私有 HF 产物仓与 task-only template/credential/network volume 可选，阶段一说明、阶段二逐项授权并单列费用 | 保留更稳妥的启动与持久化路线，同时避免无边界远端状态 | 远端资产 | 已采纳 |
