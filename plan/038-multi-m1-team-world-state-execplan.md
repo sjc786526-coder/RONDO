@@ -163,41 +163,51 @@
 
 - 已阅读根 `AGENTS.md`、`README.md`、顶层 WBS、方向 3 子 WBS、计划模板、M-0 计划与相关验收日志。
 - 已只读核对 `AgentControl`/registry/residency、V2 `wait_agent`、session sampling/retry、history/compaction 与现有
-  集成测试接缝；未替执行者锁定具体实现。
+  集成测试接缝。
 - 已从干净 `main@53fbb58b` 创建本专用 worktree 和短期本地分支；未进入或读取 L6 工作树内容。
-- 已建立本 ExecPlan；尚未修改产品源码或运行 Rust 构建/测试。
+- 已建立本 ExecPlan。
+- **M-1 实现已完成**：新增领域 crate `codex-team-state`（canonical store、双生命周期、活动视图、
+  增量/幂等/陈旧 mutation、唤醒账本、有界历史、request-only 投影渲染与预算），并接入真实产品运行面
+  —— `AgentControl` 持有团队实例、`Session::new` 从权威身份注册参与者、`team_publish`/`team_update`/
+  `team_history` 三个模型可见工具、`session/turn.rs` 的 per-sampling 快照与尾部挂载、
+  `wait_agent` 的团队唤醒、`TeamProtocolState` 稳定指令前缀。
+- 已加 `features.multi_agent_v2.team_state_enabled`（默认关闭）并重新生成 `config.schema.json`。
+- 已完成领域单测 36 项、`codex-core` 集成用例 5 项，以及格式化、定向 lint 与受影响 package 测试。
+- 已写入精炼 `agent_log/2026-08-16-034500-plan038-multi-m1-team-world-state.md`。
 
 ### 当前工作
 
-计划已就绪，等待执行者在本工作树内实施 M-1。
+实现与定向验证已结束，成果已提交在本工作树分支，等待独立审查者验收。
 
 ### 本任务剩余步骤
 
-1. 基于实时调用链确定最小架构与身份/能力边界，先用定向测试表达核心领域不变量、并发、幂等和陈旧 mutation。
-2. 实现 canonical TeamState、Event/Version、双生命周期、活动视图及有界历史查询，并接入实际 model-visible mutation
-   工具/内部 API。
-3. 把团队变化接入 Root wait 的无丢失唤醒，把团队实例和成员身份接入 spawn/residency reload 生命周期。
-4. 把稳定协议和 request-only Active World Index 接入 sampling；完成 retry snapshot、budget/overflow、compaction
-   与 history/rollout 不持久化验证。
-5. 固化完整 Root/child 产品纵切及发布先/后等待、重试、并发、陈旧视图、近窗口和 reload 等定向用例。
-6. 运行格式化、受影响 package 的 lint/fix 和定向测试；审查 diff、资源和生成物，更新精炼 log/plan/WBS，
-   提交工作树并停止。
+无。后续动作（合并、推送、顶层 WBS 同步）不在本任务授权内，交给审查与最终集成。
 
 ### 阻塞项
 
-无产品或外部前置阻塞。L6 是受保护的并行任务：遇到共享构建锁时等待；遇到共享 WBS 并行修改时延后顶层同步，
-均不构成修改 L6 或扩大权限的理由。
+无产品阻塞。两项环境限制已如实记录、未绕过：
+
+1. `codex-code-mode-host` 依赖的 V8 预编译包在本机下载 404，因此 code-mode 相关测试无法在此环境运行。
+2. 本机全局 `HTTP(S)_PROXY`/`ALL_PROXY` 会拦截 wiremock 的 loopback 请求；所有测试在剥离代理变量的
+   环境下运行，与仓库既有 `eval-*` 配方做法一致。
+
+L6 仍有 12 个未合并提交且改动了 `doc/WBS.md` 与 `doc/WBS-COMPLETED.md`，因此顶层同步按计划延后。
 
 ### 当前验收状态
 
 - ExecPlan：已建立并完成自审。
-- M-1 实现与测试：未开始。
-- Docker、真实 API、本地模型、全 workspace 测试：未授权且不属于本任务。
+- M-1 实现与测试：已完成。领域单测 36/36、M-1 集成用例 5/5、`codex-team-state` + `codex-features`
+  69/69 全部通过；`just test -p codex-core -p codex-rmcp-client` 3454/3539 通过，85 项失败全部为
+  code-mode host/工作区二进制/真实网络三类环境限制，与本次改动模块无交集（未做基线对比运行）。
+- 格式化与 lint：`just fmt`、`just fmt-check`、`just fix -p codex-core -p codex-team-state` 均通过。
+- 文档：M-1 精炼 log 与本计划已更新；`doc/WBS/multi-agent-trusted-evidence.md` 已按实际状态同步。
+- 顶层 `doc/WBS.md` / `doc/WBS-COMPLETED.md`：按决策 005 明确延后。
+- Bazel 校验、全 workspace 测试、Docker、真实 API、本地模型：未运行，不属于本任务。
 
 ### 交接边界
 
-- 执行者只在本工作树完成、提交并停止；独立审查者将对照本计划、实时 WBS、代码 diff、定向测试和现场状态验收。
-- 本任务完成后冻结本计划；M-2 及以后路线只链接 `doc/WBS/multi-agent-trusted-evidence.md`，不在此继续规划。
+- 执行者已在本工作树完成、提交并停止；独立审查者将对照本计划、实时 WBS、代码 diff、定向测试和现场状态验收。
+- 本计划自此冻结；M-2 及以后路线只链接 `doc/WBS/multi-agent-trusted-evidence.md`，不在此继续规划。
 
 ## 6. 关键决策记录
 
@@ -211,3 +221,10 @@
 | 004 | 使用真实 Multi 运行面加无 API fake/loopback provider 作为 M-1 产品链证据 | 能验证 Agent/session/wait/sampling 接缝，又不需要未授权真实 API | 集成验收 | 已采纳 |
 | 005 | L6 未合并或共享文件有并行修改时，不强行同步顶层 WBS/WBS-COMPLETED | 保护并行任务；M-1 专用源码、plan、log 和子 WBS 可独立审查 | 文档交付 | 已采纳 |
 | 006 | 普通窄失败允许执行者自行修复和定向重跑，原则性边界与持续资源阻塞才停下汇报 | 避免把可恢复的小问题误当阻塞，同时保留安全和授权边界 | 执行流程 | 已采纳 |
+| 007 | 团队领域独立为 `codex-team-state` crate，只依赖 `codex-protocol`，不进 `codex-core` | 不变量与并发语义可单独测试，也不给已经臃肿的 core 增重 | `multidev/` 架构 | 已采纳 |
+| 008 | 团队状态挂在 `AgentControl` 上 | 它本来就是每个 Root 树创建一次、被全部子 Agent clone，天然给出"一个存活 Root 树一份 canonical 状态" | 团队实例生命周期 | 已采纳 |
+| 009 | 参与者身份在 `Session::new` 从 thread id + session source 派生并幂等注册 | 权威身份唯一来源；幂等注册同时实现"卸载重载仍属原实例、权限与状态不变" | 身份与重载 | 已采纳 |
+| 010 | 唤醒实现为每参与者可消费计数 + watch 通道，先订阅再检查 | V2 wait 等的是自己的 mailbox，团队变化没有投递通道；计数关掉"先检查后订阅"竞态，也让已消费变化不重复唤醒 | Root wait | 已采纳 |
+| 011 | 幂等身份默认取 harness 的 tool `call_id`，模型只能可选覆盖 | 重试身份由 harness 而不是模型记忆保证，模型漏传也不会产生重复对象 | 工具面 | 已采纳 |
+| 012 | 新增 `features.multi_agent_v2.team_state_enabled`，默认关闭 | 避免改动既有 multi-agent 测试的工具面与 prompt；M-1 集成测试显式打开跑真实链路 | 配置与测试范围 | 已采纳 |
+| 013 | 稳定团队协议走 world-state section 进 initial context，动态投影只走 request-only 尾部 | 稳定前缀保住前缀缓存并随 compaction 自动重注入；易变数据不进 history/rollout | 投影与缓存 | 已采纳 |

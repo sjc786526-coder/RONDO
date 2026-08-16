@@ -1331,6 +1331,10 @@ async fn run_sampling_request(
         Arc::clone(&turn_diff_tracker),
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
+    // One logical sampling gets one immutable team snapshot. Capturing it here rather than inside
+    // the retry loop is what makes every provider retry of this sampling see the same team state;
+    // the next sampling captures a fresh one.
+    let team_projection = crate::team::capture_team_projection(&sess, turn_context.as_ref()).await;
     let mut retries = 0;
     let mut initial_input = Some(input);
     let mut original_input = None;
@@ -1349,6 +1353,13 @@ async fn run_sampling_request(
                 .attach_pending_to_prompt(&mut prompt_input, &mut executed_tool_calls_by_output)
         {
             codex_protocol::models::bound_executed_tool_calls_for_prompt(&mut prompt_input);
+        }
+        // The last protocol-safe position: history is normalized, every tool call is paired with
+        // its output, and pending tool metadata is attached. Appending here neither reorders the
+        // conversation nor steps over input the session has not accepted yet.
+        let conversation_input_len = prompt_input.len();
+        if let Some(team_projection) = team_projection.as_ref() {
+            prompt_input.push(team_projection.as_response_item());
         }
         let prompt = build_prompt(
             prompt_input,
@@ -1370,7 +1381,11 @@ async fn run_sampling_request(
         .await
         {
             Ok(output) => {
-                return Ok((output, original_input.unwrap_or(prompt.input)));
+                // The projection is request-only: callers downstream of this function must never
+                // see it, so it does not reach hooks, history or the rollout.
+                let mut conversation_input = prompt.input;
+                conversation_input.truncate(conversation_input_len);
+                return Ok((output, original_input.unwrap_or(conversation_input)));
             }
             Err(err) => match err.details() {
                 CodexErrorDetails::ContextWindowExceeded => {
@@ -1389,7 +1404,9 @@ async fn run_sampling_request(
         };
 
         if original_input.is_none() {
-            original_input = Some(prompt.input);
+            let mut conversation_input = prompt.input;
+            conversation_input.truncate(conversation_input_len);
+            original_input = Some(conversation_input);
         }
 
         if !err.is_retryable() {

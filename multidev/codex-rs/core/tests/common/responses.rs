@@ -1104,6 +1104,45 @@ where
     response_mock
 }
 
+/// Mount a single `/responses` reply whose SSE body is computed from the incoming request.
+///
+/// Use this when the reply has to depend on what the model actually received, for example to act
+/// on identifiers that only exist in this run.
+pub async fn mount_sse_once_match_with<M, F>(
+    server: &MockServer,
+    matcher: M,
+    respond: F,
+) -> ResponseMock
+where
+    M: wiremock::Match + Send + Sync + 'static,
+    F: Fn(&wiremock::Request) -> String + Send + Sync + 'static,
+{
+    struct ComputedResponder<F>(F);
+
+    impl<F> std::fmt::Debug for ComputedResponder<F> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("ComputedResponder")
+        }
+    }
+
+    impl<F> Respond for ComputedResponder<F>
+    where
+        F: Fn(&wiremock::Request) -> String + Send + Sync + 'static,
+    {
+        fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+            sse_response((self.0)(request))
+        }
+    }
+
+    let (mock, response_mock) = base_mock();
+    mock.and(matcher)
+        .respond_with(ComputedResponder(respond))
+        .up_to_n_times(1)
+        .mount(server)
+        .await;
+    response_mock
+}
+
 pub async fn mount_sse_once(server: &MockServer, body: String) -> ResponseMock {
     let (mock, response_mock) = base_mock();
     mock.respond_with(sse_response(body))

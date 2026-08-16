@@ -75,6 +75,7 @@ pub use utils::path_utils;
 pub(crate) mod plugins;
 #[doc(hidden)]
 pub(crate) mod prompt_debug;
+pub(crate) mod team;
 #[doc(hidden)]
 pub use prompt_debug::build_prompt_input;
 pub(crate) mod mentions {

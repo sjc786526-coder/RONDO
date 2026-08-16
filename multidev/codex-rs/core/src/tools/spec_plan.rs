@@ -50,6 +50,9 @@ use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHand
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
+use crate::tools::handlers::team_tools::TeamHistoryHandler;
+use crate::tools::handlers::team_tools::TeamPublishHandler;
+use crate::tools::handlers::team_tools::TeamUpdateHandler;
 use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -1099,6 +1102,20 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 multi_agent_v2_handler(ListAgentsHandlerV2, tool_namespace),
                 exposure,
             );
+            if turn_context.config.multi_agent_v2.team_state_enabled {
+                registry.register_trusted_with_exposure(
+                    multi_agent_v2_handler(TeamPublishHandler, tool_namespace),
+                    exposure,
+                );
+                registry.register_trusted_with_exposure(
+                    multi_agent_v2_handler(TeamUpdateHandler, tool_namespace),
+                    exposure,
+                );
+                registry.register_trusted_with_exposure(
+                    multi_agent_v2_handler(TeamHistoryHandler, tool_namespace),
+                    exposure,
+                );
+            }
         } else {
             let agent_type_description =
                 agent_type_description(turn_context, context.default_agent_type_description);

@@ -600,6 +600,10 @@ impl Session {
                 .effective_agent_max_threads(MultiAgentVersion::V2)
                 .unwrap_or(usize::MAX),
         );
+        // Registration is derived here, from the authoritative thread id and session source, so
+        // team capabilities never depend on what a model reports about itself. It is also how a
+        // member that was unloaded and reloaded rejoins the original team instance.
+        agent_control.register_team_participant(thread_id, &session_configuration.session_source);
         let time_provider = crate::current_time::resolve_time_provider(
             config.current_time_reminder.as_ref(),
             external_time_provider,

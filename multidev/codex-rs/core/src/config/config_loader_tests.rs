@@ -285,7 +285,10 @@ wire_api = "responses"
         .build()
         .await?;
 
-    assert_eq!(config.guardian_model_config.as_deref(), Some("gpt-5.6-codex"));
+    assert_eq!(
+        config.guardian_model_config.as_deref(),
+        Some("gpt-5.6-codex")
+    );
     assert_eq!(
         config.guardian_model_provider_config.as_deref(),
         Some("guardian-local")

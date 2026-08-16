@@ -30,6 +30,7 @@ mod realtime_start_with_instructions;
 mod recommended_plugins_instructions;
 mod rollout_budget;
 mod subagent_notification;
+pub(crate) mod team_protocol_instructions;
 mod token_budget_context;
 mod turn_aborted;
 mod user_instructions;

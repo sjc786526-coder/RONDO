@@ -1,0 +1,25 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "codex-team-state"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "codex_team_state"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+codex-protocol = { workspace = true }
+codex-utils-output-truncation = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

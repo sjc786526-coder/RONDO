@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-15 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-16 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 定位
 
@@ -150,7 +150,14 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 每个阶段只定义目标、交付能力、完成标准与边界；具体做法由该阶段的 plan 决定。
 阶段顺序是硬依赖顺序，不并行。
 
-### M-1 团队世界状态纵切（当前下一步）
+### M-1 团队世界状态纵切（当前阶段：实现完成，待独立审查）
+
+实现落在 `.claude/worktrees/039-multi-m1-team-world-state`，尚未合并 `main`。团队领域是独立 crate
+`codex-team-state`，canonical 状态挂在 `AgentControl` 上（每个存活 Root 树一份），模型可见工具为
+`team_publish` / `team_update` / `team_history`。整套能力由
+`features.multi_agent_v2.team_state_enabled` 控制，**默认关闭**；开启后才注册团队工具、注入稳定团队
+协议前缀与每次采样的 Active World Index。落地细节与测试证据见
+`agent_log/2026-08-16-034500-plan038-multi-m1-team-world-state.md`。
 
 这是五个阶段里最重的一个，因为它要一次性把状态、投影与唤醒三者的正确性条件全部立住；后面四个阶段都是在
 已经站稳的地基上做增量。
@@ -181,7 +188,7 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 - **边界**：不含 route、不含证据索引、不含 orphan 退休与 Event 关系；不改动 Codex 的 spawn/fork/lifecycle；
   证据引用在此阶段可以为空 —— 这是阶段边界，不是产品终态。
 
-### M-2 选择性路由
+### M-2 选择性路由（M-1 验收通过后的下一步）
 
 - **目标**：让团队信息按 Root 的判断在 Agent 之间流动，且不产生第二份 canonical 副本。
 - **交付能力**：Root 以 Event 为单位授予可见性并建立指派，再投递紧凑通知；被 route 的 Agent 能读到完整 chain

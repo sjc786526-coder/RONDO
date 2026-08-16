@@ -40,6 +40,8 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::user_input::UserInput;
+use codex_team_state::ParticipantRole;
+use codex_team_state::TeamStateHandle;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::ReadThreadParams;
 use serde::Serialize;
@@ -107,6 +109,10 @@ pub(crate) struct AgentControl {
     agent_execution_limiter: Arc<AgentExecutionLimiter>,
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
     rollout_budget: Arc<RolloutBudget>,
+    /// Canonical team world state for this root tree. Created once with the control handle and
+    /// shared by every sub-agent cloned from it, so there is exactly one team instance per live
+    /// root tree and it does not depend on which members are currently loaded.
+    team: Arc<TeamStateHandle>,
 }
 
 impl AgentControl {
@@ -137,6 +143,32 @@ impl AgentControl {
 
     pub(crate) fn rollout_budget(&self) -> &RolloutBudget {
         self.rollout_budget.as_ref()
+    }
+
+    pub(crate) fn team(&self) -> &Arc<TeamStateHandle> {
+        &self.team
+    }
+
+    /// Register the calling session as a participant of this root tree's team.
+    ///
+    /// Identity and role come from the session's own thread id and source, never from anything the
+    /// model claims. Re-registering the same thread after a residency reload is a no-op, which is
+    /// how a reloaded member keeps its instance, permissions and state.
+    pub(crate) fn register_team_participant(
+        &self,
+        thread_id: ThreadId,
+        session_source: &SessionSource,
+    ) {
+        let role = if session_source.is_non_root_agent() {
+            ParticipantRole::Member
+        } else {
+            ParticipantRole::Root
+        };
+        let label = session_source
+            .get_agent_path()
+            .map(|path| path.to_string())
+            .unwrap_or_else(|| AgentPath::ROOT.to_string());
+        self.team.register_participant(thread_id, role, label);
     }
 
     /// Send rich user input items to an existing agent thread.

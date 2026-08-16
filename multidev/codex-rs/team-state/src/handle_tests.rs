@@ -1,0 +1,224 @@
+use super::*;
+use crate::ids::TeamRevision;
+use crate::model::ProducerState;
+use crate::model::RootState;
+use crate::mutation::LifecycleChange;
+use crate::mutation::LifecycleTarget;
+use crate::mutation::PublishTarget;
+use crate::store::MAX_HISTORY_LIMIT;
+use crate::view::HistoryQuery;
+use pretty_assertions::assert_eq;
+use std::time::Duration;
+
+fn team() -> (Arc<TeamStateHandle>, ThreadId, ThreadId) {
+    let handle = Arc::new(TeamStateHandle::default());
+    let root = ThreadId::new();
+    let worker = ThreadId::new();
+    handle.register_participant(root, ParticipantRole::Root, "/root".to_string());
+    handle.register_participant(worker, ParticipantRole::Member, "/root/worker".to_string());
+    (handle, root, worker)
+}
+
+fn publish(handle: &TeamStateHandle, actor: ThreadId, request_id: &str) -> PublishOutcome {
+    handle
+        .publish(
+            actor,
+            &Submission {
+                based_on: handle.revision(),
+                request_id: request_id.to_string(),
+            },
+            PublishRequest {
+                target: PublishTarget::NewEvent {
+                    title: "finding".to_string(),
+                },
+                summary: "worker found something".to_string(),
+                handoff: None,
+            },
+        )
+        .expect("publish succeeds")
+}
+
+#[tokio::test]
+async fn a_change_published_before_the_wait_starts_is_not_lost() {
+    let (handle, root, worker) = team();
+    publish(&handle, worker, "w1");
+
+    let waiter = handle.wake_waiter(root);
+    tokio::time::timeout(Duration::from_secs(5), waiter.wait())
+        .await
+        .expect("a change published before the wait must still resolve it");
+}
+
+#[tokio::test]
+async fn a_change_published_during_the_wait_resolves_it() {
+    let (handle, root, worker) = team();
+    let waiter = handle.wake_waiter(root);
+
+    let publisher = {
+        let handle = Arc::clone(&handle);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            publish(&handle, worker, "w1");
+        })
+    };
+
+    tokio::time::timeout(Duration::from_secs(5), waiter.wait())
+        .await
+        .expect("a change published during the wait must resolve it");
+    publisher.await.expect("publisher finishes");
+}
+
+#[tokio::test]
+async fn an_already_consumed_change_does_not_resolve_the_next_wait() {
+    let (handle, root, worker) = team();
+    publish(&handle, worker, "w1");
+
+    tokio::time::timeout(Duration::from_secs(5), handle.wake_waiter(root).wait())
+        .await
+        .expect("the first wait consumes the change");
+
+    let second =
+        tokio::time::timeout(Duration::from_millis(200), handle.wake_waiter(root).wait()).await;
+    assert!(
+        second.is_err(),
+        "a change the root already consumed must not wake it again"
+    );
+}
+
+#[tokio::test]
+async fn the_root_is_not_woken_by_its_own_publication() {
+    let (handle, root, _worker) = team();
+    publish(&handle, root, "r1");
+
+    let outcome =
+        tokio::time::timeout(Duration::from_millis(200), handle.wake_waiter(root).wait()).await;
+    assert!(outcome.is_err(), "the root must not wake itself");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_appends_to_one_event_all_land_exactly_once() {
+    let handle = Arc::new(TeamStateHandle::default());
+    let root = ThreadId::new();
+    handle.register_participant(root, ParticipantRole::Root, "/root".to_string());
+    let workers: Vec<ThreadId> = (0..8)
+        .map(|index| {
+            let worker = ThreadId::new();
+            handle.register_participant(
+                worker,
+                ParticipantRole::Member,
+                format!("/root/worker{index}"),
+            );
+            worker
+        })
+        .collect();
+    let opened = publish(&handle, workers[0], "seed");
+
+    // Every worker appends twice, and each submission is retried once with the same identity.
+    let mut tasks = Vec::new();
+    for (index, worker) in workers.iter().copied().enumerate() {
+        for attempt in 0..2 {
+            let handle = Arc::clone(&handle);
+            let request_id = format!("append-{index}-{attempt}");
+            tasks.push(tokio::spawn(async move {
+                for _ in 0..2 {
+                    handle
+                        .publish(
+                            worker,
+                            &Submission {
+                                based_on: handle.revision(),
+                                request_id: request_id.clone(),
+                            },
+                            PublishRequest {
+                                target: PublishTarget::ExistingEvent {
+                                    event_id: opened.event_id,
+                                },
+                                summary: format!("append {index}/{attempt}"),
+                                handoff: None,
+                            },
+                        )
+                        .expect("concurrent appends are accepted");
+                }
+            }));
+        }
+    }
+    for task in tasks {
+        task.await.expect("append task finishes");
+    }
+
+    let page = handle
+        .history(
+            root,
+            &HistoryQuery {
+                event_id: Some(opened.event_id),
+                limit: Some(MAX_HISTORY_LIMIT),
+            },
+        )
+        .expect("root may read history");
+    let entry = page.events.first().expect("one event");
+    // 1 seed + 16 distinct submissions; the 16 retries must not create anything.
+    assert_eq!(entry.total_versions, 17);
+    assert_eq!(entry.event.versions.len(), 17);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stale_lifecycle_change_racing_a_concurrent_one_loses_cleanly() {
+    let (handle, root, worker) = team();
+    let published = publish(&handle, worker, "w1");
+    let target = move |expected: RootState, next: RootState| LifecycleRequest {
+        targets: vec![LifecycleTarget {
+            version_id: published.version_id,
+            expected_producer_state: ProducerState::Open,
+            expected_root_state: expected,
+            change: LifecycleChange::SetRootState(next),
+        }],
+    };
+
+    let first = {
+        let handle = Arc::clone(&handle);
+        tokio::spawn(async move {
+            handle.update_lifecycle(root, target(RootState::Pending, RootState::Tracking))
+        })
+    };
+    let second = {
+        let handle = Arc::clone(&handle);
+        tokio::spawn(async move {
+            handle.update_lifecycle(root, target(RootState::Pending, RootState::Resolved))
+        })
+    };
+    let results = [
+        first.await.expect("task finishes"),
+        second.await.expect("task finishes"),
+    ];
+
+    let winners = results.iter().filter(|result| result.is_ok()).count();
+    assert_eq!(winners, 1, "exactly one of two racing changes may commit");
+    let loser = results
+        .iter()
+        .find_map(|result| result.as_ref().err())
+        .expect("the other must be refused with the current state");
+    assert!(matches!(loser, TeamError::LifecycleConflict { .. }));
+
+    // The refusal did not corrupt anything: the winner's value is what is stored.
+    let snapshot = handle.snapshot_for(root).expect("root view");
+    let stored = snapshot.events[0].versions[0].root_state;
+    assert!(matches!(stored, RootState::Tracking | RootState::Resolved));
+}
+
+#[test]
+fn every_clone_of_the_handle_sees_the_same_canonical_state() {
+    let (handle, root, worker) = team();
+    let clone = Arc::clone(&handle);
+    let published = publish(&clone, worker, "w1");
+
+    assert_eq!(handle.revision(), TeamRevision::from_raw(1));
+    assert_eq!(
+        handle
+            .snapshot_for(root)
+            .expect("root view")
+            .events
+            .iter()
+            .map(|event| event.id)
+            .collect::<Vec<_>>(),
+        vec![published.event_id]
+    );
+}

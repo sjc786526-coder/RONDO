@@ -1302,6 +1302,7 @@ pub struct MultiAgentV2Config {
     pub expose_spawn_agent_model_overrides: bool,
     pub wait_agent_enabled: bool,
     pub non_code_mode_only: bool,
+    pub team_state_enabled: bool,
 }
 
 impl MultiAgentV2Config {
@@ -1329,6 +1330,7 @@ impl MultiAgentV2Config {
             expose_spawn_agent_model_overrides: true,
             wait_agent_enabled: true,
             non_code_mode_only: true,
+            team_state_enabled: false,
         }
     }
 }
@@ -2800,6 +2802,9 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
     let non_code_mode_only = base
         .and_then(|config| config.non_code_mode_only)
         .unwrap_or(default.non_code_mode_only);
+    let team_state_enabled = base
+        .and_then(|config| config.team_state_enabled)
+        .unwrap_or(default.team_state_enabled);
 
     MultiAgentV2Config {
         max_concurrent_threads_per_session,
@@ -2816,6 +2821,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         expose_spawn_agent_model_overrides,
         wait_agent_enabled,
         non_code_mode_only,
+        team_state_enabled,
     }
 }
 
