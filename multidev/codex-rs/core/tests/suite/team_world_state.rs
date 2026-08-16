@@ -25,6 +25,8 @@ use std::path::Path;
 use std::time::Duration;
 
 const NAMESPACE: &str = "collaboration";
+/// The stable half of the team protocol, which lives in the thread's instruction prefix.
+const TEAM_PROTOCOL_TAG: &str = "<team_protocol>";
 const ROOT_PROMPT: &str = "coordinate the migration review";
 const CHILD_TASK: &str = "inspect the migration and report what the team must know";
 const FOLLOWUP: &str = "anything further on the migration event";
@@ -114,6 +116,30 @@ fn tool_output_in(body: &Value, call_id: &str) -> Option<Value> {
 
 fn tool_output(request: &wiremock::Request, call_id: &str) -> Option<Value> {
     tool_output_in(&body(request), call_id)
+}
+
+/// Whether this request still carries the stable team protocol the projection is read against.
+fn has_team_protocol(body: &Value) -> bool {
+    input_items(body)
+        .iter()
+        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|content| content.get("text").and_then(Value::as_str))
+        .any(|text| text.contains(TEAM_PROTOCOL_TAG))
+}
+
+/// Every attempted-tool metadata entry this request carries, by the output item it hangs off.
+fn executed_tool_calls(body: &Value) -> Vec<(String, usize)> {
+    input_items(body)
+        .iter()
+        .filter_map(|item| {
+            let call_id = item.get("call_id").and_then(Value::as_str)?;
+            let calls = item
+                .pointer("/internal_chat_message_metadata_passthrough/executed_tool_calls")?
+                .as_array()?;
+            Some((call_id.to_string(), calls.len()))
+        })
+        .collect()
 }
 
 /// Coarse token size of a chunk of model-visible text.
@@ -987,8 +1013,9 @@ async fn no_room_compacts_before_sampling_instead_of_sending_a_projectionless_re
 
     let test = team_enabled_codex()
         .with_model_info_override("gpt-5.6-sol", |model_info| {
-            // Small enough that the team content cannot ride along with the conversation.
-            model_info.context_window = Some(14_000);
+            // Small enough that the team content cannot ride along with the conversation, and
+            // large enough that replacing the conversation with a summary genuinely helps.
+            model_info.context_window = Some(18_000);
         })
         .with_config(move |config| {
             config.model_provider = provider;
@@ -1030,7 +1057,179 @@ async fn no_room_compacts_before_sampling_instead_of_sending_a_projectionless_re
             projection(&body).is_some(),
             "sampling #{index} reasoned without the active team view:\n{body:#}"
         );
+        // Recovering the room must not cost the rules that make the view readable. This compaction
+        // happens inside the turn, so nothing else will reinject the stable protocol before the
+        // request that follows it.
+        assert!(
+            has_team_protocol(&body),
+            "sampling #{index} kept the view but lost the protocol that explains it:\n{body:#}"
+        );
     }
+
+    Ok(())
+}
+
+/// When even a compacted request has no room for the active view, the turn fails instead of
+/// sampling without it.
+///
+/// There is no second reduction to try, and a request that omits the view would put the model in
+/// exactly the position the view exists to prevent: deciding whether to involve the team while
+/// being shown an idle one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_request_that_cannot_carry_the_view_even_after_compaction_fails_the_turn() -> Result<()> {
+    use codex_model_provider_info::built_in_model_providers;
+    use codex_protocol::protocol::EventMsg;
+    use codex_protocol::protocol::Op;
+    use codex_protocol::user_input::UserInput;
+    use core_test_support::responses::mount_sse_sequence_without_request_count_expectation;
+    use core_test_support::wait_for_event;
+
+    const COMPACT_PROMPT: &str = "SUMMARIZE_THE_SESSION_NOW";
+    let server = start_mock_server().await;
+
+    let bulky = "the migration drops a column the nightly report still reads. ".repeat(30);
+    let mut publish_events = vec![ev_response_created("publish-all")];
+    for index in 0..6 {
+        publish_events.push(ev_function_call_with_namespace(
+            &format!("publish-{index}"),
+            NAMESPACE,
+            "team_publish",
+            &serde_json::to_string(&json!({
+                "title": format!("risk {index}"),
+                "summary": format!("finding {index}: {bulky}"),
+            }))?,
+        ));
+    }
+    publish_events.push(ev_completed("publish-all"));
+
+    // Three replies are mounted, but only two may ever be used: the opening turn and the
+    // compaction. A third request would mean an ordinary sampling went out without the view.
+    let requests = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![
+            sse(publish_events),
+            sse(vec![
+                ev_response_created("r2"),
+                ev_assistant_message("m2", "a summary of the session"),
+                ev_completed("r2"),
+            ]),
+            sse(vec![
+                ev_response_created("r3"),
+                ev_assistant_message("m3", "this reply must never be needed"),
+                ev_completed("r3"),
+            ]),
+        ],
+    )
+    .await;
+
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "OpenAI (test)".into();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+
+    let test = team_enabled_codex()
+        .with_model_info_override("gpt-5.6-sol", |model_info| {
+            // Too small for the team content even once the conversation is a summary.
+            model_info.context_window = Some(9_000);
+        })
+        .with_config(move |config| {
+            config.model_provider = provider;
+            config.compact_prompt = Some(COMPACT_PROMPT.to_string());
+        })
+        .build(&server)
+        .await?;
+
+    test.codex
+        .submit(Op::UserInput {
+            items: vec![UserInput::Text {
+                text: ROOT_PROMPT.into(),
+                text_elements: Vec::new(),
+            }],
+            final_output_json_schema: None,
+            responsesapi_client_metadata: None,
+            additional_context: Default::default(),
+            thread_settings: Default::default(),
+        })
+        .await?;
+    let error = wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::Error(_))).await;
+    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+    let EventMsg::Error(error) = error else {
+        unreachable!("waited for an error event")
+    };
+    assert!(
+        error.message.contains("context window"),
+        "the failure must say the request had no room, got: {}",
+        error.message
+    );
+
+    let captured = requests.requests();
+    let compaction_index = captured
+        .iter()
+        .position(|request| request.body_json().to_string().contains(COMPACT_PROMPT))
+        .expect("the harness must still try compaction before giving up");
+    assert_eq!(
+        captured.len(),
+        compaction_index + 1,
+        "nothing may be sampled after the compaction failed to make room, got {} requests",
+        captured.len()
+    );
+
+    Ok(())
+}
+
+/// The request the budget measured is the request that goes out.
+///
+/// Attempted-tool metadata is model-visible input that the sampling loop attaches on its way to the
+/// provider. It is therefore attached *before* the view is measured — once, not once per layer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_measured_request_carries_attempted_tool_metadata_exactly_once() -> Result<()> {
+    let server = start_mock_server().await;
+
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            body_contains(request, ROOT_PROMPT) && !has_output(request, "publish-1")
+        },
+        call(
+            "publish-1",
+            "team_publish",
+            json!({
+                "title": "index rebuild is slow",
+                "summary": "rebuilding the orders index takes nine minutes on staging",
+            }),
+        ),
+    )
+    .await;
+    let after_publish = mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_output(request, "publish-1"),
+        say("done", "recorded"),
+    )
+    .await;
+
+    let test = team_enabled_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::ExecutedToolCallMetadata)
+                .expect("test config allows feature updates");
+        })
+        .build(&server)
+        .await?;
+    test.submit_turn(ROOT_PROMPT).await?;
+
+    let body = after_publish.single_request().body_json();
+    assert!(
+        projection(&body).is_some(),
+        "the sampling that was measured is the one that carries the view:\n{body:#}"
+    );
+    let attached = executed_tool_calls(&body);
+    assert_eq!(
+        attached,
+        vec![("publish-1".to_string(), 1)],
+        "the metadata the budget accounted for must reach the provider once, not twice:\n{body:#}"
+    );
 
     Ok(())
 }

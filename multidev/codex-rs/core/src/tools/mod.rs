@@ -28,6 +28,7 @@ use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::formatted_truncate_text;
 use codex_utils_output_truncation::truncate_text;
 pub(crate) use executed_tool_calls::ExecutedToolCallRecorder;
+pub(crate) use executed_tool_calls::ExecutedToolCallRetryCache;
 pub use router::ToolRouter;
 
 // Telemetry preview limits: keep log events smaller than model budgets.

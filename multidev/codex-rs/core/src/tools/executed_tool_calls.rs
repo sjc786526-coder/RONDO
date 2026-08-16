@@ -17,6 +17,10 @@ const MAX_EXECUTED_TOOL_CALL_ARGUMENT_BYTES: usize = 8 * 1024;
 const MAX_EXECUTED_TOOL_CALL_FULL_ARGUMENT_BYTES_PER_OUTPUT: usize = 32 * 1024;
 const MAX_PENDING_EXECUTED_TOOL_CALLS: usize = 256;
 
+/// What one logical sampling has already attached, so its provider retries attach the same thing.
+pub(crate) type ExecutedToolCallRetryCache =
+    HashMap<(std::mem::Discriminant<ResponseItem>, String), Vec<ExecutedToolCall>>;
+
 /// Best-effort, session-scoped attempted-tool metadata; cancellation, compaction,
 /// and yielded cells without another wait can leave pending calls unreported.
 #[derive(Default)]
@@ -177,10 +181,7 @@ impl ExecutedToolCallRecorder {
     pub(crate) fn attach_pending_to_prompt(
         &self,
         items: &mut [ResponseItem],
-        retry_cache: &mut HashMap<
-            (std::mem::Discriminant<ResponseItem>, String),
-            Vec<ExecutedToolCall>,
-        >,
+        retry_cache: &mut ExecutedToolCallRetryCache,
     ) -> bool {
         let mut state = self
             .state

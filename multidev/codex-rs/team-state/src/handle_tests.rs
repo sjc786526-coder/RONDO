@@ -221,8 +221,10 @@ async fn a_stale_lifecycle_change_racing_a_concurrent_one_loses_cleanly() {
         .expect("the other must be refused with the current state");
     assert!(matches!(loser, TeamError::LifecycleConflict { .. }));
 
-    // The refusal did not corrupt anything: the winner's value is what is stored.
-    let snapshot = handle.snapshot_for(root).expect("root view");
+    // The refusal did not corrupt anything: the winner's value is what is stored. Read through
+    // the author's view because a root-resolved version correctly leaves the root's active view,
+    // while the still-open producer item remains active for its author.
+    let snapshot = handle.snapshot_for(worker).expect("worker view");
     let stored = snapshot.events[0].versions[0].root_state;
     assert!(matches!(stored, RootState::Tracking | RootState::Resolved));
 }

@@ -177,11 +177,12 @@
 
 ### 当前工作
 
-已完成三轮审查整改。首轮 5 阻断 + 3 窄修、第二轮 5 阻断、第三轮 2 阻断，经逐条核对**全部属实**，
-均已修复并补齐回归，提交在本工作树，等待再次复验。记录见
+已完成四轮审查整改。首轮 5 阻断 + 3 窄修、第二轮 5 阻断、第三轮 2 阻断、第四轮 3 阻断，经逐条核对
+**全部属实**，均已修复并补齐回归，提交在本工作树，等待再次复验。记录见
 `agent_log/2026-08-16-043500-plan038-m1-review-remediation.md`（第一轮）、
 `agent_log/2026-08-16-051500-plan038-m1-second-remediation.md`（第二轮）与
-`agent_log/2026-08-16-054000-plan038-m1-third-remediation.md`（第三轮）。
+`agent_log/2026-08-16-054000-plan038-m1-third-remediation.md`（第三轮）、
+`agent_log/2026-08-16-061500-plan038-m1-fourth-remediation.md`（第四轮）。
 
 ### 本任务剩余步骤
 
@@ -200,8 +201,8 @@ L6 仍有 12 个未合并提交且改动了 `doc/WBS.md` 与 `doc/WBS-COMPLETED.
 ### 当前验收状态
 
 - ExecPlan：已建立并完成自审。
-- M-1 实现与测试：已完成并已按三轮审查整改。`codex-team-state` + `codex-features` 80/80、
-  M-1 集成用例 7/7 加身份单测 1/1 全部通过；`just test -p codex-core -p codex-rmcp-client`
+- M-1 实现与测试：已完成并已按四轮审查整改。本轮 `codex-team-state` 46/46、M-1 集成用例 9/9、
+  身份单测 1/1、投影预算单测 1/1 全部通过；历史宽门禁 `just test -p codex-core -p codex-rmcp-client`
   3457/3542 通过，85 项失败与首轮基线**失败集合逐条一致**（无新增回归），仍为 code-mode host/
   工作区二进制/真实网络三类环境限制，按审查口径记为"环境归因、未独立确认"。
 - 格式化与 lint：`just fmt`、`just fmt-check`、`just fix -p codex-core -p codex-team-state` 均通过。
@@ -241,9 +242,11 @@ L6 仍有 12 个未合并提交且改动了 `doc/WBS.md` 与 `doc/WBS-COMPLETED.
 | 017 | Root 的 `resolved` 为终态，不可原地重开 | 重新相关只能由新 Version 表达，否则破坏追加式历史语义 | 生命周期 | 审查整改后采纳 |
 | 018 | 只承认可核验的会话身份（用户面 root 线程、带 agent path 的 V2 spawn），其余不登记 | 把"缺省当 Root"改成"证明不了就没有能力"，这才是 fail-closed | 身份 | 审查整改后采纳 |
 | 019 | 对外引用携带完整 UUID 实例身份 | 实例归属必须是可精确校验的事实，不是概率判断；代价是引用变长 | 引用与重置 | 审查整改后采纳 |
-| 020 | 投影预算按**实际待发请求**计算；第三轮补齐为 window − instructions − input − **tools − output_schema − 投影 framing**，渲染时机提到 provider 调用前 | 原先用缓存 usage；补齐前又漏算了会真实发出的 tools/schema 与投影自身的 JSON 包装，动态 tool schema 可以很大 | 投影预算 | 第三轮整改补齐 |
-| 021 | `render_active_world_index` 返回 `ProjectionOutcome`（Idle/Rendered/NoRoom）；~~`NoRoom` 时置新窗口标志~~ **第三轮修正为**：`NoRoom` 在 provider 调用前就地 compaction 并按新 prompt 重渲染 | 置标志只在响应后消费且需 `needs_follow_up`，模型仍会先在看不见团队状态时做决定 | 投影与 turn 循环 | 第三轮整改修正 |
+| 020 | 投影预算按**实际待发请求**计算；第三轮补齐 window − instructions − input − tools − output_schema − 投影 framing，第四轮再把 pending executed-tool metadata 在预算前挂载并冻结 | 缓存 usage、漏算 tools/schema/framing、预算后再追加 metadata 都会高估投影可用空间 | 投影预算 | 第四轮整改补齐 |
+| 021 | `render_active_world_index` 返回 `ProjectionOutcome`（Idle/Rendered/NoRoom）；`NoRoom` 在 provider 调用前最多 compaction 一次并按新 prompt 重渲染，仍无空间则显式 `ContextWindowExceeded`，不得无投影 sampling | 采样后置 flag 与 warning 后盲采样都会让模型先在看不见团队状态时做决定；重复 compaction 又没有新的减量来源 | 投影与 turn 循环 | 第四轮整改补齐 |
 | 022 | 削减顺序改为先削尽 Version、保留 Event 标题行，最后才整条丢弃 | 全削掉会连 Event ID 一起丢，模型拿不到标识符就无法 `team_history` 下钻，下钻路径在产品上是断的 | 投影渲染 | 第二轮整改采纳（超出复验建议） |
 | 023 | 同批禁止对同一 Version 的同一生命周期轴重复下手 | 全部 target 对批次前旧状态校验、再顺序应用，重复轴可绕过终态；两条轴独立，同批分别改仍合法 | 生命周期 | 第二轮整改采纳 |
 | 024 | retry 判定改为结构化比较 `PublishRequest`，不再拼字符串指纹 | 任何对模型可控文本的编码都可能被构造碰撞；`None` 与 `Some("")` 已经会撞 | 幂等 | 第二轮整改采纳 |
 | 025 | 生命周期校验顺序固定为 权限 → expected 状态 → 转换合法性 | 陈旧调用必须先拿到最新完整状态，而不是先撞上一条它并不知情的终态规则 | 生命周期 | 第二轮整改采纳 |
+| 026 | 团队投影触发的压缩发生在当前 turn 内，使用 `MidTurn` + `BeforeLastUserMessage` 保留并重注入 initial context | `DoNotInject` 只适用于压缩后还会经过下一 regular turn 的路径；本路径会立即继续 sampling，必须保留稳定团队协议 | compaction/initial context | 第四轮整改采纳 |
+| 027 | executed-tool metadata 在首次投影预算前完成挂载与 bound；同一 retry cache 随逻辑 sampling 传入 retry loop | metadata 是模型可见输入且可明显超过 headroom；上提后既闭合预算，也避免首 attempt 重复挂载并保持 retry 一致 | sampling/retry/预算 | 第四轮整改采纳 |

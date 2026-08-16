@@ -123,11 +123,7 @@ pub(crate) fn capture_team_projection(
 fn remaining_request_context(turn_context: &TurnContext, prompt: &PromptCost<'_>) -> Option<i64> {
     let window = turn_context.model_context_window()?;
     let instructions = approx_tokens_of(&prompt.base_instructions.text);
-    let input = prompt
-        .input
-        .iter()
-        .map(estimate_item_token_count)
-        .fold(0i64, i64::saturating_add);
+    let input = prompt_input_tokens(prompt.input);
     let tools = serde_json::to_string(prompt.tools)
         .map(|json| approx_tokens_of(&json))
         .unwrap_or_default();
@@ -148,6 +144,21 @@ fn remaining_request_context(turn_context: &TurnContext, prompt: &PromptCost<'_>
     )
 }
 
+/// What the input items cost, counting everything the provider will see on them.
+///
+/// The caller hands this the items it has already finished assembling, attached metadata included,
+/// so the measurement is of the request itself rather than of the history it grew from.
+fn prompt_input_tokens(input: &[ResponseItem]) -> i64 {
+    input
+        .iter()
+        .map(estimate_item_token_count)
+        .fold(0i64, i64::saturating_add)
+}
+
 fn approx_tokens_of(text: &str) -> i64 {
     i64::try_from(approx_token_count(text)).unwrap_or(i64::MAX)
 }
+
+#[cfg(test)]
+#[path = "projection_tests.rs"]
+mod tests;
