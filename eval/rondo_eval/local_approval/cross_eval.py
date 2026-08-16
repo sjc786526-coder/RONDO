@@ -1246,21 +1246,45 @@ def validate_three_side_rows(
     return [accepted[key] for key in sorted(accepted)]
 
 
+def _load_formal_l6_pair_evidence(
+    path: Path,
+) -> FormalL6PairEvidence:
+    from . import paired_outputs
+
+    try:
+        built = paired_outputs.load_pair_evidence_locator(path)
+        return paired_outputs.formal_pair_evidence(built)
+    except paired_outputs.PairedOutputError as exc:
+        raise CrossEvalError("l6_pair_evidence_invalid") from exc
+
+
 def validate_three_side_import(
-    worktree_root: Path, input_path: Path, pair_receipt_path: Path
-) -> tuple[CohortBundle, list[dict[str, Any]], dict[str, Any]]:
+    worktree_root: Path,
+    input_path: Path,
+    pair_receipt_path: Path,
+    *,
+    pair_evidence_path: Path | None = None,
+) -> tuple[
+    CohortBundle,
+    list[dict[str, Any]],
+    dict[str, Any] | FormalL6PairEvidence,
+]:
     bundle = load_synthetic_bundle(worktree_root)
     values, _raw = _load_jsonl(input_path, private=True)
     receipt, receipt_raw = _load_json(pair_receipt_path, private=True)
     normalized_receipt, _sha, _contracts = validate_l6_pair_receipt(
         receipt, raw=receipt_raw
     )
+    evidence: dict[str, Any] | FormalL6PairEvidence = normalized_receipt
+    if pair_evidence_path is not None:
+        formal = _load_formal_l6_pair_evidence(pair_evidence_path)
+        if formal.receipt != normalized_receipt:
+            raise CrossEvalError("l6_pair_evidence_receipt_mismatch")
+        evidence = formal
     return (
         bundle,
-        validate_three_side_rows(
-            bundle, values, l6_pair_receipt=normalized_receipt
-        ),
-        normalized_receipt,
+        validate_three_side_rows(bundle, values, l6_pair_receipt=evidence),
+        evidence,
     )
 
 
@@ -2357,6 +2381,7 @@ def prepare_private_blind_review(
     worktree_root: Path,
     outputs_path: Path,
     pair_receipt_path: Path,
+    pair_evidence_path: Path | None = None,
     private_dir: Path,
     judge_model: str,
     judged_date: str,
@@ -2366,10 +2391,17 @@ def prepare_private_blind_review(
     if (
         outputs_path.parent.resolve(strict=True) != resolved_private
         or pair_receipt_path.parent.resolve(strict=True) != resolved_private
+        or (
+            pair_evidence_path is not None
+            and pair_evidence_path.parent.resolve(strict=True) != resolved_private
+        )
     ):
         raise CrossEvalError("import_artifact_out_of_private_batch")
     bundle, rows, pair_receipt = validate_three_side_import(
-        worktree_root, outputs_path, pair_receipt_path
+        worktree_root,
+        outputs_path,
+        pair_receipt_path,
+        pair_evidence_path=pair_evidence_path,
     )
     templates = load_template_identity(worktree_root)
     private_seed = seed if seed is not None else secrets.token_bytes(32)
@@ -2390,18 +2422,29 @@ def _load_and_rebuild_private_blinds(
     worktree_root: Path,
     outputs_path: Path,
     pair_receipt_path: Path,
+    pair_evidence_path: Path | None = None,
     private_dir: Path,
 ) -> tuple[
-    CohortBundle, list[dict[str, Any]], dict[str, Any], list[BlindBatch]
+    CohortBundle,
+    list[dict[str, Any]],
+    dict[str, Any] | FormalL6PairEvidence,
+    list[BlindBatch],
 ]:
     resolved_private = _require_execution_private_directory(worktree_root, private_dir)
     if (
         outputs_path.parent.resolve(strict=True) != resolved_private
         or pair_receipt_path.parent.resolve(strict=True) != resolved_private
+        or (
+            pair_evidence_path is not None
+            and pair_evidence_path.parent.resolve(strict=True) != resolved_private
+        )
     ):
         raise CrossEvalError("import_artifact_out_of_private_batch")
     bundle, rows, pair_receipt = validate_three_side_import(
-        worktree_root, outputs_path, pair_receipt_path
+        worktree_root,
+        outputs_path,
+        pair_receipt_path,
+        pair_evidence_path=pair_evidence_path,
     )
     seed_record, _seed_raw = _load_json(
         private_dir / "blinding-seed.json", private=True
@@ -2476,12 +2519,14 @@ def import_unblind_and_aggregate(
     worktree_root: Path,
     outputs_path: Path,
     pair_receipt_path: Path,
+    pair_evidence_path: Path | None = None,
     private_dir: Path,
 ) -> dict[str, Any]:
     bundle, rows, pair_receipt, blinds = _load_and_rebuild_private_blinds(
         worktree_root=worktree_root,
         outputs_path=outputs_path,
         pair_receipt_path=pair_receipt_path,
+        pair_evidence_path=pair_evidence_path,
         private_dir=private_dir,
     )
     markers = _side_identity_markers(rows)
@@ -2553,10 +2598,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     verify_import.add_argument("--worktree-root", type=Path, required=True)
     verify_import.add_argument("--outputs", type=Path, required=True)
     verify_import.add_argument("--pair-receipt", type=Path, required=True)
+    verify_import.add_argument("--pair-evidence", type=Path)
     pack = commands.add_parser("pack")
     pack.add_argument("--worktree-root", type=Path, required=True)
     pack.add_argument("--outputs", type=Path, required=True)
     pack.add_argument("--pair-receipt", type=Path, required=True)
+    pack.add_argument("--pair-evidence", type=Path)
     pack.add_argument("--private-dir", type=Path, required=True)
     pack.add_argument("--judge-model", required=True)
     pack.add_argument("--judged-date", required=True)
@@ -2564,6 +2611,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import_results.add_argument("--worktree-root", type=Path, required=True)
     import_results.add_argument("--outputs", type=Path, required=True)
     import_results.add_argument("--pair-receipt", type=Path, required=True)
+    import_results.add_argument("--pair-evidence", type=Path)
     import_results.add_argument("--private-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -2573,7 +2621,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = write_preflight_receipt(args.worktree_root, args.private_dir)
         elif args.command == "verify-import":
             bundle, rows, _receipt = validate_three_side_import(
-                args.worktree_root, args.outputs, args.pair_receipt
+                args.worktree_root,
+                args.outputs,
+                args.pair_receipt,
+                pair_evidence_path=args.pair_evidence,
             )
             result = {
                 "status": "ready_for_blind_packaging",
@@ -2586,6 +2637,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 worktree_root=args.worktree_root,
                 outputs_path=args.outputs,
                 pair_receipt_path=args.pair_receipt,
+                pair_evidence_path=args.pair_evidence,
                 private_dir=args.private_dir,
                 judge_model=args.judge_model,
                 judged_date=args.judged_date,
@@ -2595,6 +2647,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 worktree_root=args.worktree_root,
                 outputs_path=args.outputs,
                 pair_receipt_path=args.pair_receipt,
+                pair_evidence_path=args.pair_evidence,
                 private_dir=args.private_dir,
             )
         _print_result(result)

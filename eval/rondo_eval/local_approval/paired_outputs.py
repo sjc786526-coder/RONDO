@@ -31,6 +31,11 @@ IDENTITY_SOURCE_CONTRACT_VERSION = "rondo_l6_pair_identity_sources_v1"
 IDENTITY_SOURCE_KINDS = ("regular_file", "frozen_lock", "canonical_manifest")
 ARTIFACT_MANIFEST_SCHEMA_VERSION = 1
 ARTIFACT_MANIFEST_CONTRACT_VERSION = "rondo_l6_canonical_artifact_manifest_v1"
+DEPLOYMENT_MANIFEST_SCHEMA_VERSION = 1
+DEPLOYMENT_MANIFEST_CONTRACT_VERSION = "rondo_l6_b10333_deployment_manifest_v1"
+DEPLOYMENT_MODES = ("adapter_on_off", "paired_gguf")
+PAIR_EVIDENCE_LOCATOR_SCHEMA_VERSION = 1
+PAIR_EVIDENCE_LOCATOR_CONTRACT_VERSION = "rondo_l6_pair_evidence_locator_v1"
 JOURNAL_SCHEMA_VERSION = 1
 JOURNAL_CONTRACT_VERSION = "rondo_l6_paired_output_journal_v1"
 LOCAL_SIDE_ORDER = ("local-static", "local-ft-static")
@@ -67,7 +72,6 @@ FORMAL_SAMPLING_CONTRACT = {
     "top_p": 1.0,
     "seed": 42,
 }
-FORMAL_ADAPTER_ARTIFACT_ID = "plan037-formal-adapter"
 FROZEN_TOKENIZER_FILES = {
     "special_tokens_map.json": {
         "bytes": 147094,
@@ -84,6 +88,7 @@ FROZEN_TOKENIZER_FILES = {
 }
 
 _LOGICAL_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
+_QUANTIZATION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}\Z")
 _MANIFEST_MAX_BYTES = 8 * 1024 * 1024
 
 
@@ -121,6 +126,22 @@ class IdentitySource:
     kind: str
     path: Path
     logical_name: str
+
+
+@dataclass(frozen=True)
+class ResolvedDeployment:
+    """The only model/tool paths supplied to a formal paired invocation."""
+
+    side: str
+    deployment_mode: str
+    manifest_path: Path
+    manifest_sha256: str
+    model_gguf: Path
+    adapter_files: tuple[tuple[str, Path], ...]
+    converter: Path
+    quantizer: Path
+    quantization: str
+    source_adapter_tree_sha256: str | None
 
 
 @dataclass(frozen=True, init=False)
@@ -265,6 +286,245 @@ def build_canonical_artifact_manifest(
     }
 
 
+def _deployment_component_value(*, manifest_path: Path, component_path: Path) -> dict[str, Any]:
+    if not isinstance(component_path, Path):
+        raise PairedOutputError("deployment_manifest_component_invalid")
+    try:
+        relative = component_path.relative_to(manifest_path.parent)
+    except ValueError as exc:
+        raise PairedOutputError("artifact_manifest_component_path_invalid") from exc
+    relative = _component_relative_path(relative.as_posix())
+    inspected = inspect_identity_source(
+        IdentitySource("regular_file", component_path, "deployment-component")
+    )
+    return {
+        "relative_path": relative.as_posix(),
+        "size_bytes": inspected["size_bytes"],
+        "sha256": inspected["sha256"],
+    }
+
+
+def build_b10333_deployment_manifest(
+    *,
+    deployment_id: str,
+    manifest_path: Path,
+    deployment_mode: str,
+    side: str,
+    model_gguf: Path,
+    converter: Path,
+    quantizer: Path,
+    quantization: str,
+    deployed_adapter_files: Mapping[str, Path] | None = None,
+    source_adapter_tree_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Build one canonical manifest for the files b10333 will actually load."""
+
+    adapter_files = deployed_adapter_files or {}
+    if (
+        not isinstance(deployment_id, str)
+        or _LOGICAL_NAME.fullmatch(deployment_id) is None
+        or not isinstance(manifest_path, Path)
+        or deployment_mode not in DEPLOYMENT_MODES
+        or side not in LOCAL_SIDE_ORDER
+        or not isinstance(quantization, str)
+        or _QUANTIZATION_NAME.fullmatch(quantization) is None
+        or not isinstance(adapter_files, Mapping)
+        or (deployment_mode == "adapter_on_off" and side == "local-ft-static")
+        != bool(adapter_files)
+        or (deployment_mode == "paired_gguf" and bool(adapter_files))
+        or (side == "local-ft-static")
+        != (
+            isinstance(source_adapter_tree_sha256, str)
+            and cross_eval._HEX64.fullmatch(source_adapter_tree_sha256) is not None
+        )
+    ):
+        raise PairedOutputError("deployment_manifest_invalid")
+    accepted_adapter_files: dict[str, dict[str, Any]] = {}
+    for logical_name, component_path in sorted(adapter_files.items()):
+        if (
+            not isinstance(logical_name, str)
+            or _LOGICAL_NAME.fullmatch(logical_name) is None
+            or logical_name in accepted_adapter_files
+        ):
+            raise PairedOutputError("deployment_manifest_component_invalid")
+        accepted_adapter_files[logical_name] = _deployment_component_value(
+            manifest_path=manifest_path, component_path=component_path
+        )
+    load_components: dict[str, Any] = {
+        "model_gguf": _deployment_component_value(
+            manifest_path=manifest_path, component_path=model_gguf
+        )
+    }
+    if accepted_adapter_files:
+        load_components["adapter_files"] = accepted_adapter_files
+    tooling = {
+        "converter": _deployment_component_value(
+            manifest_path=manifest_path, component_path=converter
+        ),
+        "quantizer": _deployment_component_value(
+            manifest_path=manifest_path, component_path=quantizer
+        ),
+    }
+    training_source = None
+    if side == "local-ft-static":
+        conversion = {
+            "schema_version": 1,
+            "deployment_mode": deployment_mode,
+            "source_adapter_tree_sha256": source_adapter_tree_sha256,
+            "quantization": quantization,
+            "load_components": load_components,
+            "tooling": tooling,
+        }
+        training_source = {
+            "adapter_tree_sha256": source_adapter_tree_sha256,
+            "conversion_identity_sha256": cross_eval._canonical_sha256(conversion),
+        }
+    return {
+        "schema_version": DEPLOYMENT_MANIFEST_SCHEMA_VERSION,
+        "contract_version": DEPLOYMENT_MANIFEST_CONTRACT_VERSION,
+        "deployment_id": deployment_id,
+        "deployment_mode": deployment_mode,
+        "side": side,
+        "runtime_release": "b10333",
+        "quantization": quantization,
+        "load_components": load_components,
+        "tooling": tooling,
+        "training_source": training_source,
+    }
+
+
+def _validate_deployment_component(
+    value: Any, *, manifest_path: Path
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "relative_path",
+        "size_bytes",
+        "sha256",
+    }:
+        raise PairedOutputError("deployment_manifest_component_invalid")
+    relative = _component_relative_path(value["relative_path"])
+    if (
+        not isinstance(value["size_bytes"], int)
+        or isinstance(value["size_bytes"], bool)
+        or value["size_bytes"] <= 0
+        or not isinstance(value["sha256"], str)
+        or cross_eval._HEX64.fullmatch(value["sha256"]) is None
+    ):
+        raise PairedOutputError("deployment_manifest_component_invalid")
+    actual = inspect_identity_source(
+        IdentitySource(
+            "regular_file",
+            manifest_path.parent / relative,
+            "deployment-component",
+        )
+    )
+    if (
+        actual["size_bytes"] != value["size_bytes"]
+        or actual["sha256"] != value["sha256"]
+    ):
+        raise PairedOutputError("deployment_manifest_component_drift")
+    return copy.deepcopy(value)
+
+
+def _validate_deployment_manifest(
+    value: Any, *, manifest_path: Path
+) -> dict[str, Any]:
+    fields = {
+        "schema_version",
+        "contract_version",
+        "deployment_id",
+        "deployment_mode",
+        "side",
+        "runtime_release",
+        "quantization",
+        "load_components",
+        "tooling",
+        "training_source",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("schema_version") != DEPLOYMENT_MANIFEST_SCHEMA_VERSION
+        or value.get("contract_version") != DEPLOYMENT_MANIFEST_CONTRACT_VERSION
+        or not isinstance(value.get("deployment_id"), str)
+        or _LOGICAL_NAME.fullmatch(value["deployment_id"]) is None
+        or value.get("deployment_mode") not in DEPLOYMENT_MODES
+        or value.get("side") not in LOCAL_SIDE_ORDER
+        or value.get("runtime_release") != "b10333"
+        or not isinstance(value.get("quantization"), str)
+        or _QUANTIZATION_NAME.fullmatch(value["quantization"]) is None
+        or not isinstance(value.get("load_components"), dict)
+        or not isinstance(value.get("tooling"), dict)
+        or set(value["tooling"]) != {"converter", "quantizer"}
+    ):
+        raise PairedOutputError("deployment_manifest_invalid")
+    mode = value["deployment_mode"]
+    side = value["side"]
+    expected_load_fields = {"model_gguf"}
+    if mode == "adapter_on_off" and side == "local-ft-static":
+        expected_load_fields.add("adapter_files")
+    if set(value["load_components"]) != expected_load_fields:
+        raise PairedOutputError("deployment_manifest_invalid")
+    accepted = copy.deepcopy(value)
+    accepted["load_components"]["model_gguf"] = _validate_deployment_component(
+        value["load_components"]["model_gguf"], manifest_path=manifest_path
+    )
+    if "adapter_files" in expected_load_fields:
+        adapter_files = value["load_components"]["adapter_files"]
+        if not isinstance(adapter_files, dict) or not adapter_files:
+            raise PairedOutputError("deployment_manifest_invalid")
+        accepted_adapter_files: dict[str, dict[str, Any]] = {}
+        for logical_name, component in adapter_files.items():
+            if (
+                not isinstance(logical_name, str)
+                or _LOGICAL_NAME.fullmatch(logical_name) is None
+                or logical_name in accepted_adapter_files
+            ):
+                raise PairedOutputError("deployment_manifest_component_invalid")
+            accepted_adapter_files[logical_name] = _validate_deployment_component(
+                component, manifest_path=manifest_path
+            )
+        accepted["load_components"]["adapter_files"] = accepted_adapter_files
+    for role in ("converter", "quantizer"):
+        accepted["tooling"][role] = _validate_deployment_component(
+            value["tooling"][role], manifest_path=manifest_path
+        )
+    training_source = value["training_source"]
+    if side == "local-static":
+        if training_source is not None:
+            raise PairedOutputError("deployment_manifest_invalid")
+    else:
+        if (
+            not isinstance(training_source, dict)
+            or set(training_source)
+            != {"adapter_tree_sha256", "conversion_identity_sha256"}
+            or not isinstance(training_source["adapter_tree_sha256"], str)
+            or cross_eval._HEX64.fullmatch(training_source["adapter_tree_sha256"])
+            is None
+            or not isinstance(training_source["conversion_identity_sha256"], str)
+            or cross_eval._HEX64.fullmatch(
+                training_source["conversion_identity_sha256"]
+            )
+            is None
+        ):
+            raise PairedOutputError("deployment_manifest_invalid")
+        conversion = {
+            "schema_version": 1,
+            "deployment_mode": mode,
+            "source_adapter_tree_sha256": training_source[
+                "adapter_tree_sha256"
+            ],
+            "quantization": value["quantization"],
+            "load_components": accepted["load_components"],
+            "tooling": accepted["tooling"],
+        }
+        if training_source["conversion_identity_sha256"] != cross_eval._canonical_sha256(
+            conversion
+        ):
+            raise PairedOutputError("deployment_manifest_conversion_identity_invalid")
+    return accepted
+
+
 def inspect_identity_source(source: IdentitySource) -> dict[str, Any]:
     """Hash one non-symlink regular object and return body-free evidence."""
 
@@ -324,6 +584,7 @@ def inspect_identity_source(source: IdentitySource) -> dict[str, Any]:
     ):
         raise PairedOutputError("identity_source_changed")
     components: list[dict[str, Any]] | None = None
+    deployment: dict[str, Any] | None = None
     if canonical_raw is not None:
         try:
             value = json.loads(bytes(canonical_raw).decode("utf-8"))
@@ -335,9 +596,17 @@ def inspect_identity_source(source: IdentitySource) -> dict[str, Any]:
         ):
             raise PairedOutputError("identity_source_not_canonical")
         if source.kind == "canonical_manifest":
-            components = _validate_artifact_manifest(
-                value, manifest_path=source.path
-            )
+            contract_version = value.get("contract_version") if isinstance(value, dict) else None
+            if contract_version == ARTIFACT_MANIFEST_CONTRACT_VERSION:
+                components = _validate_artifact_manifest(
+                    value, manifest_path=source.path
+                )
+            elif contract_version == DEPLOYMENT_MANIFEST_CONTRACT_VERSION:
+                deployment = _validate_deployment_manifest(
+                    value, manifest_path=source.path
+                )
+            else:
+                raise PairedOutputError("artifact_manifest_invalid")
             try:
                 final_manifest = os.lstat(source.path)
             except OSError as exc:
@@ -352,6 +621,8 @@ def inspect_identity_source(source: IdentitySource) -> dict[str, Any]:
     }
     if components is not None:
         result["components"] = components
+    if deployment is not None:
+        result["deployment"] = deployment
     return result
 
 
@@ -649,46 +920,165 @@ def _validate_formal_training_receipt(
         raise PairedOutputError("formal_training_receipt_cost_invalid")
 
 
-def _validate_adapter_artifact_binding(
+def _inspect_formal_adapter_files(
     receipt: Mapping[str, Any],
     *,
-    base_model: IdentitySource,
-    local_static: IdentitySource,
-    local_ft_static: IdentitySource,
-    inspected: Mapping[str, Mapping[str, Any]],
-) -> None:
-    """Bind the adapter-on/off pair to the frozen base and formal receipt."""
+    training_receipt: IdentitySource,
+) -> dict[str, dict[str, Any]]:
+    """Require the source-adapter directory to equal the receipt file tree."""
 
-    if (
-        local_static.kind != "frozen_lock"
-        or local_static.path != base_model.path
-        or inspected["local-static"].get("sha256")
-        != inspected["base-model"].get("sha256")
-        or local_ft_static.kind != "canonical_manifest"
-    ):
-        raise PairedOutputError("formal_pair_artifact_binding_invalid")
-    manifest = _load_identity_source_json(
-        local_ft_static,
-        inspected["local-ft-static"],
-        require_canonical=True,
-    )
-    if manifest.get("artifact_id") != FORMAL_ADAPTER_ARTIFACT_ID:
-        raise PairedOutputError("formal_pair_artifact_binding_invalid")
-    components = inspected["local-ft-static"].get("components")
-    if not isinstance(components, list):
-        raise PairedOutputError("formal_pair_artifact_binding_invalid")
-    actual_adapter_files = {
-        component["relative_path"]: {
-            "bytes": component["size_bytes"],
-            "sha256": component["sha256"],
+    relative_root = receipt["output_paths"]["adapter"]
+    adapter_root = training_receipt.path.parent / relative_root
+    try:
+        root_info = os.lstat(adapter_root)
+    except OSError as exc:
+        raise PairedOutputError("formal_pair_source_adapter_missing") from exc
+    if stat.S_ISLNK(root_info.st_mode) or not stat.S_ISDIR(root_info.st_mode):
+        raise PairedOutputError("formal_pair_source_adapter_invalid")
+    expected_files = receipt["artifacts"]["adapter"]["files"]
+    expected: dict[str, dict[str, Any]] = {}
+    expected_directories: set[str] = set()
+    for relative_name, identity in sorted(expected_files.items()):
+        relative = _component_relative_path(relative_name)
+        expected[relative.as_posix()] = {
+            "size_bytes": identity["bytes"],
+            "sha256": identity["sha256"],
         }
-        for component in components
-    }
-    expected_adapter_files = receipt.get("artifacts", {}).get("adapter", {}).get(
-        "files"
+        parent = relative.parent
+        while parent.parts and parent != Path("."):
+            expected_directories.add(parent.as_posix())
+            parent = parent.parent
+
+    observed: dict[str, dict[str, Any]] = {}
+    observed_directories: set[str] = set()
+
+    def walk(directory: Path, relative_directory: Path) -> None:
+        try:
+            with os.scandir(directory) as iterator:
+                entries = sorted(iterator, key=lambda entry: entry.name)
+        except OSError as exc:
+            raise PairedOutputError("formal_pair_source_adapter_invalid") from exc
+        for entry in entries:
+            relative = relative_directory / entry.name
+            relative_name = relative.as_posix()
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise PairedOutputError("formal_pair_source_adapter_invalid") from exc
+            if stat.S_ISLNK(info.st_mode):
+                raise PairedOutputError("formal_pair_source_adapter_invalid")
+            if stat.S_ISDIR(info.st_mode):
+                observed_directories.add(relative_name)
+                walk(Path(entry.path), relative)
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise PairedOutputError("formal_pair_source_adapter_invalid")
+            actual = inspect_identity_source(
+                IdentitySource(
+                    "regular_file",
+                    Path(entry.path),
+                    "formal-source-adapter",
+                )
+            )
+            observed[relative_name] = {
+                "size_bytes": actual["size_bytes"],
+                "sha256": actual["sha256"],
+            }
+
+    walk(adapter_root, Path())
+    if observed_directories != expected_directories or set(observed) != set(expected):
+        raise PairedOutputError("formal_pair_source_adapter_tree_mismatch")
+    if observed != expected:
+        raise PairedOutputError("formal_pair_source_adapter_drift")
+    return observed
+
+
+def _deployment_component_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {"size_bytes": value["size_bytes"], "sha256": value["sha256"]}
+
+
+def _resolved_deployments(
+    actual_sources: Mapping[str, IdentitySource],
+    inspected: Mapping[str, Mapping[str, Any]],
+) -> dict[str, ResolvedDeployment]:
+    resolved: dict[str, ResolvedDeployment] = {}
+    for side in LOCAL_SIDE_ORDER:
+        source = actual_sources[side]
+        identity = inspected[side]
+        deployment = identity["deployment"]
+
+        def component_path(component: Mapping[str, Any]) -> Path:
+            return source.path.parent / _component_relative_path(
+                component["relative_path"]
+            )
+
+        adapter_files = deployment["load_components"].get("adapter_files", {})
+        training_source = deployment["training_source"]
+        resolved[side] = ResolvedDeployment(
+            side=side,
+            deployment_mode=deployment["deployment_mode"],
+            manifest_path=source.path,
+            manifest_sha256=identity["sha256"],
+            model_gguf=component_path(
+                deployment["load_components"]["model_gguf"]
+            ),
+            adapter_files=tuple(
+                (logical_name, component_path(component))
+                for logical_name, component in sorted(adapter_files.items())
+            ),
+            converter=component_path(deployment["tooling"]["converter"]),
+            quantizer=component_path(deployment["tooling"]["quantizer"]),
+            quantization=deployment["quantization"],
+            source_adapter_tree_sha256=(
+                training_source["adapter_tree_sha256"]
+                if training_source is not None
+                else None
+            ),
+        )
+    return resolved
+
+
+def _validate_deployment_pair(
+    inspected: Mapping[str, Mapping[str, Any]],
+    *,
+    source_adapter_tree_sha256: str,
+) -> str:
+    """Bind two actual b10333 deployments without preselecting their route."""
+
+    local_static = inspected["local-static"].get("deployment")
+    local_ft = inspected["local-ft-static"].get("deployment")
+    if (
+        not isinstance(local_static, dict)
+        or not isinstance(local_ft, dict)
+        or local_static.get("side") != "local-static"
+        or local_ft.get("side") != "local-ft-static"
+        or local_static.get("deployment_mode") not in DEPLOYMENT_MODES
+        or local_static.get("deployment_mode") != local_ft.get("deployment_mode")
+        or local_static.get("runtime_release") != "b10333"
+        or local_ft.get("runtime_release") != "b10333"
+        or local_static.get("quantization") != local_ft.get("quantization")
+        or local_ft.get("training_source", {}).get("adapter_tree_sha256")
+        != source_adapter_tree_sha256
+    ):
+        raise PairedOutputError("formal_pair_deployment_binding_invalid")
+    for role in ("converter", "quantizer"):
+        if _deployment_component_fingerprint(
+            local_static["tooling"][role]
+        ) != _deployment_component_fingerprint(local_ft["tooling"][role]):
+            raise PairedOutputError("formal_pair_deployment_tooling_drift")
+    static_model = _deployment_component_fingerprint(
+        local_static["load_components"]["model_gguf"]
     )
-    if actual_adapter_files != expected_adapter_files:
-        raise PairedOutputError("formal_pair_adapter_receipt_mismatch")
+    ft_model = _deployment_component_fingerprint(
+        local_ft["load_components"]["model_gguf"]
+    )
+    mode = local_static["deployment_mode"]
+    if mode == "adapter_on_off":
+        if static_model != ft_model:
+            raise PairedOutputError("formal_pair_shared_base_gguf_drift")
+    elif static_model == ft_model:
+        raise PairedOutputError("formal_pair_paired_gguf_not_distinct")
+    return mode
 
 
 def _validate_pair_contract(
@@ -794,7 +1184,7 @@ def build_pair_receipt(
         or runtime_lock.kind != "frozen_lock"
         or chat_template.kind != "regular_file"
         or pair_contract.kind != "frozen_lock"
-        or local_static.kind != "frozen_lock"
+        or local_static.kind != "canonical_manifest"
         or local_ft_static.kind != "canonical_manifest"
     ):
         raise PairedOutputError("formal_pair_identity_source_kind_invalid")
@@ -804,12 +1194,17 @@ def build_pair_receipt(
         training_receipt, sources["training-receipt"]
     )
     _validate_formal_training_receipt(completed, model_contract=model_contract)
-    _validate_adapter_artifact_binding(
-        completed,
-        base_model=base_model,
-        local_static=local_static,
-        local_ft_static=local_ft_static,
-        inspected=sources,
+    sources["training-receipt"]["source_adapter_files"] = (
+        _inspect_formal_adapter_files(
+            completed,
+            training_receipt=training_receipt,
+        )
+    )
+    _validate_deployment_pair(
+        sources,
+        source_adapter_tree_sha256=completed["artifacts"]["adapter"][
+            "tree_sha256"
+        ],
     )
     runtime_value = _load_identity_source_json(
         runtime_lock, sources["runtime-lock"]
@@ -863,36 +1258,36 @@ def build_pair_receipt(
 
 def _revalidate_built_pair_receipt(
     value: BuiltPairReceipt,
-) -> tuple[dict[str, Any], str, dict[str, dict[str, Any]]]:
+) -> tuple[
+    dict[str, Any],
+    str,
+    dict[str, dict[str, Any]],
+    dict[str, ResolvedDeployment],
+]:
     if not isinstance(value, BuiltPairReceipt) or not all(
         hasattr(value, field) for field in ("receipt", "source_manifest", "sources")
     ):
         raise PairedOutputError("built_pair_receipt_required")
     actual_sources = dict(value.sources)
-    if set(actual_sources) != {
-        "base-model",
-        "local-static",
-        "local-ft-static",
-        "training-receipt",
-        "runtime-lock",
-        "chat-template",
-        "pair-contract",
-    } or any(not isinstance(source, IdentitySource) for source in actual_sources.values()):
+    expected_kinds = {
+        "base-model": "frozen_lock",
+        "local-static": "canonical_manifest",
+        "local-ft-static": "canonical_manifest",
+        "training-receipt": "frozen_lock",
+        "runtime-lock": "frozen_lock",
+        "chat-template": "regular_file",
+        "pair-contract": "frozen_lock",
+    }
+    if set(actual_sources) != set(expected_kinds) or any(
+        not isinstance(source, IdentitySource)
+        or source.kind != expected_kinds[name]
+        for name, source in actual_sources.items()
+    ):
         raise PairedOutputError("built_pair_receipt_sources_invalid")
     inspected = {
         name: inspect_identity_source(source)
         for name, source in actual_sources.items()
     }
-    expected_manifest = value.source_manifest
-    if (
-        not isinstance(expected_manifest, dict)
-        or expected_manifest.get("schema_version") != IDENTITY_SOURCE_SCHEMA_VERSION
-        or expected_manifest.get("contract_version")
-        != IDENTITY_SOURCE_CONTRACT_VERSION
-        or expected_manifest.get("pair_id") != value.receipt.get("pair_id")
-        or expected_manifest.get("sources") != inspected
-    ):
-        raise PairedOutputError("pair_receipt_source_manifest_mismatch")
     normalized, receipt_sha256, contracts = cross_eval.validate_l6_pair_receipt(
         value.receipt
     )
@@ -905,12 +1300,17 @@ def _revalidate_built_pair_receipt(
         inspected["training-receipt"],
     )
     _validate_formal_training_receipt(completed, model_contract=model_contract)
-    _validate_adapter_artifact_binding(
-        completed,
-        base_model=actual_sources["base-model"],
-        local_static=actual_sources["local-static"],
-        local_ft_static=actual_sources["local-ft-static"],
-        inspected=inspected,
+    inspected["training-receipt"]["source_adapter_files"] = (
+        _inspect_formal_adapter_files(
+            completed,
+            training_receipt=actual_sources["training-receipt"],
+        )
+    )
+    _validate_deployment_pair(
+        inspected,
+        source_adapter_tree_sha256=completed["artifacts"]["adapter"][
+            "tree_sha256"
+        ],
     )
     runtime_value = _load_identity_source_json(
         actual_sources["runtime-lock"], inspected["runtime-lock"]
@@ -928,8 +1328,15 @@ def _revalidate_built_pair_receipt(
         runtime_identity=inspected["runtime-lock"],
         chat_identity=inspected["chat-template"],
     )
+    expected_manifest = value.source_manifest
     if (
-        expected_manifest.get("pair_receipt_sha256") != receipt_sha256
+        not isinstance(expected_manifest, dict)
+        or expected_manifest.get("schema_version") != IDENTITY_SOURCE_SCHEMA_VERSION
+        or expected_manifest.get("contract_version")
+        != IDENTITY_SOURCE_CONTRACT_VERSION
+        or expected_manifest.get("pair_id") != value.receipt.get("pair_id")
+        or expected_manifest.get("sources") != inspected
+        or expected_manifest.get("pair_receipt_sha256") != receipt_sha256
         or normalized["base_model_identity_sha256"]
         != inspected["base-model"]["sha256"]
         or normalized["artifacts"]["local-static"]["model_artifact_sha256"]
@@ -941,7 +1348,122 @@ def _revalidate_built_pair_receipt(
         or normalized["shared_contract"] != shared_contract
     ):
         raise PairedOutputError("pair_receipt_source_manifest_mismatch")
-    return normalized, receipt_sha256, contracts
+    return (
+        normalized,
+        receipt_sha256,
+        contracts,
+        _resolved_deployments(actual_sources, inspected),
+    )
+
+
+def write_pair_evidence_locator(
+    pair_receipt: BuiltPairReceipt, path: Path
+) -> dict[str, Any]:
+    """Persist one private locator that can rebuild all formal pair evidence."""
+
+    receipt, _sha256, _contracts, _deployments = _revalidate_built_pair_receipt(
+        pair_receipt
+    )
+    if not isinstance(path, Path):
+        raise PairedOutputError("pair_evidence_path_invalid")
+    sources = {}
+    for name, source in sorted(pair_receipt.sources):
+        try:
+            resolved = source.path.resolve(strict=True)
+        except OSError as exc:
+            raise PairedOutputError("pair_evidence_source_path_invalid") from exc
+        sources[name] = {
+            "kind": source.kind,
+            "path": resolved.as_posix(),
+            "logical_name": source.logical_name,
+        }
+    locator = {
+        "schema_version": PAIR_EVIDENCE_LOCATOR_SCHEMA_VERSION,
+        "contract_version": PAIR_EVIDENCE_LOCATOR_CONTRACT_VERSION,
+        "pair_receipt": receipt,
+        "source_manifest": copy.deepcopy(pair_receipt.source_manifest),
+        "sources": sources,
+    }
+    try:
+        cross_eval._write_exclusive(
+            path, cross_eval._json_file_bytes(locator), mode=0o600
+        )
+    except (cross_eval.CrossEvalError, OSError) as exc:
+        raise PairedOutputError("pair_evidence_write_failed") from exc
+    return copy.deepcopy(locator)
+
+
+def load_pair_evidence_locator(path: Path) -> BuiltPairReceipt:
+    """Rebuild a formal receipt capability and re-hash every referenced object."""
+
+    if not isinstance(path, Path):
+        raise PairedOutputError("pair_evidence_path_invalid")
+    try:
+        raw = cross_eval._safe_read(path, private=True)
+        value = json.loads(raw.decode("utf-8"))
+    except (cross_eval.CrossEvalError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PairedOutputError("pair_evidence_locator_invalid") from exc
+    fields = {
+        "schema_version",
+        "contract_version",
+        "pair_receipt",
+        "source_manifest",
+        "sources",
+    }
+    expected_kinds = {
+        "base-model": "frozen_lock",
+        "local-static": "canonical_manifest",
+        "local-ft-static": "canonical_manifest",
+        "training-receipt": "frozen_lock",
+        "runtime-lock": "frozen_lock",
+        "chat-template": "regular_file",
+        "pair-contract": "frozen_lock",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("schema_version") != PAIR_EVIDENCE_LOCATOR_SCHEMA_VERSION
+        or value.get("contract_version")
+        != PAIR_EVIDENCE_LOCATOR_CONTRACT_VERSION
+        or raw != cross_eval._json_file_bytes(value)
+        or not isinstance(value.get("pair_receipt"), dict)
+        or not isinstance(value.get("source_manifest"), dict)
+        or not isinstance(value.get("sources"), dict)
+        or set(value["sources"]) != set(expected_kinds)
+    ):
+        raise PairedOutputError("pair_evidence_locator_invalid")
+    sources: dict[str, IdentitySource] = {}
+    for name, source_value in value["sources"].items():
+        if (
+            not isinstance(source_value, dict)
+            or set(source_value) != {"kind", "path", "logical_name"}
+            or source_value.get("kind") != expected_kinds[name]
+            or not isinstance(source_value.get("path"), str)
+            or not isinstance(source_value.get("logical_name"), str)
+        ):
+            raise PairedOutputError("pair_evidence_locator_source_invalid")
+        source_path = Path(source_value["path"])
+        try:
+            resolved = source_path.resolve(strict=True)
+        except OSError as exc:
+            raise PairedOutputError("pair_evidence_source_path_invalid") from exc
+        if (
+            not source_path.is_absolute()
+            or source_path.as_posix() != source_value["path"]
+            or source_path != resolved
+        ):
+            raise PairedOutputError("pair_evidence_source_path_invalid")
+        sources[name] = IdentitySource(
+            source_value["kind"], resolved, source_value["logical_name"]
+        )
+    built = BuiltPairReceipt._from_inspected_sources(
+        value["pair_receipt"], value["source_manifest"], sources
+    )
+    try:
+        _revalidate_built_pair_receipt(built)
+    except cross_eval.CrossEvalError as exc:
+        raise PairedOutputError("pair_evidence_receipt_invalid") from exc
+    return built
 
 
 def _decision_terminal(decision: Mapping[str, Any]) -> dict[str, Any]:
@@ -1196,7 +1718,9 @@ def run_paired_outputs(
     *,
     pair_receipt: BuiltPairReceipt,
     run_dir: Path,
-    invoke: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
+    invoke: Callable[
+        [str, Mapping[str, Any], ResolvedDeployment], Mapping[str, Any]
+    ],
     max_new_terminals: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run both local sides serially and record one honest terminal per sample.
@@ -1207,8 +1731,8 @@ def run_paired_outputs(
     """
 
     cross_eval.validate_cohort_bundle(bundle)
-    receipt, receipt_sha256, contracts = _revalidate_built_pair_receipt(
-        pair_receipt
+    receipt, receipt_sha256, contracts, deployments = (
+        _revalidate_built_pair_receipt(pair_receipt)
     )
     if not callable(invoke):
         raise PairedOutputError("paired_invoke_invalid")
@@ -1261,7 +1785,11 @@ def run_paired_outputs(
         )
         try:
             terminal = _decision_terminal(
-                invoke(side, copy.deepcopy(source["input"]))
+                invoke(
+                    side,
+                    copy.deepcopy(source["input"]),
+                    deployments[side],
+                )
             )
         except SampleTerminal as exc:
             terminal = _failure_terminal(exc.status, exc.failure_code)
@@ -1305,8 +1833,8 @@ def resolve_interrupted_attempt(
     """
 
     cross_eval.validate_cohort_bundle(bundle)
-    receipt, receipt_sha256, contracts = _revalidate_built_pair_receipt(
-        pair_receipt
+    receipt, receipt_sha256, contracts, _deployments = (
+        _revalidate_built_pair_receipt(pair_receipt)
     )
     terminal = _infrastructure_terminal(failure_code)
     items = {item["sample_id"]: item for item in bundle.manifest["items"]}
@@ -1433,5 +1961,7 @@ def formal_pair_evidence(
 ) -> cross_eval.FormalL6PairEvidence:
     """Revalidate every actual source and return a formal-import capability."""
 
-    receipt, _sha256, _contracts = _revalidate_built_pair_receipt(pair_receipt)
+    receipt, _sha256, _contracts, _deployments = _revalidate_built_pair_receipt(
+        pair_receipt
+    )
     return cross_eval.FormalL6PairEvidence._from_source_validation(receipt)

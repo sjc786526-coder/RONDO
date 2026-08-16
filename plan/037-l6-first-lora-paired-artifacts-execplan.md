@@ -213,8 +213,9 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
    版本化的 terminal union/importer 兼容，并以 mixed-terminal fixture 证明导入及后续匿名候选表示不补造 decision；
    既有 v1 decision、130 条 cohort identity 和 65 / 65 分批保持不变。
 4. canonical pair receipt 的 base、两种工件和 training receipt 身份必须由 runner 从实际 regular file、冻结 lock 或
-   含全部组件哈希的 canonical artifact manifest 计算，不能接受调用方随意自报字符串；receipt 绑定两种不同工件哈希与
-   五项 shared contract，并让 Plan 036 从私有完整输出重算验证。正式三方导入精确覆盖 `130 × 3` 个 sample-side，
+   含全部组件哈希的 canonical deployment manifest 计算，不能接受调用方随意自报字符串。两侧 manifest 必须绑定
+   b10333 实际加载的 GGUF/adapter 与 converter、quantizer、quantization；微调侧还要绑定 formal source adapter tree。
+   私有 evidence locator 只能通过重新读取这些实物恢复正式导入能力。正式三方导入精确覆盖 `130 × 3` 个 sample-side，
    不缺、不重、不混分区；本任务不继续打 Opus 裁判包，也不运行正式 Local M4。
 
 ### 3.5 本地资源、安全与 Git
@@ -289,10 +290,11 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
   receipt、逐文件 artifact export/download 验真和超时/监控/止费说明已落地。候选 image 为
   `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`；本地 mock 不加载模型且 optimizer step 为 0。
 - Plan 036 前置已版本化支持 decision / structured-output failure / refusal / timeout / infrastructure failure，非 decision
-  不伪造成 deny；formal v2 导入只接受 BuildPairReceipt 实物重验产生的 evidence，训练 receipt 的 adapter tree 与微调侧
-  canonical manifest 精确相等。attempt-first、终态 fsync journal 的悬空 attempt 可显式收敛后继续剩余样本且不重调。
-  既有 v1 decision 导入/盲评语义保持兼容。
-- 最终 focused unittest 68/68 通过；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups，
+  不伪造成 deny；两侧 canonical b10333 deployment manifest 同时支持 adapter on/off 与 paired GGUF，绑定实际加载工件、
+  共同转换/量化身份及 formal source adapter tree。formal v2 的文件入口通过 0600 private evidence locator 重建
+  BuiltPairReceipt 并重新哈希七项 source；`verify-import`、`pack`、`import-results` 共用该路径，既有 v1 语义保持兼容。
+  attempt-first、终态 fsync journal 的悬空 attempt 可显式收敛后继续剩余样本且不重调。
+- 最终 focused unittest 75/75 通过；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups，
   `waiting_for_l6_outputs`；精确 census 重算逐字一致、mock dry-run、bundle 解包后自校验、`py_compile`、entrypoint
   `bash -n`、JSON 解析、候选依赖解析、敏感/大文件/权限检查和 `git diff --check` 均通过。训练与 pair 各完成两轮
   独立审查，已关闭发现且没有阶段一阻断。
@@ -313,7 +315,7 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 
 ### 当前工作
 
-- 阶段一已完成并提交任务分支；当前停止在用户审查与阶段二单独授权门前。
+- 阶段一审查窄修已完成并提交任务分支；当前停止在用户审查与阶段二单独授权门前。
 
 ### 本任务剩余步骤
 
@@ -356,4 +358,4 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 | 012 | tracked synthetic/TB 数据按普通项目数据处理；validation 可被普通工具和兼容测试读取，但不得进入训练、上传或训练决策 | 保留训练归因所需的最小卫生，避免把普通合成数据隐私化或扩建审计体系 | 数据分类 / 隔离 | 已采纳 |
 | 013 | 阶段二主路线为 Secure A40 48 GB + 40 GB container disk + 100 GB Pod volume；不建 template/credential/network volume，条件式 HF 私有 repo 只作产物持久化 | 当前 live 价格、容量与 470 条 token 规模下成本最低且余量充足；A40 可用区当前不支持 network volume | 资源 / 预算 | 阶段一候选，待阶段二授权与创建前复核 |
 | 014 | 候选 QLoRA 为 rank 16、固定文本层 regex target、LR 2e-4、batch 1 × accum 8、2 epochs、NF4 4-bit、无 packing；target regex 属安全边界不允许 smoke 后漂移，loader/attention、rank、batch/accum/LR、epochs/max steps/max sequence length 和依赖允许一次有据收敛 | 本地能证明格式/mask与 runtime 模块范围，但不能证明真实 8B 显存和云端依赖兼容性 | recipe | 阶段一候选，正式训练前冻结 |
-| 015 | formal v2 pair 导入必须保留 BuiltPairReceipt 的实物 source evidence；未微调侧绑定冻结 base contract，微调侧 adapter manifest 必须逐文件等于 completed formal training receipt | 保留 v1 fixture/结构兼容，同时防止自报 receipt、任意 sampling 或任意工件冒充正式同源比较 | pair attribution | 已采纳 |
+| 015 | formal v2 pair 导入必须用 private evidence locator 重建并重验 BuiltPairReceipt；两侧分别绑定 b10333 实际 deployment manifest，adapter on/off 与 paired GGUF 都保留，微调侧绑定 completed formal source adapter tree 与转换身份 | 保留 v1 兼容且不预先锁死本地部署路线，同时防止合同 JSON、自报 receipt 或任意工件冒充实际加载的正式同源比较 | pair attribution | 已采纳 |

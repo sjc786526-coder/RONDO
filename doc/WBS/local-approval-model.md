@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-15（Plan 037 阶段一本地准备完成，等待 L6 阶段二授权）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-16（Plan 037 阶段一本地准备完成，等待 L6 阶段二授权）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -190,7 +190,8 @@
 1. **L5b 与 M4 离线准备均已完成**：600 条合成训练资产及 130 条 validation 主体 cohort 已冻结；真实 holdout
    未被本次准备任务打开或物化。
 2. **L6 阶段一本地准备已完成**：470 条 train-only 投影、冻结 tokenizer/template 精确 census、completion-only
-   mask、候选 QLoRA/RunPod 脚手架，以及非 decision 终态与实物哈希 pair runner 已就绪；没有创建云资源、上传、
+   mask、候选 QLoRA/RunPod 脚手架，以及同时支持 adapter on/off / paired GGUF 的实物 deployment pair runner 已就绪；
+   formal v2 私有文件入口会由 evidence locator 重验全部来源；没有创建云资源、上传、
    8B optimizer smoke、训练或 130 条输出。
 3. **下一产品工作是 L6 阶段二**：用户单独授权 RunPod 预算与对象后，先做真实 optimizer smoke 和 adapter reload，
    再冻结最终 recipe 并只完成一个有效正式训练；产物回收并形成同源成对输出后才正式执行 Local M4。
@@ -454,8 +455,9 @@ prompt 是少数能被完全冻结的部分，必须冻死。首版为
 
 **三方导入与成对归因**：`sol-static` 只取 validation 已有的 point-in-time target，不重新调用教师；
 `local-static` 与 `local-ft-static` 必须由 L6 同一 pair 生成，除工件角色/身份与训练 receipt 外，共享 base lineage、
-runtime、chat template、request、sampling 与 output contract。L6 还必须提供 canonical 私有 pair receipt，其内容哈希
-绑定两侧输出的工件与 provenance；只有输出自报字段或 Plan 033 baseline 均不被接受。三方每条都回显完整
+runtime、chat template、request、sampling 与 output contract。L6 还必须提供两侧 canonical b10333 deployment
+manifest，绑定实际加载的 GGUF/adapter、共同转换/量化身份及 formal source adapter tree；正式私有文件导入从
+0600 evidence locator 重建并重哈希这些来源。只有合同 JSON、输出自报字段或 Plan 033 baseline 均不被接受。三方每条都回显完整
 canonical approval input，由导入器与冻结 validation 深比较；缺 side、重复/未知 side、正文/消息边界或任何身份
 漂移都拒绝。
 

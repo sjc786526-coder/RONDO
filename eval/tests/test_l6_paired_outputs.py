@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import copy
+import contextlib
 import hashlib
+import io
 import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import jsonschema
 
@@ -213,33 +216,91 @@ def build_receipt(
     runtime_lock_path: Path | None = None,
     pair_contract_path: Path | None = None,
     bind_adapter_receipt: bool = True,
+    deployment_mode: str = "adapter_on_off",
+    deployment_drift: str | None = None,
 ) -> paired_outputs.BuiltPairReceipt:
-    adapter = directory / "adapter.safetensors"
-    finetuned = directory / "adapter.manifest.json"
+    source_adapter_root = directory / "adapter-final"
+    source_adapter_root.mkdir()
+    source_adapter = source_adapter_root / "adapter_model.safetensors"
+    source_adapter.write_bytes(b"fixture-formal-source-adapter")
+    base_gguf = directory / "base-model.gguf"
+    base_gguf.write_bytes(b"fixture-shared-base-gguf")
+    finetuned_gguf = directory / "finetuned-model.gguf"
+    finetuned_gguf.write_bytes(b"fixture-distinct-finetuned-gguf")
+    deployed_adapter = directory / "deployed-adapter.gguf"
+    deployed_adapter.write_bytes(b"fixture-deployed-adapter")
+    converter = directory / "converter.identity"
+    converter.write_bytes(b"fixture-converter-identity")
+    quantizer = directory / "quantizer.identity"
+    quantizer.write_bytes(b"fixture-quantizer-identity")
+    alternate_converter = directory / "alternate-converter.identity"
+    alternate_converter.write_bytes(b"different-converter-identity")
+    local_static_manifest = directory / "local-static.deployment.json"
+    local_ft_manifest = directory / "local-ft-static.deployment.json"
     training = directory / "training-receipt.json"
-    adapter.write_bytes(b"fixture-finetuned-adapter")
-    write_canonical(
-        finetuned,
-        paired_outputs.build_canonical_artifact_manifest(
-            artifact_id=paired_outputs.FORMAL_ADAPTER_ARTIFACT_ID,
-            manifest_path=finetuned,
-            components={"adapter.safetensors": adapter},
-        ),
-    )
     receipt_value = copy.deepcopy(
         formal_training_receipt() if training_value is None else training_value
     )
     if bind_adapter_receipt:
         adapter_files = {
-            "adapter.safetensors": {
-                "bytes": adapter.stat().st_size,
-                "sha256": digest_bytes(adapter.read_bytes()),
+            "adapter_model.safetensors": {
+                "bytes": source_adapter.stat().st_size,
+                "sha256": digest_bytes(source_adapter.read_bytes()),
             }
         }
         receipt_value["artifacts"]["adapter"] = {
             "files": adapter_files,
             "tree_sha256": cross_eval._canonical_sha256(adapter_files),
         }
+    source_adapter_tree_sha256 = receipt_value["artifacts"]["adapter"][
+        "tree_sha256"
+    ]
+    ft_model_gguf = (
+        base_gguf if deployment_mode == "adapter_on_off" else finetuned_gguf
+    )
+    if deployment_drift == "model":
+        ft_model_gguf = (
+            finetuned_gguf if deployment_mode == "adapter_on_off" else base_gguf
+        )
+    ft_converter = alternate_converter if deployment_drift == "tooling" else converter
+    ft_quantization = "Q5_K_M" if deployment_drift == "quantization" else "Q4_K_M"
+    ft_source_tree = (
+        digest("wrong-source-adapter-tree")
+        if deployment_drift == "source-tree"
+        else source_adapter_tree_sha256
+    )
+    write_canonical(
+        local_static_manifest,
+        paired_outputs.build_b10333_deployment_manifest(
+            deployment_id="fixture-local-static",
+            manifest_path=local_static_manifest,
+            deployment_mode=deployment_mode,
+            side="local-static",
+            model_gguf=base_gguf,
+            converter=converter,
+            quantizer=quantizer,
+            quantization="Q4_K_M",
+        ),
+    )
+    write_canonical(
+        local_ft_manifest,
+        paired_outputs.build_b10333_deployment_manifest(
+            deployment_id="fixture-local-ft-static",
+            manifest_path=local_ft_manifest,
+            deployment_mode=deployment_mode,
+            side="local-ft-static",
+            model_gguf=ft_model_gguf,
+            converter=ft_converter,
+            quantizer=quantizer,
+            quantization=ft_quantization,
+            deployed_adapter_files=(
+                {"deployed-adapter": deployed_adapter}
+                if deployment_mode == "adapter_on_off"
+                else None
+            ),
+            source_adapter_tree_sha256=ft_source_tree,
+        ),
+    )
     training.write_bytes(
         (
             json.dumps(
@@ -265,10 +326,10 @@ def build_receipt(
         pair_id=pair_id,
         base_model=paired_outputs.IdentitySource("frozen_lock", base, "base-lock"),
         local_static=paired_outputs.IdentitySource(
-            "frozen_lock", base, "unfinetuned-base-lock"
+            "canonical_manifest", local_static_manifest, "local-static-deployment"
         ),
         local_ft_static=paired_outputs.IdentitySource(
-            "canonical_manifest", finetuned, "finetuned-manifest"
+            "canonical_manifest", local_ft_manifest, "local-ft-deployment"
         ),
         training_receipt=paired_outputs.IdentitySource(
             "frozen_lock", training, "training-receipt"
@@ -303,11 +364,11 @@ class PairReceiptIdentityTests(unittest.TestCase):
             )
             self.assertEqual(
                 built.receipt["artifacts"]["local-static"]["model_artifact_sha256"],
-                sources["base-model"]["sha256"],
+                digest_bytes((directory / "local-static.deployment.json").read_bytes()),
             )
             self.assertEqual(
                 built.receipt["artifacts"]["local-ft-static"]["model_artifact_sha256"],
-                digest_bytes((directory / "adapter.manifest.json").read_bytes()),
+                digest_bytes((directory / "local-ft-static.deployment.json").read_bytes()),
             )
             self.assertEqual(
                 built.receipt["artifacts"]["local-ft-static"]["training_receipt_sha256"],
@@ -318,17 +379,24 @@ class PairReceiptIdentityTests(unittest.TestCase):
                 digest_bytes(cross_eval._json_file_bytes(built.receipt)),
             )
             self.assertEqual(
-                sources["local-ft-static"]["components"],
-                [
-                    {
-                        "logical_name": "adapter.safetensors",
-                        "relative_path": "adapter.safetensors",
-                        "size_bytes": (directory / "adapter.safetensors").stat().st_size,
+                sources["local-static"]["deployment"]["deployment_mode"],
+                "adapter_on_off",
+            )
+            self.assertEqual(
+                sources["training-receipt"]["source_adapter_files"],
+                {
+                    "adapter_model.safetensors": {
+                        "size_bytes": (
+                            directory / "adapter-final/adapter_model.safetensors"
+                        ).stat().st_size,
                         "sha256": digest_bytes(
-                            (directory / "adapter.safetensors").read_bytes()
+                            (
+                                directory
+                                / "adapter-final/adapter_model.safetensors"
+                            ).read_bytes()
                         ),
                     }
-                ],
+                },
             )
             with self.assertRaises(TypeError):
                 paired_outputs.BuiltPairReceipt()
@@ -341,7 +409,7 @@ class PairReceiptIdentityTests(unittest.TestCase):
                     fixture_bundle(),
                     pair_receipt=built.receipt,  # type: ignore[arg-type]
                     run_dir=run_dir,
-                    invoke=lambda _side, _payload: {},
+                    invoke=lambda _side, _payload, _deployment: {},
                 )
             with self.assertRaisesRegex(
                 paired_outputs.PairedOutputError, "built_pair_receipt_required"
@@ -349,18 +417,380 @@ class PairReceiptIdentityTests(unittest.TestCase):
                 paired_outputs.assemble_three_side_outputs(
                     fixture_bundle(), [], pair_receipt=built.receipt  # type: ignore[arg-type]
                 )
-            (directory / "adapter.safetensors").write_bytes(b"changed-adapter")
+            (directory / "deployed-adapter.gguf").write_bytes(b"changed-adapter")
             called = []
             with self.assertRaisesRegex(
-                paired_outputs.PairedOutputError, "artifact_manifest_component_drift"
+                paired_outputs.PairedOutputError,
+                "deployment_manifest_component_drift",
             ):
                 paired_outputs.run_paired_outputs(
                     fixture_bundle(),
                     pair_receipt=built,
                     run_dir=run_dir,
-                    invoke=lambda side, _payload: called.append(side) or {},
+                    invoke=lambda side, _payload, _deployment: called.append(side)
+                    or {},
                 )
             self.assertEqual(called, [])
+
+    def test_adapter_on_off_and_paired_gguf_resolve_actual_load_paths(self) -> None:
+        for mode in ("adapter_on_off", "paired_gguf"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                built = build_receipt(directory, deployment_mode=mode)
+                seen: dict[str, paired_outputs.ResolvedDeployment] = {}
+                run_dir = directory / "deployment-run"
+                run_dir.mkdir(mode=0o700)
+
+                def invoke(
+                    side: str,
+                    _payload: dict,
+                    deployment: paired_outputs.ResolvedDeployment,
+                ) -> dict:
+                    seen[side] = deployment
+                    return {
+                        "outcome": "allow",
+                        "rationale": "Validated deployment fixture decision.",
+                        "risk_tags": [],
+                    }
+
+                rows = paired_outputs.run_paired_outputs(
+                    fixture_bundle(),
+                    pair_receipt=built,
+                    run_dir=run_dir,
+                    invoke=invoke,
+                )
+                self.assertEqual(set(seen), set(paired_outputs.LOCAL_SIDE_ORDER))
+                self.assertEqual(len(rows), 12)
+                self.assertTrue(
+                    all(item.deployment_mode == mode for item in seen.values())
+                )
+                self.assertEqual(
+                    seen["local-static"].manifest_sha256,
+                    built.receipt["artifacts"]["local-static"][
+                        "model_artifact_sha256"
+                    ],
+                )
+                actual_training_receipt = json.loads(
+                    (directory / "training-receipt.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(
+                    seen["local-ft-static"].source_adapter_tree_sha256,
+                    actual_training_receipt["artifacts"]["adapter"]["tree_sha256"],
+                )
+                if mode == "adapter_on_off":
+                    self.assertEqual(
+                        seen["local-static"].model_gguf,
+                        seen["local-ft-static"].model_gguf,
+                    )
+                    self.assertTrue(seen["local-ft-static"].adapter_files)
+                    self.assertFalse(seen["local-static"].adapter_files)
+                else:
+                    self.assertNotEqual(
+                        seen["local-static"].model_gguf,
+                        seen["local-ft-static"].model_gguf,
+                    )
+                    self.assertFalse(seen["local-static"].adapter_files)
+                    self.assertFalse(seen["local-ft-static"].adapter_files)
+
+    def test_deployment_pair_rejects_route_specific_and_shared_fact_drift(self) -> None:
+        cases = (
+            ("adapter_on_off", "model", "formal_pair_shared_base_gguf_drift"),
+            ("paired_gguf", "model", "formal_pair_paired_gguf_not_distinct"),
+            ("adapter_on_off", "tooling", "formal_pair_deployment_tooling_drift"),
+            ("paired_gguf", "quantization", "formal_pair_deployment_binding_invalid"),
+            ("paired_gguf", "source-tree", "formal_pair_deployment_binding_invalid"),
+        )
+        for mode, drift, error in cases:
+            with (
+                self.subTest(mode=mode, drift=drift),
+                tempfile.TemporaryDirectory() as temporary,
+                self.assertRaisesRegex(paired_outputs.PairedOutputError, error),
+            ):
+                build_receipt(
+                    Path(temporary),
+                    deployment_mode=mode,
+                    deployment_drift=drift,
+                )
+
+    def test_formal_source_adapter_and_deployment_components_are_reread(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            built = build_receipt(directory)
+            run_dir = directory / "source-adapter-drift-run"
+            run_dir.mkdir(mode=0o700)
+            (directory / "adapter-final/adapter_model.safetensors").write_bytes(
+                b"drifted-formal-source-adapter"
+            )
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError,
+                "formal_pair_source_adapter_drift",
+            ):
+                paired_outputs.run_paired_outputs(
+                    fixture_bundle(),
+                    pair_receipt=built,
+                    run_dir=run_dir,
+                    invoke=lambda _side, _payload, _deployment: {},
+                )
+
+        for unknown_kind in ("file", "symlink"):
+            with (
+                self.subTest(unknown_kind=unknown_kind),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                directory = Path(temporary)
+                built = build_receipt(directory)
+                run_dir = directory / f"unknown-adapter-{unknown_kind}-run"
+                run_dir.mkdir(mode=0o700)
+                unknown = directory / "adapter-final/unreported.bin"
+                if unknown_kind == "file":
+                    unknown.write_bytes(b"unreported-conversion-input")
+                else:
+                    os.symlink(
+                        directory / "adapter-final/adapter_model.safetensors",
+                        unknown,
+                    )
+                called: list[str] = []
+                expected_error = (
+                    "formal_pair_source_adapter_tree_mismatch"
+                    if unknown_kind == "file"
+                    else "formal_pair_source_adapter_invalid"
+                )
+                with self.assertRaisesRegex(
+                    paired_outputs.PairedOutputError, expected_error
+                ):
+                    paired_outputs.run_paired_outputs(
+                        fixture_bundle(),
+                        pair_receipt=built,
+                        run_dir=run_dir,
+                        invoke=lambda side, _payload, _deployment: called.append(side)
+                        or {},
+                        max_new_terminals=1,
+                    )
+                self.assertEqual(called, [])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            built = build_receipt(directory, deployment_mode="paired_gguf")
+            run_dir = directory / "tool-drift-run"
+            run_dir.mkdir(mode=0o700)
+            (directory / "converter.identity").write_bytes(b"drifted-converter")
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError,
+                "deployment_manifest_component_drift",
+            ):
+                paired_outputs.run_paired_outputs(
+                    fixture_bundle(),
+                    pair_receipt=built,
+                    run_dir=run_dir,
+                    invoke=lambda _side, _payload, _deployment: {},
+                )
+
+    def test_private_pair_evidence_locator_rebuilds_and_rehashes_all_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            built = build_receipt(directory, deployment_mode="paired_gguf")
+            private = directory / "private"
+            private.mkdir(mode=0o700)
+            locator_path = private / "pair-evidence.json"
+            locator = paired_outputs.write_pair_evidence_locator(
+                built, locator_path
+            )
+            self.assertEqual(stat_mode(locator_path), 0o600)
+            self.assertEqual(
+                locator_path.read_bytes(), cross_eval._json_file_bytes(locator)
+            )
+            self.assertEqual(
+                set(locator["sources"]),
+                {
+                    "base-model",
+                    "local-static",
+                    "local-ft-static",
+                    "training-receipt",
+                    "runtime-lock",
+                    "chat-template",
+                    "pair-contract",
+                },
+            )
+            self.assertTrue(
+                all(
+                    Path(source["path"]).is_absolute()
+                    and set(source) == {"kind", "path", "logical_name"}
+                    for source in locator["sources"].values()
+                )
+            )
+            rebuilt = paired_outputs.load_pair_evidence_locator(locator_path)
+            evidence = paired_outputs.formal_pair_evidence(rebuilt)
+            self.assertEqual(evidence.receipt, built.receipt)
+
+            (directory / "finetuned-model.gguf").write_bytes(
+                b"drifted-finetuned-model"
+            )
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError,
+                "deployment_manifest_component_drift",
+            ):
+                paired_outputs.load_pair_evidence_locator(locator_path)
+
+    def test_private_pair_evidence_locator_rejects_mode_and_body_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            private = directory / "private"
+            private.mkdir(mode=0o700)
+            built = build_receipt(directory)
+            locator_path = private / "pair-evidence.json"
+            locator = paired_outputs.write_pair_evidence_locator(
+                built, locator_path
+            )
+            os.chmod(locator_path, 0o644)
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError, "pair_evidence_locator_invalid"
+            ):
+                paired_outputs.load_pair_evidence_locator(locator_path)
+
+            os.chmod(locator_path, 0o600)
+            locator["pair_receipt"]["blind_identity_markers"].append(
+                "tampered-marker"
+            )
+            locator_path.write_bytes(cross_eval._json_file_bytes(locator))
+            os.chmod(locator_path, 0o600)
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError,
+                "pair_receipt_source_manifest_mismatch",
+            ):
+                paired_outputs.load_pair_evidence_locator(locator_path)
+
+    def test_v2_file_import_and_cli_require_and_propagate_pair_evidence(self) -> None:
+        bundle = fixture_bundle()
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            private = directory / "private"
+            private.mkdir(mode=0o700)
+            built = build_receipt(directory)
+            run_dir = directory / "run"
+            run_dir.mkdir(mode=0o700)
+            local = paired_outputs.run_paired_outputs(
+                bundle,
+                pair_receipt=built,
+                run_dir=run_dir,
+                invoke=lambda _side, _payload, _deployment: {
+                    "outcome": "allow",
+                    "rationale": "Synthetic fixture decision.",
+                    "risk_tags": [],
+                },
+            )
+            rows = paired_outputs.assemble_three_side_outputs(
+                bundle, local, pair_receipt=built
+            )
+            outputs_path = private / "three-side-outputs.jsonl"
+            receipt_path = private / "pair-receipt.json"
+            evidence_path = private / "pair-evidence.json"
+            cross_eval._write_exclusive(
+                outputs_path, cross_eval._jsonl_bytes(rows), mode=0o600
+            )
+            cross_eval._write_exclusive(
+                receipt_path,
+                cross_eval._json_file_bytes(built.receipt),
+                mode=0o600,
+            )
+            paired_outputs.write_pair_evidence_locator(built, evidence_path)
+
+            with mock.patch.object(
+                cross_eval, "load_synthetic_bundle", return_value=bundle
+            ):
+                with self.assertRaisesRegex(
+                    cross_eval.CrossEvalError, "l6_pair_sources_required"
+                ):
+                    cross_eval.validate_three_side_import(
+                        WORKTREE_ROOT, outputs_path, receipt_path
+                    )
+                _bundle, accepted, evidence = cross_eval.validate_three_side_import(
+                    WORKTREE_ROOT,
+                    outputs_path,
+                    receipt_path,
+                    pair_evidence_path=evidence_path,
+                )
+                self.assertEqual(len(accepted), 18)
+                self.assertIsInstance(evidence, cross_eval.FormalL6PairEvidence)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result = cross_eval.main(
+                        [
+                            "verify-import",
+                            "--worktree-root",
+                            str(WORKTREE_ROOT),
+                            "--outputs",
+                            str(outputs_path),
+                            "--pair-receipt",
+                            str(receipt_path),
+                            "--pair-evidence",
+                            str(evidence_path),
+                        ]
+                    )
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                json.loads(output.getvalue())["status"],
+                "ready_for_blind_packaging",
+            )
+
+            with mock.patch.object(
+                cross_eval,
+                "prepare_private_blind_review",
+                return_value={"status": "awaiting_judge_results"},
+            ) as prepare:
+                self.assertEqual(
+                    cross_eval.main(
+                        [
+                            "pack",
+                            "--worktree-root",
+                            str(WORKTREE_ROOT),
+                            "--outputs",
+                            str(outputs_path),
+                            "--pair-receipt",
+                            str(receipt_path),
+                            "--pair-evidence",
+                            str(evidence_path),
+                            "--private-dir",
+                            str(private),
+                            "--judge-model",
+                            "fixture-judge",
+                            "--judged-date",
+                            FIXTURE_DATE,
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    prepare.call_args.kwargs["pair_evidence_path"], evidence_path
+                )
+            with mock.patch.object(
+                cross_eval,
+                "import_unblind_and_aggregate",
+                return_value={"status": "complete"},
+            ) as import_results:
+                self.assertEqual(
+                    cross_eval.main(
+                        [
+                            "import-results",
+                            "--worktree-root",
+                            str(WORKTREE_ROOT),
+                            "--outputs",
+                            str(outputs_path),
+                            "--pair-receipt",
+                            str(receipt_path),
+                            "--pair-evidence",
+                            str(evidence_path),
+                            "--private-dir",
+                            str(private),
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    import_results.call_args.kwargs["pair_evidence_path"],
+                    evidence_path,
+                )
 
     def test_symlink_noncanonical_manifest_and_identical_artifacts_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -449,7 +879,7 @@ class PairReceiptIdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(
                 paired_outputs.PairedOutputError,
-                "formal_pair_adapter_receipt_mismatch",
+                "formal_pair_source_adapter_drift",
             ):
                 build_receipt(
                     Path(temporary),
@@ -559,7 +989,11 @@ class MixedTerminalPairTests(unittest.TestCase):
             calls: list[str] = []
             side_counts = {side: 0 for side in paired_outputs.LOCAL_SIDE_ORDER}
 
-            def invoke(side: str, _approval_input: dict) -> dict:
+            def invoke(
+                side: str,
+                _approval_input: dict,
+                _deployment: paired_outputs.ResolvedDeployment,
+            ) -> dict:
                 calls.append(side)
                 index = side_counts[side]
                 side_counts[side] += 1
@@ -687,7 +1121,7 @@ class MixedTerminalPairTests(unittest.TestCase):
                 bundle,
                 pair_receipt=built_receipt,
                 run_dir=run_dir,
-                invoke=lambda _side, _payload: {
+                invoke=lambda _side, _payload, _deployment: {
                     "outcome": "allow",
                     "rationale": "Synthetic fixture decision.",
                     "risk_tags": [],
@@ -715,7 +1149,7 @@ class MixedTerminalPairTests(unittest.TestCase):
                 bundle,
                 pair_receipt=built_receipt,
                 run_dir=run_dir,
-                invoke=lambda _side, _payload: {
+                invoke=lambda _side, _payload, _deployment: {
                     "outcome": "allow",
                     "rationale": "Synthetic fixture decision.",
                     "risk_tags": [],
@@ -746,7 +1180,11 @@ class MixedTerminalPairTests(unittest.TestCase):
 
 class PairedJournalTests(unittest.TestCase):
     @staticmethod
-    def decision(_side: str, _payload: dict) -> dict:
+    def decision(
+        _side: str,
+        _payload: dict,
+        _deployment: paired_outputs.ResolvedDeployment,
+    ) -> dict:
         return {
             "outcome": "allow",
             "rationale": "Synthetic durable-journal fixture decision.",
@@ -762,9 +1200,13 @@ class PairedJournalTests(unittest.TestCase):
             run_dir.mkdir(mode=0o700)
             calls: list[tuple[str, str]] = []
 
-            def invoke(side: str, payload: dict) -> dict:
+            def invoke(
+                side: str,
+                payload: dict,
+                deployment: paired_outputs.ResolvedDeployment,
+            ) -> dict:
                 calls.append((side, cross_eval._canonical_sha256(payload)))
-                return self.decision(side, payload)
+                return self.decision(side, payload, deployment)
 
             partial = paired_outputs.run_paired_outputs(
                 bundle,
@@ -797,7 +1239,11 @@ class PairedJournalTests(unittest.TestCase):
             run_dir.mkdir(mode=0o700)
             first_calls: list[tuple[str, str]] = []
 
-            def interrupted(side: str, payload: dict) -> dict:
+            def interrupted(
+                side: str,
+                payload: dict,
+                _deployment: paired_outputs.ResolvedDeployment,
+            ) -> dict:
                 first_calls.append((side, cross_eval._canonical_sha256(payload)))
                 raise RuntimeError("synthetic interruption")
 
@@ -818,10 +1264,10 @@ class PairedJournalTests(unittest.TestCase):
                     bundle,
                     pair_receipt=receipt,
                     run_dir=run_dir,
-                    invoke=lambda side, payload: resumed_calls.append(
+                    invoke=lambda side, payload, deployment: resumed_calls.append(
                         (side, cross_eval._canonical_sha256(payload))
                     )
-                    or self.decision(side, payload),
+                    or self.decision(side, payload, deployment),
                 )
             self.assertEqual(resumed_calls, [])
 
@@ -864,10 +1310,10 @@ class PairedJournalTests(unittest.TestCase):
                 bundle,
                 pair_receipt=receipt,
                 run_dir=run_dir,
-                invoke=lambda side, payload: resumed_calls.append(
+                invoke=lambda side, payload, deployment: resumed_calls.append(
                     (side, cross_eval._canonical_sha256(payload))
                 )
-                or self.decision(side, payload),
+                or self.decision(side, payload, deployment),
             )
             self.assertEqual(len(completed), 12)
             self.assertEqual(len(resumed_calls), 11)
@@ -929,7 +1375,7 @@ class PairedJournalTests(unittest.TestCase):
                     bundle,
                     pair_receipt=receipt,
                     run_dir=interrupted_run,
-                    invoke=lambda _side, _payload: (_ for _ in ()).throw(
+                    invoke=lambda _side, _payload, _deployment: (_ for _ in ()).throw(
                         RuntimeError("interrupt")
                     ),
                 )

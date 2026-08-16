@@ -122,16 +122,16 @@ them.
 
 ```bash
 runpodctl ssh info "$TASK_POD_ID"
-TASK_POD_IP='<PUBLIC_IP_FROM_SSH_INFO>'
-TASK_POD_SSH_PORT='<MAPPED_TCP_22_PORT_FROM_SSH_INFO>'
+TASK_SSH_HOST='<PUBLIC_IP_FROM_SSH_INFO>'
+TASK_SSH_PORT='<MAPPED_TCP_22_PORT_FROM_SSH_INFO>'
 TASK_SSH_KEY='<LOCAL_PRIVATE_SSH_KEY_PATH>'
 
 ssh -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
-  -p "$TASK_POD_SSH_PORT" root@"$TASK_POD_IP" \
+  -p "$TASK_SSH_PORT" root@"$TASK_SSH_HOST" \
   'install -d -m 700 /workspace/rondo-l6/incoming /workspace/rondo-l6/runs /workspace/rondo-l6/controller-logs /workspace/rondo-l6/contracts'
 scp -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
-  -P "$TASK_POD_SSH_PORT" "$TASK_BUNDLE_TAR" \
-  root@"$TASK_POD_IP":/workspace/rondo-l6/incoming/train-only-bundle.tar
+  -P "$TASK_SSH_PORT" "$TASK_BUNDLE_TAR" \
+  root@"$TASK_SSH_HOST":/workspace/rondo-l6/incoming/train-only-bundle.tar
 ```
 
 In the remote SSH shell, verify the exact local tar hash before extraction and
@@ -334,6 +334,31 @@ bash "$RONDO_L6_BUNDLE/bin/runpod-stage2-entrypoint.sh" \
   2>&1 | tee -a "$TASK_CONTROLLER_LOG_ROOT/formal-resume.log"
 ```
 
+If `training-pending.json` already exists, training and adapter saving finished;
+do **not** invoke the entrypoint or resume a checkpoint. Continue the interrupted
+state transition on the same output. Run the isolated reload only when its
+receipt is absent, validate both receipts, then continue with H to finalize:
+
+```bash
+set -euo pipefail
+TASK_FORMAL_OUTPUT="$TASK_ATTEMPT_ROOT/formal"
+test -f "$TASK_FORMAL_OUTPUT/training-pending.json"
+test ! -e "$TASK_FORMAL_OUTPUT/training-receipt.json"
+if test ! -e "$TASK_FORMAL_OUTPUT/adapter-reload-receipt.json"; then
+  python3 "$RONDO_L6_BUNDLE/bin/l6_training.py" reload-adapter \
+    --bundle "$RONDO_L6_BUNDLE" \
+    --output "$TASK_FORMAL_OUTPUT"
+fi
+jq -e '.status == "pending_adapter_reload_and_finalize"' \
+  "$TASK_FORMAL_OUTPUT/training-pending.json"
+jq -e '.status == "adapter_reloaded" and .separate_command == true' \
+  "$TASK_FORMAL_OUTPUT/adapter-reload-receipt.json"
+```
+
+`reload-adapter` and `finalize-receipt` rehash the recipe, dependencies,
+adapter and pending receipt. Any drift fails closed; it is not permission to
+restart formal training on that completed output.
+
 Never resume a different run contract merely because its files fit. If failure
 occurs before a valid checkpoint exists, do not reuse the partial output:
 select `attempt-02`, repeat E-F-G with a fresh attempt output, controller-log
@@ -375,14 +400,55 @@ storage. The control decisions are mandatory:
 
 If that one recovery restart is needed, do not reuse the old SSH address. Start
 the same stopped Pod, wait for it to become ready, then obtain the current host
-and port before executing only the download/verification steps in I:
+and port:
 
 ```bash
 runpodctl pod start "$TASK_POD_ID"
 runpodctl pod get "$TASK_POD_ID"
-runpodctl pod ssh info "$TASK_POD_ID"
+runpodctl ssh info "$TASK_POD_ID"
 export TASK_SSH_HOST='<CURRENT_SSH_HOST_FROM_SSH_INFO>'
 export TASK_SSH_PORT='<CURRENT_SSH_PORT_FROM_SSH_INFO>'
+ssh -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
+  -p "$TASK_SSH_PORT" root@"$TASK_SSH_HOST"
+```
+
+In that new remote shell, inspect the existing formal output before choosing
+the recovery branch. A
+completed receipt may proceed to remote `verify-artifacts` and I. A pending
+receipt must complete the reload/finalize transition described above, using the
+existing environment and without invoking `train` or the entrypoint:
+
+```bash
+set -euo pipefail
+TASK_ROOT=/workspace/rondo-l6
+TASK_POD_ID='<TASK_POD_ID_FROM_CONTROLLER>'
+TASK_ATTEMPT_ID=attempt-01
+TASK_ATTEMPT_ROOT="$TASK_ROOT/runs/$TASK_ATTEMPT_ID"
+TASK_FORMAL_OUTPUT="$TASK_ATTEMPT_ROOT/formal"
+RONDO_L6_BUNDLE="$TASK_ROOT/train-only-bundle"
+if test -f "$TASK_FORMAL_OUTPUT/training-receipt.json"; then
+  : # completed branch; verify below, then recover with I
+elif test -f "$TASK_FORMAL_OUTPUT/training-pending.json"; then
+  . "$TASK_ROOT/venv/bin/activate"
+  export HF_HOME="$TASK_ROOT/hf-home"
+  export HF_HUB_OFFLINE=1
+  export TRANSFORMERS_OFFLINE=1
+  if test ! -f "$TASK_FORMAL_OUTPUT/adapter-reload-receipt.json"; then
+    python3 "$RONDO_L6_BUNDLE/bin/l6_training.py" reload-adapter \
+      --bundle "$RONDO_L6_BUNDLE" --output "$TASK_FORMAL_OUTPUT"
+  fi
+  TASK_ACTUAL_COST_USD='<ACTUAL_CUMULATIVE_RUNPOD_COST_USD_AFTER_RELOAD>'
+  python3 "$RONDO_L6_BUNDLE/bin/l6_training.py" finalize-receipt \
+    --bundle "$RONDO_L6_BUNDLE" --output "$TASK_FORMAL_OUTPUT" \
+    --actual-runpod-cost-usd "$TASK_ACTUAL_COST_USD" \
+    --persistence-kind pod_volume \
+    --persistence-revision "pod:$TASK_POD_ID:$TASK_FORMAL_OUTPUT"
+else
+  echo 'recovery_missing_pending_or_completed_receipt' >&2
+  exit 1
+fi
+python3 "$RONDO_L6_BUNDLE/bin/l6_training.py" verify-artifacts \
+  --bundle "$RONDO_L6_BUNDLE" --output "$TASK_FORMAL_OUTPUT"
 ```
 
 The controller continues polling spend during recovery and deletes at the
@@ -426,8 +492,8 @@ TASK_LOCAL_RECOVERY='/home/sjc/desktop/RONDO/eval-data/local-approval/l6/plan037
 test ! -e "$TASK_LOCAL_RECOVERY"
 install -d -m 700 "$TASK_LOCAL_RECOVERY"
 scp -r -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
-  -P "$TASK_POD_SSH_PORT" \
-  root@"$TASK_POD_IP":/workspace/rondo-l6/runs/"$TASK_ATTEMPT_ID"/formal/. \
+  -P "$TASK_SSH_PORT" \
+  root@"$TASK_SSH_HOST":/workspace/rondo-l6/runs/"$TASK_ATTEMPT_ID"/formal/. \
   "$TASK_LOCAL_RECOVERY"/
 
 cd "$TASK_WORKTREE"

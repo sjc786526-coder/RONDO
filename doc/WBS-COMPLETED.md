@@ -947,13 +947,14 @@ standard/Lite 形态均补回归。
   resume、adapter 隔离重载、pending→completed training receipt、逐文件 artifact export/download 验真和超时/止费说明。
   本地 mock 只验证同格式数据/mask，未加载模型且 optimizer step 为 0；最终 recipe 仍须在阶段二真实 smoke 后冻结。
 - **成对输出前置**：Plan 036 增加版本化 decision / structured-output failure / refusal / timeout 终态，非 decision
-  不补造 deny；paired runner 每次重读实际 identity 文件/lock/canonical manifest，formal v2 导入要求 source-validated
-  evidence，训练 receipt 的 adapter tree 与微调侧 manifest 精确相等；先写 attempt journal、再 fsync 唯一终态，悬空
+  不补造 deny；paired runner 每次重读两侧 canonical b10333 deployment manifest，支持 adapter on/off 与 paired GGUF，
+  绑定实际加载 GGUF/adapter、共同转换/量化身份和 formal source adapter tree。formal v2 文件导入用 0600 private
+  evidence locator 重建并重哈希全部 source；先写 attempt journal、再 fsync 唯一终态，悬空
   attempt 显式收敛为 infrastructure failure 后只继续剩余样本。既有 decision v1 导入、盲化和裁判语义保持兼容。
 - **审查窄修**：PEFT target 改为只完整匹配 Transformers runtime 文本层的单个 regex，并对实际 targeted modules 与
   trainable LoRA 参数二次 fail-closed；阶段二 RunPod 上传、安装、smoke/formal、预算止费、下载验真、一次恢复重启与删除
   命令已落盘。completed receipt 最后一步中断时只接受逐字一致的 orphan manifest 恢复。
-- **验证**：直接相关 unittest **68/68 通过**；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups、
+- **验证**：直接相关 unittest **75/75 通过**；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups、
   `waiting_for_l6_outputs`。精确 census 重算逐字一致，mock dry-run、最终 tar 解包后 bundle 自校验、`py_compile`、
   entrypoint `bash -n`、JSON/候选依赖解析、敏感/大文件/权限和 `git diff --check` 通过；训练与 pair 两轮独立复验
   均无阶段一阻断。

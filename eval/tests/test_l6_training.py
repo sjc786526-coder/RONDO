@@ -291,6 +291,49 @@ class CandidateContractTests(unittest.TestCase):
         self.assertLess(mode_end, resume)
         self.assertLess(resume, train)
 
+    def test_runbook_recovery_refreshes_ssh_and_finishes_pending_receipt(self) -> None:
+        runbook = (
+            REPO_ROOT / "training/local-approval-l6/stage2-runbook.md"
+        ).read_text()
+        recovery_start = runbook.index("If that one recovery restart is needed")
+        recovery_end = runbook.index(
+            "The controller continues polling spend during recovery", recovery_start
+        )
+        recovery = runbook[recovery_start:recovery_end]
+        download = runbook[runbook.index("## I. SCP recovery") :]
+
+        self.assertNotIn("runpodctl pod ssh info", runbook)
+        self.assertIn('runpodctl ssh info "$TASK_POD_ID"', recovery)
+        self.assertIn("TASK_SSH_HOST", recovery)
+        self.assertIn("TASK_SSH_PORT", recovery)
+        self.assertIn('ssh -o IdentitiesOnly=yes -i "$TASK_SSH_KEY"', recovery)
+        self.assertIn('root@"$TASK_SSH_HOST"', recovery)
+        self.assertIn("TASK_POD_ID='<TASK_POD_ID_FROM_CONTROLLER>'", recovery)
+        self.assertIn('-P "$TASK_SSH_PORT"', download)
+        self.assertIn('root@"$TASK_SSH_HOST"', download)
+
+        completed = recovery.index("training-receipt.json")
+        pending = recovery.index("training-pending.json", completed)
+        reload_adapter = recovery.index("reload-adapter", pending)
+        finalize = recovery.index("finalize-receipt", reload_adapter)
+        verify = recovery.index("verify-artifacts", finalize)
+        missing = recovery.index("recovery_missing_pending_or_completed_receipt")
+        self.assertLess(completed, pending)
+        self.assertLess(pending, reload_adapter)
+        self.assertLess(reload_adapter, finalize)
+        self.assertLess(finalize, verify)
+        self.assertLess(finalize, missing)
+        self.assertLess(missing, verify)
+        self.assertLess(
+            recovery_start + verify,
+            runbook.index("scp -r", runbook.index("## I. SCP recovery")),
+        )
+        self.assertNotIn("runpod-stage2-entrypoint.sh", recovery)
+        self.assertNotRegex(recovery, r'l6_training\.py"\s+train\b')
+        self.assertIn('export HF_HOME="$TASK_ROOT/hf-home"', recovery)
+        self.assertNotIn("hf-cache", recovery)
+        self.assertIn("recovery_missing_pending_or_completed_receipt", recovery)
+
     def test_smoke_forces_one_step_without_mutating_candidate(self) -> None:
         candidate = json.loads((REPO_ROOT / l6_training.RECIPE_RELATIVE_PATH).read_text())
         original = copy.deepcopy(candidate)
