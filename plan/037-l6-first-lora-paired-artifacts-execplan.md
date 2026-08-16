@@ -36,30 +36,30 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 
 ### 最终完成/验收标准
 
-- [ ] 训练投影精确来自 frozen `train.jsonl` 的 470 条记录；上传清单不含 validation、真实 seed、holdout、真实
+- [x] 训练投影精确来自 frozen `train.jsonl` 的 470 条记录；上传清单不含 validation、真实 seed、holdout、真实
       `E_final` 或其他私有正文，直接相关 pure tests 证明该边界。
-- [ ] 用冻结 tokenizer/template 对 470 条最终训练序列完成精确 token 统计；receipt 记录 min/max/P50/P95、上限和
+- [x] 用冻结 tokenizer/template 对 470 条最终训练序列完成精确 token 统计；receipt 记录 min/max/P50/P95、上限和
       超限数，实际训练无未记录截断。
-- [ ] completion-only loss 通过可执行测试或 smoke 证据证明：输入/prompt token 不计入 labels，target assistant
+- [x] completion-only loss 通过可执行测试或 smoke 证据证明：输入/prompt token 不计入 labels，target assistant
       token 计入 labels，非空 completion 不被全部 mask。
-- [ ] 真实 smoke 至少完成一个 optimizer step、保存 adapter 并在新进程或等强隔离后成功重载；本地不适合时可在
+- [x] 真实 smoke 至少完成一个 optimizer step、保存 adapter 并在新进程或等强隔离后成功重载；本地不适合时可在
       阶段二 RunPod 完成。
-- [ ] 一个冻结 recipe 的正式 LoRA 训练有效完成；adapter、必要 checkpoint、实际配置、依赖身份、聚合训练指标和
+- [x] 一个冻结 recipe 的正式 LoRA 训练有效完成；adapter、必要 checkpoint、实际配置、依赖身份、聚合训练指标和
       training receipt 已在 RunPod 销毁前保存并验真到本地 ignored 目录或阶段二明确批准的私有 HF repo，任务完成前
       必须下载到本地 ignored 目录复核哈希。
-- [ ] RunPod 本任务累计实际费用不超过阶段二批准上限且绝不超过 25 USD、GPU Pod 并发始终为 1；任务结束时没有仍在
+- [x] RunPod 本任务累计实际费用不超过阶段二批准上限且绝不超过 25 USD、GPU Pod 并发始终为 1；任务结束时没有仍在
       运行的计算或未经授权持续计费的存储资源，所有 task-only 远端对象及获准保留资产的最终状态/费用均已确认。
-- [ ] 未微调与微调后两种本地工件来自同一官方 BF16 base lineage，且 b10333 能以同一 runtime、chat template、
+- [x] 未微调与微调后两种本地工件来自同一官方 BF16 base lineage，且 b10333 能以同一 runtime、chat template、
       request、sampling、12,288 context、512 output 和 decision schema 合同串行加载。
-- [ ] 两侧对 frozen 130 条 synthetic validation 各形成 130 条且每样本唯一的最终记录；allow/deny、结构化失败、
+- [x] 两侧对 frozen 130 条 synthetic validation 各形成 130 条且每样本唯一的最终记录；allow/deny、结构化失败、
       超时或明确拒绝均按实际终态记录，不伪造业务判定补齐结果。
-- [ ] canonical L6 pair receipt 与本地输出通过 Plan 036 正式完整导入；`sol-static` 只来自 frozen validation target，
+- [x] canonical L6 pair receipt 与本地输出通过 Plan 036 正式完整导入；`sol-static` 只来自 frozen validation target，
       Plan 033 Bartowski GGUF 不冒充本次 `local-static`。
-- [ ] focused tests、真实训练/本地运行 preflight、私有文件权限与哈希检查、tracked 敏感/大文件检查以及
+- [x] focused tests、真实训练/本地运行 preflight、私有文件权限与哈希检查、tracked 敏感/大文件检查以及
       `git diff --check` 通过；skip 或未运行项不写成通过。
-- [ ] 本地模型进程、端口和 GPU 显存清理完成；WBS 只在上述事实齐全后把 L6 标为完成，并把下一产品工作指向正式
+- [x] 本地模型进程、端口和 GPU 显存清理完成；WBS 只在上述事实齐全后把 L6 标为完成，并把下一产品工作指向正式
       Local M4，不提前写 M4 质量结论。
-- [ ] 任务分支形成少量清晰本地提交，停在未合并、未推送、待独立验收状态。
+- [x] 任务分支形成少量清晰本地提交，停在未合并、未推送、待独立验收状态。
 
 ### 阶段一交审标准
 
@@ -297,7 +297,7 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
   `1e66c06e…110a` / `cbab8084…8dd2`。validation 没有进入训练投影、上传包、梯度或 recipe 选择；按用户补充授权，
   这不构成隐私泄露或训练污染，无需重建数据或增加访问审计。
 - frozen train `1e66c06e…110a` 已确定性投影为 470 条，投影 SHA-256 为 `0026cddd…c14`。最终 train-only
-  bundle manifest / tar SHA-256 分别为 `e429ca57…56ad` / `45f098d6…018c`；固定 allowlist 拒绝 validation、
+  bundle manifest / tar SHA-256 分别为 `fe77afe3…8407` / `f980f318…60eb`；固定 allowlist 拒绝 validation、
   holdout、未知文件、symlink、清单外正文和连同自改 manifest 一起加入的额外文件。
 - 冻结官方 tokenizer/template 对 470 条最终序列的精确 census 为 145,360 tokens（prompt 128,545，completion
   16,815），min/P50/P95/max = 278/311/331/333，limit 4096，超限 0；无 packing、无截断。470/470 prompt
@@ -331,46 +331,39 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 
 ### 当前工作
 
-- 阶段一审查已由 `49125cb` 接受；**阶段二A：购买前本地补齐**也已完成。当前没有创建/启动 RunPod/HF
-  对象、上传、训练、真实模型加载或任何新增费用。
-- b10333 转换工具、body-free conversion 上传包、双部署路线、只消费 `ResolvedDeployment` 的任务专用生命周期
-  胶水，以及转换、回收、本地 130×2、正式导入和清理命令均已落盘并通过 focused tests；当前停止在新的明确
-  付费授权门前。
-- 阶段二A复验指出的生命周期顺序缺口已窄修：deployment 本地验真后先 stop 同一 Pod 保留 volume，本地结构化
-  smoke 通过才 delete；adapter 路线若有实证的转换/加载不兼容，则在 `$10/$12` 线内恢复同一 Pod，用独立目录改走
-  paired-GGUF，不重训，也不按 validation 质量选路线。
-- structural smoke 只验证两侧绑定身份实际加载、串行请求均形成合法终态并完成进程清理；decision 数量只进入诊断，
-  即使一侧或两侧仅产生结构化失败、超时或拒绝也可进入正式 130×2。只有转换或冻结 b10333 加载不兼容可触发
-  deployment fallback，样本输出质量不得触发换路线。
+- Plan 037 已完成，等待独立验收；任务内不再进行训练、转换、输出或远端动作。
+- 唯一任务 Pod `iudn1ajhkkvjsr` 已在训练、转换、本地回收和 structural smoke 全部验真后删除；Pod 与 network
+  volume 列表均为空，`currentSpendPerHr=0`。最终 billing 为 `$1.4046356059`（GPU `$1.3439874556`、Pod disk
+  `$0.0606481503`、network volume `$0`），与起止余额差额除浮点舍入外一致，低于 `$12` 上限。未创建 template、registry credential、network volume
+  或 HF repo，也未上传 HF、启用订阅/PAYG 或产生 HF 新增费用。
+- 真实 A40 smoke 完成 1 optimizer step、238 个纯文本 LoRA target 和隔离 adapter reload；未发生 recipe 技术漂移。
+  正式训练完成 118 steps / 2 epochs，train loss `0.2667613620381463`。completed training receipt 为
+  `d551e5cf…c97f`，178,328,936-byte adapter 为 `146d6871…4c41`，29 项 formal 工件已本地逐文件验真。
+- `adapter_on_off` 的冻结 converter 实证会把 rank-16 adapter 展开为 309 个全模型张量和约 17 GB GGUF，故按转换
+  兼容性转入同源 `paired_gguf`，未重训且未用 validation 质量选路线。最终 base / fine-tuned Q4_K_M 分别为
+  5,198,378,592 / 5,198,378,560 bytes，SHA-256 `9d2ae96a…9eeb` / `c3f34fe8…6621`；conversion receipt 为
+  `bc471f50…2600`，14 项部署工件已远端、本地两次验真。
+- 冻结 b10333 对 paired-GGUF 两侧 structural smoke 通过，receipt 为 `a8530642…e1a`。正式本地运行两侧各 130 条，
+  260 个新终态均为真实 decision；与 130 条 frozen `sol-static` 合并为 390 行，输出 / pair receipt / private evidence
+  SHA-256 分别为 `0e8fbbc7…00aa` / `1d57def1…129c` / `4dd7966c…1727`，Plan 036 正式 CLI 导入报告
+  `ready_for_blind_packaging`。未运行 Opus/裁判、未读取真实 holdout、未形成 M4 质量结论。
 
 ### 本任务剩余步骤
 
-- **付费授权门：**用户根据阶段二A的 live 报告另行批准 task-only Pod、train-only/conversion-tool 上传及 `$12` 内
-  RunPod 上限；用户已另行常设授权使用任何确认零增量费用的 HF 功能作为计划变化时的备援，但本次窄修不创建或
-  上传 HF 对象，且 HF 不承担训练/转换计算。本次阶段二A授权不得被解释为 RunPod 付费授权。
-- **获批后的阶段二执行：**在 RunPod 完成真实 optimizer smoke 与隔离 adapter reload；根据显存/兼容性证据只做一次
-  允许范围内的技术收敛并冻结 final recipe/dependencies；完成一个有效正式训练、转换、持久化、下载验真、同源 pair
-  两侧各 130 条输出和 Plan 036 正式导入，随后清理所有 task-only 远端对象。
+- 无。任务合同冻结，后续正式 Local M4 只由 WBS 安排。
 
 ### 阻塞项
 
-- 阶段二A 无已知阻塞。购买/上传/训练仍由付费授权门阻断，这是有意边界而非任务失败。
+- 无。
 
 ### 当前验收状态
 
-- 阶段一与阶段二A本地交审项均满足。conversion 工具包 manifest / tar SHA-256 分别为
-  `e812f38c3878c236e8e52d7ff3bc8e86f79fe1cfde12bad1cf4ed6521721b687` /
-  `142ee972647cda7c0ebf0369c3e79e8ae2adf1843900d2d8a8c86cdc776f15f1`，合同 SHA-256 为
-  `f0740a2ea286cd741e2c705285b00f8f480ae2b08ff57b7c6117fdcb2510e177`；直接相关 focused unittest
-  92/92 通过，no-model preflight 保持 130 条、65/65、0 model call、`waiting_for_l6_outputs`。真实 8B
-  optimizer smoke、adapter 真实重载、正式训练、转换、HF 上传、本地成对推理、完整 130×2 输出和正式
-  Plan 036 导入均未运行，不能表述为通过。
+- Plan 037 全部完成标准已满足，任务分支等待独立验收；尚未合并或推送。
 
 ### 交接边界
 
-- 阶段一提交后停止修改和远端操作。用户若单独授权阶段二，执行者按本计划的真实 receipt、产物哈希、运行终态、
-  预算/止费和 Plan 036 导入继续；若没有新授权，只保留本地候选与 ignored 工件等待审查。
-- 整个 Plan 037 完成后冻结本计划；下一步只由 WBS 指向正式 Local M4。
+- 本计划冻结。下一产品工作是正式 Local M4 人判流程；不得把本任务的 allow/deny 分布解释为质量结论，也不得据此
+  继续训练或选择另一 recipe。
 
 ## 6. 关键决策记录
 
@@ -388,11 +381,14 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 | 010 | 阶段一只形成候选 recipe/依赖/镜像；真实 smoke 后允许一次有证据的 allowlist 内技术收敛，正式训练启动前冻结 | 本地无法证明真实 8B optimizer、显存和云端依赖兼容性；文本 target regex 已在阶段一固定 | 训练 recipe | 已采纳 |
 | 011 | 私有 HF 产物仓与 task-only template/credential/network volume 可选，阶段一说明、阶段二逐项授权并单列费用 | 保留更稳妥的启动与持久化路线，同时避免无边界远端状态 | 远端资产 | 已采纳 |
 | 012 | tracked synthetic/TB 数据按普通项目数据处理；validation 可被普通工具和兼容测试读取，但不得进入训练、上传或训练决策 | 保留训练归因所需的最小卫生，避免把普通合成数据隐私化或扩建审计体系 | 数据分类 / 隔离 | 已采纳 |
-| 013 | 阶段二主路线为 Secure A40 48 GB + 40 GB container disk + 100 GB Pod volume；不建 template/credential/network volume；本地 SCP 为默认持久化，确认零增量费用的 HF 私有功能可在计划变化时作备援 | 当前 live 价格、容量与 470 条 token 规模下成本最低且余量充足；A40 可用区当前不支持 network volume；用户确认个人 HF included 100 GB 未使用并给出零费用常设授权 | 资源 / 预算 | 阶段二A候选，待 RunPod 付费授权与创建前复核 |
-| 014 | 候选 QLoRA 为 rank 16、固定文本层 regex target、LR 2e-4、batch 1 × accum 8、2 epochs、NF4 4-bit、无 packing；target regex 属安全边界不允许 smoke 后漂移，loader/attention、rank、batch/accum/LR、epochs/max steps/max sequence length 和依赖允许一次有据收敛 | 本地能证明格式/mask与 runtime 模块范围，但不能证明真实 8B 显存和云端依赖兼容性 | recipe | 阶段一候选，正式训练前冻结 |
+| 013 | 阶段二主路线为 Secure A40 48 GB + 40 GB container disk + 100 GB Pod volume；不建 template/credential/network volume；本地 SCP 为默认持久化，确认零增量费用的 HF 私有功能可在计划变化时作备援 | 当前 live 价格、容量与 470 条 token 规模下成本最低且余量充足；A40 可用区当前不支持 network volume；用户确认个人 HF included 100 GB 未使用并给出零费用常设授权 | 资源 / 预算 | 已按 `$0.44/h` A40 + `$0.019/h` disk 执行 |
+| 014 | 候选 QLoRA 为 rank 16、固定文本层 regex target、LR 2e-4、batch 1 × accum 8、2 epochs、NF4 4-bit、无 packing；target regex 属安全边界不允许 smoke 后漂移，loader/attention、rank、batch/accum/LR、epochs/max steps/max sequence length 和依赖允许一次有据收敛 | 本地能证明格式/mask与 runtime 模块范围，但不能证明真实 8B 显存和云端依赖兼容性 | recipe | smoke 无需漂移，已冻结并完成 118 steps |
 | 015 | formal v2 pair 导入必须用 private evidence locator 重建并重验 BuiltPairReceipt；两侧分别绑定 b10333 实际 deployment manifest，adapter on/off 与 paired GGUF 都保留，微调侧绑定 completed formal source adapter tree 与转换身份 | 保留 v1 兼容且不预先锁死本地部署路线，同时防止合同 JSON、自报 receipt 或任意工件冒充实际加载的正式同源比较 | pair attribution | 已采纳 |
-| 016 | 阶段二先执行不付费的阶段二A，本地闭环与 live 资源报告提交后再取得一次明确付费授权 | 不让 Pod 计费期间才设计转换、推理或回收流程；阶段二A本身不授权任何远端变更、上传、训练或费用 | 授权 / 成本 | 已完成，等待付费授权 |
+| 016 | 阶段二先执行不付费的阶段二A，本地闭环与 live 资源报告提交后再取得一次明确付费授权 | 不让 Pod 计费期间才设计转换、推理或回收流程；阶段二A本身不授权任何远端变更、上传、训练或费用 | 授权 / 成本 | 阶段二A与付费授权均已完成 |
 | 017 | RunPod-only、单 Pod、`$12` 上限、冻结 base/data/template/b10333、一个有效 recipe、train-only 上传、零新增 HF 费用和 validation 不调参属于硬边界；adapter on/off 优先、同 Pod 转换、具体命令/目录/时长属于可按实证调整的软路线 | 用户明确要求区分安全/费用/任务边界与实现建议；技术偏离可自主收敛，但不能扩大授权或改变训练归因 | 阶段二执行 | 已采纳 |
-| 018 | 正式 receipt 必须先回收本地并逐文件验真，随后才在 formal 输出外的独立目录转换；adapter on/off 与 paired GGUF 均预备，实际路线只按真实转换和 b10333 smoke 的兼容性选择 | 保护已完成训练证据，同时避免在购买 Pod 后临时设计转换或预先锁死不可用路线 | 转换 / 回收 | 阶段二A已落盘，真实兼容性待付费阶段 |
-| 019 | 优先 deployment 本地验真后先 stop 同一 Pod 并保留 volume；本地 structural smoke 通过才 delete 并运行 130×2。若 adapter 转换或冻结 b10333 加载有实证不兼容，在 `$10/$12` 线内恢复同一 Pod，以独立 remote/local/pair 目录完成 paired-GGUF fallback，不重训、不按 validation 质量选路线 | 删除 Pod 后才发现 LoRA 不兼容会丢失 BF16 cache 和同一付费生命周期内的已备回退；route-specific 目录保留诊断且避免 receipt/evidence 冲突 | 转换 / 本地 pair / 止费 | 阶段二A窄修已落盘，真实兼容性待付费阶段 |
-| 020 | structural smoke 是部署兼容性与生命周期门禁：两侧身份、请求合法终态和清理完成即通过；decision/非 decision 数量只作诊断，不参与正式运行或 deployment route 选择 | 两条样本的结构化失败、超时或拒绝是合同允许的诚实终态，不能把偶然输出质量误当成加载不兼容并永久阻断 130×2 | 本地 pair / fallback | 已采纳 |
+| 018 | 正式 receipt 必须先回收本地并逐文件验真，随后才在 formal 输出外的独立目录转换；adapter on/off 与 paired GGUF 均预备，实际路线只按真实转换和 b10333 smoke 的兼容性选择 | 保护已完成训练证据，同时避免在购买 Pod 后临时设计转换或预先锁死不可用路线 | 转换 / 回收 | formal 先回收；adapter 转换实证不兼容后完成 paired-GGUF |
+| 019 | 优先 deployment 本地验真后先 stop 同一 Pod 并保留 volume；本地 structural smoke 通过才 delete 并运行 130×2。若 adapter 转换或冻结 b10333 加载有实证不兼容，在 `$10/$12` 线内恢复同一 Pod，以独立 remote/local/pair 目录完成 paired-GGUF fallback，不重训、不按 validation 质量选路线 | 删除 Pod 后才发现 LoRA 不兼容会丢失 BF16 cache 和同一付费生命周期内的已备回退；route-specific 目录保留诊断且避免 receipt/evidence 冲突 | 转换 / 本地 pair / 止费 | paired-GGUF smoke 通过后删除唯一 Pod；390 行导入完成 |
+| 020 | structural smoke 是部署兼容性与生命周期门禁：两侧身份、请求合法终态和清理完成即通过；decision/非 decision 数量只作诊断，不参与正式运行或 deployment route 选择 | 两条样本的结构化失败、超时或拒绝是合同允许的诚实终态，不能把偶然输出质量误当成加载不兼容并永久阻断 130×2 | 本地 pair / fallback | 两侧加载、终态与清理实证通过 |
+| 021 | 对未被真实工件证明的 converter/model 组合先检查 tensor 角色/数量与早期文件增长；轻量 LoRA 一旦按完整 BF16 增长立即止损，paired-GGUF 则按完整模型预期核对 | adapter converter 在完成后才暴露 309-tensor / 17 GB 全模型展开，造成可避免的时间与磁盘浪费；早期形状和增长已足以区分两类产物 | 转换 / 费用 | 已写入 runbook，并用于 paired-GGUF 早期门禁 |
+| 022 | paired-GGUF merge 后逐字复制冻结 `tokenizer.json` / `tokenizer_config.json`，不得用 Transformers 重序列化；转换前再 `cmp` 两份文件 | Transformers 5 重存为 `TokenizersBackend` 后，冻结 b10333 converter 无法导入；权重合并本身有效，原始冻结 tokenizer 已被 base 转换真实证明可用 | 转换 / tokenizer | 真实失败复现后窄修，逐字检查已通过 |
+| 023 | formal evidence 文件入口在 `python -m cross_eval` 下必须把完整源重验结果重包装为当前模块实例的 capability | `-m` 的 `__main__` 与包名导入会产生不同 Python 类身份，库入口通过而 CLI `isinstance` 误拒绝；重包装发生在七项 source 和实物重验之后，不接受裸 receipt | Plan 036 文件导入 | 真实 390 行 CLI 复现后窄修并通过 |

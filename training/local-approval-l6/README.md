@@ -1,16 +1,18 @@
-# Plan 037 L6 training and paired-deployment scaffold
+# Plan 037 L6 training and paired-deployment artifacts
 
 The operator-ready A-J command sequence is in
-[`stage2-runbook.md`](stage2-runbook.md). Local stage-2A conversion preparation
-is allowed; Pod creation, transfer, model download, training, conversion/model
-loading and every remote mutation remain forbidden until separately authorized.
+[`stage2-runbook.md`](stage2-runbook.md). Plan 037 completed that lifecycle on
+2026-08-16 under the paid-stage authorization recorded in the frozen execplan;
+this README does not authorize a new cloud run or retraining.
 
-This is a candidate, not the final training recipe. It binds the official BF16
-base/tokenizer revision and the separately frozen official chat template. The
-candidate RunPod image is
+The tracked recipe remains the stage-1 candidate source. The real optimizer
+smoke required no allowed technical drift, so the separately persisted final
+recipe kept its rank/LR/batch/epoch/quantization values. Both bind the official
+BF16 base/tokenizer revision and frozen official chat template. The actual
+RunPod image was
 `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`; its preinstalled Torch 2.8.0
-matches `dependencies-candidate-v1.txt`. The other exact pins remain candidates
-until the authorized stage-2 optimizer smoke freezes the installed environment.
+matched `dependencies-candidate-v1.txt`, and the completed private training
+receipt records the exact installed environment.
 
 From the repository root with `PYTHONPATH=eval`:
 
@@ -28,7 +30,7 @@ unlisted bodies, and any projection other than SHA-256
 are rejected. No truncation is implemented. The mock path loads no model and
 performs zero optimizer steps; it does not stand in for the real 8B smoke.
 
-## Authorized stage-2 lifecycle
+## Stage-2 lifecycle
 
 The active controller must recheck price/capacity/balance, create no more than
 one task Pod with a 100 GB Pod volume by default, record its ID/rate/deadline,
@@ -112,6 +114,14 @@ binds its SHA-256. `verify-output` requires the exact tool bundle, streams every
 deployment hash, rejects smoke/non-frozen training evidence, verifies pinned
 conversion Python/package/Torch/CUDA/image identity, and binds the route receipt
 to the completed training receipt and source adapter tree.
+`runpod-stage2-convert.sh` and
+`runpod-stage2-finalize-conversion.sh` are task-only detached controllers for
+the long conversion and streamed manifest verification; their status and logs
+stay outside the deployment allowlist so an SSH disconnect cannot turn a valid
+Pod-side operation into a partial receipt. Both disable Python bytecode writes
+so importing bundled converter modules cannot add `__pycache__` outside the
+fixed package manifest. Paired-GGUF merge copies the two frozen tokenizer files
+byte for byte instead of re-serializing an incompatible tokenizer class.
 
 Conversion starts only after the completed formal training output has first
 been downloaded and verified. It writes to a separate deployment directory,
@@ -136,3 +146,12 @@ use the shared `conversion-operations.json` as converter identity and the real q
 binary as quantizer identity. Train, validation and holdout bodies and
 per-sample outputs never enter the conversion tool bundle or any future
 separately authorized HF mirror.
+
+The completed run used one Secure A40 Pod and no HF repository, template,
+credential or network volume. The adapter converter proved incompatible by
+expanding the LoRA into full-model tensors, so the evidence-backed deployment
+route is `paired_gguf`: two distinct Q4_K_M files from the same frozen BF16
+lineage and formal adapter. Both sides passed structural smoke, then produced
+130 local terminals each; the 390-row three-side import is ready for the
+separately planned Local M4 blind review. No judge or quality-based retraining
+is part of this package.

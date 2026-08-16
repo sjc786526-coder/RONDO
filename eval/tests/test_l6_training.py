@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import unittest
+from collections import UserDict
 from pathlib import Path
 from unittest import mock
 
@@ -26,6 +27,14 @@ _CONVERSION_TOOL_SPEC = importlib.util.spec_from_file_location(
 assert _CONVERSION_TOOL_SPEC is not None and _CONVERSION_TOOL_SPEC.loader is not None
 conversion_tooling = importlib.util.module_from_spec(_CONVERSION_TOOL_SPEC)
 _CONVERSION_TOOL_SPEC.loader.exec_module(conversion_tooling)
+
+_MERGE_ADAPTER_PATH = REPO_ROOT / "training/local-approval-l6/merge_adapter.py"
+_MERGE_ADAPTER_SPEC = importlib.util.spec_from_file_location(
+    "plan037_merge_adapter", _MERGE_ADAPTER_PATH
+)
+assert _MERGE_ADAPTER_SPEC is not None and _MERGE_ADAPTER_SPEC.loader is not None
+merge_adapter = importlib.util.module_from_spec(_MERGE_ADAPTER_SPEC)
+_MERGE_ADAPTER_SPEC.loader.exec_module(merge_adapter)
 
 
 def _dependency_identity(recipe: dict, *, status: str) -> dict:
@@ -181,6 +190,13 @@ class BundleTests(unittest.TestCase):
 
 
 class CompletionOnlyTests(unittest.TestCase):
+    def test_single_batch_tokenizer_result_is_unwrapped_before_validation(self) -> None:
+        self.assertEqual(l6_training._token_ids([[1, 2, 3]]), [1, 2, 3])
+        self.assertEqual(
+            l6_training._token_ids(UserDict({"input_ids": [[4, 5, 6]]})),
+            [4, 5, 6],
+        )
+
     def test_prompt_is_masked_and_completion_is_trainable(self) -> None:
         projection, _ = l6_training.build_training_projection(REPO_ROOT)
         row = l6_training.tokenize_completion_only(l6_training.FixtureTokenizer(), projection[0])
@@ -1325,6 +1341,91 @@ class ConversionToolContractTests(unittest.TestCase):
         self.assertIn("flock -u 9", runbook)
         self.assertIn("pgrep -x cargo", runbook)
         self.assertGreaterEqual(runbook.count("pgrep -x llama-server"), 2)
+        self.assertIn(
+            'find "$TASK_LOCAL_RECOVERY" -type d -exec chmod 700 {} +',
+            runbook,
+        )
+        self.assertIn(
+            'find "$TASK_LOCAL_RECOVERY" -type f -exec chmod 600 {} +',
+            runbook,
+        )
+        self.assertIn(
+            'find "$TASK_LOCAL_DEPLOYMENT" -type d -exec chmod 700 {} +',
+            runbook,
+        )
+        self.assertIn(
+            'find "$TASK_LOCAL_DEPLOYMENT" -type f -exec chmod 600 {} +',
+            runbook,
+        )
+        self.assertIn(
+            'chmod 700 "$TASK_LOCAL_DEPLOYMENT/tooling/llama-quantize"',
+            runbook,
+        )
+
+    def test_conversion_controller_survives_ssh_disconnect(self) -> None:
+        runbook = (
+            REPO_ROOT / "training/local-approval-l6/stage2-runbook.md"
+        ).read_text()
+        controller = (
+            REPO_ROOT / "training/local-approval-l6/runpod-stage2-convert.sh"
+        ).read_text()
+        finalizer = (
+            REPO_ROOT
+            / "training/local-approval-l6/runpod-stage2-finalize-conversion.sh"
+        ).read_text()
+        self.assertIn("runpod-stage2-convert.sh", runbook)
+        self.assertIn("runpod-stage2-finalize-conversion.sh", runbook)
+        self.assertGreaterEqual(runbook.count("nohup env"), 3)
+        self.assertIn("TASK_STATUS_FILE", runbook)
+        self.assertIn('kill -0 "$TASK_CONVERSION_PID"', runbook)
+        self.assertIn("set -euo pipefail", controller)
+        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", controller)
+        self.assertIn("export PYTHONDONTWRITEBYTECODE=1", finalizer)
+        self.assertGreaterEqual(controller.count('"$TASK_CONVERSION_PYTHON" -B'), 4)
+        self.assertIn("trap finish EXIT", controller)
+        self.assertIn('test ! -e "$TASK_DEPLOYMENT"', controller)
+        self.assertIn('TASK_ROUTE_ATTEMPT:?TASK_ROUTE_ATTEMPT is required', controller)
+        self.assertIn('cmp "$TASK_BASE_DIR/tokenizer.json"', controller)
+        self.assertIn('cmp "$TASK_BASE_DIR/tokenizer_config.json"', controller)
+        self.assertIn(
+            'TASK_ADAPTER_MAX_BYTES="$((TASK_SOURCE_ADAPTER_BYTES * 8 + 64000000))"',
+            controller,
+        )
+        self.assertIn('kill "$TASK_ADAPTER_PID"', controller)
+        self.assertIn("adapter_conversion_size_guard_exceeded", controller)
+        self.assertIn("adapter_conversion_bytes=", controller)
+        self.assertIn('printf \'completed\\n\' >"$TASK_STATUS_FILE"', controller)
+        self.assertNotIn("training-pending.json", controller)
+        self.assertNotRegex(controller, r'l6_training\.py"?\s+train\b')
+        self.assertIn("trap finish EXIT", finalizer)
+        self.assertIn("conversion-files-manifest.json", finalizer)
+        self.assertIn("conversion-receipt.json", finalizer)
+        self.assertIn("verify-output", finalizer)
+        self.assertNotRegex(finalizer, r'l6_training\.py"?\s+train\b')
+
+    def test_merge_adapter_preserves_frozen_tokenizer_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "base"
+            output = root / "output"
+            base.mkdir()
+            output.mkdir()
+            expected = {
+                "tokenizer.json": b'{"frozen":true}\n',
+                "tokenizer_config.json": b'{"tokenizer_class":"Mistral"}\n',
+            }
+            for name, body in expected.items():
+                (base / name).write_bytes(body)
+            merge_adapter._copy_frozen_tokenizer(base, output)
+            self.assertEqual(
+                {name: (output / name).read_bytes() for name in expected},
+                expected,
+            )
+
+        source = (
+            REPO_ROOT / "training/local-approval-l6/merge_adapter.py"
+        ).read_text()
+        self.assertNotIn("AutoTokenizer", source)
 
 
 if __name__ == "__main__":

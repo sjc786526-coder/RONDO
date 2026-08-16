@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+_FROZEN_TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json")
+
 
 class MergeAdapterError(RuntimeError):
     """Stable fail-closed merge error."""
@@ -24,6 +26,23 @@ def _require_directory(path: Path) -> None:
         raise MergeAdapterError("required_directory_invalid")
 
 
+def _copy_frozen_tokenizer(base: Path, output: Path) -> None:
+    for name in _FROZEN_TOKENIZER_FILES:
+        source = base / name
+        try:
+            body = source.read_bytes()
+        except OSError as exc:
+            raise MergeAdapterError("frozen_tokenizer_file_missing") from exc
+        if not body:
+            raise MergeAdapterError("frozen_tokenizer_file_empty")
+        target = output / name
+        try:
+            with target.open("xb") as stream:
+                stream.write(body)
+        except OSError as exc:
+            raise MergeAdapterError("frozen_tokenizer_copy_failed") from exc
+
+
 def merge_adapter(base: Path, adapter: Path, output: Path) -> None:
     _require_directory(base)
     _require_directory(adapter)
@@ -32,7 +51,7 @@ def merge_adapter(base: Path, adapter: Path, output: Path) -> None:
 
     import torch
     from peft import PeftModel
-    from transformers import AutoModelForImageTextToText, AutoTokenizer
+    from transformers import AutoModelForImageTextToText
 
     model = AutoModelForImageTextToText.from_pretrained(
         base,
@@ -47,9 +66,10 @@ def merge_adapter(base: Path, adapter: Path, output: Path) -> None:
     merged.save_pretrained(
         output, safe_serialization=True, max_shard_size="5GB"
     )
-    AutoTokenizer.from_pretrained(base, local_files_only=True).save_pretrained(
-        output
-    )
+    # Re-serializing this tokenizer with Transformers 5 writes
+    # `tokenizer_class=TokenizersBackend`, which b10333's converter cannot
+    # import. Preserve the already-verified frozen tokenizer bytes instead.
+    _copy_frozen_tokenizer(base, output)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

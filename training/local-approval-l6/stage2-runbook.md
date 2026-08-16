@@ -30,6 +30,8 @@ TASK_CENSUS="$TASK_STAGE1/token-census.json"
 TASK_CONVERSION_TOOL_BUNDLE="$TASK_STAGE2A/conversion-tool-bundle"
 TASK_CONVERSION_TOOL_TAR="$TASK_STAGE2A/conversion-tool-bundle.tar"
 TASK_CONVERSION_CONTRACT="$TASK_WORKTREE/training/local-approval-l6/conversion-tool-contract-v1.json"
+TASK_CONVERSION_CONTROLLER="$TASK_WORKTREE/training/local-approval-l6/runpod-stage2-convert.sh"
+TASK_CONVERSION_FINALIZER="$TASK_WORKTREE/training/local-approval-l6/runpod-stage2-finalize-conversion.sh"
 TASK_LLAMA_SOURCE=/home/sjc/desktop/RONDO/eval-data/sources/llama.cpp-b10333-08659901
 TASK_QUANTIZER_RUNTIME=/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333
 TASK_C_AVAILABLE_BYTES="$(df -B1 --output=avail /mnt/c | tail -n1 | tr -d ' ')"
@@ -47,6 +49,8 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
   -m rondo_eval.local_approval.l6_training mock-dry-run \
   --repo . --records 6
 bash -n training/local-approval-l6/runpod-stage2-entrypoint.sh
+bash -n "$TASK_CONVERSION_CONTROLLER"
+bash -n "$TASK_CONVERSION_FINALIZER"
 if test ! -e "$TASK_CONVERSION_TOOL_BUNDLE"; then
   python3 -B training/local-approval-l6/conversion_tooling.py prepare \
     --contract "$TASK_CONVERSION_CONTRACT" \
@@ -77,8 +81,12 @@ git diff --check -- eval/rondo_eval/local_approval/l6_training.py \
 TASK_BUNDLE_SHA256="$(sha256sum "$TASK_BUNDLE_TAR" | cut -d' ' -f1)"
 TASK_CENSUS_SHA256="$(sha256sum "$TASK_CENSUS" | cut -d' ' -f1)"
 TASK_CONVERSION_TOOL_SHA256="$(sha256sum "$TASK_CONVERSION_TOOL_TAR" | cut -d' ' -f1)"
-printf 'bundle_tar_sha256=%s\ncensus_sha256=%s\nconversion_tool_tar_sha256=%s\n' \
-  "$TASK_BUNDLE_SHA256" "$TASK_CENSUS_SHA256" "$TASK_CONVERSION_TOOL_SHA256"
+TASK_CONVERSION_CONTROLLER_SHA256="$(sha256sum "$TASK_CONVERSION_CONTROLLER" | cut -d' ' -f1)"
+TASK_CONVERSION_FINALIZER_SHA256="$(sha256sum "$TASK_CONVERSION_FINALIZER" | cut -d' ' -f1)"
+printf 'bundle_tar_sha256=%s\ncensus_sha256=%s\nconversion_tool_tar_sha256=%s\nconversion_controller_sha256=%s\nconversion_finalizer_sha256=%s\n' \
+  "$TASK_BUNDLE_SHA256" "$TASK_CENSUS_SHA256" \
+  "$TASK_CONVERSION_TOOL_SHA256" "$TASK_CONVERSION_CONTROLLER_SHA256" \
+  "$TASK_CONVERSION_FINALIZER_SHA256"
 ```
 
 Confirm the census still says 470 records, limit 4096, over-limit 0, total
@@ -174,6 +182,12 @@ scp -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
 scp -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
   -P "$TASK_SSH_PORT" "$TASK_CONVERSION_TOOL_TAR" \
   root@"$TASK_SSH_HOST":/workspace/rondo-l6/incoming/conversion-tool-bundle.tar
+scp -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
+  -P "$TASK_SSH_PORT" "$TASK_CONVERSION_CONTROLLER" \
+  root@"$TASK_SSH_HOST":/workspace/rondo-l6/incoming/runpod-stage2-convert.sh
+scp -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
+  -P "$TASK_SSH_PORT" "$TASK_CONVERSION_FINALIZER" \
+  root@"$TASK_SSH_HOST":/workspace/rondo-l6/incoming/runpod-stage2-finalize-conversion.sh
 ```
 
 In the remote SSH shell, verify the exact local tar hash before extraction and
@@ -186,26 +200,37 @@ TASK_BUNDLE="$TASK_ROOT/train-only-bundle"
 TASK_CONVERSION_TOOLS="$TASK_ROOT/conversion-tool-bundle"
 TASK_EXPECTED_BUNDLE_SHA256='<TASK_BUNDLE_SHA256_FROM_SECTION_A>'
 TASK_EXPECTED_CONVERSION_TOOL_SHA256='<TASK_CONVERSION_TOOL_SHA256_FROM_SECTION_A>'
+TASK_EXPECTED_CONVERSION_CONTROLLER_SHA256='<TASK_CONVERSION_CONTROLLER_SHA256_FROM_SECTION_A>'
+TASK_EXPECTED_CONVERSION_FINALIZER_SHA256='<TASK_CONVERSION_FINALIZER_SHA256_FROM_SECTION_A>'
 test "$(sha256sum "$TASK_ROOT/incoming/train-only-bundle.tar" | cut -d' ' -f1)" \
   = "$TASK_EXPECTED_BUNDLE_SHA256"
 test "$(sha256sum "$TASK_ROOT/incoming/conversion-tool-bundle.tar" | cut -d' ' -f1)" \
   = "$TASK_EXPECTED_CONVERSION_TOOL_SHA256"
+test "$(sha256sum "$TASK_ROOT/incoming/runpod-stage2-convert.sh" | cut -d' ' -f1)" \
+  = "$TASK_EXPECTED_CONVERSION_CONTROLLER_SHA256"
+test "$(sha256sum "$TASK_ROOT/incoming/runpod-stage2-finalize-conversion.sh" | cut -d' ' -f1)" \
+  = "$TASK_EXPECTED_CONVERSION_FINALIZER_SHA256"
 tar -xf "$TASK_ROOT/incoming/train-only-bundle.tar" -C "$TASK_ROOT"
 tar -xf "$TASK_ROOT/incoming/conversion-tool-bundle.tar" -C "$TASK_ROOT"
-python3 "$TASK_BUNDLE/bin/l6_training.py" verify-bundle --bundle "$TASK_BUNDLE"
-python3 "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" verify \
+install -m 700 "$TASK_ROOT/incoming/runpod-stage2-convert.sh" \
+  "$TASK_ROOT/runpod-stage2-convert.sh"
+install -m 700 "$TASK_ROOT/incoming/runpod-stage2-finalize-conversion.sh" \
+  "$TASK_ROOT/runpod-stage2-finalize-conversion.sh"
+PYTHONDONTWRITEBYTECODE=1 python3 -B \
+  "$TASK_BUNDLE/bin/l6_training.py" verify-bundle --bundle "$TASK_BUNDLE"
+PYTHONDONTWRITEBYTECODE=1 python3 -B \
+  "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" verify \
   --bundle "$TASK_CONVERSION_TOOLS"
 ```
 
 ## D. Download the frozen official revision and install exact dependencies
 
-Still in the remote shell, type the HF read token with the shell `read` builtin:
-silent input does not enter shell history or a process argument, and the value
-is unset immediately after download. Do not call `hf auth token`, and do not use
-HF Jobs, Endpoints or Spaces. Download only the four indexed BF16 shards and
-the exact config/tokenizer files by immutable commit into the Pod-volume Hub
-cache. This intentionally omits the duplicate consolidated weight file; the
-training loader uses the same `HF_HOME`, fixed revision and offline mode.
+The frozen repository is public, so the normal path downloads it anonymously
+and never copies an HF token to the Pod. Do not call `hf auth token`, and do not
+use HF Jobs, Endpoints or Spaces. Download only the four indexed BF16 shards
+and the exact config/tokenizer files by immutable commit into the Pod-volume
+Hub cache. This intentionally omits the duplicate consolidated weight file;
+the training loader uses the same `HF_HOME`, fixed revision and offline mode.
 
 ```bash
 set -euo pipefail
@@ -214,10 +239,12 @@ TASK_BUNDLE="$TASK_ROOT/train-only-bundle"
 export HF_HOME="$TASK_ROOT/hf-home"
 export PIP_CACHE_DIR="$TASK_ROOT/pip-cache"
 install -d -m 700 "$HF_HOME" "$PIP_CACHE_DIR"
-read -rsp 'HF read token: ' HF_TOKEN
-printf '\n'
-export HF_TOKEN
-hf auth whoami
+if ! command -v hf >/dev/null; then
+  python3 -m venv "$TASK_ROOT/hf-bootstrap"
+  "$TASK_ROOT/hf-bootstrap/bin/python" -m pip install huggingface-hub==0.36.0
+  export PATH="$TASK_ROOT/hf-bootstrap/bin:$PATH"
+fi
+hf --help >/dev/null
 TASK_DOWNLOAD_LOG="$TASK_ROOT/controller-logs/model-download.log"
 hf download mistralai/Ministral-3-8B-Instruct-2512-BF16 \
   config.json \
@@ -232,7 +259,6 @@ hf download mistralai/Ministral-3-8B-Instruct-2512-BF16 \
   special_tokens_map.json \
   --revision f6fae9795746f63c9be8344932f01275f3c63734 \
   --cache-dir "$HF_HOME/hub" 2>&1 | tee "$TASK_DOWNLOAD_LOG"
-unset HF_TOKEN
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
@@ -251,15 +277,18 @@ assert torch.cuda.is_available()
 PY
 nvidia-smi
 
-# Keep Transformers 4.57.6 isolated from the training venv's 5.14.1. The
-# --system-site-packages link deliberately reuses image torch 2.8.0.
-python3 -m venv --system-site-packages "$TASK_ROOT/conversion-venv"
-. "$TASK_ROOT/conversion-venv/bin/activate"
-python -m pip install \
-  -r "$TASK_ROOT/conversion-tool-bundle/contracts/conversion-dependencies-v1.txt"
-python -m pip check
-python - <<'PY'
+# Keep Python 3.11 and Transformers 4.57.6 isolated from the Python 3.12
+# training venv. The image supplies /usr/bin/python3.11 and uv; install the
+# exact CUDA 12.8 Torch wheel in this separate task venv because Python 3.11
+# cannot import the image's Python 3.12 Torch extension.
+/usr/bin/uv venv --python /usr/bin/python3.11 "$TASK_ROOT/conversion-venv"
+/usr/bin/uv pip install --python "$TASK_ROOT/conversion-venv/bin/python" \
+  torch==2.8.0 \
+  --requirement "$TASK_ROOT/conversion-tool-bundle/contracts/conversion-dependencies-v1.txt"
+/usr/bin/uv pip check --python "$TASK_ROOT/conversion-venv/bin/python"
+"$TASK_ROOT/conversion-venv/bin/python" - <<'PY'
 import importlib.metadata as metadata
+import platform
 import torch
 
 expected = {
@@ -275,11 +304,15 @@ expected = {
 }
 actual = {name: metadata.version(name) for name in expected}
 assert actual == expected, (actual, expected)
+assert platform.python_version().startswith("3.11."), platform.python_version()
 assert torch.__version__.split("+", 1)[0] == "2.8.0", torch.__version__
-print({"conversion_dependencies": actual, "torch": torch.__version__})
+assert torch.version.cuda == "12.8", torch.version.cuda
+print({"conversion_dependencies": actual, "python": platform.python_version(),
+       "torch": torch.__version__, "cuda": torch.version.cuda})
 PY
 PYTHONPATH="$TASK_ROOT/conversion-tool-bundle/tools/llama.cpp/gguf-py" \
-  python "$TASK_ROOT/conversion-tool-bundle/tools/llama.cpp/convert_hf_to_gguf.py" \
+  "$TASK_ROOT/conversion-venv/bin/python" \
+  "$TASK_ROOT/conversion-tool-bundle/tools/llama.cpp/convert_hf_to_gguf.py" \
   --print-supported-models 2>&1 | grep -E 'Mistral3|Ministral3|mistral3'
 ldd "$TASK_ROOT/conversion-tool-bundle/tools/llama-b10333-cpu/llama-quantize"
 "$TASK_ROOT/conversion-tool-bundle/tools/llama-b10333-cpu/llama-quantize" \
@@ -287,9 +320,9 @@ ldd "$TASK_ROOT/conversion-tool-bundle/tools/llama-b10333-cpu/llama-quantize"
 ```
 
 Stop immediately on a missing file, dependency conflict, CUDA mismatch or a
-GPU other than the approved 48 GB device. Keep `HF_TOKEN` only in the remote
-process environment and unset it after the official download if no optional HF
-mirror is authorized.
+GPU other than the approved 48 GB device. If an optional private HF mirror is
+later used under the zero-incremental-cost authorization, keep its token only
+in the target process environment and unset it immediately afterward.
 
 ## E. Run the one-step optimizer smoke and isolated reload
 
@@ -598,6 +631,8 @@ scp -r -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
   -P "$TASK_SSH_PORT" \
   root@"$TASK_SSH_HOST":/workspace/rondo-l6/runs/"$TASK_ATTEMPT_ID"/formal/. \
   "$TASK_LOCAL_RECOVERY"/
+find "$TASK_LOCAL_RECOVERY" -type d -exec chmod 700 {} +
+find "$TASK_LOCAL_RECOVERY" -type f -exec chmod 600 {} +
 
 cd "$TASK_WORKTREE"
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
@@ -620,6 +655,11 @@ technical choice under the paid authorization, not a new user review:
 - `paired_gguf`: the same base plus a separately merged and quantized Q4_K_M
   fine-tuned model; neither side uses `--lora`.
 
+The paired merge copies the two already-verified frozen tokenizer files byte
+for byte into the merged HF directory. Do not re-serialize them with
+Transformers: version 5 may emit `tokenizer_class=TokenizersBackend`, which the
+frozen b10333 converter cannot import even though the merged weights are valid.
+
 The frozen BF16 cache is exactly 17,836,052,480 bytes. A prior same-family
 Q4_K_M artifact was 5,198,387,456 bytes, which is only a size estimate. Reserve
 a conservative 60 GB total Pod-volume peak for `adapter_on_off` or 80 GB for
@@ -627,9 +667,60 @@ sequential `paired_gguf`; require 45/65 GB free respectively before starting
 and 20 GB free at each transition. All weights stay on the 100 GB Pod volume,
 not the 40 GB container disk.
 
+The conversion must not depend on a long-lived SSH session. Launch the
+hash-verified task controller detached, keep its log/status outside the
+deployment allowlist, and poll it from short control connections. A failed
+attempt keeps its small logs and identity facts under `diagnostics/`; remove
+only its known unusable temporary F16 file before selecting a new route-attempt
+directory. Never reuse a partial deployment directory.
+
+For a converter/model combination not already proven by a real artifact,
+inspect the first tensor inventory and file-growth samples before allowing a
+long write. A lightweight LoRA conversion must emit low-rank adapter tensors
+and remain on the order of the source adapter, not grow like the full BF16
+model. Abort and preserve diagnostics as soon as that invariant is disproved.
+Full-model F16 growth is expected for `paired_gguf`; compare its early tensor
+roles/count and growth with the frozen full model instead.
+
+```bash
+set -euo pipefail
+TASK_ROOT=/workspace/rondo-l6
+TASK_ATTEMPT_ID=attempt-01
+TASK_ROUTE=adapter_on_off
+TASK_ROUTE_ATTEMPT=adapter-on-off-01
+TASK_CONVERSION_CONTROLLER="$TASK_ROOT/runpod-stage2-convert.sh"
+TASK_STATUS_FILE="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT.status"
+TASK_PID_FILE="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT.pid"
+TASK_CONTROLLER_LOG="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT.log"
+test -x "$TASK_CONVERSION_CONTROLLER"
+test ! -e "$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/$TASK_ROUTE_ATTEMPT"
+test ! -e "$TASK_STATUS_FILE"
+test ! -e "$TASK_PID_FILE"
+test ! -e "$TASK_CONTROLLER_LOG"
+nohup env TASK_ROOT="$TASK_ROOT" TASK_ATTEMPT_ID="$TASK_ATTEMPT_ID" \
+  TASK_ROUTE="$TASK_ROUTE" TASK_ROUTE_ATTEMPT="$TASK_ROUTE_ATTEMPT" \
+  TASK_STATUS_FILE="$TASK_STATUS_FILE" \
+  "$TASK_CONVERSION_CONTROLLER" >"$TASK_CONTROLLER_LOG" 2>&1 </dev/null &
+printf '%s\n' "$!" >"$TASK_PID_FILE"
+chmod 600 "$TASK_PID_FILE" "$TASK_CONTROLLER_LOG"
+
+while test ! -f "$TASK_STATUS_FILE"; do
+  TASK_CONVERSION_PID="$(cat "$TASK_PID_FILE")"
+  kill -0 "$TASK_CONVERSION_PID"
+  tail -n 20 "$TASK_CONTROLLER_LOG"
+  sleep 30
+done
+test "$(cat "$TASK_STATUS_FILE")" = completed
+```
+
+The following is the controller's exact route/path/tool contract for review.
+The operator uses the detached controller above rather than pasting this
+long-running block into an interactive SSH session.
+
 ```bash
 set -euo pipefail
 umask 077
+export PYTHONDONTWRITEBYTECODE=1
 TASK_ROOT=/workspace/rondo-l6
 TASK_ATTEMPT_ID=attempt-01
 TASK_FORMAL_OUTPUT="$TASK_ROOT/runs/$TASK_ATTEMPT_ID/formal"
@@ -690,7 +781,7 @@ print(json.loads(pathlib.Path(sys.argv[1]).read_text())["metadata"]["total_size"
 PY
 )" = 17836052480
 
-"$TASK_CONVERSION_PYTHON" "$TASK_CONVERTER_ROOT/convert_hf_to_gguf.py" \
+"$TASK_CONVERSION_PYTHON" -B "$TASK_CONVERTER_ROOT/convert_hf_to_gguf.py" \
   --outfile "$TASK_DEPLOYMENT/work/base-f16.gguf" --outtype f16 \
   --use-temp-file "$TASK_BASE_DIR" \
   2>&1 | tee "$TASK_DEPLOYMENT/base-convert.log"
@@ -704,20 +795,58 @@ test "$(df -B1 --output=avail /workspace | tail -n1 | tr -d ' ')" \
   -ge 20000000000
 
 if test "$TASK_ROUTE" = adapter_on_off; then
-  "$TASK_CONVERSION_PYTHON" "$TASK_CONVERTER_ROOT/convert_lora_to_gguf.py" \
+  TASK_SOURCE_ADAPTER_BYTES="$(jq -er \
+    '[.artifacts.adapter.files[].bytes] | add | select(type == "number" and . > 0)' \
+    "$TASK_FORMAL_OUTPUT/training-receipt.json")"
+  TASK_ADAPTER_MAX_BYTES="$((TASK_SOURCE_ADAPTER_BYTES * 8 + 64000000))"
+  TASK_ADAPTER_LOG="$TASK_DEPLOYMENT/adapter-convert.log"
+  "$TASK_CONVERSION_PYTHON" -B "$TASK_CONVERTER_ROOT/convert_lora_to_gguf.py" \
     --base "$TASK_BASE_DIR" \
     --outfile "$TASK_DEPLOYMENT/adapter-f16.gguf" --outtype f16 \
     "$TASK_FORMAL_OUTPUT/adapter-final" \
-    2>&1 | tee "$TASK_DEPLOYMENT/adapter-convert.log"
+    >"$TASK_ADAPTER_LOG" 2>&1 &
+  TASK_ADAPTER_PID="$!"
+  TASK_ADAPTER_POLL=0
+  while kill -0 "$TASK_ADAPTER_PID" 2>/dev/null; do
+    if test -f "$TASK_DEPLOYMENT/adapter-f16.gguf"; then
+      TASK_ADAPTER_BYTES="$(stat -c '%s' \
+        "$TASK_DEPLOYMENT/adapter-f16.gguf")"
+      if test "$TASK_ADAPTER_BYTES" -gt "$TASK_ADAPTER_MAX_BYTES"; then
+        kill "$TASK_ADAPTER_PID" 2>/dev/null || true
+        wait "$TASK_ADAPTER_PID" || true
+        tail -n 50 "$TASK_ADAPTER_LOG"
+        printf 'adapter_conversion_size_guard_exceeded:%s:%s\n' \
+          "$TASK_ADAPTER_BYTES" "$TASK_ADAPTER_MAX_BYTES" >&2
+        exit 24
+      fi
+      if test "$((TASK_ADAPTER_POLL % 5))" -eq 0; then
+        printf 'adapter_conversion_bytes=%s max_bytes=%s\n' \
+          "$TASK_ADAPTER_BYTES" "$TASK_ADAPTER_MAX_BYTES"
+      fi
+    fi
+    TASK_ADAPTER_POLL="$((TASK_ADAPTER_POLL + 1))"
+    sleep 2
+  done
+  if ! wait "$TASK_ADAPTER_PID"; then
+    tail -n 50 "$TASK_ADAPTER_LOG"
+    exit 1
+  fi
+  cat "$TASK_ADAPTER_LOG"
   test -s "$TASK_DEPLOYMENT/adapter-f16.gguf"
+  test "$(stat -c '%s' "$TASK_DEPLOYMENT/adapter-f16.gguf")" \
+    -le "$TASK_ADAPTER_MAX_BYTES"
 else
-  "$TASK_TRAINING_PYTHON" "$TASK_DEPLOYMENT/tooling/merge_adapter.py" \
+  "$TASK_TRAINING_PYTHON" -B "$TASK_DEPLOYMENT/tooling/merge_adapter.py" \
     --base "$TASK_BASE_DIR" \
     --adapter "$TASK_FORMAL_OUTPUT/adapter-final" \
     --output "$TASK_DEPLOYMENT/work/merged-hf" \
     2>&1 | tee "$TASK_DEPLOYMENT/merge.log"
+  cmp "$TASK_BASE_DIR/tokenizer.json" \
+    "$TASK_DEPLOYMENT/work/merged-hf/tokenizer.json"
+  cmp "$TASK_BASE_DIR/tokenizer_config.json" \
+    "$TASK_DEPLOYMENT/work/merged-hf/tokenizer_config.json"
   export PYTHONPATH="$TASK_CONVERTER_ROOT/gguf-py"
-  "$TASK_CONVERSION_PYTHON" "$TASK_CONVERTER_ROOT/convert_hf_to_gguf.py" \
+  "$TASK_CONVERSION_PYTHON" -B "$TASK_CONVERTER_ROOT/convert_hf_to_gguf.py" \
     --outfile "$TASK_DEPLOYMENT/work/finetuned-f16.gguf" --outtype f16 \
     --use-temp-file "$TASK_DEPLOYMENT/work/merged-hf" \
     2>&1 | tee "$TASK_DEPLOYMENT/finetuned-convert.log"
@@ -733,7 +862,7 @@ else
 fi
 rmdir "$TASK_DEPLOYMENT/work"
 
-"$TASK_CONVERSION_PYTHON" \
+"$TASK_CONVERSION_PYTHON" -B \
   "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" write-operations \
   --contract "$TASK_CONVERSION_TOOLS/contracts/conversion-tool-contract-v1.json" \
   --tool-bundle "$TASK_CONVERSION_TOOLS" \
@@ -746,15 +875,44 @@ rmdir "$TASK_DEPLOYMENT/work"
   --training-python "$TASK_TRAINING_PYTHON"
 ```
 
-Create the exact route manifest and receipt. Hashing is streamed in 1 MiB
-chunks, so multi-gigabyte GGUFs are never read into memory at once. The receipt
-binds the already-completed training receipt and its adapter tree.
+Create the exact route manifest and receipt with the second detached
+controller. Hashing is streamed in 1 MiB chunks, so multi-gigabyte GGUFs are
+never read into memory at once. The receipt binds the already-completed
+training receipt and its adapter tree. As with conversion, short SSH polls may
+disconnect without killing the Pod-side hash/verification process.
+
+```bash
+set -euo pipefail
+TASK_FINALIZE_STATUS="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT-finalize.status"
+TASK_FINALIZE_PID="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT-finalize.pid"
+TASK_FINALIZE_LOG="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT-finalize.log"
+test ! -e "$TASK_FINALIZE_STATUS"
+test ! -e "$TASK_FINALIZE_PID"
+test ! -e "$TASK_FINALIZE_LOG"
+nohup env TASK_ROOT="$TASK_ROOT" TASK_ATTEMPT_ID="$TASK_ATTEMPT_ID" \
+  TASK_ROUTE="$TASK_ROUTE" TASK_ROUTE_ATTEMPT="$TASK_ROUTE_ATTEMPT" \
+  TASK_STATUS_FILE="$TASK_FINALIZE_STATUS" \
+  "$TASK_ROOT/runpod-stage2-finalize-conversion.sh" \
+  >"$TASK_FINALIZE_LOG" 2>&1 </dev/null &
+printf '%s\n' "$!" >"$TASK_FINALIZE_PID"
+chmod 600 "$TASK_FINALIZE_PID" "$TASK_FINALIZE_LOG"
+while test ! -f "$TASK_FINALIZE_STATUS"; do
+  kill -0 "$(cat "$TASK_FINALIZE_PID")"
+  tail -n 20 "$TASK_FINALIZE_LOG"
+  sleep 30
+done
+test "$(cat "$TASK_FINALIZE_STATUS")" = completed
+```
+
+The following is the finalizer's exact manifest/receipt construction contract
+for review; do not paste it into an interactive SSH session.
 
 ```bash
 set -euo pipefail
 umask 077
+export PYTHONDONTWRITEBYTECODE=1
 . "$TASK_ROOT/conversion-venv/bin/activate"
-python - "$TASK_DEPLOYMENT" "$TASK_ROUTE" <<'PY'
+python -B - "$TASK_DEPLOYMENT" "$TASK_ROUTE" <<'PY'
 import importlib.metadata as metadata
 import json
 import pathlib
@@ -781,7 +939,7 @@ value = {
 )
 PY
 
-python - "$TASK_DEPLOYMENT" "$TASK_CONVERSION_TOOLS" "$TASK_ROUTE" \
+python -B - "$TASK_DEPLOYMENT" "$TASK_CONVERSION_TOOLS" "$TASK_ROUTE" \
   "$TASK_FORMAL_OUTPUT/training-receipt.json" <<'PY'
 import hashlib
 import json
@@ -862,7 +1020,7 @@ else
   chmod 600 "$TASK_DEPLOYMENT/tooling/merge_adapter.py"
 fi
 chmod 700 "$TASK_DEPLOYMENT/tooling/llama-quantize"
-python "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" verify-output \
+python -B "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" verify-output \
   --contract "$TASK_CONVERSION_TOOLS/contracts/conversion-tool-contract-v1.json" \
   --tool-bundle "$TASK_CONVERSION_TOOLS" \
   --output "$TASK_DEPLOYMENT" \
@@ -882,8 +1040,23 @@ training:
 ```bash
 export TASK_ROUTE=paired_gguf
 export TASK_ROUTE_ATTEMPT=paired-gguf-01
-# Re-run I's conversion, receipt and remote verify-output blocks only.
-test -f "/workspace/rondo-l6/deployments/attempt-01/$TASK_ROUTE_ATTEMPT/conversion-receipt.json"
+export TASK_STATUS_FILE="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT.status"
+TASK_CONTROLLER_LOG="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT.log"
+TASK_PID_FILE="$TASK_ROOT/controller-logs/$TASK_ROUTE_ATTEMPT.pid"
+nohup env TASK_ROOT="$TASK_ROOT" TASK_ATTEMPT_ID="$TASK_ATTEMPT_ID" \
+  TASK_ROUTE="$TASK_ROUTE" TASK_ROUTE_ATTEMPT="$TASK_ROUTE_ATTEMPT" \
+  TASK_STATUS_FILE="$TASK_STATUS_FILE" \
+  "$TASK_ROOT/runpod-stage2-convert.sh" >"$TASK_CONTROLLER_LOG" 2>&1 </dev/null &
+printf '%s\n' "$!" >"$TASK_PID_FILE"
+chmod 600 "$TASK_PID_FILE" "$TASK_CONTROLLER_LOG"
+while test ! -f "$TASK_STATUS_FILE"; do
+  kill -0 "$(cat "$TASK_PID_FILE")"
+  tail -n 20 "$TASK_CONTROLLER_LOG"
+  sleep 30
+done
+test "$(cat "$TASK_STATUS_FILE")" = completed
+# Run I's receipt and remote verify-output block only after this succeeds.
+test -s "$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/$TASK_ROUTE_ATTEMPT/finetuned-q4_k_m.gguf"
 ```
 
 Recover deployment artifacts separately and run the same streaming verifier on
@@ -906,6 +1079,9 @@ scp -r -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
   -P "$TASK_SSH_PORT" \
   root@"$TASK_SSH_HOST":/workspace/rondo-l6/deployments/"$TASK_ATTEMPT_ID"/"$TASK_ROUTE_ATTEMPT"/. \
   "$TASK_LOCAL_DEPLOYMENT"/
+find "$TASK_LOCAL_DEPLOYMENT" -type d -exec chmod 700 {} +
+find "$TASK_LOCAL_DEPLOYMENT" -type f -exec chmod 600 {} +
+chmod 700 "$TASK_LOCAL_DEPLOYMENT/tooling/llama-quantize"
 cd "$TASK_WORKTREE"
 PYTHONDONTWRITEBYTECODE=1 python3 -B \
   training/local-approval-l6/conversion_tooling.py verify-output \

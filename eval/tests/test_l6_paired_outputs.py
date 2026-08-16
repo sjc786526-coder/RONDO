@@ -733,7 +733,6 @@ class PairReceiptIdentityTests(unittest.TestCase):
                 json.loads(output.getvalue())["status"],
                 "ready_for_blind_packaging",
             )
-
             with mock.patch.object(
                 cross_eval,
                 "prepare_private_blind_review",
@@ -791,6 +790,28 @@ class PairReceiptIdentityTests(unittest.TestCase):
                     import_results.call_args.kwargs["pair_evidence_path"],
                     evidence_path,
                 )
+
+    def test_file_evidence_loader_rewraps_foreign_module_capability(self) -> None:
+        """The ``python -m`` module instance must retain the formal capability."""
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            built = build_receipt(directory)
+            foreign_capability = mock.Mock(receipt=built.receipt)
+            with mock.patch.object(
+                paired_outputs,
+                "load_pair_evidence_locator",
+                return_value=built,
+            ), mock.patch.object(
+                paired_outputs,
+                "formal_pair_evidence",
+                return_value=foreign_capability,
+            ):
+                evidence = cross_eval._load_formal_l6_pair_evidence(
+                    directory / "pair-evidence.json"
+                )
+            self.assertIs(type(evidence), cross_eval.FormalL6PairEvidence)
+            self.assertEqual(evidence.receipt, built.receipt)
 
     def test_symlink_noncanonical_manifest_and_identical_artifacts_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -1253,7 +1253,13 @@ def _load_formal_l6_pair_evidence(
 
     try:
         built = paired_outputs.load_pair_evidence_locator(path)
-        return paired_outputs.formal_pair_evidence(built)
+        validated = paired_outputs.formal_pair_evidence(built)
+        # ``python -m ...cross_eval`` executes this file as ``__main__`` while
+        # paired_outputs imports it by its package name.  Re-wrap the fully
+        # source-validated receipt so the capability has this module instance's
+        # class identity; otherwise the CLI rejects it at the later isinstance
+        # gate even though the library entrypoint accepts the same evidence.
+        return FormalL6PairEvidence._from_source_validation(validated.receipt)
     except paired_outputs.PairedOutputError as exc:
         raise CrossEvalError("l6_pair_evidence_invalid") from exc
 

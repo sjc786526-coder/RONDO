@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-16（Plan 037 阶段二A购买前闭环完成，等待付费授权）
+最后更新：2026-08-16（Plan 037 完成，L6 成对输出已就绪）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | P2、L5b 与 Local M4 离线准备设施均已完成；Plan 037 阶段一和阶段二A购买前闭环也已完成。470 条 train-only 投影、精确 census、completion-only QLoRA、RunPod回收/转换手册、两种同源 deployment 路线和串行 b10333 pair CLI 均已就绪。真实 cohort 仍为 `waiting_for_l6_outputs`；尚未创建云资源、上传、加载 8B、做 optimizer smoke/训练、转换或生成 130×2 输出。下一步是用户另行付费授权的 L6 阶段二执行。 |
+| 方向 2 | L6 已完成：470 条 train-only completion-only QLoRA 在 RunPod A40 上完成真实 smoke、一个冻结 recipe 的 118-step 正式训练和 adapter 重载；同源 paired-GGUF 已由冻结 b10333 串行完成 130×2，连同 frozen Sol 侧形成 390 行并通过 Plan 036 正式导入。唯一 Pod/volume 已删除，未使用 HF。下一步是正式 Local M4 人判；当前没有 M4 质量结论。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -71,12 +71,11 @@
   六类与 allow/deny 均有覆盖，train/validation 按 120 个近重复组互斥，holdout 16 条只在本地内存中过滤且
   聚合命中 0。正文约 1.67 MB，随 prompt/schema、manifest 和数据卡进入 `training/`；私有 seed 投影、候选与
   逐条过滤明细留在 ignored `eval-data/`。
-  **Local M4 离线准备设施已完成（WP3b-A8）**：全部 130 条 validation 已冻结为 body-free 65 / 65 两批；
+  **Local M4 输入已就绪（WP3b-A8/A9）**：全部 130 条 validation 已冻结为 body-free 65 / 65 两批；
   三方完整导入、L6 成对归因、匿名位置平衡、裁判 prompt/schema、私有解盲聚合及独立 holdout 批次摘要合同
-  已就绪。Plan 037 阶段一与阶段二A已补齐 train-only 投影/token census、候选训练、转换与回收脚手架、
-  双路线实物 deployment、非 decision 终态和串行 pair runner；当前仍没有 L6 输出，状态为
-  `waiting_for_l6_outputs`。**下一步是需明确付费授权的 optimizer smoke、一次正式训练、转换、产物回收和
-  成对输出，之后才正式执行 Local M4。**
+  已就绪。Plan 037 已完成 470 条 train-only 训练、paired-GGUF 转换、两侧 130 条串行输出和 canonical
+  pair receipt/private evidence；390 行正式导入为 `ready_for_blind_packaging`。**下一步只执行正式 Local M4
+  盲化、裁判、解盲与人判，不因 validation 结果继续训练或更换 recipe。**
 - **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
   付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
   真实 API 授权，不得用未运行或无效比较表述“未见退化”。
@@ -101,7 +100,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | P2、L5b、M4 离线设施与 L6 阶段二A完成；等待付费执行输出 | L6 阶段二 → Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | L6 完成；390 行成对输入已通过正式导入 | 正式 Local M4 |
 | 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L6 → Local M4 已成链），
@@ -175,7 +174,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P0 | S1 审批模型显式覆盖、S2 审批证据快照 | 已完成 |
 | P1 | B1—B3 最小真实链路；L1/L2 model-free 前置 | 已完成，M1 通过 |
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
-| P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 进行中：L6 阶段二A购买前闭环完成，训练/输出待付费授权 |
+| P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 进行中：L6 已完成，正式 Local M4 待执行 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
 | P5 | RONDO Multi 产品线 | 产品基线已完成（工作包 2）；功能开发待 D1 |
 
@@ -184,7 +183,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | M0 | Guardian 模型/effort 显式生效并落盘规范化 `E_final` | 工程验收 | 已完成 |
 | M1 | 冻结 Codex 与 RONDO 同一 TB 2.1 任务端到端可归档 | 工程验收 | 已完成 |
 | Local M3 | 12k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 已完成 |
-| Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 未完成；离线准备与 L6 阶段二A已就绪，等待付费阶段成对输出 |
+| Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 未完成；390 行输入已验真，待正式盲评与人判 |
 | Multi 里程碑 | 由 Multi 自行定义，**不继承 `σ`/`delta` 总闸门** | 待定 | 待 D1 定下首个增量后确定 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1

@@ -80,8 +80,8 @@
   },
   "merge_builder": {
     "package_path": "bin/merge_adapter.py",
-    "sha256": "e024b6fb600470d3ad20b6abc9165053cc0bd3c6fe3f6a6a0212f27c59cc73f1",
-    "size_bytes": 2078
+    "sha256": "22015d5799ea7d2bfaeccb53bf7c394117bfd9d484e014e1e0641de478652836",
+    "size_bytes": 2904
   },
   "output_allowlists": {
     "adapter_on_off": [

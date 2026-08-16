@@ -563,18 +563,18 @@ def verify_model_contract(repo_root: Path, tokenizer_dir: Path) -> dict[str, Any
 def _token_ids(value: Any) -> list[int]:
     if hasattr(value, "tolist"):
         value = value.tolist()
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         value = value.get("input_ids")
+    if isinstance(value, list) and value and isinstance(value[0], list):
+        if len(value) != 1:
+            raise L6TrainingError("tokenizer_result_invalid")
+        value = value[0]
     if (
         not isinstance(value, list)
         or not value
         or any(isinstance(item, bool) or not isinstance(item, int) for item in value)
     ):
         raise L6TrainingError("tokenizer_result_invalid")
-    if value and isinstance(value[0], list):
-        if len(value) != 1:
-            raise L6TrainingError("tokenizer_result_invalid")
-        value = value[0]
     return list(value)
 
 
