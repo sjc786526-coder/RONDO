@@ -1106,9 +1106,12 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
 
 Verify the frozen CUDA runtime, display the exact server commands, then run the
 separate deterministic two-sample structural smoke. Its status is `passed`
-only when each side yields at least one real decision; typed structured-output,
-timeout or refusal terminals stay honest in the 0600 receipt. It never writes
-the formal journal and never selects a recipe or checkpoint.
+when both deployments load with the bound identity, both serial side sessions
+complete, every request records a legal terminal, and both processes are
+cleaned up. Decision counts and terminal-status counts are diagnostic only;
+typed structured-output, timeout or refusal terminals stay honest in the 0600
+receipt and do not block formal execution. It never writes the formal journal
+and never selects a recipe or checkpoint.
 
 ```bash
 set -euo pipefail
@@ -1140,11 +1143,12 @@ printf '%s\n' "$TASK_SMOKE_RESULT" | jq -e '.status == "passed"'
 ```
 
 If this preferred-route smoke passes, skip directly to J.2. Do not choose a
-route from the model decisions or validation quality. If and only if the
-conversion logs or b10333 startup/identity logs prove that the converted LoRA
-itself cannot be produced or loaded by the frozen runtime, keep the stopped Pod
-and use the fallback below. Preserve the failed route's deployment, private
-smoke receipt and server logs; do not rewrite them.
+route from the model decisions or validation quality. Zero decisions, typed
+structured-output failures, timeouts or refusals are not fallback triggers. If
+and only if the conversion logs or b10333 startup/identity logs prove that the
+converted LoRA itself cannot be produced or loaded by the frozen runtime, keep
+the stopped Pod and use the fallback below. Preserve the failed route's
+deployment, private smoke receipt and server logs; do not rewrite them.
 
 ### J.1 Same-Pod `paired_gguf` compatibility fallback
 

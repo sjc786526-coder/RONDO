@@ -523,6 +523,8 @@ def subprocess_side_session(
         )
     finally:
         launcher._stop_server_process(process)
+        if process.poll() is None:
+            raise L6B10333PairError("formal_pair_server_cleanup_failed")
 
 
 class SerialB10333Invoker:
@@ -694,6 +696,32 @@ def prepare_pair_evidence(
     return receipt_path, evidence_path
 
 
+def _structural_smoke_diagnostics(
+    results: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    terminal_status_counts = {
+        side: {status: 0 for status in cross_eval.OUTPUT_TERMINAL_STATUSES}
+        for side in paired_outputs.LOCAL_SIDE_ORDER
+    }
+    for result in results:
+        side = result.get("side")
+        terminal = result.get("terminal")
+        if side not in terminal_status_counts or not isinstance(terminal, dict):
+            raise L6B10333PairError("formal_pair_smoke_invalid")
+        try:
+            cross_eval.validate_output_terminal(terminal)
+        except cross_eval.CrossEvalError as exc:
+            raise L6B10333PairError("formal_pair_smoke_invalid") from exc
+        terminal_status_counts[side][terminal["status"]] += 1
+    return {
+        "decision_count_by_side": {
+            side: terminal_status_counts[side]["decision"]
+            for side in paired_outputs.LOCAL_SIDE_ORDER
+        },
+        "terminal_status_counts_by_side": terminal_status_counts,
+    }
+
+
 def run_structural_smoke(
     *,
     bundle: cross_eval.CohortBundle,
@@ -752,19 +780,11 @@ def run_structural_smoke(
                         "terminal": terminal,
                     }
                 )
-    decision_sides = {
-        result["side"]
-        for result in results
-        if result["terminal"]["status"] == "decision"
-    }
-    smoke_status = (
-        "passed"
-        if decision_sides == set(paired_outputs.LOCAL_SIDE_ORDER)
-        else "complete_with_sample_failures"
-    )
+    diagnostics = _structural_smoke_diagnostics(results)
+    smoke_status = "passed"
     value = {
-        "schema_version": 1,
-        "contract_version": "rondo_l6_b10333_structural_smoke_v1",
+        "schema_version": 2,
+        "contract_version": "rondo_l6_b10333_structural_smoke_v2",
         "status": smoke_status,
         "scope": "structural_smoke_not_formal_pair_output",
         "pair_receipt_sha256": receipt_sha256,
@@ -774,6 +794,13 @@ def run_structural_smoke(
         "sampling_contract": copy.deepcopy(
             receipt["shared_contract"]["sampling_contract"]
         ),
+        "lifecycle": {
+            "serial_side_sessions_completed": list(
+                paired_outputs.LOCAL_SIDE_ORDER
+            ),
+            "process_cleanup_completed": True,
+        },
+        "diagnostics": diagnostics,
         "results": results,
         "results_sha256": cross_eval._canonical_sha256(results),
     }
@@ -813,6 +840,8 @@ def _require_structural_smoke(
         "sample_ids",
         "sides",
         "sampling_contract",
+        "lifecycle",
+        "diagnostics",
         "results",
         "results_sha256",
     }
@@ -820,9 +849,9 @@ def _require_structural_smoke(
         not isinstance(value, dict)
         or set(value) != fields
         or raw != cross_eval._json_file_bytes(value)
-        or value.get("schema_version") != 1
+        or value.get("schema_version") != 2
         or value.get("contract_version")
-        != "rondo_l6_b10333_structural_smoke_v1"
+        != "rondo_l6_b10333_structural_smoke_v2"
         or value.get("status") != "passed"
         or value.get("scope") != "structural_smoke_not_formal_pair_output"
         or value.get("pair_receipt_sha256") != receipt_sha256
@@ -836,6 +865,13 @@ def _require_structural_smoke(
         or value.get("sides") != list(paired_outputs.LOCAL_SIDE_ORDER)
         or value.get("sampling_contract")
         != paired_outputs.FORMAL_SAMPLING_CONTRACT
+        or value.get("lifecycle")
+        != {
+            "serial_side_sessions_completed": list(
+                paired_outputs.LOCAL_SIDE_ORDER
+            ),
+            "process_cleanup_completed": True,
+        }
         or not isinstance(value.get("results"), list)
         or len(value["results"])
         != len(value["sample_ids"]) * len(paired_outputs.LOCAL_SIDE_ORDER)
@@ -849,7 +885,6 @@ def _require_structural_smoke(
         for sample_id in value["sample_ids"]
     ]
     actual_keys = []
-    decision_sides: set[str] = set()
     try:
         for result in value["results"]:
             if not isinstance(result, dict) or set(result) != {
@@ -860,14 +895,15 @@ def _require_structural_smoke(
                 raise cross_eval.CrossEvalError("smoke_result_invalid")
             actual_keys.append((result["side"], result["sample_id"]))
             cross_eval.validate_output_terminal(result["terminal"])
-            if result["terminal"]["status"] == "decision":
-                decision_sides.add(result["side"])
     except cross_eval.CrossEvalError as exc:
         raise L6B10333PairError("formal_pair_smoke_invalid") from exc
-    if (
-        actual_keys != expected_keys
-        or decision_sides != set(paired_outputs.LOCAL_SIDE_ORDER)
-    ):
+    if actual_keys != expected_keys:
+        raise L6B10333PairError("formal_pair_smoke_invalid")
+    try:
+        diagnostics = _structural_smoke_diagnostics(value["results"])
+    except L6B10333PairError as exc:
+        raise L6B10333PairError("formal_pair_smoke_invalid") from exc
+    if value.get("diagnostics") != diagnostics:
         raise L6B10333PairError("formal_pair_smoke_invalid")
 
 

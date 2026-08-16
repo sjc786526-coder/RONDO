@@ -339,6 +339,9 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 - 阶段二A复验指出的生命周期顺序缺口已窄修：deployment 本地验真后先 stop 同一 Pod 保留 volume，本地结构化
   smoke 通过才 delete；adapter 路线若有实证的转换/加载不兼容，则在 `$10/$12` 线内恢复同一 Pod，用独立目录改走
   paired-GGUF，不重训，也不按 validation 质量选路线。
+- structural smoke 只验证两侧绑定身份实际加载、串行请求均形成合法终态并完成进程清理；decision 数量只进入诊断，
+  即使一侧或两侧仅产生结构化失败、超时或拒绝也可进入正式 130×2。只有转换或冻结 b10333 加载不兼容可触发
+  deployment fallback，样本输出质量不得触发换路线。
 
 ### 本任务剩余步骤
 
@@ -392,3 +395,4 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 | 017 | RunPod-only、单 Pod、`$12` 上限、冻结 base/data/template/b10333、一个有效 recipe、train-only 上传、零新增 HF 费用和 validation 不调参属于硬边界；adapter on/off 优先、同 Pod 转换、具体命令/目录/时长属于可按实证调整的软路线 | 用户明确要求区分安全/费用/任务边界与实现建议；技术偏离可自主收敛，但不能扩大授权或改变训练归因 | 阶段二执行 | 已采纳 |
 | 018 | 正式 receipt 必须先回收本地并逐文件验真，随后才在 formal 输出外的独立目录转换；adapter on/off 与 paired GGUF 均预备，实际路线只按真实转换和 b10333 smoke 的兼容性选择 | 保护已完成训练证据，同时避免在购买 Pod 后临时设计转换或预先锁死不可用路线 | 转换 / 回收 | 阶段二A已落盘，真实兼容性待付费阶段 |
 | 019 | 优先 deployment 本地验真后先 stop 同一 Pod 并保留 volume；本地 structural smoke 通过才 delete 并运行 130×2。若 adapter 转换或冻结 b10333 加载有实证不兼容，在 `$10/$12` 线内恢复同一 Pod，以独立 remote/local/pair 目录完成 paired-GGUF fallback，不重训、不按 validation 质量选路线 | 删除 Pod 后才发现 LoRA 不兼容会丢失 BF16 cache 和同一付费生命周期内的已备回退；route-specific 目录保留诊断且避免 receipt/evidence 冲突 | 转换 / 本地 pair / 止费 | 阶段二A窄修已落盘，真实兼容性待付费阶段 |
+| 020 | structural smoke 是部署兼容性与生命周期门禁：两侧身份、请求合法终态和清理完成即通过；decision/非 decision 数量只作诊断，不参与正式运行或 deployment route 选择 | 两条样本的结构化失败、超时或拒绝是合同允许的诚实终态，不能把偶然输出质量误当成加载不兼容并永久阻断 130×2 | 本地 pair / fallback | 已采纳 |

@@ -124,9 +124,10 @@ training receipt if conversion fails.
 After a separately authorized conversion, the deployment is downloaded and
 verified, then the same Pod is stopped with its volume retained while the local
 b10333 glue builds canonical deployment manifests and runs a two-sample
-structural smoke. A proven adapter conversion/load incompatibility continues
-or restarts that same Pod and uses an independent paired-GGUF attempt without
-retraining.
+structural smoke. Any legal terminal union passes this compatibility/lifecycle
+gate; decision counts are diagnostic and cannot select a route. A proven
+adapter conversion/load incompatibility continues or restarts that same Pod
+and uses an independent paired-GGUF attempt without retraining.
 Once either route passes smoke, the Pod is deleted before 130 inputs per side
 run serially, the 390 three-side rows are assembled and formally re-imported.
 Typed sample failures remain typed; an unexpected dangling infrastructure

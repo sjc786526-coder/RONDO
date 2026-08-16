@@ -57,6 +57,7 @@ class RecordingFactory:
         structured_failure_count: int | None = None,
         timeout_once: bool = False,
         infrastructure_failure_once: bool = False,
+        terminal_statuses: list[str] | None = None,
     ) -> None:
         self.events: list[tuple[str, str]] = []
         self.commands: dict[str, list[str]] = {}
@@ -66,6 +67,7 @@ class RecordingFactory:
         ) if structured_failure_count is None else structured_failure_count
         self.timeout_once = timeout_once
         self.infrastructure_failure_once = infrastructure_failure_once
+        self.terminal_statuses = list(terminal_statuses or [])
 
     def __call__(
         self,
@@ -81,6 +83,19 @@ class RecordingFactory:
             def post(self, request: dict) -> dict:
                 factory.events.append(("post", deployment.side))
                 factory.requests.append((deployment.side, request))
+                if factory.terminal_statuses:
+                    status = factory.terminal_statuses.pop(0)
+                    if status == "structured_output_failure":
+                        raise local_client.StructuredOutputError(
+                            "fixture-invalid-json"
+                        )
+                    if status == "timeout":
+                        raise l6_b10333_pair.L6B10333RequestTimeout(
+                            "fixture-timeout"
+                        )
+                    if status == "refusal":
+                        raise paired_outputs.ModelRefusal("fixture-refusal")
+                    raise AssertionError(f"unknown fixture terminal: {status}")
                 if factory.timeout_once:
                     factory.timeout_once = False
                     raise l6_b10333_pair.L6B10333RequestTimeout(
@@ -603,7 +618,12 @@ class B10333FormalCompositionTests(unittest.TestCase):
             self.assertEqual(
                 smoke_value["results"][0]["terminal"]["status"], "timeout"
             )
-            self.assertEqual(smoke.status, "complete_with_sample_failures")
+            self.assertEqual(smoke.status, "passed")
+            l6_b10333_pair._require_structural_smoke(
+                bundle=bundle,
+                pair_receipt=built,
+                private_dir=private,
+            )
             self.assertFalse((run_dir / "paired-output-journal.jsonl").exists())
 
             infra_private = directory / "infra-private"
@@ -683,7 +703,7 @@ class B10333FormalCompositionTests(unittest.TestCase):
                 report["terminal"]["status"], "infrastructure_failure"
             )
 
-    def test_smoke_requires_one_decision_per_side_not_all_decisions(self) -> None:
+    def test_smoke_accepts_only_honest_nondecision_terminals(self) -> None:
         bundle = fixture_bundle()
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
@@ -691,72 +711,76 @@ class B10333FormalCompositionTests(unittest.TestCase):
             runtime = directory / "llama-server"
             runtime.write_bytes(b"fixture-b10333-runtime")
             os.chmod(runtime, 0o755)
-
-            compatible_private = directory / "compatible-private"
-            compatible_private.mkdir(mode=0o700)
-            compatible_factory = RecordingFactory(structured_failure_count=1)
+            private = directory / "private"
+            run_dir = directory / "run"
+            private.mkdir(mode=0o700)
+            run_dir.mkdir(mode=0o700)
+            factory = RecordingFactory(
+                terminal_statuses=[
+                    "structured_output_failure",
+                    "timeout",
+                    "refusal",
+                    "structured_output_failure",
+                ]
+            )
             with mock.patch.object(
                 l6_b10333_pair,
                 "FROZEN_SERVER_SHA256",
                 digest_bytes(runtime.read_bytes()),
+            ), mock.patch.object(
+                cross_eval, "load_synthetic_bundle", return_value=bundle
             ):
-                compatible = l6_b10333_pair.run_structural_smoke(
+                smoke = l6_b10333_pair.run_structural_smoke(
                     bundle=bundle,
                     pair_receipt=built,
                     runtime_binary=runtime,
-                    private_dir=compatible_private,
+                    private_dir=private,
                     port=19037,
                     sample_count=2,
-                    session_factory=compatible_factory,
+                    session_factory=factory,
                 )
                 l6_b10333_pair._require_structural_smoke(
                     bundle=bundle,
                     pair_receipt=built,
-                    private_dir=compatible_private,
+                    private_dir=private,
                 )
-            compatible_value, _raw = cross_eval._load_json(
-                compatible.receipt_path, private=True
-            )
-            self.assertEqual(compatible.status, "passed")
+                formal = l6_b10333_pair.run_formal_pair_bundle(
+                    worktree_root=WORKTREE_ROOT,
+                    bundle=bundle,
+                    pair_receipt=built,
+                    runtime_binary=runtime,
+                    run_dir=run_dir,
+                    private_dir=private,
+                    port=19037,
+                    session_factory=factory,
+                )
+            value, _raw = cross_eval._load_json(smoke.receipt_path, private=True)
+            self.assertEqual(smoke.status, "passed")
+            self.assertEqual(value["schema_version"], 2)
             self.assertEqual(
-                [result["terminal"]["status"] for result in compatible_value["results"]],
+                value["diagnostics"]["decision_count_by_side"],
+                {"local-static": 0, "local-ft-static": 0},
+            )
+            self.assertEqual(
+                [result["terminal"]["status"] for result in value["results"]],
                 [
                     "structured_output_failure",
-                    "decision",
-                    "decision",
-                    "decision",
+                    "timeout",
+                    "refusal",
+                    "structured_output_failure",
                 ],
             )
-
-            incompatible_private = directory / "incompatible-private"
-            incompatible_private.mkdir(mode=0o700)
-            incompatible_factory = RecordingFactory(structured_failure_count=2)
-            with mock.patch.object(
-                l6_b10333_pair,
-                "FROZEN_SERVER_SHA256",
-                digest_bytes(runtime.read_bytes()),
-            ):
-                incompatible = l6_b10333_pair.run_structural_smoke(
-                    bundle=bundle,
-                    pair_receipt=built,
-                    runtime_binary=runtime,
-                    private_dir=incompatible_private,
-                    port=19037,
-                    sample_count=2,
-                    session_factory=incompatible_factory,
-                )
             self.assertEqual(
-                incompatible.status, "complete_with_sample_failures"
+                value["lifecycle"],
+                {
+                    "serial_side_sessions_completed": [
+                        "local-static",
+                        "local-ft-static",
+                    ],
+                    "process_cleanup_completed": True,
+                },
             )
-            with self.assertRaisesRegex(
-                l6_b10333_pair.L6B10333PairError,
-                "formal_pair_smoke_invalid",
-            ):
-                l6_b10333_pair._require_structural_smoke(
-                    bundle=bundle,
-                    pair_receipt=built,
-                    private_dir=incompatible_private,
-                )
+            self.assertEqual(formal.side_output_count, 18)
 
     def test_show_commands_cli_is_model_free_and_uses_locator(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
