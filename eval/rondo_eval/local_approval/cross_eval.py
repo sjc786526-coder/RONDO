@@ -46,11 +46,23 @@ CANONICAL_JSON_VERSION = "utf8_sorted_keys_compact_no_nan_v1"
 APPROVAL_IDENTITY_VERSION = "static_v3_prompt_messages_output_schema_sha256_v1"
 IMPORT_SCHEMA_VERSION = 1
 IMPORT_CONTRACT_VERSION = "rondo_m4_three_side_import_v1"
+TERMINAL_IMPORT_SCHEMA_VERSION = 2
+TERMINAL_IMPORT_CONTRACT_VERSION = "rondo_m4_three_side_import_v2"
+OUTPUT_TERMINAL_SCHEMA_VERSION = 1
+OUTPUT_TERMINAL_CONTRACT_VERSION = "rondo_l6_output_terminal_v1"
+OUTPUT_TERMINAL_STATUSES = (
+    "decision",
+    "structured_output_failure",
+    "refusal",
+    "timeout",
+)
 LOCAL_PAIR_CONTRACT_VERSION = "rondo_l6_paired_attribution_v1"
 LOCAL_PAIR_RECEIPT_SCHEMA_VERSION = 1
 LOCAL_PAIR_RECEIPT_CONTRACT_VERSION = "rondo_l6_m4_pair_receipt_v1"
 PACKAGE_SCHEMA_VERSION = 1
 PACKAGE_CONTRACT_VERSION = "rondo_m4_blind_package_v1"
+ANONYMOUS_TERMINAL_SCHEMA_VERSION = 1
+ANONYMOUS_TERMINAL_CONTRACT_VERSION = "rondo_m4_anonymous_terminal_projection_v1"
 MAPPING_SCHEMA_VERSION = 1
 MAPPING_CONTRACT_VERSION = "rondo_m4_private_blind_mapping_v1"
 REQUEST_SCHEMA_VERSION = 1
@@ -163,6 +175,15 @@ class BlindBatch:
     package_raw: bytes
     mapping: dict[str, Any]
     request: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class AnonymousTerminalBatch:
+    """A blind, pre-judge projection that can honestly carry absent decisions."""
+
+    package: dict[str, Any]
+    package_raw: bytes
+    mapping: dict[str, Any]
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -874,6 +895,73 @@ def _validate_sol_run_contract(
     return copy.deepcopy(expected)
 
 
+def validate_output_terminal(value: Any) -> dict[str, Any]:
+    """Validate one honest, versioned per-sample terminal outcome.
+
+    Only the ``decision`` variant is allowed to carry a decision.  Failures,
+    refusals, and timeouts carry a stable body-free code instead, so callers
+    cannot silently convert absence of a compliant model output into ``deny``.
+    """
+
+    if not isinstance(value, dict):
+        raise CrossEvalError("output_terminal_invalid")
+    common = {
+        "schema_version",
+        "contract_version",
+        "status",
+    }
+    status = value.get("status")
+    if (
+        value.get("schema_version") != OUTPUT_TERMINAL_SCHEMA_VERSION
+        or value.get("contract_version") != OUTPUT_TERMINAL_CONTRACT_VERSION
+        or status not in OUTPUT_TERMINAL_STATUSES
+    ):
+        raise CrossEvalError("output_terminal_invalid")
+    accepted = copy.deepcopy(value)
+    if status == "decision":
+        if set(value) != common | {"decision"}:
+            raise CrossEvalError("output_terminal_fields_invalid")
+        try:
+            accepted["decision"] = validate_static_decision(value["decision"])
+        except EvidenceError as exc:
+            raise CrossEvalError("output_terminal_decision_invalid") from exc
+        return accepted
+    if set(value) != common | {"failure_code"}:
+        raise CrossEvalError("output_terminal_fields_invalid")
+    code = value.get("failure_code")
+    if (
+        not isinstance(code, str)
+        or _ID.fullmatch(code) is None
+        or len(code) > 64
+    ):
+        raise CrossEvalError("output_terminal_failure_code_invalid")
+    return accepted
+
+
+def _row_terminal(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the terminal projection without changing accepted v1 rows."""
+
+    if "terminal" in row:
+        return validate_output_terminal(row["terminal"])
+    try:
+        decision = validate_static_decision(row["decision"])
+    except (KeyError, EvidenceError) as exc:
+        raise CrossEvalError("side_output_terminal_missing") from exc
+    return {
+        "schema_version": OUTPUT_TERMINAL_SCHEMA_VERSION,
+        "contract_version": OUTPUT_TERMINAL_CONTRACT_VERSION,
+        "status": "decision",
+        "decision": decision,
+    }
+
+
+def _row_decision(row: Mapping[str, Any]) -> dict[str, Any]:
+    terminal = _row_terminal(row)
+    if terminal["status"] != "decision":
+        raise CrossEvalError("decision_terminal_required")
+    return copy.deepcopy(terminal["decision"])
+
+
 def _validate_import_row(
     value: Any,
     *,
@@ -881,7 +969,7 @@ def _validate_import_row(
     cohort_item: Mapping[str, Any],
     source_row: Mapping[str, Any],
 ) -> dict[str, Any]:
-    fields = {
+    v1_fields = {
         "schema_version",
         "contract_version",
         "partition",
@@ -898,14 +986,25 @@ def _validate_import_row(
         "decision",
         "run_contract",
     }
-    if not isinstance(value, dict) or set(value) != fields:
+    v2_fields = (v1_fields - {"decision"}) | {"terminal"}
+    if not isinstance(value, dict):
+        raise CrossEvalError("side_output_fields_invalid")
+    is_v1 = (
+        value.get("schema_version") == IMPORT_SCHEMA_VERSION
+        and value.get("contract_version") == IMPORT_CONTRACT_VERSION
+        and set(value) == v1_fields
+    )
+    is_v2 = (
+        value.get("schema_version") == TERMINAL_IMPORT_SCHEMA_VERSION
+        and value.get("contract_version") == TERMINAL_IMPORT_CONTRACT_VERSION
+        and set(value) == v2_fields
+    )
+    if not is_v1 and not is_v2:
         raise CrossEvalError("side_output_fields_invalid")
     side = value.get("side")
     if side not in SIDES:
         raise CrossEvalError("side_unknown")
     expected_scalars = {
-        "schema_version": IMPORT_SCHEMA_VERSION,
-        "contract_version": IMPORT_CONTRACT_VERSION,
         "partition": bundle.partition,
         "cohort_id": bundle.manifest["cohort_id"],
         "cohort_manifest_sha256": bundle.manifest_sha256,
@@ -924,11 +1023,23 @@ def _validate_import_row(
         or any(value[key] != identities[key] for key in identities)
     ):
         raise CrossEvalError("side_output_approval_input_drift")
-    try:
-        decision = validate_static_decision(value["decision"])
-    except EvidenceError as exc:
-        raise CrossEvalError("side_output_decision_invalid") from exc
+    if is_v1:
+        try:
+            decision = validate_static_decision(value["decision"])
+        except EvidenceError as exc:
+            raise CrossEvalError("side_output_decision_invalid") from exc
+        terminal = {
+            "schema_version": OUTPUT_TERMINAL_SCHEMA_VERSION,
+            "contract_version": OUTPUT_TERMINAL_CONTRACT_VERSION,
+            "status": "decision",
+            "decision": decision,
+        }
+    else:
+        terminal = validate_output_terminal(value["terminal"])
+        decision = terminal.get("decision")
     if side == "sol-static":
+        if terminal["status"] != "decision":
+            raise CrossEvalError("sol_target_terminal_invalid")
         if decision != source_row["target"]:
             raise CrossEvalError("sol_target_drift")
         run_contract = _validate_sol_run_contract(
@@ -939,7 +1050,10 @@ def _validate_import_row(
         if run_contract["output_contract_sha256"] != cohort_item["output_schema_sha256"]:
             raise CrossEvalError("local_output_contract_drift")
     accepted = copy.deepcopy(value)
-    accepted["decision"] = decision
+    if is_v1:
+        accepted["decision"] = decision
+    else:
+        accepted["terminal"] = terminal
     accepted["run_contract"] = run_contract
     return accepted
 
@@ -1374,6 +1488,99 @@ def _position_counts(mapping_entries: Sequence[Mapping[str, Any]]) -> dict[str, 
     return counts
 
 
+def build_anonymous_terminal_batches(
+    bundle: CohortBundle,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    seed: bytes,
+    l6_pair_receipt: Mapping[str, Any],
+) -> list[AnonymousTerminalBatch]:
+    """Build balanced anonymous candidates without inventing missing decisions.
+
+    This is deliberately a pre-judge projection, not a replacement for the
+    frozen v1 judge package.  A later formal review can bind an explicit judge
+    prompt/result contract to this versioned shape.  The existing v1 decision
+    package and its judging semantics remain unchanged.
+    """
+
+    normalized = validate_three_side_rows(
+        bundle, rows, l6_pair_receipt=l6_pair_receipt
+    )
+    by_key = {(row["sample_id"], row["side"]): row for row in normalized}
+    cohort_items = {item["sample_id"]: item for item in bundle.manifest["items"]}
+    markers = _side_identity_markers(normalized) | {seed.hex()}
+    results: list[AnonymousTerminalBatch] = []
+    batch_ids = sorted({item["body_batch_id"] for item in cohort_items.values()})
+    for batch_id in batch_ids:
+        sample_ids = sorted(
+            sample_id
+            for sample_id, item in cohort_items.items()
+            if item["body_batch_id"] == batch_id
+        )
+        shuffled, orders = _balanced_side_orders(sample_ids, batch_id=batch_id, seed=seed)
+        package_samples = []
+        mapping_entries = []
+        for sample_id in shuffled:
+            source = bundle.source_rows[sample_id]
+            order = orders[sample_id]
+            candidates = [
+                {
+                    "candidate_id": candidate_id,
+                    "terminal": _row_terminal(by_key[(sample_id, side)]),
+                }
+                for candidate_id, side in zip(CANDIDATES, order)
+            ]
+            package_samples.append(
+                {
+                    "sample_id": sample_id,
+                    "payload_sha256": source["payload_sha256"],
+                    "approval_input": copy.deepcopy(source["input"]),
+                    "candidates": candidates,
+                }
+            )
+            mapping_entries.append(
+                {
+                    "sample_id": sample_id,
+                    "positions": [
+                        {"candidate_id": candidate_id, "side": side}
+                        for candidate_id, side in zip(CANDIDATES, order)
+                    ],
+                }
+            )
+        package = {
+            "schema_version": ANONYMOUS_TERMINAL_SCHEMA_VERSION,
+            "contract_version": ANONYMOUS_TERMINAL_CONTRACT_VERSION,
+            "partition": bundle.partition,
+            "cohort_id": bundle.manifest["cohort_id"],
+            "cohort_manifest_sha256": bundle.manifest_sha256,
+            "body_batch_id": batch_id,
+            "samples": package_samples,
+        }
+        terminals = [
+            candidate["terminal"]
+            for sample in package_samples
+            for candidate in sample["candidates"]
+        ]
+        if _contains_marker(package, markers) or _contains_forbidden_side_identity(
+            terminals
+        ):
+            raise CrossEvalError("blind_package_side_leak")
+        package_raw = _json_file_bytes(package)
+        mapping = {
+            "schema_version": MAPPING_SCHEMA_VERSION,
+            "contract_version": MAPPING_CONTRACT_VERSION,
+            "partition": bundle.partition,
+            "cohort_manifest_sha256": bundle.manifest_sha256,
+            "body_batch_id": batch_id,
+            "package_sha256": _sha256(package_raw),
+            "seed_sha256": _sha256(seed),
+            "position_counts": _position_counts(mapping_entries),
+            "entries": mapping_entries,
+        }
+        results.append(AnonymousTerminalBatch(package, package_raw, mapping))
+    return results
+
+
 def build_blind_batches(
     bundle: CohortBundle,
     rows: Sequence[Mapping[str, Any]],
@@ -1390,6 +1597,8 @@ def build_blind_batches(
     normalized = validate_three_side_rows(
         bundle, rows, l6_pair_receipt=l6_pair_receipt
     )
+    if any(_row_terminal(row)["status"] != "decision" for row in normalized):
+        raise CrossEvalError("judge_package_v1_requires_decision_terminals")
     by_key = {(row["sample_id"], row["side"]): row for row in normalized}
     cohort_items = {item["sample_id"]: item for item in bundle.manifest["items"]}
     markers = _side_identity_markers(normalized) | {seed.hex()}
@@ -1410,7 +1619,7 @@ def build_blind_batches(
             candidates = [
                 {
                     "candidate_id": candidate_id,
-                    "decision": copy.deepcopy(by_key[(sample_id, side)]["decision"]),
+                    "decision": _row_decision(by_key[(sample_id, side)]),
                 }
                 for candidate_id, side in zip(CANDIDATES, order)
             ]
@@ -1653,7 +1862,9 @@ def unblind_batch(
             for item in package_samples[sample_id]["candidates"]
         }
         for candidate_id, side in candidate_to_side.items():
-            if package_decisions.get(candidate_id) != by_key[(sample_id, side)]["decision"]:
+            if package_decisions.get(candidate_id) != _row_decision(
+                by_key[(sample_id, side)]
+            ):
                 raise CrossEvalError("blind_mapping_decision_mismatch")
         assessment_by_candidate = {
             item["candidate_id"]: item for item in result["candidate_assessments"]
@@ -1666,7 +1877,7 @@ def unblind_batch(
                 "sides": [
                     {
                         "side": side,
-                        "decision": by_key[(sample_id, side)]["decision"],
+                        "decision": _row_decision(by_key[(sample_id, side)]),
                         "candidate_id": candidate_id,
                         "assessment": assessment_by_candidate[candidate_id],
                         "preferred": candidate_id in result["preferred_candidates"],

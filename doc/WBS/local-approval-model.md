@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-15（L5b 与 Local M4 离线准备设施完成，等待 L6）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-15（Plan 037 阶段一本地准备完成，等待 L6 阶段二授权）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -189,8 +189,11 @@
 
 1. **L5b 与 M4 离线准备均已完成**：600 条合成训练资产及 130 条 validation 主体 cohort 已冻结；真实 holdout
    未被本次准备任务打开或物化。
-2. **下一产品工作是 L6**：按云 GPU LoRA 微调路线推进；训练、数据外发、云 GPU 与权重需独立申请；L6 产生
-   成对输出后才正式执行 Local M4。
+2. **L6 阶段一本地准备已完成**：470 条 train-only 投影、冻结 tokenizer/template 精确 census、completion-only
+   mask、候选 QLoRA/RunPod 脚手架，以及非 decision 终态与实物哈希 pair runner 已就绪；没有创建云资源、上传、
+   8B optimizer smoke、训练或 130 条输出。
+3. **下一产品工作是 L6 阶段二**：用户单独授权 RunPod 预算与对象后，先做真实 optimizer smoke 和 adapter reload，
+   再冻结最终 recipe 并只完成一个有效正式训练；产物回收并形成同源成对输出后才正式执行 Local M4。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
@@ -361,16 +364,18 @@ L5b 冻结结果：当前人在场开发用 Codex `gpt-5.6-sol` 只使用 seed 2
 2. **训练数据外发** —— Sol 生成的合成标签要上传到云端；即便都是本项目自造数据，也属于真实数据外发；
 3. 权重下载回本地。
 
-因此推进顺序为：**先在本地用极小样本跑通 LoRA 训练脚本与数据格式**（不求收敛，只验证管线），
-再一次性申请云端正式训练的预算与数据外发范围。
+阶段一本地准备已用同格式 mock、完整 470 条精确 tokenizer/template census 和 train-only bundle 验证数据与标签管线；
+它不冒充真实 8B optimizer smoke。阶段二获单独授权后，必须先在 RunPod 做一个真实 optimizer step、保存并隔离重载
+adapter，再基于显存/兼容性证据做一次技术收敛，正式训练启动前冻结最终 recipe 与依赖。
 
 - **推理仍在本地**：训练产出的 LoRA adapter 或由其生成的合并/量化工件必须能由本地 llama.cpp runtime 加载，
   **训练侧的量化、转换与格式选择必须以本地推理可落地为约束**，不能训完才发现用不了。
 - **训练前后可比性**：两份 Local 工件必须来自同一底模谱系，并固定相同 runtime、prompt、采样和结构化输出条件。
   最终采用 adapter on/off 还是从同一训练谱系生成成对 GGUF，由 L6 实施计划按本地 runtime 兼容性决定；
   本页不预先写死，也不把当前部署用 GGUF 直接当作训练效果归因工件。
-- **轮次封顶：正式训练最多 2—3 轮**，之后必须明确三选一 —— **采用 / 保留为实验 / 停止**。
-  不允许无限微调下去，也不扩成生产验收。
+- **轮次封顶：只允许一个有效正式 recipe/训练。** 在成功 smoke 前，明确的依赖、OOM、target module、保存或基础设施
+  技术失败可在预算内窄修并有界重试；一旦冻结 recipe 完成有效正式训练，不得因 validation、loss 或主观质量再改配重训。
+  后续 Local M4 只做人判三选一 —— **采用 / 保留为实验 / 停止**。
 
 仓库边界按数据体量决定（L5b 出数后立即确认）：
 

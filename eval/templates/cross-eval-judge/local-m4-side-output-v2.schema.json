@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"properties": {"side": {"const": "sol-static"}}, "required": ["side"]},
+      "then": {
+        "properties": {
+          "run_contract": {
+            "properties": {"provenance": {"const": "frozen_validation_target"}},
+            "required": ["provenance"]
+          },
+          "terminal": {
+            "properties": {"status": {"const": "decision"}},
+            "required": ["status"]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"side": {"const": "local-static"}}, "required": ["side"]},
+      "then": {
+        "properties": {
+          "run_contract": {
+            "properties": {
+              "provenance": {"const": "l6_paired_unfinetuned"},
+              "training_receipt_sha256": {"type": "null"}
+            },
+            "required": ["provenance", "training_receipt_sha256"]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"side": {"const": "local-ft-static"}}, "required": ["side"]},
+      "then": {
+        "properties": {
+          "run_contract": {
+            "properties": {
+              "provenance": {"const": "l6_paired_finetuned"},
+              "training_receipt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+            },
+            "required": ["provenance", "training_receipt_sha256"]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "approval_input": {"type": "object"},
+    "approval_prompt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "body_batch_id": {"pattern": "^[a-z0-9][a-z0-9-]{0,95}$", "type": "string"},
+    "cohort_id": {"pattern": "^[a-z0-9][a-z0-9-]{0,95}$", "type": "string"},
+    "cohort_manifest_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "contract_version": {"const": "rondo_m4_three_side_import_v2", "type": "string"},
+    "message_sequence_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "output_schema_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "partition": {"enum": ["synthetic", "holdout"], "type": "string"},
+    "payload_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "run_contract": {"$ref": "local-m4-side-output-v1.schema.json#/properties/run_contract"},
+    "sample_id": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": 2, "type": "integer"},
+    "side": {
+      "enum": ["sol-static", "local-static", "local-ft-static"],
+      "type": "string"
+    },
+    "terminal": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "contract_version": {"const": "rondo_l6_output_terminal_v1", "type": "string"},
+            "decision": {
+              "additionalProperties": false,
+              "properties": {
+                "outcome": {"enum": ["allow", "deny"], "type": "string"},
+                "rationale": {"minLength": 1, "type": "string"},
+                "risk_tags": {
+                  "items": {"minLength": 1, "type": "string"},
+                  "maxItems": 16,
+                  "type": "array",
+                  "uniqueItems": true
+                }
+              },
+              "required": ["outcome", "rationale", "risk_tags"],
+              "type": "object"
+            },
+            "schema_version": {"const": 1, "type": "integer"},
+            "status": {"const": "decision", "type": "string"}
+          },
+          "required": ["schema_version", "contract_version", "status", "decision"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "contract_version": {"const": "rondo_l6_output_terminal_v1", "type": "string"},
+            "failure_code": {
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "type": "string"
+            },
+            "schema_version": {"const": 1, "type": "integer"},
+            "status": {
+              "enum": ["structured_output_failure", "refusal", "timeout"],
+              "type": "string"
+            }
+          },
+          "required": ["schema_version", "contract_version", "status", "failure_code"],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "partition",
+    "cohort_id",
+    "cohort_manifest_sha256",
+    "body_batch_id",
+    "sample_id",
+    "side",
+    "approval_input",
+    "payload_sha256",
+    "approval_prompt_sha256",
+    "message_sequence_sha256",
+    "output_schema_sha256",
+    "terminal",
+    "run_contract"
+  ],
+  "title": "RONDO M4 complete three-side import row v2 with honest terminal union",
+  "type": "object"
+}

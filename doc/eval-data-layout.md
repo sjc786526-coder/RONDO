@@ -62,7 +62,7 @@ eval-data/                             # git-ignored
 ├── teacher-labels/<batch_id>/          # L5a Sol 教师 manifest / payload / 原始返回 / 验证标签，目录 0700、文件 0600
 ├── synthetic-training/<batch_id>/      # L5b seed 投影、候选、authoring 与逐条过滤明细，目录 0700、文件 0600
 ├── b2/current.json                    # 可替换的当前 no-API 双侧验收收据，0600
-├── local-approval/                    # 本地模型 launcher 实例 receipt，0600
+├── local-approval/                    # 本地审批任务资产；launcher receipt 及 l6/<plan-id>/ 训练准备/回收工件，0600
 ├── work/                              # materialize 和 no-API 工作目录
 ├── recordings/<recording_id>/         # A1 录制包（原始 HTTP exchange + SSE）
 ├── evidence/                          # 审批证据包
@@ -73,11 +73,12 @@ eval-data/                             # git-ignored
 └── models/                            # 本地权重、GGUF、LoRA adapter（永不入库）
 
 training/                              # 按体积门限入库，不参与 Rust 构建
-└── local-approval-synthetic-v1/
-    ├── DATA_CARD.md
-    ├── manifest.json                  # 机器可读合同、统计、边界和文件哈希
-    ├── train.jsonl                    # 通过严格校验的 synthetic static-v3 样本
-    └── validation.jsonl               # 与 train 按近重复连通组互斥
+├── local-approval-synthetic-v1/
+│   ├── DATA_CARD.md
+│   ├── manifest.json                  # 机器可读合同、统计、边界和文件哈希
+│   ├── train.jsonl                    # 通过严格校验的 synthetic static-v3 样本
+│   └── validation.jsonl               # 与 train 按近重复连通组互斥
+└── local-approval-l6/                 # train-only bundle、候选 recipe/依赖与 receipt 合同；不含权重/输出
 ```
 
 ## 3. 命名
@@ -295,6 +296,10 @@ Git 只在 `eval/locks/` 保存一个不含正文、source path、逐条 semanti
 `rondo_static_approval_v1` target、场景类别、源变体组、近重复 split 组和 train/validation 归属。
 `input` / `target` 是 L6 的确定性消费面，其他字段用于合同和分组。
 
+这些 tracked synthetic 样本及 TB fixture 属于普通项目数据，不按凭据或隐私数据处理；普通搜索、格式解析或兼容测试
+遍历 validation 不构成失败。训练归因边界仍是只有冻结 470 条 train 可进入投影、RunPod bundle 和梯度，validation
+不得用于 recipe、超参、checkpoint、重训或正式训练后的第二套质量方案。
+
 - 生成上下文只允许 Plan 032 的 seed 受控投影；真实 `E_final`、真实身份和 provider 私有字段不得进入最终样本。
 - 候选总数最多 800。最终有效集必须为 400—800 条，覆盖 WBS 的六类场景且同时含 allow/deny。
 - 精确去重按 canonical static payload SHA-256；源变体和检测出的近重复连通组整体落入同一 split。
@@ -319,12 +324,16 @@ M4 由 Opus 5 在 Claude Code 会话内判定，**不满足“自动运行、自
   65 / 65，状态为 `waiting_for_l6_outputs`。
 - 真实执行目录为 `eval-data/cross-eval/<execution_id>/`，目录 0700、普通文件 0600。三方完整导入为
   `three-side-outputs.jsonl`，并同时导入 canonical `l6-pair-receipt.json`；每个 sample 必须恰有
-  `sol-static`、`local-static`、`local-ft-static` 一条。Sol 行只能复用冻结 validation target；receipt 必须声明
+  `sol-static`、`local-static`、`local-ft-static` 一条。Sol 行只能复用冻结 validation target；两种 Local 行使用
+  版本化 terminal union 如实保存 decision、结构化失败、拒绝或超时，非 decision 不补造 deny。paired runner 先完整
+  执行未微调侧、再执行微调侧，并用 0600 journal 在调用前记 attempt、终态后记完整行；悬空 attempt 不自动重调。
+  receipt 必须声明
   L6 成对的未微调/微调工件身份、训练 receipt、禁泄漏模型标识及共同 base lineage/runtime/template/request/
-  sampling/output contract，文件内容哈希再绑定两种 Local 行。不能用只有自报字段的输出或 Plan 033 部署 baseline
-  充当成对对照。
+  sampling/output contract；runner 会重新读取实际 regular file、冻结 lock 或逐组件复算的 canonical artifact manifest，
+  再绑定两种 Local 行。不能用只有自报字段的输出或 Plan 033 部署 baseline 充当成对对照。
 - `blinding-seed.json` 与 `blind-map-<body_batch_id>.json` 只在上述 ignored 私有目录。裁判可见的
-  `judge-package-<body_batch_id>.json` 只含一次 canonical approval input 与三个统一序列化的匿名 decision；
+  terminal 匿名投影可保留上述四种终态；现有 v1 `judge-package-<body_batch_id>.json` 只有在三侧全部为 decision 时
+  才可生成，并只含一次 canonical approval input 与三个统一序列化的匿名 decision；
   不含 side、模型/工件/路径/runtime/lineage、seed、mapping 或单独的参考 target。每批都独立满足 side × position
   计数差不超过 1。
 - `judge-request-<body_batch_id>.json` 冻结 package、裁判 prompt/schema、裁判模型标识和判定日期；人工返回
@@ -364,6 +373,7 @@ M4 由 Opus 5 在 Claude Code 会话内判定，**不满足“自动运行、自
 | `eval-data/runs/<run_id>/` | 保留最近 20 次 + 所有里程碑标记的运行 |
 | `eval-data/cross-eval/<batch_id>/` | 永久。会话内判定不可重跑复现，删掉就没有第二份 |
 | `eval-data/synthetic-training/<batch_id>/` | 至少保留到对应 L6 与 Local M4 收口；包含不可入库的 seed 投影、候选和过滤明细 |
+| `eval-data/local-approval/l6/<plan-id>/` | 至少保留到对应训练、产物回收与 Local M4 收口；权重/checkpoint 另按当前版+上一版策略 |
 | `eval-data/recordings/` | E-A 挂起期间不新增；已有录制按原规则保留 |
 | `eval-data/evidence/` | `seed` 与 `holdout` 永久（体量小）；`raw` 在完成划分后可清 |
 | `eval-data/models/` | 只保留当前在用与上一版权重，其余按需重新下载 |

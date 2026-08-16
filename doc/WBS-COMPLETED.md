@@ -935,3 +935,24 @@ standard/Lite 形态均补回归。
   focused unittest **27/27 通过、0 skip**，`py_compile` 与 `git diff --check` 通过。真实 no-model preflight 复算
   130 条、65 / 65、26 + 26 组，终态 `waiting_for_l6_outputs`。未创建 fake Local 输出，未调用模型/网络，未运行
   L6、正式 M4、Opus 裁判、训练、Cargo、Docker、CI 或全量测试；三选一人判定仍未完成。
+
+## WP3b-A9：L6 首轮 LoRA 阶段一本地准备（Plan 037，2026-08-15）
+
+- **训练数据与 token 合同**：冻结 train `1e66c06e…110a` 的 470 条记录确定性投影为
+  `0026cddd…c14`；固定 allowlist 的 train-only bundle 拒绝 validation、holdout、未知文件、symlink、清单外正文
+  及自改 manifest 后加入的额外文件。冻结 tokenizer/template 的精确序列统计为 145,360 tokens，
+  min/P50/P95/max = 278/311/331/333，4096 上限超限 0、无 packing/截断；470/470 prompt 全 mask，470/470
+  非空 completion 均有训练 label。
+- **候选训练与回收设施**：落地候选 QLoRA recipe、7 个直接依赖 pin、RunPod smoke/formal 分门入口、checkpoint
+  resume、adapter 隔离重载、pending→completed training receipt、逐文件 artifact export/download 验真和超时/止费说明。
+  本地 mock 只验证同格式数据/mask，未加载模型且 optimizer step 为 0；最终 recipe 仍须在阶段二真实 smoke 后冻结。
+- **成对输出前置**：Plan 036 增加版本化 decision / structured-output failure / refusal / timeout 终态，非 decision
+  不补造 deny；paired runner 每次重读实际 identity 文件/lock/canonical manifest，先写 attempt journal、再 fsync 唯一终态，
+  恢复时拒绝重调悬空 attempt。既有 decision v1 导入、盲化和裁判语义保持兼容。
+- **验证**：直接相关 unittest **61/61 通过**；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups、
+  `waiting_for_l6_outputs`。精确 census 重算逐字一致，mock dry-run、最终 tar 解包后 bundle 自校验、`py_compile`、
+  entrypoint `bash -n`、JSON/候选依赖解析、敏感/大文件/权限和 `git diff --check` 通过；训练与 pair 两轮独立复验
+  均无阶段一阻断。
+- **阶段边界**：阶段一没有创建/修改 RunPod/HF 资源、上传、付费、下载 base 权重、加载 8B、训练、转换、调用真实
+  模型/API、运行 130 条成对输出或正式 holdout。推荐阶段二候选为 Secure A40 48 GB；具体对象、预算和上传仍待用户
+  单独授权，WBS 保持 L6 进行中而不提前记为完成。

@@ -1,0 +1,33 @@
+{
+  "base": {
+    "repo": "mistralai/Ministral-3-8B-Instruct-2512-BF16",
+    "revision": "f6fae9795746f63c9be8344932f01275f3c63734"
+  },
+  "chat_template": {
+    "repo": "mistralai/Ministral-3-8B-Instruct-2512",
+    "revision": "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d",
+    "source_file": "chat_template.jinja",
+    "tracked_relative_path": "eval/templates/local-approval/ministral-3-8b-instruct-2512-chat-template.jinja",
+    "sha256": "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56"
+  },
+  "schema_version": 1,
+  "tokenizer": {
+    "files": {
+      "special_tokens_map.json": {
+        "bytes": 147094,
+        "sha256": "0a5c981e8c5c6f8886ee007a6d4543a0be6b221cb9ca32a8709384a4c6fc8cbb"
+      },
+      "tokenizer.json": {
+        "bytes": 17078128,
+        "sha256": "d5f6046775b112f0e2d456ee9dba450684ab964fe5c4e231599bdc6773028135"
+      },
+      "tokenizer_config.json": {
+        "bytes": 198094,
+        "sha256": "f59f7294e4f26383d0ea93840fe21cf197784be0842a8301a0343e8c34ed0d6d"
+      }
+    },
+    "repo": "mistralai/Ministral-3-8B-Instruct-2512-BF16",
+    "revision": "f6fae9795746f63c9be8344932f01275f3c63734"
+  },
+  "version": "rondo_local_approval_l6_model_contract_v1"
+}
