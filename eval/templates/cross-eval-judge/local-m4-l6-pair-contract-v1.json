@@ -1,0 +1,33 @@
+{
+  "chat_template": {
+    "relative_path": "eval/templates/local-approval/ministral-3-8b-instruct-2512-chat-template.jinja",
+    "revision": "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d",
+    "sha256": "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56"
+  },
+  "output_contract": {
+    "name": "rondo_static_approval_v1",
+    "sha256": "9d6eb425b9e73af31970c3e88f4b8cbeeaea9b41170d9b9b03d6611fa9cec212"
+  },
+  "request_contract": {
+    "sampling": {
+      "context_size": 12288,
+      "max_output_tokens": 512,
+      "seed": 42,
+      "temperature": 0.0,
+      "top_p": 1.0
+    },
+    "schema_version": 1,
+    "static_decision_schema_name": "rondo_static_approval_v1",
+    "static_decision_schema_sha256": "9d6eb425b9e73af31970c3e88f4b8cbeeaea9b41170d9b9b03d6611fa9cec212",
+    "static_instructions_sha256": "03f7b6bab6fd29329fe9c07d6540ca7b220b4cdc0fced78d6bb62ad93f0ef7e5",
+    "static_payload_schema_version": 3,
+    "transport": "llama_cpp_b10333_responses_static_v3"
+  },
+  "runtime": {
+    "lock_relative_path": "eval/locks/llama-cpp-b10333-cuda-linux-x64.json",
+    "lock_sha256": "299440bb261f9dbc6641e81fa995ca88af84e4e05530978fe9c46a9716107b75",
+    "release": "b10333"
+  },
+  "schema_version": 1,
+  "version": "rondo_l6_local_pair_contract_v1"
+}

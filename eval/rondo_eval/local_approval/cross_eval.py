@@ -46,11 +46,26 @@ CANONICAL_JSON_VERSION = "utf8_sorted_keys_compact_no_nan_v1"
 APPROVAL_IDENTITY_VERSION = "static_v3_prompt_messages_output_schema_sha256_v1"
 IMPORT_SCHEMA_VERSION = 1
 IMPORT_CONTRACT_VERSION = "rondo_m4_three_side_import_v1"
+TERMINAL_IMPORT_SCHEMA_VERSION = 2
+TERMINAL_IMPORT_CONTRACT_VERSION = "rondo_m4_three_side_import_v2"
+OUTPUT_TERMINAL_SCHEMA_VERSION = 1
+OUTPUT_TERMINAL_CONTRACT_VERSION = "rondo_l6_output_terminal_v1"
+OUTPUT_TERMINAL_STATUSES = (
+    "decision",
+    "structured_output_failure",
+    "refusal",
+    "timeout",
+)
+INFRASTRUCTURE_TERMINAL_SCHEMA_VERSION = 2
+INFRASTRUCTURE_TERMINAL_CONTRACT_VERSION = "rondo_l6_output_terminal_v2"
+INFRASTRUCTURE_TERMINAL_STATUS = "infrastructure_failure"
 LOCAL_PAIR_CONTRACT_VERSION = "rondo_l6_paired_attribution_v1"
 LOCAL_PAIR_RECEIPT_SCHEMA_VERSION = 1
 LOCAL_PAIR_RECEIPT_CONTRACT_VERSION = "rondo_l6_m4_pair_receipt_v1"
 PACKAGE_SCHEMA_VERSION = 1
 PACKAGE_CONTRACT_VERSION = "rondo_m4_blind_package_v1"
+ANONYMOUS_TERMINAL_SCHEMA_VERSION = 1
+ANONYMOUS_TERMINAL_CONTRACT_VERSION = "rondo_m4_anonymous_terminal_projection_v1"
 MAPPING_SCHEMA_VERSION = 1
 MAPPING_CONTRACT_VERSION = "rondo_m4_private_blind_mapping_v1"
 REQUEST_SCHEMA_VERSION = 1
@@ -157,12 +172,45 @@ class CohortBundle:
     source_rows: dict[str, dict[str, Any]]
 
 
+@dataclass(frozen=True, init=False)
+class FormalL6PairEvidence:
+    """A source-validated Plan 037 receipt capability.
+
+    The generic v1 receipt remains a legacy shape contract.  Formal v2 rows
+    require this capability, which the paired-output boundary creates only
+    after re-reading the frozen model/runtime contracts, completed formal
+    training receipt, and actual artifacts.
+    """
+
+    receipt: dict[str, Any]
+
+    def __new__(cls) -> FormalL6PairEvidence:
+        raise TypeError("FormalL6PairEvidence requires source validation")
+
+    @classmethod
+    def _from_source_validation(
+        cls, receipt: Mapping[str, Any]
+    ) -> FormalL6PairEvidence:
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "receipt", copy.deepcopy(dict(receipt)))
+        return instance
+
+
 @dataclass(frozen=True)
 class BlindBatch:
     package: dict[str, Any]
     package_raw: bytes
     mapping: dict[str, Any]
     request: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class AnonymousTerminalBatch:
+    """A blind, pre-judge projection that can honestly carry absent decisions."""
+
+    package: dict[str, Any]
+    package_raw: bytes
+    mapping: dict[str, Any]
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -874,6 +922,80 @@ def _validate_sol_run_contract(
     return copy.deepcopy(expected)
 
 
+def validate_output_terminal(value: Any) -> dict[str, Any]:
+    """Validate one honest, versioned per-sample terminal outcome.
+
+    Only the ``decision`` variant is allowed to carry a decision.  Failures,
+    refusals, and timeouts carry a stable body-free code instead, so callers
+    cannot silently convert absence of a compliant model output into ``deny``.
+    """
+
+    if not isinstance(value, dict):
+        raise CrossEvalError("output_terminal_invalid")
+    common = {
+        "schema_version",
+        "contract_version",
+        "status",
+    }
+    status = value.get("status")
+    accepted = copy.deepcopy(value)
+    is_v1 = (
+        value.get("schema_version") == OUTPUT_TERMINAL_SCHEMA_VERSION
+        and value.get("contract_version") == OUTPUT_TERMINAL_CONTRACT_VERSION
+        and status in OUTPUT_TERMINAL_STATUSES
+    )
+    is_infrastructure_v2 = (
+        value.get("schema_version") == INFRASTRUCTURE_TERMINAL_SCHEMA_VERSION
+        and value.get("contract_version")
+        == INFRASTRUCTURE_TERMINAL_CONTRACT_VERSION
+        and status == INFRASTRUCTURE_TERMINAL_STATUS
+    )
+    if not is_v1 and not is_infrastructure_v2:
+        raise CrossEvalError("output_terminal_invalid")
+    if is_v1 and status == "decision":
+        if set(value) != common | {"decision"}:
+            raise CrossEvalError("output_terminal_fields_invalid")
+        try:
+            accepted["decision"] = validate_static_decision(value["decision"])
+        except EvidenceError as exc:
+            raise CrossEvalError("output_terminal_decision_invalid") from exc
+        return accepted
+    if set(value) != common | {"failure_code"}:
+        raise CrossEvalError("output_terminal_fields_invalid")
+    code = value.get("failure_code")
+    if (
+        not isinstance(code, str)
+        or _ID.fullmatch(code) is None
+        or len(code) > 64
+    ):
+        raise CrossEvalError("output_terminal_failure_code_invalid")
+    return accepted
+
+
+def _row_terminal(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the terminal projection without changing accepted v1 rows."""
+
+    if "terminal" in row:
+        return validate_output_terminal(row["terminal"])
+    try:
+        decision = validate_static_decision(row["decision"])
+    except (KeyError, EvidenceError) as exc:
+        raise CrossEvalError("side_output_terminal_missing") from exc
+    return {
+        "schema_version": OUTPUT_TERMINAL_SCHEMA_VERSION,
+        "contract_version": OUTPUT_TERMINAL_CONTRACT_VERSION,
+        "status": "decision",
+        "decision": decision,
+    }
+
+
+def _row_decision(row: Mapping[str, Any]) -> dict[str, Any]:
+    terminal = _row_terminal(row)
+    if terminal["status"] != "decision":
+        raise CrossEvalError("decision_terminal_required")
+    return copy.deepcopy(terminal["decision"])
+
+
 def _validate_import_row(
     value: Any,
     *,
@@ -881,7 +1003,7 @@ def _validate_import_row(
     cohort_item: Mapping[str, Any],
     source_row: Mapping[str, Any],
 ) -> dict[str, Any]:
-    fields = {
+    v1_fields = {
         "schema_version",
         "contract_version",
         "partition",
@@ -898,14 +1020,25 @@ def _validate_import_row(
         "decision",
         "run_contract",
     }
-    if not isinstance(value, dict) or set(value) != fields:
+    v2_fields = (v1_fields - {"decision"}) | {"terminal"}
+    if not isinstance(value, dict):
+        raise CrossEvalError("side_output_fields_invalid")
+    is_v1 = (
+        value.get("schema_version") == IMPORT_SCHEMA_VERSION
+        and value.get("contract_version") == IMPORT_CONTRACT_VERSION
+        and set(value) == v1_fields
+    )
+    is_v2 = (
+        value.get("schema_version") == TERMINAL_IMPORT_SCHEMA_VERSION
+        and value.get("contract_version") == TERMINAL_IMPORT_CONTRACT_VERSION
+        and set(value) == v2_fields
+    )
+    if not is_v1 and not is_v2:
         raise CrossEvalError("side_output_fields_invalid")
     side = value.get("side")
     if side not in SIDES:
         raise CrossEvalError("side_unknown")
     expected_scalars = {
-        "schema_version": IMPORT_SCHEMA_VERSION,
-        "contract_version": IMPORT_CONTRACT_VERSION,
         "partition": bundle.partition,
         "cohort_id": bundle.manifest["cohort_id"],
         "cohort_manifest_sha256": bundle.manifest_sha256,
@@ -924,11 +1057,23 @@ def _validate_import_row(
         or any(value[key] != identities[key] for key in identities)
     ):
         raise CrossEvalError("side_output_approval_input_drift")
-    try:
-        decision = validate_static_decision(value["decision"])
-    except EvidenceError as exc:
-        raise CrossEvalError("side_output_decision_invalid") from exc
+    if is_v1:
+        try:
+            decision = validate_static_decision(value["decision"])
+        except EvidenceError as exc:
+            raise CrossEvalError("side_output_decision_invalid") from exc
+        terminal = {
+            "schema_version": OUTPUT_TERMINAL_SCHEMA_VERSION,
+            "contract_version": OUTPUT_TERMINAL_CONTRACT_VERSION,
+            "status": "decision",
+            "decision": decision,
+        }
+    else:
+        terminal = validate_output_terminal(value["terminal"])
+        decision = terminal.get("decision")
     if side == "sol-static":
+        if terminal["status"] != "decision":
+            raise CrossEvalError("sol_target_terminal_invalid")
         if decision != source_row["target"]:
             raise CrossEvalError("sol_target_drift")
         run_contract = _validate_sol_run_contract(
@@ -939,7 +1084,10 @@ def _validate_import_row(
         if run_contract["output_contract_sha256"] != cohort_item["output_schema_sha256"]:
             raise CrossEvalError("local_output_contract_drift")
     accepted = copy.deepcopy(value)
-    accepted["decision"] = decision
+    if is_v1:
+        accepted["decision"] = decision
+    else:
+        accepted["terminal"] = terminal
     accepted["run_contract"] = run_contract
     return accepted
 
@@ -1012,15 +1160,32 @@ def validate_three_side_rows(
     bundle: CohortBundle,
     values: Sequence[Any],
     *,
-    l6_pair_receipt: Mapping[str, Any] | None,
+    l6_pair_receipt: Mapping[str, Any] | FormalL6PairEvidence | None,
 ) -> list[dict[str, Any]]:
-    """Validate one complete, all-or-nothing three-side import."""
+    """Validate one complete, all-or-nothing three-side import.
+
+    Legacy v1 decision rows retain their frozen structural contract.  Formal
+    Plan 037 v2 rows cannot be imported from a self-reported receipt mapping;
+    callers must retain source-validated evidence from ``paired_outputs``.
+    """
 
     validate_cohort_bundle(bundle)
     if l6_pair_receipt is None:
         raise CrossEvalError("l6_pair_receipt_required")
+    contains_v2_local = any(
+        isinstance(value, dict)
+        and value.get("side") in {"local-static", "local-ft-static"}
+        and value.get("schema_version") == TERMINAL_IMPORT_SCHEMA_VERSION
+        for value in values
+    )
+    if isinstance(l6_pair_receipt, FormalL6PairEvidence):
+        receipt_value: Mapping[str, Any] = l6_pair_receipt.receipt
+    else:
+        if contains_v2_local:
+            raise CrossEvalError("l6_pair_sources_required")
+        receipt_value = l6_pair_receipt
     _receipt, _receipt_sha256, expected_local_contracts = validate_l6_pair_receipt(
-        l6_pair_receipt
+        receipt_value
     )
     items = {item["sample_id"]: item for item in bundle.manifest["items"]}
     expected_count = len(items) * len(SIDES)
@@ -1081,21 +1246,51 @@ def validate_three_side_rows(
     return [accepted[key] for key in sorted(accepted)]
 
 
+def _load_formal_l6_pair_evidence(
+    path: Path,
+) -> FormalL6PairEvidence:
+    from . import paired_outputs
+
+    try:
+        built = paired_outputs.load_pair_evidence_locator(path)
+        validated = paired_outputs.formal_pair_evidence(built)
+        # ``python -m ...cross_eval`` executes this file as ``__main__`` while
+        # paired_outputs imports it by its package name.  Re-wrap the fully
+        # source-validated receipt so the capability has this module instance's
+        # class identity; otherwise the CLI rejects it at the later isinstance
+        # gate even though the library entrypoint accepts the same evidence.
+        return FormalL6PairEvidence._from_source_validation(validated.receipt)
+    except paired_outputs.PairedOutputError as exc:
+        raise CrossEvalError("l6_pair_evidence_invalid") from exc
+
+
 def validate_three_side_import(
-    worktree_root: Path, input_path: Path, pair_receipt_path: Path
-) -> tuple[CohortBundle, list[dict[str, Any]], dict[str, Any]]:
+    worktree_root: Path,
+    input_path: Path,
+    pair_receipt_path: Path,
+    *,
+    pair_evidence_path: Path | None = None,
+) -> tuple[
+    CohortBundle,
+    list[dict[str, Any]],
+    dict[str, Any] | FormalL6PairEvidence,
+]:
     bundle = load_synthetic_bundle(worktree_root)
     values, _raw = _load_jsonl(input_path, private=True)
     receipt, receipt_raw = _load_json(pair_receipt_path, private=True)
     normalized_receipt, _sha, _contracts = validate_l6_pair_receipt(
         receipt, raw=receipt_raw
     )
+    evidence: dict[str, Any] | FormalL6PairEvidence = normalized_receipt
+    if pair_evidence_path is not None:
+        formal = _load_formal_l6_pair_evidence(pair_evidence_path)
+        if formal.receipt != normalized_receipt:
+            raise CrossEvalError("l6_pair_evidence_receipt_mismatch")
+        evidence = formal
     return (
         bundle,
-        validate_three_side_rows(
-            bundle, values, l6_pair_receipt=normalized_receipt
-        ),
-        normalized_receipt,
+        validate_three_side_rows(bundle, values, l6_pair_receipt=evidence),
+        evidence,
     )
 
 
@@ -1374,6 +1569,99 @@ def _position_counts(mapping_entries: Sequence[Mapping[str, Any]]) -> dict[str, 
     return counts
 
 
+def build_anonymous_terminal_batches(
+    bundle: CohortBundle,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    seed: bytes,
+    l6_pair_receipt: Mapping[str, Any],
+) -> list[AnonymousTerminalBatch]:
+    """Build balanced anonymous candidates without inventing missing decisions.
+
+    This is deliberately a pre-judge projection, not a replacement for the
+    frozen v1 judge package.  A later formal review can bind an explicit judge
+    prompt/result contract to this versioned shape.  The existing v1 decision
+    package and its judging semantics remain unchanged.
+    """
+
+    normalized = validate_three_side_rows(
+        bundle, rows, l6_pair_receipt=l6_pair_receipt
+    )
+    by_key = {(row["sample_id"], row["side"]): row for row in normalized}
+    cohort_items = {item["sample_id"]: item for item in bundle.manifest["items"]}
+    markers = _side_identity_markers(normalized) | {seed.hex()}
+    results: list[AnonymousTerminalBatch] = []
+    batch_ids = sorted({item["body_batch_id"] for item in cohort_items.values()})
+    for batch_id in batch_ids:
+        sample_ids = sorted(
+            sample_id
+            for sample_id, item in cohort_items.items()
+            if item["body_batch_id"] == batch_id
+        )
+        shuffled, orders = _balanced_side_orders(sample_ids, batch_id=batch_id, seed=seed)
+        package_samples = []
+        mapping_entries = []
+        for sample_id in shuffled:
+            source = bundle.source_rows[sample_id]
+            order = orders[sample_id]
+            candidates = [
+                {
+                    "candidate_id": candidate_id,
+                    "terminal": _row_terminal(by_key[(sample_id, side)]),
+                }
+                for candidate_id, side in zip(CANDIDATES, order)
+            ]
+            package_samples.append(
+                {
+                    "sample_id": sample_id,
+                    "payload_sha256": source["payload_sha256"],
+                    "approval_input": copy.deepcopy(source["input"]),
+                    "candidates": candidates,
+                }
+            )
+            mapping_entries.append(
+                {
+                    "sample_id": sample_id,
+                    "positions": [
+                        {"candidate_id": candidate_id, "side": side}
+                        for candidate_id, side in zip(CANDIDATES, order)
+                    ],
+                }
+            )
+        package = {
+            "schema_version": ANONYMOUS_TERMINAL_SCHEMA_VERSION,
+            "contract_version": ANONYMOUS_TERMINAL_CONTRACT_VERSION,
+            "partition": bundle.partition,
+            "cohort_id": bundle.manifest["cohort_id"],
+            "cohort_manifest_sha256": bundle.manifest_sha256,
+            "body_batch_id": batch_id,
+            "samples": package_samples,
+        }
+        terminals = [
+            candidate["terminal"]
+            for sample in package_samples
+            for candidate in sample["candidates"]
+        ]
+        if _contains_marker(package, markers) or _contains_forbidden_side_identity(
+            terminals
+        ):
+            raise CrossEvalError("blind_package_side_leak")
+        package_raw = _json_file_bytes(package)
+        mapping = {
+            "schema_version": MAPPING_SCHEMA_VERSION,
+            "contract_version": MAPPING_CONTRACT_VERSION,
+            "partition": bundle.partition,
+            "cohort_manifest_sha256": bundle.manifest_sha256,
+            "body_batch_id": batch_id,
+            "package_sha256": _sha256(package_raw),
+            "seed_sha256": _sha256(seed),
+            "position_counts": _position_counts(mapping_entries),
+            "entries": mapping_entries,
+        }
+        results.append(AnonymousTerminalBatch(package, package_raw, mapping))
+    return results
+
+
 def build_blind_batches(
     bundle: CohortBundle,
     rows: Sequence[Mapping[str, Any]],
@@ -1390,6 +1678,8 @@ def build_blind_batches(
     normalized = validate_three_side_rows(
         bundle, rows, l6_pair_receipt=l6_pair_receipt
     )
+    if any(_row_terminal(row)["status"] != "decision" for row in normalized):
+        raise CrossEvalError("judge_package_v1_requires_decision_terminals")
     by_key = {(row["sample_id"], row["side"]): row for row in normalized}
     cohort_items = {item["sample_id"]: item for item in bundle.manifest["items"]}
     markers = _side_identity_markers(normalized) | {seed.hex()}
@@ -1410,7 +1700,7 @@ def build_blind_batches(
             candidates = [
                 {
                     "candidate_id": candidate_id,
-                    "decision": copy.deepcopy(by_key[(sample_id, side)]["decision"]),
+                    "decision": _row_decision(by_key[(sample_id, side)]),
                 }
                 for candidate_id, side in zip(CANDIDATES, order)
             ]
@@ -1653,7 +1943,9 @@ def unblind_batch(
             for item in package_samples[sample_id]["candidates"]
         }
         for candidate_id, side in candidate_to_side.items():
-            if package_decisions.get(candidate_id) != by_key[(sample_id, side)]["decision"]:
+            if package_decisions.get(candidate_id) != _row_decision(
+                by_key[(sample_id, side)]
+            ):
                 raise CrossEvalError("blind_mapping_decision_mismatch")
         assessment_by_candidate = {
             item["candidate_id"]: item for item in result["candidate_assessments"]
@@ -1666,7 +1958,7 @@ def unblind_batch(
                 "sides": [
                     {
                         "side": side,
-                        "decision": by_key[(sample_id, side)]["decision"],
+                        "decision": _row_decision(by_key[(sample_id, side)]),
                         "candidate_id": candidate_id,
                         "assessment": assessment_by_candidate[candidate_id],
                         "preferred": candidate_id in result["preferred_candidates"],
@@ -2095,6 +2387,7 @@ def prepare_private_blind_review(
     worktree_root: Path,
     outputs_path: Path,
     pair_receipt_path: Path,
+    pair_evidence_path: Path | None = None,
     private_dir: Path,
     judge_model: str,
     judged_date: str,
@@ -2104,10 +2397,17 @@ def prepare_private_blind_review(
     if (
         outputs_path.parent.resolve(strict=True) != resolved_private
         or pair_receipt_path.parent.resolve(strict=True) != resolved_private
+        or (
+            pair_evidence_path is not None
+            and pair_evidence_path.parent.resolve(strict=True) != resolved_private
+        )
     ):
         raise CrossEvalError("import_artifact_out_of_private_batch")
     bundle, rows, pair_receipt = validate_three_side_import(
-        worktree_root, outputs_path, pair_receipt_path
+        worktree_root,
+        outputs_path,
+        pair_receipt_path,
+        pair_evidence_path=pair_evidence_path,
     )
     templates = load_template_identity(worktree_root)
     private_seed = seed if seed is not None else secrets.token_bytes(32)
@@ -2128,18 +2428,29 @@ def _load_and_rebuild_private_blinds(
     worktree_root: Path,
     outputs_path: Path,
     pair_receipt_path: Path,
+    pair_evidence_path: Path | None = None,
     private_dir: Path,
 ) -> tuple[
-    CohortBundle, list[dict[str, Any]], dict[str, Any], list[BlindBatch]
+    CohortBundle,
+    list[dict[str, Any]],
+    dict[str, Any] | FormalL6PairEvidence,
+    list[BlindBatch],
 ]:
     resolved_private = _require_execution_private_directory(worktree_root, private_dir)
     if (
         outputs_path.parent.resolve(strict=True) != resolved_private
         or pair_receipt_path.parent.resolve(strict=True) != resolved_private
+        or (
+            pair_evidence_path is not None
+            and pair_evidence_path.parent.resolve(strict=True) != resolved_private
+        )
     ):
         raise CrossEvalError("import_artifact_out_of_private_batch")
     bundle, rows, pair_receipt = validate_three_side_import(
-        worktree_root, outputs_path, pair_receipt_path
+        worktree_root,
+        outputs_path,
+        pair_receipt_path,
+        pair_evidence_path=pair_evidence_path,
     )
     seed_record, _seed_raw = _load_json(
         private_dir / "blinding-seed.json", private=True
@@ -2214,12 +2525,14 @@ def import_unblind_and_aggregate(
     worktree_root: Path,
     outputs_path: Path,
     pair_receipt_path: Path,
+    pair_evidence_path: Path | None = None,
     private_dir: Path,
 ) -> dict[str, Any]:
     bundle, rows, pair_receipt, blinds = _load_and_rebuild_private_blinds(
         worktree_root=worktree_root,
         outputs_path=outputs_path,
         pair_receipt_path=pair_receipt_path,
+        pair_evidence_path=pair_evidence_path,
         private_dir=private_dir,
     )
     markers = _side_identity_markers(rows)
@@ -2291,10 +2604,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     verify_import.add_argument("--worktree-root", type=Path, required=True)
     verify_import.add_argument("--outputs", type=Path, required=True)
     verify_import.add_argument("--pair-receipt", type=Path, required=True)
+    verify_import.add_argument("--pair-evidence", type=Path)
     pack = commands.add_parser("pack")
     pack.add_argument("--worktree-root", type=Path, required=True)
     pack.add_argument("--outputs", type=Path, required=True)
     pack.add_argument("--pair-receipt", type=Path, required=True)
+    pack.add_argument("--pair-evidence", type=Path)
     pack.add_argument("--private-dir", type=Path, required=True)
     pack.add_argument("--judge-model", required=True)
     pack.add_argument("--judged-date", required=True)
@@ -2302,6 +2617,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import_results.add_argument("--worktree-root", type=Path, required=True)
     import_results.add_argument("--outputs", type=Path, required=True)
     import_results.add_argument("--pair-receipt", type=Path, required=True)
+    import_results.add_argument("--pair-evidence", type=Path)
     import_results.add_argument("--private-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -2311,7 +2627,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = write_preflight_receipt(args.worktree_root, args.private_dir)
         elif args.command == "verify-import":
             bundle, rows, _receipt = validate_three_side_import(
-                args.worktree_root, args.outputs, args.pair_receipt
+                args.worktree_root,
+                args.outputs,
+                args.pair_receipt,
+                pair_evidence_path=args.pair_evidence,
             )
             result = {
                 "status": "ready_for_blind_packaging",
@@ -2324,6 +2643,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 worktree_root=args.worktree_root,
                 outputs_path=args.outputs,
                 pair_receipt_path=args.pair_receipt,
+                pair_evidence_path=args.pair_evidence,
                 private_dir=args.private_dir,
                 judge_model=args.judge_model,
                 judged_date=args.judged_date,
@@ -2333,6 +2653,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 worktree_root=args.worktree_root,
                 outputs_path=args.outputs,
                 pair_receipt_path=args.pair_receipt,
+                pair_evidence_path=args.pair_evidence,
                 private_dir=args.private_dir,
             )
         _print_result(result)

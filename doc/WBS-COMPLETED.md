@@ -935,3 +935,52 @@ standard/Lite 形态均补回归。
   focused unittest **27/27 通过、0 skip**，`py_compile` 与 `git diff --check` 通过。真实 no-model preflight 复算
   130 条、65 / 65、26 + 26 组，终态 `waiting_for_l6_outputs`。未创建 fake Local 输出，未调用模型/网络，未运行
   L6、正式 M4、Opus 裁判、训练、Cargo、Docker、CI 或全量测试；三选一人判定仍未完成。
+
+## WP3b-A9：L6 首轮 LoRA 阶段一本地准备（Plan 037，2026-08-15）
+
+- **训练数据与 token 合同**：冻结 train `1e66c06e…110a` 的 470 条记录确定性投影为
+  `0026cddd…c14`；固定 allowlist 的 train-only bundle 拒绝 validation、holdout、未知文件、symlink、清单外正文
+  及自改 manifest 后加入的额外文件。冻结 tokenizer/template 的精确序列统计为 145,360 tokens，
+  min/P50/P95/max = 278/311/331/333，4096 上限超限 0、无 packing/截断；470/470 prompt 全 mask，470/470
+  非空 completion 均有训练 label。
+- **候选训练与回收设施**：落地候选 QLoRA recipe、7 个直接依赖 pin、RunPod smoke/formal 分门入口、checkpoint
+  resume、adapter 隔离重载、pending→completed training receipt、逐文件 artifact export/download 验真和超时/止费说明。
+  本地 mock 只验证同格式数据/mask，未加载模型且 optimizer step 为 0；最终 recipe 仍须在阶段二真实 smoke 后冻结。
+- **成对输出前置**：Plan 036 增加版本化 decision / structured-output failure / refusal / timeout 终态，非 decision
+  不补造 deny；paired runner 每次重读两侧 canonical b10333 deployment manifest，支持 adapter on/off 与 paired GGUF，
+  绑定实际加载 GGUF/adapter、共同转换/量化身份和 formal source adapter tree。formal v2 文件导入用 0600 private
+  evidence locator 重建并重哈希全部 source；先写 attempt journal、再 fsync 唯一终态，悬空
+  attempt 显式收敛为 infrastructure failure 后只继续剩余样本。既有 decision v1 导入、盲化和裁判语义保持兼容。
+- **审查窄修**：PEFT target 改为只完整匹配 Transformers runtime 文本层的单个 regex，并对实际 targeted modules 与
+  trainable LoRA 参数二次 fail-closed；阶段二 RunPod 上传、安装、smoke/formal、预算止费、下载验真、一次恢复重启与删除
+  命令已落盘。completed receipt 最后一步中断时只接受逐字一致的 orphan manifest 恢复。
+- **验证**：直接相关 unittest **75/75 通过**；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups、
+  `waiting_for_l6_outputs`。精确 census 重算逐字一致，mock dry-run、最终 tar 解包后 bundle 自校验、`py_compile`、
+  entrypoint `bash -n`、JSON/候选依赖解析、敏感/大文件/权限和 `git diff --check` 通过；训练与 pair 两轮独立复验
+  均无阶段一阻断。
+- **阶段边界**：阶段一没有创建/修改 RunPod/HF 资源、上传、付费、下载 base 权重、加载 8B、训练、转换、调用真实
+  模型/API、运行 130 条成对输出或正式 holdout。推荐阶段二候选为 Secure A40 48 GB；具体对象、预算和上传仍待用户
+  单独授权，WBS 保持 L6 进行中而不提前记为完成。
+
+## WP3b-A10：L6 首轮 LoRA 训练与成对输出（Plan 037，2026-08-16）
+
+- **唯一正式训练**：一个 Secure A40 48 GB Pod 上的真实 smoke 完成 1 optimizer step、238 个文本 LoRA target
+  和隔离 adapter reload；候选 recipe 无需技术漂移。正式训练完成 118 steps / 2 epochs，train loss
+  `0.2667613620381463`。completed training receipt SHA-256 为 `d551e5cf…c97f`，178,328,936-byte adapter
+  SHA-256 为 `146d6871…4c41`；29 项 formal 工件在 Pod 删除前回收到本地并逐文件验真。
+- **同源部署转换**：冻结 adapter converter 会把 rank-16 adapter 展开为 309 个全模型张量和约 17 GB GGUF，故只按
+  技术兼容性改走 `paired_gguf`，未重训、未据 validation 选路线。最终 base / fine-tuned Q4_K_M 均来自同一冻结
+  BF16 revision，大小 5,198,378,592 / 5,198,378,560 bytes，SHA-256 为 `9d2ae96a…9eeb` /
+  `c3f34fe8…6621`；14 项 deployment receipt/manifest 已在远端和本地分别验真。
+- **本地成对输出**：冻结 b10333 对两份部署的两样本 structural smoke 通过；之后串行完成两侧各 130 条，260 个
+  新终态均为真实 decision。连同 frozen `sol-static` 形成 390 行，输出 / canonical pair receipt / private evidence
+  SHA-256 为 `0e8fbbc7…00aa` / `1d57def1…129c` / `4dd7966c…1727`，Plan 036 正式 CLI 导入为
+  `ready_for_blind_packaging`。未运行裁判、解盲或真实 holdout，不形成 Local M4 质量结论。
+- **费用与清理**：全程最多一个 Pod；未创建 template、registry credential、network volume 或 HF repo。任务结束时
+  Pod 和 volume 均已删除、`currentSpendPerHr=0`；最终账单 `$1.4046356059`（GPU `$1.3439874556`、Pod disk
+  `$0.0606481503`、network volume `$0`），与余额差额一致且低于 `$12` 授权上限。本地 llama-server、端口、
+  Docker/Cargo 占用和任务 GPU 显存均已清理。
+- **现场窄修与门禁**：训练 tokenizer 返回的单 batch Mapping 已兼容解包；paired merge 改为逐字复制冻结 tokenizer，
+  转换控制器禁止 bytecode 污染并对产物角色/增长做早期止损；`python -m cross_eval` 的 formal evidence 类身份误拒绝已在
+  完整 source 重验后窄修。相关 unittest **89/89 通过**，真实 no-model cohort preflight 为 130 条、65 / 65、
+  26 + 26 groups、0 模型调用/0 fake 输出；Bash、Python、JSON、敏感/大文件和 `git diff --check` 门禁通过。

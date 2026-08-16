@@ -1,0 +1,73 @@
+{
+  "candidate_status": "stage1_candidate_not_final",
+  "checkpoint": {
+    "save_steps": 25,
+    "save_total_limit": 2
+  },
+  "container": {
+    "image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "preinstalled_cuda": "12.8.1",
+    "preinstalled_torch": "2.8.0"
+  },
+  "data": {
+    "completion_only": true,
+    "expected_train_records": 470,
+    "max_sequence_length": 4096,
+    "packing": false,
+    "truncation": false
+  },
+  "lora": {
+    "alpha": 32,
+    "bias": "none",
+    "dropout": 0.05,
+    "exclude_modules": [
+      "vision_tower",
+      "multi_modal_projector"
+    ],
+    "rank": 16,
+    "target_modules": "^model\\.language_model\\.layers\\.\\d+\\.(?:self_attn\\.(?:q_proj|k_proj|v_proj|o_proj)|mlp\\.(?:gate_proj|up_proj|down_proj))$",
+    "task_type": "CAUSAL_LM"
+  },
+  "model": {
+    "attention_implementation": "sdpa",
+    "gradient_checkpointing": true,
+    "loader_class": "AutoModelForImageTextToText"
+  },
+  "optimizer": {
+    "bf16": true,
+    "gradient_accumulation_steps": 8,
+    "learning_rate": 0.0002,
+    "logging_steps": 1,
+    "lr_scheduler_type": "cosine",
+    "max_grad_norm": 1.0,
+    "max_steps": null,
+    "num_train_epochs": 2,
+    "optim": "paged_adamw_8bit",
+    "per_device_train_batch_size": 1,
+    "seed": 42,
+    "warmup_ratio": 0.05,
+    "weight_decay": 0.0
+  },
+  "quantization": {
+    "bnb_4bit_compute_dtype": "bfloat16",
+    "bnb_4bit_quant_storage": "bfloat16",
+    "bnb_4bit_quant_type": "nf4",
+    "bnb_4bit_use_double_quant": true,
+    "load_in_4bit": true,
+    "method": "qlora_nf4"
+  },
+  "schema_version": 1,
+  "smoke_adjustable_once": [
+    "model.loader_class",
+    "model.attention_implementation",
+    "lora.rank",
+    "optimizer.per_device_train_batch_size",
+    "optimizer.gradient_accumulation_steps",
+    "optimizer.learning_rate",
+    "optimizer.num_train_epochs",
+    "optimizer.max_steps",
+    "data.max_sequence_length",
+    "dependencies"
+  ],
+  "version": "rondo_local_approval_l6_recipe_candidate_v1"
+}

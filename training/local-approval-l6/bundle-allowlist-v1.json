@@ -1,0 +1,65 @@
+{
+  "files": [
+    {
+      "bundle_path": "data/train-projection.jsonl",
+      "contains_train_body": true,
+      "generated": true,
+      "role": "470-record train-only projection"
+    },
+    {
+      "bundle_path": "contracts/model-contract-v1.json",
+      "contains_train_body": false,
+      "source_relative_path": "training/local-approval-l6/model-contract-v1.json"
+    },
+    {
+      "bundle_path": "contracts/recipe-candidate-v1.json",
+      "contains_train_body": false,
+      "source_relative_path": "training/local-approval-l6/recipe-candidate-v1.json"
+    },
+    {
+      "bundle_path": "contracts/dependencies-candidate-v1.txt",
+      "contains_train_body": false,
+      "source_relative_path": "training/local-approval-l6/dependencies-candidate-v1.txt"
+    },
+    {
+      "bundle_path": "contracts/training-receipt-v1.schema.json",
+      "contains_train_body": false,
+      "source_relative_path": "training/local-approval-l6/training-receipt-v1.schema.json"
+    },
+    {
+      "bundle_path": "contracts/artifact-export-allowlist-v1.json",
+      "contains_train_body": false,
+      "source_relative_path": "training/local-approval-l6/artifact-export-allowlist-v1.json"
+    },
+    {
+      "bundle_path": "contracts/bundle-allowlist-v1.json",
+      "contains_train_body": false,
+      "source_relative_path": "training/local-approval-l6/bundle-allowlist-v1.json"
+    },
+    {
+      "bundle_path": "contracts/chat-template.jinja",
+      "contains_train_body": false,
+      "source_relative_path": "eval/templates/local-approval/ministral-3-8b-instruct-2512-chat-template.jinja"
+    },
+    {
+      "bundle_path": "bin/l6_training.py",
+      "contains_train_body": false,
+      "source_relative_path": "eval/rondo_eval/local_approval/l6_training.py"
+    },
+    {
+      "bundle_path": "bin/runpod-stage2-entrypoint.sh",
+      "contains_train_body": false,
+      "source_relative_path": "training/local-approval-l6/runpod-stage2-entrypoint.sh"
+    }
+  ],
+  "forbidden_path_terms": [
+    "validation",
+    "holdout",
+    "e_final",
+    "seed-reference",
+    ".env.local",
+    "rondo.local.toml"
+  ],
+  "schema_version": 1,
+  "version": "rondo_local_approval_l6_bundle_allowlist_v1"
+}

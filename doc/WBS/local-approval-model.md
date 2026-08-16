@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-15（L5b 与 Local M4 离线准备设施完成，等待 L6）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-16（Plan 037 完成，正式 Local M4 待执行）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -178,19 +178,23 @@
   真实 ignored `rondo.local.toml` 已于 2026-08-15 迁移到 exact GGUF 与 12k 合同，
   `providers`、`paid_eval` 与价格配置未变、权限仍为 0600。冻结选择见 2026-08-12 快照，
   下载/CUDA 证据见 2026-08-13 快照。
-- **Local M4 离线准备设施已完成**：tracked body-free cohort 精确绑定 L5b 全部 130 条 validation 与
+- **Local M4 正式输入已就绪**：tracked body-free cohort 精确绑定 L5b 全部 130 条 validation 与
   dataset/payload/target/source-group/near-duplicate-group 身份，确定性分为 65 / 65 两批。三方完整导入会重算
   canonical input，并要求未微调/微调 Local 同属一个 L6 pair，base lineage、runtime、chat template、request、
   sampling 和 output contract 相同；Plan 033 部署 baseline 不能冒充成对未微调工件。裁判 prompt/schema、私有
-  seed/mapping、逐批位置平衡、裁判结果身份、私有解盲聚合及独立 holdout 批次摘要合同均已冻结。真实 preflight
-  状态是 `waiting_for_l6_outputs`；未生成 fake Local 输出，未开始正式 M4，也没有模型质量结论。
+  seed/mapping、逐批位置平衡、裁判结果身份、私有解盲聚合及独立 holdout 批次摘要合同均已冻结。Plan 037 已用同源
+  paired-GGUF 完成未微调/微调 Local 各 130 条诚实终态，连同 frozen Sol 侧形成 390 行；canonical pair receipt 与
+  private evidence 已通过正式文件导入。尚未开始裁判、解盲或人判，没有 Local M4 质量结论。
 
 ### 当前推进顺序
 
 1. **L5b 与 M4 离线准备均已完成**：600 条合成训练资产及 130 条 validation 主体 cohort 已冻结；真实 holdout
    未被本次准备任务打开或物化。
-2. **下一产品工作是 L6**：按云 GPU LoRA 微调路线推进；训练、数据外发、云 GPU 与权重需独立申请；L6 产生
-   成对输出后才正式执行 Local M4。
+2. **L6 已完成**：470 条 train-only completion-only QLoRA 完成真实 optimizer smoke、隔离 adapter reload、
+   一个冻结 recipe 的正式训练与本地逐文件回收；paired-GGUF 两侧由冻结 b10333 串行生成 130×2，正式导入为
+   `ready_for_blind_packaging`。任务 Pod/volume 已删除，未使用 HF，未依据 validation 重训。
+3. **下一产品工作是正式 Local M4**：使用现有 390 行输入完成盲化、裁判、解盲和采用/保留/停止人判；
+   不把 Plan 037 的终态分布本身当成质量结论。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
@@ -361,16 +365,19 @@ L5b 冻结结果：当前人在场开发用 Codex `gpt-5.6-sol` 只使用 seed 2
 2. **训练数据外发** —— Sol 生成的合成标签要上传到云端；即便都是本项目自造数据，也属于真实数据外发；
 3. 权重下载回本地。
 
-因此推进顺序为：**先在本地用极小样本跑通 LoRA 训练脚本与数据格式**（不求收敛，只验证管线），
-再一次性申请云端正式训练的预算与数据外发范围。
+Plan 037 已按三重授权门完成：阶段一本地 mock/census/train-only bundle 与阶段二A转换/回收闭环先行交审，付费阶段
+在唯一 RunPod A40 上完成真实 optimizer step、adapter 保存与隔离重载；smoke 不需技术漂移，随后冻结同一 recipe
+完成一个有效正式训练。产物已逐文件回收，本地部署因 adapter converter 实证不兼容而改用同源 paired-GGUF；这只改变
+部署格式，没有第二个训练 recipe。
 
 - **推理仍在本地**：训练产出的 LoRA adapter 或由其生成的合并/量化工件必须能由本地 llama.cpp runtime 加载，
   **训练侧的量化、转换与格式选择必须以本地推理可落地为约束**，不能训完才发现用不了。
 - **训练前后可比性**：两份 Local 工件必须来自同一底模谱系，并固定相同 runtime、prompt、采样和结构化输出条件。
   最终采用 adapter on/off 还是从同一训练谱系生成成对 GGUF，由 L6 实施计划按本地 runtime 兼容性决定；
   本页不预先写死，也不把当前部署用 GGUF 直接当作训练效果归因工件。
-- **轮次封顶：正式训练最多 2—3 轮**，之后必须明确三选一 —— **采用 / 保留为实验 / 停止**。
-  不允许无限微调下去，也不扩成生产验收。
+- **轮次封顶：只允许一个有效正式 recipe/训练。** 在成功 smoke 前，明确的依赖、OOM、target module、保存或基础设施
+  技术失败可在预算内窄修并有界重试；一旦冻结 recipe 完成有效正式训练，不得因 validation、loss 或主观质量再改配重训。
+  后续 Local M4 只做人判三选一 —— **采用 / 保留为实验 / 停止**。
 
 仓库边界按数据体量决定（L5b 出数后立即确认）：
 
@@ -449,8 +456,9 @@ prompt 是少数能被完全冻结的部分，必须冻死。首版为
 
 **三方导入与成对归因**：`sol-static` 只取 validation 已有的 point-in-time target，不重新调用教师；
 `local-static` 与 `local-ft-static` 必须由 L6 同一 pair 生成，除工件角色/身份与训练 receipt 外，共享 base lineage、
-runtime、chat template、request、sampling 与 output contract。L6 还必须提供 canonical 私有 pair receipt，其内容哈希
-绑定两侧输出的工件与 provenance；只有输出自报字段或 Plan 033 baseline 均不被接受。三方每条都回显完整
+runtime、chat template、request、sampling 与 output contract。L6 还必须提供两侧 canonical b10333 deployment
+manifest，绑定实际加载的 GGUF/adapter、共同转换/量化身份及 formal source adapter tree；正式私有文件导入从
+0600 evidence locator 重建并重哈希这些来源。只有合同 JSON、输出自报字段或 Plan 033 baseline 均不被接受。三方每条都回显完整
 canonical approval input，由导入器与冻结 validation 深比较；缺 side、重复/未知 side、正文/消息边界或任何身份
 漂移都拒绝。
 

@@ -1,0 +1,33 @@
+{
+  "allowed_prefixes": ["adapter-final/", "checkpoints/", "conversion/", "metrics/"],
+  "allowed_root_files": [
+    "actual-recipe.json",
+    "adapter-reload-receipt.json",
+    "artifact-manifest.json",
+    "dependency-identity.json",
+    "run-contract.json",
+    "token-census.json",
+    "training-pending.json",
+    "training-receipt.json"
+  ],
+  "boundaries": {
+    "dataset_body_allowed": false,
+    "per_sample_validation_output_allowed": false,
+    "private_credentials_allowed": false,
+    "training_projection_allowed": false
+  },
+  "destination": "private model artifact storage only",
+  "forbidden_path_terms": [
+    "train.jsonl",
+    "train-projection",
+    "validation.jsonl",
+    "holdout",
+    "e_final",
+    "seed-reference",
+    "per-sample",
+    ".env.local",
+    "rondo.local.toml"
+  ],
+  "schema_version": 1,
+  "version": "rondo_local_approval_l6_artifact_export_allowlist_v1"
+}

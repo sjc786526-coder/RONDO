@@ -1,0 +1,161 @@
+{
+  "base_model": {
+    "repo_id": "mistralai/Ministral-3-8B-Instruct-2512-BF16",
+    "revision": "f6fae9795746f63c9be8344932f01275f3c63734"
+  },
+  "boundaries": {
+    "dataset_body_allowed": false,
+    "model_weight_in_tool_bundle_allowed": false,
+    "private_credentials_allowed": false,
+    "sample_output_in_tool_bundle_allowed": false,
+    "training_projection_allowed": false
+  },
+  "bundle_builder": {
+    "package_path": "bin/conversion_tooling.py",
+    "sha256": "60ec69250e0e1a80201df2c9472ecd13ef1de707c4de2fd0477945d424dc9fb2",
+    "size_bytes": 42028
+  },
+  "contract_version": "rondo_local_approval_l6_b10333_conversion_tools_v1",
+  "conversion_dependencies": {
+    "package_path": "contracts/conversion-dependencies-v1.txt",
+    "sha256": "139cb4ffa06596ef3a5286f671a2a292d932ebab4a5f4be3d1b142e2f6319568",
+    "size_bytes": 447,
+    "torch_policy": "reuse_container_torch_2.8.0_in_separate_system_site_packages_venv"
+  },
+  "conversion_environment": {
+    "container_image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "cuda": "12.8",
+    "python_prefix": "3.11.",
+    "torch": "2.8.0"
+  },
+  "formal_training": {
+    "chat_template_sha256": "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56",
+    "expected_records": 470,
+    "projection_sha256": "0026cddd2a80771039c6644378120793d98310abdf66f01e7475416f23b2cc14",
+    "sequence_limit": 4096,
+    "source_dataset_manifest_sha256": "dbf5fffe1f26d7746acf43fdcd092ff3e9cd64ea1f40046cd3b7219a15107190",
+    "source_train_jsonl_sha256": "1e66c06e9357a3b6e14aedd193c5405ad2c18924e57da6a3a209f079b80c110a",
+    "tokenizer_repo": "mistralai/Ministral-3-8B-Instruct-2512-BF16",
+    "tokenizer_revision": "f6fae9795746f63c9be8344932f01275f3c63734"
+  },
+  "llama_cpp_source": {
+    "commit": "08659901c43b51de735740f1cf61bb82fbe0c4e4",
+    "project": "ggml-org/llama.cpp",
+    "release": "b10333",
+    "source_tree": "9ae780f13650ac3d45e4e345f208163ad744dd6d",
+    "top_level_files": {
+      "convert_hf_to_gguf.py": {
+        "sha256": "e38975e1c68d98ac1664dfd530616eb35c72294382a4dd873d4746b23f27779f",
+        "size_bytes": 12798
+      },
+      "convert_lora_to_gguf.py": {
+        "sha256": "3c5f109f3d7a5ef530ea388d8e994512df6f544ce1aa8b2e39be446223637b93",
+        "size_bytes": 23200
+      }
+    },
+    "trees": {
+      "conversion": {
+        "entries": 84,
+        "sha256": "e259bc550ae38dc2abda68c8236023b1e99a8fbb279e313ec723c5a9b520f732",
+        "size_bytes": 846420
+      },
+      "gguf-py/gguf": {
+        "entries": 18,
+        "sha256": "60908ebbed74eef70a18c42c7d3afbb60c54924f17d411ace1315eb8937be87b",
+        "size_bytes": 689363
+      },
+      "models/templates": {
+        "entries": 66,
+        "sha256": "7854496b180f07b8bc740694f0af179e238686c59e0ad2088bfd943b702707ba",
+        "size_bytes": 412877
+      }
+    }
+  },
+  "local_inference_runtime": {
+    "installed_relative_path": "eval-data/tools/llama-b10333-cuda-linux-x64",
+    "lock_relative_path": "eval/locks/llama-cpp-b10333-cuda-linux-x64.json",
+    "lock_sha256": "299440bb261f9dbc6641e81fa995ca88af84e4e05530978fe9c46a9716107b75",
+    "llama_server_sha256": "97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd",
+    "llama_server_size_bytes": 17920
+  },
+  "merge_builder": {
+    "package_path": "bin/merge_adapter.py",
+    "sha256": "22015d5799ea7d2bfaeccb53bf7c394117bfd9d484e014e1e0641de478652836",
+    "size_bytes": 2904
+  },
+  "output_allowlists": {
+    "adapter_on_off": [
+      "adapter-convert.log",
+      "base-q4_k_m.gguf",
+      "base-convert.log",
+      "base-quantize.log",
+      "adapter-f16.gguf",
+      "conversion-dependency-identity.json",
+      "conversion-files-manifest.json",
+      "conversion-operations.json",
+      "conversion-receipt.json",
+      "tooling/convert_hf_to_gguf.py",
+      "tooling/convert_lora_to_gguf.py",
+      "tooling/llama-quantize"
+    ],
+    "paired_gguf": [
+      "base-q4_k_m.gguf",
+      "base-convert.log",
+      "base-quantize.log",
+      "finetuned-q4_k_m.gguf",
+      "conversion-dependency-identity.json",
+      "conversion-files-manifest.json",
+      "conversion-operations.json",
+      "conversion-receipt.json",
+      "finetuned-convert.log",
+      "finetuned-quantize.log",
+      "merge.log",
+      "tooling/convert_hf_to_gguf.py",
+      "tooling/merge_adapter.py",
+      "tooling/llama-quantize"
+    ]
+  },
+  "quantizer_runtime": {
+    "canonical_selected_tree_sha256": "f2a5d038af6e0fe687e3a5fd04776fd47daaee9c080c2411496eb0def40c15ab",
+    "installed_relative_path": "eval-data/tools/llama-b10333",
+    "lock_relative_path": "eval/locks/llama-cpp-b10333.json",
+    "lock_sha256": "1174a292c294c3a646a059c02f9ae18338680eddbf07731ae42e0a0eae522a4b",
+    "regular_files": {
+      "libggml-base.so.0.19.0": {"sha256": "70fb27338be2ed53614ec518abebfc43bf3c0965887b7c865011f23db3a4ed69", "size_bytes": 910784},
+      "libggml-cpu-alderlake.so": {"sha256": "066906c06e12fa6c8a72a3b87d7be76137dd8ff687e559fc45713c108c367613", "size_bytes": 1141184},
+      "libggml-cpu-cannonlake.so": {"sha256": "1cff542b64e417fcf1f71ed7177e12eb4e7c1022fa959525d340d212cbca0cbf", "size_bytes": 1286176},
+      "libggml-cpu-cascadelake.so": {"sha256": "a742e3b1576a6d9c16c50fcb4e045af880fb49634356fff1c4c1053433162fa5", "size_bytes": 1282080},
+      "libggml-cpu-cooperlake.so": {"sha256": "4ed30298f402d1b3f2cf3c6995c34c2f0b90ead9834294f151a93b032e004d87", "size_bytes": 1282144},
+      "libggml-cpu-haswell.so": {"sha256": "155eb9bbd263822346f33d1f0612dc69b3269ee2fa18e9b4dbf637e1ab240dae", "size_bytes": 1141184},
+      "libggml-cpu-icelake.so": {"sha256": "282a2f11091e9aacd7efda3cd33e0cc92e53ddf5e0e90d15b2393b6196d039d6", "size_bytes": 1282080},
+      "libggml-cpu-ivybridge.so": {"sha256": "abd957ac6f41d0ba22682602e063deea3861d28088934135097f0043a2ae1e08", "size_bytes": 1094656},
+      "libggml-cpu-piledriver.so": {"sha256": "6b4e6f00f936791a0b5e66b7c8a8a0fb2a6cd3b0150acfb14dc5dc11757407e1", "size_bytes": 1090560},
+      "libggml-cpu-sandybridge.so": {"sha256": "fd8d67a1ea8f2e37ccd3a1308731af903d698d6069980711e3483909f14aa7f1", "size_bytes": 1081248},
+      "libggml-cpu-sapphirerapids.so": {"sha256": "d9092412e44f9d2ec07432c0a9110065863ac8d01d972df6c0e9a06d3963021f", "size_bytes": 1548480},
+      "libggml-cpu-skylakex.so": {"sha256": "d5256e9738827e0c1d4f13107e2d284950e117e303cbb598649abd399a30415d", "size_bytes": 1286176},
+      "libggml-cpu-sse42.so": {"sha256": "cdbca7612d26f574ecc696a142701b9d13b7c947834e7785df5eee34c1511630", "size_bytes": 882048},
+      "libggml-cpu-x64.so": {"sha256": "e0027ee90105a950198866d9704dc2e8d5e63b4fb52deaf1bced671b8996700b", "size_bytes": 878128},
+      "libggml-cpu-zen4.so": {"sha256": "ce81e04328400f170dc973304a996bfe49e1eef09a7d516d327c822e6acdbf99", "size_bytes": 1282144},
+      "libggml.so.0.19.0": {"sha256": "ffd6a736ad58e2d9407ed427252520ffbd4bca8dd5de467ecb2bd446a7a3d75b", "size_bytes": 54936},
+      "libllama-common.so.0.0.10333": {"sha256": "ba64cc7ff862d3fe71434f2cf66ccc7f1fa70ccbb983fe6599b0c0d0dd93ad5d", "size_bytes": 6195472},
+      "libllama-quantize-impl.so": {"sha256": "8f5dcd1a6517e4a88d3bc6e4ed4d76b2237d3237ef93f5fd8fde1f4045d17c75", "size_bytes": 85880},
+      "libllama.so.0.0.10333": {"sha256": "22c4f9c4e36bcdb75d134f703cb2b5968c40b6a6a0a7c0f59a455b721027db02", "size_bytes": 4165728},
+      "llama-quantize": {"sha256": "6ea852917cc1ef724faf1cb612c2ca50c5963321acc86af51a91224d15aa7e3a", "size_bytes": 17896}
+    },
+    "symlinks": {
+      "libggml-base.so": "libggml-base.so.0",
+      "libggml-base.so.0": "libggml-base.so.0.19.0",
+      "libggml.so": "libggml.so.0",
+      "libggml.so.0": "libggml.so.0.19.0",
+      "libllama-common.so": "libllama-common.so.0",
+      "libllama-common.so.0": "libllama-common.so.0.0.10333",
+      "libllama.so": "libllama.so.0",
+      "libllama.so.0": "libllama.so.0.0.10333"
+    }
+  },
+  "routes": [
+    "adapter_on_off",
+    "paired_gguf"
+  ],
+  "schema_version": 1
+}
