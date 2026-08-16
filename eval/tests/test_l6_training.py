@@ -1210,7 +1210,9 @@ class ConversionToolContractTests(unittest.TestCase):
                     contract_path, output, training_path, bundle
                 )
 
-    def test_runbook_keeps_deployment_outside_formal_and_verifies_both_downloads(self) -> None:
+    def test_runbook_stops_before_smoke_and_preserves_same_pod_route_fallback(
+        self,
+    ) -> None:
         runbook = (
             REPO_ROOT / "training/local-approval-l6/stage2-runbook.md"
         ).read_text()
@@ -1219,22 +1221,81 @@ class ConversionToolContractTests(unittest.TestCase):
             "--bundle \"$TASK_BUNDLE\" --output \"$TASK_LOCAL_RECOVERY\""
         )
         deployment = runbook.index(
-            'TASK_DEPLOYMENT="$TASK_ROOT/deployments/$TASK_ATTEMPT_ID"'
+            'TASK_DEPLOYMENT="$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/$TASK_ROUTE_ATTEMPT"'
         )
+        conversion_fallback_start = runbook.index(
+            "If the preferred adapter converter itself proves incompatible",
+            deployment,
+        )
+        conversion_fallback_end = runbook.index(
+            "Recover deployment artifacts separately", conversion_fallback_start
+        )
+        conversion_fallback = runbook[
+            conversion_fallback_start:conversion_fallback_end
+        ]
         local_deployment_verify = runbook.index(
             '--output "$TASK_LOCAL_DEPLOYMENT"'
         )
-        pod_delete = runbook.index(
-            'runpodctl pod delete "$TASK_POD_ID"', runbook.index("## J.")
+        pod_stop = runbook.index(
+            'runpodctl pod stop "$TASK_POD_ID"', runbook.index("## J.")
         )
         local_pair = runbook.index("l6_b10333_pair prepare-evidence")
+        structural_smoke = runbook.index(
+            "l6_b10333_pair smoke", local_pair
+        )
+        fallback_start = runbook.index("### J.1", structural_smoke)
+        fallback_end = runbook.index("### J.2", fallback_start)
+        fallback = runbook[fallback_start:fallback_end]
+        pod_delete = runbook.index(
+            'runpodctl pod delete "$TASK_POD_ID"', fallback_end
+        )
+        formal_pair = runbook.index(
+            "l6_b10333_pair run", pod_delete
+        )
         self.assertLess(finalize, local_training_verify)
         self.assertLess(local_training_verify, deployment)
+        self.assertLess(deployment, conversion_fallback_start)
+        self.assertLess(conversion_fallback_end, local_deployment_verify)
         self.assertLess(deployment, local_deployment_verify)
-        self.assertLess(local_deployment_verify, pod_delete)
-        self.assertLess(pod_delete, local_pair)
+        self.assertLess(local_deployment_verify, pod_stop)
+        self.assertLess(pod_stop, local_pair)
+        self.assertLess(local_pair, structural_smoke)
+        self.assertLess(structural_smoke, fallback_start)
+        self.assertLess(fallback_end, pod_delete)
+        self.assertLess(pod_delete, formal_pair)
         self.assertNotIn('TASK_DEPLOYMENT="$TASK_FORMAL_OUTPUT', runbook)
         self.assertNotIn('TASK_FORMAL_OUTPUT/conversion', runbook)
+        self.assertIn(
+            'TASK_DEPLOYMENT="$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/$TASK_ROUTE_ATTEMPT"',
+            runbook,
+        )
+        self.assertIn(
+            'TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_DEPLOYMENTS/$TASK_ROUTE_ATTEMPT"',
+            runbook,
+        )
+        self.assertIn(
+            'TASK_PAIR_ROOT="$TASK_LOCAL_RECOVERY-pairs/$TASK_ROUTE_ATTEMPT"',
+            runbook,
+        )
+        self.assertIn('runpodctl pod start "$TASK_POD_ID"', fallback)
+        self.assertIn('runpodctl ssh info "$TASK_POD_ID"', fallback)
+        self.assertIn("TASK_ROUTE=paired_gguf", fallback)
+        self.assertIn("TASK_ROUTE_ATTEMPT=paired-gguf-01", fallback)
+        self.assertNotIn("runpodctl pod create", fallback)
+        self.assertNotRegex(
+            fallback,
+            r'(?m)^\s*bash .*runpod-stage2-entrypoint\.sh',
+        )
+        self.assertNotRegex(fallback, r'l6_training\.py"\s+train\b')
+        self.assertIn("TASK_ROUTE=paired_gguf", conversion_fallback)
+        self.assertNotIn("runpodctl pod create", conversion_fallback)
+        self.assertNotRegex(
+            conversion_fallback, r'l6_training\.py"\s+train\b'
+        )
+        self.assertIn("active executor's technical review", runbook)
+        self.assertIn("not another user approval gate", runbook)
+        self.assertIn("ordinary dependency, OOM, SSH, download", runbook)
+        self.assertIn("incremental cost remains exactly `$0`", runbook)
         self.assertGreaterEqual(runbook.count("verify-output"), 2)
         self.assertGreaterEqual(runbook.count('--tool-bundle'), 3)
         self.assertIn("conversion_tooling.py\" write-operations", runbook)

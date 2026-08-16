@@ -336,11 +336,15 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 - b10333 转换工具、body-free conversion 上传包、双部署路线、只消费 `ResolvedDeployment` 的任务专用生命周期
   胶水，以及转换、回收、本地 130×2、正式导入和清理命令均已落盘并通过 focused tests；当前停止在新的明确
   付费授权门前。
+- 阶段二A复验指出的生命周期顺序缺口已窄修：deployment 本地验真后先 stop 同一 Pod 保留 volume，本地结构化
+  smoke 通过才 delete；adapter 路线若有实证的转换/加载不兼容，则在 `$10/$12` 线内恢复同一 Pod，用独立目录改走
+  paired-GGUF，不重训，也不按 validation 质量选路线。
 
 ### 本任务剩余步骤
 
 - **付费授权门：**用户根据阶段二A的 live 报告另行批准 task-only Pod、train-only/conversion-tool 上传及 `$12` 内
-  RunPod 上限；本轮不创建或上传 HF 私有 repo，本次阶段二A授权不得被解释为付费授权。
+  RunPod 上限；用户已另行常设授权使用任何确认零增量费用的 HF 功能作为计划变化时的备援，但本次窄修不创建或
+  上传 HF 对象，且 HF 不承担训练/转换计算。本次阶段二A授权不得被解释为 RunPod 付费授权。
 - **获批后的阶段二执行：**在 RunPod 完成真实 optimizer smoke 与隔离 adapter reload；根据显存/兼容性证据只做一次
   允许范围内的技术收敛并冻结 final recipe/dependencies；完成一个有效正式训练、转换、持久化、下载验真、同源 pair
   两侧各 130 条输出和 Plan 036 正式导入，随后清理所有 task-only 远端对象。
@@ -381,9 +385,10 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 | 010 | 阶段一只形成候选 recipe/依赖/镜像；真实 smoke 后允许一次有证据的 allowlist 内技术收敛，正式训练启动前冻结 | 本地无法证明真实 8B optimizer、显存和云端依赖兼容性；文本 target regex 已在阶段一固定 | 训练 recipe | 已采纳 |
 | 011 | 私有 HF 产物仓与 task-only template/credential/network volume 可选，阶段一说明、阶段二逐项授权并单列费用 | 保留更稳妥的启动与持久化路线，同时避免无边界远端状态 | 远端资产 | 已采纳 |
 | 012 | tracked synthetic/TB 数据按普通项目数据处理；validation 可被普通工具和兼容测试读取，但不得进入训练、上传或训练决策 | 保留训练归因所需的最小卫生，避免把普通合成数据隐私化或扩建审计体系 | 数据分类 / 隔离 | 已采纳 |
-| 013 | 阶段二主路线为 Secure A40 48 GB + 40 GB container disk + 100 GB Pod volume；不建 template/credential/network volume，本轮不建 HF repo | 当前 live 价格、容量与 470 条 token 规模下成本最低且余量充足；A40 可用区当前不支持 network volume，HF 精确剩余字节无法从控制面确认 | 资源 / 预算 | 阶段二A候选，待付费授权与创建前复核 |
+| 013 | 阶段二主路线为 Secure A40 48 GB + 40 GB container disk + 100 GB Pod volume；不建 template/credential/network volume；本地 SCP 为默认持久化，确认零增量费用的 HF 私有功能可在计划变化时作备援 | 当前 live 价格、容量与 470 条 token 规模下成本最低且余量充足；A40 可用区当前不支持 network volume；用户确认个人 HF included 100 GB 未使用并给出零费用常设授权 | 资源 / 预算 | 阶段二A候选，待 RunPod 付费授权与创建前复核 |
 | 014 | 候选 QLoRA 为 rank 16、固定文本层 regex target、LR 2e-4、batch 1 × accum 8、2 epochs、NF4 4-bit、无 packing；target regex 属安全边界不允许 smoke 后漂移，loader/attention、rank、batch/accum/LR、epochs/max steps/max sequence length 和依赖允许一次有据收敛 | 本地能证明格式/mask与 runtime 模块范围，但不能证明真实 8B 显存和云端依赖兼容性 | recipe | 阶段一候选，正式训练前冻结 |
 | 015 | formal v2 pair 导入必须用 private evidence locator 重建并重验 BuiltPairReceipt；两侧分别绑定 b10333 实际 deployment manifest，adapter on/off 与 paired GGUF 都保留，微调侧绑定 completed formal source adapter tree 与转换身份 | 保留 v1 兼容且不预先锁死本地部署路线，同时防止合同 JSON、自报 receipt 或任意工件冒充实际加载的正式同源比较 | pair attribution | 已采纳 |
 | 016 | 阶段二先执行不付费的阶段二A，本地闭环与 live 资源报告提交后再取得一次明确付费授权 | 不让 Pod 计费期间才设计转换、推理或回收流程；阶段二A本身不授权任何远端变更、上传、训练或费用 | 授权 / 成本 | 已完成，等待付费授权 |
 | 017 | RunPod-only、单 Pod、`$12` 上限、冻结 base/data/template/b10333、一个有效 recipe、train-only 上传、零新增 HF 费用和 validation 不调参属于硬边界；adapter on/off 优先、同 Pod 转换、具体命令/目录/时长属于可按实证调整的软路线 | 用户明确要求区分安全/费用/任务边界与实现建议；技术偏离可自主收敛，但不能扩大授权或改变训练归因 | 阶段二执行 | 已采纳 |
 | 018 | 正式 receipt 必须先回收本地并逐文件验真，随后才在 formal 输出外的独立目录转换；adapter on/off 与 paired GGUF 均预备，实际路线只按真实转换和 b10333 smoke 的兼容性选择 | 保护已完成训练证据，同时避免在购买 Pod 后临时设计转换或预先锁死不可用路线 | 转换 / 回收 | 阶段二A已落盘，真实兼容性待付费阶段 |
+| 019 | 优先 deployment 本地验真后先 stop 同一 Pod 并保留 volume；本地 structural smoke 通过才 delete 并运行 130×2。若 adapter 转换或冻结 b10333 加载有实证不兼容，在 `$10/$12` 线内恢复同一 Pod，以独立 remote/local/pair 目录完成 paired-GGUF fallback，不重训、不按 validation 质量选路线 | 删除 Pod 后才发现 LoRA 不兼容会丢失 BF16 cache 和同一付费生命周期内的已备回退；route-specific 目录保留诊断且避免 receipt/evidence 冲突 | 转换 / 本地 pair / 止费 | 阶段二A窄修已落盘，真实兼容性待付费阶段 |

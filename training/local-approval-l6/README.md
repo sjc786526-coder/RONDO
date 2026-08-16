@@ -73,10 +73,11 @@ Output remains on the 100 GB Pod volume while the controller is active unless
 an optional network volume was explicitly authorized. Before Pod deletion,
 adapter, necessary checkpoints, final recipe and dependency identity,
 aggregate metrics and training receipt are persisted and downloaded locally;
-every size/SHA-256 is rechecked. This run plans no HF repo because remaining
-byte-level private quota cannot be confirmed. A future separately authorized
-mirror requires an exact staging verifier before any upload; dataset/projection
-bodies and per-sample outputs never enter it.
+every size/SHA-256 is rechecked. The owner confirms the personal HF account's
+included 100 GB is unused and authorizes zero-incremental-cost HF features as a
+contingency; local SCP remains the default, and any private mirror first needs
+an exact staging verifier. HF compute, paid features, dataset/projection bodies
+and per-sample outputs remain outside this route.
 
 Training success first writes `training-pending.json`; it never writes a
 completed receipt before adapter reload. The separate reload command writes a
@@ -121,13 +122,16 @@ Q4_K_M files from that same source base and adapter. Neither route changes the
 training receipt if conversion fails.
 
 After a separately authorized conversion, the deployment is downloaded and
-verified again before Pod deletion. The local b10333 glue then builds canonical
-deployment manifests and private pair evidence, runs a separate two-sample
-structural smoke, executes 130 inputs on each local side serially, assembles the
-390 three-side rows and formally re-imports them. Typed sample failures remain
-typed; an unexpected dangling infrastructure attempt requires the explicit
-`resolve-interrupted` command. Both deployment manifests use the shared
-`conversion-operations.json` as converter identity and the real quantizer
+verified, then the same Pod is stopped with its volume retained while the local
+b10333 glue builds canonical deployment manifests and runs a two-sample
+structural smoke. A proven adapter conversion/load incompatibility continues
+or restarts that same Pod and uses an independent paired-GGUF attempt without
+retraining.
+Once either route passes smoke, the Pod is deleted before 130 inputs per side
+run serially, the 390 three-side rows are assembled and formally re-imported.
+Typed sample failures remain typed; an unexpected dangling infrastructure
+attempt requires the explicit `resolve-interrupted` command. Both manifests
+use the shared `conversion-operations.json` as converter identity and the real quantizer
 binary as quantizer identity. Train, validation and holdout bodies and
 per-sample outputs never enter the conversion tool bundle or any future
 separately authorized HF mirror.

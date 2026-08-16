@@ -327,9 +327,11 @@ jq -e '.status == "adapter_reloaded" and .separate_command == true' \
 test ! -e "$TASK_ATTEMPT_ROOT/smoke/training-receipt.json"
 ```
 
-Stop here for human/agent review. The local mock is not this evidence. An OOM,
-wrong target module, zero/extra optimizer steps, reload failure or missing
-receipt is a failed smoke and must not be converted into formal success.
+Stop here for the active executor's technical review. After the one paid-stage
+authorization this is not another user approval gate. The local mock is not
+this evidence. An OOM, wrong target module, zero/extra optimizer steps, reload
+failure or missing receipt is a failed smoke and must not be converted into
+formal success.
 
 ## F. Converge once and freeze the formal contracts
 
@@ -471,17 +473,28 @@ PY
 Compute cumulative task spend as start balance minus current balance, including
 storage. The control decisions are mandatory:
 
-- `$8`: soft stop. Start no new phase or retry. If no critical write is active,
-  stop the Pod and begin recovery review.
+- `$8`: soft checkpoint, not automatic failure. Before starting another
+  high-cost phase or retry, recompute its conservative completion and recovery
+  cost. Continue the current critical write or necessary evidenced recovery
+  only when that bound remains below `$12`; otherwise stop the Pod.
 - `$10` hard recovery line: `runpodctl pod stop "$TASK_POD_ID"` immediately.
-  A single short restart is allowed only to recover `/workspace`, with the `$2`
-  reserve and the same user authorization.
+  Do not restart GPU computation; use the remaining reserve only for short
+  artifact recovery and deletion.
 - `$12` cap: `runpodctl pod delete "$TASK_POD_ID"`; no retry.
 - 10 hours since creation: forced deletion. The RFC3339
   `TASK_TERMINATE_UTC` passed to `--terminate-after` is the independent
   control-plane backstop; the controller also deletes explicitly.
 
 Conversion is deliberately deferred until the completed training receipt has been finalized, recovered locally and verified file by file. The deployment procedure is in I; a conversion failure cannot erase or downgrade completed training evidence.
+
+After the paid-stage authorization, ordinary dependency, OOM, SSH, download,
+conversion, checkpoint and model-load problems are owned by the active
+executor: diagnose, make a narrow evidence-backed correction and continue
+within the frozen contracts and budget without asking again. Pause only when
+the conservative total would exceed `$12`, a new remote object or data class is
+needed outside the authorized boundaries, a second valid training recipe is
+required, or the frozen base, template, b10333 runtime or product route must
+change.
 
 If that one recovery restart is needed, do not reuse the old SSH address. Start
 the same stopped Pod, wait for it to become ready, then obtain the current host
@@ -599,7 +612,8 @@ conversion begin. It writes to the sibling
 The completed receipt and adapter are read-only sources. Conversion failure
 does not change completed training status.
 
-Choose exactly one reviewed route:
+Start with the preferred `adapter_on_off` route. This is the executor's
+technical choice under the paid authorization, not a new user review:
 
 - `adapter_on_off`: one Q4_K_M base plus one F16 LoRA GGUF; the fine-tuned side
   adds `--lora` to the same base.
@@ -619,16 +633,22 @@ umask 077
 TASK_ROOT=/workspace/rondo-l6
 TASK_ATTEMPT_ID=attempt-01
 TASK_FORMAL_OUTPUT="$TASK_ROOT/runs/$TASK_ATTEMPT_ID/formal"
-TASK_DEPLOYMENT="$TASK_ROOT/deployments/$TASK_ATTEMPT_ID"
+TASK_ROUTE="${TASK_ROUTE:-adapter_on_off}"
 TASK_CONVERSION_TOOLS="$TASK_ROOT/conversion-tool-bundle"
 TASK_CONVERTER_ROOT="$TASK_CONVERSION_TOOLS/tools/llama.cpp"
 TASK_QUANTIZER_ROOT="$TASK_CONVERSION_TOOLS/tools/llama-b10333-cpu"
-TASK_ROUTE='<adapter_on_off_OR_paired_gguf>'
 case "$TASK_ROUTE" in
-  adapter_on_off) TASK_REQUIRED_FREE_GB=45 ;;
-  paired_gguf) TASK_REQUIRED_FREE_GB=65 ;;
+  adapter_on_off)
+    TASK_ROUTE_ATTEMPT="${TASK_ROUTE_ATTEMPT:-adapter-on-off-01}"
+    TASK_REQUIRED_FREE_GB=45
+    ;;
+  paired_gguf)
+    TASK_ROUTE_ATTEMPT="${TASK_ROUTE_ATTEMPT:-paired-gguf-01}"
+    TASK_REQUIRED_FREE_GB=65
+    ;;
   *) echo 'conversion_route_invalid' >&2; exit 2 ;;
 esac
+TASK_DEPLOYMENT="$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/$TASK_ROUTE_ATTEMPT"
 test -f "$TASK_FORMAL_OUTPUT/training-receipt.json"
 test "$(jq -r .status "$TASK_FORMAL_OUTPUT/training-receipt.json")" = completed
 test ! -e "$TASK_DEPLOYMENT"
@@ -707,7 +727,7 @@ else
     2>&1 | tee "$TASK_DEPLOYMENT/finetuned-quantize.log"
   test -s "$TASK_DEPLOYMENT/finetuned-q4_k_m.gguf"
   test "$TASK_DEPLOYMENT/work/merged-hf" = \
-    "$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/work/merged-hf"
+    "$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/$TASK_ROUTE_ATTEMPT/work/merged-hf"
   rm -rf -- "$TASK_DEPLOYMENT/work/merged-hf"
   rm -f -- "$TASK_DEPLOYMENT/work/finetuned-f16.gguf"
 fi
@@ -851,17 +871,40 @@ test "$(df -B1 --output=avail /workspace | tail -n1 | tr -d ' ')" \
   -ge 20000000000
 ```
 
+If the preferred adapter converter itself proves incompatible before it can
+produce a verified receipt, preserve `adapter-on-off-01` and use the still
+running same Pod for the fallback; an ordinary missing dependency or wrong path
+must be fixed instead of being mislabeled incompatibility. Below `$10`, set the
+following overrides and rerun only I's conversion/receipt/remote
+`verify-output` blocks. They write a distinct directory and never invoke
+training:
+
+```bash
+export TASK_ROUTE=paired_gguf
+export TASK_ROUTE_ATTEMPT=paired-gguf-01
+# Re-run I's conversion, receipt and remote verify-output blocks only.
+test -f "/workspace/rondo-l6/deployments/attempt-01/$TASK_ROUTE_ATTEMPT/conversion-receipt.json"
+```
+
 Recover deployment artifacts separately and run the same streaming verifier on
 the local copy before Pod deletion:
 
 ```bash
 set -euo pipefail
-TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_RECOVERY-deployment"
+TASK_ROUTE="${TASK_ROUTE:-adapter_on_off}"
+case "$TASK_ROUTE" in
+  adapter_on_off) TASK_ROUTE_ATTEMPT="${TASK_ROUTE_ATTEMPT:-adapter-on-off-01}" ;;
+  paired_gguf) TASK_ROUTE_ATTEMPT="${TASK_ROUTE_ATTEMPT:-paired-gguf-01}" ;;
+  *) echo 'conversion_route_invalid' >&2; exit 2 ;;
+esac
+TASK_LOCAL_DEPLOYMENTS="$TASK_LOCAL_RECOVERY-deployments"
+TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_DEPLOYMENTS/$TASK_ROUTE_ATTEMPT"
 test ! -e "$TASK_LOCAL_DEPLOYMENT"
+install -d -m 700 "$TASK_LOCAL_DEPLOYMENTS"
 install -d -m 700 "$TASK_LOCAL_DEPLOYMENT"
 scp -r -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
   -P "$TASK_SSH_PORT" \
-  root@"$TASK_SSH_HOST":/workspace/rondo-l6/deployments/"$TASK_ATTEMPT_ID"/. \
+  root@"$TASK_SSH_HOST":/workspace/rondo-l6/deployments/"$TASK_ATTEMPT_ID"/"$TASK_ROUTE_ATTEMPT"/. \
   "$TASK_LOCAL_DEPLOYMENT"/
 cd "$TASK_WORKTREE"
 PYTHONDONTWRITEBYTECODE=1 python3 -B \
@@ -874,40 +917,44 @@ sha256sum "$TASK_LOCAL_DEPLOYMENT/conversion-files-manifest.json" \
   "$TASK_LOCAL_DEPLOYMENT/conversion-receipt.json"
 ```
 
-No HF repo is planned or created in this run. The account-level private quota
-can be queried, but remaining byte-level quota for this exact upload cannot be
-confirmed, so the required `$0` incremental-cost gate is not satisfied. Keep
-the locally verified copies and do not run any `hf repos create` or `hf upload`
-command. A future, separately authorized mirror must first add an exact staging
-allowlist/verifier for only the selected adapter/checkpoint or GGUF, actual
-configuration/dependency identities, aggregate metrics, manifests and receipts.
-It must reject logs, tool source/binaries, datasets, projections and per-sample
-outputs before any remote mutation; enabling PRO, pay-as-you-go or another paid
-feature remains forbidden without its own authorization.
+No HF object is created during stage-2A. The owner confirms the personal
+account's included 100 GB is unused and grants standing permission to use HF
+features only while their incremental cost remains exactly `$0`. The default
+success path still uses local SCP. If a later plan change makes a private HF
+artifact mirror materially useful, the active executor may first add and run
+an exact staging allowlist/verifier, then use the free private storage without
+another ordinary technical approval. Staging is limited to selected
+adapter/checkpoint or GGUF, actual configuration/dependency identities,
+aggregate metrics, manifests and receipts; it must reject logs, tool
+source/binaries, datasets, projections and per-sample outputs. HF compute stays
+forbidden because RunPod is the sole training/conversion backend. Any PRO,
+pay-as-you-go, paid storage/compute or public asset still requires new explicit
+authorization.
 
-## J. Delete the task Pod and confirm zero live objects
+## J. Stop the task Pod and run local compatibility smoke
 
-After both local training and deployment verification succeed, delete the Pod
-immediately; do not keep it billed after the verified local recovery.
-Deletion permanently removes its Pod volume.
+After local training and the preferred deployment both verify, stop the same
+Pod before loading the model locally. This ends GPU billing while retaining the
+100 GB Pod volume, frozen BF16 cache and completed training output for one
+evidence-backed `paired_gguf` fallback. Do not delete it yet.
 
 ```bash
-runpodctl pod delete "$TASK_POD_ID"
-if runpodctl pod list --all | grep -F "$TASK_POD_ID"; then
-  echo 'refuse completion: task Pod still listed' >&2
-  exit 2
-fi
+set -euo pipefail
+runpodctl pod stop "$TASK_POD_ID"
+for TASK_STOP_POLL in $(seq 1 40); do
+  TASK_RUNTIME_STATUS="$(runpodctl pod get "$TASK_POD_ID" -o json | jq -er .runtimeStatus)"
+  test "$TASK_RUNTIME_STATUS" = stopped && break
+  sleep 15
+done
+test "$TASK_RUNTIME_STATUS" = stopped
 runpodctl user
 runpodctl billing pods --bucket-size hour --start-time "$TASK_START_UTC" \
   --grouping podId --pod-id "$TASK_POD_ID"
-runpodctl network-volume list
 ```
 
-Confirm no task template, registry credential or network volume was created,
-current spend per hour returned to its pre-task value, final task cost did not
-exceed `$12`, and the local artifact manifest still verifies. Record the final
-billing result and deleted Pod ID in the stage-2 handoff without recording any
-credential.
+Record the stopped-volume timestamp and current task spend. The 100 GB stopped
+volume remains billable; do not leave it stopped while doing unrelated work.
+At `$10`, do not restart it for conversion. At `$12`, delete it immediately.
 
 Now materialize the selected deployment pair beside the two verified local
 downloads using same-filesystem hard links. This avoids duplicating the 5-12 GB
@@ -920,12 +967,18 @@ set -euo pipefail
 umask 077
 TASK_WORKTREE=/home/sjc/desktop/RONDO/.claude/worktrees/037-l6-first-lora-paired-artifacts
 TASK_LOCAL_RECOVERY='/home/sjc/desktop/RONDO/eval-data/local-approval/l6/plan037-stage2/<FORMAL_RUN_ID>'
-TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_RECOVERY-deployment"
-TASK_PAIR_ROOT="$TASK_LOCAL_RECOVERY-pair"
+TASK_ROUTE="${TASK_ROUTE:-adapter_on_off}"
+case "$TASK_ROUTE" in
+  adapter_on_off) TASK_ROUTE_ATTEMPT="${TASK_ROUTE_ATTEMPT:-adapter-on-off-01}" ;;
+  paired_gguf) TASK_ROUTE_ATTEMPT="${TASK_ROUTE_ATTEMPT:-paired-gguf-01}" ;;
+  *) echo 'conversion_route_invalid' >&2; exit 2 ;;
+esac
+TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_RECOVERY-deployments/$TASK_ROUTE_ATTEMPT"
+TASK_PAIR_ROOT="$TASK_LOCAL_RECOVERY-pairs/$TASK_ROUTE_ATTEMPT"
 TASK_PAIR_SOURCE="$TASK_PAIR_ROOT/source"
 TASK_PAIR_PRIVATE="$TASK_PAIR_ROOT/private"
 TASK_PAIR_RUN="$TASK_PAIR_ROOT/journal"
-TASK_PAIR_ID='l6-plan037-<FORMAL_RUN_ID_NORMALIZED>'
+TASK_PAIR_ID="l6-plan037-<FORMAL_RUN_ID_NORMALIZED>-$TASK_ROUTE_ATTEMPT"
 TASK_C_AVAILABLE_BYTES="$(df -B1 --output=avail /mnt/c | tail -n1 | tr -d ' ')"
 test "$TASK_C_AVAILABLE_BYTES" -ge 85899345920
 if pgrep -x cargo >/dev/null || pgrep -x rustc >/dev/null; then
@@ -1086,7 +1139,103 @@ printf '%s\n' "$TASK_SMOKE_RESULT"
 printf '%s\n' "$TASK_SMOKE_RESULT" | jq -e '.status == "passed"'
 ```
 
-Only after that gate, run 130 inputs × 2 local models = 260 new local
+If this preferred-route smoke passes, skip directly to J.2. Do not choose a
+route from the model decisions or validation quality. If and only if the
+conversion logs or b10333 startup/identity logs prove that the converted LoRA
+itself cannot be produced or loaded by the frozen runtime, keep the stopped Pod
+and use the fallback below. Preserve the failed route's deployment, private
+smoke receipt and server logs; do not rewrite them.
+
+### J.1 Same-Pod `paired_gguf` compatibility fallback
+
+The fallback is a deployment conversion, not another training recipe. It is
+allowed only below the `$10` hard recovery line and while the conservative
+total remains below `$12`. Start the same Pod ID, wait for its actual runtime
+to become ready, and refresh SSH facts; do not create a replacement Pod while
+this one exists:
+
+```bash
+set -euo pipefail
+runpodctl user
+runpodctl billing pods --bucket-size hour --start-time "$TASK_START_UTC" \
+  --grouping podId --pod-id "$TASK_POD_ID"
+TASK_ROUTE=paired_gguf
+TASK_ROUTE_ATTEMPT=paired-gguf-01
+runpodctl pod start "$TASK_POD_ID"
+for TASK_START_POLL in $(seq 1 80); do
+  TASK_RUNTIME_STATUS="$(runpodctl pod get "$TASK_POD_ID" -o json | jq -er .runtimeStatus)"
+  test "$TASK_RUNTIME_STATUS" = running && break
+  sleep 15
+done
+test "$TASK_RUNTIME_STATUS" = running
+runpodctl pod get "$TASK_POD_ID"
+runpodctl ssh info "$TASK_POD_ID"
+export TASK_SSH_HOST='<CURRENT_SSH_HOST_FROM_SSH_INFO>'
+export TASK_SSH_PORT='<CURRENT_SSH_PORT_FROM_SSH_INFO>'
+ssh -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
+  -p "$TASK_SSH_PORT" root@"$TASK_SSH_HOST"
+```
+
+In the refreshed remote shell, set the following exact route variables and
+rerun only the conversion/receipt/remote `verify-output` blocks in I. The
+defaults in those blocks now preserve these overrides. Do not invoke
+`runpod-stage2-entrypoint.sh`, `l6_training.py train`, or any optimizer step:
+
+```bash
+export TASK_ROUTE=paired_gguf
+export TASK_ROUTE_ATTEMPT=paired-gguf-01
+# Re-run I's conversion, receipt and remote verify-output blocks only.
+test -f "/workspace/rondo-l6/deployments/attempt-01/$TASK_ROUTE_ATTEMPT/conversion-receipt.json"
+```
+
+Back on the local controller, retain the adapter attempt and select independent
+fallback paths. Rerun I's deployment SCP/local `verify-output` block, then J's
+Pod-stop block and pair-materialization/structural-smoke blocks with these
+exports. They resolve to distinct remote deployment, local deployment, pair
+source, private receipt, journal and server-log directories:
+
+```bash
+export TASK_ROUTE=paired_gguf
+export TASK_ROUTE_ATTEMPT=paired-gguf-01
+export TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_RECOVERY-deployments/$TASK_ROUTE_ATTEMPT"
+export TASK_PAIR_ROOT="$TASK_LOCAL_RECOVERY-pairs/$TASK_ROUTE_ATTEMPT"
+# Re-run I deployment SCP + local verify-output, then J stop + materialize + smoke.
+test -f "$TASK_LOCAL_DEPLOYMENT/conversion-receipt.json"
+test "$(jq -r .status "$TASK_PAIR_ROOT/private/l6-pair-structural-smoke.json")" = passed
+```
+
+If this second route cannot complete its local structural smoke, or the `$12`
+cap is reached, delete the Pod, retain the already-local diagnostics and stop;
+do not train again or invent a completed pair result. A replacement Pod is a
+last resort only when the original Pod is actually gone, never concurrently,
+and its cost remains in the same `$12` ledger.
+
+### J.2 Delete after the selected route passes local smoke
+
+For either route, require its local smoke receipt before deleting the same Pod.
+Deletion permanently removes the retained volume and BF16 cache:
+
+```bash
+set -euo pipefail
+test "$(jq -r .status "$TASK_PAIR_PRIVATE/l6-pair-structural-smoke.json")" = passed
+runpodctl pod delete "$TASK_POD_ID"
+if runpodctl pod list --all | grep -F "$TASK_POD_ID"; then
+  echo 'refuse completion: task Pod still listed' >&2
+  exit 2
+fi
+runpodctl user
+runpodctl billing pods --bucket-size hour --start-time "$TASK_START_UTC" \
+  --grouping podId --pod-id "$TASK_POD_ID"
+runpodctl network-volume list
+```
+
+Confirm no task template, registry credential or network volume was created,
+current spend per hour returned to its pre-task value, final task cost did not
+exceed `$12`, and both local artifact manifests still verify. Record the final
+billing result and deleted Pod ID without recording any credential.
+
+Only after the selected route's structural smoke and Pod deletion, run 130
+inputs × 2 local models = 260 new local
 attempts. Assembly adds the existing 130 Sol-side rows, so the canonical import
 contains exactly 390 rows. The two model servers run serially, and `run`
 performs formal import verification internally; the explicit command repeats
