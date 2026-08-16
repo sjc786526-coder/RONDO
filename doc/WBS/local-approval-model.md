@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-16（Plan 037 阶段一本地准备完成，等待 L6 阶段二授权）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-16（Plan 037 阶段二A购买前闭环完成，等待付费授权）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -189,11 +189,10 @@
 
 1. **L5b 与 M4 离线准备均已完成**：600 条合成训练资产及 130 条 validation 主体 cohort 已冻结；真实 holdout
    未被本次准备任务打开或物化。
-2. **L6 阶段一本地准备已完成**：470 条 train-only 投影、冻结 tokenizer/template 精确 census、completion-only
-   mask、候选 QLoRA/RunPod 脚手架，以及同时支持 adapter on/off / paired GGUF 的实物 deployment pair runner 已就绪；
-   formal v2 私有文件入口会由 evidence locator 重验全部来源；没有创建云资源、上传、
-   8B optimizer smoke、训练或 130 条输出。
-3. **下一产品工作是 L6 阶段二**：用户单独授权 RunPod 预算与对象后，先做真实 optimizer smoke 和 adapter reload，
+2. **L6 阶段一与阶段二A均已完成**：470 条 train-only 投影、精确 census、completion-only QLoRA/RunPod
+   脚手架、冻结 b10333 转换工具包、adapter on/off / paired GGUF 双路线和串行 pair CLI 已就绪；formal v2
+   文件入口会由 private evidence locator 重验实际部署来源。尚未创建云资源、上传、加载模型、训练、转换或生成输出。
+3. **下一产品工作是获付费授权后的 L6 阶段二**：先做真实 optimizer smoke 和 adapter reload，
    再冻结最终 recipe 并只完成一个有效正式训练；产物回收并形成同源成对输出后才正式执行 Local M4。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
@@ -366,8 +365,9 @@ L5b 冻结结果：当前人在场开发用 Codex `gpt-5.6-sol` 只使用 seed 2
 3. 权重下载回本地。
 
 阶段一本地准备已用同格式 mock、完整 470 条精确 tokenizer/template census 和 train-only bundle 验证数据与标签管线；
-它不冒充真实 8B optimizer smoke。阶段二获单独授权后，必须先在 RunPod 做一个真实 optimizer step、保存并隔离重载
-adapter，再基于显存/兼容性证据做一次技术收敛，正式训练启动前冻结最终 recipe 与依赖。
+阶段二A又冻结转换工具身份、双路线命令、产物回收和本地成对输出闭环。它们都不冒充真实 8B optimizer smoke。
+付费阶段获单独授权后，必须先在 RunPod 做一个真实 optimizer step、保存并隔离重载 adapter，再基于显存/兼容性证据
+做一次技术收敛，正式训练启动前冻结最终 recipe 与依赖。
 
 - **推理仍在本地**：训练产出的 LoRA adapter 或由其生成的合并/量化工件必须能由本地 llama.cpp runtime 加载，
   **训练侧的量化、转换与格式选择必须以本地推理可落地为约束**，不能训完才发现用不了。

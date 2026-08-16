@@ -1,8 +1,9 @@
 # Plan 037 stage-2 RunPod runbook
 
-This is an operator runbook, not stage-2 authorization. Section A is local and
-read-only. Sections B-J create, use, bill, upload to, or delete remote objects
-and must not be run until the user separately approves stage 2. Replace every
+This is an operator runbook, not remote authorization. Section A is the local
+stage-2A preparation scope. Sections B-J create, use, bill, upload to, or delete
+remote objects and must not be run until the user separately approves that
+paid stage. Replace every
 `<PLACEHOLDER>` from live control-plane output; never paste a secret into this
 file, a receipt, shell history, or a process argument. Do not read or source
 `.env.local`.
@@ -22,9 +23,19 @@ Run from the Plan 037 worktree. These commands do not create a remote object.
 set -euo pipefail
 TASK_WORKTREE=/home/sjc/desktop/RONDO/.claude/worktrees/037-l6-first-lora-paired-artifacts
 TASK_STAGE1=/home/sjc/desktop/RONDO/eval-data/local-approval/l6/plan037-stage1
+TASK_STAGE2A="$TASK_WORKTREE/eval-data/local-approval/l6/plan037-stage2a"
 TASK_BUNDLE="$TASK_STAGE1/train-only-bundle"
 TASK_BUNDLE_TAR="$TASK_STAGE1/train-only-bundle.tar"
 TASK_CENSUS="$TASK_STAGE1/token-census.json"
+TASK_CONVERSION_TOOL_BUNDLE="$TASK_STAGE2A/conversion-tool-bundle"
+TASK_CONVERSION_TOOL_TAR="$TASK_STAGE2A/conversion-tool-bundle.tar"
+TASK_CONVERSION_CONTRACT="$TASK_WORKTREE/training/local-approval-l6/conversion-tool-contract-v1.json"
+TASK_LLAMA_SOURCE=/home/sjc/desktop/RONDO/eval-data/sources/llama.cpp-b10333-08659901
+TASK_QUANTIZER_RUNTIME=/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333
+TASK_C_AVAILABLE_BYTES="$(df -B1 --output=avail /mnt/c | tail -n1 | tr -d ' ')"
+# 80 GiB mandatory post-download floor plus a conservative 35 GiB local peak.
+test "$TASK_C_AVAILABLE_BYTES" -ge 123480309760
+printf 'windows_c_available_bytes=%s\n' "$TASK_C_AVAILABLE_BYTES"
 
 cd "$TASK_WORKTREE"
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B -m unittest -v \
@@ -36,20 +47,48 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
   -m rondo_eval.local_approval.l6_training mock-dry-run \
   --repo . --records 6
 bash -n training/local-approval-l6/runpod-stage2-entrypoint.sh
+if test ! -e "$TASK_CONVERSION_TOOL_BUNDLE"; then
+  python3 -B training/local-approval-l6/conversion_tooling.py prepare \
+    --contract "$TASK_CONVERSION_CONTRACT" \
+    --source-root "$TASK_LLAMA_SOURCE" \
+    --quantizer-root "$TASK_QUANTIZER_RUNTIME" \
+    --output "$TASK_CONVERSION_TOOL_BUNDLE"
+fi
+python3 -B "$TASK_CONVERSION_TOOL_BUNDLE/bin/conversion_tooling.py" verify \
+  --bundle "$TASK_CONVERSION_TOOL_BUNDLE"
+if test ! -e "$TASK_CONVERSION_TOOL_TAR"; then
+  tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+    -cf "$TASK_CONVERSION_TOOL_TAR" -C "$TASK_STAGE2A" conversion-tool-bundle
+fi
+TASK_TAR_VERIFY="$(mktemp -d /tmp/plan037-conversion-tar.XXXXXX)"
+trap 'rm -rf -- "$TASK_TAR_VERIFY"' EXIT
+tar -xf "$TASK_CONVERSION_TOOL_TAR" -C "$TASK_TAR_VERIFY"
+python3 -B "$TASK_TAR_VERIFY/conversion-tool-bundle/bin/conversion_tooling.py" \
+  verify --bundle "$TASK_TAR_VERIFY/conversion-tool-bundle"
+cmp "$TASK_CONVERSION_CONTRACT" \
+  "$TASK_TAR_VERIFY/conversion-tool-bundle/contracts/conversion-tool-contract-v1.json"
+cmp "$TASK_CONVERSION_TOOL_BUNDLE/conversion-tool-bundle-manifest.json" \
+  "$TASK_TAR_VERIFY/conversion-tool-bundle/conversion-tool-bundle-manifest.json"
+rm -rf -- "$TASK_TAR_VERIFY"
+trap - EXIT
 git diff --check -- eval/rondo_eval/local_approval/l6_training.py \
   eval/tests/test_l6_training.py training/local-approval-l6
 
 TASK_BUNDLE_SHA256="$(sha256sum "$TASK_BUNDLE_TAR" | cut -d' ' -f1)"
 TASK_CENSUS_SHA256="$(sha256sum "$TASK_CENSUS" | cut -d' ' -f1)"
-printf 'bundle_tar_sha256=%s\ncensus_sha256=%s\n' \
-  "$TASK_BUNDLE_SHA256" "$TASK_CENSUS_SHA256"
+TASK_CONVERSION_TOOL_SHA256="$(sha256sum "$TASK_CONVERSION_TOOL_TAR" | cut -d' ' -f1)"
+printf 'bundle_tar_sha256=%s\ncensus_sha256=%s\nconversion_tool_tar_sha256=%s\n' \
+  "$TASK_BUNDLE_SHA256" "$TASK_CENSUS_SHA256" "$TASK_CONVERSION_TOOL_SHA256"
 ```
 
 Confirm the census still says 470 records, limit 4096, over-limit 0, total
 145360, prompt 128545 and completion 16815. Record the printed hashes in the
-stage-2 controller notes. Do not continue without separate authorization for
-the Pod, bundle transfer, official model download, compute budget and any
-optional private HF mirror.
+stage-2 controller notes. The conversion bundle is body-free: its generated
+manifest is the exact upload allowlist, and its builder rejects source drift,
+unknown package files, model/data bodies and unlisted symlinks. Do not continue
+without separate authorization for the Pod, both bundle transfers, official
+model download and compute budget. This run does not include a private HF
+mirror.
 
 ## B. After authorization: select and create the one Pod
 
@@ -132,6 +171,9 @@ ssh -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
 scp -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
   -P "$TASK_SSH_PORT" "$TASK_BUNDLE_TAR" \
   root@"$TASK_SSH_HOST":/workspace/rondo-l6/incoming/train-only-bundle.tar
+scp -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
+  -P "$TASK_SSH_PORT" "$TASK_CONVERSION_TOOL_TAR" \
+  root@"$TASK_SSH_HOST":/workspace/rondo-l6/incoming/conversion-tool-bundle.tar
 ```
 
 In the remote SSH shell, verify the exact local tar hash before extraction and
@@ -141,11 +183,18 @@ then use the bundled verifier. No other dataset file may be transferred.
 set -euo pipefail
 TASK_ROOT=/workspace/rondo-l6
 TASK_BUNDLE="$TASK_ROOT/train-only-bundle"
+TASK_CONVERSION_TOOLS="$TASK_ROOT/conversion-tool-bundle"
 TASK_EXPECTED_BUNDLE_SHA256='<TASK_BUNDLE_SHA256_FROM_SECTION_A>'
+TASK_EXPECTED_CONVERSION_TOOL_SHA256='<TASK_CONVERSION_TOOL_SHA256_FROM_SECTION_A>'
 test "$(sha256sum "$TASK_ROOT/incoming/train-only-bundle.tar" | cut -d' ' -f1)" \
   = "$TASK_EXPECTED_BUNDLE_SHA256"
+test "$(sha256sum "$TASK_ROOT/incoming/conversion-tool-bundle.tar" | cut -d' ' -f1)" \
+  = "$TASK_EXPECTED_CONVERSION_TOOL_SHA256"
 tar -xf "$TASK_ROOT/incoming/train-only-bundle.tar" -C "$TASK_ROOT"
+tar -xf "$TASK_ROOT/incoming/conversion-tool-bundle.tar" -C "$TASK_ROOT"
 python3 "$TASK_BUNDLE/bin/l6_training.py" verify-bundle --bundle "$TASK_BUNDLE"
+python3 "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" verify \
+  --bundle "$TASK_CONVERSION_TOOLS"
 ```
 
 ## D. Download the frozen official revision and install exact dependencies
@@ -201,6 +250,40 @@ print({"python": platform.python_version(), "cuda": torch.version.cuda})
 assert torch.cuda.is_available()
 PY
 nvidia-smi
+
+# Keep Transformers 4.57.6 isolated from the training venv's 5.14.1. The
+# --system-site-packages link deliberately reuses image torch 2.8.0.
+python3 -m venv --system-site-packages "$TASK_ROOT/conversion-venv"
+. "$TASK_ROOT/conversion-venv/bin/activate"
+python -m pip install \
+  -r "$TASK_ROOT/conversion-tool-bundle/contracts/conversion-dependencies-v1.txt"
+python -m pip check
+python - <<'PY'
+import importlib.metadata as metadata
+import torch
+
+expected = {
+    "numpy": "1.26.4",
+    "sentencepiece": "0.2.1",
+    "transformers": "4.57.6",
+    "protobuf": "4.25.8",
+    "huggingface-hub": "0.36.0",
+    "safetensors": "0.8.0",
+    "tqdm": "4.67.3",
+    "PyYAML": "6.0.3",
+    "requests": "2.32.5",
+}
+actual = {name: metadata.version(name) for name in expected}
+assert actual == expected, (actual, expected)
+assert torch.__version__.split("+", 1)[0] == "2.8.0", torch.__version__
+print({"conversion_dependencies": actual, "torch": torch.__version__})
+PY
+PYTHONPATH="$TASK_ROOT/conversion-tool-bundle/tools/llama.cpp/gguf-py" \
+  python "$TASK_ROOT/conversion-tool-bundle/tools/llama.cpp/convert_hf_to_gguf.py" \
+  --print-supported-models 2>&1 | grep -E 'Mistral3|Ministral3|mistral3'
+ldd "$TASK_ROOT/conversion-tool-bundle/tools/llama-b10333-cpu/llama-quantize"
+"$TASK_ROOT/conversion-tool-bundle/tools/llama-b10333-cpu/llama-quantize" \
+  --help >/dev/null 2>&1 || test "$?" -eq 1
 ```
 
 Stop immediately on a missing file, dependency conflict, CUDA mismatch or a
@@ -398,6 +481,8 @@ storage. The control decisions are mandatory:
   `TASK_TERMINATE_UTC` passed to `--terminate-after` is the independent
   control-plane backstop; the controller also deletes explicitly.
 
+Conversion is deliberately deferred until the completed training receipt has been finalized, recovered locally and verified file by file. The deployment procedure is in I; a conversion failure cannot erase or downgrade completed training evidence.
+
 If that one recovery restart is needed, do not reuse the old SSH address. Start
 the same stopped Pod, wait for it to become ready, then obtain the current host
 and port:
@@ -480,7 +565,7 @@ Finalization must leave a schema-valid `completed` receipt only after the
 pending and reload receipts, actual cost, persistence identity and every
 allowlisted artifact hash agree.
 
-## I. SCP recovery, local verification, and optional private HF mirror
+## I. SCP recovery and local verification
 
 Recover the complete allowlisted formal output into a new ignored local
 directory before Pod deletion:
@@ -488,7 +573,12 @@ directory before Pod deletion:
 ```bash
 set -euo pipefail
 TASK_ATTEMPT_ID=attempt-01
+TASK_WORKTREE=/home/sjc/desktop/RONDO/.claude/worktrees/037-l6-first-lora-paired-artifacts
+TASK_BUNDLE=/home/sjc/desktop/RONDO/eval-data/local-approval/l6/plan037-stage1/train-only-bundle
 TASK_LOCAL_RECOVERY='/home/sjc/desktop/RONDO/eval-data/local-approval/l6/plan037-stage2/<FORMAL_RUN_ID>'
+TASK_C_AVAILABLE_BYTES="$(df -B1 --output=avail /mnt/c | tail -n1 | tr -d ' ')"
+# Fail before SCP unless the 35 GiB conservative local peak still leaves 80 GiB.
+test "$TASK_C_AVAILABLE_BYTES" -ge 123480309760
 test ! -e "$TASK_LOCAL_RECOVERY"
 install -d -m 700 "$TASK_LOCAL_RECOVERY"
 scp -r -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
@@ -503,29 +593,303 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
 sha256sum "$TASK_LOCAL_RECOVERY/artifact-manifest.json"
 ```
 
-The optional private HF model mirror is a separate remote mutation and is
-forbidden unless the user explicitly authorizes the named private repo and the
-operator confirms it remains inside free private quota with `$0` incremental
-HF cost. Never enable PRO, pay-as-you-go or another paid feature. Because
-`verify-artifacts` rejects every non-allowlisted path, the verified recovery
-directory may be uploaded as one commit only after that extra approval:
+Only after this local training-artifact verification may the remote deployment
+conversion begin. It writes to the sibling
+`/workspace/rondo-l6/deployments/<attempt>`, never under formal training output.
+The completed receipt and adapter are read-only sources. Conversion failure
+does not change completed training status.
+
+Choose exactly one reviewed route:
+
+- `adapter_on_off`: one Q4_K_M base plus one F16 LoRA GGUF; the fine-tuned side
+  adds `--lora` to the same base.
+- `paired_gguf`: the same base plus a separately merged and quantized Q4_K_M
+  fine-tuned model; neither side uses `--lora`.
+
+The frozen BF16 cache is exactly 17,836,052,480 bytes. A prior same-family
+Q4_K_M artifact was 5,198,387,456 bytes, which is only a size estimate. Reserve
+a conservative 60 GB total Pod-volume peak for `adapter_on_off` or 80 GB for
+sequential `paired_gguf`; require 45/65 GB free respectively before starting
+and 20 GB free at each transition. All weights stay on the 100 GB Pod volume,
+not the 40 GB container disk.
 
 ```bash
-HF_MODEL_REPO='<AUTHORIZED_PRIVATE_NAMESPACE/REPO>'
-hf repos create "$HF_MODEL_REPO" --type model --private
-hf upload "$HF_MODEL_REPO" "$TASK_LOCAL_RECOVERY" . \
-  --type model --revision main --private \
-  --commit-message 'Plan 037 L6 verified artifacts'
+set -euo pipefail
+umask 077
+TASK_ROOT=/workspace/rondo-l6
+TASK_ATTEMPT_ID=attempt-01
+TASK_FORMAL_OUTPUT="$TASK_ROOT/runs/$TASK_ATTEMPT_ID/formal"
+TASK_DEPLOYMENT="$TASK_ROOT/deployments/$TASK_ATTEMPT_ID"
+TASK_CONVERSION_TOOLS="$TASK_ROOT/conversion-tool-bundle"
+TASK_CONVERTER_ROOT="$TASK_CONVERSION_TOOLS/tools/llama.cpp"
+TASK_QUANTIZER_ROOT="$TASK_CONVERSION_TOOLS/tools/llama-b10333-cpu"
+TASK_ROUTE='<adapter_on_off_OR_paired_gguf>'
+case "$TASK_ROUTE" in
+  adapter_on_off) TASK_REQUIRED_FREE_GB=45 ;;
+  paired_gguf) TASK_REQUIRED_FREE_GB=65 ;;
+  *) echo 'conversion_route_invalid' >&2; exit 2 ;;
+esac
+test -f "$TASK_FORMAL_OUTPUT/training-receipt.json"
+test "$(jq -r .status "$TASK_FORMAL_OUTPUT/training-receipt.json")" = completed
+test ! -e "$TASK_DEPLOYMENT"
+TASK_AVAILABLE_BYTES="$(df -B1 --output=avail /workspace | tail -n1 | tr -d ' ')"
+test "$TASK_AVAILABLE_BYTES" -ge "$((TASK_REQUIRED_FREE_GB * 1000 * 1000 * 1000))"
+install -d -m 700 "$TASK_DEPLOYMENT/tooling" "$TASK_DEPLOYMENT/work"
+install -m 600 "$TASK_CONVERTER_ROOT/convert_hf_to_gguf.py" \
+  "$TASK_DEPLOYMENT/tooling/convert_hf_to_gguf.py"
+install -m 700 "$TASK_QUANTIZER_ROOT/llama-quantize" \
+  "$TASK_DEPLOYMENT/tooling/llama-quantize"
+if test "$TASK_ROUTE" = adapter_on_off; then
+  install -m 600 "$TASK_CONVERTER_ROOT/convert_lora_to_gguf.py" \
+    "$TASK_DEPLOYMENT/tooling/convert_lora_to_gguf.py"
+else
+  install -m 600 "$TASK_CONVERSION_TOOLS/bin/merge_adapter.py" \
+    "$TASK_DEPLOYMENT/tooling/merge_adapter.py"
+fi
+
+. "$TASK_ROOT/conversion-venv/bin/activate"
+TASK_CONVERSION_PYTHON="$TASK_ROOT/conversion-venv/bin/python"
+TASK_TRAINING_PYTHON="$TASK_ROOT/venv/bin/python"
+export HF_HOME="$TASK_ROOT/hf-home"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export PYTHONPATH="$TASK_CONVERTER_ROOT/gguf-py"
+TASK_BASE_DIR="$(python - <<'PY'
+from huggingface_hub import snapshot_download
+print(snapshot_download(
+    repo_id="mistralai/Ministral-3-8B-Instruct-2512-BF16",
+    revision="f6fae9795746f63c9be8344932f01275f3c63734",
+    cache_dir="/workspace/rondo-l6/hf-home/hub",
+    local_files_only=True,
+))
+PY
+)"
+test "$(python - "$TASK_BASE_DIR/model.safetensors.index.json" <<'PY'
+import json, pathlib, sys
+print(json.loads(pathlib.Path(sys.argv[1]).read_text())["metadata"]["total_size"])
+PY
+)" = 17836052480
+
+"$TASK_CONVERSION_PYTHON" "$TASK_CONVERTER_ROOT/convert_hf_to_gguf.py" \
+  --outfile "$TASK_DEPLOYMENT/work/base-f16.gguf" --outtype f16 \
+  --use-temp-file "$TASK_BASE_DIR" \
+  2>&1 | tee "$TASK_DEPLOYMENT/base-convert.log"
+"$TASK_QUANTIZER_ROOT/llama-quantize" \
+  "$TASK_DEPLOYMENT/work/base-f16.gguf" \
+  "$TASK_DEPLOYMENT/base-q4_k_m.gguf" Q4_K_M \
+  2>&1 | tee "$TASK_DEPLOYMENT/base-quantize.log"
+test -s "$TASK_DEPLOYMENT/base-q4_k_m.gguf"
+rm -f -- "$TASK_DEPLOYMENT/work/base-f16.gguf"
+test "$(df -B1 --output=avail /workspace | tail -n1 | tr -d ' ')" \
+  -ge 20000000000
+
+if test "$TASK_ROUTE" = adapter_on_off; then
+  "$TASK_CONVERSION_PYTHON" "$TASK_CONVERTER_ROOT/convert_lora_to_gguf.py" \
+    --base "$TASK_BASE_DIR" \
+    --outfile "$TASK_DEPLOYMENT/adapter-f16.gguf" --outtype f16 \
+    "$TASK_FORMAL_OUTPUT/adapter-final" \
+    2>&1 | tee "$TASK_DEPLOYMENT/adapter-convert.log"
+  test -s "$TASK_DEPLOYMENT/adapter-f16.gguf"
+else
+  "$TASK_TRAINING_PYTHON" "$TASK_DEPLOYMENT/tooling/merge_adapter.py" \
+    --base "$TASK_BASE_DIR" \
+    --adapter "$TASK_FORMAL_OUTPUT/adapter-final" \
+    --output "$TASK_DEPLOYMENT/work/merged-hf" \
+    2>&1 | tee "$TASK_DEPLOYMENT/merge.log"
+  export PYTHONPATH="$TASK_CONVERTER_ROOT/gguf-py"
+  "$TASK_CONVERSION_PYTHON" "$TASK_CONVERTER_ROOT/convert_hf_to_gguf.py" \
+    --outfile "$TASK_DEPLOYMENT/work/finetuned-f16.gguf" --outtype f16 \
+    --use-temp-file "$TASK_DEPLOYMENT/work/merged-hf" \
+    2>&1 | tee "$TASK_DEPLOYMENT/finetuned-convert.log"
+  "$TASK_QUANTIZER_ROOT/llama-quantize" \
+    "$TASK_DEPLOYMENT/work/finetuned-f16.gguf" \
+    "$TASK_DEPLOYMENT/finetuned-q4_k_m.gguf" Q4_K_M \
+    2>&1 | tee "$TASK_DEPLOYMENT/finetuned-quantize.log"
+  test -s "$TASK_DEPLOYMENT/finetuned-q4_k_m.gguf"
+  test "$TASK_DEPLOYMENT/work/merged-hf" = \
+    "$TASK_ROOT/deployments/$TASK_ATTEMPT_ID/work/merged-hf"
+  rm -rf -- "$TASK_DEPLOYMENT/work/merged-hf"
+  rm -f -- "$TASK_DEPLOYMENT/work/finetuned-f16.gguf"
+fi
+rmdir "$TASK_DEPLOYMENT/work"
+
+"$TASK_CONVERSION_PYTHON" \
+  "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" write-operations \
+  --contract "$TASK_CONVERSION_TOOLS/contracts/conversion-tool-contract-v1.json" \
+  --tool-bundle "$TASK_CONVERSION_TOOLS" \
+  --output "$TASK_DEPLOYMENT" \
+  --training-receipt "$TASK_FORMAL_OUTPUT/training-receipt.json" \
+  --route "$TASK_ROUTE" \
+  --base-snapshot "$TASK_BASE_DIR" \
+  --formal-output "$TASK_FORMAL_OUTPUT" \
+  --conversion-python "$TASK_CONVERSION_PYTHON" \
+  --training-python "$TASK_TRAINING_PYTHON"
 ```
 
-Do not upload the bundle, train projection, any dataset, validation/holdout,
-seed material or per-sample outputs. If quota or `$0` cost cannot be confirmed,
-skip HF entirely and retain the locally verified copy.
+Create the exact route manifest and receipt. Hashing is streamed in 1 MiB
+chunks, so multi-gigabyte GGUFs are never read into memory at once. The receipt
+binds the already-completed training receipt and its adapter tree.
+
+```bash
+set -euo pipefail
+umask 077
+. "$TASK_ROOT/conversion-venv/bin/activate"
+python - "$TASK_DEPLOYMENT" "$TASK_ROUTE" <<'PY'
+import importlib.metadata as metadata
+import json
+import pathlib
+import platform
+import sys
+import torch
+
+output = pathlib.Path(sys.argv[1])
+route = sys.argv[2]
+names = ("numpy", "sentencepiece", "transformers", "protobuf",
+         "huggingface-hub", "safetensors", "tqdm", "PyYAML", "requests")
+value = {
+    "schema_version": 1,
+    "version": "rondo_local_approval_l6_conversion_dependency_identity_v1",
+    "packages": {name: metadata.version(name) for name in names},
+    "python": platform.python_version(),
+    "torch": torch.__version__,
+    "cuda": torch.version.cuda,
+    "container_image": "runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404",
+    "route": route,
+}
+(output / "conversion-dependency-identity.json").write_text(
+    json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+)
+PY
+
+python - "$TASK_DEPLOYMENT" "$TASK_CONVERSION_TOOLS" "$TASK_ROUTE" \
+  "$TASK_FORMAL_OUTPUT/training-receipt.json" <<'PY'
+import hashlib
+import json
+import os
+import pathlib
+import stat
+import sys
+
+output = pathlib.Path(sys.argv[1])
+tools = pathlib.Path(sys.argv[2])
+route = sys.argv[3]
+training_path = pathlib.Path(sys.argv[4])
+contract_raw = (tools / "contracts/conversion-tool-contract-v1.json").read_bytes()
+contract = json.loads(contract_raw)
+allowed = set(contract["output_allowlists"][route])
+
+def identity(path):
+    info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise SystemExit(f"non_regular_conversion_output:{path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return {"size_bytes": info.st_size, "sha256": digest.hexdigest()}
+
+observed = {
+    path.relative_to(output).as_posix()
+    for path in output.rglob("*") if not path.is_dir()
+}
+expected = allowed - {"conversion-files-manifest.json", "conversion-receipt.json"}
+if observed != expected:
+    raise SystemExit("conversion_output_allowlist_mismatch")
+files = {name: identity(output / name) for name in sorted(observed)}
+manifest = {
+    "schema_version": 1,
+    "version": "rondo_local_approval_l6_conversion_files_v1",
+    "route": route,
+    "files": files,
+}
+manifest_raw = (
+    json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+).encode()
+(output / "conversion-files-manifest.json").write_bytes(manifest_raw)
+training_raw = training_path.read_bytes()
+training = json.loads(training_raw)
+receipt = {
+    "schema_version": 1,
+    "version": "rondo_local_approval_l6_conversion_receipt_v1",
+    "status": "completed",
+    "route": route,
+    "base_model": contract["base_model"],
+    "quantization": "Q4_K_M",
+    "source_adapter_tree_sha256": training["artifacts"]["adapter"]["tree_sha256"],
+    "training_receipt_sha256": hashlib.sha256(training_raw).hexdigest(),
+    "conversion_contract_sha256": hashlib.sha256(contract_raw).hexdigest(),
+    "tool_bundle_manifest_sha256": hashlib.sha256(
+        (tools / "conversion-tool-bundle-manifest.json").read_bytes()
+    ).hexdigest(),
+    "dependency_identity_sha256": files["conversion-dependency-identity.json"]["sha256"],
+    "operations_sha256": files["conversion-operations.json"]["sha256"],
+    "files_manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
+    "deployed_outputs": {
+        name: files[name] for name in sorted(files) if name.endswith(".gguf")
+    },
+    "temporary_f16_and_merged_hf_removed": True,
+}
+(output / "conversion-receipt.json").write_text(
+    json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+)
+PY
+chmod 600 "$TASK_DEPLOYMENT"/*.json "$TASK_DEPLOYMENT"/*.log \
+  "$TASK_DEPLOYMENT"/*.gguf \
+  "$TASK_DEPLOYMENT/tooling/convert_hf_to_gguf.py"
+if test "$TASK_ROUTE" = adapter_on_off; then
+  chmod 600 "$TASK_DEPLOYMENT/tooling/convert_lora_to_gguf.py"
+else
+  chmod 600 "$TASK_DEPLOYMENT/tooling/merge_adapter.py"
+fi
+chmod 700 "$TASK_DEPLOYMENT/tooling/llama-quantize"
+python "$TASK_CONVERSION_TOOLS/bin/conversion_tooling.py" verify-output \
+  --contract "$TASK_CONVERSION_TOOLS/contracts/conversion-tool-contract-v1.json" \
+  --tool-bundle "$TASK_CONVERSION_TOOLS" \
+  --output "$TASK_DEPLOYMENT" \
+  --training-receipt "$TASK_FORMAL_OUTPUT/training-receipt.json"
+test "$(df -B1 --output=avail /workspace | tail -n1 | tr -d ' ')" \
+  -ge 20000000000
+```
+
+Recover deployment artifacts separately and run the same streaming verifier on
+the local copy before Pod deletion:
+
+```bash
+set -euo pipefail
+TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_RECOVERY-deployment"
+test ! -e "$TASK_LOCAL_DEPLOYMENT"
+install -d -m 700 "$TASK_LOCAL_DEPLOYMENT"
+scp -r -o IdentitiesOnly=yes -i "$TASK_SSH_KEY" \
+  -P "$TASK_SSH_PORT" \
+  root@"$TASK_SSH_HOST":/workspace/rondo-l6/deployments/"$TASK_ATTEMPT_ID"/. \
+  "$TASK_LOCAL_DEPLOYMENT"/
+cd "$TASK_WORKTREE"
+PYTHONDONTWRITEBYTECODE=1 python3 -B \
+  training/local-approval-l6/conversion_tooling.py verify-output \
+  --contract training/local-approval-l6/conversion-tool-contract-v1.json \
+  --tool-bundle "$TASK_CONVERSION_TOOL_BUNDLE" \
+  --output "$TASK_LOCAL_DEPLOYMENT" \
+  --training-receipt "$TASK_LOCAL_RECOVERY/training-receipt.json"
+sha256sum "$TASK_LOCAL_DEPLOYMENT/conversion-files-manifest.json" \
+  "$TASK_LOCAL_DEPLOYMENT/conversion-receipt.json"
+```
+
+No HF repo is planned or created in this run. The account-level private quota
+can be queried, but remaining byte-level quota for this exact upload cannot be
+confirmed, so the required `$0` incremental-cost gate is not satisfied. Keep
+the locally verified copies and do not run any `hf repos create` or `hf upload`
+command. A future, separately authorized mirror must first add an exact staging
+allowlist/verifier for only the selected adapter/checkpoint or GGUF, actual
+configuration/dependency identities, aggregate metrics, manifests and receipts.
+It must reject logs, tool source/binaries, datasets, projections and per-sample
+outputs before any remote mutation; enabling PRO, pay-as-you-go or another paid
+feature remains forbidden without its own authorization.
 
 ## J. Delete the task Pod and confirm zero live objects
 
-Only after local verification (and optional separately authorized HF mirror)
-succeeds, delete the Pod. This permanently removes its Pod volume.
+After both local training and deployment verification succeed, delete the Pod
+immediately; do not keep it billed after the verified local recovery.
+Deletion permanently removes its Pod volume.
 
 ```bash
 runpodctl pod delete "$TASK_POD_ID"
@@ -544,6 +908,263 @@ current spend per hour returned to its pre-task value, final task cost did not
 exceed `$12`, and the local artifact manifest still verifies. Record the final
 billing result and deleted Pod ID in the stage-2 handoff without recording any
 credential.
+
+Now materialize the selected deployment pair beside the two verified local
+downloads using same-filesystem hard links. This avoids duplicating the 5-12 GB
+GGUF payload while keeping both recovered manifests immutable. Retain the
+source directory with the private evidence: the locator rehashes every source
+object on each use.
+
+```bash
+set -euo pipefail
+umask 077
+TASK_WORKTREE=/home/sjc/desktop/RONDO/.claude/worktrees/037-l6-first-lora-paired-artifacts
+TASK_LOCAL_RECOVERY='/home/sjc/desktop/RONDO/eval-data/local-approval/l6/plan037-stage2/<FORMAL_RUN_ID>'
+TASK_LOCAL_DEPLOYMENT="$TASK_LOCAL_RECOVERY-deployment"
+TASK_PAIR_ROOT="$TASK_LOCAL_RECOVERY-pair"
+TASK_PAIR_SOURCE="$TASK_PAIR_ROOT/source"
+TASK_PAIR_PRIVATE="$TASK_PAIR_ROOT/private"
+TASK_PAIR_RUN="$TASK_PAIR_ROOT/journal"
+TASK_PAIR_ID='l6-plan037-<FORMAL_RUN_ID_NORMALIZED>'
+TASK_C_AVAILABLE_BYTES="$(df -B1 --output=avail /mnt/c | tail -n1 | tr -d ' ')"
+test "$TASK_C_AVAILABLE_BYTES" -ge 85899345920
+if pgrep -x cargo >/dev/null || pgrep -x rustc >/dev/null; then
+  echo 'refuse: heavy Cargo work is active' >&2
+  exit 2
+fi
+TASK_RUNNING_CONTAINERS="$(docker container ls -q)"
+if test -n "$TASK_RUNNING_CONTAINERS"; then
+  echo 'refuse: a Docker container is active' >&2
+  exit 2
+fi
+if pgrep -x llama-server >/dev/null; then
+  echo 'refuse: another local model server is active' >&2
+  exit 2
+fi
+TASK_BUILD_LOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/rondo-cargo-build.lock"
+command -v flock >/dev/null
+test ! -L "$TASK_BUILD_LOCK"
+if test -e "$TASK_BUILD_LOCK"; then test -O "$TASK_BUILD_LOCK"; fi
+exec 9>"$TASK_BUILD_LOCK"
+if ! flock -n 9; then
+  echo 'refuse: heavy Cargo build lock is held' >&2
+  exit 2
+fi
+test ! -e "$TASK_PAIR_ROOT"
+install -d -m 700 "$TASK_PAIR_SOURCE" "$TASK_PAIR_PRIVATE" "$TASK_PAIR_RUN"
+
+cd "$TASK_WORKTREE"
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B - \
+  "$TASK_LOCAL_RECOVERY" "$TASK_LOCAL_DEPLOYMENT" "$TASK_PAIR_SOURCE" <<'PY'
+import json
+import os
+import pathlib
+import shutil
+import sys
+
+from rondo_eval.local_approval import cross_eval, paired_outputs
+
+recovery = pathlib.Path(sys.argv[1])
+deployment = pathlib.Path(sys.argv[2])
+target = pathlib.Path(sys.argv[3])
+receipt = json.loads((recovery / "training-receipt.json").read_text())
+conversion = json.loads((deployment / "conversion-receipt.json").read_text())
+route = conversion["route"]
+if route not in {"adapter_on_off", "paired_gguf"}:
+    raise SystemExit("deployment_route_invalid")
+
+shutil.copy2(recovery / "training-receipt.json", target / "training-receipt.json")
+shutil.copytree(
+    recovery / receipt["output_paths"]["adapter"],
+    target / receipt["output_paths"]["adapter"],
+    copy_function=os.link,
+)
+selected = {
+    "base-q4_k_m.gguf",
+    "conversion-operations.json",
+    "tooling/llama-quantize",
+}
+selected.add(
+    "adapter-f16.gguf" if route == "adapter_on_off"
+    else "finetuned-q4_k_m.gguf"
+)
+for relative_name in sorted(selected):
+    source = deployment / relative_name
+    destination = target / "deployment" / relative_name
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.link(source, destination)
+
+adapter_tree = receipt["artifacts"]["adapter"]["tree_sha256"]
+converter = target / "deployment/conversion-operations.json"
+quantizer = target / "deployment/tooling/llama-quantize"
+base_gguf = target / "deployment/base-q4_k_m.gguf"
+static_manifest = target / "local-static.deployment.json"
+ft_manifest = target / "local-ft-static.deployment.json"
+static = paired_outputs.build_b10333_deployment_manifest(
+    deployment_id="plan037-local-static",
+    manifest_path=static_manifest,
+    deployment_mode=route,
+    side="local-static",
+    model_gguf=base_gguf,
+    converter=converter,
+    quantizer=quantizer,
+    quantization="Q4_K_M",
+)
+ft = paired_outputs.build_b10333_deployment_manifest(
+    deployment_id="plan037-local-ft-static",
+    manifest_path=ft_manifest,
+    deployment_mode=route,
+    side="local-ft-static",
+    model_gguf=(
+        base_gguf if route == "adapter_on_off"
+        else target / "deployment/finetuned-q4_k_m.gguf"
+    ),
+    converter=converter,
+    quantizer=quantizer,
+    quantization="Q4_K_M",
+    deployed_adapter_files=(
+        {"plan037-lora": target / "deployment/adapter-f16.gguf"}
+        if route == "adapter_on_off" else None
+    ),
+    source_adapter_tree_sha256=adapter_tree,
+)
+cross_eval._write_exclusive(
+    static_manifest, cross_eval._json_file_bytes(static), mode=0o600
+)
+cross_eval._write_exclusive(
+    ft_manifest, cross_eval._json_file_bytes(ft), mode=0o600
+)
+PY
+
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
+  -m rondo_eval.local_approval.l6_b10333_pair prepare-evidence \
+  --pair-id "$TASK_PAIR_ID" \
+  --base-model training/local-approval-l6/model-contract-v1.json \
+  --local-static-deployment "$TASK_PAIR_SOURCE/local-static.deployment.json" \
+  --local-ft-deployment "$TASK_PAIR_SOURCE/local-ft-static.deployment.json" \
+  --training-receipt "$TASK_PAIR_SOURCE/training-receipt.json" \
+  --runtime-lock eval/locks/llama-cpp-b10333-cuda-linux-x64.json \
+  --chat-template eval/templates/local-approval/ministral-3-8b-instruct-2512-chat-template.jinja \
+  --pair-contract eval/templates/cross-eval-judge/local-m4-l6-pair-contract-v1.json \
+  --blind-identity-marker artifact-037-a \
+  --blind-identity-marker artifact-037-b \
+  --private-dir "$TASK_PAIR_PRIVATE"
+```
+
+Verify the frozen CUDA runtime, display the exact server commands, then run the
+separate deterministic two-sample structural smoke. Its status is `passed`
+only when each side yields at least one real decision; typed structured-output,
+timeout or refusal terminals stay honest in the 0600 receipt. It never writes
+the formal journal and never selects a recipe or checkpoint.
+
+```bash
+set -euo pipefail
+TASK_PAIR_EVIDENCE="$TASK_PAIR_PRIVATE/l6-pair-evidence.json"
+TASK_RUNTIME_BINARY=/home/sjc/desktop/RONDO/eval-data/tools/llama-b10333-cuda-linux-x64/llama-server
+TASK_PAIR_PORT=18437
+test "$(sha256sum eval/locks/llama-cpp-b10333-cuda-linux-x64.json | cut -d' ' -f1)" \
+  = 299440bb261f9dbc6641e81fa995ca88af84e4e05530978fe9c46a9716107b75
+test "$(sha256sum "$TASK_RUNTIME_BINARY" | cut -d' ' -f1)" \
+  = 97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd
+if ss -H -ltn "sport = :$TASK_PAIR_PORT" | grep -q .; then
+  echo 'refuse: selected loopback port is already listening' >&2
+  exit 2
+fi
+
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
+  -m rondo_eval.local_approval.l6_b10333_pair show-commands \
+  --worktree-root "$TASK_WORKTREE" \
+  --pair-evidence-source "$TASK_PAIR_EVIDENCE" \
+  --runtime-binary "$TASK_RUNTIME_BINARY" --port "$TASK_PAIR_PORT"
+TASK_SMOKE_RESULT="$(PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
+  -m rondo_eval.local_approval.l6_b10333_pair smoke \
+  --worktree-root "$TASK_WORKTREE" \
+  --pair-evidence-source "$TASK_PAIR_EVIDENCE" \
+  --runtime-binary "$TASK_RUNTIME_BINARY" --port "$TASK_PAIR_PORT" \
+  --private-dir "$TASK_PAIR_PRIVATE" --sample-count 2)"
+printf '%s\n' "$TASK_SMOKE_RESULT"
+printf '%s\n' "$TASK_SMOKE_RESULT" | jq -e '.status == "passed"'
+```
+
+Only after that gate, run 130 inputs × 2 local models = 260 new local
+attempts. Assembly adds the existing 130 Sol-side rows, so the canonical import
+contains exactly 390 rows. The two model servers run serially, and `run`
+performs formal import verification internally; the explicit command repeats
+that check.
+
+```bash
+set -euo pipefail
+TASK_PAIR_RESULT="$(PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
+  -m rondo_eval.local_approval.l6_b10333_pair run \
+  --worktree-root "$TASK_WORKTREE" \
+  --pair-evidence-source "$TASK_PAIR_EVIDENCE" \
+  --runtime-binary "$TASK_RUNTIME_BINARY" --port "$TASK_PAIR_PORT" \
+  --run-dir "$TASK_PAIR_RUN" --private-dir "$TASK_PAIR_PRIVATE")"
+printf '%s\n' "$TASK_PAIR_RESULT"
+printf '%s\n' "$TASK_PAIR_RESULT" \
+  | jq -e '.status == "complete" and .side_output_count == 390'
+
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
+  -m rondo_eval.local_approval.cross_eval verify-import \
+  --worktree-root "$TASK_WORKTREE" \
+  --outputs "$TASK_PAIR_PRIVATE/three-side-outputs.jsonl" \
+  --pair-receipt "$TASK_PAIR_PRIVATE/l6-pair-receipt.json" \
+  --pair-evidence "$TASK_PAIR_PRIVATE/l6-pair-evidence.json" \
+  | tee "$TASK_PAIR_PRIVATE/verify-import-result.json"
+test "$(wc -l < "$TASK_PAIR_PRIVATE/three-side-outputs.jsonl")" -eq 390
+chmod 600 "$TASK_PAIR_PRIVATE/verify-import-result.json"
+sha256sum "$TASK_PAIR_PRIVATE/three-side-outputs.jsonl" \
+  "$TASK_PAIR_PRIVATE/l6-pair-receipt.json" \
+  "$TASK_PAIR_PRIVATE/l6-pair-evidence.json"
+flock -u 9
+exec 9>&-
+```
+
+If unexpected infrastructure interruption leaves one dangling journal
+attempt, do not relabel it as a model terminal. Resolve exactly that attempt,
+then rerun the exact `run` and `verify-import` commands; completed attempts are
+reused:
+
+```bash
+set -euo pipefail
+TASK_BUILD_LOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/rondo-cargo-build.lock"
+command -v flock >/dev/null
+test ! -L "$TASK_BUILD_LOCK"
+if test -e "$TASK_BUILD_LOCK"; then test -O "$TASK_BUILD_LOCK"; fi
+exec 9>"$TASK_BUILD_LOCK"
+if ! flock -n 9; then
+  echo 'refuse: heavy Cargo build lock is held' >&2
+  exit 2
+fi
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=eval python3 -B \
+  -m rondo_eval.local_approval.l6_b10333_pair resolve-interrupted \
+  --worktree-root "$TASK_WORKTREE" \
+  --pair-evidence-source "$TASK_PAIR_EVIDENCE" \
+  --run-dir "$TASK_PAIR_RUN" \
+  --failure-code '<TASK_SPECIFIC_INFRASTRUCTURE_FAILURE_CODE>'
+```
+
+Keep FD 9 held while rerunning the exact formal `run` and `verify-import`
+commands above; their successful tail releases it. If recovery exits early,
+the shell closing releases the lock without relabeling the interrupted attempt.
+
+The runner owns and stops its two task processes. Require the port to be idle;
+do not kill unrelated processes. Keep `source/`, `private/` and `journal/`
+together as the verifiable pair evidence. Pod deletion already removed the
+remote cache, temporary F16/merged weights, venvs and transferred bundles.
+
+```bash
+if ss -H -ltn "sport = :$TASK_PAIR_PORT" | grep -q .; then
+  echo 'refuse completion: task llama-server still listening' >&2
+  exit 2
+fi
+if pgrep -x llama-server >/dev/null; then
+  echo 'refuse completion: a llama-server process remains' >&2
+  exit 2
+fi
+nvidia-smi
+du -sh "$TASK_PAIR_ROOT" "$TASK_LOCAL_RECOVERY" "$TASK_LOCAL_DEPLOYMENT"
+```
 
 Official command references: [RunPod Pod CLI](https://docs.runpod.io/runpodctl/reference/runpodctl-pod),
 [RunPod SSH](https://docs.runpod.io/pods/configuration/use-ssh),

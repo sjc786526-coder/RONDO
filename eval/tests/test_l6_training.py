@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
 import os
 import re
@@ -15,6 +16,16 @@ from rondo_eval.local_approval import l6_training
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = EVAL_ROOT.parent
+
+_CONVERSION_TOOL_PATH = (
+    REPO_ROOT / "training/local-approval-l6/conversion_tooling.py"
+)
+_CONVERSION_TOOL_SPEC = importlib.util.spec_from_file_location(
+    "plan037_conversion_tooling", _CONVERSION_TOOL_PATH
+)
+assert _CONVERSION_TOOL_SPEC is not None and _CONVERSION_TOOL_SPEC.loader is not None
+conversion_tooling = importlib.util.module_from_spec(_CONVERSION_TOOL_SPEC)
+_CONVERSION_TOOL_SPEC.loader.exec_module(conversion_tooling)
 
 
 def _dependency_identity(recipe: dict, *, status: str) -> dict:
@@ -693,6 +704,566 @@ class ReceiptAndArtifactTests(unittest.TestCase):
                 persistence_revision="volume-fixture",
             )
         self.assertFalse((output / "training-receipt.json").exists())
+
+
+class ConversionToolContractTests(unittest.TestCase):
+    def test_contract_is_body_free_and_binds_b10333_tools_and_both_routes(self) -> None:
+        contract_path = (
+            REPO_ROOT
+            / "training/local-approval-l6/conversion-tool-contract-v1.json"
+        )
+        contract, _raw = conversion_tooling._load_contract(contract_path)
+        self.assertEqual(contract["llama_cpp_source"]["release"], "b10333")
+        self.assertEqual(
+            contract["llama_cpp_source"]["commit"],
+            "08659901c43b51de735740f1cf61bb82fbe0c4e4",
+        )
+        self.assertEqual(
+            contract["llama_cpp_source"]["top_level_files"]
+            ["convert_hf_to_gguf.py"]["sha256"],
+            "e38975e1c68d98ac1664dfd530616eb35c72294382a4dd873d4746b23f27779f",
+        )
+        self.assertEqual(
+            contract["llama_cpp_source"]["top_level_files"]
+            ["convert_lora_to_gguf.py"]["sha256"],
+            "3c5f109f3d7a5ef530ea388d8e994512df6f544ce1aa8b2e39be446223637b93",
+        )
+        self.assertEqual(
+            contract["quantizer_runtime"]["regular_files"]["llama-quantize"]
+            ["sha256"],
+            "6ea852917cc1ef724faf1cb612c2ca50c5963321acc86af51a91224d15aa7e3a",
+        )
+        self.assertEqual(
+            contract["local_inference_runtime"]["llama_server_sha256"],
+            "97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd",
+        )
+        merge_path = REPO_ROOT / "training/local-approval-l6/merge_adapter.py"
+        self.assertEqual(
+            contract["merge_builder"],
+            {
+                "package_path": "bin/merge_adapter.py",
+                "sha256": conversion_tooling._sha256(merge_path.read_bytes()),
+                "size_bytes": merge_path.stat().st_size,
+            },
+        )
+        self.assertEqual(
+            set(contract["output_allowlists"]),
+            {"adapter_on_off", "paired_gguf"},
+        )
+        self.assertTrue(
+            all(
+                "conversion-operations.json" in allowlist
+                for allowlist in contract["output_allowlists"].values()
+            )
+        )
+        self.assertTrue(
+            all(value is False for value in contract["boundaries"].values())
+        )
+        serialized = json.dumps(contract, sort_keys=True).lower()
+        self.assertNotIn("validation.jsonl", serialized)
+        self.assertNotIn("train-projection", serialized)
+
+    def test_actual_ignored_b10333_sources_match_contract_when_installed(self) -> None:
+        common_root = REPO_ROOT.parents[2]
+        source_root = (
+            common_root / "eval-data/sources/llama.cpp-b10333-08659901"
+        )
+        quantizer_root = common_root / "eval-data/tools/llama-b10333"
+        if not source_root.is_dir() or not quantizer_root.is_dir():
+            self.skipTest("ignored b10333 tooling is not installed")
+        result = conversion_tooling.verify_sources(
+            REPO_ROOT
+            / "training/local-approval-l6/conversion-tool-contract-v1.json",
+            source_root,
+            quantizer_root,
+        )
+        self.assertEqual(result["status"], "verified")
+
+    def test_conversion_operations_cover_each_route_and_actual_tool(self) -> None:
+        common = {
+            "tool_bundle": "/workspace/rondo-l6/conversion-tool-bundle",
+            "deployment": "/workspace/rondo-l6/deployments/attempt-01",
+            "base_snapshot": "/workspace/rondo-l6/hf-home/hub/base",
+            "formal_output": "/workspace/rondo-l6/runs/attempt-01/formal",
+            "conversion_python": "/workspace/rondo-l6/conversion-venv/bin/python",
+            "training_python": "/workspace/rondo-l6/venv/bin/python",
+        }
+        adapter = conversion_tooling._steps_for_operations(
+            "adapter_on_off", **common
+        )
+        paired = conversion_tooling._steps_for_operations("paired_gguf", **common)
+        self.assertEqual(
+            [step["name"] for step in adapter],
+            ["base_hf_to_f16", "base_quantize_q4_k_m", "adapter_to_f16"],
+        )
+        self.assertEqual(
+            [step["name"] for step in paired],
+            [
+                "base_hf_to_f16",
+                "base_quantize_q4_k_m",
+                "merge_adapter_into_base",
+                "finetuned_hf_to_f16",
+                "finetuned_quantize_q4_k_m",
+            ],
+        )
+        self.assertEqual(paired[2]["tool"], "merge_adapter")
+        self.assertEqual(
+            paired[2]["argv"][1],
+            "/workspace/rondo-l6/deployments/attempt-01/tooling/merge_adapter.py",
+        )
+
+    def test_tool_bundle_manifest_rejects_unknown_or_changed_body(self) -> None:
+        contract_source = (
+            REPO_ROOT
+            / "training/local-approval-l6/conversion-tool-contract-v1.json"
+        )
+        common_root = REPO_ROOT.parents[2]
+        source_root = (
+            common_root / "eval-data/sources/llama.cpp-b10333-08659901"
+        )
+        quantizer_root = common_root / "eval-data/tools/llama-b10333"
+        if not source_root.is_dir() or not quantizer_root.is_dir():
+            self.skipTest("ignored b10333 tooling is not installed")
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "bundle"
+            conversion_tooling.prepare_package(
+                contract_source,
+                source_root,
+                quantizer_root,
+                bundle,
+            )
+            self.assertEqual(
+                conversion_tooling.verify_package(bundle)["status"], "verified"
+            )
+            (bundle / "unknown.bin").write_bytes(b"unknown")
+            manifest_path = bundle / conversion_tooling.MANIFEST_NAME
+            manifest = json.loads(manifest_path.read_text())
+            manifest["files"] = conversion_tooling._package_entries(bundle)
+            manifest_path.write_bytes(conversion_tooling._pretty_bytes(manifest))
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "tool_bundle_allowlist_mismatch",
+            ):
+                conversion_tooling.verify_package(bundle)
+
+    def test_verify_output_streams_exact_route_and_training_binding(self) -> None:
+        contract_path = (
+            REPO_ROOT
+            / "training/local-approval-l6/conversion-tool-contract-v1.json"
+        )
+        contract_raw = contract_path.read_bytes()
+        contract = json.loads(contract_raw)
+        common_root = REPO_ROOT.parents[2]
+        source_root = common_root / "eval-data/sources/llama.cpp-b10333-08659901"
+        quantizer_root = common_root / "eval-data/tools/llama-b10333"
+        if not source_root.is_dir() or not quantizer_root.is_dir():
+            self.skipTest("ignored b10333 tooling is not installed")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = root / "tool-bundle"
+            conversion_tooling.prepare_package(
+                contract_path, source_root, quantizer_root, bundle
+            )
+            output = root / "deployment"
+            output.mkdir()
+            training_path = root / "training-receipt.json"
+            model_contract = json.loads(
+                (REPO_ROOT / "training/local-approval-l6/model-contract-v1.json")
+                .read_text()
+            )
+            dependency_identity = {
+                "schema_version": 1,
+                "status": "stage2_final_frozen",
+                "packages": {
+                    name: "fixture"
+                    for name in (
+                        "torch",
+                        "transformers",
+                        "peft",
+                        "trl",
+                        "accelerate",
+                        "bitsandbytes",
+                        "safetensors",
+                    )
+                },
+                "python_version": "3.11.13",
+                "cuda_version": "12.8",
+                "container_image": contract["conversion_environment"]
+                ["container_image"],
+            }
+            adapter_files = {
+                "adapter_model.safetensors": {
+                    "bytes": 7,
+                    "sha256": "d" * 64,
+                }
+            }
+            adapter_tree = conversion_tooling._sha256(
+                conversion_tooling._canonical_bytes(adapter_files)
+            )
+            training = {
+                "schema_version": 1,
+                "version": "rondo_local_approval_l6_training_receipt_v1",
+                "status": "completed",
+                "run_kind": "formal",
+                "base": model_contract,
+                "train": {
+                    "records": 470,
+                    "source_train_jsonl_sha256": conversion_tooling.TRAIN_SHA256,
+                    "source_dataset_manifest_sha256": (
+                        conversion_tooling.DATASET_MANIFEST_SHA256
+                    ),
+                    "projection_sha256": (
+                        conversion_tooling.TRAIN_PROJECTION_SHA256
+                    ),
+                    "completion_only": True,
+                },
+                "token_census": {
+                    "status": "complete",
+                    "exact": True,
+                    "records": 470,
+                    "projection_sha256": (
+                        conversion_tooling.TRAIN_PROJECTION_SHA256
+                    ),
+                    "truncation": False,
+                    "packing": False,
+                    "tokenizer": {
+                        "repo": contract["formal_training"]["tokenizer_repo"],
+                        "revision": contract["formal_training"]
+                        ["tokenizer_revision"],
+                        "chat_template_sha256": contract["formal_training"]
+                        ["chat_template_sha256"],
+                    },
+                    "sequence_tokens": {"limit": 4096, "over_limit": 0},
+                    "completion_only": {
+                        "records_with_all_prompt_labels_masked": 470,
+                        "records_with_unmasked_completion": 470,
+                    },
+                },
+                "recipe_sha256": "a" * 64,
+                "dependencies": {
+                    "identity": dependency_identity,
+                    "identity_sha256": conversion_tooling._sha256(
+                        conversion_tooling._pretty_bytes(dependency_identity)
+                    ),
+                },
+                "cost": {"provider": "runpod", "actual_usd": "0.25"},
+                "provider": {
+                    "name": "runpod",
+                    "job_id": "fixture",
+                    "run_id": "formal-fixture",
+                },
+                "persistence": {
+                    "kind": "local_download",
+                    "revision": "sha256:fixture",
+                },
+                "reload_receipt_sha256": "b" * 64,
+                "hardware": {"name": "A40", "cuda": "12.8"},
+                "metrics": {
+                    "global_step": 2,
+                    "actual_epochs": 1.0,
+                    "train_loss": 1.0,
+                },
+                "output_paths": {
+                    "adapter": "adapter-final",
+                    "checkpoints": "checkpoints",
+                },
+                "artifacts": {
+                    "adapter": {
+                        "files": adapter_files,
+                        "tree_sha256": adapter_tree,
+                    },
+                    "checkpoints": {"files": {}, "tree_sha256": "c" * 64},
+                },
+                "bundle_manifest_sha256": "e" * 64,
+            }
+            training_raw = conversion_tooling._pretty_bytes(training)
+            training_path.write_bytes(training_raw)
+            route = "adapter_on_off"
+            body_paths = set(contract["output_allowlists"][route]) - {
+                "conversion-files-manifest.json",
+                "conversion-receipt.json",
+                "conversion-operations.json",
+            }
+            for relative_name in body_paths:
+                path = output / relative_name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tool_source = {
+                    "tooling/convert_hf_to_gguf.py": (
+                        bundle / "tools/llama.cpp/convert_hf_to_gguf.py"
+                    ),
+                    "tooling/convert_lora_to_gguf.py": (
+                        bundle / "tools/llama.cpp/convert_lora_to_gguf.py"
+                    ),
+                    "tooling/llama-quantize": (
+                        bundle / "tools/llama-b10333-cpu/llama-quantize"
+                    ),
+                }.get(relative_name)
+                if tool_source is not None:
+                    shutil.copy2(tool_source, path)
+                elif relative_name == "conversion-dependency-identity.json":
+                    dependency = {
+                        "schema_version": 1,
+                        "version": (
+                            "rondo_local_approval_l6_conversion_dependency_identity_v1"
+                        ),
+                        "packages": conversion_tooling._dependency_pins(
+                            bundle / "contracts/conversion-dependencies-v1.txt"
+                        ),
+                        "python": "3.11.13",
+                        "torch": "2.8.0+cu128",
+                        "cuda": "12.8",
+                        "container_image": contract["conversion_environment"]
+                        ["container_image"],
+                        "route": route,
+                    }
+                    path.write_bytes(conversion_tooling._pretty_bytes(dependency))
+                else:
+                    path.write_bytes(f"fixture:{relative_name}\n".encode())
+            conversion_tooling.write_operations(
+                contract_path,
+                bundle,
+                output,
+                training_path,
+                route=route,
+                base_snapshot=root / "base-snapshot",
+                formal_output=root / "formal",
+                conversion_python=root / "conversion-venv/bin/python",
+                training_python=root / "venv/bin/python",
+            )
+            body_paths.add("conversion-operations.json")
+            files = {
+                name: conversion_tooling._stream_identity(output / name)
+                for name in sorted(body_paths)
+            }
+            manifest = {
+                "schema_version": 1,
+                "version": "rondo_local_approval_l6_conversion_files_v1",
+                "route": route,
+                "files": files,
+            }
+            manifest_raw = conversion_tooling._pretty_bytes(manifest)
+            (output / "conversion-files-manifest.json").write_bytes(manifest_raw)
+            receipt = {
+                "schema_version": 1,
+                "version": "rondo_local_approval_l6_conversion_receipt_v1",
+                "status": "completed",
+                "route": route,
+                "base_model": contract["base_model"],
+                "quantization": "Q4_K_M",
+                "source_adapter_tree_sha256": adapter_tree,
+                "training_receipt_sha256": conversion_tooling._sha256(training_raw),
+                "conversion_contract_sha256": conversion_tooling._sha256(contract_raw),
+                "tool_bundle_manifest_sha256": conversion_tooling.verify_package(
+                    bundle
+                )["manifest_sha256"],
+                "dependency_identity_sha256": files[
+                    "conversion-dependency-identity.json"
+                ]["sha256"],
+                "operations_sha256": files["conversion-operations.json"][
+                    "sha256"
+                ],
+                "files_manifest_sha256": conversion_tooling._sha256(manifest_raw),
+                "deployed_outputs": {
+                    name: files[name]
+                    for name in sorted(files)
+                    if name.endswith(".gguf")
+                },
+                "temporary_f16_and_merged_hf_removed": True,
+            }
+            (output / "conversion-receipt.json").write_bytes(
+                conversion_tooling._pretty_bytes(receipt)
+            )
+
+            def rewrite_envelopes() -> None:
+                refreshed = {
+                    name: conversion_tooling._stream_identity(output / name)
+                    for name in sorted(body_paths)
+                }
+                refreshed_manifest = {
+                    "schema_version": 1,
+                    "version": "rondo_local_approval_l6_conversion_files_v1",
+                    "route": route,
+                    "files": refreshed,
+                }
+                refreshed_manifest_raw = conversion_tooling._pretty_bytes(
+                    refreshed_manifest
+                )
+                (output / "conversion-files-manifest.json").write_bytes(
+                    refreshed_manifest_raw
+                )
+                receipt["dependency_identity_sha256"] = refreshed[
+                    "conversion-dependency-identity.json"
+                ]["sha256"]
+                receipt["operations_sha256"] = refreshed[
+                    "conversion-operations.json"
+                ]["sha256"]
+                receipt["files_manifest_sha256"] = conversion_tooling._sha256(
+                    refreshed_manifest_raw
+                )
+                receipt["deployed_outputs"] = {
+                    name: refreshed[name]
+                    for name in sorted(refreshed)
+                    if name.endswith(".gguf")
+                }
+                (output / "conversion-receipt.json").write_bytes(
+                    conversion_tooling._pretty_bytes(receipt)
+                )
+
+            self.assertEqual(
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )["route"],
+                route,
+            )
+            receipt["tool_bundle_manifest_sha256"] = "f" * 64
+            (output / "conversion-receipt.json").write_bytes(
+                conversion_tooling._pretty_bytes(receipt)
+            )
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "deployment_receipt_mismatch",
+            ):
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )
+            receipt["tool_bundle_manifest_sha256"] = (
+                conversion_tooling.verify_package(bundle)["manifest_sha256"]
+            )
+            (output / "conversion-receipt.json").write_bytes(
+                conversion_tooling._pretty_bytes(receipt)
+            )
+
+            malformed_training = copy.deepcopy(training)
+            malformed_training["provider"] = ["not", "a", "mapping"]
+            training_path.write_bytes(
+                conversion_tooling._pretty_bytes(malformed_training)
+            )
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "formal_training_receipt_invalid",
+            ):
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )
+            training_path.write_bytes(training_raw)
+
+            (output / "unknown.bin").write_bytes(b"unknown")
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "deployment_output_allowlist_mismatch",
+            ):
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )
+            (output / "unknown.bin").unlink()
+            (output / "base-q4_k_m.gguf").write_bytes(b"tampered")
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "deployment_files_manifest_mismatch",
+            ):
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )
+
+            dependency_path = output / "conversion-dependency-identity.json"
+            dependency_raw = dependency_path.read_bytes()
+            dependency = json.loads(dependency_raw)
+            dependency["packages"]["numpy"] = "9.9.9"
+            dependency_path.write_bytes(conversion_tooling._pretty_bytes(dependency))
+            rewrite_envelopes()
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "conversion_dependency_identity_invalid",
+            ):
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )
+            dependency_path.write_bytes(dependency_raw)
+            rewrite_envelopes()
+
+            operations_path = output / "conversion-operations.json"
+            operations_raw = operations_path.read_bytes()
+            operations = json.loads(operations_raw)
+            operations["steps"][0]["argv"][-1] = "/coherently-rehashed-wrong-base"
+            operations_path.write_bytes(conversion_tooling._pretty_bytes(operations))
+            rewrite_envelopes()
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "conversion_operations_invalid",
+            ):
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )
+            operations_path.write_bytes(operations_raw)
+            rewrite_envelopes()
+
+            (output / "base-q4_k_m.gguf").write_bytes(
+                b"fixture:base-q4_k_m.gguf\n"
+            )
+            training["run_kind"] = "smoke"
+            training_path.write_bytes(conversion_tooling._pretty_bytes(training))
+            with self.assertRaisesRegex(
+                conversion_tooling.ConversionToolError,
+                "formal_training_receipt_invalid",
+            ):
+                conversion_tooling.verify_output(
+                    contract_path, output, training_path, bundle
+                )
+
+    def test_runbook_keeps_deployment_outside_formal_and_verifies_both_downloads(self) -> None:
+        runbook = (
+            REPO_ROOT / "training/local-approval-l6/stage2-runbook.md"
+        ).read_text()
+        finalize = runbook.index("finalize-receipt", runbook.index("## H."))
+        local_training_verify = runbook.index(
+            "--bundle \"$TASK_BUNDLE\" --output \"$TASK_LOCAL_RECOVERY\""
+        )
+        deployment = runbook.index(
+            'TASK_DEPLOYMENT="$TASK_ROOT/deployments/$TASK_ATTEMPT_ID"'
+        )
+        local_deployment_verify = runbook.index(
+            '--output "$TASK_LOCAL_DEPLOYMENT"'
+        )
+        pod_delete = runbook.index(
+            'runpodctl pod delete "$TASK_POD_ID"', runbook.index("## J.")
+        )
+        local_pair = runbook.index("l6_b10333_pair prepare-evidence")
+        self.assertLess(finalize, local_training_verify)
+        self.assertLess(local_training_verify, deployment)
+        self.assertLess(deployment, local_deployment_verify)
+        self.assertLess(local_deployment_verify, pod_delete)
+        self.assertLess(pod_delete, local_pair)
+        self.assertNotIn('TASK_DEPLOYMENT="$TASK_FORMAL_OUTPUT', runbook)
+        self.assertNotIn('TASK_FORMAL_OUTPUT/conversion', runbook)
+        self.assertGreaterEqual(runbook.count("verify-output"), 2)
+        self.assertGreaterEqual(runbook.count('--tool-bundle'), 3)
+        self.assertIn("conversion_tooling.py\" write-operations", runbook)
+        self.assertIn('"$TASK_DEPLOYMENT/tooling/merge_adapter.py"', runbook)
+        self.assertNotIn("merge_and_unload", runbook)
+        self.assertIn(
+            'converter = target / "deployment/conversion-operations.json"',
+            runbook,
+        )
+        self.assertNotIn("HF_MODEL_REPO=", runbook)
+        self.assertNotIn("--commit-message 'Plan 037 L6 verified artifacts'", runbook)
+        self.assertIn("l6_b10333_pair smoke", runbook)
+        self.assertIn("l6_b10333_pair run", runbook)
+        self.assertIn("cross_eval verify-import", runbook)
+        self.assertIn("side_output_count == 390", runbook)
+        self.assertGreaterEqual(
+            runbook.count("df -B1 --output=avail /mnt/c"), 3
+        )
+        self.assertIn(
+            'TASK_RUNNING_CONTAINERS="$(docker container ls -q)"', runbook
+        )
+        self.assertIn("rondo-cargo-build.lock", runbook)
+        self.assertGreaterEqual(runbook.count("command -v flock"), 2)
+        self.assertGreaterEqual(runbook.count('test ! -L "$TASK_BUILD_LOCK"'), 2)
+        self.assertGreaterEqual(runbook.count('test -O "$TASK_BUILD_LOCK"'), 2)
+        self.assertIn("flock -n 9", runbook)
+        self.assertIn("flock -u 9", runbook)
+        self.assertIn("pgrep -x cargo", runbook)
+        self.assertGreaterEqual(runbook.count("pgrep -x llama-server"), 2)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
-# Plan 037 stage-1 L6 training scaffold
+# Plan 037 L6 training and paired-deployment scaffold
 
 The operator-ready A-J command sequence is in
-[`stage2-runbook.md`](stage2-runbook.md). Its remote sections remain forbidden
-until the user separately authorizes stage 2.
+[`stage2-runbook.md`](stage2-runbook.md). Local stage-2A conversion preparation
+is allowed; Pod creation, transfer, model download, training, conversion/model
+loading and every remote mutation remain forbidden until separately authorized.
 
 This is a candidate, not the final training recipe. It binds the official BF16
 base/tokenizer revision and the separately frozen official chat template. The
@@ -60,19 +61,22 @@ every trainable LoRA parameter is checked against that regex; any vision,
 projector or `lm_head` hit fails the run.
 
 `runpod-stage2-entrypoint.sh` adds a three-hour default hard timeout. The
-controller must also tail logs, Pod state and billing continuously. No progress,
-repeated crash, OOM, identity/projection mismatch or budget drift is a stop
-condition. `stop` is only a temporary cost brake while recovering checkpoint
+controller must also tail logs, Pod state and billing continuously. A first
+ordinary technical failure such as OOM triggers diagnosis and one evidenced
+recovery or permitted convergence; blind repetition without progress is
+forbidden. Budget, identity, data-boundary or projection drift stops the run
+immediately. `stop` is only a temporary cost brake while recovering checkpoint
 data; after recovery and local hash verification, task-only Pod/template/
 credential/temporary volume are deleted and final billing is checked.
 
 Output remains on the 100 GB Pod volume while the controller is active unless
 an optional network volume was explicitly authorized. Before Pod deletion,
-adapter, necessary checkpoints, final recipe and
-dependency identity, aggregate metrics and training receipt are persisted and
-downloaded locally; every size/SHA-256 is rechecked. Only
-`artifact-export-allowlist-v1.json` paths may enter an approved private HF model
-repo. Dataset/projection bodies and per-sample outputs never enter that repo.
+adapter, necessary checkpoints, final recipe and dependency identity,
+aggregate metrics and training receipt are persisted and downloaded locally;
+every size/SHA-256 is rechecked. This run plans no HF repo because remaining
+byte-level private quota cannot be confirmed. A future separately authorized
+mirror requires an exact staging verifier before any upload; dataset/projection
+bodies and per-sample outputs never enter it.
 
 Training success first writes `training-pending.json`; it never writes a
 completed receipt before adapter reload. The separate reload command writes a
@@ -93,9 +97,37 @@ reload leaves only pending evidence and logs, never `status=completed`.
 If the controller stops after writing the manifest but before the completed
 receipt, rerunning finalization accepts only a byte-identical orphan manifest.
 
-The source-validated pair receipt currently implements the adapter-on/off
-route: the unfinetuned side is the frozen base contract, and the finetuned
-manifest must equal the completed training receipt's adapter tree file by file.
-If the stage-2 smoke instead selects paired GGUF, a conversion receipt binding
-the same base, formal training receipt, converter and output components must be
-added and tested before those outputs can enter the formal v2 importer.
+## Conversion and paired deployment
+
+`conversion-tool-contract-v1.json` binds the actual b10333 converter source,
+the tracked `merge_adapter.py`, minimal CPU `llama-quantize` closure, local
+qualified CUDA `llama-server`, conversion-only dependency pins and exact output
+allowlists.
+`conversion_tooling.py prepare` creates a body-free upload bundle; its manifest
+cannot authorize an unknown file, missing file, changed converter tree or extra
+symlink. `write-operations` records canonical route-specific argv and every
+executed tool identity in `conversion-operations.json`; the conversion receipt
+binds its SHA-256. `verify-output` requires the exact tool bundle, streams every
+deployment hash, rejects smoke/non-frozen training evidence, verifies pinned
+conversion Python/package/Torch/CUDA/image identity, and binds the route receipt
+to the completed training receipt and source adapter tree.
+
+Conversion starts only after the completed formal training output has first
+been downloaded and verified. It writes to a separate deployment directory,
+never below formal output. Both candidate routes are implemented in the
+runbook: `adapter_on_off` uses the same Q4_K_M base for both sides and adds one
+F16 LoRA GGUF to the fine-tuned side; `paired_gguf` derives two distinct
+Q4_K_M files from that same source base and adapter. Neither route changes the
+training receipt if conversion fails.
+
+After a separately authorized conversion, the deployment is downloaded and
+verified again before Pod deletion. The local b10333 glue then builds canonical
+deployment manifests and private pair evidence, runs a separate two-sample
+structural smoke, executes 130 inputs on each local side serially, assembles the
+390 three-side rows and formally re-imports them. Typed sample failures remain
+typed; an unexpected dangling infrastructure attempt requires the explicit
+`resolve-interrupted` command. Both deployment manifests use the shared
+`conversion-operations.json` as converter identity and the real quantizer
+binary as quantizer identity. Train, validation and holdout bodies and
+per-sample outputs never enter the conversion tool bundle or any future
+separately authorized HF mirror.
