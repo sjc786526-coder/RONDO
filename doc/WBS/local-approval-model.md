@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-15（L5b 合成训练资产冻结完成）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-15（L5b 与 Local M4 离线准备设施完成，等待 L6）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -178,11 +178,19 @@
   真实 ignored `rondo.local.toml` 已于 2026-08-15 迁移到 exact GGUF 与 12k 合同，
   `providers`、`paid_eval` 与价格配置未变、权限仍为 0600。冻结选择见 2026-08-12 快照，
   下载/CUDA 证据见 2026-08-13 快照。
+- **Local M4 离线准备设施已完成**：tracked body-free cohort 精确绑定 L5b 全部 130 条 validation 与
+  dataset/payload/target/source-group/near-duplicate-group 身份，确定性分为 65 / 65 两批。三方完整导入会重算
+  canonical input，并要求未微调/微调 Local 同属一个 L6 pair，base lineage、runtime、chat template、request、
+  sampling 和 output contract 相同；Plan 033 部署 baseline 不能冒充成对未微调工件。裁判 prompt/schema、私有
+  seed/mapping、逐批位置平衡、裁判结果身份、私有解盲聚合及独立 holdout 批次摘要合同均已冻结。真实 preflight
+  状态是 `waiting_for_l6_outputs`；未生成 fake Local 输出，未开始正式 M4，也没有模型质量结论。
 
 ### 当前推进顺序
 
-1. **L5b 已完成**：600 条合成训练资产已冻结，holdout 未进入合成上下文、合成 prompt 或训练集。
-2. **下一工作是 L6**：按云 GPU LoRA 微调路线推进；训练、数据外发、云 GPU 与权重需独立申请，最后是 Local M4。
+1. **L5b 与 M4 离线准备均已完成**：600 条合成训练资产及 130 条 validation 主体 cohort 已冻结；真实 holdout
+   未被本次准备任务打开或物化。
+2. **下一产品工作是 L6**：按云 GPU LoRA 微调路线推进；训练、数据外发、云 GPU 与权重需独立申请；L6 产生
+   成对输出后才正式执行 Local M4。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
@@ -425,16 +433,26 @@ L5b 冻结结果：当前人在场开发用 Codex `gpt-5.6-sol` 只使用 seed 2
 加入未微调 Local 是为了把“微调带来多少增益”与“底模本身有多少能力”拆开；训练完成后同场运行即可，
 无需训练前重复做一次完整横评。不设质量机械阈值，由人根据冻结对比结果作**采用 / 保留为实验 / 停止**决定。
 
-**规模**：单批 ≤100 条，共 2—3 批。单批控制在一次会话内可完成的量，避免长尾判定标准漂移；
-批与批之间可换 prompt 版本或数据切片。
+**合成主体规模已冻结**：正式主体只使用 `training/local-approval-synthetic-v1/validation.jsonl` 的全部
+130 条，不抽样、不混入 470 条 train。source 与近重复 group 的联合闭包不可跨批；当前确定性两批各 65 条，
+单批 ≤100。两批使用同一裁判 prompt/schema；若以后必须换 prompt，应升级合同并形成新 cohort，不得在同一
+正式主体内静默漂移。
 
 **裁判 prompt 冻结**：裁判 prompt 与判定标准**预先设计成仓库内的版本化文件**
 （放 `eval/templates/cross-eval-judge/`，与既有 `eval/templates/local-approval/` 并列），
 使用时由人直接复制发送，不在会话里即兴撰写。每批 JSONL 记录所用 prompt 文件的版本标识与内容哈希。
 理由：会话内即兴写 prompt 会让“标准”随批次漂移，而这恰是本方案唯一不可复现的环节；
-prompt 是少数能被完全冻结的部分，必须冻死。
+prompt 是少数能被完全冻结的部分，必须冻死。首版为
+`eval/templates/cross-eval-judge/local-m4-judge-prompt-v1.md`，结果与 blinding/holdout schema 同目录版本化。
 三个被评方必须收到**同一份证据、同一 prompt**；裁判看到的三份输出必须**匿名化且顺序随机**，
 否则“哪个是 Sol”这一信息本身就会影响判定。
+
+**三方导入与成对归因**：`sol-static` 只取 validation 已有的 point-in-time target，不重新调用教师；
+`local-static` 与 `local-ft-static` 必须由 L6 同一 pair 生成，除工件角色/身份与训练 receipt 外，共享 base lineage、
+runtime、chat template、request、sampling 与 output contract。L6 还必须提供 canonical 私有 pair receipt，其内容哈希
+绑定两侧输出的工件与 provenance；只有输出自报字段或 Plan 033 baseline 均不被接受。三方每条都回显完整
+canonical approval input，由导入器与冻结 validation 深比较；缺 side、重复/未知 side、正文/消息边界或任何身份
+漂移都拒绝。
 
 **证据来源：合成证据做主体，真实 `E_final` 做锚点，两组分开记录、不混算。**
 
@@ -443,10 +461,12 @@ prompt 是少数能被完全冻结的部分，必须冻死。
   锚点规模按定档后实际装得下的条数计，而不是默认 47；
   按稳定语义哈希规则预估切分后 holdout 约 20 条；**实际数量必须以尚待生成的冻结 manifest 为准**。
   无论最终数量多少，它都撑不起 200—300 条的判定规模，且这 47 条全部来自 TB 2.1 任务运行，审批情境单一。
-- 因此主体横评用 Sol 批量生成的**合成审批场景**，覆盖面由构造决定，规模可控。
+- 因此主体横评使用 L5b 已冻结的 **130 条合成 validation 场景**；它们只提供时点 Sol 蒸馏目标，不冒充
+  人工 ground truth。
 - 真实 holdout 单独报一组数作为 **sanity anchor** —— 用途是发现“合成场景与真实分布严重脱节”，
   不用于比较三方强弱。真实证据的 `seed`/`holdout` 切分仍按 L5 的稳定语义哈希规则，不另立一套；
-  真实证据不得进训练集这条不变。
+  真实证据不得进训练集这条不变。当前只冻结独立私有导入与批次级 tracked 摘要合同，没有读取正文或物化
+  anchor 包；synthetic 与 holdout 聚合入口拒绝混算。
 
 **两条必须写进合同的现实限制**：
 

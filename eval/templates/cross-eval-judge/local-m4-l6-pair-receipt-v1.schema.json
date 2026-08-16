@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "additionalProperties": false,
+      "properties": {
+        "local-ft-static": {
+          "additionalProperties": false,
+          "properties": {
+            "model_artifact_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "provenance": {"const": "l6_paired_finetuned", "type": "string"},
+            "training_receipt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+          },
+          "required": ["provenance", "model_artifact_sha256", "training_receipt_sha256"],
+          "type": "object"
+        },
+        "local-static": {
+          "additionalProperties": false,
+          "properties": {
+            "model_artifact_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "provenance": {"const": "l6_paired_unfinetuned", "type": "string"},
+            "training_receipt_sha256": {"type": "null"}
+          },
+          "required": ["provenance", "model_artifact_sha256", "training_receipt_sha256"],
+          "type": "object"
+        }
+      },
+      "required": ["local-static", "local-ft-static"],
+      "type": "object"
+    },
+    "base_model_identity_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "blind_identity_markers": {
+      "description": "Exact private model names or paths that blind packages and judge results must not contain.",
+      "items": {"maxLength": 512, "minLength": 3, "type": "string"},
+      "maxItems": 32,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "contract_version": {"const": "rondo_l6_m4_pair_receipt_v1", "type": "string"},
+    "pair_id": {"pattern": "^l6-[a-z0-9][a-z0-9-]{0,92}$", "type": "string"},
+    "schema_version": {"const": 1, "type": "integer"},
+    "shared_contract": {
+      "additionalProperties": false,
+      "properties": {
+        "chat_template_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+        "output_contract_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+        "request_contract_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+        "runtime_identity_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+        "sampling_contract": {
+          "additionalProperties": false,
+          "properties": {
+            "context_size": {"minimum": 1, "type": "integer"},
+            "max_output_tokens": {"minimum": 1, "type": "integer"},
+            "seed": {"type": "integer"},
+            "temperature": {"type": "number"},
+            "top_p": {"type": "number"}
+          },
+          "required": ["context_size", "max_output_tokens", "temperature", "top_p", "seed"],
+          "type": "object"
+        }
+      },
+      "required": [
+        "runtime_identity_sha256",
+        "chat_template_sha256",
+        "request_contract_sha256",
+        "sampling_contract",
+        "output_contract_sha256"
+      ],
+      "type": "object"
+    },
+    "source_work_package": {"const": "L6", "type": "string"}
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "source_work_package",
+    "pair_id",
+    "base_model_identity_sha256",
+    "shared_contract",
+    "artifacts",
+    "blind_identity_markers"
+  ],
+  "title": "RONDO L6 paired M4 artifact receipt v1",
+  "type": "object"
+}

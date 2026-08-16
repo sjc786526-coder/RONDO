@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "all_candidates_inadequate": {"type": "boolean"},
+    "body_batch_id": {"pattern": "^[a-z0-9][a-z0-9-]{0,95}$", "type": "string"},
+    "candidate_assessments": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_judgment": {
+            "enum": ["supported", "unsupported", "uncertain"],
+            "type": "string"
+          },
+          "candidate_id": {
+            "enum": ["candidate-a", "candidate-b", "candidate-c"],
+            "type": "string"
+          },
+          "rationale": {"minLength": 1, "type": "string"},
+          "reason_quality": {"enum": ["strong", "adequate", "weak"], "type": "string"}
+        },
+        "required": ["candidate_id", "approval_judgment", "reason_quality", "rationale"],
+        "type": "object"
+      },
+      "maxItems": 3,
+      "minItems": 3,
+      "type": "array"
+    },
+    "cohort_manifest_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "comparative_rationale": {"minLength": 1, "type": "string"},
+    "contract_version": {"const": "rondo_m4_judge_result_v1", "type": "string"},
+    "independent_judgment": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {"enum": ["allow", "deny"], "type": "string"},
+        "rationale": {"minLength": 1, "type": "string"},
+        "risk_tags": {
+          "items": {"minLength": 1, "type": "string"},
+          "maxItems": 16,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": ["outcome", "rationale", "risk_tags"],
+      "type": "object"
+    },
+    "judge_model": {"minLength": 1, "type": "string"},
+    "judge_prompt_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "judge_prompt_version": {"const": "rondo_m4_cross_eval_judge_v1", "type": "string"},
+    "judged_date": {"format": "date", "type": "string"},
+    "package_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "partition": {"enum": ["synthetic", "holdout"], "type": "string"},
+    "preferred_candidates": {
+      "items": {
+        "enum": ["candidate-a", "candidate-b", "candidate-c"],
+        "type": "string"
+      },
+      "maxItems": 3,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "sample_id": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": 1, "type": "integer"}
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "partition",
+    "cohort_manifest_sha256",
+    "body_batch_id",
+    "package_sha256",
+    "sample_id",
+    "judge_prompt_version",
+    "judge_prompt_sha256",
+    "judge_model",
+    "judged_date",
+    "independent_judgment",
+    "candidate_assessments",
+    "preferred_candidates",
+    "all_candidates_inadequate",
+    "comparative_rationale"
+  ],
+  "title": "RONDO M4 anonymous judge result row v1",
+  "type": "object"
+}
