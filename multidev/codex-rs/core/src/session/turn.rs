@@ -52,6 +52,7 @@ use crate::stream_events_utils::mark_thread_memory_mode_polluted_if_external_con
 use crate::stream_events_utils::raw_assistant_output_text_from_item;
 use crate::stream_events_utils::record_completed_response_item_with_finalized_facts;
 use crate::tasks::emit_compact_metric;
+use crate::tools::ExecutedToolCallRetryCache;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
@@ -331,13 +332,84 @@ pub(crate) async fn run_turn(
                 .await?;
 
             // Construct the input that we will send to the model.
-            let sampling_request_input: Vec<ResponseItem> = async {
+            let mut sampling_request_input: Vec<ResponseItem> = async {
                 sess.clone_history()
                     .await
                     .for_prompt(&turn_context.model_info.input_modalities)
             }
             .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
             .await;
+
+            // Freeze what this attempt will actually send before anything measures it. Attempted
+            // tool metadata is model-visible input the provider receives, so budgeting the team
+            // view against the bare history would hand it room the real request does not have.
+            let mut executed_tool_calls_by_output = ExecutedToolCallRetryCache::new();
+            attach_executed_tool_call_metadata(
+                &sess,
+                &mut sampling_request_input,
+                &mut executed_tool_calls_by_output,
+            );
+
+            // The active team view has to be in the context the model reasons over, so it is
+            // resolved before the request goes out rather than alongside it. If it does not fit,
+            // compaction runs first and the view is measured again against the smaller prompt;
+            // sampling without it would let the model decide while being shown an idle team.
+            let mut team_projection =
+                resolve_team_projection(&sess, &step_context, &sampling_request_input).await;
+            if matches!(
+                team_projection,
+                crate::team::TeamProjectionOutcome::NeedsRoom
+            ) {
+                // This compaction happens inside the current turn: its replacement history is what
+                // the very next request is built from, with no ordinary turn boundary in between to
+                // reinject initial context. It therefore has to carry the initial context itself,
+                // or the retry would go out without the stable team protocol that tells the model
+                // what the view it is about to receive even means.
+                run_auto_compact(
+                    &sess,
+                    Arc::clone(&step_context),
+                    /*fallback_step_context*/ None,
+                    &mut client_session,
+                    InitialContextInjection::BeforeLastUserMessage {
+                        world_state: Arc::clone(&world_state),
+                        step_context: Arc::clone(&step_context),
+                    },
+                    CompactionReason::ContextLimit,
+                    CompactionPhase::MidTurn,
+                )
+                .await?;
+                sampling_request_input = sess
+                    .clone_history()
+                    .await
+                    .for_prompt(&turn_context.model_info.input_modalities);
+                attach_executed_tool_call_metadata(
+                    &sess,
+                    &mut sampling_request_input,
+                    &mut executed_tool_calls_by_output,
+                );
+                team_projection =
+                    resolve_team_projection(&sess, &step_context, &sampling_request_input).await;
+                if matches!(
+                    team_projection,
+                    crate::team::TeamProjectionOutcome::NeedsRoom
+                ) {
+                    // Compaction has already replaced the history with a summary, so there is no
+                    // second reduction to try. Sampling anyway would show the model an idle team
+                    // while it decides, which is the one outcome the active view exists to prevent,
+                    // so this fails the turn instead of quietly degrading it.
+                    error!(
+                        "team projection does not fit even after compaction; refusing to sample without it"
+                    );
+                    return Err(CodexErrorDetails::ContextWindowExceeded.into());
+                }
+            }
+            let team_projection = match team_projection {
+                crate::team::TeamProjectionOutcome::Ready(projection) => Some(projection),
+                crate::team::TeamProjectionOutcome::Nothing => None,
+                crate::team::TeamProjectionOutcome::NeedsRoom => {
+                    return Err(CodexErrorDetails::ContextWindowExceeded.into());
+                }
+            };
 
             let responses_metadata = turn_context.turn_metadata_state.to_responses_metadata(
                 sess.installation_id.clone(),
@@ -352,6 +424,8 @@ pub(crate) async fn run_turn(
                 &mut client_session,
                 &responses_metadata,
                 sampling_request_input,
+                &mut executed_tool_calls_by_output,
+                team_projection,
                 cancellation_token.child_token(),
             )
             .await
@@ -1313,6 +1387,8 @@ async fn run_sampling_request(
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
     input: Vec<ResponseItem>,
+    executed_tool_calls_by_output: &mut ExecutedToolCallRetryCache,
+    team_projection: Option<crate::team::TeamProjection>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
     let turn_context = Arc::clone(&step_context.turn);
@@ -1334,21 +1410,29 @@ async fn run_sampling_request(
     let mut retries = 0;
     let mut initial_input = Some(input);
     let mut original_input = None;
-    let mut executed_tool_calls_by_output = HashMap::new();
     loop {
-        let prompt_input = if let Some(input) = initial_input.take() {
+        // The caller already attached this metadata to the first attempt's input, so that the
+        // request could be measured as it will be sent. Re-attaching it here would duplicate it.
+        let mut prompt_input = if let Some(input) = initial_input.take() {
             input
         } else {
-            sess.clone_history()
+            let mut prompt_input = sess
+                .clone_history()
                 .await
-                .for_prompt(&turn_context.model_info.input_modalities)
+                .for_prompt(&turn_context.model_info.input_modalities);
+            attach_executed_tool_call_metadata(
+                &sess,
+                &mut prompt_input,
+                executed_tool_calls_by_output,
+            );
+            prompt_input
         };
-        let mut prompt_input = prompt_input;
-        if let Some(executed_tool_calls) = sess.services.executed_tool_calls.as_ref()
-            && executed_tool_calls
-                .attach_pending_to_prompt(&mut prompt_input, &mut executed_tool_calls_by_output)
-        {
-            codex_protocol::models::bound_executed_tool_calls_for_prompt(&mut prompt_input);
+        // The last protocol-safe position: history is normalized, every tool call is paired with
+        // its output, and pending tool metadata is attached. Appending here neither reorders the
+        // conversation nor steps over input the session has not accepted yet.
+        let conversation_input_len = prompt_input.len();
+        if let Some(team_projection) = team_projection.as_ref() {
+            prompt_input.push(team_projection.as_response_item());
         }
         let prompt = build_prompt(
             prompt_input,
@@ -1370,7 +1454,11 @@ async fn run_sampling_request(
         .await
         {
             Ok(output) => {
-                return Ok((output, original_input.unwrap_or(prompt.input)));
+                // The projection is request-only: callers downstream of this function must never
+                // see it, so it does not reach hooks, history or the rollout.
+                let mut conversation_input = prompt.input;
+                conversation_input.truncate(conversation_input_len);
+                return Ok((output, original_input.unwrap_or(conversation_input)));
             }
             Err(err) => match err.details() {
                 CodexErrorDetails::ContextWindowExceeded => {
@@ -1389,7 +1477,9 @@ async fn run_sampling_request(
         };
 
         if original_input.is_none() {
-            original_input = Some(prompt.input);
+            let mut conversation_input = prompt.input;
+            conversation_input.truncate(conversation_input_len);
+            original_input = Some(conversation_input);
         }
 
         if !err.is_retryable() {
@@ -1408,6 +1498,44 @@ async fn run_sampling_request(
         .await?;
         turn_context.turn_timing_state.record_sampling_retry();
     }
+}
+
+/// Attach the attempted-tool metadata this request will carry.
+///
+/// It is model-visible input rather than bookkeeping, so it belongs in the prompt before anything
+/// measures how much of the window is still free.
+fn attach_executed_tool_call_metadata(
+    sess: &Session,
+    prompt_input: &mut [ResponseItem],
+    retry_cache: &mut ExecutedToolCallRetryCache,
+) {
+    if let Some(executed_tool_calls) = sess.services.executed_tool_calls.as_ref()
+        && executed_tool_calls.attach_pending_to_prompt(prompt_input, retry_cache)
+    {
+        codex_protocol::models::bound_executed_tool_calls_for_prompt(prompt_input);
+    }
+}
+
+/// Resolve the team projection for the request that is about to be assembled.
+///
+/// Kept next to the sampling step so the budget sees the same prompt the provider will.
+async fn resolve_team_projection(
+    sess: &Arc<Session>,
+    step_context: &Arc<StepContext>,
+    prompt_input: &[ResponseItem],
+) -> crate::team::TeamProjectionOutcome {
+    let turn_context = step_context.turn.as_ref();
+    let base_instructions = sess.get_base_instructions().await;
+    let tools = step_context.tool_router.model_visible_specs();
+    crate::team::capture_team_projection(
+        sess,
+        turn_context,
+        &crate::team::PromptCost {
+            input: prompt_input,
+            base_instructions: &base_instructions,
+            tools: &tools,
+        },
+    )
 }
 
 pub(crate) struct PreparedToolRecommendations {

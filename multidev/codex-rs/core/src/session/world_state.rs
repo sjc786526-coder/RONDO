@@ -18,6 +18,7 @@ use crate::context::world_state::PermissionsState;
 use crate::context::world_state::PersonalityState;
 use crate::context::world_state::PluginsInstructionsState;
 use crate::context::world_state::RealtimeState;
+use crate::context::world_state::TeamProtocolState;
 use crate::context::world_state::ToolsState;
 use crate::context::world_state::WorldState;
 use codex_connectors::AppToolPolicyEvaluator;
@@ -264,6 +265,17 @@ impl Session {
             world_state.add_section(usage_hint);
         }
         world_state.add_section(multi_agent_mode);
+        // The stable half of the team protocol. The volatile half (the active world index) is
+        // deliberately not a world-state section: it must stay out of history entirely.
+        world_state.add_section(TeamProtocolState::new(
+            crate::team::team_state_enabled(turn_context)
+                && self
+                    .services
+                    .agent_control
+                    .team()
+                    .participant(self.thread_id)
+                    .is_some(),
+        ));
         Ok(world_state)
     }
 }

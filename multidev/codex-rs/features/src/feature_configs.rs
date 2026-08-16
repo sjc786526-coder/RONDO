@@ -120,6 +120,10 @@ pub struct MultiAgentV2ConfigToml {
     /// Expose the multi-agent v2 `wait_agent` tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_agent_enabled: Option<bool>,
+    /// Expose the canonical team world state: the `team_*` tools, the team protocol prefix and the
+    /// per-sampling active world index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub team_state_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub non_code_mode_only: Option<bool>,
 }

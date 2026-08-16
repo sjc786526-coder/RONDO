@@ -40,6 +40,8 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::user_input::UserInput;
+use codex_team_state::ParticipantRole;
+use codex_team_state::TeamStateHandle;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::ReadThreadParams;
 use serde::Serialize;
@@ -107,6 +109,10 @@ pub(crate) struct AgentControl {
     agent_execution_limiter: Arc<AgentExecutionLimiter>,
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
     rollout_budget: Arc<RolloutBudget>,
+    /// Canonical team world state for this root tree. Created once with the control handle and
+    /// shared by every sub-agent cloned from it, so there is exactly one team instance per live
+    /// root tree and it does not depend on which members are currently loaded.
+    team: Arc<TeamStateHandle>,
 }
 
 impl AgentControl {
@@ -137,6 +143,28 @@ impl AgentControl {
 
     pub(crate) fn rollout_budget(&self) -> &RolloutBudget {
         self.rollout_budget.as_ref()
+    }
+
+    pub(crate) fn team(&self) -> &Arc<TeamStateHandle> {
+        &self.team
+    }
+
+    /// Register the calling session as a participant of this root tree's team, if it is one.
+    ///
+    /// Identity and role come from the session's own thread id and source, never from anything the
+    /// model claims. A session whose place in the agent tree cannot be established is left
+    /// unregistered, which is what makes team capabilities fail closed rather than default to
+    /// something. Re-registering the same thread after a residency reload is a no-op, which is how
+    /// a reloaded member keeps its instance, permissions and state.
+    pub(crate) fn register_team_participant(
+        &self,
+        thread_id: ThreadId,
+        session_source: &SessionSource,
+    ) {
+        let Some((role, label)) = team_participant_identity(session_source) else {
+            return;
+        };
+        self.team.register_participant(thread_id, role, label);
     }
 
     /// Send rich user input items to an existing agent thread.
@@ -802,3 +830,25 @@ fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
 #[cfg(test)]
 #[path = "control_tests.rs"]
 mod tests;
+
+/// The team role and label a session source proves, or `None` when it proves neither.
+///
+/// Only two shapes qualify: a user-facing root thread, and a V2 thread spawn that carries the agent
+/// path its registry entry was created with. Everything else — review, compaction, memory
+/// consolidation and other internal sessions, unknown sources, and spawns without a verifiable
+/// path — gets no team identity at all, so it cannot act as a participant even if the team tools
+/// were somehow reachable from it.
+fn team_participant_identity(session_source: &SessionSource) -> Option<(ParticipantRole, String)> {
+    match session_source {
+        SessionSource::Cli
+        | SessionSource::VSCode
+        | SessionSource::Exec
+        | SessionSource::Mcp
+        | SessionSource::Custom(_) => Some((ParticipantRole::Root, AgentPath::ROOT.to_string())),
+        SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            agent_path: Some(agent_path),
+            ..
+        }) => Some((ParticipantRole::Member, agent_path.to_string())),
+        SessionSource::Internal(_) | SessionSource::SubAgent(_) | SessionSource::Unknown => None,
+    }
+}

@@ -1897,6 +1897,10 @@
         "subagent_usage_hint_text": {
           "type": "string"
         },
+        "team_state_enabled": {
+          "description": "Expose the canonical team world state: the `team_*` tools, the team protocol prefix and the per-sampling active world index.",
+          "type": "boolean"
+        },
         "tool_namespace": {
           "maxLength": 64,
           "minLength": 1,

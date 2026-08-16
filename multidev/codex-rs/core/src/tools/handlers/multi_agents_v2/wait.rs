@@ -73,6 +73,12 @@ impl Handler {
             .input_queue
             .subscribe_activity(turn_state.as_deref())
             .await;
+        // Team changes have their own consumable wake, so a change published before this wait
+        // started is still delivered, and one already consumed does not wake the waiter twice.
+        let team_waiter = crate::team::team_state_enabled(&turn)
+            .then(|| crate::team::TeamAccess::resolve(&session).ok())
+            .flatten()
+            .map(|access| access.handle().wake_waiter(access.actor()));
 
         session
             .emit_turn_item_started(
@@ -93,7 +99,13 @@ impl Handler {
             .await;
 
         let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
-        let outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline).await;
+        let outcome = match team_waiter {
+            Some(team_waiter) => tokio::select! {
+                () = team_waiter.wait() => WaitOutcome::TeamActivity,
+                outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline) => outcome,
+            },
+            None => wait_for_activity(&mut activity_rx, pending_activity, deadline).await,
+        };
         let result = WaitAgentResult::from_outcome(outcome);
 
         session
@@ -140,6 +152,9 @@ impl WaitAgentResult {
     fn from_outcome(outcome: WaitOutcome) -> Self {
         let message = match outcome {
             WaitOutcome::MailboxActivity => "Wait completed.",
+            WaitOutcome::TeamActivity => {
+                "Wait completed: the team world state changed. The current active view is in this request."
+            }
             WaitOutcome::Steered => "Wait interrupted by new input.",
             WaitOutcome::TimedOut => "Wait timed out.",
         };
@@ -171,6 +186,8 @@ impl ToolOutput for WaitAgentResult {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WaitOutcome {
     MailboxActivity,
+    /// A team-state change this participant had not consumed yet.
+    TeamActivity,
     Steered,
     TimedOut,
 }
