@@ -150,9 +150,9 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 每个阶段只定义目标、交付能力、完成标准与边界；具体做法由该阶段的 plan 决定。
 阶段顺序是硬依赖顺序，不并行。
 
-### M-1 团队世界状态纵切（当前阶段：验收通过，待集成）
+### M-1 团队世界状态纵切（当前阶段：已验收并合入 main）
 
-已验收实现位于 `.claude/worktrees/039-multi-m1-team-world-state` 的 `5f7268d`，尚未合并 `main`。团队领域是独立 crate
+已验收实现由工作树提交 `5f7268d` 落地，并通过 merge commit `bcad5b22` 合入 `main`。团队领域是独立 crate
 `codex-team-state`，canonical 状态挂在 `AgentControl` 上（每个存活 Root 树一份），模型可见工具为
 `team_publish` / `team_update` / `team_history`。整套能力由
 `features.multi_agent_v2.team_state_enabled` 控制，**默认关闭**；开启后才注册团队工具、注入稳定团队
@@ -190,7 +190,7 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 - **边界**：不含 route、不含证据索引、不含 orphan 退休与 Event 关系；不改动 Codex 的 spawn/fork/lifecycle；
   证据引用在此阶段可以为空 —— 这是阶段边界，不是产品终态。
 
-### M-2 选择性路由（M-1 集成后的下一步）
+### M-2 选择性路由（下一阶段）
 
 - **目标**：让团队信息按 Root 的判断在 Agent 之间流动，且不产生第二份 canonical 副本。
 - **交付能力**：Root 以 Event 为单位授予可见性并建立指派，再投递紧凑通知；被 route 的 Agent 能读到完整 chain
