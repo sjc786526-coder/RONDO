@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-16（Plan 037 完成，L6 成对输出已就绪）
+最后更新：2026-08-16（Plan 037 完成；Multi M-1 已合入，下一阶段为 M-2）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -25,7 +25,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | L6 已完成：470 条 train-only completion-only QLoRA 在 RunPod A40 上完成真实 smoke、一个冻结 recipe 的 118-step 正式训练和 adapter 重载；同源 paired-GGUF 已由冻结 b10333 串行完成 130×2，连同 frozen Sol 侧形成 390 行并通过 Plan 036 正式导入。唯一 Pod/volume 已删除，未使用 HF。下一步是正式 Local M4 人判；当前没有 M4 质量结论。 |
-| 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；产品基线（M-0）和团队世界状态纵切（M-1）均已验收并合入 `main`。下一阶段是 M-2 选择性路由；尚无冻结 runtime bundle，付费退化验收排在 M-5。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -71,14 +71,15 @@
   六类与 allow/deny 均有覆盖，train/validation 按 120 个近重复组互斥，holdout 16 条只在本地内存中过滤且
   聚合命中 0。正文约 1.67 MB，随 prompt/schema、manifest 和数据卡进入 `training/`；私有 seed 投影、候选与
   逐条过滤明细留在 ignored `eval-data/`。
-  **Local M4 输入已就绪（WP3b-A8/A9）**：全部 130 条 validation 已冻结为 body-free 65 / 65 两批；
+  **Local M4 输入已就绪（WP3b-A8—A10）**：全部 130 条 validation 已冻结为 body-free 65 / 65 两批；
   三方完整导入、L6 成对归因、匿名位置平衡、裁判 prompt/schema、私有解盲聚合及独立 holdout 批次摘要合同
   已就绪。Plan 037 已完成 470 条 train-only 训练、paired-GGUF 转换、两侧 130 条串行输出和 canonical
   pair receipt/private evidence；390 行正式导入为 `ready_for_blind_packaging`。**下一步只执行正式 Local M4
   盲化、裁判、解盲与人判，不因 validation 结果继续训练或更换 recipe。**
-- **3c RONDO Multi**：`multidev/` 产品基线已完成；D1 未定前只有环境就绪工作，没有功能内容。
-  付费同题退化验收所需的公平比较设施前置已经具备；实际运行时仍须按 §6 单独冻结范围、轮数与预算并取得
-  真实 API 授权，不得用未运行或无效比较表述“未见退化”。
+- **3c RONDO Multi**：M-0 产品基线和 M-1 团队世界状态纵切已完成，**下一阶段是 M-2 选择性路由**。
+  阶段目标、交付能力与完成标准见 `doc/WBS/multi-agent-trusted-evidence.md`；M-2—M-4 均为离线可验证的
+  内核工作，不需要付费 API。付费同题退化验收（M-5）所需的公平比较设施前置已经具备；实际运行时仍须按
+  §6 单独冻结范围、轮数与预算并取得真实 API 授权，不得用未运行或无效比较表述“未见退化”。
   Multi 尚无冻结 runtime bundle，`eval-data/bin/rondo-multi/` 仍为空；首次真实或 Docker 验收前必须先按
   §4.5 的产品身份冻结一套 Multi bundle。
 
@@ -101,10 +102,10 @@
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | L6 完成；390 行成对输入已通过正式导入 | 正式 Local M4 |
-| 3 | 共享可信证据链的多智能体协作 | Multi | 研究与产品基线完成；首个功能增量待定 | 由 D1 决定首个增量；真实 API/付费测评单独授权 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0/M-1 已完成；M-2 选择性路由待实施 | 无外部阻塞；M-5 的真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L6 → Local M4 已成链），
-  而 Multi 的首个增量还待定（D1），不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
+  而 Multi 还有 M-2—M-5 四个阶段，不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
 
@@ -176,7 +177,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 进行中：L6 已完成，正式 Local M4 待执行 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | 产品基线已完成（工作包 2）；功能开发待 D1 |
+| P5 | RONDO Multi 产品线 | M-0/M-1 已完成；M-2 选择性路由待实施 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -184,11 +185,13 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | M1 | 冻结 Codex 与 RONDO 同一 TB 2.1 任务端到端可归档 | 工程验收 | 已完成 |
 | Local M3 | 12k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 已完成 |
 | Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 未完成；390 行输入已验真，待正式盲评与人判 |
-| Multi 里程碑 | 由 Multi 自行定义，**不继承 `σ`/`delta` 总闸门** | 待定 | 待 D1 定下首个增量后确定 |
+| Multi M-1 | 团队世界状态纵切端到端跑通，团队状态不依赖任何模型记住 | 工程验收 | 已完成并合入 `main` |
+| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 未开始 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
 （设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。
 工作包 1 已闭合，Multi 的付费退化验收不再有跨工作包前置，只保留具体运行时的合同冻结与真实 API 授权门。
+带 `Multi` 前缀的 `M-0`—`M-5` 是 Multi 产品线自己的阶段编号，与上面已退役的 `M2`/`M5` 无关。
 
 ### 公平比较设施保留的机械判据
 
@@ -242,19 +245,9 @@ v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两�
 - skip、未运行和无效比较不能表述为通过；测评设施合同不满足时不得解释产品能力。
 - 结果与数据资产边界遵循 `doc/eval-data-layout.md`。
 
-## 8. 待定决策
-
-- **D1 Multi 首个可交付增量** —— 待细读 `doc/research/multi-agent-trusted-evidence-research.md` 后决定选哪个
-  工作流、是否先做证据层地基。**这是当前最大的未定项**：产品基线已完成，且在 D1 定下来之前
-  工作包 3c 没有实质内容。
-- **D2 Multi 价值命题的最终措辞** —— 现有版本（见 `doc/WBS/multi-agent-trusted-evidence.md`）是初步框架，
-  需在读完调研报告后确认或修正，特别是“朴素自然语言基线作对照组”是否采纳为设计约束。
-
-两项都不阻塞 3a/3b；它们只使 3c 暂时停在环境就绪。
-
-## 9. 子规划索引
+## 8. 子规划索引
 
 - `doc/WBS/eval-benchmark.md` —— 方向 0：量化测评基准
 - `doc/WBS/local-approval-model.md` —— 方向 2：RONDO Local 本地审批模型接入与横评
 - `doc/WBS/teacher-harness-study.md` —— 方向 1：教师研究成果到优化实验（挂起）
-- `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：RONDO Multi 产品线
+- `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：RONDO Multi 产品线（设计语义合同与 M-1—M-5）
