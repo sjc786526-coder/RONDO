@@ -13,6 +13,38 @@ use codex_protocol::ThreadId;
 use serde::Serialize;
 use std::fmt;
 
+/// Per-field ceilings on authored content.
+///
+/// The store never holds an unbounded authored field, so everything downstream of it — the
+/// projection, history queries, tool output — is bounded by construction rather than by each
+/// consumer remembering to clamp. Over-long input is cut at write time with a visible marker, so
+/// the author's own record shows that it was cut.
+const MAX_TITLE_CHARS: usize = 200;
+const MAX_SUMMARY_CHARS: usize = 2_000;
+const MAX_HANDOFF_CHARS: usize = 1_000;
+const TRUNCATION_MARKER: &str = " […truncated]";
+
+/// Clamp `value` to `max_chars`, marking it when anything was removed.
+pub(crate) fn clamp_authored(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let kept: String = value.chars().take(max_chars).collect();
+    format!("{kept}{TRUNCATION_MARKER}")
+}
+
+pub(crate) fn clamp_title(value: &str) -> String {
+    clamp_authored(value, MAX_TITLE_CHARS)
+}
+
+pub(crate) fn clamp_summary(value: &str) -> String {
+    clamp_authored(value, MAX_SUMMARY_CHARS)
+}
+
+pub(crate) fn clamp_handoff(value: &str) -> String {
+    clamp_authored(value, MAX_HANDOFF_CHARS)
+}
+
 /// What the author of a version currently believes about the matter it describes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -245,16 +277,19 @@ impl TeamEvent {
                 .any(|version| version.root_state.occupies_root_attention())
     }
 
-    /// Whether `viewer` may read this event's history.
+    /// Whether this event is visible to `participant`.
     ///
-    /// Before routing exists the only readers are the root (whole team) and participants who
-    /// authored something under the event.
-    pub(crate) fn is_readable_by(&self, viewer: ThreadId, role: ParticipantRole) -> bool {
+    /// Visibility governs both reading and contributing: in the first version, being able to see an
+    /// event is exactly what makes someone eligible to add to it. Before routing exists, that means
+    /// the root (whole team) plus whoever opened the event or already authored under it. M-2 widens
+    /// visibility through explicit route grants; until then a participant cannot reach an event by
+    /// guessing its identifier, because writing to it requires already being able to see it.
+    pub(crate) fn is_visible_to(&self, participant: ThreadId, role: ParticipantRole) -> bool {
         role.is_root()
-            || self.created_by == viewer
+            || self.created_by == participant
             || self
                 .versions
                 .iter()
-                .any(|version| version.authored.author == viewer)
+                .any(|version| version.authored.author == participant)
     }
 }

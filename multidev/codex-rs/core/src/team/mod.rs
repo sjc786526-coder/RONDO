@@ -16,8 +16,15 @@ use codex_team_state::TeamStateHandle;
 use std::sync::Arc;
 
 /// Whether the team world state is switched on for this turn.
+///
+/// This is the single gate for the whole feature: the tools, the stable protocol prefix, the
+/// per-sampling projection and the wait hook all ask this one question. Deciding them separately
+/// would let a configuration exist where the model is told the team protocol and shown a projection
+/// it has no tools to act on.
 pub(crate) fn team_state_enabled(turn_context: &TurnContext) -> bool {
     turn_context.config.multi_agent_v2.team_state_enabled
+        && crate::tools::spec_plan::collab_tools_enabled(turn_context)
+        && crate::tools::spec_plan::multi_agent_v2_enabled(turn_context)
 }
 
 /// A resolved team capability for one session.

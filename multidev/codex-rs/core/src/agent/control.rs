@@ -149,25 +149,21 @@ impl AgentControl {
         &self.team
     }
 
-    /// Register the calling session as a participant of this root tree's team.
+    /// Register the calling session as a participant of this root tree's team, if it is one.
     ///
     /// Identity and role come from the session's own thread id and source, never from anything the
-    /// model claims. Re-registering the same thread after a residency reload is a no-op, which is
-    /// how a reloaded member keeps its instance, permissions and state.
+    /// model claims. A session whose place in the agent tree cannot be established is left
+    /// unregistered, which is what makes team capabilities fail closed rather than default to
+    /// something. Re-registering the same thread after a residency reload is a no-op, which is how
+    /// a reloaded member keeps its instance, permissions and state.
     pub(crate) fn register_team_participant(
         &self,
         thread_id: ThreadId,
         session_source: &SessionSource,
     ) {
-        let role = if session_source.is_non_root_agent() {
-            ParticipantRole::Member
-        } else {
-            ParticipantRole::Root
+        let Some((role, label)) = team_participant_identity(session_source) else {
+            return;
         };
-        let label = session_source
-            .get_agent_path()
-            .map(|path| path.to_string())
-            .unwrap_or_else(|| AgentPath::ROOT.to_string());
         self.team.register_participant(thread_id, role, label);
     }
 
@@ -834,3 +830,25 @@ fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
 #[cfg(test)]
 #[path = "control_tests.rs"]
 mod tests;
+
+/// The team role and label a session source proves, or `None` when it proves neither.
+///
+/// Only two shapes qualify: a user-facing root thread, and a V2 thread spawn that carries the agent
+/// path its registry entry was created with. Everything else — review, compaction, memory
+/// consolidation and other internal sessions, unknown sources, and spawns without a verifiable
+/// path — gets no team identity at all, so it cannot act as a participant even if the team tools
+/// were somehow reachable from it.
+fn team_participant_identity(session_source: &SessionSource) -> Option<(ParticipantRole, String)> {
+    match session_source {
+        SessionSource::Cli
+        | SessionSource::VSCode
+        | SessionSource::Exec
+        | SessionSource::Mcp
+        | SessionSource::Custom(_) => Some((ParticipantRole::Root, AgentPath::ROOT.to_string())),
+        SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            agent_path: Some(agent_path),
+            ..
+        }) => Some((ParticipantRole::Member, agent_path.to_string())),
+        SessionSource::Internal(_) | SessionSource::SubAgent(_) | SessionSource::Unknown => None,
+    }
+}

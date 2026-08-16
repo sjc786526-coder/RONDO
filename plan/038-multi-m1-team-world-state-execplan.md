@@ -177,11 +177,12 @@
 
 ### 当前工作
 
-实现与定向验证已结束，成果已提交在本工作树分支，等待独立审查者验收。
+首轮独立审查判定不通过，其 5 个阻断项与 3 个窄修项经逐条核对**全部属实**，已在本工作树完成整改并提交，
+等待复验。整改记录见 `agent_log/2026-08-16-043500-plan038-m1-review-remediation.md`。
 
 ### 本任务剩余步骤
 
-无。后续动作（合并、推送、顶层 WBS 同步）不在本任务授权内，交给审查与最终集成。
+无。后续动作（合并、推送、顶层 WBS 同步）不在本任务授权内，交给复验与最终集成。
 
 ### 阻塞项
 
@@ -196,13 +197,16 @@ L6 仍有 12 个未合并提交且改动了 `doc/WBS.md` 与 `doc/WBS-COMPLETED.
 ### 当前验收状态
 
 - ExecPlan：已建立并完成自审。
-- M-1 实现与测试：已完成。领域单测 36/36、M-1 集成用例 5/5、`codex-team-state` + `codex-features`
-  69/69 全部通过；`just test -p codex-core -p codex-rmcp-client` 3454/3539 通过，85 项失败全部为
-  code-mode host/工作区二进制/真实网络三类环境限制，与本次改动模块无交集（未做基线对比运行）。
+- M-1 实现与测试：已完成并已按首轮审查整改。`codex-team-state` + `codex-features` 76/76、
+  M-1 集成用例 6/6 加身份单测 1/1 全部通过；`just test -p codex-core -p codex-rmcp-client`
+  3456/3541 通过，85 项失败与整改前**失败集合逐条一致**（无新增回归），仍为 code-mode host/
+  工作区二进制/真实网络三类环境限制，按审查口径记为"环境归因、未独立确认"。
 - 格式化与 lint：`just fmt`、`just fmt-check`、`just fix -p codex-core -p codex-team-state` 均通过。
 - 文档：M-1 精炼 log 与本计划已更新；`doc/WBS/multi-agent-trusted-evidence.md` 已按实际状态同步。
 - 顶层 `doc/WBS.md` / `doc/WBS-COMPLETED.md`：按决策 005 明确延后。
-- Bazel 校验、全 workspace 测试、Docker、真实 API、本地模型：未运行，不属于本任务。
+- Bazel（`BUILD.bazel` / `MODULE.bazel.lock`）：本机未安装 Bazel，按用户指示不为 M-1 安装，标记为
+  **当前环境未验证的非阻断项**；两个 Bazel 文件均无变化，依赖正确性由 Cargo lock、定向测试与 diff 兜底。
+- 全 workspace 测试、Docker、真实 API、本地模型：未运行，不属于本任务。
 
 ### 交接边界
 
@@ -228,3 +232,9 @@ L6 仍有 12 个未合并提交且改动了 `doc/WBS.md` 与 `doc/WBS-COMPLETED.
 | 011 | 幂等身份默认取 harness 的 tool `call_id`，模型只能可选覆盖 | 重试身份由 harness 而不是模型记忆保证，模型漏传也不会产生重复对象 | 工具面 | 已采纳 |
 | 012 | 新增 `features.multi_agent_v2.team_state_enabled`，默认关闭 | 避免改动既有 multi-agent 测试的工具面与 prompt；M-1 集成测试显式打开跑真实链路 | 配置与测试范围 | 已采纳 |
 | 013 | 稳定团队协议走 world-state section 进 initial context，动态投影只走 request-only 尾部 | 稳定前缀保住前缀缓存并随 compaction 自动重注入；易变数据不进 history/rollout | 投影与缓存 | 已采纳 |
+| 014 | authored 内容在写入时即有界，投影与历史因此构造性有界 | 比让每个消费方各自记得裁剪更可靠，也让 store 里不存在无界字段 | 领域与投影 | 审查整改后采纳 |
+| 015 | 极小预算下投影退化为不可再缩的省略通告，允许它略超预算，而不是输出空块或消失 | 空块等于谎称"团队无事发生"且模型无从分辨；通告只有几十 token，真正的空间回收交给已有 compaction | 投影预算 | 审查整改后采纳（与审查建议的硬 clamp 不同） |
+| 016 | 可见性同时决定可读与可贡献，append 前校验可见性 | 引用可猜，靠引用保密等于没有边界；与设计合同第 21 条一致，M-2 再由 route 扩展 | 权限 | 审查整改后采纳 |
+| 017 | Root 的 `resolved` 为终态，不可原地重开 | 重新相关只能由新 Version 表达，否则破坏追加式历史语义 | 生命周期 | 审查整改后采纳 |
+| 018 | 只承认可核验的会话身份（用户面 root 线程、带 agent path 的 V2 spawn），其余不登记 | 把"缺省当 Root"改成"证明不了就没有能力"，这才是 fail-closed | 身份 | 审查整改后采纳 |
+| 019 | 对外引用携带完整 UUID 实例身份 | 实例归属必须是可精确校验的事实，不是概率判断；代价是引用变长 | 引用与重置 | 审查整改后采纳 |

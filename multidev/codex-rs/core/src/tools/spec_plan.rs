@@ -529,11 +529,11 @@ fn namespace_tools_enabled(turn_context: &TurnContext) -> bool {
     turn_context.provider.capabilities().namespace_tools
 }
 
-fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
+pub(crate) fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
     turn_context.multi_agent_version == MultiAgentVersion::V2
 }
 
-fn collab_tools_enabled(turn_context: &TurnContext) -> bool {
+pub(crate) fn collab_tools_enabled(turn_context: &TurnContext) -> bool {
     match turn_context.multi_agent_version {
         MultiAgentVersion::Disabled => false,
         MultiAgentVersion::V1 => !exceeds_thread_spawn_depth_limit(
@@ -1102,7 +1102,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 multi_agent_v2_handler(ListAgentsHandlerV2, tool_namespace),
                 exposure,
             );
-            if turn_context.config.multi_agent_v2.team_state_enabled {
+            if crate::team::team_state_enabled(turn_context) {
                 registry.register_trusted_with_exposure(
                     multi_agent_v2_handler(TeamPublishHandler, tool_namespace),
                     exposure,

@@ -4267,3 +4267,53 @@ async fn resume_agent_from_rollout_skips_descendants_when_parent_resume_fails() 
         .await
         .expect("tree shutdown after partial subtree resume should succeed");
 }
+
+#[test]
+fn only_verifiable_sessions_get_a_team_identity() {
+    use codex_protocol::AgentPath;
+    use codex_protocol::protocol::InternalSessionSource;
+
+    // A user-facing thread is the root of its own tree.
+    assert_eq!(
+        team_participant_identity(&SessionSource::Cli),
+        Some((ParticipantRole::Root, AgentPath::ROOT.to_string()))
+    );
+
+    // A spawned agent is a member, named by the path its registry entry was created with.
+    let spawned = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        parent_thread_id: ThreadId::new(),
+        depth: 1,
+        agent_path: Some(AgentPath::root().join("worker").expect("valid agent path")),
+        agent_nickname: None,
+        agent_role: None,
+    });
+    assert_eq!(
+        team_participant_identity(&spawned),
+        Some((ParticipantRole::Member, "/root/worker".to_string()))
+    );
+
+    // Everything whose place in the tree cannot be established gets nothing at all, rather than
+    // being quietly treated as the root of the team.
+    let unverifiable = [
+        SessionSource::Internal(InternalSessionSource::MemoryConsolidation),
+        SessionSource::SubAgent(SubAgentSource::Review),
+        SessionSource::SubAgent(SubAgentSource::Compact),
+        SessionSource::SubAgent(SubAgentSource::MemoryConsolidation),
+        SessionSource::SubAgent(SubAgentSource::Other("mystery".to_string())),
+        SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id: ThreadId::new(),
+            depth: 1,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
+        }),
+        SessionSource::Unknown,
+    ];
+    for session_source in unverifiable {
+        assert_eq!(
+            team_participant_identity(&session_source),
+            None,
+            "{session_source:?} must not be granted a team identity"
+        );
+    }
+}

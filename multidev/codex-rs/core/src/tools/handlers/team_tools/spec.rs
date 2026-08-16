@@ -149,12 +149,19 @@ pub(crate) fn create_team_history_tool() -> ToolSpec {
                 "Maximum entries to return, capped at {MAX_HISTORY_LIMIT}."
             ))),
         ),
+        (
+            "before".to_string(),
+            JsonSchema::integer(Some(
+                "Pass the `next_before` from a previous result to read the page before it."
+                    .to_string(),
+            )),
+        ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "team_history".to_string(),
         description:
-            "Read team history you can no longer see in the active world index, including anything the projection reported as omitted. Scoped to what you are allowed to read and bounded in size."
+            "Read team history you can no longer see in the active world index, including anything the projection reported as omitted. Scoped to what you are allowed to read and bounded in size; page backwards with `before` to reach older entries."
                 .to_string(),
         strict: false,
         defer_loading: None,
@@ -209,9 +216,10 @@ fn history_output_schema() -> serde_json::Value {
             "revision": { "type": "integer" },
             "total_events": { "type": "integer" },
             "omitted_events": { "type": "integer" },
+            "next_before": { "type": ["integer", "null"] },
             "events": { "type": "array", "items": { "type": "object" } }
         },
-        "required": ["revision", "total_events", "omitted_events", "events"],
+        "required": ["revision", "total_events", "omitted_events", "next_before", "events"],
         "additionalProperties": false
     })
 }

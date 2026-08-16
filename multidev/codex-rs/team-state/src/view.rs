@@ -49,10 +49,15 @@ impl TeamSnapshot {
 }
 
 /// A bounded history request. `limit` is clamped by the store.
+///
+/// `before` is the cursor: pass the `next_before` of the previous page to keep walking backwards.
+/// Without it a capped query could only ever show the newest slice, and everything the projection
+/// reported as omitted would be permanently out of reach.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct HistoryQuery {
     pub event_id: Option<EventId>,
     pub limit: Option<usize>,
+    pub before: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -69,4 +74,6 @@ pub struct HistoryPage {
     pub events: Vec<EventHistory>,
     pub total_events: usize,
     pub omitted_events: usize,
+    /// Cursor for the next page, or `None` when this page reached the oldest entry.
+    pub next_before: Option<u32>,
 }

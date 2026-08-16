@@ -43,6 +43,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
             &HistoryQuery {
                 event_id,
                 limit: args.limit,
+                before: args.before,
             },
         )
         .map_err(team_error)?;
@@ -51,6 +52,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         revision: page.revision.get(),
         total_events: page.total_events,
         omitted_events: page.omitted_events,
+        next_before: page.next_before,
         events: page.events.into_iter().map(render_event).collect(),
     }))
 }
@@ -87,6 +89,7 @@ fn render_event(entry: EventHistory) -> HistoryEvent {
 struct HistoryArgs {
     event_id: Option<String>,
     limit: Option<usize>,
+    before: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,6 +117,8 @@ pub(crate) struct TeamHistoryResult {
     revision: u64,
     total_events: usize,
     omitted_events: usize,
+    /// Pass back as `before` to read the next page; absent when this page reached the oldest entry.
+    next_before: Option<u32>,
     events: Vec<HistoryEvent>,
 }
 

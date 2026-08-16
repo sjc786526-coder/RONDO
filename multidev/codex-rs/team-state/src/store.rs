@@ -17,6 +17,9 @@ use crate::model::ProducerState;
 use crate::model::RootState;
 use crate::model::TeamEvent;
 use crate::model::TeamVersion;
+use crate::model::clamp_handoff;
+use crate::model::clamp_summary;
+use crate::model::clamp_title;
 use crate::mutation::LifecycleChange;
 use crate::mutation::LifecycleOutcome;
 use crate::mutation::LifecycleRequest;
@@ -39,6 +42,15 @@ use std::collections::HashMap;
 /// Hard ceiling on a single bounded history query, so a drill-down can never become unbounded.
 pub const MAX_HISTORY_LIMIT: usize = 50;
 const DEFAULT_HISTORY_LIMIT: usize = 10;
+/// In list mode each event only previews its newest entries; the full chain comes from an
+/// event-scoped query, which is itself pageable. Without this a "bounded" list of 50 events could
+/// still drag in every version the team ever wrote.
+const LIST_MODE_VERSION_PREVIEW: usize = 2;
+
+struct CommittedSubmission {
+    fingerprint: String,
+    outcome: PublishOutcome,
+}
 
 pub struct TeamStore {
     instance: TeamInstanceId,
@@ -46,9 +58,11 @@ pub struct TeamStore {
     revision: TeamRevision,
     events: Vec<TeamEvent>,
     participants: HashMap<ThreadId, Participant>,
-    /// Committed outcomes keyed by author and retry identity, so a repeated submission returns the
-    /// original result instead of minting a second object.
-    committed: HashMap<(ThreadId, String), PublishOutcome>,
+    /// Committed submissions keyed by author and retry identity, so a repeated submission returns
+    /// the original result instead of minting a second object. The original request is kept
+    /// alongside the outcome: reusing an identity for different content is a caller mistake, not a
+    /// retry, and must not silently discard the second piece of content.
+    committed: HashMap<(ThreadId, String), CommittedSubmission>,
     wake: WakeLedger,
     next_event_ordinal: u32,
 }
@@ -178,10 +192,14 @@ impl TeamStore {
         }
 
         let retry_key = (actor, submission.request_id.clone());
+        let fingerprint = request.fingerprint();
         if let Some(existing) = self.committed.get(&retry_key) {
+            if existing.fingerprint != fingerprint {
+                return Err(TeamError::RetryIdentityReused);
+            }
             return Ok(PublishOutcome {
                 deduplicated: true,
-                ..existing.clone()
+                ..existing.outcome.clone()
             });
         }
 
@@ -198,7 +216,19 @@ impl TeamStore {
                 });
             }
             PublishTarget::NewEvent { .. } => None,
-            PublishTarget::ExistingEvent { event_id } => Some(self.event_index(*event_id)?),
+            PublishTarget::ExistingEvent { event_id } => {
+                let index = self.event_index(*event_id)?;
+                // Contributing requires already being able to see the event. Without this, an
+                // identifier — which is guessable, being an instance tag plus a small ordinal —
+                // would be enough to write into a sibling's event and, by becoming one of its
+                // authors, to read the whole chain afterwards.
+                if !self.events[index].is_visible_to(actor, role) {
+                    return Err(TeamError::NotPermitted {
+                        reason: "this event is not visible to you, so you cannot add to it",
+                    });
+                }
+                Some(index)
+            }
         };
 
         let revision = self.revision.next();
@@ -213,7 +243,7 @@ impl TeamStore {
                 self.next_event_ordinal = self.next_event_ordinal.saturating_add(1);
                 self.events.push(TeamEvent::new(
                     EventId::new(self.tag, ordinal),
-                    title,
+                    clamp_title(&title),
                     actor,
                     revision,
                 ));
@@ -244,8 +274,8 @@ impl TeamStore {
             version_id,
             AuthoredVersion {
                 author: actor,
-                summary,
-                handoff,
+                summary: clamp_summary(&summary),
+                handoff: handoff.as_deref().map(clamp_handoff),
                 evidence_refs: Vec::new(),
             },
             root_state,
@@ -267,7 +297,13 @@ impl TeamStore {
             authored_on_stale_view: authored_on_stale_view.is_some(),
             deduplicated: false,
         };
-        self.committed.insert(retry_key, outcome.clone());
+        self.committed.insert(
+            retry_key,
+            CommittedSubmission {
+                fingerprint,
+                outcome: outcome.clone(),
+            },
+        );
         Ok(outcome)
     }
 
@@ -306,6 +342,14 @@ impl TeamStore {
                     if !role.is_root() {
                         return Err(TeamError::NotPermitted {
                             reason: "only the root may change root attention state",
+                        });
+                    }
+                    // `resolved` ends coordination on this entry for good. Walking it back would
+                    // pull an old entry into the active view in place; the way to make a matter
+                    // current again is to publish a new version of it.
+                    if version.root_state() == RootState::Resolved {
+                        return Err(TeamError::RootAttentionResolved {
+                            version_id: target.version_id,
                         });
                     }
                 }
@@ -382,23 +426,29 @@ impl TeamStore {
             versions: event
                 .versions()
                 .iter()
-                .map(|version| VersionView {
-                    id: version.id(),
-                    author_label: self.label_of(version.authored().author),
-                    summary: version.authored().summary.clone(),
-                    handoff: version.authored().handoff.clone(),
-                    producer_state: version.producer_state(),
-                    root_state: version.root_state(),
-                    authored_on_stale_view: version.authored_on_stale_view().is_some(),
-                })
+                .map(|version| self.version_view(version))
                 .collect(),
+        }
+    }
+
+    fn version_view(&self, version: &TeamVersion) -> VersionView {
+        VersionView {
+            id: version.id(),
+            author_label: self.label_of(version.authored().author),
+            summary: version.authored().summary.clone(),
+            handoff: version.authored().handoff.clone(),
+            producer_state: version.producer_state(),
+            root_state: version.root_state(),
+            authored_on_stale_view: version.authored_on_stale_view().is_some(),
         }
     }
 
     /// Bounded, permission-scoped history read.
     ///
-    /// Leaving the active view never deletes anything: this is how a participant gets back to
-    /// entries the projection has dropped.
+    /// Leaving the active view never deletes anything, so this is how a participant gets back to
+    /// entries the projection dropped. Every mode is both capped and pageable: the cap keeps a
+    /// single answer bounded, and the cursor is what makes the material behind the cap reachable
+    /// rather than merely reported as missing.
     pub fn history(
         &self,
         viewer: ThreadId,
@@ -411,58 +461,109 @@ impl TeamStore {
             .unwrap_or(DEFAULT_HISTORY_LIMIT)
             .clamp(1, MAX_HISTORY_LIMIT);
 
-        if let Some(event_id) = query.event_id {
-            let index = self.event_index(event_id)?;
-            let event = &self.events[index];
-            if !event.is_readable_by(viewer, role) {
-                return Err(TeamError::NotPermitted {
-                    reason: "this event is not visible to you",
-                });
-            }
-            let total_versions = event.versions().len();
-            let mut view = self.event_view(event);
-            // Keep the newest entries when the chain is longer than the caller asked for.
-            let dropped = total_versions.saturating_sub(limit);
-            view.versions.drain(..dropped);
-            return Ok(HistoryPage {
-                instance: self.instance,
-                revision: self.revision,
-                events: vec![EventHistory {
-                    event: view,
-                    total_versions,
-                    omitted_versions: dropped,
-                }],
-                total_events: 1,
-                omitted_events: 0,
+        match query.event_id {
+            Some(event_id) => self.event_history(viewer, role, event_id, query.before, limit),
+            None => Ok(self.event_list(viewer, role, query.before, limit)),
+        }
+    }
+
+    /// One event's chain, newest first, walking backwards from `before`.
+    fn event_history(
+        &self,
+        viewer: ThreadId,
+        role: ParticipantRole,
+        event_id: EventId,
+        before: Option<u32>,
+        limit: usize,
+    ) -> Result<HistoryPage, TeamError> {
+        let index = self.event_index(event_id)?;
+        let event = &self.events[index];
+        if !event.is_visible_to(viewer, role) {
+            return Err(TeamError::NotPermitted {
+                reason: "this event is not visible to you",
             });
         }
 
-        let readable: Vec<&TeamEvent> = self
-            .events
+        let total_versions = event.versions().len();
+        let eligible: Vec<&TeamVersion> = event
+            .versions()
             .iter()
-            .filter(|event| event.is_readable_by(viewer, role))
+            .filter(|version| before.is_none_or(|before| version.id().ordinal() < before))
             .collect();
-        let total_events = readable.len();
-        let omitted_events = total_events.saturating_sub(limit);
-        let events = readable
-            .into_iter()
-            .skip(omitted_events)
-            .map(|event| {
-                let total_versions = event.versions().len();
-                EventHistory {
-                    event: self.event_view(event),
-                    total_versions,
-                    omitted_versions: 0,
-                }
-            })
+        let dropped = eligible.len().saturating_sub(limit);
+        let window: Vec<&TeamVersion> = eligible.into_iter().skip(dropped).collect();
+        // The oldest entry returned is where the next page picks up.
+        let next_before = (dropped > 0)
+            .then(|| window.first().map(|version| version.id().ordinal()))
+            .flatten();
+
+        let mut view = self.event_view(event);
+        view.versions = window
+            .iter()
+            .map(|version| self.version_view(version))
             .collect();
         Ok(HistoryPage {
             instance: self.instance,
             revision: self.revision,
+            events: vec![EventHistory {
+                event: view,
+                total_versions,
+                omitted_versions: dropped,
+            }],
+            total_events: 1,
+            omitted_events: 0,
+            next_before,
+        })
+    }
+
+    /// The events this participant may read, newest first, walking backwards from `before`.
+    ///
+    /// Each event only previews its newest entries; the rest is reached by querying that event.
+    fn event_list(
+        &self,
+        viewer: ThreadId,
+        role: ParticipantRole,
+        before: Option<u32>,
+        limit: usize,
+    ) -> HistoryPage {
+        let visible: Vec<&TeamEvent> = self
+            .events
+            .iter()
+            .filter(|event| event.is_visible_to(viewer, role))
+            .collect();
+        let total_events = visible.len();
+        let eligible: Vec<&TeamEvent> = visible
+            .into_iter()
+            .filter(|event| before.is_none_or(|before| event.id().ordinal() < before))
+            .collect();
+        let dropped = eligible.len().saturating_sub(limit);
+        let window: Vec<&TeamEvent> = eligible.into_iter().skip(dropped).collect();
+        let next_before = (dropped > 0)
+            .then(|| window.first().map(|event| event.id().ordinal()))
+            .flatten();
+
+        let events = window
+            .into_iter()
+            .map(|event| {
+                let total_versions = event.versions().len();
+                let preview_dropped = total_versions.saturating_sub(LIST_MODE_VERSION_PREVIEW);
+                let mut view = self.event_view(event);
+                view.versions.drain(..preview_dropped);
+                EventHistory {
+                    event: view,
+                    total_versions,
+                    omitted_versions: preview_dropped,
+                }
+            })
+            .collect();
+        HistoryPage {
+            instance: self.instance,
+            revision: self.revision,
             events,
             total_events,
-            omitted_events,
-        })
+            omitted_events: dropped,
+            next_before,
+        }
     }
 
     fn wake_root(&mut self) {

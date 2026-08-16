@@ -11,8 +11,12 @@ use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
-/// Number of hex characters of the instance UUID used as the human/model visible tag.
-const INSTANCE_TAG_LEN: usize = 8;
+/// The instance tag carries the whole UUID, not a prefix of it.
+///
+/// A shorter tag would make "does this reference belong to the current instance?" a probabilistic
+/// question, and the answer has to be exact: an old reference must never resolve against a new
+/// instance just because their prefixes happened to agree.
+const INSTANCE_TAG_LEN: usize = 32;
 
 /// Identity of one live team instance.
 ///
@@ -30,7 +34,7 @@ impl TeamInstanceId {
     pub fn tag(&self) -> InstanceTag {
         let hex = self.0.simple().to_string();
         let mut bytes = [0u8; INSTANCE_TAG_LEN];
-        bytes.copy_from_slice(&hex.as_bytes()[..INSTANCE_TAG_LEN]);
+        bytes.copy_from_slice(hex.as_bytes());
         InstanceTag(bytes)
     }
 }
@@ -47,14 +51,15 @@ impl fmt::Display for TeamInstanceId {
     }
 }
 
-/// Short, printable form of a [`TeamInstanceId`], embedded in every reference string.
+/// Printable form of a [`TeamInstanceId`], embedded in every reference string so that instance
+/// membership is checkable from the reference alone.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct InstanceTag([u8; INSTANCE_TAG_LEN]);
 
 impl fmt::Display for InstanceTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The bytes always come from a hex rendering of a UUID, so they are valid ASCII.
-        f.write_str(std::str::from_utf8(&self.0).unwrap_or("????????"))
+        f.write_str(std::str::from_utf8(&self.0).unwrap_or("<invalid instance tag>"))
     }
 }
 
@@ -165,6 +170,10 @@ impl VersionId {
 
     pub fn event_id(&self) -> EventId {
         EventId::new(self.instance, self.event_ordinal)
+    }
+
+    pub(crate) fn ordinal(&self) -> u32 {
+        self.ordinal
     }
 }
 

@@ -97,33 +97,22 @@ async fn the_root_is_not_woken_by_its_own_publication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_appends_to_one_event_all_land_exactly_once() {
-    let handle = Arc::new(TeamStateHandle::default());
-    let root = ThreadId::new();
-    handle.register_participant(root, ParticipantRole::Root, "/root".to_string());
-    let workers: Vec<ThreadId> = (0..8)
-        .map(|index| {
-            let worker = ThreadId::new();
-            handle.register_participant(
-                worker,
-                ParticipantRole::Member,
-                format!("/root/worker{index}"),
-            );
-            worker
-        })
-        .collect();
-    let opened = publish(&handle, workers[0], "seed");
+    let (handle, root, worker) = team();
+    let opened = publish(&handle, worker, "seed");
 
-    // Every worker appends twice, and each submission is retried once with the same identity.
+    // Both actors are entitled to this event: the worker opened it, and the root can write
+    // anywhere in its own team. Each submits eight distinct appends, and every submission is sent
+    // twice with the same retry identity.
     let mut tasks = Vec::new();
-    for (index, worker) in workers.iter().copied().enumerate() {
-        for attempt in 0..2 {
+    for (actor, name) in [(root, "root"), (worker, "worker")] {
+        for index in 0..8 {
             let handle = Arc::clone(&handle);
-            let request_id = format!("append-{index}-{attempt}");
+            let request_id = format!("append-{name}-{index}");
             tasks.push(tokio::spawn(async move {
                 for _ in 0..2 {
                     handle
                         .publish(
-                            worker,
+                            actor,
                             &Submission {
                                 based_on: handle.revision(),
                                 request_id: request_id.clone(),
@@ -132,11 +121,11 @@ async fn concurrent_appends_to_one_event_all_land_exactly_once() {
                                 target: PublishTarget::ExistingEvent {
                                     event_id: opened.event_id,
                                 },
-                                summary: format!("append {index}/{attempt}"),
+                                summary: format!("append {name}/{index}"),
                                 handoff: None,
                             },
                         )
-                        .expect("concurrent appends are accepted");
+                        .expect("concurrent appends by entitled actors are accepted");
                 }
             }));
         }
@@ -151,6 +140,7 @@ async fn concurrent_appends_to_one_event_all_land_exactly_once() {
             &HistoryQuery {
                 event_id: Some(opened.event_id),
                 limit: Some(MAX_HISTORY_LIMIT),
+                before: None,
             },
         )
         .expect("root may read history");
@@ -158,6 +148,38 @@ async fn concurrent_appends_to_one_event_all_land_exactly_once() {
     // 1 seed + 16 distinct submissions; the 16 retries must not create anything.
     assert_eq!(entry.total_versions, 17);
     assert_eq!(entry.event.versions.len(), 17);
+}
+
+#[tokio::test]
+async fn reusing_a_retry_identity_for_different_content_is_refused() {
+    let (handle, _root, worker) = team();
+    let submission = Submission {
+        based_on: TeamRevision::INITIAL,
+        request_id: "same-id".to_string(),
+    };
+    let request = |summary: &str| PublishRequest {
+        target: PublishTarget::NewEvent {
+            title: "finding".to_string(),
+        },
+        summary: summary.to_string(),
+        handoff: None,
+    };
+
+    handle
+        .publish(worker, &submission, request("the first conclusion"))
+        .expect("first submission lands");
+    let reused = handle
+        .publish(worker, &submission, request("a different conclusion"))
+        .expect_err("different content under the same identity is not a retry");
+
+    assert_eq!(reused, TeamError::RetryIdentityReused);
+    // The refusal must not have thrown away the first submission either.
+    let snapshot = handle.snapshot_for(worker).expect("worker view");
+    assert_eq!(snapshot.events.len(), 1);
+    assert_eq!(
+        snapshot.events[0].versions[0].summary,
+        "the first conclusion"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

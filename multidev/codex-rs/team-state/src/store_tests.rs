@@ -703,6 +703,7 @@ fn history_is_bounded_and_scoped_to_what_the_caller_may_read() {
             &HistoryQuery {
                 event_id: Some(root_only.event_id),
                 limit: None,
+                before: None,
             },
         )
         .expect_err("reading someone else's event is refused");
@@ -724,6 +725,7 @@ fn history_is_bounded_and_scoped_to_what_the_caller_may_read() {
             &HistoryQuery {
                 event_id: None,
                 limit: Some(MAX_HISTORY_LIMIT * 10),
+                before: None,
             },
         )
         .expect("root may query");
@@ -759,6 +761,7 @@ fn history_of_a_long_chain_reports_what_it_left_out() {
             &HistoryQuery {
                 event_id: Some(opened.event_id),
                 limit: Some(2),
+                before: None,
             },
         )
         .expect("worker may read its own event");
@@ -849,4 +852,197 @@ fn an_unregistered_session_gets_no_team_capability() {
         TeamError::UnknownParticipant
     );
     assert!(store.events.is_empty());
+}
+
+#[test]
+fn a_member_cannot_write_into_an_event_it_cannot_see() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let outsider = ThreadId::new();
+    store.register_participant(outsider, ParticipantRole::Member, "/root/other".to_string());
+
+    let private = store
+        .publish(
+            root,
+            &submission(TeamRevision::INITIAL, "r1"),
+            new_event("root only", "something the root is tracking"),
+        )
+        .expect("root may publish");
+
+    // Identifiers are guessable by construction, so the guard has to be the visibility check
+    // rather than the obscurity of the reference.
+    let denied = store
+        .publish(
+            outsider,
+            &submission(store.revision(), "o1"),
+            append(private.event_id, "sneaking in"),
+        )
+        .expect_err("writing into an invisible event is refused");
+    assert_eq!(
+        denied,
+        TeamError::NotPermitted {
+            reason: "this event is not visible to you, so you cannot add to it"
+        }
+    );
+
+    // And the refusal did not hand out read access as a side effect.
+    let still_denied = store
+        .history(
+            outsider,
+            &HistoryQuery {
+                event_id: Some(private.event_id),
+                limit: None,
+                before: None,
+            },
+        )
+        .expect_err("still not readable");
+    assert_eq!(
+        still_denied,
+        TeamError::NotPermitted {
+            reason: "this event is not visible to you"
+        }
+    );
+    let _ = worker;
+}
+
+#[test]
+fn root_attention_does_not_reopen_once_resolved() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let published = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("finding", "worker found something"),
+        )
+        .expect("worker may publish");
+    store
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![set_root_state(
+                    published.version_id,
+                    RootState::Pending,
+                    RootState::Resolved,
+                )],
+            },
+        )
+        .expect("root may resolve");
+
+    let reopened = store
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![set_root_state(
+                    published.version_id,
+                    RootState::Resolved,
+                    RootState::Pending,
+                )],
+            },
+        )
+        .expect_err("resolved coordination is terminal");
+    assert_eq!(
+        reopened,
+        TeamError::RootAttentionResolved {
+            version_id: published.version_id
+        }
+    );
+}
+
+#[test]
+fn history_pages_all_the_way_back_to_the_oldest_entry() {
+    let TeamFixture {
+        mut store, worker, ..
+    } = TeamFixture::new();
+    let opened = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w0"),
+            new_event("finding", "entry 0"),
+        )
+        .expect("worker may publish");
+    for index in 1..12 {
+        store
+            .publish(
+                worker,
+                &submission(store.revision(), &format!("w{index}")),
+                append(opened.event_id, &format!("entry {index}")),
+            )
+            .expect("worker may append");
+    }
+
+    // Walk backwards three at a time until the cursor runs out, and confirm every entry was
+    // reachable. Reporting what was omitted is only half the contract; getting it back is the
+    // other half.
+    let mut seen = Vec::new();
+    let mut before = None;
+    loop {
+        let page = store
+            .history(
+                worker,
+                &HistoryQuery {
+                    event_id: Some(opened.event_id),
+                    limit: Some(3),
+                    before,
+                },
+            )
+            .expect("worker may read its own event");
+        let entry = page.events.first().expect("one event");
+        assert!(entry.event.versions.len() <= 3, "the page stayed bounded");
+        for version in &entry.event.versions {
+            seen.push(version.summary.clone());
+        }
+        match page.next_before {
+            Some(next) => before = Some(next),
+            None => break,
+        }
+    }
+    seen.sort();
+    let mut expected: Vec<String> = (0..12).map(|index| format!("entry {index}")).collect();
+    expected.sort();
+    assert_eq!(seen, expected);
+}
+
+#[test]
+fn listing_events_previews_them_instead_of_returning_every_version() {
+    let TeamFixture {
+        mut store, worker, ..
+    } = TeamFixture::new();
+    let opened = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w0"),
+            new_event("finding", "entry 0"),
+        )
+        .expect("worker may publish");
+    for index in 1..20 {
+        store
+            .publish(
+                worker,
+                &submission(store.revision(), &format!("w{index}")),
+                append(opened.event_id, &format!("entry {index}")),
+            )
+            .expect("worker may append");
+    }
+
+    let page = store
+        .history(worker, &HistoryQuery::default())
+        .expect("worker may list");
+    let entry = page.events.first().expect("one event");
+    assert_eq!(entry.total_versions, 20);
+    assert!(
+        entry.event.versions.len() < 20,
+        "a list of events must not drag in every version the team ever wrote"
+    );
+    assert_eq!(
+        entry.omitted_versions,
+        20 - entry.event.versions.len(),
+        "and it has to say how much it held back"
+    );
 }

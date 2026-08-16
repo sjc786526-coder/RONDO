@@ -782,3 +782,136 @@ async fn compaction_rebuilds_the_projection_and_leaves_no_residue() -> Result<()
 
     Ok(())
 }
+
+/// Near the context window the projection sheds content, says what it dropped, and the model can
+/// fetch the dropped material back through the real `team_history` tool.
+///
+/// Reporting an omission is only half of the contract; this covers the other half over the product
+/// path rather than at the domain boundary.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn omitted_projection_content_is_retrievable_with_team_history() -> Result<()> {
+    use core_test_support::responses::ev_completed_with_tokens;
+
+    // Long enough that two of them cannot share the squeezed budget.
+    let first = format!(
+        "the migration drops orders.legacy_total. {}",
+        "detail ".repeat(40)
+    );
+    let second = format!(
+        "the nightly report still joins on it. {}",
+        "detail ".repeat(40)
+    );
+    let first_for_mock = first.clone();
+    let second_for_mock = second.clone();
+    let server = start_mock_server().await;
+
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            body_contains(request, ROOT_PROMPT) && !has_output(request, "publish-1")
+        },
+        call(
+            "publish-1",
+            "team_publish",
+            json!({ "title": "migration risk", "summary": first_for_mock }),
+        ),
+    )
+    .await;
+
+    // The second publish reports usage that leaves very little room, so the next projection has to
+    // shed the older entry.
+    let second_publish = mount_sse_once_match_with(
+        &server,
+        |request: &wiremock::Request| has_output(request, "publish-1"),
+        move |request: &wiremock::Request| {
+            let projection = projection_of(request).expect("the first entry is active");
+            sse(vec![
+                ev_response_created("publish-2"),
+                ev_function_call_with_namespace(
+                    "publish-2",
+                    NAMESPACE,
+                    "team_publish",
+                    &serde_json::to_string(&json!({
+                        "event_id": only_event_id(&projection),
+                        "summary": second_for_mock,
+                    }))
+                    .expect("arguments serialize"),
+                ),
+                ev_completed_with_tokens("publish-2", /*total_tokens*/ 7_000),
+            ])
+        },
+    )
+    .await;
+
+    // Now the projection is short an entry; the model drills back down through the real tool.
+    let squeezed = mount_sse_once_match_with(
+        &server,
+        |request: &wiremock::Request| has_output(request, "publish-2"),
+        |request: &wiremock::Request| {
+            let projection = projection_of(request).unwrap_or_default();
+            let event_id = ids_with_prefix(&projection, "evt-")
+                .first()
+                .cloned()
+                .unwrap_or_default();
+            call(
+                "history-1",
+                "team_history",
+                json!({ "event_id": event_id, "limit": 50 }),
+            )
+        },
+    )
+    .await;
+
+    let after_history = mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_output(request, "history-1"),
+        say("done", "recovered the dropped entry"),
+    )
+    .await;
+
+    let test = test_codex()
+        .with_model("gpt-5.6-sol")
+        .with_model_info_override("gpt-5.6-sol", |model_info| {
+            // A small window is what makes the budget tight enough to force an omission.
+            model_info.context_window = Some(10_000);
+        })
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Collab)
+                .expect("test config allows feature updates");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("test config allows feature updates");
+            config.multi_agent_v2.team_state_enabled = true;
+            // Keep auto-compaction out of the way; this test is about the projection budget.
+            config.model_auto_compact_token_limit = Some(5_000_000);
+        })
+        .build(&server)
+        .await?;
+    test.submit_turn(ROOT_PROMPT).await?;
+
+    let _ = second_publish.single_request();
+
+    // The squeezed projection dropped the older entry and said where it went.
+    let squeezed_projection = projection(&squeezed.single_request().body_json())
+        .expect("an active team never renders as nothing");
+    assert!(
+        squeezed_projection.contains("team_history"),
+        "a squeezed projection must point at where the dropped content lives:\n{squeezed_projection}"
+    );
+    assert!(
+        !squeezed_projection.contains(&first),
+        "the older entry is what should have been shed:\n{squeezed_projection}"
+    );
+
+    // And the dropped entry really does come back through the tool.
+    let history_output = after_history.single_request().body_json().to_string();
+    assert!(
+        history_output.contains("orders.legacy_total"),
+        "team_history must return the entry the projection omitted"
+    );
+
+    Ok(())
+}
