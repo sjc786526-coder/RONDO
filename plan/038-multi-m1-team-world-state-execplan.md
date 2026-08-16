@@ -177,8 +177,10 @@
 
 ### 当前工作
 
-首轮独立审查判定不通过，其 5 个阻断项与 3 个窄修项经逐条核对**全部属实**，已在本工作树完成整改并提交，
-等待复验。整改记录见 `agent_log/2026-08-16-043500-plan038-m1-review-remediation.md`。
+已完成两轮审查整改。首轮 5 个阻断项 + 3 个窄修项、第二轮复验 5 个阻断项，经逐条核对**全部属实**，
+均已修复并补齐回归，提交在本工作树，等待再次复验。记录见
+`agent_log/2026-08-16-043500-plan038-m1-review-remediation.md`（第一轮）与
+`agent_log/2026-08-16-051500-plan038-m1-second-remediation.md`（第二轮）。
 
 ### 本任务剩余步骤
 
@@ -197,9 +199,9 @@ L6 仍有 12 个未合并提交且改动了 `doc/WBS.md` 与 `doc/WBS-COMPLETED.
 ### 当前验收状态
 
 - ExecPlan：已建立并完成自审。
-- M-1 实现与测试：已完成并已按首轮审查整改。`codex-team-state` + `codex-features` 76/76、
+- M-1 实现与测试：已完成并已按两轮审查整改。`codex-team-state` + `codex-features` 80/80、
   M-1 集成用例 6/6 加身份单测 1/1 全部通过；`just test -p codex-core -p codex-rmcp-client`
-  3456/3541 通过，85 项失败与整改前**失败集合逐条一致**（无新增回归），仍为 code-mode host/
+  3456/3541 通过，85 项失败与首轮基线**失败集合逐条一致**（无新增回归），仍为 code-mode host/
   工作区二进制/真实网络三类环境限制，按审查口径记为"环境归因、未独立确认"。
 - 格式化与 lint：`just fmt`、`just fmt-check`、`just fix -p codex-core -p codex-team-state` 均通过。
 - 文档：M-1 精炼 log 与本计划已更新；`doc/WBS/multi-agent-trusted-evidence.md` 已按实际状态同步。
@@ -233,8 +235,14 @@ L6 仍有 12 个未合并提交且改动了 `doc/WBS.md` 与 `doc/WBS-COMPLETED.
 | 012 | 新增 `features.multi_agent_v2.team_state_enabled`，默认关闭 | 避免改动既有 multi-agent 测试的工具面与 prompt；M-1 集成测试显式打开跑真实链路 | 配置与测试范围 | 已采纳 |
 | 013 | 稳定团队协议走 world-state section 进 initial context，动态投影只走 request-only 尾部 | 稳定前缀保住前缀缓存并随 compaction 自动重注入；易变数据不进 history/rollout | 投影与缓存 | 已采纳 |
 | 014 | authored 内容在写入时即有界，投影与历史因此构造性有界 | 比让每个消费方各自记得裁剪更可靠，也让 store 里不存在无界字段 | 领域与投影 | 审查整改后采纳 |
-| 015 | 极小预算下投影退化为不可再缩的省略通告，允许它略超预算，而不是输出空块或消失 | 空块等于谎称"团队无事发生"且模型无从分辨；通告只有几十 token，真正的空间回收交给已有 compaction | 投影预算 | 审查整改后采纳（与审查建议的硬 clamp 不同） |
+| 015 | ~~极小预算下允许省略通告略超预算~~ **已撤回**：预算是无例外的硬边界，装不下就什么都不返回 | 复验裁决：显式 omission 不能豁免"不得由投影顶爆请求"。改由 `NoRoom -> 请求新上下文窗口 -> 已有 compaction` 承接 | 投影预算 | 第二轮整改撤回并替换为决策 020 |
 | 016 | 可见性同时决定可读与可贡献，append 前校验可见性 | 引用可猜，靠引用保密等于没有边界；与设计合同第 21 条一致，M-2 再由 route 扩展 | 权限 | 审查整改后采纳 |
 | 017 | Root 的 `resolved` 为终态，不可原地重开 | 重新相关只能由新 Version 表达，否则破坏追加式历史语义 | 生命周期 | 审查整改后采纳 |
 | 018 | 只承认可核验的会话身份（用户面 root 线程、带 agent path 的 V2 spawn），其余不登记 | 把"缺省当 Root"改成"证明不了就没有能力"，这才是 fail-closed | 身份 | 审查整改后采纳 |
 | 019 | 对外引用携带完整 UUID 实例身份 | 实例归属必须是可精确校验的事实，不是概率判断；代价是引用变长 | 引用与重置 | 审查整改后采纳 |
+| 020 | 投影预算按**实际待发请求**计算（window − instructions − prompt_input），渲染移入第一次尝试内并复用给 retry | 原先用缓存的 provider usage，本轮新写入的内容根本没计入，"计入整次请求"当时不成立 | 投影预算 | 第二轮整改采纳 |
+| 021 | `render_active_world_index` 返回 `ProjectionOutcome`（Idle/Rendered/NoRoom），`NoRoom` 时调用层请求新上下文窗口 | 硬边界无例外，同时让"近窗口先走 compaction"成为代码里真实发生的事 | 投影与 turn 循环 | 第二轮整改采纳 |
+| 022 | 削减顺序改为先削尽 Version、保留 Event 标题行，最后才整条丢弃 | 全削掉会连 Event ID 一起丢，模型拿不到标识符就无法 `team_history` 下钻，下钻路径在产品上是断的 | 投影渲染 | 第二轮整改采纳（超出复验建议） |
+| 023 | 同批禁止对同一 Version 的同一生命周期轴重复下手 | 全部 target 对批次前旧状态校验、再顺序应用，重复轴可绕过终态；两条轴独立，同批分别改仍合法 | 生命周期 | 第二轮整改采纳 |
+| 024 | retry 判定改为结构化比较 `PublishRequest`，不再拼字符串指纹 | 任何对模型可控文本的编码都可能被构造碰撞；`None` 与 `Some("")` 已经会撞 | 幂等 | 第二轮整改采纳 |
+| 025 | 生命周期校验顺序固定为 权限 → expected 状态 → 转换合法性 | 陈旧调用必须先拿到最新完整状态，而不是先撞上一条它并不知情的终态规则 | 生命周期 | 第二轮整改采纳 |

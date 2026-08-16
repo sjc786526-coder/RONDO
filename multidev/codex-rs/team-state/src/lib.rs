@@ -45,6 +45,7 @@ pub use mutation::Submission;
 pub use mutation::TeamError;
 pub use render::MAX_PROJECTION_TOKENS;
 pub use render::ProjectionBudget;
+pub use render::ProjectionOutcome;
 pub use render::RenderedProjection;
 pub use render::TEAM_WORLD_STATE_CLOSE_TAG;
 pub use render::TEAM_WORLD_STATE_OPEN_TAG;

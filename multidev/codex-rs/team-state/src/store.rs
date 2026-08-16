@@ -47,8 +47,27 @@ const DEFAULT_HISTORY_LIMIT: usize = 10;
 /// still drag in every version the team ever wrote.
 const LIST_MODE_VERSION_PREVIEW: usize = 2;
 
+/// The two independent lifecycle axes of a version.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LifecycleAxis {
+    Producer,
+    Root,
+}
+
+impl LifecycleAxis {
+    fn of(change: LifecycleChange) -> Self {
+        match change {
+            LifecycleChange::CloseProducer => Self::Producer,
+            LifecycleChange::SetRootState(_) => Self::Root,
+        }
+    }
+}
+
 struct CommittedSubmission {
-    fingerprint: String,
+    /// The request as submitted. Comparing the structure itself is what makes "is this the same
+    /// submission?" exact; any flattening into a string has to answer that question with an
+    /// encoding, and an encoding of model-controlled text can be made to collide.
+    request: PublishRequest,
     outcome: PublishOutcome,
 }
 
@@ -192,9 +211,8 @@ impl TeamStore {
         }
 
         let retry_key = (actor, submission.request_id.clone());
-        let fingerprint = request.fingerprint();
         if let Some(existing) = self.committed.get(&retry_key) {
-            if existing.fingerprint != fingerprint {
+            if existing.request != request {
                 return Err(TeamError::RetryIdentityReused);
             }
             return Ok(PublishOutcome {
@@ -202,6 +220,7 @@ impl TeamStore {
                 ..existing.outcome.clone()
             });
         }
+        let original_request = request.clone();
 
         let PublishRequest {
             target,
@@ -300,7 +319,7 @@ impl TeamStore {
         self.committed.insert(
             retry_key,
             CommittedSubmission {
-                fingerprint,
+                request: original_request,
                 outcome: outcome.clone(),
             },
         );
@@ -321,38 +340,41 @@ impl TeamStore {
         }
 
         // Validate every target first; nothing is written until all of them pass.
+        //
+        // Each target is checked against the state as it stands before the batch, so a batch that
+        // named the same version twice on the same axis could have both halves pass against the
+        // old state and then apply in sequence — which is how a terminal state would be walked
+        // around. Naming an axis twice is refused instead. The producer and root axes are
+        // independent, so touching both in one batch stays legal.
+        let mut claimed: Vec<(VersionId, LifecycleAxis)> = Vec::new();
         let mut resolved = Vec::with_capacity(request.targets.len());
         for target in &request.targets {
+            let axis = LifecycleAxis::of(target.change);
+            if claimed.contains(&(target.version_id, axis)) {
+                return Err(TeamError::ConflictingTargets {
+                    version_id: target.version_id,
+                });
+            }
+            claimed.push((target.version_id, axis));
+
             let (event_index, version_index) = self.locate_version(target.version_id)?;
             let version = &self.events[event_index].versions[version_index];
+
+            // Who may act comes first, then whether the caller's picture is still current, and only
+            // then whether the transition is legal. A caller working from a stale picture has to
+            // learn the current state rather than a rule about a state it did not know about.
             match target.change {
-                LifecycleChange::CloseProducer => {
-                    if version.authored().author != actor {
-                        return Err(TeamError::NotPermitted {
-                            reason: "only the author of a version may close it",
-                        });
-                    }
-                    if version.producer_state() == ProducerState::Closed {
-                        return Err(TeamError::VersionClosed {
-                            version_id: target.version_id,
-                        });
-                    }
+                LifecycleChange::CloseProducer if version.authored().author != actor => {
+                    return Err(TeamError::NotPermitted {
+                        reason: "only the author of a version may close it",
+                    });
                 }
-                LifecycleChange::SetRootState(_) => {
-                    if !role.is_root() {
-                        return Err(TeamError::NotPermitted {
-                            reason: "only the root may change root attention state",
-                        });
-                    }
-                    // `resolved` ends coordination on this entry for good. Walking it back would
-                    // pull an old entry into the active view in place; the way to make a matter
-                    // current again is to publish a new version of it.
-                    if version.root_state() == RootState::Resolved {
-                        return Err(TeamError::RootAttentionResolved {
-                            version_id: target.version_id,
-                        });
-                    }
+                LifecycleChange::SetRootState(_) if !role.is_root() => {
+                    return Err(TeamError::NotPermitted {
+                        reason: "only the root may change root attention state",
+                    });
                 }
+                _ => {}
             }
             if version.producer_state() != target.expected_producer_state
                 || version.root_state() != target.expected_root_state
@@ -364,6 +386,24 @@ impl TeamStore {
                         root_state: version.root_state(),
                     },
                 });
+            }
+            match target.change {
+                LifecycleChange::CloseProducer
+                    if version.producer_state() == ProducerState::Closed =>
+                {
+                    return Err(TeamError::VersionClosed {
+                        version_id: target.version_id,
+                    });
+                }
+                // `resolved` ends coordination on this entry for good. Walking it back would pull
+                // an old entry into the active view in place; the way to make a matter current
+                // again is to publish a new version of it.
+                LifecycleChange::SetRootState(_) if version.root_state() == RootState::Resolved => {
+                    return Err(TeamError::RootAttentionResolved {
+                        version_id: target.version_id,
+                    });
+                }
+                _ => {}
             }
             resolved.push((event_index, version_index, *target));
         }

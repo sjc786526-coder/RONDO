@@ -1331,10 +1331,11 @@ async fn run_sampling_request(
         Arc::clone(&turn_diff_tracker),
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
-    // One logical sampling gets one immutable team snapshot. Capturing it here rather than inside
-    // the retry loop is what makes every provider retry of this sampling see the same team state;
-    // the next sampling captures a fresh one.
-    let team_projection = crate::team::capture_team_projection(&sess, turn_context.as_ref()).await;
+    // One logical sampling gets one team projection. It is rendered on the first attempt, from the
+    // request that is actually about to be sent, and then reused: that is what makes every provider
+    // retry of this sampling see the same team state, while still budgeting against real contents.
+    let mut team_projection = None;
+    let mut team_projection_rendered = false;
     let mut retries = 0;
     let mut initial_input = Some(input);
     let mut original_input = None;
@@ -1358,6 +1359,16 @@ async fn run_sampling_request(
         // its output, and pending tool metadata is attached. Appending here neither reorders the
         // conversation nor steps over input the session has not accepted yet.
         let conversation_input_len = prompt_input.len();
+        if !team_projection_rendered {
+            team_projection_rendered = true;
+            team_projection = crate::team::capture_team_projection(
+                &sess,
+                turn_context.as_ref(),
+                &prompt_input,
+                &base_instructions,
+            )
+            .await;
+        }
         if let Some(team_projection) = team_projection.as_ref() {
             prompt_input.push(team_projection.as_response_item());
         }

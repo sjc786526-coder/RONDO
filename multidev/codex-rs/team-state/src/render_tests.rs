@@ -4,10 +4,15 @@ use crate::test_support::TeamFixture;
 use crate::test_support::append;
 use crate::test_support::new_event;
 use crate::test_support::submission;
+use crate::view::TeamSnapshot;
 use pretty_assertions::assert_eq;
 
-/// Upper bound on the irreducible notice, which is the one thing allowed to exceed a tiny budget.
-const MINIMUM_NOTICE_TOKENS: i64 = 64;
+fn rendered(snapshot: &TeamSnapshot, budget: ProjectionBudget) -> RenderedProjection {
+    match render_active_world_index(snapshot, budget) {
+        ProjectionOutcome::Rendered(rendered) => rendered,
+        other => panic!("expected a rendered projection, got {other:?}"),
+    }
+}
 
 fn fixture_with_chain(entries: usize) -> (crate::store::TeamStore, codex_protocol::ThreadId) {
     let TeamFixture {
@@ -49,7 +54,7 @@ fn an_idle_team_renders_nothing() {
 
     assert_eq!(
         render_active_world_index(&snapshot, ProjectionBudget::from_remaining_context(None)),
-        None
+        ProjectionOutcome::Idle
     );
 }
 
@@ -58,16 +63,14 @@ fn a_generous_budget_renders_the_whole_chain() {
     let (store, root) = fixture_with_chain(4);
     let snapshot = store.snapshot_for(root).expect("root view");
 
-    let rendered =
-        render_active_world_index(&snapshot, ProjectionBudget::from_remaining_context(None))
-            .expect("an active team renders");
+    let projection = rendered(&snapshot, ProjectionBudget::from_remaining_context(None));
 
-    assert!(rendered.omissions.is_empty());
+    assert!(projection.omissions.is_empty());
     for index in 0..4 {
         assert!(
-            rendered.text.contains(&format!("entry {index} ")),
+            projection.text.contains(&format!("entry {index} ")),
             "entry {index} should be present in {}",
-            rendered.text
+            projection.text
         );
     }
 }
@@ -77,77 +80,34 @@ fn a_tight_budget_drops_the_oldest_entries_and_says_so() {
     let (store, root) = fixture_with_chain(8);
     let snapshot = store.snapshot_for(root).expect("root view");
 
-    let rendered = render_active_world_index(
+    let projection = rendered(
         &snapshot,
         ProjectionBudget::from_remaining_context(Some(3_500)),
-    )
-    .expect("an active team renders");
+    );
 
     assert!(
-        !rendered.omissions.is_empty(),
+        !projection.omissions.is_empty(),
         "a projection that had to shed content must report it"
     );
-    assert!(rendered.text.contains("team_history"));
+    assert!(projection.text.contains("team_history"));
     assert!(
-        rendered.text.contains("entry 7"),
+        projection.text.contains("entry 7"),
         "the newest entry is what coordination needs and must survive"
     );
-    assert!(!rendered.text.contains("entry 0 "));
+    assert!(!projection.text.contains("entry 0 "));
 }
 
+/// The budget is a boundary, not a suggestion: nothing that comes back may exceed it, at any size
+/// of content and at any amount of remaining room.
 #[test]
-fn the_projection_never_exceeds_the_budget_it_was_given() {
-    let (store, root) = fixture_with_chain(12);
-    let snapshot = store.snapshot_for(root).expect("root view");
-
-    for remaining in [3_000, 6_000, 20_000, 200_000] {
-        let budget = ProjectionBudget::from_remaining_context(Some(remaining));
-        let Some(rendered) = render_active_world_index(&snapshot, budget) else {
-            continue;
-        };
-        assert!(
-            rendered.estimated_tokens <= budget.max_tokens(),
-            "remaining={remaining} produced {} tokens against a budget of {}",
-            rendered.estimated_tokens,
-            budget.max_tokens()
-        );
-    }
-}
-
-#[test]
-fn a_request_with_almost_no_room_left_still_says_the_team_has_active_items() {
-    let (store, root) = fixture_with_chain(4);
-    let snapshot = store.snapshot_for(root).expect("root view");
-    let budget = ProjectionBudget::from_remaining_context(Some(2_100));
-
-    let rendered = render_active_world_index(&snapshot, budget)
-        .expect("an active view must never vanish just because the request is tight");
-
-    assert!(
-        rendered.estimated_tokens <= budget.max_tokens().max(MINIMUM_NOTICE_TOKENS),
-        "the cap still holds: {} tokens against a budget of {}",
-        rendered.estimated_tokens,
-        budget.max_tokens()
-    );
-    assert!(
-        !rendered.omissions.is_empty(),
-        "and what was left out has to be stated: {rendered:?}"
-    );
-    assert!(
-        rendered.text.contains("team_history"),
-        "a squeezed view still has to point at where the content went: {rendered:?}"
-    );
-}
-
-#[test]
-fn one_oversized_entry_cannot_break_the_cap() {
+fn whatever_comes_back_always_fits_the_budget() {
+    let (many, many_root) = fixture_with_chain(12);
+    // One entry far larger than any budget, so shedding cannot rescue it.
     let TeamFixture {
         mut store,
-        root,
+        root: long_root,
         worker,
     } = TeamFixture::new();
-    // A single entry far larger than any budget. Shedding cannot help here: there is nothing else
-    // to drop, so the renderer has to give way rather than overrun.
     store
         .publish(
             worker,
@@ -155,34 +115,59 @@ fn one_oversized_entry_cannot_break_the_cap() {
             new_event("runaway", &"lorem ipsum dolor sit amet ".repeat(4_000)),
         )
         .expect("worker may publish");
-    let snapshot = store.snapshot_for(root).expect("root view");
+    let snapshots = [
+        many.snapshot_for(many_root).expect("root view"),
+        store.snapshot_for(long_root).expect("root view"),
+    ];
 
-    let stored_summary = snapshot.events[0].versions[0].summary.clone();
-    for remaining in [2_500, 5_000, 40_000, 400_000] {
-        let budget = ProjectionBudget::from_remaining_context(Some(remaining));
-        let rendered =
-            render_active_world_index(&snapshot, budget).expect("the active item is reported");
-        // The floor notice is allowed to exceed a pathologically small budget; everything above
-        // that floor must respect it.
-        assert!(
-            rendered.estimated_tokens <= budget.max_tokens().max(MINIMUM_NOTICE_TOKENS),
-            "remaining={remaining} produced {} tokens against a budget of {}",
-            rendered.estimated_tokens,
-            budget.max_tokens()
-        );
-        assert!(
-            rendered.text.contains("team_history") || rendered.text.contains(&stored_summary),
-            "remaining={remaining} produced a view that neither shows the item nor points at it"
-        );
-        // Whenever the entry did not survive intact, the projection has to say so rather than
-        // quietly present a partial view as the whole picture.
-        if !rendered.text.contains(&stored_summary) {
-            assert!(
-                !rendered.omissions.is_empty(),
-                "remaining={remaining} dropped content without saying so"
-            );
+    for snapshot in &snapshots {
+        for remaining in [0, 1_000, 2_050, 2_100, 2_500, 5_000, 40_000, 400_000] {
+            let budget = ProjectionBudget::from_remaining_context(Some(remaining));
+            if let ProjectionOutcome::Rendered(projection) =
+                render_active_world_index(snapshot, budget)
+            {
+                assert!(
+                    projection.estimated_tokens <= budget.max_tokens(),
+                    "remaining={remaining} produced {} tokens against a budget of {}",
+                    projection.estimated_tokens,
+                    budget.max_tokens()
+                );
+            }
         }
     }
+}
+
+/// Squeezed, but still honest: whatever survives has to point at what did not.
+#[test]
+fn a_squeezed_view_names_what_it_dropped() {
+    let (store, root) = fixture_with_chain(8);
+    let snapshot = store.snapshot_for(root).expect("root view");
+
+    let projection = rendered(
+        &snapshot,
+        ProjectionBudget::from_remaining_context(Some(3_000)),
+    );
+
+    assert!(!projection.omissions.is_empty());
+    assert!(
+        projection.text.contains("team_history"),
+        "a squeezed view has to say where the rest went: {projection:?}"
+    );
+}
+
+/// When there is no room at all the renderer says so rather than overrunning or pretending the
+/// team is idle; making room is the caller's job.
+#[test]
+fn no_room_is_reported_rather_than_overrunning_or_faking_an_idle_team() {
+    let (store, root) = fixture_with_chain(4);
+    let snapshot = store.snapshot_for(root).expect("root view");
+
+    let outcome = render_active_world_index(
+        &snapshot,
+        ProjectionBudget::from_remaining_context(Some(2_050)),
+    );
+
+    assert_eq!(outcome, ProjectionOutcome::NoRoom { active_events: 1 });
 }
 
 #[test]

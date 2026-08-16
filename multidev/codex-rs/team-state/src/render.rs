@@ -57,6 +57,20 @@ pub struct RenderedProjection {
     pub estimated_tokens: i64,
 }
 
+/// What rendering the active view produced for this request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProjectionOutcome {
+    /// Nothing is active for this participant, so the projection costs nothing.
+    Idle,
+    /// A view that fits the budget. It may have shed content, in which case `omissions` says so.
+    Rendered(RenderedProjection),
+    /// There are active items, but the request has no room for even a notice about them.
+    ///
+    /// The renderer refuses to overrun its budget, so the caller has to make room — which is what
+    /// compaction is for — rather than the projection quietly taking space it was not given.
+    NoRoom { active_events: usize },
+}
+
 fn estimate_tokens(text: &str) -> i64 {
     approx_tokens_from_byte_count_i64(i64::try_from(text.len()).unwrap_or(i64::MAX))
 }
@@ -64,17 +78,15 @@ fn estimate_tokens(text: &str) -> i64 {
 /// Render `snapshot` into the projection body, dropping the least useful material first if the
 /// budget requires it.
 ///
-/// Returns `None` only when there is nothing active to show, so an idle team costs nothing. A
-/// participant that does have active items always gets something: when the budget cannot fit the
-/// material, the content is replaced by a fixed-size notice that says what was left out and where
-/// to get it. Vanishing silently would tell the model the team has nothing going on, which is a
-/// worse failure than an abbreviated view.
+/// The budget is a hard boundary with no exceptions: whatever comes back fits, or nothing comes
+/// back at all. When content has to be shed, what went missing is named in the body itself, so an
+/// abbreviated view never reads as a complete one.
 pub fn render_active_world_index(
     snapshot: &TeamSnapshot,
     budget: ProjectionBudget,
-) -> Option<RenderedProjection> {
+) -> ProjectionOutcome {
     if snapshot.is_empty() {
-        return None;
+        return ProjectionOutcome::Idle;
     }
 
     // Start from the full chain, then shed detail until it fits. Oldest versions of the longest
@@ -94,13 +106,16 @@ pub fn render_active_world_index(
     while estimate_tokens(&text) > budget.max_tokens {
         let shed = if let Some(target) = events
             .iter_mut()
-            .filter(|candidate| candidate.shown_versions > 1)
+            .filter(|candidate| candidate.shown_versions > 0)
             .max_by_key(|candidate| candidate.shown_versions)
         {
+            // Entries go before the events that hold them: an event line still carries the
+            // identifier a participant needs to fetch the rest, so keeping it is what makes the
+            // omission notice actionable rather than merely informative.
             target.shown_versions -= 1;
             true
-        } else if events.len() > 1 {
-            // Every chain is down to its latest entry; start dropping whole events, oldest first.
+        } else if !events.is_empty() {
+            // Even the bare event lines do not fit; drop them, oldest first.
             events.remove(0);
             dropped_events += 1;
             true
@@ -115,36 +130,18 @@ pub fn render_active_world_index(
     }
 
     if estimate_tokens(&text) > budget.max_tokens {
-        // A single entry is still too large for the room available. Nothing can be shed any
-        // further, so the content gives way to a notice of fixed size; the cap is not negotiable.
-        omissions = vec![format!(
-            "all {} active event(s) omitted: this request had no room for them",
-            snapshot.events.len()
-        )];
-        text = render(snapshot, &[], snapshot.events.len(), &omissions);
-        if estimate_tokens(&text) > budget.max_tokens {
-            text = minimum_notice();
-        }
+        // Everything has been dropped and the bare notice still does not fit.
+        return ProjectionOutcome::NoRoom {
+            active_events: snapshot.events.len(),
+        };
     }
 
     let estimated_tokens = estimate_tokens(&text);
-    Some(RenderedProjection {
+    ProjectionOutcome::Rendered(RenderedProjection {
         text,
         omissions,
         estimated_tokens,
     })
-}
-
-/// The smallest thing the projection is ever allowed to become.
-///
-/// This notice is the floor rather than one more thing to shrink. An empty or truncated block would
-/// read as "the team has nothing going on", which is worse than an oversized one: it is wrong, and
-/// the model cannot tell that it is wrong. The notice is a couple of dozen tokens, so emitting it
-/// cannot meaningfully crowd a request; when even that is too much, the request is already past
-/// what the projection can fix and the existing compaction path is what reclaims room.
-fn minimum_notice() -> String {
-    const NOTICE: &str = "\nActive team items exist but this request had no room for them; retrieve them with team_history.\n";
-    format!("{TEAM_WORLD_STATE_OPEN_TAG}{NOTICE}{TEAM_WORLD_STATE_CLOSE_TAG}")
 }
 
 struct RenderableEvent<'a> {
@@ -163,7 +160,12 @@ fn collect_omissions(events: &[RenderableEvent<'_>], dropped_events: usize) -> V
         let hidden = candidate.event.versions.len() - candidate.shown_versions;
         if hidden > 0 {
             let id = candidate.event.id;
-            omissions.push(format!("{id}: {hidden} earlier version(s) omitted"));
+            let scope = if candidate.shown_versions == 0 {
+                "all"
+            } else {
+                "earlier"
+            };
+            omissions.push(format!("{id}: {hidden} {scope} version(s) omitted"));
         }
     }
     omissions

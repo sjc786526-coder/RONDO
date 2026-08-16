@@ -1046,3 +1046,171 @@ fn listing_events_previews_them_instead_of_returning_every_version() {
         "and it has to say how much it held back"
     );
 }
+
+/// A batch cannot step around a terminal state by naming the same axis twice: both halves would
+/// validate against the state as it stood before the batch, and then apply in order.
+#[test]
+fn one_batch_cannot_change_the_same_lifecycle_axis_twice() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let published = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("finding", "worker found something"),
+        )
+        .expect("worker may publish");
+
+    let sneaky = store
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![
+                    set_root_state(
+                        published.version_id,
+                        RootState::Pending,
+                        RootState::Resolved,
+                    ),
+                    set_root_state(
+                        published.version_id,
+                        RootState::Pending,
+                        RootState::Tracking,
+                    ),
+                ],
+            },
+        )
+        .expect_err("naming one axis twice in a batch is refused");
+    assert_eq!(
+        sneaky,
+        TeamError::ConflictingTargets {
+            version_id: published.version_id
+        }
+    );
+
+    // Nothing was written: the batch is still all-or-nothing.
+    let snapshot = store.snapshot_for(root).expect("root view");
+    assert_eq!(
+        snapshot.events[0].versions[0].root_state,
+        RootState::Pending
+    );
+}
+
+/// The two axes are independent, so one batch may still touch both on the same version.
+#[test]
+fn one_batch_may_still_change_both_axes_of_a_version() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let published = store
+        .publish(
+            root,
+            &submission(TeamRevision::INITIAL, "r1"),
+            new_event("root item", "the root's own note"),
+        )
+        .expect("root may publish");
+
+    store
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![
+                    close_producer(published.version_id, RootState::Tracking),
+                    set_root_state(
+                        published.version_id,
+                        RootState::Tracking,
+                        RootState::Resolved,
+                    ),
+                ],
+            },
+        )
+        .expect("producer and root state are independent axes");
+    let _ = worker;
+}
+
+/// A caller whose picture of a version is out of date learns the current state, even when the
+/// change it asked for would also have been rejected as a terminal transition.
+#[test]
+fn a_stale_call_against_a_terminal_state_gets_the_current_state_back() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let published = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("finding", "worker found something"),
+        )
+        .expect("worker may publish");
+    // The root resolves it and the author closes it; a caller still holding the original view now
+    // has both fields wrong.
+    store
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![set_root_state(
+                    published.version_id,
+                    RootState::Pending,
+                    RootState::Resolved,
+                )],
+            },
+        )
+        .expect("root may resolve");
+    store
+        .update_lifecycle(
+            worker,
+            LifecycleRequest {
+                targets: vec![close_producer(published.version_id, RootState::Resolved)],
+            },
+        )
+        .expect("author may close");
+
+    let stale_root = store
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![set_root_state(
+                    published.version_id,
+                    RootState::Pending,
+                    RootState::Tracking,
+                )],
+            },
+        )
+        .expect_err("a stale lifecycle change is refused");
+    assert_eq!(
+        stale_root,
+        TeamError::LifecycleConflict {
+            current: LifecycleSnapshot {
+                version_id: published.version_id,
+                producer_state: ProducerState::Closed,
+                root_state: RootState::Resolved,
+            }
+        },
+        "the refusal has to carry the whole current state, not just the rule that was broken"
+    );
+
+    let stale_author = store
+        .update_lifecycle(
+            worker,
+            LifecycleRequest {
+                targets: vec![close_producer(published.version_id, RootState::Pending)],
+            },
+        )
+        .expect_err("a stale close is refused");
+    assert_eq!(
+        stale_author,
+        TeamError::LifecycleConflict {
+            current: LifecycleSnapshot {
+                version_id: published.version_id,
+                producer_state: ProducerState::Closed,
+                root_state: RootState::Resolved,
+            }
+        }
+    );
+}

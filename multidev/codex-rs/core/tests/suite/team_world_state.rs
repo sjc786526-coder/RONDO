@@ -95,6 +95,32 @@ fn projection_placement(body: &Value) -> (usize, bool) {
     (count, last_is_projection)
 }
 
+/// The JSON a tool returned, read from the `function_call_output` that carries it.
+///
+/// Searching the whole request body instead would match text that merely travelled along in the
+/// conversation history, which makes an assertion pass whether or not the tool returned anything.
+fn tool_output_in(body: &Value, call_id: &str) -> Option<Value> {
+    let output = input_items(body).iter().find(|item| {
+        item.get("type").and_then(Value::as_str) == Some("function_call_output")
+            && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+    })?;
+    let text = output
+        .get("output")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| item_text(output).map(str::to_string))?;
+    serde_json::from_str(&text).ok()
+}
+
+fn tool_output(request: &wiremock::Request, call_id: &str) -> Option<Value> {
+    tool_output_in(&body(request), call_id)
+}
+
+/// Coarse token size of a chunk of model-visible text.
+fn approx_tokens(text: &str) -> i64 {
+    i64::try_from(text.len() / 4).unwrap_or(i64::MAX)
+}
+
 fn ids_with_prefix(projection: &str, prefix: &str) -> Vec<String> {
     projection
         .split_whitespace()
@@ -843,7 +869,8 @@ async fn omitted_projection_content_is_retrievable_with_team_history() -> Result
     )
     .await;
 
-    // Now the projection is short an entry; the model drills back down through the real tool.
+    // Now the projection is short an entry; the model drills back down through the real tool. The
+    // first page is deliberately one entry wide so the cursor has to be used to reach the rest.
     let squeezed = mount_sse_once_match_with(
         &server,
         |request: &wiremock::Request| has_output(request, "publish-2"),
@@ -856,15 +883,37 @@ async fn omitted_projection_content_is_retrievable_with_team_history() -> Result
             call(
                 "history-1",
                 "team_history",
-                json!({ "event_id": event_id, "limit": 50 }),
+                json!({ "event_id": event_id, "limit": 1 }),
             )
         },
     )
     .await;
 
-    let after_history = mount_sse_once_match(
+    // Page back with the cursor the tool handed out.
+    let after_history = mount_sse_once_match_with(
         &server,
         |request: &wiremock::Request| has_output(request, "history-1"),
+        |request: &wiremock::Request| {
+            let page = tool_output(request, "history-1").expect("the first page came back");
+            let event_id = page["events"][0]["event_id"]
+                .as_str()
+                .expect("the page names its event")
+                .to_string();
+            let next_before = page["next_before"]
+                .as_u64()
+                .expect("a one-wide page over two entries must offer a cursor");
+            call(
+                "history-2",
+                "team_history",
+                json!({ "event_id": event_id, "limit": 1, "before": next_before }),
+            )
+        },
+    )
+    .await;
+
+    let after_second_page = mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_output(request, "history-2"),
         say("done", "recovered the dropped entry"),
     )
     .await;
@@ -902,15 +951,50 @@ async fn omitted_projection_content_is_retrievable_with_team_history() -> Result
         "a squeezed projection must point at where the dropped content lives:\n{squeezed_projection}"
     );
     assert!(
+        !ids_with_prefix(&squeezed_projection, "evt-").is_empty(),
+        "and it must still name the event, or the pointer is not actionable:\n{squeezed_projection}"
+    );
+
+    // The point of the whole budget: against a small window the projection stays a small slice of
+    // it rather than growing to whatever the team happens to hold.
+    const TEST_CONTEXT_WINDOW: i64 = 10_000;
+    let projection_tokens = approx_tokens(&squeezed_projection);
+    assert!(
+        projection_tokens < TEST_CONTEXT_WINDOW / 5,
+        "a {TEST_CONTEXT_WINDOW}-token window must not carry a {projection_tokens}-token projection"
+    );
+    assert!(
         !squeezed_projection.contains(&first),
         "the older entry is what should have been shed:\n{squeezed_projection}"
     );
 
-    // And the dropped entry really does come back through the tool.
-    let history_output = after_history.single_request().body_json().to_string();
+    // And the dropped entry really does come back — asserted on the tool's own output, not on the
+    // request as a whole, which still carries the original publish arguments in its history.
+    let first_page = tool_output_in(&after_history.single_request().body_json(), "history-1")
+        .expect("the first page came back");
+    let second_page = tool_output_in(&after_second_page.single_request().body_json(), "history-2")
+        .expect("the second page came back");
+    let paged_summaries: Vec<String> = [&first_page, &second_page]
+        .iter()
+        .flat_map(|page| {
+            page["events"][0]["versions"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .filter_map(|version| version["summary"].as_str().map(str::to_string))
+        .collect();
     assert!(
-        history_output.contains("orders.legacy_total"),
-        "team_history must return the entry the projection omitted"
+        paged_summaries
+            .iter()
+            .any(|summary| summary.contains("orders.legacy_total")),
+        "team_history must return the entry the projection omitted, got {paged_summaries:?}"
+    );
+    assert!(
+        paged_summaries
+            .iter()
+            .any(|summary| summary.contains("still joins on it")),
+        "and the newest entry too, got {paged_summaries:?}"
     );
 
     Ok(())

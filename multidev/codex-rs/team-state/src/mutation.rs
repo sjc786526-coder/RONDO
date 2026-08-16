@@ -39,19 +39,6 @@ pub struct PublishRequest {
     pub handoff: Option<String>,
 }
 
-impl PublishRequest {
-    /// Identifies the content of a submission, so a repeated retry identity can be told apart from
-    /// an accidental reuse of one.
-    pub(crate) fn fingerprint(&self) -> String {
-        let target = match &self.target {
-            PublishTarget::NewEvent { title } => format!("new:{title}"),
-            PublishTarget::ExistingEvent { event_id } => format!("append:{event_id}"),
-        };
-        let handoff = self.handoff.as_deref().unwrap_or_default();
-        format!("{target}\u{1e}{}\u{1e}{handoff}", self.summary)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PublishOutcome {
     pub event_id: EventId,
@@ -135,6 +122,9 @@ pub enum TeamError {
     RetryIdentityReused,
     /// Root attention on this version is already finished and does not reopen in place.
     RootAttentionResolved { version_id: VersionId },
+    /// One batch named the same version twice on the same lifecycle axis, which would make the
+    /// outcome depend on ordering and could step around a terminal state.
+    ConflictingTargets { version_id: VersionId },
 }
 
 impl fmt::Display for TeamError {
@@ -175,6 +165,10 @@ impl fmt::Display for TeamError {
             Self::InvalidRequest { reason } => write!(f, "invalid request: {reason}"),
             Self::RetryIdentityReused => f.write_str(
                 "this retry identity was already used for different content; use a new one, or resend the original content unchanged",
+            ),
+            Self::ConflictingTargets { version_id } => write!(
+                f,
+                "this batch changes {version_id} twice on the same lifecycle axis; name it once"
             ),
             Self::RootAttentionResolved { version_id } => write!(
                 f,

@@ -173,6 +173,7 @@ async fn reusing_a_retry_identity_for_different_content_is_refused() {
         .expect_err("different content under the same identity is not a retry");
 
     assert_eq!(reused, TeamError::RetryIdentityReused);
+
     // The refusal must not have thrown away the first submission either.
     let snapshot = handle.snapshot_for(worker).expect("worker view");
     assert_eq!(snapshot.events.len(), 1);
@@ -243,4 +244,32 @@ fn every_clone_of_the_handle_sees_the_same_canonical_state() {
             .collect::<Vec<_>>(),
         vec![published.event_id]
     );
+}
+
+/// An empty handoff and the absence of one are different submissions. A retry check that flattens
+/// the request into text has to decide how to encode that difference, and any encoding of
+/// model-controlled text can be made to collide; comparing the request itself cannot.
+#[tokio::test]
+async fn an_empty_field_is_not_the_same_submission_as_a_missing_one() {
+    let (handle, _root, worker) = team();
+    let submission = Submission {
+        based_on: TeamRevision::INITIAL,
+        request_id: "ambiguity".to_string(),
+    };
+    let request = |handoff: Option<&str>| PublishRequest {
+        target: PublishTarget::NewEvent {
+            title: "finding".to_string(),
+        },
+        summary: "same summary".to_string(),
+        handoff: handoff.map(str::to_string),
+    };
+
+    handle
+        .publish(worker, &submission, request(None))
+        .expect("first submission lands");
+    let ambiguous = handle
+        .publish(worker, &submission, request(Some("")))
+        .expect_err("an empty handoff is not the absence of one");
+
+    assert_eq!(ambiguous, TeamError::RetryIdentityReused);
 }
