@@ -809,193 +809,228 @@ async fn compaction_rebuilds_the_projection_and_leaves_no_residue() -> Result<()
     Ok(())
 }
 
-/// Near the context window the projection sheds content, says what it dropped, and the model can
-/// fetch the dropped material back through the real `team_history` tool.
+/// When the team holds more than the projection's cap allows, the projection sheds content, says
+/// so, and the model can page the dropped material back through the real `team_history` tool.
 ///
 /// Reporting an omission is only half of the contract; this covers the other half over the product
-/// path rather than at the domain boundary.
+/// path. The squeeze comes from the volume of team content rather than a shrunken window, so it
+/// does not depend on how large this build's instructions or tool schemas happen to be.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn omitted_projection_content_is_retrievable_with_team_history() -> Result<()> {
-    use core_test_support::responses::ev_completed_with_tokens;
+    use codex_team_state::MAX_PROJECTION_TOKENS;
 
-    // Long enough that two of them cannot share the squeezed budget.
-    let first = format!(
-        "the migration drops orders.legacy_total. {}",
-        "detail ".repeat(40)
-    );
-    let second = format!(
-        "the nightly report still joins on it. {}",
-        "detail ".repeat(40)
-    );
-    let first_for_mock = first.clone();
-    let second_for_mock = second.clone();
+    const EVENT_COUNT: usize = 10;
     let server = start_mock_server().await;
 
+    // One response opening many substantial events, so the whole chain cannot fit the cap.
+    let publishes: Vec<Value> = (0..EVENT_COUNT)
+        .map(|index| {
+            let summary = format!(
+                "finding {index}: {}",
+                "the migration drops a column the nightly report still reads. ".repeat(30)
+            );
+            json!({ "title": format!("risk {index}"), "summary": summary })
+        })
+        .collect();
+    let mut events = vec![ev_response_created("publish-all")];
+    for (index, args) in publishes.iter().enumerate() {
+        events.push(ev_function_call_with_namespace(
+            &format!("publish-{index}"),
+            NAMESPACE,
+            "team_publish",
+            &serde_json::to_string(args)?,
+        ));
+    }
+    events.push(ev_completed("publish-all"));
     mount_sse_once_match(
         &server,
         |request: &wiremock::Request| {
-            body_contains(request, ROOT_PROMPT) && !has_output(request, "publish-1")
+            body_contains(request, ROOT_PROMPT) && !has_output(request, "publish-0")
         },
-        call(
-            "publish-1",
-            "team_publish",
-            json!({ "title": "migration risk", "summary": first_for_mock }),
-        ),
+        sse(events),
     )
     .await;
 
-    // The second publish reports usage that leaves very little room, so the next projection has to
-    // shed the older entry.
-    let second_publish = mount_sse_once_match_with(
+    // The projection cannot show everything; the model pages the rest back, one entry at a time so
+    // the cursor has to be used.
+    let squeezed = mount_sse_once_match(
         &server,
-        |request: &wiremock::Request| has_output(request, "publish-1"),
-        move |request: &wiremock::Request| {
-            let projection = projection_of(request).expect("the first entry is active");
-            sse(vec![
-                ev_response_created("publish-2"),
-                ev_function_call_with_namespace(
-                    "publish-2",
-                    NAMESPACE,
-                    "team_publish",
-                    &serde_json::to_string(&json!({
-                        "event_id": only_event_id(&projection),
-                        "summary": second_for_mock,
-                    }))
-                    .expect("arguments serialize"),
-                ),
-                ev_completed_with_tokens("publish-2", /*total_tokens*/ 7_000),
-            ])
-        },
+        |request: &wiremock::Request| has_output(request, "publish-0"),
+        call("history-1", "team_history", json!({ "limit": 1 })),
     )
     .await;
-
-    // Now the projection is short an entry; the model drills back down through the real tool. The
-    // first page is deliberately one entry wide so the cursor has to be used to reach the rest.
-    let squeezed = mount_sse_once_match_with(
-        &server,
-        |request: &wiremock::Request| has_output(request, "publish-2"),
-        |request: &wiremock::Request| {
-            let projection = projection_of(request).unwrap_or_default();
-            let event_id = ids_with_prefix(&projection, "evt-")
-                .first()
-                .cloned()
-                .unwrap_or_default();
-            call(
-                "history-1",
-                "team_history",
-                json!({ "event_id": event_id, "limit": 1 }),
-            )
-        },
-    )
-    .await;
-
-    // Page back with the cursor the tool handed out.
-    let after_history = mount_sse_once_match_with(
+    let after_first_page = mount_sse_once_match_with(
         &server,
         |request: &wiremock::Request| has_output(request, "history-1"),
         |request: &wiremock::Request| {
             let page = tool_output(request, "history-1").expect("the first page came back");
-            let event_id = page["events"][0]["event_id"]
-                .as_str()
-                .expect("the page names its event")
-                .to_string();
             let next_before = page["next_before"]
                 .as_u64()
-                .expect("a one-wide page over two entries must offer a cursor");
+                .expect("a one-wide page over ten events must offer a cursor");
             call(
                 "history-2",
                 "team_history",
-                json!({ "event_id": event_id, "limit": 1, "before": next_before }),
+                json!({ "limit": 1, "before": next_before }),
             )
         },
     )
     .await;
-
     let after_second_page = mount_sse_once_match(
         &server,
         |request: &wiremock::Request| has_output(request, "history-2"),
-        say("done", "recovered the dropped entry"),
+        say("done", "recovered the dropped entries"),
     )
     .await;
 
-    let test = test_codex()
-        .with_model("gpt-5.6-sol")
+    let test = team_enabled_codex().build(&server).await?;
+    test.submit_turn(ROOT_PROMPT).await?;
+
+    // The projection shed content, said so, and still named events so the pointer is actionable.
+    let squeezed_projection = projection(&squeezed.single_request().body_json())
+        .expect("an active team never renders as nothing");
+    assert!(
+        squeezed_projection.contains("Omitted") && squeezed_projection.contains("team_history"),
+        "a squeezed projection must name what it dropped and where to get it:\n{squeezed_projection}"
+    );
+    assert!(
+        !ids_with_prefix(&squeezed_projection, "evt-").is_empty(),
+        "and it must still name events, or the pointer is not actionable:\n{squeezed_projection}"
+    );
+    assert!(
+        approx_tokens(&squeezed_projection) <= MAX_PROJECTION_TOKENS,
+        "the projection must respect its cap, got ~{} tokens",
+        approx_tokens(&squeezed_projection)
+    );
+
+    // Paging through the real tool reaches events the projection could not show.
+    let first_page = tool_output_in(&after_first_page.single_request().body_json(), "history-1")
+        .expect("the first page came back");
+    let second_page = tool_output_in(&after_second_page.single_request().body_json(), "history-2")
+        .expect("the second page came back");
+    let paged_events: Vec<String> = [&first_page, &second_page]
+        .iter()
+        .filter_map(|page| page["events"][0]["event_id"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(paged_events.len(), 2, "both pages returned an event");
+    assert_ne!(
+        paged_events[0], paged_events[1],
+        "the cursor must actually move: {paged_events:?}"
+    );
+    assert_eq!(
+        first_page["total_events"].as_u64(),
+        Some(EVENT_COUNT as u64),
+        "the page reports how much there is in total"
+    );
+
+    Ok(())
+}
+
+/// When the request has no room for the active view, compaction runs *before* the provider is
+/// called and the view is re-rendered against the smaller prompt.
+///
+/// The ordering is the whole point: a sampling that went out first and compacted afterwards would
+/// have let the model decide while being shown an idle team.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_room_compacts_before_sampling_instead_of_sending_a_projectionless_request() -> Result<()>
+{
+    use codex_model_provider_info::built_in_model_providers;
+    use core_test_support::responses::mount_sse_sequence_without_request_count_expectation;
+    use core_test_support::responses::received_responses_request_count;
+
+    const COMPACT_PROMPT: &str = "SUMMARIZE_THE_SESSION_NOW";
+    let server = start_mock_server().await;
+
+    // Turn one fills the team with more than a small window can carry alongside the conversation.
+    let bulky = "the migration drops a column the nightly report still reads. ".repeat(30);
+    let mut publish_events = vec![ev_response_created("publish-all")];
+    for index in 0..6 {
+        publish_events.push(ev_function_call_with_namespace(
+            &format!("publish-{index}"),
+            NAMESPACE,
+            "team_publish",
+            &serde_json::to_string(&json!({
+                "title": format!("risk {index}"),
+                "summary": format!("finding {index}: {bulky}"),
+            }))?,
+        ));
+    }
+    publish_events.push(ev_completed("publish-all"));
+
+    let requests = mount_sse_sequence_without_request_count_expectation(
+        &server,
+        vec![
+            sse(publish_events),
+            // Whatever comes next is either the compaction summarization or the next sampling.
+            sse(vec![
+                ev_response_created("r2"),
+                ev_assistant_message("m2", "a summary of the session"),
+                ev_completed("r2"),
+            ]),
+            sse(vec![
+                ev_response_created("r3"),
+                ev_assistant_message("m3", "done"),
+                ev_completed("r3"),
+            ]),
+            sse(vec![
+                ev_response_created("r4"),
+                ev_assistant_message("m4", "done"),
+                ev_completed("r4"),
+            ]),
+        ],
+    )
+    .await;
+
+    let mut provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+    provider.name = "OpenAI (test)".into();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+
+    let test = team_enabled_codex()
         .with_model_info_override("gpt-5.6-sol", |model_info| {
-            // A small window is what makes the budget tight enough to force an omission.
-            model_info.context_window = Some(10_000);
+            // Small enough that the team content cannot ride along with the conversation.
+            model_info.context_window = Some(14_000);
         })
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::Collab)
-                .expect("test config allows feature updates");
-            config
-                .features
-                .enable(Feature::MultiAgentV2)
-                .expect("test config allows feature updates");
-            config.multi_agent_v2.team_state_enabled = true;
-            // Keep auto-compaction out of the way; this test is about the projection budget.
-            config.model_auto_compact_token_limit = Some(5_000_000);
+        .with_config(move |config| {
+            config.model_provider = provider;
+            config.compact_prompt = Some(COMPACT_PROMPT.to_string());
         })
         .build(&server)
         .await?;
     test.submit_turn(ROOT_PROMPT).await?;
 
-    let _ = second_publish.single_request();
-
-    // The squeezed projection dropped the older entry and said where it went.
-    let squeezed_projection = projection(&squeezed.single_request().body_json())
-        .expect("an active team never renders as nothing");
+    let captured = requests.requests();
     assert!(
-        squeezed_projection.contains("team_history"),
-        "a squeezed projection must point at where the dropped content lives:\n{squeezed_projection}"
-    );
-    assert!(
-        !ids_with_prefix(&squeezed_projection, "evt-").is_empty(),
-        "and it must still name the event, or the pointer is not actionable:\n{squeezed_projection}"
+        received_responses_request_count(&server).await? >= 2,
+        "the turn must have sampled at least twice"
     );
 
-    // The point of the whole budget: against a small window the projection stays a small slice of
-    // it rather than growing to whatever the team happens to hold.
-    const TEST_CONTEXT_WINDOW: i64 = 10_000;
-    let projection_tokens = approx_tokens(&squeezed_projection);
-    assert!(
-        projection_tokens < TEST_CONTEXT_WINDOW / 5,
-        "a {TEST_CONTEXT_WINDOW}-token window must not carry a {projection_tokens}-token projection"
-    );
-    assert!(
-        !squeezed_projection.contains(&first),
-        "the older entry is what should have been shed:\n{squeezed_projection}"
-    );
-
-    // And the dropped entry really does come back — asserted on the tool's own output, not on the
-    // request as a whole, which still carries the original publish arguments in its history.
-    let first_page = tool_output_in(&after_history.single_request().body_json(), "history-1")
-        .expect("the first page came back");
-    let second_page = tool_output_in(&after_second_page.single_request().body_json(), "history-2")
-        .expect("the second page came back");
-    let paged_summaries: Vec<String> = [&first_page, &second_page]
+    // The scenario has to actually reach the no-room path, or the ordering below proves nothing.
+    let compaction_index = captured
         .iter()
-        .flat_map(|page| {
-            page["events"][0]["versions"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-        })
-        .filter_map(|version| version["summary"].as_str().map(str::to_string))
-        .collect();
+        .position(|request| request.body_json().to_string().contains(COMPACT_PROMPT))
+        .expect("the team content must have left no room, forcing a compaction");
+    let projection_index = captured
+        .iter()
+        .position(|request| projection(&request.body_json()).is_some())
+        .expect("and the view must appear once there is room for it");
     assert!(
-        paged_summaries
-            .iter()
-            .any(|summary| summary.contains("orders.legacy_total")),
-        "team_history must return the entry the projection omitted, got {paged_summaries:?}"
+        compaction_index < projection_index,
+        "compaction has to come first: compaction at #{compaction_index}, view at #{projection_index}"
     );
-    assert!(
-        paged_summaries
-            .iter()
-            .any(|summary| summary.contains("still joins on it")),
-        "and the newest entry too, got {paged_summaries:?}"
-    );
+
+    // Every ordinary sampling issued after the team had active items carries the view. A request
+    // that compacts is exempt: it is the mechanism that makes room, not a turn of reasoning.
+    for (index, request) in captured.iter().enumerate().skip(1) {
+        let body = request.body_json();
+        let is_compaction = body.to_string().contains(COMPACT_PROMPT);
+        if is_compaction {
+            continue;
+        }
+        assert!(
+            projection(&body).is_some(),
+            "sampling #{index} reasoned without the active team view:\n{body:#}"
+        );
+    }
 
     Ok(())
 }

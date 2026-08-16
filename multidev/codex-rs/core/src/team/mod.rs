@@ -6,6 +6,9 @@
 
 mod projection;
 
+pub(crate) use projection::PromptCost;
+pub(crate) use projection::TeamProjection;
+pub(crate) use projection::TeamProjectionOutcome;
 pub(crate) use projection::capture_team_projection;
 
 use crate::session::session::Session;
