@@ -2,10 +2,11 @@
 
 The module is intentionally model-agnostic in stage one.  A later authorized
 caller supplies one invocation callback; this runner fixes the side order,
-performs no retries, and records exactly one decision/failure/refusal/timeout
-terminal for every attempted sample.  Artifact identities are derived from
-regular files, frozen locks, or canonical manifests rather than caller-supplied
-digest strings.
+performs no retries, and durably records each attempt before an honest decision
+or non-decision terminal.  An interrupted tail attempt requires an explicit
+infrastructure-failure resolution before the run may resume.  Artifact
+identities are derived from regular files, frozen locks, or canonical manifests
+rather than caller-supplied digest strings.
 """
 
 from __future__ import annotations
@@ -17,9 +18,11 @@ import os
 import re
 import stat
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from ..evidence import STATIC_INSTRUCTIONS
 from . import cross_eval
 
 
@@ -31,6 +34,54 @@ ARTIFACT_MANIFEST_CONTRACT_VERSION = "rondo_l6_canonical_artifact_manifest_v1"
 JOURNAL_SCHEMA_VERSION = 1
 JOURNAL_CONTRACT_VERSION = "rondo_l6_paired_output_journal_v1"
 LOCAL_SIDE_ORDER = ("local-static", "local-ft-static")
+FROZEN_BASE_REPO = "mistralai/Ministral-3-8B-Instruct-2512-BF16"
+FROZEN_BASE_REVISION = "f6fae9795746f63c9be8344932f01275f3c63734"
+FROZEN_CHAT_REVISION = "5b26027e7b19eeb4b7352e1fed3926375dd2cb4d"
+FROZEN_CHAT_SHA256 = (
+    "74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56"
+)
+FROZEN_MODEL_CONTRACT_SHA256 = (
+    "964b071a1bf8fdc8bd81f0b8d1d8bd2262d829044ca24743efa619d1102a8481"
+)
+FROZEN_RUNTIME_LOCK_SHA256 = (
+    "299440bb261f9dbc6641e81fa995ca88af84e4e05530978fe9c46a9716107b75"
+)
+FROZEN_PAIR_CONTRACT_SHA256 = (
+    "ddf17fa1b0eadb1aa8fe6c090f656e3bd331bb529deb012655b063b2335a5514"
+)
+FROZEN_RUNTIME_COMMIT = "08659901c43b51de735740f1cf61bb82fbe0c4e4"
+FROZEN_RUNTIME_SERVER_SHA256 = (
+    "97a6b083ea34fea7e4e4440a0ddb734e1a2f6b775f4b31ef68ba5f998a9eeabd"
+)
+FROZEN_TRAIN_SHA256 = "1e66c06e9357a3b6e14aedd193c5405ad2c18924e57da6a3a209f079b80c110a"
+FROZEN_DATASET_MANIFEST_SHA256 = (
+    "dbf5fffe1f26d7746acf43fdcd092ff3e9cd64ea1f40046cd3b7219a15107190"
+)
+FROZEN_TRAIN_PROJECTION_SHA256 = (
+    "0026cddd2a80771039c6644378120793d98310abdf66f01e7475416f23b2cc14"
+)
+FORMAL_SAMPLING_CONTRACT = {
+    "context_size": 12288,
+    "max_output_tokens": 512,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "seed": 42,
+}
+FORMAL_ADAPTER_ARTIFACT_ID = "plan037-formal-adapter"
+FROZEN_TOKENIZER_FILES = {
+    "special_tokens_map.json": {
+        "bytes": 147094,
+        "sha256": "0a5c981e8c5c6f8886ee007a6d4543a0be6b221cb9ca32a8709384a4c6fc8cbb",
+    },
+    "tokenizer.json": {
+        "bytes": 17078128,
+        "sha256": "d5f6046775b112f0e2d456ee9dba450684ab964fe5c4e231599bdc6773028135",
+    },
+    "tokenizer_config.json": {
+        "bytes": 198094,
+        "sha256": "f59f7294e4f26383d0ea93840fe21cf197784be0842a8301a0343e8c34ed0d6d",
+    },
+}
 
 _LOGICAL_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
 _MANIFEST_MAX_BYTES = 8 * 1024 * 1024
@@ -278,7 +329,10 @@ def inspect_identity_source(source: IdentitySource) -> dict[str, Any]:
             value = json.loads(bytes(canonical_raw).decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise PairedOutputError("identity_source_json_invalid") from exc
-        if bytes(canonical_raw) != cross_eval._json_file_bytes(value):
+        if (
+            source.kind == "canonical_manifest"
+            and bytes(canonical_raw) != cross_eval._json_file_bytes(value)
+        ):
             raise PairedOutputError("identity_source_not_canonical")
         if source.kind == "canonical_manifest":
             components = _validate_artifact_manifest(
@@ -301,6 +355,412 @@ def inspect_identity_source(source: IdentitySource) -> dict[str, Any]:
     return result
 
 
+def _load_identity_source_json(
+    source: IdentitySource,
+    inspected: Mapping[str, Any],
+    *,
+    require_canonical: bool = False,
+) -> dict[str, Any]:
+    raw = cross_eval._safe_read(source.path, private=False)
+    if hashlib.sha256(raw).hexdigest() != inspected.get("sha256"):
+        raise PairedOutputError("identity_source_changed")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise PairedOutputError("identity_source_json_invalid") from exc
+    if not isinstance(value, dict) or (
+        require_canonical and raw != cross_eval._json_file_bytes(value)
+    ):
+        raise PairedOutputError("identity_source_not_canonical")
+    return value
+
+
+def _validate_model_contract(
+    value: Mapping[str, Any], *, identity: Mapping[str, Any]
+) -> None:
+    expected = {
+        "schema_version": 1,
+        "version": "rondo_local_approval_l6_model_contract_v1",
+        "base": {"repo": FROZEN_BASE_REPO, "revision": FROZEN_BASE_REVISION},
+        "tokenizer": {
+            "repo": FROZEN_BASE_REPO,
+            "revision": FROZEN_BASE_REVISION,
+            "files": FROZEN_TOKENIZER_FILES,
+        },
+        "chat_template": {
+            "repo": "mistralai/Ministral-3-8B-Instruct-2512",
+            "revision": FROZEN_CHAT_REVISION,
+            "source_file": "chat_template.jinja",
+            "tracked_relative_path": (
+                "eval/templates/local-approval/"
+                "ministral-3-8b-instruct-2512-chat-template.jinja"
+            ),
+            "sha256": FROZEN_CHAT_SHA256,
+        },
+    }
+    if identity.get("sha256") != FROZEN_MODEL_CONTRACT_SHA256 or value != expected:
+        raise PairedOutputError("formal_model_contract_invalid")
+
+
+def _validate_formal_training_receipt(
+    receipt: Mapping[str, Any], *, model_contract: Mapping[str, Any]
+) -> None:
+    required = {
+        "schema_version",
+        "version",
+        "status",
+        "base",
+        "train",
+        "token_census",
+        "recipe_sha256",
+        "run_kind",
+        "dependencies",
+        "cost",
+        "provider",
+        "persistence",
+        "reload_receipt_sha256",
+        "hardware",
+        "metrics",
+        "output_paths",
+        "artifacts",
+        "bundle_manifest_sha256",
+    }
+    if (
+        set(receipt) != required
+        or receipt.get("schema_version") != 1
+        or receipt.get("version")
+        != "rondo_local_approval_l6_training_receipt_v1"
+        or receipt.get("status") != "completed"
+        or receipt.get("run_kind") != "formal"
+        or receipt.get("base") != model_contract
+    ):
+        raise PairedOutputError("formal_training_receipt_invalid")
+    train = receipt.get("train")
+    if train != {
+        "records": 470,
+        "source_train_jsonl_sha256": FROZEN_TRAIN_SHA256,
+        "source_dataset_manifest_sha256": FROZEN_DATASET_MANIFEST_SHA256,
+        "projection_sha256": FROZEN_TRAIN_PROJECTION_SHA256,
+        "completion_only": True,
+    }:
+        raise PairedOutputError("formal_training_receipt_train_invalid")
+    census = receipt.get("token_census")
+    sequence = census.get("sequence_tokens") if isinstance(census, dict) else None
+    completion = census.get("completion_only") if isinstance(census, dict) else None
+    census_fields = {
+        "schema_version",
+        "version",
+        "status",
+        "exact",
+        "records",
+        "projection_sha256",
+        "tokenizer",
+        "chat_template_applied",
+        "truncation",
+        "packing",
+        "sequence_tokens",
+        "completion_only",
+    }
+    sequence_fields = {"min", "p50", "p95", "max", "total", "limit", "over_limit"}
+    completion_fields = {
+        "prompt_tokens_total",
+        "completion_tokens_total",
+        "records_with_all_prompt_labels_masked",
+        "records_with_unmasked_completion",
+        "records_with_nonempty_completion",
+    }
+    if (
+        not isinstance(census, dict)
+        or set(census) != census_fields
+        or census.get("schema_version") != 1
+        or census.get("version") != "rondo_local_approval_l6_exact_token_census_v1"
+        or census.get("status") != "complete"
+        or census.get("exact") is not True
+        or census.get("records") != 470
+        or census.get("projection_sha256") != FROZEN_TRAIN_PROJECTION_SHA256
+        or census.get("tokenizer")
+        != {
+            "repo": FROZEN_BASE_REPO,
+            "revision": FROZEN_BASE_REVISION,
+            "chat_template_sha256": FROZEN_CHAT_SHA256,
+        }
+        or census.get("chat_template_applied") is not True
+        or census.get("truncation") is not False
+        or census.get("packing") is not False
+        or not isinstance(sequence, dict)
+        or set(sequence) != sequence_fields
+        or any(
+            not isinstance(sequence.get(field), int)
+            or isinstance(sequence[field], bool)
+            for field in sequence_fields
+        )
+        or sequence["min"] <= 0
+        or not (
+            sequence["min"]
+            <= sequence["p50"]
+            <= sequence["p95"]
+            <= sequence["max"]
+            <= sequence["limit"]
+        )
+        or sequence["total"] < sequence["min"] * 470
+        or sequence.get("over_limit") != 0
+        or not isinstance(completion, dict)
+        or set(completion) != completion_fields
+        or completion.get("records_with_all_prompt_labels_masked") != 470
+        or completion.get("records_with_unmasked_completion") != 470
+        or completion.get("records_with_nonempty_completion") != 470
+        or not isinstance(completion.get("prompt_tokens_total"), int)
+        or completion["prompt_tokens_total"] <= 0
+        or not isinstance(completion.get("completion_tokens_total"), int)
+        or completion["completion_tokens_total"] <= 0
+        or completion["prompt_tokens_total"] + completion["completion_tokens_total"]
+        != sequence["total"]
+    ):
+        raise PairedOutputError("formal_training_receipt_census_invalid")
+    dependencies = receipt.get("dependencies")
+    provider = receipt.get("provider")
+    hardware = receipt.get("hardware")
+    persistence = receipt.get("persistence")
+    metrics = receipt.get("metrics")
+    artifacts = receipt.get("artifacts")
+    output_paths = receipt.get("output_paths")
+    if (
+        not isinstance(receipt.get("recipe_sha256"), str)
+        or cross_eval._HEX64.fullmatch(receipt["recipe_sha256"]) is None
+        or not isinstance(dependencies, dict)
+        or set(dependencies) != {"identity", "identity_sha256"}
+        or not isinstance(dependencies.get("identity"), dict)
+        or not dependencies["identity"]
+        or not isinstance(dependencies.get("identity_sha256"), str)
+        or cross_eval._HEX64.fullmatch(dependencies["identity_sha256"]) is None
+        or not isinstance(provider, dict)
+        or set(provider) != {"name", "job_id", "run_id"}
+        or provider.get("name") != "runpod"
+        or not isinstance(provider.get("job_id"), str)
+        or not provider["job_id"]
+        or not isinstance(provider.get("run_id"), str)
+        or not provider["run_id"]
+        or not isinstance(hardware, dict)
+        or set(hardware) != {"name", "cuda"}
+        or not isinstance(hardware.get("name"), str)
+        or not hardware["name"]
+        or not isinstance(hardware.get("cuda"), str)
+        or not hardware["cuda"]
+        or not isinstance(persistence, dict)
+        or set(persistence) != {"kind", "revision"}
+        or persistence.get("kind")
+        not in {"pod_volume", "network_volume", "private_hf_repo", "local_download"}
+        or not isinstance(persistence.get("revision"), str)
+        or not persistence["revision"]
+        or not isinstance(metrics, dict)
+        or set(metrics)
+        != {
+            "trainer_metrics",
+            "global_step",
+            "actual_epochs",
+            "train_loss",
+            "lora_injection",
+        }
+        or not isinstance(metrics.get("trainer_metrics"), dict)
+        or not metrics["trainer_metrics"]
+        or not isinstance(metrics.get("global_step"), int)
+        or isinstance(metrics["global_step"], bool)
+        or metrics["global_step"] <= 0
+        or not isinstance(metrics.get("actual_epochs"), (int, float))
+        or isinstance(metrics["actual_epochs"], bool)
+        or metrics["actual_epochs"] < 0
+        or not isinstance(metrics.get("train_loss"), (int, float))
+        or isinstance(metrics["train_loss"], bool)
+        or not isinstance(metrics.get("lora_injection"), dict)
+        or output_paths != {"adapter": "adapter-final", "checkpoints": "checkpoints"}
+        or not isinstance(artifacts, dict)
+        or set(artifacts) != {"adapter", "checkpoints"}
+        or not isinstance(receipt.get("reload_receipt_sha256"), str)
+        or cross_eval._HEX64.fullmatch(receipt["reload_receipt_sha256"]) is None
+        or not isinstance(receipt.get("bundle_manifest_sha256"), str)
+        or cross_eval._HEX64.fullmatch(receipt["bundle_manifest_sha256"]) is None
+    ):
+        raise PairedOutputError("formal_training_receipt_facts_invalid")
+    injection = metrics["lora_injection"]
+    if (
+        set(injection)
+        != {
+            "target_pattern",
+            "targeted_modules",
+            "trainable_parameters",
+            "vision_projector_lm_head_hits",
+        }
+        or not isinstance(injection.get("target_pattern"), str)
+        or not injection["target_pattern"]
+        or not isinstance(injection.get("targeted_modules"), int)
+        or isinstance(injection["targeted_modules"], bool)
+        or injection["targeted_modules"] <= 0
+        or not isinstance(injection.get("trainable_parameters"), int)
+        or isinstance(injection["trainable_parameters"], bool)
+        or injection["trainable_parameters"] <= 0
+        or injection.get("vision_projector_lm_head_hits") != 0
+    ):
+        raise PairedOutputError("formal_training_receipt_facts_invalid")
+    for artifact_name, artifact in artifacts.items():
+        if (
+            not isinstance(artifact, dict)
+            or set(artifact) != {"files", "tree_sha256"}
+            or not isinstance(artifact["files"], dict)
+            or (artifact_name == "adapter" and not artifact["files"])
+            or not isinstance(artifact["tree_sha256"], str)
+            or cross_eval._HEX64.fullmatch(artifact["tree_sha256"]) is None
+            or artifact["tree_sha256"]
+            != cross_eval._canonical_sha256(artifact["files"])
+        ):
+            raise PairedOutputError("formal_training_receipt_facts_invalid")
+        for relative_path, file_identity in artifact["files"].items():
+            if (
+                not isinstance(relative_path, str)
+                or not relative_path
+                or relative_path.startswith("/")
+                or ".." in Path(relative_path).parts
+                or not isinstance(file_identity, dict)
+                or set(file_identity) != {"bytes", "sha256"}
+                or not isinstance(file_identity["bytes"], int)
+                or isinstance(file_identity["bytes"], bool)
+                or file_identity["bytes"] <= 0
+                or not isinstance(file_identity["sha256"], str)
+                or cross_eval._HEX64.fullmatch(file_identity["sha256"]) is None
+            ):
+                raise PairedOutputError("formal_training_receipt_facts_invalid")
+    cost = receipt.get("cost")
+    if (
+        not isinstance(cost, dict)
+        or set(cost) != {"provider", "actual_usd"}
+        or cost.get("provider") != "runpod"
+        or not isinstance(cost.get("actual_usd"), str)
+        or not cost["actual_usd"]
+    ):
+        raise PairedOutputError("formal_training_receipt_cost_invalid")
+    try:
+        actual_cost = Decimal(cost["actual_usd"])
+    except InvalidOperation as exc:
+        raise PairedOutputError("formal_training_receipt_cost_invalid") from exc
+    if (
+        not actual_cost.is_finite()
+        or actual_cost < 0
+        or actual_cost > Decimal("25")
+    ):
+        raise PairedOutputError("formal_training_receipt_cost_invalid")
+
+
+def _validate_adapter_artifact_binding(
+    receipt: Mapping[str, Any],
+    *,
+    base_model: IdentitySource,
+    local_static: IdentitySource,
+    local_ft_static: IdentitySource,
+    inspected: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Bind the adapter-on/off pair to the frozen base and formal receipt."""
+
+    if (
+        local_static.kind != "frozen_lock"
+        or local_static.path != base_model.path
+        or inspected["local-static"].get("sha256")
+        != inspected["base-model"].get("sha256")
+        or local_ft_static.kind != "canonical_manifest"
+    ):
+        raise PairedOutputError("formal_pair_artifact_binding_invalid")
+    manifest = _load_identity_source_json(
+        local_ft_static,
+        inspected["local-ft-static"],
+        require_canonical=True,
+    )
+    if manifest.get("artifact_id") != FORMAL_ADAPTER_ARTIFACT_ID:
+        raise PairedOutputError("formal_pair_artifact_binding_invalid")
+    components = inspected["local-ft-static"].get("components")
+    if not isinstance(components, list):
+        raise PairedOutputError("formal_pair_artifact_binding_invalid")
+    actual_adapter_files = {
+        component["relative_path"]: {
+            "bytes": component["size_bytes"],
+            "sha256": component["sha256"],
+        }
+        for component in components
+    }
+    expected_adapter_files = receipt.get("artifacts", {}).get("adapter", {}).get(
+        "files"
+    )
+    if actual_adapter_files != expected_adapter_files:
+        raise PairedOutputError("formal_pair_adapter_receipt_mismatch")
+
+
+def _validate_pair_contract(
+    value: Mapping[str, Any],
+    *,
+    runtime_value: Mapping[str, Any],
+    runtime_identity: Mapping[str, Any],
+    chat_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    request = {
+        "schema_version": 1,
+        "transport": "llama_cpp_b10333_responses_static_v3",
+        "static_payload_schema_version": cross_eval.STATIC_PAYLOAD_SCHEMA_VERSION,
+        "static_instructions_sha256": hashlib.sha256(
+            STATIC_INSTRUCTIONS.encode("utf-8")
+        ).hexdigest(),
+        "static_decision_schema_name": cross_eval.STATIC_DECISION_SCHEMA_NAME,
+        "static_decision_schema_sha256": cross_eval._canonical_sha256(
+            cross_eval.STATIC_DECISION_SCHEMA
+        ),
+        "sampling": FORMAL_SAMPLING_CONTRACT,
+    }
+    expected = {
+        "schema_version": 1,
+        "version": "rondo_l6_local_pair_contract_v1",
+        "runtime": {
+            "lock_relative_path": "eval/locks/llama-cpp-b10333-cuda-linux-x64.json",
+            "lock_sha256": FROZEN_RUNTIME_LOCK_SHA256,
+            "release": "b10333",
+        },
+        "chat_template": {
+            "relative_path": (
+                "eval/templates/local-approval/"
+                "ministral-3-8b-instruct-2512-chat-template.jinja"
+            ),
+            "revision": FROZEN_CHAT_REVISION,
+            "sha256": FROZEN_CHAT_SHA256,
+        },
+        "request_contract": request,
+        "output_contract": {
+            "name": cross_eval.STATIC_DECISION_SCHEMA_NAME,
+            "sha256": cross_eval._canonical_sha256(
+                cross_eval.STATIC_DECISION_SCHEMA
+            ),
+        },
+    }
+    if (
+        value != expected
+        or runtime_identity.get("sha256") != FROZEN_RUNTIME_LOCK_SHA256
+        or runtime_value.get("schema_version") != 1
+        or runtime_value.get("release") != "b10333"
+        or runtime_value.get("source", {}).get("commit") != FROZEN_RUNTIME_COMMIT
+        or runtime_value.get("installed_runtime", {}).get("relative_path")
+        != "eval-data/tools/llama-b10333-cuda-linux-x64"
+        or runtime_value.get("installed_runtime", {})
+        .get("regular_files", {})
+        .get("llama-server")
+        != FROZEN_RUNTIME_SERVER_SHA256
+        or chat_identity.get("sha256") != FROZEN_CHAT_SHA256
+    ):
+        raise PairedOutputError("formal_pair_contract_invalid")
+    return {
+        "runtime_identity_sha256": runtime_identity["sha256"],
+        "chat_template_sha256": chat_identity["sha256"],
+        "request_contract_sha256": cross_eval._canonical_sha256(request),
+        "sampling_contract": copy.deepcopy(FORMAL_SAMPLING_CONTRACT),
+        "output_contract_sha256": cross_eval._canonical_sha256(
+            cross_eval.STATIC_DECISION_SCHEMA
+        ),
+    }
+
+
 def build_pair_receipt(
     *,
     pair_id: str,
@@ -308,30 +768,70 @@ def build_pair_receipt(
     local_static: IdentitySource,
     local_ft_static: IdentitySource,
     training_receipt: IdentitySource,
-    shared_contract: Mapping[str, Any],
+    runtime_lock: IdentitySource,
+    chat_template: IdentitySource,
+    pair_contract: IdentitySource,
     blind_identity_markers: Sequence[str],
 ) -> BuiltPairReceipt:
-    """Build the v1 canonical receipt exclusively from inspected objects."""
+    """Build a formal v1 pair receipt exclusively from inspected Plan 037 facts."""
 
     actual_sources = {
         "base-model": base_model,
         "local-static": local_static,
         "local-ft-static": local_ft_static,
         "training-receipt": training_receipt,
+        "runtime-lock": runtime_lock,
+        "chat-template": chat_template,
+        "pair-contract": pair_contract,
     }
     sources = {
-        "base-model": inspect_identity_source(base_model),
-        "local-static": inspect_identity_source(local_static),
-        "local-ft-static": inspect_identity_source(local_ft_static),
-        "training-receipt": inspect_identity_source(training_receipt),
+        name: inspect_identity_source(source)
+        for name, source in actual_sources.items()
     }
+    if (
+        base_model.kind != "frozen_lock"
+        or training_receipt.kind != "frozen_lock"
+        or runtime_lock.kind != "frozen_lock"
+        or chat_template.kind != "regular_file"
+        or pair_contract.kind != "frozen_lock"
+        or local_static.kind != "frozen_lock"
+        or local_ft_static.kind != "canonical_manifest"
+    ):
+        raise PairedOutputError("formal_pair_identity_source_kind_invalid")
+    model_contract = _load_identity_source_json(base_model, sources["base-model"])
+    _validate_model_contract(model_contract, identity=sources["base-model"])
+    completed = _load_identity_source_json(
+        training_receipt, sources["training-receipt"]
+    )
+    _validate_formal_training_receipt(completed, model_contract=model_contract)
+    _validate_adapter_artifact_binding(
+        completed,
+        base_model=base_model,
+        local_static=local_static,
+        local_ft_static=local_ft_static,
+        inspected=sources,
+    )
+    runtime_value = _load_identity_source_json(
+        runtime_lock, sources["runtime-lock"]
+    )
+    pair_value = _load_identity_source_json(
+        pair_contract, sources["pair-contract"], require_canonical=True
+    )
+    if sources["pair-contract"]["sha256"] != FROZEN_PAIR_CONTRACT_SHA256:
+        raise PairedOutputError("formal_pair_contract_invalid")
+    shared_contract = _validate_pair_contract(
+        pair_value,
+        runtime_value=runtime_value,
+        runtime_identity=sources["runtime-lock"],
+        chat_identity=sources["chat-template"],
+    )
     receipt = {
         "schema_version": cross_eval.LOCAL_PAIR_RECEIPT_SCHEMA_VERSION,
         "contract_version": cross_eval.LOCAL_PAIR_RECEIPT_CONTRACT_VERSION,
         "source_work_package": "L6",
         "pair_id": pair_id,
         "base_model_identity_sha256": sources["base-model"]["sha256"],
-        "shared_contract": copy.deepcopy(dict(shared_contract)),
+        "shared_contract": shared_contract,
         "artifacts": {
             "local-static": {
                 "provenance": "l6_paired_unfinetuned",
@@ -374,6 +874,9 @@ def _revalidate_built_pair_receipt(
         "local-static",
         "local-ft-static",
         "training-receipt",
+        "runtime-lock",
+        "chat-template",
+        "pair-contract",
     } or any(not isinstance(source, IdentitySource) for source in actual_sources.values()):
         raise PairedOutputError("built_pair_receipt_sources_invalid")
     inspected = {
@@ -393,6 +896,38 @@ def _revalidate_built_pair_receipt(
     normalized, receipt_sha256, contracts = cross_eval.validate_l6_pair_receipt(
         value.receipt
     )
+    model_contract = _load_identity_source_json(
+        actual_sources["base-model"], inspected["base-model"]
+    )
+    _validate_model_contract(model_contract, identity=inspected["base-model"])
+    completed = _load_identity_source_json(
+        actual_sources["training-receipt"],
+        inspected["training-receipt"],
+    )
+    _validate_formal_training_receipt(completed, model_contract=model_contract)
+    _validate_adapter_artifact_binding(
+        completed,
+        base_model=actual_sources["base-model"],
+        local_static=actual_sources["local-static"],
+        local_ft_static=actual_sources["local-ft-static"],
+        inspected=inspected,
+    )
+    runtime_value = _load_identity_source_json(
+        actual_sources["runtime-lock"], inspected["runtime-lock"]
+    )
+    pair_value = _load_identity_source_json(
+        actual_sources["pair-contract"],
+        inspected["pair-contract"],
+        require_canonical=True,
+    )
+    if inspected["pair-contract"]["sha256"] != FROZEN_PAIR_CONTRACT_SHA256:
+        raise PairedOutputError("formal_pair_contract_invalid")
+    shared_contract = _validate_pair_contract(
+        pair_value,
+        runtime_value=runtime_value,
+        runtime_identity=inspected["runtime-lock"],
+        chat_identity=inspected["chat-template"],
+    )
     if (
         expected_manifest.get("pair_receipt_sha256") != receipt_sha256
         or normalized["base_model_identity_sha256"]
@@ -403,6 +938,7 @@ def _revalidate_built_pair_receipt(
         != inspected["local-ft-static"]["sha256"]
         or normalized["artifacts"]["local-ft-static"]["training_receipt_sha256"]
         != inspected["training-receipt"]["sha256"]
+        or normalized["shared_contract"] != shared_contract
     ):
         raise PairedOutputError("pair_receipt_source_manifest_mismatch")
     return normalized, receipt_sha256, contracts
@@ -425,6 +961,19 @@ def _failure_terminal(status: str, failure_code: str) -> dict[str, Any]:
             "schema_version": cross_eval.OUTPUT_TERMINAL_SCHEMA_VERSION,
             "contract_version": cross_eval.OUTPUT_TERMINAL_CONTRACT_VERSION,
             "status": status,
+            "failure_code": failure_code,
+        }
+    )
+
+
+def _infrastructure_terminal(failure_code: str) -> dict[str, Any]:
+    return cross_eval.validate_output_terminal(
+        {
+            "schema_version": cross_eval.INFRASTRUCTURE_TERMINAL_SCHEMA_VERSION,
+            "contract_version": (
+                cross_eval.INFRASTRUCTURE_TERMINAL_CONTRACT_VERSION
+            ),
+            "status": cross_eval.INFRASTRUCTURE_TERMINAL_STATUS,
             "failure_code": failure_code,
         }
     )
@@ -545,10 +1094,14 @@ def _load_or_create_journal(
     bundle: cross_eval.CohortBundle,
     contracts: Mapping[str, Mapping[str, Any]],
     expected_keys: Sequence[tuple[str, str]],
-) -> tuple[Path, list[dict[str, Any]]]:
+    create: bool = True,
+    allow_dangling: bool = False,
+) -> tuple[Path, list[dict[str, Any]], dict[str, Any] | None]:
     _require_run_directory(run_dir)
     journal_path = run_dir / "paired-output-journal.jsonl"
     if not journal_path.exists() and not journal_path.is_symlink():
+        if not create:
+            raise PairedOutputError("paired_journal_missing")
         cross_eval._write_exclusive(
             journal_path,
             cross_eval._canonical_bytes(dict(header)) + b"\n",
@@ -593,6 +1146,8 @@ def _load_or_create_journal(
             raise PairedOutputError("paired_journal_attempt_invalid")
         cursor += 1
         if cursor == len(records):
+            if allow_dangling:
+                return journal_path, completed, copy.deepcopy(attempt)
             raise PairedOutputError("paired_journal_attempt_without_terminal")
         terminal_record = records[cursor]
         if (
@@ -633,7 +1188,7 @@ def _load_or_create_journal(
             raise PairedOutputError("paired_journal_terminal_invalid")
         completed.append(accepted)
         cursor += 1
-    return journal_path, completed
+    return journal_path, completed, None
 
 
 def run_paired_outputs(
@@ -679,7 +1234,7 @@ def run_paired_outputs(
         source_manifest=pair_receipt.source_manifest,
         expected_keys=expected_keys,
     )
-    journal_path, rows = _load_or_create_journal(
+    journal_path, rows, _dangling = _load_or_create_journal(
         run_dir=run_dir,
         header=header,
         bundle=bundle,
@@ -735,6 +1290,81 @@ def run_paired_outputs(
     return rows
 
 
+def resolve_interrupted_attempt(
+    bundle: cross_eval.CohortBundle,
+    *,
+    pair_receipt: BuiltPairReceipt,
+    run_dir: Path,
+    failure_code: str,
+) -> dict[str, Any]:
+    """Resolve exactly one tail attempt as a body-free infrastructure failure.
+
+    This explicit operation never invokes the model.  It revalidates the
+    cohort, every pair-receipt source, and the durable journal header before it
+    appends the one terminal that makes a later resume safe.
+    """
+
+    cross_eval.validate_cohort_bundle(bundle)
+    receipt, receipt_sha256, contracts = _revalidate_built_pair_receipt(
+        pair_receipt
+    )
+    terminal = _infrastructure_terminal(failure_code)
+    items = {item["sample_id"]: item for item in bundle.manifest["items"]}
+    expected_keys = [
+        (side, sample_id)
+        for side in LOCAL_SIDE_ORDER
+        for sample_id in sorted(items)
+    ]
+    header = _journal_header(
+        bundle,
+        receipt=receipt,
+        receipt_sha256=receipt_sha256,
+        source_manifest=pair_receipt.source_manifest,
+        expected_keys=expected_keys,
+    )
+    journal_path, rows, dangling = _load_or_create_journal(
+        run_dir=run_dir,
+        header=header,
+        bundle=bundle,
+        contracts=contracts,
+        expected_keys=expected_keys,
+        create=False,
+        allow_dangling=True,
+    )
+    if dangling is None:
+        raise PairedOutputError("paired_journal_no_interrupted_attempt")
+    sequence = len(rows)
+    side, sample_id = expected_keys[sequence]
+    if (
+        dangling.get("sequence") != sequence
+        or dangling.get("side") != side
+        or dangling.get("sample_id") != sample_id
+    ):
+        raise PairedOutputError("paired_journal_attempt_invalid")
+    source = bundle.source_rows[sample_id]
+    row = _local_output_row(
+        bundle=bundle,
+        cohort_item=items[sample_id],
+        source_row=source,
+        side=side,
+        run_contract=contracts[side],
+        terminal=terminal,
+    )
+    _append_journal_record(
+        journal_path,
+        {
+            "schema_version": JOURNAL_SCHEMA_VERSION,
+            "contract_version": JOURNAL_CONTRACT_VERSION,
+            "record_type": "terminal",
+            "sequence": sequence,
+            "side": side,
+            "sample_id": sample_id,
+            "row": row,
+        },
+    )
+    return row
+
+
 def build_frozen_sol_rows(
     bundle: cross_eval.CohortBundle,
 ) -> list[dict[str, Any]]:
@@ -786,12 +1416,22 @@ def assemble_three_side_outputs(
     bundle: cross_eval.CohortBundle,
     local_rows: Sequence[Mapping[str, Any]],
     *,
-    pair_receipt: Mapping[str, Any],
+    pair_receipt: BuiltPairReceipt,
 ) -> list[dict[str, Any]]:
     """Combine frozen Sol v1 rows and local v2 rows through the formal importer."""
 
+    evidence = formal_pair_evidence(pair_receipt)
     return cross_eval.validate_three_side_rows(
         bundle,
         [*build_frozen_sol_rows(bundle), *copy.deepcopy(list(local_rows))],
-        l6_pair_receipt=pair_receipt,
+        l6_pair_receipt=evidence,
     )
+
+
+def formal_pair_evidence(
+    pair_receipt: BuiltPairReceipt,
+) -> cross_eval.FormalL6PairEvidence:
+    """Revalidate every actual source and return a formal-import capability."""
+
+    receipt, _sha256, _contracts = _revalidate_built_pair_receipt(pair_receipt)
+    return cross_eval.FormalL6PairEvidence._from_source_validation(receipt)

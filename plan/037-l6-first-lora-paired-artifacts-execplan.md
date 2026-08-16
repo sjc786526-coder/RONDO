@@ -114,7 +114,7 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
   frozen 资产；Plan 032/033/034/036 历史 plan 的稳定正文。
 - Codex/llama.cpp 上游基线、宿主机或全局工具链、CI/PR、公开 Hub/RunPod 资产、长期在线服务、定时任务或
   Inference Endpoint；不得创建 RunPod Serverless endpoint、cluster 或阶段二授权清单外的 volume/template/credential。
-- 主工作区已有 tracked 文件、两份未跟踪 `doc/research/RONDO Multi*.md`、其他 worktree 与来源不明的既有
+- 主工作区已有 tracked 文件、全部既有研究文档、其他 worktree 与来源不明的既有
   ignored 资产。
 
 ### 敏感凭据、真实秘密与普通项目数据
@@ -153,9 +153,10 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
    与 SHA-256 `74eeb55fd3341286ec3fd44e902b7120721acc81cd394e96b431f85e93a1ea56`，不得从远端 `main`
    静默解析任一资产。
 2. 所有训练输入必须用正式模板与 tokenizer 精确渲染/计数；若序列超出 recipe 上限，先调整合法 recipe 或定位数据，
-   不得静默 truncate。阶段一形成 packing、rank、target modules、学习率、batch、累积、epoch/max steps、量化方式和
-   依赖组合的候选方案；阶段二真实 optimizer smoke 后可依据显存与兼容性做一次有证据的技术收敛，并在正式训练开始前
-   冻结最终 recipe/依赖。该收敛不得改变 base、训练数据、completion-only 目标或演变为第二套质量 recipe。
+   不得静默 truncate。阶段一形成 packing、rank、文本层 target regex、学习率、batch、累积、epoch/max steps、量化方式和
+   依赖组合的候选方案；target regex 经实际模块范围验证后作为视觉隔离边界固定，不在 smoke 后漂移。其余明确列入
+   `smoke_adjustable_once` 的参数可依据显存与兼容性做一次有证据的技术收敛，并在正式训练开始前冻结最终 recipe/依赖。
+   该收敛不得改变 base、训练数据、completion-only 目标或演变为第二套质量 recipe。
 3. 正式训练前必须以真实 optimizer step + adapter reload 证明数据映射、completion-only mask、模型/PEFT 组合和持久化
    路径成立。普通依赖、OOM、映射、target module、保存或基础设施问题先根因定位、窄修后合理重试，不因第一次失败
    结束；不得无差别重放同一失败命令。成功 smoke 前为使同一候选路线跑通所需的普通窄修不按“第二 recipe”计数；
@@ -242,8 +243,9 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 - 阶段一尽量用 5—10 条 train、同格式小模型或 mock 完成不会误导的 pipeline dry-run；当前机器为 RTX 4060 Laptop
   8GB，若完整 BF16/真实 adapter optimizer step 明显不适合本机，则把真实 smoke 留给阶段二 RunPod，不为本地绿色而
   换底模或改训练合同。
-- 阶段一只需把最可能成功的候选 recipe/依赖/镜像和备选技术参数准备清楚；阶段二 smoke 才是 target modules、batch、
-  量化方式和真实依赖兼容性的最终证据。允许据此做一次集中技术收敛，正式训练启动才是最终冻结点。
+- 阶段一只需把最可能成功的候选 recipe/依赖/镜像和备选技术参数准备清楚；target regex 在阶段一先按 runtime 文本模块名
+  fail-closed，阶段二 smoke 再证明实际注入、batch、量化和真实依赖可运行。允许在 allowlist 内做一次集中技术收敛，
+  正式训练启动才是最终冻结点。
 - 优先让一个 RunPod Pod 顺序完成短 smoke、正式训练和必要转换，以减少反复拉模型/启动；若实际兼容性或持久化风险令
   拆分更稳妥，也可在同一阶段二预算内有理由地调整。GPU 型号、镜像、磁盘和最长运行时间以阶段一结束时的 live
   RunPod 事实为准，不在计划里预先锁死。
@@ -268,16 +270,17 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 
 ### 已完成
 
-- 已按执行基线 `7a53a566b2815ca0447933fd77c4e74e3dbc412d` 接管专用 worktree；本地 `main` 仍为
-  `8250c4ddec991b16a2cd2e5881256b4870489946`，主工作区两份来源不明的 `doc/research/RONDO Multi*.md`
-  保持不动。
+- 已按实际执行基线 `7a53a56662904eb43a857b57a90adc8713ff2bda` 接管专用 worktree。该 worktree
+  源自当时的 `main@8250c4ddec991b16a2cd2e5881256b4870489946`；并行任务后续已把主工作区
+  `main` 推进到 `4ebf62d204f0f3926d256532600938916e8979ca`。主工作区已有 tracked 文件、既有研究
+  文档、038 worktree 和其他来源不明资产均保持不动。
 - 阶段一接管时误执行一次仓库依赖关键词盘点：
   `rg -n "dependencies|optional-dependencies|pytest|unittest|transformers|torch|peft|trl|huggingface" pyproject.toml eval training uv.lock requirements*.txt`。
   该普通搜索遍历了 tracked synthetic validation；当时 `git status` 仍干净，随后复核 train/validation SHA-256 仍分别为
   `1e66c06e…110a` / `cbab8084…8dd2`。validation 没有进入训练投影、上传包、梯度或 recipe 选择；按用户补充授权，
   这不构成隐私泄露或训练污染，无需重建数据或增加访问审计。
 - frozen train `1e66c06e…110a` 已确定性投影为 470 条，投影 SHA-256 为 `0026cddd…c14`。最终 train-only
-  bundle manifest / tar SHA-256 分别为 `e61bc447…039c` / `b66d03f1…f206`；固定 allowlist 拒绝 validation、
+  bundle manifest / tar SHA-256 分别为 `e429ca57…56ad` / `45f098d6…018c`；固定 allowlist 拒绝 validation、
   holdout、未知文件、symlink、清单外正文和连同自改 manifest 一起加入的额外文件。
 - 冻结官方 tokenizer/template 对 470 条最终序列的精确 census 为 145,360 tokens（prompt 128,545，completion
   16,815），min/P50/P95/max = 278/311/331/333，limit 4096，超限 0；无 packing、无截断。470/470 prompt
@@ -285,10 +288,11 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 - 候选 QLoRA recipe、7 个直接依赖 pin、RunPod entrypoint、checkpoint resume、adapter 隔离重载、pending→completed
   receipt、逐文件 artifact export/download 验真和超时/监控/止费说明已落地。候选 image 为
   `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`；本地 mock 不加载模型且 optimizer step 为 0。
-- Plan 036 前置已版本化支持 decision / structured-output failure / refusal / timeout，非 decision 不伪造成 deny；pair
-  runner 绑定实际文件/lock/canonical manifest 哈希，并以 attempt-first、终态 fsync journal 保证恢复时不重复调用悬空
-  样本。既有 v1 decision 导入/盲评语义保持兼容。
-- 最终 focused unittest 61/61 通过；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups，
+- Plan 036 前置已版本化支持 decision / structured-output failure / refusal / timeout / infrastructure failure，非 decision
+  不伪造成 deny；formal v2 导入只接受 BuildPairReceipt 实物重验产生的 evidence，训练 receipt 的 adapter tree 与微调侧
+  canonical manifest 精确相等。attempt-first、终态 fsync journal 的悬空 attempt 可显式收敛后继续剩余样本且不重调。
+  既有 v1 decision 导入/盲评语义保持兼容。
+- 最终 focused unittest 68/68 通过；真实 no-model preflight 仍为 130 条、65 / 65、26 + 26 groups，
   `waiting_for_l6_outputs`；精确 census 重算逐字一致、mock dry-run、bundle 解包后自校验、`py_compile`、entrypoint
   `bash -n`、JSON 解析、候选依赖解析、敏感/大文件/权限检查和 `git diff --check` 均通过。训练与 pair 各完成两轮
   独立审查，已关闭发现且没有阶段一阻断。
@@ -347,8 +351,9 @@ RunPod 资源、上传 train-only bundle 或开始任何付费 GPU 工作。制�
 | 007 | tracked 工作留在 worktree，模型/输出等 ignored 实物使用主工作区明确任务目录 | linked worktree 不共享 ignored 资产，现有 b10333 和 GGUF 也在主工作区 | 文件布局 | 已采纳 |
 | 008 | 任务以阶段一“本地准备并停下交审”和阶段二“另行授权后 RunPod 执行”分门 | 尽量在计费前消除可本地发现的问题，同时保留真实云环境下合理窄修空间 | 授权 / 成本 | 已采纳 |
 | 009 | Pod 运行期间由同一活动任务持续读取日志、状态和 billing，回收验真后终止 task-only Pod | 长训练不能以已提交代替完成，且 stop 后仍可能存在存储费 | 监控 / 止费 | 已采纳 |
-| 010 | 阶段一只形成候选 recipe/依赖/镜像；真实 smoke 后允许一次有证据的技术收敛，正式训练启动前冻结 | 本地无法证明真实 target modules、显存和云端依赖兼容性 | 训练 recipe | 已采纳 |
+| 010 | 阶段一只形成候选 recipe/依赖/镜像；真实 smoke 后允许一次有证据的 allowlist 内技术收敛，正式训练启动前冻结 | 本地无法证明真实 8B optimizer、显存和云端依赖兼容性；文本 target regex 已在阶段一固定 | 训练 recipe | 已采纳 |
 | 011 | 私有 HF 产物仓与 task-only template/credential/network volume 可选，阶段一说明、阶段二逐项授权并单列费用 | 保留更稳妥的启动与持久化路线，同时避免无边界远端状态 | 远端资产 | 已采纳 |
 | 012 | tracked synthetic/TB 数据按普通项目数据处理；validation 可被普通工具和兼容测试读取，但不得进入训练、上传或训练决策 | 保留训练归因所需的最小卫生，避免把普通合成数据隐私化或扩建审计体系 | 数据分类 / 隔离 | 已采纳 |
 | 013 | 阶段二主路线为 Secure A40 48 GB + 40 GB container disk + 100 GB Pod volume；不建 template/credential/network volume，条件式 HF 私有 repo 只作产物持久化 | 当前 live 价格、容量与 470 条 token 规模下成本最低且余量充足；A40 可用区当前不支持 network volume | 资源 / 预算 | 阶段一候选，待阶段二授权与创建前复核 |
-| 014 | 候选 QLoRA 为 rank 16、7 个文本投影 target、LR 2e-4、batch 1 × accum 8、2 epochs、NF4 4-bit、无 packing；smoke 后仅 loader/attention、rank/targets、batch/accum/LR、epochs/max steps/max sequence length 和依赖允许一次有据收敛 | 本地能证明格式/mask，但不能证明真实 8B 显存、模块命名和云端依赖兼容性 | recipe | 阶段一候选，正式训练前冻结 |
+| 014 | 候选 QLoRA 为 rank 16、固定文本层 regex target、LR 2e-4、batch 1 × accum 8、2 epochs、NF4 4-bit、无 packing；target regex 属安全边界不允许 smoke 后漂移，loader/attention、rank、batch/accum/LR、epochs/max steps/max sequence length 和依赖允许一次有据收敛 | 本地能证明格式/mask与 runtime 模块范围，但不能证明真实 8B 显存和云端依赖兼容性 | recipe | 阶段一候选，正式训练前冻结 |
+| 015 | formal v2 pair 导入必须保留 BuiltPairReceipt 的实物 source evidence；未微调侧绑定冻结 base contract，微调侧 adapter manifest 必须逐文件等于 completed formal training receipt | 保留 v1 fixture/结构兼容，同时防止自报 receipt、任意 sampling 或任意工件冒充正式同源比较 | pair attribution | 已采纳 |

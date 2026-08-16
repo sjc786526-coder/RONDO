@@ -61,6 +61,11 @@ DIRECT_DEPENDENCIES = frozenset(
         "safetensors",
     }
 )
+LORA_TARGET_MODULE_PATTERN = (
+    r"^model\.language_model\.layers\.\d+\."
+    r"(?:self_attn\.(?:q_proj|k_proj|v_proj|o_proj)|"
+    r"mlp\.(?:gate_proj|up_proj|down_proj))$"
+)
 TRAIN_RELATIVE_PATH = "training/local-approval-synthetic-v1/train.jsonl"
 DATASET_MANIFEST_RELATIVE_PATH = "training/local-approval-synthetic-v1/manifest.json"
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -931,6 +936,10 @@ def resolve_run_contract(
 ) -> tuple[dict[str, Any], bytes, dict[str, Any] | None, str | None]:
     """Resolve smoke/formal without allowing an implicit mode transition."""
 
+    if candidate_recipe.get("lora", {}).get("target_modules") != (
+        LORA_TARGET_MODULE_PATTERN
+    ):
+        raise L6TrainingError("candidate_lora_target_pattern_invalid")
     if run_kind == "smoke":
         if final_recipe_path is not None or dependency_identity_path is not None:
             raise L6TrainingError("smoke_final_contract_not_allowed")
@@ -957,6 +966,8 @@ def resolve_run_contract(
         or recipe.get("data", {}).get("truncation") is not False
         or recipe.get("data", {}).get("packing") is not False
         or recipe.get("quantization") != candidate_recipe.get("quantization")
+        or recipe.get("lora", {}).get("target_modules")
+        != LORA_TARGET_MODULE_PATTERN
         or recipe.get("optimizer", {}).get("max_steps") == 1
         or not isinstance(adjustable, list)
         or any(not isinstance(path, str) or not path for path in adjustable)
@@ -988,6 +999,64 @@ def _hash_tree(path: Path) -> dict[str, Any]:
             "sha256": _sha256(raw),
         }
     return {"files": files, "tree_sha256": _canonical_sha256(files)}
+
+
+def validate_lora_injection(
+    model: Any, target_module_pattern: str
+) -> dict[str, Any]:
+    """Fail closed on the concrete PEFT injection and trainable parameter set."""
+
+    if target_module_pattern != LORA_TARGET_MODULE_PATTERN:
+        raise L6TrainingError("lora_target_pattern_invalid")
+    try:
+        pattern = re.compile(target_module_pattern)
+    except re.error as exc:
+        raise L6TrainingError("lora_target_pattern_invalid") from exc
+    targeted_value = getattr(model, "targeted_module_names", None)
+    if (
+        not isinstance(targeted_value, (list, tuple, set, frozenset))
+        or not targeted_value
+        or any(not isinstance(name, str) or not name for name in targeted_value)
+    ):
+        raise L6TrainingError("lora_targeted_modules_missing")
+    targeted = tuple(sorted(set(targeted_value)))
+    forbidden_markers = ("vision", "multi_modal_projector", "lm_head")
+    if (
+        len(targeted) != len(targeted_value)
+        or any(pattern.fullmatch(name) is None for name in targeted)
+        or any(marker in name for marker in forbidden_markers for name in targeted)
+    ):
+        raise L6TrainingError("lora_targeted_module_scope_invalid")
+    trainable = tuple(
+        name
+        for name, parameter in model.named_parameters()
+        if getattr(parameter, "requires_grad", False)
+    )
+    if not trainable:
+        raise L6TrainingError("lora_trainable_scope_invalid")
+    owners: set[str] = set()
+    for parameter_name in trainable:
+        matches = tuple(
+            target
+            for target in targeted
+            if f".{target}." in f".{parameter_name}."
+        )
+        if (
+            ".lora_" not in parameter_name
+            or len(matches) != 1
+            or pattern.fullmatch(matches[0]) is None
+            or any(marker in parameter_name for marker in forbidden_markers)
+        ):
+            raise L6TrainingError("lora_trainable_scope_invalid")
+        owners.add(matches[0])
+    if owners != set(targeted):
+        raise L6TrainingError("lora_trainable_scope_invalid")
+    return {
+        "target_pattern": target_module_pattern,
+        "targeted_modules": len(targeted),
+        "trainable_parameters": len(trainable),
+        "vision_projector_lm_head_hits": 0,
+    }
 
 
 def _run_contract(
@@ -1218,10 +1287,9 @@ def _run_training(
     if "exclude_modules" in inspect.signature(LoraConfig).parameters:
         lora_kwargs["exclude_modules"] = recipe["lora"]["exclude_modules"]
     model = get_peft_model(model, LoraConfig(**lora_kwargs))
-    forbidden = tuple(recipe["lora"]["exclude_modules"])
-    trainable = [name for name, parameter in model.named_parameters() if parameter.requires_grad]
-    if not trainable or any(any(term in name for term in forbidden) for name in trainable):
-        raise L6TrainingError("lora_trainable_scope_invalid")
+    lora_injection = validate_lora_injection(
+        model, recipe["lora"]["target_modules"]
+    )
 
     class Dataset(torch.utils.data.Dataset):
         def __len__(self) -> int:
@@ -1308,6 +1376,7 @@ def _run_training(
         "global_step": int(trainer.state.global_step),
         "actual_epochs": trainer.state.epoch,
         "train_loss": result.metrics.get("train_loss"),
+        "lora_injection": lora_injection,
     }
     pending = {
         "schema_version": 1,
@@ -1697,12 +1766,14 @@ def finalize_training_receipt(
     )
     _validate_completed_receipt_schema(receipt, schema)
     receipt_raw = _pretty_bytes(receipt)
-    for destination in (
-        output_root / "artifact-manifest.json",
-        output_root / "training-receipt.json",
+    manifest_path = output_root / "artifact-manifest.json"
+    receipt_path = output_root / "training-receipt.json"
+    if (
+        receipt_path.exists()
+        or receipt_path.is_symlink()
+        or manifest_path.is_symlink()
     ):
-        if destination.exists() or destination.is_symlink():
-            raise L6TrainingError("output_already_exists")
+        raise L6TrainingError("output_already_exists")
     allowlist, allowlist_raw = _artifact_allowlist_from_bundle(bundle_root)
     export_files = _enumerate_export_artifacts(output_root, allowlist)
     export_files["training-receipt.json"] = {
@@ -1711,11 +1782,15 @@ def finalize_training_receipt(
     }
     manifest = _artifact_manifest_value(bundle, allowlist_raw, export_files)
     manifest_raw = _pretty_bytes(manifest)
-    _write_exclusive(output_root / "artifact-manifest.json", manifest_raw)
+    if manifest_path.exists():
+        if _regular_file(manifest_path) != manifest_raw:
+            raise L6TrainingError("output_already_exists")
+    else:
+        _write_exclusive(manifest_path, manifest_raw)
     # The completed receipt is intentionally the final write in the state
     # transition. If any earlier recomputation fails, only pending evidence
     # remains and no failure can be mistaken for completed training.
-    _write_exclusive(output_root / "training-receipt.json", receipt_raw)
+    _write_exclusive(receipt_path, receipt_raw)
     return {
         "status": "completed",
         "training_receipt_sha256": _sha256(receipt_raw),

@@ -56,6 +56,9 @@ OUTPUT_TERMINAL_STATUSES = (
     "refusal",
     "timeout",
 )
+INFRASTRUCTURE_TERMINAL_SCHEMA_VERSION = 2
+INFRASTRUCTURE_TERMINAL_CONTRACT_VERSION = "rondo_l6_output_terminal_v2"
+INFRASTRUCTURE_TERMINAL_STATUS = "infrastructure_failure"
 LOCAL_PAIR_CONTRACT_VERSION = "rondo_l6_paired_attribution_v1"
 LOCAL_PAIR_RECEIPT_SCHEMA_VERSION = 1
 LOCAL_PAIR_RECEIPT_CONTRACT_VERSION = "rondo_l6_m4_pair_receipt_v1"
@@ -167,6 +170,30 @@ class CohortBundle:
     manifest: dict[str, Any]
     manifest_sha256: str
     source_rows: dict[str, dict[str, Any]]
+
+
+@dataclass(frozen=True, init=False)
+class FormalL6PairEvidence:
+    """A source-validated Plan 037 receipt capability.
+
+    The generic v1 receipt remains a legacy shape contract.  Formal v2 rows
+    require this capability, which the paired-output boundary creates only
+    after re-reading the frozen model/runtime contracts, completed formal
+    training receipt, and actual artifacts.
+    """
+
+    receipt: dict[str, Any]
+
+    def __new__(cls) -> FormalL6PairEvidence:
+        raise TypeError("FormalL6PairEvidence requires source validation")
+
+    @classmethod
+    def _from_source_validation(
+        cls, receipt: Mapping[str, Any]
+    ) -> FormalL6PairEvidence:
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "receipt", copy.deepcopy(dict(receipt)))
+        return instance
 
 
 @dataclass(frozen=True)
@@ -911,14 +938,21 @@ def validate_output_terminal(value: Any) -> dict[str, Any]:
         "status",
     }
     status = value.get("status")
-    if (
-        value.get("schema_version") != OUTPUT_TERMINAL_SCHEMA_VERSION
-        or value.get("contract_version") != OUTPUT_TERMINAL_CONTRACT_VERSION
-        or status not in OUTPUT_TERMINAL_STATUSES
-    ):
-        raise CrossEvalError("output_terminal_invalid")
     accepted = copy.deepcopy(value)
-    if status == "decision":
+    is_v1 = (
+        value.get("schema_version") == OUTPUT_TERMINAL_SCHEMA_VERSION
+        and value.get("contract_version") == OUTPUT_TERMINAL_CONTRACT_VERSION
+        and status in OUTPUT_TERMINAL_STATUSES
+    )
+    is_infrastructure_v2 = (
+        value.get("schema_version") == INFRASTRUCTURE_TERMINAL_SCHEMA_VERSION
+        and value.get("contract_version")
+        == INFRASTRUCTURE_TERMINAL_CONTRACT_VERSION
+        and status == INFRASTRUCTURE_TERMINAL_STATUS
+    )
+    if not is_v1 and not is_infrastructure_v2:
+        raise CrossEvalError("output_terminal_invalid")
+    if is_v1 and status == "decision":
         if set(value) != common | {"decision"}:
             raise CrossEvalError("output_terminal_fields_invalid")
         try:
@@ -1126,15 +1160,32 @@ def validate_three_side_rows(
     bundle: CohortBundle,
     values: Sequence[Any],
     *,
-    l6_pair_receipt: Mapping[str, Any] | None,
+    l6_pair_receipt: Mapping[str, Any] | FormalL6PairEvidence | None,
 ) -> list[dict[str, Any]]:
-    """Validate one complete, all-or-nothing three-side import."""
+    """Validate one complete, all-or-nothing three-side import.
+
+    Legacy v1 decision rows retain their frozen structural contract.  Formal
+    Plan 037 v2 rows cannot be imported from a self-reported receipt mapping;
+    callers must retain source-validated evidence from ``paired_outputs``.
+    """
 
     validate_cohort_bundle(bundle)
     if l6_pair_receipt is None:
         raise CrossEvalError("l6_pair_receipt_required")
+    contains_v2_local = any(
+        isinstance(value, dict)
+        and value.get("side") in {"local-static", "local-ft-static"}
+        and value.get("schema_version") == TERMINAL_IMPORT_SCHEMA_VERSION
+        for value in values
+    )
+    if isinstance(l6_pair_receipt, FormalL6PairEvidence):
+        receipt_value: Mapping[str, Any] = l6_pair_receipt.receipt
+    else:
+        if contains_v2_local:
+            raise CrossEvalError("l6_pair_sources_required")
+        receipt_value = l6_pair_receipt
     _receipt, _receipt_sha256, expected_local_contracts = validate_l6_pair_receipt(
-        l6_pair_receipt
+        receipt_value
     )
     items = {item["sample_id"]: item for item in bundle.manifest["items"]}
     expected_count = len(items) * len(SIDES)

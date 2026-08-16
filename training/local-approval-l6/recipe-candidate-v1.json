@@ -25,15 +25,7 @@
       "multi_modal_projector"
     ],
     "rank": 16,
-    "target_modules": [
-      "q_proj",
-      "k_proj",
-      "v_proj",
-      "o_proj",
-      "gate_proj",
-      "up_proj",
-      "down_proj"
-    ],
+    "target_modules": "^model\\.language_model\\.layers\\.\\d+\\.(?:self_attn\\.(?:q_proj|k_proj|v_proj|o_proj)|mlp\\.(?:gate_proj|up_proj|down_proj))$",
     "task_type": "CAUSAL_LM"
   },
   "model": {
@@ -69,7 +61,6 @@
     "model.loader_class",
     "model.attention_implementation",
     "lora.rank",
-    "lora.target_modules",
     "optimizer.per_device_train_batch_size",
     "optimizer.gradient_accumulation_steps",
     "optimizer.learning_rate",

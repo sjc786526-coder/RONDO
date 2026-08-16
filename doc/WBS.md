@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | P2、L5b 与 Local M4 离线准备设施均已完成；**Plan 037 阶段一也已完成本地准备**。470 条 train-only 投影、冻结 tokenizer/template 精确 census、completion-only mask、候选 QLoRA/RunPod 脚手架和诚实终态/pair receipt 前置均已就绪。真实 cohort 仍为 `waiting_for_l6_outputs`；尚未创建云资源、上传、加载 8B、做 optimizer smoke/训练或生成 130 条成对输出。下一步是用户单独授权的 L6 阶段二。 |
+| 方向 2 | P2、L5b 与 Local M4 离线准备设施均已完成；**Plan 037 阶段一也已完成本地准备**。470 条 train-only 投影、冻结 tokenizer/template 精确 census、completion-only mask、仅命中文本塔的候选 QLoRA、可执行 RunPod 回收手册和 formal receipt/adapter 实物绑定均已就绪。真实 cohort 仍为 `waiting_for_l6_outputs`；尚未创建云资源、上传、加载 8B、做 optimizer smoke/训练或生成 130 条成对输出。下一步是用户单独授权的 L6 阶段二。 |
 | 方向 3 | 多智能体可信证据研究已完成。方向改为**独立产品源码 RONDO Multi**，不再是 Local 内的可插拔模式；`multidev/` 产品基线已完成并合入 `main`；首个可交付增量待定（D1，见 §8）。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在

@@ -108,6 +108,21 @@
           },
           "required": ["schema_version", "contract_version", "status", "failure_code"],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "contract_version": {"const": "rondo_l6_output_terminal_v2", "type": "string"},
+            "failure_code": {
+              "maxLength": 64,
+              "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+              "type": "string"
+            },
+            "schema_version": {"const": 2, "type": "integer"},
+            "status": {"const": "infrastructure_failure", "type": "string"}
+          },
+          "required": ["schema_version", "contract_version", "status", "failure_code"],
+          "type": "object"
         }
       ]
     }

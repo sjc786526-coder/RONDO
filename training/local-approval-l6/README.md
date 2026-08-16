@@ -1,5 +1,9 @@
 # Plan 037 stage-1 L6 training scaffold
 
+The operator-ready A-J command sequence is in
+[`stage2-runbook.md`](stage2-runbook.md). Its remote sections remain forbidden
+until the user separately authorizes stage 2.
+
 This is a candidate, not the final training recipe. It binds the official BF16
 base/tokenizer revision and the separately frozen official chat template. The
 candidate RunPod image is
@@ -50,6 +54,11 @@ interrupted, `RONDO_L6_RESUME_CHECKPOINT` may name one existing
 output, symlinks, changed run/recipe/dependency contracts and already-finished
 training; without this variable, an existing mode output is always rejected.
 
+LoRA injection is fixed to the Transformers 5.14.1 runtime language-module
+names through one PEFT string regex. After injection, every targeted module and
+every trainable LoRA parameter is checked against that regex; any vision,
+projector or `lm_head` hit fails the run.
+
 `runpod-stage2-entrypoint.sh` adds a three-hour default hard timeout. The
 controller must also tail logs, Pod state and billing continuously. No progress,
 repeated crash, OOM, identity/projection mismatch or budget drift is a stop
@@ -81,3 +90,12 @@ identity, validates the strict receipt schema, and creates a body-free artifact
 manifest. The manifest covers every adapter/checkpoint/config/metric/receipt
 file and lets a local download be checked file by file. A timeout or failed
 reload leaves only pending evidence and logs, never `status=completed`.
+If the controller stops after writing the manifest but before the completed
+receipt, rerunning finalization accepts only a byte-identical orphan manifest.
+
+The source-validated pair receipt currently implements the adapter-on/off
+route: the unfinetuned side is the frozen base contract, and the finetuned
+manifest must equal the completed training receipt's adapter tree file by file.
+If the stage-2 smoke instead selects paired GGUF, a conversion receipt binding
+the same base, formal training receipt, converter and output components must be
+added and tested before those outputs can enter the formal v2 importer.

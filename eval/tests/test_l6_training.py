@@ -3,10 +3,12 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from rondo_eval.local_approval import l6_training
 
@@ -203,6 +205,79 @@ class CandidateContractTests(unittest.TestCase):
         self.assertIn("torch==2.8.0", dependencies)
         self.assertTrue(recipe["data"]["completion_only"])
         self.assertFalse(recipe["data"]["truncation"])
+        self.assertIsInstance(recipe["lora"]["target_modules"], str)
+        self.assertEqual(
+            recipe["lora"]["target_modules"],
+            l6_training.LORA_TARGET_MODULE_PATTERN,
+        )
+        self.assertNotIn("lora.target_modules", recipe["smoke_adjustable_once"])
+
+    def test_lora_target_regex_matches_only_runtime_language_modules(self) -> None:
+        pattern = re.compile(l6_training.LORA_TARGET_MODULE_PATTERN)
+        positives = (
+            "model.language_model.layers.0.self_attn.q_proj",
+            "model.language_model.layers.17.self_attn.o_proj",
+            "model.language_model.layers.35.mlp.gate_proj",
+            "model.language_model.layers.35.mlp.down_proj",
+        )
+        negatives = (
+            "language_model.model.layers.0.self_attn.q_proj",
+            "model.language_model.layers.0.self_attn.rotary_emb",
+            "model.language_model.layers.0.self_attn.q_proj.weight",
+            "model.vision_tower.layers.0.self_attn.q_proj",
+            "model.multi_modal_projector.linear",
+            "lm_head",
+        )
+        self.assertTrue(all(pattern.fullmatch(name) for name in positives))
+        self.assertTrue(all(pattern.fullmatch(name) is None for name in negatives))
+
+    def test_runtime_lora_injection_scope_is_fail_closed(self) -> None:
+        class Parameter:
+            def __init__(self, requires_grad: bool) -> None:
+                self.requires_grad = requires_grad
+
+        class Model:
+            def __init__(self, targeted, trainable) -> None:
+                self.targeted_module_names = targeted
+                self._trainable = trainable
+
+            def named_parameters(self):
+                return [(name, Parameter(True)) for name in self._trainable]
+
+        q_proj = "model.language_model.layers.0.self_attn.q_proj"
+        down_proj = "model.language_model.layers.1.mlp.down_proj"
+        valid = Model(
+            [q_proj, down_proj],
+            [
+                f"base_model.model.{q_proj}.lora_A.default.weight",
+                f"base_model.model.{q_proj}.lora_B.default.weight",
+                f"base_model.model.{down_proj}.lora_A.default.weight",
+                f"base_model.model.{down_proj}.lora_B.default.weight",
+            ],
+        )
+        result = l6_training.validate_lora_injection(
+            valid, l6_training.LORA_TARGET_MODULE_PATTERN
+        )
+        self.assertEqual(result["targeted_modules"], 2)
+        self.assertEqual(result["trainable_parameters"], 4)
+        self.assertEqual(result["vision_projector_lm_head_hits"], 0)
+
+        invalid_models = (
+            Model([q_proj, "model.vision_tower.layers.0.self_attn.q_proj"], []),
+            Model([q_proj], [f"base_model.model.{q_proj}.weight"]),
+            Model([q_proj], ["base_model.model.lm_head.lora_A.default.weight"]),
+            Model([q_proj, down_proj], [f"base_model.model.{q_proj}.lora_A.default.weight"]),
+        )
+        for model in invalid_models:
+            with self.subTest(targeted=model.targeted_module_names):
+                with self.assertRaises(l6_training.L6TrainingError):
+                    l6_training.validate_lora_injection(
+                        model, l6_training.LORA_TARGET_MODULE_PATTERN
+                    )
+        with self.assertRaisesRegex(
+            l6_training.L6TrainingError, "lora_target_pattern_invalid"
+        ):
+            l6_training.validate_lora_injection(valid, "q_proj")
 
     def test_entrypoint_appends_resume_after_mode_arguments(self) -> None:
         script = (
@@ -522,6 +597,42 @@ class ReceiptAndArtifactTests(unittest.TestCase):
             l6_training.L6TrainingError, "artifact_manifest_verification_failed"
         ):
             l6_training.verify_artifact_manifest(self.bundle, output)
+
+    def test_finalize_recovers_exact_orphan_manifest_before_completed_receipt(self) -> None:
+        output = self._completed_fixture("orphan-manifest")
+        original_write = l6_training._write_exclusive
+
+        def interrupt_completed_receipt(path: Path, raw: bytes, *, mode: int = 0o600) -> None:
+            if path.name == "training-receipt.json":
+                raise RuntimeError("fixture-controller-interruption")
+            original_write(path, raw, mode=mode)
+
+        with mock.patch.object(
+            l6_training, "_write_exclusive", side_effect=interrupt_completed_receipt
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fixture-controller-interruption"):
+                l6_training.finalize_training_receipt(
+                    self.bundle,
+                    output,
+                    actual_runpod_cost_usd="0.17",
+                    persistence_kind="local_download",
+                    persistence_revision="sha256:fixture",
+                )
+        self.assertTrue((output / "artifact-manifest.json").is_file())
+        self.assertFalse((output / "training-receipt.json").exists())
+
+        result = l6_training.finalize_training_receipt(
+            self.bundle,
+            output,
+            actual_runpod_cost_usd="0.17",
+            persistence_kind="local_download",
+            persistence_revision="sha256:fixture",
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(
+            l6_training.verify_artifact_manifest(self.bundle, output)["status"],
+            "verified",
+        )
 
     def test_export_rejects_projection_or_per_sample_output(self) -> None:
         output = self._completed_fixture("forbidden")

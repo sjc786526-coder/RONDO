@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import jsonschema
+
 from rondo_eval.local_approval import cross_eval, paired_outputs, synthetic_training
 
 
@@ -96,53 +98,174 @@ def digest_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def shared_contract() -> dict:
-    return {
-        "runtime_identity_sha256": digest("pair-runtime"),
-        "chat_template_sha256": digest("pair-chat-template"),
-        "request_contract_sha256": digest("pair-request-contract"),
-        "sampling_contract": {
-            "context_size": 12288,
-            "max_output_tokens": 512,
-            "temperature": 0.0,
-            "top_p": 1.0,
-            "seed": 42,
-        },
-        "output_contract_sha256": cross_eval._canonical_sha256(
-            cross_eval.STATIC_DECISION_SCHEMA
-        ),
-    }
-
-
 def write_canonical(path: Path, value: object) -> None:
     path.write_bytes(cross_eval._json_file_bytes(value))
 
 
+def formal_training_receipt() -> dict:
+    model_contract = json.loads(
+        (WORKTREE_ROOT / "training/local-approval-l6/model-contract-v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return {
+        "schema_version": 1,
+        "version": "rondo_local_approval_l6_training_receipt_v1",
+        "status": "completed",
+        "base": model_contract,
+        "train": {
+            "records": 470,
+            "source_train_jsonl_sha256": paired_outputs.FROZEN_TRAIN_SHA256,
+            "source_dataset_manifest_sha256": (
+                paired_outputs.FROZEN_DATASET_MANIFEST_SHA256
+            ),
+            "projection_sha256": paired_outputs.FROZEN_TRAIN_PROJECTION_SHA256,
+            "completion_only": True,
+        },
+        "token_census": {
+            "schema_version": 1,
+            "version": "rondo_local_approval_l6_exact_token_census_v1",
+            "status": "complete",
+            "exact": True,
+            "records": 470,
+            "projection_sha256": paired_outputs.FROZEN_TRAIN_PROJECTION_SHA256,
+            "tokenizer": {
+                "repo": model_contract["tokenizer"]["repo"],
+                "revision": model_contract["tokenizer"]["revision"],
+                "chat_template_sha256": model_contract["chat_template"]["sha256"],
+            },
+            "chat_template_applied": True,
+            "truncation": False,
+            "packing": False,
+            "sequence_tokens": {
+                "min": 40,
+                "p50": 64,
+                "p95": 96,
+                "max": 128,
+                "total": 30080,
+                "limit": 12288,
+                "over_limit": 0,
+            },
+            "completion_only": {
+                "prompt_tokens_total": 23000,
+                "completion_tokens_total": 7080,
+                "records_with_all_prompt_labels_masked": 470,
+                "records_with_unmasked_completion": 470,
+                "records_with_nonempty_completion": 470,
+            },
+        },
+        "recipe_sha256": digest("formal-recipe"),
+        "run_kind": "formal",
+        "dependencies": {
+            "identity": {"transformers": "fixture"},
+            "identity_sha256": digest("formal-dependencies"),
+        },
+        "cost": {"provider": "runpod", "actual_usd": "0.17"},
+        "provider": {"name": "runpod", "job_id": "fixture-job", "run_id": "fixture-run"},
+        "persistence": {"kind": "local_download", "revision": "fixture-artifacts-v1"},
+        "reload_receipt_sha256": digest("reload-receipt"),
+        "hardware": {"name": "fixture-24gb", "cuda": "12.6"},
+        "metrics": {
+            "trainer_metrics": {"train_runtime": 1.0, "train_loss": 0.5},
+            "global_step": 10,
+            "actual_epochs": 1.0,
+            "train_loss": 0.5,
+            "lora_injection": {
+                "target_pattern": "fixture-language-modules",
+                "targeted_modules": 8,
+                "trainable_parameters": 16,
+                "vision_projector_lm_head_hits": 0,
+            },
+        },
+        "output_paths": {"adapter": "adapter-final", "checkpoints": "checkpoints"},
+        "artifacts": {
+            "adapter": {
+                "files": {
+                    "adapter_model.safetensors": {
+                        "bytes": 17,
+                        "sha256": digest("adapter-model"),
+                    }
+                },
+                "tree_sha256": cross_eval._canonical_sha256(
+                    {
+                        "adapter_model.safetensors": {
+                            "bytes": 17,
+                            "sha256": digest("adapter-model"),
+                        }
+                    }
+                ),
+            },
+            "checkpoints": {
+                "files": {},
+                "tree_sha256": cross_eval._canonical_sha256({}),
+            },
+        },
+        "bundle_manifest_sha256": digest("formal-bundle"),
+    }
+
+
 def build_receipt(
-    directory: Path, *, pair_id: str = "l6-paired-output-fixture-v1"
+    directory: Path,
+    *,
+    pair_id: str = "l6-paired-output-fixture-v1",
+    training_value: dict | None = None,
+    base_model_path: Path | None = None,
+    runtime_lock_path: Path | None = None,
+    pair_contract_path: Path | None = None,
+    bind_adapter_receipt: bool = True,
 ) -> paired_outputs.BuiltPairReceipt:
-    base = directory / "base.lock.json"
-    static = directory / "base.gguf"
     adapter = directory / "adapter.safetensors"
     finetuned = directory / "adapter.manifest.json"
     training = directory / "training-receipt.json"
-    write_canonical(base, {"revision": digest("base-revision")})
-    static.write_bytes(b"fixture-unfinetuned-artifact")
     adapter.write_bytes(b"fixture-finetuned-adapter")
     write_canonical(
         finetuned,
         paired_outputs.build_canonical_artifact_manifest(
-            artifact_id="fixture-finetuned-adapter",
+            artifact_id=paired_outputs.FORMAL_ADAPTER_ARTIFACT_ID,
             manifest_path=finetuned,
-            components={"adapter": adapter},
+            components={"adapter.safetensors": adapter},
         ),
     )
-    write_canonical(training, {"status": "completed", "steps": 2})
+    receipt_value = copy.deepcopy(
+        formal_training_receipt() if training_value is None else training_value
+    )
+    if bind_adapter_receipt:
+        adapter_files = {
+            "adapter.safetensors": {
+                "bytes": adapter.stat().st_size,
+                "sha256": digest_bytes(adapter.read_bytes()),
+            }
+        }
+        receipt_value["artifacts"]["adapter"] = {
+            "files": adapter_files,
+            "tree_sha256": cross_eval._canonical_sha256(adapter_files),
+        }
+    training.write_bytes(
+        (
+            json.dumps(
+                receipt_value,
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=2,
+            )
+            + "\n"
+        ).encode("utf-8")
+    )
+    base = base_model_path or (
+        WORKTREE_ROOT / "training/local-approval-l6/model-contract-v1.json"
+    )
+    runtime = runtime_lock_path or (
+        WORKTREE_ROOT / "eval/locks/llama-cpp-b10333-cuda-linux-x64.json"
+    )
+    pair_contract = pair_contract_path or (
+        WORKTREE_ROOT
+        / "eval/templates/cross-eval-judge/local-m4-l6-pair-contract-v1.json"
+    )
     return paired_outputs.build_pair_receipt(
         pair_id=pair_id,
         base_model=paired_outputs.IdentitySource("frozen_lock", base, "base-lock"),
         local_static=paired_outputs.IdentitySource(
-            "regular_file", static, "unfinetuned-artifact"
+            "frozen_lock", base, "unfinetuned-base-lock"
         ),
         local_ft_static=paired_outputs.IdentitySource(
             "canonical_manifest", finetuned, "finetuned-manifest"
@@ -150,7 +273,19 @@ def build_receipt(
         training_receipt=paired_outputs.IdentitySource(
             "frozen_lock", training, "training-receipt"
         ),
-        shared_contract=shared_contract(),
+        runtime_lock=paired_outputs.IdentitySource(
+            "frozen_lock", runtime, "runtime-lock"
+        ),
+        chat_template=paired_outputs.IdentitySource(
+            "regular_file",
+            WORKTREE_ROOT
+            / "eval/templates/local-approval/"
+            "ministral-3-8b-instruct-2512-chat-template.jinja",
+            "chat-template",
+        ),
+        pair_contract=paired_outputs.IdentitySource(
+            "frozen_lock", pair_contract, "pair-contract"
+        ),
         blind_identity_markers=["PairFixtureBase", "PairFixtureAdapter"],
     )
 
@@ -168,7 +303,7 @@ class PairReceiptIdentityTests(unittest.TestCase):
             )
             self.assertEqual(
                 built.receipt["artifacts"]["local-static"]["model_artifact_sha256"],
-                digest_bytes((directory / "base.gguf").read_bytes()),
+                sources["base-model"]["sha256"],
             )
             self.assertEqual(
                 built.receipt["artifacts"]["local-ft-static"]["model_artifact_sha256"],
@@ -186,7 +321,7 @@ class PairReceiptIdentityTests(unittest.TestCase):
                 sources["local-ft-static"]["components"],
                 [
                     {
-                        "logical_name": "adapter",
+                        "logical_name": "adapter.safetensors",
                         "relative_path": "adapter.safetensors",
                         "size_bytes": (directory / "adapter.safetensors").stat().st_size,
                         "sha256": digest_bytes(
@@ -207,6 +342,12 @@ class PairReceiptIdentityTests(unittest.TestCase):
                     pair_receipt=built.receipt,  # type: ignore[arg-type]
                     run_dir=run_dir,
                     invoke=lambda _side, _payload: {},
+                )
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError, "built_pair_receipt_required"
+            ):
+                paired_outputs.assemble_three_side_outputs(
+                    fixture_bundle(), [], pair_receipt=built.receipt  # type: ignore[arg-type]
                 )
             (directory / "adapter.safetensors").write_bytes(b"changed-adapter")
             called = []
@@ -282,6 +423,129 @@ class PairReceiptIdentityTests(unittest.TestCase):
             ):
                 cross_eval.validate_l6_pair_receipt(duplicate)
 
+    def test_formal_receipt_rejects_nonformal_and_frozen_fact_drift(self) -> None:
+        mutations = {
+            "pending": lambda value: value.update(status="pending"),
+            "smoke": lambda value: value.update(run_kind="smoke"),
+            "wrong-base": lambda value: value["base"]["base"].update(
+                repo="fixture/wrong-base"
+            ),
+            "wrong-train": lambda value: value["train"].update(records=469),
+            "wrong-projection": lambda value: value["train"].update(
+                projection_sha256=digest("wrong-projection")
+            ),
+            "simplified-census": lambda value: value["token_census"].pop(
+                "tokenizer"
+            ),
+            "nonobject-cost": lambda value: value.update(cost="0.17"),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                value = formal_training_receipt()
+                mutate(value)
+                with self.assertRaises(paired_outputs.PairedOutputError):
+                    build_receipt(Path(temporary), training_value=value)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError,
+                "formal_pair_adapter_receipt_mismatch",
+            ):
+                build_receipt(
+                    Path(temporary),
+                    bind_adapter_receipt=False,
+                )
+
+    def test_tracked_model_runtime_chat_and_pair_contract_are_fixed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            model_contract = json.loads(
+                (
+                    WORKTREE_ROOT
+                    / "training/local-approval-l6/model-contract-v1.json"
+                ).read_text(encoding="utf-8")
+            )
+            model_contract["tokenizer"]["files"]["tokenizer.json"]["sha256"] = digest(
+                "counterfeit-tokenizer"
+            )
+            counterfeit_model = directory / "counterfeit-model-contract.json"
+            write_canonical(counterfeit_model, model_contract)
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError, "formal_model_contract_invalid"
+            ):
+                build_receipt(directory, base_model_path=counterfeit_model)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            runtime = json.loads(
+                (
+                    WORKTREE_ROOT
+                    / "eval/locks/llama-cpp-b10333-cuda-linux-x64.json"
+                ).read_text(encoding="utf-8")
+            )
+            runtime["source"]["commit"] = digest("counterfeit-runtime")[:40]
+            counterfeit_runtime = directory / "counterfeit-runtime.json"
+            write_canonical(counterfeit_runtime, runtime)
+            contract = json.loads(
+                (
+                    WORKTREE_ROOT
+                    / "eval/templates/cross-eval-judge/"
+                    "local-m4-l6-pair-contract-v1.json"
+                ).read_text(encoding="utf-8")
+            )
+            contract["runtime"]["lock_sha256"] = digest_bytes(
+                counterfeit_runtime.read_bytes()
+            )
+            counterfeit_contract = directory / "counterfeit-pair-contract.json"
+            write_canonical(counterfeit_contract, contract)
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError, "formal_pair_contract_invalid"
+            ):
+                build_receipt(
+                    directory,
+                    runtime_lock_path=counterfeit_runtime,
+                    pair_contract_path=counterfeit_contract,
+                )
+
+    def test_sampling_and_shared_facts_are_exact_at_formal_evidence_boundary(self) -> None:
+        mutations = (
+            lambda receipt: receipt["shared_contract"]["sampling_contract"].update(
+                seed=43
+            ),
+            lambda receipt: receipt["shared_contract"].update(
+                runtime_identity_sha256=digest("runtime_identity_sha256")
+            ),
+            lambda receipt: receipt["shared_contract"].update(
+                chat_template_sha256=digest("chat_template_sha256")
+            ),
+            lambda receipt: receipt["shared_contract"].update(
+                request_contract_sha256=digest("request_contract_sha256")
+            ),
+            lambda receipt: receipt.update(
+                base_model_identity_sha256=digest("wrong-base")
+            ),
+        )
+        for mutate in mutations:
+            with tempfile.TemporaryDirectory() as temporary:
+                built = build_receipt(Path(temporary))
+                mutate(built.receipt)
+                with self.assertRaisesRegex(
+                    paired_outputs.PairedOutputError,
+                    "pair_receipt_source_manifest_mismatch",
+                ):
+                    paired_outputs.formal_pair_evidence(built)
+        pair_contract = json.loads(
+            (
+                WORKTREE_ROOT
+                / "eval/templates/cross-eval-judge/"
+                "local-m4-l6-pair-contract-v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            pair_contract["request_contract"]["sampling"],
+            paired_outputs.FORMAL_SAMPLING_CONTRACT,
+        )
+
 
 class MixedTerminalPairTests(unittest.TestCase):
     def test_mixed_terminals_import_and_anonymize_without_forged_decisions(self) -> None:
@@ -317,12 +581,20 @@ class MixedTerminalPairTests(unittest.TestCase):
                 run_dir=run_dir,
                 invoke=invoke,
             )
+            with self.assertRaisesRegex(
+                cross_eval.CrossEvalError, "l6_pair_sources_required"
+            ):
+                cross_eval.validate_three_side_rows(
+                    bundle,
+                    [*paired_outputs.build_frozen_sol_rows(bundle), *local_rows],
+                    l6_pair_receipt=receipt,
+                )
             self.assertEqual(
                 calls,
                 ["local-static"] * 6 + ["local-ft-static"] * 6,
             )
             accepted = paired_outputs.assemble_three_side_outputs(
-                bundle, local_rows, pair_receipt=receipt
+                bundle, local_rows, pair_receipt=built_receipt
             )
             self.assertEqual(len(accepted), 18)
             local_terminals = [
@@ -340,7 +612,7 @@ class MixedTerminalPairTests(unittest.TestCase):
                 bundle,
                 accepted,
                 seed=bytes(range(32)),
-                l6_pair_receipt=receipt,
+                l6_pair_receipt=paired_outputs.formal_pair_evidence(built_receipt),
             )
             self.assertEqual(len(anonymous), 2)
             projected = [
@@ -371,7 +643,9 @@ class MixedTerminalPairTests(unittest.TestCase):
                     judged_date=FIXTURE_DATE,
                     seed=bytes(range(32)),
                     templates=cross_eval.load_template_identity(WORKTREE_ROOT),
-                    l6_pair_receipt=receipt,
+                    l6_pair_receipt=paired_outputs.formal_pair_evidence(
+                        built_receipt
+                    ),
                 )
 
     def test_terminal_union_rejects_failure_with_decision_and_sol_failure(self) -> None:
@@ -425,7 +699,9 @@ class MixedTerminalPairTests(unittest.TestCase):
                 cross_eval.validate_three_side_rows(
                     bundle,
                     [*rows, *local],
-                    l6_pair_receipt=receipt,
+                    l6_pair_receipt=paired_outputs.formal_pair_evidence(
+                        built_receipt
+                    ),
                 )
 
     def test_all_decision_v2_rows_still_build_the_frozen_v1_blind_package(self) -> None:
@@ -446,7 +722,7 @@ class MixedTerminalPairTests(unittest.TestCase):
                 },
             )
             accepted = paired_outputs.assemble_three_side_outputs(
-                bundle, local, pair_receipt=built_receipt.receipt
+                bundle, local, pair_receipt=built_receipt
             )
             blind = cross_eval.build_blind_batches(
                 bundle,
@@ -455,7 +731,7 @@ class MixedTerminalPairTests(unittest.TestCase):
                 judged_date=FIXTURE_DATE,
                 seed=bytes(range(32)),
                 templates=cross_eval.load_template_identity(WORKTREE_ROOT),
-                l6_pair_receipt=built_receipt.receipt,
+                l6_pair_receipt=paired_outputs.formal_pair_evidence(built_receipt),
             )
             self.assertEqual(len(blind), 2)
             self.assertTrue(
@@ -512,17 +788,17 @@ class PairedJournalTests(unittest.TestCase):
             self.assertEqual(stat_mode(journal), 0o600)
             self.assertEqual(stat_mode(run_dir), 0o700)
 
-    def test_unexpected_interruption_leaves_attempt_and_resume_refuses_reinvoke(self) -> None:
+    def test_interruption_requires_explicit_infrastructure_resolution_then_resumes(self) -> None:
         bundle = fixture_bundle()
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             receipt = build_receipt(directory)
             run_dir = directory / "interrupted-run"
             run_dir.mkdir(mode=0o700)
-            first_calls = []
+            first_calls: list[tuple[str, str]] = []
 
-            def interrupted(side: str, _payload: dict) -> dict:
-                first_calls.append(side)
+            def interrupted(side: str, payload: dict) -> dict:
+                first_calls.append((side, cross_eval._canonical_sha256(payload)))
                 raise RuntimeError("synthetic interruption")
 
             with self.assertRaisesRegex(RuntimeError, "synthetic interruption"):
@@ -532,8 +808,8 @@ class PairedJournalTests(unittest.TestCase):
                     run_dir=run_dir,
                     invoke=interrupted,
                 )
-            self.assertEqual(first_calls, ["local-static"])
-            resumed_calls = []
+            self.assertEqual(len(first_calls), 1)
+            resumed_calls: list[tuple[str, str]] = []
             with self.assertRaisesRegex(
                 paired_outputs.PairedOutputError,
                 "paired_journal_attempt_without_terminal",
@@ -542,10 +818,157 @@ class PairedJournalTests(unittest.TestCase):
                     bundle,
                     pair_receipt=receipt,
                     run_dir=run_dir,
-                    invoke=lambda side, payload: resumed_calls.append(side)
+                    invoke=lambda side, payload: resumed_calls.append(
+                        (side, cross_eval._canonical_sha256(payload))
+                    )
                     or self.decision(side, payload),
                 )
             self.assertEqual(resumed_calls, [])
+
+            infrastructure = paired_outputs.resolve_interrupted_attempt(
+                bundle,
+                pair_receipt=receipt,
+                run_dir=run_dir,
+                failure_code="worker-process-lost",
+            )
+            self.assertEqual(
+                infrastructure["terminal"],
+                {
+                    "schema_version": 2,
+                    "contract_version": "rondo_l6_output_terminal_v2",
+                    "status": "infrastructure_failure",
+                    "failure_code": "worker-process-lost",
+                },
+            )
+            self.assertNotIn("decision", infrastructure["terminal"])
+            side_schema_path = (
+                WORKTREE_ROOT
+                / "eval/templates/cross-eval-judge/local-m4-side-output-v2.schema.json"
+            )
+            side_schema = json.loads(side_schema_path.read_text(encoding="utf-8"))
+            jsonschema.Draft202012Validator(
+                side_schema["properties"]["terminal"]
+            ).validate(infrastructure["terminal"])
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError,
+                "paired_journal_no_interrupted_attempt",
+            ):
+                paired_outputs.resolve_interrupted_attempt(
+                    bundle,
+                    pair_receipt=receipt,
+                    run_dir=run_dir,
+                    failure_code="duplicate-resolution",
+                )
+
+            completed = paired_outputs.run_paired_outputs(
+                bundle,
+                pair_receipt=receipt,
+                run_dir=run_dir,
+                invoke=lambda side, payload: resumed_calls.append(
+                    (side, cross_eval._canonical_sha256(payload))
+                )
+                or self.decision(side, payload),
+            )
+            self.assertEqual(len(completed), 12)
+            self.assertEqual(len(resumed_calls), 11)
+            self.assertEqual(len(set([*first_calls, *resumed_calls])), 12)
+            keys = [(row["side"], row["sample_id"]) for row in completed]
+            self.assertEqual(len(keys), len(set(keys)))
+            infrastructure_rows = [
+                row
+                for row in completed
+                if row["terminal"]["status"] == "infrastructure_failure"
+            ]
+            self.assertEqual(infrastructure_rows, [infrastructure])
+            accepted = paired_outputs.assemble_three_side_outputs(
+                bundle, completed, pair_receipt=receipt
+            )
+            with self.assertRaisesRegex(
+                cross_eval.CrossEvalError,
+                "judge_package_v1_requires_decision_terminals",
+            ):
+                cross_eval.build_blind_batches(
+                    bundle,
+                    accepted,
+                    judge_model="fixture-judge",
+                    judged_date=FIXTURE_DATE,
+                    seed=bytes(range(32)),
+                    templates=cross_eval.load_template_identity(WORKTREE_ROOT),
+                    l6_pair_receipt=paired_outputs.formal_pair_evidence(receipt),
+                )
+
+    def test_interruption_resolution_rejects_missing_non_tail_and_pair_drift(self) -> None:
+        bundle = fixture_bundle()
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            receipt = build_receipt(directory)
+            clean_run = directory / "clean-run"
+            clean_run.mkdir(mode=0o700)
+            paired_outputs.run_paired_outputs(
+                bundle,
+                pair_receipt=receipt,
+                run_dir=clean_run,
+                invoke=self.decision,
+                max_new_terminals=0,
+            )
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError,
+                "paired_journal_no_interrupted_attempt",
+            ):
+                paired_outputs.resolve_interrupted_attempt(
+                    bundle,
+                    pair_receipt=receipt,
+                    run_dir=clean_run,
+                    failure_code="nothing-to-resolve",
+                )
+
+            interrupted_run = directory / "non-tail-run"
+            interrupted_run.mkdir(mode=0o700)
+            with self.assertRaises(RuntimeError):
+                paired_outputs.run_paired_outputs(
+                    bundle,
+                    pair_receipt=receipt,
+                    run_dir=interrupted_run,
+                    invoke=lambda _side, _payload: (_ for _ in ()).throw(
+                        RuntimeError("interrupt")
+                    ),
+                )
+            other_dir = directory / "other-pair"
+            other_dir.mkdir()
+            other_receipt = build_receipt(
+                other_dir, pair_id="l6-other-resolution-fixture-v1"
+            )
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError, "paired_journal_binding_mismatch"
+            ):
+                paired_outputs.resolve_interrupted_attempt(
+                    bundle,
+                    pair_receipt=other_receipt,
+                    run_dir=interrupted_run,
+                    failure_code="wrong-pair",
+                )
+
+            journal = interrupted_run / "paired-output-journal.jsonl"
+            paired_outputs._append_journal_record(
+                journal,
+                {
+                    "schema_version": paired_outputs.JOURNAL_SCHEMA_VERSION,
+                    "contract_version": paired_outputs.JOURNAL_CONTRACT_VERSION,
+                    "record_type": "attempt",
+                    "sequence": 1,
+                    "side": "local-static",
+                    "sample_id": sorted(bundle.source_rows)[1],
+                },
+            )
+            with self.assertRaisesRegex(
+                paired_outputs.PairedOutputError, "paired_journal_terminal_invalid"
+            ):
+                paired_outputs.resolve_interrupted_attempt(
+                    bundle,
+                    pair_receipt=receipt,
+                    run_dir=interrupted_run,
+                    failure_code="non-tail-attempt",
+                )
 
     def test_journal_rejects_pair_and_cohort_binding_drift(self) -> None:
         bundle = fixture_bundle()
