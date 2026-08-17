@@ -1034,11 +1034,11 @@ standard/Lite 形态均补回归。
   `git diff --check` 通过，2026-08-17 独立验收确认任务目标完成；详见
   `agent_log/2026-08-17-001729-plan041-final-independent-acceptance.md`。
 
-## Multi M-3 —— 证据锚定（Plan 042，2026-08-17，补充整改后待再次复验与合入）
+## Multi M-3 —— 证据锚定（Plan 042，2026-08-17，已验收待合入）
 
 **状态**：实现与定向门禁完成，落在工作树分支 `worktree-042-multi-m3-evidence-anchoring`
 （提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`、`35356ab`、`eb53218`），**尚未合入 `main`**。
-第三轮独立复验的三项残余 findings 已补修，**再次复验尚未进行**。
+第三轮独立复验的三项残余 findings 已补修并通过最终独立复验。
 
 - **两步捕获**：Harness 在 dispatch 前为输出预留唯一 item identity，工具处理器产出终态时按该身份记下观察
   （此处才知道跑的是哪个工具、结果什么形状），同一 item 进入
@@ -1088,6 +1088,9 @@ standard/Lite 形态均补回归。
   `just fix -p codex-team-state -p codex-core`、`just fmt`、`just fmt-check` 通过。
   补充整改另跑 `codex-team-state evidence` **23/23**、新边界纵切 **1/1**、其余 M-1/M-2/既有 M-3/
   `tools::parallel` **19/19**、`team::evidence` **6/6**，scoped fix 与 fmt-check 通过；未重跑 541 条合并门禁。
+- **最终独立复验**：静态复核未发现新的 P0/P1/P2 缺陷，并经共享构建锁独立重跑
+  `codex-team-state evidence` **23/23** 与重复 call ID/refs 分页产品纵切 **1/1**；结论为验收通过、任务目标完成。
+  详见 `agent_log/2026-08-17-055152-plan042-m3-supplemental-remediation-reverification.md`。
 - **边界**：功能默认关闭，关闭时不注册 `team_evidence`、不改变普通工具结果与 rollout 行为。未建 artifact
   store、全量输出副本、完整 transcript/provenance graph、自动 freshness 验证或跨进程持久化；未运行全
   workspace、Docker、真实 API、本地模型或付费测评。执行细节与环境坑见

@@ -222,11 +222,11 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
   目标空闲且指派要求它开始或继续工作时，触发其下一轮；目标空闲但只是信息通知时排队投递。
 - **边界**：不引入新的 Agent-to-Agent 传输协议；不实现只读贡献档位；不实现 Event 关系图。
 
-### M-3 证据锚定（补充整改完成，待再次独立复验与合入）
+### M-3 证据锚定（已验收，待合入 main）
 
 实现由工作树分支 `worktree-042-multi-m3-evidence-anchoring` 落地（提交 `db39e28`、`8360bbf`、`ce32394`、
 `cfe3dc1`、`35356ab`、`eb53218`），尚未合入 `main`。第三轮独立复验指出的并行重复 call ID 配对、
-refs 第 33 条后不可达与同 producer 暂存截断均已补修，**再次复验尚未进行**。模型可见工具新增
+refs 第 33 条后不可达与同 producer 暂存截断均已补修并通过最终独立复验。模型可见工具新增
 `team_evidence`，与 M-1/M-2 五个工具同受
 `features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。
 
@@ -242,11 +242,13 @@ observation 的有界文本与必要元数据。
 locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 只作元数据）；Version 保留发布窗口的全部引用，
 上下文预算只作用于打印列表的 surface 并报告省略数。
 
-定向门禁：`codex-team-state` 101/101；产品纵切 `suite::team_evidence` 3/3；M-1/M-2 回归
-`suite::team_world_state` + `suite::team_routing` 12/12 无退化；`core` 的 `team::evidence` 6/6；
-合并 `tools::`/`context::` 共 541/541。执行细节见
+实现期定向门禁：`codex-team-state` 101/101；产品纵切 `suite::team_evidence` 3/3；M-1/M-2 回归
+12/12；`core` 的 `team::evidence` 6/6；合并 `tools::`/`context::` 共 541/541。补充整改后另通过
+`codex-team-state evidence` 23/23、新边界产品纵切 1/1 与其余定向回归 19/19；最终独立复验再次确认
+23/23 与 1/1。执行与验收细节见
 `agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`，验收审查与整改见同目录
-`...-045506-...-independent-acceptance-review.md` 与 `...-052000-...-acceptance-remediation.md`，
+`...-045506-...-independent-acceptance-review.md`、`...-052355-...-remediation-reverification.md` 与
+`...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
