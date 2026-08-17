@@ -32,19 +32,18 @@ impl AgentControl {
             return AvailabilitySnapshot::from_entries_at(AvailabilityEpoch::INITIAL, entries);
         };
         loop {
-            let generation = state.availability_generation();
-            if state.store_transition_in_progress() {
-                if generation != state.availability_generation()
-                    || !state.store_transition_in_progress()
-                {
-                    continue;
-                }
+            let (generation, store_transition_active) = state.availability_marker();
+            if store_transition_active {
                 let entries = self
                     .team
                     .participants()
                     .into_iter()
                     .map(|participant| (participant.thread_id, ProducerAvailability::Unknown))
                     .collect();
+                let (live_generation, live_store_transition_active) = state.availability_marker();
+                if generation != live_generation || !live_store_transition_active {
+                    continue;
+                }
                 return AvailabilitySnapshot::from_entries_at(
                     AvailabilityEpoch::from_raw(generation),
                     entries,
@@ -57,9 +56,8 @@ impl AgentControl {
                     .await;
                 entries.push((participant.thread_id, class));
             }
-            if generation == state.availability_generation()
-                && !state.store_transition_in_progress()
-            {
+            let (live_generation, live_store_transition_active) = state.availability_marker();
+            if generation == live_generation && !live_store_transition_active {
                 return AvailabilitySnapshot::from_entries_at(
                     AvailabilityEpoch::from_raw(generation),
                     entries,
@@ -344,9 +342,15 @@ mod tests {
             control.classify_producer(worker.thread_id).await,
             ProducerAvailability::RecoverableUnloaded
         );
+        let before_transition = control.producer_availability_snapshot().await;
+        assert_eq!(
+            before_transition.class_of(worker.thread_id),
+            Some(ProducerAvailability::RecoverableUnloaded)
+        );
 
         let transition = manager.begin_thread_store_transition();
         let midpoint_epoch = control.availability_epoch();
+        assert_ne!(midpoint_epoch, before_transition.epoch);
         assert_eq!(
             control.classify_producer(worker.thread_id).await,
             ProducerAvailability::Unknown,
@@ -389,9 +393,11 @@ mod tests {
 
         transition.finish();
         assert!(control.availability_epoch() != midpoint_epoch);
+        let after_transition = control.producer_availability_snapshot().await;
+        assert_ne!(after_transition.epoch, midpoint_epoch);
         assert_eq!(
-            control.classify_producer(worker.thread_id).await,
-            ProducerAvailability::Unavailable
+            after_transition.class_of(worker.thread_id),
+            Some(ProducerAvailability::Unavailable)
         );
     }
 

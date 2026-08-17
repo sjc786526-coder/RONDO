@@ -202,7 +202,7 @@
 
 ### 当前工作
 
-- 独立复验认定 `59b0f33` 仍有中间 epoch 双义阻断。第四轮审查缺口已在 043 工作树窄修；未合并、未推送，等待再次独立审查。
+- 独立复验认定 `def76b6` 仍可在 active/generation 两次原子写之间发布双义 epoch。第五轮审查缺口已在 043 工作树窄修；未合并、未推送，等待再次独立审查。
 
 ### 本任务剩余步骤
 
@@ -220,7 +220,8 @@
 - 第一轮整改 `8f73572`：独立复验不通过（报告 `035977c`）。
 - 第二轮整改 `c203e34`：独立复验不通过（报告 `31ecafc`）。
 - 第三轮整改 `59b0f33`：独立复验不通过（报告 `c3e9563`）。
-- 第四轮审查缺口整改、格式化、lint、定向测试、文档同步：本轮已完成并提交 043 分支。
+- 第四轮整改 `def76b6`：独立复验不通过（报告 `8a3d7eb`）。
+- 第五轮审查缺口整改、格式化、lint、定向测试、文档同步：本轮已完成并在 043 分支交付。
 - 再次独立审查：待进行；不由执行者自判替代。
 
 ### 交接边界
@@ -266,3 +267,4 @@
 | 026 | 当前可用 = loaded 且 `CodexThread::is_running()`；死驻留按 stored resume material 分类，探测时从 map 丢掉并 bump generation | dump 不得把已不能接任务的 runtime 报成 available；该变化必须进入 availability version | availability | 已采纳 |
 | 027 | DumpCursor 携带完整 TeamInstanceId；跨实例 cursor 以 `InstanceReset` fail-closed，不签名 | 延续既有“旧实例引用不得解析当前实例”合同 | 可观测性 | 已采纳 |
 | 028 | store transition 用可跨 await 持有的 active counter/token；期间可用性为 `unknown`，Root 不得退休；Drop 与显式 finish 都能收口 | 同一中间 epoch 不得在删除前后分别表示 recoverable 与 unavailable | 并发 | 已采纳 |
+| 029 | availability snapshot 在分类前后短持现有 gate，一致采样 `(generation, active)`；锁不跨 `await` | active 与 generation 是两次原子写；无锁 snapshot 仍可能在边界发布新分类/旧 epoch，loaded map mutation 也有同类窗口 | 并发 | 已采纳 |

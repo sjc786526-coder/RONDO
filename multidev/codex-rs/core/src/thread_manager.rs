@@ -1313,6 +1313,15 @@ impl ThreadManagerState {
         self.availability_generation.load(Ordering::SeqCst)
     }
 
+    /// Read the externally observable availability marker without interleaving a gated mutation.
+    pub(crate) fn availability_marker(&self) -> (u64, bool) {
+        let _gate = self.lock_availability_transition();
+        (
+            self.availability_generation(),
+            self.store_transition_in_progress(),
+        )
+    }
+
     pub(crate) fn bump_availability_generation(&self) {
         self.availability_generation.fetch_add(1, Ordering::SeqCst);
     }
