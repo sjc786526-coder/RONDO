@@ -316,13 +316,18 @@ impl AgentControl {
     }
 
     /// Ask whether the producer can be restored in this root tree, including via `resume_agent`.
+    ///
+    /// A mapped thread counts as loaded only while it can still accept tasks.
     pub(crate) async fn probe_producer_recoverability(
         &self,
         state: &Arc<ThreadManagerState>,
         thread_id: ThreadId,
     ) -> ProducerRecoverability {
-        if state.get_thread(thread_id).await.is_ok() {
-            return ProducerRecoverability::Loaded;
+        if let Ok(thread) = state.get_thread(thread_id).await {
+            if thread.is_running() {
+                return ProducerRecoverability::Loaded;
+            }
+            state.drop_dead_resident(thread_id).await;
         }
         match self.stored_resume_material(state, thread_id).await {
             StoredResumeMaterial::Present(_) => ProducerRecoverability::Restorable,

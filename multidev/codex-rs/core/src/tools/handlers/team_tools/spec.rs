@@ -404,7 +404,7 @@ pub(crate) fn create_team_inspect_tool() -> ToolSpec {
         (
             "cursor".to_string(),
             JsonSchema::string(Some(
-                "Pass the `next_cursor` from a previous dump page. A cursor from a different revision, availability snapshot or observe generation is refused."
+                "Pass the `next_cursor` from a previous dump page. A cursor from a different team instance, revision, availability snapshot or observe generation is refused."
                     .to_string(),
             )),
         ),

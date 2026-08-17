@@ -205,6 +205,7 @@ impl ObserveQuery {
 /// Cursor carried by dump pages so a later page can refuse a different snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DumpCursor {
+    pub instance: TeamInstanceId,
     pub revision: TeamRevision,
     pub availability_epoch: AvailabilityEpoch,
     pub observe_generation: u64,
@@ -214,7 +215,8 @@ pub struct DumpCursor {
 impl DumpCursor {
     pub fn encode(self) -> String {
         format!(
-            "{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}",
+            self.instance,
             self.revision.get(),
             self.availability_epoch.get(),
             self.observe_generation,
@@ -224,6 +226,13 @@ impl DumpCursor {
 
     pub fn decode(value: &str) -> Result<Self, TeamError> {
         let mut parts = value.split(':');
+        let instance =
+            parts
+                .next()
+                .and_then(|part| part.parse().ok())
+                .ok_or(TeamError::InvalidRequest {
+                    reason: "dump cursor is malformed",
+                })?;
         let revision =
             parts
                 .next()
@@ -258,6 +267,7 @@ impl DumpCursor {
             });
         }
         Ok(Self {
+            instance,
             revision: TeamRevision::from_raw(revision),
             availability_epoch: AvailabilityEpoch::from_raw(epoch),
             observe_generation,

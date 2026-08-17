@@ -37,6 +37,13 @@ impl TeamInstanceId {
         bytes.copy_from_slice(hex.as_bytes());
         InstanceTag(bytes)
     }
+
+    pub fn from_tag(tag: InstanceTag) -> Result<Self, ReferenceParseError> {
+        std::str::from_utf8(&tag.0)
+            .ok()
+            .and_then(|hex| hex.parse().ok())
+            .ok_or(ReferenceParseError)
+    }
 }
 
 impl Default for TeamInstanceId {
@@ -48,6 +55,20 @@ impl Default for TeamInstanceId {
 impl fmt::Display for TeamInstanceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.tag())
+    }
+}
+
+impl FromStr for TeamInstanceId {
+    type Err = ReferenceParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() != INSTANCE_TAG_LEN || !value.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(ReferenceParseError);
+        }
+        Uuid::try_parse(value)
+            .ok()
+            .map(Self)
+            .ok_or(ReferenceParseError)
     }
 }
 

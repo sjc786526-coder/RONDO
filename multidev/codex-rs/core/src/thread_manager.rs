@@ -332,8 +332,9 @@ pub(crate) struct ThreadManagerState {
     analytics_events_client: Option<AnalyticsEventsClient>,
     // Captures submitted ops for testing purpose when test mode is enabled.
     ops_log: Option<SharedCapturedOps>,
-    /// Monotonic generation for producer availability. Bumped when a thread is loaded, unloaded
-    /// or deleted from the store so a stale retirement cannot land after a restore.
+    /// Monotonic generation for producer availability. Bumped when a thread is loaded, unloaded,
+    /// dies while still mapped, or when a store transition begins/finishes, so a stale retirement
+    /// cannot land after a restore or delete.
     availability_generation: AtomicU64,
     /// Serializes availability-changing map/store updates with Root retirement.
     availability_gate: std::sync::Mutex<()>,
@@ -721,6 +722,7 @@ impl ThreadManager {
 
     /// Permanently drop a stored thread. After this, the same root tree cannot restore it.
     pub async fn delete_stored_thread(&self, thread_id: ThreadId) -> CodexResult<()> {
+        self.begin_thread_store_transition();
         let result = self
             .state
             .thread_store
@@ -734,15 +736,22 @@ impl ThreadManager {
                     CodexErr::Fatal(format!("failed to delete stored thread {thread_id}: {err}"))
                 }
             });
-        if result.is_ok() {
-            let _gate = self.state.lock_availability_transition();
-            self.state.bump_availability_generation();
-        }
+        self.finish_thread_store_transition();
         result
     }
 
-    /// Record that the backing thread store changed outside this manager's delete helper.
-    pub fn notify_thread_store_changed(&self) {
+    /// Invalidate availability snapshots before an awaitable store mutation.
+    ///
+    /// Pair with [`Self::finish_thread_store_transition`] around the actual delete. The two
+    /// gated bumps are the linearization points; the await in between must not hold the gate.
+    pub fn begin_thread_store_transition(&self) {
+        let _gate = self.state.lock_availability_transition();
+        self.state.bump_availability_generation();
+    }
+
+    /// Record that an awaitable store mutation is now visible to recoverability probes.
+    pub fn finish_thread_store_transition(&self) {
+        let _gate = self.state.lock_availability_transition();
         self.state.bump_availability_generation();
     }
 
@@ -1306,6 +1315,30 @@ impl ThreadManagerState {
         match threads.get(&thread_id) {
             Some(thread) if !thread.session_source.is_internal() => Ok(thread.clone()),
             Some(_) | None => Err(CodexErr::ThreadNotFound(thread_id)),
+        }
+    }
+
+    /// Drop a map-resident thread whose submit channel is already closed.
+    ///
+    /// Product availability treats this as unloaded, then classifies from stored resume material.
+    /// The gated bump versions the change so a dump/retire snapshot taken while it looked loaded
+    /// cannot be reused after the runtime can no longer accept tasks.
+    pub(crate) async fn drop_dead_resident(&self, thread_id: ThreadId) {
+        let mut threads = self.threads.write().await;
+        let Some(thread) = threads.get(&thread_id) else {
+            return;
+        };
+        if thread.is_running() {
+            return;
+        }
+        let _gate = self.lock_availability_transition();
+        if threads
+            .get(&thread_id)
+            .is_some_and(|thread| !thread.is_running())
+        {
+            threads.remove(&thread_id);
+            drop(threads);
+            self.bump_availability_generation();
         }
     }
 

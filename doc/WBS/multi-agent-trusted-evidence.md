@@ -252,7 +252,7 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 独立复验仍不通过；第二轮审查缺口已在
+M-3 已完成并合入 `main`。M-4 独立复验仍不通过；第三轮审查缺口已在
 `worktree-043-multi-m4-coordination-closure` 整改，待再审查后合入。合入前下一工作包仍是 M-4
 审查/合入，不是 M-5。任务合同见
 `plan/043-multi-m4-coordination-closure-observability-execplan.md`，首次实现见
@@ -260,7 +260,9 @@ M-3 已完成并合入 `main`。M-4 独立复验仍不通过；第二轮审查�
 `agent_log/2026-08-17-082629-plan043-m4-independent-acceptance-review.md`，第一轮整改见
 `agent_log/2026-08-17-090000-plan043-m4-acceptance-gap-remediation.md`，复验见
 `agent_log/2026-08-17-091208-plan043-m4-remediation-independent-rereview.md`，第二轮整改见
-`agent_log/2026-08-17-093500-plan043-m4-rereview-gap-remediation.md`。
+`agent_log/2026-08-17-093500-plan043-m4-rereview-gap-remediation.md`，第二轮复验见
+`agent_log/2026-08-17-094215-plan043-m4-second-remediation-independent-rereview.md`，第三轮整改见
+`agent_log/2026-08-17-100500-plan043-m4-third-remediation.md`。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -276,7 +278,7 @@ M-3 已完成并合入 `main`。M-4 独立复验仍不通过；第二轮审查�
   团队工具自身与证据读取动作默认不递归产生新证据。
 - **边界**：不复制全量工具输出，不建 artifact store，不自动判定证据是否仍然有效。
 
-### M-4 协调闭合与可观测性（第二轮审查缺口已在 043 工作树整改，待再审查）
+### M-4 协调闭合与可观测性（第三轮审查缺口已在 043 工作树整改，待再审查）
 
 - **目标**：让长时间运行中的团队状态能干净收尾，并让一次错误协调可被事后解释。
 - **交付能力**：producer 不可用时 Root 显式退休其未终结 Version；确定性的团队状态转储与精简变更日志；

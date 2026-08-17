@@ -34,16 +34,23 @@ impl TeamStore {
                 reason: "dump pages continue with a snapshot cursor, not a raw offset",
             });
         }
-        if let Some(cursor) = cursor
-            && (cursor.revision != self.revision
+        if let Some(cursor) = cursor {
+            if cursor.instance != self.instance {
+                return Err(TeamError::InstanceReset {
+                    referenced_instance: cursor.instance.tag(),
+                    current_instance: self.tag,
+                });
+            }
+            if cursor.revision != self.revision
                 || cursor.availability_epoch != availability.epoch
-                || cursor.observe_generation != self.observe_generation)
-        {
-            return Err(TeamError::DumpCursorStale {
-                current_revision: self.revision,
-                current_epoch: availability.epoch,
-                current_observe_generation: self.observe_generation,
-            });
+                || cursor.observe_generation != self.observe_generation
+            {
+                return Err(TeamError::DumpCursorStale {
+                    current_revision: self.revision,
+                    current_epoch: availability.epoch,
+                    current_observe_generation: self.observe_generation,
+                });
+            }
         }
 
         let entries = self.dump_entries(availability);

@@ -73,6 +73,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 .map_err(team_error)?;
             let next_cursor = page.next_offset.map(|offset| {
                 DumpCursor {
+                    instance: page.instance,
                     revision: page.revision,
                     availability_epoch: page.availability_epoch,
                     observe_generation: page.observe_generation,

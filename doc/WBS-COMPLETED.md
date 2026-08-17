@@ -1099,24 +1099,18 @@ standard/Lite 形态均补回归。
 
 ## Multi M-4 —— 协调闭合与可观测性（Plan 043，2026-08-17）
 
-**状态**：首次落地 `e03eef1` 与第一轮整改 `8f73572` 均未通过独立验收（报告 `e2105aa`、`035977c`）。
-第二轮审查缺口已在 `worktree-043-multi-m4-coordination-closure` 整改，未合并、未推送，待再次独立审查。
+**状态**：首次落地 `e03eef1`、第一轮整改 `8f73572` 与第二轮整改 `c203e34` 均未通过独立验收（报告 `e2105aa`、`035977c`、`31ecafc`）。
+第三轮审查缺口已在 `worktree-043-multi-m4-coordination-closure` 整改，未合并、未推送，待再次独立审查。
 
-- **可用性**：产品分类按显式 `resume_agent` 恢复能力派生——已加载为 `available`；store+history 可重建为
-  `recoverable_unloaded`（含 shutdown 后 registry 缺失）；store/history 明确缺失为 `unavailable`；读失败为
-  `unknown`。自动 V2 load 仍走单独的 `probe_v2_restore`。epoch 是单调 generation。
-- **退休**：仅 Root；作者在提交时须为 `unavailable`。最终 epoch 重验与 loaded-map insert/remove、store
-  delete、registry release 共用同步 availability gate。退休是独立终态覆盖层。同状态 lifecycle 是 no-op。
-- **可观测性**：dump cursor `revision:epoch:observe_generation:offset`；裸 offset 拒绝。Version→Fact 用独立
-  `VersionFact` 行分页。Agent 关系行同时带 label 与 `thread_id`。统计按 `thread_id` 聚合可分页。
-- **门禁（本轮）**：`codex-team-state --lib` **124/124**；`resume_agent_restores_closed_agent_and_accepts_send_input`
-  **1/1**；availability 控制面（含 shutdown 后 recoverable）通过；产品纵切 M-1—M-4 **17/17**（须清 loopback
-  代理）。`just fix -p codex-team-state -p codex-core`、`just fmt` 通过。未跑全 workspace、Docker、真实 API
-  或本地模型。
-- **边界**：功能仍随 `team_state_enabled` 默认关闭。未做自动退休、orphan 清理、escalation、产品 UI、
-  跨进程日志持久化或审计链。执行与审查记录见
+- **可用性**：产品分类按显式 `resume_agent` 恢复能力派生——loaded 且 `is_running()` 为 `available`；死驻留与未加载均按 store+history 派生 `recoverable_unloaded` / `unavailable` / `unknown`。自动 V2 load 仍走单独的 `probe_v2_restore`。epoch 是单调 generation。
+- **退休**：仅 Root；作者在提交时须为 `unavailable`。store delete 用 begin/finish 两阶段 gated bump 夹住 await；app-server `thread/delete` 走同一协议。退休是独立终态覆盖层。同状态 lifecycle 是 no-op。
+- **可观测性**：dump cursor `instance:revision:epoch:observe_generation:offset`；跨实例 `InstanceReset`；裸 offset 拒绝。Version→Fact 用独立 `VersionFact` 行分页。Agent 关系行同时带 label 与 `thread_id`。
+- **门禁（本轮）**：`codex-team-state --lib` **125/125**；availability/resume 精确测试 **6/6**；产品纵切 M-1—M-4 **17/17**（须清 loopback 代理）。受影响包 clippy `-D warnings`、`just fmt` 通过。未跑全 workspace、Docker、真实 API 或本地模型。
+- **边界**：功能仍随 `team_state_enabled` 默认关闭。未做自动退休、orphan 清理、escalation、产品 UI、跨进程日志持久化或审计链。执行与审查记录见
   `agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`、
   `agent_log/2026-08-17-082629-plan043-m4-independent-acceptance-review.md`、
   `agent_log/2026-08-17-090000-plan043-m4-acceptance-gap-remediation.md`、
   `agent_log/2026-08-17-091208-plan043-m4-remediation-independent-rereview.md`、
-  `agent_log/2026-08-17-093500-plan043-m4-rereview-gap-remediation.md`。
+  `agent_log/2026-08-17-093500-plan043-m4-rereview-gap-remediation.md`、
+  `agent_log/2026-08-17-094215-plan043-m4-second-remediation-independent-rereview.md`、
+  `agent_log/2026-08-17-100500-plan043-m4-third-remediation.md`。

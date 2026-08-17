@@ -22,6 +22,16 @@ fn all_unavailable(store: &TeamStore) -> AvailabilitySnapshot {
     )
 }
 
+fn cursor_at(page: &crate::observe::TeamDumpPage, offset: u32) -> DumpCursor {
+    DumpCursor {
+        instance: page.instance,
+        revision: page.revision,
+        availability_epoch: page.availability_epoch,
+        observe_generation: page.observe_generation,
+        offset,
+    }
+}
+
 #[test]
 fn dump_pages_are_stable_and_refuse_a_stale_cursor() {
     let TeamFixture {
@@ -68,12 +78,7 @@ fn dump_pages_are_stable_and_refuse_a_stale_cursor() {
         .expect("repeat dump");
     assert_eq!(first, again);
 
-    let cursor = DumpCursor {
-        revision: first.revision,
-        availability_epoch: first.availability_epoch,
-        observe_generation: first.observe_generation,
-        offset: first.next_offset.expect("more pages"),
-    };
+    let cursor = cursor_at(&first, first.next_offset.expect("more pages"));
     let second = store
         .dump(
             root,
@@ -310,12 +315,7 @@ fn confirming_a_fact_invalidates_an_open_dump_cursor() {
             None,
         )
         .expect("first page");
-    let cursor = DumpCursor {
-        revision: first.revision,
-        availability_epoch: first.availability_epoch,
-        observe_generation: first.observe_generation,
-        offset: first.next_offset.expect("more pages"),
-    };
+    let cursor = cursor_at(&first, first.next_offset.expect("more pages"));
 
     store.note_observation(
         worker,
@@ -618,12 +618,7 @@ fn dump_pages_version_facts_and_keeps_each_row_bounded() {
                     offset: None,
                     after: None,
                 },
-                Some(DumpCursor {
-                    revision: first.revision,
-                    availability_epoch: first.availability_epoch,
-                    observe_generation: first.observe_generation,
-                    offset,
-                }),
+                Some(cursor_at(&first, offset)),
             )
             .expect("page");
         assert!(page.entries.len() <= 1);
@@ -730,4 +725,60 @@ fn dump_and_log_disambiguate_duplicate_labels_with_thread_ids() {
         .collect();
     assert!(log_actors.contains(&worker.to_string()));
     assert!(log_actors.contains(&twin.to_string()));
+}
+
+#[test]
+fn dump_cursor_binds_the_team_instance_and_rejects_another_store() {
+    let TeamFixture {
+        store: first,
+        root: first_root,
+        ..
+    } = TeamFixture::new();
+    let TeamFixture {
+        store: second,
+        root: second_root,
+        ..
+    } = TeamFixture::new();
+    let first_page = first
+        .dump(
+            first_root,
+            &all_unavailable(&first),
+            0,
+            ObserveQuery {
+                limit: Some(1),
+                offset: None,
+                after: None,
+            },
+            None,
+        )
+        .expect("first instance dump");
+    let cursor = cursor_at(&first_page, first_page.next_offset.unwrap_or(0));
+    assert_eq!(DumpCursor::decode(&cursor.encode()), Ok(cursor));
+
+    let err = second
+        .dump(
+            second_root,
+            &all_unavailable(&second),
+            0,
+            ObserveQuery {
+                limit: Some(1),
+                offset: None,
+                after: None,
+            },
+            Some(cursor),
+        )
+        .expect_err("a cursor from another team instance must not continue here");
+    assert!(matches!(
+        err,
+        crate::mutation::TeamError::InstanceReset { .. }
+    ));
+
+    let legacy = format!(
+        "{}:{}:{}:{}",
+        first_page.revision.get(),
+        first_page.availability_epoch.get(),
+        first_page.observe_generation,
+        0
+    );
+    assert!(DumpCursor::decode(&legacy).is_err());
 }

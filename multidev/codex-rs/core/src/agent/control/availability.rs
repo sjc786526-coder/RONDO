@@ -3,9 +3,10 @@
 //! The four classes are product contract. This module is the only place that turns AgentControl
 //! facts into them; `codex-team-state` stores and compares the result, it does not invent it.
 //!
-//! Classification follows explicit `resume_agent` recoverability: loaded threads are available,
-//! a stored rollout that resume can rebuild is recoverable even if registry metadata is gone, a
-//! missing store/history is unavailable, and any other read failure is unknown.
+//! Classification follows explicit `resume_agent` recoverability: a loaded thread that can still
+//! accept tasks is available, a stored rollout that resume can rebuild is recoverable even if
+//! registry metadata is gone, a missing store/history is unavailable, and any other read failure
+//! is unknown. A map-resident thread whose submit channel is closed is not available.
 
 use super::AgentControl;
 use super::spawn::ProducerRecoverability;
@@ -226,6 +227,126 @@ mod tests {
         assert_eq!(
             control.classify_producer(worker.thread_id).await,
             ProducerAvailability::Available
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dead_resident_thread_is_not_available() {
+        let mut config = test_config().await;
+        let _ = config.features.enable(Feature::MultiAgentV2);
+        let temp_home = tempfile::tempdir().expect("create temp home");
+        config.codex_home = temp_home.path().to_path_buf().try_into().unwrap();
+        config.cwd = temp_home.path().to_path_buf().try_into().unwrap();
+        let manager = ThreadManager::with_models_provider_and_home_for_tests(
+            CodexAuth::from_api_key("dummy"),
+            config.model_provider.clone(),
+            config.codex_home.to_path_buf(),
+            Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        );
+        let root = manager
+            .start_thread(StartThreadOptions::new(config.clone()))
+            .await
+            .expect("start root thread");
+        let control = manager.agent_control();
+        let state = control.upgrade().expect("thread manager should be live");
+        let worker = spawn_v2_subagent(&control, &state, config, root.thread_id, "worker-1").await;
+        control.team().register_participant(
+            worker.thread_id,
+            ParticipantRole::Member,
+            "/root/worker".to_string(),
+        );
+        assert_eq!(
+            control.classify_producer(worker.thread_id).await,
+            ProducerAvailability::Available
+        );
+        assert!(worker.thread.is_running());
+
+        worker.thread.session.ensure_rollout_materialized().await;
+        worker
+            .thread
+            .session
+            .flush_rollout()
+            .await
+            .expect("flush leftover rollout before the runtime dies");
+        worker.thread.io.tx_sub.close();
+        assert!(!worker.thread.is_running());
+        assert!(
+            state.get_thread(worker.thread_id).await.is_ok(),
+            "the dead runtime is still mapped before classification"
+        );
+        let epoch_before = control.availability_epoch();
+        assert_eq!(
+            control.classify_producer(worker.thread_id).await,
+            ProducerAvailability::RecoverableUnloaded,
+            "a closed submit channel is not currently available"
+        );
+        assert!(control.availability_epoch() != epoch_before);
+        assert!(
+            state.get_thread(worker.thread_id).await.is_err(),
+            "dead residents are dropped so the availability change is versioned once"
+        );
+    }
+
+    #[tokio::test]
+    async fn beginning_a_store_transition_moves_epoch_before_the_row_disappears() {
+        let mut config = test_config().await;
+        let _ = config.features.enable(Feature::MultiAgentV2);
+        let temp_home = tempfile::tempdir().expect("create temp home");
+        config.codex_home = temp_home.path().to_path_buf().try_into().unwrap();
+        config.cwd = temp_home.path().to_path_buf().try_into().unwrap();
+        let manager = ThreadManager::with_models_provider_and_home_for_tests(
+            CodexAuth::from_api_key("dummy"),
+            config.model_provider.clone(),
+            config.codex_home.to_path_buf(),
+            Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        );
+        let root = manager
+            .start_thread(StartThreadOptions::new(config.clone()))
+            .await
+            .expect("start root thread");
+        let control = manager.agent_control();
+        let state = control.upgrade().expect("thread manager should be live");
+        let worker = spawn_v2_subagent(&control, &state, config, root.thread_id, "worker-1").await;
+        control.team().register_participant(
+            worker.thread_id,
+            ParticipantRole::Member,
+            "/root/worker".to_string(),
+        );
+        control
+            .shutdown_live_agent(worker.thread_id)
+            .await
+            .expect("shutdown");
+        assert_eq!(
+            control.classify_producer(worker.thread_id).await,
+            ProducerAvailability::RecoverableUnloaded
+        );
+
+        let epoch_before = control.availability_epoch();
+        manager.begin_thread_store_transition();
+        assert!(control.availability_epoch() != epoch_before);
+        assert_eq!(
+            control.classify_producer(worker.thread_id).await,
+            ProducerAvailability::RecoverableUnloaded,
+            "begin must not wait for the store row to vanish"
+        );
+        manager
+            .read_stored_thread(codex_thread_store::ReadThreadParams {
+                thread_id: worker.thread_id,
+                include_archived: true,
+                include_history: false,
+            })
+            .await
+            .expect("store row is still present after begin");
+
+        let epoch_after_begin = control.availability_epoch();
+        manager
+            .delete_stored_thread(worker.thread_id)
+            .await
+            .expect("delete stored thread");
+        assert!(control.availability_epoch() != epoch_after_begin);
+        assert_eq!(
+            control.classify_producer(worker.thread_id).await,
+            ProducerAvailability::Unavailable
         );
     }
 
