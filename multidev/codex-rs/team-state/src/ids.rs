@@ -258,6 +258,52 @@ impl FromStr for RouteId {
     }
 }
 
+/// Identity of one piece of evidence this team instance can locate.
+///
+/// Facts are numbered in the order Codex confirmed retention of the observations they point at, so
+/// the same execution trajectory always produces the same numbering. The tag travels with the
+/// ordinal for the same reason it does on every other reference: a fact minted by an earlier
+/// instance must not resolve against the current one.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct FactId {
+    instance: InstanceTag,
+    ordinal: u32,
+}
+
+impl FactId {
+    pub(crate) fn new(instance: InstanceTag, ordinal: u32) -> Self {
+        Self { instance, ordinal }
+    }
+
+    pub fn instance(&self) -> InstanceTag {
+        self.instance
+    }
+
+    pub(crate) fn ordinal(&self) -> u32 {
+        self.ordinal
+    }
+}
+
+impl fmt::Display for FactId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { instance, ordinal } = self;
+        write!(f, "fct-{ordinal}-{instance}")
+    }
+}
+
+impl FromStr for FactId {
+    type Err = ReferenceParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let rest = value.strip_prefix("fct-").ok_or(ReferenceParseError)?;
+        let (ordinal, instance) = rest.split_once('-').ok_or(ReferenceParseError)?;
+        Ok(Self {
+            instance: instance.parse()?,
+            ordinal: ordinal.parse().map_err(|_| ReferenceParseError)?,
+        })
+    }
+}
+
 /// A reference string that is not a well-formed team reference at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReferenceParseError;

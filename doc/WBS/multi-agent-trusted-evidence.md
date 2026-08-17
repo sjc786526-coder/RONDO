@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-16 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-17 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 定位
 
@@ -200,7 +200,7 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 指派有独立身份与终态；通知复用既有 inter-agent communication，未新增调度器或第二套协议。
 
 首轮独立审查发现的三项通知恢复路径缺陷（去重未占用 retry identity、精确重放报过期 `pending`、目标可先重发
-通知后记账失败）已整改并通过最终独立复验；M-2 已完成，下一阶段为 M-3 证据锚定。
+通知后记账失败）已整改并通过最终独立复验。
 
 定向门禁（整改后）：`codex-team-state` 78/78，团队产品纵切 `suite::team_world_state` + `suite::team_routing`
 12/12（M-1 九项无退化），`codex-core` 的 `tools::` 416/416、`context::` 99/99。
@@ -222,7 +222,34 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
   目标空闲且指派要求它开始或继续工作时，触发其下一轮；目标空闲但只是信息通知时排队投递。
 - **边界**：不引入新的 Agent-to-Agent 传输协议；不实现只读贡献档位；不实现 Event 关系图。
 
-### M-3 证据锚定（下一阶段）
+### M-3 证据锚定（已验收，待合入 main）
+
+实现由工作树分支 `worktree-042-multi-m3-evidence-anchoring` 落地（提交 `db39e28`、`8360bbf`、`ce32394`、
+`cfe3dc1`、`35356ab`、`eb53218`），尚未合入 `main`。第三轮独立复验指出的并行重复 call ID 配对、
+refs 第 33 条后不可达与同 producer 暂存截断均已补修并通过最终独立复验。模型可见工具新增
+`team_evidence`，与 M-1/M-2 五个工具同受
+`features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。
+
+首版 observation 支持集为**已完成、由 Codex 正式保留、body 为纯文本的工具结果**，成功与失败都形成 Fact。
+捕获拆成两步：Harness 在 dispatch 前为结果预留唯一 item identity，工具处理器产出终态时按该身份记下观察
+（宿主要自己顶替回答时再精确撤销），同一 retained item 进入 conversation history 时才铸造 Fact 并按 retention
+顺序分配序号，所以并行重复 call ID 不会串配，也不存在"尚未保留就当成存在"的引用。可用状态不缓存在 Fact 上，
+每次读取现场判定并区分"producer 未加载"与"当前 history 不携带该项"，两者都不写死引用。领域侧
+`codex-team-state` 只持 typed Fact refs、每 producer 的发布窗口和授权元数据；`publish` 在同一次 mutation
+内取走该作者上次成功发布之后的新 Fact 并推进游标。读取沿 Event 图收敛，`team_evidence` 只返回目标
+observation 的有界文本与必要元数据。
+
+locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 只作元数据）；Version 保留发布窗口的全部引用，
+上下文预算只作用于打印列表的 surface 并报告省略数。
+
+实现期定向门禁：`codex-team-state` 101/101；产品纵切 `suite::team_evidence` 3/3；M-1/M-2 回归
+12/12；`core` 的 `team::evidence` 6/6；合并 `tools::`/`context::` 共 541/541。补充整改后另通过
+`codex-team-state evidence` 23/23、新边界产品纵切 1/1 与其余定向回归 19/19；最终独立复验再次确认
+23/23 与 1/1。执行与验收细节见
+`agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`，验收审查与整改见同目录
+`...-045506-...-independent-acceptance-review.md`、`...-052355-...-remediation-reverification.md` 与
+`...-055152-...-supplemental-remediation-reverification.md`，
+任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -238,7 +265,7 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
   团队工具自身与证据读取动作默认不递归产生新证据。
 - **边界**：不复制全量工具输出，不建 artifact store，不自动判定证据是否仍然有效。
 
-### M-4 协调闭合与可观测性
+### M-4 协调闭合与可观测性（M-3 合入后的下一阶段）
 
 - **目标**：让长时间运行中的团队状态能干净收尾，并让一次错误协调可被事后解释。
 - **交付能力**：producer 不可用时 Root 显式退休其未终结 Version；确定性的团队状态转储与精简变更日志；

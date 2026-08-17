@@ -2998,6 +2998,20 @@ impl Session {
         }
         self.persist_rollout_response_items(items).await;
         self.send_raw_response_items(turn_context, items).await;
+        // Retention is what makes a tool result referenceable, so team evidence is recorded here
+        // rather than where the tool returned. This is a no-op unless the team world state is on.
+        crate::team::evidence::record_retained_tool_facts(self, turn_context, items).await;
+    }
+
+    /// The retained text of one tool result this session kept, if history still holds it.
+    ///
+    /// This is the resolution half of an evidence locator. `item_id` is the identity Codex assigned
+    /// the item when it recorded it, so this answers for exactly one item and returns `None` once
+    /// compaction or a rollback has dropped it — which is what lets an evidence read report an honest
+    /// absence instead of a neighbouring result.
+    pub(crate) async fn retained_tool_output(&self, item_id: &str) -> Option<String> {
+        let state = self.state.lock().await;
+        crate::team::evidence::retained_output_text(state.history.raw_items(), item_id)
     }
 
     pub(crate) async fn record_step_world_state_if_changed(

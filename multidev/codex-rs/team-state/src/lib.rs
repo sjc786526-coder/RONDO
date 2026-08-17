@@ -6,9 +6,15 @@
 //! wakes the root when something it cares about changes, and re-derives every participant's view
 //! from scratch for each sampling.
 //!
+//! Versions can also carry evidence: stable references to observations Codex actually kept, chosen
+//! by the harness from what their author had recorded since its last publish. A reference proves
+//! what was observed at the time, never that it still holds, and the observation itself stays where
+//! Codex put it — this crate holds identities and locators, not tool output.
+//!
 //! Nothing here is persisted across processes; a team instance lives exactly as long as its root
 //! tree. Members unloaded and reloaded inside that tree rejoin the same instance.
 
+mod evidence;
 mod handle;
 mod ids;
 mod model;
@@ -18,9 +24,15 @@ mod store;
 mod view;
 mod wake;
 
+pub use evidence::FactCategory;
+pub use evidence::FactView;
+pub use evidence::NotedObservation;
+pub use evidence::ObservationLocator;
+pub use evidence::reported_evidence_refs;
 pub use handle::TeamStateHandle;
 pub use handle::TeamWakeWaiter;
 pub use ids::EventId;
+pub use ids::FactId;
 pub use ids::InstanceTag;
 pub use ids::ReferenceParseError;
 pub use ids::RouteId;

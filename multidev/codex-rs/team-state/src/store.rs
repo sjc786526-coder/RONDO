@@ -5,6 +5,8 @@
 //! intervening await, which is what makes concurrent appends, retries and racing lifecycle changes
 //! well defined.
 
+use crate::evidence::PendingObservation;
+use crate::evidence::TeamFact;
 use crate::ids::EventId;
 use crate::ids::InstanceTag;
 use crate::ids::RouteId;
@@ -42,7 +44,11 @@ use crate::view::VersionView;
 use crate::wake::WakeLedger;
 use codex_protocol::ThreadId;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
+/// Evidence capture and read permission follow the same pattern: a child module with its own
+/// invariants, reaching the same private state under the same single lock.
+pub(crate) mod evidence;
 /// Selective routing lives in a child module so this file stays the single place that defines the
 /// publish and lifecycle invariants, while route commits still reach the same private state and
 /// follow the same validate-everything-then-commit-once discipline.
@@ -114,6 +120,14 @@ pub struct TeamStore {
     committed: HashMap<(ThreadId, String), CommittedSubmission>,
     wake: WakeLedger,
     next_event_ordinal: u32,
+    /// Recorded evidence, in the order Codex's retention of it was confirmed.
+    facts: Vec<TeamFact>,
+    /// Observations seen but not yet confirmed retained. Entries normally live only between tool
+    /// completion and the ordered history-retention pass; discarded results are revoked explicitly.
+    pending_observations: VecDeque<PendingObservation>,
+    next_fact_ordinal: u32,
+    /// Per-producer publication cursor: the highest fact ordinal of its own that it has published.
+    published_facts_through: HashMap<ThreadId, u32>,
 }
 
 impl Default for TeamStore {
@@ -134,6 +148,10 @@ impl TeamStore {
             committed: HashMap::new(),
             wake: WakeLedger::default(),
             next_event_ordinal: 1,
+            facts: Vec::new(),
+            pending_observations: VecDeque::new(),
+            next_fact_ordinal: 1,
+            published_facts_through: HashMap::new(),
         }
     }
 
@@ -318,6 +336,10 @@ impl TeamStore {
         let authored_on_stale_view = previously_changed_at
             .filter(|changed_at| *changed_at > submission.based_on)
             .map(|_| submission.based_on);
+        // Evidence is attached mechanically, from what this author has recorded since its last
+        // successful publish. The model is never asked to list it, and everything after this point
+        // is infallible, so taking the window here is the same step as committing the version.
+        let evidence_refs = self.take_publish_window(actor);
         let event = &mut self.events[event_index];
         let version_id = VersionId::new(
             self.tag,
@@ -330,7 +352,7 @@ impl TeamStore {
                 author: actor,
                 summary: clamp_summary(&summary),
                 handoff: handoff.as_deref().map(clamp_handoff),
-                evidence_refs: Vec::new(),
+                evidence_refs: evidence_refs.clone(),
             },
             root_state,
             revision,
@@ -348,6 +370,7 @@ impl TeamStore {
             event_id,
             version_id,
             revision,
+            evidence_refs,
             authored_on_stale_view: authored_on_stale_view.is_some(),
             deduplicated: false,
         };
@@ -534,6 +557,9 @@ impl TeamStore {
             author_label: self.label_of(version.authored().author),
             summary: version.authored().summary.clone(),
             handoff: version.authored().handoff.clone(),
+            // The references travel with the entry that authored them, which is what lets a reader
+            // that may see this version go on to ask for the observations behind it.
+            evidence_refs: version.authored().evidence_refs.clone(),
             producer_state: version.producer_state(),
             root_state: version.root_state(),
             authored_on_stale_view: version.authored_on_stale_view().is_some(),
