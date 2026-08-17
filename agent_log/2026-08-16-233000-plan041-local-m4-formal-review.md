@@ -4,7 +4,7 @@
 
 - **人判结论：保留为实验**（`keep_as_experiment`）。由用户作出，只作记录；未改动生产默认、provider、
   launcher 或部署开关。tracked body-free 结论锁 `eval/locks/local-approval-m4-formal-review-v1.json`
-  （SHA-256 `2c8af519…cd3e`）。
+  （SHA-256 `4e27d06a…1d89`）。
 - **synthetic 主体 130 条**：直接消费 Plan 037 已验真的 390 行（`0e8fbbc7…00aa`），未重跑 130×2 推理、
   未重新调用 Sol。两批各 65 条，冻结 v1 裁判合同。未微调侧教师一致 104/130（80.0%）、相对 Opus 误拦 26；
   微调侧 130/130、误拦 0；两侧漏放 0、结构化输出 130/130 成功；理由判“弱”29 → 5，未被偏好 29 → 5。

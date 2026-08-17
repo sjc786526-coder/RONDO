@@ -149,11 +149,29 @@ _SIDE_NAMED_LOCAL_USE = re.compile(
     r"\blocal[-_\s]+(?:"
     r"static|ft|finetuned|fine-tuned|untuned|unfinetuned|baseline|variant|"
     r"model|models|candidate|candidates|side|sides|output|outputs|answer|"
-    r"answers|response|responses|checkpoint|adapter|judge|replica|run|runs"
+    r"answers|response|responses|checkpoint|adapter|judge|replica|run|runs|"
+    r"decision|decisions|judgment|judgement|verdict|verdicts|assessment|"
+    r"rationale|reviewer|approver"
     r")\b",
     re.IGNORECASE,
 )
-_PROPER_NOUN_LOCAL = re.compile(r"\bLocal\b")
+# Capitalized "Local" as a bare proper noun names a side ("Local produced this").
+# Hyphenated compounds such as the real Guardian policy's "Local-vs-prod note"
+# are ordinary prose; a side-naming compound like "Local-static" is still caught
+# by the case-insensitive side-noun rule above.
+_PROPER_NOUN_LOCAL = re.compile(r"\bLocal\b(?![-_][a-z])")
+# "the fine-tuned model" / "the unfine-tuned baseline" name a side without ever
+# writing "local", "sol" or "ft", so they need their own rule.  The trailing
+# noun keeps ordinary phrasing such as "a fine-tuned configuration" allowed.
+_FINETUNE_SIDE_USE = re.compile(
+    r"\b(?:un[-_\s]?)?fine[-_\s]?tuned[-_\s]+(?:"
+    r"model|models|baseline|baselines|variant|variants|version|versions|side|"
+    r"sides|candidate|candidates|output|outputs|answer|answers|response|"
+    r"responses|decision|decisions|judgment|judgement|checkpoint|adapter|"
+    r"local|run|runs|one"
+    r")\b",
+    re.IGNORECASE,
+)
 _SIDE_IDENTITY_CONTEXT = re.compile(
     r"(?:\b(?:candidate|answer|output|response|identity|side|model)\b.{0,32}"
     r"\b(?:sol|local|ft)\b"
@@ -1548,6 +1566,7 @@ def _contains_forbidden_side_identity(value: Any) -> bool:
                 _UNAMBIGUOUS_SIDE_TOKEN.search(item)
                 or _SIDE_NAMED_LOCAL_USE.search(item)
                 or _PROPER_NOUN_LOCAL.search(item)
+                or _FINETUNE_SIDE_USE.search(item)
                 or _SIDE_IDENTITY_CONTEXT.search(item)
                 or _MODEL_PATH_MARKER.search(item)
             )

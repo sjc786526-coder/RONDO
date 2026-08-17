@@ -177,17 +177,29 @@ Plan 032 的真实 holdout 与 Plan 037 的同一 paired-GGUF 形成独立 sanit
   批次严格重验后物化 16 条，两种 Local 使用与 Plan 037 逐字节相同的 pair receipt（`1d57def1…129c`）串行运行。
 - 结果：synthetic 未微调教师一致 104/130、误拦 26，微调 130/130、误拦 0；holdout 未微调 14/16 合规、
   教师一致 8/14、误拦 6，微调 16/16 合规、教师一致 15/16、误拦 1；两分区漏放均为 0，从不合并分母。
-- tracked body-free 结论锁 `eval/locks/local-approval-m4-formal-review-v1.json`（`2c8af519…cd3e`）已发布；
-  未改动生产默认、provider、launcher 或部署。
+- tracked body-free 结论锁 `eval/locks/local-approval-m4-formal-review-v1.json`（`4e27d06a…1d89`，
+  独立审查后按准确分项结果重述 rationale 并重新发布）；未改动生产默认、provider、launcher 或部署。
 - focused unittest 253/253 通过；本地模型阶段持共享重型锁串行运行，进程/端口/显存已清理。
 
 ### 当前工作
 
-- 已收口，等待独立审查。
+- 已收口。独立审查提出的三项问题已整改并复验，等待复审。
 
 ### 本任务剩余步骤
 
-1. 交由 Codex 审查者独立验收，按审查中的真实问题整改、复验并追加提交。
+1. 交由审查者复验整改结果。
+
+### 独立审查整改（2026-08-16）
+
+1. 顶层权威文档已按 main 当前状态吸收 Multi M-2 完成历史与 M-3 下一阶段，并补记 Local M4 里程碑行；
+   `doc/WBS.md` 与 `doc/WBS-COMPLETED.md` 的 Multi 段落现与 main 逐字一致，仅余“最后更新”抬头与
+   `WBS-COMPLETED` 末尾追加两处 append/append 差异，两处的本分支内容都是 main 事实的超集。
+2. 匿名扫描补上直接身份措辞：`local` 名词表增加 decision/judgment 等，另加"(un)fine-tuned + 侧名词"规则；
+   同时把大写 `Local` 的连字符复合词（真实 Guardian policy 的 `Local-vs-prod note`）排除，避免新的误报。
+   四个正式 package 的候选侧扫描仍为 0 命中，四份 judge result 也为 0，**无需重判**。
+3. `doc/WBS.md` 与结论锁的“每一项指标都改善”改为准确分项：明确列出改善项，并记录漏放两分区维持 0、
+   synthetic 结构化可用性两侧同为 130/130、`sole_preferred` 由 5 降为 0。结论锁因此重发布，
+   引用其 SHA-256 的文档同步更新。`keep_as_experiment` 及其依据不变。
 
 ### 阻塞项
 

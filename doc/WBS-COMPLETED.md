@@ -985,11 +985,25 @@ standard/Lite 形态均补回归。
   完整 source 重验后窄修。相关 unittest **89/89 通过**，真实 no-model cohort preflight 为 130 条、65 / 65、
   26 + 26 groups、0 模型调用/0 fake 输出；Bash、Python、JSON、敏感/大文件和 `git diff --check` 门禁通过。
 
+## Multi M-2：选择性路由（Plan 039，2026-08-16）
+
+- **成果**：Root 可把一个 canonical Event 路由给同团队目标，先授予不可撤销可见性和所需指派，再经既有
+  inter-agent communication 投递不复制 Event 正文的紧凑通知。目标读取完整 chain、在同一 Event 追加 Version，
+  Root 获得新的协调机会；指派结束后严格按活动谓词保留或退出活动视图，历史权限继续存在。
+- **投递与权限**：运行中目标并入既有 turn，空闲工作目标触发下一轮，空闲信息目标只排队；通知失败保留 canonical
+  route 并明确可重试。route 仅 Root 可发起，`retry_notice` 仅 original router 可执行，未知身份、未知目标和跨实例
+  引用均 fail-closed。
+- **整改与验收**：首轮审查发现的 retry identity 未绑定、重放返回旧 `pending`、target 可先重发后记账失败三项缺陷
+  均已窄修。最终独立复验为 `codex-team-state` **78/78**、真实产品纵切 **12/12**、关键发送前拒绝回归 **1/1**，
+  格式检查通过；详见 `agent_log/2026-08-16-180544-plan039-m2-final-acceptance.md`。
+- **边界**：未引入第二套状态、调度器、通信协议、持久化 outbox 或复杂审计设施；未运行全 workspace、Docker、
+  真实 API、本地模型或付费测评。
+
 ## Local M4 —— 正式三方盲评与人判收口（Plan 041，2026-08-16）
 
 - **人判结论：保留为实验**（`keep_as_experiment`）。决定由用户作出，只作记录：未改动生产默认、provider、
   launcher 或部署开关。body-free 结果锁为 `eval/locks/local-approval-m4-formal-review-v1.json`
-  （SHA-256 `2c8af519…cd3e`）。
+  （SHA-256 `4e27d06a…1d89`）。
 - **synthetic 主体（130 条，冻结 v1 裁判合同）**：直接消费 Plan 037 已验真的 390 行，未重跑 130×2 推理、
   未重新调用 Sol。两批各 65 条，位置平衡、匿名性与完整集合校验通过。未微调侧教师一致 104/130（80.0%）、
   相对 Opus 误拦 26；微调侧 130/130、误拦 0；两侧漏放均为 0，结构化输出均 130/130 成功；理由被判“弱”

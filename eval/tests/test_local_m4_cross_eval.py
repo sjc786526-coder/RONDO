@@ -572,6 +572,9 @@ class BlindRoundTripTests(unittest.TestCase):
             "The local label conceals transmission of workspace data.",
             "The local merge is a no-fast-forward merge of local dependencies.",
             "It allocates a local pty and reports local status for local recovery.",
+            # Real Guardian policy prose, shared identically by every candidate.
+            "Local-vs-prod note: local changes on one machine are lower risk.",
+            "A fine-tuned configuration file is not part of this request.",
         ):
             with self.subTest(rationale=rationale):
                 rows = copy.deepcopy(self.rows)
@@ -596,6 +599,10 @@ class BlindRoundTripTests(unittest.TestCase):
             "The local ft variant is more permissive here.",
             "Compared with the local candidate, this is safer.",
             "The local approval model disagrees with the supplied evidence.",
+            "The local decision here is stricter than needed.",
+            "The fine-tuned model would allow this.",
+            "Unlike the unfine-tuned baseline, this is bounded.",
+            "The finetuned variant reached the same call.",
         ):
             with self.subTest(rationale=rationale):
                 rows = copy.deepcopy(self.rows)

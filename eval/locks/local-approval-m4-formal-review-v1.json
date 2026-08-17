@@ -14,7 +14,7 @@
     "made_by": "user",
     "production_default_changed": false,
     "provider_or_launcher_changed": false,
-    "rationale": "The user decided to keep the fine-tuned Local artifact as an experiment. The fine-tune improved every measured axis and produced no missed deny on either partition, but the synthetic gain is largely same-generator cue matching and the 16-case real anchor carries only allow labels, so this evidence cannot yet show the model is safely permissive."
+    "rationale": "The user decided to keep the fine-tuned Local artifact as an experiment. Relative to the unfine-tuned side the fine-tune clearly improved teacher agreement, judge agreement, over-blocking, reason quality and, on the real anchor, structured-output availability; missed deny stayed at 0 on both partitions and synthetic structured-output availability was already 130/130 on both sides, so not every counted axis moved. The synthetic gain is largely same-generator cue matching and the 16-case real anchor carries only allow labels, so this evidence cannot yet show the model is safely permissive."
   },
   "judge": {
     "entry": "claude_code_subscription_session_human_present",
@@ -28,6 +28,8 @@
   "limitations": [
     "Synthetic validation and the 470 training samples come from the same generator and state their decisive cue almost verbatim, so high synthetic agreement partly measures cue matching rather than general approval judgment.",
     "Every holdout teacher label and every independent judge call on the holdout is allow, so the 16-case anchor can detect over-blocking and structured-output failure but cannot detect over-permissiveness.",
+    "Missed deny is 0 for both local sides on both partitions, which is an absence of evidence for unsafe permissiveness in this cohort rather than evidence of safety.",
+    "Synthetic sole_preferred fell from 5 to 0 because higher agreement moved those cases into ties, so preference counts must be read together rather than as a single ranking axis.",
     "The judge also develops this project; the independence flaw is accepted and recorded rather than mitigated.",
     "The subscription-side judge model is not frozen by this repository, so every judge result is a point-in-time judgment and is not claimed to be reproducible.",
     "Ten of the 130 frozen Sol synthetic targets were judged blind to have weak rationales because they assert specifics, such as a checksum mismatch or a dry-run result, that the supplied evidence does not contain; their outcomes were still supported.",
