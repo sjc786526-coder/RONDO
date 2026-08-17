@@ -164,9 +164,11 @@ def three_side_rows(bundle: cross_eval.CohortBundle) -> list[dict]:
                     "source_generated_date": source["generated_date"],
                     "source_generation_prompt_version": source["prompt_version"],
                     "source_generation_prompt_sha256": source["prompt_sha256"],
-                    "source_cohort_sha256": bundle.manifest["source"][
-                        "validation_sha256"
-                    ],
+                    "source_cohort_sha256": (
+                        bundle.manifest["source"]["validation_sha256"]
+                        if bundle.partition == "synthetic"
+                        else bundle.manifest["source"]["private_source_sha256"]
+                    ),
                 }
             else:
                 decision = {
@@ -561,22 +563,65 @@ class BlindRoundTripTests(unittest.TestCase):
                         l6_pair_receipt=l6_pair_receipt(),
                     )
 
-    def test_normal_local_workspace_word_is_not_an_identity_leak(self) -> None:
-        rows = copy.deepcopy(self.rows)
-        local = next(row for row in rows if row["side"] == "local-static")
-        local["decision"]["rationale"] = (
-            "The command is bounded to the local workspace and supplied evidence."
-        )
-        batches = cross_eval.build_blind_batches(
-            self.bundle,
-            rows,
-            judge_model=JUDGE_MODEL,
-            judged_date=FIXTURE_DATE,
-            seed=self.seed,
-            templates=self.templates,
-            l6_pair_receipt=l6_pair_receipt(),
-        )
-        self.assertEqual(len(batches), 2)
+    def test_ordinary_local_english_is_not_an_identity_leak(self) -> None:
+        # Real Plan 037 rationales use "local" as plain technical English.  Only
+        # a side-naming use may block a package.
+        for rationale in (
+            "The command is bounded to the local workspace and supplied evidence.",
+            "It would rewrite the local git history, which is not requested.",
+            "The local label conceals transmission of workspace data.",
+            "The local merge is a no-fast-forward merge of local dependencies.",
+            "It allocates a local pty and reports local status for local recovery.",
+            # Real Guardian policy prose, shared identically by every candidate.
+            "Local-vs-prod note: local changes on one machine are lower risk.",
+            "A fine-tuned configuration file is not part of this request.",
+        ):
+            with self.subTest(rationale=rationale):
+                rows = copy.deepcopy(self.rows)
+                local = next(row for row in rows if row["side"] == "local-static")
+                local["decision"]["rationale"] = rationale
+                batches = cross_eval.build_blind_batches(
+                    self.bundle,
+                    rows,
+                    judge_model=JUDGE_MODEL,
+                    judged_date=FIXTURE_DATE,
+                    seed=self.seed,
+                    templates=self.templates,
+                    l6_pair_receipt=l6_pair_receipt(),
+                )
+                self.assertEqual(len(batches), 2)
+
+    def test_side_naming_local_use_is_still_rejected(self) -> None:
+        for rationale in (
+            "The local model would refuse this request.",
+            "Local produced this decision.",
+            "This matches the local-static answer.",
+            "The local ft variant is more permissive here.",
+            "Compared with the local candidate, this is safer.",
+            "The local approval model disagrees with the supplied evidence.",
+            "The local decision here is stricter than needed.",
+            "The fine-tuned model would allow this.",
+            "Unlike the unfine-tuned baseline, this is bounded.",
+            "The finetuned variant reached the same call.",
+            "The untuned baseline denied this one.",
+            "An untuned model would be stricter here.",
+        ):
+            with self.subTest(rationale=rationale):
+                rows = copy.deepcopy(self.rows)
+                local = next(row for row in rows if row["side"] == "local-static")
+                local["decision"]["rationale"] = rationale
+                with self.assertRaisesRegex(
+                    cross_eval.CrossEvalError, "blind_package_side_leak"
+                ):
+                    cross_eval.build_blind_batches(
+                        self.bundle,
+                        rows,
+                        judge_model=JUDGE_MODEL,
+                        judged_date=FIXTURE_DATE,
+                        seed=self.seed,
+                        templates=self.templates,
+                        l6_pair_receipt=l6_pair_receipt(),
+                    )
 
     def test_six_sample_private_file_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

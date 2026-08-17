@@ -458,6 +458,60 @@ class B10333FormalCompositionTests(unittest.TestCase):
             )
             self.assertEqual(rebuilt.receipt, built.receipt)
 
+    def test_holdout_run_verifies_against_the_private_cohort(self) -> None:
+        """A holdout run must never be re-imported against the synthetic cohort."""
+
+        from eval.tests.test_local_m4_holdout_anchor import (
+            HOLDOUT_BATCH_ID,
+            holdout_records,
+        )
+
+        bundle = cross_eval.build_private_holdout_bundle(
+            holdout_records(6, holdout=6), holdout_batch_id=HOLDOUT_BATCH_ID
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            built = build_receipt(directory)
+            runtime = directory / "llama-server"
+            runtime.write_bytes(b"fixture-b10333-runtime")
+            os.chmod(runtime, 0o755)
+            run_dir = directory / "run"
+            private_dir = directory / "private"
+            run_dir.mkdir(mode=0o700)
+            private_dir.mkdir(mode=0o700)
+            factory = RecordingFactory()
+            with mock.patch.object(
+                l6_b10333_pair,
+                "FROZEN_SERVER_SHA256",
+                digest_bytes(runtime.read_bytes()),
+            ):
+                l6_b10333_pair.run_structural_smoke(
+                    bundle=bundle,
+                    pair_receipt=built,
+                    runtime_binary=runtime,
+                    private_dir=private_dir,
+                    port=19037,
+                    sample_count=2,
+                    session_factory=factory,
+                )
+                artifacts = l6_b10333_pair.run_formal_pair_bundle(
+                    worktree_root=WORKTREE_ROOT,
+                    bundle=bundle,
+                    pair_receipt=built,
+                    runtime_binary=runtime,
+                    run_dir=run_dir,
+                    private_dir=private_dir,
+                    port=19037,
+                    session_factory=factory,
+                )
+            self.assertEqual(artifacts.side_output_count, 18)
+            rows, _raw = cross_eval._load_jsonl(artifacts.outputs_path, private=True)
+            self.assertTrue(all(row["partition"] == "holdout" for row in rows))
+            self.assertEqual(
+                {row["cohort_manifest_sha256"] for row in rows},
+                {bundle.manifest_sha256},
+            )
+
     def test_serial_sessions_journal_artifacts_locator_and_formal_import(self) -> None:
         bundle = fixture_bundle()
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,6 +1,6 @@
 # 方向 2：RONDO Local 本地审批模型接入与横评
 
-最后更新：2026-08-16（Plan 037 完成，正式 Local M4 待执行）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-16（Plan 041 完成，Local M4 人判结论为“保留为实验”）｜ 产品线：RONDO Local（`mydev/`）｜ 依赖：P0（S1/S2）｜ 当前 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 目标与定位
 
@@ -178,13 +178,34 @@
   真实 ignored `rondo.local.toml` 已于 2026-08-15 迁移到 exact GGUF 与 12k 合同，
   `providers`、`paid_eval` 与价格配置未变、权限仍为 0600。冻结选择见 2026-08-12 快照，
   下载/CUDA 证据见 2026-08-13 快照。
-- **Local M4 正式输入已就绪**：tracked body-free cohort 精确绑定 L5b 全部 130 条 validation 与
+- **Local M4 已完成，人判结论为“保留为实验”**：synthetic 主体用冻结 v1 裁判合同评完全部 130 条，真实
+  holdout 16 条作为独立 sanity anchor 单独评、单独解盲、单独聚合，两者从不合并分母。裁判为经 Claude Code
+  订阅入口、人在场的 `claude-opus-5`（2026-08-16，时点判定，不宣称可复现）。
+  1. **synthetic（130 条）**：未微调侧教师一致 104/130（80.0%），微调侧 130/130；相对 Opus 独立判断，
+     未微调误拦 26、微调 0，两侧漏放均为 0；理由被判“弱”的从 29 降到 5。两侧结构化输出均 130/130 成功。
+  2. **真实 holdout（16 条）**：未微调侧只产生 14 条合规判定（2 次结构化输出失败），有效判定内教师一致
+     8/14（57.1%）、误拦 6；微调侧 16/16 合规、教师一致 15/16、误拦 1；漏放均为 0。
+  3. **两条必须同时记住的限制**：validation 与 470 条训练数据同源，且每条证据几乎逐字写明判定线索，
+     所以 synthetic 的高一致率很大程度是“线索匹配”而非通用审批判断；holdout 的教师标签与裁判独立判断
+     **全部为 allow**，因此该锚点只能发现误拦与可用性问题，**无法检验过度放行**。这两点正是“保留为实验”
+     而非“采用”的直接依据。
+  4. **顺带发现**：盲评中 130 条 synthetic 里有 10 条冻结 Sol 目标的理由被判为弱——它们断言了证据中
+     并不存在的具体事实（如“校验和不匹配”、“dry-run 报告”）；其结论仍被判为成立。
+  5. 因真实 holdout 出现 2 个既有结构化失败终态，经用户现场授权新增 **holdout 专用** terminal-carrying
+     v2 裁判合同以完整表达 16/16；冻结 v1 未修改，synthetic 仍用 v1。无判定候选记为 `no_decision`，
+     不得进入偏好，也不当作隐含 deny。
+  6. 结论只记录，**未改动生产默认、provider、launcher 或部署**。body-free 结果锁为
+     `eval/locks/local-approval-m4-formal-review-v1.json`；逐条输入、模型输出、seed、mapping、裁判理由与
+     解盲明细永久留在 ignored `eval-data/cross-eval/20260816-cross-eval-01-synthetic/` 与 `…-02-holdout/`。
+  7. 两轮独立审查发现均已窄修并复验，最终 focused unittest 253/253 通过；2026-08-17 最终独立验收通过。
+     验收只确认本轮 M4 合同与结果正确完成，不把“保留为实验”扩展成生产可用声明。
+- **Local M4 正式输入（历史）**：tracked body-free cohort 精确绑定 L5b 全部 130 条 validation 与
   dataset/payload/target/source-group/near-duplicate-group 身份，确定性分为 65 / 65 两批。三方完整导入会重算
   canonical input，并要求未微调/微调 Local 同属一个 L6 pair，base lineage、runtime、chat template、request、
   sampling 和 output contract 相同；Plan 033 部署 baseline 不能冒充成对未微调工件。裁判 prompt/schema、私有
   seed/mapping、逐批位置平衡、裁判结果身份、私有解盲聚合及独立 holdout 批次摘要合同均已冻结。Plan 037 已用同源
   paired-GGUF 完成未微调/微调 Local 各 130 条诚实终态，连同 frozen Sol 侧形成 390 行；canonical pair receipt 与
-  private evidence 已通过正式文件导入。尚未开始裁判、解盲或人判，没有 Local M4 质量结论。
+  private evidence 已通过正式文件导入；这批输入随后被 Plan 041 直接消费，未重跑。
 
 ### 当前推进顺序
 
@@ -193,8 +214,10 @@
 2. **L6 已完成**：470 条 train-only completion-only QLoRA 完成真实 optimizer smoke、隔离 adapter reload、
    一个冻结 recipe 的正式训练与本地逐文件回收；paired-GGUF 两侧由冻结 b10333 串行生成 130×2，正式导入为
    `ready_for_blind_packaging`。任务 Pod/volume 已删除，未使用 HF，未依据 validation 重训。
-3. **下一产品工作是正式 Local M4**：使用现有 390 行输入完成盲化、裁判、解盲和采用/保留/停止人判；
-   不把 Plan 037 的终态分布本身当成质量结论。
+3. **Local M4 已完成（Plan 041）**：390 行 synthetic 输入与新物化的 16 条真实 holdout 分别完成盲化、
+   裁判、解盲与聚合，人判三选一结果为**保留为实验**。方向 2 没有已排期的下一工作包。
+4. **若将来要投入真实使用**，必须另行立项并先补上两处证据缺口：合成集需要不逐字写明判定线索的样本，
+   真实锚点需要包含 deny 的标签；在此之前不得据现有数字宣称模型可安全放行。
 
 真实模型加载/推理与重型 Cargo、Docker 互斥。12k qualification 通过后能力为
 `gpu_model_serving_validated`；该能力严格绑定当前 12k 服务参数与 static payload v3，任一项漂移即自动退回
@@ -435,6 +458,8 @@ Plan 037 已按三重授权门完成：阶段一本地 mock/census/train-only bu
 它**不保存一套正式分数**，也不构成里程碑，更不是“训练前的一次完整横评”。
 
 ### Local M4 —— 人判定
+
+状态：**已完成**（2026-08-16，Plan 041）。人判结论为**保留为实验**，数据与限制见上文“当前状态”。
 
 在同一批冻结样本上正式比较**三方：Sol、微调后 Local、未微调 Local**。
 加入未微调 Local 是为了把“微调带来多少增益”与“底模本身有多少能力”拆开；训练完成后同场运行即可，

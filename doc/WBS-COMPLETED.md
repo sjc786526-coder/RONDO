@@ -998,3 +998,38 @@ standard/Lite 形态均补回归。
   格式检查通过；详见 `agent_log/2026-08-16-180544-plan039-m2-final-acceptance.md`。
 - **边界**：未引入第二套状态、调度器、通信协议、持久化 outbox 或复杂审计设施；未运行全 workspace、Docker、
   真实 API、本地模型或付费测评。
+
+## Local M4 —— 正式三方盲评与人判收口（Plan 041，2026-08-16）
+
+- **人判结论：保留为实验**（`keep_as_experiment`）。决定由用户作出，只作记录：未改动生产默认、provider、
+  launcher 或部署开关。body-free 结果锁为 `eval/locks/local-approval-m4-formal-review-v1.json`
+  （SHA-256 `4e27d06a…1d89`）。
+- **synthetic 主体（130 条，冻结 v1 裁判合同）**：直接消费 Plan 037 已验真的 390 行，未重跑 130×2 推理、
+  未重新调用 Sol。两批各 65 条，位置平衡、匿名性与完整集合校验通过。未微调侧教师一致 104/130（80.0%）、
+  相对 Opus 误拦 26；微调侧 130/130、误拦 0；两侧漏放均为 0，结构化输出均 130/130 成功；理由被判“弱”
+  从 29 降到 5，未被偏好从 29 降到 5。
+- **真实 holdout（16 条，独立 cohort 与 aggregate）**：从 Plan 032 冻结批次严格重验后物化——按真实归档重算
+  manifest / outbound / prepare-receipt 并要求逐字节一致，再复跑 Plan 032 verifier。两种 Local 使用与 Plan 037
+  **完全相同**的 canonical pair（pair receipt SHA-256 `1d57def1…129c`，逐字节一致），在资源互斥门内串行完成
+  16×2。未微调侧 14/16 合规判定（2 次结构化输出失败）、有效判定内教师一致 8/14、误拦 6；微调侧 16/16 合规、
+  教师一致 15/16、误拦 1；漏放均为 0。synthetic 与 holdout 从不合并分母。
+- **两处证据缺口（写入结论的直接依据）**：validation 与 470 条训练数据同源且逐字写明判定线索，故 synthetic
+  的高一致率很大程度是线索匹配；holdout 教师标签与裁判独立判断全部为 allow，因此只能检出误拦与可用性问题，
+  无法检验过度放行。
+- **裁判**：经 Claude Code 订阅入口、人在场的 `claude-opus-5`（2026-08-16）。裁判阶段只读取冻结 prompt/schema、
+  judge request 与匿名包，未读 seed、mapping 或模型身份材料；订阅侧模型不由仓库冻结，结论只作时点判定。
+  盲评中另发现 10 条冻结 Sol synthetic 目标的理由断言了证据中不存在的具体事实，其结论仍成立。
+- **合同变更（用户现场授权）**：真实 holdout 出现 2 个既有结构化失败终态，冻结 v1 包无法表达，故新增
+  **holdout 专用** terminal-carrying v2 裁判 prompt/result/summary 合同以完整表达 16/16；v1 三件套未修改，
+  synthetic 全程仍用 v1。无判定候选记为 `no_decision`/`not_applicable`，禁止进入偏好，也不当作隐含 deny。
+- **现场窄修**：Plan 033 的 shadow 行会让 Plan 032 的 ledger 查找把非 Guardian 运行当成证据运行而 fail-closed；
+  holdout 私有 batch id 会经 cohort id 进入裁判包；`local` 的通用英语用法被匿名扫描误判；`python -m` 双重导入
+  使 holdout cohort 与 formal 运行的类身份不匹配。四项均已窄修并补回归。
+- **验证与现场**：focused unittest **253/253 通过**。本地模型阶段持共享重型锁串行运行，运行后 llama-server 进程、
+  监听端口与任务 GPU 显存均已清理，Windows `C:` 实际余量全程在门禁之上。私有逐条输入、模型输出、seed、mapping、
+  裁判理由与解盲明细永久留在 ignored `eval-data/cross-eval/20260816-cross-eval-01-synthetic/` 与 `…-02-holdout/`
+  （目录 0700、文件 0600），未进入 Git。
+- **独立验收**：两轮审查发现的 Multi 状态同步、匿名身份措辞漏检和指标概括失真均已窄修；正式四个 package 与
+  四份 judge result 重扫仍为 0 身份命中，146 条判定无需重判。最终 focused unittest **253/253**、
+  `git diff --check` 通过，2026-08-17 独立验收确认任务目标完成；详见
+  `agent_log/2026-08-17-001729-plan041-final-independent-acceptance.md`。

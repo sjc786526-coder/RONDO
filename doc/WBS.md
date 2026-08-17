@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-16（Plan 037 完成；Multi M-2 已验收并合入，下一阶段为 M-3）
+最后更新：2026-08-16（Local M4 已人判收口，方向 2 结论为“保留为实验”；Multi M-2 已验收并合入，下一阶段为 M-3）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -24,7 +24,7 @@
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
-| 方向 2 | L6 已完成：470 条 train-only completion-only QLoRA 在 RunPod A40 上完成真实 smoke、一个冻结 recipe 的 118-step 正式训练和 adapter 重载；同源 paired-GGUF 已由冻结 b10333 串行完成 130×2，连同 frozen Sol 侧形成 390 行并通过 Plan 036 正式导入。唯一 Pod/volume 已删除，未使用 HF。下一步是正式 Local M4 人判；当前没有 M4 质量结论。 |
+| 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
 | 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0 产品基线、M-1 团队世界状态和 M-2 选择性路由均已验收并合入 `main`。下一阶段是 M-3 证据锚定；尚无冻结 runtime bundle，付费退化验收排在 M-5。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
@@ -74,8 +74,11 @@
   **Local M4 输入已就绪（WP3b-A8—A10）**：全部 130 条 validation 已冻结为 body-free 65 / 65 两批；
   三方完整导入、L6 成对归因、匿名位置平衡、裁判 prompt/schema、私有解盲聚合及独立 holdout 批次摘要合同
   已就绪。Plan 037 已完成 470 条 train-only 训练、paired-GGUF 转换、两侧 130 条串行输出和 canonical
-  pair receipt/private evidence；390 行正式导入为 `ready_for_blind_packaging`。**下一步只执行正式 Local M4
-  盲化、裁判、解盲与人判，不因 validation 结果继续训练或更换 recipe。**
+  pair receipt/private evidence；390 行正式导入为 `ready_for_blind_packaging`。
+  **Local M4 已收口（Plan 041）**：synthetic 130 条与真实 holdout 16 条分区独立完成盲评、解盲与聚合，
+  人判结论为**保留为实验**。方向 2 因此没有已排期的下一工作包；若将来要投入真实使用，必须先按本页
+  §6 单独立项，建立面向生产的正确性与安全验收，并解决“合成集线索化”与“holdout 单侧标签”两项证据缺口。
+  结论详情见 `doc/WBS/local-approval-model.md`。
 - **3c RONDO Multi**：M-0 产品基线、M-1 团队世界状态和 M-2 选择性路由均已完成，
   **下一阶段是 M-3 证据锚定**。阶段目标、交付能力与完成标准见
   `doc/WBS/multi-agent-trusted-evidence.md`；M-3—M-4 均为离线可验证的
@@ -102,7 +105,7 @@
 |---|---|---|---|---|
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
-| 2 | 本地审批模型接入与横评 | Local | L6 完成；390 行成对输入已通过正式导入 | 正式 Local M4 |
+| 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
 | 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-2 已完成；M-3 证据锚定待实施 | 无外部阻塞；M-5 的真实 API/付费测评单独授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L6 → Local M4 已成链），
@@ -176,7 +179,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P0 | S1 审批模型显式覆盖、S2 审批证据快照 | 已完成 |
 | P1 | B1—B3 最小真实链路；L1/L2 model-free 前置 | 已完成，M1 通过 |
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
-| P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 进行中：L6 已完成，正式 Local M4 待执行 |
+| P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
 | P5 | RONDO Multi 产品线 | M-0—M-2 已完成；M-3 证据锚定待实施 |
 
@@ -185,7 +188,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | M0 | Guardian 模型/effort 显式生效并落盘规范化 `E_final` | 工程验收 | 已完成 |
 | M1 | 冻结 Codex 与 RONDO 同一 TB 2.1 任务端到端可归档 | 工程验收 | 已完成 |
 | Local M3 | 12k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 已完成 |
-| Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 未完成；390 行输入已验真，待正式盲评与人判 |
+| Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 已完成（2026-08-16）：synthetic 130 与 holdout 16 分区盲评并解盲，人判为保留为实验 |
 | Multi M-1 | 团队世界状态纵切端到端跑通，团队状态不依赖任何模型记住 | 工程验收 | 已完成并合入 `main` |
 | Multi M-2 | Root 选择性路由 Event，目标读取并扩展同一 canonical chain，通知与指派可独立恢复和结束 | 工程验收 | 已完成并合入 `main` |
 | Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 未开始 |

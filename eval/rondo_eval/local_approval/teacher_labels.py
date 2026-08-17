@@ -402,6 +402,15 @@ def partition_for(semantic_id: str) -> str:
 
 
 def _load_ledger_tasks(worktree_root: Path) -> dict[str, str]:
+    """Index the task of every Guardian evidence run recorded in the ledger.
+
+    The ledger also carries rows that are not Guardian evidence runs, such as
+    the imported and replayed L3 shadow rows, which legitimately summarize many
+    tasks at once or hide them entirely.  Only rows that bind their own run
+    artifact directory and carry a Guardian identity can produce evidence, so
+    only those are required to name exactly one task.
+    """
+
     path = worktree_root / RUN_LEDGER_RELATIVE_PATH
     raw = _safe_read(path, limit=_MAX_TRACKED_FILE_BYTES)
     tasks_by_run: dict[str, str] = {}
@@ -415,6 +424,14 @@ def _load_ledger_tasks(worktree_root: Path) -> dict[str, str]:
                 raise TeacherLabelsError("run_ledger_invalid")
             run_id = record.get("run_id")
             if not isinstance(run_id, str):
+                continue
+            configuration = record.get("config")
+            if (
+                record.get("artifacts") != f"eval-data/runs/{run_id}"
+                or not isinstance(configuration, dict)
+                or not isinstance(configuration.get("effective_guardian_model"), str)
+                or not isinstance(configuration.get("guardian_effort"), str)
+            ):
                 continue
             tasks = record.get("tasks")
             if not isinstance(tasks, list) or len(tasks) != 1:
@@ -653,15 +670,22 @@ def _build_instance_records(
     return records, sorted(outbound, key=lambda value: value["semantic_id"])
 
 
-def prepare_batch(
+def build_batch_artifacts(
     *,
     worktree_root: Path,
     source_root: Path,
-    private_dir: Path,
     batch_id: str,
     created_date: str,
     previous_manifest: Path | None = None,
 ) -> dict[str, Any]:
+    """Recompute the frozen batch artifacts from the real production archive.
+
+    This performs every source read, canonical payload build, semantic identity
+    and partition derivation that ``prepare_batch`` performs, but writes
+    nothing.  A later consumer can therefore re-derive the batch and require
+    byte identity with the frozen private files.
+    """
+
     if _BATCH_ID.fullmatch(batch_id) is None:
         raise TeacherLabelsError("batch_id_invalid")
     _validate_date(created_date)
@@ -835,6 +859,39 @@ def prepare_batch(
         ),
     }
     receipt_raw = _json_file_bytes(receipt)
+    return {
+        "batch_id": batch_id,
+        "counts": counts,
+        "prompt_sha256": prompt_sha,
+        "label_schema_sha256": schema_sha,
+        "manifest": manifest,
+        "manifest_raw": manifest_raw,
+        "outbound": outbound,
+        "outbound_raw": outbound_raw,
+        "prepare_receipt": receipt,
+        "prepare_receipt_raw": receipt_raw,
+    }
+
+
+def prepare_batch(
+    *,
+    worktree_root: Path,
+    source_root: Path,
+    private_dir: Path,
+    batch_id: str,
+    created_date: str,
+    previous_manifest: Path | None = None,
+) -> dict[str, Any]:
+    artifacts = build_batch_artifacts(
+        worktree_root=worktree_root,
+        source_root=source_root,
+        batch_id=batch_id,
+        created_date=created_date,
+        previous_manifest=previous_manifest,
+    )
+    manifest_raw = artifacts["manifest_raw"]
+    outbound_raw = artifacts["outbound_raw"]
+    receipt_raw = artifacts["prepare_receipt_raw"]
     _prepare_private_directory(source_root, private_dir, batch_id)
     _write_exclusive(private_dir / "manifest.json", manifest_raw, mode=0o600)
     _write_exclusive(private_dir / "outbound.jsonl", outbound_raw, mode=0o600)
@@ -842,9 +899,15 @@ def prepare_batch(
     return {
         "status": "prepared",
         "batch_id": batch_id,
-        "counts": counts,
-        "prompt": {"version": PROMPT_VERSION, "sha256": prompt_sha},
-        "label_schema": {"version": LABEL_SCHEMA_VERSION, "sha256": schema_sha},
+        "counts": artifacts["counts"],
+        "prompt": {
+            "version": PROMPT_VERSION,
+            "sha256": artifacts["prompt_sha256"],
+        },
+        "label_schema": {
+            "version": LABEL_SCHEMA_VERSION,
+            "sha256": artifacts["label_schema_sha256"],
+        },
         "manifest": {
             "version": MANIFEST_SCHEMA_VERSION,
             "sha256": _sha256(manifest_raw),
