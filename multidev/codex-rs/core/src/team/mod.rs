@@ -2,8 +2,10 @@
 //!
 //! Everything a model can reach goes through here, and every capability is derived from the
 //! session's own authoritative identity. A session that is not a registered participant of the
-//! root tree's team gets no team capability at all rather than a default one.
+//! root tree's team gets no team capability at all rather than a default one. That includes leaving
+//! evidence behind: an unidentified session's tool results are not anchored to anything.
 
+pub(crate) mod evidence;
 mod projection;
 
 pub(crate) use projection::PromptCost;

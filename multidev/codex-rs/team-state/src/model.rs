@@ -7,6 +7,7 @@
 //! convention.
 
 use crate::ids::EventId;
+use crate::ids::FactId;
 use crate::ids::RouteId;
 use crate::ids::TeamRevision;
 use crate::ids::VersionId;
@@ -146,8 +147,9 @@ pub struct AuthoredVersion {
     pub author: ThreadId,
     pub summary: String,
     pub handoff: Option<String>,
-    /// Evidence locators. Always empty in M-1; evidence anchoring is a later stage.
-    pub evidence_refs: Vec<String>,
+    /// References to the observations the harness recorded for this author since its last successful
+    /// publish. Typed identities only: the observations themselves stay where Codex kept them.
+    pub evidence_refs: Vec<FactId>,
 }
 
 /// One immutable authored entry in an event's chain, plus its two mutable lifecycle states.

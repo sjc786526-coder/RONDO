@@ -7,6 +7,7 @@
 //! touches the targets it names.
 
 use crate::ids::EventId;
+use crate::ids::FactId;
 use crate::ids::InstanceTag;
 use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
@@ -49,6 +50,10 @@ pub struct PublishOutcome {
     pub event_id: EventId,
     pub version_id: VersionId,
     pub revision: TeamRevision,
+    /// The evidence this publish attached, chosen by the harness rather than by the author. Because
+    /// it is part of the committed outcome, a retry answered from that outcome reports the same
+    /// references, whatever has been observed since.
+    pub evidence_refs: Vec<FactId>,
     /// True when this submission's `based_on` was older than the event's last change. The entry
     /// is committed either way; the label travels with it.
     pub authored_on_stale_view: bool,

@@ -262,6 +262,30 @@ pub(crate) fn create_team_route_update_tool() -> ToolSpec {
     })
 }
 
+pub(crate) fn create_team_evidence_tool() -> ToolSpec {
+    let properties = BTreeMap::from([(
+        "fact_id".to_string(),
+        JsonSchema::string(Some(
+            "An evidence reference from a team version you can read.".to_string(),
+        )),
+    )]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "team_evidence".to_string(),
+        description:
+            "Read the tool result a team version was published with. It returns what the harness recorded at that moment for that one observation, bounded in size — not the surrounding work, and not a claim that the result still holds. You can read your own evidence and anything a version of an event you can see explicitly referenced."
+                .to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec!["fact_id".to_string()]),
+            Some(false.into()),
+        ),
+        output_schema: Some(evidence_output_schema()),
+    })
+}
+
 fn publish_output_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -269,10 +293,30 @@ fn publish_output_schema() -> serde_json::Value {
             "event_id": { "type": "string" },
             "version_id": { "type": "string" },
             "revision": { "type": "integer" },
+            "evidence_refs": { "type": "array", "items": { "type": "string" } },
             "authored_on_stale_view": { "type": "boolean" },
             "deduplicated": { "type": "boolean" }
         },
-        "required": ["event_id", "version_id", "revision", "authored_on_stale_view", "deduplicated"],
+        "required": ["event_id", "version_id", "revision", "evidence_refs", "authored_on_stale_view", "deduplicated"],
+        "additionalProperties": false
+    })
+}
+
+fn evidence_output_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "fact_id": { "type": "string" },
+            "producer": { "type": "string" },
+            "tool": { "type": "string" },
+            "category": { "type": "string" },
+            "availability": { "type": "string" },
+            "unavailable_reason": { "type": ["string", "null"] },
+            "observation": { "type": ["string", "null"] },
+            "truncated": { "type": "boolean" },
+            "total_chars": { "type": ["integer", "null"] }
+        },
+        "required": ["fact_id", "producer", "tool", "category", "availability", "unavailable_reason", "observation", "truncated", "total_chars"],
         "additionalProperties": false
     })
 }

@@ -4,6 +4,7 @@
 //! provider retries of that sampling see exactly the same team state.
 
 use crate::ids::EventId;
+use crate::ids::FactId;
 use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
@@ -22,6 +23,9 @@ pub struct VersionView {
     pub author_label: String,
     pub summary: String,
     pub handoff: Option<String>,
+    /// The observations this entry was published with. Identities only; reading one is a separate,
+    /// permission-checked step.
+    pub evidence_refs: Vec<FactId>,
     pub producer_state: ProducerState,
     pub root_state: RootState,
     pub authored_on_stale_view: bool,

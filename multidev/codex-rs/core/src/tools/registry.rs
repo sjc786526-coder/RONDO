@@ -727,6 +727,10 @@ impl ToolRegistry {
                     &result.payload,
                     result.result.as_ref(),
                 );
+                // The tool ran to completion, which is the one thing only this point knows: an
+                // abandoned call never gets here, and its filler response is written elsewhere. The
+                // observation is only noted; it becomes team evidence once Codex has retained it.
+                crate::team::evidence::note_completed_tool_result(&invocation, &result);
                 Ok(result)
             }
             Err(err) => {

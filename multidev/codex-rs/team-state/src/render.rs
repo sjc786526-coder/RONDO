@@ -5,6 +5,7 @@
 //! to fall back on, which is why the budget here is computed against the whole request's remaining
 //! context and why anything dropped is reported rather than silently cut.
 
+use crate::ids::FactId;
 use crate::view::EventView;
 use crate::view::RouteView;
 use crate::view::TeamSnapshot;
@@ -20,6 +21,8 @@ pub const MAX_PROJECTION_TOKENS: i64 = 4_000;
 const REQUEST_HEADROOM_TOKENS: i64 = 2_000;
 /// Share of the remaining request context the projection may occupy at most.
 const REMAINING_CONTEXT_SHARE_PERCENT: i64 = 20;
+/// How many evidence references one version names in the projection before the rest is counted.
+const MAX_PROJECTED_EVIDENCE_REFS: usize = 4;
 
 /// How much room the projection may take in this request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -172,6 +175,25 @@ fn collect_omissions(events: &[RenderableEvent<'_>], dropped_events: usize) -> V
     omissions
 }
 
+/// Name a version's evidence, keeping one entry's worth of references bounded.
+///
+/// A publication window has no fixed size, so a long-running author could otherwise put an unbounded
+/// list into every sampling. The remainder is counted rather than dropped silently, and the whole
+/// chain is still reachable through bounded history.
+fn render_evidence(refs: &[FactId]) -> String {
+    let shown = refs.len().min(MAX_PROJECTED_EVIDENCE_REFS);
+    let named = refs
+        .iter()
+        .take(shown)
+        .map(FactId::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    match refs.len().saturating_sub(shown) {
+        0 => named,
+        rest => format!("{named} (+{rest} more, read with team_history)"),
+    }
+}
+
 fn render(
     snapshot: &TeamSnapshot,
     events: &[RenderableEvent<'_>],
@@ -234,6 +256,7 @@ fn render(
                 author_label,
                 summary,
                 handoff,
+                evidence_refs,
                 producer_state,
                 root_state,
                 authored_on_stale_view,
@@ -249,6 +272,12 @@ fn render(
             out.push_str(&format!("    {summary}\n"));
             if let Some(handoff) = handoff {
                 out.push_str(&format!("    handoff: {handoff}\n"));
+            }
+            if !evidence_refs.is_empty() {
+                out.push_str(&format!(
+                    "    evidence: {}\n",
+                    render_evidence(evidence_refs)
+                ));
             }
         }
     }

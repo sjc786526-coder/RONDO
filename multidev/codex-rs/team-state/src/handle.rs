@@ -4,6 +4,10 @@
 //! what makes the state canonical: there is no second copy to reconcile, and nothing about it
 //! depends on which members happen to be loaded right now.
 
+use crate::evidence::FactCategory;
+use crate::evidence::FactView;
+use crate::evidence::ObservationLocator;
+use crate::ids::FactId;
 use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
@@ -156,6 +160,32 @@ impl TeamStateHandle {
         route_id: RouteId,
     ) -> Result<RouteDispatch, TeamError> {
         self.with_store(|store| store.route_dispatch(actor, route_id))
+    }
+
+    /// Note a completed, supported tool result whose retention is not confirmed yet.
+    pub fn note_observation(
+        &self,
+        producer: ThreadId,
+        category: FactCategory,
+        locator: ObservationLocator,
+    ) {
+        self.with_store(|store| store.note_observation(producer, category, locator));
+    }
+
+    /// Mint the fact for an observation the caller has confirmed Codex retained.
+    ///
+    /// No change notification follows: recording evidence is not itself a team event, and nothing in
+    /// anyone's active view moves until an author decides to publish.
+    pub fn confirm_observation(&self, producer: ThreadId, call_id: &str) -> Option<FactId> {
+        self.with_store(|store| store.confirm_observation(producer, call_id))
+    }
+
+    pub fn read_fact(&self, actor: ThreadId, fact_id: FactId) -> Result<FactView, TeamError> {
+        self.with_store(|store| store.read_fact(actor, fact_id))
+    }
+
+    pub fn mark_fact_unavailable(&self, actor: ThreadId, fact_id: FactId) -> Result<(), TeamError> {
+        self.with_store(|store| store.mark_fact_unavailable(actor, fact_id))
     }
 
     pub fn snapshot_for(&self, viewer: ThreadId) -> Result<TeamSnapshot, TeamError> {

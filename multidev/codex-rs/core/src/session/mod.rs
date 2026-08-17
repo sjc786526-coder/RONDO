@@ -143,6 +143,7 @@ use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ThreadTraceContext;
 use codex_sandboxing::policy_transforms::intersect_permission_profiles;
 use codex_shell_command::parse_command::parse_command;
+use codex_team_state::RetainedOutputKind;
 use codex_terminal_detection::user_agent;
 use codex_thread_store::CreateThreadParams;
 use codex_thread_store::LiveThread;
@@ -2998,6 +2999,34 @@ impl Session {
         }
         self.persist_rollout_response_items(items).await;
         self.send_raw_response_items(turn_context, items).await;
+        // Retention is what makes a tool result referenceable, so team evidence is recorded here
+        // rather than where the tool returned. This is a no-op unless the team world state is on.
+        crate::team::evidence::record_retained_tool_facts(self, turn_context, items).await;
+    }
+
+    /// Whether this session's history still holds the tool result the arguments name.
+    pub(crate) async fn retains_tool_output(
+        &self,
+        call_id: &str,
+        output_kind: RetainedOutputKind,
+    ) -> bool {
+        let state = self.state.lock().await;
+        crate::team::evidence::retained_output_text(state.history.raw_items(), call_id, output_kind)
+            .is_some()
+    }
+
+    /// The retained text of one tool result this session kept, if history still holds it.
+    ///
+    /// This is the resolution half of an evidence locator. It answers for exactly the item named and
+    /// returns `None` once compaction or a rollback has dropped it, which is what lets an evidence
+    /// read report an honest absence instead of a neighbouring result.
+    pub(crate) async fn retained_tool_output(
+        &self,
+        call_id: &str,
+        output_kind: RetainedOutputKind,
+    ) -> Option<String> {
+        let state = self.state.lock().await;
+        crate::team::evidence::retained_output_text(state.history.raw_items(), call_id, output_kind)
     }
 
     pub(crate) async fn record_step_world_state_if_changed(

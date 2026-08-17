@@ -5,7 +5,7 @@ pub(crate) const TEAM_PROTOCOL_CLOSE_TAG: &str = "</team_protocol>";
 
 /// Bumped whenever the wording below changes, so the fragment is re-emitted rather than silently
 /// drifting from what the model was told earlier in the thread.
-const TEAM_PROTOCOL_VERSION: u32 = 2;
+const TEAM_PROTOCOL_VERSION: u32 = 3;
 
 const TEAM_PROTOCOL_BODY: &str = "\
 This team keeps a canonical world state owned by the harness, not by your memory.
@@ -27,6 +27,10 @@ access to stays readable afterwards. Being routed an event lets you add your own
 the same event, not a copy of it.
 - A route notice tells you which event to look at and nothing about what it says. Read the event \
 with `team_history` rather than working from the notice.
+- Versions carry evidence: references to tool results the harness recorded while you worked. You do \
+not choose or list them — publishing attaches whatever you have observed since your last publish. \
+`team_evidence` reads one back. It shows what was seen at that moment, not that it is still true, \
+and it may report that the observation is no longer available.
 - Submissions are incremental. Only what you name changes; everything else keeps its current state. \
 You never need to restate active items to keep them alive.
 - The active world index appended to each request is the current truth. It is regenerated every \

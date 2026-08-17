@@ -1,6 +1,7 @@
 use super::*;
 use crate::tools::handlers::team_tools::spec::create_team_publish_tool;
 use codex_team_state::EventId;
+use codex_team_state::FactId;
 use codex_team_state::PublishRequest;
 use codex_team_state::PublishTarget;
 use codex_team_state::Submission;
@@ -78,6 +79,13 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         event_id: outcome.event_id.to_string(),
         version_id: outcome.version_id.to_string(),
         revision: outcome.revision.get(),
+        // Reported rather than requested: the harness chose these from what this author had observed
+        // since its last successful publish, and they are now part of the version's authored content.
+        evidence_refs: outcome
+            .evidence_refs
+            .iter()
+            .map(FactId::to_string)
+            .collect(),
         authored_on_stale_view: outcome.authored_on_stale_view,
         deduplicated: outcome.deduplicated,
     }))
@@ -110,6 +118,8 @@ pub(crate) struct TeamPublishResult {
     event_id: String,
     version_id: String,
     revision: u64,
+    /// The observations this version was published with. Read one with `team_evidence`.
+    evidence_refs: Vec<String>,
     authored_on_stale_view: bool,
     deduplicated: bool,
 }

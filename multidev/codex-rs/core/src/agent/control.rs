@@ -167,6 +167,21 @@ impl AgentControl {
         self.team.register_participant(thread_id, role, label);
     }
 
+    /// The live session of one member of this root tree, if it is currently loaded.
+    ///
+    /// Evidence produced by another participant lives in that participant's own retained history, so
+    /// resolving a reference to it has to reach the session that owns it. A member that has been
+    /// unloaded is simply not reachable, which the caller reports as the observation being
+    /// unavailable for this read — not as the reference being worthless.
+    pub(crate) async fn loaded_session(
+        &self,
+        thread_id: ThreadId,
+    ) -> Option<Arc<crate::session::session::Session>> {
+        let state = self.upgrade().ok()?;
+        let thread = state.get_thread(thread_id).await.ok()?;
+        Some(Arc::clone(&thread.session))
+    }
+
     /// Send rich user input items to an existing agent thread.
     pub(crate) async fn send_input(
         &self,

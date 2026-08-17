@@ -2,6 +2,7 @@ use super::*;
 use crate::tools::handlers::team_tools::publish::parse_event_id;
 use crate::tools::handlers::team_tools::spec::create_team_history_tool;
 use codex_team_state::EventHistory;
+use codex_team_state::FactId;
 use codex_team_state::HistoryQuery;
 use codex_tools::ToolSpec;
 
@@ -76,6 +77,13 @@ fn render_event(entry: EventHistory) -> HistoryEvent {
                 author: version.author_label,
                 summary: version.summary,
                 handoff: version.handoff,
+                // The full list, unlike the projection's bounded preview: this is where a reader
+                // comes to reach everything a version was published with.
+                evidence_refs: version
+                    .evidence_refs
+                    .iter()
+                    .map(FactId::to_string)
+                    .collect(),
                 producer_state: version.producer_state.to_string(),
                 root_state: version.root_state.to_string(),
                 authored_on_stale_view: version.authored_on_stale_view,
@@ -98,6 +106,8 @@ struct HistoryVersion {
     author: String,
     summary: String,
     handoff: Option<String>,
+    /// Everything this version was published with. Read one with `team_evidence`.
+    evidence_refs: Vec<String>,
     producer_state: String,
     root_state: String,
     authored_on_stale_view: bool,
