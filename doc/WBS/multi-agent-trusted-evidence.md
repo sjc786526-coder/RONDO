@@ -224,20 +224,21 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 
 ### M-3 证据锚定（实现完成，待独立审查与合入）
 
-实现由工作树分支 `worktree-042-multi-m3-evidence-anchoring` 落地（提交 `db39e28`、`8360bbf`），
-尚未合入 `main`。模型可见工具新增 `team_evidence`，与 M-1/M-2 五个工具同受
+实现由工作树分支 `worktree-042-multi-m3-evidence-anchoring` 落地（提交 `db39e28`、`8360bbf`、`ce32394`、
+`cfe3dc1`），尚未合入 `main`。一轮只读独立审查已完成，findings 全部整改。模型可见工具新增 `team_evidence`，与 M-1/M-2 五个工具同受
 `features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。
 
 首版 observation 支持集为**已完成、由 Codex 正式保留、body 为纯文本的工具结果**，成功与失败都形成 Fact。
-捕获拆成两步：工具产出终态时记下观察（此处才知道跑的是哪个工具、是否真的跑完），结果进入 conversation
-history 时才铸造 Fact 并按 retention 顺序分配序号，所以不存在"尚未保留就标成可用"的引用。领域侧
+捕获拆成两步：工具处理器产出终态时记下观察（宿主要自己顶替回答时再撤销），结果进入 conversation history
+时才铸造 Fact 并按 retention 顺序分配序号，所以不存在"尚未保留就当成存在"的引用。可用状态不缓存在 Fact 上，
+每次读取现场判定并区分"producer 未加载"与"当前 history 不携带该项"，两者都不写死引用。领域侧
 `codex-team-state` 只持 typed Fact refs、每 producer 的发布窗口和授权元数据；`publish` 在同一次 mutation
 内取走该作者上次成功发布之后的新 Fact 并推进游标。读取沿 Event 图收敛，`team_evidence` 只返回目标
 observation 的有界文本与必要元数据。
 
-定向门禁：`codex-team-state` 99/99；新增产品纵切 `suite::team_evidence` 2/2；M-1/M-2 回归
-`suite::team_world_state` + `suite::team_routing` 12/12 无退化；`core` 的 `team::evidence` 4/4；
-合并 `tools::`/`context::` 共 538/538。执行细节与环境坑见
+定向门禁：`codex-team-state` 101/101；新增产品纵切 `suite::team_evidence` 2/2；M-1/M-2 回归
+`suite::team_world_state` + `suite::team_routing` 12/12 无退化；`core` 的 `team::evidence` 5/5；
+合并 `tools::`/`context::` 共 539/539。执行细节与环境坑见
 `agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`，任务合同见
 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 

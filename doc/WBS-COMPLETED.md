@@ -1037,12 +1037,14 @@ standard/Lite 形态均补回归。
 ## Multi M-3 —— 证据锚定（Plan 042，2026-08-17，待独立审查与合入）
 
 **状态**：实现与定向门禁完成，落在工作树分支 `worktree-042-multi-m3-evidence-anchoring`
-（提交 `db39e28`、`8360bbf`），**尚未独立审查、尚未合入 `main`**。
+（提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`），**尚未合入 `main`**。一轮只读独立审查已完成，
+findings 全部整改（见下）。
 
-- **两步捕获**：工具产出终态时记下观察（此处才知道跑的是哪个工具、是否真的跑完、结果什么形状），
-  结果进入 conversation history 时才铸造 Fact 并按 retention 顺序分配序号。落点是
-  `ToolRegistry::dispatch_any_with_terminal_outcome` 的两个终态分支与 `Session::record_conversation_items`。
-  未确认保留的观察不铸造任何东西，因此不存在"尚未保留就标成可用"的引用。
+- **两步捕获**：工具处理器产出终态时记下观察（此处才知道跑的是哪个工具、结果什么形状），结果进入
+  conversation history 时才铸造 Fact 并按 retention 顺序分配序号。落点是
+  `ToolRegistry::dispatch_any_with_terminal_outcome` 的两个终态分支、`ToolCallRuntime` 的 abort 分支
+  （宿主要自己顶替回答时先撤销该次 note，否则被打断的调用会变成证据）与
+  `Session::record_conversation_items`。未确认保留的观察不铸造任何东西。
 - **支持集**：已完成、正式保留、body 为纯文本的工具结果，成功与失败都形成 Fact
   （`tool_result_success` / `tool_result_failure`）。content-item body（媒体载体）、模型消息与推理、
   tool-search 结果、被放弃调用、流式增量、嵌套 code-mode 步骤、团队工具与证据读取自身一律不入集；
@@ -1054,12 +1056,20 @@ standard/Lite 形态均补回归。
   那一条；猜中 ID、同团队 sibling、看见别的 Event ID 与跨实例引用均 fail-closed。新增窄工具 `team_evidence`
   返回 producer、工具名、类别、可用状态、有界文本（4,000 字符上限）与截断信息，不返回调用参数、
   相邻结果或 producer 的其他上下文。TeamState 只持 typed Fact refs，不复制工具输出。
-- **诚实退化**：producer 当前未加载 → 本次读取报 `unavailable`，引用不写死；producer 的 history 确实已丢掉
-  该项（compaction / 回滚）→ Fact 永久降级为 `Unavailable`。Version 的 authored 内容不可改写，
-  引用永远留着并靠标注解释，不出现无标记悬空引用。
-- **门禁**：`codex-team-state` **99/99**；新增产品纵切 `suite::team_evidence` **2/2**；M-1/M-2 回归
-  `suite::team_world_state` + `suite::team_routing` **12/12** 无退化；`core` 的 `team::evidence` **4/4**；
-  合并 `tools::` 与 `context::` 共 **538/538**；`just clippy -p codex-core`、
+- **诚实退化**：可用状态**每次读取现场判定，不缓存在 Fact 上**。两种读不到的原因分别命名：producer 未加载，
+  或 producer 当前 history 已不携带该项（一次普通 compaction 就会造成后者，而 rollout 仍持有它）。
+  两者都只陈述 Harness 实际确认到的事，都不写死引用。Version 的 authored 内容不可改写，引用永远留着，
+  读取时总能得到显式解释，不出现无标记悬空引用。
+- **独立审查整改**：可用状态原本缓存在 Fact 上并在读不到时永久降级 —— 而“不在 producer 当前 history 里”
+  正是一次普通 compaction 的结果（rollout 仍持有该项），
+  于是例行压缩会把该参与者的全部引用逐条写死，成员重载后还会返回 `unavailable` 与正文并存的矛盾结果。
+  另一处：`waits_for_runtime_cancellation` 的工具在 abort 抢到终态后仍会返回结果，宿主丢弃它并用同一 call id
+  写 filler，于是被打断的调用变成证据。两项诚实性缺陷均已修正。加固三处：同一 call id 的重复 note 保留第一条、
+  Version 引用数量设上限并报告未装下的条数、移除不可达的 join watermark。五处测试质量问题（退化路径无覆盖、
+  按字符串排序的伪断言、两处注释过度声称）同批修好。
+- **门禁**：`codex-team-state` **101/101**；新增产品纵切 `suite::team_evidence` **2/2**；M-1/M-2 回归
+  `suite::team_world_state` + `suite::team_routing` **12/12** 无退化；`core` 的 `team::evidence` **5/5**；
+  合并 `tools::` 与 `context::` 共 **539/539**；`just clippy -p codex-core`、
   `just fix -p codex-team-state -p codex-core`、`just fmt`、`just fmt-check` 通过。
 - **边界**：功能默认关闭，关闭时不注册 `team_evidence`、不改变普通工具结果与 rollout 行为。未建 artifact
   store、全量输出副本、完整 transcript/provenance graph、自动 freshness 验证或跨进程持久化；未运行全
