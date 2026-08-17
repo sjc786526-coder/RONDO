@@ -202,15 +202,16 @@
 
 ### 当前工作
 
-- 第五轮整改 `da4b7cd` 已通过最终独立验收；Plan 043 / Multi M-4 任务目标完成。当前未合并、未推送，等待用户授权。
+- 第五轮整改 `da4b7cd` 已通过最终独立验收；Plan 043 / Multi M-4 任务目标完成，并经用户批准通过
+  merge commit `601de62` 合入 `main`。
 
 ### 本任务剩余步骤
 
-- 无。合并与推送属于验收后的用户授权交付动作，不是本任务内剩余实现。
+- 无。任务内无剩余实施、验收或集成步骤；后续路线以 Multi 子 WBS 为准。
 
 ### 阻塞项
 
-- 无。Docker、真实 API、本地模型、付费资源、全 workspace 测试、合并和推送均不是本任务所需或已授权范围。
+- 无。M-5、Docker、真实 API、本地模型、付费资源和全 workspace 测试均未授权，也不由本次合入自动开始。
 
 ### 当前验收状态
 
@@ -222,6 +223,7 @@
 - 第四轮整改 `def76b6`：独立复验不通过（报告 `8a3d7eb`）。
 - 第五轮审查缺口整改、格式化、lint、定向测试、文档同步：本轮已完成并在 043 分支交付。
 - 最终独立审查：验收通过，任务目标完成（报告 `agent_log/2026-08-17-105030-plan043-m4-final-independent-acceptance.md`）。
+- 合入：实现与验收提交已通过 `601de62` 合入 `main`。
 
 ### 交接边界
 
@@ -229,7 +231,8 @@
   当成固定要求；发现更优等强路线可自行采用并在关键决策记录中简述。
 - 普通编译、fixture、竞态或窄实现问题应自主修复并有界重跑；原则边界、未授权高危扩展、合同变化、持续资源门禁或
   多次合理尝试仍无法收敛的实质阻塞才暂停汇报。
-- 完成后只提交 043 工作树并停止；独立审查者将对照本计划、实时 WBS、live code、定向测试和 Git/资源现场验收。
+- 已按用户授权合入 `main`；独立审查结论与合入证据见当前验收状态。后续路线以
+  `doc/WBS/multi-agent-trusted-evidence.md` 为准。
 - 本任务完成后冻结本计划；M-5 及以后只链接 `doc/WBS/multi-agent-trusted-evidence.md`，不在此继续规划。
 
 ## 6. 关键决策记录
@@ -267,3 +270,4 @@
 | 027 | DumpCursor 携带完整 TeamInstanceId；跨实例 cursor 以 `InstanceReset` fail-closed，不签名 | 延续既有“旧实例引用不得解析当前实例”合同 | 可观测性 | 已采纳 |
 | 028 | store transition 用可跨 await 持有的 active counter/token；期间可用性为 `unknown`，Root 不得退休；Drop 与显式 finish 都能收口 | 同一中间 epoch 不得在删除前后分别表示 recoverable 与 unavailable | 并发 | 已采纳 |
 | 029 | availability snapshot 在分类前后短持现有 gate，一致采样 `(generation, active)`；锁不跨 `await` | active 与 generation 是两次原子写；无锁 snapshot 仍可能在边界发布新分类/旧 epoch，loaded map mutation 也有同类窗口 | 并发 | 已采纳 |
+| 030 | 用户授权将已验收的 043 合入 `main` 并推送；合入后不自动开始 M-5 | 本次明确交付授权 | Git 交付 | 已采纳 |

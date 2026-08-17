@@ -252,21 +252,7 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已在 `worktree-043-multi-m4-coordination-closure` 独立验收通过，
-待用户授权合入。合入前下一步仍是 M-4 合入，不是 M-5。任务合同见
-`plan/043-multi-m4-coordination-closure-observability-execplan.md`，首次实现见
-`agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`，独立验收见
-`agent_log/2026-08-17-082629-plan043-m4-independent-acceptance-review.md`，第一轮整改见
-`agent_log/2026-08-17-090000-plan043-m4-acceptance-gap-remediation.md`，复验见
-`agent_log/2026-08-17-091208-plan043-m4-remediation-independent-rereview.md`，第二轮整改见
-`agent_log/2026-08-17-093500-plan043-m4-rereview-gap-remediation.md`，第二轮复验见
-`agent_log/2026-08-17-094215-plan043-m4-second-remediation-independent-rereview.md`，第三轮整改见
-`agent_log/2026-08-17-100500-plan043-m4-third-remediation.md`，第三轮复验见
-`agent_log/2026-08-17-101517-plan043-m4-third-remediation-independent-rereview.md`，第四轮整改见
-`agent_log/2026-08-17-102800-plan043-m4-fourth-remediation.md`，第四轮复验见
-`agent_log/2026-08-17-103327-plan043-m4-fourth-remediation-independent-rereview.md`，第五轮整改见
-`agent_log/2026-08-17-104430-plan043-m4-fifth-remediation.md`，最终独立验收见
-`agent_log/2026-08-17-105030-plan043-m4-final-independent-acceptance.md`。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。下一阶段为 M-5，尚未开始。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -282,7 +268,20 @@ M-3 已完成并合入 `main`。M-4 已在 `worktree-043-multi-m4-coordination-c
   团队工具自身与证据读取动作默认不递归产生新证据。
 - **边界**：不复制全量工具输出，不建 artifact store，不自动判定证据是否仍然有效。
 
-### M-4 协调闭合与可观测性（已独立验收，待合入）
+### M-4 协调闭合与可观测性（已验收并合入 main）
+
+实现由工作树分支 `worktree-043-multi-m4-coordination-closure` 落地，并通过 merge commit `601de62`
+合入 `main`。模型可见工具新增 `team_retire` 与 `team_inspect`（dump/log/stats），协议片段升到 v4，
+与既有团队工具同受 `features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。
+
+producer 可用性由 Harness 权威控制面派生四类：loaded 且 `is_running()` 为 available；同一 Root 树
+可通过显式 `resume_agent` 恢复为 recoverable_unloaded；store/history 明确缺失为 unavailable；读失败或
+store transition 期间为 unknown。Root 退休是独立终态覆盖层，只撤销目标 Version 的 producer-open
+活动理由。dump cursor 绑定 team instance、revision、availability epoch 与 observe generation。
+
+最终独立验收见 `agent_log/2026-08-17-105030-plan043-m4-final-independent-acceptance.md`，
+任务合同见 `plan/043-multi-m4-coordination-closure-observability-execplan.md`，完整执行与审查链见
+`doc/WBS-COMPLETED.md`。
 
 - **目标**：让长时间运行中的团队状态能干净收尾，并让一次错误协调可被事后解释。
 - **交付能力**：producer 不可用时 Root 显式退休其未终结 Version；确定性的团队状态转储与精简变更日志；

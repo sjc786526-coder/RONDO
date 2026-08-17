@@ -1100,7 +1100,8 @@ standard/Lite 形态均补回归。
 ## Multi M-4 —— 协调闭合与可观测性（Plan 043，2026-08-17）
 
 **状态**：首次落地 `e03eef1` 至第四轮整改 `def76b6` 均未通过独立验收（最近未通过报告 `8a3d7eb`）。
-第五轮整改 `da4b7cd` 已通过最终独立验收，Plan 043 / Multi M-4 任务目标完成；当前未合并、未推送，等待用户授权。
+第五轮整改 `da4b7cd` 已通过最终独立验收，Plan 043 / Multi M-4 任务目标完成，并通过 merge commit
+`601de62` 合入 `main`。
 
 - **可用性**：产品分类按显式 `resume_agent` 恢复能力派生——loaded 且 `is_running()` 为 `available`；死驻留与未加载均按 store+history 派生 `recoverable_unloaded` / `unavailable` / `unknown`。store transition 期间一律 `unknown`；snapshot 在现有 gate 下成对采样 generation/active，避免发布原子边界上的双义 epoch。自动 V2 load 仍走单独的 `probe_v2_restore`。
 - **退休**：仅 Root；作者在提交时须为 `unavailable`。store delete 用可跨 await 的 active token 夹住删除；token 存活期间 Root 不得退休。app-server `thread/delete` 走同一协议。退休是独立终态覆盖层。同状态 lifecycle 是 no-op。
