@@ -170,6 +170,98 @@ pub(crate) fn create_team_history_tool() -> ToolSpec {
     })
 }
 
+pub(crate) fn create_team_route_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "event_id".to_string(),
+            JsonSchema::string(Some("The event to hand over.".to_string())),
+        ),
+        (
+            "target".to_string(),
+            JsonSchema::string(Some(
+                "The agent to route it to, by the same reference you use for other agent tools."
+                    .to_string(),
+            )),
+        ),
+        (
+            "intent".to_string(),
+            JsonSchema::string_enum(
+                vec![json!("assign"), json!("notify")],
+                Some(
+                    "`assign` when you want the target to work on this and asks it to start or continue; `notify` when you only want it to know. Do not use `assign` for something you are not asking for."
+                        .to_string(),
+                ),
+            ),
+        ),
+        (
+            "note".to_string(),
+            JsonSchema::string(Some(
+                "A short instruction for the target. Keep it to what you want done; the target reads the event itself."
+                    .to_string(),
+            )),
+        ),
+        (
+            "based_on_revision".to_string(),
+            JsonSchema::integer(Some(
+                "The team revision shown in the active world index you acted on.".to_string(),
+            )),
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "team_route".to_string(),
+        description:
+            "Root only. Give one other agent access to one team event, and optionally assign it as work. Access is permanent once granted and lets the target read the whole chain and add its own versions, without copying the event anywhere. The target is told where to look, never the content."
+                .to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec![
+                "event_id".to_string(),
+                "target".to_string(),
+                "intent".to_string(),
+            ]),
+            Some(false.into()),
+        ),
+        output_schema: Some(route_output_schema()),
+    })
+}
+
+pub(crate) fn create_team_route_update_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "route_id".to_string(),
+            JsonSchema::string(Some("The route to act on.".to_string())),
+        ),
+        (
+            "action".to_string(),
+            JsonSchema::string_enum(
+                vec![json!("end"), json!("retry_notice")],
+                Some(
+                    "`end` finishes the assignment, which is the target's or the root's to do; `retry_notice` re-sends a notice that is reported as failed."
+                        .to_string(),
+                ),
+            ),
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "team_route_update".to_string(),
+        description:
+            "End a route assignment, or retry its notice after a failed delivery. Ending an assignment only retires that piece of work: what the target was given access to stays readable, and any other reason the event is still active is untouched."
+                .to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec!["route_id".to_string(), "action".to_string()]),
+            Some(false.into()),
+        ),
+        output_schema: Some(route_update_output_schema()),
+    })
+}
+
 fn publish_output_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -205,6 +297,40 @@ fn update_output_schema() -> serde_json::Value {
             }
         },
         "required": ["revision", "updated"],
+        "additionalProperties": false
+    })
+}
+
+fn route_output_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "route_id": { "type": "string" },
+            "event_id": { "type": "string" },
+            "target": { "type": "string" },
+            "duty": { "type": "string" },
+            "delivery": { "type": "string" },
+            "delivery_error": { "type": ["string", "null"] },
+            "revision": { "type": "integer" },
+            "deduplicated": { "type": "boolean" }
+        },
+        "required": ["route_id", "event_id", "target", "duty", "delivery", "delivery_error", "revision", "deduplicated"],
+        "additionalProperties": false
+    })
+}
+
+fn route_update_output_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "route_id": { "type": "string" },
+            "event_id": { "type": "string" },
+            "duty": { "type": "string" },
+            "delivery": { "type": "string" },
+            "delivery_error": { "type": ["string", "null"] },
+            "revision": { "type": "integer" }
+        },
+        "required": ["route_id", "event_id", "duty", "delivery", "delivery_error", "revision"],
         "additionalProperties": false
     })
 }

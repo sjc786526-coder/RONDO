@@ -4,6 +4,8 @@ use crate::ids::TeamRevision;
 use crate::model::ParticipantRole;
 use crate::mutation::PublishRequest;
 use crate::mutation::PublishTarget;
+use crate::mutation::RouteIntent;
+use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::store::TeamStore;
 use codex_protocol::ThreadId;
@@ -52,5 +54,25 @@ pub(crate) fn append(event_id: crate::ids::EventId, summary: &str) -> PublishReq
         target: PublishTarget::ExistingEvent { event_id },
         summary: summary.to_string(),
         handoff: None,
+    }
+}
+
+/// Register one more spawned member, for the cases that need a third participant.
+pub(crate) fn register_member(store: &mut TeamStore, label: &str) -> ThreadId {
+    let thread_id = ThreadId::new();
+    store.register_participant(thread_id, ParticipantRole::Member, label.to_string());
+    thread_id
+}
+
+pub(crate) fn route(
+    event_id: crate::ids::EventId,
+    target: ThreadId,
+    intent: RouteIntent,
+) -> RouteRequest {
+    RouteRequest {
+        event_id,
+        target,
+        intent,
+        note: None,
     }
 }

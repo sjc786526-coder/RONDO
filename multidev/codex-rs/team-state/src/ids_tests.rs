@@ -2,14 +2,28 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn event_and_version_references_round_trip_through_their_printed_form() {
+fn event_version_and_route_references_round_trip_through_their_printed_form() {
     let instance = TeamInstanceId::new();
     let event_id = EventId::new(instance.tag(), 7);
     let version_id = VersionId::new(instance.tag(), 7, 3);
+    let route_id = RouteId::new(instance.tag(), 7, 2);
 
     assert_eq!(event_id.to_string().parse(), Ok(event_id));
     assert_eq!(version_id.to_string().parse(), Ok(version_id));
+    assert_eq!(route_id.to_string().parse(), Ok(route_id));
     assert_eq!(version_id.event_id(), event_id);
+    assert_eq!(route_id.event_id(), event_id);
+}
+
+#[test]
+fn a_route_reference_is_not_mistaken_for_a_version_of_the_same_event() {
+    let instance = TeamInstanceId::new();
+    let route_id = RouteId::new(instance.tag(), 4, 1);
+
+    assert_eq!(
+        route_id.to_string().parse::<VersionId>(),
+        Err(ReferenceParseError)
+    );
 }
 
 #[test]

@@ -1,9 +1,10 @@
 //! The model-facing surface of the canonical team world state.
 //!
-//! Three tools cover what M-1 needs: publish a semantic checkpoint, update the lifecycle of
-//! specific entries, and drill back into history the active view has dropped. None of them accepts
-//! an author, producer or root claim from the model; the acting participant is always the calling
-//! session's own identity.
+//! Publish a semantic checkpoint, update the lifecycle of specific entries, drill back into history
+//! the active view has dropped, hand an event to another agent, and end or re-notify a hand-over.
+//! None of them accepts an author, producer, root or target claim from the model; the acting
+//! participant is always the calling session's own identity, and the target is always resolved
+//! through the agent registry.
 
 use crate::function_tool::FunctionCallError;
 use crate::team::TeamAccess;
@@ -27,10 +28,15 @@ use serde_json::Value as JsonValue;
 
 pub(crate) use history::Handler as TeamHistoryHandler;
 pub(crate) use publish::Handler as TeamPublishHandler;
+pub(crate) use route::Handler as TeamRouteHandler;
+pub(crate) use route_update::Handler as TeamRouteUpdateHandler;
 pub(crate) use update::Handler as TeamUpdateHandler;
 
 mod history;
+mod notice;
 mod publish;
+mod route;
+mod route_update;
 pub(crate) mod spec;
 mod update;
 
