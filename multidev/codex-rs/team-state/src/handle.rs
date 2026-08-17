@@ -4,14 +4,21 @@
 //! what makes the state canonical: there is no second copy to reconcile, and nothing about it
 //! depends on which members happen to be loaded right now.
 
+use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
 use crate::model::Participant;
 use crate::model::ParticipantRole;
+use crate::mutation::DeliveryOutcome;
+use crate::mutation::DeliveryResult;
+use crate::mutation::EndAssignmentOutcome;
 use crate::mutation::LifecycleOutcome;
 use crate::mutation::LifecycleRequest;
 use crate::mutation::PublishOutcome;
 use crate::mutation::PublishRequest;
+use crate::mutation::RouteDispatch;
+use crate::mutation::RouteOutcome;
+use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::mutation::TeamError;
 use crate::store::TeamStore;
@@ -99,6 +106,56 @@ impl TeamStateHandle {
             self.notify_change();
         }
         outcome
+    }
+
+    /// Commit a route: the visibility grant, and the assignment when work is intended.
+    ///
+    /// The notice is the caller's job and happens strictly after this returns, which is the whole
+    /// ordering guarantee: nothing can be delivered about a grant that does not exist yet.
+    pub fn route(
+        &self,
+        actor: ThreadId,
+        submission: &Submission,
+        request: RouteRequest,
+    ) -> Result<RouteOutcome, TeamError> {
+        let outcome = self.with_store(|store| store.route(actor, submission, request));
+        if outcome.is_ok() {
+            self.notify_change();
+        }
+        outcome
+    }
+
+    pub fn record_delivery(
+        &self,
+        actor: ThreadId,
+        route_id: RouteId,
+        result: DeliveryResult,
+    ) -> Result<DeliveryOutcome, TeamError> {
+        let outcome = self.with_store(|store| store.record_delivery(actor, route_id, result));
+        if outcome.is_ok() {
+            self.notify_change();
+        }
+        outcome
+    }
+
+    pub fn end_assignment(
+        &self,
+        actor: ThreadId,
+        route_id: RouteId,
+    ) -> Result<EndAssignmentOutcome, TeamError> {
+        let outcome = self.with_store(|store| store.end_assignment(actor, route_id));
+        if outcome.is_ok() {
+            self.notify_change();
+        }
+        outcome
+    }
+
+    pub fn route_dispatch(
+        &self,
+        actor: ThreadId,
+        route_id: RouteId,
+    ) -> Result<RouteDispatch, TeamError> {
+        self.with_store(|store| store.route_dispatch(actor, route_id))
     }
 
     pub fn snapshot_for(&self, viewer: ThreadId) -> Result<TeamSnapshot, TeamError> {

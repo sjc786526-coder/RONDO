@@ -147,21 +147,28 @@ Root 的判断跨 Agent 流动，同时始终只有一份 Harness 持有的 cano
 - 已核对根 `AGENTS.md`、`README.md`、顶层 WBS、方向 3 子 WBS、计划模板、M-1 ExecPlan/最终验收与实时源码接缝。
 - 已确认 `main` 与 `origin/main` 均为 `2f732405`，主工作区干净；M-1 已验收并合入，M-2 前置满足。
 - 已从 `main@2f732405` 创建本专用 worktree 与本地分支；未进入或读取 L6 worktree 内容。
-- 已确认 M-1 当前由 `codex-team-state`、`AgentControl` 共享 canonical handle、三个 team tools、request-only
-  Active World Index 与 V2 wait 接缝构成；既有 inter-agent communication 已有 queue/trigger-turn 原语可供复用。
 - 已建立本 ExecPlan。
+- **M-2 实现已完成**：
+  - 领域层（`codex-team-state`）新增 `RouteId`、`TeamRoute`、`RouteDuty`（notice/assigned/ended）与
+    `DeliveryState`（pending/delivered/failed）；route 提交逻辑单列 `store/route.rs`，沿用"先全量校验、
+    再一次性提交"结构。第 13 条活动谓词补齐第三个纳入理由，`is_visible_to` 增加不可撤销 route 授权。
+  - 幂等：`committed` retry 账本泛化为 `CommittedRequest`/`CommittedOutcome` 枚举，publish 与 route 共享
+    同一 `(actor, request_id)` 命名空间，跨类型复用同一 retry identity 被拒绝；另外「同一目标同一 Event 上
+    已有进行中指派」直接返回原指派，避免重复 route 叠加第二份工作。
+  - 产品层新增 `team_route` 与 `team_route_update`（`end` / `retry_notice`）两个工具，注册在既有
+    `team_state_enabled` 门内；通知发送与失败记录集中在 `team_tools/notice.rs`，复用既有
+    `ensure_v2_agent_loaded` + `send_inter_agent_communication`，未新建调度器或第二套协议。
+  - 三种投递意图由 `duty` 推导 `trigger_turn`，运行中/空闲由既有执行面在 `active_turn` 锁下裁决，
+    未自行读取 Agent status。稳定团队协议前缀升版至 v2 并说明 route 语义。
+- 定向门禁全部通过（详见"当前验收状态"）。
 
 ### 当前工作
 
-等待执行者依据本计划实现 M-2。
+实现与定向验证已完成，成果已提交在本工作树分支，等待独立审查。
 
 ### 本任务剩余步骤
 
-- 核对实时领域模型、Agent status/residency、通信队列与工具注册细节，选择最小完整实现方案。
-- 落地可见性、指派、route、紧凑通知与失败/重试语义，并接入真实产品运行面。
-- 补齐必要领域、并发/幂等、拒绝路径及无 API 多 Agent 纵切测试。
-- 通过格式化、定向 lint/fix/test，审查 diff 与生成物；同步本计划、精炼 log 和 Multi 子 WBS。
-- 提交工作树分支并停止，交由独立审查者验收。
+- 无。交由独立审查者验收。
 
 ### 阻塞项
 
@@ -170,9 +177,23 @@ Root 的判断跨 Agent 流动，同时始终只有一份 Harness 持有的 cano
 ### 当前验收状态
 
 - 规划与现场核对：已完成。
-- M-2 实现、格式化、lint 与定向测试：尚未开始。
+- M-2 实现、格式化、lint：已完成。`just fmt` / `just fmt-check` 通过，
+  `just fix -p codex-team-state` 与 `just fix -p codex-core` 无告警。
+- 定向测试（均经根共享构建锁执行）：
+  - `just test -p codex-team-state`：75/75 通过（M-1 原 46 项 + M-2 新增 29 项）。
+  - `just test -p codex-core --test all -- suite::team_world_state suite::team_routing`：12/12 通过
+    （M-1 产品纵切 9 项无退化 + M-2 新增 3 项）。
+  - `just test -p codex-core --lib -- tools::`：415/415 通过；`-- context::`：99/99 通过；
+    `-- team`：9/9 通过（含 M-2 新增 7 项 route 工具用例）。
 - 顶层 `doc/WBS.md` / `doc/WBS-COMPLETED.md`：按本任务边界明确不修改，待 L6 集成后再窄同步。
 - Docker、真实 API、本地模型、全 workspace 测试：不在授权范围，未运行。
+
+### 执行期环境说明
+
+本机 shell 预置了 `HTTP(S)_PROXY` / `ALL_PROXY` 环境变量，会让 wiremock 起的本地 mock server 无法被
+被测进程连通；该现象对 M-1 既有 suite 同样出现，与本次改动无关。定向集成测试均在显式清除这些代理变量后
+执行（`env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy just test ...`）。
+未修改任何宿主机或仓库配置。
 
 ### 交接边界
 
@@ -192,3 +213,11 @@ Root 的判断跨 Agent 流动，同时始终只有一份 Harness 持有的 cano
 | 005 | 顶层 WBS/WBS-COMPLETED 本任务不修改 | L6 分支正修改共享文档，避免并行冲突；Multi 子 WBS 足以记录 M-2 专用事实 | 文档交付 | 已采纳 |
 | 006 | 用领域测试加无 API 的真实 Agent 产品纵切验收，不跑全 workspace | 能证明功能与接缝正确，同时遵守轻量、定向测试偏好 | 测试范围 | 已采纳 |
 | 007 | 普通窄失败允许执行者自行修复并定向重跑，原则边界或持续实质阻塞才暂停 | 避免可恢复小问题打断执行，又不放松安全与资源门禁 | 执行流程 | 已采纳 |
+| 008 | 指派用独立对象 `TeamRoute`（含 `RouteId` 与 `RouteDuty`），不作为 `TeamVersion` 的第三条生命周期轴 | 指派要有独立身份、可并存、可分别结束，而 `LifecycleAxis` 的同轴去重模型表达不了这一点 | 领域模型 | 已采纳 |
+| 009 | 信息型 route 用独立 `RouteDuty::Notice`，永不进入活动视图、不发 wake | 保证「只告知」不被伪造成进行中工作，同时仍授予不可撤销可见性 | 活动谓词与投递 | 已采纳 |
+| 010 | publish 与 route 共用同一 `(actor, request_id)` retry 命名空间，跨类型复用直接判 `RetryIdentityReused` | 分开命名空间会让同一 identity 在两类操作间静默生效，等于放弃"重试不产生重复对象"的保证 | 幂等 | 已采纳 |
+| 011 | 除 retry identity 外，再对「同一目标在同一 Event 上已有进行中指派」去重 | 不同轮次的重复 route 不是重放，但叠加第二份指派会让"结束一个指派"留下无法解释的活动残留 | route 提交 | 已采纳 |
+| 012 | `trigger_turn` 只由 `duty` 推导，运行中/空闲交给既有执行面在 `active_turn` 锁下裁决 | 自行读取 Agent status 是锁外快照，必然有竞态；既有路径已原子区分排队与唤起 | 投递接缝 | 已采纳 |
+| 013 | 通知投递失败只记在 route 的 `DeliveryState` 上，工具仍返回成功 | route 的 canonical 事实已经成立，把它报成失败会诱导模型重做一次授权 | 失败语义 | 已采纳 |
+| 014 | 投影中 route 行按可见性收敛：Root 见全部，成员只见发给自己的 | 选择性传播若在视图里泄露"还发给了谁"，等于抵消了它自己 | 投影 | 已采纳 |
+| 015 | 集成测试断言改为基于 mock server 完整请求日志的显式谓词，不依赖单个 mock 的 `single_request()` | `ResponseMock` 在匹配阶段就记录请求（含它随后拒绝的），其计数含义是"是否被询问"而非"是否应答" | 测试设施 | 已采纳 |

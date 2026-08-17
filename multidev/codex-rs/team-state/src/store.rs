@@ -16,6 +16,7 @@ use crate::model::ParticipantRole;
 use crate::model::ProducerState;
 use crate::model::RootState;
 use crate::model::TeamEvent;
+use crate::model::TeamRoute;
 use crate::model::TeamVersion;
 use crate::model::clamp_handoff;
 use crate::model::clamp_summary;
@@ -27,17 +28,25 @@ use crate::mutation::LifecycleSnapshot;
 use crate::mutation::PublishOutcome;
 use crate::mutation::PublishRequest;
 use crate::mutation::PublishTarget;
+use crate::mutation::RouteOutcome;
+use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::mutation::TeamError;
 use crate::view::EventHistory;
 use crate::view::EventView;
 use crate::view::HistoryPage;
 use crate::view::HistoryQuery;
+use crate::view::RouteView;
 use crate::view::TeamSnapshot;
 use crate::view::VersionView;
 use crate::wake::WakeLedger;
 use codex_protocol::ThreadId;
 use std::collections::HashMap;
+
+/// Selective routing lives in a child module so this file stays the single place that defines the
+/// publish and lifecycle invariants, while route commits still reach the same private state and
+/// follow the same validate-everything-then-commit-once discipline.
+pub(crate) mod route;
 
 /// Hard ceiling on a single bounded history query, so a drill-down can never become unbounded.
 pub const MAX_HISTORY_LIMIT: usize = 50;
@@ -63,12 +72,29 @@ impl LifecycleAxis {
     }
 }
 
+/// The request half of a committed submission.
+///
+/// Every kind of submission shares one retry namespace per actor. Reusing an identity across kinds
+/// is therefore refused rather than silently treated as a fresh operation of the other kind, which
+/// is the same rule as reusing it for different content.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CommittedRequest {
+    Publish(PublishRequest),
+    Route(RouteRequest),
+}
+
+#[derive(Clone, Debug)]
+enum CommittedOutcome {
+    Publish(PublishOutcome),
+    Route(RouteOutcome),
+}
+
 struct CommittedSubmission {
     /// The request as submitted. Comparing the structure itself is what makes "is this the same
     /// submission?" exact; any flattening into a string has to answer that question with an
     /// encoding, and an encoding of model-controlled text can be made to collide.
-    request: PublishRequest,
-    outcome: PublishOutcome,
+    request: CommittedRequest,
+    outcome: CommittedOutcome,
 }
 
 pub struct TeamStore {
@@ -211,16 +237,19 @@ impl TeamStore {
         }
 
         let retry_key = (actor, submission.request_id.clone());
+        let original_request = CommittedRequest::Publish(request.clone());
         if let Some(existing) = self.committed.get(&retry_key) {
-            if existing.request != request {
+            if existing.request != original_request {
                 return Err(TeamError::RetryIdentityReused);
             }
+            let CommittedOutcome::Publish(outcome) = &existing.outcome else {
+                return Err(TeamError::RetryIdentityReused);
+            };
             return Ok(PublishOutcome {
                 deduplicated: true,
-                ..existing.outcome.clone()
+                ..outcome.clone()
             });
         }
-        let original_request = request.clone();
 
         let PublishRequest {
             target,
@@ -320,7 +349,7 @@ impl TeamStore {
             retry_key,
             CommittedSubmission {
                 request: original_request,
-                outcome: outcome.clone(),
+                outcome: CommittedOutcome::Publish(outcome.clone()),
             },
         );
         Ok(outcome)
@@ -447,7 +476,7 @@ impl TeamStore {
             .events
             .iter()
             .filter(|event| event.is_active_for(viewer, role))
-            .map(|event| self.event_view(event))
+            .map(|event| self.event_view(viewer, role, event))
             .collect();
         Ok(TeamSnapshot {
             instance: self.instance,
@@ -459,7 +488,13 @@ impl TeamStore {
         })
     }
 
-    fn event_view(&self, event: &TeamEvent) -> EventView {
+    /// Render one event for `viewer`.
+    ///
+    /// Routes are scoped rather than listed wholesale: the root coordinates the team and sees them
+    /// all, while a member is only shown the ones addressed to it. Who else was handed the same
+    /// event is the root's coordination picture, and selective propagation is worth little if the
+    /// view leaks it back out.
+    fn event_view(&self, viewer: ThreadId, role: ParticipantRole, event: &TeamEvent) -> EventView {
         EventView {
             id: event.id(),
             title: event.title().to_string(),
@@ -468,6 +503,22 @@ impl TeamStore {
                 .iter()
                 .map(|version| self.version_view(version))
                 .collect(),
+            routes: event
+                .routes()
+                .iter()
+                .filter(|route| role.is_root() || route.target() == viewer)
+                .map(|route| self.route_view(route))
+                .collect(),
+        }
+    }
+
+    fn route_view(&self, route: &TeamRoute) -> RouteView {
+        RouteView {
+            id: route.id(),
+            target_label: self.label_of(route.target()),
+            duty: route.duty(),
+            delivery: route.delivery().clone(),
+            note: route.note().map(str::to_string),
         }
     }
 
@@ -537,7 +588,7 @@ impl TeamStore {
             .then(|| window.first().map(|version| version.id().ordinal()))
             .flatten();
 
-        let mut view = self.event_view(event);
+        let mut view = self.event_view(viewer, role, event);
         view.versions = window
             .iter()
             .map(|version| self.version_view(version))
@@ -587,7 +638,7 @@ impl TeamStore {
             .map(|event| {
                 let total_versions = event.versions().len();
                 let preview_dropped = total_versions.saturating_sub(LIST_MODE_VERSION_PREVIEW);
-                let mut view = self.event_view(event);
+                let mut view = self.event_view(viewer, role, event);
                 view.versions.drain(..preview_dropped);
                 EventHistory {
                     event: view,

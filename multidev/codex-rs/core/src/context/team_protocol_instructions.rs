@@ -5,7 +5,7 @@ pub(crate) const TEAM_PROTOCOL_CLOSE_TAG: &str = "</team_protocol>";
 
 /// Bumped whenever the wording below changes, so the fragment is re-emitted rather than silently
 /// drifting from what the model was told earlier in the thread.
-const TEAM_PROTOCOL_VERSION: u32 = 1;
+const TEAM_PROTOCOL_VERSION: u32 = 2;
 
 const TEAM_PROTOCOL_BODY: &str = "\
 This team keeps a canonical world state owned by the harness, not by your memory.
@@ -20,6 +20,13 @@ root changes it. The root resolving something does not close the author's item, 
 closing an item does not decide anything for the root.
 - `team_publish` records a checkpoint, `team_update` moves lifecycle state on versions you name, \
 and `team_history` reads back anything the active view no longer shows.
+- Events do not travel on their own. The root decides who else sees one with `team_route`, which \
+grants access permanently and, when it assigns work, gives the target something to finish. Access \
+and work are separate: `team_route_update` with `end` finishes the work, and what you were given \
+access to stays readable afterwards. Being routed an event lets you add your own versions to it — \
+the same event, not a copy of it.
+- A route notice tells you which event to look at and nothing about what it says. Read the event \
+with `team_history` rather than working from the notice.
 - Submissions are incremental. Only what you name changes; everything else keeps its current state. \
 You never need to restate active items to keep them alive.
 - The active world index appended to each request is the current truth. It is regenerated every \

@@ -275,3 +275,107 @@ async fn an_empty_field_is_not_the_same_submission_as_a_missing_one() {
 
     assert_eq!(ambiguous, TeamError::RetryIdentityReused);
 }
+
+fn route_submission(request_id: &str) -> Submission {
+    Submission {
+        based_on: TeamRevision::INITIAL,
+        request_id: request_id.to_string(),
+    }
+}
+
+fn assignment(event_id: crate::ids::EventId, target: ThreadId) -> RouteRequest {
+    RouteRequest {
+        event_id,
+        target,
+        intent: crate::mutation::RouteIntent::Assign,
+        note: None,
+    }
+}
+
+fn routes_of(handle: &TeamStateHandle, viewer: ThreadId) -> Vec<crate::view::RouteView> {
+    handle
+        .snapshot_for(viewer)
+        .expect("viewer is registered")
+        .events
+        .iter()
+        .flat_map(|event| event.routes.clone())
+        .collect()
+}
+
+/// Racing copies of one logical route must settle on a single grant. Two assignments for the same
+/// work would each need ending separately, and ending only one of them would leave the event in the
+/// target's view with nothing to explain why.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_copies_of_one_route_produce_exactly_one_assignment() {
+    let (handle, root, worker) = team();
+    let event_id = publish(&handle, root, "r-open").event_id;
+
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let handle = Arc::clone(&handle);
+            tokio::spawn(async move {
+                handle.route(root, &route_submission("r1"), assignment(event_id, worker))
+            })
+        })
+        .collect();
+    let mut outcomes = Vec::new();
+    for task in tasks {
+        outcomes.push(task.await.expect("task finishes").expect("route succeeds"));
+    }
+
+    let fresh = outcomes
+        .iter()
+        .filter(|outcome| !outcome.deduplicated)
+        .count();
+    assert_eq!(fresh, 1, "only one caller may mint the grant");
+    let route_id = outcomes[0].dispatch.route_id;
+    assert!(
+        outcomes
+            .iter()
+            .all(|outcome| outcome.dispatch.route_id == route_id),
+        "every caller must be told about the same grant"
+    );
+    assert_eq!(routes_of(&handle, worker).len(), 1);
+}
+
+/// Ending is terminal, so a race has one winner and the losers learn the assignment is already
+/// over rather than silently re-ending it or walking the state backwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_ends_of_one_assignment_leave_exactly_one_winner() {
+    let (handle, root, worker) = team();
+    let event_id = publish(&handle, root, "r-open").event_id;
+    let route_id = handle
+        .route(root, &route_submission("r1"), assignment(event_id, worker))
+        .expect("routed")
+        .dispatch
+        .route_id;
+
+    let tasks: Vec<_> = [root, worker, root, worker]
+        .into_iter()
+        .map(|actor| {
+            let handle = Arc::clone(&handle);
+            tokio::spawn(async move { handle.end_assignment(actor, route_id) })
+        })
+        .collect();
+    let mut results = Vec::new();
+    for task in tasks {
+        results.push(task.await.expect("task finishes"));
+    }
+
+    assert_eq!(
+        results.iter().filter(|result| result.is_ok()).count(),
+        1,
+        "an assignment ends exactly once"
+    );
+    assert!(
+        results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|err| matches!(err, TeamError::AssignmentEnded { .. })),
+        "every loser is told it was already ended"
+    );
+    assert_eq!(
+        routes_of(&handle, root)[0].duty,
+        crate::model::RouteDuty::Ended
+    );
+}

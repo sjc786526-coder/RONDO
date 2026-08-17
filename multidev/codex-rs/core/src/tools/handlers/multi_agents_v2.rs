@@ -54,7 +54,7 @@ pub(crate) async fn emit_sub_agent_activity(
     session.emit_turn_item_completed(turn, item).await;
 }
 
-fn communication_from_tool_message(
+pub(crate) fn communication_from_tool_message(
     author: AgentPath,
     recipient: AgentPath,
     message: String,

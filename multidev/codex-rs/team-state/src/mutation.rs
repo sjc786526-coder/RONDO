@@ -8,10 +8,15 @@
 
 use crate::ids::EventId;
 use crate::ids::InstanceTag;
+use crate::ids::RouteId;
+use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
 use crate::ids::VersionId;
+use crate::model::DeliveryState;
 use crate::model::ProducerState;
 use crate::model::RootState;
+use crate::model::RouteDuty;
+use codex_protocol::ThreadId;
 use serde::Serialize;
 use std::fmt;
 
@@ -88,6 +93,74 @@ pub struct LifecycleOutcome {
     pub updated: Vec<LifecycleSnapshot>,
 }
 
+/// What a route asks of its target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RouteIntent {
+    /// Hand over work: create an assignment and ask the target to start or continue.
+    Assign,
+    /// Tell the target about the event without asking for anything. No assignment is created, so
+    /// an informational notice can never be mistaken for work in progress, and the target is never
+    /// pulled into a turn just to be told something.
+    Notify,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RouteRequest {
+    pub event_id: EventId,
+    pub target: ThreadId,
+    pub intent: RouteIntent,
+    /// Compact hint for the target, clamped on write. The event's own content is never copied here.
+    pub note: Option<String>,
+}
+
+/// Everything the harness needs to build and send this route's compact notice.
+///
+/// It deliberately carries locators and the root's hint only: the target reads the event itself
+/// from the canonical state, so nothing here has to duplicate a chain that could then drift.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RouteDispatch {
+    pub instance: TeamInstanceId,
+    pub route_id: RouteId,
+    pub event_id: EventId,
+    pub target: ThreadId,
+    pub duty: RouteDuty,
+    pub note: Option<String>,
+    pub delivery: DeliveryState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RouteOutcome {
+    pub dispatch: RouteDispatch,
+    pub revision: TeamRevision,
+    /// True when this call matched a grant that already existed and minted nothing new.
+    pub deduplicated: bool,
+}
+
+/// The result of one attempt to deliver a route's notice.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeliveryResult {
+    Delivered,
+    Failed { reason: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DeliveryOutcome {
+    pub route_id: RouteId,
+    pub delivery: DeliveryState,
+    pub revision: TeamRevision,
+    /// False when the recorded state already said this, so a repeated report changes nothing.
+    pub changed: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct EndAssignmentOutcome {
+    pub route_id: RouteId,
+    pub event_id: EventId,
+    pub duty: RouteDuty,
+    pub delivery: DeliveryState,
+    pub revision: TeamRevision,
+}
+
 /// Why a team operation was refused.
 ///
 /// Every variant is a refusal, never a silent partial success: the store commits a mutation whole
@@ -125,6 +198,13 @@ pub enum TeamError {
     /// One batch named the same version twice on the same lifecycle axis, which would make the
     /// outcome depend on ordering and could step around a terminal state.
     ConflictingTargets { version_id: VersionId },
+    /// The route target is not a registered participant of this team instance. Distinct from
+    /// [`TeamError::UnknownParticipant`], which is about the caller.
+    UnknownTarget,
+    /// The route is informational, so it never carried an assignment there could be an end to.
+    NotAnAssignment { route_id: RouteId },
+    /// The assignment has already reached its terminal state and does not end twice.
+    AssignmentEnded { route_id: RouteId },
 }
 
 impl fmt::Display for TeamError {
@@ -173,6 +253,17 @@ impl fmt::Display for TeamError {
             Self::RootAttentionResolved { version_id } => write!(
                 f,
                 "root attention on {version_id} is already resolved and does not reopen; publish a new version if the matter is current again"
+            ),
+            Self::UnknownTarget => f.write_str(
+                "the target is not a registered participant of this team instance; only agents of this team can be routed to",
+            ),
+            Self::NotAnAssignment { route_id } => write!(
+                f,
+                "{route_id} is an informational route and carries no assignment to end"
+            ),
+            Self::AssignmentEnded { route_id } => write!(
+                f,
+                "the assignment on {route_id} has already ended; route the event again if there is new work"
             ),
         }
     }
