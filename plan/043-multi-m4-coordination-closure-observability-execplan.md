@@ -202,15 +202,12 @@
 
 ### 当前工作
 
-- 等待执行者按本计划在 043 工作树实施两个串行批次。
+- 实现、定向门禁和文档同步已完成，成果只提交在 043 工作树；未合并、未推送，等待独立审查。
 
 ### 本任务剩余步骤
 
-1. 落地 producer 四类可用性、Root-only 显式退休、并发/重试和活动视图纵切。
-2. 落地有界确定性状态转储、按 revision 的精简变更日志与可重算发布统计。
-3. 完成联合无 API 产品纵切、M-1—M-3 定向回归、scoped fix/fmt 与资源/diff 检查；自主修复窄问题并有界重跑。
-4. 按职责同步 Plan、精炼日志、顶层 WBS、Multi 子 WBS和 WBS-COMPLETED，提交完整 043 工作树分支后停止，交付
-   独立审查。
+1. 独立审查对照本计划、live code 与定向测试验收。
+2. 审查通过后由用户授权合并与推送。
 
 ### 阻塞项
 
@@ -219,8 +216,8 @@
 ### 当前验收状态
 
 - 规划现场核对、worktree 创建和 ExecPlan：已完成。
-- M-4 实现、格式化、lint、定向测试、文档同步和实现提交：待执行者完成。
-- 独立审查：将在执行者提交工作树成果后由本计划制定者对照 live code 与实测证据进行，不由执行者自判替代。
+- M-4 实现、格式化、lint、定向测试、文档同步和实现提交：执行者已完成本分支工作。
+- 独立审查：待进行；不由执行者自判替代。
 
 ### 交接边界
 
@@ -250,3 +247,9 @@
 | 011 | 普通窄失败允许自主修复并有界重跑，原则边界或持续实质阻塞才暂停 | 给实现与测试恢复合理冗余，不放松安全和资源门禁 | 执行流程 | 已采纳 |
 | 012 | 043 只提交工作树分支；合并、推送和分支/worktree 归档等待用户另行批准 | 遵守本次明确交付边界 | Git 交付 | 已采纳 |
 | 013 | 当前无需在主工作区直接生成 ignored 产品数据；主工作区侧仅保留 Git 管理 043 worktree 所需目录与元数据 | M-4 是 session 内存态代码/测试任务，不涉及私有数据资产 | 工作区 | 已采纳 |
+| 014 | 四类可用性只在 `AgentControl` 派生：已加载为 available；store 可读为 recoverable_unloaded；`ThreadNotFound` 或 rollout 文件已不存在为 unavailable；其余为 unknown | team-state 不猜生命周期；Local store 删除后 SQLite 摘要仍可能让 `read_thread` 成功，那种幽灵行不能当可恢复 | availability | 已采纳 |
+| 015 | 退休是 `Option<RetirementRecord>` 覆盖层，producer 保持 `open`；只撤销 producer-open 活动理由 | 不能伪装成作者 closed，也不能改 root attention / route / 其他 Version | Version 生命周期 | 已采纳 |
+| 016 | dump/log 用 offset 分页；dump cursor 为 `revision:epoch:offset`；对外 ID 用 Display 字符串 | 同 revision 批次不能丢页；模型看到的 ID 必须与投影一致 | 可观测性 | 已采纳 |
+| 017 | `TeamStateHandle::notify_change` 只在真实 canonical mutation 上 bump；稳定重试/no-op 不写 changelog、不改统计 | 修掉 deduplicated 也会推进 wake generation 的既有问题 | 幂等 | 已采纳 |
+| 018 | Root-only 工具 `team_retire` / `team_inspect`（dump/log/stats）；协议片段升到 v4 | 与现有 team 工具同一 namespace，不另做诊断浏览器 | 工具面 | 已采纳 |
+| 019 | `authored_chars` 计 Unicode 标量值，纳入开 Event 的 title、每 Version 的 summary 与可选 handoff，查询时从 canonical 重算 | 拒绝发布和稳定重试本来就不会入库，统计不会漂 | publication stats | 已采纳 |

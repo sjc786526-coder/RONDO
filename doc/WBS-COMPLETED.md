@@ -1091,8 +1091,30 @@ standard/Lite 形态均补回归。
   `tools::parallel` **19/19**、`team::evidence` **6/6**，scoped fix 与 fmt-check 通过；未重跑 541 条合并门禁。
 - **最终独立复验**：静态复核未发现新的 P0/P1/P2 缺陷，并经共享构建锁独立重跑
   `codex-team-state evidence` **23/23** 与重复 call ID/refs 分页产品纵切 **1/1**；结论为验收通过、任务目标完成。
-  详见 `agent_log/2026-08-17-055152-plan042-m3-supplemental-remediation-reverification.md`。
+  详见   `agent_log/2026-08-17-055152-plan042-m3-supplemental-remediation-reverification.md`。
 - **边界**：功能默认关闭，关闭时不注册 `team_evidence`、不改变普通工具结果与 rollout 行为。未建 artifact
   store、全量输出副本、完整 transcript/provenance graph、自动 freshness 验证或跨进程持久化；未运行全
   workspace、Docker、真实 API、本地模型或付费测评。执行细节与环境坑见
   `agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`。
+
+## Multi M-4 —— 协调闭合与可观测性（Plan 043，2026-08-17）
+
+**状态**：实现与定向门禁完成，落在工作树分支 `worktree-043-multi-m4-coordination-closure`，
+未合并、未推送，待独立审查。
+
+- **可用性**：Harness 从 `AgentControl` 派生四类——已加载为 `available`；未加载但 store 仍可读为
+  `recoverable_unloaded`；`ThreadNotFound` 或 rollout 文件已不存在为 `unavailable`；事实不足或查询失败为
+  `unknown`。不把单个 `AgentStatus`、registry miss 或 residency 卸载当成真正不可用。
+- **退休**：仅 Root；目标须 producer `open` 且未退休，作者在提交时为 `unavailable`。记录是独立终态覆盖层，
+  producer 保持 `open`，不改 root attention、route、其他 Version 或 authored 内容。Root 不操作则事项悬挂。
+- **可观测性**：Root-only `team_inspect` 提供有界 dump（cursor `revision:epoch:offset`）、按 revision 的
+  精简变更日志和从 canonical 重算的发布统计。`authored_chars` 计 Unicode 标量值，纳入开 Event 的 title、
+  每 Version 的 summary 与可选 handoff。稳定重试/no-op 不增加 revision、wake generation、日志或统计。
+- **门禁**：`codex-team-state --lib` **114/114**；产品纵切 `suite::team_coordination` **1/1**；
+  M-1—M-3 回归 `suite::team_world_state` + `team_routing` + `team_evidence` **16/16**；
+  受影响 `core --lib`（`agent::control` / `team::` / `tools::handlers::team_tools` / `context::team*` /
+  `tools::spec_plan`）**124/124**。`just fix -p codex-team-state -p codex-core`、`just fmt`、
+  `just fmt-check` 通过。未跑全 workspace、Docker、真实 API 或本地模型。
+- **边界**：功能仍随 `team_state_enabled` 默认关闭。未做自动退休、orphan 清理、escalation、产品 UI、
+  跨进程日志持久化或审计链。执行细节见
+  `agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`。

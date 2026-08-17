@@ -67,6 +67,7 @@ use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout::state_db::StateDbHandle;
+use codex_thread_store::DeleteThreadParams;
 use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::LocalThreadStore;
@@ -701,6 +702,27 @@ impl ThreadManager {
 
     pub async fn get_thread(&self, thread_id: ThreadId) -> CodexResult<Arc<CodexThread>> {
         self.state.get_thread(thread_id).await
+    }
+
+    /// Read a stored thread even when it is not currently loaded.
+    pub async fn read_stored_thread(&self, params: ReadThreadParams) -> CodexResult<StoredThread> {
+        self.state.read_stored_thread(params).await
+    }
+
+    /// Permanently drop a stored thread. After this, the same root tree cannot restore it.
+    pub async fn delete_stored_thread(&self, thread_id: ThreadId) -> CodexResult<()> {
+        self.state
+            .thread_store
+            .delete_thread(DeleteThreadParams { thread_id })
+            .await
+            .map_err(|err| match err {
+                ThreadStoreError::ThreadNotFound { thread_id } => {
+                    CodexErr::ThreadNotFound(thread_id)
+                }
+                err => {
+                    CodexErr::Fatal(format!("failed to delete stored thread {thread_id}: {err}"))
+                }
+            })
     }
 
     /// Updates metadata for loaded and cold threads through one entrypoint.

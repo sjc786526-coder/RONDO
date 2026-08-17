@@ -95,6 +95,17 @@ async fn the_root_is_not_woken_by_its_own_publication() {
     assert!(outcome.is_err(), "the root must not wake itself");
 }
 
+#[test]
+fn a_stable_retry_does_not_bump_wake_generation() {
+    let (handle, _root, worker) = team();
+    publish(&handle, worker, "w1");
+    let generation = handle.wake_generation();
+    let retry = publish(&handle, worker, "w1");
+    assert!(retry.deduplicated);
+    assert_eq!(handle.wake_generation(), generation);
+    assert_eq!(handle.revision(), TeamRevision::from_raw(1));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_appends_to_one_event_all_land_exactly_once() {
     let (handle, root, worker) = team();

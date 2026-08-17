@@ -56,6 +56,7 @@ pub(crate) use self::execution::AgentExecutionGuard;
 use self::execution::AgentExecutionLimiter;
 use self::residency::V2Residency;
 
+mod availability;
 mod execution;
 mod legacy;
 mod residency;

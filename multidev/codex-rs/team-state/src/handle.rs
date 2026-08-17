@@ -4,6 +4,7 @@
 //! what makes the state canonical: there is no second copy to reconcile, and nothing about it
 //! depends on which members happen to be loaded right now.
 
+use crate::availability::AvailabilitySnapshot;
 use crate::evidence::FactView;
 use crate::evidence::NotedObservation;
 use crate::ids::FactId;
@@ -19,11 +20,18 @@ use crate::mutation::LifecycleOutcome;
 use crate::mutation::LifecycleRequest;
 use crate::mutation::PublishOutcome;
 use crate::mutation::PublishRequest;
+use crate::mutation::RetireOutcome;
+use crate::mutation::RetireRequest;
 use crate::mutation::RouteDispatch;
 use crate::mutation::RouteOutcome;
 use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::mutation::TeamError;
+use crate::observe::ChangeLogPage;
+use crate::observe::DumpCursor;
+use crate::observe::ObserveQuery;
+use crate::observe::PublicationStats;
+use crate::observe::TeamDumpPage;
 use crate::store::TeamStore;
 use crate::view::HistoryPage;
 use crate::view::HistoryQuery;
@@ -86,6 +94,16 @@ impl TeamStateHandle {
         self.with_store(|store| store.participant(thread_id).cloned())
     }
 
+    pub fn participants(&self) -> Vec<Participant> {
+        self.with_store(|store| store.participants())
+    }
+
+    /// The generation waiters observe. It only advances when a mutation actually changed canonical
+    /// state, so a stable retry cannot look like new work.
+    pub fn wake_generation(&self) -> u64 {
+        *self.change_tx.borrow()
+    }
+
     pub fn publish(
         &self,
         actor: ThreadId,
@@ -93,9 +111,7 @@ impl TeamStateHandle {
         request: PublishRequest,
     ) -> Result<PublishOutcome, TeamError> {
         let outcome = self.with_store(|store| store.publish(actor, submission, request));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
+        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| !outcome.deduplicated));
         outcome
     }
 
@@ -105,9 +121,7 @@ impl TeamStateHandle {
         request: LifecycleRequest,
     ) -> Result<LifecycleOutcome, TeamError> {
         let outcome = self.with_store(|store| store.update_lifecycle(actor, request));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
+        self.notify_if_changed(outcome.is_ok());
         outcome
     }
 
@@ -122,9 +136,7 @@ impl TeamStateHandle {
         request: RouteRequest,
     ) -> Result<RouteOutcome, TeamError> {
         let outcome = self.with_store(|store| store.route(actor, submission, request));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
+        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| !outcome.deduplicated));
         outcome
     }
 
@@ -135,9 +147,7 @@ impl TeamStateHandle {
         result: DeliveryResult,
     ) -> Result<DeliveryOutcome, TeamError> {
         let outcome = self.with_store(|store| store.record_delivery(actor, route_id, result));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
+        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| outcome.changed));
         outcome
     }
 
@@ -147,10 +157,45 @@ impl TeamStateHandle {
         route_id: RouteId,
     ) -> Result<EndAssignmentOutcome, TeamError> {
         let outcome = self.with_store(|store| store.end_assignment(actor, route_id));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
+        self.notify_if_changed(outcome.is_ok());
         outcome
+    }
+
+    pub fn retire(
+        &self,
+        actor: ThreadId,
+        submission: &Submission,
+        request: RetireRequest,
+        availability: &AvailabilitySnapshot,
+    ) -> Result<RetireOutcome, TeamError> {
+        let outcome =
+            self.with_store(|store| store.retire(actor, submission, request, availability));
+        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| !outcome.deduplicated));
+        outcome
+    }
+
+    pub fn dump(
+        &self,
+        actor: ThreadId,
+        availability: &AvailabilitySnapshot,
+        query: ObserveQuery,
+        cursor: Option<DumpCursor>,
+    ) -> Result<TeamDumpPage, TeamError> {
+        let wake_generation = self.wake_generation();
+        self.with_store(|store| store.dump(actor, availability, wake_generation, query, cursor))
+    }
+
+    pub fn change_log(
+        &self,
+        actor: ThreadId,
+        query: ObserveQuery,
+    ) -> Result<ChangeLogPage, TeamError> {
+        let wake_generation = self.wake_generation();
+        self.with_store(|store| store.change_log(actor, wake_generation, query))
+    }
+
+    pub fn publication_stats(&self, actor: ThreadId) -> Result<Vec<PublicationStats>, TeamError> {
+        self.with_store(|store| store.publication_stats(actor))
     }
 
     pub fn route_dispatch(
@@ -201,6 +246,12 @@ impl TeamStateHandle {
 
     pub fn consume_wake(&self, participant: ThreadId) -> bool {
         self.with_store(|store| store.consume_wake(participant))
+    }
+
+    fn notify_if_changed(&self, changed: bool) {
+        if changed {
+            self.notify_change();
+        }
     }
 
     fn notify_change(&self) {

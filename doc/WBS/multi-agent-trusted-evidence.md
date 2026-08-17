@@ -252,7 +252,10 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成；下一阶段为 M-4 协调闭合与可观测性。
+M-3 已完成并合入 `main`。M-4 实现已落在 `worktree-043-multi-m4-coordination-closure`，定向门禁通过，
+待独立审查后合入；合入前下一工作包仍是 M-4 审查/合入，不是 M-5。任务合同见
+`plan/043-multi-m4-coordination-closure-observability-execplan.md`，执行记录见
+`agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -268,7 +271,7 @@ M-3 已完成；下一阶段为 M-4 协调闭合与可观测性。
   团队工具自身与证据读取动作默认不递归产生新证据。
 - **边界**：不复制全量工具输出，不建 artifact store，不自动判定证据是否仍然有效。
 
-### M-4 协调闭合与可观测性（M-3 合入后的下一阶段）
+### M-4 协调闭合与可观测性（实现已落在 043 工作树，待独立审查）
 
 - **目标**：让长时间运行中的团队状态能干净收尾，并让一次错误协调可被事后解释。
 - **交付能力**：producer 不可用时 Root 显式退休其未终结 Version；确定性的团队状态转储与精简变更日志；

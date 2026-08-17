@@ -6,6 +6,8 @@
 //! whose precondition already moved are rejected with the current state, and a batch only ever
 //! touches the targets it names.
 
+use crate::availability::AvailabilityEpoch;
+use crate::availability::ProducerAvailability;
 use crate::ids::EventId;
 use crate::ids::FactId;
 use crate::ids::InstanceTag;
@@ -166,6 +168,28 @@ pub struct EndAssignmentOutcome {
     pub revision: TeamRevision,
 }
 
+/// Root retirement of one version whose author is confirmed truly unavailable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetireRequest {
+    pub version_id: VersionId,
+    pub expected_producer_state: ProducerState,
+    pub expected_root_state: RootState,
+    pub expected_availability: ProducerAvailability,
+    pub expected_availability_epoch: AvailabilityEpoch,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RetireOutcome {
+    pub revision: TeamRevision,
+    pub version_id: VersionId,
+    pub retired_by: ThreadId,
+    pub reason: String,
+    pub availability: ProducerAvailability,
+    pub availability_epoch: AvailabilityEpoch,
+    pub deduplicated: bool,
+}
+
 /// Why a team operation was refused.
 ///
 /// Every variant is a refusal, never a silent partial success: the store commits a mutation whole
@@ -214,6 +238,24 @@ pub enum TeamError {
     /// the existing assignment would drop the new instruction silently, and opening a second one
     /// would leave the target holding the same event for two reasons.
     AssignmentInProgress { route_id: RouteId },
+    /// Root retirement of a version that has already been retired. The original operator and
+    /// reason stand.
+    VersionRetired { version_id: VersionId },
+    /// The producer is not confirmed truly unavailable, so Root retirement is refused.
+    ProducerNotUnavailable {
+        availability: ProducerAvailability,
+        availability_epoch: AvailabilityEpoch,
+    },
+    /// The availability snapshot the caller acted on is no longer current.
+    AvailabilityConflict {
+        availability: ProducerAvailability,
+        availability_epoch: AvailabilityEpoch,
+    },
+    /// A dump page cursor belongs to a different revision or availability snapshot.
+    DumpCursorStale {
+        current_revision: TeamRevision,
+        current_epoch: AvailabilityEpoch,
+    },
 }
 
 impl fmt::Display for TeamError {
@@ -277,6 +319,31 @@ impl fmt::Display for TeamError {
             Self::AssignmentInProgress { route_id } => write!(
                 f,
                 "the target is already assigned this event under {route_id}; publish a version to add to it, or end {route_id} first if you want to hand it over again"
+            ),
+            Self::VersionRetired { version_id } => write!(
+                f,
+                "{version_id} has already been retired by the root and cannot be rewritten; publish a new version if the matter is current again"
+            ),
+            Self::ProducerNotUnavailable {
+                availability,
+                availability_epoch,
+            } => write!(
+                f,
+                "the producer is {availability} (availability_epoch={availability_epoch}); root retirement requires a producer confirmed truly unavailable"
+            ),
+            Self::AvailabilityConflict {
+                availability,
+                availability_epoch,
+            } => write!(
+                f,
+                "producer availability has moved; it is now {availability} at availability_epoch={availability_epoch}"
+            ),
+            Self::DumpCursorStale {
+                current_revision,
+                current_epoch,
+            } => write!(
+                f,
+                "this dump cursor belongs to a different snapshot; current revision={current_revision} availability_epoch={current_epoch}"
             ),
         }
     }

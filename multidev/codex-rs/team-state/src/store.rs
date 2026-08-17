@@ -31,9 +31,14 @@ use crate::mutation::LifecycleSnapshot;
 use crate::mutation::PublishOutcome;
 use crate::mutation::PublishRequest;
 use crate::mutation::PublishTarget;
+use crate::mutation::RetireOutcome;
+use crate::mutation::RetireRequest;
 use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::mutation::TeamError;
+use crate::observe::ChangeKind;
+use crate::observe::ChangeRecord;
+use crate::observe::StoredWake;
 use crate::view::EventHistory;
 use crate::view::EventView;
 use crate::view::HistoryPage;
@@ -49,6 +54,8 @@ use std::collections::VecDeque;
 /// Evidence capture and read permission follow the same pattern: a child module with its own
 /// invariants, reaching the same private state under the same single lock.
 pub(crate) mod evidence;
+pub(crate) mod observe;
+pub(crate) mod retire;
 /// Selective routing lives in a child module so this file stays the single place that defines the
 /// publish and lifecycle invariants, while route commits still reach the same private state and
 /// follow the same validate-everything-then-commit-once discipline.
@@ -87,6 +94,7 @@ impl LifecycleAxis {
 enum CommittedRequest {
     Publish(PublishRequest),
     Route(RouteRequest),
+    Retire(RetireRequest),
 }
 
 #[derive(Clone, Debug)]
@@ -96,7 +104,10 @@ enum CommittedOutcome {
     /// Only the route's identity is remembered. Its delivery state goes on changing after the
     /// commit, and a snapshot taken here would be taken before the notice was even attempted — a
     /// replay would then report `pending` over a failure that is meant to be visible and retryable.
-    Route { route_id: RouteId },
+    Route {
+        route_id: RouteId,
+    },
+    Retire(RetireOutcome),
 }
 
 struct CommittedSubmission {
@@ -128,6 +139,7 @@ pub struct TeamStore {
     next_fact_ordinal: u32,
     /// Per-producer publication cursor: the highest fact ordinal of its own that it has published.
     published_facts_through: HashMap<ThreadId, u32>,
+    change_log: Vec<ChangeRecord>,
 }
 
 impl Default for TeamStore {
@@ -152,6 +164,7 @@ impl TeamStore {
             pending_observations: VecDeque::new(),
             next_fact_ordinal: 1,
             published_facts_through: HashMap::new(),
+            change_log: Vec::new(),
         }
     }
 
@@ -197,6 +210,18 @@ impl TeamStore {
 
     pub fn participant(&self, thread_id: ThreadId) -> Option<&Participant> {
         self.participants.get(&thread_id)
+    }
+
+    /// Registered participants, sorted by label then thread id so diagnostics do not depend on
+    /// HashMap iteration order.
+    pub fn participants(&self) -> Vec<Participant> {
+        let mut participants: Vec<Participant> = self.participants.values().cloned().collect();
+        participants.sort_by(|left, right| {
+            left.label
+                .cmp(&right.label)
+                .then_with(|| left.thread_id.to_string().cmp(&right.thread_id.to_string()))
+        });
+        participants
     }
 
     fn require_participant(&self, thread_id: ThreadId) -> Result<&Participant, TeamError> {
@@ -265,8 +290,7 @@ impl TeamStore {
                 return Err(TeamError::RetryIdentityReused);
             }
             let CommittedOutcome::Publish(outcome) = &existing.outcome else {
-                // The same identity already stands for a route. Treating it as a fresh publish
-                // would put two different objects behind one retry identity.
+                // The same identity already stands for a different kind of submission.
                 return Err(TeamError::RetryIdentityReused);
             };
             return Ok(PublishOutcome {
@@ -362,9 +386,23 @@ impl TeamStore {
         let event_id = event.id();
         self.revision = revision;
 
-        if !role.is_root() {
+        let wake = if role.is_root() {
+            StoredWake::None {
+                rule: "root_does_not_self_wake",
+            }
+        } else {
             self.wake_root();
-        }
+            self.root_wake("member_publish")
+        };
+        self.push_change(ChangeRecord {
+            revision,
+            actor,
+            kind: ChangeKind::Publish,
+            target: version_id.to_string(),
+            before: None,
+            after: Some(format!("producer=open root={root_state}")),
+            wake,
+        });
 
         let outcome = PublishOutcome {
             event_id,
@@ -422,6 +460,11 @@ impl TeamStore {
             // then whether the transition is legal. A caller working from a stale picture has to
             // learn the current state rather than a rule about a state it did not know about.
             match target.change {
+                LifecycleChange::CloseProducer if version.is_retired() => {
+                    return Err(TeamError::VersionRetired {
+                        version_id: target.version_id,
+                    });
+                }
                 LifecycleChange::CloseProducer if version.authored().author != actor => {
                     return Err(TeamError::NotPermitted {
                         reason: "only the author of a version may close it",
@@ -468,30 +511,70 @@ impl TeamStore {
 
         let revision = self.revision.next();
         let mut updated = Vec::with_capacity(resolved.len());
-        let mut wake_root = false;
+        let root_id = self.root_id();
         for (event_index, version_index, target) in resolved {
             let event = &mut self.events[event_index];
             let version = &mut event.versions[version_index];
-            match target.change {
+            let before = format!(
+                "producer={} root={}",
+                version.producer_state, version.root_state
+            );
+            let (kind, wake) = match target.change {
                 LifecycleChange::CloseProducer => {
                     version.producer_state = ProducerState::Closed;
-                    // Closing something the root has not finished with gives the root another
-                    // coordination opportunity; closing something already resolved does not.
-                    wake_root |= version.root_state.occupies_root_attention();
+                    let occupies = version.root_state.occupies_root_attention();
+                    (
+                        ChangeKind::CloseProducer,
+                        if occupies {
+                            if let Some(root_id) = root_id {
+                                self.wake.signal(root_id);
+                                StoredWake::Signalled {
+                                    participant: root_id,
+                                    rule: "producer_closed_while_root_active",
+                                }
+                            } else {
+                                StoredWake::None {
+                                    rule: "producer_closed_while_root_active",
+                                }
+                            }
+                        } else {
+                            StoredWake::None {
+                                rule: "producer_closed_after_root_resolved",
+                            }
+                        },
+                    )
                 }
-                LifecycleChange::SetRootState(state) => version.root_state = state,
-            }
+                LifecycleChange::SetRootState(state) => {
+                    version.root_state = state;
+                    (
+                        ChangeKind::SetRootState,
+                        StoredWake::None {
+                            rule: "root_does_not_self_wake",
+                        },
+                    )
+                }
+            };
+            let after = format!(
+                "producer={} root={}",
+                version.producer_state, version.root_state
+            );
             updated.push(LifecycleSnapshot {
                 version_id: target.version_id,
                 producer_state: version.producer_state,
                 root_state: version.root_state,
             });
             event.last_changed_at = revision;
+            self.change_log.push(ChangeRecord {
+                revision,
+                actor,
+                kind,
+                target: target.version_id.to_string(),
+                before: Some(before),
+                after: Some(after),
+                wake,
+            });
         }
         self.revision = revision;
-        if wake_root {
-            self.wake_root();
-        }
 
         Ok(LifecycleOutcome { revision, updated })
     }
@@ -514,6 +597,7 @@ impl TeamStore {
             viewer_label,
             viewer_role: role,
             events,
+            availability_epoch: None,
         })
     }
 
@@ -554,6 +638,7 @@ impl TeamStore {
     fn version_view(&self, version: &TeamVersion) -> VersionView {
         VersionView {
             id: version.id(),
+            author: version.authored().author,
             author_label: self.label_of(version.authored().author),
             summary: version.authored().summary.clone(),
             handoff: version.authored().handoff.clone(),
@@ -563,6 +648,8 @@ impl TeamStore {
             producer_state: version.producer_state(),
             root_state: version.root_state(),
             authored_on_stale_view: version.authored_on_stale_view().is_some(),
+            retired: version.is_retired(),
+            producer_availability: None,
         }
     }
 
@@ -690,15 +777,27 @@ impl TeamStore {
     }
 
     fn wake_root(&mut self) {
-        let roots: Vec<ThreadId> = self
-            .participants
-            .values()
-            .filter(|participant| participant.role.is_root())
-            .map(|participant| participant.thread_id)
-            .collect();
-        for root in roots {
+        if let Some(root) = self.root_id() {
             self.wake.signal(root);
         }
+    }
+
+    fn root_id(&self) -> Option<ThreadId> {
+        self.participants
+            .values()
+            .find(|participant| participant.role.is_root())
+            .map(|participant| participant.thread_id)
+    }
+
+    fn root_wake(&self, rule: &'static str) -> StoredWake {
+        match self.root_id() {
+            Some(participant) => StoredWake::Signalled { participant, rule },
+            None => StoredWake::None { rule },
+        }
+    }
+
+    fn push_change(&mut self, record: ChangeRecord) {
+        self.change_log.push(record);
     }
 
     pub fn has_pending_wake(&self, participant: ThreadId) -> bool {

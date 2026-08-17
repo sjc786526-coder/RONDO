@@ -87,7 +87,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     }))
 }
 
-fn parse_version_id(value: &str) -> Result<VersionId, FunctionCallError> {
+pub(crate) fn parse_version_id(value: &str) -> Result<VersionId, FunctionCallError> {
     value.parse().map_err(|_| {
         team_error(TeamError::MalformedReference {
             reference: value.to_string(),
@@ -113,7 +113,7 @@ struct UpdateTargetArgs {
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum WireProducerState {
+pub(crate) enum WireProducerState {
     Open,
     Closed,
 }
@@ -129,7 +129,7 @@ impl From<WireProducerState> for ProducerState {
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum WireRootState {
+pub(crate) enum WireRootState {
     Pending,
     Tracking,
     Resolved,

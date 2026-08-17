@@ -205,6 +205,7 @@ fn render(
         revision,
         viewer_label,
         viewer_role,
+        availability_epoch,
         ..
     } = snapshot;
     let role = if viewer_role.is_root() {
@@ -212,11 +213,14 @@ fn render(
     } else {
         "member"
     };
+    let availability_epoch = availability_epoch
+        .map(|epoch| format!(" availability_epoch={epoch}"))
+        .unwrap_or_default();
     let mut out = String::with_capacity(512);
     out.push_str(TEAM_WORLD_STATE_OPEN_TAG);
     out.push('\n');
     out.push_str(&format!(
-        "team_instance={instance} revision={revision} you={viewer_label} role={role}\n"
+        "team_instance={instance} revision={revision}{availability_epoch} you={viewer_label} role={role}\n"
     ));
     out.push_str(
         "Harness-owned team state, regenerated every sampling. Echo `revision` as `based_on_revision` when you publish or update.\n",
@@ -260,14 +264,21 @@ fn render(
                 producer_state,
                 root_state,
                 authored_on_stale_view,
+                retired,
+                producer_availability,
+                ..
             } = version;
             let stale = if *authored_on_stale_view {
                 " authored_on_stale_view=true"
             } else {
                 ""
             };
+            let retired = if *retired { " retired=true" } else { "" };
+            let availability = producer_availability
+                .map(|class| format!(" producer_availability={class}"))
+                .unwrap_or_default();
             out.push_str(&format!(
-                "  {id} by {author_label} producer={producer_state} root={root_state}{stale}\n"
+                "  {id} by {author_label} producer={producer_state} root={root_state}{retired}{availability}{stale}\n"
             ));
             out.push_str(&format!("    {summary}\n"));
             if let Some(handoff) = handoff {

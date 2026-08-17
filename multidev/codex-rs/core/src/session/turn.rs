@@ -1535,6 +1535,7 @@ async fn resolve_team_projection(
             tools: &tools,
         },
     )
+    .await
 }
 
 pub(crate) struct PreparedToolRecommendations {

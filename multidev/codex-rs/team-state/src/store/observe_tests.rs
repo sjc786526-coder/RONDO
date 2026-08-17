@@ -1,0 +1,269 @@
+use super::super::TeamStore;
+use crate::availability::AvailabilitySnapshot;
+use crate::availability::ProducerAvailability;
+use crate::ids::TeamRevision;
+use crate::observe::DumpCursor;
+use crate::observe::DumpEntry;
+use crate::observe::ObserveQuery;
+use crate::test_support::TeamFixture;
+use crate::test_support::new_event;
+use crate::test_support::register_member;
+use crate::test_support::submission;
+use pretty_assertions::assert_eq;
+
+fn all_unavailable(store: &TeamStore) -> AvailabilitySnapshot {
+    AvailabilitySnapshot::from_entries(
+        store
+            .participants()
+            .into_iter()
+            .map(|participant| (participant.thread_id, ProducerAvailability::Unavailable))
+            .collect(),
+    )
+}
+
+#[test]
+fn dump_pages_are_stable_and_refuse_a_stale_cursor() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("schema drift", "two columns were renamed"),
+        )
+        .expect("worker may publish");
+    let availability = all_unavailable(&store);
+    let first = store
+        .dump(
+            root,
+            &availability,
+            /*wake_generation*/ 1,
+            ObserveQuery {
+                limit: Some(3),
+                offset: None,
+                after: None,
+            },
+            None,
+        )
+        .expect("root may dump");
+    assert_eq!(first.wake_generation, 1);
+    assert_eq!(first.entries.len(), 3);
+    assert!(first.next_offset.is_some());
+    let again = store
+        .dump(
+            root,
+            &availability,
+            1,
+            ObserveQuery {
+                limit: Some(3),
+                offset: None,
+                after: None,
+            },
+            None,
+        )
+        .expect("repeat dump");
+    assert_eq!(first, again);
+
+    let cursor = DumpCursor {
+        revision: first.revision,
+        availability_epoch: first.availability_epoch,
+        offset: first.next_offset.expect("more pages"),
+    };
+    let second = store
+        .dump(
+            root,
+            &availability,
+            1,
+            ObserveQuery {
+                limit: Some(50),
+                offset: None,
+                after: None,
+            },
+            Some(cursor),
+        )
+        .expect("next page");
+    assert!(
+        second
+            .entries
+            .iter()
+            .all(|entry| !first.entries.contains(entry))
+    );
+
+    store
+        .publish(
+            worker,
+            &submission(store.revision(), "w2"),
+            new_event("another", "new matter"),
+        )
+        .expect("second publish");
+    let err = store
+        .dump(
+            root,
+            &availability,
+            1,
+            ObserveQuery {
+                limit: Some(3),
+                offset: None,
+                after: None,
+            },
+            Some(cursor),
+        )
+        .expect_err("cursor from an older revision");
+    assert!(matches!(
+        err,
+        crate::mutation::TeamError::DumpCursorStale { .. }
+    ));
+}
+
+#[test]
+fn dump_pairs_visibility_and_activity_reasons_and_counts_zero_publishers() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let _idle = register_member(&mut store, "/root/idle");
+    store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("schema drift", "two columns were renamed"),
+        )
+        .expect("worker may publish");
+    let availability = all_unavailable(&store);
+    let page = store
+        .dump(
+            root,
+            &availability,
+            0,
+            ObserveQuery {
+                limit: Some(50),
+                offset: None,
+                after: None,
+            },
+            None,
+        )
+        .expect("dump");
+
+    let idle_visibility = page
+        .entries
+        .iter()
+        .find_map(|entry| match entry {
+            DumpEntry::Visibility {
+                participant,
+                visible,
+                reasons,
+                ..
+            } if participant == "/root/idle" => Some((*visible, reasons.clone())),
+            _ => None,
+        })
+        .expect("idle visibility");
+    assert!(!idle_visibility.0);
+    assert_eq!(idle_visibility.1, vec!["no_visibility_grant".to_string()]);
+
+    let idle_activity = page
+        .entries
+        .iter()
+        .find_map(|entry| match entry {
+            DumpEntry::Activity {
+                participant,
+                active,
+                reasons,
+                ..
+            } if participant == "/root/idle" => Some((*active, reasons.clone())),
+            _ => None,
+        })
+        .expect("idle activity");
+    assert!(!idle_activity.0);
+    assert_eq!(idle_activity.1, vec!["no_active_reason".to_string()]);
+
+    let idle_stats = page
+        .entries
+        .iter()
+        .find_map(|entry| match entry {
+            DumpEntry::Publication {
+                participant,
+                version_count,
+                authored_chars,
+                fact_ref_count,
+            } if participant == "/root/idle" => {
+                Some((*version_count, *authored_chars, *fact_ref_count))
+            }
+            _ => None,
+        })
+        .expect("idle stats");
+    assert_eq!(idle_stats, (0, 0, 0));
+}
+
+#[test]
+fn change_log_skips_retries_and_stats_match_canonical_authored_fields() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let _published = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("schema drift", "two columns were renamed"),
+        )
+        .expect("worker may publish");
+    store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("schema drift", "two columns were renamed"),
+        )
+        .expect("retry");
+    let log = store
+        .change_log(
+            root,
+            0,
+            ObserveQuery {
+                limit: Some(50),
+                offset: None,
+                after: None,
+            },
+        )
+        .expect("root may read the log");
+    assert_eq!(log.entries.len(), 1);
+    assert_eq!(log.total_entries, 1);
+
+    let stats = store.publication_stats(root).expect("stats");
+    let worker_stats = stats
+        .iter()
+        .find(|row| row.participant == "/root/worker")
+        .expect("worker stats");
+    let expected_chars =
+        "schema drift".chars().count() as u64 + "two columns were renamed".chars().count() as u64;
+    assert_eq!(worker_stats.version_count, 1);
+    assert_eq!(worker_stats.authored_chars, expected_chars);
+    assert_eq!(worker_stats.fact_ref_count, 0);
+}
+
+#[test]
+fn members_cannot_read_diagnostics() {
+    let TeamFixture { store, worker, .. } = TeamFixture::new();
+    let availability = all_unavailable(&store);
+    let err = store
+        .dump(
+            worker,
+            &availability,
+            0,
+            ObserveQuery {
+                limit: None,
+                offset: None,
+                after: None,
+            },
+            None,
+        )
+        .expect_err("members cannot dump");
+    assert!(matches!(
+        err,
+        crate::mutation::TeamError::NotPermitted { .. }
+    ));
+}

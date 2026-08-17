@@ -6,6 +6,8 @@
 //! lifecycle ones, so "authored content is immutable" is a property of the code rather than a
 //! convention.
 
+use crate::availability::AvailabilityEpoch;
+use crate::availability::ProducerAvailability;
 use crate::ids::EventId;
 use crate::ids::FactId;
 use crate::ids::RouteId;
@@ -27,6 +29,8 @@ const MAX_HANDOFF_CHARS: usize = 1_000;
 /// A route note travels inside a notification rather than the projection, and its whole purpose is
 /// to stay small enough that the notice never becomes a second copy of the event.
 const MAX_ROUTE_NOTE_CHARS: usize = 400;
+/// Root retirement reasons are coordination metadata, bounded the same way as delivery failures.
+const MAX_RETIRE_REASON_CHARS: usize = 400;
 /// Delivery failures come from transport errors, which are not authored content but still end up in
 /// the canonical record, so they are bounded the same way.
 const MAX_DELIVERY_REASON_CHARS: usize = 300;
@@ -59,6 +63,10 @@ pub(crate) fn clamp_route_note(value: &str) -> String {
 
 pub(crate) fn clamp_delivery_reason(value: &str) -> String {
     clamp_authored(value, MAX_DELIVERY_REASON_CHARS)
+}
+
+pub(crate) fn clamp_retire_reason(value: &str) -> String {
+    clamp_authored(value, MAX_RETIRE_REASON_CHARS)
 }
 
 /// What the author of a version currently believes about the matter it describes.
@@ -152,6 +160,19 @@ pub struct AuthoredVersion {
     pub evidence_refs: Vec<FactId>,
 }
 
+/// Root-declared independent terminal for a version whose author can no longer act.
+///
+/// This is not [`ProducerState::Closed`]: the author never closed the item. It only removes the
+/// producer-open activity reason.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RetirementRecord {
+    pub retired_by: ThreadId,
+    pub reason: String,
+    pub retired_at: TeamRevision,
+    pub availability: ProducerAvailability,
+    pub availability_epoch: AvailabilityEpoch,
+}
+
 /// One immutable authored entry in an event's chain, plus its two mutable lifecycle states.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct TeamVersion {
@@ -159,6 +180,7 @@ pub struct TeamVersion {
     authored: AuthoredVersion,
     pub(crate) producer_state: ProducerState,
     pub(crate) root_state: RootState,
+    pub(crate) retirement: Option<RetirementRecord>,
     created_at: TeamRevision,
     /// Set when the author submitted against a view older than the event's latest change. The
     /// append is still accepted; it is only labelled.
@@ -178,6 +200,7 @@ impl TeamVersion {
             authored,
             producer_state: ProducerState::Open,
             root_state,
+            retirement: None,
             created_at,
             authored_on_stale_view,
         }
@@ -207,9 +230,20 @@ impl TeamVersion {
         self.authored_on_stale_view
     }
 
+    pub fn retirement(&self) -> Option<&RetirementRecord> {
+        self.retirement.as_ref()
+    }
+
+    pub fn is_retired(&self) -> bool {
+        self.retirement.is_some()
+    }
+
     /// Whether this version still keeps the event in its own author's active view.
+    ///
+    /// Root retirement is an independent terminal: it does not pretend the author closed the
+    /// item, but it does stop occupying the author's attention.
     pub(crate) fn occupies_author_attention(&self) -> bool {
-        matches!(self.producer_state, ProducerState::Open)
+        matches!(self.producer_state, ProducerState::Open) && self.retirement.is_none()
     }
 }
 

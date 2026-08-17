@@ -52,7 +52,9 @@ use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHand
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::team_tools::TeamEvidenceHandler;
 use crate::tools::handlers::team_tools::TeamHistoryHandler;
+use crate::tools::handlers::team_tools::TeamInspectHandler;
 use crate::tools::handlers::team_tools::TeamPublishHandler;
+use crate::tools::handlers::team_tools::TeamRetireHandler;
 use crate::tools::handlers::team_tools::TeamRouteHandler;
 use crate::tools::handlers::team_tools::TeamRouteUpdateHandler;
 use crate::tools::handlers::team_tools::TeamUpdateHandler;
@@ -1128,6 +1130,14 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 );
                 registry.register_trusted_with_exposure(
                     multi_agent_v2_handler(TeamEvidenceHandler, tool_namespace),
+                    exposure,
+                );
+                registry.register_trusted_with_exposure(
+                    multi_agent_v2_handler(TeamRetireHandler, tool_namespace),
+                    exposure,
+                );
+                registry.register_trusted_with_exposure(
+                    multi_agent_v2_handler(TeamInspectHandler, tool_namespace),
                     exposure,
                 );
             }
