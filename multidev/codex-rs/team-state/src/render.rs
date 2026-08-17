@@ -6,6 +6,7 @@
 //! context and why anything dropped is reported rather than silently cut.
 
 use crate::view::EventView;
+use crate::view::RouteView;
 use crate::view::TeamSnapshot;
 use crate::view::VersionView;
 use codex_utils_output_truncation::approx_tokens_from_byte_count_i64;
@@ -209,6 +210,23 @@ fn render(
     for candidate in events {
         let EventView { id, title, .. } = candidate.event;
         out.push_str(&format!("\n[{id}] {title}\n"));
+        // Routes come before the chain: an assignment is usually the reason the event is in this
+        // view at all, and it is the part the reader has to act on.
+        for route in &candidate.event.routes {
+            let RouteView {
+                id,
+                target_label,
+                duty,
+                delivery,
+                note,
+            } = route;
+            out.push_str(&format!(
+                "  {id} route to {target_label} duty={duty} notice={delivery}\n"
+            ));
+            if let Some(note) = note {
+                out.push_str(&format!("    note: {note}\n"));
+            }
+        }
         let hidden = candidate.event.versions.len() - candidate.shown_versions;
         for version in candidate.event.versions.iter().skip(hidden) {
             let VersionView {

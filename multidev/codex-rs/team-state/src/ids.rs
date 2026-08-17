@@ -203,6 +203,61 @@ impl FromStr for VersionId {
     }
 }
 
+/// Identity of one route grant under an [`EventId`].
+///
+/// A route is minted per event, so its reference carries the event it belongs to and cannot be
+/// confused with a version of the same event.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct RouteId {
+    instance: InstanceTag,
+    event_ordinal: u32,
+    ordinal: u32,
+}
+
+impl RouteId {
+    pub(crate) fn new(instance: InstanceTag, event_ordinal: u32, ordinal: u32) -> Self {
+        Self {
+            instance,
+            event_ordinal,
+            ordinal,
+        }
+    }
+
+    pub fn instance(&self) -> InstanceTag {
+        self.instance
+    }
+
+    pub fn event_id(&self) -> EventId {
+        EventId::new(self.instance, self.event_ordinal)
+    }
+}
+
+impl fmt::Display for RouteId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            instance,
+            event_ordinal,
+            ordinal,
+        } = self;
+        write!(f, "rte-{event_ordinal}.{ordinal}-{instance}")
+    }
+}
+
+impl FromStr for RouteId {
+    type Err = ReferenceParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let rest = value.strip_prefix("rte-").ok_or(ReferenceParseError)?;
+        let (ordinals, instance) = rest.split_once('-').ok_or(ReferenceParseError)?;
+        let (event_ordinal, ordinal) = ordinals.split_once('.').ok_or(ReferenceParseError)?;
+        Ok(Self {
+            instance: instance.parse()?,
+            event_ordinal: event_ordinal.parse().map_err(|_| ReferenceParseError)?,
+            ordinal: ordinal.parse().map_err(|_| ReferenceParseError)?,
+        })
+    }
+}
+
 /// A reference string that is not a well-formed team reference at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ReferenceParseError;

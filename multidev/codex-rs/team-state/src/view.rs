@@ -4,12 +4,15 @@
 //! provider retries of that sampling see exactly the same team state.
 
 use crate::ids::EventId;
+use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
 use crate::ids::VersionId;
+use crate::model::DeliveryState;
 use crate::model::ParticipantRole;
 use crate::model::ProducerState;
 use crate::model::RootState;
+use crate::model::RouteDuty;
 use codex_protocol::ThreadId;
 use serde::Serialize;
 
@@ -24,11 +27,23 @@ pub struct VersionView {
     pub authored_on_stale_view: bool,
 }
 
+/// One route as the viewer is allowed to see it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RouteView {
+    pub id: RouteId,
+    pub target_label: String,
+    pub duty: RouteDuty,
+    pub delivery: DeliveryState,
+    pub note: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EventView {
     pub id: EventId,
     pub title: String,
     pub versions: Vec<VersionView>,
+    /// Routes this viewer may see: all of them for the root, its own for a member.
+    pub routes: Vec<RouteView>,
 }
 
 /// One participant's active view, frozen at a revision.
