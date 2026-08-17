@@ -727,14 +727,27 @@ impl ToolRegistry {
                     &result.payload,
                     result.result.as_ref(),
                 );
-                // The tool ran to completion, which is the one thing only this point knows: an
-                // abandoned call never gets here, and its filler response is written elsewhere. The
-                // observation is only noted; it becomes team evidence once Codex has retained it.
-                crate::team::evidence::note_completed_tool_result(&invocation, &result);
+                // The handler produced a terminal outcome, which is the one thing only this point
+                // knows: an abandoned call never gets here, and its filler response is written
+                // elsewhere. The observation is only noted; it becomes team evidence once Codex has
+                // retained it.
+                crate::team::evidence::note_completed_tool_result(
+                    &invocation,
+                    crate::team::evidence::CompletedToolResult::Output(&result),
+                );
                 Ok(result)
             }
             Err(err) => {
                 dispatch_trace.record_failed(&err);
+                // A handler that answers the model with a failure has observed something too — a
+                // command that exited non-zero is the obvious case. The earlier refusals in this
+                // function are deliberately not noted: nothing ran, or what ran was replaced.
+                if matches!(err, FunctionCallError::RespondToModel(_)) {
+                    crate::team::evidence::note_completed_tool_result(
+                        &invocation,
+                        crate::team::evidence::CompletedToolResult::Failure,
+                    );
+                }
                 Err(err)
             }
         }

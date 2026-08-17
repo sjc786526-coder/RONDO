@@ -14,6 +14,7 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
+use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ResponseItem;
@@ -28,13 +29,30 @@ use codex_team_state::RetainedOutputKind;
 /// rather than by whatever the producer's tool happened to print. Anything cut is reported.
 pub(crate) const MAX_OBSERVATION_CHARS: usize = 4_000;
 
+/// The terminal outcome a tool handler produced for the model.
+///
+/// A handler that fails is as much an observation as one that succeeds — a command exiting non-zero
+/// is exactly the kind of thing a team version needs to be able to point at — but the two arrive
+/// differently: one carries its own output and decides for itself whether it succeeded, the other is
+/// turned into a failed text result by the host.
+pub(crate) enum CompletedToolResult<'a> {
+    Output(&'a AnyToolResult),
+    Failure,
+}
+
 /// Note a completed tool result so it can become evidence once Codex has retained it.
 ///
-/// Three exclusions are decided here, at the only point where all three are knowable: nested
-/// code-mode calls (their retained observation is the cell's own result, not each step inside it),
-/// the team tools and the evidence read itself (a drill-down that produced more evidence would make
-/// every read generate another thing to read), and every result shape outside the supported set.
-pub(crate) fn note_completed_tool_result(invocation: &ToolInvocation, result: &AnyToolResult) {
+/// Called only where a tool handler has really produced a terminal outcome, which is what keeps an
+/// abandoned call — whose response is written by the host after the dispatch is given up on — from
+/// leaving evidence behind. Three further exclusions are decided here, at the only point where all
+/// three are knowable: nested code-mode calls (their retained observation is the cell's own result,
+/// not each step inside it), the team tools and the evidence read itself (a drill-down that produced
+/// more evidence would make every read generate another thing to read), and every result shape
+/// outside the supported set.
+pub(crate) fn note_completed_tool_result(
+    invocation: &ToolInvocation,
+    result: CompletedToolResult<'_>,
+) {
     if !super::team_state_enabled(&invocation.turn) {
         return;
     }
@@ -50,20 +68,48 @@ pub(crate) fn note_completed_tool_result(invocation: &ToolInvocation, result: &A
     let Ok(access) = super::TeamAccess::resolve(&invocation.session) else {
         return;
     };
-    let item = ResponseItem::from(
-        result
-            .result
-            .to_response_item(&result.call_id, &result.payload),
-    );
-    let Some(observation) = supported_observation(&item) else {
-        return;
+
+    let (call_id, output_kind, category) = match result {
+        CompletedToolResult::Output(result) => {
+            let item = ResponseItem::from(
+                result
+                    .result
+                    .to_response_item(&result.call_id, &result.payload),
+            );
+            let Some(observation) = supported_observation(&item) else {
+                return;
+            };
+            (
+                observation.call_id.to_string(),
+                observation.output_kind,
+                observation.category,
+            )
+        }
+        // The host answers a failing handler with the error text in the same shape the payload
+        // implies, always as text and always marked unsuccessful, so the classification is settled
+        // without waiting to see the message.
+        CompletedToolResult::Failure => {
+            let output_kind = match invocation.payload {
+                ToolPayload::Function { .. } => RetainedOutputKind::FunctionCallOutput,
+                ToolPayload::Custom { .. } => RetainedOutputKind::CustomToolCallOutput,
+                ToolPayload::ToolSearch { .. } => return,
+            };
+            if invocation.call_id.is_empty() {
+                return;
+            }
+            (
+                invocation.call_id.clone(),
+                output_kind,
+                FactCategory::ToolResultFailure,
+            )
+        }
     };
     access.handle().note_observation(
         access.actor(),
-        observation.category,
+        category,
         ObservationLocator {
-            call_id: observation.call_id.to_string(),
-            output_kind: observation.output_kind,
+            call_id,
+            output_kind,
             tool: invocation.tool_name.name.clone(),
         },
     );

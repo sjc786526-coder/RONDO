@@ -120,6 +120,92 @@ fn facts_are_numbered_in_confirmed_retention_order_rather_than_completion_order(
     );
 }
 
+/// The single mechanism by which everything outside the support set is excluded.
+///
+/// An abandoned call, a streaming increment, a media result, a nested code-mode step and a team
+/// tool's own output all reach retention without ever having been noted. Retention on its own never
+/// mints anything, so each of those exclusions is settled by not noting it rather than by a second
+/// filter that could disagree with the first.
+#[test]
+fn a_retained_result_that_was_never_noted_mints_nothing() {
+    let TeamFixture {
+        mut store, worker, ..
+    } = TeamFixture::new();
+
+    assert_eq!(store.confirm_observation(worker, "call-never-noted"), None);
+    assert!(store.facts.is_empty());
+}
+
+/// Replaying the same trajectory produces the same observation-to-publication association.
+///
+/// Compared as `(publication, position within its author's window)` rather than by identifier: a new
+/// team instance mints new identities on purpose, and requiring the old ones back would break the
+/// reset semantics the instance tag exists to enforce.
+#[test]
+fn replaying_a_trajectory_associates_the_same_observations_with_the_same_publications() {
+    fn run() -> Vec<Vec<u32>> {
+        let TeamFixture {
+            mut store,
+            root,
+            worker,
+        } = TeamFixture::new();
+        let mut windows = Vec::new();
+        // Two of the worker's observations, then a publish; then one each and a publish from both.
+        observe(&mut store, worker, "w-call-1");
+        observe(&mut store, worker, "w-call-2");
+        let opened = store
+            .publish(
+                worker,
+                &submission(TeamRevision::INITIAL, "w-0"),
+                new_event("first finding", "what the first two checks showed"),
+            )
+            .expect("worker may publish");
+        windows.push(
+            opened
+                .evidence_refs
+                .iter()
+                .map(FactId::ordinal)
+                .collect::<Vec<_>>(),
+        );
+        observe(&mut store, root, "r-call-1");
+        observe(&mut store, worker, "w-call-3");
+        windows.push(
+            store
+                .publish(
+                    root,
+                    &submission(store.revision(), "r-0"),
+                    append(opened.event_id, "what the root saw"),
+                )
+                .expect("root may append")
+                .evidence_refs
+                .iter()
+                .map(FactId::ordinal)
+                .collect(),
+        );
+        windows.push(
+            store
+                .publish(
+                    worker,
+                    &submission(store.revision(), "w-1"),
+                    append(opened.event_id, "and what the third check showed"),
+                )
+                .expect("worker may append")
+                .evidence_refs
+                .iter()
+                .map(FactId::ordinal)
+                .collect(),
+        );
+        windows
+    }
+
+    assert_eq!(run(), run());
+    assert_eq!(
+        run(),
+        vec![vec![1, 2], vec![3], vec![4]],
+        "each publication carries exactly the observations recorded for its author since the last one"
+    );
+}
+
 #[test]
 fn a_result_from_an_unregistered_session_never_becomes_evidence() {
     let TeamFixture { mut store, .. } = TeamFixture::new();

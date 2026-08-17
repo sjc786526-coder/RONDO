@@ -141,6 +141,7 @@ mod sqlite_state;
 mod stream_error_allows_next_turn;
 mod stream_no_completed;
 mod subagent_notifications;
+mod team_evidence;
 mod team_routing;
 mod team_world_state;
 mod token_budget;

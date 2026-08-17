@@ -75,6 +75,66 @@ fn a_generous_budget_renders_the_whole_chain() {
     }
 }
 
+/// A participant has to be able to see that an entry has evidence before it can ask for any, so the
+/// references travel in the view. A publication window has no fixed size, so the list they form does.
+#[test]
+fn a_versions_evidence_is_named_in_the_view_and_stays_bounded() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let mut expected = Vec::new();
+    for index in 0..MAX_PROJECTED_EVIDENCE_REFS + 3 {
+        store.note_observation(
+            worker,
+            crate::evidence::FactCategory::ToolResultSuccess,
+            crate::evidence::ObservationLocator {
+                call_id: format!("call-{index}"),
+                output_kind: crate::evidence::RetainedOutputKind::FunctionCallOutput,
+                tool: "shell_command".to_string(),
+            },
+        );
+        expected.push(
+            store
+                .confirm_observation(worker, &format!("call-{index}"))
+                .expect("retention was confirmed"),
+        );
+    }
+    store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w0"),
+            new_event("checked everything", "here is what all of that showed"),
+        )
+        .expect("worker may publish");
+    let snapshot = store.snapshot_for(root).expect("root view");
+
+    let projection = rendered(&snapshot, ProjectionBudget::from_remaining_context(None));
+
+    for reference in expected.iter().take(MAX_PROJECTED_EVIDENCE_REFS) {
+        assert!(
+            projection.text.contains(&reference.to_string()),
+            "{reference} should be named in:\n{}",
+            projection.text
+        );
+    }
+    assert!(
+        projection
+            .text
+            .contains("(+3 more, read with team_history)"),
+        "the rest is counted rather than dropped in silence:\n{}",
+        projection.text
+    );
+    for reference in expected.iter().skip(MAX_PROJECTED_EVIDENCE_REFS) {
+        assert!(
+            !projection.text.contains(&reference.to_string()),
+            "{reference} is past the cap and must not be named:\n{}",
+            projection.text
+        );
+    }
+}
+
 #[test]
 fn a_tight_budget_drops_the_oldest_entries_and_says_so() {
     let (store, root) = fixture_with_chain(8);
