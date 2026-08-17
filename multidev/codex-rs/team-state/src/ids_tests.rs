@@ -15,6 +15,8 @@ fn event_version_route_and_fact_references_round_trip_through_their_printed_form
     assert_eq!(fact_id.to_string().parse(), Ok(fact_id));
     assert_eq!(version_id.event_id(), event_id);
     assert_eq!(route_id.event_id(), event_id);
+    assert_eq!(TeamInstanceId::from_tag(instance.tag()), Ok(instance));
+    assert_eq!(instance.to_string().parse(), Ok(instance));
 }
 
 #[test]

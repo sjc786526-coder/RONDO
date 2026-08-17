@@ -3,6 +3,7 @@ use crate::ids::TeamRevision;
 use crate::model::ProducerState;
 use crate::model::RootState;
 use crate::mutation::LifecycleChange;
+use crate::mutation::LifecycleRequest;
 use crate::mutation::LifecycleTarget;
 use crate::mutation::PublishTarget;
 use crate::store::MAX_HISTORY_LIMIT;
@@ -93,6 +94,40 @@ async fn the_root_is_not_woken_by_its_own_publication() {
     let outcome =
         tokio::time::timeout(Duration::from_millis(200), handle.wake_waiter(root).wait()).await;
     assert!(outcome.is_err(), "the root must not wake itself");
+}
+
+#[test]
+fn a_stable_retry_does_not_bump_wake_generation() {
+    let (handle, _root, worker) = team();
+    publish(&handle, worker, "w1");
+    let generation = handle.wake_generation();
+    let retry = publish(&handle, worker, "w1");
+    assert!(retry.deduplicated);
+    assert_eq!(handle.wake_generation(), generation);
+    assert_eq!(handle.revision(), TeamRevision::from_raw(1));
+}
+
+#[test]
+fn a_same_state_lifecycle_update_does_not_bump_wake_generation() {
+    let (handle, root, worker) = team();
+    let published = publish(&handle, worker, "w1");
+    let generation = handle.wake_generation();
+    let outcome = handle
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![LifecycleTarget {
+                    version_id: published.version_id,
+                    expected_producer_state: ProducerState::Open,
+                    expected_root_state: RootState::Pending,
+                    change: LifecycleChange::SetRootState(RootState::Pending),
+                }],
+            },
+        )
+        .expect("same-state update");
+    assert!(!outcome.changed);
+    assert_eq!(handle.wake_generation(), generation);
+    assert_eq!(handle.revision(), TeamRevision::from_raw(1));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

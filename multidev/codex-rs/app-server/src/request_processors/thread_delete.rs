@@ -47,12 +47,15 @@ impl ThreadRequestProcessor {
         let mut delete_order: Vec<_> = thread_ids.iter().skip(1).rev().copied().collect();
         delete_order.push(thread_id);
 
-        self.thread_store
+        let transition = self.thread_manager.begin_thread_store_transition();
+        let delete_result = self
+            .thread_store
             .delete_threads(StoreDeleteThreadsParams {
                 thread_ids: delete_order.clone(),
             })
-            .await
-            .map_err(thread_store_delete_error)?;
+            .await;
+        transition.finish();
+        delete_result.map_err(thread_store_delete_error)?;
 
         if let Some(state_db) = self.state_db.as_ref() {
             state_db

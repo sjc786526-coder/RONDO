@@ -1091,8 +1091,31 @@ standard/Lite 形态均补回归。
   `tools::parallel` **19/19**、`team::evidence` **6/6**，scoped fix 与 fmt-check 通过；未重跑 541 条合并门禁。
 - **最终独立复验**：静态复核未发现新的 P0/P1/P2 缺陷，并经共享构建锁独立重跑
   `codex-team-state evidence` **23/23** 与重复 call ID/refs 分页产品纵切 **1/1**；结论为验收通过、任务目标完成。
-  详见 `agent_log/2026-08-17-055152-plan042-m3-supplemental-remediation-reverification.md`。
+  详见   `agent_log/2026-08-17-055152-plan042-m3-supplemental-remediation-reverification.md`。
 - **边界**：功能默认关闭，关闭时不注册 `team_evidence`、不改变普通工具结果与 rollout 行为。未建 artifact
   store、全量输出副本、完整 transcript/provenance graph、自动 freshness 验证或跨进程持久化；未运行全
   workspace、Docker、真实 API、本地模型或付费测评。执行细节与环境坑见
   `agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`。
+
+## Multi M-4 —— 协调闭合与可观测性（Plan 043，2026-08-17）
+
+**状态**：首次落地 `e03eef1` 至第四轮整改 `def76b6` 均未通过独立验收（最近未通过报告 `8a3d7eb`）。
+第五轮整改 `da4b7cd` 已通过最终独立验收，Plan 043 / Multi M-4 任务目标完成；当前未合并、未推送，等待用户授权。
+
+- **可用性**：产品分类按显式 `resume_agent` 恢复能力派生——loaded 且 `is_running()` 为 `available`；死驻留与未加载均按 store+history 派生 `recoverable_unloaded` / `unavailable` / `unknown`。store transition 期间一律 `unknown`；snapshot 在现有 gate 下成对采样 generation/active，避免发布原子边界上的双义 epoch。自动 V2 load 仍走单独的 `probe_v2_restore`。
+- **退休**：仅 Root；作者在提交时须为 `unavailable`。store delete 用可跨 await 的 active token 夹住删除；token 存活期间 Root 不得退休。app-server `thread/delete` 走同一协议。退休是独立终态覆盖层。同状态 lifecycle 是 no-op。
+- **可观测性**：dump cursor `instance:revision:epoch:observe_generation:offset`；跨实例 `InstanceReset`；裸 offset 拒绝。Version→Fact 用独立 `VersionFact` 行分页。Agent 关系行同时带 label 与 `thread_id`。
+- **最终独立验收**：静态复核确认 coherent marker 关闭原子边界双义 epoch；经共享构建锁重跑 `codex-team-state --lib` **125/125**、availability **5/5** 与 explicit resume **1/1**。第五轮执行的 M-4 产品纵切 **1/1**、scoped fix 与格式化结果一并采用。未重跑 M-1—M-3、全 workspace、Docker、真实 API 或本地模型。
+- **边界**：功能仍随 `team_state_enabled` 默认关闭。未做自动退休、orphan 清理、escalation、产品 UI、跨进程日志持久化或审计链。执行与审查记录见
+  `agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`、
+  `agent_log/2026-08-17-082629-plan043-m4-independent-acceptance-review.md`、
+  `agent_log/2026-08-17-090000-plan043-m4-acceptance-gap-remediation.md`、
+  `agent_log/2026-08-17-091208-plan043-m4-remediation-independent-rereview.md`、
+  `agent_log/2026-08-17-093500-plan043-m4-rereview-gap-remediation.md`、
+  `agent_log/2026-08-17-094215-plan043-m4-second-remediation-independent-rereview.md`、
+  `agent_log/2026-08-17-100500-plan043-m4-third-remediation.md`、
+  `agent_log/2026-08-17-101517-plan043-m4-third-remediation-independent-rereview.md`、
+  `agent_log/2026-08-17-102800-plan043-m4-fourth-remediation.md`、
+  `agent_log/2026-08-17-103327-plan043-m4-fourth-remediation-independent-rereview.md`、
+  `agent_log/2026-08-17-104430-plan043-m4-fifth-remediation.md`、
+  `agent_log/2026-08-17-105030-plan043-m4-final-independent-acceptance.md`。

@@ -28,15 +28,19 @@ use serde_json::Value as JsonValue;
 
 pub(crate) use evidence::Handler as TeamEvidenceHandler;
 pub(crate) use history::Handler as TeamHistoryHandler;
+pub(crate) use inspect::Handler as TeamInspectHandler;
 pub(crate) use publish::Handler as TeamPublishHandler;
+pub(crate) use retire::Handler as TeamRetireHandler;
 pub(crate) use route::Handler as TeamRouteHandler;
 pub(crate) use route_update::Handler as TeamRouteUpdateHandler;
 pub(crate) use update::Handler as TeamUpdateHandler;
 
 mod evidence;
 mod history;
+mod inspect;
 mod notice;
 mod publish;
+mod retire;
 mod route;
 mod route_update;
 pub(crate) mod spec;
@@ -56,6 +60,8 @@ pub(crate) fn is_team_tool(tool_name: &ToolName) -> bool {
         TeamRouteHandler.tool_name(),
         TeamRouteUpdateHandler.tool_name(),
         TeamEvidenceHandler.tool_name(),
+        TeamRetireHandler.tool_name(),
+        TeamInspectHandler.tool_name(),
     ]
     .iter()
     .any(|team_tool| team_tool.name == tool_name.name)

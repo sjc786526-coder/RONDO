@@ -73,7 +73,7 @@ pub(crate) struct PromptCost<'a> {
 /// usage the provider reported for some earlier request. Tool schemas in particular can be large
 /// and vary per turn, so leaving them out would quietly hand the projection room that does not
 /// exist.
-pub(crate) fn capture_team_projection(
+pub(crate) async fn capture_team_projection(
     session: &Session,
     turn_context: &TurnContext,
     prompt: &PromptCost<'_>,
@@ -84,13 +84,21 @@ pub(crate) fn capture_team_projection(
     let Ok(access) = super::TeamAccess::resolve(session) else {
         return TeamProjectionOutcome::Nothing;
     };
-    let Ok(snapshot) = access
+    let Ok(mut snapshot) = access
         .handle()
         .snapshot_for(access.actor())
         .inspect_err(|err| tracing::debug!(%err, "team projection unavailable"))
     else {
         return TeamProjectionOutcome::Nothing;
     };
+    if snapshot.viewer_role.is_root() {
+        let availability = session
+            .services
+            .agent_control
+            .producer_availability_snapshot()
+            .await;
+        snapshot = snapshot.with_producer_availability(&availability);
+    }
 
     let budget =
         ProjectionBudget::from_remaining_context(remaining_request_context(turn_context, prompt));

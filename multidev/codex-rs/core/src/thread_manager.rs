@@ -67,6 +67,7 @@ use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout::state_db::StateDbHandle;
+use codex_thread_store::DeleteThreadParams;
 use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::LocalThreadStore;
@@ -89,6 +90,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -197,6 +199,38 @@ enum ShutdownOutcome {
 pub struct ThreadManager {
     state: Arc<ThreadManagerState>,
     _test_codex_home_guard: Option<TempCodexHomeGuard>,
+}
+
+/// Keeps a store-backed availability transition open across await.
+///
+/// While any guard is live, producer availability is [`codex_team_state::ProducerAvailability::Unknown`]
+/// and Root retirement is refused. [`Self::finish`] and [`Drop`] both close the transition.
+#[must_use = "the returned guard keeps the store transition active; drop or finish it"]
+pub struct StoreTransitionGuard {
+    state: Arc<ThreadManagerState>,
+    closed: bool,
+}
+
+impl StoreTransitionGuard {
+    /// Close this transition and bump availability generation.
+    pub fn finish(mut self) {
+        self.close();
+    }
+
+    fn close(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let _gate = self.state.lock_availability_transition();
+        self.state.end_store_transition();
+    }
+}
+
+impl Drop for StoreTransitionGuard {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
 pub struct StartThreadOptions {
@@ -330,6 +364,14 @@ pub(crate) struct ThreadManagerState {
     analytics_events_client: Option<AnalyticsEventsClient>,
     // Captures submitted ops for testing purpose when test mode is enabled.
     ops_log: Option<SharedCapturedOps>,
+    /// Monotonic generation for producer availability. Bumped when a thread is loaded, unloaded,
+    /// dies while still mapped, or when a store transition begins/finishes, so a stale retirement
+    /// cannot land after a restore or delete.
+    availability_generation: AtomicU64,
+    /// Serializes availability-changing map/store updates with Root retirement.
+    availability_gate: std::sync::Mutex<()>,
+    /// Count of in-flight store transitions. While non-zero, availability is unknown.
+    store_transition_active: AtomicU64,
 }
 
 pub fn build_models_manager(
@@ -440,6 +482,9 @@ impl ThreadManager {
                 analytics_events_client,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
+                availability_generation: AtomicU64::new(0),
+                availability_gate: std::sync::Mutex::new(()),
+                store_transition_active: AtomicU64::new(0),
             }),
             _test_codex_home_guard: None,
         }
@@ -575,6 +620,9 @@ impl ThreadManager {
                 analytics_events_client: None,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
+                availability_generation: AtomicU64::new(0),
+                availability_gate: std::sync::Mutex::new(()),
+                store_transition_active: AtomicU64::new(0),
             }),
             _test_codex_home_guard: None,
         }
@@ -701,6 +749,60 @@ impl ThreadManager {
 
     pub async fn get_thread(&self, thread_id: ThreadId) -> CodexResult<Arc<CodexThread>> {
         self.state.get_thread(thread_id).await
+    }
+
+    /// Read a stored thread even when it is not currently loaded.
+    pub async fn read_stored_thread(&self, params: ReadThreadParams) -> CodexResult<StoredThread> {
+        self.state.read_stored_thread(params).await
+    }
+
+    /// Permanently drop a stored thread. After this, the same root tree cannot restore it.
+    pub async fn delete_stored_thread(&self, thread_id: ThreadId) -> CodexResult<()> {
+        let transition = self.begin_thread_store_transition();
+        let result = self
+            .state
+            .thread_store
+            .delete_thread(DeleteThreadParams { thread_id })
+            .await
+            .map_err(|err| match err {
+                ThreadStoreError::ThreadNotFound { thread_id } => {
+                    CodexErr::ThreadNotFound(thread_id)
+                }
+                err => {
+                    CodexErr::Fatal(format!("failed to delete stored thread {thread_id}: {err}"))
+                }
+            });
+        transition.finish();
+        result
+    }
+
+    /// Invalidate availability snapshots before an awaitable store mutation.
+    ///
+    /// Hold the returned guard across the await. Availability stays unknown until the guard is
+    /// finished or dropped, so a mid-delete epoch cannot mean both recoverable and unavailable.
+    pub fn begin_thread_store_transition(&self) -> StoreTransitionGuard {
+        let _gate = self.state.lock_availability_transition();
+        self.state.begin_store_transition();
+        StoreTransitionGuard {
+            state: Arc::clone(&self.state),
+            closed: false,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn delete_store_row_for_tests(&self, thread_id: ThreadId) -> CodexResult<()> {
+        self.state
+            .thread_store
+            .delete_thread(DeleteThreadParams { thread_id })
+            .await
+            .map_err(|err| match err {
+                ThreadStoreError::ThreadNotFound { thread_id } => {
+                    CodexErr::ThreadNotFound(thread_id)
+                }
+                err => {
+                    CodexErr::Fatal(format!("failed to delete stored thread {thread_id}: {err}"))
+                }
+            })
     }
 
     /// Updates metadata for loaded and cold threads through one entrypoint.
@@ -970,7 +1072,7 @@ impl ThreadManager {
     /// as `Arc<CodexThread>`, it is possible that other references to it exist elsewhere.
     /// Returns the thread if the thread was found and removed.
     pub async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
-        self.state.threads.write().await.remove(thread_id)
+        self.state.remove_thread(thread_id).await
     }
 
     /// Tries to shut down all tracked threads concurrently within the provided timeout.
@@ -1008,8 +1110,16 @@ impl ThreadManager {
         }
 
         let mut tracked_threads = self.state.threads.write().await;
+        let _gate = self.state.lock_availability_transition();
+        let mut removed = false;
         for thread_id in &report.completed {
-            tracked_threads.remove(thread_id);
+            if tracked_threads.remove(thread_id).is_some() {
+                removed = true;
+            }
+        }
+        drop(tracked_threads);
+        if removed {
+            self.state.bump_availability_generation();
         }
 
         report
@@ -1199,6 +1309,45 @@ impl ThreadManager {
 }
 
 impl ThreadManagerState {
+    pub(crate) fn availability_generation(&self) -> u64 {
+        self.availability_generation.load(Ordering::SeqCst)
+    }
+
+    /// Read the externally observable availability marker without interleaving a gated mutation.
+    pub(crate) fn availability_marker(&self) -> (u64, bool) {
+        let _gate = self.lock_availability_transition();
+        (
+            self.availability_generation(),
+            self.store_transition_in_progress(),
+        )
+    }
+
+    pub(crate) fn bump_availability_generation(&self) {
+        self.availability_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn store_transition_in_progress(&self) -> bool {
+        self.store_transition_active.load(Ordering::SeqCst) > 0
+    }
+
+    fn begin_store_transition(&self) {
+        self.store_transition_active.fetch_add(1, Ordering::SeqCst);
+        self.bump_availability_generation();
+    }
+
+    fn end_store_transition(&self) {
+        if self.store_transition_active.load(Ordering::SeqCst) > 0 {
+            self.store_transition_active.fetch_sub(1, Ordering::SeqCst);
+        }
+        self.bump_availability_generation();
+    }
+
+    pub(crate) fn lock_availability_transition(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.availability_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     pub(crate) fn agent_graph_store(&self) -> Option<Arc<dyn AgentGraphStore>> {
         self.agent_graph_store.clone()
     }
@@ -1241,6 +1390,30 @@ impl ThreadManagerState {
         match threads.get(&thread_id) {
             Some(thread) if !thread.session_source.is_internal() => Ok(thread.clone()),
             Some(_) | None => Err(CodexErr::ThreadNotFound(thread_id)),
+        }
+    }
+
+    /// Drop a map-resident thread whose submit channel is already closed.
+    ///
+    /// Product availability treats this as unloaded, then classifies from stored resume material.
+    /// The gated bump versions the change so a dump/retire snapshot taken while it looked loaded
+    /// cannot be reused after the runtime can no longer accept tasks.
+    pub(crate) async fn drop_dead_resident(&self, thread_id: ThreadId) {
+        let mut threads = self.threads.write().await;
+        let Some(thread) = threads.get(&thread_id) else {
+            return;
+        };
+        if thread.is_running() {
+            return;
+        }
+        let _gate = self.lock_availability_transition();
+        if threads
+            .get(&thread_id)
+            .is_some_and(|thread| !thread.is_running())
+        {
+            threads.remove(&thread_id);
+            drop(threads);
+            self.bump_availability_generation();
         }
     }
 
@@ -1308,7 +1481,13 @@ impl ThreadManagerState {
 
     /// Remove a thread from the manager by ID, returning it when present.
     pub(crate) async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
-        self.threads.write().await.remove(thread_id)
+        let mut threads = self.threads.write().await;
+        let _gate = self.lock_availability_transition();
+        let removed = threads.remove(thread_id);
+        if removed.is_some() {
+            self.bump_availability_generation();
+        }
+        removed
     }
 
     pub(crate) async fn effective_multi_agent_version_for_spawn(
@@ -1657,7 +1836,10 @@ impl ThreadManagerState {
                         thread,
                     });
                 }
+                let _gate = self.lock_availability_transition();
                 threads.remove(&resumed.conversation_id);
+                drop(threads);
+                self.bump_availability_generation();
             }
         }
         let user_instructions = self
@@ -1768,6 +1950,7 @@ impl ThreadManagerState {
 
         {
             let mut threads = self.threads.write().await;
+            let _gate = self.lock_availability_transition();
             if let std::collections::hash_map::Entry::Vacant(e) = threads.entry(thread_id) {
                 let thread = Arc::new(CodexThread::new(
                     session,
@@ -1777,6 +1960,8 @@ impl ThreadManagerState {
                     session_source,
                 ));
                 e.insert(thread.clone());
+                drop(threads);
+                self.bump_availability_generation();
                 return Ok(NewThread {
                     thread_id,
                     thread,

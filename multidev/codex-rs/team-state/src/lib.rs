@@ -14,16 +14,21 @@
 //! Nothing here is persisted across processes; a team instance lives exactly as long as its root
 //! tree. Members unloaded and reloaded inside that tree rejoin the same instance.
 
+mod availability;
 mod evidence;
 mod handle;
 mod ids;
 mod model;
 mod mutation;
+mod observe;
 mod render;
 mod store;
 mod view;
 mod wake;
 
+pub use availability::AvailabilityEpoch;
+pub use availability::AvailabilitySnapshot;
+pub use availability::ProducerAvailability;
 pub use evidence::FactCategory;
 pub use evidence::FactView;
 pub use evidence::NotedObservation;
@@ -44,6 +49,7 @@ pub use model::DeliveryState;
 pub use model::Participant;
 pub use model::ParticipantRole;
 pub use model::ProducerState;
+pub use model::RetirementRecord;
 pub use model::RootState;
 pub use model::RouteDuty;
 pub use model::TeamEvent;
@@ -60,12 +66,25 @@ pub use mutation::LifecycleTarget;
 pub use mutation::PublishOutcome;
 pub use mutation::PublishRequest;
 pub use mutation::PublishTarget;
+pub use mutation::RetireOutcome;
+pub use mutation::RetireRequest;
 pub use mutation::RouteDispatch;
 pub use mutation::RouteIntent;
 pub use mutation::RouteOutcome;
 pub use mutation::RouteRequest;
 pub use mutation::Submission;
 pub use mutation::TeamError;
+pub use observe::ChangeKind;
+pub use observe::ChangeLogPage;
+pub use observe::ChangeLogView;
+pub use observe::DumpCursor;
+pub use observe::DumpEntry;
+pub use observe::MAX_OBSERVE_LIMIT;
+pub use observe::ObserveQuery;
+pub use observe::PublicationStats;
+pub use observe::PublicationStatsPage;
+pub use observe::TeamDumpPage;
+pub use observe::WakeDecisionView;
 pub use render::MAX_PROJECTION_TOKENS;
 pub use render::ProjectionBudget;
 pub use render::ProjectionOutcome;

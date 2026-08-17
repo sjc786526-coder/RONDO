@@ -1,6 +1,7 @@
 //! Tool specs for the team world state surface.
 
 use codex_team_state::MAX_HISTORY_LIMIT;
+use codex_team_state::MAX_OBSERVE_LIMIT;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
@@ -293,6 +294,138 @@ pub(crate) fn create_team_evidence_tool() -> ToolSpec {
     })
 }
 
+pub(crate) fn create_team_retire_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "version_id".to_string(),
+            JsonSchema::string(Some(
+                "The still-open version whose producer can no longer act.".to_string(),
+            )),
+        ),
+        (
+            "expect_producer_state".to_string(),
+            JsonSchema::string_enum(
+                vec![json!("open"), json!("closed")],
+                Some("The producer state you believe this version currently has.".to_string()),
+            ),
+        ),
+        (
+            "expect_root_state".to_string(),
+            JsonSchema::string_enum(
+                vec![json!("pending"), json!("tracking"), json!("resolved")],
+                Some("The root state you believe this version currently has.".to_string()),
+            ),
+        ),
+        (
+            "expect_availability".to_string(),
+            JsonSchema::string_enum(
+                vec![
+                    json!("available"),
+                    json!("recoverable_unloaded"),
+                    json!("unavailable"),
+                    json!("unknown"),
+                ],
+                Some(
+                    "The producer availability shown in the active world index or dump you acted on."
+                        .to_string(),
+                ),
+            ),
+        ),
+        (
+            "expect_availability_epoch".to_string(),
+            JsonSchema::integer(Some(
+                "The availability_epoch shown in the active world index or dump you acted on."
+                    .to_string(),
+            )),
+        ),
+        (
+            "reason".to_string(),
+            JsonSchema::string(Some(
+                "Why you are retiring this version. Recorded with the retirement; it does not close the author's item."
+                    .to_string(),
+            )),
+        ),
+        (
+            "based_on_revision".to_string(),
+            JsonSchema::integer(Some(
+                "The team revision shown in the active world index you acted on.".to_string(),
+            )),
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "team_retire".to_string(),
+        description:
+            "Root only. Retire one still-open version after the harness has confirmed its author is truly unavailable in this team instance. Retirement is an independent terminal: it does not pretend the author closed the item, does not change root attention, and does not touch routes or other versions. Recoverable unloaded, currently available, or unknown producers are refused."
+                .to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec![
+                "version_id".to_string(),
+                "expect_producer_state".to_string(),
+                "expect_root_state".to_string(),
+                "expect_availability".to_string(),
+                "expect_availability_epoch".to_string(),
+                "reason".to_string(),
+            ]),
+            Some(false.into()),
+        ),
+        output_schema: Some(retire_output_schema()),
+    })
+}
+
+pub(crate) fn create_team_inspect_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "action".to_string(),
+            JsonSchema::string_enum(
+                vec![json!("dump"), json!("log"), json!("stats")],
+                Some(
+                    "`dump` is a bounded page of coordination metadata; `log` is the revision-ordered change log; `stats` is publication volume recomputed from canonical authored fields."
+                        .to_string(),
+                ),
+            ),
+        ),
+        (
+            "limit".to_string(),
+            JsonSchema::integer(Some(format!(
+                "Maximum entries to return, capped at {MAX_OBSERVE_LIMIT}."
+            ))),
+        ),
+        (
+            "offset".to_string(),
+            JsonSchema::integer(Some(
+                "Start the log or stats page at this zero-based offset. Pass the returned next_offset to continue."
+                    .to_string(),
+            )),
+        ),
+        (
+            "cursor".to_string(),
+            JsonSchema::string(Some(
+                "Pass the `next_cursor` from a previous dump page. A cursor from a different team instance, revision, availability snapshot or observe generation is refused."
+                    .to_string(),
+            )),
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "team_inspect".to_string(),
+        description:
+            "Root only. Explain the current team state without copying tool output, transcripts or private context. Dump pages are frozen to one revision and availability snapshot; publication stats count unique committed versions and unicode scalar values in event title (opening version), summary and optional handoff."
+                .to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec!["action".to_string()]),
+            Some(false.into()),
+        ),
+        output_schema: Some(inspect_output_schema()),
+    })
+}
+
 fn publish_output_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -399,5 +532,33 @@ fn history_output_schema() -> serde_json::Value {
         },
         "required": ["revision", "total_events", "omitted_events", "next_before", "events"],
         "additionalProperties": false
+    })
+}
+
+fn retire_output_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "revision": { "type": "integer" },
+            "version_id": { "type": "string" },
+            "retired_by": { "type": "string" },
+            "reason": { "type": "string" },
+            "availability": { "type": "string" },
+            "availability_epoch": { "type": "integer" },
+            "deduplicated": { "type": "boolean" }
+        },
+        "required": ["revision", "version_id", "retired_by", "reason", "availability", "availability_epoch", "deduplicated"],
+        "additionalProperties": false
+    })
+}
+
+fn inspect_output_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "action": { "type": "string" }
+        },
+        "required": ["action"],
+        "additionalProperties": true
     })
 }

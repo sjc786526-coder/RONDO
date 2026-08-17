@@ -1214,3 +1214,37 @@ fn a_stale_call_against_a_terminal_state_gets_the_current_state_back() {
         }
     );
 }
+
+#[test]
+fn a_same_state_root_update_is_a_stable_noop() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let published = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("finding", "worker found something"),
+        )
+        .expect("worker may publish");
+    let revision = store.revision();
+    let log_len = store.change_log.len();
+    let outcome = store
+        .update_lifecycle(
+            root,
+            LifecycleRequest {
+                targets: vec![set_root_state(
+                    published.version_id,
+                    RootState::Pending,
+                    RootState::Pending,
+                )],
+            },
+        )
+        .expect("same-state update is a no-op, not a fake mutation");
+    assert!(!outcome.changed);
+    assert_eq!(outcome.revision, revision);
+    assert_eq!(store.revision(), revision);
+    assert_eq!(store.change_log.len(), log_len);
+}

@@ -4,6 +4,7 @@
 //! what makes the state canonical: there is no second copy to reconcile, and nothing about it
 //! depends on which members happen to be loaded right now.
 
+use crate::availability::AvailabilitySnapshot;
 use crate::evidence::FactView;
 use crate::evidence::NotedObservation;
 use crate::ids::FactId;
@@ -19,11 +20,17 @@ use crate::mutation::LifecycleOutcome;
 use crate::mutation::LifecycleRequest;
 use crate::mutation::PublishOutcome;
 use crate::mutation::PublishRequest;
+use crate::mutation::RetireOutcome;
+use crate::mutation::RetireRequest;
 use crate::mutation::RouteDispatch;
 use crate::mutation::RouteOutcome;
 use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::mutation::TeamError;
+use crate::observe::ChangeLogPage;
+use crate::observe::DumpCursor;
+use crate::observe::ObserveQuery;
+use crate::observe::TeamDumpPage;
 use crate::store::TeamStore;
 use crate::view::HistoryPage;
 use crate::view::HistoryQuery;
@@ -86,17 +93,29 @@ impl TeamStateHandle {
         self.with_store(|store| store.participant(thread_id).cloned())
     }
 
+    pub fn participants(&self) -> Vec<Participant> {
+        self.with_store(|store| store.participants())
+    }
+
+    /// The generation waiters observe. It only advances when a mutation actually changed canonical
+    /// state, so a stable retry cannot look like new work.
+    pub fn wake_generation(&self) -> u64 {
+        *self.change_tx.borrow()
+    }
+
     pub fn publish(
         &self,
         actor: ThreadId,
         submission: &Submission,
         request: PublishRequest,
     ) -> Result<PublishOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.publish(actor, submission, request));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
-        outcome
+        self.with_store(|store| {
+            let outcome = store.publish(actor, submission, request)?;
+            if !outcome.deduplicated {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     pub fn update_lifecycle(
@@ -104,11 +123,13 @@ impl TeamStateHandle {
         actor: ThreadId,
         request: LifecycleRequest,
     ) -> Result<LifecycleOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.update_lifecycle(actor, request));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
-        outcome
+        self.with_store(|store| {
+            let outcome = store.update_lifecycle(actor, request)?;
+            if outcome.changed {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     /// Commit a route: the visibility grant, and the assignment when work is intended.
@@ -121,11 +142,13 @@ impl TeamStateHandle {
         submission: &Submission,
         request: RouteRequest,
     ) -> Result<RouteOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.route(actor, submission, request));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
-        outcome
+        self.with_store(|store| {
+            let outcome = store.route(actor, submission, request)?;
+            if !outcome.deduplicated {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     pub fn record_delivery(
@@ -134,11 +157,13 @@ impl TeamStateHandle {
         route_id: RouteId,
         result: DeliveryResult,
     ) -> Result<DeliveryOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.record_delivery(actor, route_id, result));
-        if outcome.is_ok() {
-            self.notify_change();
-        }
-        outcome
+        self.with_store(|store| {
+            let outcome = store.record_delivery(actor, route_id, result)?;
+            if outcome.changed {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     pub fn end_assignment(
@@ -146,11 +171,63 @@ impl TeamStateHandle {
         actor: ThreadId,
         route_id: RouteId,
     ) -> Result<EndAssignmentOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.end_assignment(actor, route_id));
-        if outcome.is_ok() {
+        self.with_store(|store| {
+            let outcome = store.end_assignment(actor, route_id)?;
             self.notify_change();
-        }
-        outcome
+            Ok(outcome)
+        })
+    }
+
+    pub fn retire(
+        &self,
+        actor: ThreadId,
+        submission: &Submission,
+        request: RetireRequest,
+        availability: &AvailabilitySnapshot,
+        live_epoch: impl FnOnce() -> crate::availability::AvailabilityEpoch,
+    ) -> Result<RetireOutcome, TeamError> {
+        self.with_store(|store| {
+            let outcome = store.retire(actor, submission, request, availability, live_epoch())?;
+            if !outcome.deduplicated {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
+    }
+
+    pub fn dump(
+        &self,
+        actor: ThreadId,
+        availability: &AvailabilitySnapshot,
+        query: ObserveQuery,
+        cursor: Option<DumpCursor>,
+    ) -> Result<TeamDumpPage, TeamError> {
+        self.with_store(|store| {
+            let wake_generation = *self.change_tx.borrow();
+            store.dump(actor, availability, wake_generation, query, cursor)
+        })
+    }
+
+    pub fn change_log(
+        &self,
+        actor: ThreadId,
+        query: ObserveQuery,
+    ) -> Result<ChangeLogPage, TeamError> {
+        self.with_store(|store| {
+            let wake_generation = *self.change_tx.borrow();
+            store.change_log(actor, wake_generation, query)
+        })
+    }
+
+    pub fn publication_stats(
+        &self,
+        actor: ThreadId,
+        query: ObserveQuery,
+    ) -> Result<crate::observe::PublicationStatsPage, TeamError> {
+        self.with_store(|store| {
+            let wake_generation = *self.change_tx.borrow();
+            store.publication_stats(actor, wake_generation, query)
+        })
     }
 
     pub fn route_dispatch(

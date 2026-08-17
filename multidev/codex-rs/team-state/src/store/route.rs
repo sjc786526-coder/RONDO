@@ -26,6 +26,9 @@ use crate::mutation::RouteOutcome;
 use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::mutation::TeamError;
+use crate::observe::ChangeKind;
+use crate::observe::ChangeRecord;
+use crate::observe::StoredWake;
 use codex_protocol::ThreadId;
 
 impl TeamStore {
@@ -69,7 +72,9 @@ impl TeamStore {
                 }
                 match existing.outcome {
                     CommittedOutcome::Route { route_id } => Some(route_id),
-                    CommittedOutcome::Publish(_) => return Err(TeamError::RetryIdentityReused),
+                    CommittedOutcome::Publish(_) | CommittedOutcome::Retire(_) => {
+                        return Err(TeamError::RetryIdentityReused);
+                    }
                 }
             }
             None => None,
@@ -140,9 +145,26 @@ impl TeamStore {
         // An assignment is a claim on the target's attention, so a member parked in a team wait
         // learns about it the same way the root does. An informational route deliberately does not:
         // being told something must never be dressed up as being given work.
-        if matches!(request.intent, RouteIntent::Assign) {
+        let wake = if matches!(request.intent, RouteIntent::Assign) {
             self.wake.signal(request.target);
-        }
+            StoredWake::Signalled {
+                participant: request.target,
+                rule: "assignment_wakes_target",
+            }
+        } else {
+            StoredWake::None {
+                rule: "informational_route_does_not_wake",
+            }
+        };
+        self.push_change(ChangeRecord {
+            revision,
+            actor,
+            kind: ChangeKind::Route,
+            target: route_id.to_string(),
+            before: None,
+            after: Some(format!("duty={duty}")),
+            wake,
+        });
 
         // Read the committed route back rather than re-deriving it, so the dispatch reports the note
         // exactly as it was stored, clamp and all.
@@ -210,11 +232,23 @@ impl TeamStore {
             });
         }
 
+        let before = route.delivery().label().to_string();
         let revision = self.revision.next();
         let event = &mut self.events[event_index];
         event.routes[route_index].delivery = next.clone();
         event.last_changed_at = revision;
         self.revision = revision;
+        self.push_change(ChangeRecord {
+            revision,
+            actor,
+            kind: ChangeKind::Delivery,
+            target: route_id.to_string(),
+            before: Some(before),
+            after: Some(next.label().to_string()),
+            wake: StoredWake::None {
+                rule: "delivery_does_not_wake",
+            },
+        });
         Ok(DeliveryOutcome {
             route_id,
             delivery: next,
@@ -259,9 +293,23 @@ impl TeamStore {
         let event_id = event.id();
         self.revision = revision;
         // A member finishing what it was given is a change the root coordinates on.
-        if !role.is_root() {
+        let wake = if !role.is_root() {
             self.wake_root();
-        }
+            self.root_wake("member_ended_assignment")
+        } else {
+            StoredWake::None {
+                rule: "root_does_not_self_wake",
+            }
+        };
+        self.push_change(ChangeRecord {
+            revision,
+            actor,
+            kind: ChangeKind::EndAssignment,
+            target: route_id.to_string(),
+            before: Some("duty=assigned".to_string()),
+            after: Some("duty=ended".to_string()),
+            wake,
+        });
 
         Ok(EndAssignmentOutcome {
             route_id,

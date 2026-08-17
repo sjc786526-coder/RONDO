@@ -5,7 +5,7 @@ pub(crate) const TEAM_PROTOCOL_CLOSE_TAG: &str = "</team_protocol>";
 
 /// Bumped whenever the wording below changes, so the fragment is re-emitted rather than silently
 /// drifting from what the model was told earlier in the thread.
-const TEAM_PROTOCOL_VERSION: u32 = 3;
+const TEAM_PROTOCOL_VERSION: u32 = 4;
 
 const TEAM_PROTOCOL_BODY: &str = "\
 This team keeps a canonical world state owned by the harness, not by your memory.
@@ -31,6 +31,14 @@ with `team_history` rather than working from the notice.
 not choose or list them — publishing attaches whatever you have observed since your last publish. \
 `team_evidence` reads one back. It shows what was seen at that moment, not that it is still true, \
 and it may report that the observation is no longer available.
+- Producer availability is derived by the harness. `available` means the author can receive work \
+now; `recoverable_unloaded` means it is not loaded but can be restored in this team; `unavailable` \
+means it cannot be restored here; `unknown` means the facts were missing or contradictory. Only the \
+root may `team_retire` a still-open version, and only when availability is `unavailable`. \
+Retirement is not a producer close: it only ends that version's producer-open activity reason.
+- The root explains the current team with `team_inspect`: `dump` for a bounded page of coordination \
+metadata, `log` for the revision-ordered change log, and `stats` for publication volume. None of \
+them copy tool output, transcripts or private context.
 - Submissions are incremental. Only what you name changes; everything else keeps its current state. \
 You never need to restate active items to keep them alive.
 - The active world index appended to each request is the current truth. It is regenerated every \

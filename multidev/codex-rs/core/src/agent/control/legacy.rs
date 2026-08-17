@@ -25,7 +25,9 @@ impl AgentControl {
         };
         let _ = state.remove_thread(&agent_id).await;
         self.forget_v2_residency(agent_id);
+        let _gate = state.lock_availability_transition();
         self.state.release_spawned_thread(agent_id);
+        state.bump_availability_generation();
         result
     }
 
