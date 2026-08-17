@@ -3,6 +3,8 @@ use super::*;
 use crate::agent::role::apply_role_to_config_for_multi_agent_v2;
 use crate::config::PermissionProfileSnapshot;
 use codex_extension_api::ExtensionDataInit;
+use codex_protocol::error::CodexErrorDetails;
+use codex_thread_store::StoredThread;
 
 const AGENT_NAMES: &str = include_str!("../agent_names.txt");
 
@@ -20,6 +22,20 @@ struct SpawnAgentThreadInheritance {
 enum SpawnInitialInput {
     UserInput(Vec<UserInput>),
     InterAgentCommunication(InterAgentCommunication, AgentCommunicationContext),
+}
+
+/// Payload needed to actually resume a restorable V2 thread.
+pub(crate) struct V2Restorable {
+    stored_thread: StoredThread,
+    history: Vec<RolloutItem>,
+}
+
+/// Result of asking the same restore gate `ensure_v2_agent_loaded` uses, without actually loading.
+pub(crate) enum V2RestoreProbe {
+    Loaded,
+    Restorable(Box<V2Restorable>),
+    Unrecoverable,
+    Failed(CodexErr),
 }
 
 fn default_agent_nickname_list() -> Vec<&'static str> {
@@ -186,6 +202,7 @@ impl AgentControl {
                 )?;
                 metadata.agent_id = Some(thread_id);
                 reservation.commit(metadata);
+                state.bump_availability_generation();
                 Ok::<(), CodexErr>(())
             }
             .await;
@@ -247,42 +264,87 @@ impl AgentControl {
         .await
     }
 
+    /// Ask whether this thread is loaded, restorable through the V2 resume gate, or gone.
+    ///
+    /// Classification and `ensure_v2_agent_loaded` share this probe so an orphan the restore path
+    /// would reject cannot be reported as recoverable.
+    pub(crate) async fn probe_v2_restore(
+        &self,
+        state: &Arc<ThreadManagerState>,
+        thread_id: ThreadId,
+    ) -> V2RestoreProbe {
+        if state.get_thread(thread_id).await.is_ok() {
+            return V2RestoreProbe::Loaded;
+        }
+        if self.state.agent_metadata_for_thread(thread_id).is_none() {
+            return V2RestoreProbe::Unrecoverable;
+        }
+        let stored_thread = match state
+            .read_stored_thread(ReadThreadParams {
+                thread_id,
+                include_archived: true,
+                include_history: false,
+            })
+            .await
+        {
+            Ok(stored_thread) => stored_thread,
+            Err(err) if matches!(err.details(), CodexErrorDetails::ThreadNotFound(_)) => {
+                return V2RestoreProbe::Unrecoverable;
+            }
+            Err(err) => return V2RestoreProbe::Failed(err),
+        };
+        let history =
+            match load_agent_model_context(state, thread_id, stored_thread.history_mode).await {
+                Ok(Some(history)) => history,
+                Ok(None) => return V2RestoreProbe::Unrecoverable,
+                Err(err) if matches!(err.details(), CodexErrorDetails::ThreadNotFound(_)) => {
+                    return V2RestoreProbe::Unrecoverable;
+                }
+                Err(err) => return V2RestoreProbe::Failed(err),
+            };
+        let initial_history = InitialHistory::Resumed(ResumedHistory {
+            conversation_id: thread_id,
+            history: Arc::new(history.clone()),
+            rollout_path: stored_thread.rollout_path.clone(),
+        });
+        if initial_history.get_multi_agent_version() != Some(MultiAgentVersion::V2) {
+            return V2RestoreProbe::Unrecoverable;
+        }
+        V2RestoreProbe::Restorable(Box::new(V2Restorable {
+            stored_thread,
+            history,
+        }))
+    }
+
     pub(crate) async fn ensure_v2_agent_loaded(
         &self,
         mut config: Config,
         thread_id: ThreadId,
     ) -> CodexResult<()> {
         let state = self.upgrade()?;
-        if state.get_thread(thread_id).await.is_ok() {
-            self.touch_loaded_v2_residency(&state, thread_id).await;
-            return Ok(());
+        let stored_thread;
+        let history;
+        match self.probe_v2_restore(&state, thread_id).await {
+            V2RestoreProbe::Loaded => {
+                self.touch_loaded_v2_residency(&state, thread_id).await;
+                return Ok(());
+            }
+            V2RestoreProbe::Unrecoverable => return Err(CodexErr::ThreadNotFound(thread_id)),
+            V2RestoreProbe::Failed(err) => return Err(err),
+            V2RestoreProbe::Restorable(restorable) => {
+                stored_thread = restorable.stored_thread;
+                history = restorable.history;
+            }
         }
-        if self.state.agent_metadata_for_thread(thread_id).is_none() {
-            return Err(CodexErr::ThreadNotFound(thread_id));
-        }
-
-        let stored_thread = state
-            .read_stored_thread(ReadThreadParams {
-                thread_id,
-                include_archived: true,
-                include_history: false,
-            })
-            .await?;
         let stored_model = stored_thread.model.clone();
         let stored_model_provider = stored_thread.model_provider.clone();
         let stored_source = stored_thread.source.clone();
         let stored_parent_thread_id = stored_thread.parent_thread_id;
-        let history = load_agent_model_context(&state, thread_id, stored_thread.history_mode)
-            .await?
-            .ok_or(CodexErr::ThreadNotFound(thread_id))?;
         let initial_history = InitialHistory::Resumed(ResumedHistory {
             conversation_id: thread_id,
             history: Arc::new(history),
             rollout_path: stored_thread.rollout_path,
         });
-        if initial_history.get_multi_agent_version() != Some(MultiAgentVersion::V2) {
-            return Err(CodexErr::ThreadNotFound(thread_id));
-        }
         let (session_source, _) = initial_history
             .get_resumed_session_sources()
             .unwrap_or((stored_source, None));

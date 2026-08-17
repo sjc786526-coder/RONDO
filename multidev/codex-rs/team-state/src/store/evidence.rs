@@ -90,6 +90,7 @@ impl TeamStore {
                 tool: pending.noted.tool,
             },
         ));
+        self.observe_generation = self.observe_generation.saturating_add(1);
         Some(id)
     }
 

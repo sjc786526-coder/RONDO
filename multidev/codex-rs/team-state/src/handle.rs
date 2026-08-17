@@ -30,7 +30,6 @@ use crate::mutation::TeamError;
 use crate::observe::ChangeLogPage;
 use crate::observe::DumpCursor;
 use crate::observe::ObserveQuery;
-use crate::observe::PublicationStats;
 use crate::observe::TeamDumpPage;
 use crate::store::TeamStore;
 use crate::view::HistoryPage;
@@ -110,9 +109,13 @@ impl TeamStateHandle {
         submission: &Submission,
         request: PublishRequest,
     ) -> Result<PublishOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.publish(actor, submission, request));
-        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| !outcome.deduplicated));
-        outcome
+        self.with_store(|store| {
+            let outcome = store.publish(actor, submission, request)?;
+            if !outcome.deduplicated {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     pub fn update_lifecycle(
@@ -120,9 +123,13 @@ impl TeamStateHandle {
         actor: ThreadId,
         request: LifecycleRequest,
     ) -> Result<LifecycleOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.update_lifecycle(actor, request));
-        self.notify_if_changed(outcome.is_ok());
-        outcome
+        self.with_store(|store| {
+            let outcome = store.update_lifecycle(actor, request)?;
+            if outcome.changed {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     /// Commit a route: the visibility grant, and the assignment when work is intended.
@@ -135,9 +142,13 @@ impl TeamStateHandle {
         submission: &Submission,
         request: RouteRequest,
     ) -> Result<RouteOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.route(actor, submission, request));
-        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| !outcome.deduplicated));
-        outcome
+        self.with_store(|store| {
+            let outcome = store.route(actor, submission, request)?;
+            if !outcome.deduplicated {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     pub fn record_delivery(
@@ -146,9 +157,13 @@ impl TeamStateHandle {
         route_id: RouteId,
         result: DeliveryResult,
     ) -> Result<DeliveryOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.record_delivery(actor, route_id, result));
-        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| outcome.changed));
-        outcome
+        self.with_store(|store| {
+            let outcome = store.record_delivery(actor, route_id, result)?;
+            if outcome.changed {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     pub fn end_assignment(
@@ -156,9 +171,11 @@ impl TeamStateHandle {
         actor: ThreadId,
         route_id: RouteId,
     ) -> Result<EndAssignmentOutcome, TeamError> {
-        let outcome = self.with_store(|store| store.end_assignment(actor, route_id));
-        self.notify_if_changed(outcome.is_ok());
-        outcome
+        self.with_store(|store| {
+            let outcome = store.end_assignment(actor, route_id)?;
+            self.notify_change();
+            Ok(outcome)
+        })
     }
 
     pub fn retire(
@@ -167,11 +184,15 @@ impl TeamStateHandle {
         submission: &Submission,
         request: RetireRequest,
         availability: &AvailabilitySnapshot,
+        live_epoch: impl FnOnce() -> crate::availability::AvailabilityEpoch,
     ) -> Result<RetireOutcome, TeamError> {
-        let outcome =
-            self.with_store(|store| store.retire(actor, submission, request, availability));
-        self.notify_if_changed(outcome.as_ref().is_ok_and(|outcome| !outcome.deduplicated));
-        outcome
+        self.with_store(|store| {
+            let outcome = store.retire(actor, submission, request, availability, live_epoch())?;
+            if !outcome.deduplicated {
+                self.notify_change();
+            }
+            Ok(outcome)
+        })
     }
 
     pub fn dump(
@@ -181,8 +202,10 @@ impl TeamStateHandle {
         query: ObserveQuery,
         cursor: Option<DumpCursor>,
     ) -> Result<TeamDumpPage, TeamError> {
-        let wake_generation = self.wake_generation();
-        self.with_store(|store| store.dump(actor, availability, wake_generation, query, cursor))
+        self.with_store(|store| {
+            let wake_generation = *self.change_tx.borrow();
+            store.dump(actor, availability, wake_generation, query, cursor)
+        })
     }
 
     pub fn change_log(
@@ -190,12 +213,21 @@ impl TeamStateHandle {
         actor: ThreadId,
         query: ObserveQuery,
     ) -> Result<ChangeLogPage, TeamError> {
-        let wake_generation = self.wake_generation();
-        self.with_store(|store| store.change_log(actor, wake_generation, query))
+        self.with_store(|store| {
+            let wake_generation = *self.change_tx.borrow();
+            store.change_log(actor, wake_generation, query)
+        })
     }
 
-    pub fn publication_stats(&self, actor: ThreadId) -> Result<Vec<PublicationStats>, TeamError> {
-        self.with_store(|store| store.publication_stats(actor))
+    pub fn publication_stats(
+        &self,
+        actor: ThreadId,
+        query: ObserveQuery,
+    ) -> Result<crate::observe::PublicationStatsPage, TeamError> {
+        self.with_store(|store| {
+            let wake_generation = *self.change_tx.borrow();
+            store.publication_stats(actor, wake_generation, query)
+        })
     }
 
     pub fn route_dispatch(
@@ -246,12 +278,6 @@ impl TeamStateHandle {
 
     pub fn consume_wake(&self, participant: ThreadId) -> bool {
         self.with_store(|store| store.consume_wake(participant))
-    }
-
-    fn notify_if_changed(&self, changed: bool) {
-        if changed {
-            self.notify_change();
-        }
     }
 
     fn notify_change(&self) {

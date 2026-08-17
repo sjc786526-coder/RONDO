@@ -62,6 +62,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 DumpCursor {
                     revision: page.revision,
                     availability_epoch: page.availability_epoch,
+                    observe_generation: page.observe_generation,
                     offset,
                 }
                 .encode()
@@ -72,6 +73,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 "revision": page.revision.get(),
                 "wake_generation": page.wake_generation,
                 "availability_epoch": page.availability_epoch.get(),
+                "observe_generation": page.observe_generation,
                 "entries": page.entries,
                 "total_entries": page.total_entries,
                 "next_cursor": next_cursor,
@@ -95,9 +97,9 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
             })
         }
         InspectAction::Stats => {
-            let rows = access
+            let page = access
                 .handle()
-                .publication_stats(access.actor())
+                .publication_stats(access.actor(), query)
                 .map_err(team_error)?;
             serde_json::json!({
                 "action": "stats",
@@ -107,7 +109,12 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                     "version_summary",
                     "version_handoff"
                 ],
-                "participants": rows,
+                "revision": page.revision.get(),
+                "wake_generation": page.wake_generation,
+                "participants": page.entries,
+                "total_entries": page.total_entries,
+                "next_offset": page.next_offset,
+                "limit": MAX_OBSERVE_LIMIT,
             })
         }
     };

@@ -30,11 +30,14 @@ impl TeamStore {
     ) -> Result<TeamDumpPage, TeamError> {
         self.require_root(actor)?;
         if let Some(cursor) = cursor
-            && (cursor.revision != self.revision || cursor.availability_epoch != availability.epoch)
+            && (cursor.revision != self.revision
+                || cursor.availability_epoch != availability.epoch
+                || cursor.observe_generation != self.observe_generation)
         {
             return Err(TeamError::DumpCursorStale {
                 current_revision: self.revision,
                 current_epoch: availability.epoch,
+                current_observe_generation: self.observe_generation,
             });
         }
 
@@ -53,6 +56,7 @@ impl TeamStore {
             revision: self.revision,
             wake_generation,
             availability_epoch: availability.epoch,
+            observe_generation: self.observe_generation,
             entries: page,
             total_entries,
             next_offset,
@@ -109,9 +113,28 @@ impl TeamStore {
         })
     }
 
-    pub fn publication_stats(&self, actor: ThreadId) -> Result<Vec<PublicationStats>, TeamError> {
+    pub fn publication_stats(
+        &self,
+        actor: ThreadId,
+        wake_generation: u64,
+        query: ObserveQuery,
+    ) -> Result<crate::observe::PublicationStatsPage, TeamError> {
         self.require_root(actor)?;
-        Ok(self.publication_stats_rows())
+        let rows = self.publication_stats_rows();
+        let total_entries = rows.len();
+        let offset = query.offset.unwrap_or(0) as usize;
+        let limit = query.limit();
+        let end = (offset + limit).min(total_entries);
+        let page = rows.get(offset..end).unwrap_or(&[]).to_vec();
+        let next_offset = (end < total_entries).then_some(u32::try_from(end).unwrap_or(u32::MAX));
+        Ok(crate::observe::PublicationStatsPage {
+            instance: self.instance,
+            revision: self.revision,
+            wake_generation,
+            entries: page,
+            total_entries,
+            next_offset,
+        })
     }
 
     fn require_root(&self, actor: ThreadId) -> Result<(), TeamError> {
@@ -130,6 +153,7 @@ impl TeamStore {
         for participant in self.participants() {
             entries.push(DumpEntry::Participant {
                 label: participant.label.clone(),
+                thread_id: participant.thread_id.to_string(),
                 role: participant.role,
                 availability: availability
                     .class_of(participant.thread_id)
@@ -153,6 +177,15 @@ impl TeamStore {
                     retired: retirement.is_some(),
                     retired_by: retirement.map(|record| self.label_of(record.retired_by)),
                     retired_at: retirement.map(|record| record.retired_at),
+                    retire_reason: retirement.map(|record| record.reason.clone()),
+                    retired_availability: retirement.map(|record| record.availability),
+                    retired_availability_epoch: retirement.map(|record| record.availability_epoch),
+                    fact_ids: version
+                        .authored()
+                        .evidence_refs
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect(),
                     fact_ref_count: version.authored().evidence_refs.len(),
                 });
             }
@@ -172,6 +205,7 @@ impl TeamStore {
                 producer: self.label_of(fact.producer()),
                 category: fact.category().to_string(),
                 item_id: fact.locator().item_id.clone(),
+                call_id: fact.locator().call_id.clone(),
                 tool: fact.locator().tool.clone(),
             });
         }
@@ -198,6 +232,7 @@ impl TeamStore {
         for stats in self.publication_stats_rows() {
             entries.push(DumpEntry::Publication {
                 participant: stats.participant,
+                thread_id: stats.thread_id,
                 version_count: stats.version_count,
                 authored_chars: stats.authored_chars,
                 fact_ref_count: stats.fact_ref_count,
@@ -212,18 +247,21 @@ impl TeamStore {
             .into_iter()
             .map(|participant| PublicationStats {
                 participant: participant.label,
+                thread_id: participant.thread_id.to_string(),
                 version_count: 0,
                 authored_chars: 0,
                 fact_ref_count: 0,
             })
             .collect();
-        let index_of = |label: &str, rows: &[PublicationStats]| {
-            rows.iter().position(|row| row.participant == label)
+        let index_of = |thread_id: ThreadId, rows: &[PublicationStats]| {
+            let key = thread_id.to_string();
+            rows.iter().position(|row| row.thread_id == key)
         };
         for event in &self.events {
             for (index, version) in event.versions().iter().enumerate() {
-                let label = self.label_of(version.authored().author);
-                let Some(row) = index_of(&label, &rows).and_then(|i| rows.get_mut(i)) else {
+                let Some(row) =
+                    index_of(version.authored().author, &rows).and_then(|i| rows.get_mut(i))
+                else {
                     continue;
                 };
                 row.version_count += 1;

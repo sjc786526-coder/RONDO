@@ -397,14 +397,14 @@ pub(crate) fn create_team_inspect_tool() -> ToolSpec {
         (
             "offset".to_string(),
             JsonSchema::integer(Some(
-                "Start the log page at this zero-based offset. Pass the returned next_offset to continue."
+                "Start the log or stats page at this zero-based offset. Pass the returned next_offset to continue."
                     .to_string(),
             )),
         ),
         (
             "cursor".to_string(),
             JsonSchema::string(Some(
-                "Pass the `next_cursor` from a previous dump page. A cursor from a different revision or availability snapshot is refused."
+                "Pass the `next_cursor` from a previous dump page. A cursor from a different revision, availability snapshot or observe generation is refused."
                     .to_string(),
             )),
         ),

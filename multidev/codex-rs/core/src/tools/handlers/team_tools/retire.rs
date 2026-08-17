@@ -47,6 +47,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         .agent_control
         .producer_availability_snapshot()
         .await;
+    let control = session.services.agent_control.clone();
 
     let submission = Submission {
         based_on: TeamRevision::from_raw(args.based_on_revision.unwrap_or_default()),
@@ -68,6 +69,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 reason: args.reason,
             },
             &availability,
+            || control.availability_epoch(),
         )
         .map_err(team_error)?;
 

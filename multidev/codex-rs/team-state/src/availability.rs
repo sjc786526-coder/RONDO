@@ -1,12 +1,12 @@
 //! Derived producer availability.
 //!
 //! The four classes are the product contract. This crate stores and compares them; it does not
-//! invent them. The harness derives a snapshot from AgentControl, the registry, residency and the
-//! same-tree resume path, then hands that snapshot to retirement, projection and diagnostics.
+//! invent them. The harness derives a snapshot from the same restore gate that would actually
+//! reload a member, then hands that snapshot to retirement, projection and diagnostics.
 //!
-//! A snapshot is identified by an epoch computed from its classified entries, so a retirement
-//! submitted against an older picture can be refused instead of silently covering a producer that
-//! became recoverable again.
+//! A snapshot carries a harness-assigned monotonic epoch. Equal classified sets do not reuse an
+//! epoch across an intervening change: `unavailable → available → unavailable` must not look like
+//! the original picture, or a stale retirement could land after a producer had come back.
 
 use codex_protocol::ThreadId;
 use serde::Serialize;
@@ -45,8 +45,9 @@ impl fmt::Display for ProducerAvailability {
 
 /// Identity of one availability snapshot.
 ///
-/// Equal snapshots of the same classified set produce the same epoch, so a no-op re-read does not
-/// look like a change. The value is session-local; it is not a hash of private context.
+/// The harness assigns this from a monotonic generation that advances on load, unload, restore and
+/// stored-thread deletion. It is not a hash of the classified set, so an ABA cycle cannot replay
+/// an earlier epoch. The value is session-local.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct AvailabilityEpoch(u64);
 
@@ -59,25 +60,6 @@ impl AvailabilityEpoch {
 
     pub fn from_raw(raw: u64) -> Self {
         Self(raw)
-    }
-
-    fn of(entries: &[(ThreadId, ProducerAvailability)]) -> Self {
-        // FNV-1a 64. Stable for the life of this process, which is the lifetime of a team instance.
-        let mut hash = 0xcbf29ce484222325_u64;
-        for (thread_id, class) in entries {
-            for byte in thread_id.to_string().as_bytes() {
-                hash ^= u64::from(*byte);
-                hash = hash.wrapping_mul(0x100_0000_01b3);
-            }
-            hash ^= match class {
-                ProducerAvailability::Available => 1,
-                ProducerAvailability::RecoverableUnloaded => 2,
-                ProducerAvailability::Unavailable => 3,
-                ProducerAvailability::Unknown => 4,
-            };
-            hash = hash.wrapping_mul(0x100_0000_01b3);
-        }
-        Self(hash)
     }
 }
 
@@ -96,7 +78,17 @@ pub struct AvailabilitySnapshot {
 
 impl AvailabilitySnapshot {
     /// Build a snapshot from unsorted classifications. Missing participants are not invented.
-    pub fn from_entries(mut entries: Vec<(ThreadId, ProducerAvailability)>) -> Self {
+    ///
+    /// Tests that do not care about the epoch can use [`Self::from_entries`], which stamps
+    /// [`AvailabilityEpoch::INITIAL`]. Product code must pass the harness generation.
+    pub fn from_entries(entries: Vec<(ThreadId, ProducerAvailability)>) -> Self {
+        Self::from_entries_at(AvailabilityEpoch::INITIAL, entries)
+    }
+
+    pub fn from_entries_at(
+        epoch: AvailabilityEpoch,
+        mut entries: Vec<(ThreadId, ProducerAvailability)>,
+    ) -> Self {
         entries.sort_by(|left, right| {
             left.0
                 .to_string()
@@ -104,7 +96,6 @@ impl AvailabilitySnapshot {
                 .then_with(|| format!("{:?}", left.1).cmp(&format!("{:?}", right.1)))
         });
         entries.dedup_by(|left, right| left.0 == right.0);
-        let epoch = AvailabilityEpoch::of(&entries);
         Self { epoch, entries }
     }
 

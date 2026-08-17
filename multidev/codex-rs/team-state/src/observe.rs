@@ -26,6 +26,7 @@ pub struct TeamDumpPage {
     pub revision: TeamRevision,
     pub wake_generation: u64,
     pub availability_epoch: AvailabilityEpoch,
+    pub observe_generation: u64,
     pub entries: Vec<DumpEntry>,
     pub total_entries: usize,
     pub next_offset: Option<u32>,
@@ -37,6 +38,7 @@ pub struct TeamDumpPage {
 pub enum DumpEntry {
     Participant {
         label: String,
+        thread_id: String,
         role: ParticipantRole,
         availability: ProducerAvailability,
     },
@@ -54,6 +56,10 @@ pub enum DumpEntry {
         retired: bool,
         retired_by: Option<String>,
         retired_at: Option<TeamRevision>,
+        retire_reason: Option<String>,
+        retired_availability: Option<ProducerAvailability>,
+        retired_availability_epoch: Option<AvailabilityEpoch>,
+        fact_ids: Vec<String>,
         fact_ref_count: usize,
     },
     Route {
@@ -68,6 +74,7 @@ pub enum DumpEntry {
         producer: String,
         category: String,
         item_id: String,
+        call_id: String,
         tool: String,
     },
     Visibility {
@@ -84,6 +91,7 @@ pub enum DumpEntry {
     },
     Publication {
         participant: String,
+        thread_id: String,
         version_count: u64,
         authored_chars: u64,
         fact_ref_count: u64,
@@ -133,6 +141,9 @@ pub enum WakeDecisionView {
 
 /// Publication volume for one participant, recomputed from canonical authored fields.
 ///
+/// Rows are keyed by the participant's stable thread identity. `participant` is the current label
+/// for humans and may repeat; it is not the aggregation key.
+///
 /// `authored_chars` is the number of Unicode scalar values (`chars().count()`) in:
 /// - the Event title, attributed to the version that opened the event
 /// - each Version's canonical `summary`
@@ -142,9 +153,21 @@ pub enum WakeDecisionView {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct PublicationStats {
     pub participant: String,
+    pub thread_id: String,
     pub version_count: u64,
     pub authored_chars: u64,
     pub fact_ref_count: u64,
+}
+
+/// One bounded page of publication stats. The same hard ceiling as dump and the change log.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PublicationStatsPage {
+    pub instance: TeamInstanceId,
+    pub revision: TeamRevision,
+    pub wake_generation: u64,
+    pub entries: Vec<PublicationStats>,
+    pub total_entries: usize,
+    pub next_offset: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,15 +190,17 @@ impl ObserveQuery {
 pub struct DumpCursor {
     pub revision: TeamRevision,
     pub availability_epoch: AvailabilityEpoch,
+    pub observe_generation: u64,
     pub offset: u32,
 }
 
 impl DumpCursor {
     pub fn encode(self) -> String {
         format!(
-            "{}:{}:{}",
+            "{}:{}:{}:{}",
             self.revision.get(),
             self.availability_epoch.get(),
+            self.observe_generation,
             self.offset
         )
     }
@@ -190,6 +215,13 @@ impl DumpCursor {
                     reason: "dump cursor is malformed",
                 })?;
         let epoch =
+            parts
+                .next()
+                .and_then(|part| part.parse().ok())
+                .ok_or(TeamError::InvalidRequest {
+                    reason: "dump cursor is malformed",
+                })?;
+        let observe_generation =
             parts
                 .next()
                 .and_then(|part| part.parse().ok())
@@ -211,6 +243,7 @@ impl DumpCursor {
         Ok(Self {
             revision: TeamRevision::from_raw(revision),
             availability_epoch: AvailabilityEpoch::from_raw(epoch),
+            observe_generation,
             offset,
         })
     }

@@ -140,6 +140,10 @@ pub struct TeamStore {
     /// Per-producer publication cursor: the highest fact ordinal of its own that it has published.
     published_facts_through: HashMap<ThreadId, u32>,
     change_log: Vec<ChangeRecord>,
+    /// Advances when dump layout can change without a team revision, currently fact minting and
+    /// new participant registration. Dump cursors carry it so a page cannot silently skip or
+    /// repeat those rows.
+    observe_generation: u64,
 }
 
 impl Default for TeamStore {
@@ -165,6 +169,7 @@ impl TeamStore {
             next_fact_ordinal: 1,
             published_facts_through: HashMap::new(),
             change_log: Vec::new(),
+            observe_generation: 0,
         }
     }
 
@@ -203,6 +208,7 @@ impl TeamStore {
                     role,
                     label,
                 });
+                self.observe_generation = self.observe_generation.saturating_add(1);
                 true
             }
         }
@@ -509,10 +515,40 @@ impl TeamStore {
             resolved.push((event_index, version_index, *target));
         }
 
-        let revision = self.revision.next();
         let mut updated = Vec::with_capacity(resolved.len());
-        let root_id = self.root_id();
+        let mut meaningful = Vec::new();
         for (event_index, version_index, target) in resolved {
+            let version = &self.events[event_index].versions[version_index];
+            let changes = match target.change {
+                LifecycleChange::CloseProducer => version.producer_state() != ProducerState::Closed,
+                LifecycleChange::SetRootState(state) => version.root_state() != state,
+            };
+            updated.push(LifecycleSnapshot {
+                version_id: target.version_id,
+                producer_state: match target.change {
+                    LifecycleChange::CloseProducer => ProducerState::Closed,
+                    LifecycleChange::SetRootState(_) => version.producer_state(),
+                },
+                root_state: match target.change {
+                    LifecycleChange::CloseProducer => version.root_state(),
+                    LifecycleChange::SetRootState(state) => state,
+                },
+            });
+            if changes {
+                meaningful.push((event_index, version_index, target));
+            }
+        }
+        if meaningful.is_empty() {
+            return Ok(LifecycleOutcome {
+                revision: self.revision,
+                updated,
+                changed: false,
+            });
+        }
+
+        let revision = self.revision.next();
+        let root_id = self.root_id();
+        for (event_index, version_index, target) in meaningful {
             let event = &mut self.events[event_index];
             let version = &mut event.versions[version_index];
             let before = format!(
@@ -558,11 +594,6 @@ impl TeamStore {
                 "producer={} root={}",
                 version.producer_state, version.root_state
             );
-            updated.push(LifecycleSnapshot {
-                version_id: target.version_id,
-                producer_state: version.producer_state,
-                root_state: version.root_state,
-            });
             event.last_changed_at = revision;
             self.change_log.push(ChangeRecord {
                 revision,
@@ -576,7 +607,11 @@ impl TeamStore {
         }
         self.revision = revision;
 
-        Ok(LifecycleOutcome { revision, updated })
+        Ok(LifecycleOutcome {
+            revision,
+            updated,
+            changed: true,
+        })
     }
 
     /// The active view for one participant, as of right now.

@@ -98,6 +98,9 @@ pub struct LifecycleSnapshot {
 pub struct LifecycleOutcome {
     pub revision: TeamRevision,
     pub updated: Vec<LifecycleSnapshot>,
+    /// False when every named target was already in the requested state. A stable no-op must not
+    /// look like a canonical mutation.
+    pub changed: bool,
 }
 
 /// What a route asks of its target.
@@ -251,10 +254,11 @@ pub enum TeamError {
         availability: ProducerAvailability,
         availability_epoch: AvailabilityEpoch,
     },
-    /// A dump page cursor belongs to a different revision or availability snapshot.
+    /// A dump page cursor belongs to a different revision, availability snapshot or observe layout.
     DumpCursorStale {
         current_revision: TeamRevision,
         current_epoch: AvailabilityEpoch,
+        current_observe_generation: u64,
     },
 }
 
@@ -341,9 +345,10 @@ impl fmt::Display for TeamError {
             Self::DumpCursorStale {
                 current_revision,
                 current_epoch,
+                current_observe_generation,
             } => write!(
                 f,
-                "this dump cursor belongs to a different snapshot; current revision={current_revision} availability_epoch={current_epoch}"
+                "this dump cursor belongs to a different snapshot; current revision={current_revision} availability_epoch={current_epoch} observe_generation={current_observe_generation}"
             ),
         }
     }

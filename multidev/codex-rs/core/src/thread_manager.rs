@@ -90,6 +90,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -331,6 +332,9 @@ pub(crate) struct ThreadManagerState {
     analytics_events_client: Option<AnalyticsEventsClient>,
     // Captures submitted ops for testing purpose when test mode is enabled.
     ops_log: Option<SharedCapturedOps>,
+    /// Monotonic generation for producer availability. Bumped when a thread is loaded, unloaded
+    /// or deleted from the store so a stale retirement cannot land after a restore.
+    availability_generation: AtomicU64,
 }
 
 pub fn build_models_manager(
@@ -441,6 +445,7 @@ impl ThreadManager {
                 analytics_events_client,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
+                availability_generation: AtomicU64::new(0),
             }),
             _test_codex_home_guard: None,
         }
@@ -576,6 +581,7 @@ impl ThreadManager {
                 analytics_events_client: None,
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
+                availability_generation: AtomicU64::new(0),
             }),
             _test_codex_home_guard: None,
         }
@@ -711,7 +717,8 @@ impl ThreadManager {
 
     /// Permanently drop a stored thread. After this, the same root tree cannot restore it.
     pub async fn delete_stored_thread(&self, thread_id: ThreadId) -> CodexResult<()> {
-        self.state
+        let result = self
+            .state
             .thread_store
             .delete_thread(DeleteThreadParams { thread_id })
             .await
@@ -722,7 +729,11 @@ impl ThreadManager {
                 err => {
                     CodexErr::Fatal(format!("failed to delete stored thread {thread_id}: {err}"))
                 }
-            })
+            });
+        if result.is_ok() {
+            self.state.bump_availability_generation();
+        }
+        result
     }
 
     /// Updates metadata for loaded and cold threads through one entrypoint.
@@ -992,7 +1003,7 @@ impl ThreadManager {
     /// as `Arc<CodexThread>`, it is possible that other references to it exist elsewhere.
     /// Returns the thread if the thread was found and removed.
     pub async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
-        self.state.threads.write().await.remove(thread_id)
+        self.state.remove_thread(thread_id).await
     }
 
     /// Tries to shut down all tracked threads concurrently within the provided timeout.
@@ -1030,8 +1041,15 @@ impl ThreadManager {
         }
 
         let mut tracked_threads = self.state.threads.write().await;
+        let mut removed = false;
         for thread_id in &report.completed {
-            tracked_threads.remove(thread_id);
+            if tracked_threads.remove(thread_id).is_some() {
+                removed = true;
+            }
+        }
+        drop(tracked_threads);
+        if removed {
+            self.state.bump_availability_generation();
         }
 
         report
@@ -1221,6 +1239,14 @@ impl ThreadManager {
 }
 
 impl ThreadManagerState {
+    pub(crate) fn availability_generation(&self) -> u64 {
+        self.availability_generation.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn bump_availability_generation(&self) {
+        self.availability_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
     pub(crate) fn agent_graph_store(&self) -> Option<Arc<dyn AgentGraphStore>> {
         self.agent_graph_store.clone()
     }
@@ -1330,7 +1356,11 @@ impl ThreadManagerState {
 
     /// Remove a thread from the manager by ID, returning it when present.
     pub(crate) async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
-        self.threads.write().await.remove(thread_id)
+        let removed = self.threads.write().await.remove(thread_id);
+        if removed.is_some() {
+            self.bump_availability_generation();
+        }
+        removed
     }
 
     pub(crate) async fn effective_multi_agent_version_for_spawn(
@@ -1680,6 +1710,8 @@ impl ThreadManagerState {
                     });
                 }
                 threads.remove(&resumed.conversation_id);
+                drop(threads);
+                self.bump_availability_generation();
             }
         }
         let user_instructions = self
@@ -1799,6 +1831,8 @@ impl ThreadManagerState {
                     session_source,
                 ));
                 e.insert(thread.clone());
+                drop(threads);
+                self.bump_availability_generation();
                 return Ok(NewThread {
                     thread_id,
                     thread,

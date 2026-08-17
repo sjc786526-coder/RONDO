@@ -82,6 +82,7 @@ pub use observe::DumpEntry;
 pub use observe::MAX_OBSERVE_LIMIT;
 pub use observe::ObserveQuery;
 pub use observe::PublicationStats;
+pub use observe::PublicationStatsPage;
 pub use observe::TeamDumpPage;
 pub use observe::WakeDecisionView;
 pub use render::MAX_PROJECTION_TOKENS;

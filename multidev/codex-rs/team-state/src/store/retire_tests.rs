@@ -61,6 +61,7 @@ fn root_retires_an_open_version_when_the_producer_is_unavailable() {
             &submission(published.revision, "r-retire"),
             request,
             &availability,
+            availability.epoch,
         )
         .expect("root may retire");
 
@@ -118,6 +119,7 @@ fn recoverable_or_unknown_producers_cannot_be_retired() {
                     reason: "try".to_string(),
                 },
                 &availability,
+                availability.epoch,
             )
             .expect_err("only a truly unavailable producer may be retired");
         assert!(matches!(
@@ -148,6 +150,7 @@ fn a_member_cannot_retire_and_a_stale_epoch_is_refused() {
             &submission(published.revision, "w-retire"),
             request.clone(),
             &availability,
+            availability.epoch,
         )
         .expect_err("members cannot retire");
     assert!(matches!(err, TeamError::NotPermitted { .. }));
@@ -160,6 +163,7 @@ fn a_member_cannot_retire_and_a_stale_epoch_is_refused() {
             &submission(published.revision, "r-stale"),
             stale,
             &availability,
+            availability.epoch,
         )
         .expect_err("stale availability epoch is refused");
     assert!(matches!(err, TeamError::AvailabilityConflict { .. }));
@@ -186,6 +190,7 @@ fn exact_retry_is_idempotent_and_a_second_independent_retire_is_refused() {
             &submission(published.revision, "r-retire"),
             request.clone(),
             &availability,
+            availability.epoch,
         )
         .expect("first retire");
     let revision = store.revision();
@@ -195,6 +200,7 @@ fn exact_retry_is_idempotent_and_a_second_independent_retire_is_refused() {
             &submission(published.revision, "r-retire"),
             request.clone(),
             &availability,
+            availability.epoch,
         )
         .expect("exact retry");
     assert!(retry.deduplicated);
@@ -210,6 +216,7 @@ fn exact_retry_is_idempotent_and_a_second_independent_retire_is_refused() {
             &submission(published.revision, "r-retire"),
             other,
             &availability,
+            availability.epoch,
         )
         .expect_err("same identity, different reason");
     assert_eq!(err, TeamError::RetryIdentityReused);
@@ -221,6 +228,7 @@ fn exact_retry_is_idempotent_and_a_second_independent_retire_is_refused() {
             &submission(first.revision, "r-retire-2"),
             second,
             &availability,
+            availability.epoch,
         )
         .expect_err("already retired");
     assert!(matches!(err, TeamError::VersionRetired { .. }));
@@ -268,6 +276,7 @@ fn retirement_does_not_end_routes_or_other_versions() {
             &submission(store.revision(), "r-retire"),
             request,
             &availability,
+            availability.epoch,
         )
         .expect("retire worker version");
 
@@ -319,6 +328,7 @@ fn a_closed_version_cannot_be_retired_and_a_retired_version_cannot_be_closed() {
             &submission(store.revision(), "r-retire"),
             request,
             &availability,
+            availability.epoch,
         )
         .expect_err("closed versions are already producer-terminal");
     assert!(matches!(
@@ -340,6 +350,7 @@ fn a_closed_version_cannot_be_retired_and_a_retired_version_cannot_be_closed() {
             &submission(open.revision, "r-retire-open"),
             request,
             &availability,
+            availability.epoch,
         )
         .expect("retire the open one");
     let err = store
@@ -356,4 +367,88 @@ fn a_closed_version_cannot_be_retired_and_a_retired_version_cannot_be_closed() {
         )
         .expect_err("retired versions cannot be rewritten as producer closed");
     assert!(matches!(err, TeamError::VersionRetired { .. }));
+}
+
+#[test]
+fn an_aba_unavailable_snapshot_does_not_reuse_the_original_epoch() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let published = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("schema drift", "two columns were renamed"),
+        )
+        .expect("worker may publish");
+    let stale = AvailabilitySnapshot::from_entries_at(
+        crate::availability::AvailabilityEpoch::from_raw(1),
+        vec![(worker, ProducerAvailability::Unavailable)],
+    );
+    let current = AvailabilitySnapshot::from_entries_at(
+        crate::availability::AvailabilityEpoch::from_raw(3),
+        vec![(worker, ProducerAvailability::Unavailable)],
+    );
+    let err = store
+        .retire(
+            root,
+            &submission(published.revision, "r-aba"),
+            RetireRequest {
+                version_id: published.version_id,
+                expected_producer_state: ProducerState::Open,
+                expected_root_state: RootState::Pending,
+                expected_availability: ProducerAvailability::Unavailable,
+                expected_availability_epoch: stale.epoch,
+                reason: "gone".to_string(),
+            },
+            &current,
+            current.epoch,
+        )
+        .expect_err("a later unavailable picture is not the original epoch");
+    assert!(matches!(err, TeamError::AvailabilityConflict { .. }));
+}
+
+#[test]
+fn a_live_epoch_that_moved_during_commit_is_refused() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let published = store
+        .publish(
+            worker,
+            &submission(TeamRevision::INITIAL, "w1"),
+            new_event("schema drift", "two columns were renamed"),
+        )
+        .expect("worker may publish");
+    let snapshot = AvailabilitySnapshot::from_entries_at(
+        crate::availability::AvailabilityEpoch::from_raw(4),
+        vec![(worker, ProducerAvailability::Unavailable)],
+    );
+    let err = store
+        .retire(
+            root,
+            &submission(published.revision, "r-race"),
+            RetireRequest {
+                version_id: published.version_id,
+                expected_producer_state: ProducerState::Open,
+                expected_root_state: RootState::Pending,
+                expected_availability: ProducerAvailability::Unavailable,
+                expected_availability_epoch: snapshot.epoch,
+                reason: "gone".to_string(),
+            },
+            &snapshot,
+            crate::availability::AvailabilityEpoch::from_raw(5),
+        )
+        .expect_err("restore between snapshot and commit must refuse");
+    assert!(matches!(
+        err,
+        TeamError::AvailabilityConflict {
+            availability: ProducerAvailability::Unknown,
+            ..
+        }
+    ));
 }

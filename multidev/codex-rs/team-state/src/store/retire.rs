@@ -7,6 +7,7 @@ use super::CommittedOutcome;
 use super::CommittedRequest;
 use super::CommittedSubmission;
 use super::TeamStore;
+use crate::availability::AvailabilityEpoch;
 use crate::availability::AvailabilitySnapshot;
 use crate::availability::ProducerAvailability;
 use crate::model::ProducerState;
@@ -32,6 +33,7 @@ impl TeamStore {
         submission: &Submission,
         request: RetireRequest,
         availability: &AvailabilitySnapshot,
+        live_epoch: AvailabilityEpoch,
     ) -> Result<RetireOutcome, TeamError> {
         let role = self.require_participant(actor)?.role;
         if !role.is_root() {
@@ -85,6 +87,12 @@ impl TeamStore {
         }
 
         let author = version.authored().author;
+        if live_epoch != availability.epoch {
+            return Err(TeamError::AvailabilityConflict {
+                availability: ProducerAvailability::Unknown,
+                availability_epoch: live_epoch,
+            });
+        }
         let current_class = availability
             .class_of(author)
             .unwrap_or(ProducerAvailability::Unknown);
@@ -112,8 +120,8 @@ impl TeamStore {
             version.producer_state, version.root_state
         );
         let after = format!(
-            "producer={} root={} retired",
-            version.producer_state, version.root_state
+            "producer={} root={} retired availability={} epoch={} reason={}",
+            version.producer_state, version.root_state, current_class, availability.epoch, reason
         );
         version.retirement = Some(RetirementRecord {
             retired_by: actor,

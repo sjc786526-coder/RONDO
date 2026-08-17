@@ -1099,22 +1099,27 @@ standard/Lite 形态均补回归。
 
 ## Multi M-4 —— 协调闭合与可观测性（Plan 043，2026-08-17）
 
-**状态**：实现与定向门禁完成，落在工作树分支 `worktree-043-multi-m4-coordination-closure`，
-未合并、未推送，待独立审查。
+**状态**：首次落地 `e03eef1` 未通过独立验收（报告 `e2105aa`）。审查缺口已在工作树分支
+`worktree-043-multi-m4-coordination-closure` 整改，未合并、未推送，待再次独立审查。
 
-- **可用性**：Harness 从 `AgentControl` 派生四类——已加载为 `available`；未加载但 store 仍可读为
-  `recoverable_unloaded`；`ThreadNotFound` 或 rollout 文件已不存在为 `unavailable`；事实不足或查询失败为
-  `unknown`。不把单个 `AgentStatus`、registry miss 或 residency 卸载当成真正不可用。
+- **可用性**：Harness 复用 `ensure_v2_agent_loaded` 的 `probe_v2_restore` 派生四类——Loaded 为
+  `available`；Restorable 为 `recoverable_unloaded`；Unrecoverable（含 Interrupted 驱逐后 store
+  摘要仍在但恢复门禁返回 `ThreadNotFound`）为 `unavailable`；其余读失败为 `unknown`。epoch 是
+  ThreadManager 单调 generation，seqlock 快照；退休提交时再对 live generation 原子重验。
 - **退休**：仅 Root；目标须 producer `open` 且未退休，作者在提交时为 `unavailable`。记录是独立终态覆盖层，
   producer 保持 `open`，不改 root attention、route、其他 Version 或 authored 内容。Root 不操作则事项悬挂。
-- **可观测性**：Root-only `team_inspect` 提供有界 dump（cursor `revision:epoch:offset`）、按 revision 的
-  精简变更日志和从 canonical 重算的发布统计。`authored_chars` 计 Unicode 标量值，纳入开 Event 的 title、
-  每 Version 的 summary 与可选 handoff。稳定重试/no-op 不增加 revision、wake generation、日志或统计。
-- **门禁**：`codex-team-state --lib` **114/114**；产品纵切 `suite::team_coordination` **1/1**；
-  M-1—M-3 回归 `suite::team_world_state` + `team_routing` + `team_evidence` **16/16**；
-  受影响 `core --lib`（`agent::control` / `team::` / `tools::handlers::team_tools` / `context::team*` /
-  `tools::spec_plan`）**124/124**。`just fix -p codex-team-state -p codex-core`、`just fmt`、
+  同状态 lifecycle 是 no-op，不推进 revision / 日志 / wake generation。
+- **可观测性**：Root-only `team_inspect` 提供有界 dump（cursor
+  `revision:epoch:observe_generation:offset`）、按 revision 的精简变更日志和按 `thread_id` 聚合、
+  可分页的发布统计。Version dump 带退休原因/可用性/epoch 与 FactId 列表；Fact 带 `call_id`。
+  `authored_chars` 计 Unicode 标量值。稳定重试/no-op 不增加 revision、wake generation、日志或统计。
+- **门禁（整改后）**：`codex-team-state --lib` **121/121**；产品纵切 `suite::team_coordination` **1/1**；
+  M-1—M-3 回归 `suite::team_world_state` + `team_routing` + `team_evidence` **16/16**（须清 loopback
+  代理）；受影响 `core --lib`（`agent::control` / `team::` / `tools::handlers::team_tools` /
+  `tools::spec_plan`）定向通过。`just fix -p codex-team-state -p codex-core`、`just fmt`、
   `just fmt-check` 通过。未跑全 workspace、Docker、真实 API 或本地模型。
 - **边界**：功能仍随 `team_state_enabled` 默认关闭。未做自动退休、orphan 清理、escalation、产品 UI、
-  跨进程日志持久化或审计链。执行细节见
-  `agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`。
+  跨进程日志持久化或审计链。首次实现见
+  `agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`，独立验收见
+  `agent_log/2026-08-17-082629-plan043-m4-independent-acceptance-review.md`，整改见
+  `agent_log/2026-08-17-090000-plan043-m4-acceptance-gap-remediation.md`。
