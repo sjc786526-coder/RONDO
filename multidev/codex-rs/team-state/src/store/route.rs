@@ -16,6 +16,7 @@ use crate::model::DeliveryState;
 use crate::model::RouteDuty;
 use crate::model::TeamRoute;
 use crate::model::clamp_delivery_reason;
+use crate::model::clamp_route_note;
 use crate::mutation::DeliveryOutcome;
 use crate::mutation::DeliveryResult;
 use crate::mutation::EndAssignmentOutcome;
@@ -58,17 +59,23 @@ impl TeamStore {
 
         let retry_key = (actor, submission.request_id.clone());
         let original_request = CommittedRequest::Route(request.clone());
-        if let Some(existing) = self.committed.get(&retry_key) {
-            if existing.request != original_request {
-                return Err(TeamError::RetryIdentityReused);
+        // A replay is answered from the canonical route, not from a copy of what it looked like at
+        // commit time: delivery keeps changing afterwards, and a frozen snapshot would report the
+        // `pending` that every route starts with over a failure the caller still has to retry.
+        let replayed = match self.committed.get(&retry_key) {
+            Some(existing) => {
+                if existing.request != original_request {
+                    return Err(TeamError::RetryIdentityReused);
+                }
+                match existing.outcome {
+                    CommittedOutcome::Route { route_id } => Some(route_id),
+                    CommittedOutcome::Publish(_) => return Err(TeamError::RetryIdentityReused),
+                }
             }
-            let CommittedOutcome::Route(outcome) = &existing.outcome else {
-                return Err(TeamError::RetryIdentityReused);
-            };
-            return Ok(RouteOutcome {
-                deduplicated: true,
-                ..outcome.clone()
-            });
+            None => None,
+        };
+        if let Some(route_id) = replayed {
+            return self.deduplicated_outcome(route_id);
         }
 
         // Resolve the event before the revision moves, so a failed lookup leaves no trace.
@@ -78,16 +85,33 @@ impl TeamStore {
         // a replayed call, but a root that asks twice in two different turns would otherwise stack
         // a second assignment on the same participant for the same matter, and ending one of them
         // would then leave the event sitting in its view for no reason anyone can point at.
-        if matches!(request.intent, RouteIntent::Assign)
-            && let Some(existing) =
-                self.events[event_index].assignment_in_progress_for(request.target)
-        {
-            let dispatch = self.dispatch_of(existing);
-            return Ok(RouteOutcome {
-                dispatch,
-                revision: self.revision,
-                deduplicated: true,
-            });
+        if matches!(request.intent, RouteIntent::Assign) {
+            let in_progress = self.events[event_index]
+                .assignment_in_progress_for(request.target)
+                .map(|route| (route.id(), route.note().map(str::to_string)));
+            if let Some((existing_id, existing_note)) = in_progress {
+                // Only an identical instruction is the same hand-over. Answering a changed note
+                // with the old assignment would drop what the root just said, and opening a second
+                // one would give the target two reasons to hold the same event. Refusing says so.
+                if existing_note != request.note.as_deref().map(clamp_route_note) {
+                    return Err(TeamError::AssignmentInProgress {
+                        route_id: existing_id,
+                    });
+                }
+                // Bind this identity to the assignment it was answered with. Without that the
+                // identity stays unclaimed, and replaying it after the assignment ends would mint
+                // a second one instead of repeating this answer.
+                self.committed.insert(
+                    retry_key,
+                    CommittedSubmission {
+                        request: original_request,
+                        outcome: CommittedOutcome::Route {
+                            route_id: existing_id,
+                        },
+                    },
+                );
+                return self.deduplicated_outcome(existing_id);
+            }
         }
 
         let duty = match request.intent {
@@ -132,10 +156,23 @@ impl TeamStore {
             retry_key,
             CommittedSubmission {
                 request: original_request,
-                outcome: CommittedOutcome::Route(outcome.clone()),
+                outcome: CommittedOutcome::Route { route_id },
             },
         );
         Ok(outcome)
+    }
+
+    /// Answer a repeated submission from the route it already produced.
+    ///
+    /// Both halves come from the state as it stands now, so the delivery reported here is the one
+    /// the caller still has to act on and the revision belongs to the same snapshot as the rest.
+    fn deduplicated_outcome(&self, route_id: RouteId) -> Result<RouteOutcome, TeamError> {
+        let (event_index, route_index) = self.locate_route(route_id)?;
+        Ok(RouteOutcome {
+            dispatch: self.dispatch_of(&self.events[event_index].routes()[route_index]),
+            revision: self.revision,
+            deduplicated: true,
+        })
     }
 
     /// Record how the notice for `route_id` went.
@@ -237,8 +274,11 @@ impl TeamStore {
 
     /// Everything needed to build this route's notice again, for a retry.
     ///
-    /// Readable by the two participants the route is about, so the harness never has to ask the
-    /// model to remember what it was routing.
+    /// Only the participant that made the route may take this, which is the same authority that
+    /// may record the result. Resending is an action on someone else's attention, so letting the
+    /// target take a dispatch would let it send itself notices that the canonical state then
+    /// refuses to account for — the send having already happened. The harness still never has to
+    /// ask the model to remember what it was routing.
     pub fn route_dispatch(
         &self,
         actor: ThreadId,
@@ -247,9 +287,9 @@ impl TeamStore {
         self.require_participant(actor)?;
         let (event_index, route_index) = self.locate_route(route_id)?;
         let route = &self.events[event_index].routes[route_index];
-        if route.routed_by() != actor && route.target() != actor {
+        if route.routed_by() != actor {
             return Err(TeamError::NotPermitted {
-                reason: "this route is not yours to read",
+                reason: "only the participant that routed this event may resend its notice",
             });
         }
         Ok(self.dispatch_of(route))

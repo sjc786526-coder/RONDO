@@ -776,8 +776,12 @@ fn only_the_participant_that_routed_may_report_on_the_notice() {
     );
 }
 
+/// Resending is an action on the target's attention, so the target itself must not be able to take
+/// a dispatch. The store is where that has to be refused: by the time a handler has a dispatch in
+/// hand it is one step away from sending, and a send that the canonical state then refuses to
+/// account for has already happened.
 #[test]
-fn a_route_can_be_re_read_for_a_retry_by_both_ends_and_nobody_else() {
+fn only_the_router_may_take_a_dispatch_to_resend() {
     let TeamFixture {
         mut store,
         root,
@@ -802,18 +806,173 @@ fn a_route_can_be_re_read_for_a_retry_by_both_ends_and_nobody_else() {
         .route_dispatch(root, routed.dispatch.route_id)
         .expect("the router may rebuild its own notice");
     assert_eq!(by_root, routed.dispatch);
-    assert!(
+    let refused = TeamError::NotPermitted {
+        reason: "only the participant that routed this event may resend its notice",
+    };
+    assert_eq!(
         store
             .route_dispatch(worker, routed.dispatch.route_id)
-            .is_ok()
+            .expect_err("the target does not get to resend its own notice"),
+        refused
     );
     assert_eq!(
         store
             .route_dispatch(other, routed.dispatch.route_id)
-            .expect_err("not this member's route"),
-        TeamError::NotPermitted {
-            reason: "this route is not yours to read"
+            .expect_err("nor does a bystander"),
+        refused
+    );
+
+    // The target keeps everything the route was for: it can still read the event and end the work.
+    assert!(
+        store
+            .history(
+                worker,
+                &HistoryQuery {
+                    event_id: Some(event.event_id),
+                    limit: None,
+                    before: None,
+                },
+            )
+            .is_ok()
+    );
+    assert!(
+        store
+            .end_assignment(worker, routed.dispatch.route_id)
+            .is_ok()
+    );
+}
+
+/// A replay has to report the delivery the route has now. Answering from a copy made at commit
+/// time would always say `pending`, which is precisely the state a failed notice is not in.
+#[test]
+fn a_replayed_route_reports_the_delivery_state_the_route_has_now() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let event = root_event(&mut store, root);
+    let first = assign(&mut store, root, event.event_id, worker, "r1");
+    assert_eq!(first.dispatch.delivery, DeliveryState::Pending);
+
+    store
+        .record_delivery(
+            root,
+            first.dispatch.route_id,
+            DeliveryResult::Failed {
+                reason: "agent with id 1 not found".to_string(),
+            },
+        )
+        .expect("the notice failed");
+
+    let replay = store
+        .route(
+            root,
+            &submission(TeamRevision::INITIAL, "r1"),
+            route_request(event.event_id, worker, RouteIntent::Assign),
+        )
+        .expect("a replay succeeds");
+
+    assert!(replay.deduplicated);
+    assert_eq!(replay.dispatch.route_id, first.dispatch.route_id);
+    assert_eq!(
+        replay.dispatch.delivery,
+        DeliveryState::Failed {
+            reason: "agent with id 1 not found".to_string()
+        },
+        "a replay must not hide a failure the caller still has to retry"
+    );
+    assert_eq!(
+        replay.revision,
+        store.revision(),
+        "the reported revision belongs to the same snapshot as the reported delivery"
+    );
+}
+
+/// The alias identity has to be bound to the assignment it was answered with. Left unclaimed it
+/// would mint a second assignment once the first ended, and would still be free for another kind
+/// of submission to take.
+#[test]
+fn an_alias_identity_is_bound_to_the_assignment_it_was_answered_with() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let event = root_event(&mut store, root);
+    let first = assign(&mut store, root, event.event_id, worker, "r1");
+    let alias = assign(&mut store, root, event.event_id, worker, "r2");
+    assert_eq!(alias.dispatch.route_id, first.dispatch.route_id);
+
+    store
+        .end_assignment(root, first.dispatch.route_id)
+        .expect("the assignment ends");
+
+    // Replaying the alias verbatim repeats its answer instead of handing the work over again.
+    let replay = assign(&mut store, root, event.event_id, worker, "r2");
+    assert_eq!(replay.dispatch.route_id, first.dispatch.route_id);
+    assert_eq!(replay.dispatch.duty, RouteDuty::Ended);
+    assert!(replay.deduplicated);
+    assert_eq!(store.events[0].routes().len(), 1);
+
+    // And the alias is genuinely claimed, so the shared namespace still holds.
+    assert_eq!(
+        store
+            .publish(
+                root,
+                &submission(store.revision(), "r2"),
+                new_event("something else", "reusing the identity"),
+            )
+            .expect_err("the identity already stands for a route"),
+        TeamError::RetryIdentityReused
+    );
+}
+
+/// Two different instructions are two different hand-overs. Answering the second with the first
+/// would drop what the root just said, so it is refused rather than silently merged.
+#[test]
+fn a_hand_over_with_a_different_instruction_is_refused_rather_than_dropped() {
+    let TeamFixture {
+        mut store,
+        root,
+        worker,
+    } = TeamFixture::new();
+    let event = root_event(&mut store, root);
+    let with_note = |note: &str| RouteRequest {
+        event_id: event.event_id,
+        target: worker,
+        intent: RouteIntent::Assign,
+        note: Some(note.to_string()),
+    };
+    let first = store
+        .route(
+            root,
+            &submission(store.revision(), "r1"),
+            with_note("check the report"),
+        )
+        .expect("routed");
+    let before = store.revision();
+
+    let refused = store
+        .route(
+            root,
+            &submission(before, "r2"),
+            with_note("check the report and the backfill"),
+        )
+        .expect_err("a changed instruction is not the same hand-over");
+
+    assert_eq!(
+        refused,
+        TeamError::AssignmentInProgress {
+            route_id: first.dispatch.route_id
         }
+    );
+    assert_eq!(store.revision(), before);
+    assert_eq!(store.events[0].routes().len(), 1);
+    assert_eq!(
+        store.events[0].routes()[0].note(),
+        Some("check the report"),
+        "the original instruction is untouched"
     );
 }
 

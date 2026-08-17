@@ -7,6 +7,7 @@
 
 use crate::ids::EventId;
 use crate::ids::InstanceTag;
+use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
 use crate::ids::VersionId;
@@ -28,7 +29,6 @@ use crate::mutation::LifecycleSnapshot;
 use crate::mutation::PublishOutcome;
 use crate::mutation::PublishRequest;
 use crate::mutation::PublishTarget;
-use crate::mutation::RouteOutcome;
 use crate::mutation::RouteRequest;
 use crate::mutation::Submission;
 use crate::mutation::TeamError;
@@ -85,8 +85,12 @@ enum CommittedRequest {
 
 #[derive(Clone, Debug)]
 enum CommittedOutcome {
+    /// A publish outcome is entirely made of facts fixed at commit time, so keeping it is safe.
     Publish(PublishOutcome),
-    Route(RouteOutcome),
+    /// Only the route's identity is remembered. Its delivery state goes on changing after the
+    /// commit, and a snapshot taken here would be taken before the notice was even attempted — a
+    /// replay would then report `pending` over a failure that is meant to be visible and retryable.
+    Route { route_id: RouteId },
 }
 
 struct CommittedSubmission {
@@ -243,6 +247,8 @@ impl TeamStore {
                 return Err(TeamError::RetryIdentityReused);
             }
             let CommittedOutcome::Publish(outcome) = &existing.outcome else {
+                // The same identity already stands for a route. Treating it as a fresh publish
+                // would put two different objects behind one retry identity.
                 return Err(TeamError::RetryIdentityReused);
             };
             return Ok(PublishOutcome {

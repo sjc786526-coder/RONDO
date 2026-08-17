@@ -201,10 +201,14 @@ impl TeamHarness {
         self.route_as(Arc::clone(&self.session), args).await
     }
 
-    async fn route_update(&self, args: Value) -> Result<Value, FunctionCallError> {
+    async fn route_update_as(
+        &self,
+        actor: Arc<crate::session::session::Session>,
+        args: Value,
+    ) -> Result<Value, FunctionCallError> {
         match TeamRouteUpdateHandler
             .handle(invocation(
-                Arc::clone(&self.session),
+                actor,
                 Arc::clone(&self.turn),
                 "team_route_update",
                 args,
@@ -214,6 +218,10 @@ impl TeamHarness {
             Ok(output) => Ok(output_json(output)),
             Err(err) => Err(err),
         }
+    }
+
+    async fn route_update(&self, args: Value) -> Result<Value, FunctionCallError> {
+        self.route_update_as(Arc::clone(&self.session), args).await
     }
 
     /// The real spawned member's own session, which is where its identity comes from.
@@ -486,4 +494,58 @@ async fn asking_twice_for_the_same_hand_over_does_not_notify_twice() {
         1,
         "a repeat must not send a second notice"
     );
+}
+
+/// Resending a notice is an action on the target's attention, so the target must be refused before
+/// anything is loaded or sent. Refusing only at the accounting step would leave a notice that was
+/// really delivered and a canonical state that never recorded it.
+#[tokio::test]
+async fn a_target_cannot_resend_its_own_notice_and_nothing_is_sent() {
+    let harness = TeamHarness::new().await;
+    let event_id = harness.publish_root_event().await;
+    let worker = harness.spawn_worker("worker").await;
+    let routed = harness
+        .route(json!({
+            "event_id": event_id,
+            "target": "worker",
+            "intent": "assign",
+        }))
+        .await
+        .expect("routed");
+    let delivered = harness.notices_to(worker).len();
+    assert_eq!(delivered, 1, "the original notice went out");
+
+    let member = harness.member_session(worker).await;
+    let Err(refused) = harness
+        .route_update_as(
+            member,
+            json!({ "route_id": routed["route_id"], "action": "retry_notice" }),
+        )
+        .await
+    else {
+        panic!("the target does not get to resend the notice it was sent");
+    };
+
+    let FunctionCallError::RespondToModel(message) = refused else {
+        panic!("team refusals are reported to the model");
+    };
+    assert!(
+        message.contains("only the participant that routed this event may resend its notice"),
+        "{message}"
+    );
+    assert_eq!(
+        harness.notices_to(worker).len(),
+        delivered,
+        "the refusal must come before the send, not after it"
+    );
+
+    // The target keeps what the route was actually for.
+    let ended = harness
+        .route_update_as(
+            harness.member_session(worker).await,
+            json!({ "route_id": routed["route_id"], "action": "end" }),
+        )
+        .await
+        .expect("the target may still end its own assignment");
+    assert_eq!(ended["duty"], json!("ended"));
 }

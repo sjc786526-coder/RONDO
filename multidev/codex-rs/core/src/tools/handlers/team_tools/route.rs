@@ -76,11 +76,15 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     // From here the grant and, for work, the assignment are canonical facts. A repeat of a route
     // that already exists is not re-delivered: the notice for it was already sent or already
     // recorded as failed, and sending another copy on every retry is how a duplicate turns into a
-    // second piece of apparent work.
-    let delivery = if outcome.deduplicated {
-        outcome.dispatch.delivery.clone()
+    // second piece of apparent work. Its reported state comes from the canonical route, so a
+    // failure waiting to be retried is never papered over as still pending.
+    //
+    // The revision travels with whichever state is reported, so the two always describe the same
+    // canonical snapshot rather than the commit and its after-effect.
+    let (delivery, revision) = if outcome.deduplicated {
+        (outcome.dispatch.delivery.clone(), outcome.revision)
     } else {
-        deliver_and_record(
+        let recorded = deliver_and_record(
             &access,
             &session,
             &turn,
@@ -88,7 +92,8 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
             &source,
             &outcome.dispatch,
         )
-        .await
+        .await;
+        (recorded.delivery, recorded.revision)
     };
 
     Ok(boxed_tool_output(TeamRouteResult {
@@ -98,7 +103,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         duty: outcome.dispatch.duty.to_string(),
         delivery: delivery.label().to_string(),
         delivery_error: delivery.failure_reason().map(str::to_string),
-        revision: outcome.revision.get(),
+        revision: revision.get(),
         deduplicated: outcome.deduplicated,
     }))
 }

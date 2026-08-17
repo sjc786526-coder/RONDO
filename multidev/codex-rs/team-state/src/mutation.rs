@@ -205,6 +205,10 @@ pub enum TeamError {
     NotAnAssignment { route_id: RouteId },
     /// The assignment has already reached its terminal state and does not end twice.
     AssignmentEnded { route_id: RouteId },
+    /// The target is already working on this event under a different instruction. Answering with
+    /// the existing assignment would drop the new instruction silently, and opening a second one
+    /// would leave the target holding the same event for two reasons.
+    AssignmentInProgress { route_id: RouteId },
 }
 
 impl fmt::Display for TeamError {
@@ -264,6 +268,10 @@ impl fmt::Display for TeamError {
             Self::AssignmentEnded { route_id } => write!(
                 f,
                 "the assignment on {route_id} has already ended; route the event again if there is new work"
+            ),
+            Self::AssignmentInProgress { route_id } => write!(
+                f,
+                "the target is already assigned this event under {route_id}; publish a version to add to it, or end {route_id} first if you want to hand it over again"
             ),
         }
     }

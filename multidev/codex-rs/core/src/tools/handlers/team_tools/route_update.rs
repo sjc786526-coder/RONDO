@@ -57,16 +57,21 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         }
         WireAction::RetryNotice => {
             // The route is re-read from the canonical state rather than rebuilt from anything the
-            // model remembers, so a retry sends the same notice the grant was made with.
+            // model remembers, so a retry sends the same notice the grant was made with. Taking the
+            // dispatch is itself the authorization, and it happens before the target is loaded or
+            // anything is sent: only the participant that routed the event may resend its notice,
+            // which is the same authority that records the result.
             let dispatch = access
                 .handle()
                 .route_dispatch(access.actor(), route_id)
                 .map_err(team_error)?;
-            let delivery = if dispatch.delivery.is_delivered() {
-                dispatch.delivery.clone()
+            let (delivery, revision) = if dispatch.delivery.is_delivered() {
+                (dispatch.delivery.clone(), access.handle().revision())
             } else {
-                deliver_and_record(&access, &session, &turn, &step_context, &source, &dispatch)
-                    .await
+                let recorded =
+                    deliver_and_record(&access, &session, &turn, &step_context, &source, &dispatch)
+                        .await;
+                (recorded.delivery, recorded.revision)
             };
             TeamRouteUpdateResult {
                 route_id: dispatch.route_id.to_string(),
@@ -74,7 +79,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 duty: dispatch.duty.to_string(),
                 delivery: delivery.label().to_string(),
                 delivery_error: delivery.failure_reason().map(str::to_string),
-                revision: access.handle().revision().get(),
+                revision: revision.get(),
             }
         }
     };

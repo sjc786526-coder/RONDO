@@ -162,13 +162,19 @@ Root 的判断跨 Agent 流动，同时始终只有一份 Harness 持有的 cano
     未自行读取 Agent status。稳定团队协议前缀升版至 v2 并说明 route 语义。
 - 定向门禁全部通过（详见"当前验收状态"）。
 
+- **首轮独立审查（`b2a9fe6`）判定不通过，三项阻断已整改**：
+  - 活动指派去重未占用新 retry identity，指派结束后原样重放会再造一个指派，且该 identity 还能被其他提交占用。
+  - 精确重放从提交时缓存的 `RouteOutcome` 取值，delivery 永远是 `pending`，会掩盖真实投递失败。
+  - `route_dispatch` 允许目标取用，`record_delivery` 只允许发起者，导致目标可先真实重发通知、事后才记账失败。
+  - 顺带收紧：信息型通知不再指示目标追加 Version；route 返回的 revision 与 delivery 取自同一 canonical 快照。
+
 ### 当前工作
 
-实现与定向验证已完成，成果已提交在本工作树分支，等待独立审查。
+实现、整改与定向复验已完成，成果已提交在本工作树分支，等待复审。
 
 ### 本任务剩余步骤
 
-- 无。交由独立审查者验收。
+- 无。交由独立审查者复验。
 
 ### 阻塞项
 
@@ -179,12 +185,12 @@ Root 的判断跨 Agent 流动，同时始终只有一份 Harness 持有的 cano
 - 规划与现场核对：已完成。
 - M-2 实现、格式化、lint：已完成。`just fmt` / `just fmt-check` 通过，
   `just fix -p codex-team-state` 与 `just fix -p codex-core` 无告警。
-- 定向测试（均经根共享构建锁执行）：
-  - `just test -p codex-team-state`：75/75 通过（M-1 原 46 项 + M-2 新增 29 项）。
+- 定向测试（整改后复跑，均经根共享构建锁执行）：
+  - `just test -p codex-team-state`：78/78 通过（M-1 原 46 项 + M-2 32 项，含整改新增 3 项）。
   - `just test -p codex-core --test all -- suite::team_world_state suite::team_routing`：12/12 通过
     （M-1 产品纵切 9 项无退化 + M-2 新增 3 项）。
-  - `just test -p codex-core --lib -- tools::`：415/415 通过；`-- context::`：99/99 通过；
-    `-- team`：9/9 通过（含 M-2 新增 7 项 route 工具用例）。
+  - `just test -p codex-core --lib -- tools::`：416/416 通过（含 8 项 route 工具用例，整改新增 1 项）；
+    `-- context::`：99/99 通过。
 - 顶层 `doc/WBS.md` / `doc/WBS-COMPLETED.md`：按本任务边界明确不修改，待 L6 集成后再窄同步。
 - Docker、真实 API、本地模型、全 workspace 测试：不在授权范围，未运行。
 
@@ -221,3 +227,7 @@ Root 的判断跨 Agent 流动，同时始终只有一份 Harness 持有的 cano
 | 013 | 通知投递失败只记在 route 的 `DeliveryState` 上，工具仍返回成功 | route 的 canonical 事实已经成立，把它报成失败会诱导模型重做一次授权 | 失败语义 | 已采纳 |
 | 014 | 投影中 route 行按可见性收敛：Root 见全部，成员只见发给自己的 | 选择性传播若在视图里泄露"还发给了谁"，等于抵消了它自己 | 投影 | 已采纳 |
 | 015 | 集成测试断言改为基于 mock server 完整请求日志的显式谓词，不依赖单个 mock 的 `single_request()` | `ResponseMock` 在匹配阶段就记录请求（含它随后拒绝的），其计数含义是"是否被询问"而非"是否应答" | 测试设施 | 已采纳 |
+| 016 | retry 账本只记 `RouteId`，重放时从 canonical route 现取 dispatch | delivery 是提交后仍在变的可变状态，缓存快照必然把 `pending` 报在真实失败之上 | 幂等与失败可见性 | 首轮审查后整改 |
+| 017 | 活动指派去重必须把本次 identity 绑定到该指派 | 不绑定则 identity 未被占用：指派结束后重放会再造一个，且该 identity 仍可被其他类型提交取用 | 幂等 | 首轮审查后整改 |
+| 018 | 同一 Event/target 已有进行中指派时，note 不同一律拒绝（`AssignmentInProgress`），不静默复用旧指派 | 沿用旧指派会丢掉 Root 刚下达的新指令；再开一个又让目标为同一 Event 持有两个理由 | route 提交 | 首轮审查后整改 |
+| 019 | `route_dispatch` 收紧为仅发起者可取，与 `record_delivery` 同一权威 | 取到 dispatch 距真实发送只差一步；把鉴权放在记账环节意味着"已经发出去了才拒绝" | 权限与副作用顺序 | 首轮审查后整改 |

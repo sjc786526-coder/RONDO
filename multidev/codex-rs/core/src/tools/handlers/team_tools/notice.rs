@@ -16,6 +16,7 @@ use crate::tools::context::ToolCallSource;
 use crate::tools::handlers::multi_agents_common::build_agent_resume_config;
 use crate::tools::handlers::multi_agents_v2::communication_from_tool_message;
 use codex_protocol::AgentPath;
+use codex_team_state::DeliveryOutcome;
 use codex_team_state::DeliveryResult;
 use codex_team_state::DeliveryState;
 use codex_team_state::RouteDispatch;
@@ -32,7 +33,7 @@ pub(super) async fn deliver_and_record(
     step_context: &StepContext,
     source: &ToolCallSource,
     dispatch: &RouteDispatch,
-) -> DeliveryState {
+) -> DeliveryOutcome {
     let result = match deliver(session, turn, step_context, source, dispatch).await {
         Ok(()) => DeliveryResult::Delivered,
         Err(reason) => {
@@ -48,14 +49,19 @@ pub(super) async fn deliver_and_record(
         .handle()
         .record_delivery(access.actor(), dispatch.route_id, result)
     {
-        Ok(outcome) => outcome.delivery,
+        Ok(outcome) => outcome,
         Err(err) => {
             // Only reachable if the route vanished or changed hands between the two calls, which
             // the store's rules make impossible. Report the problem rather than a delivery nobody
             // recorded.
             tracing::error!(route_id = %dispatch.route_id, %err, "could not record route delivery");
-            DeliveryState::Failed {
-                reason: err.to_string(),
+            DeliveryOutcome {
+                route_id: dispatch.route_id,
+                delivery: DeliveryState::Failed {
+                    reason: err.to_string(),
+                },
+                revision: access.handle().revision(),
+                changed: false,
             }
         }
     }
@@ -134,11 +140,17 @@ fn notice_text(dispatch: &RouteDispatch) -> String {
     } = dispatch;
     let mut text = format!(
         "Team route {route_id} (team_instance={instance}): event {event_id} is now visible to you as {duty}.\n\
-         Read its full chain with team_history(event_id=\"{event_id}\") and add your own entry with team_publish(event_id=\"{event_id}\", ...). This notice carries no event content.\n"
+         Read its full chain with team_history(event_id=\"{event_id}\"); this notice carries no event content.\n"
     );
+    // Only an assignment asks for anything. Telling an informational recipient to publish would
+    // manufacture work out of a notice, which is the distinction the two intents exist to keep.
     if duty.is_assigned() {
         text.push_str(&format!(
-            "When you are done, end it with team_route_update(route_id=\"{route_id}\", action=\"end\").\n"
+            "Record what you conclude with team_publish(event_id=\"{event_id}\", ...), and end the assignment with team_route_update(route_id=\"{route_id}\", action=\"end\") when you are done.\n"
+        ));
+    } else {
+        text.push_str(&format!(
+            "Nothing is being asked of you. You may add to the event with team_publish(event_id=\"{event_id}\", ...) if you have something to contribute.\n"
         ));
     }
     if let Some(note) = note {
