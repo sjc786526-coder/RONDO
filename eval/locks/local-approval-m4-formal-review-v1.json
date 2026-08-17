@@ -1,0 +1,424 @@
+{
+  "boundaries": {
+    "body_free": true,
+    "holdout_per_sample_published": false,
+    "runs_jsonl_modified": false,
+    "synthetic_holdout_combined": false,
+    "thresholds": null
+  },
+  "contract_version": "rondo_local_m4_formal_result_v1",
+  "decision": {
+    "choice": "keep_as_experiment",
+    "decided_date": "2026-08-16",
+    "deployment_started": false,
+    "made_by": "user",
+    "production_default_changed": false,
+    "provider_or_launcher_changed": false,
+    "rationale": "The user decided to keep the fine-tuned Local artifact as an experiment. The fine-tune improved every measured axis and produced no missed deny on either partition, but the synthetic gain is largely same-generator cue matching and the 16-case real anchor carries only allow labels, so this evidence cannot yet show the model is safely permissive."
+  },
+  "judge": {
+    "entry": "claude_code_subscription_session_human_present",
+    "judged_dates": [
+      "2026-08-16"
+    ],
+    "model": "claude-opus-5",
+    "point_in_time_only": true,
+    "programmatic_provider_used": false
+  },
+  "limitations": [
+    "Synthetic validation and the 470 training samples come from the same generator and state their decisive cue almost verbatim, so high synthetic agreement partly measures cue matching rather than general approval judgment.",
+    "Every holdout teacher label and every independent judge call on the holdout is allow, so the 16-case anchor can detect over-blocking and structured-output failure but cannot detect over-permissiveness.",
+    "The judge also develops this project; the independence flaw is accepted and recorded rather than mitigated.",
+    "The subscription-side judge model is not frozen by this repository, so every judge result is a point-in-time judgment and is not claimed to be reproducible.",
+    "Ten of the 130 frozen Sol synthetic targets were judged blind to have weak rationales because they assert specifics, such as a checksum mismatch or a dry-run result, that the supplied evidence does not contain; their outcomes were still supported.",
+    "The holdout partition uses a holdout-only terminal-carrying judge contract because two recorded terminals carry no decision; its counts are therefore not comparable with the synthetic partition and the two are never combined."
+  ],
+  "metric_contract_name": "rondo_l4_local_static_v1",
+  "milestone": "local_m4_human_decision",
+  "partitions": {
+    "holdout": {
+      "batch_summary": {
+        "body_batch_ids": [
+          "holdout-anchor-b01",
+          "holdout-anchor-b02"
+        ],
+        "cohort_manifest_sha256": "1a033f35c8d9436215c07fee6d465b4a7571ccebae617b94bf34bebf4e6b4854",
+        "contract_version": "rondo_m4_holdout_batch_summary_v2",
+        "decision": null,
+        "judge_models": [
+          "claude-opus-5"
+        ],
+        "judge_outcomes": {
+          "allow": 16
+        },
+        "judged_dates": [
+          "2026-08-16"
+        ],
+        "partition": "holdout",
+        "sample_count": 16,
+        "schema_version": 2,
+        "sides": {
+          "local-ft-static": {
+            "all_candidates_inadequate": 0,
+            "approval_judgments": {
+              "supported": 15,
+              "unsupported": 1
+            },
+            "candidate_outcomes": {
+              "allow": 15,
+              "deny": 1
+            },
+            "comparable_decision_count": 16,
+            "judge_allow_side_deny": 1,
+            "judge_deny_side_allow": 0,
+            "judge_outcome_agreement": 15,
+            "no_decision_count": 0,
+            "not_preferred": 3,
+            "reason_quality": {
+              "adequate": 12,
+              "strong": 1,
+              "weak": 3
+            },
+            "sole_preferred": 0,
+            "tied_preferred": 13
+          },
+          "local-static": {
+            "all_candidates_inadequate": 0,
+            "approval_judgments": {
+              "no_decision": 2,
+              "supported": 8,
+              "unsupported": 6
+            },
+            "candidate_outcomes": {
+              "allow": 8,
+              "deny": 6
+            },
+            "comparable_decision_count": 14,
+            "judge_allow_side_deny": 6,
+            "judge_deny_side_allow": 0,
+            "judge_outcome_agreement": 8,
+            "no_decision_count": 2,
+            "not_preferred": 8,
+            "reason_quality": {
+              "adequate": 8,
+              "not_applicable": 2,
+              "weak": 6
+            },
+            "sole_preferred": 0,
+            "tied_preferred": 8
+          },
+          "sol-static": {
+            "all_candidates_inadequate": 0,
+            "approval_judgments": {
+              "supported": 16
+            },
+            "candidate_outcomes": {
+              "allow": 16
+            },
+            "comparable_decision_count": 16,
+            "judge_allow_side_deny": 0,
+            "judge_deny_side_allow": 0,
+            "judge_outcome_agreement": 16,
+            "no_decision_count": 0,
+            "not_preferred": 0,
+            "reason_quality": {
+              "strong": 16
+            },
+            "sole_preferred": 1,
+            "tied_preferred": 15
+          }
+        },
+        "synthetic_holdout_combined": false,
+        "tasks": null,
+        "thresholds": null
+      },
+      "finetune_delta_relative_to_judge": {
+        "judge_outcome_agreement": 7,
+        "missed_deny_judge_deny_side_allow": 0,
+        "not_preferred": -5,
+        "over_block_judge_allow_side_deny": -5,
+        "sole_preferred": 0,
+        "tied_preferred": 5
+      },
+      "judge_contract": {
+        "prompt_sha256": "e787deb4b18bb0b7000e427d2c9d905eb05591468523a4bc5066d94ce96519e4",
+        "prompt_version": "rondo_m4_holdout_terminal_judge_v2",
+        "result_schema_sha256": "ad379d837f6b384a945e201748024a1fc5003fa55dc724b5a5459367abe46466",
+        "result_schema_version": 2
+      },
+      "relative_to_judge": {
+        "local-ft-static": {
+          "all_candidates_inadequate": 0,
+          "approval_judgments": {
+            "supported": 15,
+            "unsupported": 1
+          },
+          "candidate_outcomes": {
+            "allow": 15,
+            "deny": 1
+          },
+          "comparable_decision_count": 16,
+          "judge_outcome_agreement": 15,
+          "missed_deny_judge_deny_side_allow": 0,
+          "no_decision_count": 0,
+          "not_preferred": 3,
+          "over_block_judge_allow_side_deny": 1,
+          "reason_quality": {
+            "adequate": 12,
+            "strong": 1,
+            "weak": 3
+          },
+          "sole_preferred": 0,
+          "tied_preferred": 13
+        },
+        "local-static": {
+          "all_candidates_inadequate": 0,
+          "approval_judgments": {
+            "no_decision": 2,
+            "supported": 8,
+            "unsupported": 6
+          },
+          "candidate_outcomes": {
+            "allow": 8,
+            "deny": 6
+          },
+          "comparable_decision_count": 14,
+          "judge_outcome_agreement": 8,
+          "missed_deny_judge_deny_side_allow": 0,
+          "no_decision_count": 2,
+          "not_preferred": 8,
+          "over_block_judge_allow_side_deny": 6,
+          "reason_quality": {
+            "adequate": 8,
+            "not_applicable": 2,
+            "weak": 6
+          },
+          "sole_preferred": 0,
+          "tied_preferred": 8
+        },
+        "sol-static": {
+          "all_candidates_inadequate": 0,
+          "approval_judgments": {
+            "supported": 16
+          },
+          "candidate_outcomes": {
+            "allow": 16
+          },
+          "comparable_decision_count": 16,
+          "judge_outcome_agreement": 16,
+          "missed_deny_judge_deny_side_allow": 0,
+          "no_decision_count": 0,
+          "not_preferred": 0,
+          "over_block_judge_allow_side_deny": 0,
+          "reason_quality": {
+            "strong": 16
+          },
+          "sole_preferred": 1,
+          "tied_preferred": 15
+        }
+      },
+      "role": "real_distribution_sanity_anchor",
+      "teacher_agreement": {
+        "local-ft-static": {
+          "agree": 15,
+          "comparable_decision_count": 16,
+          "sample_count": 16,
+          "teacher_agreement_rate": 0.9375,
+          "teacher_allow_side_deny": 1,
+          "teacher_deny_side_allow": 0
+        },
+        "local-static": {
+          "agree": 8,
+          "comparable_decision_count": 14,
+          "sample_count": 16,
+          "teacher_agreement_rate": 0.571429,
+          "teacher_allow_side_deny": 6,
+          "teacher_deny_side_allow": 0
+        }
+      },
+      "terminal_states": {
+        "local-ft-static": {
+          "decision": 16,
+          "infrastructure_failure": 0,
+          "refusal": 0,
+          "structured_output_failure": 0,
+          "timeout": 0
+        },
+        "local-static": {
+          "decision": 14,
+          "infrastructure_failure": 0,
+          "refusal": 0,
+          "structured_output_failure": 2,
+          "timeout": 0
+        },
+        "sol-static": {
+          "decision": 16,
+          "infrastructure_failure": 0,
+          "refusal": 0,
+          "structured_output_failure": 0,
+          "timeout": 0
+        }
+      },
+      "three_way_ranking_claimed": false
+    },
+    "synthetic": {
+      "body_batch_ids": [
+        "synthetic-body-b01",
+        "synthetic-body-b02"
+      ],
+      "cohort_manifest_sha256": "9dd901fff3df072ed65ff3962d1e4524255a5a42a3f810903d191457cb494b95",
+      "finetune_delta_relative_to_judge": {
+        "judge_outcome_agreement": 26,
+        "missed_deny_judge_deny_side_allow": 0,
+        "not_preferred": -24,
+        "over_block_judge_allow_side_deny": -26,
+        "sole_preferred": -5,
+        "tied_preferred": 29
+      },
+      "judge_contract": {
+        "prompt_sha256": "74d95be39ec35f739429085ba35f64e9c7e8e88f983ab1f7f3074a36c8a26c8d",
+        "prompt_version": "rondo_m4_cross_eval_judge_v1",
+        "result_schema_sha256": "ca0c2352da01613bc39ad464d47f787237622377b2d78da01ddc2a3fcb25dd28",
+        "result_schema_version": 1
+      },
+      "judge_outcomes": {
+        "allow": 55,
+        "deny": 75
+      },
+      "relative_to_judge": {
+        "local-ft-static": {
+          "all_candidates_inadequate": 0,
+          "approval_judgments": {
+            "supported": 130
+          },
+          "candidate_outcomes": {
+            "allow": 55,
+            "deny": 75
+          },
+          "comparable_decision_count": 130,
+          "judge_outcome_agreement": 130,
+          "missed_deny_judge_deny_side_allow": 0,
+          "no_decision_count": 0,
+          "not_preferred": 5,
+          "over_block_judge_allow_side_deny": 0,
+          "reason_quality": {
+            "adequate": 54,
+            "strong": 71,
+            "weak": 5
+          },
+          "sole_preferred": 0,
+          "tied_preferred": 125
+        },
+        "local-static": {
+          "all_candidates_inadequate": 0,
+          "approval_judgments": {
+            "supported": 104,
+            "unsupported": 26
+          },
+          "candidate_outcomes": {
+            "allow": 29,
+            "deny": 101
+          },
+          "comparable_decision_count": 130,
+          "judge_outcome_agreement": 104,
+          "missed_deny_judge_deny_side_allow": 0,
+          "no_decision_count": 0,
+          "not_preferred": 29,
+          "over_block_judge_allow_side_deny": 26,
+          "reason_quality": {
+            "adequate": 61,
+            "strong": 40,
+            "weak": 29
+          },
+          "sole_preferred": 5,
+          "tied_preferred": 96
+        },
+        "sol-static": {
+          "all_candidates_inadequate": 0,
+          "approval_judgments": {
+            "supported": 130
+          },
+          "candidate_outcomes": {
+            "allow": 55,
+            "deny": 75
+          },
+          "comparable_decision_count": 130,
+          "judge_outcome_agreement": 130,
+          "missed_deny_judge_deny_side_allow": 0,
+          "no_decision_count": 0,
+          "not_preferred": 10,
+          "over_block_judge_allow_side_deny": 0,
+          "reason_quality": {
+            "adequate": 45,
+            "strong": 75,
+            "weak": 10
+          },
+          "sole_preferred": 0,
+          "tied_preferred": 120
+        }
+      },
+      "role": "formal_body",
+      "sample_count": 130,
+      "teacher_agreement": {
+        "local-ft-static": {
+          "agree": 130,
+          "comparable_decision_count": 130,
+          "sample_count": 130,
+          "teacher_agreement_rate": 1.0,
+          "teacher_allow_side_deny": 0,
+          "teacher_deny_side_allow": 0
+        },
+        "local-static": {
+          "agree": 104,
+          "comparable_decision_count": 130,
+          "sample_count": 130,
+          "teacher_agreement_rate": 0.8,
+          "teacher_allow_side_deny": 26,
+          "teacher_deny_side_allow": 0
+        }
+      },
+      "terminal_states": {
+        "local-ft-static": {
+          "decision": 130,
+          "infrastructure_failure": 0,
+          "refusal": 0,
+          "structured_output_failure": 0,
+          "timeout": 0
+        },
+        "local-static": {
+          "decision": 130,
+          "infrastructure_failure": 0,
+          "refusal": 0,
+          "structured_output_failure": 0,
+          "timeout": 0
+        },
+        "sol-static": {
+          "decision": 130,
+          "infrastructure_failure": 0,
+          "refusal": 0,
+          "structured_output_failure": 0,
+          "timeout": 0
+        }
+      }
+    }
+  },
+  "private_artifacts": {
+    "holdout-aggregate.json": "9f886b2fa7630a3eef9f1d19d1c25a179219ba9408a62e8a84a67bdeb883ddff",
+    "holdout-judge-package-holdout-anchor-b01": "df8e4e97572cdc952f0d7353718093daf2d3f9f6c56e3a4edfdfcfa5ccf4866d",
+    "holdout-judge-package-holdout-anchor-b02": "a887ea3f385a78388dea24fc0391199520c85e32bcc10ed6f04904253ac014aa",
+    "holdout-judge-results-holdout-anchor-b01": "f0a797cf7ca02503ae75396d979a75626939e89d7a10cb719dacb0bbb722c21e",
+    "holdout-judge-results-holdout-anchor-b02": "a00883905cb8ef70fdd403af2c40a5f4c5615d82550cfe96b8f6c44eac36ac48",
+    "holdout-source.jsonl": "f9fba8ebc70bf24f72e6394f7c69d2610c80fd68ed9a90c99659cb73d01e6e70",
+    "holdout-three-side-outputs.jsonl": "29b01d7c28eeb8a67881717a02ac532a5096b389a6bad80692ec19a3d7715373",
+    "l6-pair-receipt.json": "1d57def199a4ba60a70172c65c07240bd4dc5bc2189bb94ce5ee840c9547129c",
+    "synthetic-aggregate.json": "b760b03875704e654fd0650df0d9d195162584a3464072d204946b78bfa8c4c0",
+    "synthetic-judge-package-synthetic-body-b01": "bce0348c2bff2978d93318ac24e39996e6eae88b3b971cef8e1205dd14f6e17b",
+    "synthetic-judge-package-synthetic-body-b02": "46182416bc28b48e858bbecb611367a5043815b03bfa910ab48a06bf05949ddd",
+    "synthetic-judge-results-synthetic-body-b01": "3b0f979399830e8211925357b8a00964e482bc6eeb78d1b43d2314f478353ccd",
+    "synthetic-judge-results-synthetic-body-b02": "650986c94056a675d93a34b49fc588fd9ad7d901e33150eb087b99621fc37e07",
+    "synthetic-three-side-outputs.jsonl": "0e8fbbc7a9083207cad42f50cee126b67e309c16aa65d629932a85f4e09100aa"
+  },
+  "review_id": "20260816-local-m4-formal-review-v1",
+  "schema_version": 1,
+  "status": "complete"
+}

@@ -171,37 +171,31 @@ Plan 032 的真实 holdout 与 Plan 037 的同一 paired-GGUF 形成独立 sanit
 
 ### 已完成
 
-- 已核对根 `AGENTS.md`、README、顶层/Local WBS、数据布局、Plan 032/036/037、相关完成/验收日志与 live
-  `cross_eval` / paired runner 实现。
-- 规划基线为 `main = origin/main = 8852273fb15ba56f9f98dc600b48f1ef5fa056c0`，主工作区干净；Plan 037
-  的正式 390 行三方输入和 canonical pair evidence 已为 `ready_for_blind_packaging`。
-- 已确认 Plan 036 的 synthetic 两批、冻结 judge prompt/schema、严格导入/解盲/聚合及私有 holdout 投影合同可复用；
-  holdout 正式物化和同 pair 本地两侧运行仍待本任务完成。
-- 已创建独立 worktree `/home/sjc/desktop/RONDO/.claude/worktrees/041-local-m4-formal-review` 与分支
-  `worktree-041-local-m4-formal-review`。规划时 040/M-2 worktree 已出现进行中的 `multidev/` 修改，视为受保护并行现场。
-- 用户已一次性授权本计划内的私有工件读取、两枚 GGUF holdout 串行推理、Opus 5 订阅会话数据外发及同冻结合同的
-  有界格式/中断重试；首次外发无需再次抽样确认。
+- 全部完成。synthetic 130 条与真实 holdout 16 条分别完成物化/导入、盲化打包、正式裁判、解盲与聚合，
+  用户已作出唯一人判：**保留为实验**（`keep_as_experiment`，2026-08-16）。
+- synthetic 直接消费 Plan 037 已验真的 390 行，未重跑 130×2 推理、未重新调用 Sol；holdout 从 Plan 032 冻结
+  批次严格重验后物化 16 条，两种 Local 使用与 Plan 037 逐字节相同的 pair receipt（`1d57def1…129c`）串行运行。
+- 结果：synthetic 未微调教师一致 104/130、误拦 26，微调 130/130、误拦 0；holdout 未微调 14/16 合规、
+  教师一致 8/14、误拦 6，微调 16/16 合规、教师一致 15/16、误拦 1；两分区漏放均为 0，从不合并分母。
+- tracked body-free 结论锁 `eval/locks/local-approval-m4-formal-review-v1.json`（`2c8af519…cd3e`）已发布；
+  未改动生产默认、provider、launcher 或部署。
+- focused unittest 253/253 通过；本地模型阶段持共享重型锁串行运行，进程/端口/显存已清理。
 
 ### 当前工作
 
-- execplan 已完成，等待 Claude Code 中的 Opus 5 执行者按本计划实施。
+- 已收口，等待独立审查。
 
 ### 本任务剩余步骤
 
-1. 在 041 worktree 复验现有 synthetic/paired 输入并完成必要的 holdout 正式入口与 focused 回归。
-2. 在资源互斥门内物化并串行完成 holdout 两种 Local 输出，严格导入同一 pair 与既有 Sol 标签。
-3. 分别生成并验证 synthetic 两批与 holdout 独立批次的正式匿名裁判包。
-4. 由人在场 Opus 5 按冻结 prompt/schema 完成全部裁判结果；只对中断/截断/格式无效做同合同有界恢复。
-5. 全部批次验证通过后分别解盲、聚合，形成正式结果摘要并向用户请求唯一人工决定。
-6. 记录用户决定，完成定向验证、文档/日志同步、现场检查和 041 分支提交，交由独立审查；整改真实发现并复验提交。
+1. 交由 Codex 审查者独立验收，按审查中的真实问题整改、复验并追加提交。
 
 ### 阻塞项
 
-- 当前无。若 040 正占用重型资源，holdout 本地模型阶段按计划等待，不视为立即阻塞。
+- 无。
 
 ### 当前验收状态
 
-- 仅完成规划与 worktree 隔离；尚未运行 holdout 本地模型、Opus 正式裁判、解盲、聚合或人工决策，不能声明 M4 完成。
+- 正式结果完整、用户决定已记录、tracked 结论锁已发布、focused 测试通过；041 分支已提交，未合并、未推送。
 
 ### 交接边界
 
@@ -225,3 +219,6 @@ Plan 032 的真实 holdout 与 Plan 037 的同一 paired-GGUF 形成独立 sanit
 | 007 | 041 只提交 worktree 分支；合并、推送、归档等待用户另行批准 | 遵循本次明确交付要求 | Git 交付 | 已采纳 |
 | 008 | 订阅侧 Opus 结果记录实际模型标识与日期，只声明 point-in-time 判定 | 订阅模型版本无法由仓库冻结，不能宣称完全复现 | 结果限制 | 已采纳 |
 | 009 | 顶层权威文档末尾串行同步并基于届时最新 main 保留 Multi 状态 | 040/M-2 正在并行推进，旧分支文档不能覆盖新事实 | 并行协调 | 已采纳 |
+| 010 | 真实 holdout 出现两个既有 terminal failure（未微调侧结构化输出失败），经用户现场授权新增 **holdout-only** terminal-carrying v2 裁判合同 | 冻结 v1 包每条只能装三个 decision，无法表达已经产生的真实结果；这是完整表达既有结果的格式兼容，**不得**用于重跑、挑样或改变裁判标准 | 裁判合同 | 已采纳 |
+| 011 | v2 只作用于 holdout：synthetic 两批继续用冻结 v1 prompt/package/schema，v1 文件保持冻结不修改；无判定候选记为 `no_decision`/`not_applicable`，禁止进入 `preferred_candidates`，也不得当作隐含 deny | 保持合成主体判据不漂移，同时让 16/16 完整集合可判 | 裁判合同 | 已采纳 |
+| 012 | 漏放/误拦与裁判一致率只在该侧产生有效 decision 时计算；结构化失败单独进入可用性口径，教师一致率同时报有效判定分母与完整覆盖率 | 判断质量与工程可用性不混算 | 指标口径 | 已采纳 |

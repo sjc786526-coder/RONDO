@@ -341,9 +341,23 @@ M4 由 Opus 5 在 Claude Code 会话内判定，**不满足“自动运行、自
   `unblinded-<body_batch_id>.json` 和 `aggregate.json`。聚合只报判断一致/分歧、偏好/tie 与候选评价等事实，
   不自动产生采用/保留/停止决定或机械阈值。
 - synthetic body 与 holdout sanity anchor 使用独立 private cohort 和 aggregate，聚合入口拒绝混合分区。
-  本任务不物化真实 holdout；将来若发布 holdout tracked 投影，只能符合
-  `local-m4-holdout-summary-v1.schema.json` 的批次级摘要，`tasks=null`，不得含逐条身份、正文、输出、裁判理由
-  或映射。
+  真实 holdout 由 `rondo_eval.local_approval.holdout_anchor` 从 Plan 032 冻结批次严格重验后物化：先按真实归档
+  重算 manifest / outbound / prepare-receipt 并要求逐字节一致，再复跑 Plan 032 verifier，然后只投影 `selected`
+  且 `partition=holdout` 的行，数量必须与冻结 manifest 声明一致，不增删、不抽样。私有源为执行目录内的
+  `holdout-source.jsonl` 与 body-free `holdout-materialization-receipt.json`；holdout 的 cohort id 按私有
+  batch id 的摘要派生，避免该 id 经 cohort 身份进入裁判包。
+- holdout tracked 投影只能是批次级摘要且 `tasks=null`，不得含逐条身份、正文、输出、裁判理由或映射。三侧全部
+  为 decision 时用 `local-m4-holdout-summary-v1.schema.json`；当某条真实 holdout 记录了无判定终态时改用
+  `local-m4-holdout-summary-v2.schema.json`，它额外承载 `comparable_decision_count` 与 `no_decision_count`，
+  且裁判一致/漏放/误拦只在该侧有有效 decision 时计数。
+- **holdout 专用 v2 裁判合同**：冻结 v1 judge package 每条只能装三个 decision，无法表达已经产生的真实失败终态。
+  `local-m4-holdout-terminal-judge-prompt-v2.md` 与 `local-m4-holdout-terminal-judge-result-v2.schema.json`
+  只用于 holdout：匿名候选携带真实 terminal，无判定候选必须记为 `approval_judgment=no_decision`、
+  `reason_quality=not_applicable`，禁止进入 `preferred_candidates`，也不得被当作隐含 deny；导入器还要求每条
+  评价与包内实际终态一致。synthetic 主体一律使用冻结 v1，且 v1 三件套不因此修改。
+- Local M4 的正式结果另有一份 tracked、body-free 的结论锁 `eval/locks/local-approval-m4-formal-review-v1.json`：
+  只保存两个分区各自的计数、直接差值、裁判与合同身份、私有工件哈希、已知限制和用户三选一决定，不含正文、
+  逐条身份或裁判理由，也不写入 `runs.jsonl`。
 - 裁判模型由订阅侧提供且不可冻结；每批结果必须记录实际模型标识与日期并标为时点判定，不假装可完全重跑。
 
 ## 5. 证据包分区

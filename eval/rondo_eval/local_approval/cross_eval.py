@@ -81,6 +81,20 @@ AGGREGATE_CONTRACT_VERSION = "rondo_m4_partition_aggregate_v1"
 HOLDOUT_PRIVATE_CONTRACT_VERSION = "rondo_m4_holdout_anchor_private_v1"
 HOLDOUT_PUBLIC_CONTRACT_VERSION = "rondo_m4_holdout_batch_summary_v1"
 
+# Holdout-only v2.  Real holdout candidates can carry a recorded terminal that
+# has no decision, which the frozen v1 judge package cannot represent.  These
+# contracts express those existing results completely.  They never apply to the
+# synthetic body, which keeps the frozen v1 prompt, package and result schema,
+# and they are not a licence to re-run, re-sample or re-judge anything.
+TERMINAL_PACKAGE_SCHEMA_VERSION = 2
+TERMINAL_PACKAGE_CONTRACT_VERSION = "rondo_m4_blind_terminal_package_v2"
+HOLDOUT_JUDGE_PROMPT_VERSION = "rondo_m4_holdout_terminal_judge_v2"
+HOLDOUT_JUDGE_RESULT_SCHEMA_VERSION = 2
+HOLDOUT_JUDGE_RESULT_CONTRACT_VERSION = "rondo_m4_holdout_terminal_judge_result_v2"
+HOLDOUT_PUBLIC_V2_CONTRACT_VERSION = "rondo_m4_holdout_batch_summary_v2"
+NO_DECISION_JUDGMENT = "no_decision"
+NO_DECISION_QUALITY = "not_applicable"
+
 COHORT_RELATIVE_PATH = "eval/locks/local-approval-m4-synthetic-cohort-v1.json"
 DATASET_DIRECTORY = "training/local-approval-synthetic-v1"
 DATASET_MANIFEST_RELATIVE_PATH = f"{DATASET_DIRECTORY}/manifest.json"
@@ -103,6 +117,16 @@ HOLDOUT_SUMMARY_SCHEMA_RELATIVE_PATH = (
 LOCAL_PAIR_RECEIPT_SCHEMA_RELATIVE_PATH = (
     "eval/templates/cross-eval-judge/local-m4-l6-pair-receipt-v1.schema.json"
 )
+HOLDOUT_JUDGE_PROMPT_RELATIVE_PATH = (
+    "eval/templates/cross-eval-judge/local-m4-holdout-terminal-judge-prompt-v2.md"
+)
+HOLDOUT_JUDGE_RESULT_SCHEMA_RELATIVE_PATH = (
+    "eval/templates/cross-eval-judge/"
+    "local-m4-holdout-terminal-judge-result-v2.schema.json"
+)
+HOLDOUT_SUMMARY_V2_SCHEMA_RELATIVE_PATH = (
+    "eval/templates/cross-eval-judge/local-m4-holdout-summary-v2.schema.json"
+)
 
 PARTITIONS = ("synthetic", "holdout")
 SIDES = ("sol-static", "local-static", "local-ft-static")
@@ -115,17 +139,21 @@ _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _ID = re.compile(r"[a-z0-9][a-z0-9-]{0,95}\Z")
 _L6_PAIR_ID = re.compile(r"l6-[a-z0-9][a-z0-9-]{0,92}\Z")
 _UNAMBIGUOUS_SIDE_TOKEN = re.compile(r"\b(?:sol|ft)\b", re.IGNORECASE)
-_LOCAL_TOKEN = re.compile(r"\blocal\b", re.IGNORECASE)
-_SAFE_LOCAL_SEMANTIC_USE = re.compile(
-    r"\blocal(?:-|\s+)(?:"
-    r"workspace|module|reset|backup|file|path|directory|repository|repo|branch|"
-    r"machine|host|service|process|port|environment|operation|command|change|"
-    r"build|test|cache|copy|checkout|tree|state|data|evidence|scope|sandbox|"
-    r"endpoint|network|disk|filesystem|installation|configuration|config|package|"
-    r"dependency|database|server|client|account|user|resource|validation"
+# Lowercase "local" is ordinary technical English ("local git history", "the
+# local label", "local merge"), so it only identifies a side when it names one
+# directly or is written as a proper noun.  Exact side identifiers and imported
+# run-identity values are still rejected verbatim by the marker scan, and
+# nearby-word uses such as "the local approval model" are still rejected by the
+# side-identity context rule below.
+_SIDE_NAMED_LOCAL_USE = re.compile(
+    r"\blocal[-_\s]+(?:"
+    r"static|ft|finetuned|fine-tuned|untuned|unfinetuned|baseline|variant|"
+    r"model|models|candidate|candidates|side|sides|output|outputs|answer|"
+    r"answers|response|responses|checkpoint|adapter|judge|replica|run|runs"
     r")\b",
     re.IGNORECASE,
 )
+_PROPER_NOUN_LOCAL = re.compile(r"\bLocal\b")
 _SIDE_IDENTITY_CONTEXT = re.compile(
     r"(?:\b(?:candidate|answer|output|response|identity|side|model)\b.{0,32}"
     r"\b(?:sol|local|ft)\b"
@@ -162,6 +190,9 @@ class TemplateIdentity:
     blinding_contract_sha256: str
     holdout_summary_schema_sha256: str
     local_pair_receipt_schema_sha256: str
+    holdout_judge_prompt_sha256: str
+    holdout_judge_result_schema_sha256: str
+    holdout_summary_v2_schema_sha256: str
 
 
 @dataclass(frozen=True)
@@ -354,6 +385,9 @@ def load_template_identity(worktree_root: Path) -> TemplateIdentity:
         BLINDING_CONTRACT_RELATIVE_PATH,
         HOLDOUT_SUMMARY_SCHEMA_RELATIVE_PATH,
         LOCAL_PAIR_RECEIPT_SCHEMA_RELATIVE_PATH,
+        HOLDOUT_JUDGE_PROMPT_RELATIVE_PATH,
+        HOLDOUT_JUDGE_RESULT_SCHEMA_RELATIVE_PATH,
+        HOLDOUT_SUMMARY_V2_SCHEMA_RELATIVE_PATH,
     )
     hashes = [_sha256(_safe_read(worktree_root / path, private=False)) for path in paths]
     return TemplateIdentity(*hashes)
@@ -1270,12 +1304,23 @@ def validate_three_side_import(
     pair_receipt_path: Path,
     *,
     pair_evidence_path: Path | None = None,
+    bundle: CohortBundle | None = None,
 ) -> tuple[
     CohortBundle,
     list[dict[str, Any]],
     dict[str, Any] | FormalL6PairEvidence,
 ]:
-    bundle = load_synthetic_bundle(worktree_root)
+    """Validate one complete three-side import against a cohort.
+
+    ``bundle`` defaults to the tracked synthetic body cohort.  The private
+    holdout anchor supplies its own bundle; the two partitions never share a
+    cohort, package, result or aggregate.
+    """
+
+    if bundle is None:
+        bundle = load_synthetic_bundle(worktree_root)
+    elif bundle.partition == "synthetic":
+        raise CrossEvalError("synthetic_bundle_must_be_tracked")
     values, _raw = _load_jsonl(input_path, private=True)
     receipt, receipt_raw = _load_json(pair_receipt_path, private=True)
     normalized_receipt, _sha, _contracts = validate_l6_pair_receipt(
@@ -1404,10 +1449,14 @@ def build_private_holdout_bundle(
             }
         )
     source_sha = _sha256(raw)
+    # The judge package carries ``cohort_id`` verbatim while the Sol run
+    # contract carries the private batch id as ``source_dataset_batch_id``.
+    # Embedding the batch id in the cohort id would therefore put one side's
+    # identity value inside every package, so bind it by digest instead.
     manifest = {
         "schema_version": 1,
         "contract_version": HOLDOUT_PRIVATE_CONTRACT_VERSION,
-        "cohort_id": f"m4-holdout-{holdout_batch_id}",
+        "cohort_id": f"m4-holdout-{_sha256(holdout_batch_id.encode('utf-8'))[:16]}",
         "partition": "holdout",
         "status": COHORT_STATUS,
         "source": {
@@ -1495,14 +1544,10 @@ def _contains_forbidden_side_identity(value: Any) -> bool:
         if isinstance(item, list):
             return any(visit(nested) for nested in item)
         if isinstance(item, str):
-            local_uses = list(_LOCAL_TOKEN.finditer(item))
-            unsafe_local = any(
-                _SAFE_LOCAL_SEMANTIC_USE.match(item, match.start()) is None
-                for match in local_uses
-            )
             return bool(
                 _UNAMBIGUOUS_SIDE_TOKEN.search(item)
-                or unsafe_local
+                or _SIDE_NAMED_LOCAL_USE.search(item)
+                or _PROPER_NOUN_LOCAL.search(item)
                 or _SIDE_IDENTITY_CONTEXT.search(item)
                 or _MODEL_PATH_MARKER.search(item)
             )
@@ -1776,6 +1821,161 @@ def build_blind_batches(
     return results
 
 
+def build_terminal_blind_batches(
+    bundle: CohortBundle,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    judge_model: str,
+    judged_date: str,
+    seed: bytes,
+    templates: TemplateIdentity,
+    l6_pair_receipt: Mapping[str, Any],
+) -> list[BlindBatch]:
+    """Build holdout-only v2 packages that carry every recorded terminal.
+
+    This is the same cohort, the same complete set, the same seed-driven
+    balanced blinding and the same anonymity scan as the frozen v1 packager.
+    The only difference is that a candidate carries its recorded terminal, so a
+    sample where a side produced no compliant decision can still be judged
+    instead of being dropped.
+    """
+
+    if bundle.partition != "holdout":
+        raise CrossEvalError("terminal_package_is_holdout_only")
+    if not isinstance(judge_model, str) or not judge_model.strip():
+        raise CrossEvalError("judge_model_invalid")
+    _validate_date(judged_date)
+    normalized = validate_three_side_rows(bundle, rows, l6_pair_receipt=l6_pair_receipt)
+    by_key = {(row["sample_id"], row["side"]): row for row in normalized}
+    cohort_items = {item["sample_id"]: item for item in bundle.manifest["items"]}
+    markers = _side_identity_markers(normalized) | {seed.hex()}
+    results: list[BlindBatch] = []
+    for batch_id in sorted({item["body_batch_id"] for item in cohort_items.values()}):
+        sample_ids = sorted(
+            sample_id
+            for sample_id, item in cohort_items.items()
+            if item["body_batch_id"] == batch_id
+        )
+        shuffled, orders = _balanced_side_orders(sample_ids, batch_id=batch_id, seed=seed)
+        package_samples = []
+        mapping_entries = []
+        for sample_id in shuffled:
+            source = bundle.source_rows[sample_id]
+            order = orders[sample_id]
+            package_samples.append(
+                {
+                    "sample_id": sample_id,
+                    "payload_sha256": source["payload_sha256"],
+                    "approval_input": copy.deepcopy(source["input"]),
+                    "candidates": [
+                        {
+                            "candidate_id": candidate_id,
+                            "terminal": _row_terminal(by_key[(sample_id, side)]),
+                        }
+                        for candidate_id, side in zip(CANDIDATES, order)
+                    ],
+                }
+            )
+            mapping_entries.append(
+                {
+                    "sample_id": sample_id,
+                    "positions": [
+                        {"candidate_id": candidate_id, "side": side}
+                        for candidate_id, side in zip(CANDIDATES, order)
+                    ],
+                }
+            )
+        package = {
+            "schema_version": TERMINAL_PACKAGE_SCHEMA_VERSION,
+            "contract_version": TERMINAL_PACKAGE_CONTRACT_VERSION,
+            "partition": bundle.partition,
+            "cohort_id": bundle.manifest["cohort_id"],
+            "cohort_manifest_sha256": bundle.manifest_sha256,
+            "body_batch_id": batch_id,
+            "judge_prompt_version": HOLDOUT_JUDGE_PROMPT_VERSION,
+            "judge_prompt_sha256": templates.holdout_judge_prompt_sha256,
+            "judge_result_schema_version": HOLDOUT_JUDGE_RESULT_SCHEMA_VERSION,
+            "judge_result_schema_sha256": templates.holdout_judge_result_schema_sha256,
+            "samples": package_samples,
+        }
+        terminals = [
+            candidate["terminal"]
+            for sample in package_samples
+            for candidate in sample["candidates"]
+        ]
+        if _contains_marker(package, markers) or _contains_forbidden_side_identity(
+            terminals
+        ):
+            raise CrossEvalError("blind_package_side_leak")
+        package_raw = _json_file_bytes(package)
+        package_sha = _sha256(package_raw)
+        mapping = {
+            "schema_version": MAPPING_SCHEMA_VERSION,
+            "contract_version": MAPPING_CONTRACT_VERSION,
+            "partition": bundle.partition,
+            "cohort_manifest_sha256": bundle.manifest_sha256,
+            "body_batch_id": batch_id,
+            "package_sha256": package_sha,
+            "seed_sha256": _sha256(seed),
+            "position_counts": _position_counts(mapping_entries),
+            "entries": mapping_entries,
+        }
+        request = {
+            "schema_version": REQUEST_SCHEMA_VERSION,
+            "contract_version": REQUEST_CONTRACT_VERSION,
+            "partition": bundle.partition,
+            "cohort_manifest_sha256": bundle.manifest_sha256,
+            "body_batch_id": batch_id,
+            "package_sha256": package_sha,
+            "sample_count": len(package_samples),
+            "judge_prompt_version": HOLDOUT_JUDGE_PROMPT_VERSION,
+            "judge_prompt_sha256": templates.holdout_judge_prompt_sha256,
+            "judge_result_schema_version": HOLDOUT_JUDGE_RESULT_SCHEMA_VERSION,
+            "judge_result_schema_sha256": templates.holdout_judge_result_schema_sha256,
+            "expected_judge_model": judge_model,
+            "expected_judged_date": judged_date,
+            "status": "awaiting_judge_results",
+        }
+        results.append(BlindBatch(package, package_raw, mapping, request))
+    return results
+
+
+def _build_partition_blind_batches(
+    bundle: CohortBundle,
+    rows: Sequence[Mapping[str, Any]],
+    **kwargs: Any,
+) -> list[BlindBatch]:
+    """Pick the packager by partition, never by how the results turned out.
+
+    The synthetic body always uses the frozen v1 decision package.  The holdout
+    anchor always uses the v2 terminal package so its complete set can be judged
+    whether or not a side happened to produce a decision.
+    """
+
+    builder = (
+        build_terminal_blind_batches
+        if bundle.partition == "holdout"
+        else build_blind_batches
+    )
+    return builder(bundle, rows, **kwargs)
+
+
+def _is_terminal_package(blind: BlindBatch) -> bool:
+    return blind.package.get("contract_version") == TERMINAL_PACKAGE_CONTRACT_VERSION
+
+
+def _package_candidate_terminals(blind: BlindBatch) -> dict[str, dict[str, str]]:
+    """Map each sample's candidate to whether it carries a decision."""
+
+    projection: dict[str, dict[str, str]] = {}
+    for sample in blind.package["samples"]:
+        projection[sample["sample_id"]] = {
+            candidate["candidate_id"]: candidate["terminal"]["status"]
+            for candidate in sample["candidates"]
+        }
+    return projection
+
+
 def _validate_judge_result_row(
     value: Any,
     *,
@@ -1804,9 +2004,18 @@ def _validate_judge_result_row(
     if not isinstance(value, dict) or set(value) != fields:
         raise CrossEvalError("judge_result_fields_invalid")
     request = blind.request
+    terminal_package = _is_terminal_package(blind)
     expected = {
-        "schema_version": JUDGE_RESULT_SCHEMA_VERSION,
-        "contract_version": JUDGE_RESULT_CONTRACT_VERSION,
+        "schema_version": (
+            HOLDOUT_JUDGE_RESULT_SCHEMA_VERSION
+            if terminal_package
+            else JUDGE_RESULT_SCHEMA_VERSION
+        ),
+        "contract_version": (
+            HOLDOUT_JUDGE_RESULT_CONTRACT_VERSION
+            if terminal_package
+            else JUDGE_RESULT_CONTRACT_VERSION
+        ),
         "partition": request["partition"],
         "cohort_manifest_sha256": request["cohort_manifest_sha256"],
         "body_batch_id": request["body_batch_id"],
@@ -1828,6 +2037,12 @@ def _validate_judge_result_row(
     assessments = value["candidate_assessments"]
     if not isinstance(assessments, list) or len(assessments) != 3:
         raise CrossEvalError("judge_candidate_assessments_invalid")
+    judgments = {"supported", "unsupported", "uncertain"}
+    qualities = {"strong", "adequate", "weak"}
+    if terminal_package:
+        judgments = judgments | {NO_DECISION_JUDGMENT}
+        qualities = qualities | {NO_DECISION_QUALITY}
+        candidate_status = _package_candidate_terminals(blind)[value["sample_id"]]
     normalized_assessments = []
     seen = set()
     for assessment in assessments:
@@ -1841,13 +2056,26 @@ def _validate_judge_result_row(
         if (
             assessment["candidate_id"] not in CANDIDATES
             or assessment["candidate_id"] in seen
-            or assessment["approval_judgment"]
-            not in {"supported", "unsupported", "uncertain"}
-            or assessment["reason_quality"] not in {"strong", "adequate", "weak"}
+            or assessment["approval_judgment"] not in judgments
+            or assessment["reason_quality"] not in qualities
             or not isinstance(assessment["rationale"], str)
             or not assessment["rationale"].strip()
         ):
             raise CrossEvalError("judge_candidate_assessments_invalid")
+        if terminal_package:
+            # A candidate must be assessed as the recorded terminal actually is:
+            # a missing decision cannot be scored, and a real decision cannot be
+            # written off as missing.
+            has_decision = candidate_status[assessment["candidate_id"]] == "decision"
+            is_no_decision = (
+                assessment["approval_judgment"] == NO_DECISION_JUDGMENT
+                and assessment["reason_quality"] == NO_DECISION_QUALITY
+            )
+            mixed = (
+                assessment["approval_judgment"] == NO_DECISION_JUDGMENT
+            ) != (assessment["reason_quality"] == NO_DECISION_QUALITY)
+            if mixed or has_decision == is_no_decision:
+                raise CrossEvalError("judge_terminal_assessment_mismatch")
         seen.add(assessment["candidate_id"])
         normalized_assessments.append(copy.deepcopy(assessment))
     if seen != set(CANDIDATES):
@@ -1865,6 +2093,10 @@ def _validate_judge_result_row(
         or not value["comparative_rationale"].strip()
     ):
         raise CrossEvalError("judge_preference_invalid")
+    if terminal_package and any(
+        candidate_status[candidate] != "decision" for candidate in preferred
+    ):
+        raise CrossEvalError("judge_no_decision_candidate_preferred")
     if _contains_marker(value, markers) or _contains_forbidden_side_identity(value):
         raise CrossEvalError("judge_result_side_leak")
     accepted = copy.deepcopy(value)
@@ -1913,6 +2145,9 @@ def unblind_batch(
         raise CrossEvalError("judge_request_package_drift")
     if blind.mapping.get("cohort_manifest_sha256") != bundle.manifest_sha256:
         raise CrossEvalError("blind_mapping_cohort_drift")
+    terminal_package = _is_terminal_package(blind)
+    if terminal_package and bundle.partition != "holdout":
+        raise CrossEvalError("terminal_package_is_holdout_only")
     _position_counts(blind.mapping.get("entries", []))
     normalized = validate_three_side_rows(
         bundle, imported_rows, l6_pair_receipt=l6_pair_receipt
@@ -1938,31 +2173,41 @@ def unblind_batch(
             candidate_to_side.values()
         ) != set(SIDES):
             raise CrossEvalError("blind_mapping_shape_invalid")
-        package_decisions = {
-            item["candidate_id"]: item["decision"]
+        field = "terminal" if terminal_package else "decision"
+        package_values = {
+            item["candidate_id"]: item[field]
             for item in package_samples[sample_id]["candidates"]
         }
         for candidate_id, side in candidate_to_side.items():
-            if package_decisions.get(candidate_id) != _row_decision(
-                by_key[(sample_id, side)]
-            ):
+            row = by_key[(sample_id, side)]
+            actual = _row_terminal(row) if terminal_package else _row_decision(row)
+            if package_values.get(candidate_id) != actual:
                 raise CrossEvalError("blind_mapping_decision_mismatch")
         assessment_by_candidate = {
             item["candidate_id"]: item for item in result["candidate_assessments"]
         }
+
+        def side_record(candidate_id: str, side: str) -> dict[str, Any]:
+            row = by_key[(sample_id, side)]
+            value: dict[str, Any] = {"side": side}
+            if terminal_package:
+                terminal = _row_terminal(row)
+                value["terminal"] = terminal
+                value["decision"] = copy.deepcopy(terminal.get("decision"))
+            else:
+                value["decision"] = _row_decision(row)
+            value["candidate_id"] = candidate_id
+            value["assessment"] = assessment_by_candidate[candidate_id]
+            value["preferred"] = candidate_id in result["preferred_candidates"]
+            return value
+
         records.append(
             {
                 "sample_id": sample_id,
                 "payload_sha256": bundle.source_rows[sample_id]["payload_sha256"],
                 "judge_independent_judgment": result["independent_judgment"],
                 "sides": [
-                    {
-                        "side": side,
-                        "decision": _row_decision(by_key[(sample_id, side)]),
-                        "candidate_id": candidate_id,
-                        "assessment": assessment_by_candidate[candidate_id],
-                        "preferred": candidate_id in result["preferred_candidates"],
-                    }
+                    side_record(candidate_id, side)
                     for candidate_id, side in sorted(candidate_to_side.items())
                 ],
                 "all_candidates_inadequate": result["all_candidates_inadequate"],
@@ -2061,25 +2306,43 @@ def aggregate_unblinded(values: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             judge_outcomes[judge_outcome] += 1
             for item in sides:
                 side = item["side"]
-                outcome = item.get("decision", {}).get("outcome")
+                decision = item.get("decision")
+                outcome = decision.get("outcome") if isinstance(decision, dict) else None
                 assessment = item.get("assessment")
+                # A recorded terminal without a decision is an availability fact.
+                # It is counted separately and never becomes an implied deny, so
+                # judge agreement, missed deny and over block stay over that
+                # side's comparable decisions only.
+                no_decision = decision is None and "terminal" in item
                 if (
-                    outcome not in {"allow", "deny"}
+                    (outcome not in {"allow", "deny"} and not no_decision)
                     or not isinstance(assessment, dict)
                     or assessment.get("approval_judgment")
-                    not in {"supported", "unsupported", "uncertain"}
+                    not in {
+                        "supported",
+                        "unsupported",
+                        "uncertain",
+                        NO_DECISION_JUDGMENT,
+                    }
                     or assessment.get("reason_quality")
-                    not in {"strong", "adequate", "weak"}
+                    not in {"strong", "adequate", "weak", NO_DECISION_QUALITY}
+                    or no_decision
+                    != (assessment.get("approval_judgment") == NO_DECISION_JUDGMENT)
                 ):
                     raise CrossEvalError("aggregate_side_record_invalid")
                 facts = side_facts[side]
-                facts["candidate_outcomes"][outcome] += 1
-                if outcome == judge_outcome:
-                    facts["judge_outcome_agreement"] += 1
-                elif judge_outcome == "deny":
-                    facts["judge_deny_side_allow"] += 1
+                if no_decision:
+                    facts["candidate_outcomes"][NO_DECISION_JUDGMENT] += 1
+                    if item.get("preferred"):
+                        raise CrossEvalError("aggregate_preference_invalid")
                 else:
-                    facts["judge_allow_side_deny"] += 1
+                    facts["candidate_outcomes"][outcome] += 1
+                    if outcome == judge_outcome:
+                        facts["judge_outcome_agreement"] += 1
+                    elif judge_outcome == "deny":
+                        facts["judge_deny_side_allow"] += 1
+                    else:
+                        facts["judge_allow_side_deny"] += 1
                 if inadequate:
                     facts["all_candidates_inadequate"] += 1
                 if item.get("preferred"):
@@ -2106,6 +2369,85 @@ def aggregate_unblinded(values: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "judged_dates": sorted({value.get("judged_date") for value in values}),
         "judge_outcomes": dict(sorted(judge_outcomes.items())),
         "sides": projected_sides,
+        "decision": None,
+        "thresholds": None,
+        "synthetic_holdout_combined": False,
+    }
+
+
+def _aggregate_has_no_decision(aggregate: Mapping[str, Any]) -> bool:
+    sides = aggregate.get("sides")
+    if not isinstance(sides, Mapping):
+        return False
+    return any(
+        isinstance(facts, Mapping)
+        and NO_DECISION_JUDGMENT in (facts.get("candidate_outcomes") or {})
+        for facts in sides.values()
+    )
+
+
+def _public_holdout_summary_v2(aggregate: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a holdout aggregate that records non-decision terminals.
+
+    Which side lacked a decision is a per-side availability fact.  Per-sample
+    identity, bodies, outputs, rationales and mappings stay private, exactly as
+    in the v1 projection.
+    """
+
+    sample_count = aggregate["sample_count"]
+    sides = aggregate["sides"]
+    projected: dict[str, dict[str, Any]] = {}
+    for side in SIDES:
+        facts = sides[side]
+        outcomes = dict(facts["candidate_outcomes"])
+        no_decision = int(outcomes.pop(NO_DECISION_JUDGMENT, 0))
+        comparable = sample_count - no_decision
+        judgments = dict(facts["approval_judgments"])
+        qualities = dict(facts["reason_quality"])
+        if (
+            any(count < 0 for count in outcomes.values())
+            or sum(outcomes.values()) != comparable
+            or judgments.get(NO_DECISION_JUDGMENT, 0) != no_decision
+            or qualities.get(NO_DECISION_QUALITY, 0) != no_decision
+            or sum(judgments.values()) != sample_count
+            or sum(qualities.values()) != sample_count
+            or facts["judge_outcome_agreement"]
+            + facts["judge_deny_side_allow"]
+            + facts["judge_allow_side_deny"]
+            != comparable
+            or facts["sole_preferred"]
+            + facts["tied_preferred"]
+            + facts["not_preferred"]
+            != sample_count
+            or facts["all_candidates_inadequate"] > sample_count
+        ):
+            raise CrossEvalError("holdout_projection_counts_invalid")
+        projected[side] = {
+            "candidate_outcomes": dict(sorted(outcomes.items())),
+            "comparable_decision_count": comparable,
+            "no_decision_count": no_decision,
+            "judge_outcome_agreement": facts["judge_outcome_agreement"],
+            "judge_deny_side_allow": facts["judge_deny_side_allow"],
+            "judge_allow_side_deny": facts["judge_allow_side_deny"],
+            "sole_preferred": facts["sole_preferred"],
+            "tied_preferred": facts["tied_preferred"],
+            "not_preferred": facts["not_preferred"],
+            "all_candidates_inadequate": facts["all_candidates_inadequate"],
+            "approval_judgments": dict(sorted(judgments.items())),
+            "reason_quality": dict(sorted(qualities.items())),
+        }
+    return {
+        "schema_version": 2,
+        "contract_version": HOLDOUT_PUBLIC_V2_CONTRACT_VERSION,
+        "partition": "holdout",
+        "cohort_manifest_sha256": aggregate["cohort_manifest_sha256"],
+        "body_batch_ids": sorted(aggregate["body_batch_ids"]),
+        "sample_count": sample_count,
+        "judge_models": sorted(aggregate["judge_models"]),
+        "judged_dates": sorted(aggregate["judged_dates"]),
+        "judge_outcomes": dict(sorted(aggregate["judge_outcomes"].items())),
+        "sides": projected,
+        "tasks": None,
         "decision": None,
         "thresholds": None,
         "synthetic_holdout_combined": False,
@@ -2183,6 +2525,8 @@ def public_holdout_summary(aggregate: Mapping[str, Any]) -> dict[str, Any]:
     judge_outcomes = count_map(
         aggregate.get("judge_outcomes"), {"allow", "deny"}, total=sample_count
     )
+    if _aggregate_has_no_decision(aggregate):
+        return _public_holdout_summary_v2(aggregate)
     sides = aggregate.get("sides")
     side_fields = {
         "candidate_outcomes",
@@ -2392,6 +2736,7 @@ def prepare_private_blind_review(
     judge_model: str,
     judged_date: str,
     seed: bytes | None = None,
+    bundle: CohortBundle | None = None,
 ) -> dict[str, Any]:
     resolved_private = _require_execution_private_directory(worktree_root, private_dir)
     if (
@@ -2408,10 +2753,11 @@ def prepare_private_blind_review(
         outputs_path,
         pair_receipt_path,
         pair_evidence_path=pair_evidence_path,
+        bundle=bundle,
     )
     templates = load_template_identity(worktree_root)
     private_seed = seed if seed is not None else secrets.token_bytes(32)
-    blind_batches = build_blind_batches(
+    blind_batches = _build_partition_blind_batches(
         bundle,
         rows,
         judge_model=judge_model,
@@ -2430,6 +2776,7 @@ def _load_and_rebuild_private_blinds(
     pair_receipt_path: Path,
     pair_evidence_path: Path | None = None,
     private_dir: Path,
+    bundle: CohortBundle | None = None,
 ) -> tuple[
     CohortBundle,
     list[dict[str, Any]],
@@ -2451,6 +2798,7 @@ def _load_and_rebuild_private_blinds(
         outputs_path,
         pair_receipt_path,
         pair_evidence_path=pair_evidence_path,
+        bundle=bundle,
     )
     seed_record, _seed_raw = _load_json(
         private_dir / "blinding-seed.json", private=True
@@ -2489,7 +2837,7 @@ def _load_and_rebuild_private_blinds(
     judged_dates = {request.get("expected_judged_date") for request in requests}
     if len(judge_models) != 1 or len(judged_dates) != 1:
         raise CrossEvalError("judge_request_identity_mixed")
-    rebuilt = build_blind_batches(
+    rebuilt = _build_partition_blind_batches(
         bundle,
         rows,
         judge_model=next(iter(judge_models)),
@@ -2527,6 +2875,7 @@ def import_unblind_and_aggregate(
     pair_receipt_path: Path,
     pair_evidence_path: Path | None = None,
     private_dir: Path,
+    bundle: CohortBundle | None = None,
 ) -> dict[str, Any]:
     bundle, rows, pair_receipt, blinds = _load_and_rebuild_private_blinds(
         worktree_root=worktree_root,
@@ -2534,6 +2883,7 @@ def import_unblind_and_aggregate(
         pair_receipt_path=pair_receipt_path,
         pair_evidence_path=pair_evidence_path,
         private_dir=private_dir,
+        bundle=bundle,
     )
     markers = _side_identity_markers(rows)
     validated_results: list[tuple[BlindBatch, list[dict[str, Any]]]] = []
@@ -2590,6 +2940,33 @@ def _print_result(value: Mapping[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
+def _selected_bundle(args: argparse.Namespace) -> CohortBundle | None:
+    """Return the private holdout cohort, or ``None`` for the tracked synthetic one."""
+
+    if getattr(args, "partition", "synthetic") == "synthetic":
+        return None
+    from . import holdout_anchor
+
+    private_dir = getattr(args, "private_dir", None)
+    if private_dir is None:
+        raise CrossEvalError("holdout_private_dir_required")
+    try:
+        built = holdout_anchor.load_holdout_bundle(private_dir)
+    except holdout_anchor.HoldoutAnchorError as exc:
+        raise CrossEvalError(exc.code, exc.facts) from exc
+    # ``python -m ...cross_eval`` executes this file as ``__main__`` while
+    # holdout_anchor imports it by its package name, so the returned bundle
+    # would carry the other module instance's class.  Re-wrap the already
+    # validated cohort so the later isinstance gate sees this module's class.
+    return CohortBundle(
+        built.partition, built.manifest, built.manifest_sha256, built.source_rows
+    )
+
+
+def _add_partition_argument(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--partition", choices=PARTITIONS, default="synthetic")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m rondo_eval.local_approval.cross_eval"
@@ -2605,6 +2982,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     verify_import.add_argument("--outputs", type=Path, required=True)
     verify_import.add_argument("--pair-receipt", type=Path, required=True)
     verify_import.add_argument("--pair-evidence", type=Path)
+    verify_import.add_argument("--private-dir", type=Path)
+    _add_partition_argument(verify_import)
     pack = commands.add_parser("pack")
     pack.add_argument("--worktree-root", type=Path, required=True)
     pack.add_argument("--outputs", type=Path, required=True)
@@ -2613,12 +2992,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     pack.add_argument("--private-dir", type=Path, required=True)
     pack.add_argument("--judge-model", required=True)
     pack.add_argument("--judged-date", required=True)
+    _add_partition_argument(pack)
     import_results = commands.add_parser("import-results")
     import_results.add_argument("--worktree-root", type=Path, required=True)
     import_results.add_argument("--outputs", type=Path, required=True)
     import_results.add_argument("--pair-receipt", type=Path, required=True)
     import_results.add_argument("--pair-evidence", type=Path)
     import_results.add_argument("--private-dir", type=Path, required=True)
+    _add_partition_argument(import_results)
     args = parser.parse_args(argv)
     try:
         if args.command == "freeze-synthetic-cohort":
@@ -2631,6 +3012,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.outputs,
                 args.pair_receipt,
                 pair_evidence_path=args.pair_evidence,
+                bundle=_selected_bundle(args),
             )
             result = {
                 "status": "ready_for_blind_packaging",
@@ -2647,6 +3029,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 private_dir=args.private_dir,
                 judge_model=args.judge_model,
                 judged_date=args.judged_date,
+                bundle=_selected_bundle(args),
             )
         else:
             result = import_unblind_and_aggregate(
@@ -2655,6 +3038,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 pair_receipt_path=args.pair_receipt,
                 pair_evidence_path=args.pair_evidence,
                 private_dir=args.private_dir,
+                bundle=_selected_bundle(args),
             )
         _print_result(result)
         return 0

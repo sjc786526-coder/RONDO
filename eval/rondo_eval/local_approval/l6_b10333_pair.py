@@ -957,6 +957,7 @@ def run_formal_pair_bundle(
         outputs_path,
         receipt_path,
         pair_evidence_path=evidence_path,
+        bundle=None if bundle.partition == "synthetic" else bundle,
     )
     if (
         not isinstance(evidence, cross_eval.FormalL6PairEvidence)
@@ -987,6 +988,24 @@ def _add_runtime_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--port", type=int, required=True)
 
 
+def _selected_bundle(args: argparse.Namespace) -> cross_eval.CohortBundle:
+    """Bind one run to either the tracked synthetic cohort or the private holdout."""
+
+    if getattr(args, "partition", "synthetic") == "synthetic":
+        return cross_eval.load_synthetic_bundle(args.worktree_root)
+    from . import holdout_anchor
+
+    private_dir = getattr(args, "holdout_private_dir", None) or getattr(
+        args, "private_dir", None
+    )
+    if private_dir is None:
+        raise L6B10333PairError("formal_pair_holdout_private_dir_required")
+    try:
+        return holdout_anchor.load_holdout_bundle(private_dir)
+    except holdout_anchor.HoldoutAnchorError as exc:
+        raise L6B10333PairError(exc.code) from exc
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m rondo_eval.local_approval.l6_b10333_pair"
@@ -1012,15 +1031,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     _add_runtime_arguments(smoke)
     smoke.add_argument("--private-dir", type=Path, required=True)
     smoke.add_argument("--sample-count", type=int, choices=(1, 2), default=2)
+    smoke.add_argument("--partition", choices=cross_eval.PARTITIONS, default="synthetic")
     run = commands.add_parser("run")
     _add_runtime_arguments(run)
     run.add_argument("--run-dir", type=Path, required=True)
     run.add_argument("--private-dir", type=Path, required=True)
+    run.add_argument("--partition", choices=cross_eval.PARTITIONS, default="synthetic")
     resolve = commands.add_parser("resolve-interrupted")
     resolve.add_argument("--worktree-root", type=Path, required=True)
     resolve.add_argument("--pair-evidence-source", type=Path, required=True)
     resolve.add_argument("--run-dir", type=Path, required=True)
     resolve.add_argument("--failure-code", required=True)
+    resolve.add_argument("--holdout-private-dir", type=Path)
+    resolve.add_argument(
+        "--partition", choices=cross_eval.PARTITIONS, default="synthetic"
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "prepare-evidence":
@@ -1095,7 +1120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         elif args.command == "smoke":
             smoke_artifacts = run_structural_smoke(
-                bundle=cross_eval.load_synthetic_bundle(args.worktree_root),
+                bundle=_selected_bundle(args),
                 pair_receipt=built,
                 runtime_binary=args.runtime_binary,
                 private_dir=args.private_dir,
@@ -1114,7 +1139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "run":
             artifacts = run_formal_pair_bundle(
                 worktree_root=args.worktree_root,
-                bundle=cross_eval.load_synthetic_bundle(args.worktree_root),
+                bundle=_selected_bundle(args),
                 pair_receipt=built,
                 runtime_binary=args.runtime_binary,
                 run_dir=args.run_dir,
@@ -1134,7 +1159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         else:
             row = paired_outputs.resolve_interrupted_attempt(
-                cross_eval.load_synthetic_bundle(args.worktree_root),
+                _selected_bundle(args),
                 pair_receipt=built,
                 run_dir=args.run_dir,
                 failure_code=args.failure_code,

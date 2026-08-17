@@ -255,6 +255,69 @@ class TeacherCensusTests(unittest.TestCase):
         self.assertEqual(len(identity["file_sha256"]), 64)
 
 
+class TeacherLedgerTests(unittest.TestCase):
+    """The ledger also holds shadow rows that are not Guardian evidence runs."""
+
+    def _tasks_for(self, records: list[dict]) -> dict[str, str]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "eval" / "results").mkdir(parents=True)
+            (root / teacher_labels.RUN_LEDGER_RELATIVE_PATH).write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+            return teacher_labels._load_ledger_tasks(root)
+
+    @staticmethod
+    def _guardian_run(run_id: str, tasks: object) -> dict:
+        return {
+            "run_id": run_id,
+            "artifacts": f"eval-data/runs/{run_id}",
+            "config": {
+                "effective_guardian_model": "gpt-5.6-luna",
+                "guardian_effort": "low",
+            },
+            "tasks": tasks,
+        }
+
+    def test_shadow_rows_do_not_masquerade_as_guardian_evidence_runs(self) -> None:
+        tasks = self._tasks_for(
+            [
+                self._guardian_run(
+                    "20260812-1-tb-rondo-r1", [{"task_id": "terminal-bench/fix-git"}]
+                ),
+                {
+                    "run_id": "20260815-2-shadow-sol-static-r1",
+                    "artifacts": "eval-data/teacher-labels/20260815-sol-teacher-labels-v1",
+                    "config": {"partition": "seed"},
+                    "tasks": [{"task_id": f"synthetic/{index}"} for index in range(24)],
+                },
+                {
+                    "run_id": "20260815-3-shadow-local-static-r1",
+                    "artifacts": "eval-data/runs/20260815-3-shadow-local-static-r1",
+                    "config": {"partition": "holdout"},
+                    "tasks": None,
+                },
+            ]
+        )
+        self.assertEqual(
+            tasks, {"20260812-1-tb-rondo-r1": "terminal-bench/fix-git"}
+        )
+
+    def test_guardian_run_without_exactly_one_task_still_fails_closed(self) -> None:
+        for tasks in (None, [], [{"task_id": "a"}, {"task_id": "b"}]):
+            with self.subTest(tasks=tasks):
+                with self.assertRaises(teacher_labels.TeacherLabelsError):
+                    self._tasks_for([self._guardian_run("20260812-1-tb-r1", tasks)])
+
+    def test_real_tracked_ledger_covers_every_frozen_evidence_run(self) -> None:
+        tasks = teacher_labels._load_ledger_tasks(EVAL_ROOT.parent)
+        self.assertTrue(tasks)
+        self.assertTrue(
+            all(value and isinstance(value, str) for value in tasks.values())
+        )
+
+
 class TeacherResponseTests(unittest.TestCase):
     def setUp(self) -> None:
         self.fingerprints = ("3" * 64, "4" * 64)
