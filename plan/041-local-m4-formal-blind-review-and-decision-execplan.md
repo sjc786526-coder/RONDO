@@ -192,8 +192,10 @@ Plan 032 的真实 holdout 与 Plan 037 的同一 paired-GGUF 形成独立 sanit
 ### 独立审查整改（2026-08-16）
 
 1. 顶层权威文档已按 main 当前状态吸收 Multi M-2 完成历史与 M-3 下一阶段，并补记 Local M4 里程碑行；
-   `doc/WBS.md` 与 `doc/WBS-COMPLETED.md` 的 Multi 段落现与 main 逐字一致，仅余“最后更新”抬头与
-   `WBS-COMPLETED` 末尾追加两处 append/append 差异，两处的本分支内容都是 main 事实的超集。
+   `doc/WBS.md` 与 `doc/WBS-COMPLETED.md` 的全部 Multi 内容现与 main 逐字一致（含里程碑表的
+   `Multi M-2` 行）。与 main 的差异只剩两类，且每处本分支都是更新的事实：`doc/WBS.md` 的四处 Local 状态区
+   （抬头行、方向 2 行、3b 工作包段、方向表第 2 行，其中抬头行是 main 抬头的超集）和 `doc/WBS-COMPLETED.md`
+   末尾的 append/append。
 2. 匿名扫描补上直接身份措辞：`local` 名词表增加 decision/judgment 等，另加"(un)fine-tuned + 侧名词"规则；
    同时把大写 `Local` 的连字符复合词（真实 Guardian policy 的 `Local-vs-prod note`）排除，避免新的误报。
    四个正式 package 的候选侧扫描仍为 0 命中，四份 judge result 也为 0，**无需重判**。

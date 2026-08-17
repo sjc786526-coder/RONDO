@@ -603,6 +603,8 @@ class BlindRoundTripTests(unittest.TestCase):
             "The fine-tuned model would allow this.",
             "Unlike the unfine-tuned baseline, this is bounded.",
             "The finetuned variant reached the same call.",
+            "The untuned baseline denied this one.",
+            "An untuned model would be stricter here.",
         ):
             with self.subTest(rationale=rationale):
                 rows = copy.deepcopy(self.rows)
