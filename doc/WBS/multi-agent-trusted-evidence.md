@@ -222,10 +222,11 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
   目标空闲且指派要求它开始或继续工作时，触发其下一轮；目标空闲但只是信息通知时排队投递。
 - **边界**：不引入新的 Agent-to-Agent 传输协议；不实现只读贡献档位；不实现 Event 关系图。
 
-### M-3 证据锚定（已验收，待合入 main）
+### M-3 证据锚定（已验收并合入 main）
 
 实现由工作树分支 `worktree-042-multi-m3-evidence-anchoring` 落地（提交 `db39e28`、`8360bbf`、`ce32394`、
-`cfe3dc1`、`35356ab`、`eb53218`），尚未合入 `main`。第三轮独立复验指出的并行重复 call ID 配对、
+`cfe3dc1`、`35356ab`、`eb53218`），并通过 merge commit `5783ac0` 合入 `main`。第三轮独立复验指出的
+并行重复 call ID 配对、
 refs 第 33 条后不可达与同 producer 暂存截断均已补修并通过最终独立复验。模型可见工具新增
 `team_evidence`，与 M-1/M-2 五个工具同受
 `features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。
@@ -250,6 +251,8 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-045506-...-independent-acceptance-review.md`、`...-052355-...-remediation-reverification.md` 与
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
+
+M-3 已完成；下一阶段为 M-4 协调闭合与可观测性。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。

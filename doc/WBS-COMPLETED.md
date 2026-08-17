@@ -1034,10 +1034,11 @@ standard/Lite 形态均补回归。
   `git diff --check` 通过，2026-08-17 独立验收确认任务目标完成；详见
   `agent_log/2026-08-17-001729-plan041-final-independent-acceptance.md`。
 
-## Multi M-3 —— 证据锚定（Plan 042，2026-08-17，已验收待合入）
+## Multi M-3 —— 证据锚定（Plan 042，2026-08-17）
 
 **状态**：实现与定向门禁完成，落在工作树分支 `worktree-042-multi-m3-evidence-anchoring`
-（提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`、`35356ab`、`eb53218`），**尚未合入 `main`**。
+（提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`、`35356ab`、`eb53218`），并通过 merge commit
+`5783ac0` 合入 `main`。
 第三轮独立复验的三项残余 findings 已补修并通过最终独立复验。
 
 - **两步捕获**：Harness 在 dispatch 前为输出预留唯一 item identity，工具处理器产出终态时按该身份记下观察

@@ -182,11 +182,12 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
 
 ### 当前工作
 
-- 补充整改已通过最终独立复验；Plan 042 / Multi M-3 已验收，等待用户批准后合入。
+- 补充整改已通过最终独立复验；Plan 042 / Multi M-3 已验收，并经用户批准通过 merge commit `5783ac0`
+  合入 `main`。
 
 ### 本任务剩余步骤
 
-1. 任务内无剩余实施或验收步骤；合并、推送与分支归档按交接边界等待用户批准。
+1. 任务内无剩余实施、验收或集成步骤；后续路线以 Multi 子 WBS 为准。
 
 ### 阻塞项
 
@@ -203,7 +204,8 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
   `agent_log/2026-08-17-052355-plan042-m3-remediation-reverification.md` 判为不通过；其中并行重复 call ID、
   refs 第 33 条后不可达和同 producer 暂存截断三项已在 `eb53218` 补修并通过定向门禁。
   最终独立复验报告 `agent_log/2026-08-17-055152-plan042-m3-supplemental-remediation-reverification.md`
-  未发现新的 P0/P1/P2 缺陷，结论为**验收通过、任务目标完成**；合并与推送未执行。
+  未发现新的 P0/P1/P2 缺陷，结论为**验收通过、任务目标完成**；实现与验收提交已通过 `5783ac0`
+  合入 `main`。
 - 主工作区 git-ignored 现场：仅 Git 创建了 `.claude/worktrees/042-multi-m3-evidence-anchoring` 目录及关联元数据；
   本任务没有在主工作区直接生成私有/ignored 产品数据。
 
