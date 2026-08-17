@@ -222,15 +222,18 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
   目标空闲且指派要求它开始或继续工作时，触发其下一轮；目标空闲但只是信息通知时排队投递。
 - **边界**：不引入新的 Agent-to-Agent 传输协议；不实现只读贡献档位；不实现 Event 关系图。
 
-### M-3 证据锚定（实现完成，待独立审查与合入）
+### M-3 证据锚定（补充整改完成，待再次独立复验与合入）
 
 实现由工作树分支 `worktree-042-multi-m3-evidence-anchoring` 落地（提交 `db39e28`、`8360bbf`、`ce32394`、
-`cfe3dc1`、`35356ab`），尚未合入 `main`。两轮审查的 findings 全部整改，**复验尚未进行**。模型可见工具新增 `team_evidence`，与 M-1/M-2 五个工具同受
+`cfe3dc1`、`35356ab`、`eb53218`），尚未合入 `main`。第三轮独立复验指出的并行重复 call ID 配对、
+refs 第 33 条后不可达与同 producer 暂存截断均已补修，**再次复验尚未进行**。模型可见工具新增
+`team_evidence`，与 M-1/M-2 五个工具同受
 `features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。
 
 首版 observation 支持集为**已完成、由 Codex 正式保留、body 为纯文本的工具结果**，成功与失败都形成 Fact。
-捕获拆成两步：工具处理器产出终态时记下观察（宿主要自己顶替回答时再撤销），结果进入 conversation history
-时才铸造 Fact 并按 retention 顺序分配序号，所以不存在"尚未保留就当成存在"的引用。可用状态不缓存在 Fact 上，
+捕获拆成两步：Harness 在 dispatch 前为结果预留唯一 item identity，工具处理器产出终态时按该身份记下观察
+（宿主要自己顶替回答时再精确撤销），同一 retained item 进入 conversation history 时才铸造 Fact 并按 retention
+顺序分配序号，所以并行重复 call ID 不会串配，也不存在"尚未保留就当成存在"的引用。可用状态不缓存在 Fact 上，
 每次读取现场判定并区分"producer 未加载"与"当前 history 不携带该项"，两者都不写死引用。领域侧
 `codex-team-state` 只持 typed Fact refs、每 producer 的发布窗口和授权元数据；`publish` 在同一次 mutation
 内取走该作者上次成功发布之后的新 Fact 并推进游标。读取沿 Event 图收敛，`team_evidence` 只返回目标

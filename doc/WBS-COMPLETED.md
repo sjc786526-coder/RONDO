@@ -1034,13 +1034,14 @@ standard/Lite 形态均补回归。
   `git diff --check` 通过，2026-08-17 独立验收确认任务目标完成；详见
   `agent_log/2026-08-17-001729-plan041-final-independent-acceptance.md`。
 
-## Multi M-3 —— 证据锚定（Plan 042，2026-08-17，待独立审查与合入）
+## Multi M-3 —— 证据锚定（Plan 042，2026-08-17，补充整改后待再次复验与合入）
 
 **状态**：实现与定向门禁完成，落在工作树分支 `worktree-042-multi-m3-evidence-anchoring`
-（提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`、`35356ab`），**尚未合入 `main`**。两轮审查（执行期自查与
-独立验收）的 findings 全部整改，**复验尚未进行**。
+（提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`、`35356ab`、`eb53218`），**尚未合入 `main`**。
+第三轮独立复验的三项残余 findings 已补修，**再次复验尚未进行**。
 
-- **两步捕获**：工具处理器产出终态时记下观察（此处才知道跑的是哪个工具、结果什么形状），结果进入
+- **两步捕获**：Harness 在 dispatch 前为输出预留唯一 item identity，工具处理器产出终态时按该身份记下观察
+  （此处才知道跑的是哪个工具、结果什么形状），同一 item 进入
   conversation history 时才铸造 Fact 并按 retention 顺序分配序号。落点是
   `ToolRegistry::dispatch_any_with_terminal_outcome` 的两个终态分支、`ToolCallRuntime` 的 abort 分支
   （宿主要自己顶替回答时先撤销该次 note，否则被打断的调用会变成证据）与
@@ -1056,9 +1057,10 @@ standard/Lite 形态均补回归。
   那一条；猜中 ID、同团队 sibling、看见别的 Event ID 与跨实例引用均 fail-closed。新增窄工具 `team_evidence`
   返回 producer、工具名、类别、可用状态、有界文本（4,000 字符上限）与截断信息，不返回调用参数、
   相邻结果或 producer 的其他上下文。TeamState 只持 typed Fact refs，不复制工具输出。Version 保留发布窗口的
-  全部引用；上下文预算只作用于打印列表的 surface（投影 4 条、工具结果 32 条），并报告省略数。
-- **一对一定位**：locator 是 Codex 为每个已保留 item 分配的身份，不是 call_id —— 后者来自模型请求，
-  复用时无法保证只解析到目标 observation。该身份不需要跨重放稳定，重放要复现的是 Fact 序号与每次发布携带的窗口。
+  全部引用；上下文预算只作用于打印列表的 surface（投影 4 条、工具结果 32 条），并报告省略数；
+  `team_history(evidence_refs_offset=...)` 可继续有界分页取得完整 refs。
+- **一对一定位与配对**：预留 item identity 同时用于 pending 配对和最终 locator，不是 call_id —— 后者来自模型请求，
+  可并行复用。该身份不需要跨重放稳定，重放要复现的是 Fact 序号与每次发布携带的窗口。
 - **诚实退化**：可用状态**每次读取现场判定，不缓存在 Fact 上**。两种读不到的原因分别命名：producer 未加载，
   或 producer 当前 history 已不携带该项（一次普通 compaction 就会造成后者，而 rollout 仍持有它）。
   两者都只陈述 Harness 实际确认到的事，都不写死引用。Version 的 authored 内容不可改写，引用永远留着，
@@ -1076,10 +1078,16 @@ standard/Lite 形态均补回归。
   正式保留的失败文本没有任何 Fact 可指向。四项均已修：Version 保留窗口全部引用（上限只加在打印 surface）、
   locator 改用 Codex 为每个已保留 item 分配的身份（一对一）、暂存上限按 producer 计并在逐出时告警、
   拦截结果纳入支持集。
+- **补充复验整改**：并行重复 call ID 仍因 pending 先到先得而漏 Fact/错配 metadata；工具输出只报告前 32 条 refs
+  且没有继续读取路径；同 producer 超过 256 条仍会逐出正式保留前的 note。`eb53218` 改为 dispatch 前预留唯一
+  output item identity 并让 note/retention/locator 共用，移除固定 pending 截断，同时为 `team_history` 增加 refs offset
+  分页。真实纵切以 33 个本地文本工具结果验证重复 call ID 一成一败各自下钻，并取得第 33 条引用。
 - **门禁**：`codex-team-state` **101/101**；产品纵切 `suite::team_evidence` **3/3**；M-1/M-2 回归
   `suite::team_world_state` + `suite::team_routing` **12/12** 无退化；`core` 的 `team::evidence` **6/6**；
   合并 `tools::` 与 `context::` 共 **541/541**；`just clippy -p codex-core`、
   `just fix -p codex-team-state -p codex-core`、`just fmt`、`just fmt-check` 通过。
+  补充整改另跑 `codex-team-state evidence` **23/23**、新边界纵切 **1/1**、其余 M-1/M-2/既有 M-3/
+  `tools::parallel` **19/19**、`team::evidence` **6/6**，scoped fix 与 fmt-check 通过；未重跑 541 条合并门禁。
 - **边界**：功能默认关闭，关闭时不注册 `team_evidence`、不改变普通工具结果与 rollout 行为。未建 artifact
   store、全量输出副本、完整 transcript/provenance graph、自动 freshness 验证或跨进程持久化；未运行全
   workspace、Docker、真实 API、本地模型或付费测评。执行细节与环境坑见
