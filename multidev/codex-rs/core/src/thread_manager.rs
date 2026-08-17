@@ -201,6 +201,38 @@ pub struct ThreadManager {
     _test_codex_home_guard: Option<TempCodexHomeGuard>,
 }
 
+/// Keeps a store-backed availability transition open across await.
+///
+/// While any guard is live, producer availability is [`codex_team_state::ProducerAvailability::Unknown`]
+/// and Root retirement is refused. [`Self::finish`] and [`Drop`] both close the transition.
+#[must_use = "the returned guard keeps the store transition active; drop or finish it"]
+pub struct StoreTransitionGuard {
+    state: Arc<ThreadManagerState>,
+    closed: bool,
+}
+
+impl StoreTransitionGuard {
+    /// Close this transition and bump availability generation.
+    pub fn finish(mut self) {
+        self.close();
+    }
+
+    fn close(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let _gate = self.state.lock_availability_transition();
+        self.state.end_store_transition();
+    }
+}
+
+impl Drop for StoreTransitionGuard {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 pub struct StartThreadOptions {
     pub config: Config,
     pub allow_provider_model_fallback: bool,
@@ -338,6 +370,8 @@ pub(crate) struct ThreadManagerState {
     availability_generation: AtomicU64,
     /// Serializes availability-changing map/store updates with Root retirement.
     availability_gate: std::sync::Mutex<()>,
+    /// Count of in-flight store transitions. While non-zero, availability is unknown.
+    store_transition_active: AtomicU64,
 }
 
 pub fn build_models_manager(
@@ -450,6 +484,7 @@ impl ThreadManager {
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
                 availability_generation: AtomicU64::new(0),
                 availability_gate: std::sync::Mutex::new(()),
+                store_transition_active: AtomicU64::new(0),
             }),
             _test_codex_home_guard: None,
         }
@@ -587,6 +622,7 @@ impl ThreadManager {
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
                 availability_generation: AtomicU64::new(0),
                 availability_gate: std::sync::Mutex::new(()),
+                store_transition_active: AtomicU64::new(0),
             }),
             _test_codex_home_guard: None,
         }
@@ -722,7 +758,7 @@ impl ThreadManager {
 
     /// Permanently drop a stored thread. After this, the same root tree cannot restore it.
     pub async fn delete_stored_thread(&self, thread_id: ThreadId) -> CodexResult<()> {
-        self.begin_thread_store_transition();
+        let transition = self.begin_thread_store_transition();
         let result = self
             .state
             .thread_store
@@ -736,23 +772,37 @@ impl ThreadManager {
                     CodexErr::Fatal(format!("failed to delete stored thread {thread_id}: {err}"))
                 }
             });
-        self.finish_thread_store_transition();
+        transition.finish();
         result
     }
 
     /// Invalidate availability snapshots before an awaitable store mutation.
     ///
-    /// Pair with [`Self::finish_thread_store_transition`] around the actual delete. The two
-    /// gated bumps are the linearization points; the await in between must not hold the gate.
-    pub fn begin_thread_store_transition(&self) {
+    /// Hold the returned guard across the await. Availability stays unknown until the guard is
+    /// finished or dropped, so a mid-delete epoch cannot mean both recoverable and unavailable.
+    pub fn begin_thread_store_transition(&self) -> StoreTransitionGuard {
         let _gate = self.state.lock_availability_transition();
-        self.state.bump_availability_generation();
+        self.state.begin_store_transition();
+        StoreTransitionGuard {
+            state: Arc::clone(&self.state),
+            closed: false,
+        }
     }
 
-    /// Record that an awaitable store mutation is now visible to recoverability probes.
-    pub fn finish_thread_store_transition(&self) {
-        let _gate = self.state.lock_availability_transition();
-        self.state.bump_availability_generation();
+    #[cfg(test)]
+    pub(crate) async fn delete_store_row_for_tests(&self, thread_id: ThreadId) -> CodexResult<()> {
+        self.state
+            .thread_store
+            .delete_thread(DeleteThreadParams { thread_id })
+            .await
+            .map_err(|err| match err {
+                ThreadStoreError::ThreadNotFound { thread_id } => {
+                    CodexErr::ThreadNotFound(thread_id)
+                }
+                err => {
+                    CodexErr::Fatal(format!("failed to delete stored thread {thread_id}: {err}"))
+                }
+            })
     }
 
     /// Updates metadata for loaded and cold threads through one entrypoint.
@@ -1265,6 +1315,22 @@ impl ThreadManagerState {
 
     pub(crate) fn bump_availability_generation(&self) {
         self.availability_generation.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn store_transition_in_progress(&self) -> bool {
+        self.store_transition_active.load(Ordering::SeqCst) > 0
+    }
+
+    fn begin_store_transition(&self) {
+        self.store_transition_active.fetch_add(1, Ordering::SeqCst);
+        self.bump_availability_generation();
+    }
+
+    fn end_store_transition(&self) {
+        if self.store_transition_active.load(Ordering::SeqCst) > 0 {
+            self.store_transition_active.fetch_sub(1, Ordering::SeqCst);
+        }
+        self.bump_availability_generation();
     }
 
     pub(crate) fn lock_availability_transition(&self) -> std::sync::MutexGuard<'_, ()> {

@@ -48,6 +48,17 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     let _gate = state
         .as_ref()
         .map(|state| state.lock_availability_transition());
+    if state
+        .as_ref()
+        .is_some_and(|state| state.store_transition_in_progress())
+    {
+        return Err(team_error(
+            codex_team_state::TeamError::AvailabilityConflict {
+                availability: ProducerAvailability::Unknown,
+                availability_epoch: control.availability_epoch(),
+            },
+        ));
+    }
 
     let submission = Submission {
         based_on: TeamRevision::from_raw(args.based_on_revision.unwrap_or_default()),

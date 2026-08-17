@@ -6,7 +6,9 @@
 //! Classification follows explicit `resume_agent` recoverability: a loaded thread that can still
 //! accept tasks is available, a stored rollout that resume can rebuild is recoverable even if
 //! registry metadata is gone, a missing store/history is unavailable, and any other read failure
-//! is unknown. A map-resident thread whose submit channel is closed is not available.
+//! is unknown. A map-resident thread whose submit channel is closed is not available. While a
+//! store transition is in progress, every producer is unknown so a mid-delete epoch cannot mean
+//! both recoverable and unavailable.
 
 use super::AgentControl;
 use super::spawn::ProducerRecoverability;
@@ -31,6 +33,23 @@ impl AgentControl {
         };
         loop {
             let generation = state.availability_generation();
+            if state.store_transition_in_progress() {
+                if generation != state.availability_generation()
+                    || !state.store_transition_in_progress()
+                {
+                    continue;
+                }
+                let entries = self
+                    .team
+                    .participants()
+                    .into_iter()
+                    .map(|participant| (participant.thread_id, ProducerAvailability::Unknown))
+                    .collect();
+                return AvailabilitySnapshot::from_entries_at(
+                    AvailabilityEpoch::from_raw(generation),
+                    entries,
+                );
+            }
             let mut entries = Vec::new();
             for participant in self.team.participants() {
                 let class = self
@@ -38,7 +57,9 @@ impl AgentControl {
                     .await;
                 entries.push((participant.thread_id, class));
             }
-            if generation == state.availability_generation() {
+            if generation == state.availability_generation()
+                && !state.store_transition_in_progress()
+            {
                 return AvailabilitySnapshot::from_entries_at(
                     AvailabilityEpoch::from_raw(generation),
                     entries,
@@ -67,6 +88,9 @@ impl AgentControl {
         state: &Arc<ThreadManagerState>,
         thread_id: ThreadId,
     ) -> ProducerAvailability {
+        if state.store_transition_in_progress() {
+            return ProducerAvailability::Unknown;
+        }
         match self.probe_producer_recoverability(state, thread_id).await {
             ProducerRecoverability::Loaded => ProducerAvailability::Available,
             ProducerRecoverability::Restorable => ProducerAvailability::RecoverableUnloaded,
@@ -288,7 +312,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn beginning_a_store_transition_moves_epoch_before_the_row_disappears() {
+    async fn a_store_transition_midpoint_is_unknown_until_finish() {
         let mut config = test_config().await;
         let _ = config.features.enable(Feature::MultiAgentV2);
         let temp_home = tempfile::tempdir().expect("create temp home");
@@ -321,13 +345,12 @@ mod tests {
             ProducerAvailability::RecoverableUnloaded
         );
 
-        let epoch_before = control.availability_epoch();
-        manager.begin_thread_store_transition();
-        assert!(control.availability_epoch() != epoch_before);
+        let transition = manager.begin_thread_store_transition();
+        let midpoint_epoch = control.availability_epoch();
         assert_eq!(
             control.classify_producer(worker.thread_id).await,
-            ProducerAvailability::RecoverableUnloaded,
-            "begin must not wait for the store row to vanish"
+            ProducerAvailability::Unknown,
+            "an open store transition must not publish recoverable or unavailable"
         );
         manager
             .read_stored_thread(codex_thread_store::ReadThreadParams {
@@ -338,12 +361,34 @@ mod tests {
             .await
             .expect("store row is still present after begin");
 
-        let epoch_after_begin = control.availability_epoch();
         manager
-            .delete_stored_thread(worker.thread_id)
+            .delete_store_row_for_tests(worker.thread_id)
             .await
-            .expect("delete stored thread");
-        assert!(control.availability_epoch() != epoch_after_begin);
+            .expect("delete the store row while the transition is still open");
+        assert_eq!(
+            control.availability_epoch(),
+            midpoint_epoch,
+            "deleting the row must not by itself close the mid-delete epoch"
+        );
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let observer = control.clone();
+        let worker_id = worker.thread_id;
+        let observer_barrier = Arc::clone(&barrier);
+        let observed = tokio::spawn(async move {
+            observer_barrier.wait().await;
+            let class = observer.classify_producer(worker_id).await;
+            let snapshot = observer.producer_availability_snapshot().await;
+            (class, snapshot.class_of(worker_id), snapshot.epoch)
+        });
+        barrier.wait().await;
+        let (class, snapshot_class, snapshot_epoch) = observed.await.expect("observer");
+        assert_eq!(class, ProducerAvailability::Unknown);
+        assert_eq!(snapshot_class, Some(ProducerAvailability::Unknown));
+        assert_eq!(snapshot_epoch, midpoint_epoch);
+
+        transition.finish();
+        assert!(control.availability_epoch() != midpoint_epoch);
         assert_eq!(
             control.classify_producer(worker.thread_id).await,
             ProducerAvailability::Unavailable
