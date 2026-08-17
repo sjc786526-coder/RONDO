@@ -140,7 +140,11 @@ pub(crate) async fn record_retained_tool_facts(
         return;
     };
     for (call_id, output_kind) in candidates {
-        if !session.retains_tool_output(&call_id, output_kind).await {
+        if session
+            .retained_tool_output(&call_id, output_kind)
+            .await
+            .is_none()
+        {
             continue;
         }
         if let Some(fact_id) = access

@@ -3004,17 +3004,6 @@ impl Session {
         crate::team::evidence::record_retained_tool_facts(self, turn_context, items).await;
     }
 
-    /// Whether this session's history still holds the tool result the arguments name.
-    pub(crate) async fn retains_tool_output(
-        &self,
-        call_id: &str,
-        output_kind: RetainedOutputKind,
-    ) -> bool {
-        let state = self.state.lock().await;
-        crate::team::evidence::retained_output_text(state.history.raw_items(), call_id, output_kind)
-            .is_some()
-    }
-
     /// The retained text of one tool result this session kept, if history still holds it.
     ///
     /// This is the resolution half of an evidence locator. It answers for exactly the item named and
