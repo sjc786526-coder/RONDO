@@ -166,30 +166,38 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
 - 用户提示中的旧现场已被后续交付取代：当前 `main` 与 `origin/main` 均为 `0c1a5e4`，主工作区干净；M-2 已合入，
   Plan 041 已完成、人判、独立验收、合并和推送，其分支已归档，M-3 前置条件全部满足。
 - 已从 `main@0c1a5e4` 创建本专用 worktree 和本地分支；没有在主工作区修改任何受跟踪文件。
-- 已建立本 ExecPlan；M-3 产品实现尚未开始。
+- **M-3 实现完成**，两个提交：`db39e28`（捕获、定位、发布窗口、权限、`team_evidence`）与
+  `8360bbf`（失败结果捕获与真实产品纵切）。
+- 捕获拆成两步落在 `ToolRegistry::dispatch_any_with_terminal_outcome` 的两个终态分支（记下观察，此处才知道
+  tool identity 与"是否真的跑完"）和 `Session::record_conversation_items`（确认保留后铸造 Fact 并按 retention
+  顺序分配序号）。领域侧新增 `FactId` 与 `codex-team-state` 的 `evidence` / `store::evidence` 模块。
+- 定向门禁全部通过：`codex-team-state` 99/99、新增 `suite::team_evidence` 2/2、M-1/M-2 回归 12/12、
+  `core` 的 `team::evidence` 4/4、合并 `tools::`+`context::` 共 538/538；clippy/fix/fmt/fmt-check 通过。
+- 文档已同步：精炼日志 `agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`、
+  Multi 子 WBS、顶层 WBS 与 `doc/WBS-COMPLETED.md`。
 
 ### 当前工作
 
-- 规划已完成，等待执行者按本计划落地。
+- 已交付，等待独立审查。
 
 ### 本任务剩余步骤
 
-1. 在 042 worktree 重新确认基线、资源与无并行冲突现场，先站稳 Fact 捕获、定位、可用状态和有界下钻。
-2. 接入 Version 发布窗口、稳定重试与 Fact refs 不可变 authored 内容。
-3. 跑通 Root 与 M-2 route 后目标 Agent 的真实无 API 权限纵切，并补齐成功/失败/拒绝/非递归代表性回归。
-4. 完成格式化、scoped fix/lint、定向门禁、diff/生成物/资源检查和真实问题的有界整改重跑。
-5. 更新本计划状态、精炼日志与受影响 WBS/完成历史，提交 042 分支并停止，交给独立审查。
+1. 等待独立审查结论；如提出实质缺陷，在本分支窄修并只重跑受影响门禁。
 
 ### 阻塞项
 
 - 无。Docker、真实 API、本地模型、付费测评和全 workspace 测试均不是本任务所需证据。
+- 环境注意事项：本机 shell 存在环境代理且 `no_proxy` 使用 reqwest 不支持的 glob 形式，core 集成测试必须显式
+  清空代理变量（`env -u HTTP_PROXY … NO_PROXY=127.0.0.1,localhost`），否则打向 loopback wiremock 的请求会被
+  送去代理，表现为"expected 1 request, got 0"。这与本次改动无关。
 
 ### 当前验收状态
 
 - ExecPlan 与现场核对：已完成。
-- M-3 实现、格式化、lint、定向测试：尚未开始，不能表述为通过。
+- M-3 实现、格式化、lint、定向测试：已完成并通过，结果见上表所引门禁。
+- 独立审查：未进行，不能表述为已验收。合并与推送未执行。
 - 主工作区 git-ignored 现场：仅 Git 创建了 `.claude/worktrees/042-multi-m3-evidence-anchoring` 目录及关联元数据；
-  本任务当前没有必须在主工作区直接生成的私有/ignored 产品数据。
+  本任务没有在主工作区直接生成私有/ignored 产品数据。
 
 ### 交接边界
 
@@ -213,3 +221,10 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
 | 008 | 普通窄失败允许执行者自行修复并定向重跑，原则边界或持续实质阻塞才暂停 | 给实现和测试恢复留合理冗余，不放松安全/资源门禁 | 执行流程 | 已采纳 |
 | 009 | 042 只提交工作树分支；合并、推送和分支/worktree 归档等待用户另行批准 | 遵守本次明确交付边界 | Git 交付 | 已采纳 |
 | 010 | 当前无需在主工作区直接生成 M-3 ignored 数据；`.claude/worktrees` 与 Git 元数据是唯一主工作区侧效果 | M-3 是 session 内存态与受跟踪代码/测试任务，无私有数据资产 | 工作区 | 已采纳 |
+| 011 | locator 解析目标是 producer session 的 conversation history，不依赖 rollout 落盘 | rollout 失败路径只记日志，依赖它就无法诚实确认可用性；history 是 Codex 真正保留并会送给模型的那份 | 定位与可用性 | 已实现 |
+| 012 | 捕获落在 tool dispatch 的终态分支 + retention 边界两处，序号在第二处分配 | 第一处才知道 tool identity 与"是否真的跑完"，第二处才知道真的被保留；一处做不到两件事 | 捕获接缝 | 已实现 |
+| 013 | 失败结果也捕获：dispatch 的 `Err(RespondToModel)` 同样是终态 | 退出码非零的 shell 走该分支，只收 `Ok` 会让"失败"这半个支持集几乎为空 | 支持集 | 已实现 |
+| 014 | dispatch 中更早的拒绝（未知工具、PreToolUse 拦截、PostToolUse 拒绝结果）不捕获 | 要么工具没跑，要么跑出来的结果被替换，都不是对工作的观察 | 支持集 | 已实现 |
+| 015 | `ContentItems` body 整类排除，不抢救其中的文本片段 | 该形状是图片/媒体的载体，逐片段抢救会让 Fact 描述模型没真正看到的东西 | 支持集 | 已实现 |
+| 016 | Fact 可用状态只单向降级，且只在 producer history 确实丢掉该项时降级 | producer 当前未加载是暂时的，写死会误判"真正不可用" | Unavailable 语义 | 已实现 |
+| 017 | 投影按上限命名引用并计数余量，完整清单走 `team_history` | 发布窗口无固定大小，逐条全列会让投影随运行时长无界增长 | 投影预算 | 已实现 |
