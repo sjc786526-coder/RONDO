@@ -24,7 +24,6 @@ mod store;
 mod view;
 mod wake;
 
-pub use evidence::FactAvailability;
 pub use evidence::FactCategory;
 pub use evidence::FactView;
 pub use evidence::ObservationLocator;

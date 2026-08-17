@@ -343,7 +343,8 @@ async fn a_published_version_carries_the_tool_results_behind_it_and_reads_them_b
     )
     .expect("team_publish answered");
 
-    // Three real tool results, three references, in the order Codex retained them.
+    // Three real tool results, three references, numbered in the order Codex retained them — which
+    // for this trajectory is the order the model asked for them.
     let refs = evidence_refs(&published);
     assert_eq!(
         refs.len(),
@@ -351,13 +352,16 @@ async fn a_published_version_carries_the_tool_results_behind_it_and_reads_them_b
         "every supported result observed since joining is attached: {refs:?}"
     );
     assert_eq!(
-        refs,
-        {
-            let mut sorted = refs.clone();
-            sorted.sort();
-            sorted
-        },
-        "references follow retention order: {refs:?}"
+        refs.iter()
+            .map(|reference| fact_ordinal(reference))
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3],
+        "references are numbered in retention order: {refs:?}"
+    );
+    assert_eq!(
+        published["evidence_refs_omitted"],
+        json!(0),
+        "nothing was dropped from a window this small"
     );
 
     // The successful observation reads back, and only it.
@@ -740,13 +744,22 @@ fn shared_observation_ref(history: &Value) -> String {
         .to_string()
 }
 
-/// The next fact reference in the same instance, which is what a member could guess from one it has
-/// legitimately seen.
-fn guess_next_fact(reference: &str) -> String {
+fn fact_parts(reference: &str) -> (u32, &str) {
     let (ordinal, instance) = reference
         .strip_prefix("fct-")
         .and_then(|rest| rest.split_once('-'))
         .expect("a fact reference is an ordinal and an instance tag");
-    let next: u32 = ordinal.parse::<u32>().expect("ordinals are numbers") + 1;
+    (ordinal.parse().expect("ordinals are numbers"), instance)
+}
+
+fn fact_ordinal(reference: &str) -> u32 {
+    fact_parts(reference).0
+}
+
+/// The next fact reference in the same instance, which is what a member could guess from one it has
+/// legitimately seen.
+fn guess_next_fact(reference: &str) -> String {
+    let (ordinal, instance) = fact_parts(reference);
+    let next = ordinal + 1;
     format!("fct-{next}-{instance}")
 }

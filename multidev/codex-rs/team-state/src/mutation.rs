@@ -54,6 +54,9 @@ pub struct PublishOutcome {
     /// it is part of the committed outcome, a retry answered from that outcome reports the same
     /// references, whatever has been observed since.
     pub evidence_refs: Vec<FactId>,
+    /// How many older observations from this window did not fit the per-version cap. They are
+    /// consumed either way, so they do not reappear on the author's next publish.
+    pub evidence_refs_omitted: usize,
     /// True when this submission's `based_on` was older than the event's last change. The entry
     /// is committed either way; the label travels with it.
     pub authored_on_stale_view: bool,

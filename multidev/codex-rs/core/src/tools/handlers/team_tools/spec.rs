@@ -294,10 +294,11 @@ fn publish_output_schema() -> serde_json::Value {
             "version_id": { "type": "string" },
             "revision": { "type": "integer" },
             "evidence_refs": { "type": "array", "items": { "type": "string" } },
+            "evidence_refs_omitted": { "type": "integer" },
             "authored_on_stale_view": { "type": "boolean" },
             "deduplicated": { "type": "boolean" }
         },
-        "required": ["event_id", "version_id", "revision", "evidence_refs", "authored_on_stale_view", "deduplicated"],
+        "required": ["event_id", "version_id", "revision", "evidence_refs", "evidence_refs_omitted", "authored_on_stale_view", "deduplicated"],
         "additionalProperties": false
     })
 }

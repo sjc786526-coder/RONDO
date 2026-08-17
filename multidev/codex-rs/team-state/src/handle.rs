@@ -180,12 +180,13 @@ impl TeamStateHandle {
         self.with_store(|store| store.confirm_observation(producer, call_id))
     }
 
-    pub fn read_fact(&self, actor: ThreadId, fact_id: FactId) -> Result<FactView, TeamError> {
-        self.with_store(|store| store.read_fact(actor, fact_id))
+    /// Drop a note whose result the harness ended up throwing away.
+    pub fn discard_observation(&self, producer: ThreadId, call_id: &str) {
+        self.with_store(|store| store.discard_observation(producer, call_id));
     }
 
-    pub fn mark_fact_unavailable(&self, actor: ThreadId, fact_id: FactId) -> Result<(), TeamError> {
-        self.with_store(|store| store.mark_fact_unavailable(actor, fact_id))
+    pub fn read_fact(&self, actor: ThreadId, fact_id: FactId) -> Result<FactView, TeamError> {
+        self.with_store(|store| store.read_fact(actor, fact_id))
     }
 
     pub fn snapshot_for(&self, viewer: ThreadId) -> Result<TeamSnapshot, TeamError> {

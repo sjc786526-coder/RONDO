@@ -1,9 +1,6 @@
 use super::*;
-use crate::team::evidence::MAX_OBSERVATION_CHARS;
-use crate::team::evidence::ObservationRead;
 use crate::team::evidence::read_observation;
 use crate::tools::handlers::team_tools::spec::create_team_evidence_tool;
-use codex_team_state::FactAvailability;
 use codex_team_state::FactId;
 use codex_tools::ToolSpec;
 
@@ -45,54 +42,21 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         .read_fact(access.actor(), fact_id)
         .map_err(team_error)?;
 
-    let recorded_availability = fact.availability;
+    // Whether the observation can be fetched is a question about the producer's history right now,
+    // so it is answered here and not cached on the fact. Nothing is written off: the reference stays
+    // valid and resolvable, and a later read can succeed where this one did not.
     let read = read_observation(&session, &fact).await;
-    // A producer that is not loaded may answer again later, so only a history that has really dropped
-    // the item writes the reference off. The reference itself always stays: the version that carries
-    // it is immutable, and a labelled absence is the honest way to explain it.
-    if matches!(read, ObservationRead::Gone) {
-        let _ = access
-            .handle()
-            .mark_fact_unavailable(access.actor(), fact_id);
-    }
-
-    let (observation, truncated, total_chars, availability, unavailable_reason) = match read {
-        ObservationRead::Retained { text, total_chars } => (
-            Some(text),
-            total_chars > MAX_OBSERVATION_CHARS,
-            Some(total_chars),
-            recorded_availability,
-            None,
-        ),
-        ObservationRead::Gone => (
-            None,
-            false,
-            None,
-            FactAvailability::Unavailable,
-            Some("the producer no longer retains this observation".to_string()),
-        ),
-        ObservationRead::ProducerNotLoaded => (
-            None,
-            false,
-            None,
-            FactAvailability::Unavailable,
-            Some(
-                "the participant that produced this observation is not loaded right now"
-                    .to_string(),
-            ),
-        ),
-    };
 
     Ok(boxed_tool_output(TeamEvidenceResult {
         fact_id: fact.id.to_string(),
         producer: fact.producer_label,
         tool: fact.locator.tool,
         category: fact.category.to_string(),
-        availability: availability.to_string(),
-        unavailable_reason,
-        observation,
-        truncated,
-        total_chars,
+        availability: read.availability().to_string(),
+        unavailable_reason: read.unavailable_reason().map(str::to_string),
+        observation: read.observation().map(str::to_string),
+        truncated: read.truncated(),
+        total_chars: read.total_chars(),
     }))
 }
 

@@ -86,6 +86,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
             .iter()
             .map(FactId::to_string)
             .collect(),
+        evidence_refs_omitted: outcome.evidence_refs_omitted,
         authored_on_stale_view: outcome.authored_on_stale_view,
         deduplicated: outcome.deduplicated,
     }))
@@ -120,6 +121,8 @@ pub(crate) struct TeamPublishResult {
     revision: u64,
     /// The observations this version was published with. Read one with `team_evidence`.
     evidence_refs: Vec<String>,
+    /// How many older observations did not fit this entry. Publish more often to keep them attached.
+    evidence_refs_omitted: usize,
     authored_on_stale_view: bool,
     deduplicated: bool,
 }

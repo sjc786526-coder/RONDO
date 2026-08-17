@@ -17,10 +17,10 @@
 //! fact identifier is not a permission.
 
 use super::TeamStore;
-use crate::evidence::FactAvailability;
 use crate::evidence::FactCategory;
 use crate::evidence::FactView;
 use crate::evidence::MAX_PENDING_OBSERVATIONS;
+use crate::evidence::MAX_VERSION_EVIDENCE_REFS;
 use crate::evidence::ObservationLocator;
 use crate::evidence::PendingObservation;
 use crate::evidence::TeamFact;
@@ -43,11 +43,14 @@ impl TeamStore {
         if self.participant(producer).is_none() {
             return;
         }
-        // A repeat for the same call replaces the earlier note rather than queueing a second one:
-        // one tool call retains one output, so two pending entries could only ever mint a duplicate.
-        self.pending_observations.retain(|pending| {
-            pending.producer != producer || pending.locator.call_id != locator.call_id
-        });
+        // Call ids come from the model's request, so two results can claim the same one. The first
+        // note wins, because resolution also takes the first retained match: keeping the later one
+        // would mint a fact whose category and tool describe a different call than its own text.
+        if self.pending_observations.iter().any(|pending| {
+            pending.producer == producer && pending.locator.call_id == locator.call_id
+        }) {
+            return;
+        }
         if self.pending_observations.len() >= MAX_PENDING_OBSERVATIONS {
             self.pending_observations.pop_front();
         }
@@ -56,6 +59,17 @@ impl TeamStore {
             category,
             locator,
         });
+    }
+
+    /// Drop a note whose result the harness ended up throwing away.
+    ///
+    /// An interrupted tool call can still finish its teardown and return an outcome, which the host
+    /// then discards in favour of its own filler answer. The filler reaches history under the same
+    /// call id, so without revoking the note it would be confirmed as though the tool had reported
+    /// it — turning an interrupted call into evidence.
+    pub fn discard_observation(&mut self, producer: ThreadId, call_id: &str) {
+        self.pending_observations
+            .retain(|pending| pending.producer != producer || pending.locator.call_id != call_id);
     }
 
     /// Mint the fact for an observation the caller has confirmed Codex retained.
@@ -78,35 +92,38 @@ impl TeamStore {
         Some(id)
     }
 
-    /// The sequence position a participant joining now starts its first publication window at.
-    ///
-    /// Evidence recorded before a participant joined is not its own to publish, and a member that is
-    /// unloaded and reloaded keeps the cursor it already had because registration is idempotent.
-    pub(crate) fn current_fact_watermark(&self) -> u32 {
-        self.next_fact_ordinal.saturating_sub(1)
-    }
-
     /// Take this producer's unpublished facts and advance its cursor past them.
     ///
     /// Called from inside the publish commit, so the selection, the version that carries it and the
     /// cursor move are one indivisible step.
-    pub(crate) fn take_publish_window(&mut self, producer: ThreadId) -> Vec<FactId> {
+    ///
+    /// A participant's first publish starts from its own first observation rather than from the
+    /// team's: the filter is on `producer`, and a participant cannot have evidence from before it
+    /// registered because [`Self::note_observation`] refuses unregistered sessions. The window is
+    /// capped for the same reason every other authored field is — a version has to stay a bounded
+    /// object — and the count that did not fit is returned so the cap is never silent.
+    pub(crate) fn take_publish_window(&mut self, producer: ThreadId) -> (Vec<FactId>, usize) {
         let cursor = self
             .published_facts_through
             .get(&producer)
             .copied()
             .unwrap_or_default();
-        let window: Vec<FactId> = self
+        let mut window: Vec<FactId> = self
             .facts
             .iter()
             .filter(|fact| fact.producer() == producer && fact.id().ordinal() > cursor)
             .map(TeamFact::id)
             .collect();
+        // Everything selected is consumed whether or not it fits, so the next publish reports what
+        // that author saw next rather than reaching back past a version that already spoke for it.
         if let Some(last) = window.last() {
             self.published_facts_through
                 .insert(producer, last.ordinal());
         }
-        window
+        let omitted = window.len().saturating_sub(MAX_VERSION_EVIDENCE_REFS);
+        // The newest survive: they are the observations the author's summary most likely rests on.
+        window.drain(..omitted);
+        (window, omitted)
     }
 
     /// Resolve a fact reference for `actor`, or refuse.
@@ -146,26 +163,8 @@ impl TeamStore {
             producer: fact.producer(),
             producer_label: self.label_of(fact.producer()),
             category: fact.category(),
-            availability: fact.availability(),
             locator: fact.locator().clone(),
         })
-    }
-
-    /// Record that a fact's observation is gone for good.
-    ///
-    /// Only callable by a reader that may already read the fact, and only in one direction. The
-    /// reference itself stays: a version's authored content never changes, so the honest answer to
-    /// "what did this point at" is a labelled absence rather than a missing entry.
-    pub fn mark_fact_unavailable(
-        &mut self,
-        actor: ThreadId,
-        fact_id: FactId,
-    ) -> Result<(), TeamError> {
-        self.read_fact(actor, fact_id)?;
-        if let Some(fact) = self.facts.iter_mut().find(|fact| fact.id() == fact_id) {
-            fact.availability = FactAvailability::Unavailable;
-        }
-        Ok(())
     }
 }
 

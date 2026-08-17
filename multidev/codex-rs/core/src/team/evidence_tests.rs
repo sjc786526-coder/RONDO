@@ -1,4 +1,5 @@
 use super::*;
+use codex_protocol::ThreadId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
@@ -157,7 +158,7 @@ async fn resolution_returns_the_target_observation_and_nothing_around_it() {
 }
 
 #[tokio::test]
-async fn an_observation_dropped_from_history_is_reported_as_gone() {
+async fn an_observation_dropped_from_history_reports_that_it_cannot_be_read_back() {
     let (session, turn_context) = crate::session::tests::make_session_and_context().await;
     session
         .record_conversation_items(
@@ -171,16 +172,43 @@ async fn an_observation_dropped_from_history_is_reported_as_gone() {
         ObservationRead::Retained { .. }
     ));
 
-    // The replacement compaction performs: the window is rebuilt and the tool result it dropped
-    // does not come back.
+    // The replacement compaction performs: the window is rebuilt without the tool results.
     session.replace_history(Vec::new(), None).await;
 
+    let read = read_observation(&session, &fact).await;
     assert!(
-        matches!(
-            read_observation(&session, &fact).await,
-            ObservationRead::Gone
-        ),
-        "a reference whose observation is gone reports the absence rather than the nearest item"
+        matches!(read, ObservationRead::NotInProducerHistory),
+        "a reference the producer can no longer read back reports the absence rather than the \
+         nearest item"
+    );
+    assert_eq!(read.availability(), "unavailable");
+    assert_eq!(read.observation(), None);
+    assert_eq!(read.total_chars(), None);
+    assert!(!read.truncated());
+    assert!(
+        read.unavailable_reason()
+            .is_some_and(|reason| reason.contains("cannot read it back now")),
+        "and says what the harness actually established, not that it is gone for good"
+    );
+}
+
+/// Design clause 11's distinction, at the read that has to make it: a member that is not loaded
+/// right now is a different answer from one whose observation cannot be read back, and neither
+/// writes the reference off.
+#[tokio::test]
+async fn a_fact_from_an_unloaded_producer_reports_that_rather_than_a_missing_observation() {
+    let (session, _turn_context) = crate::session::tests::make_session_and_context().await;
+    let fact = fact_for(ThreadId::new(), "call-1");
+
+    let read = read_observation(&session, &fact).await;
+
+    assert!(matches!(read, ObservationRead::ProducerNotLoaded));
+    assert_eq!(read.availability(), "unavailable");
+    assert_eq!(read.observation(), None);
+    assert!(
+        read.unavailable_reason()
+            .is_some_and(|reason| reason.contains("not loaded")),
+        "the reason has to name the producer's residency, not the observation"
     );
 }
 
@@ -200,4 +228,9 @@ async fn an_oversized_observation_is_clamped_and_reports_how_long_it_really_was(
 
     assert_eq!(text.chars().count(), MAX_OBSERVATION_CHARS);
     assert_eq!(total_chars, long.chars().count());
+
+    let read = read_observation(&session, &fact).await;
+    assert!(read.truncated(), "a clamped read has to say it was clamped");
+    assert_eq!(read.total_chars(), Some(long.chars().count()));
+    assert_eq!(read.availability(), "available");
 }

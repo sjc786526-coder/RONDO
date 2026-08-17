@@ -19,7 +19,14 @@ use std::fmt;
 /// An observation whose retention is never confirmed — an abandoned turn, a result the harness
 /// discarded — would otherwise sit here for the life of the instance. Dropping the oldest is safe
 /// because a dropped entry only costs a fact that was never confirmed anyway.
-pub(crate) const MAX_PENDING_OBSERVATIONS: usize = 128;
+pub(crate) const MAX_PENDING_OBSERVATIONS: usize = 256;
+
+/// How many evidence references one version may carry.
+///
+/// A publication window is as large as the work its author did since it last published, so without a
+/// cap a single version could hold an unbounded list — and that list is read back by `team_history`
+/// into the model's context. The count that did not fit is reported rather than dropped in silence.
+pub(crate) const MAX_VERSION_EVIDENCE_REFS: usize = 32;
 
 /// The retained item shape that carries a tool result.
 ///
@@ -53,28 +60,6 @@ impl fmt::Display for FactCategory {
     }
 }
 
-/// Whether the harness still believes this observation can be fetched.
-///
-/// A fact starts out [`Available`](Self::Available) because it is not minted until retention is
-/// confirmed. It can only be demoted, and only once the harness has established that the retained
-/// item is gone for good — a producer that is merely not loaded right now is reported as
-/// unavailable for that read without the reference itself being written off.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FactAvailability {
-    Available,
-    Unavailable,
-}
-
-impl fmt::Display for FactAvailability {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Available => "available",
-            Self::Unavailable => "unavailable",
-        })
-    }
-}
-
 /// Which of the producer's retained items a fact points at.
 ///
 /// Everything here is a harness fact recorded at capture time. None of it is model input, and none
@@ -101,6 +86,13 @@ pub(crate) struct PendingObservation {
 }
 
 /// One recorded piece of evidence.
+///
+/// There is no stored "is it still there" flag. A fact is not minted until retention is confirmed,
+/// and after that whether the observation can be fetched is a question about the producer's live
+/// history right now — one only the harness can answer, and only at the moment of reading. Keeping a
+/// cached answer here would mean writing a reference off on evidence that cannot establish
+/// permanence: an ordinary compaction drops tool results from the window while the rollout still
+/// holds them.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct TeamFact {
     id: FactId,
@@ -108,7 +100,6 @@ pub struct TeamFact {
     producer: ThreadId,
     category: FactCategory,
     locator: ObservationLocator,
-    pub(crate) availability: FactAvailability,
 }
 
 impl TeamFact {
@@ -123,7 +114,6 @@ impl TeamFact {
             producer,
             category,
             locator,
-            availability: FactAvailability::Available,
         }
     }
 
@@ -142,10 +132,6 @@ impl TeamFact {
     pub fn locator(&self) -> &ObservationLocator {
         &self.locator
     }
-
-    pub fn availability(&self) -> FactAvailability {
-        self.availability
-    }
 }
 
 /// One fact as a permitted reader may see it, without the observation body.
@@ -159,6 +145,5 @@ pub struct FactView {
     pub producer: ThreadId,
     pub producer_label: String,
     pub category: FactCategory,
-    pub availability: FactAvailability,
     pub locator: ObservationLocator,
 }

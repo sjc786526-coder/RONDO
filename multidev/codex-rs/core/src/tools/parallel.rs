@@ -204,6 +204,15 @@ impl ToolCallRuntime {
                                 Err(err) => return Err(Self::tool_task_join_error(err)),
                             }
                         }
+                        // The host is answering for this call, so whatever the handler managed to
+                        // return is being thrown away. A tool that waits for its runtime to finish
+                        // can have completed and noted an observation by now; the filler written
+                        // below would otherwise be confirmed as if the tool had reported it.
+                        crate::team::evidence::discard_noted_tool_result(
+                            abort_session.as_ref(),
+                            abort_turn.as_ref(),
+                            call.call_id.as_str(),
+                        );
                         let response = Self::aborted_response(&call, secs);
                         notify_tool_aborted(
                             abort_session.as_ref(),

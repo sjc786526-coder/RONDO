@@ -1,4 +1,5 @@
 use super::*;
+use crate::evidence::MAX_VERSION_EVIDENCE_REFS;
 use crate::evidence::RetainedOutputKind;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
@@ -120,12 +121,10 @@ fn facts_are_numbered_in_confirmed_retention_order_rather_than_completion_order(
     );
 }
 
-/// The single mechanism by which everything outside the support set is excluded.
+/// Retention on its own never mints anything.
 ///
-/// An abandoned call, a streaming increment, a media result, a nested code-mode step and a team
-/// tool's own output all reach retention without ever having been noted. Retention on its own never
-/// mints anything, so each of those exclusions is settled by not noting it rather than by a second
-/// filter that could disagree with the first.
+/// This is the shape of the exclusion, not proof of any particular exclusion: which results get
+/// noted is decided in the capture layer, and the cases it turns away are covered there.
 #[test]
 fn a_retained_result_that_was_never_noted_mints_nothing() {
     let TeamFixture {
@@ -425,8 +424,13 @@ fn a_reloaded_member_keeps_the_window_it_already_advanced() {
     );
 }
 
+/// A participant publishes from its own first observation, not from the team's.
+///
+/// The guarantee comes from the window filtering on producer, plus the rule that an unregistered
+/// session cannot leave a note at all — so a participant provably has no evidence from before it
+/// joined, and the first thing it observes afterwards is the first thing it can publish.
 #[test]
-fn a_participant_that_joins_later_does_not_inherit_earlier_evidence() {
+fn a_participant_that_joins_later_publishes_from_its_own_first_observation() {
     let TeamFixture {
         mut store,
         root,
@@ -437,16 +441,31 @@ fn a_participant_that_joins_later_does_not_inherit_earlier_evidence() {
     observe(&mut store, root, "call-2");
     let latecomer = register_member(&mut store, "/root/latecomer");
 
+    let first = store
+        .publish(
+            latecomer,
+            &submission(TeamRevision::INITIAL, "l-0"),
+            new_event("late finding", "nothing observed yet"),
+        )
+        .expect("the latecomer may publish");
+    assert_eq!(
+        first.evidence_refs,
+        Vec::new(),
+        "the team's existing evidence is not the latecomer's to publish"
+    );
+
+    let own = observe(&mut store, latecomer, "call-3");
     assert_eq!(
         store
             .publish(
                 latecomer,
-                &submission(TeamRevision::INITIAL, "l-0"),
-                new_event("late finding", "nothing observed yet"),
+                &submission(store.revision(), "l-1"),
+                append(first.event_id, "and now I have looked"),
             )
-            .expect("the latecomer may publish")
+            .expect("the latecomer may append")
             .evidence_refs,
-        Vec::new()
+        vec![own],
+        "and its own first observation is the first thing it carries"
     );
 }
 
@@ -583,30 +602,111 @@ fn a_well_formed_reference_to_nothing_is_reported_as_unknown() {
     );
 }
 
-// --- honest degradation -----------------------------------------------------------------------
+// --- discarded results and bounded windows ----------------------------------------------------
+
+/// An interrupted call can still finish teardown and return an outcome the host then throws away in
+/// favour of its own filler answer. The filler reaches history under the same call id, so the note
+/// has to be revoked or the interrupted call becomes evidence.
+#[test]
+fn a_discarded_result_does_not_become_evidence_when_its_filler_is_retained() {
+    let TeamFixture {
+        mut store, worker, ..
+    } = TeamFixture::new();
+
+    store.note_observation(
+        worker,
+        FactCategory::ToolResultFailure,
+        locator("call-1", "shell_command"),
+    );
+    store.discard_observation(worker, "call-1");
+
+    assert_eq!(store.confirm_observation(worker, "call-1"), None);
+    assert!(store.facts.is_empty());
+}
 
 #[test]
-fn a_lost_observation_keeps_its_reference_and_is_labelled_unavailable() {
+fn discarding_one_call_leaves_the_others_alone() {
+    let TeamFixture {
+        mut store, worker, ..
+    } = TeamFixture::new();
+
+    store.note_observation(
+        worker,
+        FactCategory::ToolResultSuccess,
+        locator("call-1", "shell_command"),
+    );
+    store.note_observation(
+        worker,
+        FactCategory::ToolResultSuccess,
+        locator("call-2", "shell_command"),
+    );
+    store.discard_observation(worker, "call-1");
+
+    assert_eq!(store.confirm_observation(worker, "call-1"), None);
+    assert!(store.confirm_observation(worker, "call-2").is_some());
+}
+
+/// Two results claiming one call id cannot be told apart, and resolution answers with the first
+/// retained match, so the first note is the one whose metadata can honestly describe it.
+#[test]
+fn a_repeated_call_id_keeps_the_first_note_rather_than_the_last() {
+    let TeamFixture {
+        mut store, worker, ..
+    } = TeamFixture::new();
+
+    store.note_observation(
+        worker,
+        FactCategory::ToolResultSuccess,
+        locator("call-1", "first_tool"),
+    );
+    store.note_observation(
+        worker,
+        FactCategory::ToolResultFailure,
+        locator("call-1", "second_tool"),
+    );
+    let fact_id = store
+        .confirm_observation(worker, "call-1")
+        .expect("one call id retains one output");
+
+    let view = store
+        .read_fact(worker, fact_id)
+        .expect("its producer may read it");
+    assert_eq!(
+        (view.category, view.locator.tool.as_str()),
+        (FactCategory::ToolResultSuccess, "first_tool")
+    );
+    assert_eq!(store.confirm_observation(worker, "call-1"), None);
+}
+
+/// A version has to stay a bounded object: `team_history` reads its references back into the model's
+/// context, so an author that observed thousands of things cannot put all of them on one entry.
+#[test]
+fn a_version_carries_a_bounded_number_of_references_and_reports_the_rest() {
     let TeamFixture {
         mut store,
         root,
         worker,
     } = TeamFixture::new();
+    let mut all = Vec::new();
+    for index in 0..MAX_VERSION_EVIDENCE_REFS + 5 {
+        all.push(observe(&mut store, worker, &format!("call-{index}")));
+    }
 
-    let fact_id = observe(&mut store, worker, "call-1");
     let opened = store
         .publish(
             worker,
             &submission(TeamRevision::INITIAL, "w-0"),
-            new_event("finding", "what the check showed"),
+            new_event("checked everything", "here is what all of that showed"),
         )
         .expect("worker may publish");
-    store
-        .mark_fact_unavailable(root, fact_id)
-        .expect("the root may write off evidence it can read");
 
-    let view = store.read_fact(root, fact_id).expect("the reference stays");
-    assert_eq!(view.availability, FactAvailability::Unavailable);
+    assert_eq!(opened.evidence_refs.len(), MAX_VERSION_EVIDENCE_REFS);
+    assert_eq!(opened.evidence_refs_omitted, 5);
+    assert_eq!(
+        opened.evidence_refs,
+        all[5..],
+        "the newest survive; the summary is likeliest to rest on those"
+    );
     assert_eq!(
         store
             .history(
@@ -620,31 +720,24 @@ fn a_lost_observation_keeps_its_reference_and_is_labelled_unavailable() {
             .events[0]
             .event
             .versions[0]
-            .evidence_refs,
-        vec![fact_id],
-        "authored content never changes, so the reference is still there to explain"
+            .evidence_refs
+            .len(),
+        MAX_VERSION_EVIDENCE_REFS,
+        "history reads back exactly what the version carries"
     );
-}
 
-#[test]
-fn writing_off_a_fact_needs_the_same_permission_as_reading_it() {
-    let TeamFixture {
-        mut store, worker, ..
-    } = TeamFixture::new();
-    let sibling = register_member(&mut store, "/root/sibling");
-    let fact_id = observe(&mut store, worker, "call-1");
-
-    assert_eq!(
-        store.mark_fact_unavailable(sibling, fact_id),
-        Err(TeamError::NotPermitted {
-            reason: "this evidence was not produced by you and is not referenced by any team event you can see",
-        })
-    );
+    // Everything selected was consumed, so a later publish speaks for what came next rather than
+    // reaching back past the version that already spoke for these.
+    let next = observe(&mut store, worker, "call-later");
     assert_eq!(
         store
-            .read_fact(worker, fact_id)
-            .expect("still readable by its producer")
-            .availability,
-        FactAvailability::Available
+            .publish(
+                worker,
+                &submission(store.revision(), "w-1"),
+                append(opened.event_id, "and then this"),
+            )
+            .expect("worker may append")
+            .evidence_refs,
+        vec![next]
     );
 }

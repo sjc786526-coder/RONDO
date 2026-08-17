@@ -189,11 +189,6 @@ impl TeamStore {
                     role,
                     label,
                 });
-                // A first publication carries what this participant recorded from here on, not
-                // whatever the team already had. Re-registration takes the occupied branch above,
-                // so a reload never rewinds a cursor the participant has already advanced.
-                let watermark = self.current_fact_watermark();
-                self.published_facts_through.insert(thread_id, watermark);
                 true
             }
         }
@@ -343,7 +338,7 @@ impl TeamStore {
         // Evidence is attached mechanically, from what this author has recorded since its last
         // successful publish. The model is never asked to list it, and everything after this point
         // is infallible, so taking the window here is the same step as committing the version.
-        let evidence_refs = self.take_publish_window(actor);
+        let (evidence_refs, evidence_refs_omitted) = self.take_publish_window(actor);
         let event = &mut self.events[event_index];
         let version_id = VersionId::new(
             self.tag,
@@ -375,6 +370,7 @@ impl TeamStore {
             version_id,
             revision,
             evidence_refs,
+            evidence_refs_omitted,
             authored_on_stale_view: authored_on_stale_view.is_some(),
             deduplicated: false,
         };

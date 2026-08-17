@@ -1,14 +1,16 @@
 //! Anchoring team versions to observations Codex actually kept.
 //!
-//! Capture happens in two steps because those two steps know different things. When a tool call
-//! completes, the harness knows which tool ran, that it ran to completion rather than being
-//! abandoned, and what shape its result has — that is where an observation is *noted*. When the
-//! result reaches conversation history, the harness knows the observation was really retained — that
-//! is where a fact is *minted*, and where its ordinal comes from. Splitting them is what keeps a
-//! reference from claiming to be available before anything has been kept.
+//! Capture happens in two steps because those two steps know different things. When a tool handler
+//! produces a terminal outcome, the harness knows which tool ran and what shape its result has —
+//! that is where an observation is *noted*, and where a call the host ends up answering for itself
+//! is revoked again. When the result reaches conversation history, the harness knows the observation
+//! was really retained — that is where a fact is *minted*, and where its ordinal comes from.
+//! Splitting them is what keeps a reference from claiming to exist before anything has been kept.
 //!
 //! Resolution goes the other way: a locator names one retained item in one participant's history, and
-//! reading it returns that item's bounded text and nothing that happens to sit next to it.
+//! reading it returns that item's bounded text and nothing that happens to sit next to it. Whether it
+//! can be read at all is answered per read, because both ways of failing — a history that no longer
+//! carries it, a producer that is not loaded — are about now rather than forever.
 
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
@@ -42,13 +44,16 @@ pub(crate) enum CompletedToolResult<'a> {
 
 /// Note a completed tool result so it can become evidence once Codex has retained it.
 ///
-/// Called only where a tool handler has really produced a terminal outcome, which is what keeps an
-/// abandoned call — whose response is written by the host after the dispatch is given up on — from
-/// leaving evidence behind. Three further exclusions are decided here, at the only point where all
-/// three are knowable: nested code-mode calls (their retained observation is the cell's own result,
-/// not each step inside it), the team tools and the evidence read itself (a drill-down that produced
-/// more evidence would make every read generate another thing to read), and every result shape
-/// outside the supported set.
+/// Called where a tool handler has produced a terminal outcome for the model. A call the host ends up
+/// answering for itself is revoked again by [`discard_noted_tool_result`], so an interrupted call
+/// leaves nothing behind even when its runtime finishes teardown afterwards.
+///
+/// Three exclusions are decided here, at the only point where all three are knowable: the team tools
+/// and the evidence read itself (a drill-down that produced more evidence would make every read
+/// generate another thing to read), every result shape outside the supported set, and nested
+/// code-mode steps. The last of those is a matter of not doing pointless work rather than a
+/// correctness gate — a nested step's output is folded into its cell's result and never retained
+/// under its own call id, so it could not be confirmed either way.
 pub(crate) fn note_completed_tool_result(
     invocation: &ToolInvocation,
     result: CompletedToolResult<'_>,
@@ -115,6 +120,25 @@ pub(crate) fn note_completed_tool_result(
     );
 }
 
+/// Revoke the note for a tool call whose result the host is about to answer for itself.
+///
+/// An interrupted call can still finish its teardown and hand back an outcome, which the host then
+/// discards in favour of its own "aborted" filler. That filler is retained under the same call id, so
+/// without this the interrupted call would be confirmed as though the tool had reported it.
+pub(crate) fn discard_noted_tool_result(
+    session: &Session,
+    turn_context: &TurnContext,
+    call_id: &str,
+) {
+    if !super::team_state_enabled(turn_context) {
+        return;
+    }
+    let Ok(access) = super::TeamAccess::resolve(session) else {
+        return;
+    };
+    access.handle().discard_observation(access.actor(), call_id);
+}
+
 /// Mint facts for the supported tool results in `items` that this session really retained.
 ///
 /// Called from the retention boundary itself, so the ordinals facts receive follow Codex's retention
@@ -161,15 +185,64 @@ pub(crate) async fn record_retained_tool_facts(
 }
 
 /// What resolving one fact's locator produced.
+///
+/// Both unreadable cases are about right now, not forever. A producer's model-visible history is
+/// rewritten by compaction and trimmed under context pressure, so an observation missing from it may
+/// still be in that thread's rollout; and a member that is not loaded can be loaded again into the
+/// same live root tree. Neither is grounds for writing a reference off, which is why availability is
+/// answered per read instead of being cached on the fact.
 pub(crate) enum ObservationRead {
     /// The retained text, clamped to [`MAX_OBSERVATION_CHARS`].
     Retained { text: String, total_chars: usize },
-    /// The producer still holds a history, and the item this locator names is no longer in it.
-    /// Compaction and rollback do not put items back, so this is final.
-    Gone,
-    /// The producer is not loaded right now, so nothing can be read for it this turn. The reference
-    /// is not written off: the same member reloaded into this live root tree can answer again.
+    /// The producer is loaded and the item this locator names is not in its current history.
+    NotInProducerHistory,
+    /// The producer is not loaded right now, so nothing can be read for it this turn.
     ProducerNotLoaded,
+}
+
+impl ObservationRead {
+    /// The model-facing text, absent when nothing could be read.
+    pub(crate) fn observation(&self) -> Option<&str> {
+        match self {
+            Self::Retained { text, .. } => Some(text),
+            Self::NotInProducerHistory | Self::ProducerNotLoaded => None,
+        }
+    }
+
+    pub(crate) fn availability(&self) -> &'static str {
+        match self {
+            Self::Retained { .. } => "available",
+            Self::NotInProducerHistory | Self::ProducerNotLoaded => "unavailable",
+        }
+    }
+
+    /// Why nothing could be read, said in terms of what the harness actually established.
+    pub(crate) fn unavailable_reason(&self) -> Option<&'static str> {
+        match self {
+            Self::Retained { .. } => None,
+            Self::NotInProducerHistory => Some(
+                "the producer's current context no longer carries this observation; it was recorded, but the harness cannot read it back now",
+            ),
+            Self::ProducerNotLoaded => {
+                Some("the participant that produced this observation is not loaded right now")
+            }
+        }
+    }
+
+    /// Length of the retained observation, so a truncated read says how much was left out.
+    pub(crate) fn total_chars(&self) -> Option<usize> {
+        match self {
+            Self::Retained { total_chars, .. } => Some(*total_chars),
+            Self::NotInProducerHistory | Self::ProducerNotLoaded => None,
+        }
+    }
+
+    pub(crate) fn truncated(&self) -> bool {
+        match self {
+            Self::Retained { total_chars, .. } => *total_chars > MAX_OBSERVATION_CHARS,
+            Self::NotInProducerHistory | Self::ProducerNotLoaded => false,
+        }
+    }
 }
 
 /// Resolve one fact to the observation it points at.
@@ -196,7 +269,7 @@ pub(crate) async fn read_observation(session: &Session, fact: &FactView) -> Obse
         .retained_tool_output(&fact.locator.call_id, fact.locator.output_kind)
         .await
     else {
-        return ObservationRead::Gone;
+        return ObservationRead::NotInProducerHistory;
     };
 
     let total_chars = text.chars().count();
