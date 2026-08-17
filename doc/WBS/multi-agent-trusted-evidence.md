@@ -225,7 +225,7 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 ### M-3 证据锚定（实现完成，待独立审查与合入）
 
 实现由工作树分支 `worktree-042-multi-m3-evidence-anchoring` 落地（提交 `db39e28`、`8360bbf`、`ce32394`、
-`cfe3dc1`），尚未合入 `main`。一轮只读独立审查已完成，findings 全部整改。模型可见工具新增 `team_evidence`，与 M-1/M-2 五个工具同受
+`cfe3dc1`、`35356ab`），尚未合入 `main`。两轮审查的 findings 全部整改，**复验尚未进行**。模型可见工具新增 `team_evidence`，与 M-1/M-2 五个工具同受
 `features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。
 
 首版 observation 支持集为**已完成、由 Codex 正式保留、body 为纯文本的工具结果**，成功与失败都形成 Fact。
@@ -236,11 +236,15 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 内取走该作者上次成功发布之后的新 Fact 并推进游标。读取沿 Event 图收敛，`team_evidence` 只返回目标
 observation 的有界文本与必要元数据。
 
-定向门禁：`codex-team-state` 101/101；新增产品纵切 `suite::team_evidence` 2/2；M-1/M-2 回归
-`suite::team_world_state` + `suite::team_routing` 12/12 无退化；`core` 的 `team::evidence` 5/5；
-合并 `tools::`/`context::` 共 539/539。执行细节与环境坑见
-`agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`，任务合同见
-`plan/042-multi-m3-evidence-anchoring-execplan.md`。
+locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 只作元数据）；Version 保留发布窗口的全部引用，
+上下文预算只作用于打印列表的 surface 并报告省略数。
+
+定向门禁：`codex-team-state` 101/101；产品纵切 `suite::team_evidence` 3/3；M-1/M-2 回归
+`suite::team_world_state` + `suite::team_routing` 12/12 无退化；`core` 的 `team::evidence` 6/6；
+合并 `tools::`/`context::` 共 541/541。执行细节见
+`agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`，验收审查与整改见同目录
+`...-045506-...-independent-acceptance-review.md` 与 `...-052000-...-acceptance-remediation.md`，
+任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。

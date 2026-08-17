@@ -1037,8 +1037,8 @@ standard/Lite 形态均补回归。
 ## Multi M-3 —— 证据锚定（Plan 042，2026-08-17，待独立审查与合入）
 
 **状态**：实现与定向门禁完成，落在工作树分支 `worktree-042-multi-m3-evidence-anchoring`
-（提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`），**尚未合入 `main`**。一轮只读独立审查已完成，
-findings 全部整改（见下）。
+（提交 `db39e28`、`8360bbf`、`ce32394`、`cfe3dc1`、`35356ab`），**尚未合入 `main`**。两轮审查（执行期自查与
+独立验收）的 findings 全部整改，**复验尚未进行**。
 
 - **两步捕获**：工具处理器产出终态时记下观察（此处才知道跑的是哪个工具、结果什么形状），结果进入
   conversation history 时才铸造 Fact 并按 retention 顺序分配序号。落点是
@@ -1055,7 +1055,10 @@ findings 全部整改（见下）。
 - **权限与边界**：Root 读本团队证据，producer 读自己的，其他人只读自己可见 Event 的某个 Version 显式引用的
   那一条；猜中 ID、同团队 sibling、看见别的 Event ID 与跨实例引用均 fail-closed。新增窄工具 `team_evidence`
   返回 producer、工具名、类别、可用状态、有界文本（4,000 字符上限）与截断信息，不返回调用参数、
-  相邻结果或 producer 的其他上下文。TeamState 只持 typed Fact refs，不复制工具输出。
+  相邻结果或 producer 的其他上下文。TeamState 只持 typed Fact refs，不复制工具输出。Version 保留发布窗口的
+  全部引用；上下文预算只作用于打印列表的 surface（投影 4 条、工具结果 32 条），并报告省略数。
+- **一对一定位**：locator 是 Codex 为每个已保留 item 分配的身份，不是 call_id —— 后者来自模型请求，
+  复用时无法保证只解析到目标 observation。该身份不需要跨重放稳定，重放要复现的是 Fact 序号与每次发布携带的窗口。
 - **诚实退化**：可用状态**每次读取现场判定，不缓存在 Fact 上**。两种读不到的原因分别命名：producer 未加载，
   或 producer 当前 history 已不携带该项（一次普通 compaction 就会造成后者，而 rollout 仍持有它）。
   两者都只陈述 Harness 实际确认到的事，都不写死引用。Version 的 authored 内容不可改写，引用永远留着，
@@ -1067,9 +1070,15 @@ findings 全部整改（见下）。
   写 filler，于是被打断的调用变成证据。两项诚实性缺陷均已修正。加固三处：同一 call id 的重复 note 保留第一条、
   Version 引用数量设上限并报告未装下的条数、移除不可达的 join watermark。五处测试质量问题（退化路径无覆盖、
   按字符串排序的伪断言、两处注释过度声称）同批修好。
-- **门禁**：`codex-team-state` **101/101**；新增产品纵切 `suite::team_evidence` **2/2**；M-1/M-2 回归
-  `suite::team_world_state` + `suite::team_routing` **12/12** 无退化；`core` 的 `team::evidence` **5/5**；
-  合并 `tools::` 与 `context::` 共 **539/539**；`just clippy -p codex-core`、
+- **验收审查整改**：发布窗口超过打印上限时，较早引用被游标消费却没有写进 Version —— 永久失去锚点；
+  locator 用 `call_id` 匹配，而 call_id 来自模型请求，复用会串线、并在 compaction 后把旧 Fact 静默重定向到
+  新文本；pending 暂存上限全团队共用，一个成员的突发会挤掉另一个成员即将保留的结果；`PostToolUse` 拦截后
+  正式保留的失败文本没有任何 Fact 可指向。四项均已修：Version 保留窗口全部引用（上限只加在打印 surface）、
+  locator 改用 Codex 为每个已保留 item 分配的身份（一对一）、暂存上限按 producer 计并在逐出时告警、
+  拦截结果纳入支持集。
+- **门禁**：`codex-team-state` **101/101**；产品纵切 `suite::team_evidence` **3/3**；M-1/M-2 回归
+  `suite::team_world_state` + `suite::team_routing` **12/12** 无退化；`core` 的 `team::evidence` **6/6**；
+  合并 `tools::` 与 `context::` 共 **541/541**；`just clippy -p codex-core`、
   `just fix -p codex-team-state -p codex-core`、`just fmt`、`just fmt-check` 通过。
 - **边界**：功能默认关闭，关闭时不注册 `team_evidence`、不改变普通工具结果与 rollout 行为。未建 artifact
   store、全量输出副本、完整 transcript/provenance graph、自动 freshness 验证或跨进程持久化；未运行全
