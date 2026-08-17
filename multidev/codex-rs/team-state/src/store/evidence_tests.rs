@@ -19,6 +19,7 @@ use pretty_assertions::assert_eq;
 
 fn noted(call_id: &str, tool: &str) -> NotedObservation {
     NotedObservation {
+        item_id: item_of(call_id),
         call_id: call_id.to_string(),
         category: FactCategory::ToolResultSuccess,
         tool: tool.to_string(),
@@ -35,7 +36,7 @@ fn item_of(call_id: &str) -> String {
 fn observe(store: &mut TeamStore, producer: ThreadId, call_id: &str) -> FactId {
     store.note_observation(producer, noted(call_id, "shell_command"));
     store
-        .confirm_observation(producer, call_id, &item_of(call_id))
+        .confirm_observation(producer, &item_of(call_id))
         .expect("a noted observation mints a fact once retention is confirmed")
 }
 
@@ -65,7 +66,7 @@ fn an_observation_becomes_a_fact_only_once_its_retention_is_confirmed() {
     );
 
     let fact_id = store
-        .confirm_observation(worker, "call-1", &item_of("call-1"))
+        .confirm_observation(worker, &item_of("call-1"))
         .expect("confirming retention mints the fact");
     let published_after = store
         .publish(
@@ -97,10 +98,10 @@ fn facts_are_numbered_in_confirmed_retention_order_rather_than_completion_order(
         },
     );
     let first = store
-        .confirm_observation(root, "first", &item_of("first"))
+        .confirm_observation(root, &item_of("first"))
         .expect("the root's result was retained first");
     let second = store
-        .confirm_observation(worker, "second", &item_of("second"))
+        .confirm_observation(worker, &item_of("second"))
         .expect("the worker's result was retained second");
 
     assert_eq!((first.ordinal(), second.ordinal()), (1, 2));
@@ -129,7 +130,7 @@ fn a_retained_result_that_was_never_noted_mints_nothing() {
     } = TeamFixture::new();
 
     assert_eq!(
-        store.confirm_observation(worker, "call-never-noted", &item_of("call-never-noted")),
+        store.confirm_observation(worker, &item_of("call-never-noted")),
         None
     );
     assert!(store.facts.is_empty());
@@ -213,7 +214,7 @@ fn a_result_from_an_unregistered_session_never_becomes_evidence() {
     store.note_observation(stranger, noted("call-1", "shell_command"));
 
     assert_eq!(
-        store.confirm_observation(stranger, "call-1", &item_of("call-1")),
+        store.confirm_observation(stranger, &item_of("call-1")),
         None
     );
 }
@@ -226,55 +227,47 @@ fn confirming_the_same_call_twice_mints_one_fact() {
 
     let fact_id = observe(&mut store, worker, "call-1");
 
-    assert_eq!(
-        store.confirm_observation(worker, "call-1", &item_of("call-1")),
-        None
-    );
+    assert_eq!(store.confirm_observation(worker, &item_of("call-1")), None);
     assert_eq!(
         store.facts.iter().map(TeamFact::id).collect::<Vec<_>>(),
         vec![fact_id]
     );
 }
 
-/// The staging ceiling is a leak guard, and it is per producer so that one member's burst cannot
-/// cost another member its evidence.
+/// Pending observations are short-lived staging records, but a burst cannot be truncated: every
+/// supported result that is subsequently retained still has to become a fact.
 #[test]
-fn one_producers_unconfirmed_observations_cannot_evict_anothers() {
+fn more_than_256_pending_observations_are_all_confirmable() {
     let TeamFixture {
         mut store,
         root,
         worker,
     } = TeamFixture::new();
 
+    const OBSERVATION_COUNT: usize = 266;
     store.note_observation(root, noted("root-call", "shell_command"));
-    for index in 0..MAX_PENDING_OBSERVATIONS_PER_PRODUCER + 10 {
+    for index in 0..OBSERVATION_COUNT {
         store.note_observation(worker, noted(&format!("call-{index}"), "shell_command"));
     }
 
-    assert!(
-        store
-            .confirm_observation(root, "root-call", &item_of("root-call"))
-            .is_some(),
-        "the root's note survives however much the worker queues"
-    );
     assert_eq!(
         store
             .pending_observations
             .iter()
             .filter(|pending| pending.producer == worker)
             .count(),
-        MAX_PENDING_OBSERVATIONS_PER_PRODUCER,
-        "and the worker's own notes stay bounded"
+        OBSERVATION_COUNT,
+        "staging must not silently drop a supported result before retention"
     );
+    let confirmed = (0..OBSERVATION_COUNT)
+        .filter_map(|index| store.confirm_observation(worker, &item_of(&format!("call-{index}"))))
+        .count();
+    assert_eq!(confirmed, OBSERVATION_COUNT);
     assert!(
         store
-            .confirm_observation(
-                worker,
-                &format!("call-{}", MAX_PENDING_OBSERVATIONS_PER_PRODUCER + 9),
-                &item_of("newest"),
-            )
+            .confirm_observation(root, &item_of("root-call"))
             .is_some(),
-        "the newest is still there"
+        "another producer's pending note is independent too"
     );
 }
 
@@ -636,12 +629,9 @@ fn a_discarded_result_does_not_become_evidence_when_its_filler_is_retained() {
             ..noted("call-1", "shell_command")
         },
     );
-    store.discard_observation(worker, "call-1");
+    store.discard_observation(worker, &item_of("call-1"));
 
-    assert_eq!(
-        store.confirm_observation(worker, "call-1", &item_of("call-1")),
-        None
-    );
+    assert_eq!(store.confirm_observation(worker, &item_of("call-1")), None);
     assert!(store.facts.is_empty());
 }
 
@@ -653,59 +643,49 @@ fn discarding_one_call_leaves_the_others_alone() {
 
     store.note_observation(worker, noted("call-1", "shell_command"));
     store.note_observation(worker, noted("call-2", "shell_command"));
-    store.discard_observation(worker, "call-1");
+    store.discard_observation(worker, &item_of("call-1"));
 
-    assert_eq!(
-        store.confirm_observation(worker, "call-1", &item_of("call-1")),
-        None
-    );
+    assert_eq!(store.confirm_observation(worker, &item_of("call-1")), None);
     assert!(
         store
-            .confirm_observation(worker, "call-2", &item_of("call-2"))
+            .confirm_observation(worker, &item_of("call-2"))
             .is_some()
     );
 }
 
-/// Two results claiming one call id cannot be told apart while they are still pending, so the first
-/// note holds the slot. What keeps them apart afterwards is the locator: it names the retained item,
-/// not the call, so a second call reusing the id gets its own fact pointing at its own observation.
+/// The harness item identity pairs each completion note with its retained result, even when two
+/// calls reuse one model-provided id and retention observes them in the opposite order.
 #[test]
-fn a_reused_call_id_produces_separate_facts_pointing_at_separate_items() {
+fn concurrent_reused_call_ids_pair_metadata_with_their_own_retained_items() {
     let TeamFixture {
         mut store, worker, ..
     } = TeamFixture::new();
 
-    store.note_observation(worker, noted("call-1", "first_tool"));
     store.note_observation(
         worker,
         NotedObservation {
-            category: FactCategory::ToolResultFailure,
-            ..noted("call-1", "second_tool")
+            item_id: "fco_first-item".to_string(),
+            tool: "first_tool".to_string(),
+            ..noted("call-1", "first_tool")
         },
     );
-    let first = store
-        .confirm_observation(worker, "call-1", "fco_first-item")
-        .expect("one pending note, one fact");
-    assert_eq!(
-        store.confirm_observation(worker, "call-1", "fco_first-item"),
-        None,
-        "the second note never took a slot, so nothing is left to confirm"
-    );
-
-    // The call comes round again with its own retained item.
     store.note_observation(
         worker,
         NotedObservation {
+            item_id: "fco_second-item".to_string(),
             category: FactCategory::ToolResultFailure,
             ..noted("call-1", "second_tool")
         },
     );
     let second = store
-        .confirm_observation(worker, "call-1", "fco_second-item")
-        .expect("a later call with the same id is its own observation");
+        .confirm_observation(worker, "fco_second-item")
+        .expect("the second retained item finds its own pending metadata");
+    let first = store
+        .confirm_observation(worker, "fco_first-item")
+        .expect("the first retained item remains independently confirmable");
 
     assert_ne!(first, second);
-    let locators = [first, second].map(|id| {
+    let locators = [second, first].map(|id| {
         let view = store
             .read_fact(worker, id)
             .expect("its producer may read it");
@@ -715,14 +695,14 @@ fn a_reused_call_id_produces_separate_facts_pointing_at_separate_items() {
         locators,
         [
             (
-                FactCategory::ToolResultSuccess,
-                "fco_first-item".to_string(),
-                "first_tool".to_string()
-            ),
-            (
                 FactCategory::ToolResultFailure,
                 "fco_second-item".to_string(),
                 "second_tool".to_string()
+            ),
+            (
+                FactCategory::ToolResultSuccess,
+                "fco_first-item".to_string(),
+                "first_tool".to_string()
             ),
         ],
         "each fact describes and points at its own item, so neither can answer with the other's text"

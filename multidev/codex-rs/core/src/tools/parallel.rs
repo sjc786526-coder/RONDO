@@ -25,8 +25,10 @@ use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
+use codex_protocol::ResponseItemId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::ResponseItem;
 
 struct ToolCallTimingGuard {
     started_at: Instant,
@@ -74,16 +76,29 @@ impl ToolCallRuntime {
         self,
         call: ToolCall,
         cancellation_token: CancellationToken,
-    ) -> impl std::future::Future<Output = Result<ResponseInputItem, CodexErr>> {
+    ) -> impl std::future::Future<Output = Result<ResponseItem, CodexErr>> {
         let error_call = call.clone();
         let source = call.direct_source();
-        let future = self.handle_tool_call_with_source(call, source, cancellation_token);
+        let output_item_id = ResponseItemId::new(match &call.payload {
+            ToolPayload::Custom { .. } => "ctco",
+            ToolPayload::ToolSearch { .. } => "tso",
+            ToolPayload::Function { .. } => "fco",
+        });
+        let future = self.handle_tool_call_with_source_inner(
+            call,
+            source,
+            cancellation_token,
+            Some(output_item_id.to_string()),
+        );
         async move {
-            match future.await {
-                Ok(response) => Ok(response.into_response()),
-                Err(FunctionCallError::Fatal(message)) => Err(CodexErr::Fatal(message)),
-                Err(other) => Ok(Self::failure_response(error_call, other)),
-            }
+            let response = match future.await {
+                Ok(response) => response.into_response(),
+                Err(FunctionCallError::Fatal(message)) => return Err(CodexErr::Fatal(message)),
+                Err(other) => Self::failure_response(error_call, other),
+            };
+            let mut response: ResponseItem = response.into();
+            response.set_id(Some(output_item_id));
+            Ok(response)
         }
         .in_current_span()
     }
@@ -94,6 +109,16 @@ impl ToolCallRuntime {
         call: ToolCall,
         source: ToolCallSource,
         cancellation_token: CancellationToken,
+    ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
+        self.handle_tool_call_with_source_inner(call, source, cancellation_token, None)
+    }
+
+    fn handle_tool_call_with_source_inner(
+        self,
+        call: ToolCall,
+        source: ToolCallSource,
+        cancellation_token: CancellationToken,
+        output_item_id: Option<String>,
     ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
         if self
             .step_context
@@ -132,6 +157,7 @@ impl ToolCallRuntime {
         let terminal_outcome_reached = Arc::new(AtomicBool::new(false));
         let dispatch_terminal_outcome_reached = Arc::clone(&terminal_outcome_reached);
         let dispatch_call = call.clone();
+        let dispatch_output_item_id = output_item_id.clone();
 
         let dispatch_span = trace_span!(
             "dispatch_tool_call_with_code_mode_result",
@@ -169,6 +195,7 @@ impl ToolCallRuntime {
                         tracker,
                         dispatch_call,
                         source,
+                        dispatch_output_item_id,
                         dispatch_terminal_outcome_reached,
                     )
                     .instrument(dispatch_span.clone())
@@ -208,11 +235,13 @@ impl ToolCallRuntime {
                         // return is being thrown away. A tool that waits for its runtime to finish
                         // can have completed and noted an observation by now; the filler written
                         // below would otherwise be confirmed as if the tool had reported it.
-                        crate::team::evidence::discard_noted_tool_result(
-                            abort_session.as_ref(),
-                            abort_turn.as_ref(),
-                            call.call_id.as_str(),
-                        );
+                        if let Some(item_id) = output_item_id.as_deref() {
+                            crate::team::evidence::discard_noted_tool_result(
+                                abort_session.as_ref(),
+                                abort_turn.as_ref(),
+                                item_id,
+                            );
+                        }
                         let response = Self::aborted_response(&call, secs);
                         notify_tool_aborted(
                             abort_session.as_ref(),
@@ -747,14 +776,27 @@ mod tests {
             .await
             .expect("timed out waiting for tool response")
             .expect("tool response task should join")?;
-        let expected_response = ResponseInputItem::FunctionCallOutput {
-            call_id: "call-1".to_string(),
-            output: FunctionCallOutputPayload {
+        let ResponseItem::FunctionCallOutput {
+            id,
+            call_id,
+            output,
+            ..
+        } = response
+        else {
+            anyhow::bail!("completed tool should return function output");
+        };
+        assert!(
+            id.is_some(),
+            "the output identity is reserved before dispatch"
+        );
+        assert_eq!(call_id, "call-1");
+        assert_eq!(
+            output,
+            FunctionCallOutputPayload {
                 body: FunctionCallOutputBody::Text("ok".to_string()),
                 success: Some(true),
-            },
-        };
-        assert_eq!(expected_response, response);
+            }
+        );
 
         let actual = records
             .lock()
@@ -822,7 +864,7 @@ mod tests {
             .await
             .expect("timed out waiting for tool response")
             .expect("tool response task should join")?;
-        let ResponseInputItem::FunctionCallOutput { output, .. } = response else {
+        let ResponseItem::FunctionCallOutput { output, .. } = response else {
             anyhow::bail!("cancelled tool should return function output");
         };
         let FunctionCallOutputBody::Text(text) = output.body else {

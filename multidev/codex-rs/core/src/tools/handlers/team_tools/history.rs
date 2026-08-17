@@ -55,11 +55,15 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         total_events: page.total_events,
         omitted_events: page.omitted_events,
         next_before: page.next_before,
-        events: page.events.into_iter().map(render_event).collect(),
+        events: page
+            .events
+            .into_iter()
+            .map(|event| render_event(event, args.evidence_refs_offset.unwrap_or_default()))
+            .collect(),
     }))
 }
 
-fn render_event(entry: EventHistory) -> HistoryEvent {
+fn render_event(entry: EventHistory, evidence_refs_offset: usize) -> HistoryEvent {
     let EventHistory {
         event,
         total_versions,
@@ -76,13 +80,17 @@ fn render_event(entry: EventHistory) -> HistoryEvent {
             .map(|version| {
                 // Far more than the projection's preview, but still bounded, because this answer goes
                 // into the model's context too. The version itself keeps every reference.
-                let (reported, omitted) = reported_evidence_refs(&version.evidence_refs);
+                let offset = evidence_refs_offset.min(version.evidence_refs.len());
+                let (reported, omitted) = reported_evidence_refs(&version.evidence_refs[offset..]);
+                let next_offset = (omitted > 0).then_some(offset + reported.len());
                 HistoryVersion {
                     version_id: version.id.to_string(),
                     author: version.author_label,
                     summary: version.summary,
                     handoff: version.handoff,
                     evidence_refs: reported.iter().map(FactId::to_string).collect(),
+                    evidence_refs_offset: offset,
+                    evidence_refs_next_offset: next_offset,
                     evidence_refs_omitted: omitted,
                     producer_state: version.producer_state.to_string(),
                     root_state: version.root_state.to_string(),
@@ -99,6 +107,7 @@ struct HistoryArgs {
     event_id: Option<String>,
     limit: Option<usize>,
     before: Option<u32>,
+    evidence_refs_offset: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -109,7 +118,11 @@ struct HistoryVersion {
     handoff: Option<String>,
     /// The observations this version was published with. Read one with `team_evidence`.
     evidence_refs: Vec<String>,
-    /// How many of them this answer left out.
+    /// The index of the first reference in this bounded page.
+    evidence_refs_offset: usize,
+    /// Pass back as `evidence_refs_offset` to read the next page of each returned version.
+    evidence_refs_next_offset: Option<usize>,
+    /// How many references remain after this page.
     evidence_refs_omitted: usize,
     producer_state: String,
     root_state: String,

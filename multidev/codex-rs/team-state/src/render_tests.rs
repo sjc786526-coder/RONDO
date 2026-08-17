@@ -89,6 +89,7 @@ fn a_versions_evidence_is_named_in_the_view_and_stays_bounded() {
         store.note_observation(
             worker,
             crate::evidence::NotedObservation {
+                item_id: format!("fco_{index}"),
                 call_id: format!("call-{index}"),
                 category: crate::evidence::FactCategory::ToolResultSuccess,
                 tool: "shell_command".to_string(),
@@ -96,7 +97,7 @@ fn a_versions_evidence_is_named_in_the_view_and_stays_bounded() {
         );
         expected.push(
             store
-                .confirm_observation(worker, &format!("call-{index}"), &format!("fco_{index}"))
+                .confirm_observation(worker, &format!("fco_{index}"))
                 .expect("retention was confirmed"),
         );
     }

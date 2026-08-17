@@ -208,6 +208,38 @@ fn shell(id: &str, marker: &str, exit_code: u8) -> String {
     ])
 }
 
+/// One model response with many real tool calls. The first two deliberately reuse a call id while
+/// producing different outcomes; the rest take the publication beyond one 32-reference page.
+fn evidence_boundary_batch() -> String {
+    let mut events = vec![ev_response_created("batch-response")];
+    for index in 0..33 {
+        let (call_id, marker, exit_code) = match index {
+            0 => (
+                "duplicate-call".to_string(),
+                "DUPLICATE-SUCCESS".to_string(),
+                0,
+            ),
+            1 => (
+                "duplicate-call".to_string(),
+                "DUPLICATE-FAILURE".to_string(),
+                7,
+            ),
+            _ => (format!("batch-{index}"), format!("BOUNDARY-{index}"), 0),
+        };
+        let args = json!({
+            "command": format!("echo {marker}; exit {exit_code}"),
+            "timeout_ms": 10_000,
+        });
+        events.push(ev_function_call(
+            &call_id,
+            "shell_command",
+            &serde_json::to_string(&args).expect("arguments serialize"),
+        ));
+    }
+    events.push(ev_completed("batch-response"));
+    sse(events)
+}
+
 fn say(id: &str, message: &str) -> String {
     sse(vec![
         ev_response_created(id),
@@ -425,6 +457,126 @@ async fn a_published_version_carries_the_tool_results_behind_it_and_reads_them_b
         evidence_refs(&appended),
         Vec::<String>::new(),
         "team tools and evidence reads do not recursively produce evidence"
+    );
+
+    Ok(())
+}
+
+/// The product-level regression for the two residual boundaries found at re-verification: repeated
+/// call ids in one parallel batch still pair each retained item with its own metadata, and a Version
+/// with more than 32 references can be walked to the end through bounded `team_history` pages.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_reused_call_ids_and_evidence_ref_paging_remain_exact() -> Result<()> {
+    skip_if_target_windows!(Ok(()), "uses POSIX shell command fixtures");
+    let server = start_mock_server().await;
+
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| body_contains(request, ROOT_PROMPT),
+        evidence_boundary_batch(),
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_output(request, "batch-32"),
+        team_call(
+            "boundary-publish",
+            "team_publish",
+            json!({
+                "title": "evidence boundary",
+                "summary": "all retained checks are anchored",
+            }),
+        ),
+    )
+    .await;
+    mount_sse_once_match_with(
+        &server,
+        |request: &wiremock::Request| has_output(request, "boundary-publish"),
+        |request: &wiremock::Request| {
+            let published =
+                tool_output(request, "boundary-publish").expect("team_publish answered");
+            team_call(
+                "boundary-history",
+                "team_history",
+                json!({
+                    "event_id": published["event_id"],
+                    "limit": 1,
+                    "evidence_refs_offset": 32,
+                }),
+            )
+        },
+    )
+    .await;
+    mount_sse_once_match_with(
+        &server,
+        |request: &wiremock::Request| has_output(request, "boundary-history"),
+        |request: &wiremock::Request| {
+            let published =
+                tool_output(request, "boundary-publish").expect("team_publish answered");
+            team_call(
+                "duplicate-success-read",
+                "team_evidence",
+                json!({ "fact_id": evidence_refs(&published)[0] }),
+            )
+        },
+    )
+    .await;
+    mount_sse_once_match_with(
+        &server,
+        |request: &wiremock::Request| has_output(request, "duplicate-success-read"),
+        |request: &wiremock::Request| {
+            let published =
+                tool_output(request, "boundary-publish").expect("team_publish answered");
+            team_call(
+                "duplicate-failure-read",
+                "team_evidence",
+                json!({ "fact_id": evidence_refs(&published)[1] }),
+            )
+        },
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_output(request, "duplicate-failure-read"),
+        say("boundary-done", "done"),
+    )
+    .await;
+
+    let test = team_enabled_codex().build(&server).await?;
+    test.submit_turn(ROOT_PROMPT).await?;
+
+    let log = request_log(&server).await;
+    let final_request = first_where(&log, "carrying the final evidence read", |body| {
+        has_output_in(body, "duplicate-failure-read")
+    });
+    let published = tool_output_in(final_request, "boundary-publish")
+        .expect("team_publish answered on the final request");
+    assert_eq!(evidence_refs(&published).len(), 32);
+    assert_eq!(published["evidence_refs_omitted"], json!(1));
+
+    let history = tool_output_in(final_request, "boundary-history")
+        .expect("team_history returned the next evidence-reference page");
+    let version = &history["events"][0]["versions"][0];
+    assert_eq!(version["evidence_refs_offset"], json!(32));
+    assert_eq!(version["evidence_refs"].as_array().map(Vec::len), Some(1));
+    assert_eq!(version["evidence_refs_next_offset"], Value::Null);
+    assert_eq!(version["evidence_refs_omitted"], json!(0));
+
+    let success = tool_output_in(final_request, "duplicate-success-read")
+        .expect("the first duplicate call has evidence");
+    assert_eq!(success["category"], json!("tool_result_success"));
+    assert!(
+        success["observation"]
+            .as_str()
+            .is_some_and(|text| text.contains("DUPLICATE-SUCCESS"))
+    );
+    let failure = tool_output_in(final_request, "duplicate-failure-read")
+        .expect("the second duplicate call has independent evidence");
+    assert_eq!(failure["category"], json!("tool_result_failure"));
+    assert!(
+        failure["observation"]
+            .as_str()
+            .is_some_and(|text| text.contains("DUPLICATE-FAILURE"))
     );
 
     Ok(())

@@ -18,7 +18,6 @@
 
 use super::TeamStore;
 use crate::evidence::FactView;
-use crate::evidence::MAX_PENDING_OBSERVATIONS_PER_PRODUCER;
 use crate::evidence::NotedObservation;
 use crate::evidence::ObservationLocator;
 use crate::evidence::PendingObservation;
@@ -37,37 +36,17 @@ impl TeamStore {
         if self.participant(producer).is_none() {
             return;
         }
-        // Two results can claim one call id, and until they are retained there is nothing else to
-        // tell them apart, so the first note holds the slot.
+        // The harness reserves one item identity per invocation before dispatch. It is the pairing
+        // identity here because call ids come from the model and may be reused concurrently.
+        if noted.item_id.is_empty() {
+            return;
+        }
         if self
             .pending_observations
             .iter()
-            .any(|pending| pending.producer == producer && pending.noted.call_id == noted.call_id)
+            .any(|pending| pending.producer == producer && pending.noted.item_id == noted.item_id)
         {
             return;
-        }
-        // The ceiling is per producer, so one member's burst cannot evict another's notes, and it is
-        // set far above any plausible batch of concurrent tool calls: an entry only waits here from
-        // the moment its tool returns until the turn retains the result. Reaching it therefore means
-        // something is not being confirmed at all, which is worth saying out loud.
-        let oldest_of_producer = self
-            .pending_observations
-            .iter()
-            .filter(|pending| pending.producer == producer)
-            .count()
-            .checked_sub(MAX_PENDING_OBSERVATIONS_PER_PRODUCER)
-            .and_then(|_| {
-                self.pending_observations
-                    .iter()
-                    .position(|pending| pending.producer == producer)
-            });
-        if let Some(position) = oldest_of_producer {
-            let evicted = self.pending_observations.remove(position);
-            tracing::warn!(
-                %producer,
-                call_id = evicted.map(|pending| pending.noted.call_id).unwrap_or_default(),
-                "dropping an unconfirmed team observation: more are waiting than one turn should ever hold"
-            );
         }
         self.pending_observations
             .push_back(PendingObservation { producer, noted });
@@ -79,30 +58,25 @@ impl TeamStore {
     /// then discards in favour of its own filler answer. The filler reaches history under the same
     /// call id, so without revoking the note it would be confirmed as though the tool had reported
     /// it — turning an interrupted call into evidence.
-    pub fn discard_observation(&mut self, producer: ThreadId, call_id: &str) {
+    pub fn discard_observation(&mut self, producer: ThreadId, item_id: &str) {
         self.pending_observations
-            .retain(|pending| pending.producer != producer || pending.noted.call_id != call_id);
+            .retain(|pending| pending.producer != producer || pending.noted.item_id != item_id);
     }
 
     /// Mint the fact for an observation the caller has confirmed Codex retained as `item_id`.
     ///
-    /// The item identity comes from the caller because it does not exist until Codex records the
-    /// item; pairing it with the pending note here is what gives the fact a locator that resolves to
-    /// one observation. Returns `None` when nothing was pending for this call, which is the normal
-    /// answer for every tool result outside the supported set and for anything already confirmed.
-    pub fn confirm_observation(
-        &mut self,
-        producer: ThreadId,
-        call_id: &str,
-        item_id: &str,
-    ) -> Option<FactId> {
+    /// The item identity was reserved before dispatch and arrives here on the retained item itself.
+    /// Pairing by that harness identity gives the fact a locator that resolves to one observation,
+    /// even when model-provided call ids are reused. Returns `None` when nothing was pending for this
+    /// item, which is the normal answer outside the supported set and after an earlier confirmation.
+    pub fn confirm_observation(&mut self, producer: ThreadId, item_id: &str) -> Option<FactId> {
         if item_id.is_empty() {
             return None;
         }
         let position = self
             .pending_observations
             .iter()
-            .position(|pending| pending.producer == producer && pending.noted.call_id == call_id)?;
+            .position(|pending| pending.producer == producer && pending.noted.item_id == item_id)?;
         let pending = self.pending_observations.remove(position)?;
         let id = FactId::new(self.tag, self.next_fact_ordinal);
         self.next_fact_ordinal = self.next_fact_ordinal.saturating_add(1);

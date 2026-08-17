@@ -122,7 +122,8 @@ pub struct TeamStore {
     next_event_ordinal: u32,
     /// Recorded evidence, in the order Codex's retention of it was confirmed.
     facts: Vec<TeamFact>,
-    /// Observations seen but not yet confirmed retained. Bounded; see `MAX_PENDING_OBSERVATIONS`.
+    /// Observations seen but not yet confirmed retained. Entries normally live only between tool
+    /// completion and the ordered history-retention pass; discarded results are revoked explicitly.
     pending_observations: VecDeque<PendingObservation>,
     next_fact_ordinal: u32,
     /// Per-producer publication cursor: the highest fact ordinal of its own that it has published.

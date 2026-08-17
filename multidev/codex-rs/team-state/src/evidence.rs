@@ -14,13 +14,6 @@ use codex_protocol::ThreadId;
 use serde::Serialize;
 use std::fmt;
 
-/// How many unconfirmed observations one team instance keeps waiting for confirmation.
-///
-/// An observation whose retention is never confirmed — an abandoned turn, a result the harness
-/// discarded — would otherwise sit here for the life of the instance. Dropping the oldest is safe
-/// because a dropped entry only costs a fact that was never confirmed anyway.
-pub(crate) const MAX_PENDING_OBSERVATIONS_PER_PRODUCER: usize = 256;
-
 /// How many of a version's references one tool result names.
 ///
 /// The version itself keeps every reference its publication window selected: the association between
@@ -80,9 +73,13 @@ pub struct ObservationLocator {
 
 /// What the capture layer knows about a tool result before it is retained.
 ///
-/// The item identity is missing on purpose: it does not exist until Codex records the item, which is
-/// the same moment the fact becomes mintable.
+/// Codex reserves the item identity before dispatch so it can pair concurrent results exactly. The
+/// identity is only a locator at this point: no Fact exists until the retention boundary confirms
+/// that the item carrying it was formally kept.
 pub struct NotedObservation {
+    /// The identity already reserved for the result item. This is the pairing identity as well as
+    /// the eventual locator: unlike a model-provided call id, it is unique per harness invocation.
+    pub item_id: String,
     pub call_id: String,
     pub category: FactCategory,
     pub tool: String,
@@ -90,9 +87,9 @@ pub struct NotedObservation {
 
 /// A tool result the harness has seen but whose retention it has not yet confirmed.
 ///
-/// Nothing outside this crate can observe a pending entry. It exists so that the identity, the
-/// ordering and the locator of a fact are all decided at the same moment — the moment Codex is known
-/// to have kept the observation — rather than optimistically when the tool returned.
+/// Nothing outside this crate can observe a pending entry. It exists so that fact ordering and
+/// existence are decided at the retention boundary, while the pre-reserved item identity pairs that
+/// confirmation back to exactly one completed invocation.
 pub(crate) struct PendingObservation {
     pub(crate) producer: ThreadId,
     pub(crate) noted: NotedObservation,

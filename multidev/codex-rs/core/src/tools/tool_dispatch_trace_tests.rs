@@ -138,6 +138,7 @@ async fn dispatch_lifecycle_trace_records_direct_and_code_mode_requesters() -> a
                 ToolCallSource::Direct,
                 "{}",
             ),
+            /*output_item_id*/ None,
             /*terminal_outcome_reached*/ None,
         )
         .await?;
@@ -154,6 +155,7 @@ async fn dispatch_lifecycle_trace_records_direct_and_code_mode_requesters() -> a
                 },
                 "{}",
             ),
+            /*output_item_id*/ None,
             /*terminal_outcome_reached*/ None,
         )
         .await?;
@@ -223,6 +225,7 @@ async fn dispatch_lifecycle_trace_records_unsupported_tool_failures() -> anyhow:
                 ToolCallSource::Direct,
                 "{}",
             ),
+            /*output_item_id*/ None,
             /*terminal_outcome_reached*/ None,
         )
         .await;
@@ -260,6 +263,7 @@ async fn dispatch_lifecycle_trace_records_incompatible_payload_failures() -> any
                     input: "{}".to_string(),
                 },
             ),
+            /*output_item_id*/ None,
             /*terminal_outcome_reached*/ None,
         )
         .await;
@@ -304,7 +308,9 @@ async fn missing_code_mode_wait_traces_only_the_wait_tool_call() -> anyhow::Resu
     );
 
     registry
-        .dispatch_any_with_terminal_outcome(invocation, /*terminal_outcome_reached*/ None)
+        .dispatch_any_with_terminal_outcome(
+            invocation, /*output_item_id*/ None, /*terminal_outcome_reached*/ None,
+        )
         .await?;
 
     let replayed = codex_rollout_trace::replay_bundle(single_bundle_dir(temp.path())?)?;

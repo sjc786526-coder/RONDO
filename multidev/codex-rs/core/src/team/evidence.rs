@@ -1,10 +1,11 @@
 //! Anchoring team versions to observations Codex actually kept.
 //!
 //! Capture happens in two steps because those two steps know different things. When a tool handler
-//! produces a terminal outcome, the harness knows which tool ran and what shape its result has —
-//! that is where an observation is *noted*, and where a call the host ends up answering for itself
-//! is revoked again. When the result reaches conversation history, the harness knows the observation
-//! was really retained — that is where a fact is *minted*, and where its ordinal comes from.
+//! reserves a unique output item identity before dispatch. When the handler produces a terminal
+//! outcome, the harness knows which tool ran and what shape its result has — that is where an
+//! observation is *noted* against the reserved identity, and where a call the host ends up answering
+//! for itself is revoked again. When that exact result reaches conversation history, the harness
+//! knows the observation was really retained — that is where a fact is *minted* and numbered.
 //! Splitting them is what keeps a reference from claiming to exist before anything has been kept.
 //!
 //! Resolution goes the other way: a locator names one retained item in one participant's history, and
@@ -56,6 +57,7 @@ pub(crate) enum CompletedToolResult<'a> {
 /// under its own call id, so it could not be confirmed either way.
 pub(crate) fn note_completed_tool_result(
     invocation: &ToolInvocation,
+    item_id: &str,
     result: CompletedToolResult<'_>,
 ) {
     if !super::team_state_enabled(&invocation.turn) {
@@ -102,6 +104,7 @@ pub(crate) fn note_completed_tool_result(
     access.handle().note_observation(
         access.actor(),
         NotedObservation {
+            item_id: item_id.to_string(),
             call_id,
             category,
             tool: invocation.tool_name.name.clone(),
@@ -117,7 +120,7 @@ pub(crate) fn note_completed_tool_result(
 pub(crate) fn discard_noted_tool_result(
     session: &Session,
     turn_context: &TurnContext,
-    call_id: &str,
+    item_id: &str,
 ) {
     if !super::team_state_enabled(turn_context) {
         return;
@@ -125,7 +128,7 @@ pub(crate) fn discard_noted_tool_result(
     let Ok(access) = super::TeamAccess::resolve(session) else {
         return;
     };
-    access.handle().discard_observation(access.actor(), call_id);
+    access.handle().discard_observation(access.actor(), item_id);
 }
 
 /// Mint facts for the supported tool results in `items` that this session really retained.
@@ -144,15 +147,15 @@ pub(crate) async fn record_retained_tool_facts(
     // The items handed here are the ones being recorded, so each already carries the identity Codex
     // assigned it. That identity is what the fact will resolve by; an item without one cannot be
     // located again and is therefore not evidence.
-    let candidates: Vec<(String, String)> = items
+    let candidates: Vec<String> = items
         .iter()
         .filter_map(|item| {
-            let observation = supported_observation(item)?;
+            supported_observation(item)?;
             let item_id = item
                 .id()
                 .map(ResponseItemId::as_str)
                 .filter(|id| !id.is_empty())?;
-            Some((observation.call_id.to_string(), item_id.to_string()))
+            Some(item_id.to_string())
         })
         .collect();
     if candidates.is_empty() {
@@ -161,18 +164,16 @@ pub(crate) async fn record_retained_tool_facts(
     let Ok(access) = super::TeamAccess::resolve(session) else {
         return;
     };
-    for (call_id, item_id) in candidates {
+    for item_id in candidates {
         if session.retained_tool_output(&item_id).await.is_none() {
             continue;
         }
-        if let Some(fact_id) =
-            access
-                .handle()
-                .confirm_observation(access.actor(), &call_id, &item_id)
+        if let Some(fact_id) = access
+            .handle()
+            .confirm_observation(access.actor(), &item_id)
         {
             tracing::debug!(
                 %fact_id,
-                call_id,
                 item_id,
                 "recorded team evidence for a retained tool result"
             );

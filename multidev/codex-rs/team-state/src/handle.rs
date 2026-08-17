@@ -170,18 +170,13 @@ impl TeamStateHandle {
     ///
     /// No change notification follows: recording evidence is not itself a team event, and nothing in
     /// anyone's active view moves until an author decides to publish.
-    pub fn confirm_observation(
-        &self,
-        producer: ThreadId,
-        call_id: &str,
-        item_id: &str,
-    ) -> Option<FactId> {
-        self.with_store(|store| store.confirm_observation(producer, call_id, item_id))
+    pub fn confirm_observation(&self, producer: ThreadId, item_id: &str) -> Option<FactId> {
+        self.with_store(|store| store.confirm_observation(producer, item_id))
     }
 
     /// Drop a note whose result the harness ended up throwing away.
-    pub fn discard_observation(&self, producer: ThreadId, call_id: &str) {
-        self.with_store(|store| store.discard_observation(producer, call_id));
+    pub fn discard_observation(&self, producer: ThreadId, item_id: &str) {
+        self.with_store(|store| store.discard_observation(producer, item_id));
     }
 
     pub fn read_fact(&self, actor: ThreadId, fact_id: FactId) -> Result<FactView, TeamError> {

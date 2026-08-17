@@ -658,6 +658,7 @@ async fn dispatch_uses_canonical_tool_names_for_lifecycle_contributors() -> anyh
                 "ok-call",
                 codex_tools::ToolName::namespaced(DEFAULT_FUNCTION_NAMESPACE, "ok_tool"),
             ),
+            /*output_item_id*/ None,
             /*terminal_outcome_reached*/ None,
         )
         .await?;
@@ -669,6 +670,7 @@ async fn dispatch_uses_canonical_tool_names_for_lifecycle_contributors() -> anyh
                 "failing-call",
                 failing_tool.clone(),
             ),
+            /*output_item_id*/ None,
             /*terminal_outcome_reached*/ None,
         )
         .await

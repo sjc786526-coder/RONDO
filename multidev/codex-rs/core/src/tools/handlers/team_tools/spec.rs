@@ -156,12 +156,19 @@ pub(crate) fn create_team_history_tool() -> ToolSpec {
                     .to_string(),
             )),
         ),
+        (
+            "evidence_refs_offset".to_string(),
+            JsonSchema::integer(Some(
+                "Start each returned version's bounded evidence reference page at this zero-based offset. Pass the returned evidence_refs_next_offset to continue."
+                    .to_string(),
+            )),
+        ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "team_history".to_string(),
         description:
-            "Read team history you can no longer see in the active world index, including anything the projection reported as omitted. Scoped to what you are allowed to read and bounded in size; page backwards with `before` to reach older entries."
+            "Read team history you can no longer see in the active world index, including anything the projection reported as omitted. Scoped to what you are allowed to read and bounded in size; page versions backwards with `before`, and page a version's evidence references with `evidence_refs_offset`."
                 .to_string(),
         strict: false,
         defer_loading: None,

@@ -456,6 +456,7 @@ impl ToolRegistry {
     pub(crate) async fn dispatch_any_with_terminal_outcome(
         &self,
         mut invocation: ToolInvocation,
+        output_item_id: Option<String>,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let tool_name = invocation.tool_name.clone();
@@ -713,10 +714,13 @@ impl ToolRegistry {
                         // and that answer is retained as this call's failed text result. Excluding it
                         // would leave a completed call with a retained result and no way to point at
                         // it — unlike the refusals above, where nothing ran at all.
-                        crate::team::evidence::note_completed_tool_result(
-                            &invocation,
-                            crate::team::evidence::CompletedToolResult::Failure,
-                        );
+                        if let Some(item_id) = output_item_id.as_deref() {
+                            crate::team::evidence::note_completed_tool_result(
+                                &invocation,
+                                item_id,
+                                crate::team::evidence::CompletedToolResult::Failure,
+                            );
+                        }
                         return Err(err);
                     }
                     if let Some(feedback_message) = outcome.feedback_message {
@@ -739,10 +743,13 @@ impl ToolRegistry {
                 // knows: an abandoned call never gets here, and its filler response is written
                 // elsewhere. The observation is only noted; it becomes team evidence once Codex has
                 // retained it.
-                crate::team::evidence::note_completed_tool_result(
-                    &invocation,
-                    crate::team::evidence::CompletedToolResult::Output(&result),
-                );
+                if let Some(item_id) = output_item_id.as_deref() {
+                    crate::team::evidence::note_completed_tool_result(
+                        &invocation,
+                        item_id,
+                        crate::team::evidence::CompletedToolResult::Output(&result),
+                    );
+                }
                 Ok(result)
             }
             Err(err) => {
@@ -750,9 +757,12 @@ impl ToolRegistry {
                 // A handler that answers the model with a failure has observed something too — a
                 // command that exited non-zero is the obvious case. The earlier refusals in this
                 // function are deliberately not noted: nothing ran, or what ran was replaced.
-                if matches!(err, FunctionCallError::RespondToModel(_)) {
+                if matches!(err, FunctionCallError::RespondToModel(_))
+                    && let Some(item_id) = output_item_id.as_deref()
+                {
                     crate::team::evidence::note_completed_tool_result(
                         &invocation,
+                        item_id,
                         crate::team::evidence::CompletedToolResult::Failure,
                     );
                 }

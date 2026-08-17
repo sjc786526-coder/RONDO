@@ -51,13 +51,14 @@ fn fact_for(producer: codex_protocol::ThreadId, call_id: &str) -> FactView {
     handle.note_observation(
         producer,
         NotedObservation {
+            item_id: item_id(call_id),
             call_id: call_id.to_string(),
             category: FactCategory::ToolResultSuccess,
             tool: "shell_command".to_string(),
         },
     );
     let fact_id = handle
-        .confirm_observation(producer, call_id, &item_id(call_id))
+        .confirm_observation(producer, &item_id(call_id))
         .expect("a noted observation mints a fact once retention is confirmed");
     handle
         .read_fact(producer, fact_id)
