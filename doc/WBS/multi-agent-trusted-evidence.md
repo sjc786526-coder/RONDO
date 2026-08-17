@@ -190,16 +190,17 @@ Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收�
 - **边界**：不含 route、不含证据索引、不含 orphan 退休与 Event 关系；不改动 Codex 的 spawn/fork/lifecycle；
   证据引用在此阶段可以为空 —— 这是阶段边界，不是产品终态。
 
-### M-2 选择性路由（已验收，待合入 main）
+### M-2 选择性路由（已验收并合入 main）
 
-实现由工作树分支 `worktree-040-multi-m2-selective-routing` 落地，尚未合入 `main`。模型可见工具新增
+实现由工作树分支 `worktree-040-multi-m2-selective-routing` 落地，并通过 merge commit `dbeba041` 合入
+`main`。模型可见工具新增
 `team_route`（`intent=assign|notify`）与 `team_route_update`（`action=end|retry_notice`），与 M-1 三个工具
 同受 `features.multi_agent_v2.team_state_enabled` 控制，**默认仍关闭**。领域侧新增 `TeamRoute`
 （`RouteDuty` = notice/assigned/ended，`DeliveryState` = pending/delivered/failed），可见性一经授予不可撤销，
 指派有独立身份与终态；通知复用既有 inter-agent communication，未新增调度器或第二套协议。
 
 首轮独立审查发现的三项通知恢复路径缺陷（去重未占用 retry identity、精确重放报过期 `pending`、目标可先重发
-通知后记账失败）已整改并通过最终独立复验；M-2 当前只待用户批准后集成。
+通知后记账失败）已整改并通过最终独立复验；M-2 已完成，下一阶段为 M-3 证据锚定。
 
 定向门禁（整改后）：`codex-team-state` 78/78，团队产品纵切 `suite::team_world_state` + `suite::team_routing`
 12/12（M-1 九项无退化），`codex-core` 的 `tools::` 416/416、`context::` 99/99。
