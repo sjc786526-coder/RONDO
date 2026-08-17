@@ -197,6 +197,8 @@
   6. 结论只记录，**未改动生产默认、provider、launcher 或部署**。body-free 结果锁为
      `eval/locks/local-approval-m4-formal-review-v1.json`；逐条输入、模型输出、seed、mapping、裁判理由与
      解盲明细永久留在 ignored `eval-data/cross-eval/20260816-cross-eval-01-synthetic/` 与 `…-02-holdout/`。
+  7. 两轮独立审查发现均已窄修并复验，最终 focused unittest 253/253 通过；2026-08-17 最终独立验收通过。
+     验收只确认本轮 M4 合同与结果正确完成，不把“保留为实验”扩展成生产可用声明。
 - **Local M4 正式输入（历史）**：tracked body-free cohort 精确绑定 L5b 全部 130 条 validation 与
   dataset/payload/target/source-group/near-duplicate-group 身份，确定性分为 65 / 65 两批。三方完整导入会重算
   canonical input，并要求未微调/微调 Local 同属一个 L6 pair，base lineage、runtime、chat template、request、

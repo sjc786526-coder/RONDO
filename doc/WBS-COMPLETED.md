@@ -1029,3 +1029,7 @@ standard/Lite 形态均补回归。
   监听端口与任务 GPU 显存均已清理，Windows `C:` 实际余量全程在门禁之上。私有逐条输入、模型输出、seed、mapping、
   裁判理由与解盲明细永久留在 ignored `eval-data/cross-eval/20260816-cross-eval-01-synthetic/` 与 `…-02-holdout/`
   （目录 0700、文件 0600），未进入 Git。
+- **独立验收**：两轮审查发现的 Multi 状态同步、匿名身份措辞漏检和指标概括失真均已窄修；正式四个 package 与
+  四份 judge result 重扫仍为 0 身份命中，146 条判定无需重判。最终 focused unittest **253/253**、
+  `git diff --check` 通过，2026-08-17 独立验收确认任务目标完成；详见
+  `agent_log/2026-08-17-001729-plan041-final-independent-acceptance.md`。

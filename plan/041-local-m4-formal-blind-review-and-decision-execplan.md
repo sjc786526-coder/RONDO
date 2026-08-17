@@ -19,27 +19,27 @@ Plan 032 的真实 holdout 与 Plan 037 的同一 paired-GGUF 形成独立 sanit
 
 ### 完成/验收标准
 
-- [ ] synthetic 正式主体精确覆盖冻结 validation 全部 130 条，两批各 65 条；直接消费 Plan 037 已验真的
+- [x] synthetic 正式主体精确覆盖冻结 validation 全部 130 条，两批各 65 条；直接消费 Plan 037 已验真的
       390 行三方输入，不重新运行两种 Local 的 130 条推理，也不重新调用 Sol。
-- [ ] synthetic 两个裁判包均通过匿名性、位置平衡、完整集合和 prompt/package 身份校验；不存在 side、模型、
+- [x] synthetic 两个裁判包均通过匿名性、位置平衡、完整集合和 prompt/package 身份校验；不存在 side、模型、
       工件、路径、seed 或 mapping 泄漏。
-- [ ] 真实 holdout 从 Plan 032 冻结 manifest/标签严格重验后物化，当前预期 16 条，正式数量以重验通过的冻结
+- [x] 真实 holdout 从 Plan 032 冻结 manifest/标签严格重验后物化，当前预期 16 条，正式数量以重验通过的冻结
       manifest 为准；不增删、不抽样、不按标签或输出选择样本。
-- [ ] holdout 的 Sol 侧只导入既有 point-in-time 标签；两种 Local 使用 Plan 037 同一 canonical pair、同一
+- [x] holdout 的 Sol 侧只导入既有 point-in-time 标签；两种 Local 使用 Plan 037 同一 canonical pair、同一
       runtime/template/request/sampling/output 合同串行运行，每个 sample-side 只留下一个诚实终态。
-- [ ] holdout 裁判包与 synthetic 分开，且同样通过匿名性、位置平衡、完整集合和身份校验；两组不共享 aggregate、
+- [x] holdout 裁判包与 synthetic 分开，且同样通过匿名性、位置平衡、完整集合和身份校验；两组不共享 aggregate、
       不合并分母，tracked holdout 投影不泄漏逐条正文、身份、输出、理由或映射。
-- [ ] 所有正式裁判结果都来自人在场的 Claude Code 订阅入口与 WBS 指定的 Opus 5，使用仓库内既有冻结
+- [x] 所有正式裁判结果都来自人在场的 Claude Code 订阅入口与 WBS 指定的 Opus 5，使用仓库内既有冻结
       prompt/schema；逐批记录实际模型标识、判定日期、prompt 和 package 身份，并注明只能代表判定时点。
-- [ ] 只有在 synthetic 和 holdout 的全部正式批次结果都完整、唯一且验证通过后，才进行最终解盲和聚合；任何无效
+- [x] 只有在 synthetic 和 holdout 的全部正式批次结果都完整、唯一且验证通过后，才进行最终解盲和聚合；任何无效
       结果不会混入部分 aggregate。
-- [ ] 正式结果清楚报告：两种 Local 各自相对 Sol 的教师一致情况；相对 Opus 的漏放、误拦、偏好/理由质量与结构化
+- [x] 正式结果清楚报告：两种 Local 各自相对 Sol 的教师一致情况；相对 Opus 的漏放、误拦、偏好/理由质量与结构化
       可用性；微调前后直接差值；synthetic 主体结论；真实 holdout sanity anchor 的独立结论与限制。
-- [ ] 用户已明确选择“采用 / 保留为实验 / 停止”之一，决定和依据已精炼记录；即使选择“采用”，也未改变生产默认、
+- [x] 用户已明确选择“采用 / 保留为实验 / 停止”之一，决定和依据已精炼记录；即使选择“采用”，也未改变生产默认、
       provider、launcher 或部署配置。
-- [ ] 直接相关 pure/local 测试与必要真实运行检查通过，未运行项和真实终态如实记录；服务进程、监听端口和 GPU 显存
+- [x] 直接相关 pure/local 测试与必要真实运行检查通过，未运行项和真实终态如实记录；服务进程、监听端口和 GPU 显存
       已清理，040/M-2 与其他 worktree 未受干扰。
-- [ ] tracked 结果、Plan 状态、Local 专项 WBS、顶层 WBS、完成历史和精炼日志按职责同步；独立审查通过，真实问题已
+- [x] tracked 结果、Plan 状态、Local 专项 WBS、顶层 WBS、完成历史和精炼日志按职责同步；独立审查通过，真实问题已
       整改复验。041 worktree 形成清晰提交，但未合并、未推送、未重命名或删除分支/worktree。
 
 ## 2. 范围
@@ -183,20 +183,23 @@ Plan 032 的真实 holdout 与 Plan 037 的同一 paired-GGUF 形成独立 sanit
 
 ### 当前工作
 
-- 已收口。独立审查提出的三项问题已整改并复验，等待复审。
+- 已收口。两轮独立审查发现均已窄修并复验，最终独立验收于 2026-08-17 通过；验收报告为
+  `agent_log/2026-08-17-001729-plan041-final-independent-acceptance.md`（验收提交 `545fc77`）。
 
 ### 本任务剩余步骤
 
-1. 交由审查者复验整改结果。
+- 无。用户已授权本轮合并 main、推送 origin/main 和归档本地任务分支，交付后本计划冻结。
 
 ### 独立审查整改（2026-08-16）
 
 1. 顶层权威文档已按 main 当前状态吸收 Multi M-2 完成历史与 M-3 下一阶段，并补记 Local M4 里程碑行；
    `doc/WBS.md` 与 `doc/WBS-COMPLETED.md` 的全部 Multi 内容现与 main 逐字一致（含里程碑表的
-   `Multi M-2` 行）。与 main 的差异只剩两类，且每处本分支都是更新的事实：`doc/WBS.md` 的四处 Local 状态区
+   `Multi M-2` 行）。与 main 的三方合并冲突只剩两类，且每处本分支都是更新的事实：`doc/WBS.md` 的四处
+   Local 状态区
    （抬头行、方向 2 行、3b 工作包段、方向表第 2 行，其中抬头行是 main 抬头的超集）和 `doc/WBS-COMPLETED.md`
    末尾的 append/append。
-2. 匿名扫描补上直接身份措辞：`local` 名词表增加 decision/judgment 等，另加"(un)fine-tuned + 侧名词"规则；
+2. 匿名扫描补上直接身份措辞：`local` 名词表增加 decision/judgment 等，并覆盖 tuned / untuned /
+   (un)fine-tuned 后接明确 side noun 的情形；
    同时把大写 `Local` 的连字符复合词（真实 Guardian policy 的 `Local-vs-prod note`）排除，避免新的误报。
    四个正式 package 的候选侧扫描仍为 0 命中，四份 judge result 也为 0，**无需重判**。
 3. `doc/WBS.md` 与结论锁的“每一项指标都改善”改为准确分项：明确列出改善项，并记录漏放两分区维持 0、
@@ -209,7 +212,8 @@ Plan 032 的真实 holdout 与 Plan 037 的同一 paired-GGUF 形成独立 sanit
 
 ### 当前验收状态
 
-- 正式结果完整、用户决定已记录、tracked 结论锁已发布、focused 测试通过；041 分支已提交，未合并、未推送。
+- **通过。** 正式结果完整、用户决定已记录、tracked 结论锁已发布，focused unittest 253/253 通过；最终独立验收
+  确认任务目标完成，无剩余整改项。生产启用不在本任务范围内。
 
 ### 交接边界
 
