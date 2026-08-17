@@ -709,6 +709,14 @@ impl ToolRegistry {
                         });
                         let err = FunctionCallError::RespondToModel(message);
                         dispatch_trace.record_failed(&err);
+                        // The handler already ran; what a block changes is the answer the model gets,
+                        // and that answer is retained as this call's failed text result. Excluding it
+                        // would leave a completed call with a retained result and no way to point at
+                        // it — unlike the refusals above, where nothing ran at all.
+                        crate::team::evidence::note_completed_tool_result(
+                            &invocation,
+                            crate::team::evidence::CompletedToolResult::Failure,
+                        );
                         return Err(err);
                     }
                     if let Some(feedback_message) = outcome.feedback_message {

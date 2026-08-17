@@ -1,6 +1,8 @@
 use super::*;
-use crate::evidence::MAX_VERSION_EVIDENCE_REFS;
-use crate::evidence::RetainedOutputKind;
+use crate::evidence::FactCategory;
+use crate::evidence::MAX_REPORTED_EVIDENCE_REFS;
+use crate::evidence::NotedObservation;
+use crate::evidence::reported_evidence_refs;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
 use crate::model::ParticipantRole;
@@ -15,24 +17,25 @@ use crate::test_support::submission;
 use crate::view::HistoryQuery;
 use pretty_assertions::assert_eq;
 
-fn locator(call_id: &str, tool: &str) -> ObservationLocator {
-    ObservationLocator {
+fn noted(call_id: &str, tool: &str) -> NotedObservation {
+    NotedObservation {
         call_id: call_id.to_string(),
-        output_kind: RetainedOutputKind::FunctionCallOutput,
+        category: FactCategory::ToolResultSuccess,
         tool: tool.to_string(),
     }
+}
+
+/// The identity Codex would assign the item that carries this call's output.
+fn item_of(call_id: &str) -> String {
+    format!("fco_{call_id}")
 }
 
 /// Note an observation and immediately confirm its retention, as the capture layer does for a
 /// supported tool result that reached history.
 fn observe(store: &mut TeamStore, producer: ThreadId, call_id: &str) -> FactId {
-    store.note_observation(
-        producer,
-        FactCategory::ToolResultSuccess,
-        locator(call_id, "shell_command"),
-    );
+    store.note_observation(producer, noted(call_id, "shell_command"));
     store
-        .confirm_observation(producer, call_id)
+        .confirm_observation(producer, call_id, &item_of(call_id))
         .expect("a noted observation mints a fact once retention is confirmed")
 }
 
@@ -44,11 +47,7 @@ fn an_observation_becomes_a_fact_only_once_its_retention_is_confirmed() {
         mut store, worker, ..
     } = TeamFixture::new();
 
-    store.note_observation(
-        worker,
-        FactCategory::ToolResultSuccess,
-        locator("call-1", "shell_command"),
-    );
+    store.note_observation(worker, noted("call-1", "shell_command"));
     let published_before_confirmation = store
         .publish(
             worker,
@@ -66,7 +65,7 @@ fn an_observation_becomes_a_fact_only_once_its_retention_is_confirmed() {
     );
 
     let fact_id = store
-        .confirm_observation(worker, "call-1")
+        .confirm_observation(worker, "call-1", &item_of("call-1"))
         .expect("confirming retention mints the fact");
     let published_after = store
         .publish(
@@ -89,21 +88,19 @@ fn facts_are_numbered_in_confirmed_retention_order_rather_than_completion_order(
     // Two tool calls complete in one order and are retained in the other, which is what a parallel
     // pair of calls can do. The numbering has to follow retention, since that is the order the same
     // trajectory reproduces.
-    store.note_observation(
-        worker,
-        FactCategory::ToolResultSuccess,
-        locator("second", "shell_command"),
-    );
+    store.note_observation(worker, noted("second", "shell_command"));
     store.note_observation(
         root,
-        FactCategory::ToolResultFailure,
-        locator("first", "shell_command"),
+        NotedObservation {
+            category: FactCategory::ToolResultFailure,
+            ..noted("first", "shell_command")
+        },
     );
     let first = store
-        .confirm_observation(root, "first")
+        .confirm_observation(root, "first", &item_of("first"))
         .expect("the root's result was retained first");
     let second = store
-        .confirm_observation(worker, "second")
+        .confirm_observation(worker, "second", &item_of("second"))
         .expect("the worker's result was retained second");
 
     assert_eq!((first.ordinal(), second.ordinal()), (1, 2));
@@ -131,7 +128,10 @@ fn a_retained_result_that_was_never_noted_mints_nothing() {
         mut store, worker, ..
     } = TeamFixture::new();
 
-    assert_eq!(store.confirm_observation(worker, "call-never-noted"), None);
+    assert_eq!(
+        store.confirm_observation(worker, "call-never-noted", &item_of("call-never-noted")),
+        None
+    );
     assert!(store.facts.is_empty());
 }
 
@@ -210,13 +210,12 @@ fn a_result_from_an_unregistered_session_never_becomes_evidence() {
     let TeamFixture { mut store, .. } = TeamFixture::new();
     let stranger = ThreadId::new();
 
-    store.note_observation(
-        stranger,
-        FactCategory::ToolResultSuccess,
-        locator("call-1", "shell_command"),
-    );
+    store.note_observation(stranger, noted("call-1", "shell_command"));
 
-    assert_eq!(store.confirm_observation(stranger, "call-1"), None);
+    assert_eq!(
+        store.confirm_observation(stranger, "call-1", &item_of("call-1")),
+        None
+    );
 }
 
 #[test]
@@ -227,36 +226,53 @@ fn confirming_the_same_call_twice_mints_one_fact() {
 
     let fact_id = observe(&mut store, worker, "call-1");
 
-    assert_eq!(store.confirm_observation(worker, "call-1"), None);
+    assert_eq!(
+        store.confirm_observation(worker, "call-1", &item_of("call-1")),
+        None
+    );
     assert_eq!(
         store.facts.iter().map(TeamFact::id).collect::<Vec<_>>(),
         vec![fact_id]
     );
 }
 
+/// The staging ceiling is a leak guard, and it is per producer so that one member's burst cannot
+/// cost another member its evidence.
 #[test]
-fn unconfirmed_observations_stay_bounded() {
+fn one_producers_unconfirmed_observations_cannot_evict_anothers() {
     let TeamFixture {
-        mut store, worker, ..
+        mut store,
+        root,
+        worker,
     } = TeamFixture::new();
 
-    for index in 0..MAX_PENDING_OBSERVATIONS + 10 {
-        store.note_observation(
-            worker,
-            FactCategory::ToolResultSuccess,
-            locator(&format!("call-{index}"), "shell_command"),
-        );
+    store.note_observation(root, noted("root-call", "shell_command"));
+    for index in 0..MAX_PENDING_OBSERVATIONS_PER_PRODUCER + 10 {
+        store.note_observation(worker, noted(&format!("call-{index}"), "shell_command"));
     }
 
-    assert_eq!(store.pending_observations.len(), MAX_PENDING_OBSERVATIONS);
+    assert!(
+        store
+            .confirm_observation(root, "root-call", &item_of("root-call"))
+            .is_some(),
+        "the root's note survives however much the worker queues"
+    );
     assert_eq!(
-        store.confirm_observation(worker, "call-0"),
-        None,
-        "the oldest unconfirmed observations are dropped rather than accumulating"
+        store
+            .pending_observations
+            .iter()
+            .filter(|pending| pending.producer == worker)
+            .count(),
+        MAX_PENDING_OBSERVATIONS_PER_PRODUCER,
+        "and the worker's own notes stay bounded"
     );
     assert!(
         store
-            .confirm_observation(worker, &format!("call-{}", MAX_PENDING_OBSERVATIONS + 9))
+            .confirm_observation(
+                worker,
+                &format!("call-{}", MAX_PENDING_OBSERVATIONS_PER_PRODUCER + 9),
+                &item_of("newest"),
+            )
             .is_some(),
         "the newest is still there"
     );
@@ -615,12 +631,17 @@ fn a_discarded_result_does_not_become_evidence_when_its_filler_is_retained() {
 
     store.note_observation(
         worker,
-        FactCategory::ToolResultFailure,
-        locator("call-1", "shell_command"),
+        NotedObservation {
+            category: FactCategory::ToolResultFailure,
+            ..noted("call-1", "shell_command")
+        },
     );
     store.discard_observation(worker, "call-1");
 
-    assert_eq!(store.confirm_observation(worker, "call-1"), None);
+    assert_eq!(
+        store.confirm_observation(worker, "call-1", &item_of("call-1")),
+        None
+    );
     assert!(store.facts.is_empty());
 }
 
@@ -630,65 +651,98 @@ fn discarding_one_call_leaves_the_others_alone() {
         mut store, worker, ..
     } = TeamFixture::new();
 
-    store.note_observation(
-        worker,
-        FactCategory::ToolResultSuccess,
-        locator("call-1", "shell_command"),
-    );
-    store.note_observation(
-        worker,
-        FactCategory::ToolResultSuccess,
-        locator("call-2", "shell_command"),
-    );
+    store.note_observation(worker, noted("call-1", "shell_command"));
+    store.note_observation(worker, noted("call-2", "shell_command"));
     store.discard_observation(worker, "call-1");
 
-    assert_eq!(store.confirm_observation(worker, "call-1"), None);
-    assert!(store.confirm_observation(worker, "call-2").is_some());
+    assert_eq!(
+        store.confirm_observation(worker, "call-1", &item_of("call-1")),
+        None
+    );
+    assert!(
+        store
+            .confirm_observation(worker, "call-2", &item_of("call-2"))
+            .is_some()
+    );
 }
 
-/// Two results claiming one call id cannot be told apart, and resolution answers with the first
-/// retained match, so the first note is the one whose metadata can honestly describe it.
+/// Two results claiming one call id cannot be told apart while they are still pending, so the first
+/// note holds the slot. What keeps them apart afterwards is the locator: it names the retained item,
+/// not the call, so a second call reusing the id gets its own fact pointing at its own observation.
 #[test]
-fn a_repeated_call_id_keeps_the_first_note_rather_than_the_last() {
+fn a_reused_call_id_produces_separate_facts_pointing_at_separate_items() {
     let TeamFixture {
         mut store, worker, ..
     } = TeamFixture::new();
 
+    store.note_observation(worker, noted("call-1", "first_tool"));
     store.note_observation(
         worker,
-        FactCategory::ToolResultSuccess,
-        locator("call-1", "first_tool"),
+        NotedObservation {
+            category: FactCategory::ToolResultFailure,
+            ..noted("call-1", "second_tool")
+        },
     );
-    store.note_observation(
-        worker,
-        FactCategory::ToolResultFailure,
-        locator("call-1", "second_tool"),
-    );
-    let fact_id = store
-        .confirm_observation(worker, "call-1")
-        .expect("one call id retains one output");
-
-    let view = store
-        .read_fact(worker, fact_id)
-        .expect("its producer may read it");
+    let first = store
+        .confirm_observation(worker, "call-1", "fco_first-item")
+        .expect("one pending note, one fact");
     assert_eq!(
-        (view.category, view.locator.tool.as_str()),
-        (FactCategory::ToolResultSuccess, "first_tool")
+        store.confirm_observation(worker, "call-1", "fco_first-item"),
+        None,
+        "the second note never took a slot, so nothing is left to confirm"
     );
-    assert_eq!(store.confirm_observation(worker, "call-1"), None);
+
+    // The call comes round again with its own retained item.
+    store.note_observation(
+        worker,
+        NotedObservation {
+            category: FactCategory::ToolResultFailure,
+            ..noted("call-1", "second_tool")
+        },
+    );
+    let second = store
+        .confirm_observation(worker, "call-1", "fco_second-item")
+        .expect("a later call with the same id is its own observation");
+
+    assert_ne!(first, second);
+    let locators = [first, second].map(|id| {
+        let view = store
+            .read_fact(worker, id)
+            .expect("its producer may read it");
+        (view.category, view.locator.item_id, view.locator.tool)
+    });
+    assert_eq!(
+        locators,
+        [
+            (
+                FactCategory::ToolResultSuccess,
+                "fco_first-item".to_string(),
+                "first_tool".to_string()
+            ),
+            (
+                FactCategory::ToolResultFailure,
+                "fco_second-item".to_string(),
+                "second_tool".to_string()
+            ),
+        ],
+        "each fact describes and points at its own item, so neither can answer with the other's text"
+    );
 }
 
-/// A version has to stay a bounded object: `team_history` reads its references back into the model's
-/// context, so an author that observed thousands of things cannot put all of them on one entry.
+/// A publication window is never truncated.
+///
+/// Consuming an observation without anchoring it would lose it for good: the cursor has moved past it,
+/// so no later publish can pick it up. Bounding what an answer prints is a separate job, done by
+/// [`crate::evidence::reported_evidence_refs`] at the surfaces that print it.
 #[test]
-fn a_version_carries_a_bounded_number_of_references_and_reports_the_rest() {
+fn a_version_anchors_every_observation_its_window_consumed() {
     let TeamFixture {
         mut store,
         root,
         worker,
     } = TeamFixture::new();
     let mut all = Vec::new();
-    for index in 0..MAX_VERSION_EVIDENCE_REFS + 5 {
+    for index in 0..MAX_REPORTED_EVIDENCE_REFS + 5 {
         all.push(observe(&mut store, worker, &format!("call-{index}")));
     }
 
@@ -700,12 +754,9 @@ fn a_version_carries_a_bounded_number_of_references_and_reports_the_rest() {
         )
         .expect("worker may publish");
 
-    assert_eq!(opened.evidence_refs.len(), MAX_VERSION_EVIDENCE_REFS);
-    assert_eq!(opened.evidence_refs_omitted, 5);
     assert_eq!(
-        opened.evidence_refs,
-        all[5..],
-        "the newest survive; the summary is likeliest to rest on those"
+        opened.evidence_refs, all,
+        "every observation the window consumed is anchored to the version that consumed it"
     );
     assert_eq!(
         store
@@ -720,14 +771,17 @@ fn a_version_carries_a_bounded_number_of_references_and_reports_the_rest() {
             .events[0]
             .event
             .versions[0]
-            .evidence_refs
-            .len(),
-        MAX_VERSION_EVIDENCE_REFS,
-        "history reads back exactly what the version carries"
+            .evidence_refs,
+        all,
+        "and the canonical record hands all of them back"
     );
 
-    // Everything selected was consumed, so a later publish speaks for what came next rather than
-    // reaching back past the version that already spoke for these.
+    // What a context budget bounds is the printing, and it says how much it left out.
+    let (reported, omitted) = reported_evidence_refs(&opened.evidence_refs);
+    assert_eq!(reported.len(), MAX_REPORTED_EVIDENCE_REFS);
+    assert_eq!(omitted, 5);
+    assert_eq!(reported, &all[..MAX_REPORTED_EVIDENCE_REFS]);
+
     let next = observe(&mut store, worker, "call-later");
     assert_eq!(
         store

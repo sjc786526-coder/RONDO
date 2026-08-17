@@ -6,6 +6,7 @@ use codex_team_state::PublishRequest;
 use codex_team_state::PublishTarget;
 use codex_team_state::Submission;
 use codex_team_state::TeamRevision;
+use codex_team_state::reported_evidence_refs;
 use codex_tools::ToolSpec;
 
 pub(crate) struct Handler;
@@ -75,18 +76,16 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         )
         .map_err(team_error)?;
 
+    let (reported, omitted) = reported_evidence_refs(&outcome.evidence_refs);
     Ok(boxed_tool_output(TeamPublishResult {
         event_id: outcome.event_id.to_string(),
         version_id: outcome.version_id.to_string(),
         revision: outcome.revision.get(),
         // Reported rather than requested: the harness chose these from what this author had observed
         // since its last successful publish, and they are now part of the version's authored content.
-        evidence_refs: outcome
-            .evidence_refs
-            .iter()
-            .map(FactId::to_string)
-            .collect(),
-        evidence_refs_omitted: outcome.evidence_refs_omitted,
+        // The version keeps all of them; only this answer is bounded.
+        evidence_refs: reported.iter().map(FactId::to_string).collect(),
+        evidence_refs_omitted: omitted,
         authored_on_stale_view: outcome.authored_on_stale_view,
         deduplicated: outcome.deduplicated,
     }))
@@ -121,7 +120,8 @@ pub(crate) struct TeamPublishResult {
     revision: u64,
     /// The observations this version was published with. Read one with `team_evidence`.
     evidence_refs: Vec<String>,
-    /// How many older observations did not fit this entry. Publish more often to keep them attached.
+    /// How many of this entry's references this answer left out. The entry keeps them all; read the
+    /// rest with `team_history`.
     evidence_refs_omitted: usize,
     authored_on_stale_view: bool,
     deduplicated: bool,

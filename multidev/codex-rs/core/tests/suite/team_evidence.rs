@@ -12,6 +12,7 @@
 
 use anyhow::Result;
 use codex_features::Feature;
+use core_test_support::hooks::trust_discovered_hooks;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -424,6 +425,128 @@ async fn a_published_version_carries_the_tool_results_behind_it_and_reads_them_b
         evidence_refs(&appended),
         Vec::<String>::new(),
         "team tools and evidence reads do not recursively produce evidence"
+    );
+
+    Ok(())
+}
+
+/// A hook that rejects a tool result does not erase the observation.
+///
+/// `PostToolUse` runs after the handler has finished, so a block changes the answer the model gets
+/// rather than whether the work happened — and that answer is retained as this call's failed text
+/// result. A version published afterwards has to be able to point at it, or a completed call would be
+/// left with a retained result and nothing that can name it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_result_a_post_tool_use_hook_rejected_is_still_referenceable() -> Result<()> {
+    skip_if_target_windows!(Ok(()), "uses a POSIX shell command fixture");
+    let server = start_mock_server().await;
+    const BLOCK_REASON: &str = "RONDO-EVIDENCE-BLOCKED";
+
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            body_contains(request, ROOT_PROMPT) && !has_output(request, "sh-blocked")
+        },
+        shell("sh-blocked", TARGET_MARKER, /*exit_code*/ 0),
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_output(request, "sh-blocked"),
+        team_call(
+            "pub-1",
+            "team_publish",
+            json!({
+                "title": "the check was rejected",
+                "summary": "the hook would not let the result stand",
+            }),
+        ),
+    )
+    .await;
+    mount_sse_once_match_with(
+        &server,
+        |request: &wiremock::Request| has_output(request, "pub-1"),
+        |request: &wiremock::Request| {
+            let published = tool_output(request, "pub-1").expect("team_publish answered");
+            team_call(
+                "ev-1",
+                "team_evidence",
+                json!({ "fact_id": evidence_refs(&published)[0] }),
+            )
+        },
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_output(request, "ev-1"),
+        say("done", "noted the rejection"),
+    )
+    .await;
+
+    let test = team_enabled_codex()
+        .with_pre_build_hook(|home| {
+            let script = home.join("blocking_post_tool_use_hook.py");
+            let decision = serde_json::to_string(&json!({
+                "decision": "block",
+                "reason": BLOCK_REASON,
+            }))
+            .expect("hook decision serializes");
+            std::fs::write(
+                &script,
+                format!("import sys\nsys.stdin.read()\nprint({decision:?})\n"),
+            )
+            .expect("write the blocking hook");
+            std::fs::write(
+                home.join("hooks.json"),
+                serde_json::to_string_pretty(&json!({
+                    "hooks": {
+                        "PostToolUse": [{
+                            "matcher": "^Bash$",
+                            "hooks": [{
+                                "type": "command",
+                                "command": format!("python3 {}", script.display()),
+                            }],
+                        }],
+                    },
+                }))
+                .expect("hook settings serialize"),
+            )
+            .expect("write the hook settings");
+        })
+        .with_config(trust_discovered_hooks)
+        .build(&server)
+        .await?;
+    test.submit_turn(ROOT_PROMPT).await?;
+
+    let log = request_log(&server).await;
+    let published = tool_output_in(
+        first_where(&log, "carrying the publish result", |body| {
+            has_output_in(body, "pub-1")
+        }),
+        "pub-1",
+    )
+    .expect("team_publish answered");
+    assert_eq!(
+        evidence_refs(&published).len(),
+        1,
+        "the rejected call still left one observation to point at"
+    );
+
+    let read = tool_output_in(
+        first_where(&log, "carrying the evidence read", |body| {
+            has_output_in(body, "ev-1")
+        }),
+        "ev-1",
+    )
+    .expect("team_evidence answered");
+    assert_eq!(read["category"], json!("tool_result_failure"));
+    assert_eq!(read["tool"], json!("shell_command"));
+    let observation = read["observation"]
+        .as_str()
+        .expect("the retained rejection reads back");
+    assert!(
+        observation.contains(BLOCK_REASON) && !observation.contains(TARGET_MARKER),
+        "the reference resolves to what the model was actually given:\n{observation}"
     );
 
     Ok(())

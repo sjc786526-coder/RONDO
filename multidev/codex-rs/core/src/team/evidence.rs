@@ -18,12 +18,12 @@ use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
+use codex_protocol::ResponseItemId;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ResponseItem;
 use codex_team_state::FactCategory;
 use codex_team_state::FactView;
-use codex_team_state::ObservationLocator;
-use codex_team_state::RetainedOutputKind;
+use codex_team_state::NotedObservation;
 
 /// Hard ceiling on the text one evidence read returns.
 ///
@@ -74,7 +74,7 @@ pub(crate) fn note_completed_tool_result(
         return;
     };
 
-    let (call_id, output_kind, category) = match result {
+    let (call_id, category) = match result {
         CompletedToolResult::Output(result) => {
             let item = ResponseItem::from(
                 result
@@ -84,37 +84,26 @@ pub(crate) fn note_completed_tool_result(
             let Some(observation) = supported_observation(&item) else {
                 return;
             };
-            (
-                observation.call_id.to_string(),
-                observation.output_kind,
-                observation.category,
-            )
+            (observation.call_id.to_string(), observation.category)
         }
-        // The host answers a failing handler with the error text in the same shape the payload
-        // implies, always as text and always marked unsuccessful, so the classification is settled
-        // without waiting to see the message.
+        // The host answers a failing handler with the error text in the shape the payload implies,
+        // always as text and always marked unsuccessful, so the classification is settled without
+        // waiting to see the message. A tool search answers in a shape that is not a supported
+        // observation at all.
         CompletedToolResult::Failure => {
-            let output_kind = match invocation.payload {
-                ToolPayload::Function { .. } => RetainedOutputKind::FunctionCallOutput,
-                ToolPayload::Custom { .. } => RetainedOutputKind::CustomToolCallOutput,
-                ToolPayload::ToolSearch { .. } => return,
-            };
-            if invocation.call_id.is_empty() {
+            if matches!(invocation.payload, ToolPayload::ToolSearch { .. })
+                || invocation.call_id.is_empty()
+            {
                 return;
             }
-            (
-                invocation.call_id.clone(),
-                output_kind,
-                FactCategory::ToolResultFailure,
-            )
+            (invocation.call_id.clone(), FactCategory::ToolResultFailure)
         }
     };
     access.handle().note_observation(
         access.actor(),
-        category,
-        ObservationLocator {
+        NotedObservation {
             call_id,
-            output_kind,
+            category,
             tool: invocation.tool_name.name.clone(),
         },
     );
@@ -152,10 +141,19 @@ pub(crate) async fn record_retained_tool_facts(
     if !super::team_state_enabled(turn_context) {
         return;
     }
-    let candidates: Vec<(String, RetainedOutputKind)> = items
+    // The items handed here are the ones being recorded, so each already carries the identity Codex
+    // assigned it. That identity is what the fact will resolve by; an item without one cannot be
+    // located again and is therefore not evidence.
+    let candidates: Vec<(String, String)> = items
         .iter()
-        .filter_map(supported_observation)
-        .map(|observation| (observation.call_id.to_string(), observation.output_kind))
+        .filter_map(|item| {
+            let observation = supported_observation(item)?;
+            let item_id = item
+                .id()
+                .map(ResponseItemId::as_str)
+                .filter(|id| !id.is_empty())?;
+            Some((observation.call_id.to_string(), item_id.to_string()))
+        })
         .collect();
     if candidates.is_empty() {
         return;
@@ -163,21 +161,19 @@ pub(crate) async fn record_retained_tool_facts(
     let Ok(access) = super::TeamAccess::resolve(session) else {
         return;
     };
-    for (call_id, output_kind) in candidates {
-        if session
-            .retained_tool_output(&call_id, output_kind)
-            .await
-            .is_none()
-        {
+    for (call_id, item_id) in candidates {
+        if session.retained_tool_output(&item_id).await.is_none() {
             continue;
         }
-        if let Some(fact_id) = access
-            .handle()
-            .confirm_observation(access.actor(), &call_id)
+        if let Some(fact_id) =
+            access
+                .handle()
+                .confirm_observation(access.actor(), &call_id, &item_id)
         {
             tracing::debug!(
                 %fact_id,
                 call_id,
+                item_id,
                 "recorded team evidence for a retained tool result"
             );
         }
@@ -265,10 +261,7 @@ pub(crate) async fn read_observation(session: &Session, fact: &FactView) -> Obse
         }
     };
     let producer = producer.as_deref().unwrap_or(session);
-    let Some(text) = producer
-        .retained_tool_output(&fact.locator.call_id, fact.locator.output_kind)
-        .await
-    else {
+    let Some(text) = producer.retained_tool_output(&fact.locator.item_id).await else {
         return ObservationRead::NotInProducerHistory;
     };
 
@@ -281,26 +274,23 @@ pub(crate) async fn read_observation(session: &Session, fact: &FactView) -> Obse
     ObservationRead::Retained { text, total_chars }
 }
 
-/// The retained text of the one item this call id and shape name, if `items` still holds it.
+/// The retained text of the item Codex assigned `item_id`, if `items` still holds it.
 ///
-/// The first match wins, which keeps resolution deterministic if a history somehow carries the same
-/// call id twice.
-pub(crate) fn retained_output_text(
-    items: &[ResponseItem],
-    call_id: &str,
-    output_kind: RetainedOutputKind,
-) -> Option<String> {
+/// Identities are minted per item, so this matches at most one — which is the whole point: a
+/// reference can never be answered with a different call's output, and it cannot be redirected onto a
+/// later result that happens to reuse a call id.
+pub(crate) fn retained_output_text(items: &[ResponseItem], item_id: &str) -> Option<String> {
     items.iter().find_map(|item| {
-        let observation = supported_observation(item)?;
-        (observation.call_id == call_id && observation.output_kind == output_kind)
-            .then(|| observation.text.to_string())
+        if item.id().map(ResponseItemId::as_str) != Some(item_id) {
+            return None;
+        }
+        Some(supported_observation(item)?.text.to_string())
     })
 }
 
 /// One supported observation, borrowed from the retained item that carries it.
 struct Observation<'a> {
     call_id: &'a str,
-    output_kind: RetainedOutputKind,
     category: FactCategory,
     text: &'a str,
 }
@@ -311,13 +301,13 @@ struct Observation<'a> {
 /// The content-item shape is what carries images and other media, so it is excluded whole rather
 /// than salvaged for its text parts — a fact has to describe what the model actually saw.
 fn supported_observation(item: &ResponseItem) -> Option<Observation<'_>> {
-    let (call_id, output_kind, output) = match item {
+    let (call_id, output) = match item {
         ResponseItem::FunctionCallOutput {
             call_id, output, ..
-        } => (call_id, RetainedOutputKind::FunctionCallOutput, output),
+        } => (call_id, output),
         ResponseItem::CustomToolCallOutput {
             call_id, output, ..
-        } => (call_id, RetainedOutputKind::CustomToolCallOutput, output),
+        } => (call_id, output),
         ResponseItem::AdditionalTools { .. }
         | ResponseItem::Message { .. }
         | ResponseItem::AgentMessage { .. }
@@ -349,7 +339,6 @@ fn supported_observation(item: &ResponseItem) -> Option<Observation<'_>> {
     };
     Some(Observation {
         call_id,
-        output_kind,
         category,
         text,
     })

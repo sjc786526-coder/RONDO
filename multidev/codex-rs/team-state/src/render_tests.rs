@@ -88,16 +88,15 @@ fn a_versions_evidence_is_named_in_the_view_and_stays_bounded() {
     for index in 0..MAX_PROJECTED_EVIDENCE_REFS + 3 {
         store.note_observation(
             worker,
-            crate::evidence::FactCategory::ToolResultSuccess,
-            crate::evidence::ObservationLocator {
+            crate::evidence::NotedObservation {
                 call_id: format!("call-{index}"),
-                output_kind: crate::evidence::RetainedOutputKind::FunctionCallOutput,
+                category: crate::evidence::FactCategory::ToolResultSuccess,
                 tool: "shell_command".to_string(),
             },
         );
         expected.push(
             store
-                .confirm_observation(worker, &format!("call-{index}"))
+                .confirm_observation(worker, &format!("call-{index}"), &format!("fco_{index}"))
                 .expect("retention was confirmed"),
         );
     }

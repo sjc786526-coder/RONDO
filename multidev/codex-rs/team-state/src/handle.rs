@@ -4,9 +4,8 @@
 //! what makes the state canonical: there is no second copy to reconcile, and nothing about it
 //! depends on which members happen to be loaded right now.
 
-use crate::evidence::FactCategory;
 use crate::evidence::FactView;
-use crate::evidence::ObservationLocator;
+use crate::evidence::NotedObservation;
 use crate::ids::FactId;
 use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
@@ -163,21 +162,21 @@ impl TeamStateHandle {
     }
 
     /// Note a completed, supported tool result whose retention is not confirmed yet.
-    pub fn note_observation(
-        &self,
-        producer: ThreadId,
-        category: FactCategory,
-        locator: ObservationLocator,
-    ) {
-        self.with_store(|store| store.note_observation(producer, category, locator));
+    pub fn note_observation(&self, producer: ThreadId, noted: NotedObservation) {
+        self.with_store(|store| store.note_observation(producer, noted));
     }
 
     /// Mint the fact for an observation the caller has confirmed Codex retained.
     ///
     /// No change notification follows: recording evidence is not itself a team event, and nothing in
     /// anyone's active view moves until an author decides to publish.
-    pub fn confirm_observation(&self, producer: ThreadId, call_id: &str) -> Option<FactId> {
-        self.with_store(|store| store.confirm_observation(producer, call_id))
+    pub fn confirm_observation(
+        &self,
+        producer: ThreadId,
+        call_id: &str,
+        item_id: &str,
+    ) -> Option<FactId> {
+        self.with_store(|store| store.confirm_observation(producer, call_id, item_id))
     }
 
     /// Drop a note whose result the harness ended up throwing away.

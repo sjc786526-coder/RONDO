@@ -17,10 +17,9 @@
 //! fact identifier is not a permission.
 
 use super::TeamStore;
-use crate::evidence::FactCategory;
 use crate::evidence::FactView;
-use crate::evidence::MAX_PENDING_OBSERVATIONS;
-use crate::evidence::MAX_VERSION_EVIDENCE_REFS;
+use crate::evidence::MAX_PENDING_OBSERVATIONS_PER_PRODUCER;
+use crate::evidence::NotedObservation;
 use crate::evidence::ObservationLocator;
 use crate::evidence::PendingObservation;
 use crate::evidence::TeamFact;
@@ -34,31 +33,44 @@ impl TeamStore {
     /// Nothing is minted here. A producer that is not a registered participant of this instance is
     /// ignored outright, which is the same fail-closed rule the team tools follow: an unidentified
     /// session gets no team capability, and that includes leaving evidence behind.
-    pub fn note_observation(
-        &mut self,
-        producer: ThreadId,
-        category: FactCategory,
-        locator: ObservationLocator,
-    ) {
+    pub fn note_observation(&mut self, producer: ThreadId, noted: NotedObservation) {
         if self.participant(producer).is_none() {
             return;
         }
-        // Call ids come from the model's request, so two results can claim the same one. The first
-        // note wins, because resolution also takes the first retained match: keeping the later one
-        // would mint a fact whose category and tool describe a different call than its own text.
-        if self.pending_observations.iter().any(|pending| {
-            pending.producer == producer && pending.locator.call_id == locator.call_id
-        }) {
+        // Two results can claim one call id, and until they are retained there is nothing else to
+        // tell them apart, so the first note holds the slot.
+        if self
+            .pending_observations
+            .iter()
+            .any(|pending| pending.producer == producer && pending.noted.call_id == noted.call_id)
+        {
             return;
         }
-        if self.pending_observations.len() >= MAX_PENDING_OBSERVATIONS {
-            self.pending_observations.pop_front();
+        // The ceiling is per producer, so one member's burst cannot evict another's notes, and it is
+        // set far above any plausible batch of concurrent tool calls: an entry only waits here from
+        // the moment its tool returns until the turn retains the result. Reaching it therefore means
+        // something is not being confirmed at all, which is worth saying out loud.
+        let oldest_of_producer = self
+            .pending_observations
+            .iter()
+            .filter(|pending| pending.producer == producer)
+            .count()
+            .checked_sub(MAX_PENDING_OBSERVATIONS_PER_PRODUCER)
+            .and_then(|_| {
+                self.pending_observations
+                    .iter()
+                    .position(|pending| pending.producer == producer)
+            });
+        if let Some(position) = oldest_of_producer {
+            let evicted = self.pending_observations.remove(position);
+            tracing::warn!(
+                %producer,
+                call_id = evicted.map(|pending| pending.noted.call_id).unwrap_or_default(),
+                "dropping an unconfirmed team observation: more are waiting than one turn should ever hold"
+            );
         }
-        self.pending_observations.push_back(PendingObservation {
-            producer,
-            category,
-            locator,
-        });
+        self.pending_observations
+            .push_back(PendingObservation { producer, noted });
     }
 
     /// Drop a note whose result the harness ended up throwing away.
@@ -69,25 +81,40 @@ impl TeamStore {
     /// it — turning an interrupted call into evidence.
     pub fn discard_observation(&mut self, producer: ThreadId, call_id: &str) {
         self.pending_observations
-            .retain(|pending| pending.producer != producer || pending.locator.call_id != call_id);
+            .retain(|pending| pending.producer != producer || pending.noted.call_id != call_id);
     }
 
-    /// Mint the fact for an observation the caller has confirmed Codex retained.
+    /// Mint the fact for an observation the caller has confirmed Codex retained as `item_id`.
     ///
-    /// Returns `None` when nothing was pending for this call, which is the normal answer for every
-    /// tool result outside the supported set and for anything already confirmed.
-    pub fn confirm_observation(&mut self, producer: ThreadId, call_id: &str) -> Option<FactId> {
-        let position = self.pending_observations.iter().position(|pending| {
-            pending.producer == producer && pending.locator.call_id == call_id
-        })?;
+    /// The item identity comes from the caller because it does not exist until Codex records the
+    /// item; pairing it with the pending note here is what gives the fact a locator that resolves to
+    /// one observation. Returns `None` when nothing was pending for this call, which is the normal
+    /// answer for every tool result outside the supported set and for anything already confirmed.
+    pub fn confirm_observation(
+        &mut self,
+        producer: ThreadId,
+        call_id: &str,
+        item_id: &str,
+    ) -> Option<FactId> {
+        if item_id.is_empty() {
+            return None;
+        }
+        let position = self
+            .pending_observations
+            .iter()
+            .position(|pending| pending.producer == producer && pending.noted.call_id == call_id)?;
         let pending = self.pending_observations.remove(position)?;
         let id = FactId::new(self.tag, self.next_fact_ordinal);
         self.next_fact_ordinal = self.next_fact_ordinal.saturating_add(1);
         self.facts.push(TeamFact::new(
             id,
             pending.producer,
-            pending.category,
-            pending.locator,
+            pending.noted.category,
+            ObservationLocator {
+                item_id: item_id.to_string(),
+                call_id: pending.noted.call_id,
+                tool: pending.noted.tool,
+            },
         ));
         Some(id)
     }
@@ -99,31 +126,29 @@ impl TeamStore {
     ///
     /// A participant's first publish starts from its own first observation rather than from the
     /// team's: the filter is on `producer`, and a participant cannot have evidence from before it
-    /// registered because [`Self::note_observation`] refuses unregistered sessions. The window is
-    /// capped for the same reason every other authored field is — a version has to stay a bounded
-    /// object — and the count that did not fit is returned so the cap is never silent.
-    pub(crate) fn take_publish_window(&mut self, producer: ThreadId) -> (Vec<FactId>, usize) {
+    /// registered because [`Self::note_observation`] refuses unregistered sessions.
+    ///
+    /// The whole window goes into the version. Consuming an observation without anchoring it would
+    /// lose it for good — the cursor has moved past it, so no later publish can pick it up — and no
+    /// context budget is worth that. Budgets belong to the surfaces that print the list, which cap
+    /// what they show and say how much they left out.
+    pub(crate) fn take_publish_window(&mut self, producer: ThreadId) -> Vec<FactId> {
         let cursor = self
             .published_facts_through
             .get(&producer)
             .copied()
             .unwrap_or_default();
-        let mut window: Vec<FactId> = self
+        let window: Vec<FactId> = self
             .facts
             .iter()
             .filter(|fact| fact.producer() == producer && fact.id().ordinal() > cursor)
             .map(TeamFact::id)
             .collect();
-        // Everything selected is consumed whether or not it fits, so the next publish reports what
-        // that author saw next rather than reaching back past a version that already spoke for it.
         if let Some(last) = window.last() {
             self.published_facts_through
                 .insert(producer, last.ordinal());
         }
-        let omitted = window.len().saturating_sub(MAX_VERSION_EVIDENCE_REFS);
-        // The newest survive: they are the observations the author's summary most likely rests on.
-        window.drain(..omitted);
-        (window, omitted)
+        window
     }
 
     /// Resolve a fact reference for `actor`, or refuse.

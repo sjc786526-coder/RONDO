@@ -19,24 +19,20 @@ use std::fmt;
 /// An observation whose retention is never confirmed — an abandoned turn, a result the harness
 /// discarded — would otherwise sit here for the life of the instance. Dropping the oldest is safe
 /// because a dropped entry only costs a fact that was never confirmed anyway.
-pub(crate) const MAX_PENDING_OBSERVATIONS: usize = 256;
+pub(crate) const MAX_PENDING_OBSERVATIONS_PER_PRODUCER: usize = 256;
 
-/// How many evidence references one version may carry.
+/// How many of a version's references one tool result names.
 ///
-/// A publication window is as large as the work its author did since it last published, so without a
-/// cap a single version could hold an unbounded list — and that list is read back by `team_history`
-/// into the model's context. The count that did not fit is reported rather than dropped in silence.
-pub(crate) const MAX_VERSION_EVIDENCE_REFS: usize = 32;
+/// The version itself keeps every reference its publication window selected: the association between
+/// an entry and what its author had observed is authored content, and a context budget must not
+/// change it. What a budget may bound is how much of that list one answer prints, which is what this
+/// caps — always alongside the count it leaves out.
+pub(crate) const MAX_REPORTED_EVIDENCE_REFS: usize = 32;
 
-/// The retained item shape that carries a tool result.
-///
-/// Kept beside the call id so a locator names one specific item rather than "whatever currently
-/// answers to this call id".
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RetainedOutputKind {
-    FunctionCallOutput,
-    CustomToolCallOutput,
+/// Split a version's references into the ones an answer names and the number it leaves out.
+pub fn reported_evidence_refs(refs: &[FactId]) -> (&[FactId], usize) {
+    let shown = refs.len().min(MAX_REPORTED_EVIDENCE_REFS);
+    (&refs[..shown], refs.len() - shown)
 }
 
 /// What kind of observation a fact points at.
@@ -67,22 +63,39 @@ impl fmt::Display for FactCategory {
 /// someone permitted to read the fact asks.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ObservationLocator {
-    /// The tool call whose retained output this fact points at.
+    /// The identity Codex assigned the retained item, which is what makes this locator resolve to one
+    /// observation and no other.
+    ///
+    /// A call id cannot do that job: it comes from the model's request, so two calls can carry the
+    /// same one, and a reference matched on it could be answered with a different call's output — or
+    /// silently redirected onto a later one after compaction dropped the original. This identity is
+    /// minted per retained item by the harness. It is not stable across a replay, and does not need
+    /// to be: what a replay reproduces is the fact ordinals and the window each publication carried.
+    pub item_id: String,
+    /// The tool call the observation came from. Metadata for the reader, never the locator.
     pub call_id: String,
-    pub output_kind: RetainedOutputKind,
     /// The tool the harness dispatched, as the harness recorded it.
+    pub tool: String,
+}
+
+/// What the capture layer knows about a tool result before it is retained.
+///
+/// The item identity is missing on purpose: it does not exist until Codex records the item, which is
+/// the same moment the fact becomes mintable.
+pub struct NotedObservation {
+    pub call_id: String,
+    pub category: FactCategory,
     pub tool: String,
 }
 
 /// A tool result the harness has seen but whose retention it has not yet confirmed.
 ///
 /// Nothing outside this crate can observe a pending entry. It exists so that the identity, the
-/// ordering and the availability of a fact are all decided at the same moment — the moment Codex is
-/// known to have kept the observation — rather than optimistically when the tool returned.
+/// ordering and the locator of a fact are all decided at the same moment — the moment Codex is known
+/// to have kept the observation — rather than optimistically when the tool returned.
 pub(crate) struct PendingObservation {
     pub(crate) producer: ThreadId,
-    pub(crate) category: FactCategory,
-    pub(crate) locator: ObservationLocator,
+    pub(crate) noted: NotedObservation,
 }
 
 /// One recorded piece of evidence.

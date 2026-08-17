@@ -11,9 +11,11 @@ const TARGET_MARKER: &str = "TARGET-OBSERVATION-MARKER";
 const NEIGHBOUR_MARKER: &str = "NEIGHBOUR-OBSERVATION-MARKER";
 const MESSAGE_MARKER: &str = "ASSISTANT-MESSAGE-MARKER";
 
+/// A retained tool output whose item identity is fixed, so a test can name the same item a locator
+/// would. Recording assigns one when it is missing; naming it here only removes the guesswork.
 fn text_output(call_id: &str, text: &str, success: Option<bool>) -> ResponseItem {
     ResponseItem::FunctionCallOutput {
-        id: None,
+        id: Some(ResponseItemId::from_server(item_id(call_id))),
         call_id: call_id.to_string(),
         output: FunctionCallOutputPayload {
             body: FunctionCallOutputBody::Text(text.to_string()),
@@ -21,6 +23,10 @@ fn text_output(call_id: &str, text: &str, success: Option<bool>) -> ResponseItem
         },
         internal_chat_message_metadata_passthrough: None,
     }
+}
+
+fn item_id(call_id: &str) -> String {
+    format!("fco_{call_id}")
 }
 
 fn assistant_message(text: &str) -> ResponseItem {
@@ -44,15 +50,14 @@ fn fact_for(producer: codex_protocol::ThreadId, call_id: &str) -> FactView {
     handle.register_participant(producer, ParticipantRole::Root, "/root".to_string());
     handle.note_observation(
         producer,
-        FactCategory::ToolResultSuccess,
-        ObservationLocator {
+        NotedObservation {
             call_id: call_id.to_string(),
-            output_kind: RetainedOutputKind::FunctionCallOutput,
+            category: FactCategory::ToolResultSuccess,
             tool: "shell_command".to_string(),
         },
     );
     let fact_id = handle
-        .confirm_observation(producer, call_id)
+        .confirm_observation(producer, call_id, &item_id(call_id))
         .expect("a noted observation mints a fact once retention is confirmed");
     handle
         .read_fact(producer, fact_id)
@@ -209,6 +214,50 @@ async fn a_fact_from_an_unloaded_producer_reports_that_rather_than_a_missing_obs
         read.unavailable_reason()
             .is_some_and(|reason| reason.contains("not loaded")),
         "the reason has to name the producer's residency, not the observation"
+    );
+}
+
+/// Two calls sharing one id must not answer for each other.
+///
+/// The locator names the retained item, not the call, so each reference resolves to its own text even
+/// though nothing else distinguishes them.
+#[tokio::test]
+async fn a_reused_call_id_does_not_let_one_reference_answer_with_the_others_text() {
+    let (session, turn_context) = crate::session::tests::make_session_and_context().await;
+    let first = ResponseItem::FunctionCallOutput {
+        id: Some(ResponseItemId::from_server("fco_first".to_string())),
+        call_id: "call-1".to_string(),
+        output: FunctionCallOutputPayload {
+            body: FunctionCallOutputBody::Text(TARGET_MARKER.to_string()),
+            success: Some(true),
+        },
+        internal_chat_message_metadata_passthrough: None,
+    };
+    let second = ResponseItem::FunctionCallOutput {
+        id: Some(ResponseItemId::from_server("fco_second".to_string())),
+        call_id: "call-1".to_string(),
+        output: FunctionCallOutputPayload {
+            body: FunctionCallOutputBody::Text(NEIGHBOUR_MARKER.to_string()),
+            success: Some(true),
+        },
+        internal_chat_message_metadata_passthrough: None,
+    };
+    session
+        .record_conversation_items(&turn_context, &[first, second])
+        .await;
+
+    let mut earlier = fact_for(session.thread_id, "call-1");
+    earlier.locator.item_id = "fco_first".to_string();
+    let mut later = fact_for(session.thread_id, "call-1");
+    later.locator.item_id = "fco_second".to_string();
+
+    assert_eq!(
+        read_observation(&session, &earlier).await.observation(),
+        Some(TARGET_MARKER)
+    );
+    assert_eq!(
+        read_observation(&session, &later).await.observation(),
+        Some(NEIGHBOUR_MARKER)
     );
 }
 
