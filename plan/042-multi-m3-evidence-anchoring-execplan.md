@@ -166,23 +166,25 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
 - 用户提示中的旧现场已被后续交付取代：当前 `main` 与 `origin/main` 均为 `0c1a5e4`，主工作区干净；M-2 已合入，
   Plan 041 已完成、人判、独立验收、合并和推送，其分支已归档，M-3 前置条件全部满足。
 - 已从 `main@0c1a5e4` 创建本专用 worktree 和本地分支；没有在主工作区修改任何受跟踪文件。
-- **M-3 实现完成**，两个提交：`db39e28`（捕获、定位、发布窗口、权限、`team_evidence`）与
-  `8360bbf`（失败结果捕获与真实产品纵切）。
+- **M-3 实现完成**，提交 `db39e28`（捕获、定位、发布窗口、权限、`team_evidence`）、
+  `8360bbf`（失败结果捕获与真实产品纵切）、`ce32394`（收敛解析入口）、`cfe3dc1`（第一轮独立审查整改）、
+  `35356ab`（验收审查整改：窗口完整锚定、一对一 locator、按 producer 暂存、PostToolUse 拦截结果入集）。
 - 捕获拆成两步落在 `ToolRegistry::dispatch_any_with_terminal_outcome` 的两个终态分支（记下观察，此处才知道
   tool identity 与"是否真的跑完"）和 `Session::record_conversation_items`（确认保留后铸造 Fact 并按 retention
   顺序分配序号）。领域侧新增 `FactId` 与 `codex-team-state` 的 `evidence` / `store::evidence` 模块。
-- 定向门禁全部通过：`codex-team-state` 99/99、新增 `suite::team_evidence` 2/2、M-1/M-2 回归 12/12、
-  `core` 的 `team::evidence` 4/4、合并 `tools::`+`context::` 共 538/538；clippy/fix/fmt/fmt-check 通过。
+- 定向门禁全部通过（验收整改后重跑）：`codex-team-state` 101/101、`suite::team_evidence` 3/3、
+  M-1/M-2 回归 12/12、`core` 的 `team::evidence` 6/6、合并 `tools::`+`context::` 共 541/541；
+  clippy/fix/fmt/fmt-check 通过。
 - 文档已同步：精炼日志 `agent_log/2026-08-17-040656-plan042-multi-m3-evidence-anchoring.md`、
   Multi 子 WBS、顶层 WBS 与 `doc/WBS-COMPLETED.md`。
 
 ### 当前工作
 
-- 已交付，等待独立审查。
+- 已交付并完成两轮审查整改，等待复验。
 
 ### 本任务剩余步骤
 
-1. 等待独立审查结论；如提出实质缺陷，在本分支窄修并只重跑受影响门禁。
+1. 等待独立复验结论；如再提出实质缺陷，在本分支窄修并只重跑受影响门禁。
 
 ### 阻塞项
 
@@ -194,8 +196,10 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
 ### 当前验收状态
 
 - ExecPlan 与现场核对：已完成。
-- M-3 实现、格式化、lint、定向测试：已完成并通过，结果见上表所引门禁。
-- 独立审查：未进行，不能表述为已验收。合并与推送未执行。
+- M-3 实现、格式化、lint、定向测试：已完成并通过，结果见上引门禁。
+- 审查：两轮。第一轮（执行期自查）与第二轮（独立验收，报告见
+  `agent_log/2026-08-17-045506-...-independent-acceptance-review.md`，结论为不通过）提出的全部缺陷已整改
+  并重跑门禁。**复验尚未进行，不能表述为已验收**；合并与推送未执行。
 - 主工作区 git-ignored 现场：仅 Git 创建了 `.claude/worktrees/042-multi-m3-evidence-anchoring` 目录及关联元数据；
   本任务没有在主工作区直接生成私有/ignored 产品数据。
 
@@ -221,7 +225,7 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
 | 008 | 普通窄失败允许执行者自行修复并定向重跑，原则边界或持续实质阻塞才暂停 | 给实现和测试恢复留合理冗余，不放松安全/资源门禁 | 执行流程 | 已采纳 |
 | 009 | 042 只提交工作树分支；合并、推送和分支/worktree 归档等待用户另行批准 | 遵守本次明确交付边界 | Git 交付 | 已采纳 |
 | 010 | 当前无需在主工作区直接生成 M-3 ignored 数据；`.claude/worktrees` 与 Git 元数据是唯一主工作区侧效果 | M-3 是 session 内存态与受跟踪代码/测试任务，无私有数据资产 | 工作区 | 已采纳 |
-| 011 | locator 解析目标是 producer session 的 conversation history，不依赖 rollout 落盘 | rollout 失败路径只记日志，依赖它就无法诚实确认可用性；history 是 Codex 真正保留并会送给模型的那份 | 定位与可用性 | 已实现 |
+| 011 | locator 解析目标是 producer session 的 conversation history，按 Codex 为每个已保留 item 分配的身份一对一定位 | rollout 失败路径只记日志，依赖它无法诚实确认可用性；call_id 来自模型请求、可复用，据此匹配会串线或在 compaction 后把旧 Fact 重定向到新文本 | 定位与可用性 | 已实现（首版按 call_id 匹配，验收审查后改为 item 身份） |
 | 012 | 捕获落在 tool dispatch 的终态分支 + retention 边界两处，序号在第二处分配 | 第一处才知道 tool identity 与"是否真的跑完"，第二处才知道真的被保留；一处做不到两件事 | 捕获接缝 | 已实现 |
 | 013 | 失败结果也捕获：dispatch 的 `Err(RespondToModel)` 同样是终态 | 退出码非零的 shell 走该分支，只收 `Ok` 会让"失败"这半个支持集几乎为空 | 支持集 | 已实现 |
 | 014 | dispatch 中更早的拒绝（未知工具、PreToolUse 拦截、PostToolUse 拒绝结果）不捕获 | 要么工具没跑，要么跑出来的结果被替换，都不是对工作的观察 | 支持集 | 已实现 |
@@ -229,5 +233,7 @@ Fact 只证明“当时观察到了什么”，不证明结果现在仍然成立
 | 016 | 不在 Fact 上缓存可用状态，改为每次读取现场回答；两种读不到的原因分别命名，都不写死引用 | “不在 producer 当前 history 里”正是普通 compaction 的结果，而 rollout 仍持有该项，据此永久降级会误判“真正不可用” | Unavailable 语义 | 已实现（首版曾单向降级，独立审查后移除） |
 | 017 | 投影按上限命名引用并计数余量，完整清单走 `team_history` | 发布窗口无固定大小，逐条全列会让投影随运行时长无界增长 | 投影预算 | 已实现 |
 | 018 | host 用 filler 顶替被丢弃的工具结果时，先撤销该次 note | 等待 runtime 清理的工具会在 abort 抢到终态后才返回，filler 用同一 call id 落盘，否则被打断的调用会变成证据 | 支持集 | 已实现 |
-| 019 | 同一 call id 的重复 note 保留第一条 | 解析也取第一条已保留匹配，保留后一条会让 Fact 的类别与工具描述另一次调用 | 定位诚实性 | 已实现 |
-| 020 | Version 的引用数量与其他 authored 字段一样设上限，并报告未装下的条数 | `team_history` 会把引用读回模型上下文，无上限的 authored 字段会破坏“store 不持无界 authored 字段”这条既有不变量 | 上下文预算 | 已实现 |
+| 019 | locator 用 Codex 为每个已保留 item 分配的身份，call_id 只作元数据；重复 call_id 的 pending 槽位仍先到先得 | 一对一定位是唯一能保证“只解析到目标 observation”的做法，而 item 身份只需在本实例内唯一，不需要跨重放稳定 | 定位诚实性 | 已实现（首版靠“保留第一条 note”缓解，不足） |
+| 020 | canonical Version 保留发布窗口的全部引用；上限只加在打印列表的surface（投影 4 条、工具结果 32 条）并报告省略数 | 消费了却不锚定等于永久丢失该 observation（游标已越过它），上下文预算不能改变不可变 authored 关联 | 上下文预算 | 已实现（首版在 authored 侧截断，验收审查否决） |
+| 021 | pending 暂存上限改为按 producer 计，逐出时记 warn | 共享上限会让一个成员的突发把另一个成员即将保留的结果静默挤掉 | 捕获边界 | 已实现 |
+| 022 | PostToolUse 拦截后的模型可见失败文本纳入支持集；执行前的拒绝（未知工具、PreToolUse）仍排除 | 拦截发生在 handler 已执行之后，它改变的是模型得到的答案，而那个答案会被正式保留 | 支持集 | 已实现 |
