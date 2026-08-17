@@ -45,33 +45,41 @@ pub enum DumpEntry {
     Event {
         event_id: String,
         created_by: String,
+        created_by_thread_id: String,
         version_count: usize,
         route_count: usize,
     },
     Version {
         version_id: String,
         author: String,
+        author_thread_id: String,
         producer_state: ProducerState,
         root_state: RootState,
         retired: bool,
         retired_by: Option<String>,
+        retired_by_thread_id: Option<String>,
         retired_at: Option<TeamRevision>,
         retire_reason: Option<String>,
         retired_availability: Option<ProducerAvailability>,
         retired_availability_epoch: Option<AvailabilityEpoch>,
-        fact_ids: Vec<String>,
         fact_ref_count: usize,
+    },
+    VersionFact {
+        version_id: String,
+        fact_id: String,
     },
     Route {
         route_id: String,
         event_id: String,
         target: String,
+        target_thread_id: String,
         duty: RouteDuty,
         delivery: String,
     },
     Fact {
         fact_id: String,
         producer: String,
+        producer_thread_id: String,
         category: String,
         item_id: String,
         call_id: String,
@@ -79,12 +87,14 @@ pub enum DumpEntry {
     },
     Visibility {
         participant: String,
+        participant_thread_id: String,
         event_id: String,
         visible: bool,
         reasons: Vec<String>,
     },
     Activity {
         participant: String,
+        participant_thread_id: String,
         event_id: String,
         active: bool,
         reasons: Vec<String>,
@@ -113,6 +123,7 @@ pub struct ChangeLogPage {
 pub struct ChangeLogView {
     pub revision: TeamRevision,
     pub actor: String,
+    pub actor_thread_id: String,
     pub kind: ChangeKind,
     pub target: String,
     pub before: Option<String>,
@@ -135,8 +146,14 @@ pub enum ChangeKind {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum WakeDecisionView {
-    Signalled { target: String, rule: String },
-    None { rule: String },
+    Signalled {
+        target: String,
+        target_thread_id: String,
+        rule: String,
+    },
+    None {
+        rule: String,
+    },
 }
 
 /// Publication volume for one participant, recomputed from canonical authored fields.

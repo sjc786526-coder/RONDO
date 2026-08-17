@@ -29,6 +29,11 @@ impl TeamStore {
         cursor: Option<DumpCursor>,
     ) -> Result<TeamDumpPage, TeamError> {
         self.require_root(actor)?;
+        if cursor.is_none() && query.offset.is_some() {
+            return Err(TeamError::InvalidRequest {
+                reason: "dump pages continue with a snapshot cursor, not a raw offset",
+            });
+        }
         if let Some(cursor) = cursor
             && (cursor.revision != self.revision
                 || cursor.availability_epoch != availability.epoch
@@ -43,10 +48,7 @@ impl TeamStore {
 
         let entries = self.dump_entries(availability);
         let total_entries = entries.len();
-        let offset = cursor
-            .map(|cursor| cursor.offset as usize)
-            .or(query.offset.map(|offset| offset as usize))
-            .unwrap_or(0);
+        let offset = cursor.map(|cursor| cursor.offset as usize).unwrap_or(0);
         let limit = query.limit();
         let end = (offset + limit).min(total_entries);
         let page = entries.get(offset..end).unwrap_or(&[]).to_vec();
@@ -87,6 +89,7 @@ impl TeamStore {
             .map(|record| ChangeLogView {
                 revision: record.revision,
                 actor: self.label_of(record.actor),
+                actor_thread_id: record.actor.to_string(),
                 kind: record.kind,
                 target: record.target.clone(),
                 before: record.before.clone(),
@@ -94,6 +97,7 @@ impl TeamStore {
                 wake: match &record.wake {
                     StoredWake::Signalled { participant, rule } => WakeDecisionView::Signalled {
                         target: self.label_of(*participant),
+                        target_thread_id: participant.to_string(),
                         rule: (*rule).to_string(),
                     },
                     StoredWake::None { rule } => WakeDecisionView::None {
@@ -164,6 +168,7 @@ impl TeamStore {
             entries.push(DumpEntry::Event {
                 event_id: event.id().to_string(),
                 created_by: self.label_of(event.created_by()),
+                created_by_thread_id: event.created_by().to_string(),
                 version_count: event.versions().len(),
                 route_count: event.routes().len(),
             });
@@ -172,28 +177,31 @@ impl TeamStore {
                 entries.push(DumpEntry::Version {
                     version_id: version.id().to_string(),
                     author: self.label_of(version.authored().author),
+                    author_thread_id: version.authored().author.to_string(),
                     producer_state: version.producer_state(),
                     root_state: version.root_state(),
                     retired: retirement.is_some(),
                     retired_by: retirement.map(|record| self.label_of(record.retired_by)),
+                    retired_by_thread_id: retirement.map(|record| record.retired_by.to_string()),
                     retired_at: retirement.map(|record| record.retired_at),
                     retire_reason: retirement.map(|record| record.reason.clone()),
                     retired_availability: retirement.map(|record| record.availability),
                     retired_availability_epoch: retirement.map(|record| record.availability_epoch),
-                    fact_ids: version
-                        .authored()
-                        .evidence_refs
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect(),
                     fact_ref_count: version.authored().evidence_refs.len(),
                 });
+                for fact_id in &version.authored().evidence_refs {
+                    entries.push(DumpEntry::VersionFact {
+                        version_id: version.id().to_string(),
+                        fact_id: fact_id.to_string(),
+                    });
+                }
             }
             for route in event.routes() {
                 entries.push(DumpEntry::Route {
                     route_id: route.id().to_string(),
                     event_id: event.id().to_string(),
                     target: self.label_of(route.target()),
+                    target_thread_id: route.target().to_string(),
                     duty: route.duty(),
                     delivery: route.delivery().label().to_string(),
                 });
@@ -203,6 +211,7 @@ impl TeamStore {
             entries.push(DumpEntry::Fact {
                 fact_id: fact.id().to_string(),
                 producer: self.label_of(fact.producer()),
+                producer_thread_id: fact.producer().to_string(),
                 category: fact.category().to_string(),
                 item_id: fact.locator().item_id.clone(),
                 call_id: fact.locator().call_id.clone(),
@@ -215,6 +224,7 @@ impl TeamStore {
                     visibility_reasons(event, participant.thread_id, participant.role);
                 entries.push(DumpEntry::Visibility {
                     participant: participant.label.clone(),
+                    participant_thread_id: participant.thread_id.to_string(),
                     event_id: event.id().to_string(),
                     visible,
                     reasons: visibility_reasons,
@@ -223,6 +233,7 @@ impl TeamStore {
                     activity_reasons(event, participant.thread_id, participant.role);
                 entries.push(DumpEntry::Activity {
                     participant: participant.label.clone(),
+                    participant_thread_id: participant.thread_id.to_string(),
                     event_id: event.id().to_string(),
                     active,
                     reasons: activity_reasons,

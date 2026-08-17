@@ -53,6 +53,7 @@ impl ThreadRequestProcessor {
             })
             .await
             .map_err(thread_store_delete_error)?;
+        self.thread_manager.notify_thread_store_changed();
 
         if let Some(state_db) = self.state_db.as_ref() {
             state_db

@@ -43,6 +43,11 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
 
     let payload = match args.action {
         InspectAction::Dump => {
+            if args.offset.is_some() && args.cursor.is_none() {
+                return Err(team_error(codex_team_state::TeamError::InvalidRequest {
+                    reason: "dump pages continue with a snapshot cursor, not a raw offset",
+                }));
+            }
             let availability = session
                 .services
                 .agent_control
@@ -56,7 +61,15 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 .map_err(team_error)?;
             let page = access
                 .handle()
-                .dump(access.actor(), &availability, query, cursor)
+                .dump(
+                    access.actor(),
+                    &availability,
+                    ObserveQuery {
+                        offset: None,
+                        ..query
+                    },
+                    cursor,
+                )
                 .map_err(team_error)?;
             let next_cursor = page.next_offset.map(|offset| {
                 DumpCursor {

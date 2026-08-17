@@ -312,7 +312,9 @@ impl AgentControl {
         {
             let _ = state.remove_thread(&agent_id).await;
             self.forget_v2_residency(agent_id);
+            let _gate = state.lock_availability_transition();
             self.state.release_spawned_thread(agent_id);
+            state.bump_availability_generation();
         }
         result
     }
@@ -646,7 +648,7 @@ impl AgentControl {
         Ok((session_source, agent_metadata))
     }
 
-    fn upgrade(&self) -> CodexResult<Arc<ThreadManagerState>> {
+    pub(crate) fn upgrade(&self) -> CodexResult<Arc<ThreadManagerState>> {
         self.manager
             .upgrade()
             .ok_or_else(|| CodexErr::UnsupportedOperation("thread manager dropped".to_string()))

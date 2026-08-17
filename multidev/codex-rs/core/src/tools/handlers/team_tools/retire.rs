@@ -42,12 +42,12 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
     let arguments = function_arguments(payload)?;
     let args: RetireArgs = parse_arguments(&arguments)?;
     let access = resolve_access(&session)?;
-    let availability = session
-        .services
-        .agent_control
-        .producer_availability_snapshot()
-        .await;
     let control = session.services.agent_control.clone();
+    let availability = control.producer_availability_snapshot().await;
+    let state = control.upgrade().ok();
+    let _gate = state
+        .as_ref()
+        .map(|state| state.lock_availability_transition());
 
     let submission = Submission {
         based_on: TeamRevision::from_raw(args.based_on_revision.unwrap_or_default()),

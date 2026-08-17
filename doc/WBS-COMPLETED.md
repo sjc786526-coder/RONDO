@@ -1099,27 +1099,24 @@ standard/Lite 形态均补回归。
 
 ## Multi M-4 —— 协调闭合与可观测性（Plan 043，2026-08-17）
 
-**状态**：首次落地 `e03eef1` 未通过独立验收（报告 `e2105aa`）。审查缺口已在工作树分支
-`worktree-043-multi-m4-coordination-closure` 整改，未合并、未推送，待再次独立审查。
+**状态**：首次落地 `e03eef1` 与第一轮整改 `8f73572` 均未通过独立验收（报告 `e2105aa`、`035977c`）。
+第二轮审查缺口已在 `worktree-043-multi-m4-coordination-closure` 整改，未合并、未推送，待再次独立审查。
 
-- **可用性**：Harness 复用 `ensure_v2_agent_loaded` 的 `probe_v2_restore` 派生四类——Loaded 为
-  `available`；Restorable 为 `recoverable_unloaded`；Unrecoverable（含 Interrupted 驱逐后 store
-  摘要仍在但恢复门禁返回 `ThreadNotFound`）为 `unavailable`；其余读失败为 `unknown`。epoch 是
-  ThreadManager 单调 generation，seqlock 快照；退休提交时再对 live generation 原子重验。
-- **退休**：仅 Root；目标须 producer `open` 且未退休，作者在提交时为 `unavailable`。记录是独立终态覆盖层，
-  producer 保持 `open`，不改 root attention、route、其他 Version 或 authored 内容。Root 不操作则事项悬挂。
-  同状态 lifecycle 是 no-op，不推进 revision / 日志 / wake generation。
-- **可观测性**：Root-only `team_inspect` 提供有界 dump（cursor
-  `revision:epoch:observe_generation:offset`）、按 revision 的精简变更日志和按 `thread_id` 聚合、
-  可分页的发布统计。Version dump 带退休原因/可用性/epoch 与 FactId 列表；Fact 带 `call_id`。
-  `authored_chars` 计 Unicode 标量值。稳定重试/no-op 不增加 revision、wake generation、日志或统计。
-- **门禁（整改后）**：`codex-team-state --lib` **121/121**；产品纵切 `suite::team_coordination` **1/1**；
-  M-1—M-3 回归 `suite::team_world_state` + `team_routing` + `team_evidence` **16/16**（须清 loopback
-  代理）；受影响 `core --lib`（`agent::control` / `team::` / `tools::handlers::team_tools` /
-  `tools::spec_plan`）定向通过。`just fix -p codex-team-state -p codex-core`、`just fmt`、
-  `just fmt-check` 通过。未跑全 workspace、Docker、真实 API 或本地模型。
+- **可用性**：产品分类按显式 `resume_agent` 恢复能力派生——已加载为 `available`；store+history 可重建为
+  `recoverable_unloaded`（含 shutdown 后 registry 缺失）；store/history 明确缺失为 `unavailable`；读失败为
+  `unknown`。自动 V2 load 仍走单独的 `probe_v2_restore`。epoch 是单调 generation。
+- **退休**：仅 Root；作者在提交时须为 `unavailable`。最终 epoch 重验与 loaded-map insert/remove、store
+  delete、registry release 共用同步 availability gate。退休是独立终态覆盖层。同状态 lifecycle 是 no-op。
+- **可观测性**：dump cursor `revision:epoch:observe_generation:offset`；裸 offset 拒绝。Version→Fact 用独立
+  `VersionFact` 行分页。Agent 关系行同时带 label 与 `thread_id`。统计按 `thread_id` 聚合可分页。
+- **门禁（本轮）**：`codex-team-state --lib` **124/124**；`resume_agent_restores_closed_agent_and_accepts_send_input`
+  **1/1**；availability 控制面（含 shutdown 后 recoverable）通过；产品纵切 M-1—M-4 **17/17**（须清 loopback
+  代理）。`just fix -p codex-team-state -p codex-core`、`just fmt` 通过。未跑全 workspace、Docker、真实 API
+  或本地模型。
 - **边界**：功能仍随 `team_state_enabled` 默认关闭。未做自动退休、orphan 清理、escalation、产品 UI、
-  跨进程日志持久化或审计链。首次实现见
-  `agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`，独立验收见
-  `agent_log/2026-08-17-082629-plan043-m4-independent-acceptance-review.md`，整改见
-  `agent_log/2026-08-17-090000-plan043-m4-acceptance-gap-remediation.md`。
+  跨进程日志持久化或审计链。执行与审查记录见
+  `agent_log/2026-08-17-081500-plan043-multi-m4-coordination-closure.md`、
+  `agent_log/2026-08-17-082629-plan043-m4-independent-acceptance-review.md`、
+  `agent_log/2026-08-17-090000-plan043-m4-acceptance-gap-remediation.md`、
+  `agent_log/2026-08-17-091208-plan043-m4-remediation-independent-rereview.md`、
+  `agent_log/2026-08-17-093500-plan043-m4-rereview-gap-remediation.md`。

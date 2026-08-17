@@ -3,12 +3,12 @@
 //! The four classes are product contract. This module is the only place that turns AgentControl
 //! facts into them; `codex-team-state` stores and compares the result, it does not invent it.
 //!
-//! Classification reuses the same V2 restore probe as `ensure_v2_agent_loaded`: loaded threads are
-//! available, a probe that would succeed is recoverable, a probe that would return ThreadNotFound
-//! is unavailable, and any other read failure is unknown.
+//! Classification follows explicit `resume_agent` recoverability: loaded threads are available,
+//! a stored rollout that resume can rebuild is recoverable even if registry metadata is gone, a
+//! missing store/history is unavailable, and any other read failure is unknown.
 
 use super::AgentControl;
-use super::spawn::V2RestoreProbe;
+use super::spawn::ProducerRecoverability;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::ThreadId;
 use codex_team_state::AvailabilityEpoch;
@@ -66,11 +66,11 @@ impl AgentControl {
         state: &Arc<ThreadManagerState>,
         thread_id: ThreadId,
     ) -> ProducerAvailability {
-        match self.probe_v2_restore(state, thread_id).await {
-            V2RestoreProbe::Loaded => ProducerAvailability::Available,
-            V2RestoreProbe::Restorable(_) => ProducerAvailability::RecoverableUnloaded,
-            V2RestoreProbe::Unrecoverable => ProducerAvailability::Unavailable,
-            V2RestoreProbe::Failed(_) => ProducerAvailability::Unknown,
+        match self.probe_producer_recoverability(state, thread_id).await {
+            ProducerRecoverability::Loaded => ProducerAvailability::Available,
+            ProducerRecoverability::Restorable => ProducerAvailability::RecoverableUnloaded,
+            ProducerRecoverability::Unrecoverable => ProducerAvailability::Unavailable,
+            ProducerRecoverability::Failed => ProducerAvailability::Unknown,
         }
     }
 }
@@ -167,8 +167,65 @@ mod tests {
         }
         assert_eq!(
             control.classify_producer(first.thread_id).await,
-            ProducerAvailability::Unavailable,
-            "classification must follow the restore gate, not a leftover stored summary"
+            ProducerAvailability::RecoverableUnloaded,
+            "automatic V2 load may fail, but a leftover rollout is still resume_agent recoverable"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_without_registry_is_resume_recoverable_and_must_not_retire() {
+        let mut config = test_config().await;
+        let _ = config.features.enable(Feature::MultiAgentV2);
+        let temp_home = tempfile::tempdir().expect("create temp home");
+        config.codex_home = temp_home.path().to_path_buf().try_into().unwrap();
+        config.cwd = temp_home.path().to_path_buf().try_into().unwrap();
+        let manager = ThreadManager::with_models_provider_and_home_for_tests(
+            CodexAuth::from_api_key("dummy"),
+            config.model_provider.clone(),
+            config.codex_home.to_path_buf(),
+            Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        );
+        let root = manager
+            .start_thread(StartThreadOptions::new(config.clone()))
+            .await
+            .expect("start root thread");
+        let control = manager.agent_control();
+        let state = control.upgrade().expect("thread manager should be live");
+        let worker =
+            spawn_v2_subagent(&control, &state, config.clone(), root.thread_id, "worker-1").await;
+        control.team().register_participant(
+            worker.thread_id,
+            ParticipantRole::Member,
+            "/root/worker".to_string(),
+        );
+        let epoch_before = control.availability_epoch();
+
+        control
+            .shutdown_live_agent(worker.thread_id)
+            .await
+            .expect("shutdown");
+        assert_eq!(
+            control.get_status(worker.thread_id).await,
+            crate::agent::AgentStatus::NotFound
+        );
+        assert!(control.availability_epoch() != epoch_before);
+        assert_eq!(
+            control.classify_producer(worker.thread_id).await,
+            ProducerAvailability::RecoverableUnloaded,
+            "registry miss must not count as truly unavailable while resume_agent can restore"
+        );
+
+        control
+            .resume_agent_from_rollout(
+                config,
+                worker.thread_id,
+                SessionSource::SubAgent(SubAgentSource::Other("worker-1".to_string())),
+            )
+            .await
+            .expect("explicit resume_agent restores the shutdown worker");
+        assert_eq!(
+            control.classify_producer(worker.thread_id).await,
+            ProducerAvailability::Available
         );
     }
 

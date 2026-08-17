@@ -335,6 +335,8 @@ pub(crate) struct ThreadManagerState {
     /// Monotonic generation for producer availability. Bumped when a thread is loaded, unloaded
     /// or deleted from the store so a stale retirement cannot land after a restore.
     availability_generation: AtomicU64,
+    /// Serializes availability-changing map/store updates with Root retirement.
+    availability_gate: std::sync::Mutex<()>,
 }
 
 pub fn build_models_manager(
@@ -446,6 +448,7 @@ impl ThreadManager {
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
                 availability_generation: AtomicU64::new(0),
+                availability_gate: std::sync::Mutex::new(()),
             }),
             _test_codex_home_guard: None,
         }
@@ -582,6 +585,7 @@ impl ThreadManager {
                 ops_log: should_use_test_thread_manager_behavior()
                     .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
                 availability_generation: AtomicU64::new(0),
+                availability_gate: std::sync::Mutex::new(()),
             }),
             _test_codex_home_guard: None,
         }
@@ -731,9 +735,15 @@ impl ThreadManager {
                 }
             });
         if result.is_ok() {
+            let _gate = self.state.lock_availability_transition();
             self.state.bump_availability_generation();
         }
         result
+    }
+
+    /// Record that the backing thread store changed outside this manager's delete helper.
+    pub fn notify_thread_store_changed(&self) {
+        self.state.bump_availability_generation();
     }
 
     /// Updates metadata for loaded and cold threads through one entrypoint.
@@ -1041,6 +1051,7 @@ impl ThreadManager {
         }
 
         let mut tracked_threads = self.state.threads.write().await;
+        let _gate = self.state.lock_availability_transition();
         let mut removed = false;
         for thread_id in &report.completed {
             if tracked_threads.remove(thread_id).is_some() {
@@ -1247,6 +1258,12 @@ impl ThreadManagerState {
         self.availability_generation.fetch_add(1, Ordering::SeqCst);
     }
 
+    pub(crate) fn lock_availability_transition(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.availability_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     pub(crate) fn agent_graph_store(&self) -> Option<Arc<dyn AgentGraphStore>> {
         self.agent_graph_store.clone()
     }
@@ -1356,7 +1373,9 @@ impl ThreadManagerState {
 
     /// Remove a thread from the manager by ID, returning it when present.
     pub(crate) async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<CodexThread>> {
-        let removed = self.threads.write().await.remove(thread_id);
+        let mut threads = self.threads.write().await;
+        let _gate = self.lock_availability_transition();
+        let removed = threads.remove(thread_id);
         if removed.is_some() {
             self.bump_availability_generation();
         }
@@ -1709,6 +1728,7 @@ impl ThreadManagerState {
                         thread,
                     });
                 }
+                let _gate = self.lock_availability_transition();
                 threads.remove(&resumed.conversation_id);
                 drop(threads);
                 self.bump_availability_generation();
@@ -1822,6 +1842,7 @@ impl ThreadManagerState {
 
         {
             let mut threads = self.threads.write().await;
+            let _gate = self.lock_availability_transition();
             if let std::collections::hash_map::Entry::Vacant(e) = threads.entry(thread_id) {
                 let thread = Arc::new(CodexThread::new(
                     session,

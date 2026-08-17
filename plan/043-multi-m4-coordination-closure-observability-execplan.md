@@ -202,7 +202,7 @@
 
 ### 当前工作
 
-- 独立验收认定 `e03eef1` 未完整实现本计划。审查缺口已在 043 工作树窄修并提交；未合并、未推送，等待再次独立审查。
+- 独立复验认定 `8f73572` 仍未完整实现本计划。第二轮审查缺口已在 043 工作树窄修；未合并、未推送，等待再次独立审查。
 
 ### 本任务剩余步骤
 
@@ -217,7 +217,8 @@
 
 - 规划现场核对、worktree 创建和 ExecPlan：已完成。
 - 首次实现提交 `e03eef1`：独立验收不通过（报告 `e2105aa`）。
-- 审查缺口整改、格式化、lint、定向测试、文档同步：本轮已完成并提交 043 分支。
+- 第一轮整改 `8f73572`：独立复验不通过（报告 `035977c`）。
+- 第二轮审查缺口整改、格式化、lint、定向测试、文档同步：本轮已完成并提交 043 分支。
 - 再次独立审查：待进行；不由执行者自判替代。
 
 ### 交接边界
@@ -248,12 +249,14 @@
 | 011 | 普通窄失败允许自主修复并有界重跑，原则边界或持续实质阻塞才暂停 | 给实现与测试恢复合理冗余，不放松安全和资源门禁 | 执行流程 | 已采纳 |
 | 012 | 043 只提交工作树分支；合并、推送和分支/worktree 归档等待用户另行批准 | 遵守本次明确交付边界 | Git 交付 | 已采纳 |
 | 013 | 当前无需在主工作区直接生成 ignored 产品数据；主工作区侧仅保留 Git 管理 043 worktree 所需目录与元数据 | M-4 是 session 内存态代码/测试任务，不涉及私有数据资产 | 工作区 | 已采纳 |
-| 014 | 四类可用性只在 `AgentControl` 派生，并复用 `ensure_v2_agent_loaded` 的 `probe_v2_restore`：Loaded→available，Restorable→recoverable_unloaded，Unrecoverable→unavailable，Failed→unknown。epoch 是 ThreadManager 单调 generation，seqlock 快照；退休提交时再读 live generation，不一致则 `AvailabilityConflict` | 内容哈希会 ABA；`read_stored_thread`/`rollout_path.exists()` 与真实恢复门禁不一致，Interrupted 驱逐后 store 摘要仍在却不可恢复 | availability | 已采纳 |
+| 014 | 产品可用性按显式 `resume_agent` 恢复能力派生，与自动 V2 load（`probe_v2_restore`）拆开：Loaded→available；store+history 可重建→recoverable_unloaded（registry 缺失不算真正不可用）；store/history 明确缺失→unavailable；其余读失败→unknown。epoch 是 ThreadManager 单调 generation | `shutdown_live_agent` 会丢掉 registry 但保留 rollout，既有 `resume_agent` 测试证明仍可恢复并接收输入 | availability | 已采纳 |
 | 015 | 退休是 `Option<RetirementRecord>` 覆盖层，producer 保持 `open`；只撤销 producer-open 活动理由 | 不能伪装成作者 closed，也不能改 root attention / route / 其他 Version | Version 生命周期 | 已采纳 |
 | 016 | dump/log 用 offset 分页；dump cursor 为 `revision:epoch:observe_generation:offset`；对外 ID 用 Display 字符串。`observe_generation` 在新建 participant 和 `confirm_observation` 时递增 | 同 revision 下 dump 排列变化（插页 Fact）不能静默拼接旧 cursor | 可观测性 | 已采纳 |
 | 017 | `TeamStateHandle::notify_change` 只在真实 canonical mutation 上 bump；稳定重试/no-op 不写 changelog、不改统计 | 修掉 deduplicated 也会推进 wake generation 的既有问题 | 幂等 | 已采纳 |
 | 018 | Root-only 工具 `team_retire` / `team_inspect`（dump/log/stats）；协议片段升到 v4 | 与现有 team 工具同一 namespace，不另做诊断浏览器 | 工具面 | 已采纳 |
 | 019 | `authored_chars` 计 Unicode 标量值，纳入开 Event 的 title、每 Version 的 summary 与可选 handoff，查询时从 canonical 重算 | 拒绝发布和稳定重试本来就不会入库，统计不会漂 | publication stats | 已采纳 |
 | 020 | 同状态 lifecycle（`pending→pending` / `tracking→tracking`）是无 canonical 变化的 no-op：不推进 revision、changelog 或 wake generation | 与硬约束 4 一致；成功提交不等于状态变了 | 幂等 | 已采纳 |
-| 021 | 发布统计按 `thread_id` 聚合并尊重 limit/offset；dump Version 带退休元数据与 `fact_ids`，Fact 带 `call_id`，Participant/Publication 带 `thread_id` | 重复 label 不能错计；dump 必须能回答退休原因和 Version→Fact 关联 | 可观测性 | 已采纳 |
-| 022 | 产品纵切仍覆盖 unload→recoverable 拒绝→delete→unavailable 退休。恢复门禁与分类一致、陈旧 epoch 拒绝分别落在控制面 Interrupted 驱逐对照和领域 live_epoch/ABA 测试；不把 crate-private `ensure_v2` 抬到集成测试 | 审查反例的权威接缝在控制面/领域层；产品 suite 继续验证真实工具纵切，不重复抬内部 API | 测试分层 | 已采纳 |
+| 021 | 发布统计按 `thread_id` 聚合并尊重 limit/offset；dump Version 只带 `fact_ref_count`，Version→Fact 用独立 `VersionFact` 行分页；Fact 带 `call_id`；Agent 关系行同时保留 label 与 `thread_id` | 单条 dump 不得随 Fact 数无界增长；重复 label 必须能指出具体 Agent | 可观测性 | 已采纳 |
+| 022 | 产品纵切仍覆盖 unload→recoverable 拒绝→delete→unavailable 退休。`resume_agent` 可恢复性与陈旧 epoch 分别落在控制面 shutdown/resume 测试和领域 live_epoch/ABA 测试 | 审查反例的权威接缝在控制面/领域层；产品 suite 继续验证真实工具纵切 | 测试分层 | 已采纳 |
+| 023 | 退休最终检查与 loaded-map insert/remove、store delete、registry release 共用一把同步 availability gate；gate 内不再 await | 只线性化最终 epoch 重验与恢复/删除，不建事务或审计设施；避免跨 await 持锁 | 并发 | 已采纳 |
+| 024 | dump 续页只接受带 revision/epoch/observe_generation 的 cursor；裸 offset 拒绝 | 防止 mutation 后用 offset 拼接不同快照 | 可观测性 | 已采纳 |
