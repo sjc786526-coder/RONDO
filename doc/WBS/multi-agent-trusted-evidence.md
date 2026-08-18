@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-17 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 A 独立验收不通过，门 1 窄整改待复验，阶段 B 未开始
+最后更新：2026-08-17 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 A 复验通过，阶段 B 未开始
 
 ## 定位
 
@@ -252,7 +252,7 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 独立验收不通过，门 1 窄整改待复验；阶段 B 未开始，不能表述为已具备真实运行条件或 M-5 通过。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 复验通过、已具备真实运行条件；阶段 B 未开始，不能表述为 M-5 通过。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -294,9 +294,10 @@ store transition 期间为 unknown。Root 退休是独立终态覆盖层，只�
 
 ### M-5 真实运行与不退化验收
 
-阶段 A（Plan 044，无费用）的冻结 bundle、运行合同与接线核验通过，但独立验收不通过：门 1 原判据可对
-Root 独角戏误判通过，且未验 Root 唤醒。窄整改已落地、待复验。复验通过前这不是真实运行条件，**更不是**
-M-5 通过。阶段 B 未开始；授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+阶段 A（Plan 044，无费用）经两轮整改后复验通过：冻结 bundle、两份运行合同与接线核验通过，门 1 判据的
+三处缺陷（同 Event 合取、Root 唤醒、证据按产出工具绑定）已全部关闭并各有反例回归，正向通路已用冻结二进制
+实测确认。这只是**真实运行条件**，**不是** M-5 通过。阶段 B 未开始：两道门的 runner 尚未实现，真实 API、
+付费与 Docker 未授权；授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
