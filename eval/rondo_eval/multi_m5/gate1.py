@@ -94,6 +94,12 @@ def run_gate1_paid(
         if provider is None
         else require_frozen_provider(provider, effort=workflow.root_effort)
     )
+    if provider_identity is not None and upstream_base_url.rstrip("/") != provider_identity[
+        "provider_base_url"
+    ].rstrip("/"):
+        # The forwarded endpoint has to be the one that was just frozen, not a
+        # second argument that quietly points somewhere else.
+        raise Gate1Error("paid gate 1 upstream differs from the frozen provider endpoint")
     root = _common_root(common_root)
     last: dict[str, Any] | None = None
     for attempt in range(1, workflow.max_attempts + 1):

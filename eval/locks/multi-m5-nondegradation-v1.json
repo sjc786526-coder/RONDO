@@ -50,6 +50,7 @@
   "member_effort": "medium",
   "provider": "relay",
   "provider_api": "responses",
+  "provider_base_url": "https://www.cctq.ai/v1",
   "provider_max_attempts": 5,
   "provider_unbilled_retry_statuses": [429, 500, 502, 503, 504],
   "timeouts_from_catalog": true,

@@ -236,6 +236,15 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
         or cost.get("hard_cap_usd") != "120.00"
     ):
         raise M5ContractError("gate 2 attempt or dollar contract differs")
+    # The endpoint is part of the authorization: it decides where the key, the
+    # workspace content and the money go. A missing one must fail closed.
+    endpoint = raw.get("provider_base_url")
+    if (
+        not isinstance(endpoint, str)
+        or not endpoint.startswith("https://")
+        or endpoint != endpoint.strip()
+    ):
+        raise M5ContractError("gate 2 provider endpoint is missing or not https")
     if price.get("date") != "2026-08-17":
         raise M5ContractError("price snapshot date differs")
     if price.get("model_id") != "gpt-5.6-sol":

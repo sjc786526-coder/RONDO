@@ -245,6 +245,12 @@
   前五项已修，第六项**决定保持冻结载体**并把边界写进锁文件与文档（理由见决策 032）。
   门禁 **292/292**（含 `test_docker_supervisor`）。详见
   `agent_log/2026-08-18-170000-plan044-m5-paid-boundary-remediation.md`。
+- **第四轮终验判「不通过」，2 项阻断 + 2 项伴随缺口已全部关闭**：请求上限是 `snapshot→判断→reserve`
+  的 TOCTOU，代理跑在 ThreadingHTTPServer 上、Root 与成员并发，实测上限 8 被冲到 13 → 包装层加锁合成
+  单一临界区；付费 endpoint 只记录不比较、锁里也没冻结 → 锁新增 `provider_base_url` 并逐字校验，
+  门 1 的独立上游参数一并绑定；资源硬停止携带的 samples 被丢弃 → 新增 `docker_stop_summary`；
+  `image_reference` 读了不存在的属性恒为 null → 读正确字段。门禁 **297/297** + 配置类 **124/124**。
+  详见 `agent_log/2026-08-18-190000-plan044-m5-paid-boundary-remediation-2.md`。
 - **Python 门禁复现注意**：必须清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 再跑，否则环回假上游会被宿主代理劫持。
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未授权、未执行。
 
@@ -360,4 +366,6 @@
 | 034 | Docker 容量停止线单独用 `DockerResourceStop` 子类，门 2 立即停批不重试 | 80GiB/60GB 是 CLAUDE.md §3 的「立即停止」，被压成普通 infra 会继续开容器；子类化保持既有 `except DockerSupervisionError` 调用方不变 | 资源边界 | 已采纳 |
 | 035 | 门 2 退出码由 `gate2_passed`（未停批 + 十任务齐全 + 全部无退化）决定，不再只看 `stopped` | 退化结论或证据不完整都是 M-5 失败，shell 层必须看见失败 | fail-closed | 已采纳 |
 | 036 | 付费运行前用 `require_frozen_provider` 把 provider 身份/effort/重试/全部费率绑到锁，日期差异只记录不阻断 | 预算代理用 `rondo.local.toml` 的费率给 $120 记账，改那个文件就能改变授权上限的实际购买力；费率决定花钱，日期只是出处 | 预算/公平性 | 已采纳 |
-| 037 | 不强制门 2 依赖门 1 通过；不改 `base_order` 的 Codex 先后顺序 | ExecPlan §1 明写两门相互独立；顺序偏差方向利于 Multi，只会让退化判定更保守，不会造出假退化，已写进锁的 `scope_limits` | 门 2 合同 | 已采纳 |
+| 037 | 不强制门 2 依赖门 1 通过；不改 `base_order` 的 Codex 先后顺序 | ExecPlan §1 明写两门相互独立；顺序偏差方向利于 Multi，只会让退化判定更保守，不会造出假退化，已写进锁的 `scope_limits`。实际付费顺序仍应先门 1 后门 2 以减少无效支出，靠流程而非代码依赖 | 门 2 合同 | 已采纳 |
+| 038 | 请求上限的「读计数 + 预留」在包装层加锁合成单一临界区，不改共享账本 | 代理跑在 ThreadingHTTPServer 上、Root 与成员并发，`snapshot→判断→reserve` 是 TOCTOU（实测上限 8 被冲到 13）。真实槽位里交给代理的唯一 reserve 路径就是这个包装层，故在此串行即充分；账本不回调包装层，无锁反转 | 付费边界 | 已采纳 |
+| 039 | 付费 endpoint 写进不退化锁并逐字校验，缺失即 fail-closed | provider 名称不说明密钥、工作区内容与费用实际流向何处；同名换 endpoint 原先照样通过 | 安全边界 | 已采纳 |

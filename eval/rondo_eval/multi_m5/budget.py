@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from decimal import Decimal
 from pathlib import Path
 
@@ -41,6 +42,13 @@ class RequestCappedLedger:
     before anything is sent, so capping here turns the frozen
     `max_requests_per_run` into a real stop line rather than a verdict label.
 
+    The proxy serves on a threading HTTP server and Multi's Root and members
+    call concurrently, so counting and reserving have to be one critical
+    section: reading the count, then reserving, lets two requests at 79 both
+    pass and land on 81. This wrapper is the only reserve path handed to the
+    proxy, so serialising here is sufficient. The ledger never calls back into
+    the wrapper, so there is no lock inversion.
+
     The run is stopped with `logical_request_limit_exceeded` so the reason stays
     distinguishable from running out of dollars: dollars are shared and end the
     batch, this cap is per-run and only ends the slot.
@@ -53,21 +61,23 @@ class RequestCappedLedger:
             raise BudgetError("per-run request cap must be positive")
         self._ledger = ledger
         self._max_requests_per_run = max_requests_per_run
+        self._gate = threading.Lock()
 
     def __getattr__(self, name: str):
         return getattr(self._ledger, name)
 
     def reserve(self, run_id: str, request_id: str, *args, **kwargs):
-        run = self._ledger.snapshot()["runs"].get(run_id)
-        requests = run.get("requests") if isinstance(run, dict) else None
-        seen = requests if isinstance(requests, dict) else {}
-        # Re-reserving a known request id is a retry of a counted request.
-        if request_id not in seen and len(seen) >= self._max_requests_per_run:
-            self._ledger.stop_run(run_id, stop_reason=REQUEST_LIMIT_STOP_REASON)
-            raise BudgetStopped(
-                f"run exceeded the frozen {self._max_requests_per_run}-request cap"
-            )
-        return self._ledger.reserve(run_id, request_id, *args, **kwargs)
+        with self._gate:
+            run = self._ledger.snapshot()["runs"].get(run_id)
+            requests = run.get("requests") if isinstance(run, dict) else None
+            seen = requests if isinstance(requests, dict) else {}
+            # Re-reserving a known request id is a retry of a counted request.
+            if request_id not in seen and len(seen) >= self._max_requests_per_run:
+                self._ledger.stop_run(run_id, stop_reason=REQUEST_LIMIT_STOP_REASON)
+                raise BudgetStopped(
+                    f"run exceeded the frozen {self._max_requests_per_run}-request cap"
+                )
+            return self._ledger.reserve(run_id, request_id, *args, **kwargs)
 
 
 def run_stop_reason(ledger: PersistentBudgetLedger, run_id: str) -> str | None:
@@ -133,6 +143,10 @@ def require_frozen_provider(projection, *, effort: str, contract=None) -> dict[s
         mismatches.append("provider_id")
     if projection.api != str(raw["provider_api"]):
         mismatches.append("provider_api")
+    # The provider name alone does not say where the key, the workspace content
+    # and the money actually go. Freeze the endpoint itself.
+    if projection.base_url.rstrip("/") != str(raw["provider_base_url"]).rstrip("/"):
+        mismatches.append("provider_base_url")
     if projection.main_model != str(price["model_id"]):
         mismatches.append("main_model")
     if projection.main_effort != effort:

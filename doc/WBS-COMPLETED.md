@@ -1265,7 +1265,20 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
   `.gitignore` 补全局 `__pycache__/`。不改项：不强制门 2 依赖门 1（§1 明写两门独立）、不改 `base_order`
   （顺序偏差利于 Multi，只会让退化判定更保守）、退化诊断槽位仍按决策 021 不预跑。
   门禁：**292/292**（新增 `test_docker_supervisor`），`just eval-lock` 通过，worktree 干净。
+- **第四轮终验（2026-08-18）**：判「不通过」，列 2 项阻断 + 2 项伴随缺口，复核**全部属实**，已全部关闭
+  并各钉一条已验证的反向回归：①请求上限不是并发硬边界 —— `snapshot→判断→reserve` 是 TOCTOU，
+  预算代理跑在 `ThreadingHTTPServer` 上且 Multi 的 Root/成员并发，实测上限 8 被冲到 13
+  → 包装层加 `threading.Lock` 合成单一临界区（该包装层是真实槽位里交给代理的唯一 reserve 路径）；
+  ②付费 endpoint 未冻结 —— 校验函数只把 `base_url` 记进归档却从不比较，锁里也没这一项，同名 provider
+  换 endpoint 密钥与数据即流向未批准地址 → 锁新增 `provider_base_url` 并逐字校验、缺失即 fail-closed，
+  门 1 独立传入的 `upstream_base_url` 一并绑定；③`DockerResourceStop` 携带的 samples 被丢弃（撞线那一刻
+  证据最该留下）→ 新增 `docker_stop_summary`；④`image_reference` 读了不存在的 `reference` 属性恒为 null
+  → 读正确字段并补 `image_id`。
+  门禁：**297/297**，另因改动锁 schema 加跑 `test_config_hardening` + `test_contracts_and_evidence`
+  + `test_fair_comparison` **124/124**。终验替用户作出的决策（门 1 载体、口径边界、两门独立但先门 1 后门 2、
+  Codex-first 与诊断后置、结论只能说"小样本中未观察到稳定单向退化"）与已冻结内容一致，无异议。
 - 执行日志：`agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`；
   验收报告：`agent_log/2026-08-18-130000-plan044-m5-paid-entries-acceptance-review.md`、
   `agent_log/2026-08-18-150000-plan044-m5-paid-entries-final-acceptance.md`；
-  终审整改：`agent_log/2026-08-18-170000-plan044-m5-paid-boundary-remediation.md`。
+  终审整改：`agent_log/2026-08-18-170000-plan044-m5-paid-boundary-remediation.md`、
+  `agent_log/2026-08-18-190000-plan044-m5-paid-boundary-remediation-2.md`。

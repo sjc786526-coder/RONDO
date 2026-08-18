@@ -405,28 +405,12 @@ def docker_summary(evidence) -> dict[str, Any] | None:
 
     if evidence is None:
         return None
-    samples = []
-    for sample in getattr(evidence, "samples", ()):
-        samples.append(
-            {
-                "phase": sample.phase,
-                "docker_total_bytes": sample.docker_total_bytes,
-                "docker_growth_bytes": sample.docker_growth_bytes,
-                "task_growth_bytes": sample.task_growth_bytes,
-                "docker_desktop_vhdx_bytes": sample.docker_desktop_vhdx_bytes,
-                "docker_desktop_vhdx_growth_bytes": sample.docker_desktop_vhdx_growth_bytes,
-                "data_root": sample.data_root,
-                "data_root_filesystem_free_bytes": sample.data_root_filesystem_free_bytes,
-            }
-        )
     vhdx = getattr(evidence, "desktop_vhdx", None)
     summary: dict[str, Any] = {
         "returncode": getattr(evidence, "returncode", None),
         "warnings": list(getattr(evidence, "warnings", ()) or ()),
-        "growth_warn_bytes": DOCKER_GROWTH_WARN_BYTES,
-        "growth_stop_bytes": DOCKER_GROWTH_STOP_BYTES,
-        "data_root_free_stop_bytes": DATA_ROOT_FREE_STOP_BYTES,
-        "samples": samples,
+        **_stop_thresholds(),
+        "samples": _sample_rows(getattr(evidence, "samples", ())),
     }
     if vhdx is not None:
         summary["desktop_vhdx"] = {
@@ -437,8 +421,49 @@ def docker_summary(evidence) -> dict[str, Any] | None:
         }
     identity = getattr(evidence, "image_identity", None)
     if identity is not None:
-        summary["image_reference"] = getattr(identity, "reference", None)
+        summary["image_reference"] = getattr(identity, "image_reference", None)
+        summary["image_id"] = getattr(identity, "image_id", None)
     return summary
+
+
+def docker_stop_summary(exc: DockerResourceStop) -> dict[str, Any]:
+    """Evidence carried by a capacity stop.
+
+    The moment a stop line is crossed is exactly when the samples matter most,
+    so the exception's own readings are archived rather than reduced to a
+    message string.
+    """
+
+    return {
+        "reason": getattr(exc, "reason", str(exc)),
+        "failed_probe": getattr(exc, "failed_probe", None),
+        **_stop_thresholds(),
+        "samples": _sample_rows(getattr(exc, "samples", ())),
+    }
+
+
+def _stop_thresholds() -> dict[str, int]:
+    return {
+        "growth_warn_bytes": DOCKER_GROWTH_WARN_BYTES,
+        "growth_stop_bytes": DOCKER_GROWTH_STOP_BYTES,
+        "data_root_free_stop_bytes": DATA_ROOT_FREE_STOP_BYTES,
+    }
+
+
+def _sample_rows(samples) -> list[dict[str, Any]]:
+    return [
+        {
+            "phase": sample.phase,
+            "docker_total_bytes": sample.docker_total_bytes,
+            "docker_growth_bytes": sample.docker_growth_bytes,
+            "task_growth_bytes": sample.task_growth_bytes,
+            "docker_desktop_vhdx_bytes": sample.docker_desktop_vhdx_bytes,
+            "docker_desktop_vhdx_growth_bytes": sample.docker_desktop_vhdx_growth_bytes,
+            "data_root": sample.data_root,
+            "data_root_filesystem_free_bytes": sample.data_root_filesystem_free_bytes,
+        }
+        for sample in samples or ()
+    ]
 
 
 def _slot_outcome(parsed) -> str:
@@ -542,6 +567,7 @@ def run_light_interleaved(
                         "stop_reason": stop_reason,
                         "error": str(exc),
                         "attempt": attempt,
+                        "docker_evidence": docker_stop_summary(exc),
                     },
                 )
             except BudgetStopped as exc:

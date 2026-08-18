@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -31,6 +32,7 @@ from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
     DATA_ROOT_FREE_STOP_BYTES,
     DOCKER_GROWTH_STOP_BYTES,
+    DockerImageIdentity,
     DockerResourceStop,
 )
 from rondo_eval.contracts import BinaryManifest, Product, RunOutcome, Side  # noqa: E402
@@ -52,13 +54,14 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
 )
 from rondo_eval.multi_m5.capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy  # noqa: E402
 from rondo_eval.multi_m5.command import build_multi_exec_command, team_capability_overrides  # noqa: E402
-from rondo_eval.multi_m5.gate1 import run_gate1_paid, run_gate1_rehearsal  # noqa: E402
+from rondo_eval.multi_m5.gate1 import Gate1Error, run_gate1_paid, run_gate1_rehearsal  # noqa: E402
 from rondo_eval.multi_m5.gate2 import (  # noqa: E402
     DockerNotAuthorizedExecutor,
     Gate2Error,
     ScriptedSlotExecutor,
     SlotResult,
     TerminalBenchSlotExecutor,
+    docker_summary,
     gate2_passed,
     run_gate2_real,
     run_light_interleaved,
@@ -1409,6 +1412,154 @@ class MultiM5PaidBoundaryTests(unittest.TestCase):
         self.assertFalse(record["passed"])
         self.assertEqual(record["outcome"], "agent_failed")
         self.assertIn("nonzero exit rc=3", record["reasons"])
+
+
+class _SlowSnapshotLedger:
+    """Delegating ledger whose `snapshot` is slow, to open the check/act window."""
+
+    def __init__(self, ledger, *, delay_seconds: float) -> None:
+        self._ledger = ledger
+        self._delay = delay_seconds
+
+    def __getattr__(self, name: str):
+        return getattr(self._ledger, name)
+
+    def snapshot(self):
+        value = self._ledger.snapshot()
+        time.sleep(self._delay)
+        return value
+
+
+class MultiM5ConcurrencyAndEndpointTests(unittest.TestCase):
+    """The proxy is threaded and the endpoint decides where the key goes."""
+
+    def test_request_cap_holds_under_concurrent_reservations(self) -> None:
+        # The proxy serves on a threading HTTP server and Multi's Root and
+        # members call concurrently. Reading the count and then reserving lets
+        # two requests at the cap boundary both pass and land one over.
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-cap-race.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        cap = 8
+        pricing = phase_b_pricing()
+        run_id = "m5-g2-race-probe"
+        errors: list[BaseException] = []
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                ledger.ensure_run(run_id, cap_usd=GATE2_RUN_CAP_USD)
+                capped = RequestCappedLedger(ledger, max_requests_per_run=cap)
+                # Fill to exactly one below the cap.
+                for index in range(cap - 1):
+                    request_id = f"{run_id}-warm-{index}"
+                    capped.reserve(run_id, request_id, Decimal("0.01"))
+                    capped.begin_attempt(run_id, request_id, max_attempts=5)
+                    capped.settle(run_id, request_id, Usage(1, 0, 0, 0), pricing=pricing)
+                self.assertEqual(run_request_count(ledger, run_id), cap - 1)
+
+                # Widen the count-then-reserve window deterministically. Without
+                # one critical section every racer reads `cap - 1` during this
+                # sleep and then all of them reserve.
+                capped._ledger = _SlowSnapshotLedger(ledger, delay_seconds=0.05)
+
+                def racer(index: int) -> None:
+                    request_id = f"{run_id}-race-{index}"
+                    try:
+                        capped.reserve(run_id, request_id, Decimal("0.01"))
+                    except BudgetStopped:
+                        return
+                    except BaseException as exc:  # noqa: BLE001 - surfaced below
+                        errors.append(exc)
+
+                threads = [
+                    threading.Thread(target=racer, args=(index,), daemon=True)
+                    for index in range(6)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=30)
+                    self.assertFalse(thread.is_alive())
+                capped._ledger = ledger
+                final = run_request_count(ledger, run_id)
+                stop = run_stop_reason(ledger, run_id)
+        finally:
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+        self.assertEqual(errors, [])
+        # Exactly one racer may win the last slot; the cap is never exceeded.
+        self.assertEqual(final, cap)
+        self.assertEqual(stop, REQUEST_LIMIT_STOP_REASON)
+
+    def test_frozen_provider_binding_pins_the_endpoint(self) -> None:
+        contract = load_nondegradation_contract()
+        projection = load_runtime_config(
+            RepoPaths.discover(Path.cwd())
+        ).paid_provider_projection()
+        identity = require_frozen_provider(
+            projection, effort=contract.root_effort, contract=contract
+        )
+        self.assertEqual(
+            identity["provider_base_url"].rstrip("/"),
+            str(contract.raw["provider_base_url"]).rstrip("/"),
+        )
+        # Same provider name, different destination for the key and the data.
+        moved = replace(projection, base_url="https://different-provider.example/v1")
+        with self.assertRaisesRegex(M5ContractError, "provider_base_url"):
+            require_frozen_provider(moved, effort=contract.root_effort, contract=contract)
+
+    def test_gate1_refuses_an_upstream_that_is_not_the_frozen_endpoint(self) -> None:
+        projection = load_runtime_config(
+            RepoPaths.discover(Path.cwd())
+        ).paid_provider_projection()
+        with self.assertRaisesRegex(Gate1Error, "frozen provider endpoint"):
+            run_gate1_paid(
+                authorization=PaidAuthorization(real_api=True, docker=False),
+                api_key="sk-test-never-spend",
+                upstream_base_url="https://different-provider.example/v1",
+                ledger=object(),  # never reached
+                provider=projection,
+            )
+
+    def test_capacity_stop_archives_the_samples_it_carried(self) -> None:
+        root = _common_root()
+        stop = DockerResourceStop(
+            "Docker data-root filesystem has less than 80 GiB free",
+            samples=(_FakeSample("pre", 10, 0, 0, 1, 0, "/var/lib/docker", 1024),),
+            failed_probe="data_root_free",
+        )
+
+        class _OutOfSpace:
+            def execute(self, slot, *, attempt: int, run_id: str) -> SlotResult:
+                del slot, attempt, run_id
+                raise stop
+
+        result = run_light_interleaved(
+            executor=_OutOfSpace(), common_root=root, persist=False
+        )
+        row = result["records"][-1]
+        evidence = row["docker_evidence"]
+        # The readings matter most exactly when a stop line is crossed.
+        self.assertEqual([item["phase"] for item in evidence["samples"]], ["pre"])
+        self.assertEqual(evidence["samples"][0]["data_root_filesystem_free_bytes"], 1024)
+        self.assertEqual(evidence["failed_probe"], "data_root_free")
+        self.assertEqual(evidence["data_root_free_stop_bytes"], DATA_ROOT_FREE_STOP_BYTES)
+
+    def test_docker_image_identity_is_read_from_the_real_field(self) -> None:
+        reference = "alexgshaw/fix-git@sha256:" + "d" * 64
+        identity = DockerImageIdentity(image_reference=reference, image_id="sha256:" + "e" * 64)
+
+        class _WithIdentity(_FakeDockerEvidence):
+            image_identity = identity
+
+        summary = docker_summary(_WithIdentity())
+        # `reference` is not a field on DockerImageIdentity; it recorded null.
+        self.assertEqual(summary["image_reference"], reference)
+        self.assertEqual(summary["image_id"], identity.image_id)
 
 
 @dataclass(frozen=True)
