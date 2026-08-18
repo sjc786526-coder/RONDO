@@ -1129,7 +1129,7 @@ class TerminalBenchTests(unittest.TestCase):
             'features.multi_agent_v2={enabled=true,team_state_enabled=true,non_code_mode_only=false,expose_spawn_agent_model_overrides=false}',
             multi_commands,
         )
-        self.assertIn('agents.default_subagent_model="gpt-5.6-sol"', multi_commands)
+        self.assertIn('agents.default_subagent_model="gpt-5.6-terra"', multi_commands)
         self.assertNotIn("team_state_enabled", commands)
         self.assertNotIn("team_state_enabled", rondo_commands)
         self.assertNotIn("agents.default_subagent", commands)
@@ -1160,7 +1160,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("team_state_enabled=true", commands)
         # Everything else about the run is unchanged, including the pinned
         # member model: only the team layer may differ.
-        self.assertIn('agents.default_subagent_model="gpt-5.6-sol"', commands)
+        self.assertIn('agents.default_subagent_model="gpt-5.6-terra"', commands)
         self.assertIn("features.code_mode_host=true", commands)
         self.assertIn("expose_spawn_agent_model_overrides=false", commands)
 

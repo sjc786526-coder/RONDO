@@ -259,16 +259,29 @@
   锁的「不得预跑」由构造顺序保证；诊断行 `counts_as_effective=false`、不占 `max_effective_runs`，
   但共享 $120、infra 尝试与全部停止线；账本槽位补每题一个（`60+12+3+10=85`），否则要解释退化的那次运行反而开不了；
   锁新增 `attribution.diagnostic` 可执行块，loader 逐字段校验而非匹配一句话。九条定向回归。
+- **模型换为 `gpt-5.6-terra`（用户决定，决策 042/043）**：冻结上游 v0.147.0 catalog 已含 terra，
+  且 `multi_agent_version=v2` / `tool_mode=code_mode_only` / 272k 上下文 / 支持 medium 与 sol 全同，
+  故二进制、catalog、`instruction_sha256` 均不动。官方页同日核对：terra 2/0.2/12 = sol 5/0.5/30 的 40%，
+  点估计 $40→$16、最坏 $96→$38.40，$120 上限不变。
+  关键副作用已就地修掉：宿主 `paid_eval.main_model` 是机器级全局别名，直接翻成 terra 会改写同机所有
+  已冻结 campaign 的 provider 身份（P2/B7 基线锁当场 drift）。改为 M-5 用
+  `paid_provider_projection(model_id=...)` 按模型 id 反查别名，宿主别名保持 `sol`，
+  单智能体方向的历史基线不受影响。三条定向回归钉住该隔离性。
+  离线复验：彩排 4 次全绿（七谓词全真）、loopback 通过（配置已显示 terra）、就绪自检 `ready=true`。
 - **Python 门禁复现注意**：必须清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 再跑，否则环回假上游会被宿主代理劫持。
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未执行，累计费用 **$0**
   （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本，归档只有 `loopback` 行）。
 
 ### 本任务剩余步骤
 
-- 阶段 B 的**离线准备已全部完成并提交**，包括最后一项退化诊断闭环。等待用户放行后按下表执行门 1、再执行门 2。
+- 阶段 B 的**离线准备已全部完成并提交**，包括退化诊断闭环与 terra 切换。等待用户放行后按下表执行门 1、再执行门 2。
 - 门禁复跑口径：`tests.test_multi_m5`、`tests.test_multi_m5_exec`、`tests.test_terminal_bench` 与 `just eval-lock`。
-  全量 `just eval-test` 为 905 用例、无新增失败；其中 2 个 `ModuleNotFoundError: No module named 'eval'`
+  全量 `just eval-test` 为 908 用例、无新增失败；其中 2 个 `ModuleNotFoundError: No module named 'eval'`
   的加载错误（`test_l6_b10333_pair`、`test_local_m4_holdout_anchor`）在干净树上同样存在，属既有问题，不由本次引入。
+- **残留风险（未消除，需在花钱时优先处理）**：terra 在 CCTQ 中转站从未真实跑通过 —— 早先单智能体方向
+  测出「terra 不可用」，用户 2026-08-18 判断原因是中转站限制了模型类型。「现已解封」目前只是推断，无证据。
+  门 1 只有 3 次尝试，建议放行后先用 `rondo_eval.provider_probe`（单请求、`max_output_tokens=64`，约几分钱）
+  确认 terra 可用，再进门 1，避免白烧一次尝试。
 
 ### 阻塞项
 
@@ -304,15 +317,15 @@
 | 项 | 冻结值 |
 |---|---|
 | API provider | `rondo.local.toml` 的 `paid_eval.active_provider = "relay"`（CCTQ Responses；`api_key_env = OPENAI_API_KEY`）。不改官方入口，不把密钥写入文档或提示词。 |
-| Root / 成员模型 | `gpt-5.6-sol` + `medium`（两侧相同） |
+| Root / 成员模型 | `gpt-5.6-terra` + `medium`（两侧相同）。由 M-5 两把锁自行钉死，不继承宿主 `paid_eval.main_model`（仍为 `sol`） |
 | 门 1 | host `codex exec` 协作 fixture，无 Docker；最多 3 次尝试、单次 1800s |
 | 门 2 | v4 catalog 十任务；`task_major_codex_then_multi`；条件复跑仅当「Codex 完成、Multi 未完成」时双方各加两次 |
 | 最大有效运行 | 60（基础 20 + 条件最多 40） |
 | 退化诊断 | 仅在某题判为稳定单向退化后触发；每题最多 1 次、Multi 侧、V2 开 + team_state 关；不计有效结果、不改判定；与两道门共享同一 $120 与全部停止线 |
 | 基础设施 | 每槽最多 3 次尝试；infra 总上限 12；infra 不计有效结果 |
 | 每 run 请求上限 | 80 |
-| 价格快照 | 2026-08-17 官方页：input $5 / cached $0.50 / output $30 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25 |
-| 费用 | 点估计约 $40；合同内最坏约 $96；**硬上限 $120**。账本批次 `multi-m5-phase-b` |
+| 价格快照 | 2026-08-18 官方页：input $2 / cached $0.20 / output $12 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25。同日核对 sol 仍为 5/0.5/30，故 terra 为其 40% |
+| 费用 | 点估计约 $16；合同内最坏约 $38.40；**硬上限 $120 不变**（余量约 3 倍，预算掐断风险大幅下降）。账本批次 `multi-m5-phase-b` |
 | Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v1.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
 | 外发边界 | 任务输入、工作区内容与模型可见工具结果进入 Responses；密钥、`.env.local`、个人配置不进提示词或结果文件 |
 | 预计时间 | 门 1：数十分钟级，最坏约 1.5 小时。门 2：无条件复跑时数小时到十余小时；若多题触发复跑或打满超时，日历时间可到一天以上。全局串行，与重型 Cargo / 本地模型互斥。 |
@@ -384,3 +397,5 @@
 | 039 | 付费 endpoint 写进不退化锁并逐字校验，缺失即 fail-closed | provider 名称不说明密钥、工作区内容与费用实际流向何处；同名换 endpoint 原先照样通过 | 安全边界 | 已采纳 |
 | 040 | 退化诊断做成真实可执行槽位：`team_state` 标志贯通 adapter/归档/账本，判定完成后才构造，且不计有效结果 | 锁承诺了归因诊断，实现却只有一次字符串匹配；真出退化时无法诚实归因。判定后构造使「不得预跑」由构造顺序保证，而不是靠纪律 | 门 2 归因 | 已采纳 |
 | 041 | 账本槽位由 `60+12+3` 扩到 `+10`（每题一个诊断），$120 硬上限不变 | 槽位只是计数护栏、不是购买力；不扩就会出现「要解释退化的那次运行开不了」 | 预算 | 已采纳 |
+| 042 | 模型由 `gpt-5.6-sol` 换为 `gpt-5.6-terra`（用户决定），两侧同模型不变 | 官方页同日核对：terra 2/0.2/12 是 sol 5/0.5/30 的 40%。冻结上游 v0.147.0 的 catalog 已含 terra，且 `multi_agent_version=v2`/`tool_mode`/272k 上下文/medium effort 与 sol 全同，故不动二进制、不动 catalog、不动 `instruction_sha256` | 门 1+门 2 运行配置 | 已采纳 |
+| 043 | M-5 从**自己的锁**解析模型（`paid_provider_projection(model_id=...)`），宿主 `paid_eval.main_model` 保持 `sol` | 该别名是机器级全局量，翻成 terra 会改写同机所有已冻结 campaign 的 provider 身份 —— P2/B7 基线锁当场报 drift。按模型 id 反查别名可让两个冻结 campaign 在同一台机器上用不同模型，也把 M-5 的模型选择从机器配置移进任务合同 | 配置隔离 / 跨方向可比性 | 已采纳 |

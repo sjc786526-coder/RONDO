@@ -224,7 +224,10 @@ class TerminalBenchSlotExecutor:
         assert self._ledger is not None and self._api_key is not None
         contract = load_nondegradation_contract()
         config = self._config or load_runtime_config(self._paths)
-        provider = config.paid_provider_projection()
+        # Resolved from the lock's own model, not the host-wide `main_model`
+        # alias, so M-5 running on terra cannot rewrite the frozen provider
+        # identity of the sol campaigns that share this machine config.
+        provider = config.paid_provider_projection(model_id=contract.root_model)
         # Binds the endpoint, effort, retry policy and every rate to the lock.
         # The proxy meters the $120 batch with these numbers, so the mutable
         # `rondo.local.toml` must not be able to change what the cap buys.

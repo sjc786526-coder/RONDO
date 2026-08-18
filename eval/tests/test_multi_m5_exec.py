@@ -28,7 +28,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     _UrllibTransport,
     price_usage,
 )
-from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
+from rondo_eval.config import ConfigError, RepoPaths, load_runtime_config  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
     DATA_ROOT_FREE_STOP_BYTES,
     DOCKER_GROWTH_STOP_BYTES,
@@ -676,6 +676,51 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
             for item in (ledger_path, lock_path):
                 if item.exists():
                     item.unlink()
+
+
+class MultiM5FrozenModelIsolationTests(unittest.TestCase):
+    """M-5 runs gpt-5.6-terra without disturbing the sol campaigns on this host.
+
+    `paid_eval.main_model` is a machine-wide alias. Flipping it to terra would
+    have rewritten the provider identity of every frozen campaign sharing this
+    config -- the P2/B7 baseline lock notices immediately. So M-5 resolves its
+    model from its own lock instead.
+    """
+
+    def test_m5_pins_terra_while_the_host_alias_stays_sol(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(Path.cwd()))
+        contract = load_nondegradation_contract()
+        workflow = load_workflow_contract()
+        self.assertEqual(contract.root_model, "gpt-5.6-terra")
+        self.assertEqual(workflow.root_model, "gpt-5.6-terra")
+        pinned = config.paid_provider_projection(model_id=contract.root_model)
+        self.assertEqual(pinned.main_model, "gpt-5.6-terra")
+        # The unpinned projection is what every other campaign resolves, and it
+        # must be untouched by M-5's choice.
+        self.assertNotEqual(
+            config.paid_provider_projection().main_model, pinned.main_model
+        )
+
+    def test_the_pinned_projection_satisfies_the_frozen_contract(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(Path.cwd()))
+        contract = load_nondegradation_contract()
+        identity = require_frozen_provider(
+            config.paid_provider_projection(model_id=contract.root_model),
+            effort=contract.root_effort,
+            contract=contract,
+        )
+        self.assertEqual(identity["main_model"], "gpt-5.6-terra")
+        # Rates meter the $120 cap, so lock and machine config must agree
+        # exactly; a mismatch is what `require_frozen_provider` exists to catch.
+        self.assertEqual(
+            identity["frozen_price_snapshot_date"],
+            identity["effective_price_snapshot_date"],
+        )
+
+    def test_an_unmapped_model_fails_closed_instead_of_falling_back(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(Path.cwd()))
+        with self.assertRaises(ConfigError):
+            config.paid_provider_projection(model_id="gpt-5.6-does-not-exist")
 
 
 class MultiM5AttributionDiagnosticTests(unittest.TestCase):
@@ -1484,7 +1529,9 @@ class MultiM5PaidBoundaryTests(unittest.TestCase):
 
     def test_frozen_provider_binding_rejects_config_drift(self) -> None:
         contract = load_nondegradation_contract()
-        projection = load_runtime_config(RepoPaths.discover(Path.cwd())).paid_provider_projection()
+        projection = load_runtime_config(
+            RepoPaths.discover(Path.cwd())
+        ).paid_provider_projection(model_id=contract.root_model)
         identity = require_frozen_provider(
             projection, effort=contract.root_effort, contract=contract
         )
@@ -1665,7 +1712,7 @@ class MultiM5ConcurrencyAndEndpointTests(unittest.TestCase):
         contract = load_nondegradation_contract()
         projection = load_runtime_config(
             RepoPaths.discover(Path.cwd())
-        ).paid_provider_projection()
+        ).paid_provider_projection(model_id=contract.root_model)
         identity = require_frozen_provider(
             projection, effort=contract.root_effort, contract=contract
         )
@@ -1681,7 +1728,7 @@ class MultiM5ConcurrencyAndEndpointTests(unittest.TestCase):
     def test_gate1_refuses_an_upstream_that_is_not_the_frozen_endpoint(self) -> None:
         projection = load_runtime_config(
             RepoPaths.discover(Path.cwd())
-        ).paid_provider_projection()
+        ).paid_provider_projection(model_id=load_workflow_contract().root_model)
         with self.assertRaisesRegex(Gate1Error, "frozen provider endpoint"):
             run_gate1_paid(
                 authorization=PaidAuthorization(real_api=True, docker=False),

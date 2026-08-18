@@ -144,7 +144,7 @@ TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML = (
     "{enabled=true,team_state_enabled=false,non_code_mode_only=false,"
     "expose_spawn_agent_model_overrides=false}"
 )
-AGENT_DEFAULT_SUBAGENT_MODEL = "gpt-5.6-sol"
+AGENT_DEFAULT_SUBAGENT_MODEL = "gpt-5.6-terra"
 AGENT_DEFAULT_SUBAGENT_EFFORT = "medium"
 
 

@@ -72,7 +72,7 @@ class MultiM5ContractTests(unittest.TestCase):
             team_capability_override_items(Product.RONDO_MULTI),
             (
                 f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
-                'agents.default_subagent_model="gpt-5.6-sol"',
+                'agents.default_subagent_model="gpt-5.6-terra"',
                 'agents.default_subagent_reasoning_effort="medium"',
             ),
         )
@@ -811,7 +811,7 @@ class MultiM5LoopbackTests(unittest.TestCase):
         joined = " ".join(command)
         self.assertIn(fragment, command)
         self.assertEqual(joined.count("features.multi_agent_v2="), 1)
-        self.assertIn('agents.default_subagent_model="gpt-5.6-sol"', joined)
+        self.assertIn('agents.default_subagent_model="gpt-5.6-terra"', joined)
         self.assertIn("expose_spawn_agent_model_overrides=false", joined)
         self.assertIn("features.code_mode_host=true", joined)
         self.assertNotIn("auto_review.model", joined)

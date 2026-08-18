@@ -12,16 +12,18 @@ from .load import M5ContractError, load_nondegradation_contract, load_workflow_c
 
 BATCH_ID = "multi-m5-phase-b"
 HARD_CAP_USD = Decimal("120.00")
-# Per-run ceiling. Gate 1 is modelled at ~$8/attempt; $24 is a small multiple.
-# Gate 2 TB runs are cheaper and use GATE2_RUN_CAP_USD via ensure_run.
+# Per-run ceiling. Gate 1 is modelled at ~$3.20/attempt on the frozen
+# gpt-5.6-terra snapshot; $24 is a generous multiple. Gate 2 TB runs are cheaper
+# and use GATE2_RUN_CAP_USD via ensure_run. The caps are deliberately unchanged
+# from the gpt-5.6-sol contract: terra only made them looser, never tighter.
 RUN_CAP_USD = Decimal("24.00")
 GATE1_RUN_CAP_USD = Decimal("24.00")
 GATE2_RUN_CAP_USD = Decimal("8.00")
 # A reservation also has to clear the Guardian additional-capacity check, so the
-# usable spend inside a run is `cap - 2 * reservation`, not `cap`. Gate 1 at an
-# $8 reservation stops at ~$8 spent, exactly the frozen point estimate; $4 keeps
-# a 2x margin and still covers the worst realistic single turn (272k input plus
-# 32k output prices at ~$2.32 on the frozen snapshot).
+# usable spend inside a run is `cap - 2 * reservation`, not `cap`. An $8
+# reservation would stop gate 1 at roughly its own point estimate; $4 keeps a
+# wide margin and still covers the worst realistic single turn, which on the
+# frozen gpt-5.6-terra snapshot is 272k input plus 32k output at ~$0.93.
 GATE1_REQUEST_RESERVATION_USD = Decimal("4.00")
 GATE2_REQUEST_RESERVATION_USD = Decimal("2.00")
 

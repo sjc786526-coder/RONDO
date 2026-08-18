@@ -44,8 +44,8 @@
     {"task_id": "terminal-bench/vulnerable-secret", "side": "codex", "product": null},
     {"task_id": "terminal-bench/vulnerable-secret", "side": "rondo", "product": "rondo-multi"}
   ],
-  "root_model": "gpt-5.6-sol",
-  "member_model": "gpt-5.6-sol",
+  "root_model": "gpt-5.6-terra",
+  "member_model": "gpt-5.6-terra",
   "root_effort": "medium",
   "member_effort": "medium",
   "provider": "relay",
@@ -93,22 +93,22 @@
     }
   },
   "price_snapshot": {
-    "date": "2026-08-17",
-    "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+    "date": "2026-08-18",
+    "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
     "pricing_page_url": "https://developers.openai.com/api/docs/pricing",
-    "model_id": "gpt-5.6-sol",
-    "input_usd_per_million": "5",
-    "cached_input_usd_per_million": "0.5",
-    "output_usd_per_million": "30",
+    "model_id": "gpt-5.6-terra",
+    "input_usd_per_million": "2",
+    "cached_input_usd_per_million": "0.2",
+    "output_usd_per_million": "12",
     "long_context_threshold_tokens": 272000,
     "long_context_input_multiplier": "2",
     "long_context_output_multiplier": "1.5",
     "cache_write_input_multiplier": "1.25"
   },
   "cost_forecast": {
-    "basis": "v19 canary ~USD 0.45 per Codex/Local TB run; Multi spawn overhead modelled at 3x; gate 1 modelled at USD 8 per attempt.",
-    "point_estimate_usd": "40.00",
-    "worst_legal_usd": "96.00",
+    "basis": "v19 canary ~USD 0.45 per Codex/Local TB run on gpt-5.6-sol rates; gpt-5.6-terra lists at 40% of those rates (2/0.2/12 against 5/0.5/30), so ~USD 0.18 per run; Multi spawn overhead modelled at 3x; gate 1 modelled at USD 3.20 per attempt.",
+    "point_estimate_usd": "16.00",
+    "worst_legal_usd": "38.40",
     "hard_cap_usd": "120.00",
     "ledger_batch_id": "multi-m5-phase-b",
     "notes": "Point estimate assumes no conditional reruns and one successful gate 1 attempt. Worst legal is 20 base + 40 conditional + 12 infra + 3 gate 1 attempts. Attribution diagnostics only exist after a degradation, which already fails gate 2; they draw on the same 120 USD cap, at most one slot per task."

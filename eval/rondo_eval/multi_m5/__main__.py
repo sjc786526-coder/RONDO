@@ -10,7 +10,7 @@ from ..config import RepoPaths, load_provider_secret, load_runtime_config
 from .budget import open_phase_b_ledger
 from .gate1 import Gate1Error, run_gate1_paid, run_gate1_rehearsal
 from .gate2 import Gate2Error, ScriptedSlotExecutor, run_gate2_real, run_light_interleaved
-from .load import M5ContractError
+from .load import M5ContractError, load_workflow_contract
 from .loopback import LoopbackError, run_frozen_multi_team_publish_loopback
 from .paid import PaidAuthError, authorization_from_phrases
 from .ready import readiness_report
@@ -78,7 +78,11 @@ def main(argv: list[str] | None = None) -> int:
             auth = authorization_from_phrases(api_phrase=_option(args, "--authorize-paid-api"))
             config = load_runtime_config(paths)
             _name, api_key = load_provider_secret(config)
-            provider = config.paid_provider_projection()
+            # Pinned by the gate 1 lock rather than the host-wide alias, so the
+            # frozen sol campaigns on this machine keep their provider identity.
+            provider = config.paid_provider_projection(
+                model_id=load_workflow_contract().root_model
+            )
             with open_phase_b_ledger(budget_ledger_path(paths.common_root)) as ledger:
                 result = run_gate1_paid(
                     authorization=auth,

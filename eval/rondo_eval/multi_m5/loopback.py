@@ -22,7 +22,7 @@ from .store import scratch_root
 
 
 LOOPBACK_BEARER = "rondo-multi-m5-loopback"
-LOOPBACK_MODEL = "gpt-5.6-sol"
+LOOPBACK_MODEL = "gpt-5.6-terra"
 LOOPBACK_CALL_ID = "m5-team-publish-1"
 LOOPBACK_PROVIDER = "rondo_eval_provider"
 REQUIRED_TOOL_NAMES = (

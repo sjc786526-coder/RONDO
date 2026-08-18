@@ -153,8 +153,19 @@ class RuntimeConfig:
             raise ConfigError(f"paid eval model {name!r} is not configured")
         return dict(models[name])
 
-    def paid_provider_projection(self, name: str | None = None) -> ProviderProjection:
-        return _resolve_paid_provider_projection(self, provider_name=name)
+    def paid_provider_projection(
+        self, name: str | None = None, *, model_id: str | None = None
+    ) -> ProviderProjection:
+        """Project the paid provider, optionally pinning an exact model.
+
+        ``model_id`` lets a campaign that froze its own model resolve the alias
+        by identity instead of inheriting the host-wide `main_model`, so two
+        frozen campaigns can use different models on the same machine.
+        """
+
+        return _resolve_paid_provider_projection(
+            self, provider_name=name, model_id=model_id
+        )
 
     def local_model(self) -> dict[str, Any]:
         value = self.data.get("local_model")
@@ -529,14 +540,46 @@ def _model_pricing(value: object) -> ModelPricing:
     )
 
 
+def _alias_for_model_id(config: RuntimeConfig, paid_eval: dict, model_id: str) -> str:
+    """Find the single `paid_eval.models` alias serving ``model_id``.
+
+    Fails closed on absent or ambiguous mappings: a campaign asking for an exact
+    model must never silently fall back to whatever the host alias happens to
+    point at, because the rates that alias carries are what meters its budget.
+    """
+
+    models = paid_eval.get("models")
+    if not isinstance(models, dict):
+        raise ConfigError("paid_eval.models is not configured")
+    matches = sorted(
+        alias
+        for alias, table in models.items()
+        if isinstance(table, dict) and table.get("model_id") == model_id
+    )
+    if len(matches) != 1:
+        raise ConfigError(
+            "paid_eval.models does not map exactly one alias to the requested model"
+        )
+    config.paid_model(matches[0])
+    return matches[0]
+
+
 def _resolve_paid_provider_projection(
-    config: RuntimeConfig, *, provider_name: str | None
+    config: RuntimeConfig,
+    *,
+    provider_name: str | None,
+    model_id: str | None = None,
 ) -> ProviderProjection:
     paid_eval = config.paid_eval()
     active_provider = config.active_provider_name()
     provider = config.paid_provider(provider_name)
     main_alias = paid_eval["main_model"]
     guardian_alias = paid_eval["guardian_model"]
+    if model_id is not None:
+        # A campaign that freezes its own model must not depend on the machine
+        # wide `main_model` alias: flipping that alias would silently rewrite the
+        # provider identity of every other frozen campaign on this host.
+        main_alias = guardian_alias = _alias_for_model_id(config, paid_eval, model_id)
     main_pricing = _model_pricing(config.paid_model(main_alias))
     guardian_pricing = _model_pricing(config.paid_model(guardian_alias))
     statuses = tuple(sorted(provider["unbilled_retry_statuses"]))

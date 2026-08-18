@@ -149,7 +149,7 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
         raise M5ContractError("team capability override differs from the adapter contract")
     if capability.get("expose_spawn_agent_model_overrides") is not False:
         raise M5ContractError("gate 1 must hide spawn_agent model overrides")
-    if capability.get("default_subagent_model") != "gpt-5.6-sol":
+    if capability.get("default_subagent_model") != "gpt-5.6-terra":
         raise M5ContractError("gate 1 default subagent model differs")
     if capability.get("default_subagent_reasoning_effort") != "medium":
         raise M5ContractError("gate 1 default subagent effort differs")
@@ -245,9 +245,9 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
         or endpoint != endpoint.strip()
     ):
         raise M5ContractError("gate 2 provider endpoint is missing or not https")
-    if price.get("date") != "2026-08-17":
+    if price.get("date") != "2026-08-18":
         raise M5ContractError("price snapshot date differs")
-    if price.get("model_id") != "gpt-5.6-sol":
+    if price.get("model_id") != "gpt-5.6-terra":
         raise M5ContractError("price snapshot model differs")
     trigger = (raw.get("conditional_rerun") or {}).get("trigger")
     if trigger != "codex_completed_multi_incomplete":
@@ -458,8 +458,8 @@ def _optional_sha(value: object) -> str | None:
 
 
 def _model(value: object) -> str:
-    if value != "gpt-5.6-sol":
-        raise M5ContractError("model must be gpt-5.6-sol")
+    if value != "gpt-5.6-terra":
+        raise M5ContractError("model must be gpt-5.6-terra")
     return value
 
 
