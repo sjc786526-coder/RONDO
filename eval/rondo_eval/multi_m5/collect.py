@@ -17,16 +17,31 @@ WAIT_TEAM_ACTIVITY_MARK = (
     "Wait completed: the team world state changed. The current active view is in this request."
 )
 _INSPECT_NAMES = {"team_inspect", "collaboration.team_inspect"}
+_WAIT_NAMES = {"wait_agent", "collaboration.wait_agent"}
 _CALL_TYPES = {"function_call", "custom_tool_call"}
 _OUTPUT_TYPES = {"function_call_output", "custom_tool_call_output"}
 _ITEM_EVENTS = {"item.completed", "item.started", "item.updated"}
 
 
 def collect_gate1_evidence(jsonl: str) -> dict[str, Any]:
-    """Extract dump entries, change-log rows, and wait signals in document order."""
+    """Extract dump entries, change-log rows, and wait signals in document order.
+
+    Evidence is attributed to the tool call that produced it. Only a
+    ``team_inspect`` output can contribute dump or change-log rows, and only a
+    ``wait_agent`` output can contribute a wake signal, because those payloads
+    are written by the harness. A payload that merely *looks* like team
+    evidence but came from some other tool -- an `exec_command` that echoes a
+    crafted JSON blob, say -- is recorded in ``unattributed`` and never judged.
+    Without that binding the model could manufacture its own gate 1 pass.
+    """
 
     calls: dict[str, dict[str, str]] = {}
-    dump: dict[str, Any] = {"entries": [], "log": [], "jsonl_signals": []}
+    dump: dict[str, Any] = {
+        "entries": [],
+        "log": [],
+        "jsonl_signals": [],
+        "unattributed": [],
+    }
     for line in jsonl.splitlines():
         line = line.strip()
         if not line:
@@ -94,28 +109,56 @@ def _apply_record(
 def _absorb(dump: dict[str, Any], name: str, arguments: str, text: str) -> None:
     payload = _parse_json(text)
     args = _parse_json(arguments)
-    action = ""
-    if isinstance(args, dict):
+    if name in _INSPECT_NAMES:
+        _absorb_inspect(dump, payload, args)
+        return
+    if name in _WAIT_NAMES:
+        message = payload.get("message") if isinstance(payload, dict) else None
+        _record_wait_signal(dump, message if isinstance(message, str) else text)
+        return
+    if _looks_like_team_evidence(payload, text):
+        dump["unattributed"].append(name or "<unknown tool>")
+
+
+def _absorb_inspect(
+    dump: dict[str, Any],
+    payload: object,
+    args: object,
+) -> None:
+    if not isinstance(payload, dict):
+        return
+    action = str(payload.get("action") or "")
+    if not action and isinstance(args, dict):
         action = str(args.get("action") or "")
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        return
+    # A dump page continues only with a snapshot cursor, which the store
+    # refuses across revisions, so cursor pages are same-snapshot by
+    # construction. A cursor-less dump is a fresh page and replaces.
+    if action == "dump":
+        if isinstance(args, dict) and args.get("cursor"):
+            dump["entries"].extend(entries)
+        else:
+            dump["entries"] = list(entries)
+    elif action == "log":
+        if isinstance(args, dict) and args.get("offset") not in {None, 0, "0"}:
+            dump["log"].extend(entries)
+        else:
+            dump["log"] = list(entries)
+
+
+def _looks_like_team_evidence(payload: object, text: str) -> bool:
     if isinstance(payload, dict):
-        action = str(payload.get("action") or action)
+        if str(payload.get("action") or "") in {"dump", "log"} and isinstance(
+            payload.get("entries"), list
+        ):
+            return True
         message = payload.get("message")
-        if name in _INSPECT_NAMES or action in {"dump", "log"}:
-            entries = payload.get("entries")
-            if action == "dump" and isinstance(entries, list):
-                if isinstance(args, dict) and args.get("cursor"):
-                    dump["entries"].extend(entries)
-                else:
-                    dump["entries"] = list(entries)
-            if action == "log" and isinstance(entries, list):
-                if isinstance(args, dict) and args.get("offset") not in {None, 0, "0"}:
-                    dump["log"].extend(entries)
-                else:
-                    dump["log"] = list(entries)
-        if isinstance(message, str):
-            _record_wait_signal(dump, message)
-    elif WAIT_TEAM_ACTIVITY_MARK in text:
-        _record_wait_signal(dump, text)
+        if isinstance(message, str) and WAIT_TEAM_ACTIVITY_MARK in message:
+            return True
+        return False
+    return WAIT_TEAM_ACTIVITY_MARK in text
 
 
 def _record_wait_signal(dump: dict[str, Any], message: str) -> None:

@@ -35,6 +35,10 @@ class CollaborationVerdict:
     predicates: dict[str, bool]
     reasons: tuple[str, ...]
     event_id: str | None = None
+    #: Tools that produced team-shaped payloads without being `team_inspect` or
+    #: `wait_agent`. Never judged; kept so a failing gate 1 can be explained
+    #: (either the model fabricated evidence, or the wire shape moved).
+    ignored_evidence: tuple[str, ...] = ()
 
 
 def evaluate_collaboration(
@@ -50,6 +54,9 @@ def evaluate_collaboration(
 
     ``dump`` is a ``team_inspect`` dump page. When ``jsonl`` is provided it is
     the only evidence: caller dump cannot leak a fabricated collaboration in.
+    Within that JSONL every row is attributed to the tool call that produced
+    it, so only harness-written ``team_inspect`` / ``wait_agent`` output counts;
+    see ``collect_gate1_evidence``.
     Event membership follows dump order: Version / VersionFact / Route rows
     after an Event belong to that Event until the next Event or a non-nested
     row. That matches the real dump schema, which does not put ``event_id`` on
@@ -103,12 +110,16 @@ def evaluate_collaboration(
         reasons.append("task:report_missing")
     elif not finding_ok:
         reasons.append("task:finding_missing")
+    ignored = dump.get("unattributed")
     passed = not reasons
     return CollaborationVerdict(
         passed=passed,
         predicates=predicates,
         reasons=tuple(reasons),
         event_id=event_id if same_event else None,
+        ignored_evidence=tuple(str(item) for item in ignored)
+        if isinstance(ignored, list)
+        else (),
     )
 
 

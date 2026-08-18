@@ -228,9 +228,18 @@
 ### 当前验收状态
 
 - 规划现场核对、worktree 创建与 ExecPlan：已完成。
-- **阶段 A：独立验收不通过。** 冻结 bundle、两份运行合同、接线与无 API loopback 核验通过；
-  门 1 原六项谓词可对 Root 独角戏误判通过，且未验 Root 唤醒。窄整改已落地，**待复验**。
-  在复验通过前，**不得**表述为「M-5 已具备真实运行条件」，也不得表述为 M-5 / 门 1 通过或未见退化。
+- **阶段 A：两轮独立验收均不通过，第二轮缺口已由审查者直接修复。** 冻结 bundle、两份运行合同、
+  接线与无 API loopback 核验通过；第一轮的门 1 谓词缺陷（Root 独角戏误判、未验 Root 唤醒）已整改并经复验确认；
+  第二轮发现证据采集不绑定工具身份（`exec_command` 回显即可伪造门 1 通过），已按下述修复。
+  在阶段 B 真实运行前，仍**不得**表述为 M-5 / 门 1 通过或未见退化。
+- **门 1 证据绑定（审查者修复，2026-08-17）**：dump/log 只采纳 `team_inspect` 输出，唤醒信号只采纳
+  `wait_agent` 输出；其它工具产出的"团队形状"负载记入 `unattributed` 并在判定中忽略、同时通过
+  `CollaborationVerdict.ignored_evidence` 暴露，便于区分"模型伪造"与"wire 形状变了"。
+  指令模板补充 `next_cursor` 续页要求（`MAX_OBSERVE_LIMIT=50`），并重算 `instruction_sha256`。
+- **wire 形状已用冻结二进制实测确认**（无 API）：团队工具以 `name=team_inspect` +
+  `namespace=collaboration` 的 function_call 直接调用即可执行，CLI 写回的 `function_call_output`
+  正文就是真实 dump 负载；`non_code_mode_only` 取 true/false 都如此（true 只是把团队工具移出
+  code-mode 嵌套面）。因此现有 `evidence_source` 设计成立，无需改动门 1 的运行配置。
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
 - 阶段 B：未开始。§1 阶段 B 五项全部未做。

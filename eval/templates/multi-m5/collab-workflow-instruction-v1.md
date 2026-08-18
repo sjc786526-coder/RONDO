@@ -28,8 +28,11 @@ Do these steps in order. Do not skip a team tool by doing the work yourself.
 6. You, as Root, set a **member-authored** Version on that Event to
    `root_state=resolved` with `team_update`. That ends coordination. Do not retire
    an orphan; this workflow must not manufacture one.
-7. Call `team_inspect` with `action=dump`, then again with `action=log`. The harness
-   reads those tool outputs. Do not copy them into `TEAM_REPORT.md`.
+7. Call `team_inspect` with `action=dump`, then again with `action=log`. If a dump
+   page returns a `next_cursor`, call `team_inspect` again with that cursor until it
+   comes back null, so the whole page set is present. The harness reads those tool
+   outputs directly. Do not copy them into `TEAM_REPORT.md`, and do not restate them
+   through any other tool: only real `team_inspect` output counts as evidence.
 8. Only then write `TEAM_REPORT.md` at the workspace root.
 
 ## TEAM_REPORT.md format

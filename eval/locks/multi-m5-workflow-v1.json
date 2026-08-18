@@ -9,7 +9,7 @@
   "fixture_dir": "eval/fixtures/multi-m5-collab-v1",
   "fixture_notes_sha256": "e13f5b868a84595c9dae0a9b46ed77e702e366ee26982f8aed35eb15dd77d7c8",
   "instruction_path": "eval/templates/multi-m5/collab-workflow-instruction-v1.md",
-  "instruction_sha256": "5450a973bcb3ff8514f286836598b4e89dad49108e5a10483c61bb4a46962b81",
+  "instruction_sha256": "b11136afa91604af276a3b41c478b39c006952c71e14aa54d21b36d0de1eb322",
   "finding_line": "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042",
   "report_filename": "TEAM_REPORT.md",
   "root_model": "gpt-5.6-sol",
@@ -26,7 +26,8 @@
     "required_tools": ["team_inspect", "wait_agent"],
     "required_inspect_actions": ["dump", "log"],
     "wait_signal": "Wait completed: the team world state changed. The current active view is in this request.",
-    "notes": "Judge reads harness-captured Responses function_call_output (loopback/budget-proxy request bodies). codex exec --json does not emit team_inspect payloads and wait items omit the TeamActivity message. TEAM_REPORT is never collaboration evidence. Same-snapshot dump pages concatenate when the call has a cursor; a dump without a cursor replaces."
+    "attribution": "required",
+    "notes": "Judge reads harness-captured Responses function_call_output (loopback/budget-proxy request bodies). codex exec --json does not emit team_inspect payloads and wait items omit the TeamActivity message. TEAM_REPORT is never collaboration evidence. Same-snapshot dump pages concatenate when the call has a cursor; a dump without a cursor replaces. Every row is attributed to the producing call: only team_inspect output yields dump/log rows and only wait_agent output yields a wake signal, so a payload echoed by another tool cannot manufacture a pass. Verified wire shape on the frozen binary: plain name plus namespace=collaboration, CLI-written output."
   },
   "team_capability": {
     "schema_version": 1,

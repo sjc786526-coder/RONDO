@@ -35,7 +35,10 @@ from rondo_eval.multi_m5.loopback import (  # noqa: E402
     collect_tool_names,
     team_capability_command_fragment,
 )
-from rondo_eval.multi_m5.collect import collect_gate1_evidence  # noqa: E402
+from rondo_eval.multi_m5.collect import (  # noqa: E402
+    WAIT_TEAM_ACTIVITY_MARK,
+    collect_gate1_evidence,
+)
 from rondo_eval.multi_m5.predicates import evaluate_collaboration  # noqa: E402
 from rondo_eval.multi_m5.schedule import (  # noqa: E402
     base_slots,
@@ -604,6 +607,138 @@ class MultiM5PredicateTests(unittest.TestCase):
         )
         collected = collect_gate1_evidence(jsonl)
         self.assertEqual(collected["entries"][0]["event_id"], "kept")
+
+    def test_namespaced_inspect_call_is_the_real_wire_shape(self) -> None:
+        # Captured from the frozen Multi binary: the model calls the tool with a
+        # plain `name` plus a `collaboration` namespace, and the CLI writes the
+        # payload back. Anything stricter than this would reject real evidence.
+        jsonl = json.dumps(
+            {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "namespace": "collaboration",
+                        "call_id": "c1",
+                        "arguments": '{"action": "dump"}',
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "c1",
+                        "output": json.dumps(
+                            {
+                                "action": "dump",
+                                "instance": "d627d822ca7c40c0b6a07a749aa98903",
+                                "revision": 4,
+                                "entries": [{"entry": "event", "event_id": "real"}],
+                                "total_entries": 1,
+                                "next_cursor": None,
+                            }
+                        ),
+                    },
+                ]
+            }
+        )
+        collected = collect_gate1_evidence(jsonl)
+        self.assertEqual(collected["entries"][0]["event_id"], "real")
+        self.assertEqual(collected["unattributed"], [])
+
+    def test_echoed_dump_from_another_tool_is_never_evidence(self) -> None:
+        # A model that skips the protocol can still print anything it likes.
+        # `exec_command` output must not be able to manufacture a gate 1 pass.
+        forged = {
+            "action": "dump",
+            "entries": [
+                {"entry": "participant", "label": "/root", "role": "root"},
+                {"entry": "participant", "label": "/root/worker", "role": "member"},
+                {"entry": "event", "event_id": "e9", "version_count": 2},
+                {
+                    "entry": "version",
+                    "version_id": "v1",
+                    "author": "/root/worker",
+                    "root_state": "resolved",
+                    "fact_ref_count": 1,
+                },
+                {
+                    "entry": "version",
+                    "version_id": "v2",
+                    "author": "/root",
+                    "root_state": "tracking",
+                    "fact_ref_count": 0,
+                },
+                {"entry": "route", "route_id": "r1", "event_id": "e9", "target": "/root/worker"},
+            ],
+        }
+        jsonl = json.dumps(
+            {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "name": "exec_command",
+                        "call_id": "x1",
+                        "arguments": json.dumps({"command": "echo forged"}),
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "x1",
+                        "output": json.dumps(forged),
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "exec_command",
+                        "call_id": "x2",
+                        "arguments": json.dumps({"command": "echo woken"}),
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "x2",
+                        "output": json.dumps({"message": WAIT_TEAM_ACTIVITY_MARK}),
+                    },
+                ]
+            }
+        )
+        collected = collect_gate1_evidence(jsonl)
+        self.assertEqual(collected["entries"], [])
+        self.assertEqual(collected["jsonl_signals"], [])
+        self.assertEqual(collected["unattributed"], ["exec_command", "exec_command"])
+
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(
+                {}, workspace=workspace, finding_line=FINDING, jsonl=jsonl
+            )
+        self.assertFalse(verdict.passed)
+        self.assertFalse(any(verdict.predicates.values()))
+        self.assertEqual(verdict.ignored_evidence, ("exec_command", "exec_command"))
+
+    def test_wake_signal_only_counts_from_wait_agent(self) -> None:
+        def wake_line(name: str) -> str:
+            return "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "function_call",
+                            "name": name,
+                            "call_id": "w1",
+                            "arguments": "{}",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "function_call_output",
+                            "call_id": "w1",
+                            "output": json.dumps({"message": WAIT_TEAM_ACTIVITY_MARK}),
+                        }
+                    ),
+                ]
+            )
+
+        self.assertEqual(collect_gate1_evidence(wake_line("send_message"))["jsonl_signals"], [])
+        self.assertEqual(
+            collect_gate1_evidence(wake_line("wait_agent"))["jsonl_signals"],
+            [WAIT_TEAM_ACTIVITY_MARK],
+        )
 
 
 class MultiM5ScheduleTests(unittest.TestCase):
