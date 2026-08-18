@@ -1123,7 +1123,7 @@ standard/Lite 形态均补回归。
 
 ## Multi M-5 阶段 A —— 真实运行条件（Plan 044，2026-08-17）
 
-**状态**：阶段 A 当时交付为「已具备真实运行条件」。随后独立验收不通过（门 1 判据），见下节。
+**状态**：首次交付时独立验收不通过（门 1 判据），经两轮整改后于 2026-08-18 复验通过，见下两节。
 未跑 Docker、真实 API 或付费调用，**不能**表述为 M-5 通过、门 1 通过或未见退化。阶段 B 未开始。
 成果在 044 工作树分支，未合入 `main`、未推送。
 
@@ -1146,11 +1146,35 @@ standard/Lite 形态均补回归。
 
 ## Multi M-5 阶段 A 门 1 窄整改（Plan 044，2026-08-17）
 
-**状态**：独立验收指出的门 1 判据问题已在 044 分支落地窄改，待复验。未进阶段 B，未合入 `main`、未推送。
+**状态**：第一轮整改，复验时发现同类新缺陷（见下节），本节内容已被后续整改继承。未进阶段 B。
 
 - 同一 Event 合取；按真实 dump 顺序分组（Version 行没有 `event_id`）。
 - `root_resolved` 只认成员作者 Version；新增 `root_woken`。
 - dump 合同改为 harness 捕获的 Responses `function_call_output`（`codex exec --json` 不承载 team_inspect）。
 - 成员默认模型 + 隐藏 `spawn_agent` 的 model 覆盖；门 2 归因边界写入不退化锁。
 - 执行日志：`agent_log/2026-08-17-220000-plan044-m5-phase-a-predicate-remediation.md`。
+- 复验：`agent_log/2026-08-17-233000-plan044-m5-phase-a-remediation-rereview.md`（不通过：证据采集不绑定工具身份，
+  `exec_command` 回显即可伪造门 1 通过）。
+
+## Multi M-5 阶段 A 收口 —— 门 1 证据绑定（Plan 044，2026-08-18）
+
+**状态**：门 1 判据三处缺陷全部关闭，**复验通过，阶段 A 收口**。含义仅是「M-5 已具备真实运行条件」，
+**不是** M-5 通过、门 1 通过或未见退化。阶段 B 未开始：两道门的 runner 尚未实现，真实 API、付费与
+Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **证据按产出工具绑定**：dump/log 只采纳 `team_inspect` 输出，唤醒信号只采纳 `wait_agent` 输出；
+  其它工具产出的「团队形状」负载记入 `unattributed` 并在判定中忽略，同时经
+  `CollaborationVerdict.ignored_evidence` 暴露，便于区分「模型伪造」与「wire 形状变化」。
+- **wire 形状已实测**（无 API，冻结二进制 + 本地 stub）：团队工具以 `name=team_inspect` +
+  `namespace=collaboration` 调用即可执行，CLI 写回的 `function_call_output` 正文就是真实 dump 负载；
+  因此按工具名绑定不会把门焊死。指令模板补 `next_cursor` 续页要求（`MAX_OBSERVE_LIMIT=50`），
+  `instruction_sha256` 重算入锁。
+- **门禁**：`tests.test_multi_m5` 28/28；完整离线 `just eval-test` 854 项，仅剩 2 项既有 Local 模块加载
+  失败（干净 `main` 同样复现，与本任务无关）；`just eval-multi-m5-loopback` 通过。未跑 Rust、Docker、
+  真实 API，未产生费用。
+- **独立复验**：`agent_log/2026-08-18-010000-plan044-m5-gate1-attribution-rereview.md`（通过）。
+  正向通路首次实测确认：真实 `team_inspect` 输出被正确归属，采到 6 行真实 dump、`unattributed` 为空；
+  Root 独角戏与伪造回显两个反例均被拒。
+- **付费前置**：门 1 runner、门 2 交错执行面、预算记账与归档落盘均**未实现**；按复验决议，
+  这些部件实现后须再过一次独立审查，通过后才申请真实 API/付费授权。
 
