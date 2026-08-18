@@ -272,6 +272,19 @@
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未执行，累计费用 **$0**
   （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本，归档只有 `loopback` 行）。
 
+### 移交入口（2026-08-19）
+
+- **单一入口**：`agent_log/2026-08-19-030000-plan044-m5-phase-b-handover-review.md`。
+  含三批工作、费用、未解问题与建议接手顺序。
+- **门 1 当前不可能通过**：冻结判据只认 `function_call`，而 `code_mode_host=true` 下真实模型
+  用 code-mode 的 `custom_tool_call`（JS `tools.collaboration__*`）调团队工具，实测顶层
+  `function_call` 数为 0。修它要改冻结的 `evidence_source`（决策 020），已暂停等授权。
+  **若扩展采集口径，必须同时把彩排 stub 改成 code-mode 形状**，否则彩排继续全绿却对真实失效无感。
+- 已修但值得复核：预算代理原先禁止并发 main 请求（`api_budget_proxy.py:1485`），
+  会让成员被本地拒成 400 并烧光门 1 三次尝试；现为默认关闭的 `allow_concurrent_main` 选项。
+- 待处理：上游 `response.failed` 已证实可为零 token / 零费用（中转站后台记录），
+  但仍按整笔预留（门 1 $4.00）保守结算，可能虚假吃掉 $120 预算并把门 2 推向掐断。
+
 ### 本任务剩余步骤
 
 - 阶段 B 的**离线准备已全部完成并提交**，包括退化诊断闭环与 terra 切换。等待用户放行后按下表执行门 1、再执行门 2。
