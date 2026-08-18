@@ -12,6 +12,15 @@ from .load import M5ContractError, load_nondegradation_contract, load_workflow_c
 
 BATCH_ID = "multi-m5-phase-b"
 HARD_CAP_USD = Decimal("120.00")
+# Pre-contract connectivity smoke test. Separately authorized, so it gets its
+# own batch and its own ledger file: it must never draw on the $120 the two
+# gates share, and its rows must never look like contract evidence. The cap is
+# sized to the work (one gate-1-shaped flow is modelled at ~$3.20), not to the
+# authorization ceiling -- a cap is a stop line, not a spending target.
+SMOKE_BATCH_ID = "multi-m5-terra-smoke"
+SMOKE_LOCK_ID = "multi-m5-terra-smoke-v1"
+SMOKE_CAP_USD = Decimal("25.00")
+SMOKE_RUN_CAP_USD = Decimal("25.00")
 # Per-run ceiling. Gate 1 is modelled at ~$3.20/attempt on the frozen
 # gpt-5.6-terra snapshot; $24 is a generous multiple. Gate 2 TB runs are cheaper
 # and use GATE2_RUN_CAP_USD via ensure_run. The caps are deliberately unchanged
@@ -202,6 +211,33 @@ def phase_b_pricing(contract=None) -> ModelPricing:
     )
     pricing.validate()
     return pricing
+
+
+def open_smoke_ledger(path: Path) -> PersistentBudgetLedger:
+    """Ledger for the separately authorized connectivity smoke test.
+
+    Deliberately not `open_phase_b_ledger`: a different batch id and a different
+    file mean the smoke spend cannot be confused with, or subtracted from, the
+    $120 the two gates share.
+    """
+
+    ledger = PersistentBudgetLedger(
+        path,
+        batch_id=SMOKE_BATCH_ID,
+        total_cap_usd=SMOKE_CAP_USD,
+        max_runs=1,
+        default_run_cap_usd=SMOKE_RUN_CAP_USD,
+    )
+    snapshot = ledger.snapshot()
+    if snapshot["batch_id"] != SMOKE_BATCH_ID or Decimal(
+        snapshot["total_cap_usd"]
+    ) != SMOKE_CAP_USD:
+        ledger.close()
+        raise BudgetError("smoke ledger does not enforce its own batch and cap")
+    if snapshot["batch_id"] == BATCH_ID:
+        ledger.close()
+        raise BudgetError("smoke ledger must not share the phase B batch")
+    return ledger
 
 
 def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:

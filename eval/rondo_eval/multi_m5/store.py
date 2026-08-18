@@ -12,6 +12,8 @@ from .archive import REQUIRED_ARCHIVE_FIELDS
 ARCHIVE_RELPATH = "eval-data/multi-m5/archives/records.jsonl"
 CAPTURE_RELDIR = "eval-data/multi-m5/captures"
 BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b.json"
+SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/terra-smoke-records.jsonl"
+SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-terra-smoke.json"
 
 
 class StoreError(ValueError):
@@ -20,6 +22,21 @@ class StoreError(ValueError):
 
 def archive_path(common_root: Path) -> Path:
     return _under_eval_data(common_root, ARCHIVE_RELPATH)
+
+
+def smoke_archive_path(common_root: Path) -> Path:
+    """Separate file for the pre-contract smoke run.
+
+    Kept out of the contract archive on purpose: a real-API row sitting beside
+    the gate rows invites being read as gate evidence later, and this run is
+    explicitly not that.
+    """
+
+    return _under_eval_data(common_root, SMOKE_ARCHIVE_RELPATH)
+
+
+def smoke_ledger_path(common_root: Path) -> Path:
+    return _under_eval_data(common_root, SMOKE_BUDGET_RELPATH)
 
 
 def capture_dir(common_root: Path, run_id: str) -> Path:

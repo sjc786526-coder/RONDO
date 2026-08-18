@@ -19,6 +19,9 @@ from urllib.parse import urlsplit
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
+import rondo_eval.multi_m5.gate1  # noqa: E402
+import rondo_eval.multi_m5.gate2  # noqa: E402
+
 from rondo_eval.api_budget_proxy import (  # noqa: E402
     ApiBudgetProxyError,
     BudgetCapacityExhausted,
@@ -38,6 +41,11 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, Product, RunOutcome, Side  # noqa: E402
 from rondo_eval.multi_m5.archive import archive_record  # noqa: E402
 from rondo_eval.multi_m5.budget import (  # noqa: E402
+    BATCH_ID,
+    SMOKE_BATCH_ID,
+    SMOKE_CAP_USD,
+    SMOKE_LOCK_ID,
+    open_smoke_ledger,
     GATE1_REQUEST_RESERVATION_USD,
     GATE1_RUN_CAP_USD,
     GATE2_REQUEST_RESERVATION_USD,
@@ -95,6 +103,10 @@ from rondo_eval.multi_m5.schedule import (  # noqa: E402
     diagnostic_slots,
 )
 from rondo_eval.multi_m5.store import (  # noqa: E402
+    archive_path,
+    budget_ledger_path,
+    smoke_archive_path,
+    smoke_ledger_path,
     StoreError,
     load_archive_records,
     persist_archive_record,
@@ -676,6 +688,131 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
             for item in (ledger_path, lock_path):
                 if item.exists():
                     item.unlink()
+
+
+class MultiM5ConcurrentMainTests(unittest.TestCase):
+    """Root and members call the model at the same time; the proxy must allow it.
+
+    The budget proxy refused a second in-flight `main` request, which predates
+    Multi. Found by the paid terra smoke run: the spawned member died with
+    `request_rejected` before sending anything, so every collaboration predicate
+    was false and gate 1 would have burned all three attempts on a harness rule
+    rather than on the product.
+    """
+
+    def _proxy(self, ledger, **kwargs):
+        return LoopbackResponsesProxy(
+            upstream_base_url="https://upstream.example/v1",
+            api_key="sk-test-never-spend",
+            ledger=ledger,
+            run_id="m5-concurrent",
+            metadata_path=scratch_root(_common_root()) / "m5-concurrent-meta.json",
+            main_model="gpt-5.6-terra",
+            main_effort="medium",
+            main_pricing=phase_b_pricing(),
+            guardian_model="gpt-5.6-terra",
+            guardian_pricing=phase_b_pricing(),
+            guardian_effort="medium",
+            max_attempts=5,
+            retry_backoff_seconds=0.0,
+            unbilled_retry_statuses=(429, 500, 502, 503, 504),
+            request_reservation_usd=Decimal("1.00"),
+            **kwargs,
+        )
+
+    def _claim_twice(self, proxy):
+        proxy._claim_and_reserve_logical_request("main", "sha-a", "req-a")
+        proxy._claim_and_reserve_logical_request("main", "sha-b", "req-b")
+
+    def test_the_single_main_rule_still_holds_by_default(self) -> None:
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-concurrent-default.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.ensure_run("m5-concurrent", cap_usd=Decimal("25.00"))
+                proxy = self._proxy(ledger)
+                with self.assertRaisesRegex(
+                    ApiBudgetProxyError, "concurrent main requests are disabled"
+                ):
+                    self._claim_twice(proxy)
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_multi_may_opt_in_and_both_reservations_are_still_metered(self) -> None:
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-concurrent-optin.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.ensure_run("m5-concurrent", cap_usd=Decimal("25.00"))
+                proxy = self._proxy(ledger, allow_concurrent_main=True)
+                self._claim_twice(proxy)
+                run = ledger.snapshot()["runs"]["m5-concurrent"]
+                # Opting in relaxes ordering, never accounting: both concurrent
+                # requests hold their own reservation against the same cap.
+                self.assertEqual(len(run["requests"]), 2)
+                self.assertGreater(Decimal(ledger.snapshot()["reserved_usd"]), 0)
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_the_multi_gates_opt_in(self) -> None:
+        source = Path(rondo_eval.multi_m5.gate1.__file__).read_text("utf-8")
+        self.assertEqual(source.count("allow_concurrent_main=True"), 2)
+        source = Path(rondo_eval.multi_m5.gate2.__file__).read_text("utf-8")
+        self.assertEqual(source.count("allow_concurrent_main=True"), 1)
+
+
+class MultiM5SmokeIsolationTests(unittest.TestCase):
+    """The separately authorized smoke run must stay outside the contract.
+
+    It spends real money on the same model, so the danger is that its row later
+    reads as gate 1 evidence, or that its cost quietly eats the $120 the two
+    gates share.
+    """
+
+    def test_smoke_batch_cap_and_paths_are_separate_from_phase_b(self) -> None:
+        self.assertNotEqual(SMOKE_BATCH_ID, BATCH_ID)
+        self.assertNotEqual(SMOKE_LOCK_ID, "multi-m5-workflow-v1")
+        self.assertLess(SMOKE_CAP_USD, HARD_CAP_USD)
+        root = _common_root()
+        self.assertNotEqual(smoke_ledger_path(root), budget_ledger_path(root))
+        self.assertNotEqual(smoke_archive_path(root), archive_path(root))
+
+    def test_smoke_ledger_refuses_the_phase_b_batch(self) -> None:
+        scratch = scratch_root(_common_root())
+        path = scratch / "multi-m5-test-smoke-ledger.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        try:
+            with open_smoke_ledger(path) as ledger:
+                snapshot = ledger.snapshot()
+                self.assertEqual(snapshot["batch_id"], SMOKE_BATCH_ID)
+                self.assertEqual(Decimal(snapshot["total_cap_usd"]), SMOKE_CAP_USD)
+                # One flow only: the authorization was for a single run-through.
+                self.assertEqual(snapshot["max_runs"], 1)
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_smoke_requires_authorization_and_never_loads_the_key(self) -> None:
+        from rondo_eval.multi_m5.__main__ import main as m5_main
+
+        # No phrase: exit 78 before any secret is read or any socket is opened.
+        self.assertEqual(m5_main(["terra-smoke"]), 78)
 
 
 class MultiM5FrozenModelIsolationTests(unittest.TestCase):

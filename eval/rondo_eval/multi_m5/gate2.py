@@ -262,6 +262,8 @@ class TerminalBenchSlotExecutor:
                 request_reservation_usd=GATE2_REQUEST_RESERVATION_USD,
                 run_cap_usd=GATE2_RUN_CAP_USD,
                 timeout_seconds=FORWARD_TIMEOUT_SECONDS,
+                # Root and its members are concurrent by design.
+                allow_concurrent_main=True,
                 _transport=self._transport,
             )
             with proxy:

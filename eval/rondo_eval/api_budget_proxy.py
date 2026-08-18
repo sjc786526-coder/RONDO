@@ -895,6 +895,10 @@ class LoopbackResponsesProxy:
         request_reservation_usd: Decimal | str | None = None,
         run_cap_usd: Decimal | str | None = None,
         max_guardian_logical_requests: int | None = None,
+        # RONDO Multi's Root and its members call the model at the same time.
+        # The single-main assumption below predates that product, so it is opt
+        # in rather than removed: every other campaign keeps the stricter rule.
+        allow_concurrent_main: bool = False,
         max_logical_requests: int | None = None,
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         symmetry_preflight: Any | None = None,
@@ -1013,6 +1017,7 @@ class LoopbackResponsesProxy:
         self._guardian_logical_requests = 0
         self._guardian_body_sha256s: set[str] = set()
         self._main_request_ids: set[str] = set()
+        self._allow_concurrent_main = bool(allow_concurrent_main)
         self._max_logical_requests = max_logical_requests
         self._logical_requests = 0
         self._request_policy_lock = threading.Lock()
@@ -1477,7 +1482,7 @@ class LoopbackResponsesProxy:
             run = self._ledger.snapshot()["runs"].get(self._run_id)
             if not isinstance(run, dict) or not isinstance(run.get("requests"), dict):
                 raise ApiBudgetProxyError("budget run projection is invalid")
-            if role == "main" and any(
+            if role == "main" and not self._allow_concurrent_main and any(
                 isinstance(run["requests"].get(main_request_id), dict)
                 and run["requests"][main_request_id].get("status") == "reserved"
                 for main_request_id in self._main_request_ids

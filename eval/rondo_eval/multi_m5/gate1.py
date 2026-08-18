@@ -23,6 +23,9 @@ from .archive import archive_record, harness_identity
 from .budget import (
     GATE1_REQUEST_RESERVATION_USD,
     GATE1_RUN_CAP_USD,
+    SMOKE_BATCH_ID,
+    SMOKE_LOCK_ID,
+    SMOKE_RUN_CAP_USD,
     phase_b_pricing,
     require_frozen_provider,
     run_stop_reason,
@@ -34,7 +37,7 @@ from .loopback import LOOPBACK_BEARER, _require_executable
 from .paid import PaidAuthorization
 from .predicates import evaluate_collaboration
 from .rehearsal import CollaborationStub
-from .store import capture_dir, persist_archive_record, scratch_root
+from .store import capture_dir, persist_archive_record, scratch_root, smoke_archive_path
 
 REHEARSAL_TIMEOUT_SECONDS = 180
 ProcessRunner = Callable[..., subprocess.CompletedProcess[bytes]]
@@ -125,6 +128,9 @@ def run_gate1_paid(
             request_reservation_usd=GATE1_REQUEST_RESERVATION_USD,
             run_cap_usd=GATE1_RUN_CAP_USD,
             timeout_seconds=FORWARD_TIMEOUT_SECONDS,
+            # Root and its members are concurrent by design; the proxy's
+            # single-main rule predates Multi.
+            allow_concurrent_main=True,
             _transport=transport,
         )
         with proxy:
@@ -160,6 +166,93 @@ def run_gate1_paid(
     return last
 
 
+def run_gate1_smoke(
+    *,
+    authorization: PaidAuthorization,
+    api_key: str,
+    upstream_base_url: str,
+    ledger: PersistentBudgetLedger,
+    provider,
+    common_root: Path | None = None,
+    persist: bool = True,
+    transport: _UrllibTransport | None = None,
+    process_runner: ProcessRunner = subprocess.run,
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
+    """One real-API flow to prove the provider serves the frozen model.
+
+    Separately authorized and deliberately outside the contract: a single
+    attempt, its own ledger batch, its own archive file, and its own lock id.
+    It answers "does a whole flow work end to end on this model" and nothing
+    else -- passing predicates here is **not** a gate 1 pass, and failing here
+    does not consume one of gate 1's three attempts.
+    """
+
+    authorization.require_api()
+    if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
+        raise Gate1Error("the in-memory provider key is invalid")
+    workflow = load_workflow_contract()
+    pricing = phase_b_pricing()
+    if pricing.model_id != workflow.root_model:
+        raise Gate1Error("smoke model differs from the frozen price snapshot")
+    identity = require_frozen_provider(provider, effort=workflow.root_effort)
+    if upstream_base_url.rstrip("/") != identity["provider_base_url"].rstrip("/"):
+        raise Gate1Error("smoke upstream differs from the frozen provider endpoint")
+    root = _common_root(common_root)
+    run_id = "m5-g1-terra-smoke"
+    ledger.ensure_run(run_id, cap_usd=SMOKE_RUN_CAP_USD)
+    metadata_path = capture_dir(root, run_id) / "budget-metadata.json"
+    metadata_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    proxy = LoopbackResponsesProxy(
+        upstream_base_url=upstream_base_url,
+        api_key=api_key,
+        ledger=ledger,
+        run_id=run_id,
+        metadata_path=metadata_path,
+        main_model=workflow.root_model,
+        main_effort=workflow.root_effort,
+        main_pricing=pricing,
+        guardian_model=workflow.root_model,
+        guardian_pricing=pricing,
+        guardian_effort=workflow.root_effort,
+        max_attempts=5,
+        retry_backoff_seconds=0.0,
+        unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
+        request_reservation_usd=GATE1_REQUEST_RESERVATION_USD,
+        run_cap_usd=SMOKE_RUN_CAP_USD,
+        timeout_seconds=FORWARD_TIMEOUT_SECONDS,
+        # Root and its members are concurrent by design; the proxy's
+        # single-main rule predates Multi.
+        allow_concurrent_main=True,
+        _transport=transport,
+    )
+    with proxy:
+        return _run_gate1_once(
+            common_root=root,
+            run_id=run_id,
+            timeout_seconds=timeout_seconds or workflow.timeout_seconds,
+            persist=persist,
+            evidence_kind="real_api",
+            capture_mode="forward",
+            stub=None,
+            process_runner=process_runner,
+            capture_upstream=proxy.base_url,
+            capture_bearer=proxy.downstream_api_key,
+            budget_probe=lambda: run_stop_reason(ledger, run_id),
+            lock_id=SMOKE_LOCK_ID,
+            archive_file=smoke_archive_path(root),
+            extra={
+                "rehearsal": False,
+                "smoke_test": True,
+                "contract_attempt": False,
+                "budget_run_id": run_id,
+                "budget_batch_id": SMOKE_BATCH_ID,
+                "provider_identity": dict(identity),
+                **harness_identity(RepoPaths.discover(Path.cwd()).worktree_root),
+            },
+        )
+
+
 def _workflow_finding() -> str:
     return load_workflow_contract().finding_line
 
@@ -183,6 +276,8 @@ def _run_gate1_once(
     capture_upstream: str | None = None,
     capture_bearer: str = LOOPBACK_BEARER,
     budget_probe: Callable[[], str | None] | None = None,
+    lock_id: str | None = None,
+    archive_file: Path | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = _common_root(common_root)
@@ -344,7 +439,7 @@ def _run_gate1_once(
     record = archive_record(
         evidence_kind=evidence_kind,
         gate=1,
-        lock_id=workflow.lock_id,
+        lock_id=lock_id or workflow.lock_id,
         side=Side.RONDO,
         product=Product.RONDO_MULTI,
         source_commit=runtime.source_commit,
@@ -355,7 +450,9 @@ def _run_gate1_once(
     )
     archived = None
     if persist:
-        archived = str(persist_archive_record(record, common_root=root))
+        archived = str(
+            persist_archive_record(record, common_root=root, path=archive_file)
+        )
     (capture_root / "verdict.json").write_text(
         json.dumps(
             {
