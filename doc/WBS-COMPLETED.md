@@ -1150,7 +1150,7 @@ standard/Lite 形态均补回归。
 
 - 同一 Event 合取；按真实 dump 顺序分组（Version 行没有 `event_id`）。
 - `root_resolved` 只认成员作者 Version；新增 `root_woken`。
-- dump 合同改为 `codex exec --json` 的 harness 工具输出。
+- dump 合同改为 harness 捕获的 Responses `function_call_output`（`codex exec --json` 不承载 team_inspect）。
 - 成员默认模型 + 隐藏 `spawn_agent` 的 model 覆盖；门 2 归因边界写入不退化锁。
 - 执行日志：`agent_log/2026-08-17-220000-plan044-m5-phase-a-predicate-remediation.md`。
 

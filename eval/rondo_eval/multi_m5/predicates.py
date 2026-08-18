@@ -19,7 +19,7 @@ REQUIRED_PREDICATE_IDS = (
 WAIT_TEAM_ACTIVITY_MARK = (
     "Wait completed: the team world state changed. The current active view is in this request."
 )
-_ROOT_LABELS = {"", "/root", "root"}
+_ROOT_LABELS = {"/root", "root"}
 _EVENT_LOCAL = (
     "event_with_two_versions",
     "two_authors",
@@ -48,10 +48,12 @@ def evaluate_collaboration(
 ) -> CollaborationVerdict:
     """Judge gate 1 from harness-owned team evidence plus the workspace artifact.
 
-    ``dump`` is a ``team_inspect`` dump page. Event membership follows dump order:
-    Version / VersionFact / Route rows after an Event belong to that Event until
-    the next Event or a non-nested row. That matches the real dump schema, which
-    does not put ``event_id`` on Version rows.
+    ``dump`` is a ``team_inspect`` dump page. When ``jsonl`` is provided it is
+    the only evidence: caller dump cannot leak a fabricated collaboration in.
+    Event membership follows dump order: Version / VersionFact / Route rows
+    after an Event belong to that Event until the next Event or a non-nested
+    row. That matches the real dump schema, which does not put ``event_id`` on
+    Version rows.
 
     Event-local predicates must all hold on **one** Event. ``root_resolved``
     requires a member-authored Version on that Event. ``root_woken`` requires a
@@ -59,10 +61,10 @@ def evaluate_collaboration(
     message from JSONL tool output.
     """
 
-    if jsonl:
-        from .collect import merge_jsonl_into_dump
+    if jsonl is not None:
+        from .collect import collect_gate1_evidence
 
-        dump = merge_jsonl_into_dump(dump, jsonl)
+        dump = collect_gate1_evidence(jsonl)
 
     entries = dump.get("entries")
     rows = tuple(entries) if isinstance(entries, list) else ()
@@ -185,7 +187,7 @@ def _event_flags(
         if row.get("version_id")
     }
     evidence_on_member = any(
-        int(row.get("fact_ref_count") or 0) >= 1 for row in member_versions
+        _as_int(row.get("fact_ref_count")) >= 1 for row in member_versions
     ) or any(
         isinstance(row, dict) and str(row.get("version_id") or "") in member_ids
         for row in facts
@@ -231,6 +233,19 @@ def _root_was_woken(dump: Mapping[str, Any]) -> bool:
     if isinstance(signals, list):
         return any(WAIT_TEAM_ACTIVITY_MARK in str(item) for item in signals)
     return False
+
+
+def _as_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
 
 
 def _is_root_label(label: str) -> bool:

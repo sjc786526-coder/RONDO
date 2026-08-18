@@ -162,8 +162,8 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
     if report != "TEAM_REPORT.md":
         raise M5ContractError("gate 1 report filename differs")
     source = raw.get("evidence_source")
-    if not isinstance(source, dict) or source.get("kind") != "codex_exec_jsonl_tool_outputs":
-        raise M5ContractError("gate 1 dump must come from harness JSONL tool outputs")
+    if not isinstance(source, dict) or source.get("kind") != "responses_function_call_outputs":
+        raise M5ContractError("gate 1 dump must come from harness-captured Responses tool outputs")
     if source.get("required_inspect_actions") != ["dump", "log"]:
         raise M5ContractError("gate 1 must collect team_inspect dump and log")
     return WorkflowContract(

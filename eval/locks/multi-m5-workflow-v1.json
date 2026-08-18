@@ -22,11 +22,11 @@
   "orphan_retirement_required": false,
   "docker": false,
   "evidence_source": {
-    "kind": "codex_exec_jsonl_tool_outputs",
+    "kind": "responses_function_call_outputs",
     "required_tools": ["team_inspect", "wait_agent"],
     "required_inspect_actions": ["dump", "log"],
     "wait_signal": "Wait completed: the team world state changed. The current active view is in this request.",
-    "notes": "Judge reads harness-authored function_call_output from codex exec --json. TEAM_REPORT is the task artifact only and is never collaboration evidence."
+    "notes": "Judge reads harness-captured Responses function_call_output (loopback/budget-proxy request bodies). codex exec --json does not emit team_inspect payloads and wait items omit the TeamActivity message. TEAM_REPORT is never collaboration evidence. Same-snapshot dump pages concatenate when the call has a cursor; a dump without a cursor replaces."
   },
   "team_capability": {
     "schema_version": 1,

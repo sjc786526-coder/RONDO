@@ -1,8 +1,10 @@
-"""Collect gate 1 evidence from `codex exec --json` tool outputs.
+"""Collect gate 1 evidence from harness-captured tool outputs.
 
-The judge must not read a dump the model copied into a markdown file. Tool
-outputs are written by the harness when `team_inspect` / `wait_agent` actually
-ran.
+`codex exec --json` does not emit `team_inspect` payloads: exec maps a small
+ThreadItem set and drops DynamicToolCall / plain function tools. The wait
+item also omits the TeamActivity message. Real harness-owned evidence is the
+`function_call_output` the CLI later puts on the Responses `input` list
+(budget proxy / loopback request bodies). TEAM_REPORT is never a source.
 """
 
 from __future__ import annotations
@@ -15,70 +17,101 @@ WAIT_TEAM_ACTIVITY_MARK = (
     "Wait completed: the team world state changed. The current active view is in this request."
 )
 _INSPECT_NAMES = {"team_inspect", "collaboration.team_inspect"}
+_CALL_TYPES = {"function_call", "custom_tool_call"}
+_OUTPUT_TYPES = {"function_call_output", "custom_tool_call_output"}
+_ITEM_EVENTS = {"item.completed", "item.started", "item.updated"}
 
 
 def collect_gate1_evidence(jsonl: str) -> dict[str, Any]:
-    """Extract dump entries, change-log rows, and wait signals from JSONL."""
+    """Extract dump entries, change-log rows, and wait signals in document order."""
 
-    calls: dict[str, dict[str, Any]] = {}
-    outputs: dict[str, str] = {}
-    orphan_outputs: list[str] = []
-    for value in _iter_objects(jsonl):
-        kind = str(value.get("type") or "")
-        name = _tool_name(value)
-        call_id = value.get("call_id")
-        if kind in {"function_call", "custom_tool_call"} or name:
-            if isinstance(call_id, str) and call_id:
-                calls[call_id] = {
-                    "name": name,
-                    "arguments": _as_text(value.get("arguments")),
-                }
-        if kind in {"function_call_output", "custom_tool_call_output"} or "output" in value:
-            text = _as_text(value.get("output"))
-            if not text:
-                continue
-            if isinstance(call_id, str) and call_id:
-                outputs[call_id] = text
-            else:
-                orphan_outputs.append(text)
-
+    calls: dict[str, dict[str, str]] = {}
     dump: dict[str, Any] = {"entries": [], "log": [], "jsonl_signals": []}
-    for call_id, call in calls.items():
-        name = call["name"]
-        text = outputs.get(call_id, "")
-        _absorb(dump, name, call["arguments"], text)
-    for text in orphan_outputs:
-        _absorb(dump, "", "", text)
+    for line in jsonl.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        for record in _ordered_records(parsed):
+            _apply_record(dump, calls, record)
     return dump
 
 
 def merge_jsonl_into_dump(dump: Mapping[str, Any], jsonl: str) -> dict[str, Any]:
-    collected = collect_gate1_evidence(jsonl)
-    merged = dict(dump)
-    if collected["entries"]:
-        merged["entries"] = collected["entries"]
-    if collected["log"]:
-        merged["log"] = collected["log"]
-    signals = list(dump.get("jsonl_signals") or [])
-    signals.extend(collected["jsonl_signals"])
-    merged["jsonl_signals"] = signals
-    return merged
+    """JSONL is authoritative. Caller dump cannot leak a fabricated collaboration."""
+
+    if not isinstance(dump, Mapping):
+        raise TypeError("dump must be a mapping")
+    return collect_gate1_evidence(jsonl)
+
+
+def _ordered_records(value: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Walk Responses `input` items and exec `item.*` wrappers, not the whole tree."""
+
+    kind = str(value.get("type") or "")
+    records: list[dict[str, Any]] = []
+    if kind in _CALL_TYPES or kind in _OUTPUT_TYPES:
+        records.append(dict(value))
+    elif kind in _ITEM_EVENTS:
+        item = value.get("item")
+        if isinstance(item, dict):
+            records.extend(_ordered_records(item))
+    input_items = value.get("input")
+    if isinstance(input_items, list):
+        for item in input_items:
+            if isinstance(item, dict):
+                records.extend(_ordered_records(item))
+    return records
+
+
+def _apply_record(
+    dump: dict[str, Any],
+    calls: dict[str, dict[str, str]],
+    record: Mapping[str, Any],
+) -> None:
+    kind = str(record.get("type") or "")
+    call_id = record.get("call_id")
+    if kind in _CALL_TYPES and isinstance(call_id, str) and call_id:
+        calls[call_id] = {
+            "name": _tool_name(record),
+            "arguments": _as_text(record.get("arguments")),
+        }
+        return
+    if kind not in _OUTPUT_TYPES:
+        return
+    text = _output_text(record.get("output"))
+    if not text:
+        return
+    meta = calls.get(call_id, {}) if isinstance(call_id, str) else {}
+    _absorb(dump, meta.get("name", ""), meta.get("arguments", ""), text)
 
 
 def _absorb(dump: dict[str, Any], name: str, arguments: str, text: str) -> None:
     payload = _parse_json(text)
-    action = ""
     args = _parse_json(arguments)
+    action = ""
     if isinstance(args, dict):
         action = str(args.get("action") or "")
     if isinstance(payload, dict):
         action = str(payload.get("action") or action)
         message = payload.get("message")
         if name in _INSPECT_NAMES or action in {"dump", "log"}:
-            if action == "dump" and isinstance(payload.get("entries"), list):
-                dump["entries"] = payload["entries"]
-            if action == "log" and isinstance(payload.get("entries"), list):
-                dump["log"] = payload["entries"]
+            entries = payload.get("entries")
+            if action == "dump" and isinstance(entries, list):
+                if isinstance(args, dict) and args.get("cursor"):
+                    dump["entries"].extend(entries)
+                else:
+                    dump["entries"] = list(entries)
+            if action == "log" and isinstance(entries, list):
+                if isinstance(args, dict) and args.get("offset") not in {None, 0, "0"}:
+                    dump["log"].extend(entries)
+                else:
+                    dump["log"] = list(entries)
         if isinstance(message, str):
             _record_wait_signal(dump, message)
     elif WAIT_TEAM_ACTIVITY_MARK in text:
@@ -90,35 +123,31 @@ def _record_wait_signal(dump: dict[str, Any], message: str) -> None:
         dump["jsonl_signals"].append(message)
 
 
-def _iter_objects(jsonl: str) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-    for line in jsonl.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            parsed = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        _walk(parsed, found)
-    return found
-
-
-def _walk(value: object, found: list[dict[str, Any]]) -> None:
-    if isinstance(value, dict):
-        found.append(value)
-        for item in value.values():
-            _walk(item, found)
-    elif isinstance(value, list):
-        for item in value:
-            _walk(item, found)
-
-
 def _tool_name(value: Mapping[str, Any]) -> str:
     for key in ("name", "tool_name"):
         raw = value.get(key)
         if isinstance(raw, str) and raw:
-            return raw.rsplit(".", 1)[-1] if raw.startswith("collaboration.") else raw
+            if raw.startswith("collaboration."):
+                return raw.rsplit(".", 1)[-1]
+            if raw.startswith("collaboration__"):
+                return raw[len("collaboration__") :]
+            return raw
+    return ""
+
+
+def _output_text(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text:
+                    parts.append(text)
+        return "\n".join(parts)
+    if isinstance(value, dict):
+        return json.dumps(value)
     return ""
 
 

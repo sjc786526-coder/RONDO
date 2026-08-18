@@ -326,26 +326,60 @@ class MultiM5PredicateTests(unittest.TestCase):
         self.assertIn("predicate:root_woken", verdict.reasons)
 
     def test_mailbox_wait_is_not_team_wake(self) -> None:
-        dump = self._dump()
-        dump["log"] = []
-        jsonl = json.dumps(
-            {
-                "type": "item.completed",
-                "item": {
-                    "type": "function_call_output",
-                    "call_id": "wait-1",
-                    "output": json.dumps({"message": "Wait completed.", "timed_out": False}),
-                },
-            }
+        dump_payload = self._dump()
+        dump_payload["log"] = []
+        jsonl = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "call_id": "dump-1",
+                        "arguments": '{"action":"dump"}',
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call_output",
+                        "call_id": "dump-1",
+                        "output": json.dumps(
+                            {"action": "dump", "entries": dump_payload["entries"]}
+                        ),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call_output",
+                        "call_id": "wait-1",
+                        "output": json.dumps(
+                            {"message": "Wait completed.", "timed_out": False}
+                        ),
+                    }
+                ),
+            ]
         )
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
             (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
             verdict = evaluate_collaboration(
-                dump, workspace=workspace, finding_line=FINDING, jsonl=jsonl
+                {}, workspace=workspace, finding_line=FINDING, jsonl=jsonl
             )
         self.assertFalse(verdict.passed)
         self.assertFalse(verdict.predicates["root_woken"])
+
+    def test_jsonl_does_not_keep_a_caller_dump_when_inspect_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(
+                self._dump(),
+                workspace=workspace,
+                finding_line=FINDING,
+                jsonl="{}\n",
+            )
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["spawn_member"])
+        self.assertFalse(verdict.predicates["event_with_two_versions"])
 
     def test_jsonl_wait_and_inspect_are_harness_owned(self) -> None:
         dump = {
@@ -423,6 +457,153 @@ class MultiM5PredicateTests(unittest.TestCase):
             )
         self.assertTrue(verdict.passed)
         self.assertTrue(verdict.predicates["root_woken"])
+
+    def test_responses_input_order_collects_inspect_dump(self) -> None:
+        jsonl = json.dumps(
+            {
+                "model": "gpt-5.6-sol",
+                "input": [
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "call_id": "dump-1",
+                        "arguments": '{"action":"dump"}',
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "dump-1",
+                        "output": json.dumps(
+                            {"action": "dump", "entries": self._dump()["entries"]}
+                        ),
+                    },
+                ],
+            }
+        )
+        collected = collect_gate1_evidence(jsonl)
+        self.assertEqual(collected["entries"][2]["event_id"], "e1")
+
+    def test_dump_pages_with_a_cursor_concatenate(self) -> None:
+        first = [
+            {"entry": "participant", "label": "/root", "role": "root"},
+            {"entry": "event", "event_id": "e1", "version_count": 1, "route_count": 0},
+            {"entry": "version", "version_id": "v1", "author": "/root/worker"},
+        ]
+        second = [
+            {"entry": "version", "version_id": "v2", "author": "/root"},
+            {"entry": "route", "route_id": "r1", "event_id": "e1", "target": "/root/worker"},
+        ]
+        jsonl = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "call_id": "p1",
+                        "arguments": '{"action":"dump"}',
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call_output",
+                        "call_id": "p1",
+                        "output": json.dumps({"action": "dump", "entries": first}),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "call_id": "p2",
+                        "arguments": '{"action":"dump","cursor":"page-2"}',
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call_output",
+                        "call_id": "p2",
+                        "output": json.dumps({"action": "dump", "entries": second}),
+                    }
+                ),
+            ]
+        )
+        collected = collect_gate1_evidence(jsonl)
+        kinds = [row["entry"] for row in collected["entries"]]
+        self.assertEqual(kinds, ["participant", "event", "version", "version", "route"])
+
+    def test_a_later_dump_without_cursor_replaces_stale_pages(self) -> None:
+        jsonl = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "call_id": "early",
+                        "arguments": '{"action":"dump"}',
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call_output",
+                        "call_id": "early",
+                        "output": json.dumps(
+                            {
+                                "action": "dump",
+                                "entries": [{"entry": "event", "event_id": "stale"}],
+                            }
+                        ),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "call_id": "final",
+                        "arguments": '{"action":"dump"}',
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "function_call_output",
+                        "call_id": "final",
+                        "output": json.dumps(
+                            {
+                                "action": "dump",
+                                "entries": [{"entry": "event", "event_id": "fresh"}],
+                            }
+                        ),
+                    }
+                ),
+            ]
+        )
+        collected = collect_gate1_evidence(jsonl)
+        self.assertEqual(collected["entries"][0]["event_id"], "fresh")
+
+    def test_nested_tool_specs_do_not_steal_a_dump_call(self) -> None:
+        jsonl = json.dumps(
+            {
+                "tools": [{"type": "function", "name": "shell", "call_id": "dump-1"}],
+                "input": [
+                    {
+                        "type": "function_call",
+                        "name": "team_inspect",
+                        "call_id": "dump-1",
+                        "arguments": '{"action":"dump"}',
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "dump-1",
+                        "output": json.dumps(
+                            {
+                                "action": "dump",
+                                "entries": [{"entry": "event", "event_id": "kept"}],
+                            }
+                        ),
+                    },
+                ],
+            }
+        )
+        collected = collect_gate1_evidence(jsonl)
+        self.assertEqual(collected["entries"][0]["event_id"], "kept")
 
 
 class MultiM5ScheduleTests(unittest.TestCase):

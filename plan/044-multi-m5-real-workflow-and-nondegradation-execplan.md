@@ -202,7 +202,7 @@
   `counts_as_effective=false`，`evidence_kind=loopback`。证明团队工具在 `code_mode_host=true` 下已注册
   并可走 `team_publish` 往返。**不是门 1 真实通过。**
 - **定向门禁**（均无 API / 无 Docker）：
-  - `tests.test_multi_m5` 20/20（门 1 窄整改后）
+  - `tests.test_multi_m5` 25/25（门 1 窄整改 + 采集自查后）
   - `tests.test_binary_freeze.MultiProductFreezeTests`
   - `tests.test_terminal_bench.TerminalBenchTests.test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv`
   - `just eval-lock`
@@ -299,5 +299,6 @@
 | 017 | 门 1 Event 局部谓词必须落在**同一个 Event**；按 `TeamStore::dump_entries` 顺序分组，不读 Version 上的 `event_id` | 真实 dump 的 Version 行没有 `event_id`；各自扫全表会让 Root 独角戏 + 游离成员噪声误判通过 | 门 1 判据 | 已采纳 |
 | 018 | `root_resolved` 只认成员作者 Version；新增 `root_woken`（inspect log 对 Root 的 `signalled`，或 JSONL 里 `wait_agent` 的 TeamActivity 原文） | ExecPlan 五项能力含 Root 唤醒；mailbox 的 `Wait completed.` 不算 | 门 1 判据 | 已采纳 |
 | 019 | 成员模型：补 `agents.default_subagent_*`，并设 `expose_spawn_agent_model_overrides=false` | 只设默认值仍可被 spawn 的 `model` 覆盖；关掉 schema 字段才能钉死 | Multi 运行配置 | 已采纳 |
-| 020 | 门 1 dump 只从 `codex exec --json` 的 harness 工具输出采集，不读 `TEAM_REPORT.md` | 模型自述可编造；阶段 B runner 必须走这条采集合同 | 门 1 证据 | 已采纳 |
+| 020 | 门 1 dump 只从 harness 捕获的 Responses `function_call_output` 采集，不读 `TEAM_REPORT.md`，也不把 `codex exec --json` 当成工具输出源 | exec JSONL 不映射 `team_inspect`；wait 的 ThreadItem 也不带 TeamActivity 原文。真实工具结果出现在下一轮 Responses `input` 里 | 门 1 证据 | 已采纳 |
 | 021 | 门 2 归因边界写入不退化锁：比较的是「上游 V2 + 团队状态」对「上游默认 V1」；真退化再跑 `V2 开、team_state 关`，本轮不预跑 | 结论要能说清退化归谁；不预跑省钱 | 门 2 合同 | 已采纳 |
+| 022 | 采集按文档顺序吸收；无 cursor 的 dump 整页替换，带 cursor 的同快照页拼接；jsonl 一旦提供就覆盖调用方 dump | 整树 DFS last-wins 会把后一页 visibility 盖掉 Event，也会让伪造 dump 在 jsonl 空时漏进来 | 门 1 采集 | 已采纳 |
