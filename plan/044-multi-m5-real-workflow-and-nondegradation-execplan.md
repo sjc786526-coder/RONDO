@@ -225,13 +225,13 @@
   CaptureProxy(forward) → LoopbackResponsesProxy → HTTPS provider；`TerminalBenchSlotExecutor`
   走既有 TB adapters/runner/results，不套 v7 campaign。CLI / `just` 不内嵌授权口令，无口令时
   退出码 78 且不加载 `.env.local`。未跑真实 API、未拉 Docker、未产生费用。
+  独立审查先因门 2 `$8`/`$24` `ensure_run` 冲突判 FAIL，已修并复审通过。
   详见 `agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`。
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未授权、未执行。
 
 ### 本任务剩余步骤
 
-- 按阶段 A 收口的 F3 决议，对本轮两个付费部件做一次独立审查。
-- 审查通过后，按本节「阶段 B 精确授权清单」向用户申请一次真实 API/付费/Docker 授权，不得自行开工。
+- 按本节「阶段 B 精确授权清单」向用户申请一次真实 API/付费/Docker 授权，不得自行开工。
 
 ### 阻塞项
 
@@ -257,8 +257,8 @@
   code-mode 嵌套面）。因此现有 `evidence_source` 设计成立，无需改动门 1 的运行配置。
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
-- 阶段 B：**付费入口已接线，真实运行未开始。** §1 阶段 B 五项全部未做。不得表述为可以开始花钱，
-  除非独立审查通过且用户按清单授权。
+- 阶段 B：**付费入口已接线且经独立审查通过，真实运行未开始。** §1 阶段 B 五项全部未做。
+  不得开始花钱，除非用户按清单授权。
 
 ### 阶段 B 精确授权清单
 

@@ -105,6 +105,7 @@ def run_gate1_paid(
             retry_backoff_seconds=0.0,
             unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
             request_reservation_usd=GATE1_REQUEST_RESERVATION_USD,
+            run_cap_usd=GATE1_RUN_CAP_USD,
             timeout_seconds=FORWARD_TIMEOUT_SECONDS,
             _transport=transport,
         )

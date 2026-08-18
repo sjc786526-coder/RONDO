@@ -16,6 +16,7 @@ EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.api_budget_proxy import (  # noqa: E402
+    ApiBudgetProxyError,
     BudgetCapacityExhausted,
     LoopbackResponsesProxy,
     Usage,
@@ -25,6 +26,8 @@ from rondo_eval.config import RepoPaths  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, Product, Side  # noqa: E402
 from rondo_eval.multi_m5.archive import archive_record  # noqa: E402
 from rondo_eval.multi_m5.budget import (  # noqa: E402
+    GATE1_RUN_CAP_USD,
+    GATE2_REQUEST_RESERVATION_USD,
     GATE2_RUN_CAP_USD,
     HARD_CAP_USD,
     RUN_CAP_USD,
@@ -727,6 +730,66 @@ class MultiM5TerminalBenchExecutorTests(unittest.TestCase):
         self.assertTrue(any(req.product is Product.RONDO_MULTI for req in requests))
         self.assertTrue(any(req.product is None for req in requests))
         for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+
+    def test_budget_proxy_keeps_the_gate2_eight_dollar_run_cap(self) -> None:
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-gate2-run-cap.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        metadata = scratch / "multi-m5-test-gate2-run-cap-meta.json"
+        for item in (ledger_path, lock_path, metadata):
+            if item.exists():
+                item.unlink()
+        workflow = load_workflow_contract()
+        pricing = phase_b_pricing()
+        run_id = "m5-g2-fix-git-codex-r1-a1"
+        kwargs = {
+            "upstream_base_url": "https://provider.example/v1",
+            "api_key": "sk-test-never-spend",
+            "run_id": run_id,
+            "metadata_path": metadata,
+            "main_model": workflow.root_model,
+            "main_effort": workflow.root_effort,
+            "main_pricing": pricing,
+            "guardian_model": workflow.root_model,
+            "guardian_pricing": pricing,
+            "guardian_effort": workflow.root_effort,
+            "max_attempts": 5,
+            "retry_backoff_seconds": 0.0,
+            "unbilled_retry_statuses": (429, 500, 502, 503, 504),
+            "request_reservation_usd": GATE2_REQUEST_RESERVATION_USD,
+            "timeout_seconds": FORWARD_TIMEOUT_SECONDS,
+        }
+        with open_phase_b_ledger(ledger_path) as ledger:
+            ledger.ensure_run(run_id, cap_usd=GATE2_RUN_CAP_USD)
+            with self.assertRaisesRegex(ApiBudgetProxyError, "existing run cap"):
+                LoopbackResponsesProxy(ledger=ledger, **kwargs)
+            proxy = LoopbackResponsesProxy(
+                ledger=ledger,
+                run_cap_usd=GATE2_RUN_CAP_USD,
+                **kwargs,
+            )
+            self.assertEqual(
+                Decimal(ledger.snapshot()["runs"][run_id]["cap_usd"]),
+                GATE2_RUN_CAP_USD,
+            )
+            del proxy
+            ledger.ensure_run("m5-g1-paid-a1", cap_usd=GATE1_RUN_CAP_USD)
+            gate1 = LoopbackResponsesProxy(
+                ledger=ledger,
+                run_id="m5-g1-paid-a1",
+                metadata_path=scratch / "multi-m5-test-gate1-run-cap-meta.json",
+                run_cap_usd=GATE1_RUN_CAP_USD,
+                **{k: v for k, v in kwargs.items() if k not in {"run_id", "metadata_path"}},
+            )
+            self.assertEqual(
+                Decimal(ledger.snapshot()["runs"]["m5-g1-paid-a1"]["cap_usd"]),
+                GATE1_RUN_CAP_USD,
+            )
+            del gate1
+        for item in (ledger_path, lock_path, metadata):
             if item.exists():
                 item.unlink()
 

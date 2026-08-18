@@ -206,26 +206,27 @@ class TerminalBenchSlotExecutor:
             scratch_root(self._common_root) / "multi-m5-gate2-meta" / f"{run_id}.json"
         )
         metadata_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        proxy = LoopbackResponsesProxy(
-            upstream_base_url=provider.base_url,
-            api_key=self._api_key,
-            ledger=self._ledger,
-            run_id=run_id,
-            metadata_path=metadata_path,
-            main_model=provider.main_model,
-            main_effort=provider.main_effort,
-            main_pricing=provider.main_pricing,
-            guardian_model=provider.guardian_model,
-            guardian_pricing=provider.guardian_pricing,
-            guardian_effort=provider.guardian_effort,
-            max_attempts=provider.max_attempts,
-            retry_backoff_seconds=provider.retry_backoff_seconds,
-            unbilled_retry_statuses=provider.unbilled_retry_statuses,
-            request_reservation_usd=GATE2_REQUEST_RESERVATION_USD,
-            timeout_seconds=FORWARD_TIMEOUT_SECONDS,
-            _transport=self._transport,
-        )
         try:
+            proxy = LoopbackResponsesProxy(
+                upstream_base_url=provider.base_url,
+                api_key=self._api_key,
+                ledger=self._ledger,
+                run_id=run_id,
+                metadata_path=metadata_path,
+                main_model=provider.main_model,
+                main_effort=provider.main_effort,
+                main_pricing=provider.main_pricing,
+                guardian_model=provider.guardian_model,
+                guardian_pricing=provider.guardian_pricing,
+                guardian_effort=provider.guardian_effort,
+                max_attempts=provider.max_attempts,
+                retry_backoff_seconds=provider.retry_backoff_seconds,
+                unbilled_retry_statuses=provider.unbilled_retry_statuses,
+                request_reservation_usd=GATE2_REQUEST_RESERVATION_USD,
+                run_cap_usd=GATE2_RUN_CAP_USD,
+                timeout_seconds=FORWARD_TIMEOUT_SECONDS,
+                _transport=self._transport,
+            )
             with proxy:
                 projected = replace(
                     request, provider_transport_base_url=proxy.docker_base_url

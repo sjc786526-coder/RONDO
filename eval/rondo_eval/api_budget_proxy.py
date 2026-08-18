@@ -885,6 +885,7 @@ class LoopbackResponsesProxy:
         retry_backoff_seconds: float,
         unbilled_retry_statuses: tuple[int, ...],
         request_reservation_usd: Decimal | str | None = None,
+        run_cap_usd: Decimal | str | None = None,
         max_guardian_logical_requests: int | None = None,
         max_logical_requests: int | None = None,
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
@@ -977,7 +978,7 @@ class LoopbackResponsesProxy:
             or not preflight_task_id
         ):
             raise ApiBudgetProxyError("symmetry preflight identity is incomplete")
-        ledger.ensure_run(run_id)
+        ledger.ensure_run(run_id, cap_usd=run_cap_usd)
         self._symmetry_preflight = symmetry_preflight
         self._preflight_side = preflight_side
         self._preflight_task_id = preflight_task_id
