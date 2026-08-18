@@ -69,6 +69,7 @@ def archive_record(
     binary_sha256: str,
     outcome: str,
     counts_as_effective: bool,
+    team_state: bool = True,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if evidence_kind not in {"loopback", "fake", "real_api"}:
@@ -84,7 +85,9 @@ def archive_record(
         "side": side.value,
         "source_commit": source_commit,
         "binary_sha256": binary_sha256,
-        "team_capability_config": team_capability_config_projection(side, product),
+        "team_capability_config": team_capability_config_projection(
+            side, product, team_state=team_state
+        ),
         "outcome": outcome,
         "counts_as_effective": counts_as_effective,
     }

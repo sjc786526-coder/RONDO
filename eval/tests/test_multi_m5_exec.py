@@ -88,7 +88,12 @@ from rondo_eval.multi_m5.paid import (  # noqa: E402
 from rondo_eval.multi_m5.ready import readiness_report  # noqa: E402
 from rondo_eval.multi_m5.rehearsal import MEMBER_TASK, CollaborationStub  # noqa: E402
 from rondo_eval.multi_m5.gate2 import _run_id  # noqa: E402
-from rondo_eval.multi_m5.schedule import base_slots  # noqa: E402
+from rondo_eval.multi_m5.schedule import (  # noqa: E402
+    DIAGNOSTIC_ROUND_INDEX,
+    DIAGNOSTIC_SLOT_KIND,
+    base_slots,
+    diagnostic_slots,
+)
 from rondo_eval.multi_m5.store import (  # noqa: E402
     StoreError,
     load_archive_records,
@@ -320,8 +325,11 @@ class MultiM5Gate2FakeTests(unittest.TestCase):
         self.assertEqual(result["effective_runs"], 24)
         self.assertEqual(result["conditional_slots"], 4)
         self.assertEqual(result["verdicts"][first], "stable_one_way_degradation")
+        # The degraded task also drew its attribution diagnostic, which is an
+        # extra archived row that is deliberately not an effective observation.
+        self.assertEqual(result["diagnostic_slots"], 1)
         records = load_archive_records(archive)
-        self.assertEqual(len(records), 24)
+        self.assertEqual(len(records), 25)
         self.assertTrue(all(row["evidence_kind"] == "fake" for row in records))
         self.assertTrue(all("task_id" in row and "round_index" in row for row in records))
         archive.unlink()
@@ -670,6 +678,161 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
                     item.unlink()
 
 
+class MultiM5AttributionDiagnosticTests(unittest.TestCase):
+    """The lock's `diagnostic_v2_on_team_state_off` must be a real run.
+
+    Before this it was a sentence the loader grepped for: nothing built the
+    slot, nothing turned the team layer off, and a degradation could only ever
+    be attributed by assertion.
+    """
+
+    def test_no_degradation_means_the_diagnostic_is_never_pre_run(self) -> None:
+        result = run_light_interleaved(
+            executor=ScriptedSlotExecutor(),
+            common_root=_common_root(),
+            persist=False,
+        )
+        self.assertEqual(result["diagnostic_slots"], 0)
+        self.assertEqual(result["diagnostics"], {})
+        self.assertTrue(result["passed"])
+        self.assertFalse(
+            any(row.get("slot_kind") == DIAGNOSTIC_SLOT_KIND for row in result["records"])
+        )
+
+    def test_degraded_task_draws_a_team_state_off_row_that_is_not_an_observation(self) -> None:
+        contract = load_nondegradation_contract()
+        first = contract.tasks[0]
+        script = {
+            (first, "rondo", round_index): ("agent_failed",)
+            for round_index in (1, 2, 3)
+        }
+        result = run_light_interleaved(
+            executor=ScriptedSlotExecutor(script),
+            common_root=_common_root(),
+            persist=False,
+        )
+        self.assertEqual(result["verdicts"][first], "stable_one_way_degradation")
+        self.assertEqual(result["diagnostic_slots"], 1)
+        self.assertEqual(result["diagnostics"], {first: "completed"})
+        rows = [row for row in result["records"] if row.get("slot_kind") == DIAGNOSTIC_SLOT_KIND]
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["task_id"], first)
+        self.assertEqual(row["side"], Side.RONDO.value)
+        self.assertEqual(row["product"], Product.RONDO_MULTI.value)
+        self.assertEqual(row["round_index"], DIAGNOSTIC_ROUND_INDEX)
+        # Attribution evidence, not a fourth observation: it must not enter the
+        # effective count and must not soften the verdict.
+        self.assertFalse(row["counts_as_effective"])
+        self.assertEqual(result["effective_runs"], 24)
+        self.assertFalse(result["passed"])
+        # The row has to admit which configuration actually ran.
+        self.assertTrue(row["team_capability_config"]["multi_agent_v2_enabled"])
+        self.assertFalse(row["team_capability_config"]["team_state_enabled"])
+
+    def test_diagnostic_slots_are_multi_only_and_one_per_degraded_task(self) -> None:
+        contract = load_nondegradation_contract()
+        degraded = {task_id: "no_stable_one_way_degradation" for task_id in contract.tasks}
+        degraded[contract.tasks[0]] = "stable_one_way_degradation"
+        degraded[contract.tasks[3]] = "stable_one_way_degradation"
+        degraded[contract.tasks[5]] = "uncertain"
+        slots = diagnostic_slots(contract, degraded)
+        self.assertEqual(
+            [slot.task_id for slot in slots], [contract.tasks[0], contract.tasks[3]]
+        )
+        self.assertTrue(all(slot.side is Side.RONDO for slot in slots))
+        self.assertTrue(all(slot.product is Product.RONDO_MULTI for slot in slots))
+
+    def test_diagnostic_request_switches_the_team_layer_off(self) -> None:
+        contract = load_nondegradation_contract()
+        executor = TerminalBenchSlotExecutor(
+            common_root=_common_root(),
+            catalog=_v4_catalog(),
+            binaries={
+                Side.CODEX: _dummy_binary(),
+                Side.RONDO: _dummy_binary(product="rondo-multi"),
+            },
+            paths=RepoPaths.discover(Path.cwd()),
+        )
+        multi_slot = next(
+            slot for slot in base_slots(contract) if slot.side is Side.RONDO
+        )
+        diagnostic = diagnostic_slots(
+            contract, {multi_slot.task_id: "stable_one_way_degradation"}
+        )[0]
+        normal_request = executor.build_request(
+            multi_slot, attempt=1, run_id=_run_id(multi_slot, 1)
+        )
+        diagnostic_request = executor.build_request(
+            diagnostic, attempt=1, run_id=_run_id(diagnostic, 1)
+        )
+        self.assertTrue(normal_request.team_state_enabled)
+        self.assertFalse(diagnostic_request.team_state_enabled)
+        # Same task, same image, same product: only the team layer differs.
+        self.assertEqual(diagnostic_request.product, Product.RONDO_MULTI)
+        self.assertEqual(diagnostic_request.image_digest, normal_request.image_digest)
+        self.assertEqual(diagnostic_request.timeout_seconds, normal_request.timeout_seconds)
+
+    def test_a_degradation_diagnostic_still_obeys_the_batch_stop_lines(self) -> None:
+        contract = load_nondegradation_contract()
+        first = contract.tasks[0]
+        script = {
+            (first, "rondo", round_index): ("agent_failed",)
+            for round_index in (1, 2, 3)
+        }
+
+        class _StoppingExecutor(ScriptedSlotExecutor):
+            def execute(self, slot, *, attempt: int, run_id: str) -> SlotResult:
+                if slot.kind == DIAGNOSTIC_SLOT_KIND:
+                    raise DockerResourceStop(
+                        "host free space below the 80 GiB floor",
+                        failed_probe="data_root_free",
+                    )
+                return super().execute(slot, attempt=attempt, run_id=run_id)
+
+        result = run_light_interleaved(
+            executor=_StoppingExecutor(script),
+            common_root=_common_root(),
+            persist=False,
+        )
+        # A capacity stop during the diagnostic ends the batch rather than
+        # retrying: the diagnostic shares every stop line with the paid batch.
+        self.assertTrue(result["stopped"])
+        self.assertEqual(result["stop_reason"], "docker_resource_stop")
+        self.assertEqual(result["verdicts"][first], "stable_one_way_degradation")
+        self.assertFalse(result["passed"])
+
+    def test_the_lock_must_carry_an_executable_diagnostic_contract(self) -> None:
+        raw = json.loads(
+            (EVAL_ROOT / "locks" / "multi-m5-nondegradation-v1.json").read_text("utf-8")
+        )
+        self.assertEqual(
+            raw["attribution"]["diagnostic"]["id"], "diagnostic_v2_on_team_state_off"
+        )
+        for mutation in (
+            {"team_state_enabled": True},
+            {"counts_as_effective": True},
+            {"pre_run_forbidden": False},
+            {"side": "codex"},
+            {"shares_batch_budget": False},
+        ):
+            with self.subTest(mutation=mutation):
+                broken = json.loads(json.dumps(raw))
+                broken["attribution"]["diagnostic"].update(mutation)
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "multi-m5-nondegradation-v1.json"
+                    path.write_text(json.dumps(broken), "utf-8")
+                    with self.assertRaises(M5ContractError):
+                        load_nondegradation_contract(path)
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = json.loads(json.dumps(raw))
+            del broken["attribution"]["diagnostic"]
+            path = Path(tmp) / "multi-m5-nondegradation-v1.json"
+            path.write_text(json.dumps(broken), "utf-8")
+            with self.assertRaises(M5ContractError):
+                load_nondegradation_contract(path)
+
+
 class MultiM5TerminalBenchExecutorTests(unittest.TestCase):
     def test_docker_is_required_and_requests_are_not_campaigns(self) -> None:
         root = _common_root()
@@ -879,10 +1042,13 @@ class MultiM5BudgetStopHonestyTests(unittest.TestCase):
             contract.max_effective_runs
             + contract.max_infra_attempts_total
             + workflow.max_attempts
+            + len(contract.tasks)
         )
         try:
             with open_phase_b_ledger(ledger_path) as ledger:
-                # Gate 1 shares this ledger; sizing it at 60+12 starved gate 2.
+                # Gate 1 shares this ledger; sizing it at 60+12 starved gate 2,
+                # and leaving out the per-task attribution diagnostic would starve
+                # the very run that has to explain a degradation.
                 self.assertEqual(ledger.snapshot()["max_runs"], needed)
         finally:
             for item in (ledger_path, lock_path):

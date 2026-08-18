@@ -212,11 +212,19 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
     if loaded.raw.get("cost_forecast", {}).get("ledger_batch_id") != BATCH_ID:
         raise M5ContractError("ledger batch id drifted from multi-m5-phase-b")
     # Both gates share this ledger, so gate 1's attempts need their own slots.
-    # Sizing it at 60+12 alone truncates gate 2 in the worst legal case.
+    # Sizing it at 60+12 alone truncates gate 2 in the worst legal case. The
+    # attribution diagnostic can fire once per task, and it spends from the same
+    # $120, so it needs slots too -- otherwise the run that has to explain a
+    # degradation is the one that cannot start.
     gate1_attempts = load_workflow_contract().max_attempts
-    max_runs = loaded.max_effective_runs + loaded.max_infra_attempts_total + gate1_attempts
-    if max_runs != 75:
-        raise M5ContractError("ledger run-slot count drifted from 60+12+3")
+    max_runs = (
+        loaded.max_effective_runs
+        + loaded.max_infra_attempts_total
+        + gate1_attempts
+        + len(loaded.tasks)
+    )
+    if max_runs != 85:
+        raise M5ContractError("ledger run-slot count drifted from 60+12+3+10")
     ledger = PersistentBudgetLedger(
         path,
         batch_id=BATCH_ID,

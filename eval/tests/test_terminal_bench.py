@@ -1135,6 +1135,70 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("agents.default_subagent", commands)
         self.assertNotIn("agents.default_subagent", rondo_commands)
 
+    def test_multi_diagnostic_drops_only_the_team_layer(self) -> None:
+        """M-5 gate 2 attribution: upstream V2 stays on, team state goes off.
+
+        Without this the diagnostic would be indistinguishable from a normal
+        Multi run and could not separate "upstream V2 costs the completion"
+        from "the RONDO team layer costs it".
+        """
+
+        diagnostic = self.adapter(
+            RondoUploadAdapter,
+            extra_env={"OPENAI_API_KEY": "sk-test"},
+            binary_product=Product.RONDO_MULTI.value,
+            team_state_enabled=False,
+        )
+        environment = FakeEnvironment()
+        asyncio.run(diagnostic.run("repair the repository", environment, mock.Mock()))
+        commands = "\n".join(call[0] for call in environment.calls)
+        self.assertIn(
+            "features.multi_agent_v2={enabled=true,team_state_enabled=false,"
+            "non_code_mode_only=false,expose_spawn_agent_model_overrides=false}",
+            commands,
+        )
+        self.assertNotIn("team_state_enabled=true", commands)
+        # Everything else about the run is unchanged, including the pinned
+        # member model: only the team layer may differ.
+        self.assertIn('agents.default_subagent_model="gpt-5.6-sol"', commands)
+        self.assertIn("features.code_mode_host=true", commands)
+        self.assertIn("expose_spawn_agent_model_overrides=false", commands)
+
+    def test_only_multi_can_carry_the_team_state_off_flag(self) -> None:
+        # `--strict-config` upstream cannot even deserialize the key, and Local
+        # has no team layer, so a mis-routed diagnostic must fail construction
+        # rather than produce a run that misreports its own configuration.
+        for adapter_type, product in (
+            (CodexUploadAdapter, None),
+            (RondoUploadAdapter, None),
+        ):
+            with self.subTest(adapter=adapter_type.__name__):
+                overrides = {"team_state_enabled": False}
+                if product is not None:
+                    overrides["binary_product"] = product
+                with self.assertRaises(AdapterError):
+                    self.adapter(adapter_type, **overrides)
+
+    def test_team_state_flag_rejects_a_non_boolean_string(self) -> None:
+        # Harbor rebuilds kwargs from CLI strings; truthiness would turn the
+        # string "false" into an enabled team layer.
+        with self.assertRaises(AdapterError):
+            self.adapter(
+                RondoUploadAdapter,
+                binary_product=Product.RONDO_MULTI.value,
+                team_state_enabled="False",
+            )
+        adapter = self.adapter(
+            RondoUploadAdapter,
+            binary_product=Product.RONDO_MULTI.value,
+            team_state_enabled="false",
+        )
+        self.assertFalse(adapter._team_state_enabled)
+        self.assertIn(
+            ("team_state_enabled", "false"),
+            adapters_module.manifest_agent_kwargs(adapter),
+        )
+
     def test_adapter_non_git_task_uses_frozen_workdir_without_repo_precondition(self) -> None:
         adapter = self.adapter(
             RondoUploadAdapter,

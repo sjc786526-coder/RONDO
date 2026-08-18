@@ -87,6 +87,10 @@ class TerminalBenchRequest:
     frozen_model_catalog_source_commit: str | None = None
     frozen_model_catalog_provenance_sha256: str | None = None
     frozen_task: FrozenTask | None = None
+    # False only for the M-5 gate 2 attribution diagnostic: upstream V2 stays on
+    # and the RONDO team layer is switched off. Never set on a run that produces
+    # a non-degradation observation.
+    team_state_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -541,6 +545,7 @@ def prepare_terminal_bench_run(
         frozen_model_catalog_provenance_sha256=(
             request.frozen_model_catalog_provenance_sha256
         ),
+        team_state_enabled=request.team_state_enabled,
     )
     trial_name = _trial_name(materialized.task_label, spec.side)
     trials_dir = materialized.task_path.parent / "trials"

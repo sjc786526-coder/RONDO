@@ -74,6 +74,39 @@ def conditional_slots(
     return tuple(extra)
 
 
+DIAGNOSTIC_ROUND_INDEX = 4
+DIAGNOSTIC_SLOT_KIND = "diagnostic_v2_on_team_state_off"
+
+
+def diagnostic_slots(
+    contract: NondegradationContract,
+    verdicts: Mapping[str, str],
+) -> tuple[Slot, ...]:
+    """Return one ``diagnostic_v2_on_team_state_off`` slot per degraded task.
+
+    Derived from the finished verdicts, so the diagnostic can only exist after a
+    task actually degraded -- the lock forbids pre-running it. Multi side only:
+    the Codex arm of the comparison is unchanged and re-running it would answer
+    nothing about attribution.
+
+    The round index sits past every observation round so these rows can never be
+    mistaken for a fourth observation of the frozen three.
+    """
+
+    slots = [
+        Slot(
+            task_id,
+            Side.RONDO,
+            Product.RONDO_MULTI,
+            DIAGNOSTIC_ROUND_INDEX,
+            DIAGNOSTIC_SLOT_KIND,
+        )
+        for task_id in contract.tasks
+        if verdicts.get(task_id) == "stable_one_way_degradation"
+    ]
+    return tuple(slots)
+
+
 def degradation_on_task(
     observations: Sequence[Mapping[str, str]],
 ) -> str:

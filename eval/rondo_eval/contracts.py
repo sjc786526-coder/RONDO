@@ -136,6 +136,14 @@ TEAM_CAPABILITY_MULTI_TOML = (
     "{enabled=true,team_state_enabled=true,non_code_mode_only=false,"
     "expose_spawn_agent_model_overrides=false}"
 )
+# Same table with the RONDO team layer off. Used only by the M-5 gate 2
+# attribution diagnostic: when a task degrades one-way, this separates "upstream
+# V2 costs the completion" from "the team layer costs it". Never used by a run
+# that counts toward the non-degradation verdict.
+TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML = (
+    "{enabled=true,team_state_enabled=false,non_code_mode_only=false,"
+    "expose_spawn_agent_model_overrides=false}"
+)
 AGENT_DEFAULT_SUBAGENT_MODEL = "gpt-5.6-sol"
 AGENT_DEFAULT_SUBAGENT_EFFORT = "medium"
 
@@ -203,7 +211,11 @@ def auto_review_config_projection(
     }
 
 
-def team_capability_override_items(product: Product | None) -> tuple[str, ...]:
+def team_capability_override_items(
+    product: Product | None,
+    *,
+    team_state: bool = True,
+) -> tuple[str, ...]:
     """Return the ``-c`` items that turn Multi team capability on.
 
     Local and the frozen upstream get nothing: team tools are Multi-only, and
@@ -212,12 +224,17 @@ def team_capability_override_items(product: Product | None) -> tuple[str, ...]:
     enables ``code_mode_host``. The ``features.multi_agent_v2`` table stays a
     single inline TOML; the two ``agents.default_subagent_*`` items pin the
     member model without splitting that table.
+
+    ``team_state=False`` is the gate 2 attribution diagnostic only. It keeps
+    upstream V2 on and drops the RONDO team layer, so it must never be reachable
+    from a run that produces a non-degradation observation.
     """
 
     if product is not Product.RONDO_MULTI:
         return ()
+    table = TEAM_CAPABILITY_MULTI_TOML if team_state else TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML
     return (
-        f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
+        f"features.multi_agent_v2={table}",
         f"agents.default_subagent_model={json.dumps(AGENT_DEFAULT_SUBAGENT_MODEL)}",
         (
             "agents.default_subagent_reasoning_effort="
@@ -229,11 +246,17 @@ def team_capability_override_items(product: Product | None) -> tuple[str, ...]:
 def team_capability_config_projection(
     side: Side,
     product: Product | None,
+    *,
+    team_state: bool = True,
 ) -> dict[str, object] | None:
     """Record whether this run configured Multi team capability.
 
     ``None`` for the frozen upstream. Local records the closed state so a
     Multi/Local mix-up is visible in the archive rather than implied.
+
+    A diagnostic run keeps ``multi_agent_v2_enabled`` true and reports
+    ``team_state_enabled`` false, so an archive row can never claim the team
+    layer was on for a run that deliberately switched it off.
     """
 
     resolved = product_for_side(side, product)
@@ -243,7 +266,7 @@ def team_capability_config_projection(
     return {
         "schema_version": TEAM_CAPABILITY_CONFIG_SCHEMA_VERSION,
         "multi_agent_v2_enabled": enabled,
-        "team_state_enabled": enabled,
+        "team_state_enabled": enabled and team_state,
         "non_code_mode_only": False if enabled else None,
         "expose_spawn_agent_model_overrides": False if enabled else None,
         "default_subagent_model": AGENT_DEFAULT_SUBAGENT_MODEL if enabled else None,

@@ -66,7 +66,15 @@ from .bundle import load_side_manifest
 from .capture import FORWARD_TIMEOUT_SECONDS
 from .load import load_nondegradation_contract, load_runtime_identity
 from .paid import PaidAuthorization
-from .schedule import Slot, base_slots, conditional_slots, degradation_on_task, outcomes_by_task
+from .schedule import (
+    DIAGNOSTIC_SLOT_KIND,
+    Slot,
+    base_slots,
+    conditional_slots,
+    degradation_on_task,
+    diagnostic_slots,
+    outcomes_by_task,
+)
 from .store import persist_archive_record, scratch_root
 
 _FAKE_USAGE = Usage(1_000, 0, 0, 0)
@@ -199,6 +207,9 @@ class TerminalBenchSlotExecutor:
             seccomp_profile_effective_sha256=(
                 _SECCOMP_EFFECTIVE_SHA256 if seccomp is not None else None
             ),
+            # The attribution diagnostic is the one slot that runs Multi with the
+            # team layer off. Everything else about the run is unchanged.
+            team_state_enabled=slot.kind != DIAGNOSTIC_SLOT_KIND,
         )
 
     def _run_live(
@@ -528,6 +539,12 @@ def run_light_interleaved(
             )
             return produced
 
+        # The attribution diagnostic is evidence about *why* a task degraded, not
+        # another observation of whether it did. It never counts as effective and
+        # never draws on the effective-run budget, but it does share the dollars,
+        # the infra attempts and every stop line.
+        is_diagnostic = slot.kind == DIAGNOSTIC_SLOT_KIND
+
         for attempt in range(1, loaded.max_slot_attempts + 1):
             if stopped:
                 return emit(
@@ -535,7 +552,7 @@ def run_light_interleaved(
                     counts_as_effective=False,
                     extra={"stop_reason": stop_reason, "attempt": attempt},
                 )
-            if effective >= loaded.max_effective_runs:
+            if not is_diagnostic and effective >= loaded.max_effective_runs:
                 return emit(
                     outcome="uncertain",
                     counts_as_effective=False,
@@ -670,8 +687,9 @@ def run_light_interleaved(
                 if attempt == loaded.max_slot_attempts:
                     return produced
                 continue
-            counts = result.outcome != RunOutcome.BUDGET_STOPPED.value
-            if counts and ledger is not None and charge_fake_usage and pricing is not None:
+            billable = result.outcome != RunOutcome.BUDGET_STOPPED.value
+            counts = billable and not is_diagnostic
+            if billable and ledger is not None and charge_fake_usage and pricing is not None:
                 try:
                     _charge(ledger, run_id, attempt, pricing)
                 except BudgetStopped as exc:
@@ -729,17 +747,55 @@ def run_light_interleaved(
         task_id: degradation_on_task(observations)
         for task_id, observations in grouped.items()
     }
+
+    # Only now, with the verdicts settled, can the lock's
+    # `diagnostic_v2_on_team_state_off` slot exist: the contract requires it on a
+    # degraded task and forbids pre-running it. It is attribution evidence, so it
+    # cannot change a verdict -- but leaving it unrun would make an honest
+    # "the team layer caused this" impossible to state.
+    diagnostics: tuple[Slot, ...] = ()
+    if not stopped:
+        diagnostics = diagnostic_slots(loaded, verdicts)
+        for slot in diagnostics:
+            for record in run_slot(slot):
+                records.append(record)
+                if persist:
+                    persist_archive_record(record, common_root=common_root, path=archive_file)
+            if stopped:
+                break
+
     return {
         "records": records,
         "verdicts": verdicts,
         "effective_runs": effective,
         "infra_used": infra_used,
         "conditional_slots": len(extras),
+        "diagnostic_slots": len(diagnostics),
+        "diagnostics": diagnostic_outcomes(records),
         "stopped": stopped,
         "stop_reason": stop_reason,
         "passed": gate2_passed(loaded, verdicts, stopped=stopped),
         "ledger_snapshot": None if ledger is None else ledger.snapshot(),
     }
+
+
+def diagnostic_outcomes(records) -> dict[str, str]:
+    """Per-task outcome of the team-state-off diagnostic, for attribution only.
+
+    A `completed` here says the task passes with upstream V2 alone, so the team
+    layer is implicated. Anything else says the degradation is not attributable
+    to the team layer on this evidence. Neither changes the gate 2 verdict.
+    """
+
+    outcomes: dict[str, str] = {}
+    for record in records:
+        if record.get("slot_kind") != DIAGNOSTIC_SLOT_KIND:
+            continue
+        task_id = record.get("task_id")
+        outcome = record.get("outcome")
+        if isinstance(task_id, str) and isinstance(outcome, str):
+            outcomes[task_id] = outcome
+    return outcomes
 
 
 def gate2_passed(contract, verdicts: Mapping[str, str], *, stopped: bool) -> bool:
@@ -800,6 +856,9 @@ def _record_for(
         binary_sha256=binary_sha256,
         outcome=outcome,
         counts_as_effective=counts_as_effective,
+        # Derived from the slot rather than passed in, so a diagnostic row can
+        # never report the team layer as on while the command switched it off.
+        team_state=slot.kind != DIAGNOSTIC_SLOT_KIND,
         extra={
             "task_id": slot.task_id,
             "round_index": slot.round_index,

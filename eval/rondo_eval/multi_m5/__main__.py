@@ -64,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
                 "effective_runs": result["effective_runs"],
                 "infra_used": result["infra_used"],
                 "conditional_slots": result["conditional_slots"],
+                "diagnostic_slots": result["diagnostic_slots"],
+                "diagnostics": result["diagnostics"],
                 "stopped": result["stopped"],
                 "verdicts": result["verdicts"],
                 "passed": result["passed"],
@@ -124,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
                 "infra_used": result["infra_used"],
                 "stopped": result["stopped"],
                 "stop_reason": result["stop_reason"],
+                # Attribution evidence for any degraded task. Present only when a
+                # degradation was actually found; it never changes the verdict.
+                "diagnostic_slots": result["diagnostic_slots"],
+                "diagnostics": result["diagnostics"],
                 # A degradation verdict or incomplete evidence is an M-5 failure,
                 # so it must not leave the shell with a success status.
                 "verdicts": result["verdicts"],

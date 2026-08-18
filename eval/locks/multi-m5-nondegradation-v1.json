@@ -74,7 +74,23 @@
     "codex_multi_agent_v2": "default_off",
     "multi_enables": ["Feature::MultiAgentV2", "team_state_enabled"],
     "comparison": "Multi runs upstream V2 plus RONDO team state; Codex runs upstream default V1. This is the product under test, not a fairness defect.",
-    "if_stable_one_way_degradation": "Before attributing a failure to the team layer, run a diagnostic_v2_on_team_state_off slot on the same task. Do not pre-run that diagnostic."
+    "if_stable_one_way_degradation": "Before attributing a failure to the team layer, run a diagnostic_v2_on_team_state_off slot on the same task. Do not pre-run that diagnostic.",
+    "diagnostic": {
+      "id": "diagnostic_v2_on_team_state_off",
+      "runs_when": "that task's verdict is stable_one_way_degradation",
+      "pre_run_forbidden": true,
+      "side": "rondo",
+      "product": "rondo-multi",
+      "slots_per_degraded_task": 1,
+      "max_slots": 10,
+      "round_index": 4,
+      "counts_as_effective": false,
+      "multi_agent_v2": "on",
+      "team_state_enabled": false,
+      "shares_batch_budget": true,
+      "shares_stop_lines": true,
+      "verdict_effect": "none: attribution evidence only, it never changes a gate 2 verdict"
+    }
   },
   "price_snapshot": {
     "date": "2026-08-17",
@@ -95,7 +111,7 @@
     "worst_legal_usd": "96.00",
     "hard_cap_usd": "120.00",
     "ledger_batch_id": "multi-m5-phase-b",
-    "notes": "Point estimate assumes no conditional reruns and one successful gate 1 attempt. Worst legal is 20 base + 40 conditional + 12 infra + 3 gate 1 attempts."
+    "notes": "Point estimate assumes no conditional reruns and one successful gate 1 attempt. Worst legal is 20 base + 40 conditional + 12 infra + 3 gate 1 attempts. Attribution diagnostics only exist after a degradation, which already fails gate 2; they draw on the same 120 USD cap, at most one slot per task."
   },
   "docker_images": [
     "alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",

@@ -15,6 +15,7 @@ from ..contracts import (
     AGENT_DEFAULT_SUBAGENT_EFFORT,
     AGENT_DEFAULT_SUBAGENT_MODEL,
     AUTO_REVIEW_EVIDENCE_DIR,
+    TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML,
     TEAM_CAPABILITY_MULTI_TOML,
     BinaryManifest,
     ContractError,
@@ -126,6 +127,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         frozen_model_catalog_sha256: str | None = None,
         frozen_model_catalog_source_commit: str | None = None,
         frozen_model_catalog_provenance_sha256: str | None = None,
+        team_state_enabled: bool | str = True,
         extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -183,6 +185,15 @@ class UploadBinaryAdapter(HarborCodexAgent):
             raise AdapterError("task workdir is invalid")
         if not isinstance(task_requires_existing_git_repo, bool):
             raise AdapterError("task Git policy is invalid")
+        # Harbor reconstructs agent kwargs from CLI strings, so the JSON forms
+        # have to be accepted here as well as the native bool.
+        team_state = _parse_bool_kwarg(team_state_enabled, "team_state_enabled")
+        if not team_state and self._product is not Product.RONDO_MULTI:
+            # Only Multi has a team layer to switch off. Letting Codex or Local
+            # carry the flag would silently claim a configuration they cannot
+            # have and would put `team_state_enabled` on a `--strict-config`
+            # upstream command line.
+            raise AdapterError("only RONDO Multi can run with the team layer disabled")
         # Two catalog modes exist.  The shared mode is the E-B8 contract: one
         # artifact, identified by its own digest and provenance, loaded by both
         # sides.  The legacy mode is the Codex-only projection bound to the
@@ -234,6 +245,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._guardian_effort = guardian_effort
         self._task_workdir = task_workdir
         self._task_requires_existing_git_repo = task_requires_existing_git_repo
+        self._team_state_enabled = team_state
         self._frozen_model_catalog_path = frozen_model_catalog_path
         self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
         self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
@@ -667,7 +679,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
             overrides = (
                 *common_overrides,
                 *catalog_overrides,
-                *team_capability_override_items(self._product),
+                *team_capability_override_items(
+                    self._product, team_state=self._team_state_enabled
+                ),
                 *(
                     f"auto_review.{name}={json.dumps(value)}"
                     for name, value in _guardian_override_items(
@@ -698,6 +712,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
                     if self._frozen_model_catalog_path is not None
                     else None
                 ),
+                team_state_enabled=self._team_state_enabled,
             )
             await _checked_exec_as_agent(
                 environment,
@@ -753,6 +768,7 @@ def adapter_for(
     frozen_model_catalog_sha256: str | None = None,
     frozen_model_catalog_source_commit: str | None = None,
     frozen_model_catalog_provenance_sha256: str | None = None,
+    team_state_enabled: bool = True,
 ) -> UploadBinaryAdapter:
     adapter_type: type[UploadBinaryAdapter]
     if side is Side.CODEX:
@@ -791,6 +807,7 @@ def adapter_for(
         frozen_model_catalog_sha256=frozen_model_catalog_sha256,
         frozen_model_catalog_source_commit=frozen_model_catalog_source_commit,
         frozen_model_catalog_provenance_sha256=frozen_model_catalog_provenance_sha256,
+        team_state_enabled=team_state_enabled,
     )
 
 
@@ -847,6 +864,13 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
             "task_requires_existing_git_repo",
             json.dumps(adapter._task_requires_existing_git_repo),
         ),
+        # Emitted only for the gate 2 diagnostic, so every existing campaign's
+        # agent-kwarg projection stays byte-identical.
+        *(
+            (("team_state_enabled", json.dumps(False)),)
+            if not adapter._team_state_enabled
+            else ()
+        ),
     ]
     if adapter._frozen_model_catalog_path is not None:
         values.extend(
@@ -873,6 +897,21 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
                 )
             )
     return tuple(values)
+
+
+def _parse_bool_kwarg(value: bool | str, name: str) -> bool:
+    """Accept a native bool or Harbor's JSON string form, nothing looser.
+
+    Truthiness would turn the string ``"false"`` into ``True``, which for
+    ``team_state_enabled`` means silently running the product configuration a
+    diagnostic asked to switch off.
+    """
+
+    if isinstance(value, bool):
+        return value
+    if value in {"true", "false"}:
+        return value == "true"
+    raise AdapterError(f"{name} must be a boolean")
 
 
 def _validate_provider_inputs(base_url: str, api_key_env: str) -> None:
@@ -920,6 +959,7 @@ def _validate_safe_codex_command(
     guardian_model: str,
     guardian_effort: str,
     frozen_model_catalog_path: str | None = None,
+    team_state_enabled: bool = True,
 ) -> None:
     if not command.startswith("set -o pipefail; "):
         raise AdapterError("Codex output pipeline must preserve the command exit status")
@@ -973,7 +1013,15 @@ def _validate_safe_codex_command(
     # closed state has to be observable in the command itself.
     if product is not Product.RONDO_LOCAL and "auto_review." in command:
         raise AdapterError("agent received unexpected auto_review configuration")
-    team_override = f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}"
+    # The diagnostic keeps upstream V2 on and drops only the RONDO team layer;
+    # every other override, including the pinned member model, stays identical.
+    team_table = (
+        TEAM_CAPABILITY_MULTI_TOML
+        if team_state_enabled
+        else TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML
+    )
+    team_state_item = f"team_state_enabled={'true' if team_state_enabled else 'false'}"
+    team_override = f"features.multi_agent_v2={team_table}"
     subagent_model = (
         f"agents.default_subagent_model={json.dumps(AGENT_DEFAULT_SUBAGENT_MODEL)}"
     )
@@ -986,7 +1034,7 @@ def _validate_safe_codex_command(
             raise AdapterError("RONDO Multi team capability overrides are incomplete")
         if command.count("features.multi_agent_v2=") != 1:
             raise AdapterError("RONDO Multi team capability override is ambiguous")
-        if command.count("team_state_enabled=true") != 1:
+        if command.count("team_state_enabled=") != 1 or command.count(team_state_item) != 1:
             raise AdapterError("RONDO Multi team_state_enabled override is ambiguous")
         if "expose_spawn_agent_model_overrides=false" not in command:
             raise AdapterError("RONDO Multi spawn model override must stay hidden")

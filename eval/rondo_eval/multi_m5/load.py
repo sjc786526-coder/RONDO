@@ -264,6 +264,7 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
         raise M5ContractError("gate 2 Multi enable set differs")
     if "diagnostic_v2_on_team_state_off" not in str(attribution.get("if_stable_one_way_degradation") or ""):
         raise M5ContractError("gate 2 degradation diagnostic is missing")
+    _require_diagnostic(attribution.get("diagnostic"), tasks)
     return NondegradationContract(
         lock_id=raw["lock_id"],
         catalog_path=catalog,
@@ -286,6 +287,37 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
         docker_images=images,
         raw=raw,
     )
+
+
+def _require_diagnostic(value: object, tasks: tuple[str, ...]) -> None:
+    """The attribution diagnostic has to be an executable contract, not prose.
+
+    A lock that only *mentions* the diagnostic leaves nothing to run when a task
+    degrades, and the honest attribution the contract promises would then be
+    impossible to produce. These are the properties the gate 2 orchestrator
+    relies on, so drift in either direction has to fail closed.
+    """
+
+    if not isinstance(value, dict):
+        raise M5ContractError("gate 2 diagnostic contract is missing")
+    expected = {
+        "id": "diagnostic_v2_on_team_state_off",
+        "pre_run_forbidden": True,
+        "side": Side.RONDO.value,
+        "product": Product.RONDO_MULTI.value,
+        "slots_per_degraded_task": 1,
+        "max_slots": len(tasks),
+        "round_index": 4,
+        "counts_as_effective": False,
+        "multi_agent_v2": "on",
+        "team_state_enabled": False,
+        "shares_batch_budget": True,
+        "shares_stop_lines": True,
+    }
+    for key, want in expected.items():
+        got = value.get(key)
+        if got != want or type(got) is not type(want):
+            raise M5ContractError(f"gate 2 diagnostic contract field {key} differs")
 
 
 def load_runtime_identity(
