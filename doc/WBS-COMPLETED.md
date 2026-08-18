@@ -1241,6 +1241,16 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
   `budget_stopped`，门 2 不计有效并停批；③共享账本槽位按 `60+12` 算，没给门 1 的 3 次尝试留位 → 改 `75`。
   门禁：`test_multi_m5` + `test_multi_m5_exec` + `test_api_budget_proxy` + `test_terminal_bench`
   + `test_terminal_bench_results` + `test_binary_freeze` **237/237**，`just eval-lock` 通过。
+- **最终独立验收（2026-08-18）**：通过。又查出三处只在真实运行才显形的问题，均已窄修 + 各钉一条
+  已验证的反向回归：①真实 TB 槽位把 `request_count` 写死成 1，归档数字失真且冻结的「每 run 80 请求」
+  上限成为死代码（代理层 `max_logical_requests` 被校验成 `1..4`，拦不住）→ 新增 `run_request_count`
+  从账本读真实逻辑请求数，超限落 `infra_failed` 且不计有效；②`_UrllibTransport` 的 test-only
+  `endpoint_override` 被宿主 `HTTP_PROXY` 劫持（Python 的 `no_proxy` 不认 `127.*` 通配），
+  离线捕获链在用户日常 shell 里假失败 502 → 只在 override 时挂空 `ProxyHandler({})`，生产 env 行为不变；
+  ③门 2 真实批次 `require_frozen=False`，bundle 不在位要烧完 12 次 infra 才停 → `real_api` 时第一槽前即失败。
+  门禁：上述六个套件 **240/240**，`just eval-lock` 通过。**Python 门禁须在清掉
+  `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 的环境下跑。**
 - 执行日志：`agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`；
-  验收报告：`agent_log/2026-08-18-130000-plan044-m5-paid-entries-acceptance-review.md`。
+  验收报告：`agent_log/2026-08-18-130000-plan044-m5-paid-entries-acceptance-review.md`、
+  `agent_log/2026-08-18-150000-plan044-m5-paid-entries-final-acceptance.md`。
 

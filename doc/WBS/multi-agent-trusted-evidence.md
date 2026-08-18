@@ -302,8 +302,9 @@ store transition 期间为 unknown。Root 退休是独立终态覆盖层，只�
 彩排由 stub 驱动协议，**证明的是产品与判据这条链路能走通，不是真实模型会遵守协议**，因此
 **不是**门 1 通过、更不是 M-5 通过。门 1 付费入口与门 2 真实执行器已接线（预算代理 + forward 捕获；
 既有 `terminal_bench` adapters/runner/results，不套 v7 campaign），但仍锁在冻结口令之后：无授权不加载
-密钥、不打开付费上游、不启动 Docker。付费部件已通过独立验收（门 2 `$8`/`$24` cap 冲突、门 1 可用额度不足、预算掐断被误记成产品失败、
-共享账本槽位漏算门 1，均已修复并补回归），仍须用户按清单单独授权真实 API/付费/Docker；授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+密钥、不打开付费上游、不启动 Docker。付费部件已通过两轮独立验收（门 2 `$8`/`$24` cap 冲突、门 1 可用额度不足、预算掐断被误记成产品失败、
+共享账本槽位漏算门 1、真实槽位请求数写死使每 run 80 上限失效、离线捕获链被宿主代理劫持、门 2 真实批次不预检冻结 bundle，
+均已修复并补回归），仍须用户按清单单独授权真实 API/付费/Docker；授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；

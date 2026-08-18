@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .contracts import ModelPricing
 
@@ -841,7 +841,15 @@ class _UrllibTransport:
             if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
                 raise ApiBudgetProxyError("test upstream override must be loopback HTTP")
         self._endpoint_override = endpoint_override
-        self._opener = build_opener(_NoRedirect())
+        # A loopback override must never be routed through an ambient
+        # HTTP_PROXY. Python's no_proxy matching does not understand the `127.*`
+        # glob most local proxy managers export, so without an empty
+        # ProxyHandler the offline capture tests reach the user's real proxy and
+        # come back 502. The production path keeps the default env behaviour.
+        handlers: list[Any] = [_NoRedirect()]
+        if endpoint_override is not None:
+            handlers.append(ProxyHandler({}))
+        self._opener = build_opener(*handlers)
 
     def open(
         self,

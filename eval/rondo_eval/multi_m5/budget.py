@@ -45,6 +45,22 @@ def run_stop_reason(ledger: PersistentBudgetLedger, run_id: str) -> str | None:
     return str(reason) if isinstance(reason, str) and reason else "budget_stopped"
 
 
+def run_request_count(ledger: PersistentBudgetLedger, run_id: str) -> int:
+    """How many logical requests this run actually reserved.
+
+    A real Terminal-Bench slot is one host process making many model calls, so
+    reporting a hardcoded 1 both misstates the archive row and leaves the frozen
+    `max_requests_per_run` cap dead. Unbilled retries reuse their request id, so
+    this counts logical requests, not socket attempts.
+    """
+
+    run = ledger.snapshot()["runs"].get(run_id)
+    if not isinstance(run, dict):
+        return 0
+    requests = run.get("requests")
+    return len(requests) if isinstance(requests, dict) else 0
+
+
 def phase_b_pricing(contract=None) -> ModelPricing:
     raw = (contract or load_nondegradation_contract()).raw
     price = raw["price_snapshot"]

@@ -48,6 +48,7 @@ from .budget import (
     GATE2_REQUEST_RESERVATION_USD,
     GATE2_RUN_CAP_USD,
     phase_b_pricing,
+    run_request_count,
     run_stop_reason,
 )
 from .bundle import load_side_manifest
@@ -253,10 +254,21 @@ class TerminalBenchSlotExecutor:
             RuntimeError,
         ) as exc:
             raise Gate2Error(str(exc)) from exc
-        outcome = _slot_outcome(parsed)
+        return self._slot_result(parsed, run_id)
+
+    def _slot_result(self, parsed, run_id: str) -> SlotResult:
+        """One Harbor trial as a slot result.
+
+        The request count is read back from the ledger: a Terminal-Bench slot is
+        one host process making many model calls, so a hardcoded 1 would both
+        misstate the archive row and leave the frozen `max_requests_per_run`
+        cap dead.
+        """
+
+        assert self._ledger is not None
         return SlotResult(
-            outcome=outcome,
-            request_count=1,
+            outcome=_slot_outcome(parsed),
+            request_count=run_request_count(self._ledger, run_id),
             extra={
                 "executor": "terminal_bench",
                 "task_outcome": parsed.task_outcome,
@@ -380,7 +392,12 @@ def run_light_interleaved(
     ):
         raise Gate2Error("a scripted executor cannot produce real_api evidence")
     loaded = contract or load_nondegradation_contract()
-    runtime = identity or load_runtime_identity(require_frozen=False)
+    # A paid row carries both sides' binary identity. Check the bundle is really
+    # frozen on disk before the first slot, not after burning the infra budget.
+    runtime = identity or load_runtime_identity(
+        require_frozen=evidence_kind == "real_api",
+        common_root=Path(common_root),
+    )
     pricing = phase_b_pricing(loaded) if charge_fake_usage else None
     records: list[dict[str, Any]] = []
     infra_used = 0

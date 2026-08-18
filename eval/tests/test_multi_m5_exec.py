@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from decimal import Decimal
@@ -25,7 +26,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     price_usage,
 )
 from rondo_eval.config import RepoPaths  # noqa: E402
-from rondo_eval.contracts import BinaryManifest, Product, Side  # noqa: E402
+from rondo_eval.contracts import BinaryManifest, Product, RunOutcome, Side  # noqa: E402
 from rondo_eval.multi_m5.archive import archive_record  # noqa: E402
 from rondo_eval.multi_m5.budget import (  # noqa: E402
     GATE1_REQUEST_RESERVATION_USD,
@@ -36,6 +37,7 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
     RUN_CAP_USD,
     open_phase_b_ledger,
     phase_b_pricing,
+    run_request_count,
 )
 from rondo_eval.multi_m5.capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy  # noqa: E402
 from rondo_eval.multi_m5.command import build_multi_exec_command, team_capability_overrides  # noqa: E402
@@ -70,6 +72,7 @@ from rondo_eval.multi_m5.paid import (  # noqa: E402
 )
 from rondo_eval.multi_m5.ready import readiness_report  # noqa: E402
 from rondo_eval.multi_m5.rehearsal import MEMBER_TASK, CollaborationStub  # noqa: E402
+from rondo_eval.multi_m5.gate2 import _run_id  # noqa: E402
 from rondo_eval.multi_m5.schedule import base_slots  # noqa: E402
 from rondo_eval.multi_m5.store import (  # noqa: E402
     StoreError,
@@ -988,6 +991,163 @@ class MultiM5BudgetStopHonestyTests(unittest.TestCase):
         self.assertTrue(result["stopped"])
         # The stopped observation must not reach the degradation verdict.
         self.assertNotIn("stable_one_way_degradation", set(result["verdicts"].values()))
+
+
+class _FakeTrial:
+    """The parts of `parse_single_task_result` output a slot result reads."""
+
+    outcome = RunOutcome.COMPLETED
+    task_outcome = "pass"
+    reward = 1.0
+    duration_seconds = 12.5
+
+
+class MultiM5PaidEntryHardeningTests(unittest.TestCase):
+    """Gaps that only surface once the paid entries touch a real run."""
+
+    def test_gate2_request_count_is_real_and_the_frozen_cap_binds(self) -> None:
+        # A Terminal-Bench slot is one host process making many model calls, so
+        # a hardcoded `request_count=1` both lies in the archive row and leaves
+        # the frozen `max_requests_per_run` cap dead.
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-gate2-request-count.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        pricing = phase_b_pricing()
+        over_cap = contract.max_requests_per_run + 1
+
+        class _ChattyExecutor(TerminalBenchSlotExecutor):
+            def execute(self, slot, *, attempt: int, run_id: str) -> SlotResult:
+                del slot, attempt
+                assert self._ledger is not None
+                for index in range(over_cap):
+                    request_id = f"{run_id}-req-{index}"
+                    self._ledger.reserve(run_id, request_id, Decimal("0.01"))
+                    self._ledger.begin_attempt(run_id, request_id, max_attempts=5)
+                    self._ledger.settle(
+                        run_id, request_id, Usage(1, 0, 0, 0), pricing=pricing
+                    )
+                return SlotResult(
+                    outcome="completed",
+                    request_count=run_request_count(self._ledger, run_id),
+                    extra={"executor": "chatty"},
+                )
+
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                executor = _ChattyExecutor(
+                    common_root=root,
+                    ledger=ledger,
+                    catalog=_v4_catalog(),
+                    binaries={
+                        Side.CODEX: _dummy_binary(),
+                        Side.RONDO: _dummy_binary(product="rondo-multi"),
+                    },
+                    paths=RepoPaths.discover(Path.cwd()),
+                )
+                first_run = _run_id(base_slots(contract)[0], 1)
+                # The live Harbor path must read the same real count.
+                ledger.ensure_run("m5-g2-live-probe", cap_usd=GATE2_RUN_CAP_USD)
+                for index in range(3):
+                    request_id = f"m5-g2-live-probe-req-{index}"
+                    ledger.reserve("m5-g2-live-probe", request_id, Decimal("0.01"))
+                    ledger.begin_attempt("m5-g2-live-probe", request_id, max_attempts=5)
+                    ledger.settle(
+                        "m5-g2-live-probe", request_id, Usage(1, 0, 0, 0), pricing=pricing
+                    )
+                live = executor._slot_result(_FakeTrial(), "m5-g2-live-probe")
+                self.assertEqual(live.request_count, 3)
+                self.assertEqual(live.outcome, "completed")
+                result = run_light_interleaved(
+                    executor=executor,
+                    common_root=root,
+                    ledger=ledger,
+                    persist=False,
+                    charge_fake_usage=False,
+                    evidence_kind="real_api",
+                )
+                self.assertEqual(run_request_count(ledger, first_run), over_cap)
+        finally:
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+        rows = result["records"]
+        self.assertTrue(rows)
+        # Over the frozen cap the slot is infrastructure, never an effective
+        # "incomplete" that the degradation verdict could consume.
+        self.assertTrue(all(row["outcome"] == "infra_failed" for row in rows))
+        self.assertTrue(all(row["counts_as_effective"] is False for row in rows))
+        self.assertTrue(all(row["reason"] == "max_requests_per_run" for row in rows))
+        self.assertEqual(result["effective_runs"], 0)
+        self.assertNotIn("stable_one_way_degradation", set(result["verdicts"].values()))
+
+    def test_loopback_transport_override_ignores_an_ambient_http_proxy(self) -> None:
+        # Python's no_proxy matching does not understand the `127.*` glob local
+        # proxy managers export, so without an empty ProxyHandler the offline
+        # capture chain is silently routed through the user's real proxy.
+        sink = _HeaderSink()
+        sink.start()
+        dead = "http://127.0.0.1:1/"
+        try:
+            with patch.dict(
+                "os.environ",
+                {"HTTP_PROXY": dead, "http_proxy": dead, "no_proxy": ""},
+            ):
+                transport = _UrllibTransport(
+                    endpoint_override=f"{sink.base_url}/responses"
+                )
+                response = transport.open(
+                    "https://provider.example/v1/responses",
+                    body=b'{"model":"probe"}',
+                    headers={"Content-Type": "application/json"},
+                    timeout=10.0,
+                )
+                try:
+                    self.assertEqual(int(response.status), 200)
+                finally:
+                    response.close()
+            self.assertEqual(sink.writes and 1, 1)
+        finally:
+            sink.close()
+
+    def test_real_api_rows_require_a_frozen_bundle_on_disk(self) -> None:
+        # `require_frozen=False` let a paid batch write rows carrying an
+        # unfrozen identity and only fail slot by slot, burning the infra
+        # budget before saying why.
+        started: list[str] = []
+
+        class _NeverTouchesTheBundle(TerminalBenchSlotExecutor):
+            def execute(self, slot, *, attempt: int, run_id: str) -> SlotResult:
+                del slot, attempt
+                started.append(run_id)
+                return SlotResult(outcome="completed", extra={"executor": "probe"})
+
+        with tempfile.TemporaryDirectory(prefix="rondo-m5-unfrozen-") as raw:
+            absent = Path(raw)
+            with self.assertRaises(M5ContractError):
+                run_light_interleaved(
+                    executor=_NeverTouchesTheBundle(
+                        common_root=absent,
+                        paths=RepoPaths.discover(Path.cwd()),
+                    ),
+                    common_root=absent,
+                    persist=False,
+                    evidence_kind="real_api",
+                )
+            # It must fail before the first slot, not slot by slot.
+            self.assertEqual(started, [])
+            # The offline fake path must stay runnable without the bundle.
+            fake = run_light_interleaved(
+                executor=ScriptedSlotExecutor(),
+                common_root=absent,
+                persist=False,
+                evidence_kind="fake",
+            )
+            self.assertTrue(fake["records"])
 
 
 def _provider_base_url(command) -> str:
