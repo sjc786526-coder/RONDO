@@ -1120,3 +1120,25 @@ standard/Lite 形态均补回归。
   `agent_log/2026-08-17-103327-plan043-m4-fourth-remediation-independent-rereview.md`、
   `agent_log/2026-08-17-104430-plan043-m4-fifth-remediation.md`、
   `agent_log/2026-08-17-105030-plan043-m4-final-independent-acceptance.md`。
+
+## Multi M-5 阶段 A —— 真实运行条件（Plan 044，2026-08-17）
+
+**状态**：阶段 A 已完成。含义仅是「M-5 已具备真实运行条件」。未跑 Docker、真实 API 或付费调用，
+**不能**表述为 M-5 通过、门 1 通过或未见退化。阶段 B 未授权。成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **门 1 载体**：不用 TB `fix-git`。受控 host fixture `eval/fixtures/multi-m5-collab-v1/` +
+  `eval/templates/multi-m5/collab-workflow-instruction-v1.md`。完成标准 = `TEAM_REPORT.md` 含 finding
+  且六项协作谓词；孤儿退休不是必触发项。Docker 只为门 2。
+- **门 2 合同**：P2/B7 v4 十任务，task-major 每题 Codex 然后 Multi；轻 runner，不套 v7 campaign，
+  不计算 σ/delta。条件复跑仅「Codex 完成、Multi 未完成」时双方各加两次。最大有效运行 60，infra 总上限 12，
+  每槽 3 次，每 run 请求上限 80。价格快照 2026-08-17；硬上限 $120。
+- **Runtime bundle**：冻结到
+  `eval-data/bin/rondo-multi/7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle/`。
+  身份写入 `eval/locks/multi-m5-runtime-v1.json`：CLI sha `2f5f25e0…0c32`（legacy musl CLI），
+  host sha `eb54cac2…6705`，bwrap 与冻结 Codex 同资产。测量树 detached 于 ExecPlan 提交 `7a2ff68`。
+- **接线**：团队能力单条 inline TOML 只给 Multi；`non_code_mode_only=false`。`just eval-multi-m5-loopback`
+  证明 `code_mode_host` 下团队工具可注册并完成 `team_publish` 往返（`counts_as_effective=false`）。
+- **门禁**：eval 定向 Python 与 `just eval-lock` 通过；清代理后 team-state + 四个 core team suite **142/142**。
+- **任务合同与授权清单**：`plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+  执行日志：`agent_log/2026-08-17-190000-plan044-m5-phase-a.md`。
+

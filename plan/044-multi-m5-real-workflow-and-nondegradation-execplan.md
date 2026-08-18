@@ -171,41 +171,104 @@
 ## 6. 当前状态
 
 > 本节允许在执行过程中持续更新。只记录恢复任务所必需的信息，不记录普通工具调用流水账。
+> §1 验收框保持合同原文不改写；阶段完成情况以本节为准。
 
 ### 已完成
 
-- 已核对根 `AGENTS.md`/`CLAUDE.md`、`doc/WBS.md`、`doc/WBS/multi-agent-trusted-evidence.md`、
-  `doc/WBS/eval-benchmark.md`、Plan 043、计划模板与相关实时代码/配方。
-- 现场基线：`main` = `origin/main` = `45efac6`，主工作区干净；037—043 历史 worktree 均已归档为 `zz-done/*`，
-  M-5 不需要并行避让。M-0—M-4 已合入，Local 方向已收口。
-- 已从 `main@45efac6` 创建 `.claude/worktrees/044-multi-m5-real-workflow-and-nondegradation` 与分支
-  `worktree-044-multi-m5-real-workflow-and-nondegradation`；主工作区未修改任何受跟踪文件。
-- 已确认前置缺口：`eval-data/bin/rondo-multi/` 仍为空（Multi 尚无冻结 runtime bundle）；真实协作工作流、
-  当前模型价格与付费预算均未冻结；v4 catalog 十任务与冻结 Codex bundle 已就位。
+- 现场基线未变：`main` = `origin/main` = `45efac6`，主工作区受跟踪文件干净。044 工作树分支
+  `worktree-044-multi-m5-real-workflow-and-nondegradation`；测量树
+  `.claude/worktrees/044-m5-multi-bundle-measurement` 仍 detached 于
+  `7a2ff684c504c7530660f9a33a372daa949bdb00`，未在其中开发。
+- **门 1 合同**：`eval/locks/multi-m5-workflow-v1.json`。载体是 host `codex exec` +
+  `eval/fixtures/multi-m5-collab-v1/` + `eval/templates/multi-m5/collab-workflow-instruction-v1.md`
+  （sha `9879529f…d5333`），不是 TB `fix-git`。完成标准 = `TEAM_REPORT.md` 含 finding 行且六项协作谓词
+  全真；孤儿退休不是必触发项。Docker 不用于门 1。
+- **门 2 合同**：`eval/locks/multi-m5-nondegradation-v1.json`。十任务来自
+  `eval/tasksets/p2-b7-canary-catalog-v4.json`（catalog sha `00b83e44…57ddf`），交错
+  `task_major_codex_then_multi`，轻 runner，不套 v7 campaign，不计算 σ/delta。价格快照
+  2026-08-17 官方页；硬上限 $120。
+- **Multi runtime 已冻结**（ignored 产物 + 受跟踪身份）：
+  `eval-data/bin/rondo-multi/7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle/`
+  已 `verify-runtime`。受跟踪锁 `eval/locks/multi-m5-runtime-v1.json` `status=frozen`：
+  `codex_sha256=2f5f25e0…0c32`（legacy CLI）、`code_mode_host_sha256=eb54cac2…6705`（本次 musl host）、
+  `bwrap_sha256=77360cb7…2c4c`（与 Codex 同资产）、`manifest_sha256=1c782d1d…6769`。
+  对照 Codex bundle 身份见该锁 `codex_baseline`。重建 CLI sha `74989060…d266` **不得**写入 runtime 锁。
+- **最小接线**：`TEAM_CAPABILITY_MULTI_TOML` 单条 inline TOML 只注入 Multi；Codex/Local 禁止。
+  TB adapter、loopback、归档与 Python 合同测试已落地。根 `just eval-sync`/`eval-test`/`eval-lock`
+  从 worktree 经 `git-common-dir` 解析主根 venv；新增 `just eval-multi-m5-loopback`。
+- **无 API 演练**：`just eval-multi-m5-loopback` 通过；`loopback_tool_round_trip=true`，
+  `counts_as_effective=false`，`evidence_kind=loopback`。证明团队工具在 `code_mode_host=true` 下已注册
+  并可走 `team_publish` 往返。**不是门 1 真实通过。**
+- **定向门禁**（均无 API / 无 Docker）：
+  - `tests.test_multi_m5` 15/15
+  - `tests.test_binary_freeze.MultiProductFreezeTests`
+  - `tests.test_terminal_bench.TerminalBenchTests.test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv`
+  - `just eval-lock`
+  - 清代理后 `just test -p codex-team-state -p codex-core -E 'package(codex-team-state) or test(suite::team_world_state) or test(suite::team_routing) or test(suite::team_evidence) or test(suite::team_coordination)'`：**142/142**（metrics `eval-data/build-metrics/rondo-multi-m5-team-tests-noproxy`）。带残留 `HTTP_PROXY` 的首次 15 fail/1 timeout **不可复用**。
+- 阶段 B 授权清单已写入本节，执行暂停等待授权。
 
 ### 当前工作
 
-- 本 ExecPlan 已按模板形成，等待执行者进入阶段 A。
+- 阶段 A 收口：044 分支提交后停止，等待阶段 B 授权。不合并不推送。
 
 ### 本任务剩余步骤
 
-- 阶段 A：冻结 Multi bundle 与两份运行合同 → 完成最小测评接线 → 无 API 演练与定向门禁 → 输出阶段 B 授权清单 → 提交后暂停。
-- 阶段 B（授权后）：连线检查 → 门 1 工作流 → 门 2 不退化 → 复核结果与费用 → 同步文档与日志 → 提交分支后停止。
+- 阶段 A：044 分支已提交；独立审核无 P0。然后停止。
+- 阶段 B（**仅在用户按下列清单授权后**）：按已冻结合同落地 host 门 1 runner 与门 2 轻量交错执行面（当前只有 loopback CLI）→ 连线检查 → 门 1 host 工作流 → 门 2 十任务 → 复核结果与费用 → 同步文档与日志 → 044 分支再提交后停止。
 
 ### 阻塞项
 
 - 阶段 B 所需的 Docker、真实 API 与付费授权尚未取得，按 §3 硬约束 2 处理。
+- `.env.local` 已确认存在、非符号链接、权限 `0600`。未打开文件。阶段 B 开始前执行者须静默确认
+  `OPENAI_API_KEY` 存在且非空（relay / CCTQ Responses），不得记录其值。
 
 ### 当前验收状态
 
 - 规划现场核对、worktree 创建与 ExecPlan：已完成。
-- 阶段 A：未开始。
-- 阶段 B：未授权、未开始。
+- **阶段 A：已完成准备。** 含义仅是「M-5 已具备真实运行条件」。**不得**表述为 M-5 通过、门 1 通过或未见退化。
+- 阶段 A 已落地：bundle 冻结与身份自证、Codex/Multi 核验、工作流合同、不退化合同、最小接线、
+  无 API loopback、定向门禁、阶段 B 授权清单。loopback 证明的是团队工具注册、一次 `team_publish`
+  往返与归档字段；**没有**证明投影进入后续采样或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
+- 阶段 B：未授权、未开始。§1 阶段 B 五项全部未做。
+
+### 阶段 B 精确授权清单
+
+取得一次明确授权后才可开始。授权范围建议按下表一次性批准或驳回；未列项仍禁止。
+
+| 项 | 冻结值 |
+|---|---|
+| API provider | `rondo.local.toml` 的 `paid_eval.active_provider = "relay"`（CCTQ Responses；`api_key_env = OPENAI_API_KEY`）。不改官方入口，不把密钥写入文档或提示词。 |
+| Root / 成员模型 | `gpt-5.6-sol` + `medium`（两侧相同） |
+| 门 1 | host `codex exec` 协作 fixture，无 Docker；最多 3 次尝试、单次 1800s |
+| 门 2 | v4 catalog 十任务；`task_major_codex_then_multi`；条件复跑仅当「Codex 完成、Multi 未完成」时双方各加两次 |
+| 最大有效运行 | 60（基础 20 + 条件最多 40） |
+| 基础设施 | 每槽最多 3 次尝试；infra 总上限 12；infra 不计有效结果 |
+| 每 run 请求上限 | 80 |
+| 价格快照 | 2026-08-17 官方页：input $5 / cached $0.50 / output $30 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25 |
+| 费用 | 点估计约 $40；合同内最坏约 $96；**硬上限 $120**。账本批次 `multi-m5-phase-b` |
+| Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v1.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
+| 外发边界 | 任务输入、工作区内容与模型可见工具结果进入 Responses；密钥、`.env.local`、个人配置不进提示词或结果文件 |
+| 预计时间 | 门 1：数十分钟级，最坏约 1.5 小时。门 2：无条件复跑时数小时到十余小时；若多题触发复跑或打满超时，日历时间可到一天以上。全局串行，与重型 Cargo / 本地模型互斥。 |
+| Git | 阶段 B 成果仍只提交 044 分支；合并 `main`、推送、删除/重命名 worktree 仍须另批 |
+| 明确不做 | 本地模型加载、训练、发布、远端写入、清理来源不明的 Docker 对象、改 Local 公平合同、宣称 M-5 通过（除非两道门都按合同完成） |
+
+十个门 2 镜像：
+
+- `alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e`
+- `alexgshaw/extract-elf@sha256:6932e4cb318464307eacd497ef8dc617eaf551b6a90231f815ec0b911895cfed`
+- `alexgshaw/filter-js-from-html@sha256:92acda0f124b988036a6f426ce0bc47fac19f5efe9fc5e6ea3ea52ccb075d0a4`
+- `alexgshaw/fix-git@sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74`
+- `alexgshaw/headless-terminal@sha256:eb7e209672bf6cef2785fafd9e13509b10626c327bcc2b37f5bf40ca83eaf3aa`
+- `alexgshaw/openssl-selfsigned-cert@sha256:4c948a4e630af2435ae0a19108fc0814a946ac2fa29a512469e0fc77b38c8c12`
+- `alexgshaw/polyglot-c-py@sha256:0f1c3b7816d70cf5551573fd6aeef76893f2ae3000be2419997b6871b5d987ed`
+- `alexgshaw/sanitize-git-repo@sha256:4b5234da5bb0d67f3b0bf8db40a2883c07a5219f62b64c2bf9ff1ac84cd0f672`
+- `alexgshaw/sqlite-db-truncate@sha256:aabac93c93bd1f310e6a6fb893911d7735026ed18491c72133c9196a09092ca4`
+- `alexgshaw/vulnerable-secret@sha256:61ebb40454dd103aa2f7e71ad6dafd91cf2b301e6bb07e69d5b472412d1ee15b`
 
 ### 交接边界
 
-- 执行者在目标与硬边界内自主选择最小完整实现，不把软建议中的载体、路径、模块、文件名或提交拆分当成固定要求。
-- 本任务完成后冻结本计划；后续路线只链接 `doc/WBS/multi-agent-trusted-evidence.md`，不在此继续规划。
+- 阶段 A 完成后本计划仍作为任务合同；阶段 B 不另开 plan，按本节清单授权后继续同一 044 分支。
+- 跨任务路线只链接 `doc/WBS/multi-agent-trusted-evidence.md`，不在此规划 M-5 之后的工作。
 
 ## 7. 关键决策记录
 
@@ -222,3 +285,10 @@
 | 007 | 冻结 bundle 等 ignored 产物写在主工作区，身份事实同步进受跟踪合同文件 | `eval-data/` 全局 ignored，分支内不可见，否则将来无法复原当时产物 | 交付与可复原性 | 已采纳 |
 | 008 | 窄问题允许自主窄修并有界重跑，不因小失败停机汇报 | 给实现与真实运行合理冗余，同时保留原则性边界 | 执行流程 | 已采纳 |
 | 009 | 044 只提交工作树分支；合并与推送等待用户批准 | 遵守本次明确交付边界 | Git 交付 | 已采纳 |
+| 010 | 门 1 不用 TB `fix-git`，改用受控 host 协作 fixture | 单人小任务里模型可能自己做完、团队工具一次都不调用，门 1 会因任务过简而不成立 | 门 1 载体 | 已采纳 |
+| 011 | 门 2 走轻量交错 runner，不套 v7 campaign / preflight receipt | 不继承 σ/delta，完整 campaign 对小样本完成/未完成检查过重 | 门 2 设施 | 已采纳 |
+| 012 | Multi freeze 不共享 Local 的 0.147.0 lockfile checksum | Multi 与 Local 的 Cargo lock 不是同一份身份；强行共用会把错误 lock 写进 Multi bundle | binary freeze | 已采纳 |
+| 013 | 冻结源码用测量树 `044-m5-multi-bundle-measurement`（detached `7a2ff68`），不在其中开发 | 冻结身份钉在 ExecPlan 提交，避免 044 未提交改动进入 binary provenance | 冻结流程 | 已采纳 |
+| 014 | 团队 TOML 使用 `non_code_mode_only=false` | eval 固定 `features.code_mode_host=true`；为 true 时 spawn/团队工具不会在 Direct 路径注册 | Multi 运行配置 | 已采纳 |
+| 015 | 团队能力必须是恰好一条 inline TOML，且只给 Multi | 拆成 `enabled=true` 再写嵌套键会互相覆盖；Codex `--strict-config` 会拒绝未知键 | adapter / 公平性 | 已采纳 |
+| 016 | Multi musl freeze 身份包含 `CARGO_BUILD_JOBS=2` | 本机约 27GiB，不限并行会触发 `host_mem_available_below_floor` | 冻结身份 | 已采纳 |

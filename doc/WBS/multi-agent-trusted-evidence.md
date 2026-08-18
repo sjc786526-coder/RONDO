@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-17 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-17 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 A 已具备真实运行条件，阶段 B 未授权
 
 ## 定位
 
@@ -252,7 +252,7 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。下一阶段为 M-5，尚未开始。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已具备真实运行条件，阶段 B 未授权，不能表述为 M-5 通过。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -294,9 +294,15 @@ store transition 期间为 unknown。Root 退休是独立终态覆盖层，只�
 
 ### M-5 真实运行与不退化验收
 
+阶段 A（Plan 044，无费用）已完成：runtime bundle 已冻结到 `eval-data/bin/rondo-multi/`，门 1 host 协作
+fixture 与门 2 十任务轻 runner 合同已写入 `eval/locks/multi-m5-*.json`，无 API loopback 已证明团队工具
+可注册调用。这只是真实运行条件，**不是** M-5 通过。阶段 B 的 Docker / 真实 API / 付费授权清单见
+`plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
+  阶段 A 已满足前两项；第三项仍待阶段 B 单独授权。
 - **完成标准**：两个相互独立的门，缺一不可。
   1. **工作流成立且功能实际发生**：在功能开启的真实运行中，冻结的工作流达到它自己预冻结的任务完成标准，
      且 Event/Version 发布、Root 唤醒、route、多作者追加与证据下钻确实被触发、注意力按正常路径收尾，

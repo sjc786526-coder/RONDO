@@ -128,6 +128,12 @@ def parse_product(value: object) -> Product:
 
 AUTO_REVIEW_CONFIG_SCHEMA_VERSION = 1
 AUTO_REVIEW_EVIDENCE_DIR = "/logs/agent/guardian-evidence"
+TEAM_CAPABILITY_CONFIG_SCHEMA_VERSION = 1
+# Inline TOML table consumed by `-c`. One override avoids boolean-vs-table
+# clobbering if `features.multi_agent_v2=true` were mixed with nested keys.
+TEAM_CAPABILITY_MULTI_TOML = (
+    "{enabled=true,team_state_enabled=true,non_code_mode_only=false}"
+)
 
 
 def auto_review_overrides(
@@ -190,6 +196,42 @@ def auto_review_config_projection(
             guardian_model=guardian_model,
             guardian_effort=guardian_effort,
         ),
+    }
+
+
+def team_capability_override_items(product: Product | None) -> tuple[str, ...]:
+    """Return the ``-c`` items that turn Multi team capability on.
+
+    Local and the frozen upstream get nothing: team tools are Multi-only, and
+    ``--strict-config`` would reject ``team_state_enabled`` on v0.147.0 Codex.
+    ``non_code_mode_only=false`` keeps spawn/team tools Direct while eval also
+    enables ``code_mode_host``.
+    """
+
+    if product is not Product.RONDO_MULTI:
+        return ()
+    return (f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",)
+
+
+def team_capability_config_projection(
+    side: Side,
+    product: Product | None,
+) -> dict[str, object] | None:
+    """Record whether this run configured Multi team capability.
+
+    ``None`` for the frozen upstream. Local records the closed state so a
+    Multi/Local mix-up is visible in the archive rather than implied.
+    """
+
+    resolved = product_for_side(side, product)
+    if resolved is None:
+        return None
+    enabled = resolved is Product.RONDO_MULTI
+    return {
+        "schema_version": TEAM_CAPABILITY_CONFIG_SCHEMA_VERSION,
+        "multi_agent_v2_enabled": enabled,
+        "team_state_enabled": enabled,
+        "non_code_mode_only": False if enabled else None,
     }
 
 

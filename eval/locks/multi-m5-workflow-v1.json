@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "lock_id": "multi-m5-workflow-v1",
+  "gate": 1,
+  "evidence_kind": "real_api",
+  "carrier": "host_codex_exec",
+  "purpose": "Prove Multi team capability actually runs a collaboration loop. Not a Terminal-Bench score.",
+  "product": "rondo-multi",
+  "fixture_dir": "eval/fixtures/multi-m5-collab-v1",
+  "fixture_notes_sha256": "e13f5b868a84595c9dae0a9b46ed77e702e366ee26982f8aed35eb15dd77d7c8",
+  "instruction_path": "eval/templates/multi-m5/collab-workflow-instruction-v1.md",
+  "instruction_sha256": "9879529f64351b03754a1c40fbd6c0b80c69510d6cfe42f123bc55b1cb9d5333",
+  "finding_line": "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042",
+  "report_filename": "TEAM_REPORT.md",
+  "root_model": "gpt-5.6-sol",
+  "member_model": "gpt-5.6-sol",
+  "root_effort": "medium",
+  "member_effort": "medium",
+  "timeout_seconds": 1800,
+  "max_attempts": 3,
+  "max_members": 1,
+  "orphan_retirement_required": false,
+  "docker": false,
+  "team_capability": {
+    "schema_version": 1,
+    "multi_agent_v2_enabled": true,
+    "team_state_enabled": true,
+    "non_code_mode_only": false,
+    "override_toml": "{enabled=true,team_state_enabled=true,non_code_mode_only=false}"
+  },
+  "task_completion": {
+    "report_exists": true,
+    "report_contains_finding_line": true
+  },
+  "collaboration_predicates": [
+    {
+      "id": "spawn_member",
+      "description": "Root spawned exactly one member. Dump has a non-root participant."
+    },
+    {
+      "id": "event_with_two_versions",
+      "description": "At least one Event has two or more Versions."
+    },
+    {
+      "id": "two_authors",
+      "description": "Those Versions were written by at least two distinct authors."
+    },
+    {
+      "id": "team_route",
+      "description": "At least one route assignment exists on that Event."
+    },
+    {
+      "id": "team_evidence",
+      "description": "At least one Version is evidence-backed (fact_ref_count >= 1 or a VersionFact row)."
+    },
+    {
+      "id": "root_resolved",
+      "description": "At least one Version has root_state=resolved. Attention ended on the normal path."
+    }
+  ]
+}

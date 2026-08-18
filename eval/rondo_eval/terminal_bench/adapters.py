@@ -13,12 +13,14 @@ from urllib.parse import urlsplit
 
 from ..contracts import (
     AUTO_REVIEW_EVIDENCE_DIR,
+    TEAM_CAPABILITY_MULTI_TOML,
     BinaryManifest,
     ContractError,
     Product,
     Side,
     auto_review_overrides,
     product_for_manifest,
+    team_capability_override_items,
 )
 from .compat import (
     EnvironmentLike,
@@ -663,6 +665,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
             overrides = (
                 *common_overrides,
                 *catalog_overrides,
+                *team_capability_override_items(self._product),
                 *(
                     f"auto_review.{name}={json.dumps(value)}"
                     for name, value in _guardian_override_items(
@@ -968,6 +971,16 @@ def _validate_safe_codex_command(
     # closed state has to be observable in the command itself.
     if product is not Product.RONDO_LOCAL and "auto_review." in command:
         raise AdapterError("agent received unexpected auto_review configuration")
+    team_override = f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}"
+    if product is Product.RONDO_MULTI:
+        if team_override not in command:
+            raise AdapterError("RONDO Multi team capability overrides are incomplete")
+        if command.count("features.multi_agent_v2=") != 1:
+            raise AdapterError("RONDO Multi team capability override is ambiguous")
+        if command.count("team_state_enabled=true") != 1:
+            raise AdapterError("RONDO Multi team_state_enabled override is ambiguous")
+    elif "team_state_enabled" in command or "features.multi_agent_v2=" in command:
+        raise AdapterError("agent received unexpected Multi team capability configuration")
     catalog_override = (
         f"model_catalog_json={json.dumps(frozen_model_catalog_path)}"
         if frozen_model_catalog_path is not None
