@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ..api_budget_proxy import PersistentBudgetLedger
 from ..contracts import ModelPricing
-from .load import M5ContractError, load_nondegradation_contract
+from .load import M5ContractError, load_nondegradation_contract, load_workflow_contract
 
 BATCH_ID = "multi-m5-phase-b"
 HARD_CAP_USD = Decimal("120.00")
@@ -16,12 +16,33 @@ HARD_CAP_USD = Decimal("120.00")
 RUN_CAP_USD = Decimal("24.00")
 GATE1_RUN_CAP_USD = Decimal("24.00")
 GATE2_RUN_CAP_USD = Decimal("8.00")
-GATE1_REQUEST_RESERVATION_USD = Decimal("8.00")
+# A reservation also has to clear the Guardian additional-capacity check, so the
+# usable spend inside a run is `cap - 2 * reservation`, not `cap`. Gate 1 at an
+# $8 reservation stops at ~$8 spent, exactly the frozen point estimate; $4 keeps
+# a 2x margin and still covers the worst realistic single turn (272k input plus
+# 32k output prices at ~$2.32 on the frozen snapshot).
+GATE1_REQUEST_RESERVATION_USD = Decimal("4.00")
 GATE2_REQUEST_RESERVATION_USD = Decimal("2.00")
 
 
 class BudgetError(ValueError):
     """Raised when the M-5 ledger would not enforce the frozen dollar cap."""
+
+
+def run_stop_reason(ledger: PersistentBudgetLedger, run_id: str) -> str | None:
+    """Return why the ledger stopped this run, or None.
+
+    The loopback proxy answers an exhausted run with HTTP 429 instead of raising
+    into the caller, so a budget cut-off otherwise looks exactly like the agent
+    giving up. Gate 1 would file it as `agent_failed` and gate 2 would count it
+    as an effective "Multi incomplete" observation.
+    """
+
+    run = ledger.snapshot()["runs"].get(run_id)
+    if not isinstance(run, dict) or not run.get("stopped"):
+        return None
+    reason = run.get("stop_reason")
+    return str(reason) if isinstance(reason, str) and reason else "budget_stopped"
 
 
 def phase_b_pricing(contract=None) -> ModelPricing:
@@ -52,9 +73,12 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
         raise M5ContractError("non-degradation hard cap drifted from $120.00")
     if loaded.raw.get("cost_forecast", {}).get("ledger_batch_id") != BATCH_ID:
         raise M5ContractError("ledger batch id drifted from multi-m5-phase-b")
-    max_runs = loaded.max_effective_runs + loaded.max_infra_attempts_total
-    if max_runs != 72:
-        raise M5ContractError("ledger run-slot count drifted from 60+12")
+    # Both gates share this ledger, so gate 1's attempts need their own slots.
+    # Sizing it at 60+12 alone truncates gate 2 in the worst legal case.
+    gate1_attempts = load_workflow_contract().max_attempts
+    max_runs = loaded.max_effective_runs + loaded.max_infra_attempts_total + gate1_attempts
+    if max_runs != 75:
+        raise M5ContractError("ledger run-slot count drifted from 60+12+3")
     ledger = PersistentBudgetLedger(
         path,
         batch_id=BATCH_ID,

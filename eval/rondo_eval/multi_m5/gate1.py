@@ -20,7 +20,12 @@ from ..api_budget_proxy import LoopbackResponsesProxy, PersistentBudgetLedger, _
 from ..config import RepoPaths
 from ..contracts import Product, Side
 from .archive import archive_record
-from .budget import GATE1_REQUEST_RESERVATION_USD, GATE1_RUN_CAP_USD, phase_b_pricing
+from .budget import (
+    GATE1_REQUEST_RESERVATION_USD,
+    GATE1_RUN_CAP_USD,
+    phase_b_pricing,
+    run_stop_reason,
+)
 from .capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy
 from .command import build_multi_exec_command
 from .load import M5ContractError, load_runtime_identity, load_workflow_contract
@@ -121,6 +126,7 @@ def run_gate1_paid(
                 process_runner=process_runner,
                 capture_upstream=proxy.base_url,
                 capture_bearer=proxy.downstream_api_key,
+                budget_probe=lambda: run_stop_reason(ledger, run_id),
                 extra={
                     "rehearsal": False,
                     "attempt": attempt,
@@ -157,6 +163,7 @@ def _run_gate1_once(
     process_runner: ProcessRunner,
     capture_upstream: str | None = None,
     capture_bearer: str = LOOPBACK_BEARER,
+    budget_probe: Callable[[], str | None] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = _common_root(common_root)
@@ -267,25 +274,35 @@ def _run_gate1_once(
 
     if completed is None:
         raise Gate1Error("gate 1 process did not start")
-    if timed_out or not jsonl.strip():
+    stop_reason = budget_probe() if budget_probe is not None else None
+    # Keep whatever the judge saw so a timeout after tool calls is auditable.
+    predicates = dict(verdict.predicates)
+    ignored = list(verdict.ignored_evidence)
+    event_id = verdict.event_id
+    if not timed_out and jsonl.strip() and verdict.passed:
+        # Evidence is already complete; a late budget stop does not unmake it.
+        passed = True
+        outcome = "completed"
+        reasons = list(verdict.reasons)
+    elif stop_reason is not None:
+        # Not an agent failure: the proxy answered 429 and the model never got
+        # the chance to finish. It is also not retried, that would only spend more.
+        passed = False
+        outcome = "budget_stopped"
+        reasons = [stop_reason]
+    elif timed_out or not jsonl.strip():
         outcome = "infra_failed"
         passed = False
         reasons = (
             ["timeout"] if timed_out else [f"empty capture rc={completed.returncode}"]
         )
-        # Keep whatever the judge saw so a timeout after tool calls is auditable.
-        predicates = dict(verdict.predicates)
-        ignored = list(verdict.ignored_evidence)
-        event_id = verdict.event_id
     else:
-        passed = verdict.passed
-        outcome = "completed" if passed else "agent_failed"
+        passed = False
+        outcome = "agent_failed"
         reasons = list(verdict.reasons)
-        predicates = dict(verdict.predicates)
-        ignored = list(verdict.ignored_evidence)
-        event_id = verdict.event_id
 
     extra_fields = {
+        "stop_reason": stop_reason,
         "passed": passed,
         "predicates": predicates,
         "reasons": reasons,

@@ -11,6 +11,7 @@ from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
@@ -21,11 +22,13 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     LoopbackResponsesProxy,
     Usage,
     _UrllibTransport,
+    price_usage,
 )
 from rondo_eval.config import RepoPaths  # noqa: E402
 from rondo_eval.contracts import BinaryManifest, Product, Side  # noqa: E402
 from rondo_eval.multi_m5.archive import archive_record  # noqa: E402
 from rondo_eval.multi_m5.budget import (  # noqa: E402
+    GATE1_REQUEST_RESERVATION_USD,
     GATE1_RUN_CAP_USD,
     GATE2_REQUEST_RESERVATION_USD,
     GATE2_RUN_CAP_USD,
@@ -792,6 +795,228 @@ class MultiM5TerminalBenchExecutorTests(unittest.TestCase):
         for item in (ledger_path, lock_path, metadata):
             if item.exists():
                 item.unlink()
+
+
+class MultiM5BudgetStopHonestyTests(unittest.TestCase):
+    """A budget cut-off must never read as a product failure on either gate."""
+
+    def test_gate1_reservation_leaves_room_above_the_frozen_point_estimate(self) -> None:
+        # A reservation is checked twice: once for itself and once as Guardian
+        # additional capacity. The usable spend is `cap - 2 * reservation`, so an
+        # $8 reservation under a $24 cap stopped gate 1 at the $8 point estimate.
+        pricing = phase_b_pricing()
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-gate1-headroom.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        # A heavy but realistic medium-effort turn on the frozen snapshot.
+        usage = Usage(60_000, 0, 0, 3_000)
+        spent = Decimal(0)
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                ledger.ensure_run("m5-g1-paid-a1", cap_usd=GATE1_RUN_CAP_USD)
+                for index in range(1, 400):
+                    try:
+                        ledger.reserve(
+                            "m5-g1-paid-a1",
+                            f"req-{index}",
+                            amount_usd=GATE1_REQUEST_RESERVATION_USD,
+                            additional_capacity_usd=GATE1_REQUEST_RESERVATION_USD,
+                        )
+                    except BudgetCapacityExhausted:
+                        break
+                    ledger.begin_attempt("m5-g1-paid-a1", f"req-{index}", max_attempts=5)
+                    ledger.settle("m5-g1-paid-a1", f"req-{index}", usage, pricing=pricing)
+                    spent = Decimal(
+                        ledger.snapshot()["runs"]["m5-g1-paid-a1"]["spent_usd"]
+                    )
+                else:  # pragma: no cover - the cap must bind well before this
+                    self.fail("gate 1 run cap never bound")
+        finally:
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+        # Twice the frozen $8/attempt forecast, so a normal run is not truncated.
+        self.assertGreaterEqual(spent, Decimal("16.00"))
+        # The single-turn reservation still has to cover the worst realistic turn.
+        self.assertGreaterEqual(
+            GATE1_REQUEST_RESERVATION_USD,
+            price_usage(Usage(272_000, 0, 0, 32_000), pricing=pricing),
+        )
+
+    def test_phase_b_ledger_has_run_slots_for_both_gates(self) -> None:
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-slot-count.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        workflow = load_workflow_contract()
+        needed = (
+            contract.max_effective_runs
+            + contract.max_infra_attempts_total
+            + workflow.max_attempts
+        )
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                # Gate 1 shares this ledger; sizing it at 60+12 starved gate 2.
+                self.assertEqual(ledger.snapshot()["max_runs"], needed)
+        finally:
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+
+    def test_gate1_budget_stop_is_not_filed_as_an_agent_failure(self) -> None:
+        root = _common_root()
+        try:
+            load_runtime_identity(require_frozen=True, common_root=root)
+        except M5ContractError as exc:
+            self.skipTest(f"frozen Multi bundle is unavailable: {exc}")
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-gate1-budget-stop.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        upstream = _UsageUpstream()
+        upstream.start()
+        workflow = load_workflow_contract()
+        held: dict[str, object] = {}
+
+        def exhaust_then_fail(command, **_kwargs: object) -> object:
+            # One captured body, then the ledger stops the run exactly the way
+            # the proxy does when a reservation no longer fits.
+            base_url = _provider_base_url(command)
+            _post_capture(base_url, workflow.root_model, str(held["bearer"]))
+            ledger = held["ledger"]
+            ledger.stop_run("m5-g1-paid-a1", stop_reason="budget_capacity_exhausted")
+            return subprocess.CompletedProcess(args=command, returncode=1, stdout=b"", stderr=b"")
+
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                held["ledger"] = ledger
+                original = LoopbackResponsesProxy.downstream_api_key
+
+                def remember(self):  # type: ignore[no-untyped-def]
+                    value = original.fget(self)  # type: ignore[union-attr]
+                    held["bearer"] = value
+                    return value
+
+                with patch.object(
+                    LoopbackResponsesProxy,
+                    "downstream_api_key",
+                    property(remember),
+                ):
+                    result = run_gate1_paid(
+                        authorization=PaidAuthorization(real_api=True, docker=False),
+                        api_key="sk-test-never-spend",
+                        upstream_base_url="https://provider.example/v1",
+                        ledger=ledger,
+                        common_root=root,
+                        persist=False,
+                        transport=_UrllibTransport(endpoint_override=upstream.endpoint),
+                        process_runner=exhaust_then_fail,  # type: ignore[arg-type]
+                    )
+            record = result["record"]
+            self.assertEqual(record["evidence_kind"], "real_api")
+            self.assertEqual(record["outcome"], "budget_stopped")
+            self.assertNotEqual(record["outcome"], "agent_failed")
+            self.assertEqual(record["stop_reason"], "budget_capacity_exhausted")
+            self.assertFalse(record["passed"])
+            self.assertFalse(record["counts_as_effective"])
+            # One attempt only: retrying after a budget stop just spends more.
+            self.assertEqual(record["attempt"], 1)
+        finally:
+            upstream.close()
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+
+    def test_gate2_budget_stop_is_not_an_effective_multi_observation(self) -> None:
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-gate2-budget-stop.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        archive_file = scratch / "multi-m5-test-gate2-budget-stop-records.jsonl"
+        for item in (ledger_path, lock_path, archive_file):
+            if item.exists():
+                item.unlink()
+
+        class _ExhaustOnFirstMulti:
+            def __init__(self) -> None:
+                self.ledger = None
+
+            def execute(self, slot, *, attempt: int, run_id: str) -> SlotResult:
+                del attempt
+                if slot.product is Product.RONDO_MULTI and self.ledger is not None:
+                    # The proxy answers 429 in-band, so the agent merely looks
+                    # like it gave up and Harbor reports a plain failure.
+                    self.ledger.stop_run(run_id, stop_reason="budget_capacity_exhausted")
+                    return SlotResult(outcome="agent_failed", extra={"executor": "probe"})
+                return SlotResult(outcome="completed", extra={"executor": "probe"})
+
+        executor = _ExhaustOnFirstMulti()
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                executor.ledger = ledger
+                result = run_light_interleaved(
+                    executor=executor,
+                    common_root=root,
+                    ledger=ledger,
+                    persist=True,
+                    archive_file=archive_file,
+                )
+        finally:
+            for item in (ledger_path, lock_path, archive_file):
+                if item.exists():
+                    item.unlink()
+        multi_rows = [
+            row
+            for row in result["records"]
+            if row.get("product") == Product.RONDO_MULTI.value
+        ]
+        self.assertTrue(multi_rows)
+        stopped_row = multi_rows[-1]
+        self.assertEqual(stopped_row["outcome"], "budget_stopped")
+        self.assertFalse(stopped_row["counts_as_effective"])
+        self.assertEqual(stopped_row["stop_reason"], "budget_capacity_exhausted")
+        self.assertTrue(result["stopped"])
+        # The stopped observation must not reach the degradation verdict.
+        self.assertNotIn("stable_one_way_degradation", set(result["verdicts"].values()))
+
+
+def _provider_base_url(command) -> str:
+    for index, value in enumerate(command):
+        if value == "-c" and index + 1 < len(command):
+            item = command[index + 1]
+            if item.startswith("model_providers.rondo_eval_provider.base_url="):
+                return json.loads(item.split("=", 1)[1])
+    raise AssertionError("gate 1 argv carries no provider base url")
+
+
+def _post_capture(base_url: str, model: str, bearer: str) -> None:
+    body = json.dumps({"model": model, "input": [], "stream": True}).encode()
+    parsed = urlsplit(base_url)
+    connection = HTTPConnection("127.0.0.1", int(parsed.port or 0), timeout=30)
+    try:
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=body,
+            headers={
+                "Authorization": f"Bearer {bearer}",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+            },
+        )
+        connection.getresponse().read()
+    finally:
+        connection.close()
 
 
 def _v4_catalog() -> FrozenCanaryCatalog:

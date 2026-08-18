@@ -48,6 +48,7 @@ from .budget import (
     GATE2_REQUEST_RESERVATION_USD,
     GATE2_RUN_CAP_USD,
     phase_b_pricing,
+    run_stop_reason,
 )
 from .bundle import load_side_manifest
 from .capture import FORWARD_TIMEOUT_SECONDS
@@ -451,6 +452,20 @@ def run_light_interleaved(
                 if attempt == loaded.max_slot_attempts:
                     return produced
                 continue
+            if ledger is not None:
+                # The proxy stops an exhausted run in-band with HTTP 429, so the
+                # agent just looks like it gave up. Counting that as an effective
+                # "Multi incomplete" would feed the degradation verdict a result
+                # the budget produced, and Multi is the pricier side.
+                exhausted = run_stop_reason(ledger, run_id)
+                if exhausted is not None:
+                    stopped = True
+                    stop_reason = exhausted
+                    return emit(
+                        outcome=RunOutcome.BUDGET_STOPPED.value,
+                        counts_as_effective=False,
+                        extra={**result.extra, "stop_reason": exhausted, "attempt": attempt},
+                    )
             if result.request_count > loaded.max_requests_per_run:
                 result = SlotResult(
                     outcome=RunOutcome.INFRA_FAILED.value,

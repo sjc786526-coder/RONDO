@@ -1233,5 +1233,14 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
   真实 API，未产生费用。未跑完整 `just eval-test`（既有两项 Local 导入失败与本任务无关）。
 - **审查修复**：预算代理新增 `run_cap_usd`；门 2 真实槽位与编排器同用 $8；漏传 cap 的回归
   `test_budget_proxy_keeps_the_gate2_eight_dollar_run_cap`。
-- 执行日志：`agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`。
+- **独立验收（2026-08-18）**：通过，但先在预算层查出三处只会在真花钱时暴露的缺陷，已由审查者窄修 +
+  各钉一条反向回归：①门 1 可用额度是 `cap − 2×预留`（Guardian 附加容量），`$8` 预留把门 1 掐在 `$8`，
+  正好等于冻结点估计，实测第 21 请求即耗尽（累计 `$8.19`）→ 预留改 `$4`，额度回到 `$16`；
+  ②代理对耗尽的 run 就地回 429 不抛异常，掐断被记成 `agent_failed`，门 2 还 `counts_as_effective=true`
+  直接污染退化判据（Multi 成本更高，系统性偏向"退化"）→ 新增 `run_stop_reason`，两道门都落
+  `budget_stopped`，门 2 不计有效并停批；③共享账本槽位按 `60+12` 算，没给门 1 的 3 次尝试留位 → 改 `75`。
+  门禁：`test_multi_m5` + `test_multi_m5_exec` + `test_api_budget_proxy` + `test_terminal_bench`
+  + `test_terminal_bench_results` + `test_binary_freeze` **237/237**，`just eval-lock` 通过。
+- 执行日志：`agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`；
+  验收报告：`agent_log/2026-08-18-130000-plan044-m5-paid-entries-acceptance-review.md`。
 
