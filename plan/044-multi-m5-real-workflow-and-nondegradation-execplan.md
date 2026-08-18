@@ -251,12 +251,24 @@
   门 1 的独立上游参数一并绑定；资源硬停止携带的 samples 被丢弃 → 新增 `docker_stop_summary`；
   `image_reference` 读了不存在的属性恒为 null → 读正确字段。门禁 **297/297** + 配置类 **124/124**。
   详见 `agent_log/2026-08-18-190000-plan044-m5-paid-boundary-remediation-2.md`。
+- **付费前最后一项缺口已闭环：退化诊断从「文档声明」变成真实可执行**（`03b4469`）。
+  原状态是 `load.py` 只在锁文本里 grep `diagnostic_v2_on_team_state_off` 字符串，没有任何代码能构造该槽位，
+  一旦真的形成稳定单向退化，"归因到团队层"只能靠断言。现改为：`team_capability_override_items` 增加
+  `team_state_enabled=false` 的诊断表（其余 `-c` 覆盖含成员模型完全不变）；adapter 拒绝非 Multi 侧携带该标志、
+  并严格解析 Harbor 的 JSON 字符串形式（`"false"` 不会被真值化成开启）；gate 2 在**判定完成后**才构造诊断槽，
+  锁的「不得预跑」由构造顺序保证；诊断行 `counts_as_effective=false`、不占 `max_effective_runs`，
+  但共享 $120、infra 尝试与全部停止线；账本槽位补每题一个（`60+12+3+10=85`），否则要解释退化的那次运行反而开不了；
+  锁新增 `attribution.diagnostic` 可执行块，loader 逐字段校验而非匹配一句话。九条定向回归。
 - **Python 门禁复现注意**：必须清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 再跑，否则环回假上游会被宿主代理劫持。
-- 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未授权、未执行。
+- 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未执行，累计费用 **$0**
+  （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本，归档只有 `loopback` 行）。
 
 ### 本任务剩余步骤
 
-- 按本节「阶段 B 精确授权清单」向用户申请一次真实 API/付费/Docker 授权，不得自行开工。
+- 阶段 B 的**离线准备已全部完成并提交**，包括最后一项退化诊断闭环。等待用户放行后按下表执行门 1、再执行门 2。
+- 门禁复跑口径：`tests.test_multi_m5`、`tests.test_multi_m5_exec`、`tests.test_terminal_bench` 与 `just eval-lock`。
+  全量 `just eval-test` 为 905 用例、无新增失败；其中 2 个 `ModuleNotFoundError: No module named 'eval'`
+  的加载错误（`test_l6_b10333_pair`、`test_local_m4_holdout_anchor`）在干净树上同样存在，属既有问题，不由本次引入。
 
 ### 阻塞项
 
@@ -282,8 +294,8 @@
   code-mode 嵌套面）。因此现有 `evidence_source` 设计成立，无需改动门 1 的运行配置。
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
-- 阶段 B：**付费入口已接线，两轮独立验收分别窄修三处预算缺陷与三处运行期缺陷后通过，真实运行未开始。**
-  §1 阶段 B 五项全部未做。不得开始花钱，除非用户按清单授权。
+- 阶段 B：**付费入口与全部离线前置准备已就绪，真实运行未开始。**
+  §1 阶段 B 五项全部未做。不得开始花钱，除非用户按清单放行。
 
 ### 阶段 B 精确授权清单
 
@@ -296,6 +308,7 @@
 | 门 1 | host `codex exec` 协作 fixture，无 Docker；最多 3 次尝试、单次 1800s |
 | 门 2 | v4 catalog 十任务；`task_major_codex_then_multi`；条件复跑仅当「Codex 完成、Multi 未完成」时双方各加两次 |
 | 最大有效运行 | 60（基础 20 + 条件最多 40） |
+| 退化诊断 | 仅在某题判为稳定单向退化后触发；每题最多 1 次、Multi 侧、V2 开 + team_state 关；不计有效结果、不改判定；与两道门共享同一 $120 与全部停止线 |
 | 基础设施 | 每槽最多 3 次尝试；infra 总上限 12；infra 不计有效结果 |
 | 每 run 请求上限 | 80 |
 | 价格快照 | 2026-08-17 官方页：input $5 / cached $0.50 / output $30 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25 |
@@ -369,3 +382,5 @@
 | 037 | 不强制门 2 依赖门 1 通过；不改 `base_order` 的 Codex 先后顺序 | ExecPlan §1 明写两门相互独立；顺序偏差方向利于 Multi，只会让退化判定更保守，不会造出假退化，已写进锁的 `scope_limits`。实际付费顺序仍应先门 1 后门 2 以减少无效支出，靠流程而非代码依赖 | 门 2 合同 | 已采纳 |
 | 038 | 请求上限的「读计数 + 预留」在包装层加锁合成单一临界区，不改共享账本 | 代理跑在 ThreadingHTTPServer 上、Root 与成员并发，`snapshot→判断→reserve` 是 TOCTOU（实测上限 8 被冲到 13）。真实槽位里交给代理的唯一 reserve 路径就是这个包装层，故在此串行即充分；账本不回调包装层，无锁反转 | 付费边界 | 已采纳 |
 | 039 | 付费 endpoint 写进不退化锁并逐字校验，缺失即 fail-closed | provider 名称不说明密钥、工作区内容与费用实际流向何处；同名换 endpoint 原先照样通过 | 安全边界 | 已采纳 |
+| 040 | 退化诊断做成真实可执行槽位：`team_state` 标志贯通 adapter/归档/账本，判定完成后才构造，且不计有效结果 | 锁承诺了归因诊断，实现却只有一次字符串匹配；真出退化时无法诚实归因。判定后构造使「不得预跑」由构造顺序保证，而不是靠纪律 | 门 2 归因 | 已采纳 |
+| 041 | 账本槽位由 `60+12+3` 扩到 `+10`（每题一个诊断），$120 硬上限不变 | 槽位只是计数护栏、不是购买力；不扩就会出现「要解释退化的那次运行开不了」 | 预算 | 已采纳 |
