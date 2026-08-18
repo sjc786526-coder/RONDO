@@ -21,6 +21,23 @@ from .loopback import LOOPBACK_BEARER, LOOPBACK_MODEL
 
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+# Matches api_budget_proxy._MAX_UPSTREAM_TIMEOUT_SECONDS. A 30s socket timeout
+# turns a normal slow model round into infra failure.
+FORWARD_TIMEOUT_SECONDS = 180.0
+_HOP_BY_HOP = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+        "host",
+        "content-length",
+    }
+)
 
 RequestHandler = Callable[[dict[str, Any]], bytes]
 
@@ -42,6 +59,7 @@ class CaptureProxy:
         model: str = LOOPBACK_MODEL,
         capture_path: Path | None = None,
         bind_host: str = "127.0.0.1",
+        forward_timeout_seconds: float = FORWARD_TIMEOUT_SECONDS,
     ) -> None:
         if bind_host != "127.0.0.1":
             raise CaptureError("capture proxy must bind only to 127.0.0.1")
@@ -56,6 +74,12 @@ class CaptureProxy:
             if handler is not None:
                 raise CaptureError("forward mode must not take a stub handler")
             _require_loopback_base_url(upstream_base_url)
+            if (
+                not isinstance(forward_timeout_seconds, (int, float))
+                or isinstance(forward_timeout_seconds, bool)
+                or not 0 < float(forward_timeout_seconds) <= FORWARD_TIMEOUT_SECONDS
+            ):
+                raise CaptureError("forward timeout must be within 180 seconds")
         self.mode = mode
         self._handler = handler
         self._upstream = upstream_base_url.rstrip("/") if upstream_base_url else None
@@ -63,6 +87,7 @@ class CaptureProxy:
         self._model = model
         self._bind_host = bind_host
         self._capture_path = capture_path
+        self._forward_timeout = float(forward_timeout_seconds)
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -159,25 +184,15 @@ class CaptureProxy:
             if self.mode == "stub":
                 assert self._handler is not None
                 payload = self._handler(value)
-            else:
-                payload = self._forward(raw, handler.headers)
+                if not isinstance(payload, (bytes, bytearray)) or len(payload) > _MAX_RESPONSE_BYTES:
+                    _reject(handler, 500, "response_invalid")
+                    return
+                _write_sse(handler, bytes(payload))
+                return
+            self._forward_stream(raw, handler.headers, handler)
         except CaptureError as exc:
             _reject(handler, 400, str(exc))
             return
-        if not isinstance(payload, (bytes, bytearray)) or len(payload) > _MAX_RESPONSE_BYTES:
-            _reject(handler, 500, "response_invalid")
-            return
-        handler.send_response(200)
-        handler.send_header("Content-Type", "text/event-stream")
-        handler.send_header("Cache-Control", "no-cache")
-        handler.send_header("Content-Length", str(len(payload)))
-        handler.send_header("Connection", "close")
-        handler.end_headers()
-        handler.close_connection = True
-        try:
-            handler.wfile.write(payload)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
 
     def _record(self, body: dict[str, Any]) -> None:
         line = json.dumps(body, sort_keys=True, separators=(",", ":")) + "\n"
@@ -193,24 +208,53 @@ class CaptureProxy:
                 handle.write(line)
                 handle.flush()
 
-    def _forward(self, raw: bytes, headers: Any) -> bytes:
+    def _forward_stream(
+        self,
+        raw: bytes,
+        headers: Any,
+        client: BaseHTTPRequestHandler,
+    ) -> None:
+        """Copy the loopback upstream response through. Do not buffer the SSE."""
+
         parsed = urlsplit(self._upstream or "")
         host, port = parsed.hostname, parsed.port
         if host != "127.0.0.1" or not isinstance(port, int):
             raise CaptureError("forward upstream is not loopback")
-        connection = HTTPConnection("127.0.0.1", port, timeout=30)
+        connection = HTTPConnection("127.0.0.1", port, timeout=self._forward_timeout)
+        started = False
         try:
-            forwarded = {
-                "Authorization": headers.get("Authorization", ""),
-                "Content-Type": "application/json",
-                "Content-Length": str(len(raw)),
-            }
-            connection.request("POST", "/v1/responses", body=raw, headers=forwarded)
+            connection.request(
+                "POST",
+                "/v1/responses",
+                body=raw,
+                headers=_forwarded_headers(headers, body_len=len(raw)),
+            )
             response = connection.getresponse()
-            payload = response.read(_MAX_RESPONSE_BYTES + 1)
-            if response.status != 200 or len(payload) > _MAX_RESPONSE_BYTES:
-                raise CaptureError("forward upstream rejected the request")
-            return payload
+            content_type = response.headers.get("Content-Type", "text/event-stream")
+            client.send_response(response.status)
+            client.send_header("Content-Type", content_type)
+            client.send_header("Cache-Control", "no-cache")
+            client.send_header("Connection", "close")
+            client.end_headers()
+            client.close_connection = True
+            started = True
+            total = 0
+            while True:
+                chunk = response.read(8192)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _MAX_RESPONSE_BYTES:
+                    return
+                try:
+                    client.wfile.write(chunk)
+                    client.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+        except OSError as exc:
+            if started:
+                return
+            raise CaptureError("forward upstream is unavailable") from exc
         finally:
             connection.close()
 
@@ -223,6 +267,37 @@ def _require_loopback_base_url(value: str | None) -> None:
         raise CaptureError("forward upstream must be http://127.0.0.1:<port>/v1")
     if parsed.path not in {"", "/v1", "/v1/"}:
         raise CaptureError("forward upstream path must be /v1")
+
+
+def _forwarded_headers(headers: Any, *, body_len: int) -> dict[str, str]:
+    """Keep request headers the budget proxy inspects; drop hop-by-hop only."""
+
+    forwarded: dict[str, str] = {}
+    items = headers.items() if hasattr(headers, "items") else ()
+    for name, value in items:
+        if not isinstance(name, str) or not isinstance(value, str):
+            continue
+        if name.lower() in _HOP_BY_HOP:
+            continue
+        forwarded[name] = value
+    forwarded["Content-Length"] = str(body_len)
+    if not any(key.lower() == "content-type" for key in forwarded):
+        forwarded["Content-Type"] = "application/json"
+    return forwarded
+
+
+def _write_sse(handler: BaseHTTPRequestHandler, payload: bytes) -> None:
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    handler.close_connection = True
+    try:
+        handler.wfile.write(payload)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
 
 
 def _reject(handler: BaseHTTPRequestHandler, status: int, code: str) -> None:

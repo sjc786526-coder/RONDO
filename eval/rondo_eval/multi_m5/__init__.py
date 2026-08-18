@@ -37,10 +37,11 @@ from .schedule import (
     outcomes_by_task,
 )
 from .store import persist_archive_record
-from .gate1 import run_gate1_rehearsal
-from .gate2 import ScriptedSlotExecutor, run_light_interleaved
+from .gate1 import run_gate1_paid, run_gate1_rehearsal
+from .gate2 import ScriptedSlotExecutor, TerminalBenchSlotExecutor, run_gate2_real, run_light_interleaved
 from .ready import readiness_report
-from .budget import HARD_CAP_USD, open_phase_b_ledger
+from .budget import HARD_CAP_USD, RUN_CAP_USD, open_phase_b_ledger
+from .paid import PaidAuthorization, authorization_from_phrases
 
 __all__ = [
     "CollaborationVerdict",
@@ -51,12 +52,16 @@ __all__ = [
     "M5ContractError",
     "M5_ARCHIVE_SCHEMA_VERSION",
     "NondegradationContract",
+    "PaidAuthorization",
+    "RUN_CAP_USD",
     "RuntimeIdentity",
     "ScriptedSlotExecutor",
     "Slot",
     "TeamPublishFakeServer",
+    "TerminalBenchSlotExecutor",
     "WorkflowContract",
     "archive_record",
+    "authorization_from_phrases",
     "base_slots",
     "collect_gate1_evidence",
     "collect_tool_names",
@@ -73,6 +78,8 @@ __all__ = [
     "readiness_report",
     "required_archive_fields",
     "run_frozen_multi_team_publish_loopback",
+    "run_gate1_paid",
     "run_gate1_rehearsal",
+    "run_gate2_real",
     "run_light_interleaved",
 ]

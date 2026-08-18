@@ -1213,4 +1213,23 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
 - 执行日志：`agent_log/2026-08-18-030000-plan044-m5-phase-b-preparation.md`、
   `agent_log/2026-08-18-070000-plan044-m5-template-predicate-remediation.md`；
   审查报告：`agent_log/2026-08-18-050000-plan044-m5-phase-b-prep-review.md`。
+  模板整改复验通过：`agent_log/2026-08-18-090000-plan044-m5-template-remediation-rereview.md`。
+
+## Multi M-5 阶段 B 付费入口接线（Plan 044，2026-08-18）
+
+**状态**：门 1 付费运行函数与门 2 真实 Terminal-Bench 执行器已落地，**仍锁在授权门后**。未跑真实 API、
+未拉/跑 Docker、未产生费用。**不是** M-5 通过，也**不是**可以开始花钱；按 F3 决议须先独立审查这两个部件。
+成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **门 1**：`run_gate1_paid` 在冻结二进制上走 CaptureProxy(forward, 180s 流式、保留 User-Agent) →
+  环回预算代理（单次上限 $24、请求预留 $8）→ HTTPS provider。超时或空捕获落 `infra_failed` /
+  `evidence_kind=real_api`。无授权口令时 CLI 退出 78，不加载 `.env.local`。
+- **门 2**：`TerminalBenchSlotExecutor` 构造无 campaign / 无 preflight 的 `TerminalBenchRequest`，
+  经既有 `prepare_terminal_bench_run` / Harbor / `parse_single_task_result` 跑一槽；Docker 未授权则
+  fail-closed。`run_gate2_real` 显式 `evidence_kind=real_api`、`charge_fake_usage=False`，单次上限 $8、
+  请求预留 $2。脚本执行器不能冒充 `real_api`。
+- **授权**：冻结口令只存在于 `paid.py`；`just eval-multi-m5-gate1-paid` / `gate2-real` 永不转发口令。
+- **门禁**：`tests.test_multi_m5` + `tests.test_multi_m5_exec` **49/49**（含彩排）。未跑 Rust、Docker、
+  真实 API，未产生费用。未跑完整 `just eval-test`（既有两项 Local 导入失败与本任务无关）。
+- 执行日志：`agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`。
 

@@ -11,7 +11,13 @@ from .load import M5ContractError, load_nondegradation_contract
 
 BATCH_ID = "multi-m5-phase-b"
 HARD_CAP_USD = Decimal("120.00")
-RUN_CAP_USD = Decimal("40.00")
+# Per-run ceiling. Gate 1 is modelled at ~$8/attempt; $24 is a small multiple.
+# Gate 2 TB runs are cheaper and use GATE2_RUN_CAP_USD via ensure_run.
+RUN_CAP_USD = Decimal("24.00")
+GATE1_RUN_CAP_USD = Decimal("24.00")
+GATE2_RUN_CAP_USD = Decimal("8.00")
+GATE1_REQUEST_RESERVATION_USD = Decimal("8.00")
+GATE2_REQUEST_RESERVATION_USD = Decimal("2.00")
 
 
 class BudgetError(ValueError):

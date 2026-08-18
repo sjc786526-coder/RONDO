@@ -1,4 +1,4 @@
-"""CLI: Multi M-5 offline drills, rehearsal, fake gate 2, and readiness."""
+"""CLI: Multi M-5 offline drills, rehearsal, fake gate 2, readiness, and locked paid entries."""
 
 from __future__ import annotations
 
@@ -6,14 +6,20 @@ import json
 import sys
 from pathlib import Path
 
-from ..config import RepoPaths
+from ..config import RepoPaths, load_provider_secret, load_runtime_config
 from .budget import open_phase_b_ledger
-from .gate1 import Gate1Error, run_gate1_rehearsal
-from .gate2 import ScriptedSlotExecutor, run_light_interleaved
+from .gate1 import Gate1Error, run_gate1_paid, run_gate1_rehearsal
+from .gate2 import Gate2Error, ScriptedSlotExecutor, run_gate2_real, run_light_interleaved
 from .load import M5ContractError
 from .loopback import LoopbackError, run_frozen_multi_team_publish_loopback
+from .paid import PaidAuthError, authorization_from_phrases
 from .ready import readiness_report
-from .store import StoreError, scratch_root
+from .store import StoreError, budget_ledger_path, scratch_root
+
+_USAGE = (
+    "usage: python -m rondo_eval.multi_m5 "
+    "[loopback|rehearsal|ready|gate2-fake|gate1-paid|gate2-real]"
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,11 +71,76 @@ def main(argv: list[str] | None = None) -> int:
             }
             print(json.dumps(printable, sort_keys=True, indent=2))
             return 0 if not result["stopped"] else 1
-        print("usage: python -m rondo_eval.multi_m5 [loopback|rehearsal|ready|gate2-fake]", file=sys.stderr)
+        if command == "gate1-paid":
+            auth = authorization_from_phrases(api_phrase=_option(args, "--authorize-paid-api"))
+            config = load_runtime_config(paths)
+            _name, api_key = load_provider_secret(config)
+            provider = config.paid_provider_projection()
+            with open_phase_b_ledger(budget_ledger_path(paths.common_root)) as ledger:
+                result = run_gate1_paid(
+                    authorization=auth,
+                    api_key=api_key,
+                    upstream_base_url=provider.base_url,
+                    ledger=ledger,
+                    common_root=paths.common_root,
+                )
+            print(json.dumps(result["record"], sort_keys=True, separators=(",", ":")))
+            return 0 if result["record"].get("passed") else 1
+        if command == "gate2-real":
+            auth = authorization_from_phrases(
+                api_phrase=_option(args, "--authorize-paid-api"),
+                docker_phrase=_option(args, "--authorize-docker"),
+            )
+            auth.require_api_and_docker()
+            from ..docker_supervisor import HeavyLockLease
+            from ..runtime_bridge import (
+                DockerCliCounter,
+                PowerShellDockerDesktopHostProbe,
+                lease_from_watchdog,
+            )
+
+            config = load_runtime_config(paths)
+            _name, api_key = load_provider_secret(config)
+            proof = lease_from_watchdog()
+            counter = DockerCliCounter(
+                host_data_root=paths.common_root / "eval-data" / "docker-host",
+                desktop_host_probe=PowerShellDockerDesktopHostProbe(),
+            )
+            with open_phase_b_ledger(budget_ledger_path(paths.common_root)) as ledger:
+                result = run_gate2_real(
+                    authorization=auth,
+                    api_key=api_key,
+                    ledger=ledger,
+                    common_root=paths.common_root,
+                    config=config,
+                    counter=counter,
+                    lock_guard=proof.guard,
+                    lease=HeavyLockLease(proof.lease.token, proof.lease.held),
+                )
+            printable = {
+                "effective_runs": result["effective_runs"],
+                "infra_used": result["infra_used"],
+                "stopped": result["stopped"],
+                "stop_reason": result["stop_reason"],
+                "record_count": len(result["records"]),
+                "evidence_kind": "real_api",
+            }
+            print(json.dumps(printable, sort_keys=True, indent=2))
+            return 0 if not result["stopped"] else 1
+        print(_USAGE, file=sys.stderr)
         return 2
-    except (LoopbackError, M5ContractError, Gate1Error, StoreError) as exc:
+    except (LoopbackError, M5ContractError, Gate1Error, Gate2Error, StoreError, PaidAuthError) as exc:
         print(f"rondo-multi-m5: {exc}", file=sys.stderr)
         return 78
+
+
+def _option(args: list[str], name: str) -> str | None:
+    if name not in args:
+        return None
+    index = args.index(name)
+    if index + 1 >= len(args):
+        return None
+    return args[index + 1]
 
 
 if __name__ == "__main__":

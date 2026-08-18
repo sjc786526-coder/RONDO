@@ -220,19 +220,23 @@
   模板补入 Root 在同一 Event 发布的步骤、重算 `instruction_sha256`，并新增两条回归把模板与判据绑定。
   顺带把 `gate2` 的 `evidence_kind` 写死为 `fake` 这处付费陷阱就地修掉。
   详见 `agent_log/2026-08-18-070000-plan044-m5-template-predicate-remediation.md`。
+  复验通过：`agent_log/2026-08-18-090000-plan044-m5-template-remediation-rereview.md`。
+- **门 1 付费入口与门 2 真实执行器已落地，仍锁在授权门后**：`run_gate1_paid` 走
+  CaptureProxy(forward) → LoopbackResponsesProxy → HTTPS provider；`TerminalBenchSlotExecutor`
+  走既有 TB adapters/runner/results，不套 v7 campaign。CLI / `just` 不内嵌授权口令，无口令时
+  退出码 78 且不加载 `.env.local`。未跑真实 API、未拉 Docker、未产生费用。
+  详见 `agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`。
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未授权、未执行。
 
 ### 本任务剩余步骤
 
-- 付费前还差两件实现：门 1 付费入口（预算代理 + forward 捕获接成付费运行函数）、
-  门 2 真实执行器（走既有 `terminal_bench` adapters/runner/results，不套 v7 campaign）。
-- 上述两件按阶段 A 收口的 F3 决议，实现后须再过一次独立审查。
+- 按阶段 A 收口的 F3 决议，对本轮两个付费部件做一次独立审查。
 - 审查通过后，按本节「阶段 B 精确授权清单」向用户申请一次真实 API/付费/Docker 授权，不得自行开工。
 
 ### 阻塞项
 
-- 阶段 A 独立验收不通过后的门 1 判据整改待复验。
-- 阶段 B 所需的 Docker、真实 API 与付费授权尚未取得，按 §3 硬约束 2 处理。
+- 阶段 B 所需的 Docker、真实 API 与付费授权尚未取得，按 §3 硬约束 2 处理。两个付费函数已存在，
+  但在独立审查通过并取得口令前不得调用真实上游。
 - `.env.local` 已确认存在、非符号链接、权限 `0600`。未打开文件。阶段 B 开始前执行者须静默确认
   `OPENAI_API_KEY` 存在且非空（relay / CCTQ Responses），不得记录其值。
 
@@ -253,7 +257,8 @@
   code-mode 嵌套面）。因此现有 `evidence_source` 设计成立，无需改动门 1 的运行配置。
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
-- 阶段 B：未开始。§1 阶段 B 五项全部未做。
+- 阶段 B：**付费入口已接线，真实运行未开始。** §1 阶段 B 五项全部未做。不得表述为可以开始花钱，
+  除非独立审查通过且用户按清单授权。
 
 ### 阶段 B 精确授权清单
 
@@ -322,3 +327,6 @@
 | 020 | 门 1 dump 只从 harness 捕获的 Responses `function_call_output` 采集，不读 `TEAM_REPORT.md`，也不把 `codex exec --json` 当成工具输出源 | exec JSONL 不映射 `team_inspect`；wait 的 ThreadItem 也不带 TeamActivity 原文。真实工具结果出现在下一轮 Responses `input` 里 | 门 1 证据 | 已采纳 |
 | 021 | 门 2 归因边界写入不退化锁：比较的是「上游 V2 + 团队状态」对「上游默认 V1」；真退化再跑 `V2 开、team_state 关`，本轮不预跑 | 结论要能说清退化归谁；不预跑省钱 | 门 2 合同 | 已采纳 |
 | 022 | 采集按文档顺序吸收；无 cursor 的 dump 整页替换，带 cursor 的同快照页拼接；jsonl 一旦提供就覆盖调用方 dump | 整树 DFS last-wins 会把后一页 visibility 盖掉 Event，也会让伪造 dump 在 jsonl 空时漏进来 | 门 1 采集 | 已采纳 |
+| 023 | 账本默认单次上限 $24；门 2 `ensure_run` 用 $8；门 1/门 2 请求预留 $8 / $2 | 默认 $40 加上 Guardian 附加预留会顶破单次上限；门 1 按约 $8/次的小倍数收紧 | 预算 | 已采纳 |
+| 024 | Capture forward 超时 180s、SSE 边读边写、原样转发非 hop-by-hop 头（含 User-Agent） | 30s 会把正常慢请求打成 infra；预算代理要求恰好一个 User-Agent；整包缓冲会堵流 | 门 1 捕获 | 已采纳 |
+| 025 | 付费入口用冻结口令解锁；测试走 `PaidAuthorization` + fake transport，justfile 永不内嵌口令 | 函数可以存在，但不能在未授权时加载密钥或打开付费上游 | 授权门 | 已采纳 |

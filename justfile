@@ -95,6 +95,18 @@ eval-multi-m5-gate2-fake:
         uv run --directory eval --frozen --no-sync \
         python -B -m rondo_eval.multi_m5 gate2-fake
 
+# Paid entries stay locked. The Python functions exist; these recipes never
+# forward the frozen authorization phrase and never start API or Docker.
+eval-multi-m5-gate1-paid:
+    #!/usr/bin/env bash
+    echo "rondo-multi-m5: paid gate 1 is locked until the user authorizes spending" >&2
+    exit 78
+
+eval-multi-m5-gate2-real:
+    #!/usr/bin/env bash
+    echo "rondo-multi-m5: paid gate 2 is locked until the user authorizes API and Docker" >&2
+    exit 78
+
 # Compare the task-independent partitions of two captured requests. The
 # transport used here refuses to open any upstream connection, so this never
 # reaches a provider and never spends budget. Exit 3 means the pair is not
