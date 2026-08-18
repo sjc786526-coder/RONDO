@@ -1250,7 +1250,22 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
   ③门 2 真实批次 `require_frozen=False`，bundle 不在位要烧完 12 次 infra 才停 → `real_api` 时第一槽前即失败。
   门禁：上述六个套件 **240/240**，`just eval-lock` 通过。**Python 门禁须在清掉
   `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 的环境下跑。**
+- **第三轮独立终审（2026-08-18）**：判「不通过，暂不应授权付费」，列 6 项阻断，复核**全部属实**，已全部关闭
+  并各钉一条已验证的反向回归：①门 2 只看 `stopped` 决定退出码，退化结论、`uncertain`、证据不完整都可能退出 0，
+  且不打印 `verdicts` → 新增 `gate2_passed`（未停批 + 十任务齐全 + 全部无退化）；②「每 run 80 请求」是事后分类，
+  第 81 次仍会真实发出并计费（代理的 `max_logical_requests` 被校验成 `1..4`，用不了）→ 新增 `RequestCappedLedger`
+  在 `reserve()` 硬拦，停止原因与「钱不够」分开（钱停批、请求上限停槽）；③付费配置未绑定冻结合同 —— 预算代理用
+  可变 `rondo.local.toml` 的费率给 $120 记账，实测快照日期已漂移（锁 `2026-08-17` vs 配置 `2026-08-11`，费率一致）
+  → 新增 `require_frozen_provider` 逐项核验并把生效身份写进每行归档；④Docker 的 80GiB/60GB 硬停止被压成
+  `Gate2Error` 并重试 → 新增 `DockerResourceStop` 子类，门 2 立即停批；⑤Harbor 的 `docker_evidence` 未进归档
+  → 新增 `docker_summary` 有界投影；⑥门 1 载体只是协议演示（答案写在 fixture 里、指令规定工具顺序）→ 按决策 032
+  **保持冻结载体**，改为把边界写进 `eval/locks/multi-m5-workflow-v1.json` 的 `scope_limits`、子 WBS 与本节：
+  WBS 的「真实任务上跑通完整协作语义」须门 1+门 2 合起来读，任一门单独不得引用。
+  次要项：门 1 通过增加 `returncode==0`（实测彩排 rc=0，只会把通过变失败）、付费行绑定 `harness_commit`/`harness_dirty`、
+  `.gitignore` 补全局 `__pycache__/`。不改项：不强制门 2 依赖门 1（§1 明写两门独立）、不改 `base_order`
+  （顺序偏差利于 Multi，只会让退化判定更保守）、退化诊断槽位仍按决策 021 不预跑。
+  门禁：**292/292**（新增 `test_docker_supervisor`），`just eval-lock` 通过，worktree 干净。
 - 执行日志：`agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`；
   验收报告：`agent_log/2026-08-18-130000-plan044-m5-paid-entries-acceptance-review.md`、
-  `agent_log/2026-08-18-150000-plan044-m5-paid-entries-final-acceptance.md`。
-
+  `agent_log/2026-08-18-150000-plan044-m5-paid-entries-final-acceptance.md`；
+  终审整改：`agent_log/2026-08-18-170000-plan044-m5-paid-boundary-remediation.md`。

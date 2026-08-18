@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any, Mapping
 
 from ..contracts import Product, Side, team_capability_config_projection
@@ -25,6 +26,36 @@ REQUIRED_ARCHIVE_FIELDS = (
 
 def required_archive_fields() -> tuple[str, ...]:
     return REQUIRED_ARCHIVE_FIELDS
+
+
+def harness_identity(worktree_root) -> dict[str, Any]:
+    """Which eval harness produced a paid row, and whether it was committed.
+
+    Binary identity alone does not say which judge, runner or contract loader
+    ran. A dirty tree is recorded rather than rejected: the run still happened,
+    and hiding the fact would be worse than noting it.
+    """
+
+    def _git(*args: str) -> str | None:
+        try:
+            done = subprocess.run(
+                ("git", "-C", str(worktree_root), *args),
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode != 0:
+            return None
+        return done.stdout.decode("utf-8", "replace").strip()
+
+    head = _git("rev-parse", "HEAD")
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    return {
+        "harness_commit": head,
+        "harness_dirty": None if status is None else bool(status),
+    }
 
 
 def archive_record(

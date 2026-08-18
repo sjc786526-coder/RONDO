@@ -238,6 +238,13 @@
   门 2 真实批次 `require_frozen=False`，bundle 不在位时要烧完 12 次 infra 才停。
   门禁 **240/240** + `just eval-lock`。详见
   `agent_log/2026-08-18-150000-plan044-m5-paid-entries-final-acceptance.md`。
+- **第三轮终审判「不通过、暂不应授权付费」，6 项阻断已全部关闭并各钉反向回归**：
+  门 2 在退化/证据不完整时仍退出 0；「每 run 80 请求」只是事后分类、第 81 次仍会真实发出计费；
+  付费配置未绑定冻结合同（预算代理拿 `rondo.local.toml` 的费率给 $120 记账，实测快照日期已漂移）；
+  Docker 的 80GiB/60GB 硬停止被当普通 infra 重试；Docker 前后证据未进归档；门 1 载体只是协议演示。
+  前五项已修，第六项**决定保持冻结载体**并把边界写进锁文件与文档（理由见决策 032）。
+  门禁 **292/292**（含 `test_docker_supervisor`）。详见
+  `agent_log/2026-08-18-170000-plan044-m5-paid-boundary-remediation.md`。
 - **Python 门禁复现注意**：必须清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 再跑，否则环回假上游会被宿主代理劫持。
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未授权、未执行。
 
@@ -348,3 +355,9 @@
 | 029 | 「每 run 请求上限 80」真正执行：真实槽位从账本读逻辑请求数，超限落 `infra_failed` 且不计有效 | 授权清单答应了这个数就该作数；代理层的 `max_logical_requests` 被校验成 `1..4`，拦不住。分类成 infra 使最坏结果是「不确定」而非假退化 | 门 2 判据 | 已采纳 |
 | 030 | `_UrllibTransport` 的 test-only `endpoint_override` 挂空 `ProxyHandler({})` | Python 的 `no_proxy` 不认 `127.*` 通配，宿主 `HTTP_PROXY` 会劫持环回假上游；生产 env 代理行为不变 | 测试可复现性 | 已采纳 |
 | 031 | 门 1 沙箱 `network_access=true` 保持不动 | 它属于阶段 A 冻结 argv，改动会作废五次全绿彩排；作为残留风险记录而非静默修改 | 门 1 运行配置 | 已采纳 |
+| 032 | 门 1 载体保持冻结（协议演示级 fixture），改为把边界写进锁的 `scope_limits` 与文档，不换成有分析负载的任务 | 换载体等于改冻结的完成标准（须请示用户）、作废唯一验证过的五次彩排，且新载体在花钱前无法离线验证；决策 010 冻结它正是为了避开「模型自己做完、团队工具零调用」这一相反失效模式。代价是 WBS 的「真实任务上跑通完整协作语义」必须门 1+门 2 合起来读，任一门单独不得引用 | 门 1 载体 / 结论口径 | 已采纳 |
+| 033 | 「每 run 80 请求」用账本包装层在 `reserve()` 上硬拦，停止原因与「钱不够」分开 | 事后分类挡不住第 81 次真实发出与计费；预算代理的 `max_logical_requests` 被校验成 `1..4`，用不了。钱是全批共享的（停批），请求上限是每 run 的（只停槽） | 付费边界 | 已采纳 |
+| 034 | Docker 容量停止线单独用 `DockerResourceStop` 子类，门 2 立即停批不重试 | 80GiB/60GB 是 CLAUDE.md §3 的「立即停止」，被压成普通 infra 会继续开容器；子类化保持既有 `except DockerSupervisionError` 调用方不变 | 资源边界 | 已采纳 |
+| 035 | 门 2 退出码由 `gate2_passed`（未停批 + 十任务齐全 + 全部无退化）决定，不再只看 `stopped` | 退化结论或证据不完整都是 M-5 失败，shell 层必须看见失败 | fail-closed | 已采纳 |
+| 036 | 付费运行前用 `require_frozen_provider` 把 provider 身份/effort/重试/全部费率绑到锁，日期差异只记录不阻断 | 预算代理用 `rondo.local.toml` 的费率给 $120 记账，改那个文件就能改变授权上限的实际购买力；费率决定花钱，日期只是出处 | 预算/公平性 | 已采纳 |
+| 037 | 不强制门 2 依赖门 1 通过；不改 `base_order` 的 Codex 先后顺序 | ExecPlan §1 明写两门相互独立；顺序偏差方向利于 Multi，只会让退化判定更保守，不会造出假退化，已写进锁的 `scope_limits` | 门 2 合同 | 已采纳 |

@@ -19,6 +19,7 @@ reference-agent-harness/
 
 # Evaluation Python caches and project-local virtual environment.
 /eval/**/__pycache__/
+__pycache__/
 /eval/**/*.py[cod]
 /eval/.venv/
 /eval/results/*.lock

@@ -87,8 +87,10 @@
   （预算代理 + forward 捕获；既有 TB adapters/runner/results，不套 v7 campaign），CLI/`just` 无口令时
   退出 78 且不加载密钥。**真实运行仍未开始**：付费部件已通过两轮独立验收（预算层三处 —— 门 1 可用额度只有点估计的
   1.0 倍、预算掐断被误记成产品失败、共享账本槽位漏算门 1；运行期三处 —— 请求数写死使冻结的每 run 80 上限成为死代码、
-  离线捕获链被宿主 `HTTP_PROXY` 劫持、门 2 真实批次不预检冻结 bundle —— 均已窄修并补回归），仍须用户按清单单独授权
-  真实 API/付费/Docker。不得表述为 M-5 通过、门 1 通过或未见退化。
+  离线捕获链被宿主 `HTTP_PROXY` 劫持、门 2 真实批次不预检冻结 bundle）与第三轮终审的六项付费边界阻断
+  （门 2 在退化结论下仍退出 0、每 run 80 请求上限只是事后分类、付费配置未绑定冻结合同、Docker 容量硬停止被当普通
+  infra 重试、Docker 前后证据未进归档、门 1 载体只是协议演示）；前五项已修，门 1 载体按决策 032 保持冻结并把边界
+  写进锁与文档。仍须用户按清单单独授权真实 API/付费/Docker。不得表述为 M-5 通过、门 1 通过或未见退化。
   阶段目标与两道门口径见 `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 

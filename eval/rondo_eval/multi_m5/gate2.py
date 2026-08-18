@@ -25,7 +25,15 @@ from ..api_budget_proxy import (
 )
 from ..config import RepoPaths, RuntimeConfig, load_runtime_config
 from ..contracts import BinaryManifest, Product, RunOutcome, Side
-from ..docker_supervisor import DockerCounter, HeavyLockGuard, HeavyLockLease
+from ..docker_supervisor import (
+    DATA_ROOT_FREE_STOP_BYTES,
+    DOCKER_GROWTH_STOP_BYTES,
+    DOCKER_GROWTH_WARN_BYTES,
+    DockerCounter,
+    DockerResourceStop,
+    HeavyLockGuard,
+    HeavyLockLease,
+)
 from ..terminal_bench.tasksets import (
     FrozenCanaryCatalog,
     FrozenTask,
@@ -42,12 +50,15 @@ from ..terminal_bench.runner import (
     UnifiedTerminalBenchRunner,
     prepare_terminal_bench_run,
 )
-from .archive import archive_record
+from .archive import archive_record, harness_identity
 from .budget import (
     BATCH_ID,
     GATE2_REQUEST_RESERVATION_USD,
     GATE2_RUN_CAP_USD,
+    REQUEST_LIMIT_STOP_REASON,
+    RequestCappedLedger,
     phase_b_pricing,
+    require_frozen_provider,
     run_request_count,
     run_stop_reason,
 )
@@ -146,6 +157,7 @@ class TerminalBenchSlotExecutor:
         self._lock_guard = lock_guard
         self._lease = lease
         self._materializer = materializer
+        self._provider_identity: dict[str, str] | None = None
 
     def execute(self, slot: Slot, *, attempt: int, run_id: str) -> SlotResult:
         request = self.build_request(slot, attempt=attempt, run_id=run_id)
@@ -199,11 +211,15 @@ class TerminalBenchSlotExecutor:
     ) -> SlotResult:
         del slot, attempt
         assert self._ledger is not None and self._api_key is not None
+        contract = load_nondegradation_contract()
         config = self._config or load_runtime_config(self._paths)
         provider = config.paid_provider_projection()
-        pricing = phase_b_pricing()
-        if provider.main_model != pricing.model_id:
-            raise Gate2Error("paid gate 2 model differs from the frozen price snapshot")
+        # Binds the endpoint, effort, retry policy and every rate to the lock.
+        # The proxy meters the $120 batch with these numbers, so the mutable
+        # `rondo.local.toml` must not be able to change what the cap buys.
+        self._provider_identity = require_frozen_provider(
+            provider, effort=contract.root_effort, contract=contract
+        )
         metadata_path = (
             scratch_root(self._common_root) / "multi-m5-gate2-meta" / f"{run_id}.json"
         )
@@ -212,7 +228,12 @@ class TerminalBenchSlotExecutor:
             proxy = LoopbackResponsesProxy(
                 upstream_base_url=provider.base_url,
                 api_key=self._api_key,
-                ledger=self._ledger,
+                # Request 81 must never leave the process; classifying it after
+                # the fact still bills money and still sends workspace content.
+                ledger=RequestCappedLedger(
+                    self._ledger,
+                    max_requests_per_run=contract.max_requests_per_run,
+                ),
                 run_id=run_id,
                 metadata_path=metadata_path,
                 main_model=provider.main_model,
@@ -246,6 +267,12 @@ class TerminalBenchSlotExecutor:
             )
         except BudgetStopped:
             raise
+        except DockerResourceStop:
+            # The 80 GiB floor and the 60 GB growth ceiling are batch-wide stop
+            # lines from the authorization. Retrying the slot would keep running
+            # containers past a limit the user set, so this must not become a
+            # plain infra failure.
+            raise
         except (
             TerminalBenchRunError,
             HarborResultError,
@@ -254,9 +281,9 @@ class TerminalBenchSlotExecutor:
             RuntimeError,
         ) as exc:
             raise Gate2Error(str(exc)) from exc
-        return self._slot_result(parsed, run_id)
+        return self._slot_result(parsed, run_id, docker_evidence=harbor.docker_evidence)
 
-    def _slot_result(self, parsed, run_id: str) -> SlotResult:
+    def _slot_result(self, parsed, run_id: str, *, docker_evidence=None) -> SlotResult:
         """One Harbor trial as a slot result.
 
         The request count is read back from the ledger: a Terminal-Bench slot is
@@ -266,15 +293,22 @@ class TerminalBenchSlotExecutor:
         """
 
         assert self._ledger is not None
+        extra: dict[str, Any] = {
+            "executor": "terminal_bench",
+            "task_outcome": parsed.task_outcome,
+            "reward": parsed.reward,
+            "duration_seconds": parsed.duration_seconds,
+        }
+        if self._provider_identity is not None:
+            extra["provider_identity"] = dict(self._provider_identity)
+        extra.update(harness_identity(self._paths.worktree_root))
+        evidence = docker_summary(docker_evidence)
+        if evidence is not None:
+            extra["docker_evidence"] = evidence
         return SlotResult(
             outcome=_slot_outcome(parsed),
             request_count=run_request_count(self._ledger, run_id),
-            extra={
-                "executor": "terminal_bench",
-                "task_outcome": parsed.task_outcome,
-                "reward": parsed.reward,
-                "duration_seconds": parsed.duration_seconds,
-            },
+            extra=extra,
         )
 
     async def _harbor(self, prepared: PreparedTerminalBenchRun, downstream_key: str):
@@ -355,6 +389,56 @@ def run_gate2_real(
         charge_fake_usage=False,
         evidence_kind="real_api",
     )
+
+
+def _is_request_cap_stop(ledger, run_id: str) -> bool:
+    return ledger is not None and run_stop_reason(ledger, run_id) == REQUEST_LIMIT_STOP_REASON
+
+
+def docker_summary(evidence) -> dict[str, Any] | None:
+    """Persist the before/after Docker facts the authorization asked us to keep.
+
+    A bounded projection on purpose: enough to audit the 40 GB warning, the
+    60 GB stop line, the host free-space floor and that cleanup verified empty,
+    without dumping whole `docker system df` payloads into every archive row.
+    """
+
+    if evidence is None:
+        return None
+    samples = []
+    for sample in getattr(evidence, "samples", ()):
+        samples.append(
+            {
+                "phase": sample.phase,
+                "docker_total_bytes": sample.docker_total_bytes,
+                "docker_growth_bytes": sample.docker_growth_bytes,
+                "task_growth_bytes": sample.task_growth_bytes,
+                "docker_desktop_vhdx_bytes": sample.docker_desktop_vhdx_bytes,
+                "docker_desktop_vhdx_growth_bytes": sample.docker_desktop_vhdx_growth_bytes,
+                "data_root": sample.data_root,
+                "data_root_filesystem_free_bytes": sample.data_root_filesystem_free_bytes,
+            }
+        )
+    vhdx = getattr(evidence, "desktop_vhdx", None)
+    summary: dict[str, Any] = {
+        "returncode": getattr(evidence, "returncode", None),
+        "warnings": list(getattr(evidence, "warnings", ()) or ()),
+        "growth_warn_bytes": DOCKER_GROWTH_WARN_BYTES,
+        "growth_stop_bytes": DOCKER_GROWTH_STOP_BYTES,
+        "data_root_free_stop_bytes": DATA_ROOT_FREE_STOP_BYTES,
+        "samples": samples,
+    }
+    if vhdx is not None:
+        summary["desktop_vhdx"] = {
+            "baseline_bytes": vhdx.baseline_bytes,
+            "peak_bytes": vhdx.peak_bytes,
+            "final_bytes": vhdx.final_bytes,
+            "peak_growth_bytes": vhdx.peak_growth_bytes,
+        }
+    identity = getattr(evidence, "image_identity", None)
+    if identity is not None:
+        summary["image_reference"] = getattr(identity, "reference", None)
+    return summary
 
 
 def _slot_outcome(parsed) -> str:
@@ -447,7 +531,41 @@ def run_light_interleaved(
                     )
             try:
                 result = executor.execute(slot, attempt=attempt, run_id=run_id)
+            except DockerResourceStop as exc:
+                # A host capacity stop line. Ends the batch, never a retry.
+                stopped = True
+                stop_reason = "docker_resource_stop"
+                return emit(
+                    outcome=RunOutcome.INFRA_FAILED.value,
+                    counts_as_effective=False,
+                    extra={
+                        "stop_reason": stop_reason,
+                        "error": str(exc),
+                        "attempt": attempt,
+                    },
+                )
             except BudgetStopped as exc:
+                # The per-run request cap only ends this slot; dollars are shared
+                # across the batch and end everything.
+                if _is_request_cap_stop(ledger, run_id):
+                    infra_used += 1
+                    emit(
+                        outcome=RunOutcome.INFRA_FAILED.value,
+                        counts_as_effective=False,
+                        extra={
+                            "stop_reason": REQUEST_LIMIT_STOP_REASON,
+                            "error": str(exc),
+                            "attempt": attempt,
+                            "infra_used": infra_used,
+                        },
+                    )
+                    if infra_used >= loaded.max_infra_attempts_total:
+                        stopped = True
+                        stop_reason = "max_infra_attempts_total"
+                        return produced
+                    if attempt == loaded.max_slot_attempts:
+                        return produced
+                    continue
                 stopped = True
                 stop_reason = str(exc)
                 return emit(
@@ -475,6 +593,29 @@ def run_light_interleaved(
                 # "Multi incomplete" would feed the degradation verdict a result
                 # the budget produced, and Multi is the pricier side.
                 exhausted = run_stop_reason(ledger, run_id)
+                if exhausted == REQUEST_LIMIT_STOP_REASON:
+                    # Per-run cap: this slot is spent, the batch is not. The next
+                    # attempt gets a fresh run id and a fresh request budget.
+                    infra_used += 1
+                    emit(
+                        outcome=RunOutcome.INFRA_FAILED.value,
+                        counts_as_effective=False,
+                        extra={
+                            **result.extra,
+                            "stop_reason": exhausted,
+                            "reason": "max_requests_per_run",
+                            "attempt": attempt,
+                            "infra_used": infra_used,
+                            "request_count": result.request_count,
+                        },
+                    )
+                    if infra_used >= loaded.max_infra_attempts_total:
+                        stopped = True
+                        stop_reason = "max_infra_attempts_total"
+                        return produced
+                    if attempt == loaded.max_slot_attempts:
+                        return produced
+                    continue
                 if exhausted is not None:
                     stopped = True
                     stop_reason = exhausted
@@ -570,8 +711,24 @@ def run_light_interleaved(
         "conditional_slots": len(extras),
         "stopped": stopped,
         "stop_reason": stop_reason,
+        "passed": gate2_passed(loaded, verdicts, stopped=stopped),
         "ledger_snapshot": None if ledger is None else ledger.snapshot(),
     }
+
+
+def gate2_passed(contract, verdicts: Mapping[str, str], *, stopped: bool) -> bool:
+    """Gate 2 passes only on complete evidence with no task degrading.
+
+    Reporting success off `stopped` alone would exit 0 on a batch that found
+    `stable_one_way_degradation`, or on one whose evidence never completed. Both
+    are M-5 failures, so the shell has to see them as failures.
+    """
+
+    if stopped:
+        return False
+    if set(verdicts) != set(contract.tasks):
+        return False
+    return all(value == "no_stable_one_way_degradation" for value in verdicts.values())
 
 
 def _charge(

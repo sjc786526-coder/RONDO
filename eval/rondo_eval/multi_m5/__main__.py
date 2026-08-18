@@ -66,11 +66,12 @@ def main(argv: list[str] | None = None) -> int:
                 "conditional_slots": result["conditional_slots"],
                 "stopped": result["stopped"],
                 "verdicts": result["verdicts"],
+                "passed": result["passed"],
                 "record_count": len(result["records"]),
                 "evidence_kind": "fake",
             }
             print(json.dumps(printable, sort_keys=True, indent=2))
-            return 0 if not result["stopped"] else 1
+            return 0 if result["passed"] else 1
         if command == "gate1-paid":
             auth = authorization_from_phrases(api_phrase=_option(args, "--authorize-paid-api"))
             config = load_runtime_config(paths)
@@ -83,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
                     upstream_base_url=provider.base_url,
                     ledger=ledger,
                     common_root=paths.common_root,
+                    provider=provider,
                 )
             print(json.dumps(result["record"], sort_keys=True, separators=(",", ":")))
             return 0 if result["record"].get("passed") else 1
@@ -122,11 +124,15 @@ def main(argv: list[str] | None = None) -> int:
                 "infra_used": result["infra_used"],
                 "stopped": result["stopped"],
                 "stop_reason": result["stop_reason"],
+                # A degradation verdict or incomplete evidence is an M-5 failure,
+                # so it must not leave the shell with a success status.
+                "verdicts": result["verdicts"],
+                "passed": result["passed"],
                 "record_count": len(result["records"]),
                 "evidence_kind": "real_api",
             }
             print(json.dumps(printable, sort_keys=True, indent=2))
-            return 0 if not result["stopped"] else 1
+            return 0 if result["passed"] else 1
         print(_USAGE, file=sys.stderr)
         return 2
     except (LoopbackError, M5ContractError, Gate1Error, Gate2Error, StoreError, PaidAuthError) as exc:

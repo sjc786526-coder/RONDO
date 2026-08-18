@@ -19,11 +19,12 @@ from typing import Any, Callable
 from ..api_budget_proxy import LoopbackResponsesProxy, PersistentBudgetLedger, _UrllibTransport
 from ..config import RepoPaths
 from ..contracts import Product, Side
-from .archive import archive_record
+from .archive import archive_record, harness_identity
 from .budget import (
     GATE1_REQUEST_RESERVATION_USD,
     GATE1_RUN_CAP_USD,
     phase_b_pricing,
+    require_frozen_provider,
     run_stop_reason,
 )
 from .capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy
@@ -77,6 +78,7 @@ def run_gate1_paid(
     transport: _UrllibTransport | None = None,
     process_runner: ProcessRunner = subprocess.run,
     timeout_seconds: int | None = None,
+    provider=None,
 ) -> dict[str, Any]:
     """Paid gate 1. Capture forwards to the budget proxy. Spends money if transport is real."""
 
@@ -87,6 +89,11 @@ def run_gate1_paid(
     pricing = phase_b_pricing()
     if pricing.model_id != workflow.root_model:
         raise Gate1Error("paid gate 1 model differs from the frozen price snapshot")
+    provider_identity = (
+        None
+        if provider is None
+        else require_frozen_provider(provider, effort=workflow.root_effort)
+    )
     root = _common_root(common_root)
     last: dict[str, Any] | None = None
     for attempt in range(1, workflow.max_attempts + 1):
@@ -131,6 +138,12 @@ def run_gate1_paid(
                     "rehearsal": False,
                     "attempt": attempt,
                     "budget_run_id": run_id,
+                    **(
+                        {"provider_identity": dict(provider_identity)}
+                        if provider_identity is not None
+                        else {}
+                    ),
+                    **harness_identity(RepoPaths.discover(Path.cwd()).worktree_root),
                 },
             )
         last = result
@@ -279,7 +292,7 @@ def _run_gate1_once(
     predicates = dict(verdict.predicates)
     ignored = list(verdict.ignored_evidence)
     event_id = verdict.event_id
-    if not timed_out and jsonl.strip() and verdict.passed:
+    if not timed_out and jsonl.strip() and verdict.passed and completed.returncode == 0:
         # Evidence is already complete; a late budget stop does not unmake it.
         passed = True
         outcome = "completed"
@@ -300,6 +313,9 @@ def _run_gate1_once(
         passed = False
         outcome = "agent_failed"
         reasons = list(verdict.reasons)
+        # A crashed run cannot be a pass even when the judge saw every predicate.
+        if completed.returncode != 0 and verdict.passed:
+            reasons = [f"nonzero exit rc={completed.returncode}"]
 
     extra_fields = {
         "stop_reason": stop_reason,

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,12 +21,18 @@ sys.path.insert(0, str(EVAL_ROOT))
 from rondo_eval.api_budget_proxy import (  # noqa: E402
     ApiBudgetProxyError,
     BudgetCapacityExhausted,
+    BudgetStopped,
     LoopbackResponsesProxy,
     Usage,
     _UrllibTransport,
     price_usage,
 )
-from rondo_eval.config import RepoPaths  # noqa: E402
+from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
+from rondo_eval.docker_supervisor import (  # noqa: E402
+    DATA_ROOT_FREE_STOP_BYTES,
+    DOCKER_GROWTH_STOP_BYTES,
+    DockerResourceStop,
+)
 from rondo_eval.contracts import BinaryManifest, Product, RunOutcome, Side  # noqa: E402
 from rondo_eval.multi_m5.archive import archive_record  # noqa: E402
 from rondo_eval.multi_m5.budget import (  # noqa: E402
@@ -34,10 +41,14 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
     GATE2_REQUEST_RESERVATION_USD,
     GATE2_RUN_CAP_USD,
     HARD_CAP_USD,
+    REQUEST_LIMIT_STOP_REASON,
     RUN_CAP_USD,
+    RequestCappedLedger,
     open_phase_b_ledger,
     phase_b_pricing,
+    require_frozen_provider,
     run_request_count,
+    run_stop_reason,
 )
 from rondo_eval.multi_m5.capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy  # noqa: E402
 from rondo_eval.multi_m5.command import build_multi_exec_command, team_capability_overrides  # noqa: E402
@@ -48,6 +59,7 @@ from rondo_eval.multi_m5.gate2 import (  # noqa: E402
     ScriptedSlotExecutor,
     SlotResult,
     TerminalBenchSlotExecutor,
+    gate2_passed,
     run_gate2_real,
     run_light_interleaved,
 )
@@ -1148,6 +1160,286 @@ class MultiM5PaidEntryHardeningTests(unittest.TestCase):
                 evidence_kind="fake",
             )
             self.assertTrue(fake["records"])
+
+
+class MultiM5PaidBoundaryTests(unittest.TestCase):
+    """Stop lines and verdict reporting that only bite once money is moving."""
+
+    def test_gate2_success_status_requires_a_clean_complete_verdict(self) -> None:
+        # Reporting success off `stopped` alone exits 0 on a batch that found
+        # degradation, or on one whose evidence never completed.
+        contract = load_nondegradation_contract()
+        clean = {task: "no_stable_one_way_degradation" for task in contract.tasks}
+        self.assertTrue(gate2_passed(contract, clean, stopped=False))
+        self.assertFalse(gate2_passed(contract, clean, stopped=True))
+        degraded = dict(clean)
+        degraded[contract.tasks[0]] = "stable_one_way_degradation"
+        self.assertFalse(gate2_passed(contract, degraded, stopped=False))
+        unsure = dict(clean)
+        unsure[contract.tasks[3]] = "uncertain"
+        self.assertFalse(gate2_passed(contract, unsure, stopped=False))
+        short = {task: "no_stable_one_way_degradation" for task in contract.tasks[:9]}
+        self.assertFalse(gate2_passed(contract, short, stopped=False))
+
+    def test_degraded_batch_leaves_the_cli_with_a_failure_status(self) -> None:
+        root = _common_root()
+        contract = load_nondegradation_contract()
+        # Codex completes, Multi does not, on every round of one task.
+        script = {
+            (contract.tasks[0], Side.RONDO.value, index): ("agent_failed",)
+            for index in (1, 2, 3)
+        }
+        result = run_light_interleaved(
+            executor=ScriptedSlotExecutor(script),
+            common_root=root,
+            persist=False,
+        )
+        self.assertEqual(
+            result["verdicts"][contract.tasks[0]], "stable_one_way_degradation"
+        )
+        self.assertFalse(result["stopped"])
+        # The old exit rule keyed on `stopped` and would have reported success.
+        self.assertFalse(result["passed"])
+
+    def test_request_cap_stops_before_the_next_request_leaves(self) -> None:
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-request-cap.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        pricing = phase_b_pricing()
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                ledger.ensure_run("m5-g2-cap-probe", cap_usd=GATE2_RUN_CAP_USD)
+                capped = RequestCappedLedger(ledger, max_requests_per_run=3)
+                for index in range(3):
+                    request_id = f"m5-g2-cap-probe-req-{index}"
+                    capped.reserve("m5-g2-cap-probe", request_id, Decimal("0.01"))
+                    capped.begin_attempt("m5-g2-cap-probe", request_id, max_attempts=5)
+                    capped.settle(
+                        "m5-g2-cap-probe", request_id, Usage(1, 0, 0, 0), pricing=pricing
+                    )
+                # A retry of a counted request id is still allowed.
+                with self.assertRaises(BudgetStopped):
+                    capped.reserve("m5-g2-cap-probe", "m5-g2-cap-probe-req-3", Decimal("0.01"))
+                self.assertEqual(
+                    run_stop_reason(ledger, "m5-g2-cap-probe"),
+                    REQUEST_LIMIT_STOP_REASON,
+                )
+                self.assertEqual(run_request_count(ledger, "m5-g2-cap-probe"), 3)
+        finally:
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+
+    def test_request_cap_ends_the_slot_but_not_the_batch(self) -> None:
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-cap-slot.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        first_task = contract.base_order[0]["task_id"]
+
+        class _CapsFirstSlot:
+            def __init__(self) -> None:
+                self.ledger = None
+                self.capped: list[str] = []
+
+            def execute(self, slot, *, attempt: int, run_id: str) -> SlotResult:
+                if slot.task_id == first_task and slot.side is Side.CODEX:
+                    # In-band: the proxy answered 429 and the agent gave up.
+                    self.capped.append(run_id)
+                    self.ledger.stop_run(run_id, stop_reason=REQUEST_LIMIT_STOP_REASON)
+                    return SlotResult(outcome="agent_failed", extra={"executor": "probe"})
+                return SlotResult(outcome="completed", extra={"executor": "probe"})
+
+        executor = _CapsFirstSlot()
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                executor.ledger = ledger
+                result = run_light_interleaved(
+                    executor=executor,
+                    common_root=root,
+                    ledger=ledger,
+                    persist=False,
+                )
+        finally:
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+        capped_rows = [
+            row for row in result["records"]
+            if row.get("stop_reason") == REQUEST_LIMIT_STOP_REASON
+        ]
+        self.assertTrue(capped_rows)
+        # Per-run cap: infra, not a shared-dollar batch stop, and never effective.
+        self.assertTrue(all(row["outcome"] == "infra_failed" for row in capped_rows))
+        self.assertTrue(all(row["counts_as_effective"] is False for row in capped_rows))
+        self.assertEqual(len(executor.capped), contract.max_slot_attempts)
+        # The batch kept walking the other nine tasks.
+        self.assertGreater(result["effective_runs"], 2)
+
+    def test_docker_resource_stop_aborts_instead_of_retrying(self) -> None:
+        root = _common_root()
+
+        class _OutOfSpace:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def execute(self, slot, *, attempt: int, run_id: str) -> SlotResult:
+                del slot, attempt, run_id
+                self.calls += 1
+                raise DockerResourceStop(
+                    "Docker data-root filesystem has less than 80 GiB free"
+                )
+
+        executor = _OutOfSpace()
+        result = run_light_interleaved(
+            executor=executor,
+            common_root=root,
+            persist=False,
+        )
+        # A capacity stop line must not consume slot retries.
+        self.assertEqual(executor.calls, 1)
+        self.assertTrue(result["stopped"])
+        self.assertEqual(result["stop_reason"], "docker_resource_stop")
+        self.assertFalse(result["passed"])
+        self.assertTrue(
+            all(row["counts_as_effective"] is False for row in result["records"])
+        )
+
+    def test_frozen_provider_binding_rejects_config_drift(self) -> None:
+        contract = load_nondegradation_contract()
+        projection = load_runtime_config(RepoPaths.discover(Path.cwd())).paid_provider_projection()
+        identity = require_frozen_provider(
+            projection, effort=contract.root_effort, contract=contract
+        )
+        self.assertEqual(identity["provider_id"], contract.provider)
+        self.assertEqual(identity["frozen_price_snapshot_date"], contract.price_date)
+        # The proxy meters the $120 batch with these rates, so a cheaper-looking
+        # config must not silently change what the approved cap buys.
+        cheap = replace(
+            projection,
+            main_pricing=replace(
+                projection.main_pricing, input_usd_per_million=Decimal("1")
+            ),
+        )
+        with self.assertRaisesRegex(M5ContractError, "input_usd_per_million"):
+            require_frozen_provider(cheap, effort=contract.root_effort, contract=contract)
+        with self.assertRaisesRegex(M5ContractError, "main_effort"):
+            require_frozen_provider(projection, effort="high", contract=contract)
+        with self.assertRaisesRegex(M5ContractError, "provider_id"):
+            require_frozen_provider(
+                replace(projection, provider_id="openai_official"),
+                effort=contract.root_effort,
+                contract=contract,
+            )
+        with self.assertRaisesRegex(M5ContractError, "provider_max_attempts"):
+            require_frozen_provider(
+                replace(projection, max_attempts=2),
+                effort=contract.root_effort,
+                contract=contract,
+            )
+
+    def test_docker_evidence_and_identity_reach_the_slot_row(self) -> None:
+        root = _common_root()
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-docker-eviu.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger:
+                executor = TerminalBenchSlotExecutor(
+                    common_root=root,
+                    ledger=ledger,
+                    catalog=_v4_catalog(),
+                    paths=RepoPaths.discover(Path.cwd()),
+                )
+                ledger.ensure_run("m5-g2-evidence", cap_usd=GATE2_RUN_CAP_USD)
+                result = executor._slot_result(
+                    _FakeTrial(),
+                    "m5-g2-evidence",
+                    docker_evidence=_FakeDockerEvidence(),
+                )
+        finally:
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+        evidence = result.extra["docker_evidence"]
+        # The authorization asked for before/after df, host free space and the
+        # 40/60 GB thresholds to be persisted, not just checked in flight.
+        self.assertEqual([item["phase"] for item in evidence["samples"]], ["pre", "post"])
+        self.assertEqual(evidence["warnings"], ["Docker storage growth reached the 40 GB warning threshold"])
+        self.assertEqual(evidence["growth_stop_bytes"], DOCKER_GROWTH_STOP_BYTES)
+        self.assertEqual(evidence["data_root_free_stop_bytes"], DATA_ROOT_FREE_STOP_BYTES)
+        self.assertEqual(evidence["desktop_vhdx"]["peak_growth_bytes"], 7)
+        self.assertIn(
+            evidence["samples"][1]["data_root_filesystem_free_bytes"], (10**12,)
+        )
+        self.assertIn("harness_commit", result.extra)
+
+    def test_gate1_cannot_pass_on_a_crashed_run(self) -> None:
+        root = _common_root()
+        try:
+            load_runtime_identity(require_frozen=True, common_root=root)
+        except M5ContractError as exc:
+            self.skipTest(f"frozen Multi bundle is unavailable: {exc}")
+        original = subprocess.run
+
+        def crash_after_protocol(command, **kwargs):
+            done = original(command, **kwargs)
+            return subprocess.CompletedProcess(
+                args=done.args, returncode=3, stdout=done.stdout, stderr=done.stderr
+            )
+
+        result = run_gate1_rehearsal(
+            common_root=root, persist=False, process_runner=crash_after_protocol
+        )
+        record = result["record"]
+        # Every predicate is green; the run still crashed, so it is not a pass.
+        self.assertTrue(all(result["verdict"].predicates.values()))
+        self.assertEqual(record["returncode"], 3)
+        self.assertFalse(record["passed"])
+        self.assertEqual(record["outcome"], "agent_failed")
+        self.assertIn("nonzero exit rc=3", record["reasons"])
+
+
+@dataclass(frozen=True)
+class _FakeSample:
+    phase: str
+    docker_total_bytes: int
+    docker_growth_bytes: int
+    task_growth_bytes: int
+    docker_desktop_vhdx_bytes: int
+    docker_desktop_vhdx_growth_bytes: int
+    data_root: str
+    data_root_filesystem_free_bytes: int
+
+
+@dataclass(frozen=True)
+class _FakeVhdx:
+    baseline_bytes: int = 1
+    peak_bytes: int = 8
+    final_bytes: int = 2
+    peak_growth_bytes: int = 7
+
+
+class _FakeDockerEvidence:
+    returncode = 0
+    warnings = ("Docker storage growth reached the 40 GB warning threshold",)
+    desktop_vhdx = _FakeVhdx()
+    image_identity = None
+    samples = (
+        _FakeSample("pre", 10, 0, 0, 1, 0, "/var/lib/docker", 10**12),
+        _FakeSample("post", 20, 10, 5, 8, 7, "/var/lib/docker", 10**12),
+    )
 
 
 def _provider_base_url(command) -> str:

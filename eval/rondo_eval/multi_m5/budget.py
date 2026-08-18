@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
-from ..api_budget_proxy import PersistentBudgetLedger
+from ..api_budget_proxy import BudgetStopped, PersistentBudgetLedger
 from ..contracts import ModelPricing
 from .load import M5ContractError, load_nondegradation_contract, load_workflow_contract
 
@@ -25,8 +25,49 @@ GATE1_REQUEST_RESERVATION_USD = Decimal("4.00")
 GATE2_REQUEST_RESERVATION_USD = Decimal("2.00")
 
 
+REQUEST_LIMIT_STOP_REASON = "logical_request_limit_exceeded"
+
+
 class BudgetError(ValueError):
     """Raised when the M-5 ledger would not enforce the frozen dollar cap."""
+
+
+class RequestCappedLedger:
+    """Ledger view that refuses to reserve past the frozen per-run request cap.
+
+    Classifying an over-cap run after the fact still lets request 81 and every
+    one after it leave the process, bill money, and send workspace content
+    upstream. `reserve` is called exactly once per logical request and strictly
+    before anything is sent, so capping here turns the frozen
+    `max_requests_per_run` into a real stop line rather than a verdict label.
+
+    The run is stopped with `logical_request_limit_exceeded` so the reason stays
+    distinguishable from running out of dollars: dollars are shared and end the
+    batch, this cap is per-run and only ends the slot.
+    """
+
+    def __init__(self, ledger: PersistentBudgetLedger, *, max_requests_per_run: int) -> None:
+        if isinstance(max_requests_per_run, bool) or not isinstance(max_requests_per_run, int):
+            raise BudgetError("per-run request cap must be an integer")
+        if max_requests_per_run < 1:
+            raise BudgetError("per-run request cap must be positive")
+        self._ledger = ledger
+        self._max_requests_per_run = max_requests_per_run
+
+    def __getattr__(self, name: str):
+        return getattr(self._ledger, name)
+
+    def reserve(self, run_id: str, request_id: str, *args, **kwargs):
+        run = self._ledger.snapshot()["runs"].get(run_id)
+        requests = run.get("requests") if isinstance(run, dict) else None
+        seen = requests if isinstance(requests, dict) else {}
+        # Re-reserving a known request id is a retry of a counted request.
+        if request_id not in seen and len(seen) >= self._max_requests_per_run:
+            self._ledger.stop_run(run_id, stop_reason=REQUEST_LIMIT_STOP_REASON)
+            raise BudgetStopped(
+                f"run exceeded the frozen {self._max_requests_per_run}-request cap"
+            )
+        return self._ledger.reserve(run_id, request_id, *args, **kwargs)
 
 
 def run_stop_reason(ledger: PersistentBudgetLedger, run_id: str) -> str | None:
@@ -59,6 +100,73 @@ def run_request_count(ledger: PersistentBudgetLedger, run_id: str) -> int:
         return 0
     requests = run.get("requests")
     return len(requests) if isinstance(requests, dict) else 0
+
+
+_PRICE_FIELDS = (
+    "input_usd_per_million",
+    "cached_input_usd_per_million",
+    "output_usd_per_million",
+    "long_context_input_multiplier",
+    "long_context_output_multiplier",
+    "cache_write_input_multiplier",
+)
+
+
+def require_frozen_provider(projection, *, effort: str, contract=None) -> dict[str, str]:
+    """Bind a paid run to the frozen contract and return what actually applied.
+
+    `rondo.local.toml` is mutable machine config, but the proxy meters the $120
+    batch with *its* rates and talks to *its* endpoint. Checking only the model
+    name would let an edit to that file silently change what the approved dollar
+    cap buys, which provider the key is sent to, or how hard the model thinks.
+
+    Rates must match exactly. The snapshot date is provenance rather than spend,
+    so a differing date is recorded on every row instead of blocking the run.
+    """
+
+    loaded = contract or load_nondegradation_contract()
+    raw = loaded.raw
+    price = raw["price_snapshot"]
+    pricing = projection.main_pricing
+    mismatches: list[str] = []
+    if projection.provider_id != str(raw["provider"]):
+        mismatches.append("provider_id")
+    if projection.api != str(raw["provider_api"]):
+        mismatches.append("provider_api")
+    if projection.main_model != str(price["model_id"]):
+        mismatches.append("main_model")
+    if projection.main_effort != effort:
+        mismatches.append("main_effort")
+    if int(projection.max_attempts) != int(raw["provider_max_attempts"]):
+        mismatches.append("provider_max_attempts")
+    if tuple(projection.unbilled_retry_statuses) != tuple(
+        int(item) for item in raw["provider_unbilled_retry_statuses"]
+    ):
+        mismatches.append("provider_unbilled_retry_statuses")
+    if pricing.model_id != str(price["model_id"]):
+        mismatches.append("pricing_model_id")
+    if int(pricing.long_context_threshold_tokens) != int(
+        price["long_context_threshold_tokens"]
+    ):
+        mismatches.append("long_context_threshold_tokens")
+    for field in _PRICE_FIELDS:
+        if Decimal(str(getattr(pricing, field))) != Decimal(str(price[field])):
+            mismatches.append(field)
+    if mismatches:
+        raise M5ContractError(
+            "paid provider differs from the frozen contract: " + ",".join(sorted(mismatches))
+        )
+    return {
+        "provider_id": projection.provider_id,
+        "provider_api": projection.api,
+        "provider_base_url": projection.base_url,
+        "main_model": projection.main_model,
+        "main_effort": projection.main_effort,
+        "provider_profile_sha256": projection.profile_sha256,
+        "provider_config_sha256": projection.config_sha256,
+        "frozen_price_snapshot_date": str(price["date"]),
+        "effective_price_snapshot_date": str(pricing.price_snapshot_date),
+    }
 
 
 def phase_b_pricing(contract=None) -> ModelPricing:

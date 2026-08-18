@@ -307,6 +307,10 @@ store transition 期间为 unknown。Root 退休是独立终态覆盖层，只�
 均已修复并补回归），仍须用户按清单单独授权真实 API/付费/Docker；授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
+  **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
+  fixture 里、指令规定工具顺序），只回答「真实模型下团队机制是否端到端真的发生」，不证明 Multi 在
+  有分析负载的任务上更强；真实任务由门 2 的十个 TB 任务提供。任一门单独都不得引用为满足本目标。
+  详见 `eval/locks/multi-m5-workflow-v1.json` 的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
   阶段 A 前两项（工作流合同、runtime bundle）已冻结；独立验收要求先修好门 1 判据再谈第三项授权。

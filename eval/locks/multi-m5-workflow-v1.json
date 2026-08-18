@@ -4,7 +4,13 @@
   "gate": 1,
   "evidence_kind": "real_api",
   "carrier": "host_codex_exec",
-  "purpose": "Prove Multi team capability actually runs a collaboration loop. Not a Terminal-Bench score.",
+  "purpose": "Prove Multi team capability actually runs a collaboration loop with a real model. Not a Terminal-Bench score, and not a claim that Multi is better on hard work.",
+  "scope_limits": {
+    "carrier": "protocol_demonstration",
+    "analytical_load": "none",
+    "notes": "The fixture states the finding outright and the instruction prescribes which tools to call in which order, so gate 1 answers 'does the team machinery actually fire end to end under a real model', not 'does Multi help on a task with real analysis'. Deliberate: decision 010 froze this carrier because a single-operator task lets the model finish alone and never touch a team tool, which would fail gate 1 for task difficulty rather than for a product defect. The WBS phrase 'full collaboration semantics on a real task' is only satisfied by gate 1 and gate 2 read together: gate 1 supplies the collaboration evidence, gate 2 supplies the real tasks. Neither gate alone may be quoted as satisfying it.",
+    "gate2_order_bias": "base_order runs Codex before Multi on every task, so Multi inherits a warmed image. That bias favours Multi, and gate 2 only calls degradation when Codex completes and Multi does not, so it makes the degradation verdict more conservative rather than fabricating one. It does weaken a 'no degradation observed' reading."
+  },
   "product": "rondo-multi",
   "fixture_dir": "eval/fixtures/multi-m5-collab-v1",
   "fixture_notes_sha256": "e13f5b868a84595c9dae0a9b46ed77e702e366ee26982f8aed35eb15dd77d7c8",
