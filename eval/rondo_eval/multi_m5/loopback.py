@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..config import RepoPaths
-from ..contracts import Product, Side, TEAM_CAPABILITY_MULTI_TOML, team_capability_override_items
+from ..contracts import Product, Side
 from .archive import archive_record
+from .command import build_multi_exec_command, team_capability_overrides
 from .load import M5ContractError, RuntimeIdentity, load_runtime_identity
+from .store import scratch_root
 
 
 LOOPBACK_BEARER = "rondo-multi-m5-loopback"
@@ -271,15 +273,7 @@ def collect_registered_tool_names(request: Mapping[str, Any]) -> set[str]:
 
 
 def team_capability_command_items() -> tuple[str, ...]:
-    items = team_capability_override_items(Product.RONDO_MULTI)
-    expected = (
-        f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
-        f"agents.default_subagent_model={json.dumps(LOOPBACK_MODEL)}",
-        f"agents.default_subagent_reasoning_effort={json.dumps('medium')}",
-    )
-    if items != expected:
-        raise LoopbackError("team capability override drifted")
-    return items
+    return team_capability_overrides()
 
 
 def team_capability_command_fragment() -> str:
@@ -292,36 +286,13 @@ def build_loopback_command(
     base_url: str,
     instruction: str,
 ) -> list[str]:
-    overrides = (
-        'approval_policy="never"',
-        'sandbox_mode="workspace-write"',
-        "sandbox_workspace_write.network_access=true",
-        "features.code_mode_host=true",
-        f'model_provider={json.dumps(LOOPBACK_PROVIDER)}',
-        f'model_providers.{LOOPBACK_PROVIDER}.name="Configured Provider"',
-        f"model_providers.{LOOPBACK_PROVIDER}.base_url={json.dumps(base_url)}",
-        f'model_providers.{LOOPBACK_PROVIDER}.wire_api="responses"',
-        f"model_providers.{LOOPBACK_PROVIDER}.requires_openai_auth=true",
-        f"model_providers.{LOOPBACK_PROVIDER}.supports_websockets=false",
-        f"model_providers.{LOOPBACK_PROVIDER}.request_max_retries=0",
-        f"model_providers.{LOOPBACK_PROVIDER}.stream_max_retries=0",
-        'model_reasoning_effort="medium"',
-        *team_capability_command_items(),
+    return build_multi_exec_command(
+        binary,
+        base_url=base_url,
+        instruction=instruction,
+        model=LOOPBACK_MODEL,
+        effort="medium",
     )
-    command = [
-        str(binary),
-        "exec",
-        "--strict-config",
-        "--ignore-user-config",
-        "--skip-git-repo-check",
-        "--model",
-        LOOPBACK_MODEL,
-        "--json",
-    ]
-    for value in overrides:
-        command.extend(("-c", value))
-    command.extend(("--", instruction))
-    return command
 
 
 def run_frozen_multi_team_publish_loopback(
@@ -345,8 +316,8 @@ def run_frozen_multi_team_publish_loopback(
         "Publish one team checkpoint with team_publish titled loopback checkpoint, "
         "then stop. Do not spawn anyone."
     )
-    scratch_root = _loopback_scratch_root(root)
-    with tempfile.TemporaryDirectory(prefix="rondo-m5-loopback-", dir=scratch_root) as raw:
+    scratch = scratch_root(root)
+    with tempfile.TemporaryDirectory(prefix="rondo-m5-loopback-", dir=scratch) as raw:
         home = Path(raw) / "codex-home"
         workspace = Path(raw) / "workspace"
         home.mkdir(mode=0o700)
@@ -405,6 +376,7 @@ def run_frozen_multi_team_publish_loopback(
         extra={
             "loopback_tool_round_trip": True,
             "registered_tools": sorted(collect_registered_tool_names(server.bodies[0])),
+            "ignored_evidence": [],
         },
     )
     return {
@@ -447,19 +419,6 @@ def _input_items(request: Mapping[str, Any]) -> list[Any]:
         if isinstance(nested, list):
             return list(nested)
     return []
-
-
-def _loopback_scratch_root(common_root: Path) -> Path:
-    """Host CODEX_HOME must not live under /tmp: the release binary refuses PATH aliases there."""
-
-    root = common_root / "eval-data" / "tmp"
-    if root.exists() and (root.is_symlink() or not root.is_dir()):
-        raise LoopbackError("loopback scratch is not a regular directory")
-    root.mkdir(mode=0o700, exist_ok=True)
-    resolved = root.resolve()
-    if resolved != (common_root / "eval-data" / "tmp").resolve() or resolved.is_symlink():
-        raise LoopbackError("loopback scratch must stay under eval-data/tmp")
-    return resolved
 
 
 def _require_executable(path: Path) -> None:

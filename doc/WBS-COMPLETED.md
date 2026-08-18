@@ -1178,3 +1178,30 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
 - **付费前置**：门 1 runner、门 2 交错执行面、预算记账与归档落盘均**未实现**；按复验决议，
   这些部件实现后须再过一次独立审查，通过后才申请真实 API/付费授权。
 
+## Multi M-5 阶段 B 离线前置准备（Plan 044，2026-08-18）
+
+**状态**：阶段 B 的离线前置准备完成，**门 1 整条链路在花钱之前已验成绿的**。真实付费、真实 API 与 Docker
+仍未授权、未执行，**不是** M-5 通过，也**不是**门 1 通过。成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **五项交付物**：门 1 host runner（`gate1.py`/`command.py`/`capture.py`）、门 1 离线彩排 stub
+  （`rehearsal.py`）、门 2 轻量交错执行面（`gate2.py`，真实执行器 fail-closed）、$120 预算记账
+  （`budget.py`，批次 `multi-m5-phase-b`，硬上限在代码里）、归档落盘（`store.py` →
+  `eval-data/multi-m5/archives/records.jsonl`）与就绪自检（`ready.py`）。入口：
+  `just eval-multi-m5-{rehearsal,ready,gate2-fake}`。
+- **门 1 彩排**：冻结二进制真跑、stub 只替代模型侧，**连续五次全绿**，请求数稳定 16。
+  真实 canonical 状态经独立复核：真 spawn 出 `/root/worker`，同一 Event 三个 Version 跨两位作者，
+  证据由成员真实 `exec_command` 结果铸成并挂在成员 Version 上，route 已投递，Root 把成员作者的 Version
+  置 `resolved`，变更日志的 `member_publish` / `root_does_not_self_wake` / `assignment_wakes_target`
+  逐条成立，`wait_agent` 返回真实 TeamActivity 原文。M-1/M-2/M-3 在一次真实纵切里全部被触发。
+  记录标注 `evidence_kind=loopback`、`rehearsal=true`、`counts_as_effective=false`。
+- **本轮修复三处**：门 2 被重试掉的 infra 尝试不再从归档消失（原先每槽只留最后一条，导致"infra 未计入
+  有效结果"无法核对）；`Gate2Error` 改为计入 infra 预算并按上限重试（原先绕过总上限 12）；
+  二进制哈希缺失时不再回填占位值，改为 fail-closed。
+- **门禁**：`tests.test_multi_m5` + `tests.test_multi_m5_exec` 39/39；完整离线 `just eval-test` 865 项
+  （基线 854 + 新增 11），仅剩既有的两项 Local 模块加载失败（干净 `main` 同样复现，属另一任务）；
+  `just eval-multi-m5-ready` `ready=true`；fake 门 2 20 槽位调度、记账与归档正常。未跑 Rust、Docker、
+  真实 API，未产生费用。
+- **付费前仍缺**：门 1 付费入口（预算代理 + forward 捕获接成付费运行函数）与门 2 真实执行器
+  （走既有 `terminal_bench` adapters/runner/results）。按阶段 A 收口的 F3 决议，二者实现后须先过独立审查。
+- 执行日志：`agent_log/2026-08-18-030000-plan044-m5-phase-b-preparation.md`。
+

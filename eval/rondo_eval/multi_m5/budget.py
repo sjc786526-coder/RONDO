@@ -1,0 +1,66 @@
+"""M-5 phase B budget ledger: $120 hard cap is enforced in code, not docs."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from pathlib import Path
+
+from ..api_budget_proxy import PersistentBudgetLedger
+from ..contracts import ModelPricing
+from .load import M5ContractError, load_nondegradation_contract
+
+BATCH_ID = "multi-m5-phase-b"
+HARD_CAP_USD = Decimal("120.00")
+RUN_CAP_USD = Decimal("40.00")
+
+
+class BudgetError(ValueError):
+    """Raised when the M-5 ledger would not enforce the frozen dollar cap."""
+
+
+def phase_b_pricing(contract=None) -> ModelPricing:
+    raw = (contract or load_nondegradation_contract()).raw
+    price = raw["price_snapshot"]
+    pricing = ModelPricing(
+        model_id=str(price["model_id"]),
+        input_usd_per_million=Decimal(str(price["input_usd_per_million"])),
+        cached_input_usd_per_million=Decimal(str(price["cached_input_usd_per_million"])),
+        output_usd_per_million=Decimal(str(price["output_usd_per_million"])),
+        long_context_threshold_tokens=int(price["long_context_threshold_tokens"]),
+        long_context_input_multiplier=Decimal(str(price["long_context_input_multiplier"])),
+        long_context_output_multiplier=Decimal(str(price["long_context_output_multiplier"])),
+        cache_write_input_multiplier=Decimal(str(price["cache_write_input_multiplier"])),
+        price_snapshot_date=str(price["date"]),
+        price_source_url=str(price["source_url"]),
+    )
+    pricing.validate()
+    return pricing
+
+
+def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
+    """Open the batch ledger. Cap, batch id, and run slot count come from the lock."""
+
+    loaded = contract or load_nondegradation_contract()
+    cap = Decimal(loaded.hard_cap_usd)
+    if cap != HARD_CAP_USD:
+        raise M5ContractError("non-degradation hard cap drifted from $120.00")
+    if loaded.raw.get("cost_forecast", {}).get("ledger_batch_id") != BATCH_ID:
+        raise M5ContractError("ledger batch id drifted from multi-m5-phase-b")
+    max_runs = loaded.max_effective_runs + loaded.max_infra_attempts_total
+    if max_runs != 72:
+        raise M5ContractError("ledger run-slot count drifted from 60+12")
+    ledger = PersistentBudgetLedger(
+        path,
+        batch_id=BATCH_ID,
+        total_cap_usd=HARD_CAP_USD,
+        max_runs=max_runs,
+        default_run_cap_usd=RUN_CAP_USD,
+    )
+    snapshot = ledger.snapshot()
+    if Decimal(snapshot["total_cap_usd"]) != HARD_CAP_USD:
+        ledger.close()
+        raise BudgetError("opened ledger does not enforce the $120 hard cap")
+    if snapshot["batch_id"] != BATCH_ID:
+        ledger.close()
+        raise BudgetError("opened ledger batch id differs")
+    return ledger

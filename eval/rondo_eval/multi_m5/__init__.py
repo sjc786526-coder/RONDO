@@ -34,10 +34,17 @@ from .schedule import (
     base_slots,
     conditional_slots,
     degradation_on_task,
+    outcomes_by_task,
 )
+from .store import persist_archive_record
+from .gate1 import run_gate1_rehearsal
+from .gate2 import ScriptedSlotExecutor, run_light_interleaved
+from .ready import readiness_report
+from .budget import HARD_CAP_USD, open_phase_b_ledger
 
 __all__ = [
     "CollaborationVerdict",
+    "HARD_CAP_USD",
     "LOCKS_DIR",
     "LOOPBACK_BEARER",
     "LOOPBACK_MODEL",
@@ -45,6 +52,7 @@ __all__ = [
     "M5_ARCHIVE_SCHEMA_VERSION",
     "NondegradationContract",
     "RuntimeIdentity",
+    "ScriptedSlotExecutor",
     "Slot",
     "TeamPublishFakeServer",
     "WorkflowContract",
@@ -59,6 +67,12 @@ __all__ = [
     "load_runtime_identity",
     "load_workflow_contract",
     "merge_jsonl_into_dump",
+    "open_phase_b_ledger",
+    "outcomes_by_task",
+    "persist_archive_record",
+    "readiness_report",
     "required_archive_fields",
     "run_frozen_multi_team_publish_loopback",
+    "run_gate1_rehearsal",
+    "run_light_interleaved",
 ]
