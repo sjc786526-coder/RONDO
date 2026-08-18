@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from dataclasses import asdict, dataclass
@@ -132,8 +133,11 @@ TEAM_CAPABILITY_CONFIG_SCHEMA_VERSION = 1
 # Inline TOML table consumed by `-c`. One override avoids boolean-vs-table
 # clobbering if `features.multi_agent_v2=true` were mixed with nested keys.
 TEAM_CAPABILITY_MULTI_TOML = (
-    "{enabled=true,team_state_enabled=true,non_code_mode_only=false}"
+    "{enabled=true,team_state_enabled=true,non_code_mode_only=false,"
+    "expose_spawn_agent_model_overrides=false}"
 )
+AGENT_DEFAULT_SUBAGENT_MODEL = "gpt-5.6-sol"
+AGENT_DEFAULT_SUBAGENT_EFFORT = "medium"
 
 
 def auto_review_overrides(
@@ -205,12 +209,21 @@ def team_capability_override_items(product: Product | None) -> tuple[str, ...]:
     Local and the frozen upstream get nothing: team tools are Multi-only, and
     ``--strict-config`` would reject ``team_state_enabled`` on v0.147.0 Codex.
     ``non_code_mode_only=false`` keeps spawn/team tools Direct while eval also
-    enables ``code_mode_host``.
+    enables ``code_mode_host``. The ``features.multi_agent_v2`` table stays a
+    single inline TOML; the two ``agents.default_subagent_*`` items pin the
+    member model without splitting that table.
     """
 
     if product is not Product.RONDO_MULTI:
         return ()
-    return (f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",)
+    return (
+        f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
+        f"agents.default_subagent_model={json.dumps(AGENT_DEFAULT_SUBAGENT_MODEL)}",
+        (
+            "agents.default_subagent_reasoning_effort="
+            f"{json.dumps(AGENT_DEFAULT_SUBAGENT_EFFORT)}"
+        ),
+    )
 
 
 def team_capability_config_projection(
@@ -232,6 +245,11 @@ def team_capability_config_projection(
         "multi_agent_v2_enabled": enabled,
         "team_state_enabled": enabled,
         "non_code_mode_only": False if enabled else None,
+        "expose_spawn_agent_model_overrides": False if enabled else None,
+        "default_subagent_model": AGENT_DEFAULT_SUBAGENT_MODEL if enabled else None,
+        "default_subagent_reasoning_effort": AGENT_DEFAULT_SUBAGENT_EFFORT
+        if enabled
+        else None,
     }
 
 

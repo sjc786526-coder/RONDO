@@ -193,31 +193,34 @@
   `codex_sha256=2f5f25e0…0c32`（legacy CLI）、`code_mode_host_sha256=eb54cac2…6705`（本次 musl host）、
   `bwrap_sha256=77360cb7…2c4c`（与 Codex 同资产）、`manifest_sha256=1c782d1d…6769`。
   对照 Codex bundle 身份见该锁 `codex_baseline`。重建 CLI sha `74989060…d266` **不得**写入 runtime 锁。
-- **最小接线**：`TEAM_CAPABILITY_MULTI_TOML` 单条 inline TOML 只注入 Multi；Codex/Local 禁止。
-  TB adapter、loopback、归档与 Python 合同测试已落地。根 `just eval-sync`/`eval-test`/`eval-lock`
-  从 worktree 经 `git-common-dir` 解析主根 venv；新增 `just eval-multi-m5-loopback`。
+- **最小接线**：`features.multi_agent_v2` 仍是单条 inline TOML，只注入 Multi；另加
+  `agents.default_subagent_model` / `agents.default_subagent_reasoning_effort`，并关闭
+  `expose_spawn_agent_model_overrides`。Codex/Local 禁止这些项。TB adapter、loopback、归档与
+  Python 合同测试已落地。根 `just eval-sync`/`eval-test`/`eval-lock` 从 worktree 经
+  `git-common-dir` 解析主根 venv；新增 `just eval-multi-m5-loopback`。
 - **无 API 演练**：`just eval-multi-m5-loopback` 通过；`loopback_tool_round_trip=true`，
   `counts_as_effective=false`，`evidence_kind=loopback`。证明团队工具在 `code_mode_host=true` 下已注册
   并可走 `team_publish` 往返。**不是门 1 真实通过。**
 - **定向门禁**（均无 API / 无 Docker）：
-  - `tests.test_multi_m5` 15/15
+  - `tests.test_multi_m5` 20/20（门 1 窄整改后）
   - `tests.test_binary_freeze.MultiProductFreezeTests`
   - `tests.test_terminal_bench.TerminalBenchTests.test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv`
   - `just eval-lock`
   - 清代理后 `just test -p codex-team-state -p codex-core -E 'package(codex-team-state) or test(suite::team_world_state) or test(suite::team_routing) or test(suite::team_evidence) or test(suite::team_coordination)'`：**142/142**（metrics `eval-data/build-metrics/rondo-multi-m5-team-tests-noproxy`）。带残留 `HTTP_PROXY` 的首次 15 fail/1 timeout **不可复用**。
-- 阶段 B 授权清单已写入本节，执行暂停等待授权。
+- 阶段 B 授权清单已写入本节。用户要求先完成门 1 窄整改并复验，本轮不进入阶段 B。
 
 ### 当前工作
 
-- 阶段 A 收口：044 分支提交后停止，等待阶段 B 授权。不合并不推送。
+- 门 1 协作判据窄整改已落地，044 分支提交后停止，等待独立复验。不合并不推送，不进入阶段 B。
 
 ### 本任务剩余步骤
 
-- 阶段 A：044 分支已提交；独立审核无 P0。然后停止。
-- 阶段 B（**仅在用户按下列清单授权后**）：按已冻结合同落地 host 门 1 runner 与门 2 轻量交错执行面（当前只有 loopback CLI）→ 连线检查 → 门 1 host 工作流 → 门 2 十任务 → 复核结果与费用 → 同步文档与日志 → 044 分支再提交后停止。
+- 阶段 A 窄整改：等待独立复验。
+- 阶段 B：用户明确要求本轮不进入。复验通过后再按下列清单另议，不得自行开工。
 
 ### 阻塞项
 
+- 阶段 A 独立验收不通过后的门 1 判据整改待复验。
 - 阶段 B 所需的 Docker、真实 API 与付费授权尚未取得，按 §3 硬约束 2 处理。
 - `.env.local` 已确认存在、非符号链接、权限 `0600`。未打开文件。阶段 B 开始前执行者须静默确认
   `OPENAI_API_KEY` 存在且非空（relay / CCTQ Responses），不得记录其值。
@@ -225,11 +228,12 @@
 ### 当前验收状态
 
 - 规划现场核对、worktree 创建与 ExecPlan：已完成。
-- **阶段 A：已完成准备。** 含义仅是「M-5 已具备真实运行条件」。**不得**表述为 M-5 通过、门 1 通过或未见退化。
-- 阶段 A 已落地：bundle 冻结与身份自证、Codex/Multi 核验、工作流合同、不退化合同、最小接线、
-  无 API loopback、定向门禁、阶段 B 授权清单。loopback 证明的是团队工具注册、一次 `team_publish`
-  往返与归档字段；**没有**证明投影进入后续采样或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
-- 阶段 B：未授权、未开始。§1 阶段 B 五项全部未做。
+- **阶段 A：独立验收不通过。** 冻结 bundle、两份运行合同、接线与无 API loopback 核验通过；
+  门 1 原六项谓词可对 Root 独角戏误判通过，且未验 Root 唤醒。窄整改已落地，**待复验**。
+  在复验通过前，**不得**表述为「M-5 已具备真实运行条件」，也不得表述为 M-5 / 门 1 通过或未见退化。
+- loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
+  或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
+- 阶段 B：未开始。§1 阶段 B 五项全部未做。
 
 ### 阶段 B 精确授权清单
 
@@ -292,3 +296,8 @@
 | 014 | 团队 TOML 使用 `non_code_mode_only=false` | eval 固定 `features.code_mode_host=true`；为 true 时 spawn/团队工具不会在 Direct 路径注册 | Multi 运行配置 | 已采纳 |
 | 015 | 团队能力必须是恰好一条 inline TOML，且只给 Multi | 拆成 `enabled=true` 再写嵌套键会互相覆盖；Codex `--strict-config` 会拒绝未知键 | adapter / 公平性 | 已采纳 |
 | 016 | Multi musl freeze 身份包含 `CARGO_BUILD_JOBS=2` | 本机约 27GiB，不限并行会触发 `host_mem_available_below_floor` | 冻结身份 | 已采纳 |
+| 017 | 门 1 Event 局部谓词必须落在**同一个 Event**；按 `TeamStore::dump_entries` 顺序分组，不读 Version 上的 `event_id` | 真实 dump 的 Version 行没有 `event_id`；各自扫全表会让 Root 独角戏 + 游离成员噪声误判通过 | 门 1 判据 | 已采纳 |
+| 018 | `root_resolved` 只认成员作者 Version；新增 `root_woken`（inspect log 对 Root 的 `signalled`，或 JSONL 里 `wait_agent` 的 TeamActivity 原文） | ExecPlan 五项能力含 Root 唤醒；mailbox 的 `Wait completed.` 不算 | 门 1 判据 | 已采纳 |
+| 019 | 成员模型：补 `agents.default_subagent_*`，并设 `expose_spawn_agent_model_overrides=false` | 只设默认值仍可被 spawn 的 `model` 覆盖；关掉 schema 字段才能钉死 | Multi 运行配置 | 已采纳 |
+| 020 | 门 1 dump 只从 `codex exec --json` 的 harness 工具输出采集，不读 `TEAM_REPORT.md` | 模型自述可编造；阶段 B runner 必须走这条采集合同 | 门 1 证据 | 已采纳 |
+| 021 | 门 2 归因边界写入不退化锁：比较的是「上游 V2 + 团队状态」对「上游默认 V1」；真退化再跑 `V2 开、team_state 关`，本轮不预跑 | 结论要能说清退化归谁；不预跑省钱 | 门 2 合同 | 已采纳 |

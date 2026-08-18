@@ -9,7 +9,7 @@
   "fixture_dir": "eval/fixtures/multi-m5-collab-v1",
   "fixture_notes_sha256": "e13f5b868a84595c9dae0a9b46ed77e702e366ee26982f8aed35eb15dd77d7c8",
   "instruction_path": "eval/templates/multi-m5/collab-workflow-instruction-v1.md",
-  "instruction_sha256": "9879529f64351b03754a1c40fbd6c0b80c69510d6cfe42f123bc55b1cb9d5333",
+  "instruction_sha256": "5450a973bcb3ff8514f286836598b4e89dad49108e5a10483c61bb4a46962b81",
   "finding_line": "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042",
   "report_filename": "TEAM_REPORT.md",
   "root_model": "gpt-5.6-sol",
@@ -21,12 +21,22 @@
   "max_members": 1,
   "orphan_retirement_required": false,
   "docker": false,
+  "evidence_source": {
+    "kind": "codex_exec_jsonl_tool_outputs",
+    "required_tools": ["team_inspect", "wait_agent"],
+    "required_inspect_actions": ["dump", "log"],
+    "wait_signal": "Wait completed: the team world state changed. The current active view is in this request.",
+    "notes": "Judge reads harness-authored function_call_output from codex exec --json. TEAM_REPORT is the task artifact only and is never collaboration evidence."
+  },
   "team_capability": {
     "schema_version": 1,
     "multi_agent_v2_enabled": true,
     "team_state_enabled": true,
     "non_code_mode_only": false,
-    "override_toml": "{enabled=true,team_state_enabled=true,non_code_mode_only=false}"
+    "expose_spawn_agent_model_overrides": false,
+    "override_toml": "{enabled=true,team_state_enabled=true,non_code_mode_only=false,expose_spawn_agent_model_overrides=false}",
+    "default_subagent_model": "gpt-5.6-sol",
+    "default_subagent_reasoning_effort": "medium"
   },
   "task_completion": {
     "report_exists": true,
@@ -39,23 +49,27 @@
     },
     {
       "id": "event_with_two_versions",
-      "description": "At least one Event has two or more Versions."
+      "description": "The selected Event has two or more Versions."
     },
     {
       "id": "two_authors",
-      "description": "Those Versions were written by at least two distinct authors."
+      "description": "Those Versions on the same Event were written by at least two distinct authors, including the member."
     },
     {
       "id": "team_route",
-      "description": "At least one route assignment exists on that Event."
+      "description": "A route assignment on that Event targets the member."
     },
     {
       "id": "team_evidence",
-      "description": "At least one Version is evidence-backed (fact_ref_count >= 1 or a VersionFact row)."
+      "description": "A member-authored Version on that Event is evidence-backed."
     },
     {
       "id": "root_resolved",
-      "description": "At least one Version has root_state=resolved. Attention ended on the normal path."
+      "description": "Root set root_state=resolved on a member-authored Version of that Event."
+    },
+    {
+      "id": "root_woken",
+      "description": "Harness evidence shows Root was woken: team_inspect log signalled a Root wake, or wait_agent returned the TeamActivity message."
     }
   ]
 }

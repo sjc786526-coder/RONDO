@@ -1123,8 +1123,9 @@ standard/Lite 形态均补回归。
 
 ## Multi M-5 阶段 A —— 真实运行条件（Plan 044，2026-08-17）
 
-**状态**：阶段 A 已完成。含义仅是「M-5 已具备真实运行条件」。未跑 Docker、真实 API 或付费调用，
-**不能**表述为 M-5 通过、门 1 通过或未见退化。阶段 B 未授权。成果在 044 工作树分支，未合入 `main`、未推送。
+**状态**：阶段 A 当时交付为「已具备真实运行条件」。随后独立验收不通过（门 1 判据），见下节。
+未跑 Docker、真实 API 或付费调用，**不能**表述为 M-5 通过、门 1 通过或未见退化。阶段 B 未开始。
+成果在 044 工作树分支，未合入 `main`、未推送。
 
 - **门 1 载体**：不用 TB `fix-git`。受控 host fixture `eval/fixtures/multi-m5-collab-v1/` +
   `eval/templates/multi-m5/collab-workflow-instruction-v1.md`。完成标准 = `TEAM_REPORT.md` 含 finding
@@ -1141,4 +1142,15 @@ standard/Lite 形态均补回归。
 - **门禁**：eval 定向 Python 与 `just eval-lock` 通过；清代理后 team-state + 四个 core team suite **142/142**。
 - **任务合同与授权清单**：`plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
   执行日志：`agent_log/2026-08-17-190000-plan044-m5-phase-a.md`。
+  独立验收：`agent_log/2026-08-17-210000-plan044-m5-phase-a-independent-acceptance.md`（不通过）。
+
+## Multi M-5 阶段 A 门 1 窄整改（Plan 044，2026-08-17）
+
+**状态**：独立验收指出的门 1 判据问题已在 044 分支落地窄改，待复验。未进阶段 B，未合入 `main`、未推送。
+
+- 同一 Event 合取；按真实 dump 顺序分组（Version 行没有 `event_id`）。
+- `root_resolved` 只认成员作者 Version；新增 `root_woken`。
+- dump 合同改为 `codex exec --json` 的 harness 工具输出。
+- 成员默认模型 + 隐藏 `spawn_agent` 的 model 覆盖；门 2 归因边界写入不退化锁。
+- 执行日志：`agent_log/2026-08-17-220000-plan044-m5-phase-a-predicate-remediation.md`。
 

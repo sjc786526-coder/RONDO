@@ -270,11 +270,20 @@ def collect_registered_tool_names(request: Mapping[str, Any]) -> set[str]:
     return collect_tool_names(request.get("tools")) | collect_code_mode_tool_names(request)
 
 
-def team_capability_command_fragment() -> str:
+def team_capability_command_items() -> tuple[str, ...]:
     items = team_capability_override_items(Product.RONDO_MULTI)
-    if items != (f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",):
+    expected = (
+        f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
+        f"agents.default_subagent_model={json.dumps(LOOPBACK_MODEL)}",
+        f"agents.default_subagent_reasoning_effort={json.dumps('medium')}",
+    )
+    if items != expected:
         raise LoopbackError("team capability override drifted")
-    return items[0]
+    return items
+
+
+def team_capability_command_fragment() -> str:
+    return team_capability_command_items()[0]
 
 
 def build_loopback_command(
@@ -297,7 +306,7 @@ def build_loopback_command(
         f"model_providers.{LOOPBACK_PROVIDER}.request_max_retries=0",
         f"model_providers.{LOOPBACK_PROVIDER}.stream_max_retries=0",
         'model_reasoning_effort="medium"',
-        team_capability_command_fragment(),
+        *team_capability_command_items(),
     )
     command = [
         str(binary),

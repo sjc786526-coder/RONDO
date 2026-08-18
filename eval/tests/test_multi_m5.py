@@ -35,6 +35,7 @@ from rondo_eval.multi_m5.loopback import (  # noqa: E402
     collect_tool_names,
     team_capability_command_fragment,
 )
+from rondo_eval.multi_m5.collect import collect_gate1_evidence  # noqa: E402
 from rondo_eval.multi_m5.predicates import evaluate_collaboration  # noqa: E402
 from rondo_eval.multi_m5.schedule import (  # noqa: E402
     base_slots,
@@ -61,11 +62,16 @@ class MultiM5ContractTests(unittest.TestCase):
                 "team_route",
                 "team_evidence",
                 "root_resolved",
+                "root_woken",
             ),
         )
         self.assertEqual(
             team_capability_override_items(Product.RONDO_MULTI),
-            (f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",),
+            (
+                f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
+                'agents.default_subagent_model="gpt-5.6-sol"',
+                'agents.default_subagent_reasoning_effort="medium"',
+            ),
         )
         self.assertEqual(team_capability_override_items(Product.RONDO_LOCAL), ())
         self.assertEqual(team_capability_override_items(None), ())
@@ -151,7 +157,19 @@ class MultiM5PredicateTests(unittest.TestCase):
                 },
                 {"entry": "route", "route_id": "r1", "event_id": "e1", "target": "/root/worker"},
                 {"entry": "version_fact", "version_id": "v1", "fact_id": "f1"},
-            ]
+            ],
+            "log": [
+                {
+                    "kind": "publish",
+                    "actor": "/root/worker",
+                    "target": "e1",
+                    "wake": {
+                        "decision": "signalled",
+                        "target": "/root",
+                        "rule": "member_publish",
+                    },
+                }
+            ],
         }
 
     def test_complete_dump_and_report_pass(self) -> None:
@@ -203,30 +221,30 @@ class MultiM5PredicateTests(unittest.TestCase):
         self.assertIn("predicate:spawn_member", verdict.reasons)
 
     def test_two_singleton_events_are_not_a_shared_chain(self) -> None:
+        # Real dumps have no event_id on Version. Grouping follows dump order:
+        # Event, its Versions/VersionFacts, its Routes, then the next Event.
         dump = {
             "entries": [
                 {"entry": "participant", "label": "/root", "role": "root"},
                 {"entry": "participant", "label": "/root/worker", "role": "member"},
                 {"entry": "event", "event_id": "e1", "version_count": 1, "route_count": 1},
-                {"entry": "event", "event_id": "e2", "version_count": 1, "route_count": 0},
                 {
                     "entry": "version",
-                    "event_id": "e1",
                     "version_id": "v1",
                     "author": "/root/worker",
                     "root_state": "resolved",
                     "fact_ref_count": 1,
                 },
+                {"entry": "version_fact", "version_id": "v1", "fact_id": "f1"},
+                {"entry": "route", "route_id": "r1", "event_id": "e1", "target": "/root/worker"},
+                {"entry": "event", "event_id": "e2", "version_count": 1, "route_count": 0},
                 {
                     "entry": "version",
-                    "event_id": "e2",
                     "version_id": "v2",
                     "author": "/root",
                     "root_state": "tracking",
                     "fact_ref_count": 0,
                 },
-                {"entry": "route", "route_id": "r1", "event_id": "e1", "target": "/root/worker"},
-                {"entry": "version_fact", "version_id": "v1", "fact_id": "f1"},
             ]
         }
         with tempfile.TemporaryDirectory() as raw:
@@ -236,6 +254,175 @@ class MultiM5PredicateTests(unittest.TestCase):
         self.assertFalse(verdict.passed)
         self.assertFalse(verdict.predicates["event_with_two_versions"])
         self.assertIn("predicate:event_with_two_versions", verdict.reasons)
+
+    def test_root_solo_event_plus_stray_member_event_fails(self) -> None:
+        dump = {
+            "entries": [
+                {"entry": "participant", "label": "/root", "role": "root"},
+                {"entry": "participant", "label": "/root/worker", "role": "member"},
+                {"entry": "event", "event_id": "e1", "version_count": 2, "route_count": 0},
+                {
+                    "entry": "version",
+                    "version_id": "v1",
+                    "author": "/root",
+                    "root_state": "resolved",
+                    "fact_ref_count": 1,
+                },
+                {
+                    "entry": "version",
+                    "version_id": "v2",
+                    "author": "/root",
+                    "root_state": "tracking",
+                    "fact_ref_count": 0,
+                },
+                {"entry": "event", "event_id": "e2", "version_count": 1, "route_count": 1},
+                {
+                    "entry": "version",
+                    "version_id": "v3",
+                    "author": "/root/worker",
+                    "root_state": "pending",
+                    "fact_ref_count": 0,
+                },
+                {"entry": "route", "route_id": "r1", "event_id": "e2", "target": "/root/worker"},
+            ],
+            "log": [
+                {
+                    "kind": "publish",
+                    "wake": {"decision": "signalled", "target": "/root"},
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["two_authors"])
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["root_resolved"])
+
+    def test_resolving_a_root_version_does_not_count_as_root_resolved(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        dump["entries"][3]["root_state"] = "tracking"
+        dump["entries"][4]["root_state"] = "resolved"
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["root_resolved"])
+        self.assertIn("predicate:root_resolved", verdict.reasons)
+
+    def test_complete_dump_without_root_wake_fails(self) -> None:
+        dump = self._dump()
+        dump["log"] = []
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["root_woken"])
+        self.assertIn("predicate:root_woken", verdict.reasons)
+
+    def test_mailbox_wait_is_not_team_wake(self) -> None:
+        dump = self._dump()
+        dump["log"] = []
+        jsonl = json.dumps(
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": "wait-1",
+                    "output": json.dumps({"message": "Wait completed.", "timed_out": False}),
+                },
+            }
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(
+                dump, workspace=workspace, finding_line=FINDING, jsonl=jsonl
+            )
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["root_woken"])
+
+    def test_jsonl_wait_and_inspect_are_harness_owned(self) -> None:
+        dump = {
+            "entries": [
+                {"entry": "participant", "label": "/root", "role": "root"},
+                {"entry": "participant", "label": "/root/worker", "role": "member"},
+            ]
+        }
+        jsonl = "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "function_call",
+                            "name": "team_inspect",
+                            "call_id": "dump-1",
+                            "arguments": '{"action":"dump"}',
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "function_call_output",
+                            "call_id": "dump-1",
+                            "output": json.dumps(
+                                {
+                                    "action": "dump",
+                                    "entries": self._dump()["entries"],
+                                }
+                            ),
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "function_call",
+                            "name": "wait_agent",
+                            "call_id": "wait-1",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "function_call_output",
+                            "call_id": "wait-1",
+                            "output": json.dumps(
+                                {
+                                    "message": (
+                                        "Wait completed: the team world state changed. "
+                                        "The current active view is in this request."
+                                    ),
+                                    "timed_out": False,
+                                }
+                            ),
+                        },
+                    }
+                ),
+            ]
+        )
+        collected = collect_gate1_evidence(jsonl)
+        self.assertEqual(collected["entries"][2]["event_id"], "e1")
+        self.assertTrue(any("team world state changed" in item for item in collected["jsonl_signals"]))
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(
+                dump, workspace=workspace, finding_line=FINDING, jsonl=jsonl
+            )
+        self.assertTrue(verdict.passed)
+        self.assertTrue(verdict.predicates["root_woken"])
 
 
 class MultiM5ScheduleTests(unittest.TestCase):
@@ -308,6 +495,8 @@ class MultiM5LoopbackTests(unittest.TestCase):
         joined = " ".join(command)
         self.assertIn(fragment, command)
         self.assertEqual(joined.count("features.multi_agent_v2="), 1)
+        self.assertIn('agents.default_subagent_model="gpt-5.6-sol"', joined)
+        self.assertIn("expose_spawn_agent_model_overrides=false", joined)
         self.assertIn("features.code_mode_host=true", joined)
         self.assertNotIn("auto_review.model", joined)
 

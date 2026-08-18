@@ -68,6 +68,13 @@
   },
   "degradation_rule": "A task is stable one-way degradation only when all three effective observations are Codex completed and Multi incomplete. Incomplete evidence is uncertain, not a pass.",
   "team_capability_on_multi_only": true,
+  "attribution": {
+    "codex_collab": "default_on",
+    "codex_multi_agent_v2": "default_off",
+    "multi_enables": ["Feature::MultiAgentV2", "team_state_enabled"],
+    "comparison": "Multi runs upstream V2 plus RONDO team state; Codex runs upstream default V1. This is the product under test, not a fairness defect.",
+    "if_stable_one_way_degradation": "Before attributing a failure to the team layer, run a diagnostic_v2_on_team_state_off slot on the same task. Do not pre-run that diagnostic."
+  },
   "price_snapshot": {
     "date": "2026-08-17",
     "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",

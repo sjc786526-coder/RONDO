@@ -12,6 +12,8 @@ from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
 from ..contracts import (
+    AGENT_DEFAULT_SUBAGENT_EFFORT,
+    AGENT_DEFAULT_SUBAGENT_MODEL,
     AUTO_REVIEW_EVIDENCE_DIR,
     TEAM_CAPABILITY_MULTI_TOML,
     BinaryManifest,
@@ -972,6 +974,13 @@ def _validate_safe_codex_command(
     if product is not Product.RONDO_LOCAL and "auto_review." in command:
         raise AdapterError("agent received unexpected auto_review configuration")
     team_override = f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}"
+    subagent_model = (
+        f"agents.default_subagent_model={json.dumps(AGENT_DEFAULT_SUBAGENT_MODEL)}"
+    )
+    subagent_effort = (
+        "agents.default_subagent_reasoning_effort="
+        f"{json.dumps(AGENT_DEFAULT_SUBAGENT_EFFORT)}"
+    )
     if product is Product.RONDO_MULTI:
         if team_override not in command:
             raise AdapterError("RONDO Multi team capability overrides are incomplete")
@@ -979,8 +988,16 @@ def _validate_safe_codex_command(
             raise AdapterError("RONDO Multi team capability override is ambiguous")
         if command.count("team_state_enabled=true") != 1:
             raise AdapterError("RONDO Multi team_state_enabled override is ambiguous")
+        if "expose_spawn_agent_model_overrides=false" not in command:
+            raise AdapterError("RONDO Multi spawn model override must stay hidden")
+        if subagent_model not in command or subagent_effort not in command:
+            raise AdapterError("RONDO Multi default subagent model overrides are incomplete")
+        if command.count("agents.default_subagent_model=") != 1:
+            raise AdapterError("RONDO Multi default subagent model override is ambiguous")
     elif "team_state_enabled" in command or "features.multi_agent_v2=" in command:
         raise AdapterError("agent received unexpected Multi team capability configuration")
+    elif "agents.default_subagent" in command:
+        raise AdapterError("agent received unexpected Multi subagent defaults")
     catalog_override = (
         f"model_catalog_json={json.dumps(frozen_model_catalog_path)}"
         if frozen_model_catalog_path is not None

@@ -36,6 +36,7 @@ _PREDICATE_IDS = (
     "team_route",
     "team_evidence",
     "root_resolved",
+    "root_woken",
 )
 
 
@@ -146,6 +147,12 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
     override = capability.get("override_toml")
     if override != TEAM_CAPABILITY_MULTI_TOML:
         raise M5ContractError("team capability override differs from the adapter contract")
+    if capability.get("expose_spawn_agent_model_overrides") is not False:
+        raise M5ContractError("gate 1 must hide spawn_agent model overrides")
+    if capability.get("default_subagent_model") != "gpt-5.6-sol":
+        raise M5ContractError("gate 1 default subagent model differs")
+    if capability.get("default_subagent_reasoning_effort") != "medium":
+        raise M5ContractError("gate 1 default subagent effort differs")
     timeout = raw.get("timeout_seconds")
     attempts = raw.get("max_attempts")
     members = raw.get("max_members")
@@ -154,6 +161,11 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
     report = raw.get("report_filename")
     if report != "TEAM_REPORT.md":
         raise M5ContractError("gate 1 report filename differs")
+    source = raw.get("evidence_source")
+    if not isinstance(source, dict) or source.get("kind") != "codex_exec_jsonl_tool_outputs":
+        raise M5ContractError("gate 1 dump must come from harness JSONL tool outputs")
+    if source.get("required_inspect_actions") != ["dump", "log"]:
+        raise M5ContractError("gate 1 must collect team_inspect dump and log")
     return WorkflowContract(
         lock_id=raw["lock_id"],
         instruction_path=instruction,
@@ -231,6 +243,18 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
     trigger = (raw.get("conditional_rerun") or {}).get("trigger")
     if trigger != "codex_completed_multi_incomplete":
         raise M5ContractError("conditional rerun trigger differs")
+    attribution = raw.get("attribution")
+    if not isinstance(attribution, dict):
+        raise M5ContractError("gate 2 attribution boundary is missing")
+    if attribution.get("codex_multi_agent_v2") != "default_off":
+        raise M5ContractError("gate 2 Codex V2 default differs")
+    if attribution.get("multi_enables") != [
+        "Feature::MultiAgentV2",
+        "team_state_enabled",
+    ]:
+        raise M5ContractError("gate 2 Multi enable set differs")
+    if "diagnostic_v2_on_team_state_off" not in str(attribution.get("if_stable_one_way_degradation") or ""):
+        raise M5ContractError("gate 2 degradation diagnostic is missing")
     return NondegradationContract(
         lock_id=raw["lock_id"],
         catalog_path=catalog,

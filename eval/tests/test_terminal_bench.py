@@ -1126,11 +1126,14 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("auto_review.reasoning_effort", multi_commands)
         self.assertNotIn("auto_review.evidence_dir", multi_commands)
         self.assertIn(
-            'features.multi_agent_v2={enabled=true,team_state_enabled=true,non_code_mode_only=false}',
+            'features.multi_agent_v2={enabled=true,team_state_enabled=true,non_code_mode_only=false,expose_spawn_agent_model_overrides=false}',
             multi_commands,
         )
+        self.assertIn('agents.default_subagent_model="gpt-5.6-sol"', multi_commands)
         self.assertNotIn("team_state_enabled", commands)
         self.assertNotIn("team_state_enabled", rondo_commands)
+        self.assertNotIn("agents.default_subagent", commands)
+        self.assertNotIn("agents.default_subagent", rondo_commands)
 
     def test_adapter_non_git_task_uses_frozen_workdir_without_repo_precondition(self) -> None:
         adapter = self.adapter(

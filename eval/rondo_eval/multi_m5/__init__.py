@@ -24,6 +24,7 @@ from .loopback import (
     collect_tool_names,
     run_frozen_multi_team_publish_loopback,
 )
+from .collect import collect_gate1_evidence, merge_jsonl_into_dump
 from .predicates import (
     CollaborationVerdict,
     evaluate_collaboration,
@@ -49,6 +50,7 @@ __all__ = [
     "WorkflowContract",
     "archive_record",
     "base_slots",
+    "collect_gate1_evidence",
     "collect_tool_names",
     "conditional_slots",
     "degradation_on_task",
@@ -56,6 +58,7 @@ __all__ = [
     "load_nondegradation_contract",
     "load_runtime_identity",
     "load_workflow_contract",
+    "merge_jsonl_into_dump",
     "required_archive_fields",
     "run_frozen_multi_team_publish_loopback",
 ]
