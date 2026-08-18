@@ -19,21 +19,26 @@ Do these steps in order. Do not skip a team tool by doing the work yourself.
    publish what it finds. Do not write `TEAM_REPORT.md` yourself in this step.
 2. Call `wait_agent`. When the member publishes, you must be woken through the team
    world state, not by guessing the finding.
-3. Call `team_route` so the same member is assigned to gather evidence for **that**
+3. You, as Root, publish your own Version onto **that same Event** with `team_publish`,
+   passing its `event_id`. Record what you make of the member's finding. This step is
+   required: the run needs two distinct authors on one Event, and `team_update` only
+   changes lifecycle state — it never creates a Version. If you skip this, the run
+   fails no matter how well the rest goes.
+4. Call `team_route` so the same member is assigned to gather evidence for **that**
    Event.
-4. The member must call `team_evidence` successfully so a **member-authored** Version
+5. The member must call `team_evidence` successfully so a **member-authored** Version
    on that Event is evidence-backed.
-5. The member must append a second Version on the same Event (two authors on that
-   Event, at least two Versions).
-6. You, as Root, set a **member-authored** Version on that Event to
+6. The member must append a second Version on the same Event, so that Event carries at
+   least two Versions from the member plus yours from step 3.
+7. You, as Root, set a **member-authored** Version on that Event to
    `root_state=resolved` with `team_update`. That ends coordination. Do not retire
    an orphan; this workflow must not manufacture one.
-7. Call `team_inspect` with `action=dump`, then again with `action=log`. If a dump
+8. Call `team_inspect` with `action=dump`, then again with `action=log`. If a dump
    page returns a `next_cursor`, call `team_inspect` again with that cursor until it
    comes back null, so the whole page set is present. The harness reads those tool
    outputs directly. Do not copy them into `TEAM_REPORT.md`, and do not restate them
    through any other tool: only real `team_inspect` output counts as evidence.
-8. Only then write `TEAM_REPORT.md` at the workspace root.
+9. Only then write `TEAM_REPORT.md` at the workspace root.
 
 ## TEAM_REPORT.md format
 

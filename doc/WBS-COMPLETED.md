@@ -1203,5 +1203,14 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
   真实 API，未产生费用。
 - **付费前仍缺**：门 1 付费入口（预算代理 + forward 捕获接成付费运行函数）与门 2 真实执行器
   （走既有 `terminal_bench` adapters/runner/results）。按阶段 A 收口的 F3 决议，二者实现后须先过独立审查。
-- 执行日志：`agent_log/2026-08-18-030000-plan044-m5-phase-b-preparation.md`。
+- **独立审查不通过并已整改**：冻结指令模板按字面执行必然过不了 `two_authors` —— Root 全程不发布
+  Version，而 `team_update` 只改生命周期、不产生 Version；彩排全绿仅因 stub 多做了一次模板未要求的
+  Root 发布。已在冻结二进制上实测复现（唯一失败原因 `predicate:two_authors`，其余六项全过）。
+  模板补入 Root 在同一 Event 发布的步骤、重算 `instruction_sha256`
+  （`b11136af…` → `b0925723…`），新增两条回归把模板与判据绑定（已验证能抓住旧模板）；
+  另就地修掉 `gate2` 把 `evidence_kind` 写死为 `fake` 的付费陷阱并加 fail-closed 守卫。
+  整改后彩排复跑全绿，离线套件 868 项、除既有 2 项外无新增失败。
+- 执行日志：`agent_log/2026-08-18-030000-plan044-m5-phase-b-preparation.md`、
+  `agent_log/2026-08-18-070000-plan044-m5-template-predicate-remediation.md`；
+  审查报告：`agent_log/2026-08-18-050000-plan044-m5-phase-b-prep-review.md`。
 

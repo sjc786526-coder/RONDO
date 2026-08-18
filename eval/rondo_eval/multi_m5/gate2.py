@@ -77,9 +77,18 @@ def run_light_interleaved(
     charge_fake_usage: bool = False,
     identity=None,
     contract=None,
+    evidence_kind: str = "fake",
 ) -> dict[str, Any]:
     """Walk frozen base slots, then conditional extras. Infra is not effective."""
 
+    if evidence_kind not in {"fake", "loopback", "real_api"}:
+        raise Gate2Error("gate 2 evidence kind is not an M-5 partition")
+    if evidence_kind == "real_api" and isinstance(
+        executor, (ScriptedSlotExecutor, DockerNotAuthorizedExecutor)
+    ):
+        # A scripted or refusing executor never touched a provider. Labelling its
+        # rows real_api would put fake results in the paid partition.
+        raise Gate2Error("a scripted executor cannot produce real_api evidence")
     loaded = contract or load_nondegradation_contract()
     runtime = identity or load_runtime_identity(require_frozen=False)
     pricing = phase_b_pricing(loaded) if charge_fake_usage else None
@@ -98,7 +107,9 @@ def run_light_interleaved(
         produced: list[dict[str, Any]] = []
 
         def emit(**kwargs: Any) -> list[dict[str, Any]]:
-            produced.append(_record_for(slot, runtime, **kwargs))
+            produced.append(
+                _record_for(slot, runtime, evidence_kind=evidence_kind, **kwargs)
+            )
             return produced
 
         for attempt in range(1, loaded.max_slot_attempts + 1):
@@ -261,8 +272,9 @@ def _record_for(
     outcome: str,
     counts_as_effective: bool,
     extra: Mapping[str, Any],
+    evidence_kind: str = "fake",
 ) -> dict[str, Any]:
-    kind = "fake"
+    kind = evidence_kind
     if slot.side is Side.RONDO:
         source_commit = runtime.source_commit
         binary_sha256 = runtime.codex_sha256

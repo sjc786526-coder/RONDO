@@ -215,6 +215,11 @@
 - **阶段 B 离线前置准备已完成**：门 1 runner 与彩排 stub、门 2 轻量交错执行面（fake）、$120 预算记账、
   归档落盘、就绪自检五项全部落地；**门 1 完整离线彩排连续五次全绿**，真实 canonical 状态已独立复核。
   详见 `agent_log/2026-08-18-030000-plan044-m5-phase-b-preparation.md`。
+- **前置准备经独立审查发现门 1 模板与判据不自洽，已整改**：冻结模板按字面执行必然过不了
+  `two_authors`（Root 从不发布 Version，而 `team_update` 不产生 Version），已在冻结二进制上实测复现；
+  模板补入 Root 在同一 Event 发布的步骤、重算 `instruction_sha256`，并新增两条回归把模板与判据绑定。
+  顺带把 `gate2` 的 `evidence_kind` 写死为 `fake` 这处付费陷阱就地修掉。
+  详见 `agent_log/2026-08-18-070000-plan044-m5-template-predicate-remediation.md`。
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未授权、未执行。
 
 ### 本任务剩余步骤

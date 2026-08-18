@@ -20,6 +20,7 @@ from rondo_eval.multi_m5.command import build_multi_exec_command, team_capabilit
 from rondo_eval.multi_m5.gate1 import run_gate1_rehearsal  # noqa: E402
 from rondo_eval.multi_m5.gate2 import (  # noqa: E402
     DockerNotAuthorizedExecutor,
+    Gate2Error,
     ScriptedSlotExecutor,
     run_light_interleaved,
 )
@@ -278,6 +279,15 @@ class MultiM5Gate2FakeTests(unittest.TestCase):
         self.assertTrue(first_records[1]["counts_as_effective"])
         self.assertEqual(result["infra_used"], 1)
 
+    def test_a_scripted_executor_cannot_claim_real_api_evidence(self) -> None:
+        with self.assertRaises(Gate2Error):
+            run_light_interleaved(
+                executor=ScriptedSlotExecutor(),
+                common_root=_common_root(),
+                persist=False,
+                evidence_kind="real_api",
+            )
+
     def test_docker_executor_is_unauthorized(self) -> None:
         root = _common_root()
         result = run_light_interleaved(
@@ -312,6 +322,57 @@ class MultiM5ReadyAndCommandTests(unittest.TestCase):
         for item in team_capability_overrides():
             self.assertIn(item, command)
         self.assertIn("--strict-config", command)
+
+
+class MultiM5TemplateProtocolTests(unittest.TestCase):
+    """The frozen template must be sufficient on its own.
+
+    The rehearsal stub proves the product chain works, but it only proves it for
+    the sequence the stub happens to issue. If the template omits a step the
+    predicates need, a compliant paid run fails for a reason that is not a
+    product defect -- and burns the frozen attempts finding out. This binds the
+    two together: every team tool the stub's Root branch issues must appear in a
+    numbered step, and `team_publish` must be demanded of Root specifically,
+    because `team_update` never creates a Version and `two_authors` is otherwise
+    unsatisfiable with one member.
+    """
+
+    def _steps(self) -> list[str]:
+        text = load_workflow_contract().instruction_path.read_text("utf-8")
+        protocol = text.split("## Required protocol", 1)[1].split("##", 1)[0]
+        steps: list[str] = []
+        for line in protocol.splitlines():
+            if line[:1].isdigit() and "." in line[:3]:
+                steps.append(line)
+            elif steps and line.startswith("   "):
+                steps[-1] += " " + line.strip()
+        return steps
+
+    def test_template_demands_every_tool_the_stub_issues(self) -> None:
+        steps = self._steps()
+        self.assertGreaterEqual(len(steps), 8)
+        joined = " ".join(steps)
+        for tool in (
+            "spawn_agent",
+            "wait_agent",
+            "team_publish",
+            "team_route",
+            "team_update",
+            "team_inspect",
+        ):
+            self.assertIn(tool, joined, f"frozen template never asks for {tool}")
+
+    def test_template_requires_a_root_authored_version(self) -> None:
+        root_publishes = [
+            step
+            for step in self._steps()
+            if "team_publish" in step and "You, as Root" in step
+        ]
+        self.assertTrue(
+            root_publishes,
+            "no step tells Root to publish its own Version; two_authors would be "
+            "unsatisfiable and every compliant run would fail",
+        )
 
 
 class MultiM5RehearsalTests(unittest.TestCase):
