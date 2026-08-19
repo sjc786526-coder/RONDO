@@ -27,6 +27,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     BudgetCapacityExhausted,
     BudgetStopped,
     LoopbackResponsesProxy,
+    PersistentBudgetLedger,
     Usage,
     _UrllibTransport,
     exposure_summary,
@@ -52,6 +53,8 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
     open_smoke_ledger,
     HARD_CAP_USD,
     REQUEST_LIMIT_STOP_REASON,
+    SMOKE_UNPRICED_STOP_THRESHOLD,
+    UNPRICED_STOP_THRESHOLD,
     default_run_cap_usd,
     gate1_run_cap_usd,
     gate2_run_cap_usd,
@@ -964,6 +967,109 @@ class MultiM5FrozenModelIsolationTests(unittest.TestCase):
                 self.assertEqual(
                     stop_reason_class(run["stop_reason"]), "infra"
                 )
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_one_unpriced_response_does_not_destroy_the_run(self) -> None:
+        """A single upstream glitch must not end a run that is still funded.
+
+        The relay occasionally streams a terminal event with no usage. With the
+        historical threshold of 1 the ledger stopped the run, so every later
+        request was refused with HTTP 429 and the agent died -- two real smoke
+        runs were lost that way, each to one hiccup. The charge does not soften:
+        the request is still billed its full reservation.
+        """
+
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-unpriced-probe.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        pricing = phase_b_pricing(contract)
+        reservation = request_reservation_usd(contract)
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.ensure_run("m5-unpriced", cap_usd=gate1_run_cap_usd())
+                threshold = SMOKE_UNPRICED_STOP_THRESHOLD
+                for index in range(threshold):
+                    request_id = f"req-{index}"
+                    ledger.reserve("m5-unpriced", request_id, reservation)
+                    ledger.begin_attempt("m5-unpriced", request_id, max_attempts=5)
+                    settlement = ledger.settle(
+                        "m5-unpriced", request_id, None, pricing=pricing
+                    )
+                    # Accounting is unchanged at every step.
+                    self.assertEqual(settlement.charged_usd, reservation)
+                    self.assertFalse(settlement.usage_valid)
+                    run = ledger.snapshot()["runs"]["m5-unpriced"]
+                    expected_stop = index + 1 >= threshold
+                    self.assertEqual(run["stopped"], expected_stop)
+                self.assertEqual(
+                    ledger.snapshot()["runs"]["m5-unpriced"]["stop_reason"],
+                    "missing_or_invalid_usage",
+                )
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_other_campaigns_still_stop_on_the_first_unpriced_response(self) -> None:
+        """The relaxation is opt-in; every existing ledger keeps threshold 1."""
+
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-unpriced-default.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        pricing = phase_b_pricing()
+        try:
+            with PersistentBudgetLedger(
+                path, batch_id="m5-default-probe", total_cap_usd=Decimal("10.00")
+            ) as ledger:
+                self.assertEqual(ledger.unpriced_stop_threshold, 1)
+                ledger.ensure_run("run-a", cap_usd=Decimal("5.00"))
+                ledger.reserve("run-a", "req-1", Decimal("1.00"))
+                ledger.begin_attempt("run-a", "req-1", max_attempts=5)
+                ledger.settle("run-a", "req-1", None, pricing=pricing)
+                self.assertTrue(ledger.snapshot()["runs"]["run-a"]["stopped"])
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_an_out_of_envelope_response_still_stops_immediately(self) -> None:
+        """A contract violation is not a glitch and is never absorbed."""
+
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-envelope-stop.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        pricing = phase_b_pricing(contract)
+        envelope = usage_envelope(contract)
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.ensure_run("m5-envelope", cap_usd=gate1_run_cap_usd())
+                ledger.reserve(
+                    "m5-envelope", "req-1", request_reservation_usd(contract)
+                )
+                ledger.begin_attempt("m5-envelope", "req-1", max_attempts=5)
+                ledger.settle(
+                    "m5-envelope",
+                    "req-1",
+                    Usage(envelope.max_input_tokens + 1, 0, 0, 0),
+                    pricing=pricing,
+                )
+                run = ledger.snapshot()["runs"]["m5-envelope"]
+                self.assertTrue(run["stopped"])
+                self.assertEqual(run["stop_reason"], "usage_outside_frozen_envelope")
         finally:
             for item in (path, lock):
                 if item.exists():

@@ -33,6 +33,22 @@ SMOKE_MAX_RUNS = 40
 
 
 REQUEST_LIMIT_STOP_REASON = "logical_request_limit_exceeded"
+# How many responses may arrive without usage before a run is stopped. The relay
+# streams a terminal event with no usage occasionally; with the historical value
+# of 1 that single glitch stopped the run, so every later request was refused
+# with HTTP 429 and the agent died -- both real smoke runs were lost this way,
+# each to one hiccup. Accounting is unchanged: every unpriced request is still
+# charged its full reservation. Only the "does one glitch end the run" question
+# moves, and `_require_unpriced_budget` keeps the worst case inside the run cap.
+UNPRICED_STOP_THRESHOLD = 4
+# The contract-free smoke gets more tolerance than the formal gates. It exists
+# to characterise this relay, which was measured dropping roughly one stream in
+# three, and each drop costs a full reservation of *phantom* budget -- the
+# provider's own records show those responses produced no tokens and were not
+# billed. The formal gates keep the tighter number: they must fail loudly on a
+# provider this unreliable rather than quietly absorb it. Both are still bounded
+# by their run cap, and the batch cap is untouched.
+SMOKE_UNPRICED_STOP_THRESHOLD = 9
 _CENT = Decimal("0.01")
 
 
@@ -324,6 +340,21 @@ def smoke_run_cap_usd(contract=None) -> Decimal:
     return gate1_run_cap_usd(contract)
 
 
+def _require_unpriced_budget(contract=None, *, threshold: int, cap: Decimal) -> int:
+    """Confirm the absorbed unpriced settlements still fit under a run cap.
+
+    Each one is charged in full, so a threshold is only safe while
+    `threshold * reservation` leaves room inside the run cap it applies to.
+    """
+
+    loaded = contract or load_nondegradation_contract()
+    if threshold * request_reservation_usd(loaded) >= cap:
+        raise M5ContractError(
+            "absorbed unpriced settlements would exceed a per-run cap"
+        )
+    return threshold
+
+
 def open_smoke_ledger(path: Path) -> PersistentBudgetLedger:
     """Ledger for the separately authorized connectivity smoke test.
 
@@ -339,6 +370,9 @@ def open_smoke_ledger(path: Path) -> PersistentBudgetLedger:
         max_runs=SMOKE_MAX_RUNS,
         default_run_cap_usd=smoke_run_cap_usd(),
         usage_envelope=usage_envelope(),
+        unpriced_stop_threshold=_require_unpriced_budget(
+            threshold=SMOKE_UNPRICED_STOP_THRESHOLD, cap=smoke_run_cap_usd()
+        ),
     )
     snapshot = ledger.snapshot()
     if snapshot["batch_id"] != SMOKE_BATCH_ID or Decimal(
@@ -385,6 +419,11 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
         # the reserve-time cap arithmetic below is an upper bound on real spend
         # rather than a best effort.
         usage_envelope=usage_envelope(loaded),
+        unpriced_stop_threshold=_require_unpriced_budget(
+            loaded,
+            threshold=UNPRICED_STOP_THRESHOLD,
+            cap=min(gate1_run_cap_usd(loaded), gate2_run_cap_usd(loaded)),
+        ),
     )
     snapshot = ledger.snapshot()
     if Decimal(snapshot["total_cap_usd"]) != HARD_CAP_USD:

@@ -375,6 +375,7 @@ class PersistentBudgetLedger:
         max_runs: int = MAX_BENCHMARK_RUNS,
         default_run_cap_usd: Decimal | str = RUN_CAP_USD,
         usage_envelope: UsageEnvelope | None = None,
+        unpriced_stop_threshold: int = 1,
     ):
         _require_safe_id(batch_id, "batch id")
         self.path = Path(path)
@@ -387,6 +388,26 @@ class PersistentBudgetLedger:
         if usage_envelope is not None:
             usage_envelope.validate()
         self.usage_envelope = usage_envelope
+        # How many unpriced settlements a run may absorb before it is stopped.
+        # 1 means "stop on the first", which is the historical behaviour and the
+        # default for every existing campaign.
+        #
+        # A provider that streams a terminal event without usage is a transient
+        # fault, and stopping the run turns it into a total loss: every later
+        # request is refused with HTTP 429 and the agent dies of what looks like
+        # a budget stop. Two real smoke runs were destroyed this way by a single
+        # upstream hiccup each. Absorbing a few is safe because the accounting
+        # does not soften -- each unpriced request is still charged its full
+        # reservation, and the run and batch caps still gate every later reserve
+        # -- so the only thing raising this changes is whether one glitch ends
+        # the run.
+        if (
+            isinstance(unpriced_stop_threshold, bool)
+            or not isinstance(unpriced_stop_threshold, int)
+            or unpriced_stop_threshold < 1
+        ):
+            raise ApiBudgetProxyError("unpriced stop threshold must be a positive integer")
+        self.unpriced_stop_threshold = unpriced_stop_threshold
         if self.total_cap <= 0 or self.total_cap > _MAX_EXPLICIT_BATCH_CAP_USD:
             raise ApiBudgetProxyError("batch cap exceeds the supported 1600 USD maximum")
         if self.default_run_cap <= 0 or self.default_run_cap > _MAX_EXPLICIT_RUN_CAP_USD:
@@ -597,13 +618,29 @@ class PersistentBudgetLedger:
             except ApiBudgetProxyError:
                 charged = reserved
                 usage_valid = False
-                run["stopped"] = True
-                run["stop_reason"] = (
-                    "usage_outside_frozen_envelope"
-                    if outside_envelope
-                    else stop_reason or "missing_or_invalid_usage"
-                )
                 settlement_kind = _SETTLEMENT_CONSERVATIVE_RESERVATION
+                if outside_envelope:
+                    # Not a provider hiccup: a request outside the frozen
+                    # envelope breaks the arithmetic the cap is derived from,
+                    # so the run stops regardless of the threshold.
+                    run["stopped"] = True
+                    run["stop_reason"] = "usage_outside_frozen_envelope"
+                else:
+                    # Count this settlement plus the unpriced ones already on
+                    # the run. Derived from the request log rather than a new
+                    # persisted field, so the on-disk schema is unchanged.
+                    unpriced = 1 + sum(
+                        1
+                        for item in run["requests"].values()
+                        if isinstance(item, dict)
+                        and item.get("settlement_kind")
+                        == _SETTLEMENT_CONSERVATIVE_RESERVATION
+                    )
+                    if unpriced >= self.unpriced_stop_threshold:
+                        run["stopped"] = True
+                        run["stop_reason"] = (
+                            stop_reason or "missing_or_invalid_usage"
+                        )
             else:
                 if charged > reserved:
                     run["stopped"] = True

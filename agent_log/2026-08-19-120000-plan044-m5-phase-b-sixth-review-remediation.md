@@ -196,3 +196,87 @@ inference_failed    | exceeded retry limit, last status: 429 Too Many Requests
 能否成立）——**这次没有回答**：成员刚被 spawn 出来，流程就被上游打断了，成员还没做任何工具调用。
 
 七个谓词全 false 是"流程没跑完"的结果，不是"协作机制不成立"的结论。
+
+---
+
+## 冒烟第 2—4 次（cm2 / cm3 / cm4）与 $40 授权用尽
+
+用户 2026-08-18 追加"不再限制次数、只有 $40 限额"后共跑了 cm2、cm3、cm4 三次。
+
+### 账目（四次合计）
+
+| run | 账本扣减 | 请求数 | 结果 |
+|---|---|---|---|
+| cm1 | `$2.261041` | 4 | `infra_failed` |
+| cm2 | `$2.290706` | 4 | `infra_failed` |
+| cm3 | `$9.000642` | 14 | `infra_failed` |
+| cm4 | `$17.971079` | 30 | `agent_failed`（流程走完） |
+| **合计** | **`$31.523468`** | | |
+
+**其中真实按 token 计价只有 `$0.443468`**（约 3 元人民币），保守预留 `$31.08`。$40 余量 `$8.476532`，
+不足再跑一次完整流程，故就此停止。
+
+用户提供的中转站后台记录与我的账本逐条对上（cm1、cm2 两批），**无 token 的那次请求确实计费 ¥0**。
+按审查 P0-4 与用户"按原样即可"，**未据此放松保守记账**：截图无法机器绑定到具体 response id，
+且流可能在 token 已计费之后才断。
+
+### 真正的阻断是我自己的账本，不是 provider
+
+cm1/cm2 只跑 4 个请求就死，诊断出因果链：
+
+1. 上游偶发地把流在 `response.completed` 之前掐断（中转站显示这类请求 0 token、¥0）；
+2. 我的 `settle()` 保守扣一整笔预留，**并把整个 run 置为 stopped**；
+3. 此后每个请求都被我的代理拒成 HTTP 429；
+4. CLI 在 429 上耗尽重试后死亡，日志写着 `exceeded retry limit`。
+
+**provider 只抖了一下，harness 把它放大成整轮报废。** 所有请求 `attempt_count=1`，说明代理的重试根本
+没参与——那是 200 响应，不在 `unbilled_retry_statuses` 里。
+
+**修法**：`PersistentBudgetLedger` 增加 `unpriced_stop_threshold`，**默认 1 = 完全保持既有行为**
+（`test_api_budget_proxy` 全套通过，其它 campaign 一律不受影响）。M-5 正式批次取 4，合同外冒烟取 9。
+记账**没有放松**：每个无 usage 的请求仍按整笔预留扣款；变的只是"一次抖动要不要终结整轮"。
+`_require_unpriced_budget()` 机械校验 `threshold × 预留 < 对应 run cap`，最坏盲花仍被 run cap 框住，
+batch cap 不动。计数从既有 request 日志派生，**不改磁盘 schema**。
+
+效果立竿见影：cm1/cm2 4 个请求 → cm3 14 个 → cm4 **30 个请求跑完整个流程、`returncode=0`、未被停止**。
+
+### 门 1 判据在真实模型上完全成立（本轮最有价值的结论）
+
+cm3/cm4 的 trace 记到了真实模型经 code cell 发起的全部团队工具调用，`trace_error` 始终为空、绑定校验通过：
+
+```
+collaboration.spawn_agent      collaboration.wait_agent
+collaboration.followup_task    collaboration.list_agents
+collaboration.team_inspect     collaboration.send_message
+```
+
+**包括判据必需的 `collaboration.team_inspect`**，namespace 与第五轮据源码修正的值一致。
+`spawn_member` 谓词在 cm3/cm4 **由真实模型证据判为 true**。
+
+第五轮那次判据重建（放弃 `function_call` 口径、改读 rollout trace）到此在真实模型上得到完整验证，
+不再只是彩排里的推断。
+
+另有一条与 `team_evidence` 直接相关的观察：cm4 里出现了 `wait` 且 `requester=model`，
+即**真实模型确实会发出 Direct 调用**，不是只用 code cell。所以"Direct 证据在 code mode 下不可能产生"
+这个担忧**不成立**；但本轮仍未出现能铸成 fact 的 Direct 调用（模型没直接调 shell）。
+
+### 真实模型没有遵守冻结的协作协议
+
+cm4 完整跑完，30 个请求，7 个谓词只有 `spawn_member` 为真，且没有写出 `TEAM_REPORT.md`。
+Root 的行为是"派活 + 等"循环：`spawn_agent → followup_task/wait_agent ×5 → list_agents →
+team_inspect → send_message`，**从头到尾没有调用 `team_publish` / `team_route` / `team_update` /
+`team_evidence`**；成员线程没有发起任何工具调用。
+
+这不是设施失败，也不是判据看不见——判据看得很清楚，是模型没做那些动作。
+指令模板规定了工具顺序，但 terra 没有照做。
+
+**这对门 1 是一个实质性的负面信号**：按当前载体与指令，真实模型下门 1 大概率不通过，
+而且不通过的原因是"模型不遵守规定的协议"，不是"团队机制不工作"。三次尝试很可能都会这样。
+
+### 我停在这里的原因
+
+$40 只剩 `$8.48`，不够再跑一次完整流程。且再跑同样的配置大概率得到同样结果——
+问题已经从"设施能不能观测"转移到"载体/指令能不能让真实模型走完协议"，
+那是需要你我先决策的事（改指令模板会动 `instruction_sha256`，属于改冻结合同），不是继续烧钱能解决的。
+
+**M-5 未通过，门 1 未通过，不存在"未见退化"结论。正式 `$120` 账本仍未产生任何消费。**
