@@ -10,14 +10,10 @@ tool. The rehearsal therefore drives the code-mode host, the nested dispatch
 path, and the rollout-trace evidence the paid gate reads -- not a shape only the
 stub uses.
 
-The one deliberate exception is the shell call. The team layer retains a tool
-result as an evidence fact only for `ToolCallSource::Direct`; a nested cell's
-output is folded into the cell result and never kept under its own call id. A
-run that puts *every* call in a cell therefore creates no facts, and the frozen
-`team_evidence` predicate cannot be satisfied at all. Both surfaces are exposed
-here (`ToolExposure::Direct`), so a direct shell call is legal model behaviour --
-but whether a real code-mode model chooses it is an open question that only the
-paid smoke run can answer.
+The shell call also goes through the code-mode host. Its nested result is folded
+into the retained outer cell output; that all-text output is the evidence fact
+the member's next publish attaches. This is the shape a real `code_mode_only`
+model can actually produce.
 
 Sequence (one Event):
   spawn_agent → member exec (read NOTES) → member team_publish → Root wait wakes
@@ -38,12 +34,14 @@ import threading
 from typing import Any, Mapping
 
 from .capture import CaptureError
-from .loopback import collect_registered_tool_names
 
 COLLAB_NAMESPACE = "collaboration"
 _OUTPUT_TYPES = {"function_call_output", "custom_tool_call_output"}
 MEMBER_TASK = (
-    "M5-COLLAB-MEMBER: read NOTES.md and publish the finding for the rehearsal"
+    "M5-COLLAB-MEMBER: read NOTES.md with a non-team tool; create one Event with "
+    "team_publish and keep your non-empty evidence_refs; after Root routes that Event "
+    "back, call team_evidence on one of those member-produced fact IDs and append a "
+    "second Version to the same Event"
 )
 # Product tests and the V2 default both use 30s. A longer wait still fits the
 # 180s rehearsal cap, but 30s matches the proven protocol and fails faster.
@@ -404,54 +402,25 @@ def _first(pattern: re.Pattern[str], request: Mapping[str, Any]) -> str | None:
     return match.group(0) if match else None
 
 
-def _shell_call(request: Mapping[str, Any], call_id: str, command: str) -> bytes:
-    """Run a shell command through the same code-mode cell the tools use.
+def _shell_call(_request: Mapping[str, Any], call_id: str, command: str) -> bytes:
+    """Run a shell command through the code-mode surface a real model sees."""
 
-    Under code mode the registered-tool list is not resent on every request, so
-    probing it is unreliable; the cell's own shell binding is what the model
-    would use anyway.
-    """
-
-    """Emit the shell call *directly*, not inside a code cell.
-
-    This is not a shortcut, it is what the product requires. The team layer only
-    retains a tool result as an evidence fact when the call arrived through
-    `ToolCallSource::Direct`; a nested code-mode step's output is folded into its
-    cell's result and never kept under its own call id
-    (`core/src/team/evidence.rs`). So a run whose every tool call goes through a
-    cell produces no facts at all, and `team_evidence` -- a frozen gate 1
-    predicate -- becomes unsatisfiable. The collaboration tools stay in cells
-    because that is how a `code_mode_only` model calls them; the fact-producing
-    shell call has to be direct for any evidence to exist.
-    """
-
-    names = collect_registered_tool_names(request)
-    if "exec_command" in names:
-        return _direct_call(call_id, "exec_command", {"cmd": command})
-    if "shell_command" in names:
-        return _direct_call(
-            call_id, "shell_command", {"command": command, "timeout_ms": 10_000}
-        )
-    if "shell" in names:
-        return _direct_call(
-            call_id, "shell", {"command": command, "timeout_ms": 10_000}
-        )
-    raise RehearsalError(f"no direct shell tool registered among {sorted(names)}")
-
-
-def _direct_call(call_id: str, name: str, arguments: Mapping[str, Any]) -> bytes:
-    return _sse(
-        call_id,
-        {
-            "type": "response.output_item.done",
-            "item": {
-                "type": "function_call",
-                "call_id": call_id,
-                "name": name,
-                "arguments": json.dumps(dict(arguments), separators=(",", ":")),
-            },
-        },
+    encoded_command = json.dumps(command)
+    source = (
+        f"const command = {encoded_command}; "
+        "let fn, args; "
+        "if (typeof tools.exec_command === 'function') { "
+        "fn = tools.exec_command; args = {cmd: command, yield_time_ms: 10000, "
+        "max_output_tokens: 2000}; "
+        "} else if (typeof tools.shell_command === 'function') { "
+        "fn = tools.shell_command; args = {command, timeout_ms: 10000}; "
+        "} else if (typeof tools.shell === 'function') { "
+        "fn = tools.shell; args = {command, timeout_ms: 10000}; "
+        "} else { throw new Error('no shell binding available: ' + "
+        "Object.keys(tools).join(',')); } "
+        "const r = await fn(args); text(JSON.stringify(r));"
     )
+    return _exec_call(call_id, source)
 
 
 def _team_call(call_id: str, name: str, arguments: Mapping[str, Any]) -> bytes:

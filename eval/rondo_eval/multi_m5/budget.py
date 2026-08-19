@@ -18,22 +18,23 @@ from .load import M5ContractError, load_nondegradation_contract, load_workflow_c
 
 BATCH_ID = "multi-m5-phase-b"
 HARD_CAP_USD = Decimal("120.00")
-# Pre-contract connectivity smoke test. Separately authorized, so it gets its
+# Final pre-contract connectivity smoke. Separately authorized, so it gets its
 # own batch and its own ledger file: it must never draw on the $120 the two
 # gates share, and its rows must never look like contract evidence. The cap is
-# sized to the work (one gate-1-shaped flow is modelled at ~$3.20), not to the
-# authorization ceiling -- a cap is a stop line, not a spending target.
-SMOKE_BATCH_ID = "multi-m5-clean-smoke"
-SMOKE_LOCK_ID = "multi-m5-clean-smoke-v1"
+# the frozen gate-1-shaped run cap, not the authorization ceiling -- a cap is a
+# stop line, not a spending target.
+SMOKE_BATCH_ID = "multi-m5-clean-smoke-v3"
+SMOKE_LOCK_ID = "multi-m5-clean-smoke-v3"
 # The 2026-08-18 exploratory smoke (`multi-m5-code-mode-smoke`, USD 40, no
 # attempt limit) is spent and stays on disk as history: it ran on the pre-fix
-# bundle, where members could not complete a turn. This batch is the clean
-# smoke on runtime-v2 and has an acceptance contract rather than an open-ended
-# question, so it is bounded by attempts: at most three runs, each with its own
-# label, ledger row and capture. The cap is derived from those three run caps in
-# `open_smoke_ledger` rather than chosen, and stays under the gates' own $120.
-SMOKE_MAX_RUNS = 3
-SMOKE_CAP_USD = Decimal("69.30")
+# bundle, where members could not complete a turn. Clean smoke v1 on runtime-v2
+# used two slots but mixed its rows into the old archive; v2 then produced one
+# zero-taint observation that exposed the code-mode evidence gap. All historical
+# files remain read-only. This v3 identity carries one validation run for the
+# repaired runtime-v3 and workflow-v4. Its cap is derived from that run cap in
+# `open_smoke_ledger` and stays under the gates' own $120.
+SMOKE_MAX_RUNS = 1
+SMOKE_CAP_USD = Decimal("23.10")
 
 
 REQUEST_LIMIT_STOP_REASON = "logical_request_limit_exceeded"
@@ -404,7 +405,7 @@ def open_smoke_ledger(path: Path) -> PersistentBudgetLedger:
     $120 the two gates share.
     """
 
-    # Derived, not chosen: three attempts at the run cap this flow already uses.
+    # Derived, not chosen: the one final attempt at this flow's existing run cap.
     # A hand-picked total would drift the moment either input moved.
     if SMOKE_CAP_USD != SMOKE_MAX_RUNS * smoke_run_cap_usd():
         raise M5ContractError("smoke cap is not the attempt count times the run cap")

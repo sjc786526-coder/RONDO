@@ -21,10 +21,12 @@ use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
 use codex_protocol::ResponseItemId;
 use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_team_state::FactCategory;
 use codex_team_state::FactView;
 use codex_team_state::NotedObservation;
+use std::borrow::Cow;
 
 /// Hard ceiling on the text one evidence read returns.
 ///
@@ -293,14 +295,16 @@ pub(crate) fn retained_output_text(items: &[ResponseItem], item_id: &str) -> Opt
 struct Observation<'a> {
     call_id: &'a str,
     category: FactCategory,
-    text: &'a str,
+    text: Cow<'a, str>,
 }
 
 /// Classify a retained item as a supported observation, or not one at all.
 ///
-/// The support set is deliberately narrow: a completed tool call whose retained body is plain text.
-/// The content-item shape is what carries images and other media, so it is excluded whole rather
-/// than salvaged for its text parts — a fact has to describe what the model actually saw.
+/// The support set is deliberately narrow: a completed tool call whose retained body contains only
+/// plain text. Code-mode results use several `input_text` content items for the script status and
+/// output even when no media is present, so those items are joined in the same order the model saw
+/// them. A mixed or encrypted body is still excluded whole rather than partially salvaged — a fact
+/// has to describe the complete observation the model actually received.
 fn supported_observation(item: &ResponseItem) -> Option<Observation<'_>> {
     let (call_id, output) = match item {
         ResponseItem::FunctionCallOutput {
@@ -328,8 +332,30 @@ fn supported_observation(item: &ResponseItem) -> Option<Observation<'_>> {
     if call_id.is_empty() {
         return None;
     }
-    let FunctionCallOutputBody::Text(text) = &output.body else {
-        return None;
+    let text = match &output.body {
+        FunctionCallOutputBody::Text(text) => Cow::Borrowed(text.as_str()),
+        FunctionCallOutputBody::ContentItems(items)
+            if !items.is_empty()
+                && items.iter().all(|item| {
+                    matches!(item, FunctionCallOutputContentItem::InputText { .. })
+                }) =>
+        {
+            Cow::Owned(
+                items
+                    .iter()
+                    .map(|item| match item {
+                        FunctionCallOutputContentItem::InputText { text } => text.as_str(),
+                        FunctionCallOutputContentItem::InputImage { .. }
+                        | FunctionCallOutputContentItem::InputAudio { .. }
+                        | FunctionCallOutputContentItem::EncryptedContent { .. } => {
+                            unreachable!("the all-input-text guard excludes non-text content items")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        }
+        FunctionCallOutputBody::ContentItems(_) => return None,
     };
     // `success: None` means the tool did not classify itself, which every other surface reads as a
     // success; evidence follows the same convention rather than inventing a third state.

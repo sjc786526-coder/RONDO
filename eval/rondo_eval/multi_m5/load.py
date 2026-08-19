@@ -39,12 +39,13 @@ _PREDICATE_IDS = (
     "root_resolved",
     "root_woken",
 )
-WORKFLOW_LOCK_ID = "multi-m5-workflow-v3"
-NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v3"
-# v2 froze a bundle built before the code-mode plaintext fix, so a run recorded
-# under the v2 pair is not evidence for this one. Both gate locks name this id
-# so an archived row can never be re-read as if it came from the new binary.
-RUNTIME_LOCK_ID = "multi-m5-runtime-v2"
+WORKFLOW_LOCK_ID = "multi-m5-workflow-v4"
+NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v4"
+# runtime-v2 can deliver member messages but cannot retain the all-text content
+# item body produced by a completed code-mode cell as evidence. Both gate locks
+# name runtime-v3 so an older row cannot be re-read as if its member evidence
+# chain were reachable.
+RUNTIME_LOCK_ID = "multi-m5-runtime-v3"
 
 
 class M5ContractError(ValueError):

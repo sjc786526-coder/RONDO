@@ -157,8 +157,8 @@ class MultiM5ContractTests(unittest.TestCase):
             self.assertRegex(identity.codex_sha256 or "", r"^[0-9a-f]{64}$")
 
 
-class MultiM5V3ContractTests(unittest.TestCase):
-    """What v3 froze that v2 left in code or in machine-wide config."""
+class MultiM5V4ContractTests(unittest.TestCase):
+    """What v4 froze after the real code-mode evidence gap was observed."""
 
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
@@ -184,14 +184,15 @@ class MultiM5V3ContractTests(unittest.TestCase):
         )
 
     def test_a_gate_lock_pointing_at_the_old_bundle_is_refused(self) -> None:
-        # v1 was built before the code-mode plaintext fix. Accepting it here
-        # would let a run on the defective binary be filed as v3 evidence.
+        # runtime-v2 delivers plaintext messages but cannot anchor a normal
+        # completed code-mode cell. Accepting it here would make the member
+        # evidence predicate structurally unreachable again.
         for name, loader in (
-            ("multi-m5-workflow-v3", load_workflow_contract),
-            ("multi-m5-nondegradation-v3", load_nondegradation_contract),
+            ("multi-m5-workflow-v4", load_workflow_contract),
+            ("multi-m5-nondegradation-v4", load_nondegradation_contract),
         ):
             with self.subTest(lock=name):
-                path = self._mutated(name, runtime_lock_id="multi-m5-runtime-v1")
+                path = self._mutated(name, runtime_lock_id="multi-m5-runtime-v2")
                 with self.assertRaises(M5ContractError):
                     loader(path)
                 path = self._mutated(name, runtime_lock_id=None)
@@ -202,19 +203,19 @@ class MultiM5V3ContractTests(unittest.TestCase):
         self.assertEqual(load_workflow_contract().raw["infra_taint_effect"], "infra_failed")
         for value in ("ignored", "counts_as_pass", None):
             with self.subTest(value=value):
-                path = self._mutated("multi-m5-workflow-v3", infra_taint_effect=value)
+                path = self._mutated("multi-m5-workflow-v4", infra_taint_effect=value)
                 with self.assertRaises(M5ContractError):
                     load_workflow_contract(path)
 
     def test_retry_backoff_comes_from_the_lock(self) -> None:
         contract = load_nondegradation_contract()
         self.assertEqual(contract.retry_backoff_seconds, 2.0)
-        path = self._mutated("multi-m5-nondegradation-v3", provider_retry_backoff_seconds="5")
+        path = self._mutated("multi-m5-nondegradation-v4", provider_retry_backoff_seconds="5")
         self.assertEqual(load_nondegradation_contract(path).retry_backoff_seconds, 5.0)
         for value in ("0", "31", "", None):
             with self.subTest(value=value):
                 path = self._mutated(
-                    "multi-m5-nondegradation-v3", provider_retry_backoff_seconds=value
+                    "multi-m5-nondegradation-v4", provider_retry_backoff_seconds=value
                 )
                 with self.assertRaises(M5ContractError):
                     load_nondegradation_contract(path)
@@ -235,11 +236,11 @@ class MultiM5V3ContractTests(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 path = self._mutated(
-                    "multi-m5-nondegradation-v3", unpriced_settlement={**block, **change}
+                    "multi-m5-nondegradation-v4", unpriced_settlement={**block, **change}
                 )
                 with self.assertRaises(M5ContractError):
                     load_nondegradation_contract(path)
-        path = self._mutated("multi-m5-nondegradation-v3", unpriced_settlement=None)
+        path = self._mutated("multi-m5-nondegradation-v4", unpriced_settlement=None)
         with self.assertRaises(M5ContractError):
             load_nondegradation_contract(path)
 
@@ -254,11 +255,13 @@ class MultiM5MemberDeliveryTests(unittest.TestCase):
     """
 
     @staticmethod
-    def _capture(*parts: dict[str, object]) -> str:
+    def _capture(
+        *parts: dict[str, object], author: str = "/root"
+    ) -> str:
         body = {
             "input": [
                 {"type": "message", "role": "user", "content": [{"text": "task"}]},
-                {"type": "agent_message", "author": "/root", "content": list(parts)},
+                {"type": "agent_message", "author": author, "content": list(parts)},
             ]
         }
         return json.dumps(body) + "\n"
@@ -270,7 +273,12 @@ class MultiM5MemberDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(
             member_message_delivery(capture),
-            {"status": "plaintext", "plaintext_parts": 2, "encrypted_parts": 0},
+            {
+                "status": "plaintext",
+                "plaintext_parts": 2,
+                "encrypted_parts": 0,
+                "unknown_parts": 0,
+            },
         )
 
     def test_a_plaintext_task_labelled_encrypted_is_reported(self) -> None:
@@ -283,7 +291,12 @@ class MultiM5MemberDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(
             member_message_delivery(capture),
-            {"status": "encrypted", "plaintext_parts": 1, "encrypted_parts": 1},
+            {
+                "status": "encrypted",
+                "plaintext_parts": 1,
+                "encrypted_parts": 1,
+                "unknown_parts": 0,
+            },
         )
 
     def test_no_member_request_is_not_a_delivery_success(self) -> None:
@@ -302,6 +315,53 @@ class MultiM5MemberDeliveryTests(unittest.TestCase):
             {"type": "encrypted_content", "encrypted_content": "plain text"}
         )
         self.assertEqual(member_message_delivery(capture)["status"], "encrypted")
+
+    def test_a_member_reply_does_not_count_as_delivery_to_the_member(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "I finished the task."},
+            author="/root/worker",
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "absent",
+                "plaintext_parts": 0,
+                "encrypted_parts": 0,
+                "unknown_parts": 0,
+            },
+        )
+
+    def test_an_unknown_root_part_fails_closed_instead_of_counting_as_plaintext(self) -> None:
+        capture = self._capture({"type": "image", "url": "https://invalid.example"})
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "unknown",
+                "plaintext_parts": 0,
+                "encrypted_parts": 0,
+                "unknown_parts": 1,
+            },
+        )
+
+    def test_opposite_directions_do_not_pollute_root_to_member_delivery(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "Read NOTES.md."}
+        ) + self._capture(
+            {
+                "type": "encrypted_content",
+                "encrypted_content": "member reply",
+            },
+            author="/root/worker",
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "plaintext",
+                "plaintext_parts": 1,
+                "encrypted_parts": 0,
+                "unknown_parts": 0,
+            },
+        )
 
 
 class MultiM5PredicateTests(unittest.TestCase):

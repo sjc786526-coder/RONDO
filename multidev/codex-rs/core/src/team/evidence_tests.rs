@@ -102,7 +102,53 @@ fn the_support_set_is_completed_text_tool_results_and_nothing_else() {
         Some(("call-custom".to_string(), FactCategory::ToolResultSuccess))
     );
 
-    // Everything outside the first version's support set.
+    let code_mode_text = ResponseItem::CustomToolCallOutput {
+        id: None,
+        call_id: "call-code-mode".to_string(),
+        name: Some("exec".to_string()),
+        output: FunctionCallOutputPayload {
+            body: FunctionCallOutputBody::ContentItems(vec![
+                FunctionCallOutputContentItem::InputText {
+                    text: "Script completed".to_string(),
+                },
+                FunctionCallOutputContentItem::InputText {
+                    text: "finding".to_string(),
+                },
+            ]),
+            success: Some(true),
+        },
+        internal_chat_message_metadata_passthrough: None,
+    };
+    let observation =
+        supported_observation(&code_mode_text).expect("an all-text code-mode result is evidence");
+    assert_eq!(observation.call_id, "call-code-mode");
+    assert_eq!(observation.category, FactCategory::ToolResultSuccess);
+    assert_eq!(observation.text, "Script completed\nfinding");
+
+    assert_eq!(
+        supported(&ResponseItem::CustomToolCallOutput {
+            id: None,
+            call_id: "call-encrypted".to_string(),
+            name: Some("exec".to_string()),
+            output: FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::ContentItems(vec![
+                    FunctionCallOutputContentItem::InputText {
+                        text: "Script completed".to_string(),
+                    },
+                    FunctionCallOutputContentItem::EncryptedContent {
+                        encrypted_content: "opaque".to_string(),
+                    },
+                ]),
+                success: Some(true),
+            },
+            internal_chat_message_metadata_passthrough: None,
+        }),
+        None,
+        "an encrypted content part keeps the complete cell outside the evidence support set"
+    );
+
+    // Mixed content is outside the support set: discarding its non-text part would make the evidence
+    // read differ from what the model actually saw.
     assert_eq!(
         supported(&ResponseItem::FunctionCallOutput {
             id: None,
@@ -112,13 +158,17 @@ fn the_support_set_is_completed_text_tool_results_and_nothing_else() {
                     FunctionCallOutputContentItem::InputText {
                         text: "described".to_string(),
                     },
+                    FunctionCallOutputContentItem::InputImage {
+                        image_url: "data:image/png;base64,AA==".to_string(),
+                        detail: None,
+                    },
                 ]),
                 success: Some(true),
             },
             internal_chat_message_metadata_passthrough: None,
         }),
         None,
-        "the content-item shape is what carries media, so it is excluded whole"
+        "a mixed text-and-media observation is excluded whole"
     );
     assert_eq!(supported(&assistant_message("what I think")), None);
     assert_eq!(

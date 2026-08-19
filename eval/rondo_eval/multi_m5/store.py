@@ -12,10 +12,10 @@ from .archive import REQUIRED_ARCHIVE_FIELDS
 ARCHIVE_RELPATH = "eval-data/multi-m5/archives/records.jsonl"
 CAPTURE_RELDIR = "eval-data/multi-m5/captures"
 BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b.json"
-SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/code-mode-smoke-records.jsonl"
-# The exhausted pre-fix smoke ledger keeps its own file; this one is the
-# clean smoke on runtime-v2 and must not reopen or extend that batch.
-SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-clean-smoke.json"
+SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/clean-smoke-v3-records.jsonl"
+# The exploratory runs and runtime-v2 clean smokes stay immutable. Runtime-v3
+# gets a fresh one-run ledger and archive identity.
+SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-clean-smoke-v3.json"
 
 
 class StoreError(ValueError):

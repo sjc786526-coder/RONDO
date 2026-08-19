@@ -181,6 +181,7 @@ def run_gate1_paid(
                 budget_probe=lambda: run_stop_reason(ledger, run_id),
                 taint_probe=lambda: run_infra_taint(ledger, run_id),
                 exposure_probe=lambda: exposure_summary(ledger.snapshot(), run_id),
+                drain_budget_proxy=proxy.close,
                 extra={
                     "rehearsal": False,
                     "attempt": attempt,
@@ -292,6 +293,7 @@ def run_gate1_smoke(
             budget_probe=lambda: run_stop_reason(ledger, run_id),
             taint_probe=lambda: run_infra_taint(ledger, run_id),
             exposure_probe=lambda: exposure_summary(ledger.snapshot(), run_id),
+            drain_budget_proxy=proxy.close,
             lock_id=SMOKE_LOCK_ID,
             archive_file=archive_path,
             extra={
@@ -348,6 +350,7 @@ def _run_gate1_once(
     budget_probe: Callable[[], str | None] | None = None,
     taint_probe: Callable[[], dict | None] | None = None,
     exposure_probe: Callable[[], dict[str, Any]] | None = None,
+    drain_budget_proxy: Callable[[], None] | None = None,
     lock_id: str | None = None,
     archive_file: Path | None = None,
     extra: dict[str, Any] | None = None,
@@ -486,6 +489,14 @@ def _run_gate1_once(
 
     if completed is None:
         raise Gate1Error("gate 1 process did not start")
+    if drain_budget_proxy is not None:
+        # Capture handlers are daemon threads, so the agent process can exit
+        # while the budget proxy is still settling the final forwarded request.
+        # Closing this proxy joins every paid handler and prevents a new forward
+        # from starting. Only after that barrier may the archive read taint,
+        # stop reasons, or exposure; otherwise a trailing terminal error can
+        # turn an apparent pass into a tainted run after it was persisted.
+        drain_budget_proxy()
     stop_reason = budget_probe() if budget_probe is not None else None
     taint = taint_probe() if taint_probe is not None else None
     # Keep whatever the judge saw so a timeout after tool calls is auditable.

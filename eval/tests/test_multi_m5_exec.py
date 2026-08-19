@@ -108,6 +108,7 @@ from rondo_eval.multi_m5.paid import (  # noqa: E402
     PaidAuthorization,
     authorization_from_phrases,
 )
+from rondo_eval.multi_m5.predicates import CollaborationVerdict  # noqa: E402
 from rondo_eval.multi_m5.ready import readiness_report  # noqa: E402
 from rondo_eval.multi_m5.rehearsal import MEMBER_TASK, CollaborationStub  # noqa: E402
 from rondo_eval.multi_m5.gate2 import _record_for, _run_id  # noqa: E402
@@ -223,6 +224,8 @@ class MultiM5StubSequenceTests(unittest.TestCase):
             "tools": _team_tools() + [{"name": "exec_command"}],
         }
         payload = stub(member_first).decode("utf-8")
+        self.assertIn('"type":"custom_tool_call"', payload)
+        self.assertIn('"name":"exec"', payload)
         self.assertIn("exec_command", payload)
         self.assertIn("NOTES.md", payload)
 
@@ -235,15 +238,18 @@ class MultiM5StubSequenceTests(unittest.TestCase):
                     "content": [{"type": "input_text", "text": MEMBER_TASK}],
                 },
                 {
-                    "type": "function_call",
+                    "type": "custom_tool_call",
                     "call_id": "member-sh-1",
-                    "name": "exec_command",
-                    "arguments": '{"cmd":"cat NOTES.md"}',
+                    "name": "exec",
+                    "input": "const r = await tools.exec_command({cmd:'cat NOTES.md'}); text(r.output);",
                 },
                 {
-                    "type": "function_call_output",
+                    "type": "custom_tool_call_output",
                     "call_id": "member-sh-1",
-                    "output": FINDING,
+                    "output": [
+                        {"type": "input_text", "text": "Script completed"},
+                        {"type": "input_text", "text": FINDING},
+                    ],
                 },
             ],
             "tools": _team_tools() + [{"name": "exec_command"}],
@@ -717,6 +723,151 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
                 if item.exists():
                     item.unlink()
 
+    def test_gate1_drains_a_trailing_terminal_error_before_building_its_record(self) -> None:
+        """A late settlement must invalidate an otherwise passing Gate 1 run."""
+
+        root = _common_root()
+        try:
+            load_runtime_identity(require_frozen=True, common_root=root)
+        except M5ContractError as exc:
+            self.skipTest(f"frozen Multi bundle is unavailable: {exc}")
+        scratch = scratch_root(root)
+        ledger_path = scratch / "multi-m5-test-gate1-tail-taint.json"
+        lock_path = ledger_path.with_name(f".{ledger_path.name}.lock")
+        for item in (ledger_path, lock_path):
+            if item.exists():
+                item.unlink()
+        workflow = load_workflow_contract()
+        one_attempt_workflow = replace(workflow, max_attempts=1)
+        upstream = _HeldTerminalErrorUpstream().start()
+        client_threads: list[threading.Thread] = []
+        real_proxy = rondo_eval.multi_m5.gate1.LoopbackResponsesProxy
+
+        def proxy_factory(**kwargs):
+            proxy = real_proxy(**kwargs)
+            close = proxy.close
+
+            def release_and_close() -> None:
+                upstream.release.set()
+                close()
+
+            proxy.close = release_and_close  # type: ignore[method-assign]
+            return proxy
+
+        def finish_before_tail_settles(command, **kwargs):
+            base_url = ""
+            for index, item in enumerate(command[:-1]):
+                if item == "-c" and ".base_url=" in command[index + 1]:
+                    base_url = json.loads(command[index + 1].split("=", 1)[1])
+                    break
+            self.assertTrue(base_url)
+            port = int(urlsplit(base_url).port or 0)
+            bearer = kwargs["env"]["OPENAI_API_KEY"]
+
+            def issue_tail_request() -> None:
+                try:
+                    _post(
+                        port,
+                        {
+                            "model": workflow.root_model,
+                            "stream": True,
+                            "reasoning": {"effort": workflow.root_effort},
+                            "input": "tail request",
+                        },
+                        bearer=bearer,
+                        extra_headers={
+                            "User-Agent": "codex_cli_rs/0.147.0 (m5-tail)",
+                            "originator": "codex_cli_rs",
+                        },
+                    )
+                except OSError:
+                    # The capture listener is deliberately closing while this
+                    # request is in flight. The budget-side settlement, not the
+                    # caller's socket outcome, is the invariant under test.
+                    pass
+
+            thread = threading.Thread(target=issue_tail_request)
+            thread.start()
+            client_threads.append(thread)
+            self.assertTrue(upstream.wait_for_started(len(client_threads), timeout=5))
+            workspace = Path(kwargs["cwd"])
+            (workspace / workflow.report_filename).write_text(
+                f"finding: {workflow.finding_line}\n", encoding="utf-8"
+            )
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+
+        passing = CollaborationVerdict(
+            passed=True,
+            predicates={
+                name: True
+                for name in (
+                    "spawn_member",
+                    "event_with_two_versions",
+                    "two_authors",
+                    "team_route",
+                    "team_evidence",
+                    "root_resolved",
+                    "root_woken",
+                )
+            },
+            reasons=(),
+            event_id="event-tail",
+            ignored_evidence=(),
+        )
+        try:
+            with open_phase_b_ledger(ledger_path) as ledger, patch.object(
+                rondo_eval.multi_m5.gate1,
+                "LoopbackResponsesProxy",
+                side_effect=proxy_factory,
+            ), patch.object(
+                rondo_eval.multi_m5.gate1,
+                "load_workflow_contract",
+                return_value=one_attempt_workflow,
+            ), patch.object(
+                rondo_eval.multi_m5.gate1,
+                "find_trace_bundle",
+                return_value=Path("/unused/trace"),
+            ), patch.object(
+                rondo_eval.multi_m5.gate1,
+                "load_rollout_trace",
+                return_value=object(),
+            ), patch.object(
+                rondo_eval.multi_m5.gate1,
+                "evaluate_collaboration",
+                return_value=passing,
+            ):
+                result = run_gate1_paid(
+                    authorization=PaidAuthorization(real_api=True, docker=False),
+                    api_key="sk-test-never-spend",
+                    upstream_base_url="https://provider.example/v1",
+                    ledger=ledger,
+                    common_root=root,
+                    persist=False,
+                    transport=_UrllibTransport(endpoint_override=upstream.endpoint),
+                    process_runner=finish_before_tail_settles,  # type: ignore[arg-type]
+                )
+                final_exposure = exposure_summary(
+                    ledger.snapshot(), "m5-g1-paid-a1"
+                )
+            record = result["record"]
+            self.assertEqual(record["outcome"], "infra_failed")
+            self.assertFalse(record["passed"])
+            self.assertTrue(all(record["predicates"].values()))
+            self.assertEqual(
+                record["infra_taint"],
+                {"count": 1, "first_reason": "upstream_terminal_error"},
+            )
+            self.assertEqual(record["budget_exposure"], final_exposure)
+            self.assertEqual(record["budget_exposure"]["settled_requests"], 1)
+        finally:
+            upstream.release.set()
+            for thread in client_threads:
+                thread.join(timeout=5)
+            upstream.close()
+            for item in (ledger_path, lock_path):
+                if item.exists():
+                    item.unlink()
+
 
 class MultiM5ConcurrentMainTests(unittest.TestCase):
     """Root and members call the model at the same time; the proxy must allow it.
@@ -820,6 +971,17 @@ class MultiM5SmokeIsolationTests(unittest.TestCase):
         root = _common_root()
         self.assertNotEqual(smoke_ledger_path(root), budget_ledger_path(root))
         self.assertNotEqual(smoke_archive_path(root), archive_path(root))
+        self.assertNotEqual(
+            smoke_ledger_path(root),
+            (root / "eval-data/budgets/multi-m5-clean-smoke.json").resolve(),
+        )
+        self.assertNotEqual(
+            smoke_archive_path(root),
+            (
+                root
+                / "eval-data/multi-m5/archives/code-mode-smoke-records.jsonl"
+            ).resolve(),
+        )
 
     def test_smoke_ledger_refuses_the_phase_b_batch(self) -> None:
         scratch = scratch_root(_common_root())
@@ -833,10 +995,10 @@ class MultiM5SmokeIsolationTests(unittest.TestCase):
                 snapshot = ledger.snapshot()
                 self.assertEqual(snapshot["batch_id"], SMOKE_BATCH_ID)
                 self.assertEqual(Decimal(snapshot["total_cap_usd"]), SMOKE_CAP_USD)
-                # The clean smoke is bounded by attempts, and its cap is the
-                # mechanical product of those attempts and the per-run cap, so
-                # neither number can drift away from the other.
-                self.assertEqual(SMOKE_MAX_RUNS, 3)
+                # Each corrected clean-smoke identity carries one validation
+                # run; its cap is the mechanical product of that slot and the
+                # per-run cap.
+                self.assertEqual(SMOKE_MAX_RUNS, 1)
                 self.assertEqual(SMOKE_CAP_USD, SMOKE_MAX_RUNS * smoke_run_cap_usd())
                 self.assertEqual(snapshot["max_runs"], SMOKE_MAX_RUNS)
         finally:
@@ -2723,6 +2885,85 @@ class _UsageUpstream:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
+
+    def close(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        self._server = None
+        self._thread = None
+
+
+class _HeldTerminalErrorUpstream:
+    """Hold an HTTP-200 stream error until Gate 1 begins proxy shutdown."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self._condition = threading.Condition()
+        self._started_count = 0
+        self._server: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+
+    @property
+    def endpoint(self) -> str:
+        assert self._server is not None
+        host, port = self._server.server_address[:2]
+        return f"http://{host}:{port}/v1/responses"
+
+    def start(self) -> "_HeldTerminalErrorUpstream":
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self) -> None:  # noqa: N802
+                length = int(self.headers.get("Content-Length", "0"))
+                self.rfile.read(length)
+                with owner._condition:
+                    owner._started_count += 1
+                    owner._condition.notify_all()
+                owner.release.wait(timeout=5)
+                response = {
+                    "type": "error",
+                    "error": {
+                        "code": "provider_stream_error",
+                        "message": "tail error must not survive in metadata",
+                    },
+                }
+                encoded = (
+                    b"event: error\n"
+                    + b"data: "
+                    + json.dumps(response).encode()
+                    + b"\n\n"
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(encoded)
+                self.wfile.flush()
+                self.close_connection = True
+
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        return self
+
+    def wait_for_started(self, count: int, *, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while self._started_count < count:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._condition.wait(timeout=remaining)
+            return True
 
     def close(self) -> None:
         if self._server is not None:

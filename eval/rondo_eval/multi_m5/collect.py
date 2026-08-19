@@ -93,6 +93,7 @@ def member_message_delivery(jsonl: str) -> dict[str, Any]:
 
     plaintext = 0
     encrypted = 0
+    unknown = 0
     for line in jsonl.splitlines():
         line = line.strip()
         if not line:
@@ -106,15 +107,33 @@ def member_message_delivery(jsonl: str) -> dict[str, Any]:
         for item in parsed.get("input") or ():
             if not isinstance(item, dict) or item.get("type") != "agent_message":
                 continue
-            for part in item.get("content") or ():
+            # This carrier has one Root and one member. The member's task is the
+            # `agent_message` authored by `/root`; replies authored by a member
+            # appear in Root requests and do not demonstrate task delivery.
+            if item.get("author") != "/root":
+                continue
+            content = item.get("content")
+            if not isinstance(content, list) or not content:
+                unknown += 1
+                continue
+            for part in content:
                 if not isinstance(part, dict):
+                    unknown += 1
                     continue
                 if part.get("type") == "encrypted_content" or "encrypted_content" in part:
                     encrypted += 1
-                else:
+                elif (
+                    part.get("type") == "input_text"
+                    and isinstance(part.get("text"), str)
+                    and bool(part["text"])
+                ):
                     plaintext += 1
+                else:
+                    unknown += 1
     if encrypted:
         status = "encrypted"
+    elif unknown:
+        status = "unknown"
     elif plaintext:
         status = "plaintext"
     else:
@@ -123,6 +142,7 @@ def member_message_delivery(jsonl: str) -> dict[str, Any]:
         "status": status,
         "plaintext_parts": plaintext,
         "encrypted_parts": encrypted,
+        "unknown_parts": unknown,
     }
 
 
