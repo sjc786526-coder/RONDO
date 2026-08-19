@@ -304,9 +304,11 @@
   **trace 判据在真实模型上成立**（含判据必需的 `collaboration.team_inspect`，`spawn_member` 由真实
   证据判真）。**"真实模型不遵守协作协议"的结论已撤回**：cm4 的成员线程 8 次推理 8 次失败
   （`invalid_encrypted_content`），从未完成一个回合，故其"没有 publish/evidence"不可归因于模型。
-  当前首要阻断是该错误的归因（成员请求里带有 `author=/root`、`content[]` 内嵌 `encrypted_content`
-  的 `agent_message`）。顺序：证据污染语义（已修）→ 归因并修复 → 冻结 v3 → 一次零 infra-taint 的
-  clean smoke → 才谈正式门 1。
+  该错误**已归因并修复**：不是 Root 推理被 fork，而是 code-mode 的 `spawn_agent` 明文 message 被
+  误包成 encrypted content（产品缺陷，已修并补 5 条 Rust 回归）。
+  **当前阻断是冻结的 runtime bundle 早于该修复、仍带缺陷。**
+  顺序：证据污染语义（已修）→ code-mode 明文（已修）→ 重建 bundle 并冻结 v3 →
+  一次零 infra-taint 的 clean smoke → 才谈正式门 1。
   冒烟入口：`python -m rondo_eval.multi_m5 smoke --label <全新 id> --authorize-paid-api <口令>`
   （**不含独立 provider probe**，已按第六轮决定删除；入口能花的钱只受其自身账本约束）。
   每次必须换 `--label`：独立 run id、独立捕获目录、`claim_run` 拒绝重用，既有产物存在时直接拒绝启动。

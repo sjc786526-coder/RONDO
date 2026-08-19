@@ -338,15 +338,18 @@ sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign �
 
 1. **观测管线成立**：真实模型经 code cell 发起的 `collaboration.*` 调用（含判据必需的 `team_inspect`）
    都被 trace 记到并通过绑定校验，`spawn_member` 由真实证据判真。
-2. **上游/构造阻断**：成员线程 8 次推理**全部**以 `invalid_encrypted_content` 失败（8/8，Root 侧零失败），
-   成员从未完成一个回合。抓包显示成员请求里带有 `author=/root` 的 `agent_message`，其 `content[]`
-   内嵌 `encrypted_content` —— Root 的加密推理被带进了成员会话。归因（产品构造 vs relay 兼容）待定。
+2. **产品缺陷（已归因并修复）**：成员线程 8 次推理**全部**以 `invalid_encrypted_content` 失败
+   （8/8，Root 侧零失败），成员从未完成一个回合。归因不是"Root 的加密推理被 fork 带进成员会话"
+   —— 那是错的；而是 code-mode 的 `spawn_agent` **明文** message 被
+   `communication_from_tool_message()` 误包成 encrypted content（cm4 抓包中该字段与 139 字符明文
+   逐字节相等且完全可打印）。已让 `ToolCallSource::CodeMode` 走明文分支，`Direct` 的
+   encrypted-argument 语义保持不变，并补 5 条 Rust 定向回归（含反向验证）。
 3. **仍未回答**：上文那条 `team_evidence` / Direct fact 风险。唯一 `requester=model` 的调用是 Root
    一次失败的 `wait`，既非成员发出、也未产生可引用的 observation。
 
-因此**不得**据此对 terra 的指令遵循下任何结论。下一步顺序：证据污染语义（已修：任何上游故障都会给 run
-打 infra-taint，门 1 只能判 `infra_failed`、门 2 不得计为有效观察）→ 归因并修复 `invalid_encrypted_content`
-→ 一次冻结 v3 → 一次零 infra-taint 的 clean smoke → 才谈正式门 1。
+因此**不得**据此对 terra 的指令遵循下任何结论。证据污染语义与 code-mode 明文缺陷均已修复；
+**当前阻断是冻结的 runtime bundle 早于该修复、仍带缺陷**，因此现在跑 smoke 仍会同样失败。
+下一步顺序：重建 bundle 并一次冻结 v3 → 一次零 infra-taint 的 clean smoke → 才谈正式门 1。
 授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
