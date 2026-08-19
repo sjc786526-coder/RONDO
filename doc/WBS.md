@@ -107,10 +107,15 @@
   **成员线程 8 次推理全部失败**（`invalid_encrypted_content`，8/8），Root 侧零失败；成员从未完成一个
   回合，因此"成员没有 publish/evidence"完全无法归因给模型的指令遵循。
   **`team_evidence` / Direct fact 风险仍未验证**：唯一 `requester=model` 的调用是 Root 一次失败的 `wait`。
-  **当前首要阻断**是 `invalid_encrypted_content` 的归因：抓包显示成员请求里带有 `author=/root` 的
-  `agent_message`，其 `content[]` 内嵌 `encrypted_content` —— 即 Root 的加密推理被带进了成员会话。
-  下一步是先修完证据污染语义（已完成）、再定位该构造属产品还是 relay，修好后冻结 v3，
-  才做一次零 infra-taint 的 clean smoke；门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
+  **`invalid_encrypted_content` 已归因并修复（产品缺陷）**：不是 Root 推理被 fork，而是 code-mode 的
+  `spawn_agent` **明文** message 被 `communication_from_tool_message()` 误包成 encrypted content
+  （cm4 抓包里该字段与 139 字符明文逐字节相等）。已让 `ToolCallSource::CodeMode` 走明文分支，
+  `Direct` 的 encrypted-argument 语义保持不变，并补 5 条 Rust 定向回归（含反向验证）。
+  **但冻结的 runtime bundle 早于此修复，仍带缺陷**，所以现在跑 smoke 仍会同样失败。
+  下一步：重建 bundle 并一次性冻结 **v3**（bundle 身份、endpoint、retry/backoff、continuation
+  threshold、任一 unpriced 使观察无效）→ 用全新身份做一次零 infra-taint 的 clean smoke
+  （须确认成员请求的 agent message 是 plaintext input）→ 才谈 instruction/terra 是否遵守协议；
+  门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
