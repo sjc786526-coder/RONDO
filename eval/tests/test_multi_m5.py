@@ -50,9 +50,9 @@ from rondo_eval.multi_m5.schedule import (  # noqa: E402
 
 
 FINDING = "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042"
-# The first Multi source that carries the code-mode plaintext fix. Runs frozen
-# against the earlier bundle are v2 evidence and stay that way.
-MULTI_SOURCE_COMMIT = "6fe1379e4a77a604407b335fd94b3cc81d53501a"
+# The first Multi source that carries both the code-mode plaintext fix and the
+# code-mode cell evidence retention fix. Earlier frozen runs stay v2 evidence.
+MULTI_SOURCE_COMMIT = "802238bf45f9b877bef1206454216ce364b5d6c7"
 
 
 class MultiM5ContractTests(unittest.TestCase):
