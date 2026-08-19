@@ -124,3 +124,69 @@ Multi 行缺成员身份时**直接失败**。理由是这一类遗漏正是本�
 按审查者决定：修复复验通过后，可在原 `$40` 授权总额内、用**全新 label** 跑一次真实 smoke，
 回答"真实模型会不会产生 `ToolCallSource::Direct` 证据"这个门 1 的关键未知数。
 在那之前不动产品语义，正式 Gate 1 / Gate 2 继续禁止启动。
+
+---
+
+## 首次真实 code-mode 冒烟（2026-08-19，用户授权后执行）
+
+入口：`smoke --label cm1`，独立账本 `multi-m5-code-mode-smoke`（$40 上限），未附加 provider probe，
+未触碰 `$120` 正式账本。**这不是门 1 尝试，也不是门 1 通过。**
+
+**结果：`infra_failed`，原因 `upstream_terminal_error`。流程未走完。**
+
+费用（新的分开记账正好在这里派上用场）：
+
+| 项 | 值 |
+|---|---|
+| 账本实际扣减 | `$2.261041` |
+| 其中**真实按 token 计价** | `$0.041041` |
+| 其中**保守预留**（1 个请求无 usage） | `$2.220000` |
+| 已结算请求 | 3（另 1 个未结算） |
+| $40 余量 | `$37.738959` |
+
+三个请求的实际 usage：20,523 / — / 20,677 input，122 / — / 41 output。真实消耗只有约 4 分钱；
+`$2.22` 是那个拿不到 usage 的请求按预留保守扣的，不是真实花费。
+
+### 有价值的正面结果：证据管线在真实模型上成立
+
+rollout trace 里确实记到了真实模型发起的协作：
+
+```
+code_cell_started        1
+tool_call_started        1   kind=spawn_agent  label=collaboration.spawn_agent
+tool_call_ended          1
+agent_result_observed    1
+```
+
+抓包对应 `custom_tool_call(name=exec)`，input 是
+`const r = await tools.collaboration__spawn_agent({task_name:"worker", ...})`，返回
+`{"task_name":"/root/worker"}`。也就是说：**真实模型用 code mode 调团队工具，而新的 trace 判据看得见它，
+namespace 也确实是 `collaboration`** —— 第五轮那次口径重建的核心假设，在真实模型上得到验证。
+`trace_error` 为空，绑定校验通过。
+
+### 失败原因：纯上游，不是产品也不是判据
+
+trace 里的三条错误说得很清楚：
+
+```
+inference_failed    | stream disconnected before completion: stream closed before response.completed
+inference_cancelled | response stream dropped before provider terminal event
+inference_failed    | exceeded retry limit, last status: 429 Too Many Requests
+```
+
+先是流被中途掐断，随后 429 打满重试。新的停止原因分类在这里表现正确：归为 `infra_failed` 而**不是**
+`budget_stopped`（修复前会贴成预算停止，把人引向错误方向）。
+
+### 由这次真实运行暴露并已修复的 harness 缺陷
+
+门 1 与冒烟的预算代理都配了 `retry_backoff_seconds=0.0`。Root 与成员本来就并发，中转站对后到的那个
+请求回 429；零退避意味着五次重试在几毫秒内打完，等于没有重试，然后就以上游失败收场。
+已改为 `GATE1_RETRY_BACKOFF_SECONDS = 2.0`（代理按 2/4/8/16s 指数退避，并在超过 forward deadline 前提前
+停止，整条阶梯装得进一个 180s forward 窗口）。门 1 只有三次尝试，这个缺陷会实打实吃掉尝试次数。
+
+### 仍未回答的关键问题
+
+门 1 最要紧的未知数——**真实模型会不会产生 `ToolCallSource::Direct` 证据**（决定 `team_evidence` 谓词
+能否成立）——**这次没有回答**：成员刚被 spawn 出来，流程就被上游打断了，成员还没做任何工具调用。
+
+七个谓词全 false 是"流程没跑完"的结果，不是"协作机制不成立"的结论。
