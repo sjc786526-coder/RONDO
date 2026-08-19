@@ -518,7 +518,12 @@ def prepare_terminal_bench_run(
     materialized = (materializer or PinnedTaskMaterializer()).materialize(
         source_checkout=Path(request.source_checkout),
         staging_root=Path(request.staging_root),
-        staging_name=f"{request.batch_id}-{request.side.value}-{task_slug}",
+        # The staging directory has to be as unique as the run it stages.
+        # `PinnedTaskMaterializer` refuses to reuse a destination by design, so
+        # a name built only from batch/side/task collides on the second
+        # materialization of the same slot -- which is exactly the infra retry
+        # and the round 2/3 conditional rerun that a degradation verdict needs.
+        staging_name=f"{request.batch_id}-{request.side.value}-{task_slug}-{_staging_suffix(request)}",
         image_digest=image_digest,
         task_label=task_label,
         memory_bytes=request.memory_bytes,
@@ -820,6 +825,18 @@ def _compose_run_contract(
         network_names=(network,),
         volume_names=(),
     )
+
+
+def _staging_suffix(request: TerminalBenchRequest) -> str:
+    """A short, stable, filesystem-safe discriminator for one run's staging dir.
+
+    Derived from the Docker task id, which every caller already makes unique per
+    round and attempt. Hashed rather than embedded so a long task id cannot push
+    the staging path past a filesystem limit, and so the name stays safe
+    regardless of what the caller put in the id.
+    """
+
+    return hashlib.sha256(request.docker_task_id.encode("utf-8")).hexdigest()[:12]
 
 
 def _task_label(task_id: str) -> str:

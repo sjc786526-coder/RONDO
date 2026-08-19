@@ -70,12 +70,21 @@ def archive_record(
     outcome: str,
     counts_as_effective: bool,
     team_state: bool = True,
+    # The member identity the run actually configured. A Multi row must state
+    # it, because the machine-wide default and the campaign's own lock can
+    # differ: recording the default while the command line ran the pinned model
+    # produces a row that contradicts the run it describes.
+    subagent_model: str | None = None,
+    subagent_effort: str | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if evidence_kind not in {"loopback", "fake", "real_api"}:
         raise ValueError("evidence kind is not an M-5 partition")
     if gate not in {1, 2}:
         raise ValueError("gate must be 1 or 2")
+    if product is Product.RONDO_MULTI and not subagent_model:
+        # Fail closed rather than silently falling back to the host default.
+        raise ValueError("a RONDO Multi archive row must state its member model")
     record = {
         "schema_version": M5_ARCHIVE_SCHEMA_VERSION,
         "evidence_kind": evidence_kind,
@@ -86,7 +95,11 @@ def archive_record(
         "source_commit": source_commit,
         "binary_sha256": binary_sha256,
         "team_capability_config": team_capability_config_projection(
-            side, product, team_state=team_state
+            side,
+            product,
+            team_state=team_state,
+            subagent_model=subagent_model,
+            subagent_effort=subagent_effort,
         ),
         "outcome": outcome,
         "counts_as_effective": counts_as_effective,

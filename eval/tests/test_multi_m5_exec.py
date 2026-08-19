@@ -82,6 +82,8 @@ from rondo_eval.multi_m5.gate2 import (  # noqa: E402
     run_light_interleaved,
 )
 from rondo_eval.multi_m5.load import (  # noqa: E402
+    NONDEGRADATION_LOCK_ID,
+    WORKFLOW_LOCK_ID,
     M5ContractError,
     load_nondegradation_contract,
     load_runtime_identity,
@@ -102,7 +104,7 @@ from rondo_eval.multi_m5.paid import (  # noqa: E402
 )
 from rondo_eval.multi_m5.ready import readiness_report  # noqa: E402
 from rondo_eval.multi_m5.rehearsal import MEMBER_TASK, CollaborationStub  # noqa: E402
-from rondo_eval.multi_m5.gate2 import _run_id  # noqa: E402
+from rondo_eval.multi_m5.gate2 import _record_for, _run_id  # noqa: E402
 from rondo_eval.terminal_bench.runner import prepare_terminal_bench_run  # noqa: E402
 from rondo_eval.multi_m5.schedule import (  # noqa: E402
     DIAGNOSTIC_ROUND_INDEX,
@@ -255,13 +257,15 @@ class MultiM5ArchiveBudgetTests(unittest.TestCase):
         record = archive_record(
             evidence_kind="fake",
             gate=1,
-            lock_id="multi-m5-workflow-v1",
+            lock_id=WORKFLOW_LOCK_ID,
             side=Side.RONDO,
             product=Product.RONDO_MULTI,
             source_commit="7" * 40,
             binary_sha256="a" * 64,
             outcome="completed",
             counts_as_effective=False,
+            subagent_model="gpt-5.6-terra",
+            subagent_effort="medium",
         )
         with self.assertRaises(StoreError):
             persist_archive_record(record, common_root=root, path=path)
@@ -1170,38 +1174,188 @@ class MultiM5AttributionDiagnosticTests(unittest.TestCase):
         self.assertEqual(result["verdicts"][first], "stable_one_way_degradation")
         self.assertFalse(result["passed"])
 
-    def test_the_lock_must_carry_an_executable_diagnostic_contract(self) -> None:
-        raw = json.loads(
-            (EVAL_ROOT / "locks" / "multi-m5-nondegradation-v1.json").read_text("utf-8")
+    def test_every_attempt_gets_its_own_staging_identity(self) -> None:
+        """Retries and the round 2/3 reruns must be able to materialize at all.
+
+        `PinnedTaskMaterializer` refuses to reuse a destination by design, so a
+        staging name keyed only on batch/side/task made the second attempt on a
+        slot fail before Docker. That is exactly the infra retry and the
+        conditional rerun a degradation verdict depends on.
+        """
+
+        paths = RepoPaths.discover(Path.cwd())
+        config = load_runtime_config(paths)
+        contract = load_nondegradation_contract()
+        slot = next(
+            slot for slot in base_slots(contract) if slot.side is Side.RONDO
         )
+        staged: set[str] = set()
+        with tempfile.TemporaryDirectory(dir=scratch_root(_common_root())) as raw:
+            executor = TerminalBenchSlotExecutor(
+                common_root=_common_root(),
+                authorize_docker=False,
+                paths=paths,
+                work_root=Path(raw),
+            )
+            for attempt in (1, 2, 3):
+                run_id = _run_id(slot, attempt)
+                request = executor.build_request(
+                    slot, attempt=attempt, run_id=run_id
+                )
+                prepared = prepare_terminal_bench_run(config, request)
+                staged.add(str(prepared.materialized_task.task_path))
+        self.assertEqual(len(staged), 3)
+
+    def test_a_stopped_gate1_run_cannot_archive_as_completed(self) -> None:
+        """Stop lines are decided before the success branch.
+
+        Evidence formed earlier in the run does not undo a stop: a run whose
+        ledger hit capacity, or whose upstream failed, did not finish under the
+        frozen contract. Archiving it as `completed/passed=true` would let gate
+        1 pass after a stop line actually fired.
+        """
+
+        for reason, expected in (
+            ("budget_capacity_exhausted", "budget_stopped"),
+            ("upstream_terminal_failed", "infra_failed"),
+            ("missing_or_invalid_usage", "infra_failed"),
+        ):
+            with self.subTest(stop_reason=reason):
+                result = self._gate1_rehearsal_with_stop(reason)
+                record = result["record"]
+                self.assertEqual(record["outcome"], expected)
+                self.assertFalse(record["passed"])
+                self.assertEqual(record["stop_reason"], reason)
+                # The predicates stay on the row so a near-miss is diagnosable.
+                self.assertTrue(all(record["predicates"].values()))
+
+    def _gate1_rehearsal_with_stop(self, reason: str) -> dict:
+        import rondo_eval.multi_m5.gate1 as gate1_module
+
+        original = gate1_module._run_gate1_once
+
+        def _with_stop(**kwargs):
+            kwargs["budget_probe"] = lambda: reason
+            return original(**kwargs)
+
+        with patch.object(gate1_module, "_run_gate1_once", _with_stop):
+            return gate1_module.run_gate1_rehearsal(
+                common_root=_common_root(), persist=False
+            )
+
+    def test_archived_rows_state_the_identity_the_run_actually_used(self) -> None:
+        """A row must name the contract that governed it and the member it ran.
+
+        Both drifted silently: `_record_for` hard-coded the v1 lock id while the
+        loader read v2, and the team-capability projection fell back to the host
+        default while the command line ran the pinned member model. A row that
+        contradicts its own run cannot be evidence.
+        """
+
+        contract = load_nondegradation_contract()
+        runtime = load_runtime_identity(
+            require_frozen=True, common_root=_common_root()
+        )
+        for side_name in ("rondo", "codex"):
+            slot = next(
+                slot for slot in base_slots(contract) if slot.side.value == side_name
+            )
+            with self.subTest(side=side_name):
+                row = _record_for(
+                    slot,
+                    runtime,
+                    outcome="completed",
+                    counts_as_effective=True,
+                    extra={},
+                    contract=contract,
+                )
+                self.assertEqual(row["lock_id"], contract.lock_id)
+                self.assertEqual(row["lock_id"], NONDEGRADATION_LOCK_ID)
+                config = row["team_capability_config"]
+                if side_name == "rondo":
+                    self.assertEqual(
+                        config["default_subagent_model"], contract.member_model
+                    )
+                else:
+                    # The frozen upstream has no members to configure.
+                    self.assertIsNone(config)
+
+    def test_a_multi_row_cannot_omit_its_member_identity(self) -> None:
+        with self.assertRaises(ValueError):
+            archive_record(
+                evidence_kind="fake",
+                gate=1,
+                lock_id=WORKFLOW_LOCK_ID,
+                side=Side.RONDO,
+                product=Product.RONDO_MULTI,
+                source_commit="0" * 40,
+                binary_sha256="a" * 64,
+                outcome="completed",
+                counts_as_effective=False,
+            )
+
+    def test_the_lock_must_carry_an_executable_diagnostic_contract(self) -> None:
+        """Drift in the diagnostic block must fail the loader, field by field.
+
+        This test used to read the v1 file and hand variants to a loader that
+        only accepts v2, so every case died on the lock id before reaching the
+        field it meant to check -- green, but asserting nothing. It now reads
+        the live contract and first proves an unmodified copy loads.
+        """
+
+        source = EVAL_ROOT / "locks" / f"{NONDEGRADATION_LOCK_ID}.json"
+        raw = json.loads(source.read_text("utf-8"))
+        self.assertEqual(raw["lock_id"], NONDEGRADATION_LOCK_ID)
         self.assertEqual(
             raw["attribution"]["diagnostic"]["id"], "diagnostic_v2_on_team_state_off"
         )
+
+        def _write(document: dict, tmp: str) -> Path:
+            path = Path(tmp) / f"{NONDEGRADATION_LOCK_ID}.json"
+            path.write_text(json.dumps(document), "utf-8")
+            return path
+
+        # The control: an untouched copy must load, otherwise every rejection
+        # below could be caused by the copy rather than by the mutation.
+        with tempfile.TemporaryDirectory() as tmp:
+            loaded = load_nondegradation_contract(_write(raw, tmp))
+            self.assertEqual(loaded.lock_id, NONDEGRADATION_LOCK_ID)
+
         for mutation in (
             {"team_state_enabled": True},
             {"counts_as_effective": True},
             {"pre_run_forbidden": False},
             {"side": "codex"},
             {"shares_batch_budget": False},
+            # When it may run and what it may change are what keep this an
+            # attribution probe rather than a second chance at the verdict.
+            {"runs_when": "before the first observation"},
+            {"verdict_effect": "promotes the task to no_stable_one_way_degradation"},
+            # An unknown key is either silently ignored or a second,
+            # contradictory statement of one that is honoured.
+            {"also_counts_as_effective": True},
         ):
             with self.subTest(mutation=mutation):
                 broken = json.loads(json.dumps(raw))
                 broken["attribution"]["diagnostic"].update(mutation)
                 with tempfile.TemporaryDirectory() as tmp:
-                    path = Path(tmp) / "multi-m5-nondegradation-v1.json"
-                    path.write_text(json.dumps(broken), "utf-8")
                     with self.assertRaises(M5ContractError):
-                        load_nondegradation_contract(path)
+                        load_nondegradation_contract(_write(broken, tmp))
+
         with tempfile.TemporaryDirectory() as tmp:
             broken = json.loads(json.dumps(raw))
             del broken["attribution"]["diagnostic"]
-            path = Path(tmp) / "multi-m5-nondegradation-v1.json"
-            path.write_text(json.dumps(broken), "utf-8")
             with self.assertRaises(M5ContractError):
-                load_nondegradation_contract(path)
+                load_nondegradation_contract(_write(broken, tmp))
 
+        # The forecast is recomputed from the lock's own basis, so a hand-edited
+        # total must be refused rather than believed.
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = json.loads(json.dumps(raw))
+            broken["cost_forecast"]["worst_legal_usd"] = "1.00"
+            with self.assertRaises(M5ContractError):
+                load_nondegradation_contract(_write(broken, tmp))
 
-class MultiM5TerminalBenchExecutorTests(unittest.TestCase):
     def test_docker_is_required_and_requests_are_not_campaigns(self) -> None:
         root = _common_root()
         catalog = _v4_catalog()

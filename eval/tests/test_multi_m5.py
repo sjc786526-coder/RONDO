@@ -392,12 +392,18 @@ class MultiM5ArchiveTests(unittest.TestCase):
             binary_sha256="b" * 64,
             outcome="completed",
             counts_as_effective=False,
+            subagent_model="gpt-5.6-terra",
+            subagent_effort="medium",
         )
         for name in required_archive_fields():
             self.assertIn(name, record)
         self.assertEqual(record["evidence_kind"], "loopback")
         self.assertFalse(record["counts_as_effective"])
         self.assertEqual(record["team_capability_config"]["team_state_enabled"], True)
+        # The row states the member the run configured, not the host default.
+        self.assertEqual(
+            record["team_capability_config"]["default_subagent_model"], "gpt-5.6-terra"
+        )
         with self.assertRaises(ValueError):
             archive_record(
                 evidence_kind="paid",
@@ -409,6 +415,8 @@ class MultiM5ArchiveTests(unittest.TestCase):
                 binary_sha256="b" * 64,
                 outcome="completed",
                 counts_as_effective=False,
+                subagent_model="gpt-5.6-terra",
+                subagent_effort="medium",
             )
 
 

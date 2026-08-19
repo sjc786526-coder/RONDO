@@ -10,7 +10,6 @@ import re
 
 from ..config import RepoPaths, load_provider_secret, load_runtime_config
 from ..api_budget_proxy import ApiBudgetProxyError, exposure_summary
-from ..provider_probe import ProviderProbeError, run_provider_probes
 from .budget import open_phase_b_ledger, open_smoke_ledger, require_frozen_provider
 from .gate1 import Gate1Error, run_gate1_paid, run_gate1_rehearsal, run_gate1_smoke
 from .gate2 import Gate2Error, ScriptedSlotExecutor, run_gate2_real, run_light_interleaved
@@ -107,11 +106,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result["record"], sort_keys=True, separators=(",", ":")))
             return 0 if result["record"].get("passed") else 1
         if command == "smoke":
-            # Separately authorized pre-contract check: does the provider serve
-            # the frozen model, and does one whole code-mode flow produce
-            # readable trace evidence. Own ledger, own archive, own lock id;
-            # never a gate 1 attempt. Each invocation needs its own --label so
-            # two runs can never share a run id, a ledger row or a capture.
+            # Separately authorized pre-contract check: does one whole
+            # code-mode flow on the frozen model produce readable trace
+            # evidence. Own ledger, own archive, own lock id; never a gate 1
+            # attempt. Each invocation needs its own --label so two runs can
+            # never share a run id, a ledger row or a capture. Every dollar this
+            # entry can spend is bounded by the single ledger opened below.
             # The label is checked first: a run without a fresh identity is
             # refused before authorization, secrets, or sockets are considered.
             label = _option(args, "--label")
@@ -133,41 +133,15 @@ def main(argv: list[str] | None = None) -> int:
             # its spend outside the cap the smoke test claimed to enforce.
             identity = require_frozen_provider(provider, effort=workflow.root_effort)
             run_id = f"m5-g1-smoke-{label}"
+            # No pre-probe. `run_provider_probes` opens its *own* Plan 013
+            # ledger with a separate $5 cap, so every new label could spend up
+            # to $5 outside the authorized $40 -- even after that $40 was
+            # exhausted. The flow below already proves the endpoint and model
+            # serve this campaign; a standalone provider probe, if ever needed,
+            # belongs in its own separately authorized entry rather than hidden
+            # inside this one. This keeps the smoke entry's upper bound exactly
+            # the ledger opened here.
             with open_smoke_ledger(smoke_ledger_path(paths.common_root)) as ledger:
-                try:
-                    probe = run_provider_probes(
-                        config,
-                        api_key,
-                        output_root=(
-                            scratch_root(paths.common_root) / f"multi-m5-probe-{label}"
-                        ),
-                        model_id=model_id,
-                    )
-                except (ApiBudgetProxyError, ProviderProbeError, OSError, ValueError) as exc:
-                    print(
-                        json.dumps(
-                            {
-                                "stage": "probe",
-                                "model": model_id,
-                                "probe_ok": False,
-                                "error": type(exc).__name__,
-                                "detail": str(exc)[:400],
-                            },
-                            sort_keys=True,
-                            indent=2,
-                        )
-                    )
-                    return 1
-                if probe.get("status") != "completed":
-                    print(
-                        json.dumps(
-                            {"stage": "probe", "model": model_id, "probe_ok": False, "probe": probe},
-                            sort_keys=True,
-                            indent=2,
-                            default=str,
-                        )
-                    )
-                    return 1
                 result = run_gate1_smoke(
                     authorization=auth,
                     api_key=api_key,
@@ -187,7 +161,6 @@ def main(argv: list[str] | None = None) -> int:
                         "stage": "flow",
                         "model": model_id,
                         "run_id": run_id,
-                        "probe_ok": True,
                         "outcome": record.get("outcome"),
                         "flow_completed": record.get("passed"),
                         "predicates": record.get("predicates"),

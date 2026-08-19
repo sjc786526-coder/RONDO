@@ -377,6 +377,9 @@ def run_frozen_multi_team_publish_loopback(
         binary_sha256=digest,
         outcome="completed",
         counts_as_effective=False,
+        # The loopback drill runs one agent on its own model.
+        subagent_model=LOOPBACK_MODEL,
+        subagent_effort="medium",
         extra={
             "loopback_tool_round_trip": True,
             "registered_tools": sorted(collect_registered_tool_names(server.bodies[0])),

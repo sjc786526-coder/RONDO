@@ -621,7 +621,13 @@ def run_light_interleaved(
 
         def emit(**kwargs: Any) -> list[dict[str, Any]]:
             produced.append(
-                _record_for(slot, runtime, evidence_kind=evidence_kind, **kwargs)
+                _record_for(
+                    slot,
+                    runtime,
+                    evidence_kind=evidence_kind,
+                    contract=loaded,
+                    **kwargs,
+                )
             )
             return produced
 
@@ -964,6 +970,7 @@ def _record_for(
     outcome: str,
     counts_as_effective: bool,
     extra: Mapping[str, Any],
+    contract,
     evidence_kind: str = "fake",
 ) -> dict[str, Any]:
     kind = evidence_kind
@@ -980,7 +987,10 @@ def _record_for(
     return archive_record(
         evidence_kind=kind,
         gate=2,
-        lock_id="multi-m5-nondegradation-v1",
+        # Taken from the contract the run actually loaded. Hard-coding it meant
+        # a successful v2 run still produced rows claiming v1 governed them, and
+        # v1 carries neither the usage envelope nor the model-pinning contract.
+        lock_id=contract.lock_id,
         side=slot.side,
         product=slot.product,
         source_commit=source_commit,
@@ -990,6 +1000,16 @@ def _record_for(
         # Derived from the slot rather than passed in, so a diagnostic row can
         # never report the team layer as on while the command switched it off.
         team_state=slot.kind != DIAGNOSTIC_SLOT_KIND,
+        # Only Multi has members, and it runs the lock's model, not the host
+        # default. Recording the default here contradicted the command line.
+        subagent_model=(
+            contract.member_model if slot.product is Product.RONDO_MULTI else None
+        ),
+        subagent_effort=(
+            str(contract.raw["member_effort"])
+            if slot.product is Product.RONDO_MULTI
+            else None
+        ),
         extra={
             "task_id": slot.task_id,
             "round_index": slot.round_index,

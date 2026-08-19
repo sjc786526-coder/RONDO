@@ -140,7 +140,9 @@ Root 的 `resolved` 是协调注意力的结束，不等于 producer 认为问�
 **产品身份**贯通源码/构建路径、Cargo target、binary freeze、manifest、共享 catalog、adapter/RunSpec、
 campaign 与结果归档，唯一映射是 `eval/rondo_eval/contracts.py` 的 `product_layout()`；
 Multi 的工件命名空间是 `eval-data/bin/rondo-multi/`。规则见 `doc/eval-data-layout.md`。
-Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收前必须先冻结一套。
+Multi 的 runtime bundle **已按产品身份冻结**（M-5 阶段 A）：受跟踪锁
+`eval/locks/multi-m5-runtime-v1.json` `status=frozen`，工件在
+`eval-data/bin/rondo-multi/7a2ff684…-x86_64-unknown-linux-musl-runtime-bundle/`。
 
 **继承代码的处置**：evidence capture 与 Guardian provider 覆盖默认关闭、不影响 Multi 开发，本质是预留接口。
 不预设删除，处置原则只有一条：**不为保住它而对 Multi 内核做设计妥协**。

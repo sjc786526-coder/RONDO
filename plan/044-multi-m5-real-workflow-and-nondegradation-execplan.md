@@ -179,14 +179,15 @@
   `worktree-044-multi-m5-real-workflow-and-nondegradation`；测量树
   `.claude/worktrees/044-m5-multi-bundle-measurement` 仍 detached 于
   `7a2ff684c504c7530660f9a33a372daa949bdb00`，未在其中开发。
-- **门 1 合同**：`eval/locks/multi-m5-workflow-v1.json`。载体是 host `codex exec` +
+- **门 1 合同**：`eval/locks/multi-m5-workflow-v2.json`（v1 只留历史，不得作为 v2 证据）。
+  载体是 host `codex exec` +
   `eval/fixtures/multi-m5-collab-v1/` + `eval/templates/multi-m5/collab-workflow-instruction-v1.md`
   （sha `9879529f…d5333`），不是 TB `fix-git`。完成标准 = `TEAM_REPORT.md` 含 finding 行且六项协作谓词
   全真；孤儿退休不是必触发项。Docker 不用于门 1。
-- **门 2 合同**：`eval/locks/multi-m5-nondegradation-v1.json`。十任务来自
+- **门 2 合同**：`eval/locks/multi-m5-nondegradation-v2.json`（v1 只留历史）。十任务来自
   `eval/tasksets/p2-b7-canary-catalog-v4.json`（catalog sha `00b83e44…57ddf`），交错
   `task_major_codex_then_multi`，轻 runner，不套 v7 campaign，不计算 σ/delta。价格快照
-  2026-08-17 官方页；硬上限 $120。
+  2026-08-18 官方页（terra）；硬上限 $120，且由冻结 token 信封使其成为数学上限。
 - **Multi runtime 已冻结**（ignored 产物 + 受跟踪身份）：
   `eval-data/bin/rondo-multi/7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle/`
   已 `verify-runtime`。受跟踪锁 `eval/locks/multi-m5-runtime-v1.json` `status=frozen`：
@@ -269,8 +270,11 @@
   单智能体方向的历史基线不受影响。三条定向回归钉住该隔离性。
   离线复验：彩排 4 次全绿（七谓词全真）、loopback 通过（配置已显示 terra）、就绪自检 `ready=true`。
 - **Python 门禁复现注意**：必须清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 再跑，否则环回假上游会被宿主代理劫持。
-- 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未执行，累计费用 **$0**
-  （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本，归档只有 `loopback` 行）。
+- 044 分支提交后停止。未合并、未推送。**正式两道门的 `$120` 账本仍未产生任何消费**
+  （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本）。但"累计费用 $0"对整个任务已不成立：
+  2026-08-18 在合同外、单独授权的冒烟账本上发生过真实支出，见
+  `agent_log/2026-08-19-060000-plan044-m5-phase-b-fifth-review-remediation.md` 的勘误一节
+  （历史产物的账目不自洽，不能当完整费用记录）。Docker 与本地模型仍未执行。
 
 ### 移交入口（2026-08-19，第五轮审查整改后重写）
 
@@ -351,7 +355,7 @@
 | 每 run 请求上限 | 80 |
 | 价格快照 | 2026-08-18 官方页：input $2 / cached $0.20 / output $12 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25。同日核对 sol 仍为 5/0.5/30，故 terra 为其 40% |
 | 费用 | 点估计约 $16；合同内最坏约 $38.40；**硬上限 $120 不变**（余量约 3 倍，预算掐断风险大幅下降）。账本批次 `multi-m5-phase-b` |
-| Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v1.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
+| Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v2.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
 | 外发边界 | 任务输入、工作区内容与模型可见工具结果进入 Responses；密钥、`.env.local`、个人配置不进提示词或结果文件 |
 | 预计时间 | 门 1：数十分钟级，最坏约 1.5 小时。门 2：无条件复跑时数小时到十余小时；若多题触发复跑或打满超时，日历时间可到一天以上。全局串行，与重型 Cargo / 本地模型互斥。 |
 | Git | 阶段 B 成果仍只提交 044 分支；合并 `main`、推送、删除/重命名 worktree 仍须另批 |

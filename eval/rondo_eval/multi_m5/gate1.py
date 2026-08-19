@@ -485,14 +485,16 @@ def _run_gate1_once(
         # cause this classifier does not model, and filing it as either a budget
         # stop or a product failure would be an invented fact.
         raise Gate1Error(f"unclassified budget stop reason: {stop_reason}")
-    if not timed_out and jsonl.strip() and verdict.passed and completed.returncode == 0:
-        # Evidence is already complete; a late budget stop does not unmake it.
-        passed = True
-        outcome = "completed"
-        reasons = list(verdict.reasons)
-    elif stop_class == "budget":
-        # Not an agent failure: the proxy answered 429 and the model never got
-        # the chance to finish. It is also not retried, that would only spend more.
+    # Stop lines are decided first, before any success branch. A run whose
+    # ledger stopped -- capacity exhausted, upstream terminal failure, usage
+    # never reported -- did not finish under the frozen contract, even if the
+    # predicates had already been satisfied by the time it stopped. Judging the
+    # evidence first would let a stopped run archive as `completed/passed=true`
+    # and let gate 1 pass after a stop line actually fired. The predicates are
+    # still recorded on the row, so a near-miss stays diagnosable.
+    if stop_class == "budget":
+        # The proxy answered 429 and the model never got the chance to finish.
+        # Not retried: that would only spend more against a decision made.
         passed = False
         outcome = "budget_stopped"
         reasons = [stop_reason]
@@ -504,6 +506,10 @@ def _run_gate1_once(
         passed = False
         outcome = "infra_failed"
         reasons = [stop_reason]
+    elif not timed_out and jsonl.strip() and verdict.passed and completed.returncode == 0:
+        passed = True
+        outcome = "completed"
+        reasons = list(verdict.reasons)
     elif timed_out or not jsonl.strip() or trace_error is not None:
         # An unreadable trace is the evidence pipeline failing, not the team
         # failing. Filing it as `agent_failed` would spend an attempt and record
@@ -563,6 +569,9 @@ def _run_gate1_once(
         binary_sha256=binary_sha,
         outcome=outcome,
         counts_as_effective=False,
+        # What the command line actually pinned, from this gate's own lock.
+        subagent_model=workflow.member_model,
+        subagent_effort=str(workflow.raw["member_effort"]),
         extra=extra_fields,
     )
     archived = None
