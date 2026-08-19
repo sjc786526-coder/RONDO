@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-18（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 B 第五轮审查整改完成，门 1 判据改为 code-mode rollout trace 并冻结 workflow v2，真实付费尚未执行）
+最后更新：2026-08-19（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 B 已做四次合同外真实冒烟并用尽 $40，观测管线验证成立但被 `invalid_encrypted_content` 阻断，**正式两道门未启动**）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -98,13 +98,19 @@
     谓词无法成立。彩排里 shell 走直接调用可满足，但真实模型是否如此**只能由付费冒烟回答**。
   - 门 1 载体是协议演示级 fixture（决策 032），口径边界见锁的 `scope_limits`：WBS 的「真实任务上跑通完整协作
     语义」须门 1+门 2 合起来读，任一门单独不得引用。
-  **真实付费运行仍未开始**，两道门均未通过，不得表述为 M-5 通过、门 1 通过或未见退化。
-  **$40 冒烟已执行并用尽（四次）**：trace 判据在真实模型上完全成立（含 `collaboration.team_inspect`，
-  `spawn_member` 由真实证据判真），且真实模型确会发 Direct 调用，故"code mode 下不可能有 Direct 证据"
-  的担忧不成立；但**真实模型不遵守冻结的协作协议**（30 个请求里从未 publish/route/update/evidence，
-  也未写 `TEAM_REPORT.md`），这是门 1 的实质性负面信号。
-  **下一步是决策门 1 的载体/指令**（改模板会动 `instruction_sha256`，属改冻结合同），而不是继续跑；
-  门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
+  **正式两道门未启动**（`$120` 账本仍不存在）；合同外冒烟已花 `$31.52`（真实 token 计价 `$0.44`）。
+  两道门均未通过，不得表述为 M-5 通过、门 1 通过或未见退化。
+  **$40 冒烟已执行并用尽（四次）**。可以确认的只有一条：**观测管线成立** —— trace 在真实模型下看得见
+  经 code cell 发起的 `collaboration.*` 调用（含判据必需的 `team_inspect`），绑定校验通过，
+  `spawn_member` 由真实证据判真。
+  **此前"真实模型不遵守协作协议"的结论已撤回**：cm4 不是干净观察。逐线程复核显示
+  **成员线程 8 次推理全部失败**（`invalid_encrypted_content`，8/8），Root 侧零失败；成员从未完成一个
+  回合，因此"成员没有 publish/evidence"完全无法归因给模型的指令遵循。
+  **`team_evidence` / Direct fact 风险仍未验证**：唯一 `requester=model` 的调用是 Root 一次失败的 `wait`。
+  **当前首要阻断**是 `invalid_encrypted_content` 的归因：抓包显示成员请求里带有 `author=/root` 的
+  `agent_message`，其 `content[]` 内嵌 `encrypted_content` —— 即 Root 的加密推理被带进了成员会话。
+  下一步是先修完证据污染语义（已完成）、再定位该构造属产品还是 relay，修好后冻结 v3，
+  才做一次零 infra-taint 的 clean smoke；门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 

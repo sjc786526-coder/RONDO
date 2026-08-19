@@ -301,19 +301,22 @@
 - 阶段 B 的离线准备已全部完成并提交。**$40 冒烟已执行并用尽**（四次，合计扣减 `$31.52`，
   其中真实 token 计价仅 `$0.44`，余 `$8.48` 不足再跑一次完整流程）。结论见
   `agent_log/2026-08-19-120000-plan044-m5-phase-b-sixth-review-remediation.md`：
-  **trace 判据在真实模型上完全成立**（含判据必需的 `collaboration.team_inspect`，`spawn_member` 由真实
-  证据判真），但**真实模型不遵守冻结的协作协议**——30 个请求里从未调用 `team_publish` / `team_route` /
-  `team_update` / `team_evidence`，也没写出 `TEAM_REPORT.md`。
-  **因此进入正式门 1 之前需要先决策载体/指令**（改指令模板会动 `instruction_sha256`，属改冻结合同），
-  不是继续跑就能解决。门 1 通过后才谈门 2。
-  冒烟入口：`python -m rondo_eval.multi_m5 smoke --label <全新 id> --authorize-paid-api <口令>`。
+  **trace 判据在真实模型上成立**（含判据必需的 `collaboration.team_inspect`，`spawn_member` 由真实
+  证据判真）。**"真实模型不遵守协作协议"的结论已撤回**：cm4 的成员线程 8 次推理 8 次失败
+  （`invalid_encrypted_content`），从未完成一个回合，故其"没有 publish/evidence"不可归因于模型。
+  当前首要阻断是该错误的归因（成员请求里带有 `author=/root`、`content[]` 内嵌 `encrypted_content`
+  的 `agent_message`）。顺序：证据污染语义（已修）→ 归因并修复 → 冻结 v3 → 一次零 infra-taint 的
+  clean smoke → 才谈正式门 1。
+  冒烟入口：`python -m rondo_eval.multi_m5 smoke --label <全新 id> --authorize-paid-api <口令>`
+  （**不含独立 provider probe**，已按第六轮决定删除；入口能花的钱只受其自身账本约束）。
   每次必须换 `--label`：独立 run id、独立捕获目录、`claim_run` 拒绝重用，既有产物存在时直接拒绝启动。
 - 门禁复跑口径：`tests.test_multi_m5`、`tests.test_multi_m5_exec`、`tests.test_multi_m5_trace_evidence`、
   `tests.test_terminal_bench` 与 `just eval-lock`。全量 `just eval-test` 为 932 用例、0 失败；
   其中 2 个 `ModuleNotFoundError: No module named 'eval'` 的加载错误
   （`test_l6_b10333_pair`、`test_local_m4_holdout_anchor`）在干净树上同样存在，属既有问题，不由本次引入。
 - **terra 可用性已由 2026-08-18 冒烟证实**（中转站已解封，模型确实响应并调用了团队工具）。
-  仍建议每次冒烟先跑 `rondo_eval.provider_probe`（已内置于 `smoke` 入口，且在冻结 endpoint 校验之后）。
+  `smoke` 入口**不再内置 provider probe**：它会另开一份 $5 的 Plan 013 账本、绕出授权额度，
+  已按第六轮决定删除。若确需单独 probe，应作为独立且单独授权的动作。
 
 ### 阻塞项
 

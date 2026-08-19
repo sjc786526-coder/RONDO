@@ -66,6 +66,7 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
     open_phase_b_ledger,
     phase_b_pricing,
     require_frozen_provider,
+    run_infra_taint,
     run_request_count,
     run_stop_reason,
 )
@@ -971,6 +972,130 @@ class MultiM5FrozenModelIsolationTests(unittest.TestCase):
             for item in (path, lock):
                 if item.exists():
                     item.unlink()
+
+    def test_an_upstream_fault_taints_the_run_even_when_it_continues(self) -> None:
+        """Continuing is a spending decision; being evidence is not.
+
+        cm4 absorbed eight upstream terminal errors under the stop threshold and
+        was archived as a clean `agent_failed` -- a verdict about the model that
+        the run never earned. Taint is recorded on every conservative
+        settlement, with or without a stop.
+        """
+
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-taint-probe.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        pricing = phase_b_pricing(contract)
+        reservation = request_reservation_usd(contract)
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.ensure_run("m5-taint", cap_usd=gate1_run_cap_usd())
+                self.assertIsNone(run_infra_taint(ledger, "m5-taint"))
+                ledger.reserve("m5-taint", "req-1", reservation)
+                ledger.begin_attempt("m5-taint", "req-1", max_attempts=5)
+                ledger.settle(
+                    "m5-taint",
+                    "req-1",
+                    None,
+                    pricing=pricing,
+                    stop_reason="upstream_terminal_error",
+                )
+                run = ledger.snapshot()["runs"]["m5-taint"]
+                # Under the smoke threshold the run keeps going ...
+                self.assertFalse(run["stopped"])
+                self.assertIsNone(run["stop_reason"])
+                # ... but the fault is on the record regardless.
+                taint = run_infra_taint(ledger, "m5-taint")
+                self.assertEqual(taint["count"], 1)
+                self.assertEqual(taint["first_reason"], "upstream_terminal_error")
+                ledger.reserve("m5-taint", "req-2", reservation)
+                ledger.begin_attempt("m5-taint", "req-2", max_attempts=5)
+                ledger.settle("m5-taint", "req-2", None, pricing=pricing)
+                self.assertEqual(run_infra_taint(ledger, "m5-taint")["count"], 2)
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_gate1_reports_infra_failed_when_the_run_is_tainted(self) -> None:
+        """A tainted gate 1 run is never `completed`, even with every predicate true."""
+
+        import rondo_eval.multi_m5.gate1 as gate1_module
+
+        original = gate1_module._run_gate1_once
+
+        def _with_taint(**kwargs):
+            kwargs["taint_probe"] = lambda: {
+                "count": 8,
+                "first_reason": "upstream_terminal_error",
+            }
+            return original(**kwargs)
+
+        with patch.object(gate1_module, "_run_gate1_once", _with_taint):
+            result = gate1_module.run_gate1_rehearsal(
+                common_root=_common_root(), persist=False
+            )
+        record = result["record"]
+        self.assertEqual(record["outcome"], "infra_failed")
+        self.assertFalse(record["passed"])
+        # The predicates were all satisfied; the run still cannot be a pass.
+        self.assertTrue(all(record["predicates"].values()))
+        self.assertEqual(record["infra_taint"]["count"], 8)
+        self.assertIn("infra_taint:upstream_terminal_error", record["reasons"][0])
+
+    def test_gate2_never_counts_a_tainted_slot_as_an_observation(self) -> None:
+        """A slot that saw the upstream fail cannot feed the degradation verdict."""
+
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-gate2-taint.json"
+        lock = path.with_name(f".{path.name}.lock")
+        archive = scratch / "m5-gate2-taint-records.jsonl"
+        for item in (path, lock, archive):
+            if item.exists():
+                item.unlink()
+        try:
+            with open_phase_b_ledger(path) as ledger:
+                real_taint = rondo_eval.multi_m5.gate2.run_infra_taint
+
+                def _tainted(led, run_id):
+                    # Only the Multi side of the first task sees a fault.
+                    if "db-wal-recovery-rondo" in run_id:
+                        return {"count": 1, "first_reason": "upstream_terminal_error"}
+                    return real_taint(led, run_id)
+
+                with patch.object(
+                    rondo_eval.multi_m5.gate2, "run_infra_taint", _tainted
+                ):
+                    result = run_light_interleaved(
+                        executor=ScriptedSlotExecutor(),
+                        common_root=_common_root(),
+                        ledger=ledger,
+                        persist=False,
+                        charge_fake_usage=True,
+                    )
+        finally:
+            for item in (path, lock, archive):
+                if item.exists():
+                    item.unlink()
+        tainted = [
+            row
+            for row in result["records"]
+            if "db-wal-recovery" in str(row.get("task_id"))
+            and row.get("product") == Product.RONDO_MULTI.value
+        ]
+        self.assertTrue(tainted)
+        for row in tainted:
+            self.assertFalse(row["counts_as_effective"])
+            self.assertEqual(row["outcome"], RunOutcome.INFRA_FAILED.value)
+        # A fabricated one-way degradation must not appear on that task.
+        self.assertNotEqual(
+            result["verdicts"].get("terminal-bench/db-wal-recovery"),
+            "stable_one_way_degradation",
+        )
 
     def test_one_unpriced_response_does_not_destroy_the_run(self) -> None:
         """A single upstream glitch must not end a run that is still funded.

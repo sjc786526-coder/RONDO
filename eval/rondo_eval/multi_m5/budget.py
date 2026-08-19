@@ -10,6 +10,7 @@ from ..api_budget_proxy import (
     BudgetStopped,
     PersistentBudgetLedger,
     UsageEnvelope,
+    infra_taint,
     maximum_usage_cost,
 )
 from ..contracts import ModelPricing
@@ -40,7 +41,13 @@ REQUEST_LIMIT_STOP_REASON = "logical_request_limit_exceeded"
 # each to one hiccup. Accounting is unchanged: every unpriced request is still
 # charged its full reservation. Only the "does one glitch end the run" question
 # moves, and `_require_unpriced_budget` keeps the worst case inside the run cap.
-UNPRICED_STOP_THRESHOLD = 4
+# The formal batch stops on the first unpriced settlement, which is the
+# historical behaviour. Raising it there would buy nothing: an upstream fault
+# taints the run, and a tainted run cannot be product evidence for either gate,
+# so letting it continue only spends money to produce something unusable. The
+# contract-free smoke is different -- it exists to characterise the provider, so
+# it keeps collecting after a fault.
+UNPRICED_STOP_THRESHOLD = 1
 # The contract-free smoke gets more tolerance than the formal gates. It exists
 # to characterise this relay, which was measured dropping roughly one stream in
 # three, and each drop costs a full reservation of *phantom* budget -- the
@@ -206,6 +213,17 @@ class RequestCappedLedger:
                     f"run exceeded the frozen {self._max_requests_per_run}-request cap"
                 )
             return self._ledger.reserve(run_id, request_id, *args, **kwargs)
+
+
+def run_infra_taint(ledger: PersistentBudgetLedger, run_id: str) -> dict | None:
+    """Whether this run absorbed an upstream fault, and how many.
+
+    Separate from the stop reason. A run that continued under the threshold has
+    no stop reason at all, yet it still saw the upstream fail -- and a run that
+    saw the upstream fail cannot be read as a statement about the product.
+    """
+
+    return infra_taint(ledger.snapshot(), run_id)
 
 
 def run_stop_reason(ledger: PersistentBudgetLedger, run_id: str) -> str | None:

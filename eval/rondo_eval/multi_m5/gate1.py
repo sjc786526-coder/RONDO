@@ -28,6 +28,7 @@ from ..contracts import Product, Side
 from .archive import archive_record, harness_identity
 from .budget import (
     SMOKE_BATCH_ID,
+    run_infra_taint,
     SMOKE_LOCK_ID,
     gate1_run_cap_usd,
     max_concurrent_main,
@@ -177,6 +178,7 @@ def run_gate1_paid(
                 capture_upstream=proxy.base_url,
                 capture_bearer=proxy.downstream_api_key,
                 budget_probe=lambda: run_stop_reason(ledger, run_id),
+                taint_probe=lambda: run_infra_taint(ledger, run_id),
                 exposure_probe=lambda: exposure_summary(ledger.snapshot(), run_id),
                 extra={
                     "rehearsal": False,
@@ -287,6 +289,7 @@ def run_gate1_smoke(
             capture_upstream=proxy.base_url,
             capture_bearer=proxy.downstream_api_key,
             budget_probe=lambda: run_stop_reason(ledger, run_id),
+            taint_probe=lambda: run_infra_taint(ledger, run_id),
             exposure_probe=lambda: exposure_summary(ledger.snapshot(), run_id),
             lock_id=SMOKE_LOCK_ID,
             archive_file=archive_path,
@@ -342,6 +345,7 @@ def _run_gate1_once(
     capture_upstream: str | None = None,
     capture_bearer: str = LOOPBACK_BEARER,
     budget_probe: Callable[[], str | None] | None = None,
+    taint_probe: Callable[[], dict | None] | None = None,
     exposure_probe: Callable[[], dict[str, Any]] | None = None,
     lock_id: str | None = None,
     archive_file: Path | None = None,
@@ -482,6 +486,7 @@ def _run_gate1_once(
     if completed is None:
         raise Gate1Error("gate 1 process did not start")
     stop_reason = budget_probe() if budget_probe is not None else None
+    taint = taint_probe() if taint_probe is not None else None
     # Keep whatever the judge saw so a timeout after tool calls is auditable.
     predicates = dict(verdict.predicates)
     ignored = list(verdict.ignored_evidence)
@@ -499,7 +504,16 @@ def _run_gate1_once(
     # evidence first would let a stopped run archive as `completed/passed=true`
     # and let gate 1 pass after a stop line actually fired. The predicates are
     # still recorded on the row, so a near-miss stays diagnosable.
-    if stop_class == "budget":
+    if taint is not None:
+        # The upstream failed at least once during this run. Whether the run was
+        # allowed to keep going is a spending question; it cannot be a statement
+        # about the product either way. Filing it as `agent_failed` would record
+        # a model verdict the run never earned -- cm4 absorbed eight upstream
+        # terminal errors and was archived exactly that way.
+        passed = False
+        outcome = "infra_failed"
+        reasons = [f"infra_taint:{taint['first_reason']}x{taint['count']}"]
+    elif stop_class == "budget":
         # The proxy answered 429 and the model never got the chance to finish.
         # Not retried: that would only spend more against a decision made.
         passed = False
@@ -540,6 +554,9 @@ def _run_gate1_once(
     extra_fields = {
         "stop_reason": stop_reason,
         "stop_reason_class": stop_class,
+        # Present whenever the upstream failed during the run, with or without a
+        # stop. A row carrying this is never product evidence.
+        "infra_taint": taint,
         "evidence_source": "code_mode_rollout_trace",
         "trace_error": trace_error,
         # What the provider's token counts justify, kept apart from what the

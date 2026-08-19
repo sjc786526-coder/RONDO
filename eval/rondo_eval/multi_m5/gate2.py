@@ -62,6 +62,7 @@ from .budget import (
     phase_b_pricing,
     request_reservation_usd,
     require_frozen_provider,
+    run_infra_taint,
     run_request_count,
     run_stop_reason,
     usage_envelope,
@@ -728,6 +729,31 @@ def run_light_interleaved(
                     return produced
                 continue
             if ledger is not None:
+                # An upstream fault anywhere in this run disqualifies it as an
+                # observation, whether or not it stopped the run. Without this a
+                # slot that absorbed provider errors could be counted as
+                # "Multi incomplete" and manufacture a degradation verdict.
+                taint = run_infra_taint(ledger, run_id)
+                if taint is not None:
+                    infra_used += 1
+                    emit(
+                        outcome=RunOutcome.INFRA_FAILED.value,
+                        counts_as_effective=False,
+                        extra={
+                            **result.extra,
+                            "infra_taint": taint,
+                            "attempt": attempt,
+                            "infra_used": infra_used,
+                            "request_count": result.request_count,
+                        },
+                    )
+                    if infra_used >= loaded.max_infra_attempts_total:
+                        stopped = True
+                        stop_reason = "max_infra_attempts_total"
+                        return produced
+                    if attempt == loaded.max_slot_attempts:
+                        return produced
+                    continue
                 # The proxy stops an exhausted run in-band with HTTP 429, so the
                 # agent just looks like it gave up. Counting that as an effective
                 # "Multi incomplete" would feed the degradation verdict a result

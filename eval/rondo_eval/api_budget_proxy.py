@@ -627,8 +627,7 @@ class PersistentBudgetLedger:
                     run["stop_reason"] = "usage_outside_frozen_envelope"
                 else:
                     # Count this settlement plus the unpriced ones already on
-                    # the run. Derived from the request log rather than a new
-                    # persisted field, so the on-disk schema is unchanged.
+                    # the run.
                     unpriced = 1 + sum(
                         1
                         for item in run["requests"].values()
@@ -641,6 +640,8 @@ class PersistentBudgetLedger:
                         run["stop_reason"] = (
                             stop_reason or "missing_or_invalid_usage"
                         )
+                reason = run["stop_reason"] or stop_reason or "missing_or_invalid_usage"
+                _record_infra_taint(run, reason)
             else:
                 if charged > reserved:
                     run["stopped"] = True
@@ -700,6 +701,9 @@ class PersistentBudgetLedger:
             request_state["settlement_kind"] = _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED
             run["stopped"] = True
             run["stop_reason"] = stop_reason
+            # Billed nothing, but the upstream still failed: the run saw an
+            # infrastructure fault and cannot stand as a product observation.
+            _record_infra_taint(run, stop_reason)
             self._persist()
             return Settlement(
                 Decimal(0),
@@ -2009,6 +2013,34 @@ def milestone_metadata_ready(metadata_path: Path) -> bool:
     )
 
 
+def _record_infra_taint(run: dict[str, Any], reason: str) -> None:
+    """Mark that this run absorbed an upstream fault.
+
+    Kept separate from `stopped` on purpose. Whether a run may *continue* is a
+    spending decision; whether it may still be read as evidence about the
+    product is not. Conflating them let a run absorb eight upstream terminal
+    errors under the stop threshold and still be archived as a clean
+    `agent_failed`, which is a verdict about the model that the run never
+    earned.
+    """
+
+    taint = run.get("infra_taint")
+    if isinstance(taint, dict):
+        taint["count"] = int(taint["count"]) + 1
+    else:
+        run["infra_taint"] = {"count": 1, "first_reason": reason}
+
+
+def infra_taint(snapshot: Mapping[str, Any], run_id: str) -> dict[str, Any] | None:
+    """Return this run's upstream-fault record, or None if it saw none."""
+
+    run = snapshot.get("runs", {}).get(run_id)
+    if not isinstance(run, dict):
+        return None
+    taint = run.get("infra_taint")
+    return dict(taint) if isinstance(taint, dict) else None
+
+
 def exposure_summary(
     snapshot: Mapping[str, Any], run_id: str | None = None
 ) -> dict[str, object]:
@@ -2707,14 +2739,31 @@ def _validate_state(
     total_priced_overage_delta = Decimal(0)
     for run_id, run in value["runs"].items():
         _require_safe_id(run_id, "run id")
-        if not isinstance(run, dict) or set(run) != {
+        required_run_keys = {
             "cap_usd",
             "spent_usd",
             "stopped",
             "stop_reason",
             "requests",
-        }:
+        }
+        # `infra_taint` is optional so ledgers written before it existed still
+        # load unchanged. When present it records that this run absorbed an
+        # upstream failure, which is what disqualifies it as product evidence.
+        if not isinstance(run, dict) or not required_run_keys <= set(run) or set(
+            run
+        ) - required_run_keys - {"infra_taint"}:
             raise ApiBudgetProxyError("budget run state differs from schema v1")
+        taint = run.get("infra_taint")
+        if taint is not None and (
+            not isinstance(taint, dict)
+            or set(taint) != {"count", "first_reason"}
+            or isinstance(taint["count"], bool)
+            or not isinstance(taint["count"], int)
+            or taint["count"] < 1
+            or not isinstance(taint["first_reason"], str)
+            or not taint["first_reason"]
+        ):
+            raise ApiBudgetProxyError("budget run infra taint is invalid")
         cap = _money(run["cap_usd"])
         spent = _money(run["spent_usd"])
         if cap <= 0 or cap > default_run_cap:

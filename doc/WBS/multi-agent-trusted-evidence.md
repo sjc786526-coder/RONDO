@@ -332,9 +332,22 @@ sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign �
 但真实模型是否如此**只能由付费冒烟回答**，不得预先假定。
 
 彩排由 stub 驱动协议，**证明的是产品与判据这条链路能走通，不是真实模型会遵守协议**，因此
-**不是**门 1 通过、更不是 M-5 通过。下一步：用已授权的 $40 独立冒烟账本（独立 batch/lock_id/归档，
-每次运行必须带全新 `--label`）验证真实模型下 trace 判据能否看见协作，确认后才进正式门 1；
-门 1 通过后才进门 2。授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+**不是**门 1 通过、更不是 M-5 通过。
+
+**合同外冒烟已执行四次并用尽 $40（2026-08-19）。** 结果分三层，必须分开陈述：
+
+1. **观测管线成立**：真实模型经 code cell 发起的 `collaboration.*` 调用（含判据必需的 `team_inspect`）
+   都被 trace 记到并通过绑定校验，`spawn_member` 由真实证据判真。
+2. **上游/构造阻断**：成员线程 8 次推理**全部**以 `invalid_encrypted_content` 失败（8/8，Root 侧零失败），
+   成员从未完成一个回合。抓包显示成员请求里带有 `author=/root` 的 `agent_message`，其 `content[]`
+   内嵌 `encrypted_content` —— Root 的加密推理被带进了成员会话。归因（产品构造 vs relay 兼容）待定。
+3. **仍未回答**：上文那条 `team_evidence` / Direct fact 风险。唯一 `requester=model` 的调用是 Root
+   一次失败的 `wait`，既非成员发出、也未产生可引用的 observation。
+
+因此**不得**据此对 terra 的指令遵循下任何结论。下一步顺序：证据污染语义（已修：任何上游故障都会给 run
+打 infra-taint，门 1 只能判 `infra_failed`、门 2 不得计为有效观察）→ 归因并修复 `invalid_encrypted_content`
+→ 一次冻结 v3 → 一次零 infra-taint 的 clean smoke → 才谈正式门 1。
+授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
