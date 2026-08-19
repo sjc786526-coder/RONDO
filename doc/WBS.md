@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-19（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 B 的 `invalid_encrypted_content` 已归因为产品缺陷并修复，bundle 重建为 `multi-m5-runtime-v2`、两把门锁冻结为 v3，clean smoke 待跑，**正式两道门未启动**）
+最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 B 的 `invalid_encrypted_content` 已归因为产品缺陷并修复，bundle 重建为 `multi-m5-runtime-v2`、两把门锁冻结为 v3；clean smoke 2/3 次证实修复成立但被中转站流内终止阻断，**正式两道门未启动**）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -119,8 +119,17 @@
   现按决策 043 的隔离方式统一从锁读、不动宿主全局量。明文投递也从人工看抓包变成机器判据
   `member_message_delivery`：新 bundle 彩排 20/20 为 `input_text`、零 encrypted，旧 bundle 的 cm4 抓包
   有 37 个被标成 `encrypted_content` 的明文块。
-  下一步：用全新身份做一次零 infra-taint 的 clean smoke（独立账本批次，最多三次）→ 才谈 instruction/terra
-  是否遵守协议；门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
+  **clean smoke 已跑 2/3 次（2026-08-20）**：修复确认成立 —— 成员真实完成回合、从 code cell 派发 8 次
+  工具调用，`member_message_delivery=plaintext`（82 明文块 / 0 encrypted）。但**未达成 clean**，
+  两个独立原因：(a) 中转站在 HTTP `200` 后于流内发 `server_error`，而重试白名单是 HTTP 状态码，
+  状态码 200 时退避完全不触发，cs1 1/1、cs2 4/35，`conservative_exposure_usd≠0`；
+  (b) 模型这次没调 `team_inspect`，而判据只接受它的输出作为 dump/log 证据源，故七谓词**全部无法验证**
+  （不是判为假），**不得**据此对 Direct fact 风险或 terra 的指令遵循下结论。
+  勘误：cm1–cm4 的终止错误**全是** `invalid_encrypted_content`，"中转站三分之一掉流"是被产品缺陷
+  污染的观测。clean smoke 批次已扣 `$11.52`（真实计价 `$0.42`），剩 `$57.78`，**最后一次额度未用**。
+  **待用户决定方向**（三选一，互不排斥）：把流内终止纳入退避重试；放宽"zero taint"这条验收；
+  或等中转站恢复后直接用最后一次。门 1 通过后才进门 2。
+  逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
@@ -143,7 +152,7 @@
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 阶段 B 已修复 code-mode 明文缺陷、重建 bundle（`runtime-v2`）并冻结两把门锁 v3，clean smoke 待跑 | clean smoke 独立账本、最多三次；正式门 1/门 2 仍待用户按清单授权 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 阶段 B 已修复 code-mode 明文缺陷、重建 bundle（`runtime-v2`）并冻结两把门锁 v3；clean smoke 2/3 次证实成员已能完成回合，但未取得零 taint 的干净观察 | 待用户在「流内终止纳入重试 / 放宽 zero-taint / 等中转站恢复」中定向；正式门 1/门 2 仍待按清单授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L6 → Local M4 已成链），
   而 Multi 还有尚未开始的 M-5 阶段 B，不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
@@ -218,7 +227,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 阶段 B 已冻结 `runtime-v2` 与两把 v3 门锁，待 clean smoke 验证修复后的真实模型行为 |
+| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 阶段 B 已冻结 `runtime-v2` 与两把 v3 门锁；clean smoke 证实修复成立，尚未取得零 taint 的干净观察 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|

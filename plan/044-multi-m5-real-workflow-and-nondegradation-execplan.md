@@ -325,6 +325,24 @@
 - 离线复验：定向门禁 216/216、`just eval-lock` 通过、`ready=true`、彩排七谓词全真且
   `member_message_delivery=plaintext`、loopback 通过（`lock_id=multi-m5-runtime-v2`）。
 
+### clean smoke 结果（2026-08-20，2/3 次，剩 1 次未用）
+
+- **产品修复确认成立**：`cs2` 有 Root（20 请求）与**成员**（15 请求）两个线程，成员从 code cell
+  真实派发 8 次工具调用（`team_publish`×2、`team_evidence`×2、`team_history`、`team_route_update`、
+  `send_message`、`exec_command`），`member_message_delivery=plaintext`（82 明文块 / 0 encrypted）。
+  旧 bundle 的 cm4 同路径是 37 个伪 encrypted、成员 8/8 失败、从未完成回合。
+- **clean smoke 未达成**，两个互相独立的原因：
+  1. **上游终止**：HTTP `200` 之后在流内发 `error`/`server_error`。重试白名单是 HTTP **状态码**，
+     状态码 200 时退避梯子完全不触发。cs1 1/1、cs2 4/35，`conservative_exposure_usd=$11.10 ≠ 0`。
+  2. **模型未调用 `team_inspect`**：判据只接受它的输出作为 dump/log 证据源，因此 cs2 七个谓词
+     **全部无法验证**（不是判为假）。**不得**据此对 Direct fact 风险或 terra 的指令遵循下结论。
+- **勘误**：cm1–cm4 的 49 个请求终止错误**全是** `invalid_encrypted_content`、零 `server_error`。
+  「中转站约三分之一掉流」是被产品缺陷污染的观测，不是中转站基线故障率。
+- **费用**：clean smoke 批次共扣 `$11.52`（真实 token 计价 `$0.42`），剩 `$57.78`。
+  **正式 `$120` 账本仍不存在、零消费。**
+- 最后一次额度**未使用**：按当前约 11% 的终止率，一次 30+ 请求运行全程零 taint 的概率约 2%，
+  验收又要求 zero taint，故不赌这一次；方向决定见 `doc/WBS.md`。
+
 ### 本任务剩余步骤
 
 - 阶段 B 的离线准备已全部完成并提交。**$40 冒烟已执行并用尽**（四次，合计扣减 `$31.52`，

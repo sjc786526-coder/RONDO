@@ -360,7 +360,15 @@ effort、2 秒指数退避（此前门 1 写死 2.0、门 2 却读宿主 `paid_e
 20 个 `agent_message` 内容块全部是 `input_text`、零 `encrypted_content`，而同一路径在旧 bundle 的
 cm4 抓包里有 37 个被标成 `encrypted_content` 的明文块。
 
-下一步顺序：一次零 infra-taint 的 clean smoke（独立批次，最多三次）→ 才谈正式门 1。
+**clean smoke 已跑 2/3 次（2026-08-20）**，结果同样分层：**修复确认成立** —— 成员真实完成回合、
+从 code cell 派发 8 次工具调用（含 `team_publish`、`team_evidence`），`member_message_delivery=plaintext`
+（82 明文块 / 0 encrypted）；但**未取得零 taint 的干净观察**：中转站在 HTTP `200` 之后于流内发
+`server_error`，而重试白名单是 HTTP 状态码，状态码 200 时退避不触发（cs1 1/1、cs2 4/35）。
+同时模型这次没有调用 `team_inspect`，而它是判据唯一接受的 dump/log 证据源，故七谓词**全部无法验证**
+（不是判为假）—— **仍不得**对 Direct fact 风险或 terra 的指令遵循下任何结论。
+勘误：cm1–cm4 的终止错误全部是 `invalid_encrypted_content`，"中转站三分之一掉流"是被产品缺陷污染的观测。
+
+下一步顺序：取得一次零 infra-taint 的 clean smoke → 才谈正式门 1。方向待定见 `doc/WBS.md`；
 授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
