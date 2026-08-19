@@ -298,8 +298,14 @@
 
 ### 本任务剩余步骤
 
-- 阶段 B 的**离线准备已全部完成并提交**。下一步是用已授权的 $40 独立冒烟账本验证真实模型下 trace 判据能否
-  看见协作（重点看上面的 `team_evidence` 风险），确认后才进正式门 1；门 1 通过后才进门 2。
+- 阶段 B 的离线准备已全部完成并提交。**$40 冒烟已执行并用尽**（四次，合计扣减 `$31.52`，
+  其中真实 token 计价仅 `$0.44`，余 `$8.48` 不足再跑一次完整流程）。结论见
+  `agent_log/2026-08-19-120000-plan044-m5-phase-b-sixth-review-remediation.md`：
+  **trace 判据在真实模型上完全成立**（含判据必需的 `collaboration.team_inspect`，`spawn_member` 由真实
+  证据判真），但**真实模型不遵守冻结的协作协议**——30 个请求里从未调用 `team_publish` / `team_route` /
+  `team_update` / `team_evidence`，也没写出 `TEAM_REPORT.md`。
+  **因此进入正式门 1 之前需要先决策载体/指令**（改指令模板会动 `instruction_sha256`，属改冻结合同），
+  不是继续跑就能解决。门 1 通过后才谈门 2。
   冒烟入口：`python -m rondo_eval.multi_m5 smoke --label <全新 id> --authorize-paid-api <口令>`。
   每次必须换 `--label`：独立 run id、独立捕获目录、`claim_run` 拒绝重用，既有产物存在时直接拒绝启动。
 - 门禁复跑口径：`tests.test_multi_m5`、`tests.test_multi_m5_exec`、`tests.test_multi_m5_trace_evidence`、

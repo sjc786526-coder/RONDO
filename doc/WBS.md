@@ -99,8 +99,12 @@
   - 门 1 载体是协议演示级 fixture（决策 032），口径边界见锁的 `scope_limits`：WBS 的「真实任务上跑通完整协作
     语义」须门 1+门 2 合起来读，任一门单独不得引用。
   **真实付费运行仍未开始**，两道门均未通过，不得表述为 M-5 通过、门 1 通过或未见退化。
-  下一步：用已授权的 $40 独立冒烟账本验证真实模型下 trace 判据能否看见协作（含上面的 `team_evidence` 风险），
-  确认后才进正式门 1；门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
+  **$40 冒烟已执行并用尽（四次）**：trace 判据在真实模型上完全成立（含 `collaboration.team_inspect`，
+  `spawn_member` 由真实证据判真），且真实模型确会发 Direct 调用，故"code mode 下不可能有 Direct 证据"
+  的担忧不成立；但**真实模型不遵守冻结的协作协议**（30 个请求里从未 publish/route/update/evidence，
+  也未写 `TEAM_REPORT.md`），这是门 1 的实质性负面信号。
+  **下一步是决策门 1 的载体/指令**（改模板会动 `instruction_sha256`，属改冻结合同），而不是继续跑；
+  门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 

@@ -280,3 +280,26 @@ $40 只剩 `$8.48`，不够再跑一次完整流程。且再跑同样的配置�
 那是需要你我先决策的事（改指令模板会动 `instruction_sha256`，属于改冻结合同），不是继续烧钱能解决的。
 
 **M-5 未通过，门 1 未通过，不存在"未见退化"结论。正式 `$120` 账本仍未产生任何消费。**
+
+### 证据位置（供审查）
+
+受跟踪（在 git 里）：
+
+- 本文件 —— 四次冒烟的账目、诊断与结论。
+- 提交 `672de92`（退避修复）、`f5d2b3b`（unpriced 阈值修复 + 冒烟总结）。
+
+Git-ignored 产物（按 `doc/eval-data-layout.md` 不入库，路径相对仓库根）：
+
+| 内容 | 路径 |
+|---|---|
+| 冒烟账本（$40，四个 run 的逐笔扣减） | `eval-data/budgets/multi-m5-code-mode-smoke.json` |
+| 冒烟归档行（4 行，每行含 run_id / outcome / lock_id / 成员模型 / 逐 run 费用拆分） | `eval-data/multi-m5/archives/code-mode-smoke-records.jsonl` |
+| 每次运行的 Responses 抓包 | `eval-data/multi-m5/captures/m5-g1-smoke-cm{1..4}/requests.jsonl` |
+| 每次运行的 rollout trace bundle（判据实际读的证据） | `eval-data/multi-m5/captures/m5-g1-smoke-cm{1..4}/rollout-trace/` |
+| 每次运行的逐请求计费元数据（usage、settlement_kind、attempt_count） | `eval-data/multi-m5/captures/m5-g1-smoke-cm{1..4}/budget-metadata.json` |
+| 每次运行的谓词判定 | `eval-data/multi-m5/captures/m5-g1-smoke-cm{1..4}/verdict.json` |
+
+归档行里的 `budget_exposure` 是**逐 run** 的拆分，可直接与中转站后台逐条核对；
+本文表格的合计 `$31.523468` 等于四行 `charged_usd` 之和。
+
+正式 `$120` 账本 `eval-data/budgets/multi-m5-phase-b.json` **仍不存在**，可据此核实两道正式门未启动。
