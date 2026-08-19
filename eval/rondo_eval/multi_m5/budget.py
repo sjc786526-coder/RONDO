@@ -23,14 +23,17 @@ HARD_CAP_USD = Decimal("120.00")
 # gates share, and its rows must never look like contract evidence. The cap is
 # sized to the work (one gate-1-shaped flow is modelled at ~$3.20), not to the
 # authorization ceiling -- a cap is a stop line, not a spending target.
-SMOKE_BATCH_ID = "multi-m5-code-mode-smoke"
-SMOKE_LOCK_ID = "multi-m5-code-mode-smoke-v1"
-# Separately authorized on 2026-08-18 at USD 40 with no attempt limit: iterate
-# until the code-mode evidence path works end to end on a real model, or the
-# budget stops it. The cap is the stop line, not a target. `max_runs` is sized
-# so "no attempt limit" is real while every attempt still takes a fresh id.
-SMOKE_CAP_USD = Decimal("40.00")
-SMOKE_MAX_RUNS = 40
+SMOKE_BATCH_ID = "multi-m5-clean-smoke"
+SMOKE_LOCK_ID = "multi-m5-clean-smoke-v1"
+# The 2026-08-18 exploratory smoke (`multi-m5-code-mode-smoke`, USD 40, no
+# attempt limit) is spent and stays on disk as history: it ran on the pre-fix
+# bundle, where members could not complete a turn. This batch is the clean
+# smoke on runtime-v2 and has an acceptance contract rather than an open-ended
+# question, so it is bounded by attempts: at most three runs, each with its own
+# label, ledger row and capture. The cap is derived from those three run caps in
+# `open_smoke_ledger` rather than chosen, and stays under the gates' own $120.
+SMOKE_MAX_RUNS = 3
+SMOKE_CAP_USD = Decimal("69.30")
 
 
 REQUEST_LIMIT_STOP_REASON = "logical_request_limit_exceeded"
@@ -94,6 +97,17 @@ def request_reservation_usd(contract=None) -> Decimal:
             "declared request reservation differs from the price-derived value"
         )
     return reservation
+
+
+def retry_backoff_seconds(contract=None) -> float:
+    """The exponential retry base both M-5 gates use.
+
+    Taken from the lock, not from `paid_eval.retry_backoff_seconds`: that key is
+    machine-wide, so gate 2 was inheriting whatever this host happened to say
+    while gate 1 used its own hard-coded value. Same isolation as the model id.
+    """
+
+    return (contract or load_nondegradation_contract()).retry_backoff_seconds
 
 
 def max_concurrent_main(contract=None) -> int:
@@ -358,6 +372,15 @@ def smoke_run_cap_usd(contract=None) -> Decimal:
     return gate1_run_cap_usd(contract)
 
 
+def _frozen_unpriced_threshold(contract) -> int:
+    """Read the batch stop line from the lock and refuse a silent divergence."""
+
+    threshold = contract.unpriced_stop_threshold
+    if threshold != UNPRICED_STOP_THRESHOLD:
+        raise M5ContractError("frozen unpriced stop threshold differs from the harness")
+    return threshold
+
+
 def _require_unpriced_budget(contract=None, *, threshold: int, cap: Decimal) -> int:
     """Confirm the absorbed unpriced settlements still fit under a run cap.
 
@@ -381,6 +404,12 @@ def open_smoke_ledger(path: Path) -> PersistentBudgetLedger:
     $120 the two gates share.
     """
 
+    # Derived, not chosen: three attempts at the run cap this flow already uses.
+    # A hand-picked total would drift the moment either input moved.
+    if SMOKE_CAP_USD != SMOKE_MAX_RUNS * smoke_run_cap_usd():
+        raise M5ContractError("smoke cap is not the attempt count times the run cap")
+    if SMOKE_CAP_USD >= HARD_CAP_USD:
+        raise M5ContractError("smoke cap must stay under the two gates' hard cap")
     ledger = PersistentBudgetLedger(
         path,
         batch_id=SMOKE_BATCH_ID,
@@ -437,9 +466,12 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
         # the reserve-time cap arithmetic below is an upper bound on real spend
         # rather than a best effort.
         usage_envelope=usage_envelope(loaded),
+        # The formal threshold is the lock's, not this module's: the value that
+        # decides when the $120 batch stops has to be readable in the frozen
+        # contract rather than in code the run could be re-pointed at.
         unpriced_stop_threshold=_require_unpriced_budget(
             loaded,
-            threshold=UNPRICED_STOP_THRESHOLD,
+            threshold=_frozen_unpriced_threshold(loaded),
             cap=min(gate1_run_cap_usd(loaded), gate2_run_cap_usd(loaded)),
         ),
     )

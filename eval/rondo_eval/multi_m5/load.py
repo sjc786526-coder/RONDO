@@ -39,8 +39,12 @@ _PREDICATE_IDS = (
     "root_resolved",
     "root_woken",
 )
-WORKFLOW_LOCK_ID = "multi-m5-workflow-v2"
-NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v2"
+WORKFLOW_LOCK_ID = "multi-m5-workflow-v3"
+NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v3"
+# v2 froze a bundle built before the code-mode plaintext fix, so a run recorded
+# under the v2 pair is not evidence for this one. Both gate locks name this id
+# so an archived row can never be re-read as if it came from the new binary.
+RUNTIME_LOCK_ID = "multi-m5-runtime-v2"
 
 
 class M5ContractError(ValueError):
@@ -88,6 +92,8 @@ class NondegradationContract:
     price_date: str
     price_source_url: str
     docker_images: tuple[str, ...]
+    retry_backoff_seconds: float
+    unpriced_stop_threshold: int
     raw: dict[str, Any]
 
 
@@ -186,6 +192,14 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
         raise M5ContractError("gate 1 attempt contract is missing")
     if not str(attempts_block.get("semantics") or "").strip():
         raise M5ContractError("gate 1 attempt semantics are not stated")
+    if raw.get("runtime_lock_id") != RUNTIME_LOCK_ID:
+        raise M5ContractError("gate 1 does not name the frozen runtime bundle")
+    if raw.get("provider_contract") != NONDEGRADATION_LOCK_ID:
+        raise M5ContractError("gate 1 does not name the frozen provider contract")
+    # A tainted attempt is not a product failure and is not a pass either. The
+    # effect is stated here so it cannot be argued from the runner's behaviour.
+    if raw.get("infra_taint_effect") != "infra_failed":
+        raise M5ContractError("gate 1 infra taint effect differs")
     return WorkflowContract(
         lock_id=raw["lock_id"],
         instruction_path=instruction,
@@ -288,6 +302,10 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
     _require_usage_envelope(raw.get("usage_envelope"))
     _require_concurrency(raw.get("concurrency"))
     _require_cost_forecast(raw, cost)
+    if raw.get("runtime_lock_id") != RUNTIME_LOCK_ID:
+        raise M5ContractError("gate 2 does not name the frozen runtime bundle")
+    backoff = _retry_backoff(raw.get("provider_retry_backoff_seconds"))
+    unpriced = _require_unpriced_settlement(raw.get("unpriced_settlement"))
     return NondegradationContract(
         lock_id=raw["lock_id"],
         catalog_path=catalog,
@@ -308,8 +326,56 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
         price_date=str(price["date"]),
         price_source_url=str(price["source_url"]),
         docker_images=images,
+        retry_backoff_seconds=backoff,
+        unpriced_stop_threshold=unpriced,
         raw=raw,
     )
+
+
+def _retry_backoff(value: object) -> float:
+    """The retry ladder both gates use, taken from the lock rather than the host.
+
+    `rondo.local.toml` is machine-wide: editing its `retry_backoff_seconds`
+    would change how every campaign on this machine retries. Gate 1 already
+    hard-coded 2s while the host file says 1.0, so the two gates were silently
+    retrying differently. Freezing it here follows the same isolation the model
+    id uses, and leaves the single-agent direction on the host projection.
+    """
+
+    try:
+        seconds = float(Decimal(str(value)))
+    except (TypeError, ArithmeticError) as exc:
+        raise M5ContractError("provider retry backoff is invalid") from exc
+    if not 0 < seconds <= 30:
+        raise M5ContractError("provider retry backoff is out of range")
+    return seconds
+
+
+def _require_unpriced_settlement(value: object) -> int:
+    """Absorbed-settlement contract: one stops the batch, any one voids evidence.
+
+    These are two independent statements. Keeping them in one block makes it
+    impossible to freeze the stop line while leaving "does it count as
+    evidence" to whatever the runner happens to do.
+    """
+
+    if not isinstance(value, dict):
+        raise M5ContractError("gate 2 unpriced settlement contract is missing")
+    threshold = value.get("unpriced_stop_threshold")
+    if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold != 1:
+        raise M5ContractError("formal unpriced stop threshold must be one")
+    if value.get("any_unpriced_invalidates_observation") is not True:
+        raise M5ContractError("a tainted run must never count as an observation")
+    if not str(value.get("basis") or "").strip():
+        raise M5ContractError("unpriced settlement contract has no stated basis")
+    extra = set(value) - {
+        "unpriced_stop_threshold",
+        "any_unpriced_invalidates_observation",
+        "basis",
+    }
+    if extra:
+        raise M5ContractError("unpriced settlement contract has unknown fields")
+    return threshold
 
 
 def _require_diagnostic(value: object, tasks: tuple[str, ...]) -> None:
@@ -457,9 +523,9 @@ def load_runtime_identity(
     require_frozen: bool = False,
     common_root: Path | None = None,
 ) -> RuntimeIdentity:
-    lock_path = path or LOCKS_DIR / "multi-m5-runtime-v1.json"
+    lock_path = path or LOCKS_DIR / f"{RUNTIME_LOCK_ID}.json"
     raw = _read_json(lock_path)
-    if raw.get("schema_version") != 1 or raw.get("lock_id") != "multi-m5-runtime-v1":
+    if raw.get("schema_version") != 1 or raw.get("lock_id") != RUNTIME_LOCK_ID:
         raise M5ContractError("runtime lock identity differs")
     if raw.get("product") != Product.RONDO_MULTI.value:
         raise M5ContractError("runtime lock product differs")

@@ -13,7 +13,9 @@ ARCHIVE_RELPATH = "eval-data/multi-m5/archives/records.jsonl"
 CAPTURE_RELDIR = "eval-data/multi-m5/captures"
 BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b.json"
 SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/code-mode-smoke-records.jsonl"
-SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-code-mode-smoke.json"
+# The exhausted pre-fix smoke ledger keeps its own file; this one is the
+# clean smoke on runtime-v2 and must not reopen or extend that batch.
+SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-clean-smoke.json"
 
 
 class StoreError(ValueError):

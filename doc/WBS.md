@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-19（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 B 已做四次合同外真实冒烟并用尽 $40，观测管线验证成立但被 `invalid_encrypted_content` 阻断，**正式两道门未启动**）
+最后更新：2026-08-19（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 B 的 `invalid_encrypted_content` 已归因为产品缺陷并修复，bundle 重建为 `multi-m5-runtime-v2`、两把门锁冻结为 v3，clean smoke 待跑，**正式两道门未启动**）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -25,7 +25,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过；阶段 B 经五轮独立审查整改。第五轮关闭了两个结构性阻断：门 1 判据在 code-mode 下看不见任何团队工具（已改为读冻结二进制自身的 rollout trace，冻结 `multi-m5-workflow-v2`），以及门 2 的 RunSpec 仍继承宿主 model 别名而与预算代理不一致（已全链贯通并加就绪自检）。$120 上限现由「冻结 token 信封 + 价目表机械推导预留」保证为真上限。**真实付费仍未执行**，两道门均未通过，**不能**表述为 M-5 通过、门 1 通过或未见退化。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过；阶段 B 经五轮独立审查整改。第五轮关闭了两个结构性阻断：门 1 判据在 code-mode 下看不见任何团队工具（已改为读冻结二进制自身的 rollout trace），以及门 2 的 RunSpec 仍继承宿主 model 别名而与预算代理不一致（已全链贯通并加就绪自检）。$120 上限现由「冻结 token 信封 + 价目表机械推导预留」保证为真上限。此后 code-mode 明文缺陷已修复，bundle 重建为 `multi-m5-runtime-v2`，两把门锁冻结为 v3。**正式两道门的真实付费仍未执行**，两道门均未通过，**不能**表述为 M-5 通过、门 1 通过或未见退化。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -85,7 +85,7 @@
     全部在 JS 里调用，Responses 线上没有任何 `function_call`，因此原 v1 判据（`responses_function_call_outputs`）
     在真实配置下**结构上不可能通过**。现改为读冻结二进制自身的 rollout trace（`CODEX_ROLLOUT_TRACE_ROOT`），
     判据只认 Rust dispatch 侧记录的工具名/namespace/参数/handler 返回值，并要求每条 dispatch 能绑定回抓包里
-    模型真实发出的 code cell。已冻结 `multi-m5-workflow-v2`（v1 归档不得充当 v2 证据），彩排 stub 同步改为
+    模型真实发出的 code cell。该判据现由 `multi-m5-workflow-v3` 承载（v1/v2 归档不得充当 v3 证据），彩排 stub 同步改为
     真实 code-mode 形状，20 条对抗回归（伪造输出、死分支、错 namespace、缺失/冲突 trace、跨 run 重放）钉住。
   - **门 2 模型已全链贯通**。RunSpec 此前仍取宿主 `paid_eval.main_model` 别名，与只认 terra 的预算代理不一致，
     真跑会被本地拒成"产品失败"。现在锁里的 root/member 模型贯通 spec → adapter argv → proxy，就绪自检离线
@@ -111,11 +111,16 @@
   `spawn_agent` **明文** message 被 `communication_from_tool_message()` 误包成 encrypted content
   （cm4 抓包里该字段与 139 字符明文逐字节相等）。已让 `ToolCallSource::CodeMode` 走明文分支，
   `Direct` 的 encrypted-argument 语义保持不变，并补 5 条 Rust 定向回归（含反向验证）。
-  **但冻结的 runtime bundle 早于此修复，仍带缺陷**，所以现在跑 smoke 仍会同样失败。
-  下一步：重建 bundle 并一次性冻结 **v3**（bundle 身份、endpoint、retry/backoff、continuation
-  threshold、任一 unpriced 使观察无效）→ 用全新身份做一次零 infra-taint 的 clean smoke
-  （须确认成员请求的 agent message 是 plaintext input）→ 才谈 instruction/terra 是否遵守协议；
-  门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
+  **bundle 已在 2026-08-19 重建并冻结**：`multi-m5-runtime-v2`（源码 `6fe1379`，两次重型构建均由
+  共享 build-lock 看门狗全程监控、无告警），两把门锁升为 `multi-m5-workflow-v3` /
+  `multi-m5-nondegradation-v3` 并显式引用它。v3 把 endpoint、terra 模型与 medium effort、2 秒指数退避、
+  正式 `unpriced_stop_threshold=1`、`any_unpriced_invalidates_observation=true` 一次冻进合同；
+  其中退避此前门 1 写死 2.0、门 2 却读宿主 `paid_eval.retry_backoff_seconds`（本机 1.0），两门实际不一致，
+  现按决策 043 的隔离方式统一从锁读、不动宿主全局量。明文投递也从人工看抓包变成机器判据
+  `member_message_delivery`：新 bundle 彩排 20/20 为 `input_text`、零 encrypted，旧 bundle 的 cm4 抓包
+  有 37 个被标成 `encrypted_content` 的明文块。
+  下一步：用全新身份做一次零 infra-taint 的 clean smoke（独立账本批次，最多三次）→ 才谈 instruction/terra
+  是否遵守协议；门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
@@ -138,7 +143,7 @@
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 阶段 B 第五轮整改完成（门 1 判据改读 rollout trace、门 2 模型贯通、$120 成为真上限），真实付费未执行 | 已授权 $40 独立冒烟；正式门 1/门 2 仍待用户按清单授权 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 阶段 B 已修复 code-mode 明文缺陷、重建 bundle（`runtime-v2`）并冻结两把门锁 v3，clean smoke 待跑 | clean smoke 独立账本、最多三次；正式门 1/门 2 仍待用户按清单授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L6 → Local M4 已成链），
   而 Multi 还有尚未开始的 M-5 阶段 B，不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
@@ -213,7 +218,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 阶段 B 第五轮整改完成，待 $40 冒烟验证真实模型下的 trace 判据 |
+| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 阶段 B 已冻结 `runtime-v2` 与两把 v3 门锁，待 clean smoke 验证修复后的真实模型行为 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -225,7 +230,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Multi M-2 | Root 选择性路由 Event，目标读取并扩展同一 canonical chain，通知与指派可独立恢复和结束 | 工程验收 | 已完成并合入 `main` |
 | Multi M-3 | Version 机械关联到 Codex 实际保留的工具结果，按 Event 可达权限有界下钻，不可得时诚实标注 | 工程验收 | 已完成并合入 `main` |
 | Multi M-4 | producer 四类可用性、Root 显式退休独立终态、有界 dump/log/stats；真实无 API 产品纵切覆盖 recoverable 拒绝与 unavailable 退休 | 工程验收 | 已完成并合入 `main` |
-| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 阶段 B 第五轮整改完成；门 1 判据已改为 code-mode rollout trace 并在冻结二进制上彩排全绿，真实付费运行未开始。**不是** M-5 通过 |
+| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 阶段 B：`runtime-v2` 与两把 v3 门锁已冻结，门 1 判据在新二进制上彩排全绿，正式付费运行未开始。**不是** M-5 通过 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
 （设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。

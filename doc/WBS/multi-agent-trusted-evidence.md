@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-18 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B 第五轮整改完成：门 1 判据改读 code-mode rollout trace（冻结 workflow v2），门 2 模型全链贯通，$120 成为数学上限；真实付费未执行
+最后更新：2026-08-19 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：code-mode 明文缺陷已修，bundle 重建为 `multi-m5-runtime-v2`，两把门锁冻结为 v3；正式两道门均未启动
 
 ## 定位
 
@@ -140,9 +140,10 @@ Root 的 `resolved` 是协调注意力的结束，不等于 producer 认为问�
 **产品身份**贯通源码/构建路径、Cargo target、binary freeze、manifest、共享 catalog、adapter/RunSpec、
 campaign 与结果归档，唯一映射是 `eval/rondo_eval/contracts.py` 的 `product_layout()`；
 Multi 的工件命名空间是 `eval-data/bin/rondo-multi/`。规则见 `doc/eval-data-layout.md`。
-Multi 的 runtime bundle **已按产品身份冻结**（M-5 阶段 A）：受跟踪锁
-`eval/locks/multi-m5-runtime-v1.json` `status=frozen`，工件在
-`eval-data/bin/rondo-multi/7a2ff684…-x86_64-unknown-linux-musl-runtime-bundle/`。
+Multi 的 runtime bundle **已按产品身份冻结**：当前身份是受跟踪锁
+`eval/locks/multi-m5-runtime-v2.json` `status=frozen`（源码提交 `6fe1379`，含 code-mode 明文修复），
+工件在 `eval-data/bin/rondo-multi/6fe1379e…-x86_64-unknown-linux-musl-runtime-bundle/`。
+`runtime-v1`（`7a2ff68`）只作为历史保留：成员在该二进制上无法完成回合，其运行不构成协作协议的证据。
 
 **继承代码的处置**：evidence capture 与 Guardian provider 覆盖默认关闭、不影响 Multi 开发，本质是预留接口。
 不预设删除，处置原则只有一条：**不为保住它而对 Multi 内核做设计妥协**。
@@ -309,7 +310,7 @@ JavaScript 调用；Responses 线上顶层 `function_call` 数为 0。原 v1 判
 （`CODEX_ROLLOUT_TRACE_ROOT`，产品既有能力，非新增代码）：判据只认 Rust dispatch 侧写下的
 `ToolCallStarted/Ended`（工具名、namespace、注册表收到的参数、handler 返回值），并要求每条 dispatch 能绑定回
 抓包里模型真实发出的 code cell（`model_visible_call_id` + `source_js`），否则 fail-closed。这样
-"模型自己打印一段像 dump 的文本"不构成证据。已冻结 `multi-m5-workflow-v2`，v1 归档不得充当 v2 证据；
+"模型自己打印一段像 dump 的文本"不构成证据。该判据现由 `multi-m5-workflow-v3` 承载（v1/v2 归档不得充当 v3 证据）；
 彩排 stub 同步改为真实 code-mode 形状（这是关键：只改采集不改 stub 等于把同一个错误再犯一遍）。
 
 **门 2 模型已全链贯通（第五轮）。** 预算代理取锁里的 terra，但 `make_run_spec` 仍走宿主
@@ -347,16 +348,26 @@ sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign �
 3. **仍未回答**：上文那条 `team_evidence` / Direct fact 风险。唯一 `requester=model` 的调用是 Root
    一次失败的 `wait`，既非成员发出、也未产生可引用的 observation。
 
-因此**不得**据此对 terra 的指令遵循下任何结论。证据污染语义与 code-mode 明文缺陷均已修复；
-**当前阻断是冻结的 runtime bundle 早于该修复、仍带缺陷**，因此现在跑 smoke 仍会同样失败。
-下一步顺序：重建 bundle 并一次冻结 v3 → 一次零 infra-taint 的 clean smoke → 才谈正式门 1。
+因此**不得**据此对 terra 的指令遵循下任何结论。
+
+**bundle 已重建并冻结 v3（2026-08-19）。** 修复后的源码 `6fe1379` 已冻成
+`multi-m5-runtime-v2`，两把门锁升到 `multi-m5-workflow-v3` / `multi-m5-nondegradation-v3` 并显式引用它；
+`v3` 一次性把此前散在代码或宿主机器配置里的量冻进合同：付费 endpoint、terra root/成员模型与 medium
+effort、2 秒指数退避（此前门 1 写死 2.0、门 2 却读宿主 `paid_eval.retry_backoff_seconds`）、
+正式 `unpriced_stop_threshold=1`，以及 `any_unpriced_invalidates_observation=true`
+（"停不停"与"算不算证据"是两件事）。旧锁、旧 bundle 与旧归档一律保留，不得升级冒充 v3。
+明文投递从"人眼看抓包"变成机器判据 `member_message_delivery`：新 bundle 的离线彩排里
+20 个 `agent_message` 内容块全部是 `input_text`、零 `encrypted_content`，而同一路径在旧 bundle 的
+cm4 抓包里有 37 个被标成 `encrypted_content` 的明文块。
+
+下一步顺序：一次零 infra-taint 的 clean smoke（独立批次，最多三次）→ 才谈正式门 1。
 授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
   fixture 里、指令规定工具顺序），只回答「真实模型下团队机制是否端到端真的发生」，不证明 Multi 在
   有分析负载的任务上更强；真实任务由门 2 的十个 TB 任务提供。任一门单独都不得引用为满足本目标。
-  详见 `eval/locks/multi-m5-workflow-v2.json` 的 `scope_limits` 与 Plan 044 决策 032。
+  详见 `eval/locks/multi-m5-workflow-v3.json` 的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
   阶段 A 前两项（工作流合同、runtime bundle）已冻结；独立验收要求先修好门 1 判据再谈第三项授权。

@@ -296,6 +296,35 @@
   嵌套调用不留（`multidev/codex-rs/core/src/team/evidence.rs`）。若真实模型把所有调用都放进 cell，
   `team_evidence` 谓词无法成立。彩排里 shell 走直接调用可满足，真实模型是否如此只能由冒烟回答。
 
+### bundle 重建与 v3 冻结（2026-08-19）
+
+- **两次重型构建，不是一次**：`prepare_companion()` 拷进 bundle 的 `codex` 字节取自 **legacy artifact
+  目录**（`eval-data/bin/rondo-multi/<commit>-musl/`），不是两 bin 构建的产物。因此要拿到带修复的 CLI，
+  必须先补一次 legacy 单 bin 构建 + `prepare`，再做两 bin `v8-build` + `prepare-companion`。
+  两次均走本 worktree 的 `scripts/with-build-lock.sh`，`CARGO_BUILD_JOBS=2`（决策 016），
+  `status=0 stop=none`，分别 39m08s 与 32m41s，看门狗全程无告警。
+- 另两处硬约束以代码为准：`CARGO_TARGET_DIR` 必须恰好是
+  `eval-data/build/rondo-multi-<commit>-x86_64-unknown-linux-musl`（`_expected_target()`），
+  `RONDO_BUILD_METRICS_DIR` 必须在 `eval-data/build-metrics/` 下且每次构建一个全新目录
+  （`_validate_watchdog_summary()` 要求恰好一份 `summary.env` 且 `stop_reason=none`）。
+- **新身份**：`multi-m5-runtime-v2`，源码 `6fe1379e4a77a604407b335fd94b3cc81d53501a`，
+  `codex_sha256=7ec5ec76…f165`、`code_mode_host_sha256=1102b8f3…a64c`、`bwrap` 与 Codex 同资产、
+  `manifest_sha256=bd5575e5…3ff7`；`codex_baseline` 原样沿用。旧 bundle、旧锁、旧归档一字节未动。
+- **v3 冻结内容**：两把锁显式写 `runtime_lock_id`；门 1 增 `infra_taint_effect="infra_failed"` 与
+  `provider_contract`；门 2 增 `provider_retry_backoff_seconds="2"` 与 `unpriced_settlement`
+  （`unpriced_stop_threshold=1` + `any_unpriced_invalidates_observation=true`）。
+- **顺带关掉的真实缺口**：退避此前门 1 硬编码 2.0、门 2 读宿主 `paid_eval.retry_backoff_seconds`
+  （本机 `1.0`），两门实际不一致且都不受锁约束。按决策 043 的隔离方式统一从锁读，宿主全局量不动。
+- **明文投递成为机器判据**：新增 `member_message_delivery`（`plaintext` / `encrypted` / `absent`），
+  写进门 1 结果与 smoke 摘要。新 bundle 彩排 20/20 `input_text`、0 encrypted；旧 bundle 的 cm4 抓包
+  37 个 `encrypted_content`。这是冒烟五项验收里唯一原本只靠人看抓包的一项。
+- **clean smoke 账本**：旧 `$40` 批次已用尽且 cap 与磁盘文件绑定，无法就地扩容，故新建独立批次
+  `multi-m5-clean-smoke`（`eval-data/budgets/multi-m5-clean-smoke.json`）。上限不是手填而是
+  `SMOKE_MAX_RUNS(3) × 单次 run cap($23.10) = $69.30`，在 `open_smoke_ledger` 处机械校验，
+  且强制小于两道门共享的 `$120`。旧账本与旧归档保留。
+- 离线复验：定向门禁 216/216、`just eval-lock` 通过、`ready=true`、彩排七谓词全真且
+  `member_message_delivery=plaintext`、loopback 通过（`lock_id=multi-m5-runtime-v2`）。
+
 ### 本任务剩余步骤
 
 - 阶段 B 的离线准备已全部完成并提交。**$40 冒烟已执行并用尽**（四次，合计扣减 `$31.52`，
@@ -439,3 +468,6 @@
 | 041 | 账本槽位由 `60+12+3` 扩到 `+10`（每题一个诊断），$120 硬上限不变 | 槽位只是计数护栏、不是购买力；不扩就会出现「要解释退化的那次运行开不了」 | 预算 | 已采纳 |
 | 042 | 模型由 `gpt-5.6-sol` 换为 `gpt-5.6-terra`（用户决定），两侧同模型不变 | 官方页同日核对：terra 2/0.2/12 是 sol 5/0.5/30 的 40%。冻结上游 v0.147.0 的 catalog 已含 terra，且 `multi_agent_version=v2`/`tool_mode`/272k 上下文/medium effort 与 sol 全同，故不动二进制、不动 catalog、不动 `instruction_sha256` | 门 1+门 2 运行配置 | 已采纳 |
 | 043 | M-5 从**自己的锁**解析模型（`paid_provider_projection(model_id=...)`），宿主 `paid_eval.main_model` 保持 `sol` | 该别名是机器级全局量，翻成 terra 会改写同机所有已冻结 campaign 的 provider 身份 —— P2/B7 基线锁当场报 drift。按模型 id 反查别名可让两个冻结 campaign 在同一台机器上用不同模型，也把 M-5 的模型选择从机器配置移进任务合同 | 配置隔离 / 跨方向可比性 | 已采纳 |
+| 044 | 重试退避改为从 M-5 自己的锁读（`provider_retry_backoff_seconds="2"`），宿主 `paid_eval.retry_backoff_seconds` 不动 | 门 1 硬编码 2.0、门 2 却读宿主值（本机 1.0），两门实际用不同梯子且都不在冻结合同里。宿主那一项是机器级全局量，改它会波及同机其他 campaign —— 与决策 043 同一条隔离原则 | 门 1+门 2 运行配置 | 已采纳 |
+| 045 | clean smoke 另开批次 `multi-m5-clean-smoke`，上限由「三次 × 单次 run cap」机械推导（`$69.30`），并强制 < `$120` | 旧 `$40` 冒烟批次已用尽，且账本 cap 与磁盘文件绑定、不能就地扩容；沿用旧批次会把修复前后的行数混在一个账本里。上限推导而非手填，避免两个数字各自漂移 | 预算 / 证据分区 | 已采纳 |
+| 046 | 明文投递做成机器判据 `member_message_delivery`，写进门 1 结果与 smoke 摘要 | 它是冒烟五项验收里唯一只靠人看抓包的一项，而它恰好是区分「成员没收到可读任务」与「模型不遵守协议」的那一项 —— cm4 的错误归因就是这么产生的 | 门 1 证据 | 已采纳 |

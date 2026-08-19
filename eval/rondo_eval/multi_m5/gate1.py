@@ -35,12 +35,13 @@ from .budget import (
     phase_b_pricing,
     request_reservation_usd,
     require_frozen_provider,
+    retry_backoff_seconds,
     run_stop_reason,
     smoke_run_cap_usd,
     usage_envelope,
 )
 from .capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy
-from .collect import EvidenceError
+from .collect import EvidenceError, member_message_delivery
 from .command import build_multi_exec_command
 from .load import M5ContractError, load_runtime_identity, load_workflow_contract
 from .loopback import LOOPBACK_BEARER, _require_executable
@@ -60,8 +61,8 @@ REHEARSAL_TIMEOUT_SECONDS = 180
 # just burns the attempt budget in milliseconds and surfaces as an upstream
 # failure -- which is exactly how the first real smoke ended. The proxy scales
 # this exponentially (2, 4, 8, 16s) and stops early if the forward deadline
-# would pass, so the whole ladder fits inside one 180s forward window.
-GATE1_RETRY_BACKOFF_SECONDS = 2.0
+# would pass, so the whole ladder fits inside one 180s forward window. The base
+# now comes from the lock so gate 2 cannot retry on a different ladder.
 ProcessRunner = Callable[..., subprocess.CompletedProcess[bytes]]
 
 
@@ -152,7 +153,7 @@ def run_gate1_paid(
             guardian_pricing=pricing,
             guardian_effort=workflow.root_effort,
             max_attempts=5,
-            retry_backoff_seconds=GATE1_RETRY_BACKOFF_SECONDS,
+            retry_backoff_seconds=retry_backoff_seconds(),
             unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
             request_reservation_usd=reservation,
             run_cap_usd=run_cap,
@@ -265,7 +266,7 @@ def run_gate1_smoke(
         guardian_pricing=pricing,
         guardian_effort=workflow.root_effort,
         max_attempts=5,
-        retry_backoff_seconds=GATE1_RETRY_BACKOFF_SECONDS,
+        retry_backoff_seconds=retry_backoff_seconds(),
         unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
         request_reservation_usd=request_reservation_usd(),
         run_cap_usd=run_cap,
@@ -559,6 +560,11 @@ def _run_gate1_once(
         "infra_taint": taint,
         "evidence_source": "code_mode_rollout_trace",
         "trace_error": trace_error,
+        # Whether the member ever received a readable task at all. A run that
+        # fails with every `agent_message` labelled encrypted says nothing about
+        # the model's protocol compliance, so the distinction is recorded rather
+        # than left to be spotted in the capture.
+        "member_message_delivery": member_message_delivery(jsonl),
         # What the provider's token counts justify, kept apart from what the
         # ledger debited without them. A reservation held against a response
         # that never reported usage is exposure, not measured spend.

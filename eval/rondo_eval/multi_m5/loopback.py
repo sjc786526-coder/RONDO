@@ -17,7 +17,12 @@ from ..config import RepoPaths
 from ..contracts import Product, Side
 from .archive import archive_record
 from .command import build_multi_exec_command, team_capability_overrides
-from .load import M5ContractError, RuntimeIdentity, load_runtime_identity
+from .load import (
+    RUNTIME_LOCK_ID,
+    M5ContractError,
+    RuntimeIdentity,
+    load_runtime_identity,
+)
 from .store import scratch_root
 
 
@@ -370,7 +375,7 @@ def run_frozen_multi_team_publish_loopback(
     record = archive_record(
         evidence_kind="loopback",
         gate=1,
-        lock_id="multi-m5-runtime-v1",
+        lock_id=RUNTIME_LOCK_ID,
         side=Side.RONDO,
         product=Product.RONDO_MULTI,
         source_commit=runtime.source_commit,

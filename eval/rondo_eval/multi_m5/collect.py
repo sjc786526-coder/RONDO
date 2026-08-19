@@ -77,6 +77,55 @@ def collect_gate1_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any]:
     return dump
 
 
+def member_message_delivery(jsonl: str) -> dict[str, Any]:
+    """How the team's `agent_message` items reached the member on the wire.
+
+    A member request whose task text is labelled `encrypted_content` is the
+    defect that made cm4 unreadable: the provider rejects it as
+    `invalid_encrypted_content`, the member never completes a turn, and the
+    resulting "no publish, no evidence" looks exactly like a model that ignored
+    the protocol. Reading it off the capture keeps that distinction a measured
+    fact rather than something someone has to remember to check by eye.
+
+    `absent` is not `plaintext`: a run where no member request was ever built
+    has not demonstrated anything about delivery.
+    """
+
+    plaintext = 0
+    encrypted = 0
+    for line in jsonl.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        for item in parsed.get("input") or ():
+            if not isinstance(item, dict) or item.get("type") != "agent_message":
+                continue
+            for part in item.get("content") or ():
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "encrypted_content" or "encrypted_content" in part:
+                    encrypted += 1
+                else:
+                    plaintext += 1
+    if encrypted:
+        status = "encrypted"
+    elif plaintext:
+        status = "plaintext"
+    else:
+        status = "absent"
+    return {
+        "status": status,
+        "plaintext_parts": plaintext,
+        "encrypted_parts": encrypted,
+    }
+
+
 def _wire_calls(jsonl: str) -> dict[str, str]:
     """Map every tool call the model emitted on the wire to its raw input."""
 
@@ -262,4 +311,5 @@ __all__ = [
     "WAIT_TEAM_ACTIVITY_MARK",
     "TraceError",
     "collect_gate1_evidence",
+    "member_message_delivery",
 ]

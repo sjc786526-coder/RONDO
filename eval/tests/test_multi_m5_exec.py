@@ -61,6 +61,8 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
     max_concurrent_main,
     peak_reservation_usd,
     request_reservation_usd,
+    retry_backoff_seconds,
+    smoke_run_cap_usd,
     usage_envelope,
     RequestCappedLedger,
     open_phase_b_ledger,
@@ -831,10 +833,11 @@ class MultiM5SmokeIsolationTests(unittest.TestCase):
                 snapshot = ledger.snapshot()
                 self.assertEqual(snapshot["batch_id"], SMOKE_BATCH_ID)
                 self.assertEqual(Decimal(snapshot["total_cap_usd"]), SMOKE_CAP_USD)
-                # The 2026-08-18 authorization raised this to USD 40 with no
-                # attempt limit, so the slot count is sized to let the smoke run
-                # iterate; the dollar cap is what actually stops it.
-                self.assertEqual(SMOKE_CAP_USD, Decimal("40.00"))
+                # The clean smoke is bounded by attempts, and its cap is the
+                # mechanical product of those attempts and the per-run cap, so
+                # neither number can drift away from the other.
+                self.assertEqual(SMOKE_MAX_RUNS, 3)
+                self.assertEqual(SMOKE_CAP_USD, SMOKE_MAX_RUNS * smoke_run_cap_usd())
                 self.assertEqual(snapshot["max_runs"], SMOKE_MAX_RUNS)
         finally:
             for item in (path, lock):
@@ -874,6 +877,28 @@ class MultiM5FrozenModelIsolationTests(unittest.TestCase):
         self.assertNotEqual(
             config.paid_provider_projection().main_model, pinned.main_model
         )
+
+    def test_the_retry_ladder_is_the_locks_and_not_this_machines(self) -> None:
+        """Both gates retry on the frozen ladder, whatever the host file says.
+
+        `paid_eval.retry_backoff_seconds` is machine-wide. Gate 2 was reading it
+        while gate 1 used its own hard-coded 2s, so the two gates retried
+        differently and neither value was frozen. Same isolation as the model id:
+        M-5 reads its own lock and leaves the host alias to other campaigns.
+        """
+
+        contract = load_nondegradation_contract()
+        self.assertEqual(retry_backoff_seconds(contract), 2.0)
+        self.assertEqual(
+            retry_backoff_seconds(replace(contract, retry_backoff_seconds=7.0)), 7.0
+        )
+        config = load_runtime_config(RepoPaths.discover(Path.cwd()))
+        projection = config.paid_provider_projection(model_id=contract.root_model)
+        # The host ladder is not compared against the lock, because M-5 never
+        # sends it to the proxy: an unrelated edit must not fail an M-5 run.
+        drifted = replace(projection, retry_backoff_seconds=29.0)
+        require_frozen_provider(drifted, effort=contract.root_effort, contract=contract)
+        self.assertEqual(retry_backoff_seconds(contract), 2.0)
 
     def test_prepared_gate2_runs_agree_with_the_lock_on_both_sides(self) -> None:
         """Spec, adapter, argv and proxy must all name the locked model.

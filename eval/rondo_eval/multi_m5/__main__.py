@@ -166,6 +166,12 @@ def main(argv: list[str] | None = None) -> int:
                         "predicates": record.get("predicates"),
                         "reasons": record.get("reasons"),
                         "trace_error": record.get("trace_error"),
+                        # One of the smoke's acceptance conditions: a member
+                        # that never received a readable task cannot be read as
+                        # a model that ignored the protocol.
+                        "member_message_delivery": record.get(
+                            "member_message_delivery"
+                        ),
                         "request_count": record.get("request_count"),
                         "returncode": record.get("returncode"),
                         "batch_id": spend.get("batch_id"),

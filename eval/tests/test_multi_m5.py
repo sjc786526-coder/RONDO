@@ -18,6 +18,7 @@ from rondo_eval.contracts import (  # noqa: E402
 )
 from rondo_eval.multi_m5.archive import archive_record, required_archive_fields  # noqa: E402
 from rondo_eval.multi_m5.load import (  # noqa: E402
+    RUNTIME_LOCK_ID,
     M5ContractError,
     load_nondegradation_contract,
     load_runtime_identity,
@@ -38,6 +39,7 @@ from rondo_eval.multi_m5.loopback import (  # noqa: E402
 from rondo_eval.multi_m5.collect import (  # noqa: E402
     WAIT_TEAM_ACTIVITY_MARK,
     collect_gate1_evidence,
+    member_message_delivery,
 )
 from rondo_eval.multi_m5.predicates import evaluate_collaboration  # noqa: E402
 from rondo_eval.multi_m5.schedule import (  # noqa: E402
@@ -48,6 +50,9 @@ from rondo_eval.multi_m5.schedule import (  # noqa: E402
 
 
 FINDING = "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042"
+# The first Multi source that carries the code-mode plaintext fix. Runs frozen
+# against the earlier bundle are v2 evidence and stay that way.
+MULTI_SOURCE_COMMIT = "6fe1379e4a77a604407b335fd94b3cc81d53501a"
 
 
 class MultiM5ContractTests(unittest.TestCase):
@@ -137,10 +142,10 @@ class MultiM5ContractTests(unittest.TestCase):
 
     def test_runtime_lock_is_pending_until_the_bundle_is_frozen(self) -> None:
         identity = load_runtime_identity()
-        self.assertEqual(identity.source_commit, "7a2ff684c504c7530660f9a33a372daa949bdb00")
+        self.assertEqual(identity.source_commit, MULTI_SOURCE_COMMIT)
         self.assertTrue(
             identity.bundle_relpath.endswith(
-                "7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle"
+                f"{MULTI_SOURCE_COMMIT}-x86_64-unknown-linux-musl-runtime-bundle"
             )
         )
         if identity.status == "pending_freeze":
@@ -150,6 +155,153 @@ class MultiM5ContractTests(unittest.TestCase):
         else:
             self.assertTrue(identity.frozen)
             self.assertRegex(identity.codex_sha256 or "", r"^[0-9a-f]{64}$")
+
+
+class MultiM5V3ContractTests(unittest.TestCase):
+    """What v3 froze that v2 left in code or in machine-wide config."""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+
+    def _mutated(self, name: str, **changes: object) -> Path:
+        """Write a copy of a frozen lock with one field changed or removed."""
+
+        document = json.loads((EVAL_ROOT / "locks" / f"{name}.json").read_text("utf-8"))
+        for key, value in changes.items():
+            if value is None:
+                document.pop(key, None)
+            else:
+                document[key] = value
+        target = Path(self.directory.name) / f"{name}.json"
+        target.write_text(json.dumps(document), "utf-8")
+        return target
+
+    def test_both_gate_locks_name_the_new_runtime_bundle(self) -> None:
+        self.assertEqual(load_workflow_contract().raw["runtime_lock_id"], RUNTIME_LOCK_ID)
+        self.assertEqual(
+            load_nondegradation_contract().raw["runtime_lock_id"], RUNTIME_LOCK_ID
+        )
+
+    def test_a_gate_lock_pointing_at_the_old_bundle_is_refused(self) -> None:
+        # v1 was built before the code-mode plaintext fix. Accepting it here
+        # would let a run on the defective binary be filed as v3 evidence.
+        for name, loader in (
+            ("multi-m5-workflow-v3", load_workflow_contract),
+            ("multi-m5-nondegradation-v3", load_nondegradation_contract),
+        ):
+            with self.subTest(lock=name):
+                path = self._mutated(name, runtime_lock_id="multi-m5-runtime-v1")
+                with self.assertRaises(M5ContractError):
+                    loader(path)
+                path = self._mutated(name, runtime_lock_id=None)
+                with self.assertRaises(M5ContractError):
+                    loader(path)
+
+    def test_gate1_taint_effect_is_frozen(self) -> None:
+        self.assertEqual(load_workflow_contract().raw["infra_taint_effect"], "infra_failed")
+        for value in ("ignored", "counts_as_pass", None):
+            with self.subTest(value=value):
+                path = self._mutated("multi-m5-workflow-v3", infra_taint_effect=value)
+                with self.assertRaises(M5ContractError):
+                    load_workflow_contract(path)
+
+    def test_retry_backoff_comes_from_the_lock(self) -> None:
+        contract = load_nondegradation_contract()
+        self.assertEqual(contract.retry_backoff_seconds, 2.0)
+        path = self._mutated("multi-m5-nondegradation-v3", provider_retry_backoff_seconds="5")
+        self.assertEqual(load_nondegradation_contract(path).retry_backoff_seconds, 5.0)
+        for value in ("0", "31", "", None):
+            with self.subTest(value=value):
+                path = self._mutated(
+                    "multi-m5-nondegradation-v3", provider_retry_backoff_seconds=value
+                )
+                with self.assertRaises(M5ContractError):
+                    load_nondegradation_contract(path)
+
+    def test_unpriced_settlement_separates_stopping_from_counting(self) -> None:
+        contract = load_nondegradation_contract()
+        self.assertEqual(contract.unpriced_stop_threshold, 1)
+        self.assertIs(
+            contract.raw["unpriced_settlement"]["any_unpriced_invalidates_observation"],
+            True,
+        )
+        block = dict(contract.raw["unpriced_settlement"])
+        for change in (
+            {"unpriced_stop_threshold": 2},
+            {"any_unpriced_invalidates_observation": False},
+            {"basis": "  "},
+            {"note": "extra"},
+        ):
+            with self.subTest(change=change):
+                path = self._mutated(
+                    "multi-m5-nondegradation-v3", unpriced_settlement={**block, **change}
+                )
+                with self.assertRaises(M5ContractError):
+                    load_nondegradation_contract(path)
+        path = self._mutated("multi-m5-nondegradation-v3", unpriced_settlement=None)
+        with self.assertRaises(M5ContractError):
+            load_nondegradation_contract(path)
+
+
+class MultiM5MemberDeliveryTests(unittest.TestCase):
+    """Tell "the member never got a readable task" apart from "it ignored it".
+
+    Both shapes below are the ones the frozen binaries actually emit: the
+    encrypted one was taken from the cm4 capture on the pre-fix bundle, where
+    the plaintext task text was labelled `encrypted_content` and the provider
+    rejected all eight member requests.
+    """
+
+    @staticmethod
+    def _capture(*parts: dict[str, object]) -> str:
+        body = {
+            "input": [
+                {"type": "message", "role": "user", "content": [{"text": "task"}]},
+                {"type": "agent_message", "author": "/root", "content": list(parts)},
+            ]
+        }
+        return json.dumps(body) + "\n"
+
+    def test_plaintext_parts_are_reported_as_delivered(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "Message Type: NEW_TASK"},
+            {"type": "input_text", "text": "Read NOTES.md and publish the finding."},
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {"status": "plaintext", "plaintext_parts": 2, "encrypted_parts": 0},
+        )
+
+    def test_a_plaintext_task_labelled_encrypted_is_reported(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "Message Type: NEW_TASK"},
+            {
+                "type": "encrypted_content",
+                "encrypted_content": "Read NOTES.md and publish the finding.",
+            },
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {"status": "encrypted", "plaintext_parts": 1, "encrypted_parts": 1},
+        )
+
+    def test_no_member_request_is_not_a_delivery_success(self) -> None:
+        body = json.dumps({"input": [{"type": "message", "role": "user"}]}) + "\n"
+        self.assertEqual(member_message_delivery(body)["status"], "absent")
+        self.assertEqual(member_message_delivery("")["status"], "absent")
+        # `include: ["reasoning.encrypted_content"]` is a request parameter, not
+        # a message part; matching on the bare word would flag every request.
+        parameterised = json.dumps(
+            {"include": ["reasoning.encrypted_content"], "input": []}
+        )
+        self.assertEqual(member_message_delivery(parameterised)["status"], "absent")
+
+    def test_unparsable_lines_do_not_mask_an_encrypted_part(self) -> None:
+        capture = "not json\n" + self._capture(
+            {"type": "encrypted_content", "encrypted_content": "plain text"}
+        )
+        self.assertEqual(member_message_delivery(capture)["status"], "encrypted")
 
 
 class MultiM5PredicateTests(unittest.TestCase):
