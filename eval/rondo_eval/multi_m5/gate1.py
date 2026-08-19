@@ -54,6 +54,13 @@ from .store import capture_dir, persist_archive_record, scratch_root
 from .trace import TraceError, find_trace_bundle, load_rollout_trace
 
 REHEARSAL_TIMEOUT_SECONDS = 180
+# Root and its members call concurrently, so a rate-limited relay answers 429
+# to whichever request arrives second. Retrying those five times with no delay
+# just burns the attempt budget in milliseconds and surfaces as an upstream
+# failure -- which is exactly how the first real smoke ended. The proxy scales
+# this exponentially (2, 4, 8, 16s) and stops early if the forward deadline
+# would pass, so the whole ladder fits inside one 180s forward window.
+GATE1_RETRY_BACKOFF_SECONDS = 2.0
 ProcessRunner = Callable[..., subprocess.CompletedProcess[bytes]]
 
 
@@ -144,7 +151,7 @@ def run_gate1_paid(
             guardian_pricing=pricing,
             guardian_effort=workflow.root_effort,
             max_attempts=5,
-            retry_backoff_seconds=0.0,
+            retry_backoff_seconds=GATE1_RETRY_BACKOFF_SECONDS,
             unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
             request_reservation_usd=reservation,
             run_cap_usd=run_cap,
@@ -256,7 +263,7 @@ def run_gate1_smoke(
         guardian_pricing=pricing,
         guardian_effort=workflow.root_effort,
         max_attempts=5,
-        retry_backoff_seconds=0.0,
+        retry_backoff_seconds=GATE1_RETRY_BACKOFF_SECONDS,
         unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
         request_reservation_usd=request_reservation_usd(),
         run_cap_usd=run_cap,
