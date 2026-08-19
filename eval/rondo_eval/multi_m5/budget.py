@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import threading
-from decimal import Decimal
+from decimal import Decimal, ROUND_UP
 from pathlib import Path
 
-from ..api_budget_proxy import BudgetStopped, PersistentBudgetLedger
+from ..api_budget_proxy import (
+    BudgetStopped,
+    PersistentBudgetLedger,
+    UsageEnvelope,
+    maximum_usage_cost,
+)
 from ..contracts import ModelPricing
 from .load import M5ContractError, load_nondegradation_contract, load_workflow_contract
 
@@ -17,27 +22,123 @@ HARD_CAP_USD = Decimal("120.00")
 # gates share, and its rows must never look like contract evidence. The cap is
 # sized to the work (one gate-1-shaped flow is modelled at ~$3.20), not to the
 # authorization ceiling -- a cap is a stop line, not a spending target.
-SMOKE_BATCH_ID = "multi-m5-terra-smoke"
-SMOKE_LOCK_ID = "multi-m5-terra-smoke-v1"
-SMOKE_CAP_USD = Decimal("25.00")
-SMOKE_RUN_CAP_USD = Decimal("25.00")
-# Per-run ceiling. Gate 1 is modelled at ~$3.20/attempt on the frozen
-# gpt-5.6-terra snapshot; $24 is a generous multiple. Gate 2 TB runs are cheaper
-# and use GATE2_RUN_CAP_USD via ensure_run. The caps are deliberately unchanged
-# from the gpt-5.6-sol contract: terra only made them looser, never tighter.
-RUN_CAP_USD = Decimal("24.00")
-GATE1_RUN_CAP_USD = Decimal("24.00")
-GATE2_RUN_CAP_USD = Decimal("8.00")
-# A reservation also has to clear the Guardian additional-capacity check, so the
-# usable spend inside a run is `cap - 2 * reservation`, not `cap`. An $8
-# reservation would stop gate 1 at roughly its own point estimate; $4 keeps a
-# wide margin and still covers the worst realistic single turn, which on the
-# frozen gpt-5.6-terra snapshot is 272k input plus 32k output at ~$0.93.
-GATE1_REQUEST_RESERVATION_USD = Decimal("4.00")
-GATE2_REQUEST_RESERVATION_USD = Decimal("2.00")
+SMOKE_BATCH_ID = "multi-m5-code-mode-smoke"
+SMOKE_LOCK_ID = "multi-m5-code-mode-smoke-v1"
+# Separately authorized on 2026-08-18 at USD 40 with no attempt limit: iterate
+# until the code-mode evidence path works end to end on a real model, or the
+# budget stops it. The cap is the stop line, not a target. `max_runs` is sized
+# so "no attempt limit" is real while every attempt still takes a fresh id.
+SMOKE_CAP_USD = Decimal("40.00")
+SMOKE_MAX_RUNS = 40
 
 
 REQUEST_LIMIT_STOP_REASON = "logical_request_limit_exceeded"
+_CENT = Decimal("0.01")
+
+
+def usage_envelope(contract=None) -> UsageEnvelope:
+    """The frozen per-request token bounds for the M-5 model."""
+
+    raw = (contract or load_nondegradation_contract()).raw
+    block = raw.get("usage_envelope")
+    if not isinstance(block, dict):
+        raise M5ContractError("M-5 usage envelope is missing from the lock")
+    envelope = UsageEnvelope(
+        max_input_tokens=_positive_int(block.get("max_input_tokens")),
+        max_output_tokens=_positive_int(block.get("max_output_tokens")),
+    )
+    envelope.validate()
+    return envelope
+
+
+def request_reservation_usd(contract=None) -> Decimal:
+    """Derive the per-request reservation from the price table and envelope.
+
+    Mechanical rather than chosen: it is the most one request can legally cost
+    inside the frozen envelope, rounded up to the cent. Reserving less would let
+    a settled request cost more than it held and carry the batch past $120 after
+    the money was already spent; reserving a round number instead would make the
+    guarantee depend on someone re-checking the arithmetic after a price change.
+    """
+
+    loaded = contract or load_nondegradation_contract()
+    pricing = phase_b_pricing(loaded)
+    derived = maximum_usage_cost(pricing, usage_envelope(loaded))
+    reservation = derived.quantize(_CENT, rounding=ROUND_UP)
+    declared = loaded.raw.get("cost_forecast", {}).get("request_reservation_usd")
+    if declared is not None and Decimal(str(declared)) != reservation:
+        raise M5ContractError(
+            "declared request reservation differs from the price-derived value"
+        )
+    return reservation
+
+
+def max_concurrent_main(contract=None) -> int:
+    """How many Root/member requests the frozen product can have in flight.
+
+    Sizing a per-run cap needs this number, and so does refusing an unexpected
+    fifth caller. It is frozen in the lock rather than read from the product so
+    the harness stops instead of silently paying for a config that moved.
+    """
+
+    raw = (contract or load_nondegradation_contract()).raw
+    block = raw.get("concurrency")
+    if not isinstance(block, dict):
+        raise M5ContractError("M-5 concurrency contract is missing from the lock")
+    return _positive_int(block.get("max_concurrent_main_requests"))
+
+
+def peak_reservation_usd(contract=None) -> Decimal:
+    """Reserved dollars when every legal caller is in flight at once.
+
+    `reserve` also demands headroom for one Guardian request alongside each main
+    one, so the peak is `(mains + 1) * reservation`. A run cap below this rejects
+    a request the product is entitled to make, which shows up as a product
+    failure rather than the harness limit it is.
+    """
+
+    loaded = contract or load_nondegradation_contract()
+    return (max_concurrent_main(loaded) + 1) * request_reservation_usd(loaded)
+
+
+def _spend_allowance(loaded, key: str) -> Decimal:
+    block = loaded.raw.get("cost_forecast", {})
+    value = block.get(key)
+    if value is None:
+        raise M5ContractError(f"cost forecast is missing {key}")
+    amount = Decimal(str(value))
+    if amount <= 0:
+        raise M5ContractError(f"cost forecast {key} must be positive")
+    return amount
+
+
+def gate1_run_cap_usd(contract=None) -> Decimal:
+    """Peak in-flight reservations plus this gate's cumulative spend allowance."""
+
+    loaded = contract or load_nondegradation_contract()
+    return peak_reservation_usd(loaded) + _spend_allowance(
+        loaded, "gate1_run_spend_allowance_usd"
+    )
+
+
+def gate2_run_cap_usd(contract=None) -> Decimal:
+    loaded = contract or load_nondegradation_contract()
+    return peak_reservation_usd(loaded) + _spend_allowance(
+        loaded, "gate2_run_spend_allowance_usd"
+    )
+
+
+def default_run_cap_usd(contract=None) -> Decimal:
+    """Ledger-wide per-run maximum. Must admit the largest gate cap."""
+
+    loaded = contract or load_nondegradation_contract()
+    return max(gate1_run_cap_usd(loaded), gate2_run_cap_usd(loaded))
+
+
+def _positive_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise M5ContractError("M-5 lock integer is missing or not positive")
+    return value
 
 
 class BudgetError(ValueError):
@@ -213,6 +314,16 @@ def phase_b_pricing(contract=None) -> ModelPricing:
     return pricing
 
 
+def smoke_run_cap_usd(contract=None) -> Decimal:
+    """The smoke run gets the same shape of cap as a gate 1 attempt.
+
+    It runs the same flow with the same concurrency, so sizing it any smaller
+    would reject a request the product legitimately makes and blame the product.
+    """
+
+    return gate1_run_cap_usd(contract)
+
+
 def open_smoke_ledger(path: Path) -> PersistentBudgetLedger:
     """Ledger for the separately authorized connectivity smoke test.
 
@@ -225,8 +336,9 @@ def open_smoke_ledger(path: Path) -> PersistentBudgetLedger:
         path,
         batch_id=SMOKE_BATCH_ID,
         total_cap_usd=SMOKE_CAP_USD,
-        max_runs=1,
-        default_run_cap_usd=SMOKE_RUN_CAP_USD,
+        max_runs=SMOKE_MAX_RUNS,
+        default_run_cap_usd=smoke_run_cap_usd(),
+        usage_envelope=usage_envelope(),
     )
     snapshot = ledger.snapshot()
     if snapshot["batch_id"] != SMOKE_BATCH_ID or Decimal(
@@ -268,7 +380,11 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
         batch_id=BATCH_ID,
         total_cap_usd=HARD_CAP_USD,
         max_runs=max_runs,
-        default_run_cap_usd=RUN_CAP_USD,
+        default_run_cap_usd=default_run_cap_usd(loaded),
+        # With this set, every settled charge is bounded by its reservation, so
+        # the reserve-time cap arithmetic below is an upper bound on real spend
+        # rather than a best effort.
+        usage_envelope=usage_envelope(loaded),
     )
     snapshot = ledger.snapshot()
     if Decimal(snapshot["total_cap_usd"]) != HARD_CAP_USD:

@@ -255,3 +255,23 @@ await tools.collaboration__list_agents({});
 - `.env.local` 仅做存在性/权限/变量非空的静默检查，未打开内容。
 - 仅清理过本任务自建的探测产物目录，未触碰任何来源不明的对象。
 - 结论口径未放宽：至今**不得**表述为 M-5 通过、门 1 通过或未见退化。
+
+---
+
+## 勘误（2026-08-19，第五轮审查整改后追加）
+
+本文件保留为形成时点的历史记录，以下两节的结论已被取代，详见
+`agent_log/2026-08-19-060000-plan044-m5-phase-b-fifth-review-remediation.md`。
+
+1. **门 1 采集口径**：本文记为"待授权决定"。已决定并落地——改读冻结二进制自身的 rollout trace
+   （`CODEX_ROLLOUT_TRACE_ROOT`），不解析 JS、也不采信 `custom_tool_call_output`，并冻结
+   `multi-m5-workflow-v2`。彩排 stub 已同步改为 code-mode 形状。
+
+2. **冒烟账本与费用**：本文记的 "$4.253 / 21 条 metadata" 与留存账本的 "3 条 / $4.054" 对不上。
+   原因是两次冒烟共用同一固定 run id 且 `max_runs=1`，第二次成功外发意味着旧账本曾被重建或替换。
+   **`eval-data/budgets/multi-m5-terra-smoke.json` 与
+   `eval-data/multi-m5/archives/terra-smoke-records.jsonl` 不能作为完整费用记录使用。**
+   其中 $4.00 是 `response.failed` 无 usage 时的保守预留，中转站后台记录显示该请求实际 tokens 为空、费用 ¥0。
+   历史产物不改写、不删除；新的冒烟改用独立路径与全新身份。
+
+3. 本文"门 1 当前不可能通过"的判断**成立且已被本轮确认**，现已修复。

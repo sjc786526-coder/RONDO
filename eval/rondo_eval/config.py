@@ -204,13 +204,19 @@ def make_run_spec(
     terminal_bench_version: str,
     product: Product | None = None,
     provider_name: str | None = None,
+    model_id: str | None = None,
     timeout_seconds: int = 1800,
     max_retries: int = 0,
     budget_usd: float = 5.0,
 ) -> RunSpec:
-    """Create the only production RunSpec projection from rondo.local.toml."""
+    """Create the only production RunSpec projection from rondo.local.toml.
 
-    projection = config.paid_provider_projection(provider_name)
+    ``model_id`` pins the campaign's own frozen model instead of the host-wide
+    ``paid_eval.main_model`` alias. Leaving it unset preserves the historical
+    projection, so campaigns frozen against the host alias keep their identity.
+    """
+
+    projection = config.paid_provider_projection(provider_name, model_id=model_id)
     spec = RunSpec(
         side=side,
         batch_id=batch_id,

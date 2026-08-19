@@ -128,6 +128,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
         frozen_model_catalog_source_commit: str | None = None,
         frozen_model_catalog_provenance_sha256: str | None = None,
         team_state_enabled: bool | str = True,
+        subagent_model: str | None = None,
+        subagent_effort: str | None = None,
         extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -194,6 +196,16 @@ class UploadBinaryAdapter(HarborCodexAgent):
             # have and would put `team_state_enabled` on a `--strict-config`
             # upstream command line.
             raise AdapterError("only RONDO Multi can run with the team layer disabled")
+        if subagent_model is not None and (
+            not isinstance(subagent_model, str) or not _MODEL_NAME.fullmatch(subagent_model)
+        ):
+            raise AdapterError("pinned subagent model is unsafe")
+        if subagent_effort is not None and subagent_effort not in _REASONING_EFFORTS:
+            raise AdapterError("pinned subagent reasoning effort is unsupported")
+        if (
+            subagent_model is not None or subagent_effort is not None
+        ) and self._product is not Product.RONDO_MULTI:
+            raise AdapterError("only RONDO Multi can pin a member model")
         # Two catalog modes exist.  The shared mode is the E-B8 contract: one
         # artifact, identified by its own digest and provenance, loaded by both
         # sides.  The legacy mode is the Codex-only projection bound to the
@@ -246,6 +258,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._task_workdir = task_workdir
         self._task_requires_existing_git_repo = task_requires_existing_git_repo
         self._team_state_enabled = team_state
+        self._subagent_model = subagent_model
+        self._subagent_effort = subagent_effort
         self._frozen_model_catalog_path = frozen_model_catalog_path
         self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
         self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
@@ -680,7 +694,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 *common_overrides,
                 *catalog_overrides,
                 *team_capability_override_items(
-                    self._product, team_state=self._team_state_enabled
+                    self._product,
+                    team_state=self._team_state_enabled,
+                    subagent_model=self._subagent_model,
+                    subagent_effort=self._subagent_effort,
                 ),
                 *(
                     f"auto_review.{name}={json.dumps(value)}"
@@ -707,6 +724,8 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 main_effort=self._main_effort,
                 guardian_model=self._guardian_model,
                 guardian_effort=self._guardian_effort,
+                subagent_model=self._subagent_model,
+                subagent_effort=self._subagent_effort,
                 frozen_model_catalog_path=(
                     self.remote_frozen_model_catalog_path
                     if self._frozen_model_catalog_path is not None
@@ -769,6 +788,8 @@ def adapter_for(
     frozen_model_catalog_source_commit: str | None = None,
     frozen_model_catalog_provenance_sha256: str | None = None,
     team_state_enabled: bool = True,
+    subagent_model: str | None = None,
+    subagent_effort: str | None = None,
 ) -> UploadBinaryAdapter:
     adapter_type: type[UploadBinaryAdapter]
     if side is Side.CODEX:
@@ -808,6 +829,8 @@ def adapter_for(
         frozen_model_catalog_source_commit=frozen_model_catalog_source_commit,
         frozen_model_catalog_provenance_sha256=frozen_model_catalog_provenance_sha256,
         team_state_enabled=team_state_enabled,
+        subagent_model=subagent_model,
+        subagent_effort=subagent_effort,
     )
 
 
@@ -869,6 +892,19 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
         *(
             (("team_state_enabled", json.dumps(False)),)
             if not adapter._team_state_enabled
+            else ()
+        ),
+        # Emitted only by a campaign that pinned its own member identity, so
+        # every campaign frozen before pinning existed keeps a byte-identical
+        # agent-kwarg projection.
+        *(
+            (("subagent_model", adapter._subagent_model),)
+            if adapter._subagent_model is not None
+            else ()
+        ),
+        *(
+            (("subagent_effort", adapter._subagent_effort),)
+            if adapter._subagent_effort is not None
             else ()
         ),
     ]
@@ -960,6 +996,8 @@ def _validate_safe_codex_command(
     guardian_effort: str,
     frozen_model_catalog_path: str | None = None,
     team_state_enabled: bool = True,
+    subagent_model: str | None = None,
+    subagent_effort: str | None = None,
 ) -> None:
     if not command.startswith("set -o pipefail; "):
         raise AdapterError("Codex output pipeline must preserve the command exit status")
@@ -1022,12 +1060,16 @@ def _validate_safe_codex_command(
     )
     team_state_item = f"team_state_enabled={'true' if team_state_enabled else 'false'}"
     team_override = f"features.multi_agent_v2={team_table}"
-    subagent_model = (
-        f"agents.default_subagent_model={json.dumps(AGENT_DEFAULT_SUBAGENT_MODEL)}"
+    # A pinned campaign states its member identity here; anything else keeps the
+    # machine-wide default. Checking the resolved value rather than the constant
+    # is what makes this a check on the command actually generated.
+    subagent_model_item = (
+        "agents.default_subagent_model="
+        f"{json.dumps(subagent_model or AGENT_DEFAULT_SUBAGENT_MODEL)}"
     )
-    subagent_effort = (
+    subagent_effort_item = (
         "agents.default_subagent_reasoning_effort="
-        f"{json.dumps(AGENT_DEFAULT_SUBAGENT_EFFORT)}"
+        f"{json.dumps(subagent_effort or AGENT_DEFAULT_SUBAGENT_EFFORT)}"
     )
     if product is Product.RONDO_MULTI:
         if team_override not in command:
@@ -1038,10 +1080,12 @@ def _validate_safe_codex_command(
             raise AdapterError("RONDO Multi team_state_enabled override is ambiguous")
         if "expose_spawn_agent_model_overrides=false" not in command:
             raise AdapterError("RONDO Multi spawn model override must stay hidden")
-        if subagent_model not in command or subagent_effort not in command:
+        if subagent_model_item not in command or subagent_effort_item not in command:
             raise AdapterError("RONDO Multi default subagent model overrides are incomplete")
         if command.count("agents.default_subagent_model=") != 1:
             raise AdapterError("RONDO Multi default subagent model override is ambiguous")
+        if command.count("agents.default_subagent_reasoning_effort=") != 1:
+            raise AdapterError("RONDO Multi default subagent effort override is ambiguous")
     elif "team_state_enabled" in command or "features.multi_agent_v2=" in command:
         raise AdapterError("agent received unexpected Multi team capability configuration")
     elif "agents.default_subagent" in command:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import stat
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,16 @@ def readiness_report(*, common_root: Path | None = None) -> dict[str, Any]:
         if ok is False:
             missing.append(f"env_local.{key}")
 
+    if nondeg is not None and runtime is not None:
+        checks["gate2_model_projection"] = _probe_gate2_projection(root, nondeg)
+        if not checks["gate2_model_projection"].get("ok"):
+            missing.append("gate2_model_projection")
+
+    if nondeg is not None:
+        checks["budget_upper_bound"] = _probe_budget_upper_bound(nondeg)
+        if not checks["budget_upper_bound"].get("ok"):
+            missing.append("budget_upper_bound")
+
     if nondeg is not None:
         checks["docker_images_present"] = "not_checked"
         checks["docker_note"] = (
@@ -89,6 +100,110 @@ def readiness_report(*, common_root: Path | None = None) -> dict[str, Any]:
         "missing": missing,
         "checks": checks,
     }
+
+
+def _probe_gate2_projection(common_root: Path, contract) -> dict[str, Any]:
+    """Build both sides' gate 2 runs offline and check every model agrees.
+
+    Nothing here launches Docker or spends money: it is the same preparation the
+    paid path performs, stopped one step before execution. It exists because the
+    RunSpec quietly inherited the machine-wide model alias while the budget proxy
+    used the campaign's own -- a disagreement that only shows up as the provider
+    rejecting the very first request, halfway through a paid batch.
+    """
+
+    from tempfile import TemporaryDirectory
+
+    from ..config import ConfigError, RepoPaths, load_runtime_config
+    from ..terminal_bench.runner import TerminalBenchRunError, prepare_terminal_bench_run
+    from .gate2 import Gate2Error, TerminalBenchSlotExecutor, require_pinned_model
+    from .schedule import base_slots
+    from .store import scratch_root
+
+    result: dict[str, Any] = {"ok": False, "sides": {}}
+    try:
+        paths = RepoPaths.discover(Path.cwd())
+        config = load_runtime_config(paths)
+        slots = base_slots(contract)
+        by_side = {}
+        for slot in slots:
+            if slot.side not in by_side:
+                by_side[slot.side] = slot
+            if len(by_side) == 2:
+                break
+        # A throwaway staging root: this probe must not collide with, or leave
+        # anything behind in, the work area a real batch uses.
+        with TemporaryDirectory(prefix="m5-ready-", dir=scratch_root(common_root)) as raw:
+            executor = TerminalBenchSlotExecutor(
+                common_root=common_root,
+                authorize_docker=False,
+                paths=paths,
+                work_root=Path(raw),
+            )
+            for side, slot in by_side.items():
+                request = executor.build_request(
+                    slot, attempt=1, run_id=f"m5-g2-ready-{side.value}"
+                )
+                prepared = prepare_terminal_bench_run(config, request)
+                projection = require_pinned_model(prepared, contract)
+                result["sides"][side.value] = projection
+        result["ok"] = len(result["sides"]) == 2
+    except (
+        Gate2Error,
+        TerminalBenchRunError,
+        ConfigError,
+        M5ContractError,
+        OSError,
+        ValueError,
+    ) as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
+def _probe_budget_upper_bound(contract) -> dict[str, Any]:
+    """Confirm the reservation really bounds one request's maximum legal cost.
+
+    This is the property that turns the $120 line from an intention into an
+    upper bound, so it is checked before authorization rather than trusted.
+    """
+
+    from ..api_budget_proxy import maximum_usage_cost
+    from .budget import (
+        HARD_CAP_USD,
+        gate1_run_cap_usd,
+        gate2_run_cap_usd,
+        peak_reservation_usd,
+        phase_b_pricing,
+        request_reservation_usd,
+        usage_envelope,
+    )
+
+    try:
+        envelope = usage_envelope(contract)
+        pricing = phase_b_pricing(contract)
+        reservation = request_reservation_usd(contract)
+        worst_request = maximum_usage_cost(pricing, envelope)
+        peak = peak_reservation_usd(contract)
+        gate1_cap = gate1_run_cap_usd(contract)
+        gate2_cap = gate2_run_cap_usd(contract)
+        ok = (
+            reservation >= worst_request
+            and gate1_cap >= peak
+            and gate2_cap >= peak
+            and Decimal(contract.worst_legal_usd) < HARD_CAP_USD
+        )
+        return {
+            "ok": bool(ok),
+            "max_request_cost_usd": str(worst_request),
+            "request_reservation_usd": str(reservation),
+            "peak_in_flight_reservation_usd": str(peak),
+            "gate1_run_cap_usd": str(gate1_cap),
+            "gate2_run_cap_usd": str(gate2_cap),
+            "worst_legal_usd": contract.worst_legal_usd,
+            "hard_cap_usd": str(HARD_CAP_USD),
+        }
+    except (M5ContractError, ArithmeticError, ValueError) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _verify_codex_baseline(common_root: Path, baseline: dict[str, Any]) -> tuple[bool, str]:

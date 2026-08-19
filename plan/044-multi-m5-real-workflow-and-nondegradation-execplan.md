@@ -272,29 +272,38 @@
 - 044 分支提交后停止。未合并、未推送。真实 API、付费与 Docker 仍未执行，累计费用 **$0**
   （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本，归档只有 `loopback` 行）。
 
-### 移交入口（2026-08-19）
+### 移交入口（2026-08-19，第五轮审查整改后重写）
 
-- **单一入口**：`agent_log/2026-08-19-030000-plan044-m5-phase-b-handover-review.md`。
-  含三批工作、费用、未解问题与建议接手顺序。
-- **门 1 当前不可能通过**：冻结判据只认 `function_call`，而 `code_mode_host=true` 下真实模型
-  用 code-mode 的 `custom_tool_call`（JS `tools.collaboration__*`）调团队工具，实测顶层
-  `function_call` 数为 0。修它要改冻结的 `evidence_source`（决策 020），已暂停等授权。
-  **若扩展采集口径，必须同时把彩排 stub 改成 code-mode 形状**，否则彩排继续全绿却对真实失效无感。
-- 已修但值得复核：预算代理原先禁止并发 main 请求（`api_budget_proxy.py:1485`），
-  会让成员被本地拒成 400 并烧光门 1 三次尝试；现为默认关闭的 `allow_concurrent_main` 选项。
-- 待处理：上游 `response.failed` 已证实可为零 token / 零费用（中转站后台记录），
-  但仍按整笔预留（门 1 $4.00）保守结算，可能虚假吃掉 $120 预算并把门 2 推向掐断。
+- **历史入口**：`agent_log/2026-08-19-030000-plan044-m5-phase-b-handover-review.md` 记录第四轮交接时的事实；
+  其中"门 1 采集口径待定"与"smoke 账本"两节已被本轮取代，勘误见
+  `agent_log/2026-08-19-060000-plan044-m5-phase-b-fifth-review-remediation.md`。
+- **门 1 判据已重建并落地**（原"待授权"阻塞已关闭）。改的是观测手段而不是被测配置：
+  `evidence_source` 从 `responses_function_call_outputs` 换成 `code_mode_rollout_trace`，
+  读冻结二进制既有的 rollout trace（`CODEX_ROLLOUT_TRACE_ROOT`，无需改产品代码），
+  只认 Rust dispatch 侧记录的工具身份与 handler 返回值，并强制绑定回抓包里模型真实发出的 code cell。
+  已冻结 `multi-m5-workflow-v2`；**彩排 stub 已同步改成 code-mode 形状**（第四轮特别提醒的那一点）。
+- **门 2 模型贯通已修复**：RunSpec 此前仍继承宿主 `paid_eval.main_model`（sol），与只认 terra 的预算代理
+  不一致，真跑必被本地拒并记成产品失败。现已全链贯通并加了离线就绪自检。
+- **$120 已是数学上限**：预留改为「冻结 token 信封 × 价目表」机械推导（$2.22），信封在账本 settle 处强制。
+- **保守记账维持不变**：`response.failed` 无 usage 仍按整笔预留结算（无法机器绑定"未计费"证明时不放松安全线），
+  但预留额已从 $4.00 降到 $2.22，且报表把 `priced_usd` 与 `conservative_exposure_usd` 分开，
+  不再把预留描述成真实消费。
+- **新发现的门 1 风险（尚未验证）**：团队证据 fact 只在 `ToolCallSource::Direct` 时留存，code cell 内的
+  嵌套调用不留（`multidev/codex-rs/core/src/team/evidence.rs`）。若真实模型把所有调用都放进 cell，
+  `team_evidence` 谓词无法成立。彩排里 shell 走直接调用可满足，真实模型是否如此只能由冒烟回答。
 
 ### 本任务剩余步骤
 
-- 阶段 B 的**离线准备已全部完成并提交**，包括退化诊断闭环与 terra 切换。等待用户放行后按下表执行门 1、再执行门 2。
-- 门禁复跑口径：`tests.test_multi_m5`、`tests.test_multi_m5_exec`、`tests.test_terminal_bench` 与 `just eval-lock`。
-  全量 `just eval-test` 为 908 用例、无新增失败；其中 2 个 `ModuleNotFoundError: No module named 'eval'`
-  的加载错误（`test_l6_b10333_pair`、`test_local_m4_holdout_anchor`）在干净树上同样存在，属既有问题，不由本次引入。
-- **残留风险（未消除，需在花钱时优先处理）**：terra 在 CCTQ 中转站从未真实跑通过 —— 早先单智能体方向
-  测出「terra 不可用」，用户 2026-08-18 判断原因是中转站限制了模型类型。「现已解封」目前只是推断，无证据。
-  门 1 只有 3 次尝试，建议放行后先用 `rondo_eval.provider_probe`（单请求、`max_output_tokens=64`，约几分钱）
-  确认 terra 可用，再进门 1，避免白烧一次尝试。
+- 阶段 B 的**离线准备已全部完成并提交**。下一步是用已授权的 $40 独立冒烟账本验证真实模型下 trace 判据能否
+  看见协作（重点看上面的 `team_evidence` 风险），确认后才进正式门 1；门 1 通过后才进门 2。
+  冒烟入口：`python -m rondo_eval.multi_m5 smoke --label <全新 id> --authorize-paid-api <口令>`。
+  每次必须换 `--label`：独立 run id、独立捕获目录、`claim_run` 拒绝重用，既有产物存在时直接拒绝启动。
+- 门禁复跑口径：`tests.test_multi_m5`、`tests.test_multi_m5_exec`、`tests.test_multi_m5_trace_evidence`、
+  `tests.test_terminal_bench` 与 `just eval-lock`。全量 `just eval-test` 为 932 用例、0 失败；
+  其中 2 个 `ModuleNotFoundError: No module named 'eval'` 的加载错误
+  （`test_l6_b10333_pair`、`test_local_m4_holdout_anchor`）在干净树上同样存在，属既有问题，不由本次引入。
+- **terra 可用性已由 2026-08-18 冒烟证实**（中转站已解封，模型确实响应并调用了团队工具）。
+  仍建议每次冒烟先跑 `rondo_eval.provider_probe`（已内置于 `smoke` 入口，且在冻结 endpoint 校验之后）。
 
 ### 阻塞项
 
@@ -314,14 +323,17 @@
   `wait_agent` 输出；其它工具产出的"团队形状"负载记入 `unattributed` 并在判定中忽略、同时通过
   `CollaborationVerdict.ignored_evidence` 暴露，便于区分"模型伪造"与"wire 形状变了"。
   指令模板补充 `next_cursor` 续页要求（`MAX_OBSERVE_LIMIT=50`），并重算 `instruction_sha256`。
-- **wire 形状已用冻结二进制实测确认**（无 API）：团队工具以 `name=team_inspect` +
-  `namespace=collaboration` 的 function_call 直接调用即可执行，CLI 写回的 `function_call_output`
-  正文就是真实 dump 负载；`non_code_mode_only` 取 true/false 都如此（true 只是把团队工具移出
-  code-mode 嵌套面）。因此现有 `evidence_source` 设计成立，无需改动门 1 的运行配置。
+- **~~wire 形状已用冻结二进制实测确认~~（该结论已于第五轮作废，保留原文以存历史）**：当时用直接注入
+  function_call 的方式验证团队工具可执行，结论本身没错，但**那不是真实模型的调用方式**。
+  `code_mode_only` 模型只发 `custom_tool_call(name=exec)`，团队工具全在 JS 里调，顶层 function_call 数为 0，
+  因此 v1 的 `evidence_source` 在真实配置下不可能成立。现已改为 rollout-trace 口径并冻结 workflow v2。
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
-- 阶段 B：**付费入口与全部离线前置准备已就绪，真实运行未开始。**
-  §1 阶段 B 五项全部未做。不得开始花钱，除非用户按清单放行。
+- 阶段 B：**经五轮独立审查整改；离线准备已就绪，正式付费运行未开始。**
+  第五轮关闭了两个结构性阻断（门 1 判据在 code-mode 下不可能通过；门 2 RunSpec 与预算代理模型不一致），
+  并把 $120 从"意图"变成机械推导的数学上限。§1 阶段 B 五项仍全部未做。
+  已授权：$40 独立冒烟账本（不限次数，独立 batch/lock_id/归档，不动 $120）。
+  正式门 1 与门 2 仍须用户按清单单独放行。**不得表述为 M-5 通过、门 1 通过或未见退化。**
 
 ### 阶段 B 精确授权清单
 

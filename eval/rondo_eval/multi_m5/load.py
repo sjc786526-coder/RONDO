@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,8 @@ _PREDICATE_IDS = (
     "root_resolved",
     "root_woken",
 )
+WORKFLOW_LOCK_ID = "multi-m5-workflow-v2"
+NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v2"
 
 
 class M5ContractError(ValueError):
@@ -117,9 +120,9 @@ class RuntimeIdentity:
 
 
 def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
-    lock_path = path or LOCKS_DIR / "multi-m5-workflow-v1.json"
+    lock_path = path or LOCKS_DIR / f"{WORKFLOW_LOCK_ID}.json"
     raw = _read_json(lock_path)
-    if raw.get("schema_version") != 1 or raw.get("lock_id") != "multi-m5-workflow-v1":
+    if raw.get("schema_version") != 1 or raw.get("lock_id") != WORKFLOW_LOCK_ID:
         raise M5ContractError("workflow lock identity differs")
     if raw.get("carrier") != "host_codex_exec" or raw.get("docker") is not False:
         raise M5ContractError("gate 1 must be host-side without Docker")
@@ -162,10 +165,27 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
     if report != "TEAM_REPORT.md":
         raise M5ContractError("gate 1 report filename differs")
     source = raw.get("evidence_source")
-    if not isinstance(source, dict) or source.get("kind") != "responses_function_call_outputs":
-        raise M5ContractError("gate 1 dump must come from harness-captured Responses tool outputs")
+    if not isinstance(source, dict) or source.get("kind") != "code_mode_rollout_trace":
+        # v1's `responses_function_call_outputs` cannot observe a code-mode run
+        # at all: the team tools never appear on the wire. Accepting it here
+        # would let a run be judged by evidence that structurally cannot exist.
+        raise M5ContractError("gate 1 evidence must come from the rollout trace")
+    if source.get("trace_env") != "CODEX_ROLLOUT_TRACE_ROOT":
+        raise M5ContractError("gate 1 trace environment variable differs")
+    if source.get("binding") != "responses_custom_tool_call_to_code_cell":
+        raise M5ContractError("gate 1 evidence binding differs")
+    if source.get("required_tools") != [
+        {"namespace": "collaboration", "name": "team_inspect"},
+        {"namespace": "collaboration", "name": "wait_agent"},
+    ]:
+        raise M5ContractError("gate 1 required tool identities differ")
     if source.get("required_inspect_actions") != ["dump", "log"]:
         raise M5ContractError("gate 1 must collect team_inspect dump and log")
+    attempts_block = raw.get("attempts")
+    if not isinstance(attempts_block, dict) or attempts_block.get("max_attempts") != 3:
+        raise M5ContractError("gate 1 attempt contract is missing")
+    if not str(attempts_block.get("semantics") or "").strip():
+        raise M5ContractError("gate 1 attempt semantics are not stated")
     return WorkflowContract(
         lock_id=raw["lock_id"],
         instruction_path=instruction,
@@ -187,9 +207,9 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
 
 
 def load_nondegradation_contract(path: Path | None = None) -> NondegradationContract:
-    lock_path = path or LOCKS_DIR / "multi-m5-nondegradation-v1.json"
+    lock_path = path or LOCKS_DIR / f"{NONDEGRADATION_LOCK_ID}.json"
     raw = _read_json(lock_path)
-    if raw.get("schema_version") != 1 or raw.get("lock_id") != "multi-m5-nondegradation-v1":
+    if raw.get("schema_version") != 1 or raw.get("lock_id") != NONDEGRADATION_LOCK_ID:
         raise M5ContractError("non-degradation lock identity differs")
     if raw.get("runner") != "light_interleaved":
         raise M5ContractError("gate 2 must use the light interleaved runner")
@@ -265,6 +285,9 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
     if "diagnostic_v2_on_team_state_off" not in str(attribution.get("if_stable_one_way_degradation") or ""):
         raise M5ContractError("gate 2 degradation diagnostic is missing")
     _require_diagnostic(attribution.get("diagnostic"), tasks)
+    _require_usage_envelope(raw.get("usage_envelope"))
+    _require_concurrency(raw.get("concurrency"))
+    _require_cost_forecast(raw, cost)
     return NondegradationContract(
         lock_id=raw["lock_id"],
         catalog_path=catalog,
@@ -302,6 +325,12 @@ def _require_diagnostic(value: object, tasks: tuple[str, ...]) -> None:
         raise M5ContractError("gate 2 diagnostic contract is missing")
     expected = {
         "id": "diagnostic_v2_on_team_state_off",
+        # When it runs and what it may change are the two properties that keep
+        # this an attribution probe rather than a second chance at the verdict.
+        # Leaving them unchecked let a lock say "run it first and let it pass the
+        # task" while every other field still validated.
+        "runs_when": "that task's verdict is stable_one_way_degradation",
+        "verdict_effect": "none",
         "pre_run_forbidden": True,
         "side": Side.RONDO.value,
         "product": Product.RONDO_MULTI.value,
@@ -318,6 +347,108 @@ def _require_diagnostic(value: object, tasks: tuple[str, ...]) -> None:
         got = value.get(key)
         if got != want or type(got) is not type(want):
             raise M5ContractError(f"gate 2 diagnostic contract field {key} differs")
+    # An unknown key is either a field the orchestrator silently ignores or a
+    # second, contradictory statement of one it honours. Neither is safe to keep.
+    extra = set(value) - set(expected)
+    if extra:
+        raise M5ContractError(
+            "gate 2 diagnostic contract has unknown fields: " + ",".join(sorted(extra))
+        )
+
+
+def _require_usage_envelope(value: object) -> None:
+    """The per-request token bounds the reservation is derived from."""
+
+    if not isinstance(value, dict):
+        raise M5ContractError("gate 2 usage envelope is missing")
+    for key in ("max_input_tokens", "max_output_tokens"):
+        item = value.get(key)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+            raise M5ContractError(f"gate 2 usage envelope field {key} is invalid")
+    if not str(value.get("basis") or "").strip():
+        raise M5ContractError("gate 2 usage envelope has no stated basis")
+    extra = set(value) - {"max_input_tokens", "max_output_tokens", "basis"}
+    if extra:
+        raise M5ContractError("gate 2 usage envelope has unknown fields")
+
+
+def _require_concurrency(value: object) -> None:
+    """How many simultaneous callers the per-run cap has to admit."""
+
+    if not isinstance(value, dict):
+        raise M5ContractError("gate 2 concurrency contract is missing")
+    for key in ("max_concurrent_main_requests", "guardian_reserved_slots"):
+        item = value.get(key)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 1:
+            raise M5ContractError(f"gate 2 concurrency field {key} is invalid")
+    if not str(value.get("basis") or "").strip():
+        raise M5ContractError("gate 2 concurrency has no stated basis")
+    extra = set(value) - {
+        "max_concurrent_main_requests",
+        "guardian_reserved_slots",
+        "basis",
+    }
+    if extra:
+        raise M5ContractError("gate 2 concurrency has unknown fields")
+
+
+def _require_cost_forecast(raw: dict[str, Any], cost: dict[str, Any]) -> None:
+    """Recompute the declared forecast from the same basis the lock states.
+
+    A hand-maintained total drifts the moment a slot is added -- the attribution
+    diagnostic was already missing from it. Deriving both numbers here means a
+    lock cannot claim a forecast its own inputs do not produce.
+    """
+
+    basis = cost.get("basis")
+    if not isinstance(basis, dict):
+        raise M5ContractError("cost forecast has no machine-readable basis")
+    try:
+        codex_run = Decimal(str(basis["codex_run_usd"]))
+        multi_run = Decimal(str(basis["multi_run_usd"]))
+        gate1_attempt = Decimal(str(basis["gate1_attempt_usd"]))
+    except (KeyError, TypeError, ArithmeticError) as exc:
+        raise M5ContractError("cost forecast basis is incomplete") from exc
+    if min(codex_run, multi_run, gate1_attempt) <= 0:
+        raise M5ContractError("cost forecast basis must be positive")
+    for key in (
+        "request_reservation_usd",
+        "gate1_run_spend_allowance_usd",
+        "gate2_run_spend_allowance_usd",
+    ):
+        try:
+            if Decimal(str(cost[key])) <= 0:
+                raise M5ContractError(f"cost forecast {key} must be positive")
+        except (KeyError, TypeError, ArithmeticError) as exc:
+            raise M5ContractError(f"cost forecast {key} is missing or invalid") from exc
+    tasks = len(raw["tasks"])
+    base_pairs = tasks
+    conditional_pairs = (
+        tasks * int(raw["conditional_rerun"]["extra_effective_pairs_per_triggered_task"])
+    )
+    gate1_attempts = 3
+    point = base_pairs * (codex_run + multi_run) + gate1_attempt
+    worst = (
+        (base_pairs + conditional_pairs) * (codex_run + multi_run)
+        # Infra retries are priced as the dearer side; the diagnostic is Multi.
+        + int(raw["infra"]["max_infra_attempts_total"]) * multi_run
+        + gate1_attempts * gate1_attempt
+        + tasks * multi_run
+    )
+    for key, want in (
+        ("point_estimate_usd", point),
+        ("worst_legal_usd", worst),
+    ):
+        try:
+            declared = Decimal(str(cost[key]))
+        except (KeyError, TypeError, ArithmeticError) as exc:
+            raise M5ContractError(f"cost forecast {key} is missing") from exc
+        if declared != want:
+            raise M5ContractError(
+                f"cost forecast {key} differs from the basis: {declared} != {want}"
+            )
+    if worst >= Decimal(str(cost["hard_cap_usd"])):
+        raise M5ContractError("worst legal forecast is not under the hard cap")
 
 
 def load_runtime_identity(

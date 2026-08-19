@@ -16,28 +16,42 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from ..api_budget_proxy import LoopbackResponsesProxy, PersistentBudgetLedger, _UrllibTransport
+from ..api_budget_proxy import (
+    LoopbackResponsesProxy,
+    PersistentBudgetLedger,
+    _UrllibTransport,
+    exposure_summary,
+    stop_reason_class,
+)
 from ..config import RepoPaths
 from ..contracts import Product, Side
 from .archive import archive_record, harness_identity
 from .budget import (
-    GATE1_REQUEST_RESERVATION_USD,
-    GATE1_RUN_CAP_USD,
     SMOKE_BATCH_ID,
     SMOKE_LOCK_ID,
-    SMOKE_RUN_CAP_USD,
+    gate1_run_cap_usd,
+    max_concurrent_main,
     phase_b_pricing,
+    request_reservation_usd,
     require_frozen_provider,
     run_stop_reason,
+    smoke_run_cap_usd,
+    usage_envelope,
 )
 from .capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy
+from .collect import EvidenceError
 from .command import build_multi_exec_command
 from .load import M5ContractError, load_runtime_identity, load_workflow_contract
 from .loopback import LOOPBACK_BEARER, _require_executable
 from .paid import PaidAuthorization
-from .predicates import evaluate_collaboration
+from .predicates import (
+    REQUIRED_PREDICATE_IDS,
+    CollaborationVerdict,
+    evaluate_collaboration,
+)
 from .rehearsal import CollaborationStub
-from .store import capture_dir, persist_archive_record, scratch_root, smoke_archive_path
+from .store import capture_dir, persist_archive_record, scratch_root
+from .trace import TraceError, find_trace_bundle, load_rollout_trace
 
 REHEARSAL_TIMEOUT_SECONDS = 180
 ProcessRunner = Callable[..., subprocess.CompletedProcess[bytes]]
@@ -104,10 +118,17 @@ def run_gate1_paid(
         # second argument that quietly points somewhere else.
         raise Gate1Error("paid gate 1 upstream differs from the frozen provider endpoint")
     root = _common_root(common_root)
+    run_cap = gate1_run_cap_usd()
+    reservation = request_reservation_usd()
+    envelope = usage_envelope()
+    concurrent_main = max_concurrent_main()
     last: dict[str, Any] | None = None
     for attempt in range(1, workflow.max_attempts + 1):
         run_id = f"m5-g1-paid-a{attempt}"
-        ledger.ensure_run(run_id, cap_usd=GATE1_RUN_CAP_USD)
+        # `claim_run` rather than `ensure_run`: a re-invoked CLI must not be able
+        # to spend a second time against an id that already paid, overwrite its
+        # capture, or turn three attempts into six.
+        ledger.claim_run(run_id, cap_usd=run_cap)
         metadata_path = capture_dir(root, run_id) / "budget-metadata.json"
         metadata_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         proxy = LoopbackResponsesProxy(
@@ -125,12 +146,15 @@ def run_gate1_paid(
             max_attempts=5,
             retry_backoff_seconds=0.0,
             unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
-            request_reservation_usd=GATE1_REQUEST_RESERVATION_USD,
-            run_cap_usd=GATE1_RUN_CAP_USD,
+            request_reservation_usd=reservation,
+            run_cap_usd=run_cap,
             timeout_seconds=FORWARD_TIMEOUT_SECONDS,
             # Root and its members are concurrent by design; the proxy's
-            # single-main rule predates Multi.
-            allow_concurrent_main=True,
+            # single-main rule predates Multi. The limit is the frozen product's
+            # own maximum, so a fifth caller is a config drift the harness stops
+            # rather than a cost it silently absorbs.
+            max_concurrent_main=concurrent_main,
+            usage_envelope=envelope,
             _transport=transport,
         )
         with proxy:
@@ -146,6 +170,7 @@ def run_gate1_paid(
                 capture_upstream=proxy.base_url,
                 capture_bearer=proxy.downstream_api_key,
                 budget_probe=lambda: run_stop_reason(ledger, run_id),
+                exposure_probe=lambda: exposure_summary(ledger.snapshot(), run_id),
                 extra={
                     "rehearsal": False,
                     "attempt": attempt,
@@ -160,7 +185,14 @@ def run_gate1_paid(
             )
         last = result
         outcome = str(result["record"].get("outcome"))
-        if outcome != "infra_failed":
+        if outcome == "completed":
+            return result
+        # The contract buys three independent attempts, and gate 1 is a
+        # protocol demonstration: a model that fumbled the sequence once is
+        # exactly the case those attempts exist for. Only a hard stop -- the
+        # budget, an authorization, a capacity line -- ends the gate early,
+        # because retrying those spends money on a decision already made.
+        if outcome == "budget_stopped":
             return result
     assert last is not None
     return last
@@ -173,6 +205,8 @@ def run_gate1_smoke(
     upstream_base_url: str,
     ledger: PersistentBudgetLedger,
     provider,
+    run_id: str,
+    archive_path: Path,
     common_root: Path | None = None,
     persist: bool = True,
     transport: _UrllibTransport | None = None,
@@ -199,9 +233,15 @@ def run_gate1_smoke(
     if upstream_base_url.rstrip("/") != identity["provider_base_url"].rstrip("/"):
         raise Gate1Error("smoke upstream differs from the frozen provider endpoint")
     root = _common_root(common_root)
-    run_id = "m5-g1-terra-smoke"
-    ledger.ensure_run(run_id, cap_usd=SMOKE_RUN_CAP_USD)
+    if not isinstance(run_id, str) or not run_id.startswith("m5-g1-smoke-"):
+        # A fresh identity per smoke run. Reusing one made the second run's
+        # ledger replace the first's and left the pair impossible to read apart.
+        raise Gate1Error("smoke run id must be a fresh m5-g1-smoke-<label> id")
+    run_cap = smoke_run_cap_usd()
+    ledger.claim_run(run_id, cap_usd=run_cap)
     metadata_path = capture_dir(root, run_id) / "budget-metadata.json"
+    if metadata_path.parent.exists() and any(metadata_path.parent.iterdir()):
+        raise Gate1Error("smoke capture directory already holds artifacts")
     metadata_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     proxy = LoopbackResponsesProxy(
         upstream_base_url=upstream_base_url,
@@ -218,12 +258,13 @@ def run_gate1_smoke(
         max_attempts=5,
         retry_backoff_seconds=0.0,
         unbilled_retry_statuses=tuple(sorted({429, 500, 502, 503, 504})),
-        request_reservation_usd=GATE1_REQUEST_RESERVATION_USD,
-        run_cap_usd=SMOKE_RUN_CAP_USD,
+        request_reservation_usd=request_reservation_usd(),
+        run_cap_usd=run_cap,
         timeout_seconds=FORWARD_TIMEOUT_SECONDS,
         # Root and its members are concurrent by design; the proxy's
         # single-main rule predates Multi.
-        allow_concurrent_main=True,
+        max_concurrent_main=max_concurrent_main(),
+        usage_envelope=usage_envelope(),
         _transport=transport,
     )
     with proxy:
@@ -239,8 +280,9 @@ def run_gate1_smoke(
             capture_upstream=proxy.base_url,
             capture_bearer=proxy.downstream_api_key,
             budget_probe=lambda: run_stop_reason(ledger, run_id),
+            exposure_probe=lambda: exposure_summary(ledger.snapshot(), run_id),
             lock_id=SMOKE_LOCK_ID,
-            archive_file=smoke_archive_path(root),
+            archive_file=archive_path,
             extra={
                 "rehearsal": False,
                 "smoke_test": True,
@@ -251,6 +293,23 @@ def run_gate1_smoke(
                 **harness_identity(RepoPaths.discover(Path.cwd()).worktree_root),
             },
         )
+
+
+def _no_evidence_verdict(reason: str | None) -> CollaborationVerdict:
+    """Every predicate false, with the reason the evidence could not be read.
+
+    Deliberately not an exception: a run whose trace is unusable still produced
+    a real, archivable attempt, and the archive should say the evidence failed
+    rather than lose the run.
+    """
+
+    return CollaborationVerdict(
+        passed=False,
+        predicates={name: False for name in REQUIRED_PREDICATE_IDS},
+        reasons=(f"evidence:{reason or 'rollout trace unavailable'}",),
+        event_id=None,
+        ignored_evidence=(),
+    )
 
 
 def _workflow_finding() -> str:
@@ -276,6 +335,7 @@ def _run_gate1_once(
     capture_upstream: str | None = None,
     capture_bearer: str = LOOPBACK_BEARER,
     budget_probe: Callable[[], str | None] | None = None,
+    exposure_probe: Callable[[], dict[str, Any]] | None = None,
     lock_id: str | None = None,
     archive_file: Path | None = None,
     extra: dict[str, Any] | None = None,
@@ -303,11 +363,17 @@ def _run_gate1_once(
     if capture_path.exists():
         capture_path.unlink()
 
+    trace_root = capture_root / "rollout-trace"
+    if trace_root.exists():
+        shutil.rmtree(trace_root)
+    trace_root.mkdir(parents=True, mode=0o700)
+
     scratch = scratch_root(root)
     completed: subprocess.CompletedProcess[bytes] | None = None
     timed_out = False
     jsonl = ""
     request_count = 0
+    trace_error: str | None = None
     with tempfile.TemporaryDirectory(prefix="rondo-m5-gate1-", dir=scratch) as raw:
         home = Path(raw) / "codex-home"
         workspace = Path(raw) / "workspace"
@@ -338,6 +404,8 @@ def _run_gate1_once(
                 instruction=instruction,
                 model=workflow.root_model,
                 effort=workflow.root_effort,
+                member_model=workflow.member_model,
+                member_effort=workflow.raw["member_effort"],
             )
             env = {
                 "CODEX_HOME": str(home),
@@ -348,6 +416,11 @@ def _run_gate1_once(
                 "NO_PROXY": "127.0.0.1,localhost",
                 "no_proxy": "127.0.0.1,localhost",
                 "OPENAI_API_KEY": capture_bearer,
+                # Gate 1's evidence source. The frozen binary writes its own
+                # tool-dispatch record here; under code mode that is the only
+                # place the team tools it actually ran are visible. Spawned
+                # members share the root's writer, so one bundle covers the team.
+                "CODEX_ROLLOUT_TRACE_ROOT": str(trace_root),
             }
             try:
                 completed = process_runner(
@@ -371,14 +444,27 @@ def _run_gate1_once(
                 )
             jsonl = proxy.jsonl()
             request_count = len(proxy.bodies)
-            verdict = evaluate_collaboration(
-                {},
-                workspace=workspace,
-                finding_line=workflow.finding_line,
-                report_filename=workflow.report_filename,
-                max_members=workflow.max_members,
-                jsonl=jsonl,
-            )
+            # No trace means no evidence. Judging the run on the Responses
+            # capture alone would be judging text the model wrote about its own
+            # tool calls, which is exactly what this gate must not do.
+            try:
+                rollout = load_rollout_trace(find_trace_bundle(trace_root))
+            except TraceError as exc:
+                rollout = None
+                trace_error = str(exc)
+            try:
+                verdict = evaluate_collaboration(
+                    {},
+                    workspace=workspace,
+                    finding_line=workflow.finding_line,
+                    report_filename=workflow.report_filename,
+                    max_members=workflow.max_members,
+                    jsonl=jsonl,
+                    trace=rollout,
+                ) if rollout is not None else _no_evidence_verdict(trace_error)
+            except EvidenceError as exc:
+                trace_error = str(exc)
+                verdict = _no_evidence_verdict(trace_error)
             report = workspace / workflow.report_filename
             report_text = (
                 report.read_text("utf-8")
@@ -393,23 +479,43 @@ def _run_gate1_once(
     predicates = dict(verdict.predicates)
     ignored = list(verdict.ignored_evidence)
     event_id = verdict.event_id
+    stop_class = stop_reason_class(stop_reason)
+    if stop_class == "unknown":
+        # Never guess. An unrecognised stop reason means the run ended for a
+        # cause this classifier does not model, and filing it as either a budget
+        # stop or a product failure would be an invented fact.
+        raise Gate1Error(f"unclassified budget stop reason: {stop_reason}")
     if not timed_out and jsonl.strip() and verdict.passed and completed.returncode == 0:
         # Evidence is already complete; a late budget stop does not unmake it.
         passed = True
         outcome = "completed"
         reasons = list(verdict.reasons)
-    elif stop_reason is not None:
+    elif stop_class == "budget":
         # Not an agent failure: the proxy answered 429 and the model never got
         # the chance to finish. It is also not retried, that would only spend more.
         passed = False
         outcome = "budget_stopped"
         reasons = [stop_reason]
-    elif timed_out or not jsonl.strip():
+    elif stop_class == "infra":
+        # The upstream failed, usage never arrived, or a deadline expired. The
+        # ledger still debited the reservation, but no money ran out: calling
+        # this `budget_stopped` would send someone looking at the wrong thing,
+        # and it is a retryable attempt rather than a hard stop.
+        passed = False
+        outcome = "infra_failed"
+        reasons = [stop_reason]
+    elif timed_out or not jsonl.strip() or trace_error is not None:
+        # An unreadable trace is the evidence pipeline failing, not the team
+        # failing. Filing it as `agent_failed` would spend an attempt and record
+        # a product verdict this run never actually produced.
         outcome = "infra_failed"
         passed = False
-        reasons = (
-            ["timeout"] if timed_out else [f"empty capture rc={completed.returncode}"]
-        )
+        if timed_out:
+            reasons = ["timeout"]
+        elif not jsonl.strip():
+            reasons = [f"empty capture rc={completed.returncode}"]
+        else:
+            reasons = [f"evidence:{trace_error}"]
     else:
         passed = False
         outcome = "agent_failed"
@@ -420,6 +526,17 @@ def _run_gate1_once(
 
     extra_fields = {
         "stop_reason": stop_reason,
+        "stop_reason_class": stop_class,
+        "evidence_source": "code_mode_rollout_trace",
+        "trace_error": trace_error,
+        # What the provider's token counts justify, kept apart from what the
+        # ledger debited without them. A reservation held against a response
+        # that never reported usage is exposure, not measured spend.
+        **(
+            {"budget_exposure": exposure_probe()}
+            if exposure_probe is not None
+            else {}
+        ),
         "passed": passed,
         "predicates": predicates,
         "reasons": reasons,

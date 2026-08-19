@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-18 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 A 复验通过，阶段 B 付费入口已落地并通过独立验收，待用户授权
+最后更新：2026-08-18 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B 第五轮整改完成：门 1 判据改读 code-mode rollout trace（冻结 workflow v2），门 2 模型全链贯通，$120 成为数学上限；真实付费未执行
 
 ## 定位
 
@@ -252,7 +252,7 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 复验通过、已具备真实运行条件；阶段 B 未开始，不能表述为 M-5 通过。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 仍在进行，真实付费运行未开始，不能表述为 M-5 通过。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -294,23 +294,51 @@ store transition 期间为 unknown。Root 退休是独立终态覆盖层，只�
 
 ### M-5 真实运行与不退化验收
 
-阶段 A（Plan 044，无费用）经两轮整改后复验通过：冻结 bundle、两份运行合同与接线核验通过，门 1 判据的
-三处缺陷（同 Event 合取、Root 唤醒、证据按产出工具绑定）已全部关闭并各有反例回归。
-**阶段 B 的离线前置准备也已完成**：门 1 host runner 与彩排 stub、门 2 轻量交错执行面（fake）、$120 预算
-记账、归档落盘、就绪自检均已落地；门 1 完整协作彩排在冻结二进制上连续五次全绿 —— 真实 spawn 出成员、
-同一 Event 三个 Version 跨两位作者、证据由成员真实工具结果铸成、变更日志的唤醒规则逐条成立。
+阶段 A（Plan 044，无费用）已通过：冻结 bundle、两份运行合同与接线核验通过，门 1 判据的三处缺陷
+（同 Event 合取、Root 唤醒、证据按产出工具绑定）已关闭并各有反例回归。
+
+**阶段 B 经五轮独立审查整改，当前事实如下。**
+
+**门 1 判据已重建（第五轮）。** 冻结模型 `gpt-5.6-terra` 是 `tool_mode=code_mode_only`，配合
+`features.code_mode_host=true` 时，模型只发一个 `custom_tool_call(name=exec)`，团队工具全部由其中的
+JavaScript 调用；Responses 线上顶层 `function_call` 数为 0。原 v1 判据只认
+`responses_function_call_outputs`，**在真实配置下结构上不可能通过** —— 阶段 A 那次"实测确认 wire 形状"
+用的是直接注入 function_call，结论对但不是模型的真实行为。现改为读冻结二进制自身的 rollout trace
+（`CODEX_ROLLOUT_TRACE_ROOT`，产品既有能力，非新增代码）：判据只认 Rust dispatch 侧写下的
+`ToolCallStarted/Ended`（工具名、namespace、注册表收到的参数、handler 返回值），并要求每条 dispatch 能绑定回
+抓包里模型真实发出的 code cell（`model_visible_call_id` + `source_js`），否则 fail-closed。这样
+"模型自己打印一段像 dump 的文本"不构成证据。已冻结 `multi-m5-workflow-v2`，v1 归档不得充当 v2 证据；
+彩排 stub 同步改为真实 code-mode 形状（这是关键：只改采集不改 stub 等于把同一个错误再犯一遍）。
+
+**门 2 模型已全链贯通（第五轮）。** 预算代理取锁里的 terra，但 `make_run_spec` 仍走宿主
+`paid_eval.main_model` 别名，实际 adapter 拿到 sol，真跑会被代理本地拒掉并记成"产品失败"。现在锁里的
+root/member 模型与 effort 贯通 `TerminalBenchRequest → make_run_spec → adapter argv → proxy`，
+就绪自检离线构造 Codex/Multi 两侧 prepared run 并逐字段比对；全局 `AGENT_DEFAULT_SUBAGENT_MODEL` 恢复为
+sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign 的成员身份），M-5 从自己的锁显式传入。
+
+**$120 已是数学上限（第五轮）。** 此前每请求预留 $4/$2，而通用 Usage 合同允许的 terra 单请求最大合法费用
+约 $7.554，settle 时按实际计价可越过 cap。现在冻结 token 信封（输入 272k = terra 上下文窗口，输出 128k =
+通用合同上界），预留由信封 × 价目表机械推导（$2.22），信封在账本 settle 处强制，因此
+`charged ≤ reserved` 恒成立，reserve 时的批次校验即为真上限。每 run 上限由最大并发推导
+（Root + 3 成员 + Guardian = 5 × 预留），并发上限改为经校验的整数而非布尔。停止原因区分 budget 与 infra
+（上游失败、缺 usage、超时不再被贴成"预算停止"），未知原因 fail-closed；预留扣款与已计价消费分开记账。
+正式付费槽位改用 `claim_run`，重跑 CLI 无法二次消费同一 run id。
+
+**已知风险，尚未验证。** 团队证据 fact 只在 `ToolCallSource::Direct` 时留存，code cell 内的嵌套调用不留
+（`multidev/codex-rs/core/src/team/evidence.rs`，产品的明确设计）。若真实模型把所有工具调用都放进 cell，
+则冻结的 `team_evidence` 谓词无法成立。彩排中 shell 走直接调用即可满足（两种暴露面都开着，是合法模型行为），
+但真实模型是否如此**只能由付费冒烟回答**，不得预先假定。
+
 彩排由 stub 驱动协议，**证明的是产品与判据这条链路能走通，不是真实模型会遵守协议**，因此
-**不是**门 1 通过、更不是 M-5 通过。门 1 付费入口与门 2 真实执行器已接线（预算代理 + forward 捕获；
-既有 `terminal_bench` adapters/runner/results，不套 v7 campaign），但仍锁在冻结口令之后：无授权不加载
-密钥、不打开付费上游、不启动 Docker。付费部件已通过两轮独立验收（门 2 `$8`/`$24` cap 冲突、门 1 可用额度不足、预算掐断被误记成产品失败、
-共享账本槽位漏算门 1、真实槽位请求数写死使每 run 80 上限失效、离线捕获链被宿主代理劫持、门 2 真实批次不预检冻结 bundle，
-均已修复并补回归），仍须用户按清单单独授权真实 API/付费/Docker；授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+**不是**门 1 通过、更不是 M-5 通过。下一步：用已授权的 $40 独立冒烟账本（独立 batch/lock_id/归档，
+每次运行必须带全新 `--label`）验证真实模型下 trace 判据能否看见协作，确认后才进正式门 1；
+门 1 通过后才进门 2。授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
   fixture 里、指令规定工具顺序），只回答「真实模型下团队机制是否端到端真的发生」，不证明 Multi 在
   有分析负载的任务上更强；真实任务由门 2 的十个 TB 任务提供。任一门单独都不得引用为满足本目标。
-  详见 `eval/locks/multi-m5-workflow-v1.json` 的 `scope_limits` 与 Plan 044 决策 032。
+  详见 `eval/locks/multi-m5-workflow-v2.json` 的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
   阶段 A 前两项（工作流合同、runtime bundle）已冻结；独立验收要求先修好门 1 判据再谈第三项授权。

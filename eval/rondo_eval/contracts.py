@@ -144,7 +144,12 @@ TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML = (
     "{enabled=true,team_state_enabled=false,non_code_mode_only=false,"
     "expose_spawn_agent_model_overrides=false}"
 )
-AGENT_DEFAULT_SUBAGENT_MODEL = "gpt-5.6-terra"
+# Machine-wide default for a Multi run that has not pinned its own member model.
+# Campaigns that froze a different model pass it explicitly: flipping this
+# constant instead would silently restate the member identity of every other
+# frozen Multi campaign on the host, exactly as flipping `paid_eval.main_model`
+# did to the single-agent baselines.
+AGENT_DEFAULT_SUBAGENT_MODEL = "gpt-5.6-sol"
 AGENT_DEFAULT_SUBAGENT_EFFORT = "medium"
 
 
@@ -215,6 +220,8 @@ def team_capability_override_items(
     product: Product | None,
     *,
     team_state: bool = True,
+    subagent_model: str | None = None,
+    subagent_effort: str | None = None,
 ) -> tuple[str, ...]:
     """Return the ``-c`` items that turn Multi team capability on.
 
@@ -228,18 +235,25 @@ def team_capability_override_items(
     ``team_state=False`` is the gate 2 attribution diagnostic only. It keeps
     upstream V2 on and drops the RONDO team layer, so it must never be reachable
     from a run that produces a non-degradation observation.
+
+    ``subagent_model`` / ``subagent_effort`` let a campaign pin its own member
+    identity from its lock. Unset falls back to the machine-wide default, which
+    is what every campaign frozen before pinning existed still expects.
     """
 
     if product is not Product.RONDO_MULTI:
         return ()
     table = TEAM_CAPABILITY_MULTI_TOML if team_state else TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML
+    model = subagent_model or AGENT_DEFAULT_SUBAGENT_MODEL
+    effort = subagent_effort or AGENT_DEFAULT_SUBAGENT_EFFORT
+    if not isinstance(model, str) or not model:
+        raise ContractError("subagent model override is invalid")
+    if effort not in _REASONING_EFFORTS:
+        raise ContractError("subagent reasoning effort override is invalid")
     return (
         f"features.multi_agent_v2={table}",
-        f"agents.default_subagent_model={json.dumps(AGENT_DEFAULT_SUBAGENT_MODEL)}",
-        (
-            "agents.default_subagent_reasoning_effort="
-            f"{json.dumps(AGENT_DEFAULT_SUBAGENT_EFFORT)}"
-        ),
+        f"agents.default_subagent_model={json.dumps(model)}",
+        f"agents.default_subagent_reasoning_effort={json.dumps(effort)}",
     )
 
 
@@ -248,6 +262,8 @@ def team_capability_config_projection(
     product: Product | None,
     *,
     team_state: bool = True,
+    subagent_model: str | None = None,
+    subagent_effort: str | None = None,
 ) -> dict[str, object] | None:
     """Record whether this run configured Multi team capability.
 
@@ -269,10 +285,14 @@ def team_capability_config_projection(
         "team_state_enabled": enabled and team_state,
         "non_code_mode_only": False if enabled else None,
         "expose_spawn_agent_model_overrides": False if enabled else None,
-        "default_subagent_model": AGENT_DEFAULT_SUBAGENT_MODEL if enabled else None,
-        "default_subagent_reasoning_effort": AGENT_DEFAULT_SUBAGENT_EFFORT
-        if enabled
-        else None,
+        # Records what the command line actually pinned, so a row cannot claim a
+        # member model the run did not configure.
+        "default_subagent_model": (
+            (subagent_model or AGENT_DEFAULT_SUBAGENT_MODEL) if enabled else None
+        ),
+        "default_subagent_reasoning_effort": (
+            (subagent_effort or AGENT_DEFAULT_SUBAGENT_EFFORT) if enabled else None
+        ),
     }
 
 

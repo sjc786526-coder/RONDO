@@ -11,8 +11,6 @@ import json
 from pathlib import Path
 
 from ..contracts import (
-    AGENT_DEFAULT_SUBAGENT_EFFORT,
-    AGENT_DEFAULT_SUBAGENT_MODEL,
     Product,
     TEAM_CAPABILITY_MULTI_TOML,
     team_capability_override_items,
@@ -22,15 +20,27 @@ from .load import M5ContractError
 EVAL_PROVIDER = "rondo_eval_provider"
 
 
-def team_capability_overrides() -> tuple[str, ...]:
-    items = team_capability_override_items(Product.RONDO_MULTI)
+def team_capability_overrides(
+    *, member_model: str, member_effort: str
+) -> tuple[str, ...]:
+    """Team capability `-c` items with this campaign's own member identity.
+
+    The member model has to come from the gate 1 lock, not the machine-wide
+    default. A member started on a different model is rejected by the capture
+    proxy before it sends anything, so it dies silently and every collaboration
+    predicate reads false -- a product verdict produced entirely by a config
+    mismatch.
+    """
+
+    items = team_capability_override_items(
+        Product.RONDO_MULTI,
+        subagent_model=member_model,
+        subagent_effort=member_effort,
+    )
     expected = (
         f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
-        f"agents.default_subagent_model={json.dumps(AGENT_DEFAULT_SUBAGENT_MODEL)}",
-        (
-            "agents.default_subagent_reasoning_effort="
-            f"{json.dumps(AGENT_DEFAULT_SUBAGENT_EFFORT)}"
-        ),
+        f"agents.default_subagent_model={json.dumps(member_model)}",
+        f"agents.default_subagent_reasoning_effort={json.dumps(member_effort)}",
     )
     if items != expected:
         raise M5ContractError("team capability override drifted")
@@ -44,8 +54,13 @@ def build_multi_exec_command(
     instruction: str,
     model: str,
     effort: str,
+    member_model: str | None = None,
+    member_effort: str | None = None,
 ) -> list[str]:
     """Frozen Multi binary, strict config, team capability, Responses provider."""
+
+    member_model = member_model or model
+    member_effort = member_effort or effort
 
     overrides = (
         'approval_policy="never"',
@@ -61,7 +76,9 @@ def build_multi_exec_command(
         f"model_providers.{EVAL_PROVIDER}.request_max_retries=0",
         f"model_providers.{EVAL_PROVIDER}.stream_max_retries=0",
         f"model_reasoning_effort={json.dumps(effort)}",
-        *team_capability_overrides(),
+        *team_capability_overrides(
+            member_model=member_model, member_effort=member_effort
+        ),
     )
     command = [
         str(binary),

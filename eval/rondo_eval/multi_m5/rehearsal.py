@@ -4,6 +4,21 @@ The frozen Multi binary runs for real. This stub only replaces the model: it
 issues the tool calls, the CLI executes them against canonical team state, and
 the harness-captured Responses bodies are what the predicates judge.
 
+Collaboration turns are emitted the way a `code_mode_only` model emits them: a
+single `custom_tool_call` named `exec` whose input is JavaScript calling the
+tool. The rehearsal therefore drives the code-mode host, the nested dispatch
+path, and the rollout-trace evidence the paid gate reads -- not a shape only the
+stub uses.
+
+The one deliberate exception is the shell call. The team layer retains a tool
+result as an evidence fact only for `ToolCallSource::Direct`; a nested cell's
+output is folded into the cell result and never kept under its own call id. A
+run that puts *every* call in a cell therefore creates no facts, and the frozen
+`team_evidence` predicate cannot be satisfied at all. Both surfaces are exposed
+here (`ToolExposure::Direct`), so a direct shell call is legal model behaviour --
+but whether a real code-mode model chooses it is an open question that only the
+paid smoke run can answer.
+
 Sequence (one Event):
   spawn_agent → member exec (read NOTES) → member team_publish → Root wait wakes
   → Root team_publish on that Event (two authors) → team_route → member
@@ -26,6 +41,7 @@ from .capture import CaptureError
 from .loopback import collect_registered_tool_names
 
 COLLAB_NAMESPACE = "collaboration"
+_OUTPUT_TYPES = {"function_call_output", "custom_tool_call_output"}
 MEMBER_TASK = (
     "M5-COLLAB-MEMBER: read NOTES.md and publish the finding for the rehearsal"
 )
@@ -300,7 +316,7 @@ def _has_output(request: Mapping[str, Any], call_id: str) -> bool:
     for item in _input_items(request):
         if (
             isinstance(item, dict)
-            and item.get("type") == "function_call_output"
+            and item.get("type") in _OUTPUT_TYPES
             and item.get("call_id") == call_id
         ):
             return True
@@ -311,29 +327,42 @@ def _output_json(request: Mapping[str, Any], call_id: str) -> dict[str, Any] | N
     for item in _input_items(request):
         if not isinstance(item, dict):
             continue
-        if item.get("type") != "function_call_output" or item.get("call_id") != call_id:
+        if item.get("type") not in _OUTPUT_TYPES or item.get("call_id") != call_id:
             continue
-        raw = item.get("output")
-        text = raw if isinstance(raw, str) else ""
-        if not text and isinstance(raw, list):
-            parts = [
-                part.get("text")
-                for part in raw
-                if isinstance(part, dict) and isinstance(part.get("text"), str)
-            ]
-            text = "\n".join(part for part in parts if part)
+        return _decode_output(item.get("output"))
+    return None
+
+
+def _decode_output(raw: object) -> dict[str, Any] | None:
+    """Read the tool result out of a code-mode cell's printed output.
+
+    A code cell returns a status header followed by whatever the script printed,
+    as separate text parts. The JSON the stub asked for is one of those parts,
+    so each is tried rather than assuming the whole blob parses.
+    """
+
+    candidates: list[str] = []
+    if isinstance(raw, str):
+        candidates.append(raw)
+    elif isinstance(raw, list):
+        for part in raw:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                candidates.append(part["text"])
+    for text in reversed(candidates):
+        text = text.strip()
         if not text:
-            return None
+            continue
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            return None
+            continue
         if isinstance(parsed, str):
             try:
                 parsed = json.loads(parsed)
             except json.JSONDecodeError:
-                return None
-        return parsed if isinstance(parsed, dict) else None
+                continue
+        if isinstance(parsed, dict):
+            return parsed
     return None
 
 
@@ -344,7 +373,7 @@ def _outputs_with_prefix(
     for item in _input_items(request):
         if not isinstance(item, dict):
             continue
-        if item.get("type") != "function_call_output":
+        if item.get("type") not in _OUTPUT_TYPES:
             continue
         call_id = item.get("call_id")
         if not isinstance(call_id, str) or not (
@@ -376,38 +405,106 @@ def _first(pattern: re.Pattern[str], request: Mapping[str, Any]) -> str | None:
 
 
 def _shell_call(request: Mapping[str, Any], call_id: str, command: str) -> bytes:
+    """Run a shell command through the same code-mode cell the tools use.
+
+    Under code mode the registered-tool list is not resent on every request, so
+    probing it is unreliable; the cell's own shell binding is what the model
+    would use anyway.
+    """
+
+    """Emit the shell call *directly*, not inside a code cell.
+
+    This is not a shortcut, it is what the product requires. The team layer only
+    retains a tool result as an evidence fact when the call arrived through
+    `ToolCallSource::Direct`; a nested code-mode step's output is folded into its
+    cell's result and never kept under its own call id
+    (`core/src/team/evidence.rs`). So a run whose every tool call goes through a
+    cell produces no facts at all, and `team_evidence` -- a frozen gate 1
+    predicate -- becomes unsatisfiable. The collaboration tools stay in cells
+    because that is how a `code_mode_only` model calls them; the fact-producing
+    shell call has to be direct for any evidence to exist.
+    """
+
     names = collect_registered_tool_names(request)
     if "exec_command" in names:
-        return _call(call_id, "exec_command", {"cmd": command}, namespace=None)
+        return _direct_call(call_id, "exec_command", {"cmd": command})
     if "shell_command" in names:
-        return _call(call_id, "shell_command", {"command": command, "timeout_ms": 10_000}, namespace=None)
+        return _direct_call(
+            call_id, "shell_command", {"command": command, "timeout_ms": 10_000}
+        )
     if "shell" in names:
-        return _call(call_id, "shell", {"command": command, "timeout_ms": 10_000}, namespace=None)
-    raise RehearsalError(f"no shell tool registered among {sorted(names)}")
+        return _direct_call(
+            call_id, "shell", {"command": command, "timeout_ms": 10_000}
+        )
+    raise RehearsalError(f"no direct shell tool registered among {sorted(names)}")
+
+
+def _direct_call(call_id: str, name: str, arguments: Mapping[str, Any]) -> bytes:
+    return _sse(
+        call_id,
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "call_id": call_id,
+                "name": name,
+                "arguments": json.dumps(dict(arguments), separators=(",", ":")),
+            },
+        },
+    )
 
 
 def _team_call(call_id: str, name: str, arguments: Mapping[str, Any]) -> bytes:
-    return _call(call_id, name, arguments, namespace=COLLAB_NAMESPACE)
+    return _call(call_id, name, arguments)
 
 
-def _call(
-    call_id: str,
-    name: str,
-    arguments: Mapping[str, Any],
-    *,
-    namespace: str | None,
-) -> bytes:
-    item: dict[str, Any] = {
-        "type": "function_call",
-        "call_id": call_id,
-        "name": name,
-        "arguments": json.dumps(dict(arguments), separators=(",", ":")),
-    }
-    if namespace:
-        item["namespace"] = namespace
+def _call(call_id: str, name: str, arguments: Mapping[str, Any]) -> bytes:
+    """Emit the call the way a `code_mode_only` model actually emits it.
+
+    One `custom_tool_call` named `exec` whose input is JavaScript that awaits the
+    tool. This is not cosmetic: it is the shape that makes the rehearsal exercise
+    the code-mode host, the nested dispatch path, and the rollout-trace evidence
+    the paid gate reads. The previous stub emitted a top-level `function_call`,
+    which the binary happily executed -- and which is why a rehearsal could go
+    green while the real wire shape had no evidence path at all.
+    """
+
+    return _exec_call(call_id, _tool_script(name, arguments))
+
+
+def _tool_script(name: str, arguments: Mapping[str, Any]) -> str:
+    payload = json.dumps(dict(arguments), separators=(",", ":"))
+    # Resolve the binding at runtime rather than hard-coding one spelling. Which
+    # namespace a tool ends up under is a registry decision, and guessing wrong
+    # makes the stub fail in a way that reads as the product failing. Whichever
+    # binding is picked, the judge still reads the dispatch the registry
+    # recorded, so this cannot widen what counts as evidence.
+    return _pick_script([f"{COLLAB_NAMESPACE}__{name}", name], payload)
+
+
+def _pick_script(candidates: list[str], payload: str) -> str:
+    names = json.dumps(candidates, separators=(",", ":"))
+    return (
+        f"const names = {names}; "
+        "const fn = names.map(n => tools[n]).find(f => typeof f === 'function'); "
+        "if (!fn) { throw new Error('no tool among ' + names.join(',') "
+        "+ ' available: ' + Object.keys(tools).join(',')); } "
+        f"const r = await fn({payload}); text(JSON.stringify(r));"
+    )
+
+
+def _exec_call(call_id: str, source: str) -> bytes:
     return _sse(
         call_id,
-        {"type": "response.output_item.done", "item": item},
+        {
+            "type": "response.output_item.done",
+            "item": {
+                "type": "custom_tool_call",
+                "call_id": call_id,
+                "name": "exec",
+                "input": source,
+            },
+        },
     )
 
 

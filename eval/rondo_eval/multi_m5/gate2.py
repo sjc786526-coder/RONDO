@@ -21,7 +21,9 @@ from ..api_budget_proxy import (
     PersistentBudgetLedger,
     Usage,
     _UrllibTransport,
+    exposure_summary,
     price_usage,
+    stop_reason_class,
 )
 from ..config import RepoPaths, RuntimeConfig, load_runtime_config
 from ..contracts import BinaryManifest, Product, RunOutcome, Side
@@ -53,14 +55,16 @@ from ..terminal_bench.runner import (
 from .archive import archive_record, harness_identity
 from .budget import (
     BATCH_ID,
-    GATE2_REQUEST_RESERVATION_USD,
-    GATE2_RUN_CAP_USD,
     REQUEST_LIMIT_STOP_REASON,
     RequestCappedLedger,
+    gate2_run_cap_usd,
+    max_concurrent_main,
     phase_b_pricing,
+    request_reservation_usd,
     require_frozen_provider,
     run_request_count,
     run_stop_reason,
+    usage_envelope,
 )
 from .bundle import load_side_manifest
 from .capture import FORWARD_TIMEOUT_SECONDS
@@ -166,6 +170,7 @@ class TerminalBenchSlotExecutor:
         self._lease = lease
         self._materializer = materializer
         self._provider_identity: dict[str, str] | None = None
+        self._model_projection: dict[str, str] | None = None
 
     def execute(self, slot: Slot, *, attempt: int, run_id: str) -> SlotResult:
         request = self.build_request(slot, attempt=attempt, run_id=run_id)
@@ -177,6 +182,7 @@ class TerminalBenchSlotExecutor:
         """Frozen-task Terminal-Bench request. No campaign id, no preflight receipt."""
 
         del attempt
+        contract = load_nondegradation_contract()
         task = self._task(slot.task_id)
         binary = self._binary(slot.side)
         seccomp = self._seccomp()
@@ -197,8 +203,24 @@ class TerminalBenchSlotExecutor:
             provider_transport_base_url="http://host.docker.internal:9/v1",
             timeout_seconds=task.timeout_seconds,
             max_retries=0,
-            budget_usd=float(GATE2_RUN_CAP_USD),
+            budget_usd=float(gate2_run_cap_usd(contract)),
             frozen_task=task,
+            # The models come from this campaign's own lock, not the host-wide
+            # `paid_eval.main_model` alias. Without this the proxy metered terra
+            # while the adapter launched the binary on the host default, and the
+            # proxy would reject every request the run made.
+            pinned_model_id=contract.root_model,
+            # Only Multi has members. The frozen upstream side gets the same root
+            # model and nothing else, which is what keeps the two sides
+            # comparable without giving Codex a configuration it cannot parse.
+            pinned_subagent_model=(
+                contract.member_model if slot.product is Product.RONDO_MULTI else None
+            ),
+            pinned_subagent_effort=(
+                str(contract.raw["member_effort"])
+                if slot.product is Product.RONDO_MULTI
+                else None
+            ),
             require_container_metrics=True,
             seccomp_profile_path=str(seccomp) if seccomp is not None else None,
             seccomp_profile_source_sha256=(
@@ -259,11 +281,12 @@ class TerminalBenchSlotExecutor:
                 max_attempts=provider.max_attempts,
                 retry_backoff_seconds=provider.retry_backoff_seconds,
                 unbilled_retry_statuses=provider.unbilled_retry_statuses,
-                request_reservation_usd=GATE2_REQUEST_RESERVATION_USD,
-                run_cap_usd=GATE2_RUN_CAP_USD,
+                request_reservation_usd=request_reservation_usd(contract),
+                run_cap_usd=gate2_run_cap_usd(contract),
                 timeout_seconds=FORWARD_TIMEOUT_SECONDS,
                 # Root and its members are concurrent by design.
-                allow_concurrent_main=True,
+                max_concurrent_main=max_concurrent_main(contract),
+                usage_envelope=usage_envelope(contract),
                 _transport=self._transport,
             )
             with proxy:
@@ -274,6 +297,14 @@ class TerminalBenchSlotExecutor:
                     config,
                     projected,
                     materializer=self._materializer,
+                )
+                # Last chance before Docker starts: the binary the adapter is
+                # about to launch must be pointed at the same model the proxy
+                # will pay for. A mismatch is a harness defect, and letting it
+                # through would produce a rejected run that reads as the
+                # product failing the task.
+                self._model_projection = require_pinned_model(
+                    prepared, contract, proxy_model=proxy.main_model
                 )
                 harbor = asyncio.run(self._harbor(prepared, proxy.downstream_api_key))
             parsed = parse_single_task_result(
@@ -317,6 +348,8 @@ class TerminalBenchSlotExecutor:
         }
         if self._provider_identity is not None:
             extra["provider_identity"] = dict(self._provider_identity)
+        if self._model_projection is not None:
+            extra["model_projection"] = dict(self._model_projection)
         extra.update(harness_identity(self._paths.worktree_root))
         evidence = docker_summary(docker_evidence)
         if evidence is not None:
@@ -364,6 +397,54 @@ class TerminalBenchSlotExecutor:
         if digest != _SECCOMP_SOURCE_SHA256:
             raise Gate2Error("tracked Terminal-Bench seccomp profile digest differs")
         return profile
+
+
+def require_pinned_model(
+    prepared: PreparedTerminalBenchRun,
+    contract,
+    *,
+    proxy_model: str | None = None,
+) -> dict[str, str]:
+    """Fail closed unless spec, adapter, argv and proxy all name the lock's model.
+
+    These four are produced by different code paths from different sources, and
+    for a while they disagreed: the proxy resolved the campaign's own model while
+    the RunSpec still inherited the machine-wide alias. The run would then be
+    rejected locally on its very first request and be recorded as the agent
+    failing the task. Comparing them here, before Docker starts, makes that a
+    harness error instead of a fabricated observation about the product.
+    """
+
+    spec_model = prepared.spec.provider.main_model
+    adapter_model = str(prepared.adapter.model_name).split("/", maxsplit=1)[-1]
+    argv = "\0".join(prepared.command.argv)
+    expected = contract.root_model
+    mismatches: list[str] = []
+    if spec_model != expected:
+        mismatches.append("run_spec_main_model")
+    if adapter_model != expected:
+        mismatches.append("adapter_model_name")
+    if f"--model\0{prepared.spec.provider.provider_id}/{expected}" not in argv:
+        mismatches.append("harbor_argv_model")
+    if proxy_model is not None and proxy_model != expected:
+        mismatches.append("budget_proxy_model")
+    if prepared.spec.provider.main_effort != contract.root_effort:
+        mismatches.append("run_spec_main_effort")
+    multi = prepared.spec.product is Product.RONDO_MULTI
+    if multi and prepared.side_member_model() != contract.member_model:
+        mismatches.append("adapter_subagent_model")
+    if mismatches:
+        raise Gate2Error(
+            "prepared gate 2 run differs from the frozen model contract: "
+            + ",".join(sorted(mismatches))
+        )
+    return {
+        "run_spec_main_model": spec_model,
+        "adapter_model_name": adapter_model,
+        "adapter_subagent_model": prepared.side_member_model() if multi else "",
+        "budget_proxy_model": proxy_model or "",
+        "main_effort": prepared.spec.provider.main_effort,
+    }
 
 
 def run_gate2_real(
@@ -566,8 +647,13 @@ def run_light_interleaved(
             run_id = _run_id(slot, attempt)
             if ledger is not None:
                 try:
-                    cap = GATE2_RUN_CAP_USD if evidence_kind == "real_api" else None
-                    ledger.ensure_run(run_id, cap_usd=cap)
+                    if evidence_kind == "real_api":
+                        # A paid slot consumes its id. Re-running the CLI after an
+                        # interrupted batch must fail loudly rather than pay twice
+                        # for the same slot and overwrite its evidence.
+                        ledger.claim_run(run_id, cap_usd=gate2_run_cap_usd(loaded))
+                    else:
+                        ledger.ensure_run(run_id, cap_usd=None)
                 except BudgetStopped as exc:
                     stopped = True
                     stop_reason = str(exc)
@@ -665,12 +751,47 @@ def run_light_interleaved(
                         return produced
                     continue
                 if exhausted is not None:
+                    exhausted_class = stop_reason_class(exhausted)
+                    if exhausted_class == "unknown":
+                        raise Gate2Error(
+                            f"unclassified budget stop reason: {exhausted}"
+                        )
+                    if exhausted_class == "infra":
+                        # The upstream failed or never reported usage. The ledger
+                        # still debited the reservation, but nothing ran out of
+                        # money: this is a retryable infra attempt, and calling it
+                        # a budget stop would end the whole batch on a hiccup.
+                        infra_used += 1
+                        emit(
+                            outcome=RunOutcome.INFRA_FAILED.value,
+                            counts_as_effective=False,
+                            extra={
+                                **result.extra,
+                                "stop_reason": exhausted,
+                                "stop_reason_class": exhausted_class,
+                                "attempt": attempt,
+                                "infra_used": infra_used,
+                                "request_count": result.request_count,
+                            },
+                        )
+                        if infra_used >= loaded.max_infra_attempts_total:
+                            stopped = True
+                            stop_reason = "max_infra_attempts_total"
+                            return produced
+                        if attempt == loaded.max_slot_attempts:
+                            return produced
+                        continue
                     stopped = True
                     stop_reason = exhausted
                     return emit(
                         outcome=RunOutcome.BUDGET_STOPPED.value,
                         counts_as_effective=False,
-                        extra={**result.extra, "stop_reason": exhausted, "attempt": attempt},
+                        extra={
+                            **result.extra,
+                            "stop_reason": exhausted,
+                            "stop_reason_class": exhausted_class,
+                            "attempt": attempt,
+                        },
                     )
             if result.request_count > loaded.max_requests_per_run:
                 result = SlotResult(
@@ -781,6 +902,11 @@ def run_light_interleaved(
         "stop_reason": stop_reason,
         "passed": gate2_passed(loaded, verdicts, stopped=stopped),
         "ledger_snapshot": None if ledger is None else ledger.snapshot(),
+        # Priced spend separated from conservatively debited reservations, so a
+        # batch is not reported as having cost what it merely held.
+        "budget_exposure": (
+            None if ledger is None else exposure_summary(ledger.snapshot())
+        ),
     }
 
 

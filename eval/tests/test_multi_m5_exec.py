@@ -29,7 +29,10 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     LoopbackResponsesProxy,
     Usage,
     _UrllibTransport,
+    exposure_summary,
+    maximum_usage_cost,
     price_usage,
+    stop_reason_class,
 )
 from rondo_eval.config import ConfigError, RepoPaths, load_runtime_config  # noqa: E402
 from rondo_eval.docker_supervisor import (  # noqa: E402
@@ -45,14 +48,17 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
     SMOKE_BATCH_ID,
     SMOKE_CAP_USD,
     SMOKE_LOCK_ID,
+    SMOKE_MAX_RUNS,
     open_smoke_ledger,
-    GATE1_REQUEST_RESERVATION_USD,
-    GATE1_RUN_CAP_USD,
-    GATE2_REQUEST_RESERVATION_USD,
-    GATE2_RUN_CAP_USD,
     HARD_CAP_USD,
     REQUEST_LIMIT_STOP_REASON,
-    RUN_CAP_USD,
+    default_run_cap_usd,
+    gate1_run_cap_usd,
+    gate2_run_cap_usd,
+    max_concurrent_main,
+    peak_reservation_usd,
+    request_reservation_usd,
+    usage_envelope,
     RequestCappedLedger,
     open_phase_b_ledger,
     phase_b_pricing,
@@ -71,6 +77,7 @@ from rondo_eval.multi_m5.gate2 import (  # noqa: E402
     TerminalBenchSlotExecutor,
     docker_summary,
     gate2_passed,
+    require_pinned_model,
     run_gate2_real,
     run_light_interleaved,
 )
@@ -96,6 +103,7 @@ from rondo_eval.multi_m5.paid import (  # noqa: E402
 from rondo_eval.multi_m5.ready import readiness_report  # noqa: E402
 from rondo_eval.multi_m5.rehearsal import MEMBER_TASK, CollaborationStub  # noqa: E402
 from rondo_eval.multi_m5.gate2 import _run_id  # noqa: E402
+from rondo_eval.terminal_bench.runner import prepare_terminal_bench_run  # noqa: E402
 from rondo_eval.multi_m5.schedule import (  # noqa: E402
     DIAGNOSTIC_ROUND_INDEX,
     DIAGNOSTIC_SLOT_KIND,
@@ -282,36 +290,34 @@ class MultiM5ArchiveBudgetTests(unittest.TestCase):
             self.assertGreater(spent, 0)
             self.assertLess(spent, Decimal("1.00"))
 
-            self.assertEqual(Decimal(ledger.snapshot()["default_run_cap_usd"]), RUN_CAP_USD)
-            self.assertEqual(RUN_CAP_USD, Decimal("24.00"))
+            run_cap = default_run_cap_usd()
+            self.assertEqual(Decimal(ledger.snapshot()["default_run_cap_usd"]), run_cap)
+            # Derived from the lock: peak in-flight reservations plus the larger
+            # gate's spend allowance. Asserted against the same program the
+            # runners use, so a price change cannot silently loosen it.
+            self.assertEqual(run_cap, Decimal("23.10"))
             ledger.ensure_run("m5-cap-a")
             with self.assertRaises(BudgetCapacityExhausted):
                 ledger.reserve("m5-cap-a", "req-too-big", Decimal("40.00"))
-            ledger.reserve("m5-cap-a", "req-a", Decimal("24.00"))
-            ledger.begin_attempt("m5-cap-a", "req-a", max_attempts=5)
-            ledger.settle("m5-cap-a", "req-a", None, pricing=pricing)
-            ledger.ensure_run("m5-cap-b")
-            ledger.reserve("m5-cap-b", "req-b", Decimal("24.00"))
-            ledger.begin_attempt("m5-cap-b", "req-b", max_attempts=5)
-            ledger.settle("m5-cap-b", "req-b", None, pricing=pricing)
-            ledger.ensure_run("m5-cap-c")
-            ledger.reserve("m5-cap-c", "req-c", Decimal("24.00"))
-            ledger.begin_attempt("m5-cap-c", "req-c", max_attempts=5)
-            ledger.settle("m5-cap-c", "req-c", None, pricing=pricing)
-            ledger.ensure_run("m5-cap-d")
-            ledger.reserve("m5-cap-d", "req-d", Decimal("24.00"))
-            ledger.begin_attempt("m5-cap-d", "req-d", max_attempts=5)
-            ledger.settle("m5-cap-d", "req-d", None, pricing=pricing)
-            ledger.ensure_run("m5-cap-e")
-            ledger.reserve("m5-cap-e", "req-e", Decimal("23.00"))
-            ledger.begin_attempt("m5-cap-e", "req-e", max_attempts=5)
-            ledger.settle("m5-cap-e", "req-e", None, pricing=pricing)
+            # Walk the batch toward $120 one full-cap run at a time. The point is
+            # that the batch total accumulates across runs, so the exact per-run
+            # figure is read from the lock rather than written in by hand.
+            spent = Decimal("0")
+            index = 0
+            while spent + run_cap <= HARD_CAP_USD - Decimal("1.00"):
+                run_id = f"m5-cap-{index}"
+                ledger.ensure_run(run_id)
+                ledger.reserve(run_id, f"req-{index}", run_cap)
+                ledger.begin_attempt(run_id, f"req-{index}", max_attempts=5)
+                ledger.settle(run_id, f"req-{index}", None, pricing=pricing)
+                spent += run_cap
+                index += 1
             remaining = Decimal(ledger.snapshot()["remaining_uncommitted_usd"])
-            self.assertLess(remaining, Decimal("2.00"))
+            self.assertLessEqual(remaining, run_cap)
             self.assertGreater(remaining, 0)
             ledger.ensure_run("m5-cap-over")
             with self.assertRaises(BudgetCapacityExhausted):
-                ledger.reserve("m5-cap-over", "req-over", Decimal("24.00"))
+                ledger.reserve("m5-cap-over", "req-over", run_cap)
 
 
 class MultiM5Gate2FakeTests(unittest.TestCase):
@@ -400,11 +406,23 @@ class MultiM5ReadyAndCommandTests(unittest.TestCase):
             instruction="hello",
             model=workflow.root_model,
             effort=workflow.root_effort,
+            member_model=workflow.member_model,
+            member_effort=workflow.raw["member_effort"],
         )
         joined = " ".join(command)
         self.assertEqual(joined.count("features.multi_agent_v2="), 1)
-        for item in team_capability_overrides():
+        for item in team_capability_overrides(
+            member_model=workflow.member_model,
+            member_effort=workflow.raw["member_effort"],
+        ):
             self.assertIn(item, command)
+        # The member model comes from the gate 1 lock, not the machine-wide
+        # default. A member started on the host default is rejected by the
+        # capture proxy before it sends anything and dies silently, which reads
+        # as every collaboration predicate being false.
+        self.assertIn(
+            f'agents.default_subagent_model="{workflow.member_model}"', command
+        )
         self.assertIn("--strict-config", command)
 
 
@@ -733,10 +751,10 @@ class MultiM5ConcurrentMainTests(unittest.TestCase):
                 item.unlink()
         try:
             with open_smoke_ledger(path) as ledger:
-                ledger.ensure_run("m5-concurrent", cap_usd=Decimal("25.00"))
+                ledger.ensure_run("m5-concurrent", cap_usd=gate1_run_cap_usd())
                 proxy = self._proxy(ledger)
                 with self.assertRaisesRegex(
-                    ApiBudgetProxyError, "concurrent main requests are disabled"
+                    ApiBudgetProxyError, "concurrent main requests exceed"
                 ):
                     self._claim_twice(proxy)
         finally:
@@ -753,8 +771,8 @@ class MultiM5ConcurrentMainTests(unittest.TestCase):
                 item.unlink()
         try:
             with open_smoke_ledger(path) as ledger:
-                ledger.ensure_run("m5-concurrent", cap_usd=Decimal("25.00"))
-                proxy = self._proxy(ledger, allow_concurrent_main=True)
+                ledger.ensure_run("m5-concurrent", cap_usd=gate1_run_cap_usd())
+                proxy = self._proxy(ledger, max_concurrent_main=4)
                 self._claim_twice(proxy)
                 run = ledger.snapshot()["runs"]["m5-concurrent"]
                 # Opting in relaxes ordering, never accounting: both concurrent
@@ -768,9 +786,13 @@ class MultiM5ConcurrentMainTests(unittest.TestCase):
 
     def test_the_multi_gates_opt_in(self) -> None:
         source = Path(rondo_eval.multi_m5.gate1.__file__).read_text("utf-8")
-        self.assertEqual(source.count("allow_concurrent_main=True"), 2)
+        self.assertEqual(source.count("max_concurrent_main=concurrent_main"), 1)
+        self.assertEqual(source.count("max_concurrent_main=max_concurrent_main()"), 1)
         source = Path(rondo_eval.multi_m5.gate2.__file__).read_text("utf-8")
-        self.assertEqual(source.count("allow_concurrent_main=True"), 1)
+        self.assertEqual(source.count("max_concurrent_main=max_concurrent_main(contract)"), 1)
+        # The frozen product default is Root plus three members. A per-run cap is
+        # sized against this number, so it is asserted rather than assumed.
+        self.assertEqual(max_concurrent_main(), 4)
 
 
 class MultiM5SmokeIsolationTests(unittest.TestCase):
@@ -801,8 +823,11 @@ class MultiM5SmokeIsolationTests(unittest.TestCase):
                 snapshot = ledger.snapshot()
                 self.assertEqual(snapshot["batch_id"], SMOKE_BATCH_ID)
                 self.assertEqual(Decimal(snapshot["total_cap_usd"]), SMOKE_CAP_USD)
-                # One flow only: the authorization was for a single run-through.
-                self.assertEqual(snapshot["max_runs"], 1)
+                # The 2026-08-18 authorization raised this to USD 40 with no
+                # attempt limit, so the slot count is sized to let the smoke run
+                # iterate; the dollar cap is what actually stops it.
+                self.assertEqual(SMOKE_CAP_USD, Decimal("40.00"))
+                self.assertEqual(snapshot["max_runs"], SMOKE_MAX_RUNS)
         finally:
             for item in (path, lock):
                 if item.exists():
@@ -812,7 +837,11 @@ class MultiM5SmokeIsolationTests(unittest.TestCase):
         from rondo_eval.multi_m5.__main__ import main as m5_main
 
         # No phrase: exit 78 before any secret is read or any socket is opened.
-        self.assertEqual(m5_main(["terra-smoke"]), 78)
+        self.assertEqual(m5_main(["smoke", "--label", "probe1"]), 78)
+        # A reused or missing label is refused before authorization is even
+        # considered: two smoke runs sharing an id is how the first batch's
+        # ledger got replaced by the second's.
+        self.assertEqual(m5_main(["smoke"]), 2)
 
 
 class MultiM5FrozenModelIsolationTests(unittest.TestCase):
@@ -837,6 +866,163 @@ class MultiM5FrozenModelIsolationTests(unittest.TestCase):
         self.assertNotEqual(
             config.paid_provider_projection().main_model, pinned.main_model
         )
+
+    def test_prepared_gate2_runs_agree_with_the_lock_on_both_sides(self) -> None:
+        """Spec, adapter, argv and proxy must all name the locked model.
+
+        This is the check that was missing: the proxy resolved the campaign's
+        own model while `make_run_spec` still inherited the machine-wide alias,
+        so the adapter launched the binary on a model the proxy would reject.
+        Nothing here spends money or starts Docker.
+        """
+
+        report = readiness_report(common_root=_common_root())
+        projection = report["checks"]["gate2_model_projection"]
+        self.assertTrue(projection.get("ok"), projection)
+        contract = load_nondegradation_contract()
+        for side, values in projection["sides"].items():
+            with self.subTest(side=side):
+                self.assertEqual(values["run_spec_main_model"], contract.root_model)
+                self.assertEqual(values["adapter_model_name"], contract.root_model)
+                self.assertEqual(values["main_effort"], contract.root_effort)
+        # Only Multi carries a member model; the frozen upstream must not.
+        self.assertEqual(
+            projection["sides"]["rondo"]["adapter_subagent_model"],
+            contract.member_model,
+        )
+        self.assertEqual(projection["sides"]["codex"]["adapter_subagent_model"], "")
+
+    def test_a_mismatched_prepared_run_is_refused_before_docker(self) -> None:
+        contract = load_nondegradation_contract()
+        drifted = replace(contract, root_model="gpt-5.6-sol")
+        paths = RepoPaths.discover(Path.cwd())
+        config = load_runtime_config(paths)
+        executor = TerminalBenchSlotExecutor(
+            common_root=_common_root(), authorize_docker=False, paths=paths
+        )
+        slot = base_slots(contract)[0]
+        with tempfile.TemporaryDirectory(dir=scratch_root(_common_root())) as raw:
+            executor._work_root = Path(raw)
+            request = executor.build_request(slot, attempt=1, run_id="m5-g2-mismatch")
+            prepared = prepare_terminal_bench_run(config, request)
+            with self.assertRaisesRegex(Gate2Error, "frozen model contract"):
+                require_pinned_model(prepared, drifted)
+            # The proxy disagreeing is caught too, even when the spec is right.
+            with self.assertRaisesRegex(Gate2Error, "budget_proxy_model"):
+                require_pinned_model(prepared, contract, proxy_model="gpt-5.6-sol")
+
+    def test_the_budget_reservation_bounds_the_worst_legal_request(self) -> None:
+        """The property that makes $120 an upper bound rather than an intention."""
+
+        contract = load_nondegradation_contract()
+        envelope = usage_envelope(contract)
+        pricing = phase_b_pricing(contract)
+        reservation = request_reservation_usd(contract)
+        self.assertGreaterEqual(reservation, maximum_usage_cost(pricing, envelope))
+        # Without the envelope the generic Usage contract admits a request that
+        # costs far more than the reservation, which is exactly how a settled
+        # charge could exceed what it held.
+        self.assertGreater(maximum_usage_cost(pricing), reservation)
+        # Every legal caller must fit under the per-run cap at once, or the
+        # harness rejects a request the product is entitled to make.
+        self.assertGreaterEqual(gate1_run_cap_usd(contract), peak_reservation_usd(contract))
+        self.assertGreaterEqual(gate2_run_cap_usd(contract), peak_reservation_usd(contract))
+
+    def test_usage_outside_the_envelope_is_refused_not_priced(self) -> None:
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-envelope-probe.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        pricing = phase_b_pricing(contract)
+        envelope = usage_envelope(contract)
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.ensure_run("m5-envelope", cap_usd=gate1_run_cap_usd())
+                reserved = ledger.reserve(
+                    "m5-envelope", "req-1", request_reservation_usd(contract)
+                )
+                ledger.begin_attempt("m5-envelope", "req-1", max_attempts=5)
+                # One token past the frozen envelope: the charge falls back to
+                # the reservation instead of being priced above it.
+                settlement = ledger.settle(
+                    "m5-envelope",
+                    "req-1",
+                    Usage(envelope.max_input_tokens + 1, 0, 0, 0),
+                    pricing=pricing,
+                )
+                self.assertEqual(settlement.charged_usd, reserved)
+                self.assertFalse(settlement.usage_valid)
+                run = ledger.snapshot()["runs"]["m5-envelope"]
+                self.assertEqual(run["stop_reason"], "usage_outside_frozen_envelope")
+                self.assertEqual(
+                    stop_reason_class(run["stop_reason"]), "infra"
+                )
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_paid_run_ids_cannot_be_spent_twice(self) -> None:
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-claim-probe.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.claim_run("m5-g1-smoke-once", cap_usd=gate1_run_cap_usd())
+                # A re-invoked CLI must not pay twice against a consumed slot.
+                with self.assertRaises(BudgetStopped):
+                    ledger.claim_run("m5-g1-smoke-once", cap_usd=gate1_run_cap_usd())
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
+
+    def test_stop_reasons_separate_running_out_of_money_from_breaking(self) -> None:
+        self.assertEqual(stop_reason_class("budget_capacity_exhausted"), "budget")
+        self.assertEqual(stop_reason_class("usage_cost_exceeded_reservation"), "budget")
+        self.assertEqual(stop_reason_class(REQUEST_LIMIT_STOP_REASON), "budget")
+        # These are the upstream or the harness failing. The ledger still
+        # debited a reservation, but nothing ran out: calling them budget stops
+        # sent triage at the wrong thing and, in gate 2, would end the batch.
+        self.assertEqual(stop_reason_class("upstream_terminal_failed"), "infra")
+        self.assertEqual(stop_reason_class("missing_or_invalid_usage"), "infra")
+        self.assertEqual(stop_reason_class("upstream_response_unavailable"), "infra")
+        self.assertEqual(stop_reason_class(None), "none")
+        # Never guessed.
+        self.assertEqual(stop_reason_class("something_new"), "unknown")
+
+    def test_exposure_separates_priced_spend_from_held_reservations(self) -> None:
+        scratch = scratch_root(_common_root())
+        path = scratch / "m5-exposure-probe.json"
+        lock = path.with_name(f".{path.name}.lock")
+        for item in (path, lock):
+            if item.exists():
+                item.unlink()
+        contract = load_nondegradation_contract()
+        pricing = phase_b_pricing(contract)
+        try:
+            with open_smoke_ledger(path) as ledger:
+                ledger.ensure_run("m5-exposure", cap_usd=gate1_run_cap_usd())
+                ledger.reserve("m5-exposure", "req-1", Decimal("1.00"))
+                ledger.begin_attempt("m5-exposure", "req-1", max_attempts=5)
+                ledger.settle(
+                    "m5-exposure", "req-1", Usage(1000, 0, 0, 0), pricing=pricing
+                )
+                summary = exposure_summary(ledger.snapshot(), "m5-exposure")
+                self.assertEqual(
+                    Decimal(summary["conservative_exposure_usd"]), Decimal("0")
+                )
+                self.assertGreater(Decimal(summary["priced_usd"]), 0)
+        finally:
+            for item in (path, lock):
+                if item.exists():
+                    item.unlink()
 
     def test_the_pinned_projection_satisfies_the_frozen_contract(self) -> None:
         config = load_runtime_config(RepoPaths.discover(Path.cwd()))
@@ -1089,7 +1275,7 @@ class MultiM5TerminalBenchExecutorTests(unittest.TestCase):
         self.assertTrue(requests)
         self.assertTrue(
             all(
-                Decimal(info["cap_usd"]) == GATE2_RUN_CAP_USD
+                Decimal(info["cap_usd"]) == gate2_run_cap_usd()
                 for info in snapshot["runs"].values()
             )
         )
@@ -1125,34 +1311,34 @@ class MultiM5TerminalBenchExecutorTests(unittest.TestCase):
             "max_attempts": 5,
             "retry_backoff_seconds": 0.0,
             "unbilled_retry_statuses": (429, 500, 502, 503, 504),
-            "request_reservation_usd": GATE2_REQUEST_RESERVATION_USD,
+            "request_reservation_usd": request_reservation_usd(),
             "timeout_seconds": FORWARD_TIMEOUT_SECONDS,
         }
         with open_phase_b_ledger(ledger_path) as ledger:
-            ledger.ensure_run(run_id, cap_usd=GATE2_RUN_CAP_USD)
+            ledger.ensure_run(run_id, cap_usd=gate2_run_cap_usd())
             with self.assertRaisesRegex(ApiBudgetProxyError, "existing run cap"):
                 LoopbackResponsesProxy(ledger=ledger, **kwargs)
             proxy = LoopbackResponsesProxy(
                 ledger=ledger,
-                run_cap_usd=GATE2_RUN_CAP_USD,
+                run_cap_usd=gate2_run_cap_usd(),
                 **kwargs,
             )
             self.assertEqual(
                 Decimal(ledger.snapshot()["runs"][run_id]["cap_usd"]),
-                GATE2_RUN_CAP_USD,
+                gate2_run_cap_usd(),
             )
             del proxy
-            ledger.ensure_run("m5-g1-paid-a1", cap_usd=GATE1_RUN_CAP_USD)
+            ledger.ensure_run("m5-g1-paid-a1", cap_usd=gate1_run_cap_usd())
             gate1 = LoopbackResponsesProxy(
                 ledger=ledger,
                 run_id="m5-g1-paid-a1",
                 metadata_path=scratch / "multi-m5-test-gate1-run-cap-meta.json",
-                run_cap_usd=GATE1_RUN_CAP_USD,
+                run_cap_usd=gate1_run_cap_usd(),
                 **{k: v for k, v in kwargs.items() if k not in {"run_id", "metadata_path"}},
             )
             self.assertEqual(
                 Decimal(ledger.snapshot()["runs"]["m5-g1-paid-a1"]["cap_usd"]),
-                GATE1_RUN_CAP_USD,
+                gate1_run_cap_usd(),
             )
             del gate1
         for item in (ledger_path, lock_path, metadata):
@@ -1180,14 +1366,14 @@ class MultiM5BudgetStopHonestyTests(unittest.TestCase):
         spent = Decimal(0)
         try:
             with open_phase_b_ledger(ledger_path) as ledger:
-                ledger.ensure_run("m5-g1-paid-a1", cap_usd=GATE1_RUN_CAP_USD)
+                ledger.ensure_run("m5-g1-paid-a1", cap_usd=gate1_run_cap_usd())
                 for index in range(1, 400):
                     try:
                         ledger.reserve(
                             "m5-g1-paid-a1",
                             f"req-{index}",
-                            amount_usd=GATE1_REQUEST_RESERVATION_USD,
-                            additional_capacity_usd=GATE1_REQUEST_RESERVATION_USD,
+                            amount_usd=request_reservation_usd(),
+                            additional_capacity_usd=request_reservation_usd(),
                         )
                     except BudgetCapacityExhausted:
                         break
@@ -1206,7 +1392,7 @@ class MultiM5BudgetStopHonestyTests(unittest.TestCase):
         self.assertGreaterEqual(spent, Decimal("16.00"))
         # The single-turn reservation still has to cover the worst realistic turn.
         self.assertGreaterEqual(
-            GATE1_REQUEST_RESERVATION_USD,
+            request_reservation_usd(),
             price_usage(Usage(272_000, 0, 0, 32_000), pricing=pricing),
         )
 
@@ -1414,7 +1600,7 @@ class MultiM5PaidEntryHardeningTests(unittest.TestCase):
                 )
                 first_run = _run_id(base_slots(contract)[0], 1)
                 # The live Harbor path must read the same real count.
-                ledger.ensure_run("m5-g2-live-probe", cap_usd=GATE2_RUN_CAP_USD)
+                ledger.ensure_run("m5-g2-live-probe", cap_usd=gate2_run_cap_usd())
                 for index in range(3):
                     request_id = f"m5-g2-live-probe-req-{index}"
                     ledger.reserve("m5-g2-live-probe", request_id, Decimal("0.01"))
@@ -1563,7 +1749,7 @@ class MultiM5PaidBoundaryTests(unittest.TestCase):
         pricing = phase_b_pricing()
         try:
             with open_phase_b_ledger(ledger_path) as ledger:
-                ledger.ensure_run("m5-g2-cap-probe", cap_usd=GATE2_RUN_CAP_USD)
+                ledger.ensure_run("m5-g2-cap-probe", cap_usd=gate2_run_cap_usd())
                 capped = RequestCappedLedger(ledger, max_requests_per_run=3)
                 for index in range(3):
                     request_id = f"m5-g2-cap-probe-req-{index}"
@@ -1715,7 +1901,7 @@ class MultiM5PaidBoundaryTests(unittest.TestCase):
                     catalog=_v4_catalog(),
                     paths=RepoPaths.discover(Path.cwd()),
                 )
-                ledger.ensure_run("m5-g2-evidence", cap_usd=GATE2_RUN_CAP_USD)
+                ledger.ensure_run("m5-g2-evidence", cap_usd=gate2_run_cap_usd())
                 result = executor._slot_result(
                     _FakeTrial(),
                     "m5-g2-evidence",
@@ -1800,7 +1986,7 @@ class MultiM5ConcurrencyAndEndpointTests(unittest.TestCase):
         errors: list[BaseException] = []
         try:
             with open_phase_b_ledger(ledger_path) as ledger:
-                ledger.ensure_run(run_id, cap_usd=GATE2_RUN_CAP_USD)
+                ledger.ensure_run(run_id, cap_usd=gate2_run_cap_usd())
                 capped = RequestCappedLedger(ledger, max_requests_per_run=cap)
                 # Fill to exactly one below the cap.
                 for index in range(cap - 1):

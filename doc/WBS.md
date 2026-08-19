@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-18（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 A 复验通过，阶段 B 付费入口已落地并通过独立验收，真实付费未授权未执行）
+最后更新：2026-08-18（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 阶段 B 第五轮审查整改完成，门 1 判据改为 code-mode rollout trace 并冻结 workflow v2，真实付费尚未执行）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -25,7 +25,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 经两轮整改后复验通过；阶段 B 离线前置准备完成，门 1 付费入口与门 2 真实执行器已落地，付费边界经四轮独立审查收紧后成立，但仍锁在授权门后。真实付费与 Docker 未授权未执行，**不能**表述为 M-5 通过或门 1 通过。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过；阶段 B 经五轮独立审查整改。第五轮关闭了两个结构性阻断：门 1 判据在 code-mode 下看不见任何团队工具（已改为读冻结二进制自身的 rollout trace，冻结 `multi-m5-workflow-v2`），以及门 2 的 RunSpec 仍继承宿主 model 别名而与预算代理不一致（已全链贯通并加就绪自检）。$120 上限现由「冻结 token 信封 + 价目表机械推导预留」保证为真上限。**真实付费仍未执行**，两道门均未通过，**不能**表述为 M-5 通过、门 1 通过或未见退化。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -79,20 +79,29 @@
   人判结论为**保留为实验**。方向 2 因此没有已排期的下一工作包；若将来要投入真实使用，必须先按本页
   §6 单独立项，建立面向生产的正确性与安全验收，并解决“合成集线索化”与“holdout 单侧标签”两项证据缺口。
   结论详情见 `doc/WBS/local-approval-model.md`。
-- **3c RONDO Multi**：M-0—M-4 已完成并合入。**M-5 阶段 A 经两轮整改后复验通过**：冻结 bundle、两份运行合同、
-  接线与无 API loopback 核验通过；门 1 判据的三处缺陷（同 Event 合取、Root 唤醒、证据按产出工具绑定）已全部
-  关闭并各有反例回归钉住。**阶段 B 离线前置准备已完成**：门 1 host runner 与彩排 stub、门 2 轻量交错执行面
-  （fake）、$120 预算记账、归档落盘与就绪自检均已落地，门 1 完整协作彩排在冻结二进制上连续五次全绿
-  （真实 spawn、同 Event 多作者、真实证据、真实唤醒规则）。**门 1 付费入口与门 2 真实执行器已落地**
-  （预算代理 + forward 捕获；既有 TB adapters/runner/results，不套 v7 campaign），CLI/`just` 无口令时
-  退出 78 且不加载密钥。付费边界经四轮独立审查逐轮收紧，现已成立：$120 账本与每 run 美元上限、
-  每 run 80 请求在发出前硬拦（并发安全）、provider 身份/endpoint/effort/费率绑定冻结锁、
-  Docker 容量停止线立即停批并归档证据、门 2 只在十题证据齐全且全部无退化时才报成功。
-  **真实运行仍未开始**，仍须用户按清单单独授权真实 API/付费/Docker。
-  门 1 载体是协议演示级 fixture（决策 032），其口径边界已写进锁的 `scope_limits`：
-  WBS 的「真实任务上跑通完整协作语义」须门 1+门 2 合起来读，任一门单独不得引用。
-  不得表述为 M-5 通过、门 1 通过或未见退化。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`。
-  阶段目标与两道门口径见 `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
+- **3c RONDO Multi**：M-0—M-4 已完成并合入。**M-5 阶段 A 已通过**；**阶段 B 仍是当前工作**，经五轮独立审查整改。
+  当前事实：
+  - **门 1 判据已重建**。在 `tool_mode=code_mode_only` 下模型只发一个 `custom_tool_call(name=exec)`，团队工具
+    全部在 JS 里调用，Responses 线上没有任何 `function_call`，因此原 v1 判据（`responses_function_call_outputs`）
+    在真实配置下**结构上不可能通过**。现改为读冻结二进制自身的 rollout trace（`CODEX_ROLLOUT_TRACE_ROOT`），
+    判据只认 Rust dispatch 侧记录的工具名/namespace/参数/handler 返回值，并要求每条 dispatch 能绑定回抓包里
+    模型真实发出的 code cell。已冻结 `multi-m5-workflow-v2`（v1 归档不得充当 v2 证据），彩排 stub 同步改为
+    真实 code-mode 形状，20 条对抗回归（伪造输出、死分支、错 namespace、缺失/冲突 trace、跨 run 重放）钉住。
+  - **门 2 模型已全链贯通**。RunSpec 此前仍取宿主 `paid_eval.main_model` 别名，与只认 terra 的预算代理不一致，
+    真跑会被本地拒成"产品失败"。现在锁里的 root/member 模型贯通 spec → adapter argv → proxy，就绪自检离线
+    构造两侧 prepared run 并逐字段比对；宿主别名与全局 member 默认恢复为 sol，历史基线不受影响。
+  - **$120 已是数学上限**。预留额由「冻结 token 信封（272k/128k）× 价目表」机械推导（$2.22），信封在账本
+    settle 处强制，因此 `charged ≤ reserved` 恒成立；每 run 上限由最大并发（Root+3 成员+Guardian）推导。
+    停止原因区分 budget 与 infra，未知原因 fail-closed；预留扣款与已计价消费分开记账。
+  - **已知风险（尚未验证）**：团队证据 fact 只在 `ToolCallSource::Direct` 时留存，code cell 内的嵌套调用不留
+    （`multidev/codex-rs/core/src/team/evidence.rs`）。若真实模型把所有调用都放进 cell，则 `team_evidence`
+    谓词无法成立。彩排里 shell 走直接调用可满足，但真实模型是否如此**只能由付费冒烟回答**。
+  - 门 1 载体是协议演示级 fixture（决策 032），口径边界见锁的 `scope_limits`：WBS 的「真实任务上跑通完整协作
+    语义」须门 1+门 2 合起来读，任一门单独不得引用。
+  **真实付费运行仍未开始**，两道门均未通过，不得表述为 M-5 通过、门 1 通过或未见退化。
+  下一步：用已授权的 $40 独立冒烟账本验证真实模型下 trace 判据能否看见协作（含上面的 `team_evidence` 风险），
+  确认后才进正式门 1；门 1 通过后才进门 2。逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
+  `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
 
 三条线的代码与文档工作真正并行；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源门禁全局串行。
@@ -114,7 +123,7 @@
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 阶段 A 复验通过，阶段 B 付费入口已落地并通过独立验收，待用户授权 | 用户按清单单独授权 Docker / 真实 API / 付费 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 阶段 B 第五轮整改完成（门 1 判据改读 rollout trace、门 2 模型贯通、$120 成为真上限），真实付费未执行 | 已授权 $40 独立冒烟；正式门 1/门 2 仍待用户按清单授权 |
 
 - **Local 与 Multi 地位相同**。Local 可能更早收口，只因剩余路径较短（L6 → Local M4 已成链），
   而 Multi 还有尚未开始的 M-5 阶段 B，不代表优先级更高。重型任务全局串行是资源约束，不构成战略阻塞。
@@ -189,7 +198,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 阶段 A 复验通过，阶段 B 前置准备完成、待付费授权 |
+| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 阶段 B 第五轮整改完成，待 $40 冒烟验证真实模型下的 trace 判据 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -201,7 +210,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Multi M-2 | Root 选择性路由 Event，目标读取并扩展同一 canonical chain，通知与指派可独立恢复和结束 | 工程验收 | 已完成并合入 `main` |
 | Multi M-3 | Version 机械关联到 Codex 实际保留的工具结果，按 Event 可达权限有界下钻，不可得时诚实标注 | 工程验收 | 已完成并合入 `main` |
 | Multi M-4 | producer 四类可用性、Root 显式退休独立终态、有界 dump/log/stats；真实无 API 产品纵切覆盖 recoverable 拒绝与 unavailable 退休 | 工程验收 | 已完成并合入 `main` |
-| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 阶段 A 复验通过；阶段 B 前置准备完成、门 1 彩排全绿，真实运行未开始。**不是** M-5 通过 |
+| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 阶段 B 第五轮整改完成；门 1 判据已改为 code-mode rollout trace 并在冻结二进制上彩排全绿，真实付费运行未开始。**不是** M-5 通过 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
 （设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。

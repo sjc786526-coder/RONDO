@@ -273,7 +273,11 @@ def collect_registered_tool_names(request: Mapping[str, Any]) -> set[str]:
 
 
 def team_capability_command_items() -> tuple[str, ...]:
-    return team_capability_overrides()
+    """The loopback drill runs one agent, so its member identity is its own model."""
+
+    return team_capability_overrides(
+        member_model=LOOPBACK_MODEL, member_effort="medium"
+    )
 
 
 def team_capability_command_fragment() -> str:

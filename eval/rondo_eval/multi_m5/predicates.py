@@ -49,13 +49,15 @@ def evaluate_collaboration(
     report_filename: str = "TEAM_REPORT.md",
     max_members: int = 1,
     jsonl: str | None = None,
+    trace: Any | None = None,
 ) -> CollaborationVerdict:
     """Judge gate 1 from harness-owned team evidence plus the workspace artifact.
 
-    ``dump`` is a ``team_inspect`` dump page. When ``jsonl`` is provided it is
-    the only evidence: caller dump cannot leak a fabricated collaboration in.
-    Within that JSONL every row is attributed to the tool call that produced
-    it, so only harness-written ``team_inspect`` / ``wait_agent`` output counts;
+    ``dump`` is a ``team_inspect`` dump page. When ``trace`` is provided it and
+    the captured ``jsonl`` are the only evidence: a caller-supplied dump cannot
+    leak a fabricated collaboration in. Rows come from the frozen binary's own
+    tool-dispatch record and are attributed to the tool the registry actually
+    ran, and each dispatch is tied back to a model call the capture contains;
     see ``collect_gate1_evidence``.
     Event membership follows dump order: Version / VersionFact / Route rows
     after an Event belong to that Event until the next Event or a non-nested
@@ -65,13 +67,13 @@ def evaluate_collaboration(
     Event-local predicates must all hold on **one** Event. ``root_resolved``
     requires a member-authored Version on that Event. ``root_woken`` requires a
     change-log ``signalled`` wake targeting Root, or a ``wait_agent`` TeamActivity
-    message from JSONL tool output.
+    message recorded for a dispatched wait.
     """
 
-    if jsonl is not None:
+    if trace is not None:
         from .collect import collect_gate1_evidence
 
-        dump = collect_gate1_evidence(jsonl)
+        dump = collect_gate1_evidence(jsonl or "", trace)
 
     entries = dump.get("entries")
     rows = tuple(entries) if isinstance(entries, list) else ()

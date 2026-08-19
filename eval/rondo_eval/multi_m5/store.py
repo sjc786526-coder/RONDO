@@ -12,8 +12,8 @@ from .archive import REQUIRED_ARCHIVE_FIELDS
 ARCHIVE_RELPATH = "eval-data/multi-m5/archives/records.jsonl"
 CAPTURE_RELDIR = "eval-data/multi-m5/captures"
 BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b.json"
-SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/terra-smoke-records.jsonl"
-SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-terra-smoke.json"
+SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/code-mode-smoke-records.jsonl"
+SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-code-mode-smoke.json"
 
 
 class StoreError(ValueError):
