@@ -1,0 +1,150 @@
+"""Offline-first CLI for Plan 049 Phase A."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+
+from ..config import RepoPaths
+from .campaign import default_fake_executor, run_rehearsal
+from .contract import REPO_ROOT, load_contract
+from .loopback import run_common_v2_loopback
+from .paid import PaidEntryCallbacks, PaidGuardError, enter_paid_phase
+from .schedule import dry_run_projection
+from .readiness import secret_readiness
+from .store import assert_body_free
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="rondo-eval-plan049")
+    parser.add_argument(
+        "command",
+        choices=("dry-run", "fake", "loopback", "replay", "ready", "phase-b-paid"),
+    )
+    parser.add_argument("--namespace", default="phase-a-final")
+    args = parser.parse_args(argv)
+    paths = RepoPaths.discover(REPO_ROOT)
+    contract = load_contract(paths.worktree_root)
+    if args.command == "dry-run":
+        _print(dry_run_projection(contract, common_root=paths.common_root, namespace=args.namespace))
+        return 0
+    if args.command == "fake":
+        result = run_rehearsal(
+            contract,
+            common_root=paths.common_root,
+            namespace=args.namespace,
+            executor=default_fake_executor,
+        )
+        _print(result)
+        return 0
+    if args.command == "loopback":
+        _print(
+            run_common_v2_loopback(
+                contract,
+                common_root=paths.common_root,
+                namespace=args.namespace,
+            )
+        )
+        return 0
+    if args.command == "replay":
+        fixture = paths.worktree_root / "eval/fixtures/multi-proactive-delegation-v1/body-free-replay-v1.json"
+        raw = fixture.read_bytes()
+        value = json.loads(raw)
+        assert_body_free(value)
+        _print(
+            {
+                "schema_version": 1,
+                "evidence_kind": "replay",
+                "fixture_sha256": hashlib.sha256(raw).hexdigest(),
+                "record_count": len(value["records"]),
+                "deterministic": json.dumps(value, sort_keys=True, separators=(",", ":"))
+                == json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":")),
+            }
+        )
+        return 0
+    if args.command == "ready":
+        projection = dry_run_projection(contract, common_root=paths.common_root, namespace=args.namespace)
+        _print(
+            {
+                "schema_version": 1,
+                "phase_a_status": "paid-ready",
+                "lock_id": contract.lock_id,
+                "slot_count": len(projection["slots"]),
+                "secret_readiness": secret_readiness(
+                    paths,
+                    provider_name=contract.lock["provider"]["name"],
+                ),
+                "phase_b_requires": [
+                    "explicit_phase_b_authorization",
+                    "explicit_activation_action",
+                    "usd_100_hard_cap_confirmation",
+                    "available_balance_at_least_usd_100",
+                    "clean_harness_commit",
+                    "safe_resume_prefix",
+                    "local_activation_conditions",
+                ],
+                "pilot_pass_conditions": [
+                    "six_valid_terminal_runs",
+                    "six_policy_hash_matches",
+                    "six_native_trace_team_lens_outputs",
+                    "at_least_one_trace_backed_root_spawn_accept",
+                ],
+                "autonomously_recoverable": [
+                    "configuration_or_fixture_error",
+                    "scheduler_archive_resume_or_report_error",
+                    "bounded_provider_or_network_infra_error",
+                    "missing_side_without_trusted_terminal_record",
+                ],
+                "principled_stop_conditions": [
+                    "usd_100_hard_cap_or_balance_exhaustion",
+                    "usage_cannot_be_conservatively_settled",
+                    "identity_or_fairness_contract_drift",
+                    "body_or_secret_leak_risk",
+                    "run_state_cannot_be_safely_determined",
+                    "pilot_has_no_trace_backed_autonomous_spawn",
+                ],
+                "first_real_connection_only": [
+                    "provider_connectivity",
+                    "provider_model_identity",
+                    "provider_usage_accounting",
+                    "trace_backed_autonomous_spawn_activation",
+                ],
+            }
+        )
+        return 0
+    callbacks = PaidEntryCallbacks(
+        read_secret=_forbidden_callback,
+        create_formal_state=_forbidden_callback,
+        touch_network=_forbidden_callback,
+        touch_docker=_forbidden_callback,
+    )
+    try:
+        enter_paid_phase(
+            repo_root=paths.worktree_root,
+            authorization=None,
+            activation_action=None,
+            confirmed_balance_usd=None,
+            harness_clean=False,
+            resume_prefix_safe=False,
+            activation_conditions_ready=False,
+            docker_resource_gate_ready=False,
+            callbacks=callbacks,
+        )
+    except PaidGuardError as exc:
+        print(str(exc), file=sys.stderr)
+        return 78
+    raise RuntimeError("locked Phase B entry unexpectedly passed")
+
+
+def _forbidden_callback() -> None:
+    raise RuntimeError("Stage A reached a forbidden Phase B side effect")
+
+
+def _print(value: object) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

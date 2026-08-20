@@ -301,29 +301,37 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       Team Lens 是阶段 A 的首选复用面；没有发现需要第二套平台的理由。
 - [x] 已识别现有 M-5 不能原样作为公平入口：其 Codex 使用 V1、RONDO 使用 V2，且 Terminal-Bench runner 尚未接入
       Plan 049 的 rollout trace root；这两点属于阶段 A 的窄 eval 接线工作，不需要修改冻结 Codex。
+- [x] 已落地 `multi-proactive-delegation-v1` lock、固定 taskset 与 proactive policy，并给 Terminal-Bench adapter 增加
+      显式共同 V2 / policy / trace opt-in；旧 M-5 默认投影保持不变。
+- [x] 已落地 26 槽 rehearsal dry-run、body-free fake 归档/聚合、幂等 claim/settle/resume、重复终态/合同漂移防护、
+      Team Lens JSON/HTML 和阶段 B 前置授权门；故障矩阵由定向测试覆盖。
+- [x] 已用两侧冻结二进制完成零 API native loopback：共同工具注册与 policy 注入匹配，两个原生 bundle 均由现有
+      Team Lens 归约；Codex Team State 为 `null/not_applicable`。
+- [x] 已完成本地定向验收与重复生成校验；结论为 `paid-ready`，尚待提交后的独立子智能体审查。
 
 ### 当前工作
 
-- ExecPlan 已制定，阶段 A 实现尚未开始，等待交给执行者。
+- 阶段 A 实现和本地验收已完成；正在整理提交，随后进行上下文独立的功能/正确性审查。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：落地冻结 lock/template、最小编排/聚合/resume 与付费入口隔离。
-2. 阶段 A：完成 pure/fake/loopback/replay、Team Lens 确定性、故障恢复和必要的零 API 彩排。
-3. 阶段 A：更新计划状态与精炼日志，提交 049 分支，独立审查给出 `paid-ready` 或 `blocked`。
-4. 等待用户另行授权阶段 B；未授权期间保持工作树、分支和正式付费入口不动。
-5. 阶段 B 获授权后：创建正式 activation identity，执行 pilot；通过后按固定顺序完成十个有效配对、聚合与独立审查。
-6. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 阶段 A：提交 049 本地分支并保持工作树干净。
+2. 阶段 A：由上下文独立的子智能体审查全部实现；真实问题修复后重新提交并复审，直至通过或形成具体 blocker。
+3. 等待用户另行授权阶段 B；未授权期间保持工作树、分支和正式付费入口不动。
+4. 阶段 B 获授权后：创建正式 activation identity，执行 pilot；通过后按固定顺序完成十个有效配对、聚合与独立审查。
+5. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 无已知 blocker。
+- 阶段 A 无已知实现 blocker；本地结论为 `paid-ready`，等待独立审查确认。
 - 阶段 B 当前因缺少明确开始授权、100 USD 上限确认和余额确认而有意阻塞；provider 真连通性也只可在该阶段 pilot 确认。
 
 ### 当前验收状态
 
-- 规划完成，尚未实施或运行测试。
-- 未运行 Docker、Cargo、API、本地模型、付费测评或全量测试；未创建正式 receipt/ledger/run/result identity。
+- pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；rehearsal
+  重复执行的 archive/ledger/aggregate SHA-256 不变。
+- 未运行 Docker、Cargo、真实 API、本地模型、付费测评或全量测试；未创建正式 activation receipt、正式账本或
+  正式 run/result identity。
 
 ### 交接边界
 

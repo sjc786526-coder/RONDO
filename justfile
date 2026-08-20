@@ -35,6 +35,77 @@ eval-lock:
 
 eval-check: eval-lock eval-test
 
+# Offline Plan 049 rehearsal entry; never starts Docker, provider I/O, or paid state.
+eval-plan049-dry-run namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.proactive_eval dry-run --namespace "{{namespace}}"
+
+eval-plan049-fake namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.proactive_eval fake --namespace "{{namespace}}"
+
+eval-plan049-loopback namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.proactive_eval loopback --namespace "{{namespace}}"
+
+eval-plan049-replay:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.proactive_eval replay
+
+eval-plan049-ready namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.proactive_eval ready --namespace "{{namespace}}"
+
+eval-plan049-phase-b-paid:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.proactive_eval phase-b-paid
+
 # No-API host drill: frozen Multi binary must register team tools and call team_publish.
 eval-multi-m5-loopback:
     #!/usr/bin/env bash

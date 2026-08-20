@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "taskset_id": "multi-proactive-delegation-v1",
+  "catalog": "eval/tasksets/p2-b7-canary-catalog-v4.json",
+  "catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf",
+  "pilot_pairs": [
+    {"pair_id": "P01", "task_id": "terminal-bench/filter-js-from-html", "side_order": ["codex", "rondo"]},
+    {"pair_id": "P02", "task_id": "terminal-bench/sanitize-git-repo", "side_order": ["rondo", "codex"]},
+    {"pair_id": "P03", "task_id": "terminal-bench/db-wal-recovery", "side_order": ["codex", "rondo"]}
+  ],
+  "formal_pairs": [
+    {"pair_id": "F01", "task_id": "terminal-bench/db-wal-recovery", "side_order": ["codex", "rondo"]},
+    {"pair_id": "F02", "task_id": "terminal-bench/extract-elf", "side_order": ["rondo", "codex"]},
+    {"pair_id": "F03", "task_id": "terminal-bench/filter-js-from-html", "side_order": ["codex", "rondo"]},
+    {"pair_id": "F04", "task_id": "terminal-bench/fix-git", "side_order": ["rondo", "codex"]},
+    {"pair_id": "F05", "task_id": "terminal-bench/headless-terminal", "side_order": ["codex", "rondo"]},
+    {"pair_id": "F06", "task_id": "terminal-bench/openssl-selfsigned-cert", "side_order": ["rondo", "codex"]},
+    {"pair_id": "F07", "task_id": "terminal-bench/polyglot-c-py", "side_order": ["codex", "rondo"]},
+    {"pair_id": "F08", "task_id": "terminal-bench/sanitize-git-repo", "side_order": ["rondo", "codex"]},
+    {"pair_id": "F09", "task_id": "terminal-bench/sqlite-db-truncate", "side_order": ["codex", "rondo"]},
+    {"pair_id": "F10", "task_id": "terminal-bench/vulnerable-secret", "side_order": ["rondo", "codex"]}
+  ]
+}

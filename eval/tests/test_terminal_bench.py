@@ -1166,6 +1166,55 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertIn("features.code_mode_host=true", commands)
         self.assertIn("expose_spawn_agent_model_overrides=false", commands)
 
+    def test_plan049_common_v2_and_trace_root_reach_both_adapters(self) -> None:
+        policy = (
+            self.root
+            / "eval/templates/multi-proactive-delegation/proactive-policy-v1.md"
+        )
+        policy.parent.mkdir(parents=True)
+        policy.write_text("delegate only when useful\n", "utf-8")
+        policy_sha256 = hashlib.sha256(policy.read_bytes()).hexdigest()
+        commands = {}
+        for adapter_type, product in (
+            (CodexUploadAdapter, None),
+            (RondoUploadAdapter, Product.RONDO_MULTI.value),
+        ):
+            overrides = {
+                "common_multi_agent_v2": True,
+                "multi_agent_max_concurrency": 4,
+                "subagent_model": "gpt-5.6-terra",
+                "subagent_effort": "medium",
+                "developer_instructions_path": str(policy),
+                "developer_instructions_sha256": policy_sha256,
+                "rollout_trace_root": "/logs/agent/rollout-trace",
+            }
+            if product is not None:
+                overrides["binary_product"] = product
+            adapter = self.adapter(adapter_type, **overrides)
+            environment = FakeEnvironment()
+            asyncio.run(adapter.run("native task instruction", environment, mock.Mock()))
+            command = "\n".join(call[0] for call in environment.calls)
+            commands[adapter_type.__name__] = command
+            self.assertIn("max_concurrent_threads_per_session=4", command)
+            self.assertIn('agents.default_subagent_model="gpt-5.6-terra"', command)
+            self.assertIn(
+                'agents.default_subagent_reasoning_effort="medium"', command
+            )
+            self.assertIn('developer_instructions="delegate only when useful"', command)
+            self.assertTrue(
+                any(
+                    call[1] is not None
+                    and call[1].get("CODEX_ROLLOUT_TRACE_ROOT")
+                    == "/logs/agent/rollout-trace"
+                    for call in environment.calls
+                )
+            )
+            kwargs = dict(adapters_module.manifest_agent_kwargs(adapter))
+            self.assertEqual(kwargs["developer_instructions_sha256"], policy_sha256)
+            self.assertNotIn("delegate only when useful", "\n".join(kwargs.values()))
+        self.assertNotIn("team_state_enabled", commands["CodexUploadAdapter"])
+        self.assertIn("team_state_enabled=true", commands["RondoUploadAdapter"])
+
     def test_only_multi_can_carry_the_team_state_off_flag(self) -> None:
         # `--strict-config` upstream cannot even deserialize the key, and Local
         # has no team layer, so a mis-routed diagnostic must fail construction

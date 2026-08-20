@@ -99,6 +99,12 @@ class TerminalBenchRequest:
     pinned_model_id: str | None = None
     pinned_subagent_model: str | None = None
     pinned_subagent_effort: str | None = None
+    # Opt-in symmetric V2/trace wiring. False preserves historical campaigns.
+    common_multi_agent_v2: bool = False
+    multi_agent_max_concurrency: int | None = None
+    developer_instructions_path: str | None = None
+    developer_instructions_sha256: str | None = None
+    rollout_trace_root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -573,6 +579,11 @@ def prepare_terminal_bench_run(
         team_state_enabled=request.team_state_enabled,
         subagent_model=request.pinned_subagent_model,
         subagent_effort=request.pinned_subagent_effort,
+        common_multi_agent_v2=request.common_multi_agent_v2,
+        multi_agent_max_concurrency=request.multi_agent_max_concurrency,
+        developer_instructions_path=request.developer_instructions_path,
+        developer_instructions_sha256=request.developer_instructions_sha256,
+        rollout_trace_root=request.rollout_trace_root,
     )
     trial_name = _trial_name(materialized.task_label, spec.side)
     trials_dir = materialized.task_path.parent / "trials"
