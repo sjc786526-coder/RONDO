@@ -7,4 +7,6 @@
   重新猜测顺序。
 - 新增 5 项窄回归；Team Lens 定向测试 25/25 通过。指定 24/24 个 RONDO bundle 归约成功，重复 JSON/HTML 字节一致，
   CLI help/reduce/report 与 JavaScript 语法 smoke 通过。
+- 修复提交 `78736a7` 经新的干净上下文独立审查为 `PASS`；额外 late-terminal 组合、Team 实体/双向关系排序和 schema
+  乱序破坏复验均通过，未发现新的可复现功能或正确性问题。
 - 未修改 Rust/runtime/Team State/M-5 reader，未触发 hook、`eval-sync`、Cargo、Docker、API、模型或全量测试。

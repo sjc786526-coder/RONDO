@@ -267,12 +267,14 @@
   invocation 时 typed ToolCallKind 回退及十进制 ordinal 超过 9 后的 Event/Version 顺序；现均已补先失败后通过的窄回归。
 - 修复后 24/24 指定 bundle 仍可归约，JSON/HTML 重复生成字节一致，五类 Team capability 全 `available` 的样本仍为 1；
   CLI help/reduce/report 与内嵌 JavaScript 语法 smoke 通过。
+- 修复提交 `78736a7` 已由新的干净上下文独立审查者复验为 `PASS`：四项原阻断、额外 late-terminal 状态组合、全部 Team
+  实体/双向关系排序与 schema 乱序反例均关闭，25/25 定向测试和 24/24 现场 bundle 确定性继续通过。
 - 未执行 `just eval-sync`，未产生 common-root ignored 环境/缓存写入；未运行 Docker、API、模型、Cargo 或全量测试。
 
 ### 当前工作
 
-验收提交 `a3f7c20` 的 4 个阻断已在 Python consumer/schema 内窄修并完成定向与现场复验；保持零 hook。待提交修复批次后
-按用户要求交给新的干净上下文审查者复验，只有正确性/功能性验收通过后才重新冻结完成状态。
+验收提交 `a3f7c20` 的 4 个阻断已在 Python consumer/schema 内窄修，保持零 hook；修复提交 `78736a7` 的定向、现场和
+干净上下文独立复验均通过。本任务重新冻结为完成状态，本地 048 分支提交后停止，仍不合并、不推送。
 
 ### 本任务剩余步骤
 
@@ -284,7 +286,8 @@
 
 ### 当前验收状态
 
-- 两阶段实现与 `a3f7c20` 指出的 4 个阻断均已完成修复，执行者定向验收通过；独立复验待修复提交后执行。
+- 两阶段实现与 `a3f7c20` 指出的 4 个阻断均已完成修复；执行者定向验收和新的干净上下文独立复验均通过，未发现新的
+  可复现正确性或功能问题。
 
 ### 交接边界
 
