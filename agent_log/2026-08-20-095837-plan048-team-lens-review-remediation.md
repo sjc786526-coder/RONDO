@@ -26,4 +26,12 @@
 - `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py`：19/19 通过；24/24 指定 bundle 归约和重复
   JSON/HTML 确定性继续通过。
 
-第二个修复批次仍需交还同一独立审查者第三次复验，本日志不提前记录为通过。
+## 第三次复验修复
+
+- 第三次复验确认第二轮 4 项均关闭，但复现 interaction endpoint 与产品四态边界两个残留问题。
+- 已用 `parent_agent_id` 要求 `spawn_agent` 为 parent→child、`agent_result` 为 child→parent；共有 capability 不得
+  `not_applicable`，RONDO Team capability 不得 `not_applicable`，只有无 projection rows 时 projection 可
+  `unsupported`，其余 Team 类别不得 `unsupported`。
+- 19/19 定向测试与 24/24 指定 bundle 归约、JSON/HTML 确定性继续通过。
+
+第三个修复批次仍需交还同一独立审查者第四次复验，本日志不提前记录为通过。

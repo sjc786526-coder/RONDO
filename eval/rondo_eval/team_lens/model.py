@@ -290,6 +290,7 @@ def validate_team_view(view: dict[str, Any]) -> None:
             item = _dict(row, collection)
             _exact_keys(item, keys, collection)
             normalized_rows[collection].append(item)
+    _validate_common_availability(normalized_rows, availability)
     common_ids = _validate_common_rows(normalized_rows, source)
     for inference in normalized_rows["inferences"]:
         usage = inference.get("usage")
@@ -332,6 +333,7 @@ def _validate_common_rows(
     rows: dict[str, list[dict[str, Any]]], source: dict[str, Any]
 ) -> dict[str, set[str]]:
     agent_ids = _unique_ids(rows["agents"], "agent_id", "agent")
+    agent_parents = {agent["agent_id"]: agent["parent_agent_id"] for agent in rows["agents"]}
     if source["root_thread_id"] not in agent_ids:
         raise TeamViewError("source root thread is not an agent")
     for agent in rows["agents"]:
@@ -415,8 +417,16 @@ def _validate_common_rows(
             tool = tools_by_id[tool_id]
             if interaction["source_agent_id"] != tool["agent_id"] or interaction["kind"] != tool["kind"]:
                 raise TeamViewError("interaction and tool ownership disagree")
+            if interaction["kind"] == "spawn_agent" and (
+                interaction["source_agent_id"] == interaction["target_agent_id"]
+                or agent_parents[interaction["target_agent_id"]]
+                != interaction["source_agent_id"]
+            ):
+                raise TeamViewError("spawn interaction endpoint disagrees with agent parent")
         elif interaction["kind"] != "agent_result":
             raise TeamViewError("tool-free interaction kind is unsupported")
+        elif agent_parents[interaction["source_agent_id"]] != interaction["target_agent_id"]:
+            raise TeamViewError("agent result endpoint disagrees with agent parent")
         _validate_window(interaction)
     return {
         "agents": agent_ids,
@@ -424,6 +434,36 @@ def _validate_common_rows(
         "inferences": inference_ids,
         "tools": tool_ids,
     }
+
+
+def _validate_common_availability(
+    rows: dict[str, list[dict[str, Any]]],
+    availability: dict[str, dict[str, Any]],
+) -> None:
+    common_names = (
+        "agents",
+        "turns",
+        "inferences",
+        "usage",
+        "tools",
+        "terminal",
+        "interactions",
+        "timing",
+    )
+    for name in common_names:
+        if availability[name]["status"] == "not_applicable":
+            raise TeamViewError("common capability cannot be not applicable")
+    for name in ("agents", "turns", "inferences", "tools", "terminal", "interactions"):
+        if availability[name]["status"] == "unsupported" and rows[name]:
+            raise TeamViewError("unsupported common capability has normalized data")
+    if availability["usage"]["status"] == "unsupported" and any(
+        inference["usage"] is not None for inference in rows["inferences"]
+    ):
+        raise TeamViewError("unsupported usage capability has normalized data")
+    if availability["timing"]["status"] == "unsupported" and any(
+        rows[name] for name in ("agents", "turns", "inferences", "tools", "terminal", "interactions")
+    ):
+        raise TeamViewError("unsupported timing capability has normalized data")
 
 
 def _validate_team_rows(
@@ -540,6 +580,20 @@ def _validate_team_availability(
     rows: dict[str, list[dict[str, Any]]],
     availability: dict[str, dict[str, Any]],
 ) -> None:
+    for name in (
+        "team_revisions",
+        "team_projections",
+        "team_events_versions",
+        "team_routes",
+        "team_facts",
+    ):
+        if availability[name]["status"] == "not_applicable":
+            raise TeamViewError("RONDO team capability cannot be not applicable")
+    for name in ("team_revisions", "team_events_versions", "team_routes", "team_facts"):
+        if availability[name]["status"] == "unsupported":
+            raise TeamViewError("RONDO team capability cannot be unsupported")
+    if availability["team_projections"]["status"] == "unsupported" and rows["projections"]:
+        raise TeamViewError("unsupported team projection capability has normalized data")
     if availability["team_revisions"]["status"] == "available" and not rows["revisions"]:
         raise TeamViewError("team revision capability contradicts empty data")
     if availability["team_events_versions"]["status"] == "available" and any(

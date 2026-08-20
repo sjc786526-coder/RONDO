@@ -949,6 +949,19 @@ class TeamLensReducerTests(unittest.TestCase):
         )
         tool_interaction["source_agent_id"] = "thread-worker"
         corruptions.append(("interaction owner", wrong_interaction_owner))
+        reversed_agent_result = copy.deepcopy(view)
+        agent_result = next(
+            row for row in reversed_agent_result["interactions"] if row["kind"] == "agent_result"
+        )
+        agent_result["source_agent_id"], agent_result["target_agent_id"] = (
+            agent_result["target_agent_id"],
+            agent_result["source_agent_id"],
+        )
+        corruptions.append(("agent result endpoint", reversed_agent_result))
+        self_spawn = copy.deepcopy(view)
+        spawn = next(row for row in self_spawn["interactions"] if row["kind"] == "spawn_agent")
+        spawn["target_agent_id"] = spawn["source_agent_id"]
+        corruptions.append(("spawn endpoint", self_spawn))
         false_fact_available = copy.deepcopy(view)
         false_fact_available["team"]["facts"][0]["availability"] = None
         corruptions.append(("fact capability", false_fact_available))
@@ -967,6 +980,24 @@ class TeamLensReducerTests(unittest.TestCase):
             "reason_codes": [],
         }
         corruptions.append(("degraded reasons", partial_without_reason))
+        common_not_applicable = copy.deepcopy(view)
+        common_not_applicable["availability"]["agents"] = {
+            "status": "not_applicable",
+            "reason_codes": ["contradiction"],
+        }
+        corruptions.append(("common product boundary", common_not_applicable))
+        fact_not_applicable = copy.deepcopy(view)
+        fact_not_applicable["availability"]["team_facts"] = {
+            "status": "not_applicable",
+            "reason_codes": ["contradiction"],
+        }
+        corruptions.append(("team product boundary", fact_not_applicable))
+        projection_unsupported_with_rows = copy.deepcopy(view)
+        projection_unsupported_with_rows["availability"]["team_projections"] = {
+            "status": "unsupported",
+            "reason_codes": ["projection_request_shape_unrecognized"],
+        }
+        corruptions.append(("projection capability data", projection_unsupported_with_rows))
 
         for label, corrupted in corruptions:
             with self.subTest(corruption=label):
