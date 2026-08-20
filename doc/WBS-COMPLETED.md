@@ -1282,3 +1282,20 @@ Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送�
   `agent_log/2026-08-18-150000-plan044-m5-paid-entries-final-acceptance.md`；
   终审整改：`agent_log/2026-08-18-170000-plan044-m5-paid-boundary-remediation.md`、
   `agent_log/2026-08-18-190000-plan044-m5-paid-boundary-remediation-2.md`。
+
+## Multi M-5 正式门前 runtime-v4 收口（Plan 044，2026-08-20）
+
+**状态**：runtime-v3 的递归证据/分页假绿已关闭，runtime-v4、两把 v5 门锁、离线验证、唯一一次真实
+clean-smoke-v5 与独立后审全部完成。这里只记录门前开发成果；正式门 1/门 2 未启动，**不是** M-5 通过、
+门 1 通过或“小样本未见退化”。
+
+- 产品修复提交 `0eee6dc`；共享 build-lock Rust 146/146。runtime-v4 的 CLI/host/bwrap/manifest 摘要与
+  clean measurement tree 一致；合同提交 `b078e28` 固定 workflow-v5→runtime-v4→nondegradation-v5。
+- `just eval-lock`、Python M-5 定向 136/136、ready、loopback 通过。rehearsal 20/20 dispatch 均为 code cell、
+  0 Direct；dump 7 页/log 2 页到 null，七谓词与成员自身证据链成立。
+- clean-smoke-v5 只运行一次：20 请求全部 usage-priced/settled，计价 `$0.273138`、保守暴露 0、零 taint；
+  明文 16/加密与未知 0，七谓词全真。真实 trace 18/18 dispatch completed、0 Direct，成员 exec Fact 被成员
+  Version 引用并由 `team_evidence` 读回。
+- 独立预审与付费后审均为 GO、无 P0/P1。正式归档仍为 26 行且哈希未变；`multi-m5-phase-b` 账本/锁不存在，
+  Docker 未运行。完整证据见
+  `agent_log/2026-08-20-100000-plan044-m5-runtime-v4-prebuild-remediation.md`。

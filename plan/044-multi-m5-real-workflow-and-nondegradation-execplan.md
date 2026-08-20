@@ -26,22 +26,22 @@
 
 **阶段 A（无费用、无 Docker、无真实 API）**
 
-- [ ] Multi runtime bundle 已按产品身份冻结到 `eval-data/bin/rondo-multi/<bundle>/`，manifest 完整；
+- [x] Multi runtime bundle 已按产品身份冻结到 `eval-data/bin/rondo-multi/<bundle>/`，manifest 完整；
       其来源提交、构建命令与二进制哈希等身份事实同时写入本分支的受跟踪文件，使分支离开 ignored 目录仍可自证。
-- [ ] 冻结 Codex bundle 与 Multi bundle 的身份、来源与必要伴随产物（如 code-mode host、bwrap 资源）已核验一致可用。
-- [ ] **真实协作工作流合同已冻结**并写入受跟踪文件：运行载体与环境、给 Root 的任务陈述、成员规模上限、
+- [x] 冻结 Codex bundle 与 Multi bundle 的身份、来源与必要伴随产物（如 code-mode host、bwrap 资源）已核验一致可用。
+- [x] **真实协作工作流合同已冻结**并写入受跟踪文件：运行载体与环境、给 Root 的任务陈述、成员规模上限、
       工作流自身的完成标准、以及“协作功能确实发生”的可观测判定口径（至少覆盖 Event/Version 发布、Root 唤醒、
       route、多作者追加、证据下钻五项）。不要求人为制造孤儿成员。
-- [ ] **不退化运行合同已冻结**并写入受跟踪文件：`eval/tasksets/p2-b7-canary-catalog-v4.json` 的十任务、
+- [x] **不退化运行合同已冻结**并写入受跟踪文件：`eval/tasksets/p2-b7-canary-catalog-v4.json` 的十任务、
       双方一致的任务条件、预先冻结且交错的执行顺序、Root/成员模型与推理配置、超时与请求上限、基础轮次、
       条件复跑规则、基础设施失败处理与尝试上限、价格快照来源与日期、费用预测与美元硬上限。
-- [ ] 完成 M-5 所需的**最小**测评接线：Multi 侧以团队能力开启的状态运行，产品身份、运行合同版本与结果归档链路贯通。
+- [x] 完成 M-5 所需的**最小**测评接线：Multi 侧以团队能力开启的状态运行，产品身份、运行合同版本与结果归档链路贯通。
       不新建通用框架，不改写历史结果，不动 Local 的既有公平运行合同。
-- [ ] 在**无 API、无 Docker**条件下证明接线真的生效：至少一次 fake/loopback 级别的工作流演练，证明团队工具确实被
+- [x] 在**无 API、无 Docker**条件下证明接线真的生效：至少一次 fake/loopback 级别的工作流演练，证明团队工具确实被
       注册并可被调用、投影与证据链路可观测、结果记录字段齐全；skip 或未运行不得写成通过。
-- [ ] 受影响模块的定向门禁通过：`multidev/` 侧受影响的 Rust 定向测试（含既有 team 套件不退化）、
+- [x] 受影响模块的定向门禁通过：`multidev/` 侧受影响的 Rust 定向测试（含既有 team 套件不退化）、
       `eval/` 侧受影响的 Python 测试与 `just eval-lock`；不扩大为全 workspace 测试。
-- [ ] 输出**阶段 B 精确授权清单**（见 §3 硬约束 2 的条目），并在本计划“当前状态”记录，然后暂停等待授权。
+- [x] 输出**阶段 B 精确授权清单**（见 §3 硬约束 2 的条目），并在本计划“当前状态”记录，然后暂停等待授权。
 
 **阶段 B（取得单独授权后）**
 
@@ -270,11 +270,12 @@
   单智能体方向的历史基线不受影响。三条定向回归钉住该隔离性。
   离线复验：彩排 4 次全绿（七谓词全真）、loopback 通过（配置已显示 terra）、就绪自检 `ready=true`。
 - **Python 门禁复现注意**：必须清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 再跑，否则环回假上游会被宿主代理劫持。
-- 044 分支提交后停止。未合并、未推送。**正式两道门的 `$120` 账本仍未产生任何消费**
+- 044 分支在正式门前停止。未合并、未推送。**正式两道门的 `$120` 账本仍未创建或产生任何消费**
   （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本）。但"累计费用 $0"对整个任务已不成立：
   2026-08-18 在合同外、单独授权的冒烟账本上发生过真实支出，见
   `agent_log/2026-08-19-060000-plan044-m5-phase-b-fifth-review-remediation.md` 的勘误一节
-  （历史产物的账目不自洽，不能当完整费用记录）。Docker 与本地模型仍未执行。
+  （历史产物的账目不自洽，不能当完整费用记录）。本轮另有一条隔离 clean-smoke-v5，真实计价
+  `$0.273138`；Docker 与本地模型仍未执行。
 
 ### 移交入口（2026-08-19，第五轮审查整改后重写）
 
@@ -292,9 +293,14 @@
 - **保守记账维持不变**：`response.failed` 无 usage 仍按整笔预留结算（无法机器绑定"未计费"证明时不放松安全线），
   但预留额已从 $4.00 降到 $2.22，且报表把 `priced_usd` 与 `conservative_exposure_usd` 分开，
   不再把预留描述成真实消费。
-- **新发现的门 1 风险（尚未验证）**：团队证据 fact 只在 `ToolCallSource::Direct` 时留存，code cell 内的
-  嵌套调用不留（`multidev/codex-rs/core/src/team/evidence.rs`）。若真实模型把所有调用都放进 cell，
-  `team_evidence` 谓词无法成立。彩排里 shell 走直接调用可满足，真实模型是否如此只能由冒烟回答。
+- **门 1 证据链风险正在用 fail-closed 口径收口**：final-v2 已证明模型在 code cell 内调用工具，但外层
+  `exec` 结果原先不会铸 fact，成员 Version 的 `evidence_refs` 结构上不可达；不是模型漏调工具。runtime-v3
+  随后把所有纯文本 outer cell 都当证据，独立终审又证明这会让只含 team tools 的 inspect/publish cell 递归铸
+  Fact，并在分页时改变 snapshot generation。当前修复改为：只有在该 cell 内完成过受支持的**非 canonical
+  team-state / evidence-read-only** nested
+  tool，且 outer response 是 runtime 已排空 callbacks 的 terminal 纯文本结果时，才允许铸一个 Fact；Yielded、
+  team-only、混合媒体、加密与空输出均拒绝。绑定键是 harness 唯一 `output_item_id`，不使用可并发复用的模型
+  `call_id`。
 
 ### bundle 重建与 v3 冻结（2026-08-19）
 
@@ -343,36 +349,52 @@
 - 最后一次额度**未使用**：按当前约 11% 的终止率，一次 30+ 请求运行全程零 taint 的概率约 2%，
   验收又要求 zero taint，故不赌这一次；方向决定见 `doc/WBS.md`。
 
+### runtime-v3 冻结及终审否决（2026-08-19）
+
+- 产品修复提交 `802238bf45f9b877bef1206454216ce364b5d6c7`。Rust 定向门禁 8/8：正向覆盖真实
+  `CustomToolCallOutput + ContentItems(InputText...)`，集成覆盖外层 code cell 只生成一个 fact、成员发布带
+  `evidence_refs` 且 `team_evidence` 可读；加密与混合媒体反向回归继续 fail-closed。
+- 新测量树 `.claude/worktrees/044-m5-multi-bundle-measurement-v3` detached 于该提交。legacy musl 与
+  CLI+host 两次构建都走共享 build-lock、`CARGO_BUILD_JOBS=2`，分别 37m33s / 31m30s，均
+  `status=0 stop=none cleanup=none`。`multi-m5-runtime-v3` 已冻结并验证：CLI `d73c1ada…6355`、host
+  `bcbca36f…3c55`、bwrap `77360cb7…2c4c`、manifest `73d7f9cf…e8af`。
+- 当时的离线门禁为 M-5/trace/terminal 164/164、依赖锁、`ready=true` 与 loopback；rehearsal 表面七谓词
+  全真、明文且无 Direct shell。**独立终审已否决该 rehearsal 和 runtime-v3 的 ready 结论**：首次 dump 返回
+  `next_cursor` 后，outer inspect cell 自己铸 Fact 并推进 `observe_generation`，第二页实际以 stale cursor 失败；
+  collector 又静默跳过 failed inspect，故第一页足以假绿。runtime-v3、workflow/nondegradation v4 只保留为
+  被否决历史，不得充当后续 smoke 或正式门证据。
+- 用户把本轮准备性真实 API 授权上调为 **1000 USD**，但各入口自己的更低硬上限继续生效；正式门 1/门 2
+  和 `$120` 账本明确禁止启动。第一次 `clean-smoke-v3` 在 provider 收到请求前被开发沙箱网络策略拦截，留下
+  1 条未结算的 `$2.22` 预留与请求 capture，无归档、不可当真实消费或产品证据。该历史不删除、不复用；
+  replacement `clean-smoke-v4` 未启动；因其合同已绑定被否决的 runtime-v3，后续也不得启动。runtime-v4
+  验证通过后另建隔离的 clean-smoke-v5（1 次、上限 `$23.10`、独立 ledger/archive）。
+
+### runtime-v4 与门前收口（2026-08-20）
+
+- 产品修复提交 `0eee6dc5ee69f0eca9e1db350148c423a2b2bf67`；共享 build-lock 定向 Rust 146/146，
+  wrapper/final rc=0、无 stop/cleanup。measurement worktree detached clean 于同一提交。
+- `multi-m5-runtime-v4` 四项实物摘要：CLI `c64ff001…c631`、host `dc7a00d7…8d0f`、bwrap
+  `77360cb7…2c4c`、manifest `5fa958e0…5f31`；`verify-runtime` 通过。`b078e28` 冻结
+  workflow/nondegradation v5，并将 clean smoke 切为独立 v5 身份。
+- `just eval-lock`、M-5 Python 定向 136/136、ready=true、loopback 通过。rehearsal 0 Direct、20/20
+  dispatch completed、dump 7 页/log 2 页（`limit=3`，均到 null）、明文 9/加密与未知 0、七谓词全真；
+  成员自身 exec Fact 被 Version 引用并由 `team_evidence` 读回。独立付费前终审为 GO。
+- clean-smoke-v5 仅运行一次 `m5-g1-smoke-finalv5`：20 请求全部 usage-priced/settled，计价与 charged
+  `$0.273138`，`conservative_exposure_usd=0`；outcome=completed、零 taint、明文 16/加密与未知 0、
+  七谓词全真。真实 trace 18/18 dispatch 均为 code cell、0 Direct、全部 completed；dump 25 条与 log 7 条
+  均在返回 null 的完整页收齐，成员 `fct-2 → ver-1.1 → team_evidence observation` 成链。
+- 独立后审复核 ledger/archive/raw trace/正式资产隔离后通过。正式归档 SHA-256 仍为
+  `9da1be52…f884`（26 行）；`multi-m5-phase-b` 账本和锁不存在。
+
 ### 本任务剩余步骤
 
-- 阶段 B 的离线准备已全部完成并提交。**$40 冒烟已执行并用尽**（四次，合计扣减 `$31.52`，
-  其中真实 token 计价仅 `$0.44`，余 `$8.48` 不足再跑一次完整流程）。结论见
-  `agent_log/2026-08-19-120000-plan044-m5-phase-b-sixth-review-remediation.md`：
-  **trace 判据在真实模型上成立**（含判据必需的 `collaboration.team_inspect`，`spawn_member` 由真实
-  证据判真）。**"真实模型不遵守协作协议"的结论已撤回**：cm4 的成员线程 8 次推理 8 次失败
-  （`invalid_encrypted_content`），从未完成一个回合，故其"没有 publish/evidence"不可归因于模型。
-  该错误**已归因并修复**：不是 Root 推理被 fork，而是 code-mode 的 `spawn_agent` 明文 message 被
-  误包成 encrypted content（产品缺陷，已修并补 5 条 Rust 回归）。
-  **当前阻断是冻结的 runtime bundle 早于该修复、仍带缺陷。**
-  顺序：证据污染语义（已修）→ code-mode 明文（已修）→ 重建 bundle 并冻结 v3 →
-  一次零 infra-taint 的 clean smoke → 才谈正式门 1。
-  冒烟入口：`python -m rondo_eval.multi_m5 smoke --label <全新 id> --authorize-paid-api <口令>`
-  （**不含独立 provider probe**，已按第六轮决定删除；入口能花的钱只受其自身账本约束）。
-  每次必须换 `--label`：独立 run id、独立捕获目录、`claim_run` 拒绝重用，既有产物存在时直接拒绝启动。
-- 门禁复跑口径：`tests.test_multi_m5`、`tests.test_multi_m5_exec`、`tests.test_multi_m5_trace_evidence`、
-  `tests.test_terminal_bench` 与 `just eval-lock`。全量 `just eval-test` 为 932 用例、0 失败；
-  其中 2 个 `ModuleNotFoundError: No module named 'eval'` 的加载错误
-  （`test_l6_b10333_pair`、`test_local_m4_holdout_anchor`）在干净树上同样存在，属既有问题，不由本次引入。
-- **terra 可用性已由 2026-08-18 冒烟证实**（中转站已解封，模型确实响应并调用了团队工具）。
-  `smoke` 入口**不再内置 provider probe**：它会另开一份 $5 的 Plan 013 账本、绕出授权额度，
-  已按第六轮决定删除。若确需单独 probe，应作为独立且单独授权的动作。
+- 门前设施、准备性验证与铺垫均已完成。本任务只需同步权威文档、日志、最终 diff/状态并提交；随后停在正式门 1 前。
+- 正式门 1、门 2、Docker 和 `$120` 账本不执行，也不得把 clean smoke 表述为正式门 1 通过或 M-5 通过。
 
 ### 阻塞项
 
-- 阶段 B 所需的 Docker、真实 API 与付费授权尚未取得，按 §3 硬约束 2 处理。两个付费函数已存在，
-  但在独立审查通过并取得口令前不得调用真实上游。
-- `.env.local` 已确认存在、非符号链接、权限 `0600`。未打开文件。阶段 B 开始前执行者须静默确认
-  `OPENAI_API_KEY` 存在且非空（relay / CCTQ Responses），不得记录其值。
+- 无门前阻塞。正式门的未启动状态是本任务的授权停止边界，不是设施失败。
+- `.env.local` 已静默确认存在、为普通文件、权限 `0600` 且所需变量非空；从未打开、搜索或打印其内容。
 
 ### 当前验收状态
 
@@ -384,22 +406,23 @@
 - **门 1 证据绑定（审查者修复，2026-08-17）**：dump/log 只采纳 `team_inspect` 输出，唤醒信号只采纳
   `wait_agent` 输出；其它工具产出的"团队形状"负载记入 `unattributed` 并在判定中忽略、同时通过
   `CollaborationVerdict.ignored_evidence` 暴露，便于区分"模型伪造"与"wire 形状变了"。
-  指令模板补充 `next_cursor` 续页要求（`MAX_OBSERVE_LIMIT=50`），并重算 `instruction_sha256`。
+  指令模板补充 `next_cursor` 续页要求，并重算 `instruction_sha256`。产品硬上限仍为 50，但省略 `limit`
+  的实际默认页长是 20，响应现报告这个有效值；门前彩排另显式用 `limit=3` 强制覆盖续页分支。
 - **~~wire 形状已用冻结二进制实测确认~~（该结论已于第五轮作废，保留原文以存历史）**：当时用直接注入
   function_call 的方式验证团队工具可执行，结论本身没错，但**那不是真实模型的调用方式**。
   `code_mode_only` 模型只发 `custom_tool_call(name=exec)`，团队工具全在 JS 里调，顶层 function_call 数为 0，
   因此 v1 的 `evidence_source` 在真实配置下不可能成立。现已改为 rollout-trace 口径并冻结 workflow v2。
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
-- 阶段 B：**经五轮独立审查整改；离线准备已就绪，正式付费运行未开始。**
-  第五轮关闭了两个结构性阻断（门 1 判据在 code-mode 下不可能通过；门 2 RunSpec 与预算代理模型不一致），
-  并把 $120 从"意图"变成机械推导的数学上限。§1 阶段 B 五项仍全部未做。
-  已授权：$40 独立冒烟账本（不限次数，独立 batch/lock_id/归档，不动 $120）。
-  正式门 1 与门 2 仍须用户按清单单独放行。**不得表述为 M-5 通过、门 1 通过或未见退化。**
+- 阶段 B：runtime-v3 历史失败已由 runtime-v4、v5 门锁、完整分页 rehearsal、一次 zero-taint clean smoke 与
+  两轮独立终审闭合；门前准备已完成。用户授权本轮准备性 API 总额 1000 USD，实际本轮 clean smoke 计价
+  `$0.273138`，入口 `$23.10` 硬上限未放宽。正式门 1/门 2 未启动，`$120` 正式账本不存在。
+  **不得表述为 M-5 通过、门 1 通过或未见退化。**
 
 ### 阶段 B 精确授权清单
 
-取得一次明确授权后才可开始。授权范围建议按下表一次性批准或驳回；未列项仍禁止。
+下表仍是未来正式门的冻结清单。本轮只获授权完成门前准备与验证性 smoke，且明确停在正式大规模付费测评前；
+因此不得用本轮 1000 USD 的总授权替代下表的正式启动动作。
 
 | 项 | 冻结值 |
 |---|---|
@@ -489,3 +512,11 @@
 | 044 | 重试退避改为从 M-5 自己的锁读（`provider_retry_backoff_seconds="2"`），宿主 `paid_eval.retry_backoff_seconds` 不动 | 门 1 硬编码 2.0、门 2 却读宿主值（本机 1.0），两门实际用不同梯子且都不在冻结合同里。宿主那一项是机器级全局量，改它会波及同机其他 campaign —— 与决策 043 同一条隔离原则 | 门 1+门 2 运行配置 | 已采纳 |
 | 045 | clean smoke 另开批次 `multi-m5-clean-smoke`，上限由「三次 × 单次 run cap」机械推导（`$69.30`），并强制 < `$120` | 旧 `$40` 冒烟批次已用尽，且账本 cap 与磁盘文件绑定、不能就地扩容；沿用旧批次会把修复前后的行数混在一个账本里。上限推导而非手填，避免两个数字各自漂移 | 预算 / 证据分区 | 已采纳 |
 | 046 | 明文投递做成机器判据 `member_message_delivery`，写进门 1 结果与 smoke 摘要 | 它是冒烟五项验收里唯一只靠人看抓包的一项，而它恰好是区分「成员没收到可读任务」与「模型不遵守协议」的那一项 —— cm4 的错误归因就是这么产生的 | 门 1 证据 | 已采纳 |
+| 047 | code-mode outer `exec/wait` 只有在同一 cell 完成过受支持的非 canonical team-state / evidence-read-only nested tool、结果为非空全 `InputText`，且该 response 为 terminal 时才铸一个 Fact；Yielded、纯 team-state/evidence-read、混合、加密、空输出拒绝。spawn/wait/send_message 属支持的协作通信工具，不在 canonical team-state 排除集 | runtime-v3 的“所有纯文本 outer cell”会让 publish/evidence/inspect 自身递归产证据；Yielded 的远端快照与 handler seal 之间还允许 nested completion 竞态。terminal 前 runtime 已排空 callbacks，是当前可证明的最小安全边界 | Multi 证据链 | 已采纳，取代原宽口径 |
+| 048 | 证据链修复用新测量树与 `multi-m5-runtime-v3` 冻结，不覆盖 runtime-v2 | runtime-v2 的源码早于 `evidence.rs` 修复，复用其字节会让合同引用与真实产品不一致；旧运行仍须保持可追溯 | binary freeze / 合同身份 | 已采纳 |
+| 049 | 开发沙箱在 provider 前拦截后，保留 clean-smoke-v3 的未结算 `$2.22` 预留与 capture，replacement 改用独立 clean-smoke-v4 | v3 已写入一次性账本与 capture，删除或复用会抹掉失败边界并破坏身份隔离；v4 仍只有 1 次、`$23.10` 硬上限 | 预算 / 证据分区 | 已采纳 |
+| 050 | 本轮准备性真实 API 总授权提升到 `$1000`，但不得启动正式门 1/门 2 或创建 `$120` 账本；入口的更低硬上限不放宽 | 用户要求自主完成所有门前铺垫并停在大规模付费测评前。总授权是允许范围，不是消费目标，也不替代合同内 stop line | 执行授权 / 停止边界 | 已采纳 |
+| 051 | runtime-v3 与 workflow/nondegradation v4 保留为终审失败历史；后继使用 runtime-v4、两把 v5 锁与 clean-smoke-v5 | runtime-v3 的第二页 inspect 实际 stale-cursor 失败，而 collector 静默跳过，形成假绿；旧身份不得在修复后升级冒充 | binary freeze / 证据分区 | 已采纳 |
+| 052 | collector 必须拒绝 failed required inspect，且 dump/log 必须按返回 continuation 续页到 null 并覆盖 `total_entries`；fresh cursorless/offset-0 page set 可接受新总数 | 第一页谓词已足够时静默忽略第二页失败会假通过；反过来，不区分 continuation 与 fresh snapshot 又会误杀团队状态变化后的合法最终读取 | 门 1 判据 | 已采纳 |
+| 053 | rehearsal 的 dump/log 初始页与续页固定显式 `limit=3`，且两者都必须至少两页并走到 null；页数写入结果/归档 | 修掉 team-only 假 Fact 后自然状态可能不超过默认 20 条，若仍依赖自然体量，彩排会重新退化为未执行 continuation 分支的假准备 | 门 1 彩排 | 已采纳 |
+| 054 | code-mode recorder 的响应边界分成 Yielded / Terminal / Unavailable；MissingCell、首响应错误与不可转换响应一律不铸证并清理，wait 内部错误只为此前已知 live cell 保留重试状态 | MissingCell 没有 terminal callback-drain 证明，不能把泛化错误文本当 provenance；错误路径若留下任意未知 cell 又会逐步耗尽 256 项上限 | Multi 证据生命周期 | 已采纳 |

@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-19 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：code-mode 明文缺陷已修，bundle 重建为 `multi-m5-runtime-v2`，两把门锁冻结为 v3；正式两道门均未启动
+最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：runtime-v4、两把 v5 锁、完整分页彩排与一次 clean smoke 已通过独立后审；正式两道门均未启动
 
 ## 定位
 
@@ -140,10 +140,10 @@ Root 的 `resolved` 是协调注意力的结束，不等于 producer 认为问�
 **产品身份**贯通源码/构建路径、Cargo target、binary freeze、manifest、共享 catalog、adapter/RunSpec、
 campaign 与结果归档，唯一映射是 `eval/rondo_eval/contracts.py` 的 `product_layout()`；
 Multi 的工件命名空间是 `eval-data/bin/rondo-multi/`。规则见 `doc/eval-data-layout.md`。
-Multi 的 runtime bundle **已按产品身份冻结**：当前身份是受跟踪锁
-`eval/locks/multi-m5-runtime-v2.json` `status=frozen`（源码提交 `6fe1379`，含 code-mode 明文修复），
-工件在 `eval-data/bin/rondo-multi/6fe1379e…-x86_64-unknown-linux-musl-runtime-bundle/`。
-`runtime-v1`（`7a2ff68`）只作为历史保留：成员在该二进制上无法完成回合，其运行不构成协作协议的证据。
+Multi 当前冻结工件是 `eval/locks/multi-m5-runtime-v4.json`，来源提交 `0eee6dc`；codex、code-mode host、
+bwrap 与 manifest 四项 SHA-256 均与实物一致，measurement worktree clean 且指向同一提交。
+runtime-v1—v3 均只作历史保留，不得升级冒充；其中 runtime-v3 因 team-state outer cell 递归产 Fact、使
+inspect continuation cursor 自扰而被终审否决。
 
 **继承代码的处置**：evidence capture 与 Guardian provider 覆盖默认关闭、不影响 Multi 开发，本质是预留接口。
 不预设删除，处置原则只有一条：**不为保住它而对 Multi 内核做设计妥协**。
@@ -310,7 +310,7 @@ JavaScript 调用；Responses 线上顶层 `function_call` 数为 0。原 v1 判
 （`CODEX_ROLLOUT_TRACE_ROOT`，产品既有能力，非新增代码）：判据只认 Rust dispatch 侧写下的
 `ToolCallStarted/Ended`（工具名、namespace、注册表收到的参数、handler 返回值），并要求每条 dispatch 能绑定回
 抓包里模型真实发出的 code cell（`model_visible_call_id` + `source_js`），否则 fail-closed。这样
-"模型自己打印一段像 dump 的文本"不构成证据。该判据现由 `multi-m5-workflow-v3` 承载（v1/v2 归档不得充当 v3 证据）；
+"模型自己打印一段像 dump 的文本"不构成证据。当前判据由 `multi-m5-workflow-v5` 承载（旧版归档不得升级冒充）；
 彩排 stub 同步改为真实 code-mode 形状（这是关键：只改采集不改 stub 等于把同一个错误再犯一遍）。
 
 **门 2 模型已全链贯通（第五轮）。** 预算代理取锁里的 terra，但 `make_run_spec` 仍走宿主
@@ -327,10 +327,11 @@ sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign �
 （上游失败、缺 usage、超时不再被贴成"预算停止"），未知原因 fail-closed；预留扣款与已计价消费分开记账。
 正式付费槽位改用 `claim_run`，重跑 CLI 无法二次消费同一 run id。
 
-**已知风险，尚未验证。** 团队证据 fact 只在 `ToolCallSource::Direct` 时留存，code cell 内的嵌套调用不留
-（`multidev/codex-rs/core/src/team/evidence.rs`，产品的明确设计）。若真实模型把所有工具调用都放进 cell，
-则冻结的 `team_evidence` 谓词无法成立。彩排中 shell 走直接调用即可满足（两种暴露面都开着，是合法模型行为），
-但真实模型是否如此**只能由付费冒烟回答**，不得预先假定。
+**成员证据链已按终审后的最小安全边界闭合。** runtime-v4 要求同一 cell 完成受支持的非 canonical
+team-state nested tool，outer response 还必须是 runtime 已排空 callbacks 的 terminal 纯文本结果；Yielded、
+team-state/evidence-read-only、混合媒体、加密、空输出均拒绝，Missing/不可用响应只清理不铸证。唯一绑定键是
+harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界重试状态。共享 build-lock 的定向 Rust
+结果为 146/146；Python M-5 定向为 136/136。
 
 彩排由 stub 驱动协议，**证明的是产品与判据这条链路能走通，不是真实模型会遵守协议**，因此
 **不是**门 1 通过、更不是 M-5 通过。
@@ -345,41 +346,32 @@ sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign �
    `communication_from_tool_message()` 误包成 encrypted content（cm4 抓包中该字段与 139 字符明文
    逐字节相等且完全可打印）。已让 `ToolCallSource::CodeMode` 走明文分支，`Direct` 的
    encrypted-argument 语义保持不变，并补 5 条 Rust 定向回归（含反向验证）。
-3. **仍未回答**：上文那条 `team_evidence` / Direct fact 风险。唯一 `requester=model` 的调用是 Root
-   一次失败的 `wait`，既非成员发出、也未产生可引用的 observation。
+3. **后续 final-v2 回答了结构问题**：成员确实调用工具，但 outer cell 不铸 fact；该历史运行不能冒充
+   修复后的结果；runtime-v3 当时的无 API 纵切随后因 inspect 分页假绿被终审否决。
 
 因此**不得**据此对 terra 的指令遵循下任何结论。
 
-**bundle 已重建并冻结 v3（2026-08-19）。** 修复后的源码 `6fe1379` 已冻成
-`multi-m5-runtime-v2`，两把门锁升到 `multi-m5-workflow-v3` / `multi-m5-nondegradation-v3` 并显式引用它；
-`v3` 一次性把此前散在代码或宿主机器配置里的量冻进合同：付费 endpoint、terra root/成员模型与 medium
-effort、2 秒指数退避（此前门 1 写死 2.0、门 2 却读宿主 `paid_eval.retry_backoff_seconds`）、
-正式 `unpriced_stop_threshold=1`，以及 `any_unpriced_invalidates_observation=true`
-（"停不停"与"算不算证据"是两件事）。旧锁、旧 bundle 与旧归档一律保留，不得升级冒充 v3。
-明文投递从"人眼看抓包"变成机器判据 `member_message_delivery`：新 bundle 的离线彩排里
-20 个 `agent_message` 内容块全部是 `input_text`、零 `encrypted_content`，而同一路径在旧 bundle 的
-cm4 抓包里有 37 个被标成 `encrypted_content` 的明文块。
+**runtime-v3 与 workflow/nondegradation-v4 门锁已被终审否决（2026-08-20）。** 第一页 dump 带 `next_cursor`，但 outer inspect cell
+自己铸 Fact 并推进 `observe_generation`；第二页真实返回 stale-cursor failed。旧 collector 静默跳过失败，
+第一页已有的谓词因此假绿。当前 collector 强制 required dump/log 成功、按 continuation 续到 null，并要求页集
+覆盖 `total_entries`；fresh snapshot 与 continuation 的总数语义分开。
 
-**clean smoke 已跑 2/3 次（2026-08-20）**，结果同样分层：**修复确认成立** —— 成员真实完成回合、
-从 code cell 派发 8 次工具调用（含 `team_publish`、`team_evidence`），`member_message_delivery=plaintext`
-（82 明文块 / 0 encrypted）；但**未取得零 taint 的干净观察**：中转站在 HTTP `200` 之后于流内发
-`server_error`，而重试白名单是 HTTP 状态码，状态码 200 时退避不触发（cs1 1/1、cs2 4/35）。
-同时模型这次没有调用 `team_inspect`，而它是判据唯一接受的 dump/log 证据源，故七谓词**全部无法验证**
-（不是判为假）—— **仍不得**对 Direct fact 风险或 terra 的指令遵循下任何结论。
-勘误：cm1–cm4 的终止错误全部是 `invalid_encrypted_content`，"中转站三分之一掉流"是被产品缺陷污染的观测。
-
-下一步顺序：取得一次零 infra-taint 的 clean smoke → 才谈正式门 1。方向待定见 `doc/WBS.md`；
-授权清单见 `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+**正式门前验证已完成。** v5 loader 绑定 workflow-v5→runtime-v4→nondegradation-v5；ready=true、loopback
+通过。rehearsal 以 `limit=3` 完成 dump 7 页、log 2 页并续到 null，0 Direct，七谓词全真。独立预审后只运行
+一次 clean-smoke-v5：20 请求全部 usage-priced/settled，计价 `$0.273138`、保守暴露 0、零 taint，明文 16/
+加密与未知 0，七谓词与 `team_evidence` 全真；真实 trace 18/18 dispatch 均来自 code cell 且全完成，成员
+exec Fact→首个 Version→`team_evidence` 明文 observation 成链。独立后审通过。clean-smoke-v3 的未结算历史与
+v4 未启动身份继续保留；正式 `$120` 账本/锁不存在，正式归档未变。下一工作包是未来单独启动正式门 1，
+本轮停在该边界。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
   fixture 里、指令规定工具顺序），只回答「真实模型下团队机制是否端到端真的发生」，不证明 Multi 在
   有分析负载的任务上更强；真实任务由门 2 的十个 TB 任务提供。任一门单独都不得引用为满足本目标。
-  详见 `eval/locks/multi-m5-workflow-v3.json` 的 `scope_limits` 与 Plan 044 决策 032。
+  当前合同由 `multi-m5-workflow-v5` 承载；历史边界见 workflow-v4 的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
-  阶段 A 前两项（工作流合同、runtime bundle）已冻结；独立验收要求先修好门 1 判据再谈第三项授权。
-  第三项所需的两个付费部件已落地并通过独立验收，仍待用户单独授权，本轮不进入真实运行。
+  阶段 A 前两项与阶段 B 门前准备已冻结并通过独立验收；正式门仍须按下表另行启动。
 - **完成标准**：两个相互独立的门，缺一不可。
   1. **工作流成立且功能实际发生**：在功能开启的真实运行中，冻结的工作流达到它自己预冻结的任务完成标准，
      且 Event/Version 发布、Root 唤醒、route、多作者追加与证据下钻确实被触发、注意力按正常路径收尾，
