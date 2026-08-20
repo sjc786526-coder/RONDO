@@ -640,6 +640,12 @@ class TeamLensReducerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    @staticmethod
+    def _resequence_events(events: list[dict]) -> None:
+        for seq, event in enumerate(events, start=1):
+            event["seq"] = seq
+            event["wall_time_unix_ms"] = 1_000 + seq * 10
+
     def test_codex_native_bundle_without_state_is_not_applicable(self):
         with TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw) / "bundle", product="codex")
@@ -683,6 +689,34 @@ class TeamLensReducerTests(unittest.TestCase):
             {row["kind"] for row in view["interactions"]},
             {"spawn_agent", "agent_result"},
         )
+
+    def test_structured_non_spawn_session_sources_do_not_forge_a_parent(self):
+        sources = (
+            {"custom": "app-server"},
+            {"internal": "memory_consolidation"},
+            {"subagent": "review"},
+        )
+        with TemporaryDirectory() as raw:
+            for ordinal, source in enumerate(sources):
+                with self.subTest(source=source):
+                    bundle = make_bundle(Path(raw) / str(ordinal), product="codex")
+                    events = self._events(bundle)
+                    root_start = next(
+                        row
+                        for row in events
+                        if row["payload"]["type"] == "thread_started"
+                        and row["payload"]["thread_id"] == "thread-root"
+                    )
+                    metadata_path = bundle / root_start["payload"]["metadata_payload"]["path"]
+                    metadata = json.loads(metadata_path.read_text("utf-8"))
+                    metadata["session_source"] = source
+                    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+                    view = reduce_bundle(bundle, "codex")
+
+                    root = next(row for row in view["agents"] if row["agent_id"] == "thread-root")
+                    self.assertIsNone(root["parent_agent_id"])
+                    self.assertEqual(view["availability"]["agents"]["status"], "available")
 
     def test_rondo_native_bundle_reduces_all_core_views_without_state(self):
         with TemporaryDirectory() as raw:
@@ -743,6 +777,109 @@ class TeamLensReducerTests(unittest.TestCase):
             {tool["requester"] for tool in direct_view["tools"] if tool["name"].startswith("team_")},
             {"code_cell", "model"},
         )
+
+    def test_typed_tool_kind_recovers_identity_without_invocation_payload(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw) / "bundle", product="rondo-multi")
+            events = self._events(bundle)
+            publish = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "tool_call_started"
+                and row["payload"]["tool_call_id"] == "tool-publish"
+            )
+            publish["payload"]["invocation_payload"] = None
+            mcp = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "tool_call_started"
+                and row["payload"]["tool_call_id"] == "tool-terminal"
+            )
+            mcp["payload"]["invocation_payload"] = None
+            mcp["payload"]["kind"] = {
+                "type": "mcp",
+                "server": "server-one",
+                "tool": "tool-one",
+            }
+            self._write_events(bundle, events)
+
+            view = reduce_bundle(bundle, "rondo-multi")
+
+        tools = {row["tool_id"]: row for row in view["tools"]}
+        self.assertEqual(tools["tool-publish"]["name"], "team_publish")
+        self.assertEqual(tools["tool-terminal"]["name"], "tool-one")
+        self.assertEqual(tools["tool-terminal"]["namespace"], "server-one")
+        self.assertIn(1, [row["revision"] for row in view["team"]["revisions"]])
+        self.assertEqual(view["availability"]["tools"]["status"], "available")
+
+    def test_team_rows_and_relations_follow_first_observation_sequence(self):
+        with TemporaryDirectory() as raw:
+            builder = NativeBundleBuilder(Path(raw) / "bundle")
+            builder.event(
+                {
+                    "type": "rollout_started",
+                    "trace_id": builder.trace_id,
+                    "root_thread_id": builder.root_thread,
+                }
+            )
+            builder.thread(builder.root_thread, "/root")
+            builder.event(
+                {
+                    "type": "codex_turn_started",
+                    "codex_turn_id": builder.root_turn,
+                    "thread_id": builder.root_thread,
+                },
+                thread_id=builder.root_thread,
+                turn_id=builder.root_turn,
+            )
+            expected = []
+            for ordinal in range(1, 11):
+                version_id = f"ver-1.{ordinal}"
+                expected.append(version_id)
+                builder.tool(
+                    f"tool-publish-{ordinal}",
+                    name="team_publish",
+                    kind="other",
+                    arguments={"based_on_revision": ordinal - 1},
+                    result={
+                        "event_id": "event-many",
+                        "version_id": version_id,
+                        "revision": ordinal,
+                        "evidence_refs": [],
+                        "evidence_refs_omitted": 0,
+                        "authored_on_stale_view": False,
+                        "deduplicated": False,
+                    },
+                    result_mode="direct",
+                )
+            builder.event(
+                {
+                    "type": "codex_turn_ended",
+                    "codex_turn_id": builder.root_turn,
+                    "status": "completed",
+                },
+                thread_id=builder.root_thread,
+                turn_id=builder.root_turn,
+            )
+            builder.event(
+                {"type": "thread_ended", "thread_id": builder.root_thread, "status": "completed"},
+                thread_id=builder.root_thread,
+            )
+            builder.event({"type": "rollout_ended", "status": "completed"})
+            view = reduce_bundle(builder.write(), "rondo-multi")
+
+        self.assertEqual([row["version_id"] for row in view["team"]["versions"]], expected)
+        self.assertEqual(view["team"]["events"][0]["version_ids"], expected)
+        corruptions = []
+        reversed_rows = copy.deepcopy(view)
+        reversed_rows["team"]["versions"].reverse()
+        corruptions.append(reversed_rows)
+        reversed_relation = copy.deepcopy(view)
+        reversed_relation["team"]["events"][0]["version_ids"].reverse()
+        corruptions.append(reversed_relation)
+        for corrupted in corruptions:
+            with self.assertRaisesRegex(TeamViewError, "canonical observation order"):
+                validate_team_view(corrupted)
 
     def test_fact_omission_marks_flow_partial_even_with_a_dump(self):
         with TemporaryDirectory() as raw:
@@ -897,6 +1034,79 @@ class TeamLensReducerTests(unittest.TestCase):
             view["availability"]["usage"]["reason_codes"],
         )
         self.assertEqual(view["summary"]["usage"]["total_tokens"], 14)
+
+    def test_turn_end_closes_running_inference_with_native_status_mapping(self):
+        cases = {
+            "completed": "cancelled",
+            "cancelled": "cancelled",
+            "failed": "failed",
+            "aborted": "aborted",
+        }
+        with TemporaryDirectory() as raw:
+            for turn_status, inference_status in cases.items():
+                with self.subTest(turn_status=turn_status):
+                    bundle = make_bundle(Path(raw) / turn_status, product="codex")
+                    events = [
+                        row
+                        for row in self._events(bundle)
+                        if not (
+                            row["payload"]["type"] == "inference_completed"
+                            and row["payload"]["inference_call_id"] == "inference-1"
+                        )
+                    ]
+                    turn_end = next(
+                        row
+                        for row in events
+                        if row["payload"]["type"] == "codex_turn_ended"
+                        and row["payload"]["codex_turn_id"] == "turn-root"
+                    )
+                    turn_end["payload"]["status"] = turn_status
+                    self._write_events(bundle, events)
+
+                    view = reduce_bundle(bundle, "codex")
+
+                    inference = view["inferences"][0]
+                    self.assertEqual(inference["status"], inference_status)
+                    self.assertEqual(inference["ended_seq"], turn_end["seq"])
+                    self.assertEqual(
+                        inference["ended_at_unix_ms"],
+                        turn_end["wall_time_unix_ms"],
+                    )
+
+    def test_late_inference_terminal_adds_usage_without_overriding_turn_end(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw) / "bundle", product="codex")
+            events = self._events(bundle)
+            terminal = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "inference_completed"
+                and row["payload"]["inference_call_id"] == "inference-1"
+            )
+            events.remove(terminal)
+            response_ref = terminal["payload"].pop("response_payload")
+            terminal["payload"].pop("response_id")
+            terminal["payload"]["type"] = "inference_cancelled"
+            terminal["payload"]["reason"] = "late_mapper_cancellation"
+            terminal["payload"]["partial_response_payload"] = response_ref
+            turn_end_index = next(
+                index
+                for index, row in enumerate(events)
+                if row["payload"]["type"] == "codex_turn_ended"
+                and row["payload"]["codex_turn_id"] == "turn-root"
+            )
+            events.insert(turn_end_index + 1, terminal)
+            self._resequence_events(events)
+            turn_end = events[turn_end_index]
+            self._write_events(bundle, events)
+
+            view = reduce_bundle(bundle, "codex")
+
+        inference = view["inferences"][0]
+        self.assertEqual(inference["status"], "cancelled")
+        self.assertEqual(inference["ended_seq"], turn_end["seq"])
+        self.assertEqual(inference["usage"]["total_tokens"], 14)
+        self.assertEqual(view["availability"]["usage"]["status"], "available")
 
     def test_terminal_timing_prefers_runtime_start_and_marks_dispatch_fallback(self):
         with TemporaryDirectory() as raw:

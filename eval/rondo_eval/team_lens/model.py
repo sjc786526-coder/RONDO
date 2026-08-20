@@ -565,7 +565,13 @@ def _validate_team_rows(
     versions = {row["version_id"]: row for row in rows["versions"]}
     routes = {row["route_id"]: row for row in rows["routes"]}
     facts = {row["fact_id"]: row for row in rows["facts"]}
+    _require_observation_order(rows["events"], "event_id", "team events")
+    _require_observation_order(rows["versions"], "version_id", "team versions")
+    _require_observation_order(rows["routes"], "route_id", "team routes")
+    _require_observation_order(rows["facts"], "fact_id", "team facts")
     for event in rows["events"]:
+        _require_relation_order(event["version_ids"], versions, "event versions")
+        _require_relation_order(event["route_ids"], routes, "event routes")
         for version_id in event["version_ids"]:
             if versions[version_id]["event_id"] != event["event_id"]:
                 raise TeamViewError("event and version relation disagree")
@@ -576,6 +582,7 @@ def _validate_team_rows(
         event_id = version["event_id"]
         if event_id is not None and version["version_id"] not in events[event_id]["version_ids"]:
             raise TeamViewError("version and event relation disagree")
+        _require_relation_order(version["fact_ids"], facts, "version facts")
         for fact_id in version["fact_ids"]:
             if version["version_id"] not in facts[fact_id]["version_ids"]:
                 raise TeamViewError("version and fact relation disagree")
@@ -584,6 +591,7 @@ def _validate_team_rows(
         if event_id is not None and route["route_id"] not in events[event_id]["route_ids"]:
             raise TeamViewError("route and event relation disagree")
     for fact in rows["facts"]:
+        _require_relation_order(fact["version_ids"], versions, "fact versions")
         for version_id in fact["version_ids"]:
             if fact["fact_id"] not in versions[version_id]["fact_ids"]:
                 raise TeamViewError("fact and version relation disagree")
@@ -685,6 +693,26 @@ def _validate_sequence_span(row: dict[str, Any]) -> None:
     last = _integer(row["last_seq"], "last sequence", minimum=1)
     if last < first:
         raise TeamViewError("sequence span runs backwards")
+
+
+def _require_observation_order(
+    rows: list[dict[str, Any]], identity_key: str, label: str
+) -> None:
+    identities = [row[identity_key] for row in rows]
+    expected = [
+        row[identity_key]
+        for row in sorted(rows, key=lambda row: (row["first_seq"], row[identity_key]))
+    ]
+    if identities != expected:
+        raise TeamViewError(f"{label} are not in canonical observation order")
+
+
+def _require_relation_order(
+    identities: list[str], rows: dict[str, dict[str, Any]], label: str
+) -> None:
+    expected = sorted(identities, key=lambda identity: (rows[identity]["first_seq"], identity))
+    if identities != expected:
+        raise TeamViewError(f"{label} are not in canonical observation order")
 
 
 def _unique_ids(rows: list[dict[str, Any]], key: str, label: str) -> set[str]:

@@ -259,25 +259,20 @@
   `available`，其余按缺少完整 dump/Team/evidence observation 显式 `partial`；所有 bundle 的 JSON/HTML 重复生成均字节
   一致。Codex 侧使用与冻结源码一致的原生 v1 合成
   fixture，明确标记为合成证据。现有 typed tool result、projection 外壳和 dump 关系足够，不触发 hook。
-- 已加入临时目录原生 fixture 与 20 项定向测试，覆盖两侧布局、direct/code-mode 等义、四态降级、无 `state.json`、
+- 已加入临时目录原生 fixture 与 25 项定向测试，覆盖两侧布局、direct/code-mode 等义、四态降级、无 `state.json`、
   Fact omission、wait 非 interaction、严格 reader 错误、正文不出站、renderer 单向依赖、确定性与 HTML 转义/自包含；
-  `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py` 为 20/20 通过。
-- 首次独立审查复现 6 个真实功能问题；已窄修 Fact dump/动态 evidence 区分、`team_retire`、原生事件 variant 与关联
-  fail-closed、Team View 交叉一致性、所有 inference usage 缺失降级及 terminal runtime 起点，并为每类补回归。
-- 第二次独立复验确认上述 6 项已关闭，并发现 4 个残留；已补 Agent/turn/tool/terminal/interaction ownership、capability 与
-  数据一致性、revision/deduplicated 驱动的 attention stale 判定和原生 Agent summary 可选字段类型回归。
-- 第三次独立复验确认第二次 4 项已关闭，并发现 interaction endpoint 与产品四态边界两个残留；已用 Agent parent 关系
-  校验 spawn/result 方向，并约束共有与 RONDO Team capability 的合法状态及 unsupported/data 共存关系。
-- 第四次独立复验确认第三次问题已关闭，但发现可选 child metadata 缺失被新 endpoint 约束误拒绝；现已仅在 parent 已知
-  时校验等式，始终保留非 self/spawned 方向约束，并把缺 parent 的 Agent 视图降为 `partial`。
-- 第五次独立复验为 `PASS`：可选 metadata 降级、历轮反例、20/20 定向测试、24/24 指定 bundle、JSON/HTML 确定性、
-  CLI 入口、diff check 与 tracked worktree 状态均通过，未发现新的可复现正确性或功能问题。
+  `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py` 为 25/25 通过。
+- 前轮独立审查已修复 Fact/retire、原生 variant、ownership、四态、attention stale、interaction endpoint 和可选 parent
+  降级等问题。后续验收提交 `a3f7c20` 又复现 4 个真实缺口：合法结构化 SessionSource、turn-end inference 收口、缺失
+  invocation 时 typed ToolCallKind 回退及十进制 ordinal 超过 9 后的 Event/Version 顺序；现均已补先失败后通过的窄回归。
+- 修复后 24/24 指定 bundle 仍可归约，JSON/HTML 重复生成字节一致，五类 Team capability 全 `available` 的样本仍为 1；
+  CLI help/reduce/report 与内嵌 JavaScript 语法 smoke 通过。
 - 未执行 `just eval-sync`，未产生 common-root ignored 环境/缓存写入；未运行 Docker、API、模型、Cargo 或全量测试。
 
 ### 当前工作
 
-两阶段实现、四个修复批次和第五次独立复验均已完成；最终工作树/提交链、敏感内容、raw trace、生成物和其他 worktree
-状态复核通过。本地 048 分支已完整提交，未合并、未推送，按授权边界停止并等待用户验收。
+验收提交 `a3f7c20` 的 4 个阻断已在 Python consumer/schema 内窄修并完成定向与现场复验；保持零 hook。待提交修复批次后
+按用户要求交给新的干净上下文审查者复验，只有正确性/功能性验收通过后才重新冻结完成状态。
 
 ### 本任务剩余步骤
 
@@ -289,8 +284,7 @@
 
 ### 当前验收状态
 
-- 两阶段实现及执行者定向验收通过；用户要求的干净上下文独立审查在第五次复验明确 `PASS`，未发现新的可复现
-  正确性或功能问题。
+- 两阶段实现与 `a3f7c20` 指出的 4 个阻断均已完成修复，执行者定向验收通过；独立复验待修复提交后执行。
 
 ### 交接边界
 
@@ -321,3 +315,7 @@
 | 016 | attention snapshot 新鲜度比较 Team result revision 与 dump revision，并排除 deduplicated result | tool-end sequence 是观测完成顺序，不等于 canonical Team State 变更顺序 | Team Attention | 已采纳 |
 | 017 | schema v1 用 Agent parent 校验 spawn/result 方向，并限制 capability 的产品合法状态 | 这些关系已在规范化数据中可机械判定，允许矛盾会让报告展示反向 interaction 或错误四态 | 规范化 schema | 已采纳 |
 | 018 | child parent 缺失时保留 spawned 角色/interaction 方向并降级，不拒绝 bundle | 原生 thread metadata 是 best-effort Option；parent 等式只有在字段存在时才能机械断言 | Agent 降级 | 已采纳 |
+| 019 | SessionSource 只在结构正确的 `subagent.thread_spawn.parent_thread_id` 存在时提取 parent，其他形态返回未知 | 冻结原生 reducer 将 SessionSource 作为 best-effort Value，Custom/Internal/Review 等对象形态不代表 spawn | Agent 身份 | 已采纳 |
+| 020 | turn terminal 关闭同 turn 的 running inference；late terminal 只补 usage，不覆盖 turn-end 状态与时间 | 与冻结原生 reducer 的 completed/cancelled→cancelled、failed→failed、aborted→aborted 收口语义一致 | inference 生命周期 | 已采纳 |
+| 021 | invocation 缺失时从 typed `Other.name` 或 `Mcp.server/tool` 恢复工具身份 | 这些字段是同一原生事件内已有的 body-free 机械事实，不能降级为 variant tag | 工具归约 | 已采纳 |
+| 022 | Team 实体与关系统一按 `(first_seq, stable_id)` 排序，并由 schema v1 拒绝乱序合同 | ID 词典序不是原生时序；renderer 只消费规范化合同，排序必须在 consumer/schema 边界统一保证 | Team 时序 | 已采纳 |

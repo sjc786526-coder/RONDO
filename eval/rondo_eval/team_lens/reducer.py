@@ -447,6 +447,7 @@ class _Reducer:
         self.tool_name_missing = False
         self.terminal_runtime_missing = False
         self.terminal_runtime_started: set[str] = set()
+        self.inference_terminal_events: set[str] = set()
         self.mcp_correlations: set[str] = set()
         self.code_cells: dict[tuple[str, str], dict[str, Any]] = {}
         self.compaction_requests: dict[str, dict[str, Any]] = {}
@@ -485,7 +486,14 @@ class _Reducer:
         elif kind == "codex_turn_started":
             self._start_turn(event)
         elif kind == "codex_turn_ended":
-            self._end_window(self.turns, payload.get("codex_turn_id"), seq, timestamp, payload.get("status"), "turn")
+            turn_id = payload.get("codex_turn_id")
+            self._end_window(self.turns, turn_id, seq, timestamp, payload.get("status"), "turn")
+            self._close_running_inferences_for_turn_end(
+                turn_id,
+                seq,
+                timestamp,
+                payload.get("status"),
+            )
         elif kind == "inference_started":
             self._start_inference(event)
         elif kind in {"inference_completed", "inference_failed", "inference_cancelled"}:
@@ -596,21 +604,46 @@ class _Reducer:
         if inference_id not in self.inferences:
             raise BundleError("inference terminal event references an unknown inference")
         row = self.inferences[inference_id]
-        if row["ended_seq"] is not None:
+        if inference_id in self.inference_terminal_events:
             raise BundleError("inference has more than one terminal event")
         if event.get("thread_id") not in {None, row["agent_id"]} or event.get("codex_turn_id") not in {None, row["turn_id"]}:
             raise BundleError("inference terminal envelope identity disagrees")
-        row["ended_seq"] = event["seq"]
-        row["ended_at_unix_ms"] = event["wall_time_unix_ms"]
-        row["status"] = {
-            "inference_completed": "completed",
-            "inference_failed": "failed",
-            "inference_cancelled": "cancelled",
-        }[payload["type"]]
+        self.inference_terminal_events.add(inference_id)
+        if row["ended_seq"] is None:
+            row["ended_seq"] = event["seq"]
+            row["ended_at_unix_ms"] = event["wall_time_unix_ms"]
+            row["status"] = {
+                "inference_completed": "completed",
+                "inference_failed": "failed",
+                "inference_cancelled": "cancelled",
+            }[payload["type"]]
         response_ref = payload.get("response_payload") or payload.get("partial_response_payload")
         response = self.reader.load_ref(response_ref)
         if isinstance(response, dict):
             row["usage"] = _extract_usage(response.get("token_usage"))
+
+    def _close_running_inferences_for_turn_end(
+        self,
+        turn_id: object,
+        seq: int,
+        timestamp: int,
+        turn_status: object,
+    ) -> None:
+        if not isinstance(turn_id, str):
+            return
+        status = {
+            "completed": "cancelled",
+            "cancelled": "cancelled",
+            "failed": "failed",
+            "aborted": "aborted",
+        }.get(_execution_status(turn_status))
+        if status is None:
+            return
+        for inference in self.inferences.values():
+            if inference["turn_id"] == turn_id and inference["status"] == "running":
+                inference["ended_seq"] = seq
+                inference["ended_at_unix_ms"] = timestamp
+                inference["status"] = status
 
     def _start_tool(self, event: dict[str, Any]) -> None:
         payload = event["payload"]
@@ -625,12 +658,18 @@ class _Reducer:
             raise BundleError("tool invocation payload is not an object")
         name = invocation.get("tool_name") if isinstance(invocation, dict) else None
         namespace = invocation.get("tool_namespace") if isinstance(invocation, dict) else None
-        kind = _tag(payload.get("kind"))
+        if namespace is not None and not isinstance(namespace, str):
+            raise BundleError("tool namespace is invalid")
+        tool_kind = payload.get("kind")
+        kind = _tag(tool_kind)
+        fallback_name, fallback_namespace = _tool_kind_identity(tool_kind)
+        if not _is_nonempty_string(name):
+            name = fallback_name
+        if namespace is None:
+            namespace = fallback_namespace
         if not _is_nonempty_string(name):
             name = kind
             self.tool_name_missing = True
-        if namespace is not None and not isinstance(namespace, str):
-            raise BundleError("tool namespace is invalid")
         requester = _tag(payload.get("requester"))
         if requester not in {"model", "code_cell"}:
             raise BundleError("tool requester is unsupported")
@@ -1389,12 +1428,20 @@ class _TeamAccumulator:
             attention = sorted(pairs.values(), key=lambda row: (row["agent_id"], row["event_id"]))
 
         for event in self.events.values():
-            event["version_ids"].sort()
-            event["route_ids"].sort()
+            event["version_ids"].sort(
+                key=lambda identity: (self.versions[identity]["first_seq"], identity)
+            )
+            event["route_ids"].sort(
+                key=lambda identity: (self.routes[identity]["first_seq"], identity)
+            )
         for version in self.versions.values():
-            version["fact_ids"].sort()
+            version["fact_ids"].sort(
+                key=lambda identity: (self.facts[identity]["first_seq"], identity)
+            )
         for fact in self.facts.values():
-            fact["version_ids"].sort()
+            fact["version_ids"].sort(
+                key=lambda identity: (self.versions[identity]["first_seq"], identity)
+            )
 
         missing_version_relation = any(version["event_id"] is None for version in self.versions.values())
         missing_route_relation = any(
@@ -1472,10 +1519,18 @@ class _TeamAccumulator:
                 key=lambda row: (row["seq"], row["revision"], row["tool_id"]),
             ),
             "projections": self.projections,
-            "events": sorted(self.events.values(), key=lambda row: row["event_id"]),
-            "versions": sorted(self.versions.values(), key=lambda row: row["version_id"]),
-            "routes": sorted(self.routes.values(), key=lambda row: row["route_id"]),
-            "facts": sorted(self.facts.values(), key=lambda row: row["fact_id"]),
+            "events": sorted(
+                self.events.values(), key=lambda row: (row["first_seq"], row["event_id"])
+            ),
+            "versions": sorted(
+                self.versions.values(), key=lambda row: (row["first_seq"], row["version_id"])
+            ),
+            "routes": sorted(
+                self.routes.values(), key=lambda row: (row["first_seq"], row["route_id"])
+            ),
+            "facts": sorted(
+                self.facts.values(), key=lambda row: (row["first_seq"], row["fact_id"])
+            ),
             "attention": attention,
         }
         return view, availability
@@ -1566,16 +1621,12 @@ def _sum_usage(inferences: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def _parent_thread_id(source: object) -> str | None:
-    if isinstance(source, str):
-        return None
     if not isinstance(source, dict):
-        raise BundleError("thread session source is unsupported")
+        return None
     subagent = source.get("subagent")
     spawn = subagent.get("thread_spawn") if isinstance(subagent, dict) else None
     parent = spawn.get("parent_thread_id") if isinstance(spawn, dict) else None
-    if not _is_nonempty_string(parent):
-        raise BundleError("spawned thread metadata has no parent identity")
-    return parent
+    return parent if _is_nonempty_string(parent) else None
 
 
 def _dump_entry_key(entry: dict[str, Any]) -> tuple[object, ...] | None:
@@ -1643,6 +1694,23 @@ def _tag(value: object) -> str:
     if _is_nonempty_string(value):
         return value
     return "unknown"
+
+
+def _tool_kind_identity(value: object) -> tuple[str | None, str | None]:
+    if not isinstance(value, dict):
+        return None, None
+    kind = value.get("type")
+    if kind == "other":
+        name = value.get("name")
+        return (name if _is_nonempty_string(name) else None), None
+    if kind == "mcp":
+        server = value.get("server")
+        tool = value.get("tool")
+        return (
+            tool if _is_nonempty_string(tool) else None,
+            server if _is_nonempty_string(server) else None,
+        )
+    return (kind if _is_nonempty_string(kind) else None), None
 
 
 def _execution_status(value: object) -> str:
