@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 v6-c1/c2 失败历史保持不可变，v6-c3 正式 Gate 1/Gate 2 已通过，Plan 044 尚未合入 `main`）
+最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 第一期已完成并合入 `main`；第二期进入两个并行工程包，后置主动委派收益测评）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -25,16 +25,17 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过。阶段 B 复用 `multi-m5-runtime-v4`，正式合同为 workflow/nondegradation v6：协议证据、capture 隔离、provider 前置冻结与幂等 resume 已闭合；共享 build-lock Rust 历史 146/146、当前 Python 199 项定向门禁、Docker resume 探针 29/29、ready、loopback 和 append-only v6-r3 完整分页 rehearsal 已验证。clean-smoke-v5 是有效历史非正式 smoke，不升级冒充 v6 正式证据。c1 Gate 1 因 sandbox 网络边界失败；c2 在有效模型响应后被 harness 误拒并停止，历史不改写；c3 Gate 1 与 Gate 2 已正式通过，十题均未观察到稳定单向退化。Plan 044 尚未合入 `main`。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期已经完成并随 `a220b774…` 合入、推送 `main`：明确要求委派时，真实协作链可达；冻结十题的 20 个基础有效 run 未观察到稳定单向退化。该结论不证明真实任务中会主动委派，也不证明质量或性能提升。第二期先并行补 Team State 序列性质测试与 Team Lens，随后再做主动委派收益对比。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
 
 ## 2. 下一工作包与顺序
 
-工作包 1、工作包 2（Plan 022）均已完成。**工作包 3 是当前工作包**，三条线按下述范围并行。
+工作包 1、工作包 2（Plan 022）均已完成；Local 已收口且方向 1 挂起。**当前执行焦点是 RONDO Multi
+第二期**：两个工程包并行，主动委派收益测评后置。下方保留各方向的当前状态与边界。
 
-### 工作包 3（当前）：三条线并行
+### 当前路线：Multi 第二期 A/B 并行
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
 - **3b RONDO Local**：**exact-token 普查（WP3b-A2）已完成并闭合**。
@@ -79,80 +80,24 @@
   人判结论为**保留为实验**。方向 2 因此没有已排期的下一工作包；若将来要投入真实使用，必须先按本页
   §6 单独立项，建立面向生产的正确性与安全验收，并解决“合成集线索化”与“holdout 单侧标签”两项证据缺口。
   结论详情见 `doc/WBS/local-approval-model.md`。
-- **3c RONDO Multi**：M-0—M-4 已完成并合入。**M-5 阶段 A 与阶段 B 均已通过**；c1 的执行环境失败和 c2 的
-  harness 假阴保留为历史，c3 正式 Gate 1/Gate 2 已完成。Plan 044 分支尚未合入 `main`。
-  当前事实：
-  - **门 1 判据已重建**。在 `tool_mode=code_mode_only` 下模型只发一个 `custom_tool_call(name=exec)`，团队工具
-    全部在 JS 里调用，Responses 线上没有任何 `function_call`，因此原 v1 判据（`responses_function_call_outputs`）
-    在真实配置下**结构上不可能通过**。现改为读冻结二进制自身的 rollout trace（`CODEX_ROLLOUT_TRACE_ROOT`），
-    判据只认 Rust dispatch 侧记录的工具名/namespace/参数/handler 返回值，并要求每条 dispatch 能绑定回抓包里
-    模型真实发出的 code cell。当前合同由 `multi-m5-workflow-v6` 承载（旧版归档不得升级冒充），彩排 stub 同步改为
-    真实 code-mode 形状，20 条对抗回归（伪造输出、死分支、错 namespace、缺失/冲突 trace、跨 run 重放）钉住。
-  - **门 2 模型已全链贯通**。RunSpec 此前仍取宿主 `paid_eval.main_model` 别名，与只认 terra 的预算代理不一致，
-    真跑会被本地拒成"产品失败"。现在锁里的 root/member 模型贯通 spec → adapter argv → proxy，就绪自检离线
-    构造两侧 prepared run 并逐字段比对；宿主别名与全局 member 默认恢复为 sol，历史基线不受影响。
-  - **$120 已是数学上限**。预留额由「冻结 token 信封（272k/128k）× 价目表」机械推导（$2.22），信封在账本
-    settle 处强制，因此 `charged ≤ reserved` 恒成立；每 run 上限由最大并发（Root+3 成员+Guardian）推导。
-    停止原因区分 budget 与 infra，未知原因 fail-closed；预留扣款与已计价消费分开记账。
-  - **成员证据链已按更窄边界闭合**。runtime-v4 只允许同 cell 已完成受支持的非 canonical team-state nested
-    tool、且 outer response 为 terminal 的纯文本结果铸一个 Fact；Yielded、team-state/evidence-read-only、
-    混合媒体、加密、空输出、Missing/不可用响应继续 fail-closed。唯一绑定键为 `output_item_id`。彩排固定
-    `limit=3`，dump 7 页、log 2 页都续到 null；真实 clean smoke 的成员自身 exec Fact 被首个 Version 引用并由
-    `team_evidence` 成功读回明文 observation。
-  - **正式 v6 执行面可幂等恢复**。Gate 1 最多 6 次；Gate 2 每槽最多 5 次 infra、全批最多 40 次，
-    `最多 60 effective（基础 20 + 条件最多 40）+ 40 infra + 6 Gate 1 + 10 diagnostic = 116` 个 run 槽位；
-    80 请求/run、5 次 HTTP 尝试和
-    `$120` 硬上限不变。完整归档跳过，pristine 零请求 run 可安全重领，精确白名单内的 pre-Harbor 自有产物和
-    已请求未归档状态各只追加一次 abandoned infra；terminal budget/capacity stop 保持终止并幂等归档。未知、
-    symlink、exact trial dir 或 exact-label Docker/Compose 残留 fail-closed，等待受监督精确清理，绝不伪装可重试。
-    正常模型失败保持产品结果；provider 全量冻结在任何正式状态创建前完成。
-  - 门 1 载体是协议演示级 fixture（决策 032），口径边界见锁的 `scope_limits`：WBS 的「真实任务上跑通完整协作
-    语义」须门 1+门 2 合起来读，任一门单独不得引用。
-  **M-5 阶段 B 的正式 Gate 1 与 Gate 2 已通过。** c1 六次均被开发工具 sandbox 的 local/private-address 策略
-  阻断；c2 又因旧 collector 把 code-mode runtime 的顶层默认 `wait` 错当 Direct team dispatch 而形成 harness
-  假阴。这两代历史资产保持不可变，不升级冒充产品结论。c3 使用同一 workflow-v6 / runtime-v4 /
-  nondegradation-v6 行为合同和独立执行身份：Gate 1 的 a1 因单次 `upstream_unavailable` 归档为 infra，a2 完成
-  22 个请求并以七谓词全真、`team_evidence=true`、明文 14 / 加密与未知 0 正式通过。Gate 2 随后在锁定的 10 个
-  镜像上串行完成 20 个基础有效 run：4 对双方通过、6 对双方失败，零 Codex-only 完成，因此没有条件复跑或
-  归因诊断，10 题均为 `no_stable_one_way_degradation`。冻结合同中的 60 是最大有效运行数（基础 20 + 条件最多
-  40），不是必须跑满的固定样本数。
-  - **纯执行环境/harness 修复不升级行为合同。** workflow-v6 / runtime-v4 / nondegradation-v6 三文件摘要保持不变；
-    campaign generation 只隔离执行身份与历史。c3 拥有新的 receipt/ledger/archive/capture/run-id，formal identity
-    绑定 clean harness commit；启动前同时核 c1/c2 冻结摘要和终态语义。collector 只豁免默认 namespace 的
-    runtime `wait`，且要求内部/模型 call-id 相同、wire 原始参数逐字一致、同线程 cell 已更早创建；它不贡献协作
-    证据，任何 Direct collaboration/team dispatch 仍 fail-closed。
-  - **共享预算跨代闭合。** 用户确认中转站 c1 实际账单 `$0`，本地仍保留 `$13.32` conservative exposure；再加
-    c2 已计价 `$0.661683`，c3 prior 为 `$13.981683`、ledger cap 为 `$106.018317`。c3 最终账本 237/237 request
-    settled、0 held，账本暴露 `$5.840974`；跨代保守口径合计 `$19.822657 < $120`。所有请求最多 1 次 HTTP
-    attempt，每 run 最多 22 请求。Gate 2 的 20 行 Docker 证据均 returncode 0、无 warning、精确清理完成；峰值
-    Docker 增长约 2.56GB、VHDX 增长 0，结束后 0 容器/卷/build cache，Windows `C:` 仍约 179GiB 可用。
-  **$40 冒烟已执行并用尽（四次）**。可以确认的只有一条：**观测管线成立** —— trace 在真实模型下看得见
-  经 code cell 发起的 `collaboration.*` 调用（含判据必需的 `team_inspect`），绑定校验通过，
-  `spawn_member` 由真实证据判真。
-  **此前"真实模型不遵守协作协议"的结论已撤回**：cm4 不是干净观察。逐线程复核显示
-  **成员线程 8 次推理全部失败**（`invalid_encrypted_content`，8/8），Root 侧零失败；成员从未完成一个
-  回合，因此"成员没有 publish/evidence"完全无法归因给模型的指令遵循。
-  final-v2 随后证明 `team_evidence=false` 是上述结构缺口，不是模型漏调工具；该历史结果不得冒充修复后证据。
-  **`invalid_encrypted_content` 已归因并修复（产品缺陷）**：不是 Root 推理被 fork，而是 code-mode 的
-  `spawn_agent` **明文** message 被 `communication_from_tool_message()` 误包成 encrypted content
-  （cm4 抓包里该字段与 139 字符明文逐字节相等）。已让 `ToolCallSource::CodeMode` 走明文分支，
-  `Direct` 的 encrypted-argument 语义保持不变，并补 5 条 Rust 定向回归（含反向验证）。
-  **runtime-v3 已冻结但被终审否决**：原 rehearsal 第二页 dump 实际 stale cursor 失败，旧 collector 静默跳过。
-  后继 runtime-v4 来自源码 `0eee6dc`，CLI/host/bwrap/manifest 四摘要与实物一致，现行 v6 loader 关系为
-  workflow-v6→runtime-v4→nondegradation-v6。clean-smoke-v5 只运行一次：20 请求全部按 usage 结算，真实计价
-  `$0.273138`、`conservative_exposure_usd=0`、明文 16/加密与未知均 0、七谓词全真；18/18 dispatch 均来自
-  code cell，0 Direct、0 失败。append-only v6-r3 rehearsal 为 20/20 code-cell、0 Direct/failed、dump 7 页/
-  log 2 页；canonical mutation 必须非 deduplicated，跨线程提交顺序由 inspect-log revision 证明，wrapper end
-  不作跨线程提交时钟，并严格绑定 Root wait/publish/route/update、成员 evidence 与不同二次 Version，七谓词
-  全真。正式 v6 c1/c2 archive、ledger、identity receipt 与 capture 已作为不可变历史保留；c3 已在 clean
-  harness `c9fcb0f…` 上完成 Gate 1 / Gate 2，正式 receipt、archive、ledger 与 capture 同样作为不可变证据保留。
-  后续提交仅收口文档，不是 c3 的可恢复运行身份，不改 receipt、不开新 campaign，也不重跑付费样本。本轮只证明
-  明确要求委派时协作链真实可用，以及冻结十题未观察到稳定单向退化；未验收主动委派或性能提升。
-  逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
-  `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
-  `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+- **3c RONDO Multi**：第一期已完成、归档并合入 `main`；执行过程、正式数字与验收证据只保留在
+  `doc/WBS-COMPLETED.md`、冻结 plan、agent log 和结果资产中。第二期按下列顺序推进：
+  - **并行包 A — Team State 序列性质测试**：在现有 `codex-team-state` 测试体系内增加一个默认 ignored 的
+    property test、薄参考状态与主动入口，复用既有 fixture 和共享 build-lock；不新建 crate、runner、corpus
+    或通用 fuzz 基础设施，首版不碰 Fact、真实 mailbox 与 Tokio 调度。
+  - **并行包 B — Team Lens**：先只消费 Codex 原生 rollout trace，离线抽取、聚合并生成
+    `team_view.json` 与可直接打开的静态 `team_report.html`。首批不改产品 runtime、trace writer/schema 或冻结
+    Codex；只有零改造原型机械证明缺少关键 RONDO 语义时，才另行评审一个窄 hook 批次。
+  - **后置包 C — 主动委派收益对比**：A、B 完成后再冻结任务、轮数与预算。冻结 Codex 与 RONDO 都启用同一
+    Multi-Agent V2 工具面，使用同一模型、`medium` effort、同一非任务特化的 proactive developer instruction、
+    同一并发上限和成员模型、同一自然任务 prompt；只有 RONDO 额外启用 Team State。两侧均开启原生 rollout
+    trace，Root 自主决定是否、何时及如何委派。冻结 Codex 不改源码。
+    该测评分别报告主动委派是否发生、任务结果和时间/token/工具/文件操作等成本；Team Lens 的行为记录是描述性
+    证据，不能单独证明因果收益。真实 API 执行仍须按 §6 单独授权。
+  A、B 的代码工作可并行，但写集和共享文件归属须在各自 plan 中冻结；重型构建仍通过同一共享锁串行。
 
-三条线的代码与文档工作真正并行；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源门禁全局串行。
+当前代码并行仅指 Multi 第二期 A/B 两个工程包；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源
+门禁全局串行。Local 没有已排期的下一工作包，方向 1 继续挂起。
 
 ### 关键阶段的真实 API 检查
 
@@ -171,10 +116,10 @@
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 c3 正式 Gate 1/Gate 2 已通过，Plan 044 分支待交付 | 是否合入 `main` 由用户决定；后续工作包尚未确定 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一期已完成；第二期两个工程包待实施 | 序列性质测试与 Team Lens 并行；主动委派收益测评依赖二者完成及单独授权 |
 
-- **Local 与 Multi 地位相同**。Local 已收口，Multi 的 c3 Gate 1 与 Gate 2 已正式通过；先后只反映路径长度，
-  不代表优先级高低。重型任务全局串行是资源约束，不构成战略阻塞。
+- **Local 与 Multi 地位相同**。Local 已收口，Multi 第一期已完成、第二期是当前优先路线；先后只反映路径长度，
+  不代表优先级高低。工程任务可以并行，重型任务仍因资源约束全局串行。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
 
@@ -246,7 +191,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 c1/c2 失败历史不改写，v6-c3 正式 Gate 1/Gate 2 已通过；Plan 044 待交付 |
+| P5 | RONDO Multi 产品线 | 第一期已完成并合入；第二期已排期、待实施：两个并行工程包，后置主动委派收益测评 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -254,16 +199,13 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | M1 | 冻结 Codex 与 RONDO 同一 TB 2.1 任务端到端可归档 | 工程验收 | 已完成 |
 | Local M3 | 12k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 已完成 |
 | Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 已完成（2026-08-16）：synthetic 130 与 holdout 16 分区盲评并解盲，人判为保留为实验 |
-| Multi M-1 | 团队世界状态纵切端到端跑通，团队状态不依赖任何模型记住 | 工程验收 | 已完成并合入 `main` |
-| Multi M-2 | Root 选择性路由 Event，目标读取并扩展同一 canonical chain，通知与指派可独立恢复和结束 | 工程验收 | 已完成并合入 `main` |
-| Multi M-3 | Version 机械关联到 Codex 实际保留的工具结果，按 Event 可达权限有界下钻，不可得时诚实标注 | 工程验收 | 已完成并合入 `main` |
-| Multi M-4 | producer 四类可用性、Root 显式退休独立终态、有界 dump/log/stats；真实无 API 产品纵切覆盖 recoverable 拒绝与 unavailable 退休 | 工程验收 | 已完成并合入 `main` |
-| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 阶段 B 已通过：c3 Gate 1 七谓词与真实证据链成立；Gate 2 十题 20 个基础有效 run 无稳定单向退化。Plan 044 尚未合入 `main` |
+| Multi 二期 A | Team State 序列性质测试：在现有 Rust 测试体系内探索跨功能状态组合 | 测试 | 待实施，与二期 B 并行 |
+| Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 待实施，与二期 A 并行 |
+| Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 待 A、B 完成并另获真实 API 授权 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
 （设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。
-工作包 1 已闭合，Multi 的付费退化验收不再有跨工作包前置，只保留具体运行时的合同冻结与真实 API 授权门。
-带 `Multi` 前缀的 `M-0`—`M-5` 是 Multi 产品线自己的阶段编号，与上面已退役的 `M2`/`M5` 无关。
+工作包 1 已闭合；后续 Multi 付费测评只保留具体运行时的合同冻结与真实 API 授权门。
 
 ### 公平比较设施保留的机械判据
 
@@ -279,7 +221,7 @@ pairwise-max `σ` 等事后放宽办法：
    共同有效集合至少 8 项。
 5. **预算**：基础运行、预冻结重复、infra attempts 与 wire canary 全部计入 campaign cap，并单独授权。
 
-这套判据**只适用于该设施自身的等条件 A/A、A/B 比较**。Local M3、Local M4 与 Multi 退化验收都
+这套判据**只适用于该设施自身的等条件 A/A、A/B 比较**。Local M3、Local M4 与已完成的 Multi 第一期退化验收都
 **不继承** `σ`/`delta`（理由分别见 `doc/WBS/local-approval-model.md` 与
 `doc/WBS/multi-agent-trusted-evidence.md`）。
 
@@ -322,4 +264,4 @@ v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两�
 - `doc/WBS/eval-benchmark.md` —— 方向 0：量化测评基准
 - `doc/WBS/local-approval-model.md` —— 方向 2：RONDO Local 本地审批模型接入与横评
 - `doc/WBS/teacher-harness-study.md` —— 方向 1：教师研究成果到优化实验（挂起）
-- `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：RONDO Multi 产品线（设计语义合同与 M-1—M-5）
+- `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：RONDO Multi 产品语义合同与第二期路线
