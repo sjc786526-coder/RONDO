@@ -334,6 +334,7 @@ def _validate_common_rows(
 ) -> dict[str, set[str]]:
     agent_ids = _unique_ids(rows["agents"], "agent_id", "agent")
     agent_parents = {agent["agent_id"]: agent["parent_agent_id"] for agent in rows["agents"]}
+    agent_roles = {agent["agent_id"]: agent["role"] for agent in rows["agents"]}
     if source["root_thread_id"] not in agent_ids:
         raise TeamViewError("source root thread is not an agent")
     for agent in rows["agents"]:
@@ -417,16 +418,28 @@ def _validate_common_rows(
             tool = tools_by_id[tool_id]
             if interaction["source_agent_id"] != tool["agent_id"] or interaction["kind"] != tool["kind"]:
                 raise TeamViewError("interaction and tool ownership disagree")
-            if interaction["kind"] == "spawn_agent" and (
-                interaction["source_agent_id"] == interaction["target_agent_id"]
-                or agent_parents[interaction["target_agent_id"]]
-                != interaction["source_agent_id"]
-            ):
-                raise TeamViewError("spawn interaction endpoint disagrees with agent parent")
+            if interaction["kind"] == "spawn_agent":
+                source = interaction["source_agent_id"]
+                target = interaction["target_agent_id"]
+                parent = agent_parents[target]
+                if (
+                    source == target
+                    or agent_roles[target] != "spawned"
+                    or (parent is not None and parent != source)
+                ):
+                    raise TeamViewError("spawn interaction endpoint disagrees with agent parent")
         elif interaction["kind"] != "agent_result":
             raise TeamViewError("tool-free interaction kind is unsupported")
-        elif agent_parents[interaction["source_agent_id"]] != interaction["target_agent_id"]:
-            raise TeamViewError("agent result endpoint disagrees with agent parent")
+        else:
+            source = interaction["source_agent_id"]
+            target = interaction["target_agent_id"]
+            parent = agent_parents[source]
+            if (
+                source == target
+                or agent_roles[source] != "spawned"
+                or (parent is not None and parent != target)
+            ):
+                raise TeamViewError("agent result endpoint disagrees with agent parent")
         _validate_window(interaction)
     return {
         "agents": agent_ids,

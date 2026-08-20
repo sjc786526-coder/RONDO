@@ -964,8 +964,14 @@ class _Reducer:
             if tool["kind"] in _INTERACTION_KINDS and tool["status"] == "completed"
         }
         observed_edges = {edge["tool_id"] for edge in interactions if edge["tool_id"] is not None}
+        agent_parent_missing = any(
+            agent["role"] == "spawned" and agent["parent_agent_id"] is None
+            for agent in self.agents.values()
+        )
         return {
-            "agents": capability("available"),
+            "agents": capability("partial", "agent_parent_missing")
+            if agent_parent_missing
+            else capability("available"),
             "turns": capability("available"),
             "inferences": capability("available"),
             "usage": capability("partial", *usage_reasons)

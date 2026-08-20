@@ -658,6 +658,32 @@ class TeamLensReducerTests(unittest.TestCase):
         self.assertEqual(view["summary"]["agent_count"], 2)
         self.assertEqual(view["summary"]["wait_count"], 1)
 
+    def test_missing_optional_child_metadata_degrades_parent_without_rejecting_edges(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw) / "bundle", product="codex")
+            events = self._events(bundle)
+            child_start = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "thread_started"
+                and row["payload"]["thread_id"] == "thread-worker"
+            )
+            child_start["payload"]["metadata_payload"] = None
+            self._write_events(bundle, events)
+            view = reduce_bundle(bundle, "codex")
+
+        child = next(row for row in view["agents"] if row["agent_id"] == "thread-worker")
+        self.assertIsNone(child["parent_agent_id"])
+        self.assertEqual(view["availability"]["agents"]["status"], "partial")
+        self.assertIn(
+            "agent_parent_missing",
+            view["availability"]["agents"]["reason_codes"],
+        )
+        self.assertEqual(
+            {row["kind"] for row in view["interactions"]},
+            {"spawn_agent", "agent_result"},
+        )
+
     def test_rondo_native_bundle_reduces_all_core_views_without_state(self):
         with TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw) / "bundle", product="rondo-multi")

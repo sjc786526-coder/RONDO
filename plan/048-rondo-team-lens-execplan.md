@@ -259,21 +259,23 @@
   `available`，其余按缺少完整 dump/Team/evidence observation 显式 `partial`；所有 bundle 的 JSON/HTML 重复生成均字节
   一致。Codex 侧使用与冻结源码一致的原生 v1 合成
   fixture，明确标记为合成证据。现有 typed tool result、projection 外壳和 dump 关系足够，不触发 hook。
-- 已加入临时目录原生 fixture 与 19 项定向测试，覆盖两侧布局、direct/code-mode 等义、四态降级、无 `state.json`、
+- 已加入临时目录原生 fixture 与 20 项定向测试，覆盖两侧布局、direct/code-mode 等义、四态降级、无 `state.json`、
   Fact omission、wait 非 interaction、严格 reader 错误、正文不出站、renderer 单向依赖、确定性与 HTML 转义/自包含；
-  `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py` 为 19/19 通过。
+  `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py` 为 20/20 通过。
 - 首次独立审查复现 6 个真实功能问题；已窄修 Fact dump/动态 evidence 区分、`team_retire`、原生事件 variant 与关联
   fail-closed、Team View 交叉一致性、所有 inference usage 缺失降级及 terminal runtime 起点，并为每类补回归。
 - 第二次独立复验确认上述 6 项已关闭，并发现 4 个残留；已补 Agent/turn/tool/terminal/interaction ownership、capability 与
   数据一致性、revision/deduplicated 驱动的 attention stale 判定和原生 Agent summary 可选字段类型回归。
 - 第三次独立复验确认第二次 4 项已关闭，并发现 interaction endpoint 与产品四态边界两个残留；已用 Agent parent 关系
   校验 spawn/result 方向，并约束共有与 RONDO Team capability 的合法状态及 unsupported/data 共存关系。
+- 第四次独立复验确认第三次问题已关闭，但发现可选 child metadata 缺失被新 endpoint 约束误拒绝；现已仅在 parent 已知
+  时校验等式，始终保留非 self/spawned 方向约束，并把缺 parent 的 Agent 视图降为 `partial`。
 - 未执行 `just eval-sync`，未产生 common-root ignored 环境/缓存写入；未运行 Docker、API、模型、Cargo 或全量测试。
 
 ### 当前工作
 
-首个实现和两个修复提交已完成；第三次独立复验问题已修复，19/19 定向测试和 24/24 现场只读回放通过。准备提交
-第三个修复批次并交还同一审查者第四次复验。
+首个实现和三个修复提交已完成；第四次独立复验问题已修复，20/20 定向测试和 24/24 现场只读回放通过。准备提交
+第四个修复批次并交还同一审查者第五次复验。
 
 ### 本任务剩余步骤
 
@@ -287,7 +289,7 @@
 
 ### 当前验收状态
 
-- 两阶段实现及修复后执行者定向验收通过；第三次独立复验仍未通过，残留问题已修复，尚待第四次复验，不冒充最终
+- 两阶段实现及修复后执行者定向验收通过；第四次独立复验仍未通过，兼容性问题已修复，尚待第五次复验，不冒充最终
   独立验收已通过。
 
 ### 交接边界
@@ -318,3 +320,4 @@
 | 015 | consumer 对声明支持的原生 v1 variant 执行必需字段、envelope 和生命周期关联校验 | 避免自建 reader 接受冻结 Rust serde/reducer 已拒绝的 bundle，同时不另建通用审计层 | 输入合同 | 已采纳 |
 | 016 | attention snapshot 新鲜度比较 Team result revision 与 dump revision，并排除 deduplicated result | tool-end sequence 是观测完成顺序，不等于 canonical Team State 变更顺序 | Team Attention | 已采纳 |
 | 017 | schema v1 用 Agent parent 校验 spawn/result 方向，并限制 capability 的产品合法状态 | 这些关系已在规范化数据中可机械判定，允许矛盾会让报告展示反向 interaction 或错误四态 | 规范化 schema | 已采纳 |
+| 018 | child parent 缺失时保留 spawned 角色/interaction 方向并降级，不拒绝 bundle | 原生 thread metadata 是 best-effort Option；parent 等式只有在字段存在时才能机械断言 | Agent 降级 | 已采纳 |

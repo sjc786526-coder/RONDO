@@ -34,4 +34,12 @@
   `unsupported`，其余 Team 类别不得 `unsupported`。
 - 19/19 定向测试与 24/24 指定 bundle 归约、JSON/HTML 确定性继续通过。
 
-第三个修复批次仍需交还同一独立审查者第四次复验，本日志不提前记录为通过。
+## 第四次复验修复
+
+- 第四次复验确认第三轮问题已关闭，但发现 `ThreadStarted.metadata_payload` 合法缺失时 parent 未知，被 endpoint
+  等式误拒绝。
+- 现仅在 parent 非空时校验 parent 等式，始终要求 spawn/result 非 self 且 child/source 为 spawned；非 root Agent
+  parent 缺失时输出 `partial / agent_parent_missing`，并新增可选 metadata 缺失回归。
+- 20/20 定向测试与 24/24 指定 bundle 归约、JSON/HTML 确定性继续通过。
+
+第四个修复批次仍需交还同一独立审查者第五次复验，本日志不提前记录为通过。
