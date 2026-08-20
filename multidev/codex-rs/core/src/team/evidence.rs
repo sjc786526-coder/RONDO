@@ -1,12 +1,13 @@
 //! Anchoring team versions to observations Codex actually kept.
 //!
-//! Capture happens in two steps because those two steps know different things. When a tool handler
-//! reserves a unique output item identity before dispatch. When the handler produces a terminal
-//! outcome, the harness knows which tool ran and what shape its result has — that is where an
-//! observation is *noted* against the reserved identity, and where a call the host ends up answering
-//! for itself is revoked again. When that exact result reaches conversation history, the harness
-//! knows the observation was really retained — that is where a fact is *minted* and numbered.
-//! Splitting them is what keeps a reference from claiming to exist before anything has been kept.
+//! Capture is split across the places that know different facts. The harness first reserves a unique
+//! output item identity. When a handler produces an outcome, it knows which tool ran and what shape
+//! its result has — that is where an observation is *noted* against the reserved identity, and where
+//! a call the host ends up answering for itself is revoked again. Code mode adds one join: a terminal
+//! outer result qualifies only when the same runtime cell completed a supported non-team nested
+//! tool. When that exact outer or direct result reaches conversation history, the harness knows it
+//! was really retained — that is where a fact is *minted* and numbered. Splitting these boundaries is
+//! what keeps a reference from claiming to exist before anything has been kept.
 //!
 //! Resolution goes the other way: a locator names one retained item in one participant's history, and
 //! reading it returns that item's bounded text and nothing that happens to sit next to it. Whether it
@@ -27,12 +28,15 @@ use codex_team_state::FactCategory;
 use codex_team_state::FactView;
 use codex_team_state::NotedObservation;
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Hard ceiling on the text one evidence read returns.
 ///
 /// A drill-down answers "what did you see" for one observation, so it is bounded on its own terms
 /// rather than by whatever the producer's tool happened to print. Anything cut is reported.
 pub(crate) const MAX_OBSERVATION_CHARS: usize = 4_000;
+const MAX_PENDING_CODE_MODE_OUTPUTS: usize = 256;
 
 /// The terminal outcome a tool handler produced for the model.
 ///
@@ -45,18 +49,210 @@ pub(crate) enum CompletedToolResult<'a> {
     Failure,
 }
 
+/// Session-local provenance for evidence carried by an outer code-mode result.
+///
+/// The outer `exec`/`wait` result is the item Codex retains, but only the nested dispatch path knows
+/// whether the cell actually ran an evidence-producing tool. Keeping that one bit keyed by the
+/// runtime cell and binding each model-visible output item to the cell lets the retention path join
+/// the two facts without parsing model-authored JavaScript or printed text. Only a terminal response
+/// can carry the bit; yielded snapshots are deliberately ineligible because their producer runs in
+/// another process and can race ahead of the receiving handler.
+#[derive(Default)]
+pub(crate) struct CodeModeEvidenceRecorder {
+    state: Mutex<CodeModeEvidenceState>,
+}
+
+#[derive(Default)]
+struct CodeModeEvidenceState {
+    cells: HashMap<String, CodeModeCellEvidence>,
+    item_cells: HashMap<String, String>,
+    sealed_items: HashMap<String, bool>,
+    terminal_cells: std::collections::HashSet<String>,
+}
+
+#[derive(Default)]
+struct CodeModeCellEvidence {
+    pending_eligible: bool,
+}
+
+/// The lifecycle boundary represented by one outer code-mode response.
+pub(crate) enum CodeModeOutputBoundary {
+    /// A remote snapshot which may race with nested completions while being delivered.
+    Yielded,
+    /// A response produced after the runtime drained or cancelled nested callbacks.
+    Terminal,
+    /// No trustworthy cell response exists (for example, a missing cell or failed first observe).
+    Unavailable,
+}
+
+impl CodeModeEvidenceRecorder {
+    /// Bind a unique harness output item to a cell.
+    ///
+    /// Returns whether the cell was already known. Wait errors use that distinction to retain a
+    /// genuinely live cell across a retry without allowing arbitrary unknown cell ids to accumulate
+    /// recorder state.
+    pub(crate) fn register_output(&self, cell_id: &str, output_item_id: &str) -> bool {
+        if cell_id.is_empty() || output_item_id.is_empty() {
+            return false;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cell_was_known = state.cells.contains_key(cell_id);
+        if state.item_cells.len() >= MAX_PENDING_CODE_MODE_OUTPUTS
+            && !state.item_cells.contains_key(output_item_id)
+        {
+            return false;
+        }
+        if state.cells.len() >= MAX_PENDING_CODE_MODE_OUTPUTS && !cell_was_known {
+            return false;
+        }
+        state.cells.entry(cell_id.to_string()).or_default();
+        state
+            .item_cells
+            .insert(output_item_id.to_string(), cell_id.to_string());
+        cell_was_known
+    }
+
+    /// Seal the provenance snapshot carried by this particular runtime response.
+    ///
+    /// Yielded content is produced in the remote cell actor before its oneshot wakes this handler.
+    /// A nested tool can finish in that delivery gap, so handler-side code cannot prove that any
+    /// pending credit was part of the yielded snapshot. Yielded outputs therefore discard the
+    /// current credit and never qualify as evidence. Terminal responses are safe: the runtime drains
+    /// or cancels nested callbacks before producing them, so no later completion can race across the
+    /// terminal boundary.
+    pub(crate) fn seal_output(&self, output_item_id: &str, boundary: CodeModeOutputBoundary) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(cell_id) = state.item_cells.get(output_item_id).cloned() else {
+            return;
+        };
+        let pending_eligible = state
+            .cells
+            .get_mut(&cell_id)
+            .is_some_and(|cell| std::mem::take(&mut cell.pending_eligible));
+        let (eligible, terminal) = match boundary {
+            CodeModeOutputBoundary::Yielded => (false, false),
+            CodeModeOutputBoundary::Terminal => (pending_eligible, true),
+            CodeModeOutputBoundary::Unavailable => (false, true),
+        };
+        state
+            .sealed_items
+            .insert(output_item_id.to_string(), eligible);
+        if terminal {
+            state.terminal_cells.insert(cell_id);
+        }
+    }
+
+    fn mark_eligible(&self, cell_id: &str) {
+        if cell_id.is_empty() {
+            return;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.terminal_cells.contains(cell_id)
+            && let Some(cell) = state.cells.get_mut(cell_id)
+        {
+            cell.pending_eligible = true;
+        }
+    }
+
+    fn take_output_eligibility(&self, output_item_id: &str) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(cell_id) = state.item_cells.remove(output_item_id) else {
+            return false;
+        };
+        let eligible = state.sealed_items.remove(output_item_id).unwrap_or(false);
+        if state.terminal_cells.contains(&cell_id)
+            && !state.item_cells.values().any(|value| value == &cell_id)
+        {
+            state.terminal_cells.remove(&cell_id);
+            state.cells.remove(&cell_id);
+        }
+        eligible
+    }
+
+    fn discard_output(&self, output_item_id: &str) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cell_id = state.item_cells.remove(output_item_id);
+        state.sealed_items.remove(output_item_id);
+        if let Some(cell_id) = cell_id
+            && !state.item_cells.values().any(|value| value == &cell_id)
+        {
+            // `discard` means the host replaced this output (normally cancellation), so no future
+            // retained response is promised for the registration being removed. Unlike `take` on a
+            // Yielded result, this is not the normal gap before a follow-up wait; keeping the last
+            // cell here would let cancelled, never-terminal invocations accumulate to the recorder
+            // ceiling and permanently suppress later evidence.
+            state.terminal_cells.remove(&cell_id);
+            state.cells.remove(&cell_id);
+        }
+    }
+}
+
+/// Remember that a nested code-mode call completed with a result which would be evidence if Codex
+/// retained it directly. Nested results have no conversation item of their own, so the marker is
+/// consumed by the outer cell result instead. Team-state tools remain excluded: a publish, inspect
+/// or evidence read must never create another observation merely because code mode wrapped it.
+pub(crate) fn note_completed_code_mode_nested_result(
+    invocation: &ToolInvocation,
+    result: CompletedToolResult<'_>,
+) {
+    if !super::team_state_enabled(&invocation.turn) {
+        return;
+    }
+    let ToolCallSource::CodeMode { cell_id, .. } = &invocation.source else {
+        return;
+    };
+    if crate::tools::handlers::team_tools::is_team_tool(&invocation.tool_name) {
+        return;
+    }
+    let supported = match result {
+        CompletedToolResult::Output(result) => {
+            let item = ResponseItem::from(
+                result
+                    .result
+                    .to_response_item(&result.call_id, &result.payload),
+            );
+            supported_observation(&item).is_some()
+        }
+        CompletedToolResult::Failure => {
+            !matches!(invocation.payload, ToolPayload::ToolSearch { .. })
+                && !invocation.call_id.is_empty()
+        }
+    };
+    if supported {
+        invocation
+            .session
+            .services
+            .code_mode_evidence
+            .mark_eligible(cell_id);
+    }
+}
+
 /// Note a completed tool result so it can become evidence once Codex has retained it.
 ///
 /// Called where a tool handler has produced a terminal outcome for the model. A call the host ends up
 /// answering for itself is revoked again by [`discard_noted_tool_result`], so an interrupted call
 /// leaves nothing behind even when its runtime finishes teardown afterwards.
 ///
-/// Three exclusions are decided here, at the only point where all three are knowable: the team tools
-/// and the evidence read itself (a drill-down that produced more evidence would make every read
-/// generate another thing to read), every result shape outside the supported set, and nested
-/// code-mode steps. The last of those is a matter of not doing pointless work rather than a
-/// correctness gate — a nested step's output is folded into its cell's result and never retained
-/// under its own call id, so it could not be confirmed either way.
+/// Team tools and the evidence read itself remain excluded (a drill-down that produced more evidence
+/// would make every read generate another thing to read), as does every result shape outside the
+/// supported set. A nested code-mode result is never noted under its own call id because it is not
+/// retained there; [`note_completed_code_mode_nested_result`] instead records trusted provenance so
+/// the retained outer cell can qualify without parsing model-controlled text.
 pub(crate) fn note_completed_tool_result(
     invocation: &ToolInvocation,
     item_id: &str,
@@ -72,6 +268,19 @@ pub(crate) fn note_completed_tool_result(
         return;
     }
     if crate::tools::handlers::team_tools::is_team_tool(&invocation.tool_name) {
+        return;
+    }
+    if invocation.tool_name.is_default_namespace()
+        && matches!(
+            invocation.tool_name.name.as_str(),
+            crate::tools::code_mode::PUBLIC_TOOL_NAME | crate::tools::code_mode::WAIT_TOOL_NAME
+        )
+        && !invocation
+            .session
+            .services
+            .code_mode_evidence
+            .take_output_eligibility(item_id)
+    {
         return;
     }
     let Ok(access) = super::TeamAccess::resolve(&invocation.session) else {
@@ -124,6 +333,7 @@ pub(crate) fn discard_noted_tool_result(
     turn_context: &TurnContext,
     item_id: &str,
 ) {
+    session.services.code_mode_evidence.discard_output(item_id);
     if !super::team_state_enabled(turn_context) {
         return;
     }

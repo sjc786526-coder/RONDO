@@ -195,7 +195,8 @@ pub struct ObserveQuery {
 }
 
 impl ObserveQuery {
-    pub(crate) fn limit(self) -> usize {
+    /// Effective page size after applying the public default and hard ceiling.
+    pub fn limit(self) -> usize {
         self.limit
             .unwrap_or(DEFAULT_OBSERVE_LIMIT)
             .clamp(1, MAX_OBSERVE_LIMIT)

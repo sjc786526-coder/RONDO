@@ -283,6 +283,7 @@ impl ToolRouter {
             cancellation_token,
             tracker,
             call_id,
+            output_item_id: output_item_id.clone(),
             tool_name,
             source,
             payload,

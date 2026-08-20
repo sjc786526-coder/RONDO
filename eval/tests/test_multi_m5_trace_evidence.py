@@ -242,7 +242,7 @@ class CodeModeEvidenceTest(unittest.TestCase):
         self.assertEqual(dump["entries"], [])
         self.assertEqual(dump["unattributed"], ["shell_command"])
 
-    def test_failed_dispatch_contributes_nothing(self):
+    def test_failed_required_inspect_is_refused(self):
         with TemporaryDirectory() as raw:
             builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
             builder.cell("cell-1", "call-1", CELL_JS)
@@ -256,8 +256,61 @@ class CodeModeEvidenceTest(unittest.TestCase):
                 status="failed",
             )
             trace = load_rollout_trace(builder.write())
-            dump = collect_gate1_evidence(capture("call-1", CELL_JS), trace)
-        self.assertEqual(dump["entries"], [])
+            with self.assertRaisesRegex(EvidenceError, "did not complete"):
+                collect_gate1_evidence(
+                    capture("call-1", CELL_JS),
+                    trace,
+                    required_inspect_actions=("dump",),
+                )
+
+    def test_failed_optional_stats_does_not_poison_complete_required_inspects(self):
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "stats-failed",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"stats"}'},
+                result={"error": "optional stats unavailable"},
+                status="failed",
+            )
+            builder.nested(
+                "dump-ok",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result={
+                    "action": "dump",
+                    "entries": DUMP["entries"],
+                    "next_cursor": None,
+                    "total_entries": len(DUMP["entries"]),
+                },
+            )
+            builder.nested(
+                "log-ok",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"log"}'},
+                result={
+                    "action": "log",
+                    "entries": [{"entry": "event_created"}],
+                    "next_offset": None,
+                    "total_entries": 1,
+                },
+            )
+            trace = load_rollout_trace(builder.write())
+            dump = collect_gate1_evidence(
+                capture("call-1", CELL_JS),
+                trace,
+                required_inspect_actions=("dump", "log"),
+            )
+        self.assertEqual(dump["inspect_actions"], ["dump", "log"])
+        self.assertEqual(len(dump["entries"]), 2)
+        self.assertEqual(len(dump["log"]), 1)
 
     def test_trace_from_another_run_is_refused(self):
         """The cell must correspond to a call this capture actually contains."""
@@ -390,10 +443,17 @@ class CodeModeEvidenceTest(unittest.TestCase):
     def test_dump_pages_with_a_cursor_concatenate(self):
         """A cursor page continues the same snapshot, so its rows are added."""
 
-        page_one = {"action": "dump", "entries": [{"entry": "event", "event_id": "e1"}]}
+        page_one = {
+            "action": "dump",
+            "entries": [{"entry": "event", "event_id": "e1"}],
+            "next_cursor": "c1",
+            "total_entries": 2,
+        }
         page_two = {
             "action": "dump",
             "entries": [{"entry": "version", "author": "/root/worker"}],
+            "next_cursor": None,
+            "total_entries": 2,
         }
         with TemporaryDirectory() as raw:
             builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
@@ -421,11 +481,195 @@ class CodeModeEvidenceTest(unittest.TestCase):
             dump = collect_gate1_evidence(capture("call-1", CELL_JS), trace)
         self.assertEqual(len(dump["entries"]), 2)
 
+    def test_dump_with_an_unconsumed_cursor_is_refused(self):
+        page_one = {
+            "action": "dump",
+            "entries": [{"entry": "event", "event_id": "e1"}],
+            "next_cursor": "c1",
+            "total_entries": 2,
+        }
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result=page_one,
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "before the final page"):
+                collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+
+    def test_missing_required_log_inspection_is_refused(self):
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result={
+                    "action": "dump",
+                    "entries": [],
+                    "next_cursor": None,
+                    "total_entries": 0,
+                },
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "log"):
+                collect_gate1_evidence(
+                    capture("call-1", CELL_JS),
+                    trace,
+                    required_inspect_actions=("dump", "log"),
+                )
+
+    def test_required_dump_must_cover_its_reported_total(self):
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result={
+                    "action": "dump",
+                    "entries": [{"entry": "event", "event_id": "e1"}],
+                    "next_cursor": None,
+                    "total_entries": 2,
+                },
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "does not cover"):
+                collect_gate1_evidence(
+                    capture("call-1", CELL_JS),
+                    trace,
+                    required_inspect_actions=("dump",),
+                )
+
+    def test_dump_with_the_wrong_continuation_cursor_is_refused(self):
+        page_one = {
+            "action": "dump",
+            "entries": [{"entry": "event", "event_id": "e1"}],
+            "next_cursor": "c1",
+            "total_entries": 2,
+        }
+        page_two = {
+            "action": "dump",
+            "entries": [{"entry": "version", "author": "/root/worker"}],
+            "next_cursor": None,
+            "total_entries": 2,
+        }
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result=page_one,
+            )
+            builder.nested(
+                "exec-2",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={
+                    "type": "function",
+                    "arguments": '{"action":"dump","cursor":"wrong"}',
+                },
+                result=page_two,
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "does not continue"):
+                collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+
+    def test_dump_continuation_cannot_change_the_snapshot_total(self):
+        page_one = {
+            "action": "dump",
+            "entries": [{"entry": "event", "event_id": "e1"}],
+            "next_cursor": "c1",
+            "total_entries": 2,
+        }
+        page_two = {
+            "action": "dump",
+            "entries": [{"entry": "version", "version_id": "v1"}],
+            "next_cursor": None,
+            "total_entries": 3,
+        }
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result=page_one,
+            )
+            builder.nested(
+                "exec-2",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={
+                    "type": "function",
+                    "arguments": '{"action":"dump","cursor":"c1"}',
+                },
+                result=page_two,
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "changed between pages"):
+                collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+
+    def test_inspect_result_action_must_match_the_invocation(self):
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result={
+                    "action": "log",
+                    "entries": [],
+                    "next_offset": None,
+                    "total_entries": 0,
+                },
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "differs from its invocation"):
+                collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+
     def test_a_later_cursorless_dump_replaces_stale_pages(self):
         """A fresh page is a new snapshot, so it must not be merged with the old."""
 
-        stale = {"action": "dump", "entries": [{"entry": "event", "event_id": "old"}]}
-        fresh = {"action": "dump", "entries": [{"entry": "event", "event_id": "new"}]}
+        stale = {
+            "action": "dump",
+            "entries": [{"entry": "event", "event_id": "old"}],
+            "next_cursor": None,
+            "total_entries": 1,
+        }
+        fresh = {
+            "action": "dump",
+            "entries": [
+                {"entry": "event", "event_id": "new"},
+                {"entry": "version", "version_id": "new-version"},
+            ],
+            "next_cursor": None,
+            "total_entries": 2,
+        }
         with TemporaryDirectory() as raw:
             builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
             builder.cell("cell-1", "call-1", CELL_JS)
@@ -448,6 +692,50 @@ class CodeModeEvidenceTest(unittest.TestCase):
             trace = load_rollout_trace(builder.write())
             dump = collect_gate1_evidence(capture("call-1", CELL_JS), trace)
         self.assertEqual(dump["entries"], fresh["entries"])
+
+    def test_a_later_zero_offset_log_replaces_a_completed_page_set(self):
+        """A fresh log read may observe a larger total after the team changes."""
+
+        stale = {
+            "action": "log",
+            "entries": [{"kind": "publish", "revision": 1}],
+            "next_offset": None,
+            "total_entries": 1,
+        }
+        fresh = {
+            "action": "log",
+            "entries": [
+                {"kind": "publish", "revision": 1},
+                {"kind": "resolve", "revision": 2},
+            ],
+            "next_offset": None,
+            "total_entries": 2,
+        }
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"log"}'},
+                result=stale,
+            )
+            builder.nested(
+                "exec-2",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={
+                    "type": "function",
+                    "arguments": '{"action":"log","offset":0}',
+                },
+                result=fresh,
+            )
+            trace = load_rollout_trace(builder.write())
+            dump = collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+        self.assertEqual(dump["log"], fresh["entries"])
 
     def test_wait_signal_requires_a_dispatched_wait(self):
         mark = (
@@ -497,15 +785,14 @@ class CodeModeEvidenceTest(unittest.TestCase):
             trace = load_rollout_trace(builder.write())
             workspace = root / "workspace"
             workspace.mkdir()
-            verdict = evaluate_collaboration(
-                {"entries": DUMP["entries"], "log": [], "jsonl_signals": []},
-                workspace=workspace,
-                finding_line="X",
-                jsonl=capture("call-1", CELL_JS),
-                trace=trace,
-            )
-        self.assertFalse(verdict.passed)
-        self.assertFalse(verdict.predicates["spawn_member"])
+            with self.assertRaisesRegex(EvidenceError, "required team_inspect actions"):
+                evaluate_collaboration(
+                    {"entries": DUMP["entries"], "log": [], "jsonl_signals": []},
+                    workspace=workspace,
+                    finding_line="X",
+                    jsonl=capture("call-1", CELL_JS),
+                    trace=trace,
+                )
 
 
 if __name__ == "__main__":

@@ -46,6 +46,13 @@ MEMBER_TASK = (
 # Product tests and the V2 default both use 30s. A longer wait still fits the
 # 180s rehearsal cap, but 30s matches the proven protocol and fails faster.
 WAIT_MS = 30_000
+MAX_INSPECT_PAGES = 16
+# Deliberately smaller than every realistic M-5 dump/log. The dress rehearsal
+# is also the pagination rehearsal: both inspect actions must execute at least
+# one continuation request and reach a null continuation marker. Keeping this
+# explicit prevents a smaller, cleaner state from making the collector's
+# continuation path silently untested.
+INSPECT_PAGE_LIMIT = 3
 _EVENT_ID = re.compile(r"evt-\d+-[0-9a-f]{32}")
 _VERSION_ID = re.compile(r"ver-\d+\.\d+-[0-9a-f]{32}")
 _FACT_ID = re.compile(r"fct-\d+-[0-9a-f]{32}")
@@ -158,29 +165,52 @@ class CollaborationStub:
         prefix = "inspect-dump" if action == "dump" else "inspect-log"
         pages = _outputs_with_prefix(request, prefix)
         if not pages:
-            args: dict[str, Any] = {"action": action}
+            args: dict[str, Any] = {
+                "action": action,
+                "limit": INSPECT_PAGE_LIMIT,
+            }
             return _team_call(prefix, "team_inspect", args)
         _call_id, payload = pages[-1]
         if not isinstance(payload, dict):
-            return None
+            raise RehearsalError(
+                f"{prefix} did not return a JSON page; inspection cannot be completed"
+            )
         if action == "dump":
             cursor = payload.get("next_cursor")
-            if cursor and len(pages) < 4:
+            if cursor:
+                if len(pages) >= MAX_INSPECT_PAGES:
+                    raise RehearsalError(
+                        "team_inspect dump exceeded the bounded page limit before next_cursor became null"
+                    )
                 self.dump_pages = len(pages)
                 return _team_call(
                     f"{prefix}-{len(pages)}",
                     "team_inspect",
-                    {"action": "dump", "cursor": cursor},
+                    {
+                        "action": "dump",
+                        "cursor": cursor,
+                        "limit": INSPECT_PAGE_LIMIT,
+                    },
                 )
+            self.dump_pages = len(pages)
             return None
         offset = payload.get("next_offset")
-        if offset not in {None, 0, "0"} and len(pages) < 4:
+        if offset not in {None, 0, "0"}:
+            if len(pages) >= MAX_INSPECT_PAGES:
+                raise RehearsalError(
+                    "team_inspect log exceeded the bounded page limit before next_offset became null"
+                )
             self.log_pages = len(pages)
             return _team_call(
                 f"{prefix}-{len(pages)}",
                 "team_inspect",
-                {"action": "log", "offset": offset},
+                {
+                    "action": "log",
+                    "offset": offset,
+                    "limit": INSPECT_PAGE_LIMIT,
+                },
             )
+        self.log_pages = len(pages)
         return None
 
     def _member(self, request: dict[str, Any]) -> bytes:

@@ -13,6 +13,7 @@ use super::PUBLIC_TOOL_NAME;
 use super::handle_runtime_response;
 use super::is_exec_tool_name;
 use super::telemetry::CodeModeToolCallGuard;
+use crate::team::evidence::CodeModeOutputBoundary;
 
 pub struct CodeModeExecuteHandler {
     spec: ToolSpec,
@@ -32,6 +33,7 @@ impl CodeModeExecuteHandler {
         session: std::sync::Arc<crate::session::session::Session>,
         turn: std::sync::Arc<crate::session::turn_context::TurnContext>,
         call_id: String,
+        output_item_id: Option<&str>,
         code: String,
         telemetry: &mut CodeModeToolCallGuard,
     ) -> Result<FunctionToolOutput, FunctionCallError> {
@@ -68,6 +70,14 @@ impl CodeModeExecuteHandler {
         if let Some(executed_tool_calls) = exec.session.services.executed_tool_calls.as_ref() {
             executed_tool_calls.register_cell(&cell_id, &call_id);
         }
+        if let Some(output_item_id) = output_item_id
+            && crate::team::team_state_enabled(&exec.turn)
+        {
+            exec.session
+                .services
+                .code_mode_evidence
+                .register_output(cell_id.as_str(), output_item_id);
+        }
         let runtime_cell_id = cell_id.to_string();
         let code_cell_trace = exec
             .session
@@ -83,10 +93,29 @@ impl CodeModeExecuteHandler {
             .services
             .code_mode_service
             .mark_cell_ready_for_dispatch(&cell_id);
-        let response = started_cell
-            .initial_response()
-            .await
-            .map_err(FunctionCallError::RespondToModel)?;
+        let response = match started_cell.initial_response().await {
+            Ok(response) => response,
+            Err(error) => {
+                if let Some(output_item_id) = output_item_id {
+                    exec.session
+                        .services
+                        .code_mode_evidence
+                        .seal_output(output_item_id, CodeModeOutputBoundary::Unavailable);
+                }
+                return Err(FunctionCallError::RespondToModel(error));
+            }
+        };
+        if let Some(output_item_id) = output_item_id {
+            let boundary = if matches!(response, codex_code_mode::RuntimeResponse::Yielded { .. }) {
+                CodeModeOutputBoundary::Yielded
+            } else {
+                CodeModeOutputBoundary::Terminal
+            };
+            exec.session
+                .services
+                .code_mode_evidence
+                .seal_output(output_item_id, boundary);
+        }
         // Record the raw runtime boundary. The model-visible custom-tool output
         // is produced by `handle_runtime_response` and later linked through
         // `CodeCell.output_item_ids` in the reduced trace.
@@ -109,9 +138,18 @@ impl CodeModeExecuteHandler {
                 });
         }
         exec.session.services.elicitations.wait_until_clear().await;
-        handle_runtime_response(&exec, response, args.max_output_tokens, started_at)
-            .await
-            .map_err(FunctionCallError::RespondToModel)
+        match handle_runtime_response(&exec, response, args.max_output_tokens, started_at).await {
+            Ok(output) => Ok(output),
+            Err(error) => {
+                if let Some(output_item_id) = output_item_id {
+                    exec.session
+                        .services
+                        .code_mode_evidence
+                        .seal_output(output_item_id, CodeModeOutputBoundary::Unavailable);
+                }
+                Err(FunctionCallError::RespondToModel(error))
+            }
+        }
     }
 }
 
@@ -138,6 +176,7 @@ impl CodeModeExecuteHandler {
             session,
             turn,
             call_id,
+            output_item_id,
             tool_name,
             payload,
             ..
@@ -152,7 +191,14 @@ impl CodeModeExecuteHandler {
         );
         let result = match payload {
             ToolPayload::Custom { input } if is_exec_tool_name(&tool_name) => self
-                .execute(session, turn, call_id, input, &mut telemetry)
+                .execute(
+                    session,
+                    turn,
+                    call_id,
+                    output_item_id.as_deref(),
+                    input,
+                    &mut telemetry,
+                )
                 .await
                 .map(boxed_tool_output),
             _ => Err(FunctionCallError::RespondToModel(format!(

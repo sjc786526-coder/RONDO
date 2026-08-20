@@ -39,6 +39,7 @@ async fn multi_agent_v2_request_user_input_rejects_subagent_threads() {
         cancellation_token: tokio_util::sync::CancellationToken::new(),
         tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
         call_id: "call-1".to_string(),
+        output_item_id: None,
         tool_name: codex_tools::ToolName::plain(REQUEST_USER_INPUT_TOOL_NAME),
         source: crate::tools::context::ToolCallSource::Direct,
         payload: ToolPayload::Function {
@@ -94,6 +95,7 @@ async fn request_user_input_sets_non_blocking_outside_plan_mode() {
                 cancellation_token: tokio_util::sync::CancellationToken::new(),
                 tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
                 call_id: "call-1".to_string(),
+                output_item_id: None,
                 tool_name: codex_tools::ToolName::plain(REQUEST_USER_INPUT_TOOL_NAME),
                 source: crate::tools::context::ToolCallSource::Direct,
                 payload: ToolPayload::Function {
@@ -165,6 +167,7 @@ async fn request_user_input_sets_blocking_from_turn_mode() {
                 cancellation_token: tokio_util::sync::CancellationToken::new(),
                 tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
                 call_id: "call-1".to_string(),
+                output_item_id: None,
                 tool_name: codex_tools::ToolName::plain(REQUEST_USER_INPUT_TOOL_NAME),
                 source: crate::tools::context::ToolCallSource::Direct,
                 payload: ToolPayload::Function {

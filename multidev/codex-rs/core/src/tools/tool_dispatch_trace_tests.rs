@@ -360,6 +360,7 @@ fn test_invocation_with_payload(
         cancellation_token: CancellationToken::new(),
         tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
         call_id: call_id.to_string(),
+        output_item_id: None,
         tool_name,
         source,
         payload,

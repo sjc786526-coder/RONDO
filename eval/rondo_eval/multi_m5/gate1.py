@@ -487,6 +487,23 @@ def _run_gate1_once(
                 else ""
             )
 
+            # A green scripted rehearsal must have exercised the collector's
+            # continuation branch for both required inspect actions. Natural
+            # team state size is not a stable way to guarantee that: removing
+            # spurious evidence can legitimately shrink it below the product's
+            # default page size. The stub therefore asks for small pages, and
+            # this gate fails closed if either action still completes in one.
+            if (
+                stub is not None
+                and trace_error is None
+                and (stub.dump_pages < 2 or stub.log_pages < 2)
+            ):
+                trace_error = (
+                    "rehearsal did not exercise required team_inspect "
+                    "continuations: "
+                    f"dump_pages={stub.dump_pages} log_pages={stub.log_pages}"
+                )
+
     if completed is None:
         raise Gate1Error("gate 1 process did not start")
     if drain_budget_proxy is not None:
@@ -539,7 +556,13 @@ def _run_gate1_once(
         passed = False
         outcome = "infra_failed"
         reasons = [stop_reason]
-    elif not timed_out and jsonl.strip() and verdict.passed and completed.returncode == 0:
+    elif (
+        not timed_out
+        and jsonl.strip()
+        and trace_error is None
+        and verdict.passed
+        and completed.returncode == 0
+    ):
         passed = True
         outcome = "completed"
         reasons = list(verdict.reasons)
@@ -599,6 +622,10 @@ def _run_gate1_once(
     if stub is not None:
         extra_fields["stub_finished"] = stub.finished
         extra_fields["stub_errors"] = list(stub.errors)
+        extra_fields["inspect_pages"] = {
+            "dump": stub.dump_pages,
+            "log": stub.log_pages,
+        }
         extra_fields["rehearsal"] = True
     record = archive_record(
         evidence_kind=evidence_kind,
@@ -648,6 +675,11 @@ def _run_gate1_once(
         "report_text": report_text,
         "stub_errors": list(stub.errors) if stub is not None else [],
         "stub_finished": stub.finished if stub is not None else False,
+        "inspect_pages": (
+            {"dump": stub.dump_pages, "log": stub.log_pages}
+            if stub is not None
+            else None
+        ),
         "timed_out": timed_out,
     }
 

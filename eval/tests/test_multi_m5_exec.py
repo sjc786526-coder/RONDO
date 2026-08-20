@@ -110,7 +110,11 @@ from rondo_eval.multi_m5.paid import (  # noqa: E402
 )
 from rondo_eval.multi_m5.predicates import CollaborationVerdict  # noqa: E402
 from rondo_eval.multi_m5.ready import readiness_report  # noqa: E402
-from rondo_eval.multi_m5.rehearsal import MEMBER_TASK, CollaborationStub  # noqa: E402
+from rondo_eval.multi_m5.rehearsal import (  # noqa: E402
+    INSPECT_PAGE_LIMIT,
+    MEMBER_TASK,
+    CollaborationStub,
+)
 from rondo_eval.multi_m5.gate2 import _record_for, _run_id  # noqa: E402
 from rondo_eval.terminal_bench.runner import prepare_terminal_bench_run  # noqa: E402
 from rondo_eval.multi_m5.schedule import (  # noqa: E402
@@ -180,6 +184,78 @@ class MultiM5CaptureTests(unittest.TestCase):
 
 
 class MultiM5StubSequenceTests(unittest.TestCase):
+    def test_inspect_requests_keep_a_small_limit_until_each_chain_reaches_null(
+        self,
+    ) -> None:
+        stub = CollaborationStub(finding_line=FINDING)
+
+        def script(response: bytes) -> str:
+            events = [
+                json.loads(line.removeprefix("data: "))
+                for line in response.decode("utf-8").splitlines()
+                if line.startswith("data: ")
+            ]
+            output = next(
+                event["item"]
+                for event in events
+                if event.get("type") == "response.output_item.done"
+            )
+            return output["input"]
+
+        dump_first = stub._continue_inspect({}, "dump")
+        self.assertIsNotNone(dump_first)
+        self.assertIn(f'"limit":{INSPECT_PAGE_LIMIT}', script(dump_first))
+        dump_request = {
+            "input": [
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "inspect-dump",
+                    "output": json.dumps({"next_cursor": "dump-cursor-1"}),
+                }
+            ]
+        }
+        dump_next = stub._continue_inspect(dump_request, "dump")
+        self.assertIsNotNone(dump_next)
+        dump_script = script(dump_next)
+        self.assertIn('"cursor":"dump-cursor-1"', dump_script)
+        self.assertIn(f'"limit":{INSPECT_PAGE_LIMIT}', dump_script)
+        dump_request["input"].append(
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "inspect-dump-1",
+                "output": json.dumps({"next_cursor": None}),
+            }
+        )
+        self.assertIsNone(stub._continue_inspect(dump_request, "dump"))
+        self.assertEqual(stub.dump_pages, 2)
+
+        log_first = stub._continue_inspect({}, "log")
+        self.assertIsNotNone(log_first)
+        self.assertIn(f'"limit":{INSPECT_PAGE_LIMIT}', script(log_first))
+        log_request = {
+            "input": [
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "inspect-log",
+                    "output": json.dumps({"next_offset": 3}),
+                }
+            ]
+        }
+        log_next = stub._continue_inspect(log_request, "log")
+        self.assertIsNotNone(log_next)
+        log_script = script(log_next)
+        self.assertIn('"offset":3', log_script)
+        self.assertIn(f'"limit":{INSPECT_PAGE_LIMIT}', log_script)
+        log_request["input"].append(
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "inspect-log-1",
+                "output": json.dumps({"next_offset": None}),
+            }
+        )
+        self.assertIsNone(stub._continue_inspect(log_request, "log"))
+        self.assertEqual(stub.log_pages, 2)
+
     def test_root_starts_with_spawn_and_member_is_not_confused_for_root(self) -> None:
         stub = CollaborationStub(finding_line=FINDING)
         root_first = {
@@ -517,6 +593,9 @@ class MultiM5RehearsalTests(unittest.TestCase):
         self.assertFalse(result["record"]["counts_as_effective"])
         self.assertIn("ignored_evidence", result["record"])
         self.assertEqual(result["record"]["tool_surface"], "non_code_mode_only=false")
+        self.assertGreaterEqual(result["inspect_pages"]["dump"], 2)
+        self.assertGreaterEqual(result["inspect_pages"]["log"], 2)
+        self.assertEqual(result["record"]["inspect_pages"], result["inspect_pages"])
         self.assertTrue(result["report_text"] and FINDING in result["report_text"])
 
 

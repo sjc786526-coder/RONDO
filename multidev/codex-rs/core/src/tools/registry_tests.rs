@@ -728,6 +728,7 @@ fn test_invocation(
             crate::turn_diff_tracker::TurnDiffTracker::new(),
         )),
         call_id: call_id.to_string(),
+        output_item_id: None,
         tool_name,
         source: crate::tools::context::ToolCallSource::Direct,
         payload: ToolPayload::Function {

@@ -710,6 +710,10 @@ impl ToolRegistry {
                         });
                         let err = FunctionCallError::RespondToModel(message);
                         dispatch_trace.record_failed(&err);
+                        crate::team::evidence::note_completed_code_mode_nested_result(
+                            &invocation,
+                            crate::team::evidence::CompletedToolResult::Failure,
+                        );
                         // The handler already ran; what a block changes is the answer the model gets,
                         // and that answer is retained as this call's failed text result. Excluding it
                         // would leave a completed call with a retained result and no way to point at
@@ -739,6 +743,10 @@ impl ToolRegistry {
                     &result.payload,
                     result.result.as_ref(),
                 );
+                crate::team::evidence::note_completed_code_mode_nested_result(
+                    &invocation,
+                    crate::team::evidence::CompletedToolResult::Output(&result),
+                );
                 // The handler produced a terminal outcome, which is the one thing only this point
                 // knows: an abandoned call never gets here, and its filler response is written
                 // elsewhere. The observation is only noted; it becomes team evidence once Codex has
@@ -757,14 +765,18 @@ impl ToolRegistry {
                 // A handler that answers the model with a failure has observed something too — a
                 // command that exited non-zero is the obvious case. The earlier refusals in this
                 // function are deliberately not noted: nothing ran, or what ran was replaced.
-                if matches!(err, FunctionCallError::RespondToModel(_))
-                    && let Some(item_id) = output_item_id.as_deref()
-                {
-                    crate::team::evidence::note_completed_tool_result(
+                if matches!(err, FunctionCallError::RespondToModel(_)) {
+                    crate::team::evidence::note_completed_code_mode_nested_result(
                         &invocation,
-                        item_id,
                         crate::team::evidence::CompletedToolResult::Failure,
                     );
+                    if let Some(item_id) = output_item_id.as_deref() {
+                        crate::team::evidence::note_completed_tool_result(
+                            &invocation,
+                            item_id,
+                            crate::team::evidence::CompletedToolResult::Failure,
+                        );
+                    }
                 }
                 Err(err)
             }

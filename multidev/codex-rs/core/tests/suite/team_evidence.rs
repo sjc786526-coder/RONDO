@@ -41,6 +41,25 @@ const NEIGHBOUR_MARKER: &str = "RONDO-EVIDENCE-NEIGHBOUR";
 const WORKER_MARKER: &str = "RONDO-EVIDENCE-WORKER";
 const UNSHARED_MARKER: &str = "RONDO-EVIDENCE-UNSHARED";
 
+fn clear_loopback_proxy() {
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+    unsafe {
+        std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+        std::env::set_var("no_proxy", "127.0.0.1,localhost");
+    }
+}
+
 // --- request inspection -------------------------------------------------------------------
 
 fn body(request: &wiremock::Request) -> Value {
@@ -280,6 +299,7 @@ fn say(id: &str, message: &str) -> String {
 }
 
 fn team_enabled_codex() -> core_test_support::test_codex::TestCodexBuilder {
+    clear_loopback_proxy();
     test_codex()
         .with_model("gpt-5.6-sol")
         .with_config(|config| {
@@ -388,6 +408,31 @@ text(JSON.stringify(result));
     mount_sse_once_match(
         &server,
         |request: &wiremock::Request| has_custom_output_in(&body(request), "cell-evidence"),
+        sse(vec![
+            ev_response_created("cell-team-only-publish-response"),
+            ev_custom_tool_call(
+                "cell-team-only-publish",
+                "exec",
+                r#"
+const names = ["collaboration__team_publish", "team_publish"];
+const publish = names.map(name => tools[name]).find(fn => typeof fn === "function");
+if (!publish) throw new Error("team_publish is unavailable in code mode");
+const result = await publish({
+  title: "team-only follow-up",
+  summary: "team-only cells must not recursively create evidence"
+});
+text(JSON.stringify(result));
+"#,
+            ),
+            ev_completed("cell-team-only-publish-response"),
+        ]),
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            has_custom_output_in(&body(request), "cell-team-only-publish")
+        },
         say("code-mode-done", "read the retained cell evidence"),
     )
     .await;
@@ -423,6 +468,19 @@ text(JSON.stringify(result));
             .as_str()
             .is_some_and(|text| text.contains("RONDO-CODE-MODE-EVIDENCE")),
         "the fact resolves to the plaintext output retained for the outer cell: {evidence:?}"
+    );
+
+    let team_only_publish = custom_tool_json_in(
+        first_where(&log, "carrying the team-only follow-up publish", |body| {
+            has_custom_output_in(body, "cell-team-only-publish")
+        }),
+        "cell-team-only-publish",
+    )
+    .expect("the team-only follow-up publish returned JSON through the cell");
+    assert_eq!(
+        team_only_publish["evidence_refs"].as_array().map(Vec::len),
+        Some(0),
+        "neither the earlier team_publish cell nor the team_evidence cell may mint another fact"
     );
 
     Ok(())

@@ -1,7 +1,6 @@
 use super::*;
 use crate::tools::handlers::team_tools::spec::create_team_inspect_tool;
 use codex_team_state::DumpCursor;
-use codex_team_state::MAX_OBSERVE_LIMIT;
 use codex_team_state::ObserveQuery;
 use codex_team_state::TeamRevision;
 use codex_tools::ToolSpec;
@@ -40,6 +39,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
         offset: args.offset,
         after: args.after.map(TeamRevision::from_raw),
     };
+    let effective_limit = query.limit();
 
     let payload = match args.action {
         InspectAction::Dump => {
@@ -91,7 +91,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 "entries": page.entries,
                 "total_entries": page.total_entries,
                 "next_cursor": next_cursor,
-                "limit": MAX_OBSERVE_LIMIT,
+                "limit": effective_limit,
             })
         }
         InspectAction::Log => {
@@ -107,7 +107,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 "entries": page.entries,
                 "total_entries": page.total_entries,
                 "next_offset": page.next_offset,
-                "limit": MAX_OBSERVE_LIMIT,
+                "limit": effective_limit,
             })
         }
         InspectAction::Stats => {
@@ -128,7 +128,7 @@ async fn handle_call(invocation: ToolInvocation) -> Result<Box<dyn ToolOutput>, 
                 "participants": page.entries,
                 "total_entries": page.total_entries,
                 "next_offset": page.next_offset,
-                "limit": MAX_OBSERVE_LIMIT,
+                "limit": effective_limit,
             })
         }
     };

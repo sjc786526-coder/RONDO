@@ -54,6 +54,7 @@ fn invocation(
         cancellation_token: CancellationToken::new(),
         tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
         call_id: format!("call-{tool_name}"),
+        output_item_id: None,
         tool_name: codex_tools::ToolName::plain(tool_name),
         source: crate::tools::context::ToolCallSource::Direct,
         payload: ToolPayload::Function {

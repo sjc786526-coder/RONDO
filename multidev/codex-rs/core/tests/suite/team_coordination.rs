@@ -418,6 +418,11 @@ async fn root_sees_recoverable_then_unavailable_and_can_retire_only_when_gone() 
     let log =
         tool_output(&log_page.single_request().body_json(), "log-1").expect("change log answered");
     let log_text = log.to_string();
+    assert_eq!(
+        log.get("limit").and_then(Value::as_u64),
+        Some(20),
+        "the response must report the effective default page size"
+    );
     assert!(
         log_text.contains("retire") && log_text.contains("root_does_not_self_wake"),
         "the log must record the retirement and that the root did not self-wake:\n{log_text}"
@@ -429,6 +434,7 @@ async fn root_sees_recoverable_then_unavailable_and_can_retire_only_when_gone() 
         stats.get("authored_chars_unit").and_then(Value::as_str),
         Some("unicode_scalar_values")
     );
+    assert_eq!(stats.get("limit").and_then(Value::as_u64), Some(20));
     let worker_stats = stats
         .get("participants")
         .and_then(Value::as_array)
@@ -446,6 +452,7 @@ async fn root_sees_recoverable_then_unavailable_and_can_retire_only_when_gone() 
         "dump-retired",
     )
     .expect("dump after retirement");
+    assert_eq!(retired_dump.get("limit").and_then(Value::as_u64), Some(20));
     assert!(
         dump_version_retired(&retired_dump, &version_id),
         "the dump must show the version as retired:\n{retired_dump}"

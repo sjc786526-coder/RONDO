@@ -1186,6 +1186,7 @@ impl Session {
                     ),
                 ),
                 executed_tool_calls,
+                code_mode_evidence: Default::default(),
                 code_mode_service: crate::tools::code_mode::CodeModeService::new(
                     Arc::clone(&code_mode_session_provider),
                     &config.features,

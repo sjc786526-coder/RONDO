@@ -73,7 +73,11 @@ def evaluate_collaboration(
     if trace is not None:
         from .collect import collect_gate1_evidence
 
-        dump = collect_gate1_evidence(jsonl or "", trace)
+        dump = collect_gate1_evidence(
+            jsonl or "",
+            trace,
+            required_inspect_actions=("dump", "log"),
+        )
 
     entries = dump.get("entries")
     rows = tuple(entries) if isinstance(entries, list) else ()

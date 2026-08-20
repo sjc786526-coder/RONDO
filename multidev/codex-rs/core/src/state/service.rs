@@ -91,6 +91,7 @@ pub(crate) struct SessionServices {
     /// Session-scoped model client shared across turns.
     pub(crate) model_client: ModelClient,
     pub(crate) executed_tool_calls: Option<Arc<ExecutedToolCallRecorder>>,
+    pub(crate) code_mode_evidence: crate::team::evidence::CodeModeEvidenceRecorder,
     pub(crate) code_mode_service: CodeModeService,
     pub(crate) tool_search_handler_cache: ToolSearchHandlerCache,
     pub(crate) turn_environments: Arc<ThreadEnvironments>,

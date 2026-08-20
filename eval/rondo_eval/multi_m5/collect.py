@@ -50,7 +50,12 @@ class EvidenceError(ValueError):
     """Raised when captured evidence cannot be bound to the run under judgement."""
 
 
-def collect_gate1_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any]:
+def collect_gate1_evidence(
+    jsonl: str,
+    trace: RolloutTrace,
+    *,
+    required_inspect_actions: tuple[str, ...] = (),
+) -> dict[str, Any]:
     """Extract dump entries, change-log rows, and wake signals from the trace.
 
     Rows are attributed to the tool the registry actually dispatched. Only a
@@ -67,13 +72,43 @@ def collect_gate1_evidence(jsonl: str, trace: RolloutTrace) -> dict[str, Any]:
         "log": [],
         "jsonl_signals": [],
         "unattributed": [],
+        "inspect_actions": [],
         "cells": len(trace.cells),
         "nested_calls": len(trace.calls),
     }
+    pagination: dict[str, dict[str, Any] | None] = {"dump": None, "log": None}
     _require_bound_cells(trace, wire_calls)
     for call in sorted(trace.calls, key=lambda item: item.seq):
         _require_bound_call(call, trace, wire_calls)
-        _absorb(dump, call)
+        _absorb(dump, pagination, call, required_inspect_actions)
+    for action, state in pagination.items():
+        if state is not None and state.get("next") is not None:
+            raise EvidenceError(
+                f"team_inspect {action} pagination ended before the final page"
+            )
+    missing = [
+        action
+        for action in required_inspect_actions
+        if action not in dump["inspect_actions"]
+    ]
+    if missing:
+        raise EvidenceError(
+            f"required team_inspect actions were not captured: {','.join(missing)}"
+        )
+    for action in required_inspect_actions:
+        if action not in pagination:
+            continue
+        state = pagination[action]
+        if (
+            state is None
+            or not isinstance(state.get("total"), int)
+            or isinstance(state.get("total"), bool)
+            or state["total"] < 0
+            or state.get("seen") != state["total"]
+        ):
+            raise EvidenceError(
+                f"team_inspect {action} page set does not cover total_entries"
+            )
     return dump
 
 
@@ -225,13 +260,25 @@ def _require_bound_call(
     raise EvidenceError("nested tool call has an unknown requester")
 
 
-def _absorb(dump: dict[str, Any], call: NestedToolCall) -> None:
+def _absorb(
+    dump: dict[str, Any],
+    pagination: dict[str, dict[str, Any] | None],
+    call: NestedToolCall,
+    required_inspect_actions: tuple[str, ...],
+) -> None:
     identity = (_namespace(call.tool_namespace), call.tool_name)
+    if identity == INSPECT_TOOL and call.status != "completed":
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        requested_action = str(_arguments(args).get("action") or "")
+        if requested_action in required_inspect_actions:
+            raise EvidenceError(
+                f"required team_inspect {requested_action} dispatch did not complete"
+            )
     if call.status != "completed":
         # A failed dispatch produced no result the run could act on.
         return
     if identity == INSPECT_TOOL:
-        _absorb_inspect(dump, call)
+        _absorb_inspect(dump, pagination, call)
         return
     if identity == WAIT_TOOL:
         message = call.result.get("message") if isinstance(call.result, dict) else None
@@ -242,31 +289,83 @@ def _absorb(dump: dict[str, Any], call: NestedToolCall) -> None:
         dump["unattributed"].append(_label(call))
 
 
-def _absorb_inspect(dump: dict[str, Any], call: NestedToolCall) -> None:
+def _absorb_inspect(
+    dump: dict[str, Any],
+    pagination: dict[str, dict[str, Any] | None],
+    call: NestedToolCall,
+) -> None:
     payload = call.result
     if not isinstance(payload, dict):
-        return
+        raise EvidenceError("team_inspect completed without an object result")
     args = call.arguments if isinstance(call.arguments, dict) else {}
     args = _arguments(args)
-    action = str(payload.get("action") or "")
-    if not action:
-        action = str(args.get("action") or "")
+    reported_action = str(payload.get("action") or "")
+    requested_action = str(args.get("action") or "")
+    if reported_action and requested_action and reported_action != requested_action:
+        raise EvidenceError("team_inspect result action differs from its invocation")
+    action = reported_action or requested_action
+    if action == "stats":
+        if action not in dump["inspect_actions"]:
+            dump["inspect_actions"].append(action)
+        return
+    if action not in pagination:
+        raise EvidenceError("team_inspect result has no recognised action")
     entries = payload.get("entries")
     if not isinstance(entries, list):
-        return
+        raise EvidenceError(f"team_inspect {action} result has no entries page")
     # A dump page continues only with a snapshot cursor, which the store refuses
     # across revisions, so cursor pages are same-snapshot by construction. A
     # cursor-less dump is a fresh page and replaces.
     if action == "dump":
-        if args.get("cursor"):
+        cursor = args.get("cursor")
+        previous = pagination["dump"]
+        continuation = bool(cursor)
+        if cursor:
+            if previous is None or previous.get("next") != cursor:
+                raise EvidenceError(
+                    "team_inspect dump cursor does not continue the prior page"
+                )
             dump["entries"].extend(entries)
+            seen = int(previous.get("seen") or 0) + len(entries)
         else:
+            if previous is not None and previous.get("next") is not None:
+                raise EvidenceError(
+                    "team_inspect dump restarted before completing the prior snapshot"
+                )
             dump["entries"] = list(entries)
+            seen = len(entries)
+        next_value = payload.get("next_cursor")
     elif action == "log":
-        if args.get("offset") not in {None, 0, "0"}:
+        offset = args.get("offset")
+        previous = pagination["log"]
+        continuation = offset not in {None, 0, "0"}
+        if offset not in {None, 0, "0"}:
+            if previous is None or str(previous.get("next")) != str(offset):
+                raise EvidenceError(
+                    "team_inspect log offset does not continue the prior page"
+                )
             dump["log"].extend(entries)
+            seen = int(previous.get("seen") or 0) + len(entries)
         else:
+            if previous is not None and previous.get("next") is not None:
+                raise EvidenceError(
+                    "team_inspect log restarted before completing the prior page set"
+                )
             dump["log"] = list(entries)
+            seen = len(entries)
+        next_value = payload.get("next_offset")
+        if next_value in {0, "0"}:
+            next_value = None
+    total = payload.get("total_entries")
+    if continuation and previous is not None and previous.get("total") != total:
+        raise EvidenceError(f"team_inspect {action} total_entries changed between pages")
+    pagination[action] = {
+        "next": next_value,
+        "total": total,
+        "seen": seen,
+    }
+    if action not in dump["inspect_actions"]:
+        dump["inspect_actions"].append(action)
 
 
 def _arguments(value: Mapping[str, Any]) -> dict[str, Any]:
