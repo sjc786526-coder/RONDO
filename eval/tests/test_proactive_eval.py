@@ -909,6 +909,33 @@ class ProactiveEvalTests(unittest.TestCase):
                 )
         self.assertEqual(store.records(), ())
 
+    def test_safe_formal_prefix_rejects_a_corrupt_settled_checkpoint(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="2" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/corrupt-settled"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        first = slots(self.contract)[0]
+        run_id = first.run_id().replace("rehearsal", "paid")
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            ledger.claim_run(run_id, cap_usd="15.10")
+        run_root = store.run_root(run_id)
+        run_root.mkdir(parents=True)
+        (run_root / "settled.json").write_text("{}\n", "utf-8")
+        with self.assertRaisesRegex(FormalError, "settled provider checkpoint"):
+            require_safe_formal_prefix(paths, identity, self.contract)
+
     def test_phase_b_cli_reaches_the_concrete_paid_runner(self) -> None:
         pilot_rows = [
             {"phase": "pilot", "counts_as_effective": True}

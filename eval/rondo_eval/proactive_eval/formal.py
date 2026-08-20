@@ -653,6 +653,42 @@ def require_safe_formal_prefix(
         for attempt in range(1, 6)
     }
     _require_known_run_roots(store, allowed_ids)
+    identities = {
+        slot.run_id(attempt).replace("rehearsal", "paid"): (slot, attempt)
+        for slot in schedule
+        for attempt in range(1, 6)
+    }
+    records_by_run = {row["run_id"]: row for row in records}
+    for run_root in paths.runs.iterdir():
+        slot, attempt = identities[run_root.name]
+        marker = store.marker(run_root.name)
+        execution = store.execution(run_root.name, slot=slot, attempt=attempt)
+        settled_path = run_root / "settled.json"
+        if settled_path.exists() or settled_path.is_symlink():
+            settled = _read_settled_file(
+                run_root,
+                formal_identity_sha256=store.identity_sha256,
+                contract=contract,
+                slot=slot,
+                attempt=attempt,
+                run_id=run_root.name,
+            )
+            try:
+                bundle = (run_root / settled.trace_bundle_relative).resolve(strict=True)
+            except OSError as exc:
+                raise FormalError(
+                    "Plan 049 settled trace bundle is unavailable"
+                ) from exc
+            if not bundle.is_relative_to(run_root.resolve(strict=True)):
+                raise FormalError("Plan 049 settled trace bundle escaped its run root")
+        archived = records_by_run.get(run_root.name)
+        if archived is not None:
+            if marker != archived:
+                raise FormalError("Plan 049 archive lacks its publication marker")
+            if archived["terminal"] is True and execution is None:
+                raise FormalError("Plan 049 terminal archive lacks execution evidence")
+        elif marker is not None and marker["terminal"] is True and execution is None:
+            raise FormalError("Plan 049 publication lacks execution evidence")
     if not paths.ledger.exists() and not paths.ledger.is_symlink():
         if (
             records
