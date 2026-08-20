@@ -277,6 +277,10 @@ def validate_team_view(view: dict[str, Any]) -> None:
         reasons = _list(row.get("reason_codes"), "availability reasons")
         for reason in reasons:
             _nonempty_string(reason, "availability reason")
+        if row["status"] == "available" and reasons:
+            raise TeamViewError("available capability has reason codes")
+        if row["status"] != "available" and not reasons:
+            raise TeamViewError("degraded capability has no reason code")
 
     normalized_rows: dict[str, list[dict[str, Any]]] = {}
     for collection, keys in _ITEM_KEYS.items():
@@ -291,6 +295,10 @@ def validate_team_view(view: dict[str, Any]) -> None:
         usage = inference.get("usage")
         if usage is not None:
             _validate_usage(usage)
+    if availability["usage"]["status"] == "available" and any(
+        inference["usage"] is None for inference in normalized_rows["inferences"]
+    ):
+        raise TeamViewError("usage capability contradicts missing inference usage")
 
     product = source["product"]
     team = view.get("team")
@@ -312,6 +320,7 @@ def validate_team_view(view: dict[str, Any]) -> None:
                 _exact_keys(item, keys, f"team {collection}")
                 team_rows[collection].append(item)
         _validate_team_rows(team_rows, common_ids)
+        _validate_team_availability(team_rows, availability)
 
     summary = _dict(view.get("summary"), "summary")
     _exact_keys(summary, _SUMMARY_KEYS, "summary")
@@ -339,6 +348,7 @@ def _validate_common_rows(
         _validate_window(agent)
 
     turn_ids = _unique_ids(rows["turns"], "turn_id", "turn")
+    turn_owners = {turn["turn_id"]: turn["agent_id"] for turn in rows["turns"]}
     for turn in rows["turns"]:
         if _nonempty_string(turn["agent_id"], "turn agent") not in agent_ids:
             raise TeamViewError("turn agent is unknown")
@@ -348,19 +358,25 @@ def _validate_common_rows(
     for inference in rows["inferences"]:
         if _nonempty_string(inference["agent_id"], "inference agent") not in agent_ids:
             raise TeamViewError("inference agent is unknown")
-        if _nonempty_string(inference["turn_id"], "inference turn") not in turn_ids:
+        inference_turn = _nonempty_string(inference["turn_id"], "inference turn")
+        if inference_turn not in turn_ids:
             raise TeamViewError("inference turn is unknown")
+        if turn_owners[inference_turn] != inference["agent_id"]:
+            raise TeamViewError("inference agent and turn owner disagree")
         _nonempty_string(inference["model"], "inference model")
         _nonempty_string(inference["provider"], "inference provider")
         _validate_window(inference)
 
     tool_ids = _unique_ids(rows["tools"], "tool_id", "tool")
+    tools_by_id = {tool["tool_id"]: tool for tool in rows["tools"]}
     for tool in rows["tools"]:
         if _nonempty_string(tool["agent_id"], "tool agent") not in agent_ids:
             raise TeamViewError("tool agent is unknown")
         turn_id = _optional_string(tool["turn_id"], "tool turn")
         if turn_id is not None and turn_id not in turn_ids:
             raise TeamViewError("tool turn is unknown")
+        if turn_id is not None and turn_owners[turn_id] != tool["agent_id"]:
+            raise TeamViewError("tool agent and turn owner disagree")
         _nonempty_string(tool["name"], "tool name")
         _optional_string(tool["namespace"], "tool namespace")
         if tool["requester"] not in {"model", "code_cell"}:
@@ -371,11 +387,16 @@ def _validate_common_rows(
     _unique_ids(rows["terminal"], "operation_id", "terminal operation")
     for terminal in rows["terminal"]:
         _optional_string(terminal["terminal_id"], "terminal id")
-        if _nonempty_string(terminal["tool_id"], "terminal tool") not in tool_ids:
+        terminal_tool_id = _nonempty_string(terminal["tool_id"], "terminal tool")
+        if terminal_tool_id not in tool_ids:
             raise TeamViewError("terminal tool is unknown")
-        if _nonempty_string(terminal["agent_id"], "terminal agent") not in agent_ids:
+        terminal_agent = _nonempty_string(terminal["agent_id"], "terminal agent")
+        if terminal_agent not in agent_ids:
             raise TeamViewError("terminal agent is unknown")
-        _nonempty_string(terminal["kind"], "terminal kind")
+        terminal_kind = _nonempty_string(terminal["kind"], "terminal kind")
+        tool = tools_by_id[terminal_tool_id]
+        if terminal_agent != tool["agent_id"] or terminal_kind != tool["kind"]:
+            raise TeamViewError("terminal and tool ownership disagree")
         _optional_integer(terminal["exit_code"], "terminal exit code")
         _optional_integer(terminal["duration_ms"], "terminal duration", minimum=0)
         _validate_window(terminal)
@@ -390,6 +411,12 @@ def _validate_common_rows(
         tool_id = _optional_string(interaction["tool_id"], "interaction tool")
         if tool_id is not None and tool_id not in tool_ids:
             raise TeamViewError("interaction tool is unknown")
+        if tool_id is not None:
+            tool = tools_by_id[tool_id]
+            if interaction["source_agent_id"] != tool["agent_id"] or interaction["kind"] != tool["kind"]:
+                raise TeamViewError("interaction and tool ownership disagree")
+        elif interaction["kind"] != "agent_result":
+            raise TeamViewError("tool-free interaction kind is unsupported")
         _validate_window(interaction)
     return {
         "agents": agent_ids,
@@ -507,6 +534,30 @@ def _validate_team_rows(
         for version_id in fact["version_ids"]:
             if fact["fact_id"] not in versions[version_id]["fact_ids"]:
                 raise TeamViewError("fact and version relation disagree")
+
+
+def _validate_team_availability(
+    rows: dict[str, list[dict[str, Any]]],
+    availability: dict[str, dict[str, Any]],
+) -> None:
+    if availability["team_revisions"]["status"] == "available" and not rows["revisions"]:
+        raise TeamViewError("team revision capability contradicts empty data")
+    if availability["team_events_versions"]["status"] == "available" and any(
+        version["event_id"] is None for version in rows["versions"]
+    ):
+        raise TeamViewError("team event capability contradicts missing relations")
+    if availability["team_routes"]["status"] == "available" and any(
+        route["event_id"] is None or route["target_agent_id"] is None
+        for route in rows["routes"]
+    ):
+        raise TeamViewError("team route capability contradicts missing relations")
+    if availability["team_facts"]["status"] == "available" and any(
+        fact["producer_agent_id"] is None
+        or fact["category"] is None
+        or fact["availability"] is None
+        for fact in rows["facts"]
+    ):
+        raise TeamViewError("team fact capability contradicts missing observations")
 
 
 def _validate_summary(

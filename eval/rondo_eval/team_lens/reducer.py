@@ -242,6 +242,10 @@ def _validate_tool_start_shape(payload: dict[str, Any]) -> None:
         for field in ("target_agent_path", "message_preview")
     ):
         raise BundleError("agent tool summary is missing required text")
+    if summary_type == "agent" and summary.get("task_name") is not None and not isinstance(
+        summary["task_name"], str
+    ):
+        raise BundleError("agent tool summary has an invalid task name")
     if summary_type == "wait_agent":
         if summary.get("target_agent_path") is not None and not isinstance(summary["target_agent_path"], str):
             raise BundleError("wait tool summary has an invalid target")
@@ -1015,7 +1019,7 @@ class _TeamAccumulator:
         self.team_result_missing = False
         self.fact_refs_omitted = False
         self.dump_conflict = False
-        self.state_change_seqs: list[int] = []
+        self.state_change_revisions: list[int] = []
 
     def observe_tool(
         self,
@@ -1032,8 +1036,14 @@ class _TeamAccumulator:
         if _is_int(revision) and revision >= 0:
             self.revisions.append({"revision": revision, "tool_id": tool["tool_id"], "seq": seq})
         name = tool["name"]
-        if name in {"team_publish", "team_update", "team_route", "team_route_update", "team_retire"}:
-            self.state_change_seqs.append(seq)
+        if (
+            name in {"team_publish", "team_update", "team_route", "team_route_update", "team_retire"}
+            and result.get("deduplicated") is not True
+        ):
+            if _is_int(revision) and revision >= 0:
+                self.state_change_revisions.append(revision)
+            else:
+                self.team_result_missing = True
         if name == "team_publish":
             self._publish(tool, result, seq)
         elif name == "team_update":
@@ -1163,7 +1173,11 @@ class _TeamAccumulator:
         if action != "dump":
             return
         required = ("instance", "revision", "availability_epoch", "observe_generation", "total_entries")
-        if not all(result.get(key) is not None for key in required) or not isinstance(result.get("entries"), list):
+        if (
+            not _is_nonempty_string(result.get("instance"))
+            or not all(_is_int(result.get(key)) and result[key] >= 0 for key in required[1:])
+            or not isinstance(result.get("entries"), list)
+        ):
             self.team_result_missing = True
             return
         group_key = tuple(result.get(key) for key in required[:-1])
@@ -1330,8 +1344,8 @@ class _TeamAccumulator:
         )
         snapshot_stale = bool(
             latest_complete_dump is not None
-            and self.state_change_seqs
-            and max(self.state_change_seqs) > latest_complete_dump["seq"]
+            and self.state_change_revisions
+            and max(self.state_change_revisions) > latest_complete_dump["revision"]
         )
         attention: list[dict[str, Any]] = []
         if latest_complete_dump is not None:

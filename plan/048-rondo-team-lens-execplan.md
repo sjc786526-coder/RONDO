@@ -259,17 +259,19 @@
   `available`，其余按缺少完整 dump/Team/evidence observation 显式 `partial`；所有 bundle 的 JSON/HTML 重复生成均字节
   一致。Codex 侧使用与冻结源码一致的原生 v1 合成
   fixture，明确标记为合成证据。现有 typed tool result、projection 外壳和 dump 关系足够，不触发 hook。
-- 已加入临时目录原生 fixture 与 18 项定向测试，覆盖两侧布局、direct/code-mode 等义、四态降级、无 `state.json`、
+- 已加入临时目录原生 fixture 与 19 项定向测试，覆盖两侧布局、direct/code-mode 等义、四态降级、无 `state.json`、
   Fact omission、wait 非 interaction、严格 reader 错误、正文不出站、renderer 单向依赖、确定性与 HTML 转义/自包含；
-  `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py` 为 18/18 通过。
+  `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py` 为 19/19 通过。
 - 首次独立审查复现 6 个真实功能问题；已窄修 Fact dump/动态 evidence 区分、`team_retire`、原生事件 variant 与关联
   fail-closed、Team View 交叉一致性、所有 inference usage 缺失降级及 terminal runtime 起点，并为每类补回归。
+- 第二次独立复验确认上述 6 项已关闭，并发现 4 个残留；已补 Agent/turn/tool/terminal/interaction ownership、capability 与
+  数据一致性、revision/deduplicated 驱动的 attention stale 判定和原生 Agent summary 可选字段类型回归。
 - 未执行 `just eval-sync`，未产生 common-root ignored 环境/缓存写入；未运行 Docker、API、模型、Cargo 或全量测试。
 
 ### 当前工作
 
-首个实现提交已完成；独立审查首轮问题已修复，18/18 定向测试和 24/24 现场只读回放通过。准备提交修复批次并交还
-同一干净上下文审查者复验。
+首个实现与首轮修复提交已完成；第二次独立复验问题已修复，19/19 定向测试和 24/24 现场只读回放通过。准备提交
+第二个修复批次并交还同一审查者第三次复验。
 
 ### 本任务剩余步骤
 
@@ -283,7 +285,8 @@
 
 ### 当前验收状态
 
-- 两阶段实现及修复后执行者定向验收通过；首次独立审查未通过，问题已修复，尚待复验，不冒充最终独立验收已通过。
+- 两阶段实现及修复后执行者定向验收通过；第二次独立复验仍未通过，残留问题已修复，尚待第三次复验，不冒充最终
+  独立验收已通过。
 
 ### 交接边界
 
@@ -311,3 +314,4 @@
 | 013 | 报告使用标准库 HTML/CSS/JS，内嵌转义后的严格 Team View，并以 DOM `textContent` 渲染数据 | 无需新增依赖或前端工程即可满足离线、自包含、确定性和注入安全 | 静态报告 | 已采纳 |
 | 014 | canonical Fact dump 不代表动态 evidence observation；只有 `team_evidence` 结果填写 availability | Fact 身份/元数据与调用时 observation 是不同事实，不能用静态存在性冒充可用性 | Fact 降级 | 已采纳 |
 | 015 | consumer 对声明支持的原生 v1 variant 执行必需字段、envelope 和生命周期关联校验 | 避免自建 reader 接受冻结 Rust serde/reducer 已拒绝的 bundle，同时不另建通用审计层 | 输入合同 | 已采纳 |
+| 016 | attention snapshot 新鲜度比较 Team result revision 与 dump revision，并排除 deduplicated result | tool-end sequence 是观测完成顺序，不等于 canonical Team State 变更顺序 | Team Attention | 已采纳 |

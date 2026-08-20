@@ -16,4 +16,14 @@
   五类 Team capability 全 `available`，其余诚实降级，不影响零 hook 结论。
 - 未运行 Cargo、Docker、真实 API、模型、完整数据集或全量测试；未执行 `just eval-sync`。
 
-修复批次仍需交还同一独立审查者复验，本日志不提前记录为通过。
+## 第二次复验修复
+
+- 第二次复验确认首轮 6 项均关闭，但复现 ownership、capability 语义、deduplicated attention stale 和 Agent summary
+  可选字段四个残留问题。
+- 已补 turn/tool owner 映射以及 terminal/interaction 归属和 kind 一致性；`available` 不得携带 reason，降级状态必须有
+  reason，usage/Fact 缺值不得声称 `available`；attention 改用 result/dump revision 并排除 deduplicated；Agent
+  summary 的 `task_name` 非空时严格要求字符串。
+- `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py`：19/19 通过；24/24 指定 bundle 归约和重复
+  JSON/HTML 确定性继续通过。
+
+第二个修复批次仍需交还同一独立审查者第三次复验，本日志不提前记录为通过。

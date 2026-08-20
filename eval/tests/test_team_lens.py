@@ -314,6 +314,7 @@ def make_bundle(
     unsupported_projection: bool = False,
     include_evidence: bool = True,
     retire_mode: str | None = None,
+    deduplicated_route_after_dump: bool = False,
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -482,6 +483,24 @@ def make_bundle(
             },
             result_mode=result_mode,
         )
+        if deduplicated_route_after_dump:
+            builder.tool(
+                "tool-route-deduplicated",
+                name="team_route",
+                kind="other",
+                arguments={"event_id": "event-real", "target": "thread-worker"},
+                result={
+                    "route_id": "route-real",
+                    "event_id": "event-real",
+                    "target": "thread-worker",
+                    "duty": "assigned",
+                    "delivery": "delivered",
+                    "delivery_error": None,
+                    "revision": 3,
+                    "deduplicated": True,
+                },
+                result_mode=result_mode,
+            )
         builder.tool(
             "tool-history",
             name="team_history",
@@ -753,6 +772,21 @@ class TeamLensReducerTests(unittest.TestCase):
                 view["availability"]["team_events_versions"]["reason_codes"],
             )
 
+    def test_deduplicated_team_mutation_does_not_stale_current_revision_dump(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(
+                Path(raw) / "bundle",
+                product="rondo-multi",
+                deduplicated_route_after_dump=True,
+            )
+            view = reduce_bundle(bundle, "rondo-multi")
+
+        self.assertEqual(view["availability"]["team_events_versions"]["status"], "available")
+        self.assertNotIn(
+            "attention_snapshot_stale",
+            view["availability"]["team_events_versions"]["reason_codes"],
+        )
+
     def test_native_variant_shapes_and_correlations_fail_closed(self):
         with TemporaryDirectory() as raw:
             root = Path(raw)
@@ -789,6 +823,24 @@ class TeamLensReducerTests(unittest.TestCase):
             self._write_events(bad_compaction, events)
             with self.assertRaisesRegex(BundleError, "unknown or ended request"):
                 reduce_bundle(bad_compaction, "codex")
+
+            bad_agent_summary = make_bundle(root / "bad-agent-summary", product="codex")
+            events = self._events(bad_agent_summary)
+            spawn_start = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "tool_call_started"
+                and row["payload"]["tool_call_id"] == "tool-spawn"
+            )
+            spawn_start["payload"]["summary"] = {
+                "type": "agent",
+                "target_agent_path": "/root/worker",
+                "task_name": 7,
+                "message_preview": PROMPT_BODY,
+            }
+            self._write_events(bad_agent_summary, events)
+            with self.assertRaisesRegex(BundleError, "invalid task name"):
+                reduce_bundle(bad_agent_summary, "codex")
 
     def test_missing_usage_on_failed_inference_marks_known_sum_partial(self):
         with TemporaryDirectory() as raw:
@@ -869,22 +921,55 @@ class TeamLensReducerTests(unittest.TestCase):
         corruptions = []
         unknown_projection = copy.deepcopy(view)
         unknown_projection["team"]["projections"][0]["inference_id"] = "unknown-inference"
-        corruptions.append(unknown_projection)
+        corruptions.append(("projection reference", unknown_projection))
         unknown_revision_tool = copy.deepcopy(view)
         unknown_revision_tool["team"]["revisions"][0]["tool_id"] = "unknown-tool"
-        corruptions.append(unknown_revision_tool)
+        corruptions.append(("revision reference", unknown_revision_tool))
         broken_relation = copy.deepcopy(view)
         broken_relation["team"]["events"][0]["version_ids"] = []
-        corruptions.append(broken_relation)
+        corruptions.append(("bidirectional relation", broken_relation))
         wrong_root = copy.deepcopy(view)
         wrong_root["agents"][0]["role"] = "spawned"
-        corruptions.append(wrong_root)
+        corruptions.append(("root role", wrong_root))
         wrong_usage = copy.deepcopy(view)
         wrong_usage["summary"]["usage"]["total_tokens"] += 999
-        corruptions.append(wrong_usage)
+        corruptions.append(("usage total", wrong_usage))
+        wrong_inference_owner = copy.deepcopy(view)
+        wrong_inference_owner["inferences"][0]["agent_id"] = "thread-worker"
+        corruptions.append(("inference owner", wrong_inference_owner))
+        wrong_tool_owner = copy.deepcopy(view)
+        wrong_tool_owner["tools"][0]["agent_id"] = "thread-worker"
+        corruptions.append(("tool owner", wrong_tool_owner))
+        wrong_terminal_owner = copy.deepcopy(view)
+        wrong_terminal_owner["terminal"][0]["agent_id"] = "thread-worker"
+        corruptions.append(("terminal owner", wrong_terminal_owner))
+        wrong_interaction_owner = copy.deepcopy(view)
+        tool_interaction = next(
+            row for row in wrong_interaction_owner["interactions"] if row["tool_id"] is not None
+        )
+        tool_interaction["source_agent_id"] = "thread-worker"
+        corruptions.append(("interaction owner", wrong_interaction_owner))
+        false_fact_available = copy.deepcopy(view)
+        false_fact_available["team"]["facts"][0]["availability"] = None
+        corruptions.append(("fact capability", false_fact_available))
+        false_usage_available = copy.deepcopy(view)
+        removed_usage = false_usage_available["inferences"][0]["usage"]
+        false_usage_available["inferences"][0]["usage"] = None
+        for key, value in removed_usage.items():
+            false_usage_available["summary"]["usage"][key] -= value
+        corruptions.append(("usage capability", false_usage_available))
+        available_with_reason = copy.deepcopy(view)
+        available_with_reason["availability"]["agents"]["reason_codes"] = ["contradiction"]
+        corruptions.append(("available reasons", available_with_reason))
+        partial_without_reason = copy.deepcopy(view)
+        partial_without_reason["availability"]["agents"] = {
+            "status": "partial",
+            "reason_codes": [],
+        }
+        corruptions.append(("degraded reasons", partial_without_reason))
 
-        for corrupted in corruptions:
-            with self.subTest(corruption=corruptions.index(corrupted)):
+        for label, corrupted in corruptions:
+            with self.subTest(corruption=label):
                 with self.assertRaises(TeamViewError):
                     validate_team_view(corrupted)
 
