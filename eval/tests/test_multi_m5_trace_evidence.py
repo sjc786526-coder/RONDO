@@ -354,6 +354,44 @@ class CodeModeEvidenceTest(unittest.TestCase):
             with self.assertRaises(EvidenceError):
                 collect_gate1_evidence(capture("call-1", CELL_JS), trace)
 
+    def test_direct_model_dispatch_is_refused(self):
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            invocation = builder.payload(
+                "tool_invocation",
+                {
+                    "tool_name": "team_inspect",
+                    "tool_namespace": "collaboration",
+                    "payload": {"action": "dump"},
+                },
+            )
+            builder.event(
+                {
+                    "type": "tool_call_started",
+                    "tool_call_id": "direct-1",
+                    "model_visible_call_id": "call-1",
+                    "code_mode_runtime_tool_id": None,
+                    "requester": {"type": "model"},
+                    "kind": {"type": "other", "name": "team_inspect"},
+                    "summary": {"type": "generic", "label": "team_inspect"},
+                    "invocation_payload": invocation,
+                }
+            )
+            result_ref = builder.payload(
+                "tool_result", {"type": "success", "value": DUMP}
+            )
+            builder.event(
+                {
+                    "type": "tool_call_ended",
+                    "tool_call_id": "direct-1",
+                    "status": {"type": "completed"},
+                    "result_payload": result_ref,
+                }
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "direct model tool call"):
+                collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+
     def test_same_cell_id_in_two_threads_is_not_a_collision(self):
         """Root and its members share a bundle; cell ids are per-thread."""
 
@@ -756,6 +794,18 @@ class CodeModeEvidenceTest(unittest.TestCase):
             trace = load_rollout_trace(builder.write())
             dump = collect_gate1_evidence(capture("call-1", CELL_JS), trace)
         self.assertEqual(dump["jsonl_signals"], [mark])
+        self.assertEqual(dump["root_thread_id"], THREAD)
+        self.assertEqual(
+            dump["wait_calls"],
+            [
+                {
+                    "thread_id": THREAD,
+                    "seq": 2,
+                    "status": "completed",
+                    "result": {"message": mark},
+                }
+            ],
+        )
 
     def test_plain_wait_completion_is_not_a_team_wake(self):
         """A mailbox wait returns without the TeamActivity mark, so it is not a wake."""

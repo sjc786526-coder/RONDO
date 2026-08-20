@@ -41,6 +41,9 @@ WAIT_TEAM_ACTIVITY_MARK = (
 #: offline rehearsal rather than inferred from the handler source.
 INSPECT_TOOL = ("collaboration", "team_inspect")
 WAIT_TOOL = ("collaboration", "wait_agent")
+EVIDENCE_TOOL = ("collaboration", "team_evidence")
+PUBLISH_TOOL = ("collaboration", "team_publish")
+ROUTE_TOOL = ("collaboration", "team_route")
 _DEFAULT_NAMESPACES = {None, "", "functions"}
 _CALL_TYPES = {"function_call", "custom_tool_call"}
 _ITEM_EVENTS = {"item.completed", "item.started", "item.updated"}
@@ -68,11 +71,16 @@ def collect_gate1_evidence(
 
     wire_calls = _wire_calls(jsonl)
     dump: dict[str, Any] = {
+        "root_thread_id": trace.root_thread_id,
         "entries": [],
         "log": [],
         "jsonl_signals": [],
+        "wait_calls": [],
         "unattributed": [],
         "inspect_actions": [],
+        "team_evidence_calls": [],
+        "team_publish_calls": [],
+        "team_route_calls": [],
         "cells": len(trace.cells),
         "nested_calls": len(trace.calls),
     }
@@ -254,9 +262,10 @@ def _require_bound_call(
             raise EvidenceError("nested tool call belongs to no recorded code cell")
         return
     if call.requester == "model":
-        if call.model_visible_call_id not in wire_calls:
-            raise EvidenceError("direct tool call has no captured model call")
-        return
+        # The frozen workflow is code_mode_only. A direct dispatch is product
+        # or trace drift, even if its model-visible id exists on the wire; none
+        # of its payload may enter the collaboration predicates.
+        raise EvidenceError("direct model tool call is forbidden by the workflow")
     raise EvidenceError("nested tool call has an unknown requester")
 
 
@@ -267,6 +276,45 @@ def _absorb(
     required_inspect_actions: tuple[str, ...],
 ) -> None:
     identity = (_namespace(call.tool_namespace), call.tool_name)
+    if identity == EVIDENCE_TOOL:
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        dump["team_evidence_calls"].append(
+            {
+                "thread_id": call.thread_id,
+                "seq": call.seq,
+                "status": call.status,
+                "arguments": _arguments(args),
+                "result": call.result,
+            }
+        )
+        return
+    if identity in {PUBLISH_TOOL, ROUTE_TOOL}:
+        key = "team_publish_calls" if identity == PUBLISH_TOOL else "team_route_calls"
+        args = call.arguments if isinstance(call.arguments, dict) else {}
+        dump[key].append(
+            {
+                "thread_id": call.thread_id,
+                "seq": call.seq,
+                "status": call.status,
+                "arguments": _arguments(args),
+                "result": call.result,
+            }
+        )
+        return
+    if identity == WAIT_TOOL:
+        dump["wait_calls"].append(
+            {
+                "thread_id": call.thread_id,
+                "seq": call.seq,
+                "status": call.status,
+                "result": call.result,
+            }
+        )
+        if call.status == "completed":
+            message = call.result.get("message") if isinstance(call.result, dict) else None
+            if isinstance(message, str):
+                _record_wait_signal(dump, message)
+        return
     if identity == INSPECT_TOOL and call.status != "completed":
         args = call.arguments if isinstance(call.arguments, dict) else {}
         requested_action = str(_arguments(args).get("action") or "")
@@ -279,11 +327,6 @@ def _absorb(
         return
     if identity == INSPECT_TOOL:
         _absorb_inspect(dump, pagination, call)
-        return
-    if identity == WAIT_TOOL:
-        message = call.result.get("message") if isinstance(call.result, dict) else None
-        if isinstance(message, str):
-            _record_wait_signal(dump, message)
         return
     if _looks_like_team_evidence(call.result):
         dump["unattributed"].append(_label(call))

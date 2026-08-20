@@ -179,21 +179,20 @@
   `worktree-044-multi-m5-real-workflow-and-nondegradation`；测量树
   `.claude/worktrees/044-m5-multi-bundle-measurement` 仍 detached 于
   `7a2ff684c504c7530660f9a33a372daa949bdb00`，未在其中开发。
-- **门 1 合同**：`eval/locks/multi-m5-workflow-v2.json`（v1 只留历史，不得作为 v2 证据）。
+- **门 1 当前合同**：`eval/locks/multi-m5-workflow-v6.json`；v1—v5 只留历史，不得作为正式 v6 证据。
   载体是 host `codex exec` +
-  `eval/fixtures/multi-m5-collab-v1/` + `eval/templates/multi-m5/collab-workflow-instruction-v1.md`
-  （sha `9879529f…d5333`），不是 TB `fix-git`。完成标准 = `TEAM_REPORT.md` 含 finding 行且六项协作谓词
-  全真；孤儿退休不是必触发项。Docker 不用于门 1。
-- **门 2 合同**：`eval/locks/multi-m5-nondegradation-v2.json`（v1 只留历史）。十任务来自
+  `eval/fixtures/multi-m5-collab-v1/` + `eval/templates/multi-m5/collab-workflow-instruction-v2.md`
+  （sha 以 v6 锁为准），不是 TB `fix-git`。完成标准 = `TEAM_REPORT.md` 含 finding 行且七项协作谓词全真，
+  包括成员精确证据链与 Root 自身 completed wait；孤儿退休不是必触发项。最多 6 次，Docker 不用于门 1。
+- **门 2 当前合同**：`eval/locks/multi-m5-nondegradation-v6.json`；v1—v5 只留历史。十任务来自
   `eval/tasksets/p2-b7-canary-catalog-v4.json`（catalog sha `00b83e44…57ddf`），交错
   `task_major_codex_then_multi`，轻 runner，不套 v7 campaign，不计算 σ/delta。价格快照
-  2026-08-18 官方页（terra）；硬上限 $120，且由冻结 token 信封使其成为数学上限。
-- **Multi runtime 已冻结**（ignored 产物 + 受跟踪身份）：
-  `eval-data/bin/rondo-multi/7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle/`
-  已 `verify-runtime`。受跟踪锁 `eval/locks/multi-m5-runtime-v1.json` `status=frozen`：
-  `codex_sha256=2f5f25e0…0c32`（legacy CLI）、`code_mode_host_sha256=eb54cac2…6705`（本次 musl host）、
-  `bwrap_sha256=77360cb7…2c4c`（与 Codex 同资产）、`manifest_sha256=1c782d1d…6769`。
-  对照 Codex bundle 身份见该锁 `codex_baseline`。重建 CLI sha `74989060…d266` **不得**写入 runtime 锁。
+  2026-08-18 官方页（terra）；60 个有效样本、每槽最多 5 次 infra、全批最多 40 次 infra、116 个 run 槽位，
+  每 run 80 请求、HTTP retry 5、硬上限 $120。
+- **Multi runtime 当前冻结身份**（ignored 产物 + 受跟踪身份）：
+  `eval-data/bin/rondo-multi/0eee6dc5ee69f0eca9e1db350148c423a2b2bf67-x86_64-unknown-linux-musl-runtime-bundle/`。
+  受跟踪锁 `eval/locks/multi-m5-runtime-v4.json`：source `0eee6dc5…bf67`，CLI `c64ff001…c631`、
+  host `dc7a00d7…8d0f`、bwrap `77360cb7…62c4`、manifest `5fa958e0…5f31`；已 `verify-runtime`。
 - **最小接线**：`features.multi_agent_v2` 仍是单条 inline TOML，只注入 Multi；另加
   `agents.default_subagent_model` / `agents.default_subagent_reasoning_effort`，并关闭
   `expose_spawn_agent_model_overrides`。Codex/Local 禁止这些项。TB adapter、loopback、归档与
@@ -202,7 +201,7 @@
 - **无 API 演练**：`just eval-multi-m5-loopback` 通过；`loopback_tool_round_trip=true`，
   `counts_as_effective=false`，`evidence_kind=loopback`。证明团队工具在 `code_mode_host=true` 下已注册
   并可走 `team_publish` 往返。**不是门 1 真实通过。**
-- **定向门禁**（均无 API / 无 Docker）：
+- **阶段 A 历史定向门禁**（均无 API / 无 Docker；不是当前 v6 验收数字）：
   - `tests.test_multi_m5` 25/25（门 1 窄整改 + 采集自查后）
   - `tests.test_binary_freeze.MultiProductFreezeTests`
   - `tests.test_terminal_bench.TerminalBenchTests.test_adapter_run_uses_safe_permissions_and_no_secret_in_exec_argv`
@@ -386,14 +385,40 @@
 - 独立后审复核 ledger/archive/raw trace/正式资产隔离后通过。正式归档 SHA-256 仍为
   `9da1be52…f884`（26 行）；`multi-m5-phase-b` 账本和锁不存在。
 
+### v6 正式付费前整改（2026-08-20）
+
+- 后续独立审查否决了 v5 的“门前就绪”结论：workflow-v5 没有机械要求成员完成 `team_evidence` 和二次
+  publish，测试与正式 Gate 1 共用 capture identity，Gate 2 在 provider 完整冻结前会 claim run，正式批次也
+  没有可恢复的中断语义。审查报告作为形成时点证据保留在
+  `agent_log/2026-08-20-110000-plan044-m5-paid-readiness-independent-review.md`。
+- v5 及其历史 rehearsal/smoke 不改写。新冻结 `multi-m5-workflow-v6` / `multi-m5-nondegradation-v6`，继续复用
+  未变化的 `multi-m5-runtime-v4`。门 1 最多 6 次；门 2 每槽最多 5 次 infra、全批最多 40 次；有效样本 60、
+  每 run 80 个逻辑请求、provider 每请求最多 5 次 HTTP 尝试和 `$120` 硬上限不变；共享 run 槽位为
+  `60 + 40 + 6 + 10 = 116`。
+- Gate 1 只在同一成员按“首次 publish → Root publish → route → `team_evidence` 自身 exec Fact → 二次
+  publish”的顺序完成，且首次 Version 精确引用该 Fact 时判证据链成立；Root 唤醒只认 rollout manifest 所列
+  Root thread 的 completed `wait_agent` TeamActivity，整条 trace 必须零 Direct，成员投递必须仅为 plaintext。
+  测试 capture、v6 rehearsal、v6 正式批次分别使用独立 namespace，正式 capture 已有任何产物即 fail-closed。
+- 正式 resume 按 batch/workflow/nondegradation/runtime/provider receipt 核身份：完整归档行按原分类跳过；
+  零请求、零消费、无停止/taint/冲突产物的 pristine run 可原 id 重领；已请求未归档的 run 保守结算后只追加
+  一次 `abandoned=true` infra，再进入下一 attempt；未来、重复、非连续或冲突状态 fail-closed。Gate 2 每个
+  attempt 的归档在下一 run id 被 claim 前立即 fsync，避免进程退出留下两个未归档 run。正常模型失败仍是
+  `agent_failed` 产品结果，不能换成 infra。
+- 正式入口在读取密钥、创建 receipt/ledger 或 claim 前完成 provider 冻结校验；Gate 2 正式入口还要求同一 v6
+  archive 中已有 Gate 1 pass。点估计 `$10.40`、最坏调度形状预测 `$67.80`、硬上限 `$120`，endpoint 仍为
+  `https://www.cctq.ai/v1`。
+- 离线验收：M-5 Python 定向 162/162、`just eval-lock`、ready、loopback 均通过。全新 canonical v6 rehearsal
+  为 20/20 code-cell dispatch、0 Direct、0 failed；dump 7 页/log 2 页到 null，七谓词全真，明文 9/加密与
+  未知 0，成员自己的 exec Fact 可由 `team_evidence` 读回。正式 v6 archive/ledger/identity receipt 均不存在。
+
 ### 本任务剩余步骤
 
-- 门前设施、准备性验证与铺垫均已完成。本任务只需同步权威文档、日志、最终 diff/状态并提交；随后停在正式门 1 前。
+- v6 门前设施、准备性验证、文档与独立复核均已完成；提交后停在正式门 1 前。
 - 正式门 1、门 2、Docker 和 `$120` 账本不执行，也不得把 clean smoke 表述为正式门 1 通过或 M-5 通过。
 
 ### 阻塞项
 
-- 无门前阻塞。正式门的未启动状态是本任务的授权停止边界，不是设施失败。
+- 无已知门前阻塞。正式门的未启动状态是本任务的授权停止边界，不是设施失败。
 - `.env.local` 已静默确认存在、为普通文件、权限 `0600` 且所需变量非空；从未打开、搜索或打印其内容。
 
 ### 当前验收状态
@@ -414,9 +439,10 @@
   因此 v1 的 `evidence_source` 在真实配置下不可能成立。现已改为 rollout-trace 口径并冻结 workflow v2。
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
-- 阶段 B：runtime-v3 历史失败已由 runtime-v4、v5 门锁、完整分页 rehearsal、一次 zero-taint clean smoke 与
-  两轮独立终审闭合；门前准备已完成。用户授权本轮准备性 API 总额 1000 USD，实际本轮 clean smoke 计价
-  `$0.273138`，入口 `$23.10` 硬上限未放宽。正式门 1/门 2 未启动，`$120` 正式账本不存在。
+- 阶段 B：runtime-v4 产品身份保持不变；v5 的 readiness 假设已由独立审查否决并以两把 v6 锁、严格协议判据、
+  capture 隔离、provider 前置冻结和幂等 resume 收口。v6 离线门禁与 canonical rehearsal 已通过；历史唯一
+  clean-smoke-v5 仍只证明当时的非正式真实链路。本轮未新增真实 API 消费。正式门 1/门 2 未启动，v6 `$120`
+  正式 archive/ledger/identity receipt 均不存在。
   **不得表述为 M-5 通过、门 1 通过或未见退化。**
 
 ### 阶段 B 精确授权清单
@@ -428,17 +454,19 @@
 |---|---|
 | API provider | `rondo.local.toml` 的 `paid_eval.active_provider = "relay"`（CCTQ Responses；`api_key_env = OPENAI_API_KEY`）。不改官方入口，不把密钥写入文档或提示词。 |
 | Root / 成员模型 | `gpt-5.6-terra` + `medium`（两侧相同）。由 M-5 两把锁自行钉死，不继承宿主 `paid_eval.main_model`（仍为 `sol`） |
-| 门 1 | host `codex exec` 协作 fixture，无 Docker；最多 3 次尝试、单次 1800s |
+| 合同身份 | `multi-m5-workflow-v6` → `multi-m5-runtime-v4` → `multi-m5-nondegradation-v6`；正式批次 `multi-m5-phase-b-v6`；v5 不原地修改 |
+| 门 1 | host `codex exec` 协作 fixture，无 Docker；最多 6 次尝试、单次 1800s |
 | 门 2 | v4 catalog 十任务；`task_major_codex_then_multi`；条件复跑仅当「Codex 完成、Multi 未完成」时双方各加两次 |
 | 最大有效运行 | 60（基础 20 + 条件最多 40） |
 | 退化诊断 | 仅在某题判为稳定单向退化后触发；每题最多 1 次、Multi 侧、V2 开 + team_state 关；不计有效结果、不改判定；与两道门共享同一 $120 与全部停止线 |
-| 基础设施 | 每槽最多 3 次尝试；infra 总上限 12；infra 不计有效结果 |
+| 基础设施 | 每槽最多 5 次 infra 尝试；infra 总上限 40；infra 不计有效结果；共享 run 槽位 116 |
 | 每 run 请求上限 | 80 |
 | 价格快照 | 2026-08-18 官方页：input $2 / cached $0.20 / output $12 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25。同日核对 sol 仍为 5/0.5/30，故 terra 为其 40% |
-| 费用 | 点估计约 $16；合同内最坏约 $38.40；**硬上限 $120 不变**（余量约 3 倍，预算掐断风险大幅下降）。账本批次 `multi-m5-phase-b` |
-| Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v2.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
+| 费用 | 点估计 `$10.40`；最坏调度形状预测 `$67.80`（不是合法消费上限）；**硬上限 `$120` 不变**。账本批次 `multi-m5-phase-b-v6` |
+| 恢复 | 完整归档跳过；pristine 零请求 run 安全重领；已请求未归档只追加一次 abandoned infra 后转下一 attempt；身份/顺序/停止线冲突 fail-closed |
+| Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v6.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
 | 外发边界 | 任务输入、工作区内容与模型可见工具结果进入 Responses；密钥、`.env.local`、个人配置不进提示词或结果文件 |
-| 预计时间 | 门 1：数十分钟级，最坏约 1.5 小时。门 2：无条件复跑时数小时到十余小时；若多题触发复跑或打满超时，日历时间可到一天以上。全局串行，与重型 Cargo / 本地模型互斥。 |
+| 预计时间 | 门 1：数十分钟级，打满 6 次可达数小时。门 2：无条件复跑时数小时到十余小时；若多题触发复跑或打满 infra，日历时间可到一天以上。全局串行，与重型 Cargo / 本地模型互斥。 |
 | Git | 阶段 B 成果仍只提交 044 分支；合并 `main`、推送、删除/重命名 worktree 仍须另批 |
 | 明确不做 | 本地模型加载、训练、发布、远端写入、清理来源不明的 Docker 对象、改 Local 公平合同、宣称 M-5 通过（除非两道门都按合同完成） |
 
@@ -483,7 +511,7 @@
 | 015 | 团队能力必须是恰好一条 inline TOML，且只给 Multi | 拆成 `enabled=true` 再写嵌套键会互相覆盖；Codex `--strict-config` 会拒绝未知键 | adapter / 公平性 | 已采纳 |
 | 016 | Multi musl freeze 身份包含 `CARGO_BUILD_JOBS=2` | 本机约 27GiB，不限并行会触发 `host_mem_available_below_floor` | 冻结身份 | 已采纳 |
 | 017 | 门 1 Event 局部谓词必须落在**同一个 Event**；按 `TeamStore::dump_entries` 顺序分组，不读 Version 上的 `event_id` | 真实 dump 的 Version 行没有 `event_id`；各自扫全表会让 Root 独角戏 + 游离成员噪声误判通过 | 门 1 判据 | 已采纳 |
-| 018 | `root_resolved` 只认成员作者 Version；新增 `root_woken`（inspect log 对 Root 的 `signalled`，或 JSONL 里 `wait_agent` 的 TeamActivity 原文） | ExecPlan 五项能力含 Root 唤醒；mailbox 的 `Wait completed.` 不算 | 门 1 判据 | 已采纳 |
+| 018 | `root_resolved` 只认成员作者 Version；早期 `root_woken` 接受 inspect log 或 wait 原文 | ExecPlan 五项能力含 Root 唤醒；该早期口径后来仍可由成员 wait 冒充 Root | 门 1 判据 | 由 058/063 取代 |
 | 019 | 成员模型：补 `agents.default_subagent_*`，并设 `expose_spawn_agent_model_overrides=false` | 只设默认值仍可被 spawn 的 `model` 覆盖；关掉 schema 字段才能钉死 | Multi 运行配置 | 已采纳 |
 | 020 | 门 1 dump 只从 harness 捕获的 Responses `function_call_output` 采集，不读 `TEAM_REPORT.md`，也不把 `codex exec --json` 当成工具输出源 | exec JSONL 不映射 `team_inspect`；wait 的 ThreadItem 也不带 TeamActivity 原文。真实工具结果出现在下一轮 Responses `input` 里 | 门 1 证据 | 已采纳 |
 | 021 | 门 2 归因边界写入不退化锁：比较的是「上游 V2 + 团队状态」对「上游默认 V1」；真退化再跑 `V2 开、team_state 关`，本轮不预跑 | 结论要能说清退化归谁；不预跑省钱 | 门 2 合同 | 已采纳 |
@@ -520,3 +548,12 @@
 | 052 | collector 必须拒绝 failed required inspect，且 dump/log 必须按返回 continuation 续页到 null 并覆盖 `total_entries`；fresh cursorless/offset-0 page set 可接受新总数 | 第一页谓词已足够时静默忽略第二页失败会假通过；反过来，不区分 continuation 与 fresh snapshot 又会误杀团队状态变化后的合法最终读取 | 门 1 判据 | 已采纳 |
 | 053 | rehearsal 的 dump/log 初始页与续页固定显式 `limit=3`，且两者都必须至少两页并走到 null；页数写入结果/归档 | 修掉 team-only 假 Fact 后自然状态可能不超过默认 20 条，若仍依赖自然体量，彩排会重新退化为未执行 continuation 分支的假准备 | 门 1 彩排 | 已采纳 |
 | 054 | code-mode recorder 的响应边界分成 Yielded / Terminal / Unavailable；MissingCell、首响应错误与不可转换响应一律不铸证并清理，wait 内部错误只为此前已知 live cell 保留重试状态 | MissingCell 没有 terminal callback-drain 证明，不能把泛化错误文本当 provenance；错误路径若留下任意未知 cell 又会逐步耗尽 256 项上限 | Multi 证据生命周期 | 已采纳 |
+| 055 | v5 保持历史不可变；正式门改用 workflow-v6 / nondegradation-v6，继续复用未变化的 runtime-v4 与冻结字节 | v5 已承载 rehearsal/smoke，原地修改会让历史结果冒充新合同；本轮没有产品源码变化，无需重冻 runtime | 合同身份 | 已采纳 |
+| 056 | Gate 1 最多 6 次；Gate 2 每槽最多 5 次 infra、全批最多 40 次；共享槽位 116；60 effective、80 requests/run、5 HTTP attempts 与 `$120` 不变 | 把有效样本与设施恢复机会分开；按最坏调度形状预测为 `$67.80`，仍由累计 reservation/settlement 的 `$120` 硬停止兜底 | 调度 / 预算 | 已采纳 |
+| 057 | 正式 resume 以 batch + 两把合同锁 + runtime + provider receipt 绑定；完整归档跳过，pristine 零请求 run 原 id 重领，已请求未归档只追加一次 abandoned infra 后转下一 attempt，未来/重复/冲突状态拒绝 | 固定 run id 的 one-shot 入口无法承受长批次进程退出；恢复必须幂等且不能把产品失败改标 infra | 恢复语义 | 已采纳 |
+| 058 | Gate 1 机械要求同成员完成首次 publish → Root publish → route → 自身 exec Fact 的 team_evidence → 二次 publish，Root 唤醒只认 completed wait_agent TeamActivity | v5 只从 dump 的 VersionFact 推断 evidence，缺调用、少一次成员 Version 或仅 inspect signal 都可假通过 | 门 1 判据 | 已采纳 |
+| 063 | Gate 1 进一步要求首个成员 Version 精确引用被下钻 Fact、wait 来自 rollout manifest 的 Root thread、整条 trace 零 Direct，且 Root→member 投递仅 plaintext；Gate 1/2 共享完整 Gate 1 archive 前缀验证并拒绝 symlink 归档 | 独立终审构造出成员 wait、第二 Version 借 Fact、Direct dispatch、乱序 resume 与 broken symlink 等假绿/先消费后失败边界 | 门 1 / resume | 已采纳 |
+| 059 | 测试必须显式传入 eval-data/tmp 下的隔离 capture root；v6 rehearsal、正式 Gate 1 与历史 v5 各用独立 identity，正式非空 capture 一律拒绝 | `persist=false` 旧实现仍会覆盖 canonical raw 并向 metadata 追加测试 observation | 证据分区 | 已采纳 |
+| 060 | 完整 provider frozen preflight 位于 secret、正式 identity receipt、ledger open 与 claim_run 之前，并纳入 ready | 只在 Gate 2 executor 内校验会在零 API 时仍消耗第一个正式 run id | 付费入口 | 已采纳 |
+| 061 | Gate 2 每个 attempt 形成分类后立即 fsync 归档，再允许 claim 下一 attempt | 若把同槽多次 infra 缓存在内存，下一 attempt 请求中断会留下两个未归档 run，无法按单一前缀恢复 | 恢复持久性 | 已采纳 |
+| 062 | 两门的判定语义仍相互独立，但正式 Gate 2 入口要求同一 v6 archive 已有 Gate 1 pass | 避免在协议门已知未通过时启动更大的付费批次；该执行顺序不让 Gate 1 结果替代 Gate 2 判据 | 正式执行顺序 | 已采纳，收紧决策 037 的流程边界 |

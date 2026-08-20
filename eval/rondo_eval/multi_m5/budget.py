@@ -16,7 +16,7 @@ from ..api_budget_proxy import (
 from ..contracts import ModelPricing
 from .load import M5ContractError, load_nondegradation_contract, load_workflow_contract
 
-BATCH_ID = "multi-m5-phase-b"
+BATCH_ID = "multi-m5-phase-b-v6"
 HARD_CAP_USD = Decimal("120.00")
 # Final pre-contract connectivity smoke. Separately authorized, so it gets its
 # own batch and its own ledger file: it must never draw on the $120 the two
@@ -35,7 +35,8 @@ SMOKE_LOCK_ID = "multi-m5-clean-smoke-v5"
 # intentionally preserved, unsettled pre-network row. A v4 replacement was
 # retired before a provider request because runtime-v3's self-mutating inspect
 # cursor failed rehearsal. This v5 identity carries one validation run for the
-# repaired runtime-v4 and workflow-v5.
+# repaired runtime-v4 and workflow-v5; the smoke identity stays historical
+# while the formal gates advance to v6.
 # Its cap is derived from that run cap in `open_smoke_ledger` and stays under
 # the gates' own $120.
 SMOKE_MAX_RUNS = 1
@@ -447,9 +448,9 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
     if cap != HARD_CAP_USD:
         raise M5ContractError("non-degradation hard cap drifted from $120.00")
     if loaded.raw.get("cost_forecast", {}).get("ledger_batch_id") != BATCH_ID:
-        raise M5ContractError("ledger batch id drifted from multi-m5-phase-b")
+        raise M5ContractError("ledger batch id drifted from multi-m5-phase-b-v6")
     # Both gates share this ledger, so gate 1's attempts need their own slots.
-    # Sizing it at 60+12 alone truncates gate 2 in the worst legal case. The
+    # Sizing it at effective+infra alone truncates the shared batch. The
     # attribution diagnostic can fire once per task, and it spends from the same
     # $120, so it needs slots too -- otherwise the run that has to explain a
     # degradation is the one that cannot start.
@@ -460,8 +461,8 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
         + gate1_attempts
         + len(loaded.tasks)
     )
-    if max_runs != 85:
-        raise M5ContractError("ledger run-slot count drifted from 60+12+3+10")
+    if max_runs != 116:
+        raise M5ContractError("ledger run-slot count drifted from 60+40+6+10")
     ledger = PersistentBudgetLedger(
         path,
         batch_id=BATCH_ID,

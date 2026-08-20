@@ -1299,3 +1299,23 @@ clean-smoke-v5 与独立后审全部完成。这里只记录门前开发成果�
 - 独立预审与付费后审均为 GO、无 P0/P1。正式归档仍为 26 行且哈希未变；`multi-m5-phase-b` 账本/锁不存在，
   Docker 未运行。完整证据见
   `agent_log/2026-08-20-100000-plan044-m5-runtime-v4-prebuild-remediation.md`。
+
+## Multi M-5 v6 正式付费前设施整改（Plan 044，2026-08-20）
+
+**状态**：后续独立审查确认 v5 仍有协议假绿、capture 身份串线、provider 预检过晚和不可恢复中断四类缺口；
+v5 的门前 ready 结论因此作废，但其 rehearsal/smoke 历史不改写。整改只改变 eval 合同与执行设施，产品字节未变，
+继续复用 runtime-v4。正式 Gate 1/Gate 2 仍未启动，**不是** M-5 通过或不退化结论。
+
+- 新冻结 workflow-v6 / nondegradation-v6：Gate 1 最多 6 次；Gate 2 每槽最多 5 次 infra、全批最多 40 次；
+  共享槽位 `60 effective + 40 infra + 6 Gate 1 + 10 diagnostic = 116`；80 requests/run、5 HTTP attempts 与
+  `$120` 硬上限不变。点估计 `$10.40`，最坏调度形状预测 `$67.80`。
+- Gate 1 机械验证成员两次 Version 之间真实完成自身 exec Fact 的 `team_evidence`，并要求 Root publish、route、
+  completed wait TeamActivity 的顺序链；测试 capture、v6 rehearsal 与正式 capture 完全隔离。
+- provider 全量冻结提前到任何正式 receipt/ledger/claim 之前。正式 resume 绑定 batch、两把锁、runtime 与
+  provider receipt；完整归档跳过，pristine run 安全重领，已请求未归档只追加一次 abandoned infra，未来或冲突
+  状态 fail-closed。Gate 2 attempt 在 claim 下一 id 前立即持久化，正常模型失败保持产品分类。
+- 最终定向 Python 162/162、`just eval-lock`、ready、loopback 通过。全新 canonical v6 rehearsal 20/20 dispatch
+  全为 code cell、0 Direct/failed；dump 7 页/log 2 页到 null，明文 9/加密与未知 0，严格协议链和七谓词全真。
+  正式 v6 archive、ledger、identity receipt 均未创建。
+- 审查与整改证据见 `agent_log/2026-08-20-110000-plan044-m5-paid-readiness-independent-review.md` 与
+  `agent_log/2026-08-20-120000-plan044-m5-v6-paid-readiness-remediation.md`。

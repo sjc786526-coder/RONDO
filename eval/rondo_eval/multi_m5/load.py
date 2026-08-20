@@ -39,8 +39,8 @@ _PREDICATE_IDS = (
     "root_resolved",
     "root_woken",
 )
-WORKFLOW_LOCK_ID = "multi-m5-workflow-v5"
-NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v5"
+WORKFLOW_LOCK_ID = "multi-m5-workflow-v6"
+NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v6"
 # runtime-v4 retains an all-text terminal code-mode result only after a
 # supported non-team nested dispatch completed. Team-only cells therefore
 # cannot mint recursive evidence or invalidate their own inspect cursor. Both
@@ -90,7 +90,7 @@ class NondegradationContract:
     max_requests_per_run: int
     hard_cap_usd: str
     point_estimate_usd: str
-    worst_legal_usd: str
+    worst_schedule_shape_usd: str
     price_date: str
     price_source_url: str
     docker_images: tuple[str, ...]
@@ -167,7 +167,7 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
     timeout = raw.get("timeout_seconds")
     attempts = raw.get("max_attempts")
     members = raw.get("max_members")
-    if timeout != 1800 or attempts != 3 or members != 1:
+    if timeout != 1800 or attempts != 6 or members != 1:
         raise M5ContractError("gate 1 timeout or attempt contract differs")
     report = raw.get("report_filename")
     if report != "TEAM_REPORT.md":
@@ -185,12 +185,20 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
     if source.get("required_tools") != [
         {"namespace": "collaboration", "name": "team_inspect"},
         {"namespace": "collaboration", "name": "wait_agent"},
+        {"namespace": "collaboration", "name": "team_evidence"},
     ]:
         raise M5ContractError("gate 1 required tool identities differ")
     if source.get("required_inspect_actions") != ["dump", "log"]:
         raise M5ContractError("gate 1 must collect team_inspect dump and log")
+    if raw.get("member_message_delivery") != {
+        "required_status": "plaintext",
+        "encrypted_effect": "infra_failed",
+        "unknown_effect": "infra_failed",
+        "absent_effect": "infra_failed",
+    }:
+        raise M5ContractError("gate 1 member message delivery contract differs")
     attempts_block = raw.get("attempts")
-    if not isinstance(attempts_block, dict) or attempts_block.get("max_attempts") != 3:
+    if not isinstance(attempts_block, dict) or attempts_block.get("max_attempts") != 6:
         raise M5ContractError("gate 1 attempt contract is missing")
     if not str(attempts_block.get("semantics") or "").strip():
         raise M5ContractError("gate 1 attempt semantics are not stated")
@@ -266,8 +274,8 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
         raise M5ContractError("budget or infra block is missing")
     if (
         raw.get("max_effective_runs") != 60
-        or infra.get("max_slot_attempts") != 3
-        or infra.get("max_infra_attempts_total") != 12
+        or infra.get("max_slot_attempts") != 5
+        or infra.get("max_infra_attempts_total") != 40
         or raw.get("max_requests_per_run") != 80
         or cost.get("hard_cap_usd") != "120.00"
     ):
@@ -303,6 +311,7 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
     _require_diagnostic(attribution.get("diagnostic"), tasks)
     _require_usage_envelope(raw.get("usage_envelope"))
     _require_concurrency(raw.get("concurrency"))
+    _require_resume(raw.get("resume"))
     _require_cost_forecast(raw, cost)
     if raw.get("runtime_lock_id") != RUNTIME_LOCK_ID:
         raise M5ContractError("gate 2 does not name the frozen runtime bundle")
@@ -319,12 +328,12 @@ def load_nondegradation_contract(path: Path | None = None) -> NondegradationCont
         root_effort=_effort(raw.get("root_effort")),
         provider=_provider(raw.get("provider")),
         max_effective_runs=60,
-        max_slot_attempts=3,
-        max_infra_attempts_total=12,
+        max_slot_attempts=5,
+        max_infra_attempts_total=40,
         max_requests_per_run=80,
         hard_cap_usd=cost["hard_cap_usd"],
         point_estimate_usd=str(cost["point_estimate_usd"]),
-        worst_legal_usd=str(cost["worst_legal_usd"]),
+        worst_schedule_shape_usd=str(cost["worst_schedule_shape_usd"]),
         price_date=str(price["date"]),
         price_source_url=str(price["source_url"]),
         docker_images=images,
@@ -494,7 +503,7 @@ def _require_cost_forecast(raw: dict[str, Any], cost: dict[str, Any]) -> None:
     conditional_pairs = (
         tasks * int(raw["conditional_rerun"]["extra_effective_pairs_per_triggered_task"])
     )
-    gate1_attempts = 3
+    gate1_attempts = 6
     point = base_pairs * (codex_run + multi_run) + gate1_attempt
     worst = (
         (base_pairs + conditional_pairs) * (codex_run + multi_run)
@@ -505,7 +514,7 @@ def _require_cost_forecast(raw: dict[str, Any], cost: dict[str, Any]) -> None:
     )
     for key, want in (
         ("point_estimate_usd", point),
-        ("worst_legal_usd", worst),
+        ("worst_schedule_shape_usd", worst),
     ):
         try:
             declared = Decimal(str(cost[key]))
@@ -516,7 +525,33 @@ def _require_cost_forecast(raw: dict[str, Any], cost: dict[str, Any]) -> None:
                 f"cost forecast {key} differs from the basis: {declared} != {want}"
             )
     if worst >= Decimal(str(cost["hard_cap_usd"])):
-        raise M5ContractError("worst legal forecast is not under the hard cap")
+        raise M5ContractError("worst schedule-shape forecast is not under the hard cap")
+    expected_slots = int(raw["max_effective_runs"]) + int(
+        raw["infra"]["max_infra_attempts_total"]
+    ) + gate1_attempts + tasks
+    if cost.get("run_slots") != expected_slots or expected_slots != 116:
+        raise M5ContractError("cost forecast run slots differ from 60+40+6+10")
+
+
+def _require_resume(value: object) -> None:
+    expected = {
+        "identity_fields": [
+            "budget_batch_id",
+            "workflow_lock_id",
+            "nondegradation_lock_id",
+            "runtime_lock_id",
+            "provider_identity",
+        ],
+        "skip_archived_outcomes": ["completed", "agent_failed", "infra_failed"],
+        "zero_request_reclaim": "same_run_id_only_when_pristine_and_capture_empty",
+        "requested_unarchived": "append_one_abandoned_infra_record_then_next_attempt",
+        "abandonment_idempotent": True,
+        "product_failure_is_infra": False,
+        "future_or_conflicting_rows": "fail_closed",
+        "budget_and_capacity_stops_remain_terminal": True,
+    }
+    if value != expected:
+        raise M5ContractError("gate 2 resume contract differs")
 
 
 def load_runtime_identity(

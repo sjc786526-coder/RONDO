@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 已完成 runtime-v4、v5 门锁、完整分页彩排与一次零 taint 真实 clean smoke，门前准备全部就绪；**正式两道门未启动**）
+最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 已完成 runtime-v4、v6 正式合同、幂等恢复与完整分页彩排，正式门前设施就绪；**正式两道门未启动**）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -25,7 +25,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过。阶段 B 已关闭 runtime-v3 的递归证据/分页假绿，冻结 `multi-m5-runtime-v4` 与 workflow/nondegradation v5；共享 build-lock Rust 146/146、Python 136/136、ready、loopback 和真实分页 rehearsal 均通过。唯一一次 clean-smoke-v5 以零 taint、零保守暴露、七谓词全真和成员自身证据链完成，且经独立后审。**正式两道门未执行**，不能表述为 M-5 通过、门 1 通过或未见退化。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过。阶段 B 复用 `multi-m5-runtime-v4`，正式合同已升级为 workflow/nondegradation v6：协议证据、capture 隔离、provider 前置冻结与幂等 resume 已闭合；共享 build-lock Rust 历史 146/146、当前 Python 162/162、ready、loopback 和 v6 完整分页 rehearsal 均通过。clean-smoke-v5 是有效历史非正式 smoke，不升级冒充 v6 正式证据。**正式两道门未执行**，不能表述为 M-5 通过、门 1 通过或未见退化。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -79,13 +79,13 @@
   人判结论为**保留为实验**。方向 2 因此没有已排期的下一工作包；若将来要投入真实使用，必须先按本页
   §6 单独立项，建立面向生产的正确性与安全验收，并解决“合成集线索化”与“holdout 单侧标签”两项证据缺口。
   结论详情见 `doc/WBS/local-approval-model.md`。
-- **3c RONDO Multi**：M-0—M-4 已完成并合入。**M-5 阶段 A 已通过**；**阶段 B 仍是当前工作**，经五轮独立审查整改。
+- **3c RONDO Multi**：M-0—M-4 已完成并合入。**M-5 阶段 A 已通过**；**阶段 B 仍是当前工作**，正式门前整改已收口。
   当前事实：
   - **门 1 判据已重建**。在 `tool_mode=code_mode_only` 下模型只发一个 `custom_tool_call(name=exec)`，团队工具
     全部在 JS 里调用，Responses 线上没有任何 `function_call`，因此原 v1 判据（`responses_function_call_outputs`）
     在真实配置下**结构上不可能通过**。现改为读冻结二进制自身的 rollout trace（`CODEX_ROLLOUT_TRACE_ROOT`），
     判据只认 Rust dispatch 侧记录的工具名/namespace/参数/handler 返回值，并要求每条 dispatch 能绑定回抓包里
-    模型真实发出的 code cell。当前合同由 `multi-m5-workflow-v5` 承载（旧版归档不得升级冒充），彩排 stub 同步改为
+    模型真实发出的 code cell。当前合同由 `multi-m5-workflow-v6` 承载（旧版归档不得升级冒充），彩排 stub 同步改为
     真实 code-mode 形状，20 条对抗回归（伪造输出、死分支、错 namespace、缺失/冲突 trace、跨 run 重放）钉住。
   - **门 2 模型已全链贯通**。RunSpec 此前仍取宿主 `paid_eval.main_model` 别名，与只认 terra 的预算代理不一致，
     真跑会被本地拒成"产品失败"。现在锁里的 root/member 模型贯通 spec → adapter argv → proxy，就绪自检离线
@@ -98,6 +98,10 @@
     混合媒体、加密、空输出、Missing/不可用响应继续 fail-closed。唯一绑定键为 `output_item_id`。彩排固定
     `limit=3`，dump 7 页、log 2 页都续到 null；真实 clean smoke 的成员自身 exec Fact 被首个 Version 引用并由
     `team_evidence` 成功读回明文 observation。
+  - **正式 v6 执行面可幂等恢复**。Gate 1 最多 6 次；Gate 2 每槽最多 5 次 infra、全批最多 40 次，
+    `60 effective + 40 infra + 6 Gate 1 + 10 diagnostic = 116` 个 run 槽位；80 请求/run、5 次 HTTP 尝试和
+    `$120` 硬上限不变。完整归档跳过，pristine 零请求 run 可安全重领，已请求未归档只追加一次 abandoned infra；
+    正常模型失败保持产品结果。provider 全量冻结在任何正式状态创建前完成。
   - 门 1 载体是协议演示级 fixture（决策 032），口径边界见锁的 `scope_limits`：WBS 的「真实任务上跑通完整协作
     语义」须门 1+门 2 合起来读，任一门单独不得引用。
   **正式两道门未启动**（`$120` 账本仍不存在）；历史合同外冒烟与本轮 clean smoke 分账保留。
@@ -114,10 +118,11 @@
   （cm4 抓包里该字段与 139 字符明文逐字节相等）。已让 `ToolCallSource::CodeMode` 走明文分支，
   `Direct` 的 encrypted-argument 语义保持不变，并补 5 条 Rust 定向回归（含反向验证）。
   **runtime-v3 已冻结但被终审否决**：原 rehearsal 第二页 dump 实际 stale cursor 失败，旧 collector 静默跳过。
-  后继 runtime-v4 来自源码 `0eee6dc`，CLI/host/bwrap/manifest 四摘要与实物一致，v5 loader 关系为
-  workflow→runtime-v4→nondegradation。clean-smoke-v5 只运行一次：20 请求全部按 usage 结算，真实计价
+  后继 runtime-v4 来自源码 `0eee6dc`，CLI/host/bwrap/manifest 四摘要与实物一致，现行 v6 loader 关系为
+  workflow-v6→runtime-v4→nondegradation-v6。clean-smoke-v5 只运行一次：20 请求全部按 usage 结算，真实计价
   `$0.273138`、`conservative_exposure_usd=0`、明文 16/加密与未知均 0、七谓词全真；18/18 dispatch 均来自
-  code cell，0 Direct、0 失败。正式归档基线未变，正式账本/锁仍不存在。门前准备已完成，下一动作只能是未来
+  code cell，0 Direct、0 失败。v6 canonical rehearsal 为 20/20 code-cell、0 Direct/failed、dump 7 页/log 2 页，
+  严格顺序证据链与七谓词全真。正式 v6 archive/ledger/identity receipt 均不存在。下一动作只能是未来
   另行启动正式门 1；本任务停在该边界。
   逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
@@ -217,7 +222,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 runtime-v4/v5 合同及验证性 real-API smoke 已就绪；正式两道门未启动 |
+| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 runtime-v4/v6 正式合同及恢复设施已就绪；历史 clean-smoke-v5 有效；正式两道门未启动 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|

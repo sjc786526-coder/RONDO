@@ -66,8 +66,9 @@ def evaluate_collaboration(
 
     Event-local predicates must all hold on **one** Event. ``root_resolved``
     requires a member-authored Version on that Event. ``root_woken`` requires a
-    change-log ``signalled`` wake targeting Root, or a ``wait_agent`` TeamActivity
-    message recorded for a dispatched wait.
+    completed Root-thread ``wait_agent`` whose returned result carries the
+    TeamActivity marker. A member wait or a store-only wake log cannot satisfy
+    the predicate.
     """
 
     if trace is not None:
@@ -85,9 +86,31 @@ def evaluate_collaboration(
     members = _members(participants)
     events = _events_from_dump(rows)
     member_labels = {str(row.get("label")) for row in members}
+    member_threads = {
+        str(row.get("thread_id")): str(row.get("label"))
+        for row in members
+        if row.get("thread_id") and row.get("label")
+    }
+    evidence_calls = dump.get("team_evidence_calls")
+    calls = tuple(evidence_calls) if isinstance(evidence_calls, list) else ()
+    publish_items = dump.get("team_publish_calls")
+    publish_calls = tuple(publish_items) if isinstance(publish_items, list) else ()
+    route_items = dump.get("team_route_calls")
+    route_calls = tuple(route_items) if isinstance(route_items, list) else ()
 
     spawn_ok = 1 <= len(members) <= max_members
-    local_flags = [_event_flags(event, member_labels) for event in events]
+    local_flags = [
+        _event_flags(
+            event,
+            member_labels,
+            member_threads,
+            calls,
+            publish_calls,
+            route_calls,
+            finding_line,
+        )
+        for event in events
+    ]
     best_index = _best_event_index(local_flags)
     best_flags = (
         local_flags[best_index]
@@ -185,7 +208,13 @@ def _events_from_dump(rows: tuple[object, ...]) -> list[dict[str, Any]]:
 
 
 def _event_flags(
-    event: Mapping[str, Any], member_labels: set[str]
+    event: Mapping[str, Any],
+    member_labels: set[str],
+    member_threads: Mapping[str, str],
+    evidence_calls: tuple[object, ...],
+    publish_calls: tuple[object, ...],
+    route_calls: tuple[object, ...],
+    finding_line: str,
 ) -> dict[str, bool]:
     versions = [row for row in event["versions"] if isinstance(row, dict)]
     routes = [row for row in event["routes"] if isinstance(row, dict)]
@@ -203,11 +232,24 @@ def _event_flags(
         for row in member_versions
         if row.get("version_id")
     }
-    evidence_on_member = any(
-        _as_int(row.get("fact_ref_count")) >= 1 for row in member_versions
-    ) or any(
-        isinstance(row, dict) and str(row.get("version_id") or "") in member_ids
-        for row in facts
+    root_versions = [
+        row for row in versions if _is_root_label(str(row.get("author") or ""))
+    ]
+    facts_by_version: dict[str, set[str]] = {}
+    for row in facts:
+        version_id = str(row.get("version_id") or "")
+        fact_id = str(row.get("fact_id") or "")
+        if version_id in member_ids and fact_id:
+            facts_by_version.setdefault(version_id, set()).add(fact_id)
+    protocol = _valid_member_protocol(
+        event_id=str(event.get("event_id") or ""),
+        versions=versions,
+        member_threads=member_threads,
+        facts_by_version=facts_by_version,
+        publish_calls=publish_calls,
+        route_calls=route_calls,
+        evidence_calls=evidence_calls,
+        finding_line=finding_line,
     )
     route_to_member = any(
         str(row.get("target") or "") in member_labels for row in routes
@@ -216,12 +258,138 @@ def _event_flags(
         str(row.get("root_state") or "") == "resolved" for row in member_versions
     )
     return {
-        "event_with_two_versions": len(versions) >= 2,
-        "two_authors": len(authors) >= 2 and bool(member_versions),
-        "team_route": route_to_member,
-        "team_evidence": evidence_on_member,
+        "event_with_two_versions": (
+            len(versions) >= 3
+            and bool(root_versions)
+            and len(member_versions) >= 2
+        ),
+        "two_authors": len(authors) >= 2 and bool(root_versions) and bool(member_versions),
+        "team_route": route_to_member and protocol["route"],
+        "team_evidence": protocol["evidence"],
         "root_resolved": member_resolved,
     }
+
+
+def _valid_member_protocol(
+    *,
+    event_id: str,
+    versions: list[dict[str, Any]],
+    member_threads: Mapping[str, str],
+    facts_by_version: Mapping[str, set[str]],
+    publish_calls: tuple[object, ...],
+    route_calls: tuple[object, ...],
+    evidence_calls: tuple[object, ...],
+    finding_line: str,
+) -> dict[str, bool]:
+    version_authors = {
+        str(row.get("version_id")): str(row.get("author") or "")
+        for row in versions
+        if row.get("version_id")
+    }
+    publishes = [call for call in publish_calls if _completed_result(call)]
+    routes = [call for call in route_calls if _completed_result(call)]
+    evidences = [call for call in evidence_calls if _completed_result(call)]
+    for first in publishes:
+        assert isinstance(first, dict)
+        member = member_threads.get(str(first.get("thread_id") or ""))
+        first_result = first["result"]
+        if member is None or first_result.get("event_id") != event_id:
+            continue
+        first_version = str(first_result.get("version_id") or "")
+        if version_authors.get(first_version) != member:
+            continue
+        first_refs = {
+            str(item) for item in first_result.get("evidence_refs") or () if item
+        }
+        for root_publish in publishes:
+            assert isinstance(root_publish, dict)
+            root_result = root_publish["result"]
+            root_version = str(root_result.get("version_id") or "")
+            if (
+                root_result.get("event_id") != event_id
+                or not _is_root_label(version_authors.get(root_version, ""))
+            ):
+                continue
+            for route in routes:
+                assert isinstance(route, dict)
+                route_result = route["result"]
+                if (
+                    route_result.get("event_id") != event_id
+                    or str(route_result.get("target") or "")
+                    != str(first.get("thread_id") or "")
+                ):
+                    continue
+                for evidence in evidences:
+                    assert isinstance(evidence, dict)
+                    if evidence.get("thread_id") != first.get("thread_id"):
+                        continue
+                    if not _valid_member_evidence_call(
+                        evidence,
+                        member=member,
+                        member_fact_ids=facts_by_version.get(first_version, set())
+                        & first_refs,
+                        finding_line=finding_line,
+                    ):
+                        continue
+                    for second in publishes:
+                        assert isinstance(second, dict)
+                        second_result = second["result"]
+                        second_version = str(second_result.get("version_id") or "")
+                        if (
+                            second is first
+                            or second.get("thread_id") != first.get("thread_id")
+                            or second_result.get("event_id") != event_id
+                            or version_authors.get(second_version) != member
+                        ):
+                            continue
+                        if (
+                            _seq(first)
+                            < _seq(root_publish)
+                            < _seq(route)
+                            < _seq(evidence)
+                            < _seq(second)
+                        ):
+                            return {"route": True, "evidence": True}
+    return {"route": False, "evidence": False}
+
+
+def _completed_result(call: object) -> bool:
+    return (
+        isinstance(call, dict)
+        and call.get("status") == "completed"
+        and isinstance(call.get("result"), dict)
+    )
+
+
+def _seq(call: Mapping[str, Any]) -> int:
+    return _as_int(call.get("seq"))
+
+
+def _valid_member_evidence_call(
+    call: Mapping[str, Any],
+    *,
+    member: str,
+    member_fact_ids: set[str],
+    finding_line: str,
+) -> bool:
+    arguments = call.get("arguments")
+    result = call.get("result")
+    if not isinstance(arguments, dict) or not isinstance(result, dict):
+        return False
+    fact_id = str(arguments.get("fact_id") or "")
+    observation = result.get("observation")
+    return (
+        fact_id in member_fact_ids
+        and str(result.get("fact_id") or "") == fact_id
+        and result.get("availability") == "available"
+        and result.get("producer") == member
+        and result.get("tool") == "exec"
+        and result.get("category") == "tool_result_success"
+        and result.get("truncated") is False
+        and isinstance(observation, str)
+        and bool(observation.strip())
+        and finding_line in observation
+    )
 
 
 def _best_event_index(local_flags: list[dict[str, bool]]) -> int | None:
@@ -234,21 +402,24 @@ def _best_event_index(local_flags: list[dict[str, bool]]) -> int | None:
 
 
 def _root_was_woken(dump: Mapping[str, Any]) -> bool:
-    log = dump.get("log") or dump.get("change_log") or ()
-    if isinstance(log, list):
-        for row in log:
-            if not isinstance(row, dict):
-                continue
-            wake = row.get("wake")
-            if not isinstance(wake, dict):
-                continue
-            if str(wake.get("decision") or "") != "signalled":
-                continue
-            if _is_root_label(str(wake.get("target") or "")):
-                return True
-    signals = dump.get("jsonl_signals") or ()
-    if isinstance(signals, list):
-        return any(WAIT_TEAM_ACTIVITY_MARK in str(item) for item in signals)
+    # The exact root thread comes from the signed rollout manifest. Checking
+    # only the returned string would let a member's successful wait impersonate
+    # Root and satisfy this predicate.
+    root_thread_id = dump.get("root_thread_id")
+    wait_calls = dump.get("wait_calls")
+    if not isinstance(root_thread_id, str) or not root_thread_id:
+        return False
+    if not isinstance(wait_calls, list):
+        return False
+    for call in wait_calls:
+        if (
+            isinstance(call, dict)
+            and call.get("thread_id") == root_thread_id
+            and call.get("status") == "completed"
+            and isinstance(call.get("result"), dict)
+            and WAIT_TEAM_ACTIVITY_MARK in str(call["result"].get("message") or "")
+        ):
+            return True
     return False
 
 

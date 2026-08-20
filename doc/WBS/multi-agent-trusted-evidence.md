@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：runtime-v4、两把 v5 锁、完整分页彩排与一次 clean smoke 已通过独立后审；正式两道门均未启动
+最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：runtime-v4、两把 v6 正式锁、幂等恢复与完整分页彩排已就绪；正式两道门均未启动
 
 ## 定位
 
@@ -255,7 +255,7 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 仍在进行，真实付费运行未开始，不能表述为 M-5 通过。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 的正式门前设施已就绪，正式 Gate 1/Gate 2 未开始，不能表述为 M-5 通过。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -300,7 +300,7 @@ store transition 期间为 unknown。Root 退休是独立终态覆盖层，只�
 阶段 A（Plan 044，无费用）已通过：冻结 bundle、两份运行合同与接线核验通过，门 1 判据的三处缺陷
 （同 Event 合取、Root 唤醒、证据按产出工具绑定）已关闭并各有反例回归。
 
-**阶段 B 经五轮独立审查整改，当前事实如下。**
+**阶段 B 经独立审查与 v6 整改，当前事实如下。**
 
 **门 1 判据已重建（第五轮）。** 冻结模型 `gpt-5.6-terra` 是 `tool_mode=code_mode_only`，配合
 `features.code_mode_host=true` 时，模型只发一个 `custom_tool_call(name=exec)`，团队工具全部由其中的
@@ -310,7 +310,7 @@ JavaScript 调用；Responses 线上顶层 `function_call` 数为 0。原 v1 判
 （`CODEX_ROLLOUT_TRACE_ROOT`，产品既有能力，非新增代码）：判据只认 Rust dispatch 侧写下的
 `ToolCallStarted/Ended`（工具名、namespace、注册表收到的参数、handler 返回值），并要求每条 dispatch 能绑定回
 抓包里模型真实发出的 code cell（`model_visible_call_id` + `source_js`），否则 fail-closed。这样
-"模型自己打印一段像 dump 的文本"不构成证据。当前判据由 `multi-m5-workflow-v5` 承载（旧版归档不得升级冒充）；
+"模型自己打印一段像 dump 的文本"不构成证据。当前判据由 `multi-m5-workflow-v6` 承载（旧版归档不得升级冒充）；
 彩排 stub 同步改为真实 code-mode 形状（这是关键：只改采集不改 stub 等于把同一个错误再犯一遍）。
 
 **门 2 模型已全链贯通（第五轮）。** 预算代理取锁里的 terra，但 `make_run_spec` 仍走宿主
@@ -325,13 +325,15 @@ sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign �
 `charged ≤ reserved` 恒成立，reserve 时的批次校验即为真上限。每 run 上限由最大并发推导
 （Root + 3 成员 + Guardian = 5 × 预留），并发上限改为经校验的整数而非布尔。停止原因区分 budget 与 infra
 （上游失败、缺 usage、超时不再被贴成"预算停止"），未知原因 fail-closed；预留扣款与已计价消费分开记账。
-正式付费槽位改用 `claim_run`，重跑 CLI 无法二次消费同一 run id。
+正式付费槽位使用确定性 run id，并由 archive + ledger 恢复：完整归档按原分类跳过；pristine 零请求 run 可安全
+重领；已请求未归档只追加一次 abandoned infra 后转下一 attempt；未来、重复、非连续或身份冲突 fail-closed。
+Gate 2 每个 attempt 在 claim 下一 run id 前立即 fsync，正常模型失败仍是产品结果，不得改标 infra。
 
 **成员证据链已按终审后的最小安全边界闭合。** runtime-v4 要求同一 cell 完成受支持的非 canonical
 team-state nested tool，outer response 还必须是 runtime 已排空 callbacks 的 terminal 纯文本结果；Yielded、
 team-state/evidence-read-only、混合媒体、加密、空输出均拒绝，Missing/不可用响应只清理不铸证。唯一绑定键是
 harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界重试状态。共享 build-lock 的定向 Rust
-结果为 146/146；Python M-5 定向为 136/136。
+结果为 146/146；当前 Python M-5 定向为 162/162。
 
 彩排由 stub 驱动协议，**证明的是产品与判据这条链路能走通，不是真实模型会遵守协议**，因此
 **不是**门 1 通过、更不是 M-5 通过。
@@ -356,19 +358,22 @@ harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界�
 第一页已有的谓词因此假绿。当前 collector 强制 required dump/log 成功、按 continuation 续到 null，并要求页集
 覆盖 `total_entries`；fresh snapshot 与 continuation 的总数语义分开。
 
-**正式门前验证已完成。** v5 loader 绑定 workflow-v5→runtime-v4→nondegradation-v5；ready=true、loopback
-通过。rehearsal 以 `limit=3` 完成 dump 7 页、log 2 页并续到 null，0 Direct，七谓词全真。独立预审后只运行
-一次 clean-smoke-v5：20 请求全部 usage-priced/settled，计价 `$0.273138`、保守暴露 0、零 taint，明文 16/
-加密与未知 0，七谓词与 `team_evidence` 全真；真实 trace 18/18 dispatch 均来自 code cell 且全完成，成员
-exec Fact→首个 Version→`team_evidence` 明文 observation 成链。独立后审通过。clean-smoke-v3 的未结算历史与
-v4 未启动身份继续保留；正式 `$120` 账本/锁不存在，正式归档未变。下一工作包是未来单独启动正式门 1，
-本轮停在该边界。
+**正式门前验证已完成。** v5 的 readiness 结论因协议假绿、capture 串线、provider 校验过晚和不可 resume 被后续
+独立审查否决；v5 历史不改写。现行 loader 绑定 workflow-v6→runtime-v4→nondegradation-v6，Gate 1 最多 6 次，
+Gate 2 每槽最多 5 次 infra、全批 40 次，共 116 个 run 槽位；60 effective、80 请求/run、5 次 HTTP 尝试与
+`$120` 硬上限不变。provider 完整冻结发生在 secret、receipt、ledger 与 claim 之前。
+
+ready=true、loopback 通过。全新 v6 rehearsal 以 `limit=3` 完成 dump 7 页、log 2 页并续到 null；20/20 dispatch
+均为 code cell、0 Direct/failed，明文 9/加密与未知 0。成员首次 publish → Root publish → route → 成员读取自身
+exec Fact → 成员二次 publish 的顺序成立，completed wait_agent 返回 TeamActivity，七谓词全真。历史唯一一次
+clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`），但不升级冒充 v6 正式结果。正式 v6 archive、
+`$120` ledger 与 identity receipt 均不存在；下一工作包是未来单独启动正式 Gate 1，本轮停在该边界。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
   fixture 里、指令规定工具顺序），只回答「真实模型下团队机制是否端到端真的发生」，不证明 Multi 在
   有分析负载的任务上更强；真实任务由门 2 的十个 TB 任务提供。任一门单独都不得引用为满足本目标。
-  当前合同由 `multi-m5-workflow-v5` 承载；历史边界见 workflow-v4 的 `scope_limits` 与 Plan 044 决策 032。
+  当前合同由 `multi-m5-workflow-v6` 承载；历史边界见旧锁的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
   阶段 A 前两项与阶段 B 门前准备已冻结并通过独立验收；正式门仍须按下表另行启动。

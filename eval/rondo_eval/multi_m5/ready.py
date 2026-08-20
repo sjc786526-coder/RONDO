@@ -84,6 +84,18 @@ def readiness_report(*, common_root: Path | None = None) -> dict[str, Any]:
             missing.append("gate2_model_projection")
 
     if nondeg is not None:
+        checks["provider_frozen_projection"] = _probe_provider_projection(nondeg)
+        if not checks["provider_frozen_projection"].get("ok"):
+            missing.append("provider_frozen_projection")
+        else:
+            checks["formal_batch_identity"] = _probe_formal_batch_identity(
+                root,
+                checks["provider_frozen_projection"],
+            )
+            if not checks["formal_batch_identity"].get("ok"):
+                missing.append("formal_batch_identity")
+
+    if nondeg is not None:
         checks["budget_upper_bound"] = _probe_budget_upper_bound(nondeg)
         if not checks["budget_upper_bound"].get("ok"):
             missing.append("budget_upper_bound")
@@ -160,6 +172,45 @@ def _probe_gate2_projection(common_root: Path, contract) -> dict[str, Any]:
     return result
 
 
+def _probe_provider_projection(contract) -> dict[str, Any]:
+    """Freeze endpoint, model, effort, retry and rates without reading a secret."""
+
+    from ..config import ConfigError, RepoPaths, load_runtime_config
+    from .budget import require_frozen_provider
+
+    try:
+        config = load_runtime_config(RepoPaths.discover(Path.cwd()))
+        provider = config.paid_provider_projection(model_id=contract.root_model)
+        identity = require_frozen_provider(
+            provider,
+            effort=contract.root_effort,
+            contract=contract,
+        )
+        return {"ok": True, **identity}
+    except (ConfigError, M5ContractError, OSError, ValueError) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _probe_formal_batch_identity(
+    common_root: Path,
+    provider_check: dict[str, Any],
+) -> dict[str, Any]:
+    from .resume import ResumeError, formal_identity, require_formal_receipt
+    from .store import batch_receipt_path
+
+    path = batch_receipt_path(common_root)
+    if not path.exists() and not path.is_symlink():
+        return {"ok": True, "status": "not_started"}
+    provider_identity = {
+        key: value for key, value in provider_check.items() if key != "ok"
+    }
+    try:
+        require_formal_receipt(path, formal_identity(provider_identity))
+        return {"ok": True, "status": "matching"}
+    except ResumeError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def _probe_budget_upper_bound(contract) -> dict[str, Any]:
     """Confirm the reservation really bounds one request's maximum legal cost.
 
@@ -190,7 +241,7 @@ def _probe_budget_upper_bound(contract) -> dict[str, Any]:
             reservation >= worst_request
             and gate1_cap >= peak
             and gate2_cap >= peak
-            and Decimal(contract.worst_legal_usd) < HARD_CAP_USD
+            and Decimal(contract.worst_schedule_shape_usd) < HARD_CAP_USD
         )
         return {
             "ok": bool(ok),
@@ -199,7 +250,7 @@ def _probe_budget_upper_bound(contract) -> dict[str, Any]:
             "peak_in_flight_reservation_usd": str(peak),
             "gate1_run_cap_usd": str(gate1_cap),
             "gate2_run_cap_usd": str(gate2_cap),
-            "worst_legal_usd": contract.worst_legal_usd,
+            "worst_schedule_shape_usd": contract.worst_schedule_shape_usd,
             "hard_cap_usd": str(HARD_CAP_USD),
         }
     except (M5ContractError, ArithmeticError, ValueError) as exc:

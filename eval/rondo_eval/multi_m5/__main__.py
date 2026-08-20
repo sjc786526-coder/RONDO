@@ -13,12 +13,14 @@ from ..api_budget_proxy import ApiBudgetProxyError, exposure_summary
 from .budget import open_phase_b_ledger, open_smoke_ledger, require_frozen_provider
 from .gate1 import Gate1Error, run_gate1_paid, run_gate1_rehearsal, run_gate1_smoke
 from .gate2 import Gate2Error, ScriptedSlotExecutor, run_gate2_real, run_light_interleaved
-from .load import M5ContractError, load_workflow_contract
+from .load import M5ContractError, load_nondegradation_contract, load_workflow_contract
 from .loopback import LoopbackError, run_frozen_multi_team_publish_loopback
 from .paid import PaidAuthError, authorization_from_phrases
 from .ready import readiness_report
+from .resume import ResumeError, ensure_formal_receipt, formal_identity
 from .store import (
     StoreError,
+    batch_receipt_path,
     budget_ledger_path,
     scratch_root,
     smoke_archive_path,
@@ -88,12 +90,21 @@ def main(argv: list[str] | None = None) -> int:
         if command == "gate1-paid":
             auth = authorization_from_phrases(api_phrase=_option(args, "--authorize-paid-api"))
             config = load_runtime_config(paths)
-            _name, api_key = load_provider_secret(config)
+            workflow = load_workflow_contract()
             # Pinned by the gate 1 lock rather than the host-wide alias, so the
             # frozen sol campaigns on this machine keep their provider identity.
             provider = config.paid_provider_projection(
-                model_id=load_workflow_contract().root_model
+                model_id=workflow.root_model
             )
+            provider_identity = require_frozen_provider(
+                provider,
+                effort=workflow.root_effort,
+            )
+            ensure_formal_receipt(
+                batch_receipt_path(paths.common_root),
+                formal_identity(provider_identity),
+            )
+            _name, api_key = load_provider_secret(config)
             with open_phase_b_ledger(budget_ledger_path(paths.common_root)) as ledger:
                 result = run_gate1_paid(
                     authorization=auth,
@@ -204,6 +215,20 @@ def main(argv: list[str] | None = None) -> int:
             )
 
             config = load_runtime_config(paths)
+            contract = load_nondegradation_contract()
+            provider = config.paid_provider_projection(model_id=contract.root_model)
+            # Full frozen-provider validation is deliberately before the
+            # ledger file is created/opened and before any deterministic run id
+            # can be claimed. A config-only drift must consume no formal state.
+            provider_identity = require_frozen_provider(
+                provider,
+                effort=contract.root_effort,
+                contract=contract,
+            )
+            ensure_formal_receipt(
+                batch_receipt_path(paths.common_root),
+                formal_identity(provider_identity),
+            )
             _name, api_key = load_provider_secret(config)
             proof = lease_from_watchdog()
             counter = DockerCliCounter(
@@ -241,7 +266,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["passed"] else 1
         print(_USAGE, file=sys.stderr)
         return 2
-    except (LoopbackError, M5ContractError, Gate1Error, Gate2Error, StoreError, PaidAuthError) as exc:
+    except (
+        LoopbackError,
+        M5ContractError,
+        Gate1Error,
+        Gate2Error,
+        ResumeError,
+        StoreError,
+        PaidAuthError,
+    ) as exc:
         print(f"rondo-multi-m5: {exc}", file=sys.stderr)
         return 78
 

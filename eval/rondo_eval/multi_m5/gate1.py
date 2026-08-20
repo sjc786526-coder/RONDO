@@ -52,7 +52,24 @@ from .predicates import (
     evaluate_collaboration,
 )
 from .rehearsal import CollaborationStub
-from .store import capture_dir, persist_archive_record, scratch_root
+from .resume import (
+    ResumeError,
+    claimed_run_disposition,
+    formal_identity,
+    load_formal_records,
+    require_archived_runs_in_ledger,
+    require_formal_receipt,
+    require_single_unarchived_run,
+    validate_gate1_resume_prefix,
+)
+from .store import (
+    archive_path as formal_archive_path,
+    batch_receipt_path,
+    capture_dir,
+    persist_archive_record,
+    rehearsal_archive_path,
+    scratch_root,
+)
 from .trace import TraceError, find_trace_bundle, load_rollout_trace
 
 REHEARSAL_TIMEOUT_SECONDS = 180
@@ -76,19 +93,24 @@ def run_gate1_rehearsal(
     timeout_seconds: int = REHEARSAL_TIMEOUT_SECONDS,
     persist: bool = True,
     process_runner: ProcessRunner = subprocess.run,
+    capture_base: Path | None = None,
+    run_id: str = "m5-g1-rehearsal-v6",
 ) -> dict[str, Any]:
     """Offline full protocol. Not a paid gate 1 pass, even if predicates are green."""
 
     stub = CollaborationStub(finding_line=_workflow_finding())
+    root = _common_root(common_root)
     return _run_gate1_once(
-        common_root=common_root,
-        run_id="m5-g1-rehearsal",
+        common_root=root,
+        run_id=run_id,
         timeout_seconds=timeout_seconds,
         persist=persist,
         evidence_kind="loopback",
         capture_mode="stub",
         stub=stub,
         process_runner=process_runner,
+        capture_base=capture_base,
+        archive_file=rehearsal_archive_path(root),
         extra={"rehearsal": True, "stub_finished": False},
     )
 
@@ -105,6 +127,9 @@ def run_gate1_paid(
     process_runner: ProcessRunner = subprocess.run,
     timeout_seconds: int | None = None,
     provider=None,
+    capture_base: Path | None = None,
+    archive_file: Path | None = None,
+    receipt_file: Path | None = None,
 ) -> dict[str, Any]:
     """Paid gate 1. Capture forwards to the budget proxy. Spends money if transport is real."""
 
@@ -127,18 +152,116 @@ def run_gate1_paid(
         # second argument that quietly points somewhere else.
         raise Gate1Error("paid gate 1 upstream differs from the frozen provider endpoint")
     root = _common_root(common_root)
+    formal_file = archive_file or formal_archive_path(root)
+    resume_fields: dict[str, Any] = {}
+    archived_by_attempt: dict[int, dict[str, Any]] = {}
+    formal_records: tuple[dict[str, Any], ...] = ()
+    if persist:
+        if provider_identity is None:
+            raise Gate1Error("formal gate 1 requires a frozen provider identity")
+        resume_fields = formal_identity(provider_identity)
+        try:
+            require_formal_receipt(
+                receipt_file or batch_receipt_path(root),
+                resume_fields,
+            )
+            formal_records = load_formal_records(
+                formal_file,
+                identity=resume_fields,
+            )
+            require_archived_runs_in_ledger(formal_records, ledger)
+        except ResumeError as exc:
+            raise Gate1Error(str(exc)) from exc
+        try:
+            archived_by_attempt = validate_gate1_resume_prefix(
+                formal_records,
+                maximum=workflow.max_attempts,
+            )
+        except ResumeError as exc:
+            raise Gate1Error(str(exc)) from exc
+        last_archived = archived_by_attempt.get(max(archived_by_attempt, default=0))
+        terminal = last_archived is not None and last_archived.get("outcome") in {
+            "completed",
+            "budget_stopped",
+        }
+        expected_run_id = (
+            None
+            if terminal or len(archived_by_attempt) >= workflow.max_attempts
+            else f"m5-g1-v6-paid-a{len(archived_by_attempt) + 1}"
+        )
+        try:
+            require_single_unarchived_run(
+                formal_records,
+                ledger,
+                expected_run_id=expected_run_id,
+            )
+        except ResumeError as exc:
+            raise Gate1Error(str(exc)) from exc
     run_cap = gate1_run_cap_usd()
     reservation = request_reservation_usd()
     envelope = usage_envelope()
     concurrent_main = max_concurrent_main()
     last: dict[str, Any] | None = None
     for attempt in range(1, workflow.max_attempts + 1):
-        run_id = f"m5-g1-paid-a{attempt}"
-        # `claim_run` rather than `ensure_run`: a re-invoked CLI must not be able
-        # to spend a second time against an id that already paid, overwrite its
-        # capture, or turn three attempts into six.
-        ledger.claim_run(run_id, cap_usd=run_cap)
-        metadata_path = capture_dir(root, run_id) / "budget-metadata.json"
+        run_id = f"m5-g1-v6-paid-a{attempt}"
+        archived = archived_by_attempt.get(attempt)
+        if archived is not None:
+            last = {"record": archived, "resumed": True}
+            if archived.get("outcome") in {"completed", "budget_stopped"}:
+                return last
+            continue
+        target = _capture_root(root, run_id, capture_base=capture_base, persist=persist)
+        if target.is_symlink() or (target.exists() and not target.is_dir()):
+            raise Gate1Error("paid gate 1 capture path is unsafe")
+        if persist:
+            try:
+                disposition = claimed_run_disposition(
+                    ledger,
+                    run_id,
+                    cap_usd=run_cap,
+                    conflict_paths=(
+                        target / "budget-metadata.json",
+                        target / "requests.jsonl",
+                        target / "rollout-trace",
+                        target / "verdict.json",
+                    ),
+                )
+            except ResumeError as exc:
+                raise Gate1Error(str(exc)) from exc
+        else:
+            disposition = "new"
+        if disposition == "abandon":
+            runtime = load_runtime_identity(require_frozen=True, common_root=root)
+            abandoned = archive_record(
+                evidence_kind="real_api",
+                gate=1,
+                lock_id=workflow.lock_id,
+                side=Side.RONDO,
+                product=Product.RONDO_MULTI,
+                source_commit=runtime.source_commit,
+                binary_sha256=str(runtime.codex_sha256),
+                outcome="infra_failed",
+                counts_as_effective=False,
+                subagent_model=workflow.member_model,
+                subagent_effort=str(workflow.raw["member_effort"]),
+                extra={
+                    **resume_fields,
+                    "budget_run_id": run_id,
+                    "attempt": attempt,
+                    "abandoned": True,
+                    "ignored_evidence": [],
+                    "reasons": ["resume:requested_run_missing_archive"],
+                    "passed": False,
+                },
+            )
+            persist_archive_record(abandoned, common_root=root, path=formal_file)
+            last = {"record": abandoned, "resumed": True}
+            continue
+        if target.exists() and any(target.iterdir()):
+            raise Gate1Error("paid gate 1 capture directory already holds artifacts")
+        if disposition == "new":
+            ledger.claim_run(run_id, cap_usd=run_cap)
+        metadata_path = target / "budget-metadata.json"
         metadata_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         proxy = LoopbackResponsesProxy(
             upstream_base_url=upstream_base_url,
@@ -176,6 +299,7 @@ def run_gate1_paid(
                 capture_mode="forward",
                 stub=None,
                 process_runner=process_runner,
+                capture_base=capture_base,
                 capture_upstream=proxy.base_url,
                 capture_bearer=proxy.downstream_api_key,
                 budget_probe=lambda: run_stop_reason(ledger, run_id),
@@ -186,6 +310,7 @@ def run_gate1_paid(
                     "rehearsal": False,
                     "attempt": attempt,
                     "budget_run_id": run_id,
+                    **resume_fields,
                     **(
                         {"provider_identity": dict(provider_identity)}
                         if provider_identity is not None
@@ -193,12 +318,13 @@ def run_gate1_paid(
                     ),
                     **harness_identity(RepoPaths.discover(Path.cwd()).worktree_root),
                 },
+                archive_file=formal_file if persist else None,
             )
         last = result
         outcome = str(result["record"].get("outcome"))
         if outcome == "completed":
             return result
-        # The contract buys three independent attempts, and gate 1 is a
+        # The contract buys six independent attempts, and gate 1 is a
         # protocol demonstration: a model that fumbled the sequence once is
         # exactly the case those attempts exist for. Only a hard stop -- the
         # budget, an authorization, a capacity line -- ends the gate early,
@@ -230,7 +356,7 @@ def run_gate1_smoke(
     attempt, its own ledger batch, its own archive file, and its own lock id.
     It answers "does a whole flow work end to end on this model" and nothing
     else -- passing predicates here is **not** a gate 1 pass, and failing here
-    does not consume one of gate 1's three attempts.
+    does not consume one of gate 1's six attempts.
     """
 
     authorization.require_api()
@@ -288,6 +414,7 @@ def run_gate1_smoke(
             capture_mode="forward",
             stub=None,
             process_runner=process_runner,
+            capture_base=None,
             capture_upstream=proxy.base_url,
             capture_bearer=proxy.downstream_api_key,
             budget_probe=lambda: run_stop_reason(ledger, run_id),
@@ -335,6 +462,34 @@ def _common_root(common_root: Path | None) -> Path:
     return RepoPaths.discover(Path.cwd()).common_root
 
 
+def _capture_root(
+    common_root: Path,
+    run_id: str,
+    *,
+    capture_base: Path | None,
+    persist: bool,
+) -> Path:
+    if capture_base is None:
+        if not persist:
+            raise Gate1Error(
+                "non-persistent gate 1 execution requires an isolated capture root"
+            )
+        return capture_dir(common_root, run_id)
+    if persist:
+        raise Gate1Error("a custom capture root is test-only and cannot be archived")
+    base = Path(capture_base)
+    if not base.is_absolute() or base.is_symlink():
+        raise Gate1Error("custom capture root must be an absolute regular directory")
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not base.is_dir():
+        raise Gate1Error("custom capture root is not a directory")
+    if not base.resolve().is_relative_to(scratch_root(common_root)):
+        raise Gate1Error("custom capture root must stay under eval-data/tmp")
+    if not run_id or any(part in run_id for part in ("/", "..", "\\")):
+        raise Gate1Error("capture run id is unsafe")
+    return base / run_id
+
+
 def _run_gate1_once(
     *,
     common_root: Path | None,
@@ -345,6 +500,7 @@ def _run_gate1_once(
     capture_mode: str,
     stub: CollaborationStub | None,
     process_runner: ProcessRunner,
+    capture_base: Path | None = None,
     capture_upstream: str | None = None,
     capture_bearer: str = LOOPBACK_BEARER,
     budget_probe: Callable[[], str | None] | None = None,
@@ -372,15 +528,30 @@ def _run_gate1_once(
     if evidence_kind != "real_api" and capture_mode == "forward":
         raise Gate1Error("forward capture is reserved for the paid gate 1 path")
 
-    capture_root = capture_dir(root, run_id)
+    capture_root = _capture_root(
+        root,
+        run_id,
+        capture_base=capture_base,
+        persist=persist,
+    )
+    if capture_root.exists() and (capture_root.is_symlink() or not capture_root.is_dir()):
+        raise Gate1Error("gate 1 capture path is unsafe")
     capture_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    allowed_existing = {"budget-metadata.json"} if capture_mode == "forward" else set()
+    unexpected = sorted(
+        item.name for item in capture_root.iterdir() if item.name not in allowed_existing
+    )
+    if unexpected:
+        raise Gate1Error(
+            "gate 1 capture directory already holds artifacts: " + ",".join(unexpected)
+        )
     capture_path = capture_root / "requests.jsonl"
     if capture_path.exists():
-        capture_path.unlink()
+        raise Gate1Error("gate 1 request capture already exists")
 
     trace_root = capture_root / "rollout-trace"
     if trace_root.exists():
-        shutil.rmtree(trace_root)
+        raise Gate1Error("gate 1 rollout trace already exists")
     trace_root.mkdir(parents=True, mode=0o700)
 
     scratch = scratch_root(root)
@@ -520,6 +691,7 @@ def _run_gate1_once(
     predicates = dict(verdict.predicates)
     ignored = list(verdict.ignored_evidence)
     event_id = verdict.event_id
+    delivery = member_message_delivery(jsonl)
     stop_class = stop_reason_class(stop_reason)
     if stop_class == "unknown":
         # Never guess. An unrecognised stop reason means the run ended for a
@@ -560,13 +732,19 @@ def _run_gate1_once(
         not timed_out
         and jsonl.strip()
         and trace_error is None
+        and delivery["status"] == "plaintext"
         and verdict.passed
         and completed.returncode == 0
     ):
         passed = True
         outcome = "completed"
         reasons = list(verdict.reasons)
-    elif timed_out or not jsonl.strip() or trace_error is not None:
+    elif (
+        timed_out
+        or not jsonl.strip()
+        or trace_error is not None
+        or delivery["status"] != "plaintext"
+    ):
         # An unreadable trace is the evidence pipeline failing, not the team
         # failing. Filing it as `agent_failed` would spend an attempt and record
         # a product verdict this run never actually produced.
@@ -576,6 +754,8 @@ def _run_gate1_once(
             reasons = ["timeout"]
         elif not jsonl.strip():
             reasons = [f"empty capture rc={completed.returncode}"]
+        elif delivery["status"] != "plaintext":
+            reasons = [f"evidence:member_message_delivery:{delivery['status']}"]
         else:
             reasons = [f"evidence:{trace_error}"]
     else:
@@ -598,7 +778,7 @@ def _run_gate1_once(
         # fails with every `agent_message` labelled encrypted says nothing about
         # the model's protocol compliance, so the distinction is recorded rather
         # than left to be spotted in the capture.
-        "member_message_delivery": member_message_delivery(jsonl),
+        "member_message_delivery": delivery,
         # What the provider's token counts justify, kept apart from what the
         # ledger debited without them. A reservation held against a response
         # that never reported usage is exposure, not measured spend.

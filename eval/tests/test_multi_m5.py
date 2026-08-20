@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import tempfile
@@ -102,6 +103,14 @@ class MultiM5ContractTests(unittest.TestCase):
 
     def test_nondegradation_lock_is_task_major_codex_then_multi(self) -> None:
         contract = load_nondegradation_contract()
+        workflow = load_workflow_contract()
+        self.assertEqual(workflow.max_attempts, 6)
+        self.assertEqual(contract.max_slot_attempts, 5)
+        self.assertEqual(contract.max_infra_attempts_total, 40)
+        self.assertEqual(contract.max_effective_runs, 60)
+        self.assertEqual(contract.max_requests_per_run, 80)
+        self.assertEqual(contract.worst_schedule_shape_usd, "67.80")
+        self.assertEqual(contract.hard_cap_usd, "120.00")
         slots = base_slots(contract)
         self.assertEqual(len(slots), 20)
         self.assertEqual(slots[0].side, Side.CODEX)
@@ -189,8 +198,8 @@ class MultiM5V5ContractTests(unittest.TestCase):
         # completed code-mode cell. Accepting it here would make the member
         # evidence predicate structurally unreachable again.
         for name, loader in (
-            ("multi-m5-workflow-v5", load_workflow_contract),
-            ("multi-m5-nondegradation-v5", load_nondegradation_contract),
+            ("multi-m5-workflow-v6", load_workflow_contract),
+            ("multi-m5-nondegradation-v6", load_nondegradation_contract),
         ):
             with self.subTest(lock=name):
                 path = self._mutated(name, runtime_lock_id="multi-m5-runtime-v2")
@@ -204,19 +213,32 @@ class MultiM5V5ContractTests(unittest.TestCase):
         self.assertEqual(load_workflow_contract().raw["infra_taint_effect"], "infra_failed")
         for value in ("ignored", "counts_as_pass", None):
             with self.subTest(value=value):
-                path = self._mutated("multi-m5-workflow-v5", infra_taint_effect=value)
-                with self.assertRaises(M5ContractError):
-                    load_workflow_contract(path)
+                path = self._mutated("multi-m5-workflow-v6", infra_taint_effect=value)
+            with self.assertRaises(M5ContractError):
+                load_workflow_contract(path)
+
+    def test_member_message_delivery_contract_is_frozen(self) -> None:
+        path = self._mutated(
+            "multi-m5-workflow-v6",
+            member_message_delivery={
+                "required_status": "plaintext",
+                "encrypted_effect": "agent_failed",
+                "unknown_effect": "infra_failed",
+                "absent_effect": "infra_failed",
+            },
+        )
+        with self.assertRaises(M5ContractError):
+            load_workflow_contract(path)
 
     def test_retry_backoff_comes_from_the_lock(self) -> None:
         contract = load_nondegradation_contract()
         self.assertEqual(contract.retry_backoff_seconds, 2.0)
-        path = self._mutated("multi-m5-nondegradation-v5", provider_retry_backoff_seconds="5")
+        path = self._mutated("multi-m5-nondegradation-v6", provider_retry_backoff_seconds="5")
         self.assertEqual(load_nondegradation_contract(path).retry_backoff_seconds, 5.0)
         for value in ("0", "31", "", None):
             with self.subTest(value=value):
                 path = self._mutated(
-                    "multi-m5-nondegradation-v5", provider_retry_backoff_seconds=value
+                    "multi-m5-nondegradation-v6", provider_retry_backoff_seconds=value
                 )
                 with self.assertRaises(M5ContractError):
                     load_nondegradation_contract(path)
@@ -237,11 +259,11 @@ class MultiM5V5ContractTests(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 path = self._mutated(
-                    "multi-m5-nondegradation-v5", unpriced_settlement={**block, **change}
+                    "multi-m5-nondegradation-v6", unpriced_settlement={**block, **change}
                 )
                 with self.assertRaises(M5ContractError):
                     load_nondegradation_contract(path)
-        path = self._mutated("multi-m5-nondegradation-v5", unpriced_settlement=None)
+        path = self._mutated("multi-m5-nondegradation-v6", unpriced_settlement=None)
         with self.assertRaises(M5ContractError):
             load_nondegradation_contract(path)
 
@@ -368,10 +390,21 @@ class MultiM5MemberDeliveryTests(unittest.TestCase):
 class MultiM5PredicateTests(unittest.TestCase):
     def _dump(self) -> dict[str, object]:
         return {
+            "root_thread_id": "t-root",
             "entries": [
-                {"entry": "participant", "label": "/root", "role": "root"},
-                {"entry": "participant", "label": "/root/worker", "role": "member"},
-                {"entry": "event", "event_id": "e1", "version_count": 2, "route_count": 1},
+                {
+                    "entry": "participant",
+                    "label": "/root",
+                    "thread_id": "t-root",
+                    "role": "root",
+                },
+                {
+                    "entry": "participant",
+                    "label": "/root/worker",
+                    "thread_id": "t-member",
+                    "role": "member",
+                },
+                {"entry": "event", "event_id": "e1", "version_count": 3, "route_count": 1},
                 {
                     "entry": "version",
                     "version_id": "v1",
@@ -384,6 +417,13 @@ class MultiM5PredicateTests(unittest.TestCase):
                     "version_id": "v2",
                     "author": "/root",
                     "root_state": "tracking",
+                    "fact_ref_count": 0,
+                },
+                {
+                    "entry": "version",
+                    "version_id": "v3",
+                    "author": "/root/worker",
+                    "root_state": "pending",
                     "fact_ref_count": 0,
                 },
                 {"entry": "route", "route_id": "r1", "event_id": "e1", "target": "/root/worker"},
@@ -401,6 +441,72 @@ class MultiM5PredicateTests(unittest.TestCase):
                     },
                 }
             ],
+            "jsonl_signals": [
+                "Wait completed: the team world state changed. The current active view is in this request."
+            ],
+            "wait_calls": [
+                {
+                    "thread_id": "t-root",
+                    "seq": 6,
+                    "status": "completed",
+                    "result": {
+                        "message": "Wait completed: the team world state changed. The current active view is in this request."
+                    },
+                }
+            ],
+            "team_publish_calls": [
+                {
+                    "thread_id": "t-member",
+                    "seq": 1,
+                    "status": "completed",
+                    "arguments": {"title": "finding"},
+                    "result": {
+                        "event_id": "e1",
+                        "version_id": "v1",
+                        "evidence_refs": ["f1"],
+                    },
+                },
+                {
+                    "thread_id": "t-root",
+                    "seq": 2,
+                    "status": "completed",
+                    "arguments": {"event_id": "e1"},
+                    "result": {"event_id": "e1", "version_id": "v2", "evidence_refs": []},
+                },
+                {
+                    "thread_id": "t-member",
+                    "seq": 5,
+                    "status": "completed",
+                    "arguments": {"event_id": "e1"},
+                    "result": {"event_id": "e1", "version_id": "v3", "evidence_refs": []},
+                },
+            ],
+            "team_route_calls": [
+                {
+                    "thread_id": "t-root",
+                    "seq": 3,
+                    "status": "completed",
+                    "arguments": {"event_id": "e1", "target": "worker"},
+                    "result": {"event_id": "e1", "target": "t-member"},
+                }
+            ],
+            "team_evidence_calls": [
+                {
+                    "thread_id": "t-member",
+                    "seq": 4,
+                    "status": "completed",
+                    "arguments": {"fact_id": "f1"},
+                    "result": {
+                        "fact_id": "f1",
+                        "availability": "available",
+                        "producer": "/root/worker",
+                        "tool": "exec",
+                        "category": "tool_result_success",
+                        "truncated": False,
+                        "observation": FINDING,
+                    },
+                }
+            ],
         }
 
     def test_complete_dump_and_report_pass(self) -> None:
@@ -412,6 +518,78 @@ class MultiM5PredicateTests(unittest.TestCase):
             )
         self.assertTrue(verdict.passed)
         self.assertTrue(all(verdict.predicates.values()))
+
+    def _judge(self, dump: dict[str, object]):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(
+                f"finding: {FINDING}\n", encoding="utf-8"
+            )
+            return evaluate_collaboration(
+                dump, workspace=workspace, finding_line=FINDING
+            )
+
+    def test_missing_team_evidence_call_fails(self) -> None:
+        dump = self._dump()
+        dump["team_evidence_calls"] = []
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_root_fact_cannot_stand_in_for_the_members_own_fact(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        dump["entries"].append(
+            {"entry": "version_fact", "version_id": "v2", "fact_id": "root-fact"}
+        )
+        call = dump["team_evidence_calls"][0]
+        call["arguments"]["fact_id"] = "root-fact"
+        call["result"]["fact_id"] = "root-fact"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_second_member_version_fact_cannot_backfill_first_publish(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        version_fact = next(
+            row
+            for row in dump["entries"]
+            if isinstance(row, dict) and row.get("entry") == "version_fact"
+        )
+        version_fact["version_id"] = "v3"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_failed_or_empty_team_evidence_result_fails(self) -> None:
+        for variant in ("failed", "empty"):
+            with self.subTest(variant=variant):
+                dump = copy.deepcopy(self._dump())
+                call = dump["team_evidence_calls"][0]
+                if variant == "failed":
+                    call["status"] = "failed"
+                else:
+                    call["result"]["observation"] = ""
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_only_two_versions_cannot_complete_the_protocol(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        dump["entries"] = [
+            row
+            for row in dump["entries"]
+            if not (isinstance(row, dict) and row.get("version_id") == "v3")
+        ]
+        dump["team_publish_calls"] = dump["team_publish_calls"][:2]
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["event_with_two_versions"])
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_evidence_before_route_cannot_complete_the_protocol(self) -> None:
+        dump = self._dump()
+        dump["team_evidence_calls"][0]["seq"] = 2
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["team_evidence"])
 
     def test_solo_root_fails_even_with_a_perfect_report(self) -> None:
         dump = {
@@ -548,10 +726,28 @@ class MultiM5PredicateTests(unittest.TestCase):
     def test_complete_dump_without_root_wake_fails(self) -> None:
         dump = self._dump()
         dump["log"] = []
+        dump["jsonl_signals"] = []
+        dump["wait_calls"] = []
         with tempfile.TemporaryDirectory() as raw:
             workspace = Path(raw)
             (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
             verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["root_woken"])
+        self.assertIn("predicate:root_woken", verdict.reasons)
+
+    def test_member_wait_cannot_impersonate_root_wake(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["wait_calls"], list)
+        dump["wait_calls"][0]["thread_id"] = "t-member"
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(
+                f"finding: {FINDING}\n", encoding="utf-8"
+            )
+            verdict = evaluate_collaboration(
+                dump, workspace=workspace, finding_line=FINDING
+            )
         self.assertFalse(verdict.passed)
         self.assertFalse(verdict.predicates["root_woken"])
         self.assertIn("predicate:root_woken", verdict.reasons)

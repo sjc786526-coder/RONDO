@@ -70,7 +70,11 @@ from .budget import (
 )
 from .bundle import load_side_manifest
 from .capture import FORWARD_TIMEOUT_SECONDS
-from .load import load_nondegradation_contract, load_runtime_identity
+from .load import (
+    load_nondegradation_contract,
+    load_runtime_identity,
+    load_workflow_contract,
+)
 from .paid import PaidAuthorization
 from .schedule import (
     DIAGNOSTIC_SLOT_KIND,
@@ -81,7 +85,22 @@ from .schedule import (
     diagnostic_slots,
     outcomes_by_task,
 )
-from .store import persist_archive_record, scratch_root
+from .resume import (
+    ResumeError,
+    claimed_run_disposition,
+    load_formal_records,
+    require_archived_runs_in_ledger,
+    require_contiguous_attempts,
+    require_formal_receipt,
+    require_single_unarchived_run,
+    validate_gate1_resume_prefix,
+)
+from .store import (
+    archive_path as formal_archive_path,
+    batch_receipt_path,
+    persist_archive_record,
+    scratch_root,
+)
 
 _FAKE_USAGE = Usage(1_000, 0, 0, 0)
 _SECCOMP_RELPATH = "eval/seccomp/plan008-userns-minimal-v0.2.3.json"
@@ -150,6 +169,8 @@ class TerminalBenchSlotExecutor:
         lock_guard: HeavyLockGuard | None = None,
         lease: HeavyLockLease | None = None,
         materializer=None,
+        provider_projection=None,
+        provider_identity: Mapping[str, str] | None = None,
     ) -> None:
         if authorize_docker:
             if api_key is None or ledger is None:
@@ -171,7 +192,10 @@ class TerminalBenchSlotExecutor:
         self._lock_guard = lock_guard
         self._lease = lease
         self._materializer = materializer
-        self._provider_identity: dict[str, str] | None = None
+        self._provider_projection = provider_projection
+        self._provider_identity = (
+            None if provider_identity is None else dict(provider_identity)
+        )
         self._model_projection: dict[str, str] | None = None
 
     def execute(self, slot: Slot, *, attempt: int, run_id: str) -> SlotResult:
@@ -251,13 +275,18 @@ class TerminalBenchSlotExecutor:
         # Resolved from the lock's own model, not the host-wide `main_model`
         # alias, so M-5 running on terra cannot rewrite the frozen provider
         # identity of the sol campaigns that share this machine config.
-        provider = config.paid_provider_projection(model_id=contract.root_model)
+        provider = self._provider_projection or config.paid_provider_projection(
+            model_id=contract.root_model
+        )
         # Binds the endpoint, effort, retry policy and every rate to the lock.
         # The proxy meters the $120 batch with these numbers, so the mutable
         # `rondo.local.toml` must not be able to change what the cap buys.
-        self._provider_identity = require_frozen_provider(
+        checked_identity = require_frozen_provider(
             provider, effort=contract.root_effort, contract=contract
         )
+        if self._provider_identity is not None and checked_identity != self._provider_identity:
+            raise Gate2Error("provider identity changed after the formal preflight")
+        self._provider_identity = checked_identity
         metadata_path = (
             scratch_root(self._common_root) / "multi-m5-gate2-meta" / f"{run_id}.json"
         )
@@ -462,22 +491,56 @@ def run_gate2_real(
     persist: bool = True,
     archive_file=None,
     transport: _UrllibTransport | None = None,
+    receipt_file: Path | None = None,
 ) -> dict[str, Any]:
     """Paid gate 2. Explicit real_api evidence. No v7 campaign."""
 
     authorization.require_api_and_docker()
     if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
         raise Gate2Error("the in-memory provider key is invalid")
+    loaded = load_nondegradation_contract()
+    resolved_config = config or load_runtime_config(RepoPaths.discover(Path.cwd()))
+    provider = resolved_config.paid_provider_projection(model_id=loaded.root_model)
+    provider_identity = require_frozen_provider(
+        provider,
+        effort=loaded.root_effort,
+        contract=loaded,
+    )
+    from .resume import formal_identity
+
+    resume_fields = formal_identity(provider_identity)
+    formal_file = archive_file or formal_archive_path(common_root)
+    try:
+        require_formal_receipt(
+            receipt_file or batch_receipt_path(common_root),
+            resume_fields,
+        )
+        existing = load_formal_records(formal_file, identity=resume_fields)
+        require_archived_runs_in_ledger(existing, ledger)
+    except ResumeError as exc:
+        raise Gate2Error(str(exc)) from exc
+    try:
+        gate1_rows = validate_gate1_resume_prefix(
+            existing,
+            maximum=load_workflow_contract().max_attempts,
+        )
+    except ResumeError as exc:
+        raise Gate2Error(str(exc)) from exc
+    last_gate1 = gate1_rows.get(max(gate1_rows, default=0))
+    if last_gate1 is None or last_gate1.get("outcome") != "completed":
+        raise Gate2Error("formal gate 2 requires an archived gate 1 pass")
     executor = TerminalBenchSlotExecutor(
         common_root=common_root,
         authorize_docker=True,
-        config=config,
+        config=resolved_config,
         ledger=ledger,
         api_key=api_key,
         transport=transport,
         counter=counter,
         lock_guard=lock_guard,
         lease=lease,
+        provider_projection=provider,
+        provider_identity=provider_identity,
     )
     return run_light_interleaved(
         executor=executor,
@@ -487,6 +550,7 @@ def run_gate2_real(
         archive_file=archive_file,
         charge_fake_usage=False,
         evidence_kind="real_api",
+        resume_fields=resume_fields,
     )
 
 
@@ -586,6 +650,7 @@ def run_light_interleaved(
     identity=None,
     contract=None,
     evidence_kind: str = "fake",
+    resume_fields: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Walk frozen base slots, then conditional extras. Infra is not effective."""
 
@@ -606,12 +671,50 @@ def run_light_interleaved(
         require_frozen=evidence_kind == "real_api",
         common_root=Path(common_root),
     )
+    historical: list[dict[str, Any]] = []
+    archived_by_run: dict[str, dict[str, Any]] = {}
+    formal_file = archive_file or formal_archive_path(Path(common_root))
+    if evidence_kind == "real_api" and persist:
+        if ledger is None or resume_fields is None:
+            raise Gate2Error("formal gate 2 requires ledger and resume identity")
+        try:
+            all_records = load_formal_records(formal_file, identity=resume_fields)
+            require_archived_runs_in_ledger(all_records, ledger)
+            historical = [record for record in all_records if record.get("gate") == 2]
+            _validate_gate2_resume_prefix(historical, loaded)
+            require_single_unarchived_run(
+                all_records,
+                ledger,
+                expected_run_id=_next_gate2_run_id(historical, loaded),
+            )
+        except ResumeError as exc:
+            raise Gate2Error(str(exc)) from exc
+        archived_by_run = {
+            str(record["budget_run_id"]): record for record in historical
+        }
     pricing = phase_b_pricing(loaded) if charge_fake_usage else None
-    records: list[dict[str, Any]] = []
-    infra_used = 0
-    effective = 0
-    stopped = False
+    records: list[dict[str, Any]] = list(historical)
+    infra_used = sum(
+        1 for record in historical if record.get("outcome") == RunOutcome.INFRA_FAILED.value
+    )
+    effective = sum(1 for record in historical if record.get("counts_as_effective") is True)
+    stopped = any(
+        record.get("outcome") == RunOutcome.BUDGET_STOPPED.value
+        or record.get("stop_reason") == "docker_resource_stop"
+        for record in historical
+    ) or infra_used >= loaded.max_infra_attempts_total
+    historical_terminal = stopped
     stop_reason: str | None = None
+    if stopped:
+        terminal = historical[-1] if historical else {}
+        stop_reason = str(
+            terminal.get("stop_reason")
+            or (
+                "max_infra_attempts_total"
+                if infra_used >= loaded.max_infra_attempts_total
+                else "budget_stopped"
+            )
+        )
 
     def run_slot(slot: Slot) -> list[dict[str, Any]]:
         """Every attempt on this slot, in order. A retried infra failure stays
@@ -620,17 +723,32 @@ def run_light_interleaved(
 
         nonlocal infra_used, effective, stopped, stop_reason
         produced: list[dict[str, Any]] = []
+        current_run_id: str | None = None
 
         def emit(**kwargs: Any) -> list[dict[str, Any]]:
-            produced.append(
-                _record_for(
-                    slot,
-                    runtime,
-                    evidence_kind=evidence_kind,
-                    contract=loaded,
-                    **kwargs,
-                )
+            extra = dict(kwargs.pop("extra"))
+            if current_run_id is not None:
+                extra["budget_run_id"] = current_run_id
+            if resume_fields is not None:
+                extra.update(dict(resume_fields))
+            record = _record_for(
+                slot,
+                runtime,
+                evidence_kind=evidence_kind,
+                contract=loaded,
+                extra=extra,
+                **kwargs,
             )
+            # An infra attempt is durable before the next attempt can claim its
+            # run id. Otherwise a process death during attempt N+1 leaves both
+            # N and N+1 unarchived, which cannot be resumed unambiguously.
+            if persist:
+                persist_archive_record(
+                    record,
+                    common_root=Path(common_root),
+                    path=archive_file,
+                )
+            produced.append(record)
             return produced
 
         # The attribution diagnostic is evidence about *why* a task degraded, not
@@ -640,7 +758,21 @@ def run_light_interleaved(
         is_diagnostic = slot.kind == DIAGNOSTIC_SLOT_KIND
 
         for attempt in range(1, loaded.max_slot_attempts + 1):
+            current_run_id = _run_id(slot, attempt)
+            archived = archived_by_run.get(current_run_id)
+            if archived is not None:
+                outcome = archived.get("outcome")
+                if outcome == RunOutcome.INFRA_FAILED.value:
+                    if attempt == loaded.max_slot_attempts:
+                        return produced
+                    continue
+                if outcome == RunOutcome.BUDGET_STOPPED.value:
+                    stopped = True
+                    stop_reason = str(archived.get("stop_reason") or "budget_stopped")
+                return produced
             if stopped:
+                if historical_terminal:
+                    return produced
                 return emit(
                     outcome=RunOutcome.BUDGET_STOPPED.value,
                     counts_as_effective=False,
@@ -652,16 +784,47 @@ def run_light_interleaved(
                     counts_as_effective=False,
                     extra={"reason": "max_effective_runs", "attempt": attempt},
                 )
-            run_id = _run_id(slot, attempt)
+            run_id = current_run_id
             if ledger is not None:
                 try:
                     if evidence_kind == "real_api":
-                        # A paid slot consumes its id. Re-running the CLI after an
-                        # interrupted batch must fail loudly rather than pay twice
-                        # for the same slot and overwrite its evidence.
-                        ledger.claim_run(run_id, cap_usd=gate2_run_cap_usd(loaded))
+                        disposition = (
+                            claimed_run_disposition(
+                                ledger,
+                                run_id,
+                                cap_usd=gate2_run_cap_usd(loaded),
+                                conflict_paths=_gate2_conflict_paths(
+                                    Path(common_root), slot, run_id
+                                ),
+                            )
+                            if persist
+                            else "new"
+                        )
+                        if disposition == "abandon":
+                            infra_used += 1
+                            emit(
+                                outcome=RunOutcome.INFRA_FAILED.value,
+                                counts_as_effective=False,
+                                extra={
+                                    "attempt": attempt,
+                                    "infra_used": infra_used,
+                                    "abandoned": True,
+                                    "reason": "resume:requested_run_missing_archive",
+                                },
+                            )
+                            if infra_used >= loaded.max_infra_attempts_total:
+                                stopped = True
+                                stop_reason = "max_infra_attempts_total"
+                                return produced
+                            if attempt == loaded.max_slot_attempts:
+                                return produced
+                            continue
+                        if disposition == "new":
+                            ledger.claim_run(run_id, cap_usd=gate2_run_cap_usd(loaded))
                     else:
                         ledger.ensure_run(run_id, cap_usd=None)
+                except ResumeError as exc:
+                    raise Gate2Error(str(exc)) from exc
                 except BudgetStopped as exc:
                     stopped = True
                     stop_reason = str(exc)
@@ -871,8 +1034,6 @@ def run_light_interleaved(
     for slot in base_slots(loaded):
         for record in run_slot(slot):
             records.append(record)
-            if persist:
-                persist_archive_record(record, common_root=common_root, path=archive_file)
         if stopped:
             break
 
@@ -896,8 +1057,6 @@ def run_light_interleaved(
         for slot in extras:
             for record in run_slot(slot):
                 records.append(record)
-                if persist:
-                    persist_archive_record(record, common_root=common_root, path=archive_file)
             if stopped:
                 break
 
@@ -918,8 +1077,6 @@ def run_light_interleaved(
         for slot in diagnostics:
             for record in run_slot(slot):
                 records.append(record)
-                if persist:
-                    persist_archive_record(record, common_root=common_root, path=archive_file)
             if stopped:
                 break
 
@@ -941,6 +1098,187 @@ def run_light_interleaved(
             None if ledger is None else exposure_summary(ledger.snapshot())
         ),
     }
+
+
+def _validate_gate2_resume_prefix(records: list[dict[str, Any]], contract) -> None:
+    """Require the archive to be one deterministic prefix of the frozen schedule."""
+
+    if (
+        sum(1 for row in records if row.get("outcome") == "infra_failed")
+        > contract.max_infra_attempts_total
+    ):
+        raise ResumeError("formal archive exceeds the batch infra limit")
+
+    def slot_for(row: Mapping[str, Any]) -> Slot:
+        try:
+            return Slot(
+                task_id=str(row["task_id"]),
+                side=Side(str(row["side"])),
+                product=(
+                    None
+                    if row.get("product") is None
+                    else Product(str(row["product"]))
+                ),
+                round_index=int(row["round_index"]),
+                kind=str(row["slot_kind"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ResumeError("formal archive has an invalid gate 2 slot") from exc
+
+    infra_seen = 0
+    for index, row in enumerate(records):
+        slot = slot_for(row)
+        attempt = row.get("attempt")
+        if isinstance(attempt, bool) or not isinstance(attempt, int):
+            raise ResumeError("formal archive gate 2 attempt is invalid")
+        if row.get("budget_run_id") != _run_id(slot, attempt):
+            raise ResumeError("formal archive gate 2 run id differs")
+        outcome = row.get("outcome")
+        diagnostic = slot.kind == DIAGNOSTIC_SLOT_KIND
+        if outcome == RunOutcome.INFRA_FAILED.value:
+            infra_seen += 1
+            if row.get("counts_as_effective") is not False:
+                raise ResumeError("infra archive row counts as effective")
+        elif outcome in {RunOutcome.COMPLETED.value, RunOutcome.AGENT_FAILED.value}:
+            if row.get("counts_as_effective") is not (not diagnostic):
+                raise ResumeError("product archive row has the wrong effective flag")
+        elif row.get("counts_as_effective") is not False:
+            raise ResumeError("stopped archive row counts as effective")
+        terminal_batch = (
+            outcome == RunOutcome.BUDGET_STOPPED.value
+            or row.get("stop_reason") == "docker_resource_stop"
+            or infra_seen == contract.max_infra_attempts_total
+        )
+        if terminal_batch and index != len(records) - 1:
+            raise ResumeError("formal archive continues after a batch stop")
+
+    def matches(row: Mapping[str, Any], slot: Slot) -> bool:
+        return slot_for(row) == slot
+
+    def consume(
+        start: int,
+        slots: tuple[Slot, ...],
+    ) -> tuple[int, bool]:
+        index = start
+        for slot in slots:
+            if index >= len(records) or not matches(records[index], slot):
+                return index, False
+            attempts: list[int] = []
+            terminal = False
+            while index < len(records) and matches(records[index], slot):
+                row = records[index]
+                attempt = int(row["attempt"])
+                attempts.append(attempt)
+                require_contiguous_attempts(
+                    attempts,
+                    maximum=contract.max_slot_attempts,
+                )
+                outcome = row.get("outcome")
+                index += 1
+                if outcome != RunOutcome.INFRA_FAILED.value:
+                    terminal = True
+                    break
+                if attempt == contract.max_slot_attempts:
+                    terminal = True
+                    break
+            if not terminal:
+                return index, False
+        return index, True
+
+    base = base_slots(contract)
+    base_end, base_complete = consume(0, base)
+    if not base_complete:
+        if base_end != len(records):
+            raise ResumeError("formal archive jumps ahead of the base schedule")
+        return
+    base_records = records[:base_end]
+    first_round: dict[str, dict[str, str]] = {}
+    for record in base_records:
+        if record.get("counts_as_effective") is not True:
+            continue
+        key = (
+            Product.RONDO_MULTI.value
+            if record.get("product") == Product.RONDO_MULTI.value
+            else Side.CODEX.value
+        )
+        first_round.setdefault(str(record["task_id"]), {})[key] = str(record["outcome"])
+    conditional = conditional_slots(contract, first_round)
+    conditional_end, conditional_complete = consume(base_end, conditional)
+    if not conditional_complete:
+        if conditional_end != len(records):
+            raise ResumeError("formal archive jumps ahead of conditional reruns")
+        return
+    observations = outcomes_by_task(records[:conditional_end])
+    verdicts = {
+        task_id: degradation_on_task(items)
+        for task_id, items in observations.items()
+    }
+    diagnostics = diagnostic_slots(contract, verdicts)
+    final_end, _diagnostics_complete = consume(conditional_end, diagnostics)
+    if final_end != len(records):
+        raise ResumeError("formal archive jumps ahead of diagnostics")
+
+
+def _next_gate2_run_id(records: list[dict[str, Any]], contract) -> str | None:
+    if any(
+        row.get("outcome") == RunOutcome.BUDGET_STOPPED.value
+        or row.get("stop_reason") == "docker_resource_stop"
+        for row in records
+    ) or (
+        sum(1 for row in records if row.get("outcome") == "infra_failed")
+        >= contract.max_infra_attempts_total
+    ):
+        return None
+
+    def key(row: Mapping[str, Any]) -> tuple[str, str, int, str]:
+        return (
+            str(row.get("task_id")),
+            str(row.get("side")),
+            int(row.get("round_index")),
+            str(row.get("slot_kind")),
+        )
+
+    grouped: dict[tuple[str, str, int, str], list[dict[str, Any]]] = {}
+    for row in records:
+        grouped.setdefault(key(row), []).append(row)
+
+    def next_in(slots: tuple[Slot, ...]) -> str | None:
+        for slot in slots:
+            slot_key = (slot.task_id, slot.side.value, slot.round_index, slot.kind)
+            rows = grouped.get(slot_key, [])
+            if not rows:
+                return _run_id(slot, 1)
+            last = rows[-1]
+            attempt = int(last["attempt"])
+            if (
+                last.get("outcome") == RunOutcome.INFRA_FAILED.value
+                and attempt < contract.max_slot_attempts
+            ):
+                return _run_id(slot, attempt + 1)
+        return None
+
+    candidate = next_in(base_slots(contract))
+    if candidate is not None:
+        return candidate
+    first_round: dict[str, dict[str, str]] = {}
+    for record in records:
+        if record.get("slot_kind") != "base" or record.get("counts_as_effective") is not True:
+            continue
+        side = (
+            Product.RONDO_MULTI.value
+            if record.get("product") == Product.RONDO_MULTI.value
+            else Side.CODEX.value
+        )
+        first_round.setdefault(str(record["task_id"]), {})[side] = str(record["outcome"])
+    conditionals = conditional_slots(contract, first_round)
+    candidate = next_in(conditionals)
+    if candidate is not None:
+        return candidate
+    verdicts = {
+        task_id: degradation_on_task(items)
+        for task_id, items in outcomes_by_task(records).items()
+    }
+    return next_in(diagnostic_slots(contract, verdicts))
 
 
 def diagnostic_outcomes(records) -> dict[str, str]:
@@ -1049,4 +1387,17 @@ def _record_for(
 def _run_id(slot: Slot, attempt: int) -> str:
     task = slot.task_id.rsplit("/", 1)[-1]
     side = slot.side.value
-    return f"m5-g2-{task}-{side}-r{slot.round_index}-a{attempt}"
+    return f"m5-g2-v6-{task}-{side}-r{slot.round_index}-a{attempt}"
+
+
+def _gate2_conflict_paths(common_root: Path, slot: Slot, run_id: str) -> tuple[Path, ...]:
+    work = scratch_root(common_root) / "multi-m5-gate2-work" / "staging"
+    suffix = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:12]
+    task = slot.task_id.rsplit("/", 1)[-1]
+    name = f"{BATCH_ID}-{slot.side.value}-{task}-{suffix}"
+    return (
+        scratch_root(common_root) / "multi-m5-gate2-meta" / f"{run_id}.json",
+        work / name,
+        work / f"{name}.compose.yaml",
+        work / f"{name}.provider-auth-json",
+    )

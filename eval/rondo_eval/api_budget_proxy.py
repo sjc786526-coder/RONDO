@@ -468,6 +468,32 @@ class PersistentBudgetLedger:
 
         self._register_run(run_id, cap_usd=cap_usd, reject_existing=True)
 
+    def resume_pristine_run(
+        self, run_id: str, *, cap_usd: Decimal | str | None = None
+    ) -> None:
+        """Reuse one claimed run only when it provably consumed nothing.
+
+        The process lock excludes another normal ledger writer. This method is
+        intentionally narrower than ``ensure_run``: a stopped, tainted, spent,
+        reserved, or even merely requested run must receive a new attempt id.
+        """
+
+        _require_safe_id(run_id, "run id")
+        cap = self.default_run_cap if cap_usd is None else _money(cap_usd)
+        with self._lock:
+            self._assert_open()
+            run = self._require_run(run_id)
+            if Decimal(run["cap_usd"]) != cap:
+                raise ApiBudgetProxyError("pristine run cap differs")
+            if (
+                Decimal(run["spent_usd"]) != 0
+                or run["requests"]
+                or run["stopped"] is not False
+                or run["stop_reason"] is not None
+                or run.get("infra_taint") is not None
+            ):
+                raise ApiBudgetProxyError("benchmark run is not pristine")
+
     def _register_run(
         self,
         run_id: str,

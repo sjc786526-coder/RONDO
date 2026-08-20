@@ -9,9 +9,11 @@ from typing import Any, Mapping
 
 from .archive import REQUIRED_ARCHIVE_FIELDS
 
-ARCHIVE_RELPATH = "eval-data/multi-m5/archives/records.jsonl"
+ARCHIVE_RELPATH = "eval-data/multi-m5/archives/phase-b-v6-records.jsonl"
+REHEARSAL_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/rehearsal-v6-records.jsonl"
 CAPTURE_RELDIR = "eval-data/multi-m5/captures"
-BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b.json"
+BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b-v6.json"
+BATCH_RECEIPT_RELPATH = "eval-data/budgets/multi-m5-phase-b-v6-identity.json"
 SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/clean-smoke-v5-records.jsonl"
 # The exploratory runs, runtime-v2 clean smokes, and sandbox-blocked v3 row stay
 # immutable. Runtime-v4 gets a fresh one-run v5 identity for the replacement.
@@ -24,6 +26,10 @@ class StoreError(ValueError):
 
 def archive_path(common_root: Path) -> Path:
     return _under_eval_data(common_root, ARCHIVE_RELPATH)
+
+
+def rehearsal_archive_path(common_root: Path) -> Path:
+    return _under_eval_data(common_root, REHEARSAL_ARCHIVE_RELPATH)
 
 
 def smoke_archive_path(common_root: Path) -> Path:
@@ -48,6 +54,10 @@ def capture_dir(common_root: Path, run_id: str) -> Path:
 
 def budget_ledger_path(common_root: Path) -> Path:
     return _under_eval_data(common_root, BUDGET_RELPATH)
+
+
+def batch_receipt_path(common_root: Path) -> Path:
+    return _under_eval_data(common_root, BATCH_RECEIPT_RELPATH)
 
 
 def scratch_root(common_root: Path) -> Path:
@@ -127,7 +137,13 @@ def _under_eval_data(common_root: Path, relpath: str) -> Path:
         raise StoreError("M-5 path escaped eval-data")
     if not relpath.startswith("eval-data/"):
         raise StoreError("M-5 artifacts must stay under eval-data/")
-    return (common_root / relpath).resolve()
+    target = (common_root / relpath).absolute()
+    root = (common_root / "eval-data").resolve()
+    if not target.parent.resolve().is_relative_to(root):
+        raise StoreError("M-5 artifact parent escaped eval-data/")
+    # Do not resolve the leaf: callers must still be able to observe and reject
+    # a symlink at the exact ledger/archive/capture path.
+    return target
 
 
 def _require_eval_data_file(common_root: Path, path: Path) -> None:
