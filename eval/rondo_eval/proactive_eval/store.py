@@ -97,7 +97,7 @@ class RehearsalStore:
             record["slot_id"] for record in self.records() if record["terminal"] is True
         )
 
-    def claim(self, slot_id: str, run_id_for_attempt) -> tuple[int, str] | None:
+    def claim(self, slot_id: str, run_id_for_attempt) -> tuple[int, str, str] | None:
         records = [record for record in self.records() if record["slot_id"] == slot_id]
         terminals = [record for record in records if record["terminal"] is True]
         if terminals:
@@ -110,7 +110,7 @@ class RehearsalStore:
                 or claim.get("attempt") != terminal["attempt"]
             ):
                 raise StoreError("terminal archive and rehearsal ledger disagree")
-            if claim.get("status") == "claimed":
+            if claim.get("status") in {"claimed", "executing"}:
                 claim["status"] = "settled"
                 claim["outcome"] = terminal["outcome"]
                 self._write_json(self.ledger_path, ledger)
@@ -119,8 +119,8 @@ class RehearsalStore:
             return None
         ledger = self._load_ledger()
         claim = ledger["claims"].get(slot_id)
-        if isinstance(claim, dict) and claim.get("status") == "claimed":
-            return int(claim["attempt"]), str(claim["run_id"])
+        if isinstance(claim, dict) and claim.get("status") in {"claimed", "executing"}:
+            return int(claim["attempt"]), str(claim["run_id"]), str(claim["status"])
         attempted = max((int(record["attempt"]) for record in records), default=0)
         if attempted >= 5:
             raise StoreError("Plan 049 slot exhausted its infra attempt limit")
@@ -136,14 +136,25 @@ class RehearsalStore:
             "cost_usd": "0.00",
         }
         self._write_json(self.ledger_path, ledger)
-        return attempt, run_id
+        return attempt, run_id, "claimed"
+
+    def mark_execution_started(self, slot_id: str) -> None:
+        ledger = self._load_ledger()
+        claim = ledger["claims"].get(slot_id)
+        if not isinstance(claim, dict) or claim.get("status") != "claimed":
+            raise StoreError("Plan 049 slot cannot start execution")
+        claim["status"] = "executing"
+        self._write_json(self.ledger_path, ledger)
 
     def settle(self, slot_id: str, *, outcome: str) -> None:
         if outcome not in _OUTCOMES:
             raise StoreError("Plan 049 outcome is invalid")
         ledger = self._load_ledger()
         claim = ledger["claims"].get(slot_id)
-        if not isinstance(claim, dict) or claim.get("status") != "claimed":
+        if not isinstance(claim, dict) or claim.get("status") not in {
+            "claimed",
+            "executing",
+        }:
             raise StoreError("Plan 049 slot has no unsettled claim")
         claim["status"] = "settled"
         claim["outcome"] = outcome

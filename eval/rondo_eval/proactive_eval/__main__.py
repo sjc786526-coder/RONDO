@@ -11,9 +11,9 @@ from ..config import RepoPaths
 from .campaign import default_fake_executor, run_rehearsal
 from .contract import REPO_ROOT, load_contract
 from .loopback import run_common_v2_loopback
-from .paid import PaidEntryCallbacks, PaidGuardError, enter_paid_phase
+from .paid import PaidGuardError, enter_paid_phase
 from .schedule import dry_run_projection
-from .readiness import secret_readiness
+from .readiness import ReadinessError, require_phase_a_evidence, secret_readiness
 from .store import assert_body_free
 
 
@@ -24,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=("dry-run", "fake", "loopback", "replay", "ready", "phase-b-paid"),
     )
     parser.add_argument("--namespace", default="phase-a-final")
+    parser.add_argument("--loopback-namespace", default=None)
     args = parser.parse_args(argv)
     paths = RepoPaths.discover(REPO_ROOT)
     contract = load_contract(paths.worktree_root)
@@ -66,12 +67,23 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "ready":
         projection = dry_run_projection(contract, common_root=paths.common_root, namespace=args.namespace)
+        try:
+            evidence = require_phase_a_evidence(
+                contract,
+                common_root=paths.common_root,
+                rehearsal_namespace=args.namespace,
+                loopback_namespace=args.loopback_namespace or args.namespace,
+            )
+        except ReadinessError as exc:
+            print(str(exc), file=sys.stderr)
+            return 77
         _print(
             {
                 "schema_version": 1,
-                "phase_a_status": "paid-ready",
+                "phase_a_status": "offline-evidence-ready",
                 "lock_id": contract.lock_id,
                 "slot_count": len(projection["slots"]),
+                "evidence": evidence,
                 "secret_readiness": secret_readiness(
                     paths,
                     provider_name=contract.lock["provider"]["name"],
@@ -84,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
                     "clean_harness_commit",
                     "safe_resume_prefix",
                     "local_activation_conditions",
+                    "docker_resource_gate",
+                    "independent_review_pass",
                 ],
                 "pilot_pass_conditions": [
                     "six_valid_terminal_runs",
@@ -114,12 +128,6 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         return 0
-    callbacks = PaidEntryCallbacks(
-        read_secret=_forbidden_callback,
-        create_formal_state=_forbidden_callback,
-        touch_network=_forbidden_callback,
-        touch_docker=_forbidden_callback,
-    )
     try:
         enter_paid_phase(
             repo_root=paths.worktree_root,
@@ -130,16 +138,13 @@ def main(argv: list[str] | None = None) -> int:
             resume_prefix_safe=False,
             activation_conditions_ready=False,
             docker_resource_gate_ready=False,
-            callbacks=callbacks,
+            phase_a_evidence_ready=False,
+            independent_review_passed=False,
         )
     except PaidGuardError as exc:
         print(str(exc), file=sys.stderr)
         return 78
     raise RuntimeError("locked Phase B entry unexpectedly passed")
-
-
-def _forbidden_callback() -> None:
-    raise RuntimeError("Stage A reached a forbidden Phase B side effect")
 
 
 def _print(value: object) -> None:

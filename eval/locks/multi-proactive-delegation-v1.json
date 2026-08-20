@@ -28,6 +28,8 @@
     "root_effort": "medium",
     "member_model": "gpt-5.6-terra",
     "member_effort": "medium",
+    "guardian_model": "gpt-5.6-terra",
+    "guardian_effort": "medium",
     "request_limit_per_run": 80,
     "request_attempt_limit": 5,
     "retry_backoff_seconds": 2,
@@ -67,12 +69,35 @@
     "phase_b_hard_cap_usd": "100.00",
     "minimum_confirmed_balance_usd": "100.00",
     "formal_namespace": "plan-049-paid-v1",
-    "rehearsal_namespace": "plan-049-rehearsal-v1"
+    "rehearsal_namespace": "plan-049-rehearsal-v1",
+    "batch_id": "plan-049-paid-v1",
+    "usage_envelope": {
+      "max_input_tokens": 272000,
+      "max_output_tokens": 128000
+    },
+    "request_reservation_usd": "2.22",
+    "max_concurrent_main_requests": 4,
+    "guardian_reserved_slots": 1,
+    "max_guardian_logical_requests": 3,
+    "per_run_spend_allowance_usd": "4.00",
+    "per_run_cap_usd": "15.10",
+    "max_run_slots": 66,
+    "unpriced_stop_threshold": 1
   },
   "artifacts": {
     "ignored_root": "eval-data/plan-049",
-    "per_run": ["rollout-trace", "team_view.json", "team_report.html", "run.json"],
+    "per_run": [
+      "rollout-trace",
+      "execution.json",
+      "api-metadata.json",
+      "shared-model-catalog.json",
+      "team_view.json",
+      "team_report.html",
+      "run.json"
+    ],
     "aggregate": "aggregate.json",
+    "replay_fixture": "eval/fixtures/multi-proactive-delegation-v1/body-free-replay-v1.json",
+    "replay_fixture_sha256": "305c25db9eaee162ca529a820d53dedc0e91b71c530e669d9e569aa50426f2dd",
     "tracked_body_fields": false
   },
   "activation": {

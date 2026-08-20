@@ -161,20 +161,36 @@ def aggregate(
     lock_id: str,
     lock_sha256: str,
     policy_sha256: str,
+    expected_slots: Mapping[str, str] | None = None,
+    evidence_kind: str = "rehearsal",
+    identity_class: str = "rehearsal",
 ) -> dict[str, Any]:
+    if evidence_kind not in {"rehearsal", "real_api"}:
+        raise ValueError("Plan 049 aggregate evidence kind is invalid")
+    if identity_class not in {"rehearsal", "paid"}:
+        raise ValueError("Plan 049 aggregate identity class is invalid")
     rows: list[dict[str, Any]] = []
     for record in sorted(records, key=lambda item: (str(item["slot_id"]), int(item["attempt"]))):
-        if record["terminal"] is not True:
-            continue
         view = views.get(str(record["run_id"]))
-        if view is None:
+        if record["terminal"] is True and view is None:
             raise ValueError("trusted terminal record lacks a Team View")
+        if view is None:
+            rows.append(_unobserved_row(record))
+            continue
         validate_team_view(view)
+        root_agent_id = view["source"]["root_thread_id"]
+        tools_by_id = {tool["tool_id"]: tool for tool in view["tools"]}
         spawn_tools = [tool for tool in view["tools"] if tool["kind"] == "spawn_agent"]
         accepted = [
             interaction
             for interaction in view["interactions"]
-            if interaction["kind"] == "spawn_agent" and interaction["status"] == "completed"
+            if interaction["kind"] == "spawn_agent"
+            and interaction["source_agent_id"] == root_agent_id
+            and interaction["status"] == "completed"
+            and interaction["tool_id"] is not None
+            and tools_by_id[interaction["tool_id"]]["kind"] == "spawn_agent"
+            and tools_by_id[interaction["tool_id"]]["agent_id"] == root_agent_id
+            and tools_by_id[interaction["tool_id"]]["status"] == "completed"
         ]
         file_tools = [
             tool
@@ -195,12 +211,24 @@ def aggregate(
                 "side": record["side"],
                 "product": record["product"],
                 "outcome": record["outcome"],
+                "counts_as_effective": record["counts_as_effective"],
                 "trace_status": record["trace_status"],
-                "team_state": None if record["side"] == "codex" else {
-                    "availability": view["availability"]["team_events_versions"]["status"],
-                    "event_count": view["summary"]["team_event_count"],
-                },
+                "reason_code": record["reason_code"],
+                "team_state": _team_state_metrics(view, side=str(record["side"])),
                 "agent_count": view["summary"]["agent_count"],
+                "inference_count": view["summary"]["inference_count"],
+                "tool_count": view["summary"]["tool_count"],
+                "terminal_command_count": view["summary"]["terminal_count"],
+                "interaction_count": view["summary"]["interaction_count"],
+                "wait_count": view["summary"]["wait_count"],
+                "message_count": sum(
+                    interaction["kind"] == "send_message"
+                    for interaction in view["interactions"]
+                ),
+                "followup_count": sum(
+                    interaction["kind"] == "followup_task"
+                    for interaction in view["interactions"]
+                ),
                 "spawned_member_count": sum(
                     agent["role"] == "spawned" for agent in view["agents"]
                 ),
@@ -218,21 +246,111 @@ def aggregate(
                 "usage": view["summary"]["usage"],
             }
         )
+    effective_rows = [row for row in rows if row["counts_as_effective"] is True]
+    terminal_slots = {str(row["slot_id"]) for row in effective_rows}
+    expected = dict(expected_slots or {})
+    missing_slots = sorted(set(expected) - terminal_slots)
+    pair_sides: dict[str, set[str]] = {}
+    for row in effective_rows:
+        pair_sides.setdefault(str(row["pair_id"]), set()).add(str(row["side"]))
+    expected_pairs = set(expected.values()) if expected else set(pair_sides)
     value = {
         "schema_version": 1,
-        "evidence_kind": "rehearsal",
-        "identity_class": "rehearsal",
+        "evidence_kind": evidence_kind,
+        "identity_class": identity_class,
         "lock_id": lock_id,
         "lock_sha256": lock_sha256,
         "policy_sha256": policy_sha256,
-        "run_count": len(rows),
-        "valid_success_count": sum(row["outcome"] == "completed" for row in rows),
-        "valid_failure_count": sum(row["outcome"] != "completed" for row in rows),
-        "activation_observed": any(row["root_spawn_accept_count"] > 0 for row in rows),
+        "attempt_count": len(rows),
+        "run_count": len(effective_rows),
+        "valid_success_count": sum(
+            row["outcome"] == "completed" for row in effective_rows
+        ),
+        "valid_failure_count": sum(
+            row["outcome"] != "completed" for row in effective_rows
+        ),
+        "infra_invalid_count": sum(row["outcome"] == "infra_failed" for row in rows),
+        "missing_slot_ids": missing_slots,
+        "partial_pair_ids": sorted(
+            pair_id
+            for pair_id in expected_pairs
+            if pair_sides.get(pair_id, set()) != {"codex", "rondo"}
+        ),
+        "activation_observed": any(
+            row["root_spawn_accept_count"] > 0 for row in effective_rows
+        ),
         "runs": rows,
     }
     assert_body_free(value)
     return value
+
+
+def _unobserved_row(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "phase": record["phase"],
+        "pair_id": record["pair_id"],
+        "slot_id": record["slot_id"],
+        "run_id": record["run_id"],
+        "task_id": record["task_id"],
+        "side": record["side"],
+        "product": record["product"],
+        "outcome": record["outcome"],
+        "counts_as_effective": record["counts_as_effective"],
+        "trace_status": record["trace_status"],
+        "reason_code": record["reason_code"],
+        "team_state": None,
+        "agent_count": None,
+        "inference_count": None,
+        "tool_count": None,
+        "terminal_command_count": None,
+        "interaction_count": None,
+        "wait_count": None,
+        "message_count": None,
+        "followup_count": None,
+        "spawned_member_count": None,
+        "spawn_attempt_count": None,
+        "root_spawn_accept_count": 0,
+        "first_spawn_offset_ms": None,
+        "peak_agent_concurrency": None,
+        "file_tool_count": None,
+        "file_activity_coverage": "unavailable",
+        "duration_ms": None,
+        "usage": None,
+    }
+
+
+def _team_state_metrics(view: dict[str, Any], *, side: str) -> dict[str, Any] | None:
+    if side == "codex":
+        return None
+    team = view["team"]
+    if not isinstance(team, dict):
+        raise ValueError("RONDO Team View lacks Team State")
+    capability_names = {
+        "revisions": "team_revisions",
+        "projections": "team_projections",
+        "events_versions": "team_events_versions",
+        "routes": "team_routes",
+        "facts": "team_facts",
+        # Attention completeness/staleness is part of Team Lens' combined
+        # events/versions capability; it intentionally has no invented status.
+        "attention": "team_events_versions",
+    }
+    counts = {
+        "revisions": len(team["revisions"]),
+        "projections": len(team["projections"]),
+        "events_versions": len(team["events"]) + len(team["versions"]),
+        "routes": len(team["routes"]),
+        "facts": len(team["facts"]),
+        "attention": len(team["attention"]),
+    }
+    return {
+        name: {
+            "availability": view["availability"][capability_name]["status"],
+            "reason_codes": view["availability"][capability_name]["reason_codes"],
+            "count": counts[name],
+        }
+        for name, capability_name in capability_names.items()
+    }
 
 
 def _write_or_verify(path: Path, payload: bytes) -> None:

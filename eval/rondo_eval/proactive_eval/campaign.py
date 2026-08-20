@@ -46,24 +46,45 @@ def run_rehearsal(
             or existing["taskset_sha256"] != contract.taskset_sha256
         ):
             raise ValueError("Plan 049 rehearsal contract drifted on resume")
-    for slot in slots(contract):
+    schedule = slots(contract)
+    for slot in schedule:
         claim = store.claim(slot.slot_id, slot.run_id)
         if claim is None:
             continue
-        attempt, run_id = claim
-        try:
-            result = executor(slot, attempt)
-        except Exception:
-            _persist_infra(
-                store,
-                contract,
-                slot,
-                attempt,
-                run_id,
-                reason_code="simulated_runner_failure",
-                trace_status="missing",
+        attempt, run_id, claim_status = claim
+        run_root = store.runs_root / run_id
+        checkpoint_path = run_root / "execution.json"
+        if claim_status == "executing":
+            result = _read_execution_checkpoint(
+                checkpoint_path,
+                contract=contract,
+                slot=slot,
+                attempt=attempt,
+                run_id=run_id,
             )
-            continue
+        else:
+            store.mark_execution_started(slot.slot_id)
+            try:
+                result = executor(slot, attempt)
+            except Exception:
+                _persist_infra(
+                    store,
+                    contract,
+                    slot,
+                    attempt,
+                    run_id,
+                    reason_code="simulated_runner_failure",
+                    trace_status="missing",
+                )
+                continue
+            _write_execution_checkpoint(
+                checkpoint_path,
+                result,
+                contract=contract,
+                slot=slot,
+                attempt=attempt,
+                run_id=run_id,
+            )
         if result.outcome not in VALID_OUTCOMES:
             _persist_infra(
                 store,
@@ -81,17 +102,10 @@ def run_rehearsal(
             continue
         view = synthetic_team_view(side=slot.side, run_id=run_id, ordinal=slot.ordinal)
         try:
-            digests = artifact_writer(store.runs_root / run_id, view)
+            digests = artifact_writer(run_root, view)
         except Exception:
-            _persist_infra(
-                store,
-                contract,
-                slot,
-                attempt,
-                run_id,
-                reason_code="team_lens_or_report_failure",
-                trace_status="partial",
-            )
+            # The executor result is durable. Resume repairs only this exact
+            # attempt's body-free artifacts and never invokes it a second time.
             continue
         record = _record(
             contract,
@@ -124,6 +138,7 @@ def run_rehearsal(
         lock_id=contract.lock_id,
         lock_sha256=contract.lock_sha256,
         policy_sha256=contract.policy_sha256,
+        expected_slots={slot.slot_id: slot.pair_id for slot in schedule},
     )
     store.write_aggregate(result)
     return result
@@ -212,3 +227,84 @@ def _write_run_record(path: Path, record: dict) -> None:
             raise ValueError("Plan 049 run record drifted on resume")
         return
     path.write_bytes(payload)
+
+
+def _write_execution_checkpoint(
+    path: Path,
+    result: ExecutionResult,
+    *,
+    contract: CampaignContract,
+    slot: Slot,
+    attempt: int,
+    run_id: str,
+) -> None:
+    value = {
+        "schema_version": 1,
+        "evidence_kind": "rehearsal",
+        "identity_class": "rehearsal",
+        "lock_id": contract.lock_id,
+        "lock_sha256": contract.lock_sha256,
+        "taskset_sha256": contract.taskset_sha256,
+        "policy_sha256": contract.policy_sha256,
+        "slot_id": slot.slot_id,
+        "run_id": run_id,
+        "attempt": attempt,
+        "outcome": result.outcome,
+        "trace_status": result.trace_status,
+        "reason_code": result.reason_code,
+    }
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "utf-8"
+    )
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if path.exists():
+        if path.is_symlink() or not path.is_file() or path.read_bytes() != payload:
+            raise ValueError("Plan 049 execution checkpoint drifted on resume")
+        return
+    path.write_bytes(payload)
+
+
+def _read_execution_checkpoint(
+    path: Path,
+    *,
+    contract: CampaignContract,
+    slot: Slot,
+    attempt: int,
+    run_id: str,
+) -> ExecutionResult:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(
+            "Plan 049 execution state is uncertain; refusing to repeat the executor"
+        )
+    try:
+        value = json.loads(path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Plan 049 execution checkpoint is unreadable") from exc
+    expected = {
+        "schema_version": 1,
+        "evidence_kind": "rehearsal",
+        "identity_class": "rehearsal",
+        "lock_id": contract.lock_id,
+        "lock_sha256": contract.lock_sha256,
+        "taskset_sha256": contract.taskset_sha256,
+        "policy_sha256": contract.policy_sha256,
+        "slot_id": slot.slot_id,
+        "run_id": run_id,
+        "attempt": attempt,
+    }
+    if not isinstance(value, dict) or any(
+        value.get(key) != item for key, item in expected.items()
+    ):
+        raise ValueError("Plan 049 execution checkpoint identity differs")
+    if set(value) != {*expected, "outcome", "trace_status", "reason_code"}:
+        raise ValueError("Plan 049 execution checkpoint shape differs")
+    outcome = value.get("outcome")
+    trace_status = value.get("trace_status")
+    reason_code = value.get("reason_code")
+    if (
+        not isinstance(outcome, str)
+        or not isinstance(trace_status, str)
+        or (reason_code is not None and not isinstance(reason_code, str))
+    ):
+        raise ValueError("Plan 049 execution checkpoint result is invalid")
+    return ExecutionResult(outcome, trace_status=trace_status, reason_code=reason_code)

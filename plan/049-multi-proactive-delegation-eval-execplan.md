@@ -307,23 +307,28 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       Team Lens JSON/HTML 和阶段 B 前置授权门；故障矩阵由定向测试覆盖。
 - [x] 已用两侧冻结二进制完成零 API native loopback：共同工具注册与 policy 注入匹配，两个原生 bundle 均由现有
       Team Lens 归约；Codex Team State 为 `null/not_applicable`。
-- [x] 已完成本地定向验收与重复生成校验；结论为 `paid-ready`，尚待提交后的独立子智能体审查。
+- [x] 首次提交后的独立审查复现出四项真实缺口：付费路径未接完整 runner/账本、归档失败可能重复执行、Root activation
+      统计过宽，以及空 namespace 可误报 ready。现均已窄修并补回归。
+- [x] 已将正式路径接入共同 Terminal-Bench core、冻结 provider projection、持久预算账本、请求上限、原子 publication
+      marker 与 body-free resume；阶段 A CLI 仍在授权/密钥/Docker/正式状态前 fail-closed。
+- [x] 已重新完成本地定向验收、全新 namespace fake/loopback/replay 与重复生成校验；本地结论为
+      `offline-evidence-ready`，阶段 B 的结论候选为 `paid-ready`，等待第二轮独立审查确认。
 
 ### 当前工作
 
-- 阶段 A 实现和本地验收已完成；正在整理提交，随后进行上下文独立的功能/正确性审查。
+- 独立审查第一轮问题已修复并完成本地复验；正在提交修复，随后由同一上下文独立审查者复验。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：提交 049 本地分支并保持工作树干净。
-2. 阶段 A：由上下文独立的子智能体审查全部实现；真实问题修复后重新提交并复审，直至通过或形成具体 blocker。
+1. 阶段 A：提交独立审查修复并保持 049 工作树干净。
+2. 阶段 A：由上下文独立的子智能体复审全部实现；真实问题继续修复、提交并复审，直至通过或形成具体 blocker。
 3. 等待用户另行授权阶段 B；未授权期间保持工作树、分支和正式付费入口不动。
 4. 阶段 B 获授权后：创建正式 activation identity，执行 pilot；通过后按固定顺序完成十个有效配对、聚合与独立审查。
 5. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 无已知实现 blocker；本地结论为 `paid-ready`，等待独立审查确认。
+- 阶段 A 无已知实现 blocker；本地证据为 `offline-evidence-ready`，正式路径满足本地 `paid-ready` 条件，等待独立复审确认。
 - 阶段 B 当前因缺少明确开始授权、100 USD 上限确认和余额确认而有意阻塞；provider 真连通性也只可在该阶段 pilot 确认。
 
 ### 当前验收状态
@@ -351,3 +356,4 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
 | 007 | 文件活动只报机械可见 file-tool coverage，不建文件系统审计 | 满足诚实可观测性并保持测评轻量 | Team Lens/聚合 | 已采纳 |
 | 008 | 受跟踪编辑只在 049；共享 ignored 资产经 common root 使用并单独汇报 | worktree 不复制机器资产，且必须保护 main 与既有数据 | 工作区边界 | 已采纳 |
 | 009 | 不继承 M-5 的 Codex V1 / RONDO V2 非对称，阶段 A 为两侧建立共同 V2 + trace 接线 | Plan 049 比较主动委派，工具面与观测链必须公平一致 | eval adapter/runner | 已采纳 |
+| 010 | 正式路径复用现有 Terminal-Bench core 与持久预算账本，以 execution/publication 双标记恢复 | 归档或报告失败不得再次发送已结算请求，也不能建立第二套 runner | 阶段 A/B | 已采纳 |

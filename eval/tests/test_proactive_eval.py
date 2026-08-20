@@ -15,6 +15,7 @@ REPO_ROOT = EVAL_ROOT.parent
 sys.path.insert(0, str(EVAL_ROOT))
 
 from rondo_eval.proactive_eval.aggregate import (  # noqa: E402
+    aggregate,
     synthetic_team_view,
     write_replay_artifacts,
 )
@@ -24,14 +25,30 @@ from rondo_eval.proactive_eval.campaign import (  # noqa: E402
     run_rehearsal,
 )
 from rondo_eval.proactive_eval.contract import ContractError, load_contract  # noqa: E402
+from rondo_eval.proactive_eval.formal import (  # noqa: E402
+    FormalError,
+    FormalExecutionResult,
+    FormalPaths,
+    FormalStore,
+    Plan049RequestPreflight,
+    Plan049TerminalBenchExecutor,
+    formal_identity,
+    open_paid_ledger,
+    plan049_provider_projection,
+    require_safe_formal_prefix,
+    run_formal_campaign,
+)
 from rondo_eval.proactive_eval.paid import (  # noqa: E402
     ACTIVATION_ACTION,
     PHASE_B_AUTHORIZATION,
-    PaidEntryCallbacks,
     PaidGuardError,
     enter_paid_phase,
 )
-from rondo_eval.proactive_eval.readiness import secret_readiness  # noqa: E402
+from rondo_eval.proactive_eval.readiness import (  # noqa: E402
+    ReadinessError,
+    require_phase_a_evidence,
+    secret_readiness,
+)
 from rondo_eval.proactive_eval.schedule import dry_run_projection, slots  # noqa: E402
 from rondo_eval.proactive_eval.store import (  # noqa: E402
     RehearsalStore,
@@ -40,7 +57,138 @@ from rondo_eval.proactive_eval.store import (  # noqa: E402
 )
 from rondo_eval.team_lens.model import dump_team_view  # noqa: E402
 from rondo_eval.team_lens.report import render_report  # noqa: E402
-from rondo_eval.config import RepoPaths  # noqa: E402
+from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
+from rondo_eval.contracts import Side  # noqa: E402
+from rondo_eval.api_budget_proxy import Usage  # noqa: E402
+
+
+def _spawn_view(*, source_is_root: bool, tool_status: str) -> dict:
+    view = synthetic_team_view(side="rondo", run_id="spawn-check", ordinal=1)
+    root = view["source"]["root_thread_id"]
+    child = "spawn-check-child"
+    view["agents"].append(
+        {
+            "agent_id": child,
+            "agent_path": "/root/child",
+            "parent_agent_id": root,
+            "role": "spawned",
+            "started_seq": 2,
+            "started_at_unix_ms": 1001,
+            "ended_seq": 4,
+            "ended_at_unix_ms": 1003,
+            "status": "completed",
+        }
+    )
+    source = root
+    target = child
+    if not source_is_root:
+        source = child
+        target = "spawn-check-grandchild"
+        view["agents"].append(
+            {
+                "agent_id": target,
+                "agent_path": "/root/child/grandchild",
+                "parent_agent_id": child,
+                "role": "spawned",
+                "started_seq": 3,
+                "started_at_unix_ms": 1002,
+                "ended_seq": 4,
+                "ended_at_unix_ms": 1003,
+                "status": "completed",
+            }
+        )
+    view["tools"] = [
+        {
+            "tool_id": "spawn-tool",
+            "agent_id": source,
+            "turn_id": None,
+            "name": "spawn_agent",
+            "namespace": "collaboration",
+            "requester": "model",
+            "kind": "spawn_agent",
+            "started_seq": 2,
+            "started_at_unix_ms": 1001,
+            "ended_seq": 3,
+            "ended_at_unix_ms": 1002,
+            "status": tool_status,
+        }
+    ]
+    view["interactions"] = [
+        {
+            "interaction_id": "spawn-edge",
+            "kind": "spawn_agent",
+            "source_agent_id": source,
+            "target_agent_id": target,
+            "tool_id": "spawn-tool",
+            "started_seq": 2,
+            "started_at_unix_ms": 1001,
+            "ended_seq": 3,
+            "ended_at_unix_ms": 1002,
+            "status": "completed",
+        }
+    ]
+    view["summary"]["agent_count"] = len(view["agents"])
+    view["summary"]["tool_count"] = 1
+    view["summary"]["interaction_count"] = 1
+    return view
+
+
+def _aggregate_record(run_id: str) -> dict:
+    return {
+        "phase": "pilot",
+        "pair_id": "P01",
+        "slot_id": "pilot-p01-rondo",
+        "run_id": run_id,
+        "attempt": 1,
+        "task_id": "terminal-bench/filter-js-from-html",
+        "side": "rondo",
+        "product": "rondo-multi",
+        "outcome": "completed",
+        "terminal": True,
+        "counts_as_effective": True,
+        "trace_status": "available",
+        "reason_code": None,
+    }
+
+
+def _write_loopback_receipt(
+    common_root: Path, contract, *, namespace: str
+) -> None:
+    root = common_root / "eval-data/plan-049/loopback" / namespace
+    side_rows = {}
+    for ordinal, side in enumerate(("codex", "rondo"), start=1):
+        side_root = root / side
+        view = synthetic_team_view(side=side, run_id=f"loopback-{side}", ordinal=ordinal)
+        digests = write_replay_artifacts(side_root, view)
+        side_rows[side] = {
+            "binary_sha256": contract.lock["runtime"][f"{side}_binary_sha256"],
+            "request_count": 1,
+            "policy_sha256": contract.policy_sha256,
+            "policy_matched": True,
+            "registered_common_tools": [
+                "list_agents",
+                "send_message",
+                "spawn_agent",
+                "wait_agent",
+            ],
+            "team_state": None if side == "codex" else True,
+            **digests,
+            "trace_bundle_count": 1,
+        }
+    summary = {
+        "schema_version": 1,
+        "evidence_kind": "loopback",
+        "identity_class": "rehearsal",
+        "lock_id": contract.lock_id,
+        "lock_sha256": contract.lock_sha256,
+        "policy_sha256": contract.policy_sha256,
+        "namespace": namespace,
+        "sides": side_rows,
+    }
+    (root / "loopback.json").write_text(
+        json.dumps(summary, sort_keys=True, separators=(",", ":")) + "\n",
+        "utf-8",
+    )
 
 
 class ProactiveEvalTests(unittest.TestCase):
@@ -117,6 +265,30 @@ class ProactiveEvalTests(unittest.TestCase):
         first = write_replay_artifacts(self.common_root / "run", codex)
         second = write_replay_artifacts(self.common_root / "run", codex)
         self.assertEqual(first, second)
+
+    def test_activation_requires_a_successful_root_owned_spawn_tool(self) -> None:
+        cases = (
+            (False, "completed", False),
+            (True, "failed", False),
+            (True, "completed", True),
+        )
+        for source_is_root, tool_status, expected in cases:
+            with self.subTest(source_is_root=source_is_root, tool_status=tool_status):
+                view = _spawn_view(
+                    source_is_root=source_is_root, tool_status=tool_status
+                )
+                record = _aggregate_record("spawn-check")
+                result = aggregate(
+                    [record],
+                    {"spawn-check": view},
+                    lock_id=self.contract.lock_id,
+                    lock_sha256=self.contract.lock_sha256,
+                    policy_sha256=self.contract.policy_sha256,
+                )
+                self.assertIs(result["activation_observed"], expected)
+                self.assertEqual(
+                    result["runs"][0]["root_spawn_accept_count"], int(expected)
+                )
 
     def test_success_valid_failure_duplicate_execution_and_body_free_archive(self) -> None:
         first = run_rehearsal(
@@ -208,6 +380,12 @@ class ProactiveEvalTests(unittest.TestCase):
 
     def test_report_failure_recovers_and_archive_failure_resumes_same_claim(self) -> None:
         calls = 0
+        report_executions = 0
+
+        def report_executor(_slot, _attempt):
+            nonlocal report_executions
+            report_executions += 1
+            return ExecutionResult("completed")
 
         def flaky_writer(path, view):
             nonlocal calls
@@ -220,7 +398,7 @@ class ProactiveEvalTests(unittest.TestCase):
             self.contract,
             common_root=self.common_root,
             namespace="report-recovery",
-            executor=lambda _slot, _attempt: ExecutionResult("completed"),
+            executor=report_executor,
             artifact_writer=flaky_writer,
         )
         self.assertEqual(first["run_count"], 25)
@@ -228,12 +406,19 @@ class ProactiveEvalTests(unittest.TestCase):
             self.contract,
             common_root=self.common_root,
             namespace="report-recovery",
-            executor=lambda _slot, _attempt: ExecutionResult("completed"),
+            executor=report_executor,
         )
         self.assertEqual(second["run_count"], 26)
+        self.assertEqual(report_executions, 26)
 
         original = RehearsalStore.append
         failed = False
+        archive_executions = 0
+
+        def archive_executor(_slot, _attempt):
+            nonlocal archive_executions
+            archive_executions += 1
+            return ExecutionResult("completed")
 
         def fail_once(store, record):
             nonlocal failed
@@ -248,15 +433,16 @@ class ProactiveEvalTests(unittest.TestCase):
                     self.contract,
                     common_root=self.common_root,
                     namespace="archive-recovery",
-                    executor=lambda _slot, _attempt: ExecutionResult("completed"),
+                    executor=archive_executor,
                 )
         recovered = run_rehearsal(
             self.contract,
             common_root=self.common_root,
             namespace="archive-recovery",
-            executor=lambda _slot, _attempt: ExecutionResult("completed"),
+            executor=archive_executor,
         )
         self.assertEqual(recovered["run_count"], 26)
+        self.assertEqual(archive_executions, 26)
         first_slot = RehearsalStore(self.common_root, "archive-recovery").records()[0]
         self.assertEqual(first_slot["attempt"], 1)
 
@@ -299,14 +485,46 @@ class ProactiveEvalTests(unittest.TestCase):
         )
         assert_body_free(fixture)
 
-    def test_paid_guard_stops_before_every_side_effect(self) -> None:
-        calls: list[str] = []
-        callbacks = PaidEntryCallbacks(
-            read_secret=lambda: calls.append("secret"),
-            create_formal_state=lambda: calls.append("state"),
-            touch_network=lambda: calls.append("network"),
-            touch_docker=lambda: calls.append("docker"),
+    def test_ready_requires_complete_rehearsal_and_loopback_receipts(self) -> None:
+        with self.assertRaisesRegex(ReadinessError, "rehearsal evidence is absent"):
+            require_phase_a_evidence(
+                self.contract,
+                common_root=self.common_root,
+                rehearsal_namespace="acceptance",
+                loopback_namespace="loopback",
+            )
+        run_rehearsal(
+            self.contract,
+            common_root=self.common_root,
+            namespace="acceptance",
+            executor=default_fake_executor,
         )
+        with self.assertRaisesRegex(ReadinessError, "loopback summary"):
+            require_phase_a_evidence(
+                self.contract,
+                common_root=self.common_root,
+                rehearsal_namespace="acceptance",
+                loopback_namespace="loopback",
+            )
+        _write_loopback_receipt(self.common_root, self.contract, namespace="loopback")
+        receipt = require_phase_a_evidence(
+            self.contract,
+            common_root=self.common_root,
+            rehearsal_namespace="acceptance",
+            loopback_namespace="loopback",
+        )
+        self.assertEqual(receipt["run_count"], 26)
+        store = RehearsalStore(self.common_root, "acceptance")
+        store.aggregate_path.write_text("{}\n", "utf-8")
+        with self.assertRaisesRegex(ReadinessError, "aggregate"):
+            require_phase_a_evidence(
+                self.contract,
+                common_root=self.common_root,
+                rehearsal_namespace="acceptance",
+                loopback_namespace="loopback",
+            )
+
+    def test_paid_guard_stops_before_every_side_effect(self) -> None:
         cases = (
             {},
             {"authorization": PHASE_B_AUTHORIZATION},
@@ -335,7 +553,6 @@ class ProactiveEvalTests(unittest.TestCase):
             },
         )
         for overrides in cases:
-            calls.clear()
             arguments = {
                 "repo_root": REPO_ROOT,
                 "authorization": None,
@@ -345,14 +562,14 @@ class ProactiveEvalTests(unittest.TestCase):
                 "resume_prefix_safe": True,
                 "activation_conditions_ready": True,
                 "docker_resource_gate_ready": True,
-                "callbacks": callbacks,
+                "phase_a_evidence_ready": True,
+                "independent_review_passed": True,
                 **overrides,
             }
             with self.assertRaises(PaidGuardError):
                 enter_paid_phase(**arguments)
-            self.assertEqual(calls, [])
 
-        enter_paid_phase(
+        accepted = enter_paid_phase(
             repo_root=REPO_ROOT,
             authorization=PHASE_B_AUTHORIZATION,
             activation_action=ACTIVATION_ACTION,
@@ -361,9 +578,246 @@ class ProactiveEvalTests(unittest.TestCase):
             resume_prefix_safe=True,
             activation_conditions_ready=True,
             docker_resource_gate_ready=True,
-            callbacks=callbacks,
+            phase_a_evidence_ready=True,
+            independent_review_passed=True,
         )
-        self.assertEqual(calls, ["secret", "state", "network", "docker"])
+        self.assertEqual(accepted.lock_id, self.contract.lock_id)
+
+    def test_paid_guard_requires_phase_a_evidence_and_independent_review(self) -> None:
+        base = {
+            "repo_root": REPO_ROOT,
+            "authorization": PHASE_B_AUTHORIZATION,
+            "activation_action": ACTIVATION_ACTION,
+            "confirmed_balance_usd": "100.00",
+            "harness_clean": True,
+            "resume_prefix_safe": True,
+            "activation_conditions_ready": True,
+            "docker_resource_gate_ready": True,
+            "phase_a_evidence_ready": True,
+            "independent_review_passed": True,
+        }
+        for key in ("phase_a_evidence_ready", "independent_review_passed"):
+            with self.subTest(key=key), self.assertRaises(PaidGuardError):
+                enter_paid_phase(**{**base, key: False})
+
+    def test_formal_budget_preflight_and_publication_resume_are_idempotent(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="a" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/test-fixture"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        executions = 0
+
+        class Executor:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, attempt
+                nonlocal executions
+                executions += 1
+                view = synthetic_team_view(
+                    side=slot.side, run_id=run_id, ordinal=slot.ordinal
+                )
+                digests = write_replay_artifacts(run_root, view)
+                return FormalExecutionResult(
+                    outcome="completed",
+                    trace_status="available",
+                    request_preflight_sha256="b" * 64,
+                    **digests,
+                )
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            original = store.publish
+            failed = False
+
+            def fail_once(record):
+                nonlocal failed
+                if not failed:
+                    failed = True
+                    raise OSError("simulated formal publication failure")
+                return original(record)
+
+            with mock.patch.object(store, "publish", fail_once):
+                with self.assertRaisesRegex(OSError, "publication failure"):
+                    run_formal_campaign(
+                        self.contract,
+                        store=store,
+                        ledger=ledger,
+                        executor=Executor(),
+                        phase="pilot",
+                    )
+            result = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=Executor(),
+                phase="pilot",
+            )
+            again = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=Executor(),
+                phase="pilot",
+            )
+        self.assertEqual(executions, 6)
+        self.assertEqual(result, again)
+        self.assertEqual(result["run_count"], 6)
+        self.assertEqual(len(store.records()), 6)
+        require_safe_formal_prefix(paths, identity, self.contract)
+
+        preflight = Plan049RequestPreflight(
+            contract=self.contract,
+            side=Side.CODEX,
+            task_id="terminal-bench/filter-js-from-html",
+        )
+        request = {
+            "model": "gpt-5.6-terra",
+            "reasoning": {"effort": "medium"},
+            "instructions": self.contract.policy,
+            "tools": [
+                {"type": "function", "name": name, "parameters": {}}
+                for name in ("list_agents", "send_message", "spawn_agent", "wait_agent")
+            ],
+        }
+        preflight.register(
+            task_id="terminal-bench/filter-js-from-html",
+            role="main",
+            side=Side.CODEX,
+            request=request,
+        )
+        self.assertEqual(len(preflight.digest()), 64)
+        with self.assertRaisesRegex(Exception, "frozen policy"):
+            Plan049RequestPreflight(
+                contract=self.contract,
+                side=Side.CODEX,
+                task_id="terminal-bench/filter-js-from-html",
+            ).register(
+                task_id="terminal-bench/filter-js-from-html",
+                role="main",
+                side=Side.CODEX,
+                request={**request, "instructions": "drifted"},
+            )
+
+    def test_formal_terminal_bench_requests_share_v2_policy_models_and_trace(self) -> None:
+        paths = RepoPaths.discover(REPO_ROOT)
+        ledger_path = self.common_root / "eval-data/plan-049/paid/request-ledger.json"
+        with open_paid_ledger(ledger_path, self.contract) as ledger:
+            executor = Plan049TerminalBenchExecutor(
+                contract=self.contract,
+                common_root=paths.common_root,
+                repo_root=paths.worktree_root,
+                ledger=ledger,
+                api_key="test-only-not-forwarded",
+                counter=mock.Mock(),
+                lock_guard=mock.Mock(),
+                lease=mock.Mock(),
+                config=load_runtime_config(paths),
+            )
+            selected = slots(self.contract)[:2]
+            requests = [
+                executor.build_request(
+                    slot,
+                    run_id=slot.run_id().replace("rehearsal", "paid"),
+                )
+                for slot in selected
+            ]
+        self.assertEqual([request.side.value for request in requests], ["codex", "rondo"])
+        for request in requests:
+            self.assertTrue(request.common_multi_agent_v2)
+            self.assertEqual(request.pinned_model_id, "gpt-5.6-terra")
+            self.assertEqual(request.pinned_subagent_model, "gpt-5.6-terra")
+            self.assertEqual(request.pinned_subagent_effort, "medium")
+            self.assertEqual(request.multi_agent_max_concurrency, 4)
+            self.assertEqual(
+                request.developer_instructions_sha256,
+                self.contract.policy_sha256,
+            )
+            self.assertEqual(request.rollout_trace_root, "/logs/agent/rollout-trace")
+            self.assertEqual(request.budget_usd, 15.10)
+        with self.assertRaisesRegex(FormalError, "lacks receipt identity"):
+            executor.execute(
+                selected[0],
+                attempt=1,
+                run_id="plan049-paid-pilot-p01-codex-a01",
+                run_root=self.common_root / "eval-data/plan-049/no-receipt",
+            )
+        self.assertFalse(
+            (self.common_root / "eval-data/plan-049/no-receipt").exists()
+        )
+
+    def test_formal_resume_abandons_a_requested_unpublished_attempt(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="c" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/requested-fixture"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        first_slot = slots(self.contract)[0]
+        first_run = first_slot.run_id().replace("rehearsal", "paid")
+        executed_attempts: list[tuple[str, int]] = []
+
+        class Executor:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner
+                executed_attempts.append((slot.slot_id, attempt))
+                view = synthetic_team_view(
+                    side=slot.side, run_id=run_id, ordinal=slot.ordinal
+                )
+                digests = write_replay_artifacts(run_root, view)
+                return FormalExecutionResult(
+                    outcome="completed",
+                    trace_status="available",
+                    request_preflight_sha256="d" * 64,
+                    **digests,
+                )
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            ledger.claim_run(first_run, cap_usd="15.10")
+            ledger.reserve(first_run, f"{first_run}-request-001", "2.22")
+            ledger.begin_attempt(
+                first_run, f"{first_run}-request-001", max_attempts=5
+            )
+            ledger.settle(
+                first_run,
+                f"{first_run}-request-001",
+                Usage(100, 0, 0, 10),
+                pricing=provider.main_pricing,
+            )
+            result = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=Executor(),
+                phase="pilot",
+            )
+        first_rows = [row for row in store.records() if row["slot_id"] == first_slot.slot_id]
+        self.assertEqual(
+            [(row["attempt"], row["outcome"]) for row in first_rows],
+            [(1, "infra_failed"), (2, "completed")],
+        )
+        self.assertNotIn((first_slot.slot_id, 1), executed_attempts)
+        self.assertIn((first_slot.slot_id, 2), executed_attempts)
+        self.assertEqual(result["run_count"], 6)
 
     def test_secret_readiness_never_opens_an_unsafe_path(self) -> None:
         paths = RepoPaths(self.common_root, REPO_ROOT)

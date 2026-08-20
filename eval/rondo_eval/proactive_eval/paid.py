@@ -1,4 +1,4 @@
-"""Phase-B authorization guard. Stage A recipes never forward these tokens."""
+"""Fail-closed Phase-B gate and the concrete Plan 049 paid entry."""
 
 from __future__ import annotations
 
@@ -7,8 +7,21 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable
 
-from ..config import ConfigError, RepoPaths, load_runtime_config
+from ..config import RepoPaths, load_provider_secret, load_runtime_config
+from ..docker_supervisor import DockerCounter, HeavyLockGuard, HeavyLockLease
+from ..multi_m5.archive import harness_identity
 from .contract import CampaignContract, load_contract
+from .formal import (
+    FormalStore,
+    Plan049TerminalBenchExecutor,
+    formal_identity,
+    formal_paths,
+    open_paid_ledger,
+    plan049_provider_projection,
+    require_safe_formal_prefix,
+    run_formal_campaign,
+)
+from .readiness import require_phase_a_evidence
 
 
 PHASE_B_AUTHORIZATION = "AUTHORIZE RONDO PLAN 049 PHASE B REAL API AND DOCKER UP TO USD 100.00"
@@ -20,11 +33,19 @@ class PaidGuardError(PermissionError):
 
 
 @dataclass(frozen=True)
-class PaidEntryCallbacks:
-    read_secret: Callable[[], object]
-    create_formal_state: Callable[[], object]
-    touch_network: Callable[[], object]
-    touch_docker: Callable[[], object]
+class PaidResources:
+    """The already-checked single Docker/build-lock lease for one paid call."""
+
+    counter: DockerCounter
+    lock_guard: HeavyLockGuard
+    lease: HeavyLockLease
+
+
+@dataclass(frozen=True)
+class PaidRuntimeDependencies:
+    """Side effects invoked by the concrete entry, only after its pure gates."""
+
+    acquire_docker_gate: Callable[[], PaidResources]
 
 
 def enter_paid_phase(
@@ -37,14 +58,10 @@ def enter_paid_phase(
     resume_prefix_safe: bool,
     activation_conditions_ready: bool,
     docker_resource_gate_ready: bool,
-    callbacks: PaidEntryCallbacks,
+    phase_a_evidence_ready: bool,
+    independent_review_passed: bool,
 ) -> CampaignContract:
-    """Validate every side-effect-free gate, then hand control to Phase B.
-
-    The complete paid executor remains a Phase-B implementation concern. This
-    guard fixes the ordering contract now and makes accidental Stage-A entry
-    mechanically unable to read a key or create formal identity/state.
-    """
+    """Pure authorization gate; it has no callback and creates no state."""
 
     if authorization != PHASE_B_AUTHORIZATION:
         raise PaidGuardError("Plan 049 Phase B authorization is absent")
@@ -60,66 +77,118 @@ def enter_paid_phase(
         raise PaidGuardError("Plan 049 paid harness is not clean")
     if resume_prefix_safe is not True:
         raise PaidGuardError("Plan 049 paid resume prefix is unsafe")
+    if phase_a_evidence_ready is not True:
+        raise PaidGuardError("Plan 049 Phase A evidence is not ready")
+    if independent_review_passed is not True:
+        raise PaidGuardError("Plan 049 independent review has not passed")
     if activation_conditions_ready is not True:
         raise PaidGuardError("Plan 049 local activation conditions are not ready")
     if docker_resource_gate_ready is not True:
         raise PaidGuardError("Plan 049 Docker resource gate is not ready")
     contract = load_contract(repo_root)
-    _require_local_projection(contract, RepoPaths.discover(repo_root))
-    # All callbacks are deliberately after the complete local authorization
-    # chain. Their order is explicit for the future Phase-B executor.
-    callbacks.read_secret()
-    callbacks.create_formal_state()
-    callbacks.touch_network()
-    callbacks.touch_docker()
+    paths = RepoPaths.discover(repo_root)
+    try:
+        plan049_provider_projection(load_runtime_config(paths), contract)
+    except Exception as exc:
+        raise PaidGuardError("Plan 049 local provider projection drifted") from exc
     return contract
 
 
-def _require_local_projection(contract: CampaignContract, paths: RepoPaths) -> None:
-    expected_provider = contract.lock["provider"]
-    expected_price = contract.lock["price_snapshot"]
+def run_authorized_paid_phase(
+    *,
+    repo_root: Path,
+    authorization: str | None,
+    activation_action: str | None,
+    confirmed_balance_usd: str | None,
+    harness_commit: str,
+    harness_clean: bool,
+    resume_prefix_safe: bool,
+    activation_conditions_ready: bool,
+    docker_resource_gate_ready: bool,
+    independent_review_passed: bool,
+    rehearsal_namespace: str,
+    loopback_namespace: str,
+    phase: str,
+    dependencies: PaidRuntimeDependencies,
+) -> dict:
+    """Run the real pilot/formal schedule through the shared paid runner.
+
+    The order is deliberate: offline evidence and all authorization booleans,
+    then the Docker/resource gate, then the secret, then receipt/ledger state,
+    and only then the budget proxy plus Terminal-Bench executor.
+    """
+
+    paths = RepoPaths.discover(repo_root)
+    contract = enter_paid_phase(
+        repo_root=paths.worktree_root,
+        authorization=authorization,
+        activation_action=activation_action,
+        confirmed_balance_usd=confirmed_balance_usd,
+        harness_clean=harness_clean,
+        resume_prefix_safe=resume_prefix_safe,
+        activation_conditions_ready=activation_conditions_ready,
+        docker_resource_gate_ready=docker_resource_gate_ready,
+        # Verified immediately below before any resource/secret/state action.
+        phase_a_evidence_ready=True,
+        independent_review_passed=independent_review_passed,
+    )
     try:
-        projection = load_runtime_config(paths).paid_provider_projection(
-            expected_provider["name"],
-            model_id=expected_provider["root_model"],
+        require_phase_a_evidence(
+            contract,
+            common_root=paths.common_root,
+            rehearsal_namespace=rehearsal_namespace,
+            loopback_namespace=loopback_namespace,
         )
-    except ConfigError as exc:
-        raise PaidGuardError("Plan 049 local provider projection is unavailable") from exc
-    price = projection.main_pricing.to_dict()
-    # Plan 049's own proxy/orchestrator consumes the frozen two-second retry
-    # ladder from the campaign lock; the host-wide backoff is intentionally not
-    # inherited. Endpoint, model, prices, attempts and retryable statuses still
-    # have to agree before a key can be read.
+    except Exception as exc:
+        raise PaidGuardError("Plan 049 Phase A evidence is unavailable") from exc
+    config = load_runtime_config(paths)
+    provider = plan049_provider_projection(config, contract)
+    actual_harness = harness_identity(paths.worktree_root)
     if (
-        projection.provider_id != expected_provider["name"]
-        or projection.api != expected_provider["wire_api"]
-        or projection.base_url != expected_provider["base_url"]
-        or projection.main_model != expected_provider["root_model"]
-        or projection.main_effort != expected_provider["root_effort"]
-        or projection.max_attempts != expected_provider["request_attempt_limit"]
-        or list(projection.unbilled_retry_statuses) != expected_provider["retry_statuses"]
-        or price
-        != {
-            "model_id": expected_price["model_id"],
-            "input_usd_per_million": expected_price["input_usd_per_million"],
-            "cached_input_usd_per_million": expected_price[
-                "cached_input_usd_per_million"
-            ],
-            "output_usd_per_million": expected_price["output_usd_per_million"],
-            "long_context_threshold_tokens": str(
-                expected_price["long_context_threshold_tokens"]
-            ),
-            "long_context_input_multiplier": expected_price[
-                "long_context_input_multiplier"
-            ],
-            "long_context_output_multiplier": expected_price[
-                "long_context_output_multiplier"
-            ],
-            "cache_write_input_multiplier": expected_price[
-                "cache_write_input_multiplier"
-            ],
-            "price_snapshot_date": expected_price["date"],
-            "price_source_url": expected_price["source_url"],
-        }
+        actual_harness.get("harness_commit") != harness_commit
+        or actual_harness.get("harness_dirty") is not False
     ):
-        raise PaidGuardError("Plan 049 local provider or price projection drifted")
+        raise PaidGuardError("Plan 049 harness identity changed after authorization")
+    identity = formal_identity(
+        contract, provider=provider, harness_commit=harness_commit
+    )
+    paid_paths = formal_paths(paths.common_root, contract)
+    try:
+        require_safe_formal_prefix(paid_paths, identity, contract)
+    except Exception as exc:
+        raise PaidGuardError("Plan 049 formal resume prefix is unsafe") from exc
+    # This is the first authorized Docker interaction. The factory owns the
+    # before/after resource observations and returns the held shared lock.
+    resources = dependencies.acquire_docker_gate()
+    if (
+        not isinstance(resources, PaidResources)
+        or not resources.lock_guard.is_held(resources.lease)
+    ):
+        raise PaidGuardError("Plan 049 Docker/build-lock lease is not held")
+    _secret_name, api_key = load_provider_secret(
+        config, str(contract.lock["provider"]["name"])
+    )
+    if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
+        raise PaidGuardError("Plan 049 provider secret is unavailable")
+    store = FormalStore(paid_paths, identity)
+    store.ensure_receipt()
+    with open_paid_ledger(store.paths.ledger, contract) as ledger:
+        executor = Plan049TerminalBenchExecutor(
+            contract=contract,
+            common_root=paths.common_root,
+            repo_root=paths.worktree_root,
+            ledger=ledger,
+            api_key=api_key,
+            counter=resources.counter,
+            lock_guard=resources.lock_guard,
+            lease=resources.lease,
+            config=config,
+            formal_identity_sha256=store.identity_sha256,
+        )
+        return run_formal_campaign(
+            contract,
+            store=store,
+            ledger=ledger,
+            executor=executor,
+            phase=phase,
+        )

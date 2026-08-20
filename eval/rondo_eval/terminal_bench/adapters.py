@@ -217,8 +217,13 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 raise AdapterError("common Multi-Agent V2 requires a pinned member identity")
             if concurrency is None or concurrency < 2 or concurrency > 32:
                 raise AdapterError("common Multi-Agent V2 concurrency is invalid")
-            if self.side is Side.RONDO and self._product is not Product.RONDO_MULTI:
-                raise AdapterError("common Multi-Agent V2 requires RONDO Multi")
+            if self.side is Side.RONDO:
+                if self._product is not Product.RONDO_MULTI:
+                    raise AdapterError("common Multi-Agent V2 requires RONDO Multi")
+                if team_state is not True:
+                    raise AdapterError(
+                        "common Multi-Agent V2 requires RONDO Team State"
+                    )
         elif (
             subagent_model is not None or subagent_effort is not None
         ) and self._product is not Product.RONDO_MULTI:

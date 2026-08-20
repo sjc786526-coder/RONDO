@@ -1214,6 +1214,21 @@ class TerminalBenchTests(unittest.TestCase):
             self.assertNotIn("delegate only when useful", "\n".join(kwargs.values()))
         self.assertNotIn("team_state_enabled", commands["CodexUploadAdapter"])
         self.assertIn("team_state_enabled=true", commands["RondoUploadAdapter"])
+        with self.assertRaisesRegex(
+            AdapterError, "common Multi-Agent V2 requires RONDO Team State"
+        ):
+            self.adapter(
+                RondoUploadAdapter,
+                binary_product=Product.RONDO_MULTI.value,
+                common_multi_agent_v2=True,
+                multi_agent_max_concurrency=4,
+                subagent_model="gpt-5.6-terra",
+                subagent_effort="medium",
+                developer_instructions_path=str(policy),
+                developer_instructions_sha256=policy_sha256,
+                rollout_trace_root="/logs/agent/rollout-trace",
+                team_state_enabled=False,
+            )
 
     def test_only_multi_can_carry_the_team_state_off_flag(self) -> None:
         # `--strict-config` upstream cannot even deserialize the key, and Local

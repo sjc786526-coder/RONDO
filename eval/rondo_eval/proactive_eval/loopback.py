@@ -238,13 +238,23 @@ def run_common_v2_loopback(
             "team_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
             "trace_bundle_count": 1,
         }
-    return {
+    summary = {
         "schema_version": 1,
         "evidence_kind": "loopback",
         "identity_class": "rehearsal",
         "lock_id": contract.lock_id,
+        "lock_sha256": contract.lock_sha256,
+        "policy_sha256": contract.policy_sha256,
+        "namespace": namespace,
         "sides": results,
     }
+    _write_or_verify(
+        output_root / "loopback.json",
+        (json.dumps(summary, sort_keys=True, separators=(",", ":")) + "\n").encode(
+            "utf-8"
+        ),
+    )
+    return summary
 
 
 def _command(contract: CampaignContract, binary: Path, side: Side, base_url: str) -> list[str]:
@@ -310,3 +320,11 @@ def _require_binary(path: Path, expected_sha256: str) -> None:
         or hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256
     ):
         raise LoopbackError("frozen loopback binary identity differs")
+
+
+def _write_or_verify(path: Path, payload: bytes) -> None:
+    if path.exists():
+        if path.is_symlink() or not path.is_file() or path.read_bytes() != payload:
+            raise LoopbackError("Plan 049 loopback summary drifted")
+        return
+    path.write_bytes(payload)

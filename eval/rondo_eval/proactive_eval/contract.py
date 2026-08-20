@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_UP
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +118,14 @@ def load_contract(repo_root: Path = REPO_ROOT) -> CampaignContract:
 
     _validate_runtime(root, lock)
     _validate_semantics(lock, taskset, catalog)
+    artifacts_meta = _object(lock, "artifacts")
+    fixture_path = _tracked_file(
+        root, artifacts_meta.get("replay_fixture"), "replay fixture"
+    )
+    fixture_raw, _fixture = _read_json(fixture_path, "replay fixture")
+    _require_digest(
+        fixture_raw, artifacts_meta.get("replay_fixture_sha256"), "replay fixture"
+    )
     return CampaignContract(
         lock=lock,
         taskset=taskset,
@@ -176,6 +185,8 @@ def _validate_semantics(
             "root_effort",
             "member_model",
             "member_effort",
+            "guardian_model",
+            "guardian_effort",
             "request_limit_per_run",
             "request_attempt_limit",
             "retry_backoff_seconds",
@@ -232,12 +243,29 @@ def _validate_semantics(
             "minimum_confirmed_balance_usd",
             "formal_namespace",
             "rehearsal_namespace",
+            "batch_id",
+            "usage_envelope",
+            "request_reservation_usd",
+            "max_concurrent_main_requests",
+            "guardian_reserved_slots",
+            "max_guardian_logical_requests",
+            "per_run_spend_allowance_usd",
+            "per_run_cap_usd",
+            "max_run_slots",
+            "unpriced_stop_threshold",
         },
         "budget",
     )
     _exact_keys(
         artifacts,
-        {"ignored_root", "per_run", "aggregate", "tracked_body_fields"},
+        {
+            "ignored_root",
+            "per_run",
+            "aggregate",
+            "replay_fixture",
+            "replay_fixture_sha256",
+            "tracked_body_fields",
+        },
         "artifacts",
     )
     _exact_keys(
@@ -263,6 +291,8 @@ def _validate_semantics(
         or provider.get("member_model") != provider.get("root_model")
         or provider.get("root_effort") != "medium"
         or provider.get("member_effort") != provider.get("root_effort")
+        or provider.get("guardian_model") != provider.get("root_model")
+        or provider.get("guardian_effort") != provider.get("root_effort")
         or provider.get("request_limit_per_run") != 80
         or provider.get("request_attempt_limit") != 5
         or provider.get("retry_backoff_seconds") != 2
@@ -307,9 +337,57 @@ def _validate_semantics(
         or recovery.get("resume_only_untrusted_or_missing_side") is not True
     ):
         raise ContractError("recovery or budget contract differs")
+    usage_envelope = budget.get("usage_envelope")
+    if usage_envelope != {
+        "max_input_tokens": 272000,
+        "max_output_tokens": 128000,
+    }:
+        raise ContractError("budget usage envelope differs")
+    # At exactly the frozen long-context threshold the long-context multiplier
+    # does not apply. The most expensive legal input shape is cache-write input.
+    maximum_request = (
+        Decimal(usage_envelope["max_input_tokens"])
+        * Decimal(pricing["input_usd_per_million"])
+        * Decimal(pricing["cache_write_input_multiplier"])
+        + Decimal(usage_envelope["max_output_tokens"])
+        * Decimal(pricing["output_usd_per_million"])
+    ) / Decimal(1_000_000)
+    reservation = maximum_request.quantize(Decimal("0.01"), rounding=ROUND_UP)
+    peak = reservation * Decimal(5)
+    run_cap = peak + Decimal("4.00")
+    if (
+        budget.get("batch_id") != "plan-049-paid-v1"
+        or budget.get("formal_namespace") != "plan-049-paid-v1"
+        or budget.get("rehearsal_namespace") != "plan-049-rehearsal-v1"
+        or Decimal(str(budget.get("request_reservation_usd"))) != reservation
+        or budget.get("max_concurrent_main_requests") != 4
+        or budget.get("guardian_reserved_slots") != 1
+        or budget.get("max_guardian_logical_requests") != 3
+        or Decimal(str(budget.get("per_run_spend_allowance_usd")))
+        != Decimal("4.00")
+        or Decimal(str(budget.get("per_run_cap_usd"))) != run_cap
+        or budget.get("max_run_slots") != 66
+        or budget.get("unpriced_stop_threshold") != 1
+    ):
+        raise ContractError("paid budget arithmetic or identity differs")
     if (
         artifacts.get("ignored_root") != "eval-data/plan-049"
         or artifacts.get("tracked_body_fields") is not False
+        or artifacts.get("per_run")
+        != [
+            "rollout-trace",
+            "execution.json",
+            "api-metadata.json",
+            "shared-model-catalog.json",
+            "team_view.json",
+            "team_report.html",
+            "run.json",
+        ]
+        or artifacts.get("aggregate") != "aggregate.json"
+        or artifacts.get("replay_fixture")
+        != "eval/fixtures/multi-proactive-delegation-v1/body-free-replay-v1.json"
+        or artifacts.get("replay_fixture_sha256")
+        != "305c25db9eaee162ca529a820d53dedc0e91b71c530e669d9e569aa50426f2dd"
         or activation.get("pilot_run_count") != 6
         or activation.get("minimum_trace_backed_root_spawn_accepts") != 1
         or any(

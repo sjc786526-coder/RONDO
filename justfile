@@ -83,7 +83,7 @@ eval-plan049-replay:
         UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.proactive_eval replay
 
-eval-plan049-ready namespace="phase-a-final":
+eval-plan049-ready namespace="phase-a-final" loopback_namespace="phase-a-final":
     #!/usr/bin/env bash
     set -euo pipefail
     common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
@@ -93,7 +93,8 @@ eval-plan049-ready namespace="phase-a-final":
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
         UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
         uv run --directory eval --frozen --no-sync \
-        python -B -m rondo_eval.proactive_eval ready --namespace "{{namespace}}"
+        python -B -m rondo_eval.proactive_eval ready --namespace "{{namespace}}" \
+        --loopback-namespace "{{loopback_namespace}}"
 
 eval-plan049-phase-b-paid:
     #!/usr/bin/env bash
