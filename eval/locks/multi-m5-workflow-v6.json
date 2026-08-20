@@ -93,11 +93,11 @@
     },
     {
       "id": "team_route",
-      "description": "After Root's own Version completes, the manifest Root thread completes a route assignment on that Event targeting the same member."
+      "description": "After Root's own non-deduplicated Version completes, the manifest Root thread completes a non-deduplicated route assignment on that Event targeting the same member."
     },
     {
       "id": "team_evidence",
-      "description": "After Root published and routed the Event, the same member completed team_evidence on its first Version's exact exec Fact before appending a distinct second Version; the available, successful, untruncated result is produced by that member and its non-empty observation contains the frozen finding."
+      "description": "After fresh Root publish and route mutations were initiated, the same member completed team_evidence on its first Version's exact exec Fact before appending a distinct, non-deduplicated second Version; the available, successful, untruncated result is produced by that member and its non-empty observation contains the frozen finding."
     },
     {
       "id": "root_resolved",
@@ -105,7 +105,7 @@
     },
     {
       "id": "root_woken",
-      "description": "The manifest Root thread was already waiting when the first member publish started; that publish completed before the wait returned TeamActivity, and the exact inspect-log publish revision records member_publish waking the manifest Root before Root's own publish."
+      "description": "The manifest Root wait and first non-deduplicated member publish call intervals overlap; the exact inspect-log publish revision records member_publish waking the manifest Root, and Root's wait returns TeamActivity before Root's own publish. Cross-thread wrapper completion order is not a store commit clock."
     }
   ],
   "supersedes": "multi-m5-workflow-v5",

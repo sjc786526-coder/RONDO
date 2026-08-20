@@ -1340,3 +1340,24 @@ append-only v6-r2 rehearsal 与独立终审通过。这里只记录门前设施�
 - 形成时点 NO-GO 与最终整改证据分别见
   `agent_log/2026-08-20-130000-plan044-m5-v6-remediation-independent-acceptance.md` 和
   `agent_log/2026-08-20-140000-plan044-m5-v6-remediation-final-readiness.md`。
+
+## Multi M-5 v6 canonical mutation 再收口（Plan 044，2026-08-20）
+
+**状态**：15:00 独立验收发现的幂等 publish 假绿与跨线程 wrapper 假阴均已关闭；append-only v6-r3
+rehearsal 通过。正式 Gate 1/Gate 2 仍未启动，**不是** M-5、Gate 1 或不退化结论。
+
+- 协议中的 first/Root/second publish 与 route 必须明确 `deduplicated=false`；evidence 后只重试旧 Version
+  不再被误计为新成员 Version，缺字段、非布尔与 `true` 均 fail-closed。
+- canonical mutation 顺序改由精确 inspect-log revision 证明；wrapper end 不作跨线程提交时钟，同 actor 仍用
+  end/start，wait 另用端点证明重叠，route start 必须先于 evidence start。
+  Root wait 与首次成员 publish 以区间重叠、精确 wake log 和 TeamActivity 返回绑定，因此 store 已提交但另一线程
+  wrapper 尚未写 end 的三类合法交错不再误杀。
+- 批量 `team_update` 允许同批其它目标及同一 Version 的独立 producer 轴更新，但协议只能唯一匹配一个成功
+  resolve 的成员 Version；两个成员 resolve、重复、错状态或错 ID 继续拒绝。
+- 最新串行 M-5 Python 183/183、相关窄回归 105/105、`just eval-lock`、ready、loopback 均通过。
+  `m5-g1-rehearsal-v6-r3` 为 23 requests、20/20 code-cell、0 Direct/failed、dump 7 页/log 2 页、明文 9、
+  加密/未知 0，七谓词全真；历史 v6/v6-r2 行和 raw 均保留。
+- 正式 v6 archive、ledger、identity receipt 与 paid capture 仍未创建；未运行 Docker、Rust 或真实 API。
+  形成时点报告与收口日志见
+  `agent_log/2026-08-20-150000-plan044-m5-v6-second-remediation-independent-acceptance.md` 和
+  `agent_log/2026-08-20-160000-plan044-m5-v6-canonical-mutation-final-readiness.md`。

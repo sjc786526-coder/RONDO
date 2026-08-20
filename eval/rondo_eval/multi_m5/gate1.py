@@ -123,7 +123,7 @@ def run_gate1_rehearsal(
     persist: bool = True,
     process_runner: ProcessRunner = subprocess.run,
     capture_base: Path | None = None,
-    run_id: str = "m5-g1-rehearsal-v6-r2",
+    run_id: str = "m5-g1-rehearsal-v6-r3",
 ) -> dict[str, Any]:
     """Offline full protocol. Not a paid gate 1 pass, even if predicates are green."""
 

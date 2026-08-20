@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：runtime-v4、两把 v6 正式锁、幂等恢复与完整分页彩排已就绪；正式两道门均未启动
+最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：runtime-v4、两把 v6 正式锁、幂等恢复与 append-only v6-r3 完整分页彩排已就绪；正式两道门均未启动
 
 ## 定位
 
@@ -326,14 +326,15 @@ sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign �
 （Root + 3 成员 + Guardian = 5 × 预留），并发上限改为经校验的整数而非布尔。停止原因区分 budget 与 infra
 （上游失败、缺 usage、超时不再被贴成"预算停止"），未知原因 fail-closed；预留扣款与已计价消费分开记账。
 正式付费槽位使用确定性 run id，并由 archive + ledger 恢复：完整归档按原分类跳过；pristine 零请求 run 可安全
-重领；已请求未归档只追加一次 abandoned infra 后转下一 attempt；未来、重复、非连续或身份冲突 fail-closed。
-Gate 2 每个 attempt 在 claim 下一 run id 前立即 fsync，正常模型失败仍是产品结果，不得改标 infra。
+重领；精确 pre-Harbor 自有产物和已请求未归档状态各只追加一次 abandoned infra；terminal budget/capacity stop
+幂等归档后停止。未知、错型、symlink、Harbor-started 或 exact-label Docker/Compose 残留 fail-closed，等待受监督
+精确处理。Gate 2 每个 attempt 在 claim 下一 run id 前立即 fsync，正常模型失败仍是产品结果，不得改标 infra。
 
 **成员证据链已按终审后的最小安全边界闭合。** runtime-v4 要求同一 cell 完成受支持的非 canonical
 team-state nested tool，outer response 还必须是 runtime 已排空 callbacks 的 terminal 纯文本结果；Yielded、
 team-state/evidence-read-only、混合媒体、加密、空输出均拒绝，Missing/不可用响应只清理不铸证。唯一绑定键是
 harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界重试状态。共享 build-lock 的定向 Rust
-结果为 146/146；当前 Python M-5 定向为 162/162。
+结果为 146/146；当前 Python M-5 定向为 183/183。
 
 彩排由 stub 驱动协议，**证明的是产品与判据这条链路能走通，不是真实模型会遵守协议**，因此
 **不是**门 1 通过、更不是 M-5 通过。
@@ -363,9 +364,12 @@ harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界�
 Gate 2 每槽最多 5 次 infra、全批 40 次，共 116 个 run 槽位；60 effective、80 请求/run、5 次 HTTP 尝试与
 `$120` 硬上限不变。provider 完整冻结发生在 secret、receipt、ledger 与 claim 之前。
 
-ready=true、loopback 通过。全新 v6 rehearsal 以 `limit=3` 完成 dump 7 页、log 2 页并续到 null；20/20 dispatch
-均为 code cell、0 Direct/failed，明文 9/加密与未知 0。成员首次 publish → Root publish → route → 成员读取自身
-exec Fact → 成员二次 publish 的顺序成立，completed wait_agent 返回 TeamActivity，七谓词全真。历史唯一一次
+ready=true、loopback 通过。append-only v6-r3 rehearsal 以 `limit=3` 完成 dump 7 页、log 2 页并续到 null；
+20/20 dispatch 均为 code cell、0 Direct/failed，明文 9/加密与未知 0。协议只接纳 non-deduplicated publish/route；
+canonical mutation 的跨线程提交顺序由 inspect-log revision 证明，wrapper end 不作跨线程提交时钟；同 actor
+仍用 end/start，wait 另用端点证明重叠，route start 必须先于 evidence start。成员首次
+publish → Root publish → route → 成员读取自身 exec Fact → 不同的成员二次 publish → Root update 成立，
+completed wait_agent 返回 TeamActivity，七谓词全真。历史唯一一次
 clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`），但不升级冒充 v6 正式结果。正式 v6 archive、
 `$120` ledger 与 identity receipt 均不存在；下一工作包是未来单独启动正式 Gate 1，本轮停在该边界。
 

@@ -183,8 +183,9 @@
   载体是 host `codex exec` +
   `eval/fixtures/multi-m5-collab-v1/` + `eval/templates/multi-m5/collab-workflow-instruction-v2.md`
   （sha 以 v6 锁为准），不是 TB `fix-git`。完成标准 = `TEAM_REPORT.md` 含 finding 行且七项协作谓词全真，
-  包括成员精确证据链、Root 自身 completed wait 与最终 `team_update`；调用 actor、trace 完成边界及 inspect-log
-  revision 必须共同绑定到同一 Event。孤儿退休不是必触发项。最多 6 次，Docker 不用于门 1。
+  包括成员精确证据链、Root 自身 completed wait 与最终 `team_update`；调用 actor、同线程 trace 完成边界及
+  inspect-log revision 必须共同绑定到同一 Event，canonical publish/route 只认 `deduplicated=false`。孤儿退休
+  不是必触发项。最多 6 次，Docker 不用于门 1。
 - **门 2 当前合同**：`eval/locks/multi-m5-nondegradation-v6.json`；v1—v5 只留历史。十任务来自
   `eval/tasksets/p2-b7-canary-catalog-v4.json`（catalog sha `00b83e44…57ddf`），交错
   `task_major_codex_then_multi`，轻 runner，不套 v7 campaign，不计算 σ/delta。价格快照
@@ -397,9 +398,11 @@
   每 run 80 个逻辑请求、provider 每请求最多 5 次 HTTP 尝试和 `$120` 硬上限不变；共享 run 槽位为
   `60 + 40 + 6 + 10 = 116`。
 - Gate 1 只在同一成员按“首次 publish → Root publish → route → `team_evidence` 自身 exec Fact → 不同 Version
-  的二次 publish → Root `team_update`”完成时判证据链成立。首次 Version 必须精确引用该 Fact；Root wait、publish、
-  route、update 与成员调用分别绑定 manifest actor，trace start/end 和完整 inspect-log revision 共同约束顺序；整条
-  trace 必须零 Direct，成员投递必须仅为 plaintext。
+  的二次 publish → Root `team_update`”完成时判证据链成立。首次 Version 必须精确引用该 Fact；计入协议的
+  publish/route 必须明确 `deduplicated=false`。Root wait、publish、route、update 与成员调用分别绑定 manifest
+  actor；canonical mutation 的跨线程提交顺序由完整 inspect-log revision 证明，跨线程 wrapper end 不作为提交
+  时钟；同 actor 仍用 end/start，wait 与首次 publish 另用两端点证明区间重叠并要求精确 wake log，route start
+  必须先于 evidence start。整条 trace 必须零 Direct，成员投递必须仅为 plaintext。
   测试 capture、v6 rehearsal、v6 正式批次分别使用独立 namespace，正式 capture 已有任何产物即 fail-closed。
 - 正式 resume 按 batch/workflow/nondegradation/runtime/provider receipt 核身份：完整归档行按原分类跳过；
   零请求、零消费、无停止/taint/冲突产物的 pristine run 可原 id 重领；精确白名单内、属于本 run 且仍在 Harbor
@@ -412,8 +415,8 @@
 - 正式入口在读取密钥、创建 receipt/ledger 或 claim 前完成 provider 冻结校验；Gate 2 正式入口还要求同一 v6
   archive 中已有 Gate 1 pass。点估计 `$10.40`、最坏调度形状预测 `$67.80`、硬上限 `$120`，endpoint 仍为
   `https://www.cctq.ai/v1`。
-- 离线验收：M-5 Python 定向 179/179、Docker resume 精确探针单元测试 29/29、`just eval-lock`、ready、loopback
-  均通过。append-only `m5-g1-rehearsal-v6-r2` 为 20/20 code-cell dispatch、0 Direct、0 failed；dump 7 页/log
+- 离线验收：M-5 Python 定向 183/183、Docker resume 精确探针单元测试 29/29、`just eval-lock`、ready、loopback
+  均通过。append-only `m5-g1-rehearsal-v6-r3` 为 20/20 code-cell dispatch、0 Direct、0 failed；dump 7 页/log
   2 页到 null，七谓词全真，明文 9/加密与未知 0，成员自己的 exec Fact 可由 `team_evidence` 读回，并完成 Root
   update。正式 v6 archive/ledger/identity receipt 均不存在。
 
@@ -447,7 +450,8 @@
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
 - 阶段 B：runtime-v4 产品身份保持不变；v5 的 readiness 假设已由独立审查否决并以两把 v6 锁、严格协议判据、
   capture 隔离、provider 前置冻结和幂等 resume 收口。13:00 独立验收发现的协议时序、终止预算恢复和首请求前
-  自有产物三组缺口已闭合；v6 离线门禁与 append-only v6-r2 rehearsal 已通过。历史唯一
+  自有产物三组缺口，以及 15:00 审查发现的 deduplicated 假绿/跨线程 wrapper 假阴均已闭合；v6 离线门禁与
+  append-only v6-r3 rehearsal 已通过。历史唯一
   clean-smoke-v5 仍只证明当时的非正式真实链路。本轮未新增真实 API 消费。正式门 1/门 2 未启动，v6 `$120`
   正式 archive/ledger/identity receipt 均不存在。
   **不得表述为 M-5 通过、门 1 通过或未见退化。**
@@ -561,6 +565,7 @@
 | 058 | Gate 1 机械要求同成员完成首次 publish → Root publish → route → 自身 exec Fact 的 team_evidence → 二次 publish，Root 唤醒只认 completed wait_agent TeamActivity | v5 只从 dump 的 VersionFact 推断 evidence，缺调用、少一次成员 Version 或仅 inspect signal 都可假通过 | 门 1 判据 | 已采纳 |
 | 063 | Gate 1 进一步要求首个成员 Version 精确引用被下钻 Fact、wait 来自 rollout manifest 的 Root thread、整条 trace 零 Direct，且 Root→member 投递仅 plaintext；Gate 1/2 共享完整 Gate 1 archive 前缀验证并拒绝 symlink 归档 | 独立终审构造出成员 wait、第二 Version 借 Fact、Direct dispatch、乱序 resume 与 broken symlink 等假绿/先消费后失败边界 | 门 1 / resume | 已采纳 |
 | 064 | Gate 1 以 trace start/end + inspect-log revision 绑定 Root wait/publish/route/update、成员 evidence 与不同的二次 Version；恢复先保留 terminal budget stop，精确 pre-Harbor 自有产物可一次 abandoned，Harbor-started / exact Docker 残留保持 fail-closed | 13:00 独立验收构造出晚 wait、错误 actor、复用 Version、终止 stop 被重试及首请求前自有产物死路；自动继续带活动 Docker 的 run 无法证明安全，必须留给后继受监督精确清理 | 门 1 / resume / Docker 边界 | 已采纳 |
+| 065 | 协议中的 publish/route 只认 `deduplicated=false`；跨线程 canonical 提交顺序只认 inspect-log revision，wrapper end 不作跨线程提交时钟；Root wait 以调用区间重叠 + 精确 wake log 绑定首次成员 publish，route start 先于 evidence start；批量 update 只要求唯一成员 resolve 匹配 | 15:00 审查证明幂等重试可冒充 evidence 后的新 Version，而 store 已提交后 wrapper 尚未结束是合法并发；继续使用跨线程 ToolCallEnded 判断提交先后会假阴并无故耗尽 6 次尝试 | 门 1 判据 | 已采纳 |
 | 059 | 测试必须显式传入 eval-data/tmp 下的隔离 capture root；v6 rehearsal、正式 Gate 1 与历史 v5 各用独立 identity，正式非空 capture 一律拒绝 | `persist=false` 旧实现仍会覆盖 canonical raw 并向 metadata 追加测试 observation | 证据分区 | 已采纳 |
 | 060 | 完整 provider frozen preflight 位于 secret、正式 identity receipt、ledger open 与 claim_run 之前，并纳入 ready | 只在 Gate 2 executor 内校验会在零 API 时仍消耗第一个正式 run id | 付费入口 | 已采纳 |
 | 061 | Gate 2 每个 attempt 形成分类后立即 fsync 归档，再允许 claim 下一 attempt | 若把同槽多次 infra 缓存在内存，下一 attempt 请求中断会留下两个未归档 run，无法按单一前缀恢复 | 恢复持久性 | 已采纳 |

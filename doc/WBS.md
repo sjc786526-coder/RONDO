@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 已完成 runtime-v4、v6 正式合同、严格协议/恢复整改与 append-only v6-r2 彩排，正式门前设施就绪；**正式两道门未启动**）
+最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 已完成 runtime-v4、v6 正式合同、严格协议/恢复整改与 append-only v6-r3 彩排，正式门前设施就绪；**正式两道门未启动**）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -25,7 +25,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过。阶段 B 复用 `multi-m5-runtime-v4`，正式合同为 workflow/nondegradation v6：协议证据、capture 隔离、provider 前置冻结与幂等 resume 已闭合；共享 build-lock Rust 历史 146/146、当前 Python 179/179、Docker resume 探针 29/29、ready、loopback 和 append-only v6-r2 完整分页 rehearsal 均通过。clean-smoke-v5 是有效历史非正式 smoke，不升级冒充 v6 正式证据。**正式两道门未执行**，不能表述为 M-5 通过、门 1 通过或未见退化。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过。阶段 B 复用 `multi-m5-runtime-v4`，正式合同为 workflow/nondegradation v6：协议证据、capture 隔离、provider 前置冻结与幂等 resume 已闭合；共享 build-lock Rust 历史 146/146、当前 Python 183/183、Docker resume 探针 29/29、ready、loopback 和 append-only v6-r3 完整分页 rehearsal 均通过。clean-smoke-v5 是有效历史非正式 smoke，不升级冒充 v6 正式证据。**正式两道门未执行**，不能表述为 M-5 通过、门 1 通过或未见退化。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -123,8 +123,10 @@
   后继 runtime-v4 来自源码 `0eee6dc`，CLI/host/bwrap/manifest 四摘要与实物一致，现行 v6 loader 关系为
   workflow-v6→runtime-v4→nondegradation-v6。clean-smoke-v5 只运行一次：20 请求全部按 usage 结算，真实计价
   `$0.273138`、`conservative_exposure_usd=0`、明文 16/加密与未知均 0、七谓词全真；18/18 dispatch 均来自
-  code cell，0 Direct、0 失败。append-only v6-r2 rehearsal 为 20/20 code-cell、0 Direct/failed、dump 7 页/
-  log 2 页，严格绑定 Root wait/publish/route/update、成员 evidence 与不同二次 Version，七谓词全真。正式 v6
+  code cell，0 Direct、0 失败。append-only v6-r3 rehearsal 为 20/20 code-cell、0 Direct/failed、dump 7 页/
+  log 2 页；canonical mutation 必须非 deduplicated，跨线程提交顺序由 inspect-log revision 证明，wrapper end
+  不作跨线程提交时钟，并严格绑定 Root wait/publish/route/update、成员 evidence 与不同二次 Version，七谓词
+  全真。正式 v6
   archive/ledger/identity receipt 均不存在。下一动作只能是未来
   另行启动正式门 1；本任务停在该边界。
   逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见

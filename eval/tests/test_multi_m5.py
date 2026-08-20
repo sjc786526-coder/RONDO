@@ -503,6 +503,7 @@ class MultiM5PredicateTests(unittest.TestCase):
                         "event_id": "e1",
                         "version_id": "v1",
                         "evidence_refs": ["f1"],
+                        "deduplicated": False,
                     },
                 },
                 {
@@ -511,7 +512,12 @@ class MultiM5PredicateTests(unittest.TestCase):
                     "end_seq": 6,
                     "status": "completed",
                     "arguments": {"event_id": "e1"},
-                    "result": {"event_id": "e1", "version_id": "v2", "evidence_refs": []},
+                    "result": {
+                        "event_id": "e1",
+                        "version_id": "v2",
+                        "evidence_refs": [],
+                        "deduplicated": False,
+                    },
                 },
                 {
                     "thread_id": "t-member",
@@ -519,7 +525,12 @@ class MultiM5PredicateTests(unittest.TestCase):
                     "end_seq": 12,
                     "status": "completed",
                     "arguments": {"event_id": "e1"},
-                    "result": {"event_id": "e1", "version_id": "v3", "evidence_refs": []},
+                    "result": {
+                        "event_id": "e1",
+                        "version_id": "v3",
+                        "evidence_refs": [],
+                        "deduplicated": False,
+                    },
                 },
             ],
             "team_route_calls": [
@@ -534,6 +545,7 @@ class MultiM5PredicateTests(unittest.TestCase):
                         "event_id": "e1",
                         "target": "t-member",
                         "delivery": "delivered",
+                        "deduplicated": False,
                     },
                 }
             ],
@@ -654,9 +666,9 @@ class MultiM5PredicateTests(unittest.TestCase):
         self.assertFalse(verdict.predicates["event_with_two_versions"])
         self.assertFalse(verdict.predicates["team_evidence"])
 
-    def test_evidence_before_route_cannot_complete_the_protocol(self) -> None:
+    def test_evidence_before_route_started_cannot_complete_the_protocol(self) -> None:
         dump = self._dump()
-        dump["team_evidence_calls"][0]["seq"] = 8
+        dump["team_evidence_calls"][0]["seq"] = 6
         verdict = self._judge(dump)
         self.assertFalse(verdict.predicates["team_route"])
         self.assertFalse(verdict.predicates["team_evidence"])
@@ -670,9 +682,51 @@ class MultiM5PredicateTests(unittest.TestCase):
                 self.assertFalse(verdict.predicates["root_woken"])
                 self.assertFalse(verdict.predicates["team_evidence"])
 
+        dump = self._dump()
+        dump["team_publish_calls"][0]["seq"] = 1
+        dump["team_publish_calls"][0]["end_seq"] = 2
+        dump["wait_calls"][0]["seq"] = 2
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_woken"])
+
     def test_second_publish_must_append_a_distinct_member_version(self) -> None:
         dump = self._dump()
         dump["team_publish_calls"][2]["result"]["version_id"] = "v1"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_deduplicated_mutations_cannot_complete_the_protocol(self) -> None:
+        variants = {
+            "first-member-publish": ("team_publish_calls", 0),
+            "root-publish": ("team_publish_calls", 1),
+            "second-member-publish": ("team_publish_calls", 2),
+            "route": ("team_route_calls", 0),
+        }
+        for name, (collection, index) in variants.items():
+            for value in (True, 0, None):
+                with self.subTest(name=name, value=value):
+                    dump = copy.deepcopy(self._dump())
+                    dump[collection][index]["result"]["deduplicated"] = value
+                    verdict = self._judge(dump)
+                    self.assertFalse(verdict.passed)
+        dump = self._dump()
+        dump["team_publish_calls"][0]["result"].pop("deduplicated")
+        self.assertFalse(self._judge(dump).passed)
+
+    def test_evidence_followed_only_by_a_deduplicated_retry_does_not_pass(self) -> None:
+        dump = self._dump()
+        early = copy.deepcopy(dump["team_publish_calls"][2])
+        early["seq"] = 8
+        early["end_seq"] = 9
+        dump["team_evidence_calls"][0]["seq"] = 10
+        dump["team_evidence_calls"][0]["end_seq"] = 11
+        retry = dump["team_publish_calls"][2]
+        retry["seq"] = 12
+        retry["end_seq"] = 13
+        retry["result"]["deduplicated"] = True
+        dump["team_publish_calls"].insert(2, early)
+        dump["team_update_calls"][0]["seq"] = 14
+        dump["team_update_calls"][0]["end_seq"] = 15
         verdict = self._judge(dump)
         self.assertFalse(verdict.predicates["team_evidence"])
 
@@ -696,8 +750,14 @@ class MultiM5PredicateTests(unittest.TestCase):
         verdict = self._judge(dump)
         self.assertFalse(verdict.predicates["team_route"])
 
-    def test_protocol_calls_must_not_overlap_their_required_predecessor(self) -> None:
+    def test_same_thread_protocol_calls_must_not_overlap(self) -> None:
         variants = {
+            "evidence-before-first-member-publish-ended": (
+                "team_publish_calls",
+                0,
+                "end_seq",
+                10,
+            ),
             "route-before-root-publish-ended": (
                 "team_route_calls",
                 0,
@@ -710,11 +770,11 @@ class MultiM5PredicateTests(unittest.TestCase):
                 "seq",
                 10,
             ),
-            "update-before-second-ended": (
+            "update-before-route-ended": (
                 "team_update_calls",
                 0,
                 "seq",
-                12,
+                8,
             ),
         }
         for name, (collection, index, field, value) in variants.items():
@@ -723,6 +783,31 @@ class MultiM5PredicateTests(unittest.TestCase):
                 dump[collection][index][field] = value
                 verdict = self._judge(dump)
                 self.assertFalse(verdict.passed)
+
+    def test_cross_thread_wrapper_completion_can_lag_canonical_commit(self) -> None:
+        variants = {
+            "publish-started-before-wait": {
+                ("team_publish_calls", 0, "seq"): 1,
+                ("wait_calls", 0, "seq"): 2,
+            },
+            "wait-ended-before-publish-wrapper": {
+                ("wait_calls", 0, "end_seq"): 3,
+                ("team_publish_calls", 0, "end_seq"): 4,
+            },
+            "evidence-started-before-route-wrapper-ended": {
+                ("team_route_calls", 0, "end_seq"): 10,
+            },
+            "update-started-before-second-publish-wrapper-ended": {
+                ("team_publish_calls", 2, "end_seq"): 14,
+            },
+        }
+        for name, changes in variants.items():
+            with self.subTest(name=name):
+                dump = copy.deepcopy(self._dump())
+                for (collection, index, field), value in changes.items():
+                    dump[collection][index][field] = value
+                verdict = self._judge(dump)
+                self.assertTrue(verdict.passed)
 
     def test_resolution_must_be_a_late_root_update_of_a_member_version(self) -> None:
         variants = {
@@ -750,10 +835,48 @@ class MultiM5PredicateTests(unittest.TestCase):
         self.assertFalse(verdict.predicates["root_resolved"])
 
         dump = copy.deepcopy(self._dump())
+        update = dump["team_update_calls"][0]
+        update["arguments"]["targets"].append(
+            {"version_id": "v3", "set_root_state": "resolved"}
+        )
+        update["result"]["updated"].append(
+            {"version_id": "v3", "root_state": "resolved"}
+        )
+        next(
+            row
+            for row in dump["entries"]
+            if isinstance(row, dict) and row.get("version_id") == "v3"
+        )["root_state"] = "resolved"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_resolved"])
+
+        dump = copy.deepcopy(self._dump())
         dump["entries"][3]["root_state"] = "pending"
         dump["entries"][5]["root_state"] = "resolved"
         verdict = self._judge(dump)
         self.assertFalse(verdict.predicates["root_resolved"])
+
+    def test_resolution_accepts_one_member_match_among_other_batch_targets(self) -> None:
+        dump = self._dump()
+        update = dump["team_update_calls"][0]
+        update["arguments"]["targets"].extend(
+            [
+                {"version_id": "v2", "set_root_state": "tracking"},
+                {"version_id": "v1", "set_producer_state": "closed"},
+            ]
+        )
+        update["result"]["updated"].extend(
+            [
+                {"version_id": "v2", "root_state": "tracking"},
+                {
+                    "version_id": "v1",
+                    "producer_state": "closed",
+                    "root_state": "pending",
+                },
+            ]
+        )
+        verdict = self._judge(dump)
+        self.assertTrue(verdict.passed)
 
     def test_solo_root_fails_even_with_a_perfect_report(self) -> None:
         dump = {

@@ -317,8 +317,8 @@ def _valid_member_protocol(
         for row in versions
         if row.get("version_id")
     }
-    publishes = [call for call in publish_calls if _completed_result(call)]
-    routes = [call for call in route_calls if _completed_result(call)]
+    publishes = [call for call in publish_calls if _committed_mutation(call)]
+    routes = [call for call in route_calls if _committed_mutation(call)]
     updates = [call for call in update_calls if _completed_result(call)]
     evidences = [call for call in evidence_calls if _completed_result(call)]
     waits = [call for call in wait_calls if _completed_result(call)]
@@ -355,10 +355,8 @@ def _valid_member_protocol(
                 or WAIT_TEAM_ACTIVITY_MARK
                 not in str(wait_result.get("message") or "")
                 or not (
-                    _seq(wait)
-                    < _seq(first)
-                    < _end_seq(first)
-                    < _end_seq(wait)
+                    _seq(wait) < _end_seq(first)
+                    and _seq(first) < _end_seq(wait)
                 )
             ):
                 continue
@@ -409,7 +407,8 @@ def _valid_member_protocol(
                         assert isinstance(evidence, dict)
                         if (
                             evidence.get("thread_id") != first.get("thread_id")
-                            or _end_seq(route) >= _seq(evidence)
+                            or _end_seq(first) >= _seq(evidence)
+                            or _seq(route) >= _seq(evidence)
                         ):
                             continue
                         if not _valid_member_evidence_call(
@@ -464,7 +463,7 @@ def _valid_member_protocol(
                                 if (
                                     update.get("thread_id") == root_thread_id
                                     and resolved_version is not None
-                                    and _end_seq(second) < _seq(update)
+                                    and _end_seq(route) < _seq(update)
                                     and update_revision > second_revision
                                 ):
                                     return {
@@ -489,6 +488,17 @@ def _completed_result(call: object) -> bool:
     )
 
 
+def _committed_mutation(call: object) -> bool:
+    """Only a fresh canonical mutation can satisfy the frozen protocol."""
+
+    if not _completed_result(call):
+        return False
+    assert isinstance(call, dict)
+    result = call["result"]
+    assert isinstance(result, dict)
+    return result.get("deduplicated") is False
+
+
 def _resolved_version_id(
     call: Mapping[str, Any], *, member_version_ids: set[str]
 ) -> str | None:
@@ -500,21 +510,27 @@ def _resolved_version_id(
     updated = result.get("updated")
     if not isinstance(targets, list) or not isinstance(updated, list):
         return None
-    requested = [item for item in targets if isinstance(item, dict)]
-    returned = [item for item in updated if isinstance(item, dict)]
-    if len(requested) != 1 or len(returned) != 1:
+    requested_ids = [
+        str(item.get("version_id") or "")
+        for item in targets
+        if isinstance(item, dict)
+        and str(item.get("version_id") or "") in member_version_ids
+        and item.get("set_root_state") == "resolved"
+    ]
+    returned_ids = [
+        str(item.get("version_id") or "")
+        for item in updated
+        if isinstance(item, dict)
+        and str(item.get("version_id") or "") in member_version_ids
+        and item.get("root_state") == "resolved"
+    ]
+    matching = set(requested_ids) & set(returned_ids)
+    if len(matching) != 1:
         return None
-    requested_id = str(requested[0].get("version_id") or "")
-    returned_id = str(returned[0].get("version_id") or "")
-    if (
-        requested_id
-        and requested_id == returned_id
-        and requested_id in member_version_ids
-        and requested[0].get("set_root_state") == "resolved"
-        and returned[0].get("root_state") == "resolved"
-    ):
-        return requested_id
-    return None
+    version_id = next(iter(matching))
+    if requested_ids.count(version_id) != 1 or returned_ids.count(version_id) != 1:
+        return None
+    return version_id
 
 
 def _matching_log_revision(
