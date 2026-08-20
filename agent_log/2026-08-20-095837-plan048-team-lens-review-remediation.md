@@ -42,4 +42,8 @@
   parent 缺失时输出 `partial / agent_parent_missing`，并新增可选 metadata 缺失回归。
 - 20/20 定向测试与 24/24 指定 bundle 归约、JSON/HTML 确定性继续通过。
 
-第四个修复批次仍需交还同一独立审查者第五次复验，本日志不提前记录为通过。
+## 最终独立验收
+
+- 第五次独立复验明确 `PASS`：第四轮 optional metadata 场景正确降级，历轮功能反例继续受控处理。
+- 审查者独立确认 20/20 定向测试、24/24 指定 RONDO bundle、JSON/HTML 确定性、CLI、diff check 和 tracked
+  worktree 状态通过，未发现新的可复现正确性或功能问题。
