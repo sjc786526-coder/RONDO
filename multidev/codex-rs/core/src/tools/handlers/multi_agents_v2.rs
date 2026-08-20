@@ -61,9 +61,24 @@ pub(crate) fn communication_from_tool_message(
     source: &crate::tools::context::ToolCallSource,
     trigger_turn: bool,
 ) -> InterAgentCommunication {
+    // Only a call whose arguments actually arrived encrypted may be wrapped as
+    // encrypted content. Code-mode nested calls never do: the runtime builds
+    // `ToolPayload::Function` by serializing the model's own JS object and sets
+    // `encrypted_function_args: None`, so `message` here is plain text.
+    //
+    // Wrapping it anyway put the literal task string into the child's first
+    // request as `agent_message.content[].encrypted_content`, and the provider
+    // rejected every such request with `invalid_encrypted_content` -- 8 of 8
+    // member turns in the 2026-08-19 smoke, against 0 failures on root. The
+    // member never completed a turn, so no team tool could ever be called.
+    //
+    // `Direct` keeps the existing behaviour: there the model may genuinely send
+    // encrypted arguments, and `ToolCall::direct_source` is what distinguishes
+    // that from the plaintext case.
     if !matches!(
         source,
         crate::tools::context::ToolCallSource::DirectPlaintextMessage
+            | crate::tools::context::ToolCallSource::CodeMode { .. }
     ) {
         return InterAgentCommunication::new_encrypted(
             author,
@@ -82,3 +97,7 @@ pub(crate) fn communication_from_tool_message(
         InterAgentMessage::new(message_type, recipient.clone(), author.clone(), message).render();
     InterAgentCommunication::new(author, recipient, Vec::new(), content, trigger_turn)
 }
+
+#[cfg(test)]
+#[path = "multi_agents_v2_tests.rs"]
+mod tests;

@@ -352,6 +352,7 @@ async fn guardian_allows_shell_command_additional_permissions_requests_past_poli
             cancellation_token: CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
             call_id: "test-call".to_string(),
+            output_item_id: None,
             tool_name: codex_tools::ToolName::plain("shell_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload: ToolPayload::Function {
@@ -469,6 +470,7 @@ async fn strict_auto_review_turn_grant_forces_guardian_for_shell_command_policy_
             cancellation_token: CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
             call_id: "strict-shell-command-call".to_string(),
+            output_item_id: None,
             tool_name: codex_tools::ToolName::plain("shell_command"),
             source: ToolCallSource::Direct,
             payload: ToolPayload::Function {
@@ -519,6 +521,7 @@ async fn guardian_allows_unified_exec_additional_permissions_requests_past_polic
             cancellation_token: CancellationToken::new(),
             tracker: Arc::clone(&tracker),
             call_id: "exec-call".to_string(),
+            output_item_id: None,
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload: ToolPayload::Function {
@@ -658,6 +661,7 @@ async fn shell_command_allows_sticky_turn_permissions_without_inline_request_per
             cancellation_token: CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
             call_id: "sticky-turn-grant".to_string(),
+            output_item_id: None,
             tool_name: codex_tools::ToolName::plain("shell_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload: ToolPayload::Function {

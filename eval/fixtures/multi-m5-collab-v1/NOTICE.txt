@@ -1,0 +1,4 @@
+Host-side Multi M-5 gate 1 fixture. Not a Terminal-Bench task and not used for gate 2.
+
+Gate 1 runs `codex exec` on the host against this directory. Gate 2 uses the frozen
+P2/B7 v4 canary catalog images only. Do not wrap this fixture in Docker.

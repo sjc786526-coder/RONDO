@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "lock_id": "multi-m5-runtime-v1",
+  "status": "frozen",
+  "product": "rondo-multi",
+  "source_commit": "7a2ff684c504c7530660f9a33a372daa949bdb00",
+  "rust_target": "x86_64-unknown-linux-musl",
+  "measurement_worktree": ".claude/worktrees/044-m5-multi-bundle-measurement",
+  "bundle_dir_name": "7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle",
+  "bundle_relpath": "eval-data/bin/rondo-multi/7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle",
+  "codex_sha256": "2f5f25e01c17a7be35c52cd6138a0c50c48d82721ba4ee6e0123c859a01f0c32",
+  "code_mode_host_sha256": "eb54cac2b93d3ed0fbdbd8f5924717b4acf02bc6ee5c3ac0f05e7b2fe5146705",
+  "bwrap_sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+  "manifest_sha256": "1c782d1d1e47ff3fc964bbc3df2fab8dc7243183fa6d43a01b74227b604f6769",
+  "codex_baseline": {
+    "product": "codex",
+    "source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+    "bundle_dir_name": "rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle",
+    "bundle_relpath": "eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle",
+    "codex_sha256": "8bd5f096af8302c0d5bf272a15a563d243fe77e8b704b749321a437c815f1a80",
+    "code_mode_host_sha256": "93e16201d425f9024992052dd0e9c44ef5c5a639807be196a017be3aca9be56a",
+    "bwrap_sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+    "manifest_sha256": "e13a9d0fe8c51ab09ea4552749afb437db6915eb2b069291c918ebf8075b5981"
+  }
+}

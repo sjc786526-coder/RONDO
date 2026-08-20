@@ -1213,7 +1213,10 @@ def _validate_rondo_source(source: Path, commit: str, layout: ProductLayout) -> 
     if _git(source, "status", "--porcelain=v1", "--untracked-files=all"):
         raise BinaryFreezeError("RONDO measurement source is dirty")
     lock = _regular_file(source / layout.source_dir / "codex-rs" / "Cargo.lock")
-    if _sha256_file(lock) != NORMALIZED_LOCK_SHA256:
+    # Local must still pin the frozen 0.147.0 lock. Multi added `codex-team-state`
+    # and therefore cannot share that checksum; the detached measurement commit
+    # is the lock identity for that product.
+    if layout.product is Product.RONDO_LOCAL and _sha256_file(lock) != NORMALIZED_LOCK_SHA256:
         raise BinaryFreezeError("RONDO Cargo lock differs from the frozen 0.147.0 lock")
 
 
@@ -1656,9 +1659,21 @@ def _validate_build_environment(
     }
     if require_eval_pythonpath:
         required.add("PYTHONPATH")
-    allowed = required | {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
+    # CARGO_BUILD_JOBS is optional on every product. The host MemAvailable
+    # floor is machine-wide; recording a small integer is freeze identity
+    # for that cap, not a secret. Multi musl release is what first needed it.
+    allowed = required | {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "CARGO_BUILD_JOBS",
+    }
     if set(environment) - allowed or not required.issubset(environment):
         raise BinaryFreezeError("build environment differs from the non-secret allowlist")
+    jobs = environment.get("CARGO_BUILD_JOBS")
+    if jobs is not None and (not jobs.isdigit() or not 1 <= int(jobs) <= 8):
+        raise BinaryFreezeError("build job count must be an integer from 1 to 8")
     if require_eval_pythonpath and environment["PYTHONPATH"] != str(EVAL_ROOT):
         raise BinaryFreezeError("build command Python path differs from the eval-owned V8 gate")
     if environment["HOME"] != os.environ.get("HOME") or environment["PATH"] != os.environ.get("PATH"):

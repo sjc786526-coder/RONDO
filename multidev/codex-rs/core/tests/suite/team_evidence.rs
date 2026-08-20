@@ -15,6 +15,7 @@ use codex_features::Feature;
 use core_test_support::hooks::trust_discovered_hooks;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
+use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
@@ -39,6 +40,25 @@ const FAILING_MARKER: &str = "RONDO-EVIDENCE-FAILING";
 const NEIGHBOUR_MARKER: &str = "RONDO-EVIDENCE-NEIGHBOUR";
 const WORKER_MARKER: &str = "RONDO-EVIDENCE-WORKER";
 const UNSHARED_MARKER: &str = "RONDO-EVIDENCE-UNSHARED";
+
+fn clear_loopback_proxy() {
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+    unsafe {
+        std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+        std::env::set_var("no_proxy", "127.0.0.1,localhost");
+    }
+}
 
 // --- request inspection -------------------------------------------------------------------
 
@@ -74,6 +94,36 @@ fn has_output_in(body: &Value, call_id: &str) -> bool {
 
 fn has_output(request: &wiremock::Request, call_id: &str) -> bool {
     serde_json::from_slice::<Value>(&request.body).is_ok_and(|body| has_output_in(&body, call_id))
+}
+
+fn custom_output_texts_in<'a>(body: &'a Value, call_id: &str) -> Vec<&'a str> {
+    let Some(output) = input_items(body).iter().find(|item| {
+        item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")
+            && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+    }) else {
+        return Vec::new();
+    };
+    match output.get("output") {
+        Some(Value::String(text)) => vec![text],
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.get("text").and_then(Value::as_str))
+            .collect(),
+        Some(Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_)) | None => {
+            Vec::new()
+        }
+    }
+}
+
+fn has_custom_output_in(body: &Value, call_id: &str) -> bool {
+    !custom_output_texts_in(body, call_id).is_empty()
+}
+
+fn custom_tool_json_in(body: &Value, call_id: &str) -> Option<Value> {
+    custom_output_texts_in(body, call_id)
+        .into_iter()
+        .rev()
+        .find_map(|text| serde_json::from_str(text).ok())
 }
 
 /// The raw text a tool returned, read off the `function_call_output` that carries it.
@@ -153,7 +203,7 @@ async fn request_log(server: &wiremock::MockServer) -> Vec<Value> {
 fn first_where<'a>(log: &'a [Value], label: &str, predicate: impl Fn(&Value) -> bool) -> &'a Value {
     log.iter()
         .find(|body| predicate(body))
-        .unwrap_or_else(|| panic!("no request {label}"))
+        .unwrap_or_else(|| panic!("no request {label}; request log: {log:#?}"))
 }
 
 /// Wait for the model to see a request satisfying `predicate`, then return it.
@@ -249,6 +299,7 @@ fn say(id: &str, message: &str) -> String {
 }
 
 fn team_enabled_codex() -> core_test_support::test_codex::TestCodexBuilder {
+    clear_loopback_proxy();
     test_codex()
         .with_model("gpt-5.6-sol")
         .with_config(|config| {
@@ -263,6 +314,176 @@ fn team_enabled_codex() -> core_test_support::test_codex::TestCodexBuilder {
             config.multi_agent_v2.team_state_enabled = true;
             config.multi_agent_v2.max_concurrent_threads_per_session = 3;
         })
+}
+
+fn team_enabled_code_mode_codex() -> core_test_support::test_codex::TestCodexBuilder {
+    team_enabled_codex()
+        .with_model("test-gpt-5.1-codex")
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::CodeModeOnly)
+                .expect("test config allows feature updates");
+            config.multi_agent_v2.non_code_mode_only = false;
+        })
+}
+
+/// A code-mode-only participant can anchor the retained outer cell result even though the shell
+/// call inside the cell is deliberately not recorded as a separate fact. This is the production
+/// shape used by M-5: the next publish attaches the cell fact, and a later drill-down reads the
+/// complete plaintext observation back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_all_text_code_mode_cell_is_retained_attached_and_read_back() -> Result<()> {
+    skip_if_target_windows!(Ok(()), "uses a POSIX shell command fixture");
+    let server = start_mock_server().await;
+
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| body_contains(request, ROOT_PROMPT),
+        sse(vec![
+            ev_response_created("cell-read-response"),
+            ev_custom_tool_call(
+                "cell-read",
+                "exec",
+                r#"
+const result = await tools.exec_command({ cmd: "printf RONDO-CODE-MODE-EVIDENCE" });
+text(result.output);
+"#,
+            ),
+            ev_completed("cell-read-response"),
+        ]),
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_custom_output_in(&body(request), "cell-read"),
+        sse(vec![
+            ev_response_created("cell-publish-response"),
+            ev_custom_tool_call(
+                "cell-publish",
+                "exec",
+                r#"
+const names = ["collaboration__team_publish", "team_publish"];
+const publish = names.map(name => tools[name]).find(fn => typeof fn === "function");
+if (!publish) throw new Error("team_publish is unavailable in code mode");
+const result = await publish({
+  title: "code-mode evidence",
+  summary: "the retained outer cell carries the observation"
+});
+text(JSON.stringify(result));
+"#,
+            ),
+            ev_completed("cell-publish-response"),
+        ]),
+    )
+    .await;
+    mount_sse_once_match_with(
+        &server,
+        |request: &wiremock::Request| has_custom_output_in(&body(request), "cell-publish"),
+        |request: &wiremock::Request| {
+            let published = custom_tool_json_in(&body(request), "cell-publish")
+                .expect("team_publish returned JSON through the cell");
+            let fact_id = published["evidence_refs"]
+                .as_array()
+                .and_then(|refs| refs.first())
+                .and_then(Value::as_str)
+                .expect("the publish attached the retained cell fact");
+            let source = format!(
+                r#"
+const names = ["collaboration__team_evidence", "team_evidence"];
+const read = names.map(name => tools[name]).find(fn => typeof fn === "function");
+if (!read) throw new Error("team_evidence is unavailable in code mode");
+const result = await read({{ fact_id: {fact_id:?} }});
+text(JSON.stringify(result));
+"#
+            );
+            sse(vec![
+                ev_response_created("cell-evidence-response"),
+                ev_custom_tool_call("cell-evidence", "exec", &source),
+                ev_completed("cell-evidence-response"),
+            ])
+        },
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| has_custom_output_in(&body(request), "cell-evidence"),
+        sse(vec![
+            ev_response_created("cell-team-only-publish-response"),
+            ev_custom_tool_call(
+                "cell-team-only-publish",
+                "exec",
+                r#"
+const names = ["collaboration__team_publish", "team_publish"];
+const publish = names.map(name => tools[name]).find(fn => typeof fn === "function");
+if (!publish) throw new Error("team_publish is unavailable in code mode");
+const result = await publish({
+  title: "team-only follow-up",
+  summary: "team-only cells must not recursively create evidence"
+});
+text(JSON.stringify(result));
+"#,
+            ),
+            ev_completed("cell-team-only-publish-response"),
+        ]),
+    )
+    .await;
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            has_custom_output_in(&body(request), "cell-team-only-publish")
+        },
+        say("code-mode-done", "read the retained cell evidence"),
+    )
+    .await;
+
+    let test = team_enabled_code_mode_codex().build(&server).await?;
+    test.submit_turn(ROOT_PROMPT).await?;
+
+    let log = request_log(&server).await;
+    let published = custom_tool_json_in(
+        first_where(&log, "carrying the code-mode publish", |body| {
+            has_custom_output_in(body, "cell-publish")
+        }),
+        "cell-publish",
+    )
+    .expect("team_publish returned JSON through the cell");
+    assert_eq!(
+        published["evidence_refs"].as_array().map(Vec::len),
+        Some(1),
+        "only the retained outer cell, not its nested shell call, becomes evidence"
+    );
+
+    let evidence = custom_tool_json_in(
+        first_where(&log, "carrying the code-mode evidence read", |body| {
+            has_custom_output_in(body, "cell-evidence")
+        }),
+        "cell-evidence",
+    )
+    .expect("team_evidence returned JSON through the cell");
+    assert_eq!(evidence["availability"], json!("available"));
+    assert_eq!(evidence["tool"], json!("exec"));
+    assert!(
+        evidence["observation"]
+            .as_str()
+            .is_some_and(|text| text.contains("RONDO-CODE-MODE-EVIDENCE")),
+        "the fact resolves to the plaintext output retained for the outer cell: {evidence:?}"
+    );
+
+    let team_only_publish = custom_tool_json_in(
+        first_where(&log, "carrying the team-only follow-up publish", |body| {
+            has_custom_output_in(body, "cell-team-only-publish")
+        }),
+        "cell-team-only-publish",
+    )
+    .expect("the team-only follow-up publish returned JSON through the cell");
+    assert_eq!(
+        team_only_publish["evidence_refs"].as_array().map(Vec::len),
+        Some(0),
+        "neither the earlier team_publish cell nor the team_evidence cell may mint another fact"
+    );
+
+    Ok(())
 }
 
 /// The whole single-agent chain over the real runtime: two real tool results — one that succeeded and

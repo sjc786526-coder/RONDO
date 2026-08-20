@@ -115,11 +115,17 @@ def run_provider_probes(
     api_key: str,
     *,
     output_root: Path,
+    model_id: str | None = None,
     _transport: _UrllibTransport | None = None,
 ) -> dict[str, object]:
-    """Run one main and one Guardian-shaped request through the budget proxy."""
+    """Run one main and one Guardian-shaped request through the budget proxy.
 
-    provider = config.paid_provider_projection()
+    ``model_id`` pins an exact model instead of the host-wide `main_model`
+    alias, so a campaign that froze its own model probes the model it will
+    actually spend on.
+    """
+
+    provider = config.paid_provider_projection(model_id=model_id)
     base_url = provider.base_url
     output_root = Path(output_root)
     if output_root.exists() or output_root.is_symlink():

@@ -1340,10 +1340,6 @@ class MultiProductFreezeTests(unittest.TestCase):
         )
         _write_watchdog_summary(self.common)
         self.lock_sha = hashlib.sha256(self.lock).hexdigest()
-        self.constants = mock.patch.object(
-            binary_freeze, "NORMALIZED_LOCK_SHA256", self.lock_sha
-        )
-        self.constants.start()
         self.portable = mock.patch.object(binary_freeze, "_validate_static_musl_binary")
         self.portable.start()
         self.source_identity = mock.patch.object(
@@ -1354,7 +1350,6 @@ class MultiProductFreezeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.source_identity.stop()
         self.portable.stop()
-        self.constants.stop()
         self.temporary.cleanup()
 
     def _prepare(self) -> object:
@@ -1458,6 +1453,34 @@ class MultiProductFreezeTests(unittest.TestCase):
             _load_manifest(runtime / "manifest.json", self.common).product,
             Product.RONDO_MULTI.value,
         )
+
+    def test_multi_lock_may_differ_from_the_local_normalized_lock(self) -> None:
+        self.assertNotEqual(self.lock_sha, binary_freeze.NORMALIZED_LOCK_SHA256)
+        with mock.patch.object(binary_freeze, "NORMALIZED_LOCK_SHA256", "0" * 64):
+            result = self._prepare()
+        self.assertEqual(result.product, Product.RONDO_MULTI.value)
+
+    def test_multi_may_cap_cargo_jobs_to_fit_the_host_memory_floor(self) -> None:
+        command = list(self.command)
+        watchdog = str(self.source / "scripts/with-build-lock.sh")
+        command.insert(command.index(watchdog), "CARGO_BUILD_JOBS=2")
+        result = prepare(
+            self.request,
+            command,
+            lease_factory=_lease_factory,
+            toolchain_probe=lambda: TOOLCHAIN,
+        )
+        self.assertEqual(result.product, Product.RONDO_MULTI.value)
+        for invalid in ("0", "9", "2.0", ""):
+            bad = list(self.command)
+            bad.insert(bad.index(watchdog), f"CARGO_BUILD_JOBS={invalid}")
+            with self.assertRaises(BinaryFreezeError):
+                prepare(
+                    self.request,
+                    bad,
+                    lease_factory=_lease_factory,
+                    toolchain_probe=lambda: TOOLCHAIN,
+                )
 
     def test_multi_cannot_publish_into_the_historical_local_namespace(self) -> None:
         local_artifact = (

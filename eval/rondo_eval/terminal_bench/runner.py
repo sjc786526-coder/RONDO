@@ -87,6 +87,18 @@ class TerminalBenchRequest:
     frozen_model_catalog_source_commit: str | None = None
     frozen_model_catalog_provenance_sha256: str | None = None
     frozen_task: FrozenTask | None = None
+    # False only for the M-5 gate 2 attribution diagnostic: upstream V2 stays on
+    # and the RONDO team layer is switched off. Never set on a run that produces
+    # a non-degradation observation.
+    team_state_enabled: bool = True
+    # Set only by a campaign that froze its own model. Unset keeps the historical
+    # behaviour of inheriting the machine-wide `paid_eval.main_model` alias, so
+    # the existing single-agent baselines are untouched. When set, the RunSpec,
+    # the adapter argv and the budget proxy all resolve the same model, which is
+    # what makes a pinned campaign runnable beside a differently-pinned one.
+    pinned_model_id: str | None = None
+    pinned_subagent_model: str | None = None
+    pinned_subagent_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +192,17 @@ class PreparedTerminalBenchRun:
     command: HarborCommand
     adapter: UploadBinaryAdapter
     materialized_task: MaterializedTask
+
+    def side_member_model(self) -> str:
+        """The member model this run will actually configure, pinned or default.
+
+        Read from the adapter rather than from the request so a caller checking
+        the contract sees the value that reaches the command line.
+        """
+
+        from ..contracts import AGENT_DEFAULT_SUBAGENT_MODEL
+
+        return self.adapter._subagent_model or AGENT_DEFAULT_SUBAGENT_MODEL
 
     def validate(self) -> None:
         self.spec.validate()
@@ -486,6 +509,7 @@ def prepare_terminal_bench_run(
         terminal_bench_version=TERMINAL_BENCH_VERSION,
         product=request.product,
         provider_name=request.provider_name,
+        model_id=request.pinned_model_id,
         timeout_seconds=request.timeout_seconds,
         max_retries=request.max_retries,
         budget_usd=request.budget_usd,
@@ -494,7 +518,12 @@ def prepare_terminal_bench_run(
     materialized = (materializer or PinnedTaskMaterializer()).materialize(
         source_checkout=Path(request.source_checkout),
         staging_root=Path(request.staging_root),
-        staging_name=f"{request.batch_id}-{request.side.value}-{task_slug}",
+        # The staging directory has to be as unique as the run it stages.
+        # `PinnedTaskMaterializer` refuses to reuse a destination by design, so
+        # a name built only from batch/side/task collides on the second
+        # materialization of the same slot -- which is exactly the infra retry
+        # and the round 2/3 conditional rerun that a degradation verdict needs.
+        staging_name=f"{request.batch_id}-{request.side.value}-{task_slug}-{_staging_suffix(request)}",
         image_digest=image_digest,
         task_label=task_label,
         memory_bytes=request.memory_bytes,
@@ -541,6 +570,9 @@ def prepare_terminal_bench_run(
         frozen_model_catalog_provenance_sha256=(
             request.frozen_model_catalog_provenance_sha256
         ),
+        team_state_enabled=request.team_state_enabled,
+        subagent_model=request.pinned_subagent_model,
+        subagent_effort=request.pinned_subagent_effort,
     )
     trial_name = _trial_name(materialized.task_label, spec.side)
     trials_dir = materialized.task_path.parent / "trials"
@@ -793,6 +825,18 @@ def _compose_run_contract(
         network_names=(network,),
         volume_names=(),
     )
+
+
+def _staging_suffix(request: TerminalBenchRequest) -> str:
+    """A short, stable, filesystem-safe discriminator for one run's staging dir.
+
+    Derived from the Docker task id, which every caller already makes unique per
+    round and attempt. Hashed rather than embedded so a long task id cannot push
+    the staging path past a filesystem limit, and so the name stays safe
+    regardless of what the caller put in the id.
+    """
+
+    return hashlib.sha256(request.docker_task_id.encode("utf-8")).hexdigest()[:12]
 
 
 def _task_label(task_id: str) -> str:

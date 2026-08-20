@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "lock_id": "multi-m5-workflow-v2",
+  "gate": 1,
+  "evidence_kind": "real_api",
+  "carrier": "host_codex_exec",
+  "purpose": "Prove Multi team capability actually runs a collaboration loop with a real model. Not a Terminal-Bench score, and not a claim that Multi is better on hard work.",
+  "scope_limits": {
+    "carrier": "protocol_demonstration",
+    "analytical_load": "none",
+    "notes": "The fixture states the finding outright and the instruction prescribes which tools to call in which order, so gate 1 answers 'does the team machinery actually fire end to end under a real model', not 'does Multi help on a task with real analysis'. Deliberate: decision 010 froze this carrier because a single-operator task lets the model finish alone and never touch a team tool, which would fail gate 1 for task difficulty rather than for a product defect. The WBS phrase 'full collaboration semantics on a real task' is only satisfied by gate 1 and gate 2 read together: gate 1 supplies the collaboration evidence, gate 2 supplies the real tasks. Neither gate alone may be quoted as satisfying it.",
+    "gate2_order_bias": "base_order runs Codex before Multi on every task, so Multi inherits a warmed image. That bias favours Multi, and gate 2 only calls degradation when Codex completes and Multi does not, so it makes the degradation verdict more conservative rather than fabricating one. It does weaken a 'no degradation observed' reading."
+  },
+  "product": "rondo-multi",
+  "fixture_dir": "eval/fixtures/multi-m5-collab-v1",
+  "fixture_notes_sha256": "e13f5b868a84595c9dae0a9b46ed77e702e366ee26982f8aed35eb15dd77d7c8",
+  "instruction_path": "eval/templates/multi-m5/collab-workflow-instruction-v1.md",
+  "instruction_sha256": "b0925723b762e42967944e11a20396e0e4308dfd3a038a1d82d1fd7ceba3d1be",
+  "finding_line": "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042",
+  "report_filename": "TEAM_REPORT.md",
+  "root_model": "gpt-5.6-terra",
+  "member_model": "gpt-5.6-terra",
+  "root_effort": "medium",
+  "member_effort": "medium",
+  "timeout_seconds": 1800,
+  "max_attempts": 3,
+  "max_members": 1,
+  "orphan_retirement_required": false,
+  "docker": false,
+  "evidence_source": {
+    "kind": "code_mode_rollout_trace",
+    "trace_env": "CODEX_ROLLOUT_TRACE_ROOT",
+    "required_tools": [
+      {
+        "namespace": "collaboration",
+        "name": "team_inspect"
+      },
+      {
+        "namespace": "collaboration",
+        "name": "wait_agent"
+      }
+    ],
+    "required_inspect_actions": [
+      "dump",
+      "log"
+    ],
+    "wait_signal": "Wait completed: the team world state changed. The current active view is in this request.",
+    "attribution": "required",
+    "binding": "responses_custom_tool_call_to_code_cell",
+    "notes": "Under tool_mode=code_mode_only the model emits one custom_tool_call named `exec` carrying JavaScript, and every team tool is called from inside that script. The Responses wire therefore carries only what the script printed -- text the model authored about its own tool calls -- so it cannot be the judge's evidence. The judge instead reads the frozen binary's rollout-trace bundle, whose ToolCallStarted/ToolCallEnded pairs are written by the Rust dispatch path and carry the registry's own tool name, namespace, arguments and handler return value. The Responses capture is still required and is used to bind: every judged dispatch must belong to a code cell whose model_visible_call_id appears as a captured custom_tool_call and whose recorded source_js is contained in that call's input, so a bundle from another run cannot be replayed as evidence. Both the team world-state tools and the multi-agent v2 tools are registered through the same namespace override, so the registry reports them under `collaboration` and code mode binds them as `collaboration__<name>`. This was confirmed against the frozen binary by the offline rehearsal, not assumed from the handler's declared plain name. Only a completed team_inspect dispatch yields dump/log rows and only a completed wait_agent dispatch yields a wake signal. TEAM_REPORT is never collaboration evidence. Supersedes multi-m5-workflow-v1, whose responses_function_call_outputs source could not observe a code-mode run at all; v1 archives are not v2 evidence."
+  },
+  "team_capability": {
+    "schema_version": 1,
+    "multi_agent_v2_enabled": true,
+    "team_state_enabled": true,
+    "non_code_mode_only": false,
+    "expose_spawn_agent_model_overrides": false,
+    "override_toml": "{enabled=true,team_state_enabled=true,non_code_mode_only=false,expose_spawn_agent_model_overrides=false}",
+    "default_subagent_model": "gpt-5.6-terra",
+    "default_subagent_reasoning_effort": "medium"
+  },
+  "task_completion": {
+    "report_exists": true,
+    "report_contains_finding_line": true
+  },
+  "collaboration_predicates": [
+    {
+      "id": "spawn_member",
+      "description": "Root spawned exactly one member. Dump has a non-root participant."
+    },
+    {
+      "id": "event_with_two_versions",
+      "description": "The selected Event has two or more Versions."
+    },
+    {
+      "id": "two_authors",
+      "description": "Those Versions on the same Event were written by at least two distinct authors, including the member."
+    },
+    {
+      "id": "team_route",
+      "description": "A route assignment on that Event targets the member."
+    },
+    {
+      "id": "team_evidence",
+      "description": "A member-authored Version on that Event is evidence-backed."
+    },
+    {
+      "id": "root_resolved",
+      "description": "Root set root_state=resolved on a member-authored Version of that Event."
+    },
+    {
+      "id": "root_woken",
+      "description": "Harness evidence shows Root was woken: team_inspect log signalled a Root wake, or wait_agent returned the TeamActivity message."
+    }
+  ],
+  "supersedes": "multi-m5-workflow-v1",
+  "attempts": {
+    "max_attempts": 3,
+    "semantics": "Each attempt is an independent run with its own run id and immutable evidence. A pass stops the gate. An evidence or product failure continues to the next attempt, because gate 1 is a protocol demonstration and a fumbled sequence is exactly what the attempts are for. A budget or authorization stop ends the gate immediately: retrying spends money against a decision already made."
+  }
+}

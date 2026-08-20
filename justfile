@@ -3,24 +3,109 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 # Materialize the ignored, lockfile-frozen eval environment. Keep the uv cache
 # in the repository-level eval-data partition even though uv enters eval/.
 eval-sync:
-    UV_CACHE_DIR="$PWD/eval-data/uv-cache" uv sync --directory eval --frozen --python /usr/bin/python3
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+    UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv sync --directory eval --frozen --python /usr/bin/python3
 
 # Run the pure/fake/loopback suite without inheriting an ambient HTTP proxy.
 eval-test:
-    @test -x eval/.venv/bin/python || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
     env \
         -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
         -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
-        UV_CACHE_DIR="$PWD/eval-data/uv-cache" \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
         uv run --directory eval --frozen --no-sync \
         python -m unittest discover -s tests -v
 
 # Check the eval dependency lock without updating it.
 eval-lock:
-    UV_CACHE_DIR="$PWD/eval-data/uv-cache" uv lock --directory eval --check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        uv lock --directory eval --check
 
 eval-check: eval-lock eval-test
+
+# No-API host drill: frozen Multi binary must register team tools and call team_publish.
+eval-multi-m5-loopback:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.multi_m5 loopback
+
+# Offline gate 1 dress rehearsal: stub plays Root and member against the frozen binary.
+eval-multi-m5-rehearsal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.multi_m5 rehearsal
+
+# Offline M-5 readiness probe. Does not call Docker, APIs, or print secrets.
+eval-multi-m5-ready:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.multi_m5 ready
+
+# Fake gate 2 interleave: schedule, $120 ledger, archive. No Docker.
+eval-multi-m5-gate2-fake:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env \
+        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+        -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.multi_m5 gate2-fake
+
+# Paid entries stay locked. The Python functions exist; these recipes never
+# forward the frozen authorization phrase and never start API or Docker.
+eval-multi-m5-gate1-paid:
+    #!/usr/bin/env bash
+    echo "rondo-multi-m5: paid gate 1 is locked until the user authorizes spending" >&2
+    exit 78
+
+eval-multi-m5-gate2-real:
+    #!/usr/bin/env bash
+    echo "rondo-multi-m5: paid gate 2 is locked until the user authorizes API and Docker" >&2
+    exit 78
 
 # Compare the task-independent partitions of two captured requests. The
 # transport used here refuses to open any upstream connection, so this never

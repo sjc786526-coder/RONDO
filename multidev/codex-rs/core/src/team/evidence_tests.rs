@@ -29,6 +29,172 @@ fn item_id(call_id: &str) -> String {
     format!("fco_{call_id}")
 }
 
+#[test]
+fn code_mode_evidence_survives_the_gap_between_yield_and_the_next_wait() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    recorder.register_output("cell-1", "item-yield");
+    recorder.seal_output("item-yield", CodeModeOutputBoundary::Yielded);
+    assert!(!recorder.take_output_eligibility("item-yield"));
+
+    // The nested call can finish while no model-visible wait item is registered. Its credit belongs
+    // to the next response from this still-live cell rather than being dropped.
+    recorder.mark_eligible("cell-1");
+    recorder.register_output("cell-1", "item-result");
+    recorder.seal_output("item-result", CodeModeOutputBoundary::Terminal);
+
+    assert!(recorder.take_output_eligibility("item-result"));
+}
+
+#[test]
+fn code_mode_evidence_completed_after_a_response_boundary_waits_for_the_next_output() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    recorder.register_output("cell-1", "item-yield");
+    recorder.seal_output("item-yield", CodeModeOutputBoundary::Yielded);
+    recorder.mark_eligible("cell-1");
+
+    assert!(
+        !recorder.take_output_eligibility("item-yield"),
+        "a nested result completed after sealing must not race into the older response"
+    );
+    recorder.register_output("cell-1", "item-result");
+    recorder.seal_output("item-result", CodeModeOutputBoundary::Terminal);
+    assert!(recorder.take_output_eligibility("item-result"));
+}
+
+#[test]
+fn yielded_code_mode_output_discards_even_pre_boundary_credit() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    recorder.register_output("cell-1", "item-yield");
+    recorder.mark_eligible("cell-1");
+    recorder.seal_output("item-yield", CodeModeOutputBoundary::Yielded);
+
+    assert!(
+        !recorder.take_output_eligibility("item-yield"),
+        "the handler cannot prove a pending nested result was present in the remote yield snapshot"
+    );
+    recorder.register_output("cell-1", "item-result");
+    recorder.seal_output("item-result", CodeModeOutputBoundary::Terminal);
+    assert!(
+        !recorder.take_output_eligibility("item-result"),
+        "discarded yield credit must not be reassigned to unrelated terminal content"
+    );
+}
+
+#[test]
+fn code_mode_outputs_with_a_reused_model_call_id_keep_distinct_item_identity() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    // Both outer calls may carry the same model-authored call id. The recorder never sees or keys
+    // on it: harness-minted output item identity keeps the two runtime cells independent.
+    recorder.register_output("cell-a", "item-a");
+    recorder.register_output("cell-b", "item-b");
+    recorder.mark_eligible("cell-a");
+    recorder.seal_output("item-b", CodeModeOutputBoundary::Terminal);
+    recorder.seal_output("item-a", CodeModeOutputBoundary::Terminal);
+
+    assert!(!recorder.take_output_eligibility("item-b"));
+    assert!(recorder.take_output_eligibility("item-a"));
+}
+
+#[test]
+fn discarding_one_pending_code_mode_output_does_not_clear_another() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    recorder.register_output("cell-1", "item-aborted");
+    recorder.register_output("cell-1", "item-kept");
+    recorder.mark_eligible("cell-1");
+    recorder.seal_output("item-kept", CodeModeOutputBoundary::Terminal);
+    recorder.discard_output("item-aborted");
+
+    assert!(recorder.take_output_eligibility("item-kept"));
+}
+
+#[test]
+fn discarding_the_last_cancelled_output_cleans_a_nonterminal_cell() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    recorder.register_output("cell-cancelled", "item-cancelled");
+    recorder.mark_eligible("cell-cancelled");
+    recorder.discard_output("item-cancelled");
+
+    let state = recorder
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(state.cells.is_empty());
+    assert!(state.item_cells.is_empty());
+    assert!(state.sealed_items.is_empty());
+    assert!(state.terminal_cells.is_empty());
+}
+
+#[test]
+fn terminal_code_mode_output_cleans_up_the_cell_after_its_last_item() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    recorder.register_output("cell-1", "item-result");
+    recorder.mark_eligible("cell-1");
+    recorder.seal_output("item-result", CodeModeOutputBoundary::Terminal);
+    assert!(recorder.take_output_eligibility("item-result"));
+
+    let state = recorder
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(state.cells.is_empty());
+    assert!(state.item_cells.is_empty());
+    assert!(state.sealed_items.is_empty());
+    assert!(state.terminal_cells.is_empty());
+}
+
+#[test]
+fn unavailable_code_mode_output_never_uses_pending_credit_and_cleans_up() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    recorder.register_output("missing-cell", "item-missing");
+    recorder.mark_eligible("missing-cell");
+    recorder.seal_output("item-missing", CodeModeOutputBoundary::Unavailable);
+
+    assert!(
+        !recorder.take_output_eligibility("item-missing"),
+        "a generic missing-cell response has no proven provenance boundary"
+    );
+    let state = recorder
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(state.cells.is_empty());
+    assert!(state.item_cells.is_empty());
+    assert!(state.sealed_items.is_empty());
+    assert!(state.terminal_cells.is_empty());
+}
+
+#[test]
+fn retryable_wait_error_keeps_only_a_previously_known_live_cell() {
+    let recorder = CodeModeEvidenceRecorder::default();
+
+    assert!(!recorder.register_output("cell-live", "item-yield"));
+    recorder.seal_output("item-yield", CodeModeOutputBoundary::Yielded);
+    assert!(!recorder.take_output_eligibility("item-yield"));
+    assert!(recorder.register_output("cell-live", "item-retry-error"));
+    // The dispatch failure is retained by the host and consumes this unsealed item. The known cell
+    // remains so a later successful wait can still receive new nested provenance.
+    assert!(!recorder.take_output_eligibility("item-retry-error"));
+
+    assert!(!recorder.register_output("cell-unknown", "item-unknown-error"));
+    recorder.seal_output("item-unknown-error", CodeModeOutputBoundary::Unavailable);
+    assert!(!recorder.take_output_eligibility("item-unknown-error"));
+
+    let state = recorder
+        .state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(state.cells.contains_key("cell-live"));
+    assert!(!state.cells.contains_key("cell-unknown"));
+}
+
 fn assistant_message(text: &str) -> ResponseItem {
     ResponseItem::Message {
         id: None,
@@ -102,7 +268,53 @@ fn the_support_set_is_completed_text_tool_results_and_nothing_else() {
         Some(("call-custom".to_string(), FactCategory::ToolResultSuccess))
     );
 
-    // Everything outside the first version's support set.
+    let code_mode_text = ResponseItem::CustomToolCallOutput {
+        id: None,
+        call_id: "call-code-mode".to_string(),
+        name: Some("exec".to_string()),
+        output: FunctionCallOutputPayload {
+            body: FunctionCallOutputBody::ContentItems(vec![
+                FunctionCallOutputContentItem::InputText {
+                    text: "Script completed".to_string(),
+                },
+                FunctionCallOutputContentItem::InputText {
+                    text: "finding".to_string(),
+                },
+            ]),
+            success: Some(true),
+        },
+        internal_chat_message_metadata_passthrough: None,
+    };
+    let observation =
+        supported_observation(&code_mode_text).expect("an all-text code-mode result is evidence");
+    assert_eq!(observation.call_id, "call-code-mode");
+    assert_eq!(observation.category, FactCategory::ToolResultSuccess);
+    assert_eq!(observation.text, "Script completed\nfinding");
+
+    assert_eq!(
+        supported(&ResponseItem::CustomToolCallOutput {
+            id: None,
+            call_id: "call-encrypted".to_string(),
+            name: Some("exec".to_string()),
+            output: FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::ContentItems(vec![
+                    FunctionCallOutputContentItem::InputText {
+                        text: "Script completed".to_string(),
+                    },
+                    FunctionCallOutputContentItem::EncryptedContent {
+                        encrypted_content: "opaque".to_string(),
+                    },
+                ]),
+                success: Some(true),
+            },
+            internal_chat_message_metadata_passthrough: None,
+        }),
+        None,
+        "an encrypted content part keeps the complete cell outside the evidence support set"
+    );
+
+    // Mixed content is outside the support set: discarding its non-text part would make the evidence
+    // read differ from what the model actually saw.
     assert_eq!(
         supported(&ResponseItem::FunctionCallOutput {
             id: None,
@@ -112,13 +324,17 @@ fn the_support_set_is_completed_text_tool_results_and_nothing_else() {
                     FunctionCallOutputContentItem::InputText {
                         text: "described".to_string(),
                     },
+                    FunctionCallOutputContentItem::InputImage {
+                        image_url: "data:image/png;base64,AA==".to_string(),
+                        detail: None,
+                    },
                 ]),
                 success: Some(true),
             },
             internal_chat_message_metadata_passthrough: None,
         }),
         None,
-        "the content-item shape is what carries media, so it is excluded whole"
+        "a mixed text-and-media observation is excluded whole"
     );
     assert_eq!(supported(&assistant_message("what I think")), None);
     assert_eq!(

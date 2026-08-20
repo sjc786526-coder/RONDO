@@ -1,0 +1,243 @@
+{
+  "schema_version": 1,
+  "lock_id": "multi-m5-nondegradation-v4",
+  "gate": 2,
+  "evidence_kind": "real_api",
+  "runner": "light_interleaved",
+  "purpose": "Fixed ten-task Codex vs Multi completion check. No sigma, no delta, no v7 campaign.",
+  "catalog_path": "eval/tasksets/p2-b7-canary-catalog-v4.json",
+  "catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf",
+  "taskset_sha256": "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b",
+  "terminal_bench_commit": "ffccbe05ee73a9d59518217f294ad711bda39304",
+  "tasks": [
+    "terminal-bench/db-wal-recovery",
+    "terminal-bench/extract-elf",
+    "terminal-bench/filter-js-from-html",
+    "terminal-bench/fix-git",
+    "terminal-bench/headless-terminal",
+    "terminal-bench/openssl-selfsigned-cert",
+    "terminal-bench/polyglot-c-py",
+    "terminal-bench/sanitize-git-repo",
+    "terminal-bench/sqlite-db-truncate",
+    "terminal-bench/vulnerable-secret"
+  ],
+  "interleave": "task_major_codex_then_multi",
+  "base_order": [
+    {
+      "task_id": "terminal-bench/db-wal-recovery",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/db-wal-recovery",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/extract-elf",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/extract-elf",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/filter-js-from-html",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/filter-js-from-html",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/fix-git",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/fix-git",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/headless-terminal",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/headless-terminal",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/openssl-selfsigned-cert",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/openssl-selfsigned-cert",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/polyglot-c-py",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/polyglot-c-py",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/sanitize-git-repo",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/sanitize-git-repo",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/sqlite-db-truncate",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/sqlite-db-truncate",
+      "side": "rondo",
+      "product": "rondo-multi"
+    },
+    {
+      "task_id": "terminal-bench/vulnerable-secret",
+      "side": "codex",
+      "product": null
+    },
+    {
+      "task_id": "terminal-bench/vulnerable-secret",
+      "side": "rondo",
+      "product": "rondo-multi"
+    }
+  ],
+  "root_model": "gpt-5.6-terra",
+  "member_model": "gpt-5.6-terra",
+  "root_effort": "medium",
+  "member_effort": "medium",
+  "provider": "relay",
+  "provider_api": "responses",
+  "provider_base_url": "https://www.cctq.ai/v1",
+  "provider_max_attempts": 5,
+  "provider_unbilled_retry_statuses": [
+    429,
+    500,
+    502,
+    503,
+    504
+  ],
+  "timeouts_from_catalog": true,
+  "max_requests_per_run": 80,
+  "base_effective_runs": 20,
+  "conditional_rerun": {
+    "trigger": "codex_completed_multi_incomplete",
+    "extra_effective_pairs_per_triggered_task": 2,
+    "both_sides": true
+  },
+  "max_effective_runs": 60,
+  "infra": {
+    "max_slot_attempts": 3,
+    "max_infra_attempts_total": 12,
+    "infra_does_not_count_as_effective": true
+  },
+  "degradation_rule": "A task is stable one-way degradation only when all three effective observations are Codex completed and Multi incomplete. Incomplete evidence is uncertain, not a pass.",
+  "team_capability_on_multi_only": true,
+  "attribution": {
+    "codex_collab": "default_on",
+    "codex_multi_agent_v2": "default_off",
+    "multi_enables": [
+      "Feature::MultiAgentV2",
+      "team_state_enabled"
+    ],
+    "comparison": "Multi runs upstream V2 plus RONDO team state; Codex runs upstream default V1. This is the product under test, not a fairness defect.",
+    "if_stable_one_way_degradation": "Before attributing a failure to the team layer, run a diagnostic_v2_on_team_state_off slot on the same task. Do not pre-run that diagnostic.",
+    "diagnostic": {
+      "id": "diagnostic_v2_on_team_state_off",
+      "runs_when": "that task's verdict is stable_one_way_degradation",
+      "pre_run_forbidden": true,
+      "side": "rondo",
+      "product": "rondo-multi",
+      "slots_per_degraded_task": 1,
+      "max_slots": 10,
+      "round_index": 4,
+      "counts_as_effective": false,
+      "multi_agent_v2": "on",
+      "team_state_enabled": false,
+      "shares_batch_budget": true,
+      "shares_stop_lines": true,
+      "verdict_effect": "none"
+    }
+  },
+  "price_snapshot": {
+    "date": "2026-08-18",
+    "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+    "pricing_page_url": "https://developers.openai.com/api/docs/pricing",
+    "model_id": "gpt-5.6-terra",
+    "input_usd_per_million": "2",
+    "cached_input_usd_per_million": "0.2",
+    "output_usd_per_million": "12",
+    "long_context_threshold_tokens": 272000,
+    "long_context_input_multiplier": "2",
+    "long_context_output_multiplier": "1.5",
+    "cache_write_input_multiplier": "1.25"
+  },
+  "cost_forecast": {
+    "basis": {
+      "codex_run_usd": "0.18",
+      "multi_run_usd": "0.54",
+      "gate1_attempt_usd": "3.20",
+      "notes": "v19 canary measured ~USD 0.45 per Codex/Local Terminal-Bench run on gpt-5.6-sol; gpt-5.6-terra lists at 40% of those rates (2/0.2/12 against 5/0.5/30), giving ~USD 0.18 per Codex run. Multi spawn overhead is modelled at 3x. Gate 1 is modelled at USD 3.20 per attempt."
+    },
+    "point_estimate_usd": "10.40",
+    "worst_legal_usd": "43.08",
+    "request_reservation_usd": "2.22",
+    "gate1_run_spend_allowance_usd": "12.00",
+    "gate2_run_spend_allowance_usd": "4.00",
+    "hard_cap_usd": "120.00",
+    "ledger_batch_id": "multi-m5-phase-b",
+    "notes": "Point estimate is the 20 base runs plus one successful gate 1 attempt. Worst legal adds 40 conditional runs, 12 infra retries priced as the dearer Multi side, the other two gate 1 attempts, and one attribution diagnostic per task. Both numbers are recomputed from `basis` by rondo_eval.multi_m5.budget.cost_forecast_usd and the loader rejects a lock whose declared values differ. Per-run caps are peak in-flight reservations plus the gate's spend allowance; the batch hard cap is what actually bounds the campaign."
+  },
+  "docker_images": [
+    "alexgshaw/db-wal-recovery@sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",
+    "alexgshaw/extract-elf@sha256:6932e4cb318464307eacd497ef8dc617eaf551b6a90231f815ec0b911895cfed",
+    "alexgshaw/filter-js-from-html@sha256:92acda0f124b988036a6f426ce0bc47fac19f5efe9fc5e6ea3ea52ccb075d0a4",
+    "alexgshaw/fix-git@sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74",
+    "alexgshaw/headless-terminal@sha256:eb7e209672bf6cef2785fafd9e13509b10626c327bcc2b37f5bf40ca83eaf3aa",
+    "alexgshaw/openssl-selfsigned-cert@sha256:4c948a4e630af2435ae0a19108fc0814a946ac2fa29a512469e0fc77b38c8c12",
+    "alexgshaw/polyglot-c-py@sha256:0f1c3b7816d70cf5551573fd6aeef76893f2ae3000be2419997b6871b5d987ed",
+    "alexgshaw/sanitize-git-repo@sha256:4b5234da5bb0d67f3b0bf8db40a2883c07a5219f62b64c2bf9ff1ac84cd0f672",
+    "alexgshaw/sqlite-db-truncate@sha256:aabac93c93bd1f310e6a6fb893911d7735026ed18491c72133c9196a09092ca4",
+    "alexgshaw/vulnerable-secret@sha256:61ebb40454dd103aa2f7e71ad6dafd91cf2b301e6bb07e69d5b472412d1ee15b"
+  ],
+  "supersedes": "multi-m5-nondegradation-v3",
+  "usage_envelope": {
+    "max_input_tokens": 272000,
+    "max_output_tokens": 128000,
+    "basis": "Frozen upstream models.json pins gpt-5.6-terra at context_window=max_context_window=272000, so one request's prompt cannot exceed that. Output is bounded by the generic Usage contract's 128000, which is the tighter of the two limits and is already refused above. The generic contract also admits 1050000 input tokens, which is why a reservation sized for it is not an upper bound on a terra request."
+  },
+  "concurrency": {
+    "max_concurrent_main_requests": 4,
+    "guardian_reserved_slots": 1,
+    "basis": "features.multi_agent_v2.max_concurrent_threads_per_session defaults to 4 in the frozen product, i.e. Root plus three simultaneously executing members. The budget proxy enforces the same number, so a fifth concurrent main is refused by the harness instead of silently costing money."
+  },
+  "runtime_lock_id": "multi-m5-runtime-v3",
+  "provider_retry_backoff_seconds": "2",
+  "unpriced_settlement": {
+    "unpriced_stop_threshold": 1,
+    "any_unpriced_invalidates_observation": true,
+    "basis": "A settlement with no usage is charged its full reservation, so the batch stops after the first one. Independently of stopping, any tainted run is not evidence: gate 1 reads infra_failed and gate 2 sets counts_as_effective=false. The threshold decides whether the batch may continue; it never decides whether an observation counts."
+  }
+}

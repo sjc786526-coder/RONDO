@@ -65,6 +65,8 @@ pub struct ToolInvocation {
     pub cancellation_token: CancellationToken,
     pub tracker: SharedTurnDiffTracker,
     pub call_id: String,
+    /// Harness-minted identity of the model-visible output item, absent for nested code-mode calls.
+    pub output_item_id: Option<String>,
     pub tool_name: ToolName,
     pub source: ToolCallSource,
     pub payload: ToolPayload,

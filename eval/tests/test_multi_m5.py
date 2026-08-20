@@ -1,0 +1,1227 @@
+from __future__ import annotations
+
+import copy
+import json
+import sys
+import tempfile
+import unittest
+from http.client import HTTPConnection
+from pathlib import Path
+
+EVAL_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(EVAL_ROOT))
+
+from rondo_eval.contracts import (  # noqa: E402
+    Product,
+    Side,
+    TEAM_CAPABILITY_MULTI_TOML,
+    team_capability_override_items,
+)
+from rondo_eval.multi_m5.archive import archive_record, required_archive_fields  # noqa: E402
+from rondo_eval.multi_m5.load import (  # noqa: E402
+    RUNTIME_LOCK_ID,
+    M5ContractError,
+    load_nondegradation_contract,
+    load_runtime_identity,
+    load_workflow_contract,
+)
+from rondo_eval.multi_m5.loopback import (  # noqa: E402
+    LOOPBACK_BEARER,
+    LOOPBACK_CALL_ID,
+    LOOPBACK_MODEL,
+    REQUIRED_TOOL_NAMES,
+    TeamPublishFakeServer,
+    build_loopback_command,
+    collect_code_mode_tool_names,
+    collect_registered_tool_names,
+    collect_tool_names,
+    team_capability_command_fragment,
+)
+from rondo_eval.multi_m5.collect import (  # noqa: E402
+    WAIT_TEAM_ACTIVITY_MARK,
+    collect_gate1_evidence,
+    member_message_delivery,
+)
+from rondo_eval.multi_m5.predicates import evaluate_collaboration  # noqa: E402
+from rondo_eval.multi_m5.schedule import (  # noqa: E402
+    base_slots,
+    conditional_slots,
+    degradation_on_task,
+)
+
+
+FINDING = "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042"
+# The first Multi source that retains a terminal code-mode result only after a
+# supported non-team nested dispatch and cannot recursively mint evidence from
+# team-only cells. Earlier frozen runs keep their original runtime identity.
+MULTI_SOURCE_COMMIT = "0eee6dc5ee69f0eca9e1db350148c423a2b2bf67"
+
+
+class MultiM5ContractTests(unittest.TestCase):
+    def test_workflow_lock_matches_fixtures_and_adapter_override(self) -> None:
+        contract = load_workflow_contract()
+        self.assertFalse(contract.docker)
+        self.assertEqual(contract.finding_line, FINDING)
+        self.assertEqual(contract.override_toml, TEAM_CAPABILITY_MULTI_TOML)
+        self.assertEqual(
+            contract.predicate_ids,
+            (
+                "spawn_member",
+                "event_with_two_versions",
+                "two_authors",
+                "team_route",
+                "team_evidence",
+                "root_resolved",
+                "root_woken",
+            ),
+        )
+        # Unpinned, a Multi run inherits the machine-wide member default. That
+        # default stays on the host's model so campaigns frozen before pinning
+        # existed keep their identity; M-5 passes its own from the lock.
+        self.assertEqual(
+            team_capability_override_items(Product.RONDO_MULTI),
+            (
+                f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
+                'agents.default_subagent_model="gpt-5.6-sol"',
+                'agents.default_subagent_reasoning_effort="medium"',
+            ),
+        )
+        self.assertEqual(
+            team_capability_override_items(
+                Product.RONDO_MULTI,
+                subagent_model=contract.member_model,
+                subagent_effort=contract.raw["member_effort"],
+            ),
+            (
+                f"features.multi_agent_v2={TEAM_CAPABILITY_MULTI_TOML}",
+                'agents.default_subagent_model="gpt-5.6-terra"',
+                'agents.default_subagent_reasoning_effort="medium"',
+            ),
+        )
+        self.assertEqual(team_capability_override_items(Product.RONDO_LOCAL), ())
+        self.assertEqual(team_capability_override_items(None), ())
+
+    def test_nondegradation_lock_is_task_major_codex_then_multi(self) -> None:
+        contract = load_nondegradation_contract()
+        workflow = load_workflow_contract()
+        self.assertEqual(workflow.max_attempts, 6)
+        self.assertEqual(contract.max_slot_attempts, 5)
+        self.assertEqual(contract.max_infra_attempts_total, 40)
+        self.assertEqual(contract.max_effective_runs, 60)
+        self.assertEqual(contract.max_requests_per_run, 80)
+        self.assertEqual(contract.worst_schedule_shape_usd, "67.80")
+        self.assertEqual(contract.hard_cap_usd, "120.00")
+        slots = base_slots(contract)
+        self.assertEqual(len(slots), 20)
+        self.assertEqual(slots[0].side, Side.CODEX)
+        self.assertIsNone(slots[0].product)
+        self.assertEqual(slots[1].side, Side.RONDO)
+        self.assertEqual(slots[1].product, Product.RONDO_MULTI)
+        self.assertEqual(contract.max_effective_runs, 60)
+        self.assertEqual(contract.hard_cap_usd, "120.00")
+        self.assertEqual(len(contract.docker_images), 10)
+        extra = conditional_slots(
+            contract,
+            {
+                contract.tasks[0]: {
+                    "codex": "completed",
+                    "rondo-multi": "agent_failed",
+                }
+            },
+        )
+        self.assertEqual(len(extra), 4)
+        self.assertEqual(extra[0].kind, "conditional")
+        self.assertEqual(
+            len(
+                conditional_slots(
+                    contract,
+                    {
+                        contract.tasks[0]: {
+                            "codex": "completed",
+                            "rondo-multi": "budget_stopped",
+                        }
+                    },
+                )
+            ),
+            4,
+        )
+        self.assertEqual(
+            conditional_slots(contract, {contract.tasks[0]: {"codex": "completed", "rondo-multi": "completed"}}),
+            (),
+        )
+
+    def test_runtime_lock_names_the_frozen_bundle(self) -> None:
+        identity = load_runtime_identity()
+        self.assertEqual(identity.source_commit, MULTI_SOURCE_COMMIT)
+        self.assertTrue(
+            identity.bundle_relpath.endswith(
+                f"{MULTI_SOURCE_COMMIT}-x86_64-unknown-linux-musl-runtime-bundle"
+            )
+        )
+        if identity.status == "pending_freeze":
+            self.assertFalse(identity.frozen)
+            with self.assertRaises(M5ContractError):
+                load_runtime_identity(require_frozen=True, common_root=Path("/tmp"))
+        else:
+            self.assertTrue(identity.frozen)
+            self.assertRegex(identity.codex_sha256 or "", r"^[0-9a-f]{64}$")
+
+
+class MultiM5V5ContractTests(unittest.TestCase):
+    """What v5 froze after the recursive-evidence pagination gap was observed."""
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+
+    def _mutated(self, name: str, **changes: object) -> Path:
+        """Write a copy of a frozen lock with one field changed or removed."""
+
+        document = json.loads((EVAL_ROOT / "locks" / f"{name}.json").read_text("utf-8"))
+        for key, value in changes.items():
+            if value is None:
+                document.pop(key, None)
+            else:
+                document[key] = value
+        target = Path(self.directory.name) / f"{name}.json"
+        target.write_text(json.dumps(document), "utf-8")
+        return target
+
+    def test_both_gate_locks_name_the_new_runtime_bundle(self) -> None:
+        self.assertEqual(load_workflow_contract().raw["runtime_lock_id"], RUNTIME_LOCK_ID)
+        self.assertEqual(
+            load_nondegradation_contract().raw["runtime_lock_id"], RUNTIME_LOCK_ID
+        )
+
+    def test_a_gate_lock_pointing_at_the_old_bundle_is_refused(self) -> None:
+        # runtime-v2 delivers plaintext messages but cannot anchor a normal
+        # completed code-mode cell. Accepting it here would make the member
+        # evidence predicate structurally unreachable again.
+        for name, loader in (
+            ("multi-m5-workflow-v6", load_workflow_contract),
+            ("multi-m5-nondegradation-v6", load_nondegradation_contract),
+        ):
+            with self.subTest(lock=name):
+                path = self._mutated(name, runtime_lock_id="multi-m5-runtime-v2")
+                with self.assertRaises(M5ContractError):
+                    loader(path)
+                path = self._mutated(name, runtime_lock_id=None)
+                with self.assertRaises(M5ContractError):
+                    loader(path)
+
+    def test_gate1_taint_effect_is_frozen(self) -> None:
+        self.assertEqual(load_workflow_contract().raw["infra_taint_effect"], "infra_failed")
+        for value in ("ignored", "counts_as_pass", None):
+            with self.subTest(value=value):
+                path = self._mutated("multi-m5-workflow-v6", infra_taint_effect=value)
+            with self.assertRaises(M5ContractError):
+                load_workflow_contract(path)
+
+    def test_member_message_delivery_contract_is_frozen(self) -> None:
+        path = self._mutated(
+            "multi-m5-workflow-v6",
+            member_message_delivery={
+                "required_status": "plaintext",
+                "encrypted_effect": "agent_failed",
+                "unknown_effect": "infra_failed",
+                "absent_effect": "infra_failed",
+            },
+        )
+        with self.assertRaises(M5ContractError):
+            load_workflow_contract(path)
+
+    def test_retry_backoff_comes_from_the_lock(self) -> None:
+        contract = load_nondegradation_contract()
+        self.assertEqual(contract.retry_backoff_seconds, 2.0)
+        path = self._mutated("multi-m5-nondegradation-v6", provider_retry_backoff_seconds="5")
+        self.assertEqual(load_nondegradation_contract(path).retry_backoff_seconds, 5.0)
+        for value in ("0", "31", "", None):
+            with self.subTest(value=value):
+                path = self._mutated(
+                    "multi-m5-nondegradation-v6", provider_retry_backoff_seconds=value
+                )
+                with self.assertRaises(M5ContractError):
+                    load_nondegradation_contract(path)
+
+    def test_unpriced_settlement_separates_stopping_from_counting(self) -> None:
+        contract = load_nondegradation_contract()
+        self.assertEqual(contract.unpriced_stop_threshold, 1)
+        self.assertIs(
+            contract.raw["unpriced_settlement"]["any_unpriced_invalidates_observation"],
+            True,
+        )
+        block = dict(contract.raw["unpriced_settlement"])
+        for change in (
+            {"unpriced_stop_threshold": 2},
+            {"any_unpriced_invalidates_observation": False},
+            {"basis": "  "},
+            {"note": "extra"},
+        ):
+            with self.subTest(change=change):
+                path = self._mutated(
+                    "multi-m5-nondegradation-v6", unpriced_settlement={**block, **change}
+                )
+                with self.assertRaises(M5ContractError):
+                    load_nondegradation_contract(path)
+        path = self._mutated("multi-m5-nondegradation-v6", unpriced_settlement=None)
+        with self.assertRaises(M5ContractError):
+            load_nondegradation_contract(path)
+
+
+class MultiM5MemberDeliveryTests(unittest.TestCase):
+    """Tell "the member never got a readable task" apart from "it ignored it".
+
+    Both shapes below are the ones the frozen binaries actually emit: the
+    encrypted one was taken from the cm4 capture on the pre-fix bundle, where
+    the plaintext task text was labelled `encrypted_content` and the provider
+    rejected all eight member requests.
+    """
+
+    @staticmethod
+    def _capture(
+        *parts: dict[str, object], author: str = "/root"
+    ) -> str:
+        body = {
+            "input": [
+                {"type": "message", "role": "user", "content": [{"text": "task"}]},
+                {"type": "agent_message", "author": author, "content": list(parts)},
+            ]
+        }
+        return json.dumps(body) + "\n"
+
+    def test_plaintext_parts_are_reported_as_delivered(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "Message Type: NEW_TASK"},
+            {"type": "input_text", "text": "Read NOTES.md and publish the finding."},
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "plaintext",
+                "plaintext_parts": 2,
+                "encrypted_parts": 0,
+                "unknown_parts": 0,
+            },
+        )
+
+    def test_a_plaintext_task_labelled_encrypted_is_reported(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "Message Type: NEW_TASK"},
+            {
+                "type": "encrypted_content",
+                "encrypted_content": "Read NOTES.md and publish the finding.",
+            },
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "encrypted",
+                "plaintext_parts": 1,
+                "encrypted_parts": 1,
+                "unknown_parts": 0,
+            },
+        )
+
+    def test_no_member_request_is_not_a_delivery_success(self) -> None:
+        body = json.dumps({"input": [{"type": "message", "role": "user"}]}) + "\n"
+        self.assertEqual(member_message_delivery(body)["status"], "absent")
+        self.assertEqual(member_message_delivery("")["status"], "absent")
+        # `include: ["reasoning.encrypted_content"]` is a request parameter, not
+        # a message part; matching on the bare word would flag every request.
+        parameterised = json.dumps(
+            {"include": ["reasoning.encrypted_content"], "input": []}
+        )
+        self.assertEqual(member_message_delivery(parameterised)["status"], "absent")
+
+    def test_unparsable_lines_do_not_mask_an_encrypted_part(self) -> None:
+        capture = "not json\n" + self._capture(
+            {"type": "encrypted_content", "encrypted_content": "plain text"}
+        )
+        self.assertEqual(member_message_delivery(capture)["status"], "encrypted")
+
+    def test_a_member_reply_does_not_count_as_delivery_to_the_member(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "I finished the task."},
+            author="/root/worker",
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "absent",
+                "plaintext_parts": 0,
+                "encrypted_parts": 0,
+                "unknown_parts": 0,
+            },
+        )
+
+    def test_an_unknown_root_part_fails_closed_instead_of_counting_as_plaintext(self) -> None:
+        capture = self._capture({"type": "image", "url": "https://invalid.example"})
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "unknown",
+                "plaintext_parts": 0,
+                "encrypted_parts": 0,
+                "unknown_parts": 1,
+            },
+        )
+
+    def test_opposite_directions_do_not_pollute_root_to_member_delivery(self) -> None:
+        capture = self._capture(
+            {"type": "input_text", "text": "Read NOTES.md."}
+        ) + self._capture(
+            {
+                "type": "encrypted_content",
+                "encrypted_content": "member reply",
+            },
+            author="/root/worker",
+        )
+        self.assertEqual(
+            member_message_delivery(capture),
+            {
+                "status": "plaintext",
+                "plaintext_parts": 1,
+                "encrypted_parts": 0,
+                "unknown_parts": 0,
+            },
+        )
+
+
+class MultiM5PredicateTests(unittest.TestCase):
+    def _dump(self) -> dict[str, object]:
+        return {
+            "root_thread_id": "t-root",
+            "entries": [
+                {
+                    "entry": "participant",
+                    "label": "/root",
+                    "thread_id": "t-root",
+                    "role": "root",
+                },
+                {
+                    "entry": "participant",
+                    "label": "/root/worker",
+                    "thread_id": "t-member",
+                    "role": "member",
+                },
+                {"entry": "event", "event_id": "e1", "version_count": 3, "route_count": 1},
+                {
+                    "entry": "version",
+                    "version_id": "v1",
+                    "author": "/root/worker",
+                    "root_state": "resolved",
+                    "fact_ref_count": 1,
+                },
+                {
+                    "entry": "version",
+                    "version_id": "v2",
+                    "author": "/root",
+                    "root_state": "tracking",
+                    "fact_ref_count": 0,
+                },
+                {
+                    "entry": "version",
+                    "version_id": "v3",
+                    "author": "/root/worker",
+                    "root_state": "pending",
+                    "fact_ref_count": 0,
+                },
+                {"entry": "route", "route_id": "r1", "event_id": "e1", "target": "/root/worker"},
+                {"entry": "version_fact", "version_id": "v1", "fact_id": "f1"},
+            ],
+            "log": [
+                {
+                    "revision": 1,
+                    "kind": "publish",
+                    "actor": "/root/worker",
+                    "actor_thread_id": "t-member",
+                    "target": "v1",
+                    "wake": {
+                        "decision": "signalled",
+                        "target": "/root",
+                        "target_thread_id": "t-root",
+                        "rule": "member_publish",
+                    },
+                },
+                {
+                    "revision": 2,
+                    "kind": "publish",
+                    "actor": "/root",
+                    "actor_thread_id": "t-root",
+                    "target": "v2",
+                },
+                {
+                    "revision": 3,
+                    "kind": "route",
+                    "actor": "/root",
+                    "actor_thread_id": "t-root",
+                    "target": "r1",
+                },
+                {
+                    "revision": 5,
+                    "kind": "publish",
+                    "actor": "/root/worker",
+                    "actor_thread_id": "t-member",
+                    "target": "v3",
+                    "wake": {
+                        "decision": "signalled",
+                        "target": "/root",
+                        "target_thread_id": "t-root",
+                        "rule": "member_publish",
+                    },
+                },
+                {
+                    "revision": 6,
+                    "kind": "set_root_state",
+                    "actor": "/root",
+                    "actor_thread_id": "t-root",
+                    "target": "v1",
+                },
+            ],
+            "jsonl_signals": [
+                "Wait completed: the team world state changed. The current active view is in this request."
+            ],
+            "wait_calls": [
+                {
+                    "thread_id": "t-root",
+                    "seq": 1,
+                    "end_seq": 4,
+                    "status": "completed",
+                    "result": {
+                        "message": "Wait completed: the team world state changed. The current active view is in this request."
+                    },
+                }
+            ],
+            "team_publish_calls": [
+                {
+                    "thread_id": "t-member",
+                    "seq": 2,
+                    "end_seq": 3,
+                    "status": "completed",
+                    "arguments": {"title": "finding"},
+                    "result": {
+                        "event_id": "e1",
+                        "version_id": "v1",
+                        "evidence_refs": ["f1"],
+                        "deduplicated": False,
+                    },
+                },
+                {
+                    "thread_id": "t-root",
+                    "seq": 5,
+                    "end_seq": 6,
+                    "status": "completed",
+                    "arguments": {"event_id": "e1"},
+                    "result": {
+                        "event_id": "e1",
+                        "version_id": "v2",
+                        "evidence_refs": [],
+                        "deduplicated": False,
+                    },
+                },
+                {
+                    "thread_id": "t-member",
+                    "seq": 11,
+                    "end_seq": 12,
+                    "status": "completed",
+                    "arguments": {"event_id": "e1"},
+                    "result": {
+                        "event_id": "e1",
+                        "version_id": "v3",
+                        "evidence_refs": [],
+                        "deduplicated": False,
+                    },
+                },
+            ],
+            "team_route_calls": [
+                {
+                    "thread_id": "t-root",
+                    "seq": 7,
+                    "end_seq": 8,
+                    "status": "completed",
+                    "arguments": {"event_id": "e1", "target": "worker"},
+                    "result": {
+                        "route_id": "r1",
+                        "event_id": "e1",
+                        "target": "t-member",
+                        "delivery": "delivered",
+                        "deduplicated": False,
+                    },
+                }
+            ],
+            "team_evidence_calls": [
+                {
+                    "thread_id": "t-member",
+                    "seq": 9,
+                    "end_seq": 10,
+                    "status": "completed",
+                    "arguments": {"fact_id": "f1"},
+                    "result": {
+                        "fact_id": "f1",
+                        "availability": "available",
+                        "producer": "/root/worker",
+                        "tool": "exec",
+                        "category": "tool_result_success",
+                        "truncated": False,
+                        "observation": FINDING,
+                    },
+                }
+            ],
+            "team_update_calls": [
+                {
+                    "thread_id": "t-root",
+                    "seq": 13,
+                    "end_seq": 14,
+                    "status": "completed",
+                    "arguments": {
+                        "targets": [
+                            {
+                                "version_id": "v1",
+                                "expect_root_state": "pending",
+                                "set_root_state": "resolved",
+                            }
+                        ]
+                    },
+                    "result": {
+                        "updated": [
+                            {"version_id": "v1", "root_state": "resolved"}
+                        ]
+                    },
+                }
+            ],
+        }
+
+    def test_complete_dump_and_report_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(
+                self._dump(), workspace=workspace, finding_line=FINDING
+            )
+        self.assertTrue(verdict.passed)
+        self.assertTrue(all(verdict.predicates.values()))
+
+    def _judge(self, dump: dict[str, object]):
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(
+                f"finding: {FINDING}\n", encoding="utf-8"
+            )
+            return evaluate_collaboration(
+                dump, workspace=workspace, finding_line=FINDING
+            )
+
+    def test_missing_team_evidence_call_fails(self) -> None:
+        dump = self._dump()
+        dump["team_evidence_calls"] = []
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_root_fact_cannot_stand_in_for_the_members_own_fact(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        dump["entries"].append(
+            {"entry": "version_fact", "version_id": "v2", "fact_id": "root-fact"}
+        )
+        call = dump["team_evidence_calls"][0]
+        call["arguments"]["fact_id"] = "root-fact"
+        call["result"]["fact_id"] = "root-fact"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_second_member_version_fact_cannot_backfill_first_publish(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        version_fact = next(
+            row
+            for row in dump["entries"]
+            if isinstance(row, dict) and row.get("entry") == "version_fact"
+        )
+        version_fact["version_id"] = "v3"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_failed_or_empty_team_evidence_result_fails(self) -> None:
+        for variant in ("failed", "empty"):
+            with self.subTest(variant=variant):
+                dump = copy.deepcopy(self._dump())
+                call = dump["team_evidence_calls"][0]
+                if variant == "failed":
+                    call["status"] = "failed"
+                else:
+                    call["result"]["observation"] = ""
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_only_two_versions_cannot_complete_the_protocol(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        dump["entries"] = [
+            row
+            for row in dump["entries"]
+            if not (isinstance(row, dict) and row.get("version_id") == "v3")
+        ]
+        dump["team_publish_calls"] = dump["team_publish_calls"][:2]
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["event_with_two_versions"])
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_evidence_before_route_started_cannot_complete_the_protocol(self) -> None:
+        dump = self._dump()
+        dump["team_evidence_calls"][0]["seq"] = 6
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_wait_must_complete_after_first_publish_and_before_root_publish(self) -> None:
+        for variant, end_seq in (("early", 2), ("late", 5)):
+            with self.subTest(variant=variant):
+                dump = copy.deepcopy(self._dump())
+                dump["wait_calls"][0]["end_seq"] = end_seq
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.predicates["root_woken"])
+                self.assertFalse(verdict.predicates["team_evidence"])
+
+        dump = self._dump()
+        dump["team_publish_calls"][0]["seq"] = 1
+        dump["team_publish_calls"][0]["end_seq"] = 2
+        dump["wait_calls"][0]["seq"] = 2
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_woken"])
+
+    def test_second_publish_must_append_a_distinct_member_version(self) -> None:
+        dump = self._dump()
+        dump["team_publish_calls"][2]["result"]["version_id"] = "v1"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_deduplicated_mutations_cannot_complete_the_protocol(self) -> None:
+        variants = {
+            "first-member-publish": ("team_publish_calls", 0),
+            "root-publish": ("team_publish_calls", 1),
+            "second-member-publish": ("team_publish_calls", 2),
+            "route": ("team_route_calls", 0),
+        }
+        for name, (collection, index) in variants.items():
+            for value in (True, 0, None):
+                with self.subTest(name=name, value=value):
+                    dump = copy.deepcopy(self._dump())
+                    dump[collection][index]["result"]["deduplicated"] = value
+                    verdict = self._judge(dump)
+                    self.assertFalse(verdict.passed)
+        dump = self._dump()
+        dump["team_publish_calls"][0]["result"].pop("deduplicated")
+        self.assertFalse(self._judge(dump).passed)
+
+    def test_evidence_followed_only_by_a_deduplicated_retry_does_not_pass(self) -> None:
+        dump = self._dump()
+        early = copy.deepcopy(dump["team_publish_calls"][2])
+        early["seq"] = 8
+        early["end_seq"] = 9
+        dump["team_evidence_calls"][0]["seq"] = 10
+        dump["team_evidence_calls"][0]["end_seq"] = 11
+        retry = dump["team_publish_calls"][2]
+        retry["seq"] = 12
+        retry["end_seq"] = 13
+        retry["result"]["deduplicated"] = True
+        dump["team_publish_calls"].insert(2, early)
+        dump["team_update_calls"][0]["seq"] = 14
+        dump["team_update_calls"][0]["end_seq"] = 15
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_member_cannot_route_in_roots_place(self) -> None:
+        dump = self._dump()
+        dump["team_route_calls"][0]["thread_id"] = "t-member"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_member_cannot_publish_roots_version(self) -> None:
+        dump = self._dump()
+        dump["team_publish_calls"][1]["thread_id"] = "t-member"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["root_woken"])
+
+    def test_route_call_must_match_the_dump_route(self) -> None:
+        dump = self._dump()
+        dump["team_route_calls"][0]["result"]["route_id"] = "r-other"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+
+    def test_same_thread_protocol_calls_must_not_overlap(self) -> None:
+        variants = {
+            "evidence-before-first-member-publish-ended": (
+                "team_publish_calls",
+                0,
+                "end_seq",
+                10,
+            ),
+            "route-before-root-publish-ended": (
+                "team_route_calls",
+                0,
+                "seq",
+                6,
+            ),
+            "second-before-evidence-ended": (
+                "team_publish_calls",
+                2,
+                "seq",
+                10,
+            ),
+            "update-before-route-ended": (
+                "team_update_calls",
+                0,
+                "seq",
+                8,
+            ),
+        }
+        for name, (collection, index, field, value) in variants.items():
+            with self.subTest(name=name):
+                dump = copy.deepcopy(self._dump())
+                dump[collection][index][field] = value
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.passed)
+
+    def test_cross_thread_wrapper_completion_can_lag_canonical_commit(self) -> None:
+        variants = {
+            "publish-started-before-wait": {
+                ("team_publish_calls", 0, "seq"): 1,
+                ("wait_calls", 0, "seq"): 2,
+            },
+            "wait-ended-before-publish-wrapper": {
+                ("wait_calls", 0, "end_seq"): 3,
+                ("team_publish_calls", 0, "end_seq"): 4,
+            },
+            "evidence-started-before-route-wrapper-ended": {
+                ("team_route_calls", 0, "end_seq"): 10,
+            },
+            "update-started-before-second-publish-wrapper-ended": {
+                ("team_publish_calls", 2, "end_seq"): 14,
+            },
+        }
+        for name, changes in variants.items():
+            with self.subTest(name=name):
+                dump = copy.deepcopy(self._dump())
+                for (collection, index, field), value in changes.items():
+                    dump[collection][index][field] = value
+                verdict = self._judge(dump)
+                self.assertTrue(verdict.passed)
+
+    def test_resolution_must_be_a_late_root_update_of_a_member_version(self) -> None:
+        variants = {
+            "member": ("thread_id", "t-member"),
+            "wrong-version": (
+                "arguments",
+                {
+                    "targets": [
+                        {"version_id": "v2", "set_root_state": "resolved"}
+                    ]
+                },
+            ),
+            "failed": ("status", "failed"),
+        }
+        for name, (field, value) in variants.items():
+            with self.subTest(name=name):
+                dump = copy.deepcopy(self._dump())
+                dump["team_update_calls"][0][field] = value
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.predicates["root_resolved"])
+
+        dump = copy.deepcopy(self._dump())
+        dump["log"][-1]["revision"] = 4
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_resolved"])
+
+        dump = copy.deepcopy(self._dump())
+        update = dump["team_update_calls"][0]
+        update["arguments"]["targets"].append(
+            {"version_id": "v3", "set_root_state": "resolved"}
+        )
+        update["result"]["updated"].append(
+            {"version_id": "v3", "root_state": "resolved"}
+        )
+        next(
+            row
+            for row in dump["entries"]
+            if isinstance(row, dict) and row.get("version_id") == "v3"
+        )["root_state"] = "resolved"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_resolved"])
+
+        dump = copy.deepcopy(self._dump())
+        dump["entries"][3]["root_state"] = "pending"
+        dump["entries"][5]["root_state"] = "resolved"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_resolved"])
+
+    def test_resolution_accepts_one_member_match_among_other_batch_targets(self) -> None:
+        dump = self._dump()
+        update = dump["team_update_calls"][0]
+        update["arguments"]["targets"].extend(
+            [
+                {"version_id": "v2", "set_root_state": "tracking"},
+                {"version_id": "v1", "set_producer_state": "closed"},
+            ]
+        )
+        update["result"]["updated"].extend(
+            [
+                {"version_id": "v2", "root_state": "tracking"},
+                {
+                    "version_id": "v1",
+                    "producer_state": "closed",
+                    "root_state": "pending",
+                },
+            ]
+        )
+        verdict = self._judge(dump)
+        self.assertTrue(verdict.passed)
+
+    def test_solo_root_fails_even_with_a_perfect_report(self) -> None:
+        dump = {
+            "entries": [
+                {"entry": "participant", "label": "/root", "role": "root"},
+                {
+                    "entry": "version",
+                    "version_id": "v1",
+                    "author": "/root",
+                    "root_state": "resolved",
+                    "fact_ref_count": 1,
+                },
+            ]
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertIn("predicate:spawn_member", verdict.reasons)
+        self.assertIn("predicate:two_authors", verdict.reasons)
+        self.assertIn("predicate:team_route", verdict.reasons)
+
+    def test_two_members_fail_the_spawn_cap(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        dump["entries"].append(
+            {"entry": "participant", "label": "/root/extra", "role": "member"}
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(
+                dump, workspace=workspace, finding_line=FINDING, max_members=1
+            )
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["spawn_member"])
+        self.assertIn("predicate:spawn_member", verdict.reasons)
+
+    def test_two_singleton_events_are_not_a_shared_chain(self) -> None:
+        # Real dumps have no event_id on Version. Grouping follows dump order:
+        # Event, its Versions/VersionFacts, its Routes, then the next Event.
+        dump = {
+            "entries": [
+                {"entry": "participant", "label": "/root", "role": "root"},
+                {"entry": "participant", "label": "/root/worker", "role": "member"},
+                {"entry": "event", "event_id": "e1", "version_count": 1, "route_count": 1},
+                {
+                    "entry": "version",
+                    "version_id": "v1",
+                    "author": "/root/worker",
+                    "root_state": "resolved",
+                    "fact_ref_count": 1,
+                },
+                {"entry": "version_fact", "version_id": "v1", "fact_id": "f1"},
+                {"entry": "route", "route_id": "r1", "event_id": "e1", "target": "/root/worker"},
+                {"entry": "event", "event_id": "e2", "version_count": 1, "route_count": 0},
+                {
+                    "entry": "version",
+                    "version_id": "v2",
+                    "author": "/root",
+                    "root_state": "tracking",
+                    "fact_ref_count": 0,
+                },
+            ]
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["event_with_two_versions"])
+        self.assertIn("predicate:event_with_two_versions", verdict.reasons)
+
+    def test_root_solo_event_plus_stray_member_event_fails(self) -> None:
+        dump = {
+            "entries": [
+                {"entry": "participant", "label": "/root", "role": "root"},
+                {"entry": "participant", "label": "/root/worker", "role": "member"},
+                {"entry": "event", "event_id": "e1", "version_count": 2, "route_count": 0},
+                {
+                    "entry": "version",
+                    "version_id": "v1",
+                    "author": "/root",
+                    "root_state": "resolved",
+                    "fact_ref_count": 1,
+                },
+                {
+                    "entry": "version",
+                    "version_id": "v2",
+                    "author": "/root",
+                    "root_state": "tracking",
+                    "fact_ref_count": 0,
+                },
+                {"entry": "event", "event_id": "e2", "version_count": 1, "route_count": 1},
+                {
+                    "entry": "version",
+                    "version_id": "v3",
+                    "author": "/root/worker",
+                    "root_state": "pending",
+                    "fact_ref_count": 0,
+                },
+                {"entry": "route", "route_id": "r1", "event_id": "e2", "target": "/root/worker"},
+            ],
+            "log": [
+                {
+                    "kind": "publish",
+                    "wake": {"decision": "signalled", "target": "/root"},
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["two_authors"])
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["root_resolved"])
+
+    def test_resolving_a_root_version_does_not_count_as_root_resolved(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["entries"], list)
+        dump["entries"][3]["root_state"] = "tracking"
+        dump["entries"][4]["root_state"] = "resolved"
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["root_resolved"])
+        self.assertIn("predicate:root_resolved", verdict.reasons)
+
+    def test_complete_dump_without_root_wake_fails(self) -> None:
+        dump = self._dump()
+        dump["log"] = []
+        dump["jsonl_signals"] = []
+        dump["wait_calls"] = []
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(f"finding: {FINDING}\n", encoding="utf-8")
+            verdict = evaluate_collaboration(dump, workspace=workspace, finding_line=FINDING)
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["root_woken"])
+        self.assertIn("predicate:root_woken", verdict.reasons)
+
+    def test_member_wait_cannot_impersonate_root_wake(self) -> None:
+        dump = self._dump()
+        assert isinstance(dump["wait_calls"], list)
+        dump["wait_calls"][0]["thread_id"] = "t-member"
+        with tempfile.TemporaryDirectory() as raw:
+            workspace = Path(raw)
+            (workspace / "TEAM_REPORT.md").write_text(
+                f"finding: {FINDING}\n", encoding="utf-8"
+            )
+            verdict = evaluate_collaboration(
+                dump, workspace=workspace, finding_line=FINDING
+            )
+        self.assertFalse(verdict.passed)
+        self.assertFalse(verdict.predicates["root_woken"])
+        self.assertIn("predicate:root_woken", verdict.reasons)
+
+    # The Responses-wire evidence tests that lived here judged
+    # `function_call_output` items. Under `tool_mode = code_mode_only` the frozen
+    # binary never emits those for a team tool, so they exercised a shape the
+    # product cannot produce. Their properties -- attribution, cursor paging,
+    # wake signals only from a dispatched wait, and a caller dump never counting
+    # -- are now asserted against the real code-mode path and the rollout-trace
+    # evidence source in `test_multi_m5_trace_evidence.py`.
+
+
+
+class MultiM5ScheduleTests(unittest.TestCase):
+    def test_three_one_way_failures_are_stable_degradation(self) -> None:
+        pair = {"codex": "completed", "rondo-multi": "agent_failed"}
+        self.assertEqual(
+            degradation_on_task((pair, pair, pair)),
+            "stable_one_way_degradation",
+        )
+
+    def test_first_round_one_way_failure_is_uncertain_until_reruns(self) -> None:
+        self.assertEqual(
+            degradation_on_task(({"codex": "completed", "rondo-multi": "agent_failed"},)),
+            "uncertain",
+        )
+
+    def test_mixed_results_are_not_degradation(self) -> None:
+        self.assertEqual(
+            degradation_on_task(
+                (
+                    {"codex": "completed", "rondo-multi": "agent_failed"},
+                    {"codex": "completed", "rondo-multi": "completed"},
+                    {"codex": "completed", "rondo-multi": "agent_failed"},
+                )
+            ),
+            "no_stable_one_way_degradation",
+        )
+
+
+class MultiM5ArchiveTests(unittest.TestCase):
+    def test_loopback_record_is_labelled_and_not_effective(self) -> None:
+        record = archive_record(
+            evidence_kind="loopback",
+            gate=1,
+            lock_id="multi-m5-runtime-v1",
+            side=Side.RONDO,
+            product=Product.RONDO_MULTI,
+            source_commit="a" * 40,
+            binary_sha256="b" * 64,
+            outcome="completed",
+            counts_as_effective=False,
+            subagent_model="gpt-5.6-terra",
+            subagent_effort="medium",
+        )
+        for name in required_archive_fields():
+            self.assertIn(name, record)
+        self.assertEqual(record["evidence_kind"], "loopback")
+        self.assertFalse(record["counts_as_effective"])
+        self.assertEqual(record["team_capability_config"]["team_state_enabled"], True)
+        # The row states the member the run configured, not the host default.
+        self.assertEqual(
+            record["team_capability_config"]["default_subagent_model"], "gpt-5.6-terra"
+        )
+        with self.assertRaises(ValueError):
+            archive_record(
+                evidence_kind="paid",
+                gate=1,
+                lock_id="x",
+                side=Side.RONDO,
+                product=Product.RONDO_MULTI,
+                source_commit="a" * 40,
+                binary_sha256="b" * 64,
+                outcome="completed",
+                counts_as_effective=False,
+                subagent_model="gpt-5.6-terra",
+                subagent_effort="medium",
+            )
+
+
+class MultiM5LoopbackTests(unittest.TestCase):
+    def test_command_contains_the_single_team_override(self) -> None:
+        command = build_loopback_command(
+            Path("/tmp/codex"),
+            base_url="http://127.0.0.1:9/v1",
+            instruction="publish",
+        )
+        fragment = team_capability_command_fragment()
+        joined = " ".join(command)
+        self.assertIn(fragment, command)
+        self.assertEqual(joined.count("features.multi_agent_v2="), 1)
+        self.assertIn('agents.default_subagent_model="gpt-5.6-terra"', joined)
+        self.assertIn("expose_spawn_agent_model_overrides=false", joined)
+        self.assertIn("features.code_mode_host=true", joined)
+        self.assertNotIn("auto_review.model", joined)
+
+    def test_fake_server_requires_team_tools_and_completes_a_round_trip(self) -> None:
+        tools = [
+            {"type": "namespace", "name": "collaboration", "tools": [
+                {"type": "function", "name": name} for name in REQUIRED_TOOL_NAMES[:4]
+            ]},
+            {"type": "function", "name": "spawn_agent"},
+        ]
+        with TeamPublishFakeServer() as server:
+            port = int(server.base_url.rsplit(":", 1)[1].split("/")[0])
+            first = {
+                "model": LOOPBACK_MODEL,
+                "stream": True,
+                "tools": tools,
+            }
+            status, payload = _post_responses(port, first)
+            self.assertEqual(status, 200)
+            self.assertIn("team_publish", payload.decode("utf-8"))
+            second = {
+                "model": LOOPBACK_MODEL,
+                "stream": True,
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": LOOPBACK_CALL_ID,
+                        "output": "{\"ok\":true}",
+                    }
+                ],
+            }
+            status, _payload = _post_responses(port, second)
+            self.assertEqual(status, 200)
+            self.assertTrue(server.tool_round_trip)
+            self.assertEqual(server.missing_tools, ())
+            self.assertGreaterEqual(collect_tool_names(tools), set(REQUIRED_TOOL_NAMES))
+
+    def test_fake_server_rejects_a_session_without_team_tools(self) -> None:
+        with TeamPublishFakeServer() as server:
+            port = int(server.base_url.rsplit(":", 1)[1].split("/")[0])
+            status, body = _post_responses(
+                port,
+                {"model": LOOPBACK_MODEL, "tools": [{"name": "shell"}]},
+            )
+            self.assertEqual(status, 400)
+            self.assertIn(b"required team tools", body)
+            self.assertFalse(server.tool_round_trip)
+
+    def test_code_mode_metadata_counts_as_team_tool_registration(self) -> None:
+        metadata = {
+            "code_mode_tool_names": {
+                f"collaboration__{name}": {"name": name, "namespace": "collaboration"}
+                for name in REQUIRED_TOOL_NAMES
+            }
+        }
+        request = {
+            "client_metadata": {
+                "x-codex-turn-metadata": json.dumps(metadata, separators=(",", ":")),
+            }
+        }
+        self.assertEqual(collect_tool_names(request.get("tools")), set())
+        self.assertGreaterEqual(collect_code_mode_tool_names(request), set(REQUIRED_TOOL_NAMES))
+        self.assertGreaterEqual(collect_registered_tool_names(request), set(REQUIRED_TOOL_NAMES))
+        with TeamPublishFakeServer() as server:
+            port = int(server.base_url.rsplit(":", 1)[1].split("/")[0])
+            status, payload = _post_responses(
+                port,
+                {"model": LOOPBACK_MODEL, "stream": True, **request},
+            )
+            self.assertEqual(status, 200)
+            self.assertIn("team_publish", payload.decode("utf-8"))
+            self.assertEqual(server.missing_tools, ())
+
+
+def _post_responses(port: int, payload: dict[str, object]) -> tuple[int, bytes]:
+    body = json.dumps(payload).encode("utf-8")
+    connection = HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=body,
+            headers={
+                "Authorization": f"Bearer {LOOPBACK_BEARER}",
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+            },
+        )
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

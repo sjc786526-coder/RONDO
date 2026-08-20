@@ -1120,3 +1120,277 @@ standard/Lite 形态均补回归。
   `agent_log/2026-08-17-103327-plan043-m4-fourth-remediation-independent-rereview.md`、
   `agent_log/2026-08-17-104430-plan043-m4-fifth-remediation.md`、
   `agent_log/2026-08-17-105030-plan043-m4-final-independent-acceptance.md`。
+
+## Multi M-5 阶段 A —— 真实运行条件（Plan 044，2026-08-17）
+
+**状态**：首次交付时独立验收不通过（门 1 判据），经两轮整改后于 2026-08-18 复验通过，见下两节。
+未跑 Docker、真实 API 或付费调用，**不能**表述为 M-5 通过、门 1 通过或未见退化。阶段 B 未开始。
+成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **门 1 载体**：不用 TB `fix-git`。受控 host fixture `eval/fixtures/multi-m5-collab-v1/` +
+  `eval/templates/multi-m5/collab-workflow-instruction-v1.md`。完成标准 = `TEAM_REPORT.md` 含 finding
+  且六项协作谓词；孤儿退休不是必触发项。Docker 只为门 2。
+- **门 2 合同**：P2/B7 v4 十任务，task-major 每题 Codex 然后 Multi；轻 runner，不套 v7 campaign，
+  不计算 σ/delta。条件复跑仅「Codex 完成、Multi 未完成」时双方各加两次。最大有效运行 60，infra 总上限 12，
+  每槽 3 次，每 run 请求上限 80。价格快照 2026-08-17；硬上限 $120。
+- **Runtime bundle**：冻结到
+  `eval-data/bin/rondo-multi/7a2ff684c504c7530660f9a33a372daa949bdb00-x86_64-unknown-linux-musl-runtime-bundle/`。
+  身份写入 `eval/locks/multi-m5-runtime-v1.json`：CLI sha `2f5f25e0…0c32`（legacy musl CLI），
+  host sha `eb54cac2…6705`，bwrap 与冻结 Codex 同资产。测量树 detached 于 ExecPlan 提交 `7a2ff68`。
+- **接线**：团队能力单条 inline TOML 只给 Multi；`non_code_mode_only=false`。`just eval-multi-m5-loopback`
+  证明 `code_mode_host` 下团队工具可注册并完成 `team_publish` 往返（`counts_as_effective=false`）。
+- **门禁**：eval 定向 Python 与 `just eval-lock` 通过；清代理后 team-state + 四个 core team suite **142/142**。
+- **任务合同与授权清单**：`plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
+  执行日志：`agent_log/2026-08-17-190000-plan044-m5-phase-a.md`。
+  独立验收：`agent_log/2026-08-17-210000-plan044-m5-phase-a-independent-acceptance.md`（不通过）。
+
+## Multi M-5 阶段 A 门 1 窄整改（Plan 044，2026-08-17）
+
+**状态**：第一轮整改，复验时发现同类新缺陷（见下节），本节内容已被后续整改继承。未进阶段 B。
+
+- 同一 Event 合取；按真实 dump 顺序分组（Version 行没有 `event_id`）。
+- `root_resolved` 只认成员作者 Version；新增 `root_woken`。
+- dump 合同改为 harness 捕获的 Responses `function_call_output`（`codex exec --json` 不承载 team_inspect）。
+- 成员默认模型 + 隐藏 `spawn_agent` 的 model 覆盖；门 2 归因边界写入不退化锁。
+- 执行日志：`agent_log/2026-08-17-220000-plan044-m5-phase-a-predicate-remediation.md`。
+- 复验：`agent_log/2026-08-17-233000-plan044-m5-phase-a-remediation-rereview.md`（不通过：证据采集不绑定工具身份，
+  `exec_command` 回显即可伪造门 1 通过）。
+
+## Multi M-5 阶段 A 收口 —— 门 1 证据绑定（Plan 044，2026-08-18）
+
+**状态**：门 1 判据三处缺陷全部关闭，**复验通过，阶段 A 收口**。含义仅是「M-5 已具备真实运行条件」，
+**不是** M-5 通过、门 1 通过或未见退化。阶段 B 未开始：两道门的 runner 尚未实现，真实 API、付费与
+Docker 未授权。成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **证据按产出工具绑定**：dump/log 只采纳 `team_inspect` 输出，唤醒信号只采纳 `wait_agent` 输出；
+  其它工具产出的「团队形状」负载记入 `unattributed` 并在判定中忽略，同时经
+  `CollaborationVerdict.ignored_evidence` 暴露，便于区分「模型伪造」与「wire 形状变化」。
+- **wire 形状已实测**（无 API，冻结二进制 + 本地 stub）：团队工具以 `name=team_inspect` +
+  `namespace=collaboration` 调用即可执行，CLI 写回的 `function_call_output` 正文就是真实 dump 负载；
+  因此按工具名绑定不会把门焊死。指令模板补 `next_cursor` 续页要求（`MAX_OBSERVE_LIMIT=50`），
+  `instruction_sha256` 重算入锁。
+- **门禁**：`tests.test_multi_m5` 28/28；完整离线 `just eval-test` 854 项，仅剩 2 项既有 Local 模块加载
+  失败（干净 `main` 同样复现，与本任务无关）；`just eval-multi-m5-loopback` 通过。未跑 Rust、Docker、
+  真实 API，未产生费用。
+- **独立复验**：`agent_log/2026-08-18-010000-plan044-m5-gate1-attribution-rereview.md`（通过）。
+  正向通路首次实测确认：真实 `team_inspect` 输出被正确归属，采到 6 行真实 dump、`unattributed` 为空；
+  Root 独角戏与伪造回显两个反例均被拒。
+- **付费前置**：门 1 runner、门 2 交错执行面、预算记账与归档落盘均**未实现**；按复验决议，
+  这些部件实现后须再过一次独立审查，通过后才申请真实 API/付费授权。
+
+## Multi M-5 阶段 B 离线前置准备（Plan 044，2026-08-18）
+
+**状态**：阶段 B 的离线前置准备完成，**门 1 整条链路在花钱之前已验成绿的**。真实付费、真实 API 与 Docker
+仍未授权、未执行，**不是** M-5 通过，也**不是**门 1 通过。成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **五项交付物**：门 1 host runner（`gate1.py`/`command.py`/`capture.py`）、门 1 离线彩排 stub
+  （`rehearsal.py`）、门 2 轻量交错执行面（`gate2.py`，真实执行器 fail-closed）、$120 预算记账
+  （`budget.py`，批次 `multi-m5-phase-b`，硬上限在代码里）、归档落盘（`store.py` →
+  `eval-data/multi-m5/archives/records.jsonl`）与就绪自检（`ready.py`）。入口：
+  `just eval-multi-m5-{rehearsal,ready,gate2-fake}`。
+- **门 1 彩排**：冻结二进制真跑、stub 只替代模型侧，**连续五次全绿**，请求数稳定 16。
+  真实 canonical 状态经独立复核：真 spawn 出 `/root/worker`，同一 Event 三个 Version 跨两位作者，
+  证据由成员真实 `exec_command` 结果铸成并挂在成员 Version 上，route 已投递，Root 把成员作者的 Version
+  置 `resolved`，变更日志的 `member_publish` / `root_does_not_self_wake` / `assignment_wakes_target`
+  逐条成立，`wait_agent` 返回真实 TeamActivity 原文。M-1/M-2/M-3 在一次真实纵切里全部被触发。
+  记录标注 `evidence_kind=loopback`、`rehearsal=true`、`counts_as_effective=false`。
+- **本轮修复三处**：门 2 被重试掉的 infra 尝试不再从归档消失（原先每槽只留最后一条，导致"infra 未计入
+  有效结果"无法核对）；`Gate2Error` 改为计入 infra 预算并按上限重试（原先绕过总上限 12）；
+  二进制哈希缺失时不再回填占位值，改为 fail-closed。
+- **门禁**：`tests.test_multi_m5` + `tests.test_multi_m5_exec` 39/39；完整离线 `just eval-test` 865 项
+  （基线 854 + 新增 11），仅剩既有的两项 Local 模块加载失败（干净 `main` 同样复现，属另一任务）；
+  `just eval-multi-m5-ready` `ready=true`；fake 门 2 20 槽位调度、记账与归档正常。未跑 Rust、Docker、
+  真实 API，未产生费用。
+- **付费前仍缺**：门 1 付费入口（预算代理 + forward 捕获接成付费运行函数）与门 2 真实执行器
+  （走既有 `terminal_bench` adapters/runner/results）。按阶段 A 收口的 F3 决议，二者实现后须先过独立审查。
+- **独立审查不通过并已整改**：冻结指令模板按字面执行必然过不了 `two_authors` —— Root 全程不发布
+  Version，而 `team_update` 只改生命周期、不产生 Version；彩排全绿仅因 stub 多做了一次模板未要求的
+  Root 发布。已在冻结二进制上实测复现（唯一失败原因 `predicate:two_authors`，其余六项全过）。
+  模板补入 Root 在同一 Event 发布的步骤、重算 `instruction_sha256`
+  （`b11136af…` → `b0925723…`），新增两条回归把模板与判据绑定（已验证能抓住旧模板）；
+  另就地修掉 `gate2` 把 `evidence_kind` 写死为 `fake` 的付费陷阱并加 fail-closed 守卫。
+  整改后彩排复跑全绿，离线套件 868 项、除既有 2 项外无新增失败。
+- 执行日志：`agent_log/2026-08-18-030000-plan044-m5-phase-b-preparation.md`、
+  `agent_log/2026-08-18-070000-plan044-m5-template-predicate-remediation.md`；
+  审查报告：`agent_log/2026-08-18-050000-plan044-m5-phase-b-prep-review.md`。
+  模板整改复验通过：`agent_log/2026-08-18-090000-plan044-m5-template-remediation-rereview.md`。
+
+## Multi M-5 阶段 B 付费入口接线（Plan 044，2026-08-18）
+
+**状态**：门 1 付费运行函数与门 2 真实 Terminal-Bench 执行器已落地，**仍锁在授权门后**。未跑真实 API、
+未拉/跑 Docker、未产生费用。独立审查先因门 2 `$8`/`$24` `ensure_run` 冲突判 FAIL，已修并复审通过。
+**不是** M-5 通过，也**不是**已授权花钱。成果在 044 工作树分支，未合入 `main`、未推送。
+
+- **门 1**：`run_gate1_paid` 在冻结二进制上走 CaptureProxy(forward, 180s 流式、保留 User-Agent) →
+  环回预算代理（单次上限 $24、请求预留 $8）→ HTTPS provider。超时或空捕获落 `infra_failed` /
+  `evidence_kind=real_api`。无授权口令时 CLI 退出 78，不加载 `.env.local`。
+- **门 2**：`TerminalBenchSlotExecutor` 构造无 campaign / 无 preflight 的 `TerminalBenchRequest`，
+  经既有 `prepare_terminal_bench_run` / Harbor / `parse_single_task_result` 跑一槽；Docker 未授权则
+  fail-closed。`run_gate2_real` 显式 `evidence_kind=real_api`、`charge_fake_usage=False`，单次上限 $8、
+  请求预留 $2。脚本执行器不能冒充 `real_api`。
+- **授权**：冻结口令只存在于 `paid.py`；`just eval-multi-m5-gate1-paid` / `gate2-real` 永不转发口令。
+- **门禁**：`tests.test_multi_m5` + `tests.test_multi_m5_exec` **49/49**（含彩排）。未跑 Rust、Docker、
+  真实 API，未产生费用。未跑完整 `just eval-test`（既有两项 Local 导入失败与本任务无关）。
+- **审查修复**：预算代理新增 `run_cap_usd`；门 2 真实槽位与编排器同用 $8；漏传 cap 的回归
+  `test_budget_proxy_keeps_the_gate2_eight_dollar_run_cap`。
+- **独立验收（2026-08-18）**：通过，但先在预算层查出三处只会在真花钱时暴露的缺陷，已由审查者窄修 +
+  各钉一条反向回归：①门 1 可用额度是 `cap − 2×预留`（Guardian 附加容量），`$8` 预留把门 1 掐在 `$8`，
+  正好等于冻结点估计，实测第 21 请求即耗尽（累计 `$8.19`）→ 预留改 `$4`，额度回到 `$16`；
+  ②代理对耗尽的 run 就地回 429 不抛异常，掐断被记成 `agent_failed`，门 2 还 `counts_as_effective=true`
+  直接污染退化判据（Multi 成本更高，系统性偏向"退化"）→ 新增 `run_stop_reason`，两道门都落
+  `budget_stopped`，门 2 不计有效并停批；③共享账本槽位按 `60+12` 算，没给门 1 的 3 次尝试留位 → 改 `75`。
+  门禁：`test_multi_m5` + `test_multi_m5_exec` + `test_api_budget_proxy` + `test_terminal_bench`
+  + `test_terminal_bench_results` + `test_binary_freeze` **237/237**，`just eval-lock` 通过。
+- **最终独立验收（2026-08-18）**：通过。又查出三处只在真实运行才显形的问题，均已窄修 + 各钉一条
+  已验证的反向回归：①真实 TB 槽位把 `request_count` 写死成 1，归档数字失真且冻结的「每 run 80 请求」
+  上限成为死代码（代理层 `max_logical_requests` 被校验成 `1..4`，拦不住）→ 新增 `run_request_count`
+  从账本读真实逻辑请求数，超限落 `infra_failed` 且不计有效；②`_UrllibTransport` 的 test-only
+  `endpoint_override` 被宿主 `HTTP_PROXY` 劫持（Python 的 `no_proxy` 不认 `127.*` 通配），
+  离线捕获链在用户日常 shell 里假失败 502 → 只在 override 时挂空 `ProxyHandler({})`，生产 env 行为不变；
+  ③门 2 真实批次 `require_frozen=False`，bundle 不在位要烧完 12 次 infra 才停 → `real_api` 时第一槽前即失败。
+  门禁：上述六个套件 **240/240**，`just eval-lock` 通过。**Python 门禁须在清掉
+  `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 的环境下跑。**
+- **第三轮独立终审（2026-08-18）**：判「不通过，暂不应授权付费」，列 6 项阻断，复核**全部属实**，已全部关闭
+  并各钉一条已验证的反向回归：①门 2 只看 `stopped` 决定退出码，退化结论、`uncertain`、证据不完整都可能退出 0，
+  且不打印 `verdicts` → 新增 `gate2_passed`（未停批 + 十任务齐全 + 全部无退化）；②「每 run 80 请求」是事后分类，
+  第 81 次仍会真实发出并计费（代理的 `max_logical_requests` 被校验成 `1..4`，用不了）→ 新增 `RequestCappedLedger`
+  在 `reserve()` 硬拦，停止原因与「钱不够」分开（钱停批、请求上限停槽）；③付费配置未绑定冻结合同 —— 预算代理用
+  可变 `rondo.local.toml` 的费率给 $120 记账，实测快照日期已漂移（锁 `2026-08-17` vs 配置 `2026-08-11`，费率一致）
+  → 新增 `require_frozen_provider` 逐项核验并把生效身份写进每行归档；④Docker 的 80GiB/60GB 硬停止被压成
+  `Gate2Error` 并重试 → 新增 `DockerResourceStop` 子类，门 2 立即停批；⑤Harbor 的 `docker_evidence` 未进归档
+  → 新增 `docker_summary` 有界投影；⑥门 1 载体只是协议演示（答案写在 fixture 里、指令规定工具顺序）→ 按决策 032
+  **保持冻结载体**，改为把边界写进 `eval/locks/multi-m5-workflow-v1.json` 的 `scope_limits`、子 WBS 与本节：
+  WBS 的「真实任务上跑通完整协作语义」须门 1+门 2 合起来读，任一门单独不得引用。
+  次要项：门 1 通过增加 `returncode==0`（实测彩排 rc=0，只会把通过变失败）、付费行绑定 `harness_commit`/`harness_dirty`、
+  `.gitignore` 补全局 `__pycache__/`。不改项：不强制门 2 依赖门 1（§1 明写两门独立）、不改 `base_order`
+  （顺序偏差利于 Multi，只会让退化判定更保守）、退化诊断槽位仍按决策 021 不预跑。
+  门禁：**292/292**（新增 `test_docker_supervisor`），`just eval-lock` 通过，worktree 干净。
+- **第四轮终验（2026-08-18）**：判「不通过」，列 2 项阻断 + 2 项伴随缺口，复核**全部属实**，已全部关闭
+  并各钉一条已验证的反向回归：①请求上限不是并发硬边界 —— `snapshot→判断→reserve` 是 TOCTOU，
+  预算代理跑在 `ThreadingHTTPServer` 上且 Multi 的 Root/成员并发，实测上限 8 被冲到 13
+  → 包装层加 `threading.Lock` 合成单一临界区（该包装层是真实槽位里交给代理的唯一 reserve 路径）；
+  ②付费 endpoint 未冻结 —— 校验函数只把 `base_url` 记进归档却从不比较，锁里也没这一项，同名 provider
+  换 endpoint 密钥与数据即流向未批准地址 → 锁新增 `provider_base_url` 并逐字校验、缺失即 fail-closed，
+  门 1 独立传入的 `upstream_base_url` 一并绑定；③`DockerResourceStop` 携带的 samples 被丢弃（撞线那一刻
+  证据最该留下）→ 新增 `docker_stop_summary`；④`image_reference` 读了不存在的 `reference` 属性恒为 null
+  → 读正确字段并补 `image_id`。
+  门禁：**297/297**，另因改动锁 schema 加跑 `test_config_hardening` + `test_contracts_and_evidence`
+  + `test_fair_comparison` **124/124**。终验替用户作出的决策（门 1 载体、口径边界、两门独立但先门 1 后门 2、
+  Codex-first 与诊断后置、结论只能说"小样本中未观察到稳定单向退化"）与已冻结内容一致，无异议。
+- 执行日志：`agent_log/2026-08-18-110000-plan044-m5-paid-entries.md`；
+  验收报告：`agent_log/2026-08-18-130000-plan044-m5-paid-entries-acceptance-review.md`、
+  `agent_log/2026-08-18-150000-plan044-m5-paid-entries-final-acceptance.md`；
+  终审整改：`agent_log/2026-08-18-170000-plan044-m5-paid-boundary-remediation.md`、
+  `agent_log/2026-08-18-190000-plan044-m5-paid-boundary-remediation-2.md`。
+
+## Multi M-5 正式门前 runtime-v4 收口（Plan 044，2026-08-20）
+
+**状态**：runtime-v3 的递归证据/分页假绿已关闭，runtime-v4、两把 v5 门锁、离线验证、唯一一次真实
+clean-smoke-v5 与独立后审全部完成。这里只记录门前开发成果；正式门 1/门 2 未启动，**不是** M-5 通过、
+门 1 通过或“小样本未见退化”。
+
+- 产品修复提交 `0eee6dc`；共享 build-lock Rust 146/146。runtime-v4 的 CLI/host/bwrap/manifest 摘要与
+  clean measurement tree 一致；合同提交 `b078e28` 固定 workflow-v5→runtime-v4→nondegradation-v5。
+- `just eval-lock`、Python M-5 定向 136/136、ready、loopback 通过。rehearsal 20/20 dispatch 均为 code cell、
+  0 Direct；dump 7 页/log 2 页到 null，七谓词与成员自身证据链成立。
+- clean-smoke-v5 只运行一次：20 请求全部 usage-priced/settled，计价 `$0.273138`、保守暴露 0、零 taint；
+  明文 16/加密与未知 0，七谓词全真。真实 trace 18/18 dispatch completed、0 Direct，成员 exec Fact 被成员
+  Version 引用并由 `team_evidence` 读回。
+- 独立预审与付费后审均为 GO、无 P0/P1。正式归档仍为 26 行且哈希未变；`multi-m5-phase-b` 账本/锁不存在，
+  Docker 未运行。完整证据见
+  `agent_log/2026-08-20-100000-plan044-m5-runtime-v4-prebuild-remediation.md`。
+
+## Multi M-5 v6 正式付费前设施整改（Plan 044，2026-08-20）
+
+**状态**：后续独立审查确认 v5 仍有协议假绿、capture 身份串线、provider 预检过晚和不可恢复中断四类缺口；
+v5 的门前 ready 结论因此作废，但其 rehearsal/smoke 历史不改写。整改只改变 eval 合同与执行设施，产品字节未变，
+继续复用 runtime-v4。正式 Gate 1/Gate 2 仍未启动，**不是** M-5 通过或不退化结论。
+
+- 新冻结 workflow-v6 / nondegradation-v6：Gate 1 最多 6 次；Gate 2 每槽最多 5 次 infra、全批最多 40 次；
+  共享槽位 `60 effective + 40 infra + 6 Gate 1 + 10 diagnostic = 116`；80 requests/run、5 HTTP attempts 与
+  `$120` 硬上限不变。点估计 `$10.40`，最坏调度形状预测 `$67.80`。
+- Gate 1 机械验证成员两次 Version 之间真实完成自身 exec Fact 的 `team_evidence`，并要求 Root publish、route、
+  completed wait TeamActivity 的顺序链；测试 capture、v6 rehearsal 与正式 capture 完全隔离。
+- provider 全量冻结提前到任何正式 receipt/ledger/claim 之前。正式 resume 绑定 batch、两把锁、runtime 与
+  provider receipt；完整归档跳过，pristine run 安全重领，已请求未归档只追加一次 abandoned infra，未来或冲突
+  状态 fail-closed。Gate 2 attempt 在 claim 下一 id 前立即持久化，正常模型失败保持产品分类。
+- 最终定向 Python 162/162、`just eval-lock`、ready、loopback 通过。全新 canonical v6 rehearsal 20/20 dispatch
+  全为 code cell、0 Direct/failed；dump 7 页/log 2 页到 null，明文 9/加密与未知 0，严格协议链和七谓词全真。
+  正式 v6 archive、ledger、identity receipt 均未创建。
+- 审查与整改证据见 `agent_log/2026-08-20-110000-plan044-m5-paid-readiness-independent-review.md` 与
+  `agent_log/2026-08-20-120000-plan044-m5-v6-paid-readiness-remediation.md`。
+
+## Multi M-5 v6 正式门前恢复与协议再验收（Plan 044，2026-08-20）
+
+**状态**：13:00 独立验收发现的协议假绿、终止预算停止误分类和首请求前自有产物恢复死路均已关闭；
+append-only v6-r2 rehearsal 与独立终审通过。这里只记录门前设施进展；正式 Gate 1/Gate 2 未启动，
+**不是** M-5、Gate 1 或不退化结论。
+
+- Gate 1 现在以 rollout manifest、trace start/end 和完整 inspect-log revision 共同绑定 Root
+  wait/publish/route/update、成员 evidence 以及不同的二次 Version；乱序、错误 actor、复用 Version、失败或缺失
+  update 均有反例并 fail-closed。
+- resume 先保留 ledger 的 terminal budget/capacity stop，幂等归档为 `budget_stopped` 后停止；精确白名单内的
+  pre-Harbor 零请求自有产物只追加一次 abandoned infra。未知、错型、symlink、exact trial dir 或 exact-label
+  Docker/Compose 残留继续 fail-closed，等待受监督精确清理，不做无证据自动删除。
+- 串行 M-5 Python 179/179、Docker resume 精确探针 29/29、`just eval-lock`、ready 与 loopback 通过。
+  `m5-g1-rehearsal-v6-r2` 追加到独立 archive：20/20 dispatch 均为 code cell、0 Direct/failed；dump 7 页、
+  log 2 页到 null；明文 9、加密/未知 0，七谓词与完整 update 链全真。
+- workflow-v6 / nondegradation-v6 继续复用未变化的 runtime-v4；v5 历史不改写。正式 v6 archive、ledger、
+  identity receipt 与 paid capture 均未创建，本轮未运行 Docker、Rust 或真实 API。
+- 形成时点 NO-GO 与最终整改证据分别见
+  `agent_log/2026-08-20-130000-plan044-m5-v6-remediation-independent-acceptance.md` 和
+  `agent_log/2026-08-20-140000-plan044-m5-v6-remediation-final-readiness.md`。
+
+## Multi M-5 v6 canonical mutation 再收口（Plan 044，2026-08-20）
+
+**状态**：15:00 独立验收发现的幂等 publish 假绿与跨线程 wrapper 假阴均已关闭；append-only v6-r3
+rehearsal 通过。正式 Gate 1/Gate 2 仍未启动，**不是** M-5、Gate 1 或不退化结论。
+
+- 协议中的 first/Root/second publish 与 route 必须明确 `deduplicated=false`；evidence 后只重试旧 Version
+  不再被误计为新成员 Version，缺字段、非布尔与 `true` 均 fail-closed。
+- canonical mutation 顺序改由精确 inspect-log revision 证明；wrapper end 不作跨线程提交时钟，同 actor 仍用
+  end/start，wait 另用端点证明重叠，route start 必须先于 evidence start。
+  Root wait 与首次成员 publish 以区间重叠、精确 wake log 和 TeamActivity 返回绑定，因此 store 已提交但另一线程
+  wrapper 尚未写 end 的三类合法交错不再误杀。
+- 批量 `team_update` 允许同批其它目标及同一 Version 的独立 producer 轴更新，但协议只能唯一匹配一个成功
+  resolve 的成员 Version；两个成员 resolve、重复、错状态或错 ID 继续拒绝。
+- 最新串行 M-5 Python 183/183、相关窄回归 105/105、`just eval-lock`、ready、loopback 均通过。
+  `m5-g1-rehearsal-v6-r3` 为 23 requests、20/20 code-cell、0 Direct/failed、dump 7 页/log 2 页、明文 9、
+  加密/未知 0，七谓词全真；历史 v6/v6-r2 行和 raw 均保留。
+- 正式 v6 archive、ledger、identity receipt 与 paid capture 仍未创建；未运行 Docker、Rust 或真实 API。
+  形成时点报告与收口日志见
+  `agent_log/2026-08-20-150000-plan044-m5-v6-second-remediation-independent-acceptance.md` 和
+  `agent_log/2026-08-20-160000-plan044-m5-v6-canonical-mutation-final-readiness.md`。
+
+## Multi M-5 v6-c2 纯执行环境门禁（Plan 044，2026-08-20）
+
+**状态**：首个 v6-c1 正式 Gate 1 的 6 次运行均在模型输出前被开发 sandbox 阻断，本地正确归档为 infra，
+不是产品结论。保持 workflow-v6 / runtime-v4 / nondegradation-v6 字节不变，新增轻量 v6-c2 campaign generation。
+
+- c1 ledger/receipt/archive 摘要与 6 条连续 infra、6 request 全 settled、priced `$0`、conservative `$13.32`、
+  无 Gate 2 的语义在 c2 启动前 fail-closed 核验；用户确认中转站实际账单 `$0`。
+- c2 独占 receipt/ledger/archive/capture/run-id，正式身份再绑定 clean harness commit。c2 ledger cap `$106.68`，
+  与保留的 c1 `$13.32` 暴露相加严格等于共享 `$120`。
+- 同进程无密钥 direct GET 在所有正式状态、secret 与 Docker 前执行，禁 auth/body/proxy/redirect。sandbox 内 rc78
+  且零 c2 资产；批准的 sandbox 外得到 HTTP 301 并通过。真实 Responses 请求一旦启动，usage 不明仍消耗 attempt。
+- 零费用门禁：M-5 定向 193 项、`just eval-lock`、ready、runtime-v4 loopback 已验证；未运行 Rust、Docker、
+  API smoke 或付费模型请求。
+
+## Multi M-5 c3 正式两门验收（Plan 044，2026-08-20）
+
+**状态**：workflow-v6 / runtime-v4 / nondegradation-v6 行为合同未变；c3 Gate 1 与 Gate 2 正式通过，独立终审
+重放 resume、调度与 verdict 后给出 GO。Plan 044 的开发与验收目标完成，分支尚未合入 `main`。
+
+- collector 精确接纳 code-mode runtime 的默认 `wait` continuation 后，c3 Gate 1 a2 以 22 请求完成：七谓词
+  全真、`team_evidence=true`、明文 14 / 加密与未知 0。a1 的单次 `upstream_unavailable` 保持 infra 分类。
+- Gate 2 在十个锁定镜像上串行完成 20 个基础有效 run：4 对双方通过、6 对双方失败，零 Codex-only 完成，
+  因而没有条件复跑或诊断；十题均为 `no_stable_one_way_degradation`。冻结的 60 是最大容量（基础 20 +
+  条件最多 40），本次 20 是合同正确终态。
+- c3 ledger 22 runs、237/237 request settled、0 held、最大 attempt 1；Gate 2 的 199 个 usage-priced 请求计价
+  `$3.248131`，c3 总暴露 `$5.840974`。加 prior `$13.981683` 后，跨代保守口径为 `$19.822657 < $120`。
+- 20/20 Docker 记录 returncode 0、无 warning、`cleanup_verified`；峰值 Docker 增长 2.556GB、VHDX 增长 0，
+  最低 Windows `C:` 余量约 190.835GB。结束后无任务容器、网络、卷或 build cache 残留。
+- 正式运行提交 `c9fcb0fb1cd57254558e811ecddfab65e2c452df` 上的 `just eval-lock`、
+  `just eval-multi-m5-ready` 与独立后审通过；receipt、provider、二进制、全部归档均绑定该 clean HEAD。后继提交
+  仅收口文档，不是 c3 的可恢复运行身份。完整执行证据见
+  `agent_log/2026-08-20-210000-plan044-m5-v6-c3-formal-final.md`。

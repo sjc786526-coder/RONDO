@@ -18,6 +18,7 @@ use super::WAIT_TOOL_NAME;
 use super::handle_runtime_response;
 use super::telemetry::CodeModeToolCallGuard;
 use super::wait_spec::create_wait_tool;
+use crate::team::evidence::CodeModeOutputBoundary;
 
 pub struct CodeModeWaitHandler;
 
@@ -68,6 +69,7 @@ impl CodeModeWaitHandler {
             session,
             turn,
             call_id,
+            output_item_id,
             tool_name,
             payload,
             ..
@@ -91,7 +93,19 @@ impl CodeModeWaitHandler {
                 let exec = ExecContext { session, turn };
                 let started_at = std::time::Instant::now();
                 let cell_id = codex_code_mode::CellId::new(args.cell_id);
-                let wait_response = if args.terminate {
+                let cell_was_known = if let Some(output_item_id) = output_item_id.as_deref()
+                    && crate::team::team_state_enabled(&exec.turn)
+                {
+                    Some(
+                        exec.session
+                            .services
+                            .code_mode_evidence
+                            .register_output(cell_id.as_str(), output_item_id),
+                    )
+                } else {
+                    None
+                };
+                let wait_result = if args.terminate {
                     exec.session
                         .services
                         .code_mode_service
@@ -106,11 +120,39 @@ impl CodeModeWaitHandler {
                             yield_time_ms: args.yield_time_ms,
                         })
                         .await
+                };
+                let wait_response = match wait_result {
+                    Ok(response) => response,
+                    Err(error) => {
+                        if cell_was_known == Some(false)
+                            && let Some(output_item_id) = output_item_id.as_deref()
+                        {
+                            exec.session
+                                .services
+                                .code_mode_evidence
+                                .seal_output(output_item_id, CodeModeOutputBoundary::Unavailable);
+                        }
+                        telemetry.finish(/*success*/ false);
+                        return Err(FunctionCallError::RespondToModel(error));
+                    }
+                };
+                if let Some(output_item_id) = output_item_id.as_deref() {
+                    let boundary = match &wait_response {
+                        codex_code_mode::WaitOutcome::LiveCell(
+                            codex_code_mode::RuntimeResponse::Yielded { .. },
+                        ) => CodeModeOutputBoundary::Yielded,
+                        codex_code_mode::WaitOutcome::LiveCell(_) => {
+                            CodeModeOutputBoundary::Terminal
+                        }
+                        codex_code_mode::WaitOutcome::MissingCell(_) => {
+                            CodeModeOutputBoundary::Unavailable
+                        }
+                    };
+                    exec.session
+                        .services
+                        .code_mode_evidence
+                        .seal_output(output_item_id, boundary);
                 }
-                .map_err(|error| {
-                    telemetry.finish(/*success*/ false);
-                    FunctionCallError::RespondToModel(error)
-                })?;
                 if let codex_code_mode::WaitOutcome::LiveCell(response) = &wait_response {
                     let runtime_cell_id = match response {
                         codex_code_mode::RuntimeResponse::Yielded { cell_id, .. }
@@ -149,10 +191,25 @@ impl CodeModeWaitHandler {
                     }
                 }
                 exec.session.services.elicitations.wait_until_clear().await;
-                handle_runtime_response(&exec, wait_response.into(), args.max_tokens, started_at)
-                    .await
-                    .map_err(FunctionCallError::RespondToModel)
-                    .map(boxed_tool_output)
+                match handle_runtime_response(
+                    &exec,
+                    wait_response.into(),
+                    args.max_tokens,
+                    started_at,
+                )
+                .await
+                {
+                    Ok(output) => Ok(boxed_tool_output(output)),
+                    Err(error) => {
+                        if let Some(output_item_id) = output_item_id.as_deref() {
+                            exec.session
+                                .services
+                                .code_mode_evidence
+                                .seal_output(output_item_id, CodeModeOutputBoundary::Unavailable);
+                        }
+                        Err(FunctionCallError::RespondToModel(error))
+                    }
+                }
             }
             _ => Err(FunctionCallError::RespondToModel(format!(
                 "{WAIT_TOOL_NAME} expects JSON arguments"

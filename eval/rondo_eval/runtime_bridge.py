@@ -1264,6 +1264,25 @@ class DockerCliCounter:
             probe_timings_ms=tuple(sorted(probe_timings_ms.items())),
         )
 
+    def resume_resources_present(
+        self,
+        *,
+        identity: "DockerTaskIdentity",
+        compose_project: str,
+        deadline: float | None = None,
+    ) -> bool:
+        """Probe the exact label and Compose project without a broad Docker scan."""
+
+        identity.validate()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", compose_project):
+            raise RuntimeBridgeError("Docker resume Compose project is invalid")
+        if deadline is None:
+            deadline = self._monotonic() + self._probe_timeout_seconds
+        containers = self._container_ids(identity, deadline=deadline)
+        networks = self._compose_networks(compose_project, deadline=deadline)
+        volumes = self._compose_volumes(compose_project, deadline=deadline)
+        return bool(containers or networks or volumes)
+
     def resolve_image_identity(
         self,
         image_reference: str,

@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-17 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：c1/c2 失败历史不改写；不变的 runtime-v4 与两把 v6 行为锁上，c3 Gate 1/Gate 2 已正式通过
 
 ## 定位
 
@@ -140,7 +140,10 @@ Root 的 `resolved` 是协调注意力的结束，不等于 producer 认为问�
 **产品身份**贯通源码/构建路径、Cargo target、binary freeze、manifest、共享 catalog、adapter/RunSpec、
 campaign 与结果归档，唯一映射是 `eval/rondo_eval/contracts.py` 的 `product_layout()`；
 Multi 的工件命名空间是 `eval-data/bin/rondo-multi/`。规则见 `doc/eval-data-layout.md`。
-Multi 目前**没有冻结的 runtime bundle**，首次 Docker 或付费验收前必须先冻结一套。
+Multi 当前冻结工件是 `eval/locks/multi-m5-runtime-v4.json`，来源提交 `0eee6dc`；codex、code-mode host、
+bwrap 与 manifest 四项 SHA-256 均与实物一致，measurement worktree clean 且指向同一提交。
+runtime-v1—v3 均只作历史保留，不得升级冒充；其中 runtime-v3 因 team-state outer cell 递归产 Fact、使
+inspect continuation cursor 自扰而被终审否决。
 
 **继承代码的处置**：evidence capture 与 Guardian provider 覆盖默认关闭、不影响 Multi 开发，本质是预留接口。
 不预设删除，处置原则只有一条：**不为保住它而对 Multi 内核做设计妥协**。
@@ -252,7 +255,8 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。下一阶段为 M-5，尚未开始。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 的
+c1/c2 失败历史保持不可变，c3 Gate 1 与 Gate 2 已正式通过。Plan 044 当前在独立工作树完成，尚未合入 `main`。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -294,9 +298,114 @@ store transition 期间为 unknown。Root 退休是独立终态覆盖层，只�
 
 ### M-5 真实运行与不退化验收
 
+阶段 A（Plan 044，无费用）已通过：冻结 bundle、两份运行合同与接线核验通过，门 1 判据的三处缺陷
+（同 Event 合取、Root 唤醒、证据按产出工具绑定）已关闭并各有反例回归。
+
+**阶段 B 经独立审查与 v6 整改，当前事实如下。**
+
+**门 1 判据已重建（第五轮）。** 冻结模型 `gpt-5.6-terra` 是 `tool_mode=code_mode_only`，配合
+`features.code_mode_host=true` 时，模型只发一个 `custom_tool_call(name=exec)`，团队工具全部由其中的
+JavaScript 调用；Responses 线上顶层 `function_call` 数为 0。原 v1 判据只认
+`responses_function_call_outputs`，**在真实配置下结构上不可能通过** —— 阶段 A 那次"实测确认 wire 形状"
+用的是直接注入 function_call，结论对但不是模型的真实行为。现改为读冻结二进制自身的 rollout trace
+（`CODEX_ROLLOUT_TRACE_ROOT`，产品既有能力，非新增代码）：判据只认 Rust dispatch 侧写下的
+`ToolCallStarted/Ended`（工具名、namespace、注册表收到的参数、handler 返回值），并要求每条 dispatch 能绑定回
+抓包里模型真实发出的 code cell（`model_visible_call_id` + `source_js`），否则 fail-closed。这样
+"模型自己打印一段像 dump 的文本"不构成证据。当前判据由 `multi-m5-workflow-v6` 承载（旧版归档不得升级冒充）；
+彩排 stub 同步改为真实 code-mode 形状（这是关键：只改采集不改 stub 等于把同一个错误再犯一遍）。
+
+**门 2 模型已全链贯通（第五轮）。** 预算代理取锁里的 terra，但 `make_run_spec` 仍走宿主
+`paid_eval.main_model` 别名，实际 adapter 拿到 sol，真跑会被代理本地拒掉并记成"产品失败"。现在锁里的
+root/member 模型与 effort 贯通 `TerminalBenchRequest → make_run_spec → adapter argv → proxy`，
+就绪自检离线构造 Codex/Multi 两侧 prepared run 并逐字段比对；全局 `AGENT_DEFAULT_SUBAGENT_MODEL` 恢复为
+sol（此前被整体翻成 terra，会静默改写本机每个 Multi campaign 的成员身份），M-5 从自己的锁显式传入。
+
+**$120 已是数学上限（第五轮）。** 此前每请求预留 $4/$2，而通用 Usage 合同允许的 terra 单请求最大合法费用
+约 $7.554，settle 时按实际计价可越过 cap。现在冻结 token 信封（输入 272k = terra 上下文窗口，输出 128k =
+通用合同上界），预留由信封 × 价目表机械推导（$2.22），信封在账本 settle 处强制，因此
+`charged ≤ reserved` 恒成立，reserve 时的批次校验即为真上限。每 run 上限由最大并发推导
+（Root + 3 成员 + Guardian = 5 × 预留），并发上限改为经校验的整数而非布尔。停止原因区分 budget 与 infra
+（上游失败、缺 usage、超时不再被贴成"预算停止"），未知原因 fail-closed；预留扣款与已计价消费分开记账。
+正式付费槽位使用确定性 run id，并由 archive + ledger 恢复：完整归档按原分类跳过；pristine 零请求 run 可安全
+重领；精确 pre-Harbor 自有产物和已请求未归档状态各只追加一次 abandoned infra；terminal budget/capacity stop
+幂等归档后停止。未知、错型、symlink、Harbor-started 或 exact-label Docker/Compose 残留 fail-closed，等待受监督
+精确处理。Gate 2 每个 attempt 在 claim 下一 run id 前立即 fsync，正常模型失败仍是产品结果，不得改标 infra。
+
+**成员证据链已按终审后的最小安全边界闭合。** runtime-v4 要求同一 cell 完成受支持的非 canonical
+team-state nested tool，outer response 还必须是 runtime 已排空 callbacks 的 terminal 纯文本结果；Yielded、
+team-state/evidence-read-only、混合媒体、加密、空输出均拒绝，Missing/不可用响应只清理不铸证。唯一绑定键是
+harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界重试状态。共享 build-lock 的定向 Rust
+结果为 146/146；当前 Python M-5 定向为 183/183。
+
+彩排由 stub 驱动协议，**证明的是产品与判据这条链路能走通，不是真实模型会遵守协议**，因此
+**不是**门 1 通过、更不是 M-5 通过。
+
+**合同外冒烟已执行四次并用尽 $40（2026-08-19）。** 结果分三层，必须分开陈述：
+
+1. **观测管线成立**：真实模型经 code cell 发起的 `collaboration.*` 调用（含判据必需的 `team_inspect`）
+   都被 trace 记到并通过绑定校验，`spawn_member` 由真实证据判真。
+2. **产品缺陷（已归因并修复）**：成员线程 8 次推理**全部**以 `invalid_encrypted_content` 失败
+   （8/8，Root 侧零失败），成员从未完成一个回合。归因不是"Root 的加密推理被 fork 带进成员会话"
+   —— 那是错的；而是 code-mode 的 `spawn_agent` **明文** message 被
+   `communication_from_tool_message()` 误包成 encrypted content（cm4 抓包中该字段与 139 字符明文
+   逐字节相等且完全可打印）。已让 `ToolCallSource::CodeMode` 走明文分支，`Direct` 的
+   encrypted-argument 语义保持不变，并补 5 条 Rust 定向回归（含反向验证）。
+3. **后续 final-v2 回答了结构问题**：成员确实调用工具，但 outer cell 不铸 fact；该历史运行不能冒充
+   修复后的结果；runtime-v3 当时的无 API 纵切随后因 inspect 分页假绿被终审否决。
+
+因此**不得**据此对 terra 的指令遵循下任何结论。
+
+**runtime-v3 与 workflow/nondegradation-v4 门锁已被终审否决（2026-08-20）。** 第一页 dump 带 `next_cursor`，但 outer inspect cell
+自己铸 Fact 并推进 `observe_generation`；第二页真实返回 stale-cursor failed。旧 collector 静默跳过失败，
+第一页已有的谓词因此假绿。当前 collector 强制 required dump/log 成功、按 continuation 续到 null，并要求页集
+覆盖 `total_entries`；fresh snapshot 与 continuation 的总数语义分开。
+
+**正式门前验证已完成；c1/c2 Gate 1 均未形成产品结论。** v5 的 readiness 结论因协议假绿、capture 串线、provider 校验过晚和不可 resume 被后续
+独立审查否决；v5 历史不改写。现行 loader 绑定 workflow-v6→runtime-v4→nondegradation-v6，Gate 1 最多 6 次，
+Gate 2 每槽最多 5 次 infra、全批 40 次，共 116 个 run 槽位；最多 60 effective（基础 20 + 条件最多 40）、
+80 请求/run、5 次 HTTP 尝试与
+`$120` 硬上限不变。provider 完整冻结发生在 secret、receipt、ledger 与 claim 之前。
+
+ready=true、loopback 通过。append-only v6-r3 rehearsal 以 `limit=3` 完成 dump 7 页、log 2 页并续到 null；
+20/20 dispatch 均为 code cell、0 Direct/failed，明文 9/加密与未知 0。协议只接纳 non-deduplicated publish/route；
+canonical mutation 的跨线程提交顺序由 inspect-log revision 证明，wrapper end 不作跨线程提交时钟；同 actor
+仍用 end/start，wait 另用端点证明重叠，route start 必须先于 evidence start。成员首次
+publish → Root publish → route → 成员读取自身 exec Fact → 不同的成员二次 publish → Root update 成立，
+completed wait_agent 返回 TeamActivity，七谓词全真。历史唯一一次
+clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`），但不升级冒充 v6 正式结果。
+
+正式 `m5-g1-v6-paid-a1..a6` 随后均在第一个 Root 请求处被开发工具 sandbox 的 local/private-address 策略阻断，
+归档为 `infra_failed / upstream_unavailable`；无产品判定。6 个 request 均 settled、provider 可计价 `$0`，账本
+保守暴露 `$13.32 / $120`。沙箱外无密钥检查可连接本机 `127.0.0.1` relay，故该结果只证明执行边界错误。
+按当时授权 Gate 1 未通过即停止，Gate 2 与 Docker 均未启动。c1 正式 attempt 已耗尽，不复用失败资产。
+
+行为合同与运行代次随后解耦：workflow-v6 / runtime-v4 / nondegradation-v6 字节保持不变。c2 从批准的 sandbox
+外边界运行；a1/a2 各产生 20/25 个有效 provider 请求，但旧 collector 把 code-mode runtime 继续 live cell 所需的
+顶层默认 `wait` 错当 Direct team dispatch，均归档 `infra_failed`；a3 在第 4 个请求后中断且无 verdict。c2 共
+49/49 request settled + usage-priced、0 held、计价 `$0.661683`。这些是 harness 假阴，不是产品失败；全部 c2
+资产保持不可变。
+
+修复转入独立 `multi-m5-v6-c3`：collector 只豁免内部/模型 call-id 相同、wire raw arguments 一致、同线程 cell
+更早存在的默认 runtime `wait`，且该调用不贡献协作证据；Direct team dispatch 仍拒绝。c1 本地保守暴露
+`$13.32` + c2 计价 `$0.661683` = c3 prior `$13.981683`；c3 cap `$106.018317`，累计仍为 `$120`。M-5
+199/199、eval-lock、ready、loopback 已通过。
+
+**c3 正式两门已通过。** Gate 1 的 a1 因单次 `upstream_unavailable` 归档为 infra；a2 以 22 个请求完成协议，
+七谓词全真，`team_evidence=true`，明文 14 / 加密与未知 0。Gate 2 在十个锁定 digest 上串行完成 20 个基础有效
+run：4 对双方通过、6 对双方失败，零 Codex-only 完成，故条件复跑与诊断均为 0；十题全部判为
+`no_stable_one_way_degradation`。c3 账本 237/237 request settled、0 held、最大 attempt 1，暴露 `$5.840974`；
+加 prior `$13.981683` 后为 `$19.822657 < $120`。20/20 Docker 记录均 returncode 0、无 warning、以
+`cleanup_verified` 结束；峰值 Docker 增长约 2.56GB、VHDX 增长 0，最终无任务容器、网络或卷残留。独立终审
+重建 resume prefix、条件调度与 verdict 后给出 GO；M-5 的开发与正式验收目标完成，是否合入 `main` 由后续交付决定。
+
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
+  **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
+  fixture 里、指令规定工具顺序），只回答「真实模型下团队机制是否端到端真的发生」，不证明 Multi 在
+  有分析负载的任务上更强；真实任务由门 2 的十个 TB 任务提供。任一门单独都不得引用为满足本目标。
+  当前合同由 `multi-m5-workflow-v6` 承载；历史边界见旧锁的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
+  阶段 A 前两项、阶段 B 门前准备及 c3 正式 Gate 1/Gate 2 均已通过独立验收。
 - **完成标准**：两个相互独立的门，缺一不可。
   1. **工作流成立且功能实际发生**：在功能开启的真实运行中，冻结的工作流达到它自己预冻结的任务完成标准，
      且 Event/Version 发布、Root 唤醒、route、多作者追加与证据下钻确实被触发、注意力按正常路径收尾，

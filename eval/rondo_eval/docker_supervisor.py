@@ -723,6 +723,17 @@ class DockerCounter(Protocol):
         deadline: float | None = None,
     ) -> DockerImageIdentity: ...
 
+    def resume_resources_present(
+        self,
+        *,
+        identity: DockerTaskIdentity,
+        compose_project: str,
+        deadline: float | None = None,
+    ) -> bool:
+        """Whether an exact interrupted run still owns daemon resources."""
+
+        ...
+
 
 class RunningCommand(Protocol):
     """A non-blocking process handle returned by an injected runner."""
@@ -954,6 +965,16 @@ class DockerSupervisionError(RuntimeError):
         self.samples = tuple(samples)
         self.failed_probe = failed_probe
         self.probe_timings_ms = tuple(probe_timings_ms)
+
+
+class DockerResourceStop(DockerSupervisionError):
+    """A host capacity stop line was crossed.
+
+    Distinct from the other supervision failures because it is not retriable:
+    the disk floor and the storage-growth ceiling are batch-wide stop lines, so
+    a caller must abort rather than spend another slot attempt on it. Still a
+    ``DockerSupervisionError``, so existing handlers keep working.
+    """
 
 
 class _CleanupVerificationError(RuntimeError):
@@ -1848,7 +1869,7 @@ class DockerSupervisor:
         samples: Sequence[DockerSample] = (),
     ) -> None:
         if sample.data_root_filesystem_free_bytes < DATA_ROOT_FREE_STOP_BYTES:
-            raise DockerSupervisionError(
+            raise DockerResourceStop(
                 "Docker data-root filesystem has less than 80 GiB free",
                 samples=samples or (sample,),
             )
@@ -1858,7 +1879,7 @@ class DockerSupervisor:
             sample.docker_desktop_vhdx_growth_bytes,
         )
         if growth >= DOCKER_GROWTH_STOP_BYTES:
-            raise DockerSupervisionError(
+            raise DockerResourceStop(
                 "Docker storage growth reached the 60 GB stop threshold",
                 samples=samples or (sample,),
             )

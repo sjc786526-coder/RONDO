@@ -669,6 +669,85 @@ class DockerCounterTests(unittest.TestCase):
         self.assertEqual(caught.exception.failed_probe, "docker_system_df")
         self.assertEqual(caught.exception.command_failure, failure)
 
+    def test_resume_probe_finds_each_exact_resource_kind_and_empty_state(self) -> None:
+        project = "rondo-p1-codex-0123456789ab__env"
+        network_id = "c" * 64
+        network_name = f"{project}_default"
+        volume_name = f"{project}_data"
+        cases = {
+            "container": ([json.dumps(CONTAINER_ID) + "\n", "", ""], True),
+            "network": (
+                [
+                    "",
+                    json.dumps(network_id) + "\n",
+                    json.dumps(
+                        [
+                            {
+                                "Id": network_id,
+                                "Name": network_name,
+                                "Labels": {"com.docker.compose.project": project},
+                            }
+                        ]
+                    ),
+                    "",
+                ],
+                True,
+            ),
+            "volume": (
+                [
+                    "",
+                    "",
+                    json.dumps(volume_name) + "\n",
+                    json.dumps(
+                        [
+                            {
+                                "Name": volume_name,
+                                "Labels": {"com.docker.compose.project": project},
+                            }
+                        ]
+                    ),
+                ],
+                True,
+            ),
+            "empty": (["", "", ""], False),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for name, (responses, expected) in cases.items():
+                with self.subTest(name=name):
+                    counter, executor = self._native_counter(root, responses)
+                    actual = counter.resume_resources_present(
+                        identity=DockerTaskIdentity(TASK_ID),
+                        compose_project=project,
+                    )
+                    self.assertIs(actual, expected)
+                    self.assertEqual(
+                        executor.commands[0][5:7],
+                        ("--filter", f"label=dev.rondo.eval.task={TASK_ID}"),
+                    )
+                    self.assertIn(
+                        f"label=com.docker.compose.project={project}",
+                        executor.commands[1],
+                    )
+
+    def test_resume_probe_fails_closed_on_invalid_project_or_docker_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            counter, _ = self._native_counter(root, [])
+            with self.assertRaisesRegex(RuntimeBridgeError, "project is invalid"):
+                counter.resume_resources_present(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    compose_project="INVALID/PROJECT",
+                )
+            counter, _ = self._native_counter(
+                root, [CommandOutput(returncode=1, stdout="")]
+            )
+            with self.assertRaises(RuntimeBridgeError):
+                counter.resume_resources_present(
+                    identity=DockerTaskIdentity(TASK_ID),
+                    compose_project="rondo-p1-codex-0123456789ab__env",
+                )
+
     def test_inspect_requires_literal_private_cgroup_namespace(self) -> None:
         for mode in ("host", "default", ""):
             payload = json.loads(_container_inspect())

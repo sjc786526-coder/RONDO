@@ -5848,6 +5848,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             config.http_client_factory(),
         ),
         executed_tool_calls,
+        code_mode_evidence: Default::default(),
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
             Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
             &config.features,
@@ -6583,6 +6584,7 @@ async fn request_permissions_tool_resolves_relative_paths_against_selected_envir
                     cancellation_token: CancellationToken::new(),
                     tracker,
                     call_id,
+                    output_item_id: None,
                     tool_name: codex_tools::ToolName::plain("request_permissions"),
                     source: ToolCallSource::Direct,
                     payload: ToolPayload::Function {
@@ -6661,6 +6663,7 @@ async fn request_permissions_tool_rejects_unknown_environment_id() {
             cancellation_token: CancellationToken::new(),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
             call_id: "call-1".to_string(),
+            output_item_id: None,
             tool_name: codex_tools::ToolName::plain("request_permissions"),
             source: ToolCallSource::Direct,
             payload: ToolPayload::Function {
@@ -8064,6 +8067,7 @@ where
             config.http_client_factory(),
         ),
         executed_tool_calls,
+        code_mode_evidence: Default::default(),
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
             Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
             &config.features,
@@ -11449,6 +11453,7 @@ async fn rejects_escalated_permissions_when_policy_not_on_request() {
             cancellation_token: CancellationToken::new(),
             tracker: Arc::clone(&turn_diff_tracker),
             call_id,
+            output_item_id: None,
             tool_name: codex_tools::ToolName::plain(tool_name),
             source: crate::tools::context::ToolCallSource::Direct,
             payload: ToolPayload::Function {
@@ -11609,6 +11614,7 @@ async fn unified_exec_rejects_escalated_permissions_when_policy_not_on_request()
             cancellation_token: CancellationToken::new(),
             tracker: Arc::clone(&tracker),
             call_id: "exec-call".to_string(),
+            output_item_id: None,
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload: ToolPayload::Function {

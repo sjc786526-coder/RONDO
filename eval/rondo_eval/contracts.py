@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from dataclasses import asdict, dataclass
@@ -128,6 +129,28 @@ def parse_product(value: object) -> Product:
 
 AUTO_REVIEW_CONFIG_SCHEMA_VERSION = 1
 AUTO_REVIEW_EVIDENCE_DIR = "/logs/agent/guardian-evidence"
+TEAM_CAPABILITY_CONFIG_SCHEMA_VERSION = 1
+# Inline TOML table consumed by `-c`. One override avoids boolean-vs-table
+# clobbering if `features.multi_agent_v2=true` were mixed with nested keys.
+TEAM_CAPABILITY_MULTI_TOML = (
+    "{enabled=true,team_state_enabled=true,non_code_mode_only=false,"
+    "expose_spawn_agent_model_overrides=false}"
+)
+# Same table with the RONDO team layer off. Used only by the M-5 gate 2
+# attribution diagnostic: when a task degrades one-way, this separates "upstream
+# V2 costs the completion" from "the team layer costs it". Never used by a run
+# that counts toward the non-degradation verdict.
+TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML = (
+    "{enabled=true,team_state_enabled=false,non_code_mode_only=false,"
+    "expose_spawn_agent_model_overrides=false}"
+)
+# Machine-wide default for a Multi run that has not pinned its own member model.
+# Campaigns that froze a different model pass it explicitly: flipping this
+# constant instead would silently restate the member identity of every other
+# frozen Multi campaign on the host, exactly as flipping `paid_eval.main_model`
+# did to the single-agent baselines.
+AGENT_DEFAULT_SUBAGENT_MODEL = "gpt-5.6-sol"
+AGENT_DEFAULT_SUBAGENT_EFFORT = "medium"
 
 
 def auto_review_overrides(
@@ -189,6 +212,86 @@ def auto_review_config_projection(
             resolved,
             guardian_model=guardian_model,
             guardian_effort=guardian_effort,
+        ),
+    }
+
+
+def team_capability_override_items(
+    product: Product | None,
+    *,
+    team_state: bool = True,
+    subagent_model: str | None = None,
+    subagent_effort: str | None = None,
+) -> tuple[str, ...]:
+    """Return the ``-c`` items that turn Multi team capability on.
+
+    Local and the frozen upstream get nothing: team tools are Multi-only, and
+    ``--strict-config`` would reject ``team_state_enabled`` on v0.147.0 Codex.
+    ``non_code_mode_only=false`` keeps spawn/team tools Direct while eval also
+    enables ``code_mode_host``. The ``features.multi_agent_v2`` table stays a
+    single inline TOML; the two ``agents.default_subagent_*`` items pin the
+    member model without splitting that table.
+
+    ``team_state=False`` is the gate 2 attribution diagnostic only. It keeps
+    upstream V2 on and drops the RONDO team layer, so it must never be reachable
+    from a run that produces a non-degradation observation.
+
+    ``subagent_model`` / ``subagent_effort`` let a campaign pin its own member
+    identity from its lock. Unset falls back to the machine-wide default, which
+    is what every campaign frozen before pinning existed still expects.
+    """
+
+    if product is not Product.RONDO_MULTI:
+        return ()
+    table = TEAM_CAPABILITY_MULTI_TOML if team_state else TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML
+    model = subagent_model or AGENT_DEFAULT_SUBAGENT_MODEL
+    effort = subagent_effort or AGENT_DEFAULT_SUBAGENT_EFFORT
+    if not isinstance(model, str) or not model:
+        raise ContractError("subagent model override is invalid")
+    if effort not in _REASONING_EFFORTS:
+        raise ContractError("subagent reasoning effort override is invalid")
+    return (
+        f"features.multi_agent_v2={table}",
+        f"agents.default_subagent_model={json.dumps(model)}",
+        f"agents.default_subagent_reasoning_effort={json.dumps(effort)}",
+    )
+
+
+def team_capability_config_projection(
+    side: Side,
+    product: Product | None,
+    *,
+    team_state: bool = True,
+    subagent_model: str | None = None,
+    subagent_effort: str | None = None,
+) -> dict[str, object] | None:
+    """Record whether this run configured Multi team capability.
+
+    ``None`` for the frozen upstream. Local records the closed state so a
+    Multi/Local mix-up is visible in the archive rather than implied.
+
+    A diagnostic run keeps ``multi_agent_v2_enabled`` true and reports
+    ``team_state_enabled`` false, so an archive row can never claim the team
+    layer was on for a run that deliberately switched it off.
+    """
+
+    resolved = product_for_side(side, product)
+    if resolved is None:
+        return None
+    enabled = resolved is Product.RONDO_MULTI
+    return {
+        "schema_version": TEAM_CAPABILITY_CONFIG_SCHEMA_VERSION,
+        "multi_agent_v2_enabled": enabled,
+        "team_state_enabled": enabled and team_state,
+        "non_code_mode_only": False if enabled else None,
+        "expose_spawn_agent_model_overrides": False if enabled else None,
+        # Records what the command line actually pinned, so a row cannot claim a
+        # member model the run did not configure.
+        "default_subagent_model": (
+            (subagent_model or AGENT_DEFAULT_SUBAGENT_MODEL) if enabled else None
+        ),
+        "default_subagent_reasoning_effort": (
+            (subagent_effort or AGENT_DEFAULT_SUBAGENT_EFFORT) if enabled else None
         ),
     }
 

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .contracts import ModelPricing
 
@@ -64,6 +64,10 @@ _LITE_HEADER = "x-openai-internal-codex-responses-lite"
 _MAX_USER_AGENT_BYTES = 512
 _MAX_ORIGINATOR_BYTES = 64
 _MAX_UPSTREAM_ATTEMPTS = 5
+# Ceiling for the opt-in concurrent-main count. Sized above the frozen product
+# default (Root plus three members) with room for a deliberate config change,
+# but low enough that a per-run cap can still be derived from it.
+_MAX_CONCURRENT_MAIN = 8
 _GUARDIAN_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 _SETTLEMENT_USAGE_PRICED = "usage_priced"
 _SETTLEMENT_USAGE_PRICED_OVERAGE = "usage_priced_overage"
@@ -95,8 +99,40 @@ _STOP_REASONS = {
     "logical_request_limit_exceeded",
     "proxy_closing",
     "usage_cost_exceeded_reservation",
+    "usage_outside_frozen_envelope",
     "budget_capacity_exhausted",
 }
+# Stop reasons the batch produced by refusing to spend more. Everything else is
+# the upstream, the network or the harness failing, which is not a budget stop
+# and must not be reported as one. Callers classify with `stop_reason_class`.
+BUDGET_STOP_REASONS = frozenset(
+    {
+        "budget_capacity_exhausted",
+        "usage_cost_exceeded_reservation",
+        "logical_request_limit_exceeded",
+        "guardian_logical_request_limit_exceeded",
+    }
+)
+INFRA_STOP_REASONS = frozenset(_STOP_REASONS) - BUDGET_STOP_REASONS
+
+
+def stop_reason_class(reason: str | None) -> str:
+    """Classify a ledger stop reason as budget, infra, or unknown.
+
+    A run that stopped because the upstream failed, because usage never arrived,
+    or because a deadline expired did not run out of money. Labelling those
+    `budget_stopped` hides the real defect and, in gate 2, would turn a provider
+    outage into evidence about the product. An unrecognised reason is never
+    guessed: it fails closed as `unknown` so the caller can refuse to continue.
+    """
+
+    if reason is None:
+        return "none"
+    if reason in BUDGET_STOP_REASONS:
+        return "budget"
+    if reason in INFRA_STOP_REASONS:
+        return "infra"
+    return "unknown"
 GUARDIAN_OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -231,11 +267,67 @@ def price_usage(usage: Usage, *, pricing: ModelPricing) -> Decimal:
     )
 
 
-def _maximum_usage_cost(pricing: ModelPricing) -> Decimal:
+@dataclass(frozen=True)
+class UsageEnvelope:
+    """Frozen per-request token bounds for one campaign's model.
+
+    The generic :data:`MAX_INPUT_TOKENS` / :data:`MAX_OUTPUT_TOKENS` contract is
+    wide enough to admit requests no pinned model can physically produce, so a
+    reservation sized for a real model is smaller than the largest *legally
+    representable* charge. That gap is what lets a settled request cost more
+    than it reserved and push a batch past its authorized cap. Declaring the
+    model's own envelope closes it: usage outside the envelope is refused rather
+    than priced, and the reservation can then be derived from the envelope so
+    that ``charged <= reserved`` holds for every request.
+    """
+
+    max_input_tokens: int
+    max_output_tokens: int
+
+    def validate(self) -> None:
+        values = (self.max_input_tokens, self.max_output_tokens)
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in values):
+            raise ApiBudgetProxyError("usage envelope bounds must be integers")
+        if any(value < 1 for value in values):
+            raise ApiBudgetProxyError("usage envelope bounds must be positive")
+        if self.max_input_tokens > MAX_INPUT_TOKENS:
+            raise ApiBudgetProxyError("usage envelope exceeds the generic input bound")
+        if self.max_output_tokens > MAX_OUTPUT_TOKENS:
+            raise ApiBudgetProxyError("usage envelope exceeds the generic output bound")
+
+    def require(self, usage: Usage) -> None:
+        """Raise unless this usage fits the frozen envelope."""
+
+        usage.validate()
+        if (
+            usage.input_tokens > self.max_input_tokens
+            or usage.output_tokens > self.max_output_tokens
+        ):
+            raise ApiBudgetProxyError("usage exceeds the frozen campaign envelope")
+
+
+def maximum_usage_cost(
+    pricing: ModelPricing, envelope: UsageEnvelope | None = None
+) -> Decimal:
+    """Highest price admitted by the Usage contract, optionally narrowed.
+
+    Mechanical: it enumerates the priciest legal shape of one request under the
+    given bounds and the frozen rate table, so a reservation derived from it is
+    an upper bound rather than a judgement call.
+    """
+
+    return _maximum_usage_cost(pricing, envelope)
+
+
+def _maximum_usage_cost(
+    pricing: ModelPricing, envelope: UsageEnvelope | None = None
+) -> Decimal:
     """Return the highest price admitted by the frozen Usage contract."""
 
-    candidates = {MAX_INPUT_TOKENS}
-    if pricing.long_context_threshold_tokens < MAX_INPUT_TOKENS:
+    max_input = MAX_INPUT_TOKENS if envelope is None else envelope.max_input_tokens
+    max_output = MAX_OUTPUT_TOKENS if envelope is None else envelope.max_output_tokens
+    candidates = {max_input}
+    if pricing.long_context_threshold_tokens < max_input:
         candidates.add(pricing.long_context_threshold_tokens)
     maximum = Decimal(0)
     for input_tokens in candidates:
@@ -250,7 +342,7 @@ def _maximum_usage_cost(pricing: ModelPricing) -> Decimal:
         maximum = max(
             maximum,
             price_usage(
-                Usage(input_tokens, cached, cache_write, MAX_OUTPUT_TOKENS),
+                Usage(input_tokens, cached, cache_write, max_output),
                 pricing=pricing,
             ),
         )
@@ -282,6 +374,8 @@ class PersistentBudgetLedger:
         total_cap_usd: Decimal | str = BATCH_CAP_USD,
         max_runs: int = MAX_BENCHMARK_RUNS,
         default_run_cap_usd: Decimal | str = RUN_CAP_USD,
+        usage_envelope: UsageEnvelope | None = None,
+        unpriced_stop_threshold: int = 1,
     ):
         _require_safe_id(batch_id, "batch id")
         self.path = Path(path)
@@ -289,6 +383,31 @@ class PersistentBudgetLedger:
         self.total_cap = _money(total_cap_usd)
         self.default_run_cap = _money(default_run_cap_usd)
         self.max_runs = max_runs
+        # Settling is the only place a charge is written, so the envelope is
+        # enforced here rather than at each of the proxy's settle call sites.
+        if usage_envelope is not None:
+            usage_envelope.validate()
+        self.usage_envelope = usage_envelope
+        # How many unpriced settlements a run may absorb before it is stopped.
+        # 1 means "stop on the first", which is the historical behaviour and the
+        # default for every existing campaign.
+        #
+        # A provider that streams a terminal event without usage is a transient
+        # fault, and stopping the run turns it into a total loss: every later
+        # request is refused with HTTP 429 and the agent dies of what looks like
+        # a budget stop. Two real smoke runs were destroyed this way by a single
+        # upstream hiccup each. Absorbing a few is safe because the accounting
+        # does not soften -- each unpriced request is still charged its full
+        # reservation, and the run and batch caps still gate every later reserve
+        # -- so the only thing raising this changes is whether one glitch ends
+        # the run.
+        if (
+            isinstance(unpriced_stop_threshold, bool)
+            or not isinstance(unpriced_stop_threshold, int)
+            or unpriced_stop_threshold < 1
+        ):
+            raise ApiBudgetProxyError("unpriced stop threshold must be a positive integer")
+        self.unpriced_stop_threshold = unpriced_stop_threshold
         if self.total_cap <= 0 or self.total_cap > _MAX_EXPLICIT_BATCH_CAP_USD:
             raise ApiBudgetProxyError("batch cap exceeds the supported 1600 USD maximum")
         if self.default_run_cap <= 0 or self.default_run_cap > _MAX_EXPLICIT_RUN_CAP_USD:
@@ -348,6 +467,32 @@ class PersistentBudgetLedger:
         """Consume one benchmark invocation slot, rejecting every reused run id."""
 
         self._register_run(run_id, cap_usd=cap_usd, reject_existing=True)
+
+    def resume_pristine_run(
+        self, run_id: str, *, cap_usd: Decimal | str | None = None
+    ) -> None:
+        """Reuse one claimed run only when it provably consumed nothing.
+
+        The process lock excludes another normal ledger writer. This method is
+        intentionally narrower than ``ensure_run``: a stopped, tainted, spent,
+        reserved, or even merely requested run must receive a new attempt id.
+        """
+
+        _require_safe_id(run_id, "run id")
+        cap = self.default_run_cap if cap_usd is None else _money(cap_usd)
+        with self._lock:
+            self._assert_open()
+            run = self._require_run(run_id)
+            if Decimal(run["cap_usd"]) != cap:
+                raise ApiBudgetProxyError("pristine run cap differs")
+            if (
+                Decimal(run["spent_usd"]) != 0
+                or run["requests"]
+                or run["stopped"] is not False
+                or run["stop_reason"] is not None
+                or run.get("infra_taint") is not None
+            ):
+                raise ApiBudgetProxyError("benchmark run is not pristine")
 
     def _register_run(
         self,
@@ -485,16 +630,44 @@ class PersistentBudgetLedger:
                 raise ApiBudgetProxyError("request has no active reservation")
             reserved = Decimal(request_state["reserved_usd"])
             usage_valid = True
+            outside_envelope = False
             try:
                 if usage is None:
                     raise ApiBudgetProxyError("response usage is missing")
+                if self.usage_envelope is not None:
+                    try:
+                        self.usage_envelope.require(usage)
+                    except ApiBudgetProxyError:
+                        outside_envelope = True
+                        raise
                 charged = price_usage(usage, pricing=pricing)
             except ApiBudgetProxyError:
                 charged = reserved
                 usage_valid = False
-                run["stopped"] = True
-                run["stop_reason"] = stop_reason or "missing_or_invalid_usage"
                 settlement_kind = _SETTLEMENT_CONSERVATIVE_RESERVATION
+                if outside_envelope:
+                    # Not a provider hiccup: a request outside the frozen
+                    # envelope breaks the arithmetic the cap is derived from,
+                    # so the run stops regardless of the threshold.
+                    run["stopped"] = True
+                    run["stop_reason"] = "usage_outside_frozen_envelope"
+                else:
+                    # Count this settlement plus the unpriced ones already on
+                    # the run.
+                    unpriced = 1 + sum(
+                        1
+                        for item in run["requests"].values()
+                        if isinstance(item, dict)
+                        and item.get("settlement_kind")
+                        == _SETTLEMENT_CONSERVATIVE_RESERVATION
+                    )
+                    if unpriced >= self.unpriced_stop_threshold:
+                        run["stopped"] = True
+                        run["stop_reason"] = (
+                            stop_reason or "missing_or_invalid_usage"
+                        )
+                reason = run["stop_reason"] or stop_reason or "missing_or_invalid_usage"
+                _record_infra_taint(run, reason)
             else:
                 if charged > reserved:
                     run["stopped"] = True
@@ -554,6 +727,9 @@ class PersistentBudgetLedger:
             request_state["settlement_kind"] = _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED
             run["stopped"] = True
             run["stop_reason"] = stop_reason
+            # Billed nothing, but the upstream still failed: the run saw an
+            # infrastructure fault and cannot stand as a product observation.
+            _record_infra_taint(run, stop_reason)
             self._persist()
             return Settlement(
                 Decimal(0),
@@ -841,7 +1017,15 @@ class _UrllibTransport:
             if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
                 raise ApiBudgetProxyError("test upstream override must be loopback HTTP")
         self._endpoint_override = endpoint_override
-        self._opener = build_opener(_NoRedirect())
+        # A loopback override must never be routed through an ambient
+        # HTTP_PROXY. Python's no_proxy matching does not understand the `127.*`
+        # glob most local proxy managers export, so without an empty
+        # ProxyHandler the offline capture tests reach the user's real proxy and
+        # come back 502. The production path keeps the default env behaviour.
+        handlers: list[Any] = [_NoRedirect()]
+        if endpoint_override is not None:
+            handlers.append(ProxyHandler({}))
+        self._opener = build_opener(*handlers)
 
     def open(
         self,
@@ -885,7 +1069,16 @@ class LoopbackResponsesProxy:
         retry_backoff_seconds: float,
         unbilled_retry_statuses: tuple[int, ...],
         request_reservation_usd: Decimal | str | None = None,
+        run_cap_usd: Decimal | str | None = None,
         max_guardian_logical_requests: int | None = None,
+        # RONDO Multi's Root and its members call the model at the same time.
+        # The single-main assumption below predates that product, so campaigns
+        # raise this deliberately; every other campaign keeps the strict 1. It is
+        # a count rather than a flag so "concurrency is allowed" also states how
+        # much, which is what a per-run cap has to be sized against -- and so a
+        # stray truthy string cannot silently unbound it.
+        max_concurrent_main: int = 1,
+        usage_envelope: UsageEnvelope | None = None,
         max_logical_requests: int | None = None,
         timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
         symmetry_preflight: Any | None = None,
@@ -969,6 +1162,31 @@ class LoopbackResponsesProxy:
             raise ApiBudgetProxyError(
                 "proxy short-test logical request limit must be between one and four"
             )
+        if (
+            isinstance(max_concurrent_main, bool)
+            or not isinstance(max_concurrent_main, int)
+            or not 1 <= max_concurrent_main <= _MAX_CONCURRENT_MAIN
+        ):
+            raise ApiBudgetProxyError(
+                "proxy concurrent main limit must be between one and eight"
+            )
+        if usage_envelope is not None:
+            usage_envelope.validate()
+            if getattr(ledger, "usage_envelope", None) != usage_envelope:
+                # The ledger is where a charge is written, so an envelope the
+                # ledger does not share would not actually bound anything.
+                raise ApiBudgetProxyError("proxy usage envelope differs from the ledger")
+            required = max(
+                _maximum_usage_cost(main_pricing, usage_envelope),
+                _maximum_usage_cost(guardian_pricing, usage_envelope),
+            )
+            if request_reservation is None or request_reservation < required:
+                # Without this the ledger's caps are advisory: a settled request
+                # can cost more than it reserved and carry the batch past its
+                # authorized total after the money is already gone.
+                raise ApiBudgetProxyError(
+                    "proxy request reservation is below the frozen usage envelope cost"
+                )
         if not callable(_monotonic) or not callable(_sleep):
             raise ApiBudgetProxyError("proxy clock is invalid")
         if symmetry_preflight is not None and (
@@ -977,7 +1195,7 @@ class LoopbackResponsesProxy:
             or not preflight_task_id
         ):
             raise ApiBudgetProxyError("symmetry preflight identity is incomplete")
-        ledger.ensure_run(run_id)
+        ledger.ensure_run(run_id, cap_usd=run_cap_usd)
         self._symmetry_preflight = symmetry_preflight
         self._preflight_side = preflight_side
         self._preflight_task_id = preflight_task_id
@@ -1004,6 +1222,8 @@ class LoopbackResponsesProxy:
         self._guardian_logical_requests = 0
         self._guardian_body_sha256s: set[str] = set()
         self._main_request_ids: set[str] = set()
+        self._max_concurrent_main = max_concurrent_main
+        self._usage_envelope = usage_envelope
         self._max_logical_requests = max_logical_requests
         self._logical_requests = 0
         self._request_policy_lock = threading.Lock()
@@ -1019,6 +1239,16 @@ class LoopbackResponsesProxy:
         self._sleep = _sleep
         self._server: _LoopbackServer | None = None
         self._thread: threading.Thread | None = None
+
+    @property
+    def main_model(self) -> str:
+        """The model this proxy meters and forwards. Callers compare against it."""
+
+        return self._main_model
+
+    @property
+    def main_effort(self) -> str:
+        return self._main_effort
 
     @property
     def base_url(self) -> str:
@@ -1468,12 +1698,17 @@ class LoopbackResponsesProxy:
             run = self._ledger.snapshot()["runs"].get(self._run_id)
             if not isinstance(run, dict) or not isinstance(run.get("requests"), dict):
                 raise ApiBudgetProxyError("budget run projection is invalid")
-            if role == "main" and any(
-                isinstance(run["requests"].get(main_request_id), dict)
-                and run["requests"][main_request_id].get("status") == "reserved"
-                for main_request_id in self._main_request_ids
-            ):
-                raise ApiBudgetProxyError("concurrent main requests are disabled")
+            if role == "main":
+                in_flight = sum(
+                    1
+                    for main_request_id in self._main_request_ids
+                    if isinstance(run["requests"].get(main_request_id), dict)
+                    and run["requests"][main_request_id].get("status") == "reserved"
+                )
+                if in_flight >= self._max_concurrent_main:
+                    raise ApiBudgetProxyError(
+                        "concurrent main requests exceed the configured limit"
+                    )
             if role == "guardian" and body_sha256 in self._guardian_body_sha256s:
                 self._ledger.stop_run(
                     self._run_id,
@@ -1802,6 +2037,85 @@ def milestone_metadata_ready(metadata_path: Path) -> bool:
         and 1 <= item["attempt_count"] <= _MAX_UPSTREAM_ATTEMPTS
         for item in requests
     )
+
+
+def _record_infra_taint(run: dict[str, Any], reason: str) -> None:
+    """Mark that this run absorbed an upstream fault.
+
+    Kept separate from `stopped` on purpose. Whether a run may *continue* is a
+    spending decision; whether it may still be read as evidence about the
+    product is not. Conflating them let a run absorb eight upstream terminal
+    errors under the stop threshold and still be archived as a clean
+    `agent_failed`, which is a verdict about the model that the run never
+    earned.
+    """
+
+    taint = run.get("infra_taint")
+    if isinstance(taint, dict):
+        taint["count"] = int(taint["count"]) + 1
+    else:
+        run["infra_taint"] = {"count": 1, "first_reason": reason}
+
+
+def infra_taint(snapshot: Mapping[str, Any], run_id: str) -> dict[str, Any] | None:
+    """Return this run's upstream-fault record, or None if it saw none."""
+
+    run = snapshot.get("runs", {}).get(run_id)
+    if not isinstance(run, dict):
+        return None
+    taint = run.get("infra_taint")
+    return dict(taint) if isinstance(taint, dict) else None
+
+
+def exposure_summary(
+    snapshot: Mapping[str, Any], run_id: str | None = None
+) -> dict[str, object]:
+    """Split what a ledger actually charged into priced spend and exposure.
+
+    The ledger debits a reservation in full whenever usage is missing or
+    invalid. That number is a deliberate over-estimate of the money the provider
+    took, and reporting it as spend makes a batch look far more expensive than it
+    was -- and can look like a budget stop that never happened. Priced spend is
+    what the provider's own token counts justify; conservative exposure is what
+    was debited without them. `charged_usd` remains the ledger's real debit and
+    the only number the caps are enforced against.
+    """
+
+    runs = snapshot.get("runs")
+    if not isinstance(runs, dict):
+        raise ApiBudgetProxyError("budget snapshot has no runs")
+    selected = runs if run_id is None else {run_id: runs.get(run_id)}
+    priced = Decimal(0)
+    conservative = Decimal(0)
+    unbilled = 0
+    charged = Decimal(0)
+    counted = 0
+    for run in selected.values():
+        if not isinstance(run, dict):
+            raise ApiBudgetProxyError("budget run projection is invalid")
+        requests = run.get("requests")
+        if not isinstance(requests, dict):
+            raise ApiBudgetProxyError("budget run projection is invalid")
+        for request in requests.values():
+            if not isinstance(request, dict) or request.get("status") != "settled":
+                continue
+            counted += 1
+            amount = _money(request.get("charged_usd") or "0")
+            charged += amount
+            kind = request.get("settlement_kind")
+            if kind in {_SETTLEMENT_USAGE_PRICED, _SETTLEMENT_USAGE_PRICED_OVERAGE}:
+                priced += amount
+            elif kind == _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED:
+                unbilled += 1
+            else:
+                conservative += amount
+    return {
+        "settled_requests": counted,
+        "charged_usd": _money_text(charged),
+        "priced_usd": _money_text(priced),
+        "conservative_exposure_usd": _money_text(conservative),
+        "operator_confirmed_unbilled_requests": unbilled,
+    }
 
 
 def completed_run_accounting(snapshot: Mapping[str, Any], run_id: str) -> dict[str, object]:
@@ -2451,14 +2765,31 @@ def _validate_state(
     total_priced_overage_delta = Decimal(0)
     for run_id, run in value["runs"].items():
         _require_safe_id(run_id, "run id")
-        if not isinstance(run, dict) or set(run) != {
+        required_run_keys = {
             "cap_usd",
             "spent_usd",
             "stopped",
             "stop_reason",
             "requests",
-        }:
+        }
+        # `infra_taint` is optional so ledgers written before it existed still
+        # load unchanged. When present it records that this run absorbed an
+        # upstream failure, which is what disqualifies it as product evidence.
+        if not isinstance(run, dict) or not required_run_keys <= set(run) or set(
+            run
+        ) - required_run_keys - {"infra_taint"}:
             raise ApiBudgetProxyError("budget run state differs from schema v1")
+        taint = run.get("infra_taint")
+        if taint is not None and (
+            not isinstance(taint, dict)
+            or set(taint) != {"count", "first_reason"}
+            or isinstance(taint["count"], bool)
+            or not isinstance(taint["count"], int)
+            or taint["count"] < 1
+            or not isinstance(taint["first_reason"], str)
+            or not taint["first_reason"]
+        ):
+            raise ApiBudgetProxyError("budget run infra taint is invalid")
         cap = _money(run["cap_usd"])
         spent = _money(run["spent_usd"])
         if cap <= 0 or cap > default_run_cap:
