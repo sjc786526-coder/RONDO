@@ -252,19 +252,27 @@
 - 已确认仓库 `just eval-sync` 会把 ignored Python 环境与 uv cache 物化到 common-root；只有执行者确实需要同步依赖时才
   允许这一主工作区 ignored 写例外，并须在交付中单独说明。
 - 已冻结 A/B 写集、共享文档归属、条件 hook、body-free 数据合同和本次执行授权边界。
-- 已建立本 ExecPlan；尚未实现 Team Lens、未运行测试、未触发 hook。
+- 已在固定 `eval/` 写集内完成 Team Lens：同一 `reduce_bundle()` 入口按显式 product 消费原生 v1 bundle，白名单生成
+  `team_view.json`；报告器只消费该合同并输出内嵌 CSS/JS/数据的确定性单文件 HTML；未修改 M-5 reader、依赖或 Rust。
+- 零 hook 验证已完成：冻结 Codex 与 RONDO `rollout-trace` 源码逐文件一致；同一消费者成功读取 24/24 个指定 RONDO
+  M-5 原生 bundle（均无预生成 `state.json`），其中 11 个五类 Team 视图全 `available`，其余按缺少完整 dump/Team
+  观察显式 `partial`；所有 bundle 的 JSON/HTML 重复生成均字节一致。Codex 侧使用与冻结源码一致的原生 v1 合成
+  fixture，明确标记为合成证据。现有 typed tool result、projection 外壳和 dump 关系足够，不触发 hook。
+- 已加入临时目录原生 fixture 与 12 项定向测试，覆盖两侧布局、direct/code-mode 等义、四态降级、无 `state.json`、
+  Fact omission、wait 非 interaction、严格 reader 错误、正文不出站、renderer 单向依赖、确定性与 HTML 转义/自包含；
+  `PYTHONPATH=eval python3 -m unittest -v eval/tests/test_team_lens.py` 为 12/12 通过。
+- 未执行 `just eval-sync`，未产生 common-root ignored 环境/缓存写入；未运行 Docker、API、模型、Cargo 或全量测试。
 
 ### 当前工作
 
-计划制定批次完成后等待执行者按本计划实施；执行从阶段 1 的零 hook 消费者与字段矩阵开始。
+实现、定向验收和现场零 hook 验证完成；准备提交本地 048 分支。按用户追加要求，首个实现提交后由干净上下文独立
+审查者只审正确性与功能性，真实问题修复并复审至通过。
 
 ### 本任务剩余步骤
 
-1. 在固定写集内实现原生 bundle 读取、最小 schema、四态降级和两侧合成 fixture/定向测试。
-2. 对指定代表性 bundle 完成零 hook、body-free 字段矩阵验证；决定并记录是否触发最小 RONDO hook。
-3. 完成 RONDO Team 关系归约和 `team_view.json` 确定性/泄漏回归。
-4. 只基于 `team_view.json` 完成单文件 HTML 与两侧报告测试。
-5. 运行适度定向门禁，审查提交物与意外生成物，更新本节/关键决策和精炼日志，提交 048 分支后停止。
+1. 审查 diff、敏感正文、raw trace、生成物和工作树状态，提交本地 048 分支。
+2. 启动干净上下文独立审查；若有确认属实的问题，窄修、定向重跑、追加提交并交回复审，直至通过。
+3. 复核最终工作树与提交，按授权边界停止并等待用户验收。
 
 ### 阻塞项
 
@@ -272,7 +280,7 @@
 
 ### 当前验收状态
 
-- 仅计划与源码事实侦察完成；产品实现与测试均待执行，不得表述为 Team Lens 已通过。
+- 两阶段实现及执行者定向验收通过；尚待用户要求的提交后独立审查，不冒充最终独立验收已通过。
 
 ### 交接边界
 
@@ -295,3 +303,6 @@
 | 008 | projection 文本必须通过正文结构行伪装回归，否则降级或触发最小 hook | 当前 renderer 的自由正文可含换行，仅凭固定前缀解析会猜错 Team 关系 | 零 hook 判定 | 已采纳 |
 | 009 | schema identity 分开记录 manifest/raw event/reduced state 版本 | 三者在原生 trace 中是独立版本，混成一个值会误报兼容性 | 输入合同 | 已采纳 |
 | 010 | 依赖同步可按需写 common-root ignored eval 环境/缓存，其他主工作区写入仍禁止 | 现有 `just eval-sync` 的真实路径语义如此，需诚实列为例外 | ignored 现场 | 已采纳 |
+| 011 | 零 hook 足够，不编辑 RONDO trace runtime | 24/24 指定 RONDO 原生 bundle 可由 typed tool result、projection 外壳与 dump 机械归约；11 个完整样本五类 Team 视图全可用，其余可诚实降级 | hook 门 | 已采纳 |
+| 012 | projection 只解析请求尾部 developer item 的 canonical 外壳/header，不解析后续 Event/Version 文本 | 自由 title/summary/handoff/note 可换行伪装结构行；关系统一来自 typed tool result/dump | 归约边界 | 已采纳 |
+| 013 | 报告使用标准库 HTML/CSS/JS，内嵌转义后的严格 Team View，并以 DOM `textContent` 渲染数据 | 无需新增依赖或前端工程即可满足离线、自包含、确定性和注入安全 | 静态报告 | 已采纳 |
