@@ -286,7 +286,7 @@ def validate_team_view(view: dict[str, Any]) -> None:
             item = _dict(row, collection)
             _exact_keys(item, keys, collection)
             normalized_rows[collection].append(item)
-    _validate_common_rows(normalized_rows, source)
+    common_ids = _validate_common_rows(normalized_rows, source)
     for inference in normalized_rows["inferences"]:
         usage = inference.get("usage")
         if usage is not None:
@@ -311,7 +311,7 @@ def validate_team_view(view: dict[str, Any]) -> None:
                 item = _dict(row, f"team {collection}")
                 _exact_keys(item, keys, f"team {collection}")
                 team_rows[collection].append(item)
-        _validate_team_rows(team_rows, normalized_rows["agents"])
+        _validate_team_rows(team_rows, common_ids)
 
     summary = _dict(view.get("summary"), "summary")
     _exact_keys(summary, _SUMMARY_KEYS, "summary")
@@ -321,7 +321,7 @@ def validate_team_view(view: dict[str, Any]) -> None:
 
 def _validate_common_rows(
     rows: dict[str, list[dict[str, Any]]], source: dict[str, Any]
-) -> None:
+) -> dict[str, set[str]]:
     agent_ids = _unique_ids(rows["agents"], "agent_id", "agent")
     if source["root_thread_id"] not in agent_ids:
         raise TeamViewError("source root thread is not an agent")
@@ -332,6 +332,10 @@ def _validate_common_rows(
             raise TeamViewError("agent parent is unknown")
         if agent["role"] not in {"root", "spawned"}:
             raise TeamViewError("agent role is invalid")
+        if (agent["agent_id"] == source["root_thread_id"]) != (agent["role"] == "root"):
+            raise TeamViewError("agent root identity and role disagree")
+        if agent["role"] == "root" and parent is not None:
+            raise TeamViewError("root agent has a parent")
         _validate_window(agent)
 
     turn_ids = _unique_ids(rows["turns"], "turn_id", "turn")
@@ -340,7 +344,7 @@ def _validate_common_rows(
             raise TeamViewError("turn agent is unknown")
         _validate_window(turn)
 
-    _unique_ids(rows["inferences"], "inference_id", "inference")
+    inference_ids = _unique_ids(rows["inferences"], "inference_id", "inference")
     for inference in rows["inferences"]:
         if _nonempty_string(inference["agent_id"], "inference agent") not in agent_ids:
             raise TeamViewError("inference agent is unknown")
@@ -387,12 +391,18 @@ def _validate_common_rows(
         if tool_id is not None and tool_id not in tool_ids:
             raise TeamViewError("interaction tool is unknown")
         _validate_window(interaction)
+    return {
+        "agents": agent_ids,
+        "turns": turn_ids,
+        "inferences": inference_ids,
+        "tools": tool_ids,
+    }
 
 
 def _validate_team_rows(
-    rows: dict[str, list[dict[str, Any]]], agents: list[dict[str, Any]]
+    rows: dict[str, list[dict[str, Any]]], common_ids: dict[str, set[str]]
 ) -> None:
-    agent_ids = {agent["agent_id"] for agent in agents}
+    agent_ids = common_ids["agents"]
     event_ids = _unique_ids(rows["events"], "event_id", "team event")
     version_ids = _unique_ids(rows["versions"], "version_id", "team version")
     route_ids = _unique_ids(rows["routes"], "route_id", "team route")
@@ -400,10 +410,17 @@ def _validate_team_rows(
 
     for revision in rows["revisions"]:
         _integer(revision["revision"], "team revision", minimum=0)
-        _nonempty_string(revision["tool_id"], "team revision tool")
+        if _nonempty_string(revision["tool_id"], "team revision tool") not in common_ids["tools"]:
+            raise TeamViewError("team revision tool is unknown")
         _integer(revision["seq"], "team revision sequence", minimum=1)
+    projection_inferences: set[str] = set()
     for projection in rows["projections"]:
-        _nonempty_string(projection["inference_id"], "team projection inference")
+        inference_id = _nonempty_string(projection["inference_id"], "team projection inference")
+        if inference_id not in common_ids["inferences"]:
+            raise TeamViewError("team projection inference is unknown")
+        if inference_id in projection_inferences:
+            raise TeamViewError("team projection inference is duplicated")
+        projection_inferences.add(inference_id)
         _nonempty_string(projection["team_instance"], "team projection instance")
         _integer(projection["revision"], "team projection revision", minimum=0)
         _integer(projection["seq"], "team projection sequence", minimum=1)
@@ -464,6 +481,33 @@ def _validate_team_rows(
         _integer(attention["revision"], "attention revision", minimum=0)
         _integer(attention["seq"], "attention sequence", minimum=1)
 
+    events = {row["event_id"]: row for row in rows["events"]}
+    versions = {row["version_id"]: row for row in rows["versions"]}
+    routes = {row["route_id"]: row for row in rows["routes"]}
+    facts = {row["fact_id"]: row for row in rows["facts"]}
+    for event in rows["events"]:
+        for version_id in event["version_ids"]:
+            if versions[version_id]["event_id"] != event["event_id"]:
+                raise TeamViewError("event and version relation disagree")
+        for route_id in event["route_ids"]:
+            if routes[route_id]["event_id"] != event["event_id"]:
+                raise TeamViewError("event and route relation disagree")
+    for version in rows["versions"]:
+        event_id = version["event_id"]
+        if event_id is not None and version["version_id"] not in events[event_id]["version_ids"]:
+            raise TeamViewError("version and event relation disagree")
+        for fact_id in version["fact_ids"]:
+            if version["version_id"] not in facts[fact_id]["version_ids"]:
+                raise TeamViewError("version and fact relation disagree")
+    for route in rows["routes"]:
+        event_id = route["event_id"]
+        if event_id is not None and route["route_id"] not in events[event_id]["route_ids"]:
+            raise TeamViewError("route and event relation disagree")
+    for fact in rows["facts"]:
+        for version_id in fact["version_ids"]:
+            if fact["fact_id"] not in versions[version_id]["fact_ids"]:
+                raise TeamViewError("fact and version relation disagree")
+
 
 def _validate_summary(
     summary: dict[str, Any],
@@ -494,6 +538,15 @@ def _validate_summary(
             raise TeamViewError("running summary has a duration")
     elif duration != max(0, ended - started):
         raise TeamViewError("summary duration is inconsistent")
+    expected_usage = {key: 0 for key in _USAGE_KEYS}
+    for inference in rows["inferences"]:
+        usage = inference["usage"]
+        if usage is None:
+            continue
+        for key in _USAGE_KEYS:
+            expected_usage[key] += usage[key]
+    if summary["usage"] != expected_usage:
+        raise TeamViewError("summary usage is inconsistent")
 
 
 def _validate_window(row: dict[str, Any]) -> None:
@@ -525,8 +578,11 @@ def _unique_ids(rows: list[dict[str, Any]], key: str, label: str) -> set[str]:
 
 def _string_refs(value: object, known: set[str], label: str) -> None:
     refs = _list(value, label)
-    for ref in refs:
-        if _nonempty_string(ref, label) not in known:
+    validated = [_nonempty_string(ref, label) for ref in refs]
+    if len(validated) != len(set(validated)):
+        raise TeamViewError(f"{label} contains a duplicate identity")
+    for ref in validated:
+        if ref not in known:
             raise TeamViewError(f"{label} contains an unknown identity")
 
 

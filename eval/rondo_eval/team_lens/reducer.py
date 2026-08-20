@@ -91,10 +91,169 @@ _PROJECTION_HEADER = re.compile(
     r"you=\S+ role=(?:root|member)$"
 )
 _SAFE_REASON = re.compile(r"^[a-z0-9_:-]+$")
+_ROLLOUT_STATUSES = {"running", "completed", "failed", "aborted"}
+_EXECUTION_STATUSES = {"running", "completed", "failed", "cancelled", "aborted"}
+_CODE_CELL_STATUSES = {"starting", "running", "yielded", "completed", "failed", "terminated"}
 
 
 class BundleError(ValueError):
     """Raised when a native rollout bundle is malformed or unsupported."""
+
+
+def _validate_raw_event_shape(event: dict[str, Any]) -> None:
+    """Mirror the required fields of the frozen v1 Rust raw-event enum."""
+
+    payload = event["payload"]
+    kind = payload["type"]
+    required_id_fields = {
+        "rollout_started": ("trace_id", "root_thread_id"),
+        "thread_started": ("thread_id", "agent_path"),
+        "thread_ended": ("thread_id",),
+        "codex_turn_started": ("codex_turn_id", "thread_id"),
+        "codex_turn_ended": ("codex_turn_id",),
+        "inference_started": (
+            "inference_call_id",
+            "thread_id",
+            "codex_turn_id",
+            "model",
+            "provider_name",
+        ),
+        "inference_completed": ("inference_call_id",),
+        "inference_failed": ("inference_call_id",),
+        "inference_cancelled": ("inference_call_id",),
+        "tool_call_started": ("tool_call_id",),
+        "mcp_tool_call_correlation_assigned": ("tool_call_id", "mcp_call_id"),
+        "tool_call_runtime_started": ("tool_call_id",),
+        "tool_call_runtime_ended": ("tool_call_id",),
+        "tool_call_ended": ("tool_call_id",),
+        "code_cell_started": ("runtime_cell_id", "model_visible_call_id"),
+        "code_cell_initial_response": ("runtime_cell_id",),
+        "code_cell_ended": ("runtime_cell_id",),
+        "compaction_request_started": (
+            "compaction_id",
+            "compaction_request_id",
+            "thread_id",
+            "codex_turn_id",
+            "model",
+            "provider_name",
+        ),
+        "compaction_request_completed": ("compaction_id", "compaction_request_id"),
+        "compaction_request_failed": ("compaction_id", "compaction_request_id"),
+        "compaction_installed": ("compaction_id",),
+        "agent_result_observed": (
+            "edge_id",
+            "child_thread_id",
+            "child_codex_turn_id",
+            "parent_thread_id",
+        ),
+        "protocol_event_observed": ("event_type",),
+    }
+    for field in required_id_fields.get(kind, ()):
+        if not _is_nonempty_string(payload.get(field)):
+            raise BundleError("rollout trace event is missing a required identity")
+
+    required_text_fields = {
+        "inference_failed": ("error",),
+        "inference_cancelled": ("reason",),
+        "code_cell_started": ("source_js",),
+        "compaction_request_failed": ("error",),
+        "agent_result_observed": ("message",),
+    }
+    for field in required_text_fields.get(kind, ()):
+        if not isinstance(payload.get(field), str):
+            raise BundleError("rollout trace event is missing required text")
+
+    optional_strings = {
+        "inference_completed": ("response_id", "upstream_request_id"),
+        "inference_failed": ("upstream_request_id",),
+        "inference_cancelled": ("upstream_request_id",),
+        "tool_call_started": ("model_visible_call_id", "code_mode_runtime_tool_id"),
+    }
+    for field in optional_strings.get(kind, ()):
+        if payload.get(field) is not None and not isinstance(payload[field], str):
+            raise BundleError("rollout trace event has invalid optional text")
+
+    status_fields = {
+        "rollout_ended": _ROLLOUT_STATUSES,
+        "thread_ended": _ROLLOUT_STATUSES,
+        "codex_turn_ended": _EXECUTION_STATUSES,
+        "tool_call_runtime_ended": _EXECUTION_STATUSES,
+        "tool_call_ended": _EXECUTION_STATUSES,
+        "code_cell_initial_response": _CODE_CELL_STATUSES,
+        "code_cell_ended": _CODE_CELL_STATUSES,
+    }
+    allowed_statuses = status_fields.get(kind)
+    if allowed_statuses is not None and payload.get("status") not in allowed_statuses:
+        raise BundleError("rollout trace event has an invalid native status")
+
+    if kind == "tool_call_started":
+        _validate_tool_start_shape(payload)
+
+    payload_thread = payload.get("thread_id")
+    if payload_thread is not None and event.get("thread_id") not in {None, payload_thread}:
+        raise BundleError("rollout trace event envelope thread identity disagrees")
+    payload_turn = payload.get("codex_turn_id")
+    if payload_turn is not None and event.get("codex_turn_id") not in {None, payload_turn}:
+        raise BundleError("rollout trace event envelope turn identity disagrees")
+
+
+def _validate_tool_start_shape(payload: dict[str, Any]) -> None:
+    requester = payload.get("requester")
+    if not isinstance(requester, dict) or requester.get("type") not in {"model", "code_cell"}:
+        raise BundleError("tool requester is not a native variant")
+    if requester["type"] == "code_cell" and not _is_nonempty_string(requester.get("runtime_cell_id")):
+        raise BundleError("code-cell tool requester has no runtime identity")
+
+    tool_kind = payload.get("kind")
+    simple_kinds = {
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "web",
+        "image_generation",
+        "spawn_agent",
+        "assign_agent_task",
+        "send_message",
+        "wait_agent",
+        "close_agent",
+    }
+    if not isinstance(tool_kind, dict) or tool_kind.get("type") not in simple_kinds | {"mcp", "other"}:
+        raise BundleError("tool kind is not a native variant")
+    if tool_kind["type"] == "mcp" and not all(
+        _is_nonempty_string(tool_kind.get(field)) for field in ("server", "tool")
+    ):
+        raise BundleError("MCP tool kind is missing identity")
+    if tool_kind["type"] == "other" and not _is_nonempty_string(tool_kind.get("name")):
+        raise BundleError("other tool kind is missing its name")
+
+    summary = payload.get("summary")
+    if not isinstance(summary, dict) or summary.get("type") not in {
+        "terminal",
+        "agent",
+        "wait_agent",
+        "generic",
+    }:
+        raise BundleError("tool summary is not a native variant")
+    summary_type = summary["type"]
+    if summary_type == "terminal" and not _is_nonempty_string(summary.get("operation_id")):
+        raise BundleError("terminal tool summary is missing identity")
+    if summary_type == "agent" and not all(
+        isinstance(summary.get(field), str)
+        for field in ("target_agent_path", "message_preview")
+    ):
+        raise BundleError("agent tool summary is missing required text")
+    if summary_type == "wait_agent":
+        if summary.get("target_agent_path") is not None and not isinstance(summary["target_agent_path"], str):
+            raise BundleError("wait tool summary has an invalid target")
+        timeout = summary.get("timeout_ms")
+        if timeout is not None and (not _is_int(timeout) or timeout < 0):
+            raise BundleError("wait tool summary has an invalid timeout")
+    if summary_type == "generic":
+        if not isinstance(summary.get("label"), str):
+            raise BundleError("generic tool summary is missing its label")
+        for field in ("input_preview", "output_preview"):
+            if summary.get(field) is not None and not isinstance(summary[field], str):
+                raise BundleError("generic tool summary has invalid preview text")
 
 
 def reduce_bundle(bundle_dir: Path, product: str) -> dict[str, Any]:
@@ -190,6 +349,7 @@ class _BundleReader:
             kind = payload.get("type")
             if kind == "other" or kind not in _KNOWN_EVENT_TYPES:
                 raise BundleError("unsupported rollout trace event type")
+            _validate_raw_event_shape(event)
             for field, required in _PAYLOAD_REF_FIELDS.get(kind, ()):
                 ref = payload.get(field)
                 if ref is None:
@@ -282,6 +442,11 @@ class _Reducer:
         self.rollout_ended_at: int | None = None
         self.tool_name_missing = False
         self.terminal_runtime_missing = False
+        self.terminal_runtime_started: set[str] = set()
+        self.mcp_correlations: set[str] = set()
+        self.code_cells: dict[tuple[str, str], dict[str, Any]] = {}
+        self.compaction_requests: dict[str, dict[str, Any]] = {}
+        self.compaction_installs: set[str] = set()
 
     def reduce(self) -> dict[str, Any]:
         for event in self.reader.events:
@@ -323,10 +488,16 @@ class _Reducer:
             self._end_inference(event)
         elif kind == "tool_call_started":
             self._start_tool(event)
+        elif kind == "mcp_tool_call_correlation_assigned":
+            self._mcp_correlation(event)
         elif kind in {"tool_call_runtime_started", "tool_call_runtime_ended"}:
             self._tool_runtime(event)
         elif kind == "tool_call_ended":
             self._end_tool(event)
+        elif kind in {"code_cell_started", "code_cell_initial_response", "code_cell_ended"}:
+            self._code_cell_lifecycle(event)
+        elif kind.startswith("compaction_"):
+            self._compaction_lifecycle(event)
         elif kind == "agent_result_observed":
             self._agent_result(event)
 
@@ -423,6 +594,8 @@ class _Reducer:
         row = self.inferences[inference_id]
         if row["ended_seq"] is not None:
             raise BundleError("inference has more than one terminal event")
+        if event.get("thread_id") not in {None, row["agent_id"]} or event.get("codex_turn_id") not in {None, row["turn_id"]}:
+            raise BundleError("inference terminal envelope identity disagrees")
         row["ended_seq"] = event["seq"]
         row["ended_at_unix_ms"] = event["wall_time_unix_ms"]
         row["status"] = {
@@ -457,6 +630,10 @@ class _Reducer:
         requester = _tag(payload.get("requester"))
         if requester not in {"model", "code_cell"}:
             raise BundleError("tool requester is unsupported")
+        if requester == "code_cell":
+            runtime_id = payload["requester"]["runtime_cell_id"]
+            if (agent_id, runtime_id) not in self.code_cells:
+                raise BundleError("code-cell tool references an unknown runtime cell")
         self.tool_invocations[tool_id] = invocation
         self.tools[tool_id] = {
             "tool_id": tool_id,
@@ -495,15 +672,25 @@ class _Reducer:
         tool = self.tools.get(tool_id)
         if tool is None:
             raise BundleError("tool runtime event references an unknown tool")
+        if event.get("thread_id") not in {None, tool["agent_id"]} or event.get("codex_turn_id") not in {None, tool["turn_id"]}:
+            raise BundleError("tool runtime envelope identity disagrees")
         runtime = self.reader.load_ref(payload.get("runtime_payload"))
         if not isinstance(runtime, dict):
             raise BundleError("tool runtime payload is not an object")
         if tool["kind"] in _TERMINAL_KINDS:
             terminal = self.terminal[tool_id]
+            if payload["type"] == "tool_call_runtime_started":
+                if tool_id in self.terminal_runtime_started:
+                    raise BundleError("terminal tool has more than one runtime start")
+                self.terminal_runtime_started.add(tool_id)
+                terminal["started_seq"] = event["seq"]
+                terminal["started_at_unix_ms"] = event["wall_time_unix_ms"]
             terminal_id = runtime.get("process_id")
             if _is_nonempty_string(terminal_id):
                 terminal["terminal_id"] = terminal_id
             if payload["type"] == "tool_call_runtime_ended":
+                if tool_id not in self.terminal_runtime_started:
+                    self.terminal_runtime_missing = True
                 terminal["ended_seq"] = event["seq"]
                 terminal["ended_at_unix_ms"] = event["wall_time_unix_ms"]
                 terminal["status"] = _execution_status(runtime.get("status"))
@@ -528,6 +715,80 @@ class _Reducer:
                     "status": "completed",
                 }
 
+    def _mcp_correlation(self, event: dict[str, Any]) -> None:
+        tool_id = event["payload"]["tool_call_id"]
+        if tool_id not in self.tools:
+            raise BundleError("MCP correlation references an unknown tool")
+        if tool_id in self.mcp_correlations:
+            raise BundleError("tool has more than one MCP correlation")
+        self.mcp_correlations.add(tool_id)
+
+    def _code_cell_lifecycle(self, event: dict[str, Any]) -> None:
+        payload = event["payload"]
+        runtime_id = payload["runtime_cell_id"]
+        thread_id = event.get("thread_id")
+        turn_id = event.get("codex_turn_id")
+        if not _is_nonempty_string(thread_id) or not _is_nonempty_string(turn_id):
+            raise BundleError("code cell event is missing its envelope identity")
+        turn = self.turns.get(turn_id)
+        if thread_id not in self.agents or turn is None or turn["agent_id"] != thread_id:
+            raise BundleError("code cell event references an unknown thread or turn")
+        key = (thread_id, runtime_id)
+        kind = payload["type"]
+        if kind == "code_cell_started":
+            if key in self.code_cells:
+                raise BundleError("code cell start identity is duplicated")
+            self.code_cells[key] = {"initial": False, "ended": False, "turn_id": turn_id}
+            return
+        cell = self.code_cells.get(key)
+        if cell is None or cell["turn_id"] != turn_id:
+            raise BundleError("code cell lifecycle references an unknown cell")
+        if kind == "code_cell_initial_response":
+            if cell["initial"] or cell["ended"]:
+                raise BundleError("code cell initial response is duplicated or late")
+            cell["initial"] = True
+        else:
+            if cell["ended"]:
+                raise BundleError("code cell end is duplicated")
+            cell["ended"] = True
+
+    def _compaction_lifecycle(self, event: dict[str, Any]) -> None:
+        payload = event["payload"]
+        kind = payload["type"]
+        if kind == "compaction_request_started":
+            request_id = payload["compaction_request_id"]
+            thread_id = payload["thread_id"]
+            turn_id = payload["codex_turn_id"]
+            turn = self.turns.get(turn_id)
+            if thread_id not in self.agents or turn is None or turn["agent_id"] != thread_id:
+                raise BundleError("compaction request references an unknown thread or turn")
+            if event.get("thread_id") not in {None, thread_id} or event.get("codex_turn_id") not in {None, turn_id}:
+                raise BundleError("compaction request envelope identity disagrees")
+            if request_id in self.compaction_requests:
+                raise BundleError("compaction request start identity is duplicated")
+            self.compaction_requests[request_id] = {
+                "compaction_id": payload["compaction_id"],
+                "ended": False,
+            }
+            return
+        if kind in {"compaction_request_completed", "compaction_request_failed"}:
+            request = self.compaction_requests.get(payload["compaction_request_id"])
+            if request is None or request["ended"]:
+                raise BundleError("compaction completion references an unknown or ended request")
+            if request["compaction_id"] != payload["compaction_id"]:
+                raise BundleError("compaction completion identity disagrees")
+            request["ended"] = True
+            return
+        compaction_id = payload["compaction_id"]
+        thread_id = event.get("thread_id")
+        turn_id = event.get("codex_turn_id")
+        turn = self.turns.get(turn_id) if isinstance(turn_id, str) else None
+        if not _is_nonempty_string(thread_id) or turn is None or turn["agent_id"] != thread_id:
+            raise BundleError("compaction install references an unknown thread or turn")
+        if compaction_id in self.compaction_installs:
+            raise BundleError("compaction install identity is duplicated")
+        self.compaction_installs.add(compaction_id)
+
     def _end_tool(self, event: dict[str, Any]) -> None:
         payload = event["payload"]
         tool_id = payload.get("tool_call_id")
@@ -536,10 +797,14 @@ class _Reducer:
             raise BundleError("tool terminal event references an unknown tool")
         if tool["ended_seq"] is not None:
             raise BundleError("tool has more than one terminal event")
+        if event.get("thread_id") not in {None, tool["agent_id"]} or event.get("codex_turn_id") not in {None, tool["turn_id"]}:
+            raise BundleError("tool terminal envelope identity disagrees")
         tool["ended_seq"] = event["seq"]
         tool["ended_at_unix_ms"] = event["wall_time_unix_ms"]
         tool["status"] = _execution_status(payload.get("status"))
         terminal = self.terminal.get(tool_id)
+        if terminal is not None and tool_id not in self.terminal_runtime_started:
+            self.terminal_runtime_missing = True
         if terminal is not None and terminal["ended_seq"] is None:
             terminal["ended_seq"] = event["seq"]
             terminal["ended_at_unix_ms"] = event["wall_time_unix_ms"]
@@ -559,9 +824,15 @@ class _Reducer:
         payload = event["payload"]
         edge_id = payload.get("edge_id")
         child = payload.get("child_thread_id")
+        child_turn = payload.get("child_codex_turn_id")
         parent = payload.get("parent_thread_id")
-        if not all(_is_nonempty_string(value) for value in (edge_id, child, parent)):
+        if not all(_is_nonempty_string(value) for value in (edge_id, child, child_turn, parent)):
             raise BundleError("agent result edge has invalid identity")
+        if event.get("thread_id") not in {None, child} or event.get("codex_turn_id") not in {None, child_turn}:
+            raise BundleError("agent result envelope identity disagrees")
+        turn = self.turns.get(child_turn)
+        if turn is None or turn["agent_id"] != child:
+            raise BundleError("agent result references an unknown child turn")
         if edge_id in self.interactions:
             raise BundleError("agent interaction identity is duplicated")
         self.interactions[edge_id] = {
@@ -678,10 +949,11 @@ class _Reducer:
         terminal: list[dict[str, Any]],
         interactions: list[dict[str, Any]],
     ) -> dict[str, dict[str, Any]]:
-        usage_missing = any(
-            inference["status"] == "completed" and inference["usage"] is None
+        usage_reasons = {
+            f"{inference['status']}_inference_usage_missing"
             for inference in self.inferences.values()
-        )
+            if inference["usage"] is None
+        }
         expected_edges = {
             tool["tool_id"]
             for tool in tools
@@ -692,8 +964,8 @@ class _Reducer:
             "agents": capability("available"),
             "turns": capability("available"),
             "inferences": capability("available"),
-            "usage": capability("partial", "completed_inference_usage_missing")
-            if usage_missing
+            "usage": capability("partial", *usage_reasons)
+            if usage_reasons
             else capability("available"),
             "tools": capability("partial", "tool_invocation_name_missing")
             if self.tool_name_missing
@@ -743,6 +1015,7 @@ class _TeamAccumulator:
         self.team_result_missing = False
         self.fact_refs_omitted = False
         self.dump_conflict = False
+        self.state_change_seqs: list[int] = []
 
     def observe_tool(
         self,
@@ -759,6 +1032,8 @@ class _TeamAccumulator:
         if _is_int(revision) and revision >= 0:
             self.revisions.append({"revision": revision, "tool_id": tool["tool_id"], "seq": seq})
         name = tool["name"]
+        if name in {"team_publish", "team_update", "team_route", "team_route_update", "team_retire"}:
+            self.state_change_seqs.append(seq)
         if name == "team_publish":
             self._publish(tool, result, seq)
         elif name == "team_update":
@@ -771,6 +1046,8 @@ class _TeamAccumulator:
             self._inspect(result, seq)
         elif name == "team_evidence":
             self._evidence(result, seq)
+        elif name == "team_retire":
+            self._retire(result, seq)
         del invocation
 
     def _publish(self, tool: dict[str, Any], result: dict[str, Any], seq: int) -> None:
@@ -828,6 +1105,17 @@ class _TeamAccumulator:
         _append_unique(event["route_ids"], route_id)
         self._touch(route, seq)
         self._touch(event, seq)
+
+    def _retire(self, result: dict[str, Any], seq: int) -> None:
+        version_id = result.get("version_id")
+        if not _is_nonempty_string(version_id):
+            self.team_result_missing = True
+            return
+        version = self._version(version_id, seq)
+        version["retired"] = True
+        if _is_int(result.get("revision")):
+            version["revision"] = result["revision"]
+        self._touch(version, seq)
 
     def _history(self, result: dict[str, Any], seq: int) -> None:
         if _positive_int(result.get("omitted_events")):
@@ -932,7 +1220,6 @@ class _TeamAccumulator:
             fact["producer_agent_id"] = entry.get("producer_thread_id") if _is_nonempty_string(entry.get("producer_thread_id")) else fact["producer_agent_id"]
             fact["category"] = _safe_enum(entry.get("category"))
             fact["tool"] = entry.get("tool") if _is_nonempty_string(entry.get("tool")) else fact["tool"]
-            fact["availability"] = "available"
             self._touch(fact, seq)
 
     def _evidence(self, result: dict[str, Any], seq: int) -> None:
@@ -1036,9 +1323,19 @@ class _TeamAccumulator:
             if _is_int(group["total"]) and len(group["rows"]) == group["total"]
         ]
         complete_dump = bool(complete_groups) and not self.dump_conflict
+        latest_complete_dump = (
+            max(complete_groups, key=lambda group: (group["revision"], group["seq"]))
+            if complete_groups
+            else None
+        )
+        snapshot_stale = bool(
+            latest_complete_dump is not None
+            and self.state_change_seqs
+            and max(self.state_change_seqs) > latest_complete_dump["seq"]
+        )
         attention: list[dict[str, Any]] = []
-        if complete_groups:
-            latest = max(complete_groups, key=lambda group: (group["revision"], group["seq"]))
+        if latest_complete_dump is not None:
+            latest = latest_complete_dump
             pairs: dict[tuple[str, str], dict[str, Any]] = {}
             for entry in latest["rows"].values():
                 kind = entry.get("entry")
@@ -1088,6 +1385,9 @@ class _TeamAccumulator:
             fact["producer_agent_id"] is None or fact["category"] is None
             for fact in self.facts.values()
         )
+        missing_fact_availability = any(
+            fact["availability"] is None for fact in self.facts.values()
+        )
         availability: dict[str, dict[str, Any]] = {}
         availability["team_revisions"] = (
             capability("available")
@@ -1116,6 +1416,8 @@ class _TeamAccumulator:
             event_reasons.append("version_event_relation_missing")
         if not complete_dump:
             event_reasons.append("attention_snapshot_incomplete")
+        elif snapshot_stale:
+            event_reasons.append("attention_snapshot_stale")
         availability["team_events_versions"] = (
             capability("partial", *event_reasons)
             if event_reasons
@@ -1136,6 +1438,8 @@ class _TeamAccumulator:
             fact_reasons.append("evidence_refs_omitted")
         if missing_fact_metadata:
             fact_reasons.append("fact_metadata_missing")
+        if missing_fact_availability:
+            fact_reasons.append("fact_availability_unobserved")
         if not complete_dump:
             fact_reasons.append("canonical_dump_incomplete")
         availability["team_facts"] = (

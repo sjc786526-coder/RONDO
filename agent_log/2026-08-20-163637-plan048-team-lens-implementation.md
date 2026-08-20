@@ -13,8 +13,9 @@
 ## 零 hook 结论
 
 - 冻结 Codex 与 RONDO 当前 `codex-rs/rollout-trace` 逐文件一致。
-- 同一消费者读取指定 24/24 个 RONDO M-5 原生 bundle 成功；全部重复归约/渲染字节一致，11 个 bundle 的五类 Team
-  视图全 `available`，其余按现场缺少完整 dump 或 Team 观察显式 `partial`。
+- 同一消费者读取指定 24/24 个 RONDO M-5 原生 bundle 成功，全部重复归约/渲染字节一致。初版曾将 11 个 bundle 的
+  五类 Team 视图报为全 `available`；后续独立审查确认静态 Fact dump 不能代表动态 evidence observation，修复后的
+  最终可用性矩阵和回归证据见本任务 review-remediation 日志与 plan 当前状态。
 - 现有原生字段足够形成核心视图；未触发 hook，未修改 `multidev/`、Team State、Rust 依赖/锁或任务 A 写集。
 
 ## 验证与边界

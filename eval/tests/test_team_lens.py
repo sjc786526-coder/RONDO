@@ -233,7 +233,7 @@ class NativeBundleBuilder:
                 "model_visible_call_id": f"model-{tool_id}" if result_mode == "direct" else None,
                 "code_mode_runtime_tool_id": f"runtime-{tool_id}" if result_mode == "code" else None,
                 "requester": requester,
-                "kind": {"type": kind},
+                "kind": {"type": kind, **({"name": name} if kind == "other" else {})},
                 "summary": {
                     "type": "generic",
                     "label": name,
@@ -246,12 +246,28 @@ class NativeBundleBuilder:
             turn_id=self.root_turn,
         )
         if runtime_end is not None:
+            runtime_start = self.payload(
+                "tool_runtime_event",
+                {
+                    "process_id": runtime_end.get("process_id"),
+                    "status": "running",
+                },
+            )
+            self.event(
+                {
+                    "type": "tool_call_runtime_started",
+                    "tool_call_id": tool_id,
+                    "runtime_payload": runtime_start,
+                },
+                thread_id=self.root_thread,
+                turn_id=self.root_turn,
+            )
             runtime = self.payload("tool_runtime_event", runtime_end)
             self.event(
                 {
                     "type": "tool_call_runtime_ended",
                     "tool_call_id": tool_id,
-                    "status": {"type": "completed"},
+                    "status": "completed",
                     "runtime_payload": runtime,
                 },
                 thread_id=self.root_thread,
@@ -274,7 +290,7 @@ class NativeBundleBuilder:
             {
                 "type": "tool_call_ended",
                 "tool_call_id": tool_id,
-                "status": {"type": "completed"},
+                "status": "completed",
                 "result_payload": result_ref,
             },
             thread_id=self.root_thread,
@@ -296,6 +312,8 @@ def make_bundle(
     result_mode: str = "code",
     omitted_fact_refs: int = 0,
     unsupported_projection: bool = False,
+    include_evidence: bool = True,
+    retire_mode: str | None = None,
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -337,7 +355,7 @@ def make_bundle(
         turn_id="turn-worker",
     )
     builder.event(
-        {"type": "codex_turn_ended", "codex_turn_id": "turn-worker", "status": {"type": "completed"}},
+        {"type": "codex_turn_ended", "codex_turn_id": "turn-worker", "status": "completed"},
         thread_id="thread-worker",
         turn_id="turn-worker",
     )
@@ -500,24 +518,42 @@ def make_bundle(
             },
             result_mode=result_mode,
         )
-        builder.tool(
-            "tool-evidence",
-            name="team_evidence",
-            kind="other",
-            arguments={"fact_id": "fact-real"},
-            result={
-                "fact_id": "fact-real",
-                "producer": "/root",
-                "category": "tool_result_success",
-                "tool": "exec_command",
-                "availability": "available",
-                "observation": FACT_BODY,
-                "total_chars": len(FACT_BODY),
-                "truncated": False,
-                "unavailable_reason": None,
-            },
-            result_mode=result_mode,
-        )
+        if include_evidence:
+            builder.tool(
+                "tool-evidence",
+                name="team_evidence",
+                kind="other",
+                arguments={"fact_id": "fact-real"},
+                result={
+                    "fact_id": "fact-real",
+                    "producer": "/root",
+                    "category": "tool_result_success",
+                    "tool": "exec_command",
+                    "availability": "available",
+                    "observation": FACT_BODY,
+                    "total_chars": len(FACT_BODY),
+                    "truncated": False,
+                    "unavailable_reason": None,
+                },
+                result_mode=result_mode,
+            )
+        if retire_mode is not None:
+            builder.tool(
+                "tool-retire",
+                name="team_retire",
+                kind="other",
+                arguments={"version_id": "version-real", "reason": NOTE_BODY},
+                result={
+                    "revision": 4,
+                    "version_id": "version-real",
+                    "retired_by": "/root",
+                    "reason": NOTE_BODY,
+                    "availability": "available",
+                    "availability_epoch": 1,
+                    "deduplicated": False,
+                },
+                result_mode=retire_mode,
+            )
         projection = (
             "<team_active_world_index>\n"
             "team_instance=team-instance revision=3 you=/root role=root\n"
@@ -557,23 +593,34 @@ def make_bundle(
         turn_id="turn-worker",
     )
     builder.event(
-        {"type": "codex_turn_ended", "codex_turn_id": builder.root_turn, "status": {"type": "completed"}},
+        {"type": "codex_turn_ended", "codex_turn_id": builder.root_turn, "status": "completed"},
         thread_id=builder.root_thread,
         turn_id=builder.root_turn,
     )
     builder.event(
-        {"type": "thread_ended", "thread_id": "thread-worker", "status": {"type": "completed"}},
+        {"type": "thread_ended", "thread_id": "thread-worker", "status": "completed"},
         thread_id="thread-worker",
     )
     builder.event(
-        {"type": "thread_ended", "thread_id": builder.root_thread, "status": {"type": "completed"}},
+        {"type": "thread_ended", "thread_id": builder.root_thread, "status": "completed"},
         thread_id=builder.root_thread,
     )
-    builder.event({"type": "rollout_ended", "status": {"type": "completed"}})
+    builder.event({"type": "rollout_ended", "status": "completed"})
     return builder.write()
 
 
 class TeamLensReducerTests(unittest.TestCase):
+    @staticmethod
+    def _events(bundle: Path) -> list[dict]:
+        return [json.loads(line) for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()]
+
+    @staticmethod
+    def _write_events(bundle: Path, events: list[dict]) -> None:
+        (bundle / "trace.jsonl").write_text(
+            "".join(json.dumps(event) + "\n" for event in events),
+            encoding="utf-8",
+        )
+
     def test_codex_native_bundle_without_state_is_not_applicable(self):
         with TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw) / "bundle", product="codex")
@@ -666,6 +713,180 @@ class TeamLensReducerTests(unittest.TestCase):
             "evidence_refs_omitted",
             view["availability"]["team_facts"]["reason_codes"],
         )
+
+    def test_dump_fact_without_evidence_keeps_dynamic_availability_unknown(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(
+                Path(raw) / "bundle",
+                product="rondo-multi",
+                include_evidence=False,
+            )
+            view = reduce_bundle(bundle, "rondo-multi")
+
+        self.assertIsNone(view["team"]["facts"][0]["availability"])
+        self.assertEqual(view["availability"]["team_facts"]["status"], "partial")
+        self.assertIn(
+            "fact_availability_unobserved",
+            view["availability"]["team_facts"]["reason_codes"],
+        )
+
+    def test_retire_updates_version_and_marks_older_attention_snapshot_partial(self):
+        for mode in ("code", "direct"):
+            with self.subTest(mode=mode), TemporaryDirectory() as raw:
+                bundle = make_bundle(
+                    Path(raw) / "bundle",
+                    product="rondo-multi",
+                    retire_mode=mode,
+                )
+                view = reduce_bundle(bundle, "rondo-multi")
+
+            version = view["team"]["versions"][0]
+            self.assertTrue(version["retired"])
+            self.assertEqual(version["revision"], 4)
+            self.assertIn(4, [row["revision"] for row in view["team"]["revisions"]])
+            self.assertEqual(
+                view["availability"]["team_events_versions"]["status"],
+                "partial",
+            )
+            self.assertIn(
+                "attention_snapshot_stale",
+                view["availability"]["team_events_versions"]["reason_codes"],
+            )
+
+    def test_native_variant_shapes_and_correlations_fail_closed(self):
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+
+            missing_cell = make_bundle(root / "missing-cell", product="codex")
+            events = self._events(missing_cell)
+            cell_start = next(row for row in events if row["payload"]["type"] == "code_cell_started")
+            cell_start["payload"].pop("runtime_cell_id")
+            self._write_events(missing_cell, events)
+            with self.assertRaisesRegex(BundleError, "required identity"):
+                reduce_bundle(missing_cell, "codex")
+
+            bad_mcp = make_bundle(root / "bad-mcp", product="codex")
+            events = self._events(bad_mcp)
+            cell_start = next(row for row in events if row["payload"]["type"] == "code_cell_started")
+            cell_start["payload"] = {
+                "type": "mcp_tool_call_correlation_assigned",
+                "tool_call_id": "unknown-tool",
+                "mcp_call_id": "mcp-call-1",
+            }
+            self._write_events(bad_mcp, events)
+            with self.assertRaisesRegex(BundleError, "MCP correlation references an unknown tool"):
+                reduce_bundle(bad_mcp, "codex")
+
+            bad_compaction = make_bundle(root / "bad-compaction", product="codex")
+            events = self._events(bad_compaction)
+            cell_start = next(row for row in events if row["payload"]["type"] == "code_cell_started")
+            cell_start["payload"] = {
+                "type": "compaction_request_failed",
+                "compaction_id": "compaction-1",
+                "compaction_request_id": "unknown-request",
+                "error": "synthetic failure",
+            }
+            self._write_events(bad_compaction, events)
+            with self.assertRaisesRegex(BundleError, "unknown or ended request"):
+                reduce_bundle(bad_compaction, "codex")
+
+    def test_missing_usage_on_failed_inference_marks_known_sum_partial(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw) / "bundle", product="rondo-multi")
+            events = self._events(bundle)
+            completed = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "inference_completed"
+                and row["payload"]["inference_call_id"] == "inference-1"
+            )
+            completed["payload"] = {
+                "type": "inference_failed",
+                "inference_call_id": "inference-1",
+                "upstream_request_id": None,
+                "error": "synthetic failure",
+                "partial_response_payload": None,
+            }
+            self._write_events(bundle, events)
+            view = reduce_bundle(bundle, "rondo-multi")
+
+        failed = next(row for row in view["inferences"] if row["inference_id"] == "inference-1")
+        self.assertEqual(failed["status"], "failed")
+        self.assertIsNone(failed["usage"])
+        self.assertEqual(view["availability"]["usage"]["status"], "partial")
+        self.assertIn(
+            "failed_inference_usage_missing",
+            view["availability"]["usage"]["reason_codes"],
+        )
+        self.assertEqual(view["summary"]["usage"]["total_tokens"], 14)
+
+    def test_terminal_timing_prefers_runtime_start_and_marks_dispatch_fallback(self):
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            bundle = make_bundle(root / "runtime", product="codex")
+            events = self._events(bundle)
+            tool_seq = next(
+                row["seq"]
+                for row in events
+                if row["payload"]["type"] == "tool_call_started"
+                and row["payload"]["tool_call_id"] == "tool-terminal"
+            )
+            runtime_seq = next(
+                row["seq"]
+                for row in events
+                if row["payload"]["type"] == "tool_call_runtime_started"
+                and row["payload"]["tool_call_id"] == "tool-terminal"
+            )
+            view = reduce_bundle(bundle, "codex")
+            terminal = view["terminal"][0]
+            self.assertGreater(runtime_seq, tool_seq)
+            self.assertEqual(terminal["started_seq"], runtime_seq)
+            self.assertEqual(view["availability"]["terminal"]["status"], "available")
+
+            fallback = make_bundle(root / "fallback", product="codex")
+            events = [
+                row
+                for row in self._events(fallback)
+                if not (
+                    row["payload"]["type"] == "tool_call_runtime_started"
+                    and row["payload"]["tool_call_id"] == "tool-terminal"
+                )
+            ]
+            self._write_events(fallback, events)
+            fallback_view = reduce_bundle(fallback, "codex")
+            fallback_terminal = fallback_view["terminal"][0]
+            fallback_tool = next(
+                row for row in fallback_view["tools"] if row["tool_id"] == "tool-terminal"
+            )
+            self.assertEqual(fallback_terminal["started_seq"], fallback_tool["started_seq"])
+            self.assertEqual(fallback_view["availability"]["terminal"]["status"], "partial")
+
+    def test_team_view_validator_rejects_cross_object_contradictions(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw) / "bundle", product="rondo-multi")
+            view = reduce_bundle(bundle, "rondo-multi")
+
+        corruptions = []
+        unknown_projection = copy.deepcopy(view)
+        unknown_projection["team"]["projections"][0]["inference_id"] = "unknown-inference"
+        corruptions.append(unknown_projection)
+        unknown_revision_tool = copy.deepcopy(view)
+        unknown_revision_tool["team"]["revisions"][0]["tool_id"] = "unknown-tool"
+        corruptions.append(unknown_revision_tool)
+        broken_relation = copy.deepcopy(view)
+        broken_relation["team"]["events"][0]["version_ids"] = []
+        corruptions.append(broken_relation)
+        wrong_root = copy.deepcopy(view)
+        wrong_root["agents"][0]["role"] = "spawned"
+        corruptions.append(wrong_root)
+        wrong_usage = copy.deepcopy(view)
+        wrong_usage["summary"]["usage"]["total_tokens"] += 999
+        corruptions.append(wrong_usage)
+
+        for corrupted in corruptions:
+            with self.subTest(corruption=corruptions.index(corrupted)):
+                with self.assertRaises(TeamViewError):
+                    validate_team_view(corrupted)
 
     def test_unrecognized_projection_shape_is_unsupported(self):
         with TemporaryDirectory() as raw:
