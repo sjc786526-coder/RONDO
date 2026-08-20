@@ -376,6 +376,7 @@ def _validate_semantics(
         or artifacts.get("per_run")
         != [
             "rollout-trace",
+            "settled.json",
             "execution.json",
             "api-metadata.json",
             "shared-model-catalog.json",

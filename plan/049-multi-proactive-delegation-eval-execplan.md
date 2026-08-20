@@ -313,15 +313,18 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       marker 与 body-free resume；阶段 A CLI 仍在授权/密钥/Docker/正式状态前 fail-closed。
 - [x] 已重新完成本地定向验收、全新 namespace fake/loopback/replay 与重复生成校验；本地结论为
       `offline-evidence-ready`，阶段 B 的结论候选为 `paid-ready`，等待第二轮独立审查确认。
+- [x] 第二轮独立审查又复现四项真实缺口：单槽 infra 耗尽会越过固定前缀、公平漂移会被误重试、不完整 rehearsal
+      publication 可通过 ready，以及正式函数尚未连接生产 CLI。现已全部修复并补回归；provider 已结算而 Team Lens/报告
+      未完成时另以 body-free settled checkpoint 只恢复本地归约，不重复请求。
 
 ### 当前工作
 
-- 独立审查第一轮问题已修复并完成本地复验；正在提交修复，随后由同一上下文独立审查者复验。
+- 独立审查第二轮问题已修复并完成本地复验；正在提交修复，随后由同一上下文独立审查者进行第三轮复验。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：提交独立审查修复并保持 049 工作树干净。
-2. 阶段 A：由上下文独立的子智能体复审全部实现；真实问题继续修复、提交并复审，直至通过或形成具体 blocker。
+1. 阶段 A：提交第二轮独立审查修复并保持 049 工作树干净。
+2. 阶段 A：由上下文独立的子智能体第三轮复审全部实现；真实问题继续修复、提交并复审，直至通过或形成具体 blocker。
 3. 等待用户另行授权阶段 B；未授权期间保持工作树、分支和正式付费入口不动。
 4. 阶段 B 获授权后：创建正式 activation identity，执行 pilot；通过后按固定顺序完成十个有效配对、聚合与独立审查。
 5. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
@@ -356,4 +359,5 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
 | 007 | 文件活动只报机械可见 file-tool coverage，不建文件系统审计 | 满足诚实可观测性并保持测评轻量 | Team Lens/聚合 | 已采纳 |
 | 008 | 受跟踪编辑只在 049；共享 ignored 资产经 common root 使用并单独汇报 | worktree 不复制机器资产，且必须保护 main 与既有数据 | 工作区边界 | 已采纳 |
 | 009 | 不继承 M-5 的 Codex V1 / RONDO V2 非对称，阶段 A 为两侧建立共同 V2 + trace 接线 | Plan 049 比较主动委派，工具面与观测链必须公平一致 | eval adapter/runner | 已采纳 |
-| 010 | 正式路径复用现有 Terminal-Bench core 与持久预算账本，以 execution/publication 双标记恢复 | 归档或报告失败不得再次发送已结算请求，也不能建立第二套 runner | 阶段 A/B | 已采纳 |
+| 010 | 正式路径复用现有 Terminal-Bench core 与持久预算账本，以 settled/execution/publication 分层标记恢复 | 归档或报告失败不得再次发送已结算请求，也不能建立第二套 runner | 阶段 A/B | 已采纳 |
+| 011 | 生产 paid CLI 复用共享 watchdog 与 Docker counter；未给全套精确启动参数时在 wrapper 前拒绝 | 阶段 B 获授权后应直接启动，不再临时拼装入口；阶段 A 仍不可触碰重型资源 | 阶段 A/B | 已采纳 |

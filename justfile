@@ -96,16 +96,38 @@ eval-plan049-ready namespace="phase-a-final" loopback_namespace="phase-a-final":
         python -B -m rondo_eval.proactive_eval ready --namespace "{{namespace}}" \
         --loopback-namespace "{{loopback_namespace}}"
 
-eval-plan049-phase-b-paid:
+# Authorized production entry.  The shell repeats the non-secret phrases so an
+# unauthorized invocation never enters the heavy-operation watchdog.  The
+# Python entry independently revalidates every gate before secret/formal state.
+eval-plan049-phase-b-paid authorization="" activation_action="" balance="" local_activation="" review_commit="" phase="pilot" namespace="phase-a-final" loopback_namespace="phase-a-final":
     #!/usr/bin/env bash
     set -euo pipefail
     common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
     test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    test "{{authorization}}" = "AUTHORIZE RONDO PLAN 049 PHASE B REAL API AND DOCKER UP TO USD 100.00" || { echo "Plan 049 Phase B authorization is absent" >&2; exit 78; }
+    test "{{activation_action}}" = "START RONDO PLAN 049 ACTIVATION PILOT" || { echo "Plan 049 activation action is absent" >&2; exit 78; }
+    balance_value="{{balance}}"
+    [[ "$balance_value" =~ ^[0-9]+([.][0-9]{1,2})?$ ]] || { echo "Plan 049 balance confirmation is invalid" >&2; exit 78; }
+    balance_whole="${balance_value%%.*}"
+    (( 10#$balance_whole >= 100 )) || { echo "Plan 049 confirmed balance is below USD 100.00" >&2; exit 78; }
+    test "{{local_activation}}" = "CONFIRM RONDO PLAN 049 LOCAL ACTIVATION CONDITIONS READY" || { echo "Plan 049 local activation confirmation is absent" >&2; exit 78; }
+    test "{{review_commit}}" = "$(git rev-parse HEAD)" || { echo "Plan 049 independent review commit differs" >&2; exit 78; }
+    test "{{phase}}" = "pilot" || test "{{phase}}" = "formal" || { echo "Plan 049 paid phase is invalid" >&2; exit 78; }
+    RONDO_BUILD_METRICS_DIR="$common_root/eval-data/plan-049/watchdog" \
+    "$PWD/scripts/with-build-lock.sh" \
     env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
         NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
         UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
-        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.proactive_eval phase-b-paid
+        uv run --directory eval --frozen --no-sync python -B -m rondo_eval.proactive_eval phase-b-paid \
+        --authorize-phase-b "{{authorization}}" \
+        --activation-action "{{activation_action}}" \
+        --confirmed-balance-usd "{{balance}}" \
+        --confirm-local-activation "{{local_activation}}" \
+        --independent-review-commit "{{review_commit}}" \
+        --phase "{{phase}}" \
+        --namespace "{{namespace}}" \
+        --loopback-namespace "{{loopback_namespace}}"
 
 # No-API host drill: frozen Multi binary must register team tools and call team_publish.
 eval-multi-m5-loopback:

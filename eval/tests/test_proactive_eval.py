@@ -26,8 +26,10 @@ from rondo_eval.proactive_eval.campaign import (  # noqa: E402
 )
 from rondo_eval.proactive_eval.contract import ContractError, load_contract  # noqa: E402
 from rondo_eval.proactive_eval.formal import (  # noqa: E402
+    FormalDriftError,
     FormalError,
     FormalExecutionResult,
+    FormalInfraError,
     FormalPaths,
     FormalStore,
     Plan049RequestPreflight,
@@ -40,10 +42,13 @@ from rondo_eval.proactive_eval.formal import (  # noqa: E402
 )
 from rondo_eval.proactive_eval.paid import (  # noqa: E402
     ACTIVATION_ACTION,
+    LOCAL_ACTIVATION_CONFIRMATION,
     PHASE_B_AUTHORIZATION,
     PaidGuardError,
     enter_paid_phase,
+    production_paid_dependencies,
 )
+from rondo_eval.proactive_eval.__main__ import main as proactive_main  # noqa: E402
 from rondo_eval.proactive_eval.readiness import (  # noqa: E402
     ReadinessError,
     require_phase_a_evidence,
@@ -515,6 +520,28 @@ class ProactiveEvalTests(unittest.TestCase):
         )
         self.assertEqual(receipt["run_count"], 26)
         store = RehearsalStore(self.common_root, "acceptance")
+        ledger_bytes = store.ledger_path.read_bytes()
+        store.ledger_path.unlink()
+        with self.assertRaisesRegex(ReadinessError, "rehearsal ledger"):
+            require_phase_a_evidence(
+                self.contract,
+                common_root=self.common_root,
+                rehearsal_namespace="acceptance",
+                loopback_namespace="loopback",
+            )
+        store.ledger_path.write_bytes(ledger_bytes)
+        first = store.records()[0]
+        marker = store.runs_root / first["run_id"] / "run.json"
+        marker_bytes = marker.read_bytes()
+        marker.unlink()
+        with self.assertRaisesRegex(ReadinessError, "run publication"):
+            require_phase_a_evidence(
+                self.contract,
+                common_root=self.common_root,
+                rehearsal_namespace="acceptance",
+                loopback_namespace="loopback",
+            )
+        marker.write_bytes(marker_bytes)
         store.aggregate_path.write_text("{}\n", "utf-8")
         with self.assertRaisesRegex(ReadinessError, "aggregate"):
             require_phase_a_evidence(
@@ -697,16 +724,251 @@ class ProactiveEvalTests(unittest.TestCase):
         )
         self.assertEqual(len(preflight.digest()), 64)
         with self.assertRaisesRegex(Exception, "frozen policy"):
-            Plan049RequestPreflight(
+            failed_preflight = Plan049RequestPreflight(
                 contract=self.contract,
                 side=Side.CODEX,
                 task_id="terminal-bench/filter-js-from-html",
-            ).register(
+            )
+            failed_preflight.register(
                 task_id="terminal-bench/filter-js-from-html",
                 role="main",
                 side=Side.CODEX,
                 request={**request, "instructions": "drifted"},
             )
+
+        latched = Plan049RequestPreflight(
+            contract=self.contract,
+            side=Side.CODEX,
+            task_id="terminal-bench/filter-js-from-html",
+        )
+        latched.register(
+            task_id="terminal-bench/filter-js-from-html",
+            role="main",
+            side=Side.CODEX,
+            request=request,
+        )
+        with self.assertRaises(FormalDriftError):
+            latched.register(
+                task_id="terminal-bench/filter-js-from-html",
+                role="main",
+                side=Side.CODEX,
+                request={**request, "instructions": "drifted"},
+            )
+        with self.assertRaisesRegex(FormalDriftError, "preflight failed"):
+            latched.digest()
+
+    def test_formal_infra_exhaustion_stops_at_the_first_incomplete_slot(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="d" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/infra-exhausted"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        calls = 0
+
+        class InfraExecutor:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, slot, attempt, run_id, run_root
+                nonlocal calls
+                calls += 1
+                raise FormalInfraError("simulated provider failure")
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            result = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=InfraExecutor(),
+                phase="pilot",
+            )
+            resumed = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=InfraExecutor(),
+                phase="pilot",
+            )
+        rows = store.records()
+        self.assertEqual(calls, 5)
+        self.assertEqual(len(rows), 5)
+        self.assertEqual({row["slot_id"] for row in rows}, {"pilot-p01-codex"})
+        self.assertEqual(result, resumed)
+
+    def test_formal_settled_checkpoint_recovers_reports_without_provider_repeat(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="1" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/settled-recovery"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        provider_calls = 0
+        recover_calls = 0
+        failed = False
+
+        class Executor:
+            @staticmethod
+            def result(slot, run_id, run_root):
+                view = synthetic_team_view(
+                    side=slot.side, run_id=run_id, ordinal=slot.ordinal
+                )
+                return FormalExecutionResult(
+                    outcome="completed",
+                    trace_status="available",
+                    request_preflight_sha256="7" * 64,
+                    **write_replay_artifacts(run_root, view),
+                )
+
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, attempt
+                nonlocal provider_calls, failed
+                provider_calls += 1
+                if not failed:
+                    failed = True
+                    run_root.mkdir(parents=True, exist_ok=True)
+                    (run_root / "settled.json").write_text("{}\n", "utf-8")
+                    raise OSError("simulated report failure after settlement")
+                return Executor.result(slot, run_id, run_root)
+
+            def recover(inner, slot, *, attempt, run_id, run_root):
+                del inner, attempt
+                nonlocal recover_calls
+                recover_calls += 1
+                return Executor.result(slot, run_id, run_root)
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            with self.assertRaisesRegex(FormalError, "local artifact recovery"):
+                run_formal_campaign(
+                    self.contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=Executor(),
+                    phase="pilot",
+                )
+            result = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=Executor(),
+                phase="pilot",
+            )
+        self.assertEqual(result["run_count"], 6)
+        self.assertEqual(provider_calls, 6)
+        self.assertEqual(recover_calls, 1)
+
+    def test_formal_identity_error_is_a_principled_stop(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="e" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/identity-stop"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+
+        class DriftExecutor:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, slot, attempt, run_id, run_root
+                raise FormalError("paid request lacks frozen policy")
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            with self.assertRaisesRegex(FormalError, "frozen policy"):
+                run_formal_campaign(
+                    self.contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=DriftExecutor(),
+                    phase="pilot",
+                )
+        self.assertEqual(store.records(), ())
+
+    def test_phase_b_cli_reaches_the_concrete_paid_runner(self) -> None:
+        pilot_rows = [
+            {"phase": "pilot", "counts_as_effective": True}
+            for _index in range(6)
+        ]
+        with mock.patch(
+            "rondo_eval.proactive_eval.__main__.run_authorized_paid_phase",
+            return_value={
+                "runs": pilot_rows,
+                "activation_observed": True,
+                "missing_slot_ids": [],
+            },
+        ) as runner, mock.patch("builtins.print"):
+            status = proactive_main(
+                [
+                    "phase-b-paid",
+                    "--authorize-phase-b",
+                    PHASE_B_AUTHORIZATION,
+                    "--activation-action",
+                    ACTIVATION_ACTION,
+                    "--confirmed-balance-usd",
+                    "100.00",
+                    "--confirm-local-activation",
+                    LOCAL_ACTIVATION_CONFIRMATION,
+                    "--independent-review-commit",
+                    "f" * 40,
+                    "--phase",
+                    "pilot",
+                    "--namespace",
+                    "acceptance",
+                    "--loopback-namespace",
+                    "loopback",
+                ]
+            )
+        self.assertEqual(status, 0)
+        runner.assert_called_once()
+
+    def test_production_paid_dependencies_bind_watchdog_and_docker_counter(self) -> None:
+        paths = RepoPaths.discover(REPO_ROOT)
+        proof = mock.Mock()
+        proof.lease.token = "a" * 48
+        proof.lease.held = True
+        proof.guard.is_held.return_value = True
+        counter = mock.Mock()
+        with mock.patch(
+            "rondo_eval.runtime_bridge.lease_from_watchdog", return_value=proof
+        ) as lease, mock.patch(
+            "rondo_eval.runtime_bridge.PowerShellDockerDesktopHostProbe"
+        ) as host_probe, mock.patch(
+            "rondo_eval.runtime_bridge.DockerCliCounter", return_value=counter
+        ) as counter_type:
+            resources = production_paid_dependencies(paths).acquire_docker_gate()
+        lease.assert_called_once_with()
+        host_probe.assert_called_once_with()
+        counter_type.assert_called_once_with(
+            host_data_root=paths.common_root / "eval-data" / "docker-host",
+            desktop_host_probe=host_probe.return_value,
+        )
+        self.assertIs(resources.counter, counter)
+        proof.guard.is_held.assert_called_once_with(resources.lease)
 
     def test_formal_terminal_bench_requests_share_v2_policy_models_and_trace(self) -> None:
         paths = RepoPaths.discover(REPO_ROOT)

@@ -116,6 +116,14 @@ class FormalError(RuntimeError):
     """The paid campaign state cannot be advanced safely."""
 
 
+class FormalDriftError(FormalError):
+    """A frozen identity or fairness invariant changed; never retry it."""
+
+
+class FormalInfraError(FormalError):
+    """A bounded provider/runner infrastructure attempt may be retried."""
+
+
 @dataclass(frozen=True)
 class FormalPaths:
     root: Path
@@ -132,6 +140,16 @@ class FormalExecutionResult:
     trace_status: str
     team_view_sha256: str
     team_report_sha256: str
+    request_preflight_sha256: str
+    reason_code: str | None = None
+
+
+@dataclass(frozen=True)
+class FormalSettledResult:
+    """Body-free checkpoint written after provider settlement, before reports."""
+
+    outcome: str
+    trace_bundle_relative: str
     request_preflight_sha256: str
     reason_code: str | None = None
 
@@ -301,6 +319,7 @@ class Plan049RequestPreflight:
         self._side = side
         self._task_id = task_id
         self._observed: list[dict[str, Any]] = []
+        self._failed = False
 
     def register(
         self,
@@ -310,16 +329,32 @@ class Plan049RequestPreflight:
         side: Side,
         request: Mapping[str, Any],
     ) -> None:
+        if self._failed:
+            raise FormalDriftError("Plan 049 paid request preflight already failed")
+        try:
+            self._register(task_id=task_id, role=role, side=side, request=request)
+        except FormalDriftError:
+            self._failed = True
+            raise
+
+    def _register(
+        self,
+        *,
+        task_id: str,
+        role: str,
+        side: Side,
+        request: Mapping[str, Any],
+    ) -> None:
         if task_id != self._task_id or side is not self._side:
-            raise FormalError("Plan 049 paid request slot binding differs")
+            raise FormalDriftError("Plan 049 paid request slot binding differs")
         if role not in {"main", "guardian"} or not isinstance(request, Mapping):
-            raise FormalError("Plan 049 paid request role is invalid")
+            raise FormalDriftError("Plan 049 paid request role is invalid")
         if role == "main":
             tools = collect_registered_tool_names(dict(request))
             if not _REQUIRED_TOOLS.issubset(tools):
-                raise FormalError("Plan 049 paid request lacks common V2 tools")
+                raise FormalDriftError("Plan 049 paid request lacks common V2 tools")
             if not _contains_exact_string(request, self._contract.policy):
-                raise FormalError("Plan 049 paid request lacks the frozen policy")
+                raise FormalDriftError("Plan 049 paid request lacks the frozen policy")
         self._observed.append(
             {
                 "sequence": len(self._observed) + 1,
@@ -334,6 +369,8 @@ class Plan049RequestPreflight:
         )
 
     def digest(self) -> str:
+        if self._failed:
+            raise FormalDriftError("Plan 049 paid request preflight failed")
         if not self._observed or not any(
             row["role"] == "main" for row in self._observed
         ):
@@ -547,6 +584,16 @@ class FormalStore:
             raise FormalError("Plan 049 terminal paid record lacks trace evidence")
         if not terminal and value.get("trace_status") not in {"missing", "partial"}:
             raise FormalError("Plan 049 infra paid record trace status is invalid")
+        digest_fields = (
+            value.get("team_view_sha256"),
+            value.get("team_report_sha256"),
+            value.get("request_preflight_sha256"),
+        )
+        if terminal:
+            for digest in digest_fields:
+                _require_sha256(digest, "Plan 049 terminal artifact digest is invalid")
+        elif any(digest is not None for digest in digest_fields):
+            raise FormalError("Plan 049 infra record names terminal artifacts")
         for key in ("lock_id", "lock_sha256", "policy_sha256", "taskset_sha256"):
             if value.get(key) != self.identity.get(key):
                 raise FormalError(f"Plan 049 formal record {key} differs")
@@ -701,7 +748,7 @@ class Plan049TerminalBenchExecutor:
             or hashlib.sha256(seccomp.read_bytes()).hexdigest()
             != _SECCOMP_SOURCE_SHA256
         ):
-            raise FormalError("Plan 049 seccomp profile differs")
+            raise FormalDriftError("Plan 049 seccomp profile differs")
         run_root = formal_paths(self.common_root, self.contract).runs / run_id
         return TerminalBenchRequest(
             side=side,
@@ -772,7 +819,7 @@ class Plan049TerminalBenchExecutor:
             if value.binary.source_commit != sources[
                 "upstream" if value.side is Side.CODEX else "rondo"
             ]:
-                raise FormalError("Plan 049 binary/catalog provenance differs")
+                raise FormalDriftError("Plan 049 binary/catalog provenance differs")
             shared = load_shared_model_catalog(
                 self.common_root,
                 upstream_source_commit=sources["upstream"],
@@ -814,7 +861,7 @@ class Plan049TerminalBenchExecutor:
                 or adapter._rollout_trace_root
                 != self.contract.lock["execution"]["rollout_trace_root"]
             ):
-                raise FormalError("Plan 049 prepared run differs from common V2")
+                raise FormalDriftError("Plan 049 prepared run differs from common V2")
 
         try:
             result = asyncio.run(
@@ -863,50 +910,94 @@ class Plan049TerminalBenchExecutor:
                     REQUEST_LIMIT_STOP_REASON,
                     "guardian_logical_request_limit_exceeded",
                 }:
-                    raise FormalError(f"paid request path stopped: {stopped}")
+                    raise FormalInfraError(f"paid request path stopped: {stopped}")
                 if stop_reason_class(stopped) == "budget":
                     raise BudgetStopped(stopped)
-                raise FormalError(f"paid request path stopped: {stopped}")
+                raise FormalInfraError(f"paid request path stopped: {stopped}")
             if run_infra_taint(self.ledger, run_id) is not None:
-                raise FormalError("paid request path has provider infra taint")
+                raise FormalInfraError("paid request path has provider infra taint")
             parsed = parse_single_task_result(
                 result.harbor.trial_dir,
                 host_returncode=result.harbor.returncode,
                 expected_task_id=slot.task_id,
             )
             if parsed.outcome is RunOutcome.INFRA_FAILED:
-                raise FormalError("Terminal-Bench returned an infra outcome")
+                raise FormalInfraError("Terminal-Bench returned an infra outcome")
             trace_root = result.harbor.trial_dir / "agent" / "rollout-trace"
             bundle = find_trace_bundle(trace_root)
-            view = reduce_bundle(
-                bundle, "codex" if slot.side == "codex" else "rondo-multi"
-            )
-            validate_team_view(view)
-            view_bytes = dump_team_view(view)
-            report_bytes = render_report(view)
-            _write_or_verify(run_root / "team_view.json", view_bytes)
-            _write_or_verify(run_root / "team_report.html", report_bytes)
         except (ApiBudgetProxyError, HarborResultError, TerminalBenchRunError) as exc:
-            raise FormalError(str(exc)) from exc
+            raise FormalInfraError(str(exc)) from exc
         if parsed.outcome is RunOutcome.COMPLETED:
             outcome = "completed" if parsed.reward > 0 else "task_failed"
         else:
             outcome = "product_failed"
-        formal_result = FormalExecutionResult(
+        reason_code = (
+            None
+            if outcome == "completed"
+            else (
+                "task_native_verifier_failed"
+                if outcome == "task_failed"
+                else "product_terminal_failure"
+            )
+        )
+        try:
+            bundle_relative = bundle.resolve(strict=True).relative_to(
+                run_root.resolve(strict=True)
+            )
+        except (OSError, ValueError) as exc:
+            raise FormalDriftError(
+                "Plan 049 rollout trace escaped its paid run root"
+            ) from exc
+        settled = FormalSettledResult(
             outcome=outcome,
+            request_preflight_sha256=preflight.digest(),
+            trace_bundle_relative=bundle_relative.as_posix(),
+            reason_code=reason_code,
+        )
+        _write_settled_file(
+            run_root,
+            settled,
+            formal_identity_sha256=self.formal_identity_sha256,
+            contract=self.contract,
+            slot=slot,
+            attempt=attempt,
+            run_id=run_id,
+        )
+        return self.recover(
+            slot, attempt=attempt, run_id=run_id, run_root=run_root
+        )
+
+    def recover(
+        self, slot: Slot, *, attempt: int, run_id: str, run_root: Path
+    ) -> FormalExecutionResult:
+        """Regenerate Team Lens after a settled request without provider I/O."""
+
+        settled = _read_settled_file(
+            run_root,
+            formal_identity_sha256=self.formal_identity_sha256,
+            contract=self.contract,
+            slot=slot,
+            attempt=attempt,
+            run_id=run_id,
+        )
+        bundle = (run_root / settled.trace_bundle_relative).resolve(strict=True)
+        if not bundle.is_relative_to(run_root.resolve(strict=True)):
+            raise FormalDriftError("Plan 049 settled trace path escaped its run root")
+        view = reduce_bundle(
+            bundle, "codex" if slot.side == "codex" else "rondo-multi"
+        )
+        validate_team_view(view)
+        view_bytes = dump_team_view(view)
+        report_bytes = render_report(view)
+        _write_or_verify(run_root / "team_view.json", view_bytes)
+        _write_or_verify(run_root / "team_report.html", report_bytes)
+        formal_result = FormalExecutionResult(
+            outcome=settled.outcome,
             trace_status="available",
             team_view_sha256=hashlib.sha256(view_bytes).hexdigest(),
             team_report_sha256=hashlib.sha256(report_bytes).hexdigest(),
-            request_preflight_sha256=preflight.digest(),
-            reason_code=(
-                None
-                if outcome == "completed"
-                else (
-                    "task_native_verifier_failed"
-                    if outcome == "task_failed"
-                    else "product_terminal_failure"
-                )
-            ),
+            request_preflight_sha256=settled.request_preflight_sha256,
+            reason_code=settled.reason_code,
         )
         _write_execution_file(
             run_root,
@@ -991,6 +1082,44 @@ def run_formal_campaign(
                     team_report_sha256=checkpoint.team_report_sha256,
                     request_preflight_sha256=checkpoint.request_preflight_sha256,
                     reason_code=checkpoint.reason_code,
+                )
+                _publish_and_append(store, row)
+                records.append(row)
+                break
+            settled_path = store.run_root(run_id) / "settled.json"
+            if settled_path.exists() or settled_path.is_symlink():
+                recover = getattr(executor, "recover", None)
+                if not callable(recover):
+                    raise FormalError(
+                        "Plan 049 settled request lacks its recovery executor"
+                    )
+                if run_id not in ledger.snapshot().get("runs", {}):
+                    raise FormalError(
+                        "Plan 049 settled request has no budget run"
+                    )
+                result = recover(
+                    slot,
+                    attempt=attempt,
+                    run_id=run_id,
+                    run_root=store.run_root(run_id),
+                )
+                _validate_execution_result(result)
+                store.write_execution(
+                    run_id, slot=slot, attempt=attempt, result=result
+                )
+                row = _formal_record(
+                    contract,
+                    store,
+                    ledger,
+                    slot,
+                    attempt,
+                    run_id,
+                    outcome=result.outcome,
+                    trace_status=result.trace_status,
+                    team_view_sha256=result.team_view_sha256,
+                    team_report_sha256=result.team_report_sha256,
+                    request_preflight_sha256=result.request_preflight_sha256,
+                    reason_code=result.reason_code,
                 )
                 _publish_and_append(store, row)
                 records.append(row)
@@ -1099,7 +1228,40 @@ def run_formal_campaign(
                 _publish_and_append(store, row)
                 records.append(row)
                 return _formal_aggregate(contract, records, store)
+            except FormalDriftError:
+                raise
+            except FormalInfraError:
+                settled_path = store.run_root(run_id) / "settled.json"
+                if settled_path.exists() or settled_path.is_symlink():
+                    raise FormalError(
+                        "Plan 049 settled request requires local artifact recovery"
+                    )
+                row = _formal_record(
+                    contract,
+                    store,
+                    ledger,
+                    slot,
+                    attempt,
+                    run_id,
+                    outcome="infra_failed",
+                    trace_status="missing",
+                    reason_code="paid_executor_infra_failed",
+                )
+                _publish_and_append(store, row)
+                records.append(row)
+                infra_total += 1
+                continue
+            except FormalError:
+                # Unknown state, artifact drift and fairness/identity failures
+                # are principled stops.  Retrying could buy a replacement
+                # sample for a run that must instead remain fail-closed.
+                raise
             except Exception:
+                settled_path = store.run_root(run_id) / "settled.json"
+                if settled_path.exists() or settled_path.is_symlink():
+                    raise FormalError(
+                        "Plan 049 settled request requires local artifact recovery"
+                    )
                 row = _formal_record(
                     contract,
                     store,
@@ -1118,6 +1280,13 @@ def run_formal_campaign(
             _publish_and_append(store, row)
             records.append(row)
             break
+        if not any(
+            row["slot_id"] == slot.slot_id and row["terminal"] is True
+            for row in records
+        ):
+            # A later slot cannot be started while this one has no trusted
+            # terminal result; doing so would manufacture a non-prefix archive.
+            return _formal_aggregate(contract, records, store)
     return _formal_aggregate(contract, records, store)
 
 
@@ -1207,6 +1376,124 @@ def _require_sha256(value: object, message: str) -> str:
     return value
 
 
+def _write_settled_file(
+    run_root: Path,
+    result: FormalSettledResult,
+    *,
+    formal_identity_sha256: str | None,
+    contract: CampaignContract,
+    slot: Slot,
+    attempt: int,
+    run_id: str,
+) -> None:
+    identity_sha = _require_sha256(
+        formal_identity_sha256,
+        "Plan 049 formal executor lacks receipt identity",
+    )
+    if not isinstance(result.trace_bundle_relative, str):
+        raise FormalDriftError("Plan 049 settled provider result is invalid")
+    relative = Path(result.trace_bundle_relative)
+    if (
+        result.outcome not in _TERMINAL
+        or relative.is_absolute()
+        or not relative.parts
+        or ".." in relative.parts
+        or relative.as_posix() != result.trace_bundle_relative
+    ):
+        raise FormalDriftError("Plan 049 settled provider result is invalid")
+    _require_sha256(
+        result.request_preflight_sha256,
+        "Plan 049 settled request preflight digest is invalid",
+    )
+    if result.reason_code is not None and not isinstance(result.reason_code, str):
+        raise FormalDriftError("Plan 049 settled reason code is invalid")
+    value = {
+        "schema_version": 1,
+        "evidence_kind": "real_api",
+        "identity_class": "paid",
+        "formal_identity_sha256": identity_sha,
+        "lock_id": contract.lock_id,
+        "lock_sha256": contract.lock_sha256,
+        "policy_sha256": contract.policy_sha256,
+        "taskset_sha256": contract.taskset_sha256,
+        "slot_id": slot.slot_id,
+        "run_id": run_id,
+        "attempt": attempt,
+        "outcome": result.outcome,
+        "trace_bundle_relative": result.trace_bundle_relative,
+        "request_preflight_sha256": result.request_preflight_sha256,
+        "reason_code": result.reason_code,
+    }
+    assert_body_free(value)
+    _write_or_verify(run_root / "settled.json", _canonical(value) + b"\n")
+
+
+def _read_settled_file(
+    run_root: Path,
+    *,
+    formal_identity_sha256: str | None,
+    contract: CampaignContract,
+    slot: Slot,
+    attempt: int,
+    run_id: str,
+) -> FormalSettledResult:
+    identity_sha = _require_sha256(
+        formal_identity_sha256,
+        "Plan 049 formal executor lacks receipt identity",
+    )
+    value = _read_json(run_root / "settled.json", "settled provider checkpoint")
+    expected = {
+        "schema_version": 1,
+        "evidence_kind": "real_api",
+        "identity_class": "paid",
+        "formal_identity_sha256": identity_sha,
+        "lock_id": contract.lock_id,
+        "lock_sha256": contract.lock_sha256,
+        "policy_sha256": contract.policy_sha256,
+        "taskset_sha256": contract.taskset_sha256,
+        "slot_id": slot.slot_id,
+        "run_id": run_id,
+        "attempt": attempt,
+    }
+    result_keys = {
+        "outcome",
+        "trace_bundle_relative",
+        "request_preflight_sha256",
+        "reason_code",
+    }
+    if set(value) != {*expected, *result_keys} or any(
+        value.get(key) != item for key, item in expected.items()
+    ):
+        raise FormalDriftError("Plan 049 settled provider checkpoint differs")
+    result = FormalSettledResult(
+        outcome=value["outcome"],
+        trace_bundle_relative=value["trace_bundle_relative"],
+        request_preflight_sha256=value["request_preflight_sha256"],
+        reason_code=value["reason_code"],
+    )
+    if not isinstance(result.trace_bundle_relative, str):
+        raise FormalDriftError("Plan 049 settled provider result is invalid")
+    relative = Path(result.trace_bundle_relative)
+    if (
+        result.outcome not in _TERMINAL
+        or relative.is_absolute()
+        or not relative.parts
+        or ".." in relative.parts
+        or relative.as_posix() != result.trace_bundle_relative
+        or (
+            result.reason_code is not None
+            and not isinstance(result.reason_code, str)
+        )
+    ):
+        raise FormalDriftError("Plan 049 settled provider result is invalid")
+    _require_sha256(
+        result.request_preflight_sha256,
+        "Plan 049 settled request preflight digest is invalid",
+    )
+    assert_body_free(value)
+    return result
+
+
 def _write_execution_file(
     run_root: Path,
     result: FormalExecutionResult,
@@ -1291,13 +1578,27 @@ def _require_pilot_activation(
 
 
 def _validate_paid_prefix(records: list[dict[str, Any]], schedule: tuple[Slot, ...]) -> None:
+    by_id = {slot.slot_id: slot for slot in schedule}
     order = {slot.slot_id: index for index, slot in enumerate(schedule)}
     previous = -1
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in records:
         slot_order = order.get(str(row["slot_id"]))
+        slot = by_id.get(str(row["slot_id"]))
         if slot_order is None or slot_order < previous:
             raise FormalError("Plan 049 formal archive is not a schedule prefix")
+        attempt = row.get("attempt")
+        if (
+            slot is None
+            or row.get("phase") != slot.phase
+            or row.get("pair_id") != slot.pair_id
+            or row.get("task_id") != slot.task_id
+            or row.get("side") != slot.side
+            or not isinstance(attempt, int)
+            or row.get("run_id")
+            != slot.run_id(attempt).replace("rehearsal", "paid")
+        ):
+            raise FormalError("Plan 049 formal archive slot identity differs")
         previous = slot_order
         grouped.setdefault(str(row["slot_id"]), []).append(row)
     gap = False

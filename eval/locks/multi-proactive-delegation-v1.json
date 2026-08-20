@@ -88,6 +88,7 @@
     "ignored_root": "eval-data/plan-049",
     "per_run": [
       "rollout-trace",
+      "settled.json",
       "execution.json",
       "api-metadata.json",
       "shared-model-catalog.json",

@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 后置 C 阶段 A 已完成首轮独立审查整改、等待复审，阶段 B 未授权；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
+最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 后置 C 阶段 A 已完成两轮独立审查整改、等待复审，阶段 B 未授权；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -26,7 +26,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期和第二期 A/B 已完成；后置 C 阶段 A 已冻结共同主动委派合同并完成 pure/fake/loopback/replay 本地验收，首轮独立审查问题已整改并等待复审。阶段 B 仍未授权，不证明或提前执行付费结论。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期和第二期 A/B 已完成；后置 C 阶段 A 已冻结共同主动委派合同并完成 pure/fake/loopback/replay 本地验收，两轮独立审查问题已整改并等待复审。阶段 B 仍未授权，不证明或提前执行付费结论。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -34,7 +34,7 @@
 ## 2. 下一工作包与顺序
 
 工作包 1、工作包 2（Plan 022）均已完成；Local 已收口且方向 1 挂起。**当前执行焦点是 RONDO Multi
-第二期后置包 C**：阶段 A 已完成本地无费用验收和首轮独立审查整改，正等待复审；通过后下一任务才是另行授权的阶段 B activation pilot。
+第二期后置包 C**：阶段 A 已完成本地无费用验收和两轮独立审查整改，正等待复审；通过后下一任务才是另行授权的阶段 B activation pilot。
 下方保留各方向的当前状态与边界。
 
 ### 当前路线：Multi 第二期 C 阶段 A 验收收口
@@ -87,7 +87,7 @@
     主动入口；它覆盖 publish、双生命周期、route、delivery、retry 与 wake，没有改变产品语义。
   - **包 B — Team Lens：已完成。** 同一离线消费者可读取冻结 Codex 与 RONDO 原生 trace，确定性输出 body-free
     `team_view.json`，再单向生成离线单文件 `team_report.html`；代表性证据支持保持零 runtime hook。
-  - **后置包 C — 主动委派收益对比：阶段 A 本地验收与首轮独立审查整改完成，等待复审。** 已冻结共同 V2、policy、
+  - **后置包 C — 主动委派收益对比：阶段 A 本地验收与两轮独立审查整改完成，等待复审。** 已冻结共同 V2、policy、
     任务顺序、trace/Team Lens、预算账本、无重复费用 resume 与 100 USD 边界，并以零 API 的
     pure/fake/loopback/replay 验证。阶段 B 必须再次获得
     明确开始授权、100 USD 上限与余额确认，先执行固定 activation pilot；当前没有创建正式 receipt、账本或运行身份。

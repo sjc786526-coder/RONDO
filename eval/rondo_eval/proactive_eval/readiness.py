@@ -87,6 +87,35 @@ def require_phase_a_evidence(
         != {slot.slot_id for slot in expected_schedule}
     ):
         raise ReadinessError("Plan 049 rehearsal schedule is incomplete")
+    expected_run_ids = {record["run_id"] for record in records}
+    try:
+        run_entries = tuple(store.runs_root.iterdir())
+    except OSError as exc:
+        raise ReadinessError("Plan 049 rehearsal runs root is unreadable") from exc
+    if (
+        {entry.name for entry in run_entries} != expected_run_ids
+        or any(entry.is_symlink() or not entry.is_dir() for entry in run_entries)
+    ):
+        raise ReadinessError("Plan 049 rehearsal run publications are incomplete")
+    ledger = _read_json(store.ledger_path, "rehearsal ledger")
+    claims = ledger.get("claims") if isinstance(ledger, dict) else None
+    if (
+        set(ledger) != {
+            "schema_version",
+            "evidence_kind",
+            "identity_class",
+            "cost_usd",
+            "claims",
+        }
+        or ledger.get("schema_version") != 1
+        or ledger.get("evidence_kind") != "rehearsal"
+        or ledger.get("identity_class") != "rehearsal"
+        or ledger.get("cost_usd") != "0.00"
+        or not isinstance(claims, dict)
+        or set(claims) != {slot.slot_id for slot in expected_schedule}
+    ):
+        raise ReadinessError("Plan 049 rehearsal ledger is incomplete")
+    assert_body_free(ledger)
     views: dict[str, dict[str, Any]] = {}
     for record in records:
         if (
@@ -98,6 +127,18 @@ def require_phase_a_evidence(
         ):
             raise ReadinessError("Plan 049 rehearsal identity differs")
         run_root = store.runs_root / record["run_id"]
+        marker = _read_json(run_root / "run.json", "run publication marker")
+        if marker != record:
+            raise ReadinessError("Plan 049 run publication marker differs")
+        claim = claims.get(record["slot_id"])
+        if claim != {
+            "attempt": record["attempt"],
+            "run_id": record["run_id"],
+            "status": "settled",
+            "cost_usd": "0.00",
+            "outcome": record["outcome"],
+        }:
+            raise ReadinessError("Plan 049 rehearsal ledger and archive differ")
         checkpoint = _read_json(run_root / "execution.json", "execution checkpoint")
         assert_body_free(checkpoint)
         if (

@@ -11,7 +11,11 @@ from ..config import RepoPaths
 from .campaign import default_fake_executor, run_rehearsal
 from .contract import REPO_ROOT, load_contract
 from .loopback import run_common_v2_loopback
-from .paid import PaidGuardError, enter_paid_phase
+from .formal import FormalError
+from .paid import (
+    PaidGuardError,
+    run_authorized_paid_phase,
+)
 from .schedule import dry_run_projection
 from .readiness import ReadinessError, require_phase_a_evidence, secret_readiness
 from .store import assert_body_free
@@ -25,6 +29,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--namespace", default="phase-a-final")
     parser.add_argument("--loopback-namespace", default=None)
+    parser.add_argument("--authorize-phase-b", default=None)
+    parser.add_argument("--activation-action", default=None)
+    parser.add_argument("--confirmed-balance-usd", default=None)
+    parser.add_argument("--confirm-local-activation", default=None)
+    parser.add_argument("--independent-review-commit", default=None)
+    parser.add_argument("--phase", choices=("pilot", "formal"), default="pilot")
     args = parser.parse_args(argv)
     paths = RepoPaths.discover(REPO_ROOT)
     contract = load_contract(paths.worktree_root)
@@ -129,22 +139,29 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     try:
-        enter_paid_phase(
+        result = run_authorized_paid_phase(
             repo_root=paths.worktree_root,
-            authorization=None,
-            activation_action=None,
-            confirmed_balance_usd=None,
-            harness_clean=False,
-            resume_prefix_safe=False,
-            activation_conditions_ready=False,
-            docker_resource_gate_ready=False,
-            phase_a_evidence_ready=False,
-            independent_review_passed=False,
+            authorization=args.authorize_phase_b,
+            activation_action=args.activation_action,
+            confirmed_balance_usd=args.confirmed_balance_usd,
+            local_activation_confirmation=args.confirm_local_activation,
+            independent_review_commit=args.independent_review_commit,
+            rehearsal_namespace=args.namespace,
+            loopback_namespace=args.loopback_namespace or args.namespace,
+            phase=args.phase,
         )
-    except PaidGuardError as exc:
+    except (PaidGuardError, FormalError) as exc:
         print(str(exc), file=sys.stderr)
         return 78
-    raise RuntimeError("locked Phase B entry unexpectedly passed")
+    _print(result)
+    if args.phase == "pilot":
+        pilot_runs = [
+            row
+            for row in result.get("runs", [])
+            if row.get("phase") == "pilot" and row.get("counts_as_effective") is True
+        ]
+        return 0 if len(pilot_runs) == 6 and result.get("activation_observed") is True else 1
+    return 0 if not result.get("missing_slot_ids") else 1
 
 
 def _print(value: object) -> None:

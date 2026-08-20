@@ -26,6 +26,9 @@ from .readiness import require_phase_a_evidence
 
 PHASE_B_AUTHORIZATION = "AUTHORIZE RONDO PLAN 049 PHASE B REAL API AND DOCKER UP TO USD 100.00"
 ACTIVATION_ACTION = "START RONDO PLAN 049 ACTIVATION PILOT"
+LOCAL_ACTIVATION_CONFIRMATION = (
+    "CONFIRM RONDO PLAN 049 LOCAL ACTIVATION CONDITIONS READY"
+)
 
 
 class PaidGuardError(PermissionError):
@@ -46,6 +49,30 @@ class PaidRuntimeDependencies:
     """Side effects invoked by the concrete entry, only after its pure gates."""
 
     acquire_docker_gate: Callable[[], PaidResources]
+
+
+def production_paid_dependencies(paths: RepoPaths) -> PaidRuntimeDependencies:
+    """Bind the paid CLI to the existing watchdog and Docker counter."""
+
+    def acquire() -> PaidResources:
+        from ..runtime_bridge import (
+            DockerCliCounter,
+            PowerShellDockerDesktopHostProbe,
+            lease_from_watchdog,
+        )
+
+        proof = lease_from_watchdog()
+        lease = HeavyLockLease(proof.lease.token, proof.lease.held)
+        counter = DockerCliCounter(
+            host_data_root=paths.common_root / "eval-data" / "docker-host",
+            desktop_host_probe=PowerShellDockerDesktopHostProbe(),
+        )
+        resources = PaidResources(counter=counter, lock_guard=proof.guard, lease=lease)
+        if resources.lock_guard.is_held(resources.lease) is not True:
+            raise PaidGuardError("Plan 049 Docker/build-lock lease is not held")
+        return resources
+
+    return PaidRuntimeDependencies(acquire_docker_gate=acquire)
 
 
 def enter_paid_phase(
@@ -100,16 +127,12 @@ def run_authorized_paid_phase(
     authorization: str | None,
     activation_action: str | None,
     confirmed_balance_usd: str | None,
-    harness_commit: str,
-    harness_clean: bool,
-    resume_prefix_safe: bool,
-    activation_conditions_ready: bool,
-    docker_resource_gate_ready: bool,
-    independent_review_passed: bool,
+    local_activation_confirmation: str | None,
+    independent_review_commit: str | None,
     rehearsal_namespace: str,
     loopback_namespace: str,
     phase: str,
-    dependencies: PaidRuntimeDependencies,
+    dependencies: PaidRuntimeDependencies | None = None,
 ) -> dict:
     """Run the real pilot/formal schedule through the shared paid runner.
 
@@ -119,18 +142,30 @@ def run_authorized_paid_phase(
     """
 
     paths = RepoPaths.discover(repo_root)
+    if phase not in {"pilot", "formal"}:
+        raise PaidGuardError("Plan 049 paid phase is invalid")
+    actual_harness = harness_identity(paths.worktree_root)
+    harness_commit = actual_harness.get("harness_commit")
+    harness_clean = actual_harness.get("harness_dirty") is False
     contract = enter_paid_phase(
         repo_root=paths.worktree_root,
         authorization=authorization,
         activation_action=activation_action,
         confirmed_balance_usd=confirmed_balance_usd,
         harness_clean=harness_clean,
-        resume_prefix_safe=resume_prefix_safe,
-        activation_conditions_ready=activation_conditions_ready,
-        docker_resource_gate_ready=docker_resource_gate_ready,
+        # Both are revalidated below by the production path before secrets or
+        # formal state.  These booleans say the concrete checks are wired.
+        resume_prefix_safe=True,
+        activation_conditions_ready=(
+            local_activation_confirmation == LOCAL_ACTIVATION_CONFIRMATION
+        ),
+        docker_resource_gate_ready=True,
         # Verified immediately below before any resource/secret/state action.
         phase_a_evidence_ready=True,
-        independent_review_passed=independent_review_passed,
+        independent_review_passed=(
+            isinstance(harness_commit, str)
+            and independent_review_commit == harness_commit
+        ),
     )
     try:
         require_phase_a_evidence(
@@ -143,9 +178,8 @@ def run_authorized_paid_phase(
         raise PaidGuardError("Plan 049 Phase A evidence is unavailable") from exc
     config = load_runtime_config(paths)
     provider = plan049_provider_projection(config, contract)
-    actual_harness = harness_identity(paths.worktree_root)
     if (
-        actual_harness.get("harness_commit") != harness_commit
+        not isinstance(harness_commit, str)
         or actual_harness.get("harness_dirty") is not False
     ):
         raise PaidGuardError("Plan 049 harness identity changed after authorization")
@@ -159,7 +193,15 @@ def run_authorized_paid_phase(
         raise PaidGuardError("Plan 049 formal resume prefix is unsafe") from exc
     # This is the first authorized Docker interaction. The factory owns the
     # before/after resource observations and returns the held shared lock.
-    resources = dependencies.acquire_docker_gate()
+    runtime_dependencies = dependencies or production_paid_dependencies(paths)
+    try:
+        resources = runtime_dependencies.acquire_docker_gate()
+    except PaidGuardError:
+        raise
+    except Exception as exc:
+        raise PaidGuardError(
+            "Plan 049 Docker/build-lock resource gate is unavailable"
+        ) from exc
     if (
         not isinstance(resources, PaidResources)
         or not resources.lock_guard.is_held(resources.lease)
