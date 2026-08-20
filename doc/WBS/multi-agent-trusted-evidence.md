@@ -359,7 +359,7 @@ harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界�
 第一页已有的谓词因此假绿。当前 collector 强制 required dump/log 成功、按 continuation 续到 null，并要求页集
 覆盖 `total_entries`；fresh snapshot 与 continuation 的总数语义分开。
 
-**正式门前验证已完成。** v5 的 readiness 结论因协议假绿、capture 串线、provider 校验过晚和不可 resume 被后续
+**正式门前验证已完成；首个正式 v6 Gate 1 批次因执行环境网络阻断而未通过。** v5 的 readiness 结论因协议假绿、capture 串线、provider 校验过晚和不可 resume 被后续
 独立审查否决；v5 历史不改写。现行 loader 绑定 workflow-v6→runtime-v4→nondegradation-v6，Gate 1 最多 6 次，
 Gate 2 每槽最多 5 次 infra、全批 40 次，共 116 个 run 槽位；60 effective、80 请求/run、5 次 HTTP 尝试与
 `$120` 硬上限不变。provider 完整冻结发生在 secret、receipt、ledger 与 claim 之前。
@@ -370,8 +370,19 @@ canonical mutation 的跨线程提交顺序由 inspect-log revision 证明，wra
 仍用 end/start，wait 另用端点证明重叠，route start 必须先于 evidence start。成员首次
 publish → Root publish → route → 成员读取自身 exec Fact → 不同的成员二次 publish → Root update 成立，
 completed wait_agent 返回 TeamActivity，七谓词全真。历史唯一一次
-clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`），但不升级冒充 v6 正式结果。正式 v6 archive、
-`$120` ledger 与 identity receipt 均不存在；下一工作包是未来单独启动正式 Gate 1，本轮停在该边界。
+clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`），但不升级冒充 v6 正式结果。
+
+正式 `m5-g1-v6-paid-a1..a6` 随后均在第一个 Root 请求处被开发工具 sandbox 的 local/private-address 策略阻断，
+归档为 `infra_failed / upstream_unavailable`；无产品判定。6 个 request 均 settled、provider 可计价 `$0`，账本
+保守暴露 `$13.32 / $120`。沙箱外无密钥检查可连接本机 `127.0.0.1` relay，故该结果只证明执行边界错误。
+按授权 Gate 1 未通过即停止，Gate 2 与 Docker 均未启动。现有 v6 正式 attempt 已耗尽；未来若重启，须在批准的
+沙箱外网络边界使用新批次身份并重新取得付费授权，不复用本轮失败资产。
+
+后续决定把行为合同与运行代次解耦：workflow-v6 / runtime-v4 / nondegradation-v6 字节保持不变，新建
+`multi-m5-v6-c2` generation。c2 在任何 receipt/ledger/claim/capture/secret/Docker 前先核验 c1 三资产摘要与
+终态语义，再用同进程无密钥 direct GET 验证冻结 endpoint。c1 中转站实际账单由用户确认为 `$0`，本地仍保守把
+`$13.32` 计入共享上限，因此 c2 只可使用 `$106.68`。sandbox 内门禁 rc78 且零 c2 资产；sandbox 外门禁收到
+HTTP 301 并通过。c2 的 193 项 M-5 定向测试、eval-lock、ready 与 loopback 已验证，正式 c2 仍未启动。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在

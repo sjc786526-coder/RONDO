@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 已完成 runtime-v4、v6 正式合同、严格协议/恢复整改与 append-only v6-r3 彩排，正式门前设施就绪；**正式两道门未启动**）
+最后更新：2026-08-20（Local M4 已人判收口；Multi M-4 已合入 `main`；M-5 首个 v6-c1 Gate 1 因开发 sandbox 网络边界失败；不变的 v6 行为合同上已准备独立 v6-c2 generation，Gate 2 未启动）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -25,7 +25,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过。阶段 B 复用 `multi-m5-runtime-v4`，正式合同为 workflow/nondegradation v6：协议证据、capture 隔离、provider 前置冻结与幂等 resume 已闭合；共享 build-lock Rust 历史 146/146、当前 Python 183/183、Docker resume 探针 29/29、ready、loopback 和 append-only v6-r3 完整分页 rehearsal 均通过。clean-smoke-v5 是有效历史非正式 smoke，不升级冒充 v6 正式证据。**正式两道门未执行**，不能表述为 M-5 通过、门 1 通过或未见退化。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式；M-0—M-4 已验收并合入 `main`。M-5 阶段 A 已通过。阶段 B 复用 `multi-m5-runtime-v4`，正式合同为 workflow/nondegradation v6：协议证据、capture 隔离、provider 前置冻结与幂等 resume 已闭合；共享 build-lock Rust 历史 146/146、当前 Python 193 项定向门禁、Docker resume 探针 29/29、ready、loopback 和 append-only v6-r3 完整分页 rehearsal 已验证。clean-smoke-v5 是有效历史非正式 smoke，不升级冒充 v6 正式证据。c1 Gate 1 因 sandbox 网络边界失败；c2 尚未启动，Gate 2 未启动，不能表述为 M-5 通过、门 1 通过或未见退化。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -79,7 +79,8 @@
   人判结论为**保留为实验**。方向 2 因此没有已排期的下一工作包；若将来要投入真实使用，必须先按本页
   §6 单独立项，建立面向生产的正确性与安全验收，并解决“合成集线索化”与“holdout 单侧标签”两项证据缺口。
   结论详情见 `doc/WBS/local-approval-model.md`。
-- **3c RONDO Multi**：M-0—M-4 已完成并合入。**M-5 阶段 A 已通过**；**阶段 B 仍是当前工作**，正式门前整改已收口。
+- **3c RONDO Multi**：M-0—M-4 已完成并合入。**M-5 阶段 A 已通过**；**阶段 B 仍是当前工作**。正式门前整改已收口，
+  但首个 v6 正式 Gate 1 批次因执行环境网络阻断未通过。
   当前事实：
   - **门 1 判据已重建**。在 `tool_mode=code_mode_only` 下模型只发一个 `custom_tool_call(name=exec)`，团队工具
     全部在 JS 里调用，Responses 线上没有任何 `function_call`，因此原 v1 判据（`responses_function_call_outputs`）
@@ -106,8 +107,23 @@
     正常模型失败保持产品结果；provider 全量冻结在任何正式状态创建前完成。
   - 门 1 载体是协议演示级 fixture（决策 032），口径边界见锁的 `scope_limits`：WBS 的「真实任务上跑通完整协作
     语义」须门 1+门 2 合起来读，任一门单独不得引用。
-  **正式两道门未启动**（`$120` 账本仍不存在）；历史合同外冒烟与本轮 clean smoke 分账保留。
+  **正式 Gate 1 已运行并停止，Gate 2 未启动。** `m5-g1-v6-paid-a1..a6` 六次均在第一个 Root 请求处被开发
+  工具 sandbox 的 local/private-address 策略阻断，归档为 `infra_failed / upstream_unavailable`；没有形成
+  `agent_failed`、有效协议样本或产品结论。6 个 request 均已 settled，provider 可计价使用量为 `$0`，账本按
+  fail-closed reservation 保守暴露 `$13.32 / $120`，无 held reservation。沙箱外无密钥检查可连接同一
+  `127.0.0.1` relay 并得到 HTTP 404，故失败属于执行边界而非 RONDO 或模型。按授权 Gate 1 未通过即停止，
+  Gate 2 没有 run、归档或 Docker 资产。现有 v6 attempt 空间已耗尽；未来若重启须使用新批次身份、先保证付费
+  进程在批准的沙箱外网络边界运行并重新取得付费授权，不得复用本轮失败批次冒充 resume/pass。
   两道门均未通过，不得表述为 M-5 通过、门 1 通过或未见退化。
+  - **纯执行环境修复不升级行为合同。** workflow-v6 / runtime-v4 / nondegradation-v6 三文件摘要保持不变；
+    `multi-m5-v6-c2` 只是一层 campaign generation，拥有独立 receipt/ledger/archive/capture/run-id，并把 clean
+    harness commit 纳入正式身份。c1 ledger/receipt/archive 三摘要与“6 条连续 infra、6 request 全 settled、
+    priced `$0`、conservative `$13.32`、无 Gate 2”语义均在 c2 创建任何状态前核验。
+  - **共享预算跨代闭合。** 用户确认中转站 c1 实际账单 `$0`；本地仍按 fail-closed 规则保留 `$13.32` 暴露，
+    因而 c2 ledger 上限为 `$106.68`，机械满足 `$13.32 + $106.68 = $120`。无密钥 direct GET 在同一进程、
+    无 auth/body/proxy/redirect 下先运行；sandbox 内失败为 rc78 且 c2 正式资产全无，批准的 sandbox 外得到 HTTP 301
+    并通过。只有这个正式请求前的失败零 attempt；一旦 Responses 请求启动，usage 不明仍按 infra 计入 6 次。
+    c2 零费用门禁 192/192、eval-lock、ready、loopback 均通过；当前 c2 正式资产仍为 `not_started`。
   **$40 冒烟已执行并用尽（四次）**。可以确认的只有一条：**观测管线成立** —— trace 在真实模型下看得见
   经 code cell 发起的 `collaboration.*` 调用（含判据必需的 `team_inspect`），绑定校验通过，
   `spawn_member` 由真实证据判真。
@@ -127,8 +143,8 @@
   log 2 页；canonical mutation 必须非 deduplicated，跨线程提交顺序由 inspect-log revision 证明，wrapper end
   不作跨线程提交时钟，并严格绑定 Root wait/publish/route/update、成员 evidence 与不同二次 Version，七谓词
   全真。正式 v6
-  archive/ledger/identity receipt 均不存在。下一动作只能是未来
-  另行启动正式门 1；本任务停在该边界。
+  c1 archive/ledger/identity receipt 已作为六次执行环境 infra 的不可变历史保留；c2 正式资产尚不存在。当前已获
+  条件授权：在 clean harness commit 上从已验证的 sandbox 外边界启动 c2 Gate 1，只有同一身份通过才继续 Gate 2。
   逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。
@@ -152,9 +168,9 @@
 | 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 阶段 B 的正式门前准备已完成 | 等待未来单独启动正式门 1；本轮不得启动正式门 1/门 2 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | M-0—M-4 已合入；M-5 c1 Gate 1 因执行环境失败，c2 门前准备已完成 | 已授权 clean commit 后启动 c2 Gate 1；同一身份通过后继续 Gate 2 |
 
-- **Local 与 Multi 地位相同**。Local 已收口，Multi 仍有尚未启动的 M-5 正式两道门；先后只反映路径长度，
+- **Local 与 Multi 地位相同**。Local 已收口，Multi 的 c2 Gate 1 与 Gate 2 尚未启动；先后只反映路径长度，
   不代表优先级高低。重型任务全局串行是资源约束，不构成战略阻塞。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
@@ -227,7 +243,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 runtime-v4/v6 正式合同及恢复设施已就绪；历史 clean-smoke-v5 有效；正式两道门未启动 |
+| P5 | RONDO Multi 产品线 | M-0—M-4 已合入；M-5 v6-c1 因 sandbox 网络边界失败；v6-c2 零费用设施就绪，Gate 2 未启动 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -239,7 +255,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Multi M-2 | Root 选择性路由 Event，目标读取并扩展同一 canonical chain，通知与指派可独立恢复和结束 | 工程验收 | 已完成并合入 `main` |
 | Multi M-3 | Version 机械关联到 Codex 实际保留的工具结果，按 Event 可达权限有界下钻，不可得时诚实标注 | 工程验收 | 已完成并合入 `main` |
 | Multi M-4 | producer 四类可用性、Root 显式退休独立终态、有界 dump/log/stats；真实无 API 产品纵切覆盖 recoverable 拒绝与 unavailable 退休 | 工程验收 | 已完成并合入 `main` |
-| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 阶段 B：正式门前设施、冻结身份、离线验证和一次 clean smoke 已完成；正式门 1/门 2 均未启动。**不是** M-5 通过 |
+| Multi M-5 | 两道独立门：冻结的真实工作流达成自身完成标准且协作功能确实被触发；且同题运行未观察到相对冻结 Codex 的稳定单向退化。**不继承 `σ`/`delta` 总闸门** | 工程验收 | 阶段 B：门前设施、冻结身份、离线验证和一次 clean smoke 已完成；c1 Gate 1 因执行环境失败，c2 Gate 1 与 Gate 2 尚未启动。**不是** M-5 通过 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
 （设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。

@@ -11,15 +11,25 @@ import re
 from ..config import RepoPaths, load_provider_secret, load_runtime_config
 from ..api_budget_proxy import ApiBudgetProxyError, exposure_summary
 from .budget import open_phase_b_ledger, open_smoke_ledger, require_frozen_provider
+from .archive import harness_identity
+from .connectivity import ProviderConnectivityError, require_provider_connectivity
+from .campaign import load_campaign_generation, require_prior_generation
 from .gate1 import Gate1Error, run_gate1_paid, run_gate1_rehearsal, run_gate1_smoke
 from .gate2 import Gate2Error, ScriptedSlotExecutor, run_gate2_real, run_light_interleaved
 from .load import M5ContractError, load_nondegradation_contract, load_workflow_contract
 from .loopback import LoopbackError, run_frozen_multi_team_publish_loopback
 from .paid import PaidAuthError, authorization_from_phrases
 from .ready import readiness_report
-from .resume import ResumeError, ensure_formal_receipt, formal_identity
+from .resume import (
+    ResumeError,
+    ensure_formal_receipt,
+    formal_identity,
+    require_gate1_pass_before_gate2,
+    require_formal_ledger_exists,
+)
 from .store import (
     StoreError,
+    archive_path,
     batch_receipt_path,
     budget_ledger_path,
     scratch_root,
@@ -31,7 +41,8 @@ _SAFE_LABEL = re.compile(r"[a-z0-9][a-z0-9-]{0,31}\Z")
 
 _USAGE = (
     "usage: python -m rondo_eval.multi_m5 "
-    "[loopback|rehearsal|ready|gate2-fake|smoke --label <id>|gate1-paid|gate2-real]"
+    "[loopback|rehearsal|ready|provider-connectivity|gate2-fake|"
+    "smoke --label <id>|gate1-paid|gate2-real]"
 )
 
 
@@ -53,6 +64,23 @@ def main(argv: list[str] | None = None) -> int:
             report = readiness_report(common_root=paths.common_root)
             print(json.dumps(report, sort_keys=True, indent=2))
             return 0 if report["ready"] else 1
+        if command == "provider-connectivity":
+            # A no-secret, no-inference check that can be run in the exact
+            # execution boundary intended for the paid command.  It creates no
+            # receipt, ledger, capture, or deterministic run id.
+            config = load_runtime_config(paths)
+            contract = load_nondegradation_contract()
+            campaign = load_campaign_generation()
+            require_prior_generation(paths.common_root, campaign)
+            provider = config.paid_provider_projection(model_id=contract.root_model)
+            identity = require_frozen_provider(
+                provider,
+                effort=contract.root_effort,
+                contract=contract,
+            )
+            result = require_provider_connectivity(identity["provider_base_url"])
+            print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+            return 0
         if command == "gate2-fake":
             scratch = scratch_root(paths.common_root)
             ledger_path = scratch / "multi-m5-gate2-fake-ledger.json"
@@ -100,9 +128,17 @@ def main(argv: list[str] | None = None) -> int:
                 provider,
                 effort=workflow.root_effort,
             )
+            campaign = load_campaign_generation()
+            require_prior_generation(paths.common_root, campaign)
+            identity = formal_identity(
+                provider_identity,
+                harness=harness_identity(paths.worktree_root),
+            )
+            # Must run in this same process before any formal state or secret.
+            require_provider_connectivity(provider_identity["provider_base_url"])
             ensure_formal_receipt(
                 batch_receipt_path(paths.common_root),
-                formal_identity(provider_identity),
+                identity,
             )
             _name, api_key = load_provider_secret(config)
             with open_phase_b_ledger(budget_ledger_path(paths.common_root)) as ledger:
@@ -225,10 +261,20 @@ def main(argv: list[str] | None = None) -> int:
                 effort=contract.root_effort,
                 contract=contract,
             )
-            ensure_formal_receipt(
-                batch_receipt_path(paths.common_root),
-                formal_identity(provider_identity),
+            campaign = load_campaign_generation()
+            require_prior_generation(paths.common_root, campaign)
+            identity = formal_identity(
+                provider_identity,
+                harness=harness_identity(paths.worktree_root),
             )
+            require_provider_connectivity(provider_identity["provider_base_url"])
+            require_gate1_pass_before_gate2(
+                receipt_path=batch_receipt_path(paths.common_root),
+                archive_path=archive_path(paths.common_root),
+                identity=identity,
+                maximum=load_workflow_contract().max_attempts,
+            )
+            require_formal_ledger_exists(budget_ledger_path(paths.common_root))
             _name, api_key = load_provider_secret(config)
             proof = lease_from_watchdog()
             counter = DockerCliCounter(
@@ -274,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         ResumeError,
         StoreError,
         PaidAuthError,
+        ProviderConnectivityError,
     ) as exc:
         print(f"rondo-multi-m5: {exc}", file=sys.stderr)
         return 78

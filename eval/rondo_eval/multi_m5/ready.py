@@ -34,6 +34,23 @@ def readiness_report(*, common_root: Path | None = None) -> dict[str, Any]:
         workflow = None
 
     try:
+        from .campaign import load_campaign_generation, require_prior_generation
+
+        campaign = load_campaign_generation()
+        require_prior_generation(root, campaign)
+        checks["campaign_generation"] = {
+            "ok": True,
+            "generation": campaign.generation,
+            "prior_conservative_exposure_usd": str(campaign.prior_exposure_usd),
+            "campaign_cap_usd": str(campaign.campaign_cap_usd),
+            "shared_hard_cap_usd": str(campaign.shared_hard_cap_usd),
+        }
+    except M5ContractError as exc:
+        checks["campaign_generation"] = {"ok": False, "error": str(exc)}
+        missing.append("campaign_generation")
+        campaign = None
+
+    try:
         nondeg = load_nondegradation_contract()
         checks["nondegradation_lock"] = {
             "ok": True,
@@ -95,8 +112,26 @@ def readiness_report(*, common_root: Path | None = None) -> dict[str, Any]:
             if not checks["formal_batch_identity"].get("ok"):
                 missing.append("formal_batch_identity")
 
-    if nondeg is not None:
+    if nondeg is not None and campaign is not None:
         checks["budget_upper_bound"] = _probe_budget_upper_bound(nondeg)
+        checks["budget_upper_bound"]["prior_conservative_exposure_usd"] = str(
+            campaign.prior_exposure_usd
+        )
+        checks["budget_upper_bound"]["campaign_cap_usd"] = str(
+            campaign.campaign_cap_usd
+        )
+        checks["budget_upper_bound"]["shared_cap_reconciles"] = (
+            campaign.prior_exposure_usd + campaign.campaign_cap_usd
+            == campaign.shared_hard_cap_usd
+        )
+        checks["budget_upper_bound"]["campaign_cap_covers_worst_shape"] = (
+            Decimal(nondeg.worst_schedule_shape_usd) <= campaign.campaign_cap_usd
+        )
+        checks["budget_upper_bound"]["ok"] = bool(
+            checks["budget_upper_bound"].get("ok")
+            and checks["budget_upper_bound"]["shared_cap_reconciles"]
+            and checks["budget_upper_bound"]["campaign_cap_covers_worst_shape"]
+        )
         if not checks["budget_upper_bound"].get("ok"):
             missing.append("budget_upper_bound")
 
@@ -205,7 +240,17 @@ def _probe_formal_batch_identity(
         key: value for key, value in provider_check.items() if key != "ok"
     }
     try:
-        require_formal_receipt(path, formal_identity(provider_identity))
+        from .archive import harness_identity
+
+        require_formal_receipt(
+            path,
+            formal_identity(
+                provider_identity,
+                harness=harness_identity(
+                    RepoPaths.discover(Path.cwd()).worktree_root
+                ),
+            ),
+        )
         return {"ok": True, "status": "matching"}
     except ResumeError as exc:
         return {"ok": False, "error": str(exc)}

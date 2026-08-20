@@ -14,7 +14,7 @@ import stat
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from ..api_budget_proxy import (
     LoopbackResponsesProxy,
@@ -41,6 +41,7 @@ from .budget import (
     usage_envelope,
 )
 from .capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy
+from .campaign import GATE1_RUN_PREFIX
 from .collect import EvidenceError, member_message_delivery
 from .command import build_multi_exec_command
 from .load import M5ContractError, load_runtime_identity, load_workflow_contract
@@ -159,6 +160,7 @@ def run_gate1_paid(
     capture_base: Path | None = None,
     archive_file: Path | None = None,
     receipt_file: Path | None = None,
+    harness: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Paid gate 1. Capture forwards to the budget proxy. Spends money if transport is real."""
 
@@ -188,7 +190,14 @@ def run_gate1_paid(
     if persist:
         if provider_identity is None:
             raise Gate1Error("formal gate 1 requires a frozen provider identity")
-        resume_fields = formal_identity(provider_identity)
+        resume_fields = formal_identity(
+            provider_identity,
+            harness=(
+                harness
+                if harness is not None
+                else harness_identity(RepoPaths.discover(Path.cwd()).worktree_root)
+            ),
+        )
         try:
             require_formal_receipt(
                 receipt_file or batch_receipt_path(root),
@@ -216,7 +225,7 @@ def run_gate1_paid(
         expected_run_id = (
             None
             if terminal or len(archived_by_attempt) >= workflow.max_attempts
-            else f"m5-g1-v6-paid-a{len(archived_by_attempt) + 1}"
+            else f"{GATE1_RUN_PREFIX}{len(archived_by_attempt) + 1}"
         )
         try:
             require_single_unarchived_run(
@@ -232,7 +241,7 @@ def run_gate1_paid(
     concurrent_main = max_concurrent_main()
     last: dict[str, Any] | None = None
     for attempt in range(1, workflow.max_attempts + 1):
-        run_id = f"m5-g1-v6-paid-a{attempt}"
+        run_id = f"{GATE1_RUN_PREFIX}{attempt}"
         archived = archived_by_attempt.get(attempt)
         if archived is not None:
             last = {"record": archived, "resumed": True}

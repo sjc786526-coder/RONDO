@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,12 +17,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
 import rondo_eval.multi_m5.gate1  # noqa: E402
 import rondo_eval.multi_m5.gate2  # noqa: E402
+import rondo_eval.multi_m5.connectivity as m5_connectivity  # noqa: E402
 
 from rondo_eval.api_budget_proxy import (  # noqa: E402
     ApiBudgetProxyError,
@@ -43,7 +47,7 @@ from rondo_eval.docker_supervisor import (  # noqa: E402
     DockerResourceStop,
 )
 from rondo_eval.contracts import BinaryManifest, Product, RunOutcome, Side  # noqa: E402
-from rondo_eval.multi_m5.archive import archive_record  # noqa: E402
+from rondo_eval.multi_m5.archive import archive_record, harness_identity  # noqa: E402
 from rondo_eval.multi_m5.budget import (  # noqa: E402
     BATCH_ID,
     SMOKE_BATCH_ID,
@@ -73,6 +77,17 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
     run_stop_reason,
 )
 from rondo_eval.multi_m5.capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy  # noqa: E402
+from rondo_eval.multi_m5.campaign import (  # noqa: E402
+    CAMPAIGN_CAP_USD,
+    PRIOR_EXPOSURE_USD,
+    SHARED_HARD_CAP_USD,
+    load_campaign_generation,
+    require_prior_generation,
+)
+from rondo_eval.multi_m5.connectivity import (  # noqa: E402
+    ProviderConnectivityError,
+    require_provider_connectivity,
+)
 from rondo_eval.multi_m5.command import build_multi_exec_command, team_capability_overrides  # noqa: E402
 from rondo_eval.multi_m5.gate1 import (  # noqa: E402
     Gate1Error,
@@ -357,6 +372,42 @@ class MultiM5StubSequenceTests(unittest.TestCase):
 
 
 class MultiM5ArchiveBudgetTests(unittest.TestCase):
+    def test_harness_identity_counts_untracked_source_but_not_ignored_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".gitignore").write_text("eval-data/\n", encoding="utf-8")
+            (root / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(root), "add", ".gitignore", "tracked.txt"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "-c",
+                    "user.name=RONDO Test",
+                    "-c",
+                    "user.email=rondo-test@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+                check=True,
+            )
+
+            ignored = root / "eval-data" / "formal.json"
+            ignored.parent.mkdir()
+            ignored.write_text("{}\n", encoding="utf-8")
+            self.assertEqual(harness_identity(root)["harness_dirty"], False)
+
+            (root / "untracked.py").write_text("VALUE = 1\n", encoding="utf-8")
+            self.assertEqual(harness_identity(root)["harness_dirty"], True)
+
     def test_gate1_archive_requires_ignored_evidence_and_gate2_needs_slot_fields(self) -> None:
         root = _common_root()
         scratch = scratch_root(root)
@@ -394,7 +445,9 @@ class MultiM5ArchiveBudgetTests(unittest.TestCase):
                 item.unlink()
         pricing = phase_b_pricing()
         with open_phase_b_ledger(ledger_path) as ledger:
-            self.assertEqual(Decimal(ledger.snapshot()["total_cap_usd"]), HARD_CAP_USD)
+            self.assertEqual(
+                Decimal(ledger.snapshot()["total_cap_usd"]), CAMPAIGN_CAP_USD
+            )
             ledger.ensure_run("m5-cap-normal")
             ledger.reserve("m5-cap-normal", "req-1", Decimal("1.00"))
             ledger.begin_attempt("m5-cap-normal", "req-1", max_attempts=5)
@@ -412,12 +465,12 @@ class MultiM5ArchiveBudgetTests(unittest.TestCase):
             ledger.ensure_run("m5-cap-a")
             with self.assertRaises(BudgetCapacityExhausted):
                 ledger.reserve("m5-cap-a", "req-too-big", Decimal("40.00"))
-            # Walk the batch toward $120 one full-cap run at a time. The point is
+            # Walk c2 toward its remaining shared cap one full run at a time.
             # that the batch total accumulates across runs, so the exact per-run
             # figure is read from the lock rather than written in by hand.
             spent = Decimal("0")
             index = 0
-            while spent + run_cap <= HARD_CAP_USD - Decimal("1.00"):
+            while spent + run_cap <= CAMPAIGN_CAP_USD - Decimal("1.00"):
                 run_id = f"m5-cap-{index}"
                 ledger.ensure_run(run_id)
                 ledger.reserve(run_id, f"req-{index}", run_cap)
@@ -546,6 +599,150 @@ class MultiM5ReadyAndCommandTests(unittest.TestCase):
             f'agents.default_subagent_model="{workflow.member_model}"', command
         )
         self.assertIn("--strict-config", command)
+
+
+class MultiM5CampaignConnectivityTests(unittest.TestCase):
+    def test_campaign_generation_preserves_v6_and_reconciles_shared_cap(self) -> None:
+        campaign = load_campaign_generation()
+        self.assertEqual(campaign.generation, "multi-m5-v6-c2")
+        self.assertEqual(campaign.raw["workflow_lock_id"], WORKFLOW_LOCK_ID)
+        self.assertEqual(
+            campaign.raw["nondegradation_lock_id"], NONDEGRADATION_LOCK_ID
+        )
+        self.assertEqual(PRIOR_EXPOSURE_USD, Decimal("13.320000"))
+        self.assertEqual(CAMPAIGN_CAP_USD, Decimal("106.680000"))
+        self.assertEqual(
+            PRIOR_EXPOSURE_USD + CAMPAIGN_CAP_USD,
+            SHARED_HARD_CAP_USD,
+        )
+        require_prior_generation(_common_root(), campaign)
+
+    def test_campaign_generation_rejects_budget_or_predecessor_drift(self) -> None:
+        source = EVAL_ROOT / "locks" / "multi-m5-campaign-v6-c2.json"
+        raw = json.loads(source.read_text("utf-8"))
+        with tempfile.TemporaryDirectory(prefix="m5-campaign-lock-") as directory:
+            target = Path(directory) / "campaign.json"
+            for mutate in ("cap", "predecessor"):
+                changed = json.loads(json.dumps(raw))
+                if mutate == "cap":
+                    changed["campaign_cap_usd"] = "120.000000"
+                else:
+                    changed["prior_generation"]["archive_sha256"] = "0" * 64
+                target.write_text(json.dumps(changed), "utf-8")
+                with self.subTest(mutate=mutate), self.assertRaises(M5ContractError):
+                    load_campaign_generation(target)
+
+    def test_formal_identity_binds_campaign_budget_and_clean_harness(self) -> None:
+        identity = formal_identity(
+            {"provider_id": "relay"},
+            harness={"harness_commit": "a" * 40, "harness_dirty": False},
+        )
+        self.assertEqual(identity["campaign_generation"], "multi-m5-v6-c2")
+        self.assertEqual(identity["campaign_cap_usd"], "106.680000")
+        self.assertEqual(
+            identity["prior_campaign_conservative_exposure_usd"], "13.320000"
+        )
+        self.assertEqual(identity["harness_commit"], "a" * 40)
+        with self.assertRaises(ResumeError):
+            formal_identity(
+                {"provider_id": "relay"},
+                harness={"harness_commit": "a" * 40, "harness_dirty": True},
+            )
+
+    def test_connectivity_accepts_any_http_status_without_auth_or_body(self) -> None:
+        class Response:
+            def __init__(self, status: int) -> None:
+                self.status = status
+                self.closed = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        for status in (200, 301, 401, 404, 500):
+            calls = []
+            response = Response(status)
+
+            def opener(request, *, timeout):
+                calls.append((request, timeout))
+                return response
+
+            with self.subTest(status=status):
+                result = require_provider_connectivity(
+                    "https://provider.example/v1",
+                    opener=opener,
+                )
+                self.assertEqual(result["http_status"], status)
+                self.assertEqual(len(calls), 1)
+                request, timeout = calls[0]
+                self.assertEqual(request.full_url, "https://provider.example/v1/")
+                self.assertEqual(request.get_method(), "GET")
+                self.assertIsNone(request.data)
+                self.assertIsNone(request.get_header("Authorization"))
+                self.assertEqual(timeout, 15.0)
+                self.assertTrue(response.closed)
+
+    def test_connectivity_accepts_and_closes_http_error_response(self) -> None:
+        error = HTTPError(
+            "https://provider.example/v1/",
+            404,
+            "not found",
+            {},
+            io.BytesIO(b""),
+        )
+
+        def opener(_request, *, timeout):
+            self.assertEqual(timeout, 15.0)
+            raise error
+
+        result = require_provider_connectivity(
+            "https://provider.example/v1",
+            opener=opener,
+        )
+        self.assertEqual(result["http_status"], 404)
+        self.assertTrue(error.fp.closed)
+
+    def test_connectivity_network_failures_fail_closed(self) -> None:
+        for failure in (
+            URLError("sandbox blocked"),
+            TimeoutError("timed out"),
+            OSError("connection refused"),
+        ):
+            with self.subTest(failure=type(failure).__name__):
+                with self.assertRaises(ProviderConnectivityError):
+                    require_provider_connectivity(
+                        "https://provider.example/v1",
+                        opener=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                            failure
+                        ),
+                    )
+
+    def test_connectivity_default_path_disables_proxy_and_redirects(self) -> None:
+        class Response:
+            status = 204
+
+            def close(self) -> None:
+                pass
+
+        class Opener:
+            def open(self, request, *, timeout):
+                self.request = request
+                self.timeout = timeout
+                return Response()
+
+        opener = Opener()
+        with patch.object(
+            m5_connectivity,
+            "build_opener",
+            return_value=opener,
+        ) as build:
+            result = require_provider_connectivity("https://provider.example/v1")
+        self.assertEqual(result["http_status"], 204)
+        handlers = build.call_args.args
+        proxy = next(item for item in handlers if type(item).__name__ == "ProxyHandler")
+        self.assertEqual(proxy.proxies, {})
+        self.assertTrue(any(type(item).__name__ == "_NoRedirect" for item in handlers))
+        self.assertEqual(opener.request.full_url, "https://provider.example/v1/")
+        self.assertEqual(opener.timeout, 15.0)
 
 
 class MultiM5TemplateProtocolTests(unittest.TestCase):
@@ -773,7 +970,7 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
 
         ledger = _Ledger()
         capture_base = _isolated_capture_base(self)
-        target = capture_base / "m5-g1-v6-paid-a1"
+        target = capture_base / "m5-g1-v6-c2-paid-a1"
         target.mkdir()
         (target / "verdict.json").write_text("old\n", encoding="utf-8")
         with self.assertRaisesRegex(Gate1Error, "already holds artifacts"):
@@ -797,7 +994,7 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
 
         ledger = _Ledger()
         capture_base = _isolated_capture_base(self)
-        target = capture_base / "m5-g1-v6-paid-a1"
+        target = capture_base / "m5-g1-v6-c2-paid-a1"
         target.symlink_to(capture_base / "missing-target", target_is_directory=True)
         with self.assertRaisesRegex(Gate1Error, "capture path is unsafe"):
             run_gate1_paid(
@@ -829,20 +1026,109 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
                 m5_main.main(["gate1-paid", "--authorize-paid-api", "nope"]),
                 78,
             )
-        locked = subprocess.run(
-            ["just", "eval-multi-m5-gate1-paid"],
-            cwd=justfile.parent,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(locked.returncode, 78)
-        locked = subprocess.run(
-            ["just", "eval-multi-m5-gate2-real"],
-            cwd=justfile.parent,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(locked.returncode, 78)
+        with tempfile.TemporaryDirectory(
+            prefix="m5-test-just-runtime-",
+            dir=scratch_root(_common_root()),
+        ) as runtime_dir:
+            just_env = {**os.environ, "XDG_RUNTIME_DIR": runtime_dir}
+            locked = subprocess.run(
+                ["just", "eval-multi-m5-gate1-paid"],
+                cwd=justfile.parent,
+                env=just_env,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(locked.returncode, 78)
+            locked = subprocess.run(
+                ["just", "eval-multi-m5-gate2-real"],
+                cwd=justfile.parent,
+                env=just_env,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(locked.returncode, 78)
+
+    def test_gate1_connectivity_failure_creates_no_formal_state(self) -> None:
+        from rondo_eval.multi_m5 import __main__ as m5_main
+
+        clean = {"harness_commit": "1" * 40, "harness_dirty": False}
+        with patch.object(m5_main, "harness_identity", return_value=clean), patch.object(
+            m5_main,
+            "require_provider_connectivity",
+            side_effect=ProviderConnectivityError("sandbox blocked"),
+        ) as connectivity, patch.object(
+            m5_main,
+            "load_provider_secret",
+            side_effect=AssertionError("secret load must be later"),
+        ), patch.object(m5_main, "ensure_formal_receipt") as ensure_receipt, patch.object(
+            m5_main, "open_phase_b_ledger"
+        ) as open_ledger:
+            returncodes = [
+                m5_main.main(
+                    [
+                        "gate1-paid",
+                        "--authorize-paid-api",
+                        PAID_API_PHRASE,
+                    ]
+                )
+                for _ in range(2)
+            ]
+        self.assertEqual(returncodes, [78, 78])
+        self.assertEqual(connectivity.call_count, 2)
+        ensure_receipt.assert_not_called()
+        open_ledger.assert_not_called()
+
+    def test_gate2_prefix_and_existing_ledger_precede_secret_and_docker(self) -> None:
+        from rondo_eval.multi_m5 import __main__ as m5_main
+
+        clean = {"harness_commit": "1" * 40, "harness_dirty": False}
+        with patch.object(m5_main, "harness_identity", return_value=clean), patch.object(
+            m5_main, "require_provider_connectivity", return_value={"ok": True}
+        ), patch.object(
+            m5_main,
+            "require_gate1_pass_before_gate2",
+            side_effect=ResumeError("gate 1 not passed"),
+        ), patch.object(
+            m5_main,
+            "load_provider_secret",
+            side_effect=AssertionError("secret load must be later"),
+        ), patch.object(m5_main, "open_phase_b_ledger") as open_ledger:
+            returncode = m5_main.main(
+                [
+                    "gate2-real",
+                    "--authorize-paid-api",
+                    PAID_API_PHRASE,
+                    "--authorize-docker",
+                    PAID_DOCKER_PHRASE,
+                ]
+            )
+        self.assertEqual(returncode, 78)
+        open_ledger.assert_not_called()
+
+        with patch.object(m5_main, "harness_identity", return_value=clean), patch.object(
+            m5_main, "require_provider_connectivity", return_value={"ok": True}
+        ), patch.object(
+            m5_main, "require_gate1_pass_before_gate2", return_value=None
+        ), patch.object(
+            m5_main,
+            "require_formal_ledger_exists",
+            side_effect=ResumeError("ledger missing"),
+        ), patch.object(
+            m5_main,
+            "load_provider_secret",
+            side_effect=AssertionError("secret load must be later"),
+        ), patch.object(m5_main, "open_phase_b_ledger") as open_ledger:
+            returncode = m5_main.main(
+                [
+                    "gate2-real",
+                    "--authorize-paid-api",
+                    PAID_API_PHRASE,
+                    "--authorize-docker",
+                    PAID_DOCKER_PHRASE,
+                ]
+            )
+        self.assertEqual(returncode, 78)
+        open_ledger.assert_not_called()
 
     def test_gate2_provider_drift_precedes_secret_and_ledger_open(self) -> None:
         from rondo_eval.multi_m5 import __main__ as m5_main
@@ -1037,7 +1323,7 @@ class MultiM5PaidAuthAndCaptureTests(unittest.TestCase):
                     process_runner=finish_before_tail_settles,  # type: ignore[arg-type]
                 )
                 final_exposure = exposure_summary(
-                    ledger.snapshot(), "m5-g1-v6-paid-a1"
+                    ledger.snapshot(), "m5-g1-v6-c2-paid-a1"
                 )
             record = result["record"]
             self.assertEqual(record["outcome"], "infra_failed")
@@ -2002,7 +2288,7 @@ class MultiM5AttributionDiagnosticTests(unittest.TestCase):
         )
         self.assertIsNone(codex_request.product)
         self.assertEqual(multi_request.product, Product.RONDO_MULTI)
-        self.assertEqual(multi_request.batch_id, "multi-m5-phase-b-v6")
+        self.assertEqual(multi_request.batch_id, "multi-m5-phase-b-v6-c2")
         self.assertFalse(hasattr(multi_request, "campaign_id"))
         self.assertIsNone(getattr(multi_request, "campaign_identity", None))
         self.assertIsNotNone(multi_request.frozen_task)
@@ -2102,16 +2388,16 @@ class MultiM5AttributionDiagnosticTests(unittest.TestCase):
                 gate2_run_cap_usd(),
             )
             del proxy
-            ledger.ensure_run("m5-g1-v6-paid-a1", cap_usd=gate1_run_cap_usd())
+            ledger.ensure_run("m5-g1-v6-c2-paid-a1", cap_usd=gate1_run_cap_usd())
             gate1 = LoopbackResponsesProxy(
                 ledger=ledger,
-                run_id="m5-g1-v6-paid-a1",
+                run_id="m5-g1-v6-c2-paid-a1",
                 metadata_path=scratch / "multi-m5-test-gate1-run-cap-meta.json",
                 run_cap_usd=gate1_run_cap_usd(),
                 **{k: v for k, v in kwargs.items() if k not in {"run_id", "metadata_path"}},
             )
             self.assertEqual(
-                Decimal(ledger.snapshot()["runs"]["m5-g1-v6-paid-a1"]["cap_usd"]),
+                Decimal(ledger.snapshot()["runs"]["m5-g1-v6-c2-paid-a1"]["cap_usd"]),
                 gate1_run_cap_usd(),
             )
             del gate1
@@ -2140,21 +2426,21 @@ class MultiM5BudgetStopHonestyTests(unittest.TestCase):
         spent = Decimal(0)
         try:
             with open_phase_b_ledger(ledger_path) as ledger:
-                ledger.ensure_run("m5-g1-v6-paid-a1", cap_usd=gate1_run_cap_usd())
+                ledger.ensure_run("m5-g1-v6-c2-paid-a1", cap_usd=gate1_run_cap_usd())
                 for index in range(1, 400):
                     try:
                         ledger.reserve(
-                            "m5-g1-v6-paid-a1",
+                            "m5-g1-v6-c2-paid-a1",
                             f"req-{index}",
                             amount_usd=request_reservation_usd(),
                             additional_capacity_usd=request_reservation_usd(),
                         )
                     except BudgetCapacityExhausted:
                         break
-                    ledger.begin_attempt("m5-g1-v6-paid-a1", f"req-{index}", max_attempts=5)
-                    ledger.settle("m5-g1-v6-paid-a1", f"req-{index}", usage, pricing=pricing)
+                    ledger.begin_attempt("m5-g1-v6-c2-paid-a1", f"req-{index}", max_attempts=5)
+                    ledger.settle("m5-g1-v6-c2-paid-a1", f"req-{index}", usage, pricing=pricing)
                     spent = Decimal(
-                        ledger.snapshot()["runs"]["m5-g1-v6-paid-a1"]["spent_usd"]
+                        ledger.snapshot()["runs"]["m5-g1-v6-c2-paid-a1"]["spent_usd"]
                     )
                 else:  # pragma: no cover - the cap must bind well before this
                     self.fail("gate 1 run cap never bound")
@@ -2221,7 +2507,7 @@ class MultiM5BudgetStopHonestyTests(unittest.TestCase):
             base_url = _provider_base_url(command)
             _post_capture(base_url, workflow.root_model, str(held["bearer"]))
             ledger = held["ledger"]
-            ledger.stop_run("m5-g1-v6-paid-a1", stop_reason="budget_capacity_exhausted")
+            ledger.stop_run("m5-g1-v6-c2-paid-a1", stop_reason="budget_capacity_exhausted")
             return subprocess.CompletedProcess(args=command, returncode=1, stdout=b"", stderr=b"")
 
         try:
@@ -2501,7 +2787,10 @@ class MultiM5ResumeTests(unittest.TestCase):
             contract=contract,
         )
         runtime = load_runtime_identity(require_frozen=True, common_root=root)
-        return runtime, formal_identity(provider_identity)
+        return runtime, formal_identity(
+            provider_identity,
+            harness={"harness_commit": "0" * 40, "harness_dirty": False},
+        )
 
     def _gate1_record(
         self,
@@ -2527,7 +2816,7 @@ class MultiM5ResumeTests(unittest.TestCase):
             subagent_effort=str(workflow.raw["member_effort"]),
             extra={
                 **identity_fields,
-                "budget_run_id": run_id or f"m5-g1-v6-paid-a{attempt}",
+                "budget_run_id": run_id or f"m5-g1-v6-c2-paid-a{attempt}",
                 "attempt": attempt,
                 "ignored_evidence": [],
                 "passed": outcome == "completed",
@@ -2555,12 +2844,19 @@ class MultiM5ResumeTests(unittest.TestCase):
             runtime,
             identity_fields,
             attempt=1,
-            run_id="m5-g1-v6-paid-wrong",
+            run_id="m5-g1-v6-c2-paid-wrong",
+        )
+        c1 = self._gate1_record(
+            runtime,
+            identity_fields,
+            attempt=1,
+            run_id="m5-g1-v6-paid-a1",
         )
         gate2 = {"gate": 2}
         cases = {
             "future": ([a2], "contiguous prefix"),
             "wrong-run": ([wrong], "run id differs"),
+            "prior-campaign-run": ([c1], "run id differs"),
             "after-terminal": ([a1, a2], "after a terminal row"),
             "gate2-before-pass": (
                 [
@@ -2611,6 +2907,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                     provider=provider,
                     archive_file=archive_file,
                     receipt_file=receipt_file,
+                    harness={"harness_commit": "0" * 40, "harness_dirty": False},
                 )
             self.assertEqual(ledger.claims, 0)
 
@@ -2629,7 +2926,7 @@ class MultiM5ResumeTests(unittest.TestCase):
             persist_archive_record(row, common_root=root, path=archive_file)
             with open_phase_b_ledger(directory / "ledger.json") as ledger:
                 ledger.claim_run(
-                    "m5-g1-v6-paid-a2", cap_usd=gate1_run_cap_usd(contract)
+                    "m5-g1-v6-c2-paid-a2", cap_usd=gate1_run_cap_usd(contract)
                 )
                 with patch.object(
                     rondo_eval.multi_m5.gate2,
@@ -2646,6 +2943,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         lease=object(),  # type: ignore[arg-type]
                         archive_file=archive_file,
                         receipt_file=receipt_file,
+                        harness={"harness_commit": "0" * 40, "harness_dirty": False},
                     )
 
     def test_completed_archive_is_skipped_without_reexecution(self) -> None:
@@ -2924,7 +3222,7 @@ class MultiM5ResumeTests(unittest.TestCase):
             capture_base.mkdir()
             calls: list[str] = []
             with open_phase_b_ledger(directory / "ledger.json") as ledger:
-                first_id = "m5-g1-v6-paid-a1"
+                first_id = "m5-g1-v6-c2-paid-a1"
                 ledger.claim_run(first_id, cap_usd=gate1_run_cap_usd(contract))
                 ledger.reserve(first_id, "req-a1", Decimal("0.01"))
                 ledger.begin_attempt(first_id, "req-a1", max_attempts=5)
@@ -2951,7 +3249,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                 )
                 persist_archive_record(first_row, common_root=root, path=archive_file)
 
-                second_id = "m5-g1-v6-paid-a2"
+                second_id = "m5-g1-v6-c2-paid-a2"
                 ledger.claim_run(second_id, cap_usd=gate1_run_cap_usd(contract))
                 ledger.reserve(second_id, "req-a2", Decimal("0.01"))
                 ledger.begin_attempt(second_id, "req-a2", max_attempts=5)
@@ -3002,6 +3300,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         provider=provider,
                         archive_file=archive_file,
                         receipt_file=receipt_file,
+                        harness={"harness_commit": "0" * 40, "harness_dirty": False},
                     )
                     second = run_gate1_paid(
                         authorization=PaidAuthorization(real_api=True, docker=False),
@@ -3013,9 +3312,10 @@ class MultiM5ResumeTests(unittest.TestCase):
                         provider=provider,
                         archive_file=archive_file,
                         receipt_file=receipt_file,
+                        harness={"harness_commit": "0" * 40, "harness_dirty": False},
                     )
             rows = load_archive_records(archive_file)
-            self.assertEqual(calls, ["m5-g1-v6-paid-a3"])
+            self.assertEqual(calls, ["m5-g1-v6-c2-paid-a3"])
             self.assertEqual(first["record"]["outcome"], "completed")
             self.assertEqual(second["record"]["outcome"], "completed")
             self.assertEqual(sum(row.get("abandoned") is True for row in rows), 1)
@@ -3038,7 +3338,7 @@ class MultiM5ResumeTests(unittest.TestCase):
             receipt_file = directory / "identity.json"
             ensure_formal_receipt(receipt_file, identity_fields)
             with open_phase_b_ledger(directory / "ledger.json") as ledger:
-                run_id = "m5-g1-v6-paid-a1"
+                run_id = "m5-g1-v6-c2-paid-a1"
                 ledger.claim_run(run_id, cap_usd=gate1_run_cap_usd(contract))
                 ledger.reserve(run_id, "req-1", Decimal("0.01"))
                 ledger.begin_attempt(run_id, "req-1", max_attempts=5)
@@ -3065,6 +3365,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         provider=provider,
                         archive_file=archive_file,
                         receipt_file=receipt_file,
+                        harness={"harness_commit": "0" * 40, "harness_dirty": False},
                     )
                     second = run_gate1_paid(
                         authorization=PaidAuthorization(real_api=True, docker=False),
@@ -3076,6 +3377,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         provider=provider,
                         archive_file=archive_file,
                         receipt_file=receipt_file,
+                        harness={"harness_commit": "0" * 40, "harness_dirty": False},
                     )
             rows = load_archive_records(archive_file)
         self.assertEqual(len(rows), 1)
@@ -3146,7 +3448,7 @@ class MultiM5ResumeTests(unittest.TestCase):
         ) as raw:
             directory = Path(raw)
             capture_base = directory / "captures"
-            first_capture = capture_base / "m5-g1-v6-paid-a1"
+            first_capture = capture_base / "m5-g1-v6-c2-paid-a1"
             (first_capture / "rollout-trace").mkdir(parents=True)
             archive_file = directory / "records.jsonl"
             receipt_file = directory / "identity.json"
@@ -3167,7 +3469,7 @@ class MultiM5ResumeTests(unittest.TestCase):
 
             with open_phase_b_ledger(directory / "ledger.json") as ledger:
                 ledger.claim_run(
-                    "m5-g1-v6-paid-a1", cap_usd=gate1_run_cap_usd(contract)
+                    "m5-g1-v6-c2-paid-a1", cap_usd=gate1_run_cap_usd(contract)
                 )
                 with patch.object(
                     rondo_eval.multi_m5.gate1,
@@ -3189,6 +3491,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         provider=provider,
                         archive_file=archive_file,
                         receipt_file=receipt_file,
+                        harness={"harness_commit": "0" * 40, "harness_dirty": False},
                     )
                     second = run_gate1_paid(
                         authorization=PaidAuthorization(real_api=True, docker=False),
@@ -3200,9 +3503,10 @@ class MultiM5ResumeTests(unittest.TestCase):
                         provider=provider,
                         archive_file=archive_file,
                         receipt_file=receipt_file,
+                        harness={"harness_commit": "0" * 40, "harness_dirty": False},
                     )
             rows = load_archive_records(archive_file)
-        self.assertEqual(calls, ["m5-g1-v6-paid-a2"])
+        self.assertEqual(calls, ["m5-g1-v6-c2-paid-a2"])
         self.assertEqual(first["record"]["outcome"], "completed")
         self.assertEqual(second["record"]["outcome"], "completed")
         self.assertEqual(rows[0]["outcome"], "infra_failed")

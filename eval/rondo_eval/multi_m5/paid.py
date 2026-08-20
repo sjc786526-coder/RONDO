@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PAID_API_PHRASE = "I authorize Plan 044 M-5 phase B paid API"
-PAID_DOCKER_PHRASE = "I authorize Plan 044 M-5 phase B Docker"
+PAID_API_PHRASE = "I authorize Plan 044 M-5 phase B v6-c2 paid API"
+PAID_DOCKER_PHRASE = "I authorize Plan 044 M-5 phase B v6-c2 Docker"
 
 
 class PaidAuthError(RuntimeError):

@@ -51,7 +51,10 @@ def harness_identity(worktree_root) -> dict[str, Any]:
         return done.stdout.decode("utf-8", "replace").strip()
 
     head = _git("rev-parse", "HEAD")
-    status = _git("status", "--porcelain", "--untracked-files=no")
+    # Formal receipts must not call an untracked judge, loader, or campaign
+    # lock "clean".  Git still omits ignored eval-data, so paid artifacts do
+    # not make an otherwise frozen harness dirty.
+    status = _git("status", "--porcelain", "--untracked-files=all")
     return {
         "harness_commit": head,
         "harness_dirty": None if status is None else bool(status),

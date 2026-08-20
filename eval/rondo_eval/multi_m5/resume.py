@@ -1,9 +1,10 @@
-"""Narrow, fail-closed resume primitives for the formal M-5 v6 batch."""
+"""Narrow, fail-closed resume primitives for M-5 v6 campaign generation c2."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 from dataclasses import dataclass
 from decimal import Decimal
@@ -15,7 +16,14 @@ from ..api_budget_proxy import (
     PersistentBudgetLedger,
     stop_reason_class,
 )
-from .budget import BATCH_ID, REQUEST_LIMIT_STOP_REASON
+from .budget import REQUEST_LIMIT_STOP_REASON
+from .campaign import (
+    BATCH_ID,
+    CAMPAIGN_CAP_USD,
+    CAMPAIGN_GENERATION,
+    GATE1_RUN_PREFIX,
+    PRIOR_EXPOSURE_USD,
+)
 from .load import NONDEGRADATION_LOCK_ID, RUNTIME_LOCK_ID, WORKFLOW_LOCK_ID
 from .store import load_archive_records
 
@@ -32,15 +40,31 @@ class ClaimedRunDisposition:
     stop_reason: str | None = None
 
 
-def formal_identity(provider_identity: Mapping[str, Any]) -> dict[str, Any]:
+_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def formal_identity(
+    provider_identity: Mapping[str, Any],
+    *,
+    harness: Mapping[str, Any],
+) -> dict[str, Any]:
     if not isinstance(provider_identity, Mapping) or not provider_identity:
         raise ResumeError("formal resume requires a frozen provider identity")
+    commit = harness.get("harness_commit") if isinstance(harness, Mapping) else None
+    dirty = harness.get("harness_dirty") if isinstance(harness, Mapping) else None
+    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit) or dirty is not False:
+        raise ResumeError("formal resume requires one clean harness commit")
     return {
+        "campaign_generation": CAMPAIGN_GENERATION,
         "budget_batch_id": BATCH_ID,
         "workflow_lock_id": WORKFLOW_LOCK_ID,
         "nondegradation_lock_id": NONDEGRADATION_LOCK_ID,
         "runtime_lock_id": RUNTIME_LOCK_ID,
         "provider_identity": dict(provider_identity),
+        "harness_commit": commit,
+        "harness_dirty": False,
+        "prior_campaign_conservative_exposure_usd": str(PRIOR_EXPOSURE_USD),
+        "campaign_cap_usd": str(CAMPAIGN_CAP_USD),
     }
 
 
@@ -55,6 +79,28 @@ def require_formal_receipt(path: Path, identity: Mapping[str, Any]) -> None:
         raise ResumeError("formal batch identity receipt is invalid") from exc
     if value != {"schema_version": 1, **dict(identity)}:
         raise ResumeError("formal batch identity receipt differs")
+
+
+def require_gate1_pass_before_gate2(
+    *,
+    receipt_path: Path,
+    archive_path: Path,
+    identity: Mapping[str, Any],
+    maximum: int,
+) -> None:
+    """Prove Gate 1 passed before secrets, ledgers, locks, or Docker exist."""
+
+    require_formal_receipt(receipt_path, identity)
+    records = load_formal_records(archive_path, identity=identity)
+    rows = validate_gate1_resume_prefix(records, maximum=maximum)
+    last = rows.get(max(rows, default=0))
+    if last is None or last.get("outcome") != "completed":
+        raise ResumeError("formal gate 2 requires an archived gate 1 pass")
+
+
+def require_formal_ledger_exists(path: Path) -> None:
+    if path.is_symlink() or not path.is_file():
+        raise ResumeError("formal gate 2 requires the existing gate 1 ledger")
 
 
 def ensure_formal_receipt(path: Path, identity: Mapping[str, Any]) -> None:
@@ -95,39 +141,39 @@ def load_formal_records(
     identity: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
     if path.is_symlink():
-        raise ResumeError("formal v6 archive path is unsafe")
+        raise ResumeError("formal campaign archive path is unsafe")
     if not path.exists():
         return ()
     records = load_archive_records(path)
     seen: set[str] = set()
     for record in records:
         if record.get("evidence_kind") != "real_api":
-            raise ResumeError("formal v6 archive contains non-real evidence")
+            raise ResumeError("formal campaign archive contains non-real evidence")
         if record.get("gate") not in {1, 2}:
-            raise ResumeError("formal v6 archive has an invalid gate")
+            raise ResumeError("formal campaign archive has an invalid gate")
         run_id = record.get("budget_run_id")
         if not isinstance(run_id, str) or not run_id:
-            raise ResumeError("formal v6 archive row has no budget run id")
+            raise ResumeError("formal campaign archive row has no budget run id")
         if run_id in seen:
-            raise ResumeError("formal v6 archive repeats a budget run id")
+            raise ResumeError("formal campaign archive repeats a budget run id")
         seen.add(run_id)
         for name, expected in identity.items():
             if record.get(name) != expected:
-                raise ResumeError(f"formal v6 archive {name} differs")
+                raise ResumeError(f"formal campaign archive {name} differs")
         expected_lock = (
             WORKFLOW_LOCK_ID if record["gate"] == 1 else NONDEGRADATION_LOCK_ID
         )
         if record.get("lock_id") != expected_lock:
-            raise ResumeError("formal v6 archive row names the wrong gate lock")
+            raise ResumeError("formal campaign archive row names the wrong gate lock")
         if record.get("outcome") not in {
             "completed",
             "agent_failed",
             "infra_failed",
             "budget_stopped",
         }:
-            raise ResumeError("formal v6 archive row has an invalid outcome")
+            raise ResumeError("formal campaign archive row has an invalid outcome")
         if record.get("abandoned") not in {None, True}:
-            raise ResumeError("formal v6 archive abandoned flag is invalid")
+            raise ResumeError("formal campaign archive abandoned flag is invalid")
         if record.get("abandoned") is True and (
             record.get("outcome") != "infra_failed"
             or record.get("counts_as_effective") is not False
@@ -242,7 +288,7 @@ def validate_gate1_resume_prefix(
         attempt = record.get("attempt")
         if isinstance(attempt, bool) or not isinstance(attempt, int):
             raise ResumeError("formal gate 1 archive attempt is invalid")
-        if record.get("budget_run_id") != f"m5-g1-v6-paid-a{attempt}":
+        if record.get("budget_run_id") != f"{GATE1_RUN_PREFIX}{attempt}":
             raise ResumeError("formal gate 1 archive run id differs")
         if record.get("counts_as_effective") is not False:
             raise ResumeError("formal gate 1 row cannot count as effective")

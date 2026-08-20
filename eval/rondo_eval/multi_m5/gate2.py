@@ -2,8 +2,8 @@
 
 Slot walking, attempt/budget caps, and archives live here. Fake execution uses
 ``ScriptedSlotExecutor``. Real execution uses ``TerminalBenchSlotExecutor``:
-existing ``terminal_bench`` adapters, runner, and result parsing — not a v7
-campaign or preflight receipt.
+existing ``terminal_bench`` adapters, runner, and result parsing — not a new
+behaviour contract or a second comparison harness.
 """
 
 from __future__ import annotations
@@ -71,6 +71,7 @@ from .budget import (
 )
 from .bundle import load_side_manifest
 from .capture import FORWARD_TIMEOUT_SECONDS
+from .campaign import GATE2_RUN_PREFIX
 from .load import (
     load_nondegradation_contract,
     load_runtime_identity,
@@ -151,7 +152,7 @@ class DockerNotAuthorizedExecutor:
 
 
 class TerminalBenchSlotExecutor:
-    """One Harbor slot through adapters/runner/results. Not a v7 campaign."""
+    """One Harbor slot through the frozen adapters, runner, and results."""
 
     def __init__(
         self,
@@ -514,8 +515,9 @@ def run_gate2_real(
     archive_file=None,
     transport: _UrllibTransport | None = None,
     receipt_file: Path | None = None,
+    harness: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Paid gate 2. Explicit real_api evidence. No v7 campaign."""
+    """Paid gate 2 with explicit real_api evidence under the v6 contract."""
 
     authorization.require_api_and_docker()
     if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
@@ -530,7 +532,14 @@ def run_gate2_real(
     )
     from .resume import formal_identity
 
-    resume_fields = formal_identity(provider_identity)
+    resume_fields = formal_identity(
+        provider_identity,
+        harness=(
+            harness
+            if harness is not None
+            else harness_identity(RepoPaths.discover(Path.cwd()).worktree_root)
+        ),
+    )
     formal_file = archive_file or formal_archive_path(common_root)
     try:
         require_formal_receipt(
@@ -1448,7 +1457,7 @@ def _record_for(
 def _run_id(slot: Slot, attempt: int) -> str:
     task = slot.task_id.rsplit("/", 1)[-1]
     side = slot.side.value
-    return f"m5-g2-v6-{task}-{side}-r{slot.round_index}-a{attempt}"
+    return f"{GATE2_RUN_PREFIX}{task}-{side}-r{slot.round_index}-a{attempt}"
 
 
 def _gate2_conflict_paths(common_root: Path, slot: Slot, run_id: str) -> tuple[Path, ...]:

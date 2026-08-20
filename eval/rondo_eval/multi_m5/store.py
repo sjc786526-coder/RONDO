@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .archive import REQUIRED_ARCHIVE_FIELDS
+from .campaign import (
+    ARCHIVE_RELPATH,
+    BUDGET_RELPATH,
+    RECEIPT_RELPATH as BATCH_RECEIPT_RELPATH,
+)
 
-ARCHIVE_RELPATH = "eval-data/multi-m5/archives/phase-b-v6-records.jsonl"
 REHEARSAL_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/rehearsal-v6-records.jsonl"
 CAPTURE_RELDIR = "eval-data/multi-m5/captures"
-BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b-v6.json"
-BATCH_RECEIPT_RELPATH = "eval-data/budgets/multi-m5-phase-b-v6-identity.json"
 SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/clean-smoke-v5-records.jsonl"
 # The exploratory runs, runtime-v2 clean smokes, and sandbox-blocked v3 row stay
 # immutable. Runtime-v4 gets a fresh one-run v5 identity for the replacement.

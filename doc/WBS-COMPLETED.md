@@ -1361,3 +1361,17 @@ rehearsal 通过。正式 Gate 1/Gate 2 仍未启动，**不是** M-5、Gate 1 �
   形成时点报告与收口日志见
   `agent_log/2026-08-20-150000-plan044-m5-v6-second-remediation-independent-acceptance.md` 和
   `agent_log/2026-08-20-160000-plan044-m5-v6-canonical-mutation-final-readiness.md`。
+
+## Multi M-5 v6-c2 纯执行环境门禁（Plan 044，2026-08-20）
+
+**状态**：首个 v6-c1 正式 Gate 1 的 6 次运行均在模型输出前被开发 sandbox 阻断，本地正确归档为 infra，
+不是产品结论。保持 workflow-v6 / runtime-v4 / nondegradation-v6 字节不变，新增轻量 v6-c2 campaign generation。
+
+- c1 ledger/receipt/archive 摘要与 6 条连续 infra、6 request 全 settled、priced `$0`、conservative `$13.32`、
+  无 Gate 2 的语义在 c2 启动前 fail-closed 核验；用户确认中转站实际账单 `$0`。
+- c2 独占 receipt/ledger/archive/capture/run-id，正式身份再绑定 clean harness commit。c2 ledger cap `$106.68`，
+  与保留的 c1 `$13.32` 暴露相加严格等于共享 `$120`。
+- 同进程无密钥 direct GET 在所有正式状态、secret 与 Docker 前执行，禁 auth/body/proxy/redirect。sandbox 内 rc78
+  且零 c2 资产；批准的 sandbox 外得到 HTTP 301 并通过。真实 Responses 请求一旦启动，usage 不明仍消耗 attempt。
+- 零费用门禁：M-5 定向 193 项、`just eval-lock`、ready、runtime-v4 loopback 已验证；未运行 Rust、Docker、
+  API smoke 或付费模型请求。

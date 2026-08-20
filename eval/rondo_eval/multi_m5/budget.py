@@ -14,9 +14,9 @@ from ..api_budget_proxy import (
     maximum_usage_cost,
 )
 from ..contracts import ModelPricing
+from .campaign import BATCH_ID, CAMPAIGN_CAP_USD, load_campaign_generation
 from .load import M5ContractError, load_nondegradation_contract, load_workflow_contract
 
-BATCH_ID = "multi-m5-phase-b-v6"
 HARD_CAP_USD = Decimal("120.00")
 # Final pre-contract connectivity smoke. Separately authorized, so it gets its
 # own batch and its own ledger file: it must never draw on the $120 the two
@@ -447,8 +447,11 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
     cap = Decimal(loaded.hard_cap_usd)
     if cap != HARD_CAP_USD:
         raise M5ContractError("non-degradation hard cap drifted from $120.00")
-    if loaded.raw.get("cost_forecast", {}).get("ledger_batch_id") != BATCH_ID:
-        raise M5ContractError("ledger batch id drifted from multi-m5-phase-b-v6")
+    if loaded.raw.get("cost_forecast", {}).get("ledger_batch_id") != "multi-m5-phase-b-v6":
+        raise M5ContractError("v6 behavior contract ledger identity drifted")
+    campaign = load_campaign_generation()
+    if campaign.batch_id != BATCH_ID or campaign.campaign_cap_usd != CAMPAIGN_CAP_USD:
+        raise M5ContractError("campaign generation budget identity drifted")
     # Both gates share this ledger, so gate 1's attempts need their own slots.
     # Sizing it at effective+infra alone truncates the shared batch. The
     # attribution diagnostic can fire once per task, and it spends from the same
@@ -466,7 +469,7 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
     ledger = PersistentBudgetLedger(
         path,
         batch_id=BATCH_ID,
-        total_cap_usd=HARD_CAP_USD,
+        total_cap_usd=CAMPAIGN_CAP_USD,
         max_runs=max_runs,
         default_run_cap_usd=default_run_cap_usd(loaded),
         # With this set, every settled charge is bounded by its reservation, so
@@ -483,9 +486,9 @@ def open_phase_b_ledger(path: Path, *, contract=None) -> PersistentBudgetLedger:
         ),
     )
     snapshot = ledger.snapshot()
-    if Decimal(snapshot["total_cap_usd"]) != HARD_CAP_USD:
+    if Decimal(snapshot["total_cap_usd"]) != CAMPAIGN_CAP_USD:
         ledger.close()
-        raise BudgetError("opened ledger does not enforce the $120 hard cap")
+        raise BudgetError("opened ledger does not enforce the remaining shared cap")
     if snapshot["batch_id"] != BATCH_ID:
         ledger.close()
         raise BudgetError("opened ledger batch id differs")
