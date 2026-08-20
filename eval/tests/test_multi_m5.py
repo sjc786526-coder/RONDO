@@ -431,15 +431,52 @@ class MultiM5PredicateTests(unittest.TestCase):
             ],
             "log": [
                 {
+                    "revision": 1,
                     "kind": "publish",
                     "actor": "/root/worker",
-                    "target": "e1",
+                    "actor_thread_id": "t-member",
+                    "target": "v1",
                     "wake": {
                         "decision": "signalled",
                         "target": "/root",
+                        "target_thread_id": "t-root",
                         "rule": "member_publish",
                     },
-                }
+                },
+                {
+                    "revision": 2,
+                    "kind": "publish",
+                    "actor": "/root",
+                    "actor_thread_id": "t-root",
+                    "target": "v2",
+                },
+                {
+                    "revision": 3,
+                    "kind": "route",
+                    "actor": "/root",
+                    "actor_thread_id": "t-root",
+                    "target": "r1",
+                },
+                {
+                    "revision": 5,
+                    "kind": "publish",
+                    "actor": "/root/worker",
+                    "actor_thread_id": "t-member",
+                    "target": "v3",
+                    "wake": {
+                        "decision": "signalled",
+                        "target": "/root",
+                        "target_thread_id": "t-root",
+                        "rule": "member_publish",
+                    },
+                },
+                {
+                    "revision": 6,
+                    "kind": "set_root_state",
+                    "actor": "/root",
+                    "actor_thread_id": "t-root",
+                    "target": "v1",
+                },
             ],
             "jsonl_signals": [
                 "Wait completed: the team world state changed. The current active view is in this request."
@@ -447,7 +484,8 @@ class MultiM5PredicateTests(unittest.TestCase):
             "wait_calls": [
                 {
                     "thread_id": "t-root",
-                    "seq": 6,
+                    "seq": 1,
+                    "end_seq": 4,
                     "status": "completed",
                     "result": {
                         "message": "Wait completed: the team world state changed. The current active view is in this request."
@@ -457,7 +495,8 @@ class MultiM5PredicateTests(unittest.TestCase):
             "team_publish_calls": [
                 {
                     "thread_id": "t-member",
-                    "seq": 1,
+                    "seq": 2,
+                    "end_seq": 3,
                     "status": "completed",
                     "arguments": {"title": "finding"},
                     "result": {
@@ -468,14 +507,16 @@ class MultiM5PredicateTests(unittest.TestCase):
                 },
                 {
                     "thread_id": "t-root",
-                    "seq": 2,
+                    "seq": 5,
+                    "end_seq": 6,
                     "status": "completed",
                     "arguments": {"event_id": "e1"},
                     "result": {"event_id": "e1", "version_id": "v2", "evidence_refs": []},
                 },
                 {
                     "thread_id": "t-member",
-                    "seq": 5,
+                    "seq": 11,
+                    "end_seq": 12,
                     "status": "completed",
                     "arguments": {"event_id": "e1"},
                     "result": {"event_id": "e1", "version_id": "v3", "evidence_refs": []},
@@ -484,16 +525,23 @@ class MultiM5PredicateTests(unittest.TestCase):
             "team_route_calls": [
                 {
                     "thread_id": "t-root",
-                    "seq": 3,
+                    "seq": 7,
+                    "end_seq": 8,
                     "status": "completed",
                     "arguments": {"event_id": "e1", "target": "worker"},
-                    "result": {"event_id": "e1", "target": "t-member"},
+                    "result": {
+                        "route_id": "r1",
+                        "event_id": "e1",
+                        "target": "t-member",
+                        "delivery": "delivered",
+                    },
                 }
             ],
             "team_evidence_calls": [
                 {
                     "thread_id": "t-member",
-                    "seq": 4,
+                    "seq": 9,
+                    "end_seq": 10,
                     "status": "completed",
                     "arguments": {"fact_id": "f1"},
                     "result": {
@@ -504,6 +552,28 @@ class MultiM5PredicateTests(unittest.TestCase):
                         "category": "tool_result_success",
                         "truncated": False,
                         "observation": FINDING,
+                    },
+                }
+            ],
+            "team_update_calls": [
+                {
+                    "thread_id": "t-root",
+                    "seq": 13,
+                    "end_seq": 14,
+                    "status": "completed",
+                    "arguments": {
+                        "targets": [
+                            {
+                                "version_id": "v1",
+                                "expect_root_state": "pending",
+                                "set_root_state": "resolved",
+                            }
+                        ]
+                    },
+                    "result": {
+                        "updated": [
+                            {"version_id": "v1", "root_state": "resolved"}
+                        ]
                     },
                 }
             ],
@@ -586,10 +656,104 @@ class MultiM5PredicateTests(unittest.TestCase):
 
     def test_evidence_before_route_cannot_complete_the_protocol(self) -> None:
         dump = self._dump()
-        dump["team_evidence_calls"][0]["seq"] = 2
+        dump["team_evidence_calls"][0]["seq"] = 8
         verdict = self._judge(dump)
         self.assertFalse(verdict.predicates["team_route"])
         self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_wait_must_complete_after_first_publish_and_before_root_publish(self) -> None:
+        for variant, end_seq in (("early", 2), ("late", 5)):
+            with self.subTest(variant=variant):
+                dump = copy.deepcopy(self._dump())
+                dump["wait_calls"][0]["end_seq"] = end_seq
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.predicates["root_woken"])
+                self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_second_publish_must_append_a_distinct_member_version(self) -> None:
+        dump = self._dump()
+        dump["team_publish_calls"][2]["result"]["version_id"] = "v1"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_member_cannot_route_in_roots_place(self) -> None:
+        dump = self._dump()
+        dump["team_route_calls"][0]["thread_id"] = "t-member"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["team_evidence"])
+
+    def test_member_cannot_publish_roots_version(self) -> None:
+        dump = self._dump()
+        dump["team_publish_calls"][1]["thread_id"] = "t-member"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+        self.assertFalse(verdict.predicates["root_woken"])
+
+    def test_route_call_must_match_the_dump_route(self) -> None:
+        dump = self._dump()
+        dump["team_route_calls"][0]["result"]["route_id"] = "r-other"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["team_route"])
+
+    def test_protocol_calls_must_not_overlap_their_required_predecessor(self) -> None:
+        variants = {
+            "route-before-root-publish-ended": (
+                "team_route_calls",
+                0,
+                "seq",
+                6,
+            ),
+            "second-before-evidence-ended": (
+                "team_publish_calls",
+                2,
+                "seq",
+                10,
+            ),
+            "update-before-second-ended": (
+                "team_update_calls",
+                0,
+                "seq",
+                12,
+            ),
+        }
+        for name, (collection, index, field, value) in variants.items():
+            with self.subTest(name=name):
+                dump = copy.deepcopy(self._dump())
+                dump[collection][index][field] = value
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.passed)
+
+    def test_resolution_must_be_a_late_root_update_of_a_member_version(self) -> None:
+        variants = {
+            "member": ("thread_id", "t-member"),
+            "wrong-version": (
+                "arguments",
+                {
+                    "targets": [
+                        {"version_id": "v2", "set_root_state": "resolved"}
+                    ]
+                },
+            ),
+            "failed": ("status", "failed"),
+        }
+        for name, (field, value) in variants.items():
+            with self.subTest(name=name):
+                dump = copy.deepcopy(self._dump())
+                dump["team_update_calls"][0][field] = value
+                verdict = self._judge(dump)
+                self.assertFalse(verdict.predicates["root_resolved"])
+
+        dump = copy.deepcopy(self._dump())
+        dump["log"][-1]["revision"] = 4
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_resolved"])
+
+        dump = copy.deepcopy(self._dump())
+        dump["entries"][3]["root_state"] = "pending"
+        dump["entries"][5]["root_state"] = "resolved"
+        verdict = self._judge(dump)
+        self.assertFalse(verdict.predicates["root_resolved"])
 
     def test_solo_root_fails_even_with_a_perfect_report(self) -> None:
         dump = {

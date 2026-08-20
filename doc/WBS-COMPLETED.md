@@ -1319,3 +1319,24 @@ v5 的门前 ready 结论因此作废，但其 rehearsal/smoke 历史不改写�
   正式 v6 archive、ledger、identity receipt 均未创建。
 - 审查与整改证据见 `agent_log/2026-08-20-110000-plan044-m5-paid-readiness-independent-review.md` 与
   `agent_log/2026-08-20-120000-plan044-m5-v6-paid-readiness-remediation.md`。
+
+## Multi M-5 v6 正式门前恢复与协议再验收（Plan 044，2026-08-20）
+
+**状态**：13:00 独立验收发现的协议假绿、终止预算停止误分类和首请求前自有产物恢复死路均已关闭；
+append-only v6-r2 rehearsal 与独立终审通过。这里只记录门前设施进展；正式 Gate 1/Gate 2 未启动，
+**不是** M-5、Gate 1 或不退化结论。
+
+- Gate 1 现在以 rollout manifest、trace start/end 和完整 inspect-log revision 共同绑定 Root
+  wait/publish/route/update、成员 evidence 以及不同的二次 Version；乱序、错误 actor、复用 Version、失败或缺失
+  update 均有反例并 fail-closed。
+- resume 先保留 ledger 的 terminal budget/capacity stop，幂等归档为 `budget_stopped` 后停止；精确白名单内的
+  pre-Harbor 零请求自有产物只追加一次 abandoned infra。未知、错型、symlink、exact trial dir 或 exact-label
+  Docker/Compose 残留继续 fail-closed，等待受监督精确清理，不做无证据自动删除。
+- 串行 M-5 Python 179/179、Docker resume 精确探针 29/29、`just eval-lock`、ready 与 loopback 通过。
+  `m5-g1-rehearsal-v6-r2` 追加到独立 archive：20/20 dispatch 均为 code cell、0 Direct/failed；dump 7 页、
+  log 2 页到 null；明文 9、加密/未知 0，七谓词与完整 update 链全真。
+- workflow-v6 / nondegradation-v6 继续复用未变化的 runtime-v4；v5 历史不改写。正式 v6 archive、ledger、
+  identity receipt 与 paid capture 均未创建，本轮未运行 Docker、Rust 或真实 API。
+- 形成时点 NO-GO 与最终整改证据分别见
+  `agent_log/2026-08-20-130000-plan044-m5-v6-remediation-independent-acceptance.md` 和
+  `agent_log/2026-08-20-140000-plan044-m5-v6-remediation-final-readiness.md`。

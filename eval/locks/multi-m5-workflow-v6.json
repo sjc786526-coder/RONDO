@@ -43,6 +43,10 @@
       {
         "namespace": "collaboration",
         "name": "team_evidence"
+      },
+      {
+        "namespace": "collaboration",
+        "name": "team_update"
       }
     ],
     "required_inspect_actions": [
@@ -89,25 +93,25 @@
     },
     {
       "id": "team_route",
-      "description": "A route assignment on that Event targets the member."
+      "description": "After Root's own Version completes, the manifest Root thread completes a route assignment on that Event targeting the same member."
     },
     {
       "id": "team_evidence",
-      "description": "After Root published and routed the Event, the same member completed team_evidence on its first Version's exec Fact before appending its second Version; the available, successful, untruncated result is produced by that member and its non-empty observation contains the frozen finding."
+      "description": "After Root published and routed the Event, the same member completed team_evidence on its first Version's exact exec Fact before appending a distinct second Version; the available, successful, untruncated result is produced by that member and its non-empty observation contains the frozen finding."
     },
     {
       "id": "root_resolved",
-      "description": "Root set root_state=resolved on a member-authored Version of that Event."
+      "description": "After the distinct second member Version, the manifest Root thread completed team_update and the inspect log records a later set_root_state revision resolving that exact member-authored Version."
     },
     {
       "id": "root_woken",
-      "description": "A completed wait_agent dispatch returned the TeamActivity message to Root. A team_inspect log wake alone is insufficient."
+      "description": "The manifest Root thread was already waiting when the first member publish started; that publish completed before the wait returned TeamActivity, and the exact inspect-log publish revision records member_publish waking the manifest Root before Root's own publish."
     }
   ],
   "supersedes": "multi-m5-workflow-v5",
   "attempts": {
     "max_attempts": 6,
-    "semantics": "Each attempt is an independent run with its own versioned run id and immutable evidence. A pass stops the gate. An evidence or product failure continues to the next attempt and keeps its original classification. A budget or authorization stop ends the gate immediately. Resume skips archived attempts, safely reclaims only a zero-request pristine ledger run with no capture artifacts, and records a requested but unarchived run exactly once as abandoned infra before continuing with the next attempt."
+    "semantics": "Each attempt is an independent run with its own versioned run id and immutable evidence. A pass stops the gate. An evidence or product failure continues to the next attempt and keeps its original classification. A budget or authorization stop ends the gate immediately. Resume skips archived attempts, safely reclaims only a zero-request pristine ledger run with no capture artifacts, records a pristine run with exact pre-request owned artifacts exactly once as abandoned infra before continuing, and does the same for a requested but unarchived retryable-infra run. Unsafe artifacts, Harbor-started state, Docker residue, unknown stops, and identity or ordering conflicts fail closed."
   },
   "runtime_lock_id": "multi-m5-runtime-v4",
   "provider_contract": "multi-m5-nondegradation-v6",

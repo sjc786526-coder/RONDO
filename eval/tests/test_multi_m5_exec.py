@@ -74,7 +74,12 @@ from rondo_eval.multi_m5.budget import (  # noqa: E402
 )
 from rondo_eval.multi_m5.capture import FORWARD_TIMEOUT_SECONDS, CaptureProxy  # noqa: E402
 from rondo_eval.multi_m5.command import build_multi_exec_command, team_capability_overrides  # noqa: E402
-from rondo_eval.multi_m5.gate1 import Gate1Error, run_gate1_paid, run_gate1_rehearsal  # noqa: E402
+from rondo_eval.multi_m5.gate1 import (  # noqa: E402
+    Gate1Error,
+    _gate1_owned_artifacts,
+    run_gate1_paid,
+    run_gate1_rehearsal,
+)
 from rondo_eval.multi_m5.gate2 import (  # noqa: E402
     DockerNotAuthorizedExecutor,
     Gate2Error,
@@ -2428,6 +2433,7 @@ class MultiM5PaidEntryHardeningTests(unittest.TestCase):
                 )
                 try:
                     self.assertEqual(int(response.status), 200)
+                    self.assertIn(b"response.completed", response.read())
                 finally:
                     response.close()
             self.assertEqual(sink.writes and 1, 1)
@@ -2662,6 +2668,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                     identity=runtime,
                     evidence_kind="real_api",
                     resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
                 )
                 call_count = len(executor.calls)
                 second = run_light_interleaved(
@@ -2673,6 +2680,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                     identity=runtime,
                     evidence_kind="real_api",
                     resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
                 )
             self.assertEqual(call_count, 20)
             self.assertEqual(len(executor.calls), call_count)
@@ -2702,6 +2710,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                     identity=runtime,
                     evidence_kind="real_api",
                     resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
                 )
                 snapshot = ledger.snapshot()
             self.assertEqual(executor.calls[0], first_run)
@@ -2741,6 +2750,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                     identity=runtime,
                     evidence_kind="real_api",
                     resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
                 )
                 call_count = len(executor.calls)
                 second = run_light_interleaved(
@@ -2752,6 +2762,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                     identity=runtime,
                     evidence_kind="real_api",
                     resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
                 )
             rows = load_archive_records(archive_file)
             abandoned = [row for row in rows if row.get("abandoned") is True]
@@ -2798,6 +2809,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         identity=runtime,
                         evidence_kind="real_api",
                         resume_fields=identity_fields,
+                        resume_resource_probe=lambda _slot, _run_id: False,
                     )
             first_rows = load_archive_records(archive_file)
             self.assertEqual(len(first_rows), 1)
@@ -2817,6 +2829,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                     identity=runtime,
                     evidence_kind="real_api",
                     resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
                 )
             rows = load_archive_records(archive_file)
             abandoned = [row for row in rows if row.get("abandoned") is True]
@@ -2862,6 +2875,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         identity=runtime,
                         evidence_kind="real_api",
                         resume_fields=identity_fields,
+                        resume_resource_probe=lambda _slot, _run_id: False,
                     )
 
     def test_future_unarchived_claim_fails_before_execution(self) -> None:
@@ -2886,6 +2900,7 @@ class MultiM5ResumeTests(unittest.TestCase):
                         identity=runtime,
                         evidence_kind="real_api",
                         resume_fields=identity_fields,
+                        resume_resource_probe=lambda _slot, _run_id: False,
                     )
         self.assertEqual(executor.calls, [])
 
@@ -3005,6 +3020,386 @@ class MultiM5ResumeTests(unittest.TestCase):
             self.assertEqual(second["record"]["outcome"], "completed")
             self.assertEqual(sum(row.get("abandoned") is True for row in rows), 1)
             self.assertEqual(rows[0]["outcome"], "agent_failed")
+
+    def test_gate1_terminal_budget_resume_is_idempotent_and_never_executes(self) -> None:
+        root = _common_root()
+        _runtime, identity_fields = self._identity()
+        workflow = load_workflow_contract()
+        contract = load_nondegradation_contract()
+        provider = load_runtime_config(
+            RepoPaths.discover(Path.cwd())
+        ).paid_provider_projection(model_id=workflow.root_model)
+        pricing = phase_b_pricing(contract)
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate1-terminal-resume-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            archive_file = directory / "records.jsonl"
+            receipt_file = directory / "identity.json"
+            ensure_formal_receipt(receipt_file, identity_fields)
+            with open_phase_b_ledger(directory / "ledger.json") as ledger:
+                run_id = "m5-g1-v6-paid-a1"
+                ledger.claim_run(run_id, cap_usd=gate1_run_cap_usd(contract))
+                ledger.reserve(run_id, "req-1", Decimal("0.01"))
+                ledger.begin_attempt(run_id, "req-1", max_attempts=5)
+                ledger.settle(run_id, "req-1", Usage(1, 0, 0, 0), pricing=pricing)
+                ledger.stop_run(run_id, stop_reason="budget_capacity_exhausted")
+                with patch.object(
+                    rondo_eval.multi_m5.gate1,
+                    "_run_gate1_once",
+                    side_effect=AssertionError("terminal resume must not execute"),
+                ), patch.object(
+                    rondo_eval.multi_m5.gate1,
+                    "_capture_root",
+                    side_effect=lambda _root, claimed, **_kwargs: directory
+                    / "captures"
+                    / claimed,
+                ):
+                    first = run_gate1_paid(
+                        authorization=PaidAuthorization(real_api=True, docker=False),
+                        api_key="sk-test-never-spend",
+                        upstream_base_url=provider.base_url,
+                        ledger=ledger,
+                        common_root=root,
+                        persist=True,
+                        provider=provider,
+                        archive_file=archive_file,
+                        receipt_file=receipt_file,
+                    )
+                    second = run_gate1_paid(
+                        authorization=PaidAuthorization(real_api=True, docker=False),
+                        api_key="sk-test-never-spend",
+                        upstream_base_url=provider.base_url,
+                        ledger=ledger,
+                        common_root=root,
+                        persist=True,
+                        provider=provider,
+                        archive_file=archive_file,
+                        receipt_file=receipt_file,
+                    )
+            rows = load_archive_records(archive_file)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "budget_stopped")
+        self.assertEqual(rows[0]["stop_reason"], "budget_capacity_exhausted")
+        self.assertTrue(rows[0]["recovered_unarchived"])
+        self.assertEqual(first["record"], second["record"])
+
+    def test_gate2_terminal_budget_resume_is_idempotent_and_never_executes(self) -> None:
+        root = _common_root()
+        runtime, identity_fields = self._identity()
+        contract = load_nondegradation_contract()
+        slot = base_slots(contract)[0]
+        run_id = _run_id(slot, 1)
+        executor = self._Executor()
+        pricing = phase_b_pricing(contract)
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate2-terminal-resume-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            archive_file = directory / "records.jsonl"
+            with open_phase_b_ledger(directory / "ledger.json") as ledger:
+                ledger.claim_run(run_id, cap_usd=gate2_run_cap_usd(contract))
+                ledger.reserve(run_id, "req-1", Decimal("0.01"))
+                ledger.begin_attempt(run_id, "req-1", max_attempts=5)
+                ledger.settle(run_id, "req-1", Usage(1, 0, 0, 0), pricing=pricing)
+                ledger.stop_run(run_id, stop_reason="budget_capacity_exhausted")
+                first = run_light_interleaved(
+                    executor=executor,
+                    common_root=root,
+                    ledger=ledger,
+                    persist=True,
+                    archive_file=archive_file,
+                    identity=runtime,
+                    evidence_kind="real_api",
+                    resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
+                )
+                second = run_light_interleaved(
+                    executor=executor,
+                    common_root=root,
+                    ledger=ledger,
+                    persist=True,
+                    archive_file=archive_file,
+                    identity=runtime,
+                    evidence_kind="real_api",
+                    resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
+                )
+            rows = load_archive_records(archive_file)
+        self.assertEqual(executor.calls, [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "budget_stopped")
+        self.assertEqual(rows[0]["stop_reason"], "budget_capacity_exhausted")
+        self.assertTrue(first["stopped"])
+        self.assertTrue(second["stopped"])
+
+    def test_gate1_pristine_owned_artifacts_are_abandoned_once(self) -> None:
+        root = _common_root()
+        runtime, identity_fields = self._identity()
+        workflow = load_workflow_contract()
+        contract = load_nondegradation_contract()
+        provider = load_runtime_config(
+            RepoPaths.discover(Path.cwd())
+        ).paid_provider_projection(model_id=workflow.root_model)
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate1-pristine-artifacts-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            capture_base = directory / "captures"
+            first_capture = capture_base / "m5-g1-v6-paid-a1"
+            (first_capture / "rollout-trace").mkdir(parents=True)
+            archive_file = directory / "records.jsonl"
+            receipt_file = directory / "identity.json"
+            ensure_formal_receipt(receipt_file, identity_fields)
+            calls: list[str] = []
+
+            def complete_second(**kwargs):
+                claimed = str(kwargs["run_id"])
+                calls.append(claimed)
+                row = self._gate1_record(
+                    runtime,
+                    identity_fields,
+                    attempt=2,
+                    run_id=claimed,
+                )
+                persist_archive_record(row, common_root=root, path=archive_file)
+                return {"record": row}
+
+            with open_phase_b_ledger(directory / "ledger.json") as ledger:
+                ledger.claim_run(
+                    "m5-g1-v6-paid-a1", cap_usd=gate1_run_cap_usd(contract)
+                )
+                with patch.object(
+                    rondo_eval.multi_m5.gate1,
+                    "_run_gate1_once",
+                    side_effect=complete_second,
+                ), patch.object(
+                    rondo_eval.multi_m5.gate1,
+                    "_capture_root",
+                    side_effect=lambda _root, claimed, **_kwargs: capture_base
+                    / claimed,
+                ):
+                    first = run_gate1_paid(
+                        authorization=PaidAuthorization(real_api=True, docker=False),
+                        api_key="sk-test-never-spend",
+                        upstream_base_url=provider.base_url,
+                        ledger=ledger,
+                        common_root=root,
+                        persist=True,
+                        provider=provider,
+                        archive_file=archive_file,
+                        receipt_file=receipt_file,
+                    )
+                    second = run_gate1_paid(
+                        authorization=PaidAuthorization(real_api=True, docker=False),
+                        api_key="sk-test-never-spend",
+                        upstream_base_url=provider.base_url,
+                        ledger=ledger,
+                        common_root=root,
+                        persist=True,
+                        provider=provider,
+                        archive_file=archive_file,
+                        receipt_file=receipt_file,
+                    )
+            rows = load_archive_records(archive_file)
+        self.assertEqual(calls, ["m5-g1-v6-paid-a2"])
+        self.assertEqual(first["record"]["outcome"], "completed")
+        self.assertEqual(second["record"]["outcome"], "completed")
+        self.assertEqual(rows[0]["outcome"], "infra_failed")
+        self.assertTrue(rows[0]["abandoned"])
+        self.assertEqual(
+            rows[0]["reasons"], ["resume:pristine_run_has_owned_artifacts"]
+        )
+
+    def test_gate2_pristine_owned_artifacts_are_abandoned_once(self) -> None:
+        root = _common_root()
+        runtime, identity_fields = self._identity()
+        contract = load_nondegradation_contract()
+        slot = base_slots(contract)[0]
+        first_run = _run_id(slot, 1)
+        executor = self._Executor()
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate2-pristine-artifacts-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            artifacts = (
+                directory / "meta.json",
+                directory / "staging",
+                directory / "overlay.compose.yaml",
+                directory / "provider-auth-json",
+            )
+            artifacts[0].write_text("{}\n", encoding="utf-8")
+            archive_file = directory / "records.jsonl"
+            with open_phase_b_ledger(directory / "ledger.json") as ledger:
+                ledger.claim_run(first_run, cap_usd=gate2_run_cap_usd(contract))
+                with patch.object(
+                    rondo_eval.multi_m5.gate2,
+                    "_gate2_conflict_paths",
+                    side_effect=lambda _root, _slot, claimed: (
+                        artifacts
+                        if claimed == first_run
+                        else tuple(
+                            directory / f"{claimed}-{index}"
+                            for index in range(4)
+                        )
+                    ),
+                ):
+                    first = run_light_interleaved(
+                        executor=executor,
+                        common_root=root,
+                        ledger=ledger,
+                        persist=True,
+                        archive_file=archive_file,
+                        identity=runtime,
+                        evidence_kind="real_api",
+                        resume_fields=identity_fields,
+                        resume_resource_probe=lambda _slot, _run_id: False,
+                    )
+                    call_count = len(executor.calls)
+                    second = run_light_interleaved(
+                        executor=executor,
+                        common_root=root,
+                        ledger=ledger,
+                        persist=True,
+                        archive_file=archive_file,
+                        identity=runtime,
+                        evidence_kind="real_api",
+                        resume_fields=identity_fields,
+                        resume_resource_probe=lambda _slot, _run_id: False,
+                    )
+            rows = load_archive_records(archive_file)
+        self.assertNotIn(first_run, executor.calls)
+        self.assertIn(_run_id(slot, 2), executor.calls)
+        self.assertEqual(len(executor.calls), call_count)
+        self.assertEqual(first["infra_used"], 1)
+        self.assertEqual(second["infra_used"], 1)
+        self.assertEqual(rows[0]["reason"], "resume:pristine_run_has_owned_artifacts")
+        self.assertTrue(rows[0]["abandoned"])
+
+    def test_gate1_unknown_or_symlink_capture_artifact_fails_closed(self) -> None:
+        root = _common_root()
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate1-unsafe-artifacts-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            unknown = directory / "unknown"
+            unknown.mkdir()
+            (unknown / "surprise.txt").write_text("unexpected\n", encoding="utf-8")
+            with self.assertRaisesRegex(Gate1Error, "unknown artifact"):
+                _gate1_owned_artifacts(unknown)
+
+            linked = directory / "linked"
+            linked.mkdir()
+            (linked / "real.json").write_text("{}\n", encoding="utf-8")
+            (linked / "budget-metadata.json").symlink_to(linked / "real.json")
+            with self.assertRaisesRegex(Gate1Error, "symlink"):
+                _gate1_owned_artifacts(linked)
+
+    def test_gate2_harbor_started_pristine_run_fails_closed(self) -> None:
+        root = _common_root()
+        runtime, identity_fields = self._identity()
+        contract = load_nondegradation_contract()
+        slot = base_slots(contract)[0]
+        run_id = _run_id(slot, 1)
+        executor = self._Executor()
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate2-harbor-residue-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            staging = directory / "staging" / "run-task"
+            suffix = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:12]
+            trial = (
+                staging.parent
+                / "trials"
+                / f"rondo-p1-{slot.side.value}-{suffix}"
+            )
+            trial.mkdir(parents=True)
+            artifacts = (
+                directory / "meta.json",
+                staging,
+                directory / "overlay.compose.yaml",
+                directory / "provider-auth-json",
+            )
+            with open_phase_b_ledger(directory / "ledger.json") as ledger:
+                ledger.claim_run(run_id, cap_usd=gate2_run_cap_usd(contract))
+                with patch.object(
+                    rondo_eval.multi_m5.gate2,
+                    "_gate2_conflict_paths",
+                    return_value=artifacts,
+                ), self.assertRaisesRegex(Gate2Error, "reached Harbor"):
+                    run_light_interleaved(
+                        executor=executor,
+                        common_root=root,
+                        ledger=ledger,
+                        persist=True,
+                        archive_file=directory / "records.jsonl",
+                        identity=runtime,
+                        evidence_kind="real_api",
+                        resume_fields=identity_fields,
+                        resume_resource_probe=lambda _slot, _run_id: False,
+                    )
+        self.assertEqual(executor.calls, [])
+
+    def test_gate2_exact_docker_residue_fails_before_claim_or_execution(self) -> None:
+        root = _common_root()
+        runtime, identity_fields = self._identity()
+        executor = self._Executor()
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate2-docker-residue-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            with open_phase_b_ledger(directory / "ledger.json") as ledger:
+                with self.assertRaisesRegex(Gate2Error, "still owns Docker resources"):
+                    run_light_interleaved(
+                        executor=executor,
+                        common_root=root,
+                        ledger=ledger,
+                        persist=True,
+                        archive_file=directory / "records.jsonl",
+                        identity=runtime,
+                        evidence_kind="real_api",
+                        resume_fields=identity_fields,
+                        resume_resource_probe=lambda _slot, _run_id: True,
+                    )
+                snapshot = ledger.snapshot()
+        self.assertEqual(executor.calls, [])
+        self.assertEqual(snapshot["run_slots_used"], 0)
+
+    def test_gate2_requested_run_cap_is_retryable_infra_on_resume(self) -> None:
+        root = _common_root()
+        runtime, identity_fields = self._identity()
+        contract = load_nondegradation_contract()
+        slot = base_slots(contract)[0]
+        first_run = _run_id(slot, 1)
+        executor = self._Executor()
+        pricing = phase_b_pricing(contract)
+        with tempfile.TemporaryDirectory(
+            prefix="m5-gate2-request-cap-resume-", dir=scratch_root(root)
+        ) as raw:
+            directory = Path(raw)
+            archive_file = directory / "records.jsonl"
+            with open_phase_b_ledger(directory / "ledger.json") as ledger:
+                ledger.claim_run(first_run, cap_usd=gate2_run_cap_usd(contract))
+                ledger.reserve(first_run, "req-1", Decimal("0.01"))
+                ledger.begin_attempt(first_run, "req-1", max_attempts=5)
+                ledger.settle(first_run, "req-1", Usage(1, 0, 0, 0), pricing=pricing)
+                ledger.stop_run(first_run, stop_reason=REQUEST_LIMIT_STOP_REASON)
+                result = run_light_interleaved(
+                    executor=executor,
+                    common_root=root,
+                    ledger=ledger,
+                    persist=True,
+                    archive_file=archive_file,
+                    identity=runtime,
+                    evidence_kind="real_api",
+                    resume_fields=identity_fields,
+                    resume_resource_probe=lambda _slot, _run_id: False,
+                )
+            rows = load_archive_records(archive_file)
+        self.assertFalse(result["stopped"])
+        self.assertEqual(rows[0]["outcome"], "infra_failed")
+        self.assertEqual(rows[0]["stop_reason"], REQUEST_LIMIT_STOP_REASON)
+        self.assertIn(_run_id(slot, 2), executor.calls)
 
 
 class MultiM5PaidBoundaryTests(unittest.TestCase):

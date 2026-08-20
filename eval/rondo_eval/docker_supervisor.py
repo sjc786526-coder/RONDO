@@ -723,6 +723,17 @@ class DockerCounter(Protocol):
         deadline: float | None = None,
     ) -> DockerImageIdentity: ...
 
+    def resume_resources_present(
+        self,
+        *,
+        identity: DockerTaskIdentity,
+        compose_project: str,
+        deadline: float | None = None,
+    ) -> bool:
+        """Whether an exact interrupted run still owns daemon resources."""
+
+        ...
+
 
 class RunningCommand(Protocol):
     """A non-blocking process handle returned by an injected runner."""

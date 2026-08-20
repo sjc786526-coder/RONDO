@@ -235,13 +235,16 @@
     "skip_archived_outcomes": [
       "completed",
       "agent_failed",
-      "infra_failed"
+      "infra_failed",
+      "budget_stopped"
     ],
     "zero_request_reclaim": "same_run_id_only_when_pristine_and_capture_empty",
+    "zero_request_owned_artifacts": "append_one_abandoned_infra_record_then_next_attempt_when_exact_pre_request_artifacts_and_no_docker_resources",
     "requested_unarchived": "append_one_abandoned_infra_record_then_next_attempt",
     "abandonment_idempotent": true,
     "product_failure_is_infra": false,
     "future_or_conflicting_rows": "fail_closed",
+    "unsafe_or_harbor_started_artifacts": "fail_closed",
     "budget_and_capacity_stops_remain_terminal": true
   },
   "usage_envelope": {

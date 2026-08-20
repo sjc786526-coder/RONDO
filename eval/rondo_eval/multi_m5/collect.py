@@ -44,6 +44,7 @@ WAIT_TOOL = ("collaboration", "wait_agent")
 EVIDENCE_TOOL = ("collaboration", "team_evidence")
 PUBLISH_TOOL = ("collaboration", "team_publish")
 ROUTE_TOOL = ("collaboration", "team_route")
+UPDATE_TOOL = ("collaboration", "team_update")
 _DEFAULT_NAMESPACES = {None, "", "functions"}
 _CALL_TYPES = {"function_call", "custom_tool_call"}
 _ITEM_EVENTS = {"item.completed", "item.started", "item.updated"}
@@ -81,6 +82,7 @@ def collect_gate1_evidence(
         "team_evidence_calls": [],
         "team_publish_calls": [],
         "team_route_calls": [],
+        "team_update_calls": [],
         "cells": len(trace.cells),
         "nested_calls": len(trace.calls),
     }
@@ -282,19 +284,25 @@ def _absorb(
             {
                 "thread_id": call.thread_id,
                 "seq": call.seq,
+                "end_seq": call.end_seq,
                 "status": call.status,
                 "arguments": _arguments(args),
                 "result": call.result,
             }
         )
         return
-    if identity in {PUBLISH_TOOL, ROUTE_TOOL}:
-        key = "team_publish_calls" if identity == PUBLISH_TOOL else "team_route_calls"
+    if identity in {PUBLISH_TOOL, ROUTE_TOOL, UPDATE_TOOL}:
+        key = {
+            PUBLISH_TOOL: "team_publish_calls",
+            ROUTE_TOOL: "team_route_calls",
+            UPDATE_TOOL: "team_update_calls",
+        }[identity]
         args = call.arguments if isinstance(call.arguments, dict) else {}
         dump[key].append(
             {
                 "thread_id": call.thread_id,
                 "seq": call.seq,
+                "end_seq": call.end_seq,
                 "status": call.status,
                 "arguments": _arguments(args),
                 "result": call.result,
@@ -306,6 +314,7 @@ def _absorb(
             {
                 "thread_id": call.thread_id,
                 "seq": call.seq,
+                "end_seq": call.end_seq,
                 "status": call.status,
                 "result": call.result,
             }

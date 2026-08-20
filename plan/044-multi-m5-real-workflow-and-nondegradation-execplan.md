@@ -183,7 +183,8 @@
   载体是 host `codex exec` +
   `eval/fixtures/multi-m5-collab-v1/` + `eval/templates/multi-m5/collab-workflow-instruction-v2.md`
   （sha 以 v6 锁为准），不是 TB `fix-git`。完成标准 = `TEAM_REPORT.md` 含 finding 行且七项协作谓词全真，
-  包括成员精确证据链与 Root 自身 completed wait；孤儿退休不是必触发项。最多 6 次，Docker 不用于门 1。
+  包括成员精确证据链、Root 自身 completed wait 与最终 `team_update`；调用 actor、trace 完成边界及 inspect-log
+  revision 必须共同绑定到同一 Event。孤儿退休不是必触发项。最多 6 次，Docker 不用于门 1。
 - **门 2 当前合同**：`eval/locks/multi-m5-nondegradation-v6.json`；v1—v5 只留历史。十任务来自
   `eval/tasksets/p2-b7-canary-catalog-v4.json`（catalog sha `00b83e44…57ddf`），交错
   `task_major_codex_then_multi`，轻 runner，不套 v7 campaign，不计算 σ/delta。价格快照
@@ -395,25 +396,30 @@
   未变化的 `multi-m5-runtime-v4`。门 1 最多 6 次；门 2 每槽最多 5 次 infra、全批最多 40 次；有效样本 60、
   每 run 80 个逻辑请求、provider 每请求最多 5 次 HTTP 尝试和 `$120` 硬上限不变；共享 run 槽位为
   `60 + 40 + 6 + 10 = 116`。
-- Gate 1 只在同一成员按“首次 publish → Root publish → route → `team_evidence` 自身 exec Fact → 二次
-  publish”的顺序完成，且首次 Version 精确引用该 Fact 时判证据链成立；Root 唤醒只认 rollout manifest 所列
-  Root thread 的 completed `wait_agent` TeamActivity，整条 trace 必须零 Direct，成员投递必须仅为 plaintext。
+- Gate 1 只在同一成员按“首次 publish → Root publish → route → `team_evidence` 自身 exec Fact → 不同 Version
+  的二次 publish → Root `team_update`”完成时判证据链成立。首次 Version 必须精确引用该 Fact；Root wait、publish、
+  route、update 与成员调用分别绑定 manifest actor，trace start/end 和完整 inspect-log revision 共同约束顺序；整条
+  trace 必须零 Direct，成员投递必须仅为 plaintext。
   测试 capture、v6 rehearsal、v6 正式批次分别使用独立 namespace，正式 capture 已有任何产物即 fail-closed。
 - 正式 resume 按 batch/workflow/nondegradation/runtime/provider receipt 核身份：完整归档行按原分类跳过；
-  零请求、零消费、无停止/taint/冲突产物的 pristine run 可原 id 重领；已请求未归档的 run 保守结算后只追加
-  一次 `abandoned=true` infra，再进入下一 attempt；未来、重复、非连续或冲突状态 fail-closed。Gate 2 每个
+  零请求、零消费、无停止/taint/冲突产物的 pristine run 可原 id 重领；精确白名单内、属于本 run 且仍在 Harbor
+  启动前的零请求产物追加一次 `abandoned=true` infra 后进入下一 attempt；已请求未归档的 run 保守结算后也只
+  追加一次 abandoned infra。已持久化的 budget/capacity stop 必须一次归档为 `budget_stopped` 并停止，不能伪装
+  成可重试 infra；未知产物、symlink、exact trial dir 或 exact-label Docker/Compose 残留一律 fail-closed，等待
+  受监督的精确清理，不自动删除。未来、重复、非连续或其它冲突状态同样 fail-closed。Gate 2 每个
   attempt 的归档在下一 run id 被 claim 前立即 fsync，避免进程退出留下两个未归档 run。正常模型失败仍是
   `agent_failed` 产品结果，不能换成 infra。
 - 正式入口在读取密钥、创建 receipt/ledger 或 claim 前完成 provider 冻结校验；Gate 2 正式入口还要求同一 v6
   archive 中已有 Gate 1 pass。点估计 `$10.40`、最坏调度形状预测 `$67.80`、硬上限 `$120`，endpoint 仍为
   `https://www.cctq.ai/v1`。
-- 离线验收：M-5 Python 定向 162/162、`just eval-lock`、ready、loopback 均通过。全新 canonical v6 rehearsal
-  为 20/20 code-cell dispatch、0 Direct、0 failed；dump 7 页/log 2 页到 null，七谓词全真，明文 9/加密与
-  未知 0，成员自己的 exec Fact 可由 `team_evidence` 读回。正式 v6 archive/ledger/identity receipt 均不存在。
+- 离线验收：M-5 Python 定向 179/179、Docker resume 精确探针单元测试 29/29、`just eval-lock`、ready、loopback
+  均通过。append-only `m5-g1-rehearsal-v6-r2` 为 20/20 code-cell dispatch、0 Direct、0 failed；dump 7 页/log
+  2 页到 null，七谓词全真，明文 9/加密与未知 0，成员自己的 exec Fact 可由 `team_evidence` 读回，并完成 Root
+  update。正式 v6 archive/ledger/identity receipt 均不存在。
 
 ### 本任务剩余步骤
 
-- v6 门前设施、准备性验证、文档与独立复核均已完成；提交后停在正式门 1 前。
+- v6 门前设施、准备性验证、文档与独立复核均已完成；本任务停在正式门 1 前。
 - 正式门 1、门 2、Docker 和 `$120` 账本不执行，也不得把 clean smoke 表述为正式门 1 通过或 M-5 通过。
 
 ### 阻塞项
@@ -440,7 +446,8 @@
 - loopback 证明的是团队工具注册、一次 `team_publish` 往返与归档字段；**没有**证明投影进入后续采样
   或证据下钻。那两件事仍由阶段 B 门 1 真实运行判定。
 - 阶段 B：runtime-v4 产品身份保持不变；v5 的 readiness 假设已由独立审查否决并以两把 v6 锁、严格协议判据、
-  capture 隔离、provider 前置冻结和幂等 resume 收口。v6 离线门禁与 canonical rehearsal 已通过；历史唯一
+  capture 隔离、provider 前置冻结和幂等 resume 收口。13:00 独立验收发现的协议时序、终止预算恢复和首请求前
+  自有产物三组缺口已闭合；v6 离线门禁与 append-only v6-r2 rehearsal 已通过。历史唯一
   clean-smoke-v5 仍只证明当时的非正式真实链路。本轮未新增真实 API 消费。正式门 1/门 2 未启动，v6 `$120`
   正式 archive/ledger/identity receipt 均不存在。
   **不得表述为 M-5 通过、门 1 通过或未见退化。**
@@ -463,7 +470,7 @@
 | 每 run 请求上限 | 80 |
 | 价格快照 | 2026-08-18 官方页：input $2 / cached $0.20 / output $12 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25。同日核对 sol 仍为 5/0.5/30，故 terra 为其 40% |
 | 费用 | 点估计 `$10.40`；最坏调度形状预测 `$67.80`（不是合法消费上限）；**硬上限 `$120` 不变**。账本批次 `multi-m5-phase-b-v6` |
-| 恢复 | 完整归档跳过；pristine 零请求 run 安全重领；已请求未归档只追加一次 abandoned infra 后转下一 attempt；身份/顺序/停止线冲突 fail-closed |
+| 恢复 | 完整归档跳过；pristine 零请求 run 安全重领；精确 pre-Harbor 自有产物与已请求未归档各只追加一次 abandoned infra；终止 budget/capacity stop 归档后停止；未知、symlink、Harbor-started 或 exact Docker 残留 fail-closed |
 | Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v6.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
 | 外发边界 | 任务输入、工作区内容与模型可见工具结果进入 Responses；密钥、`.env.local`、个人配置不进提示词或结果文件 |
 | 预计时间 | 门 1：数十分钟级，打满 6 次可达数小时。门 2：无条件复跑时数小时到十余小时；若多题触发复跑或打满 infra，日历时间可到一天以上。全局串行，与重型 Cargo / 本地模型互斥。 |
@@ -553,6 +560,7 @@
 | 057 | 正式 resume 以 batch + 两把合同锁 + runtime + provider receipt 绑定；完整归档跳过，pristine 零请求 run 原 id 重领，已请求未归档只追加一次 abandoned infra 后转下一 attempt，未来/重复/冲突状态拒绝 | 固定 run id 的 one-shot 入口无法承受长批次进程退出；恢复必须幂等且不能把产品失败改标 infra | 恢复语义 | 已采纳 |
 | 058 | Gate 1 机械要求同成员完成首次 publish → Root publish → route → 自身 exec Fact 的 team_evidence → 二次 publish，Root 唤醒只认 completed wait_agent TeamActivity | v5 只从 dump 的 VersionFact 推断 evidence，缺调用、少一次成员 Version 或仅 inspect signal 都可假通过 | 门 1 判据 | 已采纳 |
 | 063 | Gate 1 进一步要求首个成员 Version 精确引用被下钻 Fact、wait 来自 rollout manifest 的 Root thread、整条 trace 零 Direct，且 Root→member 投递仅 plaintext；Gate 1/2 共享完整 Gate 1 archive 前缀验证并拒绝 symlink 归档 | 独立终审构造出成员 wait、第二 Version 借 Fact、Direct dispatch、乱序 resume 与 broken symlink 等假绿/先消费后失败边界 | 门 1 / resume | 已采纳 |
+| 064 | Gate 1 以 trace start/end + inspect-log revision 绑定 Root wait/publish/route/update、成员 evidence 与不同的二次 Version；恢复先保留 terminal budget stop，精确 pre-Harbor 自有产物可一次 abandoned，Harbor-started / exact Docker 残留保持 fail-closed | 13:00 独立验收构造出晚 wait、错误 actor、复用 Version、终止 stop 被重试及首请求前自有产物死路；自动继续带活动 Docker 的 run 无法证明安全，必须留给后继受监督精确清理 | 门 1 / resume / Docker 边界 | 已采纳 |
 | 059 | 测试必须显式传入 eval-data/tmp 下的隔离 capture root；v6 rehearsal、正式 Gate 1 与历史 v5 各用独立 identity，正式非空 capture 一律拒绝 | `persist=false` 旧实现仍会覆盖 canonical raw 并向 metadata 追加测试 observation | 证据分区 | 已采纳 |
 | 060 | 完整 provider frozen preflight 位于 secret、正式 identity receipt、ledger open 与 claim_run 之前，并纳入 ready | 只在 Gate 2 executor 内校验会在零 API 时仍消耗第一个正式 run id | 付费入口 | 已采纳 |
 | 061 | Gate 2 每个 attempt 形成分类后立即 fsync 归档，再允许 claim 下一 attempt | 若把同槽多次 infra 缓存在内存，下一 attempt 请求中断会留下两个未归档 run，无法按单一前缀恢复 | 恢复持久性 | 已采纳 |

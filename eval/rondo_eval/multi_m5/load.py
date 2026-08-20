@@ -186,6 +186,7 @@ def load_workflow_contract(path: Path | None = None) -> WorkflowContract:
         {"namespace": "collaboration", "name": "team_inspect"},
         {"namespace": "collaboration", "name": "wait_agent"},
         {"namespace": "collaboration", "name": "team_evidence"},
+        {"namespace": "collaboration", "name": "team_update"},
     ]:
         raise M5ContractError("gate 1 required tool identities differ")
     if source.get("required_inspect_actions") != ["dump", "log"]:
@@ -542,12 +543,19 @@ def _require_resume(value: object) -> None:
             "runtime_lock_id",
             "provider_identity",
         ],
-        "skip_archived_outcomes": ["completed", "agent_failed", "infra_failed"],
+        "skip_archived_outcomes": [
+            "completed",
+            "agent_failed",
+            "infra_failed",
+            "budget_stopped",
+        ],
         "zero_request_reclaim": "same_run_id_only_when_pristine_and_capture_empty",
+        "zero_request_owned_artifacts": "append_one_abandoned_infra_record_then_next_attempt_when_exact_pre_request_artifacts_and_no_docker_resources",
         "requested_unarchived": "append_one_abandoned_infra_record_then_next_attempt",
         "abandonment_idempotent": True,
         "product_failure_is_infra": False,
         "future_or_conflicting_rows": "fail_closed",
+        "unsafe_or_harbor_started_artifacts": "fail_closed",
         "budget_and_capacity_stops_remain_terminal": True,
     }
     if value != expected:

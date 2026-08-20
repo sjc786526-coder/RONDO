@@ -26,6 +26,7 @@ _EVENT_LOCAL = (
     "team_route",
     "team_evidence",
     "root_resolved",
+    "root_woken",
 )
 
 
@@ -97,6 +98,13 @@ def evaluate_collaboration(
     publish_calls = tuple(publish_items) if isinstance(publish_items, list) else ()
     route_items = dump.get("team_route_calls")
     route_calls = tuple(route_items) if isinstance(route_items, list) else ()
+    update_items = dump.get("team_update_calls")
+    update_calls = tuple(update_items) if isinstance(update_items, list) else ()
+    wait_items = dump.get("wait_calls")
+    wait_calls = tuple(wait_items) if isinstance(wait_items, list) else ()
+    log_items = dump.get("log")
+    log_entries = tuple(log_items) if isinstance(log_items, list) else ()
+    root_thread_id = str(dump.get("root_thread_id") or "")
 
     spawn_ok = 1 <= len(members) <= max_members
     local_flags = [
@@ -107,6 +115,10 @@ def evaluate_collaboration(
             calls,
             publish_calls,
             route_calls,
+            update_calls,
+            wait_calls,
+            log_entries,
+            root_thread_id,
             finding_line,
         )
         for event in events
@@ -119,11 +131,9 @@ def evaluate_collaboration(
     )
     event_id = events[best_index]["event_id"] if best_index is not None else None
     same_event = bool(local_flags) and all(best_flags.values())
-    woken = _root_was_woken(dump)
     predicates = {
         "spawn_member": spawn_ok,
         **best_flags,
-        "root_woken": woken,
     }
 
     report = workspace / report_filename
@@ -214,6 +224,10 @@ def _event_flags(
     evidence_calls: tuple[object, ...],
     publish_calls: tuple[object, ...],
     route_calls: tuple[object, ...],
+    update_calls: tuple[object, ...],
+    wait_calls: tuple[object, ...],
+    log_entries: tuple[object, ...],
+    root_thread_id: str,
     finding_line: str,
 ) -> dict[str, bool]:
     versions = [row for row in event["versions"] if isinstance(row, dict)]
@@ -241,21 +255,31 @@ def _event_flags(
         fact_id = str(row.get("fact_id") or "")
         if version_id in member_ids and fact_id:
             facts_by_version.setdefault(version_id, set()).add(fact_id)
+    resolved_member_ids = {
+        str(row.get("version_id"))
+        for row in member_versions
+        if row.get("version_id") and row.get("root_state") == "resolved"
+    }
+    member_route_ids = {
+        str(row.get("route_id"))
+        for row in routes
+        if row.get("route_id") and str(row.get("target") or "") in member_labels
+    }
     protocol = _valid_member_protocol(
         event_id=str(event.get("event_id") or ""),
         versions=versions,
         member_threads=member_threads,
         facts_by_version=facts_by_version,
+        resolved_member_ids=resolved_member_ids,
+        member_route_ids=member_route_ids,
         publish_calls=publish_calls,
         route_calls=route_calls,
+        update_calls=update_calls,
         evidence_calls=evidence_calls,
+        wait_calls=wait_calls,
+        log_entries=log_entries,
+        root_thread_id=root_thread_id,
         finding_line=finding_line,
-    )
-    route_to_member = any(
-        str(row.get("target") or "") in member_labels for row in routes
-    )
-    member_resolved = any(
-        str(row.get("root_state") or "") == "resolved" for row in member_versions
     )
     return {
         "event_with_two_versions": (
@@ -264,9 +288,10 @@ def _event_flags(
             and len(member_versions) >= 2
         ),
         "two_authors": len(authors) >= 2 and bool(root_versions) and bool(member_versions),
-        "team_route": route_to_member and protocol["route"],
+        "team_route": protocol["route"],
         "team_evidence": protocol["evidence"],
-        "root_resolved": member_resolved,
+        "root_resolved": protocol["resolved"],
+        "root_woken": protocol["woken"],
     }
 
 
@@ -276,9 +301,15 @@ def _valid_member_protocol(
     versions: list[dict[str, Any]],
     member_threads: Mapping[str, str],
     facts_by_version: Mapping[str, set[str]],
+    resolved_member_ids: set[str],
+    member_route_ids: set[str],
     publish_calls: tuple[object, ...],
     route_calls: tuple[object, ...],
+    update_calls: tuple[object, ...],
     evidence_calls: tuple[object, ...],
+    wait_calls: tuple[object, ...],
+    log_entries: tuple[object, ...],
+    root_thread_id: str,
     finding_line: str,
 ) -> dict[str, bool]:
     version_authors = {
@@ -288,7 +319,9 @@ def _valid_member_protocol(
     }
     publishes = [call for call in publish_calls if _completed_result(call)]
     routes = [call for call in route_calls if _completed_result(call)]
+    updates = [call for call in update_calls if _completed_result(call)]
     evidences = [call for call in evidence_calls if _completed_result(call)]
+    waits = [call for call in wait_calls if _completed_result(call)]
     for first in publishes:
         assert isinstance(first, dict)
         member = member_threads.get(str(first.get("thread_id") or ""))
@@ -301,56 +334,151 @@ def _valid_member_protocol(
         first_refs = {
             str(item) for item in first_result.get("evidence_refs") or () if item
         }
-        for root_publish in publishes:
-            assert isinstance(root_publish, dict)
-            root_result = root_publish["result"]
-            root_version = str(root_result.get("version_id") or "")
+        first_revision = _matching_log_revision(
+            log_entries,
+            kind="publish",
+            target=first_version,
+            actor=member,
+            actor_thread_id=str(first.get("thread_id") or ""),
+            wake_target="/root",
+            wake_thread_id=root_thread_id,
+            wake_rule="member_publish",
+        )
+        if not first_revision:
+            continue
+        for wait in waits:
+            assert isinstance(wait, dict)
+            wait_result = wait["result"]
             if (
-                root_result.get("event_id") != event_id
-                or not _is_root_label(version_authors.get(root_version, ""))
+                not root_thread_id
+                or wait.get("thread_id") != root_thread_id
+                or WAIT_TEAM_ACTIVITY_MARK
+                not in str(wait_result.get("message") or "")
+                or not (
+                    _seq(wait)
+                    < _seq(first)
+                    < _end_seq(first)
+                    < _end_seq(wait)
+                )
             ):
                 continue
-            for route in routes:
-                assert isinstance(route, dict)
-                route_result = route["result"]
+            for root_publish in publishes:
+                assert isinstance(root_publish, dict)
+                root_result = root_publish["result"]
+                root_version = str(root_result.get("version_id") or "")
                 if (
-                    route_result.get("event_id") != event_id
-                    or str(route_result.get("target") or "")
-                    != str(first.get("thread_id") or "")
+                    root_publish.get("thread_id") != root_thread_id
+                    or root_result.get("event_id") != event_id
+                    or not _is_root_label(version_authors.get(root_version, ""))
+                    or _end_seq(wait) >= _seq(root_publish)
                 ):
                     continue
-                for evidence in evidences:
-                    assert isinstance(evidence, dict)
-                    if evidence.get("thread_id") != first.get("thread_id"):
-                        continue
-                    if not _valid_member_evidence_call(
-                        evidence,
-                        member=member,
-                        member_fact_ids=facts_by_version.get(first_version, set())
-                        & first_refs,
-                        finding_line=finding_line,
+                root_revision = _matching_log_revision(
+                    log_entries,
+                    kind="publish",
+                    target=root_version,
+                    actor="/root",
+                    actor_thread_id=root_thread_id,
+                )
+                if root_revision <= first_revision:
+                    continue
+                for route in routes:
+                    assert isinstance(route, dict)
+                    route_result = route["result"]
+                    if (
+                        route.get("thread_id") != root_thread_id
+                        or _end_seq(root_publish) >= _seq(route)
+                        or route_result.get("event_id") != event_id
+                        or str(route_result.get("route_id") or "")
+                        not in member_route_ids
+                        or str(route_result.get("target") or "")
+                        != str(first.get("thread_id") or "")
+                        or route_result.get("delivery") != "delivered"
                     ):
                         continue
-                    for second in publishes:
-                        assert isinstance(second, dict)
-                        second_result = second["result"]
-                        second_version = str(second_result.get("version_id") or "")
+                    route_revision = _matching_log_revision(
+                        log_entries,
+                        kind="route",
+                        target=str(route_result.get("route_id") or ""),
+                        actor="/root",
+                        actor_thread_id=root_thread_id,
+                    )
+                    if route_revision <= root_revision:
+                        continue
+                    for evidence in evidences:
+                        assert isinstance(evidence, dict)
                         if (
-                            second is first
-                            or second.get("thread_id") != first.get("thread_id")
-                            or second_result.get("event_id") != event_id
-                            or version_authors.get(second_version) != member
+                            evidence.get("thread_id") != first.get("thread_id")
+                            or _end_seq(route) >= _seq(evidence)
                         ):
                             continue
-                        if (
-                            _seq(first)
-                            < _seq(root_publish)
-                            < _seq(route)
-                            < _seq(evidence)
-                            < _seq(second)
+                        if not _valid_member_evidence_call(
+                            evidence,
+                            member=member,
+                            member_fact_ids=facts_by_version.get(first_version, set())
+                            & first_refs,
+                            finding_line=finding_line,
                         ):
-                            return {"route": True, "evidence": True}
-    return {"route": False, "evidence": False}
+                            continue
+                        for second in publishes:
+                            assert isinstance(second, dict)
+                            second_result = second["result"]
+                            second_version = str(
+                                second_result.get("version_id") or ""
+                            )
+                            if (
+                                second is first
+                                or second.get("thread_id")
+                                != first.get("thread_id")
+                                or second_result.get("event_id") != event_id
+                                or version_authors.get(second_version) != member
+                                or second_version == first_version
+                                or _end_seq(evidence) >= _seq(second)
+                            ):
+                                continue
+                            second_revision = _matching_log_revision(
+                                log_entries,
+                                kind="publish",
+                                target=second_version,
+                                actor=member,
+                                actor_thread_id=str(second.get("thread_id") or ""),
+                                wake_target="/root",
+                                wake_thread_id=root_thread_id,
+                                wake_rule="member_publish",
+                            )
+                            if second_revision <= route_revision:
+                                continue
+                            for update in updates:
+                                assert isinstance(update, dict)
+                                resolved_version = _resolved_version_id(
+                                    update,
+                                    member_version_ids=resolved_member_ids,
+                                )
+                                update_revision = _matching_log_revision(
+                                    log_entries,
+                                    kind="set_root_state",
+                                    target=resolved_version or "",
+                                    actor="/root",
+                                    actor_thread_id=root_thread_id,
+                                )
+                                if (
+                                    update.get("thread_id") == root_thread_id
+                                    and resolved_version is not None
+                                    and _end_seq(second) < _seq(update)
+                                    and update_revision > second_revision
+                                ):
+                                    return {
+                                        "route": True,
+                                        "evidence": True,
+                                        "woken": True,
+                                        "resolved": True,
+                                    }
+    return {
+        "route": False,
+        "evidence": False,
+        "woken": False,
+        "resolved": False,
+    }
 
 
 def _completed_result(call: object) -> bool:
@@ -361,8 +489,77 @@ def _completed_result(call: object) -> bool:
     )
 
 
+def _resolved_version_id(
+    call: Mapping[str, Any], *, member_version_ids: set[str]
+) -> str | None:
+    arguments = call.get("arguments")
+    result = call.get("result")
+    if not isinstance(arguments, dict) or not isinstance(result, dict):
+        return None
+    targets = arguments.get("targets")
+    updated = result.get("updated")
+    if not isinstance(targets, list) or not isinstance(updated, list):
+        return None
+    requested = [item for item in targets if isinstance(item, dict)]
+    returned = [item for item in updated if isinstance(item, dict)]
+    if len(requested) != 1 or len(returned) != 1:
+        return None
+    requested_id = str(requested[0].get("version_id") or "")
+    returned_id = str(returned[0].get("version_id") or "")
+    if (
+        requested_id
+        and requested_id == returned_id
+        and requested_id in member_version_ids
+        and requested[0].get("set_root_state") == "resolved"
+        and returned[0].get("root_state") == "resolved"
+    ):
+        return requested_id
+    return None
+
+
+def _matching_log_revision(
+    entries: tuple[object, ...],
+    *,
+    kind: str,
+    target: str,
+    actor: str,
+    actor_thread_id: str,
+    wake_target: str | None = None,
+    wake_thread_id: str | None = None,
+    wake_rule: str | None = None,
+) -> int:
+    matches: list[Mapping[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if (
+            entry.get("kind") != kind
+            or str(entry.get("target") or "") != target
+            or str(entry.get("actor_thread_id") or "") != actor_thread_id
+            or str(entry.get("actor") or "") != actor
+        ):
+            continue
+        if wake_target is not None:
+            wake = entry.get("wake")
+            if not isinstance(wake, dict) or (
+                wake.get("decision") != "signalled"
+                or wake.get("target") != wake_target
+                or wake.get("target_thread_id") != wake_thread_id
+                or wake.get("rule") != wake_rule
+            ):
+                continue
+        matches.append(entry)
+    if len(matches) != 1:
+        return 0
+    return _as_int(matches[0].get("revision"))
+
+
 def _seq(call: Mapping[str, Any]) -> int:
     return _as_int(call.get("seq"))
+
+
+def _end_seq(call: Mapping[str, Any]) -> int:
+    return _as_int(call.get("end_seq"))
 
 
 def _valid_member_evidence_call(
@@ -399,28 +596,6 @@ def _best_event_index(local_flags: list[dict[str, bool]]) -> int | None:
         range(len(local_flags)),
         key=lambda index: sum(local_flags[index].values()),
     )
-
-
-def _root_was_woken(dump: Mapping[str, Any]) -> bool:
-    # The exact root thread comes from the signed rollout manifest. Checking
-    # only the returned string would let a member's successful wait impersonate
-    # Root and satisfy this predicate.
-    root_thread_id = dump.get("root_thread_id")
-    wait_calls = dump.get("wait_calls")
-    if not isinstance(root_thread_id, str) or not root_thread_id:
-        return False
-    if not isinstance(wait_calls, list):
-        return False
-    for call in wait_calls:
-        if (
-            isinstance(call, dict)
-            and call.get("thread_id") == root_thread_id
-            and call.get("status") == "completed"
-            and isinstance(call.get("result"), dict)
-            and WAIT_TEAM_ACTIVITY_MARK in str(call["result"].get("message") or "")
-        ):
-            return True
-    return False
 
 
 def _as_int(value: object) -> int:

@@ -5,18 +5,31 @@ from __future__ import annotations
 import json
 import os
 import stat
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..api_budget_proxy import ApiBudgetProxyError, PersistentBudgetLedger
-from .budget import BATCH_ID
+from ..api_budget_proxy import (
+    ApiBudgetProxyError,
+    PersistentBudgetLedger,
+    stop_reason_class,
+)
+from .budget import BATCH_ID, REQUEST_LIMIT_STOP_REASON
 from .load import NONDEGRADATION_LOCK_ID, RUNTIME_LOCK_ID, WORKFLOW_LOCK_ID
 from .store import load_archive_records
 
 
 class ResumeError(ValueError):
     """Raised when formal archive/ledger state is not a safe schedule prefix."""
+
+
+@dataclass(frozen=True)
+class ClaimedRunDisposition:
+    """One unarchived formal run's only safe resume action."""
+
+    kind: str
+    stop_reason: str | None = None
 
 
 def formal_identity(provider_identity: Mapping[str, Any]) -> dict[str, Any]:
@@ -128,30 +141,49 @@ def claimed_run_disposition(
     run_id: str,
     *,
     cap_usd: Decimal,
-    conflict_paths: tuple[Path, ...] = (),
-) -> str:
-    """Return new/reclaimed/abandon, refusing ambiguous zero-use state."""
+    verified_owned_artifacts: bool = False,
+    request_limit_retryable: bool = False,
+) -> ClaimedRunDisposition:
+    """Classify one unarchived run without erasing a durable stop decision.
+
+    Callers enumerate and validate their own exact artifacts first. This layer
+    only receives the resulting boolean, so an unknown or wrong-typed path can
+    never inherit trust from a generic path-existence check.
+    """
 
     run = ledger.snapshot()["runs"].get(run_id)
     if run is None:
-        return "new"
+        if verified_owned_artifacts:
+            raise ResumeError("run-owned artifacts have no matching ledger claim")
+        return ClaimedRunDisposition("new")
     if not isinstance(run, dict):
         raise ResumeError("formal ledger run state is invalid")
     requests = run.get("requests")
     if not isinstance(requests, dict):
         raise ResumeError("formal ledger requests state is invalid")
-    conflicts = [
-        path for path in conflict_paths if path.exists() or path.is_symlink()
-    ]
+    stop_reason = run.get("stop_reason")
+    if stop_reason is not None and (
+        not isinstance(stop_reason, str) or not stop_reason
+    ):
+        raise ResumeError("formal ledger stop reason is invalid")
+    reason_class = stop_reason_class(stop_reason)
+    if reason_class == "unknown":
+        raise ResumeError("formal ledger stop reason is unknown")
+    if reason_class == "budget" and not (
+        request_limit_retryable and stop_reason == REQUEST_LIMIT_STOP_REASON
+    ):
+        return ClaimedRunDisposition("terminal_budget", stop_reason)
     if not requests:
-        if conflicts:
-            raise ResumeError("zero-request run has conflicting artifacts")
+        if stop_reason is not None:
+            return ClaimedRunDisposition("abandon", stop_reason)
+        if verified_owned_artifacts:
+            return ClaimedRunDisposition("abandon_pristine")
         try:
             ledger.resume_pristine_run(run_id, cap_usd=cap_usd)
         except ApiBudgetProxyError as exc:
             raise ResumeError("zero-request run is not safely reclaimable") from exc
-        return "reclaimed"
-    return "abandon"
+        return ClaimedRunDisposition("reclaimed")
+    return ClaimedRunDisposition("abandon", stop_reason)
 
 
 def require_archived_runs_in_ledger(

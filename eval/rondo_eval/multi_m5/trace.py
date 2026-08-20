@@ -61,6 +61,9 @@ class NestedToolCall:
     arguments: object
     result: object
     status: str
+    #: Global rollout sequence of the matching ToolCallEnded event. Cross-thread
+    #: protocol ordering cannot be proven from the start event alone.
+    end_seq: int
     seq: int
 
 
@@ -163,7 +166,9 @@ def load_rollout_trace(bundle_dir: Path) -> RolloutTrace:
             # writers shared the file, so ordering and attribution are lost.
             raise TraceError("rollout trace event log has a duplicate sequence number")
         seen_seq.add(seq)
-        previous = max(previous, seq)
+        if seq <= previous:
+            raise TraceError("rollout trace event sequence is not strictly increasing")
+        previous = seq
         if event.get("rollout_id") != trace.rollout_id:
             raise TraceError("rollout trace event belongs to a different rollout")
         payload = event.get("payload")
@@ -178,7 +183,7 @@ def load_rollout_trace(bundle_dir: Path) -> RolloutTrace:
         elif kind == "tool_call_started":
             _absorb_started(started, payload, seq, bundle, thread_id or "")
         elif kind == "tool_call_ended":
-            _absorb_ended(trace, started, payload, bundle)
+            _absorb_ended(trace, started, payload, bundle, seq)
     if started:
         # A dispatch with no end never produced a result the run could rely on.
         # Treating it as evidence would credit a call whose outcome is unknown.
@@ -261,11 +266,14 @@ def _absorb_ended(
     started: dict[str, dict[str, Any]],
     payload: dict[str, Any],
     bundle: Path,
+    end_seq: int,
 ) -> None:
     call_id = payload.get("tool_call_id")
     if not isinstance(call_id, str) or call_id not in started:
         raise TraceError("tool call ended without a recorded start")
     opened = started.pop(call_id)
+    if end_seq <= opened["seq"]:
+        raise TraceError("tool call ended before its recorded start")
     status = payload.get("status")
     status_name = status.get("type") if isinstance(status, dict) else status
     result = _load_payload_ref(payload.get("result_payload"), bundle)
@@ -289,6 +297,7 @@ def _absorb_ended(
             arguments=opened["arguments"],
             result=value,
             status=str(status_name or "unknown"),
+            end_seq=end_seq,
             seq=opened["seq"],
         )
     )

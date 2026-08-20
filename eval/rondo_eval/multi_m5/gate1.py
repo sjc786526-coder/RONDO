@@ -53,6 +53,7 @@ from .predicates import (
 )
 from .rehearsal import CollaborationStub
 from .resume import (
+    ClaimedRunDisposition,
     ResumeError,
     claimed_run_disposition,
     formal_identity,
@@ -87,6 +88,34 @@ class Gate1Error(RuntimeError):
     """Gate 1 runner failed closed before a collaboration verdict."""
 
 
+def _gate1_owned_artifacts(target: Path) -> tuple[Path, ...]:
+    """Return exact run-owned residue, rejecting unknown or unsafe shapes."""
+
+    if not target.exists():
+        return ()
+    expected = {
+        "budget-metadata.json": "file",
+        "requests.jsonl": "file",
+        "rollout-trace": "directory",
+        "verdict.json": "file",
+    }
+    try:
+        children = tuple(target.iterdir())
+    except OSError as exc:
+        raise Gate1Error("paid gate 1 capture directory is unreadable") from exc
+    for child in children:
+        kind = expected.get(child.name)
+        if kind is None:
+            raise Gate1Error("paid gate 1 capture holds an unknown artifact")
+        if child.is_symlink():
+            raise Gate1Error("paid gate 1 capture artifact is a symlink")
+        if kind == "file" and not child.is_file():
+            raise Gate1Error("paid gate 1 capture artifact has the wrong type")
+        if kind == "directory" and not child.is_dir():
+            raise Gate1Error("paid gate 1 capture artifact has the wrong type")
+    return children
+
+
 def run_gate1_rehearsal(
     *,
     common_root: Path | None = None,
@@ -94,7 +123,7 @@ def run_gate1_rehearsal(
     persist: bool = True,
     process_runner: ProcessRunner = subprocess.run,
     capture_base: Path | None = None,
-    run_id: str = "m5-g1-rehearsal-v6",
+    run_id: str = "m5-g1-rehearsal-v6-r2",
 ) -> dict[str, Any]:
     """Offline full protocol. Not a paid gate 1 pass, even if predicates are green."""
 
@@ -213,25 +242,53 @@ def run_gate1_paid(
         target = _capture_root(root, run_id, capture_base=capture_base, persist=persist)
         if target.is_symlink() or (target.exists() and not target.is_dir()):
             raise Gate1Error("paid gate 1 capture path is unsafe")
+        owned_artifacts = _gate1_owned_artifacts(target)
         if persist:
             try:
                 disposition = claimed_run_disposition(
                     ledger,
                     run_id,
                     cap_usd=run_cap,
-                    conflict_paths=(
-                        target / "budget-metadata.json",
-                        target / "requests.jsonl",
-                        target / "rollout-trace",
-                        target / "verdict.json",
-                    ),
+                    verified_owned_artifacts=bool(owned_artifacts),
                 )
             except ResumeError as exc:
                 raise Gate1Error(str(exc)) from exc
         else:
-            disposition = "new"
-        if disposition == "abandon":
+            disposition = ClaimedRunDisposition("new")
+        if disposition.kind == "terminal_budget":
             runtime = load_runtime_identity(require_frozen=True, common_root=root)
+            stopped = archive_record(
+                evidence_kind="real_api",
+                gate=1,
+                lock_id=workflow.lock_id,
+                side=Side.RONDO,
+                product=Product.RONDO_MULTI,
+                source_commit=runtime.source_commit,
+                binary_sha256=str(runtime.codex_sha256),
+                outcome="budget_stopped",
+                counts_as_effective=False,
+                subagent_model=workflow.member_model,
+                subagent_effort=str(workflow.raw["member_effort"]),
+                extra={
+                    **resume_fields,
+                    "budget_run_id": run_id,
+                    "attempt": attempt,
+                    "ignored_evidence": [],
+                    "stop_reason": disposition.stop_reason,
+                    "stop_reason_class": "budget",
+                    "recovered_unarchived": True,
+                    "passed": False,
+                },
+            )
+            persist_archive_record(stopped, common_root=root, path=formal_file)
+            return {"record": stopped, "resumed": True}
+        if disposition.kind in {"abandon", "abandon_pristine"}:
+            runtime = load_runtime_identity(require_frozen=True, common_root=root)
+            reason = (
+                "resume:pristine_run_has_owned_artifacts"
+                if disposition.kind == "abandon_pristine"
+                else "resume:requested_run_missing_archive"
+            )
             abandoned = archive_record(
                 evidence_kind="real_api",
                 gate=1,
@@ -250,7 +307,12 @@ def run_gate1_paid(
                     "attempt": attempt,
                     "abandoned": True,
                     "ignored_evidence": [],
-                    "reasons": ["resume:requested_run_missing_archive"],
+                    "reasons": [reason],
+                    **(
+                        {"stop_reason": disposition.stop_reason}
+                        if disposition.stop_reason is not None
+                        else {}
+                    ),
                     "passed": False,
                 },
             )
@@ -259,7 +321,7 @@ def run_gate1_paid(
             continue
         if target.exists() and any(target.iterdir()):
             raise Gate1Error("paid gate 1 capture directory already holds artifacts")
-        if disposition == "new":
+        if disposition.kind == "new":
             ledger.claim_run(run_id, cap_usd=run_cap)
         metadata_path = target / "budget-metadata.json"
         metadata_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

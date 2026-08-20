@@ -426,6 +426,23 @@ class CodeModeEvidenceTest(unittest.TestCase):
             with self.assertRaises(TraceError):
                 load_rollout_trace(builder.write())
 
+    def test_unique_but_decreasing_sequence_number_is_refused(self):
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.events[0]["seq"] = 3
+            builder.event(
+                {
+                    "type": "code_cell_started",
+                    "runtime_cell_id": "cell-2",
+                    "model_visible_call_id": "call-2",
+                    "source_js": CELL_JS,
+                },
+                seq=2,
+            )
+            with self.assertRaisesRegex(TraceError, "strictly increasing"):
+                load_rollout_trace(builder.write())
+
     def test_unfinished_dispatch_is_refused(self):
         with TemporaryDirectory() as raw:
             builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
@@ -801,8 +818,50 @@ class CodeModeEvidenceTest(unittest.TestCase):
                 {
                     "thread_id": THREAD,
                     "seq": 2,
+                    "end_seq": 3,
                     "status": "completed",
                     "result": {"message": mark},
+                }
+            ],
+        )
+
+    def test_team_update_preserves_actor_arguments_result_and_completion_seq(self):
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_update",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={
+                    "type": "function",
+                    "arguments": '{"targets":[{"version_id":"v1","set_root_state":"resolved"}]}',
+                },
+                result={
+                    "updated": [{"version_id": "v1", "root_state": "resolved"}]
+                },
+            )
+            trace = load_rollout_trace(builder.write())
+            dump = collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+        self.assertEqual(
+            dump["team_update_calls"],
+            [
+                {
+                    "thread_id": THREAD,
+                    "seq": 2,
+                    "end_seq": 3,
+                    "status": "completed",
+                    "arguments": {
+                        "targets": [
+                            {"version_id": "v1", "set_root_state": "resolved"}
+                        ]
+                    },
+                    "result": {
+                        "updated": [
+                            {"version_id": "v1", "root_state": "resolved"}
+                        ]
+                    },
                 }
             ],
         )

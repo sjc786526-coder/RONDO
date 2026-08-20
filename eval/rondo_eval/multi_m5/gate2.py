@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from ..api_budget_proxy import (
     ApiBudgetProxyError,
@@ -33,6 +33,7 @@ from ..docker_supervisor import (
     DOCKER_GROWTH_WARN_BYTES,
     DockerCounter,
     DockerResourceStop,
+    DockerTaskIdentity,
     HeavyLockGuard,
     HeavyLockLease,
 )
@@ -86,6 +87,7 @@ from .schedule import (
     outcomes_by_task,
 )
 from .resume import (
+    ClaimedRunDisposition,
     ResumeError,
     claimed_run_disposition,
     load_formal_records,
@@ -203,6 +205,26 @@ class TerminalBenchSlotExecutor:
         if not self.authorize_docker:
             raise Gate2Error("Docker execution is not authorized")
         return self._run_live(request, slot=slot, attempt=attempt, run_id=run_id)
+
+    def resume_resources_present(self, slot: Slot, run_id: str) -> bool:
+        """Read the exact run label before abandoning or reclaiming its ledger row."""
+
+        if (
+            self._counter is None
+            or self._lock_guard is None
+            or self._lease is None
+            or not self._lock_guard.is_held(self._lease)
+        ):
+            raise Gate2Error("formal resume requires the held heavy lock")
+        suffix = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:12]
+        project = f"rondo-p1-{slot.side.value}-{suffix}__env"
+        try:
+            return self._counter.resume_resources_present(
+                identity=DockerTaskIdentity(run_id),
+                compose_project=project,
+            )
+        except Exception as exc:
+            raise Gate2Error("Docker resume resource probe failed") from exc
 
     def build_request(self, slot: Slot, *, attempt: int, run_id: str) -> TerminalBenchRequest:
         """Frozen-task Terminal-Bench request. No campaign id, no preflight receipt."""
@@ -551,6 +573,7 @@ def run_gate2_real(
         charge_fake_usage=False,
         evidence_kind="real_api",
         resume_fields=resume_fields,
+        resume_resource_probe=executor.resume_resources_present,
     )
 
 
@@ -651,6 +674,7 @@ def run_light_interleaved(
     contract=None,
     evidence_kind: str = "fake",
     resume_fields: Mapping[str, Any] | None = None,
+    resume_resource_probe: Callable[[Slot, str], bool] | None = None,
 ) -> dict[str, Any]:
     """Walk frozen base slots, then conditional extras. Infra is not effective."""
 
@@ -658,6 +682,8 @@ def run_light_interleaved(
         raise Gate2Error("gate 2 evidence kind is not an M-5 partition")
     if evidence_kind == "real_api" and not isinstance(executor, TerminalBenchSlotExecutor):
         raise Gate2Error("only the Terminal-Bench slot executor can produce real_api evidence")
+    if evidence_kind == "real_api" and persist and resume_resource_probe is None:
+        raise Gate2Error("formal gate 2 resume requires an exact Docker resource probe")
     if evidence_kind != "real_api" and isinstance(executor, TerminalBenchSlotExecutor):
         raise Gate2Error("the Terminal-Bench executor cannot write fake evidence")
     if evidence_kind == "real_api" and isinstance(
@@ -793,15 +819,45 @@ def run_light_interleaved(
                                 ledger,
                                 run_id,
                                 cap_usd=gate2_run_cap_usd(loaded),
-                                conflict_paths=_gate2_conflict_paths(
-                                    Path(common_root), slot, run_id
+                                verified_owned_artifacts=bool(
+                                    _gate2_owned_artifacts(
+                                        Path(common_root), slot, run_id
+                                    )
                                 ),
+                                request_limit_retryable=True,
                             )
                             if persist
-                            else "new"
+                            else ClaimedRunDisposition("new")
                         )
-                        if disposition == "abandon":
+                        if (
+                            resume_resource_probe is not None
+                            and resume_resource_probe(slot, run_id)
+                        ):
+                            raise Gate2Error(
+                                "unarchived gate 2 run still owns Docker resources"
+                            )
+                        if disposition.kind == "terminal_budget":
+                            stopped = True
+                            stop_reason = str(
+                                disposition.stop_reason or "budget_stopped"
+                            )
+                            return emit(
+                                outcome=RunOutcome.BUDGET_STOPPED.value,
+                                counts_as_effective=False,
+                                extra={
+                                    "attempt": attempt,
+                                    "stop_reason": stop_reason,
+                                    "stop_reason_class": "budget",
+                                    "recovered_unarchived": True,
+                                },
+                            )
+                        if disposition.kind in {"abandon", "abandon_pristine"}:
                             infra_used += 1
+                            reason = (
+                                "resume:pristine_run_has_owned_artifacts"
+                                if disposition.kind == "abandon_pristine"
+                                else "resume:requested_run_missing_archive"
+                            )
                             emit(
                                 outcome=RunOutcome.INFRA_FAILED.value,
                                 counts_as_effective=False,
@@ -809,7 +865,12 @@ def run_light_interleaved(
                                     "attempt": attempt,
                                     "infra_used": infra_used,
                                     "abandoned": True,
-                                    "reason": "resume:requested_run_missing_archive",
+                                    "reason": reason,
+                                    **(
+                                        {"stop_reason": disposition.stop_reason}
+                                        if disposition.stop_reason is not None
+                                        else {}
+                                    ),
                                 },
                             )
                             if infra_used >= loaded.max_infra_attempts_total:
@@ -819,7 +880,7 @@ def run_light_interleaved(
                             if attempt == loaded.max_slot_attempts:
                                 return produced
                             continue
-                        if disposition == "new":
+                        if disposition.kind == "new":
                             ledger.claim_run(run_id, cap_usd=gate2_run_cap_usd(loaded))
                     else:
                         ledger.ensure_run(run_id, cap_usd=None)
@@ -1401,3 +1462,30 @@ def _gate2_conflict_paths(common_root: Path, slot: Slot, run_id: str) -> tuple[P
         work / f"{name}.compose.yaml",
         work / f"{name}.provider-auth-json",
     )
+
+
+def _gate2_owned_artifacts(
+    common_root: Path, slot: Slot, run_id: str
+) -> tuple[Path, ...]:
+    """Recognise deterministic pre-request residue without reading or deleting it."""
+
+    paths = _gate2_conflict_paths(common_root, slot, run_id)
+    suffix = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:12]
+    trial_dir = paths[1].parent / "trials" / f"rondo-p1-{slot.side.value}-{suffix}"
+    if trial_dir.exists() or trial_dir.is_symlink():
+        raise ResumeError(
+            "unarchived gate 2 run reached Harbor and needs supervised recovery"
+        )
+    present: list[Path] = []
+    for index, path in enumerate(paths):
+        if not (path.exists() or path.is_symlink()):
+            continue
+        if path.is_symlink():
+            raise ResumeError("gate 2 run-owned artifact is a symlink")
+        expected_directory = index == 1
+        if expected_directory and not path.is_dir():
+            raise ResumeError("gate 2 run-owned artifact has the wrong type")
+        if not expected_directory and not path.is_file():
+            raise ResumeError("gate 2 run-owned artifact has the wrong type")
+        present.append(path)
+    return tuple(present)
