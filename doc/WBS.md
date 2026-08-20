@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 第一期已完成并合入 `main`；第二期进入两个并行工程包，后置主动委派收益测评）
+最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 第二期已排期；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -11,6 +11,7 @@
 上游基线冻结为 Codex CLI `v0.147.0`（`rust-v0.147.0`，commit
 `be6e8eac029b183056b7e4402879f15d2c85f61b`）；机器事实源为
 `mydev/codex-rs/core/upstream-source-baseline.toml`。
+后续上游基线升级已经列为待办，但目标版本只在任务启动时按当时的目标稳定版本冻结，不预写为当前已发布版本。
 
 项目由两条并列产品线组成：**RONDO Local**（`mydev/`，承载方向 1、2）与
 **RONDO Multi**（`multidev/`，产品基线已完成并合入 `main`，承载方向 3）。两者地位相同，结构见 §4。
@@ -20,7 +21,7 @@
 | P0 共享地基 | S1 审批模型覆盖与 S2 `E_final` 证据捕获已完成，开关默认关闭。S1 只覆盖模型与 effort，不覆盖 provider。 |
 | 测试基线 | Plan 004 完成对旧 81 项失败的分批整改后，最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行 14,092 项：14,060 通过、31 失败、1 超时，Nextest 另列 23 项 ignored；P0 仍以定向验收收口。此后未重跑全 workspace，不能把该历史快照表述为当前全绿或当前失败复现。 |
 | P1 / M1 | B1、B2、B3 与 M1 已完成；冻结 Codex 与 RONDO 已在同一 TB 2.1 任务上完成真实端到端并归档。 |
-| P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。E-B8 公平比较设施已闭合（campaign schema v7），已通过 pure/fake/loopback 与无 API synthetic Docker 全 catalog 验收；尚无正式 v7 identity，也未跑新 campaign。E-A（A1—A7）随方向 1 一并挂起，不再作为交付项。 |
+| P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。E-B8 公平比较设施已闭合（campaign schema v7），已通过 pure/fake/loopback 与无 API synthetic Docker 全 catalog 验收；尚无正式 v7 identity，也未跑新 campaign。首次最小 v7 正式 canary 已确认为待办，但不排期，项目顺序不早于 Multi 第二期三个任务完成。E-A（A1—A7）随方向 1 一并挂起。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
@@ -99,9 +100,16 @@
 当前代码并行仅指 Multi 第二期 A/B 两个工程包；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源
 门禁全局串行。Local 没有已排期的下一工作包，方向 1 继续挂起。
 
-### 关键阶段的真实 API 检查
+### 已确认待办（不排期）
 
-在关键阶段用小规模、预算固定、尽量交错的真实 API 测评检查“不明显退化”，每次单独申请（§6）。
+- **方向 0 首次 v7 正式 canary**：已确认至少执行一次，但项目顺序不早于 Multi 第二期 A/B/C 全部完成；这是排期与
+  API/Docker 资源边界，不是 Multi 对方向 0 的产品或设施依赖。方向 0 比较 `mydev/` 与同基线冻结 Codex，
+  Multi 的主动委派重跑不能充当它的 pilot，也不能替代 Local 公平基线。默认只跑冻结 10 个 canary 的最小正式
+  campaign，按 v7 合同执行 A/A、交错基础 A/B 和差异题条件加跑；不恢复 61 个 validation、18 个 holdout，
+  也不预设第二轮完整 campaign。若 Local 仍长期挂起，可以等到下一次 Local 优化临近时再跑，减少服务端漂移。
+- **上游 Codex 基线升级**：作为横跨 `mydev/` 与 `multidev/` 的独立任务保留，不排期、不写死目标版本。
+  启动时再冻结当时采用的上游版本与 commit，审查上游差异并分别合入两套产品，更新机器事实、构建身份与受影响测试；
+  不混入普通功能任务。若它安排在 v7 canary 之前，campaign 必须等升级完成后在同一新基线上比较两侧。
 
 ### 挂起项（不排期）
 
@@ -113,7 +121,7 @@
 
 | 编号 | 方向 | 产品线 | 状态 | 解锁条件 |
 |---|---|---|---|---|
-| 0 | 量化测评基准 | 共享 | 公平比较设施已闭合，待新 campaign 授权 | 无外部阻塞；E-A 挂起 |
+| 0 | 量化测评基准 | Local | 公平比较设施已闭合；首次最小 v7 正式 canary 已确认、不排期 | 项目顺序不早于 Multi 第二期完成；执行时另获 API/Docker 授权；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
 | 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一期已完成；第二期两个工程包待实施 | 序列性质测试与 Team Lens 并行；主动委派收益测评依赖二者完成及单独授权 |
@@ -121,6 +129,8 @@
 - **Local 与 Multi 地位相同**。Local 已收口，Multi 第一期已完成、第二期是当前优先路线；先后只反映路径长度，
   不代表优先级高低。工程任务可以并行，重型任务仍因资源约束全局串行。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
+- Multi 三个任务验证 `multidev/` 的正确性、可观测性与主动协作；方向 0 面向 `mydev/` 的内核/
+  行为优化基线。二者只共享排期、API 预算与 Docker/构建资源串行关系，结果不能互相替代。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
 
 ## 4. 仓库与产品线结构
@@ -202,6 +212,8 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Multi 二期 A | Team State 序列性质测试：在现有 Rust 测试体系内探索跨功能状态组合 | 测试 | 待实施，与二期 B 并行 |
 | Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 待实施，与二期 A 并行 |
 | Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 待 A、B 完成并另获真实 API 授权 |
+| 方向 0 首次 v7 正式 canary | 10 个 canary 的 Local/冻结 Codex 公平基线；条件加跑，不扩到 validation/holdout | 测评 | 已确认待办，不排期；不早于 Multi 第二期完成 |
+| 共享上游基线升级 | 选择任务启动时的目标上游版本，审查差异并同步两套产品与机器事实 | 工程 | 已确认待办，不排期；目标版本不预写死 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
 （设施交付物，非里程碑），“方向 1 解锁”部分随方向 1 挂起；M5 同样随方向 1 挂起。
@@ -226,8 +238,9 @@ pairwise-max `σ` 等事后放宽办法：
 `doc/WBS/multi-agent-trusted-evidence.md`）。
 
 v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两轮”的历史公式；它的机械结果保持不改写，
-但不作为新 campaign 的默认重复合同。新 campaign（schema v7）必须在 lock 中预冻结重复数与聚合公式：
-每题每侧总观测数为奇数且不少于 3（基础 A/B 轮算其中一次），聚合固定为严格多数。
+但不作为新 campaign 的默认重复合同。新 campaign（schema v7）必须在 lock 中预冻结差异题的重复数与聚合公式：
+被跨侧差异触发的题每侧总观测数为奇数且不少于 3（基础 A/B 轮算其中一次），聚合固定为严格多数；
+未触发题保持基础单次 A/B 观测。
 若 catalog、请求冻结分区、harness、deadline、顺序、重复或聚合规则不对称，设施直接 blocked、不计算能力归因；
 若 `σ` 接近任务总数，应回到 B4 重选 canary，而不是放宽判据。
 
