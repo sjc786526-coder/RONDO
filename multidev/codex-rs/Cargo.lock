@@ -4175,6 +4175,7 @@ dependencies = [
  "codex-protocol",
  "codex-utils-output-truncation",
  "pretty_assertions",
+ "proptest",
  "serde",
  "tokio",
  "tracing",

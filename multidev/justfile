@@ -102,6 +102,15 @@ test *args:
 test *args:
     $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; $env:NEXTEST_PROFILE = "local"; cargo nextest run --no-fail-fast @($args | Select-Object -Skip 1)
 
+# Run the bounded Team State sequence property with a reproducible seed.
+[unix]
+team-state-sequence-properties seed="20260820047":
+    TEAM_STATE_SEQUENCE_SEED="$1" RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ watchdog }} cargo nextest run --no-fail-fast -p codex-team-state --lib --run-ignored only -E 'test(team_state_sequence_properties)'
+
+[windows]
+team-state-sequence-properties seed="20260820047":
+    $env:TEAM_STATE_SEQUENCE_SEED = @($args | Select-Object -Skip 1)[0]; $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; $env:NEXTEST_PROFILE = "local"; cargo nextest run --no-fail-fast -p codex-team-state --lib --run-ignored only -E 'test(team_state_sequence_properties)'
+
 # Run Nextest with the checksum-verified Codex V8 sandbox artifacts while
 # retaining the same build lock, watchdog, and JUnit behavior as `just test`.
 [unix]

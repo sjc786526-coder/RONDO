@@ -196,36 +196,36 @@ retry 与 wake 的跨功能组合，验证这些能力共同作用时仍满足�
 
 ### 已完成
 
-- 已核对根 `AGENTS.md`、`multidev/AGENTS.md`、README、当前 WBS、Multi 子 WBS、Plan 038/039/043/044 相关合同、
-  Team State live source/tests、`multidev/justfile` 与构建看门狗。
-- 已确认共同基线为本地 `main @ 7ba7eb65e1105f608730fc716eb4e5958b94af3d`，主工作区无未提交修改。
-- 已创建专用工作树 `.claude/worktrees/047-team-state-sequence-properties` 与本地分支
-  `worktree-047-team-state-sequence-properties`。
-- 任务 A 没有必须在主工作区原位实施的 tracked/ignored 资产；测试 target 与 watchdog 指标均应留在 047 工作树自己的
-  git-ignored 路径。主工作区只发生了创建 worktree 所必需的 `.git/worktrees` 注册与 ignored `.claude/worktrees/047-*`
-  挂载。
-- 已冻结本任务写集、性质测试规模、操作集合/权重、关键不变量、固定 seed、主动入口和 A/B 并行边界。
+- 已复核任务合同、共同基线、047 专用工作树及 A/B 冻结写集；实现期间未读取密钥文件、未触碰任务 B 或共享规划写集。
+- 已增加默认 ignored 的有限序列性质测试：固定 Root + 两名成员、11 类冻结权重、薄 reference state、动态 canonical
+  selector、64 cases / 最多 32 步 / 默认 seed `20260820047`、固定核心覆盖和失败诊断。
+- reference 独立预测 revision、event/version/route ordinal 与归属、双生命周期、三方可见/active/route 视图和 participant
+  wake；精确 publish/route retry 校验原 canonical identity、当前 route 状态、无 revision/wake 增量。
+- 已增加两项默认 invariant checker 自测及同 seed 符号候选确定性自测；`not_applicable` 在不调用产品 API 的同时核对
+  reference 与完整公开观察保持不变。
+- 已增加唯一主动 `just` 入口，并以最小 `proptest 1.9.0` std-only dev-dependency 复用既有锁定依赖。
+- 已用临时 Bazelisk/Bazel 9.0.0 运行锁更新与锁一致性检查；`MODULE.bazel.lock` 无实际差异，Cargo 锁只新增
+  `codex-team-state -> proptest` 直接依赖边。
+- 最终格式、fmt-check、定向 Clippy、默认 crate 测试、默认主动性质测试及显式 seed `424242` 复现均通过；默认门禁为
+  `128 passed, 1 skipped`，主动入口为唯一目标测试 `1 passed`。未发现 Team State 产品缺陷。
 
 ### 当前工作
 
-- ExecPlan 已完成复核并冻结，等待执行者在本工作树内实现。
+- 实现与本地门禁已完成，正在审查 diff、写完成日志并准备本地提交；提交后按用户附加要求进行独立正确性审查。
 
 ### 本任务剩余步骤
 
-- 实现默认 ignored 的序列性质测试、薄 reference state、有效引用解析和 invariant checker 自测。
-- 增加主动 `just` 入口；如需新测试依赖，同步最小 Cargo/Bazel 元数据。
-- 运行格式、定向 lint、默认 Team State 门禁与冻结主动入口；对小问题自主窄修并重跑。
-- 若发现真实产品缺陷，补普通确定性回归、窄修并复验。
-- 审查 diff/产物/各 worktree 状态，更新本节与关键决策，写精炼 agent log，只提交当前工作树分支。
+- 审查完整 diff、意外产物和各 worktree 状态，只 stage 冻结写集并提交当前工作树分支。
+- 由干净上下文独立子智能体只按正确性/功能性审查提交；确认真实的问题则窄修、复验、补交并交回同一审查者，直至通过。
+- 独立审查结束后同步本节和完成日志，确认最终提交与工作树状态；不合并、不推送。
 
 ### 阻塞项
 
-- 当前无代码阻塞。若选择新增 Rust 直接依赖，本机缺少 Bazel 可能阻塞 `MODULE.bazel.lock` 的正式生成核验；按 §3.3 处理，
-  不提前把它表述为失败或通过。
+- 当前无阻塞。
 
 ### 当前验收状态
 
-- 仅完成计划与工作树准备；尚未实现、尚未运行 Cargo lint/test，不得表述为任务 A 已验收。
+- 任务合同内实现与本地门禁已满足；尚未完成本地提交及用户要求的独立审查闭环，不得表述为最终验收通过。
 
 ### 交接边界
 
@@ -244,3 +244,6 @@ retry 与 wake 的跨功能组合，验证这些能力共同作用时仍满足�
 | 004 | availability/retire 首版后移 | 它们会引入外部 epoch/overlay 轴；先保持 reference model 薄且审查体量可控 | 任务范围 | 已采纳 |
 | 005 | 新依赖不是硬要求；若采用成熟库更简洁，则同步最小 Cargo/Bazel 元数据，不为回避依赖自建通用框架 | 兼顾实现自治、维护成本和当前 Bazel 可用性事实 | 依赖与构建 | 已采纳 |
 | 006 | 本任务只提交 A 工作树，不同步 WBS、不合并、不推送 | A/B 并行开发，共享规划文档与集成由最终批次统一处理 | 并行与交付 | 已采纳 |
+| 007 | 采用已锁定的 `proptest 1.9.0`，只启用 `std`，关闭默认失败持久化 | 直接获得成熟生成与 shrink，Cargo 锁只增加一条 crate 直接依赖边，不引入 corpus/runner | 测试依赖与性质入口 | 已采纳 |
+| 008 | 用三方公开 history/snapshot/wake 观察对比薄 reference；retry 请求记录留在 driver，不进入 reference | 保持 reference 只表达可观察状态，同时能精确复放原请求身份并校验 canonical 结果 | reference/driver | 已采纳 |
+| 009 | 用项目临时目录中的 Bazelisk 1.29.0 启动冻结 Bazel 9.0.0 完成锁核验，不全局安装工具 | 当前宿主未预装 Bazel，但普通临时依赖下载已授权；可靠核验后锁文件无需修改 | 构建元数据 | 已采纳 |
