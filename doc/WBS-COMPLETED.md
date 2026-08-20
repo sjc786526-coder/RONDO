@@ -1434,3 +1434,36 @@ M-5 正式结果如下：
 小样本内没有观察到稳定单向退化。它没有证明自然真实任务中的 Root 会主动 `spawn_agent`，也没有证明
 RONDO 相对冻结 Codex 带来质量、速度、token 或成本收益。该缺口由当前 Multi 第二期的 Team Lens 与后置主动
 委派收益测评承接；当前路线只在 `doc/WBS.md` 与 `doc/WBS/multi-agent-trusted-evidence.md` 维护。
+
+## RONDO Multi 第二期 A/B 工程包收口（Plan 047/048，2026-08-20）
+
+**状态**：两个并行工程包均已完成实现、独立验收和统一整合。A/B 从同一 `main@7ba7eb65…` 基线开发，写集没有
+重叠；最终分别通过 merge commit `df74082`、`59fab50` 保留完整提交历史并合入 `main`。执行细节与审查往返留在
+对应冻结 plan 和 agent log；当前后续路线只在 WBS 维护。
+
+### Plan 047：Team State 序列性质测试
+
+- 在现有 `codex-team-state` crate 内加入默认 ignored 的有限性质测试、薄 reference state、固定 seed 和唯一主动
+  `just team-state-sequence-properties` 入口；核心操作覆盖 publish、producer/Root 双生命周期、route、delivery、
+  retry 与 wake，未新建 crate、runner、corpus 或通用 fuzz 设施。
+- 默认合同为 64 cases、每 case 最多 32 个候选步骤、默认 seed `20260820047`。动态 selector 始终从当前 canonical
+  绑定解析；不适用变更操作不会改变 reference/store/revision/wake，只读观察用于核对前后状态。
+- 最终验收：默认门禁 128 passed、1 skipped，性质测试保持 ignored；主动入口 1 passed。invariant checker 自测、
+  固定 seed 复现、依赖/锁一致性和定向 lint 均已有记录。未发现 Team State 产品缺陷，产品语义代码未修改。
+- 实现提交 `b0a8db079a642a5ea965b2ff789c5460359c5eff`；最终验收报告提交
+  `7eaa8f28ce7d9575ca65a4a793fe88b525b9cec6`，报告为
+  `agent_log/2026-08-20-094034-plan047-final-acceptance-review.md`。
+
+### Plan 048：RONDO Team Lens
+
+- 交付本地离线 Team Lens：同一消费者按显式产品身份读取冻结 Codex/RONDO 原生 v1 rollout bundle，白名单归约为
+  确定性、body-free 的 `team_view.json`；静态报告器只消费该合同并生成自包含、无需网络的单文件 HTML。
+- 四态 capability、原生 reader 必需错误、Agent/turn/inference/tool/terminal/interaction 语义、Team
+  Event/Version/Route/Fact 关系和统一时序均有定向回归。Codex 的 Team State 诚实标为 `not_applicable`；报告不复制
+  prompt/response、命令输出、Fact 正文或 raw trace 路径。
+- 最终验收：25/25 定向测试通过；24/24 个代表性 RONDO bundle 均可归约，JSON/HTML 重复生成字节一致；CLI、内嵌
+  JavaScript、body-free 与降级语义检查通过。冻结 Codex 侧采用结构忠实且明确标记的合成原生 fixture。
+- 零 hook 证据足够，因此没有修改 Rust runtime、Team State 或 trace writer，也没有新增前端 toolchain、Docker、API、
+  模型或全量测试。关键语义返修提交 `78736a7ec2c6d37fdad74ae30fdbf682e4801ec1`；最终验收报告提交
+  `7e8ef8ee80a492e0fcc49fe3467d5e75d5812505`，报告为
+  `agent_log/2026-08-20-110755-plan048-team-lens-reacceptance-review.md`。

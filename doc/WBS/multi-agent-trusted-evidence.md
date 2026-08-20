@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 当前进入第二期
+第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ 当前下一包：C 的无费用准备阶段
 
 ## 定位
 
@@ -99,10 +99,14 @@ mailbox、wait/resume/interrupt、工具执行、sandbox 与审批。本产品�
 
 ## 第二期：稳定性、可观测性与主动委派收益
 
-第二期由两个**并行工程包**和一个**后置测评包**组成。前两个任务没有逻辑依赖，分别增强正确性保障与团队行为
-可观测性；后置测评必须等待二者完成，不能混成一个过大的实施任务。
+第二期由两个**并行工程包**和一个**后置测评包**组成。A/B 已分别完成并通过验收；当前依赖门已满足，下一包是 C。
+C 自身是一项完整任务，但按“无费用准备 → 单独授权后的付费执行”顺序分成两个阶段，不能把未验证设施直接带入付费运行。
 
 ### 并行工程包 A：Team State 序列性质测试
+
+**状态：已完成（Plan 047）。** 默认 Team State 门禁 128 passed、1 skipped，新增性质测试保持 ignored；主动入口
+1 passed。固定 seed、有限 case/步数、薄 reference state 与 invariant checker 已落地，未发现产品缺陷、未改产品语义。
+详细实现与验收证据只在冻结 plan、agent log 和 `doc/WBS-COMPLETED.md` 保留。
 
 **目标**：在现有 `codex-team-state` 测试体系内，探索 publish、双生命周期、route、delivery、retry 与 wake
 的跨功能组合，补充固定产品纵切不容易覆盖的操作序列。availability/retire 作为首选扩展轴；若首版体量接近上限，
@@ -135,6 +139,10 @@ mailbox、wait/resume/interrupt、工具执行、sandbox 与审批。本产品�
 - 精确依赖、锁文件、case 数、操作权重、命令名和生成策略在实施 plan 中根据 live workspace 冻结，不在 WBS 写死。
 
 ### 并行工程包 B：RONDO Team Lens
+
+**状态：已完成（Plan 048，零 hook）。** 25 项定向测试通过；24 个代表性 RONDO bundle 可归约且 JSON/HTML 重复生成
+字节一致，冻结 Codex 侧使用结构忠实并明确标记的合成原生 fixture。实现没有修改 Rust runtime、Team State 或原生
+trace writer。详细实现与验收证据只在冻结 plan、agent log 和 `doc/WBS-COMPLETED.md` 保留。
 
 **定位**：Team Lens 是 Codex 原生 rollout trace 的本地离线 reducer/viewer，输出 Team Report。它不是第二套
 tracing facility、benchmark、审计平台或常开 telemetry，也不参与 runtime 调度。同一个 Team Lens 任务分成
@@ -192,8 +200,29 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 
 ### 后置测评包 C：主动委派收益对比
 
-**依赖**：A、B 均完成，尤其先冻结 Team Lens 的跨产品共有字段与 RONDO 专有字段；真实 API、Docker、任务范围、
-轮数与预算另行授权。
+**依赖**：A、B 均已完成，Team Lens 的跨产品共有字段与 RONDO 专有字段已可用。C 是一个计划与任务合同，顺序分为
+阶段 A 和阶段 B；当前只授权阶段 A，阶段 B 的真实 API 开始动作仍须单独明确授权。
+
+#### 阶段 A：无费用准备（当前下一任务）
+
+- 冻结自然任务集、共同 proactive policy、模型/effort、成员配置、并发、deadline、外部判定、成对顺序、结果分类、
+  Team Lens 产物和阶段 B 的费用/恢复边界；不得借准备阶段偷偷运行付费样本。
+- 完成共享编排、身份绑定、trace/Team Lens 接线、body-free 归档、账本/resume 与结果聚合的最小设施；优先复用已有
+  Multi M-5 和 eval 组件，不建立第二套 runner、trace 或重型 benchmark 平台。
+- 用 pure/fake/loopback/replay、合成 fixture 和最小无费用彩排验证配置错误、部分运行、resume、确定性、降级和报告生成，
+  使可预见的设施问题在阶段 B 前暴露。只跑受影响模块的必要门禁；任何重型资源仍按仓库全局串行规则执行。
+- 阶段 A 的退出条件必须给出明确的 paid-ready/blocked 结论和阶段 B 启动清单，但不得创建“已开始付费”的 receipt、
+  请求或结果身份。付费 provider 连通性若无法在零费用条件下证明，应诚实留作阶段 B 首个小型 activation pilot 的门。
+
+#### 阶段 B：付费测评与观测（尚未授权）
+
+- 获得明确开始授权后，先运行小规模 activation pilot，确认两侧收到冻结策略、原生 trace 可读且至少形成可解释的主动
+  委派观测，再进入冻结的成对任务；不为追求激活临时强制 spawn 或改写自然任务。
+- 阶段 A 应预留宽容的自主修正与恢复空间：可恢复的 provider/网络/归档/编排问题可在不改变公平合同的前提下修复、
+  resume 和重跑，不采用过窄的单错即停或每类极小重试上限。费用仍须在阶段 A 冻结为宽松但有限、且不高于可用余额的
+  总边界；未知用量、合同漂移、数据边界或不可安全恢复的状态继续 fail-closed。
+- 阶段 B 完成后分别报告主动委派激活、外部任务结果和时间/token/工具/文件操作等成本；Team Lens 是描述性观测，
+  不能单独推出因果收益。
 
 **公平合同**：
 
@@ -218,10 +247,10 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 
 ## 并行与交接边界
 
-- A、B 从同一个第一期收口基线创建独立 worktree，同时开发。
-- A 独占 Rust 测试依赖锁、主动测试入口等共享写集；B 首批不碰 Team State crate、Rust 依赖锁或 trace runtime。
-- 两项代码工作可并行；重型 Cargo 仍通过全局共享 build-lock 串行。最终共享 WBS 由一个整合任务同步。
-- C 只在 A、B 完成后开始；不得为赶测评而把未证实需要的 Team Lens hook 或新测试基础设施塞进前两项。
+- A、B 已从同一基线在独立 worktree 完成并统一整合；其历史写集边界与验收只保留在各自冻结 plan。
+- C 的阶段 A/B 属于同一任务合同并严格串行；阶段 A 退出前不得启动阶段 B，阶段 B 未获明确授权不得产生真实 API 费用。
+- C 若分派多个执行者，必须冻结各自 worktree/写集并明确彼此存在；重型 Cargo、Docker、真实本地模型与付费 API
+  继续按仓库资源门禁全局串行。
 
 ## 候选池（不排期，由真实运行证据触发）
 

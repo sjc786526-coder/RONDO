@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 第二期已排期；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
+最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 第二期 A/B 已完成，后置 C 的无费用准备阶段成为下一包；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -26,7 +26,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期已经完成并随 `a220b774…` 合入、推送 `main`：明确要求委派时，真实协作链可达；冻结十题的 20 个基础有效 run 未观察到稳定单向退化。该结论不证明真实任务中会主动委派，也不证明质量或性能提升。第二期先并行补 Team State 序列性质测试与 Team Lens，随后再做主动委派收益对比。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期已经完成并随 `a220b774…` 合入、推送 `main`：明确要求委派时，真实协作链可达；冻结十题的 20 个基础有效 run 未观察到稳定单向退化。第二期 A/B 也已完成：Team State 有默认 ignored 的有限序列性质测试，Team Lens 能从原生 trace 确定性生成 body-free Team View/静态报告。下一包是主动委派收益对比；当前只授权无费用准备，不证明或提前执行付费结论。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -34,9 +34,10 @@
 ## 2. 下一工作包与顺序
 
 工作包 1、工作包 2（Plan 022）均已完成；Local 已收口且方向 1 挂起。**当前执行焦点是 RONDO Multi
-第二期**：两个工程包并行，主动委派收益测评后置。下方保留各方向的当前状态与边界。
+第二期后置包 C**：A/B 已完成，下一任务先做不产生 API 费用的准备和彩排；正式付费测评仍须单独明确开始授权。
+下方保留各方向的当前状态与边界。
 
-### 当前路线：Multi 第二期 A/B 并行
+### 当前路线：Multi 第二期 C 无费用准备
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
 - **3b RONDO Local**：**exact-token 普查（WP3b-A2）已完成并闭合**。
@@ -81,26 +82,18 @@
   人判结论为**保留为实验**。方向 2 因此没有已排期的下一工作包；若将来要投入真实使用，必须先按本页
   §6 单独立项，建立面向生产的正确性与安全验收，并解决“合成集线索化”与“holdout 单侧标签”两项证据缺口。
   结论详情见 `doc/WBS/local-approval-model.md`。
-- **3c RONDO Multi**：第一期已完成、归档并合入 `main`；执行过程、正式数字与验收证据只保留在
-  `doc/WBS-COMPLETED.md`、冻结 plan、agent log 和结果资产中。第二期按下列顺序推进：
-  - **并行包 A — Team State 序列性质测试**：在现有 `codex-team-state` 测试体系内增加一个默认 ignored 的
-    property test、薄参考状态与主动入口，复用既有 fixture 和共享 build-lock；WBS 只约束 shrink 后引用有效、
-    双方命中同一对象和不适用步骤不改变状态，不预定具体 bootstrap 或绑定表实现。availability/retire 是体量超限时
-    优先后移的扩展轴；不新建 crate、runner、corpus 或通用 fuzz 基础设施。
-  - **并行包 B — Team Lens**：同一任务分两阶段完成。阶段 1 只消费 Codex 原生 rollout trace，形成字段缺口表与
-    确定性的 body-free `team_view.json`；阶段 2 只消费该数据合同，生成可直接打开、用于汇报的单文件
-    `team_report.html`。先零 hook；只有阶段 1 证明核心视图缺少必要 RONDO 语义时，才在同一任务内加入一个窄 hook
-    子批。始终不修改冻结 Codex，不新建第二套 trace writer、在线服务或前端工程体系。
-  - **后置包 C — 主动委派收益对比**：A、B 完成后再冻结任务、轮数与预算。冻结 Codex 与 RONDO 都启用同一
-    Multi-Agent V2 工具面，使用同一模型、`medium` effort、同一非任务特化的 proactive developer instruction、
-    同一并发上限和成员模型、同一自然任务 prompt；只有 RONDO 额外启用 Team State。两侧均开启原生 rollout
-    trace，Root 自主决定是否、何时及如何委派。冻结 Codex 不改源码。
-    该测评分别报告主动委派是否发生、任务结果和时间/token/工具/文件操作等成本；Team Lens 的行为记录是描述性
-    证据，不能单独证明因果收益。真实 API 执行仍须按 §6 单独授权。
-  A、B 的代码工作可并行，但写集和共享文件归属须在各自 plan 中冻结；重型构建仍通过同一共享锁串行。
+- **3c RONDO Multi**：第一期已完成、归档并合入 `main`；第二期当前状态如下：
+  - **包 A — Team State 序列性质测试：已完成。** 现有 crate 内已有默认 ignored、固定 seed、有限规模的性质测试与
+    主动入口；它覆盖 publish、双生命周期、route、delivery、retry 与 wake，没有改变产品语义。
+  - **包 B — Team Lens：已完成。** 同一离线消费者可读取冻结 Codex 与 RONDO 原生 trace，确定性输出 body-free
+    `team_view.json`，再单向生成离线单文件 `team_report.html`；代表性证据支持保持零 runtime hook。
+  - **后置包 C — 主动委派收益对比：下一任务。** 这是一个统一任务，顺序分成两阶段：阶段 A 完成任务/运行合同冻结、
+    无费用设施接线、轻量测试与彩排，优先在花费前暴露设施问题；阶段 B 才启动真实付费成对测评。当前授权只覆盖
+    阶段 A，阶段 B 必须再次获得明确开始授权。阶段 B 的计划应给可恢复基础设施问题足够的自主修正与重跑槽位，并采用
+    宽松但有限的总费用边界，不用过窄的单错即停或重试上限阻断可修复问题。
 
-当前代码并行仅指 Multi 第二期 A/B 两个工程包；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源
-门禁全局串行。Local 没有已排期的下一工作包，方向 1 继续挂起。
+包 C 的公平合同、判读边界和两阶段细节见 Multi 子 WBS。重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源
+门禁全局串行；阶段 A 不得产生真实 API 费用。Local 没有已排期的下一工作包，方向 1 继续挂起。
 
 ### 已确认待办（不排期）
 
@@ -126,7 +119,7 @@
 | 0 | 量化测评基准 | Local | 公平比较设施已闭合；首次最小 v7 正式 canary 已确认、不排期 | 项目顺序不早于 Multi 第二期完成；执行时另获 API/Docker 授权；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一期已完成；第二期两个工程包待实施 | 序列性质测试与 Team Lens 并行；主动委派收益测评依赖二者完成及单独授权 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一期及第二期 A/B 已完成；C 的无费用准备为下一包 | 阶段 A 当前可启动；阶段 B 真实 API 测评须单独明确授权 |
 
 - **Local 与 Multi 地位相同**。Local 已收口，Multi 第一期已完成、第二期是当前优先路线；先后只反映路径长度，
   不代表优先级高低。工程任务可以并行，重型任务仍因资源约束全局串行。
@@ -203,7 +196,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | 第一期已完成并合入；第二期已排期、待实施：两个并行工程包，后置主动委派收益测评 |
+| P5 | RONDO Multi 产品线 | 第一期及第二期 A/B 已完成并合入；C 的无费用准备为下一包，付费执行未授权 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -211,9 +204,9 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | M1 | 冻结 Codex 与 RONDO 同一 TB 2.1 任务端到端可归档 | 工程验收 | 已完成 |
 | Local M3 | 12k model-backed、结构化输出、真实 `E_final`、fail-closed 与配置切换形成真实本地审批闭环 | 工程验收 | 已完成 |
 | Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 已完成（2026-08-16）：synthetic 130 与 holdout 16 分区盲评并解盲，人判为保留为实验 |
-| Multi 二期 A | Team State 序列性质测试：在现有 Rust 测试体系内探索跨功能状态组合 | 测试 | 待实施，与二期 B 并行 |
-| Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 待实施，与二期 A 并行 |
-| Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 待 A、B 完成并另获真实 API 授权 |
+| Multi 二期 A | Team State 序列性质测试：在现有 Rust 测试体系内探索跨功能状态组合 | 测试 | 已完成（Plan 047） |
+| Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 已完成（Plan 048，零 hook） |
+| Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 下一包；阶段 A 无费用准备当前已授权，阶段 B 付费执行须另行明确授权 |
 | 方向 0 首次 v7 正式 canary | 10 个 canary 的 Local/冻结 Codex 公平基线；条件加跑，不扩到 validation/holdout | 测评 | 已确认待办，不排期；不早于 Multi 第二期完成 |
 | 共享上游基线升级 | 选择任务启动时的目标上游版本，审查差异并同步两套产品与机器事实 | 工程 | 已确认待办，不排期；目标版本不预写死 |
 
