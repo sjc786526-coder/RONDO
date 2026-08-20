@@ -189,7 +189,7 @@
 - **门 2 当前合同**：`eval/locks/multi-m5-nondegradation-v6.json`；v1—v5 只留历史。十任务来自
   `eval/tasksets/p2-b7-canary-catalog-v4.json`（catalog sha `00b83e44…57ddf`），交错
   `task_major_codex_then_multi`，轻 runner，不套 v7 campaign，不计算 σ/delta。价格快照
-  2026-08-18 官方页（terra）；60 个有效样本、每槽最多 5 次 infra、全批最多 40 次 infra、116 个 run 槽位，
+  2026-08-18 官方页（terra）；最多 60 个有效运行（基础 20 + 条件最多 40）、每槽最多 5 次 infra、全批最多 40 次 infra、116 个 run 槽位，
   每 run 80 请求、HTTP retry 5、硬上限 $120。
 - **Multi runtime 当前冻结身份**（ignored 产物 + 受跟踪身份）：
   `eval-data/bin/rondo-multi/0eee6dc5ee69f0eca9e1db350148c423a2b2bf67-x86_64-unknown-linux-musl-runtime-bundle/`。
@@ -271,14 +271,14 @@
   单智能体方向的历史基线不受影响。三条定向回归钉住该隔离性。
   离线复验：彩排 4 次全绿（七谓词全真）、loopback 通过（配置已显示 terra）、就绪自检 `ready=true`。
 - **Python 门禁复现注意**：必须清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 再跑，否则环回假上游会被宿主代理劫持。
-- 044 分支在正式门前停止。未合并、未推送。**正式两道门的 `$120` 账本仍未创建或产生任何消费**
+- **2026-08-19 历史门前停止点。** 当时 044 分支未合并、未推送，正式两道门的 `$120` 账本尚未创建
   （`eval-data/budgets/` 无 `multi-m5-phase-b` 账本）。但"累计费用 $0"对整个任务已不成立：
   2026-08-18 在合同外、单独授权的冒烟账本上发生过真实支出，见
   `agent_log/2026-08-19-060000-plan044-m5-phase-b-fifth-review-remediation.md` 的勘误一节
   （历史产物的账目不自洽，不能当完整费用记录）。本轮另有一条隔离 clean-smoke-v5，真实计价
   `$0.273138`；Docker 与本地模型仍未执行。
 
-### 移交入口（2026-08-19，第五轮审查整改后重写）
+### 移交入口（2026-08-20，c3 正式验收后重写）
 
 - **历史入口**：`agent_log/2026-08-19-030000-plan044-m5-phase-b-handover-review.md` 记录第四轮交接时的事实；
   其中"门 1 采集口径待定"与"smoke 账本"两节已被本轮取代，勘误见
@@ -394,7 +394,7 @@
   没有可恢复的中断语义。审查报告作为形成时点证据保留在
   `agent_log/2026-08-20-110000-plan044-m5-paid-readiness-independent-review.md`。
 - v5 及其历史 rehearsal/smoke 不改写。新冻结 `multi-m5-workflow-v6` / `multi-m5-nondegradation-v6`，继续复用
-  未变化的 `multi-m5-runtime-v4`。门 1 最多 6 次；门 2 每槽最多 5 次 infra、全批最多 40 次；有效样本 60、
+  未变化的 `multi-m5-runtime-v4`。门 1 最多 6 次；门 2 每槽最多 5 次 infra、全批最多 40 次；有效运行最多 60（基础 20 + 条件最多 40）、
   每 run 80 个逻辑请求、provider 每请求最多 5 次 HTTP 尝试和 `$120` 硬上限不变；共享 run 槽位为
   `60 + 40 + 6 + 10 = 116`。
 - Gate 1 只在同一成员按“首次 publish → Root publish → route → `team_evidence` 自身 exec Fact → 不同 Version
@@ -415,40 +415,40 @@
 - 正式入口在读取密钥、创建 receipt/ledger 或 claim 前完成 provider 冻结校验；Gate 2 正式入口还要求同一 v6
   archive 中已有 Gate 1 pass。点估计 `$10.40`、最坏调度形状预测 `$67.80`、硬上限 `$120`，endpoint 仍为
   `https://www.cctq.ai/v1`。
-- 离线验收：M-5 Python 定向 183/183、Docker resume 精确探针单元测试 29/29、`just eval-lock`、ready、loopback
+- **正式执行前的离线验收（历史时点）**：M-5 Python 定向 183/183、Docker resume 精确探针单元测试 29/29、`just eval-lock`、ready、loopback
   均通过。append-only `m5-g1-rehearsal-v6-r3` 为 20/20 code-cell dispatch、0 Direct、0 failed；dump 7 页/log
   2 页到 null，七谓词全真，明文 9/加密与未知 0，成员自己的 exec Fact 可由 `team_evidence` 读回，并完成 Root
-  update。正式 v6 archive/ledger/identity receipt 均不存在。
+  update。该时点正式 v6 archive/ledger/identity receipt 尚不存在；后续 c1/c2/c3 正式历史见下文。
 
-### 本任务剩余步骤
+### 本任务收口与交接
 
 - c1 六次均因开发工具 sandbox 阻断本机 relay 而归档为 `infra_failed / upstream_unavailable`，未形成产品结论。
 - c2 从批准的 sandbox 外边界执行：a1/a2 产生有效模型响应，却被旧 collector 将 code-mode runtime 顶层 `wait`
   误判为 Direct team dispatch；a3 在同因重复后中断。c2 资产不改写、不升级为通过。
-- 保持 workflow-v6、runtime-v4、nondegradation-v6 不变；用全新 c3 generation 承载精确 harness 修复与剩余正式运行。
-  当前任务内下一步是在 clean commit 上复核无密钥 connectivity，随后启动 c3 Gate 1；只有同一身份通过才自动进入
-  Gate 2。任一有效产品失败、预算停止、身份漂移或需要产品/合同修改时停止。
+- workflow-v6、runtime-v4、nondegradation-v6 字节保持不变；c3 generation 承载精确 harness 修复与正式运行。
+  Gate 1 a2 已正式通过；Gate 2 以 20 个基础有效 run 完成十题比较，零 Codex-only 完成、零条件复跑、零诊断，
+  十题均为 `no_stable_one_way_degradation`。当前任务只剩工作树交付；是否合入 `main` 由用户决定。
 
 ### 阻塞项
 
-- c1/c2 均为冻结历史，不能原批次重领或改写；正式进程必须在已验证的 sandbox 外网络边界运行。
-- `multi-m5-v6-c3` 已准备独立 namespace、版本化授权口令与 c3 cap `$106.018317`；正式资产仍为空。当前没有
-  已知门前代码阻断，正式启动只差 clean commit 身份与同一边界无密钥 connectivity 复核。
-- `.env.local` 已静默确认存在、为普通文件、权限 `0600` 且所需变量非空；从未打开、搜索或打印其内容。
+- 无开发或验收阻塞。c1/c2 历史资产与 c3 正式资产均保持 append-only；Plan 044 分支尚未合入 `main`。
 
 ### 当前验收状态
 
-- **正式 Gate 1：未通过。** c1 6/6 为执行环境 infra；c2 a1/a2 为 harness 假阴，a3 中断且无 verdict。c2
-  49/49 request settled + usage-priced、0 held，累计 `$0.661683`；没有 `agent_failed` 产品结论。Gate 2 未启动，
-  M-5 未通过。
-- **v6-c3 门前整改：通过本地门禁。** 三把 v6 锁摘要未变；c1/c2 摘要与语义、跨代预算、clean identity、
-  predeparture 和 Gate 2 前置顺序均机械验证。collector 只精确豁免绑定既有同线程 cell 的 runtime `wait`，
-  Direct team dispatch 仍拒绝。M-5 199/199、eval-lock、ready、loopback 已通过；c3 正式资产为 `not_started`。
+- **正式 Gate 1：通过。** c3 a1 因单次 `upstream_unavailable` 归档 infra；a2 22 个请求完成，七谓词全真、
+  `team_evidence=true`、明文 14 / 加密与未知 0。c1/c2 仍是不可改写的执行边界/harness 失败历史。
+- **正式 Gate 2：通过。** 20 个基础有效 run 中 4 对双方通过、6 对双方失败，零 Codex-only 完成，故条件复跑与
+  诊断均为 0；十题全部 `no_stable_one_way_degradation`。冻结的 60 是最大容量（基础 20 + 条件最多 40）。
+- **预算与资源：通过。** c3 22 runs、237/237 request settled、0 held、最大 attempt 1，暴露 `$5.840974`；
+  加 prior `$13.981683` 后为 `$19.822657 < $120`。Gate 2 的 20/20 Docker 证据 returncode 0、无 warning、
+  `cleanup_verified`；峰值 Docker 增长约 2.56GB、VHDX 增长 0，最终无任务资源残留。
+- **M-5：通过。** 最终 eval-lock、ready 与独立 resume/调度/verdict 重放均通过；HEAD `c9fcb0f…` 与 receipt、
+  provider、二进制及全部归档身份一致。分支尚未合入 `main`。
 - 规划现场核对、worktree 创建与 ExecPlan：已完成。
 - **阶段 A：两轮独立验收均不通过，第二轮缺口已由审查者直接修复。** 冻结 bundle、两份运行合同、
   接线与无 API loopback 核验通过；第一轮的门 1 谓词缺陷（Root 独角戏误判、未验 Root 唤醒）已整改并经复验确认；
   第二轮发现证据采集不绑定工具身份（`exec_command` 回显即可伪造门 1 通过），已按下述修复。
-  在阶段 B 真实运行前，仍**不得**表述为 M-5 / 门 1 通过或未见退化。
+  该条为阶段 A 历史结论；阶段 B 的最终状态以上述 c3 正式验收为准。
 - **门 1 证据绑定（审查者修复，2026-08-17）**：dump/log 只采纳 `team_inspect` 输出，唤醒信号只采纳
   `wait_agent` 输出；其它工具产出的"团队形状"负载记入 `unattributed` 并在判定中忽略、同时通过
   `CollaborationVerdict.ignored_evidence` 暴露，便于区分"模型伪造"与"wire 形状变了"。
@@ -464,14 +464,14 @@
   capture 隔离、provider 前置冻结和幂等 resume 收口。13:00 独立验收发现的协议时序、终止预算恢复和首请求前
   自有产物三组缺口，以及 15:00 审查发现的 deduplicated 假绿/跨线程 wrapper 假阴均已闭合；v6 离线门禁与
   append-only v6-r3 rehearsal 已通过。历史唯一 clean-smoke-v5 仍只证明当时的非正式真实链路。c1/c2 已形成
-  正式 Gate 1 历史，其中 c1 为零模型观察的执行环境 infra，c2 为 harness 假阴；Gate 2 从未启动。c3 使用新
-  archive/ledger/identity/capture namespace，当前均不存在。
-  **不得表述为 M-5 通过、门 1 通过或未见退化。**
+  正式 Gate 1 历史，其中 c1 为零模型观察的执行环境 infra，c2 为 harness 假阴。c3 使用独立
+  archive/ledger/identity/capture namespace，Gate 1 a2 正式通过；Gate 2 完成 20 个基础有效 run，十题均为
+  `no_stable_one_way_degradation`。阶段 B 与 M-5 最终通过。
 
-### 阶段 B 精确授权清单
+### 阶段 B 执行时冻结清单
 
-下表是当前 c3 正式门的冻结清单。用户已授权 clean c3 自动执行 Gate 1，并仅在同一身份通过后进入 Gate 2；
-任何产品失败、预算停止、身份漂移或需要改产品/行为合同时立即停止。
+下表是 c3 正式执行时采用的冻结清单。执行遵循“Gate 1 通过后才进入 Gate 2；产品失败、预算停止、身份漂移或
+需要改产品/行为合同时立即停止”的授权边界；当前两门已按该清单完成。
 
 | 项 | 冻结值 |
 |---|---|
@@ -572,7 +572,7 @@
 | 053 | rehearsal 的 dump/log 初始页与续页固定显式 `limit=3`，且两者都必须至少两页并走到 null；页数写入结果/归档 | 修掉 team-only 假 Fact 后自然状态可能不超过默认 20 条，若仍依赖自然体量，彩排会重新退化为未执行 continuation 分支的假准备 | 门 1 彩排 | 已采纳 |
 | 054 | code-mode recorder 的响应边界分成 Yielded / Terminal / Unavailable；MissingCell、首响应错误与不可转换响应一律不铸证并清理，wait 内部错误只为此前已知 live cell 保留重试状态 | MissingCell 没有 terminal callback-drain 证明，不能把泛化错误文本当 provenance；错误路径若留下任意未知 cell 又会逐步耗尽 256 项上限 | Multi 证据生命周期 | 已采纳 |
 | 055 | v5 保持历史不可变；正式门改用 workflow-v6 / nondegradation-v6，继续复用未变化的 runtime-v4 与冻结字节 | v5 已承载 rehearsal/smoke，原地修改会让历史结果冒充新合同；本轮没有产品源码变化，无需重冻 runtime | 合同身份 | 已采纳 |
-| 056 | Gate 1 最多 6 次；Gate 2 每槽最多 5 次 infra、全批最多 40 次；共享槽位 116；60 effective、80 requests/run、5 HTTP attempts 与 `$120` 不变 | 把有效样本与设施恢复机会分开；按最坏调度形状预测为 `$67.80`，仍由累计 reservation/settlement 的 `$120` 硬停止兜底 | 调度 / 预算 | 已采纳 |
+| 056 | Gate 1 最多 6 次；Gate 2 每槽最多 5 次 infra、全批最多 40 次；共享槽位 116；最多 60 effective（基础 20 + 条件最多 40）、80 requests/run、5 HTTP attempts 与 `$120` 不变 | 把有效样本与设施恢复机会分开；按最坏调度形状预测为 `$67.80`，仍由累计 reservation/settlement 的 `$120` 硬停止兜底 | 调度 / 预算 | 已采纳 |
 | 057 | 正式 resume 以 batch + 两把合同锁 + runtime + provider receipt 绑定；完整归档跳过，pristine 零请求 run 原 id 重领，已请求未归档只追加一次 abandoned infra 后转下一 attempt，未来/重复/冲突状态拒绝 | 固定 run id 的 one-shot 入口无法承受长批次进程退出；恢复必须幂等且不能把产品失败改标 infra | 恢复语义 | 已采纳 |
 | 058 | Gate 1 机械要求同成员完成首次 publish → Root publish → route → 自身 exec Fact 的 team_evidence → 二次 publish，Root 唤醒只认 completed wait_agent TeamActivity | v5 只从 dump 的 VersionFact 推断 evidence，缺调用、少一次成员 Version 或仅 inspect signal 都可假通过 | 门 1 判据 | 已采纳 |
 | 063 | Gate 1 进一步要求首个成员 Version 精确引用被下钻 Fact、wait 来自 rollout manifest 的 Root thread、整条 trace 零 Direct，且 Root→member 投递仅 plaintext；Gate 1/2 共享完整 Gate 1 archive 前缀验证并拒绝 symlink 归档 | 独立终审构造出成员 wait、第二 Version 借 Fact、Direct dispatch、乱序 resume 与 broken symlink 等假绿/先消费后失败边界 | 门 1 / resume | 已采纳 |

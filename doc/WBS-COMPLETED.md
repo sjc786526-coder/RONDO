@@ -1375,3 +1375,21 @@ rehearsal 通过。正式 Gate 1/Gate 2 仍未启动，**不是** M-5、Gate 1 �
   且零 c2 资产；批准的 sandbox 外得到 HTTP 301 并通过。真实 Responses 请求一旦启动，usage 不明仍消耗 attempt。
 - 零费用门禁：M-5 定向 193 项、`just eval-lock`、ready、runtime-v4 loopback 已验证；未运行 Rust、Docker、
   API smoke 或付费模型请求。
+
+## Multi M-5 c3 正式两门验收（Plan 044，2026-08-20）
+
+**状态**：workflow-v6 / runtime-v4 / nondegradation-v6 行为合同未变；c3 Gate 1 与 Gate 2 正式通过，独立终审
+重放 resume、调度与 verdict 后给出 GO。Plan 044 的开发与验收目标完成，分支尚未合入 `main`。
+
+- collector 精确接纳 code-mode runtime 的默认 `wait` continuation 后，c3 Gate 1 a2 以 22 请求完成：七谓词
+  全真、`team_evidence=true`、明文 14 / 加密与未知 0。a1 的单次 `upstream_unavailable` 保持 infra 分类。
+- Gate 2 在十个锁定镜像上串行完成 20 个基础有效 run：4 对双方通过、6 对双方失败，零 Codex-only 完成，
+  因而没有条件复跑或诊断；十题均为 `no_stable_one_way_degradation`。冻结的 60 是最大容量（基础 20 +
+  条件最多 40），本次 20 是合同正确终态。
+- c3 ledger 22 runs、237/237 request settled、0 held、最大 attempt 1；Gate 2 的 199 个 usage-priced 请求计价
+  `$3.248131`，c3 总暴露 `$5.840974`。加 prior `$13.981683` 后，跨代保守口径为 `$19.822657 < $120`。
+- 20/20 Docker 记录 returncode 0、无 warning、`cleanup_verified`；峰值 Docker 增长 2.556GB、VHDX 增长 0，
+  最低 Windows `C:` 余量约 190.835GB。结束后无任务容器、网络、卷或 build cache 残留。
+- 最终 `just eval-lock`、`just eval-multi-m5-ready` 与独立后审通过；receipt、provider、二进制、全部归档均绑定
+  clean HEAD `c9fcb0fb1cd57254558e811ecddfab65e2c452df`。完整执行证据见
+  `agent_log/2026-08-20-210000-plan044-m5-v6-c3-formal-final.md`。

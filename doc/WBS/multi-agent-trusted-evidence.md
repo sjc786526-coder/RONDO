@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：c1 因执行环境失败、c2 因 harness 假阴停止；不变的 runtime-v4 与两把 v6 行为锁上，c3 门前就绪但尚未启动，Gate 2 未启动
+最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：c1/c2 失败历史不改写；不变的 runtime-v4 与两把 v6 行为锁上，c3 Gate 1/Gate 2 已正式通过
 
 ## 定位
 
@@ -255,7 +255,8 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 的正式门前设施已就绪，c1/c2 已形成失败历史，c3 Gate 1 与 Gate 2 尚未启动，不能表述为 M-5 通过。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 的
+c1/c2 失败历史保持不可变，c3 Gate 1 与 Gate 2 已正式通过。Plan 044 当前在独立工作树完成，尚未合入 `main`。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -361,7 +362,8 @@ harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界�
 
 **正式门前验证已完成；c1/c2 Gate 1 均未形成产品结论。** v5 的 readiness 结论因协议假绿、capture 串线、provider 校验过晚和不可 resume 被后续
 独立审查否决；v5 历史不改写。现行 loader 绑定 workflow-v6→runtime-v4→nondegradation-v6，Gate 1 最多 6 次，
-Gate 2 每槽最多 5 次 infra、全批 40 次，共 116 个 run 槽位；60 effective、80 请求/run、5 次 HTTP 尝试与
+Gate 2 每槽最多 5 次 infra、全批 40 次，共 116 个 run 槽位；最多 60 effective（基础 20 + 条件最多 40）、
+80 请求/run、5 次 HTTP 尝试与
 `$120` 硬上限不变。provider 完整冻结发生在 secret、receipt、ledger 与 claim 之前。
 
 ready=true、loopback 通过。append-only v6-r3 rehearsal 以 `limit=3` 完成 dump 7 页、log 2 页并续到 null；
@@ -386,8 +388,15 @@ clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`�
 修复转入独立 `multi-m5-v6-c3`：collector 只豁免内部/模型 call-id 相同、wire raw arguments 一致、同线程 cell
 更早存在的默认 runtime `wait`，且该调用不贡献协作证据；Direct team dispatch 仍拒绝。c1 本地保守暴露
 `$13.32` + c2 计价 `$0.661683` = c3 prior `$13.981683`；c3 cap `$106.018317`，累计仍为 `$120`。M-5
-199/199、eval-lock、ready、loopback 已通过，c3 正式资产为 `not_started`。已授权 clean c3 Gate 1，并仅在同一
-身份通过后自动进入 Gate 2。
+199/199、eval-lock、ready、loopback 已通过。
+
+**c3 正式两门已通过。** Gate 1 的 a1 因单次 `upstream_unavailable` 归档为 infra；a2 以 22 个请求完成协议，
+七谓词全真，`team_evidence=true`，明文 14 / 加密与未知 0。Gate 2 在十个锁定 digest 上串行完成 20 个基础有效
+run：4 对双方通过、6 对双方失败，零 Codex-only 完成，故条件复跑与诊断均为 0；十题全部判为
+`no_stable_one_way_degradation`。c3 账本 237/237 request settled、0 held、最大 attempt 1，暴露 `$5.840974`；
+加 prior `$13.981683` 后为 `$19.822657 < $120`。20/20 Docker 记录均 returncode 0、无 warning、以
+`cleanup_verified` 结束；峰值 Docker 增长约 2.56GB、VHDX 增长 0，最终无任务容器、网络或卷残留。独立终审
+重建 resume prefix、条件调度与 verdict 后给出 GO；M-5 的开发与正式验收目标完成，是否合入 `main` 由后续交付决定。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
@@ -396,8 +405,7 @@ clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`�
   当前合同由 `multi-m5-workflow-v6` 承载；历史边界见旧锁的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
-  阶段 A 前两项与阶段 B 门前准备已冻结并通过独立验收；当前 c3 Gate 1 须在 clean commit 与无密钥 connectivity
-  复核后启动，Gate 2 只在同一 c3 Gate 1 通过后启动。
+  阶段 A 前两项、阶段 B 门前准备及 c3 正式 Gate 1/Gate 2 均已通过独立验收。
 - **完成标准**：两个相互独立的门，缺一不可。
   1. **工作流成立且功能实际发生**：在功能开启的真实运行中，冻结的工作流达到它自己预冻结的任务完成标准，
      且 Event/Version 发布、Root 唤醒、route、多作者追加与证据下钻确实被触发、注意力按正常路径收尾，
