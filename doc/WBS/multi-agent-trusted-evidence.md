@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A 已独立验收通过、`paid-ready`，阶段 B 未授权
+第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A 最终独立验收未通过、待窄修，阶段 B 未授权
 
 ## 定位
 
@@ -201,9 +201,10 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 ### 后置测评包 C：主动委派收益对比
 
 **依赖**：A、B 均已完成，Team Lens 的跨产品共有字段与 RONDO 专有字段已可用。C 是一个计划与任务合同，顺序分为
-阶段 A 和阶段 B；阶段 A 已完成本地无费用验收并通过独立审查，阶段 B 的真实 API 开始动作仍须单独明确授权。
+阶段 A 和阶段 B；阶段 A 已有本地无费用实现与证据，但最终独立验收发现 correctness findings，当前待窄修和重新验收；
+阶段 B 的真实 API 开始动作仍须单独明确授权。
 
-#### 阶段 A：无费用准备（已独立验收通过，`paid-ready`）
+#### 阶段 A：无费用准备（最终独立验收未通过，`blocked` 待窄修）
 
 - 冻结自然任务集、共同 proactive policy、模型/effort、成员配置、并发、deadline、外部判定、成对顺序、结果分类、
   Team Lens 产物和阶段 B 的费用/恢复边界；不得借准备阶段偷偷运行付费样本。

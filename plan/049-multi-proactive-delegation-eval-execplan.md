@@ -318,27 +318,32 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       未完成时另以 body-free settled checkpoint 只恢复本地归约，不重复请求。
 - [x] 第三轮独立审查在 clean `6f1d221517b7efda31a8b3a938d3e0fb8a2fe9d6` 上逐项复现既往 blocker、共享入口、
       settled recovery 与 fail-closed 顺序，结论无 correctness finding，阶段 A `paid-ready`。
+- [x] 用户要求的最终独立验收在 `3b34dae8ab50a72bdb883110830d8bf7c778679f` 上发现原则性停止未持久锁存、
+      请求/预算停止可被重试、followup 聚合失真及 pre-Docker ledger 校验不完整，结论回拨为 `blocked`；详见
+      `agent_log/2026-08-20-145518-plan049-phase-a-independent-acceptance.md`。
 
 ### 当前工作
 
-- 阶段 A 实现、离线验收、提交与独立审查均已完成；阶段 B 保持未授权。
+- 阶段 A 已有实现和离线证据保留，但最终独立验收未通过，等待同一工作树内窄修；阶段 B 保持未授权。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：无剩余实现步骤；最终状态文档提交后保持 049 工作树干净。
-2. 等待用户另行授权阶段 B；未授权期间保持工作树、分支和正式付费入口不动。
-3. 阶段 B 获授权后：创建正式 activation identity，执行 pilot；通过后按固定顺序完成十个有效配对、聚合与独立审查。
+1. 在同一 049 工作树窄修最终验收报告列出的停止/恢复、预算分类、followup 聚合和 ledger 前置校验问题并补定向回归。
+2. 重跑 Plan 049 与共享 runner/预算定向门禁，形成新的 clean final SHA 后再次独立验收。
+3. 只有重新取得 `paid-ready` 且用户另行授权阶段 B 后，才创建正式 activation identity 并执行固定 pilot/正式任务。
 4. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 无已知 blocker；本地证据为 `offline-evidence-ready`，正式路径经独立审查确认为 `paid-ready`。
-- 阶段 B 当前因缺少明确开始授权、100 USD 上限确认和余额确认而有意阻塞；provider 真连通性也只可在该阶段 pilot 确认。
+- 阶段 A 当前 `blocked`：最终独立验收确认四类 correctness blocker；现有 offline evidence 可复用，但不能作为阶段 B
+  启动依据。
+- 阶段 B 同时因阶段 A 未通过及缺少明确开始授权、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
 
 ### 当前验收状态
 
 - pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；rehearsal
   重复执行的 archive/ledger/aggregate SHA-256 不变。
+- 最终验收定向测试仍通过，但发现现有测试未覆盖的停止/恢复和指标语义缺口，因此当前不是 `paid-ready`。
 - 未运行 Docker、Cargo、真实 API、本地模型、付费测评或全量测试；未创建正式 activation receipt、正式账本或
   正式 run/result identity。
 
