@@ -6,6 +6,7 @@ reference-agent-harness/
 # Personal Codex hooks, worktrees, and local state.
 /.codex/
 /.claude/
+/.vscode/
 
 # Local test data and retained test-run artifacts.
 /test-data/
