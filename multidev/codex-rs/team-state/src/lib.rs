@@ -103,3 +103,7 @@ pub use view::VersionView;
 
 #[cfg(test)]
 mod test_support;
+
+#[cfg(test)]
+#[path = "sequence_properties_tests.rs"]
+mod sequence_properties_tests;
