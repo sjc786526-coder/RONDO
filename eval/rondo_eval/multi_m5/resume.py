@@ -1,4 +1,4 @@
-"""Narrow, fail-closed resume primitives for M-5 v6 campaign generation c2."""
+"""Narrow, fail-closed resume primitives for the current M-5 v6 campaign."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def formal_identity(
         "provider_identity": dict(provider_identity),
         "harness_commit": commit,
         "harness_dirty": False,
-        "prior_campaign_conservative_exposure_usd": str(PRIOR_EXPOSURE_USD),
+        "prior_campaign_exposure_usd": str(PRIOR_EXPOSURE_USD),
         "campaign_cap_usd": str(CAMPAIGN_CAP_USD),
     }
 

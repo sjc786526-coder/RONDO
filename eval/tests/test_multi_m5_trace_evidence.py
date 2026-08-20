@@ -141,6 +141,47 @@ class TraceBundleBuilder:
             thread_id=thread_id,
         )
 
+    def direct(
+        self,
+        tool_call_id: str,
+        *,
+        name: str,
+        namespace: str | None,
+        arguments: object,
+        result: object,
+        thread_id: str = THREAD,
+        model_visible_call_id: str | None = None,
+    ):
+        invocation = self.payload(
+            "tool_invocation",
+            {"tool_name": name, "tool_namespace": namespace, "payload": arguments},
+        )
+        self.event(
+            {
+                "type": "tool_call_started",
+                "tool_call_id": tool_call_id,
+                "model_visible_call_id": model_visible_call_id or tool_call_id,
+                "code_mode_runtime_tool_id": None,
+                "requester": {"type": "model"},
+                "kind": {"type": "other", "name": name},
+                "summary": {"type": "generic", "label": name},
+                "invocation_payload": invocation,
+            },
+            thread_id=thread_id,
+        )
+        result_ref = self.payload(
+            "tool_result", {"type": "direct_response", "response_item": result}
+        )
+        self.event(
+            {
+                "type": "tool_call_ended",
+                "tool_call_id": tool_call_id,
+                "status": {"type": "completed"},
+                "result_payload": result_ref,
+            },
+            thread_id=thread_id,
+        )
+
     def write(self) -> Path:
         (self.dir / "trace.jsonl").write_text(
             "".join(json.dumps(event) + "\n" for event in self.events),
@@ -160,6 +201,34 @@ def capture(call_id: str, source: str) -> str:
                     "name": "exec",
                     "input": source,
                 }
+            ],
+        }
+    )
+
+
+def capture_with_runtime_wait(
+    call_id: str,
+    source: str,
+    *,
+    wait_call_id: str,
+    wait_arguments: str,
+) -> str:
+    return json.dumps(
+        {
+            "model": "gpt-5.6-terra",
+            "input": [
+                {
+                    "type": "custom_tool_call",
+                    "call_id": call_id,
+                    "name": "exec",
+                    "input": source,
+                },
+                {
+                    "type": "function_call",
+                    "call_id": wait_call_id,
+                    "name": "wait",
+                    "arguments": wait_arguments,
+                },
             ],
         }
     )
@@ -391,6 +460,166 @@ class CodeModeEvidenceTest(unittest.TestCase):
             trace = load_rollout_trace(builder.write())
             with self.assertRaisesRegex(EvidenceError, "direct model tool call"):
                 collect_gate1_evidence(capture("call-1", CELL_JS), trace)
+
+    def test_bound_code_mode_runtime_wait_is_not_a_direct_team_dispatch(self):
+        wait_arguments = json.dumps(
+            {"cell_id": "cell-1", "yield_time_ms": 10000, "max_tokens": 1000},
+            separators=(",", ":"),
+        )
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.nested(
+                "exec-1",
+                name="team_inspect",
+                namespace="collaboration",
+                cell_id="cell-1",
+                arguments={"type": "function", "arguments": '{"action":"dump"}'},
+                result=DUMP,
+            )
+            builder.direct(
+                "wait-1",
+                name="wait",
+                namespace=None,
+                arguments={"type": "function", "arguments": wait_arguments},
+                result={"type": "function_call_output", "call_id": "wait-1"},
+            )
+            trace = load_rollout_trace(builder.write())
+            dump = collect_gate1_evidence(
+                capture_with_runtime_wait(
+                    "call-1",
+                    CELL_JS,
+                    wait_call_id="wait-1",
+                    wait_arguments=wait_arguments,
+                ),
+                trace,
+            )
+        self.assertEqual(len(dump["entries"]), 2)
+        self.assertEqual(dump["unattributed"], [])
+
+    def test_runtime_wait_for_an_unknown_cell_is_still_refused(self):
+        wait_arguments = '{"cell_id":"ghost"}'
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.direct(
+                "wait-1",
+                name="wait",
+                namespace=None,
+                arguments={"type": "function", "arguments": wait_arguments},
+                result={"type": "function_call_output", "call_id": "wait-1"},
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "direct model tool call"):
+                collect_gate1_evidence(
+                    capture_with_runtime_wait(
+                        "call-1",
+                        CELL_JS,
+                        wait_call_id="wait-1",
+                        wait_arguments=wait_arguments,
+                    ),
+                    trace,
+                )
+
+    def test_runtime_wait_cannot_be_backfilled_by_a_later_cell(self):
+        wait_arguments = '{"cell_id":"cell-1"}'
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.direct(
+                "wait-1",
+                name="wait",
+                namespace=None,
+                arguments={"type": "function", "arguments": wait_arguments},
+                result={"type": "function_call_output", "call_id": "wait-1"},
+            )
+            builder.cell("cell-1", "call-1", CELL_JS)
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "direct model tool call"):
+                collect_gate1_evidence(
+                    capture_with_runtime_wait(
+                        "call-1",
+                        CELL_JS,
+                        wait_call_id="wait-1",
+                        wait_arguments=wait_arguments,
+                    ),
+                    trace,
+                )
+
+    def test_runtime_wait_trace_and_wire_call_ids_must_match(self):
+        wait_arguments = '{"cell_id":"cell-1"}'
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.direct(
+                "trace-wait-1",
+                name="wait",
+                namespace=None,
+                arguments={"type": "function", "arguments": wait_arguments},
+                result={"type": "function_call_output", "call_id": "wire-wait-1"},
+                model_visible_call_id="wire-wait-1",
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "direct model tool call"):
+                collect_gate1_evidence(
+                    capture_with_runtime_wait(
+                        "call-1",
+                        CELL_JS,
+                        wait_call_id="wire-wait-1",
+                        wait_arguments=wait_arguments,
+                    ),
+                    trace,
+                )
+
+    def test_runtime_wait_trace_and_wire_arguments_must_match(self):
+        trace_arguments = '{"cell_id":"cell-1","max_tokens":1}'
+        wire_arguments = '{"cell_id":"cell-1","max_tokens":2}'
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell("cell-1", "call-1", CELL_JS)
+            builder.direct(
+                "wait-1",
+                name="wait",
+                namespace=None,
+                arguments={"type": "function", "arguments": trace_arguments},
+                result={"type": "function_call_output", "call_id": "wait-1"},
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "direct model tool call"):
+                collect_gate1_evidence(
+                    capture_with_runtime_wait(
+                        "call-1",
+                        CELL_JS,
+                        wait_call_id="wait-1",
+                        wait_arguments=wire_arguments,
+                    ),
+                    trace,
+                )
+
+    def test_runtime_wait_cannot_bind_a_same_named_cell_in_another_thread(self):
+        wait_arguments = '{"cell_id":"cell-1"}'
+        with TemporaryDirectory() as raw:
+            builder = TraceBundleBuilder(Path(raw) / "trace-1-thread-root")
+            builder.cell(
+                "cell-1", "call-1", CELL_JS, thread_id="thread-member"
+            )
+            builder.direct(
+                "wait-1",
+                name="wait",
+                namespace=None,
+                arguments={"type": "function", "arguments": wait_arguments},
+                result={"type": "function_call_output", "call_id": "wait-1"},
+            )
+            trace = load_rollout_trace(builder.write())
+            with self.assertRaisesRegex(EvidenceError, "direct model tool call"):
+                collect_gate1_evidence(
+                    capture_with_runtime_wait(
+                        "call-1",
+                        CELL_JS,
+                        wait_call_id="wait-1",
+                        wait_arguments=wait_arguments,
+                    ),
+                    trace,
+                )
 
     def test_same_cell_id_in_two_threads_is_not_a_collision(self):
         """Root and its members share a bundle; cell ids are per-thread."""

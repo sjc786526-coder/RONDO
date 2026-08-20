@@ -264,11 +264,63 @@ def _require_bound_call(
             raise EvidenceError("nested tool call belongs to no recorded code cell")
         return
     if call.requester == "model":
+        if _is_bound_runtime_wait(call, trace, wire_calls):
+            # `exec` may yield a live code cell. Resuming that cell uses the
+            # model-visible code-mode `wait` control tool, so the rollout trace
+            # correctly records requester=model. It is not a judged nested
+            # dispatch and contributes no collaboration evidence. Accept only
+            # the exact wait call tied to a known cell and the captured wire
+            # arguments; every direct product/team tool remains forbidden.
+            return
         # The frozen workflow is code_mode_only. A direct dispatch is product
-        # or trace drift, even if its model-visible id exists on the wire; none
-        # of its payload may enter the collaboration predicates.
+        # or trace drift unless it is the bound runtime wait above; none of its
+        # payload may enter the collaboration predicates.
         raise EvidenceError("direct model tool call is forbidden by the workflow")
     raise EvidenceError("nested tool call has an unknown requester")
+
+
+def _is_bound_runtime_wait(
+    call: NestedToolCall,
+    trace: RolloutTrace,
+    wire_calls: Mapping[str, str],
+) -> bool:
+    if _namespace(call.tool_namespace) is not None or call.tool_name != "wait":
+        return False
+    call_id = call.model_visible_call_id
+    if (
+        not isinstance(call_id, str)
+        or not call_id
+        or call.tool_call_id != call_id
+    ):
+        return False
+    envelope = call.arguments
+    if not isinstance(envelope, dict) or envelope.get("type") != "function":
+        return False
+    raw_arguments = envelope.get("arguments")
+    if not isinstance(raw_arguments, str) or wire_calls.get(call_id) != raw_arguments:
+        return False
+    arguments = _parse_json(raw_arguments)
+    if not isinstance(arguments, dict) or set(arguments) - {
+        "cell_id",
+        "yield_time_ms",
+        "max_tokens",
+        "terminate",
+    }:
+        return False
+    cell_id = arguments.get("cell_id")
+    if not isinstance(cell_id, str) or not cell_id:
+        return False
+    cell = trace.cells.get((call.thread_id, cell_id))
+    if cell is None or cell.seq >= call.seq:
+        return False
+    for name in ("yield_time_ms", "max_tokens"):
+        value = arguments.get(name)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            return False
+    terminate = arguments.get("terminate")
+    return terminate is None or isinstance(terminate, bool)
 
 
 def _absorb(

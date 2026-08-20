@@ -41,7 +41,7 @@ def readiness_report(*, common_root: Path | None = None) -> dict[str, Any]:
         checks["campaign_generation"] = {
             "ok": True,
             "generation": campaign.generation,
-            "prior_conservative_exposure_usd": str(campaign.prior_exposure_usd),
+            "prior_exposure_usd": str(campaign.prior_exposure_usd),
             "campaign_cap_usd": str(campaign.campaign_cap_usd),
             "shared_hard_cap_usd": str(campaign.shared_hard_cap_usd),
         }
@@ -114,7 +114,7 @@ def readiness_report(*, common_root: Path | None = None) -> dict[str, Any]:
 
     if nondeg is not None and campaign is not None:
         checks["budget_upper_bound"] = _probe_budget_upper_bound(nondeg)
-        checks["budget_upper_bound"]["prior_conservative_exposure_usd"] = str(
+        checks["budget_upper_bound"]["prior_exposure_usd"] = str(
             campaign.prior_exposure_usd
         )
         checks["budget_upper_bound"]["campaign_cap_usd"] = str(

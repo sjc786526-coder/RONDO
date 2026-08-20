@@ -1,6 +1,6 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：runtime-v4、两把 v6 正式锁、幂等恢复与 append-only v6-r3 完整分页彩排已就绪；正式两道门均未启动
+最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md` ｜ M-5 阶段 B：c1 因执行环境失败、c2 因 harness 假阴停止；不变的 runtime-v4 与两把 v6 行为锁上，c3 门前就绪但尚未启动，Gate 2 未启动
 
 ## 定位
 
@@ -255,7 +255,7 @@ locator 是 Codex 为每个已保留 item 分配的身份（一对一，call_id 
 `...-055152-...-supplemental-remediation-reverification.md`，
 任务合同见 `plan/042-multi-m3-evidence-anchoring-execplan.md`。
 
-M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 的正式门前设施已就绪，正式 Gate 1/Gate 2 未开始，不能表述为 M-5 通过。
+M-3 已完成并合入 `main`。M-4 已验收并经 merge commit `601de62` 合入 `main`。M-5 阶段 A 已通过；阶段 B 的正式门前设施已就绪，c1/c2 已形成失败历史，c3 Gate 1 与 Gate 2 尚未启动，不能表述为 M-5 通过。
 
 - **目标**：让 Event 里的语义判断可以回溯到 Harness 实际观察到的执行结果，使团队状态成为 evidence-backed，
   而不只是结构化便签。
@@ -359,7 +359,7 @@ harness `output_item_id`；wait 错误只为此前已知 live cell 保留有界�
 第一页已有的谓词因此假绿。当前 collector 强制 required dump/log 成功、按 continuation 续到 null，并要求页集
 覆盖 `total_entries`；fresh snapshot 与 continuation 的总数语义分开。
 
-**正式门前验证已完成；首个正式 v6 Gate 1 批次因执行环境网络阻断而未通过。** v5 的 readiness 结论因协议假绿、capture 串线、provider 校验过晚和不可 resume 被后续
+**正式门前验证已完成；c1/c2 Gate 1 均未形成产品结论。** v5 的 readiness 结论因协议假绿、capture 串线、provider 校验过晚和不可 resume 被后续
 独立审查否决；v5 历史不改写。现行 loader 绑定 workflow-v6→runtime-v4→nondegradation-v6，Gate 1 最多 6 次，
 Gate 2 每槽最多 5 次 infra、全批 40 次，共 116 个 run 槽位；60 effective、80 请求/run、5 次 HTTP 尝试与
 `$120` 硬上限不变。provider 完整冻结发生在 secret、receipt、ledger 与 claim 之前。
@@ -375,14 +375,19 @@ clean-smoke-v5 仍是有效的非正式真实链路证据（计价 `$0.273138`�
 正式 `m5-g1-v6-paid-a1..a6` 随后均在第一个 Root 请求处被开发工具 sandbox 的 local/private-address 策略阻断，
 归档为 `infra_failed / upstream_unavailable`；无产品判定。6 个 request 均 settled、provider 可计价 `$0`，账本
 保守暴露 `$13.32 / $120`。沙箱外无密钥检查可连接本机 `127.0.0.1` relay，故该结果只证明执行边界错误。
-按授权 Gate 1 未通过即停止，Gate 2 与 Docker 均未启动。现有 v6 正式 attempt 已耗尽；未来若重启，须在批准的
-沙箱外网络边界使用新批次身份并重新取得付费授权，不复用本轮失败资产。
+按当时授权 Gate 1 未通过即停止，Gate 2 与 Docker 均未启动。c1 正式 attempt 已耗尽，不复用失败资产。
 
-后续决定把行为合同与运行代次解耦：workflow-v6 / runtime-v4 / nondegradation-v6 字节保持不变，新建
-`multi-m5-v6-c2` generation。c2 在任何 receipt/ledger/claim/capture/secret/Docker 前先核验 c1 三资产摘要与
-终态语义，再用同进程无密钥 direct GET 验证冻结 endpoint。c1 中转站实际账单由用户确认为 `$0`，本地仍保守把
-`$13.32` 计入共享上限，因此 c2 只可使用 `$106.68`。sandbox 内门禁 rc78 且零 c2 资产；sandbox 外门禁收到
-HTTP 301 并通过。c2 的 193 项 M-5 定向测试、eval-lock、ready 与 loopback 已验证，正式 c2 仍未启动。
+行为合同与运行代次随后解耦：workflow-v6 / runtime-v4 / nondegradation-v6 字节保持不变。c2 从批准的 sandbox
+外边界运行；a1/a2 各产生 20/25 个有效 provider 请求，但旧 collector 把 code-mode runtime 继续 live cell 所需的
+顶层默认 `wait` 错当 Direct team dispatch，均归档 `infra_failed`；a3 在第 4 个请求后中断且无 verdict。c2 共
+49/49 request settled + usage-priced、0 held、计价 `$0.661683`。这些是 harness 假阴，不是产品失败；全部 c2
+资产保持不可变。
+
+修复转入独立 `multi-m5-v6-c3`：collector 只豁免内部/模型 call-id 相同、wire raw arguments 一致、同线程 cell
+更早存在的默认 runtime `wait`，且该调用不贡献协作证据；Direct team dispatch 仍拒绝。c1 本地保守暴露
+`$13.32` + c2 计价 `$0.661683` = c3 prior `$13.981683`；c3 cap `$106.018317`，累计仍为 `$120`。M-5
+199/199、eval-lock、ready、loopback 已通过，c3 正式资产为 `not_started`。已授权 clean c3 Gate 1，并仅在同一
+身份通过后自动进入 Gate 2。
 
 - **目标**：在真实任务上跑通完整协作语义，并确认相对冻结 Codex 未出现稳定单向退化。
   **口径边界**：这句话由门 1 与门 2 **合起来**满足 —— 门 1 的载体是协议演示级 fixture（答案写在
@@ -391,7 +396,8 @@ HTTP 301 并通过。c2 的 193 项 M-5 定向测试、eval-lock、ready 与 loo
   当前合同由 `multi-m5-workflow-v6` 承载；历史边界见旧锁的 `scope_limits` 与 Plan 044 决策 032。
 - **前置**：冻结一个真实的 Multi 产品工作流作为验收样例（具体选哪个由本阶段 plan 决定，不预先写死角色分工）；
   按产品身份冻结一套 Multi runtime bundle；按 `doc/WBS.md` §6 单独取得真实 API 授权。
-  阶段 A 前两项与阶段 B 门前准备已冻结并通过独立验收；正式门仍须按下表另行启动。
+  阶段 A 前两项与阶段 B 门前准备已冻结并通过独立验收；当前 c3 Gate 1 须在 clean commit 与无密钥 connectivity
+  复核后启动，Gate 2 只在同一 c3 Gate 1 通过后启动。
 - **完成标准**：两个相互独立的门，缺一不可。
   1. **工作流成立且功能实际发生**：在功能开启的真实运行中，冻结的工作流达到它自己预冻结的任务完成标准，
      且 Event/Version 发布、Root 唤醒、route、多作者追加与证据下钻确实被触发、注意力按正常路径收尾，

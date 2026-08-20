@@ -422,29 +422,28 @@
 
 ### 本任务剩余步骤
 
-- v6 门前设施、准备性验证、文档与独立复核均已完成。经后续明确授权，正式 Gate 1 已执行并终止：
-  a1..a6 均因开发工具 sandbox 阻断本机 relay 而归档为 `infra_failed / upstream_unavailable`，未形成产品结论。
-- 按“Gate 1 未通过即停止”的授权边界，Gate 2 与 Docker 未启动。现有 v6 正式 attempt 已耗尽；本任务不重跑、
-  不改写失败资产，也不把 clean smoke 或设施失败表述为正式 Gate 1 / M-5 通过。
-- 后续授权允许纯执行环境修复使用独立 campaign generation，而不升级三把行为/产品锁。v6-c2 零费用门禁已完成；
-  下一任务内动作是在 clean harness commit 上从批准的 sandbox 外边界启动 c2 Gate 1，并仅在通过后自动进入 Gate 2。
+- c1 六次均因开发工具 sandbox 阻断本机 relay 而归档为 `infra_failed / upstream_unavailable`，未形成产品结论。
+- c2 从批准的 sandbox 外边界执行：a1/a2 产生有效模型响应，却被旧 collector 将 code-mode runtime 顶层 `wait`
+  误判为 Direct team dispatch；a3 在同因重复后中断。c2 资产不改写、不升级为通过。
+- 保持 workflow-v6、runtime-v4、nondegradation-v6 不变；用全新 c3 generation 承载精确 harness 修复与剩余正式运行。
+  当前任务内下一步是在 clean commit 上复核无密钥 connectivity，随后启动 c3 Gate 1；只有同一身份通过才自动进入
+  Gate 2。任一有效产品失败、预算停止、身份漂移或需要产品/合同修改时停止。
 
 ### 阻塞项
 
-- c1 的 6 个正式 attempt 已全部持久化，不能原批次重领。开发工具 sandbox 会把解析为 `127.0.0.1` 的 CCTQ
-  relay 当作 local/private address 阻断，因此 c2 正式进程必须在已验证的 sandbox 外网络边界运行。
-- `multi-m5-v6-c2` 已取得独立正式资产、版本化授权口令与 c2 cap `$106.68`；用户已授权零费用验证通过后自动
-  启动 c2 Gate 1，并仅在同一 v6 pass 后继续 Gate 2。当前没有其它已知门前阻断。
+- c1/c2 均为冻结历史，不能原批次重领或改写；正式进程必须在已验证的 sandbox 外网络边界运行。
+- `multi-m5-v6-c3` 已准备独立 namespace、版本化授权口令与 c3 cap `$106.018317`；正式资产仍为空。当前没有
+  已知门前代码阻断，正式启动只差 clean commit 身份与同一边界无密钥 connectivity 复核。
 - `.env.local` 已静默确认存在、为普通文件、权限 `0600` 且所需变量非空；从未打开、搜索或打印其内容。
 
 ### 当前验收状态
 
-- **正式 Gate 1：未通过。** 6/6 均为同因 infra，provider 可计价 `$0`，账本保守暴露 `$13.32`；没有产品失败
-  或成功样本。Gate 2 未启动，M-5 未通过。终态见
-  `agent_log/2026-08-20-180000-plan044-m5-v6-formal-gate1-infra-stop.md`。
-- **v6-c2 执行环境整改：通过零费用门禁。** 三把 v6 锁摘要未变；c1 三资产摘要/语义、跨代预算、clean harness、
-  predeparture、Gate 2 前置 prefix/ledger 顺序均机械验证。M-5 193 项、eval-lock、ready、loopback 已验证；
-  sandbox 内 connectivity rc78/零资产，sandbox 外无密钥 HTTP 301 通过。正式 c2 尚未启动。
+- **正式 Gate 1：未通过。** c1 6/6 为执行环境 infra；c2 a1/a2 为 harness 假阴，a3 中断且无 verdict。c2
+  49/49 request settled + usage-priced、0 held，累计 `$0.661683`；没有 `agent_failed` 产品结论。Gate 2 未启动，
+  M-5 未通过。
+- **v6-c3 门前整改：通过本地门禁。** 三把 v6 锁摘要未变；c1/c2 摘要与语义、跨代预算、clean identity、
+  predeparture 和 Gate 2 前置顺序均机械验证。collector 只精确豁免绑定既有同线程 cell 的 runtime `wait`，
+  Direct team dispatch 仍拒绝。M-5 199/199、eval-lock、ready、loopback 已通过；c3 正式资产为 `not_started`。
 - 规划现场核对、worktree 创建与 ExecPlan：已完成。
 - **阶段 A：两轮独立验收均不通过，第二轮缺口已由审查者直接修复。** 冻结 bundle、两份运行合同、
   接线与无 API loopback 核验通过；第一轮的门 1 谓词缺陷（Root 独角戏误判、未验 Root 唤醒）已整改并经复验确认；
@@ -464,21 +463,21 @@
 - 阶段 B：runtime-v4 产品身份保持不变；v5 的 readiness 假设已由独立审查否决并以两把 v6 锁、严格协议判据、
   capture 隔离、provider 前置冻结和幂等 resume 收口。13:00 独立验收发现的协议时序、终止预算恢复和首请求前
   自有产物三组缺口，以及 15:00 审查发现的 deduplicated 假绿/跨线程 wrapper 假阴均已闭合；v6 离线门禁与
-  append-only v6-r3 rehearsal 已通过。历史唯一
-  clean-smoke-v5 仍只证明当时的非正式真实链路。本轮未新增真实 API 消费。正式门 1/门 2 未启动，v6 `$120`
-  正式 archive/ledger/identity receipt 均不存在。
+  append-only v6-r3 rehearsal 已通过。历史唯一 clean-smoke-v5 仍只证明当时的非正式真实链路。c1/c2 已形成
+  正式 Gate 1 历史，其中 c1 为零模型观察的执行环境 infra，c2 为 harness 假阴；Gate 2 从未启动。c3 使用新
+  archive/ledger/identity/capture namespace，当前均不存在。
   **不得表述为 M-5 通过、门 1 通过或未见退化。**
 
 ### 阶段 B 精确授权清单
 
-下表仍是未来正式门的冻结清单。本轮只获授权完成门前准备与验证性 smoke，且明确停在正式大规模付费测评前；
-因此不得用本轮 1000 USD 的总授权替代下表的正式启动动作。
+下表是当前 c3 正式门的冻结清单。用户已授权 clean c3 自动执行 Gate 1，并仅在同一身份通过后进入 Gate 2；
+任何产品失败、预算停止、身份漂移或需要改产品/行为合同时立即停止。
 
 | 项 | 冻结值 |
 |---|---|
 | API provider | `rondo.local.toml` 的 `paid_eval.active_provider = "relay"`（CCTQ Responses；`api_key_env = OPENAI_API_KEY`）。不改官方入口，不把密钥写入文档或提示词。 |
 | Root / 成员模型 | `gpt-5.6-terra` + `medium`（两侧相同）。由 M-5 两把锁自行钉死，不继承宿主 `paid_eval.main_model`（仍为 `sol`） |
-| 合同身份 | `multi-m5-workflow-v6` → `multi-m5-runtime-v4` → `multi-m5-nondegradation-v6`；行为合同批次身份仍为 `multi-m5-phase-b-v6`，纯执行代次为独立 `multi-m5-v6-c2` / `multi-m5-phase-b-v6-c2`；v5 与 c1 均不原地修改 |
+| 合同身份 | `multi-m5-workflow-v6` → `multi-m5-runtime-v4` → `multi-m5-nondegradation-v6`；行为合同身份不变，当前纯执行代次为独立 `multi-m5-v6-c3` / `multi-m5-phase-b-v6-c3`；c1/c2 均不原地修改 |
 | 门 1 | host `codex exec` 协作 fixture，无 Docker；最多 6 次尝试、单次 1800s |
 | 门 2 | v4 catalog 十任务；`task_major_codex_then_multi`；条件复跑仅当「Codex 完成、Multi 未完成」时双方各加两次 |
 | 最大有效运行 | 60（基础 20 + 条件最多 40） |
@@ -486,7 +485,7 @@
 | 基础设施 | 每槽最多 5 次 infra 尝试；infra 总上限 40；infra 不计有效结果；共享 run 槽位 116 |
 | 每 run 请求上限 | 80 |
 | 价格快照 | 2026-08-18 官方页：input $2 / cached $0.20 / output $12 per 1M；长上下文 272k input×2 output×1.5；cache_write 1.25。同日核对 sol 仍为 5/0.5/30，故 terra 为其 40% |
-| 费用 | 点估计 `$10.40`；最坏调度形状预测 `$67.80`（不是合法消费上限）；**跨代硬上限 `$120` 不变**。c1 保守暴露 `$13.32`，c2 账本批次 `multi-m5-phase-b-v6-c2` 的 cap 为 `$106.68` |
+| 费用 | 点估计 `$10.40`；最坏调度形状预测 `$67.80`（不是合法消费上限）；**跨代硬上限 `$120` 不变**。c1 保守暴露 `$13.32` + c2 已计价 `$0.661683` = c3 prior `$13.981683`；c3 cap 为 `$106.018317` |
 | 恢复 | 完整归档跳过；pristine 零请求 run 安全重领；精确 pre-Harbor 自有产物与已请求未归档各只追加一次 abandoned infra；终止 budget/capacity stop 归档后停止；未知、symlink、Harbor-started 或 exact Docker 残留 fail-closed |
 | Docker | **只为门 2**。十个 digest 钉死镜像（见 `eval/locks/multi-m5-nondegradation-v6.json` 的 `docker_images`）。不拉其它镜像，不跑完整数据集。门 1 不用 Docker。 |
 | 外发边界 | 任务输入、工作区内容与模型可见工具结果进入 Responses；密钥、`.env.local`、个人配置不进提示词或结果文件 |
@@ -579,9 +578,10 @@
 | 063 | Gate 1 进一步要求首个成员 Version 精确引用被下钻 Fact、wait 来自 rollout manifest 的 Root thread、整条 trace 零 Direct，且 Root→member 投递仅 plaintext；Gate 1/2 共享完整 Gate 1 archive 前缀验证并拒绝 symlink 归档 | 独立终审构造出成员 wait、第二 Version 借 Fact、Direct dispatch、乱序 resume 与 broken symlink 等假绿/先消费后失败边界 | 门 1 / resume | 已采纳 |
 | 064 | Gate 1 以 trace start/end + inspect-log revision 绑定 Root wait/publish/route/update、成员 evidence 与不同的二次 Version；恢复先保留 terminal budget stop，精确 pre-Harbor 自有产物可一次 abandoned，Harbor-started / exact Docker 残留保持 fail-closed | 13:00 独立验收构造出晚 wait、错误 actor、复用 Version、终止 stop 被重试及首请求前自有产物死路；自动继续带活动 Docker 的 run 无法证明安全，必须留给后继受监督精确清理 | 门 1 / resume / Docker 边界 | 已采纳 |
 | 065 | 协议中的 publish/route 只认 `deduplicated=false`；跨线程 canonical 提交顺序只认 inspect-log revision，wrapper end 不作跨线程提交时钟；Root wait 以调用区间重叠 + 精确 wake log 绑定首次成员 publish，route start 先于 evidence start；批量 update 只要求唯一成员 resolve 匹配 | 15:00 审查证明幂等重试可冒充 evidence 后的新 Version，而 store 已提交后 wrapper 尚未结束是合法并发；继续使用跨线程 ToolCallEnded 判断提交先后会假阴并无故耗尽 6 次尝试 | 门 1 判据 | 已采纳 |
-| 066 | 纯 sandbox / 启动边界修复不改 workflow-v6、runtime-v4、nondegradation-v6；另用 append-only `multi-m5-v6-c2` campaign generation 隔离 receipt/ledger/archive/capture/run-id | c1 没有模型观察，失败来自开发工具网络边界；为执行设施问题重冻产品或行为合同既无证据收益，又会让历史身份混线 | 执行代次 / 身份 | 已采纳 |
-| 067 | 用户确认 c1 中转站实际账单 `$0`，但本地仍保留 `$13.32` conservative exposure；c2 cap 固定 `$106.68`，两代机械相加等于 `$120` | 外部账单事实不等于可回写已落账本；保留 fail-closed 暴露可避免不确定结算被重复消费，同时仍容纳 `$67.80` 最坏调度形状 | 跨代预算 | 已采纳 |
-| 068 | 同一正式进程在 secret、receipt、ledger、claim、capture、Docker 前执行一次无密钥 direct GET；禁 body/auth/proxy/redirect，网络失败零正式状态、零 attempt；正式 identity 绑定 clean commit，Gate 2 还须先证明 c2 Gate 1 pass 与既有 ledger | c1 证明启动进程的网络边界本身会令全部六次失效；把 preflight 放到 receipt 后会留下假正式资产，把 Gate 2 prefix 校验放到 Docker 后会先产生外部状态 | predeparture / 正式入口 | 已采纳 |
+| 066 | 纯 sandbox / harness 执行边界修复不改 workflow-v6、runtime-v4、nondegradation-v6；用 append-only campaign generation 隔离 receipt/ledger/archive/capture/run-id | c1 没有模型观察，c2 是 collector 假阴；为执行设施问题重冻产品或行为合同既无证据收益，又会让历史身份混线 | 执行代次 / 身份 | 已采纳 |
+| 067 | 用户确认 c1 中转站实际账单 `$0`，但本地仍保留 `$13.32` conservative exposure；c2 已计价 `$0.661683`，故 c3 prior `$13.981683`、cap `$106.018317`，累计等于 `$120` | 外部账单事实不等于可回写已落账本；同时保留已计价使用，避免跨 generation 重复消费 | 跨代预算 | 已采纳 |
+| 068 | 同一正式进程在 secret、receipt、ledger、claim、capture、Docker 前执行一次无密钥 direct GET；禁 body/auth/proxy/redirect，网络失败零正式状态、零 attempt；正式 identity 绑定 clean commit，Gate 2 还须先证明同一 campaign Gate 1 pass 与既有 ledger | c1 证明启动进程的网络边界本身会令全部六次失效；把 preflight 放到 receipt 后会留下假正式资产，把 Gate 2 prefix 校验放到 Docker 后会先产生外部状态 | predeparture / 正式入口 | 已采纳 |
+| 069 | c2 历史不改写；collector 仅豁免默认 namespace 的 code-mode runtime `wait`，并要求内部/模型 call-id 相同、wire raw arguments 一致、同线程 cell 更早存在；该调用不贡献协作证据，Direct team 仍拒绝。修复转入 `multi-m5-v6-c3` | c2 真实 trace 仅有这些顶层 `wait`，团队 dispatch 仍全来自 code cell； blanket Direct 拒绝把合法 runtime continuation 误判为协议漂移 | trace provenance / 执行代次 | 已采纳 |
 | 059 | 测试必须显式传入 eval-data/tmp 下的隔离 capture root；v6 rehearsal、正式 Gate 1 与历史 v5 各用独立 identity，正式非空 capture 一律拒绝 | `persist=false` 旧实现仍会覆盖 canonical raw 并向 metadata 追加测试 observation | 证据分区 | 已采纳 |
 | 060 | 完整 provider frozen preflight 位于 secret、正式 identity receipt、ledger open 与 claim_run 之前，并纳入 ready | 只在 Gate 2 executor 内校验会在零 API 时仍消耗第一个正式 run id | 付费入口 | 已采纳 |
 | 061 | Gate 2 每个 attempt 形成分类后立即 fsync 归档，再允许 claim 下一 attempt | 若把同槽多次 infra 缓存在内存，下一 attempt 请求中断会留下两个未归档 run，无法按单一前缀恢复 | 恢复持久性 | 已采纳 |
