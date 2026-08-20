@@ -1394,3 +1394,43 @@ rehearsal 通过。正式 Gate 1/Gate 2 仍未启动，**不是** M-5、Gate 1 �
   `just eval-multi-m5-ready` 与独立后审通过；receipt、provider、二进制、全部归档均绑定该 clean HEAD。后继提交
   仅收口文档，不是 c3 的可恢复运行身份。完整执行证据见
   `agent_log/2026-08-20-210000-plan044-m5-v6-c3-formal-final.md`。
+
+## RONDO Multi 第一期总收口（2026-08-20）
+
+**状态**：第一期产品与验收目标全部完成。Plan 044 的 P2 文档修正提交为
+`eae16904bfa321425fbe8ada16263634f255564a`，最终通过 merge commit
+`a220b77488f48a40474cf14261b3961fcf520213` 合入并推送 `main`；此前各条目中“分支尚未合入”的表述是对应
+形成时点的历史状态，不改写。本条记录后续正式交付事实。
+
+第一期从产品基线到真实验收形成了完整纵向能力：
+
+- 产品基线建立独立的 `multidev/` 身份、默认关闭与 Local 隔离合同；既有完成证据见 Plan 022 条目。
+- M-1 交付 Team State、Event/Version、双生命周期、活动投影、revision/retry 与 wake 纵切，通过
+  `bcad5b22ca5cb226ff7bed15fec64aa8ddecf84b` 合入；这是此前 COMPLETED 缺失的独立收口索引。
+- M-2 交付选择性 route、assignment 与通知投递分离，通过
+  `dbeba04168632019a564f199837d35012f59a0d6` 合入。
+- M-3 交付 Fact 与 retained observation 的机械绑定、Event 可达权限和诚实不可用语义，通过
+  `5783ac0e798508ec730a886ffa45608b9388cca7` 合入。
+- M-4 交付 producer 可用性、Root retire、恢复边界及有界 inspect/dump/log/stats，通过
+  `601de62e1ff2ec7af0ecc9941b2ba3686cda7d01` 合入。
+- M-5 完成“协作链真实激活”和“小样本无稳定单向退化”两道独立验收门；逐批设施整改、失败历史及正式证据见
+  本页前述 Plan 044 条目和冻结日志，不在当前 WBS 重复维护。
+
+M-5 正式结果如下：
+
+- Gate 1 的 c3 a2 在 22 个请求后七项谓词全真，`team_evidence=true`，明文 evidence 14，
+  加密/未知 0；a1 的单次 `upstream_unavailable` 保持 infra 分类。
+- Gate 2 完成 20 个基础有效 run：4 对双方通过、6 对双方失败、0 个 Codex-only 完成（Codex 完成而 RONDO
+  失败），因此无需条件复跑；
+  十题均为 `no_stable_one_way_degradation`。冻结合同中的 60 是基础 20 加条件最多 40 的最大容量，
+  不是固定运行数。
+- 正式运行身份保持在 `c9fcb0fb1cd57254558e811ecddfab65e2c452df`；后续文档与 merge 不改变 receipt，
+  不创建新 campaign，也不重跑付费样本。
+- c3 账本 237/237 request settled、0 held，暴露 `$5.840974`；跨代保守合计
+  `$19.822657 < $120`。Gate 2 的 20/20 Docker 清理记录成立，最终无任务容器、网络或卷残留；
+  两轮独立终审均无剩余 P0/P1。
+
+**能力边界**：第一期证明的是在 `medium` 且明确协作指令下，RONDO Multi 的完整链路真实可达，并在该冻结
+小样本内没有观察到稳定单向退化。它没有证明自然真实任务中的 Root 会主动 `spawn_agent`，也没有证明
+RONDO 相对冻结 Codex 带来质量、速度、token 或成本收益。该缺口由当前 Multi 第二期的 Team Lens 与后置主动
+委派收益测评承接；当前路线只在 `doc/WBS.md` 与 `doc/WBS/multi-agent-trusted-evidence.md` 维护。
