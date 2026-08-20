@@ -1390,6 +1390,7 @@ rehearsal 通过。正式 Gate 1/Gate 2 仍未启动，**不是** M-5、Gate 1 �
   `$3.248131`，c3 总暴露 `$5.840974`。加 prior `$13.981683` 后，跨代保守口径为 `$19.822657 < $120`。
 - 20/20 Docker 记录 returncode 0、无 warning、`cleanup_verified`；峰值 Docker 增长 2.556GB、VHDX 增长 0，
   最低 Windows `C:` 余量约 190.835GB。结束后无任务容器、网络、卷或 build cache 残留。
-- 最终 `just eval-lock`、`just eval-multi-m5-ready` 与独立后审通过；receipt、provider、二进制、全部归档均绑定
-  clean HEAD `c9fcb0fb1cd57254558e811ecddfab65e2c452df`。完整执行证据见
+- 正式运行提交 `c9fcb0fb1cd57254558e811ecddfab65e2c452df` 上的 `just eval-lock`、
+  `just eval-multi-m5-ready` 与独立后审通过；receipt、provider、二进制、全部归档均绑定该 clean HEAD。后继提交
+  仅收口文档，不是 c3 的可恢复运行身份。完整执行证据见
   `agent_log/2026-08-20-210000-plan044-m5-v6-c3-formal-final.md`。

@@ -144,9 +144,10 @@
   code cell，0 Direct、0 失败。append-only v6-r3 rehearsal 为 20/20 code-cell、0 Direct/failed、dump 7 页/
   log 2 页；canonical mutation 必须非 deduplicated，跨线程提交顺序由 inspect-log revision 证明，wrapper end
   不作跨线程提交时钟，并严格绑定 Root wait/publish/route/update、成员 evidence 与不同二次 Version，七谓词
-  全真。正式 v6
-  c1/c2 archive、ledger、identity receipt 与 capture 已作为不可变历史保留；c3 正式资产尚不存在。当前已获
-  条件授权：在 clean harness commit 上从已验证的 sandbox 外边界启动 c3 Gate 1，只有同一身份通过才继续 Gate 2。
+  全真。正式 v6 c1/c2 archive、ledger、identity receipt 与 capture 已作为不可变历史保留；c3 已在 clean
+  harness `c9fcb0f…` 上完成 Gate 1 / Gate 2，正式 receipt、archive、ledger 与 capture 同样作为不可变证据保留。
+  后续提交仅收口文档，不是 c3 的可恢复运行身份，不改 receipt、不开新 campaign，也不重跑付费样本。本轮只证明
+  明确要求委派时协作链真实可用，以及冻结十题未观察到稳定单向退化；未验收主动委派或性能提升。
   逐轮缺陷与修复见 `doc/WBS-COMPLETED.md`；阶段目标与两道门口径见
   `doc/WBS/multi-agent-trusted-evidence.md`；任务合同见
   `plan/044-multi-m5-real-workflow-and-nondegradation-execplan.md`。

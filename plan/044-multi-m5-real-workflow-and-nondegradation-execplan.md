@@ -442,8 +442,9 @@
 - **预算与资源：通过。** c3 22 runs、237/237 request settled、0 held、最大 attempt 1，暴露 `$5.840974`；
   加 prior `$13.981683` 后为 `$19.822657 < $120`。Gate 2 的 20/20 Docker 证据 returncode 0、无 warning、
   `cleanup_verified`；峰值 Docker 增长约 2.56GB、VHDX 增长 0，最终无任务资源残留。
-- **M-5：通过。** 最终 eval-lock、ready 与独立 resume/调度/verdict 重放均通过；HEAD `c9fcb0f…` 与 receipt、
-  provider、二进制及全部归档身份一致。分支尚未合入 `main`。
+- **M-5：通过。** 正式运行提交 `c9fcb0f…` 上的 eval-lock、ready 与独立 resume/调度/verdict 重放均通过；该提交
+  与 receipt、provider、二进制及全部归档身份一致。后继提交仅收口文档，不是 c3 的可恢复运行身份。分支尚未合入
+  `main`。
 - 规划现场核对、worktree 创建与 ExecPlan：已完成。
 - **阶段 A：两轮独立验收均不通过，第二轮缺口已由审查者直接修复。** 冻结 bundle、两份运行合同、
   接线与无 API loopback 核验通过；第一轮的门 1 谓词缺陷（Root 独角戏误判、未验 Root 唤醒）已整改并经复验确认；
