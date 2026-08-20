@@ -39,13 +39,14 @@ _PREDICATE_IDS = (
     "root_resolved",
     "root_woken",
 )
-WORKFLOW_LOCK_ID = "multi-m5-workflow-v4"
-NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v4"
-# runtime-v2 can deliver member messages but cannot retain the all-text content
-# item body produced by a completed code-mode cell as evidence. Both gate locks
-# name runtime-v3 so an older row cannot be re-read as if its member evidence
-# chain were reachable.
-RUNTIME_LOCK_ID = "multi-m5-runtime-v3"
+WORKFLOW_LOCK_ID = "multi-m5-workflow-v5"
+NONDEGRADATION_LOCK_ID = "multi-m5-nondegradation-v5"
+# runtime-v4 retains an all-text terminal code-mode result only after a
+# supported non-team nested dispatch completed. Team-only cells therefore
+# cannot mint recursive evidence or invalidate their own inspect cursor. Both
+# gate locks name this exact bundle so older rows cannot be replayed against the
+# repaired provenance and pagination contract.
+RUNTIME_LOCK_ID = "multi-m5-runtime-v4"
 
 
 class M5ContractError(ValueError):

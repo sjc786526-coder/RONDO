@@ -23,8 +23,8 @@ HARD_CAP_USD = Decimal("120.00")
 # gates share, and its rows must never look like contract evidence. The cap is
 # the frozen gate-1-shaped run cap, not the authorization ceiling -- a cap is a
 # stop line, not a spending target.
-SMOKE_BATCH_ID = "multi-m5-clean-smoke-v4"
-SMOKE_LOCK_ID = "multi-m5-clean-smoke-v4"
+SMOKE_BATCH_ID = "multi-m5-clean-smoke-v5"
+SMOKE_LOCK_ID = "multi-m5-clean-smoke-v5"
 # The 2026-08-18 exploratory smoke (`multi-m5-code-mode-smoke`, USD 40, no
 # attempt limit) is spent and stays on disk as history: it ran on the pre-fix
 # bundle, where members could not complete a turn. Clean smoke v1 on runtime-v2
@@ -32,8 +32,10 @@ SMOKE_LOCK_ID = "multi-m5-clean-smoke-v4"
 # zero-taint observation that exposed the code-mode evidence gap. All historical
 # files remain read-only. Clean smoke v3 was then blocked by the execution
 # sandbox before the provider received its first reserved request, leaving an
-# intentionally preserved, unsettled pre-network row. This v4 identity carries
-# one replacement validation run for the repaired runtime-v3 and workflow-v4.
+# intentionally preserved, unsettled pre-network row. A v4 replacement was
+# retired before a provider request because runtime-v3's self-mutating inspect
+# cursor failed rehearsal. This v5 identity carries one validation run for the
+# repaired runtime-v4 and workflow-v5.
 # Its cap is derived from that run cap in `open_smoke_ledger` and stays under
 # the gates' own $120.
 SMOKE_MAX_RUNS = 1

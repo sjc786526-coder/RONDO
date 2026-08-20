@@ -50,9 +50,10 @@ from rondo_eval.multi_m5.schedule import (  # noqa: E402
 
 
 FINDING = "M5-COLLAB-FINDING: orders.legacy_total is dropped by migration 0042"
-# The first Multi source that carries both the code-mode plaintext fix and the
-# code-mode cell evidence retention fix. Earlier frozen runs stay v2 evidence.
-MULTI_SOURCE_COMMIT = "802238bf45f9b877bef1206454216ce364b5d6c7"
+# The first Multi source that retains a terminal code-mode result only after a
+# supported non-team nested dispatch and cannot recursively mint evidence from
+# team-only cells. Earlier frozen runs keep their original runtime identity.
+MULTI_SOURCE_COMMIT = "0eee6dc5ee69f0eca9e1db350148c423a2b2bf67"
 
 
 class MultiM5ContractTests(unittest.TestCase):
@@ -140,7 +141,7 @@ class MultiM5ContractTests(unittest.TestCase):
             (),
         )
 
-    def test_runtime_lock_is_pending_until_the_bundle_is_frozen(self) -> None:
+    def test_runtime_lock_names_the_frozen_bundle(self) -> None:
         identity = load_runtime_identity()
         self.assertEqual(identity.source_commit, MULTI_SOURCE_COMMIT)
         self.assertTrue(
@@ -157,8 +158,8 @@ class MultiM5ContractTests(unittest.TestCase):
             self.assertRegex(identity.codex_sha256 or "", r"^[0-9a-f]{64}$")
 
 
-class MultiM5V4ContractTests(unittest.TestCase):
-    """What v4 froze after the real code-mode evidence gap was observed."""
+class MultiM5V5ContractTests(unittest.TestCase):
+    """What v5 froze after the recursive-evidence pagination gap was observed."""
 
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
@@ -188,8 +189,8 @@ class MultiM5V4ContractTests(unittest.TestCase):
         # completed code-mode cell. Accepting it here would make the member
         # evidence predicate structurally unreachable again.
         for name, loader in (
-            ("multi-m5-workflow-v4", load_workflow_contract),
-            ("multi-m5-nondegradation-v4", load_nondegradation_contract),
+            ("multi-m5-workflow-v5", load_workflow_contract),
+            ("multi-m5-nondegradation-v5", load_nondegradation_contract),
         ):
             with self.subTest(lock=name):
                 path = self._mutated(name, runtime_lock_id="multi-m5-runtime-v2")
@@ -203,19 +204,19 @@ class MultiM5V4ContractTests(unittest.TestCase):
         self.assertEqual(load_workflow_contract().raw["infra_taint_effect"], "infra_failed")
         for value in ("ignored", "counts_as_pass", None):
             with self.subTest(value=value):
-                path = self._mutated("multi-m5-workflow-v4", infra_taint_effect=value)
+                path = self._mutated("multi-m5-workflow-v5", infra_taint_effect=value)
                 with self.assertRaises(M5ContractError):
                     load_workflow_contract(path)
 
     def test_retry_backoff_comes_from_the_lock(self) -> None:
         contract = load_nondegradation_contract()
         self.assertEqual(contract.retry_backoff_seconds, 2.0)
-        path = self._mutated("multi-m5-nondegradation-v4", provider_retry_backoff_seconds="5")
+        path = self._mutated("multi-m5-nondegradation-v5", provider_retry_backoff_seconds="5")
         self.assertEqual(load_nondegradation_contract(path).retry_backoff_seconds, 5.0)
         for value in ("0", "31", "", None):
             with self.subTest(value=value):
                 path = self._mutated(
-                    "multi-m5-nondegradation-v4", provider_retry_backoff_seconds=value
+                    "multi-m5-nondegradation-v5", provider_retry_backoff_seconds=value
                 )
                 with self.assertRaises(M5ContractError):
                     load_nondegradation_contract(path)
@@ -236,11 +237,11 @@ class MultiM5V4ContractTests(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 path = self._mutated(
-                    "multi-m5-nondegradation-v4", unpriced_settlement={**block, **change}
+                    "multi-m5-nondegradation-v5", unpriced_settlement={**block, **change}
                 )
                 with self.assertRaises(M5ContractError):
                     load_nondegradation_contract(path)
-        path = self._mutated("multi-m5-nondegradation-v4", unpriced_settlement=None)
+        path = self._mutated("multi-m5-nondegradation-v5", unpriced_settlement=None)
         with self.assertRaises(M5ContractError):
             load_nondegradation_contract(path)
 

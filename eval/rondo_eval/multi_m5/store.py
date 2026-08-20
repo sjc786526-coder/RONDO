@@ -12,10 +12,10 @@ from .archive import REQUIRED_ARCHIVE_FIELDS
 ARCHIVE_RELPATH = "eval-data/multi-m5/archives/records.jsonl"
 CAPTURE_RELDIR = "eval-data/multi-m5/captures"
 BUDGET_RELPATH = "eval-data/budgets/multi-m5-phase-b.json"
-SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/clean-smoke-v4-records.jsonl"
+SMOKE_ARCHIVE_RELPATH = "eval-data/multi-m5/archives/clean-smoke-v5-records.jsonl"
 # The exploratory runs, runtime-v2 clean smokes, and sandbox-blocked v3 row stay
-# immutable. Runtime-v3 gets a fresh one-run v4 identity for the replacement.
-SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-clean-smoke-v4.json"
+# immutable. Runtime-v4 gets a fresh one-run v5 identity for the replacement.
+SMOKE_BUDGET_RELPATH = "eval-data/budgets/multi-m5-clean-smoke-v5.json"
 
 
 class StoreError(ValueError):

@@ -1044,17 +1044,17 @@ class MultiM5SmokeIsolationTests(unittest.TestCase):
     """
 
     def test_smoke_batch_cap_and_paths_are_separate_from_phase_b(self) -> None:
-        self.assertEqual(SMOKE_BATCH_ID, "multi-m5-clean-smoke-v4")
-        self.assertEqual(SMOKE_LOCK_ID, "multi-m5-clean-smoke-v4")
+        self.assertEqual(SMOKE_BATCH_ID, "multi-m5-clean-smoke-v5")
+        self.assertEqual(SMOKE_LOCK_ID, "multi-m5-clean-smoke-v5")
         self.assertNotEqual(SMOKE_BATCH_ID, BATCH_ID)
         self.assertNotEqual(SMOKE_LOCK_ID, "multi-m5-workflow-v1")
         self.assertLess(SMOKE_CAP_USD, HARD_CAP_USD)
         root = _common_root()
         self.assertTrue(
-            str(smoke_ledger_path(root)).endswith("multi-m5-clean-smoke-v4.json")
+            str(smoke_ledger_path(root)).endswith("multi-m5-clean-smoke-v5.json")
         )
         self.assertTrue(
-            str(smoke_archive_path(root)).endswith("clean-smoke-v4-records.jsonl")
+            str(smoke_archive_path(root)).endswith("clean-smoke-v5-records.jsonl")
         )
         self.assertNotEqual(smoke_ledger_path(root), budget_ledger_path(root))
         self.assertNotEqual(smoke_archive_path(root), archive_path(root))
