@@ -104,17 +104,18 @@ mailbox、wait/resume/interrupt、工具执行、sandbox 与审批。本产品�
 
 ### 并行工程包 A：Team State 序列性质测试
 
-**目标**：在现有 `codex-team-state` 测试体系内，探索 publish、双生命周期、route、delivery、retry、wake、
-availability 与 retire 的跨功能组合，补充固定产品纵切不容易覆盖的操作序列。
+**目标**：在现有 `codex-team-state` 测试体系内，探索 publish、双生命周期、route、delivery、retry 与 wake
+的跨功能组合，补充固定产品纵切不容易覆盖的操作序列。availability/retire 作为首选扩展轴；若首版体量接近上限，
+先后移该轴，不削弱核心组合链。既有确定性测试继续负责单点合同和永久回归。
 
 **形态**：
 
-- 一个默认 ignored 的 property test、一份只记录可观察抽象状态的薄 reference state、共享符号绑定与主动入口；
-  availability 作为外部环境轴保存，不混入 canonical revision；
-- 固定 Root 与少量成员，并由 harness 提供不可被 shrink 删除的有效 Event 起点；后续操作使用符号引用，
-  reference model 与真实 store 通过同一绑定表解析；
-- 不适用的符号操作由 harness 明确记为 `NotApplicable`，双方均不调用产品 API，也不把它伪装成产品错误；
-- 每步只核对 revision、outcome class、canonical identity、对象数量、活动/权限视图和关键不变量；
+- 一个默认 ignored 的 property test、一份只记录可观察抽象状态的薄 reference state、一个主动入口，以及固定 Root
+  与少量成员；复用既有 fixture、测试模块和共享 build-lock；
+- 生成与 shrink 后的步骤必须保持有效引用，reference model 与真实 store 必须命中同一个 canonical 对象；不适用步骤
+  不调用产品 API，也不改变任一侧状态。如何 bootstrap、索引和绑定由实施 plan 结合 live API 决定，WBS 不指定数据结构；
+- 只比较可观察 outcome、revision、canonical identity、对象数量、权限视图和关键不变量；精确逐步矩阵在实施 plan 冻结；
+- 若纳入 availability，它保持外部环境轴，不混入 canonical revision；
 - 失败保留 seed 并 shrink；真实缺陷的最小反例转成既有模块中的普通确定性回归。
 
 **完成口径**：
@@ -130,36 +131,61 @@ availability 与 retire 的跨功能组合，补充固定产品纵切不容易�
 - 不随机轰炸已有确定性测试覆盖的一般错误输入，也不重复 re-register 身份保持测试；
 - 首批不纳入 Fact、批量生命周期、真实 residency/mailbox、provider retry、compaction、Tokio 调度、
   工具 runtime 异步接缝、Docker、API 或模型调用；
-- 精确依赖、锁文件、case 数、操作权重和命令名在实施 plan 中根据 live workspace 冻结，不在 WBS 写死。
+- availability/retire 不构成首版硬门；若 reference model、运行时间或审查体量超限，优先后移；
+- 精确依赖、锁文件、case 数、操作权重、命令名和生成策略在实施 plan 中根据 live workspace 冻结，不在 WBS 写死。
 
 ### 并行工程包 B：RONDO Team Lens
 
 **定位**：Team Lens 是 Codex 原生 rollout trace 的本地离线 reducer/viewer，输出 Team Report。它不是第二套
-tracing facility、benchmark、审计平台或常开 telemetry，也不参与 runtime 调度。
+tracing facility、benchmark、审计平台或常开 telemetry，也不参与 runtime 调度。同一个 Team Lens 任务分成
+数据 MVP 和完整静态可视化两个顺序阶段；任务只有两个阶段都完成才收口。
 
-**首批路线**：
+#### 阶段 1：数据 MVP
 
-1. 先对冻结 Codex 与 RONDO 当前原生 rollout bundle 做字段盘点和缺口验证，复用现有 trace/reducer 及第一期
-   collector 经验；不预设需要产品 hook。
-2. 从同一原生数据源归约出规范化、body-free 的 `team_view.json`，再生成可直接离线打开和归档的单文件
-   `team_report.html`。
-3. 两侧共同展示线程/Agent、inference、token、工具、code cell、terminal、spawn/message/followup/wait、
-   时间与峰值并发；RONDO 额外展示 sampling 时的 Team projection、revision、Event/Version/route 与 Fact flow。
-   冻结 Codex 不具备的 Team State 面板明确显示“不适用”，不伪造空事件。
+先对冻结 Codex 与 RONDO 当前原生 rollout bundle 做字段盘点和缺口验证，复用既有 trace/reducer 与第一期 collector
+经验；不预设需要产品 hook。随后由同一个消费者归约出规范化、body-free、确定性的 `team_view.json`：
 
-**完成口径**：
+- 记录可机械取得的线程/Agent、turn/inference、工具与 terminal、Agent interaction、时序和用量信息；
+- 对 RONDO 记录可机械取得的 Team revision、projection、Event/Version/route/Fact 身份与关系；
+- 每类字段显式标记可用、部分可用、不支持或不适用；不猜测缺失语义，也不把 Codex 缺少的 Team State 伪造成空事件；
+- 精确 schema 和字段表由本任务 plan 根据真实 bundle 冻结，不在长程 WBS 预先展开。
+
+阶段 1 完成口径：
 
 - 同一个消费者可以读取冻结 Codex 与 RONDO 的原生 trace，且不修改冻结 Codex；
 - 固定 bundle 重复归约得到确定性相同的规范化结果，缺失或不支持字段显式降级，不猜测、不静默拼接；
-- 报告可展示 Agent swimlane、团队注意力、Event/Version/Fact 流和摘要卡中的适用子集；
-- reduced JSON 与 HTML 不复制 prompt、response、命令输出或 Fact 正文，不分析隐藏推理；
+- `team_view.json` 不复制 prompt、response、命令输出或 Fact 正文，不分析隐藏推理；
+- 离线 fixture 与定向测试覆盖归约、跨产品读取和降级路径；不需要 API、Docker 或模型调用。
+
+**条件 hook 门**：阶段 1 必须先完成零 hook 缺口验证。只有机械证据证明核心视图被缺少的 RONDO 结构化语义阻断，
+才允许在同一个 Team Lens 任务内增加一个窄 hook 子批：先在 plan 中冻结缺口与最小字段，复用原生 writer、上下文和
+reducer，只补 RONDO 必需语义。不得预选具体 hook，不修改冻结 Codex，也不得建立第二套 trace writer、序号、
+thread identity、mailbox 记录或独立 Team Trace JSONL。
+
+#### 阶段 2：完整静态可视化
+
+阶段 2 只消费阶段 1 的 `team_view.json`，不重新解析 raw rollout bundle。输出可直接打开、归档、截图和用于汇报的
+单文件 `team_report.html`，至少覆盖：
+
+- 两侧共有的 Agent swimlane/timeline、模型与工具活动、通信/等待和摘要卡；
+- RONDO 专有的 Team Attention Map、Event/Version 关系和 Fact flow；
+- 冻结 Codex 不适用的 Team State 区域、缺失数据和部分失败的清晰说明。
+
+报告应具备适合真实运行汇报的图例、身份/时序一致性和必要的浏览能力，但图形库、布局、筛选交互及视觉细节由任务
+plan 和实现审查决定。它是离线静态产品，不引入服务端、数据库、在线 UI、遥测后台或独立前端构建体系。
+
+阶段 2 完成口径：
+
+- 代表性的冻结 Codex 与 RONDO fixture 均能生成可离线打开的报告，同一输入重复生成的结果确定；
+- 各视图对同一对象身份和时间顺序的解释一致，缺失、部分可用和不适用状态可见；
+- HTML 不复制 prompt、response、命令输出或 Fact 正文，不依赖外部网络资源；
+- 报告生成与关键视图有定向测试；不需要 API、Docker 或模型调用。
+
+**共同数据边界**：
+
 - 原始 trace 仅在指定运行中显式开启并保留在本地，按其可能含 prompt、response 与工具 payload 的敏感原始资产处理，
   不由 Team Lens 自动提交或长期归档；
-- 离线 fixture 与定向测试覆盖 reducer 和报告生成；首批不需要 API、Docker 或模型调用。
-
-**扩张门**：只有零 hook 原型机械证明缺少的结构化 projection 或 canonical mutation 时点确实阻断核心报告，
-才另立一个第二批窄任务，在 RONDO 精确位置补最少语义事件。不得提前新增 trace writer、第二套序号、
-thread identity、mailbox 记录或独立 Team Trace JSONL；冻结 Codex 始终不改源码。
+- `team_view.json` 是 reducer 与可视化之间唯一的数据合同；可视化需求不得反向要求保存正文或重建运行时 tracing。
 
 Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态；Team Lens 用于还原跨线程的实际团队行为。
 二者观察对象不同，不互相替代，也不重复建设。

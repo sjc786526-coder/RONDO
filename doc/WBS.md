@@ -84,11 +84,13 @@
 - **3c RONDO Multi**：第一期已完成、归档并合入 `main`；执行过程、正式数字与验收证据只保留在
   `doc/WBS-COMPLETED.md`、冻结 plan、agent log 和结果资产中。第二期按下列顺序推进：
   - **并行包 A — Team State 序列性质测试**：在现有 `codex-team-state` 测试体系内增加一个默认 ignored 的
-    property test、薄参考状态与主动入口，复用既有 fixture 和共享 build-lock；不新建 crate、runner、corpus
-    或通用 fuzz 基础设施，首版不碰 Fact、真实 mailbox 与 Tokio 调度。
-  - **并行包 B — Team Lens**：先只消费 Codex 原生 rollout trace，离线抽取、聚合并生成
-    `team_view.json` 与可直接打开的静态 `team_report.html`。首批不改产品 runtime、trace writer/schema 或冻结
-    Codex；只有零改造原型机械证明缺少关键 RONDO 语义时，才另行评审一个窄 hook 批次。
+    property test、薄参考状态与主动入口，复用既有 fixture 和共享 build-lock；WBS 只约束 shrink 后引用有效、
+    双方命中同一对象和不适用步骤不改变状态，不预定具体 bootstrap 或绑定表实现。availability/retire 是体量超限时
+    优先后移的扩展轴；不新建 crate、runner、corpus 或通用 fuzz 基础设施。
+  - **并行包 B — Team Lens**：同一任务分两阶段完成。阶段 1 只消费 Codex 原生 rollout trace，形成字段缺口表与
+    确定性的 body-free `team_view.json`；阶段 2 只消费该数据合同，生成可直接打开、用于汇报的单文件
+    `team_report.html`。先零 hook；只有阶段 1 证明核心视图缺少必要 RONDO 语义时，才在同一任务内加入一个窄 hook
+    子批。始终不修改冻结 Codex，不新建第二套 trace writer、在线服务或前端工程体系。
   - **后置包 C — 主动委派收益对比**：A、B 完成后再冻结任务、轮数与预算。冻结 Codex 与 RONDO 都启用同一
     Multi-Agent V2 工具面，使用同一模型、`medium` effort、同一非任务特化的 proactive developer instruction、
     同一并发上限和成员模型、同一自然任务 prompt；只有 RONDO 额外启用 Team State。两侧均开启原生 rollout
