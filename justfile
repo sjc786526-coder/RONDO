@@ -525,7 +525,8 @@ eval-b7-resolve-diagnosis chain_id category disposition evidence_code:
         --disposition "{{disposition}}" \
         --evidence-code "{{evidence_code}}"
 
-# Retire an idle active campaign after a confirmed local implementation defect.
+# Retire an active campaign after a confirmed local implementation defect. A
+# running paid slot must already have one complete usage-priced settlement.
 eval-b7-retire-local-defect:
     @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \

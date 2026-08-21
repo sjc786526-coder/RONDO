@@ -41,7 +41,7 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     load_campaign_identity,
 )
 from rondo_eval.terminal_bench.scoring import TaskOutcome  # noqa: E402
-from rondo_eval.terminal_bench import baseline_cli  # noqa: E402
+from rondo_eval.terminal_bench import baseline_cli, baseline_diagnosis  # noqa: E402
 from rondo_eval.terminal_bench.baseline_identity import (  # noqa: E402
     CampaignIdentityGenerationError,
     required_successor_prior,
@@ -588,6 +588,54 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                     len(identity.slots) - 1,
                 )
                 self.assertEqual(snapshot["slots"][0]["estimated_usd"], "0.200000")
+
+    def test_local_defect_retirement_uses_only_complete_usage_settlement(self) -> None:
+        identity = mock.Mock()
+        identity.slot.return_value.run_id = "paid-run"
+        state = {
+            "slots": [
+                {"slot_id": "wire-canary", "status": "completed"},
+                {"slot_id": "paid-slot", "status": "running"},
+            ]
+        }
+        budget = {
+            "runs": {
+                "paid-run": {
+                    "cap_usd": "40.000000",
+                    "spent_usd": "0.128314",
+                    "stopped": False,
+                    "stop_reason": None,
+                    "requests": {
+                        "request-1": {
+                            "status": "settled",
+                            "reserved_usd": "7.554000",
+                            "charged_usd": "0.128314",
+                            "usage_valid": True,
+                            "attempt_count": 1,
+                            "settlement_kind": "usage_priced",
+                        }
+                    },
+                }
+            }
+        }
+
+        slot_id, spent = baseline_diagnosis._running_local_defect_settlement(
+            identity, state, budget
+        )
+
+        self.assertEqual(slot_id, "paid-slot")
+        self.assertEqual(spent, "0.128314")
+        identity.slot.assert_called_once_with("paid-slot")
+
+        budget["runs"]["paid-run"]["requests"]["request-1"][
+            "usage_valid"
+        ] = False
+        with self.assertRaisesRegex(
+            SystemExit, "running paid slot has no complete usage settlement"
+        ):
+            baseline_diagnosis._running_local_defect_settlement(
+                identity, state, budget
+            )
 
     def test_post_oracle_worker_returns_after_wire_then_advances_paid_step(self) -> None:
         identity = self._identity_v2()

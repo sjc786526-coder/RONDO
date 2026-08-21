@@ -152,6 +152,22 @@ class _ResultFixture:
         campaign_schema_version: int | None = None,
     ) -> CampaignPublicationContext:
         provider = self._live_result("campaign-publication-fixture").prepared.spec.provider
+        schema_version = (
+            campaign_schema_version
+            if campaign_schema_version is not None
+            else (7 if campaign_product is not None else 1)
+        )
+        selected_profile = {
+            **provider.to_public_dict(),
+            "max_guardian_logical_requests": 3,
+        }
+        if schema_version < 7:
+            selected_profile.update(
+                {
+                    "frozen_codex_model_catalog_source_commit": "a" * 40,
+                    "frozen_codex_model_catalog_sha256": "b" * 64,
+                }
+            )
         return CampaignPublicationContext(
             campaign_id="p2-b7-canary-baseline-test",
             campaign_lock_sha256="7" * 64,
@@ -160,11 +176,7 @@ class _ResultFixture:
             ),
             campaign_round_id="aa-rondo-1",
             campaign_attempt=attempt,
-            campaign_schema_version=(
-                campaign_schema_version
-                if campaign_schema_version is not None
-                else (7 if campaign_product is not None else 1)
-            ),
+            campaign_schema_version=schema_version,
             taskset_sha256="8" * 64,
             canary_catalog_sha256="9" * 64,
             side=side,
@@ -175,12 +187,7 @@ class _ResultFixture:
                 "peak_rss_bytes": 1024,
                 "exit_code": exit_code,
             },
-            selected_profile={
-                **provider.to_public_dict(),
-                "frozen_codex_model_catalog_source_commit": "a" * 40,
-                "frozen_codex_model_catalog_sha256": "b" * 64,
-                "max_guardian_logical_requests": 3,
-            },
+            selected_profile=selected_profile,
             campaign_product=campaign_product,
         )
 
@@ -198,14 +205,20 @@ class _ResultFixture:
             comparison_overrides={"product": product.value}
         )
         provider = self._live_result("campaign-identity-fixture").prepared.spec.provider
+        selected_profile = {
+            **provider.to_public_dict(),
+            "max_guardian_logical_requests": 3,
+        }
+        if historical:
+            selected_profile.update(
+                {
+                    "frozen_codex_model_catalog_source_commit": "a" * 40,
+                    "frozen_codex_model_catalog_sha256": "b" * 64,
+                }
+            )
         return replace(
             identity,
-            selected_profile={
-                **provider.to_public_dict(),
-                "frozen_codex_model_catalog_source_commit": "a" * 40,
-                "frozen_codex_model_catalog_sha256": "b" * 64,
-                "max_guardian_logical_requests": 3,
-            },
+            selected_profile=selected_profile,
         )
 
     @staticmethod
@@ -1232,6 +1245,39 @@ class TerminalBenchResultTests(_ResultFixture, unittest.TestCase):
             PairIdentityError, "publication campaign topology is invalid"
         ):
             self._campaign_publication(side=Side.RONDO, attempt=5).validate()
+
+    def test_campaign_publication_validates_the_schema_specific_profile_shape(self) -> None:
+        historical = self._campaign_publication(campaign_schema_version=6)
+        historical.validate()
+
+        current = self._campaign_publication(
+            campaign_schema_version=7,
+            campaign_product=Product.RONDO_LOCAL,
+        )
+        current.validate()
+        self.assertNotIn(
+            "frozen_codex_model_catalog_source_commit", current.selected_profile
+        )
+        self.assertNotIn(
+            "frozen_codex_model_catalog_sha256", current.selected_profile
+        )
+
+        with self.assertRaisesRegex(
+            PairIdentityError, "selected campaign profile differs from schema v7"
+        ):
+            replace(
+                current,
+                selected_profile={
+                    **current.selected_profile,
+                    "frozen_codex_model_catalog_sha256": "b" * 64,
+                },
+            ).validate()
+        incomplete = dict(current.selected_profile)
+        del incomplete["provider_profile_sha256"]
+        with self.assertRaisesRegex(
+            PairIdentityError, "selected campaign profile differs from schema v7"
+        ):
+            replace(current, selected_profile=incomplete).validate()
 
     def test_infra_diagnostic_rejects_unknown_or_non_docker_probe(self) -> None:
         run_id = "20260810-010000019-tb-codex-r1"
