@@ -1504,3 +1504,10 @@ RONDO Team State。结果只构成冻结三题的条件性案例，不估计总�
   `agent_log/2026-08-21-062443-plan050-phase-b-reacceptance.md`、
   `agent_log/2026-08-21-063528-plan050-phase-b-collaboration-return-remediation.md` 与
   `agent_log/2026-08-21-064519-plan050-phase-b-collaboration-return-rereview.md`。
+- Plan 050 的语义化协作展示可从既有本地原始证据离线重建，无需重跑付费槽位：保留 ignored
+  `eval-data/plan-050/paid/plan-050-paid-v1/`，从各有效 run 的 `rollout-trace/trace.jsonl` 与 `payloads/` 按
+  `seq`、agent/thread 和 typed interaction 关联 spawn、`send_message`、`agent_result`、`team_publish`（含
+  `title/summary/handoff`）及 `team_update`，再与 verifier、usage 和费用终态合并生成新页面。现有
+  `team_view.json`/HTML 是 body-free 投影，不能单独恢复交接正文；当时未采全的 Fact metadata、route 与 attention
+  字段也不得事后补造。若原始 ignored 目录被删除，语义正文将无法从受跟踪产物恢复；仅为改善现有 handoff 展示不需要
+  重跑，只有补采缺失字段或取得新的成功案例才需要另立运行。
