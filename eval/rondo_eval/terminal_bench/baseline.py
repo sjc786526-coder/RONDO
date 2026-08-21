@@ -1034,6 +1034,33 @@ class CampaignStateLedger:
         state["terminal_reason"] = reason
         self._persist(state)
 
+    def retire_preflight_blocked(self, *, reason: str) -> None:
+        """Retire a pristine v7 identity after its zero-API preflight fails."""
+
+        expected_reason = (
+            "diagnosed_campaign_defect:"
+            "local_implementation_defect:preflight_projection"
+        )
+        state = self._require_state()
+        if not self.identity.enforces_fair_comparison or reason != expected_reason:
+            raise BaselineError("preflight campaign retirement is invalid")
+        if state["status"] != "running":
+            raise BaselineError("campaign state is already terminal")
+        if state.get("diagnoses") or any(
+            row["status"] != CampaignSlotStatus.PLANNED.value
+            or row["estimated_usd"] != "0.000000"
+            for row in state["slots"]
+        ):
+            raise BaselineError("preflight campaign retirement is not pristine")
+        finished_at = int(time.time())
+        for row in state["slots"]:
+            row["status"] = CampaignSlotStatus.SKIPPED.value
+            row["reason"] = "campaign_retired_after_preflight_local_defect"
+            row["finished_at_unix"] = finished_at
+        state["status"] = BaselineStatus.BLOCKED.value
+        state["terminal_reason"] = reason
+        self._persist(state)
+
     def require_diagnosis(
         self,
         *,

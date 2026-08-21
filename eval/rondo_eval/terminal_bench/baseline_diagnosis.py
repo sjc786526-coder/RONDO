@@ -56,12 +56,19 @@ def main(argv: list[str] | None = None) -> int:
             if snapshot["status"] != "running":
                 raise SystemExit("campaign diagnosis can only update a running identity")
             if args.retire_local_defect:
-                state.retire_blocked(
-                    reason=(
-                        "diagnosed_campaign_defect:"
-                        "local_implementation_defect:harness_runtime"
-                    )
+                reason = (
+                    "diagnosed_campaign_defect:"
+                    "local_implementation_defect:harness_runtime"
                 )
+                if all(row["status"] == "planned" for row in snapshot["slots"]):
+                    state.retire_preflight_blocked(
+                        reason=(
+                            "diagnosed_campaign_defect:"
+                            "local_implementation_defect:preflight_projection"
+                        )
+                    )
+                else:
+                    state.retire_blocked(reason=reason)
             elif all(item is not None for item in supplied):
                 state.resolve_diagnosis(
                     chain_id=args.chain_id,

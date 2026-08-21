@@ -37,6 +37,7 @@ from rondo_eval.contracts import (
 from rondo_eval.terminal_bench.baseline import (
     BASE_ROUNDS,
     CampaignLockRegistration,
+    CampaignStateLedger,
     FAIR_COMPARISON_SCHEMA_VERSION,
     BaselineError,
     BaselineRun,
@@ -859,6 +860,26 @@ class _CampaignFixture:
 
 
 class CampaignExecutionOrderTests(unittest.TestCase):
+    def test_pristine_v7_identity_can_retire_after_zero_api_preflight_defect(
+        self,
+    ) -> None:
+        identity = _CampaignFixture.v7()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                ledger.retire_preflight_blocked(
+                    reason=(
+                        "diagnosed_campaign_defect:"
+                        "local_implementation_defect:preflight_projection"
+                    )
+                )
+                snapshot = ledger.snapshot()
+        self.assertEqual(snapshot["status"], "blocked")
+        self.assertTrue(all(row["status"] == "skipped" for row in snapshot["slots"]))
+        self.assertTrue(
+            all(row["estimated_usd"] == "0.000000" for row in snapshot["slots"])
+        )
+
     def test_historical_campaign_request_keeps_host_provider_defaults(self) -> None:
         paths = RepoPaths.discover(Path.cwd())
         identity = _CampaignFixture.v6()
