@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "lock_id": "multi-proactive-delegation-v1",
+  "status": "frozen",
+  "plan": "049",
+  "phase_a": {"network": false, "docker": false, "provider": false, "identity_class": "rehearsal"},
+  "runtime": {
+    "lock": "eval/locks/multi-m5-runtime-v4.json",
+    "lock_id": "multi-m5-runtime-v4",
+    "rondo_binary_sha256": "c64ff001fe7bec20c84a6bbea84f077ffffdcddc8b796b2f663513d5d7a6c631",
+    "codex_binary_sha256": "8bd5f096af8302c0d5bf272a15a563d243fe77e8b704b749321a437c815f1a80"
+  },
+  "taskset": {
+    "path": "eval/tasksets/multi-proactive-delegation-v1.json",
+    "sha256": "151770436a2d46f9993d5ee6bde127850f696b4f36ff32b70f631256fc51e05b",
+    "catalog_path": "eval/tasksets/p2-b7-canary-catalog-v4.json",
+    "catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf"
+  },
+  "policy": {
+    "path": "eval/templates/multi-proactive-delegation/proactive-policy-v1.md",
+    "sha256": "2263cd6c5e03e884a509d9478a4eedae37bff5844a0e6f605d9fde6355f30ccd"
+  },
+  "provider": {
+    "name": "relay",
+    "wire_api": "responses",
+    "base_url": "https://www.cctq.ai/v1",
+    "root_model": "gpt-5.6-terra",
+    "root_effort": "medium",
+    "member_model": "gpt-5.6-terra",
+    "member_effort": "medium",
+    "guardian_model": "gpt-5.6-terra",
+    "guardian_effort": "medium",
+    "request_limit_per_run": 80,
+    "request_attempt_limit": 5,
+    "retry_backoff_seconds": 2,
+    "retry_statuses": [429, 500, 502, 503, 504]
+  },
+  "price_snapshot": {
+    "date": "2026-08-18",
+    "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+    "pricing_page_url": "https://developers.openai.com/api/docs/pricing",
+    "model_id": "gpt-5.6-terra",
+    "input_usd_per_million": "2",
+    "cached_input_usd_per_million": "0.2",
+    "output_usd_per_million": "12",
+    "long_context_threshold_tokens": 272000,
+    "long_context_input_multiplier": "2",
+    "long_context_output_multiplier": "1.5",
+    "cache_write_input_multiplier": "1.25"
+  },
+  "execution": {
+    "terminal_bench_slot_concurrency": 1,
+    "max_concurrent_threads_per_session": 4,
+    "provider_request_concurrency": 4,
+    "approval_policy": "on-request",
+    "sandbox_mode": "workspace-write",
+    "network_access_in_phase_b": true,
+    "rollout_trace_root": "/logs/agent/rollout-trace",
+    "codex_team_state": null,
+    "rondo_team_state": true
+  },
+  "recovery": {
+    "max_infra_attempts_per_slot": 5,
+    "max_infra_attempts_total": 40,
+    "valid_task_failure_is_terminal": true,
+    "resume_only_untrusted_or_missing_side": true
+  },
+  "budget": {
+    "phase_b_hard_cap_usd": "100.00",
+    "minimum_confirmed_balance_usd": "100.00",
+    "formal_namespace": "plan-049-paid-v1",
+    "rehearsal_namespace": "plan-049-rehearsal-v1",
+    "batch_id": "plan-049-paid-v1",
+    "usage_envelope": {
+      "max_input_tokens": 272000,
+      "max_output_tokens": 128000
+    },
+    "request_reservation_usd": "2.22",
+    "max_concurrent_main_requests": 4,
+    "guardian_reserved_slots": 1,
+    "max_guardian_logical_requests": 3,
+    "per_run_spend_allowance_usd": "4.00",
+    "per_run_cap_usd": "15.10",
+    "max_run_slots": 66,
+    "unpriced_stop_threshold": 1
+  },
+  "artifacts": {
+    "ignored_root": "eval-data/plan-049",
+    "per_run": [
+      "rollout-trace",
+      "settled.json",
+      "execution.json",
+      "api-metadata.json",
+      "shared-model-catalog.json",
+      "team_view.json",
+      "team_report.html",
+      "run.json"
+    ],
+    "aggregate": "aggregate.json",
+    "replay_fixture": "eval/fixtures/multi-proactive-delegation-v1/body-free-replay-v1.json",
+    "replay_fixture_sha256": "305c25db9eaee162ca529a820d53dedc0e91b71c530e669d9e569aa50426f2dd",
+    "tracked_body_fields": false
+  },
+  "activation": {
+    "pilot_run_count": 6,
+    "requires_all_valid_terminal": true,
+    "requires_policy_hash_match": true,
+    "requires_all_team_lens_outputs": true,
+    "minimum_trace_backed_root_spawn_accepts": 1
+  }
+}

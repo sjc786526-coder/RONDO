@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
-最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ 当前下一包：C 的无费用准备阶段
+最后更新：2026-08-21 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
+第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A/B 已完成；activation pilot 阴性，正式十题按合同未运行
 
 ## 定位
 
@@ -99,8 +99,8 @@ mailbox、wait/resume/interrupt、工具执行、sandbox 与审批。本产品�
 
 ## 第二期：稳定性、可观测性与主动委派收益
 
-第二期由两个**并行工程包**和一个**后置测评包**组成。A/B 已分别完成并通过验收；当前依赖门已满足，下一包是 C。
-C 自身是一项完整任务，但按“无费用准备 → 单独授权后的付费执行”顺序分成两个阶段，不能把未验证设施直接带入付费运行。
+第二期由两个**并行工程包**和一个**后置测评包**组成。A/B/C 均已完成并通过验收，Multi 当前没有已排期的下一包。
+C 自身是一项完整任务，已按“无费用准备 → 单独授权后的付费执行”顺序完成两个阶段，没有把未验证设施直接带入付费运行。
 
 ### 并行工程包 A：Team State 序列性质测试
 
@@ -201,9 +201,12 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 ### 后置测评包 C：主动委派收益对比
 
 **依赖**：A、B 均已完成，Team Lens 的跨产品共有字段与 RONDO 专有字段已可用。C 是一个计划与任务合同，顺序分为
-阶段 A 和阶段 B；当前只授权阶段 A，阶段 B 的真实 API 开始动作仍须单独明确授权。
+阶段 A 和阶段 B；阶段 A 的本地无费用实现、验收整改与离线证据已通过独立验收。阶段 B 已完成固定 activation pilot：
+Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity 关闭，旧首槽没有 provider 重放；最终六个 pilot
+均为 attempt 1、trace available，2 个成功、4 个有效任务失败、零 infra，累计 `2.533684 USD`。两侧 Root spawn 均为 0，
+因此 activation 阴性并按冻结合同停止，正式十题未运行。
 
-#### 阶段 A：无费用准备（当前下一任务）
+#### 阶段 A：无费用准备（独立验收通过，`paid-ready`）
 
 - 冻结自然任务集、共同 proactive policy、模型/effort、成员配置、并发、deadline、外部判定、成对顺序、结果分类、
   Team Lens 产物和阶段 B 的费用/恢复边界；不得借准备阶段偷偷运行付费样本。
@@ -214,15 +217,15 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 - 阶段 A 的退出条件必须给出明确的 paid-ready/blocked 结论和阶段 B 启动清单，但不得创建“已开始付费”的 receipt、
   请求或结果身份。付费 provider 连通性若无法在零费用条件下证明，应诚实留作阶段 B 首个小型 activation pilot 的门。
 
-#### 阶段 B：付费测评与观测（尚未授权）
+#### 阶段 B：付费测评与观测（已完成；activation 未激活）
 
 - 获得明确开始授权后，先运行小规模 activation pilot，确认两侧收到冻结策略、原生 trace 可读且至少形成可解释的主动
   委派观测，再进入冻结的成对任务；不为追求激活临时强制 spawn 或改写自然任务。
 - 阶段 A 应预留宽容的自主修正与恢复空间：可恢复的 provider/网络/归档/编排问题可在不改变公平合同的前提下修复、
   resume 和重跑，不采用过窄的单错即停或每类极小重试上限。费用仍须在阶段 A 冻结为宽松但有限、且不高于可用余额的
   总边界；未知用量、合同漂移、数据边界或不可安全恢复的状态继续 fail-closed。
-- 阶段 B 完成后分别报告主动委派激活、外部任务结果和时间/token/工具/文件操作等成本；Team Lens 是描述性观测，
-  不能单独推出因果收益。
+- 正式结果是“当前共同 policy 与固定 pilot 任务未激活主动委派”。它不能推出 Team State 的委派收益，也不通过追加
+  有效 pilot、换题或强制 spawn 把阴性结果采成阳性；外部结果、费用与 Team Lens 描述保留在 Plan 049 和完成日志。
 
 **公平合同**：
 

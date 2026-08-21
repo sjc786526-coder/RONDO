@@ -35,6 +35,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     canonical_request_sha256,
     canonical_guardian_request_sha256,
     completed_run_accounting,
+    load_validated_budget_ledger_state,
     milestone_metadata_ready,
     price_usage,
 )
@@ -1716,6 +1717,64 @@ class ApiBudgetProxyTests(unittest.TestCase):
 
 
 class PersistentBudgetLedgerTests(unittest.TestCase):
+    def test_read_only_loader_reuses_exact_validation_without_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "ledger.json"
+            with PersistentBudgetLedger(
+                path,
+                batch_id="read-only-validation",
+                total_cap_usd="10.00",
+                max_runs=2,
+                default_run_cap_usd="5.00",
+            ) as ledger:
+                ledger.claim_run("run-a")
+                ledger.reserve("run-a", "request-a", "1.00")
+            lock_path = path.with_name(f".{path.name}.lock")
+            lock_path.unlink()
+            before = path.read_bytes()
+            state = load_validated_budget_ledger_state(
+                path,
+                batch_id="read-only-validation",
+                total_cap_usd="10.00",
+                max_runs=2,
+                default_run_cap_usd="5.00",
+            )
+            self.assertEqual(path.read_bytes(), before)
+            self.assertFalse(lock_path.exists())
+            self.assertEqual(
+                state["runs"]["run-a"]["requests"]["request-a"]["status"],
+                "reserved",
+            )
+
+            malformed = json.loads(before)
+            malformed["runs"]["run-a"]["spent_usd"] = "1.000000"
+            path.write_text(
+                json.dumps(malformed, sort_keys=True, separators=(",", ":")) + "\n",
+                "utf-8",
+            )
+            path.chmod(0o600)
+            with self.assertRaisesRegex(
+                ApiBudgetProxyError, "run total is inconsistent"
+            ):
+                load_validated_budget_ledger_state(
+                    path,
+                    batch_id="read-only-validation",
+                    total_cap_usd="10.00",
+                    max_runs=2,
+                    default_run_cap_usd="5.00",
+                )
+
+            path.write_bytes(before)
+            path.chmod(0o644)
+            with self.assertRaisesRegex(ApiBudgetProxyError, "mode 0600"):
+                load_validated_budget_ledger_state(
+                    path,
+                    batch_id="read-only-validation",
+                    total_cap_usd="10.00",
+                    max_runs=2,
+                    default_run_cap_usd="5.00",
+                )
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

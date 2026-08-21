@@ -22,6 +22,7 @@ from ..contracts import (
     Product,
     Side,
     auto_review_overrides,
+    common_multi_agent_v2_override_items,
     product_for_manifest,
     team_capability_override_items,
 )
@@ -130,6 +131,11 @@ class UploadBinaryAdapter(HarborCodexAgent):
         team_state_enabled: bool | str = True,
         subagent_model: str | None = None,
         subagent_effort: str | None = None,
+        common_multi_agent_v2: bool | str = False,
+        multi_agent_max_concurrency: int | str | None = None,
+        developer_instructions_path: str | None = None,
+        developer_instructions_sha256: str | None = None,
+        rollout_trace_root: str | None = None,
         extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -202,10 +208,35 @@ class UploadBinaryAdapter(HarborCodexAgent):
             raise AdapterError("pinned subagent model is unsafe")
         if subagent_effort is not None and subagent_effort not in _REASONING_EFFORTS:
             raise AdapterError("pinned subagent reasoning effort is unsupported")
-        if (
+        common_v2 = _parse_bool_kwarg(common_multi_agent_v2, "common_multi_agent_v2")
+        concurrency = _parse_optional_int_kwarg(
+            multi_agent_max_concurrency, "multi_agent_max_concurrency"
+        )
+        if common_v2:
+            if subagent_model is None or subagent_effort is None:
+                raise AdapterError("common Multi-Agent V2 requires a pinned member identity")
+            if concurrency is None or concurrency < 2 or concurrency > 32:
+                raise AdapterError("common Multi-Agent V2 concurrency is invalid")
+            if self.side is Side.RONDO:
+                if self._product is not Product.RONDO_MULTI:
+                    raise AdapterError("common Multi-Agent V2 requires RONDO Multi")
+                if team_state is not True:
+                    raise AdapterError(
+                        "common Multi-Agent V2 requires RONDO Team State"
+                    )
+        elif (
             subagent_model is not None or subagent_effort is not None
         ) and self._product is not Product.RONDO_MULTI:
             raise AdapterError("only RONDO Multi can pin a member model")
+        policy_path, policy_sha256, policy_text = _load_developer_instructions(
+            developer_instructions_path,
+            developer_instructions_sha256,
+            required=common_v2,
+        )
+        trace_root = _validate_rollout_trace_root(
+            rollout_trace_root,
+            required=common_v2,
+        )
         # Two catalog modes exist.  The shared mode is the E-B8 contract: one
         # artifact, identified by its own digest and provenance, loaded by both
         # sides.  The legacy mode is the Codex-only projection bound to the
@@ -260,6 +291,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._team_state_enabled = team_state
         self._subagent_model = subagent_model
         self._subagent_effort = subagent_effort
+        self._common_multi_agent_v2 = common_v2
+        self._multi_agent_max_concurrency = concurrency
+        self._developer_instructions_path = policy_path
+        self._developer_instructions_sha256 = policy_sha256
+        self._developer_instructions = policy_text
+        self._rollout_trace_root = trace_root
         self._frozen_model_catalog_path = frozen_model_catalog_path
         self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
         self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
@@ -511,6 +548,11 @@ class UploadBinaryAdapter(HarborCodexAgent):
         nonsecret_env = {
             "CODEX_HOME": remote_home,
             "GIT_CONFIG_GLOBAL": remote_gitconfig,
+            **(
+                {"CODEX_ROLLOUT_TRACE_ROOT": self._rollout_trace_root}
+                if self._rollout_trace_root is not None
+                else {}
+            ),
         }
         git_tree_checks = (
             'test -d "$task_workdir/.git"; test -w "$task_workdir/.git"; '
@@ -693,11 +735,29 @@ class UploadBinaryAdapter(HarborCodexAgent):
             overrides = (
                 *common_overrides,
                 *catalog_overrides,
-                *team_capability_override_items(
-                    self._product,
-                    team_state=self._team_state_enabled,
-                    subagent_model=self._subagent_model,
-                    subagent_effort=self._subagent_effort,
+                *(
+                    common_multi_agent_v2_override_items(
+                        self.side,
+                        self._product,
+                        subagent_model=self._subagent_model or "",
+                        subagent_effort=self._subagent_effort or "",
+                        max_concurrency=self._multi_agent_max_concurrency or 0,
+                    )
+                    if self._common_multi_agent_v2
+                    else team_capability_override_items(
+                        self._product,
+                        team_state=self._team_state_enabled,
+                        subagent_model=self._subagent_model,
+                        subagent_effort=self._subagent_effort,
+                    )
+                ),
+                *(
+                    (
+                        "developer_instructions="
+                        f"{json.dumps(self._developer_instructions)}",
+                    )
+                    if self._developer_instructions is not None
+                    else ()
                 ),
                 *(
                     f"auto_review.{name}={json.dumps(value)}"
@@ -732,6 +792,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
                     else None
                 ),
                 team_state_enabled=self._team_state_enabled,
+                common_multi_agent_v2=self._common_multi_agent_v2,
+                multi_agent_max_concurrency=self._multi_agent_max_concurrency,
+                developer_instructions=self._developer_instructions,
             )
             await _checked_exec_as_agent(
                 environment,
@@ -790,6 +853,11 @@ def adapter_for(
     team_state_enabled: bool = True,
     subagent_model: str | None = None,
     subagent_effort: str | None = None,
+    common_multi_agent_v2: bool = False,
+    multi_agent_max_concurrency: int | None = None,
+    developer_instructions_path: str | None = None,
+    developer_instructions_sha256: str | None = None,
+    rollout_trace_root: str | None = None,
 ) -> UploadBinaryAdapter:
     adapter_type: type[UploadBinaryAdapter]
     if side is Side.CODEX:
@@ -831,6 +899,11 @@ def adapter_for(
         team_state_enabled=team_state_enabled,
         subagent_model=subagent_model,
         subagent_effort=subagent_effort,
+        common_multi_agent_v2=common_multi_agent_v2,
+        multi_agent_max_concurrency=multi_agent_max_concurrency,
+        developer_instructions_path=developer_instructions_path,
+        developer_instructions_sha256=developer_instructions_sha256,
+        rollout_trace_root=rollout_trace_root,
     )
 
 
@@ -907,6 +980,27 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
             if adapter._subagent_effort is not None
             else ()
         ),
+        # Opt-in only, keeping historical Harbor argv byte-identical.
+        *(
+            (
+                ("common_multi_agent_v2", "true"),
+                (
+                    "multi_agent_max_concurrency",
+                    str(adapter._multi_agent_max_concurrency),
+                ),
+                (
+                    "developer_instructions_path",
+                    adapter._developer_instructions_path,
+                ),
+                (
+                    "developer_instructions_sha256",
+                    adapter._developer_instructions_sha256,
+                ),
+                ("rollout_trace_root", adapter._rollout_trace_root),
+            )
+            if adapter._common_multi_agent_v2
+            else ()
+        ),
     ]
     if adapter._frozen_model_catalog_path is not None:
         values.extend(
@@ -948,6 +1042,69 @@ def _parse_bool_kwarg(value: bool | str, name: str) -> bool:
     if value in {"true", "false"}:
         return value == "true"
     raise AdapterError(f"{name} must be a boolean")
+
+
+def _parse_optional_int_kwarg(value: int | str | None, name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise AdapterError(f"{name} must be an integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AdapterError(f"{name} must be an integer") from exc
+    if str(parsed) != str(value):
+        raise AdapterError(f"{name} must be an integer")
+    return parsed
+
+
+def _load_developer_instructions(
+    path_value: str | None,
+    digest_value: str | None,
+    *,
+    required: bool,
+) -> tuple[str | None, str | None, str | None]:
+    if path_value is None and digest_value is None:
+        if required:
+            raise AdapterError("common Multi-Agent V2 requires developer instructions")
+        return None, None, None
+    if not isinstance(path_value, str) or not isinstance(digest_value, str):
+        raise AdapterError("developer instructions identity is incomplete")
+    path = Path(path_value)
+    try:
+        metadata = path.lstat()
+        raw = path.read_bytes()
+        policy = raw.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise AdapterError("developer instructions are unavailable") from exc
+    if (
+        not path.is_absolute()
+        or path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or tuple(path.parts[-4:])
+        != (
+            "eval",
+            "templates",
+            "multi-proactive-delegation",
+            "proactive-policy-v1.md",
+        )
+        or not raw
+        or len(raw) > 16 * 1024
+        or not re.fullmatch(r"[0-9a-f]{64}", digest_value)
+        or hashlib.sha256(raw).hexdigest() != digest_value
+    ):
+        raise AdapterError("developer instructions identity differs")
+    return str(path), digest_value, policy.rstrip("\n")
+
+
+def _validate_rollout_trace_root(value: str | None, *, required: bool) -> str | None:
+    if value is None:
+        if required:
+            raise AdapterError("common Multi-Agent V2 requires a rollout trace root")
+        return None
+    if value != "/logs/agent/rollout-trace":
+        raise AdapterError("rollout trace root must use the adapter-owned log directory")
+    return value
 
 
 def _validate_provider_inputs(base_url: str, api_key_env: str) -> None:
@@ -998,6 +1155,9 @@ def _validate_safe_codex_command(
     team_state_enabled: bool = True,
     subagent_model: str | None = None,
     subagent_effort: str | None = None,
+    common_multi_agent_v2: bool = False,
+    multi_agent_max_concurrency: int | None = None,
+    developer_instructions: str | None = None,
 ) -> None:
     if not command.startswith("set -o pipefail; "):
         raise AdapterError("Codex output pipeline must preserve the command exit status")
@@ -1071,7 +1231,26 @@ def _validate_safe_codex_command(
         "agents.default_subagent_reasoning_effort="
         f"{json.dumps(subagent_effort or AGENT_DEFAULT_SUBAGENT_EFFORT)}"
     )
-    if product is Product.RONDO_MULTI:
+    if common_multi_agent_v2:
+        expected = common_multi_agent_v2_override_items(
+            side,
+            product,
+            subagent_model=subagent_model or "",
+            subagent_effort=subagent_effort or "",
+            max_concurrency=multi_agent_max_concurrency or 0,
+        )
+        if any(item not in command for item in expected):
+            raise AdapterError("common Multi-Agent V2 overrides are incomplete")
+        if command.count("features.multi_agent_v2=") != 1:
+            raise AdapterError("common Multi-Agent V2 override is ambiguous")
+        if side is Side.CODEX and "team_state_enabled" in command:
+            raise AdapterError("Codex must record Team State as not applicable")
+        if side is Side.RONDO and command.count("team_state_enabled=true") != 1:
+            raise AdapterError("RONDO Multi Team State override is incomplete")
+        policy_item = f"developer_instructions={json.dumps(developer_instructions)}"
+        if developer_instructions is None or policy_item not in command:
+            raise AdapterError("developer instructions override is incomplete")
+    elif product is Product.RONDO_MULTI:
         if team_override not in command:
             raise AdapterError("RONDO Multi team capability overrides are incomplete")
         if command.count("features.multi_agent_v2=") != 1:

@@ -363,6 +363,42 @@ UPSTREAM_TIMEOUT_SECONDS = 90.0
 _MAX_UPSTREAM_TIMEOUT_SECONDS = 180.0
 
 
+def load_validated_budget_ledger_state(
+    path: Path,
+    *,
+    batch_id: str,
+    total_cap_usd: Decimal | str,
+    max_runs: int,
+    default_run_cap_usd: Decimal | str,
+) -> dict[str, Any]:
+    """Read and fully validate an existing ledger without locks or writes."""
+
+    _require_safe_id(batch_id, "batch id")
+    target = Path(path)
+    try:
+        metadata = target.lstat()
+    except OSError as exc:
+        raise ApiBudgetProxyError("budget ledger path is unsafe") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise ApiBudgetProxyError("budget ledger path is unsafe")
+    if stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise ApiBudgetProxyError("budget ledger must have mode 0600")
+    try:
+        value = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ApiBudgetProxyError("budget ledger is invalid") from exc
+    total_cap = _money(total_cap_usd)
+    default_run_cap = _money(default_run_cap_usd)
+    _validate_state(
+        value,
+        batch_id=batch_id,
+        total_cap=total_cap,
+        max_runs=max_runs,
+        default_run_cap=default_run_cap,
+    )
+    return value
+
+
 class PersistentBudgetLedger:
     """Thread-safe, atomically persisted budget state for one benchmark batch."""
 
@@ -795,22 +831,13 @@ class PersistentBudgetLedger:
         return descriptor
 
     def _read_state(self) -> dict[str, Any]:
-        if self.path.is_symlink() or not self.path.is_file():
-            raise ApiBudgetProxyError("budget ledger path is unsafe")
-        if stat.S_IMODE(self.path.stat().st_mode) != 0o600:
-            raise ApiBudgetProxyError("budget ledger must have mode 0600")
-        try:
-            value = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise ApiBudgetProxyError("budget ledger is invalid") from exc
-        _validate_state(
-            value,
+        return load_validated_budget_ledger_state(
+            self.path,
             batch_id=self.batch_id,
-            total_cap=self.total_cap,
+            total_cap_usd=self.total_cap,
             max_runs=self.max_runs,
-            default_run_cap=self.default_run_cap,
+            default_run_cap_usd=self.default_run_cap,
         )
-        return value
 
     def _recover_reserved_requests(self) -> None:
         recovered = False
@@ -2798,6 +2825,8 @@ def _validate_state(
             raise ApiBudgetProxyError("budget run state is invalid")
         if run["stop_reason"] is not None and run["stop_reason"] not in _STOP_REASONS:
             raise ApiBudgetProxyError("budget stop reason is invalid")
+        if run["stopped"] != (run["stop_reason"] is not None):
+            raise ApiBudgetProxyError("budget run stop state is inconsistent")
         settled_total = Decimal(0)
         run_priced_overage_delta = Decimal(0)
         for request_id, request in run["requests"].items():

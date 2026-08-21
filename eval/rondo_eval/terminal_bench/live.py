@@ -6,7 +6,8 @@ import json
 import stat
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping
+from decimal import Decimal
+from typing import Any, Callable, Mapping
 
 from ..api_budget_proxy import (
     ApiBudgetProxyError,
@@ -272,38 +273,7 @@ async def run_budgeted_terminal_bench(
         raise TerminalBenchRunError(
             "only fair-comparison campaigns consume a preflight receipt"
         )
-    proxy = LoopbackResponsesProxy(
-        upstream_base_url=provider.base_url,
-        api_key=api_key,
-        ledger=ledger,
-        run_id=request.docker_task_id,
-        metadata_path=metadata_path,
-        main_model=provider.main_model,
-        main_effort=provider.main_effort,
-        main_pricing=provider.main_pricing,
-        guardian_model=provider.guardian_model,
-        guardian_pricing=provider.guardian_pricing,
-        guardian_effort=provider.guardian_effort,
-        max_attempts=provider.max_attempts,
-        retry_backoff_seconds=provider.retry_backoff_seconds,
-        unbilled_retry_statuses=provider.unbilled_retry_statuses,
-        max_guardian_logical_requests=max_guardian_logical_requests,
-        timeout_seconds=(
-            campaign_identity.upstream_timeout_seconds
-            if campaign_identity is not None
-            else UPSTREAM_TIMEOUT_SECONDS
-        ),
-        symmetry_preflight=symmetry_preflight,
-        preflight_side=request.side if symmetry_preflight is not None else None,
-        preflight_task_id=(
-            campaign_task.task_id if symmetry_preflight is not None else None
-        ),
-    )
-    with proxy:
-        projected_request = replace(
-            request,
-            provider_transport_base_url=proxy.docker_base_url,
-        )
+    def project_request(projected_request: TerminalBenchRequest) -> TerminalBenchRequest:
         if campaign_identity is not None and campaign_identity.enforces_fair_comparison:
             projected_request = project_shared_model_catalog(
                 config,
@@ -336,11 +306,9 @@ async def run_budgeted_terminal_bench(
                 frozen_model_catalog_sha256=catalog.sha256,
                 frozen_model_catalog_source_commit=catalog.source_commit,
             )
-        prepared = prepare_terminal_bench_run(
-            config,
-            projected_request,
-            materializer=materializer,
-        )
+        return projected_request
+
+    def validate_prepared(prepared: PreparedTerminalBenchRun) -> None:
         if campaign_identity is None:
             assert pair_identity is not None
             pair_identity.validate_prepared(prepared, mode="paid")
@@ -354,6 +322,104 @@ async def run_budgeted_terminal_bench(
                 task=campaign_task,
                 seccomp_profile=campaign_seccomp_profile,
             )
+
+    return await run_budgeted_terminal_bench_core(
+        config,
+        request,
+        api_key=api_key,
+        ledger=ledger,
+        metadata_path=metadata_path,
+        counter=counter,
+        lock_guard=lock_guard,
+        lease=lease,
+        provider=provider,
+        max_guardian_logical_requests=max_guardian_logical_requests,
+        timeout_seconds=(
+            campaign_identity.upstream_timeout_seconds
+            if campaign_identity is not None
+            else UPSTREAM_TIMEOUT_SECONDS
+        ),
+        request_preflight=symmetry_preflight,
+        preflight_task_id=(
+            campaign_task.task_id if symmetry_preflight is not None else None
+        ),
+        project_request=project_request,
+        validate_prepared=validate_prepared,
+        materializer=materializer,
+    )
+
+
+async def run_budgeted_terminal_bench_core(
+    config: RuntimeConfig,
+    request: TerminalBenchRequest,
+    *,
+    api_key: str,
+    ledger: PersistentBudgetLedger,
+    metadata_path: Path,
+    counter: DockerCounter,
+    lock_guard: HeavyLockGuard,
+    lease: HeavyLockLease,
+    provider: Any,
+    max_guardian_logical_requests: int,
+    timeout_seconds: float,
+    request_preflight: Any | None,
+    preflight_task_id: str | None,
+    project_request: Callable[[TerminalBenchRequest], TerminalBenchRequest],
+    validate_prepared: Callable[[PreparedTerminalBenchRun], None],
+    retry_backoff_seconds: float | None = None,
+    request_reservation_usd: Decimal | str | None = None,
+    run_cap_usd: Decimal | str | None = None,
+    max_concurrent_main: int = 1,
+    usage_envelope: Any | None = None,
+    materializer: TaskMaterializer | None = None,
+) -> BudgetedTerminalBenchResult:
+    """Shared budget-proxy, prepare, Harbor and result path for paid campaigns.
+
+    Campaign-specific identity, catalog and fairness checks stay in the thin
+    wrappers and are injected before the sole Docker runner is reached.
+    """
+
+    if not isinstance(api_key, str) or not api_key or "\r" in api_key or "\n" in api_key:
+        raise TerminalBenchRunError("the in-memory provider key is invalid")
+    proxy = LoopbackResponsesProxy(
+        upstream_base_url=provider.base_url,
+        api_key=api_key,
+        ledger=ledger,
+        run_id=request.docker_task_id,
+        metadata_path=metadata_path,
+        main_model=provider.main_model,
+        main_effort=provider.main_effort,
+        main_pricing=provider.main_pricing,
+        guardian_model=provider.guardian_model,
+        guardian_pricing=provider.guardian_pricing,
+        guardian_effort=provider.guardian_effort,
+        max_attempts=provider.max_attempts,
+        retry_backoff_seconds=(
+            provider.retry_backoff_seconds
+            if retry_backoff_seconds is None
+            else retry_backoff_seconds
+        ),
+        unbilled_retry_statuses=provider.unbilled_retry_statuses,
+        max_guardian_logical_requests=max_guardian_logical_requests,
+        request_reservation_usd=request_reservation_usd,
+        run_cap_usd=run_cap_usd,
+        max_concurrent_main=max_concurrent_main,
+        usage_envelope=usage_envelope,
+        timeout_seconds=timeout_seconds,
+        symmetry_preflight=request_preflight,
+        preflight_side=request.side if request_preflight is not None else None,
+        preflight_task_id=preflight_task_id,
+    )
+    with proxy:
+        projected_request = project_request(
+            replace(request, provider_transport_base_url=proxy.docker_base_url)
+        )
+        prepared = prepare_terminal_bench_run(
+            config,
+            projected_request,
+            materializer=materializer,
+        )
+        validate_prepared(prepared)
         executor = DockerSupervisedHostHarborExecutor(
             counter=counter,
             lock_guard=lock_guard,

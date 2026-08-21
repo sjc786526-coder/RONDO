@@ -144,6 +144,7 @@ TEAM_CAPABILITY_MULTI_DIAGNOSTIC_TOML = (
     "{enabled=true,team_state_enabled=false,non_code_mode_only=false,"
     "expose_spawn_agent_model_overrides=false}"
 )
+COMMON_MULTI_AGENT_V2_MAX_CONCURRENCY = 4
 # Machine-wide default for a Multi run that has not pinned its own member model.
 # Campaigns that froze a different model pass it explicitly: flipping this
 # constant instead would silently restate the member identity of every other
@@ -254,6 +255,59 @@ def team_capability_override_items(
         f"features.multi_agent_v2={table}",
         f"agents.default_subagent_model={json.dumps(model)}",
         f"agents.default_subagent_reasoning_effort={json.dumps(effort)}",
+    )
+
+
+def common_multi_agent_v2_override_items(
+    side: Side,
+    product: Product | None,
+    *,
+    subagent_model: str,
+    subagent_effort: str,
+    max_concurrency: int = COMMON_MULTI_AGENT_V2_MAX_CONCURRENCY,
+) -> tuple[str, ...]:
+    """Return the symmetric V2 surface used by proactive-delegation evals.
+
+    Historical M-5 callers continue to use ``team_capability_override_items``
+    and therefore keep their Codex-V1/RONDO-V2 projection unchanged.  The only
+    side-specific field here is RONDO Multi's product capability, Team State.
+    """
+
+    if (
+        not isinstance(max_concurrency, int)
+        or isinstance(max_concurrency, bool)
+        or max_concurrency < 2
+        or max_concurrency > 32
+    ):
+        raise ContractError("Multi-Agent V2 concurrency is invalid")
+    if not isinstance(subagent_model, str) or not _MODEL_ID.fullmatch(subagent_model):
+        raise ContractError("subagent model override is invalid")
+    if subagent_effort not in _REASONING_EFFORTS:
+        raise ContractError("subagent reasoning effort override is invalid")
+    if side is Side.CODEX:
+        if product is not None:
+            raise ContractError("the frozen upstream side has no product identity")
+        table = (
+            "{enabled=true,max_concurrent_threads_per_session="
+            f"{max_concurrency},non_code_mode_only=false,"
+            "expose_spawn_agent_model_overrides=false}"
+        )
+    elif side is Side.RONDO:
+        if product is not Product.RONDO_MULTI:
+            raise ContractError("common Multi-Agent V2 requires RONDO Multi")
+        table = (
+            "{enabled=true,team_state_enabled=true,"
+            "max_concurrent_threads_per_session="
+            f"{max_concurrency},non_code_mode_only=false,"
+            "expose_spawn_agent_model_overrides=false}"
+        )
+    else:
+        raise ContractError("unsupported evaluation side")
+    return (
+        f"features.multi_agent_v2={table}",
+        f"agents.default_subagent_model={json.dumps(subagent_model)}",
+        "agents.default_subagent_reasoning_effort="
+        f"{json.dumps(subagent_effort)}",
     )
 
 

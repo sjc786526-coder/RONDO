@@ -3,6 +3,7 @@
 import json
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,14 @@ _CODE_CELL_STATUSES = {"starting", "running", "yielded", "completed", "failed", 
 
 class BundleError(ValueError):
     """Raised when a native rollout bundle is malformed or unsupported."""
+
+
+@dataclass(frozen=True)
+class BundleReduction:
+    """One validated Team View plus its body-free root session kind."""
+
+    view: dict[str, Any]
+    root_session_kind: str
 
 
 def _validate_raw_event_shape(event: dict[str, Any]) -> None:
@@ -263,11 +272,27 @@ def _validate_tool_start_shape(payload: dict[str, Any]) -> None:
 def reduce_bundle(bundle_dir: Path, product: str) -> dict[str, Any]:
     """Read one native bundle using an explicit product identity."""
 
+    return reduce_bundle_with_root_session(bundle_dir, product).view
+
+
+def reduce_bundle_with_root_session(
+    bundle_dir: Path, product: str
+) -> BundleReduction:
+    """Reduce one bundle and classify only its root session identity.
+
+    The classification intentionally exposes no session body.  Plan 049 uses
+    it to distinguish the product's top-level ``Exec`` rollout from the
+    separately traced Guardian control session.
+    """
+
     if product not in PRODUCTS:
         raise BundleError("unsupported product identity")
     reader = _BundleReader(bundle_dir)
     reducer = _Reducer(reader, product)
-    return reducer.reduce()
+    view = reducer.reduce()
+    if reducer.root_session_kind is None:
+        raise BundleError("rollout trace has no root session identity")
+    return BundleReduction(view=view, root_session_kind=reducer.root_session_kind)
 
 
 def write_team_view(bundle_dir: Path, product: str, output_path: Path) -> dict[str, Any]:
@@ -452,6 +477,7 @@ class _Reducer:
         self.code_cells: dict[tuple[str, str], dict[str, Any]] = {}
         self.compaction_requests: dict[str, dict[str, Any]] = {}
         self.compaction_installs: set[str] = set()
+        self.root_session_kind: str | None = None
 
     def reduce(self) -> dict[str, Any]:
         for event in self.reader.events:
@@ -534,6 +560,10 @@ class _Reducer:
         root = thread_id == self.reader.manifest["root_thread_id"]
         if root and parent is not None:
             raise BundleError("root thread names a parent")
+        if root:
+            self.root_session_kind = _root_session_kind(
+                metadata.get("session_source") if isinstance(metadata, dict) else None
+            )
         self.agents[thread_id] = {
             "agent_id": thread_id,
             "agent_path": agent_path,
@@ -1627,6 +1657,14 @@ def _parent_thread_id(source: object) -> str | None:
     spawn = subagent.get("thread_spawn") if isinstance(subagent, dict) else None
     parent = spawn.get("parent_thread_id") if isinstance(spawn, dict) else None
     return parent if _is_nonempty_string(parent) else None
+
+
+def _root_session_kind(source: object) -> str:
+    if source == "exec":
+        return "exec"
+    if source == {"subagent": {"other": "guardian"}}:
+        return "guardian"
+    return "other"
 
 
 def _dump_entry_key(entry: dict[str, Any]) -> tuple[object, ...] | None:

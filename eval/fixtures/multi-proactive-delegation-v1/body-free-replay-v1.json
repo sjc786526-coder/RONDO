@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "synthetic_body_free_replay",
+  "identity_class": "rehearsal",
+  "records": [
+    {
+      "slot_id": "pilot-p01-codex",
+      "side": "codex",
+      "product": null,
+      "outcome": "completed",
+      "trace_status": "available",
+      "team_state": null,
+      "agent_count": 1,
+      "spawn_attempt_count": 0
+    },
+    {
+      "slot_id": "pilot-p01-rondo",
+      "side": "rondo",
+      "product": "rondo-multi",
+      "outcome": "task_failed",
+      "trace_status": "partial",
+      "team_state": {"availability": "partial", "event_count": 0},
+      "agent_count": 1,
+      "spawn_attempt_count": 0
+    },
+    {
+      "slot_id": "formal-f01-codex",
+      "side": "codex",
+      "product": null,
+      "outcome": "infra_failed",
+      "trace_status": "missing",
+      "team_state": null,
+      "agent_count": 0,
+      "spawn_attempt_count": 0
+    },
+    {
+      "slot_id": "formal-f01-rondo",
+      "side": "rondo",
+      "product": "rondo-multi",
+      "outcome": "completed",
+      "trace_status": "available",
+      "team_state": {"availability": "available", "event_count": 1},
+      "agent_count": 2,
+      "spawn_attempt_count": 1
+    }
+  ]
+}
