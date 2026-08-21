@@ -1,7 +1,7 @@
 # Plan 050：明确委派三任务比较案例 ExecPlan
 
 > 本计划是 Plan 050 的稳定任务合同，同时覆盖阶段 A 与阶段 B。
-> 阶段 A/B 均已完成并通过独立验收；本计划冻结为任务合同与历史记录，后续路线只在 WBS 维护。
+> 阶段 A 已完成；阶段 B 六槽与结算有效，最终协作分类因 C01 RONDO 漏报等待本地窄修复验。
 > 除“当前状态”和“关键决策记录”外，其他部分在执行期间默认不得修改。
 > 如果必须改变目标、三道任务、共同 policy、公平合同、范围、硬约束、最高预算或完成标准，应暂停执行并请求用户确认；
 > 普通实现选择、离线 fixture/配置窄修、基础设施修复、从可信状态 resume 和合同内重跑不属于合同变更。
@@ -78,7 +78,7 @@ RONDO Multi 启用 Team State。
       或只产生仪式性成员活动，标为 `policy_noncompliance`。真实委派但 verifier 失败仍是有效案例。
 - [x] 最终报告只作三题条件性案例解释；外部 verifier 是主要结果，Team Lens 是过程解释。Event/Fact/route/wake 数量、
       participant 数量或漂亮调用顺序都不能替代任务结果或证明因果收益。
-- [x] 独立最终验收确认六槽/停止状态、结算、报告和 body-free 边界一致；按实际状态精炼更新 WBS、WBS-COMPLETED、
+- [ ] 独立最终验收确认六槽/停止状态、结算、报告和 body-free 边界一致；按实际状态精炼更新 WBS、WBS-COMPLETED、
       本计划与 agent log。执行者只提交 050 工作树；合并、推送、关闭或分支重命名均等待用户另行批准。
 
 ## 2. 范围
@@ -315,19 +315,21 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 ### 当前工作
 
 - 阶段 B 已按冻结顺序完成六个有效槽位与本地 finalization：4 `completed`、2 `task_failed`，六槽 Root trace 均
-  `available`；独立最终验收在 `b2cdaa9` 上通过，无剩余 correctness finding。
+  `available`；复验发现 C01 RONDO 的 typed member-to-Root `send_message` 未被计为贡献返回，现有最终分类少计一个协作槽。
 - 13 个 attempts 中 7 个因 relay 返回 `invalid_encrypted_content` 或流读取错误保持为 `infra_failed`，其余 6 个为
   不可替换的有效终态。165 个请求均已结算，100 USD 正式账本保守费用为 `30.307445 USD`，无悬空 reservation。
-- 三份案例与总览已确定性生成：5 槽 `policy_noncompliance` / `not_observed`；仅 RONDO `extract-elf` 形成
-  `collaboration_observed` / `observed`，但两侧外部 verifier 均失败，因此不构成质量收益或因果结论。
+- 三份案例与总览的现有 digest 可重现，但协作分类尚非最终结果。C03 RONDO 的 `collaboration_observed / observed` 及两侧
+  verifier 失败不变；C01 RONDO 应至少为 `collaboration_observed / not_observed`。
 
 ### 本任务剩余步骤
 
-- 无。计划已完成并冻结；合并、推送、关闭和后续路线均不在本任务授权内。
+- 窄修 `member_result_returned`：成员已有实质活动时，接受 completed member-to-Root `send_message` 或 `agent_result`；
+  纯 spawn/message 仍不得冒充实质协作。
+- 补正反两类定向回归，从既有资产重建 aggregate、三份案例和 overview，更新报告后重新独立复验。不得重跑真实 API。
 
 ### 阻塞项
 
-- 无。
+- 最终验收被 C01 RONDO 协作漏报阻断；不影响六槽、外部 verifier、费用与资源证据。
 
 ### 当前验收状态
 
@@ -341,7 +343,8 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
   Cargo、模型或全 workspace 测试，没有产生费用；影响链收口已通过独立复验。
 - 阶段 B 正式 aggregate 为 6/6 effective terminal、3/3 complete pair、7 infra invalid、0 missing slot。有效结果为
   C01/C02 两侧通过、C03 两侧失败；有效六槽费用 `3.156021 USD`，含保守 infra 暴露的总账为 `30.307445 USD`。
-- finalizer 判读为 1 `observed`、5 `not_observed`、0 `unknown`；案例 digest 分别为
+- 现有待替换的 finalizer 判读为 1 `observed`、5 `not_observed`、0 `unknown`；该分类少计 C01 RONDO 的真实协作，
+  因而下列当前案例 digest 只用于定位待重建资产，不是最终展示结果：
   `80394198467fdc10eb1b9f6ccc4426c5c0c3a8d187e84f5b72f5ce68464f5686`、
   `bcd2697e931d967f52db42339d60f29f52a0163dafc160d3727085e71da27ca4`、
   `0d373519342dcf922986977f9afdf6790c8248943bf78ee86dfb30590a51931d`，overview 为
@@ -355,8 +358,8 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 
 ### 交接边界
 
-- Plan 050 已完成并冻结；后续路线只链接 WBS，不在本计划继续规划。
-- 050 工作树只保留本地提交；合并、推送、关闭或分支重命名等待用户另行授权。
+- Plan 050 继续在同一工作树做本地窄修和复验；不得重跑真实 API，也不改变六槽外部终态或费用。
+- 050 工作树只保留本地提交；最终验收通过前不合并、不推送、不关闭或重命名分支。
 
 ## 6. 关键决策记录
 

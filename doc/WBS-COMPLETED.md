@@ -1483,20 +1483,3 @@ pilot 任务未激活 Root 主动委派”，因此按预先冻结的停止门�
   事后追加有效 pilot、换题或强制 spawn 改写阴性结果。完整代码、运行、资源和未运行项见
   `plan/049-multi-proactive-delegation-eval-execplan.md` 与
   `agent_log/2026-08-20-231500-plan049-phase-b-final.md`。
-
-## RONDO Multi 明确委派三任务案例（Plan 050，2026-08-21）
-
-**状态**：阶段 A/B 已完成并通过独立验收。冻结 Codex 与 RONDO Multi 在同一 `gpt-5.6-terra/high`、明确
-collaboration policy、任务、并发、deadline、Docker 和 task-native verifier 下完成三题六槽比较；唯一产品差异为
-RONDO Team State。该结果是条件性案例，不估计总体成功率、自然委派率或 Team State 单因素因果收益。
-
-- C01 `sqlite-db-truncate` 与 C02 `headless-terminal` 两侧均 `completed`；C03 `extract-elf` 两侧均
-  `task_failed`。六份 Root trace 均可归约，五槽为 `policy_noncompliance / not_observed`；仅 C03 RONDO 形成
-  `collaboration_observed / observed` 的 typed 影响链，但外部 verifier 仍失败。
-- 正式 100 USD 账本共 13 attempts、165/165 settled requests。七个 relay 加密内容/流错误保留为 infra invalid；
-  六个有效槽位费用 `3.156021 USD`，含 12 个 unknown-usage 保守 reservation 的总账为 `30.307445 USD`，无悬空状态。
-- 三份 body-free 案例与总览确定性生成；219 项定向门禁为 217 通过、2 个约定 skip，finalizer 重入 digest 不变。
-  Docker 前后均为 26 images / 11.5 GB、0 containers/volumes/build-cache，Windows C: 始终高于 80 GiB。
-- 独立终验在 `b2cdaa98d3919321e438e96e033ea75d8ed48f22` 上关闭两处陈旧状态文字后 PASS，无剩余 correctness finding。
-  执行与验收报告分别为 `agent_log/2026-08-21-060000-plan050-phase-b-final.md` 与
-  `agent_log/2026-08-21-061340-plan050-phase-b-independent-acceptance.md`。
