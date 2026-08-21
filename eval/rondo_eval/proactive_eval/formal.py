@@ -984,7 +984,20 @@ class Plan049TerminalBenchExecutor:
                     )
                 raise FormalInfraError("Terminal-Bench returned an infra outcome")
             trace_root = result.harbor.trial_dir / "agent" / "rollout-trace"
-            bundle = find_trace_bundle(trace_root)
+            try:
+                bundle = find_trace_bundle(trace_root)
+            except TraceError as exc:
+                if limit_stop is not None:
+                    raise FormalError(
+                        "Plan 049 request limit lacks complete terminal evidence"
+                    ) from exc
+                # INFRA_FAILED was handled above.  Every remaining parsed
+                # outcome is already a fixed non-infra task result;
+                # missing observation evidence alone must not buy a
+                # replacement sample under an infra label.
+                raise FormalError(
+                    "Plan 049 non-infra task result lacks complete trace evidence"
+                ) from exc
         except (
             ApiBudgetProxyError,
             HarborResultError,

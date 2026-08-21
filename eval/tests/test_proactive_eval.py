@@ -1653,6 +1653,190 @@ class ProactiveEvalTests(unittest.TestCase):
         self.assertEqual(rows[0]["outcome"], "principled_stopped")
         self.assertEqual(rows[0]["attempt"], 1)
 
+    def test_product_terminal_without_trace_latches_across_restart(self) -> None:
+        repo_paths = RepoPaths.discover(REPO_ROOT)
+        config = load_runtime_config(repo_paths)
+        provider = plan049_provider_projection(config, self.contract)
+
+        for parsed_outcome, reward in (
+            (RunOutcome.AGENT_FAILED, 0),
+            (RunOutcome.CANCELLED, 0),
+            (RunOutcome.COMPLETED, 0),
+            (RunOutcome.COMPLETED, 1),
+        ):
+            with self.subTest(
+                parsed_outcome=parsed_outcome.value,
+                reward=reward,
+            ):
+                identity = formal_identity(
+                    self.contract, provider=provider, harness_commit="9" * 40
+                )
+                root = (
+                    self.common_root
+                    / "eval-data/plan-049/paid"
+                    / f"missing-trace-{parsed_outcome.value}-reward-{reward}"
+                )
+                formal = FormalPaths(
+                    root=root,
+                    receipt=root / "activation-receipt.json",
+                    ledger=root / "budget-ledger.json",
+                    archive=root / "records.jsonl",
+                    aggregate=root / "aggregate.json",
+                    runs=root / "runs",
+                )
+                store = FormalStore(formal, identity)
+                store.ensure_receipt()
+                core_calls = 0
+
+                async def fake_core(_config, request, **kwargs):
+                    nonlocal core_calls
+                    core_calls += 1
+                    first = slots(self.contract)[0]
+                    kwargs["request_preflight"].register(
+                        task_id=first.task_id,
+                        role="main",
+                        side=request.side,
+                        request={
+                            "model": "gpt-5.6-terra",
+                            "instructions": self.contract.policy,
+                            "tools": [
+                                {
+                                    "type": "function",
+                                    "name": name,
+                                    "parameters": {},
+                                }
+                                for name in sorted(COMMON_V2_TOOL_NAMES)
+                            ],
+                        },
+                    )
+                    run_id = first.run_id().replace("rehearsal", "paid")
+                    trial = store.run_root(run_id) / "trial"
+                    (trial / "agent/rollout-trace").mkdir(parents=True)
+                    return mock.Mock(
+                        harbor=mock.Mock(trial_dir=trial, returncode=0)
+                    )
+
+                def executor(ledger):
+                    return Plan049TerminalBenchExecutor(
+                        contract=self.contract,
+                        common_root=repo_paths.common_root,
+                        repo_root=repo_paths.worktree_root,
+                        ledger=ledger,
+                        api_key="test-only-not-forwarded",
+                        counter=mock.Mock(),
+                        lock_guard=mock.Mock(),
+                        lease=mock.Mock(),
+                        config=config,
+                        formal_identity_sha256=store.identity_sha256,
+                    )
+
+                with mock.patch(
+                    "rondo_eval.proactive_eval.formal.run_budgeted_terminal_bench_core",
+                    side_effect=fake_core,
+                ), mock.patch(
+                    "rondo_eval.proactive_eval.formal.parse_single_task_result",
+                    return_value=mock.Mock(
+                        outcome=parsed_outcome,
+                        reward=reward,
+                    ),
+                ):
+                    with open_paid_ledger(formal.ledger, self.contract) as ledger:
+                        with self.assertRaisesRegex(
+                            FormalError,
+                            "non-infra task result lacks complete trace evidence",
+                        ):
+                            run_formal_campaign(
+                                self.contract,
+                                store=store,
+                                ledger=ledger,
+                                executor=executor(ledger),
+                                phase="pilot",
+                            )
+                    with open_paid_ledger(formal.ledger, self.contract) as ledger:
+                        with self.assertRaisesRegex(
+                            FormalDriftError, "latched principled stop"
+                        ):
+                            run_formal_campaign(
+                                self.contract,
+                                store=store,
+                                ledger=ledger,
+                                executor=executor(ledger),
+                                phase="pilot",
+                            )
+                self.assertEqual(core_calls, 1)
+                rows = store.records()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["outcome"], "principled_stopped")
+                self.assertEqual(rows[0]["attempt"], 1)
+
+    def test_infra_result_stays_retryable_without_trace_lookup(self) -> None:
+        repo_paths = RepoPaths.discover(REPO_ROOT)
+        ledger_path = self.common_root / "eval-data/plan-049/paid/infra-result.json"
+        first = slots(self.contract)[0]
+        run_id = first.run_id().replace("rehearsal", "paid")
+        run_root = self.common_root / "infra-result" / run_id
+
+        with open_paid_ledger(ledger_path, self.contract) as ledger:
+            ledger.claim_run(run_id, cap_usd="15.10")
+            executor = Plan049TerminalBenchExecutor(
+                contract=self.contract,
+                common_root=repo_paths.common_root,
+                repo_root=repo_paths.worktree_root,
+                ledger=ledger,
+                api_key="test-only-not-forwarded",
+                counter=mock.Mock(),
+                lock_guard=mock.Mock(),
+                lease=mock.Mock(),
+                config=load_runtime_config(repo_paths),
+                formal_identity_sha256="a" * 64,
+            )
+
+            async def fake_core(_config, request, **kwargs):
+                kwargs["request_preflight"].register(
+                    task_id=first.task_id,
+                    role="main",
+                    side=request.side,
+                    request={
+                        "model": "gpt-5.6-terra",
+                        "instructions": self.contract.policy,
+                        "tools": [
+                            {
+                                "type": "function",
+                                "name": name,
+                                "parameters": {},
+                            }
+                            for name in sorted(COMMON_V2_TOOL_NAMES)
+                        ],
+                    },
+                )
+                trial = run_root / "trial"
+                trial.mkdir(parents=True)
+                return mock.Mock(
+                    harbor=mock.Mock(trial_dir=trial, returncode=0)
+                )
+
+            with mock.patch(
+                "rondo_eval.proactive_eval.formal.run_budgeted_terminal_bench_core",
+                side_effect=fake_core,
+            ), mock.patch(
+                "rondo_eval.proactive_eval.formal.parse_single_task_result",
+                return_value=mock.Mock(
+                    outcome=RunOutcome.INFRA_FAILED,
+                    reward=0,
+                ),
+            ), mock.patch(
+                "rondo_eval.proactive_eval.formal.find_trace_bundle"
+            ) as find_trace:
+                with self.assertRaises(FormalInfraError) as caught:
+                    executor.execute(
+                        first,
+                        attempt=1,
+                        run_id=run_id,
+                        run_root=run_root,
+                    )
+            self.assertIs(type(caught.exception), FormalInfraError)
+            find_trace.assert_not_called()
+
     def test_request_limit_settled_write_failure_latches_without_retry(self) -> None:
         repo_paths = RepoPaths.discover(REPO_ROOT)
         config = load_runtime_config(repo_paths)
