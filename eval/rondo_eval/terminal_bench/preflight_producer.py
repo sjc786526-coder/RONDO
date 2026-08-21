@@ -339,7 +339,7 @@ async def capture_side_requests(
 ) -> tuple[tuple[str, dict[str, Any]], ...]:
     """Run one side and return its exact approval request trajectory."""
 
-    provider = config.paid_provider_projection()
+    provider = identity.provider_projection(config)
     identity.validate_provider(provider)
     validate_frozen_task_source(
         paths.common_root / "eval-data/sources/terminal-bench-2-1-ffccbe05",

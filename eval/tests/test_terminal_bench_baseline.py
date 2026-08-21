@@ -282,7 +282,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v9")
         self.assertEqual(identity.budget["campaign_cap_usd"], "600.000000")
         self.assertEqual(identity.budget["prior_estimated_usd"], "281.718702")
-        identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
+        identity.validate_provider(
+            load_runtime_config(paths).paid_provider_projection(
+                model_id=str(identity.selected_profile["effective_main_model"]),
+                main_effort=str(identity.selected_profile["main_effort"]),
+                guardian_effort=str(identity.selected_profile["guardian_effort"]),
+            )
+        )
 
         successor = self._identity_v2()
         self.assertEqual(successor.schema_version, 2)
@@ -1736,6 +1742,57 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len(values), 1)
         execute_mock.assert_called_once()
         self.assertEqual(len(state.skipped), 3)
+
+    def test_schema_v7_ordinary_infra_consumes_all_attempts_without_operator_hold(self) -> None:
+        identity = replace(
+            self._identity_v2(),
+            schema_version=7,
+            comparison={
+                "repeat_contract": {
+                    "repeats_per_task": 3,
+                    "aggregation": "strict_majority",
+                    "frozen_after": "pilot",
+                }
+            },
+        )
+        task = identity.catalog.tasks[0]
+        chain_id = f"base:aa-rondo-1:{task.task_id}"
+
+        class State:
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                raise AssertionError((slot_id, reason))
+
+            def require_diagnosis(self, **kwargs):
+                raise AssertionError(kwargs)
+
+            def mark_task_local_reproducible(self, **kwargs) -> None:
+                raise AssertionError(kwargs)
+
+        calls: list[str] = []
+
+        def execute(*, slot, **kwargs):
+            del kwargs
+            calls.append(slot.slot_id)
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED,
+                TaskOutcome.INFRA,
+                Decimal("1.000000"),
+                MechanicalFailureCategory.DOCKER_RUNTIME,
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_attempt_chain(
+                identity=identity,
+                state=State(),
+                tracker=baseline_cli.MechanicalFailureTracker(
+                    continue_bounded_infra=True
+                ),
+                task=task,
+                chain_id=chain_id,
+            )
+        self.assertEqual(len(values), 4)
+        self.assertEqual(calls, [f"{chain_id}:a{attempt}" for attempt in range(1, 5)])
 
     def test_two_remaining_infra_per_round_can_continue(self) -> None:
         identity = self._identity()

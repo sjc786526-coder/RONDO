@@ -1931,7 +1931,7 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             ledger.ensure_run("r4")
         ledger.close()
 
-    def test_crashed_reservation_is_charged_and_run_stopped_on_reopen(self) -> None:
+    def test_crashed_reservation_keeps_historical_conservative_recovery(self) -> None:
         path = self.root / "budget.json"
         ledger = PersistentBudgetLedger(path, batch_id="recover")
         ledger.ensure_run("r1")
@@ -1947,9 +1947,137 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             run["requests"]["q1"]["settlement_kind"],
             "conservative_reservation",
         )
-        with self.assertRaises(BudgetStopped):
-            reopened.reserve("r1", "q2")
         reopened.close()
+
+    def test_plan051_unattempted_recovery_is_zero_and_can_continue(self) -> None:
+        path = self.root / "not-sent.json"
+        ledger = PersistentBudgetLedger(
+            path, batch_id="not-sent", unpriced_fallback_usd="1"
+        )
+        ledger.ensure_run("r1")
+        ledger.reserve("r1", "q1", "2")
+        ledger.close()
+
+        reopened = PersistentBudgetLedger(
+            path, batch_id="not-sent", unpriced_fallback_usd="1"
+        )
+        run = reopened.snapshot()["runs"]["r1"]
+        self.assertFalse(run["stopped"])
+        self.assertIsNone(run["stop_reason"])
+        self.assertEqual(run["spent_usd"], "0.000000")
+        self.assertEqual(run["requests"]["q1"]["attempt_count"], 0)
+        self.assertEqual(run["requests"]["q1"]["settlement_kind"], "not_sent_unbilled")
+        self.assertEqual(run["requests"]["q1"]["charged_usd"], "0.000000")
+        reopened.reserve("r1", "q2", "1")
+        reopened.close()
+
+    def test_plan051_unattempted_proxy_close_settles_at_zero(self) -> None:
+        ledger = PersistentBudgetLedger(
+            self.root / "close.json",
+            batch_id="close",
+            unpriced_fallback_usd="1",
+        )
+        ledger.ensure_run("r1")
+        ledger.reserve("r1", "q1", "2")
+        settlement = ledger.settle(
+            "r1",
+            "q1",
+            None,
+            pricing=MAIN_PRICING,
+            stop_reason="proxy_closing",
+        )
+        self.assertEqual(settlement.charged_usd, Decimal("0.000000"))
+        self.assertEqual(settlement.settlement_kind, "not_sent_unbilled")
+        self.assertEqual(settlement.attempt_count, 0)
+        run = ledger.snapshot()["runs"]["r1"]
+        self.assertTrue(run["stopped"])
+        self.assertEqual(run["stop_reason"], "proxy_closing")
+        ledger.close()
+
+    def test_explicit_unpriced_fallback_is_durable_and_settles_one_usd(self) -> None:
+        path = self.root / "fallback.json"
+        ledger = PersistentBudgetLedger(
+            path,
+            batch_id="fallback",
+            unpriced_fallback_usd="1.000000",
+        )
+        ledger.ensure_run("r1")
+        ledger.reserve("r1", "q1", "2")
+        ledger.begin_attempt("r1", "q1", max_attempts=1)
+        settlement = ledger.settle("r1", "q1", None, pricing=MAIN_PRICING)
+        self.assertEqual(settlement.charged_usd, Decimal("1.000000"))
+        self.assertEqual(settlement.settlement_kind, "unpriced_fallback")
+        self.assertFalse(settlement.usage_valid)
+        self.assertEqual(
+            ledger.snapshot()["unpriced_fallback_usd"], "1.000000"
+        )
+        ledger.close()
+
+        reopened = PersistentBudgetLedger(
+            path,
+            batch_id="fallback",
+            unpriced_fallback_usd="1",
+        )
+        request = reopened.snapshot()["runs"]["r1"]["requests"]["q1"]
+        self.assertEqual(request["charged_usd"], "1.000000")
+        self.assertEqual(request["settlement_kind"], "unpriced_fallback")
+        reopened.close()
+
+        loaded = load_validated_budget_ledger_state(
+            path,
+            batch_id="fallback",
+            total_cap_usd="10",
+            max_runs=4,
+            default_run_cap_usd="5",
+            unpriced_fallback_usd="1",
+        )
+        self.assertEqual(loaded["unpriced_fallback_usd"], "1.000000")
+
+        with self.assertRaisesRegex(ApiBudgetProxyError, "schema v1"):
+            PersistentBudgetLedger(path, batch_id="fallback")
+        with self.assertRaisesRegex(ApiBudgetProxyError, "authorized batch"):
+            PersistentBudgetLedger(
+                path,
+                batch_id="fallback",
+                unpriced_fallback_usd="2",
+            )
+
+    def test_attempted_crash_uses_explicit_unpriced_fallback_on_reopen(self) -> None:
+        path = self.root / "fallback-recovery.json"
+        ledger = PersistentBudgetLedger(
+            path,
+            batch_id="fallback-recovery",
+            unpriced_fallback_usd="1",
+        )
+        ledger.ensure_run("r1")
+        ledger.reserve("r1", "q1", "2")
+        ledger.begin_attempt("r1", "q1", max_attempts=1)
+        ledger.close()
+
+        reopened = PersistentBudgetLedger(
+            path,
+            batch_id="fallback-recovery",
+            unpriced_fallback_usd="1.000000",
+        )
+        run = reopened.snapshot()["runs"]["r1"]
+        self.assertTrue(run["stopped"])
+        self.assertEqual(run["stop_reason"], "interrupted_request")
+        self.assertEqual(run["spent_usd"], "1.000000")
+        self.assertEqual(
+            run["requests"]["q1"]["settlement_kind"], "unpriced_fallback"
+        )
+        reopened.close()
+
+    def test_default_unpriced_settlement_remains_full_reservation(self) -> None:
+        ledger = PersistentBudgetLedger(self.root / "legacy.json", batch_id="legacy")
+        ledger.ensure_run("r1")
+        ledger.reserve("r1", "q1", "2")
+        ledger.begin_attempt("r1", "q1", max_attempts=1)
+        settlement = ledger.settle("r1", "q1", None, pricing=MAIN_PRICING)
+        self.assertEqual(settlement.charged_usd, Decimal("2.000000"))
+        self.assertEqual(settlement.settlement_kind, "conservative_reservation")
+        self.assertNotIn("unpriced_fallback_usd", ledger.snapshot())
+        ledger.close()
 
     def test_claim_run_rejects_reusing_an_existing_invocation(self) -> None:
         path = self.root / "claim-budget.json"

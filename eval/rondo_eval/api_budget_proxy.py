@@ -73,11 +73,19 @@ _SETTLEMENT_USAGE_PRICED = "usage_priced"
 _SETTLEMENT_USAGE_PRICED_OVERAGE = "usage_priced_overage"
 _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED = "operator_confirmed_unbilled"
 _SETTLEMENT_CONSERVATIVE_RESERVATION = "conservative_reservation"
+_SETTLEMENT_UNPRICED_FALLBACK = "unpriced_fallback"
+_SETTLEMENT_NOT_SENT_UNBILLED = "not_sent_unbilled"
 _SETTLEMENT_KINDS = {
     _SETTLEMENT_USAGE_PRICED,
     _SETTLEMENT_USAGE_PRICED_OVERAGE,
     _SETTLEMENT_OPERATOR_CONFIRMED_UNBILLED,
     _SETTLEMENT_CONSERVATIVE_RESERVATION,
+    _SETTLEMENT_UNPRICED_FALLBACK,
+    _SETTLEMENT_NOT_SENT_UNBILLED,
+}
+_UNPRICED_SETTLEMENT_KINDS = {
+    _SETTLEMENT_CONSERVATIVE_RESERVATION,
+    _SETTLEMENT_UNPRICED_FALLBACK,
 }
 _STOP_REASONS = {
     "missing_or_invalid_usage",
@@ -370,6 +378,7 @@ def load_validated_budget_ledger_state(
     total_cap_usd: Decimal | str,
     max_runs: int,
     default_run_cap_usd: Decimal | str,
+    unpriced_fallback_usd: Decimal | str | None = None,
 ) -> dict[str, Any]:
     """Read and fully validate an existing ledger without locks or writes."""
 
@@ -389,12 +398,16 @@ def load_validated_budget_ledger_state(
         raise ApiBudgetProxyError("budget ledger is invalid") from exc
     total_cap = _money(total_cap_usd)
     default_run_cap = _money(default_run_cap_usd)
+    unpriced_fallback = _unpriced_fallback(
+        unpriced_fallback_usd, default_run_cap=default_run_cap
+    )
     _validate_state(
         value,
         batch_id=batch_id,
         total_cap=total_cap,
         max_runs=max_runs,
         default_run_cap=default_run_cap,
+        unpriced_fallback=unpriced_fallback,
     )
     return value
 
@@ -412,12 +425,16 @@ class PersistentBudgetLedger:
         default_run_cap_usd: Decimal | str = RUN_CAP_USD,
         usage_envelope: UsageEnvelope | None = None,
         unpriced_stop_threshold: int = 1,
+        unpriced_fallback_usd: Decimal | str | None = None,
     ):
         _require_safe_id(batch_id, "batch id")
         self.path = Path(path)
         self.batch_id = batch_id
         self.total_cap = _money(total_cap_usd)
         self.default_run_cap = _money(default_run_cap_usd)
+        self.unpriced_fallback = _unpriced_fallback(
+            unpriced_fallback_usd, default_run_cap=self.default_run_cap
+        )
         self.max_runs = max_runs
         # Settling is the only place a charge is written, so the envelope is
         # enforced here rather than at each of the proxy's settle call sites.
@@ -474,6 +491,10 @@ class PersistentBudgetLedger:
                     "default_run_cap_usd": _money_text(self.default_run_cap),
                     "runs": {},
                 }
+                if self.unpriced_fallback is not None:
+                    self._state["unpriced_fallback_usd"] = _money_text(
+                        self.unpriced_fallback
+                    )
                 self._persist()
         except Exception:
             self.close()
@@ -594,6 +615,10 @@ class PersistentBudgetLedger:
                 raise BudgetCapacityExhausted(
                     "request reservation has no authorized capacity"
                 )
+            if self.unpriced_fallback is not None and amount < self.unpriced_fallback:
+                raise BudgetCapacityExhausted(
+                    "request reservation cannot cover the unpriced fallback"
+                )
             if (
                 run_spent + run_reserved + amount + additional_capacity
                 > Decimal(run["cap_usd"])
@@ -665,9 +690,22 @@ class PersistentBudgetLedger:
             if not isinstance(request_state, dict) or request_state.get("status") != "reserved":
                 raise ApiBudgetProxyError("request has no active reservation")
             reserved = Decimal(request_state["reserved_usd"])
+            attempt_count = request_state["attempt_count"]
+            if (
+                isinstance(attempt_count, bool)
+                or not isinstance(attempt_count, int)
+                or not 0 <= attempt_count <= _MAX_UPSTREAM_ATTEMPTS
+            ):
+                raise ApiBudgetProxyError("budget settlement attempt count is invalid")
             usage_valid = True
             outside_envelope = False
             try:
+                if attempt_count == 0:
+                    if usage is not None:
+                        raise ApiBudgetProxyError(
+                            "budget settlement has no persisted attempt"
+                        )
+                    raise ApiBudgetProxyError("request was not sent")
                 if usage is None:
                     raise ApiBudgetProxyError("response usage is missing")
                 if self.usage_envelope is not None:
@@ -678,32 +716,48 @@ class PersistentBudgetLedger:
                         raise
                 charged = price_usage(usage, pricing=pricing)
             except ApiBudgetProxyError:
-                charged = reserved
                 usage_valid = False
-                settlement_kind = _SETTLEMENT_CONSERVATIVE_RESERVATION
-                if outside_envelope:
+                if attempt_count == 0 and self.unpriced_fallback is not None:
+                    charged = Decimal(0)
+                    settlement_kind = _SETTLEMENT_NOT_SENT_UNBILLED
+                    if stop_reason is not None:
+                        run["stopped"] = True
+                        run["stop_reason"] = stop_reason
+                elif outside_envelope:
+                    charged = reserved
+                    settlement_kind = _SETTLEMENT_CONSERVATIVE_RESERVATION
                     # Not a provider hiccup: a request outside the frozen
                     # envelope breaks the arithmetic the cap is derived from,
                     # so the run stops regardless of the threshold.
                     run["stopped"] = True
                     run["stop_reason"] = "usage_outside_frozen_envelope"
                 else:
+                    charged = (
+                        self.unpriced_fallback
+                        if self.unpriced_fallback is not None
+                        else reserved
+                    )
+                    settlement_kind = (
+                        _SETTLEMENT_UNPRICED_FALLBACK
+                        if self.unpriced_fallback is not None
+                        else _SETTLEMENT_CONSERVATIVE_RESERVATION
+                    )
                     # Count this settlement plus the unpriced ones already on
                     # the run.
                     unpriced = 1 + sum(
                         1
                         for item in run["requests"].values()
                         if isinstance(item, dict)
-                        and item.get("settlement_kind")
-                        == _SETTLEMENT_CONSERVATIVE_RESERVATION
+                        and item.get("settlement_kind") in _UNPRICED_SETTLEMENT_KINDS
                     )
                     if unpriced >= self.unpriced_stop_threshold:
                         run["stopped"] = True
                         run["stop_reason"] = (
                             stop_reason or "missing_or_invalid_usage"
                         )
-                reason = run["stop_reason"] or stop_reason or "missing_or_invalid_usage"
-                _record_infra_taint(run, reason)
+                if attempt_count >= 1:
+                    reason = run["stop_reason"] or stop_reason or "missing_or_invalid_usage"
+                    _record_infra_taint(run, reason)
             else:
                 if charged > reserved:
                     run["stopped"] = True
@@ -724,7 +778,7 @@ class PersistentBudgetLedger:
                 charged,
                 usage_valid,
                 bool(run["stopped"]),
-                request_state["attempt_count"],
+                attempt_count,
                 settlement_kind,
                 usage if usage_valid else None,
             )
@@ -793,7 +847,7 @@ class PersistentBudgetLedger:
         with self._lock:
             self._assert_open()
             spent, reserved = self._totals()
-            return {
+            snapshot = {
                 "schema_version": 1,
                 "batch_id": self.batch_id,
                 "total_cap_usd": _money_text(self.total_cap),
@@ -805,6 +859,9 @@ class PersistentBudgetLedger:
                 "remaining_uncommitted_usd": _money_text(self.total_cap - spent - reserved),
                 "runs": json.loads(json.dumps(self._state["runs"])),
             }
+            if self.unpriced_fallback is not None:
+                snapshot["unpriced_fallback_usd"] = _money_text(self.unpriced_fallback)
+            return snapshot
 
     def _prepare_parent(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -837,6 +894,7 @@ class PersistentBudgetLedger:
             total_cap_usd=self.total_cap,
             max_runs=self.max_runs,
             default_run_cap_usd=self.default_run_cap,
+            unpriced_fallback_usd=self.unpriced_fallback,
         )
 
     def _recover_reserved_requests(self) -> None:
@@ -845,14 +903,24 @@ class PersistentBudgetLedger:
             for request_state in run["requests"].values():
                 if request_state["status"] != "reserved":
                     continue
-                charged = Decimal(request_state["reserved_usd"])
+                attempt_count = request_state["attempt_count"]
                 request_state["status"] = "settled"
+                if attempt_count == 0 and self.unpriced_fallback is not None:
+                    charged = Decimal(0)
+                    settlement_kind = _SETTLEMENT_NOT_SENT_UNBILLED
+                elif self.unpriced_fallback is not None:
+                    charged = self.unpriced_fallback
+                    settlement_kind = _SETTLEMENT_UNPRICED_FALLBACK
+                else:
+                    charged = Decimal(request_state["reserved_usd"])
+                    settlement_kind = _SETTLEMENT_CONSERVATIVE_RESERVATION
                 request_state["charged_usd"] = _money_text(charged)
                 request_state["usage_valid"] = False
-                request_state["settlement_kind"] = _SETTLEMENT_CONSERVATIVE_RESERVATION
+                request_state["settlement_kind"] = settlement_kind
                 run["spent_usd"] = _money_text(Decimal(run["spent_usd"]) + charged)
-                run["stopped"] = True
-                run["stop_reason"] = "interrupted_request"
+                if attempt_count >= 1 or self.unpriced_fallback is None:
+                    run["stopped"] = True
+                    run["stop_reason"] = "interrupted_request"
                 recovered = True
         if recovered:
             self._persist()
@@ -2744,6 +2812,17 @@ def _money_text(value: Decimal) -> str:
     return format(value.quantize(_MONEY_QUANTUM), "f")
 
 
+def _unpriced_fallback(
+    value: Decimal | str | None, *, default_run_cap: Decimal
+) -> Decimal | None:
+    if value is None:
+        return None
+    fallback = _money(value)
+    if fallback <= 0 or fallback > default_run_cap:
+        raise ApiBudgetProxyError("unpriced fallback is outside the run cap")
+    return fallback
+
+
 def _require_safe_id(value: object, label: str) -> None:
     if not isinstance(value, str) or not _SAFE_ID.fullmatch(value):
         raise ApiBudgetProxyError(f"{label} is invalid")
@@ -2767,15 +2846,19 @@ def _validate_state(
     total_cap: Decimal,
     max_runs: int,
     default_run_cap: Decimal,
+    unpriced_fallback: Decimal | None,
 ) -> None:
-    if not isinstance(value, dict) or set(value) != {
+    expected_keys = {
         "schema_version",
         "batch_id",
         "total_cap_usd",
         "max_runs",
         "default_run_cap_usd",
         "runs",
-    }:
+    }
+    if unpriced_fallback is not None:
+        expected_keys.add("unpriced_fallback_usd")
+    if not isinstance(value, dict) or set(value) != expected_keys:
         raise ApiBudgetProxyError("budget ledger differs from schema v1")
     if (
         value["schema_version"] != 1
@@ -2785,6 +2868,10 @@ def _validate_state(
         or value["default_run_cap_usd"] != _money_text(default_run_cap)
         or not isinstance(value["runs"], dict)
         or len(value["runs"]) > max_runs
+        or (
+            unpriced_fallback is not None
+            and value["unpriced_fallback_usd"] != _money_text(unpriced_fallback)
+        )
     ):
         raise ApiBudgetProxyError("budget ledger does not match the authorized batch")
     total_spent = Decimal(0)
@@ -2888,6 +2975,19 @@ def _validate_state(
                     or attempt_count < 1
                 ):
                     raise ApiBudgetProxyError("unbilled budget settlement is invalid")
+                if settlement_kind == _SETTLEMENT_NOT_SENT_UNBILLED and (
+                    request["usage_valid"] is not False
+                    or charged != 0
+                    or attempt_count != 0
+                ):
+                    raise ApiBudgetProxyError("not-sent budget settlement is invalid")
+                if settlement_kind == _SETTLEMENT_UNPRICED_FALLBACK and (
+                    unpriced_fallback is None
+                    or request["usage_valid"] is not False
+                    or charged != unpriced_fallback
+                    or attempt_count < 1
+                ):
+                    raise ApiBudgetProxyError("fallback budget settlement is invalid")
                 if settlement_kind == _SETTLEMENT_CONSERVATIVE_RESERVATION and (
                     request["usage_valid"] is not False or charged != reserved
                 ):

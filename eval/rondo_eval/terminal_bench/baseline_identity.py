@@ -7,12 +7,14 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 from decimal import Decimal
 from pathlib import Path
 
+from ..api_budget_proxy import maximum_usage_cost
 from ..config import RepoPaths, load_runtime_config
-from ..contracts import Product
+from ..contracts import Product, ProviderProjection, Side, product_for_manifest
 from ..frozen_model_catalog import (
     load_frozen_model_catalog,
     load_shared_model_catalog,
@@ -20,9 +22,14 @@ from ..frozen_model_catalog import (
 from ..fair_comparison import FairComparisonError, RepeatContract
 from .baseline import (
     CAMPAIGN_ACTIVE_POINTER_PATH,
-    CAMPAIGN_CAP_USD,
     CAMPAIGN_MAX_RUNS,
     FAIR_COMPARISON_SCHEMA_VERSION,
+    PLAN051_CODEX_SOURCE_COMMIT,
+    PLAN051_GUARDIAN_REASONING_EFFORT,
+    PLAN051_MAIN_REASONING_EFFORT,
+    PLAN051_MODEL_ID,
+    PLAN051_RONDO_SOURCE_COMMIT,
+    PLAN051_TASK_BUDGET_CAP_USD,
     CampaignIdentity,
     CampaignLockRegistration,
     _parse_comparison_block,
@@ -34,6 +41,8 @@ from .baseline import (
 )
 from .results import validate_eval_harness_checkout
 from .tasksets import load_successor_canary_catalog
+from .task_budget import TASK_BUDGET_ID
+from .__main__ import TerminalBenchRunError, _load_manifest
 
 
 class CampaignIdentityGenerationError(RuntimeError):
@@ -159,7 +168,11 @@ def generate_successor_lock(
     run_id_date: str,
     run_id_sequence_base: int,
     comparison: dict[str, object],
-    campaign_cap_usd: Decimal,
+    rondo_runtime_manifest: Path,
+    codex_runtime_manifest: Path,
+    task_budget_id: str,
+    task_budget_cap_usd: Decimal,
+    task_budget_prior_estimated_usd: Decimal,
 ) -> tuple[Path, Decimal]:
     """Mint the next campaign lock.
 
@@ -169,12 +182,9 @@ def generate_successor_lock(
     whose repeat count and aggregation formula are not yet frozen must not
     exist at all.
 
-    A v7 campaign starts fresh: it inherits no continuation and no prior spend
-    from v1--v22, because those results were produced without the shared
-    catalog, the stub receipts, the frozen harness commit and the interleaved
-    order that the fair-comparison contract requires.  Its cap is therefore a
-    separately authorized amount rather than the remainder of the historical
-    envelope.
+    A v7 campaign starts fresh: it inherits neither a v1--v22 bundle/profile
+    nor continuation.  Its explicit Local/Codex runtime manifests and its
+    task-envelope budget are therefore inputs, never fields copied from v22.
     """
 
     # Pure validation first: a campaign whose repeat count and aggregation
@@ -189,22 +199,26 @@ def generate_successor_lock(
         raise CampaignIdentityGenerationError(
             f"successor comparison contract is not frozen: {exc}"
         ) from exc
-    # This generator deliberately inherits the predecessor's frozen Local
-    # bundles.  A Multi successor needs a separately selected and frozen Multi
-    # bundle contract; silently retaining these Local paths would mint a false
-    # identity before any paid work starts.
     if Product(str(parsed_comparison["product"])) is not Product.RONDO_LOCAL:
         raise CampaignIdentityGenerationError(
-            "successor product differs from the inherited Local bundles"
+            "Plan 051 identity product must be rondo-local"
         )
     if (
-        not isinstance(campaign_cap_usd, Decimal)
-        or not campaign_cap_usd.is_finite()
-        or campaign_cap_usd <= 0
-        or campaign_cap_usd > CAMPAIGN_CAP_USD
-        or campaign_cap_usd != campaign_cap_usd.quantize(Decimal("0.000001"))
+        task_budget_id != TASK_BUDGET_ID
+        or not isinstance(task_budget_cap_usd, Decimal)
+        or not task_budget_cap_usd.is_finite()
+        or task_budget_cap_usd <= 0
+        or task_budget_cap_usd != PLAN051_TASK_BUDGET_CAP_USD
+        or task_budget_cap_usd
+        != task_budget_cap_usd.quantize(Decimal("0.000001"))
+        or not isinstance(task_budget_prior_estimated_usd, Decimal)
+        or not task_budget_prior_estimated_usd.is_finite()
+        or task_budget_prior_estimated_usd < 0
+        or task_budget_prior_estimated_usd >= task_budget_cap_usd
+        or task_budget_prior_estimated_usd
+        != task_budget_prior_estimated_usd.quantize(Decimal("0.000001"))
     ):
-        raise CampaignIdentityGenerationError("successor campaign cap is not authorized")
+        raise CampaignIdentityGenerationError("task budget is not authorized")
     _require_clean_worktree(paths.worktree_root)
     if re.fullmatch(r"[0-9]{8}", run_id_date) is None:
         raise CampaignIdentityGenerationError("run ID date must contain eight digits")
@@ -224,19 +238,24 @@ def generate_successor_lock(
     latest = registry[-1]
     if pointer["active_lock"] not in {None, latest.path.as_posix()}:
         raise CampaignIdentityGenerationError("active campaign pointer is not the latest lock")
-    predecessor = load_historical_campaign_identity(paths, latest.version)
-    predecessor.validate_provider(load_runtime_config(paths).paid_provider_projection())
-    _validate_frozen_inputs(paths, predecessor)
     next_version = latest.version + 1
-    # Calling this proves the predecessor's accounting is closed and settled;
-    # its value is deliberately not carried into the successor's prior.
-    required_successor_prior(paths, version=latest.version)
-    prior = Decimal(0)
-    lock = _read_json(paths.worktree_root / latest.path)
+    if next_version == 23:
+        if task_budget_prior_estimated_usd != Decimal("0.000000"):
+            raise CampaignIdentityGenerationError(
+                "first Plan 051 identity must start at zero task prior"
+            )
+    else:
+        expected_prior = required_successor_prior(paths, version=latest.version)
+        if task_budget_prior_estimated_usd != expected_prior:
+            raise CampaignIdentityGenerationError(
+                "successor task prior differs from predecessor settlement"
+            )
+    historical_lock = _read_json(paths.worktree_root / latest.path)
     successor_catalog = load_successor_canary_catalog(paths)
     if (
-        successor_catalog.taskset_sha256 != predecessor.taskset_sha256
-        or successor_catalog.terminal_bench_commit != predecessor.terminal_bench_commit
+        successor_catalog.taskset_sha256 != historical_lock.get("taskset_sha256")
+        or successor_catalog.terminal_bench_commit
+        != historical_lock.get("terminal_bench_commit")
     ):
         raise CampaignIdentityGenerationError(
             "successor catalog changes the frozen taskset identity"
@@ -248,55 +267,71 @@ def generate_successor_lock(
         max_attempts=4,
         conditional_repeats_per_side=conditional_repeats,
     )
-    # The frozen repeat count decides how many run IDs this campaign consumes,
-    # so the collision check has to cover that range and not a fixed 321.
+    if slot_total != CAMPAIGN_MAX_RUNS:
+        raise CampaignIdentityGenerationError(
+            "Plan 051 repeat contract must retain the 321-slot geometry"
+        )
     validate_successor_run_range(
         registry,
         run_id_date=run_id_date,
         run_id_sequence_base=run_id_sequence_base,
         slot_total=slot_total,
     )
+    selected_profile, provider = _plan051_selected_profile(paths)
+    bundles = {
+        Side.RONDO.value: _plan051_manifest_identity(
+            paths,
+            side=Side.RONDO,
+            manifest_path=rondo_runtime_manifest,
+            expected_source_commit=PLAN051_RONDO_SOURCE_COMMIT,
+        ),
+        Side.CODEX.value: _plan051_manifest_identity(
+            paths,
+            side=Side.CODEX,
+            manifest_path=codex_runtime_manifest,
+            expected_source_commit=PLAN051_CODEX_SOURCE_COMMIT,
+        ),
+    }
     _validate_successor_comparison_facts(
         paths,
         comparison=parsed,
-        selected_profile=lock["selected_profile"],
+        selected_profile=selected_profile,
         catalog=successor_catalog,
     )
-    lock.update(
-        {
-            "schema_version": FAIR_COMPARISON_SCHEMA_VERSION,
-            "campaign_id": f"p2-b7-canary-baseline-v{next_version}",
-            "batch_id": f"p2-b7-canary-sol-sol-v{next_version}",
-            "run_id_date": run_id_date,
-            "run_id_sequence_base": run_id_sequence_base,
-            "canary_catalog_sha256": successor_catalog.catalog_sha256,
-            # No v1--v22 result satisfies the v7 fair-comparison conditions, so
-            # none may be carried forward into its aggregate.
-            "continuation": [],
-            "comparison": parsed,
-        }
-    )
-    # The Codex-only catalog digest is superseded by the shared artifact
-    # identity inside the comparison block.
-    lock["selected_profile"] = {
-        key: value
-        for key, value in lock["selected_profile"].items()
-        if key
-        not in {
-            "frozen_codex_model_catalog_sha256",
-            "frozen_codex_model_catalog_source_commit",
-        }
+    reservation = _maximum_legal_reservation(provider)
+    lock = {
+        "schema_version": FAIR_COMPARISON_SCHEMA_VERSION,
+        "campaign_id": f"p2-b7-canary-baseline-v{next_version}",
+        "batch_id": f"p2-b7-canary-v{next_version}",
+        "run_id_date": run_id_date,
+        "run_id_sequence_base": run_id_sequence_base,
+        "taskset_sha256": successor_catalog.taskset_sha256,
+        "canary_catalog_sha256": successor_catalog.catalog_sha256,
+        "terminal_bench_commit": successor_catalog.terminal_bench_commit,
+        "selected_profile": selected_profile,
+        "bundles": bundles,
+        "no_api_seccomp": historical_lock["no_api_seccomp"],
+        "budget": {
+            "campaign_cap_usd": f"{task_budget_cap_usd:.6f}",
+            "prior_estimated_usd": f"{task_budget_prior_estimated_usd:.6f}",
+            "run_cap_usd": "40.000000",
+            "max_run_slots": slot_total,
+            "maximum_legal_request_reservation_usd": f"{reservation:.6f}",
+            "actual_usd": None,
+            "task_budget_id": task_budget_id,
+            "task_budget_cap_usd": f"{task_budget_cap_usd:.6f}",
+            "task_budget_prior_estimated_usd": (
+                f"{task_budget_prior_estimated_usd:.6f}"
+            ),
+        },
+        "baseline": campaign_baseline_contract(
+            FAIR_COMPARISON_SCHEMA_VERSION,
+            conditional_repeats_per_side=conditional_repeats,
+        ),
+        # No v1--v22 result satisfies the v7 fair-comparison conditions.
+        "continuation": [],
+        "comparison": parsed,
     }
-    lock["budget"] = {
-        **lock["budget"],
-        "campaign_cap_usd": f"{campaign_cap_usd:.6f}",
-        "prior_estimated_usd": f"{prior:.6f}",
-        "max_run_slots": slot_total,
-    }
-    lock["baseline"] = campaign_baseline_contract(
-        FAIR_COMPARISON_SCHEMA_VERSION,
-        conditional_repeats_per_side=conditional_repeats,
-    )
     relative = Path(f"eval/locks/p2-b7-canary-baseline-v{next_version}.json")
     destination = paths.worktree_root / relative
     if destination.exists() or destination.is_symlink():
@@ -307,7 +342,8 @@ def generate_successor_lock(
         if (
             generated.campaign_id != lock["campaign_id"]
             or generated.batch_id != lock["batch_id"]
-            or generated.budget["prior_estimated_usd"] != f"{prior:.6f}"
+            or generated.budget["prior_estimated_usd"]
+            != f"{task_budget_prior_estimated_usd:.6f}"
         ):
             raise CampaignIdentityGenerationError("generated campaign lock did not validate")
         _atomic_json(
@@ -318,7 +354,101 @@ def generate_successor_lock(
     except BaseException:
         destination.unlink(missing_ok=True)
         raise
-    return destination, prior
+    return destination, task_budget_prior_estimated_usd
+
+
+def _plan051_selected_profile(
+    paths: RepoPaths,
+) -> tuple[dict[str, object], ProviderProjection]:
+    """Project the configured relay with Plan 051's explicit model contract."""
+
+    provider = load_runtime_config(paths).paid_provider_projection(
+        model_id=PLAN051_MODEL_ID,
+        main_effort=PLAN051_MAIN_REASONING_EFFORT,
+        guardian_effort=PLAN051_GUARDIAN_REASONING_EFFORT,
+    )
+    selected = {
+        **provider.to_public_dict(),
+        "max_guardian_logical_requests": 3,
+    }
+    if (
+        selected["main_model"] != PLAN051_MODEL_ID
+        or selected["guardian_model"] != PLAN051_MODEL_ID
+        or selected["main_effort"] != PLAN051_MAIN_REASONING_EFFORT
+        or selected["guardian_effort"] != PLAN051_GUARDIAN_REASONING_EFFORT
+    ):
+        raise CampaignIdentityGenerationError(
+            "Plan 051 provider projection differs from Terra main medium / Guardian low"
+        )
+    return selected, provider
+
+
+def _plan051_manifest_identity(
+    paths: RepoPaths,
+    *,
+    side: Side,
+    manifest_path: Path,
+    expected_source_commit: str,
+) -> dict[str, str]:
+    """Return one real, non-symlink runtime manifest identity for the lock."""
+
+    candidate = (
+        manifest_path
+        if manifest_path.is_absolute()
+        else paths.worktree_root / manifest_path
+    )
+    try:
+        metadata = candidate.lstat()
+        resolved = candidate.resolve(strict=True)
+        root = paths.common_root.resolve(strict=True)
+    except OSError as exc:
+        raise CampaignIdentityGenerationError("runtime manifest is unavailable") from exc
+    if (
+        candidate.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or not resolved.is_relative_to(root / "eval-data" / "bin")
+        or not resolved.is_file()
+    ):
+        raise CampaignIdentityGenerationError("runtime manifest path is invalid")
+    try:
+        manifest = _load_manifest(candidate, paths.common_root)
+        product = product_for_manifest(side, manifest)
+    except (OSError, ValueError, TerminalBenchRunError) as exc:
+        raise CampaignIdentityGenerationError("runtime manifest is invalid") from exc
+    expected_product = Product.RONDO_LOCAL if side is Side.RONDO else None
+    if (
+        manifest.source_dirty
+        or manifest.source_commit != expected_source_commit
+        or product is not expected_product
+    ):
+        raise CampaignIdentityGenerationError("runtime manifest source differs from Plan 051")
+    try:
+        relative = resolved.relative_to(root).as_posix()
+        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise CampaignIdentityGenerationError("runtime manifest cannot be read") from exc
+    if side is Side.RONDO and "cb652e1" in relative:
+        raise CampaignIdentityGenerationError("old cb652e1 Local runtime manifest is forbidden")
+    return {
+        "manifest_path": relative,
+        "manifest_sha256": digest,
+        "source_commit": manifest.source_commit,
+    }
+
+
+def _maximum_legal_reservation(provider: ProviderProjection) -> Decimal:
+    """Price the largest single request the proxy may admit."""
+
+    reservation = max(
+        maximum_usage_cost(provider.main_pricing),
+        maximum_usage_cost(provider.guardian_pricing),
+    )
+    reservation = reservation.quantize(Decimal("0.000001"))
+    if reservation <= 0 or reservation > Decimal("40.000000"):
+        raise CampaignIdentityGenerationError(
+            "Plan 051 maximum request reservation exceeds the run cap"
+        )
+    return reservation
 
 
 def _validate_successor_comparison_facts(
@@ -542,19 +672,41 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--campaign-cap-usd",
+        "--rondo-runtime-manifest",
         required=True,
-        help=(
-            "the separately authorized cap for this campaign; a v7 campaign "
-            "does not inherit the historical shared envelope"
-        ),
+        type=Path,
+        help="runtime manifest built from Local 54f62e5",
+    )
+    parser.add_argument(
+        "--codex-runtime-manifest",
+        required=True,
+        type=Path,
+        help="verified frozen Codex v0.147.0 runtime manifest",
+    )
+    parser.add_argument(
+        "--task-budget-id",
+        required=True,
+        help="shared Plan 051 task-envelope identity",
+    )
+    parser.add_argument(
+        "--task-budget-cap-usd",
+        required=True,
+        help="shared Plan 051 task-envelope cap, at most 400 USD",
+    )
+    parser.add_argument(
+        "--task-budget-prior-estimated-usd",
+        required=True,
+        help="already settled or conservatively debited task-envelope spend",
     )
     args = parser.parse_args(argv)
     try:
-        campaign_cap_usd = Decimal(args.campaign_cap_usd)
+        task_budget_cap_usd = Decimal(args.task_budget_cap_usd)
+        task_budget_prior_estimated_usd = Decimal(
+            args.task_budget_prior_estimated_usd
+        )
     except ArithmeticError as exc:
         raise CampaignIdentityGenerationError(
-            "successor campaign cap is not a decimal amount"
+            "task budget amount is not a decimal"
         ) from exc
     paths = RepoPaths.discover(Path.cwd())
     contract_path = args.comparison_contract
@@ -571,7 +723,11 @@ def main(argv: list[str] | None = None) -> int:
         run_id_date=args.run_id_date,
         run_id_sequence_base=args.run_id_sequence_base,
         comparison=comparison,
-        campaign_cap_usd=campaign_cap_usd,
+        rondo_runtime_manifest=args.rondo_runtime_manifest,
+        codex_runtime_manifest=args.codex_runtime_manifest,
+        task_budget_id=args.task_budget_id,
+        task_budget_cap_usd=task_budget_cap_usd,
+        task_budget_prior_estimated_usd=task_budget_prior_estimated_usd,
     )
     print(json.dumps({"lock_path": path.as_posix(), "prior_estimated_usd": f"{prior:.6f}"}))
     return 0

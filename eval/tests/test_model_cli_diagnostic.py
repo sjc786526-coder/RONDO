@@ -5,6 +5,7 @@ import os
 import tempfile
 import types
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -28,6 +29,7 @@ from rondo_eval.model_cli_diagnostic import (
     _phase_budget_contract,
     _prompt,
     _redacted_cli_observation,
+    _recover_unrecorded_formal_attempt,
     _remove_generated_plugin_cache,
     _safe_environment,
     _selected_campaign_phases,
@@ -402,6 +404,123 @@ class ModelCliDiagnosticTests(unittest.TestCase):
             [call.kwargs["max_logical_requests"] for call in run_phase.call_args_list],
             [1, 3],
         )
+
+    def test_formal_canary_uses_identity_bundles_terra_efforts_and_fallback(self) -> None:
+        provider = types.SimpleNamespace(
+            profile_sha256="a" * 64,
+            base_url="https://provider.example/v1",
+            main_model="gpt-5.6-terra",
+            guardian_model="gpt-5.6-terra",
+            main_effort="medium",
+            guardian_effort="low",
+            main_pricing=object(),
+            guardian_pricing=object(),
+            max_attempts=5,
+        )
+        config = mock.Mock()
+        identity = mock.Mock(
+            campaign_id="p2-b7-canary-baseline-v23",
+            batch_id="p2-b7-canary-v23",
+            lock_sha256="b" * 64,
+            bundles={
+                "codex": {"manifest_path": "eval-data/bin/codex/manifest.json"},
+                "rondo": {"manifest_path": "eval-data/bin/rondo/manifest.json"},
+            },
+            budget={
+                "task_budget_cap_usd": "400.000000",
+                "task_budget_prior_estimated_usd": "0.000000",
+            },
+            maximum_legal_request_reservation_usd=Decimal("2.000000"),
+            upstream_timeout_seconds=180.0,
+            max_guardian_logical_requests=3,
+            product=object(),
+            catalog_identity={
+                "sources": [
+                    {"side": "upstream", "commit": "c" * 40},
+                    {"side": "rondo", "commit": "d" * 40},
+                ]
+            },
+        )
+        identity.provider_projection.return_value = provider
+        targets = {
+            side: BinaryTarget(side, Path(f"/{side}"), side[0] * 64, side[0] * 40)
+            for side in ("codex", "rondo")
+        }
+        shared = mock.Mock()
+        shared.to_dict.return_value = {"models": []}
+        shared.identity.return_value = identity.catalog_identity
+        attempts = [
+            {"phase": "codex-main", "spent_usd": "0.100000"},
+            {"phase": "codex-approval", "spent_usd": "0.200000"},
+        ]
+        with tempfile.TemporaryDirectory() as directory, mock.patch(
+            "rondo_eval.model_cli_diagnostic.load_runtime_config", return_value=config
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic.load_provider_secret",
+            return_value=("KEY", "secret"),
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic._binary_target",
+            side_effect=lambda _root, side, **_kwargs: targets[side],
+        ) as binary, mock.patch(
+            "rondo_eval.model_cli_diagnostic.load_shared_model_catalog",
+            return_value=shared,
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic.maximum_usage_cost",
+            return_value=Decimal("2.000000"),
+        ), mock.patch(
+            "rondo_eval.model_cli_diagnostic._run_phase_once",
+            side_effect=[
+                (attempts[0], True, False, 0),
+                (attempts[1], True, False, 0),
+            ],
+        ) as run_phase:
+            receipt = run_campaign(
+                types.SimpleNamespace(common_root=Path(directory)),
+                output_root=Path(directory) / "formal-wire",
+                main_model_alias="terra",
+                guardian_model_alias="terra",
+                max_retries=3,
+                formal_campaign_canary=True,
+                p2_campaign_identity=identity,
+            )
+
+        self.assertEqual(receipt["status"], "completed")
+        self.assertTrue(receipt["formal_campaign_canary"])
+        self.assertEqual(receipt["campaign_cap_usd"], "400.000000")
+        self.assertEqual(receipt["main_reasoning_effort"], "medium")
+        self.assertEqual(receipt["guardian_reasoning_effort"], "low")
+        self.assertEqual(binary.call_count, 2)
+        self.assertEqual(
+            [call.kwargs["run_cap_usd"] for call in run_phase.call_args_list],
+            [Decimal("2.000000"), Decimal("6.000000")],
+        )
+        self.assertEqual(
+            [call.kwargs["request_reservation_usd"] for call in run_phase.call_args_list],
+            [Decimal("2.000000"), Decimal("2.000000")],
+        )
+        self.assertEqual(
+            [call.kwargs["unpriced_fallback_usd"] for call in run_phase.call_args_list],
+            ["1.000000", "1.000000"],
+        )
+
+    def test_formal_wire_recovers_a_created_but_unsent_attempt_at_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            attempt_root = root / "001-codex-main"
+            attempt_root.mkdir()
+            recovered, retry_delta = _recover_unrecorded_formal_attempt(
+                root,
+                attempts=[],
+                request_reservation_usd=Decimal("2.000000"),
+            )
+        self.assertIsNotNone(recovered)
+        assert recovered is not None
+        self.assertEqual(recovered["spent_usd"], "0.000000")
+        self.assertEqual(
+            recovered["settlements"][0]["settlement_kind"],
+            "not_sent_unbilled",
+        )
+        self.assertEqual(retry_delta, 0)
 
     def test_cli_observation_does_not_persist_text_or_command_output(self) -> None:
         observation = _redacted_cli_observation(

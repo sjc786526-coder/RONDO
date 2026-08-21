@@ -44,7 +44,6 @@ from ..fair_comparison import FairComparisonError, PreflightReceipt, valid_task_
 from .baseline import (
     BASE_ROUNDS,
     RUN_CAP_USD,
-    SOL_MAX_LEGAL_REQUEST_RESERVATION_USD,
     BaselineRun,
     BaselineAssessment,
     BaselineError,
@@ -94,15 +93,31 @@ from .scoring import (
     aggregate_scores,
     score_task,
 )
+from .task_budget import (
+    TaskBudgetIdentity,
+    task_budget_path,
+    verify_active_identity,
+)
 
 
 _WINDOWS_C_FLOOR_BYTES = 80 * 1024**3
 _DOCKER_WARN_GROWTH_BYTES = 40 * 1024**3
 _DOCKER_STOP_GROWTH_BYTES = 60 * 1024**3
+_PLAN051_UNPRICED_FALLBACK_USD = "1.000000"
 
 
 class CampaignExecutionError(RuntimeError):
     """Raised when the frozen B7 campaign cannot progress safely."""
+
+
+def _unpriced_fallback_usd(identity: CampaignIdentity) -> str | None:
+    """Keep historical ledgers byte-compatible while enabling Plan 051's rule."""
+
+    return (
+        _PLAN051_UNPRICED_FALLBACK_USD
+        if identity.enforces_fair_comparison
+        else None
+    )
 
 
 class _CampaignStepAdvanced(RuntimeError):
@@ -134,8 +149,14 @@ class ExecutedSlot:
 class MechanicalFailureTracker:
     """Open the campaign circuit after one category reaches three tasks."""
 
-    def __init__(self, *, ignore_provider_integrity: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        ignore_provider_integrity: bool = False,
+        continue_bounded_infra: bool = False,
+    ) -> None:
         self._ignore_provider_integrity = ignore_provider_integrity
+        self._continue_bounded_infra = continue_bounded_infra
         self._tasks: dict[MechanicalFailureCategory, set[str]] = {
             item: set() for item in MechanicalFailureCategory
         }
@@ -158,6 +179,8 @@ class MechanicalFailureTracker:
             MechanicalFailureCategory.OPERATOR_INTERRUPTION,
         }:
             raise CampaignExecutionError(f"campaign_terminal_failure:{category.value}")
+        if self._continue_bounded_infra:
+            return
         if (
             self._ignore_provider_integrity
             and category is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
@@ -415,8 +438,15 @@ def _worker_step_main(args: argparse.Namespace) -> int:
         args.campaign_lease_token,
     )
     config = load_runtime_config(paths)
-    provider = config.paid_provider_projection()
-    identity.validate_provider(provider)
+    provider = identity.provider_projection(config)
+    if identity.enforces_fair_comparison:
+        verify_active_identity(
+            task_budget_path(paths.common_root),
+            active=TaskBudgetIdentity(identity.campaign_id, identity.batch_id),
+            prior_settled_usd=Decimal(
+                str(identity.budget["task_budget_prior_estimated_usd"])
+            ),
+        )
     expected_harness_commit = (
         identity.comparison_conditions.eval_harness_commit
         if identity.enforces_fair_comparison
@@ -596,7 +626,7 @@ def _advance_post_oracle_step(
     prior_cost = Decimal(identity.budget["prior_estimated_usd"])
     campaign_cap = Decimal(identity.budget["campaign_cap_usd"])
     remaining_cap = campaign_cap - prior_cost - canary_cost
-    if remaining_cap < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
+    if remaining_cap < identity.maximum_legal_request_reservation_usd:
         _skip_planned(state, identity, reason="budget_after_wire_canary")
         state.finalize(BaselineStatus.BLOCKED, reason="budget_after_wire_canary")
         return 3
@@ -607,6 +637,7 @@ def _advance_post_oracle_step(
         total_cap_usd=remaining_cap,
         max_runs=len(identity.slots) - 1,
         default_run_cap_usd=RUN_CAP_USD,
+        unpriced_fallback_usd=_unpriced_fallback_usd(identity),
     ) as budget:
         try:
             _reconcile_running_paid_slot(
@@ -722,6 +753,7 @@ def _recover_terminal_aggregate(
             total_cap_usd=remaining_cap,
             max_runs=len(identity.slots) - 1,
             default_run_cap_usd=RUN_CAP_USD,
+            unpriced_fallback_usd=_unpriced_fallback_usd(identity),
         ) as budget:
             assessment = _replay_terminal_assessment(
                 paths=paths,
@@ -760,6 +792,7 @@ def _recover_terminal_aggregate(
             total_cap_usd=remaining_cap,
             max_runs=len(identity.slots) - 1,
             default_run_cap_usd=RUN_CAP_USD,
+            unpriced_fallback_usd=_unpriced_fallback_usd(identity),
         ) as budget:
             budget_snapshot = budget.snapshot()
     else:
@@ -1008,6 +1041,7 @@ def _reconcile_before_oracle(
             total_cap_usd=remaining_cap,
             max_runs=len(identity.slots) - 1,
             default_run_cap_usd=RUN_CAP_USD,
+            unpriced_fallback_usd=_unpriced_fallback_usd(identity),
         ) as budget:
             try:
                 recovered = _reconcile_running_paid_slot(
@@ -1110,6 +1144,18 @@ def _reconcile_running_wire_canary(
             reason=MechanicalFailureCategory.OPERATOR_INTERRUPTION.value,
         )
         raise CampaignExecutionError("wire canary receipt is invalid") from exc
+    if receipt.get("status") == "running" and identity.enforces_fair_comparison:
+        receipt = run_model_cli_campaign(
+            paths,
+            output_root=campaign_root / "wire-canary",
+            main_model_alias="terra",
+            guardian_model_alias="terra",
+            max_retries=3,
+            formal_campaign_canary=True,
+            resume_existing=True,
+            p2_campaign_identity=identity,
+        )
+        spent = Decimal(str(receipt["estimated_spent_usd"]))
     if receipt.get("status") != "completed" or spent < 0:
         state.fail_interrupted(
             estimated_usd=f"{max(spent, Decimal(0)):.6f}",
@@ -1647,10 +1693,11 @@ def _execute_wire_canary(
     receipt = run_model_cli_campaign(
         paths,
         output_root=output_root,
-        main_model_alias="sol",
-        guardian_model_alias="sol",
-        max_retries=0,
-        plan014_canary=True,
+        main_model_alias="terra",
+        guardian_model_alias="terra",
+        max_retries=3,
+        formal_campaign_canary=True,
+        resume_existing=False,
         p2_campaign_identity=identity,
     )
     spent = Decimal(str(receipt["estimated_spent_usd"]))
@@ -1701,7 +1748,8 @@ def _advance_one_paid_step(
     all_records = {**continued_records, **records}
     all_digests = {**continued_digests, **digests}
     tracker = MechanicalFailureTracker(
-        ignore_provider_integrity=identity.schema_version >= 3
+        ignore_provider_integrity=identity.schema_version >= 3,
+        continue_bounded_infra=identity.enforces_fair_comparison,
     )
     resumable = {
         "paths": paths,
@@ -2016,6 +2064,13 @@ def _execute_attempt_chain(
             and category is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
         ):
             continue
+        if identity.enforces_fair_comparison:
+            # Plan 051 consumes the four already-frozen attempts without the
+            # historical second-occurrence operator hold.  If the full chain
+            # remains infra, the round/campaign boundary stops new requests so
+            # the unattended executor can diagnose and, only for a confirmed
+            # facility defect, mint a successor identity.
+            continue
         same_category = tuple(
             item.slot.slot_id for item in values if item.failure_category is category
         )
@@ -2304,10 +2359,13 @@ def _execute_task_slot(
     )
     _validate_daemon_image(task)
     snapshot = budget.snapshot()
-    if Decimal(snapshot["remaining_uncommitted_usd"]) < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
+    if (
+        Decimal(snapshot["remaining_uncommitted_usd"])
+        < identity.maximum_legal_request_reservation_usd
+    ):
         raise CampaignExecutionError("remaining campaign budget cannot fit the next request")
     _sample_storage(counter, slot.run_id, baseline=storage_baseline)
-    identity.validate_provider(config.paid_provider_projection())
+    identity.provider_projection(config)
     if (
         validate_eval_harness_checkout(
             common_root=paths.common_root,
@@ -2446,7 +2504,7 @@ def _execute_task_slot(
             git_commit=measurement_commits[slot.side],
             eval_harness_commit=eval_harness_commit,
             manifest=manifests[slot.side],
-            provider=config.paid_provider_projection(),
+            provider=identity.provider_projection(config),
             budget_snapshot=budget.snapshot(),
             metadata_path=metadata_path,
             outcome=outcome,

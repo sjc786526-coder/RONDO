@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Iterable
 
 from ..artifacts import strict_json_equal
-from ..config import RepoPaths
+from ..config import RepoPaths, RuntimeConfig
 from ..contracts import (
     BinaryManifest,
     ContractError,
@@ -42,6 +42,7 @@ from ..frozen_model_catalog import (
 from .runner import PreparedTerminalBenchRun
 from .scoring import TaskOutcome
 from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalog
+from .task_budget import TASK_BUDGET_ID
 
 
 LEGACY_CAMPAIGN_CAP_USD = Decimal("600.000000")
@@ -54,6 +55,15 @@ CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("1136.113528")
 CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
+# Schema v7 is deliberately outside the historical P2 campaign envelope.  It
+# is the first identity in the Plan 051 task envelope, whose cap covers every
+# successor rather than being reset per campaign.
+PLAN051_TASK_BUDGET_CAP_USD = Decimal("400.000000")
+PLAN051_MODEL_ID = "gpt-5.6-terra"
+PLAN051_MAIN_REASONING_EFFORT = "medium"
+PLAN051_GUARDIAN_REASONING_EFFORT = "low"
+PLAN051_RONDO_SOURCE_COMMIT = "54f62e5f7e86a7ab0d4f8d788eafec7176809395"
+PLAN051_CODEX_SOURCE_COMMIT = "be6e8eac029b183056b7e4402879f15d2c85f61b"
 LEGACY_UPSTREAM_TIMEOUT_SECONDS = Decimal("90.000")
 CAMPAIGN_UPSTREAM_TIMEOUT_SECONDS = Decimal("180.000")
 BASE_ROUNDS = (
@@ -82,7 +92,10 @@ MIN_COMMON_VALID_TASKS = 8
 CAMPAIGN_ACTIVE_POINTER_PATH = Path("eval/locks/p2-b7-active.json")
 _CAMPAIGN_LOCK_NAME = re.compile(r"p2-b7-canary-baseline-v([1-9][0-9]*)\.json")
 _CAMPAIGN_ID = re.compile(r"p2-b7-canary-baseline-v([1-9][0-9]*)")
-_CAMPAIGN_BATCH_ID = re.compile(r"p2-b7-canary-sol-sol-v([1-9][0-9]*)")
+# v1--v6 batch IDs are historical evidence and remain model-labelled.  A v7
+# batch must not leak the previous Sol choice into a Terra campaign identity.
+_HISTORICAL_CAMPAIGN_BATCH_ID = re.compile(r"p2-b7-canary-sol-sol-v([1-9][0-9]*)")
+_FAIR_CAMPAIGN_BATCH_ID = re.compile(r"p2-b7-canary-v([1-9][0-9]*)")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _GIT_OBJECT = re.compile(r"[0-9a-f]{40}")
 _MODEL_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
@@ -441,6 +454,24 @@ class CampaignIdentity:
             raise BaselineError("campaign Guardian request limit is invalid")
         return value
 
+    @property
+    def maximum_legal_request_reservation_usd(self) -> Decimal:
+        """Return the identity-frozen admission amount for one paid slot."""
+
+        value = self.budget.get("maximum_legal_request_reservation_usd")
+        try:
+            reservation = Decimal(str(value))
+        except ArithmeticError as exc:
+            raise BaselineError("campaign request reservation is invalid") from exc
+        if (
+            not reservation.is_finite()
+            or reservation <= 0
+            or reservation > RUN_CAP_USD
+            or value != _money(reservation)
+        ):
+            raise BaselineError("campaign request reservation is invalid")
+        return reservation
+
     def validate_provider(self, provider: ProviderProjection) -> None:
         expected = {
             key: value
@@ -454,6 +485,26 @@ class CampaignIdentity:
         }
         if provider.to_public_dict() != expected:
             raise BaselineError("selected provider profile drifted from the campaign lock")
+
+    def provider_projection(self, config: RuntimeConfig) -> ProviderProjection:
+        """Resolve exactly the provider projection frozen by this identity.
+
+        Historical campaigns retain their host-active projection behavior.  A
+        v7 campaign instead names its model and both role efforts in the lock,
+        so unrelated host defaults cannot turn the Terra main/Guardian pair
+        away from medium/low after identity creation.
+        """
+
+        if self.enforces_fair_comparison:
+            provider = config.paid_provider_projection(
+                model_id=str(self.selected_profile["effective_main_model"]),
+                main_effort=str(self.selected_profile["main_effort"]),
+                guardian_effort=str(self.selected_profile["guardian_effort"]),
+            )
+        else:
+            provider = config.paid_provider_projection()
+        self.validate_provider(provider)
+        return provider
 
     def validate_frozen_model_catalog(
         self,
@@ -551,10 +602,10 @@ class CampaignIdentity:
             if actual_product is not expected_product:
                 raise BaselineError("campaign bundle product differs from the lock")
         expected = self.bundles.get(side.value)
-        if not isinstance(expected, dict) or set(expected) != {
-            "manifest_path",
-            "manifest_sha256",
-        }:
+        expected_keys = {"manifest_path", "manifest_sha256"}
+        if self.enforces_fair_comparison:
+            expected_keys.add("source_commit")
+        if not isinstance(expected, dict) or set(expected) != expected_keys:
             raise BaselineError("campaign bundle identity is invalid")
         try:
             actual_path = manifest_path.resolve(strict=True)
@@ -564,6 +615,10 @@ class CampaignIdentity:
         if (
             actual_path != expected_path
             or _file_sha256(actual_path) != expected["manifest_sha256"]
+            or (
+                self.enforces_fair_comparison
+                and manifest.source_commit != expected["source_commit"]
+            )
         ):
             raise BaselineError("campaign bundle manifest drifted from the lock")
 
@@ -1352,7 +1407,13 @@ def campaign_lock_registry(paths: RepoPaths) -> tuple[CampaignLockRegistration, 
             raise BaselineError("historical campaign lock is invalid") from exc
         version = int(match.group(1))
         campaign_match = _CAMPAIGN_ID.fullmatch(str(lock.get("campaign_id")))
-        batch_match = _CAMPAIGN_BATCH_ID.fullmatch(str(lock.get("batch_id")))
+        schema_version = lock.get("schema_version")
+        batch_pattern = (
+            _FAIR_CAMPAIGN_BATCH_ID
+            if schema_version == FAIR_COMPARISON_SCHEMA_VERSION
+            else _HISTORICAL_CAMPAIGN_BATCH_ID
+        )
+        batch_match = batch_pattern.fullmatch(str(lock.get("batch_id")))
         max_slots = budget.get("max_run_slots")
         if (
             campaign_match is None
@@ -1510,9 +1571,17 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         or not isinstance(schema_version, int)
         or schema_version not in SUPPORTED_SCHEMA_VERSIONS
         or _CAMPAIGN_ID.fullmatch(str(value["campaign_id"])) is None
-        or _CAMPAIGN_BATCH_ID.fullmatch(str(value["batch_id"])) is None
+        or (
+            _FAIR_CAMPAIGN_BATCH_ID
+            if schema_version == FAIR_COMPARISON_SCHEMA_VERSION
+            else _HISTORICAL_CAMPAIGN_BATCH_ID
+        ).fullmatch(str(value["batch_id"])) is None
         or _CAMPAIGN_ID.fullmatch(value["campaign_id"]).group(1)
-        != _CAMPAIGN_BATCH_ID.fullmatch(value["batch_id"]).group(1)
+        != (
+            _FAIR_CAMPAIGN_BATCH_ID
+            if schema_version == FAIR_COMPARISON_SCHEMA_VERSION
+            else _HISTORICAL_CAMPAIGN_BATCH_ID
+        ).fullmatch(value["batch_id"]).group(1)
         or re.fullmatch(r"[0-9]{8}", str(value["run_id_date"])) is None
         or isinstance(value["run_id_sequence_base"], bool)
         or not isinstance(value["run_id_sequence_base"], int)
@@ -1527,7 +1596,15 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
             schema_version=schema_version,
             expected_max_run_slots=expected_max_run_slots,
         )
+        or (
+            schema_version == FAIR_COMPARISON_SCHEMA_VERSION
+            and expected_max_run_slots != CAMPAIGN_MAX_RUNS
+        )
         or value["baseline"] != expected_baseline
+        or (
+            schema_version == FAIR_COMPARISON_SCHEMA_VERSION
+            and not _valid_plan051_bundle_contract(value["bundles"])
+        )
     ):
         raise BaselineError("campaign lock differs from the frozen B7 contract")
     selected = value["selected_profile"]
@@ -1546,6 +1623,17 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         for key in required_selected
     ):
         raise BaselineError("campaign selected profile hashes are invalid")
+    if comparison is not None and (
+        selected.get("main_model") != PLAN051_MODEL_ID
+        or selected.get("guardian_model") != PLAN051_MODEL_ID
+        or selected.get("requested_main_model") != PLAN051_MODEL_ID
+        or selected.get("effective_main_model") != PLAN051_MODEL_ID
+        or selected.get("requested_guardian_model") != PLAN051_MODEL_ID
+        or selected.get("effective_guardian_model") != PLAN051_MODEL_ID
+        or selected.get("main_effort") != PLAN051_MAIN_REASONING_EFFORT
+        or selected.get("guardian_effort") != PLAN051_GUARDIAN_REASONING_EFFORT
+    ):
+        raise BaselineError("fair-comparison campaign model or effort differs from Plan 051")
     continuation = _parse_continuation_references(
         value.get("continuation", []),
         schema_version=schema_version,
@@ -1592,6 +1680,31 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     ):
         raise BaselineError("campaign lock is not registered")
     return identity
+
+
+def _valid_plan051_bundle_contract(value: object) -> bool:
+    """Validate the v7 bundle binding without changing historical lock shape."""
+
+    if not isinstance(value, dict) or set(value) != {"rondo", "codex"}:
+        return False
+    expected_commits = {
+        "rondo": PLAN051_RONDO_SOURCE_COMMIT,
+        "codex": PLAN051_CODEX_SOURCE_COMMIT,
+    }
+    for side, source_commit in expected_commits.items():
+        bundle = value[side]
+        if (
+            not isinstance(bundle, dict)
+            or set(bundle) != {"manifest_path", "manifest_sha256", "source_commit"}
+            or not isinstance(bundle["manifest_path"], str)
+            or not bundle["manifest_path"].startswith("eval-data/bin/")
+            or _SHA256.fullmatch(str(bundle["manifest_sha256"])) is None
+            or bundle["source_commit"] != source_commit
+        ):
+            return False
+    # A v7 Local identity must be constructed from the new Local source, never
+    # the cb652e1 bundle copied by the v22 generator.
+    return "cb652e1" not in str(value["rondo"]["manifest_path"])
 
 
 def _parse_comparison_block(
@@ -1806,14 +1919,22 @@ def _valid_campaign_budget(
     schema_version: int,
     expected_max_run_slots: int | None = None,
 ) -> bool:
-    if not isinstance(value, dict) or set(value) != {
+    historical_keys = {
         "campaign_cap_usd",
         "prior_estimated_usd",
         "run_cap_usd",
         "max_run_slots",
         "maximum_legal_request_reservation_usd",
         "actual_usd",
-    }:
+    }
+    fair_keys = historical_keys | {
+        "task_budget_id",
+        "task_budget_cap_usd",
+        "task_budget_prior_estimated_usd",
+    }
+    if not isinstance(value, dict) or set(value) != (
+        fair_keys if schema_version == FAIR_COMPARISON_SCHEMA_VERSION else historical_keys
+    ):
         return False
     try:
         cap = Decimal(value["campaign_cap_usd"])
@@ -1838,13 +1959,29 @@ def _valid_campaign_budget(
         6: {CAMPAIGN_CAP_USD},
     }.get(schema_version, set())
     if schema_version == FAIR_COMPARISON_SCHEMA_VERSION:
-        # A fair-comparison campaign carries no continuation, so it starts with
-        # no inherited spend and its own separately authorized cap.  The
-        # historical envelope stays the ceiling so a typo cannot widen it.
+        # Campaign arithmetic continues to use the established cap/prior names,
+        # while the explicit task fields bind all v7 successors to one 400 USD
+        # envelope.  The reservation is model-priced at generation time, so it
+        # cannot retain the old Sol constant.
+        try:
+            task_cap = Decimal(value["task_budget_cap_usd"])
+            task_prior = Decimal(value["task_budget_prior_estimated_usd"])
+            reservation = Decimal(value["maximum_legal_request_reservation_usd"])
+        except (ArithmeticError, TypeError):
+            return False
         cap_valid = (
-            Decimal(0) < cap <= CAMPAIGN_CAP_USD
+            value["task_budget_id"] == TASK_BUDGET_ID
+            and task_cap == PLAN051_TASK_BUDGET_CAP_USD
+            and task_prior >= Decimal(0)
+            and task_prior < task_cap
+            and cap == task_cap
+            and prior == task_prior
             and value["campaign_cap_usd"] == _money(cap)
-            and prior == Decimal(0)
+            and value["prior_estimated_usd"] == _money(prior)
+            and value["task_budget_cap_usd"] == _money(task_cap)
+            and value["task_budget_prior_estimated_usd"] == _money(task_prior)
+            and Decimal(0) < reservation <= RUN_CAP_USD
+            and value["maximum_legal_request_reservation_usd"] == _money(reservation)
         )
     else:
         cap_valid = cap in valid_caps and Decimal(0) <= prior < cap
@@ -1852,8 +1989,11 @@ def _valid_campaign_budget(
         cap_valid
         and value["run_cap_usd"] == _money(RUN_CAP_USD)
         and value["max_run_slots"] == expected_slots
-        and value["maximum_legal_request_reservation_usd"]
-        == _money(SOL_MAX_LEGAL_REQUEST_RESERVATION_USD)
+        and (
+            schema_version == FAIR_COMPARISON_SCHEMA_VERSION
+            or value["maximum_legal_request_reservation_usd"]
+            == _money(SOL_MAX_LEGAL_REQUEST_RESERVATION_USD)
+        )
         and value["actual_usd"] is None
     )
 

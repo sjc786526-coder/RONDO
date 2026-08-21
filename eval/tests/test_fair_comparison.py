@@ -85,6 +85,7 @@ from rondo_eval.terminal_bench.runner import PreparedTerminalBenchRun
 from rondo_eval.terminal_bench.__main__ import _load_manifest
 from rondo_eval.terminal_bench.freeze import TERMINAL_BENCH_VERSION
 from rondo_eval.terminal_bench.live import campaign_terminal_bench_request
+from rondo_eval.terminal_bench.task_budget import TASK_BUDGET_ID
 
 
 MAIN_PRICING = ModelPricing(
@@ -796,6 +797,16 @@ class _CampaignFixture:
     @classmethod
     def v7(cls, *, repeats: int = 3, comparison_overrides: dict | None = None):
         base = cls.v6()
+        paths = RepoPaths.discover(Path.cwd())
+        bundles = {
+            side: {
+                **bundle,
+                "source_commit": _load_manifest(
+                    paths.common_root / bundle["manifest_path"], paths.common_root
+                ).source_commit,
+            }
+            for side, bundle in base.bundles.items()
+        }
         catalog_identity = cls.catalog_identity()
         # Bind the declared conditions to the campaign's own authoritative
         # facts so the fixture exercises the real cross-check rather than a
@@ -826,9 +837,12 @@ class _CampaignFixture:
             schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
             budget={
                 **base.budget,
-                # A v7 campaign starts fresh: its own cap, no inherited spend.
-                "campaign_cap_usd": "200.000000",
+                # A v7 campaign starts fresh inside the exact Plan 051 envelope.
+                "campaign_cap_usd": "400.000000",
                 "prior_estimated_usd": "0.000000",
+                "task_budget_id": TASK_BUDGET_ID,
+                "task_budget_cap_usd": "400.000000",
+                "task_budget_prior_estimated_usd": "0.000000",
                 "max_run_slots": campaign_slot_total(
                     task_count=10,
                     max_attempts=4,
@@ -839,6 +853,7 @@ class _CampaignFixture:
                 FAIR_COMPARISON_SCHEMA_VERSION,
                 conditional_repeats_per_side=repeats - 1,
             ),
+            bundles=bundles,
             comparison=comparison,
         )
 
@@ -1573,13 +1588,24 @@ class SuccessorIdentityTests(unittest.TestCase):
                     run_id_date="20260901",
                     run_id_sequence_base=500000001,
                     comparison=block,
-                    campaign_cap_usd=Decimal("100.000000"),
+                    rondo_runtime_manifest=Path("missing-rondo-manifest.json"),
+                    codex_runtime_manifest=Path("missing-codex-manifest.json"),
+                    task_budget_id=TASK_BUDGET_ID,
+                    task_budget_cap_usd=Decimal("400.000000"),
+                    task_budget_prior_estimated_usd=Decimal("0.000000"),
                 )
 
-    def test_the_generator_requires_the_comparison_contract(self) -> None:
+    def test_the_generator_requires_explicit_frozen_inputs(self) -> None:
         signature = inspect.signature(generate_successor_lock)
-        parameter = signature.parameters["comparison"]
-        self.assertEqual(parameter.default, inspect.Parameter.empty)
+        for name in (
+            "comparison",
+            "rondo_runtime_manifest",
+            "codex_runtime_manifest",
+            "task_budget_id",
+            "task_budget_cap_usd",
+            "task_budget_prior_estimated_usd",
+        ):
+            self.assertEqual(signature.parameters[name].default, inspect.Parameter.empty)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             baseline_identity.main(
                 ["--run-id-date", "20260901", "--run-id-sequence-base", "500000001"]
@@ -1598,14 +1624,18 @@ class SuccessorIdentityTests(unittest.TestCase):
             "product": Product.RONDO_MULTI.value,
         }
         with self.assertRaisesRegex(
-            CampaignIdentityGenerationError, "inherited Local bundles"
+            CampaignIdentityGenerationError, "product must be rondo-local"
         ):
             generate_successor_lock(
                 RepoPaths.discover(Path.cwd()),
                 run_id_date="20260901",
                 run_id_sequence_base=500000001,
                 comparison=comparison,
-                campaign_cap_usd=Decimal("100.000000"),
+                rondo_runtime_manifest=Path("missing-rondo-manifest.json"),
+                codex_runtime_manifest=Path("missing-codex-manifest.json"),
+                task_budget_id=TASK_BUDGET_ID,
+                task_budget_cap_usd=Decimal("400.000000"),
+                task_budget_prior_estimated_usd=Decimal("0.000000"),
             )
 
     def test_an_unreadable_contract_file_fails_before_any_work(self) -> None:
@@ -1620,8 +1650,16 @@ class SuccessorIdentityTests(unittest.TestCase):
                     "500000001",
                     "--comparison-contract",
                     "/nonexistent/comparison.json",
-                    "--campaign-cap-usd",
+                    "--rondo-runtime-manifest",
+                    "missing-rondo-manifest.json",
+                    "--codex-runtime-manifest",
+                    "missing-codex-manifest.json",
+                    "--task-budget-id",
+                    "plan-051",
+                    "--task-budget-cap-usd",
                     "100.000000",
+                    "--task-budget-prior-estimated-usd",
+                    "0.000000",
                 ]
             )
 
@@ -2502,11 +2540,11 @@ class SuccessorRunRangeTests(unittest.TestCase):
 
 
 class SuccessorBudgetTests(unittest.TestCase):
-    """A v7 campaign gets its own authorized cap and inherits no spend."""
+    """Every v7 successor shares the exact authorized Plan 051 envelope."""
 
-    def test_the_generator_requires_an_authorized_cap(self) -> None:
+    def test_the_generator_requires_an_authorized_task_cap(self) -> None:
         parameter = inspect.signature(generate_successor_lock).parameters[
-            "campaign_cap_usd"
+            "task_budget_cap_usd"
         ]
         self.assertEqual(parameter.default, inspect.Parameter.empty)
         paths = RepoPaths.discover(Path.cwd())
@@ -2524,32 +2562,50 @@ class SuccessorBudgetTests(unittest.TestCase):
             "catalog_identity": _CampaignFixture.catalog_identity(),
             "product": Product.RONDO_LOCAL.value,
         }
-        for cap in (Decimal("0"), Decimal("-1"), Decimal("1600.000001")):
+        for cap in (
+            Decimal("0"),
+            Decimal("-1"),
+            Decimal("200.000000"),
+            Decimal("400.000001"),
+        ):
             with self.subTest(cap=cap), self.assertRaisesRegex(
-                CampaignIdentityGenerationError, "cap is not authorized"
+                CampaignIdentityGenerationError, "task budget is not authorized"
             ):
                 generate_successor_lock(
                     paths,
                     run_id_date="20260901",
                     run_id_sequence_base=500000001,
                     comparison=frozen,
-                    campaign_cap_usd=cap,
+                    rondo_runtime_manifest=Path("missing-rondo-manifest.json"),
+                    codex_runtime_manifest=Path("missing-codex-manifest.json"),
+                    task_budget_id=TASK_BUDGET_ID,
+                    task_budget_cap_usd=cap,
+                    task_budget_prior_estimated_usd=Decimal("0.000000"),
                 )
 
-    def test_a_v7_budget_may_not_carry_inherited_prior_spend(self) -> None:
+    def test_a_v7_budget_requires_the_exact_task_envelope(self) -> None:
         identity = _CampaignFixture.v7()
         self.assertTrue(
             _valid_campaign_budget(
-                {**identity.budget, "campaign_cap_usd": "200.000000",
-                 "prior_estimated_usd": "0.000000"},
+                {**identity.budget, "campaign_cap_usd": "400.000000",
+                 "prior_estimated_usd": "0.000000",
+                 "task_budget_cap_usd": "400.000000",
+                 "task_budget_prior_estimated_usd": "0.000000"},
                 schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
                 expected_max_run_slots=identity.budget["max_run_slots"],
             )
         )
         self.assertFalse(
             _valid_campaign_budget(
-                {**identity.budget, "campaign_cap_usd": "1600.000000",
-                 "prior_estimated_usd": "1136.113528"},
+                {**identity.budget, "campaign_cap_usd": "200.000000",
+                 "task_budget_cap_usd": "200.000000"},
+                schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+                expected_max_run_slots=identity.budget["max_run_slots"],
+            )
+        )
+        self.assertFalse(
+            _valid_campaign_budget(
+                {**identity.budget, "task_budget_id": "other-task"},
                 schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
                 expected_max_run_slots=identity.budget["max_run_slots"],
             )

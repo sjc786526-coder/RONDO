@@ -16,7 +16,7 @@
 
 1. 在 RONDO Local 源码基线 `54f62e5f7e86a7ab0d4f8d788eafec7176809395` 与冻结 Codex CLI
    `v0.147.0`（commit `be6e8eac029b183056b7e4402879f15d2c85f61b`）上，使用同一冻结中转站、
-   `gpt-5.6-terra` 和双方 main/Guardian 均为 `medium`，完成首次正式 schema v7 十题 canary，形成可归因、
+   `gpt-5.6-terra`、双方 main 为 `medium` 且双方 Guardian 为 `low`，完成首次正式 schema v7 十题 canary，形成可归因、
    可结算、可归档的 RONDO Local 基线。
 2. 在现有 `rondo_eval`、Terminal-Bench 与 `just` 设施上固化轻量稳定入口，使后续 Local 优化只需提供新的
    Local 源码/bundle、campaign identity、价格快照和当次预算，即可完成准备、运行或恢复、聚合、结算、清理、
@@ -32,7 +32,7 @@
 - [ ] 10 个既有 canary、共享 catalog、task/image digest、两侧 main/Guardian 模型与 effort、provider profile、
       价格快照、deadline、task-major 顺序、三次严格多数合同及 400 USD 任务预算均在首个真实请求前冻结并可复验。
 - [ ] 无 API 阶段保持零真实请求、零费用：相关 focused tests 通过；仍有效的 Oracle proof 被复用，失效部分才重跑；
-      十题双侧 stub preflight 串行通过，证明两侧生成相同的 Terra/medium 任务无关请求合同。
+      十题双侧 stub preflight 串行通过，证明两侧生成相同的 Terra main-medium/Guardian-low 任务无关请求合同。
 - [ ] 正式序列完成 fresh wire canary、RONDO A/A 两轮、RONDO/Codex A/B 各一轮、所有差异题的条件加跑、严格多数
       聚合、结算、归档与清理；基础与条件运行均按任务交错执行，不运行 validation、holdout 或 E-A。
 - [ ] 每个 schema v7 identity 仍是最多 321 槽：1 个 wire 槽、40 条基础逻辑链、最多 40 条条件逻辑链，每条逻辑链
@@ -80,7 +80,8 @@
 - `codex-source-code/` 的内容、上游版本/commit、依赖版本或依赖锁；冻结 Codex bundle 只允许校验，校验失败时才按
   既有 v0.147.0 freeze 流程重建。
 - v1—v22 的 lock/result/ledger/artifact/receipt/聚合及来源不明的现有 Docker、eval-data 或 worktree 资产。
-- 10 个 canary 题集、基础轮数、三次严格多数、比较判据、Terra/medium、冻结 provider、产品行为或 400 USD 上限。
+- 10 个 canary 题集、基础轮数、三次严格多数、比较判据、Terra main-medium/Guardian-low、冻结 provider、产品行为或
+  400 USD 上限。
 - validation、holdout、E-A、完整 Terminal-Bench、本地模型、训练、上游升级、CI、PR 或新的测评/可信/签名/审计平台。
 
 ### 不允许读取/查看
@@ -94,10 +95,11 @@
 
 以下约束具有强制性。不得为了简化实现、通过测试或提高局部指标而违反。
 
-1. **比较输入固定。** 两侧均使用 `gpt-5.6-terra`；main 与 Guardian 均为 `medium`；provider 保持执行启动时
+1. **比较输入固定。** 两侧均使用 `gpt-5.6-terra`；main 均为 `medium`，Guardian 均为 `low`；provider 保持执行启动时
    冻结的现有中转站 profile。正式数据开始后不得改变模型、effort、价格、provider、deadline、题集、顺序、
    重复合同或聚合公式。当前 ignored profile 仍激活 Sol/high，执行者必须在无 API 阶段通过显式任务选择或必要的
-   最小本地配置调整完成 Terra/medium 切换，并由 tracked identity 冻结结果；不能把本机默认值当作已满足。
+   最小本地配置调整完成 Terra main-medium/Guardian-low 切换，并由 tracked identity 冻结结果；不能把本机默认值
+   当作已满足。冻结 Codex 的 Guardian 自动选择 `low` 是本轮明确合同，不得投影成 `medium`。
 2. **产品与上游固定。** 本轮 Local 源码基线是 `54f62e5...`；评测设施后续提交不改变这个产品源码身份。
    当前 Local bundle 必须由该源码构建；冻结 Codex 只允许 `v0.147.0@be6e8eac...`，不做上游升级。
 3. **公平合同固定。** 只运行既有 10 canary；基础形态为 RONDO A/A 两轮和 RONDO/Codex A/B 各一轮；按任务交错；
@@ -154,7 +156,7 @@
 - 可以保留现有 bounded diagnosis 信息用于自动决策和日志，但普通外部瞬态无需人工命令解锁；识别为本地设施缺陷时
   先暂停新请求、窄修和无 API 复验，再创建 successor。更好的等价恢复策略可以替代这一建议。
 - 优先复用仍匹配 task/source/image/runner/verifier/seccomp 的 Oracle proof；只有依赖漂移或验证失败的题才重跑。
-- focused tests 至少覆盖：显式当前 Local bundle、Terra/medium 全链投影、wire 瞬态有界自动重试、任务预算跨
+- focused tests 至少覆盖：显式当前 Local bundle、Terra main-medium/Guardian-low 全链投影、wire 瞬态有界自动重试、任务预算跨
   successor 不清零、1/0 USD 三分法、崩溃恢复不重复发送、普通 infra 自动进入下一 attempt、有效结果不选择性
   重跑、默认入口零 API、终态清理。
   可按实际改动增减测试文件，不要求重跑整个 `eval-test`，除非执行者判断本次集中改动已达到阶段级全量门槛。
@@ -179,25 +181,31 @@
   旧诊断门会让普通同类 infra 等人工处理；尚无贯通 freeze/identity/preflight/run/resume/archive 的稳定入口。
 - 只读解析确认主仓库 ignored `rondo.local.toml` 已定义 Terra 价格快照（2026-08-21），但 active main/Guardian
   仍为 Sol/high；`.env.local` 仅检查为 regular file、`0600`，未读取内容。
+- 用户在执行中明确修订 effort 合同：双方主模型保持 `medium`，双方审批模型/Guardian 改为 `low`；实现与测试已按
+  该合同投影，不修改冻结 Codex 上游逻辑。
+- 已从 clean detached `54f62e5...` 源码经共享构建锁和看门狗冻结并完整复验新的 Local runtime bundle；现有
+  Codex `v0.147.0@be6e8eac...` bundle 自包含校验通过，因此未重建上游。
+- schema v7 显式 bundle、Terra effort 投影、wire 有界重试/恢复、跨 identity 400 USD envelope、1/0 USD fallback
+  与稳定入口已落地；受影响的无 API focused tests 当前 243/243 通过，入口默认返回 idle 且零请求。
 
 ### 当前工作
 
-计划已冻结，等待执行者从本 worktree 实施。规划阶段未运行 Cargo、Docker、Oracle、stub preflight 或真实 API，
-未创建 v23 identity，费用为 0。
+无 API harness 正在收口，尚未创建 v23 identity。已运行受看门狗保护的 Cargo freeze 与无 API tests；尚未运行
+Docker、Oracle/stub preflight 或真实 API，累计费用仍为 0。
 
 ### 本任务剩余步骤
 
 1. **启动复核与冻结输入**：再次确认 worktree/共享重型任务/active pointer；记录 Windows `C:` 与 Docker 基线；
-   静默校验密钥文件；刷新并冻结 Terra 价格，选择现有中转站 + Terra/medium；确认 10 题与 v7 比较合同。
+   静默校验密钥文件；刷新并冻结 Terra 价格，选择现有中转站 + Terra main-medium/Guardian-low；确认 10 题与 v7 比较合同。
 2. **冻结 bundle**：从 `54f62e5...` 的 clean detached measurement source 走共享构建锁冻结新的 Local runtime
    bundle；验证现有 Codex `be6e8eac...` bundle，只有验证失败才按同基线重建。不得用旧 Local bundle顶替。
-3. **复现并做最小适配**：关闭显式 bundle、Terra/medium、任务级 400 USD、1 USD fallback、自动恢复与统一入口的
+3. **复现并做最小适配**：关闭显式 bundle、Terra main-medium/Guardian-low、任务级 400 USD、1 USD fallback、自动恢复与统一入口的
    已确认缺口；补 focused 回归，不改产品行为和历史 v1—v22。
 4. **无 API harness 验收并提交**：运行相关 pure/fake/loopback/focused tests，确认统一入口默认零 API；提交可执行
    harness。随后生成 v23 comparison/identity 并单独提交，使后续 Oracle、stub 与正式运行都来自 clean committed
    harness/identity。
 5. **identity 下的无 API 预检**：在 v23 下复验现有 Oracle proof，只补齐失配或缺失项；两侧串行完成十题 stub
-   receipt，证明 Terra/medium 与 bundle 绑定正确。若失败，窄修、重跑并在需要时重新生成尚未产生正式数据的 identity。
+   receipt，证明 Terra main-medium/Guardian-low 与 bundle 绑定正确。若失败，窄修、重跑并在需要时重新生成尚未产生正式数据的 identity。
 6. **正式连续运行**：显式启动 paid action，自动推进 wire、task-major A/A、task-major A/B、条件加跑、聚合、结算、
    清理和归档。普通故障在边界内恢复；设施窄修后使用新 successor identity，所有 identity 共用 400 USD。
 7. **收口与交付**：验证至少 8 个共同有效任务、各层指标、全部请求结算、无活动 reservation/running slot/容器，
@@ -251,3 +259,4 @@ worktree，那是 tracked result 的既有架构要求，不是把结果直接�
 | 005 | 统一入口默认零 API，显式 paid 后持续到终态或硬停 | 防止误付费，同时避免每个普通错误重复等待人工确认 | just/CLI、运行状态机 | 已采纳 |
 | 006 | 允许现有发布合同所需的 task-owned distinct results worktree | 当前 baseline 明确拒绝把 tracked 结果写回执行 harness checkout；保持 clean harness 与 durable 发布 | worktree、结果提交 | 已采纳 |
 | 007 | 本轮只提交任务 worktree，不合并或推送 | 用户对本次规划和后续执行给出的最新 Git 交付边界优先于任务原稿中的最终交付条目 | Git 交付 | 已采纳 |
+| 008 | 双方 main 固定 `medium`，双方 Guardian 固定 `low` | 用户在执行中明确修订原 main/Guardian 均为 medium 的合同；冻结 Codex 本身也会为 Guardian 选择 low | provider projection、identity、preflight、wire、正式运行 | 已采纳 |
