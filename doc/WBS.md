@@ -91,8 +91,8 @@
     recovery identity 关闭，旧首槽没有重放。固定六个 pilot 全部有效且 trace 可用，2 个成功、4 个有效任务失败、
     累计 `2.533684 USD`；两侧 Root 均未主动委派，因此 activation 阴性并按冻结合同未运行正式十题。
   - **下一包 D — 明确委派三任务比较案例：待实施。** 冻结 Codex 与 RONDO 使用同一模型、effort、明确要求实质委派的
-    developer policy、任务、并发与外部 verifier；三道精选任务为 `db-wal-recovery`、`filter-js-from-html` 和
-    `headless-terminal`，每题两侧各运行一次。外部任务结果与 Team Lens 协作轨迹共同构成案例，但不形成统计性总体提升
+    developer policy、任务、并发与外部 verifier；三道精选任务为 `headless-terminal`、`sqlite-db-truncate` 和
+    `extract-elf`，每题两侧各运行一次。外部任务结果与 Team Lens 协作轨迹共同构成案例，但不形成统计性总体提升
     结论。policy 只强制真实 collaboration、必要沟通与最终整合，不规定 Team State 工具、Event/Fact 数量或调用顺序。
 
 新包 D 的任务目标、题目选择与判读边界见 Multi 子 WBS。真实 API、Docker、任务轮数与宽松总预算须在执行 plan 中冻结并
