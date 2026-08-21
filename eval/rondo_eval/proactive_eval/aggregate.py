@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping
 
 from ..team_lens.model import CAPABILITY_NAMES, capability, dump_team_view, validate_team_view
 from ..team_lens.report import render_report
+from .contract import COMMON_V2_TOOL_NAMES
 from .store import assert_body_free
 
 
@@ -19,6 +20,9 @@ _USAGE = {
     "reasoning_output_tokens": 0,
     "total_tokens": 0,
 }
+_COLLABORATION_ONLY_TOOL_NAMES = COMMON_V2_TOOL_NAMES | frozenset(
+    {"assign_agent_task", "assign_task", "close_agent"}
+)
 
 
 def synthetic_team_view(*, side: str, run_id: str, ordinal: int) -> dict[str, Any]:
@@ -219,7 +223,9 @@ def aggregate(
                 "wait_agent",
                 "close_agent",
             }
-            and not row["name"].startswith("team_")
+            and row["name"].rsplit(".", 1)[-1]
+            not in _COLLABORATION_ONLY_TOOL_NAMES
+            and not row["name"].rsplit(".", 1)[-1].startswith("team_")
             for row in view["tools"]
         )
         member_result_returned = any(

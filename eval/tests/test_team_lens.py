@@ -210,7 +210,11 @@ class NativeBundleBuilder:
         result: object,
         result_mode: str = "code",
         runtime_end: dict | None = None,
+        thread_id: str | None = None,
+        turn_id: str | None = None,
     ) -> None:
+        owner_thread = thread_id or self.root_thread
+        owner_turn = turn_id or self.root_turn
         invocation = self.payload(
             "tool_invocation",
             {
@@ -232,8 +236,8 @@ class NativeBundleBuilder:
                     "model_visible_call_id": f"model-{tool_id}",
                     "source_js": SOURCE_BODY,
                 },
-                thread_id=self.root_thread,
-                turn_id=self.root_turn,
+                thread_id=owner_thread,
+                turn_id=owner_turn,
             )
         self.event(
             {
@@ -251,8 +255,8 @@ class NativeBundleBuilder:
                 },
                 "invocation_payload": invocation,
             },
-            thread_id=self.root_thread,
-            turn_id=self.root_turn,
+            thread_id=owner_thread,
+            turn_id=owner_turn,
         )
         if runtime_end is not None:
             runtime_start = self.payload(
@@ -268,8 +272,8 @@ class NativeBundleBuilder:
                     "tool_call_id": tool_id,
                     "runtime_payload": runtime_start,
                 },
-                thread_id=self.root_thread,
-                turn_id=self.root_turn,
+                thread_id=owner_thread,
+                turn_id=owner_turn,
             )
             runtime = self.payload("tool_runtime_event", runtime_end)
             self.event(
@@ -279,8 +283,8 @@ class NativeBundleBuilder:
                     "status": "completed",
                     "runtime_payload": runtime,
                 },
-                thread_id=self.root_thread,
-                turn_id=self.root_turn,
+                thread_id=owner_thread,
+                turn_id=owner_turn,
             )
         wrapped = (
             {"type": "code_mode_response", "value": result}
@@ -302,8 +306,8 @@ class NativeBundleBuilder:
                 "status": "completed",
                 "result_payload": result_ref,
             },
-            thread_id=self.root_thread,
-            turn_id=self.root_turn,
+            thread_id=owner_thread,
+            turn_id=owner_turn,
         )
 
     def write(self) -> Path:
@@ -325,6 +329,7 @@ def make_bundle(
     retire_mode: str | None = None,
     deduplicated_route_after_dump: bool = False,
     include_member_inference: bool = False,
+    member_tool_name: str | None = None,
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -369,6 +374,17 @@ def make_bundle(
         builder.inference(
             "inference-worker",
             {"model": "synthetic", "input": []},
+            thread_id="thread-worker",
+            turn_id="turn-worker",
+        )
+    if member_tool_name is not None:
+        builder.tool(
+            "tool-worker",
+            name=member_tool_name,
+            kind="other",
+            arguments={},
+            result={},
+            result_mode="direct",
             thread_id="thread-worker",
             turn_id="turn-worker",
         )

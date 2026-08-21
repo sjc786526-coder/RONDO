@@ -460,6 +460,26 @@ class ExplicitEvalTest(unittest.TestCase):
                 "policy_noncompliance",
             )
 
+            ritual_bundle = make_bundle(
+                Path(raw) / "ritual-bundle",
+                product="codex",
+                member_tool_name="list_agents",
+            )
+            ritual = aggregate(
+                [record],
+                {run_id: reduce_bundle(ritual_bundle, "codex")},
+                lock_id=self.contract.lock_id,
+                lock_sha256=self.contract.lock_sha256,
+                policy_sha256=self.contract.policy_sha256,
+                expected_slots={slot.slot_id: slot.pair_id},
+            )
+            self.assertFalse(ritual["runs"][0]["member_activity_observed"])
+            cases, _overview = build_case_outputs(ritual)
+            self.assertEqual(
+                cases["C01"]["sides"][0]["collaboration_status"],
+                "policy_noncompliance",
+            )
+
             active_bundle = make_bundle(
                 Path(raw) / "active-bundle",
                 product="codex",
