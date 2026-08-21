@@ -14,5 +14,6 @@
   workspace、CI/PR、validation/holdout、本地模型或训练。
 - 正式运行前后 Docker 均为 26 images / 11.5 GB、0 container/volume/build cache，VHDX 为
   `69,467,111,424` bytes；Windows `C:` campaign 读数为 `183,926,632,448 -> 183,749,709,824` bytes，收尾
-  读数 `183,738,654,720` bytes。ignored 资产保留 bundle/build、v23—v28 campaign/preflight、v27/v28 ledgers、
-  task envelope、comparison 和 raw runs；未编辑 `rondo.local.toml`，未改冻结上游源码。
+  读数 `183,738,654,720` bytes。ignored 资产保留 runtime/code-mode bundle、build metrics、v23—v28
+  campaign/preflight、v27/v28 ledgers、task envelope、comparison、诊断 work 与正式 raw runs；13 GB 可重建临时
+  build tree 和 v27 孤立隐藏发布 staging 已精确删除。未编辑 `rondo.local.toml`，未改冻结上游源码。
