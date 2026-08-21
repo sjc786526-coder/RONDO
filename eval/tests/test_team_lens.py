@@ -330,6 +330,8 @@ def make_bundle(
     deduplicated_route_after_dump: bool = False,
     include_member_inference: bool = False,
     member_tool_name: str | None = None,
+    include_member_message: bool = False,
+    include_agent_result: bool = True,
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -385,6 +387,21 @@ def make_bundle(
             arguments={},
             result={},
             result_mode="direct",
+            thread_id="thread-worker",
+            turn_id="turn-worker",
+        )
+    if include_member_message:
+        builder.tool(
+            "tool-worker-message",
+            name="send_message",
+            kind="send_message",
+            arguments={"target": builder.root_thread, "message": RESPONSE_BODY},
+            result={"delivered": True},
+            result_mode="direct",
+            runtime_end={
+                "receiver_thread_id": builder.root_thread,
+                "status": "completed",
+            },
             thread_id="thread-worker",
             turn_id="turn-worker",
         )
@@ -631,19 +648,22 @@ def make_bundle(
         }
         builder.inference("inference-2", request)
 
-    builder.event(
-        {
-            "type": "agent_result_observed",
-            "edge_id": "edge-result",
-            "child_thread_id": "thread-worker",
-            "child_codex_turn_id": "turn-worker",
-            "parent_thread_id": "thread-root",
-            "message": RESPONSE_BODY,
-            "carried_payload": builder.payload("agent_result", {"message": RESPONSE_BODY}),
-        },
-        thread_id="thread-worker",
-        turn_id="turn-worker",
-    )
+    if include_agent_result:
+        builder.event(
+            {
+                "type": "agent_result_observed",
+                "edge_id": "edge-result",
+                "child_thread_id": "thread-worker",
+                "child_codex_turn_id": "turn-worker",
+                "parent_thread_id": "thread-root",
+                "message": RESPONSE_BODY,
+                "carried_payload": builder.payload(
+                    "agent_result", {"message": RESPONSE_BODY}
+                ),
+            },
+            thread_id="thread-worker",
+            turn_id="turn-worker",
+        )
     builder.event(
         {"type": "codex_turn_ended", "codex_turn_id": builder.root_turn, "status": "completed"},
         thread_id=builder.root_thread,

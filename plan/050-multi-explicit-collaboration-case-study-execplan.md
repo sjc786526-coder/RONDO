@@ -1,7 +1,7 @@
 # Plan 050：明确委派三任务比较案例 ExecPlan
 
 > 本计划是 Plan 050 的稳定任务合同，同时覆盖阶段 A 与阶段 B。
-> 阶段 A 已完成；阶段 B 六槽与结算有效，最终协作分类因 C01 RONDO 漏报等待本地窄修复验。
+> 阶段 A 已完成；阶段 B 六槽与结算有效，C01 RONDO 协作漏报已完成本地窄修与重归约，等待独立复验。
 > 除“当前状态”和“关键决策记录”外，其他部分在执行期间默认不得修改。
 > 如果必须改变目标、三道任务、共同 policy、公平合同、范围、硬约束、最高预算或完成标准，应暂停执行并请求用户确认；
 > 普通实现选择、离线 fixture/配置窄修、基础设施修复、从可信状态 resume 和合同内重跑不属于合同变更。
@@ -315,21 +315,19 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 ### 当前工作
 
 - 阶段 B 已按冻结顺序完成六个有效槽位与本地 finalization：4 `completed`、2 `task_failed`，六槽 Root trace 均
-  `available`；复验发现 C01 RONDO 的 typed member-to-Root `send_message` 未被计为贡献返回，现有最终分类少计一个协作槽。
+  `available`；C01 RONDO 的 typed member-to-Root `send_message` 漏报已窄修并从既有资产重归约。
 - 13 个 attempts 中 7 个因 relay 返回 `invalid_encrypted_content` 或流读取错误保持为 `infra_failed`，其余 6 个为
   不可替换的有效终态。165 个请求均已结算，100 USD 正式账本保守费用为 `30.307445 USD`，无悬空 reservation。
-- 三份案例与总览的现有 digest 可重现，但协作分类尚非最终结果。C03 RONDO 的 `collaboration_observed / observed` 及两侧
-  verifier 失败不变；C01 RONDO 应至少为 `collaboration_observed / not_observed`。
+- 更正后共有 2 槽 `collaboration_observed`、4 槽 `policy_noncompliance`；C01 RONDO 为
+  `collaboration_observed / not_observed`，C03 RONDO 为 `collaboration_observed / observed`，外部结果不变。
 
 ### 本任务剩余步骤
 
-- 窄修 `member_result_returned`：成员已有实质活动时，接受 completed member-to-Root `send_message` 或 `agent_result`；
-  纯 spawn/message 仍不得冒充实质协作。
-- 补正反两类定向回归，从既有资产重建 aggregate、三份案例和 overview，更新报告后重新独立复验。不得重跑真实 API。
+- 在当前候选提交上完成独立复验；若发现真实 correctness 问题，先窄修并再次复验。不得重跑真实 API。
 
 ### 阻塞项
 
-- 最终验收被 C01 RONDO 协作漏报阻断；不影响六槽、外部 verifier、费用与资源证据。
+- 无已知技术 blocker；等待独立复验。
 
 ### 当前验收状态
 
@@ -339,16 +337,18 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
   完整显式判读，并覆盖 `observed`、`not_observed`、合法 `unknown`、缺槽/错槽和不一致状态。
 - 定向回归共 219 项：217 通过、2 项因未提供既有真实 Plan 049 样本路径按预期跳过；无失败。范围覆盖 Plan 050、
   Plan 049 共享编排、预算代理、Terminal-Bench、Team Lens 与 Multi 工具面，未运行全量测试。
-- readiness 复算得到 6/6 terminal、无缺槽/半对，且 `eval-data/plan-050/paid/` 不存在。阶段 A 未运行真实 API、Docker、
-  Cargo、模型或全 workspace 测试，没有产生费用；影响链收口已通过独立复验。
+- 阶段 A readiness 复算得到 6/6 terminal、无缺槽/半对，当时 `eval-data/plan-050/paid/` 不存在。阶段 A 未运行真实 API、
+  Docker、Cargo、模型或全 workspace 测试，没有产生费用；影响链收口已通过独立复验。
 - 阶段 B 正式 aggregate 为 6/6 effective terminal、3/3 complete pair、7 infra invalid、0 missing slot。有效结果为
   C01/C02 两侧通过、C03 两侧失败；有效六槽费用 `3.156021 USD`，含保守 infra 暴露的总账为 `30.307445 USD`。
-- 现有待替换的 finalizer 判读为 1 `observed`、5 `not_observed`、0 `unknown`；该分类少计 C01 RONDO 的真实协作，
-  因而下列当前案例 digest 只用于定位待重建资产，不是最终展示结果：
-  `80394198467fdc10eb1b9f6ccc4426c5c0c3a8d187e84f5b72f5ce68464f5686`、
+- 修正后的 collaboration 判读为 2 `collaboration_observed`、4 `policy_noncompliance`；impact chain 为 1 `observed`、
+  5 `not_observed`、0 `unknown`。aggregate digest 为
+  `50502a6ba68b47b9cf0a4502ce211c094e8c9aafba051dec44645c126971814a`，案例 digest 为：
+  `7729a9361edc13a442e06477706ee322244b7b946757433b597eca53a69d1111`、
   `bcd2697e931d967f52db42339d60f29f52a0163dafc160d3727085e71da27ca4`、
   `0d373519342dcf922986977f9afdf6790c8248943bf78ee86dfb30590a51931d`，overview 为
-  `dcd2d7419285633057018a401b832f155a1d88e64ab691961c59d669e569f859`。
+  `b02ad9424139ddeda75a83bede08a42db623a11e2d078872f6e8ddb80b4178f9`。finalizer 同输入重入 digest 不变；
+  本轮 75 项定向回归为 73 通过、2 个既有可选样本 skip，37 个正式 body-free/schema 值通过。
 
 ### 阶段 B 实际启动条件
 
@@ -358,7 +358,7 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 
 ### 交接边界
 
-- Plan 050 继续在同一工作树做本地窄修和复验；不得重跑真实 API，也不改变六槽外部终态或费用。
+- Plan 050 继续在同一工作树完成独立复验；不得重跑真实 API，也不改变六槽外部终态或费用。
 - 050 工作树只保留本地提交；最终验收通过前不合并、不推送、不关闭或重命名分支。
 
 ## 6. 关键决策记录

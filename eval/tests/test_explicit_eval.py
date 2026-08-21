@@ -609,9 +609,68 @@ class ExplicitEvalTest(unittest.TestCase):
                 "collaboration_observed",
             )
 
-            missing_result = copy.deepcopy(active)
-            missing_result["runs"][0]["member_result_returned"] = False
-            cases, _overview = build_case_outputs(missing_result)
+            message_bundle = make_bundle(
+                Path(raw) / "message-bundle",
+                product="codex",
+                include_member_inference=True,
+                include_member_message=True,
+                include_agent_result=False,
+            )
+            message_return = aggregate(
+                [record],
+                {run_id: reduce_bundle(message_bundle, "codex")},
+                lock_id=self.contract.lock_id,
+                lock_sha256=self.contract.lock_sha256,
+                policy_sha256=self.contract.policy_sha256,
+                expected_slots={slot.slot_id: slot.pair_id},
+            )
+            self.assertTrue(message_return["runs"][0]["member_activity_observed"])
+            self.assertTrue(message_return["runs"][0]["member_result_returned"])
+            cases, _overview = build_case_outputs(message_return)
+            self.assertEqual(
+                cases["C01"]["sides"][0]["collaboration_status"],
+                "collaboration_observed",
+            )
+
+            active_no_return_bundle = make_bundle(
+                Path(raw) / "active-no-return-bundle",
+                product="codex",
+                include_member_inference=True,
+                include_agent_result=False,
+            )
+            active_no_return = aggregate(
+                [record],
+                {run_id: reduce_bundle(active_no_return_bundle, "codex")},
+                lock_id=self.contract.lock_id,
+                lock_sha256=self.contract.lock_sha256,
+                policy_sha256=self.contract.policy_sha256,
+                expected_slots={slot.slot_id: slot.pair_id},
+            )
+            self.assertTrue(active_no_return["runs"][0]["member_activity_observed"])
+            self.assertFalse(active_no_return["runs"][0]["member_result_returned"])
+            cases, _overview = build_case_outputs(active_no_return)
+            self.assertEqual(
+                cases["C01"]["sides"][0]["collaboration_status"],
+                "policy_noncompliance",
+            )
+
+            ritual_message_bundle = make_bundle(
+                Path(raw) / "ritual-message-bundle",
+                product="codex",
+                include_member_message=True,
+                include_agent_result=False,
+            )
+            ritual_message = aggregate(
+                [record],
+                {run_id: reduce_bundle(ritual_message_bundle, "codex")},
+                lock_id=self.contract.lock_id,
+                lock_sha256=self.contract.lock_sha256,
+                policy_sha256=self.contract.policy_sha256,
+                expected_slots={slot.slot_id: slot.pair_id},
+            )
+            self.assertFalse(ritual_message["runs"][0]["member_activity_observed"])
+            self.assertTrue(ritual_message["runs"][0]["member_result_returned"])
+            cases, _overview = build_case_outputs(ritual_message)
             self.assertEqual(
                 cases["C01"]["sides"][0]["collaboration_status"],
                 "policy_noncompliance",

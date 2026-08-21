@@ -228,8 +228,11 @@ def aggregate(
             and not row["name"].rsplit(".", 1)[-1].startswith("team_")
             for row in view["tools"]
         )
+        # A completed member-to-Root send_message is also a typed handoff.
+        # Material work remains a separate mandatory predicate above, so a
+        # ritual message alone cannot satisfy the collaboration policy.
         member_result_returned = any(
-            interaction["kind"] == "agent_result"
+            interaction["kind"] in {"agent_result", "send_message"}
             and interaction["source_agent_id"] in spawned_ids
             and interaction["target_agent_id"] == root_agent_id
             and interaction["status"] == "completed"

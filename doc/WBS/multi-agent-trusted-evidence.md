@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-21 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 六槽与结算有效，最终协作分类等待窄修复验
+第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 本地分类窄修与重归约完成，等待独立复验
 
 ## 定位
 
@@ -251,15 +251,17 @@ Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity
 
 ## 当前任务包：明确委派三任务比较案例
 
-**状态：Plan 050 六槽付费执行与结算有效，最终协作分类待窄修复验。** 六个有效槽位为 4 `completed`、
-2 `task_failed`，六份 Root trace 均可归约；C01/C02 两侧通过，C03 两侧失败。复验确认 C01 RONDO accepted spawn 后，
-成员完成 7 次 inference、7 次非协作工具并以 typed `send_message` 交回 Root；现有聚合只接受 `agent_result`，因此把这一真实
-协作槽误报为 `policy_noncompliance`。C03 RONDO 的 `collaboration_observed / observed` 与外部失败结论不变。
+**状态：Plan 050 六槽付费执行与结算有效，本地分类窄修与重归约完成，等待独立复验。** 六个有效槽位为 4 `completed`、
+2 `task_failed`，六份 Root trace 均可归约；C01/C02 两侧通过，C03 两侧失败。C01 RONDO accepted spawn 后，成员完成
+7 次 inference、7 次非协作工具并以 typed `send_message` 交回 Root；聚合现将 completed member-to-Root
+`send_message` 或 `agent_result` 视为 contribution return，同时继续独立要求实质成员活动。C01 RONDO 因而更正为
+`collaboration_observed / not_observed`，C03 RONDO 保持 `collaboration_observed / observed`。
 
 正式 100 USD 账本共 13 attempts、165 个已结算请求：7 个 relay 加密内容/流错误保留为 infra invalid，六个有效槽位费用
 `3.156021 USD`，含未知 usage 保守 reservation 的总账 `30.307445 USD`。三份案例与总览已由本地-only finalizer
-确定性生成；无缺槽、半对、悬空 reservation 或 Docker 资源。当前不得重跑付费槽位，只需窄修 member-to-Root 返回判读、
-补定向回归并从既有资产重建 aggregate、案例和总览；最终结论仍只适用于冻结的三题与明确 collaboration policy。
+确定性生成；无缺槽、半对、悬空 reservation 或 Docker 资源。重归约后共 2 `collaboration_observed`、
+4 `policy_noncompliance`，影响链为 1 `observed`、5 `not_observed`；当前只剩独立复验，最终结论仍只适用于冻结的三题与
+明确 collaboration policy。
 
 **定位**：这是一个三任务的小规模 comparative case study，同时也是产品展示。它不再询问模型是否会在软提示下自然
 委派，而是明确建立 collaboration 条件，比较真实委派发生后冻结 Codex 与 RONDO 的外部任务结果和协作过程。它不是
