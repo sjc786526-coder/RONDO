@@ -122,13 +122,17 @@ class ConfigHardeningTests(unittest.TestCase):
             task_image_digest=f"sha256:{'c' * 64}",
             binary=binary,
             terminal_bench_version="harbor-v0.20.0",
+            model_id="test-sol-model",
+            main_effort="low",
+            guardian_effort="low",
         )
         self.assertEqual(spec.provider.config_sha256, config.source_sha256)
         self.assertEqual(spec.provider.config_source, "rondo.local.toml")
         self.assertEqual(spec.provider.provider_id, "relay")
         self.assertEqual(spec.provider.main_model, "test-sol-model")
-        self.assertEqual(spec.provider.main_effort, "medium")
-        self.assertEqual(spec.provider.guardian_model, "test-luna-model")
+        self.assertEqual(spec.provider.main_effort, "low")
+        self.assertEqual(spec.provider.guardian_model, "test-sol-model")
+        self.assertEqual(spec.provider.guardian_effort, "low")
         self.assertEqual(spec.provider.max_attempts, 5)
         self.assertEqual(
             spec.provider.unbilled_retry_statuses, (429, 500, 502, 503, 504)

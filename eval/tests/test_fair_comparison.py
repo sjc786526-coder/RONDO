@@ -859,6 +859,30 @@ class _CampaignFixture:
 
 
 class CampaignExecutionOrderTests(unittest.TestCase):
+    def test_historical_campaign_request_keeps_host_provider_defaults(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        identity = _CampaignFixture.v6()
+        task = identity.catalog.tasks[0]
+        manifest = _load_manifest(
+            paths.common_root / identity.bundles["codex"]["manifest_path"],
+            paths.common_root,
+        )
+        request = campaign_terminal_bench_request(
+            identity=identity,
+            side=Side.CODEX,
+            task=task,
+            binary=manifest,
+            common_root=paths.common_root,
+            work_root=paths.common_root / "eval-data/work/historical-contract",
+            docker_task_id="historical-contract-codex",
+            seccomp_profile=paths.worktree_root
+            / identity.no_api_seccomp["profile_path"],
+            budget_usd=40.0,
+        )
+        self.assertIsNone(request.pinned_model_id)
+        self.assertIsNone(request.pinned_main_effort)
+        self.assertIsNone(request.pinned_guardian_effort)
+
     def test_historical_campaigns_keep_round_blocked_order(self) -> None:
         order = _CampaignFixture.v6().base_round_order
         self.assertEqual(
@@ -1047,6 +1071,11 @@ class CampaignFairComparisonContractTests(unittest.TestCase):
             self.assertIs(
                 request.product,
                 Product.RONDO_LOCAL if side is Side.RONDO else None,
+            )
+            self.assertEqual(request.pinned_model_id, provider.main_model)
+            self.assertEqual(request.pinned_main_effort, provider.main_effort)
+            self.assertEqual(
+                request.pinned_guardian_effort, provider.guardian_effort
             )
             spec = RunSpec(
                 side=side,

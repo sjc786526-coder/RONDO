@@ -216,6 +216,8 @@ def make_run_spec(
     product: Product | None = None,
     provider_name: str | None = None,
     model_id: str | None = None,
+    main_effort: str | None = None,
+    guardian_effort: str | None = None,
     timeout_seconds: int = 1800,
     max_retries: int = 0,
     budget_usd: float = 5.0,
@@ -227,7 +229,12 @@ def make_run_spec(
     projection, so campaigns frozen against the host alias keep their identity.
     """
 
-    projection = config.paid_provider_projection(provider_name, model_id=model_id)
+    projection = config.paid_provider_projection(
+        provider_name,
+        model_id=model_id,
+        main_effort=main_effort,
+        guardian_effort=guardian_effort,
+    )
     spec = RunSpec(
         side=side,
         batch_id=batch_id,

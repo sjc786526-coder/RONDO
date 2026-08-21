@@ -145,6 +145,21 @@ def campaign_terminal_bench_request(
         seccomp_profile_effective_sha256=identity.no_api_seccomp["effective_sha256"],
         require_container_metrics=True,
         frozen_task=task,
+        pinned_model_id=(
+            str(identity.selected_profile["effective_main_model"])
+            if identity.enforces_fair_comparison
+            else None
+        ),
+        pinned_main_effort=(
+            str(identity.selected_profile["main_effort"])
+            if identity.enforces_fair_comparison
+            else None
+        ),
+        pinned_guardian_effort=(
+            str(identity.selected_profile["guardian_effort"])
+            if identity.enforces_fair_comparison
+            else None
+        ),
     )
 
 

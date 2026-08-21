@@ -97,6 +97,8 @@ class TerminalBenchRequest:
     # the adapter argv and the budget proxy all resolve the same model, which is
     # what makes a pinned campaign runnable beside a differently-pinned one.
     pinned_model_id: str | None = None
+    pinned_main_effort: str | None = None
+    pinned_guardian_effort: str | None = None
     pinned_subagent_model: str | None = None
     pinned_subagent_effort: str | None = None
     # Opt-in symmetric V2/trace wiring. False preserves historical campaigns.
@@ -516,6 +518,8 @@ def prepare_terminal_bench_run(
         product=request.product,
         provider_name=request.provider_name,
         model_id=request.pinned_model_id,
+        main_effort=request.pinned_main_effort,
+        guardian_effort=request.pinned_guardian_effort,
         timeout_seconds=request.timeout_seconds,
         max_retries=request.max_retries,
         budget_usd=request.budget_usd,
