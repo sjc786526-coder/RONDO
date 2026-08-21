@@ -329,20 +329,23 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       25 项定向测试均通过。
 - [x] 全新上下文的独立审查者在 clean `9e354aa8794c07186ede56689487c17d7a774ea5` 上复核五项 finding、三个崩溃窗口、
       v5 工具投影、readiness 与上述全部门禁，结论 PASS；阶段 A 恢复为 `paid-ready`，阶段 B 仍未授权。
+- [x] 对最终 `a30715de75240a9d61f0e8702e942ca7b90fc53e` 的另一次独立验收发现：普通产品失败已归因后，
+      trace 缺失仍会被记为 `infra_failed` 并购买替代 attempt，违反不选择性重跑的公平合同。阶段 A 回拨为
+      `blocked`，证据见 `agent_log/2026-08-20-203309-plan049-phase-a-final-independent-acceptance.md`。
 
 ### 当前工作
 
-- 阶段 A 已完成并通过独立验收，当前 `paid-ready`；阶段 B 保持未授权。
+- 阶段 A 最终独立验收回拨为 `blocked`；阶段 B 保持未授权。
 
 ### 本任务剩余步骤
 
-1. 只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额后，才创建正式 activation identity 并执行固定
-   pilot/正式任务。
-2. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 窄修“已归因产品失败 + missing trace”的恢复分类：不得转成 infra retry，必须持久阻断替代 attempt；补一条跨重启定向回归并重新独立验收。
+2. 修复验收通过后，仍只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额，才可创建正式 activation identity 并执行固定 pilot/正式任务。
+3. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 无已知 correctness blocker，独立验收结论为 `paid-ready`。
+- 普通产品失败后 missing trace 会被误标 infra 并进入替代 attempt；该 correctness blocker 关闭前阶段 A 为 `blocked`。
 - 阶段 B 仍因尚未授权及缺少明确开始动作、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
 
 ### 当前验收状态
