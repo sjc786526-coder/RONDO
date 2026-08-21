@@ -1467,3 +1467,19 @@ RONDO 相对冻结 Codex 带来质量、速度、token 或成本收益。该缺�
   模型或全量测试。关键语义返修提交 `78736a7ec2c6d37fdad74ae30fdbf682e4801ec1`；最终验收报告提交
   `7e8ef8ee80a492e0fcc49fe3467d5e75d5812505`，报告为
   `agent_log/2026-08-20-110755-plan048-team-lens-reacceptance-review.md`。
+
+## RONDO Multi 第二期后置主动委派测评（Plan 049，2026-08-20）
+
+**状态**：阶段 A 无费用设施与阶段 B 固定 activation pilot 均完成。阶段 B 的正确结论为“当前共同 policy 与固定
+pilot 任务未激活 Root 主动委派”，因此按预先冻结的停止门没有运行正式十题，不能形成 Team State 委派收益结论。
+
+- 阶段 A 建立两侧共同 Multi-Agent V2、同模型/effort/并发/policy、确定性 schedule、body-free archive/Team Lens、
+  持久预算与 fail-closed paid/resume；多轮独立审查关闭原则性停止、重复费用、身份前缀、工具投影与分类缺口。
+- 首个 paid Codex 槽因 Guardian 形成第二个原生 root bundle 暴露单-bundle locator 缺口。Plan 049 selector 随后机械要求
+  唯一 Exec Root、允许身份明确的 Guardian，并让 Team Lens 只消费 Root；RONDO 同构路径也纳入回归。
+- 新 recovery identity 只读承接旧 a01、15 个已结算请求和 `$0.262759`，没有 a02 或 provider 重放。随后六个固定 pilot
+  全部以 attempt 1 完成：2 个成功、4 个有效任务失败、0 infra、100 个 usage-priced 请求，累计 `$2.533684`。
+- 六槽的 Root spawn attempt/accept 均为 0，故 `activation_observed=false`。追加机动预算没有被实例化或消费；不通过
+  事后追加有效 pilot、换题或强制 spawn 改写阴性结果。完整代码、运行、资源和未运行项见
+  `plan/049-multi-proactive-delegation-eval-execplan.md` 与
+  `agent_log/2026-08-20-231500-plan049-phase-b-final.md`。

@@ -24,8 +24,8 @@ reasoning effort、并发、deadline、工具面和外部判定的条件下，�
 
 - **阶段 A：无费用准备。** 当前已授权。冻结合同、完成最小设施、离线测试和彩排，最后只给 `paid-ready` 或
   `blocked` 结论；不得产生真实 provider/API 请求或费用。
-- **阶段 B：真实 API activation pilot 与正式成对测评。** 当前未授权。只有用户另行明确“开始阶段 B”并确认本计划的
-  总费用边界与当前可用余额后才可启动。
+- **阶段 B：真实 API activation pilot 与正式成对测评。** 已在用户另行明确授权、确认本计划费用边界与当前可用余额后
+  执行；activation 未通过，故正式成对测评按合同未启动。
 
 ### 完成/验收标准
 
@@ -63,20 +63,20 @@ reasoning effort、并发、deadline、工具面和外部判定的条件下，�
 付费 provider 连通性若无法零费用验证，诚实留给阶段 B activation pilot，不因此伪造绿色，也不单独把其余阶段 A
 判为失败。
 
-#### 阶段 B：付费测评与观测（当前未授权）
+#### 阶段 B：付费测评与观测（执行完成；activation 未激活）
 
-- [ ] 用户另行明确授权“开始阶段 B”，确认 **100 USD 本任务累计硬上限**，并确认中转站可用余额不少于该上限；授权前
+- [x] 用户另行明确授权“开始阶段 B”，确认 **100 USD 本任务累计硬上限**，并确认中转站可用余额不少于该上限；授权前
       不得运行任何真实 provider/API 或正式样本。若用户选择其他金额，属于费用合同变更，必须先更新计划并重新审查。
-- [ ] 先完成 §3.4 的固定 activation pilot；只有 policy 注入、两侧原生 trace、Team Lens 和主动委派 activation 门均满足，
+- [x] 先完成 §3.4 的固定 activation pilot；只有 policy 注入、两侧原生 trace、Team Lens 和主动委派 activation 门均满足，
       才进入正式十个成对任务。
-- [ ] 按 §3.3 的固定顺序得到十个有效配对；基础设施无效尝试不替换为别的任务，模型正常完成但 verifier 失败属于有效
-      测评结果，不因分数不好而重跑。
-- [ ] 每个有效运行均有 body-free Team View 与离线 HTML；字段不可得时使用 Team Lens 既有四态与 reason code，
+- [ ] 按 §3.3 的固定顺序得到十个有效配对；本项不适用：activation 未通过，§3.4 要求不得启动正式十题。基础设施无效
+      尝试不替换为别的任务，模型正常完成但 verifier 失败属于有效测评结果，不因分数不好而重跑。
+- [x] 每个有效运行均有 body-free Team View 与离线 HTML；字段不可得时使用 Team Lens 既有四态与 reason code，
       不以零值伪造可观测事实。
-- [ ] 聚合分别报告：外部 verifier 结果；wall time；input/cached/cache-write/output/reasoning/total token；inference、
+- [x] 聚合分别报告：外部 verifier 结果；wall time；input/cached/cache-write/output/reasoning/total token；inference、
       tool、terminal command 与可机械识别的 file-tool 活动；spawn、峰值并发、message/followup/wait；RONDO Team State
       的 Event/Version/route/Fact/attention 指标及两侧 availability。
-- [ ] 最终报告将 `有效成功/有效失败`、`infra 无效`、`未激活`、`样本不足`、`观测降级` 分开，并分别给出“委派倾向”
+- [x] 最终报告将 `有效成功/有效失败`、`infra 无效`、`未激活`、`样本不足`、`观测降级` 分开，并分别给出“委派倾向”
       与“委派后结果/成本”的结论。只有一侧委派时可报告倾向与整包结果，但不得把差异单独归因为 Team State；双方均未
       委派时只能结论为本策略/任务集未激活。
 - [ ] 阶段 B 实现、结果与精炼历史记录提交在同一 049 分支；独立审查后仍须用户批准才可合并、推送或关闭工作树。
@@ -345,42 +345,50 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       既有 144/25 项结果保持适用。
 - [x] 全新上下文的独立审查者在 clean `7826df0d856ad166c18bf63052a496203b63e8bc` 上复核四态原因码、ledger reopen、
       body-free 与相邻分类语义，结论 PASS；阶段 A 恢复为 `paid-ready`，阶段 B 仍未授权。
+- [x] 阶段 B 首槽的 Root/Guardian 多 bundle 根因已在共同 eval 层关闭：每个 run 必须恰有一个
+      `SessionSource::Exec` Root，允许任意个身份精确为 Guardian 的 bundle，未知来源、双 Root、损坏或身份不明继续
+      fail-closed；Team Lens 只消费 Root。Codex 与 RONDO 的冻结 runtime 都有同构 Guardian 行为，普通 V2 成员仍留在
+      Root bundle。实现提交 `fffb1f9cfc39ae481492948a3217df4e1801f594` 已通过独立审查。
+- [x] 已在零 API、零 Docker 条件下建立 `plan-049-paid-v1-recovery-v1`，只读绑定旧 receipt、ledger、run、API
+      metadata、Terminal-Bench result、Root/Guardian trace 身份和旧/新 harness commit；首槽保持 a01、外部
+      `completed/reward=0.0` 并正式归类为 `task_failed`，承接 15 个已结算请求与 `0.262759 USD`，没有 a02 或 provider
+      重放。实现提交 `ebd77c7e377222dbe7d5dce3e4b9605cfdc9514a` 及实际恢复状态均通过独立审查。
+- [x] 已从 `pilot-p01-rondo` 继续完成其余五个真实 pilot，最终六槽全部为 attempt 1、trace available、usage-priced，
+      无 infra 无效槽或未知用量：2 个 `completed`、4 个 `task_failed`，100 个请求累计 `2.533684 USD`。六槽
+      Root spawn attempt/accept 均为 0，因此 `activation_observed=false`；按 §3.4 冻结门停止在 pilot，未启动正式十题，
+      也未用追加机动预算事后扩大有效样本。
 
 ### 当前工作
 
-- 阶段 A finding 已关闭并通过独立验收。用户已授权阶段 B、确认 100 USD 累计硬上限及可用余额不少于该上限；
-  固定 activation pilot 已在验收提交 `2b30b8e5e2fdc819c5d49fc05c6adfaae48aac02` 上启动。
-- 首槽 `pilot-p01-codex` 的 a01 得到 Terminal-Bench 非 infra 终态 `completed/reward=0.0`，15 个请求均按真实 usage
-  结算，共 `0.262759 USD`。事后只读诊断确认 trace 实际完整生成了一个 Root Exec bundle 和一个 Guardian bundle；
-  Guardian 的独立 session 不继承 Root writer，因而在同一 root 新建第二束，而复用的 `find_trace_bundle` 硬要求恰好一束，
-  将两束证据拒绝后才被 formal 层折叠为 missing-trace。该槽已持久发布
-  `principled_stopped/non_infra_terminal_missing_trace`；没有 a02、没有启动其余五个 pilot 槽或正式十个配对。
-- 当前正式 identity 因已锁存的首槽原则性停止而 fail-closed；activation pilot 未通过，阶段 B `blocked`。诊断没有改写
-  receipt、账本、run marker 或 raw trace，也没有购买替代样本。
+- Plan 049 阶段 A 与阶段 B 执行均已收口。阶段 B 得到可信的阴性 activation 结果：共同 policy 在固定三题六槽中
+  没有触发任何 Root 主动委派，因此本计划不能形成 Team State 委派收益结论，正式十题按合同保持未运行。
+- 受跟踪代码、冻结合同和 ignored paid namespace 等待整个任务的最终独立审查；通过后只做本地提交收口，不合并、
+  不推送、不关闭工作树。
 
 ### 本任务剩余步骤
 
-1. 不得对当前正式 identity 清除停止、购买替代 attempt 或启动 formal。若未来继续，须先以明确授权的恢复方案处理
-   已锁存状态与 harness identity；不能把当前已付费 a01 改标 infra，也不能再次购买该槽样本。
-2. 本次 blocked 状态仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 更新当前 WBS、完成历史索引与精炼日志，提交 049 本地分支。
+2. 由一个上下文较干净的独立审查者完成整任务终审；若有真实 correctness finding，窄修并沿用同一审查链复验。
 
 ### 阻塞项
 
-- 阶段 A 无已知 correctness blocker，独立验收结论保持 `paid-ready`。
-- 阶段 B 的当前正式 identity 已原则性停止：首个非 infra 任务的 Root/Guardian trace 均已生成且各自可归约，但现有
-  单 bundle locator 无法选择唯一 Root bundle，故未形成正式 Team Lens/activation 记录。按固定样本合同不能重跑该槽，
-  formal 未解锁。
+- 无已知设施或正确性 blocker。`activation_observed=false` 是阶段 B 的有效测评结论，不是待重试故障；它按冻结合同
+  阻止正式十题，但不阻止 Plan 049 以“未激活”结论完成。
 
 ### 当前验收状态
 
-- pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；v5 loopback
-  保存实际 V2 工具投影，v4 rehearsal 的 archive/ledger/aggregate 继续通过确定性 readiness。
-- 整改后的 Plan 049 32 项通过且独立审查复跑结果一致；本轮未改共享 runner/M-5 或 Team Lens，144/25 项按审查要求
-  未重复运行。
-- 阶段 B 实际运行了一个 Docker + 真实 API pilot 槽；创建了正式 receipt、账本和 a01 result identity，费用
-  `0.262759 USD`。请求 15/15 均为 `usage_priced`，无未结算 reservation 或未知 usage；Docker 前后均为 26 images / 11.5 GB、
-  0 containers、0 volumes、0 build cache，Windows C: 可用 `183578390528 -> 183580635136` bytes。
-- 未运行 Cargo、本地模型、正式十题、完整数据集或全 workspace；pilot 其余五槽与 formal 均未运行。
+- selector/recovery 落地后的 Plan 049 36 项、Team Lens 25 项、共享 Terminal-Bench/API budget/M-5 144 项均通过；
+  实际旧 paid trace 与恢复样本均纳入纯离线回归。收尾再次运行 Plan 049 36 项通过。
+- 阶段 B 六个 pilot 的有效结果为：`filter-js-from-html` 两侧失败，`sanitize-git-repo` 两侧成功，
+  `db-wal-recovery` 两侧失败；六槽均 `trace_status=available`、attempt 1，零 infra，Root spawn attempt/accept 均为 0。
+- 正式账本共 6 runs、100/100 请求 `usage_priced`、0 未结算 reservation、0 stopped runs，累计 `2.533684 USD`；
+  基础 100 USD 账本剩余 `97.466316 USD`。用户追加的 100 USD 机动预算没有实例化或消费，因为没有 infra 恢复且
+  activation 合同禁止为追求激活追加有效样本。
+- Docker 前后均为 26 images / 11.5 GB、0 containers、0 volumes、0 build cache；本轮正式 pilot 的 Windows C: 实际
+  可用空间为 `183559651328 -> 183757615104` bytes，未触发 40/60 GB 增量或 80 GiB 停止线。首次启动因传入生产
+  lease 禁止的 watchdog 阈值覆盖而在 provider/Docker 前 rc78；移除多余参数后原生门禁正常，账本未受影响。
+- `.env.local` 仅由正式运行时 loader 检查并使用：存在、普通非符号链接、权限 0600、所需值非空均为 true；未打印、
+  搜索、复制、source 或记录内容。未运行正式十题、Cargo、本地模型、完整数据集、全 workspace、CI 或 PR。
 
 ### 交接边界
 
@@ -402,4 +410,6 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
 | 009 | 不继承 M-5 的 Codex V1 / RONDO V2 非对称，阶段 A 为两侧建立共同 V2 + trace 接线 | Plan 049 比较主动委派，工具面与观测链必须公平一致 | eval adapter/runner | 已采纳 |
 | 010 | 正式路径复用现有 Terminal-Bench core 与持久预算账本，以 settled/execution/publication 分层标记恢复 | 归档或报告失败不得再次发送已结算请求，也不能建立第二套 runner | 阶段 A/B | 已采纳 |
 | 011 | 生产 paid CLI 复用共享 watchdog 与 Docker counter；未给全套精确启动参数时在 wrapper 前拒绝 | 阶段 B 获授权后应直接启动，不再临时拼装入口；阶段 A 仍不可触碰重型资源 | 阶段 A/B | 已采纳 |
-| 012 | 首个 paid pilot 槽为非 infra 终态；Root 与 Guardian 各写一束 trace，被单 bundle locator 拒绝后锁存原则性停止 | 固定样本和 activation 合同要求保留已发生的产品结果；设施误判也不能通过替代 attempt 换样本 | 阶段 B | 根因已定位，当前 identity blocked |
+| 012 | 首个 paid pilot 槽为非 infra 终态；Root 与 Guardian 各写一束 trace，Plan 049 selector 只选择唯一 Exec Root 并验证 Guardian 身份 | 固定样本必须保留，Guardian 不应进入产品团队行为指标，未知来源仍须 fail-closed | 阶段 B | 已采纳并恢复 |
+| 013 | 用新 recovery identity 逐项绑定旧样本和费用，不清除旧 identity 停止、不创建 a02、不重放 provider | 在不改写历史的前提下恢复由 harness collector 缺口阻断的同一有效样本 | 阶段 B | 已采纳 |
+| 014 | 六个固定 pilot 均无 Root spawn 后停止，不使用追加机动预算扩大有效样本或启动 formal | §3.4 明确禁止把 pilot 采到激活；预算授权不能替代公平停止条件 | 阶段 B | 已采纳，阴性收口 |

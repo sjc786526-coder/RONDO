@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A 独立验收通过；阶段 B activation pilot 当前 `blocked`
+第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A/B 已完成；activation pilot 阴性，正式十题按合同未运行
 
 ## 定位
 
@@ -201,10 +201,10 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 ### 后置测评包 C：主动委派收益对比
 
 **依赖**：A、B 均已完成，Team Lens 的跨产品共有字段与 RONDO 专有字段已可用。C 是一个计划与任务合同，顺序分为
-阶段 A 和阶段 B；阶段 A 的本地无费用实现、验收整改与离线证据已通过独立验收。阶段 B 已获明确授权并按
-100 USD 硬上限启动固定 activation pilot；首个 Codex 槽得到非 infra `completed/reward=0.0`，Root 与 Guardian 各自的
-原生 trace bundle 也均已生成，但复用的单 bundle 读取器拒绝同一 trace root 下的两束证据，正式 identity 因而锁存
-`principled_stopped/non_infra_terminal_missing_trace`。该槽不得替换，其余 pilot 与正式十题未启动，当前阶段 B `blocked`。
+阶段 A 和阶段 B；阶段 A 的本地无费用实现、验收整改与离线证据已通过独立验收。阶段 B 已完成固定 activation pilot：
+Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity 关闭，旧首槽没有 provider 重放；最终六个 pilot
+均为 attempt 1、trace available，2 个成功、4 个有效任务失败、零 infra，累计 `2.533684 USD`。两侧 Root spawn 均为 0，
+因此 activation 阴性并按冻结合同停止，正式十题未运行。
 
 #### 阶段 A：无费用准备（独立验收通过，`paid-ready`）
 
@@ -217,15 +217,15 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 - 阶段 A 的退出条件必须给出明确的 paid-ready/blocked 结论和阶段 B 启动清单，但不得创建“已开始付费”的 receipt、
   请求或结果身份。付费 provider 连通性若无法在零费用条件下证明，应诚实留作阶段 B 首个小型 activation pilot 的门。
 
-#### 阶段 B：付费测评与观测（activation pilot 已原则性停止）
+#### 阶段 B：付费测评与观测（已完成；activation 未激活）
 
 - 获得明确开始授权后，先运行小规模 activation pilot，确认两侧收到冻结策略、原生 trace 可读且至少形成可解释的主动
   委派观测，再进入冻结的成对任务；不为追求激活临时强制 spawn 或改写自然任务。
 - 阶段 A 应预留宽容的自主修正与恢复空间：可恢复的 provider/网络/归档/编排问题可在不改变公平合同的前提下修复、
   resume 和重跑，不采用过窄的单错即停或每类极小重试上限。费用仍须在阶段 A 冻结为宽松但有限、且不高于可用余额的
   总边界；未知用量、合同漂移、数据边界或不可安全恢复的状态继续 fail-closed。
-- 阶段 B 完成后分别报告主动委派激活、外部任务结果和时间/token/工具/文件操作等成本；Team Lens 是描述性观测，
-  不能单独推出因果收益。
+- 正式结果是“当前共同 policy 与固定 pilot 任务未激活主动委派”。它不能推出 Team State 的委派收益，也不通过追加
+  有效 pilot、换题或强制 spawn 把阴性结果采成阳性；外部结果、费用与 Team Lens 描述保留在 Plan 049 和完成日志。
 
 **公平合同**：
 
