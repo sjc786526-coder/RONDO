@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -68,11 +69,16 @@ from rondo_eval.proactive_eval.store import (  # noqa: E402
     StoreError,
     assert_body_free,
 )
+from rondo_eval.proactive_eval.trace import (  # noqa: E402
+    ProactiveTraceError,
+    select_proactive_root_bundle,
+)
 from rondo_eval.team_lens.model import dump_team_view  # noqa: E402
 from rondo_eval.team_lens.report import render_report  # noqa: E402
 from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
 from rondo_eval.contracts import RunOutcome, Side  # noqa: E402
 from rondo_eval.api_budget_proxy import BudgetStopped, Usage  # noqa: E402
+from tests.test_team_lens import make_bundle  # noqa: E402
 
 
 def _spawn_view(*, source_is_root: bool, tool_status: str) -> dict:
@@ -217,6 +223,31 @@ def _followup_view() -> dict:
     return view
 
 
+def _write_native_bundle(
+    trace_root: Path,
+    name: str,
+    *,
+    product: str,
+    session_source: object,
+) -> Path:
+    bundle = make_bundle(trace_root / name, product=product)
+    events = [
+        json.loads(line)
+        for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+    ]
+    root_start = next(
+        row
+        for row in events
+        if row["payload"]["type"] == "thread_started"
+        and row["payload"]["thread_id"] == "thread-root"
+    )
+    metadata_path = bundle / root_start["payload"]["metadata_payload"]["path"]
+    metadata = json.loads(metadata_path.read_text("utf-8"))
+    metadata["session_source"] = session_source
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    return bundle
+
+
 def _write_loopback_receipt(
     common_root: Path, contract, *, namespace: str
 ) -> None:
@@ -295,6 +326,106 @@ class ProactiveEvalTests(unittest.TestCase):
         self.assertNotIn("team_state_enabled", codex["config_overrides"][0])
         self.assertIn("team_state_enabled=true", rondo["config_overrides"][0])
         self.assertIsNone(codex["team_state"])
+
+    def test_trace_selector_accepts_one_root_and_guardians_for_both_products(self) -> None:
+        for product in ("codex", "rondo-multi"):
+            for guardian_count in (0, 1, 3):
+                with self.subTest(product=product, guardians=guardian_count):
+                    trace_root = self.common_root / f"trace-{product}-{guardian_count}"
+                    root = _write_native_bundle(
+                        trace_root,
+                        "root",
+                        product=product,
+                        session_source="exec",
+                    )
+                    for ordinal in range(guardian_count):
+                        _write_native_bundle(
+                            trace_root,
+                            f"guardian-{ordinal}",
+                            product=product,
+                            session_source={"subagent": {"other": "guardian"}},
+                        )
+
+                    selected = select_proactive_root_bundle(
+                        trace_root, product=product
+                    )
+
+                    self.assertEqual(selected.root_bundle, root)
+                    self.assertEqual(selected.guardian_bundle_count, guardian_count)
+                    self.assertEqual(
+                        selected.root_view["source"]["product"], product
+                    )
+                    self.assertEqual(selected.root_view["summary"]["agent_count"], 2)
+
+    def test_trace_selector_rejects_ambiguous_unknown_and_damaged_bundles(self) -> None:
+        for product in ("codex", "rondo-multi"):
+            with self.subTest(product=product, case="two-roots"):
+                trace_root = self.common_root / f"two-roots-{product}"
+                for name in ("root-one", "root-two"):
+                    _write_native_bundle(
+                        trace_root,
+                        name,
+                        product=product,
+                        session_source="exec",
+                    )
+                with self.assertRaisesRegex(
+                    ProactiveTraceError, "exactly one Exec Root"
+                ):
+                    select_proactive_root_bundle(trace_root, product=product)
+
+            with self.subTest(product=product, case="unknown-extra"):
+                trace_root = self.common_root / f"unknown-{product}"
+                _write_native_bundle(
+                    trace_root,
+                    "root",
+                    product=product,
+                    session_source="exec",
+                )
+                _write_native_bundle(
+                    trace_root,
+                    "unknown",
+                    product=product,
+                    session_source={"subagent": {"other": "worker"}},
+                )
+                with self.assertRaisesRegex(
+                    ProactiveTraceError, "unknown session source"
+                ):
+                    select_proactive_root_bundle(trace_root, product=product)
+
+            with self.subTest(product=product, case="damaged"):
+                trace_root = self.common_root / f"damaged-{product}"
+                _write_native_bundle(
+                    trace_root,
+                    "root",
+                    product=product,
+                    session_source="exec",
+                )
+                guardian = _write_native_bundle(
+                    trace_root,
+                    "guardian",
+                    product=product,
+                    session_source={"subagent": {"other": "guardian"}},
+                )
+                (guardian / "trace.jsonl").write_text("not-json\n", "utf-8")
+                with self.assertRaisesRegex(
+                    ProactiveTraceError, "bundle is malformed"
+                ):
+                    select_proactive_root_bundle(trace_root, product=product)
+
+    def test_actual_paid_trace_reduces_offline_when_requested(self) -> None:
+        trace_root_value = os.environ.get("PLAN049_PAID_TRACE_ROOT")
+        if trace_root_value is None:
+            self.skipTest("PLAN049_PAID_TRACE_ROOT is not set")
+
+        selected = select_proactive_root_bundle(
+            Path(trace_root_value), product="codex"
+        )
+
+        self.assertEqual(selected.guardian_bundle_count, 1)
+        self.assertEqual(selected.root_view["source"]["product"], "codex")
+        self.assertEqual(selected.root_view["summary"]["inference_count"], 15)
+        self.assertEqual(selected.root_view["summary"]["tool_count"], 14)
+        self.assertIsNone(selected.root_view["team"])
 
     def test_contract_digest_drift_fails_closed(self) -> None:
         copied = self.common_root / "copy"
@@ -1534,8 +1665,10 @@ class ProactiveEvalTests(unittest.TestCase):
                         "rondo_eval.proactive_eval.formal.parse_single_task_result",
                         return_value=parsed,
                     ), mock.patch(
-                        "rondo_eval.proactive_eval.formal.find_trace_bundle",
-                        side_effect=lambda trace_root: trace_root / "bundle",
+                        "rondo_eval.proactive_eval.formal.select_proactive_root_bundle",
+                        side_effect=lambda trace_root, **_kwargs: mock.Mock(
+                            root_bundle=trace_root / "bundle"
+                        ),
                     ), mock.patch(
                         "rondo_eval.proactive_eval.formal.reduce_bundle",
                         side_effect=lambda _bundle, product: synthetic_team_view(
@@ -1831,8 +1964,8 @@ class ProactiveEvalTests(unittest.TestCase):
                     reward=0,
                 ),
             ), mock.patch(
-                "rondo_eval.proactive_eval.formal.find_trace_bundle"
-            ) as find_trace:
+                "rondo_eval.proactive_eval.formal.select_proactive_root_bundle"
+            ) as select_trace:
                 with self.assertRaises(FormalInfraError) as caught:
                     executor.execute(
                         first,
@@ -1841,7 +1974,7 @@ class ProactiveEvalTests(unittest.TestCase):
                         run_root=run_root,
                     )
             self.assertIs(type(caught.exception), FormalInfraError)
-            find_trace.assert_not_called()
+            select_trace.assert_not_called()
 
     def test_request_limit_settled_write_failure_latches_without_retry(self) -> None:
         repo_paths = RepoPaths.discover(REPO_ROOT)
@@ -1917,8 +2050,10 @@ class ProactiveEvalTests(unittest.TestCase):
                     reward=0,
                 ),
             ), mock.patch(
-                "rondo_eval.proactive_eval.formal.find_trace_bundle",
-                side_effect=lambda trace_root: trace_root / "bundle",
+                "rondo_eval.proactive_eval.formal.select_proactive_root_bundle",
+                side_effect=lambda trace_root, **_kwargs: mock.Mock(
+                    root_bundle=trace_root / "bundle"
+                ),
             ), mock.patch(
                 "rondo_eval.proactive_eval.formal._write_settled_file",
                 side_effect=OSError("injected settled checkpoint failure"),

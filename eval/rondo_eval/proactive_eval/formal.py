@@ -53,7 +53,7 @@ from ..multi_m5.resume import (
     require_formal_receipt,
     require_single_unarchived_run,
 )
-from ..multi_m5.trace import TraceError, find_trace_bundle
+from ..multi_m5.trace import TraceError
 from ..team_lens.model import dump_team_view, validate_team_view
 from ..team_lens.reducer import reduce_bundle
 from ..team_lens.report import render_report
@@ -70,6 +70,7 @@ from .aggregate import aggregate
 from .contract import COMMON_V2_TOOL_NAMES, CampaignContract
 from .schedule import Slot, slots
 from .store import assert_body_free
+from .trace import ProactiveTraceError, select_proactive_root_bundle
 
 
 _RUN_ID = re.compile(
@@ -990,8 +991,11 @@ class Plan049TerminalBenchExecutor:
                 raise FormalInfraError("Terminal-Bench returned an infra outcome")
             trace_root = result.harbor.trial_dir / "agent" / "rollout-trace"
             try:
-                bundle = find_trace_bundle(trace_root)
-            except TraceError as exc:
+                bundle = select_proactive_root_bundle(
+                    trace_root,
+                    product="codex" if slot.side == "codex" else "rondo-multi",
+                ).root_bundle
+            except ProactiveTraceError as exc:
                 if limit_stop is not None:
                     raise FormalError(
                         "Plan 049 request limit lacks complete terminal evidence"
@@ -1008,6 +1012,7 @@ class Plan049TerminalBenchExecutor:
             HarborResultError,
             TerminalBenchRunError,
             TraceError,
+            ProactiveTraceError,
         ) as exc:
             preflight.raise_if_failed()
             stopped = run_stop_reason(self.ledger, run_id)
