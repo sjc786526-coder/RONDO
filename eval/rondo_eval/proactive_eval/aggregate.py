@@ -226,7 +226,7 @@ def aggregate(
                     for interaction in view["interactions"]
                 ),
                 "followup_count": sum(
-                    interaction["kind"] == "followup_task"
+                    interaction["kind"] == "assign_agent_task"
                     for interaction in view["interactions"]
                 ),
                 "spawned_member_count": sum(

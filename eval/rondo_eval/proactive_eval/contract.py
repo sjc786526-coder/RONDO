@@ -12,10 +12,60 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LOCK_RELPATH = "eval/locks/multi-proactive-delegation-v1.json"
+COMMON_V2_TOOL_NAMES = frozenset(
+    {
+        "followup_task",
+        "interrupt_agent",
+        "list_agents",
+        "send_message",
+        "spawn_agent",
+        "wait_agent",
+    }
+)
+RONDO_TEAM_STATE_TOOL_NAMES = frozenset(
+    {
+        "team_evidence",
+        "team_history",
+        "team_inspect",
+        "team_publish",
+        "team_retire",
+        "team_route",
+        "team_route_update",
+        "team_update",
+    }
+)
 
 
 class ContractError(ValueError):
     """Raised before any campaign state or external side effect is created."""
+
+
+def require_common_v2_tool_projections(
+    codex_projection: object, rondo_projection: object
+) -> None:
+    projections: dict[str, set[str]] = {}
+    for side, raw in (
+        ("codex", codex_projection),
+        ("rondo", rondo_projection),
+    ):
+        if (
+            not isinstance(raw, list)
+            or any(not isinstance(name, str) or not name for name in raw)
+            or raw != sorted(set(raw))
+        ):
+            raise ContractError("Plan 049 observed tool projection is invalid")
+        projections[side] = set(raw)
+        if not COMMON_V2_TOOL_NAMES.issubset(projections[side]):
+            raise ContractError(f"Plan 049 {side} common-V2 tools are incomplete")
+    codex = projections["codex"]
+    rondo = projections["rondo"]
+    if codex & RONDO_TEAM_STATE_TOOL_NAMES:
+        raise ContractError("Codex unexpectedly exposes RONDO Team State tools")
+    if (
+        rondo - RONDO_TEAM_STATE_TOOL_NAMES != codex
+        or rondo - codex != RONDO_TEAM_STATE_TOOL_NAMES
+    ):
+        raise ContractError("Plan 049 common-V2 tool projections differ")
 
 
 @dataclass(frozen=True)

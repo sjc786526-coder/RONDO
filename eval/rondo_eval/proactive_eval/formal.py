@@ -24,6 +24,7 @@ from ..api_budget_proxy import (
     PersistentBudgetLedger,
     UsageEnvelope,
     canonical_request_sha256,
+    load_validated_budget_ledger_state,
     stop_reason_class,
 )
 from ..config import RepoPaths, RuntimeConfig, load_runtime_config
@@ -52,7 +53,7 @@ from ..multi_m5.resume import (
     require_formal_receipt,
     require_single_unarchived_run,
 )
-from ..multi_m5.trace import find_trace_bundle
+from ..multi_m5.trace import TraceError, find_trace_bundle
 from ..team_lens.model import dump_team_view, validate_team_view
 from ..team_lens.reducer import reduce_bundle
 from ..team_lens.report import render_report
@@ -66,7 +67,7 @@ from ..terminal_bench.runner import (
 )
 from ..terminal_bench.tasksets import SOURCE_DIRECTORY, load_successor_canary_catalog
 from .aggregate import aggregate
-from .contract import CampaignContract
+from .contract import COMMON_V2_TOOL_NAMES, CampaignContract
 from .schedule import Slot, slots
 from .store import assert_body_free
 
@@ -75,12 +76,13 @@ _RUN_ID = re.compile(
     r"plan049-paid-(?:pilot|formal)-(?:p|f)[0-9]{2}-(?:codex|rondo)-a0[1-5]\Z"
 )
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
-_REQUIRED_TOOLS = {"list_agents", "send_message", "spawn_agent", "wait_agent"}
+_REQUIRED_TOOLS = COMMON_V2_TOOL_NAMES
 _SECCOMP_RELPATH = "eval/seccomp/plan008-userns-minimal-v0.2.3.json"
 _SECCOMP_SOURCE_SHA256 = "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f"
 _SECCOMP_EFFECTIVE_SHA256 = "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
 _TERMINAL = {"completed", "task_failed", "product_failed"}
-_OUTCOMES = _TERMINAL | {"infra_failed", "budget_stopped"}
+_CAMPAIGN_STOPS = {"budget_stopped", "principled_stopped"}
+_OUTCOMES = _TERMINAL | {"infra_failed"} | _CAMPAIGN_STOPS
 _RECORD_KEYS = {
     "schema_version",
     "evidence_kind",
@@ -369,8 +371,7 @@ class Plan049RequestPreflight:
         )
 
     def digest(self) -> str:
-        if self._failed:
-            raise FormalDriftError("Plan 049 paid request preflight failed")
+        self.raise_if_failed()
         if not self._observed or not any(
             row["role"] == "main" for row in self._observed
         ):
@@ -378,6 +379,10 @@ class Plan049RequestPreflight:
         value = {"schema_version": 1, "observed": self._observed}
         assert_body_free(value)
         return hashlib.sha256(_canonical(value)).hexdigest()
+
+    def raise_if_failed(self) -> None:
+        if self._failed:
+            raise FormalDriftError("Plan 049 paid request preflight failed")
 
 
 class FormalStore:
@@ -659,9 +664,12 @@ def require_safe_formal_prefix(
         for attempt in range(1, 6)
     }
     records_by_run = {row["run_id"]: row for row in records}
+    published_stop = False
     for run_root in paths.runs.iterdir():
         slot, attempt = identities[run_root.name]
         marker = store.marker(run_root.name)
+        if marker is not None and marker["outcome"] in _CAMPAIGN_STOPS:
+            published_stop = True
         execution = store.execution(run_root.name, slot=slot, attempt=attempt)
         settled_path = run_root / "settled.json"
         if settled_path.exists() or settled_path.is_symlink():
@@ -700,20 +708,19 @@ def require_safe_formal_prefix(
         ):
             raise FormalError("Plan 049 formal artifacts exist without a ledger")
         return
-    ledger = _read_json(paths.ledger, "formal budget ledger")
     budget = contract.lock["budget"]
-    runs = ledger.get("runs")
-    if (
-        ledger.get("schema_version") != 1
-        or ledger.get("batch_id") != budget["batch_id"]
-        or Decimal(str(ledger.get("total_cap_usd")))
-        != Decimal(str(budget["phase_b_hard_cap_usd"]))
-        or ledger.get("max_runs") != budget["max_run_slots"]
-        or Decimal(str(ledger.get("default_run_cap_usd")))
-        != Decimal(str(budget["per_run_cap_usd"]))
-        or not isinstance(runs, dict)
-        or any(run_id not in allowed_ids for run_id in runs)
-    ):
+    try:
+        ledger = load_validated_budget_ledger_state(
+            paths.ledger,
+            batch_id=str(budget["batch_id"]),
+            total_cap_usd=str(budget["phase_b_hard_cap_usd"]),
+            max_runs=int(budget["max_run_slots"]),
+            default_run_cap_usd=str(budget["per_run_cap_usd"]),
+        )
+    except ApiBudgetProxyError as exc:
+        raise FormalError("Plan 049 formal ledger is invalid") from exc
+    runs = ledger["runs"]
+    if any(run_id not in allowed_ids for run_id in runs):
         raise FormalError("Plan 049 formal ledger identity differs")
     archived = {row["run_id"] for row in records}
     if any(run_id not in runs for run_id in archived):
@@ -733,6 +740,12 @@ def require_safe_formal_prefix(
     if unarchived and unarchived != [expected_unarchived]:
         raise FormalError("Plan 049 formal ledger unarchived run is not next")
     assert_body_free(ledger)
+    if published_stop or any(row["outcome"] in _CAMPAIGN_STOPS for row in records):
+        raise FormalError("Plan 049 formal campaign has a latched stop")
+    if unarchived:
+        stopped = runs[unarchived[0]].get("stop_reason")
+        if stop_reason_class(stopped) == "budget":
+            raise FormalError("Plan 049 formal campaign has an unarchived budget stop")
 
 
 class Plan049TerminalBenchExecutor:
@@ -899,6 +912,7 @@ class Plan049TerminalBenchExecutor:
             ):
                 raise FormalDriftError("Plan 049 prepared run differs from common V2")
 
+        limit_stop: str | None = None
         try:
             result = asyncio.run(
                 run_budgeted_terminal_bench_core(
@@ -940,16 +954,22 @@ class Plan049TerminalBenchExecutor:
                     materializer=self.materializer,
                 )
             )
+            preflight.raise_if_failed()
             stopped = run_stop_reason(self.ledger, run_id)
             if stopped is not None:
                 if stopped in {
                     REQUEST_LIMIT_STOP_REASON,
                     "guardian_logical_request_limit_exceeded",
                 }:
-                    raise FormalInfraError(f"paid request path stopped: {stopped}")
-                if stop_reason_class(stopped) == "budget":
+                    limit_stop = stopped
+                elif stop_reason_class(stopped) == "budget":
                     raise BudgetStopped(stopped)
-                raise FormalInfraError(f"paid request path stopped: {stopped}")
+                else:
+                    raise FormalInfraError(f"paid request path stopped: {stopped}")
+            if run_infra_taint(self.ledger, run_id) is not None and limit_stop is not None:
+                raise FormalError(
+                    "Plan 049 request limit coincides with provider infra taint"
+                )
             if run_infra_taint(self.ledger, run_id) is not None:
                 raise FormalInfraError("paid request path has provider infra taint")
             parsed = parse_single_task_result(
@@ -958,24 +978,48 @@ class Plan049TerminalBenchExecutor:
                 expected_task_id=slot.task_id,
             )
             if parsed.outcome is RunOutcome.INFRA_FAILED:
+                if limit_stop is not None:
+                    raise FormalError(
+                        "Plan 049 request limit lacks an attributable task result"
+                    )
                 raise FormalInfraError("Terminal-Bench returned an infra outcome")
             trace_root = result.harbor.trial_dir / "agent" / "rollout-trace"
             bundle = find_trace_bundle(trace_root)
-        except (ApiBudgetProxyError, HarborResultError, TerminalBenchRunError) as exc:
+        except (
+            ApiBudgetProxyError,
+            HarborResultError,
+            TerminalBenchRunError,
+            TraceError,
+        ) as exc:
+            preflight.raise_if_failed()
+            stopped = run_stop_reason(self.ledger, run_id)
+            if stopped in {
+                REQUEST_LIMIT_STOP_REASON,
+                "guardian_logical_request_limit_exceeded",
+            }:
+                raise FormalError(
+                    "Plan 049 request limit lacks complete terminal evidence"
+                ) from exc
+            if stop_reason_class(stopped) == "budget":
+                raise BudgetStopped(stopped) from exc
             raise FormalInfraError(str(exc)) from exc
-        if parsed.outcome is RunOutcome.COMPLETED:
+        if limit_stop is not None:
+            outcome = "product_failed"
+        elif parsed.outcome is RunOutcome.COMPLETED:
             outcome = "completed" if parsed.reward > 0 else "task_failed"
         else:
             outcome = "product_failed"
-        reason_code = (
-            None
-            if outcome == "completed"
-            else (
-                "task_native_verifier_failed"
-                if outcome == "task_failed"
-                else "product_terminal_failure"
+        reason_code = limit_stop
+        if reason_code is None:
+            reason_code = (
+                None
+                if outcome == "completed"
+                else (
+                    "task_native_verifier_failed"
+                    if outcome == "task_failed"
+                    else "product_terminal_failure"
+                )
             )
-        )
         try:
             bundle_relative = bundle.resolve(strict=True).relative_to(
                 run_root.resolve(strict=True)
@@ -990,15 +1034,22 @@ class Plan049TerminalBenchExecutor:
             trace_bundle_relative=bundle_relative.as_posix(),
             reason_code=reason_code,
         )
-        _write_settled_file(
-            run_root,
-            settled,
-            formal_identity_sha256=self.formal_identity_sha256,
-            contract=self.contract,
-            slot=slot,
-            attempt=attempt,
-            run_id=run_id,
-        )
+        try:
+            _write_settled_file(
+                run_root,
+                settled,
+                formal_identity_sha256=self.formal_identity_sha256,
+                contract=self.contract,
+                slot=slot,
+                attempt=attempt,
+                run_id=run_id,
+            )
+        except OSError as exc:
+            if limit_stop is not None:
+                raise FormalError(
+                    "Plan 049 request limit lacks a durable terminal checkpoint"
+                ) from exc
+            raise
         return self.recover(
             slot, attempt=attempt, run_id=run_id, run_root=run_root
         )
@@ -1083,6 +1134,11 @@ def run_formal_campaign(
         require_archived_runs_in_ledger(records, ledger)
     except ResumeError as exc:
         raise FormalError(str(exc)) from exc
+    stopped_rows = [row for row in records if row["outcome"] in _CAMPAIGN_STOPS]
+    if stopped_rows:
+        if stopped_rows[-1]["outcome"] == "principled_stopped":
+            raise FormalDriftError("Plan 049 formal campaign has a latched principled stop")
+        return _formal_aggregate(contract, records, store)
     if phase == "formal":
         _require_pilot_activation(contract, records, store)
 
@@ -1249,7 +1305,8 @@ def run_formal_campaign(
                 _publish_and_append(store, row)
                 records.append(row)
                 return _formal_aggregate(contract, records, store)
-            except BudgetStopped as exc:
+            except BudgetStopped:
+                stopped = run_stop_reason(ledger, run_id)
                 row = _formal_record(
                     contract,
                     store,
@@ -1259,12 +1316,25 @@ def run_formal_campaign(
                     run_id,
                     outcome="budget_stopped",
                     trace_status="missing",
-                    reason_code=str(exc) or "budget_stopped",
+                    reason_code=stopped or "budget_stopped",
                 )
                 _publish_and_append(store, row)
                 records.append(row)
                 return _formal_aggregate(contract, records, store)
             except FormalDriftError:
+                row = _formal_record(
+                    contract,
+                    store,
+                    ledger,
+                    slot,
+                    attempt,
+                    run_id,
+                    outcome="principled_stopped",
+                    trace_status="missing",
+                    reason_code="identity_or_fairness_drift",
+                )
+                _publish_and_append(store, row)
+                records.append(row)
                 raise
             except FormalInfraError:
                 settled_path = store.run_root(run_id) / "settled.json"
@@ -1291,6 +1361,22 @@ def run_formal_campaign(
                 # Unknown state, artifact drift and fairness/identity failures
                 # are principled stops.  Retrying could buy a replacement
                 # sample for a run that must instead remain fail-closed.
+                settled_path = store.run_root(run_id) / "settled.json"
+                if settled_path.exists() or settled_path.is_symlink():
+                    raise
+                row = _formal_record(
+                    contract,
+                    store,
+                    ledger,
+                    slot,
+                    attempt,
+                    run_id,
+                    outcome="principled_stopped",
+                    trace_status="missing",
+                    reason_code="identity_or_fairness_drift",
+                )
+                _publish_and_append(store, row)
+                records.append(row)
                 raise
             except Exception:
                 settled_path = store.run_root(run_id) / "settled.json"
@@ -1618,6 +1704,13 @@ def _validate_paid_prefix(records: list[dict[str, Any]], schedule: tuple[Slot, .
     order = {slot.slot_id: index for index, slot in enumerate(schedule)}
     previous = -1
     grouped: dict[str, list[dict[str, Any]]] = {}
+    stop_indexes = [
+        index
+        for index, row in enumerate(records)
+        if row.get("outcome") in _CAMPAIGN_STOPS
+    ]
+    if len(stop_indexes) > 1 or (stop_indexes and stop_indexes[0] != len(records) - 1):
+        raise FormalError("Plan 049 formal archive continues after campaign stop")
     for row in records:
         slot_order = order.get(str(row["slot_id"]))
         slot = by_id.get(str(row["slot_id"]))

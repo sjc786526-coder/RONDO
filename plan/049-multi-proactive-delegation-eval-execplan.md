@@ -321,29 +321,33 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
 - [x] 用户要求的最终独立验收在 `3b34dae8ab50a72bdb883110830d8bf7c778679f` 上发现原则性停止未持久锁存、
       请求/预算停止可被重试、followup 聚合失真及 pre-Docker ledger 校验不完整，结论回拨为 `blocked`；详见
       `agent_log/2026-08-20-145518-plan049-phase-a-independent-acceptance.md`。
+- [x] 已在同一合同内完成上述 findings 的窄修：原则性与预算停止成为持久 campaign barrier；可信的 run-local 请求上限
+      记为 `product_failed`，缺失 trace/归因时持久停止；followup 使用 Team Lens 归一 kind；正式 ledger 在 Docker/密钥
+      前走共享 exact validator；共同 V2 六工具由实际 loopback 投影证明，两侧只允许冻结的 Team State 差值。
+- [x] 新的 `phase-a-loopback-v5` 保存 Codex 14 项与 RONDO 同 14 项加 8 项 Team State 的实际工具投影；与既有
+      `phase-a-acceptance-v4` 组合的离线 readiness 为 26 runs。Plan 049 30 项、共享 runner/预算/M-5 144 项及 Team Lens
+      25 项定向测试均通过，等待 clean commit 上的最终独立复验。
 
 ### 当前工作
 
-- 阶段 A 已有实现和离线证据保留，但最终独立验收未通过，等待同一工作树内窄修；阶段 B 保持未授权。
+- 阶段 A 的验收整改和离线验证已完成，当前等待 clean commit 上的最终独立复验；阶段 B 保持未授权。
 
 ### 本任务剩余步骤
 
-1. 在同一 049 工作树窄修最终验收报告列出的停止/恢复、预算分类、followup 聚合和 ledger 前置校验问题并补定向回归。
-2. 重跑 Plan 049 与共享 runner/预算定向门禁，形成新的 clean final SHA 后再次独立验收。
-3. 只有重新取得 `paid-ready` 且用户另行授权阶段 B 后，才创建正式 activation identity 并执行固定 pilot/正式任务。
-4. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 提交整改后的 049 分支并保持工作树干净，在新 HEAD 上完成最终独立复验；真实 finding 继续在同一分支闭环。
+2. 只有重新取得 `paid-ready` 且用户另行授权阶段 B 后，才创建正式 activation identity 并执行固定 pilot/正式任务。
+3. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 当前 `blocked`：最终独立验收确认四类 correctness blocker；现有 offline evidence 可复用，但不能作为阶段 B
-  启动依据。
-- 阶段 B 同时因阶段 A 未通过及缺少明确开始授权、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
+- 阶段 A 当前没有已知 correctness blocker，但必须等待新 HEAD 的最终独立复验后才能恢复 `paid-ready`。
+- 阶段 B 仍因尚未授权及缺少明确开始动作、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
 
 ### 当前验收状态
 
-- pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；rehearsal
-  重复执行的 archive/ledger/aggregate SHA-256 不变。
-- 最终验收定向测试仍通过，但发现现有测试未覆盖的停止/恢复和指标语义缺口，因此当前不是 `paid-ready`。
+- pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；v5 loopback
+  保存实际 V2 工具投影，v4 rehearsal 的 archive/ledger/aggregate 继续通过确定性 readiness。
+- 整改后的 Plan 049 30 项、共享 runner/预算/M-5 144 项、Team Lens 25 项均通过；最终结论等待独立复验。
 - 未运行 Docker、Cargo、真实 API、本地模型、付费测评或全量测试；未创建正式 activation receipt、正式账本或
   正式 run/result identity。
 

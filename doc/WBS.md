@@ -26,7 +26,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期和第二期 A/B 已完成；后置 C 阶段 A 已有离线实现与证据，但最终独立验收发现停止/恢复和指标语义缺口，当前 `blocked` 待窄修。阶段 B 仍未授权。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期和第二期 A/B 已完成；后置 C 阶段 A 的验收整改与离线证据已完成，当前等待新 HEAD 的最终独立复验。阶段 B 仍未授权。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -87,9 +87,9 @@
     主动入口；它覆盖 publish、双生命周期、route、delivery、retry 与 wake，没有改变产品语义。
   - **包 B — Team Lens：已完成。** 同一离线消费者可读取冻结 Codex 与 RONDO 原生 trace，确定性输出 body-free
     `team_view.json`，再单向生成离线单文件 `team_report.html`；代表性证据支持保持零 runtime hook。
-  - **后置包 C — 主动委派收益对比：阶段 A 最终独立验收未通过，当前 `blocked` 待窄修。** 共同合同与零 API
-    pure/fake/loopback/replay 证据保留；须先关闭停止/恢复、预算分类、followup 聚合和 ledger 前置校验 findings 并
-    重新验收。阶段 B 未授权，当前没有创建正式 receipt、账本或运行身份。
+  - **后置包 C — 主动委派收益对比：阶段 A 验收整改已完成，等待最终独立复验。** 持久停止、请求上限分类、
+    followup 聚合、pre-Docker ledger exact 校验与共同 V2 六工具实际投影均已有定向回归和离线证据；阶段 B 未授权，
+    当前没有创建正式 receipt、账本或运行身份。
 
 包 C 的公平合同、判读边界和两阶段细节见 Multi 子 WBS。重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源
 门禁全局串行；阶段 A 不得产生真实 API 费用。Local 没有已排期的下一工作包，方向 1 继续挂起。
@@ -118,7 +118,7 @@
 | 0 | 量化测评基准 | Local | 公平比较设施已闭合；首次最小 v7 正式 canary 已确认、不排期 | 项目顺序不早于 Multi 第二期完成；执行时另获 API/Docker 授权；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一期及第二期 A/B 已完成；C 阶段 A 验收整改中 | 先重新取得 paid-ready；阶段 B 真实 API 测评另行授权 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一期及第二期 A/B 已完成；C 阶段 A 等待最终独立复验 | 先重新取得 paid-ready；阶段 B 真实 API 测评另行授权 |
 
 - **Local 与 Multi 地位相同**。Local 已收口，Multi 第一期已完成、第二期是当前优先路线；先后只反映路径长度，
   不代表优先级高低。工程任务可以并行，重型任务仍因资源约束全局串行。

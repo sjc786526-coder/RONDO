@@ -24,7 +24,12 @@ from rondo_eval.proactive_eval.campaign import (  # noqa: E402
     default_fake_executor,
     run_rehearsal,
 )
-from rondo_eval.proactive_eval.contract import ContractError, load_contract  # noqa: E402
+from rondo_eval.proactive_eval.contract import (  # noqa: E402
+    COMMON_V2_TOOL_NAMES,
+    RONDO_TEAM_STATE_TOOL_NAMES,
+    ContractError,
+    load_contract,
+)
 from rondo_eval.proactive_eval.formal import (  # noqa: E402
     FormalDriftError,
     FormalError,
@@ -35,6 +40,7 @@ from rondo_eval.proactive_eval.formal import (  # noqa: E402
     Plan049RequestPreflight,
     Plan049TerminalBenchExecutor,
     formal_identity,
+    formal_paths,
     open_paid_ledger,
     plan049_provider_projection,
     require_safe_formal_prefix,
@@ -45,8 +51,10 @@ from rondo_eval.proactive_eval.paid import (  # noqa: E402
     LOCAL_ACTIVATION_CONFIRMATION,
     PHASE_B_AUTHORIZATION,
     PaidGuardError,
+    PaidRuntimeDependencies,
     enter_paid_phase,
     production_paid_dependencies,
+    run_authorized_paid_phase,
 )
 from rondo_eval.proactive_eval.__main__ import main as proactive_main  # noqa: E402
 from rondo_eval.proactive_eval.readiness import (  # noqa: E402
@@ -63,8 +71,8 @@ from rondo_eval.proactive_eval.store import (  # noqa: E402
 from rondo_eval.team_lens.model import dump_team_view  # noqa: E402
 from rondo_eval.team_lens.report import render_report  # noqa: E402
 from rondo_eval.config import RepoPaths, load_runtime_config  # noqa: E402
-from rondo_eval.contracts import Side  # noqa: E402
-from rondo_eval.api_budget_proxy import Usage  # noqa: E402
+from rondo_eval.contracts import RunOutcome, Side  # noqa: E402
+from rondo_eval.api_budget_proxy import BudgetStopped, Usage  # noqa: E402
 
 
 def _spawn_view(*, source_is_root: bool, tool_status: str) -> dict:
@@ -156,6 +164,59 @@ def _aggregate_record(run_id: str) -> dict:
     }
 
 
+def _followup_view() -> dict:
+    view = synthetic_team_view(side="rondo", run_id="followup-check", ordinal=1)
+    root = view["source"]["root_thread_id"]
+    child = "followup-check-child"
+    view["agents"].append(
+        {
+            "agent_id": child,
+            "agent_path": "/root/child",
+            "parent_agent_id": root,
+            "role": "spawned",
+            "started_seq": 2,
+            "started_at_unix_ms": 1001,
+            "ended_seq": 4,
+            "ended_at_unix_ms": 1003,
+            "status": "completed",
+        }
+    )
+    view["tools"] = [
+        {
+            "tool_id": "followup-tool",
+            "agent_id": root,
+            "turn_id": None,
+            "name": "followup_task",
+            "namespace": "collaboration",
+            "requester": "model",
+            "kind": "assign_agent_task",
+            "started_seq": 2,
+            "started_at_unix_ms": 1001,
+            "ended_seq": 3,
+            "ended_at_unix_ms": 1002,
+            "status": "completed",
+        }
+    ]
+    view["interactions"] = [
+        {
+            "interaction_id": "followup-edge",
+            "kind": "assign_agent_task",
+            "source_agent_id": root,
+            "target_agent_id": child,
+            "tool_id": "followup-tool",
+            "started_seq": 2,
+            "started_at_unix_ms": 1001,
+            "ended_seq": 3,
+            "ended_at_unix_ms": 1002,
+            "status": "completed",
+        }
+    ]
+    view["summary"]["agent_count"] = 2
+    view["summary"]["tool_count"] = 1
+    view["summary"]["interaction_count"] = 1
+    return view
+
+
 def _write_loopback_receipt(
     common_root: Path, contract, *, namespace: str
 ) -> None:
@@ -170,18 +231,16 @@ def _write_loopback_receipt(
             "request_count": 1,
             "policy_sha256": contract.policy_sha256,
             "policy_matched": True,
-            "registered_common_tools": [
-                "list_agents",
-                "send_message",
-                "spawn_agent",
-                "wait_agent",
-            ],
+            "registered_tool_projection": sorted(
+                COMMON_V2_TOOL_NAMES
+                | (RONDO_TEAM_STATE_TOOL_NAMES if side == "rondo" else set())
+            ),
             "team_state": None if side == "codex" else True,
             **digests,
             "trace_bundle_count": 1,
         }
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evidence_kind": "loopback",
         "identity_class": "rehearsal",
         "lock_id": contract.lock_id,
@@ -294,6 +353,16 @@ class ProactiveEvalTests(unittest.TestCase):
                 self.assertEqual(
                     result["runs"][0]["root_spawn_accept_count"], int(expected)
                 )
+
+    def test_followup_metric_uses_the_normalized_team_lens_kind(self) -> None:
+        result = aggregate(
+            [_aggregate_record("followup-check")],
+            {"followup-check": _followup_view()},
+            lock_id=self.contract.lock_id,
+            lock_sha256=self.contract.lock_sha256,
+            policy_sha256=self.contract.policy_sha256,
+        )
+        self.assertEqual(result["runs"][0]["followup_count"], 1)
 
     def test_success_valid_failure_duplicate_execution_and_body_free_archive(self) -> None:
         first = run_rehearsal(
@@ -519,6 +588,46 @@ class ProactiveEvalTests(unittest.TestCase):
             loopback_namespace="loopback",
         )
         self.assertEqual(receipt["run_count"], 26)
+        loopback_path = (
+            self.common_root
+            / "eval-data/plan-049/loopback/loopback/loopback.json"
+        )
+        loopback_bytes = loopback_path.read_bytes()
+        for side, missing in (
+            ("codex", "followup_task"),
+            ("rondo", "interrupt_agent"),
+        ):
+            with self.subTest(side=side, missing=missing):
+                loopback = json.loads(loopback_bytes)
+                loopback["sides"][side]["registered_tool_projection"].remove(missing)
+                loopback_path.write_text(
+                    json.dumps(loopback, sort_keys=True, separators=(",", ":")) + "\n",
+                    "utf-8",
+                )
+                with self.assertRaisesRegex(ReadinessError, "tool projection"):
+                    require_phase_a_evidence(
+                        self.contract,
+                        common_root=self.common_root,
+                        rehearsal_namespace="acceptance",
+                        loopback_namespace="loopback",
+                    )
+        loopback = json.loads(loopback_bytes)
+        loopback["sides"]["rondo"]["registered_tool_projection"].append(
+            "one_sided_unknown_tool"
+        )
+        loopback["sides"]["rondo"]["registered_tool_projection"].sort()
+        loopback_path.write_text(
+            json.dumps(loopback, sort_keys=True, separators=(",", ":")) + "\n",
+            "utf-8",
+        )
+        with self.assertRaisesRegex(ReadinessError, "tool projection"):
+            require_phase_a_evidence(
+                self.contract,
+                common_root=self.common_root,
+                rehearsal_namespace="acceptance",
+                loopback_namespace="loopback",
+            )
+        loopback_path.write_bytes(loopback_bytes)
         store = RehearsalStore(self.common_root, "acceptance")
         ledger_bytes = store.ledger_path.read_bytes()
         store.ledger_path.unlink()
@@ -713,7 +822,7 @@ class ProactiveEvalTests(unittest.TestCase):
             "instructions": self.contract.policy,
             "tools": [
                 {"type": "function", "name": name, "parameters": {}}
-                for name in ("list_agents", "send_message", "spawn_agent", "wait_agent")
+                for name in sorted(COMMON_V2_TOOL_NAMES)
             ],
         }
         preflight.register(
@@ -723,6 +832,47 @@ class ProactiveEvalTests(unittest.TestCase):
             request=request,
         )
         self.assertEqual(len(preflight.digest()), 64)
+        for missing in ("followup_task", "interrupt_agent"):
+            with self.subTest(missing=missing):
+                incomplete = Plan049RequestPreflight(
+                    contract=self.contract,
+                    side=Side.CODEX,
+                    task_id="terminal-bench/filter-js-from-html",
+                )
+                with self.assertRaisesRegex(FormalDriftError, "common V2 tools"):
+                    incomplete.register(
+                        task_id="terminal-bench/filter-js-from-html",
+                        role="main",
+                        side=Side.CODEX,
+                        request={
+                            **request,
+                            "tools": [
+                                tool
+                                for tool in request["tools"]
+                                if tool["name"] != missing
+                            ],
+                        },
+                    )
+        rondo_preflight = Plan049RequestPreflight(
+            contract=self.contract,
+            side=Side.RONDO,
+            task_id="terminal-bench/filter-js-from-html",
+        )
+        rondo_preflight.register(
+            task_id="terminal-bench/filter-js-from-html",
+            role="main",
+            side=Side.RONDO,
+            request={
+                **request,
+                "tools": [
+                    {"type": "function", "name": name, "parameters": {}}
+                    for name in sorted(
+                        COMMON_V2_TOOL_NAMES | RONDO_TEAM_STATE_TOOL_NAMES
+                    )
+                ],
+            },
+        )
+        self.assertEqual(len(rondo_preflight.digest()), 64)
         with self.assertRaisesRegex(Exception, "frozen policy"):
             failed_preflight = Plan049RequestPreflight(
                 contract=self.contract,
@@ -907,7 +1057,32 @@ class ProactiveEvalTests(unittest.TestCase):
                     executor=DriftExecutor(),
                     phase="pilot",
                 )
-        self.assertEqual(store.records(), ())
+        rows = store.records()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "principled_stopped")
+        self.assertFalse(rows[0]["counts_as_effective"])
+        resumed_calls = 0
+
+        class WouldSucceed:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, slot, attempt, run_id, run_root
+                nonlocal resumed_calls
+                resumed_calls += 1
+                raise AssertionError("latched principled stop executed again")
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            with self.assertRaisesRegex(FormalDriftError, "latched principled stop"):
+                run_formal_campaign(
+                    self.contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=WouldSucceed(),
+                    phase="pilot",
+                )
+        self.assertEqual(resumed_calls, 0)
+        self.assertEqual(len(json.loads(paths.ledger.read_text("utf-8"))["runs"]), 1)
+        with self.assertRaisesRegex(FormalError, "latched stop"):
+            require_safe_formal_prefix(paths, identity, self.contract)
 
     def test_safe_formal_prefix_rejects_a_corrupt_settled_checkpoint(self) -> None:
         config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
@@ -935,6 +1110,256 @@ class ProactiveEvalTests(unittest.TestCase):
         (run_root / "settled.json").write_text("{}\n", "utf-8")
         with self.assertRaisesRegex(FormalError, "settled provider checkpoint"):
             require_safe_formal_prefix(paths, identity, self.contract)
+
+    def test_principled_stop_after_a_settled_request_never_buys_a_replacement(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="6" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/requested-drift"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        calls = 0
+
+        class RequestedDrift:
+            def __init__(inner, ledger):
+                inner.ledger = ledger
+
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del slot, attempt, run_root
+                nonlocal calls
+                calls += 1
+                request_id = f"{run_id}-request-001"
+                inner.ledger.reserve(run_id, request_id, "2.22")
+                inner.ledger.begin_attempt(run_id, request_id, max_attempts=5)
+                inner.ledger.settle(
+                    run_id,
+                    request_id,
+                    Usage(100, 0, 0, 10),
+                    pricing=provider.main_pricing,
+                )
+                raise FormalDriftError("simulated post-request policy drift")
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            with self.assertRaisesRegex(FormalDriftError, "policy drift"):
+                run_formal_campaign(
+                    self.contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=RequestedDrift(ledger),
+                    phase="pilot",
+                )
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            with self.assertRaisesRegex(FormalDriftError, "latched principled stop"):
+                run_formal_campaign(
+                    self.contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=RequestedDrift(ledger),
+                    phase="pilot",
+                )
+        rows = store.records()
+        self.assertEqual(calls, 1)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "principled_stopped")
+        self.assertEqual(rows[0]["request_count"], 1)
+        self.assertGreater(float(rows[0]["cost_usd"]), 0)
+
+    def test_unarchived_principled_marker_stops_before_paid_resources(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="8" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/stop-append-window"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+
+        class DriftExecutor:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, slot, attempt, run_id, run_root
+                raise FormalDriftError("simulated fairness drift")
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger, mock.patch.object(
+            store, "append", side_effect=OSError("simulated stop append failure")
+        ):
+            with self.assertRaisesRegex(OSError, "stop append failure"):
+                run_formal_campaign(
+                    self.contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=DriftExecutor(),
+                    phase="pilot",
+                )
+        self.assertEqual(store.records(), ())
+        with self.assertRaisesRegex(FormalError, "latched stop"):
+            require_safe_formal_prefix(paths, identity, self.contract)
+
+        resumed_calls = 0
+
+        class WouldSucceed:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, slot, attempt, run_id, run_root
+                nonlocal resumed_calls
+                resumed_calls += 1
+                raise AssertionError("unarchived stop marker was retried")
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            with self.assertRaisesRegex(FormalDriftError, "latched principled stop"):
+                run_formal_campaign(
+                    self.contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=WouldSucceed(),
+                    phase="pilot",
+                )
+        self.assertEqual(resumed_calls, 0)
+        self.assertEqual(len(store.records()), 1)
+
+    def test_formal_budget_stop_is_a_persistent_campaign_barrier(self) -> None:
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="3" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/budget-stop"
+        paths = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        calls = 0
+
+        class BudgetExecutor:
+            def __init__(inner, ledger):
+                inner.ledger = ledger
+
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del slot, attempt, run_root
+                nonlocal calls
+                calls += 1
+                inner.ledger.stop_run(
+                    run_id, stop_reason="budget_capacity_exhausted"
+                )
+                raise BudgetStopped("budget_capacity_exhausted")
+
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            first = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=BudgetExecutor(ledger),
+                phase="pilot",
+            )
+        with open_paid_ledger(paths.ledger, self.contract) as ledger:
+            second = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=BudgetExecutor(ledger),
+                phase="pilot",
+            )
+        self.assertEqual(first, second)
+        self.assertEqual(calls, 1)
+        rows = store.records()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "budget_stopped")
+        self.assertEqual(rows[0]["reason_code"], "budget_capacity_exhausted")
+        self.assertEqual(rows[0]["attempt"], 1)
+        with self.assertRaisesRegex(FormalError, "latched stop"):
+            require_safe_formal_prefix(paths, identity, self.contract)
+
+    def test_malformed_ledger_stops_before_docker_and_secret_access(self) -> None:
+        repo_paths = RepoPaths(
+            common_root=self.common_root,
+            worktree_root=REPO_ROOT,
+        )
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        harness_commit = "4" * 40
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit=harness_commit
+        )
+        paths = formal_paths(self.common_root, self.contract)
+        store = FormalStore(paths, identity)
+        store.ensure_receipt()
+        with open_paid_ledger(paths.ledger, self.contract):
+            pass
+        malformed = json.loads(paths.ledger.read_text("utf-8"))
+        malformed["unexpected"] = True
+        paths.ledger.write_text(
+            json.dumps(malformed, sort_keys=True, separators=(",", ":")) + "\n",
+            "utf-8",
+        )
+        paths.ledger.chmod(0o600)
+        with self.assertRaisesRegex(FormalError, "ledger is invalid"):
+            require_safe_formal_prefix(paths, identity, self.contract)
+
+        acquire_docker = mock.Mock()
+        load_secret = mock.Mock()
+        dependencies = PaidRuntimeDependencies(acquire_docker_gate=acquire_docker)
+        with mock.patch(
+            "rondo_eval.proactive_eval.paid.RepoPaths.discover",
+            return_value=repo_paths,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.harness_identity",
+            return_value={
+                "harness_commit": harness_commit,
+                "harness_dirty": False,
+            },
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.enter_paid_phase",
+            return_value=self.contract,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.require_phase_a_evidence",
+            return_value={},
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.load_runtime_config",
+            return_value=config,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.plan049_provider_projection",
+            return_value=provider,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.load_provider_secret",
+            load_secret,
+        ):
+            with self.assertRaisesRegex(PaidGuardError, "resume prefix is unsafe"):
+                run_authorized_paid_phase(
+                    repo_root=REPO_ROOT,
+                    authorization=PHASE_B_AUTHORIZATION,
+                    activation_action=ACTIVATION_ACTION,
+                    confirmed_balance_usd="100.00",
+                    local_activation_confirmation=LOCAL_ACTIVATION_CONFIRMATION,
+                    independent_review_commit=harness_commit,
+                    rehearsal_namespace="unused",
+                    loopback_namespace="unused",
+                    phase="pilot",
+                    dependencies=dependencies,
+                )
+        acquire_docker.assert_not_called()
+        load_secret.assert_not_called()
 
     def test_phase_b_cli_reaches_the_concrete_paid_runner(self) -> None:
         pilot_rows = [
@@ -1043,6 +1468,296 @@ class ProactiveEvalTests(unittest.TestCase):
         self.assertFalse(
             (self.common_root / "eval-data/plan-049/no-receipt").exists()
         )
+
+    def test_run_local_request_limits_are_product_failures_without_retry(self) -> None:
+        paths = RepoPaths.discover(REPO_ROOT)
+        ledger_path = self.common_root / "eval-data/plan-049/paid/limit-ledger.json"
+        with open_paid_ledger(ledger_path, self.contract) as ledger:
+            executor = Plan049TerminalBenchExecutor(
+                contract=self.contract,
+                common_root=paths.common_root,
+                repo_root=paths.worktree_root,
+                ledger=ledger,
+                api_key="test-only-not-forwarded",
+                counter=mock.Mock(),
+                lock_guard=mock.Mock(),
+                lease=mock.Mock(),
+                config=load_runtime_config(paths),
+                formal_identity_sha256="5" * 64,
+            )
+            for slot, stop_reason in zip(
+                slots(self.contract)[:2],
+                (
+                    "logical_request_limit_exceeded",
+                    "guardian_logical_request_limit_exceeded",
+                ),
+                strict=True,
+            ):
+                with self.subTest(stop_reason=stop_reason):
+                    run_id = slot.run_id().replace("rehearsal", "paid")
+                    run_root = self.common_root / "limit-runs" / run_id
+                    ledger.claim_run(run_id, cap_usd="15.10")
+
+                    async def fake_core(_config, request, **kwargs):
+                        kwargs["request_preflight"].register(
+                            task_id=slot.task_id,
+                            role="main",
+                            side=request.side,
+                            request={
+                                "model": "gpt-5.6-terra",
+                                "instructions": self.contract.policy,
+                                "tools": [
+                                    {
+                                        "type": "function",
+                                        "name": name,
+                                        "parameters": {},
+                                    }
+                                    for name in sorted(COMMON_V2_TOOL_NAMES)
+                                ],
+                            },
+                        )
+                        ledger.stop_run(run_id, stop_reason=stop_reason)
+                        trial = run_root / "trial"
+                        bundle = trial / "agent/rollout-trace/bundle"
+                        bundle.mkdir(parents=True)
+                        harbor = mock.Mock(trial_dir=trial, returncode=0)
+                        return mock.Mock(harbor=harbor)
+
+                    parsed = mock.Mock(
+                        outcome=RunOutcome.AGENT_FAILED,
+                        reward=0,
+                    )
+                    with mock.patch(
+                        "rondo_eval.proactive_eval.formal.run_budgeted_terminal_bench_core",
+                        side_effect=fake_core,
+                    ), mock.patch(
+                        "rondo_eval.proactive_eval.formal.parse_single_task_result",
+                        return_value=parsed,
+                    ), mock.patch(
+                        "rondo_eval.proactive_eval.formal.find_trace_bundle",
+                        side_effect=lambda trace_root: trace_root / "bundle",
+                    ), mock.patch(
+                        "rondo_eval.proactive_eval.formal.reduce_bundle",
+                        side_effect=lambda _bundle, product: synthetic_team_view(
+                            side="codex" if product == "codex" else "rondo",
+                            run_id=run_id,
+                            ordinal=slot.ordinal,
+                        ),
+                    ):
+                        result = executor.execute(
+                            slot,
+                            attempt=1,
+                            run_id=run_id,
+                            run_root=run_root,
+                        )
+                    self.assertEqual(result.outcome, "product_failed")
+                    self.assertEqual(result.reason_code, stop_reason)
+                    self.assertTrue((run_root / "settled.json").is_file())
+
+    def test_request_limit_without_trace_latches_instead_of_retrying(self) -> None:
+        repo_paths = RepoPaths.discover(REPO_ROOT)
+        config = load_runtime_config(repo_paths)
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="7" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/limit-no-trace"
+        formal = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(formal, identity)
+        store.ensure_receipt()
+        core_calls = 0
+
+        with open_paid_ledger(formal.ledger, self.contract) as ledger:
+            executor = Plan049TerminalBenchExecutor(
+                contract=self.contract,
+                common_root=repo_paths.common_root,
+                repo_root=repo_paths.worktree_root,
+                ledger=ledger,
+                api_key="test-only-not-forwarded",
+                counter=mock.Mock(),
+                lock_guard=mock.Mock(),
+                lease=mock.Mock(),
+                config=config,
+                formal_identity_sha256=store.identity_sha256,
+            )
+
+            async def fake_core(_config, request, **kwargs):
+                nonlocal core_calls
+                core_calls += 1
+                first = slots(self.contract)[0]
+                run_id = first.run_id().replace("rehearsal", "paid")
+                kwargs["request_preflight"].register(
+                    task_id=first.task_id,
+                    role="main",
+                    side=request.side,
+                    request={
+                        "model": "gpt-5.6-terra",
+                        "instructions": self.contract.policy,
+                        "tools": [
+                            {
+                                "type": "function",
+                                "name": name,
+                                "parameters": {},
+                            }
+                            for name in sorted(COMMON_V2_TOOL_NAMES)
+                        ],
+                    },
+                )
+                ledger.stop_run(
+                    run_id, stop_reason="logical_request_limit_exceeded"
+                )
+                trial = store.run_root(run_id) / "trial"
+                (trial / "agent/rollout-trace").mkdir(parents=True)
+                return mock.Mock(harbor=mock.Mock(trial_dir=trial, returncode=0))
+
+            with mock.patch(
+                "rondo_eval.proactive_eval.formal.run_budgeted_terminal_bench_core",
+                side_effect=fake_core,
+            ), mock.patch(
+                "rondo_eval.proactive_eval.formal.parse_single_task_result",
+                return_value=mock.Mock(
+                    outcome=RunOutcome.AGENT_FAILED,
+                    reward=0,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    FormalError, "lacks complete terminal evidence"
+                ):
+                    run_formal_campaign(
+                        self.contract,
+                        store=store,
+                        ledger=ledger,
+                        executor=executor,
+                        phase="pilot",
+                    )
+                with self.assertRaisesRegex(
+                    FormalDriftError, "latched principled stop"
+                ):
+                    run_formal_campaign(
+                        self.contract,
+                        store=store,
+                        ledger=ledger,
+                        executor=executor,
+                        phase="pilot",
+                    )
+        self.assertEqual(core_calls, 1)
+        rows = store.records()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "principled_stopped")
+        self.assertEqual(rows[0]["attempt"], 1)
+
+    def test_request_limit_settled_write_failure_latches_without_retry(self) -> None:
+        repo_paths = RepoPaths.discover(REPO_ROOT)
+        config = load_runtime_config(repo_paths)
+        provider = plan049_provider_projection(config, self.contract)
+        identity = formal_identity(
+            self.contract, provider=provider, harness_commit="8" * 40
+        )
+        root = self.common_root / "eval-data/plan-049/paid/limit-settled-write"
+        formal = FormalPaths(
+            root=root,
+            receipt=root / "activation-receipt.json",
+            ledger=root / "budget-ledger.json",
+            archive=root / "records.jsonl",
+            aggregate=root / "aggregate.json",
+            runs=root / "runs",
+        )
+        store = FormalStore(formal, identity)
+        store.ensure_receipt()
+        core_calls = 0
+
+        with open_paid_ledger(formal.ledger, self.contract) as ledger:
+            executor = Plan049TerminalBenchExecutor(
+                contract=self.contract,
+                common_root=repo_paths.common_root,
+                repo_root=repo_paths.worktree_root,
+                ledger=ledger,
+                api_key="test-only-not-forwarded",
+                counter=mock.Mock(),
+                lock_guard=mock.Mock(),
+                lease=mock.Mock(),
+                config=config,
+                formal_identity_sha256=store.identity_sha256,
+            )
+
+            async def fake_core(_config, request, **kwargs):
+                nonlocal core_calls
+                core_calls += 1
+                first = slots(self.contract)[0]
+                run_id = first.run_id().replace("rehearsal", "paid")
+                kwargs["request_preflight"].register(
+                    task_id=first.task_id,
+                    role="main",
+                    side=request.side,
+                    request={
+                        "model": "gpt-5.6-terra",
+                        "instructions": self.contract.policy,
+                        "tools": [
+                            {
+                                "type": "function",
+                                "name": name,
+                                "parameters": {},
+                            }
+                            for name in sorted(COMMON_V2_TOOL_NAMES)
+                        ],
+                    },
+                )
+                ledger.stop_run(
+                    run_id, stop_reason="logical_request_limit_exceeded"
+                )
+                trial = store.run_root(run_id) / "trial"
+                bundle = trial / "agent/rollout-trace/bundle"
+                bundle.mkdir(parents=True)
+                return mock.Mock(harbor=mock.Mock(trial_dir=trial, returncode=0))
+
+            with mock.patch(
+                "rondo_eval.proactive_eval.formal.run_budgeted_terminal_bench_core",
+                side_effect=fake_core,
+            ), mock.patch(
+                "rondo_eval.proactive_eval.formal.parse_single_task_result",
+                return_value=mock.Mock(
+                    outcome=RunOutcome.AGENT_FAILED,
+                    reward=0,
+                ),
+            ), mock.patch(
+                "rondo_eval.proactive_eval.formal.find_trace_bundle",
+                side_effect=lambda trace_root: trace_root / "bundle",
+            ), mock.patch(
+                "rondo_eval.proactive_eval.formal._write_settled_file",
+                side_effect=OSError("injected settled checkpoint failure"),
+            ):
+                with self.assertRaisesRegex(
+                    FormalError, "lacks a durable terminal checkpoint"
+                ):
+                    run_formal_campaign(
+                        self.contract,
+                        store=store,
+                        ledger=ledger,
+                        executor=executor,
+                        phase="pilot",
+                    )
+                with self.assertRaisesRegex(
+                    FormalDriftError, "latched principled stop"
+                ):
+                    run_formal_campaign(
+                        self.contract,
+                        store=store,
+                        ledger=ledger,
+                        executor=executor,
+                        phase="pilot",
+                    )
+        self.assertEqual(core_calls, 1)
+        rows = store.records()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], "principled_stopped")
+        self.assertEqual(rows[0]["attempt"], 1)
 
     def test_formal_resume_abandons_a_requested_unpublished_attempt(self) -> None:
         config = load_runtime_config(RepoPaths.discover(REPO_ROOT))

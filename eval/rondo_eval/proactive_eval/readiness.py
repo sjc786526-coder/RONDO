@@ -11,7 +11,11 @@ from typing import Any
 from ..config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
 from ..team_lens.model import validate_team_view
 from .aggregate import aggregate
-from .contract import CampaignContract
+from .contract import (
+    CampaignContract,
+    ContractError,
+    require_common_v2_tool_projections,
+)
 from .schedule import slots
 from .store import RehearsalStore, assert_body_free
 
@@ -195,6 +199,7 @@ def require_phase_a_evidence(
     sides = summary.get("sides") if isinstance(summary, dict) else None
     if (
         not isinstance(summary, dict)
+        or summary.get("schema_version") != 2
         or summary.get("evidence_kind") != "loopback"
         or summary.get("identity_class") != "rehearsal"
         or summary.get("lock_id") != contract.lock_id
@@ -205,7 +210,6 @@ def require_phase_a_evidence(
         or set(sides) != {"codex", "rondo"}
     ):
         raise ReadinessError("Plan 049 loopback identity differs")
-    required_tools = ["list_agents", "send_message", "spawn_agent", "wait_agent"]
     for side in ("codex", "rondo"):
         row = sides[side]
         if not isinstance(row, dict):
@@ -217,7 +221,6 @@ def require_phase_a_evidence(
             or row.get("request_count") != 1
             or row.get("policy_sha256") != contract.policy_sha256
             or row.get("policy_matched") is not True
-            or row.get("registered_common_tools") != required_tools
             or row.get("team_state") is not expected_team_state
             or row.get("trace_bundle_count") != 1
         ):
@@ -243,6 +246,13 @@ def require_phase_a_evidence(
             or (side == "rondo" and not isinstance(view.get("team"), dict))
         ):
             raise ReadinessError("Plan 049 loopback Team Lens evidence differs")
+    try:
+        require_common_v2_tool_projections(
+            sides["codex"].get("registered_tool_projection"),
+            sides["rondo"].get("registered_tool_projection"),
+        )
+    except ContractError as exc:
+        raise ReadinessError("Plan 049 loopback tool projection differs") from exc
     return {
         "rehearsal_namespace": rehearsal_namespace,
         "loopback_namespace": loopback_namespace,

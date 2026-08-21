@@ -22,11 +22,16 @@ from ..multi_m5.trace import find_trace_bundle
 from ..team_lens.model import dump_team_view
 from ..team_lens.reducer import reduce_bundle
 from ..team_lens.report import render_report
-from .contract import CampaignContract
+from .contract import (
+    COMMON_V2_TOOL_NAMES,
+    CampaignContract,
+    ContractError,
+    require_common_v2_tool_projections,
+)
 
 
 _BEARER = "plan049-loopback-only"
-_REQUIRED_TOOLS = {"spawn_agent", "send_message", "wait_agent", "list_agents"}
+_REQUIRED_TOOLS = COMMON_V2_TOOL_NAMES
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
 
 
@@ -232,14 +237,21 @@ def run_common_v2_loopback(
             "request_count": 1,
             "policy_sha256": contract.policy_sha256,
             "policy_matched": True,
-            "registered_common_tools": sorted(_REQUIRED_TOOLS),
+            "registered_tool_projection": sorted(server.registered_tools),
             "team_state": None if side is Side.CODEX else True,
             "team_view_sha256": hashlib.sha256(view_bytes).hexdigest(),
             "team_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
             "trace_bundle_count": 1,
         }
+    try:
+        require_common_v2_tool_projections(
+            results["codex"]["registered_tool_projection"],
+            results["rondo"]["registered_tool_projection"],
+        )
+    except ContractError as exc:
+        raise LoopbackError(str(exc)) from exc
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evidence_kind": "loopback",
         "identity_class": "rehearsal",
         "lock_id": contract.lock_id,
