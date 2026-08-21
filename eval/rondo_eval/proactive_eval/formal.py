@@ -83,6 +83,7 @@ _SECCOMP_EFFECTIVE_SHA256 = "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54
 _TERMINAL = {"completed", "task_failed", "product_failed"}
 _CAMPAIGN_STOPS = {"budget_stopped", "principled_stopped"}
 _OUTCOMES = _TERMINAL | {"infra_failed"} | _CAMPAIGN_STOPS
+_NON_INFRA_TERMINAL_MISSING_TRACE = "non_infra_terminal_missing_trace"
 _RECORD_KEYS = {
     "schema_version",
     "evidence_kind",
@@ -124,6 +125,10 @@ class FormalDriftError(FormalError):
 
 class FormalInfraError(FormalError):
     """A bounded provider/runner infrastructure attempt may be retried."""
+
+
+class FormalTerminalTraceError(FormalError):
+    """A fixed non-infra result lacks its required trace; never retry it."""
 
 
 @dataclass(frozen=True)
@@ -995,7 +1000,7 @@ class Plan049TerminalBenchExecutor:
                 # outcome is already a fixed non-infra task result;
                 # missing observation evidence alone must not buy a
                 # replacement sample under an infra label.
-                raise FormalError(
+                raise FormalTerminalTraceError(
                     "Plan 049 non-infra task result lacks complete trace evidence"
                 ) from exc
         except (
@@ -1370,7 +1375,7 @@ def run_formal_campaign(
                 records.append(row)
                 infra_total += 1
                 continue
-            except FormalError:
+            except FormalError as exc:
                 # Unknown state, artifact drift and fairness/identity failures
                 # are principled stops.  Retrying could buy a replacement
                 # sample for a run that must instead remain fail-closed.
@@ -1386,7 +1391,11 @@ def run_formal_campaign(
                     run_id,
                     outcome="principled_stopped",
                     trace_status="missing",
-                    reason_code="identity_or_fairness_drift",
+                    reason_code=(
+                        _NON_INFRA_TERMINAL_MISSING_TRACE
+                        if isinstance(exc, FormalTerminalTraceError)
+                        else "identity_or_fairness_drift"
+                    ),
                 )
                 _publish_and_append(store, row)
                 records.append(row)

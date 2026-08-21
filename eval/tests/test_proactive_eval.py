@@ -1768,6 +1768,12 @@ class ProactiveEvalTests(unittest.TestCase):
                 self.assertEqual(len(rows), 1)
                 self.assertEqual(rows[0]["outcome"], "principled_stopped")
                 self.assertEqual(rows[0]["attempt"], 1)
+                self.assertEqual(
+                    rows[0]["reason_code"],
+                    "non_infra_terminal_missing_trace",
+                )
+                marker = store.marker(rows[0]["run_id"])
+                self.assertEqual(marker, rows[0])
 
     def test_infra_result_stays_retryable_without_trace_lookup(self) -> None:
         repo_paths = RepoPaths.discover(REPO_ROOT)

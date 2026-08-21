@@ -340,27 +340,30 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
 - [x] 对最终 `9837a2c2cf74e7ee0b4fec531c03826a83df1634` 的独立验收确认不重跑语义成立，但发现新路径的
       `principled_stopped` 仍把 missing-trace 原因误记为 `identity_or_fairness_drift`。阶段 A 回拨为 `blocked`，
       证据见 `agent_log/2026-08-20-210151-plan049-phase-a-trace-reason-independent-acceptance.md`。
+- [x] 已用专用异常类型和固定 body-free code `non_infra_terminal_missing_trace` 关闭误报；现有四态跨重启矩阵同时
+      断言 JSONL 与 `run.json` 原因，Plan 049 32 项通过。共享 runner/M-5 与 Team Lens 未改，按审查范围不重复运行，
+      等待 clean commit 上的独立复验。
 
 ### 当前工作
 
-- 阶段 A 因 missing-trace 持久 reason 误报而 `blocked`。阶段 B 保持未授权。
+- 阶段 A finding 已在本地关闭并通过定向门禁；独立复验前仍保持 `blocked`。阶段 B 保持未授权。
 
 ### 本任务剩余步骤
 
-1. 为新的 fail-closed 路径持久准确、body-free 的 missing-trace reason code，并在现有分类矩阵增加原因断言。
+1. 提交当前窄修并在 clean HEAD 上独立复验；真实 finding 继续在同一分支闭环。
 2. 修复验收通过后，仍只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额，才可创建正式 activation identity 并执行固定 pilot/正式任务。
 3. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- missing-trace 停止记录的 `reason_code` 仍误标为身份/公平漂移；该 correctness blocker 关闭前阶段 A 为 `blocked`。
+- 当前本地实现无已知 correctness blocker，但独立复验完成前阶段 A 仍为 `blocked`。
 - 阶段 B 仍因尚未授权及缺少明确开始动作、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
 
 ### 当前验收状态
 
 - pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；v5 loopback
   保存实际 V2 工具投影，v4 rehearsal 的 archive/ledger/aggregate 继续通过确定性 readiness。
-- 整改后的 Plan 049 32 项、共享 runner/预算/M-5 144 项、Team Lens 25 项均通过；独立审查复跑结果一致。
+- 整改后的 Plan 049 32 项通过；本轮未改共享 runner/M-5 或 Team Lens，144/25 项按独立审查要求未重复运行。
 - 未运行 Docker、Cargo、真实 API、本地模型、付费测评或全量测试；未创建正式 activation receipt、正式账本或
   正式 run/result identity。
 
