@@ -24,6 +24,7 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     BaselineError,
     BaselineRun,
     BaselineStatus,
+    CampaignLockRegistration,
     CampaignSlotStatus,
     CampaignStateLedger,
     ConditionalRun,
@@ -45,6 +46,7 @@ from rondo_eval.terminal_bench import baseline_cli, baseline_diagnosis  # noqa: 
 from rondo_eval.terminal_bench.baseline_identity import (  # noqa: E402
     CampaignIdentityGenerationError,
     required_successor_prior,
+    retire_active_campaign_pointer,
     validate_successor_run_range,
 )
 
@@ -316,23 +318,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         latest = load_historical_campaign_identity(paths, registry[-1].version)
         self.assertEqual(latest.campaign_id, registry[-1].campaign_id)
         self.assertEqual(latest.lock_sha256, registry[-1].lock_sha256)
-        self.assertEqual(latest.schema_version, 6)
+        self.assertEqual(latest.schema_version, 7)
         self.assertEqual(latest.max_attempts, 4)
         self.assertEqual(latest.upstream_timeout_seconds, 180.0)
-        self.assertEqual(len(latest.continuation), 25)
-        self.assertEqual(
-            {item.source_campaign_id for item in latest.continuation},
-            {
-                "p2-b7-canary-baseline-v18",
-                "p2-b7-canary-baseline-v19",
-                "p2-b7-canary-baseline-v20",
-            },
-        )
+        self.assertTrue(latest.enforces_fair_comparison)
+        self.assertEqual(latest.continuation, ())
         self.assertEqual(len(latest.slots), 321)
-        self.assertIn(
-            latest.budget["campaign_cap_usd"],
-            {"700.000000", "1000.000000", "1300.000000", "1600.000000"},
-        )
+        self.assertEqual(latest.budget["campaign_cap_usd"], "400.000000")
         self.assertEqual(
             Decimal(latest.budget["prior_estimated_usd"]),
             required_successor_prior(paths, version=registry[-2].version),
@@ -385,6 +377,69 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             load_historical_campaign_identity(paths, 9).campaign_id,
             "p2-b7-canary-baseline-v9",
         )
+
+    def test_retire_active_campaign_pointer_preserves_lock_as_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pointer_path = root / CAMPAIGN_ACTIVE_POINTER_PATH
+            pointer_path.parent.mkdir(parents=True)
+            relative = Path("eval/locks/p2-b7-canary-baseline-v28.json")
+            pointer_path.write_text(
+                json.dumps(
+                    {"schema_version": 1, "active_lock": relative.as_posix()}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            identity = mock.Mock(
+                campaign_id="p2-b7-canary-baseline-v28",
+                lock_sha256="a" * 64,
+            )
+            registration = CampaignLockRegistration(
+                version=28,
+                path=relative,
+                campaign_id=identity.campaign_id,
+                batch_id="p2-b7-canary-v28",
+                run_id_date="20260821",
+                run_id_sequence_base=500001606,
+                max_run_slots=321,
+                lock_sha256=identity.lock_sha256,
+            )
+            with mock.patch(
+                "rondo_eval.terminal_bench.baseline_identity.campaign_lock_registry",
+                return_value=(registration,),
+            ):
+                retire_active_campaign_pointer(
+                    RepoPaths(root, root), identity=identity
+                )
+
+            self.assertEqual(
+                json.loads(pointer_path.read_text(encoding="utf-8")),
+                {"schema_version": 1, "active_lock": None},
+            )
+            pointer_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "active_lock": "eval/locks/p2-b7-canary-baseline-v29.json",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch(
+                    "rondo_eval.terminal_bench.baseline_identity.campaign_lock_registry",
+                    return_value=(registration,),
+                ),
+                self.assertRaisesRegex(
+                    CampaignIdentityGenerationError,
+                    "pointer moved to another identity",
+                ),
+            ):
+                retire_active_campaign_pointer(
+                    RepoPaths(root, root), identity=identity
+                )
 
     def test_campaign_registry_sorts_multi_digit_versions_numerically(self) -> None:
         live = RepoPaths.discover(Path.cwd())

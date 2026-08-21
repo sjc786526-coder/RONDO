@@ -1533,5 +1533,6 @@ Guardian 为 `gpt-5.6-terra/low`。
   `actual_usd=null`，task envelope 已关闭且剩余 `$390.587112`，无 active identity、reservation 或 running slot。
 - distinct results worktree 发布 40 条 `track=tb` 与 `p2-b7-canary-baseline-v28.json`。正式 Docker 前后均为
   26 images / 11.5 GB、0 container、0 volume、0 build cache，VHDX 增长 0；Windows `C:` 全程高于 80 GiB。
-  受影响的无 API harness 回归曾 243/243 通过；发布修复后的 pair/results 回归 67/67、窄子集 12/12 通过，
-  未运行全 workspace、CI、PR、validation、holdout、本地模型或训练。
+  受影响的无 API harness 回归初轮 243/243、最终相关集合 346/346 通过；终态 finalizer 会在预算确认关闭后原子
+  清空 active pointer，默认入口复验为 `idle` / 0 requests。未运行全 workspace、CI、PR、validation、holdout、
+  本地模型或训练。

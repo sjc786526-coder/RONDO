@@ -49,6 +49,52 @@ class CampaignIdentityGenerationError(RuntimeError):
     """The next identity cannot be derived without resetting or guessing facts."""
 
 
+def retire_active_campaign_pointer(
+    paths: RepoPaths,
+    *,
+    identity: CampaignIdentity,
+) -> None:
+    """Atomically clear the pointer for one verified terminal identity.
+
+    The immutable campaign lock remains registered as history.  Requiring both
+    its campaign id and lock digest prevents a stale finalizer from retiring a
+    newer successor.
+    """
+
+    registration = next(
+        (
+            item
+            for item in campaign_lock_registry(paths)
+            if item.campaign_id == identity.campaign_id
+            and item.lock_sha256 == identity.lock_sha256
+        ),
+        None,
+    )
+    if registration is None:
+        raise CampaignIdentityGenerationError(
+            "terminal campaign identity is not registered"
+        )
+    pointer_path = paths.worktree_root / CAMPAIGN_ACTIVE_POINTER_PATH
+    pointer = _read_json(pointer_path)
+    if (
+        set(pointer) != {"schema_version", "active_lock"}
+        or pointer.get("schema_version") != 1
+    ):
+        raise CampaignIdentityGenerationError("active campaign pointer is invalid")
+    active_lock = pointer.get("active_lock")
+    if active_lock is None:
+        return
+    if active_lock != registration.path.as_posix():
+        raise CampaignIdentityGenerationError(
+            "active campaign pointer moved to another identity"
+        )
+    _atomic_json(
+        pointer_path,
+        {"schema_version": 1, "active_lock": None},
+        replace=True,
+    )
+
+
 def required_successor_prior(
     paths: RepoPaths,
     *,

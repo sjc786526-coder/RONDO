@@ -8,8 +8,10 @@
 - v28 的 20-side stub、10 receipt 与正式序列通过：1 wire、40 产品槽、400/400 usage-priced upstream attempts。
   10/10 共同有效任务，双方均 5/10，`sigma=0`、`base_delta=0`、`delta=0`，三层 passed、无条件题；有效失败和
   reward 0 未选择性重跑。v28 `$9.142443`，Plan 051 累计 `$9.412888`，`actual_usd=null`，预算终态已关闭。
-- 结果发布器的 v7 profile 解析与运行中单槽安全退役补了回归；相关 pair/results 67/67、窄子集 12/12、语法编译与
-  whitespace 检查通过。未运行全 workspace、CI/PR、validation/holdout、本地模型或训练。
+- 结果发布器的 v7 profile 解析与运行中单槽安全退役补了回归。首次独立审查发现 passed v28 仍被 active pointer
+  指向；finalizer 现只在结果发布成功且 task envelope 确认该 identity 已关闭后原子退役 pointer，历史 lock 保持只读。
+  默认入口复验为 `idle` / 0 requests，最终相关无 API 集合 346/346、语法编译与 whitespace 检查通过。未运行全
+  workspace、CI/PR、validation/holdout、本地模型或训练。
 - 正式运行前后 Docker 均为 26 images / 11.5 GB、0 container/volume/build cache，VHDX 为
   `69,467,111,424` bytes；Windows `C:` campaign 读数为 `183,926,632,448 -> 183,749,709,824` bytes，收尾
   读数 `183,738,654,720` bytes。ignored 资产保留 bundle/build、v23—v28 campaign/preflight、v27/v28 ledgers、

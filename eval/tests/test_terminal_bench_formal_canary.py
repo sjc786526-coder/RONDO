@@ -54,6 +54,14 @@ class FormalCanaryEntryTests(unittest.TestCase):
         self.assertEqual(payload["status"], "idle")
         self.assertEqual(payload["paid_requests_sent"], 0)
 
+    def test_completed_repository_state_is_idle(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        payload = formal_canary.status(paths)
+
+        self.assertEqual(payload["status"], "idle")
+        self.assertIsNone(payload["active_lock"])
+        self.assertEqual(payload["paid_requests_sent"], 0)
+
     def test_run_requires_the_literal_paid_action_before_preparation(self) -> None:
         with (
             mock.patch.object(
@@ -104,6 +112,58 @@ class FormalCanaryEntryTests(unittest.TestCase):
             )
         self.assertEqual(result, 7)
         run.assert_called_once()
+
+    def test_finalize_retires_only_a_closed_terminal_identity(self) -> None:
+        identity = mock.Mock(
+            campaign_id="p2-b7-canary-baseline-v28",
+            batch_id="p2-b7-canary-v28",
+            enforces_fair_comparison=True,
+            budget={"task_budget_prior_estimated_usd": "0.270445"},
+        )
+        state_path = (
+            self.root
+            / "eval-data/campaigns/p2-b7-canary-baseline-v28/state.json"
+        )
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text('{"status":"passed"}\n', encoding="utf-8")
+        closed = {
+            "active_identity": None,
+            "closed_identities": [
+                {
+                    "campaign_id": identity.campaign_id,
+                    "batch_id": identity.batch_id,
+                    "terminal_status": "passed",
+                }
+            ],
+        }
+        runner_args = [
+            "finalize",
+            "--docker-host-volume",
+            "/tmp/docker-host",
+            "--results-worktree-root",
+            "/tmp/results",
+            "--rondo-measurement-worktree-root",
+            "/tmp/rondo",
+            "--codex-measurement-worktree-root",
+            "/tmp/codex",
+        ]
+        with (
+            mock.patch.object(
+                formal_canary.RepoPaths, "discover", return_value=self.paths
+            ),
+            mock.patch.object(
+                formal_canary, "load_campaign_identity", return_value=identity
+            ),
+            mock.patch.object(formal_canary, "baseline_main", return_value=0),
+            mock.patch.object(formal_canary, "load_task_budget", return_value=closed),
+            mock.patch.object(
+                formal_canary, "retire_active_campaign_pointer"
+            ) as retire,
+        ):
+            result = formal_canary.main(runner_args)
+
+        self.assertEqual(result, 0)
+        retire.assert_called_once_with(self.paths, identity=identity)
 
 
 if __name__ == "__main__":

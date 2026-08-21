@@ -186,7 +186,7 @@
 - 已从 clean detached `54f62e5...` 源码经共享构建锁和看门狗冻结并完整复验新的 Local runtime bundle；现有
   Codex `v0.147.0@be6e8eac...` bundle 自包含校验通过，因此未重建上游。
 - schema v7 显式 bundle、Terra effort 投影、wire 有界重试/恢复、跨 identity 400 USD envelope、1/0 USD fallback
-  与稳定入口已落地；受影响的无 API focused tests 当前 243/243 通过，入口默认返回 idle 且零请求。
+  与稳定入口已落地；初轮 243/243、最终相关集合 346/346 无 API focused tests 通过，入口默认返回 idle 且零请求。
 - 依次冻结并关闭 v23—v28 六个 identity：v23—v26 在零 API 阶段暴露并关闭本地 preflight/runner 适配缺口；
   v27 的十题双侧 stub preflight 通过，正式 wire 与首个 RONDO 槽可靠结算后暴露 schema v7 结果发布缺口，按
   无新请求恢复路径结算 `$0.270445` 并保持旧结果只读；修复后由全新 v28 接续。
@@ -204,8 +204,8 @@
 
 ### 当前工作
 
-实现、无 API 预检、正式 API、聚合、结算、结果发布与资源清理均已完成。正在同步任务文档、提交执行与 results
-worktree，并按用户附加要求进行一次干净上下文的独立正确性/功能性审查；审查完成前不合并、不推送。
+实现、无 API 预检、正式 API、聚合、结算、结果发布与资源清理均已完成。首次干净上下文审查发现终态 active
+pointer 未清空；已补 finalizer 的原子退役、历史回归与实际 `status=idle` 复验，正在交回同一审查者复验。
 
 ### 本任务剩余步骤
 
@@ -219,12 +219,12 @@ worktree，并按用户附加要求进行一次干净上下文的独立正确性
 
 ### 当前验收状态
 
-- 实现与无 API 定向门禁：完成；最新相关 Python 回归为 pair/results 67/67，schema v7 发布与运行中安全退役
-  子集 12/12，语法编译与 diff whitespace 检查通过。全 workspace、CI、PR、validation/holdout 均未运行。
+- 实现与无 API 定向门禁：完成；最终相关 Python 回归 346/346（含 pair/results、预算、identity、formal entry、
+  发布与运行中安全退役），语法编译与 diff whitespace 检查通过。全 workspace、CI、PR、validation/holdout 均未运行。
 - Docker/stub 与正式 API：完成；v28 为有效正式基线，所有有效 pass、reward 0 与任务失败均原样保留。
 - 预算、归档与清理：完成；任务累计 `$9.412888`，无 active identity、running slot、容器、volume 或任务网络。
 - Git：执行 worktree 与 distinct results worktree 正在完成任务内提交；未修改、合并或推送 `main`，未归档分支。
-- 独立审查：待最终提交后执行；通过前不宣告任务验收完成。
+- 独立审查：首次审查的唯一 active-pointer finding 已修复，待同一审查者复验；通过前不宣告任务验收完成。
 
 ### 主工作区 ignored 资产
 
