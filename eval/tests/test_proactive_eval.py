@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -62,6 +63,13 @@ from rondo_eval.proactive_eval.readiness import (  # noqa: E402
     ReadinessError,
     require_phase_a_evidence,
     secret_readiness,
+)
+from rondo_eval.proactive_eval.recovery import (  # noqa: E402
+    RECOVERY_ACTION,
+    RECOVERY_ID,
+    prepare_recovery_prefix,
+    recovery_paths,
+    require_safe_recovery_prefix,
 )
 from rondo_eval.proactive_eval.schedule import dry_run_projection, slots  # noqa: E402
 from rondo_eval.proactive_eval.store import (  # noqa: E402
@@ -426,6 +434,162 @@ class ProactiveEvalTests(unittest.TestCase):
         self.assertEqual(selected.root_view["summary"]["inference_count"], 15)
         self.assertEqual(selected.root_view["summary"]["tool_count"], 14)
         self.assertIsNone(selected.root_view["team"])
+
+    def test_actual_paid_sample_recovers_offline_when_requested(self) -> None:
+        source_root_value = os.environ.get("PLAN049_RECOVERY_SOURCE_ROOT")
+        if source_root_value is None:
+            self.skipTest("PLAN049_RECOVERY_SOURCE_ROOT is not set")
+        source_root = Path(source_root_value)
+        copied_source = formal_paths(self.common_root, self.contract).root
+        shutil.copytree(source_root, copied_source)
+        before = {
+            path.relative_to(copied_source).as_posix(): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in sorted(copied_source.rglob("*"))
+            if path.is_file() and not path.is_symlink()
+        }
+        config = load_runtime_config(RepoPaths.discover(REPO_ROOT))
+        provider = plan049_provider_projection(config, self.contract)
+        recovery_commit = "f" * 40
+
+        first = prepare_recovery_prefix(
+            self.contract,
+            common_root=self.common_root,
+            provider=provider,
+            recovery_harness_commit=recovery_commit,
+            recovery_action=RECOVERY_ACTION,
+        )
+        second = prepare_recovery_prefix(
+            self.contract,
+            common_root=self.common_root,
+            provider=provider,
+            recovery_harness_commit=recovery_commit,
+            recovery_action=RECOVERY_ACTION,
+        )
+        context = require_safe_recovery_prefix(
+            self.contract,
+            common_root=self.common_root,
+            provider=provider,
+            recovery_harness_commit=recovery_commit,
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["source_run_id"], "plan049-paid-pilot-p01-codex-a01")
+        self.assertEqual(first["recovered_outcome"], "task_failed")
+        self.assertEqual(first["request_count"], 15)
+        self.assertEqual(first["prior_spend_usd"], "0.262759")
+        self.assertEqual(first["remaining_authorized_usd"], "99.737241")
+        self.assertEqual(first["next_slot_id"], "pilot-p01-rondo")
+        self.assertEqual(first["provider_requests"], 0)
+        self.assertEqual(first["docker_runs"], 0)
+        self.assertEqual(str(context.remaining_usd), "99.737241")
+        self.assertFalse(
+            (
+                context.paths.formal.runs
+                / "plan049-paid-pilot-p01-codex-a02"
+            ).exists()
+        )
+        recovered_run = (
+            context.paths.formal.runs / "plan049-paid-pilot-p01-codex-a01"
+        )
+        self.assertFalse((recovered_run / "staging").exists())
+        self.assertFalse((recovered_run / "settled.json").exists())
+
+        store = FormalStore(context.paths.formal, context.identity)
+
+        class OfflineExecutor:
+            def execute(inner, slot, *, attempt, run_id, run_root):
+                del inner, attempt
+                view = synthetic_team_view(
+                    side=slot.side, run_id=run_id, ordinal=slot.ordinal
+                )
+                digests = write_replay_artifacts(run_root, view)
+                return FormalExecutionResult(
+                    outcome="task_failed",
+                    trace_status="available",
+                    request_preflight_sha256="e" * 64,
+                    reason_code="task_native_verifier_failed",
+                    **digests,
+                )
+
+        with open_paid_ledger(context.paths.formal.ledger, self.contract) as ledger:
+            progressed = run_formal_campaign(
+                self.contract,
+                store=store,
+                ledger=ledger,
+                executor=OfflineExecutor(),
+                phase="pilot",
+            )
+        self.assertEqual(progressed["run_count"], 6)
+        self.assertEqual(store.records()[0]["run_id"], first["source_run_id"])
+        require_safe_recovery_prefix(
+            self.contract,
+            common_root=self.common_root,
+            provider=provider,
+            recovery_harness_commit=recovery_commit,
+        )
+        after = {
+            path.relative_to(copied_source).as_posix(): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in sorted(copied_source.rglob("*"))
+            if path.is_file() and not path.is_symlink()
+        }
+        self.assertEqual(before, after)
+
+        binding = json.loads(context.paths.binding.read_text("utf-8"))
+        binding["source_run"]["request_count"] = 14
+        context.paths.binding.write_text(
+            json.dumps(binding, sort_keys=True, separators=(",", ":")) + "\n",
+            "utf-8",
+        )
+        context.paths.binding.chmod(0o600)
+        acquire_docker = mock.Mock()
+        load_secret = mock.Mock()
+        dependencies = PaidRuntimeDependencies(acquire_docker_gate=acquire_docker)
+        repo_paths = RepoPaths(self.common_root, REPO_ROOT)
+        with mock.patch(
+            "rondo_eval.proactive_eval.paid.RepoPaths.discover",
+            return_value=repo_paths,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.harness_identity",
+            return_value={
+                "harness_commit": recovery_commit,
+                "harness_dirty": False,
+            },
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.enter_paid_phase",
+            return_value=self.contract,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.require_phase_a_evidence",
+            return_value={},
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.load_runtime_config",
+            return_value=config,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.plan049_provider_projection",
+            return_value=provider,
+        ), mock.patch(
+            "rondo_eval.proactive_eval.paid.load_provider_secret",
+            load_secret,
+        ):
+            with self.assertRaisesRegex(PaidGuardError, "recovery prefix is unsafe"):
+                run_authorized_paid_phase(
+                    repo_root=REPO_ROOT,
+                    authorization=PHASE_B_AUTHORIZATION,
+                    activation_action=ACTIVATION_ACTION,
+                    confirmed_balance_usd="99.737241",
+                    local_activation_confirmation=LOCAL_ACTIVATION_CONFIRMATION,
+                    independent_review_commit=recovery_commit,
+                    rehearsal_namespace="unused",
+                    loopback_namespace="unused",
+                    phase="pilot",
+                    dependencies=dependencies,
+                    recovery_id=RECOVERY_ID,
+                )
+        acquire_docker.assert_not_called()
+        load_secret.assert_not_called()
 
     def test_contract_digest_drift_fails_closed(self) -> None:
         copied = self.common_root / "copy"
@@ -1556,6 +1720,9 @@ class ProactiveEvalTests(unittest.TestCase):
     def test_formal_terminal_bench_requests_share_v2_policy_models_and_trace(self) -> None:
         paths = RepoPaths.discover(REPO_ROOT)
         ledger_path = self.common_root / "eval-data/plan-049/paid/request-ledger.json"
+        injected_paid_paths = recovery_paths(
+            self.common_root, self.contract
+        ).formal
         with open_paid_ledger(ledger_path, self.contract) as ledger:
             executor = Plan049TerminalBenchExecutor(
                 contract=self.contract,
@@ -1567,6 +1734,7 @@ class ProactiveEvalTests(unittest.TestCase):
                 lock_guard=mock.Mock(),
                 lease=mock.Mock(),
                 config=load_runtime_config(paths),
+                paid_paths=injected_paid_paths,
             )
             selected = slots(self.contract)[:2]
             requests = [
@@ -1583,6 +1751,11 @@ class ProactiveEvalTests(unittest.TestCase):
             self.assertEqual(request.pinned_subagent_model, "gpt-5.6-terra")
             self.assertEqual(request.pinned_subagent_effort, "medium")
             self.assertEqual(request.multi_agent_max_concurrency, 4)
+            self.assertTrue(
+                Path(request.staging_root).is_relative_to(
+                    injected_paid_paths.runs
+                )
+            )
             self.assertEqual(
                 request.developer_instructions_sha256,
                 self.contract.policy_sha256,

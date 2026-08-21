@@ -771,6 +771,7 @@ class Plan049TerminalBenchExecutor:
         config: RuntimeConfig | None = None,
         materializer: TaskMaterializer | None = None,
         formal_identity_sha256: str | None = None,
+        paid_paths: FormalPaths | None = None,
     ) -> None:
         self.contract = contract
         self.common_root = Path(common_root).resolve()
@@ -785,6 +786,7 @@ class Plan049TerminalBenchExecutor:
         self.lease = lease
         self.materializer = materializer
         self.formal_identity_sha256 = formal_identity_sha256
+        self.paid_paths = paid_paths or formal_paths(self.common_root, self.contract)
         self.runtime = load_runtime_identity(
             self.repo_root / contract.lock["runtime"]["lock"],
             require_frozen=True,
@@ -804,7 +806,7 @@ class Plan049TerminalBenchExecutor:
             != _SECCOMP_SOURCE_SHA256
         ):
             raise FormalDriftError("Plan 049 seccomp profile differs")
-        run_root = formal_paths(self.common_root, self.contract).runs / run_id
+        run_root = self.paid_paths.runs / run_id
         return TerminalBenchRequest(
             side=side,
             batch_id=str(self.contract.lock["budget"]["batch_id"]),

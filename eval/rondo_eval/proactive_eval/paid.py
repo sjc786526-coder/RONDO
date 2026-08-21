@@ -22,6 +22,11 @@ from .formal import (
     run_formal_campaign,
 )
 from .readiness import require_phase_a_evidence
+from .recovery import (
+    RECOVERY_ID,
+    RECOVERY_REMAINING_USD,
+    require_safe_recovery_prefix,
+)
 
 
 PHASE_B_AUTHORIZATION = "AUTHORIZE RONDO PLAN 049 PHASE B REAL API AND DOCKER UP TO USD 100.00"
@@ -87,6 +92,7 @@ def enter_paid_phase(
     docker_resource_gate_ready: bool,
     phase_a_evidence_ready: bool,
     independent_review_passed: bool,
+    minimum_balance_usd: Decimal | str = Decimal("100.00"),
 ) -> CampaignContract:
     """Pure authorization gate; it has no callback and creates no state."""
 
@@ -98,8 +104,17 @@ def enter_paid_phase(
         balance = Decimal(confirmed_balance_usd or "")
     except InvalidOperation as exc:
         raise PaidGuardError("Plan 049 balance confirmation is invalid") from exc
-    if not balance.is_finite() or balance < Decimal("100.00"):
-        raise PaidGuardError("Plan 049 confirmed balance is below USD 100.00")
+    try:
+        minimum_balance = Decimal(str(minimum_balance_usd))
+    except InvalidOperation as exc:
+        raise PaidGuardError("Plan 049 minimum balance is invalid") from exc
+    if (
+        not minimum_balance.is_finite()
+        or minimum_balance <= 0
+        or not balance.is_finite()
+        or balance < minimum_balance
+    ):
+        raise PaidGuardError("Plan 049 confirmed balance is below the required cap")
     if harness_clean is not True:
         raise PaidGuardError("Plan 049 paid harness is not clean")
     if resume_prefix_safe is not True:
@@ -133,6 +148,7 @@ def run_authorized_paid_phase(
     loopback_namespace: str,
     phase: str,
     dependencies: PaidRuntimeDependencies | None = None,
+    recovery_id: str | None = None,
 ) -> dict:
     """Run the real pilot/formal schedule through the shared paid runner.
 
@@ -147,6 +163,8 @@ def run_authorized_paid_phase(
     actual_harness = harness_identity(paths.worktree_root)
     harness_commit = actual_harness.get("harness_commit")
     harness_clean = actual_harness.get("harness_dirty") is False
+    if recovery_id not in {None, RECOVERY_ID}:
+        raise PaidGuardError("Plan 049 recovery identity is invalid")
     contract = enter_paid_phase(
         repo_root=paths.worktree_root,
         authorization=authorization,
@@ -166,6 +184,9 @@ def run_authorized_paid_phase(
             isinstance(harness_commit, str)
             and independent_review_commit == harness_commit
         ),
+        minimum_balance_usd=(
+            RECOVERY_REMAINING_USD if recovery_id is not None else Decimal("100.00")
+        ),
     )
     try:
         require_phase_a_evidence(
@@ -183,10 +204,24 @@ def run_authorized_paid_phase(
         or actual_harness.get("harness_dirty") is not False
     ):
         raise PaidGuardError("Plan 049 harness identity changed after authorization")
-    identity = formal_identity(
-        contract, provider=provider, harness_commit=harness_commit
-    )
-    paid_paths = formal_paths(paths.common_root, contract)
+    if recovery_id is None:
+        identity = formal_identity(
+            contract, provider=provider, harness_commit=harness_commit
+        )
+        paid_paths = formal_paths(paths.common_root, contract)
+    else:
+        try:
+            recovery = require_safe_recovery_prefix(
+                contract,
+                common_root=paths.common_root,
+                provider=provider,
+                recovery_harness_commit=harness_commit,
+                recovery_id=recovery_id,
+            )
+        except Exception as exc:
+            raise PaidGuardError("Plan 049 recovery prefix is unsafe") from exc
+        identity = recovery.identity
+        paid_paths = recovery.paths.formal
     try:
         require_safe_formal_prefix(paid_paths, identity, contract)
     except Exception as exc:
@@ -226,6 +261,7 @@ def run_authorized_paid_phase(
             lease=resources.lease,
             config=config,
             formal_identity_sha256=store.identity_sha256,
+            paid_paths=paid_paths,
         )
         return run_formal_campaign(
             contract,

@@ -7,16 +7,22 @@ import hashlib
 import json
 import sys
 
-from ..config import RepoPaths
+from ..config import RepoPaths, load_runtime_config
+from ..multi_m5.archive import harness_identity
 from .campaign import default_fake_executor, run_rehearsal
 from .contract import REPO_ROOT, load_contract
 from .loopback import run_common_v2_loopback
-from .formal import FormalError
+from .formal import FormalError, plan049_provider_projection
 from .paid import (
     PaidGuardError,
     run_authorized_paid_phase,
 )
 from .schedule import dry_run_projection
+from .recovery import (
+    RECOVERY_ID,
+    RecoveryError,
+    prepare_recovery_prefix,
+)
 from .readiness import ReadinessError, require_phase_a_evidence, secret_readiness
 from .store import assert_body_free
 
@@ -25,7 +31,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="rondo-eval-plan049")
     parser.add_argument(
         "command",
-        choices=("dry-run", "fake", "loopback", "replay", "ready", "phase-b-paid"),
+        choices=(
+            "dry-run",
+            "fake",
+            "loopback",
+            "replay",
+            "ready",
+            "recover-paid",
+            "phase-b-paid",
+        ),
     )
     parser.add_argument("--namespace", default="phase-a-final")
     parser.add_argument("--loopback-namespace", default=None)
@@ -34,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--confirmed-balance-usd", default=None)
     parser.add_argument("--confirm-local-activation", default=None)
     parser.add_argument("--independent-review-commit", default=None)
+    parser.add_argument("--recovery-action", default=None)
+    parser.add_argument("--recovery-id", default=None)
     parser.add_argument("--phase", choices=("pilot", "formal"), default="pilot")
     args = parser.parse_args(argv)
     paths = RepoPaths.discover(REPO_ROOT)
@@ -138,6 +154,36 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         return 0
+    if args.command == "recover-paid":
+        actual_harness = harness_identity(paths.worktree_root)
+        harness_commit = actual_harness.get("harness_commit")
+        if (
+            not isinstance(harness_commit, str)
+            or actual_harness.get("harness_dirty") is not False
+            or args.independent_review_commit != harness_commit
+        ):
+            print("Plan 049 recovery requires its clean reviewed commit", file=sys.stderr)
+            return 78
+        try:
+            provider = plan049_provider_projection(
+                load_runtime_config(paths), contract
+            )
+            result = prepare_recovery_prefix(
+                contract,
+                common_root=paths.common_root,
+                provider=provider,
+                recovery_harness_commit=harness_commit,
+                recovery_action=args.recovery_action,
+                recovery_id=args.recovery_id or RECOVERY_ID,
+            )
+        except (FormalError, RecoveryError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 78
+        except Exception:
+            print("Plan 049 recovery source validation failed", file=sys.stderr)
+            return 78
+        _print(result)
+        return 0
     try:
         result = run_authorized_paid_phase(
             repo_root=paths.worktree_root,
@@ -149,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
             rehearsal_namespace=args.namespace,
             loopback_namespace=args.loopback_namespace or args.namespace,
             phase=args.phase,
+            recovery_id=args.recovery_id,
         )
     except (PaidGuardError, FormalError) as exc:
         print(str(exc), file=sys.stderr)
