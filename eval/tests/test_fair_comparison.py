@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import asyncio
 import inspect
 import io
 import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -1962,6 +1964,18 @@ class NamespacedTaskIdTests(unittest.TestCase):
 
 
 class PreflightProducerTests(unittest.TestCase):
+    def test_noop_verifier_returns_zero_without_touching_the_environment(self) -> None:
+        environment = mock.Mock()
+        verifier = preflight_producer.PreflightNoopVerifier(
+            task=object(),
+            trial_paths=object(),
+            environment=environment,
+        )
+        result = asyncio.run(verifier.verify())
+
+        self.assertEqual(result.rewards, {"reward": 0})
+        environment.assert_not_called()
+
     """The receipt must come from an entry point that really drives both sides."""
 
     tasks = ("terminal-bench/fix-git", "terminal-bench/db-wal-recovery")
@@ -2208,9 +2222,13 @@ class PreflightProducerTests(unittest.TestCase):
         prepared = PreparedTerminalBenchRun(
             spec=spec,
             command=SimpleNamespace(
-                disable_verification=True,
+                stub_verifier=True,
                 delete_environment=False,
-                argv=("--disable-verification", "--no-delete"),
+                argv=(
+                    "--verifier",
+                    preflight_producer.PREFLIGHT_STUB_VERIFIER_IMPORT,
+                    "--no-delete",
+                ),
             ),  # type: ignore[arg-type]
             adapter=object(),  # type: ignore[arg-type]
             materialized_task=object(),  # type: ignore[arg-type]

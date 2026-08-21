@@ -24,6 +24,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
+from harbor.models.verifier.result import VerifierResult
+from harbor.verifier.base import BaseVerifier
+
 from ..api_budget_proxy import _inspect_request
 from ..config import RepoPaths, load_runtime_config
 from ..contracts import Side
@@ -59,6 +62,7 @@ from .runner import (
     DockerSupervisedHostHarborExecutor,
     HostHarborExecutor,
     InjectedHostHarborBackend,
+    PREFLIGHT_STUB_VERIFIER_IMPORT,
     TaskMaterializer,
     UnifiedTerminalBenchRunner,
     prepare_terminal_bench_run,
@@ -73,6 +77,13 @@ _MAX_STUB_ROUNDS = 4
 
 class PreflightProductionError(RuntimeError):
     """The receipt cannot be produced without guessing or reaching upstream."""
+
+
+class PreflightNoopVerifier(BaseVerifier):
+    """Finish a stub trial without running task tests after capture completes."""
+
+    async def verify(self) -> VerifierResult:
+        return VerifierResult(rewards={"reward": 0})
 
 
 class PreflightCaptureServer:
@@ -364,7 +375,7 @@ async def capture_side_requests(
                 seccomp_profile=seccomp_profile,
                 budget_usd=float(RUN_CAP_USD),
             ),
-            disable_verification=True,
+            stub_verifier=True,
             delete_environment=False,
         )
         projected = project_shared_model_catalog(
@@ -432,14 +443,15 @@ def _validate_stub_projection(
     command = getattr(prepared, "command", None)
     if (
         command is None
-        or getattr(command, "disable_verification", None) is not True
+        or getattr(command, "stub_verifier", None) is not True
         or getattr(command, "delete_environment", None) is not False
-        or "--disable-verification" not in getattr(command, "argv", ())
+        or "--verifier" not in getattr(command, "argv", ())
+        or PREFLIGHT_STUB_VERIFIER_IMPORT not in getattr(command, "argv", ())
         or "--no-delete" not in getattr(command, "argv", ())
         or "--delete" in getattr(command, "argv", ())
     ):
         raise PreflightProductionError(
-            "preflight projection did not preserve the supervisor cleanup boundary"
+            "preflight projection did not preserve the stub verifier boundary"
         )
     if (
         spec.task_id != task.task_id
