@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-21 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 阶段 A 已自检、待独立验收
+第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 阶段 A 已独立验收并 `paid-ready`，阶段 B 未授权
 
 ## 定位
 
