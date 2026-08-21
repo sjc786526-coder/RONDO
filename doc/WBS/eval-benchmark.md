@@ -12,8 +12,8 @@
 - **E-A 离线冻结回放**：**已随方向 1 一并挂起**，见下文；日常回归改由测试体系承担。
 
 测评设施本身继续保留和维护，但定位调整为：关键阶段的不退化检查、产品变体对比和最终验收，
-不再承担高频回归。设施实现保持**产品无关**，能接收不同二进制与产品 variant；但当前方向 0 的下一次
-正式 campaign 只比较 RONDO Local 与同基线冻结 Codex，不承接 RONDO Multi 的主动委派测评。
+不再承担高频回归。设施实现保持**产品无关**，能接收不同二进制与产品 variant；Plan 051 已完成当前方向 0
+的 RONDO Local / 同基线冻结 Codex 正式 campaign，RONDO Multi 的主动委派测评仍不属于本方向。
 
 ## 当前状态
 
@@ -26,8 +26,8 @@
 | B5 计分归因 | 完成首版 | agent、Guardian 与 infra 可分离；后续 assessment 需再拆方向性与行为一致性。 |
 | B6 预算 | 完成首版 | v1—v22 只读，active paid identity 已关闭。 |
 | B7 首次执行 | 执行完成、结论不可归因 | v22 机械一致性子门 failed，但比较条件不对称，不能解释为 RONDO/Codex 能力或性能差异。 |
-| E-B8 公平比较设施 | 完成 | 六项合同已成为 campaign schema v7 的机械约束；只做离线验收，未跑新 campaign。 |
-| 首次 v7 正式 canary | **Plan 051 已排期** | execplan 已冻结、实现待开始；默认 10 canary 最小 campaign，不扩到 validation/holdout。 |
+| E-B8 公平比较设施 | 完成 | 六项合同已成为 campaign schema v7 的机械约束，并由 Plan 051 v28 正式 campaign 贯通验证。 |
+| 首次 v7 正式 canary | **完成** | Plan 051 v28：10/10 共同有效，双方均 5/10，`sigma=0`、`delta=0`，三层判据通过；未运行 validation/holdout。 |
 | E-A A1—A7 | **挂起** | 随方向 1 一并挂起，不排期；保留为历史设计，见下文。 |
 
 v22 的 `sigma=0`、`delta=3` 与 `ab_delta_exceeds_aa_sigma` 是对既有冻结输入的机械结果。固定归因报告确认
@@ -35,7 +35,9 @@ catalog prompt 相差 161 tokens，同时混有 harness/deadline 和时间分块
 机械门运行到了终态。报告见 `doc/research/plan020-b7-canary-baseline-failure-attribution.md`。
 
 P2 v2—v22 公共账本已合入当前交付历史：`runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，其中 v22 为 32 条；
-v6—v22 共 11 份聚合 JSON。方向 2 的 L3/L4 另追加 4 条 `track=shadow`（当前账本共 248 条），不属于本方向。历史标签中的“Plan 015”保留原样，当前权威编号仍为 Plan 020。
+v6—v22 共 11 份聚合 JSON。Plan 051 的 distinct results worktree 另有 v28 的 40 条 `track=tb` 与 1 份
+schema v7 aggregate，待后续批准合入后本方向共 284 条。方向 2 的 L3/L4 另有 4 条 `track=shadow`，不属于本方向。
+历史标签中的“Plan 015”保留原样，当前权威编号仍为 Plan 020。
 
 ## E-B8 公平比较设施（已闭合）
 
@@ -83,9 +85,9 @@ assessment 语义一律不变，新规则只在 v7 生效。
    正交，v7 lock 显式记录产品身份；`codex` 不是产品取值。设施继续保留不同产品的身份校验能力，但当前首次
    v7 正式 canary 必须锁定 `rondo-local`，不得复用或导入 Multi 主动委派重跑的身份、trace 或结果。
 
-闭合的是设施，不是结论：本工作包跑过 pure/fake/loopback 与无 API synthetic Docker 定向门禁，未执行正式 v7
-identity 生命周期、未调用真实 API，也未产生任何新的正式比较结果。Plan 051 现已要求新的 B7 campaign 使用全新 IDs，并冻结跨 successor 的任务预算与一次性授权边界；
-实现和正式运行仍未开始。
+E-B8 当时只闭合设施；Plan 051 随后以全新 IDs 完成了正式 v7 identity 生命周期、真实 API、结算与结果发布。
+v23—v27 如实保留为本地设施适配/诊断 identity，v28 是首个有效产品基线；全部 identity 共用同一 400 USD
+任务 envelope，未继承或改写 v1—v22。
 
 它是**设施交付物，不是里程碑**：旧 M2 已拆解退役，它不再充当解锁其他方向的总闸门。
 Multi 第二期与方向 0 没有产品依赖；两者只因项目排期、API 预算、Docker 和构建资源而串行。
@@ -139,38 +141,26 @@ Multi 的主动委派重跑不能充当 v7 pilot，也不能替代 Local 与冻�
 - 注入已知延迟、额外轮次和请求不对称，证明报告能检出且 fail-closed。
 - 测试并入已有体系，不另起框架；只运行与本次改动相关的必要门禁。
 
-## 首次 v7 正式 canary（Plan 051 已排期）
+## 首次 v7 正式 canary（Plan 051 已完成）
 
-Plan 051 已冻结本次任务合同，当前实现、无 API 预检和正式运行均未开始。该任务只比较当前 RONDO Local 与
-同基线冻结 Codex；Multi 的运行不能充当 pilot 或替代这份基线。具体执行与停止边界见
+Plan 051 固定 RONDO Local `54f62e5f7e86a7ab0d4f8d788eafec7176809395` 与 Codex
+`v0.147.0@be6e8eac029b183056b7e4402879f15d2c85f61b`，使用同一冻结中转站、双方 Terra main-medium 与
+Guardian-low。v28 的十题双侧 stub receipt、wire、按任务交错的两轮 Local A/A 与一轮 Local/Codex A/B、结算、
+聚合和发布均完成；未进入 validation、holdout、E-A、本地模型或训练。
+
+正式结果为 10/10 个共同有效任务，Local 的两轮 A/A 与一轮 A/B 均为 5/10，Codex A/B 为 5/10；五道题双方通过，
+五道题双方有效失败，`sigma=0`、`base_delta=0`、`delta=0`。由于基础 A/B 没有差异，预冻结条件槽均未激活；
+A/A、cross-side 与 directional 三层机械判据均为 `passed`。这只表示冻结十题与当次合同下未观察到差异，不能推广
+到完整 Terminal-Bench 2.1 或其他模型/effort。
+
+v23—v26 在零 API 阶段关闭；v27 完成 wire 与首个产品槽后暴露本地 schema v7 发布缺口，可靠结算 `$0.270445`
+并由 v28 successor 重新形成正式比较。v28 identity 结算 `$9.142443`，Plan 051 累计 `$9.412888`，全部 400 个
+上游 attempt 都有可靠 usage，`actual_usd` 仍为未知；任务 envelope 已关闭，无 active identity 或未结 reservation。
+所有有效 pass、reward 0 与任务失败均原样保留，没有按成绩重跑。
+
+后续使用稳定入口创建新 baseline 时仍须另立 identity、重新冻结产品 bundle、comparison、价格与当次预算，并取得
+对应真实 API/Docker 授权；本次 400 USD 授权和余额不自动延续。具体历史合同与执行边界见
 `plan/051-direction0-schema-v7-first-formal-canary-execplan.md`。
-
-默认运行形态是：冻结的 10 个 canary、v7 公平合同、按任务交错的基础 A/A 与 A/B、只对跨侧差异题按预冻结
-奇数次数做条件加跑和严格多数聚合。不恢复 61 个 validation 或 18 个 holdout，不预设第二轮完整 campaign。
-主模型必须是后续 Local 优化真正针对的模型；廉价替代模型只能形成该模型条件下的基线，不能代替目标模型。
-
-第一次结果按以下口径收口：设施合同成立且共同有效任务不少于 8 时，无论 `sigma` 大小、稳定 A/B 差异还是双侧
-基本一致，都原样归档为当时的 Local 正式基线，不在 Plan 051 内按成绩改题、删样本、针对性确认或重跑。
-`sigma` 大只记录为基线局限；将来若确需改题或另做确认，必须由 WBS 另立任务、使用新 identity 和新授权，不能
-改写本 campaign。
-
-Plan 051 已获得一次性 API/Docker/构建与最多 400 USD 任务预算授权；首个正式请求前仍必须同时满足：
-
-- 新 campaign 使用 schema v7，其 `comparison` 块（重复合同、运行条件、catalog 身份、产品身份）已冻结；
-  设施在该块缺失、不合法或与 campaign 自身事实矛盾时拒绝建立 campaign。
-  **不再要求 E-A 完成**：E-A 已挂起，不作为前置条件。
-- 每道题都已有 stub 冻结的 preflight receipt，且与本 campaign 的 lock SHA、task 与两侧 bundle manifest 绑定；
-  任一 receipt 缺失时 campaign 在 wire canary 之前就拒绝启动。生成 receipt 走 `just eval-b7-preflight-receipts`，
-  需要一次无 API 的 stub 双侧 Docker 运行，本次已纳入 Plan 051 授权。
-- 新 identity 不复用任何 v1—v22 ID，不继承其 continuation 或历史预算；v23 与本任务内全部 successor 共享同一
-  `400 USD` 任务累计预算，创建 identity 不得清零费用。
-- 任务、轮数、交错顺序、重复规则、模型、价格快照、预算 cap 和停止条件全部预冻结。
-- 两侧必须来自同一上游基线。Plan 051 已冻结 `v0.147.0@be6e8eac...`，本任务不做上游升级；未来升级只影响
-  升级后另立的新 campaign。
-- 按 `doc/WBS.md` §5 的机械判据执行，比较合同任一项漂移都先 blocked。
-
-通过只表示在冻结样本与该合同下的等条件比较成立；不自动推广到全量 TB 2.1，也不自动解锁未获授权的下一轮费用，
-更不构成任何方向的解锁闸门。
 
 ## 硬约束
 

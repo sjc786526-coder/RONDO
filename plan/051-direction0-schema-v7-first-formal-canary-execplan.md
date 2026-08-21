@@ -24,37 +24,37 @@
 
 ### 完成/验收标准
 
-- [ ] 新正式 identity 使用 campaign schema v7、全新 campaign/batch/run IDs，产品为 `rondo-local`；不继承或
+- [x] 新正式 identity 使用 campaign schema v7、全新 campaign/batch/run IDs，产品为 `rondo-local`；不继承或
       改写 v1—v22 的 continuation、结果、run ID、费用或预算余额。首个 identity 按现有编号应为 v23；若被设施
       缺陷阻断，后续使用顺延的新 identity。
-- [ ] RONDO 侧 manifest 精确绑定从 `54f62e5...` 构建并冻结的 Local runtime bundle；Codex 侧精确绑定
+- [x] RONDO 侧 manifest 精确绑定从 `54f62e5...` 构建并冻结的 Local runtime bundle；Codex 侧精确绑定
       `v0.147.0@be6e8eac...` 的已验证 runtime bundle。旧 `cb652e1...` Local bundle 不能作为本轮产品基线。
-- [ ] 10 个既有 canary、共享 catalog、task/image digest、两侧 main/Guardian 模型与 effort、provider profile、
+- [x] 10 个既有 canary、共享 catalog、task/image digest、两侧 main/Guardian 模型与 effort、provider profile、
       价格快照、deadline、task-major 顺序、三次严格多数合同及 400 USD 任务预算均在首个真实请求前冻结并可复验。
-- [ ] 无 API 阶段保持零真实请求、零费用：相关 focused tests 通过；仍有效的 Oracle proof 被复用，失效部分才重跑；
+- [x] 无 API 阶段保持零真实请求、零费用：相关 focused tests 通过；仍有效的 Oracle proof 被复用，失效部分才重跑；
       十题双侧 stub preflight 串行通过，证明两侧生成相同的 Terra main-medium/Guardian-low 任务无关请求合同。
-- [ ] 正式序列完成 fresh wire canary、RONDO A/A 两轮、RONDO/Codex A/B 各一轮、所有差异题的条件加跑、严格多数
+- [x] 正式序列完成 fresh wire canary、RONDO A/A 两轮、RONDO/Codex A/B 各一轮、所有差异题的条件加跑、严格多数
       聚合、结算、归档与清理；基础与条件运行均按任务交错执行，不运行 validation、holdout 或 E-A。
-- [ ] 每个 schema v7 identity 仍是最多 321 槽：1 个 wire 槽、40 条基础逻辑链、最多 40 条条件逻辑链，每条逻辑链
+- [x] 每个 schema v7 identity 仍是最多 321 槽：1 个 wire 槽、40 条基础逻辑链、最多 40 条条件逻辑链，每条逻辑链
       最多 4 次 attempt。普通 provider、断流、超时、Docker、runner、resume、结算或归档故障可在既有 attempt、
       任务预算与安全边界内自动恢复；不因一次可窄修问题等待人工确认。
-- [ ] wire 的普通 provider/断流/超时在同一 wire 槽、任务预算与冻结合同内有界自动重试；每个已发送请求仍按计费
+- [x] wire 的普通 provider/断流/超时在同一 wire 槽、任务预算与冻结合同内有界自动重试；每个已发送请求仍按计费
       三分法落账，不因一次瞬态失败直接废弃整个任务。合同、安全、预算或资源门失败继续 fail-closed。
-- [ ] 所有 identity 共用一个任务级 400 USD 累计预算。请求有可靠 usage 时按冻结 Terra 价格结算；已发送但无法获得
+- [x] 所有 identity 共用一个任务级 400 USD 累计预算。请求有可靠 usage 时按冻结 Terra 价格结算；已发送但无法获得
       可靠 usage/计费终态时本地任务账本记 `1.000000 USD`；能证明未发送时记 `0.000000 USD`。identity、进程、
       worktree 或代码窄修均不能重置累计费用，达到 400 USD 后不能再发送请求。
-- [ ] 已完成槽位在普通进程重启后不重复发送；未完成槽位可继续。已形成的有效产品结果不因分数不好而选择性重跑；
+- [x] 已完成槽位在普通进程重启后不重复发送；未完成槽位可继续。已形成的有效产品结果不因分数不好而选择性重跑；
       只有原 campaign 因设施缺陷失效或冻结运行代码发生必要修复时，才以全新 successor identity 继续相应正式比较，
       且旧 identity、旧结果和旧费用保持只读。
-- [ ] 最终正式基线至少有 8 个共同有效任务，并输出 A/A 一致性、跨侧比较、方向性结果、`sigma`、`base_delta`、
+- [x] 最终正式基线至少有 8 个共同有效任务，并输出 A/A 一致性、跨侧比较、方向性结果、`sigma`、`base_delta`、
       聚合 `delta`、条件题与双方多数结果。稳定差异、无差异或有效任务失败都如实保留，不为改善成绩重跑。
-- [ ] 每个请求都有可复算的结算类别和任务级累计；最终累计不超过 400 USD，所有 reservation 已结清，没有无法解释的
+- [x] 每个请求都有可复算的结算类别和任务级累计；最终累计不超过 400 USD，所有 reservation 已结清，没有无法解释的
       running slot、活动 campaign lease 或本任务残留容器。非零供应商实际账单未知时继续记 `actual_usd=null`，
       `1 USD` 只表述为本地预算估算。
-- [ ] Docker 与 Windows `C:` 前后资源事实完整；稳定入口完成至少一次无 API 的准备、进程中断后恢复、终态归档/清理
+- [x] Docker 与 Windows `C:` 前后资源事实完整；稳定入口完成至少一次无 API 的准备、进程中断后恢复、终态归档/清理
       验证。默认调用或缺少明确 paid action 时不得意外发出真实请求；一旦在已授权 identity 上正式启动，应连续运行到
       campaign 终态或明确硬停。
-- [ ] 只运行受影响的必要测试，不运行全 workspace、CI 或 PR 流程；同步方向 0 WBS、WBS-COMPLETED、计划当前状态和
+- [x] 只运行受影响的必要测试，不运行全 workspace、CI 或 PR 流程；同步方向 0 WBS、WBS-COMPLETED、计划当前状态和
       一份精炼 agent log。任务 worktree 与必要的任务专用 results worktree 均提交且状态清楚，不合并 `main`、不推送。
 
 ## 2. 范围
@@ -187,30 +187,30 @@
   Codex `v0.147.0@be6e8eac...` bundle 自包含校验通过，因此未重建上游。
 - schema v7 显式 bundle、Terra effort 投影、wire 有界重试/恢复、跨 identity 400 USD envelope、1/0 USD fallback
   与稳定入口已落地；受影响的无 API focused tests 当前 243/243 通过，入口默认返回 idle 且零请求。
+- 依次冻结并关闭 v23—v28 六个 identity：v23—v26 在零 API 阶段暴露并关闭本地 preflight/runner 适配缺口；
+  v27 的十题双侧 stub preflight 通过，正式 wire 与首个 RONDO 槽可靠结算后暴露 schema v7 结果发布缺口，按
+  无新请求恢复路径结算 `$0.270445` 并保持旧结果只读；修复后由全新 v28 接续。
+- v28 的 20 个 stub side、10 份 receipt 全部通过，随后正式完成 wire、RONDO A/A 两轮以及 RONDO/Codex A/B
+  各一轮。40 个产品槽全部有效，400/400 个上游 attempt 均有可靠 usage；没有基础差异题，故冻结的条件槽保持
+  未激活，不作选择性加跑。
+- v28 正式聚合为 `passed`：10/10 个共同有效任务，Local 三轮观察均为 5/10，Codex A/B 为 5/10；
+  `sigma=0`、`base_delta=0`、`delta=0`，A/A、cross-side 与 directional 三层均通过。成功题为 `fix-git`、
+  `headless-terminal`、`sanitize-git-repo`、`sqlite-db-truncate`、`vulnerable-secret`，其余五题双方均为有效失败。
+- v27 费用 `$0.270445`，v28 本 identity 费用 `$9.142443`（含 wire `$0.116195`），Plan 051 任务累计
+  `$9.412888`；`actual_usd=null`，任务 envelope 已关闭且无 active identity，剩余 `$390.587112`，未命中硬停。
+- 正式聚合与 40 条 result 已发布到任务专用 results worktree。Docker 前后均为 26 images / 11.5 GB、0
+  container、0 volume、0 build cache，VHDX 前后均为 `69,467,111,424` bytes；campaign 记录的 Windows `C:`
+  可用空间为 `183,926,632,448 -> 183,749,709,824` bytes，收尾独立读数为 `183,738,654,720` bytes。
 
 ### 当前工作
 
-无 API harness 正在收口，尚未创建 v23 identity。已运行受看门狗保护的 Cargo freeze 与无 API tests；尚未运行
-Docker、Oracle/stub preflight 或真实 API，累计费用仍为 0。
+实现、无 API 预检、正式 API、聚合、结算、结果发布与资源清理均已完成。正在同步任务文档、提交执行与 results
+worktree，并按用户附加要求进行一次干净上下文的独立正确性/功能性审查；审查完成前不合并、不推送。
 
 ### 本任务剩余步骤
 
-1. **启动复核与冻结输入**：再次确认 worktree/共享重型任务/active pointer；记录 Windows `C:` 与 Docker 基线；
-   静默校验密钥文件；刷新并冻结 Terra 价格，选择现有中转站 + Terra main-medium/Guardian-low；确认 10 题与 v7 比较合同。
-2. **冻结 bundle**：从 `54f62e5...` 的 clean detached measurement source 走共享构建锁冻结新的 Local runtime
-   bundle；验证现有 Codex `be6e8eac...` bundle，只有验证失败才按同基线重建。不得用旧 Local bundle顶替。
-3. **复现并做最小适配**：关闭显式 bundle、Terra main-medium/Guardian-low、任务级 400 USD、1 USD fallback、自动恢复与统一入口的
-   已确认缺口；补 focused 回归，不改产品行为和历史 v1—v22。
-4. **无 API harness 验收并提交**：运行相关 pure/fake/loopback/focused tests，确认统一入口默认零 API；提交可执行
-   harness。随后生成 v23 comparison/identity 并单独提交，使后续 Oracle、stub 与正式运行都来自 clean committed
-   harness/identity。
-5. **identity 下的无 API 预检**：在 v23 下复验现有 Oracle proof，只补齐失配或缺失项；两侧串行完成十题 stub
-   receipt，证明 Terra main-medium/Guardian-low 与 bundle 绑定正确。若失败，窄修、重跑并在需要时重新生成尚未产生正式数据的 identity。
-6. **正式连续运行**：显式启动 paid action，自动推进 wire、task-major A/A、task-major A/B、条件加跑、聚合、结算、
-   清理和归档。普通故障在边界内恢复；设施窄修后使用新 successor identity，所有 identity 共用 400 USD。
-7. **收口与交付**：验证至少 8 个共同有效任务、各层指标、全部请求结算、无活动 reservation/running slot/容器，
-   完成无 API 恢复和归档入口验证；同步 WBS、WBS-COMPLETED、计划和精炼日志；检查所有任务 worktree 后提交，
-   不合并、不推送，交由审查者验收。
+1. 完成任务与 results worktree 的最终提交、状态和 ignored 资产清单复核。
+2. 由干净上下文独立审查者检查正确性与功能性；真实 finding 先窄修，再交回同一审查者复验至通过。
 
 ### 阻塞项
 
@@ -219,10 +219,12 @@ Docker、Oracle/stub preflight 或真实 API，累计费用仍为 0。
 
 ### 当前验收状态
 
-- 规划与现状核对：完成。
-- 实现、定向测试、Docker、正式 API、聚合与归档：均未运行，不能表述为通过。
-- Git：Plan 051 worktree 已建立；本批规划只提交任务分支；规划者未修改 `main` 或远端。主分支的外部并行推进见
-  “已完成”，不得误算为本任务交付。
+- 实现与无 API 定向门禁：完成；最新相关 Python 回归为 pair/results 67/67，schema v7 发布与运行中安全退役
+  子集 12/12，语法编译与 diff whitespace 检查通过。全 workspace、CI、PR、validation/holdout 均未运行。
+- Docker/stub 与正式 API：完成；v28 为有效正式基线，所有有效 pass、reward 0 与任务失败均原样保留。
+- 预算、归档与清理：完成；任务累计 `$9.412888`，无 active identity、running slot、容器、volume 或任务网络。
+- Git：执行 worktree 与 distinct results worktree 正在完成任务内提交；未修改、合并或推送 `main`，未归档分支。
+- 独立审查：待最终提交后执行；通过前不宣告任务验收完成。
 
 ### 主工作区 ignored 资产
 
