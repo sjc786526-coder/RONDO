@@ -1,7 +1,7 @@
 # Plan 050：明确委派三任务比较案例 ExecPlan
 
 > 本计划是 Plan 050 的稳定任务合同，同时覆盖阶段 A 与阶段 B。
-> 阶段 A 已获授权；外部独立验收指出的影响链收口缺口已窄修，当前等待复验。**阶段 B 尚未授权**。
+> 阶段 A 已完成并通过影响链窄修后的独立复验，结论为 `paid-ready`。**阶段 B 尚未授权**。
 > 除“当前状态”和“关键决策记录”外，其他部分在执行期间默认不得修改。
 > 如果必须改变目标、三道任务、共同 policy、公平合同、范围、硬约束、最高预算或完成标准，应暂停执行并请求用户确认；
 > 普通实现选择、离线 fixture/配置窄修、基础设施修复、从可信状态 resume 和合同内重跑不属于合同变更。
@@ -55,7 +55,7 @@ RONDO Multi 启用 Team State。
       必须在读取密钥、创建正式 receipt/ledger/run、发起网络请求或启动正式 Docker 任务前拒绝。
 - [x] 只运行相关模块的必要测试。若未改 Rust，不运行 Cargo；若确需窄改 Rust，只通过共享 build-lock/watchdog 运行受影响
       crate 的必要门禁，不扩大到全 workspace。
-- [ ] 执行者在 050 分支完成本地提交并保持工作树干净；独立审查者复核合同、离线证据、付费入口和 body-free 边界，给出
+- [x] 执行者在 050 分支完成本地提交并保持工作树干净；独立审查者复核合同、离线证据、付费入口和 body-free 边界，给出
       明确 `paid-ready` 或具体 `blocked` 结论，并列出阶段 B 的精炼启动清单。
 - [x] 阶段 A 全程没有真实付费请求、费用、正式 paid receipt、正式结果身份或“阶段 B 已开始”的表述。
 
@@ -314,34 +314,33 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 
 ### 当前工作
 
-- 外部独立验收提交 `793d1c7` 指出的正式案例影响链缺口已窄修；当前为待独立复验的阶段 A 修复候选，不能提前称
-  `paid-ready`。阶段 B 未授权。
+- 外部独立验收提交 `793d1c7` 指出的正式案例影响链缺口已窄修并通过针对性独立复验；阶段 A 为 `paid-ready`。
+  阶段 B 未授权。
 
 ### 本任务剩余步骤
 
-- 独立复验正式 paid 路径的“六槽完成 → 显式逐槽影响判读 → 本地确定性 finalization”，确认不再固化默认 `unknown`。
-- 仅在阶段 A 复验通过且用户另行明确授权阶段 B 后，以启动时余额不少于 `100.00 USD` 为前提，串行运行六槽并完成
+- 仅在用户另行明确授权阶段 B 后，以启动时余额不少于 `100.00 USD` 为前提，串行运行六槽并完成
   结算、逐槽影响判读、三份案例、总览和最终独立验收；预算选择不构成本次付费开始授权。
 - 阶段 B 最终完成后更新权威文档与历史记录，提交 050 分支；合并、推送和关闭继续等待用户授权。
 
 ### 阻塞项
 
-- 无已知阶段 A 技术 blocker；当前只等待独立复验。阶段 B 的独立开始授权尚未提供，这是预期授权门。
+- 无已知阶段 A 技术 blocker；阶段 B 的独立开始授权尚未提供，这是预期授权门。
 
 ### 当前验收状态
 
-- 修复候选：六槽 fake rehearsal 为 4 成功、2 有效失败、0 infra；最终 loopback
+- `paid-ready`：六槽 fake rehearsal 为 4 成功、2 有效失败、0 infra；最终 loopback
   namespace 为 `phase-a-final-v3`，两侧各 1 个本地回环 Root 请求，policy/tool/model 投影一致。
 - 正式 paid 路径现在只在六槽后返回 `awaiting_impact_assessment`，不会写案例；本地-only finalizer 要求六个固定 slot
   完整显式判读，并覆盖 `observed`、`not_observed`、合法 `unknown`、缺槽/错槽和不一致状态。
 - 定向回归共 219 项：217 通过、2 项因未提供既有真实 Plan 049 样本路径按预期跳过；无失败。范围覆盖 Plan 050、
   Plan 049 共享编排、预算代理、Terminal-Bench、Team Lens 与 Multi 工具面，未运行全量测试。
 - readiness 复算得到 6/6 terminal、无缺槽/半对，且 `eval-data/plan-050/paid/` 不存在。阶段 A 未运行真实 API、Docker、
-  Cargo、模型或全 workspace 测试，没有产生费用；最终 `paid-ready` 结论等待独立复验。
+  Cargo、模型或全 workspace 测试，没有产生费用；影响链收口已通过独立复验。
 
 ### 阶段 B 启动清单
 
-- 阶段 A 独立复验通过后，用户另行明确授权开始阶段 B；实际总上限采用 `100.00 USD`，启动时确认可用余额不低于该数。
+- 用户另行明确授权开始阶段 B；实际总上限采用 `100.00 USD`，启动时确认可用余额不低于该数。
 - 使用当前干净、独立审查通过的本地提交，复核 `phase-a-final` / `phase-a-final-v3` 证据与 safe resume prefix。
 - 明确确认本地 paid 条件；随后才通过共享 watchdog 核对 Docker/Windows `C:` 资源门并读取所需 secret，串行运行六槽。
 

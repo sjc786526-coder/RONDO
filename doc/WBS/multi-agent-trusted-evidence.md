@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-21 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 阶段 A 影响链收口已修复、待独立复验，阶段 B 未授权
+第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 阶段 A 已独立复验并 `paid-ready`，阶段 B 未授权
 
 ## 定位
 
@@ -251,7 +251,7 @@ Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity
 
 ## 当前任务包：明确委派三任务比较案例
 
-**状态：Plan 050 阶段 A 影响链收口已窄修，等待独立复验；阶段 B 未授权。** 正式 paid 路径不再固化六个默认
+**状态：Plan 050 阶段 A 已独立复验并 `paid-ready`；阶段 B 未授权。** 正式 paid 路径不再固化六个默认
 `unknown`，而是在六槽完成后等待 body-free 的逐槽 Team Lens 操作性判读，再由本地-only 入口确定性生成案例；该判读不证明
 成员贡献内容质量。既有 lock/taskset/policy、fake/replay、零 API loopback、body-free 与负门禁保持不变，未创建 paid 状态。
 
