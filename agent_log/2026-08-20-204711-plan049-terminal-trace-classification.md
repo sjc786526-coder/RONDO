@@ -19,4 +19,5 @@
 - v4 rehearsal + v5 loopback readiness：exit 0，`offline-evidence-ready`，26 runs。
 
 未运行真实 API、Docker、Cargo、付费操作、完整数据集或全 workspace；未创建正式 paid namespace、receipt、账本或
-run/result identity。当前等待 clean commit 上的最终独立复验，阶段 B 仍未授权。
+run/result identity。全新上下文的独立审查者在 clean `6141cce1c48e4b743a6ef33d48b2b7332ffce9af` 上复跑上述门禁、
+检查四类非 infra 结果与反向 infra 语义后结论 PASS；阶段 A 恢复为 `paid-ready`，阶段 B 仍未授权。
