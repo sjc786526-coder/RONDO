@@ -1536,3 +1536,5 @@ Guardian 为 `gpt-5.6-terra/low`。
   受影响的无 API harness 回归初轮 243/243、最终相关集合 346/346 通过；终态 finalizer 会在预算确认关闭后原子
   清空 active pointer，默认入口复验为 `idle` / 0 requests。未运行全 workspace、CI、PR、validation、holdout、
   本地模型或训练。
+- 干净上下文独立审查首次发现上述 active-pointer 终态问题；修复后同一审查者重跑直接相关 60/60、复核两份提交与
+  ignored 终态并给出 `PASS`，无剩余 correctness/functionality finding。

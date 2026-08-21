@@ -12,6 +12,8 @@
   指向；finalizer 现只在结果发布成功且 task envelope 确认该 identity 已关闭后原子退役 pointer，历史 lock 保持只读。
   默认入口复验为 `idle` / 0 requests，最终相关无 API 集合 346/346、语法编译与 whitespace 检查通过。未运行全
   workspace、CI/PR、validation/holdout、本地模型或训练。
+- 同一干净上下文审查者随后以直接相关 60/60、默认入口与 Git/结果终态复验该修复并给出 `PASS`；无剩余
+  correctness/functionality finding，未引入额外审计设施。
 - 正式运行前后 Docker 均为 26 images / 11.5 GB、0 container/volume/build cache，VHDX 为
   `69,467,111,424` bytes；Windows `C:` campaign 读数为 `183,926,632,448 -> 183,749,709,824` bytes，收尾
   读数 `183,738,654,720` bytes。ignored 资产保留 runtime/code-mode bundle、build metrics、v23—v28
