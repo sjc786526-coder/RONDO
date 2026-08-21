@@ -222,7 +222,8 @@ active pointer；同一审查者复验确认默认 `status=idle`、直接相关 
   发布与运行中安全退役），语法编译与 diff whitespace 检查通过。全 workspace、CI、PR、validation/holdout 均未运行。
 - Docker/stub 与正式 API：完成；v28 为有效正式基线，所有有效 pass、reward 0 与任务失败均原样保留。
 - 预算、归档与清理：完成；任务累计 `$9.412888`，无 active identity、running slot、容器、volume 或任务网络。
-- Git：执行 worktree 与 distinct results worktree 正在完成任务内提交；未修改、合并或推送 `main`，未归档分支。
+- Git：执行 worktree 与 distinct results worktree 的任务内提交均已完成且 clean；未修改、合并或推送 `main`，
+  未归档分支。
 - 独立审查：首次审查的唯一 active-pointer finding 已修复；同一干净上下文审查者复验 `PASS`，无剩余
   correctness/functionality finding。
 
