@@ -30,34 +30,34 @@ RONDO Multi 启用 Team State。
 
 #### 阶段 A：无费用准备
 
-- [ ] 新建并冻结 `multi-explicit-collaboration-v1` 机器合同、任务集和 policy 模板；使用独立的 Plan 050 lock、run/pair/
+- [x] 新建并冻结 `multi-explicit-collaboration-v1` 机器合同、任务集和 policy 模板；使用独立的 Plan 050 lock、run/pair/
       attempt identity、账本 batch、rehearsal/paid namespace 与 `eval-data/plan-050/` ignored 根，不改写 Plan 049 的合同、
       结果或 ignored paid 状态。
-- [ ] 合同冻结 §3.2—§3.5 的三题 source/image/verifier 身份、policy 精确字节及 hash、二进制、provider、主/成员/Guardian
+- [x] 合同冻结 §3.2—§3.5 的三题 source/image/verifier 身份、policy 精确字节及 hash、二进制、provider、主/成员/Guardian
       模型与 `high` effort、六槽顺序、deadline、并发、判定维度、恢复语义、价格快照、最高可授权预算和数据边界。
-- [ ] 最大限度复用 Plan 049 的 Terminal-Bench runner、persistent budget ledger、reservation/settlement、resume、
+- [x] 最大限度复用 Plan 049 的 Terminal-Bench runner、persistent budget ledger、reservation/settlement、resume、
       Root/Guardian selector、原生 rollout trace、Team Lens 和报告组件；只增加 Plan 050 合同所需的薄编排或窄泛化，
       不复制成第二套 runner、trace writer、账本、Team Lens 或展示前端。
-- [ ] dry-run 能确定性列出六个基础槽位、顺序、稳定身份、预期 ignored/tracked 产物与恢复决策；rehearsal/fake 身份不得
+- [x] dry-run 能确定性列出六个基础槽位、顺序、稳定身份、预期 ignored/tracked 产物与恢复决策；rehearsal/fake 身份不得
       占用或伪装正式 paid identity。
-- [ ] 两侧命令投影与零 API loopback 证明：共同 policy hash 确实进入 Root、共同 Multi-Agent V2 工具面一致、
+- [x] 两侧命令投影与零 API loopback 证明：共同 policy hash 确实进入 Root、共同 Multi-Agent V2 工具面一致、
       主/成员/Guardian 模型与 effort 均为冻结值、并发/deadline 一致，唯一允许的工具差异是 RONDO 的 Team State。
-- [ ] pure/fake/loopback/replay 与小型合成 fixture 覆盖六槽编排、成功/有效失败、`policy_noncompliance`、infra 无效、
+- [x] pure/fake/loopback/replay 与小型合成 fixture 覆盖六槽编排、成功/有效失败、`policy_noncompliance`、infra 无效、
       请求前/请求后中断、settled 后本地归约失败、部分配对、幂等 resume、合同漂移、未知请求/usage 和原则性停止。
-- [ ] trace 选择器对两侧都只能选择唯一 `SessionSource::Exec` Root，并允许身份精确匹配的 Guardian bundle；双 Root、
+- [x] trace 选择器对两侧都只能选择唯一 `SessionSource::Exec` Root，并允许身份精确匹配的 Guardian bundle；双 Root、
       未知来源、身份不明或无法核清的逻辑槽位必须拒绝，Guardian 不进入产品团队行为指标。
-- [ ] 同一固定归档重复生成的 `team_view.json`、`team_report.html`、三题并列案例数据和总览保持字节确定；Codex Team State
+- [x] 同一固定归档重复生成的 `team_view.json`、`team_report.html`、三题并列案例数据和总览保持字节确定；Codex Team State
       为 `not_applicable`/`null`，字段缺失使用 Team Lens 既有四态与 reason code，不用零值冒充事实。
-- [ ] tracked lock、fixture、聚合和案例产物保持 body-free：不含 raw prompt/response、reasoning、agent message、命令或
+- [x] tracked lock、fixture、聚合和案例产物保持 body-free：不含 raw prompt/response、reasoning、agent message、命令或
       stdout/stderr、工具参数/结果正文、Fact 正文、密钥、隐藏推理或 raw trace。原始 trace、任务 workspace 与完整运行
       产物只留在 ignored `eval-data/plan-050/`。
-- [ ] 阶段 A 的普通入口不接触真实 provider。阶段 B 入口在缺少独立授权、精确预算、paid-ready 审查提交与本地启动条件时，
+- [x] 阶段 A 的普通入口不接触真实 provider。阶段 B 入口在缺少独立授权、精确预算、paid-ready 审查提交与本地启动条件时，
       必须在读取密钥、创建正式 receipt/ledger/run、发起网络请求或启动正式 Docker 任务前拒绝。
-- [ ] 只运行相关模块的必要测试。若未改 Rust，不运行 Cargo；若确需窄改 Rust，只通过共享 build-lock/watchdog 运行受影响
+- [x] 只运行相关模块的必要测试。若未改 Rust，不运行 Cargo；若确需窄改 Rust，只通过共享 build-lock/watchdog 运行受影响
       crate 的必要门禁，不扩大到全 workspace。
-- [ ] 执行者在 050 分支完成本地提交并保持工作树干净；独立审查者复核合同、离线证据、付费入口和 body-free 边界，给出
+- [x] 执行者在 050 分支完成本地提交并保持工作树干净；独立审查者复核合同、离线证据、付费入口和 body-free 边界，给出
       明确 `paid-ready` 或具体 `blocked` 结论，并列出阶段 B 的精炼启动清单。
-- [ ] 阶段 A 全程没有真实付费请求、费用、正式 paid receipt、正式结果身份或“阶段 B 已开始”的表述。
+- [x] 阶段 A 全程没有真实付费请求、费用、正式 paid receipt、正式结果身份或“阶段 B 已开始”的表述。
 
 付费 provider 的真实连通性若无法零费用证明，诚实留给阶段 B 第一组成对运行，不因此伪造绿色，也不额外增加 pilot。
 
@@ -314,13 +314,10 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 
 ### 当前工作
 
-- 阶段 A 实现、定向自检和 ignored rehearsal/loopback 证据已完成，当前等待本轮上下文独立的审查者复核；在该复核
-  明确通过前只称 `paid-ready-candidate`，不称最终 `paid-ready`。
+- 阶段 A 已通过上下文独立审查，结论为 `paid-ready`；阶段 B 未授权，当前停在预期授权门。
 
 ### 本任务剩余步骤
 
-- 提交阶段 A 候选，由上下文独立审查者复核合同、测试、离线证据、付费负门禁和 body-free 边界；真实 finding 窄修并
-  重跑，直至 `paid-ready` 或确认原则 blocker。
 - 仅在用户另行明确授权阶段 B 和实际费用上限后，串行运行六槽并完成结算、三份案例、总览和最终独立验收。
 - 阶段 B 最终完成后更新权威文档与历史记录，提交 050 分支；合并、推送和关闭继续等待用户授权。
 
@@ -330,14 +327,20 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 
 ### 当前验收状态
 
-- `paid-ready-candidate`：六槽 fake rehearsal 为 4 成功、2 有效失败、0 infra，确定性案例/总览完整；最终 loopback
+- `paid-ready`：六槽 fake rehearsal 为 4 成功、2 有效失败、0 infra，确定性案例/总览完整；最终 loopback
   namespace 为 `phase-a-final-v3`，两侧各 1 个本地回环 Root 请求，policy/tool/model 投影一致。
 - 定向回归共 218 项：216 通过、2 项因未提供既有真实 Plan 049 样本路径按预期跳过；无失败。范围覆盖 Plan 050、
   Plan 049 共享编排、预算代理、Terminal-Bench、Team Lens 与 Multi 工具面，未运行全量测试。
-- 前两轮独立审查复现的五项功能 finding 已窄修：Docker 资源硬停持久锁存、空成员或纯协作工具活动不再算真实协作、
-  loopback namespace 严格限制在本 campaign ignored 根、正式 recipe 接受合同允许的 `0.01–100.00 USD`；当前等待复审。
+- 三轮独立审查已通过；前两轮复现的五项功能 finding 已窄修：Docker 资源硬停持久锁存、空成员或纯协作工具活动不再
+  算真实协作、loopback namespace 严格限制在本 campaign ignored 根、正式 recipe 接受合同允许的 `0.01–100.00 USD`。
 - readiness 复算得到 6/6 terminal、无缺槽/半对，且 `eval-data/plan-050/paid/` 不存在。阶段 A 未运行真实 API、Docker、
-  Cargo、模型或全 workspace 测试，没有产生费用；最终结论仍待独立审查。
+  Cargo、模型或全 workspace 测试，没有产生费用。
+
+### 阶段 B 启动清单
+
+- 用户另行明确授权开始阶段 B，并给出 `0.01–100.00 USD` 的实际总上限；启动时确认可用余额不低于该上限。
+- 使用当前干净、独立审查通过的本地提交，复核 `phase-a-final` / `phase-a-final-v3` 证据与 safe resume prefix。
+- 明确确认本地 paid 条件；随后才通过共享 watchdog 核对 Docker/Windows `C:` 资源门并读取所需 secret，串行运行六槽。
 
 ### 交接边界
 

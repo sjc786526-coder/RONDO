@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-21（Local M4 已人判收口；RONDO Multi 明确委派三任务案例的阶段 A 已完成执行者自检、等待独立验收；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
+最后更新：2026-08-21（Local M4 已人判收口；RONDO Multi 明确委派三任务案例的阶段 A 已独立验收并 `paid-ready`，阶段 B 未授权；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -26,7 +26,7 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期、第二期 A/B/C 均已完成；Plan 050 明确委派三任务案例的阶段 A 已完成执行者自检，当前等待独立验收。阶段 B 的真实 API、Docker 和实际预算仍须另行授权。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期、第二期 A/B/C 均已完成；Plan 050 明确委派三任务案例的阶段 A 已独立验收并 `paid-ready`。阶段 B 的真实 API、Docker 和实际预算仍须另行授权。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
@@ -34,7 +34,7 @@
 ## 2. 下一工作包与顺序
 
 工作包 1、工作包 2（Plan 022）与 RONDO Multi 第二期 A/B/C 均已完成；Local 已收口且方向 1 挂起。
-当前工作包是 **RONDO Multi 明确委派三任务比较案例**：阶段 A 已完成执行者自检、等待独立验收；阶段 B 尚未授权。
+当前工作包是 **RONDO Multi 明确委派三任务比较案例**：阶段 A 已独立验收并 `paid-ready`；阶段 B 尚未授权。
 它既是小规模 comparative case study，也是产品展示；
 不估计总体成功率，也不把结果外推为模型的自然委派倾向。方向 0 首次 v7 canary 与上游基线升级仍是未排期待办。
 
@@ -91,7 +91,7 @@
   - **后置包 C — 主动委派收益对比：阶段 A/B 已完成。** Root/Guardian 多 bundle 已通过共同 selector 和只读
     recovery identity 关闭，旧首槽没有重放。固定六个 pilot 全部有效且 trace 可用，2 个成功、4 个有效任务失败、
     累计 `2.533684 USD`；两侧 Root 均未主动委派，因此 activation 阴性并按冻结合同未运行正式十题。
-  - **包 D — 明确委派三任务比较案例：阶段 A 已自检，待独立验收。** 冻结 Codex 与 RONDO 使用同一模型、effort、明确要求实质委派的
+  - **包 D — 明确委派三任务比较案例：阶段 A 已独立验收，`paid-ready`。** 冻结 Codex 与 RONDO 使用同一模型、effort、明确要求实质委派的
     developer policy、任务、并发与外部 verifier；三道精选任务为 `headless-terminal`、`sqlite-db-truncate` 和
     `extract-elf`，每题两侧各运行一次。外部任务结果与 Team Lens 协作轨迹共同构成案例，但不形成统计性总体提升
     结论。policy 只强制真实 collaboration、必要沟通与最终整合，不规定 Team State 工具、Event/Fact 数量或调用顺序。
