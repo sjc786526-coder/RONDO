@@ -1483,3 +1483,24 @@ pilot 任务未激活 Root 主动委派”，因此按预先冻结的停止门�
   事后追加有效 pilot、换题或强制 spawn 改写阴性结果。完整代码、运行、资源和未运行项见
   `plan/049-multi-proactive-delegation-eval-execplan.md` 与
   `agent_log/2026-08-20-231500-plan049-phase-b-final.md`。
+
+## RONDO Multi 明确委派三任务案例（Plan 050，2026-08-21）
+
+**状态**：阶段 A/B 已完成并通过修复后独立验收。冻结 Codex 与 RONDO Multi 在同一 `gpt-5.6-terra/high`、明确
+collaboration policy、任务、并发、deadline、Docker 和 task-native verifier 下完成三题六槽比较；唯一产品差异为
+RONDO Team State。结果只构成冻结三题的条件性案例，不估计总体成功率、自然委派率或 Team State 单因素因果收益。
+
+- C01 `sqlite-db-truncate` 与 C02 `headless-terminal` 两侧均 `completed`；C03 `extract-elf` 两侧均
+  `task_failed`。C01 RONDO 为 `collaboration_observed / not_observed`，C03 RONDO 为
+  `collaboration_observed / observed`，其余四槽为 `policy_noncompliance / not_observed`；外部结果优先，过程判读不证明
+  成员贡献内容质量或因果收益。
+- 正式 100 USD 账本共 13 attempts、165/165 settled requests。七个 relay 加密内容/流错误保留为 infra invalid；
+  六个有效槽位费用 `3.156021 USD`，含 12 个 unknown-usage 保守 reservation 的总账为 `30.307445 USD`，无悬空状态。
+- 原聚合遗漏 completed member-to-Root `send_message` 返回形态；窄修后仍独立要求 accepted Root spawn、实质成员活动和
+  typed contribution return。75 项定向测试为 73 通过、2 个约定 skip，37 个正式值通过 body-free/schema 校验，
+  finalizer 重入 digest 不变。
+- 修复候选 `f4854ec` 经干净上下文独立复验 PASS，无剩余 correctness finding。执行、失败复验、修复与最终复验报告分别见
+  `agent_log/2026-08-21-060000-plan050-phase-b-final.md`、
+  `agent_log/2026-08-21-062443-plan050-phase-b-reacceptance.md`、
+  `agent_log/2026-08-21-063528-plan050-phase-b-collaboration-return-remediation.md` 与
+  `agent_log/2026-08-21-064519-plan050-phase-b-collaboration-return-rereview.md`。
