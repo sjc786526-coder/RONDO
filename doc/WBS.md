@@ -199,7 +199,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | 第一、二期已完成；下一包为明确委派条件下的三任务比较案例 |
+| P5 | RONDO Multi 产品线 | 第一、二期已完成；明确委派三任务案例已完成付费执行与本地收口，待独立终验 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -210,7 +210,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Multi 二期 A | Team State 序列性质测试：在现有 Rust 测试体系内探索跨功能状态组合 | 测试 | 已完成（Plan 047） |
 | Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 已完成（Plan 048，零 hook） |
 | Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 已完成（Plan 049）：六个 pilot 均无 Root 主动委派，activation 阴性，正式十题不适用 |
-| Multi 明确委派案例 | 同一明确 collaboration policy 下的三任务跨产品比较与 Team Lens 展示 | 案例研究/产品展示 | 下一包；真实 API、Docker 与预算另行授权 |
+| Multi 明确委派案例 | 同一明确 collaboration policy 下的三任务跨产品比较与 Team Lens 展示 | 案例研究/产品展示 | 付费执行与本地案例收口已完成，待独立终验 |
 | 方向 0 首次 v7 正式 canary | 10 个 canary 的 Local/冻结 Codex 公平基线；条件加跑，不扩到 validation/holdout | 测评 | 已确认待办，不排期；不早于 Multi 第二期完成 |
 | 共享上游基线升级 | 选择任务启动时的目标上游版本，审查差异并同步两套产品与机器事实 | 工程 | 已确认待办，不排期；目标版本不预写死 |
 
