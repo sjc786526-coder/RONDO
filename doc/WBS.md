@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 后置 C 阶段 A 最终独立验收未通过、待窄修，阶段 B 未授权；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
+最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 后置 C 阶段 A 已通过独立验收并 `paid-ready`，阶段 B 未授权；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -33,11 +33,11 @@
 
 ## 2. 下一工作包与顺序
 
-工作包 1、工作包 2（Plan 022）均已完成；Local 已收口且方向 1 挂起。**当前执行焦点是 RONDO Multi
-第二期后置包 C**：当前先修复阶段 A 最终独立验收 findings 并重新验收；阶段 B activation pilot 尚未授权。
+工作包 1、工作包 2（Plan 022）均已完成；Local 已收口且方向 1 挂起。**当前路线是 RONDO Multi
+第二期后置包 C**：阶段 A 已通过独立验收并 `paid-ready`；阶段 B activation pilot 尚未授权。
 下方保留各方向的当前状态与边界。
 
-### 当前路线：Multi 第二期 C 阶段 A 验收整改
+### 当前路线：Multi 第二期 C 阶段 B 授权门
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
 - **3b RONDO Local**：**exact-token 普查（WP3b-A2）已完成并闭合**。
@@ -195,7 +195,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | 第一期及第二期 A/B 已完成并合入；C 阶段 A 最终验收整改中，付费执行未授权 |
+| P5 | RONDO Multi 产品线 | 第一期及第二期 A/B 已完成并合入；C 阶段 A `paid-ready`，付费执行未授权 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -205,7 +205,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Local M4 | 同一批冻结样本上正式比较 Sol / 未微调 Local / 微调后 Local，由人作采用/保留/停止决定 | 人判定 | 已完成（2026-08-16）：synthetic 130 与 holdout 16 分区盲评并解盲，人判为保留为实验 |
 | Multi 二期 A | Team State 序列性质测试：在现有 Rust 测试体系内探索跨功能状态组合 | 测试 | 已完成（Plan 047） |
 | Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 已完成（Plan 048，零 hook） |
-| Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 阶段 A 最终独立验收未通过、待窄修；阶段 B 未授权 |
+| Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 阶段 A 独立验收通过、`paid-ready`；阶段 B 未授权 |
 | 方向 0 首次 v7 正式 canary | 10 个 canary 的 Local/冻结 Codex 公平基线；条件加跑，不扩到 validation/holdout | 测评 | 已确认待办，不排期；不早于 Multi 第二期完成 |
 | 共享上游基线升级 | 选择任务启动时的目标上游版本，审查差异并同步两套产品与机器事实 | 工程 | 已确认待办，不排期；目标版本不预写死 |
 
