@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-21 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A/B 已完成；activation pilot 阴性，正式十题按合同未运行
+第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ 下一包：明确委派条件下的三任务比较案例
 
 ## 定位
 
@@ -99,7 +99,8 @@ mailbox、wait/resume/interrupt、工具执行、sandbox 与审批。本产品�
 
 ## 第二期：稳定性、可观测性与主动委派收益
 
-第二期由两个**并行工程包**和一个**后置测评包**组成。A/B/C 均已完成并通过验收，Multi 当前没有已排期的下一包。
+第二期由两个**并行工程包**和一个**后置测评包**组成。A/B/C 均已完成并通过验收；下一包不重开第二期，也不改写
+Plan 049 的 activation 阴性结果，而是进入明确要求 collaboration 的新条件区间。
 C 自身是一项完整任务，已按“无费用准备 → 单独授权后的付费执行”顺序完成两个阶段，没有把未验证设施直接带入付费运行。
 
 ### 并行工程包 A：Team State 序列性质测试
@@ -248,12 +249,65 @@ Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity
 4. 任务、轮数、模型、价格、预算、重试和统计口径在该测评自己的冻结 plan 中确定；未运行、未激活、infra 或
    样本不足必须按各自语义如实报告。
 
+## 下一任务包：明确委派三任务比较案例
+
+**定位**：这是一个三任务的小规模 comparative case study，同时也是产品展示。它不再询问模型是否会在软提示下自然
+委派，而是明确建立 collaboration 条件，比较真实委派发生后冻结 Codex 与 RONDO 的外部任务结果和协作过程。它不是
+Plan 049 的追加样本，也不估计有统计意义的总体成功率提升。
+
+### 研究问题与强化 policy
+
+- 两侧使用同一模型、effort、Multi-Agent V2 工具面和 developer policy；只有 RONDO 额外启用 Team State。
+- policy 必须明确要求采用多智能体方式完成任务，把适合独立推进的实质工作交给成员，并根据执行中新获得的信息进行
+  必要的沟通、调整与整合；Root 继续对最终正确性负责。精确文本与 hash 在执行 plan 冻结。
+- policy 只强制真实 collaboration，不替模型指定任务分解、成员角色、工具顺序或结果。不得要求必须发布 Event、route、
+  Fact、wake，也不得规定 Team State 调用次数或人为导演一条漂亮轨迹。
+- 没有真实 accepted spawn 的运行不得被解释为“委派后的协作案例”；RONDO 是否自然使用 Team State、使用多少以及是否
+  形成跨成员影响，都属于结果，不通过事后补写提示词修饰。
+
+### 精选任务
+
+候选只从本地已经冻结、具备 digest 镜像与外部 verifier 的 Terminal-Bench 2.1 canary 中选择。本包冻结三题：
+
+1. `db-wal-recovery`：并行的文件取证、修复假设和数据验证可能相互推翻，最接近“新事实改变全局方案”的协作链；
+2. `filter-js-from-html`：攻击面调查与实现/回归天然互相反馈，适合观察成员发现是否改变另一分支的方案；
+3. `headless-terminal`：交互程序、控制信号、启动文件、状态保持和后台任务形成多个实质关注点，最终必须统一到同一实现。
+
+三题在任何真实运行前冻结，不因结果难看临时换成更容易展示的任务。`sanitize-git-repo` 虽较稳定但更偏并行扫描，
+`openssl-selfsigned-cert` 与 `fix-git` 易形成仪式性拆分，其余本地候选的双向影响或展示价值弱于上述三题。
+
+### 比较与完成口径
+
+- 三题均由冻结 Codex 与 RONDO 各运行一次，任务 prompt、模型/effort、明确 collaboration policy、并发、deadline、
+  Docker 环境和外部 verifier 保持一致；运行顺序在 plan 中预先交错。
+- 外部任务终态是主要结果。Team Lens 同时展示 spawn、成员活动、communication/wait、工具与时间线；RONDO 额外展示
+  自然产生的 Event/Version/route/Fact 关系。可机械观察与人工解释必须分开，不能从一张漂亮轨迹图推出因果收益。
+- 每题形成一份两侧并列案例：任务结果、wall time、token/费用、主要工具活动和 Team Lens 报告；另汇总是否出现
+  “成员发现 → 团队传播 → 另一成员或 Root 调整 → 最终整合”的可观察链。没有该链也按真实结果报告。
+- 六个基础运行形成有效终态并完成 body-free 汇总、静态报告和独立验收后收口。有效任务失败属于案例结果，不因失败补跑；
+  infra 只按预冻结恢复规则处理。
+- 最终结论只适用于“相同明确 collaboration policy + 三道冻结任务”的条件性案例，不声称自然委派倾向、总体成功率、
+  统计显著性或普遍性能优势。
+
+### 边界与授权门
+
+- 复用 Plan 049 的执行、账本、恢复、Root/Guardian selector、原生 trace 与 Team Lens；只补新合同真正需要的窄接线，
+  不建立第二套 runner、trace、展示前端或大型 benchmark。
+- 本包不新增 delegation scheduler，不改变 Team State 产品语义，也不把“提高第一次 spawn 率”立为产品功能任务。
+- 原始 trace、prompt/response 与工具正文继续作为本地敏感资产；tracked 结果保持 body-free，冻结 Codex 源码不修改。
+- 普通设施问题可在不改变任务、policy、公平合同和有效结果的前提下自主修复、resume 与重跑；不得把有效任务失败当 infra
+  反复采样，也不得事后改变题目或提示词。
+- 真实 API、Docker、具体轮数与宽松总预算必须在执行 plan 中一次冻结并另获明确授权。重型 Cargo、Docker、真实本地模型
+  与付费 API 继续遵守项目全局串行和资源门禁。
+
 ## 并行与交接边界
 
 - A、B 已从同一基线在独立 worktree 完成并统一整合；其历史写集边界与验收只保留在各自冻结 plan。
 - C 的阶段 A/B 属于同一任务合同并严格串行；阶段 A 退出前不得启动阶段 B，阶段 B 未获明确授权不得产生真实 API 费用。
 - C 若分派多个执行者，必须冻结各自 worktree/写集并明确彼此存在；重型 Cargo、Docker、真实本地模型与付费 API
   继续按仓库资源门禁全局串行。
+- 新三任务案例是一个统一任务；准备、真实运行、Team Lens 汇总与展示不拆成互不相干的 demo/测评任务。若内部使用多个
+  执行者，仍须冻结工作树和写集，且任何重型或真实付费资源全局串行。
 
 ## 候选池（不排期，由真实运行证据触发）
 

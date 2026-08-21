@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-20（Local M4 已人判收口；RONDO Multi 后置 C 阶段 A/B 已完成，固定 activation pilot 未观察到 Root 主动委派，按合同未运行正式十题；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
+最后更新：2026-08-21（Local M4 已人判收口；RONDO Multi 第二期全部完成，下一包进入明确委派条件下的三任务比较案例；方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -26,17 +26,18 @@
 | 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
-| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期、第二期 A/B 与后置 C 均已完成；C 的六个固定 pilot 全部形成可信终态，但两侧均未主动委派，故 activation 阴性并按冻结合同未运行正式十题。 |
+| 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期、第二期 A/B/C 均已完成；C 在共同软 policy 下得到可信的零委派结果。下一包不再重复测自然 activation，而是在两侧相同的明确协作要求下，用三道精选任务比较委派已经发生后的外部结果与 Team Lens 轨迹。 |
 
 当前不再维护 v6—v22 的逐轮过程、请求数和费用流水；这些历史只保留在
 `doc/WBS-COMPLETED.md`、对应 plan、agent log 与冻结结果中。
 
 ## 2. 下一工作包与顺序
 
-工作包 1、工作包 2（Plan 022）与 RONDO Multi 第二期后置包 C 均已完成；Local 已收口且方向 1 挂起。
-当前没有已排期执行包；方向 0 首次 v7 canary 与上游基线升级仍是未排期待办。下方保留各方向的当前状态与边界。
+工作包 1、工作包 2（Plan 022）与 RONDO Multi 第二期 A/B/C 均已完成；Local 已收口且方向 1 挂起。
+当前下一包是 **RONDO Multi 明确委派三任务比较案例**：它既是小规模 comparative case study，也是产品展示；
+不估计总体成功率，也不把结果外推为模型的自然委派倾向。方向 0 首次 v7 canary 与上游基线升级仍是未排期待办。
 
-### 当前路线：暂无已排期执行包
+### 当前路线：Multi 明确委派三任务比较案例
 
 - **3a 测评设施**：按需要继续维护，但不恢复已挂起的 E-A。
 - **3b RONDO Local**：**exact-token 普查（WP3b-A2）已完成并闭合**。
@@ -89,9 +90,14 @@
   - **后置包 C — 主动委派收益对比：阶段 A/B 已完成。** Root/Guardian 多 bundle 已通过共同 selector 和只读
     recovery identity 关闭，旧首槽没有重放。固定六个 pilot 全部有效且 trace 可用，2 个成功、4 个有效任务失败、
     累计 `2.533684 USD`；两侧 Root 均未主动委派，因此 activation 阴性并按冻结合同未运行正式十题。
+  - **下一包 D — 明确委派三任务比较案例：待实施。** 冻结 Codex 与 RONDO 使用同一模型、effort、明确要求实质委派的
+    developer policy、任务、并发与外部 verifier；三道精选任务为 `db-wal-recovery`、`filter-js-from-html` 和
+    `headless-terminal`，每题两侧各运行一次。外部任务结果与 Team Lens 协作轨迹共同构成案例，但不形成统计性总体提升
+    结论。policy 只强制真实 collaboration、必要沟通与最终整合，不规定 Team State 工具、Event/Fact 数量或调用顺序。
 
-包 C 的公平合同、判读边界和两阶段细节见 Multi 子 WBS。重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源
-门禁全局串行；阶段 A 不得产生真实 API 费用。Local 没有已排期的下一工作包，方向 1 继续挂起。
+新包 D 的任务目标、题目选择与判读边界见 Multi 子 WBS。真实 API、Docker、任务轮数与宽松总预算须在执行 plan 中冻结并
+单独授权；重型 Cargo、Docker、真实本地模型加载与付费 API 仍按资源门禁全局串行。Local 没有已排期的下一工作包，
+方向 1 继续挂起。
 
 ### 已确认待办（不排期）
 
@@ -117,13 +123,13 @@
 | 0 | 量化测评基准 | Local | 公平比较设施已闭合；首次最小 v7 正式 canary 已确认、不排期 | 项目顺序不早于 Multi 第二期完成；执行时另获 API/Docker 授权；E-A 挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
-| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一期、第二期 A/B 与 C 均已完成 | C 的 activation pilot 阴性；正式十题按合同不适用 |
+| 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一、二期已完成；明确委派三任务比较案例为下一包 | 另行冻结执行 plan，并取得真实 API/Docker/预算授权 |
 
-- **Local 与 Multi 地位相同**。Local 已收口，Multi 第一期与第二期均已完成；当前没有已排期路线。工程任务可以并行，
-  重型任务仍因资源约束全局串行。
+- **Local 与 Multi 地位相同**。Local 已收口；Multi 第一、二期已完成，明确委派三任务比较案例是当前路线。工程任务可以
+  并行，重型任务仍因资源约束全局串行。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
-- Multi 三个任务验证 `multidev/` 的正确性、可观测性与主动协作；方向 0 面向 `mydev/` 的内核/
-  行为优化基线。二者只共享排期、API 预算与 Docker/构建资源串行关系，结果不能互相替代。
+- Multi 新包只研究明确委派条件下的协作过程与外部结果；方向 0 面向 `mydev/` 的内核/行为优化基线。二者只共享排期、
+  API 预算与 Docker/构建资源串行关系，结果不能互相替代。
 - 方向 2 的真实 `E_final` 必须按稳定语义哈希切成互斥 `seed` / `holdout`，真实证据本身不得进入训练集。
 
 ## 4. 仓库与产品线结构
@@ -194,7 +200,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | P2 | 公平比较设施闭合、B4—B7、L2a/L7 + 12k model-backed（收口 Local M3）、L5a 教师标签与 L3/L4 未微调 baseline | 已完成 |
 | P3 | L5b 合成训练数据、L6 微调，收口为 Local M4 | 已完成：Local M4 人判结论为保留为实验 |
 | P4 | harness 优化迭代 | **挂起，不排期** |
-| P5 | RONDO Multi 产品线 | 第一期、第二期 A/B 与 C 均已完成；C 的 activation pilot 阴性，正式十题按合同未运行 |
+| P5 | RONDO Multi 产品线 | 第一、二期已完成；下一包为明确委派条件下的三任务比较案例 |
 
 | 里程碑 | 验收口径 | 性质 | 状态 |
 |---|---|---|---|
@@ -205,6 +211,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Multi 二期 A | Team State 序列性质测试：在现有 Rust 测试体系内探索跨功能状态组合 | 测试 | 已完成（Plan 047） |
 | Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 已完成（Plan 048，零 hook） |
 | Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 已完成（Plan 049）：六个 pilot 均无 Root 主动委派，activation 阴性，正式十题不适用 |
+| Multi 明确委派案例 | 同一明确 collaboration policy 下的三任务跨产品比较与 Team Lens 展示 | 案例研究/产品展示 | 下一包；真实 API、Docker 与预算另行授权 |
 | 方向 0 首次 v7 正式 canary | 10 个 canary 的 Local/冻结 Codex 公平基线；条件加跑，不扩到 validation/holdout | 测评 | 已确认待办，不排期；不早于 Multi 第二期完成 |
 | 共享上游基线升级 | 选择任务启动时的目标上游版本，审查差异并同步两套产品与机器事实 | 工程 | 已确认待办，不排期；目标版本不预写死 |
 
