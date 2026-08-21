@@ -1,7 +1,7 @@
 # Plan 050：明确委派三任务比较案例 ExecPlan
 
 > 本计划是 Plan 050 的稳定任务合同，同时覆盖阶段 A 与阶段 B。
-> 阶段 A 已完成并通过独立复验。阶段 B 的六槽付费执行、本地影响链判读和确定性案例已完成，当前等待独立最终验收。
+> 阶段 A/B 均已完成并通过独立验收；本计划冻结为任务合同与历史记录，后续路线只在 WBS 维护。
 > 除“当前状态”和“关键决策记录”外，其他部分在执行期间默认不得修改。
 > 如果必须改变目标、三道任务、共同 policy、公平合同、范围、硬约束、最高预算或完成标准，应暂停执行并请求用户确认；
 > 普通实现选择、离线 fixture/配置窄修、基础设施修复、从可信状态 resume 和合同内重跑不属于合同变更。
@@ -78,7 +78,7 @@ RONDO Multi 启用 Team State。
       或只产生仪式性成员活动，标为 `policy_noncompliance`。真实委派但 verifier 失败仍是有效案例。
 - [x] 最终报告只作三题条件性案例解释；外部 verifier 是主要结果，Team Lens 是过程解释。Event/Fact/route/wake 数量、
       participant 数量或漂亮调用顺序都不能替代任务结果或证明因果收益。
-- [ ] 独立最终验收确认六槽/停止状态、结算、报告和 body-free 边界一致；按实际状态精炼更新 WBS、WBS-COMPLETED、
+- [x] 独立最终验收确认六槽/停止状态、结算、报告和 body-free 边界一致；按实际状态精炼更新 WBS、WBS-COMPLETED、
       本计划与 agent log。执行者只提交 050 工作树；合并、推送、关闭或分支重命名均等待用户另行批准。
 
 ## 2. 范围
@@ -315,7 +315,7 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 ### 当前工作
 
 - 阶段 B 已按冻结顺序完成六个有效槽位与本地 finalization：4 `completed`、2 `task_failed`，六槽 Root trace 均
-  `available`；当前等待独立最终验收。
+  `available`；独立最终验收在 `b2cdaa9` 上通过，无剩余 correctness finding。
 - 13 个 attempts 中 7 个因 relay 返回 `invalid_encrypted_content` 或流读取错误保持为 `infra_failed`，其余 6 个为
   不可替换的有效终态。165 个请求均已结算，100 USD 正式账本保守费用为 `30.307445 USD`，无悬空 reservation。
 - 三份案例与总览已确定性生成：5 槽 `policy_noncompliance` / `not_observed`；仅 RONDO `extract-elf` 形成
@@ -323,12 +323,11 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 
 ### 本任务剩余步骤
 
-- 在 clean 执行候选提交上完成独立最终验收；若发现真实 correctness 问题，先窄修、定向验证并重新验收。
-- 验收通过后更新完成历史并提交 050 分支；合并、推送和关闭继续等待用户授权。
+- 无。计划已完成并冻结；合并、推送、关闭和后续路线均不在本任务授权内。
 
 ### 阻塞项
 
-- 无已知技术 blocker；仅等待独立最终验收。
+- 无。
 
 ### 当前验收状态
 
@@ -348,16 +347,16 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
   `0d373519342dcf922986977f9afdf6790c8248943bf78ee86dfb30590a51931d`，overview 为
   `dcd2d7419285633057018a401b832f155a1d88e64ab691961c59d669e569f859`。
 
-### 阶段 B 启动清单
+### 阶段 B 实际启动条件
 
-- 用户另行明确授权开始阶段 B；实际总上限采用 `100.00 USD`，启动时确认可用余额不低于该数。
-- 使用当前干净、独立审查通过的本地提交，复核 `phase-a-final` / `phase-a-final-v3` 证据与 safe resume prefix。
-- 明确确认本地 paid 条件；随后才通过共享 watchdog 核对 Docker/Windows `C:` 资源门并读取所需 secret，串行运行六槽。
+- 用户明确授权阶段 B，确认可用余额 `200.00 USD`；正式 receipt 绑定 `100.00 USD` 上限。
+- 使用 clean `f06bfaa`，复核 `phase-a-final` / `phase-a-final-v3` 与 safe resume prefix 后启动。
+- Docker/Windows `C:`、共享 watchdog、密钥布尔门和本地 provider 投影均在正式请求前通过；六槽全局串行。
 
 ### 交接边界
 
-- 阶段 A 完成后本计划仍保持为同一 A/B 合同，只更新当前状态与必要决策；阶段 B 必须再次获得用户授权。
-- Plan 050 最终完成后冻结本计划；后续路线只链接 WBS，不在本计划继续规划。
+- Plan 050 已完成并冻结；后续路线只链接 WBS，不在本计划继续规划。
+- 050 工作树只保留本地提交；合并、推送、关闭或分支重命名等待用户另行授权。
 
 ## 6. 关键决策记录
 

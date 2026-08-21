@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-21 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 付费执行与本地案例收口已完成，等待独立最终验收
+第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 已完成并通过独立最终验收
 
 ## 定位
 
@@ -251,7 +251,7 @@ Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity
 
 ## 当前任务包：明确委派三任务比较案例
 
-**状态：Plan 050 阶段 B 六槽、结算与三份案例已完成，等待独立最终验收。** 六个有效槽位为 4 `completed`、
+**状态：Plan 050 阶段 A/B 已完成并通过独立验收。** 六个有效槽位为 4 `completed`、
 2 `task_failed`，六份 Root trace 均可归约；C01/C02 两侧通过，C03 两侧失败。五槽为
 `policy_noncompliance / not_observed`，仅 RONDO `extract-elf` 为 `collaboration_observed / observed`；该操作性
 影响链不证明成员贡献内容质量，也没有改变外部失败结果。
@@ -259,6 +259,7 @@ Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity
 正式 100 USD 账本共 13 attempts、165 个已结算请求：7 个 relay 加密内容/流错误保留为 infra invalid，六个有效槽位费用
 `3.156021 USD`，含未知 usage 保守 reservation 的总账 `30.307445 USD`。三份案例与总览已由本地-only finalizer
 确定性生成；无缺槽、半对、悬空 reservation 或 Docker 资源。最终结论仍只适用于冻结的三题与明确 collaboration policy。
+独立终验确认六槽、账本、影响链、body-free、digest 与状态文档一致，无剩余 correctness finding；当前无已排期后续包。
 
 **定位**：这是一个三任务的小规模 comparative case study，同时也是产品展示。它不再询问模型是否会在软提示下自然
 委派，而是明确建立 collaboration 条件，比较真实委派发生后冻结 Codex 与 RONDO 的外部任务结果和协作过程。它不是
