@@ -342,28 +342,31 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       证据见 `agent_log/2026-08-20-210151-plan049-phase-a-trace-reason-independent-acceptance.md`。
 - [x] 已用专用异常类型和固定 body-free code `non_infra_terminal_missing_trace` 关闭误报；现有四态跨重启矩阵同时
       断言 JSONL 与 `run.json` 原因，Plan 049 32 项通过。共享 runner/M-5 与 Team Lens 未改，按审查范围不重复运行，
-      等待 clean commit 上的独立复验。
+      既有 144/25 项结果保持适用。
+- [x] 全新上下文的独立审查者在 clean `7826df0d856ad166c18bf63052a496203b63e8bc` 上复核四态原因码、ledger reopen、
+      body-free 与相邻分类语义，结论 PASS；阶段 A 恢复为 `paid-ready`，阶段 B 仍未授权。
 
 ### 当前工作
 
-- 阶段 A finding 已在本地关闭并通过定向门禁；独立复验前仍保持 `blocked`。阶段 B 保持未授权。
+- 阶段 A finding 已关闭并通过独立验收，当前 `paid-ready`。阶段 B 保持未授权。
 
 ### 本任务剩余步骤
 
-1. 提交当前窄修并在 clean HEAD 上独立复验；真实 finding 继续在同一分支闭环。
-2. 修复验收通过后，仍只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额，才可创建正式 activation identity 并执行固定 pilot/正式任务。
-3. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额后，才可创建正式 activation identity 并执行固定
+   pilot/正式任务。
+2. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 当前本地实现无已知 correctness blocker，但独立复验完成前阶段 A 仍为 `blocked`。
+- 阶段 A 无已知 correctness blocker，独立验收结论为 `paid-ready`。
 - 阶段 B 仍因尚未授权及缺少明确开始动作、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
 
 ### 当前验收状态
 
 - pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；v5 loopback
   保存实际 V2 工具投影，v4 rehearsal 的 archive/ledger/aggregate 继续通过确定性 readiness。
-- 整改后的 Plan 049 32 项通过；本轮未改共享 runner/M-5 或 Team Lens，144/25 项按独立审查要求未重复运行。
+- 整改后的 Plan 049 32 项通过且独立审查复跑结果一致；本轮未改共享 runner/M-5 或 Team Lens，144/25 项按审查要求
+  未重复运行。
 - 未运行 Docker、Cargo、真实 API、本地模型、付费测评或全量测试；未创建正式 activation receipt、正式账本或
   正式 run/result identity。
 

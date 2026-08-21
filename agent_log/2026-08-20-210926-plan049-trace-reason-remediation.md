@@ -18,4 +18,5 @@
 
 本轮未改共享 runner/M-5、Team Lens 或 readiness，按独立审查范围未重复运行 144/25/ready。未运行真实 API、Docker、
 Cargo、付费操作、完整数据集或全 workspace；未创建正式 paid namespace、receipt、账本或 run/result identity。阶段 B
-仍未授权。
+仍未授权。全新上下文的独立审查者在 clean `7826df0d856ad166c18bf63052a496203b63e8bc` 上复跑 2/32 项门禁并复核
+JSONL、`run.json`、resume、body-free 与相邻分类语义，结论 PASS；阶段 A 恢复为 `paid-ready`。
