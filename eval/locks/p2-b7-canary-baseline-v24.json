@@ -1,0 +1,192 @@
+{
+  "schema_version": 7,
+  "campaign_id": "p2-b7-canary-baseline-v24",
+  "batch_id": "p2-b7-canary-v24",
+  "run_id_date": "20260821",
+  "run_id_sequence_base": 500000322,
+  "taskset_sha256": "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b",
+  "canary_catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf",
+  "terminal_bench_commit": "ffccbe05ee73a9d59518217f294ad711bda39304",
+  "selected_profile": {
+    "provider": "relay",
+    "provider_api": "responses",
+    "provider_profile_sha256": "cd0903dca99dba2ffb7a742f3dc8d5a2e7c89f804d243d93c19c1fb4837eb2b4",
+    "provider_endpoint_sha256": "349d8f7aeba75e4610bca5db1c0c294e04c1bdaf5408e44a7753e5c78ac197a9",
+    "main_model": "gpt-5.6-terra",
+    "main_effort": "medium",
+    "guardian_model": "gpt-5.6-terra",
+    "guardian_effort": "low",
+    "requested_main_model": "gpt-5.6-terra",
+    "effective_main_model": "gpt-5.6-terra",
+    "requested_guardian_model": "gpt-5.6-terra",
+    "effective_guardian_model": "gpt-5.6-terra",
+    "main_pricing": {
+      "model_id": "gpt-5.6-terra",
+      "input_usd_per_million": "2",
+      "cached_input_usd_per_million": "0.2",
+      "output_usd_per_million": "12",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-21",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+    },
+    "guardian_pricing": {
+      "model_id": "gpt-5.6-terra",
+      "input_usd_per_million": "2",
+      "cached_input_usd_per_million": "0.2",
+      "output_usd_per_million": "12",
+      "long_context_threshold_tokens": "272000",
+      "long_context_input_multiplier": "2",
+      "long_context_output_multiplier": "1.5",
+      "cache_write_input_multiplier": "1.25",
+      "price_snapshot_date": "2026-08-21",
+      "price_source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra"
+    },
+    "provider_max_attempts": 5,
+    "provider_retry_backoff_seconds": 1.0,
+    "provider_unbilled_retry_statuses": [
+      429,
+      500,
+      502,
+      503,
+      504
+    ],
+    "max_guardian_logical_requests": 3
+  },
+  "bundles": {
+    "rondo": {
+      "manifest_path": "eval-data/bin/rondo/54f62e5f7e86a7ab0d4f8d788eafec7176809395-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "de414d3f53f874108fa92d827b272ad9cc542f8a5859f90916d252fdd9853d83",
+      "source_commit": "54f62e5f7e86a7ab0d4f8d788eafec7176809395"
+    },
+    "codex": {
+      "manifest_path": "eval-data/bin/codex/rust-v0.147.0-be6e8eac029b183056b7e4402879f15d2c85f61b-x86_64-unknown-linux-musl-runtime-bundle/manifest.json",
+      "manifest_sha256": "e13a9d0fe8c51ab09ea4552749afb437db6915eb2b069291c918ebf8075b5981",
+      "source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b"
+    }
+  },
+  "no_api_seccomp": {
+    "profile_path": "eval/seccomp/plan008-userns-minimal-v0.2.3.json",
+    "source_sha256": "9c5198e529f03d38babe9f270f663fa6867bda4e4d14a37a1f6680179d9bbd2f",
+    "effective_sha256": "a67068e2712d6dd8168d96c71e5e46df2ec74e1ef7c6e49bf54447c5a12fa3bf"
+  },
+  "budget": {
+    "campaign_cap_usd": "400.000000",
+    "prior_estimated_usd": "0.000000",
+    "run_cap_usd": "40.000000",
+    "max_run_slots": 321,
+    "maximum_legal_request_reservation_usd": "7.554000",
+    "actual_usd": null,
+    "task_budget_id": "plan-051-direction0-schema-v7-canary",
+    "task_budget_cap_usd": "400.000000",
+    "task_budget_prior_estimated_usd": "0.000000"
+  },
+  "baseline": {
+    "base_rounds": [
+      "aa-rondo-1",
+      "aa-rondo-2",
+      "ab-rondo-1",
+      "ab-codex-1"
+    ],
+    "max_sigma": 2,
+    "max_remaining_infra_per_round": 2,
+    "mechanical_circuit_breaker_tasks": 3,
+    "mechanical_failure_categories": [
+      "provider_response_integrity",
+      "docker_runtime",
+      "guardian_runtime",
+      "publication_integrity",
+      "harness_runtime",
+      "budget_capacity",
+      "operator_interruption"
+    ],
+    "minimum_common_valid_tasks": 8,
+    "conditional_repeats_per_side": 2,
+    "docker_concurrency": 1,
+    "api_max_retries": 0,
+    "base_replacement_policy": "cross_identity_infra_only_continuation",
+    "max_base_attempts": 4,
+    "max_conditional_attempts": 4,
+    "same_category_diagnosis_attempts": 2,
+    "task_local_reproducible_infra_attempts": 3,
+    "provider_response_integrity_circuit_breaker": false,
+    "upstream_timeout_seconds": "180.000",
+    "timeout_compatibility": "monotonic_extension",
+    "concurrent_guardian_capacity_admission": "main_plus_guardian_max_reservation",
+    "continuation_compatibility": "fair_comparison_contract_v1",
+    "guardian_evidence_input_scanning": "exact_runtime_secret_then_structured_untrusted_input",
+    "provider_terminal_diagnostics": "bounded_protocol_facts_v1",
+    "campaign_ledger_capacity": "authorized_remaining_cap_up_to_1600_usd",
+    "execution_order": "task_interleaved",
+    "assessment_layers": [
+      "aa_consistency",
+      "cross_side",
+      "directional"
+    ],
+    "conditional_aggregation": "strict_majority",
+    "shared_model_catalog": "both_sides_load_one_artifact",
+    "task_independent_request_preflight": "required_before_upstream"
+  },
+  "continuation": [],
+  "comparison": {
+    "catalog_identity": {
+      "guardian_model": "gpt-5.6-terra",
+      "main_model": "gpt-5.6-terra",
+      "model_slugs": [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.2",
+        "codex-auto-review"
+      ],
+      "override_target_slug": "gpt-5.6-terra",
+      "projection_algorithm": "full_catalog_with_auto_review_override",
+      "projection_version": 2,
+      "sha256": "497a82a266de677c718122441e1609bda8caea853afc66ad4f01962d5ae1c23f",
+      "sources": [
+        {
+          "blob_id": "fef0db08bd82538130176b0987aa2ece54fb2842",
+          "commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+          "path": "codex-rs/models-manager/models.json",
+          "side": "upstream"
+        },
+        {
+          "blob_id": "fef0db08bd82538130176b0987aa2ece54fb2842",
+          "commit": "54f62e5f7e86a7ab0d4f8d788eafec7176809395",
+          "path": "mydev/codex-rs/models-manager/models.json",
+          "side": "rondo"
+        }
+      ]
+    },
+    "comparison_conditions": {
+      "catalog_artifact_sha256": "497a82a266de677c718122441e1609bda8caea853afc66ad4f01962d5ae1c23f",
+      "eval_harness_commit": "2d3727c00d16da1cecf6ac30d00532376dc1ca6a",
+      "projection_version": 2,
+      "provider_profile_sha256": "cd0903dca99dba2ffb7a742f3dc8d5a2e7c89f804d243d93c19c1fb4837eb2b4",
+      "task_image_digests": {
+        "terminal-bench/db-wal-recovery": "sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",
+        "terminal-bench/extract-elf": "sha256:6932e4cb318464307eacd497ef8dc617eaf551b6a90231f815ec0b911895cfed",
+        "terminal-bench/filter-js-from-html": "sha256:92acda0f124b988036a6f426ce0bc47fac19f5efe9fc5e6ea3ea52ccb075d0a4",
+        "terminal-bench/fix-git": "sha256:389b9c8247610c2c5be080b1ac00429007c2c69bf57f7f26c79f0f75ba2d5c74",
+        "terminal-bench/headless-terminal": "sha256:eb7e209672bf6cef2785fafd9e13509b10626c327bcc2b37f5bf40ca83eaf3aa",
+        "terminal-bench/openssl-selfsigned-cert": "sha256:4c948a4e630af2435ae0a19108fc0814a946ac2fa29a512469e0fc77b38c8c12",
+        "terminal-bench/polyglot-c-py": "sha256:0f1c3b7816d70cf5551573fd6aeef76893f2ae3000be2419997b6871b5d987ed",
+        "terminal-bench/sanitize-git-repo": "sha256:4b5234da5bb0d67f3b0bf8db40a2883c07a5219f62b64c2bf9ff1ac84cd0f672",
+        "terminal-bench/sqlite-db-truncate": "sha256:aabac93c93bd1f310e6a6fb893911d7735026ed18491c72133c9196a09092ca4",
+        "terminal-bench/vulnerable-secret": "sha256:61ebb40454dd103aa2f7e71ad6dafd91cf2b301e6bb07e69d5b472412d1ee15b"
+      },
+      "upstream_timeout_seconds": "180.000"
+    },
+    "product": "rondo-local",
+    "repeat_contract": {
+      "aggregation": "strict_majority",
+      "frozen_after": "pilot",
+      "repeats_per_task": 3
+    }
+  }
+}
