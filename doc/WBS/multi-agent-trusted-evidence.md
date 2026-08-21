@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-20 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A 独立验收通过、`paid-ready`，阶段 B 未授权
+第一期已完成并合入 `main` ｜ 第二期 A/B 已完成 ｜ C 阶段 A 独立验收通过；阶段 B activation pilot 当前 `blocked`
 
 ## 定位
 
@@ -201,8 +201,10 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 ### 后置测评包 C：主动委派收益对比
 
 **依赖**：A、B 均已完成，Team Lens 的跨产品共有字段与 RONDO 专有字段已可用。C 是一个计划与任务合同，顺序分为
-阶段 A 和阶段 B；阶段 A 的本地无费用实现、验收整改与离线证据已通过独立验收，当前 `paid-ready`；
-阶段 B 的真实 API 开始动作仍须单独明确授权。
+阶段 A 和阶段 B；阶段 A 的本地无费用实现、验收整改与离线证据已通过独立验收。阶段 B 已获明确授权并按
+100 USD 硬上限启动固定 activation pilot；首个 Codex 槽得到非 infra `completed/reward=0.0`，Root 与 Guardian 各自的
+原生 trace bundle 也均已生成，但复用的单 bundle 读取器拒绝同一 trace root 下的两束证据，正式 identity 因而锁存
+`principled_stopped/non_infra_terminal_missing_trace`。该槽不得替换，其余 pilot 与正式十题未启动，当前阶段 B `blocked`。
 
 #### 阶段 A：无费用准备（独立验收通过，`paid-ready`）
 
@@ -215,7 +217,7 @@ Team State 现有 `team_inspect`、dump/log/stats 用于解释 canonical 状态�
 - 阶段 A 的退出条件必须给出明确的 paid-ready/blocked 结论和阶段 B 启动清单，但不得创建“已开始付费”的 receipt、
   请求或结果身份。付费 provider 连通性若无法在零费用条件下证明，应诚实留作阶段 B 首个小型 activation pilot 的门。
 
-#### 阶段 B：付费测评与观测（尚未授权）
+#### 阶段 B：付费测评与观测（activation pilot 已原则性停止）
 
 - 获得明确开始授权后，先运行小规模 activation pilot，确认两侧收到冻结策略、原生 trace 可读且至少形成可解释的主动
   委派观测，再进入冻结的成对任务；不为追求激活临时强制 spawn 或改写自然任务。

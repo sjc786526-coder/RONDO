@@ -348,18 +348,28 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
 
 ### 当前工作
 
-- 阶段 A finding 已关闭并通过独立验收，当前 `paid-ready`。阶段 B 保持未授权。
+- 阶段 A finding 已关闭并通过独立验收。用户已授权阶段 B、确认 100 USD 累计硬上限及可用余额不少于该上限；
+  固定 activation pilot 已在验收提交 `2b30b8e5e2fdc819c5d49fc05c6adfaae48aac02` 上启动。
+- 首槽 `pilot-p01-codex` 的 a01 得到 Terminal-Bench 非 infra 终态 `completed/reward=0.0`，15 个请求均按真实 usage
+  结算，共 `0.262759 USD`。事后只读诊断确认 trace 实际完整生成了一个 Root Exec bundle 和一个 Guardian bundle；
+  Guardian 的独立 session 不继承 Root writer，因而在同一 root 新建第二束，而复用的 `find_trace_bundle` 硬要求恰好一束，
+  将两束证据拒绝后才被 formal 层折叠为 missing-trace。该槽已持久发布
+  `principled_stopped/non_infra_terminal_missing_trace`；没有 a02、没有启动其余五个 pilot 槽或正式十个配对。
+- 当前正式 identity 因已锁存的首槽原则性停止而 fail-closed；activation pilot 未通过，阶段 B `blocked`。诊断没有改写
+  receipt、账本、run marker 或 raw trace，也没有购买替代样本。
 
 ### 本任务剩余步骤
 
-1. 只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额后，才可创建正式 activation identity 并执行固定
-   pilot/正式任务。
-2. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 不得对当前正式 identity 清除停止、购买替代 attempt 或启动 formal。若未来继续，须先以明确授权的恢复方案处理
+   已锁存状态与 harness identity；不能把当前已付费 a01 改标 infra，也不能再次购买该槽样本。
+2. 本次 blocked 状态仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 无已知 correctness blocker，独立验收结论为 `paid-ready`。
-- 阶段 B 仍因尚未授权及缺少明确开始动作、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
+- 阶段 A 无已知 correctness blocker，独立验收结论保持 `paid-ready`。
+- 阶段 B 的当前正式 identity 已原则性停止：首个非 infra 任务的 Root/Guardian trace 均已生成且各自可归约，但现有
+  单 bundle locator 无法选择唯一 Root bundle，故未形成正式 Team Lens/activation 记录。按固定样本合同不能重跑该槽，
+  formal 未解锁。
 
 ### 当前验收状态
 
@@ -367,8 +377,10 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
   保存实际 V2 工具投影，v4 rehearsal 的 archive/ledger/aggregate 继续通过确定性 readiness。
 - 整改后的 Plan 049 32 项通过且独立审查复跑结果一致；本轮未改共享 runner/M-5 或 Team Lens，144/25 项按审查要求
   未重复运行。
-- 未运行 Docker、Cargo、真实 API、本地模型、付费测评或全量测试；未创建正式 activation receipt、正式账本或
-  正式 run/result identity。
+- 阶段 B 实际运行了一个 Docker + 真实 API pilot 槽；创建了正式 receipt、账本和 a01 result identity，费用
+  `0.262759 USD`。请求 15/15 均为 `usage_priced`，无未结算 reservation 或未知 usage；Docker 前后均为 26 images / 11.5 GB、
+  0 containers、0 volumes、0 build cache，Windows C: 可用 `183578390528 -> 183580635136` bytes。
+- 未运行 Cargo、本地模型、正式十题、完整数据集或全 workspace；pilot 其余五槽与 formal 均未运行。
 
 ### 交接边界
 
@@ -390,3 +402,4 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
 | 009 | 不继承 M-5 的 Codex V1 / RONDO V2 非对称，阶段 A 为两侧建立共同 V2 + trace 接线 | Plan 049 比较主动委派，工具面与观测链必须公平一致 | eval adapter/runner | 已采纳 |
 | 010 | 正式路径复用现有 Terminal-Bench core 与持久预算账本，以 settled/execution/publication 分层标记恢复 | 归档或报告失败不得再次发送已结算请求，也不能建立第二套 runner | 阶段 A/B | 已采纳 |
 | 011 | 生产 paid CLI 复用共享 watchdog 与 Docker counter；未给全套精确启动参数时在 wrapper 前拒绝 | 阶段 B 获授权后应直接启动，不再临时拼装入口；阶段 A 仍不可触碰重型资源 | 阶段 A/B | 已采纳 |
+| 012 | 首个 paid pilot 槽为非 infra 终态；Root 与 Guardian 各写一束 trace，被单 bundle locator 拒绝后锁存原则性停止 | 固定样本和 activation 合同要求保留已发生的产品结果；设施误判也不能通过替代 attempt 换样本 | 阶段 B | 根因已定位，当前 identity blocked |
