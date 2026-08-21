@@ -145,20 +145,29 @@ class NativeBundleBuilder:
             thread_id=thread_id,
         )
 
-    def inference(self, inference_id: str, request: dict) -> None:
+    def inference(
+        self,
+        inference_id: str,
+        request: dict,
+        *,
+        thread_id: str | None = None,
+        turn_id: str | None = None,
+    ) -> None:
+        owner_thread = thread_id or self.root_thread
+        owner_turn = turn_id or self.root_turn
         request_ref = self.payload("inference_request", request)
         self.event(
             {
                 "type": "inference_started",
                 "inference_call_id": inference_id,
-                "thread_id": self.root_thread,
-                "codex_turn_id": self.root_turn,
+                "thread_id": owner_thread,
+                "codex_turn_id": owner_turn,
                 "model": "model</script><img src=x>",
                 "provider_name": 'provider&"unsafe',
                 "request_payload": request_ref,
             },
-            thread_id=self.root_thread,
-            turn_id=self.root_turn,
+            thread_id=owner_thread,
+            turn_id=owner_turn,
         )
         response_ref = self.payload(
             "inference_response",
@@ -187,8 +196,8 @@ class NativeBundleBuilder:
                 "upstream_request_id": "upstream-private",
                 "response_payload": response_ref,
             },
-            thread_id=self.root_thread,
-            turn_id=self.root_turn,
+            thread_id=owner_thread,
+            turn_id=owner_turn,
         )
 
     def tool(
@@ -315,6 +324,7 @@ def make_bundle(
     include_evidence: bool = True,
     retire_mode: str | None = None,
     deduplicated_route_after_dump: bool = False,
+    include_member_inference: bool = False,
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -355,6 +365,13 @@ def make_bundle(
         thread_id="thread-worker",
         turn_id="turn-worker",
     )
+    if include_member_inference:
+        builder.inference(
+            "inference-worker",
+            {"model": "synthetic", "input": []},
+            thread_id="thread-worker",
+            turn_id="turn-worker",
+        )
     builder.event(
         {"type": "codex_turn_ended", "codex_turn_id": "turn-worker", "status": "completed"},
         thread_id="thread-worker",

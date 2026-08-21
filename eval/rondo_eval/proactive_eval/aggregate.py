@@ -200,10 +200,27 @@ def aggregate(
         spawned_ids = {
             agent["agent_id"] for agent in view["agents"] if agent["role"] == "spawned"
         }
+        # A thread/turn envelope only proves that a member existed.  Treating
+        # it as work would let an empty spawned turn satisfy the explicit
+        # collaboration policy.  Keep the projection body-free and
+        # conservative: require either a completed member inference or a
+        # completed non-collaboration tool owned by the member.
         member_activity_observed = any(
+            row["agent_id"] in spawned_ids and row["status"] == "completed"
+            for row in view["inferences"]
+        ) or any(
             row["agent_id"] in spawned_ids
-            for collection in (view["turns"], view["inferences"], view["tools"])
-            for row in collection
+            and row["status"] == "completed"
+            and row["kind"]
+            not in {
+                "spawn_agent",
+                "assign_agent_task",
+                "send_message",
+                "wait_agent",
+                "close_agent",
+            }
+            and not row["name"].startswith("team_")
+            for row in view["tools"]
         )
         member_result_returned = any(
             interaction["kind"] == "agent_result"

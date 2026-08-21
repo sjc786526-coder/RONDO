@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -34,10 +35,34 @@ from .contract import (
 _BEARER = "offline-loopback-only"
 _REQUIRED_TOOLS = COMMON_V2_TOOL_NAMES
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
+_NAMESPACE = re.compile(r"[a-z0-9][a-z0-9-]{0,63}\Z")
 
 
 class LoopbackError(RuntimeError):
     """Raised without exposing request or response bodies."""
+
+
+def loopback_output_root(
+    contract: CampaignContract, *, common_root: Path, namespace: str
+) -> Path:
+    """Resolve one campaign-owned loopback namespace without path escape."""
+
+    if not isinstance(namespace, str) or _NAMESPACE.fullmatch(namespace) is None:
+        raise LoopbackError("loopback namespace is invalid")
+    common = Path(common_root).resolve()
+    ignored_root = Path(str(contract.lock["artifacts"]["ignored_root"]))
+    if (
+        ignored_root.is_absolute()
+        or not ignored_root.parts
+        or ignored_root.parts[0] != "eval-data"
+        or ".." in ignored_root.parts
+    ):
+        raise LoopbackError("campaign ignored root is invalid")
+    parent = common / ignored_root / "loopback"
+    output = parent / namespace
+    if output.resolve().parent != parent.resolve():
+        raise LoopbackError("loopback namespace escaped its ignored root")
+    return output
 
 
 class _Server:
@@ -180,8 +205,9 @@ def run_common_v2_loopback(
     timeout_seconds: int = 120,
 ) -> dict[str, Any]:
     runtime = load_runtime_identity(require_frozen=True, common_root=common_root)
-    ignored_root = Path(str(contract.lock["artifacts"]["ignored_root"]))
-    output_root = Path(common_root) / ignored_root / "loopback" / namespace
+    output_root = loopback_output_root(
+        contract, common_root=common_root, namespace=namespace
+    )
     if output_root.exists():
         raise LoopbackError("loopback namespace already exists")
     output_root.mkdir(parents=True, mode=0o700)

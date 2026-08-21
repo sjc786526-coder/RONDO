@@ -19,6 +19,7 @@ REPO_ROOT = EVAL_ROOT.parent
 
 
 from rondo_eval.contracts import ModelPricing, ProviderProjection, Side  # noqa: E402
+from rondo_eval.docker_supervisor import DockerResourceStop  # noqa: E402
 from rondo_eval.explicit_eval.contract import (  # noqa: E402
     ContractError,
     POLICY_SHA256,
@@ -51,15 +52,23 @@ from rondo_eval.proactive_eval.aggregate import (  # noqa: E402
     write_replay_artifacts,
 )
 from rondo_eval.proactive_eval.formal import (  # noqa: E402
+    FormalDriftError,
+    FormalError,
     FormalExecutionResult,
     FormalStore,
     formal_identity,
     formal_paths,
     open_paid_ledger,
+    require_safe_formal_prefix,
     run_formal_campaign,
 )
 from rondo_eval.proactive_eval.store import StoreError, assert_body_free  # noqa: E402
-from rondo_eval.proactive_eval.loopback import _command, _command_projection  # noqa: E402
+from rondo_eval.proactive_eval.loopback import (  # noqa: E402
+    LoopbackError,
+    _command,
+    _command_projection,
+    loopback_output_root,
+)
 from rondo_eval.team_lens.reducer import reduce_bundle  # noqa: E402
 from tests.test_team_lens import make_bundle  # noqa: E402
 
@@ -216,6 +225,10 @@ class ExplicitEvalTest(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ContractError):
                 self.contract.bind_actual_cap(invalid)  # type: ignore[arg-type]
 
+        self.assertEqual(
+            self.contract.bind_actual_cap("0.50").campaign_cap_usd,
+            Decimal("0.50"),
+        )
         bound = self.contract.bind_actual_cap("37.25")
         self.assertEqual(bound.campaign_cap_usd, Decimal("37.25"))
         self.assertIsNone(self.contract.actual_cap_usd)
@@ -381,6 +394,31 @@ class ExplicitEvalTest(unittest.TestCase):
         self.assertFalse(projection["member_request_observed"])
         self.assertFalse(projection["guardian_request_observed"])
 
+    def test_loopback_namespace_cannot_escape_the_campaign_root(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            common_root = Path(raw) / "common"
+            expected = (
+                common_root.resolve()
+                / "eval-data/plan-050/loopback/phase-a-review"
+            )
+            self.assertEqual(
+                loopback_output_root(
+                    self.contract,
+                    common_root=common_root,
+                    namespace="phase-a-review",
+                ),
+                expected,
+            )
+            for namespace in ("/tmp/forged", "../../plan-049", "UPPER", ""):
+                with self.subTest(namespace=namespace), self.assertRaises(
+                    LoopbackError
+                ):
+                    loopback_output_root(
+                        self.contract,
+                        common_root=common_root,
+                        namespace=namespace,
+                    )
+
     def test_trace_backed_spawn_activity_and_result_are_all_required(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw) / "bundle", product="codex")
@@ -414,15 +452,35 @@ class ExplicitEvalTest(unittest.TestCase):
             )
             row = result["runs"][0]
             self.assertGreater(row["root_spawn_accept_count"], 0)
-            self.assertTrue(row["member_activity_observed"])
+            self.assertFalse(row["member_activity_observed"])
             self.assertTrue(row["member_result_returned"])
             cases, _overview = build_case_outputs(result)
+            self.assertEqual(
+                cases["C01"]["sides"][0]["collaboration_status"],
+                "policy_noncompliance",
+            )
+
+            active_bundle = make_bundle(
+                Path(raw) / "active-bundle",
+                product="codex",
+                include_member_inference=True,
+            )
+            active = aggregate(
+                [record],
+                {run_id: reduce_bundle(active_bundle, "codex")},
+                lock_id=self.contract.lock_id,
+                lock_sha256=self.contract.lock_sha256,
+                policy_sha256=self.contract.policy_sha256,
+                expected_slots={slot.slot_id: slot.pair_id},
+            )
+            self.assertTrue(active["runs"][0]["member_activity_observed"])
+            cases, _overview = build_case_outputs(active)
             self.assertEqual(
                 cases["C01"]["sides"][0]["collaboration_status"],
                 "collaboration_observed",
             )
 
-            missing_result = copy.deepcopy(result)
+            missing_result = copy.deepcopy(active)
             missing_result["runs"][0]["member_result_returned"] = False
             cases, _overview = build_case_outputs(missing_result)
             self.assertEqual(
@@ -577,6 +635,53 @@ class ExplicitEvalTest(unittest.TestCase):
                 all(Decimal(row["cost_usd"]) == Decimal("0") for row in first["runs"])
             )
             assert_body_free(first)
+
+    def test_docker_resource_stop_is_latched_across_formal_resume(self) -> None:
+        contract = self.contract.bind_actual_cap("25.00")
+        provider = self._offline_provider()
+        identity = formal_identity(
+            contract, provider=provider, harness_commit="f" * 40
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            common_root = Path(raw) / "common"
+            paths = formal_paths(common_root, contract)
+            store = FormalStore(paths, identity)
+            store.ensure_receipt()
+            calls: list[str] = []
+
+            class HardStopExecutor:
+                def execute(inner, slot, *, attempt, run_id, run_root):
+                    del inner, slot, attempt, run_root
+                    calls.append(run_id)
+                    raise DockerResourceStop("injected host capacity stop")
+
+            with open_paid_ledger(paths.ledger, contract) as ledger:
+                first = run_formal_campaign(
+                    contract,
+                    store=store,
+                    ledger=ledger,
+                    executor=HardStopExecutor(),
+                    phase="case",
+                )
+            self.assertEqual(calls, ["plan050-paid-case-c01-codex-a01"])
+            self.assertEqual(first["runs"][0]["outcome"], "principled_stopped")
+            self.assertEqual(first["runs"][0]["reason_code"], "docker_resource_stop")
+            with self.assertRaisesRegex(FormalError, "latched stop"):
+                require_safe_formal_prefix(paths, identity, contract)
+
+            reopened = FormalStore(paths, identity, create=False)
+            with open_paid_ledger(paths.ledger, contract) as ledger:
+                with self.assertRaisesRegex(
+                    FormalDriftError, "latched principled stop"
+                ):
+                    run_formal_campaign(
+                        contract,
+                        store=reopened,
+                        ledger=ledger,
+                        executor=HardStopExecutor(),
+                        phase="case",
+                    )
+            self.assertEqual(calls, ["plan050-paid-case-c01-codex-a01"])
 
     def _copy_contract_files(self, root: Path) -> None:
         for relative in _CONTRACT_FILES:

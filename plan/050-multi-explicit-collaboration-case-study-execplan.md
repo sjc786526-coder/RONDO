@@ -332,8 +332,10 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
 
 - `paid-ready-candidate`：六槽 fake rehearsal 为 4 成功、2 有效失败、0 infra，确定性案例/总览完整；最终 loopback
   namespace 为 `phase-a-final-v3`，两侧各 1 个本地回环 Root 请求，policy/tool/model 投影一致。
-- 定向回归共 216 项：214 通过、2 项因未提供既有真实 Plan 049 样本路径按预期跳过；无失败。范围覆盖 Plan 050、
+- 定向回归共 218 项：216 通过、2 项因未提供既有真实 Plan 049 样本路径按预期跳过；无失败。范围覆盖 Plan 050、
   Plan 049 共享编排、预算代理、Terminal-Bench、Team Lens 与 Multi 工具面，未运行全量测试。
+- 首轮独立审查复现的四项功能 finding 已窄修：Docker 资源硬停持久锁存、空成员活动不再算真实协作、loopback
+  namespace 严格限制在本 campaign ignored 根、正式 recipe 接受合同允许的 `0.01–100.00 USD`；当前等待复审。
 - readiness 复算得到 6/6 terminal、无缺槽/半对，且 `eval-data/plan-050/paid/` 不存在。阶段 A 未运行真实 API、Docker、
   Cargo、模型或全 workspace 测试，没有产生费用；最终结论仍待独立审查。
 

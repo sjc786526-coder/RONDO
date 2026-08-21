@@ -171,7 +171,7 @@ eval-plan050-phase-b-paid authorization="" phase_b_action="" actual_cap="" balan
     test "{{phase_b_action}}" = "START RONDO PLAN 050 FIXED SIX-SLOT CASE" || { echo "Plan 050 Phase B action is absent" >&2; exit 78; }
     actual_cap_value="{{actual_cap}}"
     balance_value="{{balance}}"
-    [[ "$actual_cap_value" =~ ^(([1-9]|[1-9][0-9])([.][0-9]{1,2})?|100([.]0{1,2})?)$ ]] || { echo "Plan 050 actual cap is invalid" >&2; exit 78; }
+    [[ "$actual_cap_value" =~ ^[0-9]+([.][0-9]{1,2})?$ ]] || { echo "Plan 050 actual cap is invalid" >&2; exit 78; }
     [[ "$balance_value" =~ ^[0-9]+([.][0-9]{1,2})?$ ]] || { echo "Plan 050 balance confirmation is invalid" >&2; exit 78; }
     cap_whole="${actual_cap_value%%.*}"
     cap_fraction="${actual_cap_value#*.}"
@@ -183,6 +183,7 @@ eval-plan050-phase-b-paid authorization="" phase_b_action="" actual_cap="" balan
     [[ ${#balance_fraction} -eq 1 ]] && balance_fraction="${balance_fraction}0"
     cap_cents=$((10#$cap_whole * 100 + 10#$cap_fraction))
     balance_cents=$((10#$balance_whole * 100 + 10#$balance_fraction))
+    (( cap_cents > 0 && cap_cents <= 10000 )) || { echo "Plan 050 actual cap is invalid" >&2; exit 78; }
     (( balance_cents >= cap_cents )) || { echo "Plan 050 confirmed balance is below the actual cap" >&2; exit 78; }
     test "{{local_confirmation}}" = "CONFIRM RONDO PLAN 050 LOCAL PAID CONDITIONS READY" || { echo "Plan 050 local paid confirmation is absent" >&2; exit 78; }
     test "{{review_commit}}" = "$(git rev-parse HEAD)" || { echo "Plan 050 independent review commit differs" >&2; exit 78; }

@@ -1365,7 +1365,7 @@ def run_formal_campaign(
                     slot,
                     attempt,
                     run_id,
-                    outcome="infra_failed",
+                    outcome="principled_stopped",
                     trace_status="missing",
                     reason_code="docker_resource_stop",
                 )

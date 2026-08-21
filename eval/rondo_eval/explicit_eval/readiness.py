@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..proactive_eval.aggregate import aggregate
+from ..proactive_eval.loopback import LoopbackError, loopback_output_root
 from ..proactive_eval.store import assert_body_free
 from ..team_lens.model import validate_team_view
 from .contract import CampaignContract, require_common_v2_tool_projections
@@ -140,12 +141,12 @@ def require_phase_a_evidence(
     if overview_raw != _canonical(overview):
         raise ReadinessError("Plan 050 overview is missing or nondeterministic")
 
-    loopback_root = (
-        Path(common_root).resolve()
-        / str(contract.lock["artifacts"]["ignored_root"])
-        / "loopback"
-        / loopback_namespace
-    )
+    try:
+        loopback_root = loopback_output_root(
+            contract, common_root=common_root, namespace=loopback_namespace
+        )
+    except LoopbackError as exc:
+        raise ReadinessError("Plan 050 loopback namespace is invalid") from exc
     summary_raw = _read_regular(loopback_root / "loopback.json", "loopback summary")
     try:
         summary = json.loads(summary_raw)
