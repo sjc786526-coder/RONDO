@@ -31,33 +31,33 @@ reasoning effort、并发、deadline、工具面和外部判定的条件下，�
 
 #### 阶段 A：无费用准备
 
-- [ ] 用受跟踪的机器可读合同冻结本计划 §3.2—§3.5 的任务、prompt/policy 摘要、产品与二进制身份、模型/effort、
+- [x] 用受跟踪的机器可读合同冻结本计划 §3.2—§3.5 的任务、prompt/policy 摘要、产品与二进制身份、模型/effort、
       工具面、并发、deadline、成对顺序、有效运行/infra 分类、恢复规则、Team Lens 产物、activation 门与费用上限。
-- [ ] 复用现有 Multi M-5、Terminal-Bench、预算账本、归档、原生 rollout trace 和 Team Lens，完成一条最小的共同编排、
+- [x] 复用现有 Multi M-5、Terminal-Bench、预算账本、归档、原生 rollout trace 和 Team Lens，完成一条最小的共同编排、
       成对调度、身份绑定、body-free 结果聚合与幂等 resume 路径；不建立第二套 runner、trace writer、在线服务或大型
       benchmark 平台。
-- [ ] dry-run 能确定性给出 pilot/正式槽位、稳定 run/pair 身份、执行顺序、账本命名空间和每侧预期 trace、Team View、
+- [x] dry-run 能确定性给出 pilot/正式槽位、稳定 run/pair 身份、执行顺序、账本命名空间和每侧预期 trace、Team View、
       HTML 与聚合输出位置；dry-run 身份必须显式标为 rehearsal，不得占用或伪装正式 paid identity。
-- [ ] 两侧命令投影明确证明都启用 Multi-Agent V2、相同成员模型/effort 与相同并发；现有 M-5 的 Codex V1 / RONDO V2
+- [x] 两侧命令投影明确证明都启用 Multi-Agent V2、相同成员模型/effort 与相同并发；现有 M-5 的 Codex V1 / RONDO V2
       非对称入口不得原样继承。
-- [ ] pure/fake/loopback/replay 与 body-free 合成 fixture 覆盖：两侧成功与任务有效失败、provider/network 模拟失败、
+- [x] pure/fake/loopback/replay 与 body-free 合成 fixture 覆盖：两侧成功与任务有效失败、provider/network 模拟失败、
       配置/产品身份漂移、部分配对、缺失/部分 trace、归档或报告失败、重复执行、进程中断和从最后可信状态恢复。
-- [ ] resume 对已归档有效运行、已生成 Team Lens 产物和已结算请求均幂等；一个配对只补尚未形成可信终态的一侧，
+- [x] resume 对已归档有效运行、已生成 Team Lens 产物和已结算请求均幂等；一个配对只补尚未形成可信终态的一侧，
       不因恢复重复创建有效运行、重复归档或重复记账。
-- [ ] 同一固定归档重复生成的 `team_view.json`、`team_report.html` 与聚合结果保持字节确定；Codex Team State 为
+- [x] 同一固定归档重复生成的 `team_view.json`、`team_report.html` 与聚合结果保持字节确定；Codex Team State 为
       `not_applicable`/`null`，不得伪造成“可用但为空”。
-- [ ] tracked 合同、结果与 fixture 均为 body-free：不得包含 raw prompt/response、reasoning、agent message、命令/stdout/
+- [x] tracked 合同、结果与 fixture 均为 body-free：不得包含 raw prompt/response、reasoning、agent message、命令/stdout/
       stderr、工具参数/结果正文、Fact 正文、隐藏推理、密钥或 raw trace。原始 trace 与运行产物只留在 ignored
       `eval-data/`，不得提交。
-- [ ] 阶段 A 的普通入口不接触真实 provider；阶段 B 付费入口在缺少独立显式启动动作与本地 activation 条件时，必须在
+- [x] 阶段 A 的普通入口不接触真实 provider；阶段 B 付费入口在缺少独立显式启动动作与本地 activation 条件时，必须在
       读取密钥、创建正式 receipt/ledger/run、发起网络请求或启动 Docker 之前拒绝。允许用临时 fake marker 测试，
       不得在阶段 A 创建正式付费 activation receipt。
-- [ ] 相关定向测试通过。若实现未改 Rust，不要求 Cargo；若确需窄改 Rust，只运行受影响 crate 的必要门禁并遵守共享
+- [x] 相关定向测试通过。若实现未改 Rust，不要求 Cargo；若确需窄改 Rust，只运行受影响 crate 的必要门禁并遵守共享
       build-lock/watchdog，不扩大到全 workspace。
-- [ ] 阶段 A 退出材料明确列出：`paid-ready`/`blocked`、阶段 B 启动清单、冻结合同摘要、pilot 通过条件、100 USD 总硬
+- [x] 阶段 A 退出材料明确列出：`paid-ready`/`blocked`、阶段 B 启动清单、冻结合同摘要、pilot 通过条件、100 USD 总硬
       上限及余额确认项、允许自主修复/重跑的情况、fail-closed 条件，以及只能由首次真实连接确认的事项。
-- [ ] 没有真实 API 请求、费用、正式 paid receipt、正式结果身份、正式运行归档或“付费已开始”的表述。
-- [ ] 执行者完成本地提交并保持 049 工作树干净；独立审查者确认 `paid-ready` 或给出具体 `blocked` 原因。阶段 A 后仍保留
+- [x] 没有真实 API 请求、费用、正式 paid receipt、正式结果身份、正式运行归档或“付费已开始”的表述。
+- [x] 执行者完成本地提交并保持 049 工作树干净；独立审查者确认 `paid-ready` 或给出具体 `blocked` 原因。阶段 A 后仍保留
       同一工作树/分支等待阶段 B，不合并、不推送、不关闭。
 
 付费 provider 连通性若无法零费用验证，诚实留给阶段 B activation pilot，不因此伪造绿色，也不单独把其余阶段 A
@@ -326,28 +326,30 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       前走共享 exact validator；共同 V2 六工具由实际 loopback 投影证明，两侧只允许冻结的 Team State 差值。
 - [x] 新的 `phase-a-loopback-v5` 保存 Codex 14 项与 RONDO 同 14 项加 8 项 Team State 的实际工具投影；与既有
       `phase-a-acceptance-v4` 组合的离线 readiness 为 26 runs。Plan 049 30 项、共享 runner/预算/M-5 144 项及 Team Lens
-      25 项定向测试均通过，等待 clean commit 上的最终独立复验。
+      25 项定向测试均通过。
+- [x] 全新上下文的独立审查者在 clean `9e354aa8794c07186ede56689487c17d7a774ea5` 上复核五项 finding、三个崩溃窗口、
+      v5 工具投影、readiness 与上述全部门禁，结论 PASS；阶段 A 恢复为 `paid-ready`，阶段 B 仍未授权。
 
 ### 当前工作
 
-- 阶段 A 的验收整改和离线验证已完成，当前等待 clean commit 上的最终独立复验；阶段 B 保持未授权。
+- 阶段 A 已完成并通过独立验收，当前 `paid-ready`；阶段 B 保持未授权。
 
 ### 本任务剩余步骤
 
-1. 提交整改后的 049 分支并保持工作树干净，在新 HEAD 上完成最终独立复验；真实 finding 继续在同一分支闭环。
-2. 只有重新取得 `paid-ready` 且用户另行授权阶段 B 后，才创建正式 activation identity 并执行固定 pilot/正式任务。
-3. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额后，才创建正式 activation identity 并执行固定
+   pilot/正式任务。
+2. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 当前没有已知 correctness blocker，但必须等待新 HEAD 的最终独立复验后才能恢复 `paid-ready`。
+- 阶段 A 无已知 correctness blocker，独立验收结论为 `paid-ready`。
 - 阶段 B 仍因尚未授权及缺少明确开始动作、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
 
 ### 当前验收状态
 
 - pure/fake/replay、两侧冻结二进制 loopback、Team Lens 与受影响的 Terminal-Bench/M-5 定向测试均通过；v5 loopback
   保存实际 V2 工具投影，v4 rehearsal 的 archive/ledger/aggregate 继续通过确定性 readiness。
-- 整改后的 Plan 049 30 项、共享 runner/预算/M-5 144 项、Team Lens 25 项均通过；最终结论等待独立复验。
+- 整改后的 Plan 049 30 项、共享 runner/预算/M-5 144 项、Team Lens 25 项均通过；独立审查复跑结果一致。
 - 未运行 Docker、Cargo、真实 API、本地模型、付费测评或全量测试；未创建正式 activation receipt、正式账本或
   正式 run/result identity。
 

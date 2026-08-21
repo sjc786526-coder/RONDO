@@ -5,7 +5,8 @@
 - 独立报告的五项 correctness finding 均经源码与临时状态复现确认，未采纳“尾项”降级处理。
 - 在同一 049 合同和共同 eval 层完成窄修；未改变任务集、模型/effort、并发、顺序、100 USD 硬上限、产品语义或
   Team State 语义。
-- 当前本地实现与离线证据无已知 blocker，等待整改提交上的最终独立复验；阶段 B、真实 API、Docker 和费用仍未授权。
+- 整改代码提交 `9e354aa8794c07186ede56689487c17d7a774ea5` 已由全新上下文的独立审查者验收通过；阶段 A 结论恢复为
+  `paid-ready`。阶段 B、真实 API、Docker 和费用仍未授权。
 
 ## 实质修改
 
@@ -32,6 +33,8 @@
   `d27b32576fe268476c7736e067f6534ea62b1a730063f807e274a9b55e0d887c` 保持有效。
 - 三个 focused 只读 pre-commit review 分别复核 F1/F2、F3/F5 和 F4；发现的 limit+missing-trace、settled 检查点写失败
   与未归档 stop-marker 窗口已修复，最终结论均为 PASS。
+- 最终独立审查者在 clean `9e354aa…` 上复跑 30/144/25 项门禁与 v4 rehearsal + v5 loopback readiness，结果一致，
+  未发现 correctness blocker。
 
 未运行 Docker、Cargo、真实 provider/API、本地模型、付费任务、完整数据集或全 workspace；未创建正式 paid
 namespace、receipt、账本或 run/result identity。第一次 `just` 因受限环境不能写 `/run/user/1000` 退出 1，获得仅用于
