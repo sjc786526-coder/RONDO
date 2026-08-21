@@ -337,20 +337,23 @@ pilot 重跑成“直到激活”。infra 无效 pilot 可按 §3.5 恢复，不
       共享 runner/预算/M-5 144 项和 Team Lens 25 项均通过。
 - [x] 全新上下文的独立审查者在 clean `6141cce1c48e4b743a6ef33d48b2b7332ffce9af` 上复核完整分类矩阵、跨重启状态、
       反向 infra 语义和全部门禁，结论 PASS；阶段 A 恢复为 `paid-ready`，阶段 B 仍未授权。
+- [x] 对最终 `9837a2c2cf74e7ee0b4fec531c03826a83df1634` 的独立验收确认不重跑语义成立，但发现新路径的
+      `principled_stopped` 仍把 missing-trace 原因误记为 `identity_or_fairness_drift`。阶段 A 回拨为 `blocked`，
+      证据见 `agent_log/2026-08-20-210151-plan049-phase-a-trace-reason-independent-acceptance.md`。
 
 ### 当前工作
 
-- 阶段 A finding 已关闭并通过独立验收，当前 `paid-ready`。阶段 B 保持未授权。
+- 阶段 A 因 missing-trace 持久 reason 误报而 `blocked`。阶段 B 保持未授权。
 
 ### 本任务剩余步骤
 
-1. 只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额后，才可创建正式 activation identity 并执行固定
-   pilot/正式任务。
-2. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
+1. 为新的 fail-closed 路径持久准确、body-free 的 missing-trace reason code，并在现有分类矩阵增加原因断言。
+2. 修复验收通过后，仍只有用户另行授权阶段 B、再次确认 100 USD 总硬上限与可用余额，才可创建正式 activation identity 并执行固定 pilot/正式任务。
+3. 最终仍只提交 049 分支；合并、推送和关闭工作树等待用户批准。
 
 ### 阻塞项
 
-- 阶段 A 无已知 correctness blocker，独立验收结论为 `paid-ready`。
+- missing-trace 停止记录的 `reason_code` 仍误标为身份/公平漂移；该 correctness blocker 关闭前阶段 A 为 `blocked`。
 - 阶段 B 仍因尚未授权及缺少明确开始动作、100 USD 上限/余额确认而阻塞；provider 真连通性仍只可留给 pilot。
 
 ### 当前验收状态
