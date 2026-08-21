@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "synthetic_body_free_replay",
+  "identity_class": "rehearsal",
+  "records": [
+    {
+      "slot_id": "case-c01-codex",
+      "side": "codex",
+      "product": null,
+      "outcome": "completed",
+      "collaboration_status": "collaboration_observed",
+      "impact_chain_status": "not_observed",
+      "trace_status": "available",
+      "observation_status": "available",
+      "team_state": null,
+      "root_spawn_accept_count": 1,
+      "returned_member_count": 1
+    },
+    {
+      "slot_id": "case-c01-rondo",
+      "side": "rondo",
+      "product": "rondo-multi",
+      "outcome": "completed",
+      "collaboration_status": "collaboration_observed",
+      "impact_chain_status": "observed",
+      "trace_status": "available",
+      "observation_status": "available",
+      "team_state": {"status": "available", "event_count": 1},
+      "root_spawn_accept_count": 1,
+      "returned_member_count": 1
+    },
+    {
+      "slot_id": "case-c02-rondo",
+      "side": "rondo",
+      "product": "rondo-multi",
+      "outcome": "task_failed",
+      "collaboration_status": "collaboration_observed",
+      "impact_chain_status": "unknown",
+      "trace_status": "partial",
+      "observation_status": "partial",
+      "team_state": {"status": "partial", "event_count": 0},
+      "root_spawn_accept_count": 1,
+      "returned_member_count": 1
+    },
+    {
+      "slot_id": "case-c02-codex",
+      "side": "codex",
+      "product": null,
+      "outcome": "completed",
+      "collaboration_status": "policy_noncompliance",
+      "impact_chain_status": "not_observed",
+      "trace_status": "available",
+      "observation_status": "available",
+      "team_state": null,
+      "root_spawn_accept_count": 0,
+      "returned_member_count": 0
+    },
+    {
+      "slot_id": "case-c03-codex",
+      "side": "codex",
+      "product": null,
+      "outcome": "product_failed",
+      "collaboration_status": "policy_noncompliance",
+      "impact_chain_status": "unknown",
+      "trace_status": "partial",
+      "observation_status": "partial",
+      "team_state": null,
+      "root_spawn_accept_count": 1,
+      "returned_member_count": 0
+    },
+    {
+      "slot_id": "case-c03-rondo",
+      "side": "rondo",
+      "product": "rondo-multi",
+      "outcome": "completed",
+      "collaboration_status": "collaboration_observed",
+      "impact_chain_status": "not_observed",
+      "trace_status": "available",
+      "observation_status": "available",
+      "team_state": {"status": "partial", "event_count": 0},
+      "root_spawn_accept_count": 1,
+      "returned_member_count": 1
+    }
+  ]
+}

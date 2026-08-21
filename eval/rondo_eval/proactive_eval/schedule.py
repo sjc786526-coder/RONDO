@@ -17,21 +17,32 @@ class Slot:
     task_id: str
     side: str
     ordinal: int
+    run_prefix: str = "plan049"
 
     @property
     def slot_id(self) -> str:
         return f"{self.phase}-{self.pair_id.lower()}-{self.side}"
 
     def run_id(self, attempt: int = 1) -> str:
-        return f"plan049-rehearsal-{self.slot_id}-a{attempt:02d}"
+        return f"{self.run_prefix}-rehearsal-{self.slot_id}-a{attempt:02d}"
 
 
-def slots(contract: CampaignContract, phases: Iterable[str] = ("pilot", "formal")) -> tuple[Slot, ...]:
+def slots(
+    contract: CampaignContract,
+    phases: Iterable[str] | None = None,
+) -> tuple[Slot, ...]:
     result: list[Slot] = []
     ordinal = 0
-    for phase in phases:
-        if phase not in {"pilot", "formal"}:
-            raise ValueError("unsupported Plan 049 phase")
+    available = (
+        ("case",)
+        if "case_pairs" in contract.taskset
+        else ("pilot", "formal")
+    )
+    selected = tuple(available if phases is None else phases)
+    run_prefix = f"plan{contract.lock['plan']}"
+    for phase in selected:
+        if phase not in available:
+            raise ValueError("unsupported campaign phase")
         for pair in contract.taskset[f"{phase}_pairs"]:
             for side in pair["side_order"]:
                 ordinal += 1
@@ -42,6 +53,7 @@ def slots(contract: CampaignContract, phases: Iterable[str] = ("pilot", "formal"
                         task_id=pair["task_id"],
                         side=side,
                         ordinal=ordinal,
+                        run_prefix=run_prefix,
                     )
                 )
     return tuple(result)
@@ -53,7 +65,12 @@ def dry_run_projection(
     common_root: Path,
     namespace: str = "phase-a-final",
 ) -> dict[str, Any]:
-    root = Path(common_root).resolve() / "eval-data" / "plan-049" / "rehearsal" / namespace
+    root = (
+        Path(common_root).resolve()
+        / str(contract.lock["artifacts"]["ignored_root"])
+        / "rehearsal"
+        / namespace
+    )
     rows = []
     catalog = {item["task_id"]: item for item in contract.catalog["tasks"]}
     for slot in slots(contract):

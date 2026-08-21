@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-21 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ 下一包：明确委派条件下的三任务比较案例
+第一期已完成并合入 `main` ｜ 第二期 A/B/C 已完成 ｜ Plan 050 阶段 A 已自检、待独立验收
 
 ## 定位
 
@@ -249,7 +249,11 @@ Root/Guardian 多 bundle 缺口由侧无关 selector 与只读 recovery identity
 4. 任务、轮数、模型、价格、预算、重试和统计口径在该测评自己的冻结 plan 中确定；未运行、未激活、infra 或
    样本不足必须按各自语义如实报告。
 
-## 下一任务包：明确委派三任务比较案例
+## 当前任务包：明确委派三任务比较案例
+
+**状态：Plan 050 阶段 A 已完成执行者自检，等待独立验收。** 独立 lock/taskset/policy、六槽 fake/replay、两侧零 API
+loopback、确定性案例数据、body-free 边界和阶段 B 负门禁已就绪；尚未调用真实 provider 或 Docker，也未创建 paid
+receipt/ledger/run。只有独立验收给出 `paid-ready` 且用户另行明确阶段 B 开始授权与实际总预算后，才运行真实六槽。
 
 **定位**：这是一个三任务的小规模 comparative case study，同时也是产品展示。它不再询问模型是否会在软提示下自然
 委派，而是明确建立 collaboration 条件，比较真实委派发生后冻结 Codex 与 RONDO 的外部任务结果和协作过程。它不是

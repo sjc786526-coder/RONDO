@@ -37,7 +37,14 @@ def run_rehearsal(
 ) -> dict:
     """Resume the fixed schedule; never creates a paid identity or cost row."""
 
-    store = RehearsalStore(common_root, namespace)
+    recovery = contract.lock["recovery"]
+    store = RehearsalStore(
+        common_root,
+        namespace,
+        ignored_root=str(contract.lock["artifacts"]["ignored_root"]),
+        max_infra_attempts_per_slot=recovery.get("max_infra_attempts_per_slot"),
+        max_infra_attempts_total=recovery.get("max_infra_attempts_total"),
+    )
     for existing in store.records():
         if (
             existing["lock_id"] != contract.lock_id

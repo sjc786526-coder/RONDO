@@ -28,7 +28,7 @@ from ..api_budget_proxy import (
     stop_reason_class,
 )
 from ..config import RepoPaths, RuntimeConfig, load_runtime_config
-from ..contracts import Product, ProviderProjection, RunOutcome, Side
+from ..contracts import ModelPricing, Product, ProviderProjection, RunOutcome, Side
 from ..docker_supervisor import (
     DockerCounter,
     DockerResourceStop,
@@ -74,7 +74,7 @@ from .trace import ProactiveTraceError, select_proactive_root_bundle
 
 
 _RUN_ID = re.compile(
-    r"plan049-paid-(?:pilot|formal)-(?:p|f)[0-9]{2}-(?:codex|rondo)-a0[1-5]\Z"
+    r"plan[0-9]{3}-paid-(?:pilot|formal|case)-(?:p|f|c)[0-9]{2}-(?:codex|rondo)-a[0-9]{2,3}\Z"
 )
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _REQUIRED_TOOLS = COMMON_V2_TOOL_NAMES
@@ -172,8 +172,7 @@ def formal_paths(common_root: Path, contract: CampaignContract) -> FormalPaths:
     namespace = str(contract.lock["budget"]["formal_namespace"])
     root = (
         Path(common_root).resolve()
-        / "eval-data"
-        / "plan-049"
+        / str(contract.lock["artifacts"]["ignored_root"])
         / "paid"
         / namespace
     )
@@ -202,7 +201,24 @@ def request_reservation_usd(contract: CampaignContract) -> Decimal:
 
 
 def run_cap_usd(contract: CampaignContract) -> Decimal:
-    return Decimal(str(contract.lock["budget"]["per_run_cap_usd"]))
+    return min(
+        Decimal(str(contract.lock["budget"]["per_run_cap_usd"])),
+        Decimal(contract.campaign_cap_usd),
+    )
+
+
+def _attempt_limit(contract: CampaignContract) -> int:
+    """Bound identity space without imposing a Plan 050 per-slot retry policy."""
+
+    per_slot = contract.lock["recovery"].get("max_infra_attempts_per_slot")
+    value = (
+        int(per_slot)
+        if per_slot is not None
+        else int(contract.lock["budget"]["max_run_slots"])
+    )
+    if value < 1 or value > 999:
+        raise FormalError("campaign attempt identity space is invalid")
+    return value
 
 
 def open_paid_ledger(path: Path, contract: CampaignContract) -> PersistentBudgetLedger:
@@ -210,7 +226,7 @@ def open_paid_ledger(path: Path, contract: CampaignContract) -> PersistentBudget
     return PersistentBudgetLedger(
         path,
         batch_id=str(budget["batch_id"]),
-        total_cap_usd=str(budget["phase_b_hard_cap_usd"]),
+        total_cap_usd=contract.campaign_cap_usd,
         max_runs=int(budget["max_run_slots"]),
         default_run_cap_usd=str(budget["per_run_cap_usd"]),
         usage_envelope=usage_envelope(contract),
@@ -227,15 +243,37 @@ def plan049_provider_projection(
     projected = config.paid_provider_projection(
         str(provider["name"]), model_id=str(provider["root_model"])
     )
+    price = contract.lock["price_snapshot"]
+    locked_pricing = ModelPricing(
+        model_id=str(price["model_id"]),
+        input_usd_per_million=Decimal(str(price["input_usd_per_million"])),
+        cached_input_usd_per_million=Decimal(
+            str(price["cached_input_usd_per_million"])
+        ),
+        output_usd_per_million=Decimal(str(price["output_usd_per_million"])),
+        long_context_threshold_tokens=int(price["long_context_threshold_tokens"]),
+        long_context_input_multiplier=Decimal(
+            str(price["long_context_input_multiplier"])
+        ),
+        long_context_output_multiplier=Decimal(
+            str(price["long_context_output_multiplier"])
+        ),
+        cache_write_input_multiplier=Decimal(
+            str(price["cache_write_input_multiplier"])
+        ),
+        price_snapshot_date=str(price["date"]),
+        price_source_url=str(price["source_url"]),
+    )
     projected = replace(
         projected,
+        main_effort=str(provider["root_effort"]),
         guardian_model=str(provider["guardian_model"]),
         guardian_effort=str(provider["guardian_effort"]),
-        guardian_pricing=projected.main_pricing,
+        main_pricing=locked_pricing,
+        guardian_pricing=locked_pricing,
         retry_backoff_seconds=float(provider["retry_backoff_seconds"]),
     )
     projected.validate()
-    price = contract.lock["price_snapshot"]
     if (
         projected.provider_id != provider["name"]
         or projected.api != provider["wire_api"]
@@ -307,7 +345,7 @@ def formal_identity(
         "provider_identity": provider_identity(provider),
         "harness_commit": harness_commit,
         "harness_dirty": False,
-        "campaign_cap_usd": contract.lock["budget"]["phase_b_hard_cap_usd"],
+        "campaign_cap_usd": str(contract.campaign_cap_usd),
     }
     assert_body_free(value)
     return value
@@ -585,7 +623,7 @@ class FormalStore:
             or value.get("counts_as_effective") is not terminal
             or isinstance(value.get("attempt"), bool)
             or not isinstance(value.get("attempt"), int)
-            or not 1 <= value["attempt"] <= 5
+            or not 1 <= value["attempt"] <= 999
             or isinstance(value.get("request_count"), bool)
             or not isinstance(value.get("request_count"), int)
             or value["request_count"] < 0
@@ -658,16 +696,17 @@ def require_safe_formal_prefix(
     records = list(store.records())
     schedule = slots(contract)
     _validate_paid_prefix(records, schedule)
+    attempt_limit = _attempt_limit(contract)
     allowed_ids = {
         slot.run_id(attempt).replace("rehearsal", "paid")
         for slot in schedule
-        for attempt in range(1, 6)
+        for attempt in range(1, attempt_limit + 1)
     }
     _require_known_run_roots(store, allowed_ids)
     identities = {
         slot.run_id(attempt).replace("rehearsal", "paid"): (slot, attempt)
         for slot in schedule
-        for attempt in range(1, 6)
+        for attempt in range(1, attempt_limit + 1)
     }
     records_by_run = {row["run_id"]: row for row in records}
     published_stop = False
@@ -719,7 +758,7 @@ def require_safe_formal_prefix(
         ledger = load_validated_budget_ledger_state(
             paths.ledger,
             batch_id=str(budget["batch_id"]),
-            total_cap_usd=str(budget["phase_b_hard_cap_usd"]),
+            total_cap_usd=str(identity["campaign_cap_usd"]),
             max_runs=int(budget["max_run_slots"]),
             default_run_cap_usd=str(budget["per_run_cap_usd"]),
         )
@@ -1133,14 +1172,16 @@ def run_formal_campaign(
 ) -> dict[str, Any]:
     """Advance pilot or formal slots without ever repeating a requested run."""
 
-    if phase not in {"pilot", "formal"}:
-        raise FormalError("Plan 049 paid phase is invalid")
-    store.require_receipt()
     schedule = slots(contract)
+    available_phases = {slot.phase for slot in schedule}
+    if phase not in available_phases:
+        raise FormalError("paid campaign phase is invalid")
+    store.require_receipt()
+    attempt_limit = _attempt_limit(contract)
     allowed_ids = {
         slot.run_id(attempt).replace("rehearsal", "paid")
         for slot in schedule
-        for attempt in range(1, 6)
+        for attempt in range(1, attempt_limit + 1)
     }
     _require_known_run_roots(store, allowed_ids)
     records = list(store.records())
@@ -1164,7 +1205,7 @@ def run_formal_campaign(
         if stopped_rows[-1]["outcome"] == "principled_stopped":
             raise FormalDriftError("Plan 049 formal campaign has a latched principled stop")
         return _formal_aggregate(contract, records, store)
-    if phase == "formal":
+    if phase == "formal" and "pilot" in available_phases:
         _require_pilot_activation(contract, records, store)
 
     infra_total = sum(row["outcome"] == "infra_failed" for row in records)
@@ -1174,10 +1215,11 @@ def run_formal_campaign(
         slot_rows = [row for row in records if row["slot_id"] == slot.slot_id]
         if any(row["terminal"] is True for row in slot_rows):
             continue
-        for attempt in range(len(slot_rows) + 1, 6):
-            if infra_total >= int(
-                contract.lock["recovery"]["max_infra_attempts_total"]
-            ):
+        for attempt in range(len(slot_rows) + 1, attempt_limit + 1):
+            total_limit = contract.lock["recovery"].get(
+                "max_infra_attempts_total"
+            )
+            if total_limit is not None and infra_total >= int(total_limit):
                 return _formal_aggregate(contract, records, store)
             run_id = slot.run_id(attempt).replace("rehearsal", "paid")
             checkpoint = store.execution(run_id, slot=slot, attempt=attempt)

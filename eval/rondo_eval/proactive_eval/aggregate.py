@@ -197,6 +197,21 @@ def aggregate(
             for tool in view["tools"]
             if tool["kind"] in {"apply_patch", "file_read", "file_write"}
         ]
+        spawned_ids = {
+            agent["agent_id"] for agent in view["agents"] if agent["role"] == "spawned"
+        }
+        member_activity_observed = any(
+            row["agent_id"] in spawned_ids
+            for collection in (view["turns"], view["inferences"], view["tools"])
+            for row in collection
+        )
+        member_result_returned = any(
+            interaction["kind"] == "agent_result"
+            and interaction["source_agent_id"] in spawned_ids
+            and interaction["target_agent_id"] == root_agent_id
+            and interaction["status"] == "completed"
+            for interaction in view["interactions"]
+        )
         first_spawn = min(
             (interaction["started_at_unix_ms"] for interaction in accepted),
             default=None,
@@ -212,6 +227,8 @@ def aggregate(
                 "product": record["product"],
                 "outcome": record["outcome"],
                 "counts_as_effective": record["counts_as_effective"],
+                "cost_usd": record.get("cost_usd", "0.00"),
+                "request_count": record.get("request_count", 0),
                 "trace_status": record["trace_status"],
                 "reason_code": record["reason_code"],
                 "team_state": _team_state_metrics(view, side=str(record["side"])),
@@ -234,6 +251,8 @@ def aggregate(
                 ),
                 "spawn_attempt_count": len(spawn_tools),
                 "root_spawn_accept_count": len(accepted),
+                "member_activity_observed": member_activity_observed,
+                "member_result_returned": member_result_returned,
                 "first_spawn_offset_ms": (
                     None
                     if first_spawn is None
@@ -296,6 +315,8 @@ def _unobserved_row(record: Mapping[str, Any]) -> dict[str, Any]:
         "product": record["product"],
         "outcome": record["outcome"],
         "counts_as_effective": record["counts_as_effective"],
+        "cost_usd": record.get("cost_usd", "0.00"),
+        "request_count": record.get("request_count", 0),
         "trace_status": record["trace_status"],
         "reason_code": record["reason_code"],
         "team_state": None,
@@ -310,6 +331,8 @@ def _unobserved_row(record: Mapping[str, Any]) -> dict[str, Any]:
         "spawned_member_count": None,
         "spawn_attempt_count": None,
         "root_spawn_accept_count": 0,
+        "member_activity_observed": None,
+        "member_result_returned": None,
         "first_spawn_offset_ms": None,
         "peak_agent_concurrency": None,
         "file_tool_count": None,

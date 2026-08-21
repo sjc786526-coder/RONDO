@@ -75,6 +75,7 @@ class CampaignContract:
     catalog: dict[str, Any]
     policy: str
     lock_sha256: str
+    actual_cap_usd: str | None = None
 
     @property
     def lock_id(self) -> str:
@@ -87,6 +88,15 @@ class CampaignContract:
     @property
     def taskset_sha256(self) -> str:
         return str(self.lock["taskset"]["sha256"])
+
+    @property
+    def campaign_cap_usd(self) -> str:
+        if self.actual_cap_usd is not None:
+            return self.actual_cap_usd
+        budget = self.lock["budget"]
+        if "phase_b_hard_cap_usd" in budget:
+            return str(budget["phase_b_hard_cap_usd"])
+        return str(budget["maximum_authorizable_cap_usd"])
 
 
 def load_contract(repo_root: Path = REPO_ROOT) -> CampaignContract:

@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "lock_id": "multi-explicit-collaboration-v1",
+  "status": "frozen",
+  "plan": "050",
+  "phase_a": {
+    "network": false,
+    "docker": false,
+    "provider": false,
+    "identity_class": "rehearsal"
+  },
+  "runtime": {
+    "lock": "eval/locks/multi-m5-runtime-v4.json",
+    "lock_id": "multi-m5-runtime-v4",
+    "lock_sha256": "7763dc4e29077576465187aed81c8231afac73a9cf22c6b67d5cc9266bd8f02c",
+    "rondo_source_commit": "0eee6dc5ee69f0eca9e1db350148c423a2b2bf67",
+    "rondo_binary_sha256": "c64ff001fe7bec20c84a6bbea84f077ffffdcddc8b796b2f663513d5d7a6c631",
+    "codex_source_commit": "be6e8eac029b183056b7e4402879f15d2c85f61b",
+    "codex_binary_sha256": "8bd5f096af8302c0d5bf272a15a563d243fe77e8b704b749321a437c815f1a80"
+  },
+  "taskset": {
+    "path": "eval/tasksets/multi-explicit-collaboration-v1.json",
+    "sha256": "ea50a232328b84a32e1aa843ddb665b940b4eb7c0a568d57789d0464bbf0308a",
+    "catalog_path": "eval/tasksets/p2-b7-canary-catalog-v4.json",
+    "catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf",
+    "terminal_bench_commit": "ffccbe05ee73a9d59518217f294ad711bda39304",
+    "terminal_bench_taskset_sha256": "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b"
+  },
+  "policy": {
+    "path": "eval/templates/multi-explicit-collaboration/explicit-collaboration-policy-v1.md",
+    "sha256": "a4d90e09a9c0ff69816a6da4153a6fb78c3ad8695dd4076c9884a33eb3b90b49",
+    "encoding": "utf-8",
+    "line_count": 1,
+    "trailing_lf": true
+  },
+  "provider": {
+    "name": "relay",
+    "wire_api": "responses",
+    "base_url": "https://www.cctq.ai/v1",
+    "root_model": "gpt-5.6-terra",
+    "root_effort": "high",
+    "member_model": "gpt-5.6-terra",
+    "member_effort": "high",
+    "guardian_model": "gpt-5.6-terra",
+    "guardian_effort": "high",
+    "request_limit_per_run": 80,
+    "request_attempt_limit": 5,
+    "retry_backoff_seconds": 2,
+    "retry_statuses": [429, 500, 502, 503, 504]
+  },
+  "price_snapshot": {
+    "date": "2026-08-21",
+    "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+    "pricing_page_url": "https://developers.openai.com/api/docs/pricing",
+    "model_id": "gpt-5.6-terra",
+    "input_usd_per_million": "2",
+    "cached_input_usd_per_million": "0.2",
+    "output_usd_per_million": "12",
+    "long_context_threshold_tokens": 272000,
+    "long_context_input_multiplier": "2",
+    "long_context_output_multiplier": "1.5",
+    "cache_write_input_multiplier": "1.25"
+  },
+  "execution": {
+    "terminal_bench_slot_concurrency": 1,
+    "max_concurrent_threads_per_session": 4,
+    "provider_request_concurrency": 4,
+    "approval_policy": "on-request",
+    "sandbox_mode": "workspace-write",
+    "network_access_in_phase_b": true,
+    "rollout_trace_root": "/logs/agent/rollout-trace",
+    "codex_team_state": null,
+    "rondo_team_state": true
+  },
+  "recovery": {
+    "infra_attempt_limit_per_slot": null,
+    "infra_attempt_limit_total": null,
+    "retry_bound": "campaign_budget_and_resource_gates",
+    "valid_terminal_is_immutable": true,
+    "settled_result_reduction_only": true,
+    "resume_only_incomplete_side": true,
+    "unknown_request_or_usage": "principled_stop",
+    "non_infra_terminal_missing_trace": "principled_stop"
+  },
+  "budget": {
+    "maximum_authorizable_cap_usd": "100.00",
+    "actual_cap_usd": null,
+    "actual_cap_binding": "phase_b_receipt",
+    "formal_namespace": "plan-050-paid-v1",
+    "rehearsal_namespace": "plan-050-rehearsal-v1",
+    "batch_id": "plan-050-paid-v1",
+    "usage_envelope": {
+      "max_input_tokens": 272000,
+      "max_output_tokens": 128000
+    },
+    "request_reservation_usd": "2.22",
+    "max_concurrent_main_requests": 4,
+    "guardian_reserved_slots": 1,
+    "max_guardian_logical_requests": 3,
+    "per_run_spend_allowance_usd": "4.00",
+    "per_run_cap_usd": "15.10",
+    "max_run_slots": 256,
+    "unpriced_stop_threshold": 1
+  },
+  "artifacts": {
+    "ignored_root": "eval-data/plan-050",
+    "per_run": [
+      "rollout-trace",
+      "settled.json",
+      "execution.json",
+      "api-metadata.json",
+      "shared-model-catalog.json",
+      "team_view.json",
+      "team_report.html",
+      "run.json"
+    ],
+    "aggregate": "aggregate.json",
+    "case_directory": "cases",
+    "case_file_pattern": "{pair_id}.json",
+    "overview": "overview.json",
+    "replay_fixture": "eval/fixtures/multi-explicit-collaboration-v1/body-free-replay-v1.json",
+    "replay_fixture_sha256": "28ef4c848dc253ed18734a70b34a4342e00f4fa9e64871a8e42eacd76c481190",
+    "tracked_body_fields": false
+  },
+  "case_study": {
+    "base_pair_count": 3,
+    "base_run_count": 6,
+    "external_outcomes": ["completed", "task_failed", "product_failed"],
+    "collaboration_statuses": ["collaboration_observed", "policy_noncompliance"],
+    "observation_statuses": ["available", "partial", "unsupported", "not_applicable"],
+    "impact_chain_statuses": ["observed", "not_observed", "unknown"],
+    "valid_failure_is_terminal": true,
+    "policy_noncompliance_is_terminal": true,
+    "requires_unique_exec_root": true,
+    "guardian_excluded_from_team_metrics": true
+  }
+}

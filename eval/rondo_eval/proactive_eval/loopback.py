@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ..contracts import Product, Side, common_multi_agent_v2_override_items
+from ..frozen_model_catalog import load_shared_model_catalog
 from ..multi_m5.bundle import load_side_manifest
 from ..multi_m5.load import load_runtime_identity
 from ..multi_m5.loopback import collect_registered_tool_names
@@ -30,7 +31,7 @@ from .contract import (
 )
 
 
-_BEARER = "plan049-loopback-only"
+_BEARER = "offline-loopback-only"
 _REQUIRED_TOOLS = COMMON_V2_TOOL_NAMES
 _MAX_REQUEST_BYTES = 8 * 1024 * 1024
 
@@ -40,8 +41,13 @@ class LoopbackError(RuntimeError):
 
 
 class _Server:
-    def __init__(self, *, policy: str) -> None:
+    def __init__(
+        self, *, policy: str, model: str, effort: str, run_prefix: str = "plan049"
+    ) -> None:
         self.policy = policy
+        self.model = model
+        self.effort = effort
+        self.run_prefix = run_prefix
         self.server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self.request_count = 0
@@ -98,7 +104,13 @@ class _Server:
         except (UnicodeError, json.JSONDecodeError):
             self._reject(handler, 400)
             return
-        if not isinstance(request, dict) or request.get("model") != "gpt-5.6-terra":
+        reasoning = request.get("reasoning") if isinstance(request, dict) else None
+        if (
+            not isinstance(request, dict)
+            or request.get("model") != self.model
+            or not isinstance(reasoning, dict)
+            or reasoning.get("effort") != self.effort
+        ):
             self._reject(handler, 400)
             return
         self.request_count += 1
@@ -107,7 +119,7 @@ class _Server:
         if not _REQUIRED_TOOLS.issubset(self.registered_tools) or not self.policy_matched:
             self._reject(handler, 422)
             return
-        response_id = f"resp-plan049-loopback-{self.request_count}"
+        response_id = f"resp-{self.run_prefix}-loopback-{self.request_count}"
         events = (
             {"type": "response.created", "response": {"id": response_id}},
             {
@@ -115,7 +127,7 @@ class _Server:
                 "item": {
                     "type": "message",
                     "role": "assistant",
-                    "id": f"msg-plan049-loopback-{self.request_count}",
+                    "id": f"msg-{self.run_prefix}-loopback-{self.request_count}",
                     "content": [{"type": "output_text", "text": "loopback complete"}],
                 },
             },
@@ -168,10 +180,25 @@ def run_common_v2_loopback(
     timeout_seconds: int = 120,
 ) -> dict[str, Any]:
     runtime = load_runtime_identity(require_frozen=True, common_root=common_root)
-    output_root = Path(common_root) / "eval-data" / "plan-049" / "loopback" / namespace
+    ignored_root = Path(str(contract.lock["artifacts"]["ignored_root"]))
+    output_root = Path(common_root) / ignored_root / "loopback" / namespace
     if output_root.exists():
-        raise LoopbackError("Plan 049 loopback namespace already exists")
+        raise LoopbackError("loopback namespace already exists")
     output_root.mkdir(parents=True, mode=0o700)
+    catalog_path: Path | None = None
+    catalog_identity: dict[str, Any] | None = None
+    if str(contract.lock.get("plan")) == "050":
+        shared = load_shared_model_catalog(
+            common_root,
+            upstream_source_commit=str(runtime.baseline["source_commit"]),
+            rondo_source_commit=str(runtime.source_commit),
+            main_model=str(contract.lock["provider"]["root_model"]),
+            guardian_model=str(contract.lock["provider"]["guardian_model"]),
+            product=Product.RONDO_MULTI,
+        )
+        catalog_path = output_root / "shared-model-catalog.json"
+        shared.write_private(catalog_path)
+        catalog_identity = shared.identity()
     results: dict[str, Any] = {}
     for side in (Side.CODEX, Side.RONDO):
         manifest = load_side_manifest(runtime, side, common_root=common_root)
@@ -181,7 +208,10 @@ def run_common_v2_loopback(
         trace_root = side_root / "rollout-trace"
         trace_root.mkdir(parents=True, mode=0o700)
         scratch = scratch_root(common_root)
-        with tempfile.TemporaryDirectory(prefix=f"plan049-loopback-{side.value}-", dir=scratch) as raw:
+        with tempfile.TemporaryDirectory(
+            prefix=f"plan{contract.lock['plan']}-loopback-{side.value}-",
+            dir=scratch,
+        ) as raw:
             home = Path(raw) / "home"
             workspace = Path(raw) / "workspace"
             home.mkdir(mode=0o700)
@@ -191,8 +221,19 @@ def run_common_v2_loopback(
                 "utf-8",
             )
             os.chmod(home / "auth.json", 0o600)
-            with _Server(policy=contract.policy) as server:
-                command = _command(contract, binary, side, server.base_url)
+            with _Server(
+                policy=contract.policy,
+                model=str(contract.lock["provider"]["root_model"]),
+                effort=str(contract.lock["provider"]["root_effort"]),
+                run_prefix=f"plan{contract.lock['plan']}",
+            ) as server:
+                command = _command(
+                    contract,
+                    binary,
+                    side,
+                    server.base_url,
+                    model_catalog_path=catalog_path,
+                )
                 completed = subprocess.run(
                     command,
                     cwd=workspace,
@@ -242,6 +283,9 @@ def run_common_v2_loopback(
             "team_view_sha256": hashlib.sha256(view_bytes).hexdigest(),
             "team_report_sha256": hashlib.sha256(report_bytes).hexdigest(),
             "trace_bundle_count": 1,
+            "command_projection": _command_projection(
+                contract, model_catalog_identity=catalog_identity
+            ),
         }
     try:
         require_common_v2_tool_projections(
@@ -269,12 +313,21 @@ def run_common_v2_loopback(
     return summary
 
 
-def _command(contract: CampaignContract, binary: Path, side: Side, base_url: str) -> list[str]:
+def _command(
+    contract: CampaignContract,
+    binary: Path,
+    side: Side,
+    base_url: str,
+    *,
+    model_catalog_path: Path | None = None,
+) -> list[str]:
     product = None if side is Side.CODEX else Product.RONDO_MULTI
+    provider = contract.lock["provider"]
+    execution = contract.lock["execution"]
     overrides = (
         'approvals_reviewer="auto_review"',
-        'approval_policy="on-request"',
-        'sandbox_mode="workspace-write"',
+        f'approval_policy={json.dumps(execution["approval_policy"])}',
+        f'sandbox_mode={json.dumps(execution["sandbox_mode"])}',
         "sandbox_workspace_write.network_access=true",
         "features.code_mode_host=true",
         'model_provider="rondo_eval_provider"',
@@ -285,13 +338,18 @@ def _command(contract: CampaignContract, binary: Path, side: Side, base_url: str
         "model_providers.rondo_eval_provider.supports_websockets=false",
         "model_providers.rondo_eval_provider.request_max_retries=0",
         "model_providers.rondo_eval_provider.stream_max_retries=0",
-        'model_reasoning_effort="medium"',
+        f'model_reasoning_effort={json.dumps(provider["root_effort"])}',
+        *(
+            (f"model_catalog_json={json.dumps(str(model_catalog_path))}",)
+            if model_catalog_path is not None
+            else ()
+        ),
         *common_multi_agent_v2_override_items(
             side,
             product,
-            subagent_model="gpt-5.6-terra",
-            subagent_effort="medium",
-            max_concurrency=4,
+            subagent_model=str(provider["member_model"]),
+            subagent_effort=str(provider["member_effort"]),
+            max_concurrency=int(execution["max_concurrent_threads_per_session"]),
         ),
         f"developer_instructions={json.dumps(contract.policy)}",
     )
@@ -302,7 +360,7 @@ def _command(contract: CampaignContract, binary: Path, side: Side, base_url: str
         "--ignore-user-config",
         "--skip-git-repo-check",
         "--model",
-        "gpt-5.6-terra",
+        str(provider["root_model"]),
         "--json",
         "--enable",
         "unified_exec",
@@ -311,6 +369,55 @@ def _command(contract: CampaignContract, binary: Path, side: Side, base_url: str
         command.extend(("-c", item))
     command.extend(("--", "Finish this local loopback turn without changing files."))
     return command
+
+
+def _command_projection(
+    contract: CampaignContract,
+    *,
+    model_catalog_identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Body-free statement of the exact model and concurrency CLI projection.
+
+    The loopback makes one Root request. Member and Guardian values are proven
+    as command/config projection here; no synthetic member or Guardian request
+    is claimed.
+    """
+
+    provider = contract.lock["provider"]
+    execution = contract.lock["execution"]
+    value = {
+        "root_model": provider["root_model"],
+        "root_effort": provider["root_effort"],
+        "member_model": provider["member_model"],
+        "member_effort": provider["member_effort"],
+        "guardian_model": provider["guardian_model"],
+        "guardian_effort": provider["guardian_effort"],
+        "max_concurrent_threads_per_session": execution[
+            "max_concurrent_threads_per_session"
+        ],
+        "provider_request_concurrency": execution["provider_request_concurrency"],
+        "approval_policy": execution["approval_policy"],
+        "sandbox_mode": execution["sandbox_mode"],
+        "root_request_observed": True,
+        "member_request_observed": False,
+        "guardian_request_observed": False,
+    }
+    if model_catalog_identity is not None:
+        if (
+            model_catalog_identity.get("main_model") != provider["root_model"]
+            or model_catalog_identity.get("guardian_model")
+            != provider["guardian_model"]
+            or model_catalog_identity.get("override_target_slug")
+            != provider["root_model"]
+        ):
+            raise LoopbackError("shared model catalog projection differs")
+        value.update(
+            {
+                "model_catalog_sha256": model_catalog_identity["sha256"],
+                "guardian_projection_source": "shared_model_catalog_override",
+            }
+        )
+    return value
 
 
 def _contains_exact_string(value: object, expected: str) -> bool:

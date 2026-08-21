@@ -60,11 +60,37 @@ class StoreError(ValueError):
 
 
 class RehearsalStore:
-    def __init__(self, common_root: Path, namespace: str) -> None:
+    def __init__(
+        self,
+        common_root: Path,
+        namespace: str,
+        *,
+        ignored_root: str = "eval-data/plan-049",
+        max_infra_attempts_per_slot: int | None = 5,
+        max_infra_attempts_total: int | None = 40,
+    ) -> None:
         if not _NAMESPACE.fullmatch(namespace):
             raise StoreError("Plan 049 namespace is invalid")
         common = Path(common_root).resolve()
-        self.root = common / "eval-data" / "plan-049" / "rehearsal" / namespace
+        relative = Path(ignored_root)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or relative.parts[0] != "eval-data"
+            or ".." in relative.parts
+        ):
+            raise StoreError("campaign ignored root is invalid")
+        for value, label in (
+            (max_infra_attempts_per_slot, "slot infra attempt limit"),
+            (max_infra_attempts_total, "global infra attempt limit"),
+        ):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                raise StoreError(f"campaign {label} is invalid")
+        self._max_infra_attempts_per_slot = max_infra_attempts_per_slot
+        self._max_infra_attempts_total = max_infra_attempts_total
+        self.root = common / relative / "rehearsal" / namespace
         self.archive_path = self.root / "records.jsonl"
         self.ledger_path = self.root / "rehearsal-ledger.json"
         self.aggregate_path = self.root / "aggregate.json"
@@ -122,10 +148,16 @@ class RehearsalStore:
         if isinstance(claim, dict) and claim.get("status") in {"claimed", "executing"}:
             return int(claim["attempt"]), str(claim["run_id"]), str(claim["status"])
         attempted = max((int(record["attempt"]) for record in records), default=0)
-        if attempted >= 5:
+        if (
+            self._max_infra_attempts_per_slot is not None
+            and attempted >= self._max_infra_attempts_per_slot
+        ):
             raise StoreError("Plan 049 slot exhausted its infra attempt limit")
         global_infra = sum(record["outcome"] == "infra_failed" for record in self.records())
-        if global_infra >= 40:
+        if (
+            self._max_infra_attempts_total is not None
+            and global_infra >= self._max_infra_attempts_total
+        ):
             raise StoreError("Plan 049 exhausted its global infra attempt limit")
         attempt = attempted + 1
         run_id = run_id_for_attempt(attempt)

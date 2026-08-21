@@ -303,27 +303,39 @@ You must use teammates to carry out genuine multi-agent collaboration on this ta
       合并后 `main` 与 050 分支共同基线为 `38e922e736f236e922c114d81a205d2d9f65b10f`，未推送。
 - [x] 已冻结本计划的研究问题、三题身份、明确 collaboration policy 及 hash、`high` effort、公平运行条件、六槽顺序、
       分类/恢复/费用语义、A/B 授权门、资源边界和轻量复用原则。
+- [x] 用户已明确授权阶段 A；已冻结 `multi-explicit-collaboration-v1` lock/taskset/policy/replay fixture，建立独立
+      `plan050-*` run/attempt/batch、`plan-050-rehearsal-v1` / `plan-050-paid-v1` namespace 和
+      `eval-data/plan-050/` ignored 根，Plan 049 的合同与既有 paid 状态未改写。
+- [x] 已完成六槽 dry-run、fake/replay、确定性三题案例/总览和两侧冻结二进制零 API loopback；共同 policy、共同
+      Multi-Agent V2 工具面、Root `terra/high` 请求、成员 `terra/high` CLI 投影与 Guardian `terra/high` 共同
+      model-catalog 投影均已机械核对。loopback 只观察到 Root 请求，成员/Guardian 如实标为配置投影。
+- [x] 已完成实际预算 receipt 绑定、正式入口负门禁、共享 runner/账本/resume 的临时离线注入测试；阶段 A 未读取密钥
+      正文，未创建正式 paid receipt/ledger/run，未调用真实 provider、Docker、Cargo 或本地模型，费用为 0。
 
 ### 当前工作
 
-- 只完成 Plan 050 execplan 的制定、审查与本地提交。未开始阶段 A/B，未调用真实 API、Docker、模型或 Cargo，未创建
-  Plan 050 ignored campaign 状态。
+- 阶段 A 实现、定向自检和 ignored rehearsal/loopback 证据已完成，当前等待本轮上下文独立的审查者复核；在该复核
+  明确通过前只称 `paid-ready-candidate`，不称最终 `paid-ready`。
 
 ### 本任务剩余步骤
 
-- 获得用户明确的阶段 A 执行授权后，在同一 050 工作树落地机器合同、窄接线、定向测试和彩排。
-- 执行者自检并提交；独立审查阶段 A，形成 `paid-ready` 或 `blocked` 结论及阶段 B 启动清单。
+- 提交阶段 A 候选，由上下文独立审查者复核合同、测试、离线证据、付费负门禁和 body-free 边界；真实 finding 窄修并
+  重跑，直至 `paid-ready` 或确认原则 blocker。
 - 仅在用户另行明确授权阶段 B 和实际费用上限后，串行运行六槽并完成结算、三份案例、总览和最终独立验收。
 - 阶段 B 最终完成后更新权威文档与历史记录，提交 050 分支；合并、推送和关闭继续等待用户授权。
 
 ### 阻塞项
 
-- 阶段 A 与阶段 B 均尚未获得执行授权；这是预期授权门，不是已知技术 blocker。
+- 无已知阶段 A 技术 blocker；阶段 B 的独立开始授权与实际总预算尚未提供，这是预期授权门。
 
 ### 当前验收状态
 
-- `planning-complete`：计划合同已制定；阶段 A `paid-ready` 和阶段 B 结果均未声称。
-- 本轮没有运行测试、Docker、Cargo、模型或 API；没有产生费用。
+- `paid-ready-candidate`：六槽 fake rehearsal 为 4 成功、2 有效失败、0 infra，确定性案例/总览完整；最终 loopback
+  namespace 为 `phase-a-final-v3`，两侧各 1 个本地回环 Root 请求，policy/tool/model 投影一致。
+- 定向回归共 216 项：214 通过、2 项因未提供既有真实 Plan 049 样本路径按预期跳过；无失败。范围覆盖 Plan 050、
+  Plan 049 共享编排、预算代理、Terminal-Bench、Team Lens 与 Multi 工具面，未运行全量测试。
+- readiness 复算得到 6/6 terminal、无缺槽/半对，且 `eval-data/plan-050/paid/` 不存在。阶段 A 未运行真实 API、Docker、
+  Cargo、模型或全 workspace 测试，没有产生费用；最终结论仍待独立审查。
 
 ### 交接边界
 

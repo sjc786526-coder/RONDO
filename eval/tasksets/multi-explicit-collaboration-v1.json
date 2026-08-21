@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "taskset_id": "multi-explicit-collaboration-v1",
+  "catalog": "eval/tasksets/p2-b7-canary-catalog-v4.json",
+  "catalog_sha256": "00b83e4435218de730c25fcbc8fd69cebc0cee36db433a4b305076cb1e157ddf",
+  "terminal_bench_commit": "ffccbe05ee73a9d59518217f294ad711bda39304",
+  "terminal_bench_taskset_sha256": "2a9f9e3400f38606bacd71a220d8abb595a108ef3622556e8684dadbeb03a61b",
+  "case_pairs": [
+    {
+      "pair_id": "C01",
+      "task_id": "terminal-bench/sqlite-db-truncate",
+      "side_order": ["codex", "rondo"]
+    },
+    {
+      "pair_id": "C02",
+      "task_id": "terminal-bench/headless-terminal",
+      "side_order": ["rondo", "codex"]
+    },
+    {
+      "pair_id": "C03",
+      "task_id": "terminal-bench/extract-elf",
+      "side_order": ["codex", "rondo"]
+    }
+  ]
+}

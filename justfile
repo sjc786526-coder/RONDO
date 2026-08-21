@@ -96,6 +96,113 @@ eval-plan049-ready namespace="phase-a-final" loopback_namespace="phase-a-final":
         python -B -m rondo_eval.proactive_eval ready --namespace "{{namespace}}" \
         --loopback-namespace "{{loopback_namespace}}"
 
+# Plan 050 Phase A uses its own immutable contract and ignored namespace. All
+# five entries below are offline and clear ambient proxy settings.
+eval-plan050-dry-run namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.explicit_eval dry-run --namespace "{{namespace}}"
+
+eval-plan050-fake namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.explicit_eval fake --namespace "{{namespace}}"
+
+eval-plan050-loopback namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.explicit_eval loopback --namespace "{{namespace}}"
+
+eval-plan050-replay:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.explicit_eval replay
+
+eval-plan050-ready namespace="phase-a-final" loopback_namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.explicit_eval ready --namespace "{{namespace}}" \
+        --loopback-namespace "{{loopback_namespace}}"
+
+# This recipe exists for the separately authorized Phase B. Exact phrases,
+# actual cap, balance, clean reviewed commit, and the shared watchdog are all
+# required before the Python entry can touch a secret, Docker, or paid state.
+eval-plan050-phase-b-paid authorization="" phase_b_action="" actual_cap="" balance="" local_confirmation="" review_commit="" namespace="phase-a-final" loopback_namespace="phase-a-final":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    test "{{authorization}}" = "AUTHORIZE RONDO PLAN 050 PHASE B REAL API AND DOCKER" || { echo "Plan 050 Phase B authorization is absent" >&2; exit 78; }
+    test "{{phase_b_action}}" = "START RONDO PLAN 050 FIXED SIX-SLOT CASE" || { echo "Plan 050 Phase B action is absent" >&2; exit 78; }
+    actual_cap_value="{{actual_cap}}"
+    balance_value="{{balance}}"
+    [[ "$actual_cap_value" =~ ^(([1-9]|[1-9][0-9])([.][0-9]{1,2})?|100([.]0{1,2})?)$ ]] || { echo "Plan 050 actual cap is invalid" >&2; exit 78; }
+    [[ "$balance_value" =~ ^[0-9]+([.][0-9]{1,2})?$ ]] || { echo "Plan 050 balance confirmation is invalid" >&2; exit 78; }
+    cap_whole="${actual_cap_value%%.*}"
+    cap_fraction="${actual_cap_value#*.}"
+    [[ "$cap_fraction" = "$actual_cap_value" ]] && cap_fraction="00"
+    [[ ${#cap_fraction} -eq 1 ]] && cap_fraction="${cap_fraction}0"
+    balance_whole="${balance_value%%.*}"
+    balance_fraction="${balance_value#*.}"
+    [[ "$balance_fraction" = "$balance_value" ]] && balance_fraction="00"
+    [[ ${#balance_fraction} -eq 1 ]] && balance_fraction="${balance_fraction}0"
+    cap_cents=$((10#$cap_whole * 100 + 10#$cap_fraction))
+    balance_cents=$((10#$balance_whole * 100 + 10#$balance_fraction))
+    (( balance_cents >= cap_cents )) || { echo "Plan 050 confirmed balance is below the actual cap" >&2; exit 78; }
+    test "{{local_confirmation}}" = "CONFIRM RONDO PLAN 050 LOCAL PAID CONDITIONS READY" || { echo "Plan 050 local paid confirmation is absent" >&2; exit 78; }
+    test "{{review_commit}}" = "$(git rev-parse HEAD)" || { echo "Plan 050 independent review commit differs" >&2; exit 78; }
+    RONDO_BUILD_METRICS_DIR="$common_root/eval-data/plan-050/watchdog" \
+    "$PWD/scripts/with-build-lock.sh" \
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.explicit_eval phase-b-paid \
+        --authorize-phase-b "{{authorization}}" \
+        --phase-b-action "{{phase_b_action}}" \
+        --actual-cap-usd "{{actual_cap}}" \
+        --confirmed-balance-usd "{{balance}}" \
+        --confirm-local-conditions "{{local_confirmation}}" \
+        --independent-review-commit "{{review_commit}}" \
+        --namespace "{{namespace}}" \
+        --loopback-namespace "{{loopback_namespace}}"
+
 # Authorized production entry.  The shell repeats the non-secret phrases so an
 # unauthorized invocation never enters the heavy-operation watchdog.  The
 # Python entry independently revalidates every gate before secret/formal state.

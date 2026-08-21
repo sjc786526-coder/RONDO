@@ -1077,24 +1077,40 @@ def _load_developer_instructions(
         policy = raw.decode("utf-8")
     except (OSError, UnicodeError) as exc:
         raise AdapterError("developer instructions are unavailable") from exc
-    if (
-        not path.is_absolute()
-        or path.is_symlink()
-        or not stat.S_ISREG(metadata.st_mode)
-        or tuple(path.parts[-4:])
-        != (
+    suffix = tuple(path.parts[-4:])
+    allowed_suffixes = {
+        (
             "eval",
             "templates",
             "multi-proactive-delegation",
             "proactive-policy-v1.md",
-        )
+        ),
+        (
+            "eval",
+            "templates",
+            "multi-explicit-collaboration",
+            "explicit-collaboration-policy-v1.md",
+        ),
+    }
+    if (
+        not path.is_absolute()
+        or path.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+        or suffix not in allowed_suffixes
         or not raw
         or len(raw) > 16 * 1024
         or not re.fullmatch(r"[0-9a-f]{64}", digest_value)
         or hashlib.sha256(raw).hexdigest() != digest_value
     ):
         raise AdapterError("developer instructions identity differs")
-    return str(path), digest_value, policy.rstrip("\n")
+    # Plan 049 historically projected the policy without its file terminator.
+    # Plan 050 freezes one exact trailing LF as part of the runtime contract.
+    projected = (
+        policy
+        if suffix[-2] == "multi-explicit-collaboration"
+        else policy.rstrip("\n")
+    )
+    return str(path), digest_value, projected
 
 
 def _validate_rollout_trace_root(value: str | None, *, required: bool) -> str | None:
