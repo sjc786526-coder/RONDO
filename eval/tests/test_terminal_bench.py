@@ -534,6 +534,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("--upload", argv)
         self.assertIn("--delete", argv)
         self.assertNotIn("--max-retries", argv)
+        self.assertNotIn("--disable-verification", argv)
         self.assertEqual(
             Path(argv[argv.index("--trials-dir") + 1]),
             prepared.command.trials_dir,
@@ -648,6 +649,18 @@ class TerminalBenchTests(unittest.TestCase):
                     replace(observed, cap_drop=observed_cap_drop),
                     ("name=seccomp,profile=builtin",),
                 )
+
+    def test_stub_request_disables_only_post_agent_verification(self) -> None:
+        materializer = FakeMaterializer(self.root / "fake-no-verifier")
+        materializer.root.mkdir()
+        request = replace(self.request(), disable_verification=True)
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+
+        self.assertTrue(prepared.command.disable_verification)
+        self.assertEqual(prepared.command.argv.count("--disable-verification"), 1)
+        prepared.validate()
 
     def test_real_harbor_factory_can_construct_both_custom_agents(self) -> None:
         try:

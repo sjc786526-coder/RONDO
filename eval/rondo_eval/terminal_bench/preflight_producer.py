@@ -352,16 +352,19 @@ async def capture_side_requests(
     work_root.mkdir(parents=True, mode=0o700)
     server = server_factory()
     with server:
-        request = campaign_terminal_bench_request(
-            identity=identity,
-            side=side,
-            task=task,
-            binary=binary,
-            common_root=paths.common_root,
-            work_root=work_root,
-            docker_task_id=stub_id,
-            seccomp_profile=seccomp_profile,
-            budget_usd=float(RUN_CAP_USD),
+        request = replace(
+            campaign_terminal_bench_request(
+                identity=identity,
+                side=side,
+                task=task,
+                binary=binary,
+                common_root=paths.common_root,
+                work_root=work_root,
+                docker_task_id=stub_id,
+                seccomp_profile=seccomp_profile,
+                budget_usd=float(RUN_CAP_USD),
+            ),
+            disable_verification=True,
         )
         projected = project_shared_model_catalog(
             config,
@@ -425,6 +428,15 @@ def _validate_stub_projection(
     spec = getattr(prepared, "spec", None)
     if spec is None:
         raise PreflightProductionError("preflight projection is incomplete")
+    command = getattr(prepared, "command", None)
+    if (
+        command is None
+        or getattr(command, "disable_verification", None) is not True
+        or "--disable-verification" not in getattr(command, "argv", ())
+    ):
+        raise PreflightProductionError(
+            "preflight projection did not disable the post-agent verifier"
+        )
     if (
         spec.task_id != task.task_id
         or spec.task_image_digest != task.image_digest

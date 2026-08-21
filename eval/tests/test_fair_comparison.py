@@ -2207,7 +2207,10 @@ class PreflightProducerTests(unittest.TestCase):
         )
         prepared = PreparedTerminalBenchRun(
             spec=spec,
-            command=object(),  # type: ignore[arg-type]
+            command=SimpleNamespace(
+                disable_verification=True,
+                argv=("--disable-verification",),
+            ),  # type: ignore[arg-type]
             adapter=object(),  # type: ignore[arg-type]
             materialized_task=object(),  # type: ignore[arg-type]
         )
