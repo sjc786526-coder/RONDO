@@ -31,6 +31,7 @@ from rondo_eval.explicit_eval.paid import (  # noqa: E402
     PHASE_B_ACTION,
     PHASE_B_AUTHORIZATION,
     PaidGuardError,
+    PaidResources,
     PaidRuntimeDependencies,
     enter_paid_phase,
     run_authorized_paid_phase,
@@ -39,6 +40,8 @@ from rondo_eval.explicit_eval.rehearsal import plan050_store, run_fake  # noqa: 
 from rondo_eval.explicit_eval.report import (  # noqa: E402
     ReportError,
     build_case_outputs,
+    finalize_paid_case_outputs,
+    paid_case_output_state,
     validate_case,
     validate_overview,
 )
@@ -354,6 +357,112 @@ class ExplicitEvalTest(unittest.TestCase):
         )
         assert_body_free(fixture)
 
+    def test_paid_cases_require_complete_explicit_impact_assessments(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            common_root = Path(raw) / "common"
+            rehearsal = run_fake(
+                self.contract,
+                common_root=common_root,
+                namespace="impact-source",
+            )
+            paid = copy.deepcopy(rehearsal)
+            paid.pop("case_outputs")
+            paid["evidence_kind"] = "real_api"
+            paid["identity_class"] = "paid"
+            rows = {row["slot_id"]: row for row in paid["runs"]}
+            for row in rows.values():
+                row["run_id"] = row["run_id"].replace("rehearsal", "paid")
+                row["trace_status"] = "available"
+            for slot_id in (
+                "case-c01-codex",
+                "case-c01-rondo",
+                "case-c02-codex",
+            ):
+                rows[slot_id]["root_spawn_accept_count"] = 1
+                rows[slot_id]["member_activity_observed"] = True
+                rows[slot_id]["member_result_returned"] = True
+            rows["case-c02-codex"]["trace_status"] = "partial"
+            paid["activation_observed"] = True
+
+            paid_root = (
+                common_root
+                / "eval-data/plan-050/paid/plan-050-paid-v1"
+            )
+            paid_root.mkdir(parents=True)
+            aggregate_path = paid_root / "aggregate.json"
+            aggregate_path.write_text(
+                json.dumps(paid, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+            state = paid_case_output_state(paid)
+            self.assertEqual(state["status"], "awaiting_impact_assessment")
+            self.assertEqual(len(state["required_slot_ids"]), 6)
+            self.assertEqual(
+                state["interpretation_boundary"],
+                "typed_trace_operational_not_content_quality",
+            )
+
+            assessments = {slot_id: "not_observed" for slot_id in rows}
+            assessments["case-c01-codex"] = "observed"
+            assessments["case-c02-codex"] = "unknown"
+            missing = dict(assessments)
+            missing.pop("case-c03-rondo")
+            with self.assertRaisesRegex(ReportError, "fixed six slots"):
+                finalize_paid_case_outputs(
+                    self.contract,
+                    common_root=common_root,
+                    impact_assessments=missing,
+                )
+            wrong = dict(missing)
+            wrong["case-c99-codex"] = "not_observed"
+            with self.assertRaisesRegex(ReportError, "fixed six slots"):
+                finalize_paid_case_outputs(
+                    self.contract,
+                    common_root=common_root,
+                    impact_assessments=wrong,
+                )
+            invalid_observed = dict(assessments)
+            invalid_observed["case-c03-rondo"] = "observed"
+            with self.assertRaisesRegex(ReportError, "collaboration evidence"):
+                finalize_paid_case_outputs(
+                    self.contract,
+                    common_root=common_root,
+                    impact_assessments=invalid_observed,
+                )
+            invalid_unknown = dict(assessments)
+            invalid_unknown["case-c03-rondo"] = "unknown"
+            with self.assertRaisesRegex(ReportError, "must be not_observed"):
+                finalize_paid_case_outputs(
+                    self.contract,
+                    common_root=common_root,
+                    impact_assessments=invalid_unknown,
+                )
+
+            finalized = finalize_paid_case_outputs(
+                self.contract,
+                common_root=common_root,
+                impact_assessments=assessments,
+            )
+            self.assertEqual(finalized["status"], "finalized")
+            self.assertEqual(
+                finalized["assessment_counts"],
+                {"not_observed": 4, "observed": 1, "unknown": 1},
+            )
+            self.assertEqual(
+                finalized,
+                finalize_paid_case_outputs(
+                    self.contract,
+                    common_root=common_root,
+                    impact_assessments=assessments,
+                ),
+            )
+            overview = json.loads((paid_root / "overview.json").read_text("utf-8"))
+            self.assertEqual(
+                overview["impact_chain_statuses"],
+                {"not_observed": 4, "observed": 1, "unknown": 1},
+            )
+            assert_body_free(finalized)
+
     def test_loopback_command_projects_high_roles_without_unsupported_config(
         self,
     ) -> None:
@@ -585,6 +694,88 @@ class ExplicitEvalTest(unittest.TestCase):
             runtime_config.assert_not_called()
             secret.assert_not_called()
             formal_store.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as raw:
+            paid_aggregate = run_fake(
+                self.contract,
+                common_root=Path(raw) / "common",
+                namespace="paid-entry-state",
+            )
+            paid_aggregate.pop("case_outputs")
+            paid_aggregate["evidence_kind"] = "real_api"
+            paid_aggregate["identity_class"] = "paid"
+            for row in paid_aggregate["runs"]:
+                row["run_id"] = row["run_id"].replace("rehearsal", "paid")
+                row["trace_status"] = "available"
+
+            lock_guard = mock.Mock()
+            lock_guard.is_held.return_value = True
+            resources = PaidResources(
+                counter=mock.Mock(),
+                lock_guard=lock_guard,
+                lease=mock.Mock(),
+            )
+            success_dependencies = PaidRuntimeDependencies(
+                acquire_docker_gate=mock.Mock(return_value=resources)
+            )
+            fake_store = mock.Mock()
+            fake_store.paths.ledger = Path(raw) / "ledger.json"
+            ledger_context = mock.MagicMock()
+            ledger_context.__enter__.return_value = mock.Mock()
+            with (
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.harness_identity",
+                    return_value={
+                        "harness_commit": "a" * 40,
+                        "harness_dirty": False,
+                    },
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.require_phase_a_evidence"
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.load_runtime_config"
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.plan049_provider_projection",
+                    return_value=self._offline_provider(),
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.require_safe_formal_prefix"
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.load_provider_secret",
+                    return_value=("PLAN050_TEST_API_KEY", "offline-test"),
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.FormalStore",
+                    return_value=fake_store,
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.open_paid_ledger",
+                    return_value=ledger_context,
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.Plan049TerminalBenchExecutor"
+                ),
+                mock.patch(
+                    "rondo_eval.explicit_eval.paid.run_formal_campaign",
+                    return_value=paid_aggregate,
+                ),
+            ):
+                result = run_authorized_paid_phase(
+                    **{
+                        **call_base,
+                        "dependencies": success_dependencies,
+                    }
+                )
+            self.assertEqual(
+                result["case_outputs"]["status"],
+                "awaiting_impact_assessment",
+            )
+            self.assertEqual(
+                len(result["case_outputs"]["required_slot_ids"]), 6
+            )
 
     def test_shared_formal_state_machine_runs_offline_and_resumes_idempotently(
         self,

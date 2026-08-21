@@ -22,7 +22,7 @@ from ..proactive_eval.formal import (
 )
 from .contract import CampaignContract, ContractError, load_contract
 from .readiness import require_phase_a_evidence
-from .report import build_case_outputs, write_case_outputs
+from .report import paid_case_output_state
 
 
 PHASE_B_AUTHORIZATION = "AUTHORIZE RONDO PLAN 050 PHASE B REAL API AND DOCKER"
@@ -224,6 +224,7 @@ def run_authorized_paid_phase(
             executor=executor,
             phase="case",
         )
-    cases, overview = build_case_outputs(aggregate)
-    outputs = write_case_outputs(store.paths.root, cases, overview)
-    return {**aggregate, "case_outputs": outputs}
+    # The trace-backed influence judgment can only be made after all Team Lens
+    # artifacts exist.  Do not freeze six implicit ``unknown`` values here;
+    # the local-only finalize entry requires one explicit assessment per slot.
+    return {**aggregate, "case_outputs": paid_case_output_state(aggregate)}

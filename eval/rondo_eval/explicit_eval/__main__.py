@@ -15,6 +15,7 @@ from .contract import REPO_ROOT, load_contract
 from .paid import PaidGuardError, run_authorized_paid_phase
 from .readiness import ReadinessError, require_phase_a_evidence
 from .rehearsal import run_fake
+from .report import ReportError, finalize_paid_case_outputs
 from .schedule import dry_run_projection
 
 
@@ -22,7 +23,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="rondo-eval-plan050")
     parser.add_argument(
         "command",
-        choices=("dry-run", "fake", "loopback", "replay", "ready", "phase-b-paid"),
+        choices=(
+            "dry-run",
+            "fake",
+            "loopback",
+            "replay",
+            "ready",
+            "finalize-cases",
+            "phase-b-paid",
+        ),
     )
     parser.add_argument("--namespace", default="phase-a-final")
     parser.add_argument("--loopback-namespace", default=None)
@@ -32,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--confirmed-balance-usd", default=None)
     parser.add_argument("--confirm-local-conditions", default=None)
     parser.add_argument("--independent-review-commit", default=None)
+    parser.add_argument("--impact-assessments-json", default=None)
     args = parser.parse_args(argv)
 
     paths = RepoPaths.discover(REPO_ROOT)
@@ -121,6 +131,21 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
         return 0
+    if args.command == "finalize-cases":
+        try:
+            assessments = json.loads(args.impact_assessments_json or "null")
+            if not isinstance(assessments, dict):
+                raise ReportError("impact assessments must be a JSON object")
+            result = finalize_paid_case_outputs(
+                contract,
+                common_root=paths.common_root,
+                impact_assessments=assessments,
+            )
+        except (json.JSONDecodeError, ReportError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 77
+        _print(result)
+        return 0
 
     try:
         result = run_authorized_paid_phase(
@@ -141,7 +166,11 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
         return 78
     _print(result)
-    return 0 if not result.get("missing_slot_ids") else 1
+    if result.get("missing_slot_ids"):
+        return 1
+    if result.get("case_outputs", {}).get("status") == "awaiting_impact_assessment":
+        return 3
+    return 0
 
 
 def _print(value: object) -> None:

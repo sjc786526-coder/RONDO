@@ -159,6 +159,23 @@ eval-plan050-ready namespace="phase-a-final" loopback_namespace="phase-a-final":
         python -B -m rondo_eval.explicit_eval ready --namespace "{{namespace}}" \
         --loopback-namespace "{{loopback_namespace}}"
 
+# Local-only Phase B report closure. The six status values must be decided
+# from the completed Team Lens artifacts; this entry never loads a secret,
+# starts Docker, or sends a provider request.
+eval-plan050-finalize-cases impact_assessments_json="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "eval environment is missing; run 'just eval-sync' first" >&2; exit 2; }
+    test -n '{{impact_assessments_json}}' || { echo "Plan 050 impact assessments are absent" >&2; exit 77; }
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.explicit_eval finalize-cases \
+        --impact-assessments-json '{{impact_assessments_json}}'
+
 # This recipe exists for the separately authorized Phase B. Exact phrases,
 # actual cap, balance, clean reviewed commit, and the shared watchdog are all
 # required before the Python entry can touch a secret, Docker, or paid state.

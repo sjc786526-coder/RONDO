@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..proactive_eval.store import assert_body_free
+from .contract import CampaignContract
 
 
 _PAIR_ID = re.compile(r"C0[1-3]\Z")
@@ -144,6 +145,111 @@ def write_case_outputs(
         "case_digests": digests,
         "overview_sha256": hashlib.sha256(overview_payload).hexdigest(),
     }
+
+
+def paid_case_output_state(aggregate: Mapping[str, Any]) -> dict[str, Any]:
+    """Describe whether a paid aggregate can enter explicit impact review."""
+
+    if (
+        aggregate.get("evidence_kind") != "real_api"
+        or aggregate.get("identity_class") != "paid"
+    ):
+        raise ReportError("paid case aggregate identity differs")
+    cases, overview = build_case_outputs(aggregate)
+    complete = (
+        overview["effective_run_count"] == 6
+        and overview["complete_case_count"] == 3
+        and aggregate.get("missing_slot_ids") == []
+        and aggregate.get("partial_pair_ids") == []
+        and all(case["complete"] is True for case in cases.values())
+    )
+    required = sorted(
+        row["slot_id"] for case in cases.values() for row in case["sides"]
+    )
+    value = {
+        "schema_version": 1,
+        "status": (
+            "awaiting_impact_assessment" if complete else "campaign_incomplete"
+        ),
+        "required_slot_ids": required,
+        "allowed_statuses": sorted(_IMPACT),
+        "interpretation_boundary": "typed_trace_operational_not_content_quality",
+    }
+    assert_body_free(value)
+    return value
+
+
+def finalize_paid_case_outputs(
+    contract: CampaignContract,
+    *,
+    common_root: Path,
+    impact_assessments: Mapping[str, str],
+) -> dict[str, Any]:
+    """Finalize paid cases only after all six explicit Team Lens assessments exist."""
+
+    root = _paid_case_root(contract, common_root=common_root)
+    aggregate_path = root / str(contract.lock["artifacts"]["aggregate"])
+    aggregate_raw = _read_regular(aggregate_path, "paid aggregate")
+    try:
+        aggregate = json.loads(aggregate_raw)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ReportError("paid aggregate is unreadable") from exc
+    if not isinstance(aggregate, dict) or aggregate_raw != _canonical(aggregate):
+        raise ReportError("paid aggregate is not canonical")
+    assert_body_free(aggregate)
+    if (
+        aggregate.get("lock_id") != contract.lock_id
+        or aggregate.get("lock_sha256") != contract.lock_sha256
+        or aggregate.get("policy_sha256") != contract.policy_sha256
+    ):
+        raise ReportError("paid aggregate contract identity differs")
+
+    state = paid_case_output_state(aggregate)
+    if state["status"] != "awaiting_impact_assessment":
+        raise ReportError("paid campaign is incomplete")
+    impact = dict(impact_assessments)
+    expected_slots = set(state["required_slot_ids"])
+    if set(impact) != expected_slots:
+        raise ReportError("impact assessments do not cover the fixed six slots")
+    assert_body_free(impact)
+
+    preliminary, _overview = build_case_outputs(aggregate)
+    rows = {
+        row["slot_id"]: row
+        for case in preliminary.values()
+        for row in case["sides"]
+    }
+    for slot_id, status in impact.items():
+        _slot_id(slot_id)
+        _choice(status, _IMPACT, "impact chain status")
+        row = rows[slot_id]
+        if status == "observed" and (
+            row["collaboration_status"] != "collaboration_observed"
+            or row["observation_status"] != "available"
+        ):
+            raise ReportError("observed impact lacks complete collaboration evidence")
+        if status == "unknown" and (
+            row["observation_status"] == "available"
+            and row["collaboration_status"] == "policy_noncompliance"
+        ):
+            raise ReportError("complete non-collaboration evidence must be not_observed")
+
+    cases, overview = build_case_outputs(
+        aggregate, impact_assessments=impact
+    )
+    outputs = write_case_outputs(root, cases, overview)
+    result = {
+        "schema_version": 1,
+        "status": "finalized",
+        "assessment_counts": {
+            status: sum(value == status for value in impact.values())
+            for status in sorted(_IMPACT)
+        },
+        "interpretation_boundary": "typed_trace_operational_not_content_quality",
+        **outputs,
+    }
+    assert_body_free(result)
+    return result
 
 
 def validate_case(value: Mapping[str, Any]) -> None:
@@ -387,6 +493,33 @@ def _write_or_verify(path: Path, payload: bytes) -> None:
     finally:
         os.close(descriptor)
     os.replace(temporary, path)
+
+
+def _paid_case_root(contract: CampaignContract, *, common_root: Path) -> Path:
+    common = Path(common_root).resolve()
+    ignored_root = Path(str(contract.lock["artifacts"]["ignored_root"]))
+    namespace = str(contract.lock["budget"]["formal_namespace"])
+    if ignored_root != Path("eval-data/plan-050") or namespace != "plan-050-paid-v1":
+        raise ReportError("paid case root identity differs")
+    parent = common / ignored_root / "paid"
+    root = parent / namespace
+    if root.resolve().parent != parent.resolve():
+        raise ReportError("paid case root escaped its ignored namespace")
+    if root.is_symlink() or not root.is_dir():
+        raise ReportError("paid case root is unavailable")
+    return root
+
+
+def _read_regular(path: Path, label: str) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise ReportError(f"{label} is unavailable")
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ReportError(f"{label} is unreadable") from exc
+    if len(raw) > 32 * 1024 * 1024:
+        raise ReportError(f"{label} is too large")
+    return raw
 
 
 def _canonical(value: Mapping[str, Any]) -> bytes:
