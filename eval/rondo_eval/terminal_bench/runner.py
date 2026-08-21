@@ -90,6 +90,9 @@ class TerminalBenchRequest:
     # Stub receipt production runs the real agent projection but does not need
     # the post-agent task verifier. Paid and oracle paths leave this false.
     disable_verification: bool = False
+    # Fast stub runs leave their environment for the outer supervisor to
+    # observe and remove. Paid runs keep Harbor's normal self-delete behavior.
+    delete_environment: bool = True
     # False only for the M-5 gate 2 attribution diagnostic: upstream V2 stays on
     # and the RONDO team layer is switched off. Never set on a run that produces
     # a non-degradation observation.
@@ -131,6 +134,7 @@ class HarborCommand:
     compose_contract: ComposeRunContract
     n_concurrent: int = 1
     disable_verification: bool = False
+    delete_environment: bool = True
 
     def validate(
         self,
@@ -151,6 +155,8 @@ class HarborCommand:
             raise TerminalBenchRunError("Terminal-Bench P1 permits one task and no retries")
         if not isinstance(self.disable_verification, bool):
             raise TerminalBenchRunError("Harbor verification mode is invalid")
+        if not isinstance(self.delete_environment, bool):
+            raise TerminalBenchRunError("Harbor environment cleanup mode is invalid")
         if self.trial_name != _trial_name(materialized.task_label, spec.side):
             raise TerminalBenchRunError("Harbor trial identity differs from the frozen run")
         if self.trials_dir != materialized.task_path.parent / "trials":
@@ -171,6 +177,7 @@ class HarborCommand:
             trial_name=self.trial_name,
             trials_dir=self.trials_dir,
             disable_verification=self.disable_verification,
+            delete_environment=self.delete_environment,
         )
         if self.argv != expected:
             raise TerminalBenchRunError("Harbor command differs from the frozen local-task form")
@@ -513,6 +520,8 @@ def prepare_terminal_bench_run(
         raise TerminalBenchRunError("Terminal-Bench container metric gate is invalid")
     if not isinstance(request.disable_verification, bool):
         raise TerminalBenchRunError("Terminal-Bench verification mode is invalid")
+    if not isinstance(request.delete_environment, bool):
+        raise TerminalBenchRunError("Terminal-Bench environment cleanup mode is invalid")
     _validate_frozen_model_catalog_request(config, request)
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
@@ -608,6 +617,7 @@ def prepare_terminal_bench_run(
             trial_name=trial_name,
             trials_dir=trials_dir,
             disable_verification=request.disable_verification,
+            delete_environment=request.delete_environment,
         ),
         cwd=EVAL_ROOT,
         env=(("HARBOR_TELEMETRY", "off"),),
@@ -627,6 +637,7 @@ def prepare_terminal_bench_run(
             require_container_metrics=request.require_container_metrics,
         ),
         disable_verification=request.disable_verification,
+        delete_environment=request.delete_environment,
     )
     prepared = PreparedTerminalBenchRun(
         spec=spec,
@@ -704,6 +715,7 @@ def _harbor_argv(
     trial_name: str,
     trials_dir: Path,
     disable_verification: bool = False,
+    delete_environment: bool = True,
 ) -> tuple[str, ...]:
     argv = [
         str(HARBOR_EXECUTABLE),
@@ -728,13 +740,10 @@ def _harbor_argv(
         argv.extend(("--agent-kwarg", f"{key}={value}"))
     if disable_verification:
         argv.append("--disable-verification")
-    argv.extend(
-        (
-            # Harbor may delete only the environment it creates for this one
-            # staged task; the exact label keeps outer ownership observable.
-            "--delete",
-        )
-    )
+    # A stub that finishes between supervisor samples stays observable until
+    # the supervisor performs its exact-label cleanup. Paid runs let Harbor
+    # delete only the environment it created for this staged task.
+    argv.append("--delete" if delete_environment else "--no-delete")
     return tuple(argv)
 
 

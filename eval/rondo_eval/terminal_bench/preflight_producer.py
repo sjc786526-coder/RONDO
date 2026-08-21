@@ -365,6 +365,7 @@ async def capture_side_requests(
                 budget_usd=float(RUN_CAP_USD),
             ),
             disable_verification=True,
+            delete_environment=False,
         )
         projected = project_shared_model_catalog(
             config,
@@ -432,10 +433,13 @@ def _validate_stub_projection(
     if (
         command is None
         or getattr(command, "disable_verification", None) is not True
+        or getattr(command, "delete_environment", None) is not False
         or "--disable-verification" not in getattr(command, "argv", ())
+        or "--no-delete" not in getattr(command, "argv", ())
+        or "--delete" in getattr(command, "argv", ())
     ):
         raise PreflightProductionError(
-            "preflight projection did not disable the post-agent verifier"
+            "preflight projection did not preserve the supervisor cleanup boundary"
         )
     if (
         spec.task_id != task.task_id

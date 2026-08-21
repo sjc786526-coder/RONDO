@@ -2209,7 +2209,8 @@ class PreflightProducerTests(unittest.TestCase):
             spec=spec,
             command=SimpleNamespace(
                 disable_verification=True,
-                argv=("--disable-verification",),
+                delete_environment=False,
+                argv=("--disable-verification", "--no-delete"),
             ),  # type: ignore[arg-type]
             adapter=object(),  # type: ignore[arg-type]
             materialized_task=object(),  # type: ignore[arg-type]

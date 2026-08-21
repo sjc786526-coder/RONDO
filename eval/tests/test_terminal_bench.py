@@ -654,12 +654,16 @@ class TerminalBenchTests(unittest.TestCase):
         materializer = FakeMaterializer(self.root / "fake-no-verifier")
         materializer.root.mkdir()
         request = replace(self.request(), disable_verification=True)
+        request = replace(request, delete_environment=False)
         prepared = prepare_terminal_bench_run(
             self.runtime_config(), request, materializer=materializer
         )
 
         self.assertTrue(prepared.command.disable_verification)
+        self.assertFalse(prepared.command.delete_environment)
         self.assertEqual(prepared.command.argv.count("--disable-verification"), 1)
+        self.assertEqual(prepared.command.argv.count("--no-delete"), 1)
+        self.assertNotIn("--delete", prepared.command.argv)
         prepared.validate()
 
     def test_real_harbor_factory_can_construct_both_custom_agents(self) -> None:
