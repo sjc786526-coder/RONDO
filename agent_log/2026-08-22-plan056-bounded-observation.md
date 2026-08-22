@@ -32,3 +32,10 @@
 
 v1 关闭后，用户把 Plan 056 累计预算提高到 100 USD，并授权真实 rehearsal 与可修复设施问题后的全新 campaign
 重启。v1 的费用、公共无效结果和私有工件继续保留；本日志不把后续 rehearsal 或最终 20/20 冒充为 v1 的续跑。
+
+rehearsal-v2 从全新 identity 干净启动，第 1、2 题完整发布，第 2 题确认 Team Lens 修复已跨过 v1 的旧投影故障。
+第 3 题的真实请求和 trial 完成后，收尾 Docker 事实命令在 30 秒采样窗口内连续失败；当前 campaign 因已发送 slot
+无法形成完整投影而关闭为 invalid，后 7 题未发送。v2 为 34 attempts、`0.569748 USD`，累计 `1.200813 USD`、
+reservation 0；容量门未触发，Docker/VHDX 增长为 0，最终无 Plan 056 容器、网络或卷。设施窄修将 Plan 056 的
+完整采样窗口提高到 60 秒、只读命令最多重试 4 次，保留实时和 fail-closed 语义；其他调用方默认不变。下一次
+rehearsal 使用 v3 全新 identity 从第一题重启。

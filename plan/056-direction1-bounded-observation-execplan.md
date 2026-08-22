@@ -215,16 +215,23 @@
 - 实测暴露的两个设施问题已窄修：持久化预算的只读 totals 汇总，以及 runtime-end 晚于 tool-end 时 Team Lens 的
   假阴性。后者只读重放第 2 题私有 trace 后 terminal availability 为 available，但已经关闭的无效 campaign
   不回滚。相关 Python 定向集合 69/69 通过。
+- 追加授权后的 rehearsal-v2 已从第一题干净启动：前 2 题完整发布且第 2 题通过 v1 的旧投影故障点；第 3 题请求与
+  Terminal-Bench trial 已完成，但收尾时 Docker 实时事实命令连续两次失败，因而按合同关闭为 invalid，未发送后续
+  7 题。v2 固定 34 attempts、`0.569748 USD`，Plan 056 累计 `1.200813 USD`，reservation 0；公共无效结果、
+  原始工件和资源收尾均保留。
+- Docker 失败没有触发容量/增长门，也没有遗留 Plan 056 容器、网络或卷。设施窄修保留实时、fail-closed 采样，
+  仅允许调用方设置有界 sample 总时限和只读命令重试次数；Plan 056 使用 60 秒、最多 4 次，其他调用方默认仍为
+  30 秒、2 次，并增加对应回归。
 
 ### 当前工作
 
-v1 已按原合同真实关闭并保留。用户随后把累计预算提高到 100 USD、授权真实 rehearsal 和可修复设施问题后的全新
-campaign 重启；当前正在把 task-budget 改为跨 identity 单调续接，并建立隔离的单轮 rehearsal 身份。
+v1 与 rehearsal-v2 均已按各自真实终态关闭并保留。当前正在冻结 rehearsal-v3；它将从第一题干净重启完整单轮，
+费用继续从 `1.200813 USD` 单调累计，不复用 v2 已发送 slot。
 
 ### 本任务剩余步骤
 
-1. 完成累计 100 USD envelope、多 campaign 身份和 rehearsal 语义的定向实现/回归；冻结 rehearsal 身份。
-2. 串行完成至少一次连续 10 题单轮真实 rehearsal，核对观测、投影、费用和资源收尾；修复真实问题并复验。
+1. 冻结 rehearsal-v3 身份并完成 10/10 零 API preflight。
+2. 串行完成一次连续 10 题单轮真实 rehearsal，核对观测、投影、费用和资源收尾；修复真实问题并复验。
 3. 提交并冻结最终被测源码，重新构建 binary manifest，创建全新正式 campaign，从第一题执行固定 20/20。
 4. 首个可信 20/20 形成候选或“无候选”结论后停止付费运行，同步公共结果、累计费用、资源、WBS、历史和日志。
 5. 完成上下文干净的独立只读验收；整改真实 finding，必要时废弃受影响 campaign 并在余额内干净重跑。
@@ -238,8 +245,8 @@ campaign 重启；当前正在把 task-budget 改为跨 identity 单调续接，
 
 - v1：invalid 并永久保留；20 固定 slot 中 1 个发布、第 2 个已发送后完整性失败、18 个未启动；25 attempts、
   `0.631065 USD`、无候选结论。
-- 设施整改：只读预算 totals 与 Team Lens 合法事件交错已修；追加授权所需的跨 campaign 100 USD 续接与 rehearsal
-  身份正在实现，新的真实请求尚未发送。
+- 设施整改：只读预算 totals、Team Lens 合法事件交错与 Plan 056 Docker 事实采集的有界瞬时恢复均已修并通过
+  定向回归；rehearsal-v2 的 34 attempts/`0.569748 USD` 已结算，新的 v3 请求尚未发送。
 - 最终测量：完整单轮 rehearsal、正式 binary 复冻和可信 20/20 均待执行；最终独立验收待完成。
 - 未运行：Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
 - Git：只在 Plan 056 worktree 提交；未合并、未推送、未归档，未读取或修改 Plan 054/055 私有资产。

@@ -42,19 +42,19 @@ from .tasksets import FrozenTask
 
 PLAN056_KIND = "rondo_direction1_bounded_observation"
 PLAN056_SCHEMA_VERSION = 1
-PLAN056_CAMPAIGN_ID = "plan056-direction1-bounded-observation-rehearsal-v2"
-PLAN056_BATCH_ID = "plan056-direction1-bounded-observation-rehearsal-v2-batch"
+PLAN056_CAMPAIGN_ID = "plan056-direction1-bounded-observation-rehearsal-v3"
+PLAN056_BATCH_ID = "plan056-direction1-bounded-observation-rehearsal-v3-batch"
 PLAN056_CAMPAIGN_MODE = "rehearsal"
 PLAN056_TASK_BUDGET_ID = "plan-056-direction1-bounded-observation"
-PLAN056_RESULT_NAMESPACE = "direction1-bounded-observation-rehearsal-v2"
+PLAN056_RESULT_NAMESPACE = "direction1-bounded-observation-rehearsal-v3"
 PLAN056_LOCK_RELPATH = Path(
-    "eval/locks/plan056-direction1-bounded-observation-rehearsal-v2.json"
+    "eval/locks/plan056-direction1-bounded-observation-rehearsal-v3.json"
 )
 PLAN056_POINTER_RELPATH = Path(
     "eval/locks/plan056-direction1-bounded-observation-active.json"
 )
 PLAN056_PUBLIC_RESULT_RELPATH = Path(
-    "eval/results/observations/plan056-direction1-bounded-observation-rehearsal-v2-2026-08-22.json"
+    "eval/results/observations/plan056-direction1-bounded-observation-rehearsal-v3-2026-08-22.json"
 )
 PLAN056_V28_RELPATH = Path("eval/locks/p2-b7-canary-baseline-v28.json")
 PLAN056_V28_SHA256 = "a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b"

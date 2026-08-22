@@ -993,7 +993,15 @@ class DockerSupervisor:
         cleanup_runner: DockerCommandRunner | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
+        counter_sample_timeout_seconds: float = COUNTER_SAMPLE_TIMEOUT_SECONDS,
     ):
+        if (
+            isinstance(counter_sample_timeout_seconds, bool)
+            or not isinstance(counter_sample_timeout_seconds, (int, float))
+            or not math.isfinite(counter_sample_timeout_seconds)
+            or not 0 < counter_sample_timeout_seconds <= 120
+        ):
+            raise DockerSupervisionError("Docker counter sample timeout is invalid")
         self._runner = runner
         self._cleanup_runner = cleanup_runner or runner
         self._has_separate_cleanup_runner = (
@@ -1003,6 +1011,7 @@ class DockerSupervisor:
         self._lock_guard = lock_guard
         self._monotonic = monotonic
         self._sleeper = sleeper
+        self._counter_sample_timeout_seconds = float(counter_sample_timeout_seconds)
         self._owned_container_ids: dict[str, set[str]] = {}
         self._owned_networks: dict[str, set[ComposeResourceFact]] = {}
         self._owned_volumes: dict[str, set[ComposeResourceFact]] = {}
@@ -1023,7 +1032,7 @@ class DockerSupervisor:
             raise DockerSupervisionError("Docker image identity timeout is invalid")
         self._assert_lock(lease)
         deadline = self._monotonic() + min(
-            float(timeout_seconds), COUNTER_SAMPLE_TIMEOUT_SECONDS
+            float(timeout_seconds), self._counter_sample_timeout_seconds
         )
         try:
             image_identity = self._counter.resolve_image_identity(
@@ -1791,11 +1800,13 @@ class DockerSupervisor:
         self,
         outer_deadline: float | None,
         *,
-        timeout_seconds: float = COUNTER_SAMPLE_TIMEOUT_SECONDS,
+        timeout_seconds: float | None = None,
     ) -> float:
         """Give one complete multi-probe sample a fresh, short time budget."""
 
         now = self._monotonic()
+        if timeout_seconds is None:
+            timeout_seconds = self._counter_sample_timeout_seconds
         sample_deadline = now + timeout_seconds
         if outer_deadline is not None:
             sample_deadline = min(sample_deadline, outer_deadline)

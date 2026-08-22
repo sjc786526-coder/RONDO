@@ -1095,6 +1095,39 @@ class DockerCounterTests(unittest.TestCase):
 
         self.assertEqual(len(executor.commands), 2)
 
+    def test_read_only_docker_fact_command_allows_bounded_configured_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            executor = FakeExecutor(
+                [
+                    CommandOutput(returncode=1, stdout=""),
+                    CommandOutput(returncode=1, stdout=""),
+                    _system_df(),
+                    json.dumps([
+                        str(root),
+                        "Docker Engine - Community",
+                        ["name=seccomp,profile=builtin"],
+                    ]),
+                    "",
+                    "",
+                ]
+            )
+            counter = DockerCliCounter(
+                host_data_root=root,
+                executor=executor,
+                statvfs=lambda path: os.statvfs(path),
+                sleeper=lambda _: None,
+                command_max_attempts=4,
+            )
+
+            counter.sample(
+                identity=DockerTaskIdentity(TASK_ID),
+                operation=DockerOperation.RUN,
+            )
+
+        self.assertEqual(executor.commands[0], executor.commands[1])
+        self.assertEqual(executor.commands[1], executor.commands[2])
+
     def test_filter_is_not_trusted_when_inspected_label_is_not_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

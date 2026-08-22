@@ -50,6 +50,9 @@ v1 因而立即关闭为无效，没有在该 identity 内替换或重发 slot�
   不重放第 2 个 slot。
 - 用户随后追加并变更 Plan 056 授权：总费用从 v1 的 `0.631065 USD` 继续累计，硬上限为 `100.000000 USD`；
   允许真实开发性 rehearsal 和因可修复设施问题关闭 campaign 后以全新 identity 干净重启。
+- rehearsal-v2 已干净发布前 2 题并跨过 v1 旧故障点；第 3 题因收尾 Docker 实时事实命令瞬时失败而按合同关闭，
+  后 7 题未发送。v2 为 34 attempts、`0.569748 USD`，累计 `1.200813 USD`；资源门未触发且无遗留容器、网络或卷。
+  采样链已做保持 fail-closed 的有界恢复窄修，当前以 rehearsal-v3 从第一题重新验证完整单轮。
 - 当前唯一方向 1 工作包仍为 Plan 056：先至少连续完成一次冻结 10 题单轮 rehearsal，再提交/冻结正式源码和
   binary，从第一题执行新的固定两轮 20-run campaign。v1/rehearsal/无效数据不进入最终分母；首个可信 20/20
   产生候选或“无候选”结论后停止付费运行。详细合同见 `plan/056-direction1-bounded-observation-execplan.md`。

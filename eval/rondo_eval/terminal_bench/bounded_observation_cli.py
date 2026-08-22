@@ -92,6 +92,8 @@ from .runner import (
 _SOURCE_CHECKOUT_RELPATH = Path("eval-data/sources/terminal-bench-2-1-ffccbe05")
 _DEFAULT_METRICS_RELPATH = Path("eval-data/build/plan056-watchdog")
 _MAX_COORDINATOR_STEPS = 40
+_PLAN056_DOCKER_COUNTER_SAMPLE_TIMEOUT_SECONDS = 60.0
+_PLAN056_DOCKER_FACT_COMMAND_MAX_ATTEMPTS = 4
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -306,6 +308,8 @@ def _worker_inputs(
     counter = DockerCliCounter(
         host_data_root=args.docker_host_volume,
         desktop_host_probe=PowerShellDockerDesktopHostProbe(),
+        probe_timeout_seconds=_PLAN056_DOCKER_COUNTER_SAMPLE_TIMEOUT_SECONDS,
+        command_max_attempts=_PLAN056_DOCKER_FACT_COMMAND_MAX_ATTEMPTS,
     )
     baseline = _load_or_create_storage_baseline(
         campaign_root(paths, identity), counter, identity.slots[0].run_id
@@ -999,6 +1003,9 @@ def _paid_worker(paths: RepoPaths, args: argparse.Namespace) -> int:
                     validate_prepared=validate_prepared,
                     run_cap_usd=PLAN056_RUN_CAP_USD,
                     max_concurrent_main=1,
+                    counter_sample_timeout_seconds=(
+                        _PLAN056_DOCKER_COUNTER_SAMPLE_TIMEOUT_SECONDS
+                    ),
                 )
             )
             parsed = parse_single_task_result(
