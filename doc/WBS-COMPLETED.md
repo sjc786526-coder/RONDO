@@ -1581,3 +1581,22 @@ Publication Critic 产品语义；验收报告提交 `36a106c` 给出 `PASS`，�
   训练或全量测试。执行与验收分别见
   `agent_log/2026-08-22-014140-plan053-m3-a1-product-contract.md`、
   `agent_log/2026-08-22-022619-plan053-acceptance-review.md`。
+
+## RONDO Multi 三期 M3-B2a Publication Critic 本地服务（Plan 055，2026-08-22）
+
+**状态**：M3-B2a 工作树实现已完成并通过独立验收，尚未合并或推送。实现提交 `2c47adb`，配置边界修复提交
+`dbc1d7a`；同一干净上下文审查者复验为 `PASS`，无剩余 correctness/functionality finding。
+
+- 新增专用 `codex-publication-critic` crate，提供 protocol v1 的严格 allowlist packet、loopback 长度前缀 JSON 服务、可替换
+  scorer 与 B2b 可消费的 typed client；不依赖 `codex-core`、Team State 或 RONDO Local approval 产品合同。
+- expected identity 由调用方可信 typed 配置提供，精确绑定 service/protocol、qualification、model/tokenizer、render/projection、
+  score domain、threshold 和 verdict rule；服务复验 backend identity 与单值 finite score，故障不会猜成 verdict。
+- production defaults 为 request 128 KiB、response 16 KiB、concurrency 1、queue 4、job 25s、client 30s、startup 60s、I/O 2s、
+  graceful 3s + force/reap 2s、零 retry。配置字段对外只读，构造和最终消费点复验 loopback/frame/resource/timeout 上界。
+- 受控 scorer 只替换 backend；27/27 定向测试通过真实服务子进程、正式 transport、协议解析、identity、admission、资源门和 typed
+  client，覆盖 PASS/REWRITE、严格 ingress、queue full、timeout/cancel、故障漂移、异常退出、两阶段关闭及正文 sentinel。
+- 定向 Clippy、argument-comment lint、fix/fmt 与 Bazel lock update/check 通过；Cargo/Bazel 依赖均为 workspace 既有依赖，
+  `MODULE.bazel.lock` 无差异。未运行全 workspace、全 Bazel、CI、PR、Docker、真实 API、训练或真实模型。
+- 未修改 `team_publish`、Team State、Team Lens、`eval/` 或 `training/`。证据只覆盖受控 backend 的进程/协议/资源闭环；
+  canonical packet 构造与产品接入属于 M3-B2b，真实 threshold、模型质量与部署资格留给后续工作包。执行记录见
+  `agent_log/2026-08-22-051709-plan055-m3-b2a-publication-critic-service.md`。

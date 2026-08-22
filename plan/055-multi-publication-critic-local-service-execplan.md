@@ -181,7 +181,7 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 
 ### 当前工作
 
-- 独立审查提出的真实 finding 已窄修并通过定向门禁；正在创建修复提交，随后交回同一审查者复验。
+- Plan 055 已完成。实现提交 `2c47adb`、配置边界修复提交 `dbc1d7a`；同一干净上下文独立审查者复验结论为 `PASS`。
 
 ### 本任务剩余步骤
 
@@ -189,7 +189,7 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 2. 已完成：实现可替换 scorer 服务与 B2b 可消费的 typed client；用受控 scorer 建立真实进程闭环。
 3. 已完成：补齐资源、故障、取消、隔离和 body-free 日志回归，完成受影响 crate 的格式、lint 与定向测试。
 4. 已完成：检查 diff/允许写集/并行 worktree，完成首个本地提交并交给唯一的干净上下文独立审查者。
-5. 当前：首次审查 finding 已修复、复验；追加提交后由同一审查者再次验收，通过后冻结记录并停止。
+5. 已完成：首次审查 finding 已修复、复验并追加提交；同一审查者再次验收为 `PASS`，本计划冻结。
 
 ### 阻塞项
 
@@ -199,8 +199,8 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 
 - 受控 scorer 的真实子进程闭环、严格协议/identity、资源门、timeout/cancel、故障隔离和正文 sentinel 回归均已通过；
   证据只覆盖受控 backend，不覆盖真实模型、最终 threshold、B2b 接入或产品端到端。
-- 首次独立审查的配置绕过 finding 已修复，修复后 27/27 定向测试、Clippy、argument-comment lint、fix/fmt 通过；同一审查者复验
-  待完成。055 worktree 已有本地实现提交，尚未合并、推送或归档分支。
+- 首次独立审查的配置绕过 finding 已修复，修复后 27/27 定向测试、Clippy、argument-comment lint、fix/fmt 通过；同一审查者
+  复验为 `PASS`，无剩余 correctness/functionality finding。055 worktree 已有本地提交，尚未合并、推送或归档分支。
 
 ### 交接边界
 
