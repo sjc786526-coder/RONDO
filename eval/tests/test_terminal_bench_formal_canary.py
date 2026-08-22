@@ -123,6 +123,200 @@ class FormalCanaryEntryTests(unittest.TestCase):
         self.assertEqual(result, 7)
         run.assert_called_once()
 
+    def test_run_closes_and_retires_a_passed_terminal_result(self) -> None:
+        identity = mock.Mock(
+            campaign_id="p2-b7-canary-baseline-v29",
+            batch_id="p2-b7-canary-v29",
+            enforces_fair_comparison=True,
+            budget={
+                "task_budget_id": "direction0-local-optimization-052",
+                "task_budget_cap_usd": "125.000000",
+                "task_budget_prior_estimated_usd": "0.000000",
+            },
+        )
+        state_path = (
+            self.root
+            / "eval-data/campaigns/p2-b7-canary-baseline-v29/state.json"
+        )
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text('{"status":"passed"}\n', encoding="utf-8")
+        closed = {
+            "active_identity": None,
+            "closed_identities": [
+                {
+                    "campaign_id": identity.campaign_id,
+                    "batch_id": identity.batch_id,
+                    "terminal_status": "passed",
+                }
+            ],
+        }
+        with (
+            mock.patch.object(
+                formal_canary.RepoPaths, "discover", return_value=self.paths
+            ),
+            mock.patch.object(
+                formal_canary, "load_campaign_identity", return_value=identity
+            ),
+            mock.patch.object(
+                formal_canary,
+                "prepare",
+                return_value={"preflight_receipts_ready": True},
+            ),
+            mock.patch.object(formal_canary, "baseline_main", return_value=0),
+            mock.patch.object(
+                formal_canary, "load_task_budget", return_value=closed
+            ),
+            mock.patch.object(
+                formal_canary, "retire_active_campaign_pointer"
+            ) as retire,
+        ):
+            result = formal_canary.main(
+                [
+                    "run",
+                    "--paid-action",
+                    "direction0-authorized-paid-run:direction0-local-optimization-052",
+                    "--docker-host-volume",
+                    "/tmp/docker-host",
+                    "--results-worktree-root",
+                    "/tmp/results",
+                    "--rondo-measurement-worktree-root",
+                    "/tmp/rondo",
+                    "--codex-measurement-worktree-root",
+                    "/tmp/codex",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        retire.assert_called_once_with(self.paths, identity=identity)
+
+    def test_run_preserves_blocked_for_successor_recovery(self) -> None:
+        identity = mock.Mock(
+            budget={"task_budget_id": "direction0-local-optimization-052"}
+        )
+        with (
+            mock.patch.object(
+                formal_canary.RepoPaths, "discover", return_value=self.paths
+            ),
+            mock.patch.object(
+                formal_canary, "load_campaign_identity", return_value=identity
+            ),
+            mock.patch.object(
+                formal_canary,
+                "prepare",
+                return_value={"preflight_receipts_ready": True},
+            ),
+            mock.patch.object(formal_canary, "baseline_main", return_value=3),
+            mock.patch.object(
+                formal_canary,
+                "_terminal_status",
+                side_effect=AssertionError("blocked result entered formal close"),
+            ),
+            mock.patch.object(
+                formal_canary,
+                "retire_active_campaign_pointer",
+                side_effect=AssertionError("blocked pointer was retired"),
+            ),
+        ):
+            result = formal_canary.main(
+                [
+                    "run",
+                    "--paid-action",
+                    "direction0-authorized-paid-run:direction0-local-optimization-052",
+                    "--docker-host-volume",
+                    "/tmp/docker-host",
+                    "--results-worktree-root",
+                    "/tmp/results",
+                    "--rondo-measurement-worktree-root",
+                    "/tmp/rondo",
+                    "--codex-measurement-worktree-root",
+                    "/tmp/codex",
+                ]
+            )
+
+        self.assertEqual(result, 3)
+
+    def test_resume_closes_and_retires_a_failed_terminal_result(self) -> None:
+        identity = mock.Mock(
+            campaign_id="p2-b7-canary-baseline-v29",
+            batch_id="p2-b7-canary-v29",
+            enforces_fair_comparison=True,
+            budget={
+                "task_budget_id": "direction0-local-optimization-052",
+                "task_budget_cap_usd": "125.000000",
+                "task_budget_prior_estimated_usd": "0.000000",
+            },
+        )
+        state_path = (
+            self.root
+            / "eval-data/campaigns/p2-b7-canary-baseline-v29/state.json"
+        )
+        state_path.parent.mkdir(parents=True)
+        state_path.write_text('{"status":"failed"}\n', encoding="utf-8")
+        active = {
+            "active_identity": {
+                "campaign_id": identity.campaign_id,
+                "batch_id": identity.batch_id,
+            },
+            "closed_identities": [],
+        }
+        closed = {
+            "active_identity": None,
+            "closed_identities": [
+                {
+                    "campaign_id": identity.campaign_id,
+                    "batch_id": identity.batch_id,
+                    "terminal_status": "failed",
+                }
+            ],
+        }
+        with (
+            mock.patch.object(
+                formal_canary.RepoPaths, "discover", return_value=self.paths
+            ),
+            mock.patch.object(
+                formal_canary, "load_campaign_identity", return_value=identity
+            ),
+            mock.patch.object(
+                formal_canary,
+                "prepare",
+                return_value={"preflight_receipts_ready": True},
+            ),
+            mock.patch.object(formal_canary, "baseline_main", return_value=2),
+            mock.patch.object(
+                formal_canary, "load_task_budget", return_value=active
+            ),
+            mock.patch.object(
+                formal_canary,
+                "required_successor_prior",
+                return_value=Decimal("9.500000"),
+            ),
+            mock.patch.object(
+                formal_canary, "close_task_budget", return_value=closed
+            ) as close,
+            mock.patch.object(
+                formal_canary, "retire_active_campaign_pointer"
+            ) as retire,
+        ):
+            result = formal_canary.main(
+                [
+                    "resume",
+                    "--paid-action",
+                    "direction0-authorized-paid-run:direction0-local-optimization-052",
+                    "--docker-host-volume",
+                    "/tmp/docker-host",
+                    "--results-worktree-root",
+                    "/tmp/results",
+                    "--rondo-measurement-worktree-root",
+                    "/tmp/rondo",
+                    "--codex-measurement-worktree-root",
+                    "/tmp/codex",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(close.call_args.kwargs["terminal_status"], "failed")
+        retire.assert_called_once_with(self.paths, identity=identity)
+
     def test_new_task_paid_action_is_bound_to_its_budget_identity(self) -> None:
         identity = mock.Mock(
             budget={"task_budget_id": "direction0-local-optimization-052"}

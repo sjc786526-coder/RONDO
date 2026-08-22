@@ -395,6 +395,81 @@ def run_preflight(paths: RepoPaths, args: argparse.Namespace) -> int:
     return completed.returncode
 
 
+def _terminal_status(paths: RepoPaths, identity: object) -> BaselineStatus:
+    """Load the durable terminal state after a runner or before recovery."""
+
+    try:
+        state_path = (
+            paths.common_root
+            / "eval-data/campaigns"
+            / identity.campaign_id
+            / "state.json"
+        )
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        terminal = BaselineStatus(str(state["status"]))
+    except (
+        AttributeError,
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        KeyError,
+        ValueError,
+    ) as exc:
+        raise FormalCanaryError("campaign is not in a terminal state") from exc
+    return terminal
+
+
+def _close_published_terminal(
+    paths: RepoPaths,
+    *,
+    identity: object,
+    terminal: BaselineStatus,
+    exit_code: int,
+) -> int:
+    """Close a valid formal result and retire its pointer before returning."""
+
+    if terminal not in {BaselineStatus.PASSED, BaselineStatus.FAILED}:
+        if exit_code in {0, 2}:
+            raise FormalCanaryError(
+                "formal result exit code does not match the campaign terminal state"
+            )
+        return exit_code
+    expected_exit_code = 0 if terminal is BaselineStatus.PASSED else 2
+    if exit_code != expected_exit_code:
+        return exit_code
+    active, _prior, task_budget_id, task_budget_cap = _identity_budget(identity)
+    envelope_path = task_budget_path(paths.common_root, task_budget_id)
+    envelope = load_task_budget(
+        envelope_path,
+        task_budget_id=task_budget_id,
+        cap_usd=task_budget_cap,
+    )
+    if envelope.get("active_identity") is not None:
+        cumulative = required_successor_prior(
+            paths,
+            version=int(identity.campaign_id.rsplit("v", 1)[1]),
+        )
+        envelope = close_task_budget(
+            envelope_path,
+            active=active,
+            terminal_status=terminal.value,
+            cumulative_settled_usd=cumulative,
+            task_budget_id=task_budget_id,
+            cap_usd=task_budget_cap,
+        )
+    closed = envelope.get("closed_identities")
+    if not isinstance(closed, list) or not any(
+        isinstance(row, dict)
+        and row.get("campaign_id") == active.campaign_id
+        and row.get("batch_id") == active.batch_id
+        and row.get("terminal_status") == terminal.value
+        for row in closed
+    ):
+        raise FormalCanaryError("terminal identity is not closed in the task budget")
+    retire_active_campaign_pointer(paths, identity=identity)
+    return exit_code
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     paths = RepoPaths.discover(Path.cwd())
@@ -447,54 +522,24 @@ def main(argv: list[str] | None = None) -> int:
         prepared = prepare(paths)
         if not prepared["preflight_receipts_ready"]:
             raise FormalCanaryError("all stub preflight receipts are required")
-        return baseline_main(_runner_argv(args))
-    identity = load_campaign_identity(paths)
-    state_path = (
-        paths.common_root / "eval-data/campaigns" / identity.campaign_id / "state.json"
-    )
-    try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        terminal = BaselineStatus(str(state["status"]))
-    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, ValueError) as exc:
-        raise FormalCanaryError("campaign is not in a terminal state") from exc
-    exit_code = baseline_main(_runner_argv(args))
-    if terminal in {BaselineStatus.PASSED, BaselineStatus.FAILED}:
-        expected_exit_code = 0 if terminal is BaselineStatus.PASSED else 2
-        if exit_code != expected_exit_code:
+        exit_code = baseline_main(_runner_argv(args))
+        if exit_code not in {0, 2}:
             return exit_code
-        active, _prior, task_budget_id, task_budget_cap = _identity_budget(identity)
-        envelope_path = task_budget_path(paths.common_root, task_budget_id)
-        envelope = load_task_budget(
-            envelope_path,
-            task_budget_id=task_budget_id,
-            cap_usd=task_budget_cap,
+        return _close_published_terminal(
+            paths,
+            identity=paid_identity,
+            terminal=_terminal_status(paths, paid_identity),
+            exit_code=exit_code,
         )
-        if envelope.get("active_identity") is not None:
-            cumulative = required_successor_prior(
-                paths,
-                version=int(identity.campaign_id.rsplit("v", 1)[1]),
-            )
-            envelope = close_task_budget(
-                envelope_path,
-                active=active,
-                terminal_status=terminal.value,
-                cumulative_settled_usd=cumulative,
-                task_budget_id=task_budget_id,
-                cap_usd=task_budget_cap,
-            )
-        closed = envelope.get("closed_identities")
-        if not isinstance(closed, list) or not any(
-            isinstance(row, dict)
-            and row.get("campaign_id") == active.campaign_id
-            and row.get("batch_id") == active.batch_id
-            and row.get("terminal_status") == terminal.value
-            for row in closed
-        ):
-            raise FormalCanaryError(
-                "terminal identity is not closed in the task budget"
-            )
-        retire_active_campaign_pointer(paths, identity=identity)
-    return exit_code
+    identity = load_campaign_identity(paths)
+    terminal = _terminal_status(paths, identity)
+    exit_code = baseline_main(_runner_argv(args))
+    return _close_published_terminal(
+        paths,
+        identity=identity,
+        terminal=terminal,
+        exit_code=exit_code,
+    )
 
 
 if __name__ == "__main__":

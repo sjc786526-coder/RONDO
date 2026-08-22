@@ -1540,8 +1540,8 @@ Guardian 为 `gpt-5.6-terra/low`。
   清空 active pointer，默认入口复验为 `idle` / 0 requests。未运行全 workspace、CI、PR、validation、holdout、
   本地模型或训练。
 - 合法 `failed` 正式基线现与 `passed` 一样先确认发布、关闭任务 envelope 并原子退役 active pointer，再分别返回
-  2/0；`blocked` 仍保留给 successor。结果侧新增独立 relative-baseline JSON，v28 明确为无前驱的
-  `first_formal_baseline`，原 v28 aggregate SHA-256 `53e9b4b3...` 保持不变。整改相关 9 模块 357/357 通过，未重跑
-  Docker、Cargo、真实 API 或全 workspace。
+  2/0；`run`/`resume` 与恢复用 `finalize` 共用该收口，`blocked` 保留给 successor 且不生成相对正式基线。结果侧新增
+  独立 relative-baseline JSON，v28 明确为无前驱的 `first_formal_baseline`，原 v28 tracked public baseline
+  SHA-256 `53e9b4b3...` 保持不变。整改相关 9 模块最终 361/361 通过，未重跑 Docker、Cargo、真实 API 或全 workspace。
 - 干净上下文独立审查首次发现上述 active-pointer 终态问题；修复后同一审查者重跑直接相关 60/60、复核两份提交、
   默认入口与 Git/结果终态并给出 `PASS`，无剩余 correctness/functionality finding。

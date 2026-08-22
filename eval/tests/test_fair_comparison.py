@@ -2921,6 +2921,64 @@ class RelativeFormalBaselineTests(unittest.TestCase):
         self.assertIsNone(value["previous"])
         self.assertIsNone(value["metric_deltas"])
 
+    def test_blocked_campaign_does_not_publish_a_relative_formal_baseline(self) -> None:
+        identity = replace(
+            _CampaignFixture.v7(),
+            campaign_id="p2-b7-canary-baseline-v29",
+            batch_id="p2-b7-canary-v29",
+            lock_sha256="9" * 64,
+        )
+        state = mock.Mock()
+        state.snapshot.return_value = {
+            "status": BaselineStatus.BLOCKED.value,
+            "diagnoses": [],
+            "slots": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            campaign_root = root / "eval-data/campaigns" / identity.campaign_id
+            campaign_root.mkdir(parents=True)
+            with (
+                mock.patch.object(
+                    baseline_cli, "_campaign_records", return_value=({}, {})
+                ),
+                mock.patch.object(
+                    baseline_cli,
+                    "_continuation_records",
+                    return_value=(False, {}, {}),
+                ),
+                mock.patch.object(
+                    baseline_cli, "_validate_terminal_result_sources"
+                ),
+                mock.patch.object(
+                    baseline_cli, "_campaign_usage", return_value={}
+                ),
+                mock.patch.object(
+                    baseline_cli, "_write_or_validate_aggregate"
+                ),
+                mock.patch.object(
+                    baseline_cli, "_write_relative_baseline_comparison"
+                ) as relative,
+            ):
+                baseline_cli._write_aggregate(
+                    campaign_root,
+                    identity,
+                    state,
+                    {
+                        "spent_usd": "0.000000",
+                        "reserved_usd": "0.000000",
+                        "run_slots_used": 0,
+                        "runs": {},
+                    },
+                    Decimal("0.000000"),
+                    assessment=None,
+                    results_root=root / "results",
+                    storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                    final_storage=None,
+                )
+
+        relative.assert_not_called()
+
     def test_new_formal_baseline_reports_metric_and_task_outcome_changes(self) -> None:
         identity = replace(
             _CampaignFixture.v7(),

@@ -10,8 +10,8 @@
 - v7 稳定合同仍固定冻结 Codex、Terra main-medium/Guardian-low、题集和判据，但不再固定 Local commit 或任务预算。
   `passed`/`failed` 只有在发布返回码分别为 0/2 且预算闭合事实匹配后才退役 pointer；其他返回码不伪装终态。
 - 相对基线采用自动选择 results worktree 中最新兼容正式 schema v7 前驱的轻量方案，避免人工填错前驱；单独写入
-  `eval/results/baseline-comparisons/`，不改历史 aggregate。离线发布 v28 的 `first_formal_baseline` 后，其原 aggregate
-  SHA-256 仍为 `53e9b4b3ee74cefd7215c8f2b6bfcdbe6da46c9f3c31a88089adcc9bd02a0c8f`。
+  `eval/results/baseline-comparisons/`，不改历史结果。离线发布 v28 的 `first_formal_baseline` 后，其 tracked public
+  baseline SHA-256 仍为 `53e9b4b3ee74cefd7215c8f2b6bfcdbe6da46c9f3c31a88089adcc9bd02a0c8f`。
 - 相关 9 模块无 API 回归 357/357 通过；默认入口为 `idle` / 0 requests，relative compare 重入成功。未运行 Docker、
   Cargo、真实 API、全 workspace、CI/PR、validation、holdout、本地模型或训练。
 - 验收报告建议仅在没有执行者会话直接用户消息时，把 Guardian-low 的来源改成“独立验收采纳”。本会话中用户已明确

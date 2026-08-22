@@ -2737,7 +2737,10 @@ def _write_aggregate(
         / f"{identity.campaign_id}.json"
     )
     _write_or_validate_aggregate(destination, public)
-    if identity.enforces_fair_comparison:
+    if identity.enforces_fair_comparison and state_snapshot["status"] in {
+        BaselineStatus.PASSED.value,
+        BaselineStatus.FAILED.value,
+    }:
         _write_relative_baseline_comparison(
             results_root,
             identity=identity,
