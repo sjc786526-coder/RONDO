@@ -20,6 +20,7 @@ from rondo_eval.terminal_bench.bounded_observation import (
     freeze_slots,
 )
 from rondo_eval.terminal_bench.bounded_observation_cli import (
+    _load_budget_snapshot,
     _source_tree_fingerprint,
     _storage_projection,
     status,
@@ -208,6 +209,33 @@ class BoundedObservationIdentityTests(unittest.TestCase):
 
 
 class BoundedObservationBudgetTests(unittest.TestCase):
+    def test_read_only_budget_snapshot_exposes_live_totals(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            path = root / "eval-data/budgets/plan056-test-batch.json"
+            with PersistentBudgetLedger(
+                path,
+                batch_id="plan056-test-batch",
+                total_cap_usd="50",
+                max_runs=20,
+                default_run_cap_usd="40",
+                unpriced_fallback_usd="1",
+                unpriced_fallback_per_attempt=True,
+            ) as ledger:
+                ledger.claim_run("slot-1", cap_usd="40")
+                ledger.reserve("slot-1", "request-1", "5")
+
+            snapshot = _load_budget_snapshot(
+                RepoPaths(common_root=root, worktree_root=root),
+                SimpleNamespace(
+                    batch_id="plan056-test-batch",
+                ),
+            )
+
+            self.assertEqual(snapshot["run_slots_used"], 1)
+            self.assertEqual(snapshot["spent_usd"], "0.000000")
+            self.assertEqual(snapshot["reserved_usd"], "5.000000")
+
     def test_zero_attempt_recovery_reuses_same_run_without_deleting_history(
         self,
     ) -> None:

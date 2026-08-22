@@ -128,15 +128,7 @@ def status(paths: RepoPaths) -> dict[str, Any]:
     ledger_path = budget_path(paths, identity)
     budget: Mapping[str, Any] | None = None
     if ledger_path.exists() and not ledger_path.is_symlink():
-        budget = load_validated_budget_ledger_state(
-            ledger_path,
-            batch_id=identity.batch_id,
-            total_cap_usd=PLAN056_TASK_CAP_USD,
-            max_runs=PLAN056_SLOT_COUNT,
-            default_run_cap_usd=PLAN056_RUN_CAP_USD,
-            unpriced_fallback_usd=PLAN056_UNPRICED_FALLBACK_USD,
-            unpriced_fallback_per_attempt=True,
-        )
+        budget = _load_budget_snapshot(paths, identity)
     attempts = (
         sum(
             int(request["attempt_count"])
@@ -164,6 +156,44 @@ def status(paths: RepoPaths) -> dict[str, Any]:
         "selected_candidate": state["selected_candidate"],
         "paid_requests_sent": 0,
     }
+
+
+def _load_budget_snapshot(
+    paths: RepoPaths, identity: BoundedObservationIdentity
+) -> dict[str, Any]:
+    """Add the read-only totals that a live ledger snapshot normally exposes."""
+
+    value = load_validated_budget_ledger_state(
+        budget_path(paths, identity),
+        batch_id=identity.batch_id,
+        total_cap_usd=PLAN056_TASK_CAP_USD,
+        max_runs=PLAN056_SLOT_COUNT,
+        default_run_cap_usd=PLAN056_RUN_CAP_USD,
+        unpriced_fallback_usd=PLAN056_UNPRICED_FALLBACK_USD,
+        unpriced_fallback_per_attempt=True,
+    )
+    spent = sum(
+        (Decimal(str(run["spent_usd"])) for run in value["runs"].values()),
+        Decimal(0),
+    )
+    reserved = sum(
+        (
+            Decimal(str(request["reserved_usd"]))
+            for run in value["runs"].values()
+            for request in run["requests"].values()
+            if request["status"] == "reserved"
+        ),
+        Decimal(0),
+    )
+    snapshot = dict(value)
+    snapshot.update(
+        {
+            "run_slots_used": len(value["runs"]),
+            "spent_usd": f"{spent:.6f}",
+            "reserved_usd": f"{reserved:.6f}",
+        }
+    )
+    return snapshot
 
 
 def _make_request(
@@ -1086,15 +1116,7 @@ def finalize(paths: RepoPaths, *, snapshot_date: str) -> dict[str, Any]:
         raise BoundedObservationError("Plan 056 campaign is not ready to finalize")
     if state.get("final_storage") is None:
         raise BoundedObservationError("Plan 056 final storage sample is missing")
-    budget = load_validated_budget_ledger_state(
-        budget_path(paths, identity),
-        batch_id=identity.batch_id,
-        total_cap_usd=PLAN056_TASK_CAP_USD,
-        max_runs=PLAN056_SLOT_COUNT,
-        default_run_cap_usd=PLAN056_RUN_CAP_USD,
-        unpriced_fallback_usd=PLAN056_UNPRICED_FALLBACK_USD,
-        unpriced_fallback_per_attempt=True,
-    )
+    budget = _load_budget_snapshot(paths, identity)
     source_invalidated = False
     if state["status"] == "ready_to_finalize":
         try:
