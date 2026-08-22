@@ -1548,3 +1548,16 @@ Guardian 为 `gpt-5.6-terra/low`。
   failed/blocked 收口、自动 finalize 与 close/pointer 中断恢复缺口。最终复验另跑入口相关 32/32、核对 v28 结果字节、
   默认零请求状态与三棵工作树，结论 `PASS`，无剩余 correctness/functionality finding；报告见
   `agent_log/2026-08-21-174146-plan051-final-independent-acceptance.md`。
+
+## 当前 WBS 清理与方向收口决定（2026-08-22）
+
+- **方向 2（RONDO Local 本地审批模型）永久收口。** 既有 Local M3/M4 工程、训练与横评结果继续按本页前述
+  WP3b-A2—A10 和 Plan 041 条目解释，最终结论保持“保留为实验”，不改写成生产采用。用户决定今后不再开启该方向；
+  顶层与子 WBS 因此只保留一笔状态和必要能力边界，不再维护已完成任务分解。
+- **RONDO Multi 第二期归档。** Plan 047 的 Team State 序列性质测试、Plan 048 的 Team Lens、Plan 049 的主动委派
+  activation pilot 与 Plan 050 的明确委派三任务案例均已完成，其实现和验收由本页相应条目、冻结 plan 与 agent log
+  继续承载。当前 WBS 不再把这些内容表述为进行中的“当前任务包”。
+- **后续方向尚未启动。** 用户将另行定义并重新启动方向 1，也将另行定义 RONDO Multi 三期；本次整理没有替它们
+  预设目标、候选、顺序、依赖、预算或验收合同。
+- 方向 0 的既有设施和首次 schema v7 正式 canary 已归档，当前只保留可复用设施边界，没有 active campaign 或
+  可继承授权。由此，`doc/WBS.md` 与四份子 WBS 恢复为只描述当前状态和待定义路线的精炼入口。
