@@ -30,9 +30,10 @@ from .__main__ import _load_manifest
 from .baseline import CampaignIdentity, load_historical_campaign_identity
 from .task_budget import (
     TaskBudgetIdentity,
+    activate_closed_task_budget,
     close_task_budget,
     load_task_budget,
-    start_task_budget,
+    reauthorize_closed_task_budget,
     task_budget_path,
     task_budget_status,
     verify_active_identity,
@@ -41,27 +42,33 @@ from .tasksets import FrozenTask
 
 PLAN056_KIND = "rondo_direction1_bounded_observation"
 PLAN056_SCHEMA_VERSION = 1
-PLAN056_CAMPAIGN_ID = "plan056-direction1-bounded-observation-v1"
-PLAN056_BATCH_ID = "plan056-direction1-bounded-observation-v1-batch"
+PLAN056_CAMPAIGN_ID = "plan056-direction1-bounded-observation-rehearsal-v2"
+PLAN056_BATCH_ID = "plan056-direction1-bounded-observation-rehearsal-v2-batch"
+PLAN056_CAMPAIGN_MODE = "rehearsal"
 PLAN056_TASK_BUDGET_ID = "plan-056-direction1-bounded-observation"
-PLAN056_RESULT_NAMESPACE = "direction1-bounded-observation-v1"
-PLAN056_LOCK_RELPATH = Path("eval/locks/plan056-direction1-bounded-observation-v1.json")
+PLAN056_RESULT_NAMESPACE = "direction1-bounded-observation-rehearsal-v2"
+PLAN056_LOCK_RELPATH = Path(
+    "eval/locks/plan056-direction1-bounded-observation-rehearsal-v2.json"
+)
 PLAN056_POINTER_RELPATH = Path(
     "eval/locks/plan056-direction1-bounded-observation-active.json"
 )
 PLAN056_PUBLIC_RESULT_RELPATH = Path(
-    "eval/results/observations/plan056-direction1-bounded-observation-2026-08-22.json"
+    "eval/results/observations/plan056-direction1-bounded-observation-rehearsal-v2-2026-08-22.json"
 )
 PLAN056_V28_RELPATH = Path("eval/locks/p2-b7-canary-baseline-v28.json")
 PLAN056_V28_SHA256 = "a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b"
 PLAN056_MODEL = "gpt-5.6-terra"
 PLAN056_MAIN_EFFORT = "medium"
 PLAN056_GUARDIAN_EFFORT = "low"
-PLAN056_TASK_CAP_USD = Decimal("50.000000")
+PLAN056_PREVIOUS_TASK_CAP_USD = Decimal("50.000000")
+PLAN056_TASK_CAP_USD = Decimal("100.000000")
 PLAN056_RUN_CAP_USD = Decimal("40.000000")
 PLAN056_UNPRICED_FALLBACK_USD = Decimal("1.000000")
 PLAN056_SLOT_COUNT = 20
 PLAN056_ROUNDS = 2
+PLAN056_CAMPAIGN_SLOT_COUNT = 10
+PLAN056_CAMPAIGN_ROUNDS = 1
 PLAN056_TASK_COUNT = 10
 PLAN056_OBSERVATION_SCHEMA_VERSION = 2
 PLAN056_PAID_ACTION = "plan-056-authorized-paid-run"
@@ -126,6 +133,22 @@ class BoundedObservationIdentity:
     @property
     def result_namespace(self) -> str:
         return str(self.value["result_namespace"])
+
+    @property
+    def campaign_mode(self) -> str:
+        return str(self.value["campaign_mode"])
+
+    @property
+    def rounds(self) -> int:
+        return int(self.value["rounds"])
+
+    @property
+    def prior_settled_usd(self) -> Decimal:
+        return Decimal(str(self.value["budget"]["prior_estimated_usd"]))
+
+    @property
+    def campaign_cap_usd(self) -> Decimal:
+        return Decimal(str(self.value["budget"]["campaign_cap_usd"]))
 
     @property
     def max_guardian_logical_requests(self) -> int:
@@ -502,8 +525,18 @@ def initialize_identity(
 
     lock_path = paths.worktree_root / PLAN056_LOCK_RELPATH
     pointer_path = paths.worktree_root / PLAN056_POINTER_RELPATH
-    if any(path.exists() or path.is_symlink() for path in (lock_path, pointer_path)):
+    if lock_path.exists() or lock_path.is_symlink():
         raise BoundedObservationError("Plan 056 identity already exists")
+    retired_pointer = {
+        "schema_version": 1,
+        "kind": PLAN056_KIND,
+        "active_lock": None,
+        "active_lock_sha256": None,
+    }
+    if (pointer_path.exists() or pointer_path.is_symlink()) and (
+        pointer_path.is_symlink() or _read_json(pointer_path) != retired_pointer
+    ):
+        raise BoundedObservationError("Plan 056 predecessor pointer is not retired")
     if not re.fullmatch(r"20[0-9]{6}", run_id_date):
         raise BoundedObservationError("Plan 056 run date is invalid")
     if (
@@ -541,10 +574,24 @@ def initialize_identity(
     tasks = tuple(reference.catalog.tasks)
     if len(tasks) != PLAN056_TASK_COUNT:
         raise BoundedObservationError("Plan 056 v28 task denominator drifted")
+    envelope_path = task_budget_path(paths.common_root, PLAN056_TASK_BUDGET_ID)
+    envelope = load_task_budget(envelope_path, task_budget_id=PLAN056_TASK_BUDGET_ID)
+    if envelope.get("active_identity") is not None:
+        raise BoundedObservationError("Plan 056 task budget is already active")
+    existing_cap = Decimal(str(envelope["cap_usd"]))
+    if existing_cap not in {PLAN056_PREVIOUS_TASK_CAP_USD, PLAN056_TASK_CAP_USD}:
+        raise BoundedObservationError("Plan 056 task budget cap is not authorized")
+    prior_settled = Decimal(str(envelope["prior_settled_usd"]))
+    campaign_cap = PLAN056_TASK_CAP_USD - prior_settled
+    if campaign_cap <= 0:
+        raise BoundedObservationError("Plan 056 task budget is exhausted")
     slots = [
         asdict(slot)
         for slot in freeze_slots(
-            tasks, run_id_date=run_id_date, run_id_sequence_base=run_id_sequence_base
+            tasks,
+            run_id_date=run_id_date,
+            run_id_sequence_base=run_id_sequence_base,
+            rounds=PLAN056_CAMPAIGN_ROUNDS,
         )
     ]
     try:
@@ -560,6 +607,8 @@ def initialize_identity(
         "kind": PLAN056_KIND,
         "campaign_id": PLAN056_CAMPAIGN_ID,
         "batch_id": PLAN056_BATCH_ID,
+        "campaign_mode": PLAN056_CAMPAIGN_MODE,
+        "rounds": PLAN056_CAMPAIGN_ROUNDS,
         "result_namespace": PLAN056_RESULT_NAMESPACE,
         "harness_commit": harness_commit,
         "source": {
@@ -587,10 +636,10 @@ def initialize_identity(
         "budget": {
             "task_budget_id": PLAN056_TASK_BUDGET_ID,
             "task_budget_cap_usd": f"{PLAN056_TASK_CAP_USD:.6f}",
-            "prior_estimated_usd": "0.000000",
-            "campaign_cap_usd": f"{PLAN056_TASK_CAP_USD:.6f}",
+            "prior_estimated_usd": f"{prior_settled:.6f}",
+            "campaign_cap_usd": f"{campaign_cap:.6f}",
             "run_cap_usd": f"{PLAN056_RUN_CAP_USD:.6f}",
-            "max_runs": PLAN056_SLOT_COUNT,
+            "max_runs": PLAN056_CAMPAIGN_SLOT_COUNT,
             "unpriced_attempt_fallback_usd": f"{PLAN056_UNPRICED_FALLBACK_USD:.6f}",
             "unpriced_fallback_accounting": "per_upstream_attempt",
         },
@@ -665,12 +714,22 @@ def initialize_identity(
         "selected_candidate": None,
     }
     _atomic_json(state_path(paths, identity), initial_state, mode=0o600)
-    start_task_budget(
-        task_budget_path(paths.common_root, identity.task_budget_id),
-        active=TaskBudgetIdentity(identity.campaign_id, identity.batch_id),
-        task_budget_id=identity.task_budget_id,
-        cap_usd=PLAN056_TASK_CAP_USD,
-    )
+    successor = TaskBudgetIdentity(identity.campaign_id, identity.batch_id)
+    if existing_cap == PLAN056_PREVIOUS_TASK_CAP_USD:
+        reauthorize_closed_task_budget(
+            envelope_path,
+            successor=successor,
+            task_budget_id=identity.task_budget_id,
+            previous_cap_usd=PLAN056_PREVIOUS_TASK_CAP_USD,
+            new_cap_usd=PLAN056_TASK_CAP_USD,
+        )
+    else:
+        activate_closed_task_budget(
+            envelope_path,
+            successor=successor,
+            task_budget_id=identity.task_budget_id,
+            cap_usd=PLAN056_TASK_CAP_USD,
+        )
     return identity
 
 
@@ -679,12 +738,15 @@ def freeze_slots(
     *,
     run_id_date: str,
     run_id_sequence_base: int,
+    rounds: int = PLAN056_ROUNDS,
 ) -> tuple[BoundedObservationSlot, ...]:
     """Return the immutable round-major 10 x 2 Plan 056 denominator."""
 
     values = tuple(tasks)
-    if len(values) != PLAN056_TASK_COUNT or not re.fullmatch(
-        r"20[0-9]{6}", run_id_date
+    if (
+        len(values) != PLAN056_TASK_COUNT
+        or rounds not in {1, 2}
+        or not re.fullmatch(r"20[0-9]{6}", run_id_date)
     ):
         raise BoundedObservationError("Plan 056 slot input denominator is invalid")
     if (
@@ -695,7 +757,7 @@ def freeze_slots(
         raise BoundedObservationError("Plan 056 run sequence base is invalid")
     slots: list[BoundedObservationSlot] = []
     sequence = run_id_sequence_base
-    for round_number in range(1, PLAN056_ROUNDS + 1):
+    for round_number in range(1, rounds + 1):
         for task_index, task in enumerate(values, start=1):
             task.validate()
             slot = BoundedObservationSlot(
@@ -720,6 +782,8 @@ def validate_identity(
         "kind",
         "campaign_id",
         "batch_id",
+        "campaign_mode",
+        "rounds",
         "result_namespace",
         "harness_commit",
         "source",
@@ -739,6 +803,8 @@ def validate_identity(
         or value["kind"] != PLAN056_KIND
         or value["campaign_id"] != PLAN056_CAMPAIGN_ID
         or value["batch_id"] != PLAN056_BATCH_ID
+        or value["campaign_mode"] != PLAN056_CAMPAIGN_MODE
+        or value["rounds"] != PLAN056_CAMPAIGN_ROUNDS
         or value["result_namespace"] != PLAN056_RESULT_NAMESPACE
         or _COMMIT.fullmatch(str(value["harness_commit"])) is None
     ):
@@ -755,16 +821,27 @@ def validate_identity(
     if value["seccomp"] != identity.reference.no_api_seccomp:
         raise BoundedObservationError("Plan 056 seccomp binding drifted")
     budget = value["budget"]
-    if budget != {
-        "task_budget_id": PLAN056_TASK_BUDGET_ID,
-        "task_budget_cap_usd": "50.000000",
-        "prior_estimated_usd": "0.000000",
-        "campaign_cap_usd": "50.000000",
-        "run_cap_usd": "40.000000",
-        "max_runs": PLAN056_SLOT_COUNT,
-        "unpriced_attempt_fallback_usd": "1.000000",
-        "unpriced_fallback_accounting": "per_upstream_attempt",
-    }:
+    try:
+        prior = Decimal(str(budget["prior_estimated_usd"]))
+        campaign_cap = Decimal(str(budget["campaign_cap_usd"]))
+    except (KeyError, ValueError, ArithmeticError) as exc:
+        raise BoundedObservationError("Plan 056 budget contract drifted") from exc
+    if (
+        budget
+        != {
+            "task_budget_id": PLAN056_TASK_BUDGET_ID,
+            "task_budget_cap_usd": "100.000000",
+            "prior_estimated_usd": f"{prior:.6f}",
+            "campaign_cap_usd": f"{campaign_cap:.6f}",
+            "run_cap_usd": "40.000000",
+            "max_runs": PLAN056_CAMPAIGN_SLOT_COUNT,
+            "unpriced_attempt_fallback_usd": "1.000000",
+            "unpriced_fallback_accounting": "per_upstream_attempt",
+        }
+        or prior < 0
+        or campaign_cap <= 0
+        or prior + campaign_cap != PLAN056_TASK_CAP_USD
+    ):
         raise BoundedObservationError("Plan 056 budget contract drifted")
     if value["observation"] != {
         "schema_version": 2,
@@ -790,18 +867,18 @@ def validate_identity(
     expected_tasks = [asdict(task) for task in identity.tasks]
     if value["tasks"] != expected_tasks or len(identity.tasks) != PLAN056_TASK_COUNT:
         raise BoundedObservationError("Plan 056 task freeze drifted")
-    if len(identity.slots) != PLAN056_SLOT_COUNT:
+    if len(identity.slots) != PLAN056_CAMPAIGN_SLOT_COUNT:
         raise BoundedObservationError("Plan 056 slot denominator drifted")
     for slot in identity.slots:
         slot.validate()
     if (
-        len({slot.slot_id for slot in identity.slots}) != PLAN056_SLOT_COUNT
-        or len({slot.run_id for slot in identity.slots}) != PLAN056_SLOT_COUNT
+        len({slot.slot_id for slot in identity.slots}) != PLAN056_CAMPAIGN_SLOT_COUNT
+        or len({slot.run_id for slot in identity.slots}) != PLAN056_CAMPAIGN_SLOT_COUNT
     ):
         raise BoundedObservationError("Plan 056 slot identities are not unique")
     expected_order = [
         (round_number, index, task.task_id)
-        for round_number in (1, 2)
+        for round_number in range(1, PLAN056_CAMPAIGN_ROUNDS + 1)
         for index, task in enumerate(identity.tasks, start=1)
     ]
     actual_order = [
@@ -879,9 +956,8 @@ def validate_state(value: object, *, identity: BoundedObservationIdentity) -> No
         or not isinstance(value["slots"], list)
     ):
         raise BoundedObservationError("Plan 056 state identity is invalid")
-    if (
-        len(value["preflight"]) != PLAN056_TASK_COUNT
-        or len(value["slots"]) != PLAN056_SLOT_COUNT
+    if len(value["preflight"]) != PLAN056_TASK_COUNT or len(value["slots"]) != len(
+        identity.slots
     ):
         raise BoundedObservationError("Plan 056 state denominator drifted")
     for expected, row in zip(identity.tasks, value["preflight"], strict=True):
@@ -1209,10 +1285,11 @@ def public_result(
     except ValueError as exc:
         raise BoundedObservationError("Plan 056 snapshot date is invalid") from exc
     values = list(records)
-    valid = state["status"] == "ready_to_finalize"
-    assessment = assess_candidates(values) if valid else None
+    complete = state["status"] == "ready_to_finalize"
+    formal = identity.campaign_mode == "formal"
+    assessment = assess_candidates(values) if complete and formal else None
     spent = Decimal(str(budget["spent_usd"]))
-    if spent > PLAN056_TASK_CAP_USD or Decimal(str(budget["reserved_usd"])) != 0:
+    if spent > identity.campaign_cap_usd or Decimal(str(budget["reserved_usd"])) != 0:
         raise BoundedObservationError("Plan 056 budget is not terminally settled")
     outcome_counts = {outcome.value: 0 for outcome in RunOutcome}
     reward_passes = 0
@@ -1225,6 +1302,7 @@ def public_result(
         "snapshot_date": snapshot_date,
         "campaign": {
             "campaign_id": identity.campaign_id,
+            "campaign_mode": identity.campaign_mode,
             "campaign_lock_sha256": identity.lock_sha256,
             "v28_lock_sha256": PLAN056_V28_SHA256,
             "product": Product.RONDO_LOCAL.value,
@@ -1232,15 +1310,21 @@ def public_result(
             "main_effort": PLAN056_MAIN_EFFORT,
             "guardian_effort": PLAN056_GUARDIAN_EFFORT,
             "tasks": PLAN056_TASK_COUNT,
-            "rounds": PLAN056_ROUNDS,
-            "formal_denominator": PLAN056_SLOT_COUNT,
-            "formal_slots_published": sum(
+            "rounds": identity.rounds,
+            "campaign_denominator": len(identity.slots),
+            "campaign_slots_published": sum(
                 row["status"] == "published" for row in state["slots"]
             ),
             "source_validated_slots": len(values),
         },
-        "status": "valid" if valid else "invalid",
-        "outcome": assessment["decision"] if assessment else "campaign_invalid",
+        "status": "valid" if complete else "invalid",
+        "outcome": (
+            assessment["decision"]
+            if assessment
+            else (
+                "rehearsal_complete" if complete and not formal else "campaign_invalid"
+            )
+        ),
         "selected_candidate": assessment["selected_candidate"] if assessment else None,
         "candidate_assessment": assessment,
         "terminal_bench": {
@@ -1249,8 +1333,11 @@ def public_result(
             "task_failures": len(values) - reward_passes,
         },
         "budget": {
-            "cap_usd": "50.000000",
-            "estimated_usd": f"{spent:.6f}",
+            "task_cap_usd": f"{PLAN056_TASK_CAP_USD:.6f}",
+            "prior_estimated_usd": f"{identity.prior_settled_usd:.6f}",
+            "campaign_cap_usd": f"{identity.campaign_cap_usd:.6f}",
+            "campaign_estimated_usd": f"{spent:.6f}",
+            "task_estimated_usd": f"{identity.prior_settled_usd + spent:.6f}",
             "reserved_usd": "0.000000",
             "run_slots_used": int(budget["run_slots_used"]),
             "upstream_attempts": sum(
@@ -1263,7 +1350,7 @@ def public_result(
             "final_storage": state.get("final_storage"),
             "slot_docker_receipts": len(values),
         },
-        "invalid_reason": state.get("invalid_reason") if not valid else None,
+        "invalid_reason": state.get("invalid_reason") if not complete else None,
     }
     _validate_public_result(result)
     return result
@@ -1287,7 +1374,7 @@ def close_envelope_and_pointer(
             envelope_path,
             active=TaskBudgetIdentity(identity.campaign_id, identity.batch_id),
             terminal_status=terminal_status,
-            cumulative_settled_usd=spent_usd,
+            cumulative_settled_usd=identity.prior_settled_usd + spent_usd,
             task_budget_id=identity.task_budget_id,
             cap_usd=PLAN056_TASK_CAP_USD,
         )
@@ -1310,7 +1397,7 @@ def verify_task_budget(
     return verify_active_identity(
         task_budget_path(paths.common_root, identity.task_budget_id),
         active=TaskBudgetIdentity(identity.campaign_id, identity.batch_id),
-        prior_settled_usd=Decimal(0),
+        prior_settled_usd=identity.prior_settled_usd,
         task_budget_id=identity.task_budget_id,
         cap_usd=PLAN056_TASK_CAP_USD,
     )

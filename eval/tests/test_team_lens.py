@@ -1223,6 +1223,33 @@ class TeamLensReducerTests(unittest.TestCase):
             self.assertEqual(fallback_terminal["started_seq"], fallback_tool["started_seq"])
             self.assertEqual(fallback_view["availability"]["terminal"]["status"], "partial")
 
+    def test_terminal_runtime_end_may_follow_tool_end(self):
+        with TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw) / "bundle", product="codex")
+            events = self._events(bundle)
+            runtime_index = next(
+                index
+                for index, row in enumerate(events)
+                if row["payload"]["type"] == "tool_call_runtime_ended"
+                and row["payload"]["tool_call_id"] == "tool-terminal"
+            )
+            runtime_end = events.pop(runtime_index)
+            tool_index = next(
+                index
+                for index, row in enumerate(events)
+                if row["payload"]["type"] == "tool_call_ended"
+                and row["payload"]["tool_call_id"] == "tool-terminal"
+            )
+            events.insert(tool_index + 1, runtime_end)
+            self._resequence_events(events)
+            self._write_events(bundle, events)
+
+            view = reduce_bundle(bundle, "codex")
+
+            self.assertEqual(view["availability"]["terminal"]["status"], "available")
+            self.assertEqual(view["terminal"][0]["terminal_id"], "terminal-1")
+            self.assertEqual(view["terminal"][0]["duration_ms"], 1500)
+
     def test_team_view_validator_rejects_cross_object_contradictions(self):
         with TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw) / "bundle", product="rondo-multi")

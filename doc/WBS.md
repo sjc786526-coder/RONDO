@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-22（方向 1 Plan 052 已完成；方向 3 M3-A1 已完成，M3-B2a 已由 Plan 055 专用工作树承接）
+最后更新：2026-08-22（方向 1 Plan 056 已追加授权并进入 rehearsal；其他方向状态由各自专用工作树维护）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,7 +18,7 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 052 已完成；证据不足，未选择行为优化** | 下一唯一方向内工作包为 10 题 × 2 轮有界观测复测，须另建 ExecPlan 并授权真实 API、Docker 与 20 USD 上限 |
+| 1：Harness 优化 | **Plan 056 v1 已无效关闭，任务按追加授权继续** | 累计 100 USD；先完成完整 10 题单轮 rehearsal，再以全新身份执行首个可信正式 20/20 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期及其收口案例已完成；**三期 M3-A1 产品合同已完成** | M3-A2 数据/评价设施可独立立项；M3-B2a 已由 Plan 055 专用工作树承接，尚未主线整合 |
 
@@ -39,19 +39,20 @@
 
 ### 方向 1：有界观测复测
 
-Plan 052 已完成默认关闭的原生 trace、安全任务级投影和 v28 历史普查。现有证据中 C1/C2 只有弱信号，
-C11 在当前样本未观察到，C7 不可测，因此没有选择行为优化。
+Plan 056 v1 已按原冻结合同建立同一 10 题、两轮、20-slot 的 RONDO Local campaign，并完成 10/10 零 API
+Docker 预检。正式执行发布第 1 个 slot 后，第 2 个已发送 slot 在原生 trace 投影阶段被判定为生命周期不完整；
+v1 因而立即关闭为无效，没有在该 identity 内替换或重发 slot。
 
-下一唯一的方向 1 工作包已经确定，但**尚未建立独立 ExecPlan、campaign 身份或取得执行授权**：
-
-- 使用同一冻结 10 题 canary，在 `mydev/` 被测对象上执行两个完整 round，共 20 个 run；main 为
-  `gpt-5.6-terra/medium`，Guardian 为 `gpt-5.6-terra/low`，费用硬上限 20 USD。
-- 唯一变量是为目标测量开启既有原生 trace，并在发布前生成 schema-v2 body-free 投影；不改变 prompt、输出、
-  compact、重试、Guardian、调度或其他产品行为。
-- 不运行 Codex 对照、validation、holdout、E-A 或条件补题。20/20 个预定 run 全部形成唯一完整投影才构成有效测量；
-  正式边界后不得替换 slot、换题、补题或改变分母。
-- 完整停止门、候选进入条件与无候选分支见 `doc/WBS/teacher-harness-study.md`。真实 API、Docker 和费用必须在
-  下一任务中一次明确授权，本次 Plan 052 的授权不延续。
+- body-free 公共结果固定 20-run 分母、1 个已发布 slot、25 次上游尝试与 `0.631065 USD` 结算；task budget 和
+  active pointer 已关闭，reservation 为 0。无效结果不执行 C1/C2/C11 候选推断，C7 仍不可测。
+- 事后只读复核确认失败来自 Team Lens 对合法事件交错的设施假阴性：3 次 `tool_call_runtime_ended` 晚于对应
+  `tool_call_ended`，元数据实际完整。reducer 已窄修为整束读完后判断完整性并补回归测试，但无效 campaign 不回滚、
+  不重放第 2 个 slot。
+- 用户随后追加并变更 Plan 056 授权：总费用从 v1 的 `0.631065 USD` 继续累计，硬上限为 `100.000000 USD`；
+  允许真实开发性 rehearsal 和因可修复设施问题关闭 campaign 后以全新 identity 干净重启。
+- 当前唯一方向 1 工作包仍为 Plan 056：先至少连续完成一次冻结 10 题单轮 rehearsal，再提交/冻结正式源码和
+  binary，从第一题执行新的固定两轮 20-run campaign。v1/rehearsal/无效数据不进入最终分母；首个可信 20/20
+  产生候选或“无候选”结论后停止付费运行。详细合同见 `plan/056-direction1-bounded-observation-execplan.md`。
 
 ### 方向 3：Publication Critic 三期
 

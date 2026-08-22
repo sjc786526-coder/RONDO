@@ -39,12 +39,11 @@ from .baseline_cli import (
     _sample_storage,
 )
 from .bounded_observation import (
+    PLAN056_LOCK_RELPATH,
     PLAN056_PAID_ACTION,
     PLAN056_POINTER_RELPATH,
     PLAN056_PUBLIC_RESULT_RELPATH,
     PLAN056_RUN_CAP_USD,
-    PLAN056_SLOT_COUNT,
-    PLAN056_TASK_CAP_USD,
     PLAN056_UNPRICED_FALLBACK_USD,
     BoundedObservationError,
     BoundedObservationIdentity,
@@ -123,6 +122,18 @@ def status(paths: RepoPaths) -> dict[str, Any]:
     pointer = paths.worktree_root / PLAN056_POINTER_RELPATH
     if not pointer.exists() and not pointer.is_symlink():
         return {"status": "uninitialized", "paid_requests_sent": 0}
+    pointer_value = _read_json(pointer)
+    retired_pointer = {
+        "schema_version": 1,
+        "kind": "rondo_direction1_bounded_observation",
+        "active_lock": None,
+        "active_lock_sha256": None,
+    }
+    if (
+        pointer_value == retired_pointer
+        and not (paths.worktree_root / PLAN056_LOCK_RELPATH).exists()
+    ):
+        return {"status": "awaiting_initialization", "paid_requests_sent": 0}
     identity = load_identity(paths, allow_retired=True)
     state = _read_json(state_path(paths, identity))
     ledger_path = budget_path(paths, identity)
@@ -145,7 +156,7 @@ def status(paths: RepoPaths) -> dict[str, Any]:
         "preflight_complete": sum(
             row["status"] == "complete" for row in state["preflight"]
         ),
-        "formal_slots_published": sum(
+        "campaign_slots_published": sum(
             row["status"] == "published" for row in state["slots"]
         ),
         "formal_boundary": state["formal_boundary"],
@@ -166,8 +177,8 @@ def _load_budget_snapshot(
     value = load_validated_budget_ledger_state(
         budget_path(paths, identity),
         batch_id=identity.batch_id,
-        total_cap_usd=PLAN056_TASK_CAP_USD,
-        max_runs=PLAN056_SLOT_COUNT,
+        total_cap_usd=identity.campaign_cap_usd,
+        max_runs=len(identity.slots),
         default_run_cap_usd=PLAN056_RUN_CAP_USD,
         unpriced_fallback_usd=PLAN056_UNPRICED_FALLBACK_USD,
         unpriced_fallback_per_attempt=True,
@@ -889,8 +900,8 @@ def _paid_worker(paths: RepoPaths, args: argparse.Namespace) -> int:
     with PersistentBudgetLedger(
         budget_path(paths, identity),
         batch_id=identity.batch_id,
-        total_cap_usd=PLAN056_TASK_CAP_USD,
-        max_runs=PLAN056_SLOT_COUNT,
+        total_cap_usd=identity.campaign_cap_usd,
+        max_runs=len(identity.slots),
         default_run_cap_usd=PLAN056_RUN_CAP_USD,
         unpriced_fallback_usd=PLAN056_UNPRICED_FALLBACK_USD,
         unpriced_fallback_per_attempt=True,
@@ -1131,7 +1142,7 @@ def finalize(paths: RepoPaths, *, snapshot_date: str) -> dict[str, Any]:
         # An already invalid campaign makes no inference from its formal rows.
         # The budget and state remain authoritative for conservative closure.
         records = []
-    if state["status"] == "ready_to_finalize" and len(records) != PLAN056_SLOT_COUNT:
+    if state["status"] == "ready_to_finalize" and len(records) != len(identity.slots):
         raise BoundedObservationError("Plan 056 valid denominator is incomplete")
     result = public_result(
         identity=identity,
@@ -1193,7 +1204,7 @@ def main(argv: list[str] | None = None) -> int:
                         "status": "initialized",
                         "campaign_id": identity.campaign_id,
                         "campaign_lock_sha256": identity.lock_sha256,
-                        "formal_slots": len(identity.slots),
+                        "campaign_slots": len(identity.slots),
                         "required_paid_action": PLAN056_PAID_ACTION,
                         "paid_requests_sent": 0,
                     },

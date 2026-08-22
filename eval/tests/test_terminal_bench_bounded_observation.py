@@ -18,6 +18,7 @@ from rondo_eval.terminal_bench.bounded_observation import (
     _validate_source_binding,
     assess_candidates,
     freeze_slots,
+    public_result,
 )
 from rondo_eval.terminal_bench.bounded_observation_cli import (
     _load_budget_snapshot,
@@ -164,6 +165,69 @@ class BoundedObservationIdentityTests(unittest.TestCase):
                 {"status": "uninitialized", "paid_requests_sent": 0},
             )
 
+    def test_retired_predecessor_pointer_reports_awaiting_new_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            pointer = (
+                root / "eval/locks/plan056-direction1-bounded-observation-active.json"
+            )
+            pointer.parent.mkdir(parents=True)
+            pointer.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "rondo_direction1_bounded_observation",
+                        "active_lock": None,
+                        "active_lock_sha256": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                status(RepoPaths(common_root=root, worktree_root=root)),
+                {"status": "awaiting_initialization", "paid_requests_sent": 0},
+            )
+
+    def test_complete_rehearsal_is_valid_but_never_assesses_candidates(self) -> None:
+        records = _records()[:10]
+        for record in records:
+            record["terminal_bench"]["outcome"] = "completed"
+        identity = SimpleNamespace(
+            campaign_id="plan056-rehearsal-test",
+            campaign_mode="rehearsal",
+            lock_sha256="a" * 64,
+            rounds=1,
+            slots=tuple(range(10)),
+            prior_settled_usd=Decimal("0.631065"),
+            campaign_cap_usd=Decimal("99.368935"),
+        )
+        state = {
+            "status": "ready_to_finalize",
+            "slots": [{"status": "published"} for _slot in range(10)],
+            "final_storage": {},
+            "invalid_reason": None,
+        }
+        budget = {
+            "spent_usd": "1.000000",
+            "reserved_usd": "0.000000",
+            "run_slots_used": 10,
+            "runs": {},
+        }
+
+        result = public_result(
+            identity=identity,
+            state=state,
+            budget=budget,
+            records=records,
+            snapshot_date="2026-08-22",
+        )
+
+        self.assertEqual(result["status"], "valid")
+        self.assertEqual(result["outcome"], "rehearsal_complete")
+        self.assertIsNone(result["candidate_assessment"])
+        self.assertIsNone(result["selected_candidate"])
+
     def test_private_source_fingerprint_detects_trace_drift(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -216,8 +280,8 @@ class BoundedObservationBudgetTests(unittest.TestCase):
             with PersistentBudgetLedger(
                 path,
                 batch_id="plan056-test-batch",
-                total_cap_usd="50",
-                max_runs=20,
+                total_cap_usd=Decimal("99.368935"),
+                max_runs=10,
                 default_run_cap_usd="40",
                 unpriced_fallback_usd="1",
                 unpriced_fallback_per_attempt=True,
@@ -229,6 +293,8 @@ class BoundedObservationBudgetTests(unittest.TestCase):
                 RepoPaths(common_root=root, worktree_root=root),
                 SimpleNamespace(
                     batch_id="plan056-test-batch",
+                    campaign_cap_usd=Decimal("99.368935"),
+                    slots=tuple(range(10)),
                 ),
             )
 

@@ -1617,3 +1617,25 @@ Publication Critic 产品语义；验收报告提交 `36a106c` 给出 `PASS`，�
 - 第三轮独立验收确认 public `exec` 早期错误不再被误计为零；Python 51/51、Rust 2/2 通过，结论 `PASS`，
   未发现新的功能性回归或冗余设施问题。未运行真实 API、Docker、本地模型、训练或费用任务。最终报告见
   `agent_log/2026-08-22-041330-plan052-third-remediation-acceptance.md`。
+
+## 方向 1 原生观测有界复测 v1 历史节点（Plan 056，2026-08-22）
+
+**状态**：v1 已按原合同以无效 campaign 终态关闭；没有行为候选结论。用户随后追加授权，整个 Plan 056 任务仍在
+rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
+
+- 新建 `plan056-direction1-bounded-observation-v1` 独立 campaign/batch/task-budget/result namespace，固定 v28
+  同一 10 题、两个 round、20 个 round-major slot、RONDO Local、`gpt-5.6-terra` main medium / Guardian low。
+  runtime bundle 绑定 clean `2765ff8f82ce21262af46bdf93a62c75b381b631`，CLI/code-mode host/bwrap SHA-256
+  分别为 `7d960131...016f`、`5b9dcd88...afb6`、`77360cb7...2c4c`。
+- 10/10 零 API Docker/Harbor 预检完成。正式第 1 个 slot `db-wal-recovery` 发布且 task pass；第 2 个
+  `extract-elf` 已发送后，投影器报 `rollout trace lifecycle is incomplete`。合同禁止重发已发送 slot，因此整包
+  立即标记 `sent_slot_execution_or_projection_failed`，剩余 18 slot 未启动，20-run 分母保持不变。
+- 日期冻结 body-free 结果为 `campaign_invalid`：正式发布 1/20、source-validated 0、25 个上游 attempts、
+  `0.631065 USD`、reservation 0、候选 assessment/null。task envelope 已按 invalid 关闭，active pointer 已退役。
+- 只读根因复核发现 3 个完整 runtime-end 事件晚于对应 tool-end；旧 reducer 在较早事件处永久标记 missing。设施已
+  改为整束读完后判断 start/end 集合，并补乱序回归；原始第 2 题 trace 复放恢复 `terminal=available`，但不撤销
+  已冻结的 campaign 终态。另修持久预算只读 loader 与 CLI snapshot 语义错配。
+- 相关 Team Lens、harness observation 与 Plan 056 定向 Python 集合 69/69 通过；未运行 Codex 对照、validation、
+  holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
+- Docker total 前后均为 11.5 GB，Docker Desktop VHDX 前后均为 69,467,111,424 bytes，Windows `C:` 余量从
+  186,093,740,032 降至 186,090,741,760 bytes；所有 Plan 056 容器、网络和卷已清空，固定镜像保留。
