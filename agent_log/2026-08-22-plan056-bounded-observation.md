@@ -52,3 +52,12 @@ terminal structured result，但 native process 尚未创建，因而按既有�
 caller `requester + cmd + workdir`，pre-runtime 输出体积使用 native render source bytes，避免遗漏紧随其后的同命令
 重试或截断前字节。新增正负回归通过，v3 原 trace 已离线复投影为合法 schema-v2 body-free 聚合。下一次 rehearsal
 使用 v4 全新 identity 从第一题重启。
+
+rehearsal-v4 完成 10/10 零 API preflight 和连续 10 题真实单轮；10 个 slot 均有完整 Terminal-Bench、API、原生
+trace 投影和 Docker receipt，6 pass/4 fail。v4 为 111 attempts、`1.970204 USD`，Plan 056 累计 222 attempts、
+`4.013386 USD`、reservation 0。Docker/VHDX 增长均为 0，Windows `C:` 从 193,259,507,712 降至
+192,947,449,856 bytes，最终没有 Plan 056 容器、网络、卷或 build cache。两次并行重任务短时持锁均通过等待解决。
+
+首次 v4 finalize 的公共聚合已经是有效 `rehearsal_complete`，但 finalized state allowlist 漏了该 rehearsal outcome，
+因此在写最终 state 前 fail-closed。补齐 mode-aware allowlist 和回归后，同一 v4 离线幂等 finalize 成功，没有新 API
+请求。该完整 rehearsal 不进入正式分母，也不执行候选判断；下一阶段从正式源码和 binary 复冻开始。

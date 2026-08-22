@@ -232,20 +232,28 @@
   已得到合法 schema-v2 body-free 聚合。
 - v3 全 campaign Docker 与 VHDX 增长均为 0，Windows `C:` 余量未触发硬门，最终没有 Plan 056 容器、网络、卷
   或 build cache；采样重试链在 v2 的旧故障点及 v3 后续收尾均成功。
+- rehearsal-v4 完成 10/10 零 API preflight 和连续 10 题真实单轮；10 个 slot 均完成来源复验与发布，其中
+  Terminal-Bench 6 pass/4 fail，属于有效 rehearsal 结果而非重跑理由。v4 固定 111 attempts、`1.970204 USD`，
+  Plan 056 累计 222 attempts/`4.013386 USD`，reservation 0；结果为 `rehearsal_complete`，不执行候选判断。
+- v4 Docker/VHDX 增长均为 0，10 份 slot receipt 完整，Windows `C:` 从 193,259,507,712 降至
+  192,947,449,856 bytes，最终没有 Plan 056 容器、网络、卷或 build cache。执行中两次遇到并行重任务短时持锁，
+  均等待后继续，没有修改并行任务现场。
+- 首次 v4 finalize 暴露 finalized outcome allowlist 遗漏 `rehearsal_complete`；公共聚合已经有效，状态机在写 final
+  state 前 fail-closed。mode-aware allowlist 和回归已补齐，同一 campaign 离线幂等 finalize 成功，没有新请求。
 
 ### 当前工作
 
-v1、rehearsal-v2 与 rehearsal-v3 均已按各自真实终态关闭并保留。当前正在冻结 rehearsal-v4；它将从第一题干净
-重启完整单轮，费用继续从 `2.043182 USD` 单调累计，不复用任何旧 campaign 已发送 slot。
+v1、rehearsal-v2、rehearsal-v3 与完整 rehearsal-v4 均已按真实终态关闭并保留。当前正在提交最终被测源码、重建
+正式 binary manifest 并冻结 formal-v5；正式 20-run 将从第一题以全新 identity 干净启动，费用从
+`4.013386 USD` 单调累计。
 
 ### 本任务剩余步骤
 
-1. 冻结 rehearsal-v4 身份并完成 10/10 零 API preflight。
-2. 串行完成一次连续 10 题单轮真实 rehearsal，核对观测、投影、费用和资源收尾；修复真实问题并复验。
-3. 提交并冻结最终被测源码，重新构建 binary manifest，创建全新正式 campaign，从第一题执行固定 20/20。
-4. 首个可信 20/20 形成候选或“无候选”结论后停止付费运行，同步公共结果、累计费用、资源、WBS、历史和日志。
-5. 完成上下文干净的独立只读验收；整改真实 finding，必要时废弃受影响 campaign 并在余额内干净重跑。
-6. 提交 Plan 056 最终分支并保持 worktree 干净；不合并、不推送、不归档。
+1. 提交并冻结最终被测源码，重新构建 binary manifest，创建全新 formal-v5 campaign 并完成 10/10 零 API preflight。
+2. 从第一题串行执行固定两轮 20/20；首个可信 20/20 形成候选或“无候选”结论后停止付费运行。
+3. 同步公共结果、累计费用、资源、WBS、WBS-COMPLETED 和精炼日志。
+4. 完成上下文干净的独立只读验收；整改真实 finding，必要时废弃受影响 campaign 并在余额内干净重跑。
+5. 提交 Plan 056 最终分支并保持 worktree 干净；不合并、不推送、不归档。
 
 ### 阻塞项
 
@@ -257,8 +265,8 @@ v1、rehearsal-v2 与 rehearsal-v3 均已按各自真实终态关闭并保留。
   `0.631065 USD`、无候选结论。
 - 设施整改：只读预算 totals、Team Lens 合法事件交错、Plan 056 Docker 事实采集的有界瞬时恢复，以及合法
   pre-runtime sandbox denial 的投影均已窄修并通过定向回归；v2/v3 分别结算 34/52 attempts、
-  `0.569748/0.842369 USD`，累计 `2.043182 USD`，新的 v4 请求尚未发送。
-- 最终测量：完整单轮 rehearsal、正式 binary 复冻和可信 20/20 均待执行；最终独立验收待完成。
+  `0.569748/0.842369 USD`；v4 完整 10/10 为 111 attempts/`1.970204 USD`，累计 `4.013386 USD`。
+- 最终测量：完整单轮 rehearsal 已通过；正式 binary 复冻和可信 20/20 待执行；最终独立验收待完成。
 - 未运行：Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
 - Git：只在 Plan 056 worktree 提交；未合并、未推送、未归档，未读取或修改 Plan 054/055 私有资产。
 
@@ -277,7 +285,8 @@ worktree 中的命令发起、但物理上发生在主仓库 `/home/sjc/desktop/
   标记的对象，并与其他重型任务串行。
 
 实际保留的 Plan 056 ignored 资产为：detached source worktree `eval-data/sources/plan056-rondo-local-2765ff8f/`；
-约 13 GiB Cargo target；legacy/companion/runtime 三个 bundle；v1、rehearsal-v2、rehearsal-v3 三个独占 campaign；
+约 13 GiB Cargo target；legacy/companion/runtime 三个 bundle；v1、rehearsal-v2、rehearsal-v3、rehearsal-v4 四个
+独占 campaign；
 batch/task budget 与 Plan 056 build/preflight/paid/close metrics。复用了项目局部 `eval/.venv`、`eval-data/uv-cache`、
 既有 bwrap 资产和 v28 Terminal-Bench source。10 个 pinned Docker image 保留不清理；Plan 056 容器、网络、卷均已
 精确清空，Docker total 仍为 11.5 GB、VHDX 增长 0。

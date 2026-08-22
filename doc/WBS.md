@@ -54,11 +54,13 @@ v1 因而立即关闭为无效，没有在该 identity 内替换或重发 slot�
   后 7 题未发送。采样链经有界、fail-closed 窄修后，rehearsal-v3 的前 3 题完整发布并跨过该故障点；第 4 题
   因 projector 未识别 sandbox open 前的合法 code-mode terminal result 而关闭，后 6 题未发送。v2/v3 分别为
   34/52 attempts、`0.569748/0.842369 USD`，累计 `2.043182 USD`；资源门未触发且无遗留容器、网络、卷或 cache。
-  projector 已仅对该机械完整的 pre-runtime denial 形态窄修并用 v3 原 trace 离线复投影，当前以 rehearsal-v4
-  从第一题重新验证完整单轮。
-- 当前唯一方向 1 工作包仍为 Plan 056：先至少连续完成一次冻结 10 题单轮 rehearsal，再提交/冻结正式源码和
-  binary，从第一题执行新的固定两轮 20-run campaign。v1/rehearsal/无效数据不进入最终分母；首个可信 20/20
-  产生候选或“无候选”结论后停止付费运行。详细合同见 `plan/056-direction1-bounded-observation-execplan.md`。
+  projector 已仅对该机械完整的 pre-runtime denial 形态窄修并用 v3 原 trace 离线复投影。
+- rehearsal-v4 随后连续完成冻结 10 题单轮：10/10 来源、投影、费用和 Docker receipt 完整，6 pass/4 fail，
+  111 attempts、`1.970204 USD`；累计 222 attempts/`4.013386 USD`、reservation 0。Docker/VHDX 增长均为 0，
+  资源收尾完整，结果为 `rehearsal_complete` 且不参与候选判断。
+- 当前唯一方向 1 工作包仍为 Plan 056：提交/冻结正式源码并重建 binary，以 formal-v5 全新身份从第一题执行固定
+  两轮 20-run campaign。v1/rehearsal/无效数据不进入最终分母；首个可信 20/20 产生候选或“无候选”结论后停止
+  付费运行。详细合同见 `plan/056-direction1-bounded-observation-execplan.md`。
 
 ### 方向 3：Publication Critic 三期
 
