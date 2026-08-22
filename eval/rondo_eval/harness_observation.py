@@ -999,6 +999,40 @@ def _output_render_stats(
     if ended_tools != set(tools):
         raise HarnessObservationError("tool output render lifecycle is incomplete")
 
+    public_exec_deliveries: dict[
+        tuple[str, str, str, str], dict[str, Any] | None
+    ] = {}
+    for event in reader.events:
+        payload = event["payload"]
+        if payload["type"] != "code_mode_exec_output_delivered":
+            continue
+        thread_id = event.get("thread_id")
+        turn_id = event.get("codex_turn_id")
+        model_call_id = payload.get("model_visible_call_id")
+        if not all(
+            isinstance(item, str) and item
+            for item in (thread_id, turn_id, model_call_id)
+        ):
+            raise HarnessObservationError("public exec output identity is invalid")
+        delivery = ("direct_model", thread_id, turn_id, model_call_id)
+        if delivery in public_exec_deliveries:
+            raise HarnessObservationError("public exec output delivery is duplicated")
+        raw_observation = payload.get("output_render")
+        observation = (
+            None
+            if raw_observation is None
+            else _validate_output_render(raw_observation, "direct_model")
+        )
+        public_exec_deliveries[delivery] = observation
+        deliveries.setdefault(delivery, "direct_model")
+        prior = observations.get(delivery)
+        if observation is None:
+            observations.pop(delivery, None)
+        elif prior is not None and prior != observation:
+            raise HarnessObservationError("correlated output render observations disagree")
+        else:
+            observations[delivery] = observation
+
     initial_cells = {
         (
             event.get("thread_id"),
@@ -1022,23 +1056,38 @@ def _output_render_stats(
         if model_call_id is None or cell not in initial_cells:
             raise HarnessObservationError("code cell output render identity is invalid")
         delivery = ("direct_model", cell[0], cell[1], model_call_id)
-        deliveries[delivery] = "direct_model"
-        observation = _validate_output_render(payload.get("observation"), "direct_model")
-        prior = observations.get(delivery)
-        if prior is not None and prior != observation:
+        if delivery not in public_exec_deliveries:
+            raise HarnessObservationError("code cell output delivery is incomplete")
+        legacy_observation = _validate_output_render(
+            payload.get("observation"), "direct_model"
+        )
+        final_observation = public_exec_deliveries[delivery]
+        if final_observation is not None and final_observation != legacy_observation:
             raise HarnessObservationError("correlated output render observations disagree")
-        observations[delivery] = observation
+    started_deliveries = {
+        ("direct_model", cell[0], cell[1], code_cell_model_call_ids[cell])
+        for cell in code_cell_model_call_ids
+    }
     initial_deliveries = {
         ("direct_model", cell[0], cell[1], code_cell_model_call_ids[cell])
         for cell in initial_cells
         if cell in code_cell_model_call_ids
     }
+    rendered_public_exec_deliveries = {
+        delivery
+        for delivery, observation in public_exec_deliveries.items()
+        if observation is not None
+    }
+    if (
+        len(started_deliveries) != len(code_cell_model_call_ids)
+        or not started_deliveries.issubset(public_exec_deliveries)
+    ):
+        raise HarnessObservationError("code cell output delivery is incomplete")
     if (
         len(initial_deliveries) != len(initial_cells)
-        or not initial_deliveries.issubset(observations)
-        or rendered_cells != initial_cells
+        or not rendered_public_exec_deliveries.issubset(initial_deliveries)
     ):
-        raise HarnessObservationError("code cell output render coverage is incomplete")
+        raise HarnessObservationError("public exec output render lifecycle is invalid")
 
     stats: dict[str, int] = {}
     for surface, prefix in (

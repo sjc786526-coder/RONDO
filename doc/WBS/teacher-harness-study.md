@@ -30,6 +30,8 @@ E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）
 1. 复用既有 rollout trace 与 API metadata；只对目标 Local 测量请求显式开启 trace，结果发布前生成固定名称的
    schema-v2 body-free 投影。v2 对 main/Guardian failed/cancelled partial usage 做分角色核对，分别记录 model-visible 与
    code-mode-runtime render 的 measured/partial/unmeasurable 覆盖、精确重复调用 lifecycle 时长及真实 turn 时长。
+   public `exec` 在最终 caller-facing 边界原子记录一次交付与可选 render；早期错误、取消或最终输出替换没有可靠
+   render 时形成覆盖缺失，不会被报成 `0 deliveries / measured`。
    原始 trace 不进入归档；缺失、残缺、重复、schema 漂移或两来源不一致均拒绝发布。
    重复的 `codex-exec` collector 已删除，产品默认路径和行为不变。
 2. v28 Local cohort 为 10 个任务 × 3 次运行；API metadata 覆盖 30/30 run、10/10 任务，exec JSONL 覆盖
@@ -47,9 +49,11 @@ E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）
   新 Local bundle、campaign 与预算身份。
 - 唯一变量是给目标 Local 测量开启原生 trace 并执行安全离线投影；预期只改善 C1/C2/C11 的覆盖与影响归因，
   不预先承诺产品性能收益，C7 仍保持不可测。
-- 第一轮任一投影缺失、trace 完整性非零、trace/API 交叉核对不一致、schema/body-free 或资源门失败即停止；
-  任一新预留会达到 20 USD 即停止；两轮后
-  无条件停止，不加题、补轮或改分母。
+- 首个真实 API 请求或首份非空 API metadata、trace、结果工件（以先发生者为准）固定正式 slot 身份与 20-run
+  分母；此后任一投影缺失/残缺/重复，trace/API 的 main/Guardian response population、completed/non-completed
+  合计、分角色 usage 缺失数或分角色已知 usage 合计不一致，以及 schema/body-free 失败，均使整包无效并停止，
+  不替换 slot、不加题补轮。正式边界前的 fixture、schema 接线或启动配置问题可窄修复验；资源门不可用则阻塞且
+  不进入正式 slot。任一新预留会达到 20 USD 即停止；两轮后无条件停止。
 - 20/20 个预定 run 全部得到唯一完整投影才是有效测量；任一缺口使整包无效。failed/cancelled inference 缺 usage
   时保留类型化 C11 终态并把 usage 标为不可测，不把它误作残缺或 0；completed response 缺 usage 仍拒绝。观测引入新
   infra 失败时关闭 opt-in 并回到设施修复。C1/C2 须两轮均出现、跨至少 2 个任务且有相应表面已覆盖的

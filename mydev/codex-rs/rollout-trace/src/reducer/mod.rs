@@ -384,6 +384,7 @@ impl TraceReducer {
                 )?;
             }
             RawTraceEventPayload::CodeCellOutputRendered { .. } => {}
+            RawTraceEventPayload::CodeModeExecOutputDelivered { .. } => {}
             RawTraceEventPayload::CompactionRequestStarted {
                 compaction_id,
                 compaction_request_id,

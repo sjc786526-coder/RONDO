@@ -230,6 +230,7 @@ impl FunctionToolOutput {
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn render_metadata(&self) -> Option<ToolOutputRenderMetadata> {
         self.output_render_metadata
     }

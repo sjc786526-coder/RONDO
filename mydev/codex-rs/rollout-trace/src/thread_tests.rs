@@ -104,6 +104,40 @@ fn code_cell_render_records_only_body_free_native_facts() -> anyhow::Result<()> 
 }
 
 #[test]
+fn code_mode_exec_delivery_records_only_model_call_identity() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let thread_trace = ThreadTraceContext::start_root_in_root_for_test(
+        temp.path(),
+        minimal_metadata(ThreadId::new()),
+    )?;
+
+    thread_trace.record_code_mode_exec_output_delivered("turn-1", "call-1", None);
+
+    let event_log = fs::read_to_string(single_bundle_dir(temp.path())?.join("trace.jsonl"))?;
+    let delivery_event = event_log.lines().find_map(|line| {
+        let event: crate::RawTraceEvent = serde_json::from_str(line).ok()?;
+        match event.payload {
+            RawTraceEventPayload::CodeModeExecOutputDelivered {
+                model_visible_call_id,
+                output_render,
+            } => Some((
+                event.thread_id,
+                event.codex_turn_id,
+                model_visible_call_id,
+                output_render,
+            )),
+            _ => None,
+        }
+    });
+    assert!(matches!(
+        delivery_event,
+        Some((Some(_), Some(turn_id), call_id, None))
+            if turn_id == "turn-1" && call_id == "call-1"
+    ));
+    Ok(())
+}
+
+#[test]
 fn spawned_thread_start_appends_to_root_bundle() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let root_thread_id = ThreadId::new();

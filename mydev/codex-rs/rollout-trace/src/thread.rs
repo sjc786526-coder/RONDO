@@ -332,6 +332,30 @@ impl ThreadTraceContext {
         )
     }
 
+    /// Records that one public code-mode `exec` output was returned to its
+    /// model-visible caller.
+    ///
+    /// The optional render comes from the final `ToolOutput` at the same
+    /// boundary. Keeping this event body-free lets early errors contribute to
+    /// the delivery denominator without overstating truncation coverage.
+    pub fn record_code_mode_exec_output_delivered(
+        &self,
+        codex_turn_id: impl Into<CodexTurnId>,
+        model_visible_call_id: impl Into<String>,
+        output_render: Option<crate::OutputRenderObservation>,
+    ) {
+        let ThreadTraceContextState::Enabled(context) = &self.state else {
+            return;
+        };
+        context.append_with_context_best_effort(
+            codex_turn_id.into(),
+            RawTraceEventPayload::CodeModeExecOutputDelivered {
+                model_visible_call_id: model_visible_call_id.into(),
+                output_render,
+            },
+        );
+    }
+
     /// Starts one dispatch-level tool lifecycle and returns its trace handle.
     ///
     /// `invocation` is lazy because adapting core tool objects into trace-owned

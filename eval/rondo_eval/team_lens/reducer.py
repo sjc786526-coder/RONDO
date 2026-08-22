@@ -40,6 +40,7 @@ _KNOWN_EVENT_TYPES = {
     "code_cell_initial_response",
     "code_cell_ended",
     "code_cell_output_rendered",
+    "code_mode_exec_output_delivered",
     "compaction_request_started",
     "compaction_request_completed",
     "compaction_request_failed",
@@ -141,6 +142,7 @@ def _validate_raw_event_shape(event: dict[str, Any]) -> None:
         "code_cell_initial_response": ("runtime_cell_id",),
         "code_cell_ended": ("runtime_cell_id",),
         "code_cell_output_rendered": ("runtime_cell_id",),
+        "code_mode_exec_output_delivered": ("model_visible_call_id",),
         "compaction_request_started": (
             "compaction_id",
             "compaction_request_id",
@@ -514,7 +516,11 @@ class _Reducer:
             self.rollout_ended = True
             self.rollout_status = _execution_status(payload.get("status"))
             self.rollout_ended_at = timestamp
-        elif kind in {"trace_capture_ended", "code_cell_output_rendered"}:
+        elif kind in {
+            "trace_capture_ended",
+            "code_cell_output_rendered",
+            "code_mode_exec_output_delivered",
+        }:
             pass
         elif kind == "thread_started":
             self._start_thread(event)

@@ -114,6 +114,8 @@ def _write_bundle(
     inference_terminal: str = "completed",
     duplicate_code_cell_render: bool = False,
     include_mcp_without_render: bool = False,
+    code_mode_exec_phase: str | None = None,
+    duplicate_public_exec_delivery: bool = False,
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -181,6 +183,85 @@ def _write_bundle(
                 "error": "synthetic typed failure",
                 "partial_response_payload": None,
             }
+        if code_mode_exec_phase is not None:
+            if turn_count != 1 or code_mode_exec_phase not in {
+                "before_cell_error",
+                "after_cell_start_error",
+                "success",
+            }:
+                raise ValueError("synthetic public exec phase is invalid")
+            model_call_id = "public-exec-call"
+            runtime_cell_id = "public-exec-cell"
+            if code_mode_exec_phase != "before_cell_error":
+                builder.event(
+                    {
+                        "type": "code_cell_started",
+                        "runtime_cell_id": runtime_cell_id,
+                        "model_visible_call_id": model_call_id,
+                        "source_js": "synthetic private source",
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+            if code_mode_exec_phase == "success":
+                output_render = {
+                    "surface": "direct_model",
+                    "source_text_bytes": len(OUTPUT_BODY.encode("utf-8")),
+                    "collection_omitted_bytes": 0,
+                    "requested_max_output_tokens": 64,
+                    "effective_max_output_tokens": 64,
+                    "returned_text_bytes": len(OUTPUT_BODY.encode("utf-8")),
+                    "presentation_truncated": False,
+                }
+                builder.event(
+                    {
+                        "type": "code_cell_initial_response",
+                        "runtime_cell_id": runtime_cell_id,
+                        "status": "completed",
+                        "response_payload": None,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_cell_output_rendered",
+                        "runtime_cell_id": runtime_cell_id,
+                        "observation": output_render,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_cell_ended",
+                        "runtime_cell_id": runtime_cell_id,
+                        "status": "completed",
+                        "response_payload": None,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+            delivery_payload = {
+                "type": "code_mode_exec_output_delivered",
+                "model_visible_call_id": model_call_id,
+                **(
+                    {"output_render": output_render}
+                    if code_mode_exec_phase == "success"
+                    else {}
+                ),
+            }
+            builder.event(
+                delivery_payload,
+                thread_id=builder.root_thread,
+                turn_id=turn_id,
+            )
+            if duplicate_public_exec_delivery:
+                builder.event(
+                    copy.deepcopy(delivery_payload),
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
         for index, (command, exit_code, cwd) in enumerate(commands, start=1):
             output_render = {
                 "surface": "direct_model",
@@ -247,6 +328,15 @@ def _write_bundle(
                         "runtime_cell_id": f"cell-duplicate-{index}",
                         "status": "completed",
                         "response_payload": None,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_mode_exec_output_delivered",
+                        "model_visible_call_id": f"model-tool-{index}",
+                        "output_render": output_render,
                     },
                     thread_id=builder.root_thread,
                     turn_id=turn_id,
@@ -650,6 +740,191 @@ class HarnessObservationTests(unittest.TestCase):
         self.assertEqual(observation["tools"]["model_visible_output_deliveries"], 1)
         self.assertEqual(observation["tools"]["model_visible_output_renders"], 0)
         self.assertEqual(observation["tools"]["model_visible_output_render_missing"], 1)
+
+    def test_public_exec_early_errors_are_missing_render_not_measured_zero(self) -> None:
+        for phase in ("before_cell_error", "after_cell_start_error"):
+            with self.subTest(phase=phase), TemporaryDirectory() as raw:
+                root = Path(raw)
+                trace_root = root / "trace-root"
+                trace_root.mkdir()
+                _write_bundle(
+                    trace_root / "exec",
+                    commands=(),
+                    code_mode_exec_phase=phase,
+                )
+                metadata = root / "api-metadata.json"
+                _write_metadata(metadata, "main")
+
+                observation = project_task_observation(trace_root, metadata)
+
+            self.assertEqual(
+                observation["availability"]["model_visible_output_truncation"],
+                "unmeasurable",
+            )
+            self.assertEqual(
+                observation["tools"]["model_visible_output_deliveries"], 1
+            )
+            self.assertEqual(observation["tools"]["model_visible_output_renders"], 0)
+            self.assertEqual(
+                observation["tools"]["model_visible_output_render_missing"], 1
+            )
+
+    def test_public_exec_render_requires_initial_cell_response(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                code_mode_exec_phase="before_cell_error",
+            )
+            events = [
+                json.loads(line)
+                for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+            ]
+            delivery = next(
+                event
+                for event in events
+                if event["payload"]["type"] == "code_mode_exec_output_delivered"
+            )
+            delivery["payload"]["output_render"] = {
+                "surface": "direct_model",
+                "source_text_bytes": len(OUTPUT_BODY.encode("utf-8")),
+                "collection_omitted_bytes": 0,
+                "requested_max_output_tokens": 64,
+                "effective_max_output_tokens": 64,
+                "returned_text_bytes": len(OUTPUT_BODY.encode("utf-8")),
+                "presentation_truncated": False,
+            }
+            (bundle / "trace.jsonl").write_text(
+                "".join(json.dumps(event) + "\n" for event in events),
+                encoding="utf-8",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError,
+                "public exec output render lifecycle is invalid",
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_public_exec_success_delivery_and_render_are_counted_once(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                code_mode_exec_phase="success",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(
+            observation["availability"]["model_visible_output_truncation"],
+            "measured",
+        )
+        self.assertEqual(observation["tools"]["model_visible_output_deliveries"], 1)
+        self.assertEqual(observation["tools"]["model_visible_output_renders"], 1)
+        self.assertEqual(observation["tools"]["model_visible_output_render_missing"], 0)
+        self.assertEqual(
+            observation["tools"]["model_visible_source_text_bytes"],
+            len(OUTPUT_BODY.encode("utf-8")),
+        )
+        self.assertEqual(
+            observation["tools"]["model_visible_returned_text_bytes"],
+            len(OUTPUT_BODY.encode("utf-8")),
+        )
+
+    def test_final_public_exec_missing_render_overrides_stale_cell_render(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec", duplicate_code_cell_render=True
+            )
+            events = [
+                json.loads(line)
+                for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+            ]
+            delivery = next(
+                event
+                for event in events
+                if event["payload"]["type"] == "code_mode_exec_output_delivered"
+            )
+            delivery["payload"].pop("output_render")
+            (bundle / "trace.jsonl").write_text(
+                "".join(json.dumps(event) + "\n" for event in events),
+                encoding="utf-8",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(
+            observation["availability"]["model_visible_output_truncation"],
+            "unmeasurable",
+        )
+        self.assertEqual(observation["tools"]["model_visible_output_deliveries"], 1)
+        self.assertEqual(observation["tools"]["model_visible_output_renders"], 0)
+        self.assertEqual(observation["tools"]["model_visible_output_render_missing"], 1)
+
+    def test_dangling_code_cell_without_delivery_fails_closed(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                code_mode_exec_phase="after_cell_start_error",
+            )
+            events = [
+                json.loads(line)
+                for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+            ]
+            events = [
+                event
+                for event in events
+                if event["payload"]["type"] != "code_mode_exec_output_delivered"
+            ]
+            (bundle / "trace.jsonl").write_text(
+                "".join(json.dumps(event) + "\n" for event in events),
+                encoding="utf-8",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "code cell output delivery is incomplete"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_duplicate_public_exec_delivery_fails_closed(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                code_mode_exec_phase="before_cell_error",
+                duplicate_public_exec_delivery=True,
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "public exec output delivery is duplicated"
+            ):
+                project_task_observation(trace_root, metadata)
 
     def test_runtime_render_availability_is_independent_from_model_surface(self) -> None:
         value = _observation()

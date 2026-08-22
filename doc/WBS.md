@@ -24,7 +24,7 @@
 | P2 / 方向 0 | B4—B7、E-B8 公平比较设施与 Plan 051 首次 schema v7 正式 canary 均已完成。v28 在冻结 Local `54f62e5...` / Codex `be6e8eac...`、Terra main-medium / Guardian-low 下得到 10/10 共同有效任务、双方各 5/10、`sigma=0`、`delta=0`，三层机械判据通过。稳定入口支持后续显式新 Local/bundle、campaign、价格与独立授权预算；passed/failed 自动且可恢复地收口并输出相对上一兼容正式基线的派生比较，blocked 保留给 successor；Plan 051 envelope 不会被复用。Plan 052 已决定当前不恢复 E-A（A1—A7）或其最小子集。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已有 244 条 `track=tb` 唯一 run；Plan 051 的 v28 新增 40 条、1 份 schema v7 aggregate 与 1 份 `first_formal_baseline` 派生比较，`track=tb` 现为 284 条。方向 2 另有 4 条 `track=shadow`，总账本为 288 条。v23—v27 的设施诊断 identity 保留在 ignored 运行资产，不伪装成产品基线。 |
-| 方向 1 | 教师 harness 研究 T1—T3 与 Plan 052 聚合观测/首轮普查已完成。当前实际样本中 C2（2/24 可读 run）比 C1（1/24）更常见，但两者都缺少足够影响证据，不能据此回答“最值得处理”；C11 当前样本未观察到，C7 不可测。schema-v2 任务投影已补齐失败响应的 partial-usage、分表面 render 覆盖、精确重复调用 lifecycle 时长和真实 turn 时长。因此未选行为优化，下一唯一工作包仍是 10 题 × 2 轮 Local 有界观测复测。 |
+| 方向 1 | 教师 harness 研究 T1—T3 与 Plan 052 聚合观测/首轮普查已完成。当前实际样本中 C2（2/24 可读 run）比 C1（1/24）更常见，但两者都缺少足够影响证据，不能据此回答“最值得处理”；C11 当前样本未观察到，C7 不可测。schema-v2 任务投影已补齐失败响应的 partial-usage、分表面 render 覆盖、public `exec` 最终交付边界、精确重复调用 lifecycle 时长和真实 turn 时长；早期错误只有交付事实而没有可靠 render 时按覆盖缺失处理，不再冒充测得的零。因此未选行为优化，下一唯一工作包仍是 10 题 × 2 轮 Local 有界观测复测。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
 | 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期、第二期 A/B/C 与 Plan 050 明确委派案例均已完成并通过独立验收；当前无已排期新包。 |
 
@@ -44,12 +44,14 @@
   `gpt-5.6-terra/medium`，Guardian 固定 `gpt-5.6-terra/low`，费用硬上限 20 USD。不运行 Codex 对照、
   validation、holdout、条件补题或 E-A。
 - **唯一变量与预期**：只对这些 Local 测量请求开启既有 rollout trace，并在结果发布前用 API metadata 做严格的
-  schema-v2 body-free 离线投影；不改变 prompt、输出、预算、compact、重试、Guardian、调度或其他产品行为。预期改善的是
+  schema-v2 body-free 离线投影；public `exec` 在最终 caller-facing 边界原子记录一次交付及可选 render，早期错误、
+  取消或最终输出替换后缺少可靠 render 时只记覆盖缺失。不改变 prompt、输出、预算、compact、重试、Guardian、调度或其他产品行为。预期改善的是
   C1/C2/C11 的任务级覆盖和影响归因精度，不预先承诺成功率或耗时收益；C7 仍诚实保持不可测。
-- **停止条件**：第一轮任一安全投影缺失，trace 完整性终态非零，trace/API population、终态、分角色 usage 覆盖或
-  已知 usage 合计不一致，
-  schema/body-free 校验失败或资源门失败即停止，不启动第二轮；
-  任一新预算预留会使累计达到 20 USD 时停止；两轮完成后无条件停止，不事后加题、补轮或改分母。
+- **正式边界与停止条件**：首个真实 API 请求发出，或出现非空 API metadata、trace、结果工件（以先发生者为准）时，
+  固定正式 slot 身份与 20-run 分母；此后任一安全投影缺失、残缺或重复，trace/API 的 main/Guardian response population、
+  completed/non-completed 合计、分角色 usage 缺失数或分角色已知 usage 合计不一致，schema/body-free 校验失败即使整包
+  无效并停止，不静默替换 slot、不加题补轮。正式边界前的 fixture、schema 接线或启动配置等普通技术问题可以窄修并
+  重新验证；资源门不可用则阻塞且不进入正式 slot。任一新预算预留会使累计达到 20 USD 时停止；两轮完成后无条件停止。
 - **有效/无效/回滚判据**：20/20 个预定 run 都产生唯一、完整、严格可校验的安全投影，才是有效测量；任一 run
   不满足即整包无效并停止，不把缺失计为 0。失败/取消 inference 缺 usage 可形成有效 observation，但 usage 必须
   标为不可测并保留类型化 C11 终态；completed response 缺 usage 仍失败关闭。若观测 opt-in 导致任务执行或发布链出现新的 infra 失败，则关闭该

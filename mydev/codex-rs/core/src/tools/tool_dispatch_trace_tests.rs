@@ -3,8 +3,11 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::SessionSource;
 use codex_rollout_trace::ExecutionStatus;
+use codex_rollout_trace::RawTraceEvent;
+use codex_rollout_trace::RawTraceEventPayload;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ToolCallRequester;
 use codex_tools::ToolOutputRenderMetadata;
@@ -17,16 +20,21 @@ use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::session::turn_context::TurnContext;
+use crate::tools::code_mode::CodeModeExecuteHandler;
 use crate::tools::code_mode::CodeModeService;
 use crate::tools::code_mode::CodeModeWaitHandler;
+use crate::tools::code_mode::PUBLIC_TOOL_NAME;
 use crate::tools::code_mode::WAIT_TOOL_NAME;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
+use crate::tools::router::ToolCall;
+use crate::tools::router::ToolRouter;
 use crate::turn_diff_tracker::TurnDiffTracker;
 
 struct TestHandler {
@@ -340,6 +348,86 @@ async fn missing_code_mode_wait_traces_only_the_wait_tool_call() -> anyhow::Resu
             .is_some()
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_exec_parse_failure_records_one_model_output_delivery() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let (mut session, turn) = make_session_and_context().await;
+    attach_test_trace(&mut session, &turn, temp.path())?;
+
+    let spec = codex_tools::ToolSpec::Freeform(codex_tools::FreeformTool {
+        name: PUBLIC_TOOL_NAME.to_string(),
+        description: "Test code-mode exec tool.".to_string(),
+        defer_loading: None,
+        format: codex_tools::FreeformToolFormat {
+            r#type: "grammar".to_string(),
+            syntax: "lark".to_string(),
+            definition: "start: /[\\s\\S]+/".to_string(),
+        },
+    });
+    let registry = ToolRegistry::with_handler_for_test(Arc::new(CodeModeExecuteHandler::new(
+        spec,
+        Vec::new(),
+    )));
+    let session = Arc::new(session);
+    let turn = Arc::new(turn);
+    let step_context = StepContext::for_test(Arc::clone(&turn));
+    let router = Arc::new(ToolRouter::from_registry(
+        turn.as_ref(),
+        registry,
+        Vec::new(),
+        &Default::default(),
+    ));
+    let step_context = step_context.with_tool_router_for_test(router);
+    let runtime = ToolCallRuntime::new(
+        Arc::clone(&session),
+        step_context,
+        Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+    );
+
+    let response = runtime
+        .handle_tool_call(
+            ToolCall {
+                tool_name: codex_tools::ToolName::plain(PUBLIC_TOOL_NAME),
+                call_id: "public-exec-error".to_string(),
+                payload: ToolPayload::Custom {
+                    input: String::new(),
+                },
+                encrypted_function_args: None,
+            },
+            CancellationToken::new(),
+        )
+        .await?;
+
+    assert!(matches!(
+        response,
+        ResponseInputItem::CustomToolCallOutput { ref call_id, .. }
+            if call_id == "public-exec-error"
+    ));
+    let event_log = fs::read_to_string(single_bundle_dir(temp.path())?.join("trace.jsonl"))?;
+    let events = event_log
+        .lines()
+        .map(serde_json::from_str::<RawTraceEvent>)
+        .collect::<Result<Vec<_>, _>>()?;
+    let deliveries = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.payload,
+                RawTraceEventPayload::CodeModeExecOutputDelivered {
+                    model_visible_call_id,
+                    output_render: None,
+                } if model_visible_call_id == "public-exec-error"
+            )
+        })
+        .count();
+    assert_eq!(deliveries, 1);
+    assert!(events.iter().all(|event| !matches!(
+        &event.payload,
+        RawTraceEventPayload::ToolCallStarted { .. } | RawTraceEventPayload::CodeCellStarted { .. }
+    )));
     Ok(())
 }
 

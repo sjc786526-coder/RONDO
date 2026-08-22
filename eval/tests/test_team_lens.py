@@ -1022,6 +1022,20 @@ class TeamLensReducerTests(unittest.TestCase):
             with self.assertRaisesRegex(BundleError, "required identity"):
                 reduce_bundle(missing_cell, "codex")
 
+            missing_exec_delivery = make_bundle(
+                root / "missing-exec-delivery", product="codex"
+            )
+            events = self._events(missing_exec_delivery)
+            cell_start = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "code_cell_started"
+            )
+            cell_start["payload"] = {"type": "code_mode_exec_output_delivered"}
+            self._write_events(missing_exec_delivery, events)
+            with self.assertRaisesRegex(BundleError, "required identity"):
+                reduce_bundle(missing_exec_delivery, "codex")
+
             bad_mcp = make_bundle(root / "bad-mcp", product="codex")
             events = self._events(bad_mcp)
             cell_start = next(row for row in events if row["payload"]["type"] == "code_cell_started")

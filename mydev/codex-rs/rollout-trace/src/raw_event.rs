@@ -209,6 +209,17 @@ pub enum RawTraceEventPayload {
         runtime_cell_id: String,
         observation: OutputRenderObservation,
     },
+    /// The public code-mode `exec` produced one caller-facing output item.
+    ///
+    /// This event deliberately carries no output body. Its optional body-free
+    /// render describes the final output returned by the tool runtime; early
+    /// parse, runtime-start, cancellation, and initial-response failures have
+    /// no reliable render observation.
+    CodeModeExecOutputDelivered {
+        model_visible_call_id: ModelVisibleCallId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_render: Option<OutputRenderObservation>,
+    },
     CompactionRequestStarted {
         compaction_id: CompactionId,
         compaction_request_id: CompactionRequestId,
@@ -273,6 +284,7 @@ impl RawTraceEventPayload {
             | RawTraceEventPayload::CompactionRequestFailed { .. }
             | RawTraceEventPayload::CodeCellStarted { .. }
             | RawTraceEventPayload::CodeCellOutputRendered { .. }
+            | RawTraceEventPayload::CodeModeExecOutputDelivered { .. }
             | RawTraceEventPayload::McpToolCallCorrelationAssigned { .. }
             | RawTraceEventPayload::AgentResultObserved {
                 carried_payload: None,

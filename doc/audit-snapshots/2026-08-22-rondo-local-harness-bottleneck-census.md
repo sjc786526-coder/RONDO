@@ -95,3 +95,15 @@ measured/partial/unmeasurable；精确重复只累加后续调用自身的 tool 
 输出并不同时产生外层 tool render；投影仍按 thread/turn/model-call 强关系对异常双记录去重，内容不一致则拒绝。
 上述整改不改变 v28 cohort、30/30 API、24/30 exec、C1/C2/C11/C7 四态或唯一后续包，当前事实与判据以 WBS 为准，
 执行证据见 `agent_log/2026-08-22-plan052-observation-correctness-remediation.md`。
+
+## 8. public `exec` 最终交付边界附记（继续不改写首轮数字）
+
+后续复验确认：public code-mode `exec` 的通用 tool trace 虽被正确抑制，但源码解析、runtime 启动或首次响应阶段的
+模型可见错误可能早于 `code_cell_output_rendered`。只按 code-cell render 统计会把这类输出误报为
+`0 deliveries / measured`。最终实现因此在统一 caller-facing 工具边界增加一个 body-free 原子事件：每个 public
+`exec` 最终输出只记录一次 model-call 身份和可选 render；早期错误、取消或 post-hook 最终输出替换没有可靠 render
+时，仍计入 delivery 分母并把 render 标为缺失。旧 code-cell render 只作一致性核对，不能把最终缺失升级为 measured。
+
+该边界也避免在 code cell 已产生 render、但随后取消或替换最终输出时沿用过时观测。它不改变产品默认、模型可见
+内容或 v28 的冻结样本数字；唯一后续包、正式 slot 边界与 trace/API 实际交叉核对能力以当前 WBS 为准。执行证据见
+`agent_log/2026-08-22-plan052-public-exec-delivery-remediation.md`。

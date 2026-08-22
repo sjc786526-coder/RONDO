@@ -175,14 +175,19 @@
 - 二次验收确认 C11 partial usage、render 覆盖、C2 重复调用时长和 turn 时长仍有语义缺口；schema-v2 已在现有
   trace/API 投影内关闭这些问题。报告所称 public code-mode `exec` 必然双记不符合实时 suppress 路径，但投影仍按
   thread/turn/model-call 强关系防御性去重并拒绝不一致记录。
+- 三次验收进一步复现 public `exec` 在 code-cell render 前返回模型可见错误时会被误报为 `0 deliveries / measured`。
+  当前整改把最终 caller-facing delivery 与可选 body-free render 合为一个原子原生事件；早期错误、取消或最终输出
+  替换没有可靠 render 时计为 delivery + missing，旧 code-cell render 仅作一致性核对。
 
 ### 当前工作
 
-二次正确性整改、相关门禁、文档核对和最终独立只读复核均已完成；复核结论为 PASS。
+第三次 public `exec` 最终交付边界整改、相关门禁、文档核对和最终独立只读复核均已完成；复核发现的
+`Some(render)` 必须对应 cell initial response 的 fail-closed 关系已补齐，无剩余代码阻断。
 
 ### 本任务剩余步骤
 
-任务内无剩余实现步骤。后续仍只按 WBS 的唯一有界测量包另立授权和 ExecPlan，本计划不继续维护后续路线。
+任务内无剩余实现步骤；本分支随本次提交交付验收。后续仍只按 WBS 的唯一有界测量包另立授权和 ExecPlan，本计划
+不继续维护后续路线。
 
 ### 阻塞项
 
@@ -247,7 +252,9 @@ ignored 资产；另在 `/tmp` 创建的运行时临时目录也已删除。
 | 007 | v28 Local 使用 30-run/10-task 固定 cohort；exec 的 6 个 redacted 按任务级非随机缺失，不计为 0 | tracked campaign/slot 身份完整，但正文覆盖只有 24-run/8-task | census、证据 | 已采纳 |
 | 008 | 当前证据不足以选择 C1 或 C2，唯一下一包为 10 题 × 2 round、20 USD 上限的 Local 观测复测；E-A 不恢复 | C1/C2 仅有低频弱代理，C11 为窄样本阴性，C7 不可测；现有观测足以补覆盖 | WBS、方向 1 | 已采纳 |
 | 009 | 私有读取先做纯 tracked 筛选，再以 common-root `dir_fd`/`O_NOFOLLOW` 逐级打开 30 个 Local 槽；缺失覆盖时 compare 全部 delta 为 null | 关闭独立复核发现的越界读取、symlink 逃逸和“缺失当 0”问题 | eval reader、compare | 已采纳 |
-| 010 | 下一轮的唯一变量是开启 Local 安全观测，不改变产品行为；任一 trace/API 缺失、完整性终态非零、schema 或交叉核对失败即停止 | 当前证据只够验证观测覆盖，尚不足以承诺某个行为优化收益 | WBS、Terminal-Bench、结果发布 | 已采纳 |
+| 010 | 下一轮的唯一变量是开启 Local 安全观测，不改变产品行为；进入正式 slot 后任一投影缺失/残缺/重复、schema 或实际可支持的 trace/API 交叉核对失败即使整包无效并停止 | 当前证据只够验证观测覆盖，尚不足以承诺某个行为优化收益；正式边界由决策 015 精确限定 | WBS、Terminal-Bench、结果发布 | 已采纳 |
 | 011 | 任务投影升为 schema-v2；只允许 failed/cancelled/aborted inference 的 partial usage，并按 main/Guardian 核对缺失数和已知合计 | C11 正样本通常无 usage；completed 缺失仍必须失败关闭，不能用两个角色或终态间的聚合交换掩盖 | eval schema、C11 | 已采纳 |
 | 012 | direct-model 与 code-mode-runtime 分别报告 delivery/render/missing 和 measured/partial/unmeasurable；code cell 只按 thread/turn/model-call 强关系去重 | MCP 等工具没有原生 render metadata，不能宣称全覆盖；实时 public custom `exec` 已被既有 suppress 排除通用 trace，正常路径并不双记 | trace 投影、C1 | 已采纳 |
 | 013 | C2 记录重复后续调用自身的外层 lifecycle 时长；`turn.duration_ms` 改为唯一 exec turn 的真实窗口 | 发生次数不足以执行时长负担门槛，rollout 总时长也不能冒充 turn 时长 | eval schema、C2、比较器 | 已采纳 |
+| 014 | public `exec` 在统一 caller-facing 边界原子记录一次最终 delivery 与可选 body-free render；旧 code-cell render 只作一致性核对 | 仅补早期 delivery 事件仍会在 code cell 已 render、随后取消或 post-hook 替换最终输出时沿用过时观测；原子最终事实同时关闭早期错误假阴性与取消竞态 | core、rollout trace、C1 投影 | 已采纳 |
+| 015 | 正式 slot 从首个真实 API 请求或首份非空 API/trace/result 工件开始固定；交叉核对只声明 population、completed/non-completed、分角色 usage 缺失数和已知合计 | 正式数据出现后不得替换分母，但运行前 fixture/schema/启动接线可窄修；现有字段不支持逐请求终态等价声明 | WBS、后续测量合同 | 已采纳 |

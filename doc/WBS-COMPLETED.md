@@ -1556,10 +1556,12 @@ Guardian 为 `gpt-5.6-terra/low`。
 
 - 删除首版重复的 `codex exec --json --rondo-local-observation` collector。最终链路复用 rollout trace 与 API
   metadata；只对目标 Local 测量显式开启 trace，发布前生成固定名称的 schema-v2 body-free 结果。原始 trace 不
-  归档，缺失、残缺、重复、schema 漂移或 trace/API population、终态、分角色 usage 覆盖/已知合计不一致均拒绝发布。
-- 原生 trace 只窄补 writer 完整性终态与真实输出 render 边界的安全事实，区分 direct model 与 code-mode runtime，
-  保存字节数、截断/collection omission、预算和有限枚举，不保存正文。既有 Team Lens 严格 reader/reducer 扩展为
-  支持 Local 单智能体 bundle，没有建设第二套 telemetry、数据库或审计平台。
+  归档，缺失、残缺、重复、schema 漂移，或 trace/API 的 main/Guardian population、completed/non-completed 合计、
+  分角色 usage 缺失数/已知合计不一致均拒绝发布。
+- 原生 trace 只窄补 writer 完整性终态与真实输出边界的安全事实，区分 direct model 与 code-mode runtime，
+  保存字节数、截断/collection omission、预算和有限枚举，不保存正文。public `exec` 在统一 caller-facing 边界原子
+  记录最终交付与可选 body-free render；早期错误、取消或最终输出替换缺少可靠 render 时明确记为覆盖缺失。既有
+  Team Lens 严格 reader/reducer 扩展为支持 Local 单智能体 bundle，没有建设第二套 telemetry、数据库或审计平台。
 - 只读 census 先校验 288 行 tracked index，再只验证选中的 30 个 Local private summary；所有 private 文件从
   common root 以 `dir_fd`/`O_NOFOLLOW` 逐级打开。公共 report/delta 使用 exact schema 与 body-free allowlist，缺失
   覆盖不可比较时所有 delta 为 `null`。
@@ -1567,8 +1569,9 @@ Guardian 为 `gpt-5.6-terra/low`。
   redacted 集中在另外 2 个任务。C1/C2 为弱信号，C11 仅在当前样本未观察到，C7 当前资产不可测；C4/C5 只作归因
   辅助，因此没有选行为候选。
 - 当前唯一后续包是另行授权的 10 题 × 2 Local round 观测复测，main Terra medium、Guardian Terra low、20 USD
-  硬上限；唯一变量是开启安全观测而非改变产品行为。20/20 个 run 都得到严格投影才有效，任一完整性/schema/来源
-  核对或资源失败即停，预算到顶即停，两轮后无条件停止；E-A 继续不恢复。
+  硬上限；唯一变量是开启安全观测而非改变产品行为。首个真实请求或非空工件固定正式 slot 与 20-run 分母；此后
+  20/20 个 run 都得到严格投影才有效，任一完整性/schema/来源核对失败即停且不得替换。正式边界前普通接线问题可
+  窄修复验，资源门不可用则不进入 slot；预算到顶即停，两轮后无条件停止。E-A 继续不恢复。
 - 历史读取器拒绝空 API 请求集以及缺终态、重复终态或冲突终态的 exec JSONL，不再把残缺资产计成“测得的零”；
   schema-v2 同时保留 failed/cancelled inference 无 usage 的 C11 正样本，将 usage 标为不可测；按 model/runtime 表面
   记录 render delivery/covered/missing，关联去重 code cell 输出，并新增重复调用 lifecycle 与真实 turn 时长。修复后
@@ -1576,4 +1579,5 @@ Guardian 为 `gpt-5.6-terra/low`。
   Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI、PR 均未运行。详细执行
   与首次只读资产边界见 `agent_log/2026-08-22-003425-plan052-local-harness-census.md`；验收整改与最终门禁见
   `agent_log/2026-08-22-plan052-native-trace-remediation.md`；二次正确性整改见
-  `agent_log/2026-08-22-plan052-observation-correctness-remediation.md`。
+  `agent_log/2026-08-22-plan052-observation-correctness-remediation.md`；public `exec` 早期交付边界整改见
+  `agent_log/2026-08-22-plan052-public-exec-delivery-remediation.md`。
