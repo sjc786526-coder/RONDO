@@ -72,3 +72,14 @@ invalid，未重发该 slot，后 16 个 slot 未发送；v5 为 42 attempts、`
 无效且无 SSE terminal 字段；实际收到非 SSE HTTP 响应则记录 `non_sse`。旧 v5 的缺失枚举继续 fail-closed，既不
 修改原始 metadata，也不复投影或恢复该 campaign。完整预算代理 62 项、观测投影 33 项、Plan 056 状态机 21 项及
 根因定向正负回归通过；后续以新的 formal-v6 identity 从第一题干净启动。
+
+formal-v6 使用修复提交 `4965d7483d9e2812ec8e39debdb5988107e8101a` 重建并复验 Local
+legacy/companion/runtime bundle；binary、code-mode host、bwrap SHA-256 分别为 `cc523bd8...a0d5`、
+`ddda3ddb...1e0`、`77360cb7...2c4c`，全部构建/发布/复验均经共享锁和资源看门狗且 `stop=none`。新 campaign
+冻结 20 个 slot，lock SHA-256 为 `263cc3fa...9e7f`，初始化未产生 API 请求。
+
+用户追加授权精确清理仅由 Plan 056 创建且不再被 formal-v6/复验/交付引用的可再生成资源。确认构建已结束、
+manifest 归属和引用后，通过 `binary_freeze cleanup` 的 exact-commit 入口删除旧 `2765ff8f` 与 `c2be21d0`
+Cargo target，分别释放 13,552,737,989 与 13,552,728,113 bytes，合计 27,105,466,102 bytes（25.244 GiB）。
+不可恢复内容仅为可重建的编译 object/incremental/cache；对应 source、frozen bundle/manifest、campaign、预算账本、
+真实费用、公共结果和 metrics 均保留，当前 formal-v6 target 未清理。

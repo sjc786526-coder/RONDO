@@ -32,6 +32,10 @@
 - 任务只在累计 100 USD 达限、资源硬门、无法在授权范围内修复的完整性/原则问题，或需要改变固定实验条件/产品
   行为时彻底失败。最终仍须完成干净上下文独立只读验收，真实 finding 影响数据可信度时废弃对应 campaign 并在
   余额内干净重跑，直至通过或触发上述终止条件。
+- 用户随后撤销此前“先不要清理”的要求，但只授权精确清理 Plan 056 创建、已经结束且不再被当前构建、formal-v6、
+  最终复验或交付引用的可再生成资源。清理必须在构建结束后按 exact path/identity/label 核对，优先旧 Cargo target，
+  不得触碰 Plan 057、共享缓存或来源不明资产；必须继续保留累计预算账本、v1/rehearsal-v2/v3/v4/formal-v5 费用与
+  必要历史、公共结果，以及 formal-v6 源码、binary、manifest 和最终工件，并记录删除路径、释放容量与不可恢复内容。
 
 ## 1. 目标
 
@@ -247,19 +251,28 @@
   264 attempts/`5.651066 USD`、reservation 0；公共无效结果、原始工件和资源记录均保留。
 - v5 失败只读诊断确认不是 SSE 终态枚举漂移，而是 transport open 在响应头前失败。设施修复新增精确
   `stream_end_kind=open_error`，只允许 `status=0`、无 usage 和无 terminal event 的已开始尝试；旧 v5 缺字段仍被
-  拒绝，不能离线复投影或恢复。非 SSE 响应另以 `non_sse` 明确分类。预算代理、投影器与正负回归正在以 formal-v6
-  新 identity 收口。
+  拒绝，不能离线复投影或恢复。非 SSE 响应另以 `non_sse` 明确分类。预算代理 62/62、harness observation 与
+  Plan 056 合集 54/54、Ruff 正确性选择和 `git diff --check` 均通过；修复提交为
+  `4965d7483d9e2812ec8e39debdb5988107e8101a`。
+- 已从该 clean source 构建并复验 formal-v6 RONDO Local legacy/companion/runtime bundle：CLI SHA-256
+  `cc523bd8...a0d5`、code-mode host `ddda3ddb...1e0`、bwrap `77360cb7...2c4c`；所有 build/publish/verify 都走
+  共享锁与看门狗且 `stop=none`。formal-v6 identity 已从第一题冻结 20 个新 slot，lock SHA-256
+  `263cc3fa...9e7f`，初始化时累计费用仍为 `5.651066 USD`、新请求为 0。
+- 在所有构建结束并完成 runtime verify 后，按用户追加授权使用 `binary_freeze cleanup` 的 exact-commit 校验清理
+  `eval-data/build/rondo-2765ff8f82ce21262af46bdf93a62c75b381b631-x86_64-unknown-linux-musl`（13,552,737,989
+  bytes）与 `eval-data/build/rondo-c2be21d01ae34c971b9f75334b265191bce0acbd-x86_64-unknown-linux-musl`
+  （13,552,728,113 bytes），合计释放 27,105,466,102 bytes（25.244 GiB）。不可恢复内容仅为可再生成的旧编译
+  object/incremental/cache；旧源码、冻结 bundle/manifest、campaign、账本、费用、公共结果和 build metrics 均保留。
 
 ### 当前工作
 
-v1、rehearsal-v2、rehearsal-v3、完整 rehearsal-v4 与无效 formal-v5 均已按真实终态关闭并保留。当前正在完成
-`open_error` 设施修复与定向回归，随后提交并冻结新源码、重建 binary manifest 并创建 formal-v6；新的正式
-20-run 将从第一题以全新 identity 干净启动，费用从 `5.651066 USD` 单调累计。
+v1、rehearsal-v2、rehearsal-v3、完整 rehearsal-v4 与无效 formal-v5 均已按真实终态关闭并保留。formal-v6 的
+设施修复、定向回归、source/binary/runtime freeze 和新 identity 已完成；当前将提交该 identity 与资源记录，随后
+执行 10/10 零 API preflight，再从第一题干净启动正式 20-run，费用从 `5.651066 USD` 单调累计。
 
 ### 本任务剩余步骤
 
-1. 提交并冻结包含 `open_error` 修复的源码，重新构建 binary manifest，创建全新 formal-v6 campaign 并完成
-   10/10 零 API preflight。
+1. 提交 formal-v6 identity 与资源记录并完成 10/10 零 API preflight。
 2. 从第一题串行执行固定两轮 20/20；首个可信 20/20 形成候选或“无候选”结论后停止付费运行。
 3. 同步公共结果、累计费用、资源、WBS、WBS-COMPLETED 和精炼日志。
 4. 完成上下文干净的独立只读验收；整改真实 finding，必要时废弃受影响 campaign 并在余额内干净重跑。
@@ -278,8 +291,8 @@ v1、rehearsal-v2、rehearsal-v3、完整 rehearsal-v4 与无效 formal-v5 均�
   `0.569748/0.842369 USD`；v4 完整 10/10 为 111 attempts/`1.970204 USD`，累计 `4.013386 USD`。
 - formal-v5：invalid 并永久保留；20 固定 slot 中 3 个发布、第 4 个已发送后因响应前连接失败缺少可投影终态而
   关闭、16 个未启动；42 attempts、`1.637680 USD`、无候选结论。累计 264 attempts/`5.651066 USD`。
-- 最终测量：完整单轮 rehearsal 已通过；`open_error` 窄修、formal-v6 binary 复冻和可信 20/20 待完成；最终独立
-  验收待完成。
+- 最终测量：完整单轮 rehearsal、`open_error` 窄修、formal-v6 source/binary/runtime 复冻与 20-slot identity 已
+  完成；formal-v6 preflight、可信 20/20 和最终独立验收待完成。
 - 未运行：Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
 - Git：只在 Plan 056 worktree 提交；未合并、未推送、未归档，未读取或修改 Plan 054/055 私有资产。
 
@@ -298,11 +311,13 @@ worktree 中的命令发起、但物理上发生在主仓库 `/home/sjc/desktop/
   标记的对象，并与其他重型任务串行。
 
 实际保留的 Plan 056 ignored 资产为：detached source worktree
-`eval-data/sources/plan056-rondo-local-2765ff8f/` 与 `eval-data/sources/plan056-rondo-local-c2be21d0/`；对应 Cargo
-target、两代 legacy/companion/runtime bundle；v1、rehearsal-v2/v3/v4、formal-v5 五个独占 campaign；batch/task
-budget 与 Plan 056 build/preflight/paid/close metrics。复用了项目局部 `eval/.venv`、`eval-data/uv-cache`、既有
-bwrap 资产和 v28 Terminal-Bench source。10 个 pinned Docker image 保留不清理；Plan 056 容器、网络、卷均已精确
-清空，formal-v5 Docker/VHDX 增长均为 0，Docker total 仍为 11.5 GB。
+`eval-data/sources/plan056-rondo-local-2765ff8f/`、`eval-data/sources/plan056-rondo-local-c2be21d0/` 与
+`eval-data/sources/plan056-rondo-local-4965d74/`；三代 legacy/companion/runtime frozen bundle/manifest；当前
+formal-v6 Cargo target；v1、rehearsal-v2/v3/v4、formal-v5 与 formal-v6 六个独占 campaign；batch/task budget 与
+Plan 056 build/preflight/paid/close metrics。旧 `2765ff8f` 和 `c2be21d0` Cargo target 已按 exact commit 清理，
+合计释放 27,105,466,102 bytes；对应源码、冻结工件与历史证据保留。复用了项目局部 `eval/.venv`、
+`eval-data/uv-cache`、既有 bwrap 资产和 v28 Terminal-Bench source。10 个 pinned Docker image 保留不清理；
+Plan 056 容器、网络、卷均已精确清空，formal-v5 Docker/VHDX 增长均为 0，Docker total 仍为 11.5 GB。
 
 ### 交接边界
 
@@ -330,3 +345,4 @@ bwrap 资产和 v28 Terminal-Bench source。10 个 pinned Docker image 保留不
 | 010 | 本任务只提交工作树，不合并、不推送、不归档 | 用户保留最终集成批准权 | Git 交付 | 已采纳 |
 | 011 | 正式测量前至少完成一次连续 10 题单轮真实 rehearsal；首个可信正式 20/20 即停止 | 高效暴露设施问题，同时防止按成绩挑选 campaign | rehearsal、正式运行 | 已采纳 |
 | 012 | 响应头前的已开始上游尝试使用精确 `open_error` 终态；不接受旧记录缺失枚举 | 既让未来连接失败可投影，又不放宽或改写 formal-v5 历史 | API metadata、投影、恢复 | 已采纳 |
+| 013 | 构建结束并复验 formal-v6 后，只用 exact-commit 入口清理两座 Plan 056 旧 Cargo target | 执行用户追加的窄清理授权，释放 25.244 GiB，同时完整保留费用、历史与冻结交付工件 | ignored 资源、交付 | 已采纳 |
