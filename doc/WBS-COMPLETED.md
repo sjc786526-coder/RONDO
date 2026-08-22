@@ -1544,5 +1544,7 @@ Guardian 为 `gpt-5.6-terra/low`。
   独立 relative-baseline JSON，v28 明确为无前驱的 `first_formal_baseline`，原 v28 tracked public baseline
   SHA-256 `53e9b4b3...` 保持不变。`finalize` 可在 envelope 已闭合但 pointer 尚未退役的中断窗口直接恢复；正式终态与
   runner 退出码错配会明确失败。整改相关 9 模块最终 362/362 通过，未重跑 Docker、Cargo、真实 API 或全 workspace。
-- 干净上下文独立审查首次发现上述 active-pointer 终态问题；修复后同一审查者重跑直接相关 60/60、复核两份提交、
-  默认入口与 Git/结果终态并给出 `PASS`，无剩余 correctness/functionality finding。
+- 独立审查闭环：任务内审查先发现 active-pointer 终态问题；后续外部验收逐轮定位并关闭稳定入口输入/预算、
+  failed/blocked 收口、自动 finalize 与 close/pointer 中断恢复缺口。最终复验另跑入口相关 32/32、核对 v28 结果字节、
+  默认零请求状态与三棵工作树，结论 `PASS`，无剩余 correctness/functionality finding；报告见
+  `agent_log/2026-08-21-174146-plan051-final-independent-acceptance.md`。

@@ -23,7 +23,7 @@
 | P1 / M1 | B1、B2、B3 与 M1 已完成；冻结 Codex 与 RONDO 已在同一 TB 2.1 任务上完成真实端到端并归档。 |
 | P2 / 方向 0 | B4—B7、E-B8 公平比较设施与 Plan 051 首次 schema v7 正式 canary 均已完成。v28 在冻结 Local `54f62e5...` / Codex `be6e8eac...`、Terra main-medium / Guardian-low 下得到 10/10 共同有效任务、双方各 5/10、`sigma=0`、`delta=0`，三层机械判据通过。稳定入口支持后续显式新 Local/bundle、campaign、价格与独立授权预算；passed/failed 自动且可恢复地收口并输出相对上一兼容正式基线的派生比较，blocked 保留给 successor；Plan 051 envelope 不会被复用。E-A（A1—A7）继续随方向 1 挂起。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
-| 结果数据 | P2 v2—v22 公共账本已有 244 条 `track=tb` 唯一 run；Plan 051 的 v28 在任务专用 results worktree 新增 40 条、1 份 schema v7 aggregate 与 1 份 `first_formal_baseline` 派生比较，待后续批准合入后 `track=tb` 为 284 条。方向 2 另有 4 条 `track=shadow`，届时总账本为 288 条。v23—v27 的设施诊断 identity 保留在 ignored 运行资产，不伪装成产品基线。 |
+| 结果数据 | P2 v2—v22 公共账本已有 244 条 `track=tb` 唯一 run；Plan 051 的 v28 新增 40 条、1 份 schema v7 aggregate 与 1 份 `first_formal_baseline` 派生比较，`track=tb` 现为 284 条。方向 2 另有 4 条 `track=shadow`，总账本为 288 条。v23—v27 的设施诊断 identity 保留在 ignored 运行资产，不伪装成产品基线。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
 | 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期、第二期 A/B/C 与 Plan 050 明确委派案例均已完成并通过独立验收；当前无已排期新包。 |

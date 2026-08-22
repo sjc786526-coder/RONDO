@@ -35,8 +35,8 @@ catalog prompt 相差 161 tokens，同时混有 harness/deadline 和时间分块
 机械门运行到了终态。报告见 `doc/research/plan020-b7-canary-baseline-failure-attribution.md`。
 
 P2 v2—v22 公共账本已合入当前交付历史：`runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，其中 v22 为 32 条；
-v6—v22 共 11 份聚合 JSON。Plan 051 的 distinct results worktree 另有 v28 的 40 条 `track=tb` 与 1 份
-schema v7 aggregate，待后续批准合入后本方向共 284 条。方向 2 的 L3/L4 另有 4 条 `track=shadow`，不属于本方向。
+v6—v22 共 11 份聚合 JSON。Plan 051 v28 另新增 40 条 `track=tb`、1 份 schema v7 aggregate 与 1 份派生比较，
+本方向现共 284 条。方向 2 的 L3/L4 另有 4 条 `track=shadow`，不属于本方向；总账本为 288 条。
 历史标签中的“Plan 015”保留原样，当前权威编号仍为 Plan 020。
 
 ## E-B8 公平比较设施（已闭合）

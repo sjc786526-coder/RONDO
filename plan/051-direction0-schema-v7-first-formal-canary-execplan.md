@@ -7,8 +7,8 @@
 > `doc/WBS/*.md` 为唯一来源。
 >
 > 用户已一次性授权本任务范围内的共享构建锁、精确镜像 Docker、真实 API、最多 400 USD 累计预算、
-> 自主窄修、successor identity、无人值守连续运行和任务自有资源清理。该授权**不包含**把任务分支合并到
-> `main` 或推送远端；执行者完成后只提交任务 worktree，等待审查与用户后续批准。
+> 自主窄修、successor identity、无人值守连续运行和任务自有资源清理。执行阶段的原授权**不包含**把任务分支
+> 合并到 `main` 或推送远端；最终验收通过后，用户已另行批准提交、合并、推送与分支归档，见决策 012。
 
 ## 1. 目标
 
@@ -214,11 +214,12 @@ active pointer；外部独立验收提交 `de2cc24` 又发现稳定重跑入口�
 恢复入口共用同一预算/pointer 终态，blocked 保持 3/successor 且不生成 comparison；v28 的 tracked public baseline
 字节不变。第三次验收提交 `2683336` 又定位到 envelope close 与 pointer retire 之间的中断窗口，以及正式终态/退出码
 错配可能返回成功；`finalize` 现会在 runner 前直接恢复已闭合 identity，所有错配均明确失败。相关 9 模块 362/362
-通过，正在等待外部审查者再次复验。
+通过；最终独立验收提交 `afb9021` 另以 32/32 个入口相关用例复核正常、blocked、closed-envelope 恢复、预算隔离与
+相对基线，结论为 `PASS`，无剩余 correctness/functionality finding。
 
 ### 本任务剩余步骤
 
-只剩外部独立审查者对第三轮窄修的轻量复验；若通过，任务重新进入只读交付状态。仍不合并、推送或归档分支。
+无。任务目标和独立验收均已完成，本计划随交付冻结为历史合同；后续 Local 优化或新 baseline 只由 WBS 重新排期。
 
 ### 阻塞项
 
@@ -233,10 +234,10 @@ active pointer；外部独立验收提交 `de2cc24` 又发现稳定重跑入口�
   全 workspace、CI、PR、validation/holdout 均未运行。
 - Docker/stub 与正式 API：完成；v28 为有效正式基线，所有有效 pass、reward 0 与任务失败均原样保留。
 - 预算、归档与清理：完成；任务累计 `$9.412888`，无 active identity、running slot、容器、volume 或任务网络。
-- Git：v23—v28 lock、raw result、ledger 与 tracked public baseline 保持只读；本轮只新增派生 comparison 和入口整改。
-  未修改、合并或推送 `main`，未归档分支。
-- 独立审查：任务内干净上下文审查的 active-pointer finding 已修复并曾获 `PASS`；外部独立验收逐轮提出的稳定入口
-  finding 均已整改，等待同一外部审查者复验。
+- Git：v23—v28 lock、raw result、ledger 与 tracked public baseline 保持只读；本轮只新增正式结果、派生 comparison
+  和入口整改。最终验收后用户已授权把 execution/results 提交合并到 `main`、推送 `origin/main` 并归档本地分支。
+- 独立审查：任务内与外部独立审查发现的 active pointer、稳定重跑输入、failed/blocked 终态及崩溃恢复 finding 均已
+  窄修并复验；最终报告为 `agent_log/2026-08-21-174146-plan051-final-independent-acceptance.md`，结论 `PASS`。
 
 ### 主工作区 ignored 资产
 
@@ -259,7 +260,7 @@ worktree，那是 tracked result 的既有架构要求，不是把结果直接�
 
 ### 交接边界
 
-- 本任务完成并通过独立审查后冻结本计划。是否合并本地 `main`、推送 `origin/main` 与归档分支由用户另行批准。
+- 本任务完成并通过独立审查后冻结本计划。用户已另行批准合并本地 `main`、推送 `origin/main` 与归档分支。
 - 后续 Local 内核优化与新基线重跑只由 WBS 重新排期；不在本计划追加下游路线。
 
 ## 6. 关键决策记录
@@ -272,8 +273,9 @@ worktree，那是 tracked result 的既有架构要求，不是把结果直接�
 | 004 | 普通故障保留最多 4 attempt 的有界冗余，identity 数量不设人为上限 | 兼顾无人值守恢复与槽位/预算安全；纠正旧合同对窄故障过早停机 | runner、resume、successor | 已采纳 |
 | 005 | 统一入口默认零 API，显式 paid 后持续到终态或硬停 | 防止误付费，同时避免每个普通错误重复等待人工确认 | just/CLI、运行状态机 | 已采纳 |
 | 006 | 允许现有发布合同所需的 task-owned distinct results worktree | 当前 baseline 明确拒绝把 tracked 结果写回执行 harness checkout；保持 clean harness 与 durable 发布 | worktree、结果提交 | 已采纳 |
-| 007 | 本轮只提交任务 worktree，不合并或推送 | 用户对本次规划和后续执行给出的最新 Git 交付边界优先于任务原稿中的最终交付条目 | Git 交付 | 已采纳 |
+| 007 | 执行和审查阶段只提交任务 worktree，不合并或推送 | 用户对执行阶段给出的 Git 边界优先于任务原稿中的最终交付条目 | Git 交付 | 执行阶段已采纳；交付时由 012 覆盖 |
 | 008 | 双方 main 固定 `medium`，双方 Guardian 固定 `low` | 用户在执行中明确修订原 main/Guardian 均为 medium 的合同；冻结 Codex 本身也会为 Guardian 选择 low | provider projection、identity、preflight、wire、正式运行 | 已采纳 |
 | 009 | 后续正式 baseline 用显式 Local commit/manifest、campaign/batch、价格日期和新 task-budget ID/cap 初始化 | 每次运行输入不能固化为首次 Plan 051 常量；新授权不得覆盖或复用已关闭的 400 USD envelope | loader、identity、task budget、统一入口 | 已采纳 |
 | 010 | 相对基线从同一 results worktree 自动选择最新兼容 schema v7 正式结果，首轮输出 `first_formal_baseline` | 比人工传入前驱路径更小且可避免选错；独立文件不改历史 tracked public baseline 字节 | aggregate、results、compare | 已采纳 |
 | 011 | `finalize` 在进入 runner 前恢复已闭合 envelope 的 pointer，并严格匹配终态/退出码 | envelope close 与 pointer retire 是两个原子步骤，必须能从中间中断恢复且不能误报成功 | formal entry、crash recovery | 已采纳 |
+| 012 | 最终验收通过后提交文档、合并 execution/results 到本地 `main`、推送 `origin/main` 并归档分支 | 用户在最终验收后另行明确授权交付 | Git 交付 | 已采纳 |
