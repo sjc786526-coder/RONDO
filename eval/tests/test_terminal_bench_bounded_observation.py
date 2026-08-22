@@ -7,6 +7,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from rondo_eval.api_budget_proxy import PersistentBudgetLedger
 from rondo_eval.config import RepoPaths
@@ -15,6 +16,7 @@ from rondo_eval.terminal_bench.bounded_observation import (
     PLAN056_SLOT_COUNT,
     BoundedObservationError,
     BoundedObservationState,
+    _validate_binary_source_relation,
     _validate_source_binding,
     assess_candidates,
     freeze_slots,
@@ -227,6 +229,43 @@ class BoundedObservationIdentityTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "rehearsal_complete")
         self.assertIsNone(result["candidate_assessment"])
         self.assertIsNone(result["selected_candidate"])
+
+    def test_rehearsal_may_reuse_only_an_ancestor_with_identical_product_tree(
+        self,
+    ) -> None:
+        completed = SimpleNamespace(returncode=0)
+        with patch(
+            "rondo_eval.terminal_bench.bounded_observation._git_result",
+            side_effect=(completed, completed),
+        ) as git_result:
+            _validate_binary_source_relation(
+                Path("/repo"),
+                binary_commit="a" * 40,
+                harness_commit="b" * 40,
+                campaign_mode="rehearsal",
+            )
+
+        self.assertEqual(git_result.call_count, 2)
+        with (
+            patch(
+                "rondo_eval.terminal_bench.bounded_observation._git_result",
+                side_effect=(completed, SimpleNamespace(returncode=1)),
+            ),
+            self.assertRaisesRegex(BoundedObservationError, "product source differs"),
+        ):
+            _validate_binary_source_relation(
+                Path("/repo"),
+                binary_commit="a" * 40,
+                harness_commit="b" * 40,
+                campaign_mode="rehearsal",
+            )
+        with self.assertRaisesRegex(BoundedObservationError, "formal binary"):
+            _validate_binary_source_relation(
+                Path("/repo"),
+                binary_commit="a" * 40,
+                harness_commit="b" * 40,
+                campaign_mode="formal",
+            )
 
     def test_private_source_fingerprint_detects_trace_drift(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

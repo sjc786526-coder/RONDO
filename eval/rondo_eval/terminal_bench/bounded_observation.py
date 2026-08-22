@@ -193,11 +193,16 @@ class BoundedObservationIdentity:
         if (
             hashlib.sha256(raw).hexdigest() != binary["manifest_sha256"]
             or manifest.source_commit != binary["source_commit"]
-            or manifest.source_commit != self.harness_commit
             or manifest.product != Product.RONDO_LOCAL.value
             or manifest.source_dirty
         ):
             raise BoundedObservationError("Plan 056 binary manifest drifted")
+        _validate_binary_source_relation(
+            paths.worktree_root,
+            binary_commit=manifest.source_commit,
+            harness_commit=self.harness_commit,
+            campaign_mode=self.campaign_mode,
+        )
         return manifest
 
     def seccomp_profile(self, paths: RepoPaths) -> Path:
@@ -553,14 +558,16 @@ def initialize_identity(
     reference = _load_v28_reference(paths)
     raw_manifest = _read_regular(runtime_manifest, max_bytes=2 * 1024 * 1024)
     manifest = _load_manifest(runtime_manifest, paths.common_root)
-    if (
-        manifest.source_dirty
-        or manifest.source_commit != harness_commit
-        or manifest.product != Product.RONDO_LOCAL.value
-    ):
+    if manifest.source_dirty or manifest.product != Product.RONDO_LOCAL.value:
         raise BoundedObservationError(
             "Plan 056 manifest does not bind clean Local source"
         )
+    _validate_binary_source_relation(
+        paths.worktree_root,
+        binary_commit=manifest.source_commit,
+        harness_commit=harness_commit,
+        campaign_mode=PLAN056_CAMPAIGN_MODE,
+    )
     config = _load_runtime_config_without_secret(paths)
     provider = config.paid_provider_projection(
         model_id=PLAN056_MODEL,
@@ -910,7 +917,7 @@ def validate_identity(
     binary = value["binary"]
     if (
         binary.get("product") != Product.RONDO_LOCAL.value
-        or binary.get("source_commit") != value["harness_commit"]
+        or _COMMIT.fullmatch(str(binary.get("source_commit"))) is None
         or any(
             _SHA256.fullmatch(str(binary.get(key))) is None
             for key in (
@@ -922,6 +929,12 @@ def validate_identity(
         )
     ):
         raise BoundedObservationError("Plan 056 binary identity is invalid")
+    _validate_binary_source_relation(
+        paths.worktree_root,
+        binary_commit=str(binary["source_commit"]),
+        harness_commit=str(value["harness_commit"]),
+        campaign_mode=str(value["campaign_mode"]),
+    )
     if not (paths.common_root / str(binary.get("manifest_path"))).is_relative_to(
         paths.common_root / "eval-data/bin"
     ):
@@ -1485,6 +1498,52 @@ def _load_v28_reference(paths: RepoPaths) -> CampaignIdentity:
     if identity.lock_sha256 != PLAN056_V28_SHA256:
         raise BoundedObservationError("Plan 056 v28 identity digest drifted")
     return identity
+
+
+def _validate_binary_source_relation(
+    root: Path,
+    *,
+    binary_commit: str,
+    harness_commit: str,
+    campaign_mode: str,
+) -> None:
+    """Bind rehearsal reuse to byte-identical product source only.
+
+    A development rehearsal may reuse the last verified Local bundle when the
+    intervening commits changed only eval facilities or documentation.  Formal
+    measurement remains stricter and requires a freshly frozen manifest at the
+    exact harness commit.
+    """
+
+    if (
+        _COMMIT.fullmatch(binary_commit) is None
+        or _COMMIT.fullmatch(harness_commit) is None
+        or campaign_mode not in {"rehearsal", "formal"}
+    ):
+        raise BoundedObservationError("Plan 056 binary source relation is invalid")
+    if campaign_mode == "formal":
+        if binary_commit != harness_commit:
+            raise BoundedObservationError(
+                "Plan 056 formal binary does not bind the harness commit"
+            )
+        return
+    if (
+        _git_result(
+            root, "merge-base", "--is-ancestor", binary_commit, harness_commit
+        ).returncode
+        or _git_result(
+            root,
+            "diff",
+            "--quiet",
+            binary_commit,
+            harness_commit,
+            "--",
+            "mydev",
+        ).returncode
+    ):
+        raise BoundedObservationError(
+            "Plan 056 rehearsal binary product source differs from the harness commit"
+        )
 
 
 def _load_runtime_config_without_secret(paths: RepoPaths) -> RuntimeConfig:
