@@ -1561,3 +1561,23 @@ Guardian 为 `gpt-5.6-terra/low`。
   预设目标、候选、顺序、依赖、预算或验收合同。
 - 方向 0 的既有设施和首次 schema v7 正式 canary 已归档，当前只保留可复用设施边界，没有 active campaign 或
   可继承授权。由此，`doc/WBS.md` 与四份子 WBS 恢复为只描述当前状态和待定义路线的精炼入口。
+
+## RONDO Multi 三期 M3-A1 Publication Critic 产品合同（Plan 053，2026-08-22）
+
+**状态**：M3-A1 已完成并通过独立验收。实现提交 `3f048b9103a42d25ccc8a233bf2cc97f9fc30c09` 冻结
+Publication Critic 产品语义；验收报告提交 `36a106c` 给出 `PASS`，无剩余 correctness/functionality finding。
+
+- 新增 [`Publication Critic 产品合同`](rondo-multi-publication-critic-product-contract.md)，冻结完整 canonical
+  publication candidate、公共且有界的最小输入、Evidence V1 禁入边界、四类统一 hard qualification、PASS 区软偏好、
+  两次 Producer 重写、最终非阻断审查、故障继续发布与取消不提交语义。
+- 合同保持 Producer、Critic、Harness、Root 职责和现行 Team State 的权限、stale、retry/dedup、revision、wake、
+  evidence window、双生命周期及 Root attention 不变量；不实现数据设施、模型服务或 `team_publish` 接入，也不冻结
+  API/schema、模块布局、历史条数、预算、threshold、训练参数或部署格式。
+- 四类合成边界例各覆盖一组 PASS/REWRITE，不把 handoff、evidence、篇幅或文风变成隐藏门槛；Plan 050 只作为三任务
+  条件性历史事实使用，没有展开 ignored 原始正文或外推一般性能结论。
+- M3-A2 与 M3-B2a 可依赖同一合同分别立项，后续路线只在方向 3 WBS 维护。实现可优先复用职责相符的现有设施；强行复用会
+  扭曲语义或架构时，允许新建必要且架构契合的专用能力，同时避免重复、平行或无现实需求的重型体系。
+- 轻量验收覆盖允许写集、相对链接、四类例、合同内部一致性及现行源码事实；未运行 Cargo、Docker、真实 API、本地模型、
+  训练或全量测试。执行与验收分别见
+  `agent_log/2026-08-22-014140-plan053-m3-a1-product-contract.md`、
+  `agent_log/2026-08-22-022619-plan053-acceptance-review.md`。
