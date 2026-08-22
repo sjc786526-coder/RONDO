@@ -1,10 +1,10 @@
 # RONDO Multi 公共状态发布质量 Critic：研究设计与工程可行性
 
-> 文档性质：形成于 2026-08-21 的候选研究设计，用于把公共状态发布质量 Critic 讨论收敛为可落地的 ML 与工程问题；它不是 ExecPlan，也不宣告任务已经排期或实施。
-> 代码基线：主工作区 `main@56ec5d2520ff90c6260667ec810ee02b5de234dd`；Plan 050 已合入 `main` 并通过修复后独立复验。本文中的 publication 源码事实已在该基线上重新核对。
+> 文档性质：形成于 2026-08-21、更新于 2026-08-22 的候选研究设计，用于把公共状态发布质量 Critic 讨论收敛为可落地的 ML 与工程问题；它不是 ExecPlan，也不宣告任务已经排期或实施。
+> 代码基线：主工作区 `main@b24ed11e6053390f98fcdfa298927d7d3a5689c7`；Plan 050 已合入 `main` 并通过修复后独立复验。本文中的 publication 源码事实已结合同日本地工程取证报告重新核对。
 > 规划边界：用户计划在 Plan 050 收口后考虑本项目，该时间前提现已满足；当前 WBS 仍写明“无已排期工作包”。正式顺序、任务编号和授权门只能由 `doc/WBS.md`、`doc/WBS/*.md` 与后续 ExecPlan 冻结。
 > 重写关系：本文吸收原始 AI 设计稿中的有效内容和用户批注，并用当前源码、训练资产与工具环境修正不可落地或互相冲突的部分；原始散点稿在完成合并审阅后删除，本文是保留的研究设计。
-> 模型边界：学生底模、教师/复核/终审模型的精确版本、上下文、训练框架、导出格式和本地推理栈均未冻结，选型完成后再写入任务合同。
+> 模型与训练边界：学生模型已选定 `Skywork/Skywork-Reward-V2-Qwen3-1.7B`，云端训练已选定单张 RunPod H100 PCIe 80GB 上的 BF16 全参数微调，RunPod 付费阶段总预算上限为 **23 USD**。模型/tokenizer exact revision、packet context、FlashOptim 精确依赖与参数、导出格式和本地推理栈仍由后续任务合同冻结。
 
 ## 1. 执行摘要
 
@@ -18,18 +18,19 @@
 | 数据监督 | 每条样本都有 Binary 标签；额外只构造可靠的 Boundary/Q± pair 和少量 Within-PASS pair；不同维度的 trade-off 不强排 | 设计原则 |
 | 训练标量 | Binary 与 Pair 共用单样本 publication desirability score；qualification 是主体，少量 Within-PASS 只做低权重的局部偏好塑形，不把该标量解释为客观、完整的总体质量 | 用户确认 |
 | Q± | 只允许一个导致跨过门槛的原子差异，其他 hard rubric 维度必须都合格 | 用户决定 |
-| 训练路线 | 保存同一 lineage 的 `C0 未训练 → C1 Binary → C2 Boundary/Q± → C3 Within-PASS` 四个 checkpoint；后续阶段混入前序样本，避免能力遗忘 | 用户决定 |
+| 训练路线 | 使用 Skywork 1.7B 做 BF16 全参数微调，保存同一 lineage 的 `C0 未训练 → C1 Binary → C2 Boundary/Q± → C3 Within-PASS`；后续阶段混入前序样本，避免能力遗忘 | 用户决定 |
 | 数据切分 | 同一具体 scenario、pair、模板近改写和真实来源组不得跨 split；同类题型可以跨 split，并在各 split 保持类别覆盖 | 用户决定 |
 | 判定接口 | 学生服务返回可校验的内部 score；adapter 应用 validation 冻结的 threshold，再映射为产品侧 `PASS/REWRITE` | 设计原则 |
-| 数据质检 | 教师会话生成、同能力的独立教师会话复核、异构模型做最终横评；条件允许时隐藏 checkpoint 身份，但不主张严格上下文盲化 | 角色顺序已决定；模型待选 |
-| 学生模型 | 不绑定上一项目的 Ministral、8B、12K、Q4_K_M 或 llama.cpp；先完成 packet token census 和小规模未训练基线 | 待调研 |
-| 云与 Hub | RunPod MCP 可承担控制面，现有 SSH/SCP 合同承担数据面；HF CLI 用于 exact-revision 调研/下载/校验。HF Jobs 和私有 Hub 镜像不进入首版主路径 | 设计候选 |
+| 数据质检 | 教师会话生成、同能力的独立教师会话复核、异构模型做最终横评；条件允许时隐藏 checkpoint 身份，但不主张严格上下文盲化 | 角色顺序已决定；教师/复核/终审精确版本待选 |
+| 学生模型 | 冻结为 `Skywork/Skywork-Reward-V2-Qwen3-1.7B`；使用 scalar score 路径，不再保留 Qwen3 Reranker 的 yes/no causal-LM 路径 | 用户决定 |
+| 云端训练 | 单张 RunPod H100 PCIe 80GB、BF16 全参数微调；FlashOptim/FlashAdamW 为主优化器路径。优先关闭 activation checkpointing/CPU offload/低比特基座等显存妥协，用更大的 per-device batch 和更少的 accumulation 适度加速；最终数值由 one-step paid smoke 在峰值门禁内冻结 | 用户决定 + 待实测 |
+| 云与 Hub | RunPod 付费阶段总预算硬上限为 **23 USD**；RunPod MCP 承担控制面，现有 SSH/SCP 模式承担数据面，HF CLI 用于 exact-revision 下载/校验。HF Jobs 和私有 Hub 镜像不进入首版主路径 | 用户决定 + 设计边界 |
 | 重写与故障 | 最多提供两次重写机会；最终稿非阻断发布。服务故障记为未审核，重写耗尽后仍未 PASS 记为未审核通过；状态至少对开发者可观测，不要求暴露给 Root/团队 | 用户决定 |
 | 重写反馈 | 两次使用不同的 Harness 固定提示，并回显最近一次被拒绝的 canonical publication；不依赖 Producer transcript，也不让 Critic 生成自由文本理由 | 用户决定 |
 | Event context | existing Event 是否携带历史、采用何种 projection 及其条数/token 上限必须先做实际调研；本文不冻结 | 待调研 |
 | 结论上限 | 第一版最多证明离线 qualification 改善、本地服务可用、runtime 分支功能正确；不据此声称整体任务成功率或协作质量已经提高 | 硬边界 |
 
-这项工作可行，但不应直接从“选一个模型开始训练”。最先需要关闭的是三个代码前置缺口：定义真实 publication packet、冻结 V1 Evidence 边界、规定 `REWRITE` 与本地服务故障的产品语义。数据与训练合同应随后围绕真实 packet 建立。
+学生模型、云端硬件、全参数路线和预算已经关闭，但不应因此跳过三个代码前置缺口：定义真实 publication packet、冻结 V1 Evidence 边界、规定 `REWRITE` 与本地服务故障的产品语义。数据与训练合同应围绕真实 packet 建立，付费训练仍只能在 exact revision、容量和费用门禁已冻结后启动。
 
 ## 2. 证据口径与当前项目实况
 
@@ -48,7 +49,7 @@
 |---|---|---|
 | `team_publish` 输入为 `event_id/title/summary/handoff/based_on_revision`，仅 `summary` 必填 | Publication Critic 必须审完整 publication candidate；只审 `handoff` 会漏掉主要共享语义 | `multidev/codex-rs/core/src/tools/handlers/team_tools/spec.rs:11-59`、`publish.rs:102-114` |
 | Event 下的 Version 是不可变 authored entry，`summary` 与 `handoff` 一经提交不原地改写 | Gate 应位于提交前；REWRITE 不应先落一个坏 Version 再补另一个 | `multidev/codex-rs/team-state/src/model.rs:152-187` |
-| title、summary、handoff 写入时分别按 200、2,000、1,000 Unicode scalar values 截断并显示 marker | Critic 必须审 canonicalized 文本，不能审通过一个随后被截断成不同内容的原文 | `multidev/codex-rs/team-state/src/model.rs:20-58` |
+| title、summary、handoff 写入时分别先取 200、2,000、1,000 Unicode scalars，超长时再追加 13-scalar marker；实际 stored 上界是 213/2,013/1,013 scalars | Critic 必须审 canonicalized 文本，不能审通过一个随后被截断成不同内容的原文 | `multidev/codex-rs/team-state/src/model.rs:20-58` |
 | 成功 publish 在同一 store mutation 内完成目标解析、revision、Version append、wake、retry 记录和 evidence cursor 推进 | 网络/模型调用必须在 store 锁外；`team-state` domain crate 不承载异步 HTTP 推理 | `multidev/codex-rs/team-state/src/store.rs:278-428` |
 | Fact 是 retained tool observation 的 locator，不复制 payload，也不声明 observation 仍为真 | Critic 不能把 Fact ID 当真理或把“有 Fact”当“claim 已被证明” | `multidev/codex-rs/team-state/src/evidence.rs:1-10,98-159` |
 | Producer 不挑选 Fact；每次成功 publish 自动附上自上次成功发布后该 Producer 的全部新 Fact，并推进 cursor | 当前草稿无法显式声明 claim→Fact；pre-commit 也没有最终 window 的冻结 token | `multidev/codex-rs/core/src/context/team_protocol_instructions.rs:30-33`、`team-state/src/store/evidence.rs:97-127` |
@@ -128,10 +129,10 @@ Local Publication Critic
 |---|---|---|---|
 | `schema_version`、`rubric_version` | Harness 常量 | 绑定输入与判据，拒绝未知版本 | 必填 |
 | actor role 与 target kind | 权威 session + parsed request | `root/member`、`new_event/existing_event`；不接受模型自报身份 | 必填 |
-| `title` | 新 Event request 或 canonical Event | 定义局部事项；existing Event 不让 Producer重复写标题 | canonical 200-char 合同 |
+| `title` | 新 Event request 或 canonical Event | 定义局部事项；existing Event 不让 Producer重复写标题 | 200-scalar 截断阈值；含 marker 实际 stored 上界 213 |
 | bounded Event context（候选） | 待调研的 canonical projection | 若实测需要，可帮助 existing Event 理解“本次是增量 checkpoint”；是否包含历史以及采用原文、摘要或其他投影均未冻结 | 先做真实样本调研、token census 与小型消融；省略必须显式 |
-| `summary` | canonicalized request | 必填，描述本次结论或状态变化；是主要被审内容 | canonical 2,000-char 合同 |
-| `handoff` | canonicalized request | 可选；仅在确有后续动作时描述接手位置，不要求终态样本硬写下一步 | canonical 1,000-char 合同；缺失是合法值 |
+| `summary` | canonicalized request | 必填，描述本次结论或状态变化；是主要被审内容 | 2,000-scalar 截断阈值；含 marker 实际 stored 上界 2,013 |
+| `handoff` | canonicalized request | 可选；仅在确有后续动作时描述接手位置，不要求终态样本硬写下一步 | 1,000-scalar 截断阈值；含 marker 实际 stored 上界 1,013；缺失是合法值 |
 | evidence policy marker | Harness | V1 固定声明 `semantic_entailment_not_evaluated`；可选提供新 Fact 数量/类别等非正文 metadata，但不能推断支持关系 | 是否提供 metadata 待小样本实验 |
 | overflow/stale metadata | Harness | 告诉 Critic context 是否省略、读自哪个 revision；不把旧视图伪装成完整状态 | 必填显式状态 |
 
@@ -164,9 +165,9 @@ Event context 仍是研究问题，不是本文已经决定的 V1 必填输入�
 
 ### 4.4 输出、模式与失败语义
 
-产品侧 V1 仍只有严格枚举 `PASS` 或 `REWRITE`，但内部服务不能只返回最终生成字符串。本文选择 **score-first** 路线：模型服务返回版本化、可校验的 `desirability_score`（或足以机械计算它的两类 logits），本地 adapter 校验 schema、模型与 scoring identity、数值有限性后应用 validation 冻结的 threshold `τ`，再映射为产品判定：`s(x) >= τ` 为 PASS，否则为 REWRITE。score 不向 Producer、Root 或 Team State 暴露，也不解释为客观总体质量。
+产品侧 V1 仍只有严格枚举 `PASS` 或 `REWRITE`，但内部服务不返回最终生成字符串。本文选择 **score-first** 路线：Skywork scalar scorer 返回版本化、可校验的 `desirability_score`，本地 adapter 校验 schema、模型与 scoring identity、shape 和数值有限性后应用 validation 冻结的 threshold `τ`，再映射为产品判定：`s(x) >= τ` 为 PASS，否则为 REWRITE。score 不向 Producer、Root 或 Team State 暴露，也不解释为客观总体质量。
 
-模型工件合同必须一起冻结 tokenizer、scoring/verbalizer 定义和 `τ`；runtime 只能加载匹配 identity 的组合。缺失、非有限 score、未知 scoring contract 或 identity 漂移都属于 typed infra/contract failure。另一条“只 constrained-decode `PASS/REWRITE`”路线会把实际边界固定为模型自身 argmax，不能同时声称产品使用了 validation 校准的任意 `τ`，因此不作为本文 V1。
+模型工件合同必须一起冻结 tokenizer/input template、scalar head/pooling/scoring 定义和 `τ`；runtime 只能加载匹配 identity 的组合。缺失、非有限 score、非预期 shape、未知 scoring contract 或 identity 漂移都属于 typed infra/contract failure。生成式 `PASS/REWRITE` label 不进入该 V1 运行时合同。
 
 推荐按三种模式落地：
 
@@ -321,12 +322,12 @@ heterogeneous external judge（异构模型，只用于最终横评）
 
 | Checkpoint | 初始化 | 新增监督 | 必须保留的旧监督 | 主要比较 |
 |---|---|---|---|---|
-| C0 | 选定底模 | 无微调 | 无 | 未训练基线 |
+| C0 | Skywork 1.7B exact base revision | 无微调 | 无 | 未训练基线 |
 | C1 | C0 | Binary qualification | — | C1 vs C0：普通二分类是否有效 |
 | C2 | C1 | Boundary pair，重点 Q± | Binary replay/anchor | C2 vs C1：边界监督是否增益且不破坏门槛 |
 | C3 | C2 | 少量 Within-PASS pair | Binary + Boundary replay/anchor | C3 vs C2：软偏好是否增益且不损害 qualification |
 
-每个 checkpoint 都保存模型/adapter、数据 manifest、recipe、dependency identity、训练 receipt 和同一 held-out 输出。C3 变差时可以保留 C2 为产品候选；“最后训练的”不等于“必须部署的”。
+训练不使用 LoRA/QLoRA/PEFT adapter；C1、C2、C3 均保存全量模型权重，C0 由 exact immutable base revision 与本地校验过的原始权重表示。每个阶段一并保存数据 manifest、recipe、dependency identity、训练 receipt 和同一 held-out 输出；可恢复训练所需的 optimizer/scheduler/RNG state 必须受独立工件合同保护。C3 变差时可以保留 C2 为产品候选；“最后训练的”不等于“必须部署的”。
 
 连续训练的代价必须诚实记录：C1/C2/C3 的总训练量不同，且 C2/C3 存在灾难性遗忘与顺序效应，因此增量比较适合回答工程问题，但不是严格隔离数据类型的因果论文实验。首版不要求再从 C0 独立训练三套模型；如果结果难解释，再补一个小型 compute-matched ablation，而不是预先扩大训练矩阵。
 
@@ -334,48 +335,47 @@ heterogeneous external judge（异构模型，只用于最终横评）
 
 标准 DPO 通常比较**同一 prompt 下两个 completion**；本项目的 pair 是两个不同 publication input，因此不能只把 JSONL 塞进普通 DPO trainer 就声称学会了 qualification 排序。
 
-推荐让 Binary 与 Pair 共享一个单样本 **publication desirability score**。先定义两个 class logit `z_pass(x)`、`z_rewrite(x)`，再由同一个 score 同时服务训练、校准和 runtime：
+让 Binary 与 Pair 共享一个单样本 **publication desirability score**。Skywork 路径的冻结目标是模型对每个 packet 返回一个 scalar logit；如 exact model metadata/smoke 确认 `logits.shape == [B, 1]`，则定义 `s(x) = logits.squeeze(-1)`。同一个 score 同时服务训练、校准和 runtime：
 
 ```text
-s(x) = z_pass(x) - z_rewrite(x)
 decision(x; τ) = PASS if s(x) >= τ else REWRITE
 
+L_binary = BCEWithLogits(s(x), y)
 L = L_binary
   + λ_boundary · -log sigmoid(s(x_pass) - s(x_rewrite))
   + λ_within   · -log sigmoid(s(x_preferred_pass) - s(x_other_pass))
 ```
 
-这可以由 classification head 直接给出两个 logits，也可以由 causal LM 的内部 class verbalizer 给出。causal LM 路线不得默认把自然语言字符串 `PASS` 与 `REWRITE` 的整串 log-prob 直接相减：二者在选定 tokenizer 下可能包含不同数量的 token，整串概率会引入 sequence-length bias。模型选定后必须机械检查 verbalizer tokenization；优先使用两个不同且各自恰为一个 token 的内部 class（如实际验证后的 `0/1` 或 `A/B`），或者使用 classification logits。adapter 再把内部 class/score 映射为产品侧 `PASS/REWRITE`。
-
-Tokenizer exact revision、两个 verbalizer 的文本与 token ID（如使用）、scoring contract identity 和 validation 冻结的 `τ` 都属于模型工件合同。训练、离线 runner、本地服务与 Rust adapter 必须使用同一 score 定义。这个 `s(x)` 并非纯粹的 threshold distance：Binary 与 Boundary 让 qualification 成为主体，少量 Within-PASS 则让它在合格区内部带有较弱、局部的 RONDO 稳定偏好方向。因此 V1 确实使用了一个训练方便的一维标量，但不声称所有 publication 存在客观、完整、可跨任务比较的总体质量顺序。
+如 exact Skywork 实现不直接返回 `[B, 1]`，只允许在模型加载层做明确、可测试的 scalar projection，不回退到生成式 verbalizer。Tokenizer/model exact revision、input template、scalar head/pooling/scoring contract identity 和 validation 冻结的 `τ` 都属于模型工件合同。训练、离线 runner、本地服务与 Rust adapter 必须使用同一 score 定义。这个 `s(x)` 并非纯粹的 threshold distance：Binary 与 Boundary 让 qualification 成为主体，少量 Within-PASS 则让它在合格区内部带有较弱、局部的 RONDO 稳定偏好方向。因此 V1 确实使用了一个训练方便的一维标量，但不声称所有 publication 存在客观、完整、可跨任务比较的总体质量顺序。
 
 Within-PASS 必须数量少、`λ_within` 较低、偏好明确，且两端继续接受强 Binary PASS anchor；这样可以要求 `s(preferred PASS) > s(other PASS)`，同时避免把较弱一侧推过 REWRITE 门槛。`λ`、replay 比例、学习率、步数和正则化在 one-step smoke 与 validation 前冻结，不在本文猜数值。
 
-### 7.3 模型选择保持开放
+### 7.3 已冻结的模型、硬件与显存策略
 
-选型顺序应是：先冻结 packet schema并对 synthetic/real anchors 做 exact token census，再比较少量候选的 C0 能力、训练兼容性和本地运行成本。筛选条件包括：
+学生模型冻结为 `Skywork/Skywork-Reward-V2-Qwen3-1.7B`，云端训练冻结为单张 RunPod H100 PCIe 80GB 上的 BF16 全参数微调。这关闭了候选比较，但 exact base/tokenizer revision、输入模板、实际 context 和 scalar output 合同仍要由 metadata 检查、packet census 和 one-step model smoke 机械冻结。
 
-- 能可靠区分事实、推测、未知和状态可接续性；
-- 能稳定暴露 classification logits，或在 exact tokenizer 下存在两个不同的单-token class verbalizer；
-- 训练框架能实现共享 Binary + pair desirability score，而非只有 completion preference；
-- context 覆盖真实 packet 分布，不靠截断关键状态；
-- 可在 RTX 4060 Laptop 8GB 的本地目标下达到可接受显存、延迟和稳定性；
-- tokenizer/template、量化/导出与许可路线可冻结复现。
+训练 recipe 采用“显存充足时少做妥协”的原则：
 
-上一项目已经验证 exact b10333 llama.cpp + 8B 级 Q4_K_M + 12,288 context 的一个特定 Local approval 路线能在本机工作；这只是部署经验，不是本项目的模型、context 或 runtime 决定。3B/4B、7B/8B 及其他规模都应由 C0 与 packet census 决定。
+- 不使用 4-bit 基座、LoRA/QLoRA、PEFT adapter、CPU/NVMe offload 或上一项目的 paged 8-bit optimizer 合同；
+- 以 BF16 全量权重和 FlashOptim/FlashAdamW 为主路径；由于当前本机未安装 FlashOptim，必须先冻结 package/source revision、参数和 Trainer 注入方式，再做 one-step + save/reload/resume smoke；
+- 默认尝试关闭 activation checkpointing，并在峰值显存门禁内提高 per-device batch、减少 gradient accumulation，以减少重算与 optimizer step 等待；
+- 如实测峰值不满足保留余量，按“先降 micro-batch，再开 activation checkpointing”的有界顺序回退；不为凑训练一开始就启用所有显存妥协；
+- 具体 sequence length、micro-batch、accumulation、FlashAdamW state/master bits、learning rate 和 step 数不在研究稿猜值，由不超过 23 USD 总上限的 paid smoke 与 ExecPlan 冻结。
+
+本地部署仍要在 RTX 4060 Laptop 8GB 上做独立量化与 score-drift 资格验收；H100 训练可行性不代替本地 runtime 可行性。上一项目的 llama.cpp/Ministral 路线仍只是部署机制经验，不是 Skywork 的现成 launcher 或量化证据。
 
 ## 8. 离线评价与最终横评
 
 ### 8.1 统一评价矩阵
 
-C0、C1、C2、C3 使用同一冻结 test 和相同 decode/timeout 合同，至少报告：
+C0、C1、C2、C3 使用同一冻结 test 和相同 scalar scoring/timeout 合同，至少报告：
 
 - Binary：balanced accuracy、PASS/REWRITE 分区准确率、macro F1、malformed/timeout/infra 比例；
 - 错误成本：False PASS（低质状态进入 Team State）与 False REWRITE（额外调用、延迟和重写风险）；
 - Boundary：普通 boundary pair accuracy、Q± pair accuracy、margin 分布；
 - Within-PASS：只在冻结、双 PASS、单软偏好样本上计算 pair accuracy；
 - slices：按 defect、source、new/existing Event、终态/未完成、长度区间、evidence policy 分组；
-- 工程：input/output tokens、P50/P95 latency、峰值显存、服务可用率。
+- 工程：input tokens/字符长度、P50/P95 latency、峰值显存、服务可用率。
 
 本文 V1 要求每个 checkpoint 暴露同一定义的 `desirability_score`。各 checkpoint 的 qualification threshold 只在 validation 按同一预定义错误代价分别选择并冻结；test 不回调阈值，产品候选部署时必须携带该 checkpoint 对应的 `τ`。离线 runner 与本地 adapter 都执行完全相同的 `s(x) >= τ`，并用 parity fixture 逐项验证，不能出现“评价使用校准 score、runtime 却使用生成字符串 argmax”的双重判定器。也不能通过把所有样本判 REWRITE 来制造“安全”的表面结果，或只看 overall accuracy 掩盖某一侧错误。
 
@@ -412,8 +412,8 @@ C0、C1、C2、C3 使用同一冻结 test 和相同 decode/timeout 合同，至�
 |---|---|---|---|
 | `training/` + `eval-data/` 分层 | tracked 轻量数据/合同与 ignored 私有正文/权重分离 | 新建 Publication Critic 专用 dataset/schema/data card/manifest；大正文按现有体积门限分流 | Local approval 的 allow/deny payload |
 | `eval/rondo_eval/local_approval/synthetic_training.py` 模式 | schema/hash、group split、近重复、exclusive publish、recompute manifest | 抽取/复用通用机制，建立 Candidate/Pair validator | 原 600 条审批样本与类别 |
-| Local L6 bundle | train-only allowlist、token census、mock、smoke/formal、resume、receipt、artifact verify | 为新任务做独立 bundle 和多 checkpoint receipt | Ministral revision、4K、LoRA regex、旧 recipe |
-| conversion contracts | converter/quantizer identity、逐文件 hash、artifact allowlist、paired route | 等模型确定后复用模式 | b10333/Ministral 专用 closure 与 GGUF 必选结论 |
+| Local L6 bundle | train-only allowlist、token census、mock、smoke/formal、resume、receipt、artifact verify | 为新任务做独立 full-model bundle、streaming verifier 和多 checkpoint receipt | Ministral revision、4K、LoRA regex、adapter allowlist/reload、旧 recipe |
+| conversion contracts | converter/quantizer identity、逐文件 hash、artifact allowlist、paired route | 按 Skywork 本地量化与 scalar-score parity 资格需要复用模式 | b10333/Ministral 专用 closure 与 GGUF 必选结论 |
 | 本地 launcher/client | loopback-only、no redirect、response cap、零自动重试、schema 复验、launcher identity | 实现 Publication Critic 专用 Rust client/adapter 与配置；可复用这些安全/稳定模式 | Python approval-v3 client、`[auto_review]`、现有模板和 12K 参数 |
 | Team Lens | 复用原生 trace，确定性 body-free reducer/viewer | 解析 typed critic outcome/latency/count；不新建 trace writer | 训练正文 |
 | RunPod MCP | 当前会话可见 capacity/billing、Pod create/get/start/stop/delete、bounded logs 等控制面 | 授权后作为单 Pod 控制面；状态与账单复核自动化 | 已认证、已有余额、实时容量/价格已经验收的说法 |
@@ -426,13 +426,15 @@ C0、C1、C2、C3 使用同一冻结 test 和相同 decode/timeout 合同，至�
 
 1. 本地完成 packet schema、validator、split、C0 基线和 train-only bundle；test/holdout 不进入训练 bundle。
 2. 用 HF CLI/官方 metadata 冻结学生 base/tokenizer exact revision，并把下载文件与大小纳入 model contract；下载后训练/转换尽量 offline。
-3. 在 ExecPlan 中冻结数据量、C1/C2/C3 最大步数、单一 GPU 候选、预计费用和硬上限。用户当前预算意向约为 RunPod **30 USD 以内**，它不是本研究稿赋予的执行授权。
-4. 获得明确授权后，由 RunPod MCP 只创建一个 Pod并持续读取状态/账单；verified tar + SSH/SCP 传输数据和脚本。
-5. 先 one-step optimizer smoke 与独立 reload；通过后才顺序训练 C1、C2、C3并保存各阶段 checkpoint。失败不得盲重跑或另起并发 Pod。
-6. 回收 allowlisted adapter/checkpoint/recipe/metrics/receipt，逐文件 hash 验证；训练数据、validation/test、逐样本输出、凭据不随模型工件回传或上传。
-7. 只有模型选型证明需要时才做 GGUF/其他格式转换和本地 smoke；先结束云端计费，再跑 C0–C3 串行离线评价。
+3. ExecPlan 冻结数据量、C1/C2/C3 最大步数、单张 **H100 PCIe 80GB** 的价格/容量 preflight、预计时长和自动停止余量。RunPod 付费 smoke + 正式训练的总预算硬上限为 **23 USD**；该决策不等于本研究稿已授权创建 Pod。
+4. 获得明确运行授权后，由 RunPod MCP 只创建一个 H100 PCIe 80GB Pod并持续读取状态/账单；verified tar + SSH/SCP 传输数据和脚本。实时价格或预计完成时间无法在 23 USD 中保留安全余量时 fail-closed，不自动更换未授权 GPU。
+5. 先做 Skywork scalar forward/backward 和 FlashOptim/FlashAdamW one-step + save/reload/resume smoke，记录峰值显存与吞吐；在余量内冻结宽松 recipe 后才顺序训练 C1、C2、C3 并保存各阶段 full checkpoint。失败不得盲重跑或另起并发 Pod。
+6. 回收 allowlisted full-model checkpoint/optimizer state/recipe/metrics/receipt，使用 streaming hash 验证；训练数据、validation/test、逐样本输出、凭据不随模型工件回传或上传。
+7. 只在 Skywork 本地部署合同需要时才做量化/格式转换和本地 smoke；先结束云端计费，再跑 C0–C3 串行离线评价。
 
 HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publication Critic 的 upload allowlist/staging verifier；默认仍是本地 SCP 回收。HF Jobs 虽可由 CLI 使用，但当前仓库没有对应训练状态机，而且同时维护 RunPod/HF 两套云后端收益很低，首版不纳入。
+
+现有 L6 training artifact verifier 会用 `read_bytes()` 整文件读入，而且 adapter allowlist/reload 语义是 LoRA-specific；它们不是数 GB full checkpoint 的可用性证据。Publication Critic bundle 必须在上传前新建 full-model allowlist、分片/容量门禁和 streaming verifier，并在回收前确认本机 `/mnt/c` 实际余量。详见同日本地工程取证报告 §H。
 
 ### 9.3 数据落点
 
@@ -442,7 +444,7 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 - `eval/templates/publication-critic/`：versioned packet/rubric/generation/review/judge schemas 与 prompts；
 - `training/multi-publication-critic-v1/`：体积合规的 train/validation、manifest、data card；
 - `eval-data/publication-critic/`：真实 projection、raw candidates、test/holdout、RunPod bundle、权重和逐样本输出；
-- `eval-data/models/`：最终本地模型/adapter，永不入库。
+- `eval-data/models/`：最终本地 Skywork 模型/量化工件，永不入库。
 
 不在 `mydev/` 放 Multi 数据，也不把 `training/` 接入 Rust build。
 
@@ -462,8 +464,8 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 | 阶段 | 交付物 | 退出条件 |
 |---|---|---|
 | A 数据与 packet | schema、rubric、canonical builder、token census、validator、少量真实/合成 anchors | packet 与 Evidence V1 不再依赖假接口；C0 可评 |
-| B 数据集与 C0/C1 | generator→independent review、group split、C0、Binary C1 | test 冻结；Binary 有区分度且无明显 shortcut |
-| C Pair 训练 | C2 Boundary/Q±、C3 Within-PASS、前序 replay、全 checkpoint receipts | 同一矩阵完成；是否保留 C2/C3由结果决定 |
+| B 数据集与 C0/C1 | generator→independent review、group split、Skywork C0、full-parameter Binary C1 | test 冻结；Binary 有区分度且无明显 shortcut |
+| C Pair 训练 | full-parameter C2 Boundary/Q±、C3 Within-PASS、前序 replay、full checkpoint receipts | 同一矩阵完成；是否保留 C2/C3由结果决定 |
 | D 本地服务资格 | 模型特定导出、loopback client、identity、schema/latency/显存 smoke | 本地单并发 bounded packet 可稳定判定 |
 | E Runtime | off→shadow→enforce、attempt cap、fallback、Team Lens 指标 | 相关测试通过；off 零回归；无无限 loop |
 
@@ -486,7 +488,7 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 - 已提交 request replay 命中 committed fast path，不重复推理；同 request identity + 不同 canonical fingerprint 仍按原合同拒绝；
 - 多 Agent 并发请求服从有界队列/并发/timeout，排队取消不串 cycle、不产生 mutation；
 - fake server 覆盖严格 schema、body 上限、no redirect、零自动重试和身份漂移；
-- score/parity fixture 覆盖单-token verbalizer 校验、非有限 score、scoring/threshold identity 漂移，以及离线 runner 与 runtime adapter 的同一 `s(x) >= τ` 结果；
+- score/parity fixture 覆盖 scalar output shape、非有限 score、model/tokenizer/scoring/threshold identity 漂移，以及离线 runner 与 runtime adapter 的同一 `s(x) >= τ` 结果；
 - training input builder 只接受 packet allowlist；禁入 metadata sentinel 不得出现在 Binary 或 Pair 任一端输入；
 - Team Lens 只归约 typed outcome，不泄露 publication/evidence 正文；
 - 本地真实模型 smoke 与训练/转换另行授权，不能用 fake 结果冒充。
@@ -500,12 +502,15 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 | Evidence grounding | V1 不需要显式 grounding，也不让小模型验证逻辑链 | V1 只检查 uncertainty/epistemic wording，不读 body、不做 claim→Fact 绑定；以后如另立形式绑定协议，由确定性代码检查引用 | **已关闭（V1）** |
 | 是否带历史 evidence | 增量 evidence 可能依赖旧证据，不能只看本次 window | V1 不携带 evidence body、不做 semantic evidence；如果 Event context 调研最终选择 authored history，它也不等于历史 evidence。未来 semantic 路线单独设计 exact reservation | V1 后评估 |
 | Q± 非目标维度 | 其他维度全部 PASS | 采纳为 pair validator 硬约束 | **已关闭（V1）** |
-| 训练方式 | C1→C2→C3 顺序续训并保留全部权重 | 采纳；加入前序 replay 与统一 test，并诚实记录顺序/总训练量混杂 | **已关闭（V1）** |
+| 训练方式 | Skywork 1.7B 全参数 BF16，C1→C2→C3 顺序续训并保留各阶段全量权重 | 不使用 LoRA/QLoRA/4-bit 基座；加入前序 replay 与统一 test，并诚实记录顺序/总训练量混杂 | **已关闭（V1）** |
 | Split 泛化强度 | 防具体/字面近重复即可，同类题可跨 split | 采纳 grouped + stratified，不做题型整体隔离 | **已关闭（V1）** |
 | 生成/审查/终审 | 独立教师会话复核，Opus 路线只做最终异构横评 | 条件允许时隐藏身份并优先独立判 packet；实际 Claude Code 上下文无法隔离时记录限制，不声称严格盲测 | 角色与口径已关闭；精确版本待选 |
-| 学生模型/context | 继续调研，不固定 | 先 packet census + C0，小候选集后冻结 | 训练授权前 |
+| 学生模型/context | `Skywork/Skywork-Reward-V2-Qwen3-1.7B` | 模型已冻结；exact model/tokenizer revision、input template 和 context 仍由 metadata、packet census 与 smoke 冻结 | **模型已关闭** |
+| 云端硬件 | RunPod H100 PCIe 80GB | 单 Pod、单 GPU、串行 smoke/C1/C2/C3；不自动替换其他 SKU | **已关闭** |
+| 优化器与显存策略 | FlashOptim/FlashAdamW，利用 80GB 减少显存妥协并适度加速 | 默认尝试无 activation checkpointing/offload、更大 micro-batch/更少 accumulation；package 接入、state/master bits 与峰值由 one-step + resume smoke 冻结 | **路线已关闭，参数待实测** |
+| RunPod 预算 | 总上限 23 USD | paid smoke 与正式训练共用该上限；ExecPlan 预留停止余量，研究稿本身不授权创建 Pod | **预算已关闭** |
 | Pair loss 与标量语义 | 接受共享 score，但不能声称完全没有一维尺度或把它说成客观总体质量 | 使用 single-input publication desirability score；qualification 为主体，Within-PASS 以少量、低权重、强 Binary PASS anchor 做局部塑形；普通 completion-DPO 不能直接替代 | **已关闭（V1）** |
-| Verbalizer 与 threshold | 产品仍只暴露 PASS/REWRITE，但训练、校准与 runtime 必须是同一个判定器 | 禁止直接比较不等 token 数的自然语言标签；服务返回 score/logits，adapter 应用冻结 `τ`；tokenizer/verbalizer/scoring/threshold identity 一起冻结 | **已关闭（V1）** |
+| Scalar score 与 threshold | 产品仍只暴露 PASS/REWRITE，但训练、校准与 runtime 必须是同一个判定器 | Skywork 服务返回 finite scalar score，adapter 应用冻结 `τ`；model/tokenizer/input-template/scalar-head/scoring/threshold identity 一起冻结 | **已关闭（V1）** |
 | 训练输入防泄漏 | Candidate/Pair 的标签与审计 metadata 不能进入输入 | 显式 packet allowlist + exact-key assertion + forbidden-field sentinel regression | **已关闭（V1）** |
 | Internal coherence | 同一 publication packet 内不能自相矛盾 | summary、handoff 以及最终选定的 Event context projection 之间存在关键冲突时 REWRITE；不扩张为外部事实调查 | **已关闭（V1）** |
 | Event context | 仍需结合真实数据调研，不在研究稿定死 | new Event 至少使用 title；existing Event 对“不带历史/最近 N 条 Version/更窄投影”做 token census 与小型消融后再冻结 | **待调研** |
@@ -513,7 +518,7 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 | 最大重写次数 | 最多允许 Producer 重写两次 | 前两次 REWRITE 可阻断当前 draft；第二次改稿做最终非阻断检查并照常发布 | **已关闭（V1）** |
 | 耗尽/infra fallback | 都继续发布，但开发者必须能区分“未审核”和“审核未通过”；不要求暴露给 Root/团队 | 最终 outcome 与 rewrite history 正交；服务/contract 故障记 `infra_bypassed`，此前 REWRITE 次数另存 typed metadata，不污染 canonical authored state | **已关闭（V1）** |
 | runtime rewrite feedback | V1 不需要 Critic 自由文本理由；两次重写提示应不同，并带回最近一次 Producer 输出 | Harness 使用两个版本化固定模板，回显最近一次被拒绝的 canonical publication，不累积历史；受限 reason enum 仅在实测不足时再研究 | **已关闭（V1）** |
-| 部署格式 | 倾向本地量化，但模型未定 | GGUF/llama.cpp 是已验证经验而非必选；模型确定后再选 | 本地资格计划 |
+| 部署格式 | Skywork 最终需在本地 8GB GPU 运行，倾向量化 | GGUF/llama.cpp 是已验证机制经验而非 Skywork 现成路径；格式由 scalar-score parity、量化 drift、显存和延迟 smoke 决定 | 本地资格计划 |
 
 ## 12. 主要风险与控制
 
@@ -523,7 +528,9 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 | Pair 伪偏好 | 多维 trade-off 被强排，模型学风格而非门槛 | Q 原子差异 validator；mixed case 仅 Binary；Within-PASS 双方先独立 PASS |
 | 连续训练遗忘 | C2/C3 qualification 下降 | 前序 replay、每阶段 checkpoint、同一 test；允许部署 C1/C2而非 C3 |
 | Pair 目标错配 | 用普通 DPO 比较不同输入，runtime Binary 没共享 score | 显式 desirability `s(x)` + Binary/rank loss；qualification 为主体；one-step gradient/overfit smoke |
-| Score 判定漂移 | 不等长 verbalizer 产生长度偏差，或 validation 用 `τ`、runtime 用字符串 argmax | 单-token class/classification logits；冻结 tokenizer/scoring/`τ` identity；runner/adapter parity fixture |
+| Score 判定漂移 | 训练/离线/runtime 使用不同 pooling/scalar projection，或 validation 用 `τ`、runtime 使用另一边界 | 冻结 model/tokenizer/input-template/scalar-head/scoring/`τ` identity；runner/adapter parity fixture |
+| FlashOptim 接入与恢复缺口 | 本机未安装 package，当前 Transformers 无 direct `optim=` integration，state/master bits 和 checkpoint 兼容性未证 | 冻结 package/source revision 与显式 optimizer injection；付费正式训练前完成 one-step + save/reload/resume smoke |
+| 全量 checkpoint 放大 | C1/C2/C3 权重、optimizer state 与传输/验证临时副本超出旧 LoRA 容量模型 | 独立 full-model allowlist、sharding、streaming hash、Pod 与 `/mnt/c` 容量前后门禁 |
 | 训练输入泄漏 | label、defect、split 或 generator metadata 被模板拼入输入 | 显式 packet allowlist、exact-key validator、逐禁入字段 sentinel 回归 |
 | 横评上下文锚定 | Judge 已见项目或候选结果，却被报告为严格盲测 | 异构外部横评；尽力隐藏身份与平衡顺序；记录上下文限制，不主张严格盲化 |
 | Evidence 过度承诺 | 增量 Fact 被误当完整证明，小模型猜逻辑链 | V1 不读 body、不做 entailment，能力声明明确 |
@@ -536,7 +543,7 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 | Critic 单点故障 | 本地服务 OOM/timeout 阻断团队状态 | off/shadow/enforce；故障继续发布并记 `infra_bypassed` |
 | 离线外推 | test 变好被写成真实协作提升 | 只主张离线判断与功能接入；真实闭环另立项 |
 | 双产品污染 | Local approval 配置/模型默认渗入 Multi | 独立 namespace/client/identity；只复用通用模式 |
-| 云端费用/数据外发 | Pod、下载、上传或训练超出当前授权 | 精确预算与数据 allowlist；授权前只读 preflight；单 Pod 串行 |
+| 云端费用/数据外发 | H100 Pod、下载、上传或训练超出授权 | 23 USD 总硬上限与数据 allowlist；授权前只读 price/capacity preflight；单 H100 PCIe 80GB Pod 串行并预留自动停止余量 |
 
 ## 13. 证据索引与收束判断
 
@@ -551,5 +558,6 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 - 训练数据与资产分层：`training/README.md`、`doc/eval-data-layout.md`、`training/local-approval-synthetic-v1/DATA_CARD.md`；
 - RunPod 训练/回收模式：`training/local-approval-l6/README.md`、`stage2-runbook.md`、`eval/rondo_eval/local_approval/l6_training.py`；
 - 本地推理历史边界：`doc/WBS/local-approval-model.md`、`eval/rondo_eval/local_approval/client.py`、`launcher.py`；
+- Publication packet、环境、FlashOptim、Skywork/Qwen 接入、全量 checkpoint 与磁盘的同日本地取证：`doc/research/2026-08-21-rondo-multi-publication-critic-local-engineering-facts.md`。
 
-收束判断：公共状态发布质量 Critic 是一个适合 RONDO 的小型 ML 工程问题，但当前最有价值的第一步不是扩大模型与训练矩阵，而是把真实 `team_publish` packet、V1 Evidence 边界、Binary/Pair 共享且可校准的 desirability score、runtime threshold 和 fallback 写成一致合同。完成这些之后，现有 synthetic 数据管线、RunPod 单 Pod 状态机、HF exact-revision 下载、训练 receipt、转换验真、本地 launcher 经验和 Team Lens 都能提供高复用价值；复用时应保留机制，不能把上一项 Local approval 的任务专用模型、schema 和部署参数原样搬进 RONDO Multi。
+收束判断：公共状态发布质量 Critic 的学生模型、云端硬件、全参数路线和 23 USD 预算已经关闭：`Skywork/Skywork-Reward-V2-Qwen3-1.7B` 将在单张 RunPod H100 PCIe 80GB 上以 BF16 + FlashOptim/FlashAdamW 主路径顺序训练 C1/C2/C3，并优先用宽松显存配置减少重算与 offload。下一个任务合同仍要先把真实 `team_publish` packet、V1 Evidence 边界、Binary/Pair 共享的 scalar score、FlashOptim one-step/resume、full-checkpoint 回收和 runtime threshold/fallback 写成一致且可验收的合同，然后才能在单 Pod 和总预算门禁内执行。现有资产可复用机制，但 Local approval 的 Ministral、QLoRA/adapter、GGUF 和旧部署参数不得原样搬入。
