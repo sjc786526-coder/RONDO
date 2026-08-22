@@ -1,6 +1,6 @@
 {
-  "active_lock": null,
-  "active_lock_sha256": null,
+  "active_lock": "eval/locks/plan056-direction1-bounded-observation-formal-v5.json",
+  "active_lock_sha256": "888501f03eecc455a582d4a9f4b909b60b7bbefedcf255476492ba758b1b861e",
   "kind": "rondo_direction1_bounded_observation",
   "schema_version": 1
 }
