@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import stat
 from collections.abc import Mapping
@@ -10,11 +11,12 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .team_lens import BundleError
-from .team_lens import NativeBundleReader
-from .team_lens import TeamViewError
-from .team_lens import reduce_bundle_with_root_session
-
+from .team_lens import (
+    BundleError,
+    NativeBundleReader,
+    TeamViewError,
+    reduce_bundle_with_root_session,
+)
 
 OBSERVATION_FILE_NAME = "harness-observation.json"
 LOCAL_ROLLOUT_TRACE_ROOT = "/logs/agent/rollout-trace"
@@ -508,11 +510,22 @@ def _read_complete_bundle(path: Path) -> tuple[str, dict[str, Any], NativeBundle
         "turns",
         "inferences",
         "tools",
-        "terminal",
         "timing",
     ):
         if view["availability"][capability_name]["status"] != "available":
             raise HarnessObservationError("rollout trace lifecycle is incomplete")
+    _, pre_runtime_execs, _, _ = _command_runtime_aggregates(view, reader)
+    terminal_capability = view["availability"]["terminal"]
+    expected_terminal_capability = (
+        {
+            "status": "partial",
+            "reason_codes": ["terminal_runtime_metadata_missing"],
+        }
+        if pre_runtime_execs
+        else {"status": "available", "reason_codes": []}
+    )
+    if terminal_capability != expected_terminal_capability:
+        raise HarnessObservationError("rollout trace terminal coverage is invalid")
     missing_usage = [
         inference for inference in view["inferences"] if inference["usage"] is None
     ]
@@ -837,22 +850,9 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         for tool in tools
         if tool["kind"] in {"exec_command", "write_stdin"}
     }
-    runtime_ends: dict[str, dict[str, Any]] = {}
-    for event in reader.events:
-        payload = event["payload"]
-        if payload["type"] != "tool_call_runtime_ended":
-            continue
-        tool_id = payload["tool_call_id"]
-        if tool_id not in command_tools:
-            continue
-        if tool_id in runtime_ends:
-            raise HarnessObservationError("command runtime terminal is duplicated")
-        runtime = reader.load_ref(payload["runtime_payload"])
-        if not isinstance(runtime, dict):
-            raise HarnessObservationError("command runtime payload is invalid")
-        runtime_ends[tool_id] = runtime
-    if set(runtime_ends) != set(command_tools):
-        raise HarnessObservationError("command runtime terminal is incomplete")
+    runtime_ends, _, exec_identities, pre_runtime_source_bytes = (
+        _command_runtime_aggregates(view, reader)
+    )
 
     total_duration = 0
     tool_durations: dict[str, int] = {}
@@ -888,12 +888,18 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
             or not isinstance(exit_code, int)
         ):
             raise HarnessObservationError("command runtime aggregate is invalid")
-        output_bytes = len(output.encode("utf-8"))
+        source_output_bytes = pre_runtime_source_bytes.get(tool_id)
+        output_bytes = (
+            source_output_bytes
+            if _safe_count(source_output_bytes) is not None
+            else len(output.encode("utf-8"))
+        )
         output_total += output_bytes
         output_max = max(output_max, output_bytes)
         if tool["kind"] != "exec_command":
             continue
-        identity = (tool["requester"], tuple(command), cwd)
+        invocation_command, invocation_cwd = exec_identities[tool_id]
+        identity = (tool["requester"], (invocation_command,), invocation_cwd)
         prior_exit_code = commands_seen.get(identity)
         if prior_exit_code is not None:
             repeated += 1
@@ -918,6 +924,198 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         "repeated_exact_command_lifecycle_duration_ms": repeated_duration,
         "repeated_after_failure": repeated_after_failure,
     }
+
+
+def _command_runtime_aggregates(
+    view: dict[str, Any], reader: NativeBundleReader
+) -> tuple[
+    dict[str, dict[str, Any]],
+    set[str],
+    dict[str, tuple[str, str]],
+    dict[str, int],
+]:
+    """Return complete native runtimes plus exact pre-runtime exec denials.
+
+    ``exec_command`` can fail while opening its sandbox, before the native
+    runtime begin event exists.  Code mode still receives a terminal structured
+    result in that case.  Accept only that narrow, mechanically complete shape;
+    every other missing or one-sided runtime lifecycle remains invalid.
+    """
+
+    command_tools = {
+        tool["tool_id"]: tool
+        for tool in view["tools"]
+        if tool["kind"] in {"exec_command", "write_stdin"}
+    }
+    runtime_starts: set[str] = set()
+    runtime_ends: dict[str, dict[str, Any]] = {}
+    started_events: dict[str, dict[str, Any]] = {}
+    ended_events: dict[str, dict[str, Any]] = {}
+    for event in reader.events:
+        payload = event["payload"]
+        event_type = payload["type"]
+        tool_id = payload.get("tool_call_id")
+        if tool_id not in command_tools:
+            continue
+        if event_type == "tool_call_started":
+            started_events[tool_id] = payload
+        elif event_type == "tool_call_ended":
+            ended_events[tool_id] = payload
+        elif event_type == "tool_call_runtime_started":
+            if tool_id in runtime_starts:
+                raise HarnessObservationError("command runtime start is duplicated")
+            runtime = reader.load_ref(payload.get("runtime_payload"))
+            if not isinstance(runtime, dict):
+                raise HarnessObservationError("command runtime payload is invalid")
+            runtime_starts.add(tool_id)
+        elif event_type == "tool_call_runtime_ended":
+            if tool_id in runtime_ends:
+                raise HarnessObservationError("command runtime terminal is duplicated")
+            runtime = reader.load_ref(payload.get("runtime_payload"))
+            if not isinstance(runtime, dict):
+                raise HarnessObservationError("command runtime payload is invalid")
+            runtime_ends[tool_id] = runtime
+
+    pre_runtime_execs: set[str] = set()
+    exec_identities: dict[str, tuple[str, str]] = {}
+    pre_runtime_source_bytes: dict[str, int] = {}
+    for tool_id, tool in command_tools.items():
+        has_start = tool_id in runtime_starts
+        has_end = tool_id in runtime_ends
+        if has_start != has_end:
+            raise HarnessObservationError("command runtime lifecycle is incomplete")
+        if has_start:
+            if tool["kind"] == "exec_command":
+                exec_identities[tool_id] = _exec_command_invocation_identity(
+                    started_events.get(tool_id),
+                    reader,
+                    runtime_ends[tool_id],
+                )
+            continue
+        start = started_events.get(tool_id)
+        end = ended_events.get(tool_id)
+        if start is None or end is None:
+            raise HarnessObservationError("command tool lifecycle is incomplete")
+        (
+            runtime_ends[tool_id],
+            exec_identities[tool_id],
+            pre_runtime_source_bytes[tool_id],
+        ) = _pre_runtime_exec_aggregate(tool, start, end, reader)
+        pre_runtime_execs.add(tool_id)
+
+    if set(runtime_ends) != set(command_tools):
+        raise HarnessObservationError("command runtime terminal is incomplete")
+    return (
+        runtime_ends,
+        pre_runtime_execs,
+        exec_identities,
+        pre_runtime_source_bytes,
+    )
+
+
+def _exec_command_invocation_identity(
+    started: Mapping[str, Any] | None,
+    reader: NativeBundleReader,
+    runtime: Mapping[str, Any] | None,
+) -> tuple[str, str]:
+    if started is None:
+        raise HarnessObservationError("exec command invocation is missing")
+    invocation = reader.load_ref(started.get("invocation_payload"))
+    if (
+        not isinstance(invocation, dict)
+        or invocation.get("tool_name") != "exec_command"
+        or not isinstance(invocation.get("payload"), dict)
+        or invocation["payload"].get("type") != "function"
+        or not isinstance(invocation["payload"].get("arguments"), str)
+    ):
+        raise HarnessObservationError("exec command invocation is invalid")
+    try:
+        arguments = json.loads(invocation["payload"]["arguments"])
+    except json.JSONDecodeError as exc:
+        raise HarnessObservationError("exec command invocation is invalid") from exc
+    if not isinstance(arguments, dict):
+        raise HarnessObservationError("exec command invocation is invalid")
+    command = arguments.get("cmd")
+    cwd = arguments.get("workdir")
+    if cwd is None and runtime is not None:
+        cwd = runtime.get("cwd")
+    if (
+        not isinstance(command, str)
+        or not command
+        or not isinstance(cwd, str)
+        or not cwd
+    ):
+        raise HarnessObservationError("exec command invocation is incomplete")
+    return command, cwd
+
+
+def _pre_runtime_exec_aggregate(
+    tool: Mapping[str, Any],
+    started: Mapping[str, Any],
+    ended: Mapping[str, Any],
+    reader: NativeBundleReader,
+) -> tuple[dict[str, Any], tuple[str, str], int]:
+    if (
+        tool.get("kind") != "exec_command"
+        or tool.get("requester") != "code_cell"
+        or tool.get("status") != "completed"
+        or ended.get("status") != "completed"
+    ):
+        raise HarnessObservationError("missing command runtime is not a pre-runtime denial")
+
+    identity = _exec_command_invocation_identity(started, reader, None)
+
+    result = reader.load_ref(ended.get("result_payload"))
+    if (
+        not isinstance(result, dict)
+        or set(result) != {"type", "value", "output_render"}
+        or result.get("type") != "code_mode_response"
+        or not isinstance(result.get("value"), dict)
+    ):
+        raise HarnessObservationError("pre-runtime command result is invalid")
+    value = result["value"]
+    if set(value) != {
+        "chunk_id",
+        "wall_time_seconds",
+        "exit_code",
+        "original_token_count",
+        "output",
+    }:
+        raise HarnessObservationError("pre-runtime command result is invalid")
+    wall_time = value["wall_time_seconds"]
+    exit_code = value["exit_code"]
+    original_tokens = value["original_token_count"]
+    if (
+        not isinstance(value["chunk_id"], str)
+        or not value["chunk_id"]
+        or isinstance(wall_time, bool)
+        or not isinstance(wall_time, (int, float))
+        or not math.isfinite(wall_time)
+        or wall_time < 0
+        or isinstance(exit_code, bool)
+        or not isinstance(exit_code, int)
+        or exit_code == 0
+        or isinstance(original_tokens, bool)
+        or not isinstance(original_tokens, int)
+        or original_tokens < 0
+        or not isinstance(value["output"], str)
+    ):
+        raise HarnessObservationError("pre-runtime command result is invalid")
+    render = _validate_output_render(result["output_render"], "code_mode_runtime")
+    if render["returned_text_bytes"] != len(value["output"].encode("utf-8")):
+        raise HarnessObservationError("pre-runtime command result render disagrees")
+    return (
+        {
+            # There is no process argv before sandbox setup.  Repetition uses
+            # the separately parsed caller invocation, not this placeholder.
+            "command": [identity[0]],
+            "cwd": identity[1],
+            "aggregated_output": value["output"],
+            "exit_code": exit_code,
+        },
+        identity,
+        render["source_text_bytes"],
+    )
 
 
 def _output_render_stats(

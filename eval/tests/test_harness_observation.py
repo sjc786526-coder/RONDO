@@ -6,16 +6,20 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from rondo_eval.harness_observation import HarnessObservationError
-from rondo_eval.harness_observation import compare_task_observations
-from rondo_eval.harness_observation import project_task_observation
-from rondo_eval.harness_observation import validate_task_observation
-from tests.test_team_lens import BODY_SENTINELS
-from tests.test_team_lens import COMMAND_BODY
-from tests.test_team_lens import NativeBundleBuilder
-from tests.test_team_lens import OUTPUT_BODY
-from tests.test_team_lens import PROMPT_BODY
-from tests.test_team_lens import RAW_PATH_BODY
+from rondo_eval.harness_observation import (
+    HarnessObservationError,
+    compare_task_observations,
+    project_task_observation,
+    validate_task_observation,
+)
+from tests.test_team_lens import (
+    BODY_SENTINELS,
+    COMMAND_BODY,
+    OUTPUT_BODY,
+    PROMPT_BODY,
+    RAW_PATH_BODY,
+    NativeBundleBuilder,
+)
 
 
 def _observation() -> dict[str, object]:
@@ -116,6 +120,8 @@ def _write_bundle(
     include_mcp_without_render: bool = False,
     code_mode_exec_phase: str | None = None,
     duplicate_public_exec_delivery: bool = False,
+    pre_runtime_denied_command_index: int | None = None,
+    code_mode_command_indexes: tuple[int, ...] = (),
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -263,7 +269,11 @@ def _write_bundle(
                     turn_id=turn_id,
                 )
         for index, (command, exit_code, cwd) in enumerate(commands, start=1):
-            output_render = {
+            code_mode_command = (
+                pre_runtime_denied_command_index == index
+                or index in code_mode_command_indexes
+            )
+            direct_output_render = {
                 "surface": "direct_model",
                 "source_text_bytes": len(command_output.encode("utf-8")),
                 "collection_omitted_bytes": collection_omitted_bytes,
@@ -287,21 +297,79 @@ def _write_bundle(
                 f"tool-{index}",
                 name="exec_command",
                 kind="exec_command",
-                arguments={"cmd": command, "cwd": cwd},
-                result=model_output,
-                result_mode="direct",
-                runtime_end={
-                    "process_id": f"terminal-{index}",
-                    "command": [command],
-                    "cwd": cwd,
-                    "aggregated_output": command_output,
-                    "status": "completed" if exit_code == 0 else "failed",
-                    "exit_code": exit_code,
-                    "duration": {"secs": 0, "nanos": 5_000_000},
-                },
-                output_render=output_render,
+                arguments={"cmd": command, "workdir": cwd},
+                result=(
+                    {
+                        "chunk_id": f"chunk-{index}",
+                        "wall_time_seconds": 0.0,
+                        "exit_code": exit_code,
+                        "original_token_count": 1,
+                        "output": model_output,
+                    }
+                    if code_mode_command
+                    else model_output
+                ),
+                result_mode=("code" if code_mode_command else "direct"),
+                runtime_end=(
+                    None
+                    if pre_runtime_denied_command_index == index
+                    else {
+                        "process_id": f"terminal-{index}",
+                        "command": [command],
+                        "cwd": cwd,
+                        "aggregated_output": command_output,
+                        "status": "completed" if exit_code == 0 else "failed",
+                        "exit_code": exit_code,
+                        "duration": {"secs": 0, "nanos": 5_000_000},
+                    }
+                ),
+                output_render=(
+                    {**direct_output_render, "surface": "code_mode_runtime"}
+                    if code_mode_command
+                    else direct_output_render
+                ),
                 turn_id=turn_id,
             )
+            if code_mode_command:
+                runtime_cell_id = f"cell-tool-{index}"
+                builder.event(
+                    {
+                        "type": "code_cell_initial_response",
+                        "runtime_cell_id": runtime_cell_id,
+                        "status": "completed",
+                        "response_payload": None,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_cell_output_rendered",
+                        "runtime_cell_id": runtime_cell_id,
+                        "observation": direct_output_render,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_cell_ended",
+                        "runtime_cell_id": runtime_cell_id,
+                        "status": "completed",
+                        "response_payload": None,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_mode_exec_output_delivered",
+                        "model_visible_call_id": f"model-tool-{index}",
+                        "output_render": direct_output_render,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
             if duplicate_code_cell_render:
                 builder.event(
                     {
@@ -317,7 +385,7 @@ def _write_bundle(
                     {
                         "type": "code_cell_output_rendered",
                         "runtime_cell_id": f"cell-duplicate-{index}",
-                        "observation": output_render,
+                        "observation": direct_output_render,
                     },
                     thread_id=builder.root_thread,
                     turn_id=turn_id,
@@ -336,7 +404,7 @@ def _write_bundle(
                     {
                         "type": "code_mode_exec_output_delivered",
                         "model_visible_call_id": f"model-tool-{index}",
-                        "output_render": output_render,
+                        "output_render": direct_output_render,
                     },
                     thread_id=builder.root_thread,
                     turn_id=turn_id,
@@ -547,6 +615,213 @@ class HarnessObservationTests(unittest.TestCase):
         )
         self.assertEqual(observation["tools"]["repeated_after_failure"], 1)
         self.assertTrue(all(body not in encoded for body in BODY_SENTINELS))
+
+    def test_code_mode_pre_runtime_sandbox_denial_is_measured_body_free(self) -> None:
+        source_output = OUTPUT_BODY * 4
+        returned_output = "short rendered output"
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                model_output=returned_output,
+                command_output=source_output,
+                presentation_truncated=True,
+                pre_runtime_denied_command_index=1,
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        encoded = json.dumps(observation, sort_keys=True)
+        self.assertEqual(observation["tools"]["command"], 1)
+        self.assertEqual(
+            observation["tools"]["command_output_bytes"],
+            len(source_output.encode("utf-8")),
+        )
+        self.assertEqual(
+            observation["tools"]["code_mode_runtime_output_deliveries"], 1
+        )
+        self.assertEqual(
+            observation["tools"]["code_mode_runtime_source_text_bytes"],
+            len(source_output.encode("utf-8")),
+        )
+        self.assertEqual(
+            observation["tools"]["code_mode_runtime_returned_text_bytes"],
+            len(returned_output.encode("utf-8")),
+        )
+        self.assertEqual(observation["tools"]["model_visible_output_deliveries"], 1)
+        self.assertTrue(all(body not in encoded for body in BODY_SENTINELS))
+
+    def test_pre_runtime_denial_and_native_retry_share_caller_identity(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=(
+                    (COMMAND_BODY, 128, RAW_PATH_BODY),
+                    (COMMAND_BODY, 1, RAW_PATH_BODY),
+                ),
+                pre_runtime_denied_command_index=1,
+                code_mode_command_indexes=(2,),
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["tools"]["repeated_exact_commands"], 1)
+        self.assertEqual(observation["tools"]["repeated_after_failure"], 1)
+        self.assertEqual(
+            observation["tools"]["repeated_exact_command_lifecycle_duration_ms"],
+            30,
+        )
+
+    def test_native_runtime_cannot_override_source_output_bytes(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(trace_root / "exec")
+            runtime_path = next(
+                path
+                for path in (bundle / "payloads").glob("*.json")
+                if "aggregated_output" in json.loads(path.read_text("utf-8"))
+            )
+            runtime = json.loads(runtime_path.read_text("utf-8"))
+            runtime["_source_output_bytes"] = 999_999
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(
+            observation["tools"]["command_output_bytes"],
+            len(OUTPUT_BODY.encode("utf-8")),
+        )
+
+    def test_missing_command_runtime_requires_exact_pre_runtime_denial(self) -> None:
+        modes = (
+            "malformed_result",
+            "session_id",
+            "exit_zero",
+            "wrong_surface",
+            "render_mismatch",
+            "missing_render",
+            "error_result",
+            "model_requester",
+            "failed_status",
+            "write_stdin",
+            "direct_result",
+            "only_runtime_start",
+            "only_runtime_end",
+        )
+        for mode in modes:
+            with self.subTest(mode=mode), TemporaryDirectory() as raw:
+                root = Path(raw)
+                trace_root = root / "trace-root"
+                trace_root.mkdir()
+                if mode in {
+                    "direct_result",
+                    "only_runtime_start",
+                    "only_runtime_end",
+                }:
+                    bundle = _write_bundle(trace_root / "exec")
+                else:
+                    bundle = _write_bundle(
+                        trace_root / "exec",
+                        commands=((COMMAND_BODY, 128, RAW_PATH_BODY),),
+                        pre_runtime_denied_command_index=1,
+                    )
+                result_paths = [
+                    path
+                    for path in (bundle / "payloads").glob("*.json")
+                    if json.loads(path.read_text("utf-8")).get("type")
+                    == "code_mode_response"
+                ]
+                if result_paths:
+                    result_path = result_paths[0]
+                    result = json.loads(result_path.read_text("utf-8"))
+                    if mode == "malformed_result":
+                        result["value"].pop("chunk_id")
+                    elif mode == "session_id":
+                        result["value"]["session_id"] = 7
+                    elif mode == "exit_zero":
+                        result["value"]["exit_code"] = 0
+                    elif mode == "wrong_surface":
+                        result["output_render"]["surface"] = "direct_model"
+                    elif mode == "render_mismatch":
+                        result["output_render"]["returned_text_bytes"] += 1
+                    elif mode == "missing_render":
+                        result.pop("output_render")
+                    elif mode == "error_result":
+                        result["type"] = "error"
+                    result_path.write_text(json.dumps(result), encoding="utf-8")
+
+                events = [
+                    json.loads(line)
+                    for line in (bundle / "trace.jsonl")
+                    .read_text("utf-8")
+                    .splitlines()
+                ]
+                if mode == "model_requester":
+                    started = next(
+                        event
+                        for event in events
+                        if event["payload"]["type"] == "tool_call_started"
+                    )
+                    started["payload"]["requester"] = {"type": "model"}
+                    started["payload"]["model_visible_call_id"] = "model-tool-1"
+                    started["payload"]["code_mode_runtime_tool_id"] = None
+                elif mode == "failed_status":
+                    ended = next(
+                        event
+                        for event in events
+                        if event["payload"]["type"] == "tool_call_ended"
+                    )
+                    ended["payload"]["status"] = "failed"
+                elif mode == "write_stdin":
+                    started = next(
+                        event
+                        for event in events
+                        if event["payload"]["type"] == "tool_call_started"
+                    )
+                    started["payload"]["kind"] = {"type": "write_stdin"}
+                elif mode in {
+                    "direct_result",
+                    "only_runtime_start",
+                    "only_runtime_end",
+                }:
+                    remove_types = {
+                        "direct_result": {
+                            "tool_call_runtime_started",
+                            "tool_call_runtime_ended",
+                        },
+                        "only_runtime_start": {"tool_call_runtime_ended"},
+                        "only_runtime_end": {"tool_call_runtime_started"},
+                    }[mode]
+                    events = [
+                        event
+                        for event in events
+                        if event["payload"]["type"] not in remove_types
+                    ]
+                for seq, event in enumerate(events, start=1):
+                    event["seq"] = seq
+                (bundle / "trace.jsonl").write_text(
+                    "".join(json.dumps(event) + "\n" for event in events),
+                    encoding="utf-8",
+                )
+                metadata = root / "api-metadata.json"
+                _write_metadata(metadata, "main")
+
+                with self.assertRaises(HarnessObservationError):
+                    project_task_observation(trace_root, metadata)
 
     def test_turn_duration_uses_the_turn_window_not_rollout_summary(self) -> None:
         with TemporaryDirectory() as raw:

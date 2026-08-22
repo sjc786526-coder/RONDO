@@ -1,4 +1,4 @@
-# Plan 056 v1 无效 campaign 与设施根因
+# Plan 056 有界观测执行与设施修复
 
 ## 实质修改
 
@@ -39,3 +39,16 @@ rehearsal-v2 从全新 identity 干净启动，第 1、2 题完整发布，第 2
 reservation 0；容量门未触发，Docker/VHDX 增长为 0，最终无 Plan 056 容器、网络或卷。设施窄修将 Plan 056 的
 完整采样窗口提高到 60 秒、只读命令最多重试 4 次，保留实时和 fail-closed 语义；其他调用方默认不变。下一次
 rehearsal 使用 v3 全新 identity 从第一题重启。
+
+rehearsal-v3 完成 10/10 零 API preflight，前 3 题完整发布并验证 Docker 事实采集窄修；第 4 题请求与 trial
+完成后被投影器判为 lifecycle 不完整，campaign 按已发送 slot 规则关闭，后 6 题未发送。v3 为 52 attempts、
+`0.842369 USD`，Plan 056 累计 `2.043182 USD`、reservation 0。Docker/VHDX 增长均为 0，最终没有 Plan 056
+容器、网络、卷或 build cache；公共无效结果和全部原始工件保留。
+
+只读检查 v3 第 4 题原 trace 后确认：一个 code-mode `exec_command` 在 sandbox open 阶段被拒绝，产品返回了完整
+terminal structured result，但 native process 尚未创建，因而按既有事件语义不存在 runtime begin/end。投影器仅对
+`exec_command + code_cell + completed terminal result + exact nonzero-exit structured shape` 接受这一 pre-runtime
+形态；普通缺失、单侧 runtime、`write_stdin` 和畸形 result 仍 fail-closed。所有 exec 重复判断统一使用严格解析的
+caller `requester + cmd + workdir`，pre-runtime 输出体积使用 native render source bytes，避免遗漏紧随其后的同命令
+重试或截断前字节。新增正负回归通过，v3 原 trace 已离线复投影为合法 schema-v2 body-free 聚合。下一次 rehearsal
+使用 v4 全新 identity 从第一题重启。
