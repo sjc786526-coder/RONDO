@@ -9,22 +9,23 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
-
 EVAL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(EVAL_ROOT))
 
-from rondo_eval.terminal_bench.task_budget import (  # noqa: E402
+from rondo_eval.terminal_bench.task_budget import (
     TASK_BUDGET_CAP_USD,
     TASK_BUDGET_ID,
     TASK_BUDGET_RELPATH,
     TaskBudgetError,
     TaskBudgetIdentity,
+    activate_closed_task_budget,
     close_task_budget,
     load_task_budget,
+    reauthorize_closed_task_budget,
     roll_forward_task_budget,
     start_task_budget,
-    task_budget_status,
     task_budget_path,
+    task_budget_status,
     verify_active_identity,
 )
 
@@ -47,7 +48,12 @@ class TaskBudgetEnvelopeTests(unittest.TestCase):
         state = start_task_budget(self.path, active=self.v23)
 
         self.assertEqual(state["task_budget_id"], TASK_BUDGET_ID)
-        self.assertEqual(task_budget_path(Path(self.directory.name)).relative_to(self.directory.name), TASK_BUDGET_RELPATH)
+        self.assertEqual(
+            task_budget_path(Path(self.directory.name)).relative_to(
+                self.directory.name
+            ),
+            TASK_BUDGET_RELPATH,
+        )
         self.assertEqual(state["prior_settled_usd"], "0.000000")
         self.assertEqual(state["active_identity"]["campaign_id"], self.v23.campaign_id)
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
@@ -135,7 +141,9 @@ class TaskBudgetEnvelopeTests(unittest.TestCase):
             "successor": self.v24,
         }
         with self.assertRaisesRegex(TaskBudgetError, "not terminal"):
-            roll_forward_task_budget(self.path, predecessor_terminal_status="running", **kwargs)
+            roll_forward_task_budget(
+                self.path, predecessor_terminal_status="running", **kwargs
+            )
         with self.assertRaisesRegex(TaskBudgetError, "exceeds"):
             roll_forward_task_budget(
                 self.path,
@@ -189,6 +197,82 @@ class TaskBudgetEnvelopeTests(unittest.TestCase):
                 active=self.v23,
                 prior_settled_usd=TASK_BUDGET_CAP_USD,
             )
+
+    def test_explicit_reauthorization_expands_closed_cap_without_reset(self) -> None:
+        task_id = "direction1-observation-056"
+        old_cap = Decimal("50.000000")
+        new_cap = Decimal("100.000000")
+        path = task_budget_path(Path(self.directory.name), task_id)
+        start_task_budget(
+            path,
+            active=self.v23,
+            task_budget_id=task_id,
+            cap_usd=old_cap,
+        )
+        close_task_budget(
+            path,
+            active=self.v23,
+            terminal_status="invalid",
+            cumulative_settled_usd=Decimal("0.631065"),
+            task_budget_id=task_id,
+            cap_usd=old_cap,
+        )
+
+        state = reauthorize_closed_task_budget(
+            path,
+            successor=self.v24,
+            task_budget_id=task_id,
+            previous_cap_usd=old_cap,
+            new_cap_usd=new_cap,
+        )
+
+        self.assertEqual(state["cap_usd"], "100.000000")
+        self.assertEqual(state["prior_settled_usd"], "0.631065")
+        self.assertEqual(
+            state["active_identity"],
+            self.v24.to_dict(prior_settled_usd=Decimal("0.631065")),
+        )
+        self.assertEqual(
+            verify_active_identity(
+                path,
+                active=self.v24,
+                prior_settled_usd=Decimal("0.631065"),
+                task_budget_id=task_id,
+                cap_usd=new_cap,
+            )["remaining_usd"],
+            "99.368935",
+        )
+
+    def test_closed_reauthorized_envelope_can_activate_another_fresh_campaign(
+        self,
+    ) -> None:
+        task_id = "direction1-observation-056"
+        cap = Decimal("100.000000")
+        path = task_budget_path(Path(self.directory.name), task_id)
+        start_task_budget(
+            path,
+            active=self.v23,
+            task_budget_id=task_id,
+            cap_usd=cap,
+        )
+        close_task_budget(
+            path,
+            active=self.v23,
+            terminal_status="invalid",
+            cumulative_settled_usd=Decimal("2.000000"),
+            task_budget_id=task_id,
+            cap_usd=cap,
+        )
+
+        state = activate_closed_task_budget(
+            path,
+            successor=self.v24,
+            task_budget_id=task_id,
+            cap_usd=cap,
+        )
+
+        self.assertEqual(state["prior_settled_usd"], "2.000000")
+        self.assertEqual(state["active_identity"]["prior_settled_usd"], "2.000000")
 
     def test_rejects_tampered_prior_and_symlink_envelope(self) -> None:
         start_task_budget(self.path, active=self.v23)

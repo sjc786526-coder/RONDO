@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-22（方向 1 Plan 052 已完成；方向 3 M3-A1 与 Plan 055 / M3-B2a 已完成）
+最后更新：2026-08-22（方向 1 Plan 056 已完成并选择 C2；方向 3 M3-A1 与 Plan 055 / M3-B2a 已完成）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,7 +18,7 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 052 已完成；证据不足，未选择行为优化** | 下一唯一方向内工作包为 10 题 × 2 轮有界观测复测，须另建 ExecPlan 并授权真实 API、Docker 与 20 USD 上限 |
+| 1：Harness 优化 | **Plan 056 已完成有效 20/20，选择 C2** | 测量已停止；C2 行为优化尚未立项或授权，须另建 ExecPlan |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期及其收口案例已完成；**三期 M3-A1 与 Plan 055 / M3-B2a 已完成并通过独立验收** | M3-A2 状态不变；产品链下一工作包为 M3-B2b，须另行立项授权 |
 
@@ -39,19 +39,19 @@
 
 ### 方向 1：有界观测复测
 
-Plan 052 已完成默认关闭的原生 trace、安全任务级投影和 v28 历史普查。现有证据中 C1/C2 只有弱信号，
-C11 在当前样本未观察到，C7 不可测，因此没有选择行为优化。
+Plan 056 已完成。首个可信正式 campaign `formal-v6` 使用 v28 同一冻结 10 题、两个完整 round 和固定
+Terra medium/low 条件形成有效 20/20；20 个 slot 均有完整 API usage、原生 trace 投影、Terminal-Bench 终态和
+Docker receipt，8 pass/12 fail。formal-v6 为 219 attempts、`4.677962 USD`；连同 v1、三次 rehearsal 和
+formal-v5，Plan 056 累计 483 attempts、`10.329028 USD`，reservation 0，随后停止付费运行。
 
-下一唯一的方向 1 工作包已经确定，但**尚未建立独立 ExecPlan、campaign 身份或取得执行授权**：
+冻结门槛只选出 **C2**：9 次 occurrence，影响 6 个 slot/4 个任务，其中 3 个失败 slot，两轮均观察到，影响值
+10108；C1 和 C11 未达门槛，C7 继续不可测。公共 body-free 结果见
+`eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`，详细历史和验收证据见
+`doc/WBS-COMPLETED.md` 与 `plan/056-direction1-bounded-observation-execplan.md`。
 
-- 使用同一冻结 10 题 canary，在 `mydev/` 被测对象上执行两个完整 round，共 20 个 run；main 为
-  `gpt-5.6-terra/medium`，Guardian 为 `gpt-5.6-terra/low`，费用硬上限 20 USD。
-- 唯一变量是为目标测量开启既有原生 trace，并在发布前生成 schema-v2 body-free 投影；不改变 prompt、输出、
-  compact、重试、Guardian、调度或其他产品行为。
-- 不运行 Codex 对照、validation、holdout、E-A 或条件补题。20/20 个预定 run 全部形成唯一完整投影才构成有效测量；
-  正式边界后不得替换 slot、换题、补题或改变分母。
-- 完整停止门、候选进入条件与无候选分支见 `doc/WBS/teacher-harness-study.md`。真实 API、Docker 和费用必须在
-  下一任务中一次明确授权，本次 Plan 052 的授权不延续。
+方向 1 的下一工作边界是另行规划 C2 行为优化；当前结果只选择候选，不授权修改 prompt、工具语义、Guardian、
+调度、审批或安全策略，也不预设实现路线、收益或预算。启动时须单独建立 ExecPlan、正确性回归、成功/停止条件和
+有界测评授权；在此之前方向 1 没有 active campaign。
 
 ### 方向 3：Publication Critic 三期
 

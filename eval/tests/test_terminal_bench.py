@@ -1715,11 +1715,12 @@ class TerminalBenchTests(unittest.TestCase):
         )
         with mock.patch.object(runner_module, "SubprocessHostCommandRunner") as host_runner, mock.patch.object(
             runner_module, "DockerSupervisor", return_value=fake_supervisor
-        ):
+        ) as supervisor_type:
             executor = DockerSupervisedHostHarborExecutor(
                 counter=mock.Mock(),
                 lock_guard=mock.Mock(),
                 lease=HeavyLockLease(token="x" * 16, held=True),
+                counter_sample_timeout_seconds=60.0,
             )
             result = asyncio.run(
                 executor.run(
@@ -1744,6 +1745,12 @@ class TerminalBenchTests(unittest.TestCase):
         )
         fake_supervisor.supervise_host_command.assert_called_once()
         fake_supervisor.resolve_image_identity.assert_called_once()
+        self.assertEqual(
+            supervisor_type.call_args.kwargs[
+                "counter_sample_timeout_seconds"
+            ],
+            60.0,
+        )
         bound_contract = fake_supervisor.supervise_host_command.call_args.kwargs[
             "compose_contract"
         ]

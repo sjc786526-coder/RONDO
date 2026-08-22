@@ -1,0 +1,61 @@
+{
+  "budget": {
+    "campaign_cap_usd": "97.956818",
+    "campaign_estimated_usd": "1.970204",
+    "prior_estimated_usd": "2.043182",
+    "reserved_usd": "0.000000",
+    "run_slots_used": 10,
+    "task_cap_usd": "100.000000",
+    "task_estimated_usd": "4.013386",
+    "upstream_attempts": 111
+  },
+  "campaign": {
+    "campaign_denominator": 10,
+    "campaign_id": "plan056-direction1-bounded-observation-rehearsal-v4",
+    "campaign_lock_sha256": "85ee258ab53286351125fd13339eed2e6062646b4933a548fd645aba13f746e7",
+    "campaign_mode": "rehearsal",
+    "campaign_slots_published": 10,
+    "guardian_effort": "low",
+    "main_effort": "medium",
+    "model": "gpt-5.6-terra",
+    "product": "rondo-local",
+    "rounds": 1,
+    "source_validated_slots": 10,
+    "tasks": 10,
+    "v28_lock_sha256": "a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b"
+  },
+  "candidate_assessment": null,
+  "invalid_reason": null,
+  "kind": "rondo_direction1_bounded_observation_result",
+  "outcome": "rehearsal_complete",
+  "resources": {
+    "final_storage": {
+      "docker_desktop_vhdx_bytes_after": 69467111424,
+      "docker_desktop_vhdx_bytes_before": 69467111424,
+      "docker_desktop_vhdx_growth_bytes": 0,
+      "docker_growth_bytes": 0,
+      "docker_total_bytes_after": 11500000000,
+      "docker_total_bytes_before": 11500000000,
+      "final_sample_reason": null,
+      "final_sample_status": "complete",
+      "windows_c_free_bytes_after": 192947449856,
+      "windows_c_free_bytes_before": 193259507712
+    },
+    "slot_docker_receipts": 10
+  },
+  "schema_version": 1,
+  "selected_candidate": null,
+  "snapshot_date": "2026-08-22",
+  "status": "valid",
+  "terminal_bench": {
+    "outcomes": {
+      "agent_failed": 0,
+      "budget_stopped": 0,
+      "cancelled": 0,
+      "completed": 10,
+      "infra_failed": 0
+    },
+    "task_failures": 4,
+    "task_passes": 6
+  }
+}

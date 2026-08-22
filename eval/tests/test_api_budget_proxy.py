@@ -1030,7 +1030,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         ).start()
         try:
             status, body, _headers = self._post(
-                self._body(), request_id="timeout-request"
+                self._body(stream=True), request_id="timeout-request"
             )
         finally:
             self.upstream.release_sse.set()
@@ -1051,6 +1051,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
             (self.root / "timeout-metadata.json").read_text(encoding="utf-8")
         )["requests"][0]
         self.assertEqual(observation["upstream_status"], 0)
+        self.assertEqual(observation["stream_end_kind"], "open_error")
 
     def test_incomplete_sse_preserves_http_status_and_end_kind(self) -> None:
         self.upstream.mode = "sse_incomplete"
@@ -1111,7 +1112,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(run["stop_reason"], "upstream_terminal_failed")
 
     def test_missing_role_header_projects_declared_main_from_request_shape(self) -> None:
-        status, _body, _headers = self._post(self._body(), role=None)
+        status, _body, _headers = self._post(self._body(stream=True), role=None)
         self.assertEqual(status, 200)
         observation = json.loads((self.root / "metadata.json").read_text())["requests"][0]
         self.assertEqual(observation["role"], "main")
@@ -1119,6 +1120,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         self.assertEqual(observation["declared_role"], "main")
         self.assertEqual(observation["inferred_role"], "main")
         self.assertTrue(observation["contract_match"])
+        self.assertEqual(observation["stream_end_kind"], "non_sse")
         self.assertIsNone(self.upstream.requests[0]["role"])
         self.assertTrue(milestone_metadata_ready(self.root / "metadata.json"))
         request = self.ledger.snapshot()["runs"]["benchmark-r1"]["requests"]["request-1"]
@@ -1522,7 +1524,9 @@ class ApiBudgetProxyTests(unittest.TestCase):
 
     def test_five_confirmed_unbilled_attempts_stop_at_zero_and_block_followup(self) -> None:
         self.upstream.mode = "unbilled_503"
-        status, body, _headers = self._post(self._body(), request_id="exhausted")
+        status, body, _headers = self._post(
+            self._body(stream=True), request_id="exhausted"
+        )
         self.assertEqual(status, 409)
         self.assertEqual(json.loads(body)["error"]["code"], "unbilled_retry_exhausted")
         self.assertEqual(len(self.upstream.requests), 5)
@@ -1537,6 +1541,7 @@ class ApiBudgetProxyTests(unittest.TestCase):
         ledger_bytes = (self.root / "budget.json").read_bytes()
         observation = json.loads(metadata_bytes)["requests"][0]
         self.assertEqual(observation["attempt_count"], 5)
+        self.assertEqual(observation["stream_end_kind"], "non_sse")
         self.assertEqual(
             observation["settlement_kind"],
             "operator_confirmed_unbilled",

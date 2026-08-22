@@ -13,12 +13,11 @@ import json
 import os
 import re
 import stat
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Iterator, Mapping
-
 
 TASK_BUDGET_ID = "plan-051-direction0-schema-v7-canary"
 TASK_BUDGET_CAP_USD = Decimal("400.000000")
@@ -34,9 +33,7 @@ class TaskBudgetError(ValueError):
     """Raised when a cross-identity formal-task budget state is unsafe."""
 
 
-def task_budget_path(
-    common_root: Path, task_budget_id: str = TASK_BUDGET_ID
-) -> Path:
+def task_budget_path(common_root: Path, task_budget_id: str = TASK_BUDGET_ID) -> Path:
     """Return the ignored envelope path for one independently authorized task.
 
     Plan 051 retains its historical filename.  Every later authorization is
@@ -181,6 +178,102 @@ def roll_forward_task_budget(
     )
 
 
+def reauthorize_closed_task_budget(
+    path: Path,
+    *,
+    successor: TaskBudgetIdentity,
+    task_budget_id: str,
+    previous_cap_usd: Decimal,
+    new_cap_usd: Decimal,
+) -> dict[str, object]:
+    """Expand an explicitly reauthorized closed envelope and activate one successor.
+
+    This is intentionally narrower than a general budget editor: the envelope
+    must already be terminal with no active identity, the cap may only grow,
+    and the successor must be fresh.  All previously settled cost remains the
+    successor's prior so a second campaign cannot reset task-wide accounting.
+    """
+
+    previous_cap = _require_positive_money(previous_cap_usd, "previous task budget cap")
+    new_cap = _require_positive_money(new_cap_usd, "new task budget cap")
+    if new_cap <= previous_cap:
+        raise TaskBudgetError("reauthorized task budget cap must increase")
+    return _activate_closed_task_budget(
+        path,
+        successor=successor,
+        task_budget_id=task_budget_id,
+        current_cap_usd=previous_cap,
+        activated_cap_usd=new_cap,
+        closed_error="reauthorized task budget is not closed",
+    )
+
+
+def activate_closed_task_budget(
+    path: Path,
+    *,
+    successor: TaskBudgetIdentity,
+    task_budget_id: str,
+    cap_usd: Decimal,
+) -> dict[str, object]:
+    """Activate one fresh campaign without resetting a closed task envelope."""
+
+    expected_cap = _require_positive_money(cap_usd, "task budget cap")
+    return _activate_closed_task_budget(
+        path,
+        successor=successor,
+        task_budget_id=task_budget_id,
+        current_cap_usd=expected_cap,
+        activated_cap_usd=expected_cap,
+        closed_error="task budget is not closed",
+    )
+
+
+def _activate_closed_task_budget(
+    path: Path,
+    *,
+    successor: TaskBudgetIdentity,
+    task_budget_id: str,
+    current_cap_usd: Decimal,
+    activated_cap_usd: Decimal,
+    closed_error: str,
+) -> dict[str, object]:
+    successor.validate()
+    _validate_task_budget_id(task_budget_id)
+    with _locked(path):
+        state = _read_json(path)
+        _validate_state(
+            state,
+            expected_task_budget_id=task_budget_id,
+            expected_cap_usd=current_cap_usd,
+        )
+        if state["active_identity"] is not None:
+            raise TaskBudgetError(closed_error)
+        prior = _parse_money(state["prior_settled_usd"], "prior settled")
+        if prior >= activated_cap_usd:
+            raise TaskBudgetError("task budget leaves no successor capacity")
+        closed = state["closed_identities"]
+        assert isinstance(closed, list)
+        known_campaign_ids = {
+            row["campaign_id"] for row in closed if isinstance(row, dict)
+        }
+        known_batch_ids = {row["batch_id"] for row in closed if isinstance(row, dict)}
+        if (
+            successor.campaign_id in known_campaign_ids
+            or successor.batch_id in known_batch_ids
+        ):
+            raise TaskBudgetError("successor task budget identity was already used")
+        state["cap_usd"] = _money_text(activated_cap_usd)
+        state["hard_stop"] = False
+        state["active_identity"] = successor.to_dict(prior_settled_usd=prior)
+        _validate_state(
+            state,
+            expected_task_budget_id=task_budget_id,
+            expected_cap_usd=activated_cap_usd,
+        )
+        _atomic_write(path, state)
+        return _clone(state)
+
+
 def close_task_budget(
     path: Path,
     *,
@@ -243,7 +336,9 @@ def _close_or_roll(
     if successor is not None:
         successor.validate()
         if successor == predecessor:
-            raise TaskBudgetError("successor task budget identity duplicates predecessor")
+            raise TaskBudgetError(
+                "successor task budget identity duplicates predecessor"
+            )
     with _locked(path):
         state = _read_json(path)
         _validate_state(
@@ -255,7 +350,9 @@ def _close_or_roll(
             raise TaskBudgetError("task budget has reached its hard stop")
         active = _parse_active(state["active_identity"])
         if active != predecessor:
-            raise TaskBudgetError("predecessor is not the current active task budget identity")
+            raise TaskBudgetError(
+                "predecessor is not the current active task budget identity"
+            )
         prior = _parse_money(state["prior_settled_usd"], "prior settled")
         if total < prior:
             raise TaskBudgetError("cumulative settled cost cannot decrease")
@@ -293,7 +390,9 @@ def _close_or_roll(
         )
         state["prior_settled_usd"] = _money_text(total)
         state["active_identity"] = (
-            successor.to_dict(prior_settled_usd=total) if successor is not None else None
+            successor.to_dict(prior_settled_usd=total)
+            if successor is not None
+            else None
         )
         state["hard_stop"] = total == expected_cap
         _validate_state(
@@ -338,10 +437,7 @@ def _validate_state(
     prior = _parse_money(value["prior_settled_usd"], "prior settled")
     if prior > cap:
         raise TaskBudgetError("task budget prior exceeds the cap")
-    if (
-        not isinstance(value["hard_stop"], bool)
-        or value["hard_stop"] != (prior == cap)
-    ):
+    if not isinstance(value["hard_stop"], bool) or value["hard_stop"] != (prior == cap):
         raise TaskBudgetError("task budget hard-stop state is inconsistent")
     active_value = value["active_identity"]
     active = _parse_active(active_value) if active_value is not None else None
@@ -468,9 +564,7 @@ def _read_json(path: Path) -> dict[str, object]:
 def _locked(path: Path) -> Iterator[None]:
     _prepare_parent(path.parent)
     lock_path = path.with_suffix(path.suffix + ".lock")
-    descriptor = _open_regular(
-        lock_path, os.O_RDWR | os.O_CREAT, create=True
-    )
+    descriptor = _open_regular(lock_path, os.O_RDWR | os.O_CREAT, create=True)
     try:
         os.fchmod(descriptor, 0o600)
         fcntl.flock(descriptor, fcntl.LOCK_EX)
@@ -515,9 +609,9 @@ def _atomic_write(path: Path, value: Mapping[str, object]) -> None:
     _prepare_parent(path.parent)
     if path.exists() and path.is_symlink():
         raise TaskBudgetError("task budget envelope is a symlink")
-    payload = (
-        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "utf-8"
+    )
     temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
     if temporary.exists() or temporary.is_symlink():
         raise TaskBudgetError("task budget temporary path already exists")
@@ -533,9 +627,7 @@ def _atomic_write(path: Path, value: Mapping[str, object]) -> None:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         os.chmod(path, 0o600)
-        directory_fd = os.open(
-            path.parent, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-        )
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
         try:
             os.fsync(directory_fd)
         finally:

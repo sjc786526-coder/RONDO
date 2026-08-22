@@ -20,7 +20,12 @@ from ..api_budget_proxy import (
 )
 from ..config import RuntimeConfig
 from ..contracts import Side
-from ..docker_supervisor import DockerCounter, HeavyLockGuard, HeavyLockLease
+from ..docker_supervisor import (
+    COUNTER_SAMPLE_TIMEOUT_SECONDS,
+    DockerCounter,
+    HeavyLockGuard,
+    HeavyLockLease,
+)
 from ..evidence import PolicyIdentity, policy_identity
 from ..fair_comparison import (
     FairComparisonError,
@@ -423,6 +428,7 @@ async def run_budgeted_terminal_bench_core(
     max_concurrent_main: int = 1,
     usage_envelope: Any | None = None,
     materializer: TaskMaterializer | None = None,
+    counter_sample_timeout_seconds: float = COUNTER_SAMPLE_TIMEOUT_SECONDS,
 ) -> BudgetedTerminalBenchResult:
     """Shared budget-proxy, prepare, Harbor and result path for paid campaigns.
 
@@ -475,6 +481,7 @@ async def run_budgeted_terminal_bench_core(
             counter=counter,
             lock_guard=lock_guard,
             lease=lease,
+            counter_sample_timeout_seconds=counter_sample_timeout_seconds,
         )
         backend = InjectedHostHarborBackend(
             executor,

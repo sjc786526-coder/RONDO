@@ -483,6 +483,7 @@ class _Reducer:
         self.tool_name_missing = False
         self.terminal_runtime_missing = False
         self.terminal_runtime_started: set[str] = set()
+        self.terminal_runtime_ended: set[str] = set()
         self.inference_terminal_events: set[str] = set()
         self.mcp_correlations: set[str] = set()
         self.code_cells: dict[tuple[str, str], dict[str, Any]] = {}
@@ -781,6 +782,7 @@ class _Reducer:
             if payload["type"] == "tool_call_runtime_ended":
                 if tool_id not in self.terminal_runtime_started:
                     self.terminal_runtime_missing = True
+                self.terminal_runtime_ended.add(tool_id)
                 terminal["ended_seq"] = event["seq"]
                 terminal["ended_at_unix_ms"] = event["wall_time_unix_ms"]
                 terminal["status"] = _execution_status(runtime.get("status"))
@@ -893,13 +895,10 @@ class _Reducer:
         tool["ended_at_unix_ms"] = event["wall_time_unix_ms"]
         tool["status"] = _execution_status(payload.get("status"))
         terminal = self.terminal.get(tool_id)
-        if terminal is not None and tool_id not in self.terminal_runtime_started:
-            self.terminal_runtime_missing = True
         if terminal is not None and terminal["ended_seq"] is None:
             terminal["ended_seq"] = event["seq"]
             terminal["ended_at_unix_ms"] = event["wall_time_unix_ms"]
             terminal["status"] = tool["status"]
-            self.terminal_runtime_missing = True
         if self.team is not None and tool["name"].startswith("team_"):
             result_payload = self.reader.load_ref(payload.get("result_payload"))
             result = _unwrap_tool_result(result_payload)
@@ -1039,6 +1038,12 @@ class _Reducer:
         terminal: list[dict[str, Any]],
         interactions: list[dict[str, Any]],
     ) -> dict[str, dict[str, Any]]:
+        terminal_ids = set(self.terminal)
+        terminal_runtime_missing = (
+            self.terminal_runtime_missing
+            or terminal_ids != self.terminal_runtime_started
+            or terminal_ids != self.terminal_runtime_ended
+        )
         usage_reasons = {
             f"{inference['status']}_inference_usage_missing"
             for inference in self.inferences.values()
@@ -1067,7 +1072,7 @@ class _Reducer:
             if self.tool_name_missing
             else capability("available"),
             "terminal": capability("partial", "terminal_runtime_metadata_missing")
-            if terminal and self.terminal_runtime_missing
+            if terminal and terminal_runtime_missing
             else capability("available"),
             "interactions": capability("partial", "agent_interaction_target_missing")
             if expected_edges - observed_edges

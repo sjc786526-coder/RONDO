@@ -1050,8 +1050,15 @@ class DockerCliCounter:
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         probe_timeout_seconds: float = 30.0,
+        command_max_attempts: int = _DOCKER_FACT_COMMAND_MAX_ATTEMPTS,
     ) -> None:
-        if not host_data_root.is_absolute() or probe_timeout_seconds <= 0:
+        if (
+            not host_data_root.is_absolute()
+            or probe_timeout_seconds <= 0
+            or isinstance(command_max_attempts, bool)
+            or not isinstance(command_max_attempts, int)
+            or not 1 <= command_max_attempts <= 5
+        ):
             raise RuntimeBridgeError("Docker host data root must be absolute")
         self._host_data_root = host_data_root
         self._executor = executor or SubprocessCommandExecutor()
@@ -1061,6 +1068,7 @@ class DockerCliCounter:
         self._monotonic = monotonic
         self._sleeper = sleeper
         self._probe_timeout_seconds = probe_timeout_seconds
+        self._command_max_attempts = command_max_attempts
 
     def sample(
         self,
@@ -1308,7 +1316,7 @@ class DockerCliCounter:
 
     def _run(self, argv: tuple[str, ...], *, deadline: float) -> str:
         last_failure: RuntimeBridgeError | None = None
-        for attempt in range(_DOCKER_FACT_COMMAND_MAX_ATTEMPTS):
+        for attempt in range(self._command_max_attempts):
             try:
                 output = self._executor.run(
                     argv,
@@ -1326,7 +1334,7 @@ class DockerCliCounter:
                 and isinstance(output.stdout, str)
             ):
                 return output.stdout
-            if attempt + 1 < _DOCKER_FACT_COMMAND_MAX_ATTEMPTS:
+            if attempt + 1 < self._command_max_attempts:
                 remaining = self._remaining(deadline)
                 self._sleeper(
                     min(_DOCKER_FACT_COMMAND_RETRY_DELAY_SECONDS, remaining)

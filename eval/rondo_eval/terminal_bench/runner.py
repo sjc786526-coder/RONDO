@@ -18,6 +18,7 @@ from ..config import RuntimeConfig
 from ..contracts import BinaryManifest, ContractError, Product, RunSpec, Side
 from ..contracts import product_for_manifest
 from ..docker_supervisor import (
+    COUNTER_SAMPLE_TIMEOUT_SECONDS,
     ComposeRunContract,
     DockerCounter,
     DockerExecutionResult,
@@ -358,12 +359,14 @@ class DockerSupervisedHostHarborExecutor:
         lock_guard: HeavyLockGuard,
         lease: HeavyLockLease,
         harbor_executable: Path = HARBOR_EXECUTABLE,
+        counter_sample_timeout_seconds: float = COUNTER_SAMPLE_TIMEOUT_SECONDS,
     ) -> None:
         lease.validate()
         self._counter = counter
         self._lock_guard = lock_guard
         self._lease = lease
         self._harbor_executable = harbor_executable
+        self._counter_sample_timeout_seconds = counter_sample_timeout_seconds
 
     async def run(
         self,
@@ -463,6 +466,7 @@ class DockerSupervisedHostHarborExecutor:
             counter=self._counter,
             lock_guard=self._lock_guard,
             cleanup_runner=SubprocessDockerCommandRunner(),
+            counter_sample_timeout_seconds=self._counter_sample_timeout_seconds,
         )
         image_identity = supervisor.resolve_image_identity(
             identity,

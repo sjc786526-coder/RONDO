@@ -1640,3 +1640,56 @@ cap、terminal backend status 与测试 release barrier 三项局部缺口。整
   `agent_log/2026-08-22-051709-plan055-m3-b2a-publication-critic-service.md`、
   `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`；最终验收见
   `agent_log/2026-08-22-063239-plan055-remediation-final-acceptance.md`。
+## 方向 1 原生观测有界复测 v1 历史节点（Plan 056，2026-08-22）
+
+**状态**：v1 已按原合同以无效 campaign 终态关闭；没有行为候选结论。用户随后追加授权，整个 Plan 056 任务仍在
+rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
+
+- 新建 `plan056-direction1-bounded-observation-v1` 独立 campaign/batch/task-budget/result namespace，固定 v28
+  同一 10 题、两个 round、20 个 round-major slot、RONDO Local、`gpt-5.6-terra` main medium / Guardian low。
+  runtime bundle 绑定 clean `2765ff8f82ce21262af46bdf93a62c75b381b631`，CLI/code-mode host/bwrap SHA-256
+  分别为 `7d960131...016f`、`5b9dcd88...afb6`、`77360cb7...2c4c`。
+- 10/10 零 API Docker/Harbor 预检完成。正式第 1 个 slot `db-wal-recovery` 发布且 task pass；第 2 个
+  `extract-elf` 已发送后，投影器报 `rollout trace lifecycle is incomplete`。合同禁止重发已发送 slot，因此整包
+  立即标记 `sent_slot_execution_or_projection_failed`，剩余 18 slot 未启动，20-run 分母保持不变。
+- 日期冻结 body-free 结果为 `campaign_invalid`：正式发布 1/20、source-validated 0、25 个上游 attempts、
+  `0.631065 USD`、reservation 0、候选 assessment/null。task envelope 已按 invalid 关闭，active pointer 已退役。
+- 只读根因复核发现 3 个完整 runtime-end 事件晚于对应 tool-end；旧 reducer 在较早事件处永久标记 missing。设施已
+  改为整束读完后判断 start/end 集合，并补乱序回归；原始第 2 题 trace 复放恢复 `terminal=available`，但不撤销
+  已冻结的 campaign 终态。另修持久预算只读 loader 与 CLI snapshot 语义错配。
+- 相关 Team Lens、harness observation 与 Plan 056 定向 Python 集合 69/69 通过；未运行 Codex 对照、validation、
+  holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
+- Docker total 前后均为 11.5 GB，Docker Desktop VHDX 前后均为 69,467,111,424 bytes，Windows `C:` 余量从
+  186,093,740,032 降至 186,090,741,760 bytes；所有 Plan 056 容器、网络和卷已清空，固定镜像保留。
+
+## 方向 1 原生观测有界复测完成（Plan 056，2026-08-22）
+
+**状态**：完成首个可信正式 20/20，选择 C2；真实 API 已停止。Plan 056 只完成测量与候选决策，没有实施行为优化。
+
+- 用户把 v1 后续任务累计预算扩为 `100.000000 USD`，允许开发性 rehearsal 和可修复设施问题后的全新 identity。
+  rehearsal-v2/v3 分别因 Docker 实时事实瞬时失败和合法 pre-runtime sandbox denial 投影缺口关闭；相应设施窄修后，
+  rehearsal-v4 连续完成 10/10，6 pass/4 fail。formal-v5 因响应头前 transport open 失败缺少可区分终态而关闭；
+  观测链新增严格 `open_error`/`non_sse` 分类，旧工件继续 fail-closed，不改写历史。
+- 修复提交 `4965d7483d9e2812ec8e39debdb5988107e8101a` 的 RONDO Local runtime bundle 经共享锁/看门狗重建和复验；
+  CLI/code-mode host/bwrap SHA-256 为 `cc523bd8...a0d5`、`ddda3ddb...1e0`、`77360cb7...2c4c`。formal-v6 lock
+  SHA-256 为 `263cc3fa...9e7f`，10/10 零 API preflight 全部通过。
+- `formal-v6` 从第一题干净执行同一 10 题两个 round，20 个 slot 全部 `completed`、来源复验通过、usage 可定价、
+  schema-v2 body-free 投影完整且 Docker receipt 为 `verified_empty`；Terminal-Bench 为 8 pass/12 fail。正式结果为
+  219 attempts、`4.677962 USD`、reservation 0。
+- 候选门槛只选出 C2：9 次 occurrence，影响 6 个 slot/4 个任务，其中 3 个失败 slot，两轮均观察到，影响值 10108；
+  C1 为 7 次 occurrence 但只影响 2 个 slot/1 个任务且 impact 0，不合格；C11 未观察到；C7 保持不可测。公共结果为
+  `eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`。
+- 累计账本保留 6 个 identity：v1、rehearsal-v2/v3、rehearsal-v4、formal-v5、formal-v6，费用依次为
+  `0.631065/0.569748/0.842369/1.970204/1.637680/4.677962 USD`，合计 483 attempts、`10.329028 USD`；
+  task budget 已关闭、reservation 0、hard stop 未触发。三次 rehearsal 中两次 invalid、一次 complete；另有 v1 和
+  formal-v5 两个 invalid campaign，共 4 个 invalid campaign。
+- Docker total 前后均为 11.5 GB，VHDX 前后均为 69,467,111,424 bytes，Windows `C:` 从 191,850,123,264 降至
+  191,832,576,000 bytes；最终 0 container/volume/build-cache。按追加授权精确清理两座旧 Plan 056 Cargo target，
+  共释放 27,105,466,102 bytes；对应提交、bundle/manifest、账本、campaign、费用和公共结果均保留。
+- 验收后继续按精确归属清理 formal-v6 Cargo target 与三份 clean detached source，共释放 14,127,722,496 bytes；
+  正式 campaign、账本、trace/API metadata、Terminal-Bench 结果、公共结果、formal-v6 runtime bundle 与发布 bundle
+  均保留，离线状态复验仍为 `finalized`、20/20、C2、`4.677962 USD`、reservation 0。删除内容均可由仓库提交
+  重新检出或构建。
+- 定向设施回归为预算代理 62/62、harness observation 与 Plan 056 合集 54/54；构建、runtime verify、preflight 和
+  20-run 均通过相应资源门。未运行 Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、
+  本地模型、训练、云任务或上传。独立最终验收和对应整改结果见 Plan 056 最终日志。

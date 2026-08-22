@@ -1,0 +1,105 @@
+{
+  "budget": {
+    "campaign_cap_usd": "94.348934",
+    "campaign_estimated_usd": "4.677962",
+    "prior_estimated_usd": "5.651066",
+    "reserved_usd": "0.000000",
+    "run_slots_used": 20,
+    "task_cap_usd": "100.000000",
+    "task_estimated_usd": "10.329028",
+    "upstream_attempts": 219
+  },
+  "campaign": {
+    "campaign_denominator": 20,
+    "campaign_id": "plan056-direction1-bounded-observation-formal-v6",
+    "campaign_lock_sha256": "263cc3fa8ff75ca007100fe39e8bbde8b492f4cfc0898ef4d9490b097f3a9e7f",
+    "campaign_mode": "formal",
+    "campaign_slots_published": 20,
+    "guardian_effort": "low",
+    "main_effort": "medium",
+    "model": "gpt-5.6-terra",
+    "product": "rondo-local",
+    "rounds": 2,
+    "source_validated_slots": 20,
+    "tasks": 10,
+    "v28_lock_sha256": "a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b"
+  },
+  "candidate_assessment": {
+    "c7": {
+      "status": "unmeasurable"
+    },
+    "candidates": {
+      "C1": {
+        "affected_slots": 2,
+        "affected_tasks": 1,
+        "eligible": false,
+        "failed_slots": 1,
+        "impact": 0,
+        "occurrences": 7,
+        "rounds_observed": [
+          1,
+          2
+        ],
+        "timed_burden_slots": 0
+      },
+      "C11": {
+        "affected_slots": 0,
+        "affected_tasks": 0,
+        "eligible": false,
+        "failed_slots": 0,
+        "impact": 0,
+        "occurrences": 0,
+        "rounds_observed": [],
+        "timed_burden_slots": 0
+      },
+      "C2": {
+        "affected_slots": 6,
+        "affected_tasks": 4,
+        "eligible": true,
+        "failed_slots": 3,
+        "impact": 10108,
+        "occurrences": 9,
+        "rounds_observed": [
+          1,
+          2
+        ],
+        "timed_burden_slots": 6
+      }
+    },
+    "decision": "candidate_selected",
+    "selected_candidate": "C2"
+  },
+  "invalid_reason": null,
+  "kind": "rondo_direction1_bounded_observation_result",
+  "outcome": "candidate_selected",
+  "resources": {
+    "final_storage": {
+      "docker_desktop_vhdx_bytes_after": 69467111424,
+      "docker_desktop_vhdx_bytes_before": 69467111424,
+      "docker_desktop_vhdx_growth_bytes": 0,
+      "docker_growth_bytes": 0,
+      "docker_total_bytes_after": 11500000000,
+      "docker_total_bytes_before": 11500000000,
+      "final_sample_reason": null,
+      "final_sample_status": "complete",
+      "windows_c_free_bytes_after": 191832576000,
+      "windows_c_free_bytes_before": 191850123264
+    },
+    "slot_docker_receipts": 20
+  },
+  "schema_version": 1,
+  "selected_candidate": "C2",
+  "snapshot_date": "2026-08-22",
+  "status": "valid",
+  "terminal_bench": {
+    "outcomes": {
+      "agent_failed": 0,
+      "budget_stopped": 0,
+      "cancelled": 0,
+      "completed": 20,
+      "infra_failed": 0
+    },
+    "task_failures": 12,
+    "task_passes": 8
+  }
+}

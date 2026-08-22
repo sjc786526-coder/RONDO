@@ -1,12 +1,12 @@
 # 方向 1：Harness 优化
 
-最后更新：2026-08-22 ｜ 状态：**Plan 052 已完成；下一唯一方向内工作包为 10 题 × 2 轮有界观测复测** ｜
+最后更新：2026-08-22 ｜ 状态：**Plan 056 已完成有效 20/20 并选择 C2；行为优化尚未立项** ｜
 源码位置：`mydev/` ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前状态
 
-方向 1 已由 Plan 052 正式重启。默认关闭的原生 trace opt-in、任务级安全离线投影、历史普查器与日期冻结证据
-已经落地；本任务没有实施 C1—C13 行为优化，也不涉及方向 3。
+方向 1 已完成 Plan 052 的观测设施和 Plan 056 的有界真实复测。默认关闭的原生 trace opt-in、任务级安全离线
+投影、历史普查器与日期冻结证据已经落地；Plan 056 只选择了 C2 候选，没有实施 C1—C13 行为优化，也不涉及方向 3。
 
 此前教师 harness 的只读研究 T1—T3 已完成。研究交付
 `doc/research/teacher-harness-performance-candidates.md` 保留为形成时点的证据与候选池；候选进入实现仍必须由
@@ -31,23 +31,17 @@ E-A 轻量离线冻结回放当前不恢复。Plan 052 已确认现有资产、�
 - 第三轮整改关闭了 public `exec` 早期错误被误计为零的缺口；最终 Python 51/51、Rust 2/2 通过，独立验收 PASS，
   未发现新的功能性回归或冗余设施问题。
 
-## 下一唯一方向内工作包：10 题 × 2 轮有界观测复测
+## Plan 056 结论与下一边界
 
-- 使用同一冻结 10 题 canary，对 `mydev/` 被测对象执行两个完整 round，共 20 个 run；main
-  `gpt-5.6-terra/medium`、Guardian `gpt-5.6-terra/low`，费用硬上限 20 USD。
-- 不运行 Codex 对照、validation、holdout、E-A 或条件补题。真实 API、Docker 与费用必须另行授权，并在独立
-  ExecPlan 中冻结新 binary、campaign 与预算身份。
-- 唯一变量是为目标测量开启原生 trace 并执行 schema-v2 安全离线投影；不改变 prompt、输出、compact、重试、
-  Guardian、调度或其他产品行为。预期只改善 C1/C2/C11 的覆盖和影响归因，不预先承诺性能收益；C7 继续不可测。
-- 首个真实 API 请求或首份非空 API metadata、trace、结果工件（以先发生者为准）固定正式 slot 身份与 20-run
-  分母。正式边界后的投影缺失、残缺、重复、来源不一致或 schema/body-free 失败均使整包无效并停止，不替换 slot、
-  不加题补轮。正式边界前的 fixture、schema 接线或启动配置问题可窄修复验；资源门不可用则不进入正式 slot。
-- 20/20 个预定 run 都形成唯一、完整、严格可校验的投影，才是有效测量。failed/cancelled inference 缺 usage 时保留
-  类型化终态并把 usage 标为不可测；completed response 缺 usage 仍拒绝。观测 opt-in 引入新 infra 失败时关闭 opt-in，
-  保留默认产品行为并回到设施修复。
-- C1/C2 只有在两轮均出现、跨至少 2 个任务，并有充分覆盖证明真实 omission/truncation 或重复调用耗时负担时才可
-  入选；C11 出现影响任务的类型化 request/context 失败时可按严重性入选。多项满足时按任务覆盖、失败/耗时影响、
-  行为风险依次只选一个；无人满足则明确保留“无候选”。在此之前 C1—C13 均不进入行为实现。
+- `formal-v6` 使用同一冻结 10 题、两个完整 round、RONDO Local、main `gpt-5.6-terra/medium` 与 Guardian
+  `gpt-5.6-terra/low` 完成可信 20/20；20 个 slot 均为 `completed`，8 pass/12 fail，来源、usage、投影与 Docker
+  receipt 完整。
+- formal-v6 为 219 attempts、`4.677962 USD`；Plan 056 连同所有历史 campaign 累计 483 attempts、
+  `10.329028 USD`、reservation 0。首个可信 20/20 后已停止真实 API。
+- C2 达到冻结门槛：9 次 occurrence，覆盖 6 个 slot/4 个任务，3 个失败 slot，两轮均出现，影响值 10108；C1/C11
+  未达门槛，C7 仍不可测。结果只支持“选择 C2 作为下一候选”，不证明具体优化一定有收益。
+- 下一方向内工作须为 C2 单独建立 ExecPlan，先复现并冻结行为/正确性边界，再定义成功、停止和回滚条件。不得把
+  本次候选结论直接扩张成 prompt、工具、Guardian、调度、审批或安全语义改造；真实 API/Docker/费用仍须另行授权。
 
 ## 持续实验原则
 

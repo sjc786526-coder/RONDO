@@ -207,6 +207,7 @@ class DockerSupervisorTests(unittest.TestCase):
         cleanup_runner=None,
         monotonic=None,
         sleeper=None,
+        counter_sample_timeout_seconds=None,
     ):
         runner = FakeRunner(handles)
         options = dict(
@@ -219,6 +220,8 @@ class DockerSupervisorTests(unittest.TestCase):
             options["monotonic"] = monotonic
         if sleeper is not None:
             options["sleeper"] = sleeper
+        if counter_sample_timeout_seconds is not None:
+            options["counter_sample_timeout_seconds"] = counter_sample_timeout_seconds
         supervisor = DockerSupervisor(**options)
         return supervisor, runner
 
@@ -1057,6 +1060,36 @@ class DockerSupervisorTests(unittest.TestCase):
             counter.budgets,
             [COUNTER_SAMPLE_TIMEOUT_SECONDS, COUNTER_SAMPLE_TIMEOUT_SECONDS],
         )
+
+    def test_counter_round_uses_configured_bounded_timeout(self) -> None:
+        clock = FakeClock()
+
+        class BoundedCounter(FakeCounter):
+            def __init__(self):
+                super().__init__([reading(), reading()])
+                self.budgets: list[float] = []
+
+            def sample(self, **kwargs):
+                self.budgets.append(kwargs["deadline"] - clock.now)
+                return super().sample(**kwargs)
+
+        counter = BoundedCounter()
+        supervisor, _ = self.supervisor(
+            counter=counter,
+            handles=[FakeHandle([0])],
+            monotonic=clock.monotonic,
+            sleeper=clock.sleep,
+            counter_sample_timeout_seconds=60.0,
+        )
+
+        supervisor.pull(
+            self.identity,
+            IMAGE,
+            lease=self.lease,
+            timeout_seconds=120,
+        )
+
+        self.assertEqual(counter.budgets, [60.0, 60.0])
 
     def test_each_counter_round_gets_short_deadline_bounded_by_global_deadline(self) -> None:
         for global_timeout, expected_budget in (
