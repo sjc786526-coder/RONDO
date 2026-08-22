@@ -1584,9 +1584,9 @@ Publication Critic 产品语义；验收报告提交 `36a106c` 给出 `PASS`，�
 
 ## RONDO Multi 三期 M3-B2a Publication Critic 本地服务（Plan 055，2026-08-22）
 
-**状态更正**：实现提交 `2c47adb` 与配置边界修复提交 `dbc1d7a` 曾被过早记录为完成；后续独立验收提交 `d216bfb` 判定不通过，
-确认最小 frame cap、terminal backend status 与测试 release barrier 三项局部缺口。三项局部整改和 29/29 定向测试、Clippy、
-argument-comment lint、fix/fmt 已完成，正等待同一审查者复验；尚未合并或推送，本节待重新验收后补最终结论。
+**状态**：实现提交 `2c47adb` 与配置边界修复提交 `dbc1d7a` 曾被过早记录为完成；后续独立验收提交 `d216bfb` 发现最小 frame
+cap、terminal backend status 与测试 release barrier 三项局部缺口。整改提交 `3be09927` 已关闭三项 finding，并通过 29/29
+定向测试、Clippy、argument-comment lint、fix/fmt 与最终独立复验。结论为**验收通过、任务目标完成**；尚未合并或推送。
 
 - 新增专用 `codex-publication-critic` crate，提供 protocol v1 的严格 allowlist packet、loopback 长度前缀 JSON 服务、可替换
   scorer 与 B2b 可消费的 typed client；不依赖 `codex-core`、Team State 或 RONDO Local approval 产品合同。
@@ -1602,4 +1602,5 @@ argument-comment lint、fix/fmt 已完成，正等待同一审查者复验；尚
 - 未修改 `team_publish`、Team State、Team Lens、`eval/` 或 `training/`。证据只覆盖受控 backend 的进程/协议/资源闭环；
   canonical packet 构造与产品接入属于 M3-B2b，真实 threshold、模型质量与部署资格留给后续工作包。执行与整改记录见
   `agent_log/2026-08-22-051709-plan055-m3-b2a-publication-critic-service.md`、
-  `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`。
+  `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`；最终验收见
+  `agent_log/2026-08-22-063239-plan055-remediation-final-acceptance.md`。

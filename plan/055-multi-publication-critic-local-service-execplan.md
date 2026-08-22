@@ -181,9 +181,8 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 
 ### 当前工作
 
-- 独立验收提交 `d216bfb` 撤销了先前过早的 `PASS`：确认存在最小 frame cap、终态 backend status 和测试 release barrier 三项
-  correctness 缺口。三项均已按关键决策 017–019 局部修复；定向测试 29/29、Clippy、argument-comment lint、fix/fmt 已通过，
-  允许写集无越界。本轮以当前本地整改提交为交付，提交后立即通过 Codex 跨会话队列交回同一审查者；尚未重新验收通过。
+- 独立验收提交 `d216bfb` 发现的最小 frame cap、终态 backend status 和测试 release barrier 三项 correctness 缺口已由
+  `3be09927` 按关键决策 017–019 局部修复。最终独立复验确认三项均关闭、无局部回归，结论为 `PASS`；Plan 055 完成并冻结。
 
 ### 本任务剩余步骤
 
@@ -191,7 +190,8 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 2. 已完成：实现可替换 scorer 服务与 B2b 可消费的 typed client；用受控 scorer 建立真实进程闭环。
 3. 已完成：补齐资源、故障、取消、隔离和 body-free 日志回归，完成受影响 crate 的格式、lint 与定向测试。
 4. 已完成：检查 diff/允许写集/并行 worktree，完成首个本地提交并交给唯一的干净上下文独立审查者。
-5. 进行中：`d216bfb` 三项 finding 的修复、定向复验和允许写集检查已完成；以本地整改提交和 Codex 跨会话队列交回复验收口。
+5. 已完成：`d216bfb` 三项 finding 已修复并通过最终独立复验；验收报告见
+   `agent_log/2026-08-22-063239-plan055-remediation-final-acceptance.md`。
 
 ### 阻塞项
 
@@ -202,8 +202,9 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 - 受控 scorer 的真实子进程闭环、严格协议/identity、资源门、timeout/cancel、故障隔离和正文 sentinel 回归均已通过；
   证据只覆盖受控 backend，不覆盖真实模型、最终 threshold、B2b 接入或产品端到端。
 - 后续独立验收 `d216bfb` 的三项 finding 已完成局部整改；`just test -p codex-publication-critic` 29/29、定向 Clippy、
-  argument-comment lint、fix/fmt 均通过。现有状态仍是“等待同一审查者复验”，不能提前表述为 `PASS`；055 worktree 尚未合并、
-  推送或归档分支。整改证据见 `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`。
+  argument-comment lint、fix/fmt 均通过。最终独立复验为 `PASS`，无剩余 correctness/functionality finding；055 worktree 尚未
+  合并、推送或归档。整改与验收证据见 `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`、
+  `agent_log/2026-08-22-063239-plan055-remediation-final-acceptance.md`。
 
 ### 交接边界
 
