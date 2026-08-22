@@ -479,6 +479,30 @@ class ArtifactTests(unittest.TestCase):
         self.assertTrue(writer.journal.exists())
         self.assertFalse(writer.results.exists())
 
+    def test_tracked_only_reader_does_not_open_private_summary(self) -> None:
+        run_id = "20260809-000000094-tb-rondo-r1"
+        record = self._record(run_id)
+        self._set_tb_product(record, "rondo-local", campaign_schema_version=7)
+        record["config"]["auto_review_config"]["evidence_dir"] = (
+            "/logs/agent/guardian-evidence"
+        )
+        writer = ArtifactWriter(self.paths, run_id).start()
+        self._write_private_summary(writer, record)
+        target = writer.finalize(record, secrets=())
+        (target / "run-summary.json").unlink()
+        index = self.paths.worktree_root / "eval/results/runs.jsonl"
+
+        tracked = artifacts.read_validated_tracked_run_records(
+            index, common_root=self.paths.common_root
+        )
+
+        self.assertEqual(len(tracked), 1)
+        self.assertEqual(tracked[0][0]["run_id"], run_id)
+        with self.assertRaisesRegex(ArtifactError, "private run summary"):
+            artifacts.read_validated_run_records(
+                index, common_root=self.paths.common_root
+            )
+
     def test_replay_product_and_binary_contract_is_durable(self) -> None:
         for number, product in enumerate(("rondo-local", "rondo-multi"), start=76):
             with self.subTest(product=product), tempfile.TemporaryDirectory() as directory:

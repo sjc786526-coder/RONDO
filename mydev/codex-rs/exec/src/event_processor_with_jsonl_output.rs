@@ -54,6 +54,7 @@ use crate::exec_events::TurnFailedEvent;
 use crate::exec_events::TurnStartedEvent;
 use crate::exec_events::Usage;
 use crate::exec_events::WebSearchItem;
+use crate::rondo_local_observation::RondoLocalObservationCollector;
 
 pub struct EventProcessorWithJsonOutput {
     last_message_path: Option<PathBuf>,
@@ -64,6 +65,7 @@ pub struct EventProcessorWithJsonOutput {
     last_critical_error: Option<ThreadErrorEvent>,
     final_message: Option<String>,
     emit_final_message_on_shutdown: bool,
+    rondo_local_observation: Option<RondoLocalObservationCollector>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +91,14 @@ impl EventProcessorWithJsonOutput {
             last_critical_error: None,
             final_message: None,
             emit_final_message_on_shutdown: false,
+            rondo_local_observation: None,
+        }
+    }
+
+    pub fn new_with_rondo_local_observation(last_message_path: Option<PathBuf>) -> Self {
+        Self {
+            rondo_local_observation: Some(RondoLocalObservationCollector::default()),
+            ..Self::new(last_message_path)
         }
     }
 
@@ -410,6 +420,9 @@ impl EventProcessorWithJsonOutput {
         &mut self,
         notification: ServerNotification,
     ) -> CollectedThreadEvents {
+        if let Some(observation) = self.rondo_local_observation.as_mut() {
+            observation.observe(&notification);
+        }
         let mut events = Vec::new();
         let status = match notification {
             ServerNotification::ConfigWarning(notification) => {
@@ -510,7 +523,7 @@ impl EventProcessorWithJsonOutput {
                     }));
                 }
                 events.extend(self.reconcile_unfinished_started_items(&notification.turn.items));
-                match notification.turn.status {
+                let status = match notification.turn.status {
                     TurnStatus::Completed => {
                         if let Some(final_message) =
                             Self::final_message_from_turn_items(notification.turn.items.as_slice())
@@ -550,7 +563,15 @@ impl EventProcessorWithJsonOutput {
                         CodexStatus::InitiateShutdown
                     }
                     TurnStatus::InProgress => CodexStatus::Running,
+                };
+                if !matches!(notification.turn.status, TurnStatus::InProgress)
+                    && let Some(observation) = self.rondo_local_observation.as_ref()
+                {
+                    events.push(ThreadEvent::TaskObservation(Box::new(
+                        observation.snapshot(),
+                    )));
                 }
+                status
             }
             ServerNotification::TurnDiffUpdated(_) => CodexStatus::Running,
             ServerNotification::TurnPlanUpdated(notification) => {
@@ -614,6 +635,13 @@ impl EventProcessor for EventProcessorWithJsonOutput {
             self.emit(event);
         }
         collected.status
+    }
+
+    fn process_event_stream_lag(&mut self, message: String) -> CodexStatus {
+        if let Some(observation) = self.rondo_local_observation.as_mut() {
+            observation.note_event_stream_lag();
+        }
+        self.process_warning(message)
     }
 
     fn print_final_output(&mut self) {

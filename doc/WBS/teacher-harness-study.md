@@ -1,19 +1,19 @@
 # 方向 1：教师 harness 研究与优化实验
 
-最后更新：2026-08-21 ｜ 状态：**Plan 052 已排期，聚合观测与瓶颈普查待开始** ｜ 产品线：RONDO Local ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
+最后更新：2026-08-22 ｜ 状态：**Plan 052 已完成；下一唯一包为 10 题 × 2 轮 Local 有界观测复测** ｜ 产品线：RONDO Local ｜ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 定位与状态
 
-**方向 1 已由 Plan 052 正式重启，只针对 RONDO Local。** 当前包先补齐轻量任务级聚合观测并普查候选发生率，
-不实施 C1—C13 行为优化，也不涉及 RONDO Multi。
+**方向 1 已由 Plan 052 正式重启，只针对 RONDO Local。** 默认关闭的 task-level 聚合、历史普查器与日期冻结证据
+已经落地；Plan 052 没有实施 C1—C13 行为优化，也不涉及 RONDO Multi。
 
 教师 harness 的只读研究 T1—T3 已完成，结论基本不受本轮路线调整影响。四套参考实现的主题比较、与冻结 Codex
 的差异矩阵、13 个候选机制及证据等级已收敛到 `doc/research/teacher-harness-performance-candidates.md`。
 该报告是研究证据和候选池，本页是候选何时进入实现、如何排序和验收的唯一规划来源。
 
 方向 1 不受旧 M2 解锁门约束；v22 仍不满足公平能力归因条件，不能据其三项 A/B 差异直接选定优化项。
-E-A 轻量离线冻结回放当前仍未恢复（见 `doc/WBS/eval-benchmark.md`）；Plan 052 只判断后续是否确需其中的
-最小能力，不默认恢复完整 A1—A7。
+E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）；Plan 052 的结论是现有资产、最小聚合与一次
+有界真实复测足以承接下一步，未来只有已选定机制确需低成本反复实验时才重新评估最小 replay 能力。
 
 ## 已完成研究
 
@@ -22,20 +22,32 @@ E-A 轻量离线冻结回放当前仍未恢复（见 `doc/WBS/eval-benchmark.md`
 - T3：形成 C1—C13 候选，记录机制、证据、风险、测评轨、规模和否证条件。
 - 边界：只学习机制，不复制许可证边界不清的源码；研究结果不等于收益承诺。
 
-## 当前工作包：Plan 052
+## Plan 052 结论
 
-Plan 052 是当前唯一工作包，任务合同见
-`plan/052-direction1-local-harness-bottleneck-census-execplan.md`：
+任务合同见 `plan/052-direction1-local-harness-bottleneck-census-execplan.md`，冻结证据见
+`doc/audit-snapshots/2026-08-22-rondo-local-harness-bottleneck-census.md`：
 
-1. 将已有 tool latency、round count、approval latency、token/cache、compact 等安全聚合接入版本化任务级 schema；
-   观测默认关闭且不改变产品行为。
-2. 只读使用已交付 Local 运行资产，普查 C1、C11、C7、C2，C4/C5 只作 prompt/cache 和等待归因辅助。
-3. 对每项区分已观察且影响明显、已观察但影响较弱、当前样本未观察到和当前资产无法测量；缺字段不按 0 处理。
-4. 结束时只交接一个首个优化候选，或一个有明确任务数、轮数、模型和预算上限的测量任务；同时记录 E-A 最小化决定。
+1. schema-v1 `task.observation` 只在 `codex exec --json --rondo-local-observation` 时产生；关闭路径不构造 collector，
+   开启路径只输出 body-free 聚合，不改变请求、工具、审批、compact、重试、停止、调度或退出码。
+2. v28 Local cohort 为 10 个任务 × 3 次运行；API metadata 覆盖 30/30 run、10/10 任务，exec JSONL 覆盖
+   24/30 run、8/10 任务，另 6 次为集中在 2 个任务的既有敏感脱敏，不按 0 处理。
+3. C1 为 1/24 run 的 raw-output 阈值弱代理；C2 为 2/24 run 的精确重复弱信号；C11 在 311/311 完整终态请求中
+   当前样本未观察到；C7 因没有类型化完成声明—验证关系而不可测。C4 只显示 cache reuse，C5 不可测。
+4. 没有候选达到“已观察且影响明显”，因此不选行为优化；E-A 当前不恢复。
+
+## 当前唯一工作包：10 题 × 2 轮 Local 有界观测复测
+
+- 同一冻结 10 题 canary，只运行 RONDO Local 两个完整 round，共 20 个任务运行；main
+  `gpt-5.6-terra/medium`、Guardian `gpt-5.6-terra/low`，硬预算 20 USD。
+- 不运行 Codex、validation、holdout、E-A 或条件补题。真实 API/Docker 必须另行授权并在独立 ExecPlan 中冻结
+  新 Local bundle、campaign 与预算身份。
+- 第一轮任一 observation 缺失、schema/body-free 或资源门失败即停止；任一新预留会达到 20 USD 即停止；两轮后
+  无条件停止，不加题、补轮或改分母。
+- 复测完成后只选一个有证据支持的优化候选，或明确保留无优化结论；在此之前 C1—C13 均不进入行为实现。
 
 ## 首轮候选参考
 
-以下顺序是研究形成时的先验参考，不是 Plan 052 必须选 C1 的排序。最终决策综合真实发生率、影响范围、预期收益、
+以下顺序是研究形成时的先验参考，不是当前复测必须选 C1 的排序。最终决策综合真实发生率、影响范围、预期收益、
 实现成本和行为风险；每次只立一个 plan：
 
 1. **C1 可恢复的聚合工具输出预算**：先验证超限、截断与恢复提示是否真实发生，优先走离线回放。
@@ -46,8 +58,8 @@ Plan 052 是当前唯一工作包，任务合同见
 
 C3、C6、C8、C9、C10、C12、C13 继续留在候选池；只有前序证据指向相应瓶颈时再提升优先级。
 
-上述顺序中提到的“离线回放”指当前未恢复的 E-A。Plan 052 先判断现有资产和最小聚合观测是否足够；
-只有后续反复低成本实验确有需要时，才排期必要的最小子集。
+上述顺序中提到的“离线回放”指当前不恢复的 E-A。只有未来已经选定的机制确需反复低成本实验时，才重新评估
+必要的最小 replay 能力。
 
 ## 单项实验合同
 
@@ -61,7 +73,7 @@ C3、C6、C8、C9、C10、C12、C13 继续留在候选池；只有前序证据�
 
 ## 暂不进入实现
 
-Plan 052 期间所有 C1—C13 均不进入行为实现；以下方向继续不排期：
+当前有界复测完成前所有 C1—C13 均不进入行为实现；以下方向继续不排期：
 
 - 团队拓扑、自由讨论式多智能体、动态 task router 或复杂调度器。
 - 大规模 prompt 重写、完整会话系统、第二套工具协议。

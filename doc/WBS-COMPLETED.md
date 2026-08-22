@@ -1548,3 +1548,23 @@ Guardian 为 `gpt-5.6-terra/low`。
   failed/blocked 收口、自动 finalize 与 close/pointer 中断恢复缺口。最终复验另跑入口相关 32/32、核对 v28 结果字节、
   默认零请求状态与三棵工作树，结论 `PASS`，无剩余 correctness/functionality finding；报告见
   `agent_log/2026-08-21-174146-plan051-final-independent-acceptance.md`。
+
+## RONDO Local Harness 聚合观测与瓶颈普查（Plan 052，2026-08-22）
+
+**状态**：默认关闭的任务级安全聚合观测、v28 Local 历史普查、候选四态决策和独立复核均完成；本任务没有实施
+C1—C13 行为优化，也没有恢复 E-A。
+
+- `codex exec --json --rondo-local-observation` 只在显式 opt-in 时建立 collector，并在 primary turn 终态追加
+  schema-v1 `task.observation`。普通 JSON/人类输出路径不构造采集状态；新事件只含固定计数、时长、token、有限状态
+  和 unavailable，event lag 与 usage/timing 缺失会降低比较覆盖。
+- 只读 census 先校验 288 行 tracked index，再只验证选中的 30 个 Local private summary；所有 private 文件从
+  common root 以 `dir_fd`/`O_NOFOLLOW` 逐级打开。公共 report/delta 使用 exact schema 与 body-free allowlist，缺失
+  覆盖不可比较时所有 delta 为 `null`。
+- v28 cohort 为 10 题 × 3 次 Local 观测：API metadata 30/30、exec JSONL 24/30，后者覆盖 8/10 任务，6 个
+  redacted 集中在另外 2 个任务。C1/C2 为弱信号，C11 仅在当前样本未观察到，C7 当前资产不可测；C4/C5 只作归因
+  辅助，因此没有选行为候选。
+- 当前唯一后续包是另行授权的 10 题 × 2 Local round 观测复测，main Terra medium、Guardian Terra low、20 USD
+  硬上限，并带第一轮覆盖/资源失败即停、预算到顶即停、两轮无条件停止的边界；E-A 继续不恢复。
+- 定向 Python 47/47、`codex-exec` nextest 138/138 通过，独立最终复验 PASS、无剩余 correctness finding。
+  Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI、PR 均未运行。详细执行
+  与只读资产边界见 `agent_log/2026-08-22-003425-plan052-local-harness-census.md`。

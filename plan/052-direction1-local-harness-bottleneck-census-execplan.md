@@ -146,9 +146,9 @@
 - 已确认规划基线为 clean `main@9f32f22`，与本地跟踪的 `origin/main` 一致，创建时只有主工作树。
 - 已从该基线创建 `.claude/worktrees/052-direction1-bottleneck-census`，分支
   `worktree-052-direction1-bottleneck-census`；主工作区 tracked 文件未修改。
-- 规划收尾复核时，主工作区新增来源不明且不重叠的 untracked
-  `doc/research/2026-08-21-rondo-multi-publication-critic-local-engineering-facts.md`；本任务未打开、移动或纳入它。
-  它不阻塞当前任务树提交，但执行开始和未来合并前都须重新核对并继续保留。
+- 规划收尾复核时，主工作区曾新增来源不明且不重叠的 untracked
+  `doc/research/2026-08-21-rondo-multi-publication-critic-local-engineering-facts.md`；本任务始终未打开、移动或纳入它。
+  任务收尾时外部流程已将它提交到更新后的 clean `main@607cba0`；本任务没有合并该更新，也没有触碰其内容。
 - 已核对根/`mydev` AGENTS、README、顶层/方向 0/方向 1 WBS、候选研究、数据布局、Plan 051 及实时源码。
 - 安全结构盘点确认主物理根现有 290 个 ignored run 目录、209 份 `codex exec --json` 工件和 27 个 campaign
   目录；这些只是资产结构，不等于 Plan 052 的合格 Local 样本分母，执行时必须按 tracked 产品/结果身份筛选。
@@ -157,18 +157,25 @@
   有 INFO/调用源覆盖限制。Terminal-Bench publisher 主要从 Harbor `agent_result` 接 token 字段。
 - 已确认 `RepoPaths.discover()` 从 worktree 解析 Git common root；ignored `eval-data/` 不复制进普通 worktree，
   因而其只读普查必须从任务 worktree 发起、实际访问主仓库物理根。
+- 已实现 `codex exec --json --rondo-local-observation`：关闭时不构造 collector，也不接收仅供聚合的
+  raw-response/Guardian 通知；开启时在 primary turn 终态追加一个 schema-v1 body-free task aggregate。
+- 已实现严格 Local 选样、common-root 锚定的 `O_NOFOLLOW` 私有工件读取、exact-schema 校验、聚合/比较与根
+  `just eval-plan052-census` 入口；日期冻结机器结果和证据均已形成。
+- v28 最终 cohort 为 10 个任务 × 3 次 Local 观测。API metadata 为 30/30 run、10/10 任务；exec JSONL 为
+  24/30 run、8/10 任务，另外 6 个 redacted 集中在 2 个任务。C1/C2 为弱信号、C11 仅在当前样本未观察到、
+  C7 不可测；没有选择行为优化。
+- WBS 已只留下一个后续包：同一 10 题、2 个 Local round、Terra medium/Guardian low、20 USD 硬上限和明确停止
+  条件的真实观测复测，本任务不运行；E-A 继续不恢复。
+- 聚焦独立复核发现的非 Local private summary 读取、父目录 symlink 与 compare 缺失覆盖问题均已窄修并补回归；
+  最终复验 PASS，无剩余 correctness finding。
 
 ### 当前工作
 
-规划合同与权威 WBS 已在本任务 worktree 中完成并提交；等待用户把授权提示交给执行者。产品实现、历史资产正文
-读取和测试尚未开始。
+实现、普查、文档同步、定向门禁、独立复核及最终格式/敏感内容/worktree 核对均已完成；任务分支待提交。
 
 ### 本任务剩余步骤
 
-1. 阶段 A：执行者复核实时分支/worktree/资产状态，冻结 eligible Local 样本规则与 task-level schema。
-2. 阶段 B：只读完成历史资产 coverage/census；补齐最小、默认关闭的聚合观测接线及定向测试。
-3. 阶段 C：汇总重点候选的发生率、影响、证据质量和不可测项，作出单候选或有界测量二选一及 E-A 最小化决定。
-4. 阶段 D：完成聚焦独立复核、必要窄修、相关门禁、文档/日志/完成记录同步，并只提交任务 worktree。
+无任务内剩余实现步骤。本计划随任务分支提交冻结；后续只按 WBS 的唯一有界测量包另立授权和 ExecPlan。
 
 ### 阻塞项
 
@@ -176,10 +183,15 @@
 
 ### 当前验收状态
 
-- 规划：已完成实时文档、源码和安全资产结构核对；ExecPlan 与 WBS 已形成工作树提交。
-- 实现/测试：未开始；未运行 Cargo、Docker、真实 API、本地模型、训练、validation、holdout 或全 workspace 测试。
-- Git：专用 worktree 已创建且规划提交已形成；未合并、未推送、未归档。主工作区有一份不重叠的来源不明
-  untracked 研究文档，本任务保持不触碰。
+- 实现：默认关闭的 task aggregate、严格 schema/compare、只读 census、根 just 入口及日期冻结结果均完成；未改变
+  prompt、请求、工具、compact、审批、重试、停止、调度、退出码或生产默认。
+- 普查：tracked index 288 行完成纯 tracked 校验；最终只验证 30 个 Local private summary。公共结果通过 exact schema
+  与 body-free allowlist，实时重建和 tracked JSON 一致。
+- 门禁：Python 相关集合 47/47；正式 `just test -p codex-exec` 138/138，build watchdog `stop=none`；最终
+  `just fix -p codex-exec` 与 `just fmt` 通过。独立复验 PASS。
+- 未运行：Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI、PR、Bazel。
+- Git：只提交当前专用分支；不合并、不推送、不归档。主工作区已由外部流程更新为 clean `main@607cba0`，原先
+  不重叠的来源不明研究文档现已被该外部提交跟踪；本任务始终未打开或触碰它。
 
 ### 主工作区 ignored 资产
 
@@ -193,6 +205,12 @@
 - `eval/.venv` 与 `eval-data/uv-cache` 可按既有入口作为共享项目局部 Python 环境/缓存使用；不修改全局 Python。
 - `.env.local` 与 `rondo.local.toml` 本任务均不需要读取或修改。若实现意外依赖其中任一内容，应视为路线不够小；
   `.env.local` 仍绝对禁止打开。
+
+实际执行中，主物理根只发生以下 ignored I/O：重复只读 v28 campaign identity，以及合格 30 个 Local run 的
+private summary、API metadata、24 份 exec JSONL 与 6 份 redaction marker；使用既有共享 `eval/.venv` 和
+`eval-data/uv-cache` 运行冻结 Python 环境。初版 census 在 Local 筛选前误用了全索引 reader，因此额外只读打开了
+10 份 v28 Codex private summary；独立复核后已改为 tracked-only 预筛选，最终实现和后续复跑不再打开它们。该误读
+没有输出正文、写入或改变任何资产。未建立 Plan 052 ignored 临时目录，未改写、移动、删除任何既有 ignored 资产。
 
 主工作区没有任何 tracked 文件必须直接修改；若执行者发现 tracked 写入只能在主工作区完成，应停止并先说明原因，
 不得绕过 worktree 纪律。
@@ -213,3 +231,7 @@
 | 003 | E-A 当前仍不恢复，只在任务末按实际证据决定最小后续能力 | 避免因历史设计恢复整套低频设施 | WBS、eval | 已采纳 |
 | 004 | 规划期资产目录数只作结构事实，eligible cohort 由 tracked 产品/结果身份重新筛选 | ignored 目录同时含不同产品、侧别和执行代次，目录计数不是样本分母 | 普查 | 已采纳 |
 | 005 | 执行和审查阶段只提交 Plan 052 worktree，不合并、不推送、不归档 | 用户明确要求每次完成后先只提交工作树 | Git 交付 | 已采纳 |
+| 006 | 产品侧只在 `codex-exec` 增加显式 JSON opt-in collector，不跨 core/protocol 建第二套 telemetry | app-server 已有逐响应 usage、Guardian 生命周期和 full turn items；更小接线可保持默认路径无状态 | `codex-exec`、schema | 已采纳 |
+| 007 | v28 Local 使用 30-run/10-task 固定 cohort；exec 的 6 个 redacted 按任务级非随机缺失，不计为 0 | tracked campaign/slot 身份完整，但正文覆盖只有 24-run/8-task | census、证据 | 已采纳 |
+| 008 | 当前证据不足以选择 C1 或 C2，唯一下一包为 10 题 × 2 round、20 USD 上限的 Local 观测复测；E-A 不恢复 | C1/C2 仅有低频弱代理，C11 为窄样本阴性，C7 不可测；现有观测足以补覆盖 | WBS、方向 1 | 已采纳 |
+| 009 | 私有读取先做纯 tracked 筛选，再以 common-root `dir_fd`/`O_NOFOLLOW` 逐级打开 30 个 Local 槽；缺失覆盖时 compare 全部 delta 为 null | 关闭独立复核发现的越界读取、symlink 逃逸和“缺失当 0”问题 | eval reader、compare | 已采纳 |
