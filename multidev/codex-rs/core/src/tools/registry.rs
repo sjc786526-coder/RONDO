@@ -224,9 +224,18 @@ impl AnyToolResult {
     }
 }
 
-struct PostToolUseFeedbackOutput {
+pub(super) struct PostToolUseFeedbackOutput {
     original: Box<dyn ToolOutput>,
     model_visible: FunctionToolOutput,
+}
+
+impl PostToolUseFeedbackOutput {
+    pub(super) fn new(original: Box<dyn ToolOutput>, model_visible: FunctionToolOutput) -> Self {
+        Self {
+            original,
+            model_visible,
+        }
+    }
 }
 
 impl ToolOutput for PostToolUseFeedbackOutput {
@@ -244,6 +253,10 @@ impl ToolOutput for PostToolUseFeedbackOutput {
 
     fn code_mode_result(&self, payload: &ToolPayload) -> Value {
         self.original.code_mode_result(payload)
+    }
+
+    fn post_tool_use_response(&self, call_id: &str, payload: &ToolPayload) -> Option<Value> {
+        self.original.post_tool_use_response(call_id, payload)
     }
 }
 
@@ -772,13 +785,10 @@ impl ToolRegistry {
                         return Err(err);
                     }
                     if let Some(feedback_message) = outcome.feedback_message {
-                        result.result = Box::new(PostToolUseFeedbackOutput {
-                            original: result.result,
-                            model_visible: FunctionToolOutput::from_text(
-                                feedback_message,
-                                /*success*/ None,
-                            ),
-                        });
+                        result.result = Box::new(PostToolUseFeedbackOutput::new(
+                            result.result,
+                            FunctionToolOutput::from_text(feedback_message, /*success*/ None),
+                        ));
                     }
                 }
                 dispatch_trace.record_completed(

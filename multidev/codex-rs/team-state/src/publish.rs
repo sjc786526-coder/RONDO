@@ -1,6 +1,7 @@
 //! Read-only preparation for the canonical publish mutation.
 
 use crate::ids::EventId;
+use crate::ids::TeamRevision;
 use crate::model::ParticipantRole;
 use crate::mutation::PublishOutcome;
 use std::fmt;
@@ -37,6 +38,25 @@ pub enum PreparedPublishTarget {
         /// Event-local stale status at preparation time. The final publish mutation rechecks it.
         authored_on_stale_view: bool,
     },
+}
+
+/// The bounded, event-local public history needed by Publication Critic preparation.
+///
+/// This deliberately cannot carry routes, Fact identities, lifecycle state, or participant
+/// metadata. Only the authored continuity fields and a body-free evidence count leave the store.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedPublishHistory {
+    pub event_id: EventId,
+    pub revision: TeamRevision,
+    pub versions: Vec<PreparedPublishHistoryVersion>,
+    pub omitted_versions: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedPublishHistoryVersion {
+    pub summary: String,
+    pub handoff: Option<String>,
+    pub evidence_reference_count: usize,
 }
 
 impl fmt::Debug for PreparedPublish {

@@ -204,17 +204,22 @@ worktree 内的任务专用临时位置；构建输出留在 RONDO 项目根内�
   reviewed publish 的 initial/completion trace、hook 和 log 不持久化 candidate/context body。
 - 已建立 7 条启动 Plan 055 正式服务二进制的产品进程测试，覆盖 off、PASS/committed replay、并发 exact replay、完整 rewrite、failure
   fallback、rewrite 后 failure 与取消；另有 Team State、packet、配置、注册表、trace 和路由分层回归。
-- 已在本地提交实现 `f5d538a744507c3f80391f0094389bb8b0a8e192`，并由一个干净上下文独立审查者核对规划基线至该提交的全部
-  diff、生产调用链、测试和允许写集；审查结论为 PASS，无普通 finding 或阻断问题。
+- 已在本地提交实现 `f5d538a744507c3f80391f0094389bb8b0a8e192`；首次干净上下文复核曾给出 PASS，后续独立验收在
+  `11dd7ae` 记录 4 个 correctness finding：无关请求清理 cycle、旧 continuation 跨阶段复用、existing-Event continuity 锁内全量克隆、
+  PostToolUse feedback 后 body-redacted trace 缺少终态。
+- 4 个 finding 均已按 live code 确认并完成窄修：只由当前 continuation 归属的 refusal/cancel 清理 active cycle，每次阻断反馈轮换下一阶段
+  continuation，Team State 返回不含 route/Fact ID 的专用 bounded history，hook feedback wrapper 转发原始安全 typed metadata。
+- 修复后的 Team State 聚焦回归 2/2、Publication Critic 完整聚焦组 13/13（正式服务进程仍为 7/7）、body-redaction/trace 相邻组 4/4
+  通过；受影响 2 crate 的 Clippy `-D warnings` 与 `just fix` 通过。
 
 ### 当前工作
 
-Plan 057 实现、定向门禁、清理、本地提交和干净上下文独立验收均已完成；本节与方向 3 子 WBS 已写入最终状态。没有剩余产品实现工作，
-后续只等待用户另行批准主线整合。
+Plan 057 的 4 个独立验收 finding 已完成实现与定向复验；正在提交修复并交回同一跨会话审查者复验。当前不宣称验收通过或进入主线整合。
 
 ### 本任务剩余步骤
 
-无。Plan 057 已完成；真实 backend/model/threshold 资格、联合横评及主线整合只交接到方向 3 WBS 或等待用户另行批准，不在本计划继续维护。
+1. 提交本轮修复与状态记录并保持 057 worktree clean。
+2. 通过 Codex queue 交回审查者复验；验收通过前不进入主线整合。
 
 ### 阻塞项
 
@@ -224,15 +229,16 @@ Plan 057 实现、定向门禁、清理、本地提交和干净上下文独立�
 
 ### 当前验收状态
 
-- 实施：产品代码和测试已落地；关闭旁路、canonical packet、cycle/replay/fallback/cancel、body-free 观测及正式服务进程接入均已覆盖。
-- 测试：`codex-team-state --lib` 133 passed、1 既有 ignored；Publication Critic core 组 11/11 passed（其中正式服务进程 7/7）；
-  配置/注册表/trace 聚焦组 7/7、Team route 8/8、`codex-features --lib` 34/34。服务进程均由测试回收。
-- 静态/生成物：受影响 3 crate 的 Clippy `-D warnings` 与 `just fix` 通过；`just fmt`、`just fmt-check`、config schema 生成/fixture、
+- 实施：产品代码和测试已落地；4 个独立验收 finding 均已修复，关闭旁路、raw ledger、最终单写、fallback/cancel 等原边界未改变。
+- 修复测试：Team State bounded history 2/2；Publication Critic core 组 13/13（其中正式服务进程仍为 7/7）；
+  body-redaction/registry/trace 相邻组 4/4。服务进程均由测试回收。
+- 既有测试：修复前的 `codex-team-state --lib` 133 passed、1 既有 ignored；配置/注册表/trace 聚焦组 7/7、Team route 8/8、
+  `codex-features --lib` 34/34 证据继续保留，本轮未扩大到全量重跑。
+- 静态/生成物：本轮受影响 2 crate 的 Clippy `-D warnings` 与 `just fix` 通过；`just fmt`、`just fmt-check`、config schema 生成/fixture、
   Bazel module lock update/check 和 `git diff --check` 通过，module lock 无差异。argument-comment lint 未完成，原因见“阻塞项”。
 - 未运行：Docker、真实 API、真实模型、本地推理、训练、量化/转换、云资源、全 workspace、CI、PR；没有真实模型质量、threshold 或性能结论。
-- 独立验收：干净上下文审查者已审查 `9c002bd..f5d538a` 并 PASS，明确覆盖 off、canonical/raw、replay、三次审核、fallback、
-  Team State fail-closed、取消/并发、continuity/body 隔离、开发者观测、正式服务产品测试、接线、文档和允许写集；无 finding。
-- Git：实现提交为 `f5d538a744507c3f80391f0094389bb8b0a8e192`；最终状态文档另作本地收口提交，057 worktree 保持 clean。
+- 独立验收：`11dd7ae` 的审查结论为不通过并提出 4 个 finding；本轮均已修复并完成定向门禁，等待同一审查者复验，尚不冒充 PASS。
+- Git：原实现提交为 `f5d538a744507c3f80391f0094389bb8b0a8e192`，审查报告提交为 `11dd7ae`；本轮修复将另作本地提交，057 worktree 保持 clean。
   未合并、推送、rebase、归档或重命名；主工作区保持 clean，其他 worktree 未修改。
 
 ### 交接边界
@@ -262,3 +268,6 @@ Plan 057 实现、定向门禁、清理、本地提交和干净上下文独立�
 | 012 | cycle state 由 turn extension owner 持有，使用 owned async mutex 串行审核 attempt | 绑定 turn 生命周期并阻止并发复审/重复 commit；不跨 await 持有 Team State 锁 | cycle、并发、取消 | 已采纳 |
 | 013 | reviewed runtime 显式声明 body redaction，通用 dispatch/trace/hook 只记录 handler 提供的安全 metadata | 复用现有观测面且避免 candidate/context 进入普通日志或第二套 trace | registry、trace、观测 | 已采纳 |
 | 014 | 配置关闭注册原始工具合同，配置开启才注册 reviewed schema/output | 使关闭态 model-visible 行为和解析严格保持原样，同时只在启用态提供必要 continuation | 配置、spec、handler | 已采纳 |
+| 015 | 每次阻断反馈轮换下一阶段 continuation；旧 token 只允许 exact attempt replay，不能授权另一候选 | 防止并发旧 token 把未见最新反馈的候选串成后续审核 | cycle、并发、replay | 已采纳 |
+| 016 | Team State 为 Critic 返回专用 bounded history，只含 Event 绑定、revision、summary/handoff 和 evidence 数量 | 在锁内不克隆全量 Version、route、Fact ID 或无关生命周期字段 | team-state、packet | 已采纳 |
+| 017 | PostToolUse feedback wrapper 保留模型可见反馈，但向 body-redacted trace 转发原输出的安全 typed metadata | 让 dispatch trace 获得唯一终态且不泄漏 candidate/context/hook feedback | registry、trace | 已采纳 |

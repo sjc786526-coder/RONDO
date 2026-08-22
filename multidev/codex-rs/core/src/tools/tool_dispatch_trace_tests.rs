@@ -24,6 +24,7 @@ use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::CoreToolRuntime;
+use crate::tools::registry::PostToolUseFeedbackOutput;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
 use crate::turn_diff_tracker::TurnDiffTracker;
@@ -323,6 +324,62 @@ async fn runtime_log_payload_override_redacts_initial_dispatch_trace() -> anyhow
             .to_string()
             .contains("redacted-result-secret")
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn body_redacted_post_tool_feedback_records_safe_terminal_trace() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let (mut session, turn) = make_session_and_context().await;
+    attach_test_trace(&mut session, &turn, temp.path())?;
+    let invocation = test_invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "feedback-call",
+        "redacted_feedback_tool",
+        ToolCallSource::Direct,
+        r#"{"candidate":"input-sentinel"}"#,
+    );
+    let dispatch_trace =
+        super::ToolDispatchTrace::start(&invocation, Some(r#"{"body":"omitted"}"#));
+    let mut original = FunctionToolOutput::from_text("result-sentinel".to_string(), Some(true));
+    original.post_tool_use_response = Some(serde_json::json!({
+        "status": "safe_terminal",
+    }));
+    let feedback = PostToolUseFeedbackOutput::new(
+        Box::new(original),
+        FunctionToolOutput::from_text("hook-feedback-sentinel".to_string(), /*success*/ None),
+    );
+
+    dispatch_trace.record_completed(
+        &invocation,
+        &invocation.call_id,
+        &invocation.payload,
+        &feedback,
+        /*redact_bodies*/ true,
+    );
+
+    let bundle_dir = single_bundle_dir(temp.path())?;
+    let replayed = codex_rollout_trace::replay_bundle(&bundle_dir)?;
+    let call = &replayed.tool_calls["feedback-call"];
+    assert_eq!(call.execution.status, ExecutionStatus::Completed);
+    let result_id = call
+        .raw_result_payload_id
+        .as_ref()
+        .expect("body-redacted hook feedback must retain a safe terminal result");
+    let result_ref = &replayed.raw_payloads[result_id];
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle_dir.join(&result_ref.path))?)?;
+    let payload = payload.to_string();
+    assert!(payload.contains("safe_terminal"));
+    for sentinel in [
+        "input-sentinel",
+        "result-sentinel",
+        "hook-feedback-sentinel",
+    ] {
+        assert!(!payload.contains(sentinel));
+    }
 
     Ok(())
 }

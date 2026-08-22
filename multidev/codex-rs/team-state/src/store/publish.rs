@@ -3,6 +3,7 @@
 use super::CommittedOutcome;
 use super::CommittedRequest;
 use super::CommittedSubmission;
+use super::MAX_HISTORY_LIMIT;
 use super::TeamStore;
 use crate::ids::EventId;
 use crate::ids::VersionId;
@@ -22,10 +23,10 @@ use crate::observe::ChangeKind;
 use crate::observe::ChangeRecord;
 use crate::observe::StoredWake;
 use crate::publish::PreparedPublish;
+use crate::publish::PreparedPublishHistory;
+use crate::publish::PreparedPublishHistoryVersion;
 use crate::publish::PreparedPublishTarget;
 use crate::publish::PublishPreparation;
-use crate::view::HistoryPage;
-use crate::view::HistoryQuery;
 use codex_protocol::ThreadId;
 
 struct ValidatedPublish {
@@ -136,35 +137,43 @@ impl TeamStore {
         }
     }
 
-    /// Prepare a publish request and, for an existing Event, capture its bounded public history
-    /// from the same immutable store view.
+    /// Prepare a publish request and, for an existing Event, capture only the bounded public
+    /// continuity fields used by Publication Critic from the same immutable store view.
     pub fn prepare_publish_with_history(
         &self,
         actor: ThreadId,
         submission: &Submission,
         request: &PublishRequest,
         history_limit: usize,
-    ) -> Result<(PublishPreparation, Option<HistoryPage>), TeamError> {
-        let preparation = self.prepare_publish(actor, submission, request)?;
-        let history = match &preparation {
-            PublishPreparation::Ready(PreparedPublish {
-                target: PreparedPublishTarget::ExistingEvent { event_id, .. },
-                ..
-            }) => Some(self.history(
-                actor,
-                &HistoryQuery {
-                    event_id: Some(*event_id),
-                    limit: Some(history_limit),
-                    before: None,
-                },
-            )?),
-            PublishPreparation::Committed(_)
-            | PublishPreparation::Ready(PreparedPublish {
-                target: PreparedPublishTarget::NewEvent { .. },
-                ..
-            }) => None,
-        };
-        Ok((preparation, history))
+    ) -> Result<(PublishPreparation, Option<PreparedPublishHistory>), TeamError> {
+        match self.validate_publish(actor, submission, request)? {
+            PublishValidation::Committed(outcome) => {
+                Ok((PublishPreparation::Committed(outcome), None))
+            }
+            PublishValidation::Ready(validated) => {
+                let history = validated.existing_index.map(|index| {
+                    let event = &self.events[index];
+                    let versions = event.versions();
+                    let limit = history_limit.clamp(1, MAX_HISTORY_LIMIT);
+                    let omitted_versions = versions.len().saturating_sub(limit);
+                    let versions = versions[omitted_versions..]
+                        .iter()
+                        .map(|version| PreparedPublishHistoryVersion {
+                            summary: version.authored().summary.clone(),
+                            handoff: version.authored().handoff.clone(),
+                            evidence_reference_count: version.authored().evidence_refs.len(),
+                        })
+                        .collect();
+                    PreparedPublishHistory {
+                        event_id: event.id(),
+                        revision: self.revision,
+                        versions,
+                        omitted_versions,
+                    }
+                });
+                Ok((PublishPreparation::Ready(validated.prepared), history))
+            }
+        }
     }
 
     /// Publish a new event or append a version to an existing one.

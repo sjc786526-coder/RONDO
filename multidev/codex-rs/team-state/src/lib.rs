@@ -87,6 +87,8 @@ pub use observe::PublicationStatsPage;
 pub use observe::TeamDumpPage;
 pub use observe::WakeDecisionView;
 pub use publish::PreparedPublish;
+pub use publish::PreparedPublishHistory;
+pub use publish::PreparedPublishHistoryVersion;
 pub use publish::PreparedPublishTarget;
 pub use publish::PublishPreparation;
 pub use render::MAX_PROJECTION_TOKENS;

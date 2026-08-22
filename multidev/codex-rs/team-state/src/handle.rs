@@ -31,6 +31,7 @@ use crate::observe::ChangeLogPage;
 use crate::observe::DumpCursor;
 use crate::observe::ObserveQuery;
 use crate::observe::TeamDumpPage;
+use crate::publish::PreparedPublishHistory;
 use crate::publish::PublishPreparation;
 use crate::store::TeamStore;
 use crate::view::HistoryPage;
@@ -133,14 +134,14 @@ impl TeamStateHandle {
         self.with_store(|store| store.prepare_publish(actor, submission, request))
     }
 
-    /// Prepare a publish and capture its existing-Event history under the same Team State lock.
+    /// Prepare a publish and capture its bounded existing-Event continuity under the same lock.
     pub fn prepare_publish_with_history(
         &self,
         actor: ThreadId,
         submission: &Submission,
         request: &PublishRequest,
         history_limit: usize,
-    ) -> Result<(PublishPreparation, Option<HistoryPage>), TeamError> {
+    ) -> Result<(PublishPreparation, Option<PreparedPublishHistory>), TeamError> {
         self.with_store(|store| {
             store.prepare_publish_with_history(actor, submission, request, history_limit)
         })

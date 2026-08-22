@@ -20,9 +20,9 @@ use codex_publication_critic::PublicationPacket;
 use codex_publication_critic::TargetKind;
 use codex_publication_critic::Verdict;
 use codex_team_state::EventId;
-use codex_team_state::HistoryPage;
 use codex_team_state::ParticipantRole;
 use codex_team_state::PreparedPublish;
+use codex_team_state::PreparedPublishHistory;
 use codex_team_state::PreparedPublishTarget;
 use codex_team_state::PublishOutcome;
 use codex_team_state::PublishPreparation;
@@ -182,6 +182,21 @@ struct CommitDecision {
 }
 
 impl ReviewState {
+    fn active_continuation_matches(
+        &self,
+        instance: TeamInstanceId,
+        actor: ThreadId,
+        request: &PublishRequest,
+        continuation: Option<&str>,
+    ) -> bool {
+        self.active.as_ref().is_some_and(|cycle| {
+            cycle.instance == instance
+                && cycle.actor == actor
+                && cycle.target == CycleTarget::from_request(request)
+                && continuation == Some(cycle.id.as_str())
+        })
+    }
+
     fn cached_attempt(
         &self,
         request_id: &str,
@@ -206,10 +221,15 @@ impl ReviewState {
         let target = CycleTarget::from_request(request);
         let cycle = match self.active.as_mut() {
             Some(cycle) => {
-                if cycle.instance != instance || cycle.actor != actor {
+                if cycle.instance != instance {
                     self.active = None;
                     return Err(ReviewPublishError::Cycle(
                         "publication review cycle is no longer valid for this team turn".into(),
+                    ));
+                }
+                if cycle.actor != actor {
+                    return Err(ReviewPublishError::Cycle(
+                        "publication review cycle belongs to a different actor".into(),
                     ));
                 }
                 if continuation != Some(cycle.id.as_str()) {
@@ -245,6 +265,31 @@ impl ReviewState {
             review_index: cycle.next_review_index,
             blocking_rewrite_count: cycle.blocking_rewrite_count,
         })
+    }
+
+    fn advance_after_blocking_rewrite(
+        &mut self,
+        attempt: &ReviewAttempt,
+        blocking_rewrite_count: u8,
+    ) -> Result<String, ReviewPublishError> {
+        let Some(active) = self.active.as_mut() else {
+            return Err(ReviewPublishError::Cycle(
+                "publication review cycle ended unexpectedly".into(),
+            ));
+        };
+        if active.id != attempt.cycle_id
+            || active.next_review_index != attempt.review_index
+            || active.blocking_rewrite_count != attempt.blocking_rewrite_count
+        {
+            return Err(ReviewPublishError::Cycle(
+                "publication review cycle advanced unexpectedly".into(),
+            ));
+        }
+        let next_continuation = uuid::Uuid::new_v4().to_string();
+        active.id.clone_from(&next_continuation);
+        active.next_review_index = attempt.review_index + 1;
+        active.blocking_rewrite_count = blocking_rewrite_count;
+        Ok(next_continuation)
     }
 
     fn cache(
@@ -296,9 +341,31 @@ pub(crate) async fn review_and_publish(
     };
 
     if cancellation.is_cancelled() {
-        state.clear_active();
+        if state.active_continuation_matches(
+            handle.instance(),
+            actor,
+            &request,
+            continuation.as_deref(),
+        ) {
+            state.clear_active();
+        }
         return Err(ReviewPublishError::Cancelled);
     }
+
+    if state
+        .active
+        .as_ref()
+        .is_some_and(|cycle| cycle.instance != handle.instance())
+    {
+        state.clear_active();
+    }
+
+    let belongs_to_active_cycle = state.active_continuation_matches(
+        handle.instance(),
+        actor,
+        &request,
+        continuation.as_deref(),
+    );
 
     let (preparation, history) = match handle.prepare_publish_with_history(
         actor,
@@ -308,14 +375,15 @@ pub(crate) async fn review_and_publish(
     ) {
         Ok(preparation) => preparation,
         Err(error) => {
-            state.clear_active();
+            if belongs_to_active_cycle {
+                state.clear_active();
+            }
             observe(None, 0, None, None, false, "preparation_refused");
             return Err(ReviewPublishError::Team(error));
         }
     };
     match preparation {
         PublishPreparation::Committed(outcome) => {
-            state.clear_active();
             observe(None, 0, Some("committed_replay"), None, false, "committed");
             Ok(ReviewPublishResult::Committed {
                 outcome,
@@ -401,6 +469,8 @@ pub(crate) async fn review_and_publish(
             match verdict {
                 Some(Verdict::Rewrite) if attempt.review_index < 2 => {
                     let rewrite_count = attempt.blocking_rewrite_count + 1;
+                    let next_continuation =
+                        state.advance_after_blocking_rewrite(&attempt, rewrite_count)?;
                     let rewrite = RewriteRequired {
                         status: "rewrite_required",
                         feedback_version: if attempt.review_index == 0 {
@@ -413,18 +483,11 @@ pub(crate) async fn review_and_publish(
                         } else {
                             FEEDBACK_V2
                         },
-                        review_cycle_id: attempt.cycle_id,
+                        review_cycle_id: next_continuation,
                         review_attempt: attempt.review_index + 1,
                         blocking_rewrite_count: rewrite_count,
                         candidate: canonical_candidate(&prepared),
                     };
-                    let Some(active) = state.active.as_mut() else {
-                        return Err(ReviewPublishError::Cycle(
-                            "publication review cycle ended unexpectedly".into(),
-                        ));
-                    };
-                    active.next_review_index += 1;
-                    active.blocking_rewrite_count = rewrite_count;
                     state.cache(
                         submission.request_id,
                         request,
@@ -589,7 +652,7 @@ fn status_verdict(status: &FinalReviewStatus) -> Option<&'static str> {
 fn build_packet(
     client: &PublicationCriticClient,
     prepared: PreparedPublish,
-    history: Option<HistoryPage>,
+    history: Option<PreparedPublishHistory>,
 ) -> Result<PublicationPacket, ReviewPublishError> {
     let actor_role = match prepared.actor_role {
         ParticipantRole::Root => ActorRole::Root,
@@ -611,16 +674,13 @@ fn build_packet(
             title,
             authored_on_stale_view,
         } => {
-            let page = history.ok_or(ReviewPublishError::InvalidPreparation)?;
-            let Some(history) = page.events.into_iter().next() else {
-                return Err(ReviewPublishError::InvalidPreparation);
-            };
-            if history.event.id != *event_id {
+            let history = history.ok_or(ReviewPublishError::InvalidPreparation)?;
+            if history.event_id != *event_id {
                 return Err(ReviewPublishError::InvalidPreparation);
             }
-            let mut prior_publications = Vec::with_capacity(history.event.versions.len());
-            for version in history.event.versions {
-                let evidence_count = version.evidence_refs.len();
+            let mut prior_publications = Vec::with_capacity(history.versions.len());
+            for version in history.versions {
+                let evidence_count = version.evidence_reference_count;
                 let evidence = if evidence_count == 0 {
                     PriorEvidence::none()
                 } else {
@@ -651,7 +711,7 @@ fn build_packet(
                 }
             };
             let continuity = ContinuityContext::available(
-                page.revision.get(),
+                history.revision.get(),
                 if *authored_on_stale_view {
                     ContextFreshness::KnownStale
                 } else {
@@ -998,6 +1058,10 @@ mod tests {
         assert_eq!(packet["continuity"]["state"], "not_applicable");
     }
 }
+
+#[cfg(test)]
+#[path = "publication_review_regression_tests.rs"]
+mod regression_tests;
 
 #[cfg(test)]
 #[path = "publication_review_process_tests.rs"]

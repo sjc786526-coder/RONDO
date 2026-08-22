@@ -177,8 +177,8 @@ fn prepared_freshness_uses_the_target_event_not_global_revision() {
     let fresh = ready(fresh);
     let history = history.expect("an existing target includes bounded public history");
     assert_eq!(history.revision, handle.revision());
-    assert_eq!(history.events.len(), 1);
-    assert_eq!(history.events[0].event.id, target.event_id);
+    assert_eq!(history.event_id, target.event_id);
+    assert_eq!(history.versions.len(), 1);
     let PreparedPublishTarget::ExistingEvent {
         authored_on_stale_view,
         ..
@@ -222,6 +222,91 @@ fn prepared_freshness_uses_the_target_event_not_global_revision() {
         .publish(worker, &append_submission, append_request)
         .expect("the final mutation rechecks and records the same event-local staleness");
     assert!(committed.authored_on_stale_view);
+}
+
+#[test]
+fn prepared_existing_event_history_is_bounded_and_has_no_route_or_fact_identity_shape() {
+    let (handle, root, worker) = team();
+    let event = handle
+        .publish(
+            root,
+            &submission("bounded-initial"),
+            new_event("bounded", "version 1", /*handoff*/ None),
+        )
+        .expect("root opens the event");
+    handle
+        .route(
+            root,
+            &Submission {
+                based_on: handle.revision(),
+                request_id: "bounded-route".to_string(),
+            },
+            RouteRequest {
+                event_id: event.event_id,
+                target: worker,
+                intent: RouteIntent::Assign,
+                note: Some("route metadata must not be cloned".to_string()),
+            },
+        )
+        .expect("the route makes the event visible to the worker");
+    for ordinal in 2..=6 {
+        handle
+            .publish(
+                root,
+                &Submission {
+                    based_on: handle.revision(),
+                    request_id: format!("bounded-{ordinal}"),
+                },
+                PublishRequest {
+                    target: PublishTarget::ExistingEvent {
+                        event_id: event.event_id,
+                    },
+                    summary: format!("version {ordinal}"),
+                    handoff: None,
+                },
+            )
+            .expect("root appends another version");
+    }
+
+    let append = PublishRequest {
+        target: PublishTarget::ExistingEvent {
+            event_id: event.event_id,
+        },
+        summary: "worker candidate".to_string(),
+        handoff: None,
+    };
+    let (_, history) = handle
+        .prepare_publish_with_history(
+            worker,
+            &Submission {
+                based_on: handle.revision(),
+                request_id: "bounded-candidate".to_string(),
+            },
+            &append,
+            2,
+        )
+        .expect("worker receives its bounded publication-only view");
+
+    assert_eq!(
+        history,
+        Some(PreparedPublishHistory {
+            event_id: event.event_id,
+            revision: handle.revision(),
+            versions: vec![
+                PreparedPublishHistoryVersion {
+                    summary: "version 5".to_string(),
+                    handoff: None,
+                    evidence_reference_count: 0,
+                },
+                PreparedPublishHistoryVersion {
+                    summary: "version 6".to_string(),
+                    handoff: None,
+                    evidence_reference_count: 0,
+                },
+            ],
+            omitted_versions: 4,
+        })
+    );
 }
 
 #[test]
