@@ -1,4 +1,6 @@
 mod client;
+#[cfg(test)]
+mod config_tests;
 mod contract;
 mod failure;
 mod identity;
@@ -63,6 +65,7 @@ pub use resource::DEFAULT_REQUEST_BYTES;
 pub use resource::DEFAULT_RESPONSE_BYTES;
 pub use resource::DEFAULT_STARTUP_TIMEOUT;
 pub use resource::RuntimeLimits;
+pub use resource::ServiceConfig;
 pub use resource::ServiceDescriptor;
 pub use resource::controlled_test_descriptor;
 pub use resource::validate_expected_descriptor;
@@ -70,7 +73,6 @@ pub use scorer::PublicationScorer;
 pub use scorer::RawScorerOutput;
 pub use scorer::ScorerError;
 pub use scorer::ScorerStatus;
-pub use service::ServiceConfig;
 pub use service::ServiceRunError;
 pub use service::serve;
 pub use wire::ServicePhase;

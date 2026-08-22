@@ -18,10 +18,13 @@
   受控 scorer 只替换 backend，仍经过正式 transport、协议解析、identity、admission、资源门和 typed client。
 - 实现过程中修正了 permit 在响应写出前持有、force shutdown 未形成独立有界阶段、accept 永久错误可能忙循环等问题，并拆分
   contract 模块保持职责清晰。
+- 首次独立审查确认公开 config 字段与未复验消费点可绕过 loopback/frame cap，且超大 timeout 可能令 deadline 算术 panic。
+  修复后外部只能通过受检构造器获得配置，client/service 消费点仍作防御性复验，所有 timeout 统一限制在 5 分钟内。
 
 ## 验证
 
-- `just test -p codex-publication-critic`：25/25 通过，0 skipped。
+- `just test -p codex-publication-critic`：审查修复后最终 27/27 通过，0 skipped；新增回归覆盖非 loopback config 绕过、非法
+  frame cap 和无界 client/shutdown timeout。
 - `just clippy -p codex-publication-critic`：通过。
 - `../scripts/with-build-lock.sh just argument-comment-lint -p codex-publication-critic`：通过；只出现既有依赖
   `codex-utils-cargo-bin` 的 unknown lint warning。
@@ -37,4 +40,5 @@
   committed replay fast path 或真实模型部署。
 - 证据只证明受控 backend 下的正式进程/协议/资源/故障闭环。未下载或运行真实模型，未使用 Docker、真实 API、训练或云资源；
   真实 threshold、模型质量与部署资格仍待后续工作包。
-- 实现与定向门禁已完成，当前等待首次本地提交后的单一干净上下文独立审查；尚未合并、推送或归档分支。
+- 实现与定向门禁已完成；首次本地提交后的单一干净上下文独立审查发现一项真实配置边界问题，已窄修并交回同一审查者复验。
+  尚未合并、推送或归档分支。

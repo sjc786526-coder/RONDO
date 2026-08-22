@@ -5,6 +5,7 @@ use crate::RawScorerOutput;
 use crate::ScoreFailureKind;
 use crate::ScorerError;
 use crate::ScorerStatus;
+use crate::ServiceConfig;
 use crate::ServiceDescriptor;
 use crate::transport::ReadFrameError;
 use crate::transport::read_frame;
@@ -20,7 +21,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU16;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
@@ -35,33 +35,10 @@ use tokio::time::timeout;
 use tokio::time::timeout_at;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone)]
-pub struct ServiceConfig {
-    pub descriptor: ServiceDescriptor,
-    pub graceful_shutdown_timeout: Duration,
-    pub force_shutdown_timeout: Duration,
-}
-
-impl ServiceConfig {
-    pub fn new(
-        descriptor: ServiceDescriptor,
-        graceful_shutdown_timeout: Duration,
-        force_shutdown_timeout: Duration,
-    ) -> Result<Self, ContractFailure> {
-        descriptor.validate()?;
-        if graceful_shutdown_timeout.is_zero() || force_shutdown_timeout.is_zero() {
-            return Err(ContractFailure::InvalidResourceConfiguration);
-        }
-        Ok(Self {
-            descriptor,
-            graceful_shutdown_timeout,
-            force_shutdown_timeout,
-        })
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 pub enum ServiceRunError {
+    #[error("publication critic service configuration is invalid")]
+    InvalidConfiguration,
     #[error("publication critic listener is not loopback-only")]
     NonLoopbackListener,
     #[error("publication critic listener address is unavailable")]
@@ -143,6 +120,9 @@ pub async fn serve<S>(
 where
     S: PublicationScorer,
 {
+    config
+        .validate()
+        .map_err(|_| ServiceRunError::InvalidConfiguration)?;
     let local_addr = listener
         .local_addr()
         .map_err(|_| ServiceRunError::ListenerAddressUnavailable)?;

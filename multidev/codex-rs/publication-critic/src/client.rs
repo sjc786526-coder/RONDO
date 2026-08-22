@@ -7,6 +7,7 @@ use crate::PublicationPacket;
 use crate::ScoreFailureKind;
 use crate::ServiceDescriptor;
 use crate::Verdict;
+use crate::resource::validate_bounded_timeout;
 use crate::transport::ReadFrameError;
 use crate::transport::read_frame;
 use crate::transport::write_frame;
@@ -33,10 +34,10 @@ const READY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
-    pub endpoint: SocketAddr,
-    pub expected: ServiceDescriptor,
-    pub call_timeout: Duration,
-    pub startup_timeout: Duration,
+    pub(crate) endpoint: SocketAddr,
+    pub(crate) expected: ServiceDescriptor,
+    pub(crate) call_timeout: Duration,
+    pub(crate) startup_timeout: Duration,
 }
 
 impl ClientConfig {
@@ -58,19 +59,39 @@ impl ClientConfig {
         call_timeout: Duration,
         startup_timeout: Duration,
     ) -> Result<Self, ContractFailure> {
-        if !endpoint.ip().is_loopback() {
-            return Err(ContractFailure::InvalidResourceConfiguration);
-        }
-        expected.validate()?;
-        if call_timeout.is_zero() || startup_timeout.is_zero() {
-            return Err(ContractFailure::InvalidResourceConfiguration);
-        }
-        Ok(Self {
+        let config = Self {
             endpoint,
             expected,
             call_timeout,
             startup_timeout,
-        })
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn validate(&self) -> Result<(), ContractFailure> {
+        if !self.endpoint.ip().is_loopback() {
+            return Err(ContractFailure::InvalidResourceConfiguration);
+        }
+        self.expected.validate()?;
+        validate_bounded_timeout(self.call_timeout)?;
+        validate_bounded_timeout(self.startup_timeout)
+    }
+
+    pub fn endpoint(&self) -> SocketAddr {
+        self.endpoint
+    }
+
+    pub fn expected(&self) -> &ServiceDescriptor {
+        &self.expected
+    }
+
+    pub fn call_timeout(&self) -> Duration {
+        self.call_timeout
+    }
+
+    pub fn startup_timeout(&self) -> Duration {
+        self.startup_timeout
     }
 }
 
@@ -85,13 +106,14 @@ pub struct PublicationCriticClient {
 }
 
 impl PublicationCriticClient {
-    pub fn new(config: ClientConfig) -> Self {
-        Self {
+    pub fn new(config: ClientConfig) -> Result<Self, ContractFailure> {
+        config.validate()?;
+        Ok(Self {
             inner: Arc::new(ClientInner {
                 config,
                 shutting_down: AtomicBool::new(false),
             }),
-        }
+        })
     }
 
     pub fn expected_descriptor(&self) -> &ServiceDescriptor {

@@ -25,15 +25,56 @@ const MAX_CONCURRENCY: u16 = 8;
 const MAX_QUEUE_CAPACITY: u16 = 64;
 const MAX_TIMEOUT_MS: u64 = 5 * 60 * 1_000;
 
+#[derive(Clone, Debug)]
+pub struct ServiceConfig {
+    pub(crate) descriptor: ServiceDescriptor,
+    pub(crate) graceful_shutdown_timeout: Duration,
+    pub(crate) force_shutdown_timeout: Duration,
+}
+
+impl ServiceConfig {
+    pub fn new(
+        descriptor: ServiceDescriptor,
+        graceful_shutdown_timeout: Duration,
+        force_shutdown_timeout: Duration,
+    ) -> Result<Self, ContractFailure> {
+        let config = Self {
+            descriptor,
+            graceful_shutdown_timeout,
+            force_shutdown_timeout,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), ContractFailure> {
+        self.descriptor.validate()?;
+        validate_bounded_timeout(self.graceful_shutdown_timeout)?;
+        validate_bounded_timeout(self.force_shutdown_timeout)
+    }
+
+    pub fn descriptor(&self) -> &ServiceDescriptor {
+        &self.descriptor
+    }
+
+    pub fn graceful_shutdown_timeout(&self) -> Duration {
+        self.graceful_shutdown_timeout
+    }
+
+    pub fn force_shutdown_timeout(&self) -> Duration {
+        self.force_shutdown_timeout
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeLimits {
-    pub request_bytes: u32,
-    pub response_bytes: u32,
-    pub max_concurrency: u16,
-    pub queue_capacity: u16,
-    pub job_timeout_ms: u64,
-    pub io_timeout_ms: u64,
+    pub(crate) request_bytes: u32,
+    pub(crate) response_bytes: u32,
+    pub(crate) max_concurrency: u16,
+    pub(crate) queue_capacity: u16,
+    pub(crate) job_timeout_ms: u64,
+    pub(crate) io_timeout_ms: u64,
 }
 
 impl RuntimeLimits {
@@ -61,8 +102,8 @@ impl RuntimeLimits {
             response_bytes,
             max_concurrency,
             queue_capacity,
-            job_timeout_ms: checked_duration_millis(job_timeout)?,
-            io_timeout_ms: checked_duration_millis(io_timeout)?,
+            job_timeout_ms: bounded_timeout_millis(job_timeout)?,
+            io_timeout_ms: bounded_timeout_millis(io_timeout)?,
         };
         limits.validate()?;
         Ok(limits)
@@ -100,6 +141,30 @@ impl RuntimeLimits {
 
     pub fn admission_capacity(&self) -> usize {
         usize::from(self.max_concurrency + self.queue_capacity)
+    }
+
+    pub fn request_bytes(&self) -> u32 {
+        self.request_bytes
+    }
+
+    pub fn response_bytes(&self) -> u32 {
+        self.response_bytes
+    }
+
+    pub fn max_concurrency(&self) -> u16 {
+        self.max_concurrency
+    }
+
+    pub fn queue_capacity(&self) -> u16 {
+        self.queue_capacity
+    }
+
+    pub fn job_timeout_ms(&self) -> u64 {
+        self.job_timeout_ms
+    }
+
+    pub fn io_timeout_ms(&self) -> u64 {
+        self.io_timeout_ms
     }
 }
 
@@ -160,6 +225,15 @@ pub fn validate_expected_descriptor(
     Ok(())
 }
 
-fn checked_duration_millis(duration: Duration) -> Result<u64, ContractFailure> {
-    u64::try_from(duration.as_millis()).map_err(|_| ContractFailure::InvalidResourceConfiguration)
+pub(crate) fn validate_bounded_timeout(duration: Duration) -> Result<(), ContractFailure> {
+    bounded_timeout_millis(duration).map(|_| ())
+}
+
+fn bounded_timeout_millis(duration: Duration) -> Result<u64, ContractFailure> {
+    let millis = u64::try_from(duration.as_millis())
+        .map_err(|_| ContractFailure::InvalidResourceConfiguration)?;
+    if millis == 0 || millis > MAX_TIMEOUT_MS {
+        return Err(ContractFailure::InvalidResourceConfiguration);
+    }
+    Ok(millis)
 }

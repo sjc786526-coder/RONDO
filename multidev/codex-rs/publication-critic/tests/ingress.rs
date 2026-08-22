@@ -62,17 +62,17 @@ impl ServiceProcess {
         )?);
         command
             .arg("--request-bytes")
-            .arg(limits.request_bytes.to_string())
+            .arg(limits.request_bytes().to_string())
             .arg("--response-bytes")
-            .arg(limits.response_bytes.to_string())
+            .arg(limits.response_bytes().to_string())
             .arg("--max-concurrency")
-            .arg(limits.max_concurrency.to_string())
+            .arg(limits.max_concurrency().to_string())
             .arg("--queue-capacity")
-            .arg(limits.queue_capacity.to_string())
+            .arg(limits.queue_capacity().to_string())
             .arg("--job-timeout-ms")
-            .arg(limits.job_timeout_ms.to_string())
+            .arg(limits.job_timeout_ms().to_string())
             .arg("--io-timeout-ms")
-            .arg(limits.io_timeout_ms.to_string())
+            .arg(limits.io_timeout_ms().to_string())
             .arg("--graceful-shutdown-ms")
             .arg("500")
             .arg("--force-shutdown-ms")
@@ -118,6 +118,7 @@ impl ServiceProcess {
             )
             .expect("controlled client configuration must be valid"),
         )
+        .expect("validated client configuration must be accepted")
     }
 
     async fn finish(mut self) -> TestResult {
@@ -202,7 +203,7 @@ async fn ingress_rejects_oversize_and_unknown_fields_without_poisoning_typed_cal
     let oversized = service
         .expected
         .limits
-        .request_bytes
+        .request_bytes()
         .checked_add(1)
         .ok_or("request byte cap cannot be incremented")?;
     assert_raw_failure(
@@ -263,7 +264,7 @@ async fn ingress_rejects_oversize_and_unknown_fields_without_poisoning_typed_cal
         local_expected.clone(),
         CALL_TIMEOUT,
         STARTUP_TIMEOUT,
-    )?);
+    )?)?;
     assert_eq!(
         local_cap_client.review(packet(&local_expected)).await,
         Err(CriticFailure::Contract(ContractFailure::RequestTooLarge))

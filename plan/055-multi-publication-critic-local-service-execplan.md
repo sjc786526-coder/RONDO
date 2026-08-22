@@ -175,19 +175,21 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
   可信配置、真实 threshold 不由 B2a 冻结，并保留实现路线与数值选择空间。该复核只验收规划，不替代实现后的独立验收。
 - 已冻结本执行合同；协议字段名、模块布局、transport 和具体资源数值留给执行者结合实现决定。
 - 已在专用 crate 内完成版本化合同、可替换 scorer、loopback framed-JSON 服务、typed client、受控服务进程及定向回归；
-  `just test -p codex-publication-critic` 最终 25/25 通过，定向 Clippy 通过，Cargo/Bazel 锁按仓库入口更新核对。
+  审查修复后的 `just test -p codex-publication-critic` 最终 27/27 通过，定向 Clippy 通过，Cargo/Bazel 锁按仓库入口更新核对。
+- 首次实现提交 `2c47adb` 的独立审查发现公开配置字段可绕过构造器、无界 timeout 可导致 `Instant` 算术 panic；已将配置字段收口为
+  crate 内部、在 client/service 消费边界复验，并统一应用 5 分钟硬上界及两个回归测试。
 
 ### 当前工作
 
-- 实现与定向门禁已收敛；正在完成允许写集、WBS/日志同步和本地提交，随后交给一个干净上下文的独立审查子智能体验收。
+- 独立审查提出的真实 finding 已窄修并通过定向门禁；正在创建修复提交，随后交回同一审查者复验。
 
 ### 本任务剩余步骤
 
 1. 已完成：冻结版本化 schema、identity、failure、lifecycle 和资源数值并记录关键决策。
 2. 已完成：实现可替换 scorer 服务与 B2b 可消费的 typed client；用受控 scorer 建立真实进程闭环。
 3. 已完成：补齐资源、故障、取消、隔离和 body-free 日志回归，完成受影响 crate 的格式、lint 与定向测试。
-4. 当前：检查 diff/允许写集/并行 worktree，完成首个本地提交并交给唯一的干净上下文独立审查者。
-5. 待完成：对审查者确认的 finding 自主窄修、复验并追加提交；同一审查者验收通过后冻结记录并停止。
+4. 已完成：检查 diff/允许写集/并行 worktree，完成首个本地提交并交给唯一的干净上下文独立审查者。
+5. 当前：首次审查 finding 已修复、复验；追加提交后由同一审查者再次验收，通过后冻结记录并停止。
 
 ### 阻塞项
 
@@ -197,7 +199,8 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 
 - 受控 scorer 的真实子进程闭环、严格协议/identity、资源门、timeout/cancel、故障隔离和正文 sentinel 回归均已通过；
   证据只覆盖受控 backend，不覆盖真实模型、最终 threshold、B2b 接入或产品端到端。
-- 独立实现验收与 055 worktree 本地提交待完成；尚未合并、推送或归档分支。
+- 首次独立审查的配置绕过 finding 已修复，修复后 27/27 定向测试、Clippy、argument-comment lint、fix/fmt 通过；同一审查者复验
+  待完成。055 worktree 已有本地实现提交，尚未合并、推送或归档分支。
 
 ### 交接边界
 
@@ -227,3 +230,4 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 | 013 | 公共结果只有 `PASS/REWRITE` 或 `Contract/Infrastructure/Cancelled` typed failure；wire/service error 只有固定 code，body-bearing 类型使用 redacted Debug，错误和 stdout/stderr 不保存或回显 raw body | 让 B2b 可操作地区分失败，同时机械阻断正文经普通错误链和日志泄漏 | failure 与日志 | 已采纳 |
 | 014 | production defaults 冻结为 request 128 KiB、response 16 KiB、scorer concurrency 1、queue 4、服务 job deadline 25s（含排队）、client E2E 30s、startup 60s、I/O 2s、graceful shutdown 3s + force/reap 2s、零 retry；受控测试可用显式更短的同型配置 | 符合单本地 GPU 与 2–8 Agent 小团队场景，所有等待和容量均有硬上限且测试无需长时间等待 | 资源合同 | 已采纳 |
 | 015 | liveness、readiness 与 draining 分离；每次调用独占一个 loopback connection，queued/in-flight/等待响应取消通过 token 或连接关闭传播，server 以 admission/execution permit 和自身 deadline 作最终回收保证 | shutdown 后立即拒绝新调用，一次 timeout/cancel/fault 不污染下一请求或永久占用许可 | 生命周期与取消 | 已采纳 |
+| 016 | `ClientConfig`、`ServiceConfig` 与 `RuntimeLimits` 的字段不向外部开放；构造器和 client/service 最终消费点均复验配置，所有 timeout 统一限制在 `(0, 5min]` | 防止外部 struct literal 或反序列化对象绕过 loopback/frame/resource 门，并避免无界 `Duration` 在 deadline 算术中 panic | 配置边界 | 已采纳 |

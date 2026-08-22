@@ -75,17 +75,17 @@ impl ServiceProcess {
             .arg("--score")
             .arg("0.75")
             .arg("--request-bytes")
-            .arg(limits.request_bytes.to_string())
+            .arg(limits.request_bytes().to_string())
             .arg("--response-bytes")
-            .arg(limits.response_bytes.to_string())
+            .arg(limits.response_bytes().to_string())
             .arg("--max-concurrency")
-            .arg(limits.max_concurrency.to_string())
+            .arg(limits.max_concurrency().to_string())
             .arg("--queue-capacity")
-            .arg(limits.queue_capacity.to_string())
+            .arg(limits.queue_capacity().to_string())
             .arg("--job-timeout-ms")
-            .arg(limits.job_timeout_ms.to_string())
+            .arg(limits.job_timeout_ms().to_string())
             .arg("--io-timeout-ms")
-            .arg(limits.io_timeout_ms.to_string())
+            .arg(limits.io_timeout_ms().to_string())
             .arg("--graceful-shutdown-ms")
             .arg("500")
             .arg("--force-shutdown-ms")
@@ -163,6 +163,7 @@ impl ServiceProcess {
             )
             .expect("controlled client configuration is valid"),
         )
+        .expect("validated client configuration must be accepted")
     }
 
     fn packet(&self) -> PublicationPacket {

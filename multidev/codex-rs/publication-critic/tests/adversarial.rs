@@ -59,7 +59,7 @@ fn test_packet(expected: &ServiceDescriptor) -> PublicationPacket {
 fn test_client(endpoint: SocketAddr, expected: ServiceDescriptor) -> PublicationCriticClient {
     let config = ClientConfig::new(endpoint, expected, TEST_TIMEOUT, TEST_TIMEOUT)
         .expect("loopback test client configuration must be valid");
-    PublicationCriticClient::new(config)
+    PublicationCriticClient::new(config).expect("validated client configuration must be accepted")
 }
 
 async fn bind_peer() -> (TcpListener, SocketAddr) {
@@ -163,7 +163,7 @@ async fn oversized_response_prefix_is_rejected_before_body_allocation() {
     let expected = test_descriptor();
     let oversized = expected
         .limits
-        .response_bytes
+        .response_bytes()
         .checked_add(1)
         .expect("test response cap must be incrementable");
     let peer_task = tokio::spawn(async move {
