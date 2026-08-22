@@ -10,11 +10,15 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use codex_rollout_trace::ExecutionStatus;
+use codex_rollout_trace::OutputRenderObservation;
+use codex_rollout_trace::OutputRenderSurface;
 use codex_rollout_trace::ToolDispatchInvocation;
 use codex_rollout_trace::ToolDispatchPayload;
 use codex_rollout_trace::ToolDispatchRequester;
 use codex_rollout_trace::ToolDispatchResult;
 use codex_rollout_trace::ToolDispatchTraceContext;
+use codex_tools::ToolOutputRenderMetadata;
+use codex_tools::ToolOutputRenderTarget;
 
 /// Keeps registry early-return paths paired with trace end events.
 pub(crate) struct ToolDispatchTrace {
@@ -97,15 +101,49 @@ fn tool_dispatch_result(
     payload: &ToolPayload,
     result: &dyn ToolOutput,
 ) -> Option<ToolDispatchResult> {
+    let (surface, target) = match invocation.source {
+        ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage => (
+            OutputRenderSurface::DirectModel,
+            ToolOutputRenderTarget::DirectModel,
+        ),
+        ToolCallSource::CodeMode { .. } => (
+            OutputRenderSurface::CodeModeRuntime,
+            ToolOutputRenderTarget::CodeModeRuntime,
+        ),
+    };
+    let output_render = result
+        .output_render_metadata(target)
+        .map(|metadata| output_render_observation(surface, metadata));
     match invocation.source {
         ToolCallSource::Direct | ToolCallSource::DirectPlaintextMessage => {
             Some(ToolDispatchResult::DirectResponse {
                 response_item: result.to_response_item(call_id, payload),
+                output_render,
             })
         }
         ToolCallSource::CodeMode { .. } => Some(ToolDispatchResult::CodeModeResponse {
             value: result.code_mode_result(payload),
+            output_render,
         }),
+    }
+}
+
+pub(crate) fn output_render_observation(
+    surface: OutputRenderSurface,
+    metadata: ToolOutputRenderMetadata,
+) -> OutputRenderObservation {
+    OutputRenderObservation {
+        surface,
+        source_text_bytes: metadata.source_text_bytes as u64,
+        collection_omitted_bytes: metadata.collection_omitted_bytes as u64,
+        requested_max_output_tokens: metadata
+            .requested_max_output_tokens
+            .map(|value| value as u64),
+        effective_max_output_tokens: metadata
+            .effective_max_output_tokens
+            .map(|value| value as u64),
+        returned_text_bytes: metadata.returned_text_bytes as u64,
+        presentation_truncated: metadata.presentation_truncated,
     }
 }
 

@@ -40,6 +40,7 @@ use crate::tools::router::ToolCallSource;
 use crate::unified_exec::resolve_max_tokens;
 use codex_protocol::openai_models::ToolMode;
 use codex_tools::ToolName;
+use codex_tools::ToolOutputRenderMetadata;
 use codex_utils_audio::estimate_audio_token_count;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::formatted_truncate_text_content_items_with_policy;
@@ -225,45 +226,63 @@ pub(super) async fn handle_runtime_response(
     response: RuntimeResponse,
     max_output_tokens: Option<usize>,
     started_at: std::time::Instant,
+    capture_output_render: bool,
 ) -> Result<FunctionToolOutput, String> {
     let script_status = format_script_status(&response);
-
-    match response {
-        RuntimeResponse::Yielded { content_items, .. } => {
-            let mut content_items = into_function_call_output_content_items(content_items);
-            sanitize_runtime_image_detail(exec.turn.as_ref(), &mut content_items);
-            content_items = truncate_code_mode_result(content_items, max_output_tokens);
-            prepend_script_status(&mut content_items, &script_status, started_at.elapsed());
-            Ok(FunctionToolOutput::from_content(content_items, Some(true)))
-        }
-        RuntimeResponse::Terminated { content_items, .. } => {
-            let mut content_items = into_function_call_output_content_items(content_items);
-            sanitize_runtime_image_detail(exec.turn.as_ref(), &mut content_items);
-            content_items = truncate_code_mode_result(content_items, max_output_tokens);
-            prepend_script_status(&mut content_items, &script_status, started_at.elapsed());
-            Ok(FunctionToolOutput::from_content(content_items, Some(true)))
-        }
+    let (content_items, error_text) = match response {
+        RuntimeResponse::Yielded { content_items, .. }
+        | RuntimeResponse::Terminated { content_items, .. } => (content_items, None),
         RuntimeResponse::Result {
             content_items,
             error_text,
             ..
-        } => {
-            let mut content_items = into_function_call_output_content_items(content_items);
-            sanitize_runtime_image_detail(exec.turn.as_ref(), &mut content_items);
-            let success = error_text.is_none();
-            if let Some(error_text) = error_text {
-                content_items.push(FunctionCallOutputContentItem::InputText {
-                    text: format!("Script error:\n{error_text}"),
-                });
-            }
-            content_items = truncate_code_mode_result(content_items, max_output_tokens);
-            prepend_script_status(&mut content_items, &script_status, started_at.elapsed());
-            Ok(FunctionToolOutput::from_content(
-                content_items,
-                Some(success),
-            ))
-        }
+        } => (content_items, error_text),
+    };
+    let mut content_items = into_function_call_output_content_items(content_items);
+    sanitize_runtime_image_detail(exec.turn.as_ref(), &mut content_items);
+    let success = error_text.is_none();
+    if let Some(error_text) = error_text {
+        content_items.push(FunctionCallOutputContentItem::InputText {
+            text: format!("Script error:\n{error_text}"),
+        });
     }
+    Ok(finalize_runtime_output(
+        content_items,
+        success,
+        max_output_tokens,
+        &script_status,
+        started_at.elapsed(),
+        capture_output_render,
+    ))
+}
+
+fn finalize_runtime_output(
+    content_items: Vec<FunctionCallOutputContentItem>,
+    success: bool,
+    max_output_tokens: Option<usize>,
+    script_status: &str,
+    elapsed: Duration,
+    capture_output_render: bool,
+) -> FunctionToolOutput {
+    let source_text_bytes = capture_output_render.then(|| text_content_bytes(&content_items));
+    let (mut content_items, presentation_truncated) =
+        truncate_code_mode_result(content_items, max_output_tokens, capture_output_render);
+    prepend_script_status(&mut content_items, script_status, elapsed);
+    let output = FunctionToolOutput::from_content(content_items, Some(success));
+    let (Some(source_text_bytes), Some(presentation_truncated)) =
+        (source_text_bytes, presentation_truncated)
+    else {
+        return output;
+    };
+    let metadata = ToolOutputRenderMetadata {
+        source_text_bytes,
+        collection_omitted_bytes: 0,
+        requested_max_output_tokens: max_output_tokens,
+        effective_max_output_tokens: Some(resolve_max_tokens(max_output_tokens)),
+        returned_text_bytes: text_content_bytes(&output.body),
+        presentation_truncated,
+    };
+    output.with_output_render_metadata(metadata)
 }
 
 fn sanitize_runtime_image_detail(turn: &TurnContext, items: &mut [FunctionCallOutputContentItem]) {
@@ -299,19 +318,38 @@ fn prepend_script_status(
 fn truncate_code_mode_result(
     items: Vec<FunctionCallOutputContentItem>,
     max_output_tokens: Option<usize>,
-) -> Vec<FunctionCallOutputContentItem> {
+    capture_output_render: bool,
+) -> (Vec<FunctionCallOutputContentItem>, Option<bool>) {
     let max_output_tokens = resolve_max_tokens(max_output_tokens);
     let policy = TruncationPolicy::Tokens(max_output_tokens);
     if items
         .iter()
         .all(|item| matches!(item, FunctionCallOutputContentItem::InputText { .. }))
     {
-        let (truncated_items, _) =
+        let (truncated_items, original_token_count) =
             formatted_truncate_text_content_items_with_policy(&items, policy);
-        return truncated_items;
+        return (
+            truncated_items,
+            capture_output_render.then_some(original_token_count.is_some()),
+        );
     }
 
-    truncate_function_output_items_with_policy(&items, policy, estimate_audio_token_count)
+    let truncated =
+        truncate_function_output_items_with_policy(&items, policy, estimate_audio_token_count);
+    let changed = capture_output_render.then(|| truncated != items);
+    (truncated, changed)
+}
+
+fn text_content_bytes(items: &[FunctionCallOutputContentItem]) -> usize {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            FunctionCallOutputContentItem::InputText { text } => Some(text.len()),
+            FunctionCallOutputContentItem::InputImage { .. }
+            | FunctionCallOutputContentItem::InputAudio { .. }
+            | FunctionCallOutputContentItem::EncryptedContent { .. } => None,
+        })
+        .sum()
 }
 
 async fn call_nested_tool(
@@ -412,12 +450,14 @@ fn build_freeform_tool_payload(
 #[cfg(test)]
 mod tests {
     use super::build_nested_tool_payload;
+    use super::finalize_runtime_output;
     use super::truncate_code_mode_result;
     use crate::tools::context::ToolPayload;
     use codex_code_mode::CodeModeToolKind;
     use codex_protocol::models::FunctionCallOutputContentItem;
     use codex_tools::ToolName;
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn build_nested_tool_payload_uses_function_kind() {
@@ -460,15 +500,18 @@ mod tests {
         }];
 
         assert_eq!(
-            truncate_code_mode_result(items, Some(5)),
-            vec![FunctionCallOutputContentItem::InputText {
-                text: concat!(
-                    "Warning: truncated output (original token count: 10)\n",
-                    "Total output lines: 1\n\n",
-                    "0123456789…5 tokens truncated…0123456789"
-                )
-                .to_string(),
-            }]
+            truncate_code_mode_result(items, Some(5), true),
+            (
+                vec![FunctionCallOutputContentItem::InputText {
+                    text: concat!(
+                        "Warning: truncated output (original token count: 10)\n",
+                        "Total output lines: 1\n\n",
+                        "0123456789…5 tokens truncated…0123456789"
+                    )
+                    .to_string(),
+                }],
+                Some(true),
+            )
         );
     }
 
@@ -479,10 +522,41 @@ mod tests {
         }];
 
         assert_eq!(
-            truncate_code_mode_result(items, Some(5)),
-            vec![FunctionCallOutputContentItem::InputText {
-                text: "[omitted 1 audio items ...]".to_string(),
-            }]
+            truncate_code_mode_result(items, Some(5), true),
+            (
+                vec![FunctionCallOutputContentItem::InputText {
+                    text: "[omitted 1 audio items ...]".to_string(),
+                }],
+                Some(true),
+            )
         );
+    }
+
+    #[test]
+    fn disabled_trace_keeps_output_identical_without_render_metadata() {
+        let items = vec![FunctionCallOutputContentItem::InputText {
+            text: "0123456789012345678901234567890123456789".to_string(),
+        }];
+        let observed = finalize_runtime_output(
+            items.clone(),
+            true,
+            Some(5),
+            "Script completed",
+            Duration::from_millis(10),
+            true,
+        );
+        let disabled = finalize_runtime_output(
+            items,
+            true,
+            Some(5),
+            "Script completed",
+            Duration::from_millis(10),
+            false,
+        );
+
+        assert_eq!(disabled.body, observed.body);
+        assert_eq!(disabled.success, observed.success);
+        assert!(disabled.render_metadata().is_none());
+        assert!(observed.render_metadata().is_some());
     }
 }

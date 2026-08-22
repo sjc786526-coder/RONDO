@@ -210,6 +210,7 @@ class NativeBundleBuilder:
         result: object,
         result_mode: str = "code",
         runtime_end: dict | None = None,
+        output_render: dict | None = None,
         thread_id: str | None = None,
         turn_id: str | None = None,
     ) -> None:
@@ -246,7 +247,11 @@ class NativeBundleBuilder:
                 "model_visible_call_id": f"model-{tool_id}" if result_mode == "direct" else None,
                 "code_mode_runtime_tool_id": f"runtime-{tool_id}" if result_mode == "code" else None,
                 "requester": requester,
-                "kind": {"type": kind, **({"name": name} if kind == "other" else {})},
+                "kind": {
+                    "type": kind,
+                    **({"name": name} if kind == "other" else {}),
+                    **({"server": "test-server", "tool": name} if kind == "mcp" else {}),
+                },
                 "summary": {
                     "type": "generic",
                     "label": name,
@@ -298,6 +303,8 @@ class NativeBundleBuilder:
                 },
             }
         )
+        if output_render is not None:
+            wrapped["output_render"] = output_render
         result_ref = self.payload("tool_result", wrapped)
         self.event(
             {
@@ -1014,6 +1021,20 @@ class TeamLensReducerTests(unittest.TestCase):
             self._write_events(missing_cell, events)
             with self.assertRaisesRegex(BundleError, "required identity"):
                 reduce_bundle(missing_cell, "codex")
+
+            missing_exec_delivery = make_bundle(
+                root / "missing-exec-delivery", product="codex"
+            )
+            events = self._events(missing_exec_delivery)
+            cell_start = next(
+                row
+                for row in events
+                if row["payload"]["type"] == "code_cell_started"
+            )
+            cell_start["payload"] = {"type": "code_mode_exec_output_delivered"}
+            self._write_events(missing_exec_delivery, events)
+            with self.assertRaisesRegex(BundleError, "required identity"):
+                reduce_bundle(missing_exec_delivery, "codex")
 
             bad_mcp = make_bundle(root / "bad-mcp", product="codex")
             events = self._events(bad_mcp)

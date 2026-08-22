@@ -34,6 +34,10 @@ from ..contracts import (
     product_for_manifest,
 )
 from ..contracts import Side
+from ..harness_observation import HarnessObservationError
+from ..harness_observation import LOCAL_ROLLOUT_TRACE_ROOT
+from ..harness_observation import OBSERVATION_FILE_NAME
+from ..harness_observation import project_task_observation
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
     FIX_GIT_TASK_ID,
@@ -447,6 +451,11 @@ def publish_terminal_bench_result(
             or set(budget_requests) != set(metadata_request_ids)
         ):
             raise HarborResultError("completed budget requests differ from API metadata")
+    harness_observation = _project_local_harness_observation(
+        live_result,
+        side=side,
+        metadata_path=metadata_path,
+    )
     writer = writer or ArtifactWriter(
         paths, run_id, results_worktree_root=results_worktree_root
     ).start()
@@ -464,6 +473,8 @@ def publish_terminal_bench_result(
         publication=publication,
     )
     writer.write_json("run-summary.json", summary)
+    if harness_observation is not None:
+        writer.write_json(OBSERVATION_FILE_NAME, harness_observation)
     if parsed.trial_result:
         _write_harbor_evidence(
             writer,
@@ -534,6 +545,33 @@ def publish_terminal_bench_result(
     }
     _validate_terminal_bench_record(record)
     return writer.finalize(record, secrets=live_result.redaction_secrets)
+
+
+def _project_local_harness_observation(
+    live_result: BudgetedTerminalBenchResult,
+    *,
+    side: Side,
+    metadata_path: Path,
+) -> dict[str, Any] | None:
+    """Project only an explicitly opted-in Local run; defaults stay unchanged."""
+
+    adapter = getattr(live_result.prepared, "adapter", None)
+    trace_root = getattr(adapter, "rollout_trace_root", None)
+    if trace_root is None:
+        return None
+    if (
+        trace_root != LOCAL_ROLLOUT_TRACE_ROOT
+        or side is not Side.RONDO
+        or live_result.prepared.spec.effective_product() is not Product.RONDO_LOCAL
+    ):
+        raise HarborResultError("harness observation trace is not a RONDO Local opt-in")
+    try:
+        return project_task_observation(
+            live_result.harbor.trial_dir / "agent" / "rollout-trace",
+            metadata_path,
+        )
+    except HarnessObservationError as exc:
+        raise HarborResultError("RONDO Local harness observation is incomplete") from exc
 
 
 def classify_terminal_bench_result(

@@ -327,6 +327,7 @@ async fn build_post_tool_use_payload_uses_tool_output_wire_value() {
         body: vec![],
         success: Some(true),
         post_tool_use_response: Some(json!("shell output")),
+        output_render_metadata: None,
     };
     let handler = ShellCommandHandler::from(codex_tools::ShellCommandBackendConfig::Classic);
     let (session, turn) = make_session_and_context().await;

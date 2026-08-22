@@ -26,6 +26,7 @@ use crate::model::ToolCallKind;
 use crate::model::ToolCallSummary;
 use crate::payload::RawPayloadKind;
 use crate::payload::RawPayloadRef;
+use crate::raw_event::OutputRenderObservation;
 use crate::raw_event::RawToolCallRequester;
 use crate::raw_event::RawTraceEventContext;
 use crate::raw_event::RawTraceEventPayload;
@@ -99,8 +100,14 @@ pub enum ToolDispatchPayload {
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ToolDispatchResult {
-    DirectResponse { response_item: ResponseInputItem },
-    CodeModeResponse { value: JsonValue },
+    DirectResponse {
+        response_item: ResponseInputItem,
+        output_render: Option<OutputRenderObservation>,
+    },
+    CodeModeResponse {
+        value: JsonValue,
+        output_render: Option<OutputRenderObservation>,
+    },
 }
 
 /// Raw invocation payload for the canonical Codex tool boundary.
@@ -117,9 +124,13 @@ struct DispatchedToolTraceRequest<'a> {
 enum DispatchedToolTraceResponse<'a> {
     DirectResponse {
         response_item: &'a ResponseInputItem,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_render: Option<&'a OutputRenderObservation>,
     },
     CodeModeResponse {
         value: &'a JsonValue,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_render: Option<&'a OutputRenderObservation>,
     },
     Error {
         error: String,
@@ -166,12 +177,20 @@ impl ToolDispatchTraceContext {
             return;
         };
         let response = match &result {
-            ToolDispatchResult::DirectResponse { response_item } => {
-                DispatchedToolTraceResponse::DirectResponse { response_item }
-            }
-            ToolDispatchResult::CodeModeResponse { value } => {
-                DispatchedToolTraceResponse::CodeModeResponse { value }
-            }
+            ToolDispatchResult::DirectResponse {
+                response_item,
+                output_render,
+            } => DispatchedToolTraceResponse::DirectResponse {
+                response_item,
+                output_render: output_render.as_ref(),
+            },
+            ToolDispatchResult::CodeModeResponse {
+                value,
+                output_render,
+            } => DispatchedToolTraceResponse::CodeModeResponse {
+                value,
+                output_render: output_render.as_ref(),
+            },
         };
         append_tool_call_ended(context, status, &response);
     }

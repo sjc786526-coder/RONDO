@@ -22,6 +22,7 @@ MAX_PAYLOAD_BYTES = 32 * 1024 * 1024
 _KNOWN_EVENT_TYPES = {
     "rollout_started",
     "rollout_ended",
+    "trace_capture_ended",
     "thread_started",
     "thread_ended",
     "codex_turn_started",
@@ -38,6 +39,8 @@ _KNOWN_EVENT_TYPES = {
     "code_cell_started",
     "code_cell_initial_response",
     "code_cell_ended",
+    "code_cell_output_rendered",
+    "code_mode_exec_output_delivered",
     "compaction_request_started",
     "compaction_request_completed",
     "compaction_request_failed",
@@ -138,6 +141,8 @@ def _validate_raw_event_shape(event: dict[str, Any]) -> None:
         "code_cell_started": ("runtime_cell_id", "model_visible_call_id"),
         "code_cell_initial_response": ("runtime_cell_id",),
         "code_cell_ended": ("runtime_cell_id",),
+        "code_cell_output_rendered": ("runtime_cell_id",),
+        "code_mode_exec_output_delivered": ("model_visible_call_id",),
         "compaction_request_started": (
             "compaction_id",
             "compaction_request_id",
@@ -194,6 +199,11 @@ def _validate_raw_event_shape(event: dict[str, Any]) -> None:
     allowed_statuses = status_fields.get(kind)
     if allowed_statuses is not None and payload.get("status") not in allowed_statuses:
         raise BundleError("rollout trace event has an invalid native status")
+
+    if kind == "trace_capture_ended":
+        dropped = payload.get("dropped_operations")
+        if not _is_int(dropped) or dropped < 0:
+            raise BundleError("rollout trace capture health is invalid")
 
     if kind == "tool_call_started":
         _validate_tool_start_shape(payload)
@@ -287,7 +297,7 @@ def reduce_bundle_with_root_session(
 
     if product not in PRODUCTS:
         raise BundleError("unsupported product identity")
-    reader = _BundleReader(bundle_dir)
+    reader = NativeBundleReader(bundle_dir)
     reducer = _Reducer(reader, product)
     view = reducer.reduce()
     if reducer.root_session_kind is None:
@@ -304,7 +314,8 @@ def write_team_view(bundle_dir: Path, product: str, output_path: Path) -> dict[s
     return view
 
 
-class _BundleReader:
+class NativeBundleReader:
+    """Strict reader shared by body-free projections of native trace bundles."""
     def __init__(self, bundle_dir: Path) -> None:
         supplied = Path(bundle_dir)
         if supplied.is_symlink() or not supplied.is_dir():
@@ -433,7 +444,7 @@ class _BundleReader:
 
     @staticmethod
     def _read_json_object(path: Path, *, label: str, limit: int) -> dict[str, Any]:
-        value = _BundleReader._read_json_value(path, label=label, limit=limit)
+        value = NativeBundleReader._read_json_value(path, label=label, limit=limit)
         if not isinstance(value, dict):
             raise BundleError(f"{label} is not an object")
         return value
@@ -451,7 +462,7 @@ class _BundleReader:
 
 
 class _Reducer:
-    def __init__(self, reader: _BundleReader, product: str) -> None:
+    def __init__(self, reader: NativeBundleReader, product: str) -> None:
         self.reader = reader
         self.product = product
         self.agents: dict[str, dict[str, Any]] = {}
@@ -505,6 +516,12 @@ class _Reducer:
             self.rollout_ended = True
             self.rollout_status = _execution_status(payload.get("status"))
             self.rollout_ended_at = timestamp
+        elif kind in {
+            "trace_capture_ended",
+            "code_cell_output_rendered",
+            "code_mode_exec_output_delivered",
+        }:
+            pass
         elif kind == "thread_started":
             self._start_thread(event)
         elif kind == "thread_ended":
@@ -1060,8 +1077,13 @@ class _Reducer:
 
     def _team_view(self) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
         if self.team is None:
+            reason = (
+                "codex_has_no_team_state"
+                if self.product == "codex"
+                else "local_has_no_team_state"
+            )
             rows = {
-                name: capability("not_applicable", "codex_has_no_team_state")
+                name: capability("not_applicable", reason)
                 for name in (
                     "team_revisions",
                     "team_projections",

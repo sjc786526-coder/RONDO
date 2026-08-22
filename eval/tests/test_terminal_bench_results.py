@@ -35,6 +35,10 @@ from rondo_eval.contracts import (  # noqa: E402
     product_for_manifest,
 )
 from rondo_eval.docker_supervisor import DockerSupervisionError  # noqa: E402
+from rondo_eval.harness_observation import (  # noqa: E402
+    LOCAL_ROLLOUT_TRACE_ROOT,
+    OBSERVATION_FILE_NAME,
+)
 from rondo_eval.runtime_bridge import RuntimeBridgeError  # noqa: E402
 from rondo_eval.terminal_bench.live import (  # noqa: E402
     BudgetedTerminalBenchResult,
@@ -63,6 +67,7 @@ from rondo_eval.terminal_bench.results import (  # noqa: E402
     publish_terminal_bench_failure,
     publish_terminal_bench_result,
 )
+from rondo_eval.terminal_bench import results as results_module  # noqa: E402
 from rondo_eval.terminal_bench.runner import (  # noqa: E402
     HostHarborResult,
     TerminalBenchRunError,
@@ -2626,6 +2631,102 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
                 "evidence_dir": AUTO_REVIEW_EVIDENCE_DIR,
             },
         )
+
+    def test_local_trace_opt_in_publishes_only_the_fixed_safe_projection(self) -> None:
+        identity = self._frozen_campaign_identity(product=Product.RONDO_LOCAL)
+        slot = self._frozen_campaign_slot(identity, side=Side.RONDO)
+        run_id = slot.run_id
+        metadata = self.root / "work" / "local-observation-api-metadata.json"
+        self._write_metadata(metadata, "main", "main", "main")
+        trace_root = self.jobs / "agent" / "rollout-trace"
+        trace_root.mkdir(parents=True)
+        (trace_root / "private-source.txt").write_text(
+            "PROMPT_AND_COMMAND_BODY_MUST_NOT_BE_ARCHIVED\n", encoding="utf-8"
+        )
+        live_result = self._product_live_result(
+            run_id,
+            side=Side.RONDO,
+            product=Product.RONDO_LOCAL,
+        )
+        object.__setattr__(
+            live_result,
+            "prepared",
+            SimpleNamespace(
+                spec=live_result.prepared.spec,
+                adapter=SimpleNamespace(rollout_trace_root=LOCAL_ROLLOUT_TRACE_ROOT),
+            ),
+        )
+        safe_projection = {
+            "schema_version": 2,
+            "kind": "rondo_local_harness_observation",
+        }
+
+        with patch(
+            "rondo_eval.terminal_bench.results.project_task_observation",
+            return_value=safe_projection,
+        ) as project:
+            target = publish_terminal_bench_result(
+                RepoPaths(self.root, self.root),
+                results_worktree_root=self.root,
+                run_id=run_id,
+                side=Side.RONDO,
+                git_commit="e" * 40,
+                eval_harness_commit="f" * 40,
+                live_result=live_result,
+                parsed=parse_single_task_result(self.jobs, host_returncode=0),
+                metadata_path=metadata,
+                publication=self._frozen_campaign_publication(
+                    identity,
+                    slot,
+                    campaign_product=Product.RONDO_LOCAL,
+                ),
+                campaign_identity=identity,
+            )
+
+        project.assert_called_once_with(trace_root, metadata)
+        self.assertEqual(
+            json.loads((target / OBSERVATION_FILE_NAME).read_text("utf-8")),
+            safe_projection,
+        )
+        self.assertFalse((target / "harbor/agent/rollout-trace").exists())
+        self.assertNotIn(
+            "PROMPT_AND_COMMAND_BODY_MUST_NOT_BE_ARCHIVED",
+            "\n".join(
+                path.read_text("utf-8", errors="ignore")
+                for path in target.rglob("*")
+                if path.is_file()
+            ),
+        )
+
+    def test_local_trace_opt_in_stops_when_safe_projection_is_missing(self) -> None:
+        run_id = "20260814-010000099-tb-rondo-r1"
+        live_result = self._product_live_result(
+            run_id,
+            side=Side.RONDO,
+            product=Product.RONDO_LOCAL,
+        )
+        metadata = self.root / "missing-observation-metadata.json"
+        self.assertIsNone(
+            results_module._project_local_harness_observation(
+                live_result,
+                side=Side.RONDO,
+                metadata_path=metadata,
+            )
+        )
+        object.__setattr__(
+            live_result,
+            "prepared",
+            SimpleNamespace(
+                spec=live_result.prepared.spec,
+                adapter=SimpleNamespace(rollout_trace_root=LOCAL_ROLLOUT_TRACE_ROOT),
+            ),
+        )
+        with self.assertRaisesRegex(HarborResultError, "observation is incomplete"):
+            results_module._project_local_harness_observation(
+                live_result,
+                side=Side.RONDO,
+                metadata_path=metadata,
+            )
 
     def test_the_frozen_upstream_row_carries_no_product_identity(self) -> None:
         record, summary = self._publish(side=Side.CODEX, product=None)

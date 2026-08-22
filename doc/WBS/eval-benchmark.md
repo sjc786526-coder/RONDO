@@ -1,6 +1,6 @@
 # 方向 0：量化测评基准
 
-最后更新：2026-08-22 ｜ 状态：**设施保留，当前无已排期 campaign** ｜ 当前默认对象：RONDO Local（`mydev/`）｜
+最后更新：2026-08-22 ｜ 状态：**设施保留，当前无 active campaign** ｜ 当前默认被测源码：`mydev/` ｜
 Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 
 ## 当前定位
@@ -11,8 +11,22 @@ Codex 基线：`v0.147.0` ｜ 顶层路线见 `doc/WBS.md`
 Plan 051 已完成首次 schema v7 正式 canary，并验证稳定创建、运行、恢复、结算、发布与相对基线入口。
 完成过程、数字、费用和资源证据统一见 `doc/WBS-COMPLETED.md`；本页不再维护历史 campaign 流水。
 
-当前没有 active identity、已排期任务、可继承预算或默认待跑样本。未来新 campaign 必须由具体开发任务触发，
-重新冻结被测对象和运行合同，并取得相应授权。
+当前没有 active identity、可继承预算或默认待跑样本。方向 1 已确定下一有界观测复测，但尚未建立独立 ExecPlan、
+campaign 身份或取得真实 API、Docker 与费用授权。
+
+## Plan 052 观测投影边界
+
+Plan 052 为方向 1 增加了默认关闭的原生 trace opt-in、API metadata/trace 严格核对和 schema-v2 body-free
+任务级投影，并使用 v28 历史资产完成首轮普查：
+
+- 公共投影只保存安全聚合值；原始 trace、prompt、响应和工具正文不进入结果归档。
+- public `exec` 早期错误只有交付事实、没有可靠 render 时明确记为覆盖缺失，不再误计为“零次输出且已测量”。
+- v28 中 C1/C2 只有弱信号，C11 当前样本未观察到，C7 不可测，因此没有选择行为优化。
+- 方向 1 的下一复测直接复用这条事实链；E-A 当前不恢复。只有已选机制确需反复低成本实验时，才重新评估最小
+  replay 能力。
+
+日期冻结证据见 `doc/audit-snapshots/2026-08-22-rondo-local-harness-bottleneck-census.md`，方向内运行合同和
+候选停止门见 `doc/WBS/teacher-harness-study.md`。
 
 ## 现行设施合同
 
@@ -22,24 +36,25 @@ Plan 051 已完成首次 schema v7 正式 canary，并验证稳定创建、运�
    receipt，机械核对 task-independent 请求分区。任一侧不对称时在预算预留和上游转发前 fail-closed。
 3. **执行对称**：模型、effort、provider profile、deadline、任务与镜像一致，基础轮按任务交错；不能用人工说明
    替代机器绑定。
-4. **判据分层**：A/A 观测形成不一致预算 `sigma`；跨侧聚合差异要求 `delta <= sigma`，并另报 RONDO
-   全败而上游全过的方向性兜底。差异题每侧总观测数须在运行前冻结为不少于 3 的奇数，聚合固定为严格多数；
-   每轮最终 infra 超过 2 项或共同有效任务少于 8 项时 blocked。各子门分别报告，合同不成立时不解释产品能力。
+4. **判据分层**：A/A 观测形成不一致预算 `sigma`；跨侧聚合差异要求 `delta <= sigma`，并另报方向性兜底。
+   差异题重复数、聚合公式、共同有效任务下限和 infra 门在运行前冻结；各子门分别报告，合同不成立时不解释产品能力。
 5. **预算与恢复**：wire、基础轮、条件重复和 infra attempts 全部计入该任务的独立预算；crash/resume 不重置费用。
    passed/failed 自动关闭预算并退役 active pointer，blocked 只由显式 successor 承接。
-6. **结果语义**：有效任务失败、reward 0、infra、skip 和未运行保持原语义；不得按成绩换题、删题、补跑或改分母。
+6. **结果语义**：有效任务失败、reward 0、infra、skip、未运行与不可测保持原语义；不得按成绩换题、删题、补跑、
+   改分母或把缺失计为零。
 7. **数据边界**：公共结果保持 body-free；原始请求、响应、trace 和隐藏集留在规定的本地私有命名空间。
-8. **适用范围**：`sigma` / `delta` 等机械判据只属于本设施自己的等条件 A/A、A/B 比较，不外推到其他里程碑。
+8. **适用范围**：`sigma` / `delta` 等公平比较判据只属于本设施自己的等条件 A/A、A/B 比较；方向 1 的单侧
+   有界观测复测使用其独立合同，不冒充双侧能力比较。
 
 稳定入口为 `just eval-plan051 initialize|prepare|preflight|run|resume|finalize|compare`。这里的命名是保留的
-设施入口，不表示 Plan 051 的历史 identity 或授权仍可使用。新任务必须提供新的 campaign/batch、Local source
+设施入口，不表示 Plan 051 的历史 identity 或授权仍可使用。新任务必须提供新的 campaign/batch、被测 source
 commit 与 manifest、comparison、价格日期及独立 task-budget ID/cap。
 
 ## 与其他方向的关系
 
-- 方向 1 重新启动时，由新任务决定是否需要离线回放或其他低成本测评轨；旧 E-A A1—A7 拆分不再是当前路线。
+- 方向 1 已决定当前不恢复 E-A；下一 10 题 × 2 轮复测直接复用 Plan 052 的原生事实投影。
 - 已永久收口的方向 2 不再消费本方向的新工作包；其历史 shadow 结果保持原身份。
-- RONDO Multi 的专用协作测评不自动并入方向 0；如三期需要复用公共设施，应在三期 WBS 中显式定义接口。
+- 方向 3 的专用协作测评不自动并入方向 0；如需复用公共设施，应在方向 3 WBS 中显式定义接口。
 - 日常回归由测试体系承担，不借测评设施兜底。
 
 ## 新任务授权与验收边界

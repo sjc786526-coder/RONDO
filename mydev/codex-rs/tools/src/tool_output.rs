@@ -12,6 +12,24 @@ const TELEMETRY_PREVIEW_MAX_BYTES: usize = 2 * 1024;
 const TELEMETRY_PREVIEW_MAX_LINES: usize = 64;
 const TELEMETRY_PREVIEW_TRUNCATION_NOTICE: &str = "[... telemetry preview truncated ...]";
 
+/// Caller surface used when a tool output computes body-free render metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ToolOutputRenderTarget {
+    DirectModel,
+    CodeModeRuntime,
+}
+
+/// Body-free facts captured at the tool output's native render boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ToolOutputRenderMetadata {
+    pub source_text_bytes: usize,
+    pub collection_omitted_bytes: usize,
+    pub requested_max_output_tokens: Option<usize>,
+    pub effective_max_output_tokens: Option<usize>,
+    pub returned_text_bytes: usize,
+    pub presentation_truncated: bool,
+}
+
 /// Model-facing output contract returned by executable tool runtimes.
 pub trait ToolOutput: Send {
     fn log_preview(&self) -> String;
@@ -50,6 +68,13 @@ pub trait ToolOutput: Send {
     fn code_mode_result(&self, payload: &ToolPayload) -> JsonValue {
         response_input_to_code_mode_result(self.to_response_item("", payload))
     }
+
+    fn output_render_metadata(
+        &self,
+        _target: ToolOutputRenderTarget,
+    ) -> Option<ToolOutputRenderMetadata> {
+        None
+    }
 }
 
 impl<T> ToolOutput for Box<T>
@@ -86,6 +111,13 @@ where
 
     fn code_mode_result(&self, payload: &ToolPayload) -> JsonValue {
         (**self).code_mode_result(payload)
+    }
+
+    fn output_render_metadata(
+        &self,
+        target: ToolOutputRenderTarget,
+    ) -> Option<ToolOutputRenderMetadata> {
+        (**self).output_render_metadata(target)
     }
 }
 

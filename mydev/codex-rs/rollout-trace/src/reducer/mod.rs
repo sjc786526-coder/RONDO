@@ -166,6 +166,7 @@ impl TraceReducer {
                 self.rollout.status = status;
                 self.rollout.ended_at_unix_ms = Some(event.wall_time_unix_ms);
             }
+            RawTraceEventPayload::TraceCaptureEnded { .. } => {}
             RawTraceEventPayload::ThreadStarted {
                 thread_id,
                 agent_path,
@@ -382,6 +383,8 @@ impl TraceReducer {
                     status,
                 )?;
             }
+            RawTraceEventPayload::CodeCellOutputRendered { .. } => {}
+            RawTraceEventPayload::CodeModeExecOutputDelivered { .. } => {}
             RawTraceEventPayload::CompactionRequestStarted {
                 compaction_id,
                 compaction_request_id,

@@ -15,7 +15,8 @@ from urllib.parse import urlsplit
 
 from .. import config as config_module
 from ..config import RuntimeConfig
-from ..contracts import BinaryManifest, Product, RunSpec, Side
+from ..contracts import BinaryManifest, ContractError, Product, RunSpec, Side
+from ..contracts import product_for_manifest
 from ..docker_supervisor import (
     ComposeRunContract,
     DockerCounter,
@@ -28,6 +29,7 @@ from ..docker_supervisor import (
     HostContainerContract,
 )
 from ..runtime_bridge import SubprocessDockerCommandRunner, SubprocessHostCommandRunner
+from ..harness_observation import LOCAL_ROLLOUT_TRACE_ROOT
 from .adapters import UploadBinaryAdapter, adapter_for, manifest_agent_kwargs
 from .freeze import (
     FIX_GIT_IMAGE_DIGEST,
@@ -116,6 +118,25 @@ class TerminalBenchRequest:
     developer_instructions_path: str | None = None
     developer_instructions_sha256: str | None = None
     rollout_trace_root: str | None = None
+
+
+def enable_local_harness_observation(
+    request: TerminalBenchRequest,
+) -> TerminalBenchRequest:
+    """Opt one RONDO Local request into the Plan 052 private trace source."""
+
+    try:
+        effective_product = product_for_manifest(request.side, request.binary)
+    except ContractError as exc:
+        raise TerminalBenchRunError("Local observation request has an invalid binary") from exc
+    if (
+        request.side is not Side.RONDO
+        or effective_product is not Product.RONDO_LOCAL
+        or request.product not in {None, Product.RONDO_LOCAL}
+        or request.rollout_trace_root not in {None, LOCAL_ROLLOUT_TRACE_ROOT}
+    ):
+        raise TerminalBenchRunError("Local observation can only enable the frozen Local trace root")
+    return replace(request, rollout_trace_root=LOCAL_ROLLOUT_TRACE_ROOT)
 
 
 @dataclass(frozen=True)

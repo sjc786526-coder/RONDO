@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-22（方向 1 Plan 052 与 RONDO Multi 三期按独立产品线推进）
+最后更新：2026-08-22（方向 1 Plan 052 已完成；方向 3 M3-A1 已完成，M3-B2a 已由 Plan 055 专用工作树承接）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -13,14 +13,21 @@
 `mydev/codex-rs/core/upstream-source-baseline.toml`。上游升级仍是未排期待办，启动时再冻结目标版本，
 不得混入普通功能任务。
 
-项目包含两套并列产品源码：RONDO Local（`mydev/`）与 RONDO Multi（`multidev/`）。当前方向状态如下：
+项目包含两套并列产品源码：`mydev/` 与 `multidev/`。当前方向状态如下：
 
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
-| 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前空闲 | 保留设施；没有已排期 campaign，历史结果见 COMPLETED |
-| 1：Harness 优化 | **Plan 052 瓶颈普查正在整改与复验，尚未主线整合** | 当前范围与完成门以方向 1 子 WBS 和 Plan 052 为准；不把旧候选顺序恢复为既定路线 |
+| 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
+| 1：Harness 优化 | **Plan 052 已完成；证据不足，未选择行为优化** | 下一唯一方向内工作包为 10 题 × 2 轮有界观测复测，须另建 ExecPlan 并授权真实 API、Docker 与 20 USD 上限 |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一期、第二期及其收口案例均已完成；**三期 M3-A1 产品合同已完成** | M3-A2 数据/评价设施与 M3-B2a 本地 Critic 服务可分别立项，尚未启动 |
+| 3：RONDO Multi | 第一、二期及其收口案例已完成；**三期 M3-A1 产品合同已完成** | M3-A2 数据/评价设施可独立立项；M3-B2a 已由 Plan 055 专用工作树承接，尚未主线整合 |
+
+### 方向命名口径
+
+- 后续规划、任务与汇报统一使用“方向 1”和“方向 3”，不再使用“Local 方向”指代方向 1。
+- `mydev/` 是方向 1 当前产品源码位置；`multidev/` 是方向 3 产品源码位置。目录名称不等于方向名称。
+- `RONDO Local` / `rondo-local` 仅在必须区分现有产品或运行身份时使用，不代表方向 2。方向 2 专指已经收口的
+  本地审批模型研究。
 
 最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行为 14,092 项：14,060 通过、31 失败、
 1 超时，Nextest 另列 23 项 ignored。此后未重跑全 workspace，因此这只是历史测试快照，不代表当前全绿，
@@ -28,24 +35,43 @@
 
 ## 2. 下一工作包与顺序
 
-**当前推进面分属两条独立产品线：方向 1 的 Plan 052 仍在整改与复验；方向 3 的 M3-A1 已完成，M3-A2 与 M3-B2a
-是可独立立项的后续工作包，尚未启动。**
+方向 1 与方向 3 是两套产品源码上的独立推进面，不互为默认前置。
 
-- 方向 1 当前只推进 Plan 052；其整改、复验和主线整合完成前，不从旧 WBS 候选自行追加新工作包，也不在本页提前宣称完成。
-- RONDO Multi 三期现分为 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 数据/训练链与
-  `M3-B2a → M3-B2b` 产品链并行推进；两链在 `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。详细边界见方向 3 子 WBS。
-- M3-A2 与 M3-B2a 不需互相等待，但各自启动前必须建立独立任务合同并取得相应授权；M3-A1 的完成不授权提前创建训练数据、
-  下载模型、运行付费训练或修改产品代码。
+### 方向 1：有界观测复测
+
+Plan 052 已完成默认关闭的原生 trace、安全任务级投影和 v28 历史普查。现有证据中 C1/C2 只有弱信号，
+C11 在当前样本未观察到，C7 不可测，因此没有选择行为优化。
+
+下一唯一的方向 1 工作包已经确定，但**尚未建立独立 ExecPlan、campaign 身份或取得执行授权**：
+
+- 使用同一冻结 10 题 canary，在 `mydev/` 被测对象上执行两个完整 round，共 20 个 run；main 为
+  `gpt-5.6-terra/medium`，Guardian 为 `gpt-5.6-terra/low`，费用硬上限 20 USD。
+- 唯一变量是为目标测量开启既有原生 trace，并在发布前生成 schema-v2 body-free 投影；不改变 prompt、输出、
+  compact、重试、Guardian、调度或其他产品行为。
+- 不运行 Codex 对照、validation、holdout、E-A 或条件补题。20/20 个预定 run 全部形成唯一完整投影才构成有效测量；
+  正式边界后不得替换 slot、换题、补题或改变分母。
+- 完整停止门、候选进入条件与无候选分支见 `doc/WBS/teacher-harness-study.md`。真实 API、Docker 和费用必须在
+  下一任务中一次明确授权，本次 Plan 052 的授权不延续。
+
+### 方向 3：Publication Critic 三期
+
+- M3-A1 产品合同已完成。三期分为 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 数据/训练链与
+  `M3-B2a → M3-B2b` 产品链，两链在 `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
+- M3-A2 与 M3-B2a 不需互相等待。M3-B2a 的 Plan 055 已在专用工作树提交任务合同，当前尚未合入主线；其实现、
+  验收和文档收口仍由该专用任务负责。
+- M3-A1 的完成不授权提前创建训练数据、下载模型、运行付费训练或改变 `team_publish` 产品行为。每个后续包仍须
+  按自身范围取得授权。
+
+方向 1 与方向 3 的只读研究、轻量代码和数据工作可以并行；本地重型 Cargo、Docker、真实本地模型加载/推理继续
+全局串行，并由实际进入实施的工作包协调共享资源。
+
 - 方向 0 的设施保持可用，但不自行创建新 campaign；任何真实 API、Docker 或新预算均需针对新任务重新授权。
-- 方向 2 永久收口，不作为方向 1 或 Multi 三期的前置、旁支或待恢复项目。
+- 方向 2 永久收口，不作为方向 1 或方向 3 的前置、旁支或待恢复项目。
 - 上游 Codex 基线升级继续保留为独立、不排期任务；只有用户明确启动时才进入规划。
-
-方向 1 与 Multi 三期没有产品依赖，可分别推进。Multi 的云端训练可与不占用本地重型资源的代码和数据工作并行；
-本地重型 Cargo、Docker、真实本地模型加载/推理继续全局串行，并由实际进入实施的工作包协调共享资源。
 
 ## 3. 方向关系
 
-- 方向 1 与 RONDO Multi 三期是两套产品上的独立工作，不互为默认前置；Multi 三期也不依赖已收口的方向 2。
+- 方向 1 在 `mydev/` 推进 Harness 优化；方向 3 在 `multidev/` 推进多智能体与 Publication Critic，不互相夹带实现。
 - 方向 0 是可复用设施，不再作为解锁其他方向的总闸门；只在具体任务需要时提供相称测评。
 - 方向 2 已永久收口，不参与后续路线，也不阻塞其他方向。
 - 所有方向只共享排期、API 预算、Docker、构建和本地模型等全局资源约束，重型操作保持串行。
@@ -56,9 +82,9 @@
 
 ```text
 RONDO/
-├── mydev/        # RONDO Local（沿用现名）
-├── multidev/     # RONDO Multi
-├── eval/         # 两条产品线可复用的通用测评设施
+├── mydev/        # 方向 1 当前产品源码（目录名沿用现状）
+├── multidev/     # 方向 3 产品源码
+├── eval/         # 两套产品可复用的通用测评设施
 ├── scripts/      # 共享构建锁与资源看门狗入口
 ├── eval-data/    # 本地重资产与私有运行数据，内部按产品分命名空间
 ├── test-data/    # 历史测试结果和数据
@@ -69,17 +95,17 @@ RONDO/
 
 ### 4.2 产品与分支边界
 
-- Local 与 Multi 地位相同，但核心源码独立；公共修复和外围设施按需复用，不追求提交级长期同步。
-- 单仓库、单长期 `main`；不为 Multi 维护永久产品分支。具体开发任务仍按 `AGENTS.md` 使用短期 worktree，
+- 两套产品地位相同，但核心源码独立；公共修复和外围设施按需复用，不追求提交级长期同步。
+- 单仓库、单长期 `main`；不为方向 3 维护永久产品分支。具体开发任务仍按 `AGENTS.md` 使用短期 worktree，
   除非用户明确要求直接在主工作区工作。
-- Local 任务原则上修改 `mydev/` 及必要共享文件；Multi 任务原则上修改 `multidev/` 及必要共享文件。
+- 方向 1 任务原则上修改 `mydev/` 及必要共享文件；方向 3 任务原则上修改 `multidev/` 及必要共享文件。
 - `eval/`、WBS 和其他共享权威文件尽量在同一时段由一个任务负责，避免并行任务互相覆盖。
 
 ### 4.3 磁盘与重型资源
 
 - 重型 Cargo 构建与测试必须经仓库根共享 `scripts/with-build-lock.sh` 或已接入它的 `just` 配方；
   `CARGO_TARGET_DIR` 必须位于项目根内并受看门狗监督。
-- Local 与 Multi 的重型构建、Docker、真实本地模型加载/推理全局串行；同一时刻只保留一个产品的热 target。
+- 两套产品的重型构建、Docker、真实本地模型加载/推理全局串行；同一时刻只保留一个产品的热 target。
 - 具体磁盘、Windows `C:`、内存、swap、Docker 增量和 fail-closed 阈值以根 `AGENTS.md` 为准，不使用 WSL
   虚拟容量代替宿主容量。
 
@@ -90,9 +116,9 @@ RONDO/
 
 ### 4.5 产品身份与历史资产
 
-- `product`（`rondo-local` / `rondo-multi`）表示产品，`side`（`rondo` / `codex`）表示比较侧；两者正交，
-  `codex` 不是产品取值。
-- Multi 身份必须贯通源码、构建、冻结 binary、manifest、adapter/RunSpec 与结果归档；唯一布局映射为
+- `product`（`rondo-local` / `rondo-multi`）表示既有运行产品身份，`side`（`rondo` / `codex`）表示比较侧；
+  两者正交，且都不替代方向 1/2/3 的规划名称。
+- 方向 3 身份必须贯通源码、构建、冻结 binary、manifest、adapter/RunSpec 与结果归档；唯一布局映射为
   `eval/rondo_eval/contracts.py` 的 `product_layout()`。
 - 历史结果、receipt、trace、冻结 plan 和审计材料保持原身份，只作为历史证据，不回填新字段、不冒充新任务基线。
 - crate 名与二进制名沿用上游（`codex-cli` / `codex`），便于与 `codex-source-code/` 直接比较。
@@ -121,7 +147,7 @@ RONDO/
 
 ## 7. 子 WBS 索引
 
-- `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施边界（当前空闲）
-- `doc/WBS/teacher-harness-study.md` —— 方向 1：等待用户重新定义并启动
+- `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施与方向 1 观测投影边界
+- `doc/WBS/teacher-harness-study.md` —— 方向 1：Plan 052 普查与后续有界复测
 - `doc/WBS/local-approval-model.md` —— 方向 2：已永久收口
 - `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：现行产品语义与三期 Publication Critic 长程路线

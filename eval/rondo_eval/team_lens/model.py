@@ -6,7 +6,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
-PRODUCTS = {"codex", "rondo-multi"}
+PRODUCTS = {"codex", "rondo-local", "rondo-multi"}
 CAPABILITY_STATUSES = {"available", "partial", "unsupported", "not_applicable"}
 EXECUTION_STATUSES = {"running", "completed", "failed", "cancelled", "aborted", "unknown"}
 CAPABILITY_NAMES = (
@@ -303,12 +303,12 @@ def validate_team_view(view: dict[str, Any]) -> None:
 
     product = source["product"]
     team = view.get("team")
-    if product == "codex":
+    if product != "rondo-multi":
         if team is not None:
-            raise TeamViewError("codex team state must be null")
+            raise TeamViewError("single-agent team state must be null")
         for name in CAPABILITY_NAMES:
             if name.startswith("team_") and availability[name]["status"] != "not_applicable":
-                raise TeamViewError("codex team capability must be not applicable")
+                raise TeamViewError("single-agent team capability must be not applicable")
     else:
         team_object = _dict(team, "team")
         _exact_keys(team_object, _TEAM_KEYS, "team")

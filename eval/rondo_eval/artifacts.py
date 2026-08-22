@@ -1056,7 +1056,7 @@ def _assert_artifact_tree_identity(root: Path, expected: object) -> None:
 
 
 def _read_index(
-    path: Path, *, common_root: Path
+    path: Path, *, common_root: Path, validate_private_summaries: bool = True
 ) -> tuple[bytes, list[dict[str, Any]]]:
     if not _path_present(path):
         return b"", []
@@ -1084,7 +1084,8 @@ def _read_index(
         if run_id in run_ids:
             raise ArtifactError("tracked run index contains a duplicate run id")
         _validate_record(row, run_id, common_root)
-        _validate_private_run_summary(common_root / row["artifacts"], row)
+        if validate_private_summaries:
+            _validate_private_run_summary(common_root / row["artifacts"], row)
         run_ids.add(run_id)
         rows.append(row)
     return contents, rows
@@ -1096,6 +1097,28 @@ def read_validated_run_records(
     """Read the durable index through its full record and private-tree checks."""
 
     contents, rows = _read_index(path, common_root=common_root)
+    lines = contents.splitlines()
+    if len(lines) != len(rows):
+        raise ArtifactError("tracked run index row count is inconsistent")
+    return tuple(zip(rows, lines))
+
+
+def read_validated_tracked_run_records(
+    path: Path, *, common_root: Path
+) -> tuple[tuple[dict[str, Any], bytes], ...]:
+    """Validate tracked rows without opening their private artifact summaries.
+
+    Callers that need private evidence must select their authorized cohort first
+    and validate only that cohort's private trees.  The ordinary
+    :func:`read_validated_run_records` remains the full index-plus-private-tree
+    contract used by publishers and general result consumers.
+    """
+
+    contents, rows = _read_index(
+        path,
+        common_root=common_root,
+        validate_private_summaries=False,
+    )
     lines = contents.splitlines()
     if len(lines) != len(rows):
         raise ArtifactError("tracked run index row count is inconsistent")

@@ -109,9 +109,16 @@ impl CodeModeExecuteHandler {
                 });
         }
         exec.session.services.elicitations.wait_until_clear().await;
-        handle_runtime_response(&exec, response, args.max_output_tokens, started_at)
-            .await
-            .map_err(FunctionCallError::RespondToModel)
+        let output = handle_runtime_response(
+            &exec,
+            response,
+            args.max_output_tokens,
+            started_at,
+            code_cell_trace.is_enabled(),
+        )
+        .await
+        .map_err(FunctionCallError::RespondToModel)?;
+        Ok(output)
     }
 }
 

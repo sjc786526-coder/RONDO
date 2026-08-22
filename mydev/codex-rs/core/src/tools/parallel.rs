@@ -17,6 +17,7 @@ use tracing::trace_span;
 use crate::function_tool::FunctionCallError;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
+use crate::tools::code_mode::is_exec_tool_name;
 use crate::tools::context::AbortedToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
@@ -25,8 +26,10 @@ use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
+use crate::tools::tool_dispatch_trace::output_render_observation;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseInputItem;
+use codex_rollout_trace::OutputRenderSurface;
 
 struct ToolCallTimingGuard {
     started_at: Instant,
@@ -75,15 +78,44 @@ impl ToolCallRuntime {
         call: ToolCall,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<ResponseInputItem, CodexErr>> {
+        let public_exec_delivery = (is_exec_tool_name(&call.tool_name)
+            && matches!(&call.payload, ToolPayload::Custom { .. })
+            && self.session.services.rollout_thread_trace.is_enabled())
+        .then(|| {
+            (
+                self.session.services.rollout_thread_trace.clone(),
+                self.step_context.turn.sub_id.clone(),
+                call.call_id.clone(),
+            )
+        });
         let error_call = call.clone();
         let source = call.direct_source();
         let future = self.handle_tool_call_with_source(call, source, cancellation_token);
         async move {
-            match future.await {
-                Ok(response) => Ok(response.into_response()),
-                Err(FunctionCallError::Fatal(message)) => Err(CodexErr::Fatal(message)),
-                Err(other) => Ok(Self::failure_response(error_call, other)),
+            let (response, output_render) = match future.await {
+                Ok(response) => {
+                    let output_render = public_exec_delivery.as_ref().and_then(|_| {
+                        response
+                            .result
+                            .output_render_metadata(
+                                codex_tools::ToolOutputRenderTarget::DirectModel,
+                            )
+                            .map(|metadata| {
+                                output_render_observation(
+                                    OutputRenderSurface::DirectModel,
+                                    metadata,
+                                )
+                            })
+                    });
+                    (response.into_response(), output_render)
+                }
+                Err(FunctionCallError::Fatal(message)) => return Err(CodexErr::Fatal(message)),
+                Err(other) => (Self::failure_response(error_call, other), None),
+            };
+            if let Some((trace, turn_id, call_id)) = public_exec_delivery {
+                trace.record_code_mode_exec_output_delivered(turn_id, call_id, output_render);
             }
+            Ok(response)
         }
         .in_current_span()
     }

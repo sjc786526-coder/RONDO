@@ -477,6 +477,24 @@ eval-plan051 action="status" *args:
         uv run --directory eval --frozen --no-sync \
         python -B -m rondo_eval.terminal_bench.formal_canary "{{action}}" {{args}}
 
+# Read-only Plan 052 Local harness census. With no output argument the command
+# prints only its body-free aggregate JSON; it never starts Docker or a provider.
+eval-plan052-census output="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    test -x "$common_root/eval/.venv/bin/python" || { echo "shared eval environment is missing" >&2; exit 2; }
+    args=()
+    if [[ -n "{{output}}" ]]; then
+        args=(--output "{{output}}")
+    fi
+    env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+        NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost \
+        UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+        UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.harness_census "${args[@]}"
+
 # Generate and activate one schema-v7 identity.  Both runtime manifests and
 # the task-envelope budget are explicit inputs: the generator never copies the
 # historical Sol profile or cb652e1 Local bundle from v22.

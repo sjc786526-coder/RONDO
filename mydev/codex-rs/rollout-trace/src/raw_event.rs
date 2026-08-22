@@ -25,6 +25,26 @@ pub type RawEventSeq = u64;
 /// Current raw event envelope schema version.
 pub(crate) const RAW_TRACE_EVENT_SCHEMA_VERSION: u32 = 1;
 
+/// Caller surface at which text output was rendered.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputRenderSurface {
+    DirectModel,
+    CodeModeRuntime,
+}
+
+/// Body-free render facts produced at the native output boundary.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct OutputRenderObservation {
+    pub surface: OutputRenderSurface,
+    pub source_text_bytes: u64,
+    pub collection_omitted_bytes: u64,
+    pub requested_max_output_tokens: Option<u64>,
+    pub effective_max_output_tokens: Option<u64>,
+    pub returned_text_bytes: u64,
+    pub presentation_truncated: bool,
+}
+
 /// One append-only raw trace event.
 ///
 /// Every event uses the same envelope so partial replay and corruption checks
@@ -73,6 +93,11 @@ pub enum RawTraceEventPayload {
     },
     RolloutEnded {
         status: RolloutStatus,
+    },
+    /// Final writer-health sentinel. A non-zero value means the bundle is not
+    /// complete enough for quantitative measurement.
+    TraceCaptureEnded {
+        dropped_operations: u64,
     },
     ThreadStarted {
         thread_id: AgentThreadId,
@@ -180,6 +205,21 @@ pub enum RawTraceEventPayload {
         status: CodeCellRuntimeStatus,
         response_payload: Option<RawPayloadRef>,
     },
+    CodeCellOutputRendered {
+        runtime_cell_id: String,
+        observation: OutputRenderObservation,
+    },
+    /// The public code-mode `exec` produced one caller-facing output item.
+    ///
+    /// This event deliberately carries no output body. Its optional body-free
+    /// render describes the final output returned by the tool runtime; early
+    /// parse, runtime-start, cancellation, and initial-response failures have
+    /// no reliable render observation.
+    CodeModeExecOutputDelivered {
+        model_visible_call_id: ModelVisibleCallId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output_render: Option<OutputRenderObservation>,
+    },
     CompactionRequestStarted {
         compaction_id: CompactionId,
         compaction_request_id: CompactionRequestId,
@@ -237,11 +277,14 @@ impl RawTraceEventPayload {
         match self {
             RawTraceEventPayload::RolloutStarted { .. }
             | RawTraceEventPayload::RolloutEnded { .. }
+            | RawTraceEventPayload::TraceCaptureEnded { .. }
             | RawTraceEventPayload::ThreadEnded { .. }
             | RawTraceEventPayload::CodexTurnStarted { .. }
             | RawTraceEventPayload::CodexTurnEnded { .. }
             | RawTraceEventPayload::CompactionRequestFailed { .. }
             | RawTraceEventPayload::CodeCellStarted { .. }
+            | RawTraceEventPayload::CodeCellOutputRendered { .. }
+            | RawTraceEventPayload::CodeModeExecOutputDelivered { .. }
             | RawTraceEventPayload::McpToolCallCorrelationAssigned { .. }
             | RawTraceEventPayload::AgentResultObserved {
                 carried_payload: None,
