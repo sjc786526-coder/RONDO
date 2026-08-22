@@ -164,7 +164,7 @@ impl TeamHarness {
     }
 
     async fn publish_root_event(&self) -> String {
-        let output = TeamPublishHandler
+        let output = TeamPublishHandler::off()
             .handle(invocation(
                 Arc::clone(&self.session),
                 Arc::clone(&self.turn),

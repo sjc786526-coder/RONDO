@@ -114,6 +114,12 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SandboxPolicy;
+use codex_publication_critic::ClientConfig as PublicationCriticClientConfig;
+use codex_publication_critic::ContractFailure as PublicationCriticContractFailure;
+use codex_publication_critic::DEFAULT_CLIENT_TIMEOUT as DEFAULT_PUBLICATION_CRITIC_CALL_TIMEOUT;
+use codex_publication_critic::DEFAULT_STARTUP_TIMEOUT as DEFAULT_PUBLICATION_CRITIC_STARTUP_TIMEOUT;
+use codex_publication_critic::PublicationCriticClient;
+use codex_publication_critic::ServiceDescriptor;
 pub use codex_thread_store::ExtraConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::AbsolutePathBufGuard;
@@ -128,9 +134,11 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::ErrorKind;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::permissions::BUILT_IN_READ_ONLY_PROFILE;
 use crate::config::permissions::BUILT_IN_WORKSPACE_PROFILE;
@@ -1145,6 +1153,53 @@ pub struct CodeModeConfig {
     pub disable_in_process_fallback: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PublicationCriticConfig {
+    pub endpoint: SocketAddr,
+    pub expected_descriptor_json: String,
+    pub call_timeout_ms: u64,
+    pub startup_timeout_ms: u64,
+}
+
+impl PublicationCriticConfig {
+    pub fn new(
+        endpoint: SocketAddr,
+        expected: ServiceDescriptor,
+        call_timeout: Duration,
+        startup_timeout: Duration,
+    ) -> Result<Self, PublicationCriticContractFailure> {
+        let client_config =
+            PublicationCriticClientConfig::new(endpoint, expected, call_timeout, startup_timeout)?;
+        let expected_descriptor_json = serde_json::to_string(client_config.expected())
+            .map_err(|_| PublicationCriticContractFailure::InvalidResourceConfiguration)?;
+        let call_timeout_ms = u64::try_from(call_timeout.as_millis())
+            .map_err(|_| PublicationCriticContractFailure::InvalidResourceConfiguration)?;
+        let startup_timeout_ms = u64::try_from(startup_timeout.as_millis())
+            .map_err(|_| PublicationCriticContractFailure::InvalidResourceConfiguration)?;
+
+        Ok(Self {
+            endpoint,
+            expected_descriptor_json,
+            call_timeout_ms,
+            startup_timeout_ms,
+        })
+    }
+
+    pub(crate) fn client(
+        &self,
+    ) -> Result<PublicationCriticClient, PublicationCriticContractFailure> {
+        let expected = serde_json::from_str(&self.expected_descriptor_json)
+            .map_err(|_| PublicationCriticContractFailure::InvalidResourceConfiguration)?;
+        let config = PublicationCriticClientConfig::new(
+            self.endpoint,
+            expected,
+            Duration::from_millis(self.call_timeout_ms),
+            Duration::from_millis(self.startup_timeout_ms),
+        )?;
+        PublicationCriticClient::new(config)
+    }
+}
+
 pub(crate) const DEFAULT_TOKEN_BUDGET_REMINDER_MESSAGE_TEMPLATE: &str = concat!(
     "Your context window is nearly exhausted (only {n_remaining} tokens remaining) and will be automatically reset for you soon. ",
     "Once reset, message items in current context window will be cleared in the new window, but notes and history items will be persistent across windows."
@@ -1303,6 +1358,7 @@ pub struct MultiAgentV2Config {
     pub wait_agent_enabled: bool,
     pub non_code_mode_only: bool,
     pub team_state_enabled: bool,
+    pub publication_critic: Option<PublicationCriticConfig>,
 }
 
 impl MultiAgentV2Config {
@@ -1331,6 +1387,7 @@ impl MultiAgentV2Config {
             wait_agent_enabled: true,
             non_code_mode_only: true,
             team_state_enabled: false,
+            publication_critic: None,
         }
     }
 }
@@ -2719,7 +2776,7 @@ fn resolve_code_mode_config(config_toml: &ConfigToml) -> CodeModeConfig {
     }
 }
 
-fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config {
+fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> std::io::Result<MultiAgentV2Config> {
     let base = multi_agent_v2_toml_config(config_toml.features.as_ref());
     let max_concurrent_threads_per_session = base
         .and_then(|config| config.max_concurrent_threads_per_session)
@@ -2805,8 +2862,71 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
     let team_state_enabled = base
         .and_then(|config| config.team_state_enabled)
         .unwrap_or(default.team_state_enabled);
+    let publication_critic = base
+        .and_then(|config| config.publication_critic.as_ref())
+        .map(|critic| {
+            let endpoint = critic
+                .endpoint
+                .as_deref()
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "features.multi_agent_v2.publication_critic.endpoint is required",
+                    )
+                })?
+                .parse::<SocketAddr>()
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "features.multi_agent_v2.publication_critic.endpoint must be a literal socket address",
+                    )
+                })?;
+            let expected_descriptor_json = critic
+                .expected_descriptor_json
+                .as_deref()
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "features.multi_agent_v2.publication_critic.expected_descriptor_json is required",
+                    )
+                })?;
+            let expected = serde_json::from_str::<ServiceDescriptor>(expected_descriptor_json)
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "features.multi_agent_v2.publication_critic.expected_descriptor_json is invalid",
+                    )
+                })?;
+            PublicationCriticConfig::new(
+                endpoint,
+                expected,
+                Duration::from_millis(
+                    critic
+                        .call_timeout_ms
+                        .unwrap_or(DEFAULT_PUBLICATION_CRITIC_CALL_TIMEOUT.as_millis() as u64),
+                ),
+                Duration::from_millis(
+                    critic
+                        .startup_timeout_ms
+                        .unwrap_or(DEFAULT_PUBLICATION_CRITIC_STARTUP_TIMEOUT.as_millis() as u64),
+                ),
+            )
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "features.multi_agent_v2.publication_critic configuration is invalid",
+                )
+            })
+        })
+        .transpose()?;
+    if publication_critic.is_some() && !team_state_enabled {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "features.multi_agent_v2.publication_critic requires team_state_enabled = true",
+        ));
+    }
 
-    MultiAgentV2Config {
+    Ok(MultiAgentV2Config {
         max_concurrent_threads_per_session,
         min_wait_timeout_ms,
         max_wait_timeout_ms,
@@ -2822,7 +2942,8 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         wait_agent_enabled,
         non_code_mode_only,
         team_state_enabled,
-    }
+        publication_critic,
+    })
 }
 
 fn resolve_token_budget_config(
@@ -3734,7 +3855,7 @@ impl Config {
                 .unwrap_or_default(),
         };
         let code_mode = resolve_code_mode_config(&cfg);
-        let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg);
+        let multi_agent_v2 = resolve_multi_agent_v2_config(&cfg)?;
         let token_budget = resolve_token_budget_config(&cfg, &features)?;
         let rollout_budget = resolve_rollout_budget_config(&cfg, &features)?;
         let current_time_reminder = resolve_current_time_reminder_config(&cfg, &features)?;

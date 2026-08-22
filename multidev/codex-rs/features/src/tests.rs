@@ -496,6 +496,7 @@ non_code_mode_only = true
             wait_agent_enabled: Some(false),
             non_code_mode_only: Some(true),
             team_state_enabled: None,
+            publication_critic: None,
         }))
     );
 }

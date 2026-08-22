@@ -59,6 +59,27 @@ pub(crate) fn create_team_publish_tool() -> ToolSpec {
     })
 }
 
+pub(crate) fn create_reviewed_team_publish_tool() -> ToolSpec {
+    let ToolSpec::Function(mut tool) = create_team_publish_tool() else {
+        unreachable!("team_publish is a function tool")
+    };
+    tool.description.push_str(
+        " Publication Critic may return a fixed rewrite response without committing; pass its review_cycle_id with the revised candidate.",
+    );
+    tool.parameters
+        .properties
+        .get_or_insert_default()
+        .insert(
+            "review_cycle_id".to_string(),
+            JsonSchema::string(Some(
+                "Opaque continuation returned by a blocking Publication Critic rewrite. Omit for an independent publication."
+                    .to_string(),
+            )),
+        );
+    tool.output_schema = Some(reviewed_publish_output_schema());
+    ToolSpec::Function(tool)
+}
+
 pub(crate) fn create_team_update_tool() -> ToolSpec {
     let target = JsonSchema::object(
         BTreeMap::from([
@@ -440,6 +461,61 @@ fn publish_output_schema() -> serde_json::Value {
         },
         "required": ["event_id", "version_id", "revision", "evidence_refs", "evidence_refs_omitted", "authored_on_stale_view", "deduplicated"],
         "additionalProperties": false
+    })
+}
+
+fn reviewed_publish_output_schema() -> serde_json::Value {
+    json!({
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "event_id": { "type": "string" },
+                    "version_id": { "type": "string" },
+                    "revision": { "type": "integer" },
+                    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+                    "evidence_refs_omitted": { "type": "integer" },
+                    "authored_on_stale_view": { "type": "boolean" },
+                    "deduplicated": { "type": "boolean" },
+                    "publication_review": {
+                        "type": "object",
+                        "properties": {
+                            "status": { "type": "string", "enum": ["pass", "rewrite_exhausted", "failure_fallback", "committed_replay"] },
+                            "review_attempt": { "type": ["integer", "null"] },
+                            "blocking_rewrite_count": { "type": "integer" },
+                            "failure_kind": { "type": ["string", "null"] }
+                        },
+                        "required": ["status", "review_attempt", "blocking_rewrite_count", "failure_kind"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["event_id", "version_id", "revision", "evidence_refs", "evidence_refs_omitted", "authored_on_stale_view", "deduplicated", "publication_review"],
+                "additionalProperties": false
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "status": { "type": "string", "enum": ["rewrite_required"] },
+                    "feedback_version": { "type": "string", "enum": ["v1", "v2"] },
+                    "feedback": { "type": "string" },
+                    "review_cycle_id": { "type": "string" },
+                    "review_attempt": { "type": "integer" },
+                    "blocking_rewrite_count": { "type": "integer" },
+                    "candidate": {
+                        "type": "object",
+                        "properties": {
+                            "title": { "type": "string" },
+                            "summary": { "type": "string" },
+                            "handoff": { "type": ["string", "null"] }
+                        },
+                        "required": ["title", "summary", "handoff"],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["status", "feedback_version", "feedback", "review_cycle_id", "review_attempt", "blocking_rewrite_count", "candidate"],
+                "additionalProperties": false
+            }
+        ]
     })
 }
 

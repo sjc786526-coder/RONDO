@@ -194,30 +194,43 @@ worktree 内的任务专用临时位置；构建输出留在 RONDO 项目根内�
 - 已由两个只读子智能体分别按 live source/Team State 调用链和模板/产品合同独立复核草稿；已据此修正 failure fallback 副作用、raw request replay、
   attempt 幂等、native error/freshness、测试分层和并行文档边界。该复核只验收规划，不替代实现后的独立验收。
 - 已冻结本 ExecPlan；模块布局、cycle owner、输出 wire、配置字段和观测事件的具体形状留给执行者结合实时实现自主选择。
+- 已落地默认关闭的 typed Publication Critic 配置；关闭态注册原 `team_publish` schema/output 和同步发布路径，启用态才暴露 opaque
+  `review_cycle_id`、构造 client/packet 并建立 turn-local review state。
+- `codex-team-state` 已把原 publish validation/canonicalization 提取为共享只读 preparation，并提供同一 store view 下的
+  `prepare_publish_with_history()`；packet 审核 canonical 副本，ledger 与最终 commit 仍接收原始 `PublishRequest`。
+- 已实现最多三次审核、两个固定反馈版本、未提交 attempt replay、committed replay 前置、typed failure fallback、取消清理及同步 commit
+  前重查；cycle 由 turn extension owner 串行化并绑定 team instance、actor 与 target。
+- continuity 只投影 actor 可读的 event-local 单页 history，Evidence V1 只保留数量/省略状态；通用 tool runtime 增加 body-redaction 能力，
+  reviewed publish 的 initial/completion trace、hook 和 log 不持久化 candidate/context body。
+- 已建立 7 条启动 Plan 055 正式服务二进制的产品进程测试，覆盖 off、PASS/committed replay、并发 exact replay、完整 rewrite、failure
+  fallback、rewrite 后 failure 与取消；另有 Team State、packet、配置、注册表、trace 和路由分层回归。
 
 ### 当前工作
 
-ExecPlan 规划完成，等待用户把包含一次性实施授权的执行提示词交给执行者。产品代码、配置、测试和 agent log 尚未修改。
+实现、定向测试、Clippy/fix、格式、schema 与 Bazel module lock 检查已经完成，正在整理允许写集并准备首次本地实现提交；实现后的干净上下文
+独立验收尚未开始，因此本节尚不宣称 Plan 057 最终完成。
 
 ### 本任务剩余步骤
 
-1. 在 057 worktree 内复核 live status，设计并实现默认关闭的 typed 配置与 Critic client 生命周期/注入边界。
-2. 建立 canonical packet projection 和 committed replay 前置检查，保持最终 store 权威与 permission-scoped bounded context。
-3. 实现最多三次审核的 cycle、固定反馈、typed failure fallback、取消/清理和 body-free 开发者观测。
-4. 建立受控服务产品集成与 Team State 定向回归；在共享重型槽空闲后运行相称门禁，普通问题自主窄修并有界复验。
-5. 更新本计划当前状态、方向 3 子 WBS 当前事实与一份精炼日志，完成 diff/允许写集检查并提交 057 分支。
-6. 由独立审查者验收；普通 finding 由执行者整改、相关复验并补交。最终保持 worktree clean，等待用户批准后续主线整合。
+1. 完成首次实现提交并保持 worktree clean。
+2. 由一个干净上下文独立审查者按产品合同和 live diff 验收；真实 finding 由执行者窄修、复验并提交后交回同一审查者。
+3. 审查 PASS 后收口本计划与方向 3 子 WBS 的最终状态，提交文档收口并请同一审查者确认最终 SHA；保持 worktree clean。
 
 ### 阻塞项
 
-当前无规划或代码阻塞。Plan 056 占用 Docker/Harbor 或其他重型槽时，057 的 Cargo/Clippy/Bazel 门禁必须等待；等待本身不是实现失败，可继续推进不占该资源的工作。
+当前无原则性阻塞。参数注释 lint 的 Cargo 入口在进入源码检查前因仓库固定 `nightly-2025-09-18`（Rust 1.92）不满足现锁定
+`sqlx 0.9.0` 的 Rust 1.94 要求而失败；Bazel 替代入口经共享看门狗分析 3 个受影响 target 10 分钟后仍未完成，已受控中断并精确回收。
+该未完成门禁不冒充通过；其余定向测试、`-D warnings` Clippy、fix、格式、schema 与 Bazel lock 均已闭合。
 
 ### 当前验收状态
 
-- 规划：完成；必要产品行为、安全/资源边界、实现自由度、受控证据和交付纪律已写入本计划。
-- 实施：尚未开始；关闭态、packet、cycle、fallback、取消、观测和产品集成测试均待执行者落地。
-- 未运行：格式化、Rust/Bazel 门禁、Docker、真实 API、真实模型、本地推理、训练、云资源、全 workspace、CI、PR。
-- Git：Plan 057 worktree 的规划交付仅包含本计划；交付前提交本地 057 分支并保持 clean，不合并、不推送、不归档。主工作区与 Plan 056 未修改。
+- 实施：产品代码和测试已落地；关闭旁路、canonical packet、cycle/replay/fallback/cancel、body-free 观测及正式服务进程接入均已覆盖。
+- 测试：`codex-team-state --lib` 133 passed、1 既有 ignored；Publication Critic core 组 11/11 passed（其中正式服务进程 7/7）；
+  配置/注册表/trace 聚焦组 7/7、Team route 8/8、`codex-features --lib` 34/34。服务进程均由测试回收。
+- 静态/生成物：受影响 3 crate 的 Clippy `-D warnings` 与 `just fix` 通过；`just fmt`、`just fmt-check`、config schema 生成/fixture、
+  Bazel module lock update/check 和 `git diff --check` 通过，module lock 无差异。argument-comment lint 未完成，原因见“阻塞项”。
+- 未运行：Docker、真实 API、真实模型、本地推理、训练、量化/转换、云资源、全 workspace、CI、PR；没有真实模型质量、threshold 或性能结论。
+- 独立验收：待执行。Git：实现提交待创建；不合并、不推送、不归档。主工作区保持 clean，其他 worktree 未修改。
 
 ### 交接边界
 
@@ -242,3 +255,7 @@ ExecPlan 规划完成，等待用户把包含一次性实施授权的执行提�
 | 008 | 实现布局、cycle owner、反馈 wire 和具体观测字段由执行者自主选择 | 计划只冻结外部行为，保留更优架构选择空间 | 全实现 | 已采纳 |
 | 009 | 只用受控 scorer 的真实服务进程验收产品流程，不运行或宣称真实模型能力 | B2b 验证接入正确性，模型资格属于后续工作包 | 测试、结论 | 已采纳 |
 | 010 | 057 与 056 隔离并共享重型槽串行；只提交 worktree | 保护并行 campaign 与用户的最终集成批准权 | 资源、Git、文档 | 已采纳 |
+| 011 | Team State 提供共享 canonical preparation，并在同一只读 store view 返回目标 Event 的有界 history | 避免复制 clamp/权限/stale 规则及 preparation/history 竞态，同时保持最终 `publish()` 唯一写路径 | team-state、packet、replay | 已采纳 |
+| 012 | cycle state 由 turn extension owner 持有，使用 owned async mutex 串行审核 attempt | 绑定 turn 生命周期并阻止并发复审/重复 commit；不跨 await 持有 Team State 锁 | cycle、并发、取消 | 已采纳 |
+| 013 | reviewed runtime 显式声明 body redaction，通用 dispatch/trace/hook 只记录 handler 提供的安全 metadata | 复用现有观测面且避免 candidate/context 进入普通日志或第二套 trace | registry、trace、观测 | 已采纳 |
+| 014 | 配置关闭注册原始工具合同，配置开启才注册 reviewed schema/output | 使关闭态 model-visible 行为和解析严格保持原样，同时只在启用态提供必要 continuation | 配置、spec、handler | 已采纳 |

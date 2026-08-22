@@ -71,6 +71,10 @@ impl ToolCallRuntime {
             .create_diff_consumer(tool_name)
     }
 
+    pub(crate) fn redacts_tool_bodies(&self, call: &ToolCall) -> bool {
+        self.step_context.tool_router.tool_redacts_tool_bodies(call)
+    }
+
     #[instrument(level = "trace", skip_all)]
     pub(crate) fn handle_tool_call(
         self,

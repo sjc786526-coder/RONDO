@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -43,6 +44,8 @@ use serde_json::Value;
 
 pub(crate) type ToolTelemetryTags = Vec<(&'static str, String)>;
 
+const OMITTED_TOOL_BODY_LOG_PAYLOAD: &str = r#"{"body":"omitted"}"#;
+
 pub use codex_tools::ToolExecutor;
 pub use codex_tools::ToolExposure;
 
@@ -73,6 +76,20 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         Vec::new()
     }
 
+    /// Whether default developer-facing inputs must omit the model-visible tool body.
+    fn redacts_tool_bodies(&self) -> bool {
+        false
+    }
+
+    /// Returns a runtime-specific replacement for developer-facing input logs.
+    ///
+    /// `None` preserves the existing source-aware payload exactly. Implementations that return a
+    /// replacement should keep it body-free and shaped for the same kind of tool input.
+    fn log_payload<'a>(&'a self, _invocation: &'a ToolInvocation) -> Option<Cow<'a, str>> {
+        self.redacts_tool_bodies()
+            .then_some(Cow::Borrowed(OMITTED_TOOL_BODY_LOG_PAYLOAD))
+    }
+
     fn post_tool_use_payload(
         &self,
         invocation: &ToolInvocation,
@@ -82,28 +99,38 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
             return None;
         };
 
+        let redacts_tool_bodies = self.redacts_tool_bodies();
+        let explicit_response =
+            result.post_tool_use_response(&invocation.call_id, &invocation.payload);
+        let tool_response = if redacts_tool_bodies {
+            explicit_response?
+        } else {
+            explicit_response.or_else(|| {
+                // Most function tools can expose their model-facing output as the hook response.
+                // Body-redacting runtimes must instead provide an explicit stable response above.
+                let ResponseInputItem::FunctionCallOutput {
+                    output: FunctionCallOutputPayload { body, .. },
+                    ..
+                } = result.to_response_item(&invocation.call_id, &invocation.payload)
+                else {
+                    return None;
+                };
+
+                serde_json::to_value(body).ok()
+            })?
+        };
+
         Some(PostToolUsePayload {
             tool_name: function_hook_tool_name(invocation),
             tool_use_id: result.post_tool_use_id(&invocation.call_id),
-            tool_input: result
-                .post_tool_use_input(&invocation.payload)
-                .unwrap_or_else(|| function_hook_tool_input(arguments)),
-            tool_response: result
-                .post_tool_use_response(&invocation.call_id, &invocation.payload)
-                .or_else(|| {
-                    // Most function tools can expose their model-facing output
-                    // as the hook response. Outputs with a more stable hook
-                    // contract should override post_tool_use_response above.
-                    let ResponseInputItem::FunctionCallOutput {
-                        output: FunctionCallOutputPayload { body, .. },
-                        ..
-                    } = result.to_response_item(&invocation.call_id, &invocation.payload)
-                    else {
-                        return None;
-                    };
-
-                    serde_json::to_value(body).ok()
-                })?,
+            tool_input: if redacts_tool_bodies {
+                omitted_tool_body_metadata()
+            } else {
+                result
+                    .post_tool_use_input(&invocation.payload)
+                    .unwrap_or_else(|| function_hook_tool_input(arguments))
+            },
+            tool_response,
         })
     }
 
@@ -114,7 +141,11 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
 
         Some(PreToolUsePayload {
             tool_name: function_hook_tool_name(invocation),
-            tool_input: function_hook_tool_input(arguments),
+            tool_input: if self.redacts_tool_bodies() {
+                omitted_tool_body_metadata()
+            } else {
+                function_hook_tool_input(arguments)
+            },
         })
     }
 
@@ -127,6 +158,9 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         invocation: ToolInvocation,
         updated_input: Value,
     ) -> Result<ToolInvocation, FunctionCallError> {
+        if self.redacts_tool_bodies() {
+            return Ok(invocation);
+        }
         let ToolPayload::Function { .. } = &invocation.payload else {
             return Err(FunctionCallError::RespondToModel(
                 "hook input rewrite received unsupported function tool payload".to_string(),
@@ -449,6 +483,11 @@ impl ToolRegistry {
         Some(tool.waits_for_runtime_cancellation())
     }
 
+    pub(crate) fn redacts_tool_bodies(&self, name: &ToolName) -> Option<bool> {
+        let tool = self.tool(name)?;
+        Some(tool.redacts_tool_bodies())
+    }
+
     #[expect(
         clippy::await_holding_invalid_type,
         reason = "tool dispatch must keep active-turn accounting atomic"
@@ -491,8 +530,13 @@ impl ToolRegistry {
             }
         }
 
-        let dispatch_trace = ToolDispatchTrace::start(&invocation);
-        let tool = match self.tool(&tool_name) {
+        let tool = self.tool(&tool_name);
+        let log_payload_override = tool
+            .as_deref()
+            .and_then(|tool| tool.log_payload(&invocation));
+        let dispatch_trace = ToolDispatchTrace::start(&invocation, log_payload_override.as_deref());
+        drop(log_payload_override);
+        let tool = match tool {
             Some(tool) => tool,
             None => {
                 let message = unsupported_tool_call_message(&invocation.payload, &tool_name);
@@ -526,7 +570,7 @@ impl ToolRegistry {
         }
         if !tool.matches_kind(&invocation.payload) {
             let message = format!("tool {tool_name} invoked with incompatible payload");
-            let log_payload = tool_log_payload(&invocation.payload, &invocation.source);
+            let log_payload = runtime_log_payload(tool.as_ref(), &invocation);
             otel.tool_result_with_tags(
                 tool_name_flat.as_ref(),
                 &call_id_owned,
@@ -608,7 +652,7 @@ impl ToolRegistry {
 
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
-        let log_payload = tool_log_payload(&invocation.payload, &invocation.source);
+        let log_payload = runtime_log_payload(tool.as_ref(), &invocation);
 
         let result = otel
             .log_tool_result_with_tags(
@@ -742,6 +786,7 @@ impl ToolRegistry {
                     &result.call_id,
                     &result.payload,
                     result.result.as_ref(),
+                    tool.redacts_tool_bodies(),
                 );
                 crate::team::evidence::note_completed_code_mode_nested_result(
                     &invocation,
@@ -782,6 +827,18 @@ impl ToolRegistry {
             }
         }
     }
+}
+
+fn runtime_log_payload<'a>(
+    tool: &'a dyn CoreToolRuntime,
+    invocation: &'a ToolInvocation,
+) -> Cow<'a, str> {
+    tool.log_payload(invocation)
+        .unwrap_or_else(|| tool_log_payload(&invocation.payload, &invocation.source))
+}
+
+fn omitted_tool_body_metadata() -> Value {
+    serde_json::json!({ "body": "omitted" })
 }
 
 async fn notify_tool_finish_if_unclaimed(

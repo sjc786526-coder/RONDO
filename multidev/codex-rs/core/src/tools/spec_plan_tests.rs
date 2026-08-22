@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use codex_features::Feature;
 use codex_login::AuthManager;
@@ -39,25 +40,113 @@ use serde_json::json;
 
 use crate::WaitForEnvironmentToolConfig;
 use crate::config::CurrentTimeReminderConfig;
+use crate::config::PublicationCriticConfig;
 use crate::environment_selection::TurnEnvironmentState;
+use crate::function_tool::FunctionCallError;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
 use crate::session::tests::mcp_config_for_test;
 use crate::session::turn_context::TurnContext;
+use crate::tools::context::FunctionToolOutput;
+use crate::tools::context::ToolCallSource;
+use crate::tools::context::ToolInvocation;
+use crate::tools::context::ToolPayload;
 use crate::tools::handlers::McpHandler;
 use crate::tools::handlers::ToolSearchHandlerCache;
 use crate::tools::handlers::WaitForEnvironmentHandler;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
+use crate::tools::handlers::team_tools::spec::create_reviewed_team_publish_tool;
+use crate::tools::handlers::team_tools::spec::create_team_publish_tool;
 use crate::tools::registry::CoreToolRuntime;
+use crate::tools::registry::PostToolUsePayload;
+use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::RegisteredTool;
+use crate::tools::registry::ToolTelemetryTags;
 use crate::tools::router::ToolRouter;
 use crate::tools::router::ToolSuggestCandidates;
 use crate::tools::router::ToolSuggestPresentation;
 use crate::tools::spec_plan::append_source_tools;
 use crate::tools::spec_plan::build_core_tool_registry;
+use crate::turn_diff_tracker::TurnDiffTracker;
+use tokio_util::sync::CancellationToken;
 
 const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
+
+struct NamespaceForwardingProbe;
+
+impl ToolExecutor<ToolInvocation> for NamespaceForwardingProbe {
+    fn tool_name(&self) -> ToolName {
+        ToolName::plain("forwarding_probe")
+    }
+
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::Function(ResponsesApiTool {
+            name: "forwarding_probe".to_string(),
+            description: "Test forwarding.".to_string(),
+            strict: false,
+            defer_loading: None,
+            parameters: codex_tools::JsonSchema::default(),
+            output_schema: None,
+        })
+    }
+
+    fn handle(&self, _invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        Box::pin(async {
+            Ok(
+                Box::new(FunctionToolOutput::from_text("ok".to_string(), Some(true)))
+                    as Box<dyn ToolOutput>,
+            )
+        })
+    }
+}
+
+impl CoreToolRuntime for NamespaceForwardingProbe {
+    fn waits_for_runtime_cancellation(&self) -> bool {
+        true
+    }
+
+    fn telemetry_tags(&self, _invocation: &ToolInvocation) -> ToolTelemetryTags {
+        vec![("forwarded", "telemetry".to_string())]
+    }
+
+    fn redacts_tool_bodies(&self) -> bool {
+        true
+    }
+
+    fn post_tool_use_payload(
+        &self,
+        invocation: &ToolInvocation,
+        _result: &dyn ToolOutput,
+    ) -> Option<PostToolUsePayload> {
+        Some(PostToolUsePayload {
+            tool_name: crate::tools::hook_names::HookToolName::new("forwarded.post"),
+            tool_use_id: invocation.call_id.clone(),
+            tool_input: json!({"forwarded": "input"}),
+            tool_response: json!({"forwarded": "response"}),
+        })
+    }
+
+    fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
+        Some(PreToolUsePayload {
+            tool_name: crate::tools::hook_names::HookToolName::new("forwarded.pre"),
+            tool_input: json!({"forwarded": true}),
+        })
+    }
+
+    fn with_updated_hook_input(
+        &self,
+        invocation: ToolInvocation,
+        _updated_input: serde_json::Value,
+    ) -> Result<ToolInvocation, FunctionCallError> {
+        Ok(ToolInvocation {
+            payload: ToolPayload::Custom {
+                input: "forwarded update".to_string(),
+            },
+            ..invocation
+        })
+    }
+}
 
 #[derive(Default)]
 struct ToolPlanInputs {
@@ -470,6 +559,67 @@ fn apply_patch_accepts_environment_id(spec: &ToolSpec) -> bool {
         }
         _ => false,
     }
+}
+
+#[tokio::test]
+async fn multi_agent_namespace_wrapper_forwards_runtime_extensions() -> anyhow::Result<()> {
+    let (session, turn) = make_session_and_context().await;
+    let session = Arc::new(session);
+    let turn = Arc::new(turn);
+    let step_context = StepContext::for_test(Arc::clone(&turn));
+    let runtime =
+        super::multi_agent_v2_handler(NamespaceForwardingProbe, Some(MULTI_AGENT_V2_NAMESPACE));
+    let invocation = ToolInvocation {
+        session,
+        turn,
+        step_context,
+        cancellation_token: CancellationToken::new(),
+        tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+        call_id: "forwarding-call".to_string(),
+        output_item_id: None,
+        tool_name: runtime.tool_name(),
+        source: ToolCallSource::Direct,
+        payload: ToolPayload::Function {
+            arguments: r#"{"candidate":"secret"}"#.to_string(),
+        },
+    };
+    let output = FunctionToolOutput::from_text("ok".to_string(), Some(true));
+
+    assert!(runtime.waits_for_runtime_cancellation());
+    assert!(runtime.redacts_tool_bodies());
+    assert_eq!(
+        runtime.telemetry_tags(&invocation),
+        vec![("forwarded", "telemetry".to_string())]
+    );
+    assert_eq!(
+        runtime.log_payload(&invocation).as_deref(),
+        Some(r#"{"body":"omitted"}"#)
+    );
+    assert_eq!(
+        runtime.pre_tool_use_payload(&invocation),
+        Some(PreToolUsePayload {
+            tool_name: crate::tools::hook_names::HookToolName::new("forwarded.pre"),
+            tool_input: json!({"forwarded": true}),
+        })
+    );
+    assert_eq!(
+        runtime.post_tool_use_payload(&invocation, &output),
+        Some(PostToolUsePayload {
+            tool_name: crate::tools::hook_names::HookToolName::new("forwarded.post"),
+            tool_use_id: "forwarding-call".to_string(),
+            tool_input: json!({"forwarded": "input"}),
+            tool_response: json!({"forwarded": "response"}),
+        })
+    );
+    let updated = runtime.with_updated_hook_input(invocation, json!({"ignored": true}))?;
+    assert_eq!(
+        updated.payload,
+        ToolPayload::Custom {
+            input: "forwarded update".to_string(),
+        }
+    );
+
+    Ok(())
 }
 
 #[tokio::test]
@@ -2222,6 +2372,71 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
             .exposure(&ToolName::namespaced(MULTI_AGENT_V2_NAMESPACE, "spawn_agent").to_string()),
         ToolExposure::DirectModelOnly
     );
+}
+
+#[tokio::test]
+async fn publication_critic_config_selects_team_publish_contract_in_registry() {
+    let off = probe(|turn| {
+        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
+        update_config(turn, |config| {
+            config.multi_agent_v2.team_state_enabled = true;
+        });
+    })
+    .await;
+    let ToolSpec::Namespace(off_namespace) = off.visible_spec(MULTI_AGENT_V2_NAMESPACE) else {
+        panic!("expected {MULTI_AGENT_V2_NAMESPACE} namespace");
+    };
+    let Some(ResponsesApiNamespaceTool::Function(off_publish)) =
+        off_namespace.tools.iter().find(|tool| {
+            matches!(
+                tool,
+                ResponsesApiNamespaceTool::Function(tool) if tool.name == "team_publish"
+            )
+        })
+    else {
+        panic!("expected team_publish in {MULTI_AGENT_V2_NAMESPACE} namespace");
+    };
+    let ToolSpec::Function(original_publish) = create_team_publish_tool() else {
+        unreachable!("team_publish is a function tool")
+    };
+    assert_eq!(off_publish, &original_publish);
+
+    let reviewed = probe(|turn| {
+        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
+        update_config(turn, |config| {
+            config.multi_agent_v2.team_state_enabled = true;
+            config.multi_agent_v2.publication_critic = Some(
+                PublicationCriticConfig::new(
+                    "127.0.0.1:43119".parse().expect("literal endpoint"),
+                    codex_publication_critic::controlled_test_descriptor(
+                        codex_publication_critic::RuntimeLimits::production(),
+                    ),
+                    Duration::from_secs(1),
+                    Duration::from_secs(1),
+                )
+                .expect("test publication critic config"),
+            );
+        });
+    })
+    .await;
+    let ToolSpec::Namespace(reviewed_namespace) = reviewed.visible_spec(MULTI_AGENT_V2_NAMESPACE)
+    else {
+        panic!("expected {MULTI_AGENT_V2_NAMESPACE} namespace");
+    };
+    let Some(ResponsesApiNamespaceTool::Function(reviewed_publish)) =
+        reviewed_namespace.tools.iter().find(|tool| {
+            matches!(
+                tool,
+                ResponsesApiNamespaceTool::Function(tool) if tool.name == "team_publish"
+            )
+        })
+    else {
+        panic!("expected team_publish in {MULTI_AGENT_V2_NAMESPACE} namespace");
+    };
+    let ToolSpec::Function(expected_reviewed_publish) = create_reviewed_team_publish_tool() else {
+        unreachable!("reviewed team_publish is a function tool")
+    };
+    assert_eq!(reviewed_publish, &expected_reviewed_publish);
 }
 
 #[tokio::test]

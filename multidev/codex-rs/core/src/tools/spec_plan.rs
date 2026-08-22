@@ -1109,7 +1109,16 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
             );
             if crate::team::team_state_enabled(turn_context) {
                 registry.register_trusted_with_exposure(
-                    multi_agent_v2_handler(TeamPublishHandler, tool_namespace),
+                    multi_agent_v2_handler(
+                        TeamPublishHandler::new(
+                            turn_context
+                                .config
+                                .multi_agent_v2
+                                .publication_critic
+                                .clone(),
+                        ),
+                        tool_namespace,
+                    ),
                     exposure,
                 );
                 registry.register_trusted_with_exposure(
@@ -1313,6 +1322,52 @@ impl CoreToolRuntime for MultiAgentV2NamespaceOverride {
 
     fn matches_kind(&self, payload: &crate::tools::context::ToolPayload) -> bool {
         self.handler.matches_kind(payload)
+    }
+
+    fn waits_for_runtime_cancellation(&self) -> bool {
+        self.handler.waits_for_runtime_cancellation()
+    }
+
+    fn telemetry_tags(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> crate::tools::registry::ToolTelemetryTags {
+        self.handler.telemetry_tags(invocation)
+    }
+
+    fn redacts_tool_bodies(&self) -> bool {
+        self.handler.redacts_tool_bodies()
+    }
+
+    fn log_payload<'a>(
+        &'a self,
+        invocation: &'a ToolInvocation,
+    ) -> Option<std::borrow::Cow<'a, str>> {
+        self.handler.log_payload(invocation)
+    }
+
+    fn post_tool_use_payload(
+        &self,
+        invocation: &ToolInvocation,
+        result: &dyn codex_tools::ToolOutput,
+    ) -> Option<crate::tools::registry::PostToolUsePayload> {
+        self.handler.post_tool_use_payload(invocation, result)
+    }
+
+    fn pre_tool_use_payload(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Option<crate::tools::registry::PreToolUsePayload> {
+        self.handler.pre_tool_use_payload(invocation)
+    }
+
+    fn with_updated_hook_input(
+        &self,
+        invocation: ToolInvocation,
+        updated_input: serde_json::Value,
+    ) -> Result<ToolInvocation, crate::function_tool::FunctionCallError> {
+        self.handler
+            .with_updated_hook_input(invocation, updated_input)
     }
 
     fn create_diff_consumer(
