@@ -56,7 +56,7 @@
       不按成绩换题、补题或扩大样本。
 - [ ] 最终 binary manifest 绑定 rehearsal 后实际提交的 `mydev/` 源码、构建产物和产品身份；模型、effort、provider
       profile、deadline、价格快照、两轮顺序、schema-v2 与累计 100 USD task-budget 在正式边界前可复验。
-- [ ] fake/fixture/定向门禁通过，并至少连续完成一次真实 10 题单轮 rehearsal；其 identity、工件和费用与最终正式
+- [x] fake/fixture/定向门禁通过，并至少连续完成一次真实 10 题单轮 rehearsal；其 identity、工件和费用与最终正式
       命名空间隔离，不误占正式 slot。
 - [ ] 串行完成 10 题 × 2 轮共 20 个方向 1 run；不运行 Codex 对照、validation、holdout、条件补题、额外 round、
       E-A 或完整数据集。
@@ -240,16 +240,26 @@
   均等待后继续，没有修改并行任务现场。
 - 首次 v4 finalize 暴露 finalized outcome allowlist 遗漏 `rehearsal_complete`；公共聚合已经有效，状态机在写 final
   state 前 fail-closed。mode-aware allowlist 和回归已补齐，同一 campaign 离线幂等 finalize 成功，没有新请求。
+- formal-v5 绑定提交 `c2be21d01ae34c971b9f75334b265191bce0acbd`，使用重新构建的静态 RONDO Local
+  legacy/companion/runtime bundle；10/10 零 API preflight 完整。正式运行前 3 个 slot 完整发布，第 4 个 slot
+  已开始上游尝试但未获得 HTTP 响应，旧 body-free metadata 没有表达这个生命周期终态，projector 按严格合同拒绝，
+  campaign 因而关闭为 invalid，后 16 个 slot 未发送。v5 固定 42 attempts、`1.637680 USD`，Plan 056 累计
+  264 attempts/`5.651066 USD`、reservation 0；公共无效结果、原始工件和资源记录均保留。
+- v5 失败只读诊断确认不是 SSE 终态枚举漂移，而是 transport open 在响应头前失败。设施修复新增精确
+  `stream_end_kind=open_error`，只允许 `status=0`、无 usage 和无 terminal event 的已开始尝试；旧 v5 缺字段仍被
+  拒绝，不能离线复投影或恢复。非 SSE 响应另以 `non_sse` 明确分类。预算代理、投影器与正负回归正在以 formal-v6
+  新 identity 收口。
 
 ### 当前工作
 
-v1、rehearsal-v2、rehearsal-v3 与完整 rehearsal-v4 均已按真实终态关闭并保留。当前正在提交最终被测源码、重建
-正式 binary manifest 并冻结 formal-v5；正式 20-run 将从第一题以全新 identity 干净启动，费用从
-`4.013386 USD` 单调累计。
+v1、rehearsal-v2、rehearsal-v3、完整 rehearsal-v4 与无效 formal-v5 均已按真实终态关闭并保留。当前正在完成
+`open_error` 设施修复与定向回归，随后提交并冻结新源码、重建 binary manifest 并创建 formal-v6；新的正式
+20-run 将从第一题以全新 identity 干净启动，费用从 `5.651066 USD` 单调累计。
 
 ### 本任务剩余步骤
 
-1. 提交并冻结最终被测源码，重新构建 binary manifest，创建全新 formal-v5 campaign 并完成 10/10 零 API preflight。
+1. 提交并冻结包含 `open_error` 修复的源码，重新构建 binary manifest，创建全新 formal-v6 campaign 并完成
+   10/10 零 API preflight。
 2. 从第一题串行执行固定两轮 20/20；首个可信 20/20 形成候选或“无候选”结论后停止付费运行。
 3. 同步公共结果、累计费用、资源、WBS、WBS-COMPLETED 和精炼日志。
 4. 完成上下文干净的独立只读验收；整改真实 finding，必要时废弃受影响 campaign 并在余额内干净重跑。
@@ -266,7 +276,10 @@ v1、rehearsal-v2、rehearsal-v3 与完整 rehearsal-v4 均已按真实终态关
 - 设施整改：只读预算 totals、Team Lens 合法事件交错、Plan 056 Docker 事实采集的有界瞬时恢复，以及合法
   pre-runtime sandbox denial 的投影均已窄修并通过定向回归；v2/v3 分别结算 34/52 attempts、
   `0.569748/0.842369 USD`；v4 完整 10/10 为 111 attempts/`1.970204 USD`，累计 `4.013386 USD`。
-- 最终测量：完整单轮 rehearsal 已通过；正式 binary 复冻和可信 20/20 待执行；最终独立验收待完成。
+- formal-v5：invalid 并永久保留；20 固定 slot 中 3 个发布、第 4 个已发送后因响应前连接失败缺少可投影终态而
+  关闭、16 个未启动；42 attempts、`1.637680 USD`、无候选结论。累计 264 attempts/`5.651066 USD`。
+- 最终测量：完整单轮 rehearsal 已通过；`open_error` 窄修、formal-v6 binary 复冻和可信 20/20 待完成；最终独立
+  验收待完成。
 - 未运行：Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
 - Git：只在 Plan 056 worktree 提交；未合并、未推送、未归档，未读取或修改 Plan 054/055 私有资产。
 
@@ -284,12 +297,12 @@ worktree 中的命令发起、但物理上发生在主仓库 `/home/sjc/desktop/
 - Docker 镜像、容器、卷、网络与资源记录属于宿主运行状态，不随普通 worktree 隔离；只能创建/清理本任务明确
   标记的对象，并与其他重型任务串行。
 
-实际保留的 Plan 056 ignored 资产为：detached source worktree `eval-data/sources/plan056-rondo-local-2765ff8f/`；
-约 13 GiB Cargo target；legacy/companion/runtime 三个 bundle；v1、rehearsal-v2、rehearsal-v3、rehearsal-v4 四个
-独占 campaign；
-batch/task budget 与 Plan 056 build/preflight/paid/close metrics。复用了项目局部 `eval/.venv`、`eval-data/uv-cache`、
-既有 bwrap 资产和 v28 Terminal-Bench source。10 个 pinned Docker image 保留不清理；Plan 056 容器、网络、卷均已
-精确清空，Docker total 仍为 11.5 GB、VHDX 增长 0。
+实际保留的 Plan 056 ignored 资产为：detached source worktree
+`eval-data/sources/plan056-rondo-local-2765ff8f/` 与 `eval-data/sources/plan056-rondo-local-c2be21d0/`；对应 Cargo
+target、两代 legacy/companion/runtime bundle；v1、rehearsal-v2/v3/v4、formal-v5 五个独占 campaign；batch/task
+budget 与 Plan 056 build/preflight/paid/close metrics。复用了项目局部 `eval/.venv`、`eval-data/uv-cache`、既有
+bwrap 资产和 v28 Terminal-Bench source。10 个 pinned Docker image 保留不清理；Plan 056 容器、网络、卷均已精确
+清空，formal-v5 Docker/VHDX 增长均为 0，Docker total 仍为 11.5 GB。
 
 ### 交接边界
 
@@ -316,3 +329,4 @@ batch/task budget 与 Plan 056 build/preflight/paid/close metrics。复用了项
 | 009 | Plan 054 本地模型、Plan 055 重型 Cargo 与 Plan 056 Docker 全局串行 | 遵守共享宿主资源门并保护并行任务现场 | 资源、排期 | 已采纳 |
 | 010 | 本任务只提交工作树，不合并、不推送、不归档 | 用户保留最终集成批准权 | Git 交付 | 已采纳 |
 | 011 | 正式测量前至少完成一次连续 10 题单轮真实 rehearsal；首个可信正式 20/20 即停止 | 高效暴露设施问题，同时防止按成绩挑选 campaign | rehearsal、正式运行 | 已采纳 |
+| 012 | 响应头前的已开始上游尝试使用精确 `open_error` 终态；不接受旧记录缺失枚举 | 既让未来连接失败可投影，又不放宽或改写 formal-v5 历史 | API metadata、投影、恢复 | 已采纳 |

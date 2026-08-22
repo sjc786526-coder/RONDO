@@ -58,9 +58,12 @@ v1 因而立即关闭为无效，没有在该 identity 内替换或重发 slot�
 - rehearsal-v4 随后连续完成冻结 10 题单轮：10/10 来源、投影、费用和 Docker receipt 完整，6 pass/4 fail，
   111 attempts、`1.970204 USD`；累计 222 attempts/`4.013386 USD`、reservation 0。Docker/VHDX 增长均为 0，
   资源收尾完整，结果为 `rehearsal_complete` 且不参与候选判断。
-- 当前唯一方向 1 工作包仍为 Plan 056：提交/冻结正式源码并重建 binary，以 formal-v5 全新身份从第一题执行固定
-  两轮 20-run campaign。v1/rehearsal/无效数据不进入最终分母；首个可信 20/20 产生候选或“无候选”结论后停止
-  付费运行。详细合同见 `plan/056-direction1-bounded-observation-execplan.md`。
+- formal-v5 完成 10/10 零 API preflight 后正式发布前 3 个 slot；第 4 个 slot 的上游尝试在响应头前失败，旧
+  metadata 无法表达该终态，campaign 按严格投影合同关闭为 invalid，后 16 个 slot 未发送。v5 为 42 attempts、
+  `1.637680 USD`；累计 264 attempts/`5.651066 USD`，reservation 0，Docker/VHDX 增长均为 0。
+- 当前唯一方向 1 工作包仍为 Plan 056：窄修响应前 `open_error` 观测，提交/冻结新源码并重建 binary，以 formal-v6
+  全新身份从第一题执行固定两轮 20-run campaign。v1/rehearsal/无效数据不进入最终分母；首个可信 20/20 产生候选
+  或“无候选”结论后停止付费运行。详细合同见 `plan/056-direction1-bounded-observation-execplan.md`。
 
 ### 方向 3：Publication Critic 三期
 

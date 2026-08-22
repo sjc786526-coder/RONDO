@@ -1107,6 +1107,8 @@ class RedactedMetadataStore:
             raise ApiBudgetProxyError("metadata observation differs from schema v1")
         if observation.get("stream_end_kind") not in {
             None,
+            "open_error",
+            "non_sse",
             "terminal",
             "clean_eof",
             "read_error",
@@ -1777,6 +1779,8 @@ class LoopbackResponsesProxy:
             except HTTPError as response:
                 upstream = response
             except (OSError, URLError, TimeoutError, socket.timeout):
+                if request_metadata["stream"]:
+                    request_metadata["stream_end_kind"] = "open_error"
                 settlement = self._ledger.settle(
                     self._run_id,
                     request_id,
@@ -1788,6 +1792,8 @@ class LoopbackResponsesProxy:
                 self._reject(handler, 502, "upstream_unavailable")
                 return
             except Exception:
+                if request_metadata["stream"]:
+                    request_metadata["stream_end_kind"] = "open_error"
                 settlement = self._ledger.settle(
                     self._run_id,
                     request_id,
@@ -1946,10 +1952,12 @@ class LoopbackResponsesProxy:
         self,
         handler: BaseHTTPRequestHandler,
         request_id: str,
-        request_metadata: Mapping[str, Any],
+        request_metadata: dict[str, Any],
         upstream_status: int,
         stop_reason: str,
     ) -> None:
+        if request_metadata["stream"]:
+            request_metadata["stream_end_kind"] = "non_sse"
         settlement = self._ledger.settle_operator_confirmed_unbilled(
             self._run_id,
             request_id,
@@ -2106,6 +2114,8 @@ class LoopbackResponsesProxy:
             )
             self._save_observation(request_id, request_metadata, status, settlement)
         else:
+            if request_metadata["stream"]:
+                request_metadata["stream_end_kind"] = "non_sse"
             try:
                 response_body, usage = _read_completed_json_response(
                     upstream,

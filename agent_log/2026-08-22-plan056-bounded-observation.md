@@ -61,3 +61,14 @@ trace 投影和 Docker receipt，6 pass/4 fail。v4 为 111 attempts、`1.970204
 首次 v4 finalize 的公共聚合已经是有效 `rehearsal_complete`，但 finalized state allowlist 漏了该 rehearsal outcome，
 因此在写最终 state 前 fail-closed。补齐 mode-aware allowlist 和回归后，同一 v4 离线幂等 finalize 成功，没有新 API
 请求。该完整 rehearsal 不进入正式分母，也不执行候选判断；下一阶段从正式源码和 binary 复冻开始。
+
+formal-v5 使用提交 `c2be21d01ae34c971b9f75334b265191bce0acbd` 的全新静态构建，10/10 零 API preflight
+通过。正式运行前 3 个 slot 完整发布；第 4 个 slot 已开始第 8 次上游尝试，但 transport open 未取得 HTTP 响应，
+旧 metadata 没有可区分这种 pre-header failure 的终态枚举，projector 按严格 schema 拒绝。campaign 如实关闭为
+invalid，未重发该 slot，后 16 个 slot 未发送；v5 为 42 attempts、`1.637680 USD`，累计 264 attempts/
+`5.651066 USD`、reservation 0。公共 body-free 无效结果、私有原始工件和资源记录均保留，Docker/VHDX 增长为 0。
+
+根因修复只扩展观测生命周期：transport open 失败记录精确 `stream_end_kind=open_error`，并要求 status 0、usage
+无效且无 SSE terminal 字段；实际收到非 SSE HTTP 响应则记录 `non_sse`。旧 v5 的缺失枚举继续 fail-closed，既不
+修改原始 metadata，也不复投影或恢复该 campaign。完整预算代理 62 项、观测投影 33 项、Plan 056 状态机 21 项及
+根因定向正负回归通过；后续以新的 formal-v6 identity 从第一题干净启动。

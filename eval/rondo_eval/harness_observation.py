@@ -627,7 +627,10 @@ def _read_api_metadata(path: Path) -> list[dict[str, Any]]:
         ):
             raise HarnessObservationError("API request terminal metadata is invalid")
         if request["stream"]:
-            if request.get("stream_end_kind") not in {
+            stream_end_kind = request.get("stream_end_kind")
+            if stream_end_kind not in {
+                "open_error",
+                "non_sse",
                 "terminal",
                 "clean_eof",
                 "read_error",
@@ -648,6 +651,21 @@ def _read_api_metadata(path: Path) -> list[dict[str, Any]]:
                 "cancelled",
             }:
                 raise HarnessObservationError("API stream terminal enum is invalid")
+            if stream_end_kind in {"open_error", "non_sse"} and any(
+                request.get(key) is not None
+                for key in (
+                    "terminal_event_type",
+                    "terminal_response_status",
+                    "terminal_error_code",
+                )
+            ):
+                raise HarnessObservationError("API stream terminal enum is invalid")
+            if stream_end_kind == "open_error" and not (
+                status == 0 and usage_valid is False
+            ):
+                raise HarnessObservationError("API stream terminal metadata is invalid")
+            if stream_end_kind == "non_sse" and status == 0:
+                raise HarnessObservationError("API stream terminal metadata is invalid")
         error_code = request.get("terminal_error_code")
         if error_code is not None and (
             not isinstance(error_code, str)
@@ -797,6 +815,12 @@ def _api_terminal_kind(request: Mapping[str, Any]) -> str:
     end_kind = request.get("stream_end_kind")
     event_type = request.get("terminal_event_type")
     response_status = request.get("terminal_response_status")
+    if (
+        end_kind == "non_sse"
+        and 200 <= request.get("upstream_status", 0) < 300
+        and request.get("usage_valid") is True
+    ):
+        return "completed"
     if (
         end_kind == "terminal"
         and event_type == "response.completed"

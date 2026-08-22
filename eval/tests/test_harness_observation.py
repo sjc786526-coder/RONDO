@@ -858,6 +858,105 @@ class HarnessObservationTests(unittest.TestCase):
         self.assertEqual(observation["availability"]["response_usage"], "unmeasurable")
         self.assertEqual(observation["errors"]["context_window_exceeded"], 1)
 
+    def test_pre_response_transport_failure_is_a_projectable_terminal_error(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                inference_terminal="failed",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main", terminal="failed")
+            value = json.loads(metadata.read_text("utf-8"))
+            request = value["requests"][0]
+            request["upstream_status"] = 0
+            request["settlement_kind"] = "unpriced_fallback"
+            for key in (
+                "terminal_event_type",
+                "terminal_response_status",
+                "terminal_error_code",
+            ):
+                request.pop(key, None)
+            request["stream_end_kind"] = "open_error"
+            metadata.write_text(json.dumps(value), encoding="utf-8")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["turn"]["status"], "failed")
+        self.assertEqual(observation["responses"]["terminal_error"], 1)
+        self.assertEqual(observation["responses"]["missing_or_invalid_usage"], 1)
+        self.assertEqual(observation["availability"]["response_usage"], "unmeasurable")
+        self.assertEqual(observation["errors"]["other"], 1)
+
+    def test_non_sse_response_to_stream_request_is_projectable(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(trace_root / "exec")
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+            value = json.loads(metadata.read_text("utf-8"))
+            request = value["requests"][0]
+            request["stream_end_kind"] = "non_sse"
+            for key in (
+                "terminal_event_type",
+                "terminal_response_status",
+                "terminal_error_code",
+            ):
+                request.pop(key, None)
+            metadata.write_text(json.dumps(value), encoding="utf-8")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["turn"]["status"], "completed")
+        self.assertEqual(observation["responses"]["terminal_completed"], 1)
+
+    def test_pre_response_transport_failure_requires_exact_terminal_shape(self) -> None:
+        cases = (
+            ("missing kind", None, 0, None),
+            ("response already opened", "open_error", 200, None),
+            ("terminal event present", "open_error", 0, "error"),
+            ("non-SSE without response", "non_sse", 0, None),
+        )
+        for label, stream_end_kind, status, terminal_event_type in cases:
+            with self.subTest(label=label), TemporaryDirectory() as raw:
+                root = Path(raw)
+                trace_root = root / "trace-root"
+                trace_root.mkdir()
+                _write_bundle(
+                    trace_root / "exec",
+                    commands=(),
+                    inference_terminal="failed",
+                )
+                metadata = root / "api-metadata.json"
+                _write_metadata(metadata, "main", terminal="failed")
+                value = json.loads(metadata.read_text("utf-8"))
+                request = value["requests"][0]
+                request["upstream_status"] = status
+                request["settlement_kind"] = "unpriced_fallback"
+                for key in (
+                    "stream_end_kind",
+                    "terminal_event_type",
+                    "terminal_response_status",
+                    "terminal_error_code",
+                ):
+                    request.pop(key, None)
+                if stream_end_kind is not None:
+                    request["stream_end_kind"] = stream_end_kind
+                if terminal_event_type is not None:
+                    request["terminal_event_type"] = terminal_event_type
+                metadata.write_text(json.dumps(value), encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    HarnessObservationError,
+                    "API stream terminal (metadata|enum) is invalid",
+                ):
+                    project_task_observation(trace_root, metadata)
+
     def test_completed_inference_without_usage_is_rejected(self) -> None:
         with TemporaryDirectory() as raw:
             root = Path(raw)
