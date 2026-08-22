@@ -6,5 +6,7 @@
 - 核对根/`multidev/` 规则、WBS、Plan 047—050 完成证据、两份 Publication Critic 研究材料及现行
   `team_publish`/Team State 源码后，制定 Plan 053 ExecPlan。
 - 计划只冻结 M3-A1 产品语义，保留下游 API、schema、模块、数值参数和实现路线选择；普通范围内问题允许窄修与有界复核。
+- 用户补充设计取向：复用必须以职责边界相符为前提；必要时可新建与 Team State 和产品分层契合的专用模块、接口或设施，
+  不以改动最少为目标，也不建设重复或没有现实需求的重型体系。该取向已写入 Plan 053 软性建议和验收判断。
 - M3-A1 无需主工作区 git-ignored 资产，禁止展开 Plan 050 原始 trace；本规划未运行 Cargo、Docker、模型、API 或训练。
 - 本批只提交 053 本地工作树；未合并、未推送，也未改动 Plan 052 或共享权威文档。
