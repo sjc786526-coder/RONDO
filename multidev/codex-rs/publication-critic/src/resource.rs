@@ -8,6 +8,7 @@ use std::time::Duration;
 
 pub const DEFAULT_REQUEST_BYTES: u32 = 128 * 1024;
 pub const DEFAULT_RESPONSE_BYTES: u32 = 16 * 1024;
+pub const MIN_PROTOCOL_FRAME_BYTES: u32 = 8 * 1024;
 pub const DEFAULT_MAX_CONCURRENCY: u16 = 1;
 pub const DEFAULT_QUEUE_CAPACITY: u16 = 4;
 const DEFAULT_JOB_TIMEOUT_MS: u64 = 25_000;
@@ -110,9 +111,9 @@ impl RuntimeLimits {
     }
 
     pub fn validate(&self) -> Result<(), ContractFailure> {
-        if self.request_bytes == 0
+        if self.request_bytes < MIN_PROTOCOL_FRAME_BYTES
             || self.request_bytes > MAX_FRAME_BYTES
-            || self.response_bytes == 0
+            || self.response_bytes < MIN_PROTOCOL_FRAME_BYTES
             || self.response_bytes > MAX_FRAME_BYTES
             || self.max_concurrency == 0
             || self.max_concurrency > MAX_CONCURRENCY

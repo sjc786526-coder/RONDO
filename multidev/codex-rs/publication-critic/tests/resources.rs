@@ -71,7 +71,7 @@ impl ServiceProcess {
             .arg("--behavior")
             .arg("block-first")
             .arg("--affected-calls")
-            .arg("1")
+            .arg("5")
             .arg("--score")
             .arg("0.75")
             .arg("--request-bytes")

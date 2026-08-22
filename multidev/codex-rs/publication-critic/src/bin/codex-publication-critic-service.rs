@@ -26,7 +26,6 @@ use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::net::TcpListener;
-use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -40,6 +39,9 @@ enum ControlledBehavior {
     MultiScoreFirst,
     ModelDriftFirst,
     ScoringDriftFirst,
+    StatusFailed,
+    StatusModelDrift,
+    StatusScoringDrift,
 }
 
 #[derive(Debug, Parser)]
@@ -99,8 +101,7 @@ struct ControlledScorerInner {
     score: f64,
     calls: AtomicUsize,
     ready: AtomicBool,
-    released: AtomicBool,
-    release: Notify,
+    release_gate: CancellationToken,
 }
 
 impl ControlledScorer {
@@ -109,8 +110,7 @@ impl ControlledScorer {
     }
 
     fn release(&self) {
-        self.inner.released.store(true, Ordering::Release);
-        self.inner.release.notify_waiters();
+        self.inner.release_gate.cancel();
     }
 }
 
@@ -129,13 +129,23 @@ impl Drop for BlockedCallGuard {
 
 impl PublicationScorer for ControlledScorer {
     fn status(&self) -> ScorerStatus {
-        if self.inner.ready.load(Ordering::Acquire) {
-            ScorerStatus::Ready {
+        if !self.inner.ready.load(Ordering::Acquire) {
+            return ScorerStatus::Loading;
+        }
+        match self.inner.behavior {
+            ControlledBehavior::StatusFailed => ScorerStatus::Failed,
+            ControlledBehavior::StatusModelDrift => ScorerStatus::Ready {
+                model: self.inner.drifted_model.clone(),
+                scoring: Box::new(self.inner.scoring.clone()),
+            },
+            ControlledBehavior::StatusScoringDrift => ScorerStatus::Ready {
+                model: self.inner.model.clone(),
+                scoring: Box::new(self.inner.drifted_scoring.clone()),
+            },
+            _ => ScorerStatus::Ready {
                 model: self.inner.model.clone(),
                 scoring: Box::new(self.inner.scoring.clone()),
-            }
-        } else {
-            ScorerStatus::Loading
+            },
         }
     }
 
@@ -152,14 +162,12 @@ impl PublicationScorer for ControlledScorer {
                 call,
                 completed: false,
             };
-            while !self.inner.released.load(Ordering::Acquire) {
-                tokio::select! {
-                    biased;
-                    _ = cancellation.cancelled() => {
-                        return Err(ScorerError::BackendUnavailable);
-                    }
-                    _ = self.inner.release.notified() => {}
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => {
+                    return Err(ScorerError::BackendUnavailable);
                 }
+                _ = self.inner.release_gate.cancelled() => {}
             }
             guard.completed = true;
             eprintln!("controlled_scorer_released call={call}");
@@ -187,7 +195,10 @@ impl PublicationScorer for ControlledScorer {
                 }
                 ControlledBehavior::Fixed
                 | ControlledBehavior::BlockFirst
-                | ControlledBehavior::BackendFailureFirst => vec![self.inner.score],
+                | ControlledBehavior::BackendFailureFirst
+                | ControlledBehavior::StatusFailed
+                | ControlledBehavior::StatusModelDrift
+                | ControlledBehavior::StatusScoringDrift => vec![self.inner.score],
             }
         } else {
             vec![self.inner.score]
@@ -242,8 +253,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             score: args.score,
             calls: AtomicUsize::new(0),
             ready: AtomicBool::new(!args.initially_unready),
-            released: AtomicBool::new(false),
-            release: Notify::new(),
+            release_gate: CancellationToken::new(),
         }),
     };
 

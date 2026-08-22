@@ -40,5 +40,7 @@
   committed replay fast path 或真实模型部署。
 - 证据只证明受控 backend 下的正式进程/协议/资源/故障闭环。未下载或运行真实模型，未使用 Docker、真实 API、训练或云资源；
   真实 threshold、模型质量与部署资格仍待后续工作包。
-- 实现与定向门禁已完成；首次本地提交后的单一干净上下文独立审查发现一项真实配置边界问题，修复提交 `dbc1d7a` 完成后由
-  同一审查者复验为 `PASS`，无剩余 correctness/functionality finding。尚未合并、推送或归档分支。
+- 首次本地提交后的配置边界 finding 已由 `dbc1d7a` 修复；后续独立验收提交 `d216bfb` 撤销了过早的 `PASS`，确认最小 frame
+  cap、terminal backend status 与测试 release barrier 三项局部缺口。现已按 Plan 决策 017–019 完成整改并通过 29/29 定向测试、
+  Clippy、argument-comment lint、fix/fmt，正在等待同一审查者复验；尚未重新验收、合并、推送或归档分支。详见
+  `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`。

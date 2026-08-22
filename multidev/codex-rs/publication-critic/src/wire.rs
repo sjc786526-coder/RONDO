@@ -19,6 +19,7 @@ pub struct StartupAnnouncement {
 pub enum ServicePhase {
     Starting,
     Ready,
+    Failed,
     Draining,
 }
 

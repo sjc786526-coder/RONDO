@@ -181,7 +181,9 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 
 ### 当前工作
 
-- Plan 055 已完成。实现提交 `2c47adb`、配置边界修复提交 `dbc1d7a`；同一干净上下文独立审查者复验结论为 `PASS`。
+- 独立验收提交 `d216bfb` 撤销了先前过早的 `PASS`：确认存在最小 frame cap、终态 backend status 和测试 release barrier 三项
+  correctness 缺口。三项均已按关键决策 017–019 局部修复；定向测试 29/29、Clippy、argument-comment lint、fix/fmt 已通过，
+  允许写集无越界。本轮以当前本地整改提交为交付，提交后立即通过 Codex 跨会话队列交回同一审查者；尚未重新验收通过。
 
 ### 本任务剩余步骤
 
@@ -189,7 +191,7 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 2. 已完成：实现可替换 scorer 服务与 B2b 可消费的 typed client；用受控 scorer 建立真实进程闭环。
 3. 已完成：补齐资源、故障、取消、隔离和 body-free 日志回归，完成受影响 crate 的格式、lint 与定向测试。
 4. 已完成：检查 diff/允许写集/并行 worktree，完成首个本地提交并交给唯一的干净上下文独立审查者。
-5. 已完成：首次审查 finding 已修复、复验并追加提交；同一审查者再次验收为 `PASS`，本计划冻结。
+5. 进行中：`d216bfb` 三项 finding 的修复、定向复验和允许写集检查已完成；以本地整改提交和 Codex 跨会话队列交回复验收口。
 
 ### 阻塞项
 
@@ -199,8 +201,9 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 
 - 受控 scorer 的真实子进程闭环、严格协议/identity、资源门、timeout/cancel、故障隔离和正文 sentinel 回归均已通过；
   证据只覆盖受控 backend，不覆盖真实模型、最终 threshold、B2b 接入或产品端到端。
-- 首次独立审查的配置绕过 finding 已修复，修复后 27/27 定向测试、Clippy、argument-comment lint、fix/fmt 通过；同一审查者
-  复验为 `PASS`，无剩余 correctness/functionality finding。055 worktree 已有本地提交，尚未合并、推送或归档分支。
+- 后续独立验收 `d216bfb` 的三项 finding 已完成局部整改；`just test -p codex-publication-critic` 29/29、定向 Clippy、
+  argument-comment lint、fix/fmt 均通过。现有状态仍是“等待同一审查者复验”，不能提前表述为 `PASS`；055 worktree 尚未合并、
+  推送或归档分支。整改证据见 `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`。
 
 ### 交接边界
 
@@ -231,3 +234,6 @@ HTTP/UDS、字段名、默认数值或错误枚举的具体形状。选择必须
 | 014 | production defaults 冻结为 request 128 KiB、response 16 KiB、scorer concurrency 1、queue 4、服务 job deadline 25s（含排队）、client E2E 30s、startup 60s、I/O 2s、graceful shutdown 3s + force/reap 2s、零 retry；受控测试可用显式更短的同型配置 | 符合单本地 GPU 与 2–8 Agent 小团队场景，所有等待和容量均有硬上限且测试无需长时间等待 | 资源合同 | 已采纳 |
 | 015 | liveness、readiness 与 draining 分离；每次调用独占一个 loopback connection，queued/in-flight/等待响应取消通过 token 或连接关闭传播，server 以 admission/execution permit 和自身 deadline 作最终回收保证 | shutdown 后立即拒绝新调用，一次 timeout/cancel/fault 不污染下一请求或永久占用许可 | 生命周期与取消 | 已采纳 |
 | 016 | `ClientConfig`、`ServiceConfig` 与 `RuntimeLimits` 的字段不向外部开放；构造器和 client/service 最终消费点均复验配置，所有 timeout 统一限制在 `(0, 5min]` | 防止外部 struct literal 或反序列化对象绕过 loopback/frame/resource 门，并避免无界 `Duration` 在 deadline 算术中 panic | 配置边界 | 已采纳 |
+| 017 | protocol v1 的 request/response frame cap 下限均为 8 KiB；下限只保证所有有效 identity 下的正式控制 envelope 可完成，合法 review 仍可因正文较大得到 typed `RequestTooLarge` | 拒绝会启动却无法健康检查或关闭的配置；最大转义 identity 的序列化回归证明该固定下限覆盖当前 wire，又避免 descriptor 自含 cap 造成动态定点计算 | 协议与资源 | 已采纳 |
+| 018 | scorer 状态按单次快照分成 `Loading`、精确 `Ready` 和 terminal typed failure；terminal 状态对 liveness 公告 `Failed` phase，并让 readiness/review 立即返回既有 backend/model/scoring failure code | 不把显式失败或 observed identity drift 伪装成 Starting/NotReady/StartupTimeout，同时保留 Loading 可等待语义 | lifecycle 与 failure | 已采纳 |
+| 019 | 受控 scorer 的 release barrier 使用一次性 `CancellationToken` latch；一次 release 对当前和未来的全部受影响调用生效，request cancellation 仍优先 | 消除 `Notify::notify_waiters` 在 waiter 注册前触发时的丢唤醒竞态，并保持轻量广播与确定性取消测试 | 测试同步 | 已采纳 |

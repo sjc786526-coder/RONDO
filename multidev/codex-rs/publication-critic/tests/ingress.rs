@@ -6,6 +6,7 @@ use codex_publication_critic::ContinuityContext;
 use codex_publication_critic::ContractFailure;
 use codex_publication_critic::CriticFailure;
 use codex_publication_critic::LocalScope;
+use codex_publication_critic::MIN_PROTOCOL_FRAME_BYTES;
 use codex_publication_critic::ProtocolVersion;
 use codex_publication_critic::PublicationCandidate;
 use codex_publication_critic::PublicationCriticClient;
@@ -35,8 +36,8 @@ use tokio_util::sync::CancellationToken;
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(3);
 const CALL_TIMEOUT: Duration = Duration::from_secs(1);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
-const REQUEST_BYTES: u32 = 4 * 1024;
-const RESPONSE_BYTES: u32 = 4 * 1024;
+const REQUEST_BYTES: u32 = MIN_PROTOCOL_FRAME_BYTES;
+const RESPONSE_BYTES: u32 = MIN_PROTOCOL_FRAME_BYTES;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -250,23 +251,16 @@ async fn ingress_rejects_oversize_and_unknown_fields_without_poisoning_typed_cal
     .await?;
     assert_eq!(client.review(review_packet.clone()).await?, Verdict::Pass);
 
-    let local_cap = RuntimeLimits::new(
-        /*request_bytes*/ 1,
-        RESPONSE_BYTES,
-        /*max_concurrency*/ 1,
-        /*queue_capacity*/ 2,
-        Duration::from_millis(500),
-        Duration::from_millis(500),
+    let large_legal_packet = PublicationPacket::new(
+        service.expected.identity.qualification.clone(),
+        ActorRole::Root,
+        TargetKind::NewEvent,
+        LocalScope::new("ingress cap")?,
+        PublicationCandidate::new("🦀".repeat(2_000))?,
+        ContinuityContext::NotApplicable,
     )?;
-    let local_expected = controlled_test_descriptor(local_cap);
-    let local_cap_client = PublicationCriticClient::new(ClientConfig::new(
-        service.endpoint,
-        local_expected.clone(),
-        CALL_TIMEOUT,
-        STARTUP_TIMEOUT,
-    )?)?;
     assert_eq!(
-        local_cap_client.review(packet(&local_expected)).await,
+        client.review(large_legal_packet).await,
         Err(CriticFailure::Contract(ContractFailure::RequestTooLarge))
     );
     assert_eq!(client.review(review_packet).await?, Verdict::Pass);

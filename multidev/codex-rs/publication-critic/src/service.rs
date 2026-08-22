@@ -4,9 +4,10 @@ use crate::PublicationScorer;
 use crate::RawScorerOutput;
 use crate::ScoreFailureKind;
 use crate::ScorerError;
-use crate::ScorerStatus;
 use crate::ServiceConfig;
 use crate::ServiceDescriptor;
+use crate::backend::BackendState;
+use crate::backend::classify_backend;
 use crate::transport::ReadFrameError;
 use crate::transport::read_frame;
 use crate::transport::write_frame;
@@ -62,22 +63,19 @@ struct ServerState<S> {
 }
 
 impl<S: PublicationScorer> ServerState<S> {
-    fn backend_ready(&self) -> bool {
-        matches!(
-            self.scorer.status(),
-            ScorerStatus::Ready { model, scoring }
-                if model == self.descriptor.identity.model
-                    && *scoring == self.descriptor.identity.scoring
-        )
+    fn backend_state(&self) -> BackendState {
+        classify_backend(self.scorer.status(), &self.descriptor)
     }
 
-    fn status(&self) -> ServiceStatus {
+    fn status(&self, backend: BackendState) -> ServiceStatus {
         let phase = if self.draining.load(Ordering::Acquire) {
             ServicePhase::Draining
-        } else if self.backend_ready() {
-            ServicePhase::Ready
         } else {
-            ServicePhase::Starting
+            match backend {
+                BackendState::Loading => ServicePhase::Starting,
+                BackendState::Ready => ServicePhase::Ready,
+                BackendState::Failed(_) => ServicePhase::Failed,
+            }
         };
         ServiceStatus {
             phase,
@@ -258,12 +256,21 @@ async fn handle_connection<S>(
 
     match request.request {
         RequestPayload::Liveness => {
-            let status = state.status();
+            let status = state.status(state.backend_state());
             write_response(&mut writer, &state, ResponsePayload::Liveness { status }).await;
         }
         RequestPayload::Readiness => {
-            let status = state.status();
-            write_response(&mut writer, &state, ResponsePayload::Readiness { status }).await;
+            let backend = state.backend_state();
+            let response = if !state.draining.load(Ordering::Acquire)
+                && let BackendState::Failed(code) = backend
+            {
+                ResponsePayload::Failure { code }
+            } else {
+                ResponsePayload::Readiness {
+                    status: state.status(backend),
+                }
+            };
+            write_response(&mut writer, &state, response).await;
         }
         RequestPayload::Shutdown { expected } => {
             let identity_matches = *expected == state.descriptor;
@@ -306,9 +313,16 @@ async fn handle_review<S>(
         write_failure(writer, state, ServiceFailureCode::InvalidRequest).await;
         return;
     }
-    if !state.backend_ready() {
-        write_failure(writer, state, ServiceFailureCode::NotReady).await;
-        return;
+    match state.backend_state() {
+        BackendState::Ready => {}
+        BackendState::Loading => {
+            write_failure(writer, state, ServiceFailureCode::NotReady).await;
+            return;
+        }
+        BackendState::Failed(code) => {
+            write_failure(writer, state, code).await;
+            return;
+        }
     }
     let Ok(admission_permit) = Arc::clone(&state.admitted).try_acquire_owned() else {
         write_failure(writer, state, ServiceFailureCode::QueueFull).await;

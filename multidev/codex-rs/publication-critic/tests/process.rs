@@ -350,6 +350,77 @@ async fn initially_unready_process_becomes_ready_via_stdin_control() -> TestResu
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn terminal_backend_statuses_fail_immediately_with_precise_typed_errors() -> TestResult {
+    let cases = [
+        (
+            "status-failed",
+            CriticFailure::Infrastructure(InfrastructureFailure::Backend),
+        ),
+        (
+            "status-model-drift",
+            CriticFailure::Contract(ContractFailure::IdentityMismatch(IdentityField::Model)),
+        ),
+        (
+            "status-scoring-drift",
+            CriticFailure::Contract(ContractFailure::IdentityMismatch(IdentityField::Scoring)),
+        ),
+    ];
+
+    for (behavior, expected_failure) in cases {
+        let service = ServiceProcess::spawn(
+            behavior,
+            /*score*/ 0.75,
+            /*initially_unready*/ false,
+            TestRuntime::normal(),
+        )
+        .await?;
+        let client = service.client();
+        assert_eq!(client.liveness().await?.phase, ServicePhase::Failed);
+        assert_eq!(
+            client
+                .readiness()
+                .await
+                .expect_err("terminal backend status must fail readiness"),
+            expected_failure,
+            "readiness behavior: {behavior}"
+        );
+        let wait_failure = timeout(
+            Duration::from_millis(500),
+            client.wait_until_ready(CancellationToken::new()),
+        )
+        .await
+        .map_err(|_| "terminal backend status was misreported until startup timeout")?
+        .expect_err("terminal backend status must fail startup wait");
+        assert_eq!(wait_failure, expected_failure, "wait behavior: {behavior}");
+        assert_eq!(
+            client
+                .review(service.packet())
+                .await
+                .expect_err("terminal backend status must reject review"),
+            expected_failure,
+            "review behavior: {behavior}"
+        );
+        client.shutdown().await?;
+
+        let captured = service.finish().await?;
+        assert!(
+            captured.status.success(),
+            "service exit for {behavior}: {}",
+            captured.status
+        );
+        assert_body_is_redacted(
+            &captured.stdout,
+            &captured.stderr,
+            &[
+                format!("{expected_failure:?}"),
+                expected_failure.to_string(),
+            ],
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn server_job_timeout_cancels_blocked_backend_and_next_call_recovers() -> TestResult {
     let mut service = ServiceProcess::spawn(
         "block-first",

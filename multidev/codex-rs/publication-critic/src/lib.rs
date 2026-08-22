@@ -1,3 +1,4 @@
+mod backend;
 mod client;
 #[cfg(test)]
 mod config_tests;
@@ -64,6 +65,7 @@ pub use resource::DEFAULT_QUEUE_CAPACITY;
 pub use resource::DEFAULT_REQUEST_BYTES;
 pub use resource::DEFAULT_RESPONSE_BYTES;
 pub use resource::DEFAULT_STARTUP_TIMEOUT;
+pub use resource::MIN_PROTOCOL_FRAME_BYTES;
 pub use resource::RuntimeLimits;
 pub use resource::ServiceConfig;
 pub use resource::ServiceDescriptor;

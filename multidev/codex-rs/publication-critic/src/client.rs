@@ -183,6 +183,13 @@ impl PublicationCriticClient {
                         InfrastructureFailure::ShuttingDown,
                     ));
                 }
+                Ok(ResponsePayload::Readiness { status })
+                    if matches!(status.phase, ServicePhase::Failed) =>
+                {
+                    return Err(CriticFailure::Infrastructure(
+                        InfrastructureFailure::Backend,
+                    ));
+                }
                 Ok(ResponsePayload::Readiness { .. })
                 | Err(CriticFailure::Infrastructure(InfrastructureFailure::Connect)) => {}
                 Ok(ResponsePayload::Failure { code }) => {
