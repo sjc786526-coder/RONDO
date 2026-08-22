@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-22 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期与三期 M3-A1 已完成；Plan 055 / M3-B2a 已完成、通过独立验收并主线整合；M3-A2 状态不变**
+状态：**第一期、第二期与三期 M3-A1 已完成；Plan 055 / M3-B2a 已主线整合；Plan 057 / M3-B2b 已完成并通过独立验收；M3-A2 状态不变**
 
 ## 当前定位
 
@@ -130,10 +130,10 @@ PASS/REWRITE、严格解析、identity/score 漂移、并发/队列、timeout/ca
 第二套 trace、复杂鉴权或通用模型服务平台。typed packet 没有任意 metadata 扩展袋，但 B2a 不声明能识别合法文本字段中被
 手工粘入的私密语义；canonical 来源与 packet 构造仍属于 M3-B2b。
 
-**交接**：M3-B2b 已按 Plan 057 消费公开 typed verdict/failure 与 expected identity 配置边界并完成实现和定向门禁，正在等待
-实现后的独立验收；最终 threshold、真实训练权重和部署资格仍留给后续评价/资格工作包。
+**交接**：M3-B2b 已按 Plan 057 消费公开 typed verdict/failure 与 expected identity 配置边界，完成实现、定向门禁和独立验收；
+最终 threshold、真实训练权重和部署资格仍留给后续评价/资格工作包。
 
-#### M3-B2b：Multi 发布流程接入（实现完成，独立验收待执行）
+#### M3-B2b：Multi 发布流程接入（已完成并通过独立验收）
 
 **结果**：Plan 057 已把默认关闭的 typed Critic 配置接入 `team_publish` 前置流程。关闭态保留原工具合同和 store 路径；启用态审核
 Team State 共享 canonical preparation，以 event-local 单页公共 history 构造 Plan 055 packet，最多返回两次固定 rewrite，第三次审核
@@ -143,7 +143,7 @@ Team State 共享 canonical preparation，以 event-local 单页公共 history �
 **边界**：只增加 Publication Critic 所需产品能力；不接管 Producer/Root 语义，不新建 Agent 间协议、第二套 Team State、
 调度器或自动重写器。实现可以为保持边界干净而重构，不要求堆叠在现有 handler 上。
 
-**交接**：实现与定向门禁已完成，独立验收尚待 Plan 057 收口；通过后产品链等待模型链完成再进入 M3-C1。本包不冻结真实
+**交接**：Plan 057 的干净上下文独立验收已 PASS、无 finding；产品链等待模型链完成再进入 M3-C1。本包不冻结真实
 threshold/model identity，不扩张为自动改写器、第二套 Team State/trace 或通用服务监督器。
 
 ### C 阶段：本地收敛与最终选择
@@ -186,8 +186,8 @@ threshold/model identity，不扩张为自动改写器、第二套 Team State/tr
 
 ## 串并行与资源关系
 
-- M3-A1 已完成共同前置。数据/训练链按 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a 已完成并通过
-  独立验收，M3-B2b 已完成实现与定向门禁、正在等待独立验收。两链彼此并行，数据建设不阻塞本地服务与产品接入。
+- M3-A1 已完成共同前置。数据/训练链按 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 串行；产品链的 M3-B2a 与 M3-B2b
+  均已完成并通过独立验收。两链彼此并行，产品链现等待模型链完成再进入 M3-C1。
 - M3-B1b 是独立付费资格门，M3-B1c 只有在 go 结论和新的正式训练授权后才能开始；no-go 不自动继续消费预算。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
 - RunPod 云端 smoke/训练可以与不占用本地重型资源的产品代码、数据整理和受控替身测试并行；真实本地模型、Docker 与
@@ -271,8 +271,8 @@ threshold/model identity，不扩张为自动改写器、第二套 Team State/tr
 
 ## 外部授权与实施边界
 
-- M3-A1 产品合同已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 获得授权并完成实现，
-  正在等待独立验收；M3-A2 状态不由产品链任务改写。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
+- M3-A1 产品合同已完成；M3-B2a 已按 Plan 055 完成实现、独立验收与主线整合；M3-B2b 已按 Plan 057 完成实现与独立验收；
+  M3-A2 状态不由产品链任务改写。其余后续工作包启动时仍须按 `plan/plan-example.md` 建立任务合同并取得授权。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
