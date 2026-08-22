@@ -21,6 +21,7 @@ from rondo_eval.terminal_bench.bounded_observation import (
     assess_candidates,
     freeze_slots,
     public_result,
+    validate_state,
 )
 from rondo_eval.terminal_bench.bounded_observation_cli import (
     _load_budget_snapshot,
@@ -229,6 +230,59 @@ class BoundedObservationIdentityTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "rehearsal_complete")
         self.assertIsNone(result["candidate_assessment"])
         self.assertIsNone(result["selected_candidate"])
+
+    def test_finalized_rehearsal_accepts_only_rehearsal_outcomes(self) -> None:
+        tasks = _tasks()
+        slots = freeze_slots(
+            tasks,
+            run_id_date="20260822",
+            run_id_sequence_base=560000001,
+            rounds=1,
+        )
+        identity = SimpleNamespace(
+            campaign_id="plan056-rehearsal-test",
+            campaign_mode="rehearsal",
+            lock_sha256="a" * 64,
+            tasks=tasks,
+            slots=slots,
+        )
+        state = {
+            "schema_version": 1,
+            "kind": "rondo_direction1_bounded_observation",
+            "campaign_id": identity.campaign_id,
+            "campaign_lock_sha256": identity.lock_sha256,
+            "status": "finalized",
+            "invalid_reason": None,
+            "formal_boundary": True,
+            "preflight": [
+                {
+                    "task_id": task.task_id,
+                    "status": "complete",
+                    "attempts": 1,
+                    "receipt_sha256": "b" * 64,
+                    "last_error": None,
+                }
+                for task in tasks
+            ],
+            "slots": [
+                {
+                    "slot_id": slot.slot_id,
+                    "run_id": slot.run_id,
+                    "status": "published",
+                    "execution_attempts": 1,
+                    "record_sha256": "c" * 64,
+                }
+                for slot in slots
+            ],
+            "final_storage": {},
+            "outcome": "rehearsal_complete",
+            "selected_candidate": None,
+        }
+
+        validate_state(state, identity=identity)
+        state["outcome"] = "no_candidate"
+        with self.assertRaisesRegex(BoundedObservationError, "outcome"):
+            validate_state(state, identity=identity)
 
     def test_rehearsal_may_reuse_only_an_ancestor_with_identical_product_tree(
         self,

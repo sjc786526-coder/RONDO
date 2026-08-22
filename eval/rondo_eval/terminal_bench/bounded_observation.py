@@ -1010,12 +1010,14 @@ def validate_state(value: object, *, identity: BoundedObservationIdentity) -> No
         raise BoundedObservationError("Plan 056 terminal denominator is incomplete")
     if value["status"] == "invalid" and not value["invalid_reason"]:
         raise BoundedObservationError("Plan 056 invalid state lacks a reason")
-    if value["status"] == "finalized" and value["outcome"] not in {
-        "candidate_selected",
-        "no_candidate",
-        "campaign_invalid",
-    }:
-        raise BoundedObservationError("Plan 056 final outcome is invalid")
+    if value["status"] == "finalized":
+        allowed_outcomes = (
+            {"rehearsal_complete", "campaign_invalid"}
+            if identity.campaign_mode == "rehearsal"
+            else {"candidate_selected", "no_candidate", "campaign_invalid"}
+        )
+        if value["outcome"] not in allowed_outcomes:
+            raise BoundedObservationError("Plan 056 final outcome is invalid")
 
 
 def build_slot_record(
