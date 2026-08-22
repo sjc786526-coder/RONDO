@@ -159,19 +159,25 @@ worktree 不复制的 Plan 050 ignored 原始资产既不需要也不得展开�
 - 已核对根/`multidev/` 规则、README、当前 WBS、Plan 047—050 与完成证据、两份 Publication Critic 研究材料，以及
   `team_publish`、Team State publish/history/evidence 和相关测试的现行实现。
 - 已确认 M3-A1 可只用 tracked 事实完成；不需要读取 Plan 050 ignored 原始 trace，也没有必须直接写主工作区的事项。
-- 已冻结本执行合同并初始化精炼任务日志；尚未实施 M3-A1 产品合同、WBS 状态同步或独立复核。
+- 已冻结本执行合同并初始化精炼任务日志。
+- 执行阶段已重新核对 Plan 047—050 完成证据、两份 Publication Critic 研究材料，以及现行 `team_publish`、history、
+  evidence、retry/dedup、revision/wake、权限与生命周期源码和定向测试。
+- 已形成 `doc/rondo-multi-publication-critic-product-contract.md` 初稿，覆盖完整 canonical candidate、最小公共输入、
+  Evidence V1、hard/soft qualification、两次重写/故障/取消、角色职责、Team State 不变量和四类边界例。
+- 已精炼同步方向 3 子 WBS 的 M3-A1 状态、合同链接和 M3-A2/M3-B2a 交接；未修改顶层 WBS 或其他并行写集。
+- 聚焦独立审查确认主体 Team State 不变量与下游交接成立，并提出 4 项真实 finding：两个边界例的隐性 evidence/handoff
+  门槛、fallback 的 commit outcome 表述，以及执行期 Plan/WBS 状态同步。四项均已窄修；同一审查者终验全部 staged
+  交付为 `PASS`，确认四项全部关闭且没有新的 correctness/functionality finding。
+- 已完成相对链接存在性、四类例子计数、关键术语、允许写集、`git diff --cached --check`、主工作区/Plan 052 元数据和
+  worktree 状态检查；暂存区只含本计划允许的四个路径。
 
 ### 当前工作
 
-- 等待用户把本计划与一次性执行授权交给执行者。
+- M3-A1 产品合同、WBS/Plan/日志同步、轻量检查和独立验收均已完成；本计划随 053 本地提交冻结。
 
 ### 本任务剩余步骤
 
-1. 复核实时工作树/并行状态，并从现行事实中收口产品合同初稿。
-2. 补齐四类边界例、Team State 不变量和 M3-A2/M3-B2a 交接。
-3. 精炼同步方向 3 子 WBS并完成任务日志。
-4. 运行轻量检查，安排一次聚焦独立审查；核实 finding 后在范围内窄修并有界复核。
-5. 审查 diff、工作树与意外产物，只提交 053 本地分支并停止。
+- 本任务内无剩余实现或验证步骤；完成 053 本地提交并确认工作树干净后停止。
 
 ### 阻塞项
 
@@ -179,7 +185,8 @@ worktree 不复制的 Plan 050 ignored 原始资产既不需要也不得展开�
 
 ### 当前验收状态
 
-- 仅规划完成；M3-A1 尚未实施、未验证、未提交。
+- 验收通过，任务目标完成。唯一的干净上下文独立审查者确认 4 项 finding 全部关闭，合同、四类例子、Team State 不变量、
+  两条下游交接及允许写集均无剩余 correctness/functionality 问题。
 
 ### 交接边界
 
@@ -201,3 +208,7 @@ worktree 不复制的 Plan 050 ignored 原始资产既不需要也不得展开�
 | 005 | Plan 052 并行期间 053 不写共享顶层 WBS；工作树完成后只本地提交 | 避免两任务争写权威文档，并遵守用户对合并/推送另行批准的要求 | 并行与 Git 交付 | 已采纳 |
 | 006 | 普通文档 finding 允许范围内自主窄修并有界复核 | 一次可修的矛盾或例子缺口不应中断任务，原则语义边界仍需用户决定 | 审查流程 | 已采纳 |
 | 007 | 复用以职责边界相符为前提；必要时允许新建架构契合的专用能力 | 避免“为了轻而轻”或为复用扭曲设计，同时不建设重复、无现实需求的重型体系 | 下游设计与验收取向 | 已采纳 |
+| 008 | 已有 Event 必须带有界 continuity envelope，但 prior authored text 可诚实为空或省略 | 同时给增量 publication 局部语境并避免冻结历史条数、无界抓取或把缺失上下文冒充完整 | 最小公共输入 | 已采纳 |
+| 009 | Evidence V1 只给 policy marker 和 prior public Version 的 body-free 引用存在/省略语义，不给 Fact ID、locator、类别或正文 | 当前 candidate 的最终 evidence window 只在 commit 时确定；最小语义足以约束确定性用词且避免伪 grounding | Evidence V1 | 已采纳 |
+| 010 | 任一审查点发生服务/合同故障都停止继续审核并把当前稿送入现行发布路径；审核状态与最终 commit outcome 正交 | Critic 是质量优化而非安全门，且故障不能伪装成业务 verdict 或 store 已提交 | fallback | 已采纳 |
+| 011 | 用户指定的同一名干净上下文聚焦审查者同时承担合同复核和全部工作终验，不再启动第二名审查者 | 满足一次独立上下文审查与修复后复验闭环，避免重复评审 | 审查流程 | 已采纳 |

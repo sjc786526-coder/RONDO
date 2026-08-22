@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-22 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期已完成；三期 Publication Critic 已完成长程规划，M3-A1 尚未实施**
+状态：**第一期、第二期已完成；三期 M3-A1 产品合同已完成，M3-A2 与 M3-B2a 可分别立项**
 
 ## 当前定位
 
@@ -16,21 +16,17 @@ Multi-Agent 作为存在前提。预期团队规模为 2–8 个 Agent，通常�
 `doc/WBS-COMPLETED.md`，本页不再维护其任务分解。
 
 三期建设一个专用本地 **Publication Critic**：Producer 提交 `team_publish` 前，由小模型审查拟发布内容是否达到最低公共状态
-质量。Producer 仍决定写什么和如何改写，Root 仍负责协调，Critic 不成为第二个 Agent，也不接管 Team State。
+质量。稳定产品语义见 [`doc/rondo-multi-publication-critic-product-contract.md`](../rondo-multi-publication-critic-product-contract.md)；
+Producer、Critic、Harness、Root 的职责及现行 Team State 不变量以该合同为共同前置。
 
 ## 三期目标与冻结决定
 
 ### 产品目标
 
-- Critic 审查完整 publication candidate，而非只检查 `handoff`；关注状态传递、事实与推测的区分、未完成工作能否接续、
-  内部一致性和信息密度。
-- 产品判定保持 `PASS/REWRITE`。Critic 不自动改写、不生成长篇自由文本理由，也不决定事项是否值得发布、如何 route 或如何分工。
-- 前两次 `REWRITE` 可以阻止当前稿并让 Producer 重写；第二次改稿接受最后一次非阻断审查，随后无论结果都发布。
-  两次反馈使用 Harness 持有的不同固定提示，并回显最近一次被拒绝的 canonical publication。
-- 本地服务故障、超时或输出不合法时继续发布，并明确记录“未完成审核”；重写机会耗尽后仍未通过则记录“审核未通过但已发布”。
-  Critic 是质量优化能力，不是安全审批边界。
-- Critic 只使用有界的公共状态输入，不读取 Producer 或 sibling 的私有 transcript、隐藏 reasoning、整个仓库或无界历史。
-  第一版不验证 Fact 真伪、时效或 claim→Fact 语义蕴含，只检查发布文字是否诚实保留不确定性。
+- Critic 审查完整 canonical publication candidate，四类 publication 使用统一最低质量原则；`PASS/REWRITE`、两次 Producer
+  重写、最终非阻断发布、服务故障继续发布与取消不提交均按产品合同解释。
+- 输入只来自有界、permission-scoped 的公共状态；V1 不读取 evidence 正文或验证 claim→Fact 语义，Critic 不自动改写、
+  不决定事项是否值得发布，也不接管 route、分工或 Root 协调。
 
 ### 模型与训练边界
 
@@ -70,20 +66,16 @@ M3-B1c 正式分阶段训练与工件回收          │
 
 ### A 阶段：共同前置与轻量基准
 
-#### M3-A1：产品合同与质量边界（唯一下一工作包）
+#### M3-A1：产品合同与质量边界（已完成）
 
-**目标**：把 Critic 的最小公共输入、质量边界、重写行为和评价口径收口成一套可供训练与产品接入共同使用的合同，
-使数据/训练链与产品链可以独立开工。
+**结果**：[`Publication Critic 产品合同`](../rondo-multi-publication-critic-product-contract.md) 已冻结完整被审 candidate、
+最小公共输入与禁入边界、统一 qualification、hard/soft 分层、重写/故障/取消语义、角色职责及 Team State 不变量。
 
 **边界**：只定义稳定产品语义和任务边界；不建设数据设施、不下载或运行模型、不修改产品代码，也不冻结模块布局、
 API schema、训练超参数或部署格式。
 
-**宏观验收**：
-
-- 新 Event、已有 Event、已完成事项与未完成事项的代表性 publication 都有一致的审查定义；
-- 最小公共上下文、PASS/REWRITE、两次重写、最终非阻断发布和故障继续发布的边界清楚且互相一致；
-- 私有上下文、evidence 语义验证、自动改写和 Root 职责明确排除；
-- M3-A2 与 M3-B2a 可以只依赖本合同分别启动，不需要互相等待。
+**交接**：M3-A2 与 M3-B2a 可依赖同一产品合同分别建立自己的 task plan，不需互相等待。两者仍须各自冻结 schema、
+数据/评价细节或服务协议与数值参数；M3-A1 未实现数据设施、模型服务或 `team_publish` 接入。
 
 #### M3-A2：数据/评价设施与基座测评
 
@@ -187,7 +179,7 @@ M3-C1。最后一个 checkpoint 不自动获得产品资格。
 
 ## 串并行与资源关系
 
-- M3-A1 是唯一共同前置。其后数据/训练链按 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 串行，产品链按
+- M3-A1 已完成共同前置。数据/训练链现按 `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 串行，产品链按
   `M3-B2a → M3-B2b` 串行，两链彼此并行；数据建设不阻塞本地服务与产品接入。
 - M3-B1b 是独立付费资格门，M3-B1c 只有在 go 结论和新的正式训练授权后才能开始；no-go 不自动继续消费预算。
 - M3-C1 等待 M3-B1c 与 M3-B2b，M3-C2 等待 M3-C1，M3-D 最后串行收口。
@@ -272,7 +264,7 @@ M3-C1。最后一个 checkpoint 不自动获得产品资格。
 
 ## 外部授权与实施边界
 
-- 当前只完成长程规划，M3-A1 尚未实施；每个工作包启动时按 `plan/plan-example.md` 建立任务合同。
+- M3-A1 产品合同已完成；M3-A2 与 M3-B2a 尚未进入实施。每个后续工作包启动时按 `plan/plan-example.md` 建立任务合同。
 - RunPod 创建或计费、模型与数据上传、云端训练、权重下载、真实本地模型加载/推理、Docker 和付费 API 均须在对应任务
   开始前取得明确授权；23 USD 是三期训练的总预算上限，不等于已经授权消费。
 - 训练数据、权重、逐样本输出与私有运行材料留在 `eval-data/` 或仓库外；`training/` 只保存体积合规的轻量合同与数据。
