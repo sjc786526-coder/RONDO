@@ -468,6 +468,39 @@ fn exec_command_tool_output_formats_truncated_response() {
 }
 
 #[test]
+fn exec_command_tool_output_reports_native_render_metadata() {
+    let response = ExecCommandToolOutput {
+        event_call_id: "call-observed".to_string(),
+        chunk_id: String::new(),
+        wall_time: std::time::Duration::ZERO,
+        raw_output: b"0123456789012345678901234567890123456789".to_vec(),
+        truncation_policy: TruncationPolicy::Tokens(10_000),
+        max_output_tokens: Some(5),
+        process_id: None,
+        exit_code: Some(0),
+        original_token_count: Some(10),
+        output_omitted_bytes: NonZeroUsize::new(100),
+        hook_command: None,
+    };
+
+    let metadata = response
+        .output_render_metadata(ToolOutputRenderTarget::DirectModel)
+        .expect("unified exec output should expose render facts");
+
+    assert_eq!(
+        metadata,
+        ToolOutputRenderMetadata {
+            source_text_bytes: response.raw_output.len(),
+            collection_omitted_bytes: 100,
+            requested_max_output_tokens: Some(5),
+            effective_max_output_tokens: Some(5),
+            returned_text_bytes: response.response_text().len(),
+            presentation_truncated: true,
+        }
+    );
+}
+
+#[test]
 fn exec_command_tool_output_preserves_omission_metadata_when_truncated() {
     let payload = ToolPayload::Function {
         arguments: "{}".to_string(),

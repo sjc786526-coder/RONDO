@@ -5,8 +5,6 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use ts_rs::TS;
 
-use crate::RondoLocalTaskObservation;
-
 /// Top-level JSONL events emitted by codex exec
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(tag = "type")]
@@ -36,9 +34,6 @@ pub enum ThreadEvent {
     /// Represents an unrecoverable error emitted directly by the event stream.
     #[serde(rename = "error")]
     Error(ThreadErrorEvent),
-    /// Opt-in, body-free task aggregate used by the RONDO Local harness census.
-    #[serde(rename = "task.observation")]
-    TaskObservation(Box<RondoLocalTaskObservation>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

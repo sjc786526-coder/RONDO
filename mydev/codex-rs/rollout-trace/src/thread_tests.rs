@@ -16,6 +16,8 @@ use super::*;
 use crate::AgentResultTracePayload;
 use crate::CompactionCheckpointTracePayload;
 use crate::ExecutionStatus;
+use crate::OutputRenderObservation;
+use crate::OutputRenderSurface;
 use crate::RawTraceEventPayload;
 use crate::RolloutStatus;
 use crate::replay_bundle;
@@ -52,6 +54,52 @@ fn create_in_root_writes_replayable_lifecycle_events() -> anyhow::Result<()> {
     assert_eq!(replayed.threads[&thread_id.to_string()].agent_path, "/root");
     assert_eq!(replayed.raw_payloads.len(), 1);
 
+    let event_log = fs::read_to_string(bundle_dir.join("trace.jsonl"))?;
+    let final_event: crate::RawTraceEvent =
+        serde_json::from_str(event_log.lines().last().expect("capture end event"))?;
+    assert_eq!(
+        final_event.payload,
+        RawTraceEventPayload::TraceCaptureEnded {
+            dropped_operations: 0,
+        }
+    );
+
+    Ok(())
+}
+
+#[test]
+fn code_cell_render_records_only_body_free_native_facts() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let thread_trace = ThreadTraceContext::start_root_in_root_for_test(
+        temp.path(),
+        minimal_metadata(ThreadId::new()),
+    )?;
+    let code_cell =
+        thread_trace.start_code_cell_trace("turn-1", "cell-1", "call-1", "private source");
+    let observation = OutputRenderObservation {
+        surface: OutputRenderSurface::DirectModel,
+        source_text_bytes: 100,
+        collection_omitted_bytes: 20,
+        requested_max_output_tokens: Some(10),
+        effective_max_output_tokens: Some(10),
+        returned_text_bytes: 80,
+        presentation_truncated: true,
+    };
+
+    code_cell.record_output_rendered(observation);
+
+    let event_log = fs::read_to_string(single_bundle_dir(temp.path())?.join("trace.jsonl"))?;
+    let render_event = event_log.lines().find_map(|line| {
+        let event: crate::RawTraceEvent = serde_json::from_str(line).ok()?;
+        match event.payload {
+            RawTraceEventPayload::CodeCellOutputRendered {
+                runtime_cell_id,
+                observation,
+            } => Some((runtime_cell_id, observation)),
+            _ => None,
+        }
+    });
+    assert_eq!(render_event, Some(("cell-1".to_string(), observation)));
     Ok(())
 }
 

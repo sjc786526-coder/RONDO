@@ -21,32 +21,32 @@
 
 ### 完成/验收标准
 
-- [ ] 顶层 WBS 与方向 1 子 WBS 表述一致：方向 1 已进入 Plan 052 推进状态，本任务不实现性能优化，当前唯一
+- [x] 顶层 WBS 与方向 1 子 WBS 表述一致：方向 1 已进入 Plan 052 推进状态，本任务不实现性能优化，当前唯一
       工作包与任务结束后的二选一交接清楚；README 不堆叠阶段状态。
-- [ ] 形成一个版本化、可校验的 RONDO Local 任务级聚合观测 schema。它明确适用范围、采集开关、样本/字段覆盖、
+- [x] 形成一个版本化、可校验的 RONDO Local 任务级聚合观测 schema。它明确适用范围、采集开关、样本/字段覆盖、
       缺失值语义和来源，不改写历史结果，也不把 Local 内部指标用于和未注入同等探针的冻结 Codex 做公平横比。
-- [ ] 观测关闭时不建立额外采集状态、不产生额外文件或网络行为，也不改变请求、prompt、工具、compact、审批、
+- [x] 观测关闭时不建立额外采集状态、不产生额外文件或网络行为，也不改变请求、prompt、工具、compact、审批、
       重试、停止或调度语义；开启时只产生有界的安全聚合值。
-- [ ] tracked/public 输出只允许计数、时长、token、比例、枚举、布尔值和必要的版本/覆盖身份；不得包含 prompt、
+- [x] tracked/public 输出只允许计数、时长、token、比例、枚举、布尔值和必要的版本/覆盖身份；不得包含 prompt、
       命令正文、工具输出、原始参数、任务正文、最终回答正文、密钥、私有路径或逐条私有样本身份。若内部为去重
       临时计算摘要，摘要本身也不得进入 tracked/public 结果。
-- [ ] 历史资产读取器或等价工具能对当前已交付资产做只读、可重复普查；缺文件、旧 schema、部分运行失败和字段
+- [x] 历史资产读取器或等价工具能对当前已交付资产做只读、可重复普查；缺文件、旧 schema、部分运行失败和字段
       不可用均有明确分类，不能用 0、空字符串或推测值伪装成已测量。
-- [ ] 日期冻结的普查证据说明样本来源、选择规则、覆盖范围、可测/不可测字段、局限及 C1/C11/C7/C2/C4/C5 的
+- [x] 日期冻结的普查证据说明样本来源、选择规则、覆盖范围、可测/不可测字段、局限及 C1/C11/C7/C2/C4/C5 的
       结论。每个重点候选只能落入“已观察且影响明显 / 已观察但影响较弱 / 当前样本未观察到 / 当前资产无法测量”
       之一，并给出分母、发生率或不能给出发生率的原因；“未观察到”不得写成“绝对不存在”。
-- [ ] 候选排序综合发生率、影响范围、预期收益、实现成本和行为风险，不按教师实现数量、新颖度或既有候选顺序
+- [x] 候选排序综合发生率、影响范围、预期收益、实现成本和行为风险，不按教师实现数量、新颖度或既有候选顺序
       机械决定；C4/C5 只作归因辅助，不单独包装成成功率优化。
-- [ ] 证据充分时，WBS 只留下一个首个优化候选；证据不足时，WBS 只留下一个测量工作包，并明确任务数、轮数、
+- [x] 证据充分时，WBS 只留下一个首个优化候选；证据不足时，WBS 只留下一个测量工作包，并明确任务数、轮数、
       模型、预算上限、停止条件和需另行取得的真实执行授权。本计划内不启动该测量运行。
-- [ ] E-A 决策有明确依据：现有资产和最小观测足够则继续不恢复；确需低成本反复实验时，只在 WBS 中列出必要的
+- [x] E-A 决策有明确依据：现有资产和最小观测足够则继续不恢复；确需低成本反复实验时，只在 WBS 中列出必要的
       最小能力与依赖，不在本任务建设录制器、回放服务器、故障注入、曲线和统一入口全套设施。
-- [ ] 相关格式化、静态检查、Python 定向测试、受影响 Rust crate/模块的定向门禁和必要轻量集成测试通过；所有
+- [x] 相关格式化、静态检查、Python 定向测试、受影响 Rust crate/模块的定向门禁和必要轻量集成测试通过；所有
       Cargo 构建/测试经过根共享构建锁与资源看门狗。全 workspace、CI、PR、Docker、真实 API、本地模型、训练、
       validation、holdout 均不运行。
-- [ ] 安排一次聚焦的只读独立复核，确认观测未改变 Local 行为、结论能被实际资产支持、四类结论没有混淆且候选
+- [x] 安排一次聚焦的只读独立复核，确认观测未改变 Local 行为、结论能被实际资产支持、四类结论没有混淆且候选
       选择不是主观指定。完成后同步 WBS、WBS-COMPLETED、计划当前状态、日期冻结证据和一份精炼 agent log。
-- [ ] 任务分支已提交且 worktree 干净；主工作区和其他 worktree 未受干扰。未经用户另行批准不合并、不推送、
+- [x] 任务分支已提交且 worktree 干净；主工作区和其他 worktree 未受干扰。未经用户另行批准不合并、不推送、
       不归档分支。
 
 ## 2. 范围
@@ -152,13 +152,16 @@
 - 已核对根/`mydev` AGENTS、README、顶层/方向 0/方向 1 WBS、候选研究、数据布局、Plan 051 及实时源码。
 - 安全结构盘点确认主物理根现有 290 个 ignored run 目录、209 份 `codex exec --json` 工件和 27 个 campaign
   目录；这些只是资产结构，不等于 Plan 052 的合格 Local 样本分母，执行时必须按 tracked 产品/结果身份筛选。
-- 当前 `codex exec --json` 工件已有 turn 终态 token/cache、命令执行、文件变化和错误终态；turn profile 目前进入
-  analytics，compact、Guardian latency/token 与 direct tool timing 尚未进入统一任务结果，且 direct tool timing
-  有 INFO/调用源覆盖限制。Terminal-Bench publisher 主要从 Harbor `agent_result` 接 token 字段。
+- 原生 rollout trace 已有 turn/inference/tool 生命周期、usage、调用源和 tool runtime；API metadata 已有请求角色、
+  终态、错误类别与 usage。compact 原因、Guardian 细节和完成声明—验证关系仍不足以可靠归因，保持不可测。
 - 已确认 `RepoPaths.discover()` 从 worktree 解析 Git common root；ignored `eval-data/` 不复制进普通 worktree，
   因而其只读普查必须从任务 worktree 发起、实际访问主仓库物理根。
-- 已实现 `codex exec --json --rondo-local-observation`：关闭时不构造 collector，也不接收仅供聚合的
-  raw-response/Guardian 通知；开启时在 primary turn 终态追加一个 schema-v1 body-free task aggregate。
+- 已删除重复的 `codex exec --json --rondo-local-observation` collector。下一轮只对目标 RONDO Local 请求显式启用
+  既有 `CODEX_ROLLOUT_TRACE_ROOT`；Terminal-Bench 在发布前把原生 trace 与 API metadata 投影成固定名称的
+  schema-v1 body-free 任务结果，缺失、残缺、重复、字段漂移或来源不一致均停止发布，原始 trace 不归档。
+- rollout trace 增加最小完整性终态与原生输出 render 事实：精确区分 model-visible 与 code-mode runtime 表面，
+  只记录字节数、截断/collection omission、预算和有限枚举，不记录正文；现有 Team Lens 严格 reader/reducer 同时
+  支持 Local 单智能体 bundle，不另建 telemetry 平台。
 - 已实现严格 Local 选样、common-root 锚定的 `O_NOFOLLOW` 私有工件读取、exact-schema 校验、聚合/比较与根
   `just eval-plan052-census` 入口；日期冻结机器结果和证据均已形成。
 - v28 最终 cohort 为 10 个任务 × 3 次 Local 观测。API metadata 为 30/30 run、10/10 任务；exec JSONL 为
@@ -166,16 +169,15 @@
   C7 不可测；没有选择行为优化。
 - WBS 已只留下一个后续包：同一 10 题、2 个 Local round、Terra medium/Guardian low、20 USD 硬上限和明确停止
   条件的真实观测复测，本任务不运行；E-A 继续不恢复。
-- 聚焦独立复核发现的非 Local private summary 读取、父目录 symlink 与 compare 缺失覆盖问题均已窄修并补回归；
-  最终复验 PASS，无剩余 correctness finding。
+- 首轮独立验收发现重复 collector、正式结果接线缺口及残缺历史工件误计为零；均已按现有原生事实链窄修并补回归。
 
 ### 当前工作
 
-实现、普查、文档同步、定向门禁、独立复核及最终格式/敏感内容/worktree 核对均已完成；任务分支待提交。
+实现、普查、文档同步、定向门禁和最终独立只读复核均已完成；本提交冻结任务合同并交接 WBS 的唯一后续测量包。
 
 ### 本任务剩余步骤
 
-无任务内剩余实现步骤。本计划随任务分支提交冻结；后续只按 WBS 的唯一有界测量包另立授权和 ExecPlan。
+无。后续只按 WBS 的唯一有界测量包另立授权和 ExecPlan，本任务不运行真实复测。
 
 ### 阻塞项
 
@@ -183,15 +185,16 @@
 
 ### 当前验收状态
 
-- 实现：默认关闭的 task aggregate、严格 schema/compare、只读 census、根 just 入口及日期冻结结果均完成；未改变
+- 实现：默认关闭的 Local trace opt-in、严格离线投影/schema/compare、只读 census、根 just 入口及日期冻结结果均完成；未改变
   prompt、请求、工具、compact、审批、重试、停止、调度、退出码或生产默认。
 - 普查：tracked index 288 行完成纯 tracked 校验；最终只验证 30 个 Local private summary。公共结果通过 exact schema
   与 body-free allowlist，实时重建和 tracked JSON 一致。
-- 门禁：Python 相关集合 47/47；正式 `just test -p codex-exec` 138/138，build watchdog `stop=none`；最终
-  `just fix -p codex-exec` 与 `just fmt` 通过。独立复验 PASS。
+- 门禁：最终相关 Python 集合 277/277 通过；`codex-rollout-trace` 62/62，受影响 `codex-core` output context
+  3/3、code-mode 5/5、tool-dispatch trace 4/4 通过；受影响 crate 的 `just fix` 与项目缓存下 `just fmt` 通过。
+  独立复核为 PASS。一次误触发的宽 `codex-core` crate 测试因环境代理相关失败且范围过宽而中止，不冒充通过。
 - 未运行：Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI、PR、Bazel。
-- Git：只提交当前专用分支；不合并、不推送、不归档。主工作区已由外部流程更新为 clean `main@607cba0`，原先
-  不重叠的来源不明研究文档现已被该外部提交跟踪；本任务始终未打开或触碰它。
+- Git：只提交当前专用分支；不合并、不推送、不归档。修复阶段曾存在的主工作区来源不明 WBS 修改保持原样；
+  交付复核时外部流程已将其提交，主工作区为 clean `main@ea03202` 且 ahead `origin/main` 1，本任务不触碰。
 
 ### 主工作区 ignored 资产
 
@@ -207,10 +210,12 @@
   `.env.local` 仍绝对禁止打开。
 
 实际执行中，主物理根只发生以下 ignored I/O：重复只读 v28 campaign identity，以及合格 30 个 Local run 的
-private summary、API metadata、24 份 exec JSONL 与 6 份 redaction marker；使用既有共享 `eval/.venv` 和
+private summary、API metadata、24 份 exec JSONL 与 6 份 redaction marker；修复后复跑又按同一 tracked 身份只读
+这些 v28 Local 工件并保持冻结结果逐字节一致。使用既有共享 `eval/.venv` 和
 `eval-data/uv-cache` 运行冻结 Python 环境。初版 census 在 Local 筛选前误用了全索引 reader，因此额外只读打开了
 10 份 v28 Codex private summary；独立复核后已改为 tracked-only 预筛选，最终实现和后续复跑不再打开它们。该误读
-没有输出正文、写入或改变任何资产。未建立 Plan 052 ignored 临时目录，未改写、移动、删除任何既有 ignored 资产。
+没有输出正文、写入或改变任何资产。修复期间建立并完整删除 `eval-data/plan052-temp/`，未改写、移动、删除任何既有
+ignored 资产；另在 `/tmp` 创建的运行时临时目录也已删除。
 
 主工作区没有任何 tracked 文件必须直接修改；若执行者发现 tracked 写入只能在主工作区完成，应停止并先说明原因，
 不得绕过 worktree 纪律。
@@ -231,7 +236,8 @@ private summary、API metadata、24 份 exec JSONL 与 6 份 redaction marker；
 | 003 | E-A 当前仍不恢复，只在任务末按实际证据决定最小后续能力 | 避免因历史设计恢复整套低频设施 | WBS、eval | 已采纳 |
 | 004 | 规划期资产目录数只作结构事实，eligible cohort 由 tracked 产品/结果身份重新筛选 | ignored 目录同时含不同产品、侧别和执行代次，目录计数不是样本分母 | 普查 | 已采纳 |
 | 005 | 执行和审查阶段只提交 Plan 052 worktree，不合并、不推送、不归档 | 用户明确要求每次完成后先只提交工作树 | Git 交付 | 已采纳 |
-| 006 | 产品侧只在 `codex-exec` 增加显式 JSON opt-in collector，不跨 core/protocol 建第二套 telemetry | app-server 已有逐响应 usage、Guardian 生命周期和 full turn items；更小接线可保持默认路径无状态 | `codex-exec`、schema | 已采纳 |
+| 006 | 复用原生 rollout trace/API metadata，在其真实输出边界只补决策必需的 body-free render 与完整性事实；删除重复 `codex-exec` collector | 现有事实源与 Terminal-Bench 发布链已合适，重复聚合会形成第二事实源；原生边界才能精确回答模型可见截断 | rollout trace、core、eval | 已采纳 |
 | 007 | v28 Local 使用 30-run/10-task 固定 cohort；exec 的 6 个 redacted 按任务级非随机缺失，不计为 0 | tracked campaign/slot 身份完整，但正文覆盖只有 24-run/8-task | census、证据 | 已采纳 |
 | 008 | 当前证据不足以选择 C1 或 C2，唯一下一包为 10 题 × 2 round、20 USD 上限的 Local 观测复测；E-A 不恢复 | C1/C2 仅有低频弱代理，C11 为窄样本阴性，C7 不可测；现有观测足以补覆盖 | WBS、方向 1 | 已采纳 |
 | 009 | 私有读取先做纯 tracked 筛选，再以 common-root `dir_fd`/`O_NOFOLLOW` 逐级打开 30 个 Local 槽；缺失覆盖时 compare 全部 delta 为 null | 关闭独立复核发现的越界读取、symlink 逃逸和“缺失当 0”问题 | eval reader、compare | 已采纳 |
+| 010 | 下一轮的唯一变量是开启 Local 安全观测，不改变产品行为；任一 trace/API 缺失、完整性终态非零、schema 或交叉核对失败即停止 | 当前证据只够验证观测覆盖，尚不足以承诺某个行为优化收益 | WBS、Terminal-Bench、结果发布 | 已采纳 |

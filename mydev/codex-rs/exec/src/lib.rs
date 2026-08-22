@@ -9,7 +9,6 @@ mod event_processor;
 mod event_processor_with_human_output;
 pub(crate) mod event_processor_with_jsonl_output;
 pub(crate) mod exec_events;
-mod rondo_local_observation;
 
 pub use cli::Cli;
 pub use cli::Command;
@@ -138,7 +137,6 @@ pub use exec_events::TurnFailedEvent;
 pub use exec_events::TurnStartedEvent;
 pub use exec_events::Usage;
 pub use exec_events::WebSearchItem;
-pub use rondo_local_observation::RondoLocalTaskObservation;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
@@ -212,7 +210,6 @@ struct ExecRunArgs {
     exec_span: tracing::Span,
     images: Vec<PathBuf>,
     json_mode: bool,
-    rondo_local_observation: bool,
     last_message_file: Option<PathBuf>,
     model_provider: Option<String>,
     oss: bool,
@@ -256,7 +253,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         color,
         last_message_file,
         json: json_mode,
-        rondo_local_observation,
         prompt,
         output_schema: output_schema_path,
         mut config_overrides,
@@ -560,7 +556,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         exec_span: exec_span.clone(),
         images,
         json_mode,
-        rondo_local_observation,
         last_message_file,
         model_provider,
         oss,
@@ -659,7 +654,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         exec_span,
         images,
         json_mode,
-        rondo_local_observation,
         last_message_file,
         model_provider,
         oss,
@@ -670,11 +664,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     } = args;
 
     let mut event_processor: Box<dyn EventProcessor> = match json_mode {
-        true if rondo_local_observation => Box::new(
-            EventProcessorWithJsonOutput::new_with_rondo_local_observation(
-                last_message_file.clone(),
-            ),
-        ),
         true => Box::new(EventProcessorWithJsonOutput::new(last_message_file.clone())),
         _ => Box::new(EventProcessorWithHumanOutput::create_with_ansi(
             stderr_with_ansi,
@@ -1000,7 +989,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     &notification,
                     &primary_thread_id_for_requests,
                     &task_id,
-                    rondo_local_observation,
                 ) {
                     maybe_backfill_turn_completed_items(
                         config.ephemeral,
@@ -1030,7 +1018,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             InProcessServerEvent::Lagged { skipped } => {
                 let message = lagged_event_warning_message(skipped);
                 warn!("{message}");
-                event_processor.process_event_stream_lag(message);
+                event_processor.process_warning(message);
             }
         }
     }
@@ -1272,7 +1260,6 @@ fn should_process_notification(
     notification: &ServerNotification,
     thread_id: &str,
     turn_id: &str,
-    rondo_local_observation: bool,
 ) -> bool {
     match notification {
         ServerNotification::ConfigWarning(_) | ServerNotification::DeprecationNotice(_) => true,
@@ -1324,21 +1311,6 @@ fn should_process_notification(
         }
         ServerNotification::TurnStarted(notification) => {
             notification.thread_id == thread_id && notification.turn.id == turn_id
-        }
-        ServerNotification::RawResponseCompleted(notification) => {
-            rondo_local_observation
-                && notification.thread_id == thread_id
-                && notification.turn_id == turn_id
-        }
-        ServerNotification::ItemGuardianApprovalReviewStarted(notification) => {
-            rondo_local_observation
-                && notification.thread_id == thread_id
-                && notification.turn_id == turn_id
-        }
-        ServerNotification::ItemGuardianApprovalReviewCompleted(notification) => {
-            rondo_local_observation
-                && notification.thread_id == thread_id
-                && notification.turn_id == turn_id
         }
         _ => false,
     }

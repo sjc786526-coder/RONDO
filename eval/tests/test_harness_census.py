@@ -38,6 +38,16 @@ def _api_metadata() -> dict[str, object]:
     }
 
 
+def _exec_lifecycle(*middle: dict[str, object], terminal: str = "turn.completed") -> str:
+    events = [
+        {"type": "thread.started", "thread_id": "private-thread"},
+        {"type": "turn.started"},
+        *middle,
+        {"type": terminal, "usage": {}},
+    ]
+    return "".join(json.dumps(event) + "\n" for event in events)
+
+
 class HarnessCensusTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -163,7 +173,7 @@ class HarnessCensusTests(unittest.TestCase):
     def test_same_report_comparison_is_zero_and_body_free(self) -> None:
         first = self._artifact("only")
         (first / "harbor/agent/codex.txt").write_text(
-            json.dumps({"type": "turn.completed", "usage": {}}) + "\n",
+            _exec_lifecycle(),
             encoding="utf-8",
         )
         records = [
@@ -199,7 +209,7 @@ class HarnessCensusTests(unittest.TestCase):
         measured = self._artifact("measured")
         redacted = self._artifact("redacted")
         (measured / "harbor/agent/codex.txt").write_text(
-            json.dumps({"type": "turn.completed", "usage": {}}) + "\n",
+            _exec_lifecycle(),
             encoding="utf-8",
         )
         (redacted / "harbor/agent/codex.txt.redacted.json").write_text(
@@ -287,6 +297,113 @@ class HarnessCensusTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["exec_jsonl"]["measured_runs"], 0)
         self.assertEqual(report["coverage"]["exec_jsonl"]["missing"]["invalid"], 1)
         self.assertEqual(report["candidates"]["C1"]["status"], "unmeasurable")
+
+    def test_empty_api_metadata_is_invalid_not_measured_zero(self) -> None:
+        artifact = self._artifact("empty-api")
+        (artifact / "api-metadata.json").write_text(
+            json.dumps({"schema_version": 1, "requests": []}),
+            encoding="utf-8",
+        )
+        (artifact / "harbor/agent/codex.txt").write_text(
+            _exec_lifecycle(),
+            encoding="utf-8",
+        )
+        record = {
+            "artifacts": artifact.relative_to(self.common).as_posix(),
+            "tasks": [{"task_id": "private-task"}],
+            "metrics": {"wall_seconds": 1},
+        }
+        identity = SimpleNamespace(
+            schema_version=7,
+            campaign_id="p2-b7-canary-baseline-v28",
+            lock_sha256="e" * 64,
+            catalog=SimpleNamespace(tasks=(object(),)),
+        )
+
+        with mock.patch(
+            "rondo_eval.harness_census._eligible_records",
+            return_value=([record], 1, identity),
+        ):
+            report = build_census(self.paths)
+
+        self.assertEqual(report["coverage"]["api_metadata"]["measured_runs"], 0)
+        self.assertEqual(report["coverage"]["api_metadata"]["missing"]["invalid"], 1)
+        self.assertEqual(report["candidates"]["C11"]["status"], "unmeasurable")
+
+    def test_incomplete_or_ambiguous_exec_lifecycle_is_invalid(self) -> None:
+        variants = {
+            "no-terminal": [
+                {"type": "thread.started"},
+                {"type": "turn.started"},
+            ],
+            "duplicate-terminal": [
+                {"type": "thread.started"},
+                {"type": "turn.started"},
+                {"type": "turn.completed"},
+                {"type": "turn.completed"},
+            ],
+            "conflicting-terminal": [
+                {"type": "thread.started"},
+                {"type": "turn.started"},
+                {"type": "turn.completed"},
+                {"type": "turn.failed"},
+            ],
+        }
+        identity = SimpleNamespace(
+            schema_version=7,
+            campaign_id="p2-b7-canary-baseline-v28",
+            lock_sha256="f" * 64,
+            catalog=SimpleNamespace(tasks=(object(),)),
+        )
+        for name, events in variants.items():
+            with self.subTest(name=name):
+                artifact = self._artifact(name)
+                (artifact / "harbor/agent/codex.txt").write_text(
+                    "".join(json.dumps(event) + "\n" for event in events),
+                    encoding="utf-8",
+                )
+                record = {
+                    "artifacts": artifact.relative_to(self.common).as_posix(),
+                    "tasks": [{"task_id": "private-task"}],
+                    "metrics": {"wall_seconds": 1},
+                }
+                with mock.patch(
+                    "rondo_eval.harness_census._eligible_records",
+                    return_value=([record], 1, identity),
+                ):
+                    report = build_census(self.paths)
+
+                self.assertEqual(report["coverage"]["exec_jsonl"]["measured_runs"], 0)
+                self.assertEqual(report["coverage"]["exec_jsonl"]["missing"]["invalid"], 1)
+                self.assertEqual(report["candidates"]["C1"]["status"], "unmeasurable")
+                self.assertEqual(report["candidates"]["C2"]["status"], "unmeasurable")
+
+    def test_failed_exec_terminal_is_a_valid_measurement(self) -> None:
+        artifact = self._artifact("failed-terminal")
+        (artifact / "harbor/agent/codex.txt").write_text(
+            _exec_lifecycle(terminal="turn.failed"),
+            encoding="utf-8",
+        )
+        record = {
+            "artifacts": artifact.relative_to(self.common).as_posix(),
+            "tasks": [{"task_id": "private-task"}],
+            "metrics": {"wall_seconds": 1},
+        }
+        identity = SimpleNamespace(
+            schema_version=7,
+            campaign_id="p2-b7-canary-baseline-v28",
+            lock_sha256="0" * 64,
+            catalog=SimpleNamespace(tasks=(object(),)),
+        )
+
+        with mock.patch(
+            "rondo_eval.harness_census._eligible_records",
+            return_value=([record], 1, identity),
+        ):
+            report = build_census(self.paths)
+
+        self.assertEqual(report["coverage"]["exec_jsonl"]["measured_runs"], 1)
+        self.assertEqual(report["aggregates"]["exec"]["turns_failed"], 1)
 
 
 if __name__ == "__main__":

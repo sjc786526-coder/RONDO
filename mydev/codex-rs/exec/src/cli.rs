@@ -63,15 +63,6 @@ pub struct Cli {
     )]
     pub json: bool,
 
-    /// Emit one body-free RONDO Local task aggregate at turn completion.
-    #[arg(
-        long = "rondo-local-observation",
-        requires = "json",
-        default_value_t = false,
-        global = true
-    )]
-    pub rondo_local_observation: bool,
-
     /// Specifies file where the last message from the agent should be written.
     #[arg(
         long = "output-last-message",

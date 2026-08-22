@@ -86,9 +86,11 @@ from rondo_eval.terminal_bench.baseline_identity import (
 )
 from rondo_eval.terminal_bench.results import HarborResultError
 from rondo_eval.terminal_bench.runner import PreparedTerminalBenchRun
+from rondo_eval.terminal_bench.runner import TerminalBenchRunError
 from rondo_eval.terminal_bench.__main__ import _load_manifest
 from rondo_eval.terminal_bench.freeze import TERMINAL_BENCH_VERSION
 from rondo_eval.terminal_bench.live import campaign_terminal_bench_request
+from rondo_eval.terminal_bench.live import local_harness_measurement_request
 from rondo_eval.terminal_bench.task_budget import TASK_BUDGET_ID
 
 
@@ -906,6 +908,68 @@ class CampaignExecutionOrderTests(unittest.TestCase):
         self.assertIsNone(request.pinned_model_id)
         self.assertIsNone(request.pinned_main_effort)
         self.assertIsNone(request.pinned_guardian_effort)
+
+    def test_local_harness_measurement_has_an_explicit_campaign_projector(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        identity = _CampaignFixture.v7()
+        task = identity.catalog.tasks[0]
+        manifests = {
+            side: _load_manifest(
+                paths.common_root / identity.bundles[side.value]["manifest_path"],
+                paths.common_root,
+            )
+            for side in Side
+        }
+        common = {
+            "identity": identity,
+            "task": task,
+            "common_root": paths.common_root,
+            "work_root": paths.common_root / "eval-data/work/local-harness-contract",
+            "seccomp_profile": paths.worktree_root
+            / identity.no_api_seccomp["profile_path"],
+            "budget_usd": 1.0,
+        }
+
+        ordinary = campaign_terminal_bench_request(
+            **common,
+            side=Side.RONDO,
+            binary=manifests[Side.RONDO],
+            docker_task_id="ordinary-rondo-local",
+        )
+        measured = local_harness_measurement_request(
+            **common,
+            side=Side.RONDO,
+            binary=manifests[Side.RONDO],
+            docker_task_id="measured-rondo-local",
+        )
+
+        self.assertIsNone(ordinary.rollout_trace_root)
+        self.assertEqual(measured.rollout_trace_root, "/logs/agent/rollout-trace")
+        with self.assertRaisesRegex(
+            TerminalBenchRunError, "Local observation can only enable"
+        ):
+            local_harness_measurement_request(
+                **common,
+                side=Side.CODEX,
+                binary=manifests[Side.CODEX],
+                docker_task_id="rejected-codex",
+            )
+
+        multi = replace(
+            identity,
+            comparison={**identity.comparison, "product": Product.RONDO_MULTI.value},
+        )
+        with self.assertRaisesRegex(
+            TerminalBenchRunError, "Local observation can only enable"
+        ):
+            local_harness_measurement_request(
+                **{**common, "identity": multi},
+                side=Side.RONDO,
+                binary=replace(
+                    manifests[Side.RONDO], product=Product.RONDO_MULTI.value
+                ),
+                docker_task_id="rejected-rondo-multi",
+            )
 
     def test_historical_campaigns_keep_round_blocked_order(self) -> None:
         order = _CampaignFixture.v6().base_round_order

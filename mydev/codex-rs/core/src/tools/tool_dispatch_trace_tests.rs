@@ -7,6 +7,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_rollout_trace::ExecutionStatus;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ToolCallRequester;
+use codex_tools::ToolOutputRenderMetadata;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -50,10 +51,17 @@ impl ToolExecutor<ToolInvocation> for TestHandler {
 
     fn handle(&self, _invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
         Box::pin(async {
-            Ok(
-                Box::new(FunctionToolOutput::from_text("ok".to_string(), Some(true)))
-                    as Box<dyn crate::tools::context::ToolOutput>,
-            )
+            Ok(Box::new(
+                FunctionToolOutput::from_text("ok".to_string(), Some(true))
+                    .with_output_render_metadata(ToolOutputRenderMetadata {
+                        source_text_bytes: 2,
+                        collection_omitted_bytes: 0,
+                        requested_max_output_tokens: Some(10),
+                        effective_max_output_tokens: Some(10),
+                        returned_text_bytes: 2,
+                        presentation_truncated: false,
+                    }),
+            ) as Box<dyn crate::tools::context::ToolOutput>)
         })
     }
 }
@@ -198,6 +206,23 @@ async fn dispatch_lifecycle_trace_records_direct_and_code_mode_requesters() -> a
             .raw_result_payload_id
             .is_some(),
         "code-mode calls should keep the result returned to JavaScript",
+    );
+    let mut render_surfaces = fs::read_dir(single_bundle_dir(temp.path())?.join("payloads"))?
+        .filter_map(Result::ok)
+        .filter_map(|entry| fs::read(entry.path()).ok())
+        .filter_map(|body| serde_json::from_slice::<serde_json::Value>(&body).ok())
+        .filter_map(|payload| {
+            payload
+                .get("output_render")
+                .and_then(|value| value.get("surface"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
+    render_surfaces.sort();
+    assert_eq!(
+        render_surfaces,
+        vec!["code_mode_runtime".to_string(), "direct_model".to_string()]
     );
 
     Ok(())

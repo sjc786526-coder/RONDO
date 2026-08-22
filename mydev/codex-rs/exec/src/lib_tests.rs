@@ -285,42 +285,10 @@ fn runtime_warnings_are_filtered_to_the_primary_thread() {
             &ServerNotification::Warning(warning),
             primary_thread_id,
             turn_id,
-            false,
         )
     });
 
     assert_eq!(outcomes, [true, true, false]);
-}
-
-#[test]
-fn raw_response_observation_is_opt_in_and_primary_turn_only() {
-    let notification = ServerNotification::RawResponseCompleted(
-        codex_app_server_protocol::RawResponseCompletedNotification {
-            thread_id: "thread-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            response_id: "response-private".to_string(),
-            usage: None,
-        },
-    );
-
-    assert!(!should_process_notification(
-        &notification,
-        "thread-1",
-        "turn-1",
-        false,
-    ));
-    assert!(should_process_notification(
-        &notification,
-        "thread-1",
-        "turn-1",
-        true,
-    ));
-    assert!(!should_process_notification(
-        &notification,
-        "thread-other",
-        "turn-1",
-        true,
-    ));
 }
 
 #[tokio::test]

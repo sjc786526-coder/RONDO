@@ -210,6 +210,7 @@ class NativeBundleBuilder:
         result: object,
         result_mode: str = "code",
         runtime_end: dict | None = None,
+        output_render: dict | None = None,
         thread_id: str | None = None,
         turn_id: str | None = None,
     ) -> None:
@@ -298,6 +299,8 @@ class NativeBundleBuilder:
                 },
             }
         )
+        if output_render is not None:
+            wrapped["output_render"] = output_render
         result_ref = self.payload("tool_result", wrapped)
         self.event(
             {

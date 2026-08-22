@@ -40,6 +40,7 @@ from .runner import (
     TerminalBenchRequest,
     TerminalBenchRunError,
     UnifiedTerminalBenchRunner,
+    enable_local_harness_observation,
     prepare_terminal_bench_run,
 )
 from .baseline import CampaignIdentity, CampaignSlotPlan
@@ -160,6 +161,40 @@ def campaign_terminal_bench_request(
             if identity.enforces_fair_comparison
             else None
         ),
+    )
+
+
+def local_harness_measurement_request(
+    *,
+    identity: CampaignIdentity,
+    side: Side,
+    task: FrozenTask,
+    binary: Any,
+    common_root: Path,
+    work_root: Path,
+    docker_task_id: str,
+    seccomp_profile: Path,
+    budget_usd: float,
+) -> TerminalBenchRequest:
+    """Project one formal campaign slot into the explicit Local observation path.
+
+    Historical and ordinary campaign builders remain byte-compatible and do not
+    collect a trace. The bounded Plan 052 successor must call this projector for
+    each of its RONDO Local slots.
+    """
+
+    return enable_local_harness_observation(
+        campaign_terminal_bench_request(
+            identity=identity,
+            side=side,
+            task=task,
+            binary=binary,
+            common_root=common_root,
+            work_root=work_root,
+            docker_task_id=docker_task_id,
+            seccomp_profile=seccomp_profile,
+            budget_usd=budget_usd,
+        )
     )
 
 

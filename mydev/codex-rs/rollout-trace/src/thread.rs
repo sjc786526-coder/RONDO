@@ -188,6 +188,7 @@ impl ThreadTraceContext {
         });
         if context.thread_id == context.root_thread_id {
             context.append_best_effort(RawTraceEventPayload::RolloutEnded { status });
+            context.append_capture_ended_best_effort();
         }
     }
 
@@ -457,6 +458,12 @@ fn record_thread_started(
 }
 
 impl EnabledThreadTraceContext {
+    fn append_capture_ended_best_effort(&self) {
+        if let Err(err) = self.writer.append_capture_ended() {
+            warn!("failed to append rollout trace capture end: {err:#}");
+        }
+    }
+
     fn write_json_payload_best_effort(
         &self,
         kind: RawPayloadKind,

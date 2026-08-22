@@ -5,6 +5,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use codex_rollout_trace::OutputRenderSurface;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
@@ -13,6 +14,7 @@ use super::PUBLIC_TOOL_NAME;
 use super::handle_runtime_response;
 use super::is_exec_tool_name;
 use super::telemetry::CodeModeToolCallGuard;
+use crate::tools::tool_dispatch_trace::output_render_observation;
 
 pub struct CodeModeExecuteHandler {
     spec: ToolSpec,
@@ -109,9 +111,22 @@ impl CodeModeExecuteHandler {
                 });
         }
         exec.session.services.elicitations.wait_until_clear().await;
-        handle_runtime_response(&exec, response, args.max_output_tokens, started_at)
-            .await
-            .map_err(FunctionCallError::RespondToModel)
+        let output = handle_runtime_response(
+            &exec,
+            response,
+            args.max_output_tokens,
+            started_at,
+            code_cell_trace.is_enabled(),
+        )
+        .await
+        .map_err(FunctionCallError::RespondToModel)?;
+        if let Some(metadata) = output.render_metadata() {
+            code_cell_trace.record_output_rendered(output_render_observation(
+                OutputRenderSurface::DirectModel,
+                metadata,
+            ));
+        }
+        Ok(output)
     }
 }
 

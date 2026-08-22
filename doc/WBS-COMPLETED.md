@@ -1551,12 +1551,15 @@ Guardian 为 `gpt-5.6-terra/low`。
 
 ## RONDO Local Harness 聚合观测与瓶颈普查（Plan 052，2026-08-22）
 
-**状态**：默认关闭的任务级安全聚合观测、v28 Local 历史普查、候选四态决策和独立复核均完成；本任务没有实施
-C1—C13 行为优化，也没有恢复 E-A。
+**状态**：默认关闭的 RONDO Local 原生 trace opt-in、任务级安全离线投影、v28 历史普查、候选四态决策和独立
+复核均完成；本任务没有实施 C1—C13 行为优化，也没有恢复 E-A。
 
-- `codex exec --json --rondo-local-observation` 只在显式 opt-in 时建立 collector，并在 primary turn 终态追加
-  schema-v1 `task.observation`。普通 JSON/人类输出路径不构造采集状态；新事件只含固定计数、时长、token、有限状态
-  和 unavailable，event lag 与 usage/timing 缺失会降低比较覆盖。
+- 删除首版重复的 `codex exec --json --rondo-local-observation` collector。最终链路复用 rollout trace 与 API
+  metadata；只对目标 Local 测量显式开启 trace，发布前生成固定名称的 schema-v1 body-free 结果。原始 trace 不
+  归档，缺失、残缺、重复、schema 漂移或 trace/API population、终态、usage 不一致均拒绝发布。
+- 原生 trace 只窄补 writer 完整性终态与真实输出 render 边界的安全事实，区分 direct model 与 code-mode runtime，
+  保存字节数、截断/collection omission、预算和有限枚举，不保存正文。既有 Team Lens 严格 reader/reducer 扩展为
+  支持 Local 单智能体 bundle，没有建设第二套 telemetry、数据库或审计平台。
 - 只读 census 先校验 288 行 tracked index，再只验证选中的 30 个 Local private summary；所有 private 文件从
   common root 以 `dir_fd`/`O_NOFOLLOW` 逐级打开。公共 report/delta 使用 exact schema 与 body-free allowlist，缺失
   覆盖不可比较时所有 delta 为 `null`。
@@ -1564,7 +1567,10 @@ C1—C13 行为优化，也没有恢复 E-A。
   redacted 集中在另外 2 个任务。C1/C2 为弱信号，C11 仅在当前样本未观察到，C7 当前资产不可测；C4/C5 只作归因
   辅助，因此没有选行为候选。
 - 当前唯一后续包是另行授权的 10 题 × 2 Local round 观测复测，main Terra medium、Guardian Terra low、20 USD
-  硬上限，并带第一轮覆盖/资源失败即停、预算到顶即停、两轮无条件停止的边界；E-A 继续不恢复。
-- 定向 Python 47/47、`codex-exec` nextest 138/138 通过，独立最终复验 PASS、无剩余 correctness finding。
+  硬上限；唯一变量是开启安全观测而非改变产品行为。20/20 个 run 都得到严格投影才有效，任一完整性/schema/来源
+  核对或资源失败即停，预算到顶即停，两轮后无条件停止；E-A 继续不恢复。
+- 历史读取器拒绝空 API 请求集以及缺终态、重复终态或冲突终态的 exec JSONL，不再把残缺资产计成“测得的零”；
+  修复后 v28 census 与冻结机器结果逐字节一致。定向 Python/Rust、fix/fmt 和最终独立复核结果见本次整改日志。
   Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI、PR 均未运行。详细执行
-  与只读资产边界见 `agent_log/2026-08-22-003425-plan052-local-harness-census.md`。
+  与首次只读资产边界见 `agent_log/2026-08-22-003425-plan052-local-harness-census.md`；验收整改与最终门禁见
+  `agent_log/2026-08-22-plan052-native-trace-remediation.md`。

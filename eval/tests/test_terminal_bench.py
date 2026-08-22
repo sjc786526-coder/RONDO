@@ -43,6 +43,7 @@ from rondo_eval.terminal_bench import (  # noqa: E402
     TERMINAL_BENCH_VERSION,
     TerminalBenchRequest,
     UnifiedTerminalBenchRunner,
+    enable_local_harness_observation,
     prepare_terminal_bench_run,
 )
 from rondo_eval.terminal_bench import materialize as materialize_module  # noqa: E402
@@ -1251,6 +1252,48 @@ class TerminalBenchTests(unittest.TestCase):
                 rollout_trace_root="/logs/agent/rollout-trace",
                 team_state_enabled=False,
             )
+
+    def test_plan052_trace_opt_in_is_local_only_and_reaches_the_adapter(self) -> None:
+        request = enable_local_harness_observation(self.request(Side.RONDO))
+        self.assertEqual(
+            request.rollout_trace_root,
+            runner_module.LOCAL_ROLLOUT_TRACE_ROOT,
+        )
+
+        materializer = FakeMaterializer(self.root / "fake-local-observation")
+        materializer.root.mkdir()
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+        adapter = prepared.adapter
+        self.assertIsInstance(adapter, RondoUploadAdapter)
+        self.assertEqual(
+            dict(adapters_module.manifest_agent_kwargs(adapter))["rollout_trace_root"],
+            runner_module.LOCAL_ROLLOUT_TRACE_ROOT,
+        )
+        environment = FakeEnvironment()
+        asyncio.run(adapter.run("native task instruction", environment, mock.Mock()))
+        self.assertTrue(
+            any(
+                call[1] is not None
+                and call[1].get("CODEX_ROLLOUT_TRACE_ROOT")
+                == runner_module.LOCAL_ROLLOUT_TRACE_ROOT
+                for call in environment.calls
+            )
+        )
+
+        default_local = self.adapter(RondoUploadAdapter)
+        self.assertNotIn(
+            "rollout_trace_root",
+            dict(adapters_module.manifest_agent_kwargs(default_local)),
+        )
+        with self.assertRaisesRegex(AdapterError, "reserved for RONDO Local"):
+            self.adapter(
+                CodexUploadAdapter,
+                rollout_trace_root=runner_module.LOCAL_ROLLOUT_TRACE_ROOT,
+            )
+        with self.assertRaises(runner_module.TerminalBenchRunError):
+            enable_local_harness_observation(self.request(Side.CODEX))
 
     def test_only_multi_can_carry_the_team_state_off_flag(self) -> None:
         # `--strict-config` upstream cannot even deserialize the key, and Local

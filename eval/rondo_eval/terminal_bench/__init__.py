@@ -28,6 +28,7 @@ from .materialize import MaterializationError, MaterializedTask, PinnedTaskMater
 from .live import (
     BudgetedTerminalBenchResult,
     EvidenceObservation,
+    local_harness_measurement_request,
     run_budgeted_terminal_bench,
 )
 from .runner import (
@@ -38,6 +39,7 @@ from .runner import (
     PreparedTerminalBenchRun,
     TerminalBenchRequest,
     UnifiedTerminalBenchRunner,
+    enable_local_harness_observation,
     prepare_terminal_bench_run,
 )
 
@@ -82,6 +84,8 @@ __all__ = [
     "TerminalBenchRequest",
     "UnifiedTerminalBenchRunner",
     "UploadBinaryAdapter",
+    "enable_local_harness_observation",
+    "local_harness_measurement_request",
     "prepare_terminal_bench_run",
     "run_budgeted_terminal_bench",
     "run_docker_no_api_smoke",

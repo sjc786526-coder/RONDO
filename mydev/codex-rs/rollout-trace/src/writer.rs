@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use std::sync::PoisonError;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -35,6 +37,7 @@ use crate::raw_event::RawTraceEventPayload;
 #[derive(Debug)]
 pub struct TraceWriter {
     inner: Mutex<TraceWriterInner>,
+    dropped_operations: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -79,6 +82,7 @@ impl TraceWriter {
                 next_seq: 1,
                 next_payload_ordinal: 1,
             }),
+            dropped_operations: AtomicU64::new(0),
         })
     }
 
@@ -88,21 +92,27 @@ impl TraceWriter {
         kind: RawPayloadKind,
         value: &impl Serialize,
     ) -> Result<RawPayloadRef> {
-        let mut inner = self.lock_inner();
-        let ordinal = inner.next_payload_ordinal;
-        inner.next_payload_ordinal += 1;
-        let raw_payload_id = format!("raw_payload:{ordinal}");
-        let relative_path = format!("{PAYLOADS_DIR_NAME}/{ordinal}.json");
-        let absolute_path = inner.payloads_dir.join(format!("{ordinal}.json"));
-        // Payload files are created before the event that references them. A
-        // replay interrupted after an event is appended should never point at a
-        // payload file that the writer planned but had not written yet.
-        write_json_file(&absolute_path, value)?;
-        Ok(RawPayloadRef {
-            raw_payload_id,
-            kind,
-            path: relative_path,
-        })
+        let result = (|| {
+            let mut inner = self.lock_inner();
+            let ordinal = inner.next_payload_ordinal;
+            inner.next_payload_ordinal += 1;
+            let raw_payload_id = format!("raw_payload:{ordinal}");
+            let relative_path = format!("{PAYLOADS_DIR_NAME}/{ordinal}.json");
+            let absolute_path = inner.payloads_dir.join(format!("{ordinal}.json"));
+            // Payload files are created before the event that references them. A
+            // replay interrupted after an event is appended should never point at a
+            // payload file that the writer planned but had not written yet.
+            write_json_file(&absolute_path, value)?;
+            Ok(RawPayloadRef {
+                raw_payload_id,
+                kind,
+                path: relative_path,
+            })
+        })();
+        if result.is_err() {
+            self.record_dropped_operation();
+        }
+        result
     }
 
     /// Appends one raw event with no extra envelope context.
@@ -112,6 +122,27 @@ impl TraceWriter {
 
     /// Appends one raw event with explicit thread/turn context.
     pub fn append_with_context(
+        &self,
+        context: RawTraceEventContext,
+        payload: RawTraceEventPayload,
+    ) -> Result<RawTraceEvent> {
+        let result = self.append_with_context_untracked(context, payload);
+        if result.is_err() {
+            self.record_dropped_operation();
+        }
+        result
+    }
+
+    /// Appends the final capture-health sentinel without hiding prior failures.
+    pub(crate) fn append_capture_ended(&self) -> Result<RawTraceEvent> {
+        let dropped_operations = self.dropped_operations.load(Ordering::SeqCst);
+        self.append_with_context_untracked(
+            RawTraceEventContext::default(),
+            RawTraceEventPayload::TraceCaptureEnded { dropped_operations },
+        )
+    }
+
+    fn append_with_context_untracked(
         &self,
         context: RawTraceEventContext,
         payload: RawTraceEventPayload,
@@ -131,6 +162,10 @@ impl TraceWriter {
         inner.event_log.write_all(b"\n")?;
         inner.event_log.flush()?;
         Ok(event)
+    }
+
+    fn record_dropped_operation(&self) {
+        self.dropped_operations.fetch_add(1, Ordering::SeqCst);
     }
 
     fn lock_inner(&self) -> MutexGuard<'_, TraceWriterInner> {
@@ -260,6 +295,28 @@ mod tests {
             "payloads/1.json"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn capture_end_reports_prior_dropped_operation() -> anyhow::Result<()> {
+        let temp = TempDir::new()?;
+        let writer = TraceWriter::create(
+            temp.path(),
+            "trace-1".to_string(),
+            "rollout-1".to_string(),
+            "thread-root".to_string(),
+        )?;
+        writer.record_dropped_operation();
+
+        let event = writer.append_capture_ended()?;
+
+        assert_eq!(
+            event.payload,
+            RawTraceEventPayload::TraceCaptureEnded {
+                dropped_operations: 1,
+            }
+        );
         Ok(())
     }
 }

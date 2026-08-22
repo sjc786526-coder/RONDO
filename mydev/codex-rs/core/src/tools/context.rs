@@ -17,6 +17,8 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::function_call_output_content_items_to_text;
 use codex_tools::LoadableToolSpec;
 use codex_tools::ToolName;
+use codex_tools::ToolOutputRenderMetadata;
+use codex_tools::ToolOutputRenderTarget;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::formatted_truncate_text;
@@ -191,6 +193,7 @@ pub struct FunctionToolOutput {
     pub body: Vec<FunctionCallOutputContentItem>,
     pub success: Option<bool>,
     pub post_tool_use_response: Option<JsonValue>,
+    pub(crate) output_render_metadata: Option<ToolOutputRenderMetadata>,
 }
 
 impl FunctionToolOutput {
@@ -199,6 +202,7 @@ impl FunctionToolOutput {
             body: vec![FunctionCallOutputContentItem::InputText { text }],
             success,
             post_tool_use_response: None,
+            output_render_metadata: None,
         }
     }
 
@@ -210,11 +214,24 @@ impl FunctionToolOutput {
             body: content,
             success,
             post_tool_use_response: None,
+            output_render_metadata: None,
         }
     }
 
     pub fn into_text(self) -> String {
         function_call_output_content_items_to_text(&self.body).unwrap_or_default()
+    }
+
+    pub(crate) fn with_output_render_metadata(
+        mut self,
+        metadata: ToolOutputRenderMetadata,
+    ) -> Self {
+        self.output_render_metadata = Some(metadata);
+        self
+    }
+
+    pub(crate) fn render_metadata(&self) -> Option<ToolOutputRenderMetadata> {
+        self.output_render_metadata
     }
 }
 
@@ -235,6 +252,13 @@ impl ToolOutput for FunctionToolOutput {
 
     fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
         self.post_tool_use_response.clone()
+    }
+
+    fn output_render_metadata(
+        &self,
+        _target: ToolOutputRenderTarget,
+    ) -> Option<ToolOutputRenderMetadata> {
+        self.output_render_metadata
     }
 }
 
@@ -400,6 +424,40 @@ impl ToolOutput for ExecCommandToolOutput {
 
         serde_json::to_value(result).unwrap_or_else(|err| {
             JsonValue::String(format!("failed to serialize exec result: {err}"))
+        })
+    }
+
+    fn output_render_metadata(
+        &self,
+        target: ToolOutputRenderTarget,
+    ) -> Option<ToolOutputRenderMetadata> {
+        let source_text = String::from_utf8_lossy(&self.raw_output);
+        let collection_omitted_bytes = self.output_omitted_bytes.map_or(0, NonZeroUsize::get);
+        let (effective_max_output_tokens, returned_text, presentation_truncated) = match target {
+            ToolOutputRenderTarget::DirectModel => {
+                let max_tokens = self.model_output_max_tokens();
+                (
+                    Some(max_tokens),
+                    self.response_text(),
+                    source_text.len() > TruncationPolicy::Tokens(max_tokens).byte_budget(),
+                )
+            }
+            ToolOutputRenderTarget::CodeModeRuntime => match self.max_output_tokens {
+                Some(max_tokens) => (
+                    Some(max_tokens),
+                    self.truncated_output(max_tokens),
+                    source_text.len() > TruncationPolicy::Tokens(max_tokens).byte_budget(),
+                ),
+                None => (None, source_text.to_string(), false),
+            },
+        };
+        Some(ToolOutputRenderMetadata {
+            source_text_bytes: source_text.len(),
+            collection_omitted_bytes,
+            requested_max_output_tokens: self.max_output_tokens,
+            effective_max_output_tokens,
+            returned_text_bytes: returned_text.len(),
+            presentation_truncated,
         })
     }
 }

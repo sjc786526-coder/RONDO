@@ -172,6 +172,7 @@ def _parse_api_metadata(root: Path, relative: Path) -> ApiStats:
         not isinstance(value, dict)
         or value.get("schema_version") != 1
         or not isinstance(value.get("requests"), list)
+        or not value["requests"]
         or len(value["requests"]) > _MAX_REQUESTS_PER_RUN
     ):
         raise HarnessCensusError("eligible API metadata schema is invalid")
@@ -224,6 +225,9 @@ def _parse_exec_jsonl(root: Path, relative: Path) -> ExecStats:
         raise HarnessCensusError("eligible exec JSONL bounds are invalid")
     result = ExecStats()
     commands: dict[str, bool] = {}
+    thread_started = False
+    turn_started = False
+    turn_terminal = False
     for raw_line in lines:
         try:
             event = json.loads(raw_line)
@@ -233,13 +237,33 @@ def _parse_exec_jsonl(root: Path, relative: Path) -> ExecStats:
             raise HarnessCensusError("eligible exec event schema is invalid")
         result.events += 1
         event_type = event["type"]
-        if event_type == "turn.completed":
+        if turn_terminal:
+            raise HarnessCensusError("eligible exec lifecycle continues after terminal")
+        if event_type == "thread.started":
+            if thread_started or turn_started:
+                raise HarnessCensusError("eligible exec thread lifecycle is invalid")
+            thread_started = True
+        elif event_type == "turn.started":
+            if not thread_started or turn_started:
+                raise HarnessCensusError("eligible exec turn lifecycle is invalid")
+            turn_started = True
+        elif event_type == "turn.completed":
+            if not turn_started:
+                raise HarnessCensusError("eligible exec terminal lifecycle is invalid")
             result.turns_completed += 1
+            turn_terminal = True
         elif event_type == "turn.failed":
+            if not turn_started:
+                raise HarnessCensusError("eligible exec terminal lifecycle is invalid")
             result.turns_failed += 1
+            turn_terminal = True
         elif event_type == "error":
+            if not turn_started:
+                raise HarnessCensusError("eligible exec error lifecycle is invalid")
             result.top_level_errors += 1
         elif event_type == "item.completed":
+            if not turn_started:
+                raise HarnessCensusError("eligible exec item lifecycle is invalid")
             item = event.get("item")
             if not isinstance(item, dict) or not isinstance(item.get("type"), str):
                 raise HarnessCensusError("eligible completed item schema is invalid")
@@ -274,8 +298,13 @@ def _parse_exec_jsonl(root: Path, relative: Path) -> ExecStats:
                 result.file_changes += 1
             elif item_type == "agent_message":
                 result.agent_messages += 1
-        elif event_type not in {"thread.started", "turn.started", "item.started", "item.updated"}:
+        elif event_type in {"item.started", "item.updated"}:
+            if not turn_started:
+                raise HarnessCensusError("eligible exec item lifecycle is invalid")
+        else:
             result.unknown_events += 1
+    if not thread_started or not turn_started or not turn_terminal:
+        raise HarnessCensusError("eligible exec lifecycle is incomplete")
     return result
 
 

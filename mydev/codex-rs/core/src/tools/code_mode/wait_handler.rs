@@ -149,10 +149,17 @@ impl CodeModeWaitHandler {
                     }
                 }
                 exec.session.services.elicitations.wait_until_clear().await;
-                handle_runtime_response(&exec, wait_response.into(), args.max_tokens, started_at)
-                    .await
-                    .map_err(FunctionCallError::RespondToModel)
-                    .map(boxed_tool_output)
+                let capture_output_render = exec.session.services.rollout_thread_trace.is_enabled();
+                handle_runtime_response(
+                    &exec,
+                    wait_response.into(),
+                    args.max_tokens,
+                    started_at,
+                    capture_output_render,
+                )
+                .await
+                .map_err(FunctionCallError::RespondToModel)
+                .map(boxed_tool_output)
             }
             _ => Err(FunctionCallError::RespondToModel(format!(
                 "{WAIT_TOOL_NAME} expects JSON arguments"

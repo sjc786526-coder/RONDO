@@ -25,11 +25,6 @@ pub(crate) trait EventProcessor {
     /// Handle a local exec warning that is not represented as an app-server notification.
     fn process_warning(&mut self, message: String) -> CodexStatus;
 
-    /// Handle an event-stream lag while preserving the legacy warning output.
-    fn process_event_stream_lag(&mut self, message: String) -> CodexStatus {
-        self.process_warning(message)
-    }
-
     fn print_final_output(&mut self) {}
 }
 

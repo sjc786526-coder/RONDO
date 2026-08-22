@@ -75,25 +75,6 @@ fn parses_config_isolation_flags() {
 }
 
 #[test]
-fn rondo_local_observation_requires_json() {
-    let error = Cli::try_parse_from(["codex-exec", "--rondo-local-observation", "summarize"])
-        .expect_err("observation without JSON must be rejected");
-    assert_eq!(
-        error.kind(),
-        clap::error::ErrorKind::MissingRequiredArgument
-    );
-
-    let cli = Cli::parse_from([
-        "codex-exec",
-        "--json",
-        "--rondo-local-observation",
-        "summarize",
-    ]);
-    assert!(cli.json);
-    assert!(cli.rondo_local_observation);
-}
-
-#[test]
 fn approve_for_me_flag_applies_to_resume_when_passed_at_exec_root() {
     for flag in ["--approve-for-me", "--not-so-yolo"] {
         let cli = Cli::parse_from(["codex-exec", flag, "resume", "--last"]);

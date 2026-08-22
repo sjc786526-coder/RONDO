@@ -14,7 +14,6 @@ use codex_app_server_protocol::McpToolCallResult;
 use codex_app_server_protocol::McpToolCallStatus as ApiMcpToolCallStatus;
 use codex_app_server_protocol::PatchApplyStatus as ApiPatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind as ApiPatchChangeKind;
-use codex_app_server_protocol::RawResponseCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadTokenUsage;
@@ -76,108 +75,6 @@ use codex_exec::TurnFailedEvent;
 use codex_exec::TurnStartedEvent;
 use codex_exec::Usage;
 use codex_exec::WebSearchItem;
-
-#[test]
-fn opt_in_rondo_local_observation_is_body_free_and_uses_exact_usage() {
-    let mut processor = EventProcessorWithJsonOutput::new_with_rondo_local_observation(
-        /*last_message_path*/ None,
-    );
-    let usage_events = processor.collect_thread_events(ServerNotification::RawResponseCompleted(
-        RawResponseCompletedNotification {
-            thread_id: "thread-private".to_string(),
-            turn_id: "turn-private".to_string(),
-            response_id: "response-private".to_string(),
-            usage: Some(TokenUsageBreakdown {
-                total_tokens: 23,
-                input_tokens: 20,
-                cached_input_tokens: 12,
-                cache_write_input_tokens: 2,
-                output_tokens: 3,
-                reasoning_output_tokens: 1,
-            }),
-        },
-    ));
-    assert!(usage_events.events.is_empty());
-
-    let secret = "private-command-body";
-    let command = |id: &str, status, output: &str, duration_ms| ThreadItem::CommandExecution {
-        id: id.to_string(),
-        command: secret.to_string(),
-        cwd: test_path_buf("/tmp/project").abs().into(),
-        process_id: None,
-        plugin_id: None,
-        script_path: None,
-        source: CommandExecutionSource::UserShell,
-        status,
-        command_actions: Vec::<CommandAction>::new(),
-        aggregated_output: Some(output.to_string()),
-        exit_code: Some(1),
-        duration_ms,
-    };
-    let completed = processor.collect_thread_events(ServerNotification::TurnCompleted(
-        TurnCompletedNotification {
-            thread_id: "thread-private".to_string(),
-            turn: Turn {
-                id: "turn-private".to_string(),
-                items_view: codex_app_server_protocol::TurnItemsView::Full,
-                items: vec![
-                    command(
-                        "command-private-1",
-                        ApiCommandExecutionStatus::Failed,
-                        "private-output-body",
-                        Some(7),
-                    ),
-                    command(
-                        "command-private-2",
-                        ApiCommandExecutionStatus::Completed,
-                        "ok",
-                        Some(5),
-                    ),
-                    command(
-                        "command-private-3",
-                        ApiCommandExecutionStatus::Completed,
-                        "done",
-                        Some(3),
-                    ),
-                ],
-                status: TurnStatus::Completed,
-                error: None,
-                started_at: Some(10),
-                completed_at: Some(11),
-                duration_ms: Some(1000),
-            },
-        },
-    ));
-    let Some(ThreadEvent::TaskObservation(observation)) = completed.events.last() else {
-        panic!("expected final task observation");
-    };
-    assert_eq!(observation.schema_version, 1);
-    assert_eq!(observation.scope, "rondo_local_task");
-    assert!(observation.event_stream_complete);
-    assert_eq!(observation.turn.duration_ms, Some(1000));
-    assert_eq!(observation.responses.completed, 1);
-    assert_eq!(observation.responses.with_valid_usage, 1);
-    assert_eq!(observation.responses.usage.input_tokens, 20);
-    assert_eq!(observation.tools.command, 3);
-    assert_eq!(observation.tools.total_duration_ms, 15);
-    assert_eq!(observation.tools.repeated_exact_commands, 2);
-    assert_eq!(observation.tools.repeated_after_failure, 2);
-    assert_eq!(observation.tools.max_command_output_bytes, 19);
-    assert!(observation.unavailable.model_visible_output_truncation);
-
-    let serialized = serde_json::to_string(observation).expect("serialize observation");
-    for forbidden in [
-        secret,
-        "private-output-body",
-        "thread-private",
-        "turn-private",
-        "response-private",
-        "command-private",
-        "/tmp/project",
-    ] {
-        assert!(!serialized.contains(forbidden), "leaked {forbidden}");
-    }
-}
 
 #[test]
 fn map_todo_items_preserves_text_and_completion_state() {

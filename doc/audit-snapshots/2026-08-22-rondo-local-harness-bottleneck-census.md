@@ -72,3 +72,13 @@ RONDO Local 新增 `codex exec --json --rondo-local-observation` 显式开关。
 
 本轮没有运行 Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI 或 PR。
 主物理根的 30 个合格 run 目录只读；未创建 Plan 052 ignored 临时目录，未改写、移动或删除既有运行资产。
+
+## 6. 后续验收整改附记（不改写首轮普查数字）
+
+本页 §1—§5 是首轮实现形成时点的冻结记录；其中 v28 cohort、覆盖、C1/C2/C11/C7 四态结论与局限继续有效。
+后续独立验收确认 §4 的 `task.observation` 停止条件和 §5 的专用 `codex-exec` collector 不应作为当前实现或规划：
+重复 collector 已删除，最终链路改为只对目标 RONDO Local 测量显式启用既有 rollout trace，以 API metadata 交叉核对，
+并在 Terminal-Bench 发布前生成固定名称的 schema-v1 body-free 任务投影；原始 trace 不归档，缺失、残缺、重复、
+完整性终态非零、schema 或两来源不一致均失败关闭。当前唯一后续包及有效/无效/回滚判据以
+`doc/WBS.md` 和 `doc/WBS/teacher-harness-study.md` 为准，整改证据见
+`agent_log/2026-08-22-plan052-native-trace-remediation.md`。

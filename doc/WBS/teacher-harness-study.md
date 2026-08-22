@@ -4,15 +4,15 @@
 
 ## 定位与状态
 
-**方向 1 已由 Plan 052 正式重启，只针对 RONDO Local。** 默认关闭的 task-level 聚合、历史普查器与日期冻结证据
-已经落地；Plan 052 没有实施 C1—C13 行为优化，也不涉及 RONDO Multi。
+**方向 1 已由 Plan 052 正式重启，只针对 RONDO Local。** 默认关闭的原生 trace opt-in、任务级安全离线投影、
+历史普查器与日期冻结证据已经落地；Plan 052 没有实施 C1—C13 行为优化，也不涉及 RONDO Multi。
 
 教师 harness 的只读研究 T1—T3 已完成，结论基本不受本轮路线调整影响。四套参考实现的主题比较、与冻结 Codex
 的差异矩阵、13 个候选机制及证据等级已收敛到 `doc/research/teacher-harness-performance-candidates.md`。
 该报告是研究证据和候选池，本页是候选何时进入实现、如何排序和验收的唯一规划来源。
 
 方向 1 不受旧 M2 解锁门约束；v22 仍不满足公平能力归因条件，不能据其三项 A/B 差异直接选定优化项。
-E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）；Plan 052 的结论是现有资产、最小聚合与一次
+E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）；Plan 052 的结论是现有资产、原生事实投影与一次
 有界真实复测足以承接下一步，未来只有已选定机制确需低成本反复实验时才重新评估最小 replay 能力。
 
 ## 已完成研究
@@ -27,13 +27,15 @@ E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）
 任务合同见 `plan/052-direction1-local-harness-bottleneck-census-execplan.md`，冻结证据见
 `doc/audit-snapshots/2026-08-22-rondo-local-harness-bottleneck-census.md`：
 
-1. schema-v1 `task.observation` 只在 `codex exec --json --rondo-local-observation` 时产生；关闭路径不构造 collector，
-   开启路径只输出 body-free 聚合，不改变请求、工具、审批、compact、重试、停止、调度或退出码。
+1. 复用既有 rollout trace 与 API metadata；只对目标 Local 测量请求显式开启 trace，结果发布前生成固定名称的
+   schema-v1 body-free 投影。原始 trace 不进入归档；缺失、残缺、重复、schema 漂移或两来源不一致均拒绝发布。
+   重复的 `codex-exec` collector 已删除，产品默认路径和行为不变。
 2. v28 Local cohort 为 10 个任务 × 3 次运行；API metadata 覆盖 30/30 run、10/10 任务，exec JSONL 覆盖
    24/30 run、8/10 任务，另 6 次为集中在 2 个任务的既有敏感脱敏，不按 0 处理。
 3. C1 为 1/24 run 的 raw-output 阈值弱代理；C2 为 2/24 run 的精确重复弱信号；C11 在 311/311 完整终态请求中
    当前样本未观察到；C7 因没有类型化完成声明—验证关系而不可测。C4 只显示 cache reuse，C5 不可测。
-4. 没有候选达到“已观察且影响明显”，因此不选行为优化；E-A 当前不恢复。
+4. 当前实际样本中 C2 比 C1 更常见，但没有候选达到“已观察且影响明显”，因此不能判断哪个“最值得处理”，
+   不选行为优化；E-A 当前不恢复。
 
 ## 当前唯一工作包：10 题 × 2 轮 Local 有界观测复测
 
@@ -41,9 +43,15 @@ E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）
   `gpt-5.6-terra/medium`、Guardian `gpt-5.6-terra/low`，硬预算 20 USD。
 - 不运行 Codex、validation、holdout、E-A 或条件补题。真实 API/Docker 必须另行授权并在独立 ExecPlan 中冻结
   新 Local bundle、campaign 与预算身份。
-- 第一轮任一 observation 缺失、schema/body-free 或资源门失败即停止；任一新预留会达到 20 USD 即停止；两轮后
+- 唯一变量是给目标 Local 测量开启原生 trace 并执行安全离线投影；预期只改善 C1/C2/C11 的覆盖与影响归因，
+  不预先承诺产品性能收益，C7 仍保持不可测。
+- 第一轮任一投影缺失、trace 完整性非零、trace/API 交叉核对不一致、schema/body-free 或资源门失败即停止；
+  任一新预留会达到 20 USD 即停止；两轮后
   无条件停止，不加题、补轮或改分母。
-- 复测完成后只选一个有证据支持的优化候选，或明确保留无优化结论；在此之前 C1—C13 均不进入行为实现。
+- 20/20 个预定 run 全部得到唯一完整投影才是有效测量；任一缺口使整包无效。观测引入新 infra 失败时关闭 opt-in
+  并回到设施修复。C1/C2 须两轮均出现、跨至少 2 个任务且有模型可见 omission/truncation 或重复后工具时长负担；
+  C11 出现影响任务的类型化 request/context 失败时可按严重性入选。多项满足时按任务覆盖、失败/耗时影响、行为
+  风险依次只选一个；无人满足则明确保留无优化结论。在此之前 C1—C13 均不进入行为实现。
 
 ## 首轮候选参考
 

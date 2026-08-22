@@ -17,6 +17,7 @@ use crate::model::CodexTurnId;
 use crate::model::ModelVisibleCallId;
 use crate::payload::RawPayloadKind;
 use crate::payload::RawPayloadRef;
+use crate::raw_event::OutputRenderObservation;
 use crate::raw_event::RawTraceEventContext;
 use crate::raw_event::RawTraceEventPayload;
 use crate::writer::TraceWriter;
@@ -77,6 +78,11 @@ impl CodeCellTraceContext {
         }
     }
 
+    /// Returns whether preparing trace-only output facts is necessary.
+    pub fn is_enabled(&self) -> bool {
+        matches!(self.state, CodeCellTraceContextState::Enabled(_))
+    }
+
     /// Records the parent runtime object before JavaScript can issue nested tool calls.
     pub fn record_started(
         &self,
@@ -127,6 +133,20 @@ impl CodeCellTraceContext {
                 runtime_cell_id: context.runtime_cell_id.clone(),
                 status: code_cell_status_for_runtime_response(response),
                 response_payload: code_cell_response_payload(context, response),
+            },
+        );
+    }
+
+    /// Records only body-free facts about the first output returned to the model.
+    pub fn record_output_rendered(&self, observation: OutputRenderObservation) {
+        let CodeCellTraceContextState::Enabled(context) = &self.state else {
+            return;
+        };
+        append_with_context_best_effort(
+            context,
+            RawTraceEventPayload::CodeCellOutputRendered {
+                runtime_cell_id: context.runtime_cell_id.clone(),
+                observation,
             },
         );
     }

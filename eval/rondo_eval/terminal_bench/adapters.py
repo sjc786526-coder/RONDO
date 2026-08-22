@@ -237,6 +237,12 @@ class UploadBinaryAdapter(HarborCodexAgent):
             rollout_trace_root,
             required=common_v2,
         )
+        if trace_root is not None and not common_v2 and (
+            self.side is not Side.RONDO or self._product is not Product.RONDO_LOCAL
+        ):
+            raise AdapterError(
+                "stand-alone rollout trace capture is reserved for RONDO Local measurement"
+            )
         # Two catalog modes exist.  The shared mode is the E-B8 contract: one
         # artifact, identified by its own digest and provenance, loaded by both
         # sides.  The legacy mode is the Codex-only projection bound to the
@@ -311,6 +317,10 @@ class UploadBinaryAdapter(HarborCodexAgent):
     @property
     def provider_base_url(self) -> str:
         return self._provider_base_url
+
+    @property
+    def rollout_trace_root(self) -> str | None:
+        return self._rollout_trace_root
 
     @classmethod
     def name(cls) -> str:
@@ -999,6 +1009,12 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
                 ("rollout_trace_root", adapter._rollout_trace_root),
             )
             if adapter._common_multi_agent_v2
+            else ()
+        ),
+        *(
+            (("rollout_trace_root", adapter._rollout_trace_root),)
+            if adapter._rollout_trace_root is not None
+            and not adapter._common_multi_agent_v2
             else ()
         ),
     ]
