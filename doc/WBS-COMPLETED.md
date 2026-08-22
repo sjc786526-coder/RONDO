@@ -1640,6 +1640,7 @@ cap、terminal backend status 与测试 release barrier 三项局部缺口。整
   `agent_log/2026-08-22-051709-plan055-m3-b2a-publication-critic-service.md`、
   `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`；最终验收见
   `agent_log/2026-08-22-063239-plan055-remediation-final-acceptance.md`。
+
 ## 方向 1 原生观测有界复测 v1 历史节点（Plan 056，2026-08-22）
 
 **状态**：v1 已按原合同以无效 campaign 终态关闭；没有行为候选结论。用户随后追加授权，整个 Plan 056 任务仍在
@@ -1693,3 +1694,27 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
 - 定向设施回归为预算代理 62/62、harness observation 与 Plan 056 合集 54/54；构建、runtime verify、preflight 和
   20-run 均通过相应资源门。未运行 Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、
   本地模型、训练、云任务或上传。独立最终验收和对应整改结果见 Plan 056 最终日志。
+
+## RONDO Multi 三期 M3-B2b Publication Critic 发布流程接入（Plan 057，2026-08-22）
+
+**状态**：实现、四项 correctness finding 整改、最终独立验收与主线整合均已完成。受控产品路径成立，但尚无真实模型
+质量、threshold 或性能结论。
+
+- 默认关闭的 typed Critic 配置已接入 `team_publish` 前置流程。关闭态保留原 schema、输出与 store 路径；启用态从
+  Team State 权威 canonical preparation 和 actor 可读的 event-local 有界公共 history 构造 Plan 055 packet，最终提交
+  仍且只由现行 Team State `publish()` 完成。
+- 产品流程支持最多两次阻断式 `REWRITE`、第三次非阻断审核、typed failure 后当前稿单次 fallback、commit 前取消零提交，
+  并保持 attempt/committed replay、并发、revision、wake、evidence 与 Root attention 语义。候选正文只出现在必要的
+  Producer 反馈中，开发者观测保持 body-free。
+- 首轮独立验收发现无关请求清理 cycle、旧 continuation 跨阶段复用、锁内全量 history clone 与脱敏 trace 缺终态四项问题；
+  整改后 cycle 按归属隔离、每阶段轮换 continuation、Team State 使用不含 route/Fact ID/body 的专用有界 history，
+  PostToolUse feedback 也能产生安全唯一终态。最终复验结论为 `PASS`，无剩余 correctness/functionality finding。
+- 整改证据包含 Team State 2/2、Publication Critic 聚焦组 13/13（其中 7 项启动 Plan 055 正式受控服务进程）及
+  registry/trace 4/4；相邻 Clippy、fix、fmt/fmt-check 与 `git diff --check` 通过。argument-comment 固定工具链不兼容和
+  Bazel 三目标 10 分钟未完成继续如实记录，但按验收决定不阻断本包。
+- 未运行 Docker、真实 API、真实模型、本地推理、训练、全 workspace、CI 或 PR。产品链已到达 M3-C1 前置边界，但
+  M3-C1 仍等待模型链完成；当前方向 3 下一包是 M3-A2。执行、首次审查、整改与最终验收分别见
+  `agent_log/2026-08-22-094518-plan057-publication-critic-integration.md`、
+  `agent_log/2026-08-22-102052-plan057-independent-acceptance-review.md`、
+  `agent_log/2026-08-22-105310-plan057-review-remediation.md`、
+  `agent_log/2026-08-22-110158-plan057-final-acceptance-review.md`。

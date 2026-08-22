@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-22（方向 1 Plan 056 已完成并选择 C2；方向 3 M3-A1 与 Plan 055 / M3-B2a 已完成）
+最后更新：2026-08-22（Plan 056 已完成并选择 C2；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -20,7 +20,7 @@
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
 | 1：Harness 优化 | **Plan 056 已完成有效 20/20，选择 C2** | 测量已停止；C2 行为优化尚未立项或授权，须另建 ExecPlan |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
-| 3：RONDO Multi | 第一、二期及其收口案例已完成；**三期 M3-A1 与 Plan 055 / M3-B2a 已完成并通过独立验收** | M3-A2 状态不变；产品链下一工作包为 M3-B2b，须另行立项授权 |
+| 3：RONDO Multi | 第一、二期及其收口案例已完成；**三期 M3-A1、M3-B2a、M3-B2b 已完成** | 当前唯一已解锁工作包为 M3-A2；产品链等待模型链在 M3-C1 汇合 |
 
 ### 方向命名口径
 
@@ -37,7 +37,7 @@
 
 方向 1 与方向 3 是两套产品源码上的独立推进面，不互为默认前置。
 
-### 方向 1：有界观测复测
+### 方向 1：C2 候选交接
 
 Plan 056 已完成。首个可信正式 campaign `formal-v6` 使用 v28 同一冻结 10 题、两个完整 round 和固定
 Terra medium/low 条件形成有效 20/20；20 个 slot 均有完整 API usage、原生 trace 投影、Terminal-Bench 终态和
@@ -55,12 +55,12 @@ formal-v5，Plan 056 累计 483 attempts、`10.329028 USD`，reservation 0，随
 
 ### 方向 3：Publication Critic 三期
 
-- M3-A1 产品合同与 M3-B2a / Plan 055 本地 Critic 服务均已完成并通过独立验收。三期分为
+- M3-A1 产品合同、M3-B2a / Plan 055 本地 Critic 服务与 M3-B2b / Plan 057 发布流程接入均已完成并进入主线。三期分为
   `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 数据/训练链与 `M3-B2a → M3-B2b` 产品链，两链在
   `M3-C1 → M3-C2` 汇合，最后由 M3-D 收口。
-- M3-A2 与 M3-B2a 不需互相等待；M3-B2a 已主线整合，产品链下一工作包 M3-B2b 尚未启动且须另行立项授权。
-- M3-A1 的完成不授权提前创建训练数据、下载模型、运行付费训练或改变 `team_publish` 产品行为。每个后续包仍须
-  按自身范围取得授权。
+- 当前方向 3 唯一已解锁工作包是 M3-A2。产品链已经到达汇合点前，但 M3-C1 仍须等待
+  `M3-A2 → M3-B1a → M3-B1b → M3-B1c` 完成，不能作为 Plan 057 的直接后继提前启动。
+- 已完成工作不授权提前创建训练数据、下载模型、运行付费训练或启用真实 Critic。每个后续包仍须按自身范围取得授权。
 
 方向 1 与方向 3 的只读研究、轻量代码和数据工作可以并行；本地重型 Cargo、Docker、真实本地模型加载/推理继续
 全局串行，并由实际进入实施的工作包协调共享资源。
@@ -148,6 +148,6 @@ RONDO/
 ## 7. 子 WBS 索引
 
 - `doc/WBS/eval-benchmark.md` —— 方向 0：现行测评设施与方向 1 观测投影边界
-- `doc/WBS/teacher-harness-study.md` —— 方向 1：Plan 052 普查与后续有界复测
+- `doc/WBS/teacher-harness-study.md` —— 方向 1：Plan 052/056 观测结论与 C2 下一边界
 - `doc/WBS/local-approval-model.md` —— 方向 2：已永久收口
 - `doc/WBS/multi-agent-trusted-evidence.md` —— 方向 3：现行产品语义与三期 Publication Critic 长程路线
