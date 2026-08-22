@@ -212,11 +212,13 @@ active pointer；外部独立验收提交 `de2cc24` 又发现稳定重跑入口�
 返回 2。首轮整改把新任务输入与稳定合同分离，并补上显式 `finalize` 收口与相对比较；第二次验收提交 `8b43a0c` 进一步
 发现 `run`/`resume` 没有自动复用收口，且 blocked 会误入相对比较器。两项控制流均已窄修：passed/failed 的正式启动与
 恢复入口共用同一预算/pointer 终态，blocked 保持 3/successor 且不生成 comparison；v28 的 tracked public baseline
-字节不变。相关 9 模块 361/361 通过，正在等待外部审查者再次复验。
+字节不变。第三次验收提交 `2683336` 又定位到 envelope close 与 pointer retire 之间的中断窗口，以及正式终态/退出码
+错配可能返回成功；`finalize` 现会在 runner 前直接恢复已闭合 identity，所有错配均明确失败。相关 9 模块 362/362
+通过，正在等待外部审查者再次复验。
 
 ### 本任务剩余步骤
 
-只剩外部独立审查者对第二轮窄修的轻量复验；若通过，任务重新进入只读交付状态。仍不合并、推送或归档分支。
+只剩外部独立审查者对第三轮窄修的轻量复验；若通过，任务重新进入只读交付状态。仍不合并、推送或归档分支。
 
 ### 阻塞项
 
@@ -225,16 +227,16 @@ active pointer；外部独立验收提交 `de2cc24` 又发现稳定重跑入口�
 
 ### 当前验收状态
 
-- 实现与无 API 定向门禁：整改完成；相关 9 模块 Python 回归 361/361（含新任务 budget/identity、统一入口、
-  run/resume/finalize 的 passed/failed 终态、blocked、相对基线、pair/results 与历史 v28 loader）通过。语法编译与
+- 实现与无 API 定向门禁：整改完成；相关 9 模块 Python 回归 362/362（含新任务 budget/identity、统一入口、
+  run/resume/finalize 的 passed/failed 终态、闭合后恢复、退出码错配、blocked、相对基线、pair/results 与历史 v28 loader）通过。语法编译与
   diff whitespace 在最终提交前复验；
   全 workspace、CI、PR、validation/holdout 均未运行。
 - Docker/stub 与正式 API：完成；v28 为有效正式基线，所有有效 pass、reward 0 与任务失败均原样保留。
 - 预算、归档与清理：完成；任务累计 `$9.412888`，无 active identity、running slot、容器、volume 或任务网络。
 - Git：v23—v28 lock、raw result、ledger 与 tracked public baseline 保持只读；本轮只新增派生 comparison 和入口整改。
   未修改、合并或推送 `main`，未归档分支。
-- 独立审查：任务内干净上下文审查的 active-pointer finding 已修复并曾获 `PASS`；外部独立验收的两个新 finding
-  已完成整改，等待同一外部审查者复验。
+- 独立审查：任务内干净上下文审查的 active-pointer finding 已修复并曾获 `PASS`；外部独立验收逐轮提出的稳定入口
+  finding 均已整改，等待同一外部审查者复验。
 
 ### 主工作区 ignored 资产
 
@@ -274,3 +276,4 @@ worktree，那是 tracked result 的既有架构要求，不是把结果直接�
 | 008 | 双方 main 固定 `medium`，双方 Guardian 固定 `low` | 用户在执行中明确修订原 main/Guardian 均为 medium 的合同；冻结 Codex 本身也会为 Guardian 选择 low | provider projection、identity、preflight、wire、正式运行 | 已采纳 |
 | 009 | 后续正式 baseline 用显式 Local commit/manifest、campaign/batch、价格日期和新 task-budget ID/cap 初始化 | 每次运行输入不能固化为首次 Plan 051 常量；新授权不得覆盖或复用已关闭的 400 USD envelope | loader、identity、task budget、统一入口 | 已采纳 |
 | 010 | 相对基线从同一 results worktree 自动选择最新兼容 schema v7 正式结果，首轮输出 `first_formal_baseline` | 比人工传入前驱路径更小且可避免选错；独立文件不改历史 tracked public baseline 字节 | aggregate、results、compare | 已采纳 |
+| 011 | `finalize` 在进入 runner 前恢复已闭合 envelope 的 pointer，并严格匹配终态/退出码 | envelope close 与 pointer retire 是两个原子步骤，必须能从中间中断恢复且不能误报成功 | formal entry、crash recovery | 已采纳 |

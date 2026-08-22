@@ -189,6 +189,76 @@ class FormalCanaryEntryTests(unittest.TestCase):
         self.assertEqual(result, 0)
         retire.assert_called_once_with(self.paths, identity=identity)
 
+    def test_finalize_rejects_a_terminal_exit_code_mismatch(self) -> None:
+        identity = mock.Mock(
+            campaign_id="p2-b7-canary-baseline-v29",
+            batch_id="p2-b7-canary-v29",
+            enforces_fair_comparison=True,
+            budget={
+                "task_budget_id": "direction0-local-optimization-052",
+                "task_budget_cap_usd": "125.000000",
+                "task_budget_prior_estimated_usd": "0.000000",
+            },
+        )
+        state_path = (
+            self.root
+            / "eval-data/campaigns/p2-b7-canary-baseline-v29/state.json"
+        )
+        state_path.parent.mkdir(parents=True)
+        active = {
+            "active_identity": {
+                "campaign_id": identity.campaign_id,
+                "batch_id": identity.batch_id,
+            },
+            "closed_identities": [],
+        }
+        runner_args = [
+            "finalize",
+            "--docker-host-volume",
+            "/tmp/docker-host",
+            "--results-worktree-root",
+            "/tmp/results",
+            "--rondo-measurement-worktree-root",
+            "/tmp/rondo",
+            "--codex-measurement-worktree-root",
+            "/tmp/codex",
+        ]
+        for terminal, exit_code in (("passed", 2), ("failed", 0)):
+            with self.subTest(terminal=terminal, exit_code=exit_code):
+                state_path.write_text(
+                    json.dumps({"status": terminal}) + "\n", encoding="utf-8"
+                )
+                with (
+                    mock.patch.object(
+                        formal_canary.RepoPaths,
+                        "discover",
+                        return_value=self.paths,
+                    ),
+                    mock.patch.object(
+                        formal_canary,
+                        "load_campaign_identity",
+                        return_value=identity,
+                    ),
+                    mock.patch.object(
+                        formal_canary, "baseline_main", return_value=exit_code
+                    ),
+                    mock.patch.object(
+                        formal_canary, "load_task_budget", return_value=active
+                    ),
+                    mock.patch.object(formal_canary, "close_task_budget") as close,
+                    mock.patch.object(
+                        formal_canary, "retire_active_campaign_pointer"
+                    ) as retire,
+                    self.assertRaisesRegex(
+                        formal_canary.FormalCanaryError,
+                        "exit code does not match",
+                    ),
+                ):
+                    formal_canary.main(runner_args)
+
+                close.assert_not_called()
+                retire.assert_not_called()
+
     def test_run_preserves_blocked_for_successor_recovery(self) -> None:
         identity = mock.Mock(
             budget={"task_budget_id": "direction0-local-optimization-052"}
@@ -478,7 +548,11 @@ class FormalCanaryEntryTests(unittest.TestCase):
             mock.patch.object(
                 formal_canary, "load_campaign_identity", return_value=identity
             ),
-            mock.patch.object(formal_canary, "baseline_main", return_value=0),
+            mock.patch.object(
+                formal_canary,
+                "baseline_main",
+                side_effect=AssertionError("closed envelope re-entered runner"),
+            ),
             mock.patch.object(formal_canary, "load_task_budget", return_value=closed),
             mock.patch.object(
                 formal_canary, "retire_active_campaign_pointer"
@@ -545,7 +619,7 @@ class FormalCanaryEntryTests(unittest.TestCase):
             mock.patch.object(
                 formal_canary,
                 "load_task_budget",
-                side_effect=[active],
+                side_effect=[active, active],
             ),
             mock.patch.object(
                 formal_canary,

@@ -21,7 +21,7 @@
 | P0 共享地基 | S1 审批模型覆盖与 S2 `E_final` 证据捕获已完成，开关默认关闭。S1 只覆盖模型与 effort，不覆盖 provider。 |
 | 测试基线 | Plan 004 完成对旧 81 项失败的分批整改后，最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行 14,092 项：14,060 通过、31 失败、1 超时，Nextest 另列 23 项 ignored；P0 仍以定向验收收口。此后未重跑全 workspace，不能把该历史快照表述为当前全绿或当前失败复现。 |
 | P1 / M1 | B1、B2、B3 与 M1 已完成；冻结 Codex 与 RONDO 已在同一 TB 2.1 任务上完成真实端到端并归档。 |
-| P2 / 方向 0 | B4—B7、E-B8 公平比较设施与 Plan 051 首次 schema v7 正式 canary 均已完成。v28 在冻结 Local `54f62e5...` / Codex `be6e8eac...`、Terra main-medium / Guardian-low 下得到 10/10 共同有效任务、双方各 5/10、`sigma=0`、`delta=0`，三层机械判据通过。稳定入口支持后续显式新 Local/bundle、campaign、价格与独立授权预算；passed/failed 自动收口并输出相对上一兼容正式基线的派生比较，blocked 保留给 successor；Plan 051 envelope 不会被复用。E-A（A1—A7）继续随方向 1 挂起。 |
+| P2 / 方向 0 | B4—B7、E-B8 公平比较设施与 Plan 051 首次 schema v7 正式 canary 均已完成。v28 在冻结 Local `54f62e5...` / Codex `be6e8eac...`、Terra main-medium / Guardian-low 下得到 10/10 共同有效任务、双方各 5/10、`sigma=0`、`delta=0`，三层机械判据通过。稳定入口支持后续显式新 Local/bundle、campaign、价格与独立授权预算；passed/failed 自动且可恢复地收口并输出相对上一兼容正式基线的派生比较，blocked 保留给 successor；Plan 051 envelope 不会被复用。E-A（A1—A7）继续随方向 1 挂起。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
 | 结果数据 | P2 v2—v22 公共账本已有 244 条 `track=tb` 唯一 run；Plan 051 的 v28 在任务专用 results worktree 新增 40 条、1 份 schema v7 aggregate 与 1 份 `first_formal_baseline` 派生比较，待后续批准合入后 `track=tb` 为 284 条。方向 2 另有 4 条 `track=shadow`，届时总账本为 288 条。v23—v27 的设施诊断 identity 保留在 ignored 运行资产，不伪装成产品基线。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |

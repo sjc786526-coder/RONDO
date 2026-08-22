@@ -161,8 +161,9 @@ v23—v26 在零 API 阶段关闭；v27 完成 wire 与首个产品槽后暴露�
 后续使用 `just eval-plan051 initialize|prepare|preflight|run|resume|finalize|compare` 创建新 baseline 时，须显式提供
 新 campaign/batch、Local source commit 与 manifest、comparison、价格日期和独立 task-budget ID/cap，并取得对应
 真实 API/Docker 授权；新 envelope 使用独立路径，付费确认绑定其 task-budget ID，本次 400 USD 授权和余额不自动
-延续。`run`/`resume` 到达 passed/failed 后会在返回 0/2 前自动关闭 envelope 并退役 pointer；blocked 保留给
-successor，不生成相对正式基线。有效正式终态会生成单独的相对基线 JSON：自动选择同一 results worktree 中最新、
+延续。`run`/`resume` 到达 passed/failed 后会在返回 0/2 前自动关闭 envelope 并退役 pointer；若在两步之间中断，
+`finalize` 会从 closed identity 直接恢复 pointer，终态与退出码不匹配则失败。blocked 保留给 successor，不生成相对
+正式基线。有效正式终态会生成单独的相对基线 JSON：自动选择同一 results worktree 中最新、
 同题集的正式 schema v7 前驱，首次 v28 则明确记为 `first_formal_baseline`，不改 tracked public baseline。具体历史合同与执行边界见
 `plan/051-direction0-schema-v7-first-formal-canary-execplan.md`。
 

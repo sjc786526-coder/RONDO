@@ -436,7 +436,9 @@ def _close_published_terminal(
         return exit_code
     expected_exit_code = 0 if terminal is BaselineStatus.PASSED else 2
     if exit_code != expected_exit_code:
-        return exit_code
+        raise FormalCanaryError(
+            "formal result exit code does not match the campaign terminal state"
+        )
     active, _prior, task_budget_id, task_budget_cap = _identity_budget(identity)
     envelope_path = task_budget_path(paths.common_root, task_budget_id)
     envelope = load_task_budget(
@@ -457,6 +459,26 @@ def _close_published_terminal(
             task_budget_id=task_budget_id,
             cap_usd=task_budget_cap,
         )
+    _retire_closed_terminal(
+        paths,
+        identity=identity,
+        terminal=terminal,
+        active=active,
+        envelope=envelope,
+    )
+    return exit_code
+
+
+def _retire_closed_terminal(
+    paths: RepoPaths,
+    *,
+    identity: object,
+    terminal: BaselineStatus,
+    active: TaskBudgetIdentity,
+    envelope: dict[str, object],
+) -> None:
+    """Verify the durable close record before retiring the active pointer."""
+
     closed = envelope.get("closed_identities")
     if not isinstance(closed, list) or not any(
         isinstance(row, dict)
@@ -467,7 +489,34 @@ def _close_published_terminal(
     ):
         raise FormalCanaryError("terminal identity is not closed in the task budget")
     retire_active_campaign_pointer(paths, identity=identity)
-    return exit_code
+
+
+def _recover_already_closed_terminal(
+    paths: RepoPaths,
+    *,
+    identity: object,
+    terminal: BaselineStatus,
+) -> int | None:
+    """Finish the close-to-pointer crash window without re-entering the runner."""
+
+    if terminal not in {BaselineStatus.PASSED, BaselineStatus.FAILED}:
+        return None
+    active, _prior, task_budget_id, task_budget_cap = _identity_budget(identity)
+    envelope = load_task_budget(
+        task_budget_path(paths.common_root, task_budget_id),
+        task_budget_id=task_budget_id,
+        cap_usd=task_budget_cap,
+    )
+    if envelope.get("active_identity") is not None:
+        return None
+    _retire_closed_terminal(
+        paths,
+        identity=identity,
+        terminal=terminal,
+        active=active,
+        envelope=envelope,
+    )
+    return 0 if terminal is BaselineStatus.PASSED else 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -533,6 +582,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     identity = load_campaign_identity(paths)
     terminal = _terminal_status(paths, identity)
+    recovered_exit_code = _recover_already_closed_terminal(
+        paths,
+        identity=identity,
+        terminal=terminal,
+    )
+    if recovered_exit_code is not None:
+        return recovered_exit_code
     exit_code = baseline_main(_runner_argv(args))
     return _close_published_terminal(
         paths,
