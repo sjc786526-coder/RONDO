@@ -83,3 +83,16 @@ manifest 归属和引用后，通过 `binary_freeze cleanup` 的 exact-commit �
 Cargo target，分别释放 13,552,737,989 与 13,552,728,113 bytes，合计 27,105,466,102 bytes（25.244 GiB）。
 不可恢复内容仅为可重建的编译 object/incremental/cache；对应 source、frozen bundle/manifest、campaign、预算账本、
 真实费用、公共结果和 metrics 均保留，当前 formal-v6 target 未清理。
+
+formal-v6 完成 10/10 零 API preflight 后，从第一题串行执行同一 10 题两个完整 round。20 个 slot 全部
+`completed`、原生 trace 与 API usage 可投影、Terminal-Bench 来源复验通过、Docker receipt 为
+`verified_empty`；8 pass/12 fail。formal-v6 为 219 attempts、`4.677962 USD`，reservation 0；Docker total 和
+VHDX 增长均为 0，Windows `C:` 从 191,850,123,264 降至 191,832,576,000 bytes，最终无 container、volume 或
+build cache。
+
+body-free finalizer 选出 C2：9 次 occurrence，影响 6 个 slot/4 个任务、3 个失败 slot，两轮均观察到，影响值
+10108；C1/C11 未达门槛，C7 仍不可测。公共结果为
+`eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`。v1、三次 rehearsal、
+formal-v5 与 formal-v6 合计 483 attempts、`10.329028 USD`；task budget 已关闭，reservation 0，付费运行停止。
+三次 rehearsal 中 v2/v3 invalid、v4 complete；连同 v1/formal-v5，共 4 个 invalid campaign。未运行 Codex 对照、
+validation、holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。

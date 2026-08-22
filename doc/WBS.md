@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-22（方向 1 Plan 056 已追加授权并进入 rehearsal；其他方向状态由各自专用工作树维护）
+最后更新：2026-08-22（方向 1 Plan 056 已形成首个可信 20/20 并选择 C2；其他方向状态由各自专用工作树维护）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段指针、跨方向关系、
 稳定工程边界和授权门；已完成成果与验收见 `doc/WBS-COMPLETED.md`，单次任务合同见 `plan/`，执行细节见
@@ -18,7 +18,7 @@
 | 方向 | 当前状态 | 当前规划边界 |
 |---|---|---|
 | 0：量化测评基准 | 既有设施与首次 schema v7 正式 canary 已完成，当前无 active campaign | 保留设施；历史结果见 COMPLETED，新 campaign 须重新立项与授权 |
-| 1：Harness 优化 | **Plan 056 v1 已无效关闭，任务按追加授权继续** | 累计 100 USD；先完成完整 10 题单轮 rehearsal，再以全新身份执行首个可信正式 20/20 |
+| 1：Harness 优化 | **Plan 056 已完成有效 20/20，选择 C2** | 测量已停止；C2 行为优化尚未立项或授权，须另建 ExecPlan |
 | 2：本地审批模型 | **已收口，今后不再开启** | 最终结论为“保留为实验”；不改生产默认，不再规划后续工作包 |
 | 3：RONDO Multi | 第一、二期及其收口案例已完成；**三期 M3-A1 产品合同已完成** | M3-A2 数据/评价设施可独立立项；M3-B2a 已由 Plan 055 专用工作树承接，尚未主线整合 |
 
@@ -39,31 +39,19 @@
 
 ### 方向 1：有界观测复测
 
-Plan 056 v1 已按原冻结合同建立同一 10 题、两轮、20-slot 的 RONDO Local campaign，并完成 10/10 零 API
-Docker 预检。正式执行发布第 1 个 slot 后，第 2 个已发送 slot 在原生 trace 投影阶段被判定为生命周期不完整；
-v1 因而立即关闭为无效，没有在该 identity 内替换或重发 slot。
+Plan 056 已完成。首个可信正式 campaign `formal-v6` 使用 v28 同一冻结 10 题、两个完整 round 和固定
+Terra medium/low 条件形成有效 20/20；20 个 slot 均有完整 API usage、原生 trace 投影、Terminal-Bench 终态和
+Docker receipt，8 pass/12 fail。formal-v6 为 219 attempts、`4.677962 USD`；连同 v1、三次 rehearsal 和
+formal-v5，Plan 056 累计 483 attempts、`10.329028 USD`，reservation 0，随后停止付费运行。
 
-- body-free 公共结果固定 20-run 分母、1 个已发布 slot、25 次上游尝试与 `0.631065 USD` 结算；task budget 和
-  active pointer 已关闭，reservation 为 0。无效结果不执行 C1/C2/C11 候选推断，C7 仍不可测。
-- 事后只读复核确认失败来自 Team Lens 对合法事件交错的设施假阴性：3 次 `tool_call_runtime_ended` 晚于对应
-  `tool_call_ended`，元数据实际完整。reducer 已窄修为整束读完后判断完整性并补回归测试，但无效 campaign 不回滚、
-  不重放第 2 个 slot。
-- 用户随后追加并变更 Plan 056 授权：总费用从 v1 的 `0.631065 USD` 继续累计，硬上限为 `100.000000 USD`；
-  允许真实开发性 rehearsal 和因可修复设施问题关闭 campaign 后以全新 identity 干净重启。
-- rehearsal-v2 已干净发布前 2 题并跨过 v1 旧故障点；第 3 题因收尾 Docker 实时事实命令瞬时失败而按合同关闭，
-  后 7 题未发送。采样链经有界、fail-closed 窄修后，rehearsal-v3 的前 3 题完整发布并跨过该故障点；第 4 题
-  因 projector 未识别 sandbox open 前的合法 code-mode terminal result 而关闭，后 6 题未发送。v2/v3 分别为
-  34/52 attempts、`0.569748/0.842369 USD`，累计 `2.043182 USD`；资源门未触发且无遗留容器、网络、卷或 cache。
-  projector 已仅对该机械完整的 pre-runtime denial 形态窄修并用 v3 原 trace 离线复投影。
-- rehearsal-v4 随后连续完成冻结 10 题单轮：10/10 来源、投影、费用和 Docker receipt 完整，6 pass/4 fail，
-  111 attempts、`1.970204 USD`；累计 222 attempts/`4.013386 USD`、reservation 0。Docker/VHDX 增长均为 0，
-  资源收尾完整，结果为 `rehearsal_complete` 且不参与候选判断。
-- formal-v5 完成 10/10 零 API preflight 后正式发布前 3 个 slot；第 4 个 slot 的上游尝试在响应头前失败，旧
-  metadata 无法表达该终态，campaign 按严格投影合同关闭为 invalid，后 16 个 slot 未发送。v5 为 42 attempts、
-  `1.637680 USD`；累计 264 attempts/`5.651066 USD`，reservation 0，Docker/VHDX 增长均为 0。
-- 当前唯一方向 1 工作包仍为 Plan 056：窄修响应前 `open_error` 观测，提交/冻结新源码并重建 binary，以 formal-v6
-  全新身份从第一题执行固定两轮 20-run campaign。v1/rehearsal/无效数据不进入最终分母；首个可信 20/20 产生候选
-  或“无候选”结论后停止付费运行。详细合同见 `plan/056-direction1-bounded-observation-execplan.md`。
+冻结门槛只选出 **C2**：9 次 occurrence，影响 6 个 slot/4 个任务，其中 3 个失败 slot，两轮均观察到，影响值
+10108；C1 和 C11 未达门槛，C7 继续不可测。公共 body-free 结果见
+`eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`，详细历史和验收证据见
+`doc/WBS-COMPLETED.md` 与 `plan/056-direction1-bounded-observation-execplan.md`。
+
+方向 1 的下一工作边界是另行规划 C2 行为优化；当前结果只选择候选，不授权修改 prompt、工具语义、Guardian、
+调度、审批或安全策略，也不预设实现路线、收益或预算。启动时须单独建立 ExecPlan、正确性回归、成功/停止条件和
+有界测评授权；在此之前方向 1 没有 active campaign。
 
 ### 方向 3：Publication Critic 三期
 

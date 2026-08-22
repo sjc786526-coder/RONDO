@@ -53,33 +53,33 @@
 
 ### 完成/验收标准
 
-- [ ] 在完整 10 题单轮 rehearsal 通过后，为最终测量建立全新的 campaign、batch、预算子身份、结果命名空间、
+- [x] 在完整 10 题单轮 rehearsal 通过后，为最终测量建立全新的 campaign、batch、预算子身份、结果命名空间、
       binary manifest 和恰好 20 个正式 slot；不得复用或改写 v1/rehearsal/v28 的身份、结果或工件。
 - [x] 新身份只复用 `eval/locks/p2-b7-canary-baseline-v28.json`（SHA-256
       `a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b`）所冻结的同一 10 题任务/镜像身份，
       不按成绩换题、补题或扩大样本。
-- [ ] 最终 binary manifest 绑定 rehearsal 后实际提交的 `mydev/` 源码、构建产物和产品身份；模型、effort、provider
+- [x] 最终 binary manifest 绑定 rehearsal 后实际提交的 `mydev/` 源码、构建产物和产品身份；模型、effort、provider
       profile、deadline、价格快照、两轮顺序、schema-v2 与累计 100 USD task-budget 在正式边界前可复验。
 - [x] fake/fixture/定向门禁通过，并至少连续完成一次真实 10 题单轮 rehearsal；其 identity、工件和费用与最终正式
       命名空间隔离，不误占正式 slot。
-- [ ] 串行完成 10 题 × 2 轮共 20 个方向 1 run；不运行 Codex 对照、validation、holdout、条件补题、额外 round、
+- [x] 串行完成 10 题 × 2 轮共 20 个方向 1 run；不运行 Codex 对照、validation、holdout、条件补题、额外 round、
       E-A 或完整数据集。
-- [ ] 每个正式 run 都形成唯一的 Terminal-Bench 任务终态、API metadata/费用状态、schema-v2 body-free 方向 1
+- [x] 每个正式 run 都形成唯一的 Terminal-Bench 任务终态、API metadata/费用状态、schema-v2 body-free 方向 1
       投影与可对应的资源记录。有效失败或 reward 0 保持原语义，不因成绩重跑。
-- [ ] 20/20 投影通过 exact-schema、完整性、唯一性、来源一致性和 body-free 校验；原始 trace、prompt、响应和工具
+- [x] 20/20 投影通过 exact-schema、完整性、唯一性、来源一致性和 body-free 校验；原始 trace、prompt、响应和工具
       正文只留在规定的 ignored 私有工件中，不进入 Git、公共结果、日志或终端汇报。
-- [ ] task-budget 覆盖 v1、全部 rehearsal/诊断、所有正式 campaign、上游尝试和必要付费连接检查；最终累计不超过
+- [x] task-budget 覆盖 v1、全部 rehearsal/诊断、所有正式 campaign、上游尝试和必要付费连接检查；最终累计不超过
       `100.000000 USD`，
       reservation 与结算闭合，无法确定是否发送或余额不足时停止新请求。
-- [ ] Docker 与 Windows `C:` 前后资源事实闭合，没有来源不明对象被清理；任务自建的临时对象要么按 exact identity
+- [x] Docker 与 Windows `C:` 前后资源事实闭合，没有来源不明对象被清理；任务自建的临时对象要么按 exact identity
       精确清理，要么作为有说明的任务私有工件保留。
-- [ ] 首个可信 20/20 只输出“选择 C1/C2/C11 中一项”或“无候选”之一，并由冻结门槛、两轮分母、任务覆盖及失败/耗时
+- [x] 首个可信 20/20 只输出“选择 C1/C2/C11 中一项”或“无候选”之一，并由冻结门槛、两轮分母、任务覆盖及失败/耗时
       影响支持；无效 campaign 不输出行为候选结论。
-- [ ] 安排一次聚焦的独立验收，检查 20-slot 分母、观测三源一致性、body-free、预算与 Docker 记录、候选判定和
+- [x] 安排一次聚焦的独立验收，检查 20-slot 分母、观测三源一致性、body-free、预算与 Docker 记录、候选判定和
       Plan 054/055 隔离。普通 finding 由执行者窄修、重跑相关门禁并再次提交审查。
-- [ ] 只同步受影响的 WBS、WBS-COMPLETED、日期冻结公共结果/审计快照、本计划当前状态和一份精炼 agent log；
+- [x] 只同步受影响的 WBS、WBS-COMPLETED、日期冻结公共结果/审计快照、本计划当前状态和一份精炼 agent log；
       不在 README 或多份文档重复堆叠执行历史。
-- [ ] 只运行受影响模块的相称测试与格式化/静态检查，不运行全 workspace、CI 或 PR。最终 Plan 056 分支已提交且
+- [x] 只运行受影响模块的相称测试与格式化/静态检查，不运行全 workspace、CI 或 PR。最终 Plan 056 分支已提交且
       worktree 干净；不合并、不推送、不归档。
 
 ## 2. 范围
@@ -263,24 +263,30 @@
   bytes）与 `eval-data/build/rondo-c2be21d01ae34c971b9f75334b265191bce0acbd-x86_64-unknown-linux-musl`
   （13,552,728,113 bytes），合计释放 27,105,466,102 bytes（25.244 GiB）。不可恢复内容仅为可再生成的旧编译
   object/incremental/cache；旧源码、冻结 bundle/manifest、campaign、账本、费用、公共结果和 build metrics 均保留。
+- formal-v6 10/10 零 API preflight 全部通过；随后从第一题串行完成固定两个 round。20 个 slot 均为
+  `completed`、来源/usage/schema-v2 投影完整且 Docker receipt 为 `verified_empty`，Terminal-Bench 为
+  8 pass/12 fail；不存在条件补题、替换 slot 或额外 round。
+- formal-v6 最终为 219 attempts、`4.677962 USD`；连同 v1、rehearsal-v2/v3/v4 和 formal-v5，累计
+  483 attempts、`10.329028 USD`，reservation 0、hard stop 未触发，task budget 与 active pointer 已关闭。
+  Docker total/VHDX 增长均为 0，Windows `C:` 从 191,850,123,264 降至 191,832,576,000 bytes，最终无
+  container、volume 或 build cache。
+- body-free finalizer 只选出 C2：9 次 occurrence，影响 6 个 slot/4 个任务、3 个失败 slot，两轮均观察到，
+  impact 10108；C1/C11 未达门槛，C7 仍不可测。首个可信 20/20 后已经停止付费运行，公共结果位于
+  `eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`。
 
 ### 当前工作
 
-v1、rehearsal-v2、rehearsal-v3、完整 rehearsal-v4 与无效 formal-v5 均已按真实终态关闭并保留。formal-v6 的
-设施修复、定向回归、source/binary/runtime freeze 和新 identity 已完成；当前将提交该 identity 与资源记录，随后
-执行 10/10 零 API preflight，再从第一题干净启动正式 20-run，费用从 `5.651066 USD` 单调累计。
+Plan 056 已完成：v1、rehearsal-v2、rehearsal-v3、完整 rehearsal-v4 与无效 formal-v5 均按真实终态保留；
+formal-v6 形成首个可信 20/20、选择 C2 并关闭预算。最终定向门禁和上下文干净的独立只读验收均通过；没有
+correctness/functionality finding，不会再发送真实 API 请求。
 
 ### 本任务剩余步骤
 
-1. 提交 formal-v6 identity 与资源记录并完成 10/10 零 API preflight。
-2. 从第一题串行执行固定两轮 20/20；首个可信 20/20 形成候选或“无候选”结论后停止付费运行。
-3. 同步公共结果、累计费用、资源、WBS、WBS-COMPLETED 和精炼日志。
-4. 完成上下文干净的独立只读验收；整改真实 finding，必要时废弃受影响 campaign 并在余额内干净重跑。
-5. 提交 Plan 056 最终分支并保持 worktree 干净；不合并、不推送、不归档。
+无。候选实现或其他下游工作只交接到 WBS，并须另行授权。
 
 ### 阻塞项
 
-无阻塞。v1 不可续发或改写；新请求只能属于追加授权后的 rehearsal 或全新正式 identity，并继续遵守共享资源锁。
+无阻塞。首个可信 formal-v6 已完成，禁止再发送付费请求；v1/rehearsal/formal-v5 历史不可改写。
 
 ### 当前验收状态
 
@@ -291,8 +297,11 @@ v1、rehearsal-v2、rehearsal-v3、完整 rehearsal-v4 与无效 formal-v5 均�
   `0.569748/0.842369 USD`；v4 完整 10/10 为 111 attempts/`1.970204 USD`，累计 `4.013386 USD`。
 - formal-v5：invalid 并永久保留；20 固定 slot 中 3 个发布、第 4 个已发送后因响应前连接失败缺少可投影终态而
   关闭、16 个未启动；42 attempts、`1.637680 USD`、无候选结论。累计 264 attempts/`5.651066 USD`。
-- 最终测量：完整单轮 rehearsal、`open_error` 窄修、formal-v6 source/binary/runtime 复冻与 20-slot identity 已
-  完成；formal-v6 preflight、可信 20/20 和最终独立验收待完成。
+- formal-v6：有效 20/20，20 个 slot 全部 `completed`，8 pass/12 fail；219 attempts、`4.677962 USD`，选择 C2。
+  Plan 056 累计 483 attempts/`10.329028 USD`，reservation 0，公共 body-free 结果、预算和资源收尾完整。
+- 最终验收：预算代理 62/62、harness observation + Plan 056 54/54、Ruff 正确性选择、公共结果 `jq`、
+  20-record validator 和 `git diff --check` 均通过；上下文干净的独立只读验收结论为 PASS，无剩余
+  correctness/functionality finding。付费运行已停止。
 - 未运行：Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
 - Git：只在 Plan 056 worktree 提交；未合并、未推送、未归档，未读取或修改 Plan 054/055 私有资产。
 
@@ -317,7 +326,7 @@ formal-v6 Cargo target；v1、rehearsal-v2/v3/v4、formal-v5 与 formal-v6 六�
 Plan 056 build/preflight/paid/close metrics。旧 `2765ff8f` 和 `c2be21d0` Cargo target 已按 exact commit 清理，
 合计释放 27,105,466,102 bytes；对应源码、冻结工件与历史证据保留。复用了项目局部 `eval/.venv`、
 `eval-data/uv-cache`、既有 bwrap 资产和 v28 Terminal-Bench source。10 个 pinned Docker image 保留不清理；
-Plan 056 容器、网络、卷均已精确清空，formal-v5 Docker/VHDX 增长均为 0，Docker total 仍为 11.5 GB。
+Plan 056 容器、网络、卷均已精确清空，formal-v6 Docker/VHDX 增长均为 0，Docker total 仍为 11.5 GB。
 
 ### 交接边界
 
@@ -346,3 +355,4 @@ Plan 056 容器、网络、卷均已精确清空，formal-v5 Docker/VHDX 增长�
 | 011 | 正式测量前至少完成一次连续 10 题单轮真实 rehearsal；首个可信正式 20/20 即停止 | 高效暴露设施问题，同时防止按成绩挑选 campaign | rehearsal、正式运行 | 已采纳 |
 | 012 | 响应头前的已开始上游尝试使用精确 `open_error` 终态；不接受旧记录缺失枚举 | 既让未来连接失败可投影，又不放宽或改写 formal-v5 历史 | API metadata、投影、恢复 | 已采纳 |
 | 013 | 构建结束并复验 formal-v6 后，只用 exact-commit 入口清理两座 Plan 056 旧 Cargo target | 执行用户追加的窄清理授权，释放 25.244 GiB，同时完整保留费用、历史与冻结交付工件 | ignored 资源、交付 | 已采纳 |
+| 014 | 首个可信 formal-v6 作为最终测量并选择 C2；独立验收 PASS 后停止本任务 | formal-v6 是首个可信 20/20，C2 是唯一满足冻结门槛的候选，审查无剩余功能问题 | 结果、交付、WBS 交接 | 已采纳 |

@@ -1639,3 +1639,31 @@ rehearsal/全新正式 campaign 中继续，本节只冻结 v1 历史事实。
   holdout、E-A、完整数据集、全 workspace、CI、PR、本地模型、训练、云任务或上传。
 - Docker total 前后均为 11.5 GB，Docker Desktop VHDX 前后均为 69,467,111,424 bytes，Windows `C:` 余量从
   186,093,740,032 降至 186,090,741,760 bytes；所有 Plan 056 容器、网络和卷已清空，固定镜像保留。
+
+## 方向 1 原生观测有界复测完成（Plan 056，2026-08-22）
+
+**状态**：完成首个可信正式 20/20，选择 C2；真实 API 已停止。Plan 056 只完成测量与候选决策，没有实施行为优化。
+
+- 用户把 v1 后续任务累计预算扩为 `100.000000 USD`，允许开发性 rehearsal 和可修复设施问题后的全新 identity。
+  rehearsal-v2/v3 分别因 Docker 实时事实瞬时失败和合法 pre-runtime sandbox denial 投影缺口关闭；相应设施窄修后，
+  rehearsal-v4 连续完成 10/10，6 pass/4 fail。formal-v5 因响应头前 transport open 失败缺少可区分终态而关闭；
+  观测链新增严格 `open_error`/`non_sse` 分类，旧工件继续 fail-closed，不改写历史。
+- 修复提交 `4965d7483d9e2812ec8e39debdb5988107e8101a` 的 RONDO Local runtime bundle 经共享锁/看门狗重建和复验；
+  CLI/code-mode host/bwrap SHA-256 为 `cc523bd8...a0d5`、`ddda3ddb...1e0`、`77360cb7...2c4c`。formal-v6 lock
+  SHA-256 为 `263cc3fa...9e7f`，10/10 零 API preflight 全部通过。
+- `formal-v6` 从第一题干净执行同一 10 题两个 round，20 个 slot 全部 `completed`、来源复验通过、usage 可定价、
+  schema-v2 body-free 投影完整且 Docker receipt 为 `verified_empty`；Terminal-Bench 为 8 pass/12 fail。正式结果为
+  219 attempts、`4.677962 USD`、reservation 0。
+- 候选门槛只选出 C2：9 次 occurrence，影响 6 个 slot/4 个任务，其中 3 个失败 slot，两轮均观察到，影响值 10108；
+  C1 为 7 次 occurrence 但只影响 2 个 slot/1 个任务且 impact 0，不合格；C11 未观察到；C7 保持不可测。公共结果为
+  `eval/results/observations/plan056-direction1-bounded-observation-formal-v6-2026-08-22.json`。
+- 累计账本保留 6 个 identity：v1、rehearsal-v2/v3、rehearsal-v4、formal-v5、formal-v6，费用依次为
+  `0.631065/0.569748/0.842369/1.970204/1.637680/4.677962 USD`，合计 483 attempts、`10.329028 USD`；
+  task budget 已关闭、reservation 0、hard stop 未触发。三次 rehearsal 中两次 invalid、一次 complete；另有 v1 和
+  formal-v5 两个 invalid campaign，共 4 个 invalid campaign。
+- Docker total 前后均为 11.5 GB，VHDX 前后均为 69,467,111,424 bytes，Windows `C:` 从 191,850,123,264 降至
+  191,832,576,000 bytes；最终 0 container/volume/build-cache。按追加授权精确清理两座旧 Plan 056 Cargo target，
+  共释放 27,105,466,102 bytes；历史源码、bundle/manifest、账本、campaign、费用和公共结果均保留。
+- 定向设施回归为预算代理 62/62、harness observation 与 Plan 056 合集 54/54；构建、runtime verify、preflight 和
+  20-run 均通过相应资源门。未运行 Codex 对照、validation、holdout、E-A、完整数据集、全 workspace、CI、PR、
+  本地模型、训练、云任务或上传。独立最终验收和对应整改结果见 Plan 056 最终日志。
