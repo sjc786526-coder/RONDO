@@ -1,7 +1,7 @@
 # RONDO Multi 公共状态发布质量 Critic：研究设计与工程可行性
 
 > 文档性质：形成于 2026-08-21 的候选研究设计，用于把公共状态发布质量 Critic 讨论收敛为可落地的 ML 与工程问题；它不是 ExecPlan，也不宣告任务已经排期或实施。
-> 代码基线：主工作区 `main@94999835d36428ca37ad0a0962301faa07f962e1`；Plan 050 已合入 `main` 并通过修复后独立复验。本文中的 publication 源码事实已在该基线上重新核对。
+> 代码基线：主工作区 `main@56ec5d2520ff90c6260667ec810ee02b5de234dd`；Plan 050 已合入 `main` 并通过修复后独立复验。本文中的 publication 源码事实已在该基线上重新核对。
 > 规划边界：用户计划在 Plan 050 收口后考虑本项目，该时间前提现已满足；当前 WBS 仍写明“无已排期工作包”。正式顺序、任务编号和授权门只能由 `doc/WBS.md`、`doc/WBS/*.md` 与后续 ExecPlan 冻结。
 > 重写关系：本文吸收原始 AI 设计稿中的有效内容和用户批注，并用当前源码、训练资产与工具环境修正不可落地或互相冲突的部分；原始散点稿在完成合并审阅后删除，本文是保留的研究设计。
 > 模型边界：学生底模、教师/复核/终审模型的精确版本、上下文、训练框架、导出格式和本地推理栈均未冻结，选型完成后再写入任务合同。
@@ -20,7 +20,8 @@
 | Q± | 只允许一个导致跨过门槛的原子差异，其他 hard rubric 维度必须都合格 | 用户决定 |
 | 训练路线 | 保存同一 lineage 的 `C0 未训练 → C1 Binary → C2 Boundary/Q± → C3 Within-PASS` 四个 checkpoint；后续阶段混入前序样本，避免能力遗忘 | 用户决定 |
 | 数据切分 | 同一具体 scenario、pair、模板近改写和真实来源组不得跨 split；同类题型可以跨 split，并在各 split 保持类别覆盖 | 用户决定 |
-| 数据质检 | 教师会话生成、同能力的独立教师会话复核、不同模型家族只做最终盲横评；精确模型稍后冻结 | 角色顺序已决定；模型待选 |
+| 判定接口 | 学生服务返回可校验的内部 score；adapter 应用 validation 冻结的 threshold，再映射为产品侧 `PASS/REWRITE` | 设计原则 |
+| 数据质检 | 教师会话生成、同能力的独立教师会话复核、异构模型做最终横评；条件允许时隐藏 checkpoint 身份，但不主张严格上下文盲化 | 角色顺序已决定；模型待选 |
 | 学生模型 | 不绑定上一项目的 Ministral、8B、12K、Q4_K_M 或 llama.cpp；先完成 packet token census 和小规模未训练基线 | 待调研 |
 | 云与 Hub | RunPod MCP 可承担控制面，现有 SSH/SCP 合同承担数据面；HF CLI 用于 exact-revision 调研/下载/校验。HF Jobs 和私有 Hub 镜像不进入首版主路径 | 设计候选 |
 | 重写与故障 | 最多提供两次重写机会；最终稿非阻断发布。服务故障记为未审核，重写耗尽后仍未 PASS 记为未审核通过；状态至少对开发者可观测，不要求暴露给 Root/团队 | 用户决定 |
@@ -163,7 +164,9 @@ Event context 仍是研究问题，不是本文已经决定的 V1 必填输入�
 
 ### 4.4 输出、模式与失败语义
 
-模型侧 V1 只生成严格枚举 `PASS` 或 `REWRITE`，本地 adapter 负责拒绝多余文本、未知 token、空响应和 schema 漂移。离线评测可以读取内部 `desirability_score` 进行阈值选择；该标量同时承载以 qualification 为主体的门槛和少量稳定软偏好，但产品公开合同仍只有离散判定，不公开或宣称一个客观总体质量分。
+产品侧 V1 仍只有严格枚举 `PASS` 或 `REWRITE`，但内部服务不能只返回最终生成字符串。本文选择 **score-first** 路线：模型服务返回版本化、可校验的 `desirability_score`（或足以机械计算它的两类 logits），本地 adapter 校验 schema、模型与 scoring identity、数值有限性后应用 validation 冻结的 threshold `τ`，再映射为产品判定：`s(x) >= τ` 为 PASS，否则为 REWRITE。score 不向 Producer、Root 或 Team State 暴露，也不解释为客观总体质量。
+
+模型工件合同必须一起冻结 tokenizer、scoring/verbalizer 定义和 `τ`；runtime 只能加载匹配 identity 的组合。缺失、非有限 score、未知 scoring contract 或 identity 漂移都属于 typed infra/contract failure。另一条“只 constrained-decode `PASS/REWRITE`”路线会把实际边界固定为模型自身 argmax，不能同时声称产品使用了 validation 校准的任意 `τ`，因此不作为本文 V1。
 
 推荐按三种模式落地：
 
@@ -188,7 +191,7 @@ Rewrite 必须有 Harness-owned 硬上限，不能依赖模型自觉。V1 每个
 - 第二次提示明确这是最后一次重写机会，要求对照最近一次被拒绝的 publication 做定点修正，不删除已经合格的信息，也不为了通过而引入新事实；
 - 两次反馈都回显**最近一次**被拒绝的 canonical `title/summary/handoff`，不依赖 Producer 是否仍保留先前 transcript；不累积更早候选或整段会话，避免上下文无界增长。
 
-这仍然保持模型业务输出只有 `PASS/REWRITE`。固定提示、attempt index、剩余额度和 rejected candidate 都由 Harness 生成或回显，不是 Critic 的自由文本解释。将来只有实测证明这套反馈不足时，才研究受限 reason enum。
+这仍然保持产品业务判定只有 `PASS/REWRITE`；内部 score 只供 adapter 校准和离线评价使用。固定提示、attempt index、剩余额度和 rejected candidate 都由 Harness 生成或回显，不是 Critic 的自由文本解释。将来只有实测证明这套反馈不足时，才研究受限 reason enum。
 
 | 条件 | 已决定行为 | 必须避免 |
 |---|---|---|
@@ -199,6 +202,8 @@ Rewrite 必须有 Harness-owned 硬上限，不能依赖模型自觉。V1 每个
 | Producer/turn 取消 | 不提交、不推进 cursor，清理 cycle state | 留下幽灵 attempt |
 
 上述 fail-open 与重写上限已经由用户确认：该 gate 是协作质量优化，不是安全审批边界。`infra_bypassed` 表示没有完成审核，`exhausted_unapproved` 表示完成了审核但未通过，两者不得合并。状态至少进入开发者可观测的原生 trace、Team Lens 或指标；V1 不要求把它写入 canonical Team State、tool 正文或主动暴露给 Root/团队。
+
+最终状态与重写历史必须正交记录，不能把所有过程组合继续扩成状态枚举。建议 body-free typed trace 至少包含：`final_outcome`、`rewrite_count`（Producer 已提交的改稿数，0—2）、`previous_rewrite_verdicts`（此前阻断式 REWRITE 数，0—2）、`final_review_verdict`（`pass/rewrite/not_completed`）以及可选 infra subtype。例如“原稿 REWRITE → 改稿一 REWRITE → 最终稿 timeout”应记录 `final_outcome=infra_bypassed`、`rewrite_count=2`、`previous_rewrite_verdicts=2`、`final_review_verdict=not_completed`；这样既不把超时伪装成审核未通过，也不丢失此前两次拒绝历史。
 
 ### 4.5 并发与 stale 语义
 
@@ -275,6 +280,10 @@ Q± 采用用户提出的硬约束：同一 scenario、task state、Event contex
 
 建议 defect metadata：`vague_state`、`uncertainty_collapse`、`missing_continuation`、`scope_bloat`、`redundancy`、`low_information_density`、`internal_conflict`、`evidence_overclaim_v1`。它们用于数据校验和 error slice，不要求 runtime 模型输出。
 
+训练序列 builder 必须采用显式 input allowlist，而不是从 Candidate/Pair 对象删几个字段后直接序列化。模型输入只允许进入版本化 packet 合同内的 schema/rubric version、actor/target、canonical title/summary/handoff、选定的 Event context、evidence policy 与 overflow/stale 标记；`candidate_id/pair_id`、Binary label、defect tags、controlled dimension、pair direction/reviewer result、generator/reviewer identity、source identity 和 split 一律只能留在监督或审计 metadata。Binary target 与 input 分开构造；Pair 方向只交给 sampler/loss，不能拼入 pair 任一端的 input。
+
+Validator 必须对最终 `input_text` 的来源字段做 exact-key assertion，并用高辨识度 sentinel 做反向测试：把每个禁入字段依次填入唯一值，生成后的输入不得出现该值。这样可以机械阻断 synthetic 模板拼接造成的 label、split 或 generator leakage。
+
 ### 6.3 数据来源与质量控制
 
 数据来源按以下比例关系组织，但不在模型与 token census 前写死样本数：
@@ -292,10 +301,10 @@ independent teacher-review session（不读取生成意图）
         ↓
 validator / dedup / grouped split / freeze
         ↓
-final blind judge（不同模型家族，只用于最终横评）
+heterogeneous external judge（异构模型，只用于最终横评）
 ```
 
-精确模型稍后冻结；这里冻结的是**角色分离**。独立同模型会话可以降低自我确认，但仍不是人类 ground truth，最终报告必须把它称为 teacher reference。
+精确模型稍后冻结；这里冻结的是**角色分离**。独立同模型会话可以降低自我确认，但仍不是人类 ground truth，最终报告必须把它称为 teacher reference。异构横评按 §8.2 做条件允许范围内的身份隐藏，不声称严格上下文盲化。
 
 ### 6.4 Grouped + stratified split
 
@@ -325,17 +334,20 @@ final blind judge（不同模型家族，只用于最终横评）
 
 标准 DPO 通常比较**同一 prompt 下两个 completion**；本项目的 pair 是两个不同 publication input，因此不能只把 JSONL 塞进普通 DPO trainer 就声称学会了 qualification 排序。
 
-推荐让 Binary 与 Pair 共享一个单样本 **publication desirability score**：
+推荐让 Binary 与 Pair 共享一个单样本 **publication desirability score**。先定义两个 class logit `z_pass(x)`、`z_rewrite(x)`，再由同一个 score 同时服务训练、校准和 runtime：
 
 ```text
-s(x) = log P(PASS | x) - log P(REWRITE | x)
+s(x) = z_pass(x) - z_rewrite(x)
+decision(x; τ) = PASS if s(x) >= τ else REWRITE
 
 L = L_binary
   + λ_boundary · -log sigmoid(s(x_pass) - s(x_rewrite))
   + λ_within   · -log sigmoid(s(x_preferred_pass) - s(x_other_pass))
 ```
 
-这可以由 causal LM 的受限标签 log-prob、或带分类头的 encoder/decoder 实现；具体框架取决于学生模型及本地部署路线。这个 `s(x)` 并非纯粹的 threshold distance：Binary 与 Boundary 让 qualification 成为主体，少量 Within-PASS 则让它在合格区内部带有较弱、局部的 RONDO 稳定偏好方向。因此 V1 确实使用了一个训练方便的一维标量，但不声称所有 publication 存在客观、完整、可跨任务比较的总体质量顺序。
+这可以由 classification head 直接给出两个 logits，也可以由 causal LM 的内部 class verbalizer 给出。causal LM 路线不得默认把自然语言字符串 `PASS` 与 `REWRITE` 的整串 log-prob 直接相减：二者在选定 tokenizer 下可能包含不同数量的 token，整串概率会引入 sequence-length bias。模型选定后必须机械检查 verbalizer tokenization；优先使用两个不同且各自恰为一个 token 的内部 class（如实际验证后的 `0/1` 或 `A/B`），或者使用 classification logits。adapter 再把内部 class/score 映射为产品侧 `PASS/REWRITE`。
+
+Tokenizer exact revision、两个 verbalizer 的文本与 token ID（如使用）、scoring contract identity 和 validation 冻结的 `τ` 都属于模型工件合同。训练、离线 runner、本地服务与 Rust adapter 必须使用同一 score 定义。这个 `s(x)` 并非纯粹的 threshold distance：Binary 与 Boundary 让 qualification 成为主体，少量 Within-PASS 则让它在合格区内部带有较弱、局部的 RONDO 稳定偏好方向。因此 V1 确实使用了一个训练方便的一维标量，但不声称所有 publication 存在客观、完整、可跨任务比较的总体质量顺序。
 
 Within-PASS 必须数量少、`λ_within` 较低、偏好明确，且两端继续接受强 Binary PASS anchor；这样可以要求 `s(preferred PASS) > s(other PASS)`，同时避免把较弱一侧推过 REWRITE 门槛。`λ`、replay 比例、学习率、步数和正则化在 one-step smoke 与 validation 前冻结，不在本文猜数值。
 
@@ -344,7 +356,7 @@ Within-PASS 必须数量少、`λ_within` 较低、偏好明确，且两端继�
 选型顺序应是：先冻结 packet schema并对 synthetic/real anchors 做 exact token census，再比较少量候选的 C0 能力、训练兼容性和本地运行成本。筛选条件包括：
 
 - 能可靠区分事实、推测、未知和状态可接续性；
-- 对短结构化输出或 PASS/REWRITE log-prob 支持良好；
+- 能稳定暴露 classification logits，或在 exact tokenizer 下存在两个不同的单-token class verbalizer；
 - 训练框架能实现共享 Binary + pair desirability score，而非只有 completion preference；
 - context 覆盖真实 packet 分布，不靠截断关键状态；
 - 可在 RTX 4060 Laptop 8GB 的本地目标下达到可接受显存、延迟和稳定性；
@@ -365,11 +377,15 @@ C0、C1、C2、C3 使用同一冻结 test 和相同 decode/timeout 合同，至�
 - slices：按 defect、source、new/existing Event、终态/未完成、长度区间、evidence policy 分组；
 - 工程：input/output tokens、P50/P95 latency、峰值显存、服务可用率。
 
-若模型暴露 `desirability_score`，qualification threshold 只在 validation 按预先定义的错误代价选择并冻结；test 不回调阈值。不能通过把所有样本判 REWRITE 来制造“安全”的表面结果，也不能只看 overall accuracy 掩盖某一侧错误。
+本文 V1 要求每个 checkpoint 暴露同一定义的 `desirability_score`。各 checkpoint 的 qualification threshold 只在 validation 按同一预定义错误代价分别选择并冻结；test 不回调阈值，产品候选部署时必须携带该 checkpoint 对应的 `τ`。离线 runner 与本地 adapter 都执行完全相同的 `s(x) >= τ`，并用 parity fixture 逐项验证，不能出现“评价使用校准 score、runtime 却使用生成字符串 argmax”的双重判定器。也不能通过把所有样本判 REWRITE 来制造“安全”的表面结果，或只看 overall accuracy 掩盖某一侧错误。
 
-### 8.2 最终盲横评
+### 8.2 异构模型最终横评
 
-终审输入至少包含 teacher reference、C0、C1、C2、C3；隐藏来源并平衡展示顺序。终审模型只按同一 rubric 对回答与 pair 方向判定，不读取训练 checkpoint 名、生成意图或原始私有 trace。教师 reference 与终审都可能有偏差，因此需要同时保留机械标签指标、模型 judge 结果和少量人工 spot check，而不是把单个裁判写成绝对 ground truth。
+最终横评计划使用订阅版 Claude/Claude Code 中可用的 Opus 路线，精确版本在执行时冻结。由于实际工具会话可能已经接触 RONDO 项目设计、训练方案或候选结果，本文不要求、也不声称严格上下文隔离或严格双盲。
+
+最低合同是：使用冻结 rubric 和 held-out packet；尽量隐藏 checkpoint/teacher 身份并随机化或平衡展示顺序；不提供生成意图、训练阶段名称或原始私有 trace。若新开相对干净的会话成本很低，优先让 Judge 先独立判断 packet 与 pair，再离线比较 Sol teacher reference、Opus external reference、C0、C1、C2、C3；如果实际 Claude Code 上下文无法干净隔离，则如实记录上下文暴露，把独立 reference 降为可选步骤，不把它变成任务阻断门。
+
+教师与异构 Judge 不一致时保留 disagreement，不让 Judge 在看到五个 PASS/REWRITE 投票后被迫裁决多数。最终报告同时呈现机械标签指标、teacher agreement 和 heterogeneous-judge agreement；它们都是工程证据，不是人类 ground truth，也不得写成“严格盲测证明”。
 
 ### 8.3 能得出与不能得出的结论
 
@@ -463,12 +479,15 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 - enforce PASS 保留现有 event/version/revision/stale/dedup/evidence window 语义；
 - enforce 中额度内的 REWRITE 不创建 Event/Version、不推进 revision/wake/evidence cursor，下一次成功 publish 仍关联完整未消费 window；
 - 两次重写机会、最终非阻断检查及 cycle 清理严格命中冻结状态机；最终 REWRITE 仍只提交一次并记 `exhausted_unapproved`；
+- `final_outcome` 与 `rewrite_count/previous_rewrite_verdicts/final_review_verdict` 正交；覆盖“两次 REWRITE 后最终 timeout”等组合，不丢历史、不混淆 infra；
 - 第一次、第二次 REWRITE 返回不同的版本化固定提示，均逐字回显最近一次被拒绝的 canonical publication；不累积旧稿或泄露其他上下文；
 - timeout、连接失败和 malformed 均发布并记 `infra_bypassed`，取消则不提交；两类状态不会混淆；
 - Critic await 不持 TeamStore mutex；并发 append/新 Fact/stale view 不绕过 store 原生校验；
 - 已提交 request replay 命中 committed fast path，不重复推理；同 request identity + 不同 canonical fingerprint 仍按原合同拒绝；
 - 多 Agent 并发请求服从有界队列/并发/timeout，排队取消不串 cycle、不产生 mutation；
 - fake server 覆盖严格 schema、body 上限、no redirect、零自动重试和身份漂移；
+- score/parity fixture 覆盖单-token verbalizer 校验、非有限 score、scoring/threshold identity 漂移，以及离线 runner 与 runtime adapter 的同一 `s(x) >= τ` 结果；
+- training input builder 只接受 packet allowlist；禁入 metadata sentinel 不得出现在 Binary 或 Pair 任一端输入；
 - Team Lens 只归约 typed outcome，不泄露 publication/evidence 正文；
 - 本地真实模型 smoke 与训练/转换另行授权，不能用 fake 结果冒充。
 
@@ -483,14 +502,16 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 | Q± 非目标维度 | 其他维度全部 PASS | 采纳为 pair validator 硬约束 | **已关闭（V1）** |
 | 训练方式 | C1→C2→C3 顺序续训并保留全部权重 | 采纳；加入前序 replay 与统一 test，并诚实记录顺序/总训练量混杂 | **已关闭（V1）** |
 | Split 泛化强度 | 防具体/字面近重复即可，同类题可跨 split | 采纳 grouped + stratified，不做题型整体隔离 | **已关闭（V1）** |
-| 生成/审查/终审 | 独立教师会话复核，异构强模型只做最终横评 | 角色顺序已采纳；精确模型版本仍待选 | 角色已关闭；模型待选 |
+| 生成/审查/终审 | 独立教师会话复核，Opus 路线只做最终异构横评 | 条件允许时隐藏身份并优先独立判 packet；实际 Claude Code 上下文无法隔离时记录限制，不声称严格盲测 | 角色与口径已关闭；精确版本待选 |
 | 学生模型/context | 继续调研，不固定 | 先 packet census + C0，小候选集后冻结 | 训练授权前 |
 | Pair loss 与标量语义 | 接受共享 score，但不能声称完全没有一维尺度或把它说成客观总体质量 | 使用 single-input publication desirability score；qualification 为主体，Within-PASS 以少量、低权重、强 Binary PASS anchor 做局部塑形；普通 completion-DPO 不能直接替代 | **已关闭（V1）** |
+| Verbalizer 与 threshold | 产品仍只暴露 PASS/REWRITE，但训练、校准与 runtime 必须是同一个判定器 | 禁止直接比较不等 token 数的自然语言标签；服务返回 score/logits，adapter 应用冻结 `τ`；tokenizer/verbalizer/scoring/threshold identity 一起冻结 | **已关闭（V1）** |
+| 训练输入防泄漏 | Candidate/Pair 的标签与审计 metadata 不能进入输入 | 显式 packet allowlist + exact-key assertion + forbidden-field sentinel regression | **已关闭（V1）** |
 | Internal coherence | 同一 publication packet 内不能自相矛盾 | summary、handoff 以及最终选定的 Event context projection 之间存在关键冲突时 REWRITE；不扩张为外部事实调查 | **已关闭（V1）** |
 | Event context | 仍需结合真实数据调研，不在研究稿定死 | new Event 至少使用 title；existing Event 对“不带历史/最近 N 条 Version/更窄投影”做 token census 与小型消融后再冻结 | **待调研** |
 | REWRITE wire result | 原稿只写 PASS/REWRITE | 倾向 tagged published/rewrite union，需检查现有消费者 | Runtime ExecPlan |
 | 最大重写次数 | 最多允许 Producer 重写两次 | 前两次 REWRITE 可阻断当前 draft；第二次改稿做最终非阻断检查并照常发布 | **已关闭（V1）** |
-| 耗尽/infra fallback | 都继续发布，但开发者必须能区分“未审核”和“审核未通过”；不要求暴露给 Root/团队 | 最终 REWRITE 记 `exhausted_unapproved`；服务/contract 故障记 `infra_bypassed`；进入原生 trace/Team Lens/指标，不污染 canonical authored state | **已关闭（V1）** |
+| 耗尽/infra fallback | 都继续发布，但开发者必须能区分“未审核”和“审核未通过”；不要求暴露给 Root/团队 | 最终 outcome 与 rewrite history 正交；服务/contract 故障记 `infra_bypassed`，此前 REWRITE 次数另存 typed metadata，不污染 canonical authored state | **已关闭（V1）** |
 | runtime rewrite feedback | V1 不需要 Critic 自由文本理由；两次重写提示应不同，并带回最近一次 Producer 输出 | Harness 使用两个版本化固定模板，回显最近一次被拒绝的 canonical publication，不累积历史；受限 reason enum 仅在实测不足时再研究 | **已关闭（V1）** |
 | 部署格式 | 倾向本地量化，但模型未定 | GGUF/llama.cpp 是已验证经验而非必选；模型确定后再选 | 本地资格计划 |
 
@@ -502,6 +523,9 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 | Pair 伪偏好 | 多维 trade-off 被强排，模型学风格而非门槛 | Q 原子差异 validator；mixed case 仅 Binary；Within-PASS 双方先独立 PASS |
 | 连续训练遗忘 | C2/C3 qualification 下降 | 前序 replay、每阶段 checkpoint、同一 test；允许部署 C1/C2而非 C3 |
 | Pair 目标错配 | 用普通 DPO 比较不同输入，runtime Binary 没共享 score | 显式 desirability `s(x)` + Binary/rank loss；qualification 为主体；one-step gradient/overfit smoke |
+| Score 判定漂移 | 不等长 verbalizer 产生长度偏差，或 validation 用 `τ`、runtime 用字符串 argmax | 单-token class/classification logits；冻结 tokenizer/scoring/`τ` identity；runner/adapter parity fixture |
+| 训练输入泄漏 | label、defect、split 或 generator metadata 被模板拼入输入 | 显式 packet allowlist、exact-key validator、逐禁入字段 sentinel 回归 |
+| 横评上下文锚定 | Judge 已见项目或候选结果，却被报告为严格盲测 | 异构外部横评；尽力隐藏身份与平衡顺序；记录上下文限制，不主张严格盲化 |
 | Evidence 过度承诺 | 增量 Fact 被误当完整证明，小模型猜逻辑链 | V1 不读 body、不做 entailment，能力声明明确 |
 | 审写不一致 | Critic 通过未截断文本，store 写入截断文本 | 共用 canonicalization 纯函数或拒绝超长 |
 | 并发漂移 | 若采用 Event context，Critic 审查时的 projection 与 commit 时不同 | revision metadata + 原生 stale 语义；必要时一次有限 recheck |
@@ -528,4 +552,4 @@ HF 私有 repo 可作为可选的工件镜像，但现有仓库尚没有 Publica
 - RunPod 训练/回收模式：`training/local-approval-l6/README.md`、`stage2-runbook.md`、`eval/rondo_eval/local_approval/l6_training.py`；
 - 本地推理历史边界：`doc/WBS/local-approval-model.md`、`eval/rondo_eval/local_approval/client.py`、`launcher.py`；
 
-收束判断：公共状态发布质量 Critic 是一个适合 RONDO 的小型 ML 工程问题，但当前最有价值的第一步不是扩大模型与训练矩阵，而是把真实 `team_publish` packet、V1 Evidence 边界、Binary/Pair 共享 desirability score 和 runtime fallback 写成一致合同。完成这些之后，现有 synthetic 数据管线、RunPod 单 Pod 状态机、HF exact-revision 下载、训练 receipt、转换验真、本地 launcher 经验和 Team Lens 都能提供高复用价值；复用时应保留机制，不能把上一项 Local approval 的任务专用模型、schema 和部署参数原样搬进 RONDO Multi。
+收束判断：公共状态发布质量 Critic 是一个适合 RONDO 的小型 ML 工程问题，但当前最有价值的第一步不是扩大模型与训练矩阵，而是把真实 `team_publish` packet、V1 Evidence 边界、Binary/Pair 共享且可校准的 desirability score、runtime threshold 和 fallback 写成一致合同。完成这些之后，现有 synthetic 数据管线、RunPod 单 Pod 状态机、HF exact-revision 下载、训练 receipt、转换验真、本地 launcher 经验和 Team Lens 都能提供高复用价值；复用时应保留机制，不能把上一项 Local approval 的任务专用模型、schema 和部署参数原样搬进 RONDO Multi。
