@@ -158,8 +158,11 @@ v23—v26 在零 API 阶段关闭；v27 完成 wire 与首个产品槽后暴露�
 上游 attempt 都有可靠 usage，`actual_usd` 仍为未知；任务 envelope 已关闭，无 active identity 或未结 reservation。
 所有有效 pass、reward 0 与任务失败均原样保留，没有按成绩重跑。
 
-后续使用稳定入口创建新 baseline 时仍须另立 identity、重新冻结产品 bundle、comparison、价格与当次预算，并取得
-对应真实 API/Docker 授权；本次 400 USD 授权和余额不自动延续。具体历史合同与执行边界见
+后续使用 `just eval-plan051 initialize|prepare|preflight|run|resume|finalize|compare` 创建新 baseline 时，须显式提供
+新 campaign/batch、Local source commit 与 manifest、comparison、价格日期和独立 task-budget ID/cap，并取得对应
+真实 API/Docker 授权；新 envelope 使用独立路径，付费确认绑定其 task-budget ID，本次 400 USD 授权和余额不自动
+延续。终态会生成单独的相对基线 JSON：自动选择同一 results worktree 中最新、同题集的正式 schema v7 前驱，首次
+v28 则明确记为 `first_formal_baseline`，不改原 aggregate。具体历史合同与执行边界见
 `plan/051-direction0-schema-v7-first-formal-canary-execplan.md`。
 
 ## 硬约束

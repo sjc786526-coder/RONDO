@@ -42,9 +42,6 @@ from ..frozen_model_catalog import (
 from .runner import PreparedTerminalBenchRun
 from .scoring import TaskOutcome
 from .tasksets import FrozenCanaryCatalog, FrozenTask, load_frozen_canary_catalog
-from .task_budget import TASK_BUDGET_ID
-
-
 LEGACY_CAMPAIGN_CAP_USD = Decimal("600.000000")
 LEGACY_CAMPAIGN_MAX_RUNS = 161
 HISTORICAL_SCHEMA_V2_CAMPAIGN_CAP_USD = Decimal("700.000000")
@@ -55,15 +52,13 @@ CAMPAIGN_PRIOR_ESTIMATED_USD = Decimal("1136.113528")
 CAMPAIGN_MAX_RUNS = 321
 RUN_CAP_USD = Decimal("40.000000")
 SOL_MAX_LEGAL_REQUEST_RESERVATION_USD = Decimal("18.885000")
-# Schema v7 is deliberately outside the historical P2 campaign envelope.  It
-# is the first identity in the Plan 051 task envelope, whose cap covers every
-# successor rather than being reset per campaign.
-PLAN051_TASK_BUDGET_CAP_USD = Decimal("400.000000")
-PLAN051_MODEL_ID = "gpt-5.6-terra"
-PLAN051_MAIN_REASONING_EFFORT = "medium"
-PLAN051_GUARDIAN_REASONING_EFFORT = "low"
-PLAN051_RONDO_SOURCE_COMMIT = "54f62e5f7e86a7ab0d4f8d788eafec7176809395"
-PLAN051_CODEX_SOURCE_COMMIT = "be6e8eac029b183056b7e4402879f15d2c85f61b"
+# Schema v7 is outside the historical P2 campaign envelope.  The direction-0
+# comparison inputs stay fixed, while each formal baseline supplies its own
+# Local source/bundle identity and independently authorized task envelope.
+FAIR_COMPARISON_MODEL_ID = "gpt-5.6-terra"
+FAIR_COMPARISON_MAIN_REASONING_EFFORT = "medium"
+FAIR_COMPARISON_GUARDIAN_REASONING_EFFORT = "low"
+FROZEN_CODEX_SOURCE_COMMIT = "be6e8eac029b183056b7e4402879f15d2c85f61b"
 LEGACY_UPSTREAM_TIMEOUT_SECONDS = Decimal("90.000")
 CAMPAIGN_UPSTREAM_TIMEOUT_SECONDS = Decimal("180.000")
 BASE_ROUNDS = (
@@ -1630,7 +1625,7 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
         or value["baseline"] != expected_baseline
         or (
             schema_version == FAIR_COMPARISON_SCHEMA_VERSION
-            and not _valid_plan051_bundle_contract(value["bundles"])
+            and not _valid_fair_bundle_contract(value["bundles"])
         )
     ):
         raise BaselineError("campaign lock differs from the frozen B7 contract")
@@ -1651,16 +1646,17 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     ):
         raise BaselineError("campaign selected profile hashes are invalid")
     if comparison is not None and (
-        selected.get("main_model") != PLAN051_MODEL_ID
-        or selected.get("guardian_model") != PLAN051_MODEL_ID
-        or selected.get("requested_main_model") != PLAN051_MODEL_ID
-        or selected.get("effective_main_model") != PLAN051_MODEL_ID
-        or selected.get("requested_guardian_model") != PLAN051_MODEL_ID
-        or selected.get("effective_guardian_model") != PLAN051_MODEL_ID
-        or selected.get("main_effort") != PLAN051_MAIN_REASONING_EFFORT
-        or selected.get("guardian_effort") != PLAN051_GUARDIAN_REASONING_EFFORT
+        selected.get("main_model") != FAIR_COMPARISON_MODEL_ID
+        or selected.get("guardian_model") != FAIR_COMPARISON_MODEL_ID
+        or selected.get("requested_main_model") != FAIR_COMPARISON_MODEL_ID
+        or selected.get("effective_main_model") != FAIR_COMPARISON_MODEL_ID
+        or selected.get("requested_guardian_model") != FAIR_COMPARISON_MODEL_ID
+        or selected.get("effective_guardian_model") != FAIR_COMPARISON_MODEL_ID
+        or selected.get("main_effort") != FAIR_COMPARISON_MAIN_REASONING_EFFORT
+        or selected.get("guardian_effort")
+        != FAIR_COMPARISON_GUARDIAN_REASONING_EFFORT
     ):
-        raise BaselineError("fair-comparison campaign model or effort differs from Plan 051")
+        raise BaselineError("fair-comparison campaign model or effort differs")
     continuation = _parse_continuation_references(
         value.get("continuation", []),
         schema_version=schema_version,
@@ -1709,29 +1705,27 @@ def load_campaign_identity_path(paths: RepoPaths, relative_path: Path) -> Campai
     return identity
 
 
-def _valid_plan051_bundle_contract(value: object) -> bool:
-    """Validate the v7 bundle binding without changing historical lock shape."""
+def _valid_fair_bundle_contract(value: object) -> bool:
+    """Validate each v7 bundle binding without fixing the Local source commit."""
 
     if not isinstance(value, dict) or set(value) != {"rondo", "codex"}:
         return False
-    expected_commits = {
-        "rondo": PLAN051_RONDO_SOURCE_COMMIT,
-        "codex": PLAN051_CODEX_SOURCE_COMMIT,
-    }
-    for side, source_commit in expected_commits.items():
+    for side in ("rondo", "codex"):
         bundle = value[side]
+        source_commit = (
+            bundle.get("source_commit") if isinstance(bundle, dict) else None
+        )
         if (
             not isinstance(bundle, dict)
             or set(bundle) != {"manifest_path", "manifest_sha256", "source_commit"}
             or not isinstance(bundle["manifest_path"], str)
             or not bundle["manifest_path"].startswith("eval-data/bin/")
             or _SHA256.fullmatch(str(bundle["manifest_sha256"])) is None
-            or bundle["source_commit"] != source_commit
+            or _GIT_OBJECT.fullmatch(str(source_commit)) is None
+            or (side == "codex" and source_commit != FROZEN_CODEX_SOURCE_COMMIT)
         ):
             return False
-    # A v7 Local identity must be constructed from the new Local source, never
-    # the cb652e1 bundle copied by the v22 generator.
-    return "cb652e1" not in str(value["rondo"]["manifest_path"])
+    return True
 
 
 def _parse_comparison_block(
@@ -1987,9 +1981,9 @@ def _valid_campaign_budget(
     }.get(schema_version, set())
     if schema_version == FAIR_COMPARISON_SCHEMA_VERSION:
         # Campaign arithmetic continues to use the established cap/prior names,
-        # while the explicit task fields bind all v7 successors to one 400 USD
-        # envelope.  The reservation is model-priced at generation time, so it
-        # cannot retain the old Sol constant.
+        # while the explicit task fields bind each v7 repair chain to its own
+        # authorization.  The reservation is model-priced at generation time,
+        # so it cannot retain the old Sol constant.
         try:
             task_cap = Decimal(value["task_budget_cap_usd"])
             task_prior = Decimal(value["task_budget_prior_estimated_usd"])
@@ -1997,8 +1991,13 @@ def _valid_campaign_budget(
         except (ArithmeticError, TypeError):
             return False
         cap_valid = (
-            value["task_budget_id"] == TASK_BUDGET_ID
-            and task_cap == PLAN051_TASK_BUDGET_CAP_USD
+            isinstance(value["task_budget_id"], str)
+            and _MODEL_SLUG.fullmatch(value["task_budget_id"]) is not None
+            and task_cap.is_finite()
+            and task_prior.is_finite()
+            and reservation.is_finite()
+            and task_cap > 0
+            and task_cap == task_cap.quantize(Decimal("0.000001"))
             and task_prior >= Decimal(0)
             and task_prior < task_cap
             and cap == task_cap

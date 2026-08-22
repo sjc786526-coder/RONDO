@@ -186,7 +186,10 @@
 - 已从 clean detached `54f62e5...` 源码经共享构建锁和看门狗冻结并完整复验新的 Local runtime bundle；现有
   Codex `v0.147.0@be6e8eac...` bundle 自包含校验通过，因此未重建上游。
 - schema v7 显式 bundle、Terra effort 投影、wire 有界重试/恢复、跨 identity 400 USD envelope、1/0 USD fallback
-  与稳定入口已落地；初轮 243/243、最终相关集合 346/346 无 API focused tests 通过，入口默认返回 idle 且零请求。
+  与稳定入口已落地。外部独立验收随后发现入口仍把首次 Local commit/Plan 051 envelope 固定在 loader 中；整改后
+  `just eval-plan051 initialize|prepare|preflight|run|resume|finalize|compare` 已贯通显式 campaign/batch、新 Local
+  commit/manifest、价格日期和独立任务预算。Plan 051 保留历史预算路径，后续授权按 task-budget ID 使用新文件，不能
+  覆盖或继承本轮余额；默认入口仍为 idle 且零请求。
 - 依次冻结并关闭 v23—v28 六个 identity：v23—v26 在零 API 阶段暴露并关闭本地 preflight/runner 适配缺口；
   v27 的十题双侧 stub preflight 通过，正式 wire 与首个 RONDO 槽可靠结算后暴露 schema v7 结果发布缺口，按
   无新请求恢复路径结算 `$0.270445` 并保持旧结果只读；修复后由全新 v28 接续。
@@ -204,12 +207,15 @@
 
 ### 当前工作
 
-实现、无 API 预检、正式 API、聚合、结算、结果发布与资源清理均已完成。首次干净上下文审查发现并促成修复终态
-active pointer；同一审查者复验确认默认 `status=idle`、直接相关 60/60 通过，最终结论为 `PASS`，无剩余 finding。
+实现、无 API 预检、正式 API、聚合、结算、结果发布与资源清理均已完成。任务内首次干净上下文审查发现并促成修复
+active pointer；外部独立验收提交 `de2cc24` 又发现稳定重跑入口仍固定首次 Local/预算，以及合法 `failed` 会在闭合前
+返回 2。两项均已复现并整改：新任务输入与方向 0 稳定合同分离，`passed`/`failed` 均在返回各自退出码前闭合 envelope
+并退役 pointer；v28 另外发布不改原 aggregate 字节的 `first_formal_baseline` 派生比较。相关 9 模块 357/357 通过，
+正在等待外部审查者复验。
 
 ### 本任务剩余步骤
 
-无。任务进入只读交付状态，等待用户后续决定是否合并、推送或归档分支。
+只剩外部独立审查者对本轮整改的轻量复验；若通过，任务重新进入只读交付状态。仍不合并、推送或归档分支。
 
 ### 阻塞项
 
@@ -218,14 +224,15 @@ active pointer；同一审查者复验确认默认 `status=idle`、直接相关 
 
 ### 当前验收状态
 
-- 实现与无 API 定向门禁：完成；最终相关 Python 回归 346/346（含 pair/results、预算、identity、formal entry、
-  发布与运行中安全退役），语法编译与 diff whitespace 检查通过。全 workspace、CI、PR、validation/holdout 均未运行。
+- 实现与无 API 定向门禁：整改完成；相关 9 模块 Python 回归 357/357（含新任务 budget/identity、统一入口、
+  passed/failed 终态、相对基线、pair/results 与历史 v28 loader）通过。语法编译与 diff whitespace 在最终提交前复验；
+  全 workspace、CI、PR、validation/holdout 均未运行。
 - Docker/stub 与正式 API：完成；v28 为有效正式基线，所有有效 pass、reward 0 与任务失败均原样保留。
 - 预算、归档与清理：完成；任务累计 `$9.412888`，无 active identity、running slot、容器、volume 或任务网络。
-- Git：执行 worktree 与 distinct results worktree 的任务内提交均已完成且 clean；未修改、合并或推送 `main`，
-  未归档分支。
-- 独立审查：首次审查的唯一 active-pointer finding 已修复；同一干净上下文审查者复验 `PASS`，无剩余
-  correctness/functionality finding。
+- Git：v23—v28 lock、raw result、ledger 与原 aggregate 保持只读；本轮只新增派生 comparison 和入口整改，等待提交。
+  未修改、合并或推送 `main`，未归档分支。
+- 独立审查：任务内干净上下文审查的 active-pointer finding 已修复并曾获 `PASS`；外部独立验收的两个新 finding
+  已完成整改，等待同一外部审查者复验。
 
 ### 主工作区 ignored 资产
 
@@ -263,3 +270,5 @@ worktree，那是 tracked result 的既有架构要求，不是把结果直接�
 | 006 | 允许现有发布合同所需的 task-owned distinct results worktree | 当前 baseline 明确拒绝把 tracked 结果写回执行 harness checkout；保持 clean harness 与 durable 发布 | worktree、结果提交 | 已采纳 |
 | 007 | 本轮只提交任务 worktree，不合并或推送 | 用户对本次规划和后续执行给出的最新 Git 交付边界优先于任务原稿中的最终交付条目 | Git 交付 | 已采纳 |
 | 008 | 双方 main 固定 `medium`，双方 Guardian 固定 `low` | 用户在执行中明确修订原 main/Guardian 均为 medium 的合同；冻结 Codex 本身也会为 Guardian 选择 low | provider projection、identity、preflight、wire、正式运行 | 已采纳 |
+| 009 | 后续正式 baseline 用显式 Local commit/manifest、campaign/batch、价格日期和新 task-budget ID/cap 初始化 | 每次运行输入不能固化为首次 Plan 051 常量；新授权不得覆盖或复用已关闭的 400 USD envelope | loader、identity、task budget、统一入口 | 已采纳 |
+| 010 | 相对基线从同一 results worktree 自动选择最新兼容 schema v7 正式结果，首轮输出 `first_formal_baseline` | 比人工传入前驱路径更小且可避免选错；独立文件不改历史 aggregate 字节 | aggregate、results、compare | 已采纳 |

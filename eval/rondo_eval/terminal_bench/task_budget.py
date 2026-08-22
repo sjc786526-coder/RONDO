@@ -1,4 +1,4 @@
-"""Crash-safe Plan 051 task-wide budget envelope.
+"""Crash-safe task-wide budget envelopes for formal direction-0 baselines.
 
 The per-campaign proxy remains responsible for individual request admission and
 settlement.  This small sidecar records the one fact it cannot know: the
@@ -23,6 +23,7 @@ from typing import Iterator, Mapping
 TASK_BUDGET_ID = "plan-051-direction0-schema-v7-canary"
 TASK_BUDGET_CAP_USD = Decimal("400.000000")
 TASK_BUDGET_RELPATH = Path("eval-data/budgets/plan-051-task-envelope.json")
+_TASK_BUDGET_DIRECTORY = Path("eval-data/budgets")
 _SCHEMA_VERSION = 1
 _MONEY_QUANTUM = Decimal("0.000001")
 _IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
@@ -30,15 +31,28 @@ _TERMINAL_STATUSES = frozenset({"passed", "failed", "blocked", "invalid"})
 
 
 class TaskBudgetError(ValueError):
-    """Raised when the cross-identity Plan 051 budget state is unsafe."""
+    """Raised when a cross-identity formal-task budget state is unsafe."""
 
 
-def task_budget_path(common_root: Path) -> Path:
-    """Return the one ignored, shared Plan 051 envelope location."""
+def task_budget_path(
+    common_root: Path, task_budget_id: str = TASK_BUDGET_ID
+) -> Path:
+    """Return the ignored envelope path for one independently authorized task.
+
+    Plan 051 retains its historical filename.  Every later authorization is
+    namespaced by its explicit task-budget ID, so creating a new baseline can
+    never overwrite or reopen the Plan 051 envelope.
+    """
 
     if not isinstance(common_root, Path) or common_root.is_symlink():
         raise TaskBudgetError("task budget common root is unsafe")
-    return common_root / TASK_BUDGET_RELPATH
+    _validate_task_budget_id(task_budget_id)
+    relative = (
+        TASK_BUDGET_RELPATH
+        if task_budget_id == TASK_BUDGET_ID
+        else _TASK_BUDGET_DIRECTORY / f"{task_budget_id}.json"
+    )
+    return common_root / relative
 
 
 @dataclass(frozen=True)
@@ -63,32 +77,53 @@ class TaskBudgetIdentity:
         }
 
 
-def start_task_budget(path: Path, *, active: TaskBudgetIdentity) -> dict[str, object]:
-    """Create the first schema-v7 identity at a zero prior exactly once."""
+def start_task_budget(
+    path: Path,
+    *,
+    active: TaskBudgetIdentity,
+    task_budget_id: str = TASK_BUDGET_ID,
+    cap_usd: Decimal = TASK_BUDGET_CAP_USD,
+) -> dict[str, object]:
+    """Create the first identity for one authorization at zero prior once."""
 
     active.validate()
+    _validate_task_budget_id(task_budget_id)
+    cap = _require_positive_money(cap_usd, "task budget cap")
     with _locked(path):
         if path.exists() or path.is_symlink():
             raise TaskBudgetError("task budget envelope already exists")
         state: dict[str, object] = {
             "schema_version": _SCHEMA_VERSION,
-            "task_budget_id": TASK_BUDGET_ID,
-            "cap_usd": _money_text(TASK_BUDGET_CAP_USD),
+            "task_budget_id": task_budget_id,
+            "cap_usd": _money_text(cap),
             "prior_settled_usd": _money_text(Decimal(0)),
             "active_identity": active.to_dict(prior_settled_usd=Decimal(0)),
             "closed_identities": [],
             "hard_stop": False,
         }
-        _validate_state(state)
+        _validate_state(
+            state,
+            expected_task_budget_id=task_budget_id,
+            expected_cap_usd=cap,
+        )
         _atomic_write(path, state)
         return _clone(state)
 
 
-def load_task_budget(path: Path) -> dict[str, object]:
+def load_task_budget(
+    path: Path,
+    *,
+    task_budget_id: str | None = None,
+    cap_usd: Decimal | None = None,
+) -> dict[str, object]:
     """Load and validate an existing envelope without taking a writer lock."""
 
     value = _read_json(path)
-    _validate_state(value)
+    _validate_state(
+        value,
+        expected_task_budget_id=task_budget_id,
+        expected_cap_usd=cap_usd,
+    )
     return _clone(value)
 
 
@@ -97,12 +132,18 @@ def verify_active_identity(
     *,
     active: TaskBudgetIdentity,
     prior_settled_usd: Decimal,
+    task_budget_id: str = TASK_BUDGET_ID,
+    cap_usd: Decimal = TASK_BUDGET_CAP_USD,
 ) -> dict[str, object]:
     """Fail closed unless the runtime identity and prior match the envelope."""
 
     active.validate()
     expected_prior = _require_money(prior_settled_usd, "runtime prior settled")
-    state = load_task_budget(path)
+    state = load_task_budget(
+        path,
+        task_budget_id=task_budget_id,
+        cap_usd=cap_usd,
+    )
     if state["hard_stop"]:
         raise TaskBudgetError("task budget has reached its hard stop")
     stored = _parse_active(state["active_identity"])
@@ -119,6 +160,8 @@ def roll_forward_task_budget(
     predecessor_terminal_status: str,
     cumulative_settled_usd: Decimal,
     successor: TaskBudgetIdentity,
+    task_budget_id: str = TASK_BUDGET_ID,
+    cap_usd: Decimal = TASK_BUDGET_CAP_USD,
 ) -> dict[str, object]:
     """Atomically close the active terminal identity and activate its successor.
 
@@ -133,6 +176,8 @@ def roll_forward_task_budget(
         predecessor_terminal_status=predecessor_terminal_status,
         cumulative_settled_usd=cumulative_settled_usd,
         successor=successor,
+        task_budget_id=task_budget_id,
+        cap_usd=cap_usd,
     )
 
 
@@ -142,6 +187,8 @@ def close_task_budget(
     active: TaskBudgetIdentity,
     terminal_status: str,
     cumulative_settled_usd: Decimal,
+    task_budget_id: str = TASK_BUDGET_ID,
+    cap_usd: Decimal = TASK_BUDGET_CAP_USD,
 ) -> dict[str, object]:
     """Close the final identity, retaining all settled cost for reporting."""
 
@@ -151,6 +198,8 @@ def close_task_budget(
         predecessor_terminal_status=terminal_status,
         cumulative_settled_usd=cumulative_settled_usd,
         successor=None,
+        task_budget_id=task_budget_id,
+        cap_usd=cap_usd,
     )
 
 
@@ -159,12 +208,13 @@ def task_budget_status(state: Mapping[str, object]) -> dict[str, object]:
 
     _validate_state(state)
     prior = _parse_money(state["prior_settled_usd"], "prior settled")
+    cap = _parse_money(state["cap_usd"], "cap")
     active = state["active_identity"]
     return {
-        "task_budget_id": TASK_BUDGET_ID,
-        "cap_usd": _money_text(TASK_BUDGET_CAP_USD),
+        "task_budget_id": state["task_budget_id"],
+        "cap_usd": _money_text(cap),
         "prior_settled_usd": _money_text(prior),
-        "remaining_usd": _money_text(TASK_BUDGET_CAP_USD - prior),
+        "remaining_usd": _money_text(cap - prior),
         "active_identity": _clone(active) if active is not None else None,
         "closed_identity_count": len(state["closed_identities"]),
         "hard_stop": state["hard_stop"],
@@ -181,18 +231,26 @@ def _close_or_roll(
     predecessor_terminal_status: str,
     cumulative_settled_usd: Decimal,
     successor: TaskBudgetIdentity | None,
+    task_budget_id: str,
+    cap_usd: Decimal,
 ) -> dict[str, object]:
     predecessor.validate()
     if predecessor_terminal_status not in _TERMINAL_STATUSES:
         raise TaskBudgetError("predecessor identity is not terminal")
     total = _require_money(cumulative_settled_usd, "cumulative settled")
+    _validate_task_budget_id(task_budget_id)
+    expected_cap = _require_positive_money(cap_usd, "task budget cap")
     if successor is not None:
         successor.validate()
         if successor == predecessor:
             raise TaskBudgetError("successor task budget identity duplicates predecessor")
     with _locked(path):
         state = _read_json(path)
-        _validate_state(state)
+        _validate_state(
+            state,
+            expected_task_budget_id=task_budget_id,
+            expected_cap_usd=expected_cap,
+        )
         if state["hard_stop"]:
             raise TaskBudgetError("task budget has reached its hard stop")
         active = _parse_active(state["active_identity"])
@@ -201,7 +259,7 @@ def _close_or_roll(
         prior = _parse_money(state["prior_settled_usd"], "prior settled")
         if total < prior:
             raise TaskBudgetError("cumulative settled cost cannot decrease")
-        if total > TASK_BUDGET_CAP_USD:
+        if total > expected_cap:
             raise TaskBudgetError("cumulative settled cost exceeds the task budget cap")
         closed = state["closed_identities"]
         assert isinstance(closed, list)
@@ -213,7 +271,7 @@ def _close_or_roll(
         if (predecessor.campaign_id, predecessor.batch_id) in known:
             raise TaskBudgetError("predecessor task budget identity is already closed")
         if successor is not None:
-            if total >= TASK_BUDGET_CAP_USD:
+            if total >= expected_cap:
                 raise TaskBudgetError("task budget cap leaves no successor capacity")
             known_campaign_ids = {campaign_id for campaign_id, _ in known}
             known_batch_ids = {batch_id for _, batch_id in known}
@@ -237,13 +295,22 @@ def _close_or_roll(
         state["active_identity"] = (
             successor.to_dict(prior_settled_usd=total) if successor is not None else None
         )
-        state["hard_stop"] = total == TASK_BUDGET_CAP_USD
-        _validate_state(state)
+        state["hard_stop"] = total == expected_cap
+        _validate_state(
+            state,
+            expected_task_budget_id=task_budget_id,
+            expected_cap_usd=expected_cap,
+        )
         _atomic_write(path, state)
         return _clone(state)
 
 
-def _validate_state(value: Mapping[str, object]) -> None:
+def _validate_state(
+    value: Mapping[str, object],
+    *,
+    expected_task_budget_id: str | None = None,
+    expected_cap_usd: Decimal | None = None,
+) -> None:
     required = {
         "schema_version",
         "task_budget_id",
@@ -255,19 +322,25 @@ def _validate_state(value: Mapping[str, object]) -> None:
     }
     if not isinstance(value, Mapping) or set(value) != required:
         raise TaskBudgetError("task budget envelope schema differs")
-    if (
-        value["schema_version"] != _SCHEMA_VERSION
-        or value["task_budget_id"] != TASK_BUDGET_ID
-    ):
+    if value["schema_version"] != _SCHEMA_VERSION:
         raise TaskBudgetError("task budget envelope identity differs")
-    if _parse_money(value["cap_usd"], "cap") != TASK_BUDGET_CAP_USD:
-        raise TaskBudgetError("task budget cap differs from the Plan 051 contract")
+    task_budget_id = value["task_budget_id"]
+    _validate_task_budget_id(task_budget_id)
+    cap = _require_positive_money(_parse_money(value["cap_usd"], "cap"), "cap")
+    if expected_task_budget_id is not None:
+        _validate_task_budget_id(expected_task_budget_id)
+        if task_budget_id != expected_task_budget_id:
+            raise TaskBudgetError("task budget envelope identity differs")
+    if expected_cap_usd is not None and cap != _require_positive_money(
+        expected_cap_usd, "expected task budget cap"
+    ):
+        raise TaskBudgetError("task budget envelope cap differs")
     prior = _parse_money(value["prior_settled_usd"], "prior settled")
-    if prior > TASK_BUDGET_CAP_USD:
+    if prior > cap:
         raise TaskBudgetError("task budget prior exceeds the cap")
     if (
         not isinstance(value["hard_stop"], bool)
-        or value["hard_stop"] != (prior == TASK_BUDGET_CAP_USD)
+        or value["hard_stop"] != (prior == cap)
     ):
         raise TaskBudgetError("task budget hard-stop state is inconsistent")
     active_value = value["active_identity"]
@@ -348,6 +421,18 @@ def _require_money(value: Decimal, label: str) -> Decimal:
     if value != value.quantize(_MONEY_QUANTUM):
         raise TaskBudgetError(f"{label} must have six decimal places")
     return value
+
+
+def _require_positive_money(value: Decimal, label: str) -> Decimal:
+    parsed = _require_money(value, label)
+    if parsed == 0:
+        raise TaskBudgetError(f"{label} must be positive")
+    return parsed
+
+
+def _validate_task_budget_id(value: object) -> None:
+    if not isinstance(value, str) or _IDENTITY.fullmatch(value) is None:
+        raise TaskBudgetError("task budget ID is invalid")
 
 
 def _parse_money(value: object, label: str) -> Decimal:

@@ -1521,6 +1521,9 @@ Guardian 为 `gpt-5.6-terra/low`。
 
 - schema v7 增加显式 runtime bundle、跨 successor 的 400 USD task envelope、可靠 usage / 1 USD fallback /
   provably-unsent 0 USD 三分法、wire 有界重试、崩溃恢复与稳定 `just eval-plan051` 入口；默认动作不发送请求。
+  外部验收发现首版入口仍把 Local commit 与唯一 Plan 051 envelope 固定在 loader 中；收口后同一入口可显式初始化
+  新 Local commit/manifest、campaign/batch、价格日期和独立授权 task budget，新 envelope 不覆盖 Plan 051 历史，
+  付费确认绑定新 budget ID。
   Local bundle 走共享构建锁与看门狗从冻结源码构建，manifest SHA-256 为 `de414d3f...`；Codex 既有 bundle
   manifest `e13a9d0f...` 自包含校验通过，未重建或升级上游。
 - v23—v26 在零 API preflight 阶段依次暴露并关闭本地 projection/verifier/supervisor 适配缺口，费用均为 0。
@@ -1536,5 +1539,9 @@ Guardian 为 `gpt-5.6-terra/low`。
   受影响的无 API harness 回归初轮 243/243、最终相关集合 346/346 通过；终态 finalizer 会在预算确认关闭后原子
   清空 active pointer，默认入口复验为 `idle` / 0 requests。未运行全 workspace、CI、PR、validation、holdout、
   本地模型或训练。
+- 合法 `failed` 正式基线现与 `passed` 一样先确认发布、关闭任务 envelope 并原子退役 active pointer，再分别返回
+  2/0；`blocked` 仍保留给 successor。结果侧新增独立 relative-baseline JSON，v28 明确为无前驱的
+  `first_formal_baseline`，原 v28 aggregate SHA-256 `53e9b4b3...` 保持不变。整改相关 9 模块 357/357 通过，未重跑
+  Docker、Cargo、真实 API 或全 workspace。
 - 干净上下文独立审查首次发现上述 active-pointer 终态问题；修复后同一审查者重跑直接相关 60/60、复核两份提交、
   默认入口与 Git/结果终态并给出 `PASS`，无剩余 correctness/functionality finding。

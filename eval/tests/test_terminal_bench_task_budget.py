@@ -81,6 +81,52 @@ class TaskBudgetEnvelopeTests(unittest.TestCase):
         )
         self.assertEqual(status["remaining_usd"], "387.500000")
 
+    def test_new_authorization_uses_a_distinct_path_id_and_cap(self) -> None:
+        task_id = "direction0-local-optimization-052"
+        cap = Decimal("125.000000")
+        path = task_budget_path(Path(self.directory.name), task_id)
+        self.assertNotEqual(path, task_budget_path(Path(self.directory.name)))
+        state = start_task_budget(
+            path,
+            active=self.v23,
+            task_budget_id=task_id,
+            cap_usd=cap,
+        )
+
+        self.assertEqual(state["task_budget_id"], task_id)
+        self.assertEqual(state["cap_usd"], "125.000000")
+        status = verify_active_identity(
+            path,
+            active=self.v23,
+            prior_settled_usd=Decimal("0.000000"),
+            task_budget_id=task_id,
+            cap_usd=cap,
+        )
+        self.assertEqual(status["remaining_usd"], "125.000000")
+        self.assertFalse(task_budget_path(Path(self.directory.name)).exists())
+
+    def test_dynamic_envelope_rejects_a_different_runtime_contract(self) -> None:
+        task_id = "direction0-local-optimization-052"
+        path = task_budget_path(Path(self.directory.name), task_id)
+        start_task_budget(
+            path,
+            active=self.v23,
+            task_budget_id=task_id,
+            cap_usd=Decimal("125.000000"),
+        )
+        with self.assertRaisesRegex(TaskBudgetError, "identity differs"):
+            load_task_budget(
+                path,
+                task_budget_id="direction0-local-optimization-053",
+                cap_usd=Decimal("125.000000"),
+            )
+        with self.assertRaisesRegex(TaskBudgetError, "cap differs"):
+            load_task_budget(
+                path,
+                task_budget_id=task_id,
+                cap_usd=Decimal("124.000000"),
+            )
+
     def test_rejects_nonterminal_decreasing_duplicate_and_over_cap_rolls(self) -> None:
         start_task_budget(self.path, active=self.v23)
         kwargs = {
