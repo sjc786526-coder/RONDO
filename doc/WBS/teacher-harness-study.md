@@ -28,7 +28,9 @@ E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）
 `doc/audit-snapshots/2026-08-22-rondo-local-harness-bottleneck-census.md`：
 
 1. 复用既有 rollout trace 与 API metadata；只对目标 Local 测量请求显式开启 trace，结果发布前生成固定名称的
-   schema-v1 body-free 投影。原始 trace 不进入归档；缺失、残缺、重复、schema 漂移或两来源不一致均拒绝发布。
+   schema-v2 body-free 投影。v2 对 main/Guardian failed/cancelled partial usage 做分角色核对，分别记录 model-visible 与
+   code-mode-runtime render 的 measured/partial/unmeasurable 覆盖、精确重复调用 lifecycle 时长及真实 turn 时长。
+   原始 trace 不进入归档；缺失、残缺、重复、schema 漂移或两来源不一致均拒绝发布。
    重复的 `codex-exec` collector 已删除，产品默认路径和行为不变。
 2. v28 Local cohort 为 10 个任务 × 3 次运行；API metadata 覆盖 30/30 run、10/10 任务，exec JSONL 覆盖
    24/30 run、8/10 任务，另 6 次为集中在 2 个任务的既有敏感脱敏，不按 0 处理。
@@ -48,8 +50,10 @@ E-A 轻量离线冻结回放当前不恢复（见 `doc/WBS/eval-benchmark.md`）
 - 第一轮任一投影缺失、trace 完整性非零、trace/API 交叉核对不一致、schema/body-free 或资源门失败即停止；
   任一新预留会达到 20 USD 即停止；两轮后
   无条件停止，不加题、补轮或改分母。
-- 20/20 个预定 run 全部得到唯一完整投影才是有效测量；任一缺口使整包无效。观测引入新 infra 失败时关闭 opt-in
-  并回到设施修复。C1/C2 须两轮均出现、跨至少 2 个任务且有模型可见 omission/truncation 或重复后工具时长负担；
+- 20/20 个预定 run 全部得到唯一完整投影才是有效测量；任一缺口使整包无效。failed/cancelled inference 缺 usage
+  时保留类型化 C11 终态并把 usage 标为不可测，不把它误作残缺或 0；completed response 缺 usage 仍拒绝。观测引入新
+  infra 失败时关闭 opt-in 并回到设施修复。C1/C2 须两轮均出现、跨至少 2 个任务且有相应表面已覆盖的
+  omission/truncation，或精确重复调用 lifecycle 时长负担；partial/unmeasurable render 覆盖不按 0 解释；
   C11 出现影响任务的类型化 request/context 失败时可按严重性入选。多项满足时按任务覆盖、失败/耗时影响、行为
   风险依次只选一个；无人满足则明确保留无优化结论。在此之前 C1—C13 均不进入行为实现。
 

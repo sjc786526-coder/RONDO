@@ -82,3 +82,16 @@ RONDO Local 新增 `codex exec --json --rondo-local-observation` 显式开关。
 完整性终态非零、schema 或两来源不一致均失败关闭。当前唯一后续包及有效/无效/回滚判据以
 `doc/WBS.md` 和 `doc/WBS/teacher-harness-study.md` 为准，整改证据见
 `agent_log/2026-08-22-plan052-native-trace-remediation.md`。
+
+## 7. 二次正确性整改附记（继续不改写首轮数字）
+
+二次独立复验发现 §6 的首版安全投影仍会拒绝 failed/cancelled inference 无 usage 的 C11 正样本、对缺 render metadata
+的工具过度声明覆盖、缺少 C2 重复调用自身的时长，并把 rollout 总时长写成 turn 时长。最终任务级合同因此在首次
+正式复测前升级为 schema-v2：仅允许非 completed inference 的 partial usage，并按 main/Guardian 核对缺失数与已知
+usage 合计；model-visible 与 code-mode-runtime 分别报告 delivery/render/missing 和
+measured/partial/unmeasurable；精确重复只累加后续调用自身的 tool lifecycle；turn 时长取唯一 exec turn 的真实窗口。
+
+实时 Rust 路径还确认 public custom `exec` 的通用 ToolDispatchTrace 已由既有 suppress 规则禁用，正常首次 code-mode
+输出并不同时产生外层 tool render；投影仍按 thread/turn/model-call 强关系对异常双记录去重，内容不一致则拒绝。
+上述整改不改变 v28 cohort、30/30 API、24/30 exec、C1/C2/C11/C7 四态或唯一后续包，当前事实与判据以 WBS 为准，
+执行证据见 `agent_log/2026-08-22-plan052-observation-correctness-remediation.md`。

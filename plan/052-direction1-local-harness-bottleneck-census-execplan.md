@@ -158,7 +158,9 @@
   因而其只读普查必须从任务 worktree 发起、实际访问主仓库物理根。
 - 已删除重复的 `codex exec --json --rondo-local-observation` collector。下一轮只对目标 RONDO Local 请求显式启用
   既有 `CODEX_ROLLOUT_TRACE_ROOT`；Terminal-Bench 在发布前把原生 trace 与 API metadata 投影成固定名称的
-  schema-v1 body-free 任务结果，缺失、残缺、重复、字段漂移或来源不一致均停止发布，原始 trace 不归档。
+  schema-v2 body-free 任务结果，缺失、残缺、重复、字段漂移或来源不一致均停止发布，原始 trace 不归档。v2
+  保留 failed/cancelled partial-usage 的 C11 信号，按 model/runtime 表面报告 render 覆盖，并补齐重复调用与真实
+  turn 时长。
 - rollout trace 增加最小完整性终态与原生输出 render 事实：精确区分 model-visible 与 code-mode runtime 表面，
   只记录字节数、截断/collection omission、预算和有限枚举，不记录正文；现有 Team Lens 严格 reader/reducer 同时
   支持 Local 单智能体 bundle，不另建 telemetry 平台。
@@ -170,14 +172,17 @@
 - WBS 已只留下一个后续包：同一 10 题、2 个 Local round、Terra medium/Guardian low、20 USD 硬上限和明确停止
   条件的真实观测复测，本任务不运行；E-A 继续不恢复。
 - 首轮独立验收发现重复 collector、正式结果接线缺口及残缺历史工件误计为零；均已按现有原生事实链窄修并补回归。
+- 二次验收确认 C11 partial usage、render 覆盖、C2 重复调用时长和 turn 时长仍有语义缺口；schema-v2 已在现有
+  trace/API 投影内关闭这些问题。报告所称 public code-mode `exec` 必然双记不符合实时 suppress 路径，但投影仍按
+  thread/turn/model-call 强关系防御性去重并拒绝不一致记录。
 
 ### 当前工作
 
-实现、普查、文档同步、定向门禁和最终独立只读复核均已完成；本提交冻结任务合同并交接 WBS 的唯一后续测量包。
+二次正确性整改、相关门禁、文档核对和最终独立只读复核均已完成；复核结论为 PASS。
 
 ### 本任务剩余步骤
 
-无。后续只按 WBS 的唯一有界测量包另立授权和 ExecPlan，本任务不运行真实复测。
+任务内无剩余实现步骤。后续仍只按 WBS 的唯一有界测量包另立授权和 ExecPlan，本计划不继续维护后续路线。
 
 ### 阻塞项
 
@@ -189,12 +194,14 @@
   prompt、请求、工具、compact、审批、重试、停止、调度、退出码或生产默认。
 - 普查：tracked index 288 行完成纯 tracked 校验；最终只验证 30 个 Local private summary。公共结果通过 exact schema
   与 body-free allowlist，实时重建和 tracked JSON 一致。
-- 门禁：最终相关 Python 集合 277/277 通过；`codex-rollout-trace` 62/62，受影响 `codex-core` output context
-  3/3、code-mode 5/5、tool-dispatch trace 4/4 通过；受影响 crate 的 `just fix` 与项目缓存下 `just fmt` 通过。
-  独立复核为 PASS。一次误触发的宽 `codex-core` crate 测试因环境代理相关失败且范围过宽而中止，不冒充通过。
+- 门禁：前轮相关 Python 277/277、`codex-rollout-trace` 62/62 与受影响 `codex-core` 12 项窄测试通过。二次整改最终
+  相关 Python 288/288、精确过滤的 `codex-rollout-trace` 1/1 通过；census 重建与 tracked JSON 逐字节一致，
+  `just fmt`、`git diff --check` 和最终独立复核 PASS。一次误触发的宽 `codex-core` crate 测试因环境代理相关失败且
+  范围过宽而中止，不冒充通过。
 - 未运行：Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI、PR、Bazel。
 - Git：只提交当前专用分支；不合并、不推送、不归档。修复阶段曾存在的主工作区来源不明 WBS 修改保持原样；
-  交付复核时外部流程已将其提交，主工作区为 clean `main@ea03202` 且 ahead `origin/main` 1，本任务不触碰。
+  交付复核时外部流程已自行收口，主工作区为 clean `main@4823c40` 且匹配 `origin/main`，Plan 053 工作树也 clean；
+  本任务未触碰二者。
 
 ### 主工作区 ignored 资产
 
@@ -241,3 +248,6 @@ ignored 资产；另在 `/tmp` 创建的运行时临时目录也已删除。
 | 008 | 当前证据不足以选择 C1 或 C2，唯一下一包为 10 题 × 2 round、20 USD 上限的 Local 观测复测；E-A 不恢复 | C1/C2 仅有低频弱代理，C11 为窄样本阴性，C7 不可测；现有观测足以补覆盖 | WBS、方向 1 | 已采纳 |
 | 009 | 私有读取先做纯 tracked 筛选，再以 common-root `dir_fd`/`O_NOFOLLOW` 逐级打开 30 个 Local 槽；缺失覆盖时 compare 全部 delta 为 null | 关闭独立复核发现的越界读取、symlink 逃逸和“缺失当 0”问题 | eval reader、compare | 已采纳 |
 | 010 | 下一轮的唯一变量是开启 Local 安全观测，不改变产品行为；任一 trace/API 缺失、完整性终态非零、schema 或交叉核对失败即停止 | 当前证据只够验证观测覆盖，尚不足以承诺某个行为优化收益 | WBS、Terminal-Bench、结果发布 | 已采纳 |
+| 011 | 任务投影升为 schema-v2；只允许 failed/cancelled/aborted inference 的 partial usage，并按 main/Guardian 核对缺失数和已知合计 | C11 正样本通常无 usage；completed 缺失仍必须失败关闭，不能用两个角色或终态间的聚合交换掩盖 | eval schema、C11 | 已采纳 |
+| 012 | direct-model 与 code-mode-runtime 分别报告 delivery/render/missing 和 measured/partial/unmeasurable；code cell 只按 thread/turn/model-call 强关系去重 | MCP 等工具没有原生 render metadata，不能宣称全覆盖；实时 public custom `exec` 已被既有 suppress 排除通用 trace，正常路径并不双记 | trace 投影、C1 | 已采纳 |
+| 013 | C2 记录重复后续调用自身的外层 lifecycle 时长；`turn.duration_ms` 改为唯一 exec turn 的真实窗口 | 发生次数不足以执行时长负担门槛，rollout 总时长也不能冒充 turn 时长 | eval schema、C2、比较器 | 已采纳 |

@@ -1555,8 +1555,8 @@ Guardian 为 `gpt-5.6-terra/low`。
 复核均完成；本任务没有实施 C1—C13 行为优化，也没有恢复 E-A。
 
 - 删除首版重复的 `codex exec --json --rondo-local-observation` collector。最终链路复用 rollout trace 与 API
-  metadata；只对目标 Local 测量显式开启 trace，发布前生成固定名称的 schema-v1 body-free 结果。原始 trace 不
-  归档，缺失、残缺、重复、schema 漂移或 trace/API population、终态、usage 不一致均拒绝发布。
+  metadata；只对目标 Local 测量显式开启 trace，发布前生成固定名称的 schema-v2 body-free 结果。原始 trace 不
+  归档，缺失、残缺、重复、schema 漂移或 trace/API population、终态、分角色 usage 覆盖/已知合计不一致均拒绝发布。
 - 原生 trace 只窄补 writer 完整性终态与真实输出 render 边界的安全事实，区分 direct model 与 code-mode runtime，
   保存字节数、截断/collection omission、预算和有限枚举，不保存正文。既有 Team Lens 严格 reader/reducer 扩展为
   支持 Local 单智能体 bundle，没有建设第二套 telemetry、数据库或审计平台。
@@ -1570,7 +1570,10 @@ Guardian 为 `gpt-5.6-terra/low`。
   硬上限；唯一变量是开启安全观测而非改变产品行为。20/20 个 run 都得到严格投影才有效，任一完整性/schema/来源
   核对或资源失败即停，预算到顶即停，两轮后无条件停止；E-A 继续不恢复。
 - 历史读取器拒绝空 API 请求集以及缺终态、重复终态或冲突终态的 exec JSONL，不再把残缺资产计成“测得的零”；
-  修复后 v28 census 与冻结机器结果逐字节一致。定向 Python/Rust、fix/fmt 和最终独立复核结果见本次整改日志。
+  schema-v2 同时保留 failed/cancelled inference 无 usage 的 C11 正样本，将 usage 标为不可测；按 model/runtime 表面
+  记录 render delivery/covered/missing，关联去重 code cell 输出，并新增重复调用 lifecycle 与真实 turn 时长。修复后
+  v28 census 与冻结机器结果逐字节一致。定向门禁和最终独立复核结果见本次整改日志。
   Docker、真实 API、本地模型、训练、validation、holdout、完整数据集、全 workspace、CI、PR 均未运行。详细执行
   与首次只读资产边界见 `agent_log/2026-08-22-003425-plan052-local-harness-census.md`；验收整改与最终门禁见
-  `agent_log/2026-08-22-plan052-native-trace-remediation.md`。
+  `agent_log/2026-08-22-plan052-native-trace-remediation.md`；二次正确性整改见
+  `agent_log/2026-08-22-plan052-observation-correctness-remediation.md`。

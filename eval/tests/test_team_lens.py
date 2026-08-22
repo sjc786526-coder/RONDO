@@ -247,7 +247,11 @@ class NativeBundleBuilder:
                 "model_visible_call_id": f"model-{tool_id}" if result_mode == "direct" else None,
                 "code_mode_runtime_tool_id": f"runtime-{tool_id}" if result_mode == "code" else None,
                 "requester": requester,
-                "kind": {"type": kind, **({"name": name} if kind == "other" else {})},
+                "kind": {
+                    "type": kind,
+                    **({"name": name} if kind == "other" else {}),
+                    **({"server": "test-server", "tool": name} if kind == "mcp" else {}),
+                },
                 "summary": {
                     "type": "generic",
                     "label": name,

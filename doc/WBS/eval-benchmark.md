@@ -30,7 +30,7 @@
 | B7 首次执行 | 执行完成、结论不可归因 | v22 机械一致性子门 failed，但比较条件不对称，不能解释为 RONDO/Codex 能力或性能差异。 |
 | E-B8 公平比较设施 | 完成 | 六项合同已成为 campaign schema v7 的机械约束，并由 Plan 051 v28 正式 campaign 贯通验证。 |
 | 首次 v7 正式 canary | **完成** | Plan 051 v28：10/10 共同有效，双方均 5/10，`sigma=0`、`delta=0`，三层判据通过；未运行 validation/holdout。 |
-| Plan 052 Local 聚合普查 | **完成** | v28 的 30/30 API metadata、24/30 exec JSONL 支持 C1/C2 弱信号、C11 当前样本未观察到、C7 不可测；下一轮复用原生 rollout trace/API metadata 并在发布前强制生成 body-free 投影，未选行为优化。 |
+| Plan 052 Local 聚合普查 | **完成** | v28 的 30/30 API metadata、24/30 exec JSONL 支持 C1/C2 弱信号、C11 当前样本未观察到、C7 不可测；下一轮复用原生 rollout trace/API metadata 并在发布前强制生成 schema-v2 body-free 投影。v2 保留失败响应的 partial-usage C11 信号，按 model/runtime 表面报告 render 覆盖，提供重复调用与真实 turn 时长；未选行为优化。 |
 | E-A A1—A7 | **当前不恢复** | 当前下一包直接使用 10 题 × 2 轮 Local 有界真实复测；不安排 A1—A7 或其最小子集。 |
 
 v22 的 `sigma=0`、`delta=3` 与 `ab_delta_exceeds_aa_sigma` 是对既有冻结输入的机械结果。固定归因报告确认

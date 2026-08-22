@@ -2657,7 +2657,7 @@ class ProductResultContractTests(_ResultFixture, unittest.TestCase):
             ),
         )
         safe_projection = {
-            "schema_version": 1,
+            "schema_version": 2,
             "kind": "rondo_local_harness_observation",
         }
 

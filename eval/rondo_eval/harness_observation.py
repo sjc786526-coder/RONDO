@@ -21,7 +21,7 @@ LOCAL_ROLLOUT_TRACE_ROOT = "/logs/agent/rollout-trace"
 _MAX_API_METADATA_BYTES = 8 * 1024 * 1024
 _MAX_TRACE_BUNDLES = 64
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "aborted"}
-_AVAILABILITY = {"measured", "unmeasurable"}
+_AVAILABILITY = {"measured", "partial", "unmeasurable"}
 _USAGE_KEYS = {
     "input_tokens",
     "cached_input_tokens",
@@ -70,7 +70,7 @@ def _counts(value: object, keys: set[str], name: str) -> dict[str, int]:
 
 
 def validate_task_observation(value: object) -> dict[str, Any]:
-    """Validate and copy one exact schema-v1 body-free aggregate."""
+    """Validate and copy one exact schema-v2 body-free aggregate."""
 
     root = _object(
         value,
@@ -89,7 +89,7 @@ def validate_task_observation(value: object) -> dict[str, Any]:
         "task observation",
     )
     if (
-        root["schema_version"] != 1
+        root["schema_version"] != 2
         or root["kind"] != "rondo_local_harness_observation"
         or root["scope"] != "rondo_local_task"
     ):
@@ -126,6 +126,7 @@ def validate_task_observation(value: object) -> dict[str, Any]:
             "compactions",
             "guardian_details",
             "model_visible_output_truncation",
+            "code_mode_runtime_output_truncation",
             "claim_verification_relation",
         },
         "availability",
@@ -137,7 +138,6 @@ def validate_task_observation(value: object) -> dict[str, Any]:
         "response_lifecycle",
         "tool_lifecycle",
         "command_output",
-        "model_visible_output_truncation",
     ):
         if availability[required] != "measured":
             raise HarnessObservationError("required observation coverage is unavailable")
@@ -247,19 +247,24 @@ def validate_task_observation(value: object) -> dict[str, Any]:
             "total_lifecycle_duration_ms",
             "command_output_bytes",
             "max_command_output_bytes",
+            "model_visible_output_deliveries",
             "model_visible_output_renders",
+            "model_visible_output_render_missing",
             "model_visible_source_text_bytes",
             "model_visible_returned_text_bytes",
             "model_visible_presentation_truncations",
             "model_visible_collection_omission_events",
             "model_visible_collection_omitted_bytes",
+            "code_mode_runtime_output_deliveries",
             "code_mode_runtime_output_renders",
+            "code_mode_runtime_output_render_missing",
             "code_mode_runtime_source_text_bytes",
             "code_mode_runtime_returned_text_bytes",
             "code_mode_runtime_presentation_truncations",
             "code_mode_runtime_collection_omission_events",
             "code_mode_runtime_collection_omitted_bytes",
             "repeated_exact_commands",
+            "repeated_exact_command_lifecycle_duration_ms",
             "repeated_after_failure",
         },
         "tools",
@@ -270,12 +275,23 @@ def validate_task_observation(value: object) -> dict[str, Any]:
         raise HarnessObservationError("repeated command counts are inconsistent")
     if tools["repeated_exact_commands"] > tools["command"]:
         raise HarnessObservationError("repeated commands exceed command tools")
+    if (
+        tools["repeated_exact_command_lifecycle_duration_ms"]
+        > tools["total_lifecycle_duration_ms"]
+    ):
+        raise HarnessObservationError("repeated command duration exceeds tool duration")
+    if (
+        tools["repeated_exact_commands"] == 0
+        and tools["repeated_exact_command_lifecycle_duration_ms"] != 0
+    ):
+        raise HarnessObservationError("repeated command duration lacks repeated commands")
     if tools["command"] == 0 and any(
         tools[key]
         for key in {
             "command_output_bytes",
             "max_command_output_bytes",
             "repeated_exact_commands",
+            "repeated_exact_command_lifecycle_duration_ms",
             "repeated_after_failure",
         }
     ):
@@ -283,10 +299,14 @@ def validate_task_observation(value: object) -> dict[str, Any]:
     if tools["max_command_output_bytes"] > tools["command_output_bytes"]:
         raise HarnessObservationError("maximum command output exceeds total output")
     for prefix in ("model_visible", "code_mode_runtime"):
+        deliveries = tools[f"{prefix}_output_deliveries"]
         renders = tools[f"{prefix}_output_renders"]
+        missing = tools[f"{prefix}_output_render_missing"]
         truncations = tools[f"{prefix}_presentation_truncations"]
         omission_events = tools[f"{prefix}_collection_omission_events"]
         omitted_bytes = tools[f"{prefix}_collection_omitted_bytes"]
+        if renders + missing != deliveries:
+            raise HarnessObservationError("output render coverage is inconsistent")
         if truncations > renders or omission_events > renders:
             raise HarnessObservationError("output render aggregates are inconsistent")
         if renders == 0 and any(
@@ -302,6 +322,15 @@ def validate_task_observation(value: object) -> dict[str, Any]:
             raise HarnessObservationError("output render totals lack measured renders")
         if (omission_events == 0) != (omitted_bytes == 0):
             raise HarnessObservationError("output collection omission totals are inconsistent")
+    for prefix, availability_key in (
+        ("model_visible", "model_visible_output_truncation"),
+        ("code_mode_runtime", "code_mode_runtime_output_truncation"),
+    ):
+        expected_output_availability = _surface_output_render_availability(
+            tools, prefix
+        )
+        if availability[availability_key] != expected_output_availability:
+            raise HarnessObservationError("output render availability is inconsistent")
 
     compactions = _object(root["compactions"], {"completed"}, "compactions")
     if _optional_count(compactions["completed"], "compactions.completed") is not None:
@@ -327,21 +356,39 @@ _DELTA_PATHS = (
     ("tools", "total_lifecycle_duration_ms"),
     ("tools", "command_output_bytes"),
     ("tools", "max_command_output_bytes"),
+    ("tools", "model_visible_output_deliveries"),
     ("tools", "model_visible_output_renders"),
+    ("tools", "model_visible_output_render_missing"),
     ("tools", "model_visible_source_text_bytes"),
     ("tools", "model_visible_returned_text_bytes"),
     ("tools", "model_visible_presentation_truncations"),
     ("tools", "model_visible_collection_omission_events"),
     ("tools", "model_visible_collection_omitted_bytes"),
+    ("tools", "code_mode_runtime_output_deliveries"),
     ("tools", "code_mode_runtime_output_renders"),
+    ("tools", "code_mode_runtime_output_render_missing"),
     ("tools", "code_mode_runtime_source_text_bytes"),
     ("tools", "code_mode_runtime_returned_text_bytes"),
     ("tools", "code_mode_runtime_presentation_truncations"),
     ("tools", "code_mode_runtime_collection_omission_events"),
     ("tools", "code_mode_runtime_collection_omitted_bytes"),
     ("tools", "repeated_exact_commands"),
+    ("tools", "repeated_exact_command_lifecycle_duration_ms"),
     ("tools", "repeated_after_failure"),
 )
+
+_OUTPUT_RENDER_VALUE_AVAILABILITY = {
+    "model_visible_source_text_bytes": "model_visible_output_truncation",
+    "model_visible_returned_text_bytes": "model_visible_output_truncation",
+    "model_visible_presentation_truncations": "model_visible_output_truncation",
+    "model_visible_collection_omission_events": "model_visible_output_truncation",
+    "model_visible_collection_omitted_bytes": "model_visible_output_truncation",
+    "code_mode_runtime_source_text_bytes": "code_mode_runtime_output_truncation",
+    "code_mode_runtime_returned_text_bytes": "code_mode_runtime_output_truncation",
+    "code_mode_runtime_presentation_truncations": "code_mode_runtime_output_truncation",
+    "code_mode_runtime_collection_omission_events": "code_mode_runtime_output_truncation",
+    "code_mode_runtime_collection_omitted_bytes": "code_mode_runtime_output_truncation",
+}
 
 
 def compare_task_observations(left: object, right: object) -> dict[str, object]:
@@ -366,9 +413,23 @@ def compare_task_observations(left: object, right: object) -> dict[str, object]:
             left_value = left_value[part]  # type: ignore[index]
             right_value = right_value[part]  # type: ignore[index]
         usage_path = len(path) > 1 and path[1] == "usage"
-        measured = not usage_path or (
-            before["availability"]["response_usage"] == "measured"
-            and after["availability"]["response_usage"] == "measured"
+        output_availability = (
+            _OUTPUT_RENDER_VALUE_AVAILABILITY.get(path[1])
+            if len(path) > 1
+            else None
+        )
+        measured = (
+            not usage_path
+            or (
+                before["availability"]["response_usage"] == "measured"
+                and after["availability"]["response_usage"] == "measured"
+            )
+        ) and (
+            output_availability is None
+            or (
+                before["availability"][output_availability] == "measured"
+                and after["availability"][output_availability] == "measured"
+            )
         )
         key = ".".join(path)
         deltas[key] = (
@@ -382,7 +443,7 @@ def compare_task_observations(left: object, right: object) -> dict[str, object]:
             else None
         )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "rondo_local_harness_observation_delta",
         "comparable": comparable,
         "deltas": deltas,
@@ -446,13 +507,32 @@ def _read_complete_bundle(path: Path) -> tuple[str, dict[str, Any], NativeBundle
         "agents",
         "turns",
         "inferences",
-        "usage",
         "tools",
         "terminal",
         "timing",
     ):
         if view["availability"][capability_name]["status"] != "available":
             raise HarnessObservationError("rollout trace lifecycle is incomplete")
+    missing_usage = [
+        inference for inference in view["inferences"] if inference["usage"] is None
+    ]
+    usage_capability = view["availability"]["usage"]
+    if missing_usage:
+        if any(inference["status"] == "completed" for inference in missing_usage):
+            raise HarnessObservationError("completed inference usage is missing")
+        expected_reasons = sorted(
+            {
+                f"{inference['status']}_inference_usage_missing"
+                for inference in missing_usage
+            }
+        )
+        if usage_capability != {
+            "status": "partial",
+            "reason_codes": expected_reasons,
+        }:
+            raise HarnessObservationError("rollout trace usage coverage is invalid")
+    elif usage_capability != {"status": "available", "reason_codes": []}:
+        raise HarnessObservationError("rollout trace usage coverage is invalid")
     turns = view["turns"]
     if (
         view["team"] is not None
@@ -561,6 +641,8 @@ def _read_api_metadata(path: Path) -> list[dict[str, Any]]:
             or re.fullmatch(r"[A-Za-z0-9._-]{1,128}", error_code) is None
         ):
             raise HarnessObservationError("API terminal error code is invalid")
+        if usage_valid is False and _api_terminal_kind(request) == "completed":
+            raise HarnessObservationError("completed API response usage is missing")
         requests.append(request)
     return requests
 
@@ -587,17 +669,45 @@ def _project_complete_sources(
     )
     if trace_completed != response_stats["terminal_completed"]:
         raise HarnessObservationError("trace and API response terminals disagree")
-    if response_stats["missing_or_invalid_usage"] == 0:
+    trace_missing_usage = (
+        sum(inference["usage"] is None for inference in exec_view["inferences"]),
+        sum(
+            inference["usage"] is None
+            for view in all_views[1:]
+            for inference in view["inferences"]
+        ),
+    )
+    api_missing_usage = (
+        sum(
+            request["role"] == "main" and request["usage_valid"] is False
+            for request in requests
+        ),
+        sum(
+            request["role"] == "guardian" and request["usage_valid"] is False
+            for request in requests
+        ),
+    )
+    if trace_missing_usage != api_missing_usage:
+        raise HarnessObservationError("trace and API usage coverage disagree")
+    for trace_views, role in (([exec_view], "main"), (all_views[1:], "guardian")):
         trace_usage = {
-            key: sum(view["summary"]["usage"][key] for view in all_views)
+            key: sum(view["summary"]["usage"][key] for view in trace_views)
             for key in _USAGE_KEYS
         }
-        if trace_usage != response_stats["usage"]:
+        api_usage = {
+            key: sum(
+                request["usage"][key]
+                for request in requests
+                if request["role"] == role and request["usage_valid"] is True
+            )
+            for key in _USAGE_KEYS
+        }
+        if trace_usage != api_usage:
             raise HarnessObservationError("trace and API usage totals disagree")
 
     tools = _tool_stats(exec_view, exec_reader)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "rondo_local_harness_observation",
         "scope": "rondo_local_task",
         "source": {
@@ -619,12 +729,17 @@ def _project_complete_sources(
             "command_output": "measured",
             "compactions": "unmeasurable",
             "guardian_details": "unmeasurable",
-            "model_visible_output_truncation": "measured",
+            "model_visible_output_truncation": _surface_output_render_availability(
+                tools, "model_visible"
+            ),
+            "code_mode_runtime_output_truncation": _surface_output_render_availability(
+                tools, "code_mode_runtime"
+            ),
             "claim_verification_relation": "unmeasurable",
         },
         "turn": {
             "status": exec_view["turns"][0]["status"],
-            "duration_ms": exec_view["summary"]["duration_ms"],
+            "duration_ms": _turn_duration_ms(exec_view["turns"][0]),
         },
         "responses": response_stats,
         "errors": _error_stats(requests),
@@ -740,16 +855,20 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         raise HarnessObservationError("command runtime terminal is incomplete")
 
     total_duration = 0
+    tool_durations: dict[str, int] = {}
     for tool in tools:
         started = tool["started_at_unix_ms"]
         ended = tool["ended_at_unix_ms"]
         if _safe_count(started) is None or _safe_count(ended) is None or ended < started:
             raise HarnessObservationError("tool lifecycle duration is invalid")
-        total_duration += ended - started
+        duration = ended - started
+        total_duration += duration
+        tool_durations[tool["tool_id"]] = duration
 
     output_total = 0
     output_max = 0
     repeated = 0
+    repeated_duration = 0
     repeated_after_failure = 0
     commands_seen: dict[tuple[str, tuple[str, ...], str], int] = {}
     for tool_id, tool in command_tools.items():
@@ -778,6 +897,7 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         prior_exit_code = commands_seen.get(identity)
         if prior_exit_code is not None:
             repeated += 1
+            repeated_duration += tool_durations[tool_id]
             if prior_exit_code != 0:
                 repeated_after_failure += 1
         commands_seen[identity] = exit_code
@@ -795,6 +915,7 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         "max_command_output_bytes": output_max,
         **render_stats,
         "repeated_exact_commands": repeated,
+        "repeated_exact_command_lifecycle_duration_ms": repeated_duration,
         "repeated_after_failure": repeated_after_failure,
     }
 
@@ -808,7 +929,34 @@ def _output_render_stats(
         for tool_id, tool in tools.items()
         if tool["kind"] in {"exec_command", "write_stdin"}
     }
-    observations: list[dict[str, Any]] = []
+    tool_model_call_ids: dict[str, str] = {}
+    code_cell_model_call_ids: dict[tuple[str, str, str], str] = {}
+    for event in reader.events:
+        payload = event["payload"]
+        if payload["type"] == "tool_call_started":
+            tool_id = payload["tool_call_id"]
+            model_call_id = payload.get("model_visible_call_id")
+            if tools[tool_id]["requester"] == "model":
+                if not isinstance(model_call_id, str) or not model_call_id:
+                    raise HarnessObservationError("model tool output identity is missing")
+                tool_model_call_ids[tool_id] = model_call_id
+        elif payload["type"] == "code_cell_started":
+            runtime_cell_id = payload["runtime_cell_id"]
+            model_call_id = payload.get("model_visible_call_id")
+            thread_id = event.get("thread_id")
+            turn_id = event.get("codex_turn_id")
+            cell = (thread_id, turn_id, runtime_cell_id)
+            if (
+                not all(isinstance(item, str) and item for item in cell)
+                or cell in code_cell_model_call_ids
+                or not isinstance(model_call_id, str)
+                or not model_call_id
+            ):
+                raise HarnessObservationError("code cell output identity is invalid")
+            code_cell_model_call_ids[cell] = model_call_id
+
+    deliveries: dict[tuple[str, str, str | None, str], str] = {}
+    observations: dict[tuple[str, str, str | None, str], dict[str, Any]] = {}
     ended_tools: set[str] = set()
     for event in reader.events:
         payload = event["payload"]
@@ -826,31 +974,70 @@ def _output_render_stats(
         }:
             raise HarnessObservationError("tool output render payload is invalid")
         observation = result.get("output_render")
+        surface = (
+            "direct_model" if tools[tool_id]["requester"] == "model" else "code_mode_runtime"
+        )
+        delivery_id = (
+            tool_model_call_ids[tool_id]
+            if surface == "direct_model"
+            else tool_id
+        )
+        delivery = (
+            surface,
+            tools[tool_id]["agent_id"],
+            tools[tool_id]["turn_id"],
+            delivery_id,
+        )
+        if delivery in deliveries:
+            raise HarnessObservationError("tool output delivery identity is duplicated")
+        deliveries[delivery] = surface
         if observation is None:
             if tool_id in command_tools and result["type"] != "error":
                 raise HarnessObservationError("command output render observation is missing")
             continue
-        expected_surface = (
-            "direct_model" if tools[tool_id]["requester"] == "model" else "code_mode_runtime"
-        )
-        observations.append(_validate_output_render(observation, expected_surface))
+        observations[delivery] = _validate_output_render(observation, surface)
+    if ended_tools != set(tools):
+        raise HarnessObservationError("tool output render lifecycle is incomplete")
 
-    initial_cells = [
-        event["payload"]["runtime_cell_id"]
+    initial_cells = {
+        (
+            event.get("thread_id"),
+            event.get("codex_turn_id"),
+            event["payload"]["runtime_cell_id"],
+        )
         for event in reader.events
         if event["payload"]["type"] == "code_cell_initial_response"
-    ]
-    rendered_cells: set[str] = set()
+    }
+    rendered_cells: set[tuple[object, object, object]] = set()
     for event in reader.events:
         payload = event["payload"]
         if payload["type"] != "code_cell_output_rendered":
             continue
         runtime_cell_id = payload["runtime_cell_id"]
-        if runtime_cell_id in rendered_cells:
+        cell = (event.get("thread_id"), event.get("codex_turn_id"), runtime_cell_id)
+        if cell in rendered_cells:
             raise HarnessObservationError("code cell output render is duplicated")
-        rendered_cells.add(runtime_cell_id)
-        observations.append(_validate_output_render(payload.get("observation"), "direct_model"))
-    if len(initial_cells) != len(set(initial_cells)) or rendered_cells != set(initial_cells):
+        rendered_cells.add(cell)
+        model_call_id = code_cell_model_call_ids.get(cell)
+        if model_call_id is None or cell not in initial_cells:
+            raise HarnessObservationError("code cell output render identity is invalid")
+        delivery = ("direct_model", cell[0], cell[1], model_call_id)
+        deliveries[delivery] = "direct_model"
+        observation = _validate_output_render(payload.get("observation"), "direct_model")
+        prior = observations.get(delivery)
+        if prior is not None and prior != observation:
+            raise HarnessObservationError("correlated output render observations disagree")
+        observations[delivery] = observation
+    initial_deliveries = {
+        ("direct_model", cell[0], cell[1], code_cell_model_call_ids[cell])
+        for cell in initial_cells
+        if cell in code_cell_model_call_ids
+    }
+    if (
+        len(initial_deliveries) != len(initial_cells)
+        or not initial_deliveries.issubset(observations)
+        or rendered_cells != initial_cells
+    ):
         raise HarnessObservationError("code cell output render coverage is incomplete")
 
     stats: dict[str, int] = {}
@@ -858,8 +1045,17 @@ def _output_render_stats(
         ("direct_model", "model_visible"),
         ("code_mode_runtime", "code_mode_runtime"),
     ):
-        selected = [item for item in observations if item["surface"] == surface]
+        surface_deliveries = {
+            delivery for delivery, delivery_surface in deliveries.items() if delivery_surface == surface
+        }
+        selected = [
+            observation
+            for delivery, observation in observations.items()
+            if delivery in surface_deliveries
+        ]
+        stats[f"{prefix}_output_deliveries"] = len(surface_deliveries)
         stats[f"{prefix}_output_renders"] = len(selected)
+        stats[f"{prefix}_output_render_missing"] = len(surface_deliveries) - len(selected)
         stats[f"{prefix}_source_text_bytes"] = sum(
             item["source_text_bytes"] for item in selected
         )
@@ -876,6 +1072,25 @@ def _output_render_stats(
             item["collection_omitted_bytes"] for item in selected
         )
     return stats
+
+
+def _surface_output_render_availability(
+    tools: Mapping[str, int], prefix: str
+) -> str:
+    deliveries = tools[f"{prefix}_output_deliveries"]
+    renders = tools[f"{prefix}_output_renders"]
+    missing = deliveries - renders
+    if deliveries == 0 or missing == 0:
+        return "measured"
+    return "unmeasurable" if renders == 0 else "partial"
+
+
+def _turn_duration_ms(turn: Mapping[str, Any]) -> int:
+    started = turn.get("started_at_unix_ms")
+    ended = turn.get("ended_at_unix_ms")
+    if _safe_count(started) is None or _safe_count(ended) is None or ended < started:
+        raise HarnessObservationError("turn lifecycle duration is invalid")
+    return ended - started
 
 
 def _validate_output_render(value: object, expected_surface: str) -> dict[str, Any]:

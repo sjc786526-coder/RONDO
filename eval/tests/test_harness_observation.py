@@ -20,7 +20,7 @@ from tests.test_team_lens import RAW_PATH_BODY
 
 def _observation() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "rondo_local_harness_observation",
         "scope": "rondo_local_task",
         "source": {
@@ -39,6 +39,7 @@ def _observation() -> dict[str, object]:
             "compactions": "unmeasurable",
             "guardian_details": "unmeasurable",
             "model_visible_output_truncation": "measured",
+            "code_mode_runtime_output_truncation": "measured",
             "claim_verification_relation": "unmeasurable",
         },
         "turn": {"status": "completed", "duration_ms": 100},
@@ -76,19 +77,24 @@ def _observation() -> dict[str, object]:
             "total_lifecycle_duration_ms": 30,
             "command_output_bytes": len(OUTPUT_BODY.encode("utf-8")),
             "max_command_output_bytes": len(OUTPUT_BODY.encode("utf-8")),
+            "model_visible_output_deliveries": 1,
             "model_visible_output_renders": 1,
+            "model_visible_output_render_missing": 0,
             "model_visible_source_text_bytes": len(OUTPUT_BODY.encode("utf-8")),
             "model_visible_returned_text_bytes": len(OUTPUT_BODY.encode("utf-8")),
             "model_visible_presentation_truncations": 0,
             "model_visible_collection_omission_events": 0,
             "model_visible_collection_omitted_bytes": 0,
+            "code_mode_runtime_output_deliveries": 0,
             "code_mode_runtime_output_renders": 0,
+            "code_mode_runtime_output_render_missing": 0,
             "code_mode_runtime_source_text_bytes": 0,
             "code_mode_runtime_returned_text_bytes": 0,
             "code_mode_runtime_presentation_truncations": 0,
             "code_mode_runtime_collection_omission_events": 0,
             "code_mode_runtime_collection_omitted_bytes": 0,
             "repeated_exact_commands": 0,
+            "repeated_exact_command_lifecycle_duration_ms": 0,
             "repeated_after_failure": 0,
         },
         "compactions": {"completed": None},
@@ -105,6 +111,9 @@ def _write_bundle(
     presentation_truncated: bool = False,
     collection_omitted_bytes: int = 0,
     turn_count: int = 1,
+    inference_terminal: str = "completed",
+    duplicate_code_cell_render: bool = False,
+    include_mcp_without_render: bool = False,
 ) -> Path:
     builder = NativeBundleBuilder(root)
     builder.event(
@@ -161,7 +170,38 @@ def _write_bundle(
             },
             turn_id=turn_id,
         )
+        if inference_terminal != "completed":
+            inference_end = builder.events[-1]["payload"]
+            if inference_end["type"] != "inference_completed":
+                raise AssertionError("synthetic inference terminal is misplaced")
+            builder.events[-1]["payload"] = {
+                "type": "inference_failed",
+                "inference_call_id": f"inference-{turn_index}",
+                "upstream_request_id": "upstream-private",
+                "error": "synthetic typed failure",
+                "partial_response_payload": None,
+            }
         for index, (command, exit_code, cwd) in enumerate(commands, start=1):
+            output_render = {
+                "surface": "direct_model",
+                "source_text_bytes": len(command_output.encode("utf-8")),
+                "collection_omitted_bytes": collection_omitted_bytes,
+                "requested_max_output_tokens": 64,
+                "effective_max_output_tokens": 64,
+                "returned_text_bytes": len(model_output.encode("utf-8")),
+                "presentation_truncated": presentation_truncated,
+            }
+            if duplicate_code_cell_render:
+                builder.event(
+                    {
+                        "type": "code_cell_started",
+                        "runtime_cell_id": f"cell-duplicate-{index}",
+                        "model_visible_call_id": f"model-tool-{index}",
+                        "source_js": "synthetic private source",
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
             builder.tool(
                 f"tool-{index}",
                 name="exec_command",
@@ -178,40 +218,74 @@ def _write_bundle(
                     "exit_code": exit_code,
                     "duration": {"secs": 0, "nanos": 5_000_000},
                 },
-                output_render={
-                    "surface": "direct_model",
-                    "source_text_bytes": len(command_output.encode("utf-8")),
-                    "collection_omitted_bytes": collection_omitted_bytes,
-                    "requested_max_output_tokens": 64,
-                    "effective_max_output_tokens": 64,
-                    "returned_text_bytes": len(model_output.encode("utf-8")),
-                    "presentation_truncated": presentation_truncated,
-                },
+                output_render=output_render,
                 turn_id=turn_id,
             )
+            if duplicate_code_cell_render:
+                builder.event(
+                    {
+                        "type": "code_cell_initial_response",
+                        "runtime_cell_id": f"cell-duplicate-{index}",
+                        "status": "completed",
+                        "response_payload": None,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_cell_output_rendered",
+                        "runtime_cell_id": f"cell-duplicate-{index}",
+                        "observation": output_render,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+                builder.event(
+                    {
+                        "type": "code_cell_ended",
+                        "runtime_cell_id": f"cell-duplicate-{index}",
+                        "status": "completed",
+                        "response_payload": None,
+                    },
+                    thread_id=builder.root_thread,
+                    turn_id=turn_id,
+                )
+        if include_mcp_without_render:
+            builder.tool(
+                "tool-mcp",
+                name="mcp_tool",
+                kind="mcp",
+                arguments={},
+                result={"private": "result"},
+                result_mode="direct",
+                turn_id=turn_id,
+            )
+        turn_status = "completed" if inference_terminal == "completed" else "failed"
         builder.event(
             {
                 "type": "codex_turn_ended",
                 "codex_turn_id": turn_id,
-                "status": "completed",
+                "status": turn_status,
             },
             thread_id=builder.root_thread,
             turn_id=turn_id,
         )
+    rollout_status = "completed" if inference_terminal == "completed" else "failed"
     builder.event(
         {
             "type": "thread_ended",
             "thread_id": builder.root_thread,
-            "status": "completed",
+            "status": rollout_status,
         },
         thread_id=builder.root_thread,
     )
-    builder.event({"type": "rollout_ended", "status": "completed"})
+    builder.event({"type": "rollout_ended", "status": rollout_status})
     builder.event({"type": "trace_capture_ended", "dropped_operations": 0})
     return builder.write()
 
 
-def _write_metadata(path: Path, *roles: str) -> None:
+def _write_metadata(path: Path, *roles: str, terminal: str = "completed") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -232,20 +306,28 @@ def _write_metadata(path: Path, *roles: str) -> None:
                         "shape": "responses",
                         "contract_match": True,
                         "upstream_status": 200,
-                        "usage_valid": True,
+                        "usage_valid": terminal == "completed",
                         "charged_usd": "0.010000",
                         "attempt_count": 1,
                         "settlement_kind": "usage_priced",
-                        "usage": {
-                            "input_tokens": 10,
-                            "cached_input_tokens": 2,
-                            "cache_write_input_tokens": 1,
-                            "output_tokens": 4,
-                        },
+                        "usage": (
+                            {
+                                "input_tokens": 10,
+                                "cached_input_tokens": 2,
+                                "cache_write_input_tokens": 1,
+                                "output_tokens": 4,
+                            }
+                            if terminal == "completed"
+                            else None
+                        ),
                         "stream_end_kind": "terminal",
-                        "terminal_event_type": "response.completed",
-                        "terminal_response_status": "completed",
-                        "terminal_error_code": None,
+                        "terminal_event_type": f"response.{terminal}",
+                        "terminal_response_status": terminal,
+                        "terminal_error_code": (
+                            None
+                            if terminal == "completed"
+                            else "context_length_exceeded"
+                        ),
                     }
                     for index, role in enumerate(roles, start=1)
                 ],
@@ -256,6 +338,14 @@ def _write_metadata(path: Path, *roles: str) -> None:
     )
 
 
+def _mark_request_failed(request: dict[str, object]) -> None:
+    request["usage_valid"] = False
+    request["usage"] = None
+    request["terminal_event_type"] = "response.failed"
+    request["terminal_response_status"] = "failed"
+    request["terminal_error_code"] = "context_length_exceeded"
+
+
 class HarnessObservationTests(unittest.TestCase):
     def test_exact_schema_and_comparison_keep_unmeasurable_fields_null(self) -> None:
         before = _observation()
@@ -263,6 +353,8 @@ class HarnessObservationTests(unittest.TestCase):
         after["turn"]["duration_ms"] = 125
         after["tools"]["command_output_bytes"] += 5
         after["tools"]["max_command_output_bytes"] += 5
+        after["tools"]["repeated_exact_commands"] = 1
+        after["tools"]["repeated_exact_command_lifecycle_duration_ms"] = 20
 
         validated = validate_task_observation(before)
         comparison = compare_task_observations(before, after)
@@ -270,8 +362,13 @@ class HarnessObservationTests(unittest.TestCase):
         self.assertEqual(validated, before)
         self.assertIsNone(validated["compactions"]["completed"])
         self.assertTrue(comparison["comparable"])
+        self.assertEqual(comparison["schema_version"], 2)
         self.assertEqual(comparison["deltas"]["turn.duration_ms"], 25)
         self.assertEqual(comparison["deltas"]["tools.command_output_bytes"], 5)
+        self.assertEqual(
+            comparison["deltas"]["tools.repeated_exact_command_lifecycle_duration_ms"],
+            20,
+        )
 
     def test_missing_usage_is_not_silently_zero(self) -> None:
         value = _observation()
@@ -302,6 +399,18 @@ class HarnessObservationTests(unittest.TestCase):
         false_zero["compactions"]["completed"] = 0
         with self.assertRaisesRegex(HarnessObservationError, "not measurable"):
             validate_task_observation(false_zero)
+
+    def test_impossible_repeated_command_durations_are_rejected(self) -> None:
+        without_repeat = _observation()
+        without_repeat["tools"]["repeated_exact_command_lifecycle_duration_ms"] = 1
+        with self.assertRaisesRegex(HarnessObservationError, "lacks repeated commands"):
+            validate_task_observation(without_repeat)
+
+        exceeds_total = _observation()
+        exceeds_total["tools"]["repeated_exact_commands"] = 1
+        exceeds_total["tools"]["repeated_exact_command_lifecycle_duration_ms"] = 31
+        with self.assertRaisesRegex(HarnessObservationError, "exceeds tool duration"):
+            validate_task_observation(exceeds_total)
 
     def test_offline_projection_is_body_free_and_counts_exact_repeats(self) -> None:
         with TemporaryDirectory() as raw:
@@ -342,8 +451,224 @@ class HarnessObservationTests(unittest.TestCase):
         self.assertEqual(observation["tools"]["model_visible_collection_omission_events"], 2)
         self.assertEqual(observation["tools"]["model_visible_collection_omitted_bytes"], 8192)
         self.assertEqual(observation["tools"]["repeated_exact_commands"], 1)
+        self.assertEqual(
+            observation["tools"]["repeated_exact_command_lifecycle_duration_ms"],
+            30,
+        )
         self.assertEqual(observation["tools"]["repeated_after_failure"], 1)
         self.assertTrue(all(body not in encoded for body in BODY_SENTINELS))
+
+    def test_turn_duration_uses_the_turn_window_not_rollout_summary(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(trace_root / "exec")
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["turn"]["duration_ms"], 70)
+        self.assertNotEqual(observation["turn"]["duration_ms"], 120)
+
+    def test_failed_inference_without_usage_preserves_typed_c11_signal(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                inference_terminal="failed",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main", terminal="failed")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["turn"]["status"], "failed")
+        self.assertEqual(observation["responses"]["terminal_failed"], 1)
+        self.assertEqual(observation["responses"]["missing_or_invalid_usage"], 1)
+        self.assertEqual(observation["availability"]["response_usage"], "unmeasurable")
+        self.assertEqual(observation["errors"]["context_window_exceeded"], 1)
+
+    def test_completed_inference_without_usage_is_rejected(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(trace_root / "exec")
+            response_payload = next(
+                path
+                for path in (bundle / "payloads").glob("*.json")
+                if "token_usage" in json.loads(path.read_text("utf-8"))
+            )
+            response = json.loads(response_payload.read_text("utf-8"))
+            response.pop("token_usage")
+            response_payload.write_text(json.dumps(response), encoding="utf-8")
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "completed inference usage is missing"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_completed_api_request_without_usage_is_rejected(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(trace_root / "exec")
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+            value = json.loads(metadata.read_text("utf-8"))
+            value["requests"][0]["usage_valid"] = False
+            value["requests"][0]["usage"] = None
+            metadata.write_text(json.dumps(value), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "completed API response usage is missing"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_partial_usage_must_match_api_role_distribution(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                inference_terminal="failed",
+            )
+            _write_bundle(
+                trace_root / "guardian",
+                session_source={"subagent": {"other": "guardian"}},
+                commands=(),
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main", "guardian")
+            value = json.loads(metadata.read_text("utf-8"))
+            _mark_request_failed(value["requests"][1])
+            metadata.write_text(json.dumps(value), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "usage coverage disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_correlated_code_cell_and_tool_render_is_counted_once(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(trace_root / "exec", duplicate_code_cell_render=True)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["tools"]["model_visible_output_deliveries"], 1)
+        self.assertEqual(observation["tools"]["model_visible_output_renders"], 1)
+        self.assertEqual(
+            observation["tools"]["model_visible_source_text_bytes"],
+            len(OUTPUT_BODY.encode("utf-8")),
+        )
+
+    def test_correlated_code_cell_and_tool_render_must_agree(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            bundle = _write_bundle(
+                trace_root / "exec", duplicate_code_cell_render=True
+            )
+            events = [
+                json.loads(line)
+                for line in (bundle / "trace.jsonl").read_text("utf-8").splitlines()
+            ]
+            rendered = next(
+                event
+                for event in events
+                if event["payload"]["type"] == "code_cell_output_rendered"
+            )
+            rendered["payload"]["observation"]["returned_text_bytes"] += 1
+            (bundle / "trace.jsonl").write_text(
+                "".join(json.dumps(event) + "\n" for event in events),
+                encoding="utf-8",
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            with self.assertRaisesRegex(
+                HarnessObservationError, "correlated output render observations disagree"
+            ):
+                project_task_observation(trace_root, metadata)
+
+    def test_non_render_tool_is_partial_coverage_not_false_measured(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(trace_root / "exec", include_mcp_without_render=True)
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(observation["availability"]["model_visible_output_truncation"], "partial")
+        self.assertEqual(observation["tools"]["model_visible_output_deliveries"], 2)
+        self.assertEqual(observation["tools"]["model_visible_output_renders"], 1)
+        self.assertEqual(observation["tools"]["model_visible_output_render_missing"], 1)
+        comparison = compare_task_observations(observation, observation)
+        self.assertEqual(comparison["deltas"]["tools.model_visible_output_deliveries"], 0)
+        self.assertIsNone(
+            comparison["deltas"]["tools.model_visible_source_text_bytes"]
+        )
+
+    def test_only_non_render_tool_is_unmeasurable_not_false_zero(self) -> None:
+        with TemporaryDirectory() as raw:
+            root = Path(raw)
+            trace_root = root / "trace-root"
+            trace_root.mkdir()
+            _write_bundle(
+                trace_root / "exec",
+                commands=(),
+                include_mcp_without_render=True,
+            )
+            metadata = root / "api-metadata.json"
+            _write_metadata(metadata, "main")
+
+            observation = project_task_observation(trace_root, metadata)
+
+        self.assertEqual(
+            observation["availability"]["model_visible_output_truncation"],
+            "unmeasurable",
+        )
+        self.assertEqual(observation["tools"]["model_visible_output_deliveries"], 1)
+        self.assertEqual(observation["tools"]["model_visible_output_renders"], 0)
+        self.assertEqual(observation["tools"]["model_visible_output_render_missing"], 1)
+
+    def test_runtime_render_availability_is_independent_from_model_surface(self) -> None:
+        value = _observation()
+        value["availability"]["code_mode_runtime_output_truncation"] = "unmeasurable"
+        value["tools"]["code_mode_runtime_output_deliveries"] = 1
+        value["tools"]["code_mode_runtime_output_render_missing"] = 1
+
+        validated = validate_task_observation(value)
+        comparison = compare_task_observations(value, value)
+
+        self.assertEqual(
+            validated["availability"]["model_visible_output_truncation"], "measured"
+        )
+        self.assertIsNone(
+            comparison["deltas"]["tools.code_mode_runtime_source_text_bytes"]
+        )
+        self.assertEqual(
+            comparison["deltas"]["tools.model_visible_source_text_bytes"], 0
+        )
 
     def test_reused_guardian_bundle_accepts_multiple_terminal_turns(self) -> None:
         with TemporaryDirectory() as raw:
