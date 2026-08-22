@@ -11127,7 +11127,7 @@ enabled = true
 
     assert_eq!(
         config.multi_agent_v2,
-        resolve_multi_agent_v2_config(&ConfigToml::default())
+        resolve_multi_agent_v2_config(&ConfigToml::default())?
     );
     assert_eq!(
         (
@@ -11150,7 +11150,8 @@ max_concurrent_threads_per_session = 17
     )
     .expect("multi-agent v2 config should parse");
 
-    let config = resolve_multi_agent_v2_config(&config_toml);
+    let config =
+        resolve_multi_agent_v2_config(&config_toml).expect("multi-agent v2 config should resolve");
     let concurrency_guidance = "There are 17 available concurrency slots, meaning that up to 17 agents can be active at once, including you.";
     let expected_suffix = format!(
         "{DEFAULT_MULTI_AGENT_V2_SHARED_USAGE_HINT_TEXT}\n{DEFAULT_MULTI_AGENT_V2_WAIT_AGENT_USAGE_HINT_TEXT}\n\n{concurrency_guidance}"
@@ -11177,7 +11178,8 @@ expose_spawn_agent_model_overrides = true
     )
     .expect("multi-agent v2 config should parse");
 
-    let config = resolve_multi_agent_v2_config(&config_toml);
+    let config =
+        resolve_multi_agent_v2_config(&config_toml).expect("multi-agent v2 config should resolve");
     assert!(config.expose_spawn_agent_model_overrides);
     assert_eq!(
         config.root_agent_usage_hint_text.as_deref(),
@@ -11194,7 +11196,8 @@ fn multi_agent_v2_exposes_model_overrides_by_default() {
     let config_toml =
         toml::from_str(r#"[features.multi_agent_v2]"#).expect("multi-agent v2 config should parse");
 
-    let config = resolve_multi_agent_v2_config(&config_toml);
+    let config =
+        resolve_multi_agent_v2_config(&config_toml).expect("multi-agent v2 config should resolve");
     assert!(config.expose_spawn_agent_model_overrides);
     assert!(
         [
@@ -11205,6 +11208,114 @@ fn multi_agent_v2_exposes_model_overrides_by_default() {
         .all(|hint| hint.is_some_and(|hint| {
             hint.ends_with(DEFAULT_MULTI_AGENT_V2_MODEL_OVERRIDE_USAGE_HINT_TEXT)
         }))
+    );
+}
+
+fn config_toml_with_publication_critic(
+    endpoint: &str,
+    expected_descriptor_json: Option<String>,
+) -> ConfigToml {
+    let mut config_toml: ConfigToml = toml::from_str(
+        r#"[features.multi_agent_v2]
+team_state_enabled = true
+"#,
+    )
+    .expect("multi-agent v2 config should parse");
+    let Some(FeatureToml::Config(config)) = config_toml
+        .features
+        .as_mut()
+        .and_then(|features| features.multi_agent_v2.as_mut())
+    else {
+        panic!("multi-agent v2 config should be present");
+    };
+    config.publication_critic = Some(codex_features::PublicationCriticConfigToml {
+        endpoint: Some(endpoint.to_string()),
+        expected_descriptor_json,
+        call_timeout_ms: Some(2_000),
+        startup_timeout_ms: Some(3_000),
+    });
+    config_toml
+}
+
+#[test]
+fn publication_critic_is_off_when_config_is_absent() {
+    let config = resolve_multi_agent_v2_config(&ConfigToml::default())
+        .expect("default multi-agent v2 config should resolve");
+    assert!(config.publication_critic.is_none());
+}
+
+#[test]
+fn publication_critic_config_resolves_strict_typed_client_settings() {
+    let descriptor = codex_publication_critic::controlled_test_descriptor(
+        codex_publication_critic::RuntimeLimits::production(),
+    );
+    let config_toml = config_toml_with_publication_critic(
+        "127.0.0.1:43119",
+        Some(serde_json::to_string(&descriptor).expect("descriptor should serialize")),
+    );
+
+    let config = resolve_multi_agent_v2_config(&config_toml)
+        .expect("valid publication critic config should resolve");
+    let critic = config
+        .publication_critic
+        .expect("publication critic should be enabled");
+    assert_eq!(
+        critic.endpoint,
+        "127.0.0.1:43119".parse::<std::net::SocketAddr>().unwrap()
+    );
+    assert_eq!(critic.call_timeout_ms, 2_000);
+    assert_eq!(critic.startup_timeout_ms, 3_000);
+    assert_eq!(critic.client().unwrap().expected_descriptor(), &descriptor);
+}
+
+#[test]
+fn publication_critic_config_rejects_missing_identity_and_non_loopback_endpoint() {
+    let missing_identity = config_toml_with_publication_critic("127.0.0.1:43119", None);
+    assert_eq!(
+        resolve_multi_agent_v2_config(&missing_identity)
+            .expect_err("missing expected identity should fail")
+            .kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+
+    let descriptor = codex_publication_critic::controlled_test_descriptor(
+        codex_publication_critic::RuntimeLimits::production(),
+    );
+    let non_loopback = config_toml_with_publication_critic(
+        "192.0.2.1:43119",
+        Some(serde_json::to_string(&descriptor).expect("descriptor should serialize")),
+    );
+    assert_eq!(
+        resolve_multi_agent_v2_config(&non_loopback)
+            .expect_err("non-loopback endpoint should fail")
+            .kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+}
+
+#[test]
+fn publication_critic_config_requires_team_state() {
+    let descriptor = codex_publication_critic::controlled_test_descriptor(
+        codex_publication_critic::RuntimeLimits::production(),
+    );
+    let mut config_toml = config_toml_with_publication_critic(
+        "127.0.0.1:43119",
+        Some(serde_json::to_string(&descriptor).expect("descriptor should serialize")),
+    );
+    let Some(FeatureToml::Config(config)) = config_toml
+        .features
+        .as_mut()
+        .and_then(|features| features.multi_agent_v2.as_mut())
+    else {
+        panic!("multi-agent v2 config should be present");
+    };
+    config.team_state_enabled = Some(false);
+
+    assert_eq!(
+        resolve_multi_agent_v2_config(&config_toml)
+            .expect_err("publication critic should require team state")
+            .kind(),
+        std::io::ErrorKind::InvalidInput
     );
 }
 
@@ -11264,8 +11375,12 @@ subagent_developer_instructions = "  \t  "
         subagent_developer_instructions: Some(String::new()),
         multi_agent_mode_hint_text: Some(String::new()),
         ..resolve_multi_agent_v2_config(&ConfigToml::default())
+            .expect("default multi-agent v2 config should resolve")
     };
-    assert_eq!(resolve_multi_agent_v2_config(&config_toml), expected);
+    assert_eq!(
+        resolve_multi_agent_v2_config(&config_toml).expect("multi-agent v2 config should resolve"),
+        expected
+    );
 }
 
 #[tokio::test]

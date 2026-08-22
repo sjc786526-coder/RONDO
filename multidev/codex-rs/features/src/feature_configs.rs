@@ -79,6 +79,23 @@ impl FeatureConfig for NonPrefixedMcpToolNamesConfigToml {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct PublicationCriticConfigToml {
+    /// Literal loopback socket address for the already-managed local service.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    /// Strict JSON encoding of the expected Plan 055 service descriptor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_descriptor_json: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 300000))]
+    pub call_timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 300000))]
+    pub startup_timeout_ms: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MultiAgentV2ConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
@@ -124,6 +141,10 @@ pub struct MultiAgentV2ConfigToml {
     /// per-sampling active world index.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub team_state_enabled: Option<bool>,
+    /// Enable the Publication Critic pre-publish cycle with an explicit, identity-bound local
+    /// service. Absence keeps the existing publish path fully bypassed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication_critic: Option<PublicationCriticConfigToml>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub non_code_mode_only: Option<bool>,
 }

@@ -56,6 +56,14 @@ fmt-check:
 # RONDO repository root. See that script
 # for why the lock exists.
 [unix]
+build *args:
+    {{ watchdog }} cargo build {args}
+
+[windows]
+build *args:
+    cargo build {args}
+
+[unix]
 fix *args:
     {{ watchdog }} cargo clippy --fix --tests --allow-dirty {args}
 
@@ -172,6 +180,12 @@ bazel-code-mode-host *args:
     bazel run //codex-rs/code-mode-host:codex-code-mode-host --run_under='cd /d "{{ invocation_directory_native() }}" &&' -- @($args | Select-Object -Skip 1)
 
 [no-cd]
+[unix]
+bazel-lock-update:
+    {{ watchdog }} bazel mod deps --lockfile_mode=update
+
+[no-cd]
+[windows]
 bazel-lock-update:
     bazel mod deps --lockfile_mode=update
 

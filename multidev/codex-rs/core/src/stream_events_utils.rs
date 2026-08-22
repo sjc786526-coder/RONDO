@@ -304,7 +304,11 @@ pub(crate) async fn handle_output_item_done(
                 )
                 .await;
 
-            let payload_preview = tool_log_payload(&call.payload, &call.direct_source());
+            let payload_preview = if ctx.tool_runtime.redacts_tool_bodies(&call) {
+                std::borrow::Cow::Borrowed(r#"{"body":"omitted"}"#)
+            } else {
+                tool_log_payload(&call.payload, &call.direct_source())
+            };
             tracing::info!(
                 thread_id = %ctx.sess.thread_id,
                 "ToolCall: {} {}",

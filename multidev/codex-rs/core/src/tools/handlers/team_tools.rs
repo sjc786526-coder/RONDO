@@ -39,6 +39,7 @@ mod evidence;
 mod history;
 mod inspect;
 mod notice;
+mod publication_review;
 mod publish;
 mod retire;
 mod route;
@@ -54,7 +55,7 @@ mod update;
 /// into an observation are moves within the team state, not observations of the work.
 pub(crate) fn is_team_tool(tool_name: &ToolName) -> bool {
     [
-        TeamPublishHandler.tool_name(),
+        TeamPublishHandler::off().tool_name(),
         TeamUpdateHandler.tool_name(),
         TeamHistoryHandler.tool_name(),
         TeamRouteHandler.tool_name(),

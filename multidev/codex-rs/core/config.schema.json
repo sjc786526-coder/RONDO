@@ -1887,6 +1887,14 @@
         "non_code_mode_only": {
           "type": "boolean"
         },
+        "publication_critic": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/PublicationCriticConfigToml"
+            }
+          ],
+          "description": "Enable the Publication Critic pre-publish cycle with an explicit, identity-bound local service. Absence keeps the existing publish path fully bypassed."
+        },
         "root_agent_usage_hint_text": {
           "type": "string"
         },
@@ -2618,6 +2626,32 @@
       "properties": {
         "trust_level": {
           "$ref": "#/definitions/TrustLevel"
+        }
+      },
+      "type": "object"
+    },
+    "PublicationCriticConfigToml": {
+      "additionalProperties": false,
+      "properties": {
+        "call_timeout_ms": {
+          "format": "uint64",
+          "maximum": 300000.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "endpoint": {
+          "description": "Literal loopback socket address for the already-managed local service.",
+          "type": "string"
+        },
+        "expected_descriptor_json": {
+          "description": "Strict JSON encoding of the expected Plan 055 service descriptor.",
+          "type": "string"
+        },
+        "startup_timeout_ms": {
+          "format": "uint64",
+          "maximum": 300000.0,
+          "minimum": 1.0,
+          "type": "integer"
         }
       },
       "type": "object"

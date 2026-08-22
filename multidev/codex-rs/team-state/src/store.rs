@@ -13,7 +13,6 @@ use crate::ids::RouteId;
 use crate::ids::TeamInstanceId;
 use crate::ids::TeamRevision;
 use crate::ids::VersionId;
-use crate::model::AuthoredVersion;
 use crate::model::Participant;
 use crate::model::ParticipantRole;
 use crate::model::ProducerState;
@@ -21,20 +20,17 @@ use crate::model::RootState;
 use crate::model::TeamEvent;
 use crate::model::TeamRoute;
 use crate::model::TeamVersion;
-use crate::model::clamp_handoff;
-use crate::model::clamp_summary;
-use crate::model::clamp_title;
 use crate::mutation::LifecycleChange;
 use crate::mutation::LifecycleOutcome;
 use crate::mutation::LifecycleRequest;
 use crate::mutation::LifecycleSnapshot;
 use crate::mutation::PublishOutcome;
 use crate::mutation::PublishRequest;
+#[cfg(test)]
 use crate::mutation::PublishTarget;
 use crate::mutation::RetireOutcome;
 use crate::mutation::RetireRequest;
 use crate::mutation::RouteRequest;
-use crate::mutation::Submission;
 use crate::mutation::TeamError;
 use crate::observe::ChangeKind;
 use crate::observe::ChangeRecord;
@@ -55,10 +51,11 @@ use std::collections::VecDeque;
 /// invariants, reaching the same private state under the same single lock.
 pub(crate) mod evidence;
 pub(crate) mod observe;
+/// Publish preparation and commit share one validation path while reaching this same private state.
+pub(crate) mod publish;
 pub(crate) mod retire;
-/// Selective routing lives in a child module so this file stays the single place that defines the
-/// publish and lifecycle invariants, while route commits still reach the same private state and
-/// follow the same validate-everything-then-commit-once discipline.
+/// Selective routing lives in a child module while route commits still reach the same private state
+/// and follow the same validate-everything-then-commit-once discipline.
 pub(crate) mod route;
 
 /// Hard ceiling on a single bounded history query, so a drill-down can never become unbounded.
@@ -273,159 +270,6 @@ impl TeamStore {
                 reference: version_id.to_string(),
             })?;
         Ok((event_index, version_index))
-    }
-
-    /// Publish a new event or append a version to an existing one.
-    pub fn publish(
-        &mut self,
-        actor: ThreadId,
-        submission: &Submission,
-        request: PublishRequest,
-    ) -> Result<PublishOutcome, TeamError> {
-        let role = self.require_participant(actor)?.role;
-        if request.summary.trim().is_empty() {
-            return Err(TeamError::InvalidRequest {
-                reason: "summary must not be empty",
-            });
-        }
-
-        let retry_key = (actor, submission.request_id.clone());
-        let original_request = CommittedRequest::Publish(request.clone());
-        if let Some(existing) = self.committed.get(&retry_key) {
-            if existing.request != original_request {
-                return Err(TeamError::RetryIdentityReused);
-            }
-            let CommittedOutcome::Publish(outcome) = &existing.outcome else {
-                // The same identity already stands for a different kind of submission.
-                return Err(TeamError::RetryIdentityReused);
-            };
-            return Ok(PublishOutcome {
-                deduplicated: true,
-                ..outcome.clone()
-            });
-        }
-
-        let PublishRequest {
-            target,
-            summary,
-            handoff,
-        } = request;
-        // Resolve the target before bumping the revision so a failed lookup leaves no trace.
-        let existing_index = match &target {
-            PublishTarget::NewEvent { title } if title.trim().is_empty() => {
-                return Err(TeamError::InvalidRequest {
-                    reason: "title must not be empty when opening a new event",
-                });
-            }
-            PublishTarget::NewEvent { .. } => None,
-            PublishTarget::ExistingEvent { event_id } => {
-                let index = self.event_index(*event_id)?;
-                // Contributing requires already being able to see the event. Without this, an
-                // identifier — which is guessable, being an instance tag plus a small ordinal —
-                // would be enough to write into a sibling's event and, by becoming one of its
-                // authors, to read the whole chain afterwards.
-                if !self.events[index].is_visible_to(actor, role) {
-                    return Err(TeamError::NotPermitted {
-                        reason: "this event is not visible to you, so you cannot add to it",
-                    });
-                }
-                Some(index)
-            }
-        };
-
-        let revision = self.revision.next();
-        // Only an append can be authored against a stale view; an event nobody has seen yet has no
-        // older state to be stale against.
-        let previously_changed_at =
-            existing_index.map(|index| self.events[index].last_changed_at());
-        let event_index = match (existing_index, target) {
-            (Some(index), _) => index,
-            (None, PublishTarget::NewEvent { title }) => {
-                let ordinal = self.next_event_ordinal;
-                self.next_event_ordinal = self.next_event_ordinal.saturating_add(1);
-                self.events.push(TeamEvent::new(
-                    EventId::new(self.tag, ordinal),
-                    clamp_title(&title),
-                    actor,
-                    revision,
-                ));
-                self.events.len() - 1
-            }
-            (None, PublishTarget::ExistingEvent { .. }) => {
-                unreachable!("an existing-event target always resolves to an index above")
-            }
-        };
-
-        // The root's own entries start as tracking and never wake the root; anyone else's start
-        // as pending and give the root a coordination opportunity.
-        let root_state = if role.is_root() {
-            RootState::Tracking
-        } else {
-            RootState::Pending
-        };
-        let authored_on_stale_view = previously_changed_at
-            .filter(|changed_at| *changed_at > submission.based_on)
-            .map(|_| submission.based_on);
-        // Evidence is attached mechanically, from what this author has recorded since its last
-        // successful publish. The model is never asked to list it, and everything after this point
-        // is infallible, so taking the window here is the same step as committing the version.
-        let evidence_refs = self.take_publish_window(actor);
-        let event = &mut self.events[event_index];
-        let version_id = VersionId::new(
-            self.tag,
-            event.id().ordinal(),
-            u32::try_from(event.versions().len().saturating_add(1)).unwrap_or(u32::MAX),
-        );
-        event.versions.push(TeamVersion::new(
-            version_id,
-            AuthoredVersion {
-                author: actor,
-                summary: clamp_summary(&summary),
-                handoff: handoff.as_deref().map(clamp_handoff),
-                evidence_refs: evidence_refs.clone(),
-            },
-            root_state,
-            revision,
-            authored_on_stale_view,
-        ));
-        event.last_changed_at = revision;
-        let event_id = event.id();
-        self.revision = revision;
-
-        let wake = if role.is_root() {
-            StoredWake::None {
-                rule: "root_does_not_self_wake",
-            }
-        } else {
-            self.wake_root();
-            self.root_wake("member_publish")
-        };
-        self.push_change(ChangeRecord {
-            revision,
-            actor,
-            kind: ChangeKind::Publish,
-            target: version_id.to_string(),
-            before: None,
-            after: Some(format!("producer=open root={root_state}")),
-            wake,
-        });
-
-        let outcome = PublishOutcome {
-            event_id,
-            version_id,
-            revision,
-            evidence_refs,
-            authored_on_stale_view: authored_on_stale_view.is_some(),
-            deduplicated: false,
-        };
-        self.committed.insert(
-            retry_key,
-            CommittedSubmission {
-                request: original_request,
-                outcome: CommittedOutcome::Publish(outcome.clone()),
-            },
-        );
-        Ok(outcome)
     }
 
     /// Apply an all-or-nothing batch of lifecycle changes.

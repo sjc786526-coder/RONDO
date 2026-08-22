@@ -34,6 +34,30 @@ impl ToolExecutor<ToolInvocation> for TestHandler {
 
 impl CoreToolRuntime for TestHandler {}
 
+struct BodyRedactingTestHandler {
+    handler: TestHandler,
+}
+
+impl ToolExecutor<ToolInvocation> for BodyRedactingTestHandler {
+    fn tool_name(&self) -> codex_tools::ToolName {
+        self.handler.tool_name()
+    }
+
+    fn spec(&self) -> codex_tools::ToolSpec {
+        self.handler.spec()
+    }
+
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        self.handler.handle(invocation)
+    }
+}
+
+impl CoreToolRuntime for BodyRedactingTestHandler {
+    fn redacts_tool_bodies(&self) -> bool {
+        true
+    }
+}
+
 struct ReadinessTestHandler {
     handler: TestHandler,
     readiness_waits: Arc<AtomicUsize>,
@@ -471,6 +495,74 @@ async fn function_tools_expose_default_hook_payloads_and_rewrites() -> anyhow::R
         serde_json::from_str::<serde_json::Value>(&arguments)?,
         serde_json::json!({ "message": "rewritten" })
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn body_redacting_runtime_uses_safe_default_hook_contract() -> anyhow::Result<()> {
+    let (session, turn) = crate::session::tests::make_session_and_context().await;
+    let tool_name = codex_tools::ToolName::plain("body_redacting_tool");
+    let handler = BodyRedactingTestHandler {
+        handler: TestHandler {
+            tool_name: tool_name.clone(),
+        },
+    };
+    let invocation = ToolInvocation {
+        payload: ToolPayload::Function {
+            arguments: serde_json::json!({ "candidate": "secret" }).to_string(),
+        },
+        ..test_invocation(Arc::new(session), Arc::new(turn), "call-1", tool_name)
+    };
+
+    assert_eq!(
+        handler.log_payload(&invocation).as_deref(),
+        Some(r#"{"body":"omitted"}"#)
+    );
+    assert_eq!(
+        handler.pre_tool_use_payload(&invocation),
+        Some(PreToolUsePayload {
+            tool_name: HookToolName::new("body_redacting_tool"),
+            tool_input: serde_json::json!({ "body": "omitted" }),
+        })
+    );
+
+    let unsafe_output = crate::tools::context::FunctionToolOutput::from_text(
+        "model-visible candidate".to_string(),
+        Some(true),
+    );
+    assert_eq!(
+        handler.post_tool_use_payload(&invocation, &unsafe_output),
+        None,
+        "body-redacting runtimes must not fall back to the model-visible response"
+    );
+
+    let mut safe_output = crate::tools::context::FunctionToolOutput::from_text(
+        "model-visible candidate".to_string(),
+        Some(true),
+    );
+    safe_output.post_tool_use_response = Some(serde_json::json!({
+        "status": "rewrite",
+        "attempt": 1,
+    }));
+    assert_eq!(
+        handler.post_tool_use_payload(&invocation, &safe_output),
+        Some(PostToolUsePayload {
+            tool_name: HookToolName::new("body_redacting_tool"),
+            tool_use_id: "call-1".to_string(),
+            tool_input: serde_json::json!({ "body": "omitted" }),
+            tool_response: serde_json::json!({
+                "status": "rewrite",
+                "attempt": 1,
+            }),
+        })
+    );
+
+    let updated = handler.with_updated_hook_input(
+        invocation.clone(),
+        serde_json::json!({ "body": "rewritten" }),
+    )?;
+    assert_eq!(updated.payload, invocation.payload);
 
     Ok(())
 }

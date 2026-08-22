@@ -21,6 +21,7 @@ mod ids;
 mod model;
 mod mutation;
 mod observe;
+mod publish;
 mod render;
 mod store;
 mod view;
@@ -85,6 +86,11 @@ pub use observe::PublicationStats;
 pub use observe::PublicationStatsPage;
 pub use observe::TeamDumpPage;
 pub use observe::WakeDecisionView;
+pub use publish::PreparedPublish;
+pub use publish::PreparedPublishHistory;
+pub use publish::PreparedPublishHistoryVersion;
+pub use publish::PreparedPublishTarget;
+pub use publish::PublishPreparation;
 pub use render::MAX_PROJECTION_TOKENS;
 pub use render::ProjectionBudget;
 pub use render::ProjectionOutcome;
@@ -103,6 +109,10 @@ pub use view::VersionView;
 
 #[cfg(test)]
 mod test_support;
+
+#[cfg(test)]
+#[path = "publish_preparation_tests.rs"]
+mod publish_preparation_tests;
 
 #[cfg(test)]
 #[path = "sequence_properties_tests.rs"]

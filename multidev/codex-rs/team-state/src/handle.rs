@@ -31,6 +31,8 @@ use crate::observe::ChangeLogPage;
 use crate::observe::DumpCursor;
 use crate::observe::ObserveQuery;
 use crate::observe::TeamDumpPage;
+use crate::publish::PreparedPublishHistory;
+use crate::publish::PublishPreparation;
 use crate::store::TeamStore;
 use crate::view::HistoryPage;
 use crate::view::HistoryQuery;
@@ -115,6 +117,33 @@ impl TeamStateHandle {
                 self.notify_change();
             }
             Ok(outcome)
+        })
+    }
+
+    /// Check a publish request and copy its canonical authored fields without changing team state.
+    ///
+    /// Already-committed retries are answered from the same raw-request ledger as [`Self::publish`].
+    /// A ready result is only a preparation view: callers must still pass the original
+    /// [`PublishRequest`] to [`Self::publish`] for the final atomic validation and commit.
+    pub fn prepare_publish(
+        &self,
+        actor: ThreadId,
+        submission: &Submission,
+        request: &PublishRequest,
+    ) -> Result<PublishPreparation, TeamError> {
+        self.with_store(|store| store.prepare_publish(actor, submission, request))
+    }
+
+    /// Prepare a publish and capture its bounded existing-Event continuity under the same lock.
+    pub fn prepare_publish_with_history(
+        &self,
+        actor: ThreadId,
+        submission: &Submission,
+        request: &PublishRequest,
+        history_limit: usize,
+    ) -> Result<(PublishPreparation, Option<PreparedPublishHistory>), TeamError> {
+        self.with_store(|store| {
+            store.prepare_publish_with_history(actor, submission, request, history_limit)
         })
     }
 

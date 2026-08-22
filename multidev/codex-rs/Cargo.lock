@@ -2749,6 +2749,7 @@ dependencies = [
  "codex-plugin",
  "codex-prompts",
  "codex-protocol",
+ "codex-publication-critic",
  "codex-response-debug-context",
  "codex-rmcp-client",
  "codex-rollout",

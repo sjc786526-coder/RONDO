@@ -24,6 +24,7 @@ use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::CoreToolRuntime;
+use crate::tools::registry::PostToolUseFeedbackOutput;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
 use crate::turn_diff_tracker::TurnDiffTracker;
@@ -59,6 +60,38 @@ impl ToolExecutor<ToolInvocation> for TestHandler {
 }
 
 impl CoreToolRuntime for TestHandler {}
+
+struct RedactingTestHandler {
+    handler: TestHandler,
+}
+
+impl ToolExecutor<ToolInvocation> for RedactingTestHandler {
+    fn tool_name(&self) -> codex_tools::ToolName {
+        self.handler.tool_name()
+    }
+
+    fn spec(&self) -> codex_tools::ToolSpec {
+        self.handler.spec()
+    }
+
+    fn handle(&self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'_> {
+        let _ = invocation;
+        Box::pin(async {
+            let mut output =
+                FunctionToolOutput::from_text("redacted-result-secret".to_string(), Some(true));
+            output.post_tool_use_response = Some(serde_json::json!({
+                "status": "safe",
+            }));
+            Ok(Box::new(output) as Box<dyn crate::tools::context::ToolOutput>)
+        })
+    }
+}
+
+impl CoreToolRuntime for RedactingTestHandler {
+    fn redacts_tool_bodies(&self) -> bool {
+        true
+    }
+}
 
 struct MissingCellCodeModeSessionProvider;
 
@@ -206,6 +239,152 @@ async fn dispatch_lifecycle_trace_records_direct_and_code_mode_requesters() -> a
 }
 
 #[tokio::test]
+async fn runtime_log_payload_override_redacts_initial_dispatch_trace() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let (mut session, turn) = make_session_and_context().await;
+    attach_test_trace(&mut session, &turn, temp.path())?;
+    let session = Arc::new(session);
+    let turn = Arc::new(turn);
+
+    ToolRegistry::with_handler_for_test(Arc::new(TestHandler {
+        tool_name: codex_tools::ToolName::plain("default_log_tool"),
+    }))
+    .dispatch_any_with_terminal_outcome(
+        test_invocation(
+            Arc::clone(&session),
+            Arc::clone(&turn),
+            "default-log-call",
+            "default_log_tool",
+            ToolCallSource::Direct,
+            r#"{"candidate":"default-secret"}"#,
+        ),
+        /*output_item_id*/ None,
+        /*terminal_outcome_reached*/ None,
+    )
+    .await?;
+    ToolRegistry::with_handler_for_test(Arc::new(RedactingTestHandler {
+        handler: TestHandler {
+            tool_name: codex_tools::ToolName::plain("redacted_log_tool"),
+        },
+    }))
+    .dispatch_any_with_terminal_outcome(
+        test_invocation(
+            session,
+            turn,
+            "redacted-log-call",
+            "redacted_log_tool",
+            ToolCallSource::Direct,
+            r#"{"candidate":"redacted-secret"}"#,
+        ),
+        /*output_item_id*/ None,
+        /*terminal_outcome_reached*/ None,
+    )
+    .await?;
+
+    let bundle_dir = single_bundle_dir(temp.path())?;
+    let replayed = codex_rollout_trace::replay_bundle(&bundle_dir)?;
+    let default_payload_id = replayed.tool_calls["default-log-call"]
+        .raw_invocation_payload_id
+        .as_ref()
+        .expect("default invocation payload should be recorded");
+    let default_payload_ref = &replayed.raw_payloads[default_payload_id];
+    let default_payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle_dir.join(&default_payload_ref.path))?)?;
+    assert_eq!(
+        default_payload["payload"]["arguments"],
+        r#"{"candidate":"default-secret"}"#
+    );
+
+    let redacted_payload_id = replayed.tool_calls["redacted-log-call"]
+        .raw_invocation_payload_id
+        .as_ref()
+        .expect("redacted invocation payload should be recorded");
+    let redacted_payload_ref = &replayed.raw_payloads[redacted_payload_id];
+    let redacted_payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle_dir.join(&redacted_payload_ref.path))?)?;
+    assert_eq!(
+        redacted_payload["payload"]["arguments"],
+        r#"{"body":"omitted"}"#
+    );
+    assert!(!redacted_payload.to_string().contains("redacted-secret"));
+    let redacted_result_id = replayed.tool_calls["redacted-log-call"]
+        .raw_result_payload_id
+        .as_ref()
+        .expect("body-redacted result should retain safe typed metadata");
+    let redacted_result_ref = &replayed.raw_payloads[redacted_result_id];
+    let redacted_result: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle_dir.join(&redacted_result_ref.path))?)?;
+    assert!(
+        redacted_result
+            .to_string()
+            .contains(r#"\"status\":\"safe\""#)
+    );
+    assert!(
+        !redacted_result
+            .to_string()
+            .contains("redacted-result-secret")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn body_redacted_post_tool_feedback_records_safe_terminal_trace() -> anyhow::Result<()> {
+    let temp = TempDir::new()?;
+    let (mut session, turn) = make_session_and_context().await;
+    attach_test_trace(&mut session, &turn, temp.path())?;
+    let invocation = test_invocation(
+        Arc::new(session),
+        Arc::new(turn),
+        "feedback-call",
+        "redacted_feedback_tool",
+        ToolCallSource::Direct,
+        r#"{"candidate":"input-sentinel"}"#,
+    );
+    let dispatch_trace =
+        super::ToolDispatchTrace::start(&invocation, Some(r#"{"body":"omitted"}"#));
+    let mut original = FunctionToolOutput::from_text("result-sentinel".to_string(), Some(true));
+    original.post_tool_use_response = Some(serde_json::json!({
+        "status": "safe_terminal",
+    }));
+    let feedback = PostToolUseFeedbackOutput::new(
+        Box::new(original),
+        FunctionToolOutput::from_text("hook-feedback-sentinel".to_string(), /*success*/ None),
+    );
+
+    dispatch_trace.record_completed(
+        &invocation,
+        &invocation.call_id,
+        &invocation.payload,
+        &feedback,
+        /*redact_bodies*/ true,
+    );
+
+    let bundle_dir = single_bundle_dir(temp.path())?;
+    let replayed = codex_rollout_trace::replay_bundle(&bundle_dir)?;
+    let call = &replayed.tool_calls["feedback-call"];
+    assert_eq!(call.execution.status, ExecutionStatus::Completed);
+    let result_id = call
+        .raw_result_payload_id
+        .as_ref()
+        .expect("body-redacted hook feedback must retain a safe terminal result");
+    let result_ref = &replayed.raw_payloads[result_id];
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle_dir.join(&result_ref.path))?)?;
+    let payload = payload.to_string();
+    assert!(payload.contains("safe_terminal"));
+    for sentinel in [
+        "input-sentinel",
+        "result-sentinel",
+        "hook-feedback-sentinel",
+    ] {
+        assert!(!payload.contains(sentinel));
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn dispatch_lifecycle_trace_records_unsupported_tool_failures() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let (mut session, turn) = make_session_and_context().await;
@@ -301,7 +480,7 @@ async fn missing_code_mode_wait_traces_only_the_wait_tool_call() -> anyhow::Resu
     );
     invocation.tool_name = invocation.tool_name.with_default_namespace();
     assert!(
-        super::tool_dispatch_invocation(&invocation)
+        super::tool_dispatch_invocation(&invocation, /*log_payload_override*/ None)
             .expect("wait calls should produce a trace invocation")
             .tool_namespace
             .is_none()
