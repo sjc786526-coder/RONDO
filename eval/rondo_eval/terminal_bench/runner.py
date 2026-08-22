@@ -52,6 +52,9 @@ ADAPTER_IMPORTS = {
     Side.CODEX: "rondo_eval.terminal_bench.adapters:CodexUploadAdapter",
     Side.RONDO: "rondo_eval.terminal_bench.adapters:RondoUploadAdapter",
 }
+PREFLIGHT_STUB_VERIFIER_IMPORT = (
+    "rondo_eval.terminal_bench.preflight_producer:PreflightNoopVerifier"
+)
 
 
 class TerminalBenchRunError(ValueError):
@@ -87,6 +90,12 @@ class TerminalBenchRequest:
     frozen_model_catalog_source_commit: str | None = None
     frozen_model_catalog_provenance_sha256: str | None = None
     frozen_task: FrozenTask | None = None
+    # Stub receipt production runs the real agent projection with a no-op
+    # verifier. Paid and oracle paths leave this false.
+    stub_verifier: bool = False
+    # Fast stub runs leave their environment for the outer supervisor to
+    # observe and remove. Paid runs keep Harbor's normal self-delete behavior.
+    delete_environment: bool = True
     # False only for the M-5 gate 2 attribution diagnostic: upstream V2 stays on
     # and the RONDO team layer is switched off. Never set on a run that produces
     # a non-degradation observation.
@@ -97,6 +106,8 @@ class TerminalBenchRequest:
     # the adapter argv and the budget proxy all resolve the same model, which is
     # what makes a pinned campaign runnable beside a differently-pinned one.
     pinned_model_id: str | None = None
+    pinned_main_effort: str | None = None
+    pinned_guardian_effort: str | None = None
     pinned_subagent_model: str | None = None
     pinned_subagent_effort: str | None = None
     # Opt-in symmetric V2/trace wiring. False preserves historical campaigns.
@@ -125,6 +136,8 @@ class HarborCommand:
     trials_dir: Path
     compose_contract: ComposeRunContract
     n_concurrent: int = 1
+    stub_verifier: bool = False
+    delete_environment: bool = True
 
     def validate(
         self,
@@ -143,6 +156,10 @@ class HarborCommand:
             raise TerminalBenchRunError("Compose secret source differs from RunSpec")
         if self.n_concurrent != 1 or spec.max_retries != 0:
             raise TerminalBenchRunError("Terminal-Bench P1 permits one task and no retries")
+        if not isinstance(self.stub_verifier, bool):
+            raise TerminalBenchRunError("Harbor verification mode is invalid")
+        if not isinstance(self.delete_environment, bool):
+            raise TerminalBenchRunError("Harbor environment cleanup mode is invalid")
         if self.trial_name != _trial_name(materialized.task_label, spec.side):
             raise TerminalBenchRunError("Harbor trial identity differs from the frozen run")
         if self.trials_dir != materialized.task_path.parent / "trials":
@@ -162,6 +179,8 @@ class HarborCommand:
             materialized,
             trial_name=self.trial_name,
             trials_dir=self.trials_dir,
+            stub_verifier=self.stub_verifier,
+            delete_environment=self.delete_environment,
         )
         if self.argv != expected:
             raise TerminalBenchRunError("Harbor command differs from the frozen local-task form")
@@ -502,6 +521,10 @@ def prepare_terminal_bench_run(
         raise TerminalBenchRunError("Terminal-Bench seccomp profile is incomplete")
     if not isinstance(request.require_container_metrics, bool):
         raise TerminalBenchRunError("Terminal-Bench container metric gate is invalid")
+    if not isinstance(request.stub_verifier, bool):
+        raise TerminalBenchRunError("Terminal-Bench verification mode is invalid")
+    if not isinstance(request.delete_environment, bool):
+        raise TerminalBenchRunError("Terminal-Bench environment cleanup mode is invalid")
     _validate_frozen_model_catalog_request(config, request)
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
@@ -516,6 +539,8 @@ def prepare_terminal_bench_run(
         product=request.product,
         provider_name=request.provider_name,
         model_id=request.pinned_model_id,
+        main_effort=request.pinned_main_effort,
+        guardian_effort=request.pinned_guardian_effort,
         timeout_seconds=request.timeout_seconds,
         max_retries=request.max_retries,
         budget_usd=request.budget_usd,
@@ -594,6 +619,8 @@ def prepare_terminal_bench_run(
             materialized,
             trial_name=trial_name,
             trials_dir=trials_dir,
+            stub_verifier=request.stub_verifier,
+            delete_environment=request.delete_environment,
         ),
         cwd=EVAL_ROOT,
         env=(("HARBOR_TELEMETRY", "off"),),
@@ -612,6 +639,8 @@ def prepare_terminal_bench_run(
             trials_dir=trials_dir,
             require_container_metrics=request.require_container_metrics,
         ),
+        stub_verifier=request.stub_verifier,
+        delete_environment=request.delete_environment,
     )
     prepared = PreparedTerminalBenchRun(
         spec=spec,
@@ -688,6 +717,8 @@ def _harbor_argv(
     *,
     trial_name: str,
     trials_dir: Path,
+    stub_verifier: bool = False,
+    delete_environment: bool = True,
 ) -> tuple[str, ...]:
     argv = [
         str(HARBOR_EXECUTABLE),
@@ -710,13 +741,12 @@ def _harbor_argv(
         if "\x00" in value or "\n" in value or "\r" in value:
             raise TerminalBenchRunError("agent kwarg is unsafe")
         argv.extend(("--agent-kwarg", f"{key}={value}"))
-    argv.extend(
-        (
-            # Harbor may delete only the environment it creates for this one
-            # staged task; the exact label keeps outer ownership observable.
-            "--delete",
-        )
-    )
+    if stub_verifier:
+        argv.extend(("--verifier", PREFLIGHT_STUB_VERIFIER_IMPORT))
+    # A stub that finishes between supervisor samples stays observable until
+    # the supervisor performs its exact-label cleanup. Paid runs let Harbor
+    # delete only the environment it created for this staged task.
+    argv.append("--delete" if delete_environment else "--no-delete")
     return tuple(argv)
 
 

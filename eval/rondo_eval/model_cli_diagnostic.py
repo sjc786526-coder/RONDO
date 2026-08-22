@@ -14,6 +14,7 @@ import argparse
 import errno
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,11 +31,13 @@ from .api_budget_proxy import (
     SHORT_REQUEST_RESERVATION_USD,
     UPSTREAM_TIMEOUT_SECONDS,
     _atomic_private_json,
+    maximum_usage_cost,
 )
 from .config import ConfigError, RepoPaths, load_provider_secret, load_runtime_config
 from .frozen_model_catalog import (
     _legacy_catalog_with_auto_review_override as _catalog_with_auto_review_override,
     load_frozen_model_catalog,
+    load_shared_model_catalog,
 )
 
 
@@ -86,8 +89,19 @@ PHASES = (
 )
 
 
-def _binary_target(common_root: Path, side: str) -> BinaryTarget:
-    if side == "codex":
+def _binary_target(
+    common_root: Path,
+    side: str,
+    *,
+    manifest_path: Path | None = None,
+) -> BinaryTarget:
+    if manifest_path is not None:
+        manifest = (
+            manifest_path
+            if manifest_path.is_absolute()
+            else common_root / manifest_path
+        )
+    elif side == "codex":
         manifest = (
             common_root
             / "eval-data/bin/codex"
@@ -206,6 +220,8 @@ def _codex_command(
     phase: Phase,
     main_model: str,
     guardian_model: str,
+    main_effort: str = EXPECTED_MAIN_EFFORT,
+    guardian_effort: str = EXPECTED_GUARDIAN_EFFORT,
     model_catalog_json: Path | None = None,
 ) -> list[str]:
     overrides = [
@@ -222,14 +238,14 @@ def _codex_command(
         "model_providers.rondo_model_diagnostic.supports_websockets=false",
         "model_providers.rondo_model_diagnostic.request_max_retries=0",
         "model_providers.rondo_model_diagnostic.stream_max_retries=0",
-        f"model_reasoning_effort={json.dumps(EXPECTED_MAIN_EFFORT)}",
+        f"model_reasoning_effort={json.dumps(main_effort)}",
         'service_tier="default"',
     ]
     if target.side == "rondo":
         overrides.extend(
             (
                 f"auto_review.model={json.dumps(guardian_model)}",
-                f"auto_review.reasoning_effort={json.dumps(EXPECTED_GUARDIAN_EFFORT)}",
+                f"auto_review.reasoning_effort={json.dumps(guardian_effort)}",
             )
         )
     elif model_catalog_json is not None:
@@ -549,6 +565,8 @@ def _run_phase_once(
     run_cap_usd: Decimal = RUN_CAP_USD,
     max_logical_requests: int | None = None,
     upstream_timeout_seconds: float = UPSTREAM_TIMEOUT_SECONDS,
+    request_reservation_usd: Decimal = SHORT_REQUEST_RESERVATION_USD,
+    unpriced_fallback_usd: Decimal | str | None = None,
 ) -> tuple[dict[str, object], bool, bool, int]:
     _private_directory(attempt_root)
     codex_home = attempt_root / "codex-home"
@@ -573,6 +591,7 @@ def _run_phase_once(
         total_cap_usd=run_cap_usd,
         max_runs=1,
         default_run_cap_usd=run_cap_usd,
+        unpriced_fallback_usd=unpriced_fallback_usd,
     ) as ledger:
         with LoopbackResponsesProxy(
             upstream_base_url=provider.base_url,
@@ -585,11 +604,11 @@ def _run_phase_once(
             main_pricing=provider.main_pricing,
             guardian_model=provider.guardian_model,
             guardian_pricing=provider.guardian_pricing,
-            guardian_effort=EXPECTED_GUARDIAN_EFFORT,
+            guardian_effort=provider.guardian_effort,
             max_attempts=max_attempts,
             retry_backoff_seconds=provider.retry_backoff_seconds,
             unbilled_retry_statuses=provider.unbilled_retry_statuses,
-            request_reservation_usd=SHORT_REQUEST_RESERVATION_USD,
+            request_reservation_usd=request_reservation_usd,
             max_guardian_logical_requests=1,
             max_logical_requests=max_logical_requests,
             timeout_seconds=upstream_timeout_seconds,
@@ -606,6 +625,8 @@ def _run_phase_once(
                                 phase=phase,
                                 main_model=provider.main_model,
                                 guardian_model=provider.guardian_model,
+                                main_effort=provider.main_effort,
+                                guardian_effort=provider.guardian_effort,
                                 model_catalog_json=model_catalog_path,
                             ),
                             cwd=workspace,
@@ -672,10 +693,17 @@ def _run_phase_once(
         cli_observation=cli_observation,
         model_catalog_sha256=model_catalog_sha256,
     )
-    _atomic_private_json(attempt_root / "receipt.json", attempt)
     internal_retries = sum(
         max(0, int(value.get("attempt_count", 0)) - 1) for value in states
     )
+    attempt.update(
+        {
+            "successful": success,
+            "retryable": retryable,
+            "internal_retries": internal_retries,
+        }
+    )
+    _atomic_private_json(attempt_root / "receipt.json", attempt)
     return attempt, success, retryable, internal_retries
 
 
@@ -863,11 +891,15 @@ def run_direct_codex_campaign(
 
 
 def _selected_campaign_phases(
-    *, start_side: str, phase_kind: str | None, plan014_canary: bool
+    *,
+    start_side: str,
+    phase_kind: str | None,
+    plan014_canary: bool,
+    formal_campaign_canary: bool = False,
 ) -> tuple[Phase, ...]:
     phases = (
         tuple(phase for phase in PHASES if phase.side == "codex")
-        if plan014_canary
+        if plan014_canary or formal_campaign_canary
         else (
             PHASES
             if start_side == "codex"
@@ -880,12 +912,138 @@ def _selected_campaign_phases(
 
 
 def _phase_budget_contract(
-    phase: Phase, *, plan014_canary: bool
+    phase: Phase,
+    *,
+    plan014_canary: bool,
+    formal_request_reservation_usd: Decimal | None = None,
 ) -> tuple[Decimal, int | None]:
     if not plan014_canary:
-        return RUN_CAP_USD, None
+        if formal_request_reservation_usd is None:
+            return RUN_CAP_USD, None
+        logical_requests = 1 if phase.kind == "main" else 3
+        return formal_request_reservation_usd * logical_requests, logical_requests
     logical_requests = 1 if phase.kind == "main" else 3
     return Decimal(logical_requests), logical_requests
+
+
+def _recover_unrecorded_formal_attempt(
+    output_root: Path,
+    *,
+    attempts: list[dict[str, object]],
+    request_reservation_usd: Decimal,
+) -> tuple[dict[str, object] | None, int]:
+    """Settle the one attempt directory a killed wire process did not publish."""
+
+    indexed: dict[int, Path] = {}
+    for child in output_root.iterdir():
+        match = re.fullmatch(r"([0-9]{3})-(codex-(?:main|approval))", child.name)
+        if match is None:
+            continue
+        if child.is_symlink() or not child.is_dir():
+            raise ModelDiagnosticError("formal wire attempt directory is unsafe")
+        indexed[int(match.group(1))] = child
+    expected = len(attempts) + 1
+    extras = sorted(index for index in indexed if index > len(attempts))
+    if not extras:
+        return None, 0
+    if extras != [expected]:
+        raise ModelDiagnosticError("formal wire attempt sequence is ambiguous")
+    root = indexed[expected]
+    phase_name = root.name[4:]
+    phase = next(
+        (item for item in PHASES if item.name == phase_name),
+        None,
+    )
+    if phase is None or phase.side != "codex":
+        raise ModelDiagnosticError("formal wire interrupted phase is invalid")
+    attempt_receipt = root / "receipt.json"
+    if attempt_receipt.is_file() and not attempt_receipt.is_symlink():
+        try:
+            value = json.loads(attempt_receipt.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ModelDiagnosticError("formal wire attempt receipt is invalid") from exc
+        if not isinstance(value, dict) or value.get("phase") != phase.name:
+            raise ModelDiagnosticError("formal wire attempt receipt differs")
+        return value, int(value.get("internal_retries", 0)) + (
+            1
+            if any(
+                item.get("phase") == phase.name
+                and int(item.get("upstream_attempt_count", 0)) > 0
+                for item in attempts
+            )
+            else 0
+        )
+    logical_requests = 1 if phase.kind == "main" else 3
+    run_cap = request_reservation_usd * logical_requests
+    ledger_path = root / "budget.json"
+    if ledger_path.exists() or ledger_path.is_symlink():
+        run_id = f"{phase.name}-{root.name}"
+        with PersistentBudgetLedger(
+            ledger_path,
+            batch_id=run_id,
+            total_cap_usd=run_cap,
+            max_runs=1,
+            default_run_cap_usd=run_cap,
+            unpriced_fallback_usd="1.000000",
+        ) as ledger:
+            snapshot = ledger.snapshot()
+        states = _request_states(snapshot, run_id)
+        spent = Decimal(str(snapshot["spent_usd"]))
+        internal_retries = sum(
+            max(0, int(item.get("attempt_count", 0)) - 1) for item in states
+        )
+        settlements = [
+            {
+                "status": item.get("status"),
+                "charged_usd": item.get("charged_usd"),
+                "usage_valid": item.get("usage_valid"),
+                "attempt_count": item.get("attempt_count"),
+                "settlement_kind": item.get("settlement_kind"),
+            }
+            for item in states
+        ]
+    else:
+        spent = Decimal("0.000000")
+        internal_retries = 0
+        states = []
+        settlements = [
+            {
+                "status": "settled",
+                "charged_usd": "0.000000",
+                "usage_valid": False,
+                "attempt_count": 0,
+                "settlement_kind": "not_sent_unbilled",
+            }
+        ]
+    recovered: dict[str, object] = {
+        "phase": phase.name,
+        "side": phase.side,
+        "kind": phase.kind,
+        "returncode": 125,
+        "duration_seconds": 0.0,
+        "logical_request_count": len(states),
+        "upstream_attempt_count": sum(
+            int(item.get("attempt_count", 0)) for item in states
+        ),
+        "spent_usd": f"{spent:.6f}",
+        "reserved_usd": "0.000000",
+        "settlements": settlements,
+        "successful": False,
+        "retryable": True,
+        "internal_retries": internal_retries,
+        "interrupted_recovery": True,
+    }
+    _atomic_private_json(attempt_receipt, recovered)
+    return recovered, internal_retries + (
+        1
+        if states
+        and any(
+            item.get("phase") == phase.name
+            and int(item.get("upstream_attempt_count", 0)) > 0
+            for item in attempts
+        )
+        else 0
+    )
 
 
 def run_campaign(
@@ -900,6 +1058,8 @@ def run_campaign(
     guardian_model_alias: str = DEFAULT_GUARDIAN_ALIAS,
     max_retries: int = MAX_RETRIES_PER_MODEL,
     plan014_canary: bool = False,
+    formal_campaign_canary: bool = False,
+    resume_existing: bool = False,
     p2_campaign_identity: object | None = None,
 ) -> dict[str, object]:
     if prior_debit_usd < 0 or prior_debit_usd >= MODEL_CAMPAIGN_CAP_USD:
@@ -936,23 +1096,50 @@ def run_campaign(
         raise ModelDiagnosticError(
             "Plan 014 canary requires fresh frozen-Codex main+approval with zero retries"
         )
-    if p2_campaign_identity is not None and not plan014_canary:
-        raise ModelDiagnosticError("P2 identity is valid only for a fresh exact-wire canary")
-    config = load_runtime_config(paths)
-    provider = config.paid_provider_projection()
-    paid_eval = config.paid_eval()
-    if (
-        paid_eval["main_model"] != main_model_alias
-        or paid_eval["guardian_model"] != guardian_model_alias
-        or provider.main_effort != EXPECTED_MAIN_EFFORT
-        or provider.guardian_effort != EXPECTED_GUARDIAN_EFFORT
+    if plan014_canary and formal_campaign_canary:
+        raise ModelDiagnosticError("wire canary modes are mutually exclusive")
+    if resume_existing and not formal_campaign_canary:
+        raise ModelDiagnosticError("only a formal wire canary may resume in place")
+    if formal_campaign_canary and (
+        p2_campaign_identity is None
+        or prior_debit_usd != 0
+        or prior_retry_count != 0
+        or start_side != "codex"
+        or phase_kind is not None
     ):
         raise ModelDiagnosticError(
-            "active paid profile does not match the selected main/Guardian models and effort"
+            "formal campaign canary requires a fresh P2 identity and Codex start"
         )
+    if p2_campaign_identity is not None and not (
+        plan014_canary or formal_campaign_canary
+    ):
+        raise ModelDiagnosticError("P2 identity is valid only for an exact-wire canary")
+    config = load_runtime_config(paths)
+    if formal_campaign_canary:
+        try:
+            provider = p2_campaign_identity.provider_projection(config)
+        except (AttributeError, ValueError) as exc:
+            raise ModelDiagnosticError("formal P2 canary identity is invalid") from exc
+        if (
+            provider.main_model != f"gpt-5.6-{main_model_alias}"
+            or provider.guardian_model != f"gpt-5.6-{guardian_model_alias}"
+        ):
+            raise ModelDiagnosticError("formal wire model differs from its identity")
+    else:
+        provider = config.paid_provider_projection()
+        paid_eval = config.paid_eval()
+        if (
+            paid_eval["main_model"] != main_model_alias
+            or paid_eval["guardian_model"] != guardian_model_alias
+            or provider.main_effort != EXPECTED_MAIN_EFFORT
+            or provider.guardian_effort != EXPECTED_GUARDIAN_EFFORT
+        ):
+            raise ModelDiagnosticError(
+                "active paid profile does not match the selected main/Guardian models and effort"
+            )
     pair_identity = None
     campaign_identity = None
-    if plan014_canary:
+    if plan014_canary or formal_campaign_canary:
         if p2_campaign_identity is None:
             from .terminal_bench.pair import load_active_pair_identity
 
@@ -965,19 +1152,54 @@ def run_campaign(
             except AttributeError as exc:
                 raise ModelDiagnosticError("P2 canary identity is invalid") from exc
     _secret_name, api_key = load_provider_secret(config)
-    targets = {
-        side: _binary_target(paths.common_root, side) for side in ("codex", "rondo")
-    }
-    frozen_model_catalog = (
-        _load_frozen_model_catalog(
-            paths,
-            targets["codex"],
-            main_model=provider.main_model,
-            guardian_model=provider.guardian_model,
+    targets = {}
+    for side in ("codex", "rondo"):
+        manifest_path = None
+        if formal_campaign_canary:
+            try:
+                manifest_path = Path(
+                    campaign_identity.bundles[side]["manifest_path"]
+                )
+            except (AttributeError, KeyError, TypeError) as exc:
+                raise ModelDiagnosticError("formal wire bundle identity is invalid") from exc
+        targets[side] = (
+            _binary_target(
+                paths.common_root,
+                side,
+                manifest_path=manifest_path,
+            )
+            if manifest_path is not None
+            else _binary_target(paths.common_root, side)
         )
-        if start_side == "codex"
-        else None
-    )
+    if formal_campaign_canary:
+        try:
+            sources = {
+                str(item["side"]): item
+                for item in campaign_identity.catalog_identity["sources"]
+            }
+            shared_catalog = load_shared_model_catalog(
+                paths.common_root,
+                upstream_source_commit=str(sources["upstream"]["commit"]),
+                rondo_source_commit=str(sources["rondo"]["commit"]),
+                main_model=provider.main_model,
+                guardian_model=provider.guardian_model,
+                product=campaign_identity.product,
+            )
+            campaign_identity.validate_shared_model_catalog(shared_catalog.identity())
+            frozen_model_catalog = shared_catalog.to_dict()
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ModelDiagnosticError("formal shared model catalog is invalid") from exc
+    else:
+        frozen_model_catalog = (
+            _load_frozen_model_catalog(
+                paths,
+                targets["codex"],
+                main_model=provider.main_model,
+                guardian_model=provider.guardian_model,
+            )
+            if start_side == "codex"
+            else None
+        )
     frozen_model_catalog_sha256 = (
         hashlib.sha256(
             (
@@ -992,7 +1214,7 @@ def run_campaign(
         if frozen_model_catalog is not None
         else None
     )
-    if campaign_identity is not None:
+    if campaign_identity is not None and not formal_campaign_canary:
         campaign_identity.validate_frozen_model_catalog(
             source_commit=targets["codex"].source_commit,
             sha256=frozen_model_catalog_sha256,
@@ -1004,7 +1226,24 @@ def run_campaign(
         if campaign_identity is not None
         else UPSTREAM_TIMEOUT_SECONDS
     )
-    _private_directory(output_root)
+    formal_request_reservation_usd = None
+    formal_campaign_cap_usd = None
+    if formal_campaign_canary:
+        formal_request_reservation_usd = max(
+            maximum_usage_cost(provider.main_pricing),
+            maximum_usage_cost(provider.guardian_pricing),
+        ).quantize(Decimal("0.000001"))
+        if (
+            formal_request_reservation_usd
+            != campaign_identity.maximum_legal_request_reservation_usd
+        ):
+            raise ModelDiagnosticError("formal wire reservation differs from identity")
+        formal_campaign_cap_usd = (
+            Decimal(str(campaign_identity.budget["task_budget_cap_usd"]))
+            - Decimal(
+                str(campaign_identity.budget["task_budget_prior_estimated_usd"])
+            )
+        )
     profile = {
         "schema_version": 1,
         "campaign_id": f"{main_model_alias}-cli-diagnostic-v1",
@@ -1014,19 +1253,29 @@ def run_campaign(
         "main_model": provider.main_model,
         "guardian_model_alias": guardian_model_alias,
         "guardian_model": provider.guardian_model,
-        "main_reasoning_effort": EXPECTED_MAIN_EFFORT,
-        "guardian_reasoning_effort": EXPECTED_GUARDIAN_EFFORT,
+        "main_reasoning_effort": provider.main_effort,
+        "guardian_reasoning_effort": provider.guardian_effort,
         "codex_model_catalog_sha256": frozen_model_catalog_sha256,
         "codex_auto_review_model_override": (
             provider.guardian_model if frozen_model_catalog is not None else None
         ),
-        "request_reservation_usd": format(SHORT_REQUEST_RESERVATION_USD, "f"),
-        "max_guardian_logical_requests": 1,
+        "request_reservation_usd": format(
+            formal_request_reservation_usd or SHORT_REQUEST_RESERVATION_USD,
+            "f",
+        ),
+        "max_guardian_logical_requests": (
+            campaign_identity.max_guardian_logical_requests
+            if formal_campaign_canary
+            else 1
+        ),
         "campaign_cap_usd": format(
-            PLAN014_CANARY_CAP_USD if plan014_canary else MODEL_CAMPAIGN_CAP_USD,
+            PLAN014_CANARY_CAP_USD
+            if plan014_canary
+            else (formal_campaign_cap_usd or MODEL_CAMPAIGN_CAP_USD),
             "f",
         ),
         "plan014_canary": plan014_canary,
+        "formal_campaign_canary": formal_campaign_canary,
         "pair_id": pair_identity.pair_id if pair_identity is not None else None,
         "pair_lock_sha256": (
             pair_identity.lock_sha256 if pair_identity is not None else None
@@ -1045,25 +1294,106 @@ def run_campaign(
         "actual_usd": None,
         "provider_upstream_timeout_seconds": upstream_timeout_seconds,
     }
-    _atomic_private_json(output_root / "profile.json", profile)
-    attempts: list[dict[str, object]] = []
-    retry_count = prior_retry_count
-    conservative_spent = prior_debit_usd
+    if resume_existing:
+        if output_root.is_symlink() or not output_root.is_dir():
+            raise ModelDiagnosticError("formal wire output is unavailable for resume")
+        try:
+            existing_profile = json.loads(
+                (output_root / "profile.json").read_text(encoding="utf-8")
+            )
+            existing_receipt = json.loads(
+                (output_root / "receipt.json").read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ModelDiagnosticError("formal wire resume state is invalid") from exc
+        if existing_profile != profile or not isinstance(existing_receipt, dict):
+            raise ModelDiagnosticError("formal wire resume profile drifted")
+        if existing_receipt.get("status") == "completed":
+            return existing_receipt
+        if existing_receipt.get("status") != "running":
+            raise ModelDiagnosticError("formal wire receipt is not resumable")
+        raw_attempts = existing_receipt.get("attempts")
+        if not isinstance(raw_attempts, list) or any(
+            not isinstance(item, dict) for item in raw_attempts
+        ):
+            raise ModelDiagnosticError("formal wire attempts are invalid")
+        attempts = list(raw_attempts)
+        try:
+            retry_count = int(existing_receipt["retry_count"])
+            conservative_spent = Decimal(
+                str(existing_receipt["estimated_spent_usd"])
+            )
+        except (KeyError, TypeError, ValueError, ArithmeticError) as exc:
+            raise ModelDiagnosticError("formal wire accounting is invalid") from exc
+    else:
+        _private_directory(output_root)
+        _atomic_private_json(output_root / "profile.json", profile)
+        attempts = []
+        retry_count = prior_retry_count
+        conservative_spent = prior_debit_usd
+        _atomic_private_json(
+            output_root / "receipt.json",
+            {
+                **profile,
+                "status": "running",
+                "retry_count": retry_count,
+                "estimated_spent_usd": format(conservative_spent, "f"),
+                "attempts": attempts,
+            },
+        )
+    if formal_campaign_canary:
+        assert formal_request_reservation_usd is not None
+        recovered, retry_delta = _recover_unrecorded_formal_attempt(
+            output_root,
+            attempts=attempts,
+            request_reservation_usd=formal_request_reservation_usd,
+        )
+        if recovered is not None:
+            attempts.append(recovered)
+            retry_count += retry_delta
+            conservative_spent += Decimal(str(recovered["spent_usd"]))
+            _atomic_private_json(
+                output_root / "receipt.json",
+                {
+                    **profile,
+                    "status": "running",
+                    "retry_count": retry_count,
+                    "estimated_spent_usd": format(conservative_spent, "f"),
+                    "attempts": attempts,
+                },
+            )
     status = "completed"
     stopped_phase: str | None = None
     selected_phases = _selected_campaign_phases(
         start_side=start_side,
         phase_kind=phase_kind,
         plan014_canary=plan014_canary,
+        formal_campaign_canary=formal_campaign_canary,
     )
     for phase in selected_phases:
-        phase_attempt = 0
+        prior_phase_attempts = [
+            item for item in attempts if item.get("phase") == phase.name
+        ]
+        if any(item.get("successful") is True for item in prior_phase_attempts):
+            continue
+        phase_attempt = (
+            sum(
+                1
+                for item in prior_phase_attempts
+                if int(item.get("upstream_attempt_count", 0)) > 0
+            )
+            if formal_campaign_canary
+            else len(prior_phase_attempts)
+        )
         phase_run_cap, phase_logical_request_cap = _phase_budget_contract(
             phase,
             plan014_canary=plan014_canary,
+            formal_request_reservation_usd=formal_request_reservation_usd,
         )
         campaign_cap = (
-            PLAN014_CANARY_CAP_USD if plan014_canary else MODEL_CAMPAIGN_CAP_USD
+            PLAN014_CANARY_CAP_USD
+            if plan014_canary
+            else (formal_campaign_cap_usd or MODEL_CAMPAIGN_CAP_USD)
         )
         while True:
             if conservative_spent + phase_run_cap > campaign_cap:
@@ -1094,6 +1424,13 @@ def run_campaign(
                 run_cap_usd=phase_run_cap,
                 max_logical_requests=phase_logical_request_cap,
                 upstream_timeout_seconds=upstream_timeout_seconds,
+                request_reservation_usd=(
+                    formal_request_reservation_usd
+                    or SHORT_REQUEST_RESERVATION_USD
+                ),
+                unpriced_fallback_usd=(
+                    "1.000000" if formal_campaign_canary else None
+                ),
             )
             attempts.append(attempt)
             conservative_spent += Decimal(str(attempt["spent_usd"]))

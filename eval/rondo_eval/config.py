@@ -154,17 +154,28 @@ class RuntimeConfig:
         return dict(models[name])
 
     def paid_provider_projection(
-        self, name: str | None = None, *, model_id: str | None = None
+        self,
+        name: str | None = None,
+        *,
+        model_id: str | None = None,
+        main_effort: str | None = None,
+        guardian_effort: str | None = None,
     ) -> ProviderProjection:
         """Project the paid provider, optionally pinning an exact model.
 
         ``model_id`` lets a campaign that froze its own model resolve the alias
         by identity instead of inheriting the host-wide `main_model`, so two
         frozen campaigns can use different models on the same machine.
+        Optional effort overrides apply only to this projection; omitted values
+        retain the configured role effort.
         """
 
         return _resolve_paid_provider_projection(
-            self, provider_name=name, model_id=model_id
+            self,
+            provider_name=name,
+            model_id=model_id,
+            main_effort=main_effort,
+            guardian_effort=guardian_effort,
         )
 
     def local_model(self) -> dict[str, Any]:
@@ -205,6 +216,8 @@ def make_run_spec(
     product: Product | None = None,
     provider_name: str | None = None,
     model_id: str | None = None,
+    main_effort: str | None = None,
+    guardian_effort: str | None = None,
     timeout_seconds: int = 1800,
     max_retries: int = 0,
     budget_usd: float = 5.0,
@@ -216,7 +229,12 @@ def make_run_spec(
     projection, so campaigns frozen against the host alias keep their identity.
     """
 
-    projection = config.paid_provider_projection(provider_name, model_id=model_id)
+    projection = config.paid_provider_projection(
+        provider_name,
+        model_id=model_id,
+        main_effort=main_effort,
+        guardian_effort=guardian_effort,
+    )
     spec = RunSpec(
         side=side,
         batch_id=batch_id,
@@ -575,6 +593,8 @@ def _resolve_paid_provider_projection(
     *,
     provider_name: str | None,
     model_id: str | None = None,
+    main_effort: str | None = None,
+    guardian_effort: str | None = None,
 ) -> ProviderProjection:
     paid_eval = config.paid_eval()
     active_provider = config.active_provider_name()
@@ -586,6 +606,12 @@ def _resolve_paid_provider_projection(
         # wide `main_model` alias: flipping that alias would silently rewrite the
         # provider identity of every other frozen campaign on this host.
         main_alias = guardian_alias = _alias_for_model_id(config, paid_eval, model_id)
+    resolved_main_effort = _resolve_reasoning_effort(
+        main_effort, paid_eval["main_reasoning_effort"], "main"
+    )
+    resolved_guardian_effort = _resolve_reasoning_effort(
+        guardian_effort, paid_eval["guardian_reasoning_effort"], "guardian"
+    )
     main_pricing = _model_pricing(config.paid_model(main_alias))
     guardian_pricing = _model_pricing(config.paid_model(guardian_alias))
     statuses = tuple(sorted(provider["unbilled_retry_statuses"]))
@@ -600,10 +626,10 @@ def _resolve_paid_provider_projection(
         },
         "main_model_alias": main_alias,
         "main_model": main_pricing.to_dict(),
-        "main_reasoning_effort": paid_eval["main_reasoning_effort"],
+        "main_reasoning_effort": resolved_main_effort,
         "guardian_model_alias": guardian_alias,
         "guardian_model": guardian_pricing.to_dict(),
-        "guardian_reasoning_effort": paid_eval["guardian_reasoning_effort"],
+        "guardian_reasoning_effort": resolved_guardian_effort,
         "max_attempts": paid_eval["max_attempts"],
         "retry_backoff_seconds": format(
             Decimal(str(paid_eval["retry_backoff_seconds"])).normalize(), "f"
@@ -619,9 +645,9 @@ def _resolve_paid_provider_projection(
         base_url=provider["base_url"],
         api_key_env=provider["api_key_env"],
         main_model=main_pricing.model_id,
-        main_effort=paid_eval["main_reasoning_effort"],
+        main_effort=resolved_main_effort,
         guardian_model=guardian_pricing.model_id,
-        guardian_effort=paid_eval["guardian_reasoning_effort"],
+        guardian_effort=resolved_guardian_effort,
         main_pricing=main_pricing,
         guardian_pricing=guardian_pricing,
         max_attempts=paid_eval["max_attempts"],
@@ -635,3 +661,14 @@ def _resolve_paid_provider_projection(
     except ValueError as exc:
         raise ConfigError("paid_eval profile does not satisfy the RunSpec contract") from exc
     return projection
+
+
+def _resolve_reasoning_effort(
+    override: str | None, configured: object, role: str
+) -> str:
+    """Return a validated per-projection effort without changing config defaults."""
+
+    effort = configured if override is None else override
+    if not isinstance(effort, str) or effort not in _REASONING_EFFORTS:
+        raise ConfigError(f"paid_eval {role} reasoning effort override is invalid")
+    return effort

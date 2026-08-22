@@ -1,4 +1,4 @@
-"""Execute the one frozen P2 B7 canary-baseline campaign."""
+"""Execute one frozen P2/B7 direction-0 canary-baseline campaign."""
 
 from __future__ import annotations
 
@@ -44,7 +44,6 @@ from ..fair_comparison import FairComparisonError, PreflightReceipt, valid_task_
 from .baseline import (
     BASE_ROUNDS,
     RUN_CAP_USD,
-    SOL_MAX_LEGAL_REQUEST_RESERVATION_USD,
     BaselineRun,
     BaselineAssessment,
     BaselineError,
@@ -94,15 +93,31 @@ from .scoring import (
     aggregate_scores,
     score_task,
 )
+from .task_budget import (
+    TaskBudgetIdentity,
+    task_budget_path,
+    verify_active_identity,
+)
 
 
 _WINDOWS_C_FLOOR_BYTES = 80 * 1024**3
 _DOCKER_WARN_GROWTH_BYTES = 40 * 1024**3
 _DOCKER_STOP_GROWTH_BYTES = 60 * 1024**3
+_FAIR_UNPRICED_FALLBACK_USD = "1.000000"
 
 
 class CampaignExecutionError(RuntimeError):
     """Raised when the frozen B7 campaign cannot progress safely."""
+
+
+def _unpriced_fallback_usd(identity: CampaignIdentity) -> str | None:
+    """Keep historical ledgers byte-compatible while applying the v7 rule."""
+
+    return (
+        _FAIR_UNPRICED_FALLBACK_USD
+        if identity.enforces_fair_comparison
+        else None
+    )
 
 
 class _CampaignStepAdvanced(RuntimeError):
@@ -134,8 +149,14 @@ class ExecutedSlot:
 class MechanicalFailureTracker:
     """Open the campaign circuit after one category reaches three tasks."""
 
-    def __init__(self, *, ignore_provider_integrity: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        ignore_provider_integrity: bool = False,
+        continue_bounded_infra: bool = False,
+    ) -> None:
         self._ignore_provider_integrity = ignore_provider_integrity
+        self._continue_bounded_infra = continue_bounded_infra
         self._tasks: dict[MechanicalFailureCategory, set[str]] = {
             item: set() for item in MechanicalFailureCategory
         }
@@ -158,6 +179,8 @@ class MechanicalFailureTracker:
             MechanicalFailureCategory.OPERATOR_INTERRUPTION,
         }:
             raise CampaignExecutionError(f"campaign_terminal_failure:{category.value}")
+        if self._continue_bounded_infra:
+            return
         if (
             self._ignore_provider_integrity
             and category is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
@@ -415,8 +438,19 @@ def _worker_step_main(args: argparse.Namespace) -> int:
         args.campaign_lease_token,
     )
     config = load_runtime_config(paths)
-    provider = config.paid_provider_projection()
-    identity.validate_provider(provider)
+    provider = identity.provider_projection(config)
+    if identity.enforces_fair_comparison:
+        task_budget_id = str(identity.budget["task_budget_id"])
+        task_budget_cap = Decimal(str(identity.budget["task_budget_cap_usd"]))
+        verify_active_identity(
+            task_budget_path(paths.common_root, task_budget_id),
+            active=TaskBudgetIdentity(identity.campaign_id, identity.batch_id),
+            prior_settled_usd=Decimal(
+                str(identity.budget["task_budget_prior_estimated_usd"])
+            ),
+            task_budget_id=task_budget_id,
+            cap_usd=task_budget_cap,
+        )
     expected_harness_commit = (
         identity.comparison_conditions.eval_harness_commit
         if identity.enforces_fair_comparison
@@ -596,7 +630,7 @@ def _advance_post_oracle_step(
     prior_cost = Decimal(identity.budget["prior_estimated_usd"])
     campaign_cap = Decimal(identity.budget["campaign_cap_usd"])
     remaining_cap = campaign_cap - prior_cost - canary_cost
-    if remaining_cap < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
+    if remaining_cap < identity.maximum_legal_request_reservation_usd:
         _skip_planned(state, identity, reason="budget_after_wire_canary")
         state.finalize(BaselineStatus.BLOCKED, reason="budget_after_wire_canary")
         return 3
@@ -607,6 +641,7 @@ def _advance_post_oracle_step(
         total_cap_usd=remaining_cap,
         max_runs=len(identity.slots) - 1,
         default_run_cap_usd=RUN_CAP_USD,
+        unpriced_fallback_usd=_unpriced_fallback_usd(identity),
     ) as budget:
         try:
             _reconcile_running_paid_slot(
@@ -722,6 +757,7 @@ def _recover_terminal_aggregate(
             total_cap_usd=remaining_cap,
             max_runs=len(identity.slots) - 1,
             default_run_cap_usd=RUN_CAP_USD,
+            unpriced_fallback_usd=_unpriced_fallback_usd(identity),
         ) as budget:
             assessment = _replay_terminal_assessment(
                 paths=paths,
@@ -760,6 +796,7 @@ def _recover_terminal_aggregate(
             total_cap_usd=remaining_cap,
             max_runs=len(identity.slots) - 1,
             default_run_cap_usd=RUN_CAP_USD,
+            unpriced_fallback_usd=_unpriced_fallback_usd(identity),
         ) as budget:
             budget_snapshot = budget.snapshot()
     else:
@@ -1008,6 +1045,7 @@ def _reconcile_before_oracle(
             total_cap_usd=remaining_cap,
             max_runs=len(identity.slots) - 1,
             default_run_cap_usd=RUN_CAP_USD,
+            unpriced_fallback_usd=_unpriced_fallback_usd(identity),
         ) as budget:
             try:
                 recovered = _reconcile_running_paid_slot(
@@ -1110,6 +1148,18 @@ def _reconcile_running_wire_canary(
             reason=MechanicalFailureCategory.OPERATOR_INTERRUPTION.value,
         )
         raise CampaignExecutionError("wire canary receipt is invalid") from exc
+    if receipt.get("status") == "running" and identity.enforces_fair_comparison:
+        receipt = run_model_cli_campaign(
+            paths,
+            output_root=campaign_root / "wire-canary",
+            main_model_alias="terra",
+            guardian_model_alias="terra",
+            max_retries=3,
+            formal_campaign_canary=True,
+            resume_existing=True,
+            p2_campaign_identity=identity,
+        )
+        spent = Decimal(str(receipt["estimated_spent_usd"]))
     if receipt.get("status") != "completed" or spent < 0:
         state.fail_interrupted(
             estimated_usd=f"{max(spent, Decimal(0)):.6f}",
@@ -1647,10 +1697,11 @@ def _execute_wire_canary(
     receipt = run_model_cli_campaign(
         paths,
         output_root=output_root,
-        main_model_alias="sol",
-        guardian_model_alias="sol",
-        max_retries=0,
-        plan014_canary=True,
+        main_model_alias="terra",
+        guardian_model_alias="terra",
+        max_retries=3,
+        formal_campaign_canary=True,
+        resume_existing=False,
         p2_campaign_identity=identity,
     )
     spent = Decimal(str(receipt["estimated_spent_usd"]))
@@ -1701,7 +1752,8 @@ def _advance_one_paid_step(
     all_records = {**continued_records, **records}
     all_digests = {**continued_digests, **digests}
     tracker = MechanicalFailureTracker(
-        ignore_provider_integrity=identity.schema_version >= 3
+        ignore_provider_integrity=identity.schema_version >= 3,
+        continue_bounded_infra=identity.enforces_fair_comparison,
     )
     resumable = {
         "paths": paths,
@@ -2016,6 +2068,13 @@ def _execute_attempt_chain(
             and category is MechanicalFailureCategory.PROVIDER_RESPONSE_INTEGRITY
         ):
             continue
+        if identity.enforces_fair_comparison:
+            # Plan 051 consumes the four already-frozen attempts without the
+            # historical second-occurrence operator hold.  If the full chain
+            # remains infra, the round/campaign boundary stops new requests so
+            # the unattended executor can diagnose and, only for a confirmed
+            # facility defect, mint a successor identity.
+            continue
         same_category = tuple(
             item.slot.slot_id for item in values if item.failure_category is category
         )
@@ -2304,10 +2363,13 @@ def _execute_task_slot(
     )
     _validate_daemon_image(task)
     snapshot = budget.snapshot()
-    if Decimal(snapshot["remaining_uncommitted_usd"]) < SOL_MAX_LEGAL_REQUEST_RESERVATION_USD:
+    if (
+        Decimal(snapshot["remaining_uncommitted_usd"])
+        < identity.maximum_legal_request_reservation_usd
+    ):
         raise CampaignExecutionError("remaining campaign budget cannot fit the next request")
     _sample_storage(counter, slot.run_id, baseline=storage_baseline)
-    identity.validate_provider(config.paid_provider_projection())
+    identity.provider_projection(config)
     if (
         validate_eval_harness_checkout(
             common_root=paths.common_root,
@@ -2446,7 +2508,7 @@ def _execute_task_slot(
             git_commit=measurement_commits[slot.side],
             eval_harness_commit=eval_harness_commit,
             manifest=manifests[slot.side],
-            provider=config.paid_provider_projection(),
+            provider=identity.provider_projection(config),
             budget_snapshot=budget.snapshot(),
             metadata_path=metadata_path,
             outcome=outcome,
@@ -2675,6 +2737,15 @@ def _write_aggregate(
         / f"{identity.campaign_id}.json"
     )
     _write_or_validate_aggregate(destination, public)
+    if identity.enforces_fair_comparison and state_snapshot["status"] in {
+        BaselineStatus.PASSED.value,
+        BaselineStatus.FAILED.value,
+    }:
+        _write_relative_baseline_comparison(
+            results_root,
+            identity=identity,
+            current=public,
+        )
 
 
 def _validate_terminal_result_sources(
@@ -2779,6 +2850,217 @@ def _public_aggregate(
     if identity.enforces_fair_comparison:
         public["product"] = value["product"]
     return public
+
+
+def publish_relative_baseline_comparison(
+    paths: RepoPaths,
+    *,
+    identity: CampaignIdentity,
+    results_worktree_root: Path,
+) -> Path:
+    """Publish or verify the lightweight delta against the prior formal baseline."""
+
+    results_root = validate_results_worktree(
+        results_worktree_root,
+        common_root=paths.common_root,
+    )
+    _require_distinct_results_worktree(paths, results_root)
+    current_path = (
+        results_root
+        / "eval/results/baselines"
+        / f"{identity.campaign_id}.json"
+    )
+    try:
+        if current_path.is_symlink() or not current_path.is_file():
+            raise OSError
+        current = json.loads(current_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise CampaignExecutionError("current formal baseline is unavailable") from exc
+    if not isinstance(current, dict):
+        raise CampaignExecutionError("current formal baseline is invalid")
+    return _write_relative_baseline_comparison(
+        results_root,
+        identity=identity,
+        current=current,
+    )
+
+
+def _write_relative_baseline_comparison(
+    results_root: Path,
+    *,
+    identity: CampaignIdentity,
+    current: dict[str, object],
+) -> Path:
+    if (
+        current.get("campaign_id") != identity.campaign_id
+        or current.get("campaign_lock_sha256") != identity.lock_sha256
+    ):
+        raise CampaignExecutionError("current formal baseline identity differs")
+    current_version = _formal_baseline_version(identity.campaign_id)
+    current_metrics, current_outcomes = _formal_baseline_metrics(
+        current,
+        identity=identity,
+    )
+    previous: dict[str, object] | None = None
+    previous_version = -1
+    baselines = results_root / "eval/results/baselines"
+    if baselines.is_dir() and not baselines.is_symlink():
+        for candidate in baselines.glob("p2-b7-canary-baseline-v*.json"):
+            try:
+                if candidate.is_symlink() or not candidate.is_file():
+                    continue
+                version = _formal_baseline_version(candidate.stem)
+                value = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+                continue
+            if (
+                version >= current_version
+                or version <= previous_version
+                or not isinstance(value, dict)
+                or value.get("schema_version") != identity.schema_version
+                or value.get("product") != identity.product.value
+                or value.get("taskset_sha256") != identity.taskset_sha256
+                or value.get("canary_catalog_sha256")
+                != identity.canary_catalog_sha256
+                or value.get("status") not in {
+                    BaselineStatus.PASSED.value,
+                    BaselineStatus.FAILED.value,
+                }
+            ):
+                continue
+            _formal_baseline_metrics(value, identity=identity)
+            previous = value
+            previous_version = version
+
+    previous_projection = None
+    metric_deltas = None
+    outcome_changes: list[dict[str, str]] = []
+    comparison_status = "first_formal_baseline"
+    if previous is not None:
+        previous_metrics, previous_outcomes = _formal_baseline_metrics(
+            previous,
+            identity=identity,
+        )
+        previous_projection = {
+            "campaign_id": previous["campaign_id"],
+            "campaign_lock_sha256": previous["campaign_lock_sha256"],
+            "metrics": previous_metrics,
+        }
+        metric_deltas = {
+            key: current_metrics[key] - previous_metrics[key]
+            for key in (
+                "common_valid_task_count",
+                "rondo_passed",
+                "codex_passed",
+                "sigma",
+                "delta",
+            )
+        }
+        outcome_changes = [
+            {
+                "side": side,
+                "task_id": task_id,
+                "previous": previous_outcomes[(side, task_id)],
+                "current": current_outcomes[(side, task_id)],
+            }
+            for side, task_id in sorted(current_outcomes)
+            if previous_outcomes.get((side, task_id))
+            != current_outcomes[(side, task_id)]
+        ]
+        comparison_status = "compared"
+
+    value = {
+        "schema_version": 1,
+        "comparison_status": comparison_status,
+        "current": {
+            "campaign_id": current["campaign_id"],
+            "campaign_lock_sha256": current["campaign_lock_sha256"],
+            "metrics": current_metrics,
+        },
+        "previous": previous_projection,
+        "metric_deltas": metric_deltas,
+        "task_outcome_changes": outcome_changes,
+    }
+    destination = (
+        results_root
+        / "eval/results/baseline-comparisons"
+        / f"{identity.campaign_id}.json"
+    )
+    _write_or_validate_aggregate(destination, value)
+    return destination
+
+
+def _formal_baseline_version(campaign_id: object) -> int:
+    match = re.fullmatch(r"p2-b7-canary-baseline-v([1-9][0-9]*)", str(campaign_id))
+    if match is None:
+        raise ValueError("formal baseline campaign ID is invalid")
+    return int(match.group(1))
+
+
+def _formal_baseline_metrics(
+    value: dict[str, object],
+    *,
+    identity: CampaignIdentity,
+) -> tuple[dict[str, int | str], dict[tuple[str, str], str]]:
+    assessment = value.get("assessment")
+    if (
+        _formal_baseline_version(value.get("campaign_id")) < 1
+        or not isinstance(value.get("campaign_lock_sha256"), str)
+        or value.get("schema_version") != identity.schema_version
+        or value.get("product") != identity.product.value
+        or value.get("taskset_sha256") != identity.taskset_sha256
+        or value.get("canary_catalog_sha256") != identity.canary_catalog_sha256
+        or not isinstance(assessment, dict)
+        or value.get("status")
+        not in {BaselineStatus.PASSED.value, BaselineStatus.FAILED.value}
+    ):
+        raise CampaignExecutionError("formal baseline comparison source is invalid")
+    outcomes_value = assessment.get("aggregated_outcomes")
+    if not isinstance(outcomes_value, list):
+        raise CampaignExecutionError("formal baseline outcomes are unavailable")
+    outcomes: dict[tuple[str, str], str] = {}
+    for row in outcomes_value:
+        if not isinstance(row, dict):
+            raise CampaignExecutionError("formal baseline outcome is invalid")
+        side = str(row.get("side"))
+        task_id = str(row.get("task_id"))
+        outcome = str(row.get("outcome"))
+        key = (side, task_id)
+        if (
+            side not in {Side.RONDO.value, Side.CODEX.value}
+            or task_id not in {task.task_id for task in identity.catalog.tasks}
+            or outcome not in {TaskOutcome.PASS.value, TaskOutcome.FAIL.value}
+            or key in outcomes
+        ):
+            raise CampaignExecutionError("formal baseline outcome is invalid")
+        outcomes[key] = outcome
+    expected = {
+        (side.value, task.task_id)
+        for task in identity.catalog.tasks
+        for side in (Side.RONDO, Side.CODEX)
+    }
+    if set(outcomes) != expected:
+        raise CampaignExecutionError("formal baseline outcome coverage differs")
+    try:
+        metrics: dict[str, int | str] = {
+            "status": str(value["status"]),
+            "common_valid_task_count": int(assessment["common_valid_task_count"]),
+            "rondo_passed": sum(
+                outcome == TaskOutcome.PASS.value
+                for (side, _task_id), outcome in outcomes.items()
+                if side == Side.RONDO.value
+            ),
+            "codex_passed": sum(
+                outcome == TaskOutcome.PASS.value
+                for (side, _task_id), outcome in outcomes.items()
+                if side == Side.CODEX.value
+            ),
+            "sigma": int(assessment["sigma"]),
+            "delta": int(assessment["delta"]),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CampaignExecutionError("formal baseline metrics are invalid") from exc
+    return metrics, outcomes
 
 
 def _write_or_validate_aggregate(path: Path, value: dict[str, object]) -> None:

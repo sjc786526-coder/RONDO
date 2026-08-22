@@ -1511,3 +1511,40 @@ RONDO Team State。结果只构成冻结三题的条件性案例，不估计总�
   `team_view.json`/HTML 是 body-free 投影，不能单独恢复交接正文；当时未采全的 Fact metadata、route 与 attention
   字段也不得事后补造。若原始 ignored 目录被删除，语义正文将无法从受跟踪产物恢复；仅为改善现有 handoff 展示不需要
   重跑，只有补采缺失字段或取得新的成功案例才需要另立运行。
+
+## 方向 0 首次 schema v7 正式 canary（Plan 051，2026-08-21）
+
+**状态**：稳定入口、冻结 bundle、无 API 预检、正式运行、聚合、结算、结果发布和资源清理均完成。产品基线固定为
+RONDO Local `54f62e5f7e86a7ab0d4f8d788eafec7176809395` 与 Codex
+`v0.147.0@be6e8eac029b183056b7e4402879f15d2c85f61b`；双方 main 为 `gpt-5.6-terra/medium`，双方
+Guardian 为 `gpt-5.6-terra/low`。
+
+- schema v7 增加显式 runtime bundle、跨 successor 的 400 USD task envelope、可靠 usage / 1 USD fallback /
+  provably-unsent 0 USD 三分法、wire 有界重试、崩溃恢复与稳定 `just eval-plan051` 入口；默认动作不发送请求。
+  外部验收发现首版入口仍把 Local commit 与唯一 Plan 051 envelope 固定在 loader 中；收口后同一入口可显式初始化
+  新 Local commit/manifest、campaign/batch、价格日期和独立授权 task budget，新 envelope 不覆盖 Plan 051 历史，
+  付费确认绑定新 budget ID。
+  Local bundle 走共享构建锁与看门狗从冻结源码构建，manifest SHA-256 为 `de414d3f...`；Codex 既有 bundle
+  manifest `e13a9d0f...` 自包含校验通过，未重建或升级上游。
+- v23—v26 在零 API preflight 阶段依次暴露并关闭本地 projection/verifier/supervisor 适配缺口，费用均为 0。
+  v27 的 20-side stub/10-receipt 通过，正式 wire 与首个 RONDO 槽可靠结算后暴露 v7 结果发布 schema 缺口；旧
+  identity 以 `$0.270445` 原子退役，未发送新请求。修复保持 v1—v6 历史 pair schema 严格不变，并以 v28 接续。
+- v28 完成 1 个 wire 与 40 个基础产品槽，400/400 个上游 attempt 均有可靠 usage；10/10 共同有效任务中 Local
+  的两轮 A/A 与一轮 A/B、Codex A/B 均为 5/10，`sigma=0`、`base_delta=0`、`delta=0`，无条件题，A/A、cross-side、
+  directional 三层均 `passed`。五道双方通过、五道双方有效失败，所有 reward 0 与失败均原样保留。
+- v28 identity 结算 `$9.142443`（wire `$0.116195`），跨 v23—v28 的 Plan 051 累计 `$9.412888`；
+  `actual_usd=null`，task envelope 已关闭且剩余 `$390.587112`，无 active identity、reservation 或 running slot。
+- distinct results worktree 发布 40 条 `track=tb` 与 `p2-b7-canary-baseline-v28.json`。正式 Docker 前后均为
+  26 images / 11.5 GB、0 container、0 volume、0 build cache，VHDX 增长 0；Windows `C:` 全程高于 80 GiB。
+  受影响的无 API harness 回归初轮 243/243、最终相关集合 346/346 通过；终态 finalizer 会在预算确认关闭后原子
+  清空 active pointer，默认入口复验为 `idle` / 0 requests。未运行全 workspace、CI、PR、validation、holdout、
+  本地模型或训练。
+- 合法 `failed` 正式基线现与 `passed` 一样先确认发布、关闭任务 envelope 并原子退役 active pointer，再分别返回
+  2/0；`run`/`resume` 与恢复用 `finalize` 共用该收口，`blocked` 保留给 successor 且不生成相对正式基线。结果侧新增
+  独立 relative-baseline JSON，v28 明确为无前驱的 `first_formal_baseline`，原 v28 tracked public baseline
+  SHA-256 `53e9b4b3...` 保持不变。`finalize` 可在 envelope 已闭合但 pointer 尚未退役的中断窗口直接恢复；正式终态与
+  runner 退出码错配会明确失败。整改相关 9 模块最终 362/362 通过，未重跑 Docker、Cargo、真实 API 或全 workspace。
+- 独立审查闭环：任务内审查先发现 active-pointer 终态问题；后续外部验收逐轮定位并关闭稳定入口输入/预算、
+  failed/blocked 收口、自动 finalize 与 close/pointer 中断恢复缺口。最终复验另跑入口相关 32/32、核对 v28 结果字节、
+  默认零请求状态与三棵工作树，结论 `PASS`，无剩余 correctness/functionality finding；报告见
+  `agent_log/2026-08-21-174146-plan051-final-independent-acceptance.md`。

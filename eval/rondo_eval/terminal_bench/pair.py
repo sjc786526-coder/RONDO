@@ -162,6 +162,9 @@ _SELECTED_PROFILE_KEYS = _PUBLIC_PROVIDER_KEYS | {
     "frozen_codex_model_catalog_sha256",
     "max_guardian_logical_requests",
 }
+_CAMPAIGN_V7_SELECTED_PROFILE_KEYS = _PUBLIC_PROVIDER_KEYS | {
+    "max_guardian_logical_requests",
+}
 _HARBOR_KEYS = {
     "package",
     "version",
@@ -956,7 +959,10 @@ class CampaignPublicationContext:
             metrics_from_dict(self.metrics)
         except RunMetricsError as exc:
             raise PairIdentityError("publication metrics are invalid") from exc
-        _parse_selected_profile(self.selected_profile)
+        if self.campaign_schema_version >= _CAMPAIGN_PRODUCT_SCHEMA_VERSION:
+            _validate_campaign_v7_selected_profile(self.selected_profile)
+        else:
+            _parse_selected_profile(self.selected_profile)
 
 
 def load_historical_pair_identity(
@@ -1750,6 +1756,29 @@ def _parse_paid_budget(value: object, *, pair_id: str) -> PaidBudgetIdentity:
 def _parse_selected_profile(value: object) -> SelectedProfileIdentity:
     if not isinstance(value, dict) or set(value) != _SELECTED_PROFILE_KEYS:
         raise PairIdentityError("selected paid profile differs from schema v2")
+    guardian_limit = _validate_public_selected_profile(value)
+    source_commit = value.get("frozen_codex_model_catalog_source_commit")
+    catalog_sha256 = value.get("frozen_codex_model_catalog_sha256")
+    _require_commit(source_commit, "frozen model catalog source commit")
+    _require_sha256(catalog_sha256, "frozen model catalog sha256")
+    return SelectedProfileIdentity(
+        provider_public={key: value[key] for key in _PUBLIC_PROVIDER_KEYS},
+        frozen_codex_model_catalog_source_commit=source_commit,
+        frozen_codex_model_catalog_sha256=catalog_sha256,
+        max_guardian_logical_requests=guardian_limit,
+    )
+
+
+def _validate_campaign_v7_selected_profile(value: object) -> None:
+    if (
+        not isinstance(value, dict)
+        or set(value) != _CAMPAIGN_V7_SELECTED_PROFILE_KEYS
+    ):
+        raise PairIdentityError("selected campaign profile differs from schema v7")
+    _validate_public_selected_profile(value)
+
+
+def _validate_public_selected_profile(value: Mapping[str, object]) -> int:
     provider = value.get("provider")
     if (
         not isinstance(provider, str)
@@ -1794,10 +1823,6 @@ def _parse_selected_profile(value: object) -> SelectedProfileIdentity:
         or (attempts > 1 and not statuses)
     ):
         raise PairIdentityError("selected paid retry contract is invalid")
-    source_commit = value.get("frozen_codex_model_catalog_source_commit")
-    catalog_sha256 = value.get("frozen_codex_model_catalog_sha256")
-    _require_commit(source_commit, "frozen model catalog source commit")
-    _require_sha256(catalog_sha256, "frozen model catalog sha256")
     guardian_limit = value.get("max_guardian_logical_requests")
     if (
         isinstance(guardian_limit, bool)
@@ -1805,12 +1830,7 @@ def _parse_selected_profile(value: object) -> SelectedProfileIdentity:
         or not 1 <= guardian_limit <= 3
     ):
         raise PairIdentityError("selected paid Guardian request limit is invalid")
-    return SelectedProfileIdentity(
-        provider_public={key: value[key] for key in _PUBLIC_PROVIDER_KEYS},
-        frozen_codex_model_catalog_source_commit=source_commit,
-        frozen_codex_model_catalog_sha256=catalog_sha256,
-        max_guardian_logical_requests=guardian_limit,
-    )
+    return guardian_limit
 
 
 def _parse_public_pricing(value: object) -> ModelPricing:

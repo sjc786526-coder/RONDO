@@ -1,6 +1,6 @@
 # RONDO 长程规划（WBS）
 
-最后更新：2026-08-21（Local M4 已人判收口；RONDO Multi 明确委派三任务案例已完成并通过协作分类修复后的独立复验；当前无已排期工作包，方向 0 首次 v7 正式 canary 与上游基线升级列为未排期待办）
+最后更新：2026-08-21（Plan 051 已完成方向 0 首次 schema v7 正式 canary 与稳定重跑入口；当前无已排期工作包，上游基线升级仍为未排期待办）
 
 本文件与 `doc/WBS/*.md` 是项目**当前状态与后续规划的唯一来源**。本文件只保留阶段级状态、下一工作包、
 跨方向顺序、依赖和授权门；方向内部的任务分解见子 WBS。已完成成果与详细证据见
@@ -21,9 +21,9 @@
 | P0 共享地基 | S1 审批模型覆盖与 S2 `E_final` 证据捕获已完成，开关默认关闭。S1 只覆盖模型与 effort，不覆盖 provider。 |
 | 测试基线 | Plan 004 完成对旧 81 项失败的分批整改后，最近一次有记录的 `v0.147.0` RONDO 全 workspace 实际执行 14,092 项：14,060 通过、31 失败、1 超时，Nextest 另列 23 项 ignored；P0 仍以定向验收收口。此后未重跑全 workspace，不能把该历史快照表述为当前全绿或当前失败复现。 |
 | P1 / M1 | B1、B2、B3 与 M1 已完成；冻结 Codex 与 RONDO 已在同一 TB 2.1 任务上完成真实端到端并归档。 |
-| P2 / 方向 0 | B4—B7 执行设施和 v22 真实执行已完成。E-B8 公平比较设施已闭合（campaign schema v7），已通过 pure/fake/loopback 与无 API synthetic Docker 全 catalog 验收；尚无正式 v7 identity，也未跑新 campaign。首次最小 v7 正式 canary 已确认为待办，但不排期，项目顺序不早于 Multi 第二期三个任务完成。E-A（A1—A7）随方向 1 一并挂起。 |
+| P2 / 方向 0 | B4—B7、E-B8 公平比较设施与 Plan 051 首次 schema v7 正式 canary 均已完成。v28 在冻结 Local `54f62e5...` / Codex `be6e8eac...`、Terra main-medium / Guardian-low 下得到 10/10 共同有效任务、双方各 5/10、`sigma=0`、`delta=0`，三层机械判据通过。稳定入口支持后续显式新 Local/bundle、campaign、价格与独立授权预算；passed/failed 自动且可恢复地收口并输出相对上一兼容正式基线的派生比较，blocked 保留给 successor；Plan 051 envelope 不会被复用。E-A（A1—A7）继续随方向 1 挂起。 |
 | v22 结论 | 机械一致性子门得到 `sigma=0`、`delta=3`，以 `ab_delta_exceeds_aa_sigma` failed；但 A/B 存在 catalog prompt 161-token 非对称、harness/deadline 混杂和非交错执行，因此**不能据此归因 RONDO 与 Codex 的能力或性能差异**。报告分歧已全部关闭。 |
-| 结果数据 | P2 v2—v22 公共账本已合入：`eval/results/runs.jsonl` 的 `track=tb` 部分共 244 条唯一 run，v22 为 32 条；v6—v22 的 11 份聚合 JSON 同步入库。原 results 分支已收口为 `zz-done/0811-p2-b7-results`。方向 2 的 L3/L4 另追加 4 条 `track=shadow`，当前账本共 248 条。 |
+| 结果数据 | P2 v2—v22 公共账本已有 244 条 `track=tb` 唯一 run；Plan 051 的 v28 新增 40 条、1 份 schema v7 aggregate 与 1 份 `first_formal_baseline` 派生比较，`track=tb` 现为 284 条。方向 2 另有 4 条 `track=shadow`，总账本为 288 条。v23—v27 的设施诊断 identity 保留在 ignored 运行资产，不伪装成产品基线。 |
 | 方向 1 | 教师 harness 研究 T1—T3 已完成，候选及证据见研究报告；**方向整体挂起、不排期**，重启时只针对 RONDO Local。 |
 | 方向 2 | **Local M4 已完成**：130 条 synthetic 主体与 16 条真实 holdout 锚点分开盲评、解盲与聚合，人判结论为**保留为实验**。微调侧在教师/裁判一致率、误拦、理由弱项和未被偏好数上均有明显改善（synthetic 教师一致 104/130 → 130/130、误拦 26 → 0；holdout 合规判定 14/16 → 16/16、误拦 6 → 1）；漏放两分区均维持 0，synthetic 结构化可用性两侧同为 130/130，`sole_preferred` 因一致度提高由 5 降为 0，并非全部指标单调改善；但 synthetic 增益很大程度来自同生成器的措辞线索，holdout 教师标签全为 allow，因此尚不能证明模型“安全地放行”。结论只记录，未改生产默认、provider、launcher 或部署。 |
 | 方向 3 | 独立产品源码 **RONDO Multi**，不是 Local 内的可插拔模式。第一期、第二期 A/B/C 与 Plan 050 明确委派案例均已完成并通过独立验收；当前无已排期新包。 |
@@ -33,8 +33,8 @@
 
 ## 2. 下一工作包与顺序
 
-工作包 1、工作包 2（Plan 022）与 RONDO Multi 第二期 A/B/C 已完成；Local 已收口且方向 1 挂起。
-当前没有已排期工作包。方向 0 首次 v7 canary 与上游基线升级仍是未排期待办。
+工作包 1、工作包 2（Plan 022）、RONDO Multi 第二期 A/B/C 与 **Plan 051：方向 0 首次 schema v7 正式
+Canary 与稳定重跑入口**均已完成。当前没有已排期工作包；方向 1 与 E-A 继续挂起，上游基线升级保留为不排期待办。
 
 ### 最新收口：Multi 明确委派三任务比较案例
 
@@ -95,18 +95,13 @@
     `collaboration_observed`、4 个 `policy_noncompliance`，影响链仍为 1 `observed`、5 `not_observed`。
 
 包 D 的代码、回归、既有资产重归约与独立复验均已完成；任务目标、题目选择与判读边界见 Multi 子 WBS，完成证据见
-WBS-COMPLETED。Local 与 Multi 均没有已排期下一包，方向 1 继续挂起。
+WBS-COMPLETED。Multi 与 Local 当前都没有已排期下一包，方向 1 继续挂起；不恢复 Local 产品优化或本地审批模型开发。
 
 ### 已确认待办（不排期）
 
-- **方向 0 首次 v7 正式 canary**：已确认至少执行一次，但项目顺序不早于 Multi 第二期 A/B/C 全部完成；这是排期与
-  API/Docker 资源边界，不是 Multi 对方向 0 的产品或设施依赖。方向 0 比较 `mydev/` 与同基线冻结 Codex，
-  Multi 的主动委派重跑不能充当它的 pilot，也不能替代 Local 公平基线。默认只跑冻结 10 个 canary 的最小正式
-  campaign，按 v7 合同执行 A/A、交错基础 A/B 和差异题条件加跑；不恢复 61 个 validation、18 个 holdout，
-  也不预设第二轮完整 campaign。若 Local 仍长期挂起，可以等到下一次 Local 优化临近时再跑，减少服务端漂移。
 - **上游 Codex 基线升级**：作为横跨 `mydev/` 与 `multidev/` 的独立任务保留，不排期、不写死目标版本。
   启动时再冻结当时采用的上游版本与 commit，审查上游差异并分别合入两套产品，更新机器事实、构建身份与受影响测试；
-  不混入普通功能任务。若它安排在 v7 canary 之前，campaign 必须等升级完成后在同一新基线上比较两侧。
+  不混入普通功能任务。Plan 051 已冻结 v0.147.0，不受该未排期升级影响；未来升级只影响升级后的新 campaign。
 
 ### 挂起项（不排期）
 
@@ -118,12 +113,12 @@ WBS-COMPLETED。Local 与 Multi 均没有已排期下一包，方向 1 继续挂
 
 | 编号 | 方向 | 产品线 | 状态 | 解锁条件 |
 |---|---|---|---|---|
-| 0 | 量化测评基准 | Local | 公平比较设施已闭合；首次最小 v7 正式 canary 已确认、不排期 | 项目顺序不早于 Multi 第二期完成；执行时另获 API/Docker 授权；E-A 挂起 |
+| 0 | 量化测评基准 | Local | Plan 051 已完成首次正式 v7 十题基线与稳定重跑入口 | 当前无下一工作包；E-A 继续挂起 |
 | 1 | Harness 优化 | Local | **挂起，不排期** | 由用户决定重启；重启时只针对 RONDO Local |
 | 2 | 本地审批模型接入与横评 | Local | **Local M4 已收口，结论为保留为实验** | 无下一工作包；生产启用须另行立项 |
 | 3 | Event 驱动的团队世界状态多智能体协作 | Multi | 第一、二期与 Plan 050 明确委派案例均已完成并通过独立验收 | 当前无已排期新包 |
 
-- **Local 与 Multi 地位相同**。Local 已收口；Multi 第一、二期及明确委派三任务案例均已完成。工程任务可以
+- **Local 与 Multi 地位相同**。Local 已完成 Plan 051 并收口；Multi 第一、二期及明确委派三任务案例均已完成。工程任务可以
   并行，重型任务仍因资源约束全局串行。
 - 方向 0 与方向 2 共用 P0。方向 3 不再排在方向 1 之后；方向 1 的挂起也不阻塞任何其他方向。
 - Multi 新包只研究明确委派条件下的协作过程与外部结果；方向 0 面向 `mydev/` 的内核/行为优化基线。二者只共享排期、
@@ -210,7 +205,7 @@ API 预算与结算、BinaryManifest 与结果归档、本地模型 launcher/doc
 | Multi 二期 B | Team Lens：复用原生 rollout trace 的离线团队行为抽取与静态报告 | 工程/观测 | 已完成（Plan 048，零 hook） |
 | Multi 二期 C | 相同 proactive policy 下，冻结 Codex 与 RONDO 的主动委派与收益对比 | 测评 | 已完成（Plan 049）：六个 pilot 均无 Root 主动委派，activation 阴性，正式十题不适用 |
 | Multi 明确委派案例 | 同一明确 collaboration policy 下的三任务跨产品比较与 Team Lens 展示 | 案例研究/产品展示 | 已完成并通过修复后独立复验（Plan 050） |
-| 方向 0 首次 v7 正式 canary | 10 个 canary 的 Local/冻结 Codex 公平基线；条件加跑，不扩到 validation/holdout | 测评 | 已确认待办，不排期；不早于 Multi 第二期完成 |
+| 方向 0 首次 v7 正式 canary | 10 个 canary 的 Local/冻结 Codex 公平基线；条件加跑，不扩到 validation/holdout | 测评 | 已完成（Plan 051）：v28 共同有效 10/10，双方 5/10，`sigma=0`、`delta=0`，三层通过 |
 | 共享上游基线升级 | 选择任务启动时的目标上游版本，审查差异并同步两套产品与机器事实 | 工程 | 已确认待办，不排期；目标版本不预写死 |
 
 **M2 与 M5 已退役**，历史文档中的这两个名字不再对应当前任何门禁：M2 的“测评设施就绪”部分成为工作包 1
@@ -229,7 +224,8 @@ pairwise-max `σ` 等事后放宽办法：
    其中若 RONDO 全败而上游全过，则另由方向性子门判为不通过。
 4. **infra**：基础设施失败不计能力分，只按同题运行链定点补跑；每轮后最终 infra 超过 2 项即 blocked；
    共同有效集合至少 8 项。
-5. **预算**：基础运行、预冻结重复、infra attempts 与 wire canary 全部计入 campaign cap，并单独授权。
+5. **预算**：基础运行、预冻结重复、infra attempts 与 wire canary 全部计入预先授权的预算上限。Plan 051 的
+   v23 与全部 successor 共用同一个 `400 USD` 任务累计，换 identity 不能清零。
 
 这套判据**只适用于该设施自身的等条件 A/A、A/B 比较**。Local M3、Local M4 与已完成的 Multi 第一期退化验收都
 **不继承** `σ`/`delta`（理由分别见 `doc/WBS/local-approval-model.md` 与
@@ -252,6 +248,9 @@ v22 使用“两轮 RONDO A/A + 两侧各一轮 A/B + 条件两侧各加跑两�
 - 任何真实数据外发，包括把本项目自造的合成训练数据上传到云端。
 - 云 GPU 训练、上传或下载权重、产生外部费用或状态变更。
 - 上游基线升级。
+
+Plan 051 已取得其 execplan 明列范围内的一次性构建、Docker、真实 API 与最多 `400 USD` 任务累计授权；
+同一任务内按合同创建 successor 或恢复运行不构成新的批次授权。合并 `main` 与推送仍等待用户另行批准。
 
 **订阅制入口不计入 API 预算门**：Sol 经开发用 Codex 生成教师标签、Opus 5 经 Claude Code 担任横评裁判，
 二者不额外计费，因此不受 API 预算授权门约束，只受订阅速率与配额限制。相应地它们带两条限制：

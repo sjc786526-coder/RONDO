@@ -145,6 +145,21 @@ def campaign_terminal_bench_request(
         seccomp_profile_effective_sha256=identity.no_api_seccomp["effective_sha256"],
         require_container_metrics=True,
         frozen_task=task,
+        pinned_model_id=(
+            str(identity.selected_profile["effective_main_model"])
+            if identity.enforces_fair_comparison
+            else None
+        ),
+        pinned_main_effort=(
+            str(identity.selected_profile["main_effort"])
+            if identity.enforces_fair_comparison
+            else None
+        ),
+        pinned_guardian_effort=(
+            str(identity.selected_profile["guardian_effort"])
+            if identity.enforces_fair_comparison
+            else None
+        ),
     )
 
 
@@ -224,14 +239,15 @@ async def run_budgeted_terminal_bench(
         raise TerminalBenchRunError("the in-memory provider key is invalid")
     if (pair_identity is None) == (campaign_identity is None):
         raise TerminalBenchRunError("exactly one paid execution identity is required")
-    provider = config.paid_provider_projection(request.provider_name)
     if campaign_identity is None:
         assert pair_identity is not None
+        provider = config.paid_provider_projection(request.provider_name)
         pair_identity.validate_selected_profile(provider)
         max_guardian_logical_requests = (
             pair_identity.require_selected_profile().max_guardian_logical_requests
         )
     else:
+        provider = campaign_identity.provider_projection(config)
         if (
             campaign_slot is None
             or campaign_task is None

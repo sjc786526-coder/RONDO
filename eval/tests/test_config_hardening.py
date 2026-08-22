@@ -122,13 +122,17 @@ class ConfigHardeningTests(unittest.TestCase):
             task_image_digest=f"sha256:{'c' * 64}",
             binary=binary,
             terminal_bench_version="harbor-v0.20.0",
+            model_id="test-sol-model",
+            main_effort="low",
+            guardian_effort="low",
         )
         self.assertEqual(spec.provider.config_sha256, config.source_sha256)
         self.assertEqual(spec.provider.config_source, "rondo.local.toml")
         self.assertEqual(spec.provider.provider_id, "relay")
         self.assertEqual(spec.provider.main_model, "test-sol-model")
-        self.assertEqual(spec.provider.main_effort, "medium")
-        self.assertEqual(spec.provider.guardian_model, "test-luna-model")
+        self.assertEqual(spec.provider.main_effort, "low")
+        self.assertEqual(spec.provider.guardian_model, "test-sol-model")
+        self.assertEqual(spec.provider.guardian_effort, "low")
         self.assertEqual(spec.provider.max_attempts, 5)
         self.assertEqual(
             spec.provider.unbilled_retry_statuses, (429, 500, 502, 503, 504)
@@ -214,6 +218,32 @@ class ConfigHardeningTests(unittest.TestCase):
                     self.paths
                 ).paid_provider_projection()
                 self.assertNotEqual(first.profile_sha256, repriced.profile_sha256)
+
+    def test_model_pinned_effort_overrides_are_projected_and_hashed(self) -> None:
+        terra_config = PAID_EVAL_CONFIG.replace(
+            'model_id = "test-sol-model"', 'model_id = "gpt-5.6-terra"', 1
+        )
+        (self.paths.common_root / "rondo.local.toml").write_text(
+            terra_config, encoding="utf-8"
+        )
+        config = load_runtime_config(self.paths)
+
+        inherited = config.paid_provider_projection(model_id="gpt-5.6-terra")
+        projected = config.paid_provider_projection(
+            model_id="gpt-5.6-terra",
+            main_effort="medium",
+            guardian_effort="medium",
+        )
+
+        self.assertEqual(projected.main_model, "gpt-5.6-terra")
+        self.assertEqual(projected.guardian_model, "gpt-5.6-terra")
+        self.assertEqual(projected.main_effort, "medium")
+        self.assertEqual(projected.guardian_effort, "medium")
+        self.assertEqual(inherited.guardian_effort, "low")
+        self.assertNotEqual(inherited.profile_sha256, projected.profile_sha256)
+
+        with self.assertRaises(ConfigError):
+            config.paid_provider_projection(main_effort="unsupported")
 
     def test_unknown_env_name_and_shell_expansion_are_rejected(self) -> None:
         config = load_runtime_config(self.paths)

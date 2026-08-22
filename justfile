@@ -464,19 +464,39 @@ eval-b7-baseline docker_host_volume results_worktree_root rondo_measurement code
         --rondo-measurement-worktree-root "{{rondo_measurement}}" \
         --codex-measurement-worktree-root "{{codex_measurement}}"
 
-# Generate and activate one successor identity after its predecessor is terminal.
-# Only fair-comparison (schema v7) successors can be minted: the comparison
-# contract file must carry the post-pilot frozen repeat contract, run
-# conditions, shared catalog identity and product.
-eval-b7-next-identity run_id_date run_id_sequence_base comparison_contract campaign_cap_usd:
+# Stable direction-0 formal-baseline entry retained under its original Plan 051
+# name. Pass ordinary CLI flags after the action. initialize/prepare/compare are
+# zero-API; preflight is stub-only Docker under the shared watchdog; run/resume
+# additionally require the task-budget-bound paid acknowledgement.
+eval-plan051 action="status" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+    UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
+    UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
+        uv run --directory eval --frozen --no-sync \
+        python -B -m rondo_eval.terminal_bench.formal_canary "{{action}}" {{args}}
+
+# Generate and activate one schema-v7 identity.  Both runtime manifests and
+# the task-envelope budget are explicit inputs: the generator never copies the
+# historical Sol profile or cb652e1 Local bundle from v22.
+eval-b7-next-identity campaign_id batch_id run_id_date run_id_sequence_base comparison_contract rondo_runtime_manifest rondo_source_commit codex_runtime_manifest price_snapshot_date task_budget_id task_budget_cap_usd task_budget_prior_estimated_usd:
     @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \
         UV_PROJECT_ENVIRONMENT="$common_root/eval/.venv" \
         uv run --directory eval --frozen --no-sync python -B -m rondo_eval.terminal_bench.baseline_identity \
+        --campaign-id "{{campaign_id}}" \
+        --batch-id "{{batch_id}}" \
         --run-id-date "{{run_id_date}}" \
         --run-id-sequence-base "{{run_id_sequence_base}}" \
         --comparison-contract "{{comparison_contract}}" \
-        --campaign-cap-usd "{{campaign_cap_usd}}"
+        --rondo-runtime-manifest "{{rondo_runtime_manifest}}" \
+        --rondo-source-commit "{{rondo_source_commit}}" \
+        --codex-runtime-manifest "{{codex_runtime_manifest}}" \
+        --price-snapshot-date "{{price_snapshot_date}}" \
+        --task-budget-id "{{task_budget_id}}" \
+        --task-budget-cap-usd "{{task_budget_cap_usd}}" \
+        --task-budget-prior-estimated-usd "{{task_budget_prior_estimated_usd}}"
 
 # Freeze one stub preflight receipt per task of the active v7 campaign. Both
 # frozen binaries run the real Harbor/Docker chain against a loopback stub that
@@ -505,7 +525,8 @@ eval-b7-resolve-diagnosis chain_id category disposition evidence_code:
         --disposition "{{disposition}}" \
         --evidence-code "{{evidence_code}}"
 
-# Retire an idle active campaign after a confirmed local implementation defect.
+# Retire an active campaign after a confirmed local implementation defect. A
+# running paid slot must already have one complete usage-priced settlement.
 eval-b7-retire-local-defect:
     @common_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"; \
         UV_CACHE_DIR="$common_root/eval-data/uv-cache" \

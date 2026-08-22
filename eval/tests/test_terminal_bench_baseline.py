@@ -24,6 +24,7 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     BaselineError,
     BaselineRun,
     BaselineStatus,
+    CampaignLockRegistration,
     CampaignSlotStatus,
     CampaignStateLedger,
     ConditionalRun,
@@ -41,10 +42,11 @@ from rondo_eval.terminal_bench.baseline import (  # noqa: E402
     load_campaign_identity,
 )
 from rondo_eval.terminal_bench.scoring import TaskOutcome  # noqa: E402
-from rondo_eval.terminal_bench import baseline_cli  # noqa: E402
+from rondo_eval.terminal_bench import baseline_cli, baseline_diagnosis  # noqa: E402
 from rondo_eval.terminal_bench.baseline_identity import (  # noqa: E402
     CampaignIdentityGenerationError,
     required_successor_prior,
+    retire_active_campaign_pointer,
     validate_successor_run_range,
 )
 
@@ -282,7 +284,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(identity.batch_id, "p2-b7-canary-sol-sol-v9")
         self.assertEqual(identity.budget["campaign_cap_usd"], "600.000000")
         self.assertEqual(identity.budget["prior_estimated_usd"], "281.718702")
-        identity.validate_provider(load_runtime_config(paths).paid_provider_projection())
+        identity.validate_provider(
+            load_runtime_config(paths).paid_provider_projection(
+                model_id=str(identity.selected_profile["effective_main_model"]),
+                main_effort=str(identity.selected_profile["main_effort"]),
+                guardian_effort=str(identity.selected_profile["guardian_effort"]),
+            )
+        )
 
         successor = self._identity_v2()
         self.assertEqual(successor.schema_version, 2)
@@ -310,23 +318,13 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         latest = load_historical_campaign_identity(paths, registry[-1].version)
         self.assertEqual(latest.campaign_id, registry[-1].campaign_id)
         self.assertEqual(latest.lock_sha256, registry[-1].lock_sha256)
-        self.assertEqual(latest.schema_version, 6)
+        self.assertEqual(latest.schema_version, 7)
         self.assertEqual(latest.max_attempts, 4)
         self.assertEqual(latest.upstream_timeout_seconds, 180.0)
-        self.assertEqual(len(latest.continuation), 25)
-        self.assertEqual(
-            {item.source_campaign_id for item in latest.continuation},
-            {
-                "p2-b7-canary-baseline-v18",
-                "p2-b7-canary-baseline-v19",
-                "p2-b7-canary-baseline-v20",
-            },
-        )
+        self.assertTrue(latest.enforces_fair_comparison)
+        self.assertEqual(latest.continuation, ())
         self.assertEqual(len(latest.slots), 321)
-        self.assertIn(
-            latest.budget["campaign_cap_usd"],
-            {"700.000000", "1000.000000", "1300.000000", "1600.000000"},
-        )
+        self.assertEqual(latest.budget["campaign_cap_usd"], "400.000000")
         self.assertEqual(
             Decimal(latest.budget["prior_estimated_usd"]),
             required_successor_prior(paths, version=registry[-2].version),
@@ -379,6 +377,69 @@ class TerminalBenchBaselineTests(unittest.TestCase):
             load_historical_campaign_identity(paths, 9).campaign_id,
             "p2-b7-canary-baseline-v9",
         )
+
+    def test_retire_active_campaign_pointer_preserves_lock_as_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pointer_path = root / CAMPAIGN_ACTIVE_POINTER_PATH
+            pointer_path.parent.mkdir(parents=True)
+            relative = Path("eval/locks/p2-b7-canary-baseline-v28.json")
+            pointer_path.write_text(
+                json.dumps(
+                    {"schema_version": 1, "active_lock": relative.as_posix()}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            identity = mock.Mock(
+                campaign_id="p2-b7-canary-baseline-v28",
+                lock_sha256="a" * 64,
+            )
+            registration = CampaignLockRegistration(
+                version=28,
+                path=relative,
+                campaign_id=identity.campaign_id,
+                batch_id="p2-b7-canary-v28",
+                run_id_date="20260821",
+                run_id_sequence_base=500001606,
+                max_run_slots=321,
+                lock_sha256=identity.lock_sha256,
+            )
+            with mock.patch(
+                "rondo_eval.terminal_bench.baseline_identity.campaign_lock_registry",
+                return_value=(registration,),
+            ):
+                retire_active_campaign_pointer(
+                    RepoPaths(root, root), identity=identity
+                )
+
+            self.assertEqual(
+                json.loads(pointer_path.read_text(encoding="utf-8")),
+                {"schema_version": 1, "active_lock": None},
+            )
+            pointer_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "active_lock": "eval/locks/p2-b7-canary-baseline-v29.json",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch(
+                    "rondo_eval.terminal_bench.baseline_identity.campaign_lock_registry",
+                    return_value=(registration,),
+                ),
+                self.assertRaisesRegex(
+                    CampaignIdentityGenerationError,
+                    "pointer moved to another identity",
+                ),
+            ):
+                retire_active_campaign_pointer(
+                    RepoPaths(root, root), identity=identity
+                )
 
     def test_campaign_registry_sorts_multi_digit_versions_numerically(self) -> None:
         live = RepoPaths.discover(Path.cwd())
@@ -582,6 +643,54 @@ class TerminalBenchBaselineTests(unittest.TestCase):
                     len(identity.slots) - 1,
                 )
                 self.assertEqual(snapshot["slots"][0]["estimated_usd"], "0.200000")
+
+    def test_local_defect_retirement_uses_only_complete_usage_settlement(self) -> None:
+        identity = mock.Mock()
+        identity.slot.return_value.run_id = "paid-run"
+        state = {
+            "slots": [
+                {"slot_id": "wire-canary", "status": "completed"},
+                {"slot_id": "paid-slot", "status": "running"},
+            ]
+        }
+        budget = {
+            "runs": {
+                "paid-run": {
+                    "cap_usd": "40.000000",
+                    "spent_usd": "0.128314",
+                    "stopped": False,
+                    "stop_reason": None,
+                    "requests": {
+                        "request-1": {
+                            "status": "settled",
+                            "reserved_usd": "7.554000",
+                            "charged_usd": "0.128314",
+                            "usage_valid": True,
+                            "attempt_count": 1,
+                            "settlement_kind": "usage_priced",
+                        }
+                    },
+                }
+            }
+        }
+
+        slot_id, spent = baseline_diagnosis._running_local_defect_settlement(
+            identity, state, budget
+        )
+
+        self.assertEqual(slot_id, "paid-slot")
+        self.assertEqual(spent, "0.128314")
+        identity.slot.assert_called_once_with("paid-slot")
+
+        budget["runs"]["paid-run"]["requests"]["request-1"][
+            "usage_valid"
+        ] = False
+        with self.assertRaisesRegex(
+            SystemExit, "running paid slot has no complete usage settlement"
+        ):
+            baseline_diagnosis._running_local_defect_settlement(
+                identity, state, budget
+            )
 
     def test_post_oracle_worker_returns_after_wire_then_advances_paid_step(self) -> None:
         identity = self._identity_v2()
@@ -1736,6 +1845,57 @@ class TerminalBenchBaselineTests(unittest.TestCase):
         self.assertEqual(len(values), 1)
         execute_mock.assert_called_once()
         self.assertEqual(len(state.skipped), 3)
+
+    def test_schema_v7_ordinary_infra_consumes_all_attempts_without_operator_hold(self) -> None:
+        identity = replace(
+            self._identity_v2(),
+            schema_version=7,
+            comparison={
+                "repeat_contract": {
+                    "repeats_per_task": 3,
+                    "aggregation": "strict_majority",
+                    "frozen_after": "pilot",
+                }
+            },
+        )
+        task = identity.catalog.tasks[0]
+        chain_id = f"base:aa-rondo-1:{task.task_id}"
+
+        class State:
+            def skip(self, slot_id: str, *, reason: str) -> None:
+                raise AssertionError((slot_id, reason))
+
+            def require_diagnosis(self, **kwargs):
+                raise AssertionError(kwargs)
+
+            def mark_task_local_reproducible(self, **kwargs) -> None:
+                raise AssertionError(kwargs)
+
+        calls: list[str] = []
+
+        def execute(*, slot, **kwargs):
+            del kwargs
+            calls.append(slot.slot_id)
+            return baseline_cli.ExecutedSlot(
+                slot,
+                RunOutcome.INFRA_FAILED,
+                TaskOutcome.INFRA,
+                Decimal("1.000000"),
+                MechanicalFailureCategory.DOCKER_RUNTIME,
+            )
+
+        with mock.patch.object(baseline_cli, "_execute_task_slot", side_effect=execute):
+            values = baseline_cli._execute_attempt_chain(
+                identity=identity,
+                state=State(),
+                tracker=baseline_cli.MechanicalFailureTracker(
+                    continue_bounded_infra=True
+                ),
+                task=task,
+                chain_id=chain_id,
+            )
+        self.assertEqual(len(values), 4)
+        self.assertEqual(calls, [f"{chain_id}:a{attempt}" for attempt in range(1, 5)])
 
     def test_two_remaining_infra_per_round_can_continue(self) -> None:
         identity = self._identity()

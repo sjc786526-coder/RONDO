@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import contextlib
+import asyncio
 import inspect
 import io
 import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -37,6 +39,7 @@ from rondo_eval.contracts import (
 from rondo_eval.terminal_bench.baseline import (
     BASE_ROUNDS,
     CampaignLockRegistration,
+    CampaignStateLedger,
     FAIR_COMPARISON_SCHEMA_VERSION,
     BaselineError,
     BaselineRun,
@@ -45,6 +48,7 @@ from rondo_eval.terminal_bench.baseline import (
     _parse_comparison_block,
     _parse_continuation_references,
     _valid_campaign_budget,
+    _valid_fair_bundle_contract,
     assess_baseline,
     campaign_baseline_contract,
     campaign_slot_total,
@@ -85,6 +89,7 @@ from rondo_eval.terminal_bench.runner import PreparedTerminalBenchRun
 from rondo_eval.terminal_bench.__main__ import _load_manifest
 from rondo_eval.terminal_bench.freeze import TERMINAL_BENCH_VERSION
 from rondo_eval.terminal_bench.live import campaign_terminal_bench_request
+from rondo_eval.terminal_bench.task_budget import TASK_BUDGET_ID
 
 
 MAIN_PRICING = ModelPricing(
@@ -796,6 +801,16 @@ class _CampaignFixture:
     @classmethod
     def v7(cls, *, repeats: int = 3, comparison_overrides: dict | None = None):
         base = cls.v6()
+        paths = RepoPaths.discover(Path.cwd())
+        bundles = {
+            side: {
+                **bundle,
+                "source_commit": _load_manifest(
+                    paths.common_root / bundle["manifest_path"], paths.common_root
+                ).source_commit,
+            }
+            for side, bundle in base.bundles.items()
+        }
         catalog_identity = cls.catalog_identity()
         # Bind the declared conditions to the campaign's own authoritative
         # facts so the fixture exercises the real cross-check rather than a
@@ -826,9 +841,12 @@ class _CampaignFixture:
             schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
             budget={
                 **base.budget,
-                # A v7 campaign starts fresh: its own cap, no inherited spend.
-                "campaign_cap_usd": "200.000000",
+                # A v7 campaign starts fresh inside the exact Plan 051 envelope.
+                "campaign_cap_usd": "400.000000",
                 "prior_estimated_usd": "0.000000",
+                "task_budget_id": TASK_BUDGET_ID,
+                "task_budget_cap_usd": "400.000000",
+                "task_budget_prior_estimated_usd": "0.000000",
                 "max_run_slots": campaign_slot_total(
                     task_count=10,
                     max_attempts=4,
@@ -839,11 +857,56 @@ class _CampaignFixture:
                 FAIR_COMPARISON_SCHEMA_VERSION,
                 conditional_repeats_per_side=repeats - 1,
             ),
+            bundles=bundles,
             comparison=comparison,
         )
 
 
 class CampaignExecutionOrderTests(unittest.TestCase):
+    def test_pristine_v7_identity_can_retire_after_zero_api_preflight_defect(
+        self,
+    ) -> None:
+        identity = _CampaignFixture.v7()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            with CampaignStateLedger(path, identity=identity) as ledger:
+                ledger.retire_preflight_blocked(
+                    reason=(
+                        "diagnosed_campaign_defect:"
+                        "local_implementation_defect:preflight_projection"
+                    )
+                )
+                snapshot = ledger.snapshot()
+        self.assertEqual(snapshot["status"], "blocked")
+        self.assertTrue(all(row["status"] == "skipped" for row in snapshot["slots"]))
+        self.assertTrue(
+            all(row["estimated_usd"] == "0.000000" for row in snapshot["slots"])
+        )
+
+    def test_historical_campaign_request_keeps_host_provider_defaults(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        identity = _CampaignFixture.v6()
+        task = identity.catalog.tasks[0]
+        manifest = _load_manifest(
+            paths.common_root / identity.bundles["codex"]["manifest_path"],
+            paths.common_root,
+        )
+        request = campaign_terminal_bench_request(
+            identity=identity,
+            side=Side.CODEX,
+            task=task,
+            binary=manifest,
+            common_root=paths.common_root,
+            work_root=paths.common_root / "eval-data/work/historical-contract",
+            docker_task_id="historical-contract-codex",
+            seccomp_profile=paths.worktree_root
+            / identity.no_api_seccomp["profile_path"],
+            budget_usd=40.0,
+        )
+        self.assertIsNone(request.pinned_model_id)
+        self.assertIsNone(request.pinned_main_effort)
+        self.assertIsNone(request.pinned_guardian_effort)
+
     def test_historical_campaigns_keep_round_blocked_order(self) -> None:
         order = _CampaignFixture.v6().base_round_order
         self.assertEqual(
@@ -1032,6 +1095,11 @@ class CampaignFairComparisonContractTests(unittest.TestCase):
             self.assertIs(
                 request.product,
                 Product.RONDO_LOCAL if side is Side.RONDO else None,
+            )
+            self.assertEqual(request.pinned_model_id, provider.main_model)
+            self.assertEqual(request.pinned_main_effort, provider.main_effort)
+            self.assertEqual(
+                request.pinned_guardian_effort, provider.guardian_effort
             )
             spec = RunSpec(
                 side=side,
@@ -1570,16 +1638,35 @@ class SuccessorIdentityTests(unittest.TestCase):
             ):
                 generate_successor_lock(
                     paths,
+                    campaign_id="p2-b7-canary-baseline-v29",
+                    batch_id="p2-b7-canary-v29",
                     run_id_date="20260901",
                     run_id_sequence_base=500000001,
                     comparison=block,
-                    campaign_cap_usd=Decimal("100.000000"),
+                    rondo_runtime_manifest=Path("missing-rondo-manifest.json"),
+                    rondo_source_commit="1" * 40,
+                    codex_runtime_manifest=Path("missing-codex-manifest.json"),
+                    price_snapshot_date="2026-09-01",
+                    task_budget_id=TASK_BUDGET_ID,
+                    task_budget_cap_usd=Decimal("400.000000"),
+                    task_budget_prior_estimated_usd=Decimal("0.000000"),
                 )
 
-    def test_the_generator_requires_the_comparison_contract(self) -> None:
+    def test_the_generator_requires_explicit_frozen_inputs(self) -> None:
         signature = inspect.signature(generate_successor_lock)
-        parameter = signature.parameters["comparison"]
-        self.assertEqual(parameter.default, inspect.Parameter.empty)
+        for name in (
+            "comparison",
+            "campaign_id",
+            "batch_id",
+            "rondo_runtime_manifest",
+            "rondo_source_commit",
+            "codex_runtime_manifest",
+            "price_snapshot_date",
+            "task_budget_id",
+            "task_budget_cap_usd",
+            "task_budget_prior_estimated_usd",
+        ):
+            self.assertEqual(signature.parameters[name].default, inspect.Parameter.empty)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             baseline_identity.main(
                 ["--run-id-date", "20260901", "--run-id-sequence-base", "500000001"]
@@ -1598,14 +1685,22 @@ class SuccessorIdentityTests(unittest.TestCase):
             "product": Product.RONDO_MULTI.value,
         }
         with self.assertRaisesRegex(
-            CampaignIdentityGenerationError, "inherited Local bundles"
+            CampaignIdentityGenerationError, "product must be rondo-local"
         ):
             generate_successor_lock(
                 RepoPaths.discover(Path.cwd()),
+                campaign_id="p2-b7-canary-baseline-v29",
+                batch_id="p2-b7-canary-v29",
                 run_id_date="20260901",
                 run_id_sequence_base=500000001,
                 comparison=comparison,
-                campaign_cap_usd=Decimal("100.000000"),
+                rondo_runtime_manifest=Path("missing-rondo-manifest.json"),
+                rondo_source_commit="1" * 40,
+                codex_runtime_manifest=Path("missing-codex-manifest.json"),
+                price_snapshot_date="2026-09-01",
+                task_budget_id=TASK_BUDGET_ID,
+                task_budget_cap_usd=Decimal("400.000000"),
+                task_budget_prior_estimated_usd=Decimal("0.000000"),
             )
 
     def test_an_unreadable_contract_file_fails_before_any_work(self) -> None:
@@ -1614,15 +1709,154 @@ class SuccessorIdentityTests(unittest.TestCase):
         ):
             baseline_identity.main(
                 [
+                    "--campaign-id",
+                    "p2-b7-canary-baseline-v29",
+                    "--batch-id",
+                    "p2-b7-canary-v29",
                     "--run-id-date",
                     "20260901",
                     "--run-id-sequence-base",
                     "500000001",
                     "--comparison-contract",
                     "/nonexistent/comparison.json",
-                    "--campaign-cap-usd",
+                    "--rondo-runtime-manifest",
+                    "missing-rondo-manifest.json",
+                    "--rondo-source-commit",
+                    "1" * 40,
+                    "--codex-runtime-manifest",
+                    "missing-codex-manifest.json",
+                    "--price-snapshot-date",
+                    "2026-09-01",
+                    "--task-budget-id",
+                    "plan-051",
+                    "--task-budget-cap-usd",
                     "100.000000",
+                    "--task-budget-prior-estimated-usd",
+                    "0.000000",
                 ]
+            )
+
+    def test_new_task_can_mint_a_new_local_commit_and_fresh_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            locks = root / "eval/locks"
+            locks.mkdir(parents=True)
+            pointer = locks / "p2-b7-active.json"
+            pointer.write_text(
+                '{"schema_version":1,"active_lock":null}\n', encoding="utf-8"
+            )
+            historical = locks / "p2-b7-canary-baseline-v28.json"
+            historical.write_text(
+                json.dumps(
+                    {
+                        "taskset_sha256": "a" * 64,
+                        "terminal_bench_commit": "b" * 40,
+                        "no_api_seccomp": {"profile_path": "eval/seccomp.json"},
+                        "budget": {
+                            "task_budget_id": TASK_BUDGET_ID,
+                            "task_budget_cap_usd": "400.000000",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            registration = CampaignLockRegistration(
+                version=28,
+                path=Path("eval/locks/p2-b7-canary-baseline-v28.json"),
+                campaign_id="p2-b7-canary-baseline-v28",
+                batch_id="p2-b7-canary-v28",
+                run_id_date="20260821",
+                run_id_sequence_base=500001606,
+                max_run_slots=321,
+                lock_sha256="8" * 64,
+            )
+            catalog = SimpleNamespace(
+                tasks=tuple(SimpleNamespace(task_id=f"task-{index}") for index in range(10)),
+                taskset_sha256="a" * 64,
+                catalog_sha256="c" * 64,
+                terminal_bench_commit="b" * 40,
+            )
+            generated = SimpleNamespace(
+                campaign_id="p2-b7-canary-baseline-v29",
+                batch_id="p2-b7-canary-v29",
+                budget={"prior_estimated_usd": "0.000000"},
+            )
+            bundle = lambda source: {
+                "manifest_path": f"eval-data/bin/{source}/manifest.json",
+                "manifest_sha256": "d" * 64,
+                "source_commit": source,
+            }
+            with (
+                mock.patch.object(baseline_identity, "_require_clean_worktree"),
+                mock.patch.object(
+                    baseline_identity,
+                    "campaign_lock_registry",
+                    return_value=(registration,),
+                ),
+                mock.patch.object(
+                    baseline_identity,
+                    "load_task_budget",
+                    return_value={"active_identity": None},
+                ),
+                mock.patch.object(
+                    baseline_identity,
+                    "load_successor_canary_catalog",
+                    return_value=catalog,
+                ),
+                mock.patch.object(baseline_identity, "validate_successor_run_range"),
+                mock.patch.object(
+                    baseline_identity,
+                    "_fair_selected_profile",
+                    return_value=({}, SimpleNamespace()),
+                ),
+                mock.patch.object(
+                    baseline_identity,
+                    "_fair_manifest_identity",
+                    side_effect=lambda _paths, *, expected_source_commit, **_kwargs: bundle(
+                        expected_source_commit
+                    ),
+                ),
+                mock.patch.object(
+                    baseline_identity, "_validate_successor_comparison_facts"
+                ),
+                mock.patch.object(
+                    baseline_identity,
+                    "_maximum_legal_reservation",
+                    return_value=Decimal("8.000000"),
+                ),
+                mock.patch.object(
+                    baseline_identity,
+                    "load_campaign_identity_path",
+                    return_value=generated,
+                ),
+            ):
+                path, prior = generate_successor_lock(
+                    RepoPaths(root, root),
+                    campaign_id="p2-b7-canary-baseline-v29",
+                    batch_id="p2-b7-canary-v29",
+                    run_id_date="20260822",
+                    run_id_sequence_base=500001928,
+                    comparison=_CampaignFixture.v7().comparison,
+                    rondo_runtime_manifest=Path("new-local.json"),
+                    rondo_source_commit="1" * 40,
+                    codex_runtime_manifest=Path("codex.json"),
+                    price_snapshot_date="2026-08-22",
+                    task_budget_id="direction0-local-optimization-052",
+                    task_budget_cap_usd=Decimal("125.000000"),
+                    task_budget_prior_estimated_usd=Decimal("0.000000"),
+                )
+
+            value = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(prior, Decimal("0.000000"))
+            self.assertEqual(value["bundles"]["rondo"]["source_commit"], "1" * 40)
+            self.assertEqual(
+                value["budget"]["task_budget_id"],
+                "direction0-local-optimization-052",
+            )
+            self.assertEqual(value["budget"]["task_budget_cap_usd"], "125.000000")
+            self.assertEqual(
+                json.loads(pointer.read_text(encoding="utf-8"))["active_lock"],
+                "eval/locks/p2-b7-canary-baseline-v29.json",
             )
 
 
@@ -1874,6 +2108,18 @@ class NamespacedTaskIdTests(unittest.TestCase):
 
 
 class PreflightProducerTests(unittest.TestCase):
+    def test_noop_verifier_returns_zero_without_touching_the_environment(self) -> None:
+        environment = mock.Mock()
+        verifier = preflight_producer.PreflightNoopVerifier(
+            task=object(),
+            trial_paths=object(),
+            environment=environment,
+        )
+        result = asyncio.run(verifier.verify())
+
+        self.assertEqual(result.rewards, {"reward": 0})
+        environment.assert_not_called()
+
     """The receipt must come from an entry point that really drives both sides."""
 
     tasks = ("terminal-bench/fix-git", "terminal-bench/db-wal-recovery")
@@ -2119,7 +2365,15 @@ class PreflightProducerTests(unittest.TestCase):
         )
         prepared = PreparedTerminalBenchRun(
             spec=spec,
-            command=object(),  # type: ignore[arg-type]
+            command=SimpleNamespace(
+                stub_verifier=True,
+                delete_environment=False,
+                argv=(
+                    "--verifier",
+                    preflight_producer.PREFLIGHT_STUB_VERIFIER_IMPORT,
+                    "--no-delete",
+                ),
+            ),  # type: ignore[arg-type]
             adapter=object(),  # type: ignore[arg-type]
             materialized_task=object(),  # type: ignore[arg-type]
         )
@@ -2502,11 +2756,11 @@ class SuccessorRunRangeTests(unittest.TestCase):
 
 
 class SuccessorBudgetTests(unittest.TestCase):
-    """A v7 campaign gets its own authorized cap and inherits no spend."""
+    """Every v7 identity binds one explicit, independently authorized envelope."""
 
-    def test_the_generator_requires_an_authorized_cap(self) -> None:
+    def test_the_generator_requires_an_authorized_task_cap(self) -> None:
         parameter = inspect.signature(generate_successor_lock).parameters[
-            "campaign_cap_usd"
+            "task_budget_cap_usd"
         ]
         self.assertEqual(parameter.default, inspect.Parameter.empty)
         paths = RepoPaths.discover(Path.cwd())
@@ -2524,36 +2778,65 @@ class SuccessorBudgetTests(unittest.TestCase):
             "catalog_identity": _CampaignFixture.catalog_identity(),
             "product": Product.RONDO_LOCAL.value,
         }
-        for cap in (Decimal("0"), Decimal("-1"), Decimal("1600.000001")):
+        for cap in (
+            Decimal("0"),
+            Decimal("-1"),
+            Decimal("1.0000001"),
+        ):
             with self.subTest(cap=cap), self.assertRaisesRegex(
-                CampaignIdentityGenerationError, "cap is not authorized"
+                CampaignIdentityGenerationError, "task budget is not authorized"
             ):
                 generate_successor_lock(
                     paths,
+                    campaign_id="p2-b7-canary-baseline-v29",
+                    batch_id="p2-b7-canary-v29",
                     run_id_date="20260901",
                     run_id_sequence_base=500000001,
                     comparison=frozen,
-                    campaign_cap_usd=cap,
+                    rondo_runtime_manifest=Path("missing-rondo-manifest.json"),
+                    rondo_source_commit="1" * 40,
+                    codex_runtime_manifest=Path("missing-codex-manifest.json"),
+                    price_snapshot_date="2026-09-01",
+                    task_budget_id=TASK_BUDGET_ID,
+                    task_budget_cap_usd=cap,
+                    task_budget_prior_estimated_usd=Decimal("0.000000"),
                 )
 
-    def test_a_v7_budget_may_not_carry_inherited_prior_spend(self) -> None:
+    def test_a_v7_budget_accepts_a_namespaced_positive_task_envelope(self) -> None:
         identity = _CampaignFixture.v7()
         self.assertTrue(
             _valid_campaign_budget(
+                {**identity.budget, "campaign_cap_usd": "400.000000",
+                 "prior_estimated_usd": "0.000000",
+                 "task_budget_cap_usd": "400.000000",
+                 "task_budget_prior_estimated_usd": "0.000000"},
+                schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
+                expected_max_run_slots=identity.budget["max_run_slots"],
+            )
+        )
+        self.assertTrue(
+            _valid_campaign_budget(
                 {**identity.budget, "campaign_cap_usd": "200.000000",
-                 "prior_estimated_usd": "0.000000"},
+                 "task_budget_cap_usd": "200.000000",
+                 "task_budget_id": "direction0-local-optimization-052"},
                 schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
                 expected_max_run_slots=identity.budget["max_run_slots"],
             )
         )
         self.assertFalse(
             _valid_campaign_budget(
-                {**identity.budget, "campaign_cap_usd": "1600.000000",
-                 "prior_estimated_usd": "1136.113528"},
+                {**identity.budget, "task_budget_id": "../other-task"},
                 schema_version=FAIR_COMPARISON_SCHEMA_VERSION,
                 expected_max_run_slots=identity.budget["max_run_slots"],
             )
         )
+
+    def test_v7_bundle_contract_accepts_a_new_local_commit_only(self) -> None:
+        bundles = json.loads(json.dumps(_CampaignFixture.v7().bundles))
+        bundles["rondo"]["source_commit"] = "1" * 40
+        self.assertTrue(_valid_fair_bundle_contract(bundles))
+        bundles["codex"]["source_commit"] = "2" * 40
+        self.assertFalse(_valid_fair_bundle_contract(bundles))
 
     def test_a_v7_lock_may_not_inherit_historical_continuation(self) -> None:
         with self.assertRaisesRegex(BaselineError, "cannot inherit historical"):
@@ -2570,6 +2853,170 @@ class SuccessorBudgetTests(unittest.TestCase):
             ),
             (),
         )
+
+
+class RelativeFormalBaselineTests(unittest.TestCase):
+    @staticmethod
+    def _record(identity, *, campaign_id: str, lock: str, rondo_passed: int) -> dict:
+        outcomes = []
+        for index, task in enumerate(identity.catalog.tasks):
+            outcomes.extend(
+                (
+                    {
+                        "side": Side.RONDO.value,
+                        "task_id": task.task_id,
+                        "outcome": (
+                            TaskOutcome.PASS.value
+                            if index < rondo_passed
+                            else TaskOutcome.FAIL.value
+                        ),
+                    },
+                    {
+                        "side": Side.CODEX.value,
+                        "task_id": task.task_id,
+                        "outcome": (
+                            TaskOutcome.PASS.value
+                            if index < 5
+                            else TaskOutcome.FAIL.value
+                        ),
+                    },
+                )
+            )
+        return {
+            "schema_version": identity.schema_version,
+            "campaign_id": campaign_id,
+            "campaign_lock_sha256": lock,
+            "taskset_sha256": identity.taskset_sha256,
+            "canary_catalog_sha256": identity.canary_catalog_sha256,
+            "product": identity.product.value,
+            "status": BaselineStatus.PASSED.value,
+            "assessment": {
+                "common_valid_task_count": 10,
+                "sigma": 0,
+                "delta": abs(rondo_passed - 5),
+                "aggregated_outcomes": outcomes,
+            },
+        }
+
+    def test_first_formal_baseline_has_an_explicit_no_predecessor_projection(self) -> None:
+        identity = replace(
+            _CampaignFixture.v7(),
+            campaign_id="p2-b7-canary-baseline-v28",
+            batch_id="p2-b7-canary-v28",
+            lock_sha256="8" * 64,
+        )
+        current = self._record(
+            identity,
+            campaign_id=identity.campaign_id,
+            lock=identity.lock_sha256,
+            rondo_passed=5,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            destination = baseline_cli._write_relative_baseline_comparison(
+                Path(directory), identity=identity, current=current
+            )
+            value = json.loads(destination.read_text(encoding="utf-8"))
+
+        self.assertEqual(value["comparison_status"], "first_formal_baseline")
+        self.assertIsNone(value["previous"])
+        self.assertIsNone(value["metric_deltas"])
+
+    def test_blocked_campaign_does_not_publish_a_relative_formal_baseline(self) -> None:
+        identity = replace(
+            _CampaignFixture.v7(),
+            campaign_id="p2-b7-canary-baseline-v29",
+            batch_id="p2-b7-canary-v29",
+            lock_sha256="9" * 64,
+        )
+        state = mock.Mock()
+        state.snapshot.return_value = {
+            "status": BaselineStatus.BLOCKED.value,
+            "diagnoses": [],
+            "slots": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            campaign_root = root / "eval-data/campaigns" / identity.campaign_id
+            campaign_root.mkdir(parents=True)
+            with (
+                mock.patch.object(
+                    baseline_cli, "_campaign_records", return_value=({}, {})
+                ),
+                mock.patch.object(
+                    baseline_cli,
+                    "_continuation_records",
+                    return_value=(False, {}, {}),
+                ),
+                mock.patch.object(
+                    baseline_cli, "_validate_terminal_result_sources"
+                ),
+                mock.patch.object(
+                    baseline_cli, "_campaign_usage", return_value={}
+                ),
+                mock.patch.object(
+                    baseline_cli, "_write_or_validate_aggregate"
+                ),
+                mock.patch.object(
+                    baseline_cli, "_write_relative_baseline_comparison"
+                ) as relative,
+            ):
+                baseline_cli._write_aggregate(
+                    campaign_root,
+                    identity,
+                    state,
+                    {
+                        "spent_usd": "0.000000",
+                        "reserved_usd": "0.000000",
+                        "run_slots_used": 0,
+                        "runs": {},
+                    },
+                    Decimal("0.000000"),
+                    assessment=None,
+                    results_root=root / "results",
+                    storage_baseline=baseline_cli.StorageBaseline(1, 1, 1),
+                    final_storage=None,
+                )
+
+        relative.assert_not_called()
+
+    def test_new_formal_baseline_reports_metric_and_task_outcome_changes(self) -> None:
+        identity = replace(
+            _CampaignFixture.v7(),
+            campaign_id="p2-b7-canary-baseline-v29",
+            batch_id="p2-b7-canary-v29",
+            lock_sha256="9" * 64,
+        )
+        previous = self._record(
+            identity,
+            campaign_id="p2-b7-canary-baseline-v28",
+            lock="8" * 64,
+            rondo_passed=5,
+        )
+        current = self._record(
+            identity,
+            campaign_id=identity.campaign_id,
+            lock=identity.lock_sha256,
+            rondo_passed=6,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = (
+                root
+                / "eval/results/baselines/p2-b7-canary-baseline-v28.json"
+            )
+            baseline.parent.mkdir(parents=True)
+            baseline.write_text(json.dumps(previous), encoding="utf-8")
+            destination = baseline_cli._write_relative_baseline_comparison(
+                root, identity=identity, current=current
+            )
+            value = json.loads(destination.read_text(encoding="utf-8"))
+
+        self.assertEqual(value["comparison_status"], "compared")
+        self.assertEqual(value["previous"]["campaign_id"], previous["campaign_id"])
+        self.assertEqual(value["metric_deltas"]["rondo_passed"], 1)
+        self.assertEqual(value["metric_deltas"]["codex_passed"], 0)
+        self.assertEqual(len(value["task_outcome_changes"]), 1)
+        self.assertEqual(value["task_outcome_changes"][0]["side"], "rondo")
 
 
 if __name__ == "__main__":

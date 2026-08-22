@@ -534,6 +534,7 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertNotIn("--upload", argv)
         self.assertIn("--delete", argv)
         self.assertNotIn("--max-retries", argv)
+        self.assertNotIn("--verifier", argv)
         self.assertEqual(
             Path(argv[argv.index("--trials-dir") + 1]),
             prepared.command.trials_dir,
@@ -648,6 +649,27 @@ class TerminalBenchTests(unittest.TestCase):
                     replace(observed, cap_drop=observed_cap_drop),
                     ("name=seccomp,profile=builtin",),
                 )
+
+    def test_stub_request_uses_noop_verifier_and_supervisor_cleanup(self) -> None:
+        materializer = FakeMaterializer(self.root / "fake-no-verifier")
+        materializer.root.mkdir()
+        request = replace(
+            self.request(), stub_verifier=True, delete_environment=False
+        )
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+
+        self.assertTrue(prepared.command.stub_verifier)
+        self.assertFalse(prepared.command.delete_environment)
+        self.assertEqual(prepared.command.argv.count("--verifier"), 1)
+        self.assertIn(
+            runner_module.PREFLIGHT_STUB_VERIFIER_IMPORT,
+            prepared.command.argv,
+        )
+        self.assertEqual(prepared.command.argv.count("--no-delete"), 1)
+        self.assertNotIn("--delete", prepared.command.argv)
+        prepared.validate()
 
     def test_real_harbor_factory_can_construct_both_custom_agents(self) -> None:
         try:
