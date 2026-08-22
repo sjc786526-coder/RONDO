@@ -1617,3 +1617,26 @@ Publication Critic 产品语义；验收报告提交 `36a106c` 给出 `PASS`，�
 - 第三轮独立验收确认 public `exec` 早期错误不再被误计为零；Python 51/51、Rust 2/2 通过，结论 `PASS`，
   未发现新的功能性回归或冗余设施问题。未运行真实 API、Docker、本地模型、训练或费用任务。最终报告见
   `agent_log/2026-08-22-041330-plan052-third-remediation-acceptance.md`。
+
+## RONDO Multi 三期 M3-B2a Publication Critic 本地服务（Plan 055，2026-08-22）
+
+**状态**：实现提交 `2c47adb` 与配置边界修复提交 `dbc1d7a` 曾被过早记录为完成；后续独立验收提交 `d216bfb` 发现最小 frame
+cap、terminal backend status 与测试 release barrier 三项局部缺口。整改提交 `3be09927` 已关闭三项 finding，并通过 29/29
+定向测试、Clippy、argument-comment lint、fix/fmt 与最终独立复验。结论为**验收通过、任务目标完成**。
+
+- 新增专用 `codex-publication-critic` crate，提供 protocol v1 的严格 allowlist packet、loopback 长度前缀 JSON 服务、可替换
+  scorer 与 B2b 可消费的 typed client；不依赖 `codex-core`、Team State 或 RONDO Local approval 产品合同。
+- expected identity 由调用方可信 typed 配置提供，精确绑定 service/protocol、qualification、model/tokenizer、render/projection、
+  score domain、threshold 和 verdict rule；服务复验 backend identity 与单值 finite score，故障不会猜成 verdict。
+- production defaults 为 request 128 KiB、response 16 KiB、concurrency 1、queue 4、job 25s、client 30s、startup 60s、I/O 2s、
+  graceful 3s + force/reap 2s、零 retry。配置字段对外只读，构造和最终消费点复验 loopback/frame/resource/timeout 上界。
+- 受控 scorer 只替换 backend；整改后 29/29 定向测试通过真实服务子进程、正式 transport、协议解析、identity、admission、资源门
+  和 typed client，覆盖 PASS/REWRITE、严格 ingress、最小 frame cap、queue full、timeout/cancel、终态 backend/故障漂移、无丢唤醒
+  release、异常退出、两阶段关闭及正文 sentinel。
+- 定向 Clippy、argument-comment lint、fix/fmt 与 Bazel lock update/check 通过；Cargo/Bazel 依赖均为 workspace 既有依赖，
+  `MODULE.bazel.lock` 无差异。未运行全 workspace、全 Bazel、CI、PR、Docker、真实 API、训练或真实模型。
+- 未修改 `team_publish`、Team State、Team Lens、`eval/` 或 `training/`。证据只覆盖受控 backend 的进程/协议/资源闭环；
+  canonical packet 构造与产品接入属于 M3-B2b，真实 threshold、模型质量与部署资格留给后续工作包。执行与整改记录见
+  `agent_log/2026-08-22-051709-plan055-m3-b2a-publication-critic-service.md`、
+  `agent_log/2026-08-22-062600-plan055-independent-review-remediation.md`；最终验收见
+  `agent_log/2026-08-22-063239-plan055-remediation-final-acceptance.md`。
