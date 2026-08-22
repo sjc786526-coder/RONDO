@@ -21,42 +21,42 @@
 
 ### 完成/验收标准
 
-- [ ] Publication Critic 配置默认关闭；关闭态下 `team_publish` 继续暴露现有 model-visible 输入/输出合同，调用者无需提供 Critic 续接信息，既有
+- [x] Publication Critic 配置默认关闭；关闭态下 `team_publish` 继续暴露现有 model-visible 输入/输出合同，调用者无需提供 Critic 续接信息，既有
       成功/失败结果、权限、canonical 内容、dedup/replay、stale、revision、wake、Root attention 和 evidence window 行为保持不变，并有现有回归
       与新增聚焦回归证明没有 Critic 调用或 cycle 副作用。启用态若需要 additive continuation 表达，只能按配置出现在启用合同中。
-- [ ] 启用态在 store mutation 前构造 Plan 055 `PublicationPacket`：角色来自权威 session，target/title/candidate 与最终拟提交的 canonical
+- [x] 启用态在 store mutation 前构造 Plan 055 `PublicationPacket`：角色来自权威 session，target/title/candidate 与最终拟提交的 canonical
       authored 字段逐字段语义一致；已有 Event 只读取 actor 原本有权读取的 event-local、单页有界公共 history projection。
-- [ ] packet 遵守 M3-A1 与 Plan 055 allowlist：最多使用合同允许的 prior publication 数量和 body-free evidence summary；不读取 Fact observation
+- [x] packet 遵守 M3-A1 与 Plan 055 allowlist：最多使用合同允许的 prior publication 数量和 body-free evidence summary；不读取 Fact observation
       正文，不把 Fact ID 值传入或暴露给 Critic，也不读取私有 transcript、隐藏 reasoning、全 Team State、无界历史、监督元数据、凭据或其他禁入
       内容。省略、不可得与 freshness 状态诚实表达。
-- [ ] 原稿或第一次改稿得到 `PASS` 时，该稿只走一次现行 publish mutation；前两次 `REWRITE` 均不调用 mutation，并分别返回两个版本化、
+- [x] 原稿或第一次改稿得到 `PASS` 时，该稿只走一次现行 publish mutation；前两次 `REWRITE` 均不调用 mutation，并分别返回两个版本化、
       固定、有界且不同的反馈，反馈只回显最近一次被拒绝的 canonical title/summary/optional handoff。
-- [ ] 第二次改稿仍调用 Critic，但无论 `PASS/REWRITE` 都只尝试提交该稿一次；有效最终 `REWRITE` 与“审核未完成”保持不同的 typed
+- [x] 第二次改稿仍调用 Critic，但无论 `PASS/REWRITE` 都只尝试提交该稿一次；有效最终 `REWRITE` 与“审核未完成”保持不同的 typed
       开发者状态。任何一次 typed contract/infrastructure failure 都停止本 cycle 后续审核并只尝试提交当前稿一次，且不能冒充业务 verdict。
-- [ ] Harness 明确定义 publication cycle 身份和最多三次审核的计数/续接/清理语义；不同 actor、team instance、cycle 或并发调用不能串线。
+- [x] Harness 明确定义 publication cycle 身份和最多三次审核的计数/续接/清理语义；不同 actor、team instance、cycle 或并发调用不能串线。
       同一 cycle 不得在续接时切换 target kind，已有 Event 的 `event_id` 必须保持不变；被拒稿不进入 Team State committed map，最终成功 commit
       继续使用最终成功 tool attempt 自身的现行 request identity 语义，cycle identity 不替代它。续接不匹配时拒绝还是在无歧义条件下开启新 cycle，
       由实现冻结并测试。
-- [ ] 未提交 attempt 的 exact replay 幂等：不重复调用 Critic、不增加 rewrite 次数，并返回与首次相同的固定反馈/结果；同 attempt identity 携带不同
+- [x] 未提交 attempt 的 exact replay 幂等：不重复调用 Critic、不增加 rewrite 次数，并返回与首次相同的固定反馈/结果；同 attempt identity 携带不同
       原始内容必须拒绝。另一个独立 publish 不能被误认成当前改稿，新 Event 的可改写 title 不能被单独当作 cycle identity。
-- [ ] 已提交请求的精确 replay 在 Critic 之前返回原 committed outcome，不重新审核、不消费后来 Fact；同一 request identity 携带不同原始
+- [x] 已提交请求的精确 replay 在 Critic 之前返回原 committed outcome，不重新审核、不消费后来 Fact；同一 request identity 携带不同原始
       publish 内容仍按现行语义拒绝。并发重复最多产生一个 canonical commit，不能产生幽灵 Event/Version 或重复 evidence 消费。
-- [ ] commit 前收到调用/turn 取消时，取消正在等待的 Critic 调用、零提交并清理 cycle；commit 已原子成功后的取消不回滚 Version。timeout、
+- [x] commit 前收到调用/turn 取消时，取消正在等待的 Critic 调用、零提交并清理 cycle；commit 已原子成功后的取消不回滚 Version。timeout、
       queue failure、取消和 store refusal 不遗留 cycle、容量占用或部分 Team State 写入。
-- [ ] 最终提交继续由现行 store 重新检查参与者/权限、target、stale、request identity、validation、dedup 和 evidence window；Critic 等待期间
+- [x] 最终提交继续由现行 store 重新检查参与者/权限、target、stale、request identity、validation、dedup 和 evidence window；Critic 等待期间
       不持有 Team State mutex，不 peek、预留或消费 publish evidence window。审核活动、前两次拒稿、取消和 store refusal 本身不推进 revision、
       wake、Root attention 或 evidence cursor；typed failure fallback 若由 store 成功 commit，则只由该次 commit 按现行语义正常推进和消费。
-- [ ] 启用态的 review/cycle 通过现有开发者观测方式提供有界、body-free 的 typed 结果，至少能区分最终 `PASS`、最终 `REWRITE`、typed failure
+- [x] 启用态的 review/cycle 通过现有开发者观测方式提供有界、body-free 的 typed 结果，至少能区分最终 `PASS`、最终 `REWRITE`、typed failure
       fallback、取消、store commit/refusal 与阻断式 rewrite 次数；配置/测试可确认关闭态，但关闭时不要求为每次 publish 新增 review event。状态不写入
       authored publication，不建立第二套 Team State、第二套 trace 或正文审计存储。模型可见的固定 rewrite tool response 是唯一允许由新增接入层回显
       最近 candidate 的位置；内部 error chain、developer log preview/metadata 不泄漏 candidate/context sentinel，不因该响应采用成功或可恢复错误编码而混淆。
-- [ ] 使用 Plan 055 的受控 scorer 启动真实服务进程并经过正式 transport、协议、expected identity、typed client 和产品 handler，至少覆盖代表性的
+- [x] 使用 Plan 055 的受控 scorer 启动真实服务进程并经过正式 transport、协议、expected identity、typed client 和产品 handler，至少覆盖代表性的
       `PASS`、阻断式到最终非阻断 `REWRITE`、typed failure fallback 与取消产品路径；关闭态证明零请求。replay/different-content、权限/stale、
       并发和清理等完整矩阵可使用同一生产边界上的确定性 seam 分层验证，但不能取代正式进程产品 E2E。测试不依赖真实模型、Docker、外部 API 或
       脆弱的长 `sleep` 竞速。
-- [ ] 只运行受影响 crate 的格式、lint、配置/生成物检查和定向测试；重型 Rust/Bazel 入口经共享构建锁与看门狗。结果明确区分受控服务产品
+- [x] 只运行受影响 crate 的格式、lint、配置/生成物检查和定向测试；重型 Rust/Bazel 入口经共享构建锁与看门狗。结果明确区分受控服务产品
       流程、fake/单元检查和未运行的真实模型/性能证据，不运行全 workspace。
-- [ ] 完成 diff/允许写集检查和一次独立验收；普通 finding 由执行者自主窄修并重跑相关门禁。最终只提交 Plan 057 worktree 本地分支并保持
+- [x] 完成 diff/允许写集检查和一次独立验收；普通 finding 由执行者自主窄修并重跑相关门禁。最终只提交 Plan 057 worktree 本地分支并保持
       worktree 干净；不合并、不推送、不归档或重命名分支。
 
 ## 2. 范围
@@ -214,12 +214,11 @@ worktree 内的任务专用临时位置；构建输出留在 RONDO 项目根内�
 
 ### 当前工作
 
-Plan 057 的 4 个独立验收 finding 已完成实现与定向复验；正在提交修复并交回同一跨会话审查者复验。当前不宣称验收通过或进入主线整合。
+Plan 057 已完成实现、整改与同一跨会话审查者的最终复验，结论为 PASS。任务已冻结在专用 worktree，等待用户批准后续主线整合。
 
 ### 本任务剩余步骤
 
-1. 提交本轮修复与状态记录并保持 057 worktree clean。
-2. 通过 Codex queue 交回审查者复验；验收通过前不进入主线整合。
+无任务内剩余步骤。主线整合、推送与分支/worktree 归档不属于本次已授权动作，按交接边界等待用户批准。
 
 ### 阻塞项
 
@@ -237,8 +236,10 @@ Plan 057 的 4 个独立验收 finding 已完成实现与定向复验；正在�
 - 静态/生成物：本轮受影响 2 crate 的 Clippy `-D warnings` 与 `just fix` 通过；`just fmt`、`just fmt-check`、config schema 生成/fixture、
   Bazel module lock update/check 和 `git diff --check` 通过，module lock 无差异。argument-comment lint 未完成，原因见“阻塞项”。
 - 未运行：Docker、真实 API、真实模型、本地推理、训练、量化/转换、云资源、全 workspace、CI、PR；没有真实模型质量、threshold 或性能结论。
-- 独立验收：`11dd7ae` 的审查结论为不通过并提出 4 个 finding；本轮均已修复并完成定向门禁，等待同一审查者复验，尚不冒充 PASS。
-- Git：原实现提交为 `f5d538a744507c3f80391f0094389bb8b0a8e192`，审查报告提交为 `11dd7ae`；本轮修复将另作本地提交，057 worktree 保持 clean。
+- 独立验收：`11dd7ae` 提出的 4 个 finding 均已在 `e255ec7046ec2671293ce83023b65b8f74c542bd` 修复；最终复验报告
+  `agent_log/2026-08-22-110158-plan057-final-acceptance-review.md` 结论为 PASS，任务目标完成。
+- Git：原实现提交为 `f5d538a744507c3f80391f0094389bb8b0a8e192`，首次审查报告提交为 `11dd7ae`，整改提交为
+  `e255ec7046ec2671293ce83023b65b8f74c542bd`；最终报告与状态收口另作本地提交并保持 057 worktree clean。
   未合并、推送、rebase、归档或重命名；主工作区保持 clean，其他 worktree 未修改。
 
 ### 交接边界
