@@ -250,16 +250,19 @@
   按本地设施类保留并发布为 invalid，不作为任务失败或模型结果。该 identity 共结算 28 个可靠 upstream attempts、
   `1.086600 USD`；不是 transport retry，未修改 Guardian、审批或安全策略。body-free 公共结果与详细 ignored 工件均
   保留，记录见 `agent_log/2026-08-22-plan058-commissioning.md`。
+- `plan058-direction1-c2-commissioning-v2` 已以 `openssl-selfsigned-cert` 完整打通 initialize、零 API preflight、
+  paid run、原生 trace/schema-v2 投影、预算结算、私有 refined 分类与 body-free 发布。运行链有效且任务 reward `0`
+  作为任务失败保留、不重跑；7 个可靠 main attempts、0 Guardian、费用 `0.102113 USD`，raw/refined harmful 均为
+  `0`，无害门全通过。Plan 058 跨 identity 累计费用为 `1.188713 USD`。
 - 本 ExecPlan 已按用户要求保留必要行为、实验、预算和资源边界，把具体检测信号、模块、反馈形式、状态所有者、
   runner 拆分和数值收益门留给执行者基于 Phase A 证据自主冻结。
 - 本计划未运行本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 当前工作
 
-Phase A、Phase B 已完成；Phase C 有效 `c13ae98` runtime 已冻结。commissioning-v1 的零 API 预检通过，但真实运行
-触发 v28 Guardian 三次逻辑审批上限，因 agent 非零退出且 verifier 未运行而按本地设施类 invalid，费用已结算且身份已
-关闭。只读对照显示 `openssl-selfsigned-cert` 在 formal-v6 两轮均完整运行、分别为 4/5 个 main 与 0 个 Guardian
-请求，同时第二轮覆盖 C2 恢复边界；下一步以该冻结任务创建全新 commissioning-v2，从零 API 预检重新闭环。
+Phase A、Phase B 与 Phase C 首个完整 commissioning 已完成。commissioning-v1 作为本地设施 invalid 关闭，v2 已
+形成可信 `1/1` 完整闭环；两者费用和工件隔离但共同计入 task budget。正在提交 v2 闭环并冻结实际正式被测源码，随后
+从该 clean commit 重新构建/复验 formal runtime，再创建与 commissioning 完全隔离的 10 题 × 2 round 正式 identity。
 
 ### 本任务剩余步骤
 
@@ -291,6 +294,9 @@ Phase A、Phase B 已完成；Phase C 有效 `c13ae98` runtime 已冻结。commi
 - commissioning-v1：preflight `1/1`；正式 logical result `0/1`，campaign invalid；28 个可靠 upstream attempts、
   `1.086600 USD` 已关闭进总账。Docker 前后均为 `11.5GB`、容器/卷为 `0`，VHDX 增长 `0`，Windows C: 余量约
   `191.9GB`，未触发容量门。
+- commissioning-v2：preflight `1/1`，完整 logical result `1/1`，7 个可靠 upstream attempts、`0.102113 USD`；
+  Terminal-Bench outcome `completed`、task fail/reward `0` 作为有效结果，raw/refined harmful `0`，无害门全通过，
+  Docker/VHDX 增长 `0`。累计 task budget 已结算 `1.188713 USD`，reserved `0`。
 - 未运行：正式 20-result、正式比较/决策、本地模型、训练、完整数据集、Codex 对照、validation、holdout、CI 或 PR。
 
 ### 主工作区 ignored 资产
@@ -345,3 +351,4 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 016 | 初始化恢复先直接验证冻结 lock、manifest 与全部调用输入；仅未越过初始化窗口的 identity 可修复 pointer/state/budget | 防止错误恢复参数或已退役 campaign 在失败前重绑活动指针、重开预算 | identity、恢复 | 已采纳 |
 | 017 | `23567b6` 构建因与 Plan 054 模型生命周期重叠而失效；保留事件证据，确认 Plan 054 v2 终态后 exact cleanup 并从新提交完整重建 | 本侧虽使用 canonical lock/watchdog，但跨任务互斥事实已被破坏，不能把成功字节冒充合规资源证据；仅瞬时拿到锁不足以证明模型窗口已结束 | 构建、资源、commissioning | 已采纳 |
 | 018 | commissioning-v1 的 Guardian 上限终态按运行链不完整的 invalid 结算；不改 Guardian/审批，以 formal-v6 中 0 Guardian 且覆盖 C2 的 `openssl-selfsigned-cert` 新身份重做 commissioning | 第四次审批请求被正确硬拒绝后 verifier 未运行，不能伪装为有效 reward 0；换代表题可继续验证 runner 闭环而不扭曲安全语义或原地补位 | commissioning、预算、失败分类 | 已采纳 |
+| 019 | commissioning-v2 的完整 reward 0 作为有效任务失败保留；以其闭环提交冻结正式源码并重新构建，不复用 commissioning runtime identity | 运行链、verifier、投影、结算和发布完整，符合“有效失败不重跑”；正式必须绑定 commissioning 后的新 clean source/binary/identity | commissioning、正式冻结 | 已采纳 |

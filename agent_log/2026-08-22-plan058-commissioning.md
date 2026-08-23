@@ -29,3 +29,13 @@ HOME/PATH 与真实构建记录不一致。三次均未发送 API、未改变构
 只读比较 formal-v6 同 cohort：`openssl-selfsigned-cert` 两轮均完整，分别仅 4/5 个 main、0 个 Guardian 请求，
 且第二轮覆盖已分类为合理恢复的 C2 occurrence。commissioning-v2 使用该冻结任务重新走 initialize、零 API
 preflight、paid run、投影、结算和发布；v1 工件与费用永久保留且不混入新结果。
+
+## commissioning-v2 完成
+
+`plan058-direction1-c2-commissioning-v2` 的零 API preflight `1/1`，真实运行完成 7 个可靠 main attempts、
+0 Guardian，费用 `0.102113 USD`。Terminal-Bench、verifier、Docker cleanup、原生 trace、schema-v2 投影、预算、
+私有分类和 body-free 发布全部完整；任务 reward `0`/fail 是有效结果，未重跑。raw/refined harmful 均为 `0`，无害门
+全通过，Docker/VHDX 增长 `0`。跨 v1/v2 的 Plan 058 task budget 累计 `1.188713 USD`、reserved `0`。
+
+首次真实闭环已经完成。下一步提交当前闭环作为正式 source freeze，从该 clean commit 重建并复验全新 runtime，再
+创建与 commissioning 完全隔离的正式 20-slot identity。
