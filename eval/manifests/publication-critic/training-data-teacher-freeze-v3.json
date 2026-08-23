@@ -1,0 +1,103 @@
+{
+  "schema": "rondo-publication-critic-plan059-teacher-freeze-v3",
+  "plan": "059",
+  "dataset_revision": "v3",
+  "supersedes": {
+    "relative_path": "eval/manifests/publication-critic/training-data-teacher-freeze-v2.json",
+    "sha256": "e4e51e8b24caeeff8cc30098024c07ed2196ce6c4597257e9d99862448fb3f89"
+  },
+  "formal_generation_allowed": true,
+  "generator": {
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "runtime_not_exposed",
+    "role": "direct_plan059_generator",
+    "prompt_sha256": "0706c5be6d1e82ffebc4f54481dfb67f3a5ccbc46611bfcd978a769aeee5661a",
+    "date": "2026-08-23",
+    "session_identity": "01a02ec2-6085-73a1-95bf-dee63931a3c1"
+  },
+  "reviewer": {
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "role": "independent_teacher_reviewer",
+    "prompt_sha256": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "date": "2026-08-23",
+    "session_identity": "/root/teacher_reviewer_v2"
+  },
+  "input_identity": {
+    "packet_schema": "rondo-publication-packet@v1",
+    "rubric": "rondo-publication-qualification@v1",
+    "render_contract": "rondo-publication-critic-render@v3",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "adopted_window_tokens": 16384
+  },
+  "contracts": {
+    "eval/templates/publication-critic/training-data-design-lock-v1.json": "cc56ba61778d84bddce468070333deaafce2f888507e2ea2f52fe1be1dd7843b",
+    "eval/templates/publication-critic/training-data-design-lock-v2.json": "6d9848c5b89c24398b58df3535caa3125450a28654de6ac64c76b7c826b92453",
+    "eval/templates/publication-critic/training-data-design-lock-v3.json": "b6136a30a2af70fbdb8a4199a536e87ecc8ce7f3c9ddc12e4504c1ac8295d87f",
+    "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
+    "eval/templates/publication-critic/training-data-generator-prompt-v3.md": "0706c5be6d1e82ffebc4f54481dfb67f3a5ccbc46611bfcd978a769aeee5661a",
+    "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
+    "eval/tools/generate_publication_critic_training_data.py": "28d738f403bd9ac9ab7aad7d26b6f6cd27d6b7abcbbcc1447aeba67a9892fb32",
+    "eval/tools/finalize_publication_critic_training_data.py": "9e397f5abfc3d6215d354b0708614e4019af987cbbe3843e14029324de550d84",
+    "eval/rondo_eval/publication_critic/training_data/__init__.py": "ee834503a2f7ea76ca056e0099b253ffd8a345b465b962fb0f94685e4acec8b2",
+    "eval/rondo_eval/publication_critic/training_data/consumer.py": "b5025c34a1aa94c52f585e6edd6a897692840d6eeb4d16181878bc76695cef23",
+    "eval/rondo_eval/publication_critic/training_data/contract.py": "4c117cc6dcb3a9dc8addaba811f54e3161a5704feaa816fbb711a56215e156c5",
+    "eval/rondo_eval/publication_critic/training_data/dedup.py": "b3b868dc7ca7e5a0416f1eadc2f00f03bde59c8f6fbc1f4a979baf9259b87e0d",
+    "eval/rondo_eval/publication_critic/training_data/freeze.py": "e46cb5f145f33ff04f5e52f36bc1d43d95a1d8fe325d08bbb025b3da87cced22",
+    "eval/rondo_eval/publication_critic/training_data/grouping.py": "cd2fb37dedd52a4bf543235d2258687a8371fd1c1c173e5d88d77b13cb8bc69d",
+    "eval/rondo_eval/publication_critic/training_data/shortcuts.py": "647fd7d69835896b3230b8ce61d818cc68aa0713e6a8aae53de100c12adca955",
+    "eval/rondo_eval/publication_critic/training_data/token_census.py": "2179a28beccab354847d6bb49718b1c2ebfd3a9161fdafc80dd1183705e64a82"
+  },
+  "rehearsal": {
+    "run_id": "plan059-rehearsal-v8",
+    "generator_run_sha256": "768b78a9edeaab4340c576c3ec8800adae1da08e1736e856c7db012b0f9c6aef",
+    "reviewer_run_sha256": "46e197ed1f7ec483dafaced16cb2dc52aa6c7aa679bfb48dfbf6aba66c8ca7c1",
+    "candidate_reviews_sha256": "fb37f26ef7d97b040e2b4501836ba153c7c1fad0aa7c5947e42095d1f4f7d11c",
+    "pair_reviews_sha256": "5506b7f02ab7c0a6533d1686666460ff700ba8afc2ea0c79754f4037ce865ac8",
+    "finalization_manifest_sha256": "a6cc945036b74a621b652f3dca2028cd68c07130f54697eeef7385c8ba55e21b",
+    "candidate_count": 14,
+    "candidate_decisions": {
+      "accept": 14,
+      "revise": 0,
+      "exclude": 0
+    },
+    "pair_count": 7,
+    "pair_decisions": {
+      "accept": 7,
+      "downgrade": 0,
+      "exclude": 0
+    },
+    "token_total": 8806,
+    "dropped_oldest_publications_total": 0,
+    "model_visible_text_shortcuts": 0,
+    "model_visible_candidate_length_shortcuts": 0,
+    "plan054_reference_matches": 0,
+    "consumer_smoke": "pass",
+    "remaining_findings": []
+  },
+  "revision_reason": {
+    "origin": "clean_context_acceptance_F059-V2-FINAL-01",
+    "v2_status": "data_no_go",
+    "finding": "the six scope Q- candidates were the only exact-token candidate buckets above 80 and therefore perfectly predicted REWRITE across all splits",
+    "v3_resolution": "scope Q+ and Q- endpoints use comparable interleaved candidate lengths while differing in relevant state versus process noise; exact-token at-most and at-least threshold shortcuts now fail closed"
+  },
+  "formal_scale": {
+    "candidate_target": 72,
+    "candidate_hard_cap": 84,
+    "boundary_pair_target": 30,
+    "boundary_pair_hard_cap": 36,
+    "within_pass_pair_target": 6,
+    "within_pass_pair_hard_cap": 8,
+    "stop_rule": "stop when the frozen target satisfies every formal gate; do not expand toward hard caps for volume"
+  },
+  "resource_boundary": {
+    "external_api": false,
+    "local_model": false,
+    "model_forward": false,
+    "weights": false,
+    "docker": false,
+    "training": false,
+    "tokenizer_only": true
+  }
+}

@@ -25,6 +25,7 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
     census_packets,
     deterministic_grouped_stratified_split,
     find_near_duplicate_edges,
+    model_visible_candidate_length_shortcut_findings,
     model_visible_text_shortcut_findings,
     shortcut_contingencies,
     validate_dataset,
@@ -257,6 +258,34 @@ class PublicationCriticTrainingDataTests(unittest.TestCase):
             "mark",
             {finding["fragment"] for finding in model_visible_text_shortcut_findings(packets, one_split)},
         )
+
+    def test_candidate_length_shortcut_requires_threshold_support_splits_and_one_label(self) -> None:
+        supervision = [
+            self._supervision(f"length-{index}", "REWRITE" if index >= 3 else "PASS")
+            for index in range(9)
+        ]
+        for index, row in enumerate(supervision):
+            row["proposed_split"] = ("train", "validation", "unseen_test")[index % 3]
+        census = [
+            {"candidate_id": f"length-{index}", "buckets": {"candidate": value}}
+            for index, value in enumerate((20, 21, 22, 80, 81, 82, 83, 84, 85))
+        ]
+        findings = model_visible_candidate_length_shortcut_findings(census, supervision)
+        finding = next(
+            finding
+            for finding in findings
+            if finding["direction"] == "at_least" and finding["threshold"] == 80
+        )
+        self.assertEqual(finding["support"], 6)
+        self.assertEqual(finding["label"], "REWRITE")
+        self.assertEqual(finding["splits"], ["train", "unseen_test", "validation"])
+
+        mixed = [dict(row) for row in supervision]
+        mixed[-1]["binary_label"] = "PASS"
+        self.assertFalse(model_visible_candidate_length_shortcut_findings(census, mixed))
+
+        one_split = [dict(row, proposed_split="train") for row in supervision]
+        self.assertFalse(model_visible_candidate_length_shortcut_findings(census, one_split))
 
     def test_freeze_hashes_fail_closed_after_file_drift(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

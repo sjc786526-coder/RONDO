@@ -32,8 +32,10 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
     deterministic_grouped_stratified_split,
     find_near_duplicate_edges,
     find_reference_matches,
+    model_visible_candidate_length_shortcut_findings,
     model_visible_text_shortcut_findings,
     reject_exact_duplicates,
+    reject_model_visible_candidate_length_shortcuts,
     reject_model_visible_text_shortcuts,
     reject_perfect_shortcuts,
     shortcut_contingencies,
@@ -51,14 +53,17 @@ IGNORED_NAMESPACE = Path(
     "/home/sjc/desktop/RONDO/eval-data/publication-critic/plan059"
 ).resolve()
 DESIGN_LOCK_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v2.json"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v3.json"
 )
 BASE_DESIGN_LOCK_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v1.json"
 )
+SUPERSEDED_DESIGN_LOCK_PATH = (
+    REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v2.json"
+)
 SCHEMA_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-schema-v1.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v2.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v3.md"
 )
 REVIEWER_PROMPT_PATH = (
     REPO_ROOT / "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md"
@@ -79,18 +84,24 @@ def _load_json(path: Path, *, secure_ignored: bool = False) -> dict[str, Any]:
 
 def _load_design_lock() -> dict[str, Any]:
     overlay = _load_json(DESIGN_LOCK_PATH)
-    if overlay.get("schema") != "rondo-publication-critic-training-data-design-lock-v2":
-        raise TrainingDataError("training-data design lock v2 identity drifted")
+    if overlay.get("schema") != "rondo-publication-critic-training-data-design-lock-v3":
+        raise TrainingDataError("training-data design lock v3 identity drifted")
     base_identity = overlay.get("base_lock")
     overrides = overlay.get("overrides")
     if not isinstance(base_identity, dict) or not isinstance(overrides, dict):
-        raise TrainingDataError("training-data design lock v2 overlay is invalid")
+        raise TrainingDataError("training-data design lock v3 overlay is invalid")
     expected_base = {
         "relative_path": BASE_DESIGN_LOCK_PATH.relative_to(REPO_ROOT).as_posix(),
         "sha256": sha256_file(BASE_DESIGN_LOCK_PATH),
     }
     if base_identity != expected_base:
-        raise TrainingDataError("training-data design lock v2 base identity drifted")
+        raise TrainingDataError("training-data design lock v3 base identity drifted")
+    expected_superseded = {
+        "relative_path": SUPERSEDED_DESIGN_LOCK_PATH.relative_to(REPO_ROOT).as_posix(),
+        "sha256": sha256_file(SUPERSEDED_DESIGN_LOCK_PATH),
+    }
+    if overlay.get("supersedes") != expected_superseded:
+        raise TrainingDataError("training-data design lock v3 superseded identity drifted")
     base = _load_json(BASE_DESIGN_LOCK_PATH)
     merged = copy.deepcopy(base)
     merged["schema"] = overlay["schema"]
@@ -98,9 +109,12 @@ def _load_design_lock() -> dict[str, Any]:
     merged["purpose"] = overlay["purpose"]
     merged["split_contract"]["seed"] = overrides["split_seed"]
     merged["visible_text_shortcut_contract"] = overrides["visible_text_shortcut_contract"]
+    merged["candidate_token_length_shortcut_contract"] = overrides[
+        "candidate_token_length_shortcut_contract"
+    ]
     merged["template_group_rule"] = overrides["template_group_rule"]
     if overrides["generator_prompt_relative_path"] != GENERATOR_PROMPT_PATH.relative_to(REPO_ROOT).as_posix():
-        raise TrainingDataError("training-data generator prompt v2 path drifted")
+        raise TrainingDataError("training-data generator prompt v3 path drifted")
     return merged
 
 
@@ -313,6 +327,7 @@ def _contract_hashes(teacher_freeze: Path | None) -> dict[str, str]:
     paths = [
         DESIGN_LOCK_PATH,
         BASE_DESIGN_LOCK_PATH,
+        SUPERSEDED_DESIGN_LOCK_PATH,
         SCHEMA_PATH,
         GENERATOR_PROMPT_PATH,
         REVIEWER_PROMPT_PATH,
@@ -356,6 +371,7 @@ This is the Plan 059 M3-B1a `{mode}` freeze. It contains PublicationPacket v1 mo
 - Near-duplicate edges: {len(reports['near_duplicate_edges'])}; these edges participate in group closure
 - Plan 054 reference matches: {len(reports['plan054_reference_matches'])}
 - Cross-split label-exclusive repeated model-visible fragments: {len(reports['model_visible_text_shortcuts'])}
+- Exact candidate-token threshold shortcuts: {len(reports['model_visible_candidate_length_shortcuts'])}
 
 ## Identity and review
 
@@ -508,6 +524,14 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         minimum_split_support=int(visible_shortcut_contract["minimum_split_support"]),
     )
     reject_model_visible_text_shortcuts(visible_shortcuts)
+    length_shortcut_contract = design_lock["candidate_token_length_shortcut_contract"]
+    length_shortcuts = model_visible_candidate_length_shortcut_findings(
+        census_rows,
+        supervision,
+        minimum_candidate_support=int(length_shortcut_contract["minimum_candidate_support"]),
+        minimum_split_support=int(length_shortcut_contract["minimum_split_support"]),
+    )
+    reject_model_visible_candidate_length_shortcuts(length_shortcuts)
 
     membership = build_memberships(supervision, pairs, dataset_revision=dataset_revision)
     consumer = DatasetConsumer.from_rows(
@@ -580,6 +604,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         "split_assignments": dict(sorted(assignments.items())),
         "shortcut_contingencies": contingencies,
         "model_visible_text_shortcuts": list(visible_shortcuts),
+        "model_visible_candidate_length_shortcuts": list(length_shortcuts),
         "token_summary": token_summary,
         "consumer": {
             "c1_binary": len(c1["binary"]),

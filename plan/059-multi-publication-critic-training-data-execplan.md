@@ -280,8 +280,9 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 ### 当前工作
 
-- 干净上下文聚焦审查发现 v1 的跨 split 固定文本 shortcut，执行者确认真实并判定 v1 数据 NO-GO。revision v2 的显式场景文本、轻量
-  model-visible fragment 门禁与 rehearsal 已完成，正在从 clean implementation freeze 执行正式生成、复核和冻结。
+- 最终干净上下文审查发现 v2 的 6 个 scope Q- 是唯一的超长 candidate，执行者确认形成跨 split 完美 REWRITE 长度捷径并判定
+  v2 数据 NO-GO。revision v3 的相近/交错 scope pair 长度、exact-token threshold 门禁和 rehearsal-v8 全链路已完成，正在从 clean
+  implementation freeze 执行正式生成、复核和冻结。
 
 ### 本任务剩余步骤
 
@@ -298,9 +299,11 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 
 - v1 `formal-v3` 的结构、review、token 与 consumer 门禁通过，但干净上下文审查复算出固定 Q-/Within-PASS marker 在多个 split 中标签独占；
   该结论推翻 v1 provisional GO，失败冻结只保留为 ignored 修复证据，不提交训练正文。
-- revision v2 rehearsal 已完成 12/12 candidate、6/6 pair 独立 accept，显式 Q-/soft 文本、模型可见 fragment shortcut、exact tokenizer、
-  split、dedup、manifest 与 consumer 全链路通过；正式数据和再次干净上下文审查仍待完成。
-- 当前数据建议为 NO-GO；M3-B1b 尚未解锁。
+- revision v2 formal-v6 的 teacher、split、dedup、token 与 consumer 门禁虽通过，但最终干净审查复算出 `candidate_tokens >= 80`
+  对 6 个 scope Q- 形成 6/6 REWRITE、0 false positive 的跨 split 捷径；v2 tracked 候选未提交，失败冻结保留为 ignored 修复证据。
+- revision v3 rehearsal-v8 已完成 14/14 candidate、7/7 pair 独立 accept，scope Q+/Q- 字符长度分别为 121/127 与 142/146，
+  exact-token candidate bucket 交错；8,806-token census、text/length shortcut、manifest 和 consumer 门禁通过。
+- 当前数据建议为 NO-GO；revision v3 正式冻结与再次干净上下文审查仍待完成，M3-B1b 尚未解锁。
 
 ### 交接边界
 
@@ -330,3 +333,6 @@ linked worktree 不共享主根的 ignored `eval-data/`，因此下列执行期�
 | 011 | GPT-5.6-sol 执行者直接合成，独立 GPT-5.6-sol 子会话复核；先小批打通和抽样，再冻结并 clean full finalization | 减少交接与整版返工，保留已验证进度并控制无意义的数据合成成本 | generation、review、freeze | 已采纳 |
 | 012 | coverage/stop lock 冻结正式目标为 72 candidate、30 Boundary、6 Within-PASS，达到全部稀疏覆盖后立即停止 | 在覆盖四类 publication、五项 hard requirement、三 split 和关键薄弱切片的同时避免无意义扩量 | scale、coverage、stop | 已执行 |
 | 013 | rehearsal 与正式分批 review 的真实 finding 只重生成受影响 endpoint，并以逐行内容相等门禁复用未变化 review | 保留有效生成进度，同时确保任何 Scenario/packet/supervision/pair 漂移都触发局部重审 | review、repair、freeze | 已执行 |
+| 014 | v1 的固定 Q-/Within-PASS 文本 shortcut 判定数据 NO-GO；revision v2 用逐场景显式文本和跨 split label-exclusive char-4-gram 门禁替代 | 防止未来 validation/unseen 指标只复现标签模板 | 数据 revision、shortcut、split | 已执行 |
+| 015 | formal-v5 teacher finding 的 6 个 continuity 与 5 个 scope Q- 只做局部语义返修；rehearsal-v6 验证目标维度后，formal-v6 对 72/36 全量重审 | 保持 hard negative 与 pair 原子性，不把软质量差异冒充 qualification failure | teacher review、pair、freeze | 已执行 |
+| 016 | v2 的 scope Q- 超长捷径判定数据 NO-GO；revision v3 使 scope Q+/Q- exact-token 长度相近且交错，并新增双向 exact-token threshold 门禁 | 长度不是 qualification，正式 split 不能让极端长度完美预测标签 | 数据 revision、token census、shortcut | 已执行 |

@@ -29,9 +29,9 @@ from rondo_eval.publication_critic.training_data import (  # noqa: E402
 from rondo_eval.publication_critic.identity import sha256_file  # noqa: E402
 
 
-LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v2.json"
+LOCK_PATH = REPO_ROOT / "eval/templates/publication-critic/training-data-design-lock-v3.json"
 GENERATOR_PROMPT_PATH = (
-    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v2.md"
+    REPO_ROOT / "eval/templates/publication-critic/training-data-generator-prompt-v3.md"
 )
 
 QUALIFICATION = {
@@ -327,7 +327,7 @@ BOUNDARY_SPECS = (
         "completed",
         "root",
         "JSON 导出字段顺序不稳定",
-        "导出器改为按 schema 字段顺序写入；三种输入顺序得到相同结果，事项已完成。",
+        "导出器先统一字段别名，再按 schema 固定顺序写入；正向、逆向和随机三种输入得到相同字节序列。数值与 Unicode 内容保持原样，重复运行 hash 一致；空字段、嵌套数组和组合字符对照也稳定，未改变 schema 外内容，事项已完成。",
         None,
         "该事项首次公开。",
         "formal",
@@ -340,7 +340,7 @@ BOUNDARY_SPECS = (
         "incomplete",
         "member",
         "搜索预算在符号链接环中耗尽",
-        "普通目录预算稳定；符号链接环会重复计入目录，修复尚未验证。",
+        "普通目录与受控深度目录的预算计数稳定；符号链接环会重复计入同一 inode，修复尚未验证。差异只出现在环路径，非环对照保持通过；现有日志保留已访问 inode、预算消耗和停止原因，可复算差异。先按 inode 去重后复跑两组用例。",
         "先按 inode 去重目录，再复跑环与普通目录用例。",
         "搜索上限已经生效，但环路径仍过早耗尽预算。",
         "conversational",
@@ -354,7 +354,7 @@ BOUNDARY_SPECS = (
         "incomplete",
         "member",
         "日志轮换后首条记录丢失",
-        "只在轮换与写入同毫秒发生时丢首条记录，常规写入稳定。",
+        "日志只在轮换与写入落入同一毫秒时丢首条记录，常规写入和单独轮换都稳定。已把触发条件缩到文件句柄交换窗口；复现矩阵保留轮换前后文件编号与首条序号，已排除常规写入路径。下一步固定边界时钟并核对交换顺序。",
         "固定轮换边界时钟并检查文件句柄交换顺序。",
         "该事项首次公开。",
         "formal",
@@ -366,7 +366,7 @@ BOUNDARY_SPECS = (
         "completed",
         "root",
         "状态面板重复显示已关闭事件",
-        "活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。",
+        "活动谓词已统一按 producer 与 Root 双生命周期计算，面板不再拼接两份独立结果。关闭但仍待 Root 处理的事件只显示一次，普通活动与已 resolved 对照也通过；测试覆盖 producer 关闭、Root pending 与 resolved 三个组合，事件身份保持不变，事项已完成。",
         None,
         "面板分别按 producer 与 Root 状态拼接，导致同一事件重复。",
         "conversational",
@@ -382,7 +382,7 @@ BOUNDARY_SPECS = (
         "completed",
         "member",
         "CLI 帮助中的默认端口过期",
-        "帮助文本已与配置默认值统一为 4317，快照测试通过。",
+        "CLI 帮助、示例配置与运行时默认端口已统一为 4317；显式覆盖值仍优先，环境变量路径没有变化。快照分别覆盖默认调用、显式参数和环境变量覆盖，输出差异只剩预期端口值；三种入口的帮助与配置解析测试均通过，事项已完成。",
         None,
         "该事项首次公开。",
         "formal",
@@ -394,7 +394,7 @@ BOUNDARY_SPECS = (
         "incomplete",
         "root",
         "大目录扫描的取消响应慢",
-        "取消只在每个目录结束后检查；单个大目录可延迟数秒，尚未调整。",
+        "取消标志能够跨扫描层级传播，但当前只在每个目录结束后检查；单个大目录仍可延迟数秒。普通小目录保持稳定；测量已记录目录规模、批次大小和取消到返回的时间，便于调整后同口径比较。下一步把检查移到每批条目后并测量一万文件目录。",
         "把取消检查移到每批条目后，并测量一万文件目录。",
         "已确认取消标志能传播，但检查粒度过粗。",
         "conversational",
@@ -407,7 +407,7 @@ BOUNDARY_SPECS = (
         "completed",
         "member",
         "临时文件清理遗漏锁文件",
-        "清理器现在同时删除任务创建的锁文件；定向用例通过，事项已完成。",
+        "任务锁文件已清除；定向用例通过，事项完成。",
         None,
         "该事项首次公开。",
         "formal",
@@ -524,7 +524,7 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
     "b-scope-01": (
         " ".join(
             f"界面操作记录 {index}：调整面板宽度，翻看配色选项，记录滚动位置，再等待一次无关刷新。"
-            for index in range(1, 9)
+            for index in range(1, 3)
         )
         + " 最终结论：导出器改为按 schema 字段顺序写入；三种输入顺序得到相同结果，事项已完成。",
         None,
@@ -532,7 +532,7 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
     "b-scope-02": (
         " ".join(
             f"目录预算旁记 {index}：调换青色终端主题，观察提示符动画，保存字体缩放截图，逐项重排无关面板。"
-            for index in range(1, 9)
+            for index in range(1, 3)
         )
         + " 普通目录预算稳定；符号链接环会重复计入目录，修复尚未验证。",
         "先按 inode 去重目录，再复跑环与普通目录用例。",
@@ -540,7 +540,7 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
     "b-scope-03": (
         " ".join(
             f"轮换排查杂记 {index}：整理下载文件名，试验编辑器配色，重放无关帮助命令，抄录窗口坐标。"
-            for index in range(1, 9)
+            for index in range(1, 3)
         )
         + " 只在轮换与写入同毫秒发生时丢首条记录，常规写入稳定。",
         "固定轮换边界时钟并检查文件句柄交换顺序。",
@@ -548,7 +548,7 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
     "b-scope-04": (
         " ".join(
             f"状态面板过程 {index}：浏览图标候选，移动侧栏分隔线，刷新空白示例页，统计无关菜单项。"
-            for index in range(1, 9)
+            for index in range(1, 3)
         )
         + " 活动谓词已统一使用双生命周期；关闭但仍待 Root 处理的事件只显示一次，回归通过。",
         None,
@@ -556,7 +556,7 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
     "b-scope-05": (
         " ".join(
             f"帮助文本操作 {index}：更换键盘布局预览，折叠侧栏目录，调整光标闪烁，整理无关标签页。"
-            for index in range(1, 9)
+            for index in range(1, 3)
         )
         + " 帮助文本已与配置默认值统一为 4317，快照测试通过。",
         None,
@@ -564,13 +564,13 @@ NEGATIVE_CANDIDATES: dict[str, tuple[str, str | None]] = {
     "b-scope-06": (
         " ".join(
             f"取消扫描日志 {index}：测量鼠标停留时间，变换窗口尺寸，排序桌面快捷方式，记下无关时钟读数。"
-            for index in range(1, 9)
+            for index in range(1, 3)
         )
         + " 取消只在每个目录结束后检查；单个大目录可延迟数秒，尚未调整。",
         "把取消检查移到每批条目后，并测量一万文件目录。",
     ),
     "b-consistency-01": (
-        "清理器现在同时删除任务创建的锁文件；定向用例通过，事项已完成。",
+        "任务锁文件已清除；定向用例通过，事项完成。",
         "锁文件已经清除，但任务仍未完成，需要继续查同一故障。",
     ),
     "b-consistency-02": (

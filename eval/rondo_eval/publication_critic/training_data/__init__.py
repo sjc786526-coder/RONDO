@@ -37,7 +37,9 @@ from .grouping import (
 )
 from .token_census import census_packets
 from .shortcuts import (
+    model_visible_candidate_length_shortcut_findings,
     model_visible_text_shortcut_findings,
+    reject_model_visible_candidate_length_shortcuts,
     reject_model_visible_text_shortcuts,
 )
 
@@ -56,8 +58,10 @@ __all__ = [
     "exact_packet_digest",
     "find_near_duplicate_edges",
     "find_reference_matches",
+    "model_visible_candidate_length_shortcut_findings",
     "model_visible_text_shortcut_findings",
     "reject_exact_duplicates",
+    "reject_model_visible_candidate_length_shortcuts",
     "reject_model_visible_text_shortcuts",
     "reject_perfect_shortcuts",
     "shortcut_contingencies",
