@@ -717,7 +717,7 @@ def _boundary_candidates(spec: BoundarySpec) -> tuple[tuple[str, str | None], tu
         if spec.completion_state == "completed":
             negative = (spec.concrete_state, "继续定位同一故障；该事项尚未完成。")
         else:
-            negative = (spec.concrete_state, "无需继续；该事项已经完成。")
+            negative = (f"{spec.concrete_state} 但同一事项也已全部完成。", spec.next_step)
     else:
         raise ValueError(f"unknown hard focus: {spec.hard_focus}")
     return positive, negative

@@ -33,7 +33,7 @@
     "eval/templates/publication-critic/training-data-schema-v1.json": "4cdd069d8e2ed7ee3ba9b008bb1fab567da113f387f6f7e222e6bb3359bc484c",
     "eval/templates/publication-critic/training-data-generator-prompt-v1.md": "e72a763f9e73498e5a62641ac3c8f7aca92cb7e170a5d779e5e543cc762a78f3",
     "eval/templates/publication-critic/training-data-reviewer-prompt-v1.md": "38235f56bcb3a0a29ce39dd90b6ca1d32dda4e6c9866c430bf9f72db25878d2c",
-    "eval/tools/generate_publication_critic_training_data.py": "6d8f58dca016d45bc4ca444698fa2f53e81f8a026ac232d3e0b086837d268776",
+    "eval/tools/generate_publication_critic_training_data.py": "88bd5e0a6b6211d4eced8c09df4114c15effb8431d151dfe09b60f6a502f077c",
     "eval/tools/finalize_publication_critic_training_data.py": "645ef96dfc095032c979387885c98a0bbb90204b77c24f54ad44882e88b1a068",
     "eval/rondo_eval/publication_critic/training_data/__init__.py": "9bc9467172c794c97cf0c63a4181e4ec1c2e5f2e66faaa01f4e756fe032082db",
     "eval/rondo_eval/publication_critic/training_data/consumer.py": "b5025c34a1aa94c52f585e6edd6a897692840d6eeb4d16181878bc76695cef23",
@@ -89,6 +89,16 @@
       "code": "honest_pair_mechanism_specificity_drift",
       "affected_pair_id": "pair-b-honest-04-boundary",
       "resolution": "Q+ now names the same comparator-defect mechanism as Q- while retaining explicit uncertainty; only the affected endpoint and pair require re-review"
+    },
+    {
+      "origin": "formal-v2-batch-internal_consistency",
+      "code": "incomplete_consistency_pair_removed_actionable_continuity",
+      "affected_pair_ids": [
+        "pair-b-consistency-02-boundary",
+        "pair-b-consistency-04-boundary",
+        "pair-b-consistency-06-boundary"
+      ],
+      "resolution": "Q- retains the exact actionable handoff and introduces only a contradictory completed claim inside the summary; only the three affected endpoints and pairs require re-review"
     }
   ],
   "resource_boundary": {
