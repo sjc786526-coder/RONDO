@@ -53,6 +53,9 @@
       `a9567cb0ddeaa9c8e7cdfbd7253000a8453ec1ebbb03ca359deae2c048f7880b` 的同一 10 题、镜像与冻结顺序，
       两个完整 round 形成恰好 20 个正式逻辑结果；不运行 Codex 对照、validation、holdout、额外题目/round、
       E-A、完整数据集、本地模型或训练。
+- [ ] 下一 formal identity 在创建前把 20 个唯一绝对槽位的执行顺序冻结为
+      `8 → 18 → 1–7 → 9–17 → 19–20`；8/18 是同一 campaign 内最先运行的高风险 canary，不是额外试跑。
+      每个绝对槽恰好出现一次，正式分母仍为同一冻结代码、配置和 identity 的完整 `20/20`。
 - [ ] 每个正式结果都有唯一 Terminal-Bench 终态、API usage/预算终态、原生 trace/C2 与正确性投影及对应
       Docker receipt。网络 attempts 不扩大正式分母；有效任务失败、reward 0 或 C2 未改善不重跑、不补位。
 - [ ] 公共结果同时报告原始 exact-C2 occurrence、影响 slot/task、重复调用耗时、任务 pass/fail，以及冻结的
@@ -150,6 +153,8 @@
    20 个正式逻辑结果；RONDO Local 单侧，main 为 `gpt-5.6-terra/medium`，Guardian 为
    `gpt-5.6-terra/low`。Plan 056 formal-v6 是历史基线；当前 `mydev/` 与其被测 commit 无差异，正式时仍须用
    clean source/binary/manifest 复验“唯一主要产品变量为 C2 优化”。
+   下一 formal 的具体冻结执行顺序为 `8 → 18 → 1–7 → 9–17 → 19–20`：这里 `9–17` 明确排除已经第二个执行的
+   绝对槽 18，因而总数仍恰好 20。8/18 只是同 campaign 内的早期风险暴露顺序，不产生额外结果或独立 canary run。
 8. **三类失败严格分开。**
    - 运行链、请求/工具终态、观测、结算和结果完整，但任务失败、reward 0、C2 仍发生或性能不佳，是有效正式
      结果：进入分母，不重跑、不补位、不换 identity。
@@ -162,6 +167,9 @@
    formal-v1 顺序只覆盖第 `8..20` 槽（共 `13` 槽）：有效任务失败/reward 0 保留并前进；本地设施故障保留证据和
    费用、窄修并重跑当前诊断槽；纯网络暂态按同 logical slot 重试。13 槽全部完整后才统一冻结；之后只允许一个全新
    formal identity 从 `1/20` 开始，任何旧 formal/diagnostic 结果都不得进入正式分母。
+   首轮 `8..20` 全部证明后，若后续 formal 又暴露新的本地设施故障，修复后的 commissioning/diagnostic 只复验受
+   影响或尚未打通的题目/分支；不机械重跑未受改动影响且已有完整链路证据的其余题目。该局部复验仅用于重新建立冻结
+   资格，绝不缩短 formal：修复后的全新 formal 仍须从 `1/20` 完整重跑，不得拼接旧正式结果。
 9. **Plan 058 独立预算。** 新建从零开始的 task budget；不得复用或重开 Plan 056 已关闭账本。commissioning、
    invalid infra、诊断、网络重试、main/Guardian attempts 共用 `50.000000 USD` 硬上限。可靠 usage 按请求前冻结
    价格据实结算；机械确认未发送记 0；已发送或可能发送但 usage 不可靠按 `1.000000 USD/attempt`；发下一请求前
@@ -279,18 +287,22 @@
 ### 当前工作
 
 formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整槽只作诊断历史。Guardian-limit 后继续 verifier/
-真实 exit receipt 与非 `/tmp` CODEX_HOME 两项 runner 问题已窄修；独立 `diagnostic` mode 将绝对槽位范围、原 formal
-顺序、唯一 preflight task 集、失败槽新 identity 续扫和 `diagnostic_complete` 终态纳入既有 identity/state/预算/发布
-合同。Python 定向回归 `131/131`、`py_compile` 与 `git diff --check` 通过。下一步提交该修复批次，以全新 diagnostic
-identity 只扫剩余 13 槽；全部完整后统一提交、重建、冻结，再以全新 formal identity 从 1/20 开始一次干净正式运行。
+真实 exit receipt 与非 `/tmp` CODEX_HOME 两项 runner 问题已窄修；独立 `diagnostic` mode 已纳入既有设施。diagnostic-v1
+完成绝对槽 8–17 的 10 条完整链路；槽 18 自然复现 3 次 Guardian 后第 4 次本地上限，修复后的 adapter 如实保留 agent
+exit `1` 并让 Harbor 完成 verifier/reward `0`，但 schema-v2 projector 未识别该类型化、未执行命令的 failed tool call，
+campaign 以 `local_execution_or_projection_failed` 作废。该 identity 132 个可靠 attempts、`3.110194 USD`，Plan 058
+累计 `6.048443 USD`。projector 已窄修为只接受精确的 typed Guardian-limit pre-runtime failure，不伪造进程 exit、
+命令输出或已执行事实；相关 Python 回归 `171/171`、真实槽 18 私有 trace 投影和槽 8–17 十条既有记录 source
+revalidation 均通过。下一 diagnostic identity 只复验未打通的绝对槽 18–20，不重复 8–17。
 
 ### 本任务剩余步骤
 
-1. Phase C：完成 runner 窄修与定向回归；用 commissioning/diagnostic identity 串行扫旧 formal-v1 第 8–20 槽，
-   逐槽按三类规则处理，直到 13/13 运行链完整。
+1. Phase C：用已通过 typed Guardian-limit 实迹验收的全新 diagnostic identity 只扫未打通的绝对槽 18–20。与
+   diagnostic-v1 已完整的 8–17 合并为 commissioning 覆盖证据，直到 13/13 运行链完整；
+   不把任何 diagnostic 数据放入正式分母。
 2. Phase C 冻结：diagnostic sweep 完整后统一提交，从该 clean source 重新构建/复验 binary/manifest，冻结正式配置。
-3. Phase D：以全新干净 identity 从 1/20 串行完成固定 10 题 × 2 round 的 20 个正式逻辑结果；不得复用旧 formal
-   或 diagnostic 结果。
+3. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
+   2 round 的 20 个唯一正式逻辑结果；不得复用旧 formal 或 diagnostic 结果。
 4. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
@@ -378,3 +390,5 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 018 | commissioning-v1 的 Guardian 上限终态按运行链不完整的 invalid 结算；不改 Guardian/审批，以 formal-v6 中 0 Guardian 且覆盖 C2 的 `openssl-selfsigned-cert` 新身份重做 commissioning | 第四次审批请求被正确硬拒绝后 verifier 未运行，不能伪装为有效 reward 0；但换题只证明普通链路，不能替代已暴露异常分支的修复和验收 | commissioning、预算、失败分类 | 部分撤销；由 020 取代冻结资格 |
 | 019 | commissioning-v2 的完整 reward 0 作为有效任务失败保留；以其闭环提交冻结正式源码并重新构建，不复用 commissioning runtime identity | 运行链、verifier、投影、结算和发布完整，符合“有效失败不重跑”；正式必须绑定 commissioning 后的新 clean source/binary/identity | commissioning、正式冻结 | 已采纳 |
 | 020 | formal-v1 永久作废；修复 runner 后用 commissioning/diagnostic sweep 只覆盖旧 formal 第 8–20 槽（13 槽），13/13 完整后统一冻结，再以全新 formal 从 1/20 只跑一次 | commissioning-v2 的 7 main/0 Guardian 只证明普通路径；commissioning-v1 已暴露的 Guardian-limit 分支被错误绕过，formal-v1 又确认 adapter 跳过 verifier 与 `/tmp` CODEX_HOME helper 两项本地设施缺陷。剩余槽先扫尾可尽早暴露问题且避免反复重跑前 7 题 | commissioning、runner、冻结、正式分母 | 用户确认，硬合同 |
+| 021 | 首轮剩余槽覆盖完成后，若新 formal 暴露本地设施故障，修复后的 commissioning/diagnostic 只复验受影响或未打通题目；重新冻结后的 formal 仍从 1/20 完整重跑 | “局部重跑”描述的是脏版本/修复版重新打通，不是缩短正式分母；已有完整且未受修复影响的题目不做无意义重复，正式结果仍保持同一冻结版本和全新 identity | commissioning、修复、正式重启 | 用户确认，硬合同 |
+| 022 | 下一 formal 在 identity 创建前冻结执行顺序为 `8 → 18 → 1–7 → 9–17 → 19–20` | 绝对槽 8 是已知最高风险 canary，18 次之；二者在同一正式 campaign 内优先暴露问题。18 不在后续区间重复，仍是 20 个唯一结果、无额外试跑或旧结果拼接 | formal identity、执行顺序 | 用户建议，已采纳 |

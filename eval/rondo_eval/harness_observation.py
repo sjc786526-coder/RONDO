@@ -42,6 +42,10 @@ _BUDGET_ERROR_CODES = {
     "rate_limit_exceeded",
     "usage_limit_reached",
 }
+_PRE_RUNTIME_GUARDIAN_LIMIT_ERROR = re.compile(
+    r"\bstatus:?\s+409\b.{0,256}\bcode\b[^A-Za-z0-9]{1,12}"
+    r"guardian_logical_request_limit_exceeded\b"
+)
 
 
 class HarnessObservationError(ValueError):
@@ -685,8 +689,30 @@ def _project_complete_sources(
 ) -> dict[str, Any]:
     _kind, exec_view, exec_reader = exec_bundle
     all_views = [exec_view, *(item[1] for item in guardian_bundles)]
-    trace_main = len(exec_view["inferences"])
-    trace_guardian = sum(len(view["inferences"]) for view in all_views[1:])
+    exec_local_failures = _linked_local_inference_failure_ids(
+        exec_view,
+        exec_reader,
+        eligible_turns=_pre_runtime_guardian_limit_turns(exec_view, exec_reader),
+    )
+    exec_api_inferences = [
+        inference
+        for inference in exec_view["inferences"]
+        if inference["inference_id"] not in exec_local_failures
+    ]
+    guardian_api_inferences: list[list[dict[str, Any]]] = []
+    for _guardian_kind, guardian_view, guardian_reader in guardian_bundles:
+        local_failures = _local_guardian_limit_inference_ids(
+            guardian_view, guardian_reader
+        )
+        guardian_api_inferences.append(
+            [
+                inference
+                for inference in guardian_view["inferences"]
+                if inference["inference_id"] not in local_failures
+            ]
+        )
+    trace_main = len(exec_api_inferences)
+    trace_guardian = sum(len(inferences) for inferences in guardian_api_inferences)
     api_main = sum(request["role"] == "main" for request in requests)
     api_guardian = len(requests) - api_main
     if (trace_main, trace_guardian) != (api_main, api_guardian):
@@ -695,17 +721,23 @@ def _project_complete_sources(
     response_stats = _response_stats(requests)
     trace_completed = sum(
         inference["status"] == "completed"
-        for view in all_views
-        for inference in view["inferences"]
+        for inference in (
+            exec_api_inferences
+            + [
+                item
+                for inferences in guardian_api_inferences
+                for item in inferences
+            ]
+        )
     )
     if trace_completed != response_stats["terminal_completed"]:
         raise HarnessObservationError("trace and API response terminals disagree")
     trace_missing_usage = (
-        sum(inference["usage"] is None for inference in exec_view["inferences"]),
+        sum(inference["usage"] is None for inference in exec_api_inferences),
         sum(
             inference["usage"] is None
-            for view in all_views[1:]
-            for inference in view["inferences"]
+            for inferences in guardian_api_inferences
+            for inference in inferences
         ),
     )
     api_missing_usage = (
@@ -777,6 +809,110 @@ def _project_complete_sources(
         "tools": tools,
         "compactions": {"completed": None},
     }
+
+
+def _local_guardian_limit_inference_ids(
+    view: Mapping[str, Any], reader: NativeBundleReader
+) -> set[str]:
+    """Identify local Guardian budget refusals that never became API requests."""
+
+    rows = {
+        str(inference["inference_id"]): inference
+        for inference in view["inferences"]
+    }
+    local: set[str] = set()
+    for event in reader.events:
+        payload = event["payload"]
+        if payload.get("type") != "inference_failed":
+            continue
+        if (
+            set(payload)
+            != {
+                "type",
+                "inference_call_id",
+                "upstream_request_id",
+                "error",
+                "partial_response_payload",
+            }
+            or payload.get("upstream_request_id") is not None
+            or payload.get("partial_response_payload") is not None
+            or not isinstance(payload.get("error"), str)
+            or _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR.search(payload["error"]) is None
+        ):
+            continue
+        inference_id = payload.get("inference_call_id")
+        row = rows.get(str(inference_id))
+        if (
+            row is None
+            or row["status"] != "failed"
+            or row["usage"] is not None
+        ):
+            raise HarnessObservationError(
+                "local Guardian limit inference lifecycle is invalid"
+            )
+        local.add(str(inference_id))
+    return local
+
+
+def _pre_runtime_guardian_limit_turns(
+    view: dict[str, Any], reader: NativeBundleReader
+) -> set[str]:
+    runtimes, pre_runtime, _identities, _source_bytes = (
+        _command_runtime_aggregates(view, reader)
+    )
+    return {
+        str(tool["turn_id"])
+        for tool in view["tools"]
+        if tool["tool_id"] in pre_runtime
+        and runtimes[tool["tool_id"]].get("exit_code") is None
+        and runtimes[tool["tool_id"]].get("status") == "failed"
+    }
+
+
+def _linked_local_inference_failure_ids(
+    view: Mapping[str, Any],
+    reader: NativeBundleReader,
+    *,
+    eligible_turns: set[str],
+) -> set[str]:
+    """Exclude only no-upstream inference fallout from a typed tool refusal."""
+
+    if not eligible_turns:
+        return set()
+    rows = {
+        str(inference["inference_id"]): inference
+        for inference in view["inferences"]
+    }
+    local: set[str] = set()
+    for event in reader.events:
+        payload = event["payload"]
+        if payload.get("type") != "inference_failed":
+            continue
+        if (
+            set(payload)
+            != {
+                "type",
+                "inference_call_id",
+                "upstream_request_id",
+                "error",
+                "partial_response_payload",
+            }
+            or payload.get("upstream_request_id") is not None
+            or payload.get("partial_response_payload") is not None
+            or not isinstance(payload.get("error"), str)
+            or not payload["error"]
+        ):
+            continue
+        row = rows.get(str(payload.get("inference_call_id")))
+        if (
+            row is None
+            or str(row["turn_id"]) not in eligible_turns
+            or row["status"] != "failed"
+            or row["usage"] is not None
+        ):
+            continue
+        local.add(str(row["inference_id"]))
+    return local
 
 
 def _response_stats(requests: list[dict[str, Any]]) -> dict[str, Any]:
@@ -874,7 +1010,7 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
         for tool in tools
         if tool["kind"] in {"exec_command", "write_stdin"}
     }
-    runtime_ends, _, exec_identities, pre_runtime_source_bytes = (
+    runtime_ends, pre_runtime_execs, exec_identities, pre_runtime_source_bytes = (
         _command_runtime_aggregates(view, reader)
     )
 
@@ -894,13 +1030,18 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
     repeated = 0
     repeated_duration = 0
     repeated_after_failure = 0
-    commands_seen: dict[tuple[str, tuple[str, ...], str], int] = {}
+    commands_seen: dict[tuple[str, tuple[str, ...], str], bool] = {}
     for tool_id, tool in command_tools.items():
         runtime = runtime_ends[tool_id]
         command = runtime.get("command")
         cwd = runtime.get("cwd")
         output = runtime.get("aggregated_output")
         exit_code = runtime.get("exit_code")
+        pre_runtime_failed = (
+            tool_id in pre_runtime_execs
+            and exit_code is None
+            and runtime.get("status") == "failed"
+        )
         if (
             not isinstance(command, list)
             or not command
@@ -908,8 +1049,13 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
             or not isinstance(cwd, str)
             or not cwd
             or not isinstance(output, str)
-            or isinstance(exit_code, bool)
-            or not isinstance(exit_code, int)
+            or (
+                not pre_runtime_failed
+                and (
+                    isinstance(exit_code, bool)
+                    or not isinstance(exit_code, int)
+                )
+            )
         ):
             raise HarnessObservationError("command runtime aggregate is invalid")
         source_output_bytes = pre_runtime_source_bytes.get(tool_id)
@@ -924,13 +1070,15 @@ def _tool_stats(view: dict[str, Any], reader: NativeBundleReader) -> dict[str, i
             continue
         invocation_command, invocation_cwd = exec_identities[tool_id]
         identity = (tool["requester"], (invocation_command,), invocation_cwd)
-        prior_exit_code = commands_seen.get(identity)
-        if prior_exit_code is not None:
+        prior_failed = commands_seen.get(identity)
+        if prior_failed is not None:
             repeated += 1
             repeated_duration += tool_durations[tool_id]
-            if prior_exit_code != 0:
+            if prior_failed:
                 repeated_after_failure += 1
-        commands_seen[identity] = exit_code
+        commands_seen[identity] = (
+            True if pre_runtime_failed else exit_code != 0
+        )
 
     command_count = len(command_tools)
     mcp_count = sum(tool["kind"] == "mcp" for tool in tools)
@@ -958,12 +1106,13 @@ def _command_runtime_aggregates(
     dict[str, tuple[str, str]],
     dict[str, int],
 ]:
-    """Return complete native runtimes plus exact pre-runtime exec denials.
+    """Return complete runtimes plus exact typed pre-runtime exec failures.
 
     ``exec_command`` can fail while opening its sandbox, before the native
     runtime begin event exists.  Code mode still receives a terminal structured
-    result in that case.  Accept only that narrow, mechanically complete shape;
-    every other missing or one-sided runtime lifecycle remains invalid.
+    result in that case.  Accept only the narrow sandbox-denial and typed local
+    Guardian-limit shapes; every other missing or one-sided runtime lifecycle
+    remains invalid.
     """
 
     command_tools = {
@@ -1082,14 +1231,38 @@ def _pre_runtime_exec_aggregate(
     if (
         tool.get("kind") != "exec_command"
         or tool.get("requester") != "code_cell"
-        or tool.get("status") != "completed"
-        or ended.get("status") != "completed"
     ):
         raise HarnessObservationError("missing command runtime is not a pre-runtime denial")
 
     identity = _exec_command_invocation_identity(started, reader, None)
 
     result = reader.load_ref(ended.get("result_payload"))
+    if tool.get("status") == "failed" and ended.get("status") == "failed":
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"type", "error"}
+            or result.get("type") != "error"
+            or not isinstance(result.get("error"), str)
+            or _PRE_RUNTIME_GUARDIAN_LIMIT_ERROR.search(result["error"]) is None
+        ):
+            raise HarnessObservationError(
+                "missing command runtime is not a typed Guardian limit"
+            )
+        return (
+            {
+                # Guardian failed closed before command runtime creation.  Keep
+                # that true failure without inventing argv, output, or an exit.
+                "command": [identity[0]],
+                "cwd": identity[1],
+                "aggregated_output": "",
+                "exit_code": None,
+                "status": "failed",
+            },
+            identity,
+            0,
+        )
+    if tool.get("status") != "completed" or ended.get("status") != "completed":
+        raise HarnessObservationError("missing command runtime is not a pre-runtime denial")
     if (
         not isinstance(result, dict)
         or set(result) != {"type", "value", "output_render"}
