@@ -218,6 +218,23 @@
   Terminal-Bench 结果、预算账本、公共结果和 runtime bundle/manifest 仍保留；Plan 058 不依赖已删除资产。
 - 已由三个只读子智能体分别复核 execplan 合同、C2 live architecture 和 Plan 056 私有资产边界；规划整合不替代
   Phase A 的逐 occurrence 分类或实现完成后的独立验收。
+- 已完成 Phase A：逐项复核 formal-v6 六个命中 slot 的 9 次 occurrence，冻结为 `1` 次有害无进展只读重复
+  （`400 ms`）、`8` 次有状态变化或恢复依据的合理重复（`9,708 ms`）、`0` 次证据不足；总计与原始
+  `9` 次、`10,108 ms` 严格对齐。六个命中 slot 已提供充分证据，未扩大读取同 cohort 对照或其他 campaign。
+- 私有逐项表只保存在 Plan 058 ignored namespace；tracked body-free Phase A 聚合与预冻判据保存在
+  `eval/results/observations/plan058-direction1-c2-phase-a-2026-08-22.json`，未复制命令、prompt、响应或工具正文。
+- 已预冻主要收益门为 refined harmful occurrence 从 `1` 降至 `0`，并冻结合理重复/恢复/用户控制、所有工具仍
+  执行、关闭态等价和可信 20/20 等无害门。原始 exact-C2、重复耗时和 pass/fail 仅作可比解释指标。
+- 已完成 Phase B 产品实现：新增默认关闭的 `exec_command_repeat_guidance` feature，只在 RONDO Local main
+  `exec_command` tool spec 中加入有界选择提示；Guardian、legacy `shell_command` 和关闭态均保持原行为，runtime
+  不识别、抑制或改写任何调用/结果。提示明确保留状态变化、轮询、复测、恢复、transport retry、resume、steer
+  与明确继续，并禁止仅凭命令/cwd 相同推断副作用安全。
+- 已在既有公共预算、binary、Docker supervisor、Terminal-Bench runner、原生 trace 与 schema-v2 投影上新增窄的
+  Plan 058 orchestration。该层冻结 v28、Terra medium/low、单请求物理尝试、50 USD 跨 identity task budget、
+  三类重跑、body-free 发布与私有 refined classification，不复制通用 runner 或 telemetry。
+- 已完成实现侧定向门禁：Rust 4 个相关 tool-spec/feature 测试通过；Python 相关 budget、Terminal-Bench 与 Plan 058
+  orchestration 共 `126` 项通过；`just fix -p codex-core -p codex-features`、格式检查、Python compile、diff check 和
+  零 API `eval-plan058 status` 均通过。恢复审查另补了退役 identity 不可重激活、冻结输入先验证后改指针的回归。
 - 本 ExecPlan 已按用户要求保留必要行为、实验、预算和资源边界，把具体检测信号、模块、反馈形式、状态所有者、
   runner 拆分和数值收益门留给执行者基于 Phase A 证据自主冻结。
 - 规划阶段没有运行 Docker、Cargo、真实 API、本地模型、训练或测评，没有创建/修改 ignored campaign、budget、
@@ -225,29 +242,31 @@
 
 ### 当前工作
 
-Plan 058 仅完成规划，尚未进入真实 trace 分类、产品实现、commissioning 或正式复测。等待用户把包含一次性授权的
-执行提示词交给执行者。
+Phase A、Phase B 已完成；正在 Phase C 提交实现快照、从干净 detached source 构建并冻结 commissioning runtime，
+然后执行 Docker/Harbor 零 API 预检与一个完整真实 commissioning。尚未发出 Plan 058 真实 API 请求。
 
 ### 本任务剩余步骤
 
-1. Phase A：只读分类 formal-v6 C2 occurrence 和必要对照，冻结行为表、正确性回归及收益/无害/停止/回滚门。
-2. Phase B：实现一个可关闭、可回滚的 C2 主要行为变量，并完成定向回归。
-3. Phase C：打通 fake、构建、Docker 与至少一个完整真实 commissioning；修复范围内设施问题后提交并冻结正式
+1. Phase C：打通构建、Docker 与至少一个完整真实 commissioning；修复范围内设施问题后提交并冻结正式
    source/binary/config/evaluation identity。
-4. Phase D：以干净新 identity 串行完成固定 10 题 × 2 round 的 20 个正式逻辑结果，按三类规则处理失败与重试。
-5. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
+2. Phase D：以干净新 identity 串行完成固定 10 题 × 2 round 的 20 个正式逻辑结果，按三类规则处理失败与重试。
+3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
    聚焦独立验收、整改和工作树提交。
 
 ### 阻塞项
 
-无规划阻塞。真实执行仍须以用户一次性提示词取得本计划所需授权，并与 Plan 054/其他任务协调全局重型资源槽。
+无当前阻塞。用户一次性执行授权已取得；进入重型 Cargo、Docker 或真实 API 前仍须机械取得共享资源槽并满足宿主
+容量门。
 
 ### 当前验收状态
 
-- 规划输入：formal-v6 公共结果为有效 20/20、8 pass/12 fail；C2 为 9 次 occurrence、6 slot/4 task、3 个失败
-  slot、两轮均出现、10,108 ms。该事实只选择研究对象，不证明 9 次均有害或某项实现有收益。
-- Git：Plan 058 worktree 从 clean current `main` 创建；规划交付只包含本 execplan，尚未合并、推送或归档。
-- 未运行：Docker、Harbor preflight、Cargo/Rust 测试、真实 API、Terminal-Bench、本地模型、训练、完整数据集、
+- Phase A：formal-v6 公共结果为有效 20/20、8 pass/12 fail；raw C2 为 9 次、6 slot/4 task、10,108 ms；refined
+  基线为 harmful `1` 次/`400 ms`、reasonable `8` 次/`9,708 ms`、insufficient `0` 次。
+- 实现门禁：Rust 定向 `4/4`、Python 定向 `126/126` 通过；共享看门狗记录 Rust 测试 peak memory
+  `6,999,011,328` bytes、swap `0`、Windows C 可用空间前后 `192,379,305,984` bytes，资源硬门未触发。测试产生的
+  Plan 058 worktree 独占 Cargo target 已精确删除，未动共享 cache/其他任务资产。
+- Git：Plan 058 worktree 从 clean current `main` 创建；Phase A 与实现尚未提交、合并、推送或归档。
+- 未运行：Docker、Harbor preflight、真实 API、Terminal-Bench、本地模型、训练、完整数据集、
   CI 或 PR。
 
 ### 主工作区 ignored 资产
@@ -295,3 +314,8 @@ Plan 058 worktree，但执行阶段以下 I/O 会由 worktree 中的受控命令
 | 009 | ignored 运行 I/O 使用 Git common root；tracked 交付只在 Plan 058 worktree | 适配既有数据布局并保护主工作区 | 数据、Git | 已采纳 |
 | 010 | 首个可信 20/20 按预冻门决定保留或撤销；正式后调整不得借旧结果背书 | 防止结果导向调参，接受负面结论 | 决策、交付 | 已采纳 |
 | 011 | 最终只提交 Plan 058 worktree；共享权威文件与入口由后续主线整合者处理 | 遵守用户并行编排与集成批准边界 | Git、文档 | 已采纳 |
+| 012 | Phase A 将 formal-v6 C2 冻结为 harmful `1`、reasonable `8`、insufficient `0` | 唯一 harmful 是相关状态与结果均未变化的第三次只读 scan；其他调用都有状态变化、复测或恢复依据 | 分类、收益门、回归 | 已采纳 |
+| 013 | 主要收益门冻结为 harmful occurrence 从 `1` 降至 `0`；raw C2、耗时与 pass/fail 仅作解释和无害保护 | 小样本只有一个可信有害基线，不能追求删除八次合理重复或事后放宽判据 | 正式评价、最终决策 | 已采纳 |
+| 014 | 单一变量采用默认关闭、无状态的 `exec_command` tool-spec guidance，不增加 runtime suppression 或跨调用状态 | 模型在作出第三次调用前已拥有历史与状态语义；post-execution nudge 无法减少当前孤立有害 occurrence，复杂 runtime detector 反而会扩大误判与生命周期面 | 产品、配置、回归 | 已采纳 |
+| 015 | Plan 058 在既有低层原语上新增专用 campaign state/CLI，冻结 7.554 USD 的可靠 usage 最坏请求 reservation；未知 usage 仍按 1 USD/上游 attempt 结算 | Plan 056 orchestration 的固定 identity 与重试合同不适合 058，但通用 runner/预算/投影均可直接复用；请求前按冻结价格与 usage envelope 预留才能保证 50 USD 硬上限 | eval、预算、恢复 | 已采纳 |
+| 016 | 初始化恢复先直接验证冻结 lock、manifest 与全部调用输入；仅未越过初始化窗口的 identity 可修复 pointer/state/budget | 防止错误恢复参数或已退役 campaign 在失败前重绑活动指针、重开预算 | identity、恢复 | 已采纳 |

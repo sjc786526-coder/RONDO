@@ -136,6 +136,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         developer_instructions_path: str | None = None,
         developer_instructions_sha256: str | None = None,
         rollout_trace_root: str | None = None,
+        exec_command_repeat_guidance_enabled: bool | str = False,
         extra_env: dict[str, str] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -237,6 +238,16 @@ class UploadBinaryAdapter(HarborCodexAgent):
             rollout_trace_root,
             required=common_v2,
         )
+        repeat_guidance = _parse_bool_kwarg(
+            exec_command_repeat_guidance_enabled,
+            "exec_command_repeat_guidance_enabled",
+        )
+        if repeat_guidance and (
+            self.side is not Side.RONDO or self._product is not Product.RONDO_LOCAL
+        ):
+            raise AdapterError(
+                "exec_command repeat guidance is reserved for RONDO Local"
+            )
         if trace_root is not None and not common_v2 and (
             self.side is not Side.RONDO or self._product is not Product.RONDO_LOCAL
         ):
@@ -303,6 +314,7 @@ class UploadBinaryAdapter(HarborCodexAgent):
         self._developer_instructions_sha256 = policy_sha256
         self._developer_instructions = policy_text
         self._rollout_trace_root = trace_root
+        self._exec_command_repeat_guidance_enabled = repeat_guidance
         self._frozen_model_catalog_path = frozen_model_catalog_path
         self._frozen_model_catalog_sha256 = frozen_model_catalog_sha256
         self._frozen_model_catalog_source_commit = frozen_model_catalog_source_commit
@@ -714,6 +726,11 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 'sandbox_mode="workspace-write"',
                 "sandbox_workspace_write.network_access=true",
                 "features.code_mode_host=true",
+                *(
+                    ("features.exec_command_repeat_guidance=true",)
+                    if self._exec_command_repeat_guidance_enabled
+                    else ()
+                ),
                 f'model_provider={json.dumps(_EVAL_PROVIDER_ID)}',
                 f'model_providers.{_EVAL_PROVIDER_ID}.name="Configured Provider"',
                 f'model_providers.{_EVAL_PROVIDER_ID}.base_url='
@@ -805,6 +822,9 @@ class UploadBinaryAdapter(HarborCodexAgent):
                 common_multi_agent_v2=self._common_multi_agent_v2,
                 multi_agent_max_concurrency=self._multi_agent_max_concurrency,
                 developer_instructions=self._developer_instructions,
+                exec_command_repeat_guidance_enabled=(
+                    self._exec_command_repeat_guidance_enabled
+                ),
             )
             await _checked_exec_as_agent(
                 environment,
@@ -868,6 +888,7 @@ def adapter_for(
     developer_instructions_path: str | None = None,
     developer_instructions_sha256: str | None = None,
     rollout_trace_root: str | None = None,
+    exec_command_repeat_guidance_enabled: bool = False,
 ) -> UploadBinaryAdapter:
     adapter_type: type[UploadBinaryAdapter]
     if side is Side.CODEX:
@@ -914,6 +935,7 @@ def adapter_for(
         developer_instructions_path=developer_instructions_path,
         developer_instructions_sha256=developer_instructions_sha256,
         rollout_trace_root=rollout_trace_root,
+        exec_command_repeat_guidance_enabled=exec_command_repeat_guidance_enabled,
     )
 
 
@@ -1015,6 +1037,11 @@ def manifest_agent_kwargs(adapter: UploadBinaryAdapter) -> tuple[tuple[str, str]
             (("rollout_trace_root", adapter._rollout_trace_root),)
             if adapter._rollout_trace_root is not None
             and not adapter._common_multi_agent_v2
+            else ()
+        ),
+        *(
+            (("exec_command_repeat_guidance_enabled", "true"),)
+            if adapter._exec_command_repeat_guidance_enabled
             else ()
         ),
     ]
@@ -1190,6 +1217,7 @@ def _validate_safe_codex_command(
     common_multi_agent_v2: bool = False,
     multi_agent_max_concurrency: int | None = None,
     developer_instructions: str | None = None,
+    exec_command_repeat_guidance_enabled: bool = False,
 ) -> None:
     if not command.startswith("set -o pipefail; "):
         raise AdapterError("Codex output pipeline must preserve the command exit status")
@@ -1225,6 +1253,16 @@ def _validate_safe_codex_command(
         raise AdapterError("safe Codex execution options are incomplete")
     if command.count("features.code_mode_host=true") != 1:
         raise AdapterError("code-mode host feature override is ambiguous")
+    repeat_guidance_item = "features.exec_command_repeat_guidance=true"
+    if exec_command_repeat_guidance_enabled:
+        if product is not Product.RONDO_LOCAL:
+            raise AdapterError(
+                "exec_command repeat guidance is reserved for RONDO Local"
+            )
+        if command.count(repeat_guidance_item) != 1:
+            raise AdapterError("exec_command repeat guidance override is incomplete")
+    elif repeat_guidance_item in command:
+        raise AdapterError("agent received undeclared exec_command repeat guidance")
     if command.count("sandbox_workspace_write.network_access=true") != 1:
         raise AdapterError("workspace-write network policy override is ambiguous")
     if "model_providers.openai." in command:

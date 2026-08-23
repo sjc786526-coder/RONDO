@@ -119,6 +119,9 @@ class TerminalBenchRequest:
     developer_instructions_path: str | None = None
     developer_instructions_sha256: str | None = None
     rollout_trace_root: str | None = None
+    # Opt-in RONDO Local product variable for Plan 058. False keeps every
+    # historical request and Harbor argv byte-identical.
+    exec_command_repeat_guidance_enabled: bool = False
 
 
 def enable_local_harness_observation(
@@ -550,6 +553,15 @@ def prepare_terminal_bench_run(
         raise TerminalBenchRunError("Terminal-Bench verification mode is invalid")
     if not isinstance(request.delete_environment, bool):
         raise TerminalBenchRunError("Terminal-Bench environment cleanup mode is invalid")
+    if not isinstance(request.exec_command_repeat_guidance_enabled, bool):
+        raise TerminalBenchRunError("exec_command repeat guidance flag is invalid")
+    if request.exec_command_repeat_guidance_enabled and (
+        request.side is not Side.RONDO
+        or product_for_manifest(request.side, request.binary) is not Product.RONDO_LOCAL
+    ):
+        raise TerminalBenchRunError(
+            "exec_command repeat guidance is reserved for RONDO Local"
+        )
     _validate_frozen_model_catalog_request(config, request)
     if request.max_retries != 0:
         raise TerminalBenchRunError("Terminal-Bench P1 retries are disabled")
@@ -634,6 +646,9 @@ def prepare_terminal_bench_run(
         developer_instructions_path=request.developer_instructions_path,
         developer_instructions_sha256=request.developer_instructions_sha256,
         rollout_trace_root=request.rollout_trace_root,
+        exec_command_repeat_guidance_enabled=(
+            request.exec_command_repeat_guidance_enabled
+        ),
     )
     trial_name = _trial_name(materialized.task_label, spec.side)
     trials_dir = materialized.task_path.parent / "trials"

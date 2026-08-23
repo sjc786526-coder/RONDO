@@ -429,6 +429,7 @@ async def run_budgeted_terminal_bench_core(
     usage_envelope: Any | None = None,
     materializer: TaskMaterializer | None = None,
     counter_sample_timeout_seconds: float = COUNTER_SAMPLE_TIMEOUT_SECONDS,
+    budget_run_id: str | None = None,
 ) -> BudgetedTerminalBenchResult:
     """Shared budget-proxy, prepare, Harbor and result path for paid campaigns.
 
@@ -442,7 +443,7 @@ async def run_budgeted_terminal_bench_core(
         upstream_base_url=provider.base_url,
         api_key=api_key,
         ledger=ledger,
-        run_id=request.docker_task_id,
+        run_id=request.docker_task_id if budget_run_id is None else budget_run_id,
         metadata_path=metadata_path,
         main_model=provider.main_model,
         main_effort=provider.main_effort,

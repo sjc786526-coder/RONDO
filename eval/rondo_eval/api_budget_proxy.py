@@ -36,7 +36,8 @@ MAX_OUTPUT_TOKENS = 128_000
 BATCH_CAP_USD = Decimal("10.00")
 RUN_CAP_USD = Decimal("5.00")
 _MAX_EXPLICIT_BATCH_CAP_USD = Decimal("1600.00")
-_MAX_EXPLICIT_RUN_CAP_USD = Decimal("40.00")
+_MAX_EXPLICIT_RUN_CAP_USD = Decimal("50.00")
+_MAX_EXPLICIT_REQUEST_RESERVATION_USD = Decimal("40.00")
 MAX_BENCHMARK_RUNS = 4
 _MAX_EXPLICIT_BENCHMARK_RUNS = 321
 _MONEY_QUANTUM = Decimal("0.000001")
@@ -380,6 +381,7 @@ def load_validated_budget_ledger_state(
     default_run_cap_usd: Decimal | str,
     unpriced_fallback_usd: Decimal | str | None = None,
     unpriced_fallback_per_attempt: bool = False,
+    reservation_upstream_attempts: int = _MAX_UPSTREAM_ATTEMPTS,
 ) -> dict[str, Any]:
     """Read and fully validate an existing ledger without locks or writes."""
 
@@ -404,6 +406,7 @@ def load_validated_budget_ledger_state(
     )
     if not isinstance(unpriced_fallback_per_attempt, bool):
         raise ApiBudgetProxyError("unpriced fallback accounting mode is invalid")
+    _validate_reservation_upstream_attempts(reservation_upstream_attempts)
     _validate_state(
         value,
         batch_id=batch_id,
@@ -412,6 +415,7 @@ def load_validated_budget_ledger_state(
         default_run_cap=default_run_cap,
         unpriced_fallback=unpriced_fallback,
         unpriced_fallback_per_attempt=unpriced_fallback_per_attempt,
+        reservation_upstream_attempts=reservation_upstream_attempts,
     )
     return value
 
@@ -431,6 +435,7 @@ class PersistentBudgetLedger:
         unpriced_stop_threshold: int = 1,
         unpriced_fallback_usd: Decimal | str | None = None,
         unpriced_fallback_per_attempt: bool = False,
+        reservation_upstream_attempts: int = _MAX_UPSTREAM_ATTEMPTS,
     ):
         _require_safe_id(batch_id, "batch id")
         self.path = Path(path)
@@ -447,6 +452,8 @@ class PersistentBudgetLedger:
                 "per-attempt fallback accounting requires an explicit fallback"
             )
         self.unpriced_fallback_per_attempt = unpriced_fallback_per_attempt
+        _validate_reservation_upstream_attempts(reservation_upstream_attempts)
+        self.reservation_upstream_attempts = reservation_upstream_attempts
         self.max_runs = max_runs
         # Settling is the only place a charge is written, so the envelope is
         # enforced here rather than at each of the proxy's settle call sites.
@@ -476,7 +483,7 @@ class PersistentBudgetLedger:
         if self.total_cap <= 0 or self.total_cap > _MAX_EXPLICIT_BATCH_CAP_USD:
             raise ApiBudgetProxyError("batch cap exceeds the supported 1600 USD maximum")
         if self.default_run_cap <= 0 or self.default_run_cap > _MAX_EXPLICIT_RUN_CAP_USD:
-            raise ApiBudgetProxyError("run cap exceeds the supported 40 USD maximum")
+            raise ApiBudgetProxyError("run cap exceeds the supported 50 USD maximum")
         if (
             not isinstance(max_runs, int)
             or isinstance(max_runs, bool)
@@ -509,6 +516,10 @@ class PersistentBudgetLedger:
                     )
                 if self.unpriced_fallback_per_attempt:
                     self._state["unpriced_fallback_per_attempt"] = True
+                if self.reservation_upstream_attempts != _MAX_UPSTREAM_ATTEMPTS:
+                    self._state["reservation_upstream_attempts"] = (
+                        self.reservation_upstream_attempts
+                    )
                 self._persist()
         except Exception:
             self.close()
@@ -609,6 +620,54 @@ class PersistentBudgetLedger:
             ):
                 raise ApiBudgetProxyError("benchmark run is not proven unsent")
 
+    def resume_settled_infra_run(
+        self,
+        run_id: str,
+        *,
+        expected_stop_reason: str,
+        cap_usd: Decimal | str | None = None,
+    ) -> None:
+        """Resume one fully settled run after caller-classified infrastructure failure.
+
+        This is deliberately only a ledger transition. The campaign must first
+        classify the persisted transport/provider evidence and pass the exact
+        observed stop reason. Request history, spend, and ``infra_taint`` remain
+        intact, so generic product-result publication continues to reject the
+        run while a campaign-specific retry path can keep one logical identity.
+        """
+
+        _require_safe_id(run_id, "run id")
+        if expected_stop_reason not in INFRA_STOP_REASONS:
+            raise ApiBudgetProxyError("resumable stop reason is not infrastructure")
+        cap = self.default_run_cap if cap_usd is None else _money(cap_usd)
+        with self._lock:
+            self._assert_open()
+            run = self._require_run(run_id)
+            requests = run.get("requests")
+            if Decimal(run["cap_usd"]) != cap:
+                raise ApiBudgetProxyError("resumed infrastructure run cap differs")
+            if (
+                run["stopped"] is not True
+                or run["stop_reason"] != expected_stop_reason
+                or not isinstance(requests, dict)
+                or not requests
+                or run.get("infra_taint") is None
+                or any(
+                    not isinstance(request, dict)
+                    or request.get("status") != "settled"
+                    or isinstance(request.get("attempt_count"), bool)
+                    or not isinstance(request.get("attempt_count"), int)
+                    or request["attempt_count"] < 1
+                    for request in requests.values()
+                )
+            ):
+                raise ApiBudgetProxyError(
+                    "benchmark run is not a fully settled infrastructure failure"
+                )
+            run["stopped"] = False
+            run["stop_reason"] = None
+            self._persist()
+
     def _register_run(
         self,
         run_id: str,
@@ -674,7 +733,7 @@ class PersistentBudgetLedger:
                     "request reservation has no authorized capacity"
                 )
             minimum_fallback_reservation = (
-                self.unpriced_fallback * _MAX_UPSTREAM_ATTEMPTS
+                self.unpriced_fallback * self.reservation_upstream_attempts
                 if self.unpriced_fallback_per_attempt
                 and self.unpriced_fallback is not None
                 else self.unpriced_fallback
@@ -720,6 +779,10 @@ class PersistentBudgetLedger:
             or not 1 <= max_attempts <= _MAX_UPSTREAM_ATTEMPTS
         ):
             raise ApiBudgetProxyError("upstream attempt limit is invalid")
+        if max_attempts > self.reservation_upstream_attempts:
+            raise ApiBudgetProxyError(
+                "upstream attempt limit exceeds the reservation horizon"
+            )
         with self._lock:
             self._assert_open()
             run = self._require_run(run_id)
@@ -931,6 +994,10 @@ class PersistentBudgetLedger:
                 snapshot["unpriced_fallback_usd"] = _money_text(self.unpriced_fallback)
             if self.unpriced_fallback_per_attempt:
                 snapshot["unpriced_fallback_per_attempt"] = True
+            if self.reservation_upstream_attempts != _MAX_UPSTREAM_ATTEMPTS:
+                snapshot["reservation_upstream_attempts"] = (
+                    self.reservation_upstream_attempts
+                )
             return snapshot
 
     def recover_interrupted_requests(self) -> None:
@@ -980,6 +1047,7 @@ class PersistentBudgetLedger:
             default_run_cap_usd=self.default_run_cap,
             unpriced_fallback_usd=self.unpriced_fallback,
             unpriced_fallback_per_attempt=self.unpriced_fallback_per_attempt,
+            reservation_upstream_attempts=self.reservation_upstream_attempts,
         )
 
     def _recover_reserved_requests(self) -> None:
@@ -1301,6 +1369,10 @@ class LoopbackResponsesProxy:
             or not 1 <= max_attempts <= _MAX_UPSTREAM_ATTEMPTS
         ):
             raise ApiBudgetProxyError("proxy attempts must be between one and five")
+        if max_attempts > ledger.reservation_upstream_attempts:
+            raise ApiBudgetProxyError(
+                "proxy attempts exceed the ledger reservation horizon"
+            )
         if (
             isinstance(retry_backoff_seconds, bool)
             or not isinstance(retry_backoff_seconds, (int, float))
@@ -1316,7 +1388,10 @@ class LoopbackResponsesProxy:
                 request_reservation = _money(request_reservation_usd)
             except (ArithmeticError, TypeError, ValueError) as exc:
                 raise ApiBudgetProxyError("proxy request reservation is invalid") from exc
-            if request_reservation <= 0 or request_reservation > _MAX_EXPLICIT_RUN_CAP_USD:
+            if (
+                request_reservation <= 0
+                or request_reservation > _MAX_EXPLICIT_REQUEST_RESERVATION_USD
+            ):
                 raise ApiBudgetProxyError("proxy request reservation is invalid")
         if (
             not isinstance(unbilled_retry_statuses, tuple)
@@ -2920,6 +2995,17 @@ def _unpriced_fallback(
     return fallback
 
 
+def _validate_reservation_upstream_attempts(value: object) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= _MAX_UPSTREAM_ATTEMPTS
+    ):
+        raise ApiBudgetProxyError(
+            "reservation upstream attempts must be between one and five"
+        )
+
+
 def _require_safe_id(value: object, label: str) -> None:
     if not isinstance(value, str) or not _SAFE_ID.fullmatch(value):
         raise ApiBudgetProxyError(f"{label} is invalid")
@@ -2945,6 +3031,7 @@ def _validate_state(
     default_run_cap: Decimal,
     unpriced_fallback: Decimal | None,
     unpriced_fallback_per_attempt: bool = False,
+    reservation_upstream_attempts: int = _MAX_UPSTREAM_ATTEMPTS,
 ) -> None:
     expected_keys = {
         "schema_version",
@@ -2958,6 +3045,8 @@ def _validate_state(
         expected_keys.add("unpriced_fallback_usd")
     if unpriced_fallback_per_attempt:
         expected_keys.add("unpriced_fallback_per_attempt")
+    if reservation_upstream_attempts != _MAX_UPSTREAM_ATTEMPTS:
+        expected_keys.add("reservation_upstream_attempts")
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise ApiBudgetProxyError("budget ledger differs from schema v1")
     if (
@@ -2975,6 +3064,15 @@ def _validate_state(
         or (
             unpriced_fallback_per_attempt
             and value["unpriced_fallback_per_attempt"] is not True
+        )
+        or (
+            reservation_upstream_attempts != _MAX_UPSTREAM_ATTEMPTS
+            and (
+                isinstance(value["reservation_upstream_attempts"], bool)
+                or not isinstance(value["reservation_upstream_attempts"], int)
+                or value["reservation_upstream_attempts"]
+                != reservation_upstream_attempts
+            )
         )
     ):
         raise ApiBudgetProxyError("budget ledger does not match the authorized batch")

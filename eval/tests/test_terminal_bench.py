@@ -1295,6 +1295,69 @@ class TerminalBenchTests(unittest.TestCase):
         with self.assertRaises(runner_module.TerminalBenchRunError):
             enable_local_harness_observation(self.request(Side.CODEX))
 
+    def test_plan058_repeat_guidance_is_local_opt_in_and_reaches_strict_config(self) -> None:
+        request = replace(
+            self.request(Side.RONDO),
+            exec_command_repeat_guidance_enabled=True,
+        )
+        materializer = FakeMaterializer(self.root / "fake-repeat-guidance")
+        materializer.root.mkdir()
+        prepared = prepare_terminal_bench_run(
+            self.runtime_config(), request, materializer=materializer
+        )
+        adapter = prepared.adapter
+        self.assertIsInstance(adapter, RondoUploadAdapter)
+        self.assertEqual(
+            dict(adapters_module.manifest_agent_kwargs(adapter))[
+                "exec_command_repeat_guidance_enabled"
+            ],
+            "true",
+        )
+
+        environment = FakeEnvironment()
+        asyncio.run(adapter.run("native task instruction", environment, mock.Mock()))
+        commands = "\n".join(call[0] for call in environment.calls)
+        self.assertEqual(
+            commands.count("features.exec_command_repeat_guidance=true"), 1
+        )
+
+        default_local = self.adapter(RondoUploadAdapter)
+        self.assertNotIn(
+            "exec_command_repeat_guidance_enabled",
+            dict(adapters_module.manifest_agent_kwargs(default_local)),
+        )
+        with self.assertRaisesRegex(AdapterError, "reserved for RONDO Local"):
+            self.adapter(
+                CodexUploadAdapter,
+                exec_command_repeat_guidance_enabled=True,
+            )
+        with self.assertRaisesRegex(
+            runner_module.TerminalBenchRunError,
+            "reserved for RONDO Local",
+        ):
+            request = replace(
+                self.request(Side.CODEX),
+                exec_command_repeat_guidance_enabled=True,
+            )
+            materializer = FakeMaterializer(self.root / "invalid-repeat-guidance")
+            materializer.root.mkdir()
+            prepare_terminal_bench_run(
+                self.runtime_config(), request, materializer=materializer
+            )
+        with self.assertRaisesRegex(
+            runner_module.TerminalBenchRunError,
+            "flag is invalid",
+        ):
+            request = replace(
+                self.request(Side.RONDO),
+                exec_command_repeat_guidance_enabled="true",  # type: ignore[arg-type]
+            )
+            materializer = FakeMaterializer(self.root / "non-bool-repeat-guidance")
+            materializer.root.mkdir()
+            prepare_terminal_bench_run(
+                self.runtime_config(), request, materializer=materializer
+            )
+
     def test_only_multi_can_carry_the_team_state_off_flag(self) -> None:
         # `--strict-config` upstream cannot even deserialize the key, and Local
         # has no team layer, so a mis-routed diagnostic must fail construction
@@ -1922,6 +1985,10 @@ class TerminalBenchTests(unittest.TestCase):
         self.assertEqual(FakeBudgetProxy.last_kwargs["timeout_seconds"], 90.0)
         self.assertEqual(
             FakeBudgetProxy.last_kwargs["max_guardian_logical_requests"], 1
+        )
+        self.assertEqual(
+            FakeBudgetProxy.last_kwargs["run_id"],
+            self.request(Side.RONDO).docker_task_id,
         )
         self.assertNotEqual(
             FakeBudgetProxy.last_kwargs["timeout_seconds"],

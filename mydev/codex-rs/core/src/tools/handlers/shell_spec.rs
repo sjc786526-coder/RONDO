@@ -9,7 +9,10 @@ use std::collections::BTreeMap;
 pub struct CommandToolOptions {
     pub allow_login_shell: bool,
     pub exec_permission_approvals_enabled: bool,
+    pub repeat_guidance_enabled: bool,
 }
+
+pub(crate) const EXEC_COMMAND_REPEAT_GUIDANCE: &str = "Before repeating this tool with the same command and effective working directory, reuse the previous result and choose a different next action when no relevant state changed and the repeat would provide no new information. A repeat can still be appropriate for polling or waiting; after edits or changes to files, the environment, processes, services, permissions, results, or errors; for recovery or a transient transport/upstream retry; after compact, resume, or user steer; or when the user explicitly asks to continue. Never infer that a command which may write, use the network, or have unknown side effects is safely redundant from matching text alone.";
 
 #[cfg(test)]
 pub fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec {
@@ -90,14 +93,21 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
 
     ToolSpec::Function(ResponsesApiTool {
         name: "exec_command".to_string(),
-        description: if cfg!(windows) {
-            format!(
-                "Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n{}",
-                windows_shell_guidance()
-            )
-        } else {
-            "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
-                .to_string()
+        description: {
+            let description = if cfg!(windows) {
+                format!(
+                    "Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n{}",
+                    windows_shell_guidance()
+                )
+            } else {
+                "Runs a command in a PTY, returning output or a session ID for ongoing interaction."
+                    .to_string()
+            };
+            if options.repeat_guidance_enabled {
+                format!("{description}\n\n{EXEC_COMMAND_REPEAT_GUIDANCE}")
+            } else {
+                description
+            }
         },
         strict: false,
         defer_loading: None,

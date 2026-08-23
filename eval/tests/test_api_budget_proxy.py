@@ -24,6 +24,7 @@ from rondo_eval.api_budget_proxy import (  # noqa: E402
     MAX_REQUEST_RESERVATION_USD,
     UPSTREAM_TIMEOUT_SECONDS,
     ApiBudgetProxyError,
+    BudgetCapacityExhausted,
     BudgetStopped,
     LoopbackResponsesProxy,
     PersistentBudgetLedger,
@@ -521,6 +522,38 @@ class ApiBudgetProxyTests(unittest.TestCase):
                     request_reservation_usd=reservation,
                     _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
                 )
+
+    def test_proxy_attempts_cannot_exceed_ledger_reservation_horizon(self) -> None:
+        ledger = PersistentBudgetLedger(
+            self.root / "one-attempt-budget.json",
+            batch_id="one-attempt-budget",
+            total_cap_usd="50",
+            default_run_cap_usd="40",
+            unpriced_fallback_usd="1",
+            unpriced_fallback_per_attempt=True,
+            reservation_upstream_attempts=1,
+        )
+        with self.assertRaisesRegex(ApiBudgetProxyError, "reservation horizon"):
+            LoopbackResponsesProxy(
+                upstream_base_url="https://provider.example/v1",
+                api_key=self.secret,
+                ledger=ledger,
+                run_id="five-attempts",
+                metadata_path=self.root / "five-attempts.json",
+                **self._profile_kwargs(max_attempts=5),
+                _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+            )
+        proxy = LoopbackResponsesProxy(
+            upstream_base_url="https://provider.example/v1",
+            api_key=self.secret,
+            ledger=ledger,
+            run_id="one-attempt",
+            metadata_path=self.root / "one-attempt.json",
+            **self._profile_kwargs(max_attempts=1),
+            _transport=_UrllibTransport(endpoint_override=self.upstream.endpoint),
+        )
+        proxy.close()
+        ledger.close()
 
     def test_guardian_logical_request_limit_is_bounded(self) -> None:
         for number, limit in enumerate((True, False, 0, 4, -1)):
@@ -2084,6 +2117,113 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
         self.assertNotIn("unpriced_fallback_usd", ledger.snapshot())
         ledger.close()
 
+    def test_per_attempt_fallback_reservation_horizon_is_durable(self) -> None:
+        legacy = PersistentBudgetLedger(
+            self.root / "legacy-horizon.json",
+            batch_id="legacy-horizon",
+            unpriced_fallback_usd="1",
+            unpriced_fallback_per_attempt=True,
+        )
+        legacy.ensure_run("r1")
+        with self.assertRaisesRegex(BudgetCapacityExhausted, "fallback"):
+            legacy.reserve("r1", "too-small", "1")
+        legacy.reserve("r1", "full-horizon", "5")
+        self.assertNotIn("reservation_upstream_attempts", legacy.snapshot())
+        legacy.close()
+
+        path = self.root / "one-attempt-horizon.json"
+        ledger = PersistentBudgetLedger(
+            path,
+            batch_id="one-attempt-horizon",
+            unpriced_fallback_usd="1",
+            unpriced_fallback_per_attempt=True,
+            reservation_upstream_attempts=1,
+        )
+        ledger.ensure_run("r1")
+        ledger.reserve("r1", "one-dollar", "1")
+        with self.assertRaisesRegex(ApiBudgetProxyError, "reservation horizon"):
+            ledger.begin_attempt("r1", "one-dollar", max_attempts=2)
+        self.assertEqual(ledger.begin_attempt("r1", "one-dollar", max_attempts=1), 1)
+        self.assertEqual(ledger.snapshot()["reservation_upstream_attempts"], 1)
+        ledger.close()
+
+        reopened = PersistentBudgetLedger(
+            path,
+            batch_id="one-attempt-horizon",
+            unpriced_fallback_usd="1",
+            unpriced_fallback_per_attempt=True,
+            reservation_upstream_attempts=1,
+        )
+        self.assertEqual(reopened.snapshot()["reservation_upstream_attempts"], 1)
+        reopened.close()
+        with self.assertRaisesRegex(ApiBudgetProxyError, "schema v1"):
+            PersistentBudgetLedger(
+                path,
+                batch_id="one-attempt-horizon",
+                unpriced_fallback_usd="1",
+                unpriced_fallback_per_attempt=True,
+                )
+
+    def test_settled_infra_run_resumes_without_erasing_accounting(self) -> None:
+        ledger = PersistentBudgetLedger(
+            self.root / "infra-resume.json",
+            batch_id="infra-resume",
+            total_cap_usd="5",
+            default_run_cap_usd="5",
+            unpriced_fallback_usd="1",
+            unpriced_fallback_per_attempt=True,
+            reservation_upstream_attempts=1,
+        )
+        ledger.ensure_run("logical-slot")
+        ledger.reserve("logical-slot", "transport-1", "1")
+        ledger.begin_attempt("logical-slot", "transport-1", max_attempts=1)
+        ledger.settle(
+            "logical-slot",
+            "transport-1",
+            None,
+            pricing=MAIN_PRICING,
+            stop_reason="upstream_unavailable",
+        )
+        before = ledger.snapshot()["runs"]["logical-slot"]
+        with self.assertRaisesRegex(ApiBudgetProxyError, "fully settled"):
+            ledger.resume_settled_infra_run(
+                "logical-slot",
+                expected_stop_reason="upstream_deadline_exhausted",
+            )
+        ledger.resume_settled_infra_run(
+            "logical-slot",
+            expected_stop_reason="upstream_unavailable",
+        )
+        after = ledger.snapshot()["runs"]["logical-slot"]
+        self.assertFalse(after["stopped"])
+        self.assertIsNone(after["stop_reason"])
+        self.assertEqual(after["spent_usd"], "1.000000")
+        self.assertEqual(after["requests"], before["requests"])
+        self.assertEqual(after["infra_taint"], before["infra_taint"])
+        ledger.reserve("logical-slot", "next-request", "1")
+        ledger.close()
+
+        with self.assertRaisesRegex(ApiBudgetProxyError, "not infrastructure"):
+            with PersistentBudgetLedger(
+                self.root / "invalid-infra-resume.json",
+                batch_id="invalid-infra-resume",
+            ) as invalid:
+                invalid.resume_settled_infra_run(
+                    "missing",
+                    expected_stop_reason="budget_capacity_exhausted",
+                )
+
+    def test_invalid_reservation_upstream_attempts_fail_closed(self) -> None:
+        for number, value in enumerate((0, 6, True)):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                ApiBudgetProxyError, "between one and five"
+            ):
+                PersistentBudgetLedger(
+                    self.root / f"bad-horizon-{number}.json",
+                    batch_id=f"bad-horizon-{number}",
+                    reservation_upstream_attempts=value,
+                )
+
     def test_claim_run_rejects_reusing_an_existing_invocation(self) -> None:
         path = self.root / "claim-budget.json"
         with PersistentBudgetLedger(path, batch_id="claim-batch") as ledger:
@@ -2132,6 +2272,13 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             default_run_cap_usd="40",
         ) as campaign:
             self.assertEqual(campaign.snapshot()["max_runs"], 321)
+        with PersistentBudgetLedger(
+            self.root / "single-campaign-cap.json",
+            batch_id="single-campaign-cap",
+            total_cap_usd="50",
+            default_run_cap_usd="50",
+        ) as single_campaign:
+            self.assertEqual(single_campaign.snapshot()["default_run_cap_usd"], "50.000000")
         with self.assertRaises(ApiBudgetProxyError):
             PersistentBudgetLedger(
                 self.root / "too-many-runs.json",
@@ -2144,7 +2291,8 @@ class PersistentBudgetLedgerTests(unittest.TestCase):
             PersistentBudgetLedger(
                 self.root / "too-much-run.json",
                 batch_id="bad-run",
-                default_run_cap_usd="40.01",
+                total_cap_usd="50.01",
+                default_run_cap_usd="50.01",
             )
         path = self.root / "bad-mode.json"
         path.write_text("{}", encoding="utf-8")
