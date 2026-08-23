@@ -780,9 +780,16 @@ fn observe(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_publication_critic::MAX_HANDOFF_BYTES;
+    use codex_publication_critic::MAX_HANDOFF_SCALARS;
+    use codex_publication_critic::MAX_SUMMARY_BYTES;
+    use codex_publication_critic::MAX_SUMMARY_SCALARS;
+    use codex_publication_critic::MAX_TITLE_BYTES;
+    use codex_publication_critic::MAX_TITLE_SCALARS;
     use codex_publication_critic::RuntimeLimits;
     use codex_publication_critic::controlled_test_descriptor;
     use codex_team_state::FactCategory;
+    use codex_team_state::HistoryQuery;
     use codex_team_state::NotedObservation;
     use codex_team_state::TeamRevision;
     use serde_json::Value;
@@ -874,6 +881,26 @@ mod tests {
         }
     }
 
+    fn assert_packet_golden(name: &str, packet: &PublicationPacket) -> Value {
+        let goldens: Value =
+            serde_json::from_str(include_str!("fixtures/publication_packet_v1.json"))
+                .expect("tracked publication packet goldens must be valid JSON");
+        let expected = goldens
+            .get(name)
+            .unwrap_or_else(|| panic!("missing publication packet golden {name}"));
+        let actual = serde_json::to_value(packet).expect("packet must serialize");
+        assert_eq!(&actual, expected);
+
+        let decoded: PublicationPacket = serde_json::from_value(expected.clone())
+            .expect("golden must use the typed packet wire");
+        decoded.validate().expect("golden packet must validate");
+        assert_eq!(
+            serde_json::to_value(decoded).expect("decoded golden must serialize"),
+            expected.clone()
+        );
+        actual
+    }
+
     #[test]
     fn existing_event_packet_is_bounded_event_local_and_never_serializes_fact_ids() {
         let handle = Arc::new(TeamStateHandle::default());
@@ -946,7 +973,7 @@ mod tests {
             target: PublishTarget::ExistingEvent {
                 event_id: initial.event_id,
             },
-            summary: "候".repeat(2_030),
+            summary: "candidate summary".to_string(),
             handoff: Some("bounded handoff".to_string()),
         };
         let submission = Submission {
@@ -961,7 +988,7 @@ mod tests {
         };
         let expected_summary = prepared.summary.clone();
         let packet = build_packet(&test_client(), prepared, history).unwrap();
-        let packet = serde_json::to_value(packet).unwrap();
+        let packet = assert_packet_golden("existing_event", &packet);
 
         let keys = packet
             .as_object()
@@ -1051,11 +1078,129 @@ mod tests {
         else {
             panic!("candidate should not be committed yet")
         };
-        let packet =
-            serde_json::to_value(build_packet(&test_client(), prepared, history).unwrap()).unwrap();
+        let packet = build_packet(&test_client(), prepared, history).unwrap();
+        let packet = assert_packet_golden("new_event", &packet);
         assert_eq!(packet["actor_role"], "member");
         assert_eq!(packet["target_kind"], "new_event");
         assert_eq!(packet["continuity"]["state"], "not_applicable");
+    }
+
+    #[test]
+    fn packet_uses_the_same_canonical_over_cap_fields_that_store_commits() {
+        let handle = Arc::new(TeamStateHandle::default());
+        let member = ThreadId::new();
+        handle.register_participant(member, ParticipantRole::Member, "member".to_string());
+        let raw = PublishRequest {
+            target: PublishTarget::NewEvent {
+                title: "题".repeat(/*n*/ 230),
+            },
+            summary: "结".repeat(/*n*/ 2_030),
+            handoff: Some("续".repeat(/*n*/ 1_030)),
+        };
+        let submission = Submission {
+            based_on: TeamRevision::INITIAL,
+            request_id: "canonical-over-cap".to_string(),
+        };
+        let (PublishPreparation::Ready(prepared), history) = handle
+            .prepare_publish_with_history(member, &submission, &raw, MAX_PRIOR_PUBLICATIONS)
+            .unwrap()
+        else {
+            panic!("candidate should not be committed yet")
+        };
+        let PreparedPublishTarget::NewEvent { title } = &prepared.target else {
+            panic!("new event preparation must retain its target kind")
+        };
+        let expected_title = title.clone();
+        let expected_summary = prepared.summary.clone();
+        let expected_handoff = prepared
+            .handoff
+            .clone()
+            .expect("the canonical handoff remains present");
+
+        assert_eq!(expected_title.chars().count(), MAX_TITLE_SCALARS);
+        assert_eq!(expected_summary.chars().count(), MAX_SUMMARY_SCALARS);
+        assert_eq!(expected_handoff.chars().count(), MAX_HANDOFF_SCALARS);
+        for value in [&expected_title, &expected_summary, &expected_handoff] {
+            assert!(value.ends_with(" […truncated]"));
+        }
+
+        let packet = build_packet(&test_client(), prepared, history).unwrap();
+        assert_eq!(packet.local_scope.title(), expected_title);
+        assert_eq!(packet.candidate.summary(), expected_summary);
+        assert_eq!(packet.candidate.handoff(), Some(expected_handoff.as_str()));
+
+        let outcome = handle.publish(member, &submission, raw).unwrap();
+        let committed = handle
+            .history(
+                member,
+                &HistoryQuery {
+                    event_id: Some(outcome.event_id),
+                    limit: Some(1),
+                    before: None,
+                },
+            )
+            .unwrap();
+        let event = &committed.events[0].event;
+        let version = &event.versions[0];
+        assert_eq!(event.title, expected_title);
+        assert_eq!(version.summary, expected_summary);
+        assert_eq!(version.handoff.as_deref(), Some(expected_handoff.as_str()));
+    }
+
+    #[test]
+    fn plan054_sample_packets_deserialize_as_the_product_packet() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../eval/fixtures/publication-critic-v1/packets.jsonl");
+        let body = std::fs::read_to_string(&fixture).unwrap_or_else(|error| {
+            panic!(
+                "cannot read Plan 054 packet fixture {}: {error}",
+                fixture.display()
+            )
+        });
+        let mut count = 0;
+        for (index, line) in body.lines().enumerate() {
+            let row: serde_json::Value = serde_json::from_str(line)
+                .unwrap_or_else(|error| panic!("invalid Plan 054 JSON row {}: {error}", index + 1));
+            let packet: PublicationPacket = serde_json::from_value(row["packet"].clone())
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "invalid Plan 054 PublicationPacket row {}: {error}",
+                        index + 1
+                    )
+                });
+            packet.validate().unwrap_or_else(|error| {
+                panic!(
+                    "invalid Plan 054 packet contract row {}: {error}",
+                    index + 1
+                )
+            });
+            count += 1;
+        }
+        assert_eq!(count, 24);
+    }
+
+    #[test]
+    fn plan054_limit_document_matches_the_product_constants() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../eval/templates/publication-critic/product-packet-limits-v1.json");
+        let body = std::fs::read_to_string(&fixture).unwrap_or_else(|error| {
+            panic!(
+                "cannot read Plan 054 limit fixture {}: {error}",
+                fixture.display()
+            )
+        });
+        let limits: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(limits["title"]["max_scalars"], MAX_TITLE_SCALARS);
+        assert_eq!(limits["title"]["max_bytes"], MAX_TITLE_BYTES);
+        assert_eq!(limits["summary"]["max_scalars"], MAX_SUMMARY_SCALARS);
+        assert_eq!(limits["summary"]["max_bytes"], MAX_SUMMARY_BYTES);
+        assert_eq!(limits["handoff"]["max_scalars"], MAX_HANDOFF_SCALARS);
+        assert_eq!(limits["handoff"]["max_bytes"], MAX_HANDOFF_BYTES);
+        assert_eq!(limits["max_prior_publications"], MAX_PRIOR_PUBLICATIONS);
+        assert_eq!(
+            limits["max_visible_fact_references"],
+            MAX_VISIBLE_FACT_REFERENCES
+        );
     }
 }
 

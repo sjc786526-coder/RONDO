@@ -1,0 +1,153 @@
+{
+  "schema": "rondo-publication-critic-measurement-freeze-v1",
+  "purpose": "Plan 054 M3-A2 exact Skywork base-model measurement freeze",
+  "cohort_scope": "representative_and_boundary_examples_not_future_unseen_test",
+  "asset_lock_sha256": "419facd8f97412b6e45e5eac35d638ed3d88a943e7c936fd6700911d0f0b441b",
+  "environment_lock_sha256": "4665d66a91955a801c12039985bc9b8c2f43d2bb459640aeeb7c78502ba6f8b4",
+  "input_manifest": {
+    "eval/fixtures/publication-critic-v1/annotations.jsonl": "483d012b983c9bf7acfc2a03ccb9b898346f3be3d2bf1beedc19a1950d28348e",
+    "eval/fixtures/publication-critic-v1/packets.jsonl": "1d034a8f5046565d4af20dcd6c25772232fd84bf1ef7a75f7eb40a6fc1e0c598",
+    "eval/templates/publication-critic/input-contract-v1.md": "472bab9773e0a1dfb2f8239d4808132c08ca75defa67cdb9d46146d8779ea7cd",
+    "eval/templates/publication-critic/product-packet-limits-v1.json": "eb2ec31c1dc4cb271fca8f291b53b75771fd42ede4a49a03fa0628ef147f9397",
+    "eval/templates/publication-critic/qualification-rubric-v1.md": "cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4",
+    "eval/templates/publication-critic/render-contract-v1.json": "567fb076886bd65ca550635f15b6091454c7383129fcd818f4b6e39cf107e604",
+    "eval/templates/publication-critic/temporary-threshold-rule-v1.json": "7f32f5ffc9913197bb176322c8eb27d8835959d7107a8cc5ec7749590031b237"
+  },
+  "input_manifest_sha256": "28df33d8b83328cc9c0f362d6633cd63240c1c5c236ddeb166404c8e8d1113bc",
+  "implementation_manifest": {
+    "eval/rondo_eval/publication_critic/archive.py": "bbf0e94f118c9aa16b3158e284670d8286170ef14085a1d81f08ef5739ae7478",
+    "eval/rondo_eval/publication_critic/backend.py": "affe2ba674106362ee27744effa4b52dc540c3667707916dedb46e92afd1d9f6",
+    "eval/rondo_eval/publication_critic/boundaries.py": "145666d803c52a02aa1102b8a474070196349131b30a019559716c3ae1f4af6b",
+    "eval/rondo_eval/publication_critic/contract.py": "07003d8d231ee3038e746503d8c0fda318696d3d156b3a212aa7ede034bc0916",
+    "eval/rondo_eval/publication_critic/identity.py": "bbe7b35da740127f41eed583559c44f2714ed7b1aed9473f1fbe2863b210e685",
+    "eval/rondo_eval/publication_critic/render.py": "fa9b29106073a5a48932b8bb12f7496fc25241b046ac484f10b3be931a58745c",
+    "eval/rondo_eval/publication_critic/runner.py": "7cb5991bcf94749f3cf48e92c2955bbb4da13dfdffc0aca09d89c3453c7cbef7",
+    "eval/rondo_eval/publication_critic/scoring.py": "657fe9003eb8bf461258bda0ca41f4c1625928650b6542191f6ffc2b9a754887",
+    "eval/rondo_eval/publication_critic/tokenization.py": "21ba31c0516caff4d59ac0c8e616fc252514d45f645b4feb3265a08383ada1a1"
+  },
+  "implementation_manifest_sha256": "b02c4099a8a26a784c1d9a1ccd19fe500a601549e4760669e53ed11fc769b455",
+  "qualification_identity": {
+    "packet_schema": {
+      "name": "rondo-publication-packet",
+      "revision": "v1"
+    },
+    "rubric": {
+      "name": "rondo-publication-qualification",
+      "revision": "v1-sha256-cc15207b3c6e2482e56710f735d01893f8c8c020df35a18918e1a0a1be7f02e4"
+    }
+  },
+  "model_identity": {
+    "model": {
+      "name": "skywork-reward-v2-qwen3-1.7b",
+      "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+    },
+    "tokenizer": {
+      "name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+      "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
+    }
+  },
+  "scoring_identity": {
+    "definition": {
+      "name": "skywork-reward-scalar-higher-better",
+      "revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc-fp32-v1"
+    },
+    "input_template": {
+      "name": "rondo-publication-packet-render",
+      "revision": "v1-sha256-567fb076886bd65ca550635f15b6091454c7383129fcd818f4b6e39cf107e604"
+    },
+    "scalar_projection": {
+      "name": "stable-sigmoid-logits-index-0",
+      "revision": "v1"
+    },
+    "domain": {
+      "min": 0.0,
+      "max": 1.0
+    },
+    "threshold": 0.9350569011196121,
+    "pass_rule": "score_greater_than_or_equal_to_threshold"
+  },
+  "inference_contract": {
+    "backend_class": "Qwen3ForSequenceClassification",
+    "output_shape": [1],
+    "tensor_index": "logits[:,0]",
+    "pooling": "last_non_pad_token",
+    "raw_direction": "higher_is_better",
+    "device": "cpu",
+    "dtype": "float32",
+    "eval_mode": true,
+    "inference_mode": true,
+    "cpu_threads": 4,
+    "batch_size": 4,
+    "padding_side": "right",
+    "padding_counterfactual": "left",
+    "padding_id": 151654,
+    "attention_mask": "one_for_content_zero_for_padding",
+    "parity_absolute_tolerance": 0.0001,
+    "chat_template": "immutable_tokenizer_chat_template",
+    "add_generation_prompt": false,
+    "add_special_tokens_after_chat_template": false,
+    "bos_token_id": null,
+    "eos_token_id": 151645
+  },
+  "adopted_window_tokens": 16384,
+  "window_facts": {
+    "model_card_training_and_recommended_inference_tokens": 16384,
+    "model_config_max_position_embeddings": 40960,
+    "tokenizer_model_max_length": 131072,
+    "verified_context_forward_tokens": 16384,
+    "overflow_policy": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission",
+    "required_content_overflow": "typed_input_failure",
+    "implicit_tokenizer_truncation": false
+  },
+  "sample_identity": {
+    "name": "rondo-publication-critic-m3a2-cohort",
+    "revision": "v1-sha256-28df33d8b83328cc9c0f362d6633cd63240c1c5c236ddeb166404c8e8d1113bc",
+    "calibration_count": 8,
+    "measurement_count": 16,
+    "token_census_only_count": 2,
+    "class_counts": {
+      "new_event_completed": 6,
+      "new_event_incomplete": 6,
+      "existing_event_completed": 6,
+      "existing_event_incomplete": 6
+    },
+    "label_counts": {
+      "pass": 12,
+      "rewrite": 12
+    },
+    "future_m3_b1a_unseen_test": false
+  },
+  "temporary_threshold_source": {
+    "run_id": "plan054-20260823T021005Z-calibration-fp32",
+    "calibration_result_sha256": "82f36fb30c8abd812f8eb37561563fd7cff2685146efa5c89895c728b086062d",
+    "rule": "maximize_balanced_accuracy_then_minimize_false_pass_then_maximize_threshold_v1",
+    "rule_sha256": "7f32f5ffc9913197bb176322c8eb27d8835959d7107a8cc5ec7749590031b237",
+    "measurement_labels_used": false
+  },
+  "measurement_metrics": [
+    "valid_and_failed_count",
+    "raw_and_projected_score_distribution",
+    "confusion_and_false_pass_false_rewrite",
+    "accuracy_and_balanced_accuracy",
+    "roc_auc",
+    "publication_class_metrics",
+    "declared_error_slices",
+    "atomic_boundary_pair_ranking",
+    "token_distribution",
+    "forward_latency_p50_p95",
+    "wall_time_model_load_and_peak_memory"
+  ],
+  "declared_slices": [
+    "new_event",
+    "existing_event",
+    "completed",
+    "incomplete",
+    "continuity_available",
+    "continuity_unavailable",
+    "continuity_stale_or_partial",
+    "evidence_count_omitted",
+    "optional_handoff_empty",
+    "unicode",
+    "boundary_pair"
+  ]
+}

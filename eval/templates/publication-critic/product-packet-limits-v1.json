@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "rondo-publication-packet-limits",
+  "revision": "v1",
+  "title": {
+    "max_scalars": 213,
+    "max_bytes": 815
+  },
+  "summary": {
+    "max_scalars": 2013,
+    "max_bytes": 8015
+  },
+  "handoff": {
+    "max_scalars": 1013,
+    "max_bytes": 4015
+  },
+  "max_prior_publications": 4,
+  "max_visible_fact_references": 32
+}
