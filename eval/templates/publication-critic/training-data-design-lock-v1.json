@@ -1,0 +1,280 @@
+{
+  "schema": "rondo-publication-critic-training-data-design-lock-v1",
+  "dataset_name": "rondo-publication-critic-training",
+  "dataset_revision": "v1",
+  "purpose": "Plan 059 M3-B1a coverage, stopping, split, review, dedup, and consumer lock fixed before synthesis",
+  "frozen_before_synthesis": true,
+  "input_identity": {
+    "packet_schema": {
+      "name": "rondo-publication-packet",
+      "revision": "v1"
+    },
+    "qualification_rubric": {
+      "name": "rondo-publication-qualification",
+      "revision": "v1"
+    },
+    "plan054_freeze_sha256": "2a8081d3700f4209f5ac3cd7dabb7f6d31d0cb0b0ea0e9e8c639c8f10dbebfeb",
+    "render_contract": "rondo-publication-critic-render@v3",
+    "input_template_revision": "v3-sha256-dc3209af0d284dfe4be57403873717ba5f2790e2257cd4a39a2376de5696044c",
+    "tokenizer_name": "skywork-reward-v2-qwen3-1.7b-tokenizer",
+    "tokenizer_revision": "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc",
+    "adopted_window_tokens": 16384,
+    "candidate_truncation": "forbidden",
+    "continuity_overflow": "drop_whole_oldest_prior_publications_then_explicitly_encode_additional_omission"
+  },
+  "source_allowlist": [
+    {
+      "source_id": "plan059-synthetic-product-shaped-v1",
+      "kind": "synthetic",
+      "membership": "primary",
+      "allowed_projection": "author-created public Scenario blueprints and PublicationPacket fields only"
+    },
+    {
+      "source_id": "plan050-c01-public-completed-collaboration",
+      "kind": "tracked_public_anchor",
+      "membership": "anchor_only",
+      "relative_path": "agent_log/2026-08-21-060000-plan050-phase-b-final.md",
+      "sha256": "26ccd39dc70629a80dbaac56108ae4c77a1dc01c04ff39a132e49993dc66743b",
+      "allowed_projection": [
+        "case identity C01",
+        "completed outcome",
+        "collaboration observed",
+        "impact not observed"
+      ]
+    },
+    {
+      "source_id": "plan050-c03-public-incomplete-collaboration",
+      "kind": "tracked_public_anchor",
+      "membership": "anchor_only",
+      "relative_path": "agent_log/2026-08-21-060000-plan050-phase-b-final.md",
+      "sha256": "26ccd39dc70629a80dbaac56108ae4c77a1dc01c04ff39a132e49993dc66743b",
+      "allowed_projection": [
+        "case identity C03",
+        "task_failed outcome",
+        "collaboration observed",
+        "impact observed",
+        "member-to-Root typed return existed"
+      ]
+    },
+    {
+      "source_id": "plan054-v4-cohort-dedup-reference-only",
+      "kind": "tracked_dedup_reference",
+      "membership": "forbidden",
+      "packets_relative_path": "eval/fixtures/publication-critic-v1/packets.jsonl",
+      "packets_sha256": "1d034a8f5046565d4af20dcd6c25772232fd84bf1ef7a75f7eb40a6fc1e0c598",
+      "annotations_relative_path": "eval/fixtures/publication-critic-v1/annotations.jsonl",
+      "annotations_sha256": "483d012b983c9bf7acfc2a03ccb9b898346f3be3d2bf1beedc19a1950d28348e",
+      "allowed_projection": "model-visible packet text for duplicate screening; never copied or assigned a Plan 059 split"
+    }
+  ],
+  "teacher_roles": {
+    "generator": {
+      "role": "direct Plan 059 data generator",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "record_actual_when_frozen_after_rehearsal",
+      "context": "current implementation session"
+    },
+    "reviewer": {
+      "role": "independent structured teacher reviewer",
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "xhigh",
+      "context": "fresh sub-session with no inherited generator conversation"
+    },
+    "prompt_and_run_identity": "freeze_after_rehearsal_before_expansion"
+  },
+  "target_scale": {
+    "rehearsal_candidates": 12,
+    "formal_candidates": 72,
+    "formal_candidate_hard_cap": 84,
+    "boundary_pairs_target": 30,
+    "boundary_pairs_hard_cap": 36,
+    "within_pass_pairs_target": 6,
+    "within_pass_pairs_hard_cap": 8,
+    "tracked_public_anchor_scenarios_target": 2,
+    "rule": "stop immediately once all minimum coverage, terminal review, redundancy, split, dedup, tokenizer, and consumer gates pass at or above the target; do not generate toward the hard cap merely for volume"
+  },
+  "coverage_minimums": {
+    "formal_total_candidates": 60,
+    "split_candidates": {
+      "train": 36,
+      "validation": 12,
+      "unseen_test": 12
+    },
+    "split_binary_labels": {
+      "train": {
+        "PASS": 16,
+        "REWRITE": 16
+      },
+      "validation": {
+        "PASS": 5,
+        "REWRITE": 5
+      },
+      "unseen_test": {
+        "PASS": 5,
+        "REWRITE": 5
+      }
+    },
+    "publication_classes": {
+      "values": [
+        "new_event_completed",
+        "new_event_incomplete",
+        "existing_event_completed",
+        "existing_event_incomplete"
+      ],
+      "minimum_scenario_groups_per_value_global": 6,
+      "minimum_scenario_groups_per_value_per_split": 1
+    },
+    "boundary_hard_dimensions": {
+      "values": [
+        "useful_state_transfer",
+        "honest_uncertainty",
+        "conditional_continuity",
+        "scope_and_signal",
+        "internal_consistency"
+      ],
+      "minimum_pairs_per_value_global": 6,
+      "minimum_pairs_per_value_per_split": 1
+    },
+    "natural_mixed_binary_candidates_per_split": 1,
+    "within_pass_pairs_per_split": 1,
+    "roles_per_split": [
+      "root",
+      "member"
+    ],
+    "styles_per_split": [
+      "formal",
+      "conversational"
+    ],
+    "unicode_scenario_groups_global": 6,
+    "long_input_candidates_per_split": 1,
+    "priority_slices": {
+      "internal_consistency_rewrite": 6,
+      "new_completed_useful_state_boundary_pairs": 3,
+      "new_completed_scope_signal_boundary_pairs": 2,
+      "threshold_near_handoff_boundary_pairs": 3,
+      "continuity_available_label_each": 4,
+      "continuity_unavailable_label_each": 2,
+      "continuity_known_stale_label_each": 2,
+      "evidence_none_label_each": 3,
+      "evidence_present_label_each": 3,
+      "evidence_count_omitted_label_each": 2
+    }
+  },
+  "split_contract": {
+    "names": [
+      "train",
+      "validation",
+      "unseen_test"
+    ],
+    "target_candidate_ratios": {
+      "train": 0.6,
+      "validation": 0.2,
+      "unseen_test": 0.2
+    },
+    "candidate_ratio_tolerance": 0.05,
+    "algorithm": "deterministic_grouped_stratified_search_v1",
+    "seed": "plan059-publication-critic-split-v1",
+    "search_attempts": 20000,
+    "group_closure": [
+      "source_group",
+      "scenario_group",
+      "pair_endpoint",
+      "template_group",
+      "detected_near_duplicate_component"
+    ],
+    "order": "terminally accepted candidates first; build closure; then grouped stratification",
+    "unseen_test_default_consumer_access": "deny"
+  },
+  "dedup_contract": {
+    "exact_rule": "sha256_canonical_model_visible_packet_v1",
+    "near_duplicate_rule": "nfkc_variable_text_char_5gram_max_jaccard_containment_v1",
+    "near_duplicate_threshold": 0.88,
+    "plan054_reference_threshold": 0.82,
+    "variable_text_fields": [
+      "local_scope.title",
+      "candidate.summary",
+      "candidate.handoff",
+      "continuity.prior_publications.summary",
+      "continuity.prior_publications.handoff"
+    ],
+    "common_rubric_and_render_framing_excluded": true,
+    "automatic_similarity_role": "candidate screening and group closure only",
+    "cross_split_detected_component": "fail_closed",
+    "plan054_near_match": "exclude_or_rewrite; never silently admit"
+  },
+  "pair_contract": {
+    "boundary": {
+      "direction": "PASS_over_REWRITE",
+      "changed_hard_dimensions": 1,
+      "same_non_candidate_model_visible_context": true,
+      "same_final_continuity_omission": true,
+      "endpoints_keep_binary_supervision": true
+    },
+    "within_pass": {
+      "direction": "preferred_PASS_over_dispreferred_PASS",
+      "hard_qualification_equivalent": true,
+      "same_core_semantics": true,
+      "same_non_candidate_model_visible_context": true,
+      "same_final_continuity_omission": true,
+      "soft_preferences_only": true
+    }
+  },
+  "review_contract": {
+    "candidate_terminal_decisions": [
+      "accept",
+      "exclude"
+    ],
+    "candidate_nonterminal_decision": "revise",
+    "pair_terminal_decisions": [
+      "accept",
+      "downgrade",
+      "exclude"
+    ],
+    "accepted_candidate_requirement": "reviewer independently confirms Binary label and applicable hard requirements",
+    "accepted_pair_requirement": "reviewer independently confirms direction, context equality, omission equality, and atomic or soft-only semantics",
+    "disagreement_flow": [
+      "revise affected candidate and re-review",
+      "regenerate affected candidate and re-review",
+      "downgrade non-atomic pair endpoints to ordinary Binary",
+      "exclude when qualification remains untrustworthy"
+    ],
+    "prohibited": "repeat queries merely to obtain a predetermined conclusion"
+  },
+  "shortcut_checks": {
+    "dimensions": [
+      "split",
+      "binary_label",
+      "publication_class",
+      "actor_role",
+      "length_bucket",
+      "style",
+      "unicode",
+      "continuity_state",
+      "evidence_appearance",
+      "template_group"
+    ],
+    "minimum_rule": "report contingency counts and reject any feature value that perfectly predicts Binary label with at least four candidates unless product semantics necessarily force it"
+  },
+  "stage_membership": {
+    "C1": "all train Binary supervision and referenced train packets",
+    "C2": "all C1 members plus all train Boundary Q+/Q- pairs; no candidate removal",
+    "C3": "all C2 members plus all train Within-PASS pairs; no candidate or pair removal",
+    "validation_and_unseen_test": "never members of C1/C2/C3 or train-only smoke bundle"
+  },
+  "stop_and_no_go": {
+    "stop_when": [
+      "target scale reached",
+      "all sparse minimum cells pass",
+      "all selected candidates and pairs have terminal acceptable review states",
+      "all split, group closure, dedup, shortcut, exact-tokenizer, manifest, consumer, and bundle gates pass"
+    ],
+    "data_no_go_when": [
+      "formal candidate minimum cannot be met without exceeding the hard cap",
+      "any required split, label, publication class, hard dimension, or priority slice remains below minimum after reasonable repair",
+      "a cross-split group or near-duplicate leak remains",
+      "any formal candidate fails exact packet/render/tokenizer/window validation",
+      "C1/C2/C3 accumulation or train-only exclusion cannot be validated",
+      "a correctness finding remains after focused independent acceptance"
+    ]
+  }
+}
