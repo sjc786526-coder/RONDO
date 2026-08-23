@@ -286,6 +286,13 @@
 
 ### 当前工作
 
+用户于 2026-08-23 要求保存可恢复现场并安全中断。正式冻结源码已提交为 clean commit
+`9bdf51f516df46eb613810ef86e5a4cfb5683875`；legacy musl 重建在最终链接阶段收到人工 `SIGINT`，共享 watchdog
+已停止整个 scope 并记录 `wrapper_status=signal_INT`、`final_rc=130`，没有残留 Cargo/rustc/lock 进程。约
+`7.18GB` 的 Plan 058 独占增量 target 保留；尚未 prepare/publish 新 binary/runtime，也未创建下一 formal identity
+或发送新的 API 请求。恢复时沿用该 target，但须使用新的 metrics root（旧 root 保留中断 summary，不能混入成功
+build proof），再完成 build → prepare/verify → companion/runtime 冻结。
+
 formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整槽只作诊断历史。Guardian-limit 后继续 verifier、
 真实 exit receipt、非 `/tmp` CODEX_HOME 与 typed pre-runtime failure 投影已全部窄修。diagnostic-v1 完成绝对槽 8–17
 的 10 条完整链路，并在槽 18 暴露 projector 故障后作废；修改后的真实槽 18 私有 trace 投影与槽 8–17 十条 source
