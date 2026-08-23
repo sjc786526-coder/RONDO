@@ -906,9 +906,9 @@ mod tests {
     }
 
     #[test]
-    fn measurement_freeze_v2_matches_typed_publication_critic_identities() {
+    fn measurement_freeze_v3_matches_typed_publication_critic_identities() {
         let freeze_path = codex_utils_cargo_bin::find_resource!(
-            "../../../eval/manifests/publication-critic/measurement-freeze-v2.json"
+            "../../../eval/manifests/publication-critic/measurement-freeze-v3.json"
         )
         .expect("measurement freeze path must resolve");
         let freeze: Value =

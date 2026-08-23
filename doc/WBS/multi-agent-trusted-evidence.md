@@ -1,7 +1,7 @@
 # 方向 3：RONDO Multi（Event 驱动的团队世界状态产品线）
 
 最后更新：2026-08-22 ｜ 产品线：RONDO Multi（`multidev/`）｜ Codex 基线：`v0.147.0` ｜
-状态：**第一期、第二期与 M3-A1 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；M3-A2 正在执行 v2 正式测量**
+状态：**第一期、第二期与 M3-A1 已完成；Plan 055 / M3-B2a 与 Plan 057 / M3-B2b 已主线整合；M3-A2 正在执行 v3 正式测量**
 
 ## 当前定位
 
@@ -80,17 +80,16 @@ M3-B2a 服务协议、identity 和资源数值；M3-A2 的数据/评价细节和
 
 #### M3-A2：数据/评价设施与基座测评（执行中）
 
-**当前事实**：Plan 054 已冻结 PublicationPacket v1 parity、24 条代表/边界样本、两条产品 cap census case 与 Publication Critic
-专用评价/归档设施。第一次 v1 测量虽产生 16 条 finite scalar，但独立验收发现 freeze identity、全 cohort batch parity 与 render
-描述不一致，已作为 superseded 历史 attempt 保留。修正后的 v2 已绑定 exact CPU FP32 identity、真实 calibration artifact、全部 scored-row
-single/repeat/左右 padding/替代 batch composition parity 和独立 16,384-token finite smoke；正式 v2 measurement 尚未执行，当前不提前宣布
-M3-A2 完成或解锁 M3-B1a。
+**当前事实**：Plan 054 已冻结 PublicationPacket v1 parity、24 条代表/边界样本、两条产品 cap census case 和专用评价/归档设施。
+v1 因 qualification/output-shape/parity/render finding、v2 因 declared slice 名称与实际 annotation/result 键不一致，均保留为
+superseded 历史 attempt。v3 已把声明切片对齐 `freshness_known_stale`、`handoff_empty` 等真实 measurement 键，并增加 cohort/result
+双重覆盖校验；正式 v3 measurement 尚未执行，当前不宣布 M3-A2 完成或解锁 M3-B1a。
 
 **边界**：只建设 Publication Critic 必要设施和小规模代表性样本；不冻结正式训练数据，不启动付费训练，不扩张为通用
 数据平台、审计系统或大型 benchmark。
 
-**交接**：等待 v2 正式测量、结果归档和独立验收后再给出最终 go/no-go。M3-A2 cohort 始终只是代表/边界语料，不得冒充未来 unseen
-test；M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
+**交接**：等待 v3 正式测量、结果归档和同一独立审查者复验后给出最终 go/no-go。M3-A2 cohort 始终不是未来 unseen test；
+M3-C1 继续等待 M3-B1c 提供至少一个训练候选。
 
 ### B 阶段：模型链与产品链并行
 

@@ -34,8 +34,8 @@ MODEL_REPOSITORY = "Skywork/Skywork-Reward-V2-Qwen3-1.7B"
 MODEL_REVISION = "e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc"
 MODEL_WEIGHT_SHA256 = "117da8e3a6c3e9c9b9b66e74d69373b8f186e7fe27be2d64e0bb18510c9a07d9"
 ASSET_LOCK_SCHEMA = "rondo-publication-critic-skywork-assets-v1"
-FREEZE_SCHEMA = "rondo-publication-critic-measurement-freeze-v2"
-RESULT_SCHEMA = "rondo-publication-critic-baseline-result-v2"
+FREEZE_SCHEMA = "rondo-publication-critic-measurement-freeze-v3"
+RESULT_SCHEMA = "rondo-publication-critic-baseline-result-v3"
 CALIBRATION_SCHEMA = "rondo-publication-critic-calibration-result-v2"
 TOKEN_CENSUS_SCHEMA = "rondo-publication-critic-token-census-v2"
 PARITY_ABSOLUTE_TOLERANCE = 1e-4
@@ -63,14 +63,13 @@ DECLARED_SLICES = (
     "incomplete",
     "continuity_available",
     "continuity_unavailable",
-    "continuity_stale_or_partial",
+    "freshness_known_stale",
     "evidence_count_omitted",
-    "optional_handoff_empty",
+    "handoff_empty",
     "unicode",
-    "boundary_pair",
 )
 _MEASUREMENT_FREEZE_RELATIVE = Path(
-    "eval/manifests/publication-critic/measurement-freeze-v2.json"
+    "eval/manifests/publication-critic/measurement-freeze-v3.json"
 )
 
 _INPUT_FILES = (
@@ -329,6 +328,30 @@ def _model_row(row: Mapping[str, Any], output: Any) -> dict[str, Any]:
         "token_count": row["token_count"],
         "dropped_oldest_publications": row["dropped_oldest_publications"],
     }
+
+
+def _validate_declared_measurement_slices(
+    rows: Sequence[Mapping[str, Any]],
+) -> None:
+    observed: set[str] = set()
+    for row in rows:
+        sample = row.get("sample")
+        annotation = getattr(sample, "annotation", None)
+        if not isinstance(annotation, Mapping) or not isinstance(
+            annotation.get("slices"), (list, tuple)
+        ):
+            raise RunnerError("measurement slice annotation is invalid")
+        observed.update(
+            value for value in annotation["slices"] if isinstance(value, str)
+        )
+    if not set(DECLARED_SLICES).issubset(observed):
+        raise RunnerError("declared measurement slice is absent from the frozen cohort")
+
+
+def _validate_declared_quality_slices(quality: Mapping[str, Any]) -> None:
+    by_slice = quality.get("by_slice")
+    if not isinstance(by_slice, dict) or not set(DECLARED_SLICES).issubset(by_slice):
+        raise RunnerError("declared measurement slice is absent from the quality result")
 
 
 def _assert_parity(reference: float, observed: float, description: str) -> None:
@@ -627,11 +650,11 @@ def verify_measurement_freeze(
         },
         "freeze",
     )
-    if freeze["purpose"] != "Plan 054 M3-A2 exact Skywork base-model measurement freeze v2":
+    if freeze["purpose"] != "Plan 054 M3-A2 exact Skywork base-model measurement freeze v3":
         raise RunnerError("measurement freeze purpose drifted")
     if freeze["cohort_scope"] != "representative_and_boundary_examples_not_future_unseen_test":
         raise RunnerError("measurement cohort scope drifted")
-    if freeze["supersedes"] != "rondo-publication-critic-measurement-freeze-v1":
+    if freeze["supersedes"] != "rondo-publication-critic-measurement-freeze-v2":
         raise RunnerError("measurement freeze lineage drifted")
 
     expected_inputs = file_manifest(repo_root, _INPUT_FILES)
@@ -696,7 +719,7 @@ def verify_measurement_freeze(
     expected_scoring = {
         "definition": {
             "name": "skywork-reward-scalar-higher-better",
-            "revision": f"{MODEL_REVISION}-fp32-v2",
+            "revision": f"{MODEL_REVISION}-fp32-v3",
         },
         "input_template": {
             "name": "rondo-publication-packet-render",
@@ -895,6 +918,7 @@ def run_measurement(args: argparse.Namespace) -> dict[str, Any]:
         measurement = [row for row in rows if row["data_role"] == "m3a2_measurement"]
         if len(measurement) != 16:
             raise RunnerError("measurement role count drifted")
+        _validate_declared_measurement_slices(measurement)
         parity, parity_outputs = _verify_scalar_parity(
             backend,
             measurement,
@@ -906,6 +930,7 @@ def run_measurement(args: argparse.Namespace) -> dict[str, Any]:
         for row in model_rows:
             row["predicted_label"] = "pass" if row["score"] >= threshold else "rewrite"
         quality = summarize_measurement(model_rows, threshold)
+        _validate_declared_quality_slices(quality)
         measurement_wall_seconds = (
             datetime.now(timezone.utc) - measurement_started
         ).total_seconds()

@@ -15,6 +15,15 @@
   repeat, right/left padded and alternate batch composition. Calibration run
   `plan054-20260823T040900Z-calibration-v2` passed 8-row parity (maximum projected delta
   `1.5709748450998262e-06`) plus a finite 16,384-token forward and retained threshold `0.9350569011196121`.
-- Pre-measurement v2 verification: 24 Python focused tests, the Rust typed freeze identity test,
-  `just fix -p codex-core`, `multidev/just fmt`, strict freeze verification and diff checks passed. Formal v2
-  measurement and final independent acceptance remain pending.
+- Formal v2 run `plan054-20260823T042500Z-measurement-v2` completed once from clean commit
+  `c9a5e4671c3f74381b2bade7300f5e96a24bcdc7`: 16/16 valid, zero typed failures, maximum all-row parity delta
+  `4.523673587608634e-06`, accuracy/balanced accuracy 0.6875, ROC AUC 0.765625 and 7/8 atomic pair wins.
+  Final independent review then found three declared slice names absent from annotation/result keys, so v2 is
+  retained as a superseded attempt despite correct scalar/parity observations.
+- v3 aligns declared slices to actual measurement keys, leaves pair ranking as its independent metric, and
+  requires every declared slice in both the frozen cohort and `quality.by_slice`. Sample/model/render/scalar,
+  the successful v2 calibration artifact and threshold remain unchanged; formal v3 measurement is pending.
+- Focused verification: 24 Python tests, the Rust typed freeze identity test, `just fix -p codex-core`,
+  `multidev/just fmt`, environment lock, strict freeze/calibration binding and diff checks passed. All real model
+  runs used the shared watchdog; the successful calibration/measurement had zero swap/resource stop. Final
+  independent re-acceptance remains pending.

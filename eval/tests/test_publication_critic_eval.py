@@ -34,6 +34,8 @@ from rondo_eval.publication_critic.runner import (  # noqa: E402
     _INPUT_FILES,
     _require_committed_freeze,
     _frozen_runtime_identity,
+    _validate_declared_measurement_slices,
+    _validate_declared_quality_slices,
     _verify_scalar_parity,
     body_free_runner_exception,
     build_parser,
@@ -129,9 +131,9 @@ class PublicationCriticEvalTests(unittest.TestCase):
         }
         freeze = {
             "schema": FREEZE_SCHEMA,
-            "purpose": "Plan 054 M3-A2 exact Skywork base-model measurement freeze v2",
+            "purpose": "Plan 054 M3-A2 exact Skywork base-model measurement freeze v3",
             "cohort_scope": "representative_and_boundary_examples_not_future_unseen_test",
-            "supersedes": "rondo-publication-critic-measurement-freeze-v1",
+            "supersedes": "rondo-publication-critic-measurement-freeze-v2",
             "asset_lock_sha256": sha256_file(asset_lock),
             "environment_lock_sha256": inputs[
                 "eval/environments/publication-critic-plan054/uv.lock"
@@ -160,7 +162,7 @@ class PublicationCriticEvalTests(unittest.TestCase):
             "scoring_identity": {
                 "definition": {
                     "name": "skywork-reward-scalar-higher-better",
-                    "revision": f"{MODEL_REVISION}-fp32-v2",
+                    "revision": f"{MODEL_REVISION}-fp32-v3",
                 },
                 "input_template": {
                     "name": "rondo-publication-packet-render",
@@ -586,10 +588,27 @@ class PublicationCriticEvalTests(unittest.TestCase):
 
     def test_measurement_rejects_noncanonical_freeze_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            external = Path(temporary) / "measurement-freeze-v2.json"
+            external = Path(temporary) / "measurement-freeze-v3.json"
             external.write_text("{}", encoding="utf-8")
             with self.assertRaisesRegex(RunnerError, "canonical tracked path"):
                 _require_committed_freeze(REPO_ROOT, external)
+
+    def test_declared_measurement_slices_exist_in_cohort_and_quality(self) -> None:
+        measurement = [
+            {"sample": sample}
+            for sample in self.corpus.samples
+            if sample.annotation["data_role"] == "m3a2_measurement"
+        ]
+        _validate_declared_measurement_slices(measurement)
+        quality = {"by_slice": {name: {} for name in DECLARED_SLICES}}
+        _validate_declared_quality_slices(quality)
+
+        absent = SimpleNamespace(annotation={"slices": []})
+        with self.assertRaisesRegex(RunnerError, "absent from the frozen cohort"):
+            _validate_declared_measurement_slices([{"sample": absent}])
+        quality["by_slice"].pop(DECLARED_SLICES[-1])
+        with self.assertRaisesRegex(RunnerError, "absent from the quality result"):
+            _validate_declared_quality_slices(quality)
 
 
 if __name__ == "__main__":

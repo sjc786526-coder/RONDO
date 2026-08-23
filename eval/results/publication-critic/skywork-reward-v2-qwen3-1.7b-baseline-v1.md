@@ -3,7 +3,8 @@
 > **Superseded historical attempt.** Independent review found that this v1 freeze did not correctly bind the
 > model-visible rubric revision/output shape, did not exercise every scored row across alternate batch
 > compositions, and described the title's message placement incorrectly. Its finite scalars and resource facts
-> are retained, but it is not formal Plan 054 acceptance evidence. The corrected v2 result will be the authority.
+> are retained, but it is not formal Plan 054 acceptance evidence. Baseline v2 was also superseded after a
+> declared-slice identity finding; the corrected v3 measurement is pending.
 
 Plan 054 measured the immutable `Skywork/Skywork-Reward-V2-Qwen3-1.7B` revision
 `e51ea3e08fb81326c3b812a7ff0cb9cee83e59cc` on a frozen, product-shaped M3-A2 cohort. The cohort is

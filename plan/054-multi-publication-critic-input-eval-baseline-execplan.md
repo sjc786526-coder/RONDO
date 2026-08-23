@@ -232,14 +232,20 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
   context forward finite。校准 run `plan054-20260823T040900Z-calibration-v2` 固定临时 threshold `0.9350569011196121`。
 - v2 freeze SHA-256 为 `abb06abfa218695d38b8c9d681c939cbd37f8197d631c42ab3ccd63fa733797e`；24 个 Python focused tests、
   Rust typed identity 定向测试、`just fix -p codex-core`、format 与 diff check 已通过。
+- 正式 run `plan054-20260823T042500Z-measurement-v2` 从 clean commit `c9a5e4671c3f74381b2bade7300f5e96a24bcdc7`
+  一次完成：16/16 valid、零 typed failure，全部 16 条 scored row parity 最大 projected delta `4.523673587608634e-06`，
+  accuracy / balanced accuracy `0.6875`、ROC AUC `0.765625`、atomic pair `7/8`；但最终独立复验发现 3 个 frozen declared slice
+  名称不存在于正式 annotation/result，v2 因此只保留为 superseded attempt，不作为完成证据。
+- v3 已对齐 10 个真实 measurement slice，把 pair 只保留为独立 `atomic_boundary_pair_ranking`，并新增 cohort 与 `quality.by_slice`
+  双重覆盖校验；不改变 sample、render、model、scalar、threshold 或 calibration artifact，正式 measurement 将从新 clean freeze 完整重跑。
 
 ### 当前工作
 
-- 正在把 v2 freeze 固定到 clean Git commit；随后从该提交执行一次正式 16 样本 measurement。
+- 正在固定 v3 freeze clean commit；随后完整重跑正式 16 样本 measurement。
 
 ### 本任务剩余步骤
 
-1. 从 v2 clean freeze commit 执行正式 measurement，归档 tracked/raw 结果并同步本节、方向 3 WBS 与精炼日志。
+1. 从 v3 clean freeze commit 完整重跑正式 measurement，并同步 tracked/raw 结果、报告、方向 3 WBS 与日志。
 2. 交回同一干净上下文独立审查者复验；确认真实 finding 后窄修并再次交回，直到 PASS。
 3. 复核 tracked/ignored 资产和资源结果，精确清理本任务不再需要的下载分块，完成 054 本地分支最终提交并保持 clean。
 
@@ -249,7 +255,7 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 
 ### 当前验收状态
 
-- v2 实现、真实校准、context smoke、measurement freeze 和 focused freeze 自检已通过；正式 v2 measurement 与最终独立验收待执行。
+- v3 slice identity 与覆盖校验 focused tests 已通过；等待新 freeze commit、正式 v3 measurement 和最终独立复验。
 
 ### 交接边界
 
@@ -278,6 +284,7 @@ Hugging Face/Python 配置，不得把模型复制进 worktree 或用 symlink �
 | 010 | 用 Rust canonical preparation 生成 parity fixture，再由 Python strict loader 消费；不公开生产 private bridge | 保证现行产品 packet 一致，又避免为离线评价扩大产品 API | packet、测试 | 已采纳 |
 | 011 | 采用 16,384-token window，完整保留必需 candidate，仅整条丢最旧 continuity 并显式编码新增 omission | exact tokenizer census 与真实 context smoke 均支持推荐窗口，同时维持产品语义 | render、overflow | 已采纳 |
 | 012 | CPU BF16 作为已记录不合格 attempt；正式 identity 采用通过 `1e-4` batch parity 的 CPU FP32 | 不用放宽容差掩盖同一输入在 batch 中的数值漂移 | model、scoring、资源 | 已采纳 |
-| 013 | v1 质量事实曾指向工程/数据建设 GO、未微调 direct-product NO-GO；最终结论必须由 v2 重新确认 | v1 的 7/8 pair ranking 与错误切片仍可作历史观察，但不能越过无效 freeze 冒充正式结论 | 结果、交接 | 被 014 取代，待 v2 |
+| 013 | v2 正式确认基座工程与 M3-B1a 数据建设 GO、未微调 direct-product NO-GO；M3-C1 继续等待训练候选 | 7/8 pair ranking 显示可训练信号，但 3 个 false pass 与 new/completed 弱项不足以直接上线 | 结果、交接 | 已采纳 |
 | 014 | v1 正式 run 因 identity/parity/render 合同不一致降级为 superseded attempt；升级 v2 后完整重跑 | 已产生 scalar 不等于满足冻结合同，不能用文档修饰替代重新测量 | identity、runner、结果 | 已采纳 |
 | 015 | parity 覆盖全部 calibration/measurement scored row；两条 `token_census_only` cap 只做 exact census，另以独立 16k forward 验证 context | census cap 不参与 threshold/quality，强塞入 batch parity 会扭曲 `every_scored_row` 语义并放大无关计算 | parity、census、资源 | 已采纳 |
+| 016 | v2 因 declared slices 与真实结果键不一致降级为 superseded attempt；v3 对齐真实键、加 cohort/result 覆盖校验并完整重跑 measurement | 冻结声明必须对应实际可计算指标，主分数正确不能替代缺失的 declared-slice 结果 | freeze、指标、结果 | 已采纳 |
