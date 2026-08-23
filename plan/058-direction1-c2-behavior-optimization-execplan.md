@@ -247,9 +247,9 @@
 ### 当前工作
 
 Phase A、Phase B 已完成；Phase C 首次 `23567b6` build chain 因与 Plan 054 真实模型生命周期发生共享资源重叠而
-不予接受。当前等待 Plan 054 v2 校准终态与资源槽真正释放；随后精确清理本次可再生成 target/artifact，从新的干净
-detached source 完整重建 commissioning runtime，再进入 Docker/Harbor 零 API 预检。尚未初始化 Plan 058 campaign
-或发出真实 API 请求。
+不予接受。已确认 Plan 054 正式 measurement 终态并等待 canonical 槽释放，随后精确清理本次 target、detached
+measurement worktree 与 legacy artifact；build summaries 保留。正在从记录该事件与清理事实的新干净提交完整重建
+commissioning runtime，再进入 Docker/Harbor 零 API 预检。尚未初始化 Plan 058 campaign 或发出真实 API 请求。
 
 ### 本任务剩余步骤
 
@@ -274,8 +274,8 @@ detached source 完整重建 commissioning runtime，再进入 Docker/Harbor 零
 - Git：Plan 058 worktree 从 clean current `main` 创建；Phase A、实现快照与本事件记录只提交在 Plan 058 本地分支，
   未合并、推送或归档。
 - 失效构建：`23567b6` legacy/companion 本侧均构建成功，但因已确认的跨任务互斥事实不作为 commissioning 验收；
-  build metrics 和 legacy artifact 暂留，待 Plan 054 终态后 exact cleanup。该事件没有 Plan 058 campaign、Docker
-  或 API 成本。
+  exact target、detached measurement worktree 与 `1,260,206,189` bytes legacy artifact 已清理，build metrics 保留。
+  该事件没有 Plan 058 campaign、Docker 或 API 成本。
 - 未运行：Docker、Harbor preflight、真实 API、Terminal-Bench、本地模型、训练、完整数据集、
   CI 或 PR。
 

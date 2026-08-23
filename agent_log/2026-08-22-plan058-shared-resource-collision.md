@@ -19,14 +19,15 @@ Plan 058 Cargo 窗口高度重合，因此按高概率由本次构建触发处�
   infra failure 并计划修复后从冻结起点重跑。
 - 资源互斥硬约束已被事实破坏，因此 `23567b6` 的构建即使字节与 source 可复验，也不作为 Plan 058 的合规
   commissioning build。尚未初始化 campaign、启动 Docker 或发送 API，Plan 058 费用仍为 `0.000000 USD`。
-- 已终止只在等锁、尚未创建 companion bundle 的封装进程。现有 build metrics、target 和 legacy artifact 暂时
-  保留为事件证据；确认 Plan 054 v2 校准终态且资源槽真正释放后，按 exact identity 清理这些可再生成资产，再从
-  新的冻结提交完整重建。
+- 已终止只在等锁、尚未创建 companion bundle 的封装进程。只读确认 Plan 054 正式 measurement 终态，并等待
+  canonical 锁实际释放后，通过 `binary_freeze cleanup` 删除 exact `23567b6` target；确认 clean HEAD 后注销 detached
+  measurement worktree；核对 legacy manifest source/product/digest 与目录仅含 `codex + manifest.json` 后删除
+  `1,260,206,189` bytes artifact。可再生成 target 终态为 `0`，build summaries 与本日志继续保留。
 
 ## 后续门禁
 
 - Plan 058 的后续封装、Docker 和 Cargo 继续使用 canonical 共享锁；槽被占用时每三分钟轮询一次。
-- 下一次实际 Cargo 前，除取得锁外，还要只读确认 Plan 054 v2 校准已终态/模型资源已释放，避免把瞬时空锁误认为
-  完整空闲窗口。
+- 下一次实际 Cargo 前，除取得锁外，还要只读确认 Plan 054 正式 measurement 已终态/模型资源已释放，避免把瞬时
+  空锁误认为完整空闲窗口；本次重建前双重门已满足。
 - 不修改、清理或重解释 Plan 054 的 run、watchdog、模型、账本和失败证据；最终交付同时报告本事件、失效构建和
   重建证据。
