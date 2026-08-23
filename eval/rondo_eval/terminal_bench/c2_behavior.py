@@ -75,6 +75,32 @@ PLAN058_GUARDIAN_EFFORT = "low"
 PLAN058_FORMAL_TASKS = 10
 PLAN058_FORMAL_ROUNDS = 2
 PLAN058_FORMAL_SLOTS = 20
+PLAN058_FORMAL_EXECUTION_ORDER = (
+    8,
+    18,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    19,
+    20,
+)
+PLAN058_LEGACY_FORMAL_V1_CAMPAIGN_ID = "plan058-direction1-c2-formal-v1"
+PLAN058_LEGACY_FORMAL_V1_SHA256 = (
+    "f23c6b8cf361112be60b484d8458324276f9bee63077e176386d1a29b5010d95"
+)
 PLAN058_DIAGNOSTIC_SLOT_MIN = 8
 PLAN058_DIAGNOSTIC_SLOT_MAX = 20
 PLAN058_OBSERVATION_SCHEMA_VERSION = 2
@@ -85,6 +111,9 @@ PLAN058_REFINED_TARGET = 0
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,159}\Z")
+_LOGICAL_RUN_ID = re.compile(
+    r"(?P<date>20[0-9]{6})-(?P<sequence>[0-9]{9})-tb-rondo-plan058\Z"
+)
 _CAMPAIGN_PREFIX = "plan058-direction1-c2-"
 _TERMINAL_STATUSES = frozenset({"ready_to_finalize", "invalid", "finalized"})
 _SLOT_STATUSES = frozenset({"pending", "running", "retry_pending", "published"})
@@ -705,6 +734,43 @@ def freeze_diagnostic_slots(
     return slots
 
 
+def freeze_formal_slots(
+    tasks: Iterable[FrozenTask],
+    *,
+    run_id_date: str,
+    run_id_sequence_base: int,
+) -> tuple[C2BehaviorSlot, ...]:
+    """Freeze the one Plan 058 post-diagnostic formal execution order."""
+
+    canonical = freeze_slots(
+        tasks,
+        run_id_date=run_id_date,
+        run_id_sequence_base=run_id_sequence_base,
+        rounds=PLAN058_FORMAL_ROUNDS,
+    )
+    if len(canonical) != PLAN058_FORMAL_SLOTS:
+        raise C2BehaviorError("Plan 058 formal denominator drifted")
+    slots = tuple(
+        C2BehaviorSlot(
+            slot_id=canonical[position - 1].slot_id,
+            logical_run_id=(
+                f"{run_id_date}-{run_id_sequence_base + offset:09d}-"
+                "tb-rondo-plan058"
+            ),
+            round=canonical[position - 1].round,
+            task_index=canonical[position - 1].task_index,
+            task_id=canonical[position - 1].task_id,
+        )
+        for offset, position in enumerate(PLAN058_FORMAL_EXECUTION_ORDER)
+    )
+    for slot in slots:
+        slot.validate(
+            task_count=PLAN058_FORMAL_TASKS,
+            rounds=PLAN058_FORMAL_ROUNDS,
+        )
+    return slots
+
+
 def _load_v28_reference(paths: RepoPaths) -> CampaignIdentity:
     raw = _read_regular(paths.worktree_root / PLAN058_V28_RELPATH)
     if hashlib.sha256(raw).hexdigest() != PLAN058_V28_SHA256:
@@ -901,22 +967,27 @@ def _initialize_identity_locked(
     campaign_cap = PLAN058_TASK_CAP_USD - prior
     if campaign_cap < request_reservation:
         raise C2BehaviorError("Plan 058 budget cannot reserve one reliable request")
-    slots = (
-        freeze_diagnostic_slots(
+    if campaign_mode == "formal":
+        slots = freeze_formal_slots(
+            tasks,
+            run_id_date=run_id_date,
+            run_id_sequence_base=run_id_sequence_base,
+        )
+    elif campaign_mode == "diagnostic":
+        slots = freeze_diagnostic_slots(
             tasks,
             run_id_date=run_id_date,
             run_id_sequence_base=run_id_sequence_base,
             slot_start=diagnostic_slot_start,
             slot_end=diagnostic_slot_end,
         )
-        if campaign_mode == "diagnostic"
-        else freeze_slots(
+    else:
+        slots = freeze_slots(
             tasks,
             run_id_date=run_id_date,
             run_id_sequence_base=run_id_sequence_base,
             rounds=rounds,
         )
-    )
     value: dict[str, Any] = {
         "schema_version": PLAN058_SCHEMA_VERSION,
         "kind": PLAN058_KIND,
@@ -999,6 +1070,10 @@ def _initialize_identity_locked(
             "start": diagnostic_slot_start,
             "end": diagnostic_slot_end,
         }
+    elif campaign_mode == "formal":
+        value["formal_execution_order"] = list(
+            PLAN058_FORMAL_EXECUTION_ORDER
+        )
     _atomic_json(lock_path, value, mode=0o644)
     raw_lock = _read_regular(lock_path)
     digest = hashlib.sha256(raw_lock).hexdigest()
@@ -1111,6 +1186,15 @@ def _resume_identity_initialization(
             "start": diagnostic_slot_start,
             "end": diagnostic_slot_end,
         }
+    elif identity.campaign_mode == "formal" and identity.value.get(
+        "formal_execution_order"
+    ) is not None:
+        expected_slots = freeze_formal_slots(
+            identity.tasks,
+            run_id_date=run_id_date,
+            run_id_sequence_base=run_id_sequence_base,
+        )
+        expected_diagnostic_range = None
     else:
         expected_slots = freeze_slots(
             identity.tasks,
@@ -1337,6 +1421,12 @@ def validate_identity(identity: C2BehaviorIdentity, *, paths: RepoPaths) -> None
     }
     if isinstance(value, Mapping) and value.get("campaign_mode") == "diagnostic":
         required.add("diagnostic_slot_range")
+    if (
+        isinstance(value, Mapping)
+        and value.get("campaign_mode") == "formal"
+        and "formal_execution_order" in value
+    ):
+        required.add("formal_execution_order")
     if not isinstance(value, Mapping) or set(value) != required:
         raise C2BehaviorError("Plan 058 identity schema is invalid")
     if (
@@ -1352,6 +1442,14 @@ def validate_identity(identity: C2BehaviorIdentity, *, paths: RepoPaths) -> None
         != f"eval/results/observations/{value['campaign_id']}.json"
     ):
         raise C2BehaviorError("Plan 058 identity header is invalid")
+    if value["campaign_mode"] == "formal" and "formal_execution_order" not in value:
+        if (
+            identity.campaign_id != PLAN058_LEGACY_FORMAL_V1_CAMPAIGN_ID
+            or identity.lock_sha256 != PLAN058_LEGACY_FORMAL_V1_SHA256
+        ):
+            raise C2BehaviorError(
+                "Plan 058 new formal identity lacks its execution order"
+            )
     if value["source"] != {
         "v28_lock_path": PLAN058_V28_RELPATH.as_posix(),
         "v28_lock_sha256": PLAN058_V28_SHA256,
@@ -1436,6 +1534,19 @@ def validate_identity(identity: C2BehaviorIdentity, *, paths: RepoPaths) -> None
             diagnostic_range["start"], diagnostic_range["end"] + 1
         )
         expected_slot_count = diagnostic_range["end"] - diagnostic_range["start"] + 1
+    elif identity.campaign_mode == "formal" and "formal_execution_order" in value:
+        execution_order = value["formal_execution_order"]
+        if (
+            not isinstance(execution_order, list)
+            or any(
+                isinstance(position, bool) or not isinstance(position, int)
+                for position in execution_order
+            )
+            or tuple(execution_order) != PLAN058_FORMAL_EXECUTION_ORDER
+        ):
+            raise C2BehaviorError("Plan 058 formal execution order drifted")
+        expected_positions = execution_order
+        expected_slot_count = PLAN058_FORMAL_SLOTS
     else:
         expected_positions = range(1, expected_task_count * expected_rounds + 1)
         expected_slot_count = expected_task_count * expected_rounds
@@ -1471,6 +1582,26 @@ def validate_identity(identity: C2BehaviorIdentity, *, paths: RepoPaths) -> None
         raise C2BehaviorError("Plan 058 slot order drifted")
     if len({slot.slot_id for slot in identity.slots}) != len(identity.slots) or len({slot.logical_run_id for slot in identity.slots}) != len(identity.slots):
         raise C2BehaviorError("Plan 058 slot identities are duplicated")
+    logical_parts = [
+        _LOGICAL_RUN_ID.fullmatch(slot.logical_run_id) for slot in identity.slots
+    ]
+    if (
+        any(part is None for part in logical_parts)
+        or len({part.group("date") for part in logical_parts if part is not None})
+        != 1
+        or [
+            int(part.group("sequence"))
+            for part in logical_parts
+            if part is not None
+        ]
+        != list(
+            range(
+                int(logical_parts[0].group("sequence")),
+                int(logical_parts[0].group("sequence")) + len(identity.slots),
+            )
+        )
+    ):
+        raise C2BehaviorError("Plan 058 logical run sequence drifted")
     for slot in identity.slots:
         slot.validate(task_count=expected_task_count, rounds=expected_rounds)
     provider = value["provider"]

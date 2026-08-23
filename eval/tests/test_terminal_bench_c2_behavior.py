@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import asdict
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -20,13 +21,17 @@ from rondo_eval.terminal_bench.c2_behavior import (
     C2BehaviorError,
     C2BehaviorIdentity,
     C2BehaviorState,
+    PLAN058_FORMAL_EXECUTION_ORDER,
+    PLAN058_LEGACY_FORMAL_V1_SHA256,
     classify_provider_hard_stop,
     classify_pure_transport_retry,
     freeze_diagnostic_slots,
+    freeze_formal_slots,
     freeze_slots,
     _ensure_initialization_state_and_budget,
     _require_open_initialization_recovery,
     _initial_state,
+    _load_identity_from_lock,
     _reconcile_initialization_pointer,
     _resume_identity_initialization,
     campaign_root,
@@ -36,6 +41,7 @@ from rondo_eval.terminal_bench.c2_behavior import (
     public_result,
     state_path,
     validate_refined_assessment,
+    validate_identity,
 )
 from rondo_eval.terminal_bench.c2_behavior_cli import (
     _parser,
@@ -244,6 +250,128 @@ class C2BehaviorDiagnosticIdentityTests(unittest.TestCase):
                     slot_start=start,
                     slot_end=end,
                 )
+
+
+class C2BehaviorFormalIdentityTests(unittest.TestCase):
+    def test_new_formal_order_is_exact_unique_and_run_ids_follow_execution(self) -> None:
+        tasks = tuple(_task(index) for index in range(1, 11))
+        slots = freeze_formal_slots(
+            tasks,
+            run_id_date="20260823",
+            run_id_sequence_base=580600001,
+        )
+        absolute_positions = [
+            (slot.round - 1) * 10 + slot.task_index for slot in slots
+        ]
+
+        self.assertEqual(len(slots), 20)
+        self.assertEqual(len({slot.slot_id for slot in slots}), 20)
+        self.assertEqual(
+            absolute_positions, list(PLAN058_FORMAL_EXECUTION_ORDER)
+        )
+        self.assertEqual(absolute_positions[:2], [8, 18])
+        self.assertEqual(absolute_positions[-1], 20)
+        self.assertEqual(absolute_positions.count(18), 1)
+        self.assertEqual(
+            [slot.logical_run_id for slot in slots],
+            [
+                f"20260823-{580600001 + offset:09d}-tb-rondo-plan058"
+                for offset in range(20)
+            ],
+        )
+
+    def test_legacy_formal_v1_loads_without_execution_order_field(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        lock_path = (
+            paths.worktree_root
+            / "eval/locks/plan058-direction1-c2-formal-v1.json"
+        )
+        raw = lock_path.read_bytes()
+        digest = sha256(raw).hexdigest()
+        self.assertEqual(digest, PLAN058_LEGACY_FORMAL_V1_SHA256)
+
+        identity = _load_identity_from_lock(
+            paths,
+            lock_path=lock_path,
+            digest=digest,
+        )
+
+        self.assertNotIn("formal_execution_order", identity.value)
+        self.assertEqual(
+            [
+                (slot.round - 1) * 10 + slot.task_index
+                for slot in identity.slots
+            ],
+            list(range(1, 21)),
+        )
+
+    def test_new_formal_execution_order_is_explicit_and_tamper_closed(self) -> None:
+        paths = RepoPaths.discover(Path.cwd())
+        legacy_path = (
+            paths.worktree_root
+            / "eval/locks/plan058-direction1-c2-formal-v1.json"
+        )
+        legacy = _load_identity_from_lock(
+            paths,
+            lock_path=legacy_path,
+            digest=PLAN058_LEGACY_FORMAL_V1_SHA256,
+        )
+        campaign_id = "plan058-direction1-c2-formal-order-test"
+        slots = freeze_formal_slots(
+            legacy.tasks,
+            run_id_date="20260823",
+            run_id_sequence_base=580700001,
+        )
+        value = json.loads(json.dumps(legacy.value))
+        value.update(
+            campaign_id=campaign_id,
+            batch_id=campaign_id + "-batch",
+            result_namespace=campaign_id,
+            public_result_path=(
+                f"eval/results/observations/{campaign_id}.json"
+            ),
+            formal_execution_order=list(PLAN058_FORMAL_EXECUTION_ORDER),
+            slots=[asdict(slot) for slot in slots],
+        )
+        identity = C2BehaviorIdentity(
+            path=paths.worktree_root / "eval/locks/formal-order-test.json",
+            lock_sha256="a" * 64,
+            value=value,
+            reference=legacy.reference,
+            tasks=legacy.tasks,
+            slots=slots,
+        )
+        validate_identity(identity, paths=paths)
+
+        missing = json.loads(json.dumps(value))
+        missing.pop("formal_execution_order")
+        with self.assertRaisesRegex(C2BehaviorError, "lacks its execution order"):
+            validate_identity(
+                C2BehaviorIdentity(
+                    path=identity.path,
+                    lock_sha256=identity.lock_sha256,
+                    value=missing,
+                    reference=identity.reference,
+                    tasks=identity.tasks,
+                    slots=identity.slots,
+                ),
+                paths=paths,
+            )
+
+        tampered = json.loads(json.dumps(value))
+        tampered["formal_execution_order"][:2] = [18, 8]
+        with self.assertRaisesRegex(C2BehaviorError, "execution order drifted"):
+            validate_identity(
+                C2BehaviorIdentity(
+                    path=identity.path,
+                    lock_sha256=identity.lock_sha256,
+                    value=tampered,
+                    reference=identity.reference,
+                    tasks=identity.tasks,
+                    slots=identity.slots,
+                ),
+                paths=paths,
+            )
 
 
 class C2BehaviorStateTests(unittest.TestCase):

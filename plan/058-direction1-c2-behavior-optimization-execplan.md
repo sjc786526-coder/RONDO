@@ -291,13 +291,15 @@ formal-v1 已因本地 runner 缺陷作废并关闭；旧 formal 的 7 个完整
 的 10 条完整链路，并在槽 18 暴露 projector 故障后作废；修改后的真实槽 18 私有 trace 投影与槽 8–17 十条 source
 revalidation 通过。全新 diagnostic-v2 只跑 18–20，零 API preflight `3/3`、完整 source-validated result `3/3`、
 task pass `3/3`、raw/refined C2 `0/0`，结算 24 个可靠 attempts、`0.484984 USD`；Docker/VHDX 增长 `0`。由此
-8–20 共 13 个 commissioning 槽已逐项打通，Plan 058 累计费用 `6.533427 USD`、reserved `0`。当前进入正式顺序
-实现、clean source 提交、重建和冻结阶段。
+8–20 共 13 个 commissioning 槽已逐项打通，Plan 058 累计费用 `6.533427 USD`、reserved `0`。新 formal identity
+已在既有 Plan 058 identity 层显式冻结 `8,18,1..7,9..17,19,20`，20 个 slot 唯一且 logical run ID 按实际执行
+次序连续；旧 formal-v1 仅以其 campaign ID + lock SHA 保留 canonical 顺序只读兼容。相关 Python 回归 `174/174`
+通过。当前进入 clean source 提交、重建和正式冻结阶段。
 
 ### 本任务剩余步骤
 
-1. Phase C 冻结：实现并测试 formal 的 20 槽唯一执行顺序，从随后 clean source 重新构建/复验 binary/manifest，
-   冻结正式配置；不把任何 diagnostic 数据放入正式分母。
+1. Phase C 冻结：提交已测试的 formal 20 槽唯一执行顺序，从该 clean source 重新构建/复验 binary/manifest，冻结
+   正式配置；不把任何 diagnostic 数据放入正式分母。
 2. Phase D：以全新干净 identity 按 `8 → 18 → 1–7 → 9–17 → 19–20` 从执行位置 1/20 串行完成固定 10 题 ×
    2 round 的 20 个唯一正式逻辑结果；不得复用旧 formal 或 diagnostic 结果。
 3. Phase E：比较 raw/refined C2、耗时、任务结果和正确性保护，作出保留/调整/撤销决定，完成文档、精确清理、
